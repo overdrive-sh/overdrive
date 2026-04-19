@@ -445,11 +445,14 @@ Operators running three-node all-in-one clusters typically tolerate this taint c
 ### Core Data Model
 
 ```
-Job        — desired workload specification (driver, resources, constraints)
-Node       — registered worker node with capabilities and labels
-Allocation — binding of a job to a node, lifecycle state machine
-Policy     — Rego-based network and security rules
+Job         — desired workload specification (driver, resources, constraints)
+Node        — registered worker node with capabilities and labels
+Allocation  — binding of a job to a node, lifecycle state machine
+Policy      — Rego-based network and security rules
 Certificate — issued SVID, TTL, rotation schedule
+Investigation — live SRE-agent investigation: correlation key, affected
+              SPIFFE identities, token/wall-clock budget, tool-call trace.
+              Concludes into an incident row in the incident-memory libSQL.
 ```
 
 ### Built-in Certificate Authority
@@ -1316,6 +1319,8 @@ Tools:
   propose_action(action)    → submit action through approval gate
 ```
 
+The tool list above is the default `builtin:helios-core` toolset. Toolsets are a first-class catalog — see *Native SRE Investigation Agent* below.
+
 ### Tiered Self-Healing
 
 Self-healing operates at three tiers, each appropriate to its response time requirements:
@@ -1339,6 +1344,28 @@ Self-healing operates at three tiers, each appropriate to its response time requ
 ### Incident Memory
 
 Every incident, its diagnosis, actions taken, and outcome are stored in **libSQL** (embedded SQLite). The LLM agent retrieves similar past incidents before reasoning about new anomalies using embedding-based similarity search. The platform's diagnostic accuracy improves with operational age.
+
+### Native SRE Investigation Agent
+
+Helios's Tier 3 reasoning surface is a native SRE investigation agent built on `rig-rs`, organized around four first-class primitives: **toolsets, runbooks, investigations, and typed remediations**. Each is implemented with primitives the platform already owns — no external agent runtime, no Python in the control plane, no separate self-hosted service mesh for AIOps.
+
+**Toolsets — the declarative catalog.** The agent's tool surface is a catalog of toolsets loaded at runtime, not a hard-coded list. `builtin:helios-core` is a Rust trait object shipped in the binary, exposing the default tools above plus read-only projections of the IntentStore and the incident-memory retriever. Third-party toolsets are WASM modules — the same execution primitive as reconcilers (§18), policies (§13), and sidecars (§9) — content-addressed by sha256 in Garage, loaded declaratively from the IntentStore, scoped to the subset of host functions their manifest requests. A toolset declares the tools it exposes (name, description, input/output JSON schemas, risk class); the agent sees the union of loaded toolsets' tools. Investigations cite the toolset hashes used so transcripts are reproducible.
+
+**Runbooks — LLM-interpreted investigation guides.** Runbooks are markdown documents with YAML frontmatter describing trigger conditions and required toolsets. They are stored content-addressed in Garage and indexed in the incident-memory libSQL alongside past incidents via the same embedding-similarity system. When an investigation is triggered, the agent's first step retrieves top-k runbooks matching the trigger description and includes them in context. Runbooks guide *reasoning* — the steps are interpretive, not deterministic. The deterministic counterpart is the workflow primitive (§18): runbooks produce diagnoses and proposals; workflows execute ratified proposals. Format matches HolmesGPT's runbook format so community-maintained runbook catalogs are leverageable directly.
+
+**Investigation — a first-class resource.** Investigations join `Job`, `Node`, `Allocation`, `Policy`, `Certificate` in the core data model (§4). An investigation carries a lifecycle (triggered → gathering → reasoning → concluding → concluded), a trigger (alert, reconciler escalation, operator query, scheduled), a correlation key, a list of affected SPIFFE identities, a token and wall-clock budget, and a trace of tool calls and LLM turns. Live investigation state lives in the ObservationStore (Corrosion `investigation_state` table); on conclusion, the investigation is compressed into an incident row in the incident-memory libSQL with embedding-indexed diagnosis for future retrieval. An `InvestigationReconciler` drives the lifecycle; proposals from the agent are queued through the graduated approval gate.
+
+**Correlation — identity-based, not label-based.** Every eBPF event in Helios carries cryptographic SPIFFE identity on both ends. Correlation across alerts is a DuckLake SQL query over events joined on `src_identity` / `dst_identity` / `alloc_id`, windowed by causal-time proximity. Investigations carry a `correlation_key` derived from the primary identity, signal class, and time bucket; an incoming event whose key matches a live investigation appends to that investigation rather than spawning a duplicate. This collapses alert-storm scenarios to one investigation per underlying phenomenon without label-based heuristics.
+
+**Typed remediation actions.** The agent proposes state changes by emitting typed `Action` enum variants — `RestartAllocation`, `ScaleJob`, `RollBackDeployment`, `DrainNode`, `ResizeAllocation`, `ProposePolicyEdit`, `AttachDiagnosticProbe`, `StartWorkflow`. The risk tier is encoded on the variant at the type level: Tier 0 (reversible reads) auto-executes; Tier 1 (low-blast-radius writes) auto-executes with operator notification; Tier 2 (high-blast-radius writes) requires human ratification. Proposals land in the IntentStore (Raft); once ratified, the target reconciler consumes the typed action and converges. Actions flowing through Raft rather than YAML patches through kubectl is a structural consequence of the §18 reconciler model: compile-time exhaustiveness, deterministic replay, SPIFFE-bound identity.
+
+**Hypothesis verification via the owned dataplane.** Where external-agent architectures are confined to querying existing instrumentation, the Helios investigation agent can propose *temporary diagnostic attachments* — `Action::AttachDiagnosticProbe { bpf_sha, alloc, duration }`. Probes come from a platform-maintained, platform-signed catalog; they attach via aya-rs, emit into the existing eBPF ringbuf, and detach automatically at deadline. Hypotheses become verifiable within one investigation turn rather than queued behind a human-executed instrumentation rollout. This capability is structurally unavailable to orchestrators that do not own their dataplane.
+
+**Credential and prompt-injection posture.** Where the LLM is an external API, `builtin:credential-proxy` (§8) holds the provider keys; the agent never sees them. Where the agent ingests third-party content (runbook bodies from the catalog, log chunks returned by tools, documentation excerpts), `builtin:content-inspector` (§9) scans on ingress and flags prompt-injection payloads before the LLM sees them. BPF LSM blocks raw socket creation and unauthorised binary execution regardless of what the agent decides to do (§19). The agent is itself a workload under the same structural security posture as any other workload — security is enforced by infrastructure, not by the model's judgment.
+
+**Cost metering.** Every LLM call is attributed to an `investigation_id`. Token spend is accumulated per investigation, per job (via the investigation's related allocations), and cluster-wide. External-provider calls route through `builtin:credential-proxy`, which parses the response `usage` object and writes costs into the ObservationStore; local-workload-hosted LLMs report token counts via rig-rs directly. A dedicated `llm_spend` reconciler enforces per-job and cluster-wide monthly caps — Tier-3 escalations route to queue-and-notify when the cap is approached, preserving observability without incurring further spend.
+
+**Simulation.** The `SimLlm` DST trait (§21) returns deterministic completions from seeded transcripts. The full investigation trace — prompt, tool calls, tool outputs, LLM turns — is captured per investigation; re-running deterministically in CI reproduces the final diagnosis or flags a regression. Investigation-agent correctness joins control-plane correctness as a DST-gated property.
 
 ### OpenTelemetry Compatibility
 
@@ -2052,6 +2079,15 @@ trait ObservationStore: Send + Sync {
     async fn write(&self, sql: &str, params: &[Value]) -> Result<()>;
     async fn subscribe(&self, sql: &str) -> Result<RowStream>;
 }
+
+// LLM inference — no external API calls in simulation
+trait Llm: Send + Sync {
+    async fn complete(
+        &self,
+        prompt: &Prompt,
+        tools:  &[ToolDef],
+    ) -> Result<Completion>;
+}
 ```
 
 Each trait has two implementations: a real implementation for production, and a simulation implementation for testing. The compiler enforces the boundary — `rand` and `std::time` are direct dependencies only in platform wiring crates, never in core logic crates.
@@ -2067,8 +2103,9 @@ Each trait has two implementations: a real implementation for production, and a 
 | `Driver` | `CloudHypervisorDriver` etc. | `SimDriver` (configurable failure modes) |
 | `IntentStore` | `LocalStore` / `RaftStore` | `LocalStore` (already pure Rust, no kernel) |
 | `ObservationStore` | `CorrosionStore` (cr-sqlite + SWIM/QUIC) | `SimObservationStore` (in-memory LWW, injectable gossip delay, injectable partition) |
+| `Llm` | `RigLlm` (rig-rs over real provider) | `SimLlm` (replays seeded transcript; deviations fail the test) |
 
-`SimDataplane` tracks policy and service state in memory and generates synthetic flow events — enough to test that the control plane correctly drives the dataplane without involving a real kernel. `SimDriver` can be configured to fail on start, crash after N operations, or consume exactly specified resources, making scheduler and reconciler logic fully testable without spawning real VMs. `SimObservationStore` implements the CR-SQLite LWW merge semantics in memory with a controllable gossip delay and partition matrix — the contagion-deadlock failure mode that hit Fly.io's fleet is a named scenario in the DST fault catalogue.
+`SimDataplane` tracks policy and service state in memory and generates synthetic flow events — enough to test that the control plane correctly drives the dataplane without involving a real kernel. `SimDriver` can be configured to fail on start, crash after N operations, or consume exactly specified resources, making scheduler and reconciler logic fully testable without spawning real VMs. `SimObservationStore` implements the CR-SQLite LWW merge semantics in memory with a controllable gossip delay and partition matrix — the contagion-deadlock failure mode that hit Fly.io's fleet is a named scenario in the DST fault catalogue. `SimLlm` replays a captured investigation transcript step-for-step: a test seed identifies the transcript; on mismatch (the agent chose a different tool or produced a different parameter set), the test fails with a diff. Investigation-agent invariants — "every investigation concludes within budget," "no Tier 2 action is proposed without a motivating prior tool call" — join control-plane invariants as DST-gated properties.
 
 ### The Simulation Harness
 
@@ -2354,8 +2391,8 @@ Neither Kubernetes nor Nomad ships the Tier 1 + Tier 3 composition, because neit
 - Control plane API (tonic/gRPC — internal node-agent + CLI transport)
 - IntentStore abstraction: LocalStore (redb direct) for single mode
 - ObservationStore abstraction: single-process in-memory implementation (lays the trait boundary early, swapped for Corrosion in Phase 2)
-- Injectable Clock, Transport, Entropy, Dataplane, Driver, ObservationStore traits
-- turmoil simulation harness + SimDriver / SimDataplane / SimClock / SimObservationStore
+- Injectable Clock, Transport, Entropy, Dataplane, Driver, ObservationStore, Llm traits
+- turmoil simulation harness + SimDriver / SimDataplane / SimClock / SimObservationStore / SimLlm (transcript-replay)
 - Process driver
 - Basic scheduler (first-fit)
 - CLI (`helios job submit`, `helios node list`, `helios alloc status`)
@@ -2394,10 +2431,15 @@ Neither Kubernetes nor Nomad ships the Tier 1 + Tier 3 composition, because neit
 - Mesh VPN underlay extensions (§7 *Node Underlay*): `wireguard` with platform-managed keys via enrollment (pubkeys gossiped through `node_health`), and `tailscale` with bring-your-own coordination (Tailscale tailnet or self-hosted Headscale) — mutually exclusive in the schematic
 
 ### Phase 5 — Intelligence (Months 12–18)
-- LLM observability agent (rig-rs)
+- LLM observability agent (rig-rs) with native SRE-investigation primitives:
+  - `Investigation` as a first-class resource (ObservationStore live state + incident-memory libSQL on conclusion)
+  - Declarative toolset catalog (`builtin:helios-core` Rust trait object + WASM-extensible third-party toolsets, content-addressed in Garage)
+  - Typed `Action` enum with risk-tier approval gate (Tier 0 auto / Tier 1 auto+notify / Tier 2 human-ratify)
+  - `correlation_key` on telemetry for alert de-duplication; SPIFFE-identity joins across DuckLake for cross-event correlation
+  - `llm_spend` reconciler for per-investigation, per-job, and cluster-wide token budget enforcement
 - Self-healing tier 3 (LLM reasoning)
 - Right-sizing reconciler (writes resource profiles into ObservationStore)
-- Incident memory (libSQL)
+- Incident memory (libSQL) with embedding-similarity retrieval for runbook + prior-incident lookup
 - Predictive scaling
 - Persistent microVMs (step 1): Cloud Hypervisor snapshot/restore exposed in the `microvm` driver with `userfaultfd` lazy memory paging; VMGenID wired into the guest on restore
 - Persistent microVMs (step 2): `helios-fs` — Rust-native single-writer chunk store (content-addressed chunks in Garage, per-rootfs libSQL metadata with streaming WAL, NVMe 2Q cache, `vhost-user-fs` frontend). Scope: rootfs only, not a general distributed filesystem
@@ -2409,6 +2451,8 @@ Neither Kubernetes nor Nomad ships the Tier 1 + Tier 3 composition, because neit
 - OTel export adapter
 - Unikernel drivers (Nanos, Unikraft with virtiofs)
 - QEMU opt-in driver (exotic hardware emulation only)
+- Runbook primitive — markdown + YAML frontmatter matching the HolmesGPT runbook format for community-catalog reuse, content-addressed in Garage, indexed in incident-memory libSQL via embedding similarity, loaded by a `RunbookLoader` reconciler
+- Platform-signed diagnostic-probe catalog for `Action::AttachDiagnosticProbe` — curated BPF programs the investigation agent can attach to verify hypotheses, with duration-bounded auto-detach enforced by a deadline reconciler and a §22 Tier 3 integration-test fixture per probe
 - **Multi-region federation: per-region IntentStore (Raft) + global ObservationStore (Corrosion)**
 - **Regional Corrosion clusters + thin global membership cluster (regionalized blast radius from day one — the lesson Fly learned mid-incident)**
 - **Region-aware scheduler + gateway (reads `node_health.region` from local SQLite)**
