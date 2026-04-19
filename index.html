@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Overdrive — A next-generation workload orchestration platform</title>
-<meta name="description" content="Open-source orchestration in pure Rust. eBPF dataplane, kernel mTLS, native LLM observability. Replaces Kubernetes, Nomad, and Talos." />
-<meta property="og:title" content="Overdrive — Orchestration without the operational tax" />
-<meta property="og:description" content="One Rust binary. eBPF dataplane. Kernel mTLS by default. Replaces etcd, Envoy, SPIRE, CNI, kube-proxy." />
+<title>Overdrive — Workload orchestration, compiled to the kernel</title>
+<meta name="description" content="A single-binary orchestrator built on the primitives Kubernetes never had: stable eBPF, kernel TLS, and embeddable WASM. Faster scheduling. Stronger isolation. One model for every workload type." />
+<meta property="og:title" content="Overdrive — Workload orchestration, compiled to the kernel" />
+<meta property="og:description" content="One Rust binary replaces etcd, Envoy, SPIRE, CNI, and kube-proxy. AGPL-3.0." />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
 <style>
   :root {
     --bg:           #0a0a0b;
@@ -31,7 +31,8 @@
     --max:          1240px;
     --pad:          clamp(20px, 4vw, 48px);
 
-    --font-sans:    'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    --font-sans:    'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    --font-serif:   'Instrument Serif', 'Iowan Old Style', Georgia, serif;
     --font-mono:    'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
   }
 
@@ -53,18 +54,17 @@
   a { color: inherit; text-decoration: none; }
   button { font: inherit; }
 
-  /* ---- subtle background grid ---- */
   body::before {
     content: '';
     position: fixed;
     inset: 0;
     background-image:
-      linear-gradient(to right, rgba(255,255,255,0.025) 1px, transparent 1px),
-      linear-gradient(to bottom, rgba(255,255,255,0.025) 1px, transparent 1px);
+      linear-gradient(to right, rgba(255,255,255,0.022) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255,255,255,0.022) 1px, transparent 1px);
     background-size: 64px 64px;
     pointer-events: none;
     z-index: 0;
-    mask-image: radial-gradient(ellipse at top, black 30%, transparent 80%);
+    mask-image: radial-gradient(ellipse at top, black 25%, transparent 78%);
   }
 
   .container {
@@ -73,6 +73,19 @@
     padding: 0 var(--pad);
     position: relative;
     z-index: 1;
+  }
+
+  /* ---- floating pixel accent (DZ-style) ---- */
+  .pixel-accent {
+    position: absolute;
+    pointer-events: none;
+    z-index: 0;
+    opacity: 0.55;
+  }
+  .pixel-accent .px {
+    width: 22px; height: 22px;
+    display: inline-block;
+    margin: 1px;
   }
 
   /* ---- nav ---- */
@@ -132,14 +145,21 @@
 
   /* ---- typography ---- */
   h1, h2, h3, h4 {
-    font-weight: 700;
+    font-weight: 600;
     letter-spacing: -0.025em;
     line-height: 1.05;
     margin: 0;
   }
-  h2 { font-size: clamp(32px, 4.5vw, 48px); }
+  h2 { font-size: clamp(34px, 4.6vw, 52px); }
   h3 { font-size: 22px; letter-spacing: -0.015em; line-height: 1.25; }
-  p { margin: 0; }
+  p  { margin: 0; }
+
+  .display-serif {
+    font-family: var(--font-serif);
+    font-weight: 400;
+    font-style: italic;
+    letter-spacing: -0.01em;
+  }
 
   .eyebrow {
     display: inline-flex;
@@ -161,12 +181,14 @@
   }
 
   .section-head {
-    max-width: 720px;
+    max-width: 760px;
     margin-bottom: 56px;
   }
-  .section-head .eyebrow { margin-bottom: 16px; }
+  .section-head.center { margin-inline: auto; text-align: center; }
+  .section-head.center .eyebrow { justify-content: center; }
+  .section-head .eyebrow { margin-bottom: 18px; }
   .section-head .lead {
-    margin-top: 18px;
+    margin-top: 20px;
     font-size: 17px;
     color: var(--text-muted);
     line-height: 1.6;
@@ -188,6 +210,7 @@
     cursor: pointer;
     transition: all 0.15s ease;
     line-height: 1;
+    white-space: nowrap;
   }
   .btn-primary {
     background: var(--accent);
@@ -208,23 +231,31 @@
     background: var(--surface);
     border-color: #3a3a44;
   }
+  .btn-outline {
+    background: transparent;
+    color: var(--text);
+    border-color: var(--border-2);
+    font-weight: 500;
+  }
+  .btn-outline:hover { border-color: var(--accent); color: var(--accent); }
   .arrow { display: inline-block; transition: transform 0.15s ease; }
   .btn:hover .arrow { transform: translateX(2px); }
 
-  /* ---- HERO ---- */
+  /* ====================== HERO ====================== */
   .hero {
-    padding-top: 100px;
+    padding-top: 96px;
     padding-bottom: 80px;
     position: relative;
     overflow: hidden;
+    text-align: center;
   }
   .hero::after {
     content: '';
     position: absolute;
-    top: -200px; left: 50%;
-    width: 800px; height: 800px;
+    top: -180px; left: 50%;
+    width: 900px; height: 700px;
     transform: translateX(-50%);
-    background: radial-gradient(circle, rgba(255, 92, 40, 0.12) 0%, transparent 60%);
+    background: radial-gradient(ellipse, rgba(255, 92, 40, 0.10) 0%, transparent 60%);
     pointer-events: none;
     z-index: 0;
   }
@@ -239,7 +270,7 @@
     border-radius: 100px;
     font-size: 13px;
     color: var(--text-muted);
-    margin-bottom: 32px;
+    margin-bottom: 36px;
   }
   .hero-tag-pill {
     background: var(--accent-soft);
@@ -253,41 +284,97 @@
     letter-spacing: 0.05em;
   }
   h1.hero-title {
-    font-size: clamp(44px, 7.5vw, 84px);
+    font-size: clamp(44px, 7vw, 88px);
+    font-weight: 600;
     letter-spacing: -0.04em;
     line-height: 0.98;
-    max-width: 14ch;
-    margin-bottom: 28px;
+    max-width: 16ch;
+    margin: 0 auto 28px;
   }
-  h1.hero-title .accent {
-    background: linear-gradient(120deg, var(--accent) 0%, var(--accent-2) 100%);
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
-  }
+  h1.hero-title .display-serif { font-size: 1.05em; }
   .hero-sub {
-    font-size: clamp(17px, 2vw, 20px);
+    font-size: clamp(17px, 1.8vw, 19px);
     color: var(--text-muted);
-    max-width: 58ch;
-    margin-bottom: 40px;
-    line-height: 1.55;
+    max-width: 60ch;
+    margin: 0 auto 40px;
+    line-height: 1.6;
   }
-  .hero-cta { display: flex; gap: 12px; flex-wrap: wrap; }
-  .hero-meta {
-    margin-top: 56px;
+  .hero-sub strong { color: var(--text); font-weight: 500; }
+  .hero-cta {
     display: flex;
-    gap: 32px;
+    gap: 12px;
     flex-wrap: wrap;
+    justify-content: center;
+  }
+  .hero-meta {
+    margin-top: 64px;
+    display: flex;
+    gap: 40px;
+    flex-wrap: wrap;
+    justify-content: center;
     font-family: var(--font-mono);
     font-size: 12px;
     color: var(--text-dim);
   }
   .hero-meta span strong { color: var(--text); font-weight: 500; }
 
-  /* ---- credibility row ---- */
-  .creds {
-    padding: 48px 0;
+  /* DZ-style floating pixel cubes around hero */
+  .hero .pixel-accent.left  { left: 4%;  top: 18%; }
+  .hero .pixel-accent.right { right: 4%; top: 32%; }
+  @media (max-width: 1100px) {
+    .hero .pixel-accent { display: none; }
+  }
+
+  /* ====================== AUDIENCE SPLIT ====================== */
+  .audience {
     border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    padding: 0;
+  }
+  .audience-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+  }
+  @media (max-width: 880px) { .audience-grid { grid-template-columns: 1fr; } }
+  .audience-card {
+    padding: 56px 40px;
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+  }
+  .audience-card:last-child { border-right: 0; }
+  @media (max-width: 880px) {
+    .audience-card { border-right: 0; border-bottom: 1px solid var(--border); }
+    .audience-card:last-child { border-bottom: 0; }
+  }
+  .audience-card h3 {
+    font-family: var(--font-serif);
+    font-style: italic;
+    font-weight: 400;
+    font-size: 30px;
+    letter-spacing: -0.01em;
+    margin-bottom: 16px;
+    line-height: 1.1;
+  }
+  .audience-card p {
+    color: var(--text-muted);
+    font-size: 15px;
+    line-height: 1.6;
+    margin-bottom: 28px;
+    flex-grow: 1;
+  }
+  .audience-card .audience-tag {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 18px;
+  }
+
+  /* ====================== CREDS ====================== */
+  .creds {
+    padding: 56px 0;
     border-bottom: 1px solid var(--border);
   }
   .creds-label {
@@ -296,21 +383,42 @@
     color: var(--text-dim);
     text-transform: uppercase;
     letter-spacing: 0.12em;
-    margin-bottom: 20px;
+    margin-bottom: 28px;
     text-align: center;
   }
   .creds-list {
-    display: flex;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 24px;
-    font-family: var(--font-mono);
-    font-size: 14px;
-    color: var(--text-muted);
+    display: grid;
+    grid-template-columns: repeat(8, 1fr);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
   }
-  .creds-list span { white-space: nowrap; }
+  @media (max-width: 1080px) { .creds-list { grid-template-columns: repeat(4, 1fr); } }
+  @media (max-width: 560px)  { .creds-list { grid-template-columns: repeat(2, 1fr); } }
+  .creds-list span {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--text-muted);
+    padding: 22px 12px;
+    text-align: center;
+    border-right: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-2);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .creds-list span:nth-child(8n) { border-right: 0; }
+  .creds-list span:nth-last-child(-n+8) { border-bottom: 0; }
+  @media (max-width: 1080px) {
+    .creds-list span { border-right: 1px solid var(--border) !important; }
+    .creds-list span:nth-child(4n) { border-right: 0 !important; }
+  }
+  @media (max-width: 560px) {
+    .creds-list span:nth-child(2n) { border-right: 0 !important; }
+  }
 
-  /* ---- stats ---- */
+  /* ====================== STATS ====================== */
   .stats-grid {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
@@ -324,17 +432,18 @@
   @media (max-width: 520px) { .stats-grid { grid-template-columns: 1fr; } }
   .stat {
     background: var(--bg-2);
-    padding: 32px;
+    padding: 36px 32px;
   }
   .stat-num {
-    font-size: 44px;
-    font-weight: 700;
-    letter-spacing: -0.03em;
+    font-size: 48px;
+    font-weight: 600;
+    letter-spacing: -0.04em;
     color: var(--text);
     line-height: 1;
-    margin-bottom: 12px;
+    margin-bottom: 14px;
+    font-feature-settings: 'tnum';
   }
-  .stat-num .unit { color: var(--accent); font-size: 28px; }
+  .stat-num .unit { color: var(--accent); font-size: 30px; }
   .stat-label {
     font-size: 14px;
     color: var(--text);
@@ -349,29 +458,33 @@
     letter-spacing: 0.05em;
   }
 
-  /* ---- thesis 3-col ---- */
+  /* ====================== THESIS 3-COL ====================== */
   .three-col {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
-    gap: 32px;
+    gap: 24px;
   }
-  @media (max-width: 880px) { .three-col { grid-template-columns: 1fr; gap: 24px; } }
+  @media (max-width: 880px) { .three-col { grid-template-columns: 1fr; gap: 18px; } }
   .thesis-card {
-    padding: 32px;
+    padding: 36px 32px;
     border: 1px solid var(--border);
     border-radius: 12px;
     background: var(--bg-2);
+    transition: border-color 0.2s ease;
   }
-  .thesis-card h3 { margin-bottom: 12px; }
-  .thesis-card p { color: var(--text-muted); font-size: 15px; }
+  .thesis-card:hover { border-color: var(--border-2); }
+  .thesis-card h3 { margin-bottom: 14px; }
+  .thesis-card p { color: var(--text-muted); font-size: 15px; line-height: 1.6; }
   .thesis-card .num {
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: 11px;
     color: var(--accent);
-    margin-bottom: 16px;
+    margin-bottom: 20px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
   }
 
-  /* ---- architecture diagram ---- */
+  /* ====================== ARCHITECTURE ====================== */
   .arch {
     background: var(--bg-2);
     border: 1px solid var(--border);
@@ -385,29 +498,28 @@
     font-family: var(--font-mono);
     font-size: 13px;
     color: var(--text-muted);
-    line-height: 1.5;
+    line-height: 1.55;
     overflow-x: auto;
     white-space: pre;
   }
   .arch pre .h { color: var(--accent); font-weight: 600; }
   .arch pre .k { color: var(--text); font-weight: 500; }
 
-  /* ---- workload type cards ---- */
+  /* ====================== WORKLOAD CARDS ====================== */
   .workloads {
     display: grid;
     grid-template-columns: repeat(5, 1fr);
-    gap: 16px;
+    gap: 12px;
   }
   @media (max-width: 1100px) { .workloads { grid-template-columns: repeat(3, 1fr); } }
   @media (max-width: 720px)  { .workloads { grid-template-columns: repeat(2, 1fr); } }
   @media (max-width: 460px)  { .workloads { grid-template-columns: 1fr; } }
   .wl {
-    padding: 24px;
+    padding: 28px 24px;
     background: var(--bg-2);
     border: 1px solid var(--border);
     border-radius: 12px;
     transition: all 0.15s ease;
-    position: relative;
   }
   .wl:hover {
     border-color: var(--border-2);
@@ -419,42 +531,44 @@
     font-size: 11px;
     color: var(--accent);
     text-transform: uppercase;
-    letter-spacing: 0.05em;
-    margin-bottom: 16px;
+    letter-spacing: 0.06em;
+    margin-bottom: 18px;
   }
   .wl h4 {
     font-size: 17px;
-    margin: 0 0 8px;
+    font-weight: 500;
+    margin: 0 0 10px;
     color: var(--text);
   }
   .wl p {
     font-size: 13px;
     color: var(--text-muted);
-    margin: 0 0 14px;
+    margin: 0 0 16px;
+    line-height: 1.55;
   }
   .wl-meta {
     font-family: var(--font-mono);
     font-size: 11px;
     color: var(--text-dim);
     border-top: 1px dashed var(--border);
-    padding-top: 12px;
+    padding-top: 14px;
   }
 
-  /* ---- code showcase ---- */
+  /* ====================== CODE SHOWCASE ====================== */
   .code-grid {
     display: grid;
-    grid-template-columns: 1.1fr 0.9fr;
-    gap: 24px;
+    grid-template-columns: 1.05fr 0.95fr;
+    gap: 20px;
   }
   @media (max-width: 880px) { .code-grid { grid-template-columns: 1fr; } }
   .code-block {
-    background: #0d0d0f;
+    background: #0c0c0e;
     border: 1px solid var(--border);
     border-radius: 12px;
     overflow: hidden;
   }
   .code-head {
-    padding: 12px 18px;
+    padding: 14px 18px;
     border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
@@ -474,7 +588,7 @@
     padding: 24px;
     font-family: var(--font-mono);
     font-size: 13px;
-    line-height: 1.6;
+    line-height: 1.7;
     color: var(--text-muted);
     overflow-x: auto;
   }
@@ -485,19 +599,20 @@
   .code-block .t  { color: var(--text); }
   .code-block .p  { color: var(--accent); }
   .code-block .v  { color: #60a5fa; }
+  .code-block .ok { color: var(--success); }
 
-  /* ---- feature spotlight ---- */
+  /* ====================== SPOTLIGHT ====================== */
   .spotlight {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 56px;
+    gap: 64px;
     align-items: center;
   }
   @media (max-width: 880px) { .spotlight { grid-template-columns: 1fr; gap: 32px; } }
   .spotlight ul {
     list-style: none;
     padding: 0;
-    margin: 24px 0 32px;
+    margin: 28px 0 32px;
     display: grid;
     gap: 16px;
   }
@@ -516,6 +631,7 @@
     border-radius: 50%;
   }
   .spotlight li strong { color: var(--text); font-weight: 500; }
+  .spotlight h2 .display-serif { display: block; font-size: 1.15em; line-height: 1; margin-top: 8px; }
 
   .tier-panel {
     background: var(--bg-2);
@@ -529,15 +645,107 @@
   .tier-panel .row {
     display: flex;
     justify-content: space-between;
+    gap: 24px;
     padding: 10px 0;
     border-bottom: 1px dashed var(--border);
   }
   .tier-panel .row:last-child { border-bottom: 0; }
   .tier-panel .label { color: var(--text-muted); }
-  .tier-panel .val   { color: var(--text); }
+  .tier-panel .val   { color: var(--text); text-align: right; }
   .tier-panel .val.accent { color: var(--accent); }
+  .tier-panel .val.ok     { color: var(--success); }
 
-  /* ---- comparison table ---- */
+  /* ====================== FLEET MAP ====================== */
+  .fleet {
+    text-align: center;
+  }
+  .fleet-viz {
+    margin-top: 56px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--bg-2);
+    padding: 48px 32px;
+    position: relative;
+    overflow: hidden;
+  }
+  .fleet-viz::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse at center, rgba(255,92,40,0.06) 0%, transparent 60%);
+    pointer-events: none;
+  }
+  .fleet-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    position: relative;
+  }
+  @media (max-width: 880px) { .fleet-grid { grid-template-columns: 1fr; } }
+  .region-card {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 22px;
+    text-align: left;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.7;
+  }
+  .region-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  .region-head .name {
+    color: var(--text);
+    font-weight: 600;
+    font-size: 13px;
+    letter-spacing: 0.02em;
+  }
+  .region-head .live {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--success);
+    font-size: 11px;
+  }
+  .region-head .live::before {
+    content: '';
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--success);
+    box-shadow: 0 0 8px rgba(74, 222, 128, 0.6);
+    animation: pulse 1.6s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+  .region-row {
+    display: flex;
+    justify-content: space-between;
+  }
+  .region-row .v { color: var(--text); }
+  .region-row .v.warn { color: var(--warn); }
+  .fleet-foot {
+    margin-top: 28px;
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 16px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  /* ====================== COMPARISON ====================== */
   .table-wrap {
     border: 1px solid var(--border);
     border-radius: 12px;
@@ -550,7 +758,7 @@
     font-size: 14px;
   }
   table.cmp th, table.cmp td {
-    padding: 16px 24px;
+    padding: 18px 24px;
     text-align: left;
     border-bottom: 1px solid var(--border);
   }
@@ -578,7 +786,7 @@
     margin-left: 8px;
   }
 
-  /* ---- pricing tiers ---- */
+  /* ====================== TIERS ====================== */
   .tiers {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
@@ -590,7 +798,7 @@
     background: var(--bg-2);
     border: 1px solid var(--border);
     border-radius: 12px;
-    padding: 28px;
+    padding: 32px 28px;
     display: flex;
     flex-direction: column;
   }
@@ -603,18 +811,20 @@
     font-size: 11px;
     color: var(--accent);
     text-transform: uppercase;
-    letter-spacing: 0.06em;
-    margin-bottom: 12px;
+    letter-spacing: 0.08em;
+    margin-bottom: 14px;
   }
   .tier h4 {
-    font-size: 18px;
-    margin: 0 0 8px;
+    font-size: 19px;
+    font-weight: 500;
+    margin: 0 0 10px;
     letter-spacing: -0.01em;
   }
   .tier p.desc {
     font-size: 14px;
     color: var(--text-muted);
-    margin: 0 0 20px;
+    margin: 0 0 24px;
+    line-height: 1.55;
     flex-grow: 1;
   }
   .tier-billing {
@@ -626,12 +836,12 @@
   }
   .tier-billing strong { color: var(--text); display: block; margin-bottom: 4px; font-weight: 500; }
 
-  /* ---- final CTA ---- */
+  /* ====================== FINAL CTA ====================== */
   .final-cta {
     background: var(--bg-2);
     border: 1px solid var(--border);
     border-radius: 16px;
-    padding: 64px 48px;
+    padding: 72px 48px;
     text-align: center;
     position: relative;
     overflow: hidden;
@@ -646,17 +856,23 @@
     pointer-events: none;
   }
   .final-cta > * { position: relative; }
-  .final-cta h2 { margin-bottom: 20px; max-width: 18ch; margin-inline: auto; }
+  .final-cta h2 {
+    margin-bottom: 22px;
+    max-width: 22ch;
+    margin-inline: auto;
+    font-weight: 600;
+  }
+  .final-cta h2 .display-serif { font-style: italic; }
   .final-cta p {
     color: var(--text-muted);
     max-width: 56ch;
-    margin: 0 auto 32px;
+    margin: 0 auto 36px;
     font-size: 17px;
   }
   .final-cta .hero-cta { justify-content: center; }
-  @media (max-width: 760px) { .final-cta { padding: 40px 24px; } }
+  @media (max-width: 760px) { .final-cta { padding: 48px 24px; } }
 
-  /* ---- footer ---- */
+  /* ====================== FOOTER ====================== */
   footer {
     border-top: 1px solid var(--border);
     padding: 64px 0 32px;
@@ -674,16 +890,17 @@
   @media (max-width: 880px) { .footer-grid { grid-template-columns: 1fr 1fr; } }
   .footer-brand p {
     color: var(--text-dim);
-    margin-top: 12px;
+    margin-top: 14px;
     max-width: 32ch;
     font-size: 13px;
+    line-height: 1.55;
   }
   .footer-col h5 {
-    font-size: 12px;
+    font-size: 11px;
     text-transform: uppercase;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.1em;
     color: var(--text-dim);
-    margin: 0 0 16px;
+    margin: 0 0 18px;
     font-weight: 500;
     font-family: var(--font-mono);
   }
@@ -718,31 +935,50 @@
       Overdrive
     </a>
     <div class="nav-links">
+      <a href="#thesis">Why now</a>
       <a href="#architecture">Architecture</a>
-      <a href="#workloads">Workloads</a>
       <a href="#compare">vs Kubernetes</a>
       <a href="#pricing">Pricing</a>
-      <a href="#" class="nav-cta">Get started <span class="arrow">→</span></a>
+      <a href="#" class="nav-cta">Read the whitepaper <span class="arrow">→</span></a>
     </div>
   </div>
 </nav>
 
 <!-- ====================== HERO ====================== -->
 <section class="hero">
+  <!-- DZ-style floating pixel cubes -->
+  <svg class="pixel-accent left" width="120" height="160" viewBox="0 0 120 160" fill="none">
+    <rect x="0"  y="0"   width="22" height="22" fill="#ff5c28" opacity="0.6"/>
+    <rect x="24" y="0"   width="22" height="22" fill="#ff8b5f" opacity="0.3"/>
+    <rect x="0"  y="24"  width="22" height="22" fill="#232328"/>
+    <rect x="24" y="48"  width="22" height="22" fill="#ff5c28" opacity="0.4"/>
+    <rect x="48" y="72"  width="22" height="22" fill="#232328"/>
+    <rect x="24" y="96"  width="22" height="22" fill="#ff5c28" opacity="0.55"/>
+    <rect x="0"  y="120" width="22" height="22" fill="#2c2c33"/>
+  </svg>
+  <svg class="pixel-accent right" width="140" height="160" viewBox="0 0 140 160" fill="none">
+    <rect x="118" y="0"   width="22" height="22" fill="#ff5c28" opacity="0.45"/>
+    <rect x="94"  y="24"  width="22" height="22" fill="#232328"/>
+    <rect x="118" y="48"  width="22" height="22" fill="#ff8b5f" opacity="0.35"/>
+    <rect x="70"  y="72"  width="22" height="22" fill="#ff5c28" opacity="0.6"/>
+    <rect x="94"  y="96"  width="22" height="22" fill="#2c2c33"/>
+    <rect x="118" y="120" width="22" height="22" fill="#ff5c28" opacity="0.4"/>
+  </svg>
+
   <div class="container">
     <div class="hero-tag">
-      <span class="hero-tag-pill">v0.12 · Draft</span>
-      Overdrive whitepaper now public
+      <span class="hero-tag-pill">v0.12 · Whitepaper</span>
+      A platform team's exit from the Kubernetes stack
     </div>
 
     <h1 class="hero-title">
-      Orchestration without the <span class="accent">operational tax.</span>
+      Workload Orchestration, <span class="display-serif">compiled to the kernel.</span>
     </h1>
 
     <p class="hero-sub">
-      One Rust binary replaces etcd, Envoy, SPIRE, CNI, and kube-proxy.
-      eBPF in the dataplane, kernel mTLS by default, and a unified driver model
-      for VMs, processes, unikernels, containers, and WASM &mdash; all under one identity, policy, and telemetry stack.
+      Overdrive is a single-binary orchestrator built on the primitives Kubernetes never had:
+      <strong>stable eBPF, kernel TLS, and embeddable WASM.</strong>
+      Faster scheduling. Stronger isolation. One model for every workload type.
     </p>
 
     <div class="hero-cta">
@@ -751,18 +987,58 @@
     </div>
 
     <div class="hero-meta">
-      <span><strong>~50 MB</strong> node image</span>
-      <span><strong>~30 MB</strong> single-mode control plane</span>
-      <span><strong>~1 ms</strong> WASM cold start</span>
+      <span><strong>~50&nbsp;MB</strong> node image</span>
+      <span><strong>~30&nbsp;MB</strong> single-mode control plane</span>
+      <span><strong>&lt;&nbsp;10s</strong> node join</span>
       <span><strong>AGPL-3.0</strong></span>
     </div>
   </div>
 </section>
 
+<!-- ====================== AUDIENCE SPLIT ====================== -->
+<section class="audience">
+  <div class="container" style="padding: 0;">
+    <div class="audience-grid">
+      <div class="audience-card">
+        <div class="audience-tag">Platform Engineering</div>
+        <h3>Get out from under the stack you maintain.</h3>
+        <p>
+          Stop running etcd, cert-manager, an ingress controller, a service mesh, and a CNI plugin
+          as four independent failure domains. Overdrive ships them as one binary, with
+          three-node HA that fits in 80&nbsp;MB of memory.
+        </p>
+        <a href="#thesis" class="btn btn-outline">See the architecture <span class="arrow">→</span></a>
+      </div>
+
+      <div class="audience-card">
+        <div class="audience-tag">SRE & On-Call</div>
+        <h3>Incidents that investigate themselves.</h3>
+        <p>
+          Every eBPF event carries cryptographic workload identity. The native SRE agent correlates
+          across alerts via SQL joins, attaches signed BPF probes to verify hypotheses, and proposes
+          typed remediations through a graduated approval gate.
+        </p>
+        <a href="#sre" class="btn btn-outline">See the SRE agent <span class="arrow">→</span></a>
+      </div>
+
+      <div class="audience-card">
+        <div class="audience-tag">AI Engineering</div>
+        <h3>Agents that can't exfiltrate what they don't have.</h3>
+        <p>
+          Prompt injection becomes structurally inert. The credential proxy holds the real keys.
+          Domain allowlists run in-kernel via TC eBPF. BPF&nbsp;LSM blocks raw sockets. Security is
+          enforced by infrastructure, not by the model's judgment.
+        </p>
+        <a href="#agents" class="btn btn-outline">See agent isolation <span class="arrow">→</span></a>
+      </div>
+    </div>
+  </div>
+</section>
+
 <!-- ====================== CREDS ====================== -->
-<section class="creds" style="padding: 0;">
-  <div class="container" style="padding-top: 48px; padding-bottom: 48px;">
-    <p class="creds-label">Built on production-grade Rust primitives</p>
+<section class="creds" style="padding-top: 64px; padding-bottom: 64px;">
+  <div class="container">
+    <p class="creds-label">Standing on production-grade Rust primitives</p>
     <div class="creds-list">
       <span>aya-rs</span>
       <span>openraft</span>
@@ -777,33 +1053,47 @@
 </section>
 
 <!-- ====================== THESIS ====================== -->
-<section>
+<section id="thesis">
   <div class="container">
     <div class="section-head">
-      <div class="eyebrow">The thesis</div>
-      <h2>Kubernetes was right for 2014. It is not right for 2026.</h2>
+      <div class="eyebrow">Why now</div>
+      <h2>Kubernetes was right for 2014. <span class="display-serif">It is not right for 2026.</span></h2>
       <p class="lead">
-        Stable eBPF APIs, kTLS offload, production-ready Rust systems libraries, and embeddable WASM
-        only matured in the last two years. Overdrive is the platform that becomes possible
-        when all of them exist at the same time.
+        Stable eBPF APIs, kernel TLS offload, production Rust systems libraries, and embeddable WASM
+        only matured in the last two years. Overdrive is the orchestrator that becomes possible
+        when all four exist at once.
       </p>
     </div>
 
     <div class="three-col">
       <div class="thesis-card">
         <div class="num">01 / Own your primitives</div>
-        <h3>No etcd. No Envoy. No SPIRE. No CNI.</h3>
-        <p>Every critical subsystem is built into the platform or is a standard Rust library. External process dependencies are operational liabilities — they get cut.</p>
+        <h3>Every dependency is a future incident.</h3>
+        <p>
+          No etcd. No Envoy. No SPIRE. No CNI. Every critical subsystem is built into the platform
+          or is a standard Rust library. External processes you didn't write are operational liabilities &mdash;
+          they get cut.
+        </p>
       </div>
+
       <div class="thesis-card">
-        <div class="num">02 / eBPF is the dataplane</div>
-        <h3>The kernel does the work the proxy used to do.</h3>
-        <p>Service routing, network policy, load balancing, mTLS, and telemetry happen at line rate in the kernel via aya-rs. No userspace proxies in the data path.</p>
+        <div class="num">02 / The kernel is the dataplane</div>
+        <h3>Userspace proxies become unnecessary.</h3>
+        <p>
+          Service routing, network policy, load balancing, mTLS, and telemetry happen at line rate
+          in the kernel via aya-rs. No sidecar tax. No proxy reconfigurations. No tail-latency
+          spikes from a userspace hop.
+        </p>
       </div>
+
       <div class="thesis-card">
         <div class="num">03 / Security is structural</div>
-        <h3>mTLS between workloads cannot be turned off.</h3>
-        <p>Every connection is wrapped in kTLS with a SPIFFE identity. Policy is enforced by BPF LSM in-kernel. A compromised workload hits the same walls as a well-behaved one.</p>
+        <h3>mTLS isn't an option you remember to enable.</h3>
+        <p>
+          Every connection is wrapped in kTLS with a SPIFFE identity. Policy is enforced in-kernel
+          by BPF&nbsp;LSM. A compromised workload, a misconfigured pod, and a malicious dependency
+          all hit the same walls.
+        </p>
       </div>
     </div>
   </div>
@@ -814,43 +1104,43 @@
   <div class="container">
     <div class="section-head">
       <div class="eyebrow">By the numbers</div>
-      <h2>Structural advantages, not configuration tweaks.</h2>
+      <h2>Architecture decisions, <span class="display-serif">measured at fleet scale.</span></h2>
       <p class="lead">
-        These are not micro-optimizations. They are consequences of the architecture &mdash;
-        the kind of differences that compound at fleet scale.
+        Not micro-optimizations. These are direct consequences of the design &mdash; the kind of differences
+        that turn three racks back into one.
       </p>
     </div>
 
     <div class="stats-grid">
       <div class="stat">
         <div class="stat-num">~10<span class="unit">×</span></div>
-        <div class="stat-label">Lower control-plane RAM</div>
+        <div class="stat-label">Less control-plane RAM</div>
         <div class="stat-vs">~100 MB vs ~1 GB on Kubernetes</div>
       </div>
       <div class="stat">
         <div class="stat-num">~100<span class="unit">×</span></div>
         <div class="stat-label">Less mTLS CPU overhead</div>
-        <div class="stat-vs">kTLS in-kernel vs Envoy sidecar/workload</div>
+        <div class="stat-vs">kTLS in-kernel vs Envoy sidecar</div>
       </div>
       <div class="stat">
         <div class="stat-num">~50<span class="unit">×</span></div>
-        <div class="stat-label">Faster scheduling latency</div>
+        <div class="stat-label">Faster scheduling</div>
         <div class="stat-vs">&lt; 100 ms vs 1–10 s on Kubernetes</div>
       </div>
       <div class="stat">
         <div class="stat-num">2.3<span class="unit">×</span></div>
-        <div class="stat-label">Workload density at 70% utilization</div>
-        <div class="stat-vs">Continuous right-sizing vs static VPA</div>
+        <div class="stat-label">Workload density</div>
+        <div class="stat-vs">~70% utilization vs ~30% baseline</div>
       </div>
       <div class="stat">
         <div class="stat-num">&lt;10<span class="unit">s</span></div>
-        <div class="stat-label">Node join time</div>
+        <div class="stat-label">Node join</div>
         <div class="stat-vs">vs 2–5 minutes on Kubernetes</div>
       </div>
       <div class="stat">
         <div class="stat-num">~1<span class="unit">ms</span></div>
         <div class="stat-label">WASM cold start</div>
-        <div class="stat-vs">Wasmtime warm pool vs ~125 ms Firecracker</div>
+        <div class="stat-vs">Wasmtime warm pool, no Firecracker tax</div>
       </div>
     </div>
   </div>
@@ -861,10 +1151,11 @@
   <div class="container">
     <div class="section-head">
       <div class="eyebrow">Architecture</div>
-      <h2>One binary. Any topology.</h2>
+      <h2>One binary. <span class="display-serif">Any topology.</span></h2>
       <p class="lead">
-        Control plane and node agent ship in a single Rust binary. Role is declared at bootstrap
-        — single node, three-node HA, dedicated ingress tier, multi-region. Same binary, different config.
+        Control plane and node agent ship in a single Rust binary. Role is declared at bootstrap &mdash;
+        single node, three-node HA, dedicated ingress tier, multi-region. No second installer.
+        No second upgrade path.
       </p>
     </div>
 
@@ -897,16 +1188,16 @@
   </div>
 </section>
 
-<!-- ====================== WORKLOAD TYPES ====================== -->
+<!-- ====================== WORKLOADS ====================== -->
 <section id="workloads">
   <div class="container">
     <div class="section-head">
       <div class="eyebrow">Workload model</div>
-      <h2>Five drivers. One identity. One policy.</h2>
+      <h2>Five drivers. <span class="display-serif">One identity. One policy.</span></h2>
       <p class="lead">
         VMs, processes, unikernels, containers, and WASM functions share the same SPIFFE identity,
-        the same eBPF dataplane, the same policy engine, and the same telemetry pipeline.
-        Not one model bolted onto another.
+        the same eBPF dataplane, the same policy engine. Pick the right primitive for the workload &mdash;
+        not the only one your platform happens to support.
       </p>
     </div>
 
@@ -914,31 +1205,31 @@
       <div class="wl">
         <div class="wl-tag">process</div>
         <h4>Native binaries</h4>
-        <p>Long-running daemons under cgroups v2 with kernel-enforced isolation.</p>
+        <p>Daemons under cgroups v2, kernel-enforced isolation, zero VM overhead.</p>
         <div class="wl-meta">tokio::process</div>
       </div>
       <div class="wl">
         <div class="wl-tag">microvm</div>
         <h4>Fast-boot VMs</h4>
-        <p>~200 ms cold start, hardware isolation, optional persistent rootfs.</p>
+        <p>~200 ms cold start. Hardware isolation. Optional persistent rootfs.</p>
         <div class="wl-meta">cloud-hypervisor</div>
       </div>
       <div class="wl">
         <div class="wl-tag">vm</div>
         <h4>Full virtualisation</h4>
-        <p>Live CPU + memory hotplug, virtiofs sharing, AArch64 first-class.</p>
+        <p>Live CPU and memory hotplug. virtiofs sharing. AArch64 first-class.</p>
         <div class="wl-meta">cloud-hypervisor</div>
       </div>
       <div class="wl">
         <div class="wl-tag">unikernel</div>
         <h4>Extreme density</h4>
-        <p>Single-purpose images on a hypervisor, virtiofs-capable.</p>
+        <p>Single-purpose images on a hypervisor. Minimal kernel surface.</p>
         <div class="wl-meta">unikraft + CH</div>
       </div>
       <div class="wl">
         <div class="wl-tag">wasm</div>
         <h4>Serverless functions</h4>
-        <p>~1 ms cold start, scale-to-zero, structural credential isolation.</p>
+        <p>~1 ms cold start. Scale-to-zero. Sandbox the model can't talk its way out of.</p>
         <div class="wl-meta">wasmtime</div>
       </div>
     </div>
@@ -946,25 +1237,26 @@
 </section>
 
 <!-- ====================== CODE SHOWCASE ====================== -->
-<section style="padding-top: 0;">
+<section id="agents" style="padding-top: 0;">
   <div class="container">
     <div class="section-head">
       <div class="eyebrow">Job spec</div>
-      <h2>Declare what. The platform handles how.</h2>
+      <h2>Declare what. <span class="display-serif">The platform handles how.</span></h2>
       <p class="lead">
-        A single TOML job spec composes drivers, sidecars, security profiles, and ingress.
-        The Image Factory turns schematics into reproducible, content-addressed node images.
+        A single TOML composes drivers, sidecars, security profiles, and ingress.
+        The same spec deploys to a single node and to a multi-region fleet &mdash; the platform absorbs
+        the difference.
       </p>
     </div>
 
     <div class="code-grid">
       <div class="code-block">
         <div class="code-head">
-          <span>job.toml</span>
+          <span>job.toml &middot; ai-research-agent</span>
           <div class="code-dots"><span></span><span></span><span></span></div>
         </div>
-<pre><span class="c"># AI agent with structural credential isolation</span>
-<span class="c"># and prompt-injection scanning.</span>
+<pre><span class="c"># An AI agent with structural credential isolation</span>
+<span class="c"># and prompt-injection scanning on ingress.</span>
 
 [<span class="k">job</span>]
 <span class="t">name</span>   = <span class="s">"ai-research-agent"</span>
@@ -992,11 +1284,11 @@
 
       <div class="code-block">
         <div class="code-head">
-          <span>~/.overdrive</span>
+          <span>~/$ overdrive</span>
           <div class="code-dots"><span></span><span></span><span></span></div>
         </div>
 <pre><span class="p">$</span> overdrive job submit job.toml
-<span class="c">→ ai-research-agent · scheduled · alloc a1b2c3</span>
+<span class="ok">→ ai-research-agent · scheduled · alloc a1b2c3</span>
 
 <span class="p">$</span> overdrive alloc status a1b2c3
 <span class="c">  state          : running</span>
@@ -1011,46 +1303,105 @@
 <span class="p">$</span> overdrive cluster upgrade \
     <span class="t">--mode</span> ha \
     <span class="t">--peers</span> node-2,node-3
-<span class="c">→ snapshot exported (LocalStore)</span>
-<span class="c">→ RaftStore bootstrapped on 3 peers</span>
-<span class="c">→ leader: node-1 · zero downtime</span></pre>
+<span class="ok">→ snapshot exported (LocalStore)</span>
+<span class="ok">→ RaftStore bootstrapped on 3 peers</span>
+<span class="ok">→ leader: node-1 · zero downtime</span></pre>
       </div>
     </div>
   </div>
 </section>
 
-<!-- ====================== FEATURE SPOTLIGHT ====================== -->
-<section>
+<!-- ====================== SRE AGENT SPOTLIGHT ====================== -->
+<section id="sre">
   <div class="container">
     <div class="spotlight">
       <div>
-        <div class="eyebrow" style="margin-bottom: 16px;">Native SRE agent</div>
-        <h2 style="margin-bottom: 20px;">An LLM that reasons about your cluster &mdash; safely.</h2>
-        <p style="color: var(--text-muted); font-size: 17px;">
-          Every eBPF event carries cryptographic SPIFFE identity. Correlation isn't a label-matching
-          heuristic &mdash; it's a SQL join. The investigation agent proposes typed actions through
-          a graduated approval gate. It cannot do anything the platform doesn't already understand.
+        <div class="eyebrow" style="margin-bottom: 18px;">Native SRE Agent</div>
+        <h2>An LLM that can reason <span class="display-serif">about your cluster.</span></h2>
+        <p style="color: var(--text-muted); font-size: 17px; margin-top: 24px;">
+          Every event in Overdrive carries cryptographic SPIFFE identity. Correlation isn't a
+          label-matching heuristic &mdash; it's a SQL join. Investigations are first-class resources
+          with a budget, a transcript, and a typed proposal at the end.
         </p>
         <ul>
-          <li><strong>Investigations as a resource.</strong> Lifecycle, budget, transcript, compressed into incident memory on conclusion.</li>
-          <li><strong>Typed remediation.</strong> Tier 0 reads auto-execute, Tier 2 writes require human ratification.</li>
-          <li><strong>Hypothesis verification.</strong> The agent can attach signed BPF probes for one investigation turn.</li>
-          <li><strong>Deterministic replay.</strong> Investigation transcripts re-run in CI under the DST harness.</li>
+          <li><strong>Investigations as a resource.</strong> Lifecycle, budget, transcript &mdash; compressed into incident memory on conclusion.</li>
+          <li><strong>Typed remediation.</strong> Tier&nbsp;0 reads auto-execute. Tier&nbsp;2 writes wait for human ratification.</li>
+          <li><strong>Hypothesis verification.</strong> Attach signed BPF probes for one investigation turn. No instrumentation rollout.</li>
+          <li><strong>Deterministic replay.</strong> Investigation transcripts re-run in CI under the simulation harness.</li>
         </ul>
         <a href="#" class="btn btn-ghost">Read &sect; 12 of the whitepaper <span class="arrow">→</span></a>
       </div>
 
       <div class="tier-panel">
         <div class="row"><span class="label">investigation_id</span><span class="val">inv-7f3a92</span></div>
-        <div class="row"><span class="label">trigger</span><span class="val">alert: payments.p99 &gt; 800ms</span></div>
-        <div class="row"><span class="label">scope</span><span class="val">job/payments · region eu-west-1</span></div>
+        <div class="row"><span class="label">trigger</span><span class="val">alert · payments.p99 &gt; 800ms</span></div>
+        <div class="row"><span class="label">scope</span><span class="val">job/payments · eu-west-1</span></div>
         <div class="row"><span class="label">tools_called</span><span class="val">7</span></div>
         <div class="row"><span class="label">llm_turns</span><span class="val">4</span></div>
         <div class="row"><span class="label">tokens_spent</span><span class="val">12,840 / 50,000</span></div>
         <div class="row"><span class="label">probe_attached</span><span class="val accent">tcp_retransmit_trace</span></div>
-        <div class="row"><span class="label">diagnosis</span><span class="val">backend connection pool exhausted</span></div>
-        <div class="row"><span class="label">proposed</span><span class="val accent">ScaleJob { replicas: 3 → 6 } · Tier 1 · auto</span></div>
-        <div class="row"><span class="label">status</span><span class="val accent">concluded · 47s</span></div>
+        <div class="row"><span class="label">diagnosis</span><span class="val">backend pool exhausted</span></div>
+        <div class="row"><span class="label">proposed</span><span class="val accent">ScaleJob 3→6 · Tier 1 · auto</span></div>
+        <div class="row"><span class="label">status</span><span class="val ok">concluded · 47s</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ====================== FLEET MAP / "REAL TIME" ====================== -->
+<section style="padding-top: 0;">
+  <div class="container">
+    <div class="section-head center">
+      <div class="eyebrow">Multi-region by default</div>
+      <h2>See your fleet <span class="display-serif">as one cluster.</span></h2>
+      <p class="lead">
+        Per-region Raft for intent. Global CRDT gossip for observation. Each region keeps writing
+        through a partition. The dataplane never reads remote state.
+      </p>
+    </div>
+
+    <div class="fleet-viz">
+      <div class="fleet-grid">
+        <div class="region-card">
+          <div class="region-head">
+            <span class="name">us-east-1</span>
+            <span class="live">healthy</span>
+          </div>
+          <div class="region-row"><span>nodes</span>                <span class="v">42 / 42</span></div>
+          <div class="region-row"><span>allocations</span>          <span class="v">2,184</span></div>
+          <div class="region-row"><span>raft leader</span>          <span class="v">node-04</span></div>
+          <div class="region-row"><span>gossip lag p99</span>       <span class="v">214 ms</span></div>
+          <div class="region-row"><span>egress mTLS</span>          <span class="v">100%</span></div>
+        </div>
+
+        <div class="region-card">
+          <div class="region-head">
+            <span class="name">eu-west-1</span>
+            <span class="live">healthy</span>
+          </div>
+          <div class="region-row"><span>nodes</span>                <span class="v">38 / 38</span></div>
+          <div class="region-row"><span>allocations</span>          <span class="v">1,902</span></div>
+          <div class="region-row"><span>raft leader</span>          <span class="v">node-12</span></div>
+          <div class="region-row"><span>gossip lag p99</span>       <span class="v">187 ms</span></div>
+          <div class="region-row"><span>egress mTLS</span>          <span class="v">100%</span></div>
+        </div>
+
+        <div class="region-card">
+          <div class="region-head">
+            <span class="name">ap-southeast-1</span>
+            <span class="live">healthy</span>
+          </div>
+          <div class="region-row"><span>nodes</span>                <span class="v">21 / 21</span></div>
+          <div class="region-row"><span>allocations</span>          <span class="v">964</span></div>
+          <div class="region-row"><span>raft leader</span>          <span class="v">node-03</span></div>
+          <div class="region-row"><span>gossip lag p99</span>       <span class="v warn">412 ms</span></div>
+          <div class="region-row"><span>egress mTLS</span>          <span class="v">100%</span></div>
+        </div>
+      </div>
+
+      <div class="fleet-foot">
+        <span>3 regions · 101 nodes · 5,050 allocations</span>
+        <span>last gossip tick · 2.1s ago</span>
       </div>
     </div>
   </div>
@@ -1061,11 +1412,11 @@
   <div class="container">
     <div class="section-head">
       <div class="eyebrow">vs Kubernetes</div>
-      <h2>Coherent by construction, not by configuration.</h2>
+      <h2>Coherent by construction, <span class="display-serif">not by configuration.</span></h2>
       <p class="lead">
-        When the dataplane, identity model, telemetry pipeline, and service mesh all emerge
-        from the same kernel primitive with the same workload identity attached, the platform
-        becomes coherent in a way that bolted-on approaches cannot match.
+        When the dataplane, the identity model, the telemetry pipeline, and the service mesh all
+        emerge from the same kernel primitive with the same workload identity attached, you stop
+        gluing together products that were never designed to know about each other.
       </p>
     </div>
 
@@ -1081,21 +1432,21 @@
         <tbody>
           <tr>
             <td class="label">Service routing</td>
-            <td class="k8s">iptables, O(n) per packet</td>
-            <td class="over">XDP BPF, O(1) <span class="pill">in-kernel</span></td>
+            <td class="k8s">iptables · O(n) per packet</td>
+            <td class="over">XDP BPF · O(1) <span class="pill">in-kernel</span></td>
           </tr>
           <tr>
             <td class="label">mTLS</td>
-            <td class="k8s">Envoy sidecar, ~0.5 vCPU each</td>
-            <td class="over">kTLS, NIC offload <span class="pill">~0 overhead</span></td>
+            <td class="k8s">Envoy sidecar · ~0.5 vCPU each</td>
+            <td class="over">kTLS · NIC offload <span class="pill">~0 overhead</span></td>
           </tr>
           <tr>
-            <td class="label">Control plane RAM</td>
+            <td class="label">Control-plane RAM</td>
             <td class="k8s">~1 GB</td>
             <td class="over">~30–80 MB</td>
           </tr>
           <tr>
-            <td class="label">Network policy eval</td>
+            <td class="label">Network policy</td>
             <td class="k8s">Per-packet iptables walk</td>
             <td class="over">BPF map lookup</td>
           </tr>
@@ -1106,8 +1457,8 @@
           </tr>
           <tr>
             <td class="label">Observability</td>
-            <td class="k8s">Scraped logs + Prometheus</td>
-            <td class="over">Kernel-native, identity-tagged</td>
+            <td class="k8s">Scraped logs &amp; Prometheus</td>
+            <td class="over">Kernel-native · identity-tagged</td>
           </tr>
           <tr>
             <td class="label">Multi-region</td>
@@ -1117,7 +1468,7 @@
           <tr>
             <td class="label">Extension model</td>
             <td class="k8s">Go operators with cluster-admin</td>
-            <td class="over">WASM, sandboxed, hot-reloadable</td>
+            <td class="over">WASM · sandboxed · hot-reloadable</td>
           </tr>
           <tr>
             <td class="label">Node join</td>
@@ -1135,10 +1486,11 @@
   <div class="container">
     <div class="section-head">
       <div class="eyebrow">Cloud platform</div>
-      <h2>Run your own &mdash; or let us run it.</h2>
+      <h2>Run your own. <span class="display-serif">Or let us run it.</span></h2>
       <p class="lead">
-        The open source core is AGPL-3.0. The cloud platform sells the operational complexity
-        we've already absorbed for ourselves &mdash; metered exactly, by kernel telemetry.
+        The open source core is AGPL-3.0 and ships in one binary. The cloud platform sells the
+        operational complexity we already absorbed for ourselves &mdash; metered exactly, by kernel
+        telemetry. No estimation. No sampling.
       </p>
     </div>
 
@@ -1146,7 +1498,7 @@
       <div class="tier">
         <div class="tier-num">Tier 1</div>
         <h4>Managed Overdrive</h4>
-        <p class="desc">A full Overdrive cluster as a service. Control plane, worker pool, Overdrive API and CLI. Ideal for platform teams migrating off self-managed Kubernetes.</p>
+        <p class="desc">A full Overdrive cluster as a service. Control plane, worker pool, and CLI &mdash; the way you'd run it yourself, only without running it.</p>
         <div class="tier-billing">
           <strong>per vCPU-hour + GB-hour</strong>
           metered at allocation level
@@ -1154,9 +1506,9 @@
       </div>
 
       <div class="tier featured">
-        <div class="tier-num">Tier 2 · Most popular</div>
+        <div class="tier-num">Tier 2 · Most flexible</div>
         <h4>Managed Workloads</h4>
-        <p class="desc">Submit jobs directly. No cluster to size, no control plane to monitor. Nomad-style ergonomics with Overdrive's security model.</p>
+        <p class="desc">Submit jobs directly. No cluster to size. No control plane to patch. Nomad-style ergonomics with Overdrive's identity and isolation model underneath.</p>
         <div class="tier-billing">
           <strong>per vCPU-hour + GB-hour</strong>
           tenant namespace, kernel-isolated
@@ -1166,7 +1518,7 @@
       <div class="tier">
         <div class="tier-num">Tier 3</div>
         <h4>Serverless WASM</h4>
-        <p class="desc">Sub-10 ms cold start, scale-to-zero. The credential proxy and content inspector ship by default — built for AI agent workloads.</p>
+        <p class="desc">Sub-10 ms cold start. Scale-to-zero. The credential proxy and content inspector ship by default &mdash; built for the AI agent workloads no one else has a story for.</p>
         <div class="tier-billing">
           <strong>per invocation + GB-second</strong>
           minimum unit: one invocation
@@ -1176,7 +1528,7 @@
       <div class="tier">
         <div class="tier-num">Tier 4</div>
         <h4>Bare Metal Dedicated</h4>
-        <p class="desc">Dedicated physical nodes inside the platform. Full hardware performance, full Overdrive operational stack, no VM overhead.</p>
+        <p class="desc">Dedicated physical nodes inside the platform. Full hardware performance. Full Overdrive operational stack. No VM overhead between you and the silicon.</p>
         <div class="tier-billing">
           <strong>per node-hour</strong>
           reserved capacity discounts
@@ -1184,7 +1536,7 @@
       </div>
     </div>
 
-    <p style="margin-top: 32px; color: var(--text-dim); font-size: 13px; font-family: var(--font-mono);">
+    <p style="margin-top: 36px; color: var(--text-dim); font-size: 13px; font-family: var(--font-mono);">
       Enterprise self-hosted licensing &mdash; FIPS crypto, HSM integration, air-gap tooling, DORA / NIS2 / SOC2 / HIPAA policy packs &mdash; available alongside AGPL.
     </p>
   </div>
@@ -1194,11 +1546,11 @@
 <section>
   <div class="container">
     <div class="final-cta">
-      <div class="eyebrow" style="margin-bottom: 20px;">Open source · AGPL-3.0</div>
-      <h2>The primitives are ready. The platform is here.</h2>
+      <div class="eyebrow" style="margin-bottom: 22px; justify-content: center; display: inline-flex;">Open source · AGPL-3.0</div>
+      <h2>The primitives are ready. <span class="display-serif">The orchestrator is here.</span></h2>
       <p>
-        Read the whitepaper, clone the repo, run a single binary on a single node.
-        Scale to a multi-region fleet without changing tooling.
+        Read the whitepaper. Clone the repo. Run a single binary on a single node.
+        Scale to a multi-region fleet without changing a tool in your toolchain.
       </p>
       <div class="hero-cta">
         <a href="#" class="btn btn-primary">Read the whitepaper <span class="arrow">→</span></a>
@@ -1217,7 +1569,7 @@
           <span class="brand-mark"></span>
           Overdrive
         </a>
-        <p>A next-generation workload orchestration platform built entirely in Rust. AGPL-3.0.</p>
+        <p>A workload orchestration platform compiled to the kernel of 2026. Open source under AGPL-3.0.</p>
       </div>
 
       <div class="footer-col">
@@ -1225,8 +1577,8 @@
         <ul>
           <li><a href="#architecture">Architecture</a></li>
           <li><a href="#workloads">Workloads</a></li>
-          <li><a href="#">eBPF dataplane</a></li>
-          <li><a href="#">SRE agent</a></li>
+          <li><a href="#sre">SRE agent</a></li>
+          <li><a href="#agents">Agent isolation</a></li>
         </ul>
       </div>
 
@@ -1255,15 +1607,15 @@
         <ul>
           <li><a href="#">GitHub</a></li>
           <li><a href="#">Blog</a></li>
-          <li><a href="#">Contact</a></li>
           <li><a href="#">Enterprise</a></li>
+          <li><a href="#">Contact</a></li>
         </ul>
       </div>
     </div>
 
     <div class="footer-bot">
       <span>© 2026 Overdrive. AGPL-3.0.</span>
-      <span>v0.12 · draft</span>
+      <span>v0.12 · whitepaper draft</span>
     </div>
   </div>
 </footer>
