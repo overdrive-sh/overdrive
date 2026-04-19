@@ -731,6 +731,48 @@ The consequence is an end-to-end identity path in Helios: every east-west packet
 
 This divergence is the answer to why Helios, given that it adopts Corrosion directly, is not simply a Fly rebuild: the service-catalog layer is shared; the dataplane is reimagined on primitives (stable eBPF, kTLS, SPIFFE) that did not exist when `fly-proxy` was designed.
 
+### Node Underlay — IP Reachability and Optional Mesh VPN
+
+Every communication path described above — Raft between control-plane peers, Corrosion gossip between ObservationStore peers, node-agent control RPCs, and workload-to-workload data via sockops+kTLS — rides on an IP network. sockops+kTLS gives each packet *confidentiality and per-workload identity*; it does not give the kernel a way to reach the destination node. Reachability is a separate concern, and Helios handles it by scope.
+
+**Reachability requirements.**
+
+- TCP reachability between nodes running control-plane roles (Raft quorum, gRPC control RPCs).
+- UDP reachability between every pair of Corrosion peers in the same gossip group (intra-region mesh plus regional peers to the thin global membership cluster, §4).
+- TCP reachability between any workload calling `connect()` and the node hosting the destination workload — kTLS runs over TCP.
+
+The underlay itself is not required to be encrypted. Every payload above IP is authenticated-encrypted under the platform CA: sockops+kTLS for east-west workload traffic, rustls for Raft and gRPC, the Corrosion peer's QUIC handshake under the same trust bundle for observation. Operators who nonetheless require encrypted backhaul — for defense in depth, regulatory mandates, or untrusted transit — enable a mesh VPN as an Image Factory extension (§23). The Helios binary is agnostic to which, if any, is in use.
+
+**Three deployment shapes.**
+
+1. **Native reachability** — datacenter L3, single cloud VPC, small-site LAN. The underlying network routes between nodes. No extension required. Most production deployments fall here.
+2. **Encrypted mesh over a routable network** — nodes can reach one another at the IP layer but the transit is not trusted. Enable the `wireguard` extension.
+3. **Non-routable deployments** — nodes behind NAT, across the public internet without VPC peering. Enable the `tailscale` extension.
+
+**`wireguard` extension — platform-managed keys via enrollment.**
+
+WireGuard is an in-tree kernel module since Linux 5.6. The extension adds `CONFIG_WIREGUARD=y` to the kernel config fragment, installs `wg-tools`, and drops a systemd unit that brings up the tunnel at boot. Key management is integrated with the enrollment flow from §23: on first boot, the node generates a WireGuard keypair, submits the public key alongside its TPM attestation, and receives back (a) its SVID, (b) the current peer set — pubkeys and endpoints for its region — and (c) its regional aggregator assignment. The initial peer set arrives *with* the SVID before any Corrosion connection is attempted, so the first WireGuard tunnel comes up before the ObservationStore hydrates; Corrosion then runs over the established tunnel.
+
+Subsequent peer changes flow through `node_health` in the ObservationStore. Every node's WireGuard pubkey and endpoint are observation data, gossiped alongside existing node health. Adding or removing a node is a `node_health` row change; each existing node's WireGuard daemon picks up the delta through the same subscription path that already drives BPF map hydration (see *BPF Map Architecture* above). No external key-distribution service, no operator-managed `wg0.conf`.
+
+**`tailscale` extension — bring-your-own coordination.**
+
+Tailscale provides NAT traversal via DERP relays and coordinated key exchange through its control server. The extension ships `tailscaled` and a systemd unit; it does not integrate with Helios enrollment. Operators point the daemon at their Tailscale tailnet or their self-hosted Headscale (MIT-licensed open-source coord server) via standard Tailscale configuration. The tradeoff is a second identity system — Tailscale ACLs alongside SPIFFE — which operators requiring NAT traversal generally accept. A future phase may integrate Headscale management into the control plane, with node-to-node ACLs driven by the Helios policy engine; v1 treats Tailscale as a self-contained subsystem.
+
+**Mutual exclusion.**
+
+A schematic may enable `wireguard` or `tailscale`, not both. The Image Factory rejects schematics declaring both — two overlapping mesh VPNs introduce routing-table ambiguity and serve no additional purpose. Operators who need both encrypted backhaul and NAT traversal use `tailscale` alone (WireGuard under the hood, so encryption is included).
+
+**Integration surface.**
+
+No code in the node agent, control plane, or dataplane detects which mesh VPN is active. From the binary's perspective the underlay is always just IP. The only integration touchpoint is the enrollment handler, which — when the `wireguard` extension is present on the enrolling node — writes the node's WireGuard pubkey and endpoint into `node_health` on admission. The handler is a no-op when neither extension is present or when `tailscale` is selected.
+
+| Underlay mode | Extension | Operator burden | Encrypted | NAT traversal | Key management |
+|---|---|---|---|---|---|
+| Native L3 / VPC | none | use existing network | optional (kTLS above L3) | no | n/a |
+| Encrypted mesh | `wireguard` | kernel flag + schematic | yes (WireGuard) | no | platform, via enrollment |
+| NAT-traversing mesh | `tailscale` | schematic + coord server | yes (WireGuard under Tailscale) | yes (DERP) | operator, via Tailscale/Headscale |
+
 ---
 
 ## 8. Identity and mTLS
@@ -2147,6 +2189,7 @@ For exhaustive state-space exploration beyond what turmoil covers, Helios is des
 - Gateway (hyper + rustls)
 - Embedded ACMEv2 client via `instant-acme` (rustls-native, `rcgen`-integrated) — public-trust certs for the gateway (HTTP-01, DNS-01, TLS-ALPN-01), rotation unified with SVIDs in `IdentityMgr` on a single cert-generation path
 - DuckLake telemetry pipeline (catalog: libSQL, storage: Garage Parquet)
+- Mesh VPN underlay extensions (§7 *Node Underlay*): `wireguard` with platform-managed keys via enrollment (pubkeys gossiped through `node_health`), and `tailscale` with bring-your-own coordination (Tailscale tailnet or self-hosted Headscale) — mutually exclusive in the schematic
 
 ### Phase 5 — Intelligence (Months 12–18)
 - LLM observability agent (rig-rs)
@@ -2224,6 +2267,10 @@ extra_args = ["intel_iommu=on", "iommu=pt"]
 
 [extensions]
 official = ["nvidia-gpu"]   # resolved to versioned recipes by factory
+# Mesh VPN underlay extensions (§7 Node Underlay) — mutually exclusive.
+# Only one of `wireguard` or `tailscale` may appear in a schematic.
+#   wireguard — in-kernel mesh, platform-managed keys via enrollment
+#   tailscale — NAT-traversing mesh, bring-your-own Tailscale / Headscale
 
 [security]
 bpf_lsm = true   # locked true in production; configurable for dev only
