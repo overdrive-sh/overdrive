@@ -1,0 +1,32 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@700&display=block" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 128px; height: 128px; overflow: hidden; background: transparent; }
+  body { display: flex; align-items: center; justify-content: center; }
+  .mark {
+    display: inline-flex;
+    align-items: center;
+    font-family: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+    font-weight: 700;
+    color: #f5f5f7;
+    font-size: 96px;
+    line-height: 1;
+  }
+  .cur {
+    display: inline-block;
+    width: 16px;
+    height: 64px;
+    background: #ff5c28;
+    margin-left: 10px;
+  }
+</style>
+</head>
+<body>
+  <div class="mark">O<span class="cur"></span></div>
+</body>
+</html>

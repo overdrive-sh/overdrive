@@ -1,0 +1,552 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Overdrive — Logo Concepts</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg:           #0a0a0b;
+    --bg-2:         #0f0f11;
+    --surface:      #131316;
+    --border:       #2a2a31;
+    --border-2:     #3a3a44;
+    --text:         #f5f5f7;
+    --text-muted:   #9a9aa3;
+    --text-dim:     #62626a;
+    --accent:       #ff5c28;
+    --accent-2:     #ff8b5f;
+    --accent-soft:  rgba(255, 92, 40, 0.12);
+    --font-sans:    'IBM Plex Sans', -apple-system, system-ui, sans-serif;
+    --font-serif:   'Instrument Serif', Georgia, serif;
+    --font-mono:    'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(to right, rgba(255,255,255,0.022) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255,255,255,0.022) 1px, transparent 1px);
+    background-size: 64px 64px;
+    pointer-events: none;
+    z-index: 0;
+    mask-image: radial-gradient(ellipse at top, black 25%, transparent 78%);
+  }
+  .wrap {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 64px 40px;
+    position: relative;
+    z-index: 1;
+  }
+  header { margin-bottom: 56px; }
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 14px;
+  }
+  .eyebrow::before {
+    content: '';
+    width: 6px; height: 6px;
+    background: var(--accent);
+    border-radius: 50%;
+    box-shadow: 0 0 12px rgba(255,92,40,0.35);
+  }
+  h1 {
+    font-size: 44px;
+    letter-spacing: -0.03em;
+    line-height: 1.05;
+    margin: 0;
+    font-weight: 500;
+  }
+  .lead {
+    color: var(--text-muted);
+    margin-top: 14px;
+    font-size: 16px;
+    max-width: 60ch;
+  }
+  .concept {
+    border: 1px solid var(--border);
+    background: var(--bg-2);
+    margin-bottom: 20px;
+    overflow: hidden;
+  }
+  .concept-head {
+    padding: 22px 28px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 20px;
+  }
+  .concept-head .num {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-right: 14px;
+  }
+  .concept-head h2 {
+    display: inline;
+    font-size: 20px;
+    font-weight: 500;
+    letter-spacing: -0.015em;
+    margin: 0;
+  }
+  .concept-head .note {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .concept-body {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 0;
+  }
+  .concept-body > div {
+    padding: 36px 28px;
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 20px;
+    min-height: 180px;
+  }
+  .concept-body > div:last-child { border-right: 0; }
+  .size-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+  .fav-frame {
+    width: 32px; height: 32px;
+    background: var(--bg);
+    border: 1px solid var(--border-2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .rationale {
+    padding: 22px 28px;
+    border-top: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 14px;
+    line-height: 1.6;
+    background: var(--bg);
+  }
+  .rationale strong { color: var(--text); font-weight: 500; }
+  .pros-cons {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin-top: 12px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+  }
+  .pros-cons .label {
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 6px;
+    font-size: 10px;
+  }
+  .pros-cons .pros { color: #4ade80; }
+  .pros-cons .cons { color: #facc15; }
+  .wordmark-preview {
+    font-family: var(--font-mono);
+    font-size: 22px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--text);
+  }
+  .wordmark-preview .cur {
+    color: var(--accent);
+    display: inline-block;
+    animation: blink 1.1s steps(2) infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Logo concepts</div>
+    <h1>Four directions for Overdrive.</h1>
+    <p class="lead">
+      Each rendered in the existing brand system — dark surface, orange accent, sharp edges,
+      IBM Plex. Shown at favicon (32px), small (48px), and header-scale (large).
+    </p>
+  </header>
+
+  <!-- ============================================================ -->
+  <!-- 01 — CLIPPED WAVEFORM                                         -->
+  <!-- ============================================================ -->
+  <div class="concept">
+    <div class="concept-head">
+      <div>
+        <span class="num">01</span>
+        <h2>Clipped waveform</h2>
+      </div>
+      <span class="note">audio overdrive · oscilloscope</span>
+    </div>
+    <div class="concept-body">
+      <!-- Favicon -->
+      <div>
+        <div class="fav-frame">
+          <svg width="32" height="32" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" fill="none">
+            <path d="M 2 20 L 4 10 L 10 10 L 14 20 L 18 30 L 26 30 L 30 20 L 34 10 L 38 10"
+                  stroke="#ff5c28" stroke-width="3" stroke-linejoin="miter" stroke-linecap="square"/>
+          </svg>
+        </div>
+        <div class="size-label">favicon · 32</div>
+      </div>
+
+      <!-- Mark at 48 -->
+      <div>
+        <svg width="48" height="48" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" fill="none">
+          <path d="M 2 20 L 4 10 L 10 10 L 14 20 L 18 30 L 26 30 L 30 20 L 34 10 L 38 10"
+                stroke="#ff5c28" stroke-width="2.5" stroke-linejoin="miter" stroke-linecap="square"/>
+        </svg>
+        <div class="size-label">mark · 48</div>
+      </div>
+
+      <!-- Full logo -->
+      <div>
+        <svg width="240" height="48" viewBox="0 0 200 40" xmlns="http://www.w3.org/2000/svg" fill="none">
+          <path d="M 0 20 L 2 10 L 8 10 L 12 20 L 16 30 L 24 30 L 28 20 L 32 10 L 38 10"
+                stroke="#ff5c28" stroke-width="2.5" stroke-linejoin="miter" stroke-linecap="square"/>
+          <text x="50" y="28"
+                font-family="'IBM Plex Sans', -apple-system, system-ui, sans-serif"
+                font-size="22" font-weight="700" letter-spacing="-0.6" fill="#f5f5f7">Overdrive</text>
+        </svg>
+        <div class="size-label">logo · header</div>
+      </div>
+    </div>
+    <div class="rationale">
+      A signal pushed past its rails — two cycles of square-like waveform that read as an
+      <strong>overdriven / clipped signal</strong>. Reference is audio, not automotive —
+      the register that survives in a procurement room. Only engineers will catch it; that's the point.
+      <div class="pros-cons">
+        <div>
+          <div class="label">Strengths</div>
+          <div class="pros">
+            Technical, distinct<br/>
+            No tech-naming collision<br/>
+            Reads at 16px<br/>
+            Kernel-adjacent feel
+          </div>
+        </div>
+        <div>
+          <div class="label">Tradeoffs</div>
+          <div class="cons">
+            Less immediately "orchestration"<br/>
+            Can look generic if too soft<br/>
+            Benefits from the clipped-rail variant over pure sine
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- 02 — PIXEL WEDGE (current, baseline)                         -->
+  <!-- ============================================================ -->
+  <div class="concept">
+    <div class="concept-head">
+      <div>
+        <span class="num">02</span>
+        <h2>Pixel wedge <span style="color: var(--text-dim); font-weight: 400;">— current</span></h2>
+      </div>
+      <span class="note">geometric · N+1 · forward-pointing</span>
+    </div>
+    <div class="concept-body">
+      <!-- Favicon -->
+      <div>
+        <div class="fav-frame">
+          <svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" fill="#ff5c28">
+            <rect x="6" y="3"  width="3"  height="3"/>
+            <rect x="6" y="6"  width="6"  height="3"/>
+            <rect x="6" y="9"  width="9"  height="3"/>
+            <rect x="6" y="12" width="12" height="3"/>
+            <rect x="6" y="15" width="15" height="3"/>
+            <rect x="6" y="18" width="12" height="3"/>
+            <rect x="6" y="21" width="9"  height="3"/>
+            <rect x="6" y="24" width="6"  height="3"/>
+            <rect x="6" y="27" width="3"  height="3"/>
+          </svg>
+        </div>
+        <div class="size-label">favicon · 32</div>
+      </div>
+
+      <!-- Mark at 48 -->
+      <div>
+        <svg width="48" height="48" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" fill="#ff5c28">
+          <rect x="6" y="2"  width="4"  height="4"/>
+          <rect x="6" y="6"  width="8"  height="4"/>
+          <rect x="6" y="10" width="12" height="4"/>
+          <rect x="6" y="14" width="16" height="4"/>
+          <rect x="6" y="18" width="20" height="4"/>
+          <rect x="6" y="22" width="16" height="4"/>
+          <rect x="6" y="26" width="12" height="4"/>
+          <rect x="6" y="30" width="8"  height="4"/>
+          <rect x="6" y="34" width="4"  height="4"/>
+        </svg>
+        <div class="size-label">mark · 48</div>
+      </div>
+
+      <!-- Full logo -->
+      <div>
+        <svg width="240" height="48" viewBox="0 0 180 40" xmlns="http://www.w3.org/2000/svg">
+          <g fill="#ff5c28">
+            <rect x="0" y="2"  width="4"  height="4"/>
+            <rect x="0" y="6"  width="8"  height="4"/>
+            <rect x="0" y="10" width="12" height="4"/>
+            <rect x="0" y="14" width="16" height="4"/>
+            <rect x="0" y="18" width="20" height="4"/>
+            <rect x="0" y="22" width="16" height="4"/>
+            <rect x="0" y="26" width="12" height="4"/>
+            <rect x="0" y="30" width="8"  height="4"/>
+            <rect x="0" y="34" width="4"  height="4"/>
+          </g>
+          <text x="36" y="29"
+                font-family="'IBM Plex Sans', -apple-system, system-ui, sans-serif"
+                font-size="24" font-weight="700" letter-spacing="-0.7" fill="#f5f5f7">Overdrive</text>
+        </svg>
+        <div class="size-label">logo · header</div>
+      </div>
+    </div>
+    <div class="rationale">
+      Pixel arrow pointing forward — the <strong>N+1 gear</strong>, the next step. Already in place
+      across the site. Brutalist, typographic-adjacent, looks at home next to Talos / Cilium / Garage.
+      Strongest at small sizes.
+      <div class="pros-cons">
+        <div>
+          <div class="label">Strengths</div>
+          <div class="pros">
+            Already deployed<br/>
+            Razor-clear at 16–32px<br/>
+            Distinct, un-contested<br/>
+            Reads as infrastructure
+          </div>
+        </div>
+        <div>
+          <div class="label">Tradeoffs</div>
+          <div class="cons">
+            Mostly geometric — no direct<br/>
+            reference to "overdrive"<br/>
+            Arrow shapes are everywhere<br/>
+            in the space
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- 03 — TACHOMETER DIAL                                          -->
+  <!-- ============================================================ -->
+  <div class="concept">
+    <div class="concept-head">
+      <div>
+        <span class="num">03</span>
+        <h2>Tachometer dial</h2>
+      </div>
+      <span class="note">O as gauge · needle past redline</span>
+    </div>
+    <div class="concept-body">
+      <!-- Favicon -->
+      <div>
+        <div class="fav-frame">
+          <svg width="32" height="32" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" fill="none">
+            <circle cx="20" cy="20" r="13" stroke="#3a3a44" stroke-width="2"/>
+            <line x1="20" y1="4"  x2="20" y2="8"  stroke="#ff5c28" stroke-width="2"/>
+            <line x1="20" y1="20" x2="29" y2="9"  stroke="#ff5c28" stroke-width="2.5" stroke-linecap="square"/>
+            <rect x="18" y="18" width="4" height="4" fill="#ff5c28"/>
+          </svg>
+        </div>
+        <div class="size-label">favicon · 32</div>
+      </div>
+
+      <!-- Mark at 48 -->
+      <div>
+        <svg width="48" height="48" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" fill="none">
+          <!-- tick marks around the dial (subtle) -->
+          <g stroke="#2a2a31" stroke-width="1">
+            <line x1="20" y1="5"  x2="20" y2="7"/>
+            <line x1="32" y1="10" x2="30.5" y2="11.5"/>
+            <line x1="35" y1="20" x2="33" y2="20"/>
+            <line x1="32" y1="30" x2="30.5" y2="28.5"/>
+            <line x1="20" y1="35" x2="20" y2="33"/>
+            <line x1="8"  y1="30" x2="9.5"  y2="28.5"/>
+            <line x1="5"  y1="20" x2="7"    y2="20"/>
+            <line x1="8"  y1="10" x2="9.5"  y2="11.5"/>
+          </g>
+          <!-- dial circle -->
+          <circle cx="20" cy="20" r="14" stroke="#3a3a44" stroke-width="1.5"/>
+          <!-- redline tick at top -->
+          <line x1="20" y1="3" x2="20" y2="7" stroke="#ff5c28" stroke-width="2"/>
+          <!-- needle (past redline, at ~1 o'clock) -->
+          <line x1="20" y1="20" x2="30" y2="8" stroke="#ff5c28" stroke-width="3" stroke-linecap="square"/>
+          <!-- hub -->
+          <rect x="17.5" y="17.5" width="5" height="5" fill="#ff5c28"/>
+        </svg>
+        <div class="size-label">mark · 48</div>
+      </div>
+
+      <!-- Full logo -->
+      <div>
+        <svg width="260" height="48" viewBox="0 0 200 40" xmlns="http://www.w3.org/2000/svg" fill="none">
+          <circle cx="20" cy="20" r="14" stroke="#3a3a44" stroke-width="1.5"/>
+          <line x1="20" y1="3" x2="20" y2="7" stroke="#ff5c28" stroke-width="2"/>
+          <line x1="20" y1="20" x2="30" y2="8" stroke="#ff5c28" stroke-width="3" stroke-linecap="square"/>
+          <rect x="17.5" y="17.5" width="5" height="5" fill="#ff5c28"/>
+          <text x="46" y="28"
+                font-family="'IBM Plex Sans', -apple-system, system-ui, sans-serif"
+                font-size="22" font-weight="700" letter-spacing="-0.6" fill="#f5f5f7">Overdrive</text>
+        </svg>
+        <div class="size-label">logo · header</div>
+      </div>
+    </div>
+    <div class="rationale">
+      The "O" of Overdrive as a <strong>tachometer past the redline</strong> — needle at 1 o'clock,
+      tick marker at the top showing the limit being crossed. Most literal interpretation of the name,
+      but stays abstract enough to avoid cheap racing-car clichés.
+      <div class="pros-cons">
+        <div>
+          <div class="label">Strengths</div>
+          <div class="pros">
+            Direct name-metaphor<br/>
+            Recognisable from glance<br/>
+            The "O" narrative<br/>
+            Sticky / memorable
+          </div>
+        </div>
+        <div>
+          <div class="label">Tradeoffs</div>
+          <div class="cons">
+            Risk of "consumer brand" feel<br/>
+            Dense at favicon size<br/>
+            Hardest to render cleanly<br/>
+            at very small scale
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- 04 — PURE WORDMARK                                            -->
+  <!-- ============================================================ -->
+  <div class="concept">
+    <div class="concept-head">
+      <div>
+        <span class="num">04</span>
+        <h2>Pure wordmark</h2>
+      </div>
+      <span class="note">terminal prompt · no icon</span>
+    </div>
+    <div class="concept-body">
+      <!-- Favicon: just an "O" with cursor -->
+      <div>
+        <div class="fav-frame">
+          <svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+            <rect width="32" height="32" fill="#0a0a0b"/>
+            <text x="6" y="24"
+                  font-family="'IBM Plex Mono', ui-monospace, Menlo, monospace"
+                  font-size="22" font-weight="700" fill="#f5f5f7">O</text>
+            <rect x="22" y="8" width="3" height="18" fill="#ff5c28"/>
+          </svg>
+        </div>
+        <div class="size-label">favicon · 32</div>
+      </div>
+
+      <!-- Small scale wordmark -->
+      <div>
+        <div class="wordmark-preview" style="font-size: 16px;">
+          OVERDRIVE<span class="cur" style="background: #ff5c28; width: 8px; height: 16px; display: inline-block; margin-left: 3px; vertical-align: -2px;"></span>
+        </div>
+        <div class="size-label">wordmark · 16</div>
+      </div>
+
+      <!-- Full scale wordmark -->
+      <div>
+        <div class="wordmark-preview" style="font-size: 28px;">
+          OVERDRIVE<span class="cur" style="background: #ff5c28; width: 14px; height: 26px; display: inline-block; margin-left: 4px; vertical-align: -4px;"></span>
+        </div>
+        <div class="size-label">wordmark · header</div>
+      </div>
+    </div>
+    <div class="rationale">
+      No mark. IBM Plex Mono, all caps, tight tracking, with a <strong>blinking orange cursor</strong>
+      as the only accent. The terminal prompt as brand — signals "developer tool, not a SaaS product"
+      without needing a symbol. Stripe / Linear pattern at its cleanest.
+      <div class="pros-cons">
+        <div>
+          <div class="label">Strengths</div>
+          <div class="pros">
+            Impossible to render badly<br/>
+            Pure developer-register<br/>
+            Scales to billboard forever<br/>
+            Lowest design debt
+          </div>
+        </div>
+        <div>
+          <div class="label">Tradeoffs</div>
+          <div class="cons">
+            No favicon-scale identity<br/>
+            Harder to merch / sticker<br/>
+            Less distinctive in a<br/>
+            visual-branding-dense room
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- RECOMMENDATION                                                -->
+  <!-- ============================================================ -->
+  <div style="margin-top: 56px; padding: 32px; border: 1px solid var(--accent); background: rgba(255,92,40,0.04);">
+    <div class="eyebrow">Recommendation</div>
+    <h2 style="margin: 0 0 16px; font-size: 26px; letter-spacing: -0.02em; font-weight: 500;">
+      01 (waveform) or 02 (current wedge).
+    </h2>
+    <p style="color: var(--text-muted); margin: 0 0 12px; font-size: 15px; line-height: 1.6;">
+      01 is the strongest <em>fresh</em> design — most on-brief for the name, distinct in the space,
+      scales cleanly, no collision. 02 is what you already have and has the virtue of being real
+      and working. 03 is the most literal but carries the most visual risk of reading as
+      consumer-brand. 04 is the safest but gives up the favicon.
+    </p>
+    <p style="color: var(--text-dim); margin: 0; font-size: 13px; font-family: var(--font-mono);">
+      If you want to lock in a direction: pick 01, keep 02 as backup. If you're not ready to move:
+      02 is already solid.
+    </p>
+  </div>
+
+</div>
+</body>
+</html>

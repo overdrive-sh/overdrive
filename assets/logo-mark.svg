@@ -1,0 +1,6 @@
+<svg width="40" height="40" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Overdrive mark">
+  <text x="6" y="30"
+        font-family="'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, monospace"
+        font-size="28" font-weight="700" fill="#f5f5f7">O</text>
+  <rect x="28" y="10" width="5" height="20" fill="#ff5c28"/>
+</svg>
