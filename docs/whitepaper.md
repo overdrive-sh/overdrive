@@ -711,6 +711,26 @@ Policy *source* lives in the IntentStore — auditable, versioned, strongly cons
 
 Policy evaluation (Rego/Regorus) is never in the hot path. Per-connection enforcement is an O(1) BPF map lookup measured in nanoseconds.
 
+### Comparison to Fly.io's Dataplane Model
+
+Fly.io operates the largest production deployment of the Intent / Observation pattern Helios adopts in §4, and its dataplane is the most frequently cited reference for "Rust-native orchestrator with a userspace proxy." The comparison clarifies what Helios shares, what it diverges on, and why.
+
+**Shared.** Both platforms use **Corrosion** (CR-SQLite + SWIM via Foca + QUIC, Apache-2.0) as the global eventually-consistent service catalog. Helios's ObservationStore is the same open-source component Fly runs in production — not a reimplementation. The regional-Raft + global-CRDT topology in §3.5 matches the operational shape Fly arrived at after years of trying to stretch Consul-style consensus across the WAN.
+
+**Divergent — by design.** Fly routes east-west traffic over a **WireGuard mesh** backhaul with a userspace proxy (`fly-proxy`) handling TLS termination, load balancing, service catalog lookups, and request replay. Helios splits these concerns across two dataplanes:
+
+| Concern | Fly.io | Helios |
+|---|---|---|
+| Packet-level load balancing | userspace `fly-proxy` | XDP SERVICE_MAP (in-kernel, nanosecond path) |
+| Inter-node encryption | WireGuard peer-keyed tunnels | sockops + kTLS with per-workload SPIFFE SVIDs |
+| Service identity | region + app + machine ID (`*.internal`, `*.flycast`) | cryptographic SPIFFE ID in every TLS session |
+| L7 routing and TLS termination | `fly-proxy` userspace | Gateway subsystem (§11) — userspace |
+| Request replay (`fly-replay` / `helios-replay`) | `fly-proxy` | Gateway subsystem + XDP loop counter (§11) |
+
+The consequence is an end-to-end identity path in Helios: every east-west packet carries a per-workload SVID enforced at the socket layer, where Fly's WireGuard mesh enforces peer-level (machine-to-machine) trust and delegates per-workload authorization to the proxy layer. The trade-off is principled — Helios accepts the complexity of two dataplanes (XDP for the fast path, Gateway for L7) in exchange for nanosecond-scale LB and identity-bearing encryption without a per-hop userspace proxy.
+
+This divergence is the answer to why Helios, given that it adopts Corrosion directly, is not simply a Fly rebuild: the service-catalog layer is shared; the dataplane is reimagined on primitives (stable eBPF, kTLS, SPIFFE) that did not exist when `fly-proxy` was designed.
+
 ---
 
 ## 8. Identity and mTLS
@@ -1092,12 +1112,12 @@ Production (dedicated ingress tier):
 
 The built-in CA issues certs in the Helios trust domain — used for SVIDs, node intermediates, and the gateway's east-west mTLS. Generic internet clients (browsers, third-party SDKs, mobile apps) do not trust the Helios root, so public north-south ingress needs **publicly-trusted certs**.
 
-Helios embeds [`lers`](https://docs.rs/lers) — a Rust ACMEv2 client (RFC 8555) — directly in the gateway. Certs from Let's Encrypt or any ACMEv2-compliant CA feed into the same `IdentityMgr` that handles SVID rotation. Two trust lanes, one manager:
+Helios embeds [`instant-acme`](https://docs.rs/instant-acme) — a pure-Rust, rustls-native ACMEv2 client (RFC 8555) — directly in the gateway. Certs from Let's Encrypt or any ACMEv2-compliant CA feed into the same `IdentityMgr` that handles SVID rotation. Two trust lanes, one manager:
 
 | Lane | Issuer | Clients | Use |
 |---|---|---|---|
 | Internal (east-west) | Built-in CA (§4) | Helios workloads, node agents, gateway east-west | Service mesh mTLS, SVIDs |
-| Public (north-south) | ACMEv2 via `lers` | Browsers, third-party clients | Gateway ingress on `https_port` |
+| Public (north-south) | ACMEv2 via `instant-acme` | Browsers, third-party clients | Gateway ingress on `https_port` |
 
 Both lanes share `IdentityMgr` for storage and rotation, rustls as the TLS terminator, and the same reconciler-driven watchdog for certs approaching expiry.
 
@@ -1127,7 +1147,7 @@ tls     = "acme"            # "acme" | "internal" | "operator"
 
 Storage boundary: operator-uploaded certs and ACME account keys live in the **IntentStore** (authoritative, linearizable, Raft-replicated in HA). Issued cert leaves and private keys live in the `IdentityMgr` cache alongside SVIDs — rotation is driven by the same reconciler that rotates workload identity.
 
-`lers` pulls in OpenSSL via the `openssl` crate for ACME cryptographic operations. This is background work during cert issuance and rotation — rustls remains the sole TLS terminator in the hot path. Design principle 7 (*no FFI to C++ in the critical path*) is preserved.
+`instant-acme` is maintained by the author set behind `rustls`, `rcgen`, `quinn`, and `hickory-dns` — the exact libraries Helios already depends on. It defaults to `aws-lc-rs` + `hyper-rustls` with `ring` as an alternative, offers an optional `rcgen` feature for CSR/keypair generation, and ships with explicit `RetryPolicy`, pluggable `HttpClient`, ACME Profiles, and ACME Renewal Information (ARI) support. The architectural consequence matters: **`IdentityMgr` uses one `rcgen`-based cert-generation path for both internal SVIDs and public-trust ACME certs** — no second TLS stack, no OpenSSL dependency pulled in transitively. Design principle 7 (*Rust throughout*) is preserved at full strength, not merely under the critical-path caveat.
 
 ### Route Configuration
 
@@ -1160,6 +1180,49 @@ Backend service
 ```
 
 The public TLS boundary terminates at the gateway. Inside the gateway, traffic is re-wrapped in mTLS using the built-in CA — every east-west hop carries cryptographic workload identity, exactly as if the request had originated inside the cluster. Two trust lanes meet at the gateway; from that point onward, everything is Helios-native identity.
+
+### Declarative Request Replay
+
+Applications frequently need to redirect an individual request to a different region, instance, or job — a write against a read-only regional replica belongs at the primary; a sticky session belongs on the canary allocation; a tenant-sharded request belongs on the shard that owns the tenant. Static route tables cannot express this; the choice depends on request content that only the application can inspect.
+
+Helios exposes an application-driven replay primitive via a response header:
+
+```
+helios-replay: region=eu-west-1
+helios-replay: instance=<alloc_id>
+helios-replay: job=payments-primary
+```
+
+When a backend returns this header, the gateway reads it **before** streaming the body to the client, consults `service_backends` in the local ObservationStore for a backend matching the target, and re-issues the originally-buffered request via the XDP fast path to the new destination. The client sees a single response from the eventual backend. The original request body is held in a bounded buffer (≤1 MB) during the replay; requests whose body exceeds the buffer cannot be replayed and the header is honored on best effort.
+
+Loop prevention is enforced in-kernel. A `helios-replay-count` header is incremented on every replay hop and a BPF map on the XDP fast path drops any replay whose counter exceeds a configurable ceiling (default 3). Loops that would otherwise consume multiple round-trips before a userspace check are extinguished at line rate.
+
+Typical patterns:
+
+- **Primary-region writes.** A read replica receiving a write request responds with `helios-replay: region=<primary>`; the gateway replays to the primary region's job. This composes with §3.5 Multi-Region Federation — each region reads its local ObservationStore for the primary's backend set.
+- **Canary pinning.** A sticky session is pinned across canary promotion with `helios-replay: instance=<canary-alloc>` until promotion completes. Rollback remains a single SERVICE_MAP atomic update (§15) — once the canary allocation stops emitting the header, traffic follows the weighted backend set normally.
+- **Tenant sharding.** A request whose tenant hash maps to a shard the local instance does not own is redirected with `helios-replay: instance=<shard-owner-alloc>`. The shard map itself is application state; the platform only carries the redirect primitive.
+
+### Region Preference Hints
+
+For cases where the routing preference is known at the *client* rather than the backend, Helios recognises two request headers:
+
+- `helios-prefer-region: <region>` — bias backend selection toward the named region; fall back to other regions if unavailable.
+- `helios-force-region: <region>` — require the named region; return 502 if no healthy backend exists there.
+
+These hints are evaluated in the XDP fast path rather than at the userspace gateway. `service_backends` rows are keyed on `(service_id, region)`; the XDP program selects the matching subset before weighted load balancing. Happy-path cost is an additional BPF map lookup — no userspace hop, no TLS handshake overhead.
+
+### Private Service VIPs and Auto-Wake
+
+East-west traffic inside a Helios cluster addresses services by SPIFFE ID (`spiffe://helios.local/job/payments`) resolved via the local ObservationStore. For workloads that cannot carry SPIFFE identity natively (third-party SDKs, legacy clients, WASM runtimes without Helios-aware networking), Helios also exposes a stable per-service IPv6 VIP:
+
+```
+<job>.svc.helios.local  →  fdc2:<cluster>:<region>:<job-hash>::<N>
+```
+
+The VIP is allocated from a Helios-reserved ULA prefix (`fdc2::/16`). XDP SERVICE_MAP routes VIP traffic to the current backend set from `service_backends`, and the standard sockops layer wraps the connection in SPIFFE mTLS — the caller sees a plain IPv6 socket, the dataplane still enforces identity-bound encryption.
+
+When no backend is in the `running` state — all allocations are `suspended` or `stopped` — XDP returns `XDP_PASS` to the node's local gateway subsystem. The gateway issues a resume via the proxy-triggered resume path (§14) and replays the buffered request once a backend becomes healthy. The VIP is therefore the natural target for scale-to-zero services: clients address a stable name; the platform brings the backend up transparently on first request.
 
 ---
 
@@ -1406,6 +1469,76 @@ Helios observes actual resource consumption at the kernel level via eBPF kprobes
 ### Expected Outcome
 
 Teams consistently running at 70% utilization instead of 30% — achievable with continuous right-sizing — do not merely save 57% on compute. They reduce node count, which reduces control plane overhead, network overhead, and operational burden. The efficiency gains compound.
+
+### Scale-to-Zero for VM Workloads
+
+Live hotplug right-sizing keeps *running* workloads matched to their actual demand. For workloads that sit idle between requests — interactive dev environments, cron-like batch runners, per-tenant sandboxes, review-app previews — the correct resource envelope between requests is zero.
+
+Helios extends the `alloc_status` lifecycle with a `suspended` state and exposes scale-to-zero as a driver action across all VM-class workloads:
+
+```
+pending → running ⇄ suspended → terminated
+```
+
+When the idle-eviction reconciler marks an allocation for suspension:
+
+1. Cloud Hypervisor's native snapshot API checkpoints VM memory to the object-backed rootfs chunk store (§6 *Persistent MicroVMs*). Disk state is already content-addressed and requires no additional write.
+2. The node agent updates `alloc_status.state` to `suspended` and retains the allocation handle.
+3. VM process memory is released; billing stops counting CPU/RAM against the allocation.
+
+Resume is the inverse: Cloud Hypervisor `restore()` with `userfaultfd` lazy memory paging — pages materialise on access, not upfront. A VMGenID counter update on restore reseeds the guest kernel RNG to prevent entropy-reuse hazards across snapshot forks (§6 *Persistent MicroVMs*).
+
+This composes with the WASM scale-to-zero pool (§16) — the mechanism differs per driver (Cloud Hypervisor snapshot/restore vs Wasmtime instantiation) but the control-plane contract is identical: `suspended` is a first-class allocation state, and the resume trigger is the gateway or the reconciler, not the workload itself. Process-driver workloads opt out — processes cannot be checkpointed safely without userspace cooperation; they remain running or terminate.
+
+### Proxy-Triggered Resume
+
+Scale-to-zero is only useful if something wakes the workload on demand. Helios wires this through the gateway and XDP fast path:
+
+```
+Request arrives at Gateway (or Private Service VIP, §11)
+    │
+XDP SERVICE_MAP lookup
+    │
+    ├── backend is `running`     → forward normally (nanosecond path)
+    │
+    └── all backends `suspended` → XDP_PASS to local gateway subsystem
+            │
+            ▼
+        Gateway buffers request (≤1 MB)
+            │
+            ├── backend on same node  → in-process resume call
+            └── backend elsewhere     → write alloc_status.requested_state = 'running'
+                                         into ObservationStore; owner node agent
+                                         observes the change via SQL subscription
+            │
+            ▼
+        Node agent issues vm.resume via Cloud Hypervisor API
+            │ (tens of ms for CH restore; ~1 ms for WASM instantiation)
+            ▼
+        alloc_status.state → 'running'; service_backends row re-weights
+            │
+            ▼
+        Gateway replays buffered request via XDP → now-running backend
+```
+
+The resume path is identical in shape to the declarative replay primitive (§11) — request is held, destination is resolved, request is re-issued via the same XDP fast path. The only new state is the `suspended → running` transition, which is a single ObservationStore row update that the owning node's agent subscribes to directly.
+
+Requests whose body exceeds the 1 MB buffer cannot be held across a cold resume. For these, the gateway responds immediately with 503 and a `Retry-After` hint derived from the expected restore latency — the client retry arrives once the backend is up.
+
+### Deterministic Scale Rules
+
+The predictive scaler above identifies patterns and proposes cron-based resource schedules — effective for traffic whose shape is learnable over days or weeks. For workloads driven by *current* signal — queue depth, inflight requests, CPU utilisation above a threshold — Helios also supports rule-based scale-out expressed in Rego:
+
+```rego
+# Scale worker pool by queue depth
+scale_target {
+    input.service == "ingestion-worker"
+    desired := min(50, input.queue_depth / 2)
+    desired > input.current_replicas
+}
+```
+
+Rules evaluate against ObservationStore metrics on a fixed cadence (default 15 s). Output writes the desired replica count into the IntentStore; the job-lifecycle reconciler picks it up through the normal convergence path. Rule-based and LLM-based scalers are complementary — rules cover deterministic, short-horizon signals; the LLM covers pattern-based, long-horizon predictions. A job can use either or both.
 
 ---
 
@@ -2012,7 +2145,7 @@ For exhaustive state-space exploration beyond what turmoil covers, Helios is des
 - Built-in sidecars: credential-proxy, content-inspector, rate-limiter, request-logger
 - Sidecar SDK (Rust + TypeScript)
 - Gateway (hyper + rustls)
-- Embedded ACMEv2 client via `lers` — public-trust certs for the gateway (HTTP-01, DNS-01, TLS-ALPN-01), rotation unified with SVIDs in `IdentityMgr`
+- Embedded ACMEv2 client via `instant-acme` (rustls-native, `rcgen`-integrated) — public-trust certs for the gateway (HTTP-01, DNS-01, TLS-ALPN-01), rotation unified with SVIDs in `IdentityMgr` on a single cert-generation path
 - DuckLake telemetry pipeline (catalog: libSQL, storage: Garage Parquet)
 
 ### Phase 5 — Intelligence (Months 12–18)
