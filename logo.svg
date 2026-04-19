@@ -1,0 +1,15 @@
+<svg width="160" height="40" viewBox="0 0 160 40" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Overdrive">
+  <!-- Mark: three forward-leaning slabs (lead → stack) -->
+  <g>
+    <path d="M0 5 L21 5 L25 13 L4 13 Z" fill="#ff5c28"/>
+    <path d="M4 16 L25 16 L29 24 L8 24 Z" fill="#ff8b5f"/>
+    <path d="M8 27 L29 27 L33 35 L12 35 Z" fill="#3a3a44"/>
+  </g>
+  <!-- Wordmark -->
+  <text x="46" y="28"
+        font-family="'IBM Plex Sans', -apple-system, system-ui, sans-serif"
+        font-size="22"
+        font-weight="700"
+        letter-spacing="-0.6"
+        fill="#f5f5f7">Overdrive</text>
+</svg>

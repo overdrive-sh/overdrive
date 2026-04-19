@@ -7,6 +7,7 @@
 <meta name="description" content="Orchestration infrastructure for a new generation of workloads. One Rust binary. Kernel-native dataplane. Built on the primitives Kubernetes never had." />
 <meta property="og:title" content="Overdrive — Redefining how compute runs" />
 <meta property="og:description" content="Orchestration infrastructure for a new generation of workloads. AGPL-3.0." />
+<link rel="icon" type="image/svg+xml" href="favicon.svg" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
@@ -119,14 +120,16 @@
     align-items: center;
     gap: 10px;
     font-weight: 700;
-    letter-spacing: -0.02em;
+    letter-spacing: -0.025em;
     font-size: 17px;
   }
   .brand-mark {
-    width: 22px; height: 22px;
-    background: var(--accent);
-    clip-path: polygon(0 0, 100% 0, 65% 100%, 0% 100%);
+    width: 26px; height: 26px;
+    flex-shrink: 0;
+    transition: transform 0.2s ease;
   }
+  .brand-mark path { transition: fill 0.2s ease; }
+  .brand:hover .brand-mark { transform: translateX(1px); }
   .nav-links {
     display: flex;
     gap: 28px;
@@ -941,7 +944,7 @@
 <nav class="top" id="topnav">
   <div class="container row">
     <a class="brand" href="#">
-      <span class="brand-mark"></span>
+      <svg class="brand-mark" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M0 3 L21 3 L25 11 L4 11 Z" fill="#ff5c28"/><path d="M4 13 L25 13 L29 21 L8 21 Z" fill="#ff8b5f"/><path d="M8 23 L29 23 L33 31 L12 31 Z" fill="#3a3a44"/></svg>
       Overdrive
     </a>
     <div class="nav-links">
@@ -1573,7 +1576,7 @@
     <div class="footer-grid">
       <div class="footer-brand">
         <a class="brand" href="#">
-          <span class="brand-mark"></span>
+          <svg class="brand-mark" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M0 3 L21 3 L25 11 L4 11 Z" fill="#ff5c28"/><path d="M4 13 L25 13 L29 21 L8 21 Z" fill="#ff8b5f"/><path d="M8 23 L29 23 L33 31 L12 31 Z" fill="#3a3a44"/></svg>
           Overdrive
         </a>
         <p>A workload orchestration platform compiled to the kernel of 2026. Open source under AGPL-3.0.</p>
