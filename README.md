@@ -270,7 +270,7 @@ Control plane footprint by mode:
 
 Intent defines what the cluster *should* do. Observation defines what it *is doing right now*. Observation is what every node agent must read continuously to hydrate BPF maps; what the scheduler consults to bin-pack against real utilization; what the gateway resolves `spiffe://helios.local/job/payments` against to find a live backend set.
 
-Pushing this from a single Raft leader via gRPC streams does not scale. Above a few hundred nodes it is a fan-out bottleneck; across regions, Raft's quorum-latency floor makes it impossible. Fly.io learned this the hard way with Consul; the answer they built — Corrosion — is open source, pure Rust, and production-proven across a continent-spanning fleet. Helios adopts it as the observation substrate:
+Pushing this from a single Raft leader via gRPC streams does not scale. Above a few hundred nodes it is a fan-out bottleneck; across regions, Raft's quorum-latency floor makes it impossible. Fly.io learned this the hard way with Consul; the answer they built — Corrosion — is open source, pure Rust, and production-proven across a continent-spanning fleet. Helios adopts it as the observation store:
 
 ```rust
 trait ObservationStore: Send + Sync {
@@ -594,7 +594,7 @@ Firecracker cannot do this for CPU — issue #2609 (*Hot-plug vCPUs*) is parked 
 
 Not every workload is ephemeral. AI coding agents, CI runners, interactive development environments, Jupyter notebooks, and long-running data processing workers share a shape that neither stateless microVMs nor WASM functions serve well: they need a persistent filesystem, a stable addressable endpoint, and the ability to sleep and resume without losing state.
 
-Helios handles this by extending the `microvm` driver with a `persistent` flag rather than introducing a new workload type. The Cloud Hypervisor substrate, the SPIFFE identity, the eBPF dataplane, the gateway, the credential proxy, and the WASM sidecars are already first-class — persistence is the missing ingredient.
+Helios handles this by extending the `microvm` driver with a `persistent` flag rather than introducing a new workload type. The Cloud Hypervisor base, the SPIFFE identity, the eBPF dataplane, the gateway, the credential proxy, and the WASM sidecars are already first-class — persistence is the missing ingredient.
 
 ```toml
 [job]
@@ -1870,7 +1870,7 @@ First-party reconcilers are Rust trait objects — maximum performance, full typ
 
 Input and output types are fully serializable from day one, making the WASM migration path trivial.
 
-This replaces the Kubernetes operator model, where extensions ship as Go binaries running with cluster-admin privileges — the single largest source of cluster-destabilizing incidents in production Kubernetes. A misbehaving WASM reconciler cannot escape its sandbox, cannot mutate state without going through Raft, and can be evicted or hot-reloaded without restarting a pod. WASM as the control-plane extensibility substrate is now industry consensus (Helm 4, Cosmonic Control, wasmCloud) — Helios is early, not fringe.
+This replaces the Kubernetes operator model, where extensions ship as Go binaries running with cluster-admin privileges — the single largest source of cluster-destabilizing incidents in production Kubernetes. A misbehaving WASM reconciler cannot escape its sandbox, cannot mutate state without going through Raft, and can be evicted or hot-reloaded without restarting a pod. WASM as the control-plane extension model is now industry consensus (Helm 4, Cosmonic Control, wasmCloud) — Helios is early, not fringe.
 
 ### Built-in Reconcilers
 
@@ -2201,7 +2201,7 @@ Both `IntentStore` (with `export_snapshot` / `bootstrap_from`) and `ObservationS
 
 ## 22. Real-Kernel Integration Testing
 
-§21 establishes deterministic simulation as the substrate for proving control-plane correctness against injected concurrency, timing, and partition faults. DST cannot exercise eBPF — by design, `SimDataplane` is an in-memory HashMap that stands in for kernel programs. This boundary is correct: trying to simulate the kernel verifier, the XDP driver hook, kTLS offload, or BPF LSM semantics inside a single-threaded harness would either be wrong or be a kernel reimplementation. The complement to DST is real eBPF programs loaded into real kernels, exercised against real syscalls and real packets.
+§21 establishes deterministic simulation as the foundation for proving control-plane correctness against injected concurrency, timing, and partition faults. DST cannot exercise eBPF — by design, `SimDataplane` is an in-memory HashMap that stands in for kernel programs. This boundary is correct: trying to simulate the kernel verifier, the XDP driver hook, kTLS offload, or BPF LSM semantics inside a single-threaded harness would either be wrong or be a kernel reimplementation. The complement to DST is real eBPF programs loaded into real kernels, exercised against real syscalls and real packets.
 
 The published consensus across the eBPF-heavy ecosystem (Cilium, Tetragon, kernel-patches/bpf, Aya, Falco) is that the two are not substitutes. DST catches logic bugs in control flow under timing and ordering perturbation cheaply; real-kernel testing catches bugs at the boundary between Helios and the kernel — verifier rejections, kernel-version regressions, hook-attachment quirks, kTLS offload edge cases, LSM hook semantics. The bug classes partition. FoundationDB and WarpStream both position DST as complementary to real-system testing rather than a replacement; Helios takes the same posture and runs both on every PR.
 
@@ -2231,7 +2231,7 @@ Tier 4  Verifier + perf regression  per-kernel load + xdp-bench
 
 ### Tier 2 — BPF Unit Tests
 
-The kernel exposes `BPF_PROG_TEST_RUN` for running a loaded program against supplied input and recording the output. This is the substrate every credible eBPF unit test framework builds on. Aya wraps it as `Program::test_run()` for the program types where the kernel supports it (XDP, TC).
+The kernel exposes `BPF_PROG_TEST_RUN` for running a loaded program against supplied input and recording the output. This is the primitive every credible eBPF unit test framework builds on. Aya wraps it as `Program::test_run()` for the program types where the kernel supports it (XDP, TC).
 
 Each Helios eBPF program ships with three companions in `crates/helios-bpf/tests/`:
 
