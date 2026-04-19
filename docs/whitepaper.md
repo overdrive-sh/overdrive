@@ -609,7 +609,7 @@ expose                   = true   # auto-registers a gateway route
 
 When `persistent = true`:
 
-1. **Persistent rootfs bound to workload identity.** The rootfs is object-backed (Garage) with an NVMe hot-tier cache. The storage model follows the JuiceFS approach — content-addressed immutable chunks in object storage, metadata in fast local storage kept durable via streaming replication. The authoritative state lives in Garage; nodes cache chunks. The workload can migrate between nodes without moving a volume, and restores hydrate metadata only, not the full filesystem.
+1. **Persistent rootfs bound to workload identity.** The rootfs is served by `helios-fs`, a Helios-native single-writer chunk store — content-addressed immutable chunks in Garage, inode and dentry metadata in per-rootfs libSQL, with an NVMe hot-tier cache. Because each rootfs is owned by exactly one VM at a time, `helios-fs` drops the multi-client coherence and distributed-locking machinery a general distributed filesystem requires. The authoritative state lives in Garage; nodes cache chunks. The workload can migrate between nodes without moving a volume, and restores hydrate metadata only, not the full filesystem. Full design in §17.
 2. **Checkpoint/restore via Cloud Hypervisor.** The driver exposes `snapshot()` and `restore()` as control-plane actions that delegate to Cloud Hypervisor's existing snapshot/restore API with `userfaultfd` lazy memory paging — restore is pay-as-you-access, not load-everything-upfront. Disk snapshots are metadata-only against the chunk store (chunks are already immutable). Memory uses Cloud Hypervisor's native mechanism.
 3. **Idle eviction with checkpoint (scale-to-zero).** After `snapshot_on_idle_seconds` of no traffic, the workload reconciler checkpoints the VM, tears down the running process, and records the handle in the ObservationStore. An inbound request via the gateway triggers a restore. The restore path is sub-second: metadata-only on disk plus `userfaultfd`-lazy on memory.
 4. **VMGenID wired into the guest.** Live-migrated or snapshot-restored VMs face entropy-reuse hazards — the kernel's RNG can produce identical output on both sides of a snapshot. Cloud Hypervisor exposes a VMGenID device; the node agent updates the generation counter on every restore, and the guest kernel reseeds.
@@ -1751,6 +1751,23 @@ WHERE job_name = 'payments';
 
 DuckLake is MIT-licensed and ships as a DuckDB extension — no new runtime dependency is introduced since DuckDB is already embedded in the control plane.
 
+### Persistent Rootfs — `helios-fs`
+
+Persistent microVMs (§6) need a rootfs that survives workload migration, supports fast checkpoint/restore, and hydrates on access rather than upfront. Local filesystems cannot do this; neither Garage nor libSQL is sufficient on its own. `helios-fs` is the thin Rust-native layer that composes them into a per-VM filesystem.
+
+- **Chunks** — content-addressed immutable blocks in Garage. FastCDC segmentation; dedup across rootfs instances where content overlaps (common for agent sandboxes sharing a base image).
+- **Metadata** — inode, dentry, and file→chunk mapping in a per-rootfs libSQL database. Write-ahead log streamed continuously to Garage; RPO measured in seconds, not full-volume copy time.
+- **Cache** — NVMe hot tier per node, 2Q eviction, write-back for locally-originated writes. Read miss hydrates from Garage; write commits to local NVMe and to the WAL stream.
+- **Frontend** — `vhost-user-fs` (Rust port of `virtiofsd`) speaking virtio-fs directly to Cloud Hypervisor. The guest sees a normal virtiofs mount; the daemon is invisible.
+
+The design is deliberately narrower than a general distributed filesystem. `helios-fs` assumes **single-writer per rootfs** — each rootfs is owned by exactly one running VM at a time, enforced by the allocation lifecycle. This deletes the hardest parts of distributed FS design: no distributed locking, no multi-client cache coherence, no cross-mount invalidation. Metadata mutations are single-process libSQL transactions. Migration is a quiesce-and-handoff between two nodes, coordinated by the workflow reconciler (§18).
+
+Snapshot and restore operate at the metadata layer only — chunks are already immutable, so a snapshot is an atomic libSQL transaction that forks the inode tree. This is what lets §14 *Scale-to-Zero for VM Workloads* resume a persistent microVM in tens of milliseconds: restore hydrates metadata (kilobytes), not the rootfs (gigabytes), and `userfaultfd` pages in memory on access while the guest is already running.
+
+Cross-workload shared volumes — the virtiofs use case in §6 where a process workload and a VM share `/shared-volume` — do **not** go through `helios-fs`. Those are short-lived host-side mounts exposed via virtiofsd-passthrough, managed directly by the storage reconciler against local or Garage-backed volumes. `helios-fs` is specifically the rootfs store for persistent microVMs.
+
+Rejected alternatives: **embedding JuiceFS** (Apache-2.0, production-proven at Fly.io scale) was considered and declined. JuiceFS is Go, so embedding it means either running a Go process per node or pulling a Go runtime into the binary — both contradict design principles 1 (*own your primitives*) and 7 (*Rust throughout, no FFI to Go or C++ in the critical path*). Its multi-client coherence and distributed-locking machinery are also unnecessary weight for the single-writer case Helios actually has.
+
 ### Incident Memory — libSQL (embedded)
 
 Historical incidents, resource profiles, LLM reasoning chains. Not on the critical path — eventual consistency acceptable. SQL interface is natural for LLM agent tool calls. Optional sync to Turso for cross-node incident sharing.
@@ -2198,7 +2215,7 @@ For exhaustive state-space exploration beyond what turmoil covers, Helios is des
 - Incident memory (libSQL)
 - Predictive scaling
 - Persistent microVMs (step 1): Cloud Hypervisor snapshot/restore exposed in the `microvm` driver with `userfaultfd` lazy memory paging; VMGenID wired into the guest on restore
-- Persistent microVMs (step 2): object-backed rootfs (chunked over Garage) with NVMe hot-tier cache
+- Persistent microVMs (step 2): `helios-fs` — Rust-native single-writer chunk store (content-addressed chunks in Garage, per-rootfs libSQL metadata with streaming WAL, NVMe 2Q cache, `vhost-user-fs` frontend). Scope: rootfs only, not a general distributed filesystem
 - Persistent microVMs (step 3): gateway auto-route (`expose = true`) + credential-proxy sidecar defaults
 - Persistent microVMs (step 4): idle-eviction reconciler with checkpoint (`snapshot_on_idle_seconds`) — scale-to-zero for long-lived stateful workloads
 
