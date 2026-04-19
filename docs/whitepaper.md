@@ -2621,5 +2621,5 @@ The core insight is that eBPF is not a feature to add to an orchestrator. It is 
 
 ---
 
-*Overdrive is open source under the AGPL-3.0 license.*
+*Overdrive is source-available under the Functional Source License (FSL-1.1-ALv2). Each release converts to Apache 2.0 two years after publication under the Grant of Future License.*
 *Contributions, feedback, and discussion welcome.*

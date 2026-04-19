@@ -6,7 +6,7 @@
 
 ## Overview
 
-Overdrive is open source (AGPL-3.0). The commercial opportunity is not the software itself — it is the operational complexity the software absorbs. Every team running Kubernetes today operates etcd, CNI plugins, cert-manager, a service mesh, an ingress controller, Prometheus, alertmanager, and a dozen other components that each need to be deployed, upgraded, and debugged independently. Overdrive collapses that stack into one binary.
+Overdrive is source-available under the Functional Source License (FSL-1.1-ALv2); every release converts to Apache 2.0 two years after publication under the irrevocable future-grant built into the licence. The commercial opportunity is not the software itself — it is the operational complexity the software absorbs. Every team running Kubernetes today operates etcd, CNI plugins, cert-manager, a service mesh, an ingress controller, Prometheus, alertmanager, and a dozen other components that each need to be deployed, upgraded, and debugged independently. Overdrive collapses that stack into one binary.
 
 The cloud platform business charges for not having to operate that stack.
 
@@ -165,15 +165,21 @@ This creates switching cost that is not contractual or technical lock-in — it 
 
 ---
 
-## Open Source Strategy
+## Source-Available Strategy
 
-Overdrive is AGPL-3.0. The licence choice is deliberate:
+Overdrive is licensed under the Functional Source License (FSL-1.1-ALv2). The licence choice is deliberate.
 
-- AGPL requires any hosted service built on Overdrive to open-source their modifications. A competitor cannot take the codebase, build a cloud on it, and keep their improvements proprietary.
-- The open core drives adoption. Teams that self-host Overdrive become familiar with the platform. When they want managed infrastructure, the migration to the cloud offering is trivial — same binary, same job specs, same CLI.
-- Community contributions improve the platform. The eBPF dataplane, WASM runtimes, and driver model all benefit from external contribution in ways that a proprietary codebase does not.
+**What FSL permits.** Internal use is unrestricted — any team, any scale, any industry. Modifications are permitted. Redistribution is permitted. Non-commercial education and research are explicitly carved out. For the overwhelming majority of users who run Overdrive to operate their own infrastructure, FSL is functionally equivalent to Apache 2.0 from day one.
 
-Commercial licensing is available for organisations that cannot accept AGPL terms. This is the third revenue stream alongside the cloud platform and support contracts — and for large enterprises, often the largest contract value.
+**What FSL prohibits.** For two years after each release, the licence forbids offering a commercial product or service that substitutes for Overdrive or for our managed offering. A hyperscaler cannot take the codebase, wrap it in a managed console, and resell "Managed Overdrive" against us. This is the structural protection AGPL only weakly provided — AGPL permits any competitor who publishes their fork to host a commodity service at scale against the original project.
+
+**Grant of Future License.** Every release converts to Apache 2.0 on its second anniversary under an irrevocable grant written into the licence itself. Users who need a true open source fallback for long-term planning have one, on a published schedule. The community ultimately receives every release under a permissive OSI-approved licence; the two-year window is the commercial protection, not a permanent enclosure.
+
+**Why not AGPL.** AGPL's viral network-copyleft clause triggers enterprise legal review at most large organisations and routinely disqualifies software before technical evaluation begins. FSL permits internal modifications and internal deployment without copyleft obligations, removing the single largest legal objection to source-available infrastructure software in regulated industries. Sentry, Keygen, Sourcegraph, and an increasing share of commercial infrastructure projects converged on this model for the same reason.
+
+**Why not a proprietary licence with a free tier.** The community flywheel — self-hosted adoption driving familiarity that shortens the sales cycle, external contributions improving the eBPF dataplane, the WASM runtimes, and the driver model — is structurally dependent on the source being available and modifiable. FSL preserves that flywheel; a proprietary licence does not.
+
+A commercial licence is available for two cases FSL does not cover: organisations that want to embed Overdrive inside a commercial product they sell (a Competing Use under the licence), and organisations that want capabilities outside the source-available release. This is the third revenue stream alongside the cloud platform and support contracts.
 
 ---
 
@@ -181,11 +187,11 @@ Commercial licensing is available for organisations that cannot accept AGPL term
 
 Many enterprise buyers — financial services, government, regulated healthcare, defence — cannot use a managed cloud platform for their most sensitive workloads. Data sovereignty requirements, air-gap mandates, internal security policy, or regulatory frameworks (DORA, NIS2, FedRAMP, IL4/IL5) require the software to run entirely on their own infrastructure, under their own control.
 
-These organisations still want the platform. They cannot use the cloud offering. AGPL is often incompatible with their legal or procurement constraints. Enterprise licensing is the answer.
+These organisations still want the platform. They cannot use the cloud offering. They also often need capabilities not included in the source-available release — FIPS crypto, HSM integration, compliance policy packs, air-gap tooling — along with warranty-backed support contracts that procurement requires and FSL, as a software licence, does not provide. Enterprise licensing is the answer.
 
 ### What Enterprise Licensing Covers
 
-**Commercial licence.** Replaces AGPL obligations. The organisation runs Overdrive on their own infrastructure without being required to open-source internal modifications or integrations. Covers unlimited nodes within the licensed estate.
+**Commercial licence.** Grants rights beyond FSL — notably a warranty and indemnity for the software, a trademark grant for using the "Overdrive" name in customer-facing materials, and a carve-out from the Competing Use restriction for organisations that embed Overdrive inside a product they sell. Covers unlimited nodes within the licensed estate.
 
 **Enterprise feature tier.** Certain features are developed for and licensed exclusively to enterprise customers — not included in the open source release:
 
@@ -244,7 +250,7 @@ The honest answer is that enterprise procurement pays for three things: capabili
 
 **Risk reduction.** An enterprise deploying open source software bears the full operational and security risk. A commercial licence with an LTS stream, SLA-backed CVE response, and named support engineers transfers a meaningful portion of that risk. This is a real purchase, not a donation.
 
-**A throat to choke.** Procurement and legal teams require a contractual relationship with a vendor. AGPL is incompatible with many enterprise legal frameworks. The commercial licence exists to satisfy procurement, regardless of whether the engineering team needs it.
+**A throat to choke.** Procurement and legal teams require a contractual relationship with a vendor — warranty, indemnity, SLA, and a clear chain of accountability when something goes wrong in production. A source-available licence is a software licence, not a commercial relationship; it provides none of those. The commercial contract exists to satisfy procurement regardless of whether the engineering team strictly needs the enterprise feature tier.
 
 ### The Flywheel
 
@@ -306,7 +312,7 @@ Cloud revenue scales with tenant consumption. Enterprise licence revenue is pred
 | Cold start | 100ms–2s | N/A | N/A | ~1ms (WASM) |
 | mTLS | Manual | Istio (complex) | Limited | Native, zero-config |
 | AI agent security | None | None | None | Structural (sidecar) |
-| Vendor lock-in | Complete | Moderate | Low | None (AGPL) |
+| Vendor lock-in | Complete | Moderate | Low | None (FSL → Apache 2.0) |
 | Self-hosting option | No | Partial | Yes | Yes |
 | LLM observability | No | No | No | Native |
 | Multi-workload | No | No | Yes | Yes |
@@ -323,6 +329,6 @@ Overdrive has three commercial pillars:
 
 **Enterprise self-hosted licensing.** Sell commercial licences and support contracts to regulated enterprises that cannot use the cloud platform. FIPS crypto, HSM integration, compliance policy packs, and air-gap tooling are enterprise-only features. High-margin, predictable annual revenue. The install base funds platform development.
 
-**Open source flywheel.** AGPL prevents commodity competition. Community deployments validate the product and surface improvements. Enterprise customers contribute patches. The open core makes sales cycles shorter — engineers already know the product before procurement gets involved.
+**Source-available flywheel.** FSL's Competing Use restriction prevents hyperscaler commodity competition for the first two years of each release; the Apache 2.0 future grant guarantees the community a path to true open source on a published schedule. Community deployments validate the product and surface improvements. Enterprise customers contribute patches. The permissive internal-use grant shortens sales cycles — engineers already know the product before procurement gets involved, and legal review clears it without the copyleft objections AGPL would have triggered.
 
 The business model is simple: absorb complexity, return simplicity, charge for the difference.

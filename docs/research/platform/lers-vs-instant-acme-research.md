@@ -108,10 +108,10 @@ On Overdrive's "own your primitives" axis: `instant-acme` loses zero, `lers` add
 
 ## 4. License
 
-| | License | AGPL-3.0 compatibility |
+| | License | FSL-1.1-ALv2 compatibility |
 |---|---|---|
-| `lers` | MIT [5] | Compatible (MIT is permissive; can be incorporated into AGPL codebases) |
-| `instant-acme` | Apache-2.0 [8] | Compatible (Apache-2.0 is permissive; can be incorporated into AGPL-3.0 — explicit compatibility confirmed by GNU; Apache's patent grant is a plus) |
+| `lers` | MIT [5] | Compatible (MIT is permissive; can be embedded into FSL codebases) |
+| `instant-acme` | Apache-2.0 [8] | Compatible (Apache-2.0 is permissive; matches FSL's Apache-2.0 future grant; explicit patent grant is a plus) |
 
 Both are permissive licenses. Apache-2.0 offers a slight advantage via its explicit patent grant, but the difference is not decisive for Overdrive.
 

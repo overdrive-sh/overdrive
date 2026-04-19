@@ -32,7 +32,7 @@
 **Confidence**: High
 **License**: Apache-2.0. "Distributed under the Apache 2.0 License." ([GitHub README](https://github.com/HolmesGPT/holmesgpt))
 **Language**: Python 82.4% of the codebase. ([GitHub repo metadata](https://github.com/HolmesGPT/holmesgpt))
-**Analysis for Overdrive**: Apache-2.0 is *one-way compatible* with Overdrive's AGPL-3.0 — Overdrive can embed or call Apache-2.0 code without license friction; any Overdrive-specific patches stay AGPL. No license blocker regardless of integration shape.
+**Analysis for Overdrive**: Apache-2.0 is cleanly embeddable into Overdrive's FSL-1.1-ALv2 codebase — Apache-2.0 is permissive in both directions, and FSL's two-year Apache-2.0 future-grant means the combined work also reaches Apache-2.0 on the same schedule. Any Overdrive-specific patches stay under FSL. No license blocker regardless of integration shape.
 
 ### 1.2 Deployment shapes — not one thing, several
 
@@ -203,7 +203,7 @@ Each shape is evaluated against Overdrive design principles **1** (own your prim
 | Principle 5 (observability native) | Mixed. The HolmesGPT toolsets ecosystem would be immediately available, but the *native* eBPF path becomes one integration among many rather than the foundation. |
 | §12 compatibility | Breaks `rig-rs` replacement story and the single-binary claim (§2 principle 8). |
 | Operational cost | Adds Python + 2 GiB RAM floor to the control plane. Overdrive control plane is ~30 MiB / ~80 MiB today. |
-| License | Apache-2.0 is compatible with AGPL-3.0 in embedding direction; no blocker. |
+| License | Apache-2.0 is cleanly embeddable into FSL-1.1-ALv2; no blocker. |
 | Time cost | Weeks of integration + Python packaging pain in the Image Factory (§24) — the immutable OS image would need a Python stack, which today it does not. |
 
 **Verdict**: **Reject.** This shape sacrifices the single largest architectural claim of Overdrive to buy an ecosystem that can be accessed without embedding.
@@ -221,7 +221,7 @@ Each shape is evaluated against Overdrive design principles **1** (own your prim
 | §6 compatibility | **Exemplary fit** — the persistent-microVM + credential-proxy + content-inspector composition in §6 is essentially *describing this workload already*. The whitepaper table even lists "AI coding agents" and "customer-code sandboxes" as the canonical use cases. |
 | Security posture | **Superior to HolmesGPT's default**. The BPF LSM hooks (§7, §19) block raw sockets and unauthorised binaries regardless of what the LLM decides to do; the credential-proxy holds real API keys the agent never sees; content-inspector runs over ingress. HolmesGPT's own read-only posture is additive, not relied-upon. |
 | Operational cost | 2 GiB VM on one node. Scales horizontally via the scheduler. |
-| License | Apache-2.0 workload running on AGPL platform — trivially compliant. |
+| License | Apache-2.0 workload running on FSL-licensed platform — trivially compliant; running a workload on a platform is not a Competing Use. |
 
 **Verdict**: **Strong fit.** This is Overdrive eating its own dog food. The whitepaper already contains this pattern; HolmesGPT is the flagship third-party example.
 
