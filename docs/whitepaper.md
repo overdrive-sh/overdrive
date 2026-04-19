@@ -36,6 +36,7 @@ The foundational thesis: the primitives required to build a genuinely better orc
 20. [Efficiency Comparison](#20-efficiency-comparison)
 21. [Deterministic Simulation Testing](#21-deterministic-simulation-testing)
 22. [Roadmap](#22-roadmap)
+23. [Image Factory](#23-image-factory)
 
 ---
 
@@ -1636,6 +1637,7 @@ For exhaustive state-space exploration beyond what turmoil covers, Helios is des
 - Process driver
 - Basic scheduler (first-fit)
 - CLI (`helios job submit`, `helios node list`, `helios alloc status`)
+- Image Factory MVP: `meta-helios` Yocto layer, `helios-image-factory` Rust service (schematic store, artifact cache, HTTP download frontend)
 
 ### Phase 2 — Networking (Months 3–6)
 - aya-rs eBPF scaffolding
@@ -1674,6 +1676,153 @@ For exhaustive state-space exploration beyond what turmoil covers, Helios is des
 - Unikernel drivers (Nanos, Unikraft with virtiofs)
 - QEMU opt-in driver (exotic hardware emulation only)
 - Multi-region federation
+- Image Factory: OCI registry frontend, PXE boot, dm-verity + TPM attestation, Secure Boot signing
+
+---
+
+## 23. Image Factory
+
+Helios nodes run an immutable, purpose-built OS — no shell, no package manager, no SSH. This is not a constraint to work around; it is a deliberate security choice. Every component on the node is explicitly declared, compiled with hardening flags, and verified at boot. The Image Factory is the system that makes this tractable: it manages how node OS images are built, customized, versioned, and distributed.
+
+### The Problem
+
+Provisioning a Kubernetes node means installing a general-purpose Linux distribution and then running configuration management over it. The attack surface is whatever the distro ships. Security is whatever the configuration management enforced, subject to drift.
+
+Helios takes the opposite approach: the OS is minimal by construction, not by configuration. The Image Factory is how operators get from "I need a node image" to a bit-for-bit reproducible artifact they can verify and trust.
+
+### Design
+
+The Image Factory is two things:
+
+1. **`meta-helios`** — a Yocto layer that produces the node OS. It defines every package, every kernel config flag, every compiler flag. The output is a ~50 MB image: systemd, the Helios binary, Cloud Hypervisor, Wasmtime, and nothing else.
+
+2. **`helios-image-factory`** — a Rust service that wraps the Yocto build system behind an HTTP API, manages content-addressable image IDs, and caches artifacts in an OCI-compatible store.
+
+The factory service is thin. The heavy lifting — OS assembly, kernel compilation, SBOM generation — happens in Yocto. The service coordinates, caches, and serves.
+
+### Why Yocto
+
+Helios has non-trivial kernel requirements that cannot be satisfied by OCI layer assembly or a stock distribution:
+
+- `CONFIG_BPF_LSM=y` — required for BPF LSM MAC (kernel 5.7+)
+- `CONFIG_TLS=y` — required for kTLS and sockops mTLS
+- `CONFIG_KVM=y` / `CONFIG_VHOST_VSOCK=y` — required for Cloud Hypervisor
+- `CONFIG_BPF_SYSCALL=y` — required for aya-rs eBPF programs
+
+Yocto's `defconfig` + `security.cfg` fragment model gives precise, auditable control over every kernel option. Every installed package is an explicit BitBake recipe. `inherit create-spdx` produces a machine-readable SPDX SBOM for every build. This aligns directly with the "own your primitives" principle — there is no hidden package manager, no transitive dependency that snuck in through an Alpine apk.
+
+Build times are 60–90 minutes cold, ~5 minutes with a warm S3 sstate cache. For a factory service, this is acceptable: all official `(schematic_id, helios_version, arch)` tuples are pre-built at release time and served from cache. Operators waiting for a custom build are the exception.
+
+### Schematics
+
+A **schematic** is a TOML document whose SHA-256 hash is the image ID. Identical schematics always produce the same ID. The empty schematic — a base Helios node with all defaults — has a fixed well-known ID.
+
+```toml
+[node]
+role = "worker"   # "control-plane" | "worker" | "control-plane+worker"
+
+[drivers]
+process   = true
+microvm   = true    # Cloud Hypervisor
+unikernel = false   # Unikraft (optional, increases image size)
+wasm      = true    # Wasmtime
+
+[kernel]
+extra_args = ["intel_iommu=on", "iommu=pt"]
+
+[extensions]
+official = ["nvidia-gpu"]   # resolved to versioned recipes by factory
+
+[security]
+bpf_lsm = true   # locked true in production; configurable for dev only
+ktls    = true
+```
+
+The `role` field in the schematic maps directly to the `[node] role` declaration in the Helios binary — the same binary handles all roles, and the schematic makes that explicit at image build time.
+
+### Profiles
+
+A **profile** combines a schematic with a Helios version, architecture, and output type:
+
+```
+Profile = (schematic_id, helios_version, arch, output_type)
+
+output_type:
+  raw.wic.gz    bare metal disk image (GPT: EFI + rootfs + verity)
+  rootfs.ext4   VM rootfs for Cloud Hypervisor or PXE
+  vmlinuz       bare kernel
+  initramfs.xz  bare initramfs
+  oci           OCI image for in-place upgrades via registry pull
+```
+
+Every profile tuple maps to exactly one artifact. The factory stores artifacts content-addressed in an OCI-compatible registry:
+
+```
+registry.helios.io/images/helios-node/{schematic_id}/{helios_version}/{arch}/
+  raw.wic.gz
+  rootfs.ext4
+  vmlinuz
+  initramfs.xz
+  sbom.spdx.json
+```
+
+### API
+
+```
+POST   /v1/schematics                              → { id: SchematicId }
+GET    /v1/schematics/{id}                         → schematic TOML
+
+GET    /v1/versions                                → [ "0.1.0", ... ]
+
+GET    /v1/image/{id}/{version}/{arch}/raw.wic.gz  → streamed or 202 + poll
+GET    /v1/image/{id}/{version}/{arch}/rootfs.ext4
+GET    /v1/image/{id}/{version}/{arch}/vmlinuz
+GET    /v1/image/{id}/{version}/{arch}/initramfs.xz
+GET    /v1/image/{id}/{version}/{arch}/sbom.spdx.json
+
+GET    /v1/builds/{build_id}                       → { status, progress }
+
+# OCI Distribution Spec v2 — standard registry interface for upgrades
+GET    /v2/{name}/manifests/{reference}
+GET    /v2/{name}/blobs/{digest}
+```
+
+Requests for cached artifacts are served immediately. Cache misses trigger an async Yocto build — the response is `202 Accepted` with a build ID to poll.
+
+### `meta-helios` Layer
+
+The Yocto layer is a direct evolution of the `meta-opencapsule` pattern, with three additions:
+
+1. **Helios binary** via `inherit cargo_bin` + `meta-rust-bin` (prebuilt toolchain, single Cargo workspace)
+2. **Workload driver binaries** — Cloud Hypervisor (`cloud-hypervisor`), Wasmtime runtime (`wasmtime`), optional Unikraft tools
+3. **Kernel config fragments** — BPF LSM, kTLS, KVM, vhost-vsock additions to the base security config
+
+```
+meta-helios/
+  conf/machine/
+    helios-node-x86_64.conf      # bzImage, EFI_PROVIDER=grub-efi, wic+ext4
+    helios-node-aarch64.conf
+  recipes-core/images/
+    helios-node-image.bb         # inherits core-image, helios-hardening, create-spdx
+  recipes-helios/helios/
+    helios_git.bb                # inherit cargo_bin; single binary, all roles
+  recipes-drivers/
+    cloud-hypervisor/            # microVM driver
+    wasmtime/                    # WASM driver
+    unikraft/                    # optional unikernel driver
+  recipes-kernel/linux/
+    linux-yocto_%.bbappend       # kernel 6.x, defconfig + security.cfg
+  classes/
+    helios-hardening.bbclass     # RELRO/NOW, stack protector, -D_FORTIFY_SOURCE=2
+  wic/
+    helios-node.wks              # GPT: EFI + rootfs (+ verity hash partition, Phase 2)
+```
+
+The image has no shells, no package manager, no SSH server, no getty. Post-processing strips debug tooling. The only user-facing entry point is the Helios binary managed by systemd.
+
+### Node Upgrade Path
+
+Upgrades are handled by the OCI registry frontend. A node running Helios can pull a new image as an OCI artifact, verify its digest against the schematic ID, write it to the inactive partition, and reboot into the new image — the same pattern as Talos upgrades, without requiring an external upgrade tool. This is Phase 2; Phase 1 upgrades are re-provisioning from a new image.
 
 ---
 
