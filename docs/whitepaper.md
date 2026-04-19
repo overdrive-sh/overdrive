@@ -1768,6 +1768,40 @@ Cross-workload shared volumes — the virtiofs use case in §6 where a process w
 
 Rejected alternatives: **embedding JuiceFS** (Apache-2.0, production-proven at Fly.io scale) was considered and declined. JuiceFS is Go, so embedding it means either running a Go process per node or pulling a Go runtime into the binary — both contradict design principles 1 (*own your primitives*) and 7 (*Rust throughout, no FFI to Go or C++ in the critical path*). Its multi-client coherence and distributed-locking machinery are also unnecessary weight for the single-writer case Helios actually has.
 
+### Stateful Workloads on `helios-fs`
+
+The single-writer constraint raises a reasonable question: how do databases, queues, and other stateful systems run on a filesystem that one VM owns at a time? The answer is that modern stateful systems already work this way at the storage layer — they replicate at the **application layer**, where semantic knowledge of commits, batches, and acknowledgments makes replication efficient.
+
+| Class | Example systems | Storage model |
+|---|---|---|
+| Single-primary RDBMS | Postgres, MySQL, SQLite + Litestream | per-instance rootfs + WAL streaming to replicas |
+| Distributed SQL | CockroachDB, TiDB, YugabyteDB | per-node local disk + Raft at the range/region level |
+| Wide-column / KV | Cassandra, Scylla, ClickHouse, FoundationDB | per-node local disk + internal replication |
+| Document / cache | MongoDB, Redis Cluster, Elasticsearch | per-node local disk + oplog / replica streaming |
+| Message broker | Kafka, NATS JetStream, Pulsar | per-broker disk + ISR / stream replication |
+| Analytics / OLAP | DuckDB / DuckLake, Spark-style jobs | object storage (Garage) directly |
+| AI agents / CI / dev sandboxes | Claude Code, Buildkite runners, Codespaces-style | persistent rootfs (`helios-fs`), single writer |
+
+Every system in the first six rows runs as one VM per database node, each VM owning its own `helios-fs` rootfs (or ephemeral local disk for fully replicated setups), with replication handled by the database process itself. The seventh row — analytics — bypasses filesystems entirely and uses Garage directly. The eighth row is what `helios-fs` exists for.
+
+There are three reasons modern stateful systems prefer this over a shared-storage architecture:
+
+1. **The database knows more than the filesystem.** A WAL record is a commit boundary; a page is just a page. Replicating at the WAL layer enables batching, compression, and selective acknowledgment. Replicating at the filesystem layer ships arbitrary page writes that the filesystem cannot interpret.
+2. **Shared storage is a coordination bottleneck.** Oracle RAC and Aurora work because they are heroically engineered around proprietary storage layers. Sharded architectures with async replication scale better than shared state — the entire industry moved this direction over the last fifteen years.
+3. **Stacked consensus compounds latency.** A DFS using Raft beneath a database using Raft means every write traverses two consensus rounds. Cockroach on Ceph is measurably slower than Cockroach on local disk for this reason.
+
+The Helios storage catalog covers every stateful pattern this implies:
+
+| Pattern | Storage primitive | Lifecycle |
+|---|---|---|
+| Ephemeral local disk | VM block device | Dies with the allocation |
+| Persistent per-VM rootfs | `helios-fs` | Survives migration, single-writer |
+| Cluster-shared dataset | Garage (S3 API) | Cluster-durable, accessed by any workload |
+| Coordination state | ObservationStore | Gossiped, eventually consistent |
+| Cross-workload volume (same node) | virtiofsd-passthrough | Host mount, same-node only |
+
+**When a general distributed filesystem would actually be needed.** Three workload classes legitimately want multi-writer POSIX semantics: legacy shared-home-directory patterns (better served by Garage), shared-disk databases like Oracle RAC (not portable, not migrating to Helios), and Kubernetes workloads expecting `ReadWriteMany` PVCs (often a substitute for primitives Helios already provides — SPIFFE identity, ObservationStore coordination). None of these are first-class targets. If a concrete future workload demands genuine multi-writer semantics, the chunk store, libSQL metadata layer, and virtio-fs frontend in `helios-fs` are reusable — a coherence protocol could be added on top. Building it speculatively would ship complexity that cannot be tuned without real traffic.
+
 ### Incident Memory — libSQL (embedded)
 
 Historical incidents, resource profiles, LLM reasoning chains. Not on the critical path — eventual consistency acceptable. SQL interface is natural for LLM agent tool calls. Optional sync to Turso for cross-node incident sharing.
