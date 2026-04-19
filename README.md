@@ -35,8 +35,9 @@ The foundational thesis: the primitives required to build a genuinely better orc
 19. [Security Model](#19-security-model)
 20. [Efficiency Comparison](#20-efficiency-comparison)
 21. [Deterministic Simulation Testing](#21-deterministic-simulation-testing)
-22. [Roadmap](#22-roadmap)
-23. [Image Factory](#23-image-factory)
+22. [Real-Kernel Integration Testing](#22-real-kernel-integration-testing)
+23. [Roadmap](#23-roadmap)
+24. [Image Factory](#24-image-factory)
 
 ---
 
@@ -522,7 +523,7 @@ Helios uses **Cloud Hypervisor** as its sole VMM, handling both microvm and full
 | Full VM (arbitrary OS) | ❌ | ✅ | ✅ |
 | virtiofs filesystem sharing | ❌ | ✅ | ✅ |
 | CPU / memory hotplug | ❌ | ✅ | ✅ |
-| AArch64 | ❌ | ✅ | ✅ |
+| AArch64 | ✅ | ✅ | ✅ |
 | Written in Rust | ✅ | ✅ | ❌ |
 | No central daemon | ✅ | ✅ | ❌ |
 
@@ -587,7 +588,7 @@ Tier 1: node agent issues vm.resize via CH API
 No VM restart. No workload interruption.
 ```
 
-This is not possible with Firecracker, which has no hotplug support. The right-sizing story is now uniform across all workload types.
+Firecracker cannot do this for CPU — issue #2609 (*Hot-plug vCPUs*) is parked at low priority. Firecracker did gain virtio-mem memory hotplug in 2024, so the gap is narrower than it was a year ago; CPU hotplug, virtiofs, and Windows guest support remain the genuine Cloud Hypervisor differentiators. The right-sizing story is uniform across all workload types at the control-plane layer; the mechanisms differ per class — see §14.
 
 ### Persistent MicroVMs — Long-Lived Stateful Workloads
 
@@ -609,7 +610,7 @@ expose                   = true   # auto-registers a gateway route
 
 When `persistent = true`:
 
-1. **Persistent rootfs bound to workload identity.** The rootfs is object-backed (Garage) with an NVMe hot-tier cache. The storage model follows the JuiceFS approach — content-addressed immutable chunks in object storage, metadata in fast local storage kept durable via streaming replication. The authoritative state lives in Garage; nodes cache chunks. The workload can migrate between nodes without moving a volume, and restores hydrate metadata only, not the full filesystem.
+1. **Persistent rootfs bound to workload identity.** The rootfs is served by `helios-fs`, a Helios-native single-writer chunk store — content-addressed immutable chunks in Garage, inode and dentry metadata in per-rootfs libSQL, with an NVMe hot-tier cache. Because each rootfs is owned by exactly one VM at a time, `helios-fs` drops the multi-client coherence and distributed-locking machinery a general distributed filesystem requires. The authoritative state lives in Garage; nodes cache chunks. The workload can migrate between nodes without moving a volume, and restores hydrate metadata only, not the full filesystem. Full design in §17.
 2. **Checkpoint/restore via Cloud Hypervisor.** The driver exposes `snapshot()` and `restore()` as control-plane actions that delegate to Cloud Hypervisor's existing snapshot/restore API with `userfaultfd` lazy memory paging — restore is pay-as-you-access, not load-everything-upfront. Disk snapshots are metadata-only against the chunk store (chunks are already immutable). Memory uses Cloud Hypervisor's native mechanism.
 3. **Idle eviction with checkpoint (scale-to-zero).** After `snapshot_on_idle_seconds` of no traffic, the workload reconciler checkpoints the VM, tears down the running process, and records the handle in the ObservationStore. An inbound request via the gateway triggers a restore. The restore path is sub-second: metadata-only on disk plus `userfaultfd`-lazy on memory.
 4. **VMGenID wired into the guest.** Live-migrated or snapshot-restored VMs face entropy-reuse hazards — the kernel's RNG can produce identical output on both sides of a snapshot. Cloud Hypervisor exposes a VMGenID device; the node agent updates the generation counter on every restore, and the guest kernel reseeds.
@@ -741,7 +742,7 @@ Every communication path described above — Raft between control-plane peers, C
 - UDP reachability between every pair of Corrosion peers in the same gossip group (intra-region mesh plus regional peers to the thin global membership cluster, §4).
 - TCP reachability between any workload calling `connect()` and the node hosting the destination workload — kTLS runs over TCP.
 
-The underlay itself is not required to be encrypted. Every payload above IP is authenticated-encrypted under the platform CA: sockops+kTLS for east-west workload traffic, rustls for Raft and gRPC, the Corrosion peer's QUIC handshake under the same trust bundle for observation. Operators who nonetheless require encrypted backhaul — for defense in depth, regulatory mandates, or untrusted transit — enable a mesh VPN as an Image Factory extension (§23). The Helios binary is agnostic to which, if any, is in use.
+The underlay itself is not required to be encrypted. Every payload above IP is authenticated-encrypted under the platform CA: sockops+kTLS for east-west workload traffic, rustls for Raft and gRPC, the Corrosion peer's QUIC handshake under the same trust bundle for observation. Operators who nonetheless require encrypted backhaul — for defense in depth, regulatory mandates, or untrusted transit — enable a mesh VPN as an Image Factory extension (§24). The Helios binary is agnostic to which, if any, is in use.
 
 **Three deployment shapes.**
 
@@ -751,7 +752,7 @@ The underlay itself is not required to be encrypted. Every payload above IP is a
 
 **`wireguard` extension — platform-managed keys via enrollment.**
 
-WireGuard is an in-tree kernel module since Linux 5.6. The extension adds `CONFIG_WIREGUARD=y` to the kernel config fragment, installs `wg-tools`, and drops a systemd unit that brings up the tunnel at boot. Key management is integrated with the enrollment flow from §23: on first boot, the node generates a WireGuard keypair, submits the public key alongside its TPM attestation, and receives back (a) its SVID, (b) the current peer set — pubkeys and endpoints for its region — and (c) its regional aggregator assignment. The initial peer set arrives *with* the SVID before any Corrosion connection is attempted, so the first WireGuard tunnel comes up before the ObservationStore hydrates; Corrosion then runs over the established tunnel.
+WireGuard is an in-tree kernel module since Linux 5.6. The extension adds `CONFIG_WIREGUARD=y` to the kernel config fragment, installs `wg-tools`, and drops a systemd unit that brings up the tunnel at boot. Key management is integrated with the enrollment flow from §24: on first boot, the node generates a WireGuard keypair, submits the public key alongside its TPM attestation, and receives back (a) its SVID, (b) the current peer set — pubkeys and endpoints for its region — and (c) its regional aggregator assignment. The initial peer set arrives *with* the SVID before any Corrosion connection is attempted, so the first WireGuard tunnel comes up before the ObservationStore hydrates; Corrosion then runs over the established tunnel.
 
 Subsequent peer changes flow through `node_health` in the ObservationStore. Every node's WireGuard pubkey and endpoint are observation data, gossiped alongside existing node health. Adding or removing a node is a `node_health` row change; each existing node's WireGuard daemon picks up the delta through the same subscription path that already drives BPF map hydration (see *BPF Map Architecture* above). No external key-distribution service, no operator-managed `wg0.conf`.
 
@@ -1498,9 +1499,13 @@ Kubernetes' Vertical Pod Autoscaler requires pod restarts to resize and polls me
 
 ### Helios Approach
 
-Helios observes actual resource consumption at the kernel level via eBPF kprobes and cgroup v2 BPF programs — continuously, without instrumentation, with full workload identity. This enables:
+Helios observes actual resource consumption at the kernel level via eBPF kprobes and cgroup v2 BPF programs — continuously, without instrumentation, with full workload identity.
 
-**Live cgroup resizing** — the node agent can expand a cgroup memory limit before an OOM kill occurs, without restarting the workload. This works for process, VM, and unikernel workloads identically.
+**Pre-OOM pressure signal.** The distinctive property is not that the platform can resize live. Kubernetes reached GA on in-place pod resize in v1.35 (December 2025) — cgroup writes through the CRI `UpdateContainerResources` API. KubeVirt does memory hotplug via live migration. VMware has hot-add. Live resize is becoming table stakes. The distinctive property is *when* the signal fires. Industry VPA implementations poll metrics-server at minute intervals and can only react after utilization crosses a threshold — by the time an OOM is imminent, the next poll tick has not yet run. Helios reads memory and CPU pressure directly from eBPF kprobes in the kernel, sub-second, with full SPIFFE identity on every sample. The resize action fires *before* the OOM kill, not in the post-mortem. This pre-OOM pressure loop driven by identity-tagged eBPF has no published production analogue.
+
+This enables four subsystems:
+
+**Live resizing, mechanism per workload class.** Process, container, and WASM workloads are right-sized by writing the cgroup limit directly (`/sys/fs/cgroup/.../memory.max`). This is a cgroups v2 kernel feature and has no dependency on the VMM. VM and unikernel workloads are right-sized via Cloud Hypervisor's hotplug APIs — memory via virtio-mem, CPU via ACPI — which *does* require Cloud Hypervisor and a guest kernel that recognises the new capacity (Linux ≥5.8 for virtio-mem). The control-plane contract is uniform: the right-sizing reconciler issues a single typed `resize` action. The mechanical path differs sharply; the §14 novelty is that one reconciler and one pressure signal drive both.
 
 **Resource profiles** — the reconciler accumulates p95 CPU and memory utilization per job, per hour-of-week, over a rolling 30-day window stored in libSQL. Right-sizing recommendations carry a confidence score based on sample count.
 
@@ -1750,6 +1755,57 @@ WHERE job_name = 'payments';
 **Retention** is managed by DuckLake's snapshot expiry — no separate archival job required. Old snapshots are expired automatically; Garage storage is reclaimed via DuckLake's vacuum operation.
 
 DuckLake is MIT-licensed and ships as a DuckDB extension — no new runtime dependency is introduced since DuckDB is already embedded in the control plane.
+
+### Persistent Rootfs — `helios-fs`
+
+Persistent microVMs (§6) need a rootfs that survives workload migration, supports fast checkpoint/restore, and hydrates on access rather than upfront. Local filesystems cannot do this; neither Garage nor libSQL is sufficient on its own. `helios-fs` is the thin Rust-native layer that composes them into a per-VM filesystem.
+
+- **Chunks** — content-addressed immutable blocks in Garage. FastCDC segmentation; dedup across rootfs instances where content overlaps (common for agent sandboxes sharing a base image).
+- **Metadata** — inode, dentry, and file→chunk mapping in a per-rootfs libSQL database. Write-ahead log streamed continuously to Garage; RPO measured in seconds, not full-volume copy time.
+- **Cache** — NVMe hot tier per node, 2Q eviction, write-back for locally-originated writes. Read miss hydrates from Garage; write commits to local NVMe and to the WAL stream.
+- **Frontend** — `vhost-user-fs` (Rust port of `virtiofsd`) speaking virtio-fs directly to Cloud Hypervisor. The guest sees a normal virtiofs mount; the daemon is invisible.
+
+The design is deliberately narrower than a general distributed filesystem. `helios-fs` assumes **single-writer per rootfs** — each rootfs is owned by exactly one running VM at a time, enforced by the allocation lifecycle. This deletes the hardest parts of distributed FS design: no distributed locking, no multi-client cache coherence, no cross-mount invalidation. Metadata mutations are single-process libSQL transactions. Migration is a quiesce-and-handoff between two nodes, coordinated by the workflow reconciler (§18).
+
+Snapshot and restore operate at the metadata layer only — chunks are already immutable, so a snapshot is an atomic libSQL transaction that forks the inode tree. This is what lets §14 *Scale-to-Zero for VM Workloads* resume a persistent microVM in tens of milliseconds: restore hydrates metadata (kilobytes), not the rootfs (gigabytes), and `userfaultfd` pages in memory on access while the guest is already running.
+
+Cross-workload shared volumes — the virtiofs use case in §6 where a process workload and a VM share `/shared-volume` — do **not** go through `helios-fs`. Those are short-lived host-side mounts exposed via virtiofsd-passthrough, managed directly by the storage reconciler against local or Garage-backed volumes. `helios-fs` is specifically the rootfs store for persistent microVMs.
+
+Rejected alternatives: **embedding JuiceFS** (Apache-2.0, production-proven at Fly.io scale) was considered and declined. JuiceFS is Go, so embedding it means either running a Go process per node or pulling a Go runtime into the binary — both contradict design principles 1 (*own your primitives*) and 7 (*Rust throughout, no FFI to Go or C++ in the critical path*). Its multi-client coherence and distributed-locking machinery are also unnecessary weight for the single-writer case Helios actually has.
+
+### Stateful Workloads on `helios-fs`
+
+The single-writer constraint raises a reasonable question: how do databases, queues, and other stateful systems run on a filesystem that one VM owns at a time? The answer is that modern stateful systems already work this way at the storage layer — they replicate at the **application layer**, where semantic knowledge of commits, batches, and acknowledgments makes replication efficient.
+
+| Class | Example systems | Storage model |
+|---|---|---|
+| Single-primary RDBMS | Postgres, MySQL, SQLite + Litestream | per-instance rootfs + WAL streaming to replicas |
+| Distributed SQL | CockroachDB, TiDB, YugabyteDB | per-node local disk + Raft at the range/region level |
+| Wide-column / KV | Cassandra, Scylla, ClickHouse, FoundationDB | per-node local disk + internal replication |
+| Document / cache | MongoDB, Redis Cluster, Elasticsearch | per-node local disk + oplog / replica streaming |
+| Message broker | Kafka, NATS JetStream, Pulsar | per-broker disk + ISR / stream replication |
+| Analytics / OLAP | DuckDB / DuckLake, Spark-style jobs | object storage (Garage) directly |
+| AI agents / CI / dev sandboxes | Claude Code, Buildkite runners, Codespaces-style | persistent rootfs (`helios-fs`), single writer |
+
+Every system in the first six rows runs as one VM per database node, each VM owning its own `helios-fs` rootfs (or ephemeral local disk for fully replicated setups), with replication handled by the database process itself. The seventh row — analytics — bypasses filesystems entirely and uses Garage directly. The eighth row is what `helios-fs` exists for.
+
+There are three reasons modern stateful systems prefer this over a shared-storage architecture:
+
+1. **The database knows more than the filesystem.** A WAL record is a commit boundary; a page is just a page. Replicating at the WAL layer enables batching, compression, and selective acknowledgment. Replicating at the filesystem layer ships arbitrary page writes that the filesystem cannot interpret.
+2. **Shared storage is a coordination bottleneck.** Oracle RAC and Aurora work because they are heroically engineered around proprietary storage layers. Sharded architectures with async replication scale better than shared state — the entire industry moved this direction over the last fifteen years.
+3. **Stacked consensus compounds latency.** A DFS using Raft beneath a database using Raft means every write traverses two consensus rounds. Cockroach on Ceph is measurably slower than Cockroach on local disk for this reason.
+
+The Helios storage catalog covers every stateful pattern this implies:
+
+| Pattern | Storage primitive | Lifecycle |
+|---|---|---|
+| Ephemeral local disk | VM block device | Dies with the allocation |
+| Persistent per-VM rootfs | `helios-fs` | Survives migration, single-writer |
+| Cluster-shared dataset | Garage (S3 API) | Cluster-durable, accessed by any workload |
+| Coordination state | ObservationStore | Gossiped, eventually consistent |
+| Cross-workload volume (same node) | virtiofsd-passthrough | Host mount, same-node only |
+
+**When a general distributed filesystem would actually be needed.** Three workload classes legitimately want multi-writer POSIX semantics: legacy shared-home-directory patterns (better served by Garage), shared-disk databases like Oracle RAC (not portable, not migrating to Helios), and Kubernetes workloads expecting `ReadWriteMany` PVCs (often a substitute for primitives Helios already provides — SPIFFE identity, ObservationStore coordination). None of these are first-class targets. If a concrete future workload demands genuine multi-writer semantics, the chunk store, libSQL metadata layer, and virtio-fs frontend in `helios-fs` are reusable — a coherence protocol could be added on top. Building it speculatively would ship complexity that cannot be tuned without real traffic.
 
 ### Incident Memory — libSQL (embedded)
 
@@ -2141,13 +2197,157 @@ This catalogue also drives the chaos engineering reconciler in production — th
 
 Both `IntentStore` (with `export_snapshot` / `bootstrap_from`) and `ObservationStore` (with `read` / `write` / `subscribe`) are the right shapes for DST. Simulation tests use `LocalStore` + `SimObservationStore` with a `SimClock` — single-node, no Raft complexity, no real QUIC, fully deterministic. `RaftStore` is added only to tests that specifically exercise consensus behavior; the real `CorrosionStore` is exercised by cross-region tests that need the actual SWIM/LWW semantics. The four store modes (single-region intent, HA intent, sim observation, real Corrosion observation) are independently composable and each is exercised continuously rather than only at boundary events.
 
-### Antithesis
+---
 
-For exhaustive state-space exploration beyond what turmoil covers, Helios is designed to be compatible with Antithesis — a deterministic hypervisor that runs regular software in a fully reproducible environment. Antithesis has a native Rust SDK. The property assertions defined for turmoil tests map directly to Antithesis assertions, making the two approaches complementary: turmoil for fast in-process tests during development, Antithesis for deep exploration against the real binary in CI.
+## 22. Real-Kernel Integration Testing
+
+§21 establishes deterministic simulation as the substrate for proving control-plane correctness against injected concurrency, timing, and partition faults. DST cannot exercise eBPF — by design, `SimDataplane` is an in-memory HashMap that stands in for kernel programs. This boundary is correct: trying to simulate the kernel verifier, the XDP driver hook, kTLS offload, or BPF LSM semantics inside a single-threaded harness would either be wrong or be a kernel reimplementation. The complement to DST is real eBPF programs loaded into real kernels, exercised against real syscalls and real packets.
+
+The published consensus across the eBPF-heavy ecosystem (Cilium, Tetragon, kernel-patches/bpf, Aya, Falco) is that the two are not substitutes. DST catches logic bugs in control flow under timing and ordering perturbation cheaply; real-kernel testing catches bugs at the boundary between Helios and the kernel — verifier rejections, kernel-version regressions, hook-attachment quirks, kTLS offload edge cases, LSM hook semantics. The bug classes partition. FoundationDB and WarpStream both position DST as complementary to real-system testing rather than a replacement; Helios takes the same posture and runs both on every PR.
+
+### Four-Tier Stack
+
+DST is Tier 1. Tiers 2–4 are real-kernel.
+
+```
+Tier 1  DST in-process            turmoil + SimDataplane (§21)
+        — control-plane logic under injected concurrency / fault / timing
+        — millisecond feedback, fully deterministic, reproducible from seed
+
+Tier 2  BPF unit tests            BPF_PROG_TEST_RUN, no attachment
+        — each aya-rs program against curated synthetic input
+        — pattern: Cilium bpf/tests/ PKTGEN/SETUP/CHECK triptych
+        — no VM required; runs in milliseconds on the CI host
+
+Tier 3  Real-kernel integration   QEMU + kernel matrix + veth + netem
+        — programs actually load, attach, and enforce on real kernels
+        — harness: little-vm-helper (CI), virtme-ng (developer laptops)
+        — entry point: aya's existing `cargo xtask integration-test vm`
+
+Tier 4  Verifier + perf regression  per-kernel load + xdp-bench
+        — veristat-style complexity tracking, relative-delta perf gates
+        — pattern: Cilium "Datapath BPF Complexity" workflow
+```
+
+### Tier 2 — BPF Unit Tests
+
+The kernel exposes `BPF_PROG_TEST_RUN` for running a loaded program against supplied input and recording the output. This is the substrate every credible eBPF unit test framework builds on. Aya wraps it as `Program::test_run()` for the program types where the kernel supports it (XDP, TC).
+
+Each Helios eBPF program ships with three companions in `crates/helios-bpf/tests/`:
+
+- `PKTGEN` — generates a synthetic packet (or syscall context for non-XDP hooks).
+- `SETUP` — populates the BPF maps the program reads (`SERVICE_MAP`, `IDENTITY_MAP`, `POLICY_MAP`, `FS_POLICY_MAP`).
+- `CHECK` — drives `test_run` and asserts on output bytes, verdict, or map mutations.
+
+**Map state is cleared between sub-tests by default** — the inverse of Cilium's framework, which persists by default. Persistent state is opt-in via `#[test_chain]` for tests that genuinely need staged setup (e.g. atomic-swap semantics). The default tracks idiomatic Rust `#[test]` isolation and avoids the debugging burden of phantom failures from prior sub-tests.
+
+This tier exercises only program-level correctness — it does *not* prove the kernel actually invokes the program on the right hook. Sockops and BPF LSM, where `BPF_PROG_TEST_RUN` is not the right mechanism, move entirely to Tier 3.
+
+### Tier 3 — Real-Kernel Integration
+
+The goal is to prove that the programs load on every kernel in the support matrix, attach to their hooks, and produce correct end-to-end behaviour against real syscalls and real packets.
+
+**Kernel matrix:**
+
+| Kernel | Why it's in the matrix |
+|---|---|
+| 5.10 LTS | First LTS with BPF LSM, kTLS, and sockops jointly stable. The Helios floor. |
+| 5.15 LTS | Ubuntu 22.04, Debian 12 backports, RHEL 9 backports — most-deployed LTS in production. |
+| 6.1 LTS | Debian 13 stable; matches Tetragon's matrix. |
+| 6.6 LTS | Ubuntu 24.04 lineage; vhost-vsock parity for Cloud Hypervisor. |
+| Current LTS | Most recent kernel in the line; regression-catch for newer verifier behaviour. |
+| `bpf-next` | Early warning for upstream changes. Soft-fail in CI. |
+
+The matrix is `little-vm-helper` (LVH) `image-version` inputs in CI; adding a kernel is one line of YAML. LVH ships pre-built OCI kernel images and is used in production by Cilium, Tetragon, and pwru. On developer laptops `virtme-ng` boots a kernel from a tree in roughly a second and snapshots the host filesystem — same harness shape, faster iteration. Helios reuses aya's existing `cargo xtask integration-test vm --cache-dir <CACHE_DIR> <KERNEL>...` as the entry point rather than inventing its own.
+
+Nested virtualisation is not required. Tetragon's `--qemu-disable-kvm` flag exists specifically to make GitHub Actions runners viable; Helios takes the same approach. Standard `ubuntu-latest` runners are sufficient through Phase 2 of the roadmap; a self-hosted KVM-capable runner pool can be added later if PR latency budget demands it.
+
+**Inside-VM test shape:**
+
+1. A `helios-tester` binary runs as a systemd unit inside the VM, reads a job manifest, executes each test case, writes results to a host-mounted directory, then powers off the VM.
+2. Each test case stands up a small network of namespaces connected by veth pairs, runs the Helios node binary in each, submits jobs through the IntentStore API, and drives real traffic via Rust packet primitives (`pnet` + `tokio-tun`).
+3. Assertions fire against three observable layers:
+   - **Kernel-side state** — BPF maps via `bpftool map dump`, TLS ULP via `ss -K`, LSM decisions via the BPF ringbuf event stream.
+   - **Userspace state** — structured flow events from the Helios telemetry ringbuf.
+   - **Wire capture** — `tcpdump` on veth interfaces, verified against expected ciphertext (kTLS) or expected forwarding (XDP SERVICE_MAP).
+
+**Canonical test cases**, one per kernel feature Helios depends on:
+
+| Hook | Test |
+|---|---|
+| XDP | Atomic SERVICE_MAP backend swap under `xdp-trafficgen` load; assert zero packet drops during the update |
+| XDP | Per-identity drop at ingress; assert kernel-side counter increments and ringbuf event fires |
+| TC | Egress redirection through `SIDECAR_MAP` to the sidecar handler chain |
+| sockops | `connect()` intercepted at `BPF_SOCK_OPS_TCP_CONNECT_CB`; TLS ULP installed; verified via `ss -K` |
+| sockops + kTLS | Wire capture shows TLS 1.3 records; negative peer with wrong SVID fails the handshake |
+| BPF LSM | `openat(2)` of an undeclared path denied; allowed paths permitted (positive + negative cases) |
+| BPF LSM | `socket(AF_PACKET, SOCK_RAW, …)` denied when `no_raw_sockets = true` |
+| BPF LSM | `execve(2)` of a non-allowlisted binary denied; allowlisted binary succeeds |
+| End-to-end | Submit policy via IntentStore API → Corrosion propagates → assert kernel verdict via the structured event stream |
+| Fault injection | `tc qdisc add dev … netem loss 20% delay 50ms`; assert dataplane convergence within N seconds |
+
+LSM assertions go against the BPF ringbuf event stream and audit metadata, **not** against "the program returned early." The latter does not prove the hook was actually invoked. This is the lesson the Falco and Tetragon test suites encode — assert on observable kernel side effects, never on internal program reachability.
+
+### Tier 4 — Verifier and Performance Regression
+
+**Verifier complexity** — modelled directly on Cilium's "Datapath BPF Complexity" workflow. The full Helios BPF corpus is compiled with worst-case feature flags (every map at maximum size, every policy path enabled), then loaded into each matrix kernel. `veristat` records per-program instruction counts and the ratio against the kernel's complexity ceiling. A baseline is stored on `main`; PRs fail when any program exceeds its baseline by >5% or approaches the per-program ceiling by >10%. The verifier is not a fixed function — it evolves across releases with different alias-analysis precision and different register-tracking heuristics. The only guard is loading the corpus into every kernel in the matrix.
+
+**XDP performance** — `xdp-trafficgen` and `xdp-bench` from the `xdp-tools` project generate synthetic load and measure receive-side numbers inside an LVH VM with two veth pairs (generator → SUT → sink). Baselines are per-runner-class pps and p99 latency, stored under `perf-baseline/` on `main`. PRs are gated on relative delta — pps within 5% and p99 latency within 10% — never on absolute thresholds, since GitHub Actions runner hardware varies enough to make absolute gates flaky. Raw output is retained for trend visualisation; in production, the same data feeds DuckLake (§17) — Helios dogfoods its own telemetry pipeline for its CI metrics.
+
+**Static second-opinion analysis** — PREVAIL (PLDI 2019, used by Microsoft for eBPF-for-Windows) is run against the program corpus in a non-blocking nightly job. When PREVAIL disagrees with the kernel verifier's accept/reject decision, the build fails. This treats the kernel verifier as a first opinion and PREVAIL as a second — defence against verifier bugs, not just program bugs. Recent academic work (Agni at CAV 2023, OSDI 2024 state-embedding, NSDI 2025 VEP) has demonstrated soundness gaps in the verifier's range analysis. A second analyser is cheap insurance.
+
+### CI Topology
+
+```
+Per-PR (critical path ≈ 15 minutes):
+  Job A   cargo test                                pure Rust, no BPF      (s)
+  Job B   cargo xtask dst                           turmoil DST (§21)      (min)
+  Job C   cargo xtask bpf-unit                      Tier 2                 (min)
+  Job D   cargo xtask integration-test vm <K>       Tier 3, kernel matrix  (10 min)
+            matrix: 5.10, 5.15, 6.1, 6.6, latest LTS
+  Job E   cargo xtask verifier-regress              Tier 4 — veristat      (min)
+          cargo xtask xdp-perf                      Tier 4 — xdp-bench     (min)
+
+Nightly:
+  Job F   Tier 3 + Tier 4 against bpf-next                    soft-fail
+  Job G   PREVAIL second-opinion analysis                     soft-fail
+  Job H   Long-run fault-injection soak with random netem profiles
+
+Per-release:
+  Job I   Full Tier 3 matrix on aarch64 (self-hosted Graviton runner)
+```
+
+### Mapping to the §21 Fault Catalogue
+
+§21 enumerates fault classes exercised by DST. Each has a real-kernel counterpart in this section:
+
+| §21 DST fault | Real-kernel complement |
+|---|---|
+| `SimTransport` partition | `tc qdisc … netem loss 100%` on veth |
+| `SimTransport` reordering / loss / latency | `netem reorder 50% gap 3`, `netem loss 5%`, `netem delay 100ms 20ms` |
+| `SimDataplane` policy update | actual BPF map update under XDP load (Tier 3 SERVICE_MAP test) |
+| `SimClock` skew | boot VMs with offset `CLOCK_REALTIME`; assert convergence |
+| Node clean crash + restart | `kill -9` on the in-VM Helios binary; assert clean BPF unload + rehydration |
+| `SimObservationStore` schema migration | real Corrosion in VM; trigger additive migration; assert no backfill storm |
+| Driver fails to start | real Cloud Hypervisor; inject a bad kernel image; assert lifecycle state machine |
+
+The correspondence is not 1-to-1. DST catches concurrency-logic bugs no integration test can, and integration tests catch verifier, attachment, and performance bugs no DST can. The bug classes partition.
+
+### Scope Boundaries
+
+Explicitly out of scope for this section:
+
+- **Real hardware NIC drivers.** Cilium, Tetragon, and the upstream BPF CI all run against virtio-net and veth in QEMU; none gate merges on `mlx5` or `i40e` behaviour. Real-hardware validation belongs in a per-release lab, not on every PR — it is not a credible use of CI minutes.
+- **Full kernel selftests.** Helios does not re-run `tools/testing/selftests/bpf` — that is the kernel's job. Helios relies on each supported kernel having passed its own selftests (which is the case for every shipped LTS) and confines its harness to Helios-specific programs.
+- **Production chaos as a substitute for CI.** This section is pre-merge gating. The chaos reconciler (§18) injects faults in live clusters to validate emergent behaviour. The two compose; neither substitutes for the other.
+
+### What This Buys Helios Over Kubernetes and Nomad
+
+Neither Kubernetes nor Nomad ships the Tier 1 + Tier 3 composition, because neither owns its dataplane. Kubernetes ships control-plane tests and expects each CNI plugin vendor to test its dataplane separately; Nomad's scheduler tests do not exercise eBPF at all. Helios owns the dataplane, which makes it the first orchestrator in a position to **gate merges on datapath correctness across a kernel matrix**. This is a net addition to the §20 efficiency comparison — not a parity claim.
 
 ---
 
-## 22. Roadmap
+## 23. Roadmap
 
 ### Phase 1 — Foundation (Months 1–3)
 - Core data model (Job, Node, Allocation, Policy)
@@ -2171,6 +2371,7 @@ For exhaustive state-space exploration beyond what turmoil covers, Helios is des
 - BPF map hydration via Corrosion subscriptions (retires the gRPC push path for dataplane state)
 - Node-identity-scoped write authorisation on Corrosion peers
 - Additive-only schema migration tooling (avoids the Fly backfill-storm failure mode)
+- **Real-kernel integration test harness (§22)**: Tier 2 BPF unit tests via `BPF_PROG_TEST_RUN`, Tier 3 kernel-matrix CI via `little-vm-helper` reusing aya's `cargo xtask integration-test vm` entry point, Tier 4 verifier complexity gates via `veristat` and XDP perf baselines via `xdp-bench` — bootstrapped alongside the first XDP/TC programs so every subsequent eBPF addition lands with a kernel-matrix gate
 
 ### Phase 3 — Identity and Security (Months 6–9)
 - Built-in CA (rcgen + rustls)
@@ -2178,6 +2379,7 @@ For exhaustive state-space exploration beyond what turmoil covers, Helios is des
 - sockops mTLS + kTLS installation
 - BPF LSM programs
 - Regorus policy evaluation (intent), verdict compilation into ObservationStore
+- Tier 3 sockops + kTLS test cases (verified via `ss -K` and veth wire capture) and BPF LSM positive/negative test fixtures (Tetragon-style, asserting on the BPF ringbuf event stream) added to the §22 kernel matrix
 
 ### Phase 4 — Additional Drivers (Months 9–12)
 - Cloud Hypervisor microVM and VM driver (replaces Firecracker + QEMU)
@@ -2198,7 +2400,7 @@ For exhaustive state-space exploration beyond what turmoil covers, Helios is des
 - Incident memory (libSQL)
 - Predictive scaling
 - Persistent microVMs (step 1): Cloud Hypervisor snapshot/restore exposed in the `microvm` driver with `userfaultfd` lazy memory paging; VMGenID wired into the guest on restore
-- Persistent microVMs (step 2): object-backed rootfs (chunked over Garage) with NVMe hot-tier cache
+- Persistent microVMs (step 2): `helios-fs` — Rust-native single-writer chunk store (content-addressed chunks in Garage, per-rootfs libSQL metadata with streaming WAL, NVMe 2Q cache, `vhost-user-fs` frontend). Scope: rootfs only, not a general distributed filesystem
 - Persistent microVMs (step 3): gateway auto-route (`expose = true`) + credential-proxy sidecar defaults
 - Persistent microVMs (step 4): idle-eviction reconciler with checkpoint (`snapshot_on_idle_seconds`) — scale-to-zero for long-lived stateful workloads
 
@@ -2215,7 +2417,7 @@ For exhaustive state-space exploration beyond what turmoil covers, Helios is des
 
 ---
 
-## 23. Image Factory
+## 24. Image Factory
 
 Helios nodes run an immutable, purpose-built OS — no shell, no package manager, no SSH. This is not a constraint to work around; it is a deliberate security choice. Every component on the node is explicitly declared, compiled with hardening flags, and verified at boot. The Image Factory is the system that makes this tractable: it manages how node OS images are built, customized, versioned, and distributed.
 
