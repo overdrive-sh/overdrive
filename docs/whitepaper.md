@@ -1512,7 +1512,7 @@ Each reconciler gets a private libSQL database for stateful memory across reconc
 
 ### Design
 
-Helios' reconciliation model is inspired by Kubernetes' control loop but with two key differences: reconcilers are strongly typed Rust trait objects (not Go processes with cluster-admin privileges), and they have access to a private persistent store for stateful reasoning.
+Helios' reconciliation model is inspired by Kubernetes' control loop but with three key differences: reconcilers are strongly typed Rust trait objects (not Go processes with cluster-admin privileges), they have access to a private persistent store for stateful reasoning, and the platform ships a durable-workflow primitive alongside the reconciler for multi-step operations that cannot be cleanly expressed as diff-based convergence.
 
 ```rust
 trait Reconciler: Send + Sync {
@@ -1525,11 +1525,32 @@ trait Reconciler: Send + Sync {
 }
 ```
 
+The `reconcile` function is pure over `(desired, actual, db) → actions`. Neither the trigger reason nor wall-clock time are inputs. This is the property that makes reconcilers testable in the simulation harness (§21) and tractable for formal verification (below).
+
+### Triggering Model — Hybrid by Design
+
+Every mature production orchestrator — Kubernetes, Nomad, KCP, Crossplane — converges on level-triggered reconciliation because it is the only pattern that survives missed events, crashes, and stale caches. Pure event-sourced orchestrators do not exist in production; the straw-man is always a hybrid in practice. Helios follows the same consensus with Nomad's concrete shape:
+
+- **Edge-triggered at ingress.** External state changes (job submission, node heartbeat failure, policy update, cert approaching expiry) produce a typed `Evaluation` enqueued through Raft.
+- **Level-triggered inside the reconciler.** Each `Evaluation` causes the responsible reconciler to recompute `desired vs actual → Vec<Action>` against the authoritative IntentStore. Missed or duplicated events do not lose state — the next evaluation sees the full current delta.
+
+### Evaluation Broker — Storm-Proof Ingress
+
+A naïve edge-triggered ingress amplifies correlated failures. Nomad documents the canonical failure mode: 500 flapping nodes × 20 allocations × 100 system jobs = 60,000 evaluations in a single heartbeat window. Without mitigation, this saturates Raft and the reconciler fleet — HashiCorp retrofitted a cancelable-eval-set after production incidents produced literal millions of evaluations.
+
+Helios ships the mitigation natively rather than retrofitting after an incident:
+
+- Evaluations are keyed by `(reconciler, target_resource)`. A second evaluation for the same key while one is pending moves the prior evaluation into a **cancelable set** processed by a reaper in bulk.
+- Because reconciliation is idempotent, collapsing N pending evaluations for the same target into one is semantically free — the surviving evaluation sees the fully-converged delta anyway.
+- Back-pressure is measured in evaluations-per-second per reconciler; sustained over-budget shedding raises a platform alert rather than silently degrading.
+
 ### Extension Model
 
 First-party reconcilers are Rust trait objects — maximum performance, full type safety. Third-party reconcilers are WASM modules loaded at runtime — sandboxed, hot-reloadable, language-agnostic. The interface is identical; the execution backend differs.
 
 Input and output types are fully serializable from day one, making the WASM migration path trivial.
+
+This replaces the Kubernetes operator model, where extensions ship as Go binaries running with cluster-admin privileges — the single largest source of cluster-destabilizing incidents in production Kubernetes. A misbehaving WASM reconciler cannot escape its sandbox, cannot mutate state without going through Raft, and can be evicted or hot-reloaded without restarting a pod. WASM as the control-plane extensibility substrate is now industry consensus (Helm 4, Cosmonic Control, wasmCloud) — Helios is early, not fringe.
 
 ### Built-in Reconcilers
 
@@ -1541,6 +1562,43 @@ Input and output types are fully serializable from day one, making the WASM migr
 - Node drain and replacement
 - WASM function scaling
 - Chaos engineering (deliberate fault injection for reliability testing)
+- Workflow execution (see below)
+
+### Workflow Reconciler — Durable Execution for Multi-Step Operations
+
+Some orchestration operations are fundamentally sequential: "roll certificate through DNS propagation, wait for validation, swap trust anchor, verify all nodes accepted, retire old cert." These do not fit cleanly into diff-based convergence because the correct next action depends on the *history* and the *timing* of prior steps, not just the current delta. Encoding them as reconciler memory works but reproduces what Temporal and Restate call *durable execution* — poorly.
+
+Helios therefore treats durable workflows as a first-class primitive, implemented *as* a built-in reconciler whose desired state is a workflow definition and whose memory is a replayable event journal:
+
+```rust
+trait Workflow {
+    async fn run(&self, ctx: &WorkflowCtx) -> WorkflowResult;
+}
+```
+
+- Each `await` point is a durable checkpoint written to libSQL. A crashed workflow resumes on any control plane node by replaying the journal.
+- Cross-workflow coordination uses typed signals, not ad-hoc StateStore writes.
+- Used internally for certificate lifecycle, multi-stage deployments, cross-region migrations, and human-in-the-loop staged rollouts.
+
+The reconciler primitive handles "converge cluster toward spec." The workflow primitive handles "execute this defined sequence to completion with crash-safe resume." They compose: a deployment workflow emits actions that are realized by the job-lifecycle reconciler.
+
+### Three-Layer State Taxonomy
+
+Helios draws a hard boundary between three state layers, each with different consistency guarantees. The reconciler and workflow primitives read and write these layers with explicit rules:
+
+| Layer | Primitive reads | Primitive writes | Store | Guarantee |
+|---|---|---|---|---|
+| Intent — what should be | yes | only via Raft actions | IntentStore (redb / openraft+redb) | Linearizable |
+| Observation — what is | yes | never directly | ObservationStore (Corrosion / CRDT) | Eventually consistent |
+| Memory — what happened | yes | yes, private | libSQL per primitive | Private to the primitive |
+
+This boundary is load-bearing. Authoritative schedule decisions must go through Raft — CRDT state is correct for globe-spanning observation data but wrong for "this workload is definitely scheduled here." Private libSQL gives each primitive persistent memory for backoff counters, placement history, resource samples, and workflow journals without inflating the authoritative store. §4 and §17 specify the stores in detail; §18 specifies which primitive reads and writes each layer.
+
+### Formal Verification Path
+
+The typed Rust trait interface is deliberately aligned with the target shape of recent verified-controller research (USENIX OSDI '24 *Anvil*, built on Verus). The *Eventually Stable Reconciliation* property — progress (converges toward desired state) and stability (remains at desired state absent external change) — is specifiable for each built-in reconciler as a temporal-logic formula over the `reconcile` function's pre/post-state.
+
+First-party reconcilers ship with ESR specifications. WASM extensions declare ESR preconditions that the runtime enforces at load time. This is the largest future-proofing investment available to the platform: no existing production orchestrator has controllers with mechanically checked liveness properties, and the ecosystem around reconciler verification has reached academic maturity faster than around any alternative primitive.
 
 ---
 
