@@ -67,6 +67,7 @@ Several foundational technologies reached production maturity simultaneously bet
 - `rustls` with kTLS offload — Kernel TLS with hardware crypto offload
 - `redb` — Pure Rust embedded database (single and HA modes)
 - BPF LSM — Kernel 5.7+, stable, enables custom MAC without SELinux complexity
+- `cr-sqlite` + Corrosion — SQLite CRDT replication with SWIM gossip over QUIC, production-proven at Fly.io's global scale for continent-spanning routing state that Raft cannot express
 
 Helios is the platform that becomes possible when all of these exist simultaneously.
 
@@ -98,6 +99,9 @@ Memory safety, performance, and a maturing ecosystem that now covers every requi
 **8. One binary, any topology.**
 The control plane and node agent are compiled into a single binary. Role is declared at bootstrap, not at build time. A single-node development cluster and a hundred-node production cluster run the same binary with different configuration. There is no separate installation, no separate upgrade path, no separate operational model.
 
+**9. Strong consistency where it matters, gossip where it scales.**
+Cluster state divides cleanly along a consistency boundary. *Intent* — job specs, policies, certificates, scheduler allocation decisions — requires linearizability and flows through per-region Raft. *Observation* — live allocation status, service endpoints, node health, resource profiles — tolerates seconds of staleness and flows through Corrosion: CR-SQLite tables gossiped over SWIM. Raft scales to a quorum; Corrosion scales to continents. Each tool is used where its guarantees fit, and never where they don't.
+
 ---
 
 ## 3. Architecture Overview
@@ -111,9 +115,10 @@ The control plane and node agent are compiled into a single binary. Role is decl
 │          on same bare metal, or dedicated — role config)        │
 │                                                                 │
 │  ┌──────────────┐  ┌────────────────┐  ┌─────────────────────┐ │
-│  │  StateStore  │  │  Reconcilers   │  │  Built-in CA        │ │
+│  │  IntentStore │  │  Reconcilers   │  │  Built-in CA        │ │
 │  │  single:redb │  │  (Rust traits  │  │  (SPIFFE/X.509)     │ │
 │  │  ha: raft+redb  │   / WASM ext.) │  │                     │ │
+│  │  (per region)│  │                │  │                     │ │
 │  └──────────────┘  └────────────────┘  └─────────────────────┘ │
 │  ┌──────────────┐  ┌────────────────┐  ┌─────────────────────┐ │
 │  │  Scheduler   │  │  Regorus +     │  │  DuckLake           │ │
@@ -137,7 +142,10 @@ The control plane and node agent are compiled into a single binary. Role is decl
 │  │  hyper · rustls · route engine · middleware pipeline     │   │
 │  └──────────────────────────────────────────────────────────┘   │
 ├─────────────────────────────────────────────────────────────────┤
-│             Gossip / Health (SWIM)                              │
+│      ObservationStore  (Corrosion — CR-SQLite + SWIM/QUIC)      │
+│      alloc status · service backends · node health · regions    │
+│      — local SQLite on every node · gossiped within / across    │
+│        regions · subsumes plain membership gossip               │
 ├─────────────────────────────────────────────────────────────────┤
 │             Object Storage (Garage, S3-compatible)              │
 └─────────────────────────────────────────────────────────────────┘
@@ -147,18 +155,37 @@ Single binary — role declared at bootstrap:
   role = "worker"               dedicated worker node
   role = "control-plane+worker" both (single node or 3-node HA)
   node.gateway.enabled = true   activates ingress subsystem
+  cluster.region = "eu-west-1"  regional Raft + Corrosion peer
 ```
 
 ---
 
 ## 4. Control Plane
 
-### State Store
+### The Intent / Observation Split
 
-Helios abstracts control plane storage behind a single trait, with the implementation chosen by deployment mode. This means a single-node setup carries none of the overhead of a distributed consensus system — complexity scales with the deployment, not with the platform.
+Helios splits cluster state along a fundamental consistency boundary, reflecting design principle 9:
+
+|                | **Intent**                                        | **Observation**                                         |
+|----------------|---------------------------------------------------|---------------------------------------------------------|
+| Examples       | Job specs, policies, certificates, scheduler allocation decisions, compiled policy verdicts | Live allocation status, service backend IPs, node health, resource profiles |
+| Consistency    | Linearizable                                      | Eventually consistent (seconds)                         |
+| Backend        | Raft (openraft + redb), per region                | Corrosion (CR-SQLite + SWIM/QUIC), global               |
+| Writer         | Control plane leader within region                | Every node writes its own rows                          |
+| Reader         | Control plane reconcilers                         | Every node agent, scheduler, gateway, dataplane         |
+| Scale ceiling  | 3–5 node quorum, one region                       | Thousands of nodes, many regions                        |
+| Partition behavior | Minority region unavailable for writes        | Reads always succeed locally; writes catch up on heal   |
+
+The split isolates two classes of bug. A Raft partition does not stall service routing — the dataplane reads observation, which stays live. A Corrosion backfill does not corrupt job specs — intent sits in a separate store with separate writers. Nothing in the codebase can cross the boundary accidentally: `IntentStore` and `ObservationStore` are distinct traits on distinct types.
+
+This is the split Fly.io arrived at after years of trying to use Consul-style consensus for everything. Helios adopts it from day one, not after the incident.
+
+### IntentStore — Authoritative Control Plane State
+
+Helios abstracts intent storage behind a single trait, with the implementation chosen by deployment mode. A single-node setup carries none of the overhead of a distributed consensus system — complexity scales with the deployment, not with the platform.
 
 ```rust
-trait StateStore: Send + Sync {
+trait IntentStore: Send + Sync {
     async fn get(&self, key: &[u8]) -> Result<Option<Vec<u8>>>;
     async fn put(&self, key: &[u8], value: &[u8]) -> Result<()>;
     async fn delete(&self, key: &[u8]) -> Result<()>;
@@ -197,6 +224,8 @@ Read path:   linearizable read → Raft read index → redb → done
 Footprint:   ~80MB RAM, redb + Raft log, background replication tasks
 ```
 
+**Per-region quorum.** In multi-region deployments each region runs its own Raft cluster. A region's intent store is authoritative for jobs and policies declared in that region. Cross-region visibility is provided by the observation store, not by stretching Raft across the WAN — see *Multi-Region Federation* below.
+
 **Migration: single → HA**
 
 Teams that start on a single node and grow to HA do not need external tooling or manual data migration. Both store implementations share the same snapshot format, and the migration is built into the platform CLI:
@@ -210,10 +239,10 @@ helios cluster upgrade --mode ha --peers node-2,node-3
 4. Cluster continues — zero downtime, no data loss
 ```
 
-The snapshot interface is part of the `StateStore` contract:
+The snapshot interface is part of the `IntentStore` contract:
 
 ```rust
-trait StateStore: Send + Sync {
+trait IntentStore: Send + Sync {
     // ... core operations ...
 
     /// Export full state for migration or backup
@@ -227,7 +256,7 @@ trait StateStore: Send + Sync {
 
 `export_snapshot` serialises the full key-value state of `LocalStore` into a portable `StateSnapshot`. `RaftStore::bootstrap_from` replays that snapshot as the initial Raft log entry on each peer before the cluster starts — no peer sees an empty state, no reconciliation loop runs against a blank slate. The snapshot format is also used for regular Raft snapshots in HA mode and for disaster recovery backups written to Garage, so the same code path is exercised continuously in production rather than only at migration time.
 
-All authoritative cluster state — job definitions, node registrations, allocations, network policies, certificates — passes through whichever store is active. The rest of the control plane is unaware of which implementation is running.
+All authoritative intent — job definitions, node registrations (static identity, not runtime health), allocation decisions (the intent, not the live status), network policies, certificates — passes through whichever IntentStore implementation is active. The rest of the control plane is unaware of which is running.
 
 ```
 Control plane footprint by mode:
@@ -235,6 +264,129 @@ Control plane footprint by mode:
   HA:      ~80MB RAM  — openraft + redb, 3-node quorum
   (vs ~1GB for Kubernetes control plane in either topology)
 ```
+
+### ObservationStore — Live Cluster Map
+
+Intent defines what the cluster *should* do. Observation defines what it *is doing right now*. Observation is what every node agent must read continuously to hydrate BPF maps; what the scheduler consults to bin-pack against real utilization; what the gateway resolves `spiffe://helios.local/job/payments` against to find a live backend set.
+
+Pushing this from a single Raft leader via gRPC streams does not scale. Above a few hundred nodes it is a fan-out bottleneck; across regions, Raft's quorum-latency floor makes it impossible. Fly.io learned this the hard way with Consul; the answer they built — Corrosion — is open source, pure Rust, and production-proven across a continent-spanning fleet. Helios adopts it as the observation substrate:
+
+```rust
+trait ObservationStore: Send + Sync {
+    async fn read(&self, sql: &str, params: &[Value]) -> Result<Rows>;
+    async fn write(&self, sql: &str, params: &[Value]) -> Result<()>;
+    async fn subscribe(&self, sql: &str) -> Result<RowStream>;
+}
+```
+
+Under the hood each node runs a Corrosion peer backed by **cr-sqlite** — a SQLite extension that converts tagged tables into CRDTs with last-write-wins semantics under logical timestamps. Every write is logged in `crsql_changes` and gossiped to a random peer subset over QUIC within seconds. Every node ends up with a complete, ACID-queryable local SQLite of the cluster's observation state.
+
+The core schema:
+
+```sql
+CREATE TABLE alloc_status (
+    alloc_id       BLOB PRIMARY KEY,
+    job_id         TEXT,
+    node_id        TEXT,
+    state          TEXT,          -- pending | running | draining | terminated
+    svid_hash      BLOB,
+    resources      BLOB,          -- current cgroup/vCPU/memory
+    region         TEXT,
+    updated_at     INTEGER        -- logical timestamp
+);
+
+CREATE TABLE service_backends (
+    service_id     TEXT,
+    alloc_id       BLOB,
+    ip             BLOB,
+    port           INTEGER,
+    weight         INTEGER,
+    health         INTEGER,
+    PRIMARY KEY (service_id, alloc_id)
+);
+
+CREATE TABLE node_health (
+    node_id        TEXT PRIMARY KEY,
+    region         TEXT,
+    capacity       BLOB,
+    last_heartbeat INTEGER
+);
+
+CREATE TABLE policy_verdicts (
+    scope_id       TEXT,
+    key            BLOB,
+    verdict        BLOB,
+    compiled_at    INTEGER,
+    PRIMARY KEY (scope_id, key)
+);
+
+SELECT crsql_as_crr('alloc_status');
+SELECT crsql_as_crr('service_backends');
+SELECT crsql_as_crr('node_health');
+SELECT crsql_as_crr('policy_verdicts');
+```
+
+**Who writes.**
+Every node writes its own rows (owner-writer model). Allocation status is written by the node that runs the allocation. Node health is written by the node itself. Compiled policy verdicts are written by the regional control plane leader after Regorus/WASM evaluation — the source policy is intent (Raft), but the evaluated output that nodes materialise into BPF maps is observation (Corrosion).
+
+**Who reads.**
+Every subsystem reads locally, with no gRPC round trip. The node agent subscribes to `service_backends`, `alloc_status`, and `policy_verdicts` and materialises BPF maps on change. The scheduler reads `node_health` to bin-pack. The gateway reads `service_backends` to resolve routes. The LLM observability agent correlates `alloc_status` transitions against telemetry.
+
+**What it replaces.**
+The earlier bare "Gossip / Health (SWIM)" component is gone. Corrosion is SWIM membership plus state propagation in one system — you do not run both. The gRPC push path from control plane to node agent for dataplane maps is also retired: the control plane writes verdicts into `policy_verdicts`, gossip carries them, node agents react to subscription events.
+
+### Consistency Guardrails
+
+CR-SQLite sacrifices strong ordering for availability. Helios enforces the boundary between intent and observation with compile-time discipline and runtime safeguards drawn directly from Fly.io's published post-mortems:
+
+- **Type-level separation.** `IntentStore` and `ObservationStore` are distinct traits on distinct types. Nothing in the codebase can persist a job spec into Corrosion or an allocation heartbeat into Raft — the compiler rejects it. There is no shared `put(key, value)` surface that lets the wrong call go to the wrong place.
+- **Identity-scoped writes.** A Corrosion peer only accepts writes whose CRDT site ID matches a live node SVID signed by the platform CA. A compromised node cannot forge rows on behalf of another node, and a decommissioned node's site ID is purged from the trust bundle.
+- **Additive-only schema migrations.** Nullable column additions in CR-SQLite trigger cluster-wide backfill storms — Fly's most painful Corrosion incident. Helios schema migrations are strictly additive, versioned in the intent store, and gated through a two-phase rollout: new table first, readers cut over, old table drained, old table dropped. No `ALTER TABLE ADD COLUMN NULL` across the live fleet.
+- **Full rows over field diffs.** Learning from Fly's post-mortem on partial updates, node agents republish the complete row for an allocation on every state transition rather than diffing fields. Late or reordered gossip converges deterministically under LWW; diff-merge logic does not.
+- **Event-loop watchdogs.** Every subscription has a stall detector. A Corrosion peer whose event loop has not advanced within N seconds is killed and restarted before it can propagate stuck state — the bug class that contagion-deadlocked Fly's proxy fleet is a named DST scenario, not a hypothetical.
+- **Per-region blast radius.** The global Corrosion topology is not a single flat cluster. Regional clusters gossip internally; a thin global membership cluster maps regions to coordinates. A runaway write in one region does not fan out globally in the same tick.
+
+### Multi-Region Federation
+
+The intent/observation split makes geographic federation a straightforward extension rather than a new architecture:
+
+```
+┌─ region: us-east-1 ────────────┐   ┌─ region: eu-west-1 ─────────────┐
+│                                │   │                                 │
+│  IntentStore (Raft, 3 nodes)   │   │  IntentStore (Raft, 3 nodes)    │
+│    jobs, policies, certs       │   │    jobs, policies, certs        │
+│    scoped to this region       │   │    scoped to this region        │
+│                                │   │                                 │
+│  ObservationStore (Corrosion) ◄┼───┼► ObservationStore (Corrosion)   │
+│    alloc_status, service_*,    │   │    alloc_status, service_*,     │
+│    node_health                 │   │    node_health                  │
+│                                │   │                                 │
+│  Node agents · Gateway · eBPF  │   │  Node agents · Gateway · eBPF   │
+└────────────────────────────────┘   └─────────────────────────────────┘
+                  ▲                                      ▲
+                  └──── global Corrosion membership ─────┘
+                        (region metadata only; no jobs)
+```
+
+Each region is operationally autonomous. Control plane decisions are made by the regional Raft cluster; they do not wait on consensus across an ocean. Routing, service discovery, and health converge globally through Corrosion at gossip latency (seconds), which is well below the rate at which routing decisions need to react.
+
+Under a region-to-region partition each region continues to operate on locally-committed intent, serve locally-running workloads, and write to its local observation store. When the partition heals the Corrosion tables converge via LWW. Intent does not need to converge — it was never shared.
+
+Cross-region service discovery works because every node reads `service_backends` locally, and the gossip tables are populated by every region. A gateway in Tokyo resolving `job/payments` sees backends in `us-east-1` and `eu-west-1` in its local SQLite, and the dataplane's XDP programs load-balance by whatever weighting the regional policy engines have compiled into `policy_verdicts`.
+
+```toml
+[cluster]
+mode    = "ha"
+region  = "eu-west-1"
+peers   = ["node-2:7001", "node-3:7001"]
+
+[cluster.observation]
+corrosion_peers         = ["obs-1:8787", "obs-2:8787", "obs-3:8787"]
+global_bootstrap        = ["global.helios.local:8787"]
+rejoin_timeout_seconds  = 60
+```
+
+The same binary, the same role mechanic, one new line of configuration. Federation is not a separate product.
 
 ### Control Plane and Worker on the Same Node
 
@@ -267,7 +419,7 @@ Five-node mixed cluster (larger deployments):
 
 ### Workload Isolation on Co-located Nodes
 
-When a node runs both roles, control plane processes run in dedicated cgroups with kernel-enforced resource reservations. A misbehaving workload cannot starve the state store or scheduler regardless of how aggressively it consumes CPU or memory:
+When a node runs both roles, control plane processes run in dedicated cgroups with kernel-enforced resource reservations. A misbehaving workload cannot starve the IntentStore, the Corrosion peer, or the scheduler regardless of how aggressively it consumes CPU or memory:
 
 ```
 /helios.slice/
@@ -303,7 +455,7 @@ Certificate — issued SVID, TTL, rotation schedule
 
 Helios embeds a full X.509 certificate authority directly in the control plane. There is no SPIRE server, no cert-manager, no Vault integration required for basic operation.
 
-The root CA key lives in the state store, encrypted at rest. In HA mode it is Raft-replicated across all control plane nodes. Each node receives an intermediate CA certificate at bootstrap, signed by the root. The node agent issues short-lived leaf certificates (SVIDs, 1-hour TTL) for each workload it runs, using its intermediate.
+The root CA key lives in the IntentStore, encrypted at rest. In HA mode it is Raft-replicated across all control plane nodes within a region — CA material is deliberately never written to the eventually-consistent ObservationStore. Each node receives an intermediate CA certificate at bootstrap, signed by the root. The node agent issues short-lived leaf certificates (SVIDs, 1-hour TTL) for each workload it runs, using its intermediate.
 
 SPIFFE IDs are used as the identity format:
 
@@ -325,15 +477,15 @@ Resource profiles maintained by the right-sizing subsystem feed real utilization
 
 The node agent is a single Rust binary that runs on every worker node. It is responsible for:
 
-- Registering with the control plane and maintaining heartbeat
+- Registering with the regional control plane and writing live state (`alloc_status`, `node_health`, `service_backends`) into its local Corrosion ObservationStore
 - Loading and managing eBPF programs via aya-rs
-- Receiving and applying BPF map updates from the control plane
+- Subscribing to Corrosion tables and materialising BPF maps (`SERVICE_MAP`, `IDENTITY_MAP`, `POLICY_MAP`, `FS_POLICY_MAP`) on row change — there is no gRPC push path for dataplane state
 - Requesting and distributing workload SVIDs from the built-in CA
 - Running workloads via the appropriate driver
 - Collecting telemetry from the eBPF ringbuf and forwarding to DuckLake
-- Responding to reconciler actions (start, stop, migrate, resize)
+- Responding to reconciler actions (start, stop, migrate, resize) — control-flow RPCs still arrive via gRPC streaming from the regional control plane
 
-The agent is event-driven throughout. BPF ringbuf events push telemetry without polling. Control plane instructions arrive via gRPC streaming. There are no periodic polling loops in the critical path.
+The agent is event-driven throughout. BPF ringbuf events push telemetry without polling. Observation changes arrive as SQLite subscription events from the local Corrosion peer. Intent-level reconciler instructions arrive via gRPC streaming. There are no periodic polling loops in the critical path.
 
 ---
 
@@ -488,11 +640,16 @@ LSM enforcement is in-kernel and cannot be bypassed regardless of what code runs
 
 ### BPF Map Architecture
 
-All eBPF programs are readers of BPF maps. The node agent is the only writer. The control plane pushes policy decisions via gRPC; the agent writes them into maps; eBPF programs enforce them:
+All eBPF programs are readers of BPF maps. The node agent is the only writer. Policy is evaluated once, in the regional control plane, then propagated to every node as observation — compiled verdicts in Corrosion, read locally, materialised into BPF maps:
 
 ```
-Control Plane (Regorus evaluates policy)
-    │ gRPC push
+Intent (Raft, per region)
+    │
+Control Plane (Regorus / WASM evaluates policy → compiled verdicts)
+    │ writes into ObservationStore.policy_verdicts
+    ▼
+Corrosion (CR-SQLite, SWIM-gossiped to every node over QUIC)
+    │ SQLite subscription event on local peer
     ▼
 Node Agent (writes BPF maps via aya-rs)
     │
@@ -502,6 +659,8 @@ BPF Maps: POLICY_MAP · SERVICE_MAP · IDENTITY_MAP · FS_POLICY_MAP
     ▼
 XDP · TC · sockops · BPF LSM programs
 ```
+
+Policy *source* lives in the IntentStore — auditable, versioned, strongly consistent. Policy *verdicts* flow through the ObservationStore — eventually consistent within seconds, readable locally on every node without a gRPC round trip. Service backend changes take the same path: a node brings up a new allocation, writes its row into `service_backends`, and within gossip-propagation time every node's XDP program is load-balancing across the new backend set.
 
 Policy evaluation (Rego/Regorus) is never in the hot path. Per-connection enforcement is an O(1) BPF map lookup measured in nanoseconds.
 
@@ -1247,16 +1406,32 @@ Language-agnostic via the WASM Component Model. TypeScript, Go, Python, and Rust
 
 ## 17. Storage Architecture
 
-Different data shapes require different storage primitives. Helios uses purpose-fit storage at each layer:
+Different data shapes require different storage primitives. Helios uses purpose-fit storage at each layer, with a hard boundary between *intent* (linearizable) and *observation* (eventually consistent) as established in §4:
 
-### Control Plane State — StateStore (mode-dependent)
+### Control Plane Intent — IntentStore (mode-dependent)
 
-Hot metadata: jobs, nodes, allocations, policies, certificates. The active implementation depends on deployment mode:
+Hot authoritative metadata: job specs, policies, certificates, scheduler allocation decisions. Requires linearizability. The active implementation depends on deployment mode:
 
 - **Single mode** — redb direct. ACID transactions, no Raft overhead, ~30MB RAM. Right-sized for a single server without paying for distributed consensus that provides no benefit.
-- **HA mode** — openraft + redb. Linearizable via the Raft log, replicated across 3 or 5 control plane nodes, ~80MB RAM.
+- **HA mode** — openraft + redb. Linearizable via the Raft log, replicated across 3 or 5 control plane nodes, ~80MB RAM. Per-region: a multi-region deployment runs one IntentStore per region.
 
 Both implementations are pure Rust, embedded, and require no separate process. The rest of the platform is unaware of which is active. Migration from single to HA is non-destructive — both share the same snapshot format.
+
+### Live Cluster Map — ObservationStore (Corrosion)
+
+Live operational state: allocation status, service backend endpoints, node health, compiled policy verdicts, resource profiles. Strong consistency is unnecessary here and actively harmful — it cannot scale geographically, and the cost of Raft latency on the hot dataplane hydration path is unjustified when seconds of staleness is acceptable.
+
+Helios uses **Corrosion** (Fly.io, AGPL/Rust) backed by **cr-sqlite** (Vlcn, MIT). Each node runs a Corrosion peer with a local SQLite file. CR-SQLite converts tagged tables into CRDTs with last-write-wins semantics under logical timestamps; peers gossip row changes over QUIC via a SWIM membership protocol.
+
+```
+Per-node footprint:
+  SQLite file     ~50–500MB  (full cluster observation state)
+  Corrosion peer  ~15MB RAM  (QUIC endpoint + gossip engine)
+  Read path       local SQL  (no RPC, no network)
+  Write path      local SQL + gossip fan-out
+```
+
+The store is global in multi-region deployments, with the regional blast-radius limits described in §4. The full Intent / Observation rationale, the schema, and the consistency guardrails live in §4 — this section lists ObservationStore as a storage layer; §4 describes how it is used.
 
 ### Garage — Object Storage
 
@@ -1329,7 +1504,7 @@ In single mode, Garage can be replaced with local filesystem storage — the sam
 
 ### Reconciler Memory — libSQL (per-reconciler)
 
-Each reconciler gets a private libSQL database for stateful memory across reconciliation cycles — restart tracking, placement history, resource sample accumulation. Reconciler DB writes are strictly private; all cluster state mutations go through the active StateStore. The consistency model never mixes.
+Each reconciler gets a private libSQL database for stateful memory across reconciliation cycles — restart tracking, placement history, resource sample accumulation. Reconciler DB writes are strictly private; cluster mutations always route through a typed store — the IntentStore for intent, the ObservationStore for observation — never through the reconciler's private DB. The three consistency models (private libSQL, linearizable Raft, eventually-consistent CR-SQLite) never mix.
 
 ---
 
@@ -1424,6 +1599,8 @@ The control plane compiles this into BPF maps. LSM and XDP programs enforce it. 
 | Node join | 2-5 minutes | <10 seconds |
 | Workload types | Containers only | All (unified Cloud Hypervisor VMM) |
 | Observability | Scraped logs | Kernel-native, structured |
+| Cluster state fan-out | etcd watch via kube-apiserver (central bottleneck) | Corrosion gossip: local SQLite on every node |
+| Multi-region | Raft stretched across WAN, or federation plane | Per-region Raft + global CRDT gossip (Fly-proven) |
 
 ### Utilization
 
@@ -1490,6 +1667,13 @@ trait Driver: Send + Sync {
     async fn status(&self, handle: &AllocationHandle) -> Result<AllocationStatus>;
     async fn resize(&self, handle: &AllocationHandle, resources: &Resources) -> Result<()>;
 }
+
+// Observation — Corrosion cannot run in simulation (real QUIC stack, real SWIM timers)
+trait ObservationStore: Send + Sync {
+    async fn read(&self, sql: &str, params: &[Value]) -> Result<Rows>;
+    async fn write(&self, sql: &str, params: &[Value]) -> Result<()>;
+    async fn subscribe(&self, sql: &str) -> Result<RowStream>;
+}
 ```
 
 Each trait has two implementations: a real implementation for production, and a simulation implementation for testing. The compiler enforces the boundary — `rand` and `std::time` are direct dependencies only in platform wiring crates, never in core logic crates.
@@ -1503,9 +1687,10 @@ Each trait has two implementations: a real implementation for production, and a 
 | `Entropy` | `OsEntropy` (OS RNG) | `SeededEntropy` (StdRng, reproducible) |
 | `Dataplane` | `EbpfDataplane` (aya-rs) | `SimDataplane` (in-memory HashMap) |
 | `Driver` | `CloudHypervisorDriver` etc. | `SimDriver` (configurable failure modes) |
-| `StateStore` | `LocalStore` / `RaftStore` | `LocalStore` (already pure Rust, no kernel) |
+| `IntentStore` | `LocalStore` / `RaftStore` | `LocalStore` (already pure Rust, no kernel) |
+| `ObservationStore` | `CorrosionStore` (cr-sqlite + SWIM/QUIC) | `SimObservationStore` (in-memory LWW, injectable gossip delay, injectable partition) |
 
-`SimDataplane` tracks policy and service state in memory and generates synthetic flow events — enough to test that the control plane correctly drives the dataplane without involving a real kernel. `SimDriver` can be configured to fail on start, crash after N operations, or consume exactly specified resources, making scheduler and reconciler logic fully testable without spawning real VMs.
+`SimDataplane` tracks policy and service state in memory and generates synthetic flow events — enough to test that the control plane correctly drives the dataplane without involving a real kernel. `SimDriver` can be configured to fail on start, crash after N operations, or consume exactly specified resources, making scheduler and reconciler logic fully testable without spawning real VMs. `SimObservationStore` implements the CR-SQLite LWW merge semantics in memory with a controllable gossip delay and partition matrix — the contagion-deadlock failure mode that hit Fly.io's fleet is a named scenario in the DST fault catalogue.
 
 ### The Simulation Harness
 
@@ -1521,12 +1706,15 @@ fn test_leader_election_after_partition() {
     for i in 0..3 {
         sim.host(format!("node-{i}"), || async move {
             HeliosNode::new(SimConfig {
-                clock:     Arc::new(SimClock::new()),
-                transport: Arc::new(SimTransport::new()),
-                entropy:   Arc::new(SeededEntropy::new(42)),
-                dataplane: Arc::new(SimDataplane::new()),
-                driver:    Arc::new(SimDriver::new()),
-                store:     StoreMode::Ha,
+                clock:       Arc::new(SimClock::new()),
+                transport:   Arc::new(SimTransport::new()),
+                entropy:     Arc::new(SeededEntropy::new(42)),
+                dataplane:   Arc::new(SimDataplane::new()),
+                driver:      Arc::new(SimDriver::new()),
+                intent:      IntentMode::Ha,
+                observation: Arc::new(SimObservationStore::new(
+                    GossipProfile::realistic(), // injectable delay + partition
+                )),
             }).run().await
         });
     }
@@ -1571,6 +1759,12 @@ assert_always!("policy consistency",
 assert_always!("mTLS enforced",
     flows.iter().all(|f| f.tls_version.is_some())
 );
+assert_always!("intent never crosses into observation",
+    corrosion.tables().all(|t| !t.contains_intent_class())
+);
+assert_always!("observation never crosses into intent",
+    raft.keys().all(|k| !k.starts_with("alloc-status/"))
+);
 ```
 
 **Liveness — good things eventually happen:**
@@ -1606,6 +1800,11 @@ Nodes:       clean crash + restart, crash mid-write, clock skew,
 
 Storage:     redb write failure, disk full, corrupt snapshot
 
+Observation: Corrosion gossip stalled, LWW clock skew across peers,
+             peer event-loop deadlock (Fly-style contagion scenario),
+             region-to-region partition with independent writes,
+             schema-migration backfill storm
+
 Workloads:   driver fails to start, workload OOM, restart loop,
              workload consumes all node CPU
 
@@ -1616,9 +1815,9 @@ Control plane: leader crash during job submission, leader crash
 
 This catalogue also drives the chaos engineering reconciler in production — the same failure modes exercised in simulation are injected deliberately in live clusters to validate self-healing behavior.
 
-### The StateStore Abstraction Is Already Correct
+### The Store Abstractions Are Already Correct
 
-The `StateStore` trait with `export_snapshot` / `bootstrap_from` is the right shape for DST. Simulation tests use `LocalStore` with a `SimClock` — single-node, no Raft complexity, fully deterministic. `RaftStore` is added only to tests that specifically exercise consensus behavior. The two store implementations are independently testable, and the snapshot format shared between them is exercised continuously rather than only at migration time.
+Both `IntentStore` (with `export_snapshot` / `bootstrap_from`) and `ObservationStore` (with `read` / `write` / `subscribe`) are the right shapes for DST. Simulation tests use `LocalStore` + `SimObservationStore` with a `SimClock` — single-node, no Raft complexity, no real QUIC, fully deterministic. `RaftStore` is added only to tests that specifically exercise consensus behavior; the real `CorrosionStore` is exercised by cross-region tests that need the actual SWIM/LWW semantics. The four store modes (single-region intent, HA intent, sim observation, real Corrosion observation) are independently composable and each is exercised continuously rather than only at boundary events.
 
 ### Antithesis
 
@@ -1631,27 +1830,32 @@ For exhaustive state-space exploration beyond what turmoil covers, Helios is des
 ### Phase 1 — Foundation (Months 1–3)
 - Core data model (Job, Node, Allocation, Policy)
 - Control plane API (tonic/gRPC — internal node-agent + CLI transport)
-- StateStore abstraction: LocalStore (redb direct) for single mode
-- Injectable Clock, Transport, Entropy, Dataplane, Driver traits
-- turmoil simulation harness + SimDriver / SimDataplane / SimClock
+- IntentStore abstraction: LocalStore (redb direct) for single mode
+- ObservationStore abstraction: single-process in-memory implementation (lays the trait boundary early, swapped for Corrosion in Phase 2)
+- Injectable Clock, Transport, Entropy, Dataplane, Driver, ObservationStore traits
+- turmoil simulation harness + SimDriver / SimDataplane / SimClock / SimObservationStore
 - Process driver
 - Basic scheduler (first-fit)
 - CLI (`helios job submit`, `helios node list`, `helios alloc status`)
 - Image Factory MVP: `meta-helios` Yocto layer, `helios-image-factory` Rust service (schematic store, artifact cache, HTTP download frontend)
 
-### Phase 2 — Networking (Months 3–6)
+### Phase 2 — Networking and Observation (Months 3–6)
 - aya-rs eBPF scaffolding
 - XDP routing and service load balancing
 - TC egress control
-- BPF map management in node agent
 - RaftStore (openraft + redb) for HA mode + single → HA migration
+- **CorrosionStore — production ObservationStore backed by Corrosion + cr-sqlite**
+- **Corrosion schema: `alloc_status`, `service_backends`, `node_health`, `policy_verdicts`**
+- BPF map hydration via Corrosion subscriptions (retires the gRPC push path for dataplane state)
+- Node-identity-scoped write authorisation on Corrosion peers
+- Additive-only schema migration tooling (avoids the Fly backfill-storm failure mode)
 
 ### Phase 3 — Identity and Security (Months 6–9)
 - Built-in CA (rcgen + rustls)
 - SPIFFE SVID issuance and rotation
 - sockops mTLS + kTLS installation
 - BPF LSM programs
-- Regorus policy evaluation
+- Regorus policy evaluation (intent), verdict compilation into ObservationStore
 
 ### Phase 4 — Additional Drivers (Months 9–12)
 - Cloud Hypervisor microVM and VM driver (replaces Firecracker + QEMU)
@@ -1666,16 +1870,19 @@ For exhaustive state-space exploration beyond what turmoil covers, Helios is des
 ### Phase 5 — Intelligence (Months 12–18)
 - LLM observability agent (rig-rs)
 - Self-healing tier 3 (LLM reasoning)
-- Right-sizing reconciler
+- Right-sizing reconciler (writes resource profiles into ObservationStore)
 - Incident memory (libSQL)
 - Predictive scaling
 
-### Phase 6 — Ecosystem (Months 18+)
+### Phase 6 — Federation and Ecosystem (Months 18+)
 - WASM Component Model SDK (Rust, TypeScript, Go)
 - OTel export adapter
 - Unikernel drivers (Nanos, Unikraft with virtiofs)
 - QEMU opt-in driver (exotic hardware emulation only)
-- Multi-region federation
+- **Multi-region federation: per-region IntentStore (Raft) + global ObservationStore (Corrosion)**
+- **Regional Corrosion clusters + thin global membership cluster (regionalized blast radius from day one — the lesson Fly learned mid-incident)**
+- **Region-aware scheduler + gateway (reads `node_health.region` from local SQLite)**
+- Cross-region partition tolerance: each region continues to operate on locally-committed intent under partition; observation converges via LWW on heal
 - Image Factory: OCI registry frontend, PXE boot, dm-verity + TPM attestation, Secure Boot signing
 
 ---
