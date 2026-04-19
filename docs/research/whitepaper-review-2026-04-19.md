@@ -1,9 +1,9 @@
-# Helios Whitepaper Review
+# Overdrive Whitepaper Review
 
 **Date:** 2026-04-19
 **Reviewer:** nw-system-designer agent
 **SSOT reviewed:** `docs/whitepaper.md` (Version 0.12 — Draft)
-**Branch:** `marcus-sa/helios-image-factory`
+**Branch:** `marcus-sa/overdrive-image-factory`
 
 ---
 
@@ -86,8 +86,8 @@ The dependency chain: kTLS needs SVIDs; SVIDs need the built-in CA. The CA is Ph
 **I5. Phase 4 bundles too much.**
 Cloud Hypervisor driver, WASM driver, full sidecar runtime, 4 built-in sidecars, Gateway, embedded ACME, DuckLake pipeline, mesh VPN underlay extensions. Any one of these is a multi-week deliverable. Particularly coupled: the Gateway depends on the WASM sidecar runtime, which depends on the Wasmtime driver. This wants to be Phase 4a/4b.
 
-**I6. Phase 5's "persistent microVMs" four-step path hides `helios-fs`.**
-Step 2 is "`helios-fs` — Rust-native single-writer chunk store." This is a substantial filesystem implementation: FastCDC, per-rootfs libSQL, WAL streaming to Garage, NVMe 2Q cache, `vhost-user-fs` frontend. Calling this a "step" within Phase 5 understates it. It is arguably Phase 4.5 on its own.
+**I6. Phase 5's "persistent microVMs" four-step path hides `overdrive-fs`.**
+Step 2 is "`overdrive-fs` — Rust-native single-writer chunk store." This is a substantial filesystem implementation: FastCDC, per-rootfs libSQL, WAL streaming to Garage, NVMe 2Q cache, `vhost-user-fs` frontend. Calling this a "step" within Phase 5 understates it. It is arguably Phase 4.5 on its own.
 
 **I7. Phase 1's "basic scheduler (first-fit)" doesn't match the ambition of §14 right-sizing or §4 scheduler that consults `node_health`.**
 The Phase 5 right-sizing reconciler "feeds back to the scheduler" — but if the scheduler is first-fit it has no place to feed back into. The scheduler's interface needs to be right from Phase 1 even if the policy is trivial.
@@ -109,14 +109,14 @@ The smallest end-to-end vertical slice that validates the architecture:
 
 **Recommended first concrete step: the "dry process" vertical.**
 
-A single-node Helios binary that:
+A single-node Overdrive binary that:
 1. Accepts a minimal `JobSpec` via gRPC (driver = `process`, a command, resources).
 2. Persists it through `IntentStore` (LocalStore, redb).
 3. Runs the basic scheduler (pick this node — there is only one).
 4. Writes `alloc_status` into `ObservationStore` (a plain in-memory LWW map at this stage — not Corrosion).
 5. Uses `SimClock` and `SimTransport` in tests; real clock/transport in the binary.
 6. Executes via a `Driver::start()` implementation that spawns via `tokio::process` with cgroup v2 placement.
-7. The CLI `helios job submit` and `helios alloc status` round-trips.
+7. The CLI `overdrive job submit` and `overdrive alloc status` round-trips.
 8. A turmoil test asserts: job submitted → allocation eventually running → assertion `desired == actual`.
 
 This validates, in one PR:
@@ -129,7 +129,7 @@ This validates, in one PR:
 **The first PR should deliberately exclude**: eBPF, CA, mTLS, multi-node, Raft, Corrosion, Gateway, Image Factory, WASM. Each of those is its own vertical slice layered on this spine.
 
 **Pre-step (Phase 0, before the first PR):**
-- Cargo workspace skeleton (`helios-core`, `helios-node`, `helios-cli`, `helios-sim`, `helios-api`)
+- Cargo workspace skeleton (`overdrive-core`, `overdrive-node`, `overdrive-cli`, `overdrive-sim`, `overdrive-api`)
 - CI with clippy, rustfmt, `cargo deny`, MSRV pin
 - An ADR process under `docs/product/architecture/`
 - A dependency audit of the "production-stable" libraries with pinned versions
@@ -149,7 +149,7 @@ This validates, in one PR:
 **H2. The "Corrosion scales to continents" claim is based on one operator.**
 §1 says "production-proven at Fly.io's global scale." §12 asserts it subsumes SWIM membership. But:
 - No back-of-envelope math: N nodes × M rows/node × average row size × gossip fanout × rows/sec = gossip bandwidth. At 10K nodes globally with 20 allocs each, what's the steady-state gossip bandwidth per node? Is it sane on a 1 Gbps uplink?
-- Fly's published Corrosion workload is known; Helios may have different write amplification (every allocation state transition writes a full row per I5 in §4).
+- Fly's published Corrosion workload is known; Overdrive may have different write amplification (every allocation state transition writes a full row per I5 in §4).
 - "Per-region blast radius" is asserted but no sizing guidance: at what region size does a new region become necessary?
 
 **H3. The LLM agent's approval gate is underspecified.**
@@ -187,7 +187,7 @@ The principle calls for startup probes per component. The whitepaper mentions no
 **H7. Sidecar/WASM performance claim is hand-waved.**
 §9 claims "~microseconds for simple logic" for warm WASM instances. But sidecars run in the TC eBPF path on every request. Expected steady-state overhead at 10K RPS across a 4-sidecar chain is not estimated. The instance pool sizing is mentioned once, not dimensioned.
 
-**H8. `helios-fs` single-writer enforcement is mechanism-free.**
+**H8. `overdrive-fs` single-writer enforcement is mechanism-free.**
 §17 says "enforced by the allocation lifecycle." But two reconcilers, two leaders (split-brain in Raft recovery), or a stale node that missed a migration could open the same rootfs twice. The actual mutex needs to be specified (advisory lock in libSQL? lease via Raft?).
 
 **H9. Gateway is SPOF on nodes with `gateway.enabled = true`.**
@@ -201,7 +201,7 @@ No mention of gateway HA — if the gateway node dies, external traffic dies. Ex
 
 ### Nice-to-have
 
-**H12.** Cross-region service discovery's latency math is missing. Tokyo gateway resolving us-east-1 backends — how does routing weighting handle the 150ms round-trip? Is there locality preference beyond `helios-prefer-region`?
+**H12.** Cross-region service discovery's latency math is missing. Tokyo gateway resolving us-east-1 backends — how does routing weighting handle the 150ms round-trip? Is there locality preference beyond `overdrive-prefer-region`?
 **H13.** OCI image upgrade (§23 Phase 2) has no rollback path — what if the new image fails to boot? A/B partitions implied in `wic` layout but not stated as a requirement.
 **H14.** The "full rows over field diffs" guardrail (§4) is correct but creates write amplification. Back-of-envelope on how this scales with N allocations × transition rate is not provided.
 **H15.** §20's efficiency numbers are "directional estimates" — explicit methodology needed for the ones most likely to be cited (2.3x density, 100x mTLS CPU).

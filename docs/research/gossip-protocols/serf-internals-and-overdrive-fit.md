@@ -1,4 +1,4 @@
-# Research: HashiCorp Serf — Internals and Fit for Helios
+# Research: HashiCorp Serf — Internals and Fit for Overdrive
 
 **Date**: 2026-04-19 | **Researcher**: nw-researcher (Nova) | **Confidence**: High | **Sources**: 13
 
@@ -6,9 +6,9 @@
 
 HashiCorp Serf is a two-layer system: the `memberlist` Go library implements SWIM+Lifeguard, and `serf` layers user events, queries with response aggregation, a disk-journalled snapshotter for fast rejoin, Vivaldi-style network coordinates, key-rotating wire encryption, and tags on top. Consul and Nomad skip Serf and use `memberlist` directly; Serf ships as a standalone Go daemon, not a library.
 
-Helios already depends on **Foca** (Rust, MIT/Apache-2.0, used by Corrosion) which implements **SWIM+Inf.+Susp.** with a `BroadcastHandler` for user data. Foca does not ship Lifeguard — `caio/foca`'s README, docs.rs API, and `Config` struct contain no Local Health Multiplier, NACK, Dogpile, or Buddy-System knobs; `suspect_to_down_after` is a fixed duration. **Corrosion** (Fly.io, AGPL/Rust), which Helios uses as its `ObservationStore`, adds on top of Foca: a SQLite-backed CRDT state store (cr-sqlite with LWW logical timestamps), SQL API for reads/writes, HTTP streaming subscriptions, and QUIC transport with anti-entropy — functionally subsuming Serf's user events, queries, and snapshotter in a table-based rather than event-bus shape.
+Overdrive already depends on **Foca** (Rust, MIT/Apache-2.0, used by Corrosion) which implements **SWIM+Inf.+Susp.** with a `BroadcastHandler` for user data. Foca does not ship Lifeguard — `caio/foca`'s README, docs.rs API, and `Config` struct contain no Local Health Multiplier, NACK, Dogpile, or Buddy-System knobs; `suspect_to_down_after` is a fixed duration. **Corrosion** (Fly.io, AGPL/Rust), which Overdrive uses as its `ObservationStore`, adds on top of Foca: a SQLite-backed CRDT state store (cr-sqlite with LWW logical timestamps), SQL API for reads/writes, HTTP streaming subscriptions, and QUIC transport with anti-entropy — functionally subsuming Serf's user events, queries, and snapshotter in a table-based rather than event-bus shape.
 
-The only Serf capabilities genuinely absent from the Helios stack are (1) **Lifeguard** — a real but partially mitigated gap, and (2) **Vivaldi network coordinates** — not needed for Helios v1 given the explicit region-tagged routing model. The recommendation is clear: **do not copy or reimplement Serf**, do not run it as a sidecar (violates Principles 1 and 7), and do not add Serf-like primitives to Corrosion. Instead, close the single real gap by either contributing Lifeguard upstream to Foca (preferred — preserves "Rust throughout" and benefits the ecosystem) or tracking it as a known limitation mitigated by Helios's cgroup-isolated control plane.
+The only Serf capabilities genuinely absent from the Overdrive stack are (1) **Lifeguard** — a real but partially mitigated gap, and (2) **Vivaldi network coordinates** — not needed for Overdrive v1 given the explicit region-tagged routing model. The recommendation is clear: **do not copy or reimplement Serf**, do not run it as a sidecar (violates Principles 1 and 7), and do not add Serf-like primitives to Corrosion. Instead, close the single real gap by either contributing Lifeguard upstream to Foca (preferred — preserves "Rust throughout" and benefits the ecosystem) or tracking it as a known limitation mitigated by Overdrive's cgroup-isolated control plane.
 
 ## Research Methodology
 **Search Strategy**: Primary-source first — SWIM paper, Lifeguard paper, HashiCorp Serf/memberlist source trees, Foca repo and author's blog (caio.co), Corrosion repo and Fly.io blog, Quickwit's chitchat repo and blog posts. Secondary-source (InfoQ, practitioner blogs) used only to corroborate.
@@ -78,7 +78,7 @@ HashiCorp states the motivating problem: "slow message processing caused by CPU 
 **Source**: [hashicorp/serf README](https://github.com/hashicorp/serf) — Accessed 2026-04-19
 **Source**: Cross-referenced against Consul and Nomad source trees which import `hashicorp/memberlist` directly, not `hashicorp/serf`.
 **Confidence**: High
-**Analysis**: Helios's Principle 1 ("own your primitives ... External process dependencies are liabilities") and Principle 7 ("Rust throughout. No FFI to Go or C++ in the critical path") make a Go daemon a non-starter from the design-principle perspective. Even if Serf's features were uniquely valuable, the deployment model is wrong for Helios.
+**Analysis**: Overdrive's Principle 1 ("own your primitives ... External process dependencies are liabilities") and Principle 7 ("Rust throughout. No FFI to Go or C++ in the critical path") make a Go daemon a non-starter from the design-principle perspective. Even if Serf's features were uniquely valuable, the deployment model is wrong for Overdrive.
 
 ## Section 3: What Foca and Corrosion Already Provide
 
@@ -99,7 +99,7 @@ Foca is "transport and identity agnostic" — the caller supplies wire encoding 
 **Source**: [caio/foca README](https://github.com/caio/foca) — Accessed 2026-04-19
 **Source**: [caio/foca raw README on GitHub](https://raw.githubusercontent.com/caio/foca/main/README.md) — Accessed 2026-04-19
 **Confidence**: Medium — documentation silence is not proof of absence; a code-level audit would be needed to confirm definitively that none of the three Lifeguard mechanisms are implemented. Noted in Knowledge Gaps.
-**Analysis**: "SWIM+Inf.+Susp." describes the 2002 paper's full protocol. Lifeguard (2018) is a strict superset — implementing only SWIM+Susp. leaves Helios without the production-proven hardening HashiCorp added after years of Consul incident reports. This is a real gap worth noting, though not necessarily a blocker.
+**Analysis**: "SWIM+Inf.+Susp." describes the 2002 paper's full protocol. Lifeguard (2018) is a strict superset — implementing only SWIM+Susp. leaves Overdrive without the production-proven hardening HashiCorp added after years of Consul incident reports. This is a real gap worth noting, though not necessarily a blocker.
 
 ### Finding 3.3: Corrosion uses Foca + CR-SQLite + QUIC and adds SQL-based semantics on top
 
@@ -114,7 +114,7 @@ Foca is "transport and identity agnostic" — the caller supplies wire encoding 
 
 **Source**: [superfly/corrosion README](https://github.com/superfly/corrosion) — Accessed 2026-04-19
 **Confidence**: High
-**Analysis**: Corrosion's abstraction is fundamentally different from Serf's. Serf treats the cluster as a membership list plus an event bus. Corrosion treats the cluster as a distributed SQLite database. Any "event" in Serf terms maps cleanly to an `INSERT` into a Corrosion table with a subscription query — arguably more auditable and queryable than Serf's event stream. This is the architectural bet Helios has already made (whitepaper §4 and §17).
+**Analysis**: Corrosion's abstraction is fundamentally different from Serf's. Serf treats the cluster as a membership list plus an event bus. Corrosion treats the cluster as a distributed SQLite database. Any "event" in Serf terms maps cleanly to an `INSERT` into a Corrosion table with a subscription query — arguably more auditable and queryable than Serf's event stream. This is the architectural bet Overdrive has already made (whitepaper §4 and §17).
 
 ## Section 4: Rust Ecosystem Alternatives
 
@@ -138,7 +138,7 @@ No Rust crate advertises full Lifeguard (LHM + Dogpile + Buddy) as a named featu
 **Source**: Cross-referenced from Foca README, chitchat README, and Rust ecosystem searches
 **Confidence**: Medium — the crate ecosystem changes fast; exhaustive survey not performed
 
-## Section 5: The Decision for Helios
+## Section 5: The Decision for Overdrive
 
 ### Finding 5.1: What Serf has that Foca+Corrosion do not
 
@@ -152,24 +152,24 @@ No Rust crate advertises full Lifeguard (LHM + Dogpile + Buddy) as a named featu
 | Queries (filtered req/resp) | ❌ | ✅ SQL SELECT via HTTP | No (different shape, richer) |
 | Snapshotter (fast rejoin) | ❌ | ✅ local SQLite is the snapshot | No |
 | Network coordinates (Vivaldi) | ❌ | ❌ | **Yes** |
-| Encryption + key rotation | ❌ (transport's job) | ✅ QUIC+mTLS + Helios SPIFFE | No |
+| Encryption + key rotation | ❌ (transport's job) | ✅ QUIC+mTLS + Overdrive SPIFFE | No |
 | Tags | ❌ directly | ✅ as columns on `node_health` | No |
 
 The only genuine gaps are **Lifeguard** and **Vivaldi network coordinates**.
 
 **Confidence**: High — derived from the findings above, which have 2+ sources each.
 
-### Finding 5.2: Are those gaps needed for Helios v1?
+### Finding 5.2: Are those gaps needed for Overdrive v1?
 
-**Lifeguard**: Relevant. Helios nodes run co-located control-plane + worker roles (whitepaper §4) under shared cgroups where a single misbehaving workload could temporarily starve the node agent. The whitepaper §18 "Evaluation Broker — Storm-Proof Ingress" explicitly calls out the correlated-failure problem HashiCorp retrofitted Lifeguard to solve. Gossip-level false positives would amplify into spurious allocation churn exactly where Helios's design is trying to dampen it. **However**, Helios has structural defenses absent from Consul/Serf: cgroup reservations for control-plane processes (whitepaper §4, "Workload Isolation on Co-located Nodes") prevent the CPU-exhaustion trigger Lifeguard was designed for. So the gap is real but partially mitigated.
+**Lifeguard**: Relevant. Overdrive nodes run co-located control-plane + worker roles (whitepaper §4) under shared cgroups where a single misbehaving workload could temporarily starve the node agent. The whitepaper §18 "Evaluation Broker — Storm-Proof Ingress" explicitly calls out the correlated-failure problem HashiCorp retrofitted Lifeguard to solve. Gossip-level false positives would amplify into spurious allocation churn exactly where Overdrive's design is trying to dampen it. **However**, Overdrive has structural defenses absent from Consul/Serf: cgroup reservations for control-plane processes (whitepaper §4, "Workload Isolation on Co-located Nodes") prevent the CPU-exhaustion trigger Lifeguard was designed for. So the gap is real but partially mitigated.
 
-**Vivaldi coordinates**: Not needed for v1. Helios's multi-region design (whitepaper §4) uses explicit regional Raft + global Corrosion; routing decisions are made with explicit region tags from `node_health.region`, not latency estimates. Latency-aware routing is a compelling future feature but not in scope.
+**Vivaldi coordinates**: Not needed for v1. Overdrive's multi-region design (whitepaper §4) uses explicit regional Raft + global Corrosion; routing decisions are made with explicit region tags from `node_health.region`, not latency estimates. Latency-aware routing is a compelling future feature but not in scope.
 
 **Cross-reference**: Whitepaper §4 (Intent/Observation split, per-region Raft), §5 (node agent event-driven), §11 (gateway uses `service_backends`), §22 (roadmap — Phase 2 lists Corrosion as the ObservationStore). No entry in the roadmap mentions latency-aware routing or membership fast-fail hardening.
 
 ### Finding 5.3: Options for closing the Lifeguard gap
 
-Ranked by alignment with Helios design principles:
+Ranked by alignment with Overdrive design principles:
 
 **(a) Contribute Lifeguard to Foca upstream.** Foca is MIT/Apache-2.0 and actively maintained by one author (Caio) who has an obvious incentive to accept well-scoped hardening PRs. The Lifeguard paper is a strict additive refinement to SWIM+Susp. — no wire-format break, no new state machine, just tuning knobs on the existing suspicion/timeout machinery. This preserves the "own your primitives" and "Rust throughout" principles and benefits the whole Rust ecosystem.
 
@@ -184,9 +184,9 @@ Ranked by alignment with Helios design principles:
 **Evidence**: A Serf user event is a TTL'd broadcast with payload. A Corrosion SQL `INSERT` into a CRDT table is: durable (replicated across all peers), queryable (arbitrary SELECTs across event history), subscribable (streaming SELECT via HTTP), and auditable (full row history via `crsql_changes`). Serf's query primitive (filtered request/response) maps to `SELECT ... WHERE tags ...` over the local SQLite — synchronous where Serf's is scatter-gather, but evaluates against the same gossiped state.
 
 **Source**: [superfly/corrosion README](https://github.com/superfly/corrosion) — Accessed 2026-04-19
-**Source**: Helios whitepaper §4 ("Every subsystem reads locally, with no gRPC round trip")
+**Source**: Overdrive whitepaper §4 ("Every subsystem reads locally, with no gRPC round trip")
 **Confidence**: High
-**Analysis**: The Helios whitepaper's choice of a table-based observation substrate (whitepaper §4) is architecturally superior to Serf's event-bus model for Helios's use cases — policy verdicts, service backends, allocation status are all naturally tables, not event streams.
+**Analysis**: The Overdrive whitepaper's choice of a table-based observation substrate (whitepaper §4) is architecturally superior to Serf's event-bus model for Overdrive's use cases — policy verdicts, service backends, allocation status are all naturally tables, not event streams.
 
 ## Source Analysis
 
@@ -220,12 +220,12 @@ Reputation distribution: High 4 of 15 (27%); Medium-High 11 of 15 (73%); no medi
 ### Gap 2: Exhaustive comparative survey of Rust SWIM crates
 **Issue**: This research covered foca, chitchat, and mentioned gossipod/hyparview-rs but did not exhaustively evaluate every Rust cluster-membership library on crates.io.
 **Attempted**: Web search for Rust SWIM/gossip crates; Foca and chitchat appear to be the two production-grade options.
-**Recommendation**: If the Lifeguard gap forces a re-evaluation, a broader crate survey may be warranted. For now the decision space is bounded by what Helios already depends on (Foca via Corrosion).
+**Recommendation**: If the Lifeguard gap forces a re-evaluation, a broader crate survey may be warranted. For now the decision space is bounded by what Overdrive already depends on (Foca via Corrosion).
 
-### Gap 3: Quantified impact of missing Lifeguard on Helios in practice
-**Issue**: The Lifeguard paper reports "drastically reduced false-positive rate" but the research did not extract specific numbers from the (corrupted) PDF fetch. Helios's cgroup-isolation of control-plane processes (whitepaper §4 "Workload Isolation on Co-located Nodes") partially mitigates the CPU-exhaustion trigger Lifeguard was designed for, but the degree of mitigation is not quantified.
+### Gap 3: Quantified impact of missing Lifeguard on Overdrive in practice
+**Issue**: The Lifeguard paper reports "drastically reduced false-positive rate" but the research did not extract specific numbers from the (corrupted) PDF fetch. Overdrive's cgroup-isolation of control-plane processes (whitepaper §4 "Workload Isolation on Co-located Nodes") partially mitigates the CPU-exhaustion trigger Lifeguard was designed for, but the degree of mitigation is not quantified.
 **Attempted**: Multiple WebFetch of the arxiv PDF returned corrupted text; read the HashiCorp blog paraphrase instead.
-**Recommendation**: Empirical — simulate correlated CPU starvation in the Helios DST harness (§21) and measure false-positive rate of Corrosion-reported node failures. This is testable today without implementing Lifeguard.
+**Recommendation**: Empirical — simulate correlated CPU starvation in the Overdrive DST harness (§21) and measure false-positive rate of Corrosion-reported node failures. This is testable today without implementing Lifeguard.
 
 ## Full Citations
 
@@ -259,6 +259,6 @@ Reputation distribution: High 4 of 15 (27%); Medium-High 11 of 15 (73%); no medi
 
 [15] Quickwit. "chitchat (README)." GitHub. https://github.com/quickwit-oss/chitchat Accessed 2026-04-19. (First-party — Quickwit authored.)
 
-## Recommendation for Helios
+## Recommendation for Overdrive
 
-**Do not copy, reimplement, or adopt Serf in any form for Helios.** Serf's two-layer design (memberlist for SWIM+Lifeguard; Serf for user events, queries, snapshotter, Vivaldi coordinates, encryption, tags) is almost entirely redundant with what Foca+Corrosion already provide: Foca gives Helios SWIM+Suspicion with a `BroadcastHandler` for user data, and Corrosion gives a strictly more expressive substrate than Serf's event bus — a globally replicated SQLite with CRDT merge, SQL reads/writes, HTTP streaming subscriptions, and QUIC anti-entropy. Serf's daemon deployment model is a direct violation of Helios Principles 1 ("own your primitives") and 7 ("Rust throughout, no FFI to Go or C++ in the critical path"), and its value-adds — Vivaldi network coordinates and encryption/key-rotation — are respectively not needed for Helios v1 (explicit region tags beat latency estimates for Helios's regional-Raft + global-CRDT routing model) and already handled by QUIC+SPIFFE mTLS. The one real gap is **Lifeguard** (Local Health Multiplier, Dogpile, Buddy System) — Foca's `Config` has no adaptive knobs, so false-positive hardening under node CPU-starvation is weaker than HashiCorp's production-proven configuration. This gap is partially mitigated by Helios's cgroup-isolated control-plane slice (whitepaper §4) which prevents the primary Lifeguard trigger. The recommended path is to contribute Lifeguard upstream to Foca — a pure-additive, wire-compatible extension that benefits the whole Rust ecosystem and preserves every Helios design principle. In the meantime, track the gap as a known limitation and validate its actual impact via the DST harness (§21) by injecting correlated CPU starvation scenarios.
+**Do not copy, reimplement, or adopt Serf in any form for Overdrive.** Serf's two-layer design (memberlist for SWIM+Lifeguard; Serf for user events, queries, snapshotter, Vivaldi coordinates, encryption, tags) is almost entirely redundant with what Foca+Corrosion already provide: Foca gives Overdrive SWIM+Suspicion with a `BroadcastHandler` for user data, and Corrosion gives a strictly more expressive substrate than Serf's event bus — a globally replicated SQLite with CRDT merge, SQL reads/writes, HTTP streaming subscriptions, and QUIC anti-entropy. Serf's daemon deployment model is a direct violation of Overdrive Principles 1 ("own your primitives") and 7 ("Rust throughout, no FFI to Go or C++ in the critical path"), and its value-adds — Vivaldi network coordinates and encryption/key-rotation — are respectively not needed for Overdrive v1 (explicit region tags beat latency estimates for Overdrive's regional-Raft + global-CRDT routing model) and already handled by QUIC+SPIFFE mTLS. The one real gap is **Lifeguard** (Local Health Multiplier, Dogpile, Buddy System) — Foca's `Config` has no adaptive knobs, so false-positive hardening under node CPU-starvation is weaker than HashiCorp's production-proven configuration. This gap is partially mitigated by Overdrive's cgroup-isolated control-plane slice (whitepaper §4) which prevents the primary Lifeguard trigger. The recommended path is to contribute Lifeguard upstream to Foca — a pure-additive, wire-compatible extension that benefits the whole Rust ecosystem and preserves every Overdrive design principle. In the meantime, track the gap as a known limitation and validate its actual impact via the DST harness (§21) by injecting correlated CPU starvation scenarios.

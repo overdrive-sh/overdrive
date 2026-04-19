@@ -1,4 +1,4 @@
-# Helios: A Next-Generation Workload Orchestration Platform
+# Overdrive: A Next-Generation Workload Orchestration Platform
 
 **Version 0.12 — Draft**
 
@@ -6,9 +6,9 @@
 
 ## Abstract
 
-Helios is an open-source workload orchestration platform built entirely in Rust, designed to replace Kubernetes, Nomad, and Talos for teams that demand simplicity, security, and efficiency without compromise. It unifies virtual machines, processes, unikernels, and serverless WASM functions under a single control plane, with a native eBPF dataplane, built-in mutual TLS, kernel-level mandatory access control, and LLM-driven self-healing observability — all without external dependencies like etcd, Envoy, SPIRE, or a CNI plugin.
+Overdrive is an open-source workload orchestration platform built entirely in Rust, designed to replace Kubernetes, Nomad, and Talos for teams that demand simplicity, security, and efficiency without compromise. It unifies virtual machines, processes, unikernels, and serverless WASM functions under a single control plane, with a native eBPF dataplane, built-in mutual TLS, kernel-level mandatory access control, and LLM-driven self-healing observability — all without external dependencies like etcd, Envoy, SPIRE, or a CNI plugin.
 
-The foundational thesis: the primitives required to build a genuinely better orchestration platform — stable eBPF APIs, production-ready Rust systems libraries, WASM runtimes, and kTLS offload — only reached maturity in the last two years. Helios makes different architectural choices than Kubernetes, not better ones for 2014, but definitively better ones for 2026.
+The foundational thesis: the primitives required to build a genuinely better orchestration platform — stable eBPF APIs, production-ready Rust systems libraries, WASM runtimes, and kTLS offload — only reached maturity in the last two years. Overdrive makes different architectural choices than Kubernetes, not better ones for 2014, but definitively better ones for 2026.
 
 ---
 
@@ -70,7 +70,7 @@ Several foundational technologies reached production maturity simultaneously bet
 - BPF LSM — Kernel 5.7+, stable, enables custom MAC without SELinux complexity
 - `cr-sqlite` + Corrosion — SQLite CRDT replication with SWIM gossip over QUIC, production-proven at Fly.io's global scale for continent-spanning routing state that Raft cannot express
 
-Helios is the platform that becomes possible when all of these exist simultaneously.
+Overdrive is the platform that becomes possible when all of these exist simultaneously.
 
 ---
 
@@ -165,7 +165,7 @@ Single binary — role declared at bootstrap:
 
 ### The Intent / Observation Split
 
-Helios splits cluster state along a fundamental consistency boundary, reflecting design principle 9:
+Overdrive splits cluster state along a fundamental consistency boundary, reflecting design principle 9:
 
 |                | **Intent**                                        | **Observation**                                         |
 |----------------|---------------------------------------------------|---------------------------------------------------------|
@@ -179,11 +179,11 @@ Helios splits cluster state along a fundamental consistency boundary, reflecting
 
 The split isolates two classes of bug. A Raft partition does not stall service routing — the dataplane reads observation, which stays live. A Corrosion backfill does not corrupt job specs — intent sits in a separate store with separate writers. Nothing in the codebase can cross the boundary accidentally: `IntentStore` and `ObservationStore` are distinct traits on distinct types.
 
-This is the split Fly.io arrived at after years of trying to use Consul-style consensus for everything. Helios adopts it from day one, not after the incident.
+This is the split Fly.io arrived at after years of trying to use Consul-style consensus for everything. Overdrive adopts it from day one, not after the incident.
 
 ### IntentStore — Authoritative Control Plane State
 
-Helios abstracts intent storage behind a single trait, with the implementation chosen by deployment mode. A single-node setup carries none of the overhead of a distributed consensus system — complexity scales with the deployment, not with the platform.
+Overdrive abstracts intent storage behind a single trait, with the implementation chosen by deployment mode. A single-node setup carries none of the overhead of a distributed consensus system — complexity scales with the deployment, not with the platform.
 
 ```rust
 trait IntentStore: Send + Sync {
@@ -232,7 +232,7 @@ Footprint:   ~80MB RAM, redb + Raft log, background replication tasks
 Teams that start on a single node and grow to HA do not need external tooling or manual data migration. Both store implementations share the same snapshot format, and the migration is built into the platform CLI:
 
 ```
-helios cluster upgrade --mode ha --peers node-2,node-3
+overdrive cluster upgrade --mode ha --peers node-2,node-3
 
 1. LocalStore exports full state snapshot
 2. RaftStore bootstraps from snapshot on all three nodes
@@ -268,9 +268,9 @@ Control plane footprint by mode:
 
 ### ObservationStore — Live Cluster Map
 
-Intent defines what the cluster *should* do. Observation defines what it *is doing right now*. Observation is what every node agent must read continuously to hydrate BPF maps; what the scheduler consults to bin-pack against real utilization; what the gateway resolves `spiffe://helios.local/job/payments` against to find a live backend set.
+Intent defines what the cluster *should* do. Observation defines what it *is doing right now*. Observation is what every node agent must read continuously to hydrate BPF maps; what the scheduler consults to bin-pack against real utilization; what the gateway resolves `spiffe://overdrive.local/job/payments` against to find a live backend set.
 
-Pushing this from a single Raft leader via gRPC streams does not scale. Above a few hundred nodes it is a fan-out bottleneck; across regions, Raft's quorum-latency floor makes it impossible. Fly.io learned this the hard way with Consul; the answer they built — Corrosion — is open source, pure Rust, and production-proven across a continent-spanning fleet. Helios adopts it as the observation store:
+Pushing this from a single Raft leader via gRPC streams does not scale. Above a few hundred nodes it is a fan-out bottleneck; across regions, Raft's quorum-latency floor makes it impossible. Fly.io learned this the hard way with Consul; the answer they built — Corrosion — is open source, pure Rust, and production-proven across a continent-spanning fleet. Overdrive adopts it as the observation store:
 
 ```rust
 trait ObservationStore: Send + Sync {
@@ -338,11 +338,11 @@ The earlier bare "Gossip / Health (SWIM)" component is gone. Corrosion is SWIM m
 
 ### Consistency Guardrails
 
-CR-SQLite sacrifices strong ordering for availability. Helios enforces the boundary between intent and observation with compile-time discipline and runtime safeguards drawn directly from Fly.io's published post-mortems:
+CR-SQLite sacrifices strong ordering for availability. Overdrive enforces the boundary between intent and observation with compile-time discipline and runtime safeguards drawn directly from Fly.io's published post-mortems:
 
 - **Type-level separation.** `IntentStore` and `ObservationStore` are distinct traits on distinct types. Nothing in the codebase can persist a job spec into Corrosion or an allocation heartbeat into Raft — the compiler rejects it. There is no shared `put(key, value)` surface that lets the wrong call go to the wrong place.
 - **Identity-scoped writes.** A Corrosion peer only accepts writes whose CRDT site ID matches a live node SVID signed by the platform CA. A compromised node cannot forge rows on behalf of another node, and a decommissioned node's site ID is purged from the trust bundle.
-- **Additive-only schema migrations.** Nullable column additions in CR-SQLite trigger cluster-wide backfill storms — Fly's most painful Corrosion incident. Helios schema migrations are strictly additive, versioned in the intent store, and gated through a two-phase rollout: new table first, readers cut over, old table drained, old table dropped. No `ALTER TABLE ADD COLUMN NULL` across the live fleet.
+- **Additive-only schema migrations.** Nullable column additions in CR-SQLite trigger cluster-wide backfill storms — Fly's most painful Corrosion incident. Overdrive schema migrations are strictly additive, versioned in the intent store, and gated through a two-phase rollout: new table first, readers cut over, old table drained, old table dropped. No `ALTER TABLE ADD COLUMN NULL` across the live fleet.
 - **Full rows over field diffs.** Learning from Fly's post-mortem on partial updates, node agents republish the complete row for an allocation on every state transition rather than diffing fields. Late or reordered gossip converges deterministically under LWW; diff-merge logic does not.
 - **Event-loop watchdogs.** Every subscription has a stall detector. A Corrosion peer whose event loop has not advanced within N seconds is killed and restarted before it can propagate stuck state — the bug class that contagion-deadlocked Fly's proxy fleet is a named DST scenario, not a hypothetical.
 - **Per-region blast radius.** The global Corrosion topology is not a single flat cluster. Regional clusters gossip internally; a thin global membership cluster maps regions to coordinates. A runaway write in one region does not fan out globally in the same tick.
@@ -383,7 +383,7 @@ peers   = ["node-2:7001", "node-3:7001"]
 
 [cluster.observation]
 corrosion_peers         = ["obs-1:8787", "obs-2:8787", "obs-3:8787"]
-global_bootstrap        = ["global.helios.local:8787"]
+global_bootstrap        = ["global.overdrive.local:8787"]
 rejoin_timeout_seconds  = 60
 ```
 
@@ -391,7 +391,7 @@ The same binary, the same role mechanic, one new line of configuration. Federati
 
 ### Control Plane and Worker on the Same Node
 
-Like Talos, Helios supports running the control plane and node agent on the same bare metal server. A node declares its role at bootstrap — dedicated worker, dedicated control plane member, or both:
+Like Talos, Overdrive supports running the control plane and node agent on the same bare metal server. A node declares its role at bootstrap — dedicated worker, dedicated control plane member, or both:
 
 ```toml
 [node]
@@ -423,7 +423,7 @@ Five-node mixed cluster (larger deployments):
 When a node runs both roles, control plane processes run in dedicated cgroups with kernel-enforced resource reservations. A misbehaving workload cannot starve the IntentStore, the Corrosion peer, or the scheduler regardless of how aggressively it consumes CPU or memory:
 
 ```
-/helios.slice/
+/overdrive.slice/
   control-plane.slice/    ← reserved budget, never preempted
     raft.service
     scheduler.service
@@ -457,14 +457,14 @@ Investigation — live SRE-agent investigation: correlation key, affected
 
 ### Built-in Certificate Authority
 
-Helios embeds a full X.509 certificate authority directly in the control plane. There is no SPIRE server, no cert-manager, no Vault integration required for basic operation.
+Overdrive embeds a full X.509 certificate authority directly in the control plane. There is no SPIRE server, no cert-manager, no Vault integration required for basic operation.
 
 The root CA key lives in the IntentStore, encrypted at rest. In HA mode it is Raft-replicated across all control plane nodes within a region — CA material is deliberately never written to the eventually-consistent ObservationStore. Each node receives an intermediate CA certificate at bootstrap, signed by the root. The node agent issues short-lived leaf certificates (SVIDs, 1-hour TTL) for each workload it runs, using its intermediate.
 
 SPIFFE IDs are used as the identity format:
 
 ```
-spiffe://helios.local/job/payments/alloc/a1b2c3
+spiffe://overdrive.local/job/payments/alloc/a1b2c3
 ```
 
 Short TTLs eliminate the need for CRL or OCSP. Expiry is the revocation mechanism. The reconciler loop handles rotation automatically.
@@ -495,7 +495,7 @@ The agent is event-driven throughout. BPF ringbuf events push telemetry without 
 
 ## 6. Workload Drivers
 
-Helios treats every workload type as a first-class citizen through a unified driver interface:
+Overdrive treats every workload type as a first-class citizen through a unified driver interface:
 
 ```rust
 trait Driver: Send + Sync {
@@ -518,7 +518,7 @@ All drivers share the same identity model, the same eBPF dataplane, the same pol
 
 ### Cloud Hypervisor as the Unified VMM
 
-Helios uses **Cloud Hypervisor** as its sole VMM, handling both microvm and full VM workloads. This replaces the two-VMM model (Firecracker for microvms, QEMU for full VMs) that most platforms adopt. Cloud Hypervisor is written in Rust, maintains a minimal attack surface, and supports the full capability set required across all VM-class workloads.
+Overdrive uses **Cloud Hypervisor** as its sole VMM, handling both microvm and full VM workloads. This replaces the two-VMM model (Firecracker for microvms, QEMU for full VMs) that most platforms adopt. Cloud Hypervisor is written in Rust, maintains a minimal attack surface, and supports the full capability set required across all VM-class workloads.
 
 | Capability | Firecracker | Cloud Hypervisor | QEMU |
 |---|---|---|---|
@@ -597,7 +597,7 @@ Firecracker cannot do this for CPU — issue #2609 (*Hot-plug vCPUs*) is parked 
 
 Not every workload is ephemeral. AI coding agents, CI runners, interactive development environments, Jupyter notebooks, and long-running data processing workers share a shape that neither stateless microVMs nor WASM functions serve well: they need a persistent filesystem, a stable addressable endpoint, and the ability to sleep and resume without losing state.
 
-Helios handles this by extending the `microvm` driver with a `persistent` flag rather than introducing a new workload type. The Cloud Hypervisor base, the SPIFFE identity, the eBPF dataplane, the gateway, the credential proxy, and the WASM sidecars are already first-class — persistence is the missing ingredient.
+Overdrive handles this by extending the `microvm` driver with a `persistent` flag rather than introducing a new workload type. The Cloud Hypervisor base, the SPIFFE identity, the eBPF dataplane, the gateway, the credential proxy, and the WASM sidecars are already first-class — persistence is the missing ingredient.
 
 ```toml
 [job]
@@ -613,7 +613,7 @@ expose                   = true   # auto-registers a gateway route
 
 When `persistent = true`:
 
-1. **Persistent rootfs bound to workload identity.** The rootfs is served by `helios-fs`, a Helios-native single-writer chunk store — content-addressed immutable chunks in Garage, inode and dentry metadata in per-rootfs libSQL, with an NVMe hot-tier cache. Because each rootfs is owned by exactly one VM at a time, `helios-fs` drops the multi-client coherence and distributed-locking machinery a general distributed filesystem requires. The authoritative state lives in Garage; nodes cache chunks. The workload can migrate between nodes without moving a volume, and restores hydrate metadata only, not the full filesystem. Full design in §17.
+1. **Persistent rootfs bound to workload identity.** The rootfs is served by `overdrive-fs`, a Overdrive-native single-writer chunk store — content-addressed immutable chunks in Garage, inode and dentry metadata in per-rootfs libSQL, with an NVMe hot-tier cache. Because each rootfs is owned by exactly one VM at a time, `overdrive-fs` drops the multi-client coherence and distributed-locking machinery a general distributed filesystem requires. The authoritative state lives in Garage; nodes cache chunks. The workload can migrate between nodes without moving a volume, and restores hydrate metadata only, not the full filesystem. Full design in §17.
 2. **Checkpoint/restore via Cloud Hypervisor.** The driver exposes `snapshot()` and `restore()` as control-plane actions that delegate to Cloud Hypervisor's existing snapshot/restore API with `userfaultfd` lazy memory paging — restore is pay-as-you-access, not load-everything-upfront. Disk snapshots are metadata-only against the chunk store (chunks are already immutable). Memory uses Cloud Hypervisor's native mechanism.
 3. **Idle eviction with checkpoint (scale-to-zero).** After `snapshot_on_idle_seconds` of no traffic, the workload reconciler checkpoints the VM, tears down the running process, and records the handle in the ObservationStore. An inbound request via the gateway triggers a restore. The restore path is sub-second: metadata-only on disk plus `userfaultfd`-lazy on memory.
 4. **VMGenID wired into the guest.** Live-migrated or snapshot-restored VMs face entropy-reuse hazards — the kernel's RNG can produce identical output on both sides of a snapshot. Cloud Hypervisor exposes a VMGenID device; the node agent updates the generation counter on every restore, and the guest kernel reseeds.
@@ -626,7 +626,7 @@ A persistent microVM that also wants a stable public URL, credential sandboxing,
 - **Credential proxy sidecar (§8, §9)** — automatically attached for persistent workloads that declare external credentials, ensuring the workload never holds real secrets regardless of what it runs.
 - **Content-inspector sidecar (§9)** — optional; relevant for workloads processing untrusted content (AI agents reading the web, CI runners fetching third-party packages).
 
-The principle: persistent microVMs are not a separate concept. They are the `microvm` driver with `persistent = true`, and the other capabilities stateful workloads typically need are already first-class in Helios and compose via the job spec. The platform does not ship pre-baked workload images (Python, Node, Claude Code) — that is a product decision, not a platform primitive.
+The principle: persistent microVMs are not a separate concept. They are the `microvm` driver with `persistent = true`, and the other capabilities stateful workloads typically need are already first-class in Overdrive and compose via the job spec. The platform does not ship pre-baked workload images (Python, Node, Claude Code) — that is a product decision, not a platform primitive.
 
 ### Use Cases
 
@@ -638,13 +638,13 @@ The principle: persistent microVMs are not a separate concept. They are the `mic
 | Long-running data workers | Pipeline orchestrators with recovery state | State is the workload |
 | Customer-code sandboxes | SaaS offering arbitrary user code execution | Per-tenant isolation + persistent scratch |
 
-This is a natural consequence of the existing microVM driver, object storage, gateway, and identity model — not a separate product inside Helios.
+This is a natural consequence of the existing microVM driver, object storage, gateway, and identity model — not a separate product inside Overdrive.
 
 ---
 
 ## 7. eBPF Dataplane
 
-The eBPF dataplane is the core of Helios' network and security architecture. All programs are written in Rust using aya-rs and loaded by the node agent at startup.
+The eBPF dataplane is the core of Overdrive' network and security architecture. All programs are written in Rust using aya-rs and loaded by the node agent at startup.
 
 ### XDP — Fast Path Packet Processing
 
@@ -717,27 +717,27 @@ Policy evaluation (Rego/Regorus) is never in the hot path. Per-connection enforc
 
 ### Comparison to Fly.io's Dataplane Model
 
-Fly.io operates the largest production deployment of the Intent / Observation pattern Helios adopts in §4, and its dataplane is the most frequently cited reference for "Rust-native orchestrator with a userspace proxy." The comparison clarifies what Helios shares, what it diverges on, and why.
+Fly.io operates the largest production deployment of the Intent / Observation pattern Overdrive adopts in §4, and its dataplane is the most frequently cited reference for "Rust-native orchestrator with a userspace proxy." The comparison clarifies what Overdrive shares, what it diverges on, and why.
 
-**Shared.** Both platforms use **Corrosion** (CR-SQLite + SWIM via Foca + QUIC, Apache-2.0) as the global eventually-consistent service catalog. Helios's ObservationStore is the same open-source component Fly runs in production — not a reimplementation. The regional-Raft + global-CRDT topology in §3.5 matches the operational shape Fly arrived at after years of trying to stretch Consul-style consensus across the WAN.
+**Shared.** Both platforms use **Corrosion** (CR-SQLite + SWIM via Foca + QUIC, Apache-2.0) as the global eventually-consistent service catalog. Overdrive's ObservationStore is the same open-source component Fly runs in production — not a reimplementation. The regional-Raft + global-CRDT topology in §3.5 matches the operational shape Fly arrived at after years of trying to stretch Consul-style consensus across the WAN.
 
-**Divergent — by design.** Fly routes east-west traffic over a **WireGuard mesh** backhaul with a userspace proxy (`fly-proxy`) handling TLS termination, load balancing, service catalog lookups, and request replay. Helios splits these concerns across two dataplanes:
+**Divergent — by design.** Fly routes east-west traffic over a **WireGuard mesh** backhaul with a userspace proxy (`fly-proxy`) handling TLS termination, load balancing, service catalog lookups, and request replay. Overdrive splits these concerns across two dataplanes:
 
-| Concern | Fly.io | Helios |
+| Concern | Fly.io | Overdrive |
 |---|---|---|
 | Packet-level load balancing | userspace `fly-proxy` | XDP SERVICE_MAP (in-kernel, nanosecond path) |
 | Inter-node encryption | WireGuard peer-keyed tunnels | sockops + kTLS with per-workload SPIFFE SVIDs |
 | Service identity | region + app + machine ID (`*.internal`, `*.flycast`) | cryptographic SPIFFE ID in every TLS session |
 | L7 routing and TLS termination | `fly-proxy` userspace | Gateway subsystem (§11) — userspace |
-| Request replay (`fly-replay` / `helios-replay`) | `fly-proxy` | Gateway subsystem + XDP loop counter (§11) |
+| Request replay (`fly-replay` / `overdrive-replay`) | `fly-proxy` | Gateway subsystem + XDP loop counter (§11) |
 
-The consequence is an end-to-end identity path in Helios: every east-west packet carries a per-workload SVID enforced at the socket layer, where Fly's WireGuard mesh enforces peer-level (machine-to-machine) trust and delegates per-workload authorization to the proxy layer. The trade-off is principled — Helios accepts the complexity of two dataplanes (XDP for the fast path, Gateway for L7) in exchange for nanosecond-scale LB and identity-bearing encryption without a per-hop userspace proxy.
+The consequence is an end-to-end identity path in Overdrive: every east-west packet carries a per-workload SVID enforced at the socket layer, where Fly's WireGuard mesh enforces peer-level (machine-to-machine) trust and delegates per-workload authorization to the proxy layer. The trade-off is principled — Overdrive accepts the complexity of two dataplanes (XDP for the fast path, Gateway for L7) in exchange for nanosecond-scale LB and identity-bearing encryption without a per-hop userspace proxy.
 
-This divergence is the answer to why Helios, given that it adopts Corrosion directly, is not simply a Fly rebuild: the service-catalog layer is shared; the dataplane is reimagined on primitives (stable eBPF, kTLS, SPIFFE) that did not exist when `fly-proxy` was designed.
+This divergence is the answer to why Overdrive, given that it adopts Corrosion directly, is not simply a Fly rebuild: the service-catalog layer is shared; the dataplane is reimagined on primitives (stable eBPF, kTLS, SPIFFE) that did not exist when `fly-proxy` was designed.
 
 ### Node Underlay — IP Reachability and Optional Mesh VPN
 
-Every communication path described above — Raft between control-plane peers, Corrosion gossip between ObservationStore peers, node-agent control RPCs, and workload-to-workload data via sockops+kTLS — rides on an IP network. sockops+kTLS gives each packet *confidentiality and per-workload identity*; it does not give the kernel a way to reach the destination node. Reachability is a separate concern, and Helios handles it by scope.
+Every communication path described above — Raft between control-plane peers, Corrosion gossip between ObservationStore peers, node-agent control RPCs, and workload-to-workload data via sockops+kTLS — rides on an IP network. sockops+kTLS gives each packet *confidentiality and per-workload identity*; it does not give the kernel a way to reach the destination node. Reachability is a separate concern, and Overdrive handles it by scope.
 
 **Reachability requirements.**
 
@@ -745,7 +745,7 @@ Every communication path described above — Raft between control-plane peers, C
 - UDP reachability between every pair of Corrosion peers in the same gossip group (intra-region mesh plus regional peers to the thin global membership cluster, §4).
 - TCP reachability between any workload calling `connect()` and the node hosting the destination workload — kTLS runs over TCP.
 
-The underlay itself is not required to be encrypted. Every payload above IP is authenticated-encrypted under the platform CA: sockops+kTLS for east-west workload traffic, rustls for Raft and gRPC, the Corrosion peer's QUIC handshake under the same trust bundle for observation. Operators who nonetheless require encrypted backhaul — for defense in depth, regulatory mandates, or untrusted transit — enable a mesh VPN as an Image Factory extension (§24). The Helios binary is agnostic to which, if any, is in use.
+The underlay itself is not required to be encrypted. Every payload above IP is authenticated-encrypted under the platform CA: sockops+kTLS for east-west workload traffic, rustls for Raft and gRPC, the Corrosion peer's QUIC handshake under the same trust bundle for observation. Operators who nonetheless require encrypted backhaul — for defense in depth, regulatory mandates, or untrusted transit — enable a mesh VPN as an Image Factory extension (§24). The Overdrive binary is agnostic to which, if any, is in use.
 
 **Three deployment shapes.**
 
@@ -761,7 +761,7 @@ Subsequent peer changes flow through `node_health` in the ObservationStore. Ever
 
 **`tailscale` extension — bring-your-own coordination.**
 
-Tailscale provides NAT traversal via DERP relays and coordinated key exchange through its control server. The extension ships `tailscaled` and a systemd unit; it does not integrate with Helios enrollment. Operators point the daemon at their Tailscale tailnet or their self-hosted Headscale (MIT-licensed open-source coord server) via standard Tailscale configuration. The tradeoff is a second identity system — Tailscale ACLs alongside SPIFFE — which operators requiring NAT traversal generally accept. A future phase may integrate Headscale management into the control plane, with node-to-node ACLs driven by the Helios policy engine; v1 treats Tailscale as a self-contained subsystem.
+Tailscale provides NAT traversal via DERP relays and coordinated key exchange through its control server. The extension ships `tailscaled` and a systemd unit; it does not integrate with Overdrive enrollment. Operators point the daemon at their Tailscale tailnet or their self-hosted Headscale (MIT-licensed open-source coord server) via standard Tailscale configuration. The tradeoff is a second identity system — Tailscale ACLs alongside SPIFFE — which operators requiring NAT traversal generally accept. A future phase may integrate Headscale management into the control plane, with node-to-node ACLs driven by the Overdrive policy engine; v1 treats Tailscale as a self-contained subsystem.
 
 **Mutual exclusion.**
 
@@ -786,13 +786,13 @@ No code in the node agent, control plane, or dataplane detects which mesh VPN is
 Every workload allocation receives a SPIFFE ID encoding its platform identity:
 
 ```
-spiffe://helios.local/job/payments/alloc/a1b2c3
+spiffe://overdrive.local/job/payments/alloc/a1b2c3
 ```
 
 This identity is backed by a short-lived X.509 SVID issued by the node agent using its intermediate CA certificate. The full chain is:
 
 ```
-Helios Root CA (control plane, Raft-backed)
+Overdrive Root CA (control plane, Raft-backed)
     └── Node Intermediate CA (per node, issued at bootstrap)
             └── Workload SVID (per allocation, 1hr TTL)
 ```
@@ -849,7 +849,7 @@ The principle: security properties are enforced by infrastructure, not by the mo
 
 ## 9. WASM Sidecars
 
-The credential proxy is a specific instance of a general pattern. Any workload may need request interception, transformation, or enforcement logic that sits between it and the network — without modifying the workload itself. Helios formalises this as the WASM sidecar model.
+The credential proxy is a specific instance of a general pattern. Any workload may need request interception, transformation, or enforcement logic that sits between it and the network — without modifying the workload itself. Overdrive formalises this as the WASM sidecar model.
 
 ### The Pattern
 
@@ -948,9 +948,9 @@ Built-in sidecars are Rust native trait objects — zero WASM overhead for commo
 
 ```rust
 // Rust WASM sidecar — AWS SigV4 signing
-use helios_sidecar_sdk::{Request, SidecarAction, SidecarContext};
+use overdrive_sidecar_sdk::{Request, SidecarAction, SidecarContext};
 
-#[helios_sidecar::egress]
+#[overdrive_sidecar::egress]
 async fn on_egress(req: Request, ctx: SidecarContext) -> SidecarAction {
     let key = ctx.secrets().get("AWS_SECRET_KEY").await?;
     let signed = sign_sigv4(req, &key, "us-east-1", "execute-api")?;
@@ -1045,7 +1045,7 @@ They compose naturally. A policy deny at the kernel level never reaches the side
 
 ### Regorus
 
-Helios embeds **Regorus** — Microsoft's Rust-native Rego evaluation engine — directly in the control plane for policy evaluation. Rego is the language used by Open Policy Agent and is widely understood by platform and security engineers.
+Overdrive embeds **Regorus** — Microsoft's Rust-native Rego evaluation engine — directly in the control plane for policy evaluation. Rego is the language used by Open Policy Agent and is widely understood by platform and security engineers.
 
 Regorus handles:
 - Admission control (can this job be submitted?)
@@ -1086,7 +1086,7 @@ require_label {
 
 ## 11. Gateway
 
-Helios includes a native HTTP/gRPC gateway built in Rust using `hyper` and `rustls`. There is no Envoy dependency.
+Overdrive includes a native HTTP/gRPC gateway built in Rust using `hyper` and `rustls`. There is no Envoy dependency.
 
 The gateway is a built-in subsystem of the node agent, not a platform job. This distinction matters: a job depends on the scheduler, can be evicted, and requires the cluster to be healthy before it can run. The gateway needs to be available before any of that — it is infrastructure, not a workload. Making it a job would create a bootstrap deadlock and contradict the single-binary design principle.
 
@@ -1156,13 +1156,13 @@ Production (dedicated ingress tier):
 
 ### Public-Trust Certificates
 
-The built-in CA issues certs in the Helios trust domain — used for SVIDs, node intermediates, and the gateway's east-west mTLS. Generic internet clients (browsers, third-party SDKs, mobile apps) do not trust the Helios root, so public north-south ingress needs **publicly-trusted certs**.
+The built-in CA issues certs in the Overdrive trust domain — used for SVIDs, node intermediates, and the gateway's east-west mTLS. Generic internet clients (browsers, third-party SDKs, mobile apps) do not trust the Overdrive root, so public north-south ingress needs **publicly-trusted certs**.
 
-Helios embeds [`instant-acme`](https://docs.rs/instant-acme) — a pure-Rust, rustls-native ACMEv2 client (RFC 8555) — directly in the gateway. Certs from Let's Encrypt or any ACMEv2-compliant CA feed into the same `IdentityMgr` that handles SVID rotation. Two trust lanes, one manager:
+Overdrive embeds [`instant-acme`](https://docs.rs/instant-acme) — a pure-Rust, rustls-native ACMEv2 client (RFC 8555) — directly in the gateway. Certs from Let's Encrypt or any ACMEv2-compliant CA feed into the same `IdentityMgr` that handles SVID rotation. Two trust lanes, one manager:
 
 | Lane | Issuer | Clients | Use |
 |---|---|---|---|
-| Internal (east-west) | Built-in CA (§4) | Helios workloads, node agents, gateway east-west | Service mesh mTLS, SVIDs |
+| Internal (east-west) | Built-in CA (§4) | Overdrive workloads, node agents, gateway east-west | Service mesh mTLS, SVIDs |
 | Public (north-south) | ACMEv2 via `instant-acme` | Browsers, third-party clients | Gateway ingress on `https_port` |
 
 Both lanes share `IdentityMgr` for storage and rotation, rustls as the TLS terminator, and the same reconciler-driven watchdog for certs approaching expiry.
@@ -1193,7 +1193,7 @@ tls     = "acme"            # "acme" | "internal" | "operator"
 
 Storage boundary: operator-uploaded certs and ACME account keys live in the **IntentStore** (authoritative, linearizable, Raft-replicated in HA). Issued cert leaves and private keys live in the `IdentityMgr` cache alongside SVIDs — rotation is driven by the same reconciler that rotates workload identity.
 
-`instant-acme` is maintained by the author set behind `rustls`, `rcgen`, `quinn`, and `hickory-dns` — the exact libraries Helios already depends on. It defaults to `aws-lc-rs` + `hyper-rustls` with `ring` as an alternative, offers an optional `rcgen` feature for CSR/keypair generation, and ships with explicit `RetryPolicy`, pluggable `HttpClient`, ACME Profiles, and ACME Renewal Information (ARI) support. The architectural consequence matters: **`IdentityMgr` uses one `rcgen`-based cert-generation path for both internal SVIDs and public-trust ACME certs** — no second TLS stack, no OpenSSL dependency pulled in transitively. Design principle 7 (*Rust throughout*) is preserved at full strength, not merely under the critical-path caveat.
+`instant-acme` is maintained by the author set behind `rustls`, `rcgen`, `quinn`, and `hickory-dns` — the exact libraries Overdrive already depends on. It defaults to `aws-lc-rs` + `hyper-rustls` with `ring` as an alternative, offers an optional `rcgen` feature for CSR/keypair generation, and ships with explicit `RetryPolicy`, pluggable `HttpClient`, ACME Profiles, and ACME Renewal Information (ARI) support. The architectural consequence matters: **`IdentityMgr` uses one `rcgen`-based cert-generation path for both internal SVIDs and public-trust ACME certs** — no second TLS stack, no OpenSSL dependency pulled in transitively. Design principle 7 (*Rust throughout*) is preserved at full strength, not merely under the critical-path caveat.
 
 ### Route Configuration
 
@@ -1225,48 +1225,48 @@ XDP dataplane (in-process BPF map lookup, DNAT)
 Backend service
 ```
 
-The public TLS boundary terminates at the gateway. Inside the gateway, traffic is re-wrapped in mTLS using the built-in CA — every east-west hop carries cryptographic workload identity, exactly as if the request had originated inside the cluster. Two trust lanes meet at the gateway; from that point onward, everything is Helios-native identity.
+The public TLS boundary terminates at the gateway. Inside the gateway, traffic is re-wrapped in mTLS using the built-in CA — every east-west hop carries cryptographic workload identity, exactly as if the request had originated inside the cluster. Two trust lanes meet at the gateway; from that point onward, everything is Overdrive-native identity.
 
 ### Declarative Request Replay
 
 Applications frequently need to redirect an individual request to a different region, instance, or job — a write against a read-only regional replica belongs at the primary; a sticky session belongs on the canary allocation; a tenant-sharded request belongs on the shard that owns the tenant. Static route tables cannot express this; the choice depends on request content that only the application can inspect.
 
-Helios exposes an application-driven replay primitive via a response header:
+Overdrive exposes an application-driven replay primitive via a response header:
 
 ```
-helios-replay: region=eu-west-1
-helios-replay: instance=<alloc_id>
-helios-replay: job=payments-primary
+overdrive-replay: region=eu-west-1
+overdrive-replay: instance=<alloc_id>
+overdrive-replay: job=payments-primary
 ```
 
 When a backend returns this header, the gateway reads it **before** streaming the body to the client, consults `service_backends` in the local ObservationStore for a backend matching the target, and re-issues the originally-buffered request via the XDP fast path to the new destination. The client sees a single response from the eventual backend. The original request body is held in a bounded buffer (≤1 MB) during the replay; requests whose body exceeds the buffer cannot be replayed and the header is honored on best effort.
 
-Loop prevention is enforced in-kernel. A `helios-replay-count` header is incremented on every replay hop and a BPF map on the XDP fast path drops any replay whose counter exceeds a configurable ceiling (default 3). Loops that would otherwise consume multiple round-trips before a userspace check are extinguished at line rate.
+Loop prevention is enforced in-kernel. A `overdrive-replay-count` header is incremented on every replay hop and a BPF map on the XDP fast path drops any replay whose counter exceeds a configurable ceiling (default 3). Loops that would otherwise consume multiple round-trips before a userspace check are extinguished at line rate.
 
 Typical patterns:
 
-- **Primary-region writes.** A read replica receiving a write request responds with `helios-replay: region=<primary>`; the gateway replays to the primary region's job. This composes with §3.5 Multi-Region Federation — each region reads its local ObservationStore for the primary's backend set.
-- **Canary pinning.** A sticky session is pinned across canary promotion with `helios-replay: instance=<canary-alloc>` until promotion completes. Rollback remains a single SERVICE_MAP atomic update (§15) — once the canary allocation stops emitting the header, traffic follows the weighted backend set normally.
-- **Tenant sharding.** A request whose tenant hash maps to a shard the local instance does not own is redirected with `helios-replay: instance=<shard-owner-alloc>`. The shard map itself is application state; the platform only carries the redirect primitive.
+- **Primary-region writes.** A read replica receiving a write request responds with `overdrive-replay: region=<primary>`; the gateway replays to the primary region's job. This composes with §3.5 Multi-Region Federation — each region reads its local ObservationStore for the primary's backend set.
+- **Canary pinning.** A sticky session is pinned across canary promotion with `overdrive-replay: instance=<canary-alloc>` until promotion completes. Rollback remains a single SERVICE_MAP atomic update (§15) — once the canary allocation stops emitting the header, traffic follows the weighted backend set normally.
+- **Tenant sharding.** A request whose tenant hash maps to a shard the local instance does not own is redirected with `overdrive-replay: instance=<shard-owner-alloc>`. The shard map itself is application state; the platform only carries the redirect primitive.
 
 ### Region Preference Hints
 
-For cases where the routing preference is known at the *client* rather than the backend, Helios recognises two request headers:
+For cases where the routing preference is known at the *client* rather than the backend, Overdrive recognises two request headers:
 
-- `helios-prefer-region: <region>` — bias backend selection toward the named region; fall back to other regions if unavailable.
-- `helios-force-region: <region>` — require the named region; return 502 if no healthy backend exists there.
+- `overdrive-prefer-region: <region>` — bias backend selection toward the named region; fall back to other regions if unavailable.
+- `overdrive-force-region: <region>` — require the named region; return 502 if no healthy backend exists there.
 
 These hints are evaluated in the XDP fast path rather than at the userspace gateway. `service_backends` rows are keyed on `(service_id, region)`; the XDP program selects the matching subset before weighted load balancing. Happy-path cost is an additional BPF map lookup — no userspace hop, no TLS handshake overhead.
 
 ### Private Service VIPs and Auto-Wake
 
-East-west traffic inside a Helios cluster addresses services by SPIFFE ID (`spiffe://helios.local/job/payments`) resolved via the local ObservationStore. For workloads that cannot carry SPIFFE identity natively (third-party SDKs, legacy clients, WASM runtimes without Helios-aware networking), Helios also exposes a stable per-service IPv6 VIP:
+East-west traffic inside a Overdrive cluster addresses services by SPIFFE ID (`spiffe://overdrive.local/job/payments`) resolved via the local ObservationStore. For workloads that cannot carry SPIFFE identity natively (third-party SDKs, legacy clients, WASM runtimes without Overdrive-aware networking), Overdrive also exposes a stable per-service IPv6 VIP:
 
 ```
-<job>.svc.helios.local  →  fdc2:<cluster>:<region>:<job-hash>::<N>
+<job>.svc.overdrive.local  →  fdc2:<cluster>:<region>:<job-hash>::<N>
 ```
 
-The VIP is allocated from a Helios-reserved ULA prefix (`fdc2::/16`). XDP SERVICE_MAP routes VIP traffic to the current backend set from `service_backends`, and the standard sockops layer wraps the connection in SPIFFE mTLS — the caller sees a plain IPv6 socket, the dataplane still enforces identity-bound encryption.
+The VIP is allocated from a Overdrive-reserved ULA prefix (`fdc2::/16`). XDP SERVICE_MAP routes VIP traffic to the current backend set from `service_backends`, and the standard sockops layer wraps the connection in SPIFFE mTLS — the caller sees a plain IPv6 socket, the dataplane still enforces identity-bound encryption.
 
 When no backend is in the `running` state — all allocations are `suspended` or `stopped` — XDP returns `XDP_PASS` to the node's local gateway subsystem. The gateway issues a resume via the proxy-triggered resume path (§14) and replays the buffered request once a backend becomes healthy. The VIP is therefore the natural target for scale-to-zero services: clients address a stable name; the platform brings the backend up transparently on first request.
 
@@ -1307,7 +1307,7 @@ Telemetry lives in **DuckLake** — an integrated data lake and catalog format u
 
 ### LLM Agent (rig-rs)
 
-Helios embeds an LLM agent via `rig-rs` (Rust-native LLM orchestration) that has tool access to the full telemetry store, cluster state, and control plane API:
+Overdrive embeds an LLM agent via `rig-rs` (Rust-native LLM orchestration) that has tool access to the full telemetry store, cluster state, and control plane API:
 
 ```
 Tools:
@@ -1319,7 +1319,7 @@ Tools:
   propose_action(action)    → submit action through approval gate
 ```
 
-The tool list above is the default `builtin:helios-core` toolset. Toolsets are a first-class catalog — see *Native SRE Investigation Agent* below.
+The tool list above is the default `builtin:overdrive-core` toolset. Toolsets are a first-class catalog — see *Native SRE Investigation Agent* below.
 
 ### Tiered Self-Healing
 
@@ -1347,19 +1347,19 @@ Every incident, its diagnosis, actions taken, and outcome are stored in **libSQL
 
 ### Native SRE Investigation Agent
 
-Helios's Tier 3 reasoning surface is a native SRE investigation agent built on `rig-rs`, organized around four first-class primitives: **toolsets, runbooks, investigations, and typed remediations**. Each is implemented with primitives the platform already owns — no external agent runtime, no Python in the control plane, no separate self-hosted service mesh for AIOps.
+Overdrive's Tier 3 reasoning surface is a native SRE investigation agent built on `rig-rs`, organized around four first-class primitives: **toolsets, runbooks, investigations, and typed remediations**. Each is implemented with primitives the platform already owns — no external agent runtime, no Python in the control plane, no separate self-hosted service mesh for AIOps.
 
-**Toolsets — the declarative catalog.** The agent's tool surface is a catalog of toolsets loaded at runtime, not a hard-coded list. `builtin:helios-core` is a Rust trait object shipped in the binary, exposing the default tools above plus read-only projections of the IntentStore and the incident-memory retriever. Third-party toolsets are WASM modules — the same execution primitive as reconcilers (§18), policies (§13), and sidecars (§9) — content-addressed by sha256 in Garage, loaded declaratively from the IntentStore, scoped to the subset of host functions their manifest requests. A toolset declares the tools it exposes (name, description, input/output JSON schemas, risk class); the agent sees the union of loaded toolsets' tools. Investigations cite the toolset hashes used so transcripts are reproducible.
+**Toolsets — the declarative catalog.** The agent's tool surface is a catalog of toolsets loaded at runtime, not a hard-coded list. `builtin:overdrive-core` is a Rust trait object shipped in the binary, exposing the default tools above plus read-only projections of the IntentStore and the incident-memory retriever. Third-party toolsets are WASM modules — the same execution primitive as reconcilers (§18), policies (§13), and sidecars (§9) — content-addressed by sha256 in Garage, loaded declaratively from the IntentStore, scoped to the subset of host functions their manifest requests. A toolset declares the tools it exposes (name, description, input/output JSON schemas, risk class); the agent sees the union of loaded toolsets' tools. Investigations cite the toolset hashes used so transcripts are reproducible.
 
 **Runbooks — LLM-interpreted investigation guides.** Runbooks are markdown documents with YAML frontmatter describing trigger conditions and required toolsets. They are stored content-addressed in Garage and indexed in the incident-memory libSQL alongside past incidents via the same embedding-similarity system. When an investigation is triggered, the agent's first step retrieves top-k runbooks matching the trigger description and includes them in context. Runbooks guide *reasoning* — the steps are interpretive, not deterministic. The deterministic counterpart is the workflow primitive (§18): runbooks produce diagnoses and proposals; workflows execute ratified proposals. Format matches HolmesGPT's runbook format so community-maintained runbook catalogs are leverageable directly.
 
 **Investigation — a first-class resource.** Investigations join `Job`, `Node`, `Allocation`, `Policy`, `Certificate` in the core data model (§4). An investigation carries a lifecycle (triggered → gathering → reasoning → concluding → concluded), a trigger (alert, reconciler escalation, operator query, scheduled), a correlation key, a list of affected SPIFFE identities, a token and wall-clock budget, and a trace of tool calls and LLM turns. Live investigation state lives in the ObservationStore (Corrosion `investigation_state` table); on conclusion, the investigation is compressed into an incident row in the incident-memory libSQL with embedding-indexed diagnosis for future retrieval. An `InvestigationReconciler` drives the lifecycle; proposals from the agent are queued through the graduated approval gate.
 
-**Correlation — identity-based, not label-based.** Every eBPF event in Helios carries cryptographic SPIFFE identity on both ends. Correlation across alerts is a DuckLake SQL query over events joined on `src_identity` / `dst_identity` / `alloc_id`, windowed by causal-time proximity. Investigations carry a `correlation_key` derived from the primary identity, signal class, and time bucket; an incoming event whose key matches a live investigation appends to that investigation rather than spawning a duplicate. This collapses alert-storm scenarios to one investigation per underlying phenomenon without label-based heuristics.
+**Correlation — identity-based, not label-based.** Every eBPF event in Overdrive carries cryptographic SPIFFE identity on both ends. Correlation across alerts is a DuckLake SQL query over events joined on `src_identity` / `dst_identity` / `alloc_id`, windowed by causal-time proximity. Investigations carry a `correlation_key` derived from the primary identity, signal class, and time bucket; an incoming event whose key matches a live investigation appends to that investigation rather than spawning a duplicate. This collapses alert-storm scenarios to one investigation per underlying phenomenon without label-based heuristics.
 
 **Typed remediation actions.** The agent proposes state changes by emitting typed `Action` enum variants — `RestartAllocation`, `ScaleJob`, `RollBackDeployment`, `DrainNode`, `ResizeAllocation`, `ProposePolicyEdit`, `AttachDiagnosticProbe`, `StartWorkflow`. The risk tier is encoded on the variant at the type level: Tier 0 (reversible reads) auto-executes; Tier 1 (low-blast-radius writes) auto-executes with operator notification; Tier 2 (high-blast-radius writes) requires human ratification. Proposals land in the IntentStore (Raft); once ratified, the target reconciler consumes the typed action and converges. Actions flowing through Raft rather than YAML patches through kubectl is a structural consequence of the §18 reconciler model: compile-time exhaustiveness, deterministic replay, SPIFFE-bound identity.
 
-**Hypothesis verification via the owned dataplane.** Where external-agent architectures are confined to querying existing instrumentation, the Helios investigation agent can propose *temporary diagnostic attachments* — `Action::AttachDiagnosticProbe { bpf_sha, alloc, duration }`. Probes come from a platform-maintained, platform-signed catalog; they attach via aya-rs, emit into the existing eBPF ringbuf, and detach automatically at deadline. Hypotheses become verifiable within one investigation turn rather than queued behind a human-executed instrumentation rollout. This capability is structurally unavailable to orchestrators that do not own their dataplane.
+**Hypothesis verification via the owned dataplane.** Where external-agent architectures are confined to querying existing instrumentation, the Overdrive investigation agent can propose *temporary diagnostic attachments* — `Action::AttachDiagnosticProbe { bpf_sha, alloc, duration }`. Probes come from a platform-maintained, platform-signed catalog; they attach via aya-rs, emit into the existing eBPF ringbuf, and detach automatically at deadline. Hypotheses become verifiable within one investigation turn rather than queued behind a human-executed instrumentation rollout. This capability is structurally unavailable to orchestrators that do not own their dataplane.
 
 **Credential and prompt-injection posture.** Where the LLM is an external API, `builtin:credential-proxy` (§8) holds the provider keys; the agent never sees them. Where the agent ingests third-party content (runbook bodies from the catalog, log chunks returned by tools, documentation excerpts), `builtin:content-inspector` (§9) scans on ingress and flags prompt-injection payloads before the LLM sees them. BPF LSM blocks raw socket creation and unauthorised binary execution regardless of what the agent decides to do (§19). The agent is itself a workload under the same structural security posture as any other workload — security is enforced by infrastructure, not by the model's judgment.
 
@@ -1369,7 +1369,7 @@ Helios's Tier 3 reasoning surface is a native SRE investigation agent built on `
 
 ### OpenTelemetry Compatibility
 
-Helios' internal telemetry model is richer than the OTel data model and is not built on OTel primitives. However, Helios emits OTLP for interoperability with external backends (Datadog, Grafana, Jaeger, Honeycomb). The OTel Collector is available as a pre-configured platform job. OTel is an export format, not a foundation.
+Overdrive' internal telemetry model is richer than the OTel data model and is not built on OTel primitives. However, Overdrive emits OTLP for interoperability with external backends (Datadog, Grafana, Jaeger, Honeycomb). The OTel Collector is available as a pre-configured platform job. OTel is an export format, not a foundation.
 
 ---
 
@@ -1524,11 +1524,11 @@ In practice, most production clusters run at 20-40% actual resource utilization 
 
 Kubernetes' Vertical Pod Autoscaler requires pod restarts to resize and polls metrics at coarse intervals. It cannot prevent OOM kills — it can only react to them.
 
-### Helios Approach
+### Overdrive Approach
 
-Helios observes actual resource consumption at the kernel level via eBPF kprobes and cgroup v2 BPF programs — continuously, without instrumentation, with full workload identity.
+Overdrive observes actual resource consumption at the kernel level via eBPF kprobes and cgroup v2 BPF programs — continuously, without instrumentation, with full workload identity.
 
-**Pre-OOM pressure signal.** The distinctive property is not that the platform can resize live. Kubernetes reached GA on in-place pod resize in v1.35 (December 2025) — cgroup writes through the CRI `UpdateContainerResources` API. KubeVirt does memory hotplug via live migration. VMware has hot-add. Live resize is becoming table stakes. The distinctive property is *when* the signal fires. Industry VPA implementations poll metrics-server at minute intervals and can only react after utilization crosses a threshold — by the time an OOM is imminent, the next poll tick has not yet run. Helios reads memory and CPU pressure directly from eBPF kprobes in the kernel, sub-second, with full SPIFFE identity on every sample. The resize action fires *before* the OOM kill, not in the post-mortem. This pre-OOM pressure loop driven by identity-tagged eBPF has no published production analogue.
+**Pre-OOM pressure signal.** The distinctive property is not that the platform can resize live. Kubernetes reached GA on in-place pod resize in v1.35 (December 2025) — cgroup writes through the CRI `UpdateContainerResources` API. KubeVirt does memory hotplug via live migration. VMware has hot-add. Live resize is becoming table stakes. The distinctive property is *when* the signal fires. Industry VPA implementations poll metrics-server at minute intervals and can only react after utilization crosses a threshold — by the time an OOM is imminent, the next poll tick has not yet run. Overdrive reads memory and CPU pressure directly from eBPF kprobes in the kernel, sub-second, with full SPIFFE identity on every sample. The resize action fires *before* the OOM kill, not in the post-mortem. This pre-OOM pressure loop driven by identity-tagged eBPF has no published production analogue.
 
 This enables four subsystems:
 
@@ -1548,7 +1548,7 @@ Teams consistently running at 70% utilization instead of 30% — achievable with
 
 Live hotplug right-sizing keeps *running* workloads matched to their actual demand. For workloads that sit idle between requests — interactive dev environments, cron-like batch runners, per-tenant sandboxes, review-app previews — the correct resource envelope between requests is zero.
 
-Helios extends the `alloc_status` lifecycle with a `suspended` state and exposes scale-to-zero as a driver action across all VM-class workloads:
+Overdrive extends the `alloc_status` lifecycle with a `suspended` state and exposes scale-to-zero as a driver action across all VM-class workloads:
 
 ```
 pending → running ⇄ suspended → terminated
@@ -1566,7 +1566,7 @@ This composes with the WASM scale-to-zero pool (§16) — the mechanism differs 
 
 ### Proxy-Triggered Resume
 
-Scale-to-zero is only useful if something wakes the workload on demand. Helios wires this through the gateway and XDP fast path:
+Scale-to-zero is only useful if something wakes the workload on demand. Overdrive wires this through the gateway and XDP fast path:
 
 ```
 Request arrives at Gateway (or Private Service VIP, §11)
@@ -1601,7 +1601,7 @@ Requests whose body exceeds the 1 MB buffer cannot be held across a cold resume.
 
 ### Deterministic Scale Rules
 
-The predictive scaler above identifies patterns and proposes cron-based resource schedules — effective for traffic whose shape is learnable over days or weeks. For workloads driven by *current* signal — queue depth, inflight requests, CPU utilisation above a threshold — Helios also supports rule-based scale-out expressed in Rego:
+The predictive scaler above identifies patterns and proposes cron-based resource schedules — effective for traffic whose shape is learnable over days or weeks. For workloads driven by *current* signal — queue depth, inflight requests, CPU utilisation above a threshold — Overdrive also supports rule-based scale-out expressed in Rego:
 
 ```rego
 # Scale worker pool by queue depth
@@ -1618,7 +1618,7 @@ Rules evaluate against ObservationStore metrics on a fixed cadence (default 15 s
 
 ## 15. Zero Downtime Deployments
 
-Because Helios' load balancing is implemented as BPF map entries rather than proxy configuration, deployment strategies are BPF map update sequences. No proxy restart, no connection drop window, no configuration propagation delay.
+Because Overdrive' load balancing is implemented as BPF map entries rather than proxy configuration, deployment strategies are BPF map update sequences. No proxy restart, no connection drop window, no configuration propagation delay.
 
 ### Rolling Deployment
 
@@ -1684,7 +1684,7 @@ WASM functions processing untrusted content (documents, web pages, API responses
 ### Function SDK
 
 ```rust
-#[helios_fn::handler]
+#[overdrive_fn::handler]
 async fn handle(req: Request, ctx: Context) -> Response {
     // ctx.identity()          → SPIFFE ID for this invocation
     // ctx.secret("API_KEY")   → credential fetched via proxy
@@ -1702,7 +1702,7 @@ Language-agnostic via the WASM Component Model. TypeScript, Go, Python, and Rust
 
 ## 17. Storage Architecture
 
-Different data shapes require different storage primitives. Helios uses purpose-fit storage at each layer, with a hard boundary between *intent* (linearizable) and *observation* (eventually consistent) as established in §4:
+Different data shapes require different storage primitives. Overdrive uses purpose-fit storage at each layer, with a hard boundary between *intent* (linearizable) and *observation* (eventually consistent) as established in §4:
 
 ### Control Plane Intent — IntentStore (mode-dependent)
 
@@ -1717,7 +1717,7 @@ Both implementations are pure Rust, embedded, and require no separate process. T
 
 Live operational state: allocation status, service backend endpoints, node health, compiled policy verdicts, resource profiles. Strong consistency is unnecessary here and actively harmful — it cannot scale geographically, and the cost of Raft latency on the hot dataplane hydration path is unjustified when seconds of staleness is acceptable.
 
-Helios uses **Corrosion** (Fly.io, AGPL/Rust) backed by **cr-sqlite** (Vlcn, MIT). Each node runs a Corrosion peer with a local SQLite file. CR-SQLite converts tagged tables into CRDTs with last-write-wins semantics under logical timestamps; peers gossip row changes over QUIC via a SWIM membership protocol.
+Overdrive uses **Corrosion** (Fly.io, AGPL/Rust) backed by **cr-sqlite** (Vlcn, MIT). Each node runs a Corrosion peer with a local SQLite file. CR-SQLite converts tagged tables into CRDTs with last-write-wins semantics under logical timestamps; peers gossip row changes over QUIC via a SWIM membership protocol.
 
 ```
 Per-node footprint:
@@ -1742,9 +1742,9 @@ In single mode, Garage can be replaced with local filesystem storage — the sam
 
 ### Telemetry — DuckLake
 
-eBPF flow events and resource metrics are append-only columnar data. Helios uses **DuckLake** — an integrated data lake and catalog format from the DuckDB team — as the unified telemetry store.
+eBPF flow events and resource metrics are append-only columnar data. Overdrive uses **DuckLake** — an integrated data lake and catalog format from the DuckDB team — as the unified telemetry store.
 
-DuckLake separates catalog metadata (table schemas, snapshot history, file statistics) from data storage (Parquet files). In Helios:
+DuckLake separates catalog metadata (table schemas, snapshot history, file statistics) from data storage (Parquet files). In Overdrive:
 
 - **Catalog** — a libSQL (SQLite) file embedded on the control plane node. Zero additional processes.
 - **Storage** — Parquet files in Garage (S3-compatible). All telemetry data lives alongside other platform artifacts.
@@ -1783,24 +1783,24 @@ WHERE job_name = 'payments';
 
 DuckLake is MIT-licensed and ships as a DuckDB extension — no new runtime dependency is introduced since DuckDB is already embedded in the control plane.
 
-### Persistent Rootfs — `helios-fs`
+### Persistent Rootfs — `overdrive-fs`
 
-Persistent microVMs (§6) need a rootfs that survives workload migration, supports fast checkpoint/restore, and hydrates on access rather than upfront. Local filesystems cannot do this; neither Garage nor libSQL is sufficient on its own. `helios-fs` is the thin Rust-native layer that composes them into a per-VM filesystem.
+Persistent microVMs (§6) need a rootfs that survives workload migration, supports fast checkpoint/restore, and hydrates on access rather than upfront. Local filesystems cannot do this; neither Garage nor libSQL is sufficient on its own. `overdrive-fs` is the thin Rust-native layer that composes them into a per-VM filesystem.
 
 - **Chunks** — content-addressed immutable blocks in Garage. FastCDC segmentation; dedup across rootfs instances where content overlaps (common for agent sandboxes sharing a base image).
 - **Metadata** — inode, dentry, and file→chunk mapping in a per-rootfs libSQL database. Write-ahead log streamed continuously to Garage; RPO measured in seconds, not full-volume copy time.
 - **Cache** — NVMe hot tier per node, 2Q eviction, write-back for locally-originated writes. Read miss hydrates from Garage; write commits to local NVMe and to the WAL stream.
 - **Frontend** — `vhost-user-fs` (Rust port of `virtiofsd`) speaking virtio-fs directly to Cloud Hypervisor. The guest sees a normal virtiofs mount; the daemon is invisible.
 
-The design is deliberately narrower than a general distributed filesystem. `helios-fs` assumes **single-writer per rootfs** — each rootfs is owned by exactly one running VM at a time, enforced by the allocation lifecycle. This deletes the hardest parts of distributed FS design: no distributed locking, no multi-client cache coherence, no cross-mount invalidation. Metadata mutations are single-process libSQL transactions. Migration is a quiesce-and-handoff between two nodes, coordinated by the workflow reconciler (§18).
+The design is deliberately narrower than a general distributed filesystem. `overdrive-fs` assumes **single-writer per rootfs** — each rootfs is owned by exactly one running VM at a time, enforced by the allocation lifecycle. This deletes the hardest parts of distributed FS design: no distributed locking, no multi-client cache coherence, no cross-mount invalidation. Metadata mutations are single-process libSQL transactions. Migration is a quiesce-and-handoff between two nodes, coordinated by the workflow reconciler (§18).
 
 Snapshot and restore operate at the metadata layer only — chunks are already immutable, so a snapshot is an atomic libSQL transaction that forks the inode tree. This is what lets §14 *Scale-to-Zero for VM Workloads* resume a persistent microVM in tens of milliseconds: restore hydrates metadata (kilobytes), not the rootfs (gigabytes), and `userfaultfd` pages in memory on access while the guest is already running.
 
-Cross-workload shared volumes — the virtiofs use case in §6 where a process workload and a VM share `/shared-volume` — do **not** go through `helios-fs`. Those are short-lived host-side mounts exposed via virtiofsd-passthrough, managed directly by the storage reconciler against local or Garage-backed volumes. `helios-fs` is specifically the rootfs store for persistent microVMs.
+Cross-workload shared volumes — the virtiofs use case in §6 where a process workload and a VM share `/shared-volume` — do **not** go through `overdrive-fs`. Those are short-lived host-side mounts exposed via virtiofsd-passthrough, managed directly by the storage reconciler against local or Garage-backed volumes. `overdrive-fs` is specifically the rootfs store for persistent microVMs.
 
-Rejected alternatives: **embedding JuiceFS** (Apache-2.0, production-proven at Fly.io scale) was considered and declined. JuiceFS is Go, so embedding it means either running a Go process per node or pulling a Go runtime into the binary — both contradict design principles 1 (*own your primitives*) and 7 (*Rust throughout, no FFI to Go or C++ in the critical path*). Its multi-client coherence and distributed-locking machinery are also unnecessary weight for the single-writer case Helios actually has.
+Rejected alternatives: **embedding JuiceFS** (Apache-2.0, production-proven at Fly.io scale) was considered and declined. JuiceFS is Go, so embedding it means either running a Go process per node or pulling a Go runtime into the binary — both contradict design principles 1 (*own your primitives*) and 7 (*Rust throughout, no FFI to Go or C++ in the critical path*). Its multi-client coherence and distributed-locking machinery are also unnecessary weight for the single-writer case Overdrive actually has.
 
-### Stateful Workloads on `helios-fs`
+### Stateful Workloads on `overdrive-fs`
 
 The single-writer constraint raises a reasonable question: how do databases, queues, and other stateful systems run on a filesystem that one VM owns at a time? The answer is that modern stateful systems already work this way at the storage layer — they replicate at the **application layer**, where semantic knowledge of commits, batches, and acknowledgments makes replication efficient.
 
@@ -1812,9 +1812,9 @@ The single-writer constraint raises a reasonable question: how do databases, que
 | Document / cache | MongoDB, Redis Cluster, Elasticsearch | per-node local disk + oplog / replica streaming |
 | Message broker | Kafka, NATS JetStream, Pulsar | per-broker disk + ISR / stream replication |
 | Analytics / OLAP | DuckDB / DuckLake, Spark-style jobs | object storage (Garage) directly |
-| AI agents / CI / dev sandboxes | Claude Code, Buildkite runners, Codespaces-style | persistent rootfs (`helios-fs`), single writer |
+| AI agents / CI / dev sandboxes | Claude Code, Buildkite runners, Codespaces-style | persistent rootfs (`overdrive-fs`), single writer |
 
-Every system in the first six rows runs as one VM per database node, each VM owning its own `helios-fs` rootfs (or ephemeral local disk for fully replicated setups), with replication handled by the database process itself. The seventh row — analytics — bypasses filesystems entirely and uses Garage directly. The eighth row is what `helios-fs` exists for.
+Every system in the first six rows runs as one VM per database node, each VM owning its own `overdrive-fs` rootfs (or ephemeral local disk for fully replicated setups), with replication handled by the database process itself. The seventh row — analytics — bypasses filesystems entirely and uses Garage directly. The eighth row is what `overdrive-fs` exists for.
 
 There are three reasons modern stateful systems prefer this over a shared-storage architecture:
 
@@ -1822,17 +1822,17 @@ There are three reasons modern stateful systems prefer this over a shared-storag
 2. **Shared storage is a coordination bottleneck.** Oracle RAC and Aurora work because they are heroically engineered around proprietary storage layers. Sharded architectures with async replication scale better than shared state — the entire industry moved this direction over the last fifteen years.
 3. **Stacked consensus compounds latency.** A DFS using Raft beneath a database using Raft means every write traverses two consensus rounds. Cockroach on Ceph is measurably slower than Cockroach on local disk for this reason.
 
-The Helios storage catalog covers every stateful pattern this implies:
+The Overdrive storage catalog covers every stateful pattern this implies:
 
 | Pattern | Storage primitive | Lifecycle |
 |---|---|---|
 | Ephemeral local disk | VM block device | Dies with the allocation |
-| Persistent per-VM rootfs | `helios-fs` | Survives migration, single-writer |
+| Persistent per-VM rootfs | `overdrive-fs` | Survives migration, single-writer |
 | Cluster-shared dataset | Garage (S3 API) | Cluster-durable, accessed by any workload |
 | Coordination state | ObservationStore | Gossiped, eventually consistent |
 | Cross-workload volume (same node) | virtiofsd-passthrough | Host mount, same-node only |
 
-**When a general distributed filesystem would actually be needed.** Three workload classes legitimately want multi-writer POSIX semantics: legacy shared-home-directory patterns (better served by Garage), shared-disk databases like Oracle RAC (not portable, not migrating to Helios), and Kubernetes workloads expecting `ReadWriteMany` PVCs (often a substitute for primitives Helios already provides — SPIFFE identity, ObservationStore coordination). None of these are first-class targets. If a concrete future workload demands genuine multi-writer semantics, the chunk store, libSQL metadata layer, and virtio-fs frontend in `helios-fs` are reusable — a coherence protocol could be added on top. Building it speculatively would ship complexity that cannot be tuned without real traffic.
+**When a general distributed filesystem would actually be needed.** Three workload classes legitimately want multi-writer POSIX semantics: legacy shared-home-directory patterns (better served by Garage), shared-disk databases like Oracle RAC (not portable, not migrating to Overdrive), and Kubernetes workloads expecting `ReadWriteMany` PVCs (often a substitute for primitives Overdrive already provides — SPIFFE identity, ObservationStore coordination). None of these are first-class targets. If a concrete future workload demands genuine multi-writer semantics, the chunk store, libSQL metadata layer, and virtio-fs frontend in `overdrive-fs` are reusable — a coherence protocol could be added on top. Building it speculatively would ship complexity that cannot be tuned without real traffic.
 
 ### Incident Memory — libSQL (embedded)
 
@@ -1859,7 +1859,7 @@ Each reconciler gets a private libSQL database for stateful memory across reconc
 
 ### Design
 
-Helios' reconciliation model is inspired by Kubernetes' control loop but with three key differences: reconcilers are strongly typed Rust trait objects (not Go processes with cluster-admin privileges), they have access to a private persistent store for stateful reasoning, and the platform ships a durable-workflow primitive alongside the reconciler for multi-step operations that cannot be cleanly expressed as diff-based convergence.
+Overdrive' reconciliation model is inspired by Kubernetes' control loop but with three key differences: reconcilers are strongly typed Rust trait objects (not Go processes with cluster-admin privileges), they have access to a private persistent store for stateful reasoning, and the platform ships a durable-workflow primitive alongside the reconciler for multi-step operations that cannot be cleanly expressed as diff-based convergence.
 
 ```rust
 trait Reconciler: Send + Sync {
@@ -1876,7 +1876,7 @@ The `reconcile` function is pure over `(desired, actual, db) → actions`. Neith
 
 ### Triggering Model — Hybrid by Design
 
-Every mature production orchestrator — Kubernetes, Nomad, KCP, Crossplane — converges on level-triggered reconciliation because it is the only pattern that survives missed events, crashes, and stale caches. Pure event-sourced orchestrators do not exist in production; the straw-man is always a hybrid in practice. Helios follows the same consensus with Nomad's concrete shape:
+Every mature production orchestrator — Kubernetes, Nomad, KCP, Crossplane — converges on level-triggered reconciliation because it is the only pattern that survives missed events, crashes, and stale caches. Pure event-sourced orchestrators do not exist in production; the straw-man is always a hybrid in practice. Overdrive follows the same consensus with Nomad's concrete shape:
 
 - **Edge-triggered at ingress.** External state changes (job submission, node heartbeat failure, policy update, cert approaching expiry) produce a typed `Evaluation` enqueued through Raft.
 - **Level-triggered inside the reconciler.** Each `Evaluation` causes the responsible reconciler to recompute `desired vs actual → Vec<Action>` against the authoritative IntentStore. Missed or duplicated events do not lose state — the next evaluation sees the full current delta.
@@ -1885,7 +1885,7 @@ Every mature production orchestrator — Kubernetes, Nomad, KCP, Crossplane — 
 
 A naïve edge-triggered ingress amplifies correlated failures. Nomad documents the canonical failure mode: 500 flapping nodes × 20 allocations × 100 system jobs = 60,000 evaluations in a single heartbeat window. Without mitigation, this saturates Raft and the reconciler fleet — HashiCorp retrofitted a cancelable-eval-set after production incidents produced literal millions of evaluations.
 
-Helios ships the mitigation natively rather than retrofitting after an incident:
+Overdrive ships the mitigation natively rather than retrofitting after an incident:
 
 - Evaluations are keyed by `(reconciler, target_resource)`. A second evaluation for the same key while one is pending moves the prior evaluation into a **cancelable set** processed by a reaper in bulk.
 - Because reconciliation is idempotent, collapsing N pending evaluations for the same target into one is semantically free — the surviving evaluation sees the fully-converged delta anyway.
@@ -1897,7 +1897,7 @@ First-party reconcilers are Rust trait objects — maximum performance, full typ
 
 Input and output types are fully serializable from day one, making the WASM migration path trivial.
 
-This replaces the Kubernetes operator model, where extensions ship as Go binaries running with cluster-admin privileges — the single largest source of cluster-destabilizing incidents in production Kubernetes. A misbehaving WASM reconciler cannot escape its sandbox, cannot mutate state without going through Raft, and can be evicted or hot-reloaded without restarting a pod. WASM as the control-plane extension model is now industry consensus (Helm 4, Cosmonic Control, wasmCloud) — Helios is early, not fringe.
+This replaces the Kubernetes operator model, where extensions ship as Go binaries running with cluster-admin privileges — the single largest source of cluster-destabilizing incidents in production Kubernetes. A misbehaving WASM reconciler cannot escape its sandbox, cannot mutate state without going through Raft, and can be evicted or hot-reloaded without restarting a pod. WASM as the control-plane extension model is now industry consensus (Helm 4, Cosmonic Control, wasmCloud) — Overdrive is early, not fringe.
 
 ### Built-in Reconcilers
 
@@ -1915,7 +1915,7 @@ This replaces the Kubernetes operator model, where extensions ship as Go binarie
 
 Some orchestration operations are fundamentally sequential: "roll certificate through DNS propagation, wait for validation, swap trust anchor, verify all nodes accepted, retire old cert." These do not fit cleanly into diff-based convergence because the correct next action depends on the *history* and the *timing* of prior steps, not just the current delta. Encoding them as reconciler memory works but reproduces what Temporal and Restate call *durable execution* — poorly.
 
-Helios therefore treats durable workflows as a first-class primitive, implemented *as* a built-in reconciler whose desired state is a workflow definition and whose memory is a replayable event journal:
+Overdrive therefore treats durable workflows as a first-class primitive, implemented *as* a built-in reconciler whose desired state is a workflow definition and whose memory is a replayable event journal:
 
 ```rust
 trait Workflow {
@@ -1931,7 +1931,7 @@ The reconciler primitive handles "converge cluster toward spec." The workflow pr
 
 ### Three-Layer State Taxonomy
 
-Helios draws a hard boundary between three state layers, each with different consistency guarantees. The reconciler and workflow primitives read and write these layers with explicit rules:
+Overdrive draws a hard boundary between three state layers, each with different consistency guarantees. The reconciler and workflow primitives read and write these layers with explicit rules:
 
 | Layer | Primitive reads | Primitive writes | Store | Guarantee |
 |---|---|---|---|---|
@@ -1953,7 +1953,7 @@ First-party reconcilers ship with ESR specifications. WASM extensions declare ES
 
 ### Defense in Depth
 
-Helios enforces security at four independent layers. A compromise of any one layer does not defeat the others:
+Overdrive enforces security at four independent layers. A compromise of any one layer does not defeat the others:
 
 ```
 Layer 1: WASM sandbox / VM isolation     — workload execution boundary
@@ -1995,7 +1995,7 @@ The control plane compiles this into BPF maps. LSM and XDP programs enforce it. 
 
 ### Structural Advantages
 
-| Component | Kubernetes | Helios |
+| Component | Kubernetes | Overdrive |
 |---|---|---|
 | Service routing | iptables O(n) | XDP BPF O(1) |
 | mTLS | Envoy sidecar (~0.5 vCPU each) | kTLS in-kernel (~0 overhead) |
@@ -2009,7 +2009,7 @@ The control plane compiles this into BPF maps. LSM and XDP programs enforce it. 
 
 ### Utilization
 
-The most significant efficiency gain is workload density. Kubernetes clusters typically run at 20-40% actual utilization against allocated limits. Helios' continuous right-sizing targets 60-80% utilization through live cgroup adjustment and predictive resource profiles.
+The most significant efficiency gain is workload density. Kubernetes clusters typically run at 20-40% actual utilization against allocated limits. Overdrive' continuous right-sizing targets 60-80% utilization through live cgroup adjustment and predictive resource profiles.
 
 Running at 70% utilization instead of 30% on the same hardware does not merely halve the node count. It reduces control plane overhead, network overhead, and operational cost in proportion — the gains compound.
 
@@ -2017,7 +2017,7 @@ Running at 70% utilization instead of 30% on the same hardware does not merely h
 
 These are directional estimates based on analogous measurements from eBPF-based networking projects:
 
-| Metric | Kubernetes | Helios | Estimated Gain |
+| Metric | Kubernetes | Overdrive | Estimated Gain |
 |---|---|---|---|
 | Network latency p99 | 2–10ms | 0.5–2ms | ~5x |
 | mTLS CPU overhead | ~0.5 vCPU/sidecar | ~0 | ~100x |
@@ -2032,11 +2032,11 @@ These are directional estimates based on analogous measurements from eBPF-based 
 
 Deterministic simulation testing (DST) is an approach to finding and reliably reproducing complex bugs in distributed systems — concurrency issues, timing races, partition behavior — that are effectively invisible to conventional tests. It was pioneered at FoundationDB and has since been adopted by TigerBeetle, WarpStream, RisingWave, and other serious distributed infrastructure projects.
 
-The core requirement: every source of nondeterminism must be injectable. This is almost impossible to retrofit onto an existing system. Helios is designed with DST as a first-class constraint from day one.
+The core requirement: every source of nondeterminism must be injectable. This is almost impossible to retrofit onto an existing system. Overdrive is designed with DST as a first-class constraint from day one.
 
 ### Sources of Nondeterminism
 
-Every nondeterministic boundary in Helios is abstracted behind a trait:
+Every nondeterministic boundary in Overdrive is abstracted behind a trait:
 
 ```rust
 // Time — no Instant::now() in production code
@@ -2109,7 +2109,7 @@ Each trait has two implementations: a real implementation for production, and a 
 
 ### The Simulation Harness
 
-Helios uses **turmoil** — a Rust DST framework that provides deterministic async simulation with controllable time, network, and multi-host environments — as the test harness foundation:
+Overdrive uses **turmoil** — a Rust DST framework that provides deterministic async simulation with controllable time, network, and multi-host environments — as the test harness foundation:
 
 ```rust
 #[test]
@@ -2120,7 +2120,7 @@ fn test_leader_election_after_partition() {
 
     for i in 0..3 {
         sim.host(format!("node-{i}"), || async move {
-            HeliosNode::new(SimConfig {
+            OverdriveNode::new(SimConfig {
                 clock:       Arc::new(SimClock::new()),
                 transport:   Arc::new(SimTransport::new()),
                 entropy:     Arc::new(SeededEntropy::new(42)),
@@ -2158,7 +2158,7 @@ This test runs in milliseconds, is perfectly reproducible from the same seed, an
 
 ### Properties
 
-DST is paired with property-based testing. Helios tests three categories of invariant:
+DST is paired with property-based testing. Overdrive tests three categories of invariant:
 
 **Safety — nothing bad ever happens:**
 ```rust
@@ -2240,7 +2240,7 @@ Both `IntentStore` (with `export_snapshot` / `bootstrap_from`) and `ObservationS
 
 §21 establishes deterministic simulation as the foundation for proving control-plane correctness against injected concurrency, timing, and partition faults. DST cannot exercise eBPF — by design, `SimDataplane` is an in-memory HashMap that stands in for kernel programs. This boundary is correct: trying to simulate the kernel verifier, the XDP driver hook, kTLS offload, or BPF LSM semantics inside a single-threaded harness would either be wrong or be a kernel reimplementation. The complement to DST is real eBPF programs loaded into real kernels, exercised against real syscalls and real packets.
 
-The published consensus across the eBPF-heavy ecosystem (Cilium, Tetragon, kernel-patches/bpf, Aya, Falco) is that the two are not substitutes. DST catches logic bugs in control flow under timing and ordering perturbation cheaply; real-kernel testing catches bugs at the boundary between Helios and the kernel — verifier rejections, kernel-version regressions, hook-attachment quirks, kTLS offload edge cases, LSM hook semantics. The bug classes partition. FoundationDB and WarpStream both position DST as complementary to real-system testing rather than a replacement; Helios takes the same posture and runs both on every PR.
+The published consensus across the eBPF-heavy ecosystem (Cilium, Tetragon, kernel-patches/bpf, Aya, Falco) is that the two are not substitutes. DST catches logic bugs in control flow under timing and ordering perturbation cheaply; real-kernel testing catches bugs at the boundary between Overdrive and the kernel — verifier rejections, kernel-version regressions, hook-attachment quirks, kTLS offload edge cases, LSM hook semantics. The bug classes partition. FoundationDB and WarpStream both position DST as complementary to real-system testing rather than a replacement; Overdrive takes the same posture and runs both on every PR.
 
 ### Four-Tier Stack
 
@@ -2270,7 +2270,7 @@ Tier 4  Verifier + perf regression  per-kernel load + xdp-bench
 
 The kernel exposes `BPF_PROG_TEST_RUN` for running a loaded program against supplied input and recording the output. This is the primitive every credible eBPF unit test framework builds on. Aya wraps it as `Program::test_run()` for the program types where the kernel supports it (XDP, TC).
 
-Each Helios eBPF program ships with three companions in `crates/helios-bpf/tests/`:
+Each Overdrive eBPF program ships with three companions in `crates/overdrive-bpf/tests/`:
 
 - `PKTGEN` — generates a synthetic packet (or syscall context for non-XDP hooks).
 - `SETUP` — populates the BPF maps the program reads (`SERVICE_MAP`, `IDENTITY_MAP`, `POLICY_MAP`, `FS_POLICY_MAP`).
@@ -2288,27 +2288,27 @@ The goal is to prove that the programs load on every kernel in the support matri
 
 | Kernel | Why it's in the matrix |
 |---|---|
-| 5.10 LTS | First LTS with BPF LSM, kTLS, and sockops jointly stable. The Helios floor. |
+| 5.10 LTS | First LTS with BPF LSM, kTLS, and sockops jointly stable. The Overdrive floor. |
 | 5.15 LTS | Ubuntu 22.04, Debian 12 backports, RHEL 9 backports — most-deployed LTS in production. |
 | 6.1 LTS | Debian 13 stable; matches Tetragon's matrix. |
 | 6.6 LTS | Ubuntu 24.04 lineage; vhost-vsock parity for Cloud Hypervisor. |
 | Current LTS | Most recent kernel in the line; regression-catch for newer verifier behaviour. |
 | `bpf-next` | Early warning for upstream changes. Soft-fail in CI. |
 
-The matrix is `little-vm-helper` (LVH) `image-version` inputs in CI; adding a kernel is one line of YAML. LVH ships pre-built OCI kernel images and is used in production by Cilium, Tetragon, and pwru. On developer laptops `virtme-ng` boots a kernel from a tree in roughly a second and snapshots the host filesystem — same harness shape, faster iteration. Helios reuses aya's existing `cargo xtask integration-test vm --cache-dir <CACHE_DIR> <KERNEL>...` as the entry point rather than inventing its own.
+The matrix is `little-vm-helper` (LVH) `image-version` inputs in CI; adding a kernel is one line of YAML. LVH ships pre-built OCI kernel images and is used in production by Cilium, Tetragon, and pwru. On developer laptops `virtme-ng` boots a kernel from a tree in roughly a second and snapshots the host filesystem — same harness shape, faster iteration. Overdrive reuses aya's existing `cargo xtask integration-test vm --cache-dir <CACHE_DIR> <KERNEL>...` as the entry point rather than inventing its own.
 
-Nested virtualisation is not required. Tetragon's `--qemu-disable-kvm` flag exists specifically to make GitHub Actions runners viable; Helios takes the same approach. Standard `ubuntu-latest` runners are sufficient through Phase 2 of the roadmap; a self-hosted KVM-capable runner pool can be added later if PR latency budget demands it.
+Nested virtualisation is not required. Tetragon's `--qemu-disable-kvm` flag exists specifically to make GitHub Actions runners viable; Overdrive takes the same approach. Standard `ubuntu-latest` runners are sufficient through Phase 2 of the roadmap; a self-hosted KVM-capable runner pool can be added later if PR latency budget demands it.
 
 **Inside-VM test shape:**
 
-1. A `helios-tester` binary runs as a systemd unit inside the VM, reads a job manifest, executes each test case, writes results to a host-mounted directory, then powers off the VM.
-2. Each test case stands up a small network of namespaces connected by veth pairs, runs the Helios node binary in each, submits jobs through the IntentStore API, and drives real traffic via Rust packet primitives (`pnet` + `tokio-tun`).
+1. A `overdrive-tester` binary runs as a systemd unit inside the VM, reads a job manifest, executes each test case, writes results to a host-mounted directory, then powers off the VM.
+2. Each test case stands up a small network of namespaces connected by veth pairs, runs the Overdrive node binary in each, submits jobs through the IntentStore API, and drives real traffic via Rust packet primitives (`pnet` + `tokio-tun`).
 3. Assertions fire against three observable layers:
    - **Kernel-side state** — BPF maps via `bpftool map dump`, TLS ULP via `ss -K`, LSM decisions via the BPF ringbuf event stream.
-   - **Userspace state** — structured flow events from the Helios telemetry ringbuf.
+   - **Userspace state** — structured flow events from the Overdrive telemetry ringbuf.
    - **Wire capture** — `tcpdump` on veth interfaces, verified against expected ciphertext (kTLS) or expected forwarding (XDP SERVICE_MAP).
 
-**Canonical test cases**, one per kernel feature Helios depends on:
+**Canonical test cases**, one per kernel feature Overdrive depends on:
 
 | Hook | Test |
 |---|---|
@@ -2327,9 +2327,9 @@ LSM assertions go against the BPF ringbuf event stream and audit metadata, **not
 
 ### Tier 4 — Verifier and Performance Regression
 
-**Verifier complexity** — modelled directly on Cilium's "Datapath BPF Complexity" workflow. The full Helios BPF corpus is compiled with worst-case feature flags (every map at maximum size, every policy path enabled), then loaded into each matrix kernel. `veristat` records per-program instruction counts and the ratio against the kernel's complexity ceiling. A baseline is stored on `main`; PRs fail when any program exceeds its baseline by >5% or approaches the per-program ceiling by >10%. The verifier is not a fixed function — it evolves across releases with different alias-analysis precision and different register-tracking heuristics. The only guard is loading the corpus into every kernel in the matrix.
+**Verifier complexity** — modelled directly on Cilium's "Datapath BPF Complexity" workflow. The full Overdrive BPF corpus is compiled with worst-case feature flags (every map at maximum size, every policy path enabled), then loaded into each matrix kernel. `veristat` records per-program instruction counts and the ratio against the kernel's complexity ceiling. A baseline is stored on `main`; PRs fail when any program exceeds its baseline by >5% or approaches the per-program ceiling by >10%. The verifier is not a fixed function — it evolves across releases with different alias-analysis precision and different register-tracking heuristics. The only guard is loading the corpus into every kernel in the matrix.
 
-**XDP performance** — `xdp-trafficgen` and `xdp-bench` from the `xdp-tools` project generate synthetic load and measure receive-side numbers inside an LVH VM with two veth pairs (generator → SUT → sink). Baselines are per-runner-class pps and p99 latency, stored under `perf-baseline/` on `main`. PRs are gated on relative delta — pps within 5% and p99 latency within 10% — never on absolute thresholds, since GitHub Actions runner hardware varies enough to make absolute gates flaky. Raw output is retained for trend visualisation; in production, the same data feeds DuckLake (§17) — Helios dogfoods its own telemetry pipeline for its CI metrics.
+**XDP performance** — `xdp-trafficgen` and `xdp-bench` from the `xdp-tools` project generate synthetic load and measure receive-side numbers inside an LVH VM with two veth pairs (generator → SUT → sink). Baselines are per-runner-class pps and p99 latency, stored under `perf-baseline/` on `main`. PRs are gated on relative delta — pps within 5% and p99 latency within 10% — never on absolute thresholds, since GitHub Actions runner hardware varies enough to make absolute gates flaky. Raw output is retained for trend visualisation; in production, the same data feeds DuckLake (§17) — Overdrive dogfoods its own telemetry pipeline for its CI metrics.
 
 **Static second-opinion analysis** — PREVAIL (PLDI 2019, used by Microsoft for eBPF-for-Windows) is run against the program corpus in a non-blocking nightly job. When PREVAIL disagrees with the kernel verifier's accept/reject decision, the build fails. This treats the kernel verifier as a first opinion and PREVAIL as a second — defence against verifier bugs, not just program bugs. Recent academic work (Agni at CAV 2023, OSDI 2024 state-embedding, NSDI 2025 VEP) has demonstrated soundness gaps in the verifier's range analysis. A second analyser is cheap insurance.
 
@@ -2364,7 +2364,7 @@ Per-release:
 | `SimTransport` reordering / loss / latency | `netem reorder 50% gap 3`, `netem loss 5%`, `netem delay 100ms 20ms` |
 | `SimDataplane` policy update | actual BPF map update under XDP load (Tier 3 SERVICE_MAP test) |
 | `SimClock` skew | boot VMs with offset `CLOCK_REALTIME`; assert convergence |
-| Node clean crash + restart | `kill -9` on the in-VM Helios binary; assert clean BPF unload + rehydration |
+| Node clean crash + restart | `kill -9` on the in-VM Overdrive binary; assert clean BPF unload + rehydration |
 | `SimObservationStore` schema migration | real Corrosion in VM; trigger additive migration; assert no backfill storm |
 | Driver fails to start | real Cloud Hypervisor; inject a bad kernel image; assert lifecycle state machine |
 
@@ -2375,12 +2375,12 @@ The correspondence is not 1-to-1. DST catches concurrency-logic bugs no integrat
 Explicitly out of scope for this section:
 
 - **Real hardware NIC drivers.** Cilium, Tetragon, and the upstream BPF CI all run against virtio-net and veth in QEMU; none gate merges on `mlx5` or `i40e` behaviour. Real-hardware validation belongs in a per-release lab, not on every PR — it is not a credible use of CI minutes.
-- **Full kernel selftests.** Helios does not re-run `tools/testing/selftests/bpf` — that is the kernel's job. Helios relies on each supported kernel having passed its own selftests (which is the case for every shipped LTS) and confines its harness to Helios-specific programs.
+- **Full kernel selftests.** Overdrive does not re-run `tools/testing/selftests/bpf` — that is the kernel's job. Overdrive relies on each supported kernel having passed its own selftests (which is the case for every shipped LTS) and confines its harness to Overdrive-specific programs.
 - **Production chaos as a substitute for CI.** This section is pre-merge gating. The chaos reconciler (§18) injects faults in live clusters to validate emergent behaviour. The two compose; neither substitutes for the other.
 
-### What This Buys Helios Over Kubernetes and Nomad
+### What This Buys Overdrive Over Kubernetes and Nomad
 
-Neither Kubernetes nor Nomad ships the Tier 1 + Tier 3 composition, because neither owns its dataplane. Kubernetes ships control-plane tests and expects each CNI plugin vendor to test its dataplane separately; Nomad's scheduler tests do not exercise eBPF at all. Helios owns the dataplane, which makes it the first orchestrator in a position to **gate merges on datapath correctness across a kernel matrix**. This is a net addition to the §20 efficiency comparison — not a parity claim.
+Neither Kubernetes nor Nomad ships the Tier 1 + Tier 3 composition, because neither owns its dataplane. Kubernetes ships control-plane tests and expects each CNI plugin vendor to test its dataplane separately; Nomad's scheduler tests do not exercise eBPF at all. Overdrive owns the dataplane, which makes it the first orchestrator in a position to **gate merges on datapath correctness across a kernel matrix**. This is a net addition to the §20 efficiency comparison — not a parity claim.
 
 ---
 
@@ -2395,8 +2395,8 @@ Neither Kubernetes nor Nomad ships the Tier 1 + Tier 3 composition, because neit
 - turmoil simulation harness + SimDriver / SimDataplane / SimClock / SimObservationStore / SimLlm (transcript-replay)
 - Process driver
 - Basic scheduler (first-fit)
-- CLI (`helios job submit`, `helios node list`, `helios alloc status`)
-- Image Factory MVP: `meta-helios` Yocto layer, `helios-image-factory` Rust service (schematic store, artifact cache, HTTP download frontend)
+- CLI (`overdrive job submit`, `overdrive node list`, `overdrive alloc status`)
+- Image Factory MVP: `meta-overdrive` Yocto layer, `overdrive-image-factory` Rust service (schematic store, artifact cache, HTTP download frontend)
 
 ### Phase 2 — Networking and Observation (Months 3–6)
 - aya-rs eBPF scaffolding
@@ -2433,7 +2433,7 @@ Neither Kubernetes nor Nomad ships the Tier 1 + Tier 3 composition, because neit
 ### Phase 5 — Intelligence (Months 12–18)
 - LLM observability agent (rig-rs) with native SRE-investigation primitives:
   - `Investigation` as a first-class resource (ObservationStore live state + incident-memory libSQL on conclusion)
-  - Declarative toolset catalog (`builtin:helios-core` Rust trait object + WASM-extensible third-party toolsets, content-addressed in Garage)
+  - Declarative toolset catalog (`builtin:overdrive-core` Rust trait object + WASM-extensible third-party toolsets, content-addressed in Garage)
   - Typed `Action` enum with risk-tier approval gate (Tier 0 auto / Tier 1 auto+notify / Tier 2 human-ratify)
   - `correlation_key` on telemetry for alert de-duplication; SPIFFE-identity joins across DuckLake for cross-event correlation
   - `llm_spend` reconciler for per-investigation, per-job, and cluster-wide token budget enforcement
@@ -2442,7 +2442,7 @@ Neither Kubernetes nor Nomad ships the Tier 1 + Tier 3 composition, because neit
 - Incident memory (libSQL) with embedding-similarity retrieval for runbook + prior-incident lookup
 - Predictive scaling
 - Persistent microVMs (step 1): Cloud Hypervisor snapshot/restore exposed in the `microvm` driver with `userfaultfd` lazy memory paging; VMGenID wired into the guest on restore
-- Persistent microVMs (step 2): `helios-fs` — Rust-native single-writer chunk store (content-addressed chunks in Garage, per-rootfs libSQL metadata with streaming WAL, NVMe 2Q cache, `vhost-user-fs` frontend). Scope: rootfs only, not a general distributed filesystem
+- Persistent microVMs (step 2): `overdrive-fs` — Rust-native single-writer chunk store (content-addressed chunks in Garage, per-rootfs libSQL metadata with streaming WAL, NVMe 2Q cache, `vhost-user-fs` frontend). Scope: rootfs only, not a general distributed filesystem
 - Persistent microVMs (step 3): gateway auto-route (`expose = true`) + credential-proxy sidecar defaults
 - Persistent microVMs (step 4): idle-eviction reconciler with checkpoint (`snapshot_on_idle_seconds`) — scale-to-zero for long-lived stateful workloads
 
@@ -2463,27 +2463,27 @@ Neither Kubernetes nor Nomad ships the Tier 1 + Tier 3 composition, because neit
 
 ## 24. Image Factory
 
-Helios nodes run an immutable, purpose-built OS — no shell, no package manager, no SSH. This is not a constraint to work around; it is a deliberate security choice. Every component on the node is explicitly declared, compiled with hardening flags, and verified at boot. The Image Factory is the system that makes this tractable: it manages how node OS images are built, customized, versioned, and distributed.
+Overdrive nodes run an immutable, purpose-built OS — no shell, no package manager, no SSH. This is not a constraint to work around; it is a deliberate security choice. Every component on the node is explicitly declared, compiled with hardening flags, and verified at boot. The Image Factory is the system that makes this tractable: it manages how node OS images are built, customized, versioned, and distributed.
 
 ### The Problem
 
 Provisioning a Kubernetes node means installing a general-purpose Linux distribution and then running configuration management over it. The attack surface is whatever the distro ships. Security is whatever the configuration management enforced, subject to drift.
 
-Helios takes the opposite approach: the OS is minimal by construction, not by configuration. The Image Factory is how operators get from "I need a node image" to a bit-for-bit reproducible artifact they can verify and trust.
+Overdrive takes the opposite approach: the OS is minimal by construction, not by configuration. The Image Factory is how operators get from "I need a node image" to a bit-for-bit reproducible artifact they can verify and trust.
 
 ### Design
 
 The Image Factory is two things:
 
-1. **`meta-helios`** — a Yocto layer that produces the node OS. It defines every package, every kernel config flag, every compiler flag. The output is a ~50 MB image: systemd, the Helios binary, Cloud Hypervisor, Wasmtime, and nothing else.
+1. **`meta-overdrive`** — a Yocto layer that produces the node OS. It defines every package, every kernel config flag, every compiler flag. The output is a ~50 MB image: systemd, the Overdrive binary, Cloud Hypervisor, Wasmtime, and nothing else.
 
-2. **`helios-image-factory`** — a Rust service that wraps the Yocto build system behind an HTTP API, manages content-addressable image IDs, and caches artifacts in an OCI-compatible store.
+2. **`overdrive-image-factory`** — a Rust service that wraps the Yocto build system behind an HTTP API, manages content-addressable image IDs, and caches artifacts in an OCI-compatible store.
 
 The factory service is thin. The heavy lifting — OS assembly, kernel compilation, SBOM generation — happens in Yocto. The service coordinates, caches, and serves.
 
 ### Why Yocto
 
-Helios has non-trivial kernel requirements that cannot be satisfied by OCI layer assembly or a stock distribution:
+Overdrive has non-trivial kernel requirements that cannot be satisfied by OCI layer assembly or a stock distribution:
 
 - `CONFIG_BPF_LSM=y` — required for BPF LSM MAC (kernel 5.7+)
 - `CONFIG_TLS=y` — required for kTLS and sockops mTLS
@@ -2492,11 +2492,11 @@ Helios has non-trivial kernel requirements that cannot be satisfied by OCI layer
 
 Yocto's `defconfig` + `security.cfg` fragment model gives precise, auditable control over every kernel option. Every installed package is an explicit BitBake recipe. `inherit create-spdx` produces a machine-readable SPDX SBOM for every build. This aligns directly with the "own your primitives" principle — there is no hidden package manager, no transitive dependency that snuck in through an Alpine apk.
 
-Build times are 60–90 minutes cold, ~5 minutes with a warm S3 sstate cache. For a factory service, this is acceptable: all official `(schematic_id, helios_version, arch)` tuples are pre-built at release time and served from cache. Operators waiting for a custom build are the exception.
+Build times are 60–90 minutes cold, ~5 minutes with a warm S3 sstate cache. For a factory service, this is acceptable: all official `(schematic_id, overdrive_version, arch)` tuples are pre-built at release time and served from cache. Operators waiting for a custom build are the exception.
 
 ### Schematics
 
-A **schematic** is a TOML document whose SHA-256 hash is the image ID. Identical schematics always produce the same ID. The empty schematic — a base Helios node with all defaults — has a fixed well-known ID.
+A **schematic** is a TOML document whose SHA-256 hash is the image ID. Identical schematics always produce the same ID. The empty schematic — a base Overdrive node with all defaults — has a fixed well-known ID.
 
 ```toml
 [node]
@@ -2523,14 +2523,14 @@ bpf_lsm = true   # locked true in production; configurable for dev only
 ktls    = true
 ```
 
-The `role` field in the schematic maps directly to the `[node] role` declaration in the Helios binary — the same binary handles all roles, and the schematic makes that explicit at image build time.
+The `role` field in the schematic maps directly to the `[node] role` declaration in the Overdrive binary — the same binary handles all roles, and the schematic makes that explicit at image build time.
 
 ### Profiles
 
-A **profile** combines a schematic with a Helios version, architecture, and output type:
+A **profile** combines a schematic with a Overdrive version, architecture, and output type:
 
 ```
-Profile = (schematic_id, helios_version, arch, output_type)
+Profile = (schematic_id, overdrive_version, arch, output_type)
 
 output_type:
   raw.wic.gz    bare metal disk image (GPT: EFI + rootfs + verity)
@@ -2543,7 +2543,7 @@ output_type:
 Every profile tuple maps to exactly one artifact. The factory stores artifacts content-addressed in an OCI-compatible registry:
 
 ```
-registry.helios.io/images/helios-node/{schematic_id}/{helios_version}/{arch}/
+registry.overdrive.io/images/overdrive-node/{schematic_id}/{overdrive_version}/{arch}/
   raw.wic.gz
   rootfs.ext4
   vmlinuz
@@ -2574,23 +2574,23 @@ GET    /v2/{name}/blobs/{digest}
 
 Requests for cached artifacts are served immediately. Cache misses trigger an async Yocto build — the response is `202 Accepted` with a build ID to poll.
 
-### `meta-helios` Layer
+### `meta-overdrive` Layer
 
 The Yocto layer is a direct evolution of the `meta-opencapsule` pattern, with three additions:
 
-1. **Helios binary** via `inherit cargo_bin` + `meta-rust-bin` (prebuilt toolchain, single Cargo workspace)
+1. **Overdrive binary** via `inherit cargo_bin` + `meta-rust-bin` (prebuilt toolchain, single Cargo workspace)
 2. **Workload driver binaries** — Cloud Hypervisor (`cloud-hypervisor`), Wasmtime runtime (`wasmtime`), optional Unikraft tools
 3. **Kernel config fragments** — BPF LSM, kTLS, KVM, vhost-vsock additions to the base security config
 
 ```
-meta-helios/
+meta-overdrive/
   conf/machine/
-    helios-node-x86_64.conf      # bzImage, EFI_PROVIDER=grub-efi, wic+ext4
-    helios-node-aarch64.conf
+    overdrive-node-x86_64.conf      # bzImage, EFI_PROVIDER=grub-efi, wic+ext4
+    overdrive-node-aarch64.conf
   recipes-core/images/
-    helios-node-image.bb         # inherits core-image, helios-hardening, create-spdx
-  recipes-helios/helios/
-    helios_git.bb                # inherit cargo_bin; single binary, all roles
+    overdrive-node-image.bb         # inherits core-image, overdrive-hardening, create-spdx
+  recipes-overdrive/overdrive/
+    overdrive_git.bb                # inherit cargo_bin; single binary, all roles
   recipes-drivers/
     cloud-hypervisor/            # microVM driver
     wasmtime/                    # WASM driver
@@ -2598,22 +2598,22 @@ meta-helios/
   recipes-kernel/linux/
     linux-yocto_%.bbappend       # kernel 6.x, defconfig + security.cfg
   classes/
-    helios-hardening.bbclass     # RELRO/NOW, stack protector, -D_FORTIFY_SOURCE=2
+    overdrive-hardening.bbclass     # RELRO/NOW, stack protector, -D_FORTIFY_SOURCE=2
   wic/
-    helios-node.wks              # GPT: EFI + rootfs (+ verity hash partition, Phase 2)
+    overdrive-node.wks              # GPT: EFI + rootfs (+ verity hash partition, Phase 2)
 ```
 
-The image has no shells, no package manager, no SSH server, no getty. Post-processing strips debug tooling. The only user-facing entry point is the Helios binary managed by systemd.
+The image has no shells, no package manager, no SSH server, no getty. Post-processing strips debug tooling. The only user-facing entry point is the Overdrive binary managed by systemd.
 
 ### Node Upgrade Path
 
-Upgrades are handled by the OCI registry frontend. A node running Helios can pull a new image as an OCI artifact, verify its digest against the schematic ID, write it to the inactive partition, and reboot into the new image — the same pattern as Talos upgrades, without requiring an external upgrade tool. This is Phase 2; Phase 1 upgrades are re-provisioning from a new image.
+Upgrades are handled by the OCI registry frontend. A node running Overdrive can pull a new image as an OCI artifact, verify its digest against the schematic ID, write it to the inactive partition, and reboot into the new image — the same pattern as Talos upgrades, without requiring an external upgrade tool. This is Phase 2; Phase 1 upgrades are re-provisioning from a new image.
 
 ---
 
 ## Conclusion
 
-Helios is not a Kubernetes improvement. It is a clean-slate design that leverages a set of primitives — stable eBPF APIs, Rust systems libraries, WASM runtimes, kernel TLS — that simply did not exist at production quality when Kubernetes was designed.
+Overdrive is not a Kubernetes improvement. It is a clean-slate design that leverages a set of primitives — stable eBPF APIs, Rust systems libraries, WASM runtimes, kernel TLS — that simply did not exist at production quality when Kubernetes was designed.
 
 The result is a platform that is structurally more efficient, more secure, and more observable than any existing orchestrator, while supporting a broader range of workload types under a unified operational model.
 
@@ -2621,5 +2621,5 @@ The core insight is that eBPF is not a feature to add to an orchestrator. It is 
 
 ---
 
-*Helios is open source under the AGPL-3.0 license.*
+*Overdrive is open source under the AGPL-3.0 license.*
 *Contributions, feedback, and discussion welcome.*

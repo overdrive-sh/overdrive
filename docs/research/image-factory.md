@@ -1,4 +1,4 @@
-# Research: Helios Image Factory Design
+# Research: Overdrive Image Factory Design
 
 **Date**: 2026-04-19 | **Researcher**: nw-researcher (Nova) | **Confidence**: High | **Sources**: 12
 
@@ -8,7 +8,7 @@ The Talos Image Factory is a Go service that provides content-addressable, on-de
 
 The user's previous OpenCapsule node-os project used Yocto 5.3 to produce a ~50 MB hardened Linux image: no shells, no package manager, systemd, Firecracker, dm-verity (planned), kernel 6.16, and a Rust node binary compiled by BitBake via `meta-rust-bin`. The full build takes 60–90 minutes and produces `.wic.gz`, `.ext4`, and SPDX SBOM artifacts. This is a mature, proven pattern for immutable node OS images.
 
-For Helios, the recommended approach is a **Yocto-foundation Image Factory**: keep Yocto as the OS build engine (it already works and produces everything needed), but add a thin Rust service — the Helios Image Factory — that wraps BitBake invocations behind an HTTP API, manages content-addressable image IDs via `(profile_hash, helios_version, arch, output_type)` tuples, caches artifacts in an OCI-compatible store, and exposes multiple delivery frontends (HTTP download, OCI registry push). Helios' "own your primitives" philosophy is well served by this: the factory is a first-class Rust service that knows about eBPF, Cloud Hypervisor, and BPF LSM requirements at build time.
+For Overdrive, the recommended approach is a **Yocto-foundation Image Factory**: keep Yocto as the OS build engine (it already works and produces everything needed), but add a thin Rust service — the Overdrive Image Factory — that wraps BitBake invocations behind an HTTP API, manages content-addressable image IDs via `(profile_hash, overdrive_version, arch, output_type)` tuples, caches artifacts in an OCI-compatible store, and exposes multiple delivery frontends (HTTP download, OCI registry push). Overdrive' "own your primitives" philosophy is well served by this: the factory is a first-class Rust service that knows about eBPF, Cloud Hypervisor, and BPF LSM requirements at build time.
 
 ---
 
@@ -76,7 +76,7 @@ For Helios, the recommended approach is a **Yocto-foundation Image Factory**: ke
 
 **Verification**: [siderolabs/image-factory GitHub top-level structure](https://github.com/siderolabs/image-factory) — Accessed 2026-04-19
 
-**Analysis**: The imager model (pull base OCI layers, inject extensions, run imager container) means the factory is platform-agnostic with respect to OS internals. For Helios, this is the pattern to replicate: the factory orchestrates; the actual OS build runs elsewhere (in Yocto's case, the long BitBake build happens in CI and artifacts are cached in OCI/S3).
+**Analysis**: The imager model (pull base OCI layers, inject extensions, run imager container) means the factory is platform-agnostic with respect to OS internals. For Overdrive, this is the pattern to replicate: the factory orchestrates; the actual OS build runs elsewhere (in Yocto's case, the long BitBake build happens in CI and artifacts are cached in OCI/S3).
 
 ---
 
@@ -90,7 +90,7 @@ For Helios, the recommended approach is a **Yocto-foundation Image Factory**: ke
 
 **Verification**: [siderolabs/image-factory repository structure](https://github.com/siderolabs/image-factory) — frontend/http and deploy/helm confirmed present. Accessed 2026-04-19
 
-**Analysis**: Three delivery frontends (HTTP download, PXE boot, OCI registry) cover all provisioning scenarios: cloud-init/HTTP for cloud VMs, PXE for bare metal fleets, OCI registry for declarative GitOps-style upgrades. Helios should implement at minimum HTTP + OCI registry frontends; PXE is optional in phase 1.
+**Analysis**: Three delivery frontends (HTTP download, PXE boot, OCI registry) cover all provisioning scenarios: cloud-init/HTTP for cloud VMs, PXE for bare metal fleets, OCI registry for declarative GitOps-style upgrades. Overdrive should implement at minimum HTTP + OCI registry frontends; PXE is optional in phase 1.
 
 ---
 
@@ -117,7 +117,7 @@ For Helios, the recommended approach is a **Yocto-foundation Image Factory**: ke
 
 **Confidence**: High (primary source)
 
-**Analysis**: The node-os is a production-quality minimal Linux built exactly for the "no shell, immutable, single binary daemon" pattern. Helios node-os would be structurally identical, substituting `opencapsule-node` + `firecracker` with `helios` binary (which covers all roles) + `cloud-hypervisor` + Wasmtime runtime.
+**Analysis**: The node-os is a production-quality minimal Linux built exactly for the "no shell, immutable, single binary daemon" pattern. Overdrive node-os would be structurally identical, substituting `opencapsule-node` + `firecracker` with `overdrive` binary (which covers all roles) + `cloud-hypervisor` + Wasmtime runtime.
 
 ---
 
@@ -129,11 +129,11 @@ For Helios, the recommended approach is a **Yocto-foundation Image Factory**: ke
 
 **Confidence**: High (primary source)
 
-**Analysis**: The pattern `inherit cargo_bin` + `meta-rust-bin` is the proven Yocto integration path for Rust binaries. For Helios, the single binary (control-plane, worker, or both) would be built via the same mechanism. `meta-rust-bin` sidesteps the slow `meta-rust` Rust-from-source build, reducing build times significantly.
+**Analysis**: The pattern `inherit cargo_bin` + `meta-rust-bin` is the proven Yocto integration path for Rust binaries. For Overdrive, the single binary (control-plane, worker, or both) would be built via the same mechanism. `meta-rust-bin` sidesteps the slow `meta-rust` Rust-from-source build, reducing build times significantly.
 
 ---
 
-### Finding 8: Yocto as a Build System — Suitability for Helios
+### Finding 8: Yocto as a Build System — Suitability for Overdrive
 
 **Evidence**: From Yocto Project official documentation: "Yocto helps developers create custom Linux-based systems for embedded products through a layered, modular approach." The Layer Model enables hierarchical override: later layers override earlier ones. BitBake is the task scheduler/executor that "handles dependency tracking, cross-compilation, and orchestrates the complete build process." SPDX SBOM generation is built-in via `inherit create-spdx`. Build output types include wic (disk images), ext4, tar.gz, and others configurable per machine.
 
@@ -143,19 +143,19 @@ For Helios, the recommended approach is a **Yocto-foundation Image Factory**: ke
 
 **Verification**: `/Users/marcus/git/opencapsule/node-os/README.md` — "OpenCapsule Node OS is built with Yocto for production-quality images with SBOM generation." Cross-referenced 2026-04-19.
 
-**Analysis**: Yocto's long build times (60–90 min cold) are mitigated by sstate cache (S3-backed). Incremental rebuilds when only the Helios binary changes are fast (~5 min with warm sstate). The SBOM output and reproducible builds are enterprise-grade features that alternatives (Alpine, Buildroot) do not provide at the same level.
+**Analysis**: Yocto's long build times (60–90 min cold) are mitigated by sstate cache (S3-backed). Incremental rebuilds when only the Overdrive binary changes are fast (~5 min with warm sstate). The SBOM output and reproducible builds are enterprise-grade features that alternatives (Alpine, Buildroot) do not provide at the same level.
 
 ---
 
-## Proposed Design: Helios Image Factory
+## Proposed Design: Overdrive Image Factory
 
 ### Architecture Overview
 
-The Helios Image Factory is a Rust service (`helios-image-factory`) that manages the lifecycle of Helios node OS images. It follows the same content-addressable, profile-based model as Talos Image Factory, but uses Yocto as the OS build backend rather than the OCI-layer assembly model.
+The Overdrive Image Factory is a Rust service (`overdrive-image-factory`) that manages the lifecycle of Overdrive node OS images. It follows the same content-addressable, profile-based model as Talos Image Factory, but uses Yocto as the OS build backend rather than the OCI-layer assembly model.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Helios Image Factory                      │
+│                    Overdrive Image Factory                      │
 │                                                              │
 │  ┌──────────────┐  ┌────────────────┐  ┌─────────────────┐  │
 │  │  HTTP API    │  │  OCI Registry  │  │  PXE Frontend   │  │
@@ -165,7 +165,7 @@ The Helios Image Factory is a Rust service (`helios-image-factory`) that manages
 │                            │                                 │
 │  ┌─────────────────────────▼──────────────────────────────┐  │
 │  │               Profile Router                           │  │
-│  │  (schematic_id, helios_version, arch, output_type)     │  │
+│  │  (schematic_id, overdrive_version, arch, output_type)     │  │
 │  └─────────────────────────┬──────────────────────────────┘  │
 │                            │                                 │
 │  ┌──────────────┐  ┌───────▼────────┐  ┌─────────────────┐  │
@@ -177,13 +177,13 @@ The Helios Image Factory is a Rust service (`helios-image-factory`) that manages
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### Helios Schematic Model
+### Overdrive Schematic Model
 
-A **Helios Schematic** is a TOML document (matching Helios' TOML-first configuration idiom) that specifies node customizations. The content-addressable ID is SHA-256 of canonical TOML serialization.
+A **Overdrive Schematic** is a TOML document (matching Overdrive' TOML-first configuration idiom) that specifies node customizations. The content-addressable ID is SHA-256 of canonical TOML serialization.
 
 ```toml
 [node]
-# Declared role at bootstrap — matches Helios whitepaper
+# Declared role at bootstrap — matches Overdrive whitepaper
 role = "worker"           # "control-plane" | "worker" | "control-plane+worker"
 
 [drivers]
@@ -214,7 +214,7 @@ ktls      = true           # Required: kTLS + sockops mTLS
 ```
 Profile = {
     schematic_id: SchematicId,    // content-addressed
-    helios_version: SemVer,       // e.g., "0.1.0"
+    overdrive_version: SemVer,       // e.g., "0.1.0"
     arch: Arch,                   // x86_64 | aarch64
     output: OutputType,
 }
@@ -231,30 +231,30 @@ OutputType =
 ### Build Pipeline
 
 1. **Client uploads schematic** via `POST /schematics` → factory stores, returns `schematic_id`
-2. **Client requests image** via `GET /image/{schematic_id}/{helios_version}/{arch}/{output_type}` → factory checks artifact cache
+2. **Client requests image** via `GET /image/{schematic_id}/{overdrive_version}/{arch}/{output_type}` → factory checks artifact cache
 3. **Cache miss**: factory computes profile hash, triggers Yocto build job (async)
-   - Yocto build materializes: `MACHINE`, `HELIOS_SCHEMATIC_ID`, `HELIOS_VERSION`, `HELIOS_ROLE` as BitBake variables
-   - `meta-helios` layer reads schematic, enables/disables driver recipes, sets kernel args
+   - Yocto build materializes: `MACHINE`, `OVERDRIVE_SCHEMATIC_ID`, `OVERDRIVE_VERSION`, `OVERDRIVE_ROLE` as BitBake variables
+   - `meta-overdrive` layer reads schematic, enables/disables driver recipes, sets kernel args
 4. **Cache hit**: returns pre-built artifact from OCI/S3 cache
 5. **Delivery**: HTTP download stream, OCI push, or S3 presigned URL
 
-### Yocto Layer Design for Helios
+### Yocto Layer Design for Overdrive
 
-The `meta-helios` layer replaces `meta-opencapsule`:
+The `meta-overdrive` layer replaces `meta-opencapsule`:
 
 ```
-meta-helios/
+meta-overdrive/
 ├── conf/
 │   ├── layer.conf
 │   └── machine/
-│       ├── helios-node-x86_64.conf      # same pattern as opencapsule
-│       └── helios-node-aarch64.conf
+│       ├── overdrive-node-x86_64.conf      # same pattern as opencapsule
+│       └── overdrive-node-aarch64.conf
 ├── recipes-core/
 │   └── images/
-│       └── helios-node-image.bb         # inherits core-image + helios-hardening + create-spdx
-├── recipes-helios/
-│   └── helios/
-│       └── helios_git.bb                # inherit cargo_bin, single binary, all roles
+│       └── overdrive-node-image.bb         # inherits core-image + overdrive-hardening + create-spdx
+├── recipes-overdrive/
+│   └── overdrive/
+│       └── overdrive_git.bb                # inherit cargo_bin, single binary, all roles
 ├── recipes-drivers/
 │   ├── cloud-hypervisor/
 │   │   └── cloud-hypervisor_*.bb        # microVM driver
@@ -272,9 +272,9 @@ meta-helios/
 │   ├── dm-verity/                       # same as opencapsule
 │   └── tpm2/                            # TPM attestation
 ├── classes/
-│   └── helios-hardening.bbclass        # same compiler flags as opencapsule
+│   └── overdrive-hardening.bbclass        # same compiler flags as opencapsule
 └── wic/
-    └── helios-node.wks                 # GPT: EFI + rootfs + verity hash partition
+    └── overdrive-node.wks                 # GPT: EFI + rootfs + verity hash partition
 ```
 
 Key kernel config additions beyond opencapsule baseline:
@@ -291,8 +291,8 @@ Key kernel config additions beyond opencapsule baseline:
 Content-addressed artifacts stored in OCI-compatible registry (or S3 with OCI layout):
 
 ```
-registry.helios.io/images/
-  helios-node/{schematic_id}/{helios_version}/{arch}/
+registry.overdrive.io/images/
+  overdrive-node/{schematic_id}/{overdrive_version}/{arch}/
     raw.wic.gz          # bare metal disk image
     rootfs.ext4         # VM rootfs
     vmlinuz             # kernel
@@ -331,7 +331,7 @@ GET    /v2/{name}/blobs/{digest}
 
 ### Option A: Yocto Foundation (Recommended)
 
-**Approach**: `meta-helios` Yocto layer; BitBake produces all image types. Image factory is a Rust HTTP service that triggers BitBake builds and caches artifacts.
+**Approach**: `meta-overdrive` Yocto layer; BitBake produces all image types. Image factory is a Rust HTTP service that triggers BitBake builds and caches artifacts.
 
 | Dimension | Assessment |
 |-----------|-----------|
@@ -341,7 +341,7 @@ GET    /v2/{name}/blobs/{digest}
 | SBOM | Built-in via `inherit create-spdx` |
 | Immutability | IMAGE_FEATURES:remove="package-management" — no runtime changes |
 | Security | dm-verity, TPM attestation, BPF LSM all expressible in Yocto |
-| Helios fit | High — prior art in node-os, Rust via `inherit cargo_bin` proven |
+| Overdrive fit | High — prior art in node-os, Rust via `inherit cargo_bin` proven |
 | Complexity | High build infra (Yocto) but low runtime infra (no imager container) |
 | Multi-arch | Yocto cross-compilation for x86_64 + aarch64 built-in |
 
@@ -359,7 +359,7 @@ GET    /v2/{name}/blobs/{digest}
 | SBOM | Manual or tooling-dependent (Syft, etc.) |
 | Immutability | Achievable but requires explicit design |
 | Security | Possible but requires separate hardening tooling |
-| Helios fit | Medium — introduces OCI complexity, Go imager tool doesn't fit "Rust throughout" |
+| Overdrive fit | Medium — introduces OCI complexity, Go imager tool doesn't fit "Rust throughout" |
 | Complexity | Low build infra (just containers), high design complexity (layering strategy) |
 
 **Best for**: Rapid iteration, developer images, cloud-native environments where OCI tooling is already present.
@@ -374,7 +374,7 @@ GET    /v2/{name}/blobs/{digest}
 | Build time | Faster than Yocto (30–45 min cold) |
 | SBOM | No built-in; requires external tooling |
 | Reproducibility | Good with locked configs |
-| Helios fit | Medium — no `meta-rust-bin` equivalent; Rust support less mature |
+| Overdrive fit | Medium — no `meta-rust-bin` equivalent; Rust support less mature |
 | Complexity | Lower than Yocto, but less enterprise-grade |
 
 **Best for**: Simpler embedded targets without SBOM requirements.
@@ -388,7 +388,7 @@ GET    /v2/{name}/blobs/{digest}
 | Reproducibility | Best-in-class (purely functional, content-addressed by default) |
 | SBOM | Possible via nixpkgs audit tools |
 | Rust | First-class via `crane` or `naersk` |
-| Helios fit | Medium-high — Nix is a different mental model; no prior art in node-os |
+| Overdrive fit | Medium-high — Nix is a different mental model; no prior art in node-os |
 | Build time | Parallel, incremental, cached via substituters |
 | Community | Growing but smaller ecosystem for embedded OS targets |
 
@@ -402,28 +402,28 @@ GET    /v2/{name}/blobs/{digest}
 
 Rationale:
 
-1. **Prior art exists**: The OpenCapsule node-os is a direct template. Migration is `s/opencapsule/helios/` plus adding Cloud Hypervisor, Wasmtime, and updated kernel config. This is days of work, not weeks.
+1. **Prior art exists**: The OpenCapsule node-os is a direct template. Migration is `s/opencapsule/overdrive/` plus adding Cloud Hypervisor, Wasmtime, and updated kernel config. This is days of work, not weeks.
 
-2. **Helios' kernel requirements are non-trivial**: BPF LSM (`CONFIG_BPF_LSM=y`, kernel 5.7+), kTLS (`CONFIG_TLS=y`), eBPF (aya-rs), vhost-vsock for Cloud Hypervisor — these require deliberate kernel configuration. Yocto's `defconfig` + `security.cfg` fragments give precise control. OCI layer assembly cannot configure the kernel.
+2. **Overdrive' kernel requirements are non-trivial**: BPF LSM (`CONFIG_BPF_LSM=y`, kernel 5.7+), kTLS (`CONFIG_TLS=y`), eBPF (aya-rs), vhost-vsock for Cloud Hypervisor — these require deliberate kernel configuration. Yocto's `defconfig` + `security.cfg` fragments give precise control. OCI layer assembly cannot configure the kernel.
 
 3. **"Own your primitives" aligns with Yocto**: Yocto makes every dependency explicit. There is no hidden package manager, no upstream Alpine package that might add a transitive dependency. Every package installed is an explicit recipe.
 
-4. **Rust throughout**: `inherit cargo_bin` + `meta-rust-bin` is proven (node-os used it). The Helios binary is a single Cargo workspace; Yocto compiles it with the same flags as the OS.
+4. **Rust throughout**: `inherit cargo_bin` + `meta-rust-bin` is proven (node-os used it). The Overdrive binary is a single Cargo workspace; Yocto compiles it with the same flags as the OS.
 
 5. **SBOM and compliance**: `inherit create-spdx` produces a machine-readable SBOM for every image build. Required for enterprise customers and supply chain transparency.
 
-6. **The image factory service itself is Rust**: The factory service (`helios-image-factory`) is a Rust binary using Axum or Actix for HTTP, `sha2` for content-addressing, and `tokio` for async build job management. It is a thin coordination layer; the heavy lifting (OS build) happens in CI/Yocto.
+6. **The image factory service itself is Rust**: The factory service (`overdrive-image-factory`) is a Rust binary using Axum or Actix for HTTP, `sha2` for content-addressing, and `tokio` for async build job management. It is a thin coordination layer; the heavy lifting (OS build) happens in CI/Yocto.
 
 **Phase 1** (MVP):
-- `meta-helios` Yocto layer (adapt from `meta-opencapsule`)
-- `helios-image-factory` Rust service: schematic store, artifact cache (local or S3), HTTP download frontend
+- `meta-overdrive` Yocto layer (adapt from `meta-opencapsule`)
+- `overdrive-image-factory` Rust service: schematic store, artifact cache (local or S3), HTTP download frontend
 - CI: GitHub Actions triggers BitBake on tag, uploads artifacts to OCI/S3
 
 **Phase 2**:
-- OCI registry frontend for `helios-upgrade` (in-place node upgrades via OCI image pull)
+- OCI registry frontend for `overdrive-upgrade` (in-place node upgrades via OCI image pull)
 - PXE frontend for bare-metal provisioning
 - dm-verity + TPM attestation (already scaffolded in node-os)
-- Schematic validation API (check driver compatibility with Helios version)
+- Schematic validation API (check driver compatibility with Overdrive version)
 
 ---
 
@@ -458,15 +458,15 @@ Reputation: High: 12 (100%) | Medium-high: 0 (0%) | Avg: 1.0
 ### Gap 2: Talos Extension Registry — Extension Versioning Protocol
 **Issue**: How Talos resolves `OfficialExtensions: ["nvidia"]` to a specific OCI image tag for a given Talos version was not fully traced through the source.
 **Attempted**: Fetching `internal/artifacts/artifacts.go` — yielded `ExtensionManifestImage` and `OverlayManifestImage` types but no manifest schema.
-**Recommendation**: For Helios, this is less critical since Yocto resolves extension versions via BitBake recipes at build time, not at factory request time.
+**Recommendation**: For Overdrive, this is less critical since Yocto resolves extension versions via BitBake recipes at build time, not at factory request time.
 
 ### Gap 3: Talos Image Factory — Secure Boot Signing Details
 **Issue**: The `internal/secureboot/` and `internal/image/signer/` packages were not read.
 **Attempted**: None beyond directory listing.
-**Recommendation**: Helios should design Secure Boot signing as a Phase 2 feature. The node-os already has UEFI EFI partition; adding shim + MOK enrollment is standard Yocto practice via `meta-secure-core`.
+**Recommendation**: Overdrive should design Secure Boot signing as a Phase 2 feature. The node-os already has UEFI EFI partition; adding shim + MOK enrollment is standard Yocto practice via `meta-secure-core`.
 
-### Gap 4: Helios Whitepaper — Full Specification
-**Issue**: The full Helios whitepaper was not directly available for reading; requirements were sourced from the user-provided summary in the research prompt.
+### Gap 4: Overdrive Whitepaper — Full Specification
+**Issue**: The full Overdrive whitepaper was not directly available for reading; requirements were sourced from the user-provided summary in the research prompt.
 **Attempted**: N/A (whitepaper referenced as local file but path not provided).
 **Recommendation**: When designing the schematic TOML schema, validate all driver flags and network config against the full whitepaper.
 
@@ -476,19 +476,19 @@ Reputation: High: 12 (100%) | Medium-high: 0 (0%) | Avg: 1.0
 
 ### Conflict 1: Build Time Tradeoffs
 **Position A**: Yocto 60–90 minute cold builds are too slow for a developer-facing image factory (images should be available in minutes). — Implied by Talos' OCI-assembly approach which produces images in seconds from cached layers.
-**Position B**: Yocto builds are one-time; with sstate cache, incremental builds (only Helios binary changed) run in ~5 minutes. Pre-built images for all official `(schematic_id, helios_version, arch)` tuples can be cached at release time. — Source: node-os README, CI documentation.
-**Assessment**: Position B is more applicable to Helios' context. The image factory caches artifacts; users rarely wait for a cold build. The Talos OCI-assembly model is fast because Talos has a large community maintaining extension OCI images; Helios does not have that ecosystem yet, making a simpler Yocto-baked approach more practical for v1.
+**Position B**: Yocto builds are one-time; with sstate cache, incremental builds (only Overdrive binary changed) run in ~5 minutes. Pre-built images for all official `(schematic_id, overdrive_version, arch)` tuples can be cached at release time. — Source: node-os README, CI documentation.
+**Assessment**: Position B is more applicable to Overdrive' context. The image factory caches artifacts; users rarely wait for a cold build. The Talos OCI-assembly model is fast because Talos has a large community maintaining extension OCI images; Overdrive does not have that ecosystem yet, making a simpler Yocto-baked approach more practical for v1.
 
 ---
 
 ## Recommendations for Further Research
 
 1. **Clone `siderolabs/image-factory` locally** and read `internal/frontend/http/handler.go` to extract the exact URL routing scheme and HTTP response format for image downloads.
-2. **Investigate `meta-secure-core`** Yocto layer for Secure Boot (shim, MOK, UKI generation) — required for Phase 2 Secure Boot signing in Helios.
+2. **Investigate `meta-secure-core`** Yocto layer for Secure Boot (shim, MOK, UKI generation) — required for Phase 2 Secure Boot signing in Overdrive.
 3. **Evaluate `meta-virtualization`** Yocto layer for Cloud Hypervisor packaging — may already have a recipe; would reduce work for the microVM driver.
 4. **Research Nix as a long-term alternative** — if Yocto build infrastructure becomes burdensome, Nix flakes + `nixos-generators` provide a comparable immutable OS with faster developer iteration.
-5. **Investigate OCI Distribution Spec** for the registry frontend implementation — standard OCI Distribution Spec v2 would allow `helios-image-factory` to serve images to any OCI-compatible tool (skopeo, crane, containerd).
-6. **Study aya-rs kernel requirements** in detail — specifically which kernel config flags are required for each eBPF program type Helios uses, to ensure the `meta-helios` `security.cfg` fragment is complete.
+5. **Investigate OCI Distribution Spec** for the registry frontend implementation — standard OCI Distribution Spec v2 would allow `overdrive-image-factory` to serve images to any OCI-compatible tool (skopeo, crane, containerd).
+6. **Study aya-rs kernel requirements** in detail — specifically which kernel config flags are required for each eBPF program type Overdrive uses, to ensure the `meta-overdrive` `security.cfg` fragment is complete.
 
 ---
 

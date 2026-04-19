@@ -1,4 +1,4 @@
-# Research: Nomad's Scheduling Architecture and the Reconciler Pattern for a Next-Generation Orchestrator (Helios)
+# Research: Nomad's Scheduling Architecture and the Reconciler Pattern for a Next-Generation Orchestrator (Overdrive)
 
 **Date:** 2026-04-19 | **Researcher:** nw-researcher (Nova) | **Confidence:** High | **Sources:** 45 cited across 5 research questions
 
@@ -10,7 +10,7 @@ Nomad and Kubernetes both implement variants of the **level-triggered reconcilia
 
 The known weaknesses of the reconciliation pattern are real and well-documented: thundering herds, reconcile storms, cache staleness, single-threaded work-queues by default, and liveness bugs that are notoriously hard to catch with tests (the motivation for Anvil). Alternatives exist — durable execution (Temporal/Restate), CRDT-based decentralized state (Fly.io Corrosion), virtual actors (Orleans), and deterministic replicated state machines (TigerBeetle/FoundationDB) — each solving a different *subset* of orchestration problems. None of them is a complete replacement for level-triggered reconciliation when the primary job is "converge cluster toward declared desired state."
 
-**Verdict for Helios:** The reconciliation/control-loop pattern is the right *primary* primitive, and the design choices in §18 of the whitepaper (strongly typed Rust trait objects + sandboxed WASM + Raft-only mutations + private per-reconciler libSQL memory) directly address most of the empirically observed weaknesses of Kubernetes' controller pattern. However, Helios should *not* make reconciliation the *only* primitive — complex long-running workflows (deployments, cert rotations across regions, migrations) benefit from a durable-execution layer on top, not a reconciler loop underneath. The recommendation is **Reconciler + Durable-Execution hybrid**, not pure reconciler and not pure event-sourced.
+**Verdict for Overdrive:** The reconciliation/control-loop pattern is the right *primary* primitive, and the design choices in §18 of the whitepaper (strongly typed Rust trait objects + sandboxed WASM + Raft-only mutations + private per-reconciler libSQL memory) directly address most of the empirically observed weaknesses of Kubernetes' controller pattern. However, Overdrive should *not* make reconciliation the *only* primitive — complex long-running workflows (deployments, cert rotations across regions, migrations) benefit from a durable-execution layer on top, not a reconciler loop underneath. The recommendation is **Reconciler + Durable-Execution hybrid**, not pure reconciler and not pure event-sourced.
 
 ---
 
@@ -37,7 +37,7 @@ The known weaknesses of the reconciliation pattern are real and well-documented:
 **Source:** [scheduler/generic_sched.go](https://github.com/hashicorp/nomad/blob/main/scheduler/generic_sched.go)
 **Cross-verified:** [scheduler/ directory](https://github.com/hashicorp/nomad/tree/main/scheduler); [scheduler/reconcile_util.go](https://github.com/hashicorp/nomad/blob/main/scheduler/reconcile_util.go); [PR #26169 "scheduler: emit structured logs from reconciliation"](https://github.com/hashicorp/nomad/pull/26169)
 **Confidence:** High
-**Analysis:** The reconciler's sole job is to output *desired actions* (place, update in-place, destructive-update, stop, reschedule). It is a *pure function* over `(desired, actual) → []Action` — almost identical in shape to the Helios §18 trait signature. The scheduler then layers feasibility (`feasible/feasible.go`, `stack.go`), ranking (`feasible/rank.go` with `BinPackIterator` and `SpreadIterator`), and plan submission on top.
+**Analysis:** The reconciler's sole job is to output *desired actions* (place, update in-place, destructive-update, stop, reschedule). It is a *pure function* over `(desired, actual) → []Action` — almost identical in shape to the Overdrive §18 trait signature. The scheduler then layers feasibility (`feasible/feasible.go`, `stack.go`), ranking (`feasible/rank.go` with `BinPackIterator` and `SpreadIterator`), and plan submission on top.
 
 ### F1.4: Four scheduler types specialize on workload shape
 
@@ -73,14 +73,14 @@ The known weaknesses of the reconciliation pattern are real and well-documented:
 **Source:** [Load shedding in the Nomad eval broker](https://www.hashicorp.com/en/blog/load-shedding-in-the-nomad-eval-broker)
 **Cross-verified:** [How Nomad job scheduling works](https://developer.hashicorp.com/nomad/docs/concepts/scheduling/how-scheduling-works); [Nomad versus Kubernetes](https://developer.hashicorp.com/nomad/docs/nomad-vs-kubernetes)
 **Confidence:** High
-**Analysis:** This is the strongest direct parallel to Helios §18's "all mutations go through Raft (never direct)" design rule. Nomad validates that rule is workable at fleet scale, and also highlights its cost — see F1.9.
+**Analysis:** This is the strongest direct parallel to Overdrive §18's "all mutations go through Raft (never direct)" design rule. Nomad validates that rule is workable at fleet scale, and also highlights its cost — see F1.9.
 
 ### F1.9: Reconcile storms are a real operational pain point — load-shedding was retrofitted
 
 **Evidence:** "In a cluster with 100 system jobs, and 5,000 nodes, each with 20 allocations for service jobs — if only 10% of those nodes miss a heartbeat, then (500 * 20) + (500 * 100) = 60,000 evaluations will be created." HashiCorp support encountered incidents where flapping nodes produced **millions of evaluations**. The fix: the eval broker moves redundant evals into a "cancelable set" processed by a reaper goroutine in bulk. Measured improvements: Raft load −80%, scheduler load −99%, recovery time −90%.
 **Source:** [Load shedding in the Nomad eval broker](https://www.hashicorp.com/en/blog/load-shedding-in-the-nomad-eval-broker)
 **Confidence:** High (single-source but authoritative first-party engineering writeup)
-**Analysis:** This is the reconcile-storm weakness (F2.4 below) manifesting in a production hybrid system. Nomad's fix (exploit idempotency → dedupe before execution) is a pattern Helios should absorb natively, not retrofit.
+**Analysis:** This is the reconcile-storm weakness (F2.4 below) manifesting in a production hybrid system. Nomad's fix (exploit idempotency → dedupe before execution) is a pattern Overdrive should absorb natively, not retrofit.
 
 ---
 
@@ -92,7 +92,7 @@ The known weaknesses of the reconciliation pattern are real and well-documented:
 **Source:** [Borg, Omega, and Kubernetes — Google Research](https://research.google/pubs/borg-omega-and-kubernetes/); [Borg, Omega, and Kubernetes — ACM Queue](https://queue.acm.org/detail.cfm?id=2898444)
 **Cross-verified:** [Large-scale cluster management at Google with Borg — Google Research](https://research.google/pubs/large-scale-cluster-management-at-google-with-borg/); [Borg, Omega, and Kubernetes — Communications of the ACM](https://cacm.acm.org/practice/borg-omega-and-kubernetes/)
 **Confidence:** High (three independent authoritative references to the same Google publication)
-**Analysis:** Note the paper's observation: "The Borgmaster is a monolithic component that knows the semantics of every API operation" — i.e., a point explicitly rejected by K8s's split into API server + many independent controllers. Helios's typed-trait reconcilers are closer to the K8s decomposition than to Borg's monolith.
+**Analysis:** Note the paper's observation: "The Borgmaster is a monolithic component that knows the semantics of every API operation" — i.e., a point explicitly rejected by K8s's split into API server + many independent controllers. Overdrive's typed-trait reconcilers are closer to the K8s decomposition than to Borg's monolith.
 
 ### F2.2: Level-triggering is the *designed-for* property; edge-triggering loses state on missed signals
 
@@ -128,7 +128,7 @@ The known weaknesses of the reconciliation pattern are real and well-documented:
 **Source:** [Anvil — USENIX OSDI '24](https://www.usenix.org/conference/osdi24/presentation/sun-xudong)
 **Cross-verified:** [Anvil — ACM DL](https://dl.acm.org/doi/10.5555/3691938.3691973); [anvil-verifier/anvil GitHub](https://github.com/vmware-research/verifiable-controllers); [Anvil login article — USENIX](https://www.usenix.org/publications/loginonline/anvil-building-formally-verified-kubernetes-controllers)
 **Confidence:** High
-**Analysis:** Anvil's existence is the single strongest signal that reconciliation-loop correctness is *non-trivial and poorly-testable* in industry practice. That said, Anvil's conclusion is that reconciliation is *verifiable*, not broken. For Helios, it argues specifically for (a) typed reconciler interfaces (done via the Rust trait) and (b) making state transitions tractable for future verification.
+**Analysis:** Anvil's existence is the single strongest signal that reconciliation-loop correctness is *non-trivial and poorly-testable* in industry practice. That said, Anvil's conclusion is that reconciliation is *verifiable*, not broken. For Overdrive, it argues specifically for (a) typed reconciler interfaces (done via the Rust trait) and (b) making state transitions tractable for future verification.
 
 ### F2.7: Weakness — operator sprawl and memory-per-operator inefficiency
 
@@ -155,7 +155,7 @@ The known weaknesses of the reconciliation pattern are real and well-documented:
 **Source:** [Corrosion — Fly Blog](https://fly.io/blog/corrosion/)
 **Cross-verified:** [Fast Eventual Consistency: Inside Corrosion — InfoQ](https://www.infoq.com/news/2025/04/corrosion-distributed-system-fly/); [Carving The Scheduler Out Of Our Orchestrator — Fly Blog](https://fly.io/blog/carving-the-scheduler-out-of-our-orchestrator/); [Corrosion docs](https://superfly.github.io/corrosion/)
 **Confidence:** High
-**Trade-off:** Right answer for **globe-spanning, worker-owned state** (Fly.io's many-region fabric). Wrong answer for Helios if Helios aims for Kubernetes-like *authoritative* desired-state semantics (you want "yes this pod is definitely scheduled," not "eventually everyone agrees").
+**Trade-off:** Right answer for **globe-spanning, worker-owned state** (Fly.io's many-region fabric). Wrong answer for Overdrive if Overdrive aims for Kubernetes-like *authoritative* desired-state semantics (you want "yes this pod is definitely scheduled," not "eventually everyone agrees").
 
 ### F3.3: Fly.io's market-model scheduler — explicit alternative to both Nomad and K8s
 
@@ -178,7 +178,7 @@ The known weaknesses of the reconciliation pattern are real and well-documented:
 **Source:** [tigerbeetle/docs/ARCHITECTURE.md](https://github.com/tigerbeetle/tigerbeetle/blob/main/docs/ARCHITECTURE.md)
 **Cross-verified:** [Building an open-source version of Antithesis, Part 1](https://databases.systems/posts/open-source-antithesis-p1); [What's the big deal about Deterministic Simulation Testing? — Phil Eaton](https://notes.eatonphil.com/2024-08-20-deterministic-simulation-testing.html)
 **Confidence:** Medium-High (TigerBeetle primary source is official; secondary sources are practitioner-tier but highly technical)
-**Trade-off:** Gives unmatched testability and replayability at the cost of forcing all state transitions through one log. Works beautifully for a single-purpose accounting database; less suited to a multi-tenant orchestrator where side-effects on worker nodes are inherently non-deterministic. Helios can borrow the **simulation-testing technique** without adopting the whole architecture.
+**Trade-off:** Gives unmatched testability and replayability at the cost of forcing all state transitions through one log. Works beautifully for a single-purpose accounting database; less suited to a multi-tenant orchestrator where side-effects on worker nodes are inherently non-deterministic. Overdrive can borrow the **simulation-testing technique** without adopting the whole architecture.
 
 ### F3.6: Hybrid (Nomad, modern K8s) — the de facto mainstream
 
@@ -205,62 +205,62 @@ The known weaknesses of the reconciliation pattern are real and well-documented:
 **Source:** [How WebAssembly plugins simplify Kubernetes extensibility — The New Stack](https://thenewstack.io/how-webassembly-plugins-are-simplifying-kubernetes-extensibility/) — industry-tier
 **Cross-verified:** [Announcing the Cosmonic Control Technical Preview](https://blog.cosmonic.com/engineering/2025-07-07-cosmonic-control-technical-preview/); [Sandboxing agentic developers with WebAssembly — Cosmonic](https://blog.cosmonic.com/engineering/2025-03-25-sandboxing-agentic-developers-with-webassembly/); [Serverless Everywhere (arXiv 2512.04089)](https://arxiv.org/html/2512.04089v1)
 **Confidence:** Medium-High (two industry sources + one arXiv paper; industry momentum is clear, academic base is thinner)
-**Analysis:** Helios's choice of WASM for third-party reconcilers is aligned with an emergent industry consensus, not a bet on a fringe technology.
+**Analysis:** Overdrive's choice of WASM for third-party reconcilers is aligned with an emergent industry consensus, not a bet on a fringe technology.
 
-### F4.3: How Helios §18 addresses the known weaknesses — mapping table
+### F4.3: How Overdrive §18 addresses the known weaknesses — mapping table
 
-| Weakness (from Q2) | How Helios §18 addresses it | Residual risk |
+| Weakness (from Q2) | How Overdrive §18 addresses it | Residual risk |
 |---|---|---|
 | **Thundering herds (F2.4)** | Raft-mediated mutations serialize writes; private libSQL per reconciler lets each reconciler maintain its own backoff/jitter state persistently across restarts | Still need an eval-broker-like deduper (see Nomad's fix, F1.9) — **gap in whitepaper** |
 | **Cache staleness (F2.5)** | Typed Rust interface `reconcile(&self, desired: &State, actual: &State, db: &Db) -> Vec<Action>` passes *current* state as an argument, not a cache snapshot; single authoritative StateStore removes informer-cache class of bugs | Private libSQL is itself a cache — stale-self-state bugs possible if reconciler doesn't reconcile its memory against StateStore |
-| **Liveness bugs (F2.6 Anvil)** | Strongly-typed Rust trait objects align exactly with Anvil's target (Verus-verified Rust controllers) — Helios is *pre-adapted* for formal verification | Verification effort still required; typing alone is necessary not sufficient |
+| **Liveness bugs (F2.6 Anvil)** | Strongly-typed Rust trait objects align exactly with Anvil's target (Verus-verified Rust controllers) — Overdrive is *pre-adapted* for formal verification | Verification effort still required; typing alone is necessary not sufficient |
 | **Operator sprawl / memory (F2.7)** | WASM modules with "ultra-dense sandboxed" memory profiles (>83% reduction per F4.2) replace full-process operators | Linear proliferation of WASM modules possible; needs platform-level resource quotas |
 | **Reconcile storms at ingress** | Not explicitly addressed in §18 | **Design gap — adopt Nomad's cancelable-set pattern** |
 
 **Source:** Synthesis of F1.9, F2.4–F2.7, F4.1–F4.2 above; whitepaper §18.
 **Confidence:** High on the mapping (based on cited sources); Medium on the "residual risk" column (forward-looking analysis labeled as interpretation).
 
-### F4.4: Where Helios's reconciler approach might fall short vs durable-workflow designs
+### F4.4: Where Overdrive's reconciler approach might fall short vs durable-workflow designs
 
-**Evidence:** Reconciler-pattern weaknesses that Helios §18 does *not* address because they are fundamental to the pattern, not to its implementation:
+**Evidence:** Reconciler-pattern weaknesses that Overdrive §18 does *not* address because they are fundamental to the pattern, not to its implementation:
 - **Long-running saga-style operations** (multi-region failover, cert rotation with DNS propagation delays) are hard to express as "recompute diff, emit actions" because the next step depends on the *history* and the *timing* of prior steps. Temporal's model — code with durable checkpoints — is a better fit. Private libSQL memory helps (whitepaper explicitly cites "placement history, resource sample accumulation") but is not the same as a replayable workflow journal.
 - **Cross-reconciler coordination** (job-lifecycle reconciler waits on cert-rotation reconciler) becomes an implicit protocol via StateStore writes. In Temporal this would be a single workflow with child workflows and signals.
 - **Human-in-the-loop approvals** (staged deployments) need a durable wait primitive; a reconciler can poll but each poll re-runs the whole reconcile function.
 
-**Source:** Synthesis of F3.1 (Temporal/Restate) against Helios §18 design.
+**Source:** Synthesis of F3.1 (Temporal/Restate) against Overdrive §18 design.
 **Confidence:** Medium (this is analytical; marked as interpretation)
 
 ---
 
-## Q5. Verdict for Helios — Opinionated Recommendation
+## Q5. Verdict for Overdrive — Opinionated Recommendation
 
 **Recommendation:** Keep the typed-Rust-reconciler + WASM + Raft + private-libSQL design as the **primary orchestration primitive**, but add a **durable-execution sub-primitive** for multi-step workflows. Do not pursue a pure event-sourced or pure durable-workflow foundation as a replacement for reconciliation.
 
 **Why reconciliation stays as primary (evidence-backed):**
 
 1. **Every mature production orchestrator converges on level-triggered reconciliation.** Nomad (F1.3), Kubernetes (F2.2), KCP (F4.1), Crossplane (F4.1) — all are reconciliation-based. The pattern survives missed events, crashes, and stale caches; none of the alternatives does this as cleanly at cluster scope.
-2. **Helios §18's design is unusually well-aligned with the frontier of research.** Anvil (F2.6) verifies Rust controllers with Verus; Helios reconcilers are already typed Rust trait objects. The whitepaper is essentially pre-built for OSDI-grade formal verification — a property no existing orchestrator enjoys. This is a rare and real structural advantage.
+2. **Overdrive §18's design is unusually well-aligned with the frontier of research.** Anvil (F2.6) verifies Rust controllers with Verus; Overdrive reconcilers are already typed Rust trait objects. The whitepaper is essentially pre-built for OSDI-grade formal verification — a property no existing orchestrator enjoys. This is a rare and real structural advantage.
 3. **Raft-only mutations (F1.8) are validated by Nomad at production fleet scale**, and they provide the "authoritative desired state" semantics that CRDT systems like Corrosion cannot (F3.2). For an orchestrator that wants to make firm statements about what is scheduled where, consensus is not optional.
 4. **Private libSQL per reconciler is a strict upgrade over K8s controller-runtime's in-memory workqueue state.** It directly addresses the restart-amnesia class of bugs in K8s (where a restarted operator loses placement history, backoff counters, sample windows). No prior published orchestrator does this. It is a *feature*, not a risk.
-5. **WASM extensibility is now the industry direction (F4.2),** not a speculative bet. Helios is early rather than late.
+5. **WASM extensibility is now the industry direction (F4.2),** not a speculative bet. Overdrive is early rather than late.
 
 **Why reconciliation is not *sufficient* — add durable execution for workflows:**
 
 1. **Long-running workflows are the reconciler pattern's weak spot (F4.4).** Deployments, cert rotations, migrations, scaled rollouts — all want "script-like, resumable after crash, waits and signals" semantics. Temporal/Restate (F3.1) give this for free; reconcilers must encode it awkwardly in libSQL memory.
-2. **Nomad's reconcile-storm problem (F1.9) is fundamental to edge-triggered ingress over a level-triggered reconciler.** Helios *must* ship a canceler/deduper at the evaluation broker — this is a design gap in §18 as written.
-3. **Helios already has the right substrate to add durable execution cheaply.** Raft + libSQL gives you a perfectly good workflow journal; a `DurableWorkflow` primitive can be built as a *first-party reconciler* that consumes a workflow spec and emits step-by-step actions, with each step's result journaled to libSQL. This is strictly additive to the §18 design.
+2. **Nomad's reconcile-storm problem (F1.9) is fundamental to edge-triggered ingress over a level-triggered reconciler.** Overdrive *must* ship a canceler/deduper at the evaluation broker — this is a design gap in §18 as written.
+3. **Overdrive already has the right substrate to add durable execution cheaply.** Raft + libSQL gives you a perfectly good workflow journal; a `DurableWorkflow` primitive can be built as a *first-party reconciler* that consumes a workflow spec and emits step-by-step actions, with each step's result journaled to libSQL. This is strictly additive to the §18 design.
 
-**Specific concrete recommendations for the Helios design:**
+**Specific concrete recommendations for the Overdrive design:**
 
 1. **Add a `WorkflowReconciler` as a built-in** whose "desired state" is a workflow definition and whose memory is the replayable event log. This is the durable-execution layer, bolted onto the reconciler primitive rather than replacing it. (Analog: Kubernetes Jobs + Argo Workflows, but first-party and formally typed.)
-2. **Adopt Nomad's cancelable-eval-set pattern (F1.9) natively** at the Helios evaluation ingress — do not retrofit. Every Helios action-emitting path should be de-duped before Raft commit.
+2. **Adopt Nomad's cancelable-eval-set pattern (F1.9) natively** at the Overdrive evaluation ingress — do not retrofit. Every Overdrive action-emitting path should be de-duped before Raft commit.
 3. **Budget for formal verification early.** The whitepaper's typed Rust trait is the Anvil (F2.6) target shape. Specifying ESR (progress + stability) for each built-in reconciler should be a ship requirement, not a future hope — this is the single biggest future-proofing investment available, and no competing orchestrator has it.
 4. **Do not adopt CRDT-based state for the authoritative control plane.** Corrosion-style (F3.2) is the right choice for *gossip-propagated view* data (e.g., regional health signals) but wrong for the schedule-of-record. Use Raft for truth, eventual consistency for telemetry.
 5. **Document the reconciler / durable-workflow / CRDT-gossip three-layer taxonomy explicitly** in the design doc. Right now §18 reads as if reconciliation is the only answer; being clear about where it stops is a credibility win.
 
 **Summary table:**
 
-| Need | Right primitive | Helios status |
+| Need | Right primitive | Overdrive status |
 |---|---|---|
 | Cluster converges to declared spec | Reconciler (level-triggered) | Core design, well-positioned |
 | All mutations authoritative | Raft consensus | §18 explicit |
@@ -332,7 +332,7 @@ The known weaknesses of the reconciliation pattern are real and well-documented:
 **Recommendation:** If quantitative verdict is needed, commission a micro-benchmark; existing literature does not provide this directly.
 
 ### Gap 5: Real-world Rust orchestrator precedent
-**Issue:** No published production orchestrator is built on the exact Helios stack (Rust + WASM + Raft + per-reconciler embedded SQLite). Anvil's verified Rust controllers come closest but target K8s, not a new orchestrator. This means Helios is genuinely frontier work and there is no empirical baseline to cite for scaling characteristics.
+**Issue:** No published production orchestrator is built on the exact Overdrive stack (Rust + WASM + Raft + per-reconciler embedded SQLite). Anvil's verified Rust controllers come closest but target K8s, not a new orchestrator. This means Overdrive is genuinely frontier work and there is no empirical baseline to cite for scaling characteristics.
 **Attempted:** "Rust orchestrator Raft WASM scheduler".
 **Recommendation:** Acknowledge in the whitepaper that this is a novel stack; plan for early fleet-scale load-testing as the primary de-risking activity.
 
@@ -345,14 +345,14 @@ The known weaknesses of the reconciliation pattern are real and well-documented:
 Source: [scheduler/reconcile_util.go](https://github.com/hashicorp/nomad/blob/main/scheduler/reconcile_util.go), [PR #26169](https://github.com/hashicorp/nomad/pull/26169)
 **Position B (event/edge-triggered):** Evaluations are created by 17 discrete *trigger types* — they are events. If the event is missed, no evaluation exists.
 Source: [architecture-eval-triggers.md](https://github.com/hashicorp/nomad/blob/main/contributing/architecture-eval-triggers.md)
-**Assessment:** Both are correct at different layers. Nomad is **edge-triggered at ingress, level-triggered at the scheduler worker**. This resolves the apparent conflict and is an important architectural datum for Helios (F1.2).
+**Assessment:** Both are correct at different layers. Nomad is **edge-triggered at ingress, level-triggered at the scheduler worker**. This resolves the apparent conflict and is an important architectural datum for Overdrive (F1.2).
 
 ### Conflict 2: Is reconciliation "fundamentally hard" or "fine if typed"?
 **Position A (fundamentally hard):** Anvil exists because liveness bugs in reconcilers are pervasive and untestable with ordinary test suites — reconciliation-correctness was a USENIX Best Paper in 2024.
 Source: [Anvil — USENIX OSDI '24](https://www.usenix.org/conference/osdi24/presentation/sun-xudong)
 **Position B (fine in practice):** Every major production cluster orchestrator uses the pattern and ships correctly at scale; the ecosystem (kubebuilder, controller-runtime) encodes best practices; Nomad has run at Global 2000 scale for a decade.
 Source: [kubebuilder book](https://book.kubebuilder.io/reference/good-practices), [Nomad vs Kubernetes — HashiCorp](https://developer.hashicorp.com/nomad/docs/nomad-vs-kubernetes)
-**Assessment:** Not really in conflict. Reconciliation is *hard to verify formally* and *fine in practice for well-typed implementations with good tooling*. Helios's typed Rust approach sits on the "easier to verify" side of the same pattern. (F4.1 addresses this.)
+**Assessment:** Not really in conflict. Reconciliation is *hard to verify formally* and *fine in practice for well-typed implementations with good tooling*. Overdrive's typed Rust approach sits on the "easier to verify" side of the same pattern. (F4.1 addresses this.)
 
 ---
 

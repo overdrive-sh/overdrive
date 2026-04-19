@@ -1,4 +1,4 @@
-# `lers` vs `instant-acme` for Helios's Embedded ACME Client
+# `lers` vs `instant-acme` for Overdrive's Embedded ACME Client
 
 **Date**: 2026-04-19 | **Researcher**: nw-researcher (Nova) | **Confidence**: High | **Sources**: 14
 
@@ -10,9 +10,9 @@ Three decisive reasons:
 
 1. **Maintenance trajectory.** `lers` last released v0.4.0 on 2023-04-04; last commit (a single dependabot update) was 2024-05-01. Three of three open issues — including a three-year-old "fix flakey JWS signing" bug opened by the maintainer themselves, and a January-2024 "Rustls support" request — remain unactioned. `instant-acme` ships on a quarterly-ish cadence (latest 0.8.5, 2026-02-24; 0.8.0 in 2025-07-09 with API redesign + modern ACME extensions), has 1.38M total downloads to `lers`'s 7.7K (≈180× ratio), and is the single most popular ACME crate on crates.io per its maintainer's 2025 retrospective.
 
-2. **Ecosystem alignment with Helios's stack.** `instant-acme` is maintained by djc (Dirkjan Ochtman), who also maintains `rustls`, `rcgen`, `quinn`, and `hickory-dns` — precisely the Rust TLS/crypto/DNS libraries Helios already depends on (rustls for kTLS termination and the gateway, rcgen for the built-in CA, aya/eBPF adjacent to QUIC in the dataplane). `instant-acme` uses rustls directly via `hyper-rustls`, supports `rcgen` as an optional feature for CSR generation, and ships with `aws-lc-rs` by default (with `ring` as an alternative and `fips` as an opt-in). `lers` pulls in the C OpenSSL crate for all cryptography and uses `reqwest` (which in turn defaults to hyper+openssl unless carefully configured).
+2. **Ecosystem alignment with Overdrive's stack.** `instant-acme` is maintained by djc (Dirkjan Ochtman), who also maintains `rustls`, `rcgen`, `quinn`, and `hickory-dns` — precisely the Rust TLS/crypto/DNS libraries Overdrive already depends on (rustls for kTLS termination and the gateway, rcgen for the built-in CA, aya/eBPF adjacent to QUIC in the dataplane). `instant-acme` uses rustls directly via `hyper-rustls`, supports `rcgen` as an optional feature for CSR generation, and ships with `aws-lc-rs` by default (with `ring` as an alternative and `fips` as an opt-in). `lers` pulls in the C OpenSSL crate for all cryptography and uses `reqwest` (which in turn defaults to hyper+openssl unless carefully configured).
 
-3. **Feature coverage is a wash or slightly favours `instant-acme` on what matters.** Both claim RFC 8555 compliance. Both support HTTP-01, DNS-01, and TLS-ALPN-01. `instant-acme` additionally supports the ACME Renewal Information (ARI) and Profiles extensions, has explicit EAB + key rollover + contact update + revocation APIs, a documented `RetryPolicy`, and a pluggable `HttpClient` trait. The one place `lers` looks richer — it ships built-in HTTP-01 / TLS-ALPN-01 / Cloudflare DNS-01 solvers — is the wrong axis for Helios: Helios must drive challenges through its own dataplane (XDP/TC programs serve HTTP-01; ObservationStore-backed DNS-01 for internal hickory-dns integration), so "bring-your-own-solver" is a fit, not a gap. `instant-acme`'s flow (retrieve challenge token → user dispatches → `challenge.set_ready()` → library polls) maps cleanly onto a reconciler-driven rotation loop.
+3. **Feature coverage is a wash or slightly favours `instant-acme` on what matters.** Both claim RFC 8555 compliance. Both support HTTP-01, DNS-01, and TLS-ALPN-01. `instant-acme` additionally supports the ACME Renewal Information (ARI) and Profiles extensions, has explicit EAB + key rollover + contact update + revocation APIs, a documented `RetryPolicy`, and a pluggable `HttpClient` trait. The one place `lers` looks richer — it ships built-in HTTP-01 / TLS-ALPN-01 / Cloudflare DNS-01 solvers — is the wrong axis for Overdrive: Overdrive must drive challenges through its own dataplane (XDP/TC programs serve HTTP-01; ObservationStore-backed DNS-01 for internal hickory-dns integration), so "bring-your-own-solver" is a fit, not a gap. `instant-acme`'s flow (retrieve challenge token → user dispatches → `challenge.set_ready()` → library polls) maps cleanly onto a reconciler-driven rotation loop.
 
 The "Rust throughout" principle (§2.7) and the "Own your primitives" principle (§2.1) both lean the same way here. The `lers` OpenSSL dependency is the only feature-parity cost of switching, and it is not a feature.
 
@@ -46,7 +46,7 @@ The "Rust throughout" principle (§2.7) and the "Own your primitives" principle 
 | Certificate bundling | **Not implemented** (per README) [1] | Yes, standard order flow returns full chain [6] |
 | ACME Profiles extension | No [1] | Yes (added in 0.8.0, Jul 2025) [11] |
 
-**Solver architecture — key architectural divergence.** `lers` ships batteries-included: start an HTTP-01 server, hand it a Cloudflare API token for DNS-01, and it drives the whole flow end-to-end. `instant-acme` gives you the challenge token and expects the caller to dispatch it however makes sense in their environment, then calls `challenge.set_ready()` and polls. For a gateway that already owns the HTTP ingress path and a cluster that already runs hickory-dns, `instant-acme`'s model is the right shape — Helios should never delegate HTTP-01 serving or DNS record writing to an ACME library's own mini-solver.
+**Solver architecture — key architectural divergence.** `lers` ships batteries-included: start an HTTP-01 server, hand it a Cloudflare API token for DNS-01, and it drives the whole flow end-to-end. `instant-acme` gives you the challenge token and expects the caller to dispatch it however makes sense in their environment, then calls `challenge.set_ready()` and polls. For a gateway that already owns the HTTP ingress path and a cluster that already runs hickory-dns, `instant-acme`'s model is the right shape — Overdrive should never delegate HTTP-01 serving or DNS record writing to an ACME library's own mini-solver.
 
 ## 2. Dependency Footprint
 
@@ -56,7 +56,7 @@ Required direct dependencies: `async-trait`, `base64`, `chrono`, `futures`, `hex
 
 Transitive implications:
 
-- **`openssl ^0.10`** — C library binding. Requires `libssl-dev` at build time; vendored feature exists but still pins a C toolchain as build requirement. This is the dependency brushing against Helios Principle 7.
+- **`openssl ^0.10`** — C library binding. Requires `libssl-dev` at build time; vendored feature exists but still pins a C toolchain as build requirement. This is the dependency brushing against Overdrive Principle 7.
 - **`reqwest ^0.11`** — unless `default-features = false` + `rustls-tls` is set, this pulls in hyper + tokio + the `native-tls` crate, which on Linux also links openssl. The `lers` Cargo.toml default does not disable this [2].
 - **`trust-dns-resolver`** — optional, only for DNS-01 propagation checks. Predecessor to hickory-dns (now deprecated upstream; hickory is the maintained successor).
 - **`chrono`** — not needed for ACME semantics; `time` or `jiff` would be more aligned with the rustls ecosystem.
@@ -71,9 +71,9 @@ Features:
 
 - **Default: `aws-lc-rs` + `hyper-rustls`.** Pure-Rust wrapping of AWS's hardened libcrypto fork, widely used across rustls ecosystem, FIPS-certifiable.
 - **`ring` alternative.** Long-standing pure-Rust crypto (Brian Smith / rustls ecosystem). Opt-in for teams that prefer it over aws-lc-rs.
-- **`fips` opt-in.** Enables FIPS mode in aws-lc-rs — directly relevant if Helios ever targets FedRAMP/PCI.
-- **`hyper 1.x`** (not `hyper 0.14`) — aligns with the modern hyper-util / hyper-rustls stack Helios should be on anyway for its gateway.
-- **`HttpClient` trait.** Caller can swap in a custom transport; useful if Helios wants the ACME client to flow through its own telemetry/egress pipeline for audit.
+- **`fips` opt-in.** Enables FIPS mode in aws-lc-rs — directly relevant if Overdrive ever targets FedRAMP/PCI.
+- **`hyper 1.x`** (not `hyper 0.14`) — aligns with the modern hyper-util / hyper-rustls stack Overdrive should be on anyway for its gateway.
+- **`HttpClient` trait.** Caller can swap in a custom transport; useful if Overdrive wants the ACME client to flow through its own telemetry/egress pipeline for audit.
 
 Approximate transitive crate count: smaller than `lers` because hyper 1 + hyper-rustls + aws-lc-rs avoids the reqwest/openssl transitive fan-out. Not precisely counted (docs.rs dependency page 404'd for both); confidence: **Medium** on the "smaller than" claim, **High** on the qualitative direction.
 
@@ -84,7 +84,7 @@ Approximate transitive crate count: smaller than `lers` because hyper 1 + hyper-
 - Both depend on tokio; neither claims runtime-agnosticism.
 - Both depend on serde / serde_json.
 
-On Helios's "own your primitives" axis: `instant-acme` loses zero, `lers` adds OpenSSL to the build.
+On Overdrive's "own your primitives" axis: `instant-acme` loses zero, `lers` adds OpenSSL to the build.
 
 ## 3. Maintenance and Production Use
 
@@ -113,21 +113,21 @@ On Helios's "own your primitives" axis: `instant-acme` loses zero, `lers` adds O
 | `lers` | MIT [5] | Compatible (MIT is permissive; can be incorporated into AGPL codebases) |
 | `instant-acme` | Apache-2.0 [8] | Compatible (Apache-2.0 is permissive; can be incorporated into AGPL-3.0 — explicit compatibility confirmed by GNU; Apache's patent grant is a plus) |
 
-Both are permissive licenses. Apache-2.0 offers a slight advantage via its explicit patent grant, but the difference is not decisive for Helios.
+Both are permissive licenses. Apache-2.0 offers a slight advantage via its explicit patent grant, but the difference is not decisive for Overdrive.
 
-## 5. Helios Fit
+## 5. Overdrive Fit
 
 ### 5.1 Runtime and crypto backend alignment
 
-Helios is tokio-async and rustls-native (whitepaper §7: sockops mTLS via rustls; §11 gateway: rustls termination). `instant-acme` is tokio-async, rustls-native (hyper-rustls), and defaults to aws-lc-rs — a crypto provider from the same author set as rustls itself. Helios should already have rustls + a crypto provider (ring or aws-lc-rs) in its dependency graph; `instant-acme` contributes no new TLS stack.
+Overdrive is tokio-async and rustls-native (whitepaper §7: sockops mTLS via rustls; §11 gateway: rustls termination). `instant-acme` is tokio-async, rustls-native (hyper-rustls), and defaults to aws-lc-rs — a crypto provider from the same author set as rustls itself. Overdrive should already have rustls + a crypto provider (ring or aws-lc-rs) in its dependency graph; `instant-acme` contributes no new TLS stack.
 
-`lers` contributes a parallel crypto stack (OpenSSL via C FFI) that must coexist with the rustls/ring stack Helios already carries. That is the specific footgun Helios Principle 7 points at: two TLS stacks in one binary, two places to audit, two places to keep compliant.
+`lers` contributes a parallel crypto stack (OpenSSL via C FFI) that must coexist with the rustls/ring stack Overdrive already carries. That is the specific footgun Overdrive Principle 7 points at: two TLS stacks in one binary, two places to audit, two places to keep compliant.
 
 ### 5.2 Shared paths with rcgen / IdentityMgr
 
 The built-in CA described in whitepaper §4 uses rcgen to mint SVIDs. `rcgen` is maintained by the rustls org [16]. `instant-acme` exposes an optional `rcgen` feature that lets it generate CSRs using rcgen — meaning the cert-generation code path is already shared between `IdentityMgr`'s internal SVID issuance and the gateway's public-trust ACME flow. `IdentityMgr` becomes a single rcgen-using subsystem with two trust anchors (internal CA vs Let's Encrypt) rather than two independent cert-generation paths.
 
-`lers` does have an optional `rcgen` feature too (per its Cargo.toml) but uses openssl internally for signing and key operations. The surface shape of `lers`'s public API also exposes openssl types in places. That's a leaky abstraction relative to Helios's rustls/rcgen baseline.
+`lers` does have an optional `rcgen` feature too (per its Cargo.toml) but uses openssl internally for signing and key operations. The surface shape of `lers`'s public API also exposes openssl types in places. That's a leaky abstraction relative to Overdrive's rustls/rcgen baseline.
 
 ### 5.3 Principle 7 revisited (critical path question)
 
@@ -135,7 +135,7 @@ Principle 7 reads: *"Rust throughout. Memory safety, performance, and a maturing
 
 The "critical path" caveat exists because some primitives (e.g., the Linux kernel, the VMM hypervisor) are not going to be rewritten in Rust, and the principle is pragmatic about that. The intended scope of "critical path" is clearly the per-packet / per-request data path: TLS handshake (kernel + rustls), kTLS record layer (kernel), policy enforcement (XDP/LSM), service routing (XDP).
 
-ACME is genuinely not on the hot path — certs rotate every 60 days (Let's Encrypt default 90-day TTL; operational norm ≤60 days), and issuance is initiated by a reconciler once per cert, not per connection. The "bursty workload startup" argument does not apply to public-trust certs: public-trust certs are attached to public hostnames served by gateway nodes, and gateway nodes are static infrastructure (whitepaper §11: "gateway nodes are designated by configuration, not by scheduling"). There is no world in which Helios provisions 1,000 Let's Encrypt certs per second against bursty workloads — Let's Encrypt's own rate limits (300 new orders per account per 3 hours, 50 certs per registered domain per 7 days) [17] make that architecturally impossible.
+ACME is genuinely not on the hot path — certs rotate every 60 days (Let's Encrypt default 90-day TTL; operational norm ≤60 days), and issuance is initiated by a reconciler once per cert, not per connection. The "bursty workload startup" argument does not apply to public-trust certs: public-trust certs are attached to public hostnames served by gateway nodes, and gateway nodes are static infrastructure (whitepaper §11: "gateway nodes are designated by configuration, not by scheduling"). There is no world in which Overdrive provisions 1,000 Let's Encrypt certs per second against bursty workloads — Let's Encrypt's own rate limits (300 new orders per account per 3 hours, 50 certs per registered domain per 7 days) [17] make that architecturally impossible.
 
 So Principle 7 is *not* violated by keeping `lers`/OpenSSL strictly because ACME runs off the hot path. But the principle is also stated with ecosystem ambition: *"a maturing ecosystem that now covers every required primitive."* The whole point is that when a pure-Rust option is available at parity or better, the platform should take it. `instant-acme` is that option. The critical-path caveat was written for cases where Rust doesn't yet have a competitive primitive. For ACMEv2 in 2026, Rust does.
 
@@ -147,15 +147,15 @@ There is also an operational-surface argument for switching: two TLS stacks in o
 
 Rationale, ranked by weight:
 
-1. **Maintenance risk** — `lers` has effectively stopped receiving updates (single maintenance commit in 2024; zero releases since 2023-04-04). Adopting it now means Helios would either fork-and-maintain or ship a stale crypto-touching dependency. `instant-acme` is actively shipped by a core rustls-ecosystem maintainer. This is the single largest asymmetry.
+1. **Maintenance risk** — `lers` has effectively stopped receiving updates (single maintenance commit in 2024; zero releases since 2023-04-04). Adopting it now means Overdrive would either fork-and-maintain or ship a stale crypto-touching dependency. `instant-acme` is actively shipped by a core rustls-ecosystem maintainer. This is the single largest asymmetry.
 
 2. **Ecosystem cohesion** — `instant-acme` + `rustls` + `rcgen` + `aws-lc-rs` + `hickory-dns` are all maintained by overlapping author sets and are designed to compose. `IdentityMgr` can use one rcgen-based cert-generation path for internal SVIDs and public-trust certs. No dual crypto stack.
 
 3. **Principle 7 consistency** — the critical-path caveat makes OpenSSL *tolerable* in `lers`, but Principle 7's broader intent ("a maturing ecosystem that now covers every required primitive") points the other way when a pure-Rust option exists. `instant-acme` means zero C FFI in the ACME path, one less dual-TLS-stack audit, and an explicit FIPS mode for future compliance work.
 
-4. **API shape fits Helios's reconciler model** — `instant-acme`'s bring-your-own-challenge-dispatch pattern is the right shape for a reconciler that owns the gateway ingress path (HTTP-01 via the gateway's own hyper server) and may later own DNS-01 via a hickory-dns integration. `lers`'s batteries-included solvers would short-circuit or duplicate infrastructure Helios already has.
+4. **API shape fits Overdrive's reconciler model** — `instant-acme`'s bring-your-own-challenge-dispatch pattern is the right shape for a reconciler that owns the gateway ingress path (HTTP-01 via the gateway's own hyper server) and may later own DNS-01 via a hickory-dns integration. `lers`'s batteries-included solvers would short-circuit or duplicate infrastructure Overdrive already has.
 
-5. **Feature parity is good enough** — every major ACME capability Helios needs (HTTP-01, DNS-01, TLS-ALPN-01, wildcard, EAB, rollover, revocation, ARI, rate-limit aware retry) is in `instant-acme`. The one area `lers` is "richer" (built-in solvers) is not a fit axis for Helios.
+5. **Feature parity is good enough** — every major ACME capability Overdrive needs (HTTP-01, DNS-01, TLS-ALPN-01, wildcard, EAB, rollover, revocation, ARI, rate-limit aware retry) is in `instant-acme`. The one area `lers` is "richer" (built-in solvers) is not a fit axis for Overdrive.
 
 **Dual support is rejected.** Abstracting the ACME client behind a trait would be a platform-level mistake — the library choice affects feature set, crypto stack, and runtime characteristics, and an abstraction thin enough to cover both libraries would also be too thin to hide the feature gap (e.g., ACME Profiles, ARI, rcgen integration) between them. Pick one.
 
@@ -253,4 +253,4 @@ Reputation mix: High 12 (67%), Medium-High 6 (33%), Medium 0, Excluded 0. Avg �
 
 ## Research Metadata
 
-Duration: ~30 min. Examined: 18 sources. Cited: 18. Cross-refs: major claims (release cadence, maintainer identity, crypto backend, challenge support, OpenSSL dependency, rustls authorship) each verified across ≥2 independent sources. Confidence: High on the recommendation axis; Medium on exact transitive crate counts (Gap 1). Output: `/Users/marcus/conductor/workspaces/helios/taipei-v1/docs/research/platform/lers-vs-instant-acme-research.md`.
+Duration: ~30 min. Examined: 18 sources. Cited: 18. Cross-refs: major claims (release cadence, maintainer identity, crypto backend, challenge support, OpenSSL dependency, rustls authorship) each verified across ≥2 independent sources. Confidence: High on the recommendation axis; Medium on exact transitive crate counts (Gap 1). Output: `/Users/marcus/conductor/workspaces/overdrive/taipei-v1/docs/research/platform/lers-vs-instant-acme-research.md`.

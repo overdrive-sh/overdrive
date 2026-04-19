@@ -1,4 +1,4 @@
-# Research: Workload Orchestration Platforms for IoT Edge — Landscape Scouting for Helios
+# Research: Workload Orchestration Platforms for IoT Edge — Landscape Scouting for Overdrive
 
 **Date:** 2026-04-19 | **Researcher:** nw-researcher (Nova) | **Confidence:** High (landscape shape and platform architectures); Medium (specific per-platform production scale numbers) | **Sources:** 26 cited
 
@@ -8,23 +8,23 @@
 
 The IoT-edge orchestrator landscape in 2026 is dominated by two architectural camps. **Kubernetes-adapted platforms** — KubeEdge (CNCF Incubating, Apache-2.0), K3s, OpenYurt, Akri, SuperEdge — extend or trim the K8s control plane for cloud-edge-split deployments and are the natural recommendation for teams that already live in K8s and whose devices are "small servers" rather than MCU-class endpoints. **Vertically-integrated platforms** — AWS IoT Greengrass, Azure IoT Edge, EVE-OS (LF Edge), Balena — ship their own device OS or device runtime, their own enrollment service, and their own management plane, and are the natural recommendation when the operator wants the whole stack to be one vendor's problem (with the attendant lock-in trade-off, which is explicit for AWS/Azure and split-open for EVE-OS/Balena). A third category — **transport layers and identity toolkits** (Nebula, Tailscale, Ockam, SPIFFE Federation) — is not an orchestrator but is universally what the above camps reach for when the question is "how does a device behind carrier NAT talk to my control plane with a cryptographically-provable identity?"
 
-Every platform in this space solves the four failure modes that made Helios v1 scope out IoT edge the same way, with minor variations: **(1)** they use hub-and-spoke or two-tier hierarchical topology rather than peer gossip — no one puts 100k devices in a SWIM mesh; **(2)** they transport the management plane over outbound-initiated tunnels (WebSocket, MQTT-over-TLS, OpenVPN, WireGuard), which inherently solves NAT; **(3)** enrollment relies on a **global rendezvous service** (Azure DPS, AWS Fleet Provisioning, EVE-OS bootstrap config) rather than static seed lists, with attestation via TPM, X.509, or scoped claim certificates; and **(4)** factory-flashed images ship with only a well-known endpoint plus an attestation secret, which solves the "flash now, deploy in six months" provisioning flow. Helios's whitepaper has none of these four primitives — §4 assumes a Corrosion peer mesh with QUIC, §23 describes TPM attestation as a Phase 2 roadmap item but without the rendezvous protocol. The scope-out was the correct call; reopening would require five substantial additions (tunneled observation, rendezvous-plus-attestation, device-twin reconciler, hierarchical topology, per-node API cache) before the architecture fits.
+Every platform in this space solves the four failure modes that made Overdrive v1 scope out IoT edge the same way, with minor variations: **(1)** they use hub-and-spoke or two-tier hierarchical topology rather than peer gossip — no one puts 100k devices in a SWIM mesh; **(2)** they transport the management plane over outbound-initiated tunnels (WebSocket, MQTT-over-TLS, OpenVPN, WireGuard), which inherently solves NAT; **(3)** enrollment relies on a **global rendezvous service** (Azure DPS, AWS Fleet Provisioning, EVE-OS bootstrap config) rather than static seed lists, with attestation via TPM, X.509, or scoped claim certificates; and **(4)** factory-flashed images ship with only a well-known endpoint plus an attestation secret, which solves the "flash now, deploy in six months" provisioning flow. Overdrive's whitepaper has none of these four primitives — §4 assumes a Corrosion peer mesh with QUIC, §23 describes TPM attestation as a Phase 2 roadmap item but without the rendezvous protocol. The scope-out was the correct call; reopening would require five substantial additions (tunneled observation, rendezvous-plus-attestation, device-twin reconciler, hierarchical topology, per-node API cache) before the architecture fits.
 
-If Helios ever reopens this question, the most directly borrowable primitives are: **EVE-OS's TPM-anchored bootstrap model** (closest fit — EVE and Helios share a Type-1-ish HV posture and first-class unikernel support); **Azure IoT's device-twin reported-vs-desired reconciliation** (fits Helios's §18 reconciler trait with *zero* changes to the core primitive — it is the same shape at leaf granularity); **AWS Greengrass's fleet provisioning claim certificate + exchange flow** for enrollment; **KubeEdge's CloudHub/EdgeHub outbound WebSocket** for tunneled management-plane transport; and **Balena's binary container delta updates** for bandwidth-constrained OTA. For now, customers asking about IoT edge should be pointed at **KubeEdge (open source, largest independently-verified scale), EVE-OS (closest architectural cousin), or their existing cloud vendor's offering (AWS Greengrass / Azure IoT Edge)** depending on their lock-in tolerance — none of which Helios currently competes with, and none of which Helios v1 needs to try to replace.
+If Overdrive ever reopens this question, the most directly borrowable primitives are: **EVE-OS's TPM-anchored bootstrap model** (closest fit — EVE and Overdrive share a Type-1-ish HV posture and first-class unikernel support); **Azure IoT's device-twin reported-vs-desired reconciliation** (fits Overdrive's §18 reconciler trait with *zero* changes to the core primitive — it is the same shape at leaf granularity); **AWS Greengrass's fleet provisioning claim certificate + exchange flow** for enrollment; **KubeEdge's CloudHub/EdgeHub outbound WebSocket** for tunneled management-plane transport; and **Balena's binary container delta updates** for bandwidth-constrained OTA. For now, customers asking about IoT edge should be pointed at **KubeEdge (open source, largest independently-verified scale), EVE-OS (closest architectural cousin), or their existing cloud vendor's offering (AWS Greengrass / Azure IoT Edge)** depending on their lock-in tolerance — none of which Overdrive currently competes with, and none of which Overdrive v1 needs to try to replace.
 
 ---
 
 ## Research Context and Scope
 
-Helios (see `docs/whitepaper.md`) is a Rust-native workload orchestration platform targeting servers and edge-compute (tens–hundreds of nodes per region, Corrosion + Raft substrate, bare-metal and microVM workloads). IoT edge — millions of NAT-bound, intermittent devices — was explicitly scoped out of v1 on 2026-04-19, tracked in `marcus-sa/helios#5`. This research is adjacent-landscape scouting: "if a customer asks us, what do we point them to, and what patterns did they use that we could borrow later?"
+Overdrive (see `docs/whitepaper.md`) is a Rust-native workload orchestration platform targeting servers and edge-compute (tens–hundreds of nodes per region, Corrosion + Raft substrate, bare-metal and microVM workloads). IoT edge — millions of NAT-bound, intermittent devices — was explicitly scoped out of v1 on 2026-04-19, tracked in `marcus-sa/overdrive#5`. This research is adjacent-landscape scouting: "if a customer asks us, what do we point them to, and what patterns did they use that we could borrow later?"
 
 ### The Four Failure Modes (Ground Truth)
 
-The scope-out was justified by four architectural mismatches between Helios's substrate and the IoT-edge problem shape. These align with the whitepaper as follows:
+The scope-out was justified by four architectural mismatches between Overdrive's substrate and the IoT-edge problem shape. These align with the whitepaper as follows:
 
 1. **SWIM fan-out does not scale to 100k+ nodes** — Corrosion's gossip bandwidth is O(fleet-size) per node; whitepaper §4 ("Live Cluster Map — ObservationStore") describes per-node state as local SQLite with QUIC-gossiped deltas, and §4's *Per-region blast radius* guardrail explicitly limits topology to "regional clusters gossip internally" rather than a single flat cluster. At IoT fleet sizes the per-node gossip cost exceeds the per-device footprint.
 2. **NAT / intermittent connectivity breaks the peer-mesh assumption** — Corrosion's SWIM-over-QUIC requires bidirectional reachability between peers; whitepaper §4 describes "each node runs a Corrosion peer ... gossiped to a random peer subset over QUIC." IoT devices typically sit behind carrier NAT with outbound-only connectivity and flapping links.
-3. **Static seed lists do not match edge provisioning** — Helios node configs declare `peers = [...]` at bootstrap (whitepaper §4). IoT images are flashed weeks/months before deployment and must discover their control plane at first boot, not from a baked-in peer list.
+3. **Static seed lists do not match edge provisioning** — Overdrive node configs declare `peers = [...]` at bootstrap (whitepaper §4). IoT images are flashed weeks/months before deployment and must discover their control plane at first boot, not from a baked-in peer list.
 4. **Node enrollment protocol is undefined** — Whitepaper §23 (Image Factory) mentions dm-verity, TPM attestation, and Secure Boot as *Phase 2 roadmap* items but does not specify a zero-touch enrollment protocol (attestation → rendezvous → trust bundle → first SVID). For IoT, this is the day-one problem, not a Phase 2 refinement.
 
 Cross-checked against the whitepaper: the framing is consistent. §4 confirms SWIM peer-mesh and static peer lists; §23 confirms attestation is roadmap-only. Accepted as ground truth for this research.
@@ -36,7 +36,7 @@ Cross-checked against the whitepaper: the framing is consistent. §4 confirms SW
 3. **Scale claims** — marketing vs published evidence.
 4. **Workload model** — containers / VMs / WASM / native; isolation story.
 5. **Licensing shape** — OSS vs vendor-locked.
-6. **Relevance to Helios** — concrete primitives worth borrowing.
+6. **Relevance to Overdrive** — concrete primitives worth borrowing.
 
 ---
 
@@ -72,7 +72,7 @@ Cross-checked against the whitepaper: the framing is consistent. §4 confirms SW
 
 **License.** Apache-2.0, CNCF Incubating project. Vendor-neutral.
 
-**Helios relevance.** The **CloudHub / EdgeHub split with outbound-only WebSocket** is the cleanest answer to failure modes #2 (NAT) and partly #1 (fan-out — aggregation at CloudCore means edges only talk to one place). The **DeviceTwin reported-vs-desired state model** is a direct borrow candidate if Helios reopens IoT: it is a narrower, persistent, per-device shadow rather than an eventually-consistent CRDT over a fleet. Helios's current ObservationStore is the wrong shape for leaf IoT devices precisely because it assumes peer membership; a twin is a 1:1 cloud-side durable record with no peer cost.
+**Overdrive relevance.** The **CloudHub / EdgeHub split with outbound-only WebSocket** is the cleanest answer to failure modes #2 (NAT) and partly #1 (fan-out — aggregation at CloudCore means edges only talk to one place). The **DeviceTwin reported-vs-desired state model** is a direct borrow candidate if Overdrive reopens IoT: it is a narrower, persistent, per-device shadow rather than an eventually-consistent CRDT over a fleet. Overdrive's current ObservationStore is the wrong shape for leaf IoT devices precisely because it assumes peer membership; a twin is a 1:1 cloud-side durable record with no peer cost.
 
 ### P2. K3s — Rancher/SUSE (donated to CNCF as Sandbox), lightweight Kubernetes
 
@@ -84,7 +84,7 @@ Cross-checked against the whitepaper: the framing is consistent. §4 confirms SW
 
 **Enrollment.** Token-based: a cluster-wide join token is generated at server init (`/var/lib/rancher/k3s/server/node-token`); agents pass `K3S_URL=...` and `K3S_TOKEN=...`. On first join, the agent generates a random password and the server stores a hash. Subsequent joins require the same password (prevents node-name hijack). This is a **shared-secret-plus-first-use-trust** model — convenient for homogeneous fleets, not a hardware-root-of-trust attestation flow.
 
-**Datastore options.** Embedded SQLite (single-server default), embedded etcd (3+ server HA), or external PostgreSQL/MySQL/etcd. The SQLite default is the relevant edge choice — single-server K3s on a Raspberry Pi-class device is a mainstream use case. **This is the architectural parallel most relevant to Helios:** K3s's embedded SQLite ↔ Helios's redb (§4 `LocalStore`) is the same conceptual choice — skip distributed consensus when the deployment is a single node.
+**Datastore options.** Embedded SQLite (single-server default), embedded etcd (3+ server HA), or external PostgreSQL/MySQL/etcd. The SQLite default is the relevant edge choice — single-server K3s on a Raspberry Pi-class device is a mainstream use case. **This is the architectural parallel most relevant to Overdrive:** K3s's embedded SQLite ↔ Overdrive's redb (§4 `LocalStore`) is the same conceptual choice — skip distributed consensus when the deployment is a single node.
 
 **Scale claim.** K3s itself does not publish an IoT-edge scale number; it is upstream-Kubernetes-compatible, so the practical ceiling per cluster is upstream K8s's 5,000-node limit. At fleet scale people run **many small K3s clusters** (one per site) rather than one large one — Rancher Fleet and Rancher MCM exist to GitOps-manage thousands of clusters.
 
@@ -92,7 +92,7 @@ Cross-checked against the whitepaper: the framing is consistent. §4 confirms SW
 
 **License.** Apache-2.0, CNCF Sandbox.
 
-**Helios relevance.** K3s validates the "single binary, embedded local store, agent-initiated outbound WebSocket" pattern at scale. The relevant borrows for Helios-if-reopened-for-IoT are: (a) **agent-initiated tunnel instead of peer gossip** for the management plane; (b) **many-small-clusters + fleet-of-clusters GitOps** instead of one giant cluster — which matches how real IoT deployments are actually operated. However, K3s inherits K8s's container-only assumption, which Helios has already rejected — so K3s is a topology reference, not a workload-model reference.
+**Overdrive relevance.** K3s validates the "single binary, embedded local store, agent-initiated outbound WebSocket" pattern at scale. The relevant borrows for Overdrive-if-reopened-for-IoT are: (a) **agent-initiated tunnel instead of peer gossip** for the management plane; (b) **many-small-clusters + fleet-of-clusters GitOps** instead of one giant cluster — which matches how real IoT deployments are actually operated. However, K3s inherits K8s's container-only assumption, which Overdrive has already rejected — so K3s is a topology reference, not a workload-model reference.
 
 ### P3. MicroK8s — Canonical, snap-packaged Kubernetes
 
@@ -102,7 +102,7 @@ Cross-checked against the whitepaper: the framing is consistent. §4 confirms SW
 
 **Workload, license, scale.** Containers only, Apache-2.0, scale is upstream-K8s-bounded. Addons catalogue includes dashboard, metrics-server, ingress, RBAC, GPU, Istio, KubeVirt, etc. — selectable via `microk8s enable <addon>`.
 
-**Helios relevance.** Limited as an IoT-edge reference — MicroK8s is a desktop/developer/server-side lightweight K8s, not an IoT-fleet orchestrator. The most interesting primitive to note is **Dqlite**: a pure-C Raft-replicated SQLite that sits in the same design space as Helios's openraft+redb RaftStore (§4). If Helios ever needs a single-file replicated SQL store, Dqlite is the closest prior art; currently not relevant because Corrosion covers the observation layer and redb covers the intent layer with different trade-offs (Dqlite's Raft-over-SQLite model is more like Helios's RaftStore than its CorrosionStore).
+**Overdrive relevance.** Limited as an IoT-edge reference — MicroK8s is a desktop/developer/server-side lightweight K8s, not an IoT-fleet orchestrator. The most interesting primitive to note is **Dqlite**: a pure-C Raft-replicated SQLite that sits in the same design space as Overdrive's openraft+redb RaftStore (§4). If Overdrive ever needs a single-file replicated SQL store, Dqlite is the closest prior art; currently not relevant because Corrosion covers the observation layer and redb covers the intent layer with different trade-offs (Dqlite's Raft-over-SQLite model is more like Overdrive's RaftStore than its CorrosionStore).
 
 **Confidence: Medium** — classification based on canonical.com/microk8s product positioning and the enrollment pattern, not a deep technical fetch. MicroK8s is a minor player for IoT edge specifically; most practitioners reach for K3s.
 
@@ -118,7 +118,7 @@ Cross-checked against the whitepaper: the framing is consistent. §4 confirms SW
 
 **Enrollment.** `yurtadm join` produces the same kubeadm-style bootstrap-token flow as upstream Kubernetes, with Yurt-specific post-install to add YurtHub and Raven.
 
-**Node-pool concept.** Edge nodes are grouped into **NodePools**; the `UnitedDeployment` CRD spreads replicas across pools with pool-specific counts and templates. This is a deliberate answer to "I have 50 edge sites with 3 devices each; I want one spec that produces 3 replicas per site." Helios's current scheduler (§4) is single-region bin-pack and does not have this primitive.
+**Node-pool concept.** Edge nodes are grouped into **NodePools**; the `UnitedDeployment` CRD spreads replicas across pools with pool-specific counts and templates. This is a deliberate answer to "I have 50 edge sites with 3 devices each; I want one spec that produces 3 replicas per site." Overdrive's current scheduler (§4) is single-region bin-pack and does not have this primitive.
 
 **Workload model.** Containers only; upstream kubelet compatibility is the design goal, so VM/WASM support depends on whatever K8s extensions you stack on top (KubeVirt, wasmCloud). No first-class.
 
@@ -126,7 +126,7 @@ Cross-checked against the whitepaper: the framing is consistent. §4 confirms SW
 
 **License.** Apache-2.0, CNCF Sandbox.
 
-**Helios relevance.** The **YurtHub pattern — a per-node caching proxy that serves from local disk during cloud disconnect** — is the most borrowable primitive here. It is a cleaner split than KubeEdge's MetaManager: cache is explicit, the local proxy is upstream-kubelet-compatible, and reconnect semantics are well-defined. For Helios, the analog would be a per-node Intent-Store-cache that mirrors the regional Raft leader's decisions relevant to *this* node, so the node agent can continue running pinned allocations through a regional partition even when the Raft leader is unreachable. Whitepaper §3.5 gets close ("each region continues to operate on locally-committed intent") but only at *region* granularity, not *node* granularity. The NodePool / UnitedDeployment primitive is also worth noting if Helios ever goes many-small-clusters.
+**Overdrive relevance.** The **YurtHub pattern — a per-node caching proxy that serves from local disk during cloud disconnect** — is the most borrowable primitive here. It is a cleaner split than KubeEdge's MetaManager: cache is explicit, the local proxy is upstream-kubelet-compatible, and reconnect semantics are well-defined. For Overdrive, the analog would be a per-node Intent-Store-cache that mirrors the regional Raft leader's decisions relevant to *this* node, so the node agent can continue running pinned allocations through a regional partition even when the Raft leader is unreachable. Whitepaper §3.5 gets close ("each region continues to operate on locally-committed intent") but only at *region* granularity, not *node* granularity. The NodePool / UnitedDeployment primitive is also worth noting if Overdrive ever goes many-small-clusters.
 
 ### P5. Akri — Microsoft origin, CNCF Sandbox, leaf-device discovery for K8s
 
@@ -136,7 +136,7 @@ Cross-checked against the whitepaper: the framing is consistent. §4 confirms SW
 
 **Enrollment.** Does not apply — Akri is layered onto an existing K8s cluster (including KubeEdge, K3s, or OpenYurt). The devices Akri discovers do not run an Akri agent; only the K8s worker nodes do.
 
-**Helios relevance.** Akri is a *pattern* to note, not a component to borrow. The pattern is: **leaf devices that cannot run the orchestrator runtime are modeled as first-class scheduled resources via a discovery-and-broker abstraction on the nearest edge node that can.** This is directly analogous to how Helios might handle truly constrained IoT endpoints — not try to run a node agent on a 64 KB MCU, but model the MCU as a "device resource" attached to a Helios edge node that runs a per-protocol broker sidecar. KubeEdge implements the same pattern via Mapper; Akri implements it more generally via Discovery Handlers. **If Helios reopens IoT, the question "do you run a node agent on every device, or do you run a broker on gateway nodes that owns many devices?" is the first decision, and Akri's answer is the broker pattern.** Akri itself would likely be bypassed (it is K8s-CRD-native), but the abstraction would be reimplemented.
+**Overdrive relevance.** Akri is a *pattern* to note, not a component to borrow. The pattern is: **leaf devices that cannot run the orchestrator runtime are modeled as first-class scheduled resources via a discovery-and-broker abstraction on the nearest edge node that can.** This is directly analogous to how Overdrive might handle truly constrained IoT endpoints — not try to run a node agent on a 64 KB MCU, but model the MCU as a "device resource" attached to a Overdrive edge node that runs a per-protocol broker sidecar. KubeEdge implements the same pattern via Mapper; Akri implements it more generally via Discovery Handlers. **If Overdrive reopens IoT, the question "do you run a node agent on every device, or do you run a broker on gateway nodes that owns many devices?" is the first decision, and Akri's answer is the broker pattern.** Akri itself would likely be bypassed (it is K8s-CRD-native), but the abstraction would be reimplemented.
 
 **License.** Apache-2.0, CNCF Sandbox.
 
@@ -164,10 +164,10 @@ All flows support **TPM-backed key storage** (HSM option) — the device's priva
 
 **License.** AWS IoT Greengrass Core software is open source (Apache-2.0). AWS IoT Core (the cloud side) is a proprietary AWS service. **You cannot self-host the cloud side.** This is the fundamental vendor lock-in point for Greengrass — the client is portable, the service it talks to is not. The **openBalena / balenaCloud** bifurcation (below) is the closest architectural peer; Greengrass deliberately does not offer that split.
 
-**Helios relevance.** Three things are worth noting for Helios-if-reopened:
-1. **Fleet provisioning via claim certificate** is the canonical answer to failure mode #4 (node enrollment for factory-flashed images). The claim cert is weak (shared batch) but scoped (MQTT policy lets it do one thing: exchange for a real cert), and the exchange is TPM-bindable at the device. This is exactly the pattern Helios's §23 gestures at (TPM attestation) but without the concrete protocol.
-2. **Recipe + artifact component model** is substantially similar to the Helios job spec (TOML recipe + content-addressed artifacts in Garage). The similarity is shallow but the packaging taxonomy is one that converged across Greengrass, Balena, and OCI — Helios is already aligned.
-3. **Two-tier "core device + client device" hierarchy** is a direct answer to failure mode #1 (100k nodes in one control plane). Greengrass does not put MCU-class devices in the orchestrator; it puts them behind a gateway core that is in the orchestrator. Fleet size from the orchestrator's perspective is the number of cores, not the number of things. This is the same architectural move KubeEdge's Mapper / Akri's broker makes, and the same move Helios would have to make if it ever supported MCU-class endpoints.
+**Overdrive relevance.** Three things are worth noting for Overdrive-if-reopened:
+1. **Fleet provisioning via claim certificate** is the canonical answer to failure mode #4 (node enrollment for factory-flashed images). The claim cert is weak (shared batch) but scoped (MQTT policy lets it do one thing: exchange for a real cert), and the exchange is TPM-bindable at the device. This is exactly the pattern Overdrive's §23 gestures at (TPM attestation) but without the concrete protocol.
+2. **Recipe + artifact component model** is substantially similar to the Overdrive job spec (TOML recipe + content-addressed artifacts in Garage). The similarity is shallow but the packaging taxonomy is one that converged across Greengrass, Balena, and OCI — Overdrive is already aligned.
+3. **Two-tier "core device + client device" hierarchy** is a direct answer to failure mode #1 (100k nodes in one control plane). Greengrass does not put MCU-class devices in the orchestrator; it puts them behind a gateway core that is in the orchestrator. Fleet size from the orchestrator's perspective is the number of cores, not the number of things. This is the same architectural move KubeEdge's Mapper / Akri's broker makes, and the same move Overdrive would have to make if it ever supported MCU-class endpoints.
 
 ### P7. Azure IoT Edge / Azure IoT Hub / Azure Arc — Microsoft, vendor-locked, device-twin-centric
 
@@ -196,9 +196,9 @@ DPS is a **rendezvous service**: device ships knowing only the global DPS endpoi
 
 **License.** IoT Edge runtime (`edgeAgent`, `edgeHub`) is open source (MIT). IoT Hub and DPS are proprietary Azure services. Same lock-in shape as AWS.
 
-**Helios relevance.** Azure contributes two primitives worth naming:
-1. **The device-twin reported-vs-desired reconciliation pattern** is architecturally what every reconciler does in Kubernetes, Nomad, and Helios §18, but *per-device with explicit persistent documents*. For a system already committed to reconciler-as-primitive (Helios §18), supporting IoT at the leaf is cleanly expressed as "every leaf device has a twin, and a per-device reconciler converges reported → desired." The intent/observation split (Helios §4) maps onto this: desired is intent (linearizable), reported is observation (eventually-consistent, authored by the device). This is a *very* direct structural fit.
-2. **DPS as a global-rendezvous attestation service** is the pattern Helios needs to implement for failure mode #3 (static seed lists do not match edge provisioning). Helios's §23 TPM attestation section describes the verification side but not the rendezvous side — devices must know *some* endpoint at flash time, and a well-known platform-operator-run rendezvous service that routes them to their eventual home cluster is the canonical answer. Balena has an equivalent (`api.balena-cloud.com`); AWS has DPS-equivalent fleet provisioning endpoints per region.
+**Overdrive relevance.** Azure contributes two primitives worth naming:
+1. **The device-twin reported-vs-desired reconciliation pattern** is architecturally what every reconciler does in Kubernetes, Nomad, and Overdrive §18, but *per-device with explicit persistent documents*. For a system already committed to reconciler-as-primitive (Overdrive §18), supporting IoT at the leaf is cleanly expressed as "every leaf device has a twin, and a per-device reconciler converges reported → desired." The intent/observation split (Overdrive §4) maps onto this: desired is intent (linearizable), reported is observation (eventually-consistent, authored by the device). This is a *very* direct structural fit.
+2. **DPS as a global-rendezvous attestation service** is the pattern Overdrive needs to implement for failure mode #3 (static seed lists do not match edge provisioning). Overdrive's §23 TPM attestation section describes the verification side but not the rendezvous side — devices must know *some* endpoint at flash time, and a well-known platform-operator-run rendezvous service that routes them to their eventual home cluster is the canonical answer. Balena has an equivalent (`api.balena-cloud.com`); AWS has DPS-equivalent fleet provisioning endpoints per region.
 
 ### P8. EVE-OS — LF Edge project, Zededa origin, Type-1 hypervisor for edge
 
@@ -220,14 +220,14 @@ An intermediate **Eden** test harness (not a production controller) is widely re
 
 **Scale.** ZEDEDA markets deployments of tens of thousands of edge devices per controller; independent published benchmarks at a specific scale are not prominent. **Confidence: Medium** on specific scale numbers — marketing claims exceed published independent evidence.
 
-**Workload and security.** Workloads are fully isolated by virtualization (Type-1 HV). Unikernels are first-class — a property EVE shares with Helios but exceeds few other platforms in this comparison. Measured boot + TPM attestation + dm-verity-equivalent integrity chain are standard in the image.
+**Workload and security.** Workloads are fully isolated by virtualization (Type-1 HV). Unikernels are first-class — a property EVE shares with Overdrive but exceeds few other platforms in this comparison. Measured boot + TPM attestation + dm-verity-equivalent integrity chain are standard in the image.
 
 **License.** Apache-2.0, LF Edge.
 
-**Helios relevance.** EVE is the **closest architectural cousin to Helios** in this entire comparison — the same Type-1 HV substrate (Cloud Hypervisor in Helios, Xen/KVM in EVE), the same first-class-unikernel stance, the same measured-boot-from-day-one posture (Helios §23's Image Factory roadmap, EVE's existing TPM chain). Three specific borrows are worth naming:
-1. **"Edge Container" as a unified workload type** — EVE's model of papering over VM/container/unikernel via one manifest is substantially what Helios §6's `Driver` trait already achieves, but EVE names the abstraction explicitly on the user-facing side. Helios currently surfaces `driver = "process" | "microvm" | "vm" | "unikernel" | "wasm"` in the job spec; a unifying name is pure usability.
-2. **Controller-pull configuration model with self-contained config objects** — the device holds the last-known-good and reconciles against it locally. Helios's §4 per-region Raft plus §3.5 multi-region doesn't describe a configuration-pull model; for IoT-edge it would need one because Raft replication assumes a quorum.
-3. **TPM-anchored enrollment with bootstrap config via OOB delivery (USB/installer-baked)** — directly answers failure mode #4. EVE's flow is the concrete pattern Helios §23 gestures at without specifying.
+**Overdrive relevance.** EVE is the **closest architectural cousin to Overdrive** in this entire comparison — the same Type-1 HV substrate (Cloud Hypervisor in Overdrive, Xen/KVM in EVE), the same first-class-unikernel stance, the same measured-boot-from-day-one posture (Overdrive §23's Image Factory roadmap, EVE's existing TPM chain). Three specific borrows are worth naming:
+1. **"Edge Container" as a unified workload type** — EVE's model of papering over VM/container/unikernel via one manifest is substantially what Overdrive §6's `Driver` trait already achieves, but EVE names the abstraction explicitly on the user-facing side. Overdrive currently surfaces `driver = "process" | "microvm" | "vm" | "unikernel" | "wasm"` in the job spec; a unifying name is pure usability.
+2. **Controller-pull configuration model with self-contained config objects** — the device holds the last-known-good and reconciles against it locally. Overdrive's §4 per-region Raft plus §3.5 multi-region doesn't describe a configuration-pull model; for IoT-edge it would need one because Raft replication assumes a quorum.
+3. **TPM-anchored enrollment with bootstrap config via OOB delivery (USB/installer-baked)** — directly answers failure mode #4. EVE's flow is the concrete pattern Overdrive §23 gestures at without specifying.
 
 ### P9. Eclipse ioFog — Eclipse Foundation, fog-computing microservices
 
@@ -241,7 +241,7 @@ An intermediate **Eden** test harness (not a production controller) is widely re
 
 **License.** EPL 2.0, Eclipse Foundation.
 
-**Helios relevance.** Limited. ioFog's most interesting property is the Connector-as-application-overlay pattern (Qpid Dispatch Router is an AMQP-routing overlay — messages flow through named addresses, not through network addresses), but this is a *different* pattern than Helios's SPIFFE-mTLS + XDP LB approach and is tightly bound to AMQP. The project's low maintenance velocity argues against it as a technical reference in 2026.
+**Overdrive relevance.** Limited. ioFog's most interesting property is the Connector-as-application-overlay pattern (Qpid Dispatch Router is an AMQP-routing overlay — messages flow through named addresses, not through network addresses), but this is a *different* pattern than Overdrive's SPIFFE-mTLS + XDP LB approach and is tightly bound to AMQP. The project's low maintenance velocity argues against it as a technical reference in 2026.
 
 ### P10. FogLAMP / LF Edge Fledge — Dianomic origin, industrial data collection
 
@@ -249,7 +249,7 @@ An intermediate **Eden** test harness (not a production controller) is widely re
 
 **Included in this comparison for completeness only.** FogLAMP/Fledge provides protocol-plugin-driven data collection (Modbus, OPC UA, S7, MQTT, historian-specific) and forwarding, plus some on-edge aggregation. It has no notion of workload scheduling, multi-node placement, or cluster orchestration — it is a single-node or per-node runtime that pushes data to a historian or cloud.
 
-**Helios relevance.** None as an orchestrator reference. The one useful observation is that *industrial IoT deployments are typically plugin-driven protocol translators plus data pipelines*, not compute-orchestration workloads — if Helios ever addressed IIoT specifically, it would likely be as a Helios workload (a "fledge driver" running on a Helios edge node) rather than Helios reimplementing FogLAMP.
+**Overdrive relevance.** None as an orchestrator reference. The one useful observation is that *industrial IoT deployments are typically plugin-driven protocol translators plus data pipelines*, not compute-orchestration workloads — if Overdrive ever addressed IIoT specifically, it would likely be as a Overdrive workload (a "fledge driver" running on a Overdrive edge node) rather than Overdrive reimplementing FogLAMP.
 
 **License.** Apache-2.0.
 
@@ -276,10 +276,10 @@ Topology is **hub-and-spoke** via an **OpenVPN tunnel**. Every device establishe
 
 **Scale.** Balena publicly claims management of hundreds of thousands of devices per customer (e.g., Jetson-based fleets); no independently-audited benchmark at a specific scale is published. **Confidence: Low-Medium** on a single hard scale number; **High** on the claim that Balena is deployed at five-to-six-digit device fleets in production.
 
-**Helios relevance.** Three concrete borrow candidates:
-1. **Binary delta updates for container/VM images.** Helios §23 Image Factory roadmaps content-addressed OCI layers but not *delta* updates between versions of the same image. For bandwidth-constrained IoT, deltas are the difference between a 50 MB update that works and a 200 MB update that times out on a cellular link. Whitepaper §23 should note this as a future addition if IoT is reopened.
-2. **OpenVPN-over-TCP-443 or equivalent carrier-NAT-friendly transport.** Helios's QUIC-for-Corrosion approach (§4) assumes UDP-friendly networks. For IoT edge, falling back to a TCP-on-443-only transport is routinely necessary.
-3. **The openBalena / balenaCloud split as a commercial model reference**, not a technical one: the self-hosted OSS version is functional but feature-gapped; the hosted version is where the value accrues. If Helios were ever offered as a hosted edge-IoT SaaS (not current plan), this is the pattern the market expects.
+**Overdrive relevance.** Three concrete borrow candidates:
+1. **Binary delta updates for container/VM images.** Overdrive §23 Image Factory roadmaps content-addressed OCI layers but not *delta* updates between versions of the same image. For bandwidth-constrained IoT, deltas are the difference between a 50 MB update that works and a 200 MB update that times out on a cellular link. Whitepaper §23 should note this as a future addition if IoT is reopened.
+2. **OpenVPN-over-TCP-443 or equivalent carrier-NAT-friendly transport.** Overdrive's QUIC-for-Corrosion approach (§4) assumes UDP-friendly networks. For IoT edge, falling back to a TCP-on-443-only transport is routinely necessary.
+3. **The openBalena / balenaCloud split as a commercial model reference**, not a technical one: the self-hosted OSS version is functional but feature-gapped; the hosted version is where the value accrues. If Overdrive were ever offered as a hosted edge-IoT SaaS (not current plan), this is the pattern the market expects.
 
 **License.** balenaOS: Apache-2.0. openBalena: AGPLv3. balenaCloud: proprietary SaaS.
 
@@ -293,7 +293,7 @@ Topology is **hub-and-spoke** via an **OpenVPN tunnel**. Every device establishe
 
 **NAT traversal.** Ockam explicitly targets devices behind private networks, firewalls, and NAT. Because the secure channel protocol is **transport-agnostic and multi-hop**, a device behind NAT can maintain an outbound connection to a relay, and anything addressable at the Ockam routing layer becomes reachable — even if no single transport connection exists end-to-end.
 
-**Helios relevance.** Helios's built-in CA + SPIFFE SVIDs (§4, §8) covers identity and mTLS **between Helios workloads inside a cluster**. Ockam addresses a different problem: identity and mTLS **across arbitrary transports, including to devices that cannot be in the Helios dataplane** — for example a device that only speaks MQTT to a broker, or that sits behind a firewall that permits no inbound traffic. If Helios ever reopens IoT, Ockam's architecture is the reference for answering "how do I give this constrained device a cryptographically-provable identity that the Helios CA can verify, given it can't speak the Helios sockops/kTLS protocol?" The Ockam pattern — identity layer is decoupled from transport, credentials include proof-of-possession — is directly applicable. SPIFFE Federation is another relevant primitive in the same design space.
+**Overdrive relevance.** Overdrive's built-in CA + SPIFFE SVIDs (§4, §8) covers identity and mTLS **between Overdrive workloads inside a cluster**. Ockam addresses a different problem: identity and mTLS **across arbitrary transports, including to devices that cannot be in the Overdrive dataplane** — for example a device that only speaks MQTT to a broker, or that sits behind a firewall that permits no inbound traffic. If Overdrive ever reopens IoT, Ockam's architecture is the reference for answering "how do I give this constrained device a cryptographically-provable identity that the Overdrive CA can verify, given it can't speak the Overdrive sockops/kTLS protocol?" The Ockam pattern — identity layer is decoupled from transport, credentials include proof-of-possession — is directly applicable. SPIFFE Federation is another relevant primitive in the same design space.
 
 **License.** Apache-2.0 for the core; Ockam Orchestrator (hosted) is proprietary SaaS. Same architectural split as openBalena / balenaCloud.
 
@@ -307,21 +307,21 @@ Both are **transport layers, not orchestrators** — but the IoT-edge conversati
 
 **Key architectural difference.** Nebula's lighthouses are **stateless** relative to which peers can talk to which (that is governed by the fleet CA's signed certificates with embedded group labels). Tailscale's coordination server is **stateful** (holds the ACL map). For orchestration purposes, both expose the same abstraction — every host has a stable identity and can reach every other host the ACL allows, regardless of NAT.
 
-**Helios relevance.** Helios's dataplane (§7 XDP + sockops mTLS) assumes **direct L3 reachability between nodes** — a fair assumption for servers in a datacenter or a region, wrong for IoT over carrier NAT. If Helios ever reopens IoT, one of these two patterns is required as the transport substrate:
-- **Nebula-style hole-punching mesh with fleet CA** — closer to Helios's existing CA model; per-node certs could share a CA with SPIFFE SVIDs.
+**Overdrive relevance.** Overdrive's dataplane (§7 XDP + sockops mTLS) assumes **direct L3 reachability between nodes** — a fair assumption for servers in a datacenter or a region, wrong for IoT over carrier NAT. If Overdrive ever reopens IoT, one of these two patterns is required as the transport substrate:
+- **Nebula-style hole-punching mesh with fleet CA** — closer to Overdrive's existing CA model; per-node certs could share a CA with SPIFFE SVIDs.
 - **Tailscale-style coordination-server + WireGuard + DERP-fallback** — simpler operationally, but introduces a proprietary coordination server dependency unless reimplemented (which is what Headscale does).
 
-The **Nebula lighthouse pattern** is more directly borrowable because it is fully open-source and architecturally aligned with Helios's "per-node cert signed by platform CA" stance. The `helios-replay`/routing header primitives (§11) would compose naturally with a Nebula underlay: requests would flow through the mesh to reach private-network devices.
+The **Nebula lighthouse pattern** is more directly borrowable because it is fully open-source and architecturally aligned with Overdrive's "per-node cert signed by platform CA" stance. The `overdrive-replay`/routing header primitives (§11) would compose naturally with a Nebula underlay: requests would flow through the mesh to reach private-network devices.
 
-**Separate note — Tailscale's `tsnet` library** (with a Rust FFI preview) is the closest example of "embed the overlay inside the orchestrator agent binary," which would let a Helios node agent be simultaneously a Helios node and a Tailscale peer without running a separate daemon — a relevant pattern for the single-binary design principle (whitepaper §2, principle 8).
+**Separate note — Tailscale's `tsnet` library** (with a Rust FFI preview) is the closest example of "embed the overlay inside the orchestrator agent binary," which would let a Overdrive node agent be simultaneously a Overdrive node and a Tailscale peer without running a separate daemon — a relevant pattern for the single-binary design principle (whitepaper §2, principle 8).
 
 **License.** Nebula: MIT. Tailscale client: BSD. Tailscale coordination: proprietary (Headscale is the Apache-2.0 reimplementation).
 
 ### P14. Additional contenders surfaced during search
 
-**SuperEdge (Tencent, CNCF Sandbox-adjacent; not CNCF-donated).** Conceptually between KubeEdge and OpenYurt: non-intrusive to K8s (like OpenYurt) but adds distributed health checks and edge service access control. Uses a `lite-apiserver` on every edge node (per-node K8s API cache, similar to YurtHub). **NodeUnit** and **NodeGroup** primitives group edge nodes for deployment. More complex agent stack than OpenYurt (five edge components vs OpenYurt's three vs KubeEdge's one). [SuperEdge vs OpenYurt vs KubeEdge — LinkedIn analysis](https://www.linkedin.com/pulse/superedge-openyurt-extending-native-kubernetes-edge-gokul-chandra); academic review [MDPI Sensors 2023](https://pmc.ncbi.nlm.nih.gov/articles/PMC9967903/) (Accessed 2026-04-19) lists it alongside KubeEdge, OpenYurt, Open Horizon, Baetyl, Flotta, Eclipse ioFog. **Helios relevance: minor** — mostly redundant with OpenYurt and KubeEdge lessons.
+**SuperEdge (Tencent, CNCF Sandbox-adjacent; not CNCF-donated).** Conceptually between KubeEdge and OpenYurt: non-intrusive to K8s (like OpenYurt) but adds distributed health checks and edge service access control. Uses a `lite-apiserver` on every edge node (per-node K8s API cache, similar to YurtHub). **NodeUnit** and **NodeGroup** primitives group edge nodes for deployment. More complex agent stack than OpenYurt (five edge components vs OpenYurt's three vs KubeEdge's one). [SuperEdge vs OpenYurt vs KubeEdge — LinkedIn analysis](https://www.linkedin.com/pulse/superedge-openyurt-extending-native-kubernetes-edge-gokul-chandra); academic review [MDPI Sensors 2023](https://pmc.ncbi.nlm.nih.gov/articles/PMC9967903/) (Accessed 2026-04-19) lists it alongside KubeEdge, OpenYurt, Open Horizon, Baetyl, Flotta, Eclipse ioFog. **Overdrive relevance: minor** — mostly redundant with OpenYurt and KubeEdge lessons.
 
-**Baetyl (Baidu origin, LF Edge).** Baetyl 2.0 adopts a cloud-native model and runs on vanilla K8s or K3s. Positions itself as an edge framework offering device connection, message routing, function compute, AI inference, video capture, and OTA status reporting. [LF Edge — Baetyl 2.0](https://lfedge.org/baetyl-2-0/) (Accessed 2026-04-19). **Helios relevance: minor** — a K8s consumer like OpenYurt; does not introduce new primitives of interest.
+**Baetyl (Baidu origin, LF Edge).** Baetyl 2.0 adopts a cloud-native model and runs on vanilla K8s or K3s. Positions itself as an edge framework offering device connection, message routing, function compute, AI inference, video capture, and OTA status reporting. [LF Edge — Baetyl 2.0](https://lfedge.org/baetyl-2-0/) (Accessed 2026-04-19). **Overdrive relevance: minor** — a K8s consumer like OpenYurt; does not introduce new primitives of interest.
 
 **Open Horizon (IBM origin, LF Edge).** Included for completeness; an edge agent + management hub model with a focus on autonomous agreement protocols (the "policy-based pattern" approach to deployment). Less prominent than KubeEdge/K3s in current deployments.
 
@@ -350,9 +350,9 @@ The **Nebula lighthouse pattern** is more directly borrowable because it is full
 | Ockam | any (transport-agnostic) | Multi-hop routing; no topology constraint |
 | Nebula | peer-to-peer mesh + lighthouse | Lighthouses for rendezvous; direct peer when possible |
 | Tailscale | peer-to-peer mesh + coordination | Coordination server stateful; DERP relay fallback |
-| **Helios today** | **peer mesh (Corrosion + SWIM)** | Regional mesh, Raft for intent |
+| **Overdrive today** | **peer mesh (Corrosion + SWIM)** | Regional mesh, Raft for intent |
 
-**Summary.** Every IoT-focused orchestrator in the landscape uses **hub-and-spoke** or **two-tier hierarchical** topology. None uses peer gossip among leaf devices. This is the first-order confirmation of failure mode #1: at IoT-edge fleet size, peer mesh is not the architectural answer — a central aggregator or a hierarchical tier is. Helios's Corrosion substrate is well-shaped for servers and edge-compute but structurally different from every IoT-edge incumbent.
+**Summary.** Every IoT-focused orchestrator in the landscape uses **hub-and-spoke** or **two-tier hierarchical** topology. None uses peer gossip among leaf devices. This is the first-order confirmation of failure mode #1: at IoT-edge fleet size, peer mesh is not the architectural answer — a central aggregator or a hierarchical tier is. Overdrive's Corrosion substrate is well-shaped for servers and edge-compute but structurally different from every IoT-edge incumbent.
 
 ### A2. Management-plane transports
 
@@ -369,9 +369,9 @@ The **Nebula lighthouse pattern** is more directly borrowable because it is full
 | Ockam | any transport, multi-hop | Yes by design |
 | Nebula | WireGuard over UDP + hole-punching | Yes via lighthouse-coordinated punching |
 | Tailscale | WireGuard over UDP + STUN/DERP | Yes; DERP relay when UDP blocked |
-| **Helios today** | QUIC (Corrosion), gRPC/HTTP (control) | **No — assumes UDP reachability between peers** |
+| **Overdrive today** | QUIC (Corrosion), gRPC/HTTP (control) | **No — assumes UDP reachability between peers** |
 
-**Summary.** The dominant pattern is **outbound-initiated long-lived tunnel** (KubeEdge WebSocket, K3s WebSocket, Balena OpenVPN, Greengrass/Azure MQTT). This directly solves failure mode #2 (NAT). Helios's Corrosion-over-QUIC assumes UDP reachability, which is routinely blocked on enterprise networks and carrier NAT — this is the single most fundamental technical reason IoT-edge was scoped out of v1. Peer-to-peer mesh overlays (Nebula, Tailscale) are the alternative path; hub-and-spoke tunnels are simpler to operate.
+**Summary.** The dominant pattern is **outbound-initiated long-lived tunnel** (KubeEdge WebSocket, K3s WebSocket, Balena OpenVPN, Greengrass/Azure MQTT). This directly solves failure mode #2 (NAT). Overdrive's Corrosion-over-QUIC assumes UDP reachability, which is routinely blocked on enterprise networks and carrier NAT — this is the single most fundamental technical reason IoT-edge was scoped out of v1. Peer-to-peer mesh overlays (Nebula, Tailscale) are the alternative path; hub-and-spoke tunnels are simpler to operate.
 
 ### A3. Enrollment and zero-touch provisioning patterns
 
@@ -383,7 +383,7 @@ Five patterns observed across the landscape:
 4. **TPM-anchored device identity with bootstrap config via OOB delivery** — device certificate is TPM-backed; bootstrap config (controller endpoint, fleet ID) is baked into the installer image or delivered via USB at install time. **EVE-OS.** Strongest hardware root of trust in this landscape.
 5. **Identity toolkit — cryptographic proof-of-possession with transport-agnostic enrollment** — the identity layer is decoupled from transport; keys generated on-device; public halves registered centrally. **Ockam.** Structurally orthogonal to the others; used alongside any of them.
 
-**Summary.** For factory-flashed images, **patterns 2–4 are the only viable answers**. Helios whitepaper §23 gestures at pattern 4 (TPM attestation in the Phase 2 Image Factory roadmap) but does not specify the rendezvous protocol. If Helios reopens IoT, a DPS-equivalent global rendezvous service is the piece that is missing from the current whitepaper.
+**Summary.** For factory-flashed images, **patterns 2–4 are the only viable answers**. Overdrive whitepaper §23 gestures at pattern 4 (TPM attestation in the Phase 2 Image Factory roadmap) but does not specify the rendezvous protocol. If Overdrive reopens IoT, a DPS-equivalent global rendezvous service is the piece that is missing from the current whitepaper.
 
 ### A4. NAT and intermittent-connectivity handling
 
@@ -396,7 +396,7 @@ The dominant pattern is **outbound tunnel + local cache + eventual-replay**. Spe
 - **EVE-OS:** Device continues on last-known-good config; periodic pull attempts; controller change only takes effect on next successful pull.
 - **Balena:** Supervisor continues running existing containers; logs buffered; new releases downloaded on reconnect with resumable delta.
 
-**Common principle:** the edge node's autonomy is not an emergent property; it is an explicit design primitive with a specific component responsible for it (MetaManager, YurtHub, Stream Manager, device twin, supervisor). Helios has edge-node autonomy at the **region** level (§3.5) but not at the **node** level — a missing component if IoT is ever a goal.
+**Common principle:** the edge node's autonomy is not an emergent property; it is an explicit design primitive with a specific component responsible for it (MetaManager, YurtHub, Stream Manager, device twin, supervisor). Overdrive has edge-node autonomy at the **region** level (§3.5) but not at the **node** level — a missing component if IoT is ever a goal.
 
 ### A5. Workload models and isolation
 
@@ -411,9 +411,9 @@ The dominant pattern is **outbound tunnel + local cache + eventual-replay**. Spe
 | EVE-OS | **yes** | **yes** | **yes** | no (Type-1 HV, no host POSIX) | no | no |
 | Balena | **yes** (balenaEngine) | no | no | no | no | no |
 | ioFog | yes | no | no | no | no | no |
-| **Helios today** | **yes** (via drivers) | **yes** | **yes** | **yes** | **yes** | N/A |
+| **Overdrive today** | **yes** (via drivers) | **yes** | **yes** | **yes** | **yes** | N/A |
 
-**Summary.** Only **EVE-OS** matches Helios's workload-type breadth (VMs + containers + unikernels) in the IoT-edge space. **AWS Greengrass** matches Helios's containers-plus-processes support but adds Lambda rather than VMs. Every K8s-based IoT platform is containers-only. This is the strongest workload-model differentiator in Helios's favor if it ever re-enters this market.
+**Summary.** Only **EVE-OS** matches Overdrive's workload-type breadth (VMs + containers + unikernels) in the IoT-edge space. **AWS Greengrass** matches Overdrive's containers-plus-processes support but adds Lambda rather than VMs. Every K8s-based IoT platform is containers-only. This is the strongest workload-model differentiator in Overdrive's favor if it ever re-enters this market.
 
 ### A6. Licensing and commercial shape
 
@@ -441,7 +441,7 @@ The dominant pattern is **outbound tunnel + local cache + eventual-replay**. Spe
 
 ---
 
-## Relevance to Helios
+## Relevance to Overdrive
 
 ### Customer-facing recommendation matrix (the "if they ask us" answer)
 
@@ -449,7 +449,7 @@ The dominant pattern is **outbound tunnel + local cache + eventual-replay**. Spe
 |---|---|
 | "I have 50 industrial gateways at 50 sites, each with a few sensors" | **K3s + Rancher Fleet** (many-small-clusters, GitOps fleet mgmt). Or **OpenYurt** if they want one logical cluster. |
 | "I have 10,000+ devices, want open source, no AWS lock-in" | **KubeEdge** (published 100k scale + independent production reference — Hong Kong–Zhuhai–Macao bridge, 100k+ monitoring devices per academic review) |
-| "I have mixed container/VM/unikernel at the edge, strong security posture required" | **EVE-OS + Adam (OSS) or ZEDEDA (commercial)** — closest architectural cousin to Helios |
+| "I have mixed container/VM/unikernel at the edge, strong security posture required" | **EVE-OS + Adam (OSS) or ZEDEDA (commercial)** — closest architectural cousin to Overdrive |
 | "We're all-in on AWS, need Lambda at the edge" | **AWS IoT Greengrass V2** — vendor-locked but feature-complete, TPM-bindable |
 | "We're all-in on Azure, need device-twin model" | **Azure IoT Edge + DPS** — vendor-locked; nested-edge for hierarchical |
 | "I want to manage fleets of Docker containers on ARM devices, bandwidth-constrained" | **Balena (balenaCloud preferred; openBalena if self-hosted)** — delta updates are the killer feature |
@@ -458,36 +458,36 @@ The dominant pattern is **outbound tunnel + local cache + eventual-replay**. Spe
 | "I need to integrate industrial sensors (Modbus, OPC UA) with cloud historians" | **LF Edge Fledge (FogLAMP)** — this is a data pipeline, not an orchestrator |
 | "I need Kubernetes device discovery for cameras/USB/industrial" | **Akri** on top of any K8s |
 
-### Primitives worth borrowing if Helios ever reopens IoT
+### Primitives worth borrowing if Overdrive ever reopens IoT
 
 In priority order based on architectural fit and gap-filling value:
 
-**1. Outbound-only WebSocket tunnel (or QUIC fallback over TCP/443) for the management plane — directly solves failure mode #2.** Pattern source: KubeEdge CloudHub/EdgeHub, K3s agent tunnel, Balena OpenVPN. Helios implication: a third transport mode alongside Corrosion (peer mesh) and gRPC (control plane streaming) — a "tunneled observation" mode where an edge node speaks only outbound to a regional aggregator, which then proxies the node's observation rows into the regional ObservationStore on its behalf. Helios whitepaper §4 is silent on this; it is the single highest-impact addition.
+**1. Outbound-only WebSocket tunnel (or QUIC fallback over TCP/443) for the management plane — directly solves failure mode #2.** Pattern source: KubeEdge CloudHub/EdgeHub, K3s agent tunnel, Balena OpenVPN. Overdrive implication: a third transport mode alongside Corrosion (peer mesh) and gRPC (control plane streaming) — a "tunneled observation" mode where an edge node speaks only outbound to a regional aggregator, which then proxies the node's observation rows into the regional ObservationStore on its behalf. Overdrive whitepaper §4 is silent on this; it is the single highest-impact addition.
 
-**2. Global rendezvous + attestation-based enrollment — directly solves failure modes #3 and #4.** Pattern source: Azure DPS (strongest), AWS Fleet Provisioning, EVE-OS bootstrap config. Helios implication: §23 (Image Factory) currently roadmaps "dm-verity + TPM attestation + Secure Boot" in Phase 2 but does not describe a rendezvous protocol. A device should ship with an image that knows only a well-known endpoint like `rendezvous.helios.local` and a TPM-sealed attestation credential; the rendezvous service routes it to its eventual regional control plane. This is the piece Helios §23 is missing and the architectural shape is well-established across three major platforms.
+**2. Global rendezvous + attestation-based enrollment — directly solves failure modes #3 and #4.** Pattern source: Azure DPS (strongest), AWS Fleet Provisioning, EVE-OS bootstrap config. Overdrive implication: §23 (Image Factory) currently roadmaps "dm-verity + TPM attestation + Secure Boot" in Phase 2 but does not describe a rendezvous protocol. A device should ship with an image that knows only a well-known endpoint like `rendezvous.overdrive.local` and a TPM-sealed attestation credential; the rendezvous service routes it to its eventual regional control plane. This is the piece Overdrive §23 is missing and the architectural shape is well-established across three major platforms.
 
-**3. Device-twin reported-vs-desired reconciliation at the leaf — directly fits Helios's existing reconciler model.** Pattern source: Azure IoT Hub device twin, KubeEdge DeviceTwin. Helios implication: Helios's §18 reconciler trait `reconcile(desired, actual, db) → Vec<Action>` is *already* the right shape for per-device reconciliation. The intent/observation split (§4) maps cleanly: desired is intent (Raft), reported is observation (but per-device, not SWIM-gossiped — a durable per-device row written via the outbound tunnel). This is the one pattern where Helios's existing architecture is **structurally ready** for IoT and requires mostly a new transport, not new primitives.
+**3. Device-twin reported-vs-desired reconciliation at the leaf — directly fits Overdrive's existing reconciler model.** Pattern source: Azure IoT Hub device twin, KubeEdge DeviceTwin. Overdrive implication: Overdrive's §18 reconciler trait `reconcile(desired, actual, db) → Vec<Action>` is *already* the right shape for per-device reconciliation. The intent/observation split (§4) maps cleanly: desired is intent (Raft), reported is observation (but per-device, not SWIM-gossiped — a durable per-device row written via the outbound tunnel). This is the one pattern where Overdrive's existing architecture is **structurally ready** for IoT and requires mostly a new transport, not new primitives.
 
-**4. Two-tier hierarchical topology (gateway tier + leaf tier).** Pattern source: AWS Greengrass (core device + client device), KubeEdge Mapper, Akri broker. Helios implication: if Helios must ever support MCU-class devices, the architectural answer is explicitly **not** to run a Helios node agent on the MCU — it is to run a Helios node on a gateway (which participates normally in the Helios cluster) and model leaf devices as owned resources of that gateway. This is identical to how Akri's broker pattern works.
+**4. Two-tier hierarchical topology (gateway tier + leaf tier).** Pattern source: AWS Greengrass (core device + client device), KubeEdge Mapper, Akri broker. Overdrive implication: if Overdrive must ever support MCU-class devices, the architectural answer is explicitly **not** to run a Overdrive node agent on the MCU — it is to run a Overdrive node on a gateway (which participates normally in the Overdrive cluster) and model leaf devices as owned resources of that gateway. This is identical to how Akri's broker pattern works.
 
-**5. Per-node cached-API-proxy for edge autonomy.** Pattern source: OpenYurt YurtHub. Helios implication: Helios's §3.5 region-level autonomy is coarse; a YurtHub-equivalent per-node cache of the regional Raft leader's decisions relevant to that node would allow individual nodes to continue operating through regional partitions, not just region-to-region partitions. This composes with #1 above — a tunneled edge node *is* a node with a cached proxy by definition.
+**5. Per-node cached-API-proxy for edge autonomy.** Pattern source: OpenYurt YurtHub. Overdrive implication: Overdrive's §3.5 region-level autonomy is coarse; a YurtHub-equivalent per-node cache of the regional Raft leader's decisions relevant to that node would allow individual nodes to continue operating through regional partitions, not just region-to-region partitions. This composes with #1 above — a tunneled edge node *is* a node with a cached proxy by definition.
 
-**6. Binary delta updates for container/VM/unikernel images.** Pattern source: Balena's balenaEngine + container deltas (reported 10–70× bandwidth savings). Helios implication: §23 Image Factory's content-addressed OCI registry is already a foundation for this; adding binary deltas between versions of the same content-addressed image is a well-understood extension (bsdiff, zchunk, or casync/desync-style chunked refs).
+**6. Binary delta updates for container/VM/unikernel images.** Pattern source: Balena's balenaEngine + container deltas (reported 10–70× bandwidth savings). Overdrive implication: §23 Image Factory's content-addressed OCI registry is already a foundation for this; adding binary deltas between versions of the same content-addressed image is a well-understood extension (bsdiff, zchunk, or casync/desync-style chunked refs).
 
-**7. Secure-channel identity toolkit for off-cluster workloads.** Pattern source: Ockam, SPIFFE Federation. Helios implication: Helios's built-in CA (§4) already issues SPIFFE SVIDs. For IoT leaves that cannot participate in sockops/kTLS, a separate identity path that issues a provably-Helios-signed credential over an arbitrary transport (MQTT, HTTPS, Bluetooth) is a known pattern.
+**7. Secure-channel identity toolkit for off-cluster workloads.** Pattern source: Ockam, SPIFFE Federation. Overdrive implication: Overdrive's built-in CA (§4) already issues SPIFFE SVIDs. For IoT leaves that cannot participate in sockops/kTLS, a separate identity path that issues a provably-Overdrive-signed credential over an arbitrary transport (MQTT, HTTPS, Bluetooth) is a known pattern.
 
-**8. A/B rootfs partitioning with boot-health rollback.** Pattern source: Balena, Talos, EVE-OS. Helios implication: §23 roadmaps "node upgrade via OCI registry pull" for Phase 2 — the Balena/Talos A/B rollback model is the concrete implementation to adopt. Not IoT-specific, but particularly important when field devices are unreachable for manual recovery.
+**8. A/B rootfs partitioning with boot-health rollback.** Pattern source: Balena, Talos, EVE-OS. Overdrive implication: §23 roadmaps "node upgrade via OCI registry pull" for Phase 2 — the Balena/Talos A/B rollback model is the concrete implementation to adopt. Not IoT-specific, but particularly important when field devices are unreachable for manual recovery.
 
 ### What the research confirms about the v1 scope-out decision
 
-Every finding in this document supports the 2026-04-19 decision to scope IoT edge out of Helios v1:
+Every finding in this document supports the 2026-04-19 decision to scope IoT edge out of Overdrive v1:
 
-- **Failure mode #1 (SWIM fan-out)** — No IoT-edge platform uses peer gossip at leaf scale. The universal answer is hub-and-spoke aggregation. Helios's Corrosion substrate is well-shaped for servers and regional edge-compute; it is the wrong shape for 100k+ devices.
-- **Failure mode #2 (NAT)** — Every IoT-edge platform uses outbound-initiated tunnels. Helios's Corrosion-over-QUIC assumes UDP reachability and does not have a tunneled-observation path.
-- **Failure mode #3 (static seed lists)** — The industry-standard answer is a global rendezvous service. Helios does not have this primitive.
-- **Failure mode #4 (enrollment protocol)** — The industry-standard answers are DPS-like attestation services or claim-cert exchange flows. Helios §23 roadmaps the attestation chain but not the enrollment protocol.
+- **Failure mode #1 (SWIM fan-out)** — No IoT-edge platform uses peer gossip at leaf scale. The universal answer is hub-and-spoke aggregation. Overdrive's Corrosion substrate is well-shaped for servers and regional edge-compute; it is the wrong shape for 100k+ devices.
+- **Failure mode #2 (NAT)** — Every IoT-edge platform uses outbound-initiated tunnels. Overdrive's Corrosion-over-QUIC assumes UDP reachability and does not have a tunneled-observation path.
+- **Failure mode #3 (static seed lists)** — The industry-standard answer is a global rendezvous service. Overdrive does not have this primitive.
+- **Failure mode #4 (enrollment protocol)** — The industry-standard answers are DPS-like attestation services or claim-cert exchange flows. Overdrive §23 roadmaps the attestation chain but not the enrollment protocol.
 
-The scope-out was correct. Re-opening would require additions 1–5 above as a minimum, all of which are substantial features with their own design space — not bolt-ons to the existing whitepaper. Re-opening would be reasonable only if a concrete IoT-edge customer and requirements set materialises; the current v1 focus (servers + edge-compute, tens to hundreds of nodes per region) remains consistent with Helios's architectural strengths.
+The scope-out was correct. Re-opening would require additions 1–5 above as a minimum, all of which are substantial features with their own design space — not bolt-ons to the existing whitepaper. Re-opening would be reasonable only if a concrete IoT-edge customer and requirements set materialises; the current v1 focus (servers + edge-compute, tens to hundreds of nodes per region) remains consistent with Overdrive's architectural strengths.
 
 ---
 
@@ -519,7 +519,7 @@ The scope-out was correct. Re-opening would require additions 1–5 above as a m
 | Dianomic — FogLAMP | dianomic.com | Medium | vendor | 2026-04-19 | Y (LF Edge Fledge) |
 | SuperEdge vs OpenYurt vs KubeEdge | linkedin.com | Medium | secondary | 2026-04-19 | Y (academic) |
 | CNCF blog — KubeEdge getting started | cncf.io | High | OSS foundation | 2026-04-19 | Y |
-| Helios whitepaper §4, §18, §23 | local (docs/whitepaper.md) | High | authoritative (SSOT) | 2026-04-19 | N/A |
+| Overdrive whitepaper §4, §18, §23 | local (docs/whitepaper.md) | High | authoritative (SSOT) | 2026-04-19 | N/A |
 
 **Reputation distribution:** High: 19 (~76%). Medium-High: 1 (~4%). Medium: 5 (~20%). Average reputation: ~0.89 — weighted toward official project docs and vendor-authoritative sources.
 
@@ -539,11 +539,11 @@ The scope-out was correct. Re-opening would require additions 1–5 above as a m
 
 ### Gap 3: No hands-on benchmarking
 
-**Issue:** This is a document-review study; no platform was installed and measured. Claims about resource footprint, enrollment latency, update bandwidth, and offline convergence time are all taken from vendor docs or the academic review. **Recommendation:** If Helios reopens IoT, a targeted benchmark of 2–3 platforms (KubeEdge, EVE-OS, AWS Greengrass) at 1000-device scale would de-risk the primitive-borrow decisions in the Helios-relevance section.
+**Issue:** This is a document-review study; no platform was installed and measured. Claims about resource footprint, enrollment latency, update bandwidth, and offline convergence time are all taken from vendor docs or the academic review. **Recommendation:** If Overdrive reopens IoT, a targeted benchmark of 2–3 platforms (KubeEdge, EVE-OS, AWS Greengrass) at 1000-device scale would de-risk the primitive-borrow decisions in the Overdrive-relevance section.
 
 ### Gap 4: Ockam and SPIFFE Federation integration details
 
-**Issue:** Ockam's secure channel protocol is well-documented at the conceptual level, but the integration with SPIFFE Federation (which is the likely Helios-alignment path) is not spelled out in either project's docs. If recommendation P12 (#7 in relevance priorities) is pursued, a dedicated research cycle on SPIFFE Federation + Ockam compatibility is warranted.
+**Issue:** Ockam's secure channel protocol is well-documented at the conceptual level, but the integration with SPIFFE Federation (which is the likely Overdrive-alignment path) is not spelled out in either project's docs. If recommendation P12 (#7 in relevance priorities) is pursued, a dedicated research cycle on SPIFFE Federation + Ockam compatibility is warranted.
 
 ### Gap 5: Current maintenance status of older projects
 
@@ -551,7 +551,7 @@ The scope-out was correct. Re-opening would require additions 1–5 above as a m
 
 ### Gap 6: Nested edge and hierarchical fan-out
 
-**Issue:** Azure IoT Edge supports a "nested edge" topology (downstream Edge devices connect upstream to parent Edge devices, for multi-tier fan-out through network segments). This was not deeply investigated and may be the most direct architectural answer to Helios's failure mode #1 at IoT scale — hierarchical fan-out rather than flat aggregation. **Recommendation:** Targeted follow-up on Azure nested edge and KubeEdge's EdgeSite pattern if hierarchical topology becomes a design consideration.
+**Issue:** Azure IoT Edge supports a "nested edge" topology (downstream Edge devices connect upstream to parent Edge devices, for multi-tier fan-out through network segments). This was not deeply investigated and may be the most direct architectural answer to Overdrive's failure mode #1 at IoT scale — hierarchical fan-out rather than flat aggregation. **Recommendation:** Targeted follow-up on Azure nested edge and KubeEdge's EdgeSite pattern if hierarchical topology becomes a design consideration.
 
 ---
 
@@ -575,15 +575,15 @@ The landscape is architecturally diverse but internally consistent per-platform 
 
 1. **Targeted scale benchmark** — if an IoT-edge customer opportunity materialises, install KubeEdge + EVE-OS + AWS Greengrass at 1000 simulated devices (nested containers or Firecracker microVMs on a single host) and measure control-plane CPU/RAM/bandwidth, enrollment time, rolling-update bandwidth, and offline-reconnect convergence time. One week of engineering effort is enough to de-risk a primitive-borrow decision.
 
-2. **Azure DPS protocol deep dive** — if Helios reopens IoT, the rendezvous-plus-attestation pattern is the single largest whitepaper addition. Reconstruct the DPS MQTT API, claim-cert-exchange flow, and TPM EK verification chain as a design doc for a "helios-rendezvous" service. AWS Fleet Provisioning as secondary reference; EVE-OS Adam as an open-source implementation reference.
+2. **Azure DPS protocol deep dive** — if Overdrive reopens IoT, the rendezvous-plus-attestation pattern is the single largest whitepaper addition. Reconstruct the DPS MQTT API, claim-cert-exchange flow, and TPM EK verification chain as a design doc for a "overdrive-rendezvous" service. AWS Fleet Provisioning as secondary reference; EVE-OS Adam as an open-source implementation reference.
 
 3. **KubeEdge EdgeMesh + SuperEdge distributed health check** — both address edge-site-local service discovery for intermittent deployments (a fleet of devices at the same site should route locally even when the cloud link is down). Not in scope for this scouting study but a natural follow-up.
 
-4. **OpenYurt YurtHub as a design reference for per-node Intent-cache** — if Helios ever implements per-node (not just per-region) autonomy, YurtHub's implementation of "proxy that serves from disk cache during cloud disconnect" is the clearest prior art.
+4. **OpenYurt YurtHub as a design reference for per-node Intent-cache** — if Overdrive ever implements per-node (not just per-region) autonomy, YurtHub's implementation of "proxy that serves from disk cache during cloud disconnect" is the clearest prior art.
 
-5. **Binary delta update format selection** — Balena uses a proprietary-ish docker-delta; alternatives include casync/desync (content-addressed chunked refs), zchunk (Fedora), bsdiff (classic). A focused comparison for the Helios Image Factory (§23) would inform whether this is a Phase 3 item.
+5. **Binary delta update format selection** — Balena uses a proprietary-ish docker-delta; alternatives include casync/desync (content-addressed chunked refs), zchunk (Fedora), bsdiff (classic). A focused comparison for the Overdrive Image Factory (§23) would inform whether this is a Phase 3 item.
 
-6. **SPIFFE Federation + Ockam composition** — the off-cluster-identity story. How would a Helios cluster federate trust with devices that cannot run the Helios node agent but can run an Ockam identity client?
+6. **SPIFFE Federation + Ockam composition** — the off-cluster-identity story. How would a Overdrive cluster federate trust with devices that cannot run the Overdrive node agent but can run an Ockam identity client?
 
 ---
 
@@ -614,7 +614,7 @@ The landscape is architecturally diverse but internally consistent per-platform 
 [23] Dianomic Systems. "FogLAMP Architecture Plugins." https://dianomic.com/platform/foglamp/architecture-plugins/ — Accessed 2026-04-19.
 [24] Chandra, G. "SuperEdge, OpenYurt - Extending Native Kubernetes to Edge." LinkedIn. https://www.linkedin.com/pulse/superedge-openyurt-extending-native-kubernetes-edge-gokul-chandra — Accessed 2026-04-19.
 [25] Alibaba Cloud. "OpenYurt: The Practice of Extending Native Kubernetes to the Edge." https://www.alibabacloud.com/blog/openyurt-the-practice-of-extending-native-kubernetes-to-the-edge_597903 — Accessed 2026-04-19.
-[26] Helios Project. "Helios Whitepaper v0.12 — Draft." `docs/whitepaper.md` in repo — §4 (Control Plane, Corrosion), §18 (Reconciler Model), §23 (Image Factory). Accessed 2026-04-19.
+[26] Overdrive Project. "Overdrive Whitepaper v0.12 — Draft." `docs/whitepaper.md` in repo — §4 (Control Plane, Corrosion), §18 (Reconciler Model), §23 (Image Factory). Accessed 2026-04-19.
 
 ---
 
@@ -630,4 +630,4 @@ The landscape is architecturally diverse but internally consistent per-platform 
 
 **Tool failures:** `docs.balena.io/reference/OS/overview` 404; `eve-os.readthedocs.io` 403; `iofog.org/docs/3.0.0/...` 404; `docs.openziti.io` redirect to netfoundry.io (not pursued — wrong product). Mitigated via GitHub-hosted READMEs and independent comparison sources in all four cases. Research output not materially affected.
 
-**Output:** `/Users/marcus/conductor/workspaces/helios/taipei-v1/docs/research/orchestration/iot-edge-orchestrators-research.md`
+**Output:** `/Users/marcus/conductor/workspaces/overdrive/taipei-v1/docs/research/orchestration/iot-edge-orchestrators-research.md`

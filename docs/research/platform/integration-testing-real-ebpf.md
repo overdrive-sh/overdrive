@@ -6,7 +6,7 @@
 
 **Claim.** The eBPF-heavy orchestrator ecosystem (Cilium, Tetragon, kernel-patches/bpf, aya, Falco) has converged on a layered integration-testing pattern that complements deterministic simulation testing (DST) without substituting for it. The shape is: (1) in-process DST for control-plane logic; (2) BPF unit tests via `BPF_PROG_TEST_RUN` for program-level correctness; (3) real-kernel integration in QEMU (`little-vm-helper` in CI, `virtme-ng` on developer laptops) against an LTS kernel matrix; (4) verifier-complexity + perf regression gates using `veristat` and `xdp-bench`. Each tier catches bug classes the others cannot.
 
-**Conclusion for Helios.** The whitepaper §21 DST strategy is sound and does not need to change. The gap to close is a new §21.5 covering tiers 2–4. The recommended kernel matrix is 5.10, 5.15, 6.1, 6.6, and current LTS, plus `bpf-next` nightly soft-fail; the recommended CI harness is `little-vm-helper` with aya's own `cargo xtask integration-test vm` as the entry point; the recommended fault-injection substrate is `tc qdisc netem` on veth pairs inside those VMs. Every Helios-specific kernel primitive — XDP SERVICE_MAP atomicity, sockops+kTLS installation, BPF LSM denial semantics, and per-program verifier complexity — has a canonical test pattern in at least one reference project (Cilium, Tetragon, or the kernel's own selftests).
+**Conclusion for Overdrive.** The whitepaper §21 DST strategy is sound and does not need to change. The gap to close is a new §21.5 covering tiers 2–4. The recommended kernel matrix is 5.10, 5.15, 6.1, 6.6, and current LTS, plus `bpf-next` nightly soft-fail; the recommended CI harness is `little-vm-helper` with aya's own `cargo xtask integration-test vm` as the entry point; the recommended fault-injection substrate is `tc qdisc netem` on veth pairs inside those VMs. Every Overdrive-specific kernel primitive — XDP SERVICE_MAP atomicity, sockops+kTLS installation, BPF LSM denial semantics, and per-program verifier complexity — has a canonical test pattern in at least one reference project (Cilium, Tetragon, or the kernel's own selftests).
 
 **Confidence.** High. Every major recommendation is backed by at least two independent production deployments of the same pattern, and the primary-source artefacts (Cilium `bpf/tests/`, Tetragon `tests/vmtests`, aya `test/integration-test`, `kernel-patches/vmtest`, `tools/testing/selftests/bpf/README.rst`) are all publicly readable.
 
@@ -45,7 +45,7 @@
 **Source**: [kernel.org — tools/testing/selftests/bpf/README.rst](https://www.kernel.org/doc/readme/tools-testing-selftests-bpf-README.rst) - Accessed 2026-04-19
 **Confidence**: High
 **Verification**: [torvalds/linux — selftests/bpf README](https://github.com/torvalds/linux/blob/master/tools/testing/selftests/bpf/README.rst), [eBPF Foundation — Improving the eBPF tests in the kernel](https://ebpf.foundation/improving-the-ebpf-tests-in-the-kernel/)
-**Analysis**: The kernel's own framework is the reference implementation. Separate runners exist for specialised concerns: `test_maps` (map semantics), `test_verifier` (per-program verifier regressions), `veristat` (static statistics on verifier pass/complexity across a corpus). Helios should mirror this split, especially for verifier regressions.
+**Analysis**: The kernel's own framework is the reference implementation. Separate runners exist for specialised concerns: `test_maps` (map semantics), `test_verifier` (per-program verifier regressions), `veristat` (static statistics on verifier pass/complexity across a corpus). Overdrive should mirror this split, especially for verifier regressions.
 
 ### Finding 4: Aya's `integration-test` crate loads real eBPF programs into kernels spun up via QEMU and asserts on real kernel state
 
@@ -54,7 +54,7 @@
 **Source**: [aya-rs/aya — /test directory](https://github.com/aya-rs/aya/tree/main/test) - Accessed 2026-04-19
 **Confidence**: High
 **Verification**: [aya-rs/aya main README](https://github.com/aya-rs/aya), [aya-rs.dev book](https://aya-rs.dev/book/)
-**Analysis**: This is the most directly relevant pattern for Helios because Helios uses aya. The `xtask integration-test vm` command, pointed at multiple kernel archives, is the aya-native way to build a kernel matrix. Helios can lean on aya's existing test crate structure rather than invent its own.
+**Analysis**: This is the most directly relevant pattern for Overdrive because Overdrive uses aya. The `xtask integration-test vm` command, pointed at multiple kernel archives, is the aya-native way to build a kernel matrix. Overdrive can lean on aya's existing test crate structure rather than invent its own.
 
 ### Finding 5: `little-vm-helper` (LVH) is Cilium's QEMU-based runner for kernel-matrix testing, with purpose-built OCI kernel images
 
@@ -72,7 +72,7 @@
 **Source**: [oldvger.kernel.org — How BPF CI works? (LSFMM+BPF 2022)](http://oldvger.kernel.org/bpfconf2022_material/lsfmmbpf2022-bpf-ci.pdf) - Accessed 2026-04-19
 **Confidence**: High
 **Verification**: [kernel-patches/bpf GitHub](https://github.com/kernel-patches/bpf), [kernel-patches/vmtest GitHub](https://github.com/kernel-patches/vmtest), [LWN — An update on continuous testing of BPF kernel patches](https://lwn.net/Articles/1020266/)
-**Analysis**: The existence of a well-maintained upstream pattern means Helios does not need to invent CI shape. A Helios CI should take the exact structure: GitHub Actions, QEMU-based VMs per kernel, matrix of kernel versions, `veristat`-style complexity checks on the full program corpus.
+**Analysis**: The existence of a well-maintained upstream pattern means Overdrive does not need to invent CI shape. A Overdrive CI should take the exact structure: GitHub Actions, QEMU-based VMs per kernel, matrix of kernel versions, `veristat`-style complexity checks on the full program corpus.
 
 ### Finding 8: Tetragon's `tests/vmtests` is a canonical example of BPF-LSM integration testing on a kernel matrix
 
@@ -81,7 +81,7 @@
 **Source**: [cilium/tetragon — tests/vmtests](https://github.com/cilium/tetragon/tree/main/tests/vmtests) - Accessed 2026-04-19
 **Confidence**: High
 **Verification**: [cilium/tetragon main repo](https://github.com/cilium/tetragon), [Tetragon docs — FAQ](https://tetragon.io/docs/installation/faq/)
-**Analysis**: Tetragon is the most widely-deployed open-source project exercising `BPF_PROG_TYPE_LSM` (e.g. the fix "ensuring lsm programs return bounded values"). Its vmtests directory is the best concrete template for Helios' BPF LSM test harness — small, Go-based, LVH-integrated, nested-virt-aware.
+**Analysis**: Tetragon is the most widely-deployed open-source project exercising `BPF_PROG_TYPE_LSM` (e.g. the fix "ensuring lsm programs return bounded values"). Its vmtests directory is the best concrete template for Overdrive' BPF LSM test harness — small, Go-based, LVH-integrated, nested-virt-aware.
 
 ### Finding 9: Cilium has a dedicated "Datapath BPF Complexity" workflow that loads worst-case-complexity programs into each target kernel
 
@@ -99,7 +99,7 @@
 **Source**: [kernel.org — Kernel TLS documentation](https://docs.kernel.org/networking/tls.html) - Accessed 2026-04-19
 **Confidence**: High
 **Verification**: [torvalds/linux — tools/testing/selftests/net/tls.c](https://github.com/torvalds/linux/blob/master/tools/testing/selftests/net/tls.c), [kernel.org — Kernel TLS offload](https://docs.kernel.org/networking/tls-offload.html), [LWN — TLS in the kernel](https://lwn.net/Articles/666509/)
-**Analysis**: This gives Helios a concrete reference for how to assert kTLS behaviour end-to-end: open a socket, perform a TLS 1.3 handshake in userspace, `setsockopt(TCP_ULP, "tls")` and install the symmetric keys, then verify `send`/`recv` produce encrypted ciphertext on the wire. For the Helios sockops case specifically, a test can: (1) spawn two workloads with SPIFFE identities, (2) assert via `ss -K` or tracing that the socket entered TLS ULP, (3) snoop ciphertext on a veth and confirm wire format, (4) negative-test that a non-authorised peer fails the handshake. This is more than BPF program testing — it is dataplane integration.
+**Analysis**: This gives Overdrive a concrete reference for how to assert kTLS behaviour end-to-end: open a socket, perform a TLS 1.3 handshake in userspace, `setsockopt(TCP_ULP, "tls")` and install the symmetric keys, then verify `send`/`recv` produce encrypted ciphertext on the wire. For the Overdrive sockops case specifically, a test can: (1) spawn two workloads with SPIFFE identities, (2) assert via `ss -K` or tracing that the socket entered TLS ULP, (3) snoop ciphertext on a veth and confirm wire format, (4) negative-test that a non-authorised peer fails the handshake. This is more than BPF program testing — it is dataplane integration.
 
 ### Finding 11: `xdp-trafficgen` and `xdp-bench` from the `xdp-tools` project are the canonical tools for synthetic XDP load + perf regression
 
@@ -108,7 +108,7 @@
 **Source**: [xdp-project/xdp-tools GitHub](https://github.com/xdp-project/xdp-tools) - Accessed 2026-04-19
 **Confidence**: High
 **Verification**: [USENIX LISA21 — Performance Analysis of XDP Programs](https://www.usenix.org/system/files/lisa21_slides_jones.pdf), [kernel.org — AF_XDP](https://docs.kernel.org/networking/af_xdp.html)
-**Analysis**: Real NIC + real pktgen is expensive and flaky in CI. `xdp-trafficgen` lets a CI job generate synthetic packets *through XDP_TX back into the same host's XDP hook* — i.e. a closed-loop traffic generator that does not need dedicated hardware. This is the right tool for Helios SERVICE_MAP atomic-update-under-load tests and for p99 regression gates.
+**Analysis**: Real NIC + real pktgen is expensive and flaky in CI. `xdp-trafficgen` lets a CI job generate synthetic packets *through XDP_TX back into the same host's XDP hook* — i.e. a closed-loop traffic generator that does not need dedicated hardware. This is the right tool for Overdrive SERVICE_MAP atomic-update-under-load tests and for p99 regression gates.
 
 ### Finding 12: Active academic work on eBPF verifier correctness — PREVAIL, Agni, Validating-the-Verifier — provides complementary offline analysis
 
@@ -117,7 +117,7 @@
 **Source**: [PLDI 2019 — Simple and Precise Static Analysis of Untrusted Linux Kernel Extensions](http://www.math.tau.ac.il/~maon/pubs/2019-pldi-ebpf.pdf) - Accessed 2026-04-19
 **Confidence**: High
 **Verification**: [CAV 2023 — Verifying the Verifier: eBPF Range Analysis Verification (Agni)](https://people.cs.rutgers.edu/~sn349/papers/agni-cav2023.pdf), [OSDI 2024 — Validating the eBPF Verifier via State Embedding](https://www.usenix.org/system/files/osdi24-sun-hao.pdf), [NSDI 2025 — VEP: A Two-stage Verification Toolchain](https://www.usenix.org/system/files/nsdi25-wu-xiwei.pdf)
-**Analysis**: These are not test tools for a project's CI per se — they are tools for assessing the *verifier itself*. For Helios the practical takeaway is defensive: the kernel verifier can have bugs, meaning a program that passes verification is not necessarily safe. The integration-test strategy must include per-kernel-version load testing precisely *because* the verifier can change (and regress). PREVAIL can be used offline to sanity-check a program corpus against a second analyser — a recommended CI addition for Helios.
+**Analysis**: These are not test tools for a project's CI per se — they are tools for assessing the *verifier itself*. For Overdrive the practical takeaway is defensive: the kernel verifier can have bugs, meaning a program that passes verification is not necessarily safe. The integration-test strategy must include per-kernel-version load testing precisely *because* the verifier can change (and regress). PREVAIL can be used offline to sanity-check a program corpus against a second analyser — a recommended CI addition for Overdrive.
 
 ### Finding 13: `virtme-ng` (`vng`) makes per-kernel test turn-around fast enough for developer-laptop iteration
 
@@ -126,7 +126,7 @@
 **Source**: [LWN — Faster kernel testing with virtme-ng](https://lwn.net/Articles/951313/) - Accessed 2026-04-19
 **Confidence**: High
 **Verification**: [arighi/virtme-ng GitHub](https://github.com/arighi/virtme-ng), [Linux Foundation webinar — Speeding Up Kernel Development With virtme-ng](https://www.linuxfoundation.org/webinars/speeding-up-kernel-development-with-virtme-ng)
-**Analysis**: Two complementary patterns exist. **LVH** is production CI style — pre-built OCI kernel images, GitHub-Action friendly, multi-project proven. **virtme-ng** is developer-iteration style — 1.2-second boot, snapshots the host FS, excellent for `while true; do vng ./my-test; done`. A mature eBPF project typically uses virtme-ng locally and LVH or equivalent in CI. Helios should plan for both.
+**Analysis**: Two complementary patterns exist. **LVH** is production CI style — pre-built OCI kernel images, GitHub-Action friendly, multi-project proven. **virtme-ng** is developer-iteration style — 1.2-second boot, snapshots the host FS, excellent for `while true; do vng ./my-test; done`. A mature eBPF project typically uses virtme-ng locally and LVH or equivalent in CI. Overdrive should plan for both.
 
 ### Finding 14: BPF CO-RE + BTF is the portability layer that reduces, but does not eliminate, the per-kernel test matrix
 
@@ -144,7 +144,7 @@
 **Source**: [Cilium docs — End-To-End Connectivity Testing (stable)](https://docs.cilium.io/en/stable/contributing/testing/e2e/) - Accessed 2026-04-19
 **Confidence**: High
 **Verification**: [CNCF blog — Safely managing Cilium network policies in Kubernetes](https://www.cncf.io/blog/2025/11/06/safely-managing-cilium-network-policies-in-kubernetes-testing-and-simulation-techniques/), [kubernetes.io — Use Cilium for NetworkPolicy](https://kubernetes.io/docs/tasks/administer-cluster/network-policy-provider/cilium-network-policy/)
-**Analysis**: This pattern — submit a policy via API, expect datapath enforcement, observe verdicts via a structured event stream — maps directly onto Helios's intent/observation split. The Helios analogue: submit a Regorus policy via the IntentStore, wait for the compiled verdict to propagate through the ObservationStore (Corrosion), have the node agent hydrate the BPF map, then drive real traffic via veth pairs and `cilium-cli`-style probes and assert the kernel verdict. Helios should explicitly borrow the "audit mode" pattern — evaluate and record but do not enforce — as an additional safety net during policy rollout.
+**Analysis**: This pattern — submit a policy via API, expect datapath enforcement, observe verdicts via a structured event stream — maps directly onto Overdrive's intent/observation split. The Overdrive analogue: submit a Regorus policy via the IntentStore, wait for the compiled verdict to propagate through the ObservationStore (Corrosion), have the node agent hydrate the BPF map, then drive real traffic via veth pairs and `cilium-cli`-style probes and assert the kernel verdict. Overdrive should explicitly borrow the "audit mode" pattern — evaluate and record but do not enforce — as an additional safety net during policy rollout.
 
 ### Finding 16: Network fault injection via `tc qdisc netem` is the standard way to inject packet loss, latency, duplication, and reordering into integration tests
 
@@ -153,7 +153,7 @@
 **Source**: [man7 — tc-netem(8)](https://man7.org/linux/man-pages/man8/tc-netem.8.html) - Accessed 2026-04-19
 **Confidence**: High
 **Verification**: [Baeldung — Network Failures Simulation in Linux](https://www.baeldung.com/linux/network-failures-simulation), [Debian Manpages — tc-netem(8)](https://manpages.debian.org/testing/iproute2/tc-netem.8.en.html)
-**Analysis**: `netem` on a veth pair is the simplest credible way to inject network faults *between* simulated nodes in a real-kernel test bed. It composes cleanly with the LVH/virtme-ng VM harness: spin up one VM with the kernel under test, create several network namespaces with veth pairs, apply `netem` to subsets, run the Helios node binary in each namespace, assert convergence under fault. This is the direct real-kernel complement of the `SimTransport` used in the DST harness described in §21 of the whitepaper. It is also the right substrate for testing the XDP SERVICE_MAP under connection loss — the failure mode that DST models in-memory but that only real veth+netem can exercise in combination with actual XDP driver-mode behaviour.
+**Analysis**: `netem` on a veth pair is the simplest credible way to inject network faults *between* simulated nodes in a real-kernel test bed. It composes cleanly with the LVH/virtme-ng VM harness: spin up one VM with the kernel under test, create several network namespaces with veth pairs, apply `netem` to subsets, run the Overdrive node binary in each namespace, assert convergence under fault. This is the direct real-kernel complement of the `SimTransport` used in the DST harness described in §21 of the whitepaper. It is also the right substrate for testing the XDP SERVICE_MAP under connection loss — the failure mode that DST models in-memory but that only real veth+netem can exercise in combination with actual XDP driver-mode behaviour.
 
 ### Finding 17: The dominant taxonomy in the industry is "DST in process + real-kernel integration + production chaos" — not one or the other
 
@@ -162,16 +162,16 @@
 **Source**: [apple.github.io/foundationdb — Simulation and Testing](https://apple.github.io/foundationdb/testing.html) - Accessed 2026-04-19
 **Confidence**: High
 **Verification**: [WarpStream — Deterministic Simulation Testing for Our Entire SaaS](https://www.warpstream.com/blog/deterministic-simulation-testing-for-our-entire-saas), [Antithesis — Deterministic Simulation Testing primer](https://antithesis.com/docs/resources/deterministic_simulation_testing/), [notes.eatonphil.com — What's the big deal about DST](https://notes.eatonphil.com/2024-08-20-deterministic-simulation-testing.html)
-**Analysis**: This is the core "complement to DST" point in the research questions. The published consensus is that **DST catches logic bugs in control flow under timing/ordering perturbation cheaply**, and **real-kernel/real-hardware testing catches bugs in the boundary between your code and the system** (verifier rejections, kernel-version regressions, NIC driver quirks, kernel TLS offload edge cases, LSM hook semantic changes). A mature platform runs both. Helios's whitepaper §21 already has this framing — it states "eBPF cannot run in simulation" — but the complement is under-specified. This research section supplies that complement.
+**Analysis**: This is the core "complement to DST" point in the research questions. The published consensus is that **DST catches logic bugs in control flow under timing/ordering perturbation cheaply**, and **real-kernel/real-hardware testing catches bugs in the boundary between your code and the system** (verifier rejections, kernel-version regressions, NIC driver quirks, kernel TLS offload edge cases, LSM hook semantic changes). A mature platform runs both. Overdrive's whitepaper §21 already has this framing — it states "eBPF cannot run in simulation" — but the complement is under-specified. This research section supplies that complement.
 
-### Finding 18: Falco's BPF-LSM regression test infrastructure is a valid secondary reference for Helios LSM testing
+### Finding 18: Falco's BPF-LSM regression test infrastructure is a valid secondary reference for Overdrive LSM testing
 
 **Evidence**: "Falco can be built with options including -DBUILD_FALCO_MODERN_BPF=ON and -DCREATE_TEST_TARGETS=ON to build and run unit tests. The Falco Project has moved its Falco regression tests to falcosecurity/testing." Falco uses eBPF (and formerly a kernel module) to observe syscalls. BPF-LSM was upstreamed in the Linux kernel by Google in 2019; by 2023 more than 80% of distros enabled it out of the box.
 
 **Source**: [falco.org — Getting started with modern BPF probe in Falco](https://falco.org/blog/falco-modern-bpf/) - Accessed 2026-04-19
 **Confidence**: Medium-High
 **Verification**: [falcosecurity/falco GitHub](https://github.com/falcosecurity/falco), [kernel.org — LSM BPF Programs](https://docs.kernel.org/bpf/prog_lsm.html)
-**Analysis**: Tetragon is the primary reference for BPF-LSM in a testable orchestrator. Falco is the secondary reference, particularly for the "how do I assert that a specific syscall was denied by the LSM" question: Falco's rule-engine + structured output (alerts) + test fixtures over specific syscall sequences is a well-trodden pattern. The Helios analogue: for each LSM hook (`file_open`, `socket_create`, `task_setuid`, `bprm_check_security`), write a positive test (syscall reaches kernel, hook runs, is allowed, verify no audit event) and a negative test (syscall denied, verify returned -EPERM with the specific audit metadata). Assertions go against `dmesg`/`auditd`/structured BPF ringbuf events — **not** against "the program returned early," since that does not prove the hook was even invoked.
+**Analysis**: Tetragon is the primary reference for BPF-LSM in a testable orchestrator. Falco is the secondary reference, particularly for the "how do I assert that a specific syscall was denied by the LSM" question: Falco's rule-engine + structured output (alerts) + test fixtures over specific syscall sequences is a well-trodden pattern. The Overdrive analogue: for each LSM hook (`file_open`, `socket_create`, `task_setuid`, `bprm_check_security`), write a positive test (syscall reaches kernel, hook runs, is allowed, verify no audit event) and a negative test (syscall denied, verify returned -EPERM with the specific audit metadata). Assertions go against `dmesg`/`auditd`/structured BPF ringbuf events — **not** against "the program returned early," since that does not prove the hook was even invoked.
 
 ### Finding 19: Performance-as-correctness testing in CI is done against a baseline, not an absolute threshold, to avoid flake
 
@@ -180,7 +180,7 @@
 **Source**: [InfoQ — Zero to Performance Hero: How to Benchmark and Profile Your eBPF Code in Rust](https://www.infoq.com/articles/benchmark-profile-ebpf-code/) - Accessed 2026-04-19
 **Confidence**: Medium-High
 **Verification**: [Aerospike — What Is P99 Latency](https://aerospike.com/blog/what-is-p99-latency/), [ACM — Detecting Tiny Performance Regressions at Hyperscale](https://dl.acm.org/doi/pdf/10.1145/3785504)
-**Analysis**: Absolute thresholds (e.g. "p99 < 1 ms") are flaky because GitHub Actions runner hardware varies. Relative thresholds (e.g. "p99 must be within 10% of last week's baseline on the same runner class") are robust. Helios should bake this into its XDP perf tests: use `xdp-bench` to record a baseline, store it as a build artefact, and fail PRs that exceed a configurable percentage delta. `veristat` already encodes this pattern for verifier complexity (it reports percentage-of-limit) and can serve as the template.
+**Analysis**: Absolute thresholds (e.g. "p99 < 1 ms") are flaky because GitHub Actions runner hardware varies. Relative thresholds (e.g. "p99 must be within 10% of last week's baseline on the same runner class") are robust. Overdrive should bake this into its XDP perf tests: use `xdp-bench` to record a baseline, store it as a build artefact, and fail PRs that exceed a configurable percentage delta. `veristat` already encodes this pattern for verifier complexity (it reports percentage-of-limit) and can serve as the template.
 
 ### Finding 20: Cilium's test framework treats BPF map state as persistent across sub-tests by design — a trap for race-condition tests
 
@@ -189,13 +189,13 @@
 **Source**: [Cilium docs — BPF Unit and Integration Testing (stable)](https://docs.cilium.io/en/stable/contributing/testing/bpf/) - Accessed 2026-04-19
 **Confidence**: High
 **Verification**: [Cilium issue — Datapath testing using BPF_PROG_TEST_RUN (#14990)](https://github.com/cilium/cilium/issues/14990)
-**Analysis**: This is useful for tests of "atomic update semantics" like SERVICE_MAP rolling updates — a test can explicitly *stage* two different backend sets into the map within one PKTGEN/SETUP sequence and assert that CHECK observes exactly one of them per invocation. But it is a footgun for tests that do *not* want state carry-over. The Helios test harness should default to clearing test maps between CHECK invocations (opt-in carry-over, not opt-out), which is the inverse of Cilium's default but is closer to standard Rust `#[test]` isolation expectations and reduces debugging burden for contributors.
+**Analysis**: This is useful for tests of "atomic update semantics" like SERVICE_MAP rolling updates — a test can explicitly *stage* two different backend sets into the map within one PKTGEN/SETUP sequence and assert that CHECK observes exactly one of them per invocation. But it is a footgun for tests that do *not* want state carry-over. The Overdrive test harness should default to clearing test maps between CHECK invocations (opt-in carry-over, not opt-out), which is the inverse of Cilium's default but is closer to standard Rust `#[test]` isolation expectations and reduces debugging burden for contributors.
 
-## Recommended Integration-Test Strategy for Helios §21.5
+## Recommended Integration-Test Strategy for Overdrive §21.5
 
 The whitepaper §21 establishes DST as the correctness substrate for control-plane logic against simulated nondeterminism. Section §21 also correctly acknowledges that eBPF cannot run in simulation. The gap that §21.5 must close: **prove that the real eBPF programs actually load, attach, enforce, and forward packets correctly across the supported kernel matrix, under realistic fault injection, with bounded performance variance**. The published consensus across Cilium, Tetragon, kernel-patches/bpf, aya, and FoundationDB/WarpStream is that this gap requires a dedicated, separate test tier — not an extension of DST.
 
-The recommended shape below is a direct composition of the findings above, mapped onto primitives Helios already has.
+The recommended shape below is a direct composition of the findings above, mapped onto primitives Overdrive already has.
 
 ### Four-Tier Testing Stack
 
@@ -230,13 +230,13 @@ DST is Tier 1; it stays exactly as specified in §21. Tiers 2–4 are the new ma
 
 **Pattern**: mirror Cilium's `bpf/tests/` structure (Finding 1, Finding 20) with three primary programs per test:
 
-- `PKTGEN` — generates a synthetic packet (or in Helios's non-XDP hooks, a synthetic syscall context).
+- `PKTGEN` — generates a synthetic packet (or in Overdrive's non-XDP hooks, a synthetic syscall context).
 - `SETUP` — populates the BPF maps relevant to the program under test (SERVICE_MAP, IDENTITY_MAP, POLICY_MAP, FS_POLICY_MAP).
 - `CHECK` — runs the program under test via `BPF_PROG_TEST_RUN` and asserts on output bytes, verdict, or map mutations.
 
-**Deliverable**: a `crates/helios-bpf/tests/` directory with one Rust test file per program, each opening the compiled aya-rs object, installing it via libbpf/aya, and driving it through the aya `test_run` API (aya exposes `BPF_PROG_TEST_RUN` as `.test_run()` on XDP and TC program types).
+**Deliverable**: a `crates/overdrive-bpf/tests/` directory with one Rust test file per program, each opening the compiled aya-rs object, installing it via libbpf/aya, and driving it through the aya `test_run` API (aya exposes `BPF_PROG_TEST_RUN` as `.test_run()` on XDP and TC program types).
 
-**Isolation rule**: Helios should **clear test maps between sub-tests by default** (inverse of Cilium, which persists by default — Finding 20). Multi-stage state-carry tests should be opt-in via a `#[test_chain]` attribute so contributors do not debug phantom failures from prior tests.
+**Isolation rule**: Overdrive should **clear test maps between sub-tests by default** (inverse of Cilium, which persists by default — Finding 20). Multi-stage state-carry tests should be opt-in via a `#[test_chain]` attribute so contributors do not debug phantom failures from prior tests.
 
 **Budget**: these tests run in milliseconds on the CI host itself; no VM needed. They gate every PR.
 
@@ -244,13 +244,13 @@ DST is Tier 1; it stays exactly as specified in §21. Tiers 2–4 are the new ma
 
 **Goal**: prove that the programs actually load on the kernel matrix, attach to their hooks (XDP, TC, sockops, BPF LSM, kprobes), and produce correct end-to-end behaviour against real syscalls and real packets on veth pairs.
 
-**Harness**: use `little-vm-helper` (Finding 5) in CI, `virtme-ng` (Finding 13) for developer laptops. Both run QEMU under the hood; both let the test binary be the host-side driver over SSH or stdin piped into the VM. Helios reuses aya's `cargo xtask integration-test vm --cache-dir <CACHE_DIR> <KERNEL>...` (Finding 4) as the top-level entry point.
+**Harness**: use `little-vm-helper` (Finding 5) in CI, `virtme-ng` (Finding 13) for developer laptops. Both run QEMU under the hood; both let the test binary be the host-side driver over SSH or stdin piped into the VM. Overdrive reuses aya's `cargo xtask integration-test vm --cache-dir <CACHE_DIR> <KERNEL>...` (Finding 4) as the top-level entry point.
 
-**Kernel matrix** — the minimum viable set, cross-referenced with kernel features Helios requires:
+**Kernel matrix** — the minimum viable set, cross-referenced with kernel features Overdrive requires:
 
 | Kernel | Why it's in the matrix |
 |---|---|
-| 5.10 LTS | First LTS with BPF LSM + kTLS + sockops stable together. Floor for Helios. |
+| 5.10 LTS | First LTS with BPF LSM + kTLS + sockops stable together. Floor for Overdrive. |
 | 5.15 LTS | Widely deployed LTS (Ubuntu 22.04, Debian 12, RHEL 9 backports). |
 | 6.1 LTS | Current Debian stable; used by Tetragon's matrix analogue. |
 | 6.6 LTS | Current Ubuntu 24.04 LTS kernel lineage; also vhost-vsock parity. |
@@ -261,14 +261,14 @@ The matrix is LVH `image-version` inputs; adding a new kernel is one line of YAM
 
 **Inside-VM test shape** (borrowed from Tetragon, Finding 8):
 
-1. A `helios-tester` binary runs as a systemd unit inside the VM. It reads a job file, runs each test case, writes results to a mounted host directory, shuts the VM down.
-2. Each test case creates a set of network namespaces connected by veth pairs, loads the Helios node agent binary in each, submits Helios jobs programmatically, and drives real traffic using a rust equivalent of Scapy (e.g. `pnet` or `tokio-tun` + hand-crafted packets).
+1. A `overdrive-tester` binary runs as a systemd unit inside the VM. It reads a job file, runs each test case, writes results to a mounted host directory, shuts the VM down.
+2. Each test case creates a set of network namespaces connected by veth pairs, loads the Overdrive node agent binary in each, submits Overdrive jobs programmatically, and drives real traffic using a rust equivalent of Scapy (e.g. `pnet` or `tokio-tun` + hand-crafted packets).
 3. Assertions fire against:
    - Kernel-side state: BPF maps dumped via `bpftool map dump`, TLS ULP status via `ss -K`, LSM decisions via BPF ringbuf events.
-   - Userspace state: Hubble-style structured flow events from the Helios telemetry ringbuf (Finding 15 pattern).
+   - Userspace state: Hubble-style structured flow events from the Overdrive telemetry ringbuf (Finding 15 pattern).
    - Packet capture: `tcpdump` on veth interfaces, verified against expected ciphertext (kTLS) / expected forwarding (XDP SERVICE_MAP).
 
-**Canonical test cases** that Helios must have (one per kernel feature Helios depends on):
+**Canonical test cases** that Overdrive must have (one per kernel feature Overdrive depends on):
 
 | Category | Test |
 |---|---|
@@ -289,7 +289,7 @@ The matrix is LVH `image-version` inputs; adding a new kernel is one line of YAM
 
 **Pattern a — Verifier complexity (modelled directly on Cilium's "Datapath BPF Complexity" workflow, Finding 9)**:
 
-- Compile the full Helios BPF corpus with worst-case feature flags (all maps at max size, all policy paths enabled).
+- Compile the full Overdrive BPF corpus with worst-case feature flags (all maps at max size, all policy paths enabled).
 - In a dedicated CI job, boot each matrix kernel via LVH, load every program, record `veristat` output (instruction count, complexity limit ratio, pass/fail).
 - Store a baseline; fail the build when any program exceeds the previous baseline by >5% (Finding 19) or approaches the kernel's per-program complexity ceiling by >10%.
 - This is distinct from Tier 2/3 because its only job is to *load and verify*, not to exercise behaviour.
@@ -338,7 +338,7 @@ On release:
 | `SimTransport` reordering | `netem reorder 50% gap 3` |
 | `SimDataplane` policy update | actual BPF map update under XDP load (§21.5.c SERVICE_MAP test) |
 | `SimClock` skew | boot VMs with different `CLOCK_REALTIME` offsets; assert convergence |
-| node clean crash + restart | `kill -9` Helios binary inside VM, assert BPF programs unload cleanly; assert rehydration on restart |
+| node clean crash + restart | `kill -9` Overdrive binary inside VM, assert BPF programs unload cleanly; assert rehydration on restart |
 | `SimObservationStore` schema migration | real Corrosion in VM; trigger additive migration; assert no backfill storm |
 | driver fails to start | real Cloud Hypervisor instance; inject bad kernel image; assert lifecycle state machine |
 
@@ -348,8 +348,8 @@ The correspondence is not 1-to-1 — DST will catch concurrency logic bugs no in
 
 Explicitly out of scope for §21.5 (based on what the reference projects exclude):
 
-- **Real hardware NIC drivers.** Cilium, Tetragon, and the upstream BPF CI all run against virtio-net/veth in QEMU; they do *not* gate merges on `mlx5`/`i40e` behaviour. Production validation on real NICs happens in a separate release-gate lab, not on every PR. Helios should follow the same split — it is not a credible use of CI minutes to run real-hardware tests per PR.
-- **Full kernel selftests.** Helios does not need to re-run `tools/testing/selftests/bpf` — that is the kernel's job. Helios relies on *each supported kernel having passed its own selftests* (which is the case for every shipped LTS kernel) and focuses its harness on Helios-specific BPF programs.
+- **Real hardware NIC drivers.** Cilium, Tetragon, and the upstream BPF CI all run against virtio-net/veth in QEMU; they do *not* gate merges on `mlx5`/`i40e` behaviour. Production validation on real NICs happens in a separate release-gate lab, not on every PR. Overdrive should follow the same split — it is not a credible use of CI minutes to run real-hardware tests per PR.
+- **Full kernel selftests.** Overdrive does not need to re-run `tools/testing/selftests/bpf` — that is the kernel's job. Overdrive relies on *each supported kernel having passed its own selftests* (which is the case for every shipped LTS kernel) and focuses its harness on Overdrive-specific BPF programs.
 - **Production chaos as replacement for CI.** §21.5 is pre-merge gating. Production chaos (per the whitepaper's chaos reconciler) is a separate concern that validates emergent behaviour in live clusters. The two do not substitute for each other; they compose (Finding 17).
 
 ### Cost Estimate
@@ -364,9 +364,9 @@ Based on the reference projects:
 
 Total per-PR CI budget: ~15 minutes critical path, matches typical orchestrator-project norms (Cilium, Tetragon, Talos each run in this range).
 
-### What Helios Gets Over Kubernetes / Nomad
+### What Overdrive Gets Over Kubernetes / Nomad
 
-Neither Kubernetes nor Nomad ships an equivalent to the Tier 1+Tier 3 composition, because neither owns its dataplane. Kubernetes ships control-plane tests and expects each CNI plugin vendor to test its own dataplane separately; Nomad's scheduler tests do not exercise real eBPF. Helios owns the dataplane, so it is the first orchestrator in a position to *gate* merges on datapath correctness across a kernel matrix. This is a net addition to the whitepaper's §20 Efficiency Comparison — not a parity claim.
+Neither Kubernetes nor Nomad ships an equivalent to the Tier 1+Tier 3 composition, because neither owns its dataplane. Kubernetes ships control-plane tests and expects each CNI plugin vendor to test its own dataplane separately; Nomad's scheduler tests do not exercise real eBPF. Overdrive owns the dataplane, so it is the first orchestrator in a position to *gate* merges on datapath correctness across a kernel matrix. This is a net addition to the whitepaper's §20 Efficiency Comparison — not a parity claim.
 
 ## Source Analysis
 
@@ -438,20 +438,20 @@ Reputation summary: High count ≈ 16; Medium-High count ≈ 28; Medium count �
 **Attempted**: aya-rs.dev book index, aya GitHub README, aya /test directory docs.
 **Recommendation**: Verify by reading aya source directly (`crates/aya/src/programs/`) before implementing Tier 2 — in particular, check whether sockops programs require a live socket rather than `PROG_TEST_RUN` support. If they do, sockops tests move entirely to Tier 3 (that is likely fine).
 
-### Gap 2: Exact per-LTS-kernel feature floor for all Helios primitives
+### Gap 2: Exact per-LTS-kernel feature floor for all Overdrive primitives
 **Issue**: Findings cite "5.7+ for BPF LSM" and "5.10 as first LTS with full combination" but this research did not rigorously cross-verify each feature's LTS introduction against kernel changelogs. kTLS TX landed in 4.13, RX in 4.17; sockops landed in 4.13; BPF LSM in 5.7; CO-RE in 5.2+; stable BTF across distros ~5.10.
 **Attempted**: bpfman kernel-versions.md reference, kernel docs.
-**Recommendation**: Produce a companion table (one row per Helios primitive, one column per kernel LTS, marks for "supported / not supported / buggy") before fixing the Tier 3 matrix. A Helios §21.5 should list the minimum kernel versions explicitly — analogous to iovisor/bcc's `docs/kernel-versions.md`.
+**Recommendation**: Produce a companion table (one row per Overdrive primitive, one column per kernel LTS, marks for "supported / not supported / buggy") before fixing the Tier 3 matrix. A Overdrive §21.5 should list the minimum kernel versions explicitly — analogous to iovisor/bcc's `docs/kernel-versions.md`.
 
 ### Gap 3: Self-hosted runner cost model
-**Issue**: Cilium runs on AWS-hosted runners; kernel-patches/bpf runs on AWS-hosted runners via `kernel-patches/runner`. For Helios as a young project, standard GitHub Actions free-tier runners may or may not be adequate once the kernel matrix is at 5+ kernels.
+**Issue**: Cilium runs on AWS-hosted runners; kernel-patches/bpf runs on AWS-hosted runners via `kernel-patches/runner`. For Overdrive as a young project, standard GitHub Actions free-tier runners may or may not be adequate once the kernel matrix is at 5+ kernels.
 **Attempted**: reviewed references to kernel-patches infrastructure; no concrete cost numbers found in public sources.
 **Recommendation**: Prototype with standard `ubuntu-latest` (KVM disabled, per Tetragon's `--qemu-disable-kvm` flag). Re-evaluate if per-PR wall-clock exceeds 20 minutes or flake rate exceeds 2%.
 
-### Gap 4: `helios-fs` persistent-rootfs test strategy
-**Issue**: The §17 `helios-fs` layer has its own correctness and consistency concerns that are orthogonal to eBPF testing (single-writer invariant, libSQL metadata, chunk-store hydration, snapshot/restore). This research focused on eBPF; filesystem testing for `helios-fs` is a separate research topic.
+### Gap 4: `overdrive-fs` persistent-rootfs test strategy
+**Issue**: The §17 `overdrive-fs` layer has its own correctness and consistency concerns that are orthogonal to eBPF testing (single-writer invariant, libSQL metadata, chunk-store hydration, snapshot/restore). This research focused on eBPF; filesystem testing for `overdrive-fs` is a separate research topic.
 **Attempted**: Not in scope — flagged for separate research.
-**Recommendation**: A follow-up research doc on `helios-fs` testing should cover fuse/virtio-fs test harnesses (xfstests), single-writer invariant verification under migration, and snapshot/restore correctness.
+**Recommendation**: A follow-up research doc on `overdrive-fs` testing should cover fuse/virtio-fs test harnesses (xfstests), single-writer invariant verification under migration, and snapshot/restore correctness.
 
 ## Conflicting Information
 
@@ -459,9 +459,9 @@ No substantive conflicts were encountered. All reference projects agree on the c
 
 ## Recommendations for Further Research
 
-1. **`helios-fs` test strategy** — as noted in Gap 4, a dedicated research topic covering virtio-fs, xfstests adaptation, single-writer invariant property tests, and `userfaultfd`-restore correctness.
-2. **Per-primitive kernel-version floor table** — a structured mapping (Gap 2) that fixes the minimum kernel for each Helios eBPF dependency and that the §21.5 kernel matrix can reference authoritatively.
-3. **Real-NIC release-gate lab** — out of scope for per-PR CI (explicitly excluded in the synthesis), but Helios will eventually need an opt-in hardware lab for real `mlx5` / `i40e` / virtio-net-with-offload validation. Research would cover what Cilium, Katran, and cloud providers use (e.g. packet generators like TRex, MoonGen, DPDK pktgen).
+1. **`overdrive-fs` test strategy** — as noted in Gap 4, a dedicated research topic covering virtio-fs, xfstests adaptation, single-writer invariant property tests, and `userfaultfd`-restore correctness.
+2. **Per-primitive kernel-version floor table** — a structured mapping (Gap 2) that fixes the minimum kernel for each Overdrive eBPF dependency and that the §21.5 kernel matrix can reference authoritatively.
+3. **Real-NIC release-gate lab** — out of scope for per-PR CI (explicitly excluded in the synthesis), but Overdrive will eventually need an opt-in hardware lab for real `mlx5` / `i40e` / virtio-net-with-offload validation. Research would cover what Cilium, Katran, and cloud providers use (e.g. packet generators like TRex, MoonGen, DPDK pktgen).
 4. **Antithesis trial** — §21 already cites Antithesis as the deep-exploration DST target. Antithesis's native Rust SDK and its property-assertion model should be prototyped once §21 tier 1 tests exist, to estimate ROI before committing budget.
 
 ## Full Citations

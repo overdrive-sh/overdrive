@@ -1,8 +1,8 @@
-# Firecracker vs Cloud Hypervisor: Why Helios diverges from Fly
+# Firecracker vs Cloud Hypervisor: Why Overdrive diverges from Fly
 
 **Date**: 2026-04-19
 **Researcher**: Nova (nw-researcher)
-**Question**: If Fly.io runs large-scale production on Firecracker, why does Helios choose Cloud Hypervisor as its sole VMM?
+**Question**: If Fly.io runs large-scale production on Firecracker, why does Overdrive choose Cloud Hypervisor as its sole VMM?
 **Confidence**: High on feature matrix; Medium on Fly fork status; High on Fly Sprites counterfactual
 **Sources**: 20 primary/authoritative
 
@@ -10,7 +10,7 @@
 
 ## Executive summary (the one-paragraph answer)
 
-The whitepaper's headline thesis — *"Cloud Hypervisor is a strict superset of Firecracker's useful capabilities for Helios's workload mix"* — is **partially defensible but materially overstated in the current §6 table**. Upstream Firecracker as of 2025–2026 has closed three of the four capability gaps the whitepaper cites against it:
+The whitepaper's headline thesis — *"Cloud Hypervisor is a strict superset of Firecracker's useful capabilities for Overdrive's workload mix"* — is **partially defensible but materially overstated in the current §6 table**. Upstream Firecracker as of 2025–2026 has closed three of the four capability gaps the whitepaper cites against it:
 
 - **AArch64** has been production-supported for years
 - **userfaultfd-based snapshot/restore with lazy memory paging** actually shipped in Firecracker *first* (Cloud Hypervisor added it later)
@@ -22,7 +22,7 @@ The genuine, still-current gaps are narrower:
 - **CPU hotplug** — Firecracker issue #2609 is parked at low priority
 - **Windows guests** — explicit Firecracker non-goal; Cloud Hypervisor supports it
 
-The strongest argument for Cloud Hypervisor is therefore **not** that Firecracker can't do persistent microVMs — Fly.io's January 2026 **Sprites** launch proves it can at 300 ms checkpoint/restore on what appears to be vanilla-or-near-vanilla Firecracker — but that Helios specifically wants **cross-workload volume sharing via virtiofs between VMs, processes, and unikernels under one VMM**, which Firecracker will not provide.
+The strongest argument for Cloud Hypervisor is therefore **not** that Firecracker can't do persistent microVMs — Fly.io's January 2026 **Sprites** launch proves it can at 300 ms checkpoint/restore on what appears to be vanilla-or-near-vanilla Firecracker — but that Overdrive specifically wants **cross-workload volume sharing via virtiofs between VMs, processes, and unikernels under one VMM**, which Firecracker will not provide.
 
 Additionally, the whitepaper's claim that *"Cloud Hypervisor exposes a VMGenID device"* appears to be **unverified against upstream** and should be softened or removed.
 
@@ -56,13 +56,13 @@ Fly's own implementation post deliberately elides the hypervisor layer and empha
 - Metadata in local SQLite made durable via Litestream
 - NVMe as read-through cache
 
-This is conceptually identical to the `helios-fs` design described in whitepaper §17.
+This is conceptually identical to the `overdrive-fs` design described in whitepaper §17.
 
 **The existence of Sprites is a direct empirical refutation of any framing like "Firecracker cannot support persistent microVM workloads."**
 
 ---
 
-## Why AWS's and Fly's constraints differ from Helios's (the reasoning chain)
+## Why AWS's and Fly's constraints differ from Overdrive's (the reasoning chain)
 
 ### 1. Firecracker's charter is explicit about minimalism
 
@@ -78,9 +78,9 @@ Mission = "secure, multi-tenant, minimal-overhead execution of container and fun
 
 Fly Machines are user-owned but still Linux-centric, short-to-medium-lived, and don't need cross-workload volume sharing in a single VMM. When Fly needed persistence for Sprites, they did *not* add virtiofs to Firecracker — they built a **storage layer above the VMM** (block device + object-backed COW + metadata sidecar).
 
-This is the same architectural shape as `helios-fs` in §17. The VMM stayed minimal; the durability moved up the stack.
+This is the same architectural shape as `overdrive-fs` in §17. The VMM stayed minimal; the durability moved up the stack.
 
-### 3. Helios's workload mix is genuinely broader than Fly's or AWS Lambda's
+### 3. Overdrive's workload mix is genuinely broader than Fly's or AWS Lambda's
 
 Whitepaper §6 explicitly lists processes, microVMs, full VMs, unikernels, and WASM under one control plane with one identity and one dataplane. The specific *architectural* requirements:
 
@@ -92,7 +92,7 @@ These three needs are genuinely out of Firecracker's declared mission space. The
 
 ### 4. Fly Sprites shows Firecracker *is* enough for the persistent-microVM use case alone
 
-If Helios's only stateful workload were AI coding agents, the Firecracker + object-backed FS approach Fly uses would be sufficient. **The case for Cloud Hypervisor collapses to "we also want full VMs, Windows guests, and virtiofs-shared volumes between drivers."**
+If Overdrive's only stateful workload were AI coding agents, the Firecracker + object-backed FS approach Fly uses would be sufficient. **The case for Cloud Hypervisor collapses to "we also want full VMs, Windows guests, and virtiofs-shared volumes between drivers."**
 
 ---
 
@@ -103,23 +103,23 @@ If Helios's only stateful workload were AI coding agents, the Firecracker + obje
 | Attack surface | CH is ~50k LoC Rust vs Firecracker's smaller minimalist codebase. Still vastly smaller than QEMU (~2M LoC C), but strictly larger than Firecracker. Northflank's 2026 review notes this explicitly. |
 | Cold-boot time | CH is typically ~200 ms vs Firecracker's ~125 ms — the whitepaper already accepts this 75 ms cost. |
 | Memory footprint | Firecracker's "<5 MiB footprint" claim (NSDI) is harder to match in CH because the device model is richer. Not quantified in upstream CH docs. |
-| Production deployment scale | Firecracker backs **all of AWS Lambda and Fargate** — trillions of invocations and the largest single production deployment of any Rust VMM. CH production deployments include Kata Containers (one of several supported backends) and Intel/OpenStack contexts; no publicly claimed Lambda-scale deployment. Helios accepts younger battle-testing. |
+| Production deployment scale | Firecracker backs **all of AWS Lambda and Fargate** — trillions of invocations and the largest single production deployment of any Rust VMM. CH production deployments include Kata Containers (one of several supported backends) and Intel/OpenStack contexts; no publicly claimed Lambda-scale deployment. Overdrive accepts younger battle-testing. |
 | Ecosystem/tooling | Firecracker has a much larger ecosystem (firecracker-containerd, Kata Firecracker runtime, Fly, E2B, Ubicloud, Fireactions). CH ecosystem is smaller. |
 | Upstream velocity | Both projects are active; CH has a broader feature surface and thus a wider change footprint. |
 
-None of these are disqualifying for Helios, but **§20 ("Efficiency Comparison") currently does not acknowledge them**. At minimum, the Helios position should be honest that Firecracker is more minimal and more production-proven at scale, and the Cloud Hypervisor choice is a principled acceptance of that extra surface area in exchange for feature breadth.
+None of these are disqualifying for Overdrive, but **§20 ("Efficiency Comparison") currently does not acknowledge them**. At minimum, the Overdrive position should be honest that Firecracker is more minimal and more production-proven at scale, and the Cloud Hypervisor choice is a principled acceptance of that extra surface area in exchange for feature breadth.
 
 ---
 
 ## Other production orchestrator signals (industry check)
 
-- **Kata Containers**: supports *both* Firecracker and Cloud Hypervisor as alternative backends. Kata's own docs state CH *"provides better compatibility [than Firecracker] at the expense of exposing additional devices: **file system sharing and direct device assignment**."* **This is the clearest independent third-party endorsement of the exact trade-off Helios is making.**
-- **AWS**: Firecracker for Lambda/Fargate, QEMU for EC2 — the two-VMM model Helios explicitly rejects.
+- **Kata Containers**: supports *both* Firecracker and Cloud Hypervisor as alternative backends. Kata's own docs state CH *"provides better compatibility [than Firecracker] at the expense of exposing additional devices: **file system sharing and direct device assignment**."* **This is the clearest independent third-party endorsement of the exact trade-off Overdrive is making.**
+- **AWS**: Firecracker for Lambda/Fargate, QEMU for EC2 — the two-VMM model Overdrive explicitly rejects.
 - **Fly.io**: Firecracker for Machines and Sprites — proves Firecracker + external storage can support persistence. Does *not* need virtiofs because all Fly workloads are VMs.
 - **Ubicloud**: Firecracker + custom. Same minimal-surface reasoning as AWS.
 - **E2B / Northflank / Modal**: Firecracker-based for AI sandbox use cases. None mention Cloud Hypervisor as an alternative they've tried and rejected.
 
-The industry shift Helios rides is real but modest — **Cloud Hypervisor is a respected second option for workloads that need CH features, not a displacing default**.
+The industry shift Overdrive rides is real but modest — **Cloud Hypervisor is a respected second option for workloads that need CH features, not a displacing default**.
 
 ---
 
@@ -129,11 +129,11 @@ The industry shift Helios rides is real but modest — **Cloud Hypervisor is a r
 
 2. **Remove or soften the VMGenID claim.** *"Cloud Hypervisor exposes a VMGenID device"* is not supported by any primary source found; no issue, PR, or docs reference exists in upstream. Either cite a specific commit/PR, soften to "can be implemented via a userspace shim," or drop the VMGenID mention. The entropy-reuse concern is real; the VMGenID solution needs to actually exist in CH to be used.
 
-3. **Reframe the core argument** from *"Firecracker can't do these things"* to *"Firecracker's charter deliberately excludes virtiofs, Windows guests, and CPU hotplug, and Helios's multi-driver workload mix requires all three."* This is stronger because it aligns with Firecracker's own stated position and survives the "but Fly Sprites exists" objection.
+3. **Reframe the core argument** from *"Firecracker can't do these things"* to *"Firecracker's charter deliberately excludes virtiofs, Windows guests, and CPU hotplug, and Overdrive's multi-driver workload mix requires all three."* This is stronger because it aligns with Firecracker's own stated position and survives the "but Fly Sprites exists" objection.
 
 4. **Acknowledge Fly Sprites directly in §6.** A one-paragraph footnote:
 
-   > *"Persistent microVMs on Firecracker are demonstrably viable — Fly.io's Sprites (Jan 2026) ships this at 300 ms checkpoint/restore using a custom object-backed storage layer analogous to `helios-fs`. Helios chooses Cloud Hypervisor not because Firecracker cannot host persistent VMs, but because Helios unifies VM and non-VM workloads in one dataplane and requires virtiofs for cross-driver volume sharing."*
+   > *"Persistent microVMs on Firecracker are demonstrably viable — Fly.io's Sprites (Jan 2026) ships this at 300 ms checkpoint/restore using a custom object-backed storage layer analogous to `overdrive-fs`. Overdrive chooses Cloud Hypervisor not because Firecracker cannot host persistent VMs, but because Overdrive unifies VM and non-VM workloads in one dataplane and requires virtiofs for cross-driver volume sharing."*
 
    This turns a latent objection into a strength.
 

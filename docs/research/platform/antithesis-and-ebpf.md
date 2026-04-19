@@ -2,16 +2,16 @@
 
 **Date**: 2026-04-19 | **Researcher**: nw-researcher (Nova) | **Confidence**: Medium-High | **Sources**: 16
 
-## Bottom-Line Recommendation for Helios
+## Bottom-Line Recommendation for Overdrive
 
 **Antithesis is primarily useful for control-plane DST and not a credible substitute for §22's real-kernel integration matrix when the subject under test is an eBPF dataplane.** Reasoning:
 
-1. Antithesis runs a real Linux 6.x kernel as the guest, so BPF is *present* in principle and the verifier runs unchanged. But the fault-injection boundary is explicitly "at the pod level," not inside the kernel, and the Kubernetes mode forbids privileged containers (PodSecurity baseline) — which Cilium, Tetragon, Falco, and Helios's node agent all require.
+1. Antithesis runs a real Linux 6.x kernel as the guest, so BPF is *present* in principle and the verifier runs unchanged. But the fault-injection boundary is explicitly "at the pod level," not inside the kernel, and the Kubernetes mode forbids privileged containers (PodSecurity baseline) — which Cilium, Tetragon, Falco, and Overdrive's node agent all require.
 2. **No eBPF-heavy project appears in Antithesis's published customer list** (Jane Street, Ethereum, MongoDB, Ramp, Mysten Labs, WarpStream, Stardog, Formance, Palantir, Turso, OrbitingHail, TigerBeetle — all databases / blockchain / fintech / storage).
-3. Antithesis is single-core per VM by design — a fundamental constraint acknowledged by Will Wilson. Helios's kTLS + SMP race-class bugs are an explicit non-goal.
-4. Antithesis's value complements §21 (richer state-space exploration against Helios's Rust control-plane logic with `SimDataplane`), not §22.
+3. Antithesis is single-core per VM by design — a fundamental constraint acknowledged by Will Wilson. Overdrive's kTLS + SMP race-class bugs are an explicit non-goal.
+4. Antithesis's value complements §21 (richer state-space exploration against Overdrive's Rust control-plane logic with `SimDataplane`), not §22.
 
-**Concrete recommendation**: keep §22 as the eBPF gate. Treat Antithesis as an *optional future* extension of §21 — run the Helios control plane + `SimDataplane` inside Antithesis for deeper DST exploration. Do not redirect kernel-matrix testing effort to Antithesis. Tighten §21's closing paragraph to reflect this scoping (currently it reads as undifferentiated "future target" — see *Suggested Edit* at the end).
+**Concrete recommendation**: keep §22 as the eBPF gate. Treat Antithesis as an *optional future* extension of §21 — run the Overdrive control plane + `SimDataplane` inside Antithesis for deeper DST exploration. Do not redirect kernel-matrix testing effort to Antithesis. Tighten §21's closing paragraph to reflect this scoping (currently it reads as undifferentiated "future target" — see *Suggested Edit* at the end).
 
 ## Key Findings
 
@@ -33,27 +33,27 @@
 **Evidence**: "If you need a different minor version, we can usually accommodate that very easily. If you need to bring your own kernel, we support that too, but there may be some performance degradation."
 **Source**: [Antithesis — The Antithesis environment](https://antithesis.com/docs/environment/the_antithesis_environment) — Accessed 2026-04-19
 **Confidence**: High (verbatim quote)
-**Analysis**: In principle this lets a Helios test inject a specific kernel from the §22 matrix (5.10, 5.15, 6.1, 6.6, latest LTS). In practice the mechanism is customer-service-mediated ("contact support@antithesis.com"), not self-service. This is weaker than LVH's YAML-one-line kernel swap.
+**Analysis**: In principle this lets a Overdrive test inject a specific kernel from the §22 matrix (5.10, 5.15, 6.1, 6.6, latest LTS). In practice the mechanism is customer-service-mediated ("contact support@antithesis.com"), not self-service. This is weaker than LVH's YAML-one-line kernel swap.
 
 ### Finding 4: The simulated CPU is single-core per VM
 **Evidence**: "Each instance of the deterministic hypervisor runs on just one physical CPU core." wwilson (Antithesis) on HN: "There's a set of concurrency bugs that require actual SMP setups to trigger (like stuff with atomic operations, memory ordering, etc.)... Antithesis is not the right tool for you... for now... until we build a CPU simulator..."
 **Source**: [Antithesis — Deterministic hypervisor blog](https://antithesis.com/blog/deterministic_hypervisor/) — Accessed 2026-04-19
 **Confidence**: High
 **Verification**: [HN — wwilson comments](https://news.ycombinator.com/item?id=39766222)
-**Analysis**: **Material for Helios.** Much of the kTLS, sockops, and XDP correctness surface depends on multi-core behaviour — per-CPU BPF maps, RCU, atomic map updates under concurrent kernel-path load. Antithesis cannot exercise this. §22's LVH harness also defaults to single-vCPU but can configure multi-vCPU; Antithesis cannot.
+**Analysis**: **Material for Overdrive.** Much of the kTLS, sockops, and XDP correctness surface depends on multi-core behaviour — per-CPU BPF maps, RCU, atomic map updates under concurrent kernel-path load. Antithesis cannot exercise this. §22's LVH harness also defaults to single-vCPU but can configure multi-vCPU; Antithesis cannot.
 
 ### Finding 5: Fault injection is "at the pod level," not inside the kernel
 **Evidence**: "Faults are injected at the pod level rather than at the kernel." Fault classes include network latency, congestion, partitions, bad-node networking-stack failures, node throttling/hang, thread pausing, clock jitter, CPU modulation, termination.
 **Source**: [Antithesis — Fault injection](https://antithesis.com/docs/environment/fault_injection/) — Accessed 2026-04-19
 **Confidence**: High
-**Analysis**: This is the *opposite* of what eBPF testing needs. Helios's §22 injects faults *into the kernel path* — `tc netem loss`, `tc netem reorder`, driver errors, LSM hook denials — to test how XDP/TC/LSM programs behave when the kernel misbehaves around them. Antithesis injects faults around the pod, so the kernel (and any eBPF inside it) sees a "clean" view of the world. Useful for application correctness; orthogonal to kernel-path validation.
+**Analysis**: This is the *opposite* of what eBPF testing needs. Overdrive's §22 injects faults *into the kernel path* — `tc netem loss`, `tc netem reorder`, driver errors, LSM hook denials — to test how XDP/TC/LSM programs behave when the kernel misbehaves around them. Antithesis injects faults around the pod, so the kernel (and any eBPF inside it) sees a "clean" view of the world. Useful for application correctness; orthogonal to kernel-path validation.
 
 ### Finding 6: Kubernetes mode forbids privileged containers (PodSecurity baseline)
 **Evidence**: The k8s best-practices guide states: "securityContext.privileged: true violates the PodSecurity baseline." No hostPath, no LoadBalancer, no fixed clusterIP, cluster is air-gapped.
 **Source**: [Antithesis — Kubernetes best practices](https://antithesis.com/docs/best_practices/k8s_best_practices/) — Accessed 2026-04-19
 **Confidence**: High
 **Verification**: [Cilium docs — System requirements](https://docs.cilium.io/en/stable/operations/system_requirements/); [Cilium — Restricting privileged pod access](https://docs.cilium.io/en/latest/security/restrict-pod-access/) confirm Cilium requires CAP_SYS_ADMIN / privileged to install eBPF programs system-wide.
-**Analysis**: **The binding constraint for eBPF workloads under Antithesis's k3s mode.** Cilium, Tetragon, Falco, and any eBPF-heavy node agent (including Helios's) require CAP_SYS_ADMIN / CAP_BPF / CAP_NET_ADMIN — either via privileged mode or via `pod-security.kubernetes.io/enforce=privileged`. Antithesis's k8s support disallows this out of the box. The docker-compose mode does not publish an equivalent restriction list, so capabilities via `cap_add` *may* work there; no confirmation either way.
+**Analysis**: **The binding constraint for eBPF workloads under Antithesis's k3s mode.** Cilium, Tetragon, Falco, and any eBPF-heavy node agent (including Overdrive's) require CAP_SYS_ADMIN / CAP_BPF / CAP_NET_ADMIN — either via privileged mode or via `pod-security.kubernetes.io/enforce=privileged`. Antithesis's k8s support disallows this out of the box. The docker-compose mode does not publish an equivalent restriction list, so capabilities via `cap_add` *may* work there; no confirmation either way.
 
 ### Finding 7: No eBPF-heavy project appears in Antithesis's published customer list
 **Evidence**: Customer cases named: Jane Street, Ethereum (the Merge), MongoDB, Ramp, Mysten Labs (Sui/Move/Walrus), WarpStream (Confluent), Stardog, Formance, Palantir (storage), Turso (Limbo), OrbitingHail (Graft). TigerBeetle also publicly uses Antithesis.
@@ -66,13 +66,13 @@
 **Evidence**: The antithesishq GitHub organization ships SDKs for C++, Java, Python, Go, Rust; a CLI (`snouty`); a GitHub Action trigger; a property-based UI tester (`bombadil`); a reference game project. No repository mentions eBPF, BPF, or kernel-module testing.
 **Source**: [github.com/antithesishq](https://github.com/antithesishq) — Accessed 2026-04-19
 **Confidence**: High
-**Analysis**: The SDK is assertion-injection at userspace: `antithesis_sdk_assert_always`, `sometimes`, event emission. It has no hook into BPF map state, verifier output, or kernel-side BPF events. If Helios wanted Antithesis-visible assertions on eBPF state, it would have to write them as Rust code in the userspace Helios binary that reads BPF maps and calls the SDK — doable, but the SDK offers no native affordance.
+**Analysis**: The SDK is assertion-injection at userspace: `antithesis_sdk_assert_always`, `sometimes`, event emission. It has no hook into BPF map state, verifier output, or kernel-side BPF events. If Overdrive wanted Antithesis-visible assertions on eBPF state, it would have to write them as Rust code in the userspace Overdrive binary that reads BPF maps and calls the SDK — doable, but the SDK offers no native affordance.
 
 ### Finding 9: Network isolation is hermetic; containers use isolated network namespaces
 **Evidence**: "Your containers will run without any connectivity to any other computer outside the simulation (such as the internet). They will also be isolated to a network namespace that prevents them from reaching the host environment."
 **Source**: [Antithesis — The Antithesis environment](https://antithesis.com/docs/environment/the_antithesis_environment) — Accessed 2026-04-19
 **Confidence**: High
-**Analysis**: Good for Helios tests of east-west traffic between workloads in the simulation. Means Antithesis will not exercise real NIC driver paths, AF_XDP offload, or anything that depends on hardware queues — but that is also true of LVH. The relevant question is whether XDP programs attach in generic mode on veth and execute — which they do on any Linux ≥ 5.x kernel.
+**Analysis**: Good for Overdrive tests of east-west traffic between workloads in the simulation. Means Antithesis will not exercise real NIC driver paths, AF_XDP offload, or anything that depends on hardware queues — but that is also true of LVH. The relevant question is whether XDP programs attach in generic mode on veth and execute — which they do on any Linux ≥ 5.x kernel.
 
 ### Finding 10: Instruction-counting determinism is approximate (~1 in a trillion miscounts)
 **Evidence**: "The PMC instructions retired count isn't quite deterministic, even in its special 'precision' mode. Based on testing, about one in a trillion instructions would be miscounted."
@@ -84,7 +84,7 @@
 **Evidence**: "Code following a 'race-to-sleep' pattern performs significantly better than busy-wait approaches. Certain CPU instructions like RDRAND and RDTSC are more computationally expensive in the Antithesis environment than on conventional hardware."
 **Source**: [Antithesis — The Antithesis environment](https://antithesis.com/docs/environment/the_antithesis_environment) — Accessed 2026-04-19
 **Confidence**: High
-**Analysis**: XDP programs do not busy-wait — they run as RX-interrupt callbacks and return XDP_DROP/PASS/REDIRECT. Not a fit issue. TC programs are similar. Sockops are callback-driven. The only concern would be kprobes on hot kernel paths increasing simulated cost, but Helios doesn't depend on production-grade perf inside the simulator.
+**Analysis**: XDP programs do not busy-wait — they run as RX-interrupt callbacks and return XDP_DROP/PASS/REDIRECT. Not a fit issue. TC programs are similar. Sockops are callback-driven. The only concern would be kprobes on hot kernel paths increasing simulated cost, but Overdrive doesn't depend on production-grade perf inside the simulator.
 
 ### Finding 12: Wilson's framing — the hypervisor makes the OS deterministic regardless of what the OS does
 **Evidence**: Will Wilson (SE Radio 685): "The interface between the Linux kernel and everything running on top of it is really complicated... let's just emulate a deterministic computer where no matter what the operating system does... it... can't actually cause any non-determinism."
@@ -103,9 +103,9 @@
 **Evidence**: "Your machine runs with 10 GB of memory; it divides this memory among your containers and reserves a small amount for the system itself." Limit can be increased by request, with a recommendation to economise.
 **Source**: [Antithesis — The Antithesis environment](https://antithesis.com/docs/environment/the_antithesis_environment) — Accessed 2026-04-19
 **Confidence**: High
-**Analysis**: Fine for Helios control-plane + `SimDataplane` DST. Cramped for testing a realistic Helios cluster with Cloud Hypervisor microVMs running inside — §22's LVH VMs are already fighting for GitHub Actions runner memory.
+**Analysis**: Fine for Overdrive control-plane + `SimDataplane` DST. Cramped for testing a realistic Overdrive cluster with Cloud Hypervisor microVMs running inside — §22's LVH VMs are already fighting for GitHub Actions runner memory.
 
-## Fit Matrix: Antithesis vs Helios Test Stack
+## Fit Matrix: Antithesis vs Overdrive Test Stack
 
 | Test concern | §21 turmoil DST | §22 real-kernel LVH | Antithesis |
 |---|---|---|---|
@@ -116,7 +116,7 @@
 | BPF LSM positive/negative hook assertions | no | **Primary** | possible *in principle*, no published pattern |
 | Multi-core / SMP race bugs in kernel-adjacent code | partial (logical threads) | **Primary** | **explicitly out of scope** per wwilson |
 | Perf regression (pps, p99) | no | **Primary** | no — single-core simulated CPU, RDTSC expensive |
-| Multi-region / distributed scenarios against Helios's own logic | **Primary** | no | **Complementary** |
+| Multi-region / distributed scenarios against Overdrive's own logic | **Primary** | no | **Complementary** |
 | Storm-proof eval broker, workflow reconciler crash-safety | **Primary** | no | **Complementary** |
 
 ## Source Analysis
@@ -147,7 +147,7 @@ High: 11 (69%) | Medium-High: 4 (25%) | Medium: 1 (6%) | Avg reputation: ~0.91.
 ### Gap 1: Docker-compose capability allowlist
 **Issue**: Antithesis's k8s mode explicitly blocks privileged containers; the docker-compose mode does not publish an equivalent allow/deny list for `cap_add`, `cap_drop`, `privileged`, sysctls, or devices. It is unknown whether `cap_add: [BPF, NET_ADMIN, SYS_ADMIN]` works in docker-compose mode.
 **Attempted**: Antithesis docker best practices page; Antithesis setup guide; HN thread.
-**Recommendation**: Direct contact with Antithesis support / Discord if Helios decides to evaluate. Sample test: a minimal docker-compose config that tries to load an XDP program inside the container.
+**Recommendation**: Direct contact with Antithesis support / Discord if Overdrive decides to evaluate. Sample test: a minimal docker-compose config that tries to load an XDP program inside the container.
 
 ### Gap 2: Custom-kernel mechanics
 **Issue**: "Bring your own kernel, with performance degradation" is asserted but the mechanism (file upload? git SHA? bzImage?) is not documented publicly.
@@ -161,19 +161,19 @@ High: 11 (69%) | Medium-High: 4 (25%) | Medium: 1 (6%) | Avg reputation: ~0.91.
 
 ## Recommendations for Further Research
 
-1. **Field-test with a minimal Helios DST binary in Antithesis**. Package `helios-node + SimDataplane` as a docker-compose service; run it in Antithesis's trial. This validates whether Helios's turmoil harness (which uses injected `Clock`/`Transport`/`Dataplane` traits) composes with Antithesis's under-hypervisor determinism. Low effort, high information yield.
+1. **Field-test with a minimal Overdrive DST binary in Antithesis**. Package `overdrive-node + SimDataplane` as a docker-compose service; run it in Antithesis's trial. This validates whether Overdrive's turmoil harness (which uses injected `Clock`/`Transport`/`Dataplane` traits) composes with Antithesis's under-hypervisor determinism. Low effort, high information yield.
 2. **Ask Antithesis directly about docker-compose capability allowlist**. The k8s restriction is published; the docker restriction is not. One email resolves the only real remaining ambiguity.
 3. **Watch for eBPF-adjacent customer case studies**. If any appear (Cilium, Tetragon, Katran, isovalent.com, observability vendors), revisit the recommendation. As of 2026-04-19 there are none.
 
-## Suggested Edit to Helios Whitepaper §21
+## Suggested Edit to Overdrive Whitepaper §21
 
 The current whitepaper §21 closing paragraph reads:
 
-> For exhaustive state-space exploration beyond what turmoil covers, Helios is designed to be compatible with Antithesis — a deterministic hypervisor that runs regular software in a fully reproducible environment. Antithesis has a native Rust SDK. The property assertions defined for turmoil tests map directly to Antithesis assertions, making the two approaches complementary: turmoil for fast in-process tests during development, Antithesis for deep exploration against the real binary in CI.
+> For exhaustive state-space exploration beyond what turmoil covers, Overdrive is designed to be compatible with Antithesis — a deterministic hypervisor that runs regular software in a fully reproducible environment. Antithesis has a native Rust SDK. The property assertions defined for turmoil tests map directly to Antithesis assertions, making the two approaches complementary: turmoil for fast in-process tests during development, Antithesis for deep exploration against the real binary in CI.
 
 This is accurate for control-plane DST but overclaims — it implicitly suggests Antithesis is a second option for "the real binary" in a way that could be read as including the eBPF dataplane. A tighter formulation:
 
-> For exhaustive state-space exploration beyond what turmoil covers on the Rust control plane, Helios is designed to be compatible with Antithesis — a bhyve-derived deterministic hypervisor. The property assertions defined for turmoil tests map directly to the Antithesis Rust SDK's assertion primitives, making the two approaches complementary: turmoil for fast in-process development-time tests, Antithesis for deep exploration of the control plane against the `SimDataplane` stand-in. Antithesis does not substitute for §22 real-kernel integration testing — its fault-injection boundary is at the pod level rather than inside the kernel, its guest is single-core by design, and its default container security context does not grant the capabilities an eBPF-loading node agent requires. eBPF verifier, XDP, TC, sockops, and BPF LSM correctness continue to be gated by the LVH kernel matrix described in §22.
+> For exhaustive state-space exploration beyond what turmoil covers on the Rust control plane, Overdrive is designed to be compatible with Antithesis — a bhyve-derived deterministic hypervisor. The property assertions defined for turmoil tests map directly to the Antithesis Rust SDK's assertion primitives, making the two approaches complementary: turmoil for fast in-process development-time tests, Antithesis for deep exploration of the control plane against the `SimDataplane` stand-in. Antithesis does not substitute for §22 real-kernel integration testing — its fault-injection boundary is at the pod level rather than inside the kernel, its guest is single-core by design, and its default container security context does not grant the capabilities an eBPF-loading node agent requires. eBPF verifier, XDP, TC, sockops, and BPF LSM correctness continue to be gated by the LVH kernel matrix described in §22.
 
 ## Full Citations
 

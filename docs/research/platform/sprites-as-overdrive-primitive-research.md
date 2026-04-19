@@ -1,4 +1,4 @@
-# Should Sprites.dev-Style Persistent Sandboxes Be a Primitive in Helios?
+# Should Sprites.dev-Style Persistent Sandboxes Be a Primitive in Overdrive?
 
 **Date**: 2026-04-19 | **Researcher**: nw-researcher (Nova) | **Confidence**: High | **Sources**: 24
 
@@ -8,13 +8,13 @@
 
 Fly.io's sprites.dev (launched January 2026) is a Firecracker-microVM-based persistent sandbox platform targeting AI coding agents like Claude Code. Its technical innovations are not in the hypervisor layer — sprites *"are still Fly Machines"* [1] — but in the storage stack (JuiceFS-like chunked object storage with NVMe cache), sub-second checkpoint/restore (metadata-only CoW), per-instance public URLs via Anycast+Corrosion, and scale-to-zero with indefinite persistence. Comparable offerings in the same category: E2B (open-source Firecracker, session-scoped), Modal (gVisor userspace checkpoint/restore, 2.5× faster cold start), Cloudflare Sandbox SDK (container-in-VM via Durable Objects), and Cloudflare Dynamic Workers (V8 isolates, millisecond starts for AI-generated JS/TS).
 
-Helios already has every building block needed: Cloud Hypervisor has snapshot/restore with `userfaultfd` lazy-paging parity with Firecracker [20][21]; the gateway can route per-workload URLs; SPIFFE + credential proxy + WASM sidecars together provide a genuine differentiation wedge (structural prompt-injection defense) that no sandbox competitor ships at the infrastructure layer. The work is integration, not invention.
+Overdrive already has every building block needed: Cloud Hypervisor has snapshot/restore with `userfaultfd` lazy-paging parity with Firecracker [20][21]; the gateway can route per-workload URLs; SPIFFE + credential proxy + WASM sidecars together provide a genuine differentiation wedge (structural prompt-injection defense) that no sandbox competitor ships at the infrastructure layer. The work is integration, not invention.
 
-Three reasons to do it: (1) The AI-agent execution substrate is a strategically important category — sprites, E2B, Modal, and Cloudflare all launched products here between 2025 and 2026. (2) Helios would compose existing primitives rather than inventing new ones, which matches the "own your primitives" design principle without product-layer scope creep. (3) The credential-proxy + sidecar wedge is a unique positioning opportunity: platform-level prompt-injection defense that no competitor ships. Three risks to manage: Cloud Hypervisor snapshot hardening needs scale-testing parity with Firecracker, persistent per-workload storage breaks "cattle" orthodoxy and introduces migration/drain/GC classes of bugs, and multi-tenant arbitrary-code hosting requires VMGenID and the inner-container-inside-VM pattern Fly uses.
+Three reasons to do it: (1) The AI-agent execution substrate is a strategically important category — sprites, E2B, Modal, and Cloudflare all launched products here between 2025 and 2026. (2) Overdrive would compose existing primitives rather than inventing new ones, which matches the "own your primitives" design principle without product-layer scope creep. (3) The credential-proxy + sidecar wedge is a unique positioning opportunity: platform-level prompt-injection defense that no competitor ships. Three risks to manage: Cloud Hypervisor snapshot hardening needs scale-testing parity with Firecracker, persistent per-workload storage breaks "cattle" orthodoxy and introduces migration/drain/GC classes of bugs, and multi-tenant arbitrary-code hosting requires VMGenID and the inner-container-inside-VM pattern Fly uses.
 
 ## Research Methodology
 
-**Search Strategy**: Web searches across primary vendors (sprites.dev, fly.io, e2b.dev, modal.com, firecracker-microvm.github.io, kata-containers.io, criu.org, cloudflare.com), cross-reference with existing Helios whitepaper and prior research (`docs/research/infrastructure/fly-io-primitives-helios-relevance.md`). Direct fetch of docs and blog posts with adversarial-output validation.
+**Search Strategy**: Web searches across primary vendors (sprites.dev, fly.io, e2b.dev, modal.com, firecracker-microvm.github.io, kata-containers.io, criu.org, cloudflare.com), cross-reference with existing Overdrive whitepaper and prior research (`docs/research/infrastructure/fly-io-primitives-overdrive-relevance.md`). Direct fetch of docs and blog posts with adversarial-output validation.
 
 **Source Selection**: Official vendor docs (high reputation), vendor engineering blogs (medium-high), GitHub repos (high — source of truth for OSS), conference talks (medium-high). Avoid undated marketing claims unless flagged.
 
@@ -22,7 +22,7 @@ Three reasons to do it: (1) The AI-agent execution substrate is a strategically 
 
 ## 1. What sprites.dev Actually Provides
 
-**Crucial framing fact**: Sprites is a **Fly.io product**, launched January 9, 2026 [1][2]. `sprites.dev` is its marketing front door; the implementation sits on top of Fly's existing Machines/Firecracker/Anycast stack with a new storage stack layered in. This materially changes how Helios should interpret the "primitive" question — we are not comparing against a fresh point-solution but against a well-funded extension of Fly's existing infrastructure.
+**Crucial framing fact**: Sprites is a **Fly.io product**, launched January 9, 2026 [1][2]. `sprites.dev` is its marketing front door; the implementation sits on top of Fly's existing Machines/Firecracker/Anycast stack with a new storage stack layered in. This materially changes how Overdrive should interpret the "primitive" question — we are not comparing against a fresh point-solution but against a well-funded extension of Fly's existing infrastructure.
 
 ### 1.1 Primitive Anatomy
 **Evidence**: "Sprites execute code in Firecracker VMs" [3, sprites.dev marketing] — though Fly's own engineering post is more careful, stating sprites "are still Fly Machines" underneath [1]. Fly Machines are built on Firecracker, per Fly's prior public documentation [8], so the chain is: sprite → inner container → Linux VM → Firecracker microVM → bare metal host.
@@ -58,7 +58,7 @@ This is not a per-host persistent ext4 volume — it is effectively a content-ad
 - Integrates with *"Corrosion, our gossip-based service discovery system, enabling instant public URL provisioning with HTTPS termination at proxy edges"* [1].
 - DNS-based egress policy: *"DNS-based network policies with allow/deny rules for domains like github.com or *.npmjs.org"* [2].
 
-Corrosion is a CRDT-based service-discovery system Fly uses for their Anycast proxy (SQLite CRDT — same family Helios uses for its ObservationStore [whitepaper §17]). The per-sprite URL is routed through Fly's existing Anycast proxy edge.
+Corrosion is a CRDT-based service-discovery system Fly uses for their Anycast proxy (SQLite CRDT — same family Overdrive uses for its ObservationStore [whitepaper §17]). The per-sprite URL is routed through Fly's existing Anycast proxy edge.
 
 **Confidence**: **High**.
 
@@ -77,7 +77,7 @@ Corrosion is a CRDT-based service-discovery system Fly uses for their Anycast pr
 ## 2. Ecosystem Landscape
 
 ### 2.1 Fly Machines (the substrate beneath Sprites)
-- Firecracker microVMs; orchestrated by `flyd`; prior Helios research covers this in detail [see `docs/research/infrastructure/fly-io-primitives-helios-relevance.md`].
+- Firecracker microVMs; orchestrated by `flyd`; prior Overdrive research covers this in detail [see `docs/research/infrastructure/fly-io-primitives-overdrive-relevance.md`].
 - Sprites are *"still Fly Machines"* [1] but with a new storage stack (JuiceFS-like object-backed), a container sandwich inside the VM, and tight integration with Fly's Corrosion service discovery and Anycast proxy.
 - Per-machine persistent NVMe volumes have existed on Fly Machines for a long time; Sprites innovate by moving the authoritative state to object storage so sprites can migrate and restore faster.
 
@@ -135,15 +135,15 @@ Two distinct offerings (important — they serve different roles):
 | Cloudflare Dynamic Workers | V8 isolate | None (per-request) | Milliseconds | N/A | Via Workers | V8 is OSS; DW platform is not |
 | Kata Containers | QEMU / CH / FC / Dragonball | Per-pod volumes (K8s) | Seconds | Varies by hypervisor | Via K8s service | **Yes** (Apache-2.0) |
 | CRIU + runc | No VM isolation | Process state only | Sub-second possible | Linux kernel-cooperative | N/A | **Yes** |
-| Helios `microvm` (today) | Cloud Hypervisor | Per-workload (whitepaper §6) | ~200 ms [whitepaper L1362 refs] | None shipped yet | Gateway (§11) | **Yes** |
+| Overdrive `microvm` (today) | Cloud Hypervisor | Per-workload (whitepaper §6) | ~200 ms [whitepaper L1362 refs] | None shipped yet | Gateway (§11) | **Yes** |
 
-## 3. Mapping onto Helios
+## 3. Mapping onto Overdrive
 
-### 3.1 What Helios Already Has
+### 3.1 What Overdrive Already Has
 
 From the whitepaper:
 - **Cloud Hypervisor microvm driver** (§6): fast boot (~200 ms), one process per VM, virtiofs-capable, CPU/memory hotplug.
-- **CH snapshot/restore is available upstream** [20][21] — with `userfaultfd`-based on-demand memory paging that mirrors Firecracker's `MAP_PRIVATE` behaviour. As of v37 LTS (Feb 2025), JSON deserialization on restore is faster, and live migration parity is committed across LTS releases [21]. Helios currently does **not** use this feature; it is a dormant capability in the driver.
+- **CH snapshot/restore is available upstream** [20][21] — with `userfaultfd`-based on-demand memory paging that mirrors Firecracker's `MAP_PRIVATE` behaviour. As of v37 LTS (Feb 2025), JSON deserialization on restore is faster, and live migration parity is committed across LTS releases [21]. Overdrive currently does **not** use this feature; it is a dormant capability in the driver.
 - **Gateway (§11)**: SPIFFE-addressable route resolution, L7 reverse proxy capability, sidecars. This is functionally comparable to Fly's Anycast+Corrosion per-sprite URL story, minus the public anycast.
 - **SPIFFE + kernel mTLS (§8)**: every workload gets a cryptographic identity; dataplane enforces it.
 - **BPF LSM (§7)**: mandatory access control at the kernel — blocks raw socket creation etc. even if the workload is compromised.
@@ -154,7 +154,7 @@ From the whitepaper:
 
 ### 3.2 Gaps vs sprites.dev semantics
 
-| Sprite capability | Helios today | Gap size |
+| Sprite capability | Overdrive today | Gap size |
 |-------------------|--------------|----------|
 | Indefinite persistent rootfs per workload | Not a driver feature; Garage (S3) exists but isn't wired as a per-workload content-addressed backing store | **Medium–large** — needs a storage shim |
 | CoW chunked object-backed filesystem (JuiceFS-model) | Garage is S3-compatible; no JuiceFS or equivalent layered on | **Medium** — integration work, not invention |
@@ -163,8 +163,8 @@ From the whitepaper:
 | Per-workload public HTTPS URL | Gateway can do it (§11) but sprites style requires low-friction auto-provisioning | **Small** |
 | Scale-to-zero after 30 s idle with full state retention | Not a driver mode; would need reconciler support | **Medium** |
 | Migration across hosts (state follows sprite) | IntentStore + ObservationStore support this conceptually; storage backing must be shared | **Medium** — depends on storage |
-| Pre-installed dev tooling (Python/Node/Git/Claude Code) | Not in Helios scope; Image Factory produces node OS, not workload images | **Medium** — new responsibility |
-| Long-lived interactive session (SSH, REPL, console) | Not a driver target; Helios focuses on background workloads | **Medium** — new UX |
+| Pre-installed dev tooling (Python/Node/Git/Claude Code) | Not in Overdrive scope; Image Factory produces node OS, not workload images | **Medium** — new responsibility |
+| Long-lived interactive session (SSH, REPL, console) | Not a driver target; Overdrive focuses on background workloads | **Medium** — new UX |
 
 ### 3.3 Four Framings
 
@@ -172,7 +172,7 @@ From the whitepaper:
 - **Pro**: Clean semantics; a dedicated driver can encode "long-lived, stateful, interactive" as a first-class workload type. Users write `driver = "sprite"` and get the model.
 - **Pro**: Opens the door to differentiated scheduling (node affinity, preemption semantics, idle eviction).
 - **Con**: Duplicates 90% of the existing microvm driver. Two drivers that both spawn Cloud Hypervisor create maintenance debt.
-- **Con**: Sprite is a Fly.io product name. Naming a Helios driver after a competitor's product is poor positioning.
+- **Con**: Sprite is a Fly.io product name. Naming a Overdrive driver after a competitor's product is poor positioning.
 
 #### (b) Extension of existing microvm driver (persistent flag + snapshot)
 - **Pro**: Zero duplication. The microvm driver already runs Cloud Hypervisor; exposing snapshot/restore + a persistent rootfs mode is additive.
@@ -184,11 +184,11 @@ From the whitepaper:
 #### (c) New category: "agent workloads" (composition, not a new driver)
 - **Pro**: Composes the existing primitives — microvm driver + persistent volume + auto-gateway route + credential proxy sidecar + prompt-injection inspector sidecar — into a named workload **profile**.
 - **Pro**: This is `agent_workload = true` as a job-spec flag that unlocks idle-eviction semantics, auto-registered public route, and the AI-agent credential proxy by default.
-- **Pro**: Encodes Helios's genuine differentiation (credential proxy + WASM sidecars for prompt injection) rather than just replicating sprites.
+- **Pro**: Encodes Overdrive's genuine differentiation (credential proxy + WASM sidecars for prompt injection) rather than just replicating sprites.
 - **Con**: Needs the storage backing (3.2) to be real.
 
 #### (d) Not a primitive — application layer on top
-- **Pro**: "Own your primitives" (§2) does not mean "own every product." If Helios ships the building blocks (microvm driver + CH snapshots + persistent volumes + gateway + credential proxy), someone can build a sprites-like offering **on Helios** without Helios being the vendor.
+- **Pro**: "Own your primitives" (§2) does not mean "own every product." If Overdrive ships the building blocks (microvm driver + CH snapshots + persistent volumes + gateway + credential proxy), someone can build a sprites-like offering **on Overdrive** without Overdrive being the vendor.
 - **Pro**: Avoids pricing/UX debt of running a public sandbox offering.
 - **Con**: If the building blocks are missing (persistent volumes, CH snapshot surfacing), "build it on top" is a fiction.
 
@@ -206,18 +206,18 @@ The "sandbox for AI agents" space has crystallized around four archetypes [4][5]
 
 All four are converging on: persistent identity, checkpoint-restore, per-instance URL, idle eviction. Sprites differ by: indefinite persistence + chunked object-backed storage that makes migration cheap.
 
-### 4.2 What Helios Uniquely Brings
-Helios has two infrastructure-level defenses that none of the above ships as a first-class primitive:
+### 4.2 What Overdrive Uniquely Brings
+Overdrive has two infrastructure-level defenses that none of the above ships as a first-class primitive:
 
 - **Credential Proxy (§8 — "Credential Proxy for AI Agents")**: dummy credentials in-workload; token-binding prevents prompt-injection-driven auth to allowed domains using an attacker's token. This is *structural* defense against prompt injection — not model-dependent.
 - **WASM Sidecars (§9)**: ordered per-workload chain; `on_ingress` / `on_egress` hooks; block/modify/redirect actions. A "prompt injection content inspector" or "egress audit logger" is a configuration, not a service to stand up.
 
 Neither E2B, Modal, nor sprites positions this layer. Fly has Anycast egress filtering (DNS-based allow/deny [2]) but not credential virtualization or semantic content inspection at the dataplane.
 
-**Differentiation claim**: "Helios is the only agent sandbox platform where the credential layer and the content-inspection layer are part of the platform, not the agent." This is a genuine wedge, and it is additive to — not competing with — the persistent-sandbox value proposition.
+**Differentiation claim**: "Overdrive is the only agent sandbox platform where the credential layer and the content-inspection layer are part of the platform, not the agent." This is a genuine wedge, and it is additive to — not competing with — the persistent-sandbox value proposition.
 
 ### 4.3 Anthropic Computer-Use and Claude Code
-Anthropic's computer-use and Claude Code both reference Firecracker-based sandboxes as an execution target [2][3]. Sprites explicitly targets Claude Code as a design partner [3]. If Helios wants to be an execution substrate for AI agent tooling, the bar is set by this pattern: microVM isolation, persistent disk, sub-second restore, per-instance URL. The recommendation below lands Helios at this bar while preserving the credential/sidecar wedge.
+Anthropic's computer-use and Claude Code both reference Firecracker-based sandboxes as an execution target [2][3]. Sprites explicitly targets Claude Code as a design partner [3]. If Overdrive wants to be an execution substrate for AI agent tooling, the bar is set by this pattern: microVM isolation, persistent disk, sub-second restore, per-instance URL. The recommendation below lands Overdrive at this bar while preserving the credential/sidecar wedge.
 
 ## 5. Trade-offs and Risks
 
@@ -226,10 +226,10 @@ Both support memory snapshot with on-demand paging (`MAP_PRIVATE` / `userfaultfd
 
 **Real distinctions**:
 - Firecracker has **far more production scale-testing** in this exact use case (AWS Lambda, Fly Machines, E2B, sprites). CH has snapshot parity on paper but less public evidence of millions-per-day restore operations.
-- Firecracker has a **stronger threat model** for untrusted code — minimal device set, 50 kLoC [13], explicit design goal. CH has a richer device set (virtiofs, hotplug, full VMs) which is valuable for Helios's multi-workload-type story but expands attack surface.
+- Firecracker has a **stronger threat model** for untrusted code — minimal device set, 50 kLoC [13], explicit design goal. CH has a richer device set (virtiofs, hotplug, full VMs) which is valuable for Overdrive's multi-workload-type story but expands attack surface.
 - Diff snapshots in Firecracker are still **in developer preview** as of 2026-04 [11]. CH has no diff-snapshot concept; must re-snapshot fully.
 
-**Implication**: Helios's bet on CH is correct for the unified-VMM design (§6 whitepaper), but the AI-agent path will require investment in CH snapshot hardening and scale-testing that Firecracker has gotten "for free" from AWS. This is a real cost; do not hand-wave it.
+**Implication**: Overdrive's bet on CH is correct for the unified-VMM design (§6 whitepaper), but the AI-agent path will require investment in CH snapshot hardening and scale-testing that Firecracker has gotten "for free" from AWS. This is a real cost; do not hand-wave it.
 
 ### 5.2 Persistent Per-Workload Storage vs Cattle Orthodoxy
 The Kubernetes/Nomad orthodoxy is "workloads are cattle" — any instance is replaceable. Sprites inverts this: every workload is a pet with its own persistent disk that follows it across hosts. Operational tensions:
@@ -238,23 +238,23 @@ The Kubernetes/Nomad orthodoxy is "workloads are cattle" — any instance is rep
 - **GC of dead sprites** becomes a thing: who owns the 100 GB disk of a sprite whose owner stopped paying?
 - **Right-sizing (whitepaper §6)** assumes workloads can be resized via hotplug. For interactive sprites, hotplug is fine; for checkpointed sprites, resize requires restore-into-larger-VM — a new pattern.
 
-The Fly design resolves this elegantly by moving authoritative state to object storage. Helios already has Garage (S3). The question is whether to layer a JuiceFS-like chunk-store on top of Garage for the sprite driver, or take a simpler approach (per-workload virtiofs volume stored in Garage via a snapshot-then-upload path).
+The Fly design resolves this elegantly by moving authoritative state to object storage. Overdrive already has Garage (S3). The question is whether to layer a JuiceFS-like chunk-store on top of Garage for the sprite driver, or take a simpler approach (per-workload virtiofs volume stored in Garage via a snapshot-then-upload path).
 
-**Risk**: If Helios accepts persistent per-workload storage without also accepting migration cost, operators will encounter a class of incidents (stuck drains, orphan volumes, split-brain after partition) that don't arise today. Ship the model explicitly or don't ship it.
+**Risk**: If Overdrive accepts persistent per-workload storage without also accepting migration cost, operators will encounter a class of incidents (stuck drains, orphan volumes, split-brain after partition) that don't arise today. Ship the model explicitly or don't ship it.
 
 ### 5.3 Multi-Tenant Arbitrary-Code Isolation
-Sprites runs *"arbitrary code... binary your user just uploaded"* [3]. Multi-tenant arbitrary code is the most hostile threat model there is. Helios's current stack for this:
+Sprites runs *"arbitrary code... binary your user just uploaded"* [3]. Multi-tenant arbitrary code is the most hostile threat model there is. Overdrive's current stack for this:
 
 - Cloud Hypervisor VM boundary (equivalent to Firecracker at the hypervisor level; both use KVM, both are Rust, both small).
 - BPF LSM for mandatory access control.
 - SPIFFE identity + kernel mTLS (cross-workload boundary).
 - Credential proxy (limits damage of an escaped secret).
 
-**What sprites adds on top**: the inner container inside the VM [1]. Helios would want an equivalent — *"slide a container between you and the kernel"*. This is not currently in the whitepaper as a design pattern for the microvm driver.
+**What sprites adds on top**: the inner container inside the VM [1]. Overdrive would want an equivalent — *"slide a container between you and the kernel"*. This is not currently in the whitepaper as a design pattern for the microvm driver.
 
 **Additional risks to flag**:
-- Firecracker has known snapshot-entropy reuse concerns [11]. CH inherits the same class of problem. VMGenID must be wired into the Helios microvm driver before any snapshot-restore feature is exposed to untrusted workloads.
-- Side-channel attacks (Spectre-class) across sprite tenants on a shared host: Firecracker and CH both rely on kernel mitigations. This is the same risk surface AWS Lambda accepts; Helios should match its hardening.
+- Firecracker has known snapshot-entropy reuse concerns [11]. CH inherits the same class of problem. VMGenID must be wired into the Overdrive microvm driver before any snapshot-restore feature is exposed to untrusted workloads.
+- Side-channel attacks (Spectre-class) across sprite tenants on a shared host: Firecracker and CH both rely on kernel mitigations. This is the same risk surface AWS Lambda accepts; Overdrive should match its hardening.
 - `userfaultfd` has a history of LPE CVEs. Exposing it to workload-restore paths without careful auditing is risky.
 
 ## 6. Recommendation
@@ -264,7 +264,7 @@ Sprites runs *"arbitrary code... binary your user just uploaded"* [3]. Multi-ten
 
 Specifically:
 
-1. **Do not ship a `sprite` driver.** Do not ship anything called "sprite". That is Fly.io's product name and the Helios positioning should be its own.
+1. **Do not ship a `sprite` driver.** Do not ship anything called "sprite". That is Fly.io's product name and the Overdrive positioning should be its own.
 2. **Extend the `microvm` driver** with two capabilities:
    - **Persistent rootfs bound to the workload identity**, stored object-backed (Garage) with an NVMe hot-tier cache, using a JuiceFS-style chunk layer (or a simpler virtiofs-over-Garage first pass).
    - **Checkpoint/restore via Cloud Hypervisor's existing snapshot API**, with `userfaultfd` lazy memory paging. Expose as `workload.snapshot()` control-plane action.
@@ -283,16 +283,16 @@ Specifically:
    - Phase 4: Idle-eviction with checkpoint, scale-to-zero semantics. Requires reconciler work.
 
 ### 6.2 Three Key Reasons
-1. **The building blocks already exist in Helios**; the work is integration, not invention. CH snapshot/restore + Garage + gateway + SPIFFE + credential proxy + WASM sidecars compose naturally into the sprites-shaped capability without a new driver.
-2. **The AI-agent execution substrate is a strategically important category** (sprites, E2B, Modal, Cloudflare all launched products here between 2025 and 2026). A Helios that cannot run a long-lived agent workload is handing the category to Fly/Cloudflare.
-3. **Helios has a genuine wedge here** — credential proxy + WASM sidecar content inspection is platform-level defense against prompt injection that no competitor ships at the infrastructure layer. Position the feature on this wedge, not on "we too have a Firecracker sandbox."
+1. **The building blocks already exist in Overdrive**; the work is integration, not invention. CH snapshot/restore + Garage + gateway + SPIFFE + credential proxy + WASM sidecars compose naturally into the sprites-shaped capability without a new driver.
+2. **The AI-agent execution substrate is a strategically important category** (sprites, E2B, Modal, Cloudflare all launched products here between 2025 and 2026). A Overdrive that cannot run a long-lived agent workload is handing the category to Fly/Cloudflare.
+3. **Overdrive has a genuine wedge here** — credential proxy + WASM sidecar content inspection is platform-level defense against prompt injection that no competitor ships at the infrastructure layer. Position the feature on this wedge, not on "we too have a Firecracker sandbox."
 
 ### 6.3 Open Questions for User Discussion
 - **Naming**: not `sprite`. Candidates: `microvm` with `persistent = true`; workload profile `agent`; or a new noun (`cell`, `habitat`, `tenant-vm`). Strong opinion: keep it at the driver level, not product-level.
-- **Storage layer**: roll JuiceFS directly, fork it, or write a Helios-native chunk-store over Garage? JuiceFS is Apache-2.0 and battle-tested; the "own your primitives" principle suggests embedding it, not depending on it as a separate daemon.
+- **Storage layer**: roll JuiceFS directly, fork it, or write a Overdrive-native chunk-store over Garage? JuiceFS is Apache-2.0 and battle-tested; the "own your primitives" principle suggests embedding it, not depending on it as a separate daemon.
 - **Scope of the agent profile**: only AI-agent workloads, or any long-lived stateful workload (CI runners, ephemeral dev envs, notebooks)? The profile is cheap to generalize if designed right.
-- **Multi-tenancy boundary**: is Helios multi-tenant by design (customers A and B on the same node) or single-tenant (one org, one Helios cluster)? The answer changes the hardening bar significantly. The current whitepaper is ambiguous; this choice should be made explicitly before exposing persistent arbitrary-code sandboxes.
-- **Public HTTPS termination**: does Helios ship automatic ACME + SNI routing for the per-workload URL, or is that a gateway plugin? Fly's advantage here is the Anycast network; Helios will not match that in v1.
+- **Multi-tenancy boundary**: is Overdrive multi-tenant by design (customers A and B on the same node) or single-tenant (one org, one Overdrive cluster)? The answer changes the hardening bar significantly. The current whitepaper is ambiguous; this choice should be made explicitly before exposing persistent arbitrary-code sandboxes.
+- **Public HTTPS termination**: does Overdrive ship automatic ACME + SNI routing for the per-workload URL, or is that a gateway plugin? Fly's advantage here is the Anycast network; Overdrive will not match that in v1.
 
 ---
 
@@ -306,15 +306,15 @@ Specifically:
 ### Gap 2: Cloud Hypervisor snapshot scale-testing evidence
 **Issue**: No public evidence of Cloud Hypervisor snapshot/restore being exercised at AWS-Lambda scale (millions/day). Firecracker has this via AWS Lambda and Fly.
 **Attempted**: Search on "Cloud Hypervisor production snapshot scale"; found release notes but not deployment case studies.
-**Recommendation**: Flag as open engineering risk. Early Helios sprite-equivalent workloads should be either single-tenant or internal-only until scale evidence accumulates.
+**Recommendation**: Flag as open engineering risk. Early Overdrive sprite-equivalent workloads should be either single-tenant or internal-only until scale evidence accumulates.
 
 ### Gap 3: E2B cold-start latency ambiguity
 **Issue**: Two sources cite different numbers — ~150 ms [9] vs "not specified" [4]. Likely variation by template size.
 **Attempted**: Dev.to post [search result] references 28 ms; that is probably a specific micro-benchmark, not a representative sprite-vs-E2B comparison.
 **Recommendation**: For head-to-head claims, benchmark in-house rather than citing marketing.
 
-### Gap 4: Helios IntentStore / ObservationStore fit for per-sprite routing
-**Issue**: Fly uses Corrosion (SQLite CRDT) for instant URL provisioning. Helios's ObservationStore is also SQLite-CRDT (Corrosion-based per the whitepaper L333). The fit is conceptually perfect but not yet designed explicitly for per-workload public-URL provisioning.
+### Gap 4: Overdrive IntentStore / ObservationStore fit for per-sprite routing
+**Issue**: Fly uses Corrosion (SQLite CRDT) for instant URL provisioning. Overdrive's ObservationStore is also SQLite-CRDT (Corrosion-based per the whitepaper L333). The fit is conceptually perfect but not yet designed explicitly for per-workload public-URL provisioning.
 **Attempted**: Read whitepaper §4, §11.
 **Recommendation**: A small design note should validate that auto-provisioning a per-workload URL is O(1) and propagates within the CRDT gossip window.
 
@@ -334,7 +334,7 @@ Specifically:
 
 [7] E2B. "e2b-dev/infra — Infrastructure that's powering E2B Cloud". GitHub. Apache-2.0. 2026. https://github.com/e2b-dev/infra. Accessed 2026-04-19.
 
-[8] Fly.io. "Fly Machines documentation". fly.io/docs. Referenced via [1] and prior Helios research `docs/research/infrastructure/fly-io-primitives-helios-relevance.md`.
+[8] Fly.io. "Fly Machines documentation". fly.io/docs. Referenced via [1] and prior Overdrive research `docs/research/infrastructure/fly-io-primitives-overdrive-relevance.md`.
 
 [9] Dwarves Foundation. "E2B breakdown". memo.d.foundation. 2026. https://memo.d.foundation/breakdown/e2b. Accessed 2026-04-19.
 
@@ -364,6 +364,6 @@ Specifically:
 
 [22] InfoQ. "Cloudflare Launches Dynamic Workers Open Beta". infoq.com. April 2026. https://www.infoq.com/news/2026/04/cloudflare-dynamic-workers-beta/. Accessed 2026-04-19.
 
-[23] Helios whitepaper (`docs/whitepaper.md`). §§ 2, 4, 6, 7, 8, 9, 11, 16, 17. Accessed 2026-04-19.
+[23] Overdrive whitepaper (`docs/whitepaper.md`). §§ 2, 4, 6, 7, 8, 9, 11, 16, 17. Accessed 2026-04-19.
 
-[24] Prior Helios research: `docs/research/infrastructure/fly-io-primitives-helios-relevance.md`. Accessed 2026-04-19.
+[24] Prior Overdrive research: `docs/research/infrastructure/fly-io-primitives-overdrive-relevance.md`. Accessed 2026-04-19.

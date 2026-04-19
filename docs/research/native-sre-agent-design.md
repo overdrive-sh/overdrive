@@ -1,26 +1,26 @@
-# Research: Native SRE Investigation Agent for Helios
+# Research: Native SRE Investigation Agent for Overdrive
 
 **Date**: 2026-04-19 | **Researcher**: nw-researcher (Nova) | **Confidence**: High | **Sources**: 24
 
 ## Executive Summary
 
-The prior research [[1]](./holmesgpt-integration-analysis.md) settled the dependency question — HolmesGPT is not embedded. This document answers the follow-on: **what does Helios build natively to match or exceed HolmesGPT's SRE capabilities, in Rust, leveraging primitives §12 already describes?**
+The prior research [[1]](./holmesgpt-integration-analysis.md) settled the dependency question — HolmesGPT is not embedded. This document answers the follow-on: **what does Overdrive build natively to match or exceed HolmesGPT's SRE capabilities, in Rust, leveraging primitives §12 already describes?**
 
-The conclusion in one sentence: **Helios already has the hard parts; what's missing is (a) a declarative catalog around the toolset concept, (b) a first-class `Investigation` lifecycle object, (c) a runbook primitive, and (d) a `SimLLM` trait for DST.** Everything else — the LLM agent (`rig-rs`), the tool execution substrate (WASM reconcilers / sidecars / policies), the telemetry spine (DuckLake + ObservationStore with SPIFFE identity on every event), the approval gate, incident memory with embedding similarity, typed reconciler actions — is already in the whitepaper or is a trivial extension of it.
+The conclusion in one sentence: **Overdrive already has the hard parts; what's missing is (a) a declarative catalog around the toolset concept, (b) a first-class `Investigation` lifecycle object, (c) a runbook primitive, and (d) a `SimLLM` trait for DST.** Everything else — the LLM agent (`rig-rs`), the tool execution substrate (WASM reconcilers / sidecars / policies), the telemetry spine (DuckLake + ObservationStore with SPIFFE identity on every event), the approval gate, incident memory with embedding similarity, typed reconciler actions — is already in the whitepaper or is a trivial extension of it.
 
 Six concrete proposals structured around HolmesGPT's conceptual primitives:
 
-1. **Toolsets as WASM** — a declarative Helios primitive alongside reconcilers, policies, and sidecars. Same sandbox, same content-addressed storage in Garage, same load-time verification. The hard-coded §12 tool list becomes a *default toolset*; operators add more without rebuilding the binary.
+1. **Toolsets as WASM** — a declarative Overdrive primitive alongside reconcilers, policies, and sidecars. Same sandbox, same content-addressed storage in Garage, same load-time verification. The hard-coded §12 tool list becomes a *default toolset*; operators add more without rebuilding the binary.
 2. **Runbooks as a new primitive** — markdown + frontmatter matching HolmesGPT's format so the community catalog is re-usable. Runbooks guide LLM *reasoning*; they do not replace workflows, which remain the durable-execution primitive (§18).
 3. **Investigation as a first-class resource** in the data model alongside `Job`, `Node`, `Allocation`, `Policy`. Lifecycle: `triggered → gathering → reasoning → concluding → persisted`. The persisted form is the §12 incident-memory record.
-4. **Correlation via SPIFFE-ID + causal window** — Helios's per-event identity makes this a DuckLake SQL query, not a separate subsystem. HolmesGPT correlates via alert-label matching; Helios correlates via cryptographic identity. Structural advantage.
-5. **Remediation as typed `Action` enums** — HolmesGPT emits YAML patches; Helios's LLM emits typed reconciler actions that flow through Raft. This collapses "remediation" back into the reconciler model. Risk-tiered approval gate (already in §12) decides what auto-executes.
+4. **Correlation via SPIFFE-ID + causal window** — Overdrive's per-event identity makes this a DuckLake SQL query, not a separate subsystem. HolmesGPT correlates via alert-label matching; Overdrive correlates via cryptographic identity. Structural advantage.
+5. **Remediation as typed `Action` enums** — HolmesGPT emits YAML patches; Overdrive's LLM emits typed reconciler actions that flow through Raft. This collapses "remediation" back into the reconciler model. Risk-tiered approval gate (already in §12) decides what auto-executes.
 6. **`SimLLM` DST trait** — seeded, deterministic completions from stored transcripts. §21 lists six sim traits today; LLM is the missing seventh. This is the largest correctness investment available.
 
-**Structural advantages Helios ships out of the box** that HolmesGPT structurally cannot have:
+**Structural advantages Overdrive ships out of the box** that HolmesGPT structurally cannot have:
 
-- Kernel-native, zero-instrumentation telemetry with SPIFFE identity on every flow and resource event (§12) [[18]](../whitepaper.md). HolmesGPT scrapes Prometheus and kubectl; Helios has the source.
-- SQL + time travel on the full telemetry history via DuckLake (§17) [[18]](../whitepaper.md). HolmesGPT correlates via text matching; Helios correlates with snapshot reads.
+- Kernel-native, zero-instrumentation telemetry with SPIFFE identity on every flow and resource event (§12) [[18]](../whitepaper.md). HolmesGPT scrapes Prometheus and kubectl; Overdrive has the source.
+- SQL + time travel on the full telemetry history via DuckLake (§17) [[18]](../whitepaper.md). HolmesGPT correlates via text matching; Overdrive correlates with snapshot reads.
 - Owned dataplane — the LLM agent can install temporary BPF counters to verify hypotheses (§7) [[18]](../whitepaper.md). No other orchestrator's SRE agent can do this.
 - DST foundation — §21 already takes determinism seriously; adding `SimLLM` is a genuine first. No existing SRE agent has deterministic simulation of its reasoning tier.
 
@@ -34,9 +34,9 @@ The whitepaper edits are additive: a new §12.X *Native SRE Investigation Agent*
 
 **Search strategy**. The HolmesGPT factual base is already established in the prior research document [[1]](./holmesgpt-integration-analysis.md) — 18 sources cited there, every major claim cross-referenced. This pass re-aimed that material at the native-build question and added targeted verification on (a) rig-rs's provider surface in 2026, (b) the official `rmcp` Rust SDK status, (c) HolmesGPT toolset execution semantics for the native re-implementation discussion.
 
-**Source selection**. Primary: Helios whitepaper v0.12 (project SSOT); prior research on HolmesGPT. Secondary: rig-rs docs ([docs.rs/rig-core](https://docs.rs/rig-core/latest/rig/), [rig.rs](https://www.rig.rs/), [GitHub 0xPlaygrounds/rig](https://github.com/0xPlaygrounds/rig)); MCP official Rust SDK ([modelcontextprotocol/rust-sdk](https://github.com/modelcontextprotocol/rust-sdk)); HolmesGPT toolset YAML format ([custom_toolset.yaml example](https://github.com/robusta-dev/holmesgpt/blob/master/examples/custom_toolset.yaml)).
+**Source selection**. Primary: Overdrive whitepaper v0.12 (project SSOT); prior research on HolmesGPT. Secondary: rig-rs docs ([docs.rs/rig-core](https://docs.rs/rig-core/latest/rig/), [rig.rs](https://www.rig.rs/), [GitHub 0xPlaygrounds/rig](https://github.com/0xPlaygrounds/rig)); MCP official Rust SDK ([modelcontextprotocol/rust-sdk](https://github.com/modelcontextprotocol/rust-sdk)); HolmesGPT toolset YAML format ([custom_toolset.yaml example](https://github.com/robusta-dev/holmesgpt/blob/master/examples/custom_toolset.yaml)).
 
-**Quality standards**. Every HolmesGPT claim carries a URL from the prior research (which itself cross-referenced official docs + source code). Every Helios claim carries a whitepaper section reference. Every technology claim (rig-rs, rmcp) is verified from ≥1 official source.
+**Quality standards**. Every HolmesGPT claim carries a URL from the prior research (which itself cross-referenced official docs + source code). Every Overdrive claim carries a whitepaper section reference. Every technology claim (rig-rs, rmcp) is verified from ≥1 official source.
 
 **Adaptive depth note**. The hard HolmesGPT facts were already gathered in [[1]](./holmesgpt-integration-analysis.md); this pass spent budget on the design analysis rather than re-gathering the factual base. Where prior research answered a question, the citation points there rather than re-citing the underlying URL.
 
@@ -61,9 +61,9 @@ get_node_metrics()      get_incident_history()       propose_action(action)
 
 This is a Rust trait object dispatch — hard-coded at compile time, not extensible without a binary rebuild. It is sufficient for what §12 specifies, but it cannot absorb community-contributed toolsets or operator-specific diagnostics.
 
-### 1.3 Design gap and the natural Helios answer
+### 1.3 Design gap and the natural Overdrive answer
 
-Helios already has three WASM extension surfaces, each with identical execution primitives:
+Overdrive already has three WASM extension surfaces, each with identical execution primitives:
 
 | Surface | Purpose | Reference |
 |---|---|---|
@@ -123,7 +123,7 @@ struct ToolsetContext<'a> {
 
 Three consequences:
 
-1. **The hard-coded §12 tool list becomes the `builtin:helios-core` toolset** — a Rust trait object, zero WASM overhead, loaded by default. This matches the Rust-native + WASM-extension pattern §9 already uses for sidecars (`builtin:credential-proxy` vs user WASM).
+1. **The hard-coded §12 tool list becomes the `builtin:overdrive-core` toolset** — a Rust trait object, zero WASM overhead, loaded by default. This matches the Rust-native + WASM-extension pattern §9 already uses for sidecars (`builtin:credential-proxy` vs user WASM).
 2. **Operators add toolsets without rebuilding the binary.** A DuckLake-heavy toolset for SQL-level anomaly detection; a PagerDuty ingestion toolset; a Git-log toolset that correlates deploy commits against flow-event timestamps. The binary doesn't grow; the Image Factory doesn't gain `kubectl`.
 3. **The LLM-visible tool surface is versioned and content-addressed.** A toolset loaded as `sha256:abc123` produces bit-for-bit the same tool surface on every node. Investigation transcripts (§3 below) can cite toolset hashes, making past investigations reproducible.
 
@@ -131,30 +131,30 @@ Three consequences:
 
 The prior research evaluated this in Shape C and rejected wholesale adoption [[1]](./holmesgpt-integration-analysis.md) §3 Shape C. The reason is that HolmesGPT tools shell out to binaries (`kubectl`, `curl`, `aws`, `psql`, ...) — the Image Factory discipline (§24) explicitly excludes these from the node OS. A Rust toolset crate that calls DuckLake SQL directly is both faster and safer than a WASM sandbox executing shell; conversely, a user toolset that needs arbitrary tooling should run as a sidecar on an ordinary persistent-microVM workload, not in the investigation sandbox.
 
-**The cherry-pick is the format, not the execution model.** A toolset manifest file declaring tool names, descriptions, JSON Schemas for input/output, and a reference to the backing Rust trait object (or WASM module hash) is a small loader; every tool that HolmesGPT's YAML expresses as a shell command, Helios expresses as a DuckLake SQL, an ObservationStore subscription, or a WASM module invocation. The LLM-visible shape is identical.
+**The cherry-pick is the format, not the execution model.** A toolset manifest file declaring tool names, descriptions, JSON Schemas for input/output, and a reference to the backing Rust trait object (or WASM module hash) is a small loader; every tool that HolmesGPT's YAML expresses as a shell command, Overdrive expresses as a DuckLake SQL, an ObservationStore subscription, or a WASM module invocation. The LLM-visible shape is identical.
 
-### 1.5 What the default `builtin:helios-core` toolset ships with
+### 1.5 What the default `builtin:overdrive-core` toolset ships with
 
-A concrete proposal for the tools that should exist on day one, lifting what HolmesGPT's Kubernetes toolset provides and mapping each to a Helios-native backend:
+A concrete proposal for the tools that should exist on day one, lifting what HolmesGPT's Kubernetes toolset provides and mapping each to a Overdrive-native backend:
 
-| HolmesGPT-equivalent tool | Helios-native backend |
+| HolmesGPT-equivalent tool | Overdrive-native backend |
 |---|---|
-| `kubectl get pods` / `describe pod` | `helios.query_allocations(sql)` against ObservationStore `alloc_status` (§4) |
-| `kubectl get nodes` | `helios.query_nodes(sql)` against `node_health` |
-| `kubectl top node/pod` | `helios.query_resources(sql)` against DuckLake resource events |
-| `kubectl logs` | `helios.tail_events(alloc_id, duration)` — eBPF ringbuf + structured logs |
-| `kubectl describe policy` (NetworkPolicy) | `helios.get_policy(id)` + `helios.query_policy_verdicts(sql)` |
-| Prometheus `query_range` | `helios.query_flows(sql)` + `helios.query_resources(sql)` (DuckLake time travel) |
+| `kubectl get pods` / `describe pod` | `overdrive.query_allocations(sql)` against ObservationStore `alloc_status` (§4) |
+| `kubectl get nodes` | `overdrive.query_nodes(sql)` against `node_health` |
+| `kubectl top node/pod` | `overdrive.query_resources(sql)` against DuckLake resource events |
+| `kubectl logs` | `overdrive.tail_events(alloc_id, duration)` — eBPF ringbuf + structured logs |
+| `kubectl describe policy` (NetworkPolicy) | `overdrive.get_policy(id)` + `overdrive.query_policy_verdicts(sql)` |
+| Prometheus `query_range` | `overdrive.query_flows(sql)` + `overdrive.query_resources(sql)` (DuckLake time travel) |
 | `kubectl get events` | DuckLake SQL against telemetry events, scoped by SPIFFE ID and time window |
-| Kubernetes Remediation MCP | `helios.propose_action(action)` — typed `Action` enum (§5) |
-| Past-incident search | `helios.search_incidents(text_or_embedding)` — libSQL with embeddings (§12) |
-| Install a diagnostic counter | `helios.attach_probe(bpf_sha, alloc_id, duration)` — **unique to Helios** (§7 below) |
+| Kubernetes Remediation MCP | `overdrive.propose_action(action)` — typed `Action` enum (§5) |
+| Past-incident search | `overdrive.search_incidents(text_or_embedding)` — libSQL with embeddings (§12) |
+| Install a diagnostic counter | `overdrive.attach_probe(bpf_sha, alloc_id, duration)` — **unique to Overdrive** (§7 below) |
 
 Every single one of these is SQL-shaped or typed-action-shaped. None requires `kubectl` to be in the image.
 
 ### 1.6 Finding
 
-**Helios should extend the §12 tool surface to a declarative toolset catalog backed by Rust trait objects (built-in) and WASM modules (third-party), loaded via content-addressed hashes from Garage.** The `rig-rs` agent consumes the union of loaded toolsets; investigations cite the toolset hashes used so transcripts reproduce. This is the structural Helios answer to HolmesGPT's toolset ecosystem, and it composes natively with the WASM extension model §9, §13, §18 already specifies. **Confidence: High.**
+**Overdrive should extend the §12 tool surface to a declarative toolset catalog backed by Rust trait objects (built-in) and WASM modules (third-party), loaded via content-addressed hashes from Garage.** The `rig-rs` agent consumes the union of loaded toolsets; investigations cite the toolset hashes used so transcripts reproduce. This is the structural Overdrive answer to HolmesGPT's toolset ecosystem, and it composes natively with the WASM extension model §9, §13, §18 already specifies. **Confidence: High.**
 
 ---
 
@@ -181,13 +181,13 @@ They compose: a runbook may conclude "roll back deployment foo to v2.11.3"; the 
 
 ### 2.3 Format — adopt HolmesGPT's markdown + frontmatter
 
-The HolmesGPT runbook format is adoptable verbatim. Markdown is ubiquitous; the frontmatter is YAML. The benefit of matching HolmesGPT is that the community-maintained runbook corpus is directly re-usable — Helios doesn't re-author every PodCrashLooping runbook the community has already written; it translates the Kubernetes references in the runbook body to Helios allocations as the LLM applies it.
+The HolmesGPT runbook format is adoptable verbatim. Markdown is ubiquitous; the frontmatter is YAML. The benefit of matching HolmesGPT is that the community-maintained runbook corpus is directly re-usable — Overdrive doesn't re-author every PodCrashLooping runbook the community has already written; it translates the Kubernetes references in the runbook body to Overdrive allocations as the LLM applies it.
 
-A Helios runbook adds optional Helios-specific frontmatter for scoping on SPIFFE IDs and policy verdicts:
+A Overdrive runbook adds optional Overdrive-specific frontmatter for scoping on SPIFFE IDs and policy verdicts:
 
 ```yaml
 ---
-id: helios/alloc-oom-repeated
+id: overdrive/alloc-oom-repeated
 description: Repeated OOM kills for the same allocation
 triggers:
   - event: alloc_state_change
@@ -197,9 +197,9 @@ triggers:
       window_seconds: 3600
       min_count: 3
 scope:
-  job_identities: ["spiffe://helios.local/job/*"]
+  job_identities: ["spiffe://overdrive.local/job/*"]
 required_toolsets:
-  - "builtin:helios-core"
+  - "builtin:overdrive-core"
   - "sha256:abc123"   # an optional community toolset
 ---
 
@@ -218,8 +218,8 @@ Runbooks are:
 
 - **Stored** in Garage, content-addressed by sha256 of the markdown. Immutable; cite-able by hash in investigation transcripts.
 - **Indexed** in the incident-memory libSQL (§12) alongside past incidents. The same embedding-similarity index that serves incident retrieval serves runbook match. `INSERT INTO runbooks_embeddings (runbook_sha, description, embedding) VALUES (...)`.
-- **Retrieved** via a `helios.get_runbook(sha_or_id)` tool exposed from the `builtin:helios-core` toolset.
-- **Matched** by the agent at investigation-start: for a flagged incident, the agent's first tool call is `helios.match_runbook(incident_description)` returning top-k runbooks by embedding similarity against their frontmatter `description`.
+- **Retrieved** via a `overdrive.get_runbook(sha_or_id)` tool exposed from the `builtin:overdrive-core` toolset.
+- **Matched** by the agent at investigation-start: for a flagged incident, the agent's first tool call is `overdrive.match_runbook(incident_description)` returning top-k runbooks by embedding similarity against their frontmatter `description`.
 
 ### 2.5 The runbook reconciler
 
@@ -227,7 +227,7 @@ Because runbooks are evaluated *when* an investigation is triggered, they need n
 
 ### 2.6 Finding
 
-**Runbooks belong as a new primitive alongside workflows**, with format borrowed from HolmesGPT (markdown + frontmatter + `catalog.json`-equivalent index) so the community ecosystem is leverageable. Storage in Garage (content-addressed), indexed via the existing incident-memory libSQL embedding system. A `RunbookLoader` reconciler handles attachment/indexing; runbook retrieval during investigation is a tool call in `builtin:helios-core`. **Confidence: High.**
+**Runbooks belong as a new primitive alongside workflows**, with format borrowed from HolmesGPT (markdown + frontmatter + `catalog.json`-equivalent index) so the community ecosystem is leverageable. Storage in Garage (content-addressed), indexed via the existing incident-memory libSQL embedding system. A `RunbookLoader` reconciler handles attachment/indexing; runbook retrieval during investigation is a tool call in `builtin:overdrive-core`. **Confidence: High.**
 
 ---
 
@@ -237,7 +237,7 @@ Because runbooks are evaluated *when* an investigation is triggered, they need n
 
 §4 lists the core data model: `Job`, `Node`, `Allocation`, `Policy`, `Certificate`. Self-healing is described in §12 as tiers and reasoning steps, but there is no resource representing *"an in-flight reasoning session on a specific anomaly"*. This gap shows up in several places:
 
-- Observability. An operator cannot `helios investigation list` or `helios investigation describe inv-a1b2c3`.
+- Observability. An operator cannot `overdrive investigation list` or `overdrive investigation describe inv-a1b2c3`.
 - Approval gate. `propose_action` needs to carry a reference to *which* reasoning session produced the proposal — otherwise the audit trail is lossy.
 - DST. §21 can simulate the dataplane and the control plane, but an LLM reasoning pass is not a first-class object it can name and replay.
 - Cost metering (§6 below). Per-investigation token budgets need an investigation identifier to attribute spend.
@@ -379,9 +379,9 @@ This makes investigation-agent correctness regressions catchable in CI. Today, c
 
 Robusta (HolmesGPT's sibling project) handles correlation at the alert layer — grouping correlated AlertManager alerts by label similarity into one investigation. The correlation substrate is text/label matching on what AlertManager emits. ([[1]](./holmesgpt-integration-analysis.md) §1.6 — the built-in toolset catalog includes AlertManager ingestion.)
 
-### 4.2 Why Helios's substrate is better
+### 4.2 Why Overdrive's substrate is better
 
-Every eBPF event Helios emits carries the full SPIFFE ID of the source and destination workloads [[18]](../whitepaper.md §12). Every resource event carries the alloc ID and job name. Every policy verdict carries the rule matched. The correlation substrate is *already cryptographic identity*, not a label set an operator hopes to be consistent.
+Every eBPF event Overdrive emits carries the full SPIFFE ID of the source and destination workloads [[18]](../whitepaper.md §12). Every resource event carries the alloc ID and job name. Every policy verdict carries the rule matched. The correlation substrate is *already cryptographic identity*, not a label set an operator hopes to be consistent.
 
 Mechanically: correlation is a DuckLake SQL query over events joined on `src_identity` / `dst_identity` / `alloc_id`, windowed by causal-time proximity.
 
@@ -391,7 +391,7 @@ Mechanically: correlation is a DuckLake SQL query over events joined on `src_ide
 WITH anchor AS (
   SELECT timestamp, src_identity
   FROM flows
-  WHERE src_identity = 'spiffe://helios.local/job/payments/alloc/a1b2c3'
+  WHERE src_identity = 'spiffe://overdrive.local/job/payments/alloc/a1b2c3'
     AND verdict = 'deny'
     AND timestamp BETWEEN :t0 AND :t1
 )
@@ -448,13 +448,13 @@ So the split is: `investigation_state` in Corrosion (live); `incidents` in libSQ
 
 HolmesGPT's remediation surface is the "Kubernetes Remediation" MCP server — one of ~10 addons, opt-in, ships as a separate Helm sub-chart. It proposes concrete actions as YAML patches: restart pod, scale replicas, roll back deployment, cordon node, patch annotation. Human ratification is "operator reviews the YAML patch and applies it." ([[1]](./holmesgpt-integration-analysis.md) §1.6, §1.10)
 
-### 5.2 Helios already has this, and better
+### 5.2 Overdrive already has this, and better
 
 The §18 reconciler model ships with a set of built-in reconcilers:
 
 > Job lifecycle (start, stop, migrate, restart) · Certificate rotation · Resource right-sizing · Rolling deployment strategies · Canary promotion/rollback · Node drain and replacement · WASM function scaling · Chaos engineering · Workflow execution
 
-Every common SRE remediation is already a reconciler action. The LLM agent does not need a "Helios Remediation MCP server" — it emits typed `Action` enums that the existing reconcilers consume.
+Every common SRE remediation is already a reconciler action. The LLM agent does not need a "Overdrive Remediation MCP server" — it emits typed `Action` enums that the existing reconcilers consume.
 
 The action catalog — drafted as a typed enum the agent produces:
 
@@ -501,7 +501,7 @@ Tier classification is encoded on each `Action` variant at the type level (a `co
 
 ### 5.4 Why typed actions are better than YAML patches
 
-HolmesGPT emits YAML because Kubernetes is the substrate and kubectl-apply is the interface. Helios is not Kubernetes; its substrate is typed Rust enums flowing through Raft.
+HolmesGPT emits YAML because Kubernetes is the substrate and kubectl-apply is the interface. Overdrive is not Kubernetes; its substrate is typed Rust enums flowing through Raft.
 
 Concrete benefits:
 
@@ -540,7 +540,7 @@ The proposal → ratification → application cycle is itself a *workflow* under
 
 ### 5.6 Finding
 
-**Helios already has HolmesGPT's remediation capability structurally; the missing piece is the typed `Action` enum that the LLM agent emits.** This collapses remediation back into the reconciler model — no new subsystem. Risk-tiered auto-execution is encoded at the type level, not configured at runtime. The approval gate (§12) ratifies Tier 2; Tier 1 is audited but auto-applied; Tier 0 (reads) is unrestricted. **Confidence: High.**
+**Overdrive already has HolmesGPT's remediation capability structurally; the missing piece is the typed `Action` enum that the LLM agent emits.** This collapses remediation back into the reconciler model — no new subsystem. Risk-tiered auto-execution is encoded at the type level, not configured at runtime. The approval gate (§12) ratifies Tier 2; Tier 1 is audited but auto-applied; Tier 0 (reads) is unrestricted. **Confidence: High.**
 
 ---
 
@@ -558,13 +558,13 @@ Comparison to HolmesGPT's LiteLLM-backed surface of 11 documented providers ([[1
 
 Ollama is already in rig-rs's supported list. `mistral.rs` and `llama.cpp` are ABI-compatible with the OpenAI chat-completions schema when exposed via their HTTP servers, so rig-rs's OpenAI client points at a local endpoint without code changes.
 
-For truly air-gapped deployments, Helios's option space is:
+For truly air-gapped deployments, Overdrive's option space is:
 
 | Option | Ships LLM inference in the binary? | Operator burden |
 |---|---|---|
 | A. Call operator-provided endpoint (Ollama, mistral.rs, OpenAI) | No | Operator runs the endpoint |
 | B. Embed `mistral.rs` in the control plane | Yes | None — but 8–30 GB model weights in the Image Factory |
-| C. Ship LLM as a Helios *workload*, not in the binary | No (not in the CP binary) | Helios scheduler places the LLM workload |
+| C. Ship LLM as a Overdrive *workload*, not in the binary | No (not in the CP binary) | Overdrive scheduler places the LLM workload |
 
 **Recommendation: Option C.** Consistent with the single-binary principle (§2 principle 8) — the control plane stays ~30 MiB single / ~80 MiB HA. The LLM runs as a microVM workload (persistent, `snapshot_on_idle_seconds` set, GPU schedulable), scheduled like any other workload, reached by `rig-rs` via a private service VIP (§11). This is the same shape §11 already gives HTTP services and mirrors the Shape B pattern the prior research recommended for HolmesGPT. The Image Factory (§24) does not grow a Python runtime or model weights by default.
 
@@ -572,7 +572,7 @@ Tight-air-gap operators who cannot pull from public model registries can pre-sta
 
 ### 6.3 Cost control — already has the right substrate
 
-HolmesGPT has basic cost controls but no published per-investigation benchmarks ([[1]](./holmesgpt-integration-analysis.md) §6.1). The Helios-native answer reuses primitives already in the platform:
+HolmesGPT has basic cost controls but no published per-investigation benchmarks ([[1]](./holmesgpt-integration-analysis.md) §6.1). The Overdrive-native answer reuses primitives already in the platform:
 
 - **Per-investigation token budget** — a field on the `Investigation` object (§3.2). The agent's tool-call loop checks the budget before each LLM turn and aborts gracefully at exhaustion, marking `InvestigationState::Failed { reason: "budget exhausted" }`.
 - **Per-job token budget** — stored in IntentStore.job.policies. The LLM agent reads the budget when spawning an investigation scoped to that job's identities.
@@ -582,11 +582,11 @@ HolmesGPT has basic cost controls but no published per-investigation benchmarks 
 
 ### 6.4 Finding
 
-**rig-rs's provider surface is sufficient; keep it.** Local-model support lands via the Helios workload pattern, not by embedding inference in the control plane. Cost control uses the existing credential-proxy + ObservationStore + libSQL incident-memory pipeline — no new subsystem. The `Investigation` resource (§3) carries the budget and attribution. **Confidence: High.**
+**rig-rs's provider surface is sufficient; keep it.** Local-model support lands via the Overdrive workload pattern, not by embedding inference in the control plane. Cost control uses the existing credential-proxy + ObservationStore + libSQL incident-memory pipeline — no new subsystem. The `Investigation` resource (§3) carries the budget and attribution. **Confidence: High.**
 
 ---
 
-## 7. Structural Advantages Helios Has Over HolmesGPT
+## 7. Structural Advantages Overdrive Has Over HolmesGPT
 
 Explicit list — the prompt asked for this; it matters for framing the whitepaper edits.
 
@@ -594,7 +594,7 @@ Explicit list — the prompt asked for this; it matters for framing the whitepap
 
 HolmesGPT scrapes Prometheus, queries kubectl, reads log aggregators. Every data point has been *instrumented by someone* — the application, a sidecar, an operator. Identity correlation is label-based; labels can be inconsistent, forged, or missing.
 
-Helios's eBPF layer produces structured telemetry from the kernel for every workload without application instrumentation, with full SPIFFE ID on both ends of every flow (§12). This is not an incremental improvement — it is a different class of data. An investigation agent running on this substrate has:
+Overdrive's eBPF layer produces structured telemetry from the kernel for every workload without application instrumentation, with full SPIFFE ID on both ends of every flow (§12). This is not an incremental improvement — it is a different class of data. An investigation agent running on this substrate has:
 
 - No missing events. Every packet, every allocation, every policy verdict is visible.
 - No identity ambiguity. The src_identity and dst_identity are cryptographic SPIFFE IDs, not IPs or labels.
@@ -606,17 +606,17 @@ The first implication for the SRE agent: correlation (§4) is a SQL query, not a
 
 HolmesGPT investigations query Prometheus, Loki, Datadog in real time — each with its own query language, its own retention, its own rate limits. Cross-system correlation is the agent's problem.
 
-Helios has one SQL endpoint spanning the full telemetry history (§17) with time travel (`AT (TIMESTAMP => '...')` syntax). The agent runs one SQL query that joins flow events, resource events, policy verdicts, and allocation transitions over any time range. "What were flow patterns at the time of the last incident?" is a one-liner. This is not theoretically available in HolmesGPT — the underlying stores don't compose.
+Overdrive has one SQL endpoint spanning the full telemetry history (§17) with time travel (`AT (TIMESTAMP => '...')` syntax). The agent runs one SQL query that joins flow events, resource events, policy verdicts, and allocation transitions over any time range. "What were flow patterns at the time of the last incident?" is a one-liner. This is not theoretically available in HolmesGPT — the underlying stores don't compose.
 
 ### 7.3 Incident memory with embedding similarity
 
 HolmesGPT has runbooks (static, human-authored) and evals (for regression testing the agent). It does *not* have persistent cross-incident learning — every new investigation starts cold.
 
-Helios §12 ships incident memory in libSQL with embedding-based similarity search. "We saw this before; last time the cause was X and the fix was Y" is the first tool the agent can call on any new anomaly. This compounds with operational age — the longer the cluster runs, the better the agent's starting point on each new incident.
+Overdrive §12 ships incident memory in libSQL with embedding-based similarity search. "We saw this before; last time the cause was X and the fix was Y" is the first tool the agent can call on any new anomaly. This compounds with operational age — the longer the cluster runs, the better the agent's starting point on each new incident.
 
 ### 7.4 Reconciler model with typed actions
 
-HolmesGPT proposes YAML patches. Helios's LLM proposes typed `Action` enums that flow through Raft. Every benefit in §5.4 above applies: type-level risk classification, compile-time exhaustiveness, deterministic replay, SPIFFE-bound identity.
+HolmesGPT proposes YAML patches. Overdrive's LLM proposes typed `Action` enums that flow through Raft. Every benefit in §5.4 above applies: type-level risk classification, compile-time exhaustiveness, deterministic replay, SPIFFE-bound identity.
 
 ### 7.5 DST coverage of the investigation agent
 
@@ -624,7 +624,7 @@ HolmesGPT proposes YAML patches. Helios's LLM proposes typed `Action` enums that
 
 ### 7.6 Owned dataplane — hypothesis verification
 
-This is the most underexploited structural advantage. HolmesGPT cannot add a diagnostic probe to the running system — it can only query what already exists. Helios owns the dataplane; the agent can propose *temporary diagnostic attachments*:
+This is the most underexploited structural advantage. HolmesGPT cannot add a diagnostic probe to the running system — it can only query what already exists. Overdrive owns the dataplane; the agent can propose *temporary diagnostic attachments*:
 
 ```rust
 Action::AttachDiagnosticProbe {
@@ -635,17 +635,17 @@ Action::AttachDiagnosticProbe {
 }
 ```
 
-Mechanics: the probe catalog lives in Garage, each probe signed by the platform CA. The approval gate admits Tier 0 (reversible read probe from curated catalog) automatically; Tier 1 (time-bounded counter attachment) is auto-ratified. The probe attaches via aya-rs, emits into the same eBPF ringbuf Helios already consumes, and detaches automatically at `duration` expiry — enforced by a reconciler deadline.
+Mechanics: the probe catalog lives in Garage, each probe signed by the platform CA. The approval gate admits Tier 0 (reversible read probe from curated catalog) automatically; Tier 1 (time-bounded counter attachment) is auto-ratified. The probe attaches via aya-rs, emits into the same eBPF ringbuf Overdrive already consumes, and detaches automatically at `duration` expiry — enforced by a reconciler deadline.
 
 The investigation agent can *verify* hypotheses, not merely propose them. This is a capability no HolmesGPT-class agent can have — they do not own the datapath. Naming this explicitly in the whitepaper is worthwhile.
 
 ### 7.7 Security posture — kernel-enforced, not cooperation-enforced
 
-HolmesGPT's safety story is read-only RBAC plus tool-level memory caps. Helios's safety story is BPF LSM + credential-proxy + content-inspector + mTLS + XDP policy (§19). A compromised investigation agent hits the same kernel walls as a well-behaved one. The investigation agent does not need to be trusted — only the platform it runs on does.
+HolmesGPT's safety story is read-only RBAC plus tool-level memory caps. Overdrive's safety story is BPF LSM + credential-proxy + content-inspector + mTLS + XDP policy (§19). A compromised investigation agent hits the same kernel walls as a well-behaved one. The investigation agent does not need to be trusted — only the platform it runs on does.
 
 ### 7.8 Finding
 
-**Seven structural advantages, none of which HolmesGPT can match without a different substrate.** These are not marketing points; they are load-bearing design properties. The whitepaper edit (§8 below) makes them explicit as the justification for why Helios builds natively rather than integrates externally. **Confidence: High.**
+**Seven structural advantages, none of which HolmesGPT can match without a different substrate.** These are not marketing points; they are load-bearing design properties. The whitepaper edit (§8 below) makes them explicit as the justification for why Overdrive builds natively rather than integrates externally. **Confidence: High.**
 
 ---
 
@@ -656,7 +656,7 @@ HolmesGPT's safety story is read-only RBAC plus tool-level memory caps. Helios's
 | Proposal | Phase | Justification |
 |---|---|---|
 | §6 `SimLLM` DST trait | **Phase 2** | Alongside the other DST trait stabilisation. The LLM agent ships in Phase 5; it must be born simulation-testable. Adding SimLLM after the agent lands is retrofit work, and §21's discipline is that nondeterminism boundaries are abstracted *from day one*. |
-| §1 Toolset catalog (as WASM, `builtin:helios-core`) | **Phase 5** | Ships with the LLM agent — the agent has no useful tool surface without it. The hard-coded §12 tool list in the whitepaper today is a *default toolset*, not a scaffold for the real thing. |
+| §1 Toolset catalog (as WASM, `builtin:overdrive-core`) | **Phase 5** | Ships with the LLM agent — the agent has no useful tool surface without it. The hard-coded §12 tool list in the whitepaper today is a *default toolset*, not a scaffold for the real thing. |
 | §3 Investigation resource + lifecycle | **Phase 5** | Prerequisite for cost metering (§6), correlation (§4), and approval-gate attribution (§5). Ships with the agent. |
 | §5 Typed `Action` enum + risk-tier gate | **Phase 5** | Already implied by §12's `propose_action`; this proposal makes the type and the tier explicit. Ships with the agent. |
 | §2 Runbook primitive + loader reconciler | **Phase 6** | Useful but not blocking for first LLM agent release. The agent can run without runbooks, matching incidents via bare embedding-similarity against past incidents. Runbooks add human-authored investigation guidance later. |
@@ -676,19 +676,19 @@ Revised placement: Phase 2 = `SimLLM`; Phase 5 = Investigation resource + toolse
 
 #### Draft: `§12.X Native SRE Investigation Agent` — new subsection under §12
 
-> Helios's Tier 3 reasoning surface is a native SRE investigation agent built on `rig-rs`, operating on the four primitives of any mature investigation system: **toolsets, runbooks, investigations, and remediations**. Each is a first-class Helios concept, implemented with primitives the platform already owns rather than as a separate subsystem.
+> Overdrive's Tier 3 reasoning surface is a native SRE investigation agent built on `rig-rs`, operating on the four primitives of any mature investigation system: **toolsets, runbooks, investigations, and remediations**. Each is a first-class Overdrive concept, implemented with primitives the platform already owns rather than as a separate subsystem.
 >
-> **Toolsets — the declarative catalog.** The agent's tool surface is a catalog of toolsets loaded at runtime. `builtin:helios-core` is a Rust trait object shipped in the binary, exposing SQL tools against DuckLake and ObservationStore, read-only projections of IntentStore, and the incident-memory retriever. Third-party toolsets are WASM modules — same execution primitive as reconcilers (§18), policies (§13), and sidecars (§9) — content-addressed by sha256 in Garage, loaded declaratively from the IntentStore, scoped to the subset of host functions their manifest requests. A toolset declares the tools it exposes (name, description, input/output JSON schemas, risk class); the agent sees the union of loaded toolsets' tools. Investigations cite the toolset hashes used so transcripts are reproducible.
+> **Toolsets — the declarative catalog.** The agent's tool surface is a catalog of toolsets loaded at runtime. `builtin:overdrive-core` is a Rust trait object shipped in the binary, exposing SQL tools against DuckLake and ObservationStore, read-only projections of IntentStore, and the incident-memory retriever. Third-party toolsets are WASM modules — same execution primitive as reconcilers (§18), policies (§13), and sidecars (§9) — content-addressed by sha256 in Garage, loaded declaratively from the IntentStore, scoped to the subset of host functions their manifest requests. A toolset declares the tools it exposes (name, description, input/output JSON schemas, risk class); the agent sees the union of loaded toolsets' tools. Investigations cite the toolset hashes used so transcripts are reproducible.
 >
 > **Runbooks — LLM-interpreted investigation guides.** Runbooks are markdown documents with YAML frontmatter describing trigger conditions and required toolsets. They are stored in Garage (content-addressed), indexed in the incident-memory libSQL alongside past incidents via the same embedding-similarity system (§12). When an investigation is triggered, the agent's first tool call matches the incident description against loaded runbooks; top-k matches are retrieved and included in the agent's context. Runbooks guide *reasoning* — the steps are interpretive, not deterministic. The deterministic counterpart is the workflow primitive (§18): runbooks produce diagnoses and proposals; workflows execute ratified proposals. Format matches the HolmesGPT runbook format so community-maintained runbook catalogs are leverageable directly.
 >
 > **Investigation — a first-class resource.** Investigations join `Job`, `Node`, `Allocation`, `Policy`, `Certificate` in the core data model. An investigation has a lifecycle (triggered → gathering → reasoning → concluding → concluded), a trigger (alert, reconciler escalation, operator query, scheduled), a correlation key, a list of affected SPIFFE identities, a token and wall-clock budget, and a trace of tool calls and LLM turns. Live investigation state lives in the ObservationStore (Corrosion `investigation_state` table); on conclusion, an investigation is compressed into an incident row in the incident-memory libSQL with embedding-indexed diagnosis for future retrieval. An `InvestigationReconciler` drives the lifecycle; proposals from the agent are queued through the graduated approval gate.
 >
-> **Correlation — identity-based, not label-based.** Every eBPF event in Helios carries cryptographic SPIFFE identity on both ends (§12). Correlation across alerts is a DuckLake SQL query over events joined on `src_identity` / `dst_identity` / `alloc_id`, windowed by causal-time proximity. Investigations carry a `correlation_key` derived from the primary identity, signal class, and time bucket; an incoming event whose key matches a live investigation's appends to that investigation rather than spawning a duplicate. This collapses alert-storm scenarios to one investigation per underlying phenomenon without label-based heuristics.
+> **Correlation — identity-based, not label-based.** Every eBPF event in Overdrive carries cryptographic SPIFFE identity on both ends (§12). Correlation across alerts is a DuckLake SQL query over events joined on `src_identity` / `dst_identity` / `alloc_id`, windowed by causal-time proximity. Investigations carry a `correlation_key` derived from the primary identity, signal class, and time bucket; an incoming event whose key matches a live investigation's appends to that investigation rather than spawning a duplicate. This collapses alert-storm scenarios to one investigation per underlying phenomenon without label-based heuristics.
 >
 > **Remediations — typed actions, tiered gate.** The agent proposes state changes by emitting typed `Action` enum variants — `RestartAllocation`, `ScaleJob`, `RollBackDeployment`, `DrainNode`, `ResizeAllocation`, `ProposePolicyEdit`, `AttachDiagnosticProbe`, `StartWorkflow`. The risk tier is encoded on the variant at the type level: Tier 0 (reversible reads) auto-executes; Tier 1 (low-blast-radius writes) auto-executes with operator notification; Tier 2 (high-blast-radius writes) requires human ratification. Proposals land in the IntentStore (Raft); once ratified, the target reconciler consumes the typed action and converges. Actions flowing through Raft rather than YAML patches flowing through kubectl is a structural consequence of the §18 reconciler model: compile-time exhaustiveness, deterministic replay, SPIFFE-bound identity.
 >
-> **Hypothesis verification via the owned dataplane.** Where HolmesGPT-class agents are confined to querying existing instrumentation, the Helios investigation agent can propose *temporary diagnostic attachments* — `Action::AttachDiagnosticProbe { bpf_sha, alloc, duration }`. Probes come from a platform-maintained, platform-signed catalog; they attach via aya-rs, emit into the existing eBPF ringbuf, and detach automatically at deadline. Hypotheses become verifiable within one investigation turn rather than queued behind a human-executed instrumentation rollout. This capability is structurally unavailable to orchestrators that do not own their dataplane.
+> **Hypothesis verification via the owned dataplane.** Where HolmesGPT-class agents are confined to querying existing instrumentation, the Overdrive investigation agent can propose *temporary diagnostic attachments* — `Action::AttachDiagnosticProbe { bpf_sha, alloc, duration }`. Probes come from a platform-maintained, platform-signed catalog; they attach via aya-rs, emit into the existing eBPF ringbuf, and detach automatically at deadline. Hypotheses become verifiable within one investigation turn rather than queued behind a human-executed instrumentation rollout. This capability is structurally unavailable to orchestrators that do not own their dataplane.
 >
 > **Credential and prompt-injection posture.** Where the LLM is an external API, `builtin:credential-proxy` (§8) holds the provider keys; the agent never sees them. Where the agent ingests third-party content (runbook bodies fetched from the catalog, log chunks returned by tools, documentation excerpts), `builtin:content-inspector` (§9) scans on ingress and flags prompt-injection payloads before the LLM sees them. BPF LSM blocks raw socket creation and unauthorised binary execution regardless of what the agent decides to do (§19). Security is structural, not cooperation-dependent.
 >
@@ -722,7 +722,7 @@ Amendments to the existing roadmap:
 - **Phase 2** — add:
   > `SimLlm` DST trait alongside `SimClock`, `SimTransport`, `SimEntropy`, `SimDataplane`, `SimDriver`, `SimObservationStore` — deterministic LLM completion replay for agent-tier simulation testing. Lands before the agent itself, preserving the §21 principle that nondeterminism boundaries are abstracted from day one.
 - **Phase 5** — expand the existing "LLM observability agent (rig-rs)" bullet:
-  > LLM observability agent (rig-rs) with native SRE-investigation primitives: `Investigation` as a first-class resource (ObservationStore + incident-memory libSQL), declarative toolset catalog (`builtin:helios-core` Rust trait object + WASM extensibility), typed `Action` enum with risk-tier approval gate, `correlation_key`-based de-duplication. The hard-coded §12 tool list becomes the default toolset.
+  > LLM observability agent (rig-rs) with native SRE-investigation primitives: `Investigation` as a first-class resource (ObservationStore + incident-memory libSQL), declarative toolset catalog (`builtin:overdrive-core` Rust trait object + WASM extensibility), typed `Action` enum with risk-tier approval gate, `correlation_key`-based de-duplication. The hard-coded §12 tool list becomes the default toolset.
 - **Phase 6** — add:
   > Runbook primitive — markdown + YAML frontmatter matching the HolmesGPT format, content-addressed in Garage, indexed in incident-memory libSQL via embedding similarity, loaded by a `RunbookLoader` reconciler. Platform-signed diagnostic-probe catalog for `Action::AttachDiagnosticProbe` — curated BPF programs the investigation agent can attach to verify hypotheses, with duration-bounded auto-detach enforced by a deadline reconciler.
 
@@ -733,7 +733,7 @@ Amendments to the existing roadmap:
 | Source | Domain | Reputation | Type | Access Date | Cross-verified |
 |--------|--------|------------|------|-------------|----------------|
 | Prior research — holmesgpt-integration-analysis.md | local SSOT | High | Primary research | 2026-04-19 | Yes — 18 sources cited there |
-| Helios whitepaper v0.12 | local SSOT | High | Primary source of record | 2026-04-19 | N/A (authoritative) |
+| Overdrive whitepaper v0.12 | local SSOT | High | Primary source of record | 2026-04-19 | N/A (authoritative) |
 | rig-rs — rig-core docs | docs.rs | High | Technical documentation | 2026-04-19 | Yes |
 | rig-rs — official site | rig.rs | High | Official | 2026-04-19 | Yes |
 | rig-rs — GitHub | github.com | High | Official | 2026-04-19 | Yes |
@@ -772,14 +772,14 @@ Reputation: High: 22 (92%) | Medium-High: 2 (8%) | Avg reputation: 0.98.
 ### Gap 2: Embedding provider for incident-memory similarity
 
 **Issue**: §12 specifies "embedding-based similarity search" but does not specify the embedding provider. Options: (a) same external LLM provider via rig-rs (OpenAI text-embedding-3, Anthropic, Gemini, Cohere); (b) local model via an Ollama workload; (c) in-process via `rust-bert` or similar. Cost, latency, and privacy trade-offs differ.
-**Attempted**: Whitepaper §12; rig-rs docs for embedding support (confirmed supported); no explicit Helios-side decision documented.
+**Attempted**: Whitepaper §12; rig-rs docs for embedding support (confirmed supported); no explicit Overdrive-side decision documented.
 **Recommendation**: Default to the same provider the agent uses for completion (via rig-rs's EmbeddingModel trait), with local-model fallback via the same workload-hosted-LLM pattern (§6.2). Decision can be deferred to Phase 5 implementation.
 
 ### Gap 3: MCP server exposure — still worth doing?
 
-**Issue**: The prior research recommended Shape D — Helios exposes itself as an MCP server ([[1]](./holmesgpt-integration-analysis.md) §3 Shape D). The current framing is "build the SRE agent natively." Does an MCP server still matter?
+**Issue**: The prior research recommended Shape D — Overdrive exposes itself as an MCP server ([[1]](./holmesgpt-integration-analysis.md) §3 Shape D). The current framing is "build the SRE agent natively." Does an MCP server still matter?
 **Attempted**: Re-read [[1]](./holmesgpt-integration-analysis.md) §3 Shape D and §5.
-**Recommendation**: **Yes, independently.** An MCP server lets operator tooling (Claude Desktop, Cursor, other future MCP-speaking SRE tools) query Helios without each integration growing a custom client. It is orthogonal to whether Helios's *own* agent is native. The MCP server and the native agent are complementary: the native agent is the production self-healing path; MCP exposure is the operator-facing query path. Ship both. This amends the framing of the current document rather than contradicting the prior research.
+**Recommendation**: **Yes, independently.** An MCP server lets operator tooling (Claude Desktop, Cursor, other future MCP-speaking SRE tools) query Overdrive without each integration growing a custom client. It is orthogonal to whether Overdrive's *own* agent is native. The MCP server and the native agent are complementary: the native agent is the production self-healing path; MCP exposure is the operator-facing query path. Ship both. This amends the framing of the current document rather than contradicting the prior research.
 
 ### Gap 4: Concrete `AttachDiagnosticProbe` catalog
 
@@ -798,7 +798,7 @@ None identified. Every design proposal composes with existing §12 / §18 / §21
 ## Recommendations for Further Research
 
 1. **`AttachDiagnosticProbe` probe catalog design.** Which BPF programs ship in the seed catalog; how signing and operator extensibility work; how the duration-bounded detach deadline is enforced under simulated and real clock skew. Tie-in to §22 Tier 4 verifier-complexity gates.
-2. **Toolset dependency resolution.** When a runbook declares `required_toolsets: ["builtin:helios-core", "sha256:abc..."]` and the cluster does not have the required WASM toolset loaded, what happens? Load on demand from Garage? Refuse the investigation? Partial mode? Answer matters for multi-tenant scenarios.
+2. **Toolset dependency resolution.** When a runbook declares `required_toolsets: ["builtin:overdrive-core", "sha256:abc..."]` and the cluster does not have the required WASM toolset loaded, what happens? Load on demand from Garage? Refuse the investigation? Partial mode? Answer matters for multi-tenant scenarios.
 3. **`SimLLM` transcript capture format.** JSON-Lines of `{turn_id, prompt_hash, tool_calls, tool_outputs, llm_response}` is the obvious shape, but long transcripts hit storage; compression and rollup strategies should be researched before the format is frozen.
 4. **Investigation cost-regression testing.** Given stored transcripts, the CI harness can replay them against a *new* model (simulated or live) and measure token delta. This is an under-researched capability — it would let operators assess model-upgrade cost impact before rollout.
 5. **Operator-extensible BPF probe story.** Gap 4 above notes the catalog is platform-maintained in v1. The operator-extensibility design — attestation, code review, signing — is a multi-phase research item that likely drafts alongside §24 Image Factory v2.
@@ -807,9 +807,9 @@ None identified. Every design proposal composes with existing §12 / §18 / §21
 
 ## Full Citations
 
-[1] Schack Abildskov, M. (researcher: Nova). "HolmesGPT Integration Analysis for Helios". Helios docs. 2026-04-19. `/Users/marcus/conductor/workspaces/helios/taipei-v1/docs/research/holmesgpt-integration-analysis.md`. Accessed 2026-04-19. *(18 upstream sources cited there.)*
+[1] Schack Abildskov, M. (researcher: Nova). "HolmesGPT Integration Analysis for Overdrive". Overdrive docs. 2026-04-19. `/Users/marcus/conductor/workspaces/overdrive/taipei-v1/docs/research/holmesgpt-integration-analysis.md`. Accessed 2026-04-19. *(18 upstream sources cited there.)*
 
-[2] Helios project. "Helios Whitepaper v0.12". Local SSOT. Accessed 2026-04-19. `/Users/marcus/conductor/workspaces/helios/taipei-v1/docs/whitepaper.md`.
+[2] Overdrive project. "Overdrive Whitepaper v0.12". Local SSOT. Accessed 2026-04-19. `/Users/marcus/conductor/workspaces/overdrive/taipei-v1/docs/whitepaper.md`.
 
 [3] 0xPlaygrounds. "rig-core". docs.rs. Accessed 2026-04-19. <https://docs.rs/rig-core/latest/rig/>.
 

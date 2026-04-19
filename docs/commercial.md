@@ -1,4 +1,4 @@
-# Helios: Commercial Model
+# Overdrive: Commercial Model
 
 **Version 0.3 — Draft**
 
@@ -6,36 +6,36 @@
 
 ## Overview
 
-Helios is open source (AGPL-3.0). The commercial opportunity is not the software itself — it is the operational complexity the software absorbs. Every team running Kubernetes today operates etcd, CNI plugins, cert-manager, a service mesh, an ingress controller, Prometheus, alertmanager, and a dozen other components that each need to be deployed, upgraded, and debugged independently. Helios collapses that stack into one binary.
+Overdrive is open source (AGPL-3.0). The commercial opportunity is not the software itself — it is the operational complexity the software absorbs. Every team running Kubernetes today operates etcd, CNI plugins, cert-manager, a service mesh, an ingress controller, Prometheus, alertmanager, and a dozen other components that each need to be deployed, upgraded, and debugged independently. Overdrive collapses that stack into one binary.
 
 The cloud platform business charges for not having to operate that stack.
 
 ---
 
-## The Core Insight: Helios Within Helios
+## The Core Insight: Overdrive Within Overdrive
 
-Helios is self-hosting. You run Helios on bare metal. Tenants run their own Helios clusters — or simpler workload primitives — on top of it. Every layer of the platform becomes a multi-tenant product feature without additional engineering.
+Overdrive is self-hosting. You run Overdrive on bare metal. Tenants run their own Overdrive clusters — or simpler workload primitives — on top of it. Every layer of the platform becomes a multi-tenant product feature without additional engineering.
 
 ```
 Physical bare metal
     │
-Helios (infrastructure layer)
+Overdrive (infrastructure layer)
     │  manages nodes, provides tenant isolation
     ▼
 Tenant A          Tenant B          Tenant C
-Full Helios       Full Helios       WASM functions only
+Full Overdrive       Full Overdrive       WASM functions only
 cluster           cluster
 ```
 
-Tenant Helios clusters run as VM workloads on the infrastructure layer. Cloud Hypervisor provides VM-level isolation — each tenant control plane boots inside its own VM with its own kernel, network namespace, and storage. When a tenant scales their cluster, their new worker nodes are VM jobs scheduled by the infrastructure Helios. The tenant sees nodes appearing in their cluster; the operator sees VM jobs starting on bare metal.
+Tenant Overdrive clusters run as VM workloads on the infrastructure layer. Cloud Hypervisor provides VM-level isolation — each tenant control plane boots inside its own VM with its own kernel, network namespace, and storage. When a tenant scales their cluster, their new worker nodes are VM jobs scheduled by the infrastructure Overdrive. The tenant sees nodes appearing in their cluster; the operator sees VM jobs starting on bare metal.
 
 ---
 
 ## Product Tiers
 
-### Tier 1 — Managed Helios
+### Tier 1 — Managed Overdrive
 
-Full Helios cluster as a service. Tenant gets a control plane and worker node pool. They submit jobs, define policies, and operate their cluster through the Helios API and CLI. The infrastructure layer handles the underlying hardware, networking, and physical security.
+Full Overdrive cluster as a service. Tenant gets a control plane and worker node pool. They submit jobs, define policies, and operate their cluster through the Overdrive API and CLI. The infrastructure layer handles the underlying hardware, networking, and physical security.
 
 Target: platform engineering teams building internal developer platforms, companies migrating off self-managed Kubernetes.
 
@@ -43,7 +43,7 @@ Billing model: per vCPU-hour + per GB-hour of memory consumed by the tenant clus
 
 ### Tier 2 — Managed Workloads
 
-Tenant does not manage a cluster. They submit jobs directly to the platform. The platform's Helios schedules their workloads within a tenant namespace. Simpler operational model — no cluster to size, no control plane to monitor.
+Tenant does not manage a cluster. They submit jobs directly to the platform. The platform's Overdrive schedules their workloads within a tenant namespace. Simpler operational model — no cluster to size, no control plane to monitor.
 
 Target: engineering teams that want Nomad-style job submission without operating infrastructure.
 
@@ -59,7 +59,7 @@ Billing model: per invocation + per GB-second of execution. Minimum billing unit
 
 ### Tier 4 — Bare Metal Dedicated
 
-Tenant gets dedicated physical nodes within the infrastructure Helios. Full hardware performance, no VM overhead, still managed by the platform control plane — node provisioning, OS management, eBPF dataplane, mTLS, observability all included. Tenant workloads run directly on the hardware.
+Tenant gets dedicated physical nodes within the infrastructure Overdrive. Full hardware performance, no VM overhead, still managed by the platform control plane — node provisioning, OS management, eBPF dataplane, mTLS, observability all included. Tenant workloads run directly on the hardware.
 
 Target: compute-intensive workloads (ML training, HPC), latency-sensitive applications, tenants with compliance requirements around hardware isolation.
 
@@ -118,7 +118,7 @@ Tenant workloads run in a cgroup subtree scoped to their tenant ID. BPF LSM prog
 
 ## Control Plane Density
 
-A key commercial efficiency: small tenants do not require a dedicated 3-node Raft cluster. Helios' `LocalStore` (single-mode, redb direct) runs a full control plane in approximately 30MB RAM with no distributed consensus overhead.
+A key commercial efficiency: small tenants do not require a dedicated 3-node Raft cluster. Overdrive' `LocalStore` (single-mode, redb direct) runs a full control plane in approximately 30MB RAM with no distributed consensus overhead.
 
 ```
 1,000 small tenants × 30MB (LocalStore control plane) = 30GB RAM
@@ -159,7 +159,7 @@ The same telemetry feeds the LLM observability layer — cost anomaly detection,
 
 The LLM self-healing layer is the primary retention mechanism.
 
-A cluster managed by Helios accumulates incident memory over time. Past incidents, their diagnoses, the actions that resolved them, and resource profiles built from continuous eBPF observation are all stored in libSQL and used by the LLM agent to reason about new anomalies. The platform's diagnostic accuracy and right-sizing precision improve with operational age.
+A cluster managed by Overdrive accumulates incident memory over time. Past incidents, their diagnoses, the actions that resolved them, and resource profiles built from continuous eBPF observation are all stored in libSQL and used by the LLM agent to reason about new anomalies. The platform's diagnostic accuracy and right-sizing precision improve with operational age.
 
 This creates switching cost that is not contractual or technical lock-in — it is operational memory that does not migrate. A tenant who has run on the platform for 12 months has a cluster that understands their workload patterns, has resolved dozens of incidents, and has tuned resource profiles across their entire job fleet. Starting over elsewhere means starting from scratch.
 
@@ -167,10 +167,10 @@ This creates switching cost that is not contractual or technical lock-in — it 
 
 ## Open Source Strategy
 
-Helios is AGPL-3.0. The licence choice is deliberate:
+Overdrive is AGPL-3.0. The licence choice is deliberate:
 
-- AGPL requires any hosted service built on Helios to open-source their modifications. A competitor cannot take the codebase, build a cloud on it, and keep their improvements proprietary.
-- The open core drives adoption. Teams that self-host Helios become familiar with the platform. When they want managed infrastructure, the migration to the cloud offering is trivial — same binary, same job specs, same CLI.
+- AGPL requires any hosted service built on Overdrive to open-source their modifications. A competitor cannot take the codebase, build a cloud on it, and keep their improvements proprietary.
+- The open core drives adoption. Teams that self-host Overdrive become familiar with the platform. When they want managed infrastructure, the migration to the cloud offering is trivial — same binary, same job specs, same CLI.
 - Community contributions improve the platform. The eBPF dataplane, WASM runtimes, and driver model all benefit from external contribution in ways that a proprietary codebase does not.
 
 Commercial licensing is available for organisations that cannot accept AGPL terms. This is the third revenue stream alongside the cloud platform and support contracts — and for large enterprises, often the largest contract value.
@@ -185,7 +185,7 @@ These organisations still want the platform. They cannot use the cloud offering.
 
 ### What Enterprise Licensing Covers
 
-**Commercial licence.** Replaces AGPL obligations. The organisation runs Helios on their own infrastructure without being required to open-source internal modifications or integrations. Covers unlimited nodes within the licensed estate.
+**Commercial licence.** Replaces AGPL obligations. The organisation runs Overdrive on their own infrastructure without being required to open-source internal modifications or integrations. Covers unlimited nodes within the licensed estate.
 
 **Enterprise feature tier.** Certain features are developed for and licensed exclusively to enterprise customers — not included in the open source release:
 
@@ -226,7 +226,7 @@ Enterprise:  24×7, 1hr critical response, named engineer, quarterly reviews
 
 ### The Air-Gap Use Case
 
-Air-gapped deployments deserve specific treatment. A financial exchange, a defence contractor, or a government agency running Helios in a classified environment needs:
+Air-gapped deployments deserve specific treatment. A financial exchange, a defence contractor, or a government agency running Overdrive in a classified environment needs:
 
 - All container images and WASM modules bundled and cryptographically signed for offline installation
 - The Garage object store pre-seeded with all platform artifacts
@@ -248,7 +248,7 @@ The honest answer is that enterprise procurement pays for three things: capabili
 
 ### The Flywheel
 
-Enterprise self-hosted customers generate a second-order benefit beyond direct revenue: they run Helios at scale in production environments the cloud platform cannot access. Their deployments surface edge cases, scale issues, and feature requirements that improve the platform for all users. Many enterprise customers contribute patches under the commercial licence — these flow back into the open source release. The enterprise customer base funds platform development that benefits the open source community.
+Enterprise self-hosted customers generate a second-order benefit beyond direct revenue: they run Overdrive at scale in production environments the cloud platform cannot access. Their deployments surface edge cases, scale issues, and feature requirements that improve the platform for all users. Many enterprise customers contribute patches under the commercial licence — these flow back into the open source release. The enterprise customer base funds platform development that benefits the open source community.
 
 ---
 
@@ -260,9 +260,9 @@ Ship the open source platform. Target infrastructure engineers and platform team
 
 Measure: GitHub stars, self-hosted deployments, community contributions, enterprise inbound.
 
-### Phase 2 — Cloud Platform (Managed Helios + Managed Workloads)
+### Phase 2 — Cloud Platform (Managed Overdrive + Managed Workloads)
 
-Launch Tiers 1 and 2 on owned bare metal. Initial target: teams already self-hosting Helios who want to offload operations. Low acquisition cost — they already know the product.
+Launch Tiers 1 and 2 on owned bare metal. Initial target: teams already self-hosting Overdrive who want to offload operations. Low acquisition cost — they already know the product.
 
 Expand to teams migrating off EKS/GKE who want operational simplicity without rebuilding their entire toolchain.
 
@@ -276,7 +276,7 @@ Enterprise licensing and Tier 4 bare metal target organisations with compliance 
 
 The built-in MLS, BPF LSM enforcement, SPIFFE identity model, and audit-grade eBPF telemetry address requirements that most cloud platforms handle poorly. FIPS crypto, HSM integration, and compliance policy packs (DORA, NIS2, SOC2, HIPAA) are enterprise licence features.
 
-Air-gap deployment is a first-class scenario — one binary, embedded storage, no external dependencies makes Helios easier to deploy in classified environments than any platform with a dozen moving parts.
+Air-gap deployment is a first-class scenario — one binary, embedded storage, no external dependencies makes Overdrive easier to deploy in classified environments than any platform with a dozen moving parts.
 
 EU presence and Danish citizenship provides direct access to European government procurement — a market underserved by US-headquartered vendors and facing increasing data sovereignty requirements under DORA, NIS2, and GDPR.
 
@@ -286,13 +286,13 @@ EU presence and Danish citizenship provides direct access to European government
 
 | Stream | Model | Target |
 |---|---|---|
-| Cloud — Managed Helios | Per vCPU-hour + GB-hour | Platform teams |
+| Cloud — Managed Overdrive | Per vCPU-hour + GB-hour | Platform teams |
 | Cloud — Managed Workloads | Per vCPU-hour + GB-hour | Engineering teams |
 | Cloud — Serverless WASM | Per invocation + GB-second | Developers, AI agents |
 | Cloud — Bare Metal | Per node-hour | ML, HPC, latency-sensitive |
 | Enterprise Licence | Annual per-node subscription | Regulated enterprises |
 | Enterprise Support | Annual subscription, tiered SLA | Enterprise + self-hosted |
-| Commercial Licence | Annual, negotiated | Embedding Helios in a product |
+| Commercial Licence | Annual, negotiated | Embedding Overdrive in a product |
 
 Cloud revenue scales with tenant consumption. Enterprise licence revenue is predictable and high-margin — no infrastructure cost against the contract value. Support contracts compound with the install base.
 
@@ -300,7 +300,7 @@ Cloud revenue scales with tenant consumption. Enterprise licence revenue is pred
 
 ## Competitive Position
 
-| | AWS Lambda | EKS / GKE | Nomad Cloud | Helios |
+| | AWS Lambda | EKS / GKE | Nomad Cloud | Overdrive |
 |---|---|---|---|---|
 | Workload types | Functions only | Containers | Multi-type | All types |
 | Cold start | 100ms–2s | N/A | N/A | ~1ms (WASM) |
@@ -311,15 +311,15 @@ Cloud revenue scales with tenant consumption. Enterprise licence revenue is pred
 | LLM observability | No | No | No | Native |
 | Multi-workload | No | No | Yes | Yes |
 
-The gap that matters commercially: no existing platform handles AI agent workloads with structural security primitives. Prompt injection, credential exfiltration, and egress control are application-level concerns everywhere else. On Helios they are platform primitives. As AI agent adoption grows, this becomes a primary buying criterion.
+The gap that matters commercially: no existing platform handles AI agent workloads with structural security primitives. Prompt injection, credential exfiltration, and egress control are application-level concerns everywhere else. On Overdrive they are platform primitives. As AI agent adoption grows, this becomes a primary buying criterion.
 
 ---
 
 ## Summary
 
-Helios has three commercial pillars:
+Overdrive has three commercial pillars:
 
-**Cloud platform.** Run Helios on bare metal, sell tenants access to it at multiple abstraction levels — full cluster, managed workloads, serverless WASM, dedicated bare metal. The self-hosting architecture means tenants who outgrow one tier migrate upward without changing tooling. Billing is exact, funded by kernel-level telemetry.
+**Cloud platform.** Run Overdrive on bare metal, sell tenants access to it at multiple abstraction levels — full cluster, managed workloads, serverless WASM, dedicated bare metal. The self-hosting architecture means tenants who outgrow one tier migrate upward without changing tooling. Billing is exact, funded by kernel-level telemetry.
 
 **Enterprise self-hosted licensing.** Sell commercial licences and support contracts to regulated enterprises that cannot use the cloud platform. FIPS crypto, HSM integration, compliance policy packs, and air-gap tooling are enterprise-only features. High-margin, predictable annual revenue. The install base funds platform development.
 
