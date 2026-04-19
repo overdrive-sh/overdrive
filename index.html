@@ -1,0 +1,1282 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Overdrive — A next-generation workload orchestration platform</title>
+<meta name="description" content="Open-source orchestration in pure Rust. eBPF dataplane, kernel mTLS, native LLM observability. Replaces Kubernetes, Nomad, and Talos." />
+<meta property="og:title" content="Overdrive — Orchestration without the operational tax" />
+<meta property="og:description" content="One Rust binary. eBPF dataplane. Kernel mTLS by default. Replaces etcd, Envoy, SPIRE, CNI, kube-proxy." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg:           #0a0a0b;
+    --bg-2:         #0f0f11;
+    --surface:      #131316;
+    --surface-2:    #18181c;
+    --border:       #232328;
+    --border-2:     #2c2c33;
+    --text:         #f5f5f7;
+    --text-muted:   #9a9aa3;
+    --text-dim:     #62626a;
+    --accent:       #ff5c28;
+    --accent-2:     #ff8b5f;
+    --accent-soft:  rgba(255, 92, 40, 0.12);
+    --accent-glow:  rgba(255, 92, 40, 0.35);
+    --success:      #4ade80;
+    --warn:         #facc15;
+
+    --max:          1240px;
+    --pad:          clamp(20px, 4vw, 48px);
+
+    --font-sans:    'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    --font-mono:    'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-size: 16px;
+    line-height: 1.55;
+    font-feature-settings: 'ss01', 'cv11';
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    overflow-x: hidden;
+  }
+
+  a { color: inherit; text-decoration: none; }
+  button { font: inherit; }
+
+  /* ---- subtle background grid ---- */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(to right, rgba(255,255,255,0.025) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255,255,255,0.025) 1px, transparent 1px);
+    background-size: 64px 64px;
+    pointer-events: none;
+    z-index: 0;
+    mask-image: radial-gradient(ellipse at top, black 30%, transparent 80%);
+  }
+
+  .container {
+    max-width: var(--max);
+    margin: 0 auto;
+    padding: 0 var(--pad);
+    position: relative;
+    z-index: 1;
+  }
+
+  /* ---- nav ---- */
+  nav.top {
+    position: sticky;
+    top: 0;
+    z-index: 50;
+    backdrop-filter: blur(12px);
+    background: rgba(10, 10, 11, 0.72);
+    border-bottom: 1px solid transparent;
+    transition: border-color 0.2s ease;
+  }
+  nav.top.scrolled { border-bottom-color: var(--border); }
+  nav.top .row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 64px;
+  }
+  .brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    font-size: 17px;
+  }
+  .brand-mark {
+    width: 22px; height: 22px;
+    background: var(--accent);
+    clip-path: polygon(0 0, 100% 0, 65% 100%, 0% 100%);
+  }
+  .nav-links {
+    display: flex;
+    gap: 28px;
+    align-items: center;
+    font-size: 14px;
+    color: var(--text-muted);
+  }
+  .nav-links a:hover { color: var(--text); }
+  .nav-cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    background: var(--text);
+    color: var(--bg);
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    transition: opacity 0.15s ease;
+  }
+  .nav-cta:hover { opacity: 0.85; }
+  @media (max-width: 760px) {
+    .nav-links a:not(.nav-cta) { display: none; }
+  }
+
+  /* ---- typography ---- */
+  h1, h2, h3, h4 {
+    font-weight: 700;
+    letter-spacing: -0.025em;
+    line-height: 1.05;
+    margin: 0;
+  }
+  h2 { font-size: clamp(32px, 4.5vw, 48px); }
+  h3 { font-size: 22px; letter-spacing: -0.015em; line-height: 1.25; }
+  p { margin: 0; }
+
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .eyebrow::before {
+    content: '';
+    width: 6px; height: 6px;
+    background: var(--accent);
+    border-radius: 50%;
+    box-shadow: 0 0 12px var(--accent-glow);
+  }
+
+  .section-head {
+    max-width: 720px;
+    margin-bottom: 56px;
+  }
+  .section-head .eyebrow { margin-bottom: 16px; }
+  .section-head .lead {
+    margin-top: 18px;
+    font-size: 17px;
+    color: var(--text-muted);
+    line-height: 1.6;
+  }
+
+  section { padding: 96px 0; position: relative; z-index: 1; }
+  @media (max-width: 760px) { section { padding: 64px 0; } }
+
+  /* ---- buttons ---- */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 20px;
+    border-radius: 7px;
+    font-size: 14px;
+    font-weight: 600;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    line-height: 1;
+  }
+  .btn-primary {
+    background: var(--accent);
+    color: #0a0a0b;
+    box-shadow: 0 0 0 0 var(--accent-glow);
+  }
+  .btn-primary:hover {
+    background: var(--accent-2);
+    box-shadow: 0 0 32px var(--accent-glow);
+    transform: translateY(-1px);
+  }
+  .btn-ghost {
+    background: transparent;
+    color: var(--text);
+    border-color: var(--border-2);
+  }
+  .btn-ghost:hover {
+    background: var(--surface);
+    border-color: #3a3a44;
+  }
+  .arrow { display: inline-block; transition: transform 0.15s ease; }
+  .btn:hover .arrow { transform: translateX(2px); }
+
+  /* ---- HERO ---- */
+  .hero {
+    padding-top: 100px;
+    padding-bottom: 80px;
+    position: relative;
+    overflow: hidden;
+  }
+  .hero::after {
+    content: '';
+    position: absolute;
+    top: -200px; left: 50%;
+    width: 800px; height: 800px;
+    transform: translateX(-50%);
+    background: radial-gradient(circle, rgba(255, 92, 40, 0.12) 0%, transparent 60%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  .hero .container { position: relative; z-index: 1; }
+  .hero-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 12px 6px 6px;
+    background: var(--surface);
+    border: 1px solid var(--border-2);
+    border-radius: 100px;
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 32px;
+  }
+  .hero-tag-pill {
+    background: var(--accent-soft);
+    color: var(--accent);
+    padding: 3px 10px;
+    border-radius: 100px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  h1.hero-title {
+    font-size: clamp(44px, 7.5vw, 84px);
+    letter-spacing: -0.04em;
+    line-height: 0.98;
+    max-width: 14ch;
+    margin-bottom: 28px;
+  }
+  h1.hero-title .accent {
+    background: linear-gradient(120deg, var(--accent) 0%, var(--accent-2) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .hero-sub {
+    font-size: clamp(17px, 2vw, 20px);
+    color: var(--text-muted);
+    max-width: 58ch;
+    margin-bottom: 40px;
+    line-height: 1.55;
+  }
+  .hero-cta { display: flex; gap: 12px; flex-wrap: wrap; }
+  .hero-meta {
+    margin-top: 56px;
+    display: flex;
+    gap: 32px;
+    flex-wrap: wrap;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .hero-meta span strong { color: var(--text); font-weight: 500; }
+
+  /* ---- credibility row ---- */
+  .creds {
+    padding: 48px 0;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+  .creds-label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    margin-bottom: 20px;
+    text-align: center;
+  }
+  .creds-list {
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 24px;
+    font-family: var(--font-mono);
+    font-size: 14px;
+    color: var(--text-muted);
+  }
+  .creds-list span { white-space: nowrap; }
+
+  /* ---- stats ---- */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1px;
+    background: var(--border);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  @media (max-width: 880px) { .stats-grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 520px) { .stats-grid { grid-template-columns: 1fr; } }
+  .stat {
+    background: var(--bg-2);
+    padding: 32px;
+  }
+  .stat-num {
+    font-size: 44px;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    color: var(--text);
+    line-height: 1;
+    margin-bottom: 12px;
+  }
+  .stat-num .unit { color: var(--accent); font-size: 28px; }
+  .stat-label {
+    font-size: 14px;
+    color: var(--text);
+    font-weight: 500;
+    margin-bottom: 6px;
+  }
+  .stat-vs {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  /* ---- thesis 3-col ---- */
+  .three-col {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 32px;
+  }
+  @media (max-width: 880px) { .three-col { grid-template-columns: 1fr; gap: 24px; } }
+  .thesis-card {
+    padding: 32px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--bg-2);
+  }
+  .thesis-card h3 { margin-bottom: 12px; }
+  .thesis-card p { color: var(--text-muted); font-size: 15px; }
+  .thesis-card .num {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--accent);
+    margin-bottom: 16px;
+  }
+
+  /* ---- architecture diagram ---- */
+  .arch {
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 48px;
+    overflow: hidden;
+  }
+  @media (max-width: 760px) { .arch { padding: 24px; } }
+  .arch pre {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--text-muted);
+    line-height: 1.5;
+    overflow-x: auto;
+    white-space: pre;
+  }
+  .arch pre .h { color: var(--accent); font-weight: 600; }
+  .arch pre .k { color: var(--text); font-weight: 500; }
+
+  /* ---- workload type cards ---- */
+  .workloads {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 16px;
+  }
+  @media (max-width: 1100px) { .workloads { grid-template-columns: repeat(3, 1fr); } }
+  @media (max-width: 720px)  { .workloads { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 460px)  { .workloads { grid-template-columns: 1fr; } }
+  .wl {
+    padding: 24px;
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    transition: all 0.15s ease;
+    position: relative;
+  }
+  .wl:hover {
+    border-color: var(--border-2);
+    background: var(--surface);
+    transform: translateY(-2px);
+  }
+  .wl-tag {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 16px;
+  }
+  .wl h4 {
+    font-size: 17px;
+    margin: 0 0 8px;
+    color: var(--text);
+  }
+  .wl p {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin: 0 0 14px;
+  }
+  .wl-meta {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    border-top: 1px dashed var(--border);
+    padding-top: 12px;
+  }
+
+  /* ---- code showcase ---- */
+  .code-grid {
+    display: grid;
+    grid-template-columns: 1.1fr 0.9fr;
+    gap: 24px;
+  }
+  @media (max-width: 880px) { .code-grid { grid-template-columns: 1fr; } }
+  .code-block {
+    background: #0d0d0f;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  .code-head {
+    padding: 12px 18px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .code-dots { display: flex; gap: 6px; }
+  .code-dots span {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--border-2);
+  }
+  .code-block pre {
+    margin: 0;
+    padding: 24px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text-muted);
+    overflow-x: auto;
+  }
+  .code-block .k  { color: #c084fc; }
+  .code-block .s  { color: #a3e635; }
+  .code-block .c  { color: var(--text-dim); font-style: italic; }
+  .code-block .n  { color: #fb923c; }
+  .code-block .t  { color: var(--text); }
+  .code-block .p  { color: var(--accent); }
+  .code-block .v  { color: #60a5fa; }
+
+  /* ---- feature spotlight ---- */
+  .spotlight {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 56px;
+    align-items: center;
+  }
+  @media (max-width: 880px) { .spotlight { grid-template-columns: 1fr; gap: 32px; } }
+  .spotlight ul {
+    list-style: none;
+    padding: 0;
+    margin: 24px 0 32px;
+    display: grid;
+    gap: 16px;
+  }
+  .spotlight li {
+    display: flex;
+    gap: 14px;
+    color: var(--text-muted);
+    font-size: 15px;
+  }
+  .spotlight li::before {
+    content: '';
+    flex: 0 0 6px;
+    height: 6px;
+    margin-top: 9px;
+    background: var(--accent);
+    border-radius: 50%;
+  }
+  .spotlight li strong { color: var(--text); font-weight: 500; }
+
+  .tier-panel {
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 28px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.7;
+  }
+  .tier-panel .row {
+    display: flex;
+    justify-content: space-between;
+    padding: 10px 0;
+    border-bottom: 1px dashed var(--border);
+  }
+  .tier-panel .row:last-child { border-bottom: 0; }
+  .tier-panel .label { color: var(--text-muted); }
+  .tier-panel .val   { color: var(--text); }
+  .tier-panel .val.accent { color: var(--accent); }
+
+  /* ---- comparison table ---- */
+  .table-wrap {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+    background: var(--bg-2);
+  }
+  table.cmp {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+  }
+  table.cmp th, table.cmp td {
+    padding: 16px 24px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+  table.cmp tr:last-child td { border-bottom: 0; }
+  table.cmp th {
+    font-weight: 500;
+    font-size: 12px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    background: var(--bg);
+  }
+  table.cmp th.over { color: var(--accent); }
+  table.cmp td.label { color: var(--text); font-weight: 500; }
+  table.cmp td.k8s   { color: var(--text-muted); }
+  table.cmp td.over  { color: var(--text); font-weight: 500; }
+  table.cmp td.over .pill {
+    display: inline-block;
+    background: var(--accent-soft);
+    color: var(--accent);
+    padding: 2px 8px;
+    border-radius: 100px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    margin-left: 8px;
+  }
+
+  /* ---- pricing tiers ---- */
+  .tiers {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+  }
+  @media (max-width: 1080px) { .tiers { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 560px)  { .tiers { grid-template-columns: 1fr; } }
+  .tier {
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 28px;
+    display: flex;
+    flex-direction: column;
+  }
+  .tier.featured {
+    border-color: var(--accent);
+    background: linear-gradient(180deg, rgba(255, 92, 40, 0.06) 0%, var(--bg-2) 50%);
+  }
+  .tier-num {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 12px;
+  }
+  .tier h4 {
+    font-size: 18px;
+    margin: 0 0 8px;
+    letter-spacing: -0.01em;
+  }
+  .tier p.desc {
+    font-size: 14px;
+    color: var(--text-muted);
+    margin: 0 0 20px;
+    flex-grow: 1;
+  }
+  .tier-billing {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-dim);
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+  }
+  .tier-billing strong { color: var(--text); display: block; margin-bottom: 4px; font-weight: 500; }
+
+  /* ---- final CTA ---- */
+  .final-cta {
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 64px 48px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+  }
+  .final-cta::before {
+    content: '';
+    position: absolute;
+    top: -100px; left: 50%;
+    width: 600px; height: 400px;
+    transform: translateX(-50%);
+    background: radial-gradient(ellipse, rgba(255, 92, 40, 0.18) 0%, transparent 60%);
+    pointer-events: none;
+  }
+  .final-cta > * { position: relative; }
+  .final-cta h2 { margin-bottom: 20px; max-width: 18ch; margin-inline: auto; }
+  .final-cta p {
+    color: var(--text-muted);
+    max-width: 56ch;
+    margin: 0 auto 32px;
+    font-size: 17px;
+  }
+  .final-cta .hero-cta { justify-content: center; }
+  @media (max-width: 760px) { .final-cta { padding: 40px 24px; } }
+
+  /* ---- footer ---- */
+  footer {
+    border-top: 1px solid var(--border);
+    padding: 64px 0 32px;
+    color: var(--text-muted);
+    font-size: 14px;
+    position: relative;
+    z-index: 1;
+  }
+  .footer-grid {
+    display: grid;
+    grid-template-columns: 2fr 1fr 1fr 1fr 1fr;
+    gap: 48px;
+    margin-bottom: 48px;
+  }
+  @media (max-width: 880px) { .footer-grid { grid-template-columns: 1fr 1fr; } }
+  .footer-brand p {
+    color: var(--text-dim);
+    margin-top: 12px;
+    max-width: 32ch;
+    font-size: 13px;
+  }
+  .footer-col h5 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-dim);
+    margin: 0 0 16px;
+    font-weight: 500;
+    font-family: var(--font-mono);
+  }
+  .footer-col ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: 10px;
+  }
+  .footer-col a { color: var(--text-muted); transition: color 0.15s ease; font-size: 13px; }
+  .footer-col a:hover { color: var(--text); }
+  .footer-bot {
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 16px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+</style>
+</head>
+<body>
+
+<nav class="top" id="topnav">
+  <div class="container row">
+    <a class="brand" href="#">
+      <span class="brand-mark"></span>
+      Overdrive
+    </a>
+    <div class="nav-links">
+      <a href="#architecture">Architecture</a>
+      <a href="#workloads">Workloads</a>
+      <a href="#compare">vs Kubernetes</a>
+      <a href="#pricing">Pricing</a>
+      <a href="#" class="nav-cta">Get started <span class="arrow">→</span></a>
+    </div>
+  </div>
+</nav>
+
+<!-- ====================== HERO ====================== -->
+<section class="hero">
+  <div class="container">
+    <div class="hero-tag">
+      <span class="hero-tag-pill">v0.12 · Draft</span>
+      Overdrive whitepaper now public
+    </div>
+
+    <h1 class="hero-title">
+      Orchestration without the <span class="accent">operational tax.</span>
+    </h1>
+
+    <p class="hero-sub">
+      One Rust binary replaces etcd, Envoy, SPIRE, CNI, and kube-proxy.
+      eBPF in the dataplane, kernel mTLS by default, and a unified driver model
+      for VMs, processes, unikernels, containers, and WASM &mdash; all under one identity, policy, and telemetry stack.
+    </p>
+
+    <div class="hero-cta">
+      <a href="#" class="btn btn-primary">Read the whitepaper <span class="arrow">→</span></a>
+      <a href="#" class="btn btn-ghost">View on GitHub</a>
+    </div>
+
+    <div class="hero-meta">
+      <span><strong>~50 MB</strong> node image</span>
+      <span><strong>~30 MB</strong> single-mode control plane</span>
+      <span><strong>~1 ms</strong> WASM cold start</span>
+      <span><strong>AGPL-3.0</strong></span>
+    </div>
+  </div>
+</section>
+
+<!-- ====================== CREDS ====================== -->
+<section class="creds" style="padding: 0;">
+  <div class="container" style="padding-top: 48px; padding-bottom: 48px;">
+    <p class="creds-label">Built on production-grade Rust primitives</p>
+    <div class="creds-list">
+      <span>aya-rs</span>
+      <span>openraft</span>
+      <span>wasmtime</span>
+      <span>cloud-hypervisor</span>
+      <span>rustls + kTLS</span>
+      <span>regorus</span>
+      <span>corrosion / cr-sqlite</span>
+      <span>redb</span>
+    </div>
+  </div>
+</section>
+
+<!-- ====================== THESIS ====================== -->
+<section>
+  <div class="container">
+    <div class="section-head">
+      <div class="eyebrow">The thesis</div>
+      <h2>Kubernetes was right for 2014. It is not right for 2026.</h2>
+      <p class="lead">
+        Stable eBPF APIs, kTLS offload, production-ready Rust systems libraries, and embeddable WASM
+        only matured in the last two years. Overdrive is the platform that becomes possible
+        when all of them exist at the same time.
+      </p>
+    </div>
+
+    <div class="three-col">
+      <div class="thesis-card">
+        <div class="num">01 / Own your primitives</div>
+        <h3>No etcd. No Envoy. No SPIRE. No CNI.</h3>
+        <p>Every critical subsystem is built into the platform or is a standard Rust library. External process dependencies are operational liabilities — they get cut.</p>
+      </div>
+      <div class="thesis-card">
+        <div class="num">02 / eBPF is the dataplane</div>
+        <h3>The kernel does the work the proxy used to do.</h3>
+        <p>Service routing, network policy, load balancing, mTLS, and telemetry happen at line rate in the kernel via aya-rs. No userspace proxies in the data path.</p>
+      </div>
+      <div class="thesis-card">
+        <div class="num">03 / Security is structural</div>
+        <h3>mTLS between workloads cannot be turned off.</h3>
+        <p>Every connection is wrapped in kTLS with a SPIFFE identity. Policy is enforced by BPF LSM in-kernel. A compromised workload hits the same walls as a well-behaved one.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ====================== STATS ====================== -->
+<section style="padding-top: 0;">
+  <div class="container">
+    <div class="section-head">
+      <div class="eyebrow">By the numbers</div>
+      <h2>Structural advantages, not configuration tweaks.</h2>
+      <p class="lead">
+        These are not micro-optimizations. They are consequences of the architecture &mdash;
+        the kind of differences that compound at fleet scale.
+      </p>
+    </div>
+
+    <div class="stats-grid">
+      <div class="stat">
+        <div class="stat-num">~10<span class="unit">×</span></div>
+        <div class="stat-label">Lower control-plane RAM</div>
+        <div class="stat-vs">~100 MB vs ~1 GB on Kubernetes</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num">~100<span class="unit">×</span></div>
+        <div class="stat-label">Less mTLS CPU overhead</div>
+        <div class="stat-vs">kTLS in-kernel vs Envoy sidecar/workload</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num">~50<span class="unit">×</span></div>
+        <div class="stat-label">Faster scheduling latency</div>
+        <div class="stat-vs">&lt; 100 ms vs 1–10 s on Kubernetes</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num">2.3<span class="unit">×</span></div>
+        <div class="stat-label">Workload density at 70% utilization</div>
+        <div class="stat-vs">Continuous right-sizing vs static VPA</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num">&lt;10<span class="unit">s</span></div>
+        <div class="stat-label">Node join time</div>
+        <div class="stat-vs">vs 2–5 minutes on Kubernetes</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num">~1<span class="unit">ms</span></div>
+        <div class="stat-label">WASM cold start</div>
+        <div class="stat-vs">Wasmtime warm pool vs ~125 ms Firecracker</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ====================== ARCHITECTURE ====================== -->
+<section id="architecture">
+  <div class="container">
+    <div class="section-head">
+      <div class="eyebrow">Architecture</div>
+      <h2>One binary. Any topology.</h2>
+      <p class="lead">
+        Control plane and node agent ship in a single Rust binary. Role is declared at bootstrap
+        — single node, three-node HA, dedicated ingress tier, multi-region. Same binary, different config.
+      </p>
+    </div>
+
+    <div class="arch">
+<pre><span class="h">┌────────────────────────────────────────────────────────────────────┐</span>
+<span class="h">│</span>                          <span class="k">CLI / API</span>  (gRPC + REST, tonic)         <span class="h">│</span>
+<span class="h">├────────────────────────────────────────────────────────────────────┤</span>
+<span class="h">│</span>     <span class="k">CONTROL PLANE</span>  &mdash; co-located with node agent or dedicated     <span class="h">│</span>
+<span class="h">│</span>                                                                    <span class="h">│</span>
+<span class="h">│</span>   IntentStore        Reconcilers        Built-in CA  (SPIFFE)      <span class="h">│</span>
+<span class="h">│</span>   single: redb       Rust traits        Scheduler                  <span class="h">│</span>
+<span class="h">│</span>   ha: openraft+redb  WASM extensions    Regorus + WASM policy      <span class="h">│</span>
+<span class="h">│</span>   per region                            DuckLake telemetry         <span class="h">│</span>
+<span class="h">├────────────────────────────────────────────────────────────────────┤</span>
+<span class="h">│</span>     <span class="k">NODE AGENT</span>                                                     <span class="h">│</span>
+<span class="h">│</span>                                                                    <span class="h">│</span>
+<span class="h">│</span>   ▸ aya-rs eBPF dataplane                                          <span class="h">│</span>
+<span class="h">│</span>     XDP (routing/LB) · TC (egress) · sockops (mTLS)                <span class="h">│</span>
+<span class="h">│</span>     BPF LSM (MAC) · kprobes (telemetry)                            <span class="h">│</span>
+<span class="h">│</span>                                                                    <span class="h">│</span>
+<span class="h">│</span>   ▸ Drivers:  process · microvm · vm · unikernel · wasm            <span class="h">│</span>
+<span class="h">│</span>   ▸ Gateway:  hyper · rustls · ACMEv2 · in-process route table     <span class="h">│</span>
+<span class="h">├────────────────────────────────────────────────────────────────────┤</span>
+<span class="h">│</span>   <span class="k">ObservationStore</span>  (Corrosion &mdash; CR-SQLite + SWIM/QUIC gossip)   <span class="h">│</span>
+<span class="h">│</span>   alloc status · service backends · node health · regional peers   <span class="h">│</span>
+<span class="h">├────────────────────────────────────────────────────────────────────┤</span>
+<span class="h">│</span>             <span class="k">Object Storage</span>  (Garage, S3-compatible)                <span class="h">│</span>
+<span class="h">└────────────────────────────────────────────────────────────────────┘</span></pre>
+    </div>
+  </div>
+</section>
+
+<!-- ====================== WORKLOAD TYPES ====================== -->
+<section id="workloads">
+  <div class="container">
+    <div class="section-head">
+      <div class="eyebrow">Workload model</div>
+      <h2>Five drivers. One identity. One policy.</h2>
+      <p class="lead">
+        VMs, processes, unikernels, containers, and WASM functions share the same SPIFFE identity,
+        the same eBPF dataplane, the same policy engine, and the same telemetry pipeline.
+        Not one model bolted onto another.
+      </p>
+    </div>
+
+    <div class="workloads">
+      <div class="wl">
+        <div class="wl-tag">process</div>
+        <h4>Native binaries</h4>
+        <p>Long-running daemons under cgroups v2 with kernel-enforced isolation.</p>
+        <div class="wl-meta">tokio::process</div>
+      </div>
+      <div class="wl">
+        <div class="wl-tag">microvm</div>
+        <h4>Fast-boot VMs</h4>
+        <p>~200 ms cold start, hardware isolation, optional persistent rootfs.</p>
+        <div class="wl-meta">cloud-hypervisor</div>
+      </div>
+      <div class="wl">
+        <div class="wl-tag">vm</div>
+        <h4>Full virtualisation</h4>
+        <p>Live CPU + memory hotplug, virtiofs sharing, AArch64 first-class.</p>
+        <div class="wl-meta">cloud-hypervisor</div>
+      </div>
+      <div class="wl">
+        <div class="wl-tag">unikernel</div>
+        <h4>Extreme density</h4>
+        <p>Single-purpose images on a hypervisor, virtiofs-capable.</p>
+        <div class="wl-meta">unikraft + CH</div>
+      </div>
+      <div class="wl">
+        <div class="wl-tag">wasm</div>
+        <h4>Serverless functions</h4>
+        <p>~1 ms cold start, scale-to-zero, structural credential isolation.</p>
+        <div class="wl-meta">wasmtime</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ====================== CODE SHOWCASE ====================== -->
+<section style="padding-top: 0;">
+  <div class="container">
+    <div class="section-head">
+      <div class="eyebrow">Job spec</div>
+      <h2>Declare what. The platform handles how.</h2>
+      <p class="lead">
+        A single TOML job spec composes drivers, sidecars, security profiles, and ingress.
+        The Image Factory turns schematics into reproducible, content-addressed node images.
+      </p>
+    </div>
+
+    <div class="code-grid">
+      <div class="code-block">
+        <div class="code-head">
+          <span>job.toml</span>
+          <div class="code-dots"><span></span><span></span><span></span></div>
+        </div>
+<pre><span class="c"># AI agent with structural credential isolation</span>
+<span class="c"># and prompt-injection scanning.</span>
+
+[<span class="k">job</span>]
+<span class="t">name</span>   = <span class="s">"ai-research-agent"</span>
+<span class="t">driver</span> = <span class="s">"wasm"</span>
+
+[[<span class="k">job.sidecars</span>]]
+<span class="t">name</span>    = <span class="s">"credential-proxy"</span>
+<span class="t">module</span>  = <span class="s">"builtin:credential-proxy"</span>
+<span class="t">hooks</span>   = [<span class="s">"egress"</span>]
+
+  [<span class="k">job.sidecars.config</span>]
+  <span class="t">allowed_domains</span> = [<span class="s">"api.anthropic.com"</span>]
+  <span class="t">credentials</span>     = { <span class="t">ANTHROPIC_KEY</span> = { <span class="t">secret</span> = <span class="s">"prod"</span> } }
+
+[[<span class="k">job.sidecars</span>]]
+<span class="t">name</span>   = <span class="s">"content-inspector"</span>
+<span class="t">module</span> = <span class="s">"builtin:content-inspector"</span>
+<span class="t">hooks</span>  = [<span class="s">"ingress"</span>]
+
+[<span class="k">job.security</span>]
+<span class="t">no_raw_sockets</span>          = <span class="v">true</span>
+<span class="t">no_privilege_escalation</span> = <span class="v">true</span>
+<span class="t">egress.mode</span>             = <span class="s">"intercepted"</span></pre>
+      </div>
+
+      <div class="code-block">
+        <div class="code-head">
+          <span>~/.overdrive</span>
+          <div class="code-dots"><span></span><span></span><span></span></div>
+        </div>
+<pre><span class="p">$</span> overdrive job submit job.toml
+<span class="c">→ ai-research-agent · scheduled · alloc a1b2c3</span>
+
+<span class="p">$</span> overdrive alloc status a1b2c3
+<span class="c">  state          : running</span>
+<span class="c">  driver         : wasm</span>
+<span class="c">  node           : node-04 (eu-west-1)</span>
+<span class="c">  identity       : spiffe://overdrive.local/</span>
+<span class="c">                 :   job/ai-research-agent</span>
+<span class="c">                 :   alloc/a1b2c3</span>
+<span class="c">  cert ttl       : 58m 12s</span>
+<span class="c">  sidecars       : 2 attached, healthy</span>
+
+<span class="p">$</span> overdrive cluster upgrade \
+    <span class="t">--mode</span> ha \
+    <span class="t">--peers</span> node-2,node-3
+<span class="c">→ snapshot exported (LocalStore)</span>
+<span class="c">→ RaftStore bootstrapped on 3 peers</span>
+<span class="c">→ leader: node-1 · zero downtime</span></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ====================== FEATURE SPOTLIGHT ====================== -->
+<section>
+  <div class="container">
+    <div class="spotlight">
+      <div>
+        <div class="eyebrow" style="margin-bottom: 16px;">Native SRE agent</div>
+        <h2 style="margin-bottom: 20px;">An LLM that reasons about your cluster &mdash; safely.</h2>
+        <p style="color: var(--text-muted); font-size: 17px;">
+          Every eBPF event carries cryptographic SPIFFE identity. Correlation isn't a label-matching
+          heuristic &mdash; it's a SQL join. The investigation agent proposes typed actions through
+          a graduated approval gate. It cannot do anything the platform doesn't already understand.
+        </p>
+        <ul>
+          <li><strong>Investigations as a resource.</strong> Lifecycle, budget, transcript, compressed into incident memory on conclusion.</li>
+          <li><strong>Typed remediation.</strong> Tier 0 reads auto-execute, Tier 2 writes require human ratification.</li>
+          <li><strong>Hypothesis verification.</strong> The agent can attach signed BPF probes for one investigation turn.</li>
+          <li><strong>Deterministic replay.</strong> Investigation transcripts re-run in CI under the DST harness.</li>
+        </ul>
+        <a href="#" class="btn btn-ghost">Read &sect; 12 of the whitepaper <span class="arrow">→</span></a>
+      </div>
+
+      <div class="tier-panel">
+        <div class="row"><span class="label">investigation_id</span><span class="val">inv-7f3a92</span></div>
+        <div class="row"><span class="label">trigger</span><span class="val">alert: payments.p99 &gt; 800ms</span></div>
+        <div class="row"><span class="label">scope</span><span class="val">job/payments · region eu-west-1</span></div>
+        <div class="row"><span class="label">tools_called</span><span class="val">7</span></div>
+        <div class="row"><span class="label">llm_turns</span><span class="val">4</span></div>
+        <div class="row"><span class="label">tokens_spent</span><span class="val">12,840 / 50,000</span></div>
+        <div class="row"><span class="label">probe_attached</span><span class="val accent">tcp_retransmit_trace</span></div>
+        <div class="row"><span class="label">diagnosis</span><span class="val">backend connection pool exhausted</span></div>
+        <div class="row"><span class="label">proposed</span><span class="val accent">ScaleJob { replicas: 3 → 6 } · Tier 1 · auto</span></div>
+        <div class="row"><span class="label">status</span><span class="val accent">concluded · 47s</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ====================== COMPARISON ====================== -->
+<section id="compare">
+  <div class="container">
+    <div class="section-head">
+      <div class="eyebrow">vs Kubernetes</div>
+      <h2>Coherent by construction, not by configuration.</h2>
+      <p class="lead">
+        When the dataplane, identity model, telemetry pipeline, and service mesh all emerge
+        from the same kernel primitive with the same workload identity attached, the platform
+        becomes coherent in a way that bolted-on approaches cannot match.
+      </p>
+    </div>
+
+    <div class="table-wrap">
+      <table class="cmp">
+        <thead>
+          <tr>
+            <th>Component</th>
+            <th>Kubernetes</th>
+            <th class="over">Overdrive</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="label">Service routing</td>
+            <td class="k8s">iptables, O(n) per packet</td>
+            <td class="over">XDP BPF, O(1) <span class="pill">in-kernel</span></td>
+          </tr>
+          <tr>
+            <td class="label">mTLS</td>
+            <td class="k8s">Envoy sidecar, ~0.5 vCPU each</td>
+            <td class="over">kTLS, NIC offload <span class="pill">~0 overhead</span></td>
+          </tr>
+          <tr>
+            <td class="label">Control plane RAM</td>
+            <td class="k8s">~1 GB</td>
+            <td class="over">~30–80 MB</td>
+          </tr>
+          <tr>
+            <td class="label">Network policy eval</td>
+            <td class="k8s">Per-packet iptables walk</td>
+            <td class="over">BPF map lookup</td>
+          </tr>
+          <tr>
+            <td class="label">Workload types</td>
+            <td class="k8s">Containers</td>
+            <td class="over">Process · microVM · VM · unikernel · WASM</td>
+          </tr>
+          <tr>
+            <td class="label">Observability</td>
+            <td class="k8s">Scraped logs + Prometheus</td>
+            <td class="over">Kernel-native, identity-tagged</td>
+          </tr>
+          <tr>
+            <td class="label">Multi-region</td>
+            <td class="k8s">Stretched Raft or federation plane</td>
+            <td class="over">Per-region Raft + global CRDT gossip</td>
+          </tr>
+          <tr>
+            <td class="label">Extension model</td>
+            <td class="k8s">Go operators with cluster-admin</td>
+            <td class="over">WASM, sandboxed, hot-reloadable</td>
+          </tr>
+          <tr>
+            <td class="label">Node join</td>
+            <td class="k8s">2–5 minutes</td>
+            <td class="over">&lt; 10 seconds</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ====================== PRICING ====================== -->
+<section id="pricing">
+  <div class="container">
+    <div class="section-head">
+      <div class="eyebrow">Cloud platform</div>
+      <h2>Run your own &mdash; or let us run it.</h2>
+      <p class="lead">
+        The open source core is AGPL-3.0. The cloud platform sells the operational complexity
+        we've already absorbed for ourselves &mdash; metered exactly, by kernel telemetry.
+      </p>
+    </div>
+
+    <div class="tiers">
+      <div class="tier">
+        <div class="tier-num">Tier 1</div>
+        <h4>Managed Overdrive</h4>
+        <p class="desc">A full Overdrive cluster as a service. Control plane, worker pool, Overdrive API and CLI. Ideal for platform teams migrating off self-managed Kubernetes.</p>
+        <div class="tier-billing">
+          <strong>per vCPU-hour + GB-hour</strong>
+          metered at allocation level
+        </div>
+      </div>
+
+      <div class="tier featured">
+        <div class="tier-num">Tier 2 · Most popular</div>
+        <h4>Managed Workloads</h4>
+        <p class="desc">Submit jobs directly. No cluster to size, no control plane to monitor. Nomad-style ergonomics with Overdrive's security model.</p>
+        <div class="tier-billing">
+          <strong>per vCPU-hour + GB-hour</strong>
+          tenant namespace, kernel-isolated
+        </div>
+      </div>
+
+      <div class="tier">
+        <div class="tier-num">Tier 3</div>
+        <h4>Serverless WASM</h4>
+        <p class="desc">Sub-10 ms cold start, scale-to-zero. The credential proxy and content inspector ship by default — built for AI agent workloads.</p>
+        <div class="tier-billing">
+          <strong>per invocation + GB-second</strong>
+          minimum unit: one invocation
+        </div>
+      </div>
+
+      <div class="tier">
+        <div class="tier-num">Tier 4</div>
+        <h4>Bare Metal Dedicated</h4>
+        <p class="desc">Dedicated physical nodes inside the platform. Full hardware performance, full Overdrive operational stack, no VM overhead.</p>
+        <div class="tier-billing">
+          <strong>per node-hour</strong>
+          reserved capacity discounts
+        </div>
+      </div>
+    </div>
+
+    <p style="margin-top: 32px; color: var(--text-dim); font-size: 13px; font-family: var(--font-mono);">
+      Enterprise self-hosted licensing &mdash; FIPS crypto, HSM integration, air-gap tooling, DORA / NIS2 / SOC2 / HIPAA policy packs &mdash; available alongside AGPL.
+    </p>
+  </div>
+</section>
+
+<!-- ====================== FINAL CTA ====================== -->
+<section>
+  <div class="container">
+    <div class="final-cta">
+      <div class="eyebrow" style="margin-bottom: 20px;">Open source · AGPL-3.0</div>
+      <h2>The primitives are ready. The platform is here.</h2>
+      <p>
+        Read the whitepaper, clone the repo, run a single binary on a single node.
+        Scale to a multi-region fleet without changing tooling.
+      </p>
+      <div class="hero-cta">
+        <a href="#" class="btn btn-primary">Read the whitepaper <span class="arrow">→</span></a>
+        <a href="#" class="btn btn-ghost">Star on GitHub</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ====================== FOOTER ====================== -->
+<footer>
+  <div class="container">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <a class="brand" href="#">
+          <span class="brand-mark"></span>
+          Overdrive
+        </a>
+        <p>A next-generation workload orchestration platform built entirely in Rust. AGPL-3.0.</p>
+      </div>
+
+      <div class="footer-col">
+        <h5>Platform</h5>
+        <ul>
+          <li><a href="#architecture">Architecture</a></li>
+          <li><a href="#workloads">Workloads</a></li>
+          <li><a href="#">eBPF dataplane</a></li>
+          <li><a href="#">SRE agent</a></li>
+        </ul>
+      </div>
+
+      <div class="footer-col">
+        <h5>Cloud</h5>
+        <ul>
+          <li><a href="#pricing">Managed Overdrive</a></li>
+          <li><a href="#pricing">Managed Workloads</a></li>
+          <li><a href="#pricing">Serverless WASM</a></li>
+          <li><a href="#pricing">Bare Metal</a></li>
+        </ul>
+      </div>
+
+      <div class="footer-col">
+        <h5>Resources</h5>
+        <ul>
+          <li><a href="#">Whitepaper</a></li>
+          <li><a href="#">Documentation</a></li>
+          <li><a href="#">Reference architectures</a></li>
+          <li><a href="#">Roadmap</a></li>
+        </ul>
+      </div>
+
+      <div class="footer-col">
+        <h5>Company</h5>
+        <ul>
+          <li><a href="#">GitHub</a></li>
+          <li><a href="#">Blog</a></li>
+          <li><a href="#">Contact</a></li>
+          <li><a href="#">Enterprise</a></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="footer-bot">
+      <span>© 2026 Overdrive. AGPL-3.0.</span>
+      <span>v0.12 · draft</span>
+    </div>
+  </div>
+</footer>
+
+<script>
+  const nav = document.getElementById('topnav');
+  const onScroll = () => {
+    if (window.scrollY > 8) nav.classList.add('scrolled');
+    else nav.classList.remove('scrolled');
+  };
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+</script>
+
+</body>
+</html>
