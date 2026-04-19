@@ -3,21 +3,21 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Overdrive — Workload orchestration, compiled to the kernel</title>
-<meta name="description" content="A single-binary orchestrator built on the primitives Kubernetes never had: stable eBPF, kernel TLS, and embeddable WASM. Faster scheduling. Stronger isolation. One model for every workload type." />
-<meta property="og:title" content="Overdrive — Workload orchestration, compiled to the kernel" />
-<meta property="og:description" content="One Rust binary replaces etcd, Envoy, SPIRE, CNI, and kube-proxy. AGPL-3.0." />
+<title>Overdrive — Redefining how compute runs</title>
+<meta name="description" content="Orchestration infrastructure for a new generation of workloads. One Rust binary. Kernel-native dataplane. Built on the primitives Kubernetes never had." />
+<meta property="og:title" content="Overdrive — Redefining how compute runs" />
+<meta property="og:description" content="Orchestration infrastructure for a new generation of workloads. AGPL-3.0." />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet" />
 <style>
   :root {
     --bg:           #0a0a0b;
     --bg-2:         #0f0f11;
     --surface:      #131316;
     --surface-2:    #18181c;
-    --border:       #232328;
-    --border-2:     #2c2c33;
+    --border:       #2a2a31;
+    --border-2:     #3a3a44;
     --text:         #f5f5f7;
     --text-muted:   #9a9aa3;
     --text-dim:     #62626a;
@@ -31,9 +31,16 @@
     --max:          1240px;
     --pad:          clamp(20px, 4vw, 48px);
 
-    --font-sans:    'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    --font-sans:    'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Inter', system-ui, sans-serif;
     --font-serif:   'Instrument Serif', 'Iowan Old Style', Georgia, serif;
-    --font-mono:    'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+    --font-mono:    'IBM Plex Mono', ui-monospace, 'JetBrains Mono', 'SF Mono', Menlo, monospace;
+
+    /* Brutalist: sharp edges everywhere */
+    --r-sm:   0;
+    --r-md:   0;
+    --r-lg:   0;
+    --r-xl:   0;
+    --r-pill: 0;
   }
 
   * { box-sizing: border-box; }
@@ -43,13 +50,15 @@
     background: var(--bg);
     color: var(--text);
     font-family: var(--font-sans);
-    font-size: 16px;
+    font-size: 15.5px;
     line-height: 1.55;
-    font-feature-settings: 'ss01', 'cv11';
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
     overflow-x: hidden;
   }
+  /* Plex tightening for display use — Plex is wide by default */
+  h1, h2, h3, h4 { letter-spacing: -0.03em; }
+  .btn { letter-spacing: -0.005em; }
 
   a { color: inherit; text-decoration: none; }
   button { font: inherit; }
@@ -133,7 +142,7 @@
     padding: 8px 14px;
     background: var(--text);
     color: var(--bg);
-    border-radius: 6px;
+    border-radius: var(--r-sm);
     font-size: 13px;
     font-weight: 600;
     transition: opacity 0.15s ease;
@@ -202,8 +211,8 @@
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    padding: 12px 20px;
-    border-radius: 7px;
+    padding: 13px 22px;
+    border-radius: var(--r-sm);
     font-size: 14px;
     font-weight: 600;
     border: 1px solid transparent;
@@ -264,10 +273,10 @@
     display: inline-flex;
     align-items: center;
     gap: 10px;
-    padding: 6px 12px 6px 6px;
+    padding: 6px 14px 6px 6px;
     background: var(--surface);
     border: 1px solid var(--border-2);
-    border-radius: 100px;
+    border-radius: var(--r-pill);
     font-size: 13px;
     color: var(--text-muted);
     margin-bottom: 36px;
@@ -276,7 +285,7 @@
     background: var(--accent-soft);
     color: var(--accent);
     padding: 3px 10px;
-    border-radius: 100px;
+    border-radius: var(--r-pill);
     font-family: var(--font-mono);
     font-size: 11px;
     font-weight: 600;
@@ -284,20 +293,21 @@
     letter-spacing: 0.05em;
   }
   h1.hero-title {
-    font-size: clamp(44px, 7vw, 88px);
-    font-weight: 600;
-    letter-spacing: -0.04em;
+    font-size: clamp(46px, 7.6vw, 92px);
+    font-weight: 500;
+    letter-spacing: -0.045em;
     line-height: 0.98;
-    max-width: 16ch;
+    max-width: 18ch;
     margin: 0 auto 28px;
   }
-  h1.hero-title .display-serif { font-size: 1.05em; }
   .hero-sub {
-    font-size: clamp(17px, 1.8vw, 19px);
+    font-size: clamp(20px, 2.2vw, 26px);
     color: var(--text-muted);
-    max-width: 60ch;
-    margin: 0 auto 40px;
-    line-height: 1.6;
+    max-width: 36ch;
+    margin: 0 auto 44px;
+    line-height: 1.35;
+    letter-spacing: -0.01em;
+    font-weight: 400;
   }
   .hero-sub strong { color: var(--text); font-weight: 500; }
   .hero-cta {
@@ -390,7 +400,7 @@
     display: grid;
     grid-template-columns: repeat(8, 1fr);
     border: 1px solid var(--border);
-    border-radius: 12px;
+    border-radius: var(--r-md);
     overflow: hidden;
   }
   @media (max-width: 1080px) { .creds-list { grid-template-columns: repeat(4, 1fr); } }
@@ -425,7 +435,7 @@
     gap: 1px;
     background: var(--border);
     border: 1px solid var(--border);
-    border-radius: 12px;
+    border-radius: var(--r-md);
     overflow: hidden;
   }
   @media (max-width: 880px) { .stats-grid { grid-template-columns: repeat(2, 1fr); } }
@@ -468,7 +478,7 @@
   .thesis-card {
     padding: 36px 32px;
     border: 1px solid var(--border);
-    border-radius: 12px;
+    border-radius: var(--r-md);
     background: var(--bg-2);
     transition: border-color 0.2s ease;
   }
@@ -488,7 +498,7 @@
   .arch {
     background: var(--bg-2);
     border: 1px solid var(--border);
-    border-radius: 14px;
+    border-radius: var(--r-lg);
     padding: 48px;
     overflow: hidden;
   }
@@ -518,7 +528,7 @@
     padding: 28px 24px;
     background: var(--bg-2);
     border: 1px solid var(--border);
-    border-radius: 12px;
+    border-radius: var(--r-md);
     transition: all 0.15s ease;
   }
   .wl:hover {
@@ -564,7 +574,7 @@
   .code-block {
     background: #0c0c0e;
     border: 1px solid var(--border);
-    border-radius: 12px;
+    border-radius: var(--r-md);
     overflow: hidden;
   }
   .code-head {
@@ -636,7 +646,7 @@
   .tier-panel {
     background: var(--bg-2);
     border: 1px solid var(--border);
-    border-radius: 14px;
+    border-radius: var(--r-lg);
     padding: 28px;
     font-family: var(--font-mono);
     font-size: 13px;
@@ -662,7 +672,7 @@
   .fleet-viz {
     margin-top: 56px;
     border: 1px solid var(--border);
-    border-radius: 14px;
+    border-radius: var(--r-lg);
     background: var(--bg-2);
     padding: 48px 32px;
     position: relative;
@@ -685,7 +695,7 @@
   .region-card {
     background: var(--bg);
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: var(--r-md);
     padding: 22px;
     text-align: left;
     font-family: var(--font-mono);
@@ -748,7 +758,7 @@
   /* ====================== COMPARISON ====================== */
   .table-wrap {
     border: 1px solid var(--border);
-    border-radius: 12px;
+    border-radius: var(--r-md);
     overflow: hidden;
     background: var(--bg-2);
   }
@@ -780,7 +790,7 @@
     background: var(--accent-soft);
     color: var(--accent);
     padding: 2px 8px;
-    border-radius: 100px;
+    border-radius: var(--r-pill);
     font-family: var(--font-mono);
     font-size: 11px;
     margin-left: 8px;
@@ -797,7 +807,7 @@
   .tier {
     background: var(--bg-2);
     border: 1px solid var(--border);
-    border-radius: 12px;
+    border-radius: var(--r-md);
     padding: 32px 28px;
     display: flex;
     flex-direction: column;
@@ -840,7 +850,7 @@
   .final-cta {
     background: var(--bg-2);
     border: 1px solid var(--border);
-    border-radius: 16px;
+    border-radius: var(--r-lg);
     padding: 72px 48px;
     text-align: center;
     position: relative;
@@ -937,7 +947,7 @@
     <div class="nav-links">
       <a href="#thesis">Why now</a>
       <a href="#architecture">Architecture</a>
-      <a href="#compare">vs Kubernetes</a>
+      <a href="#compare">Compare</a>
       <a href="#pricing">Pricing</a>
       <a href="#" class="nav-cta">Read the whitepaper <span class="arrow">→</span></a>
     </div>
@@ -948,37 +958,35 @@
 <section class="hero">
   <!-- DZ-style floating pixel cubes -->
   <svg class="pixel-accent left" width="120" height="160" viewBox="0 0 120 160" fill="none">
-    <rect x="0"  y="0"   width="22" height="22" fill="#ff5c28" opacity="0.6"/>
-    <rect x="24" y="0"   width="22" height="22" fill="#ff8b5f" opacity="0.3"/>
-    <rect x="0"  y="24"  width="22" height="22" fill="#232328"/>
-    <rect x="24" y="48"  width="22" height="22" fill="#ff5c28" opacity="0.4"/>
-    <rect x="48" y="72"  width="22" height="22" fill="#232328"/>
-    <rect x="24" y="96"  width="22" height="22" fill="#ff5c28" opacity="0.55"/>
-    <rect x="0"  y="120" width="22" height="22" fill="#2c2c33"/>
+    <rect x="0"  y="0"   width="22" height="22" fill="#ff5c28" opacity="0.7"/>
+    <rect x="24" y="0"   width="22" height="22" fill="#ff8b5f" opacity="0.35"/>
+    <rect x="0"  y="24"  width="22" height="22" fill="#3a3a44"/>
+    <rect x="24" y="48"  width="22" height="22" fill="#ff5c28" opacity="0.45"/>
+    <rect x="48" y="72"  width="22" height="22" fill="#2a2a31"/>
+    <rect x="24" y="96"  width="22" height="22" fill="#ff5c28" opacity="0.6"/>
+    <rect x="0"  y="120" width="22" height="22" fill="#3a3a44"/>
   </svg>
   <svg class="pixel-accent right" width="140" height="160" viewBox="0 0 140 160" fill="none">
-    <rect x="118" y="0"   width="22" height="22" fill="#ff5c28" opacity="0.45"/>
-    <rect x="94"  y="24"  width="22" height="22" fill="#232328"/>
-    <rect x="118" y="48"  width="22" height="22" fill="#ff8b5f" opacity="0.35"/>
-    <rect x="70"  y="72"  width="22" height="22" fill="#ff5c28" opacity="0.6"/>
-    <rect x="94"  y="96"  width="22" height="22" fill="#2c2c33"/>
-    <rect x="118" y="120" width="22" height="22" fill="#ff5c28" opacity="0.4"/>
+    <rect x="118" y="0"   width="22" height="22" fill="#ff5c28" opacity="0.5"/>
+    <rect x="94"  y="24"  width="22" height="22" fill="#2a2a31"/>
+    <rect x="118" y="48"  width="22" height="22" fill="#ff8b5f" opacity="0.4"/>
+    <rect x="70"  y="72"  width="22" height="22" fill="#ff5c28" opacity="0.7"/>
+    <rect x="94"  y="96"  width="22" height="22" fill="#3a3a44"/>
+    <rect x="118" y="120" width="22" height="22" fill="#ff5c28" opacity="0.45"/>
   </svg>
 
   <div class="container">
     <div class="hero-tag">
-      <span class="hero-tag-pill">v0.12 · Whitepaper</span>
-      A platform team's exit from the Kubernetes stack
+      <span class="hero-tag-pill">Whitepaper v0.12</span>
+      Now public &mdash; read the design
     </div>
 
     <h1 class="hero-title">
-      Workload Orchestration, <span class="display-serif">compiled to the kernel.</span>
+      Redefining how compute&nbsp;runs.
     </h1>
 
     <p class="hero-sub">
-      Overdrive is a single-binary orchestrator built on the primitives Kubernetes never had:
-      <strong>stable eBPF, kernel TLS, and embeddable WASM.</strong>
-      Faster scheduling. Stronger isolation. One model for every workload type.
+      Orchestration infrastructure for a new generation of workloads.
     </p>
 
     <div class="hero-cta">
@@ -1057,7 +1065,7 @@
   <div class="container">
     <div class="section-head">
       <div class="eyebrow">Why now</div>
-      <h2>Kubernetes was right for 2014. <span class="display-serif">It is not right for 2026.</span></h2>
+      <h2>Kubernetes was right for 2014. <br /><span class="display-serif">It is not right for 2026.</span></h2>
       <p class="lead">
         Stable eBPF APIs, kernel TLS offload, production Rust systems libraries, and embeddable WASM
         only matured in the last two years. Overdrive is the orchestrator that becomes possible
@@ -1411,7 +1419,7 @@
 <section id="compare">
   <div class="container">
     <div class="section-head">
-      <div class="eyebrow">vs Kubernetes</div>
+      <div class="eyebrow">Compare</div>
       <h2>Coherent by construction, <span class="display-serif">not by configuration.</span></h2>
       <p class="lead">
         When the dataplane, the identity model, the telemetry pipeline, and the service mesh all
@@ -1547,10 +1555,9 @@
   <div class="container">
     <div class="final-cta">
       <div class="eyebrow" style="margin-bottom: 22px; justify-content: center; display: inline-flex;">Open source · AGPL-3.0</div>
-      <h2>The primitives are ready. <span class="display-serif">The orchestrator is here.</span></h2>
+      <h2>Reimagining the foundation of modern infrastructure.</h2>
       <p>
-        Read the whitepaper. Clone the repo. Run a single binary on a single node.
-        Scale to a multi-region fleet without changing a tool in your toolchain.
+        One binary. Every workload type. Built for the kernel of 2026, not the cluster of 2014.
       </p>
       <div class="hero-cta">
         <a href="#" class="btn btn-primary">Read the whitepaper <span class="arrow">→</span></a>
