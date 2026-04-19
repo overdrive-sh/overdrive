@@ -589,6 +589,53 @@ No VM restart. No workload interruption.
 
 This is not possible with Firecracker, which has no hotplug support. The right-sizing story is now uniform across all workload types.
 
+### Persistent MicroVMs — Long-Lived Stateful Workloads
+
+Not every workload is ephemeral. AI coding agents, CI runners, interactive development environments, Jupyter notebooks, and long-running data processing workers share a shape that neither stateless microVMs nor WASM functions serve well: they need a persistent filesystem, a stable addressable endpoint, and the ability to sleep and resume without losing state.
+
+Helios handles this by extending the `microvm` driver with a `persistent` flag rather than introducing a new workload type. The Cloud Hypervisor substrate, the SPIFFE identity, the eBPF dataplane, the gateway, the credential proxy, and the WASM sidecars are already first-class — persistence is the missing ingredient.
+
+```toml
+[job]
+name = "agent-claude-code"
+driver = "microvm"
+
+[job.microvm]
+persistent = true
+persistent_rootfs_size   = "100GB"
+snapshot_on_idle_seconds = 30
+expose                   = true   # auto-registers a gateway route
+```
+
+When `persistent = true`:
+
+1. **Persistent rootfs bound to workload identity.** The rootfs is object-backed (Garage) with an NVMe hot-tier cache. The storage model follows the JuiceFS approach — content-addressed immutable chunks in object storage, metadata in fast local storage kept durable via streaming replication. The authoritative state lives in Garage; nodes cache chunks. The workload can migrate between nodes without moving a volume, and restores hydrate metadata only, not the full filesystem.
+2. **Checkpoint/restore via Cloud Hypervisor.** The driver exposes `snapshot()` and `restore()` as control-plane actions that delegate to Cloud Hypervisor's existing snapshot/restore API with `userfaultfd` lazy memory paging — restore is pay-as-you-access, not load-everything-upfront. Disk snapshots are metadata-only against the chunk store (chunks are already immutable). Memory uses Cloud Hypervisor's native mechanism.
+3. **Idle eviction with checkpoint (scale-to-zero).** After `snapshot_on_idle_seconds` of no traffic, the workload reconciler checkpoints the VM, tears down the running process, and records the handle in the ObservationStore. An inbound request via the gateway triggers a restore. The restore path is sub-second: metadata-only on disk plus `userfaultfd`-lazy on memory.
+4. **VMGenID wired into the guest.** Live-migrated or snapshot-restored VMs face entropy-reuse hazards — the kernel's RNG can produce identical output on both sides of a snapshot. Cloud Hypervisor exposes a VMGenID device; the node agent updates the generation counter on every restore, and the guest kernel reseeds.
+
+### Composition, Not a New Workload Type
+
+A persistent microVM that also wants a stable public URL, credential sandboxing, and structural prompt-injection defense composes this from existing primitives:
+
+- **Gateway route (§11)** — automatically registered for persistent microVMs declaring `expose = true`, providing a per-workload URL routed through the in-process gateway.
+- **Credential proxy sidecar (§8, §9)** — automatically attached for persistent workloads that declare external credentials, ensuring the workload never holds real secrets regardless of what it runs.
+- **Content-inspector sidecar (§9)** — optional; relevant for workloads processing untrusted content (AI agents reading the web, CI runners fetching third-party packages).
+
+The principle: persistent microVMs are not a separate concept. They are the `microvm` driver with `persistent = true`, and the other capabilities stateful workloads typically need are already first-class in Helios and compose via the job spec. The platform does not ship pre-baked workload images (Python, Node, Claude Code) — that is a product decision, not a platform primitive.
+
+### Use Cases
+
+| Use case | Example | Why persistent microVM |
+|---|---|---|
+| AI coding agents | Claude Code, Cursor, Devin-style long sessions | State accumulates across turns; fast resume matters |
+| CI runners | Self-hosted Buildkite / GitLab runners | Warm state (layer cache, artifacts) |
+| Interactive dev environments | Codespaces-style, remote Jupyter | User filesystem persists; instant resume expected |
+| Long-running data workers | Pipeline orchestrators with recovery state | State is the workload |
+| Customer-code sandboxes | SaaS offering arbitrary user code execution | Per-tenant isolation + persistent scratch |
+
+This is a natural consequence of the existing microVM driver, object storage, gateway, and identity model — not a separate product inside Helios.
+
 ---
 
 ## 7. eBPF Dataplane
@@ -1009,11 +1056,11 @@ struct Gateway {
     route_table: Arc<RouteTable>,    // shared with XDP dataplane
     identity:    Arc<IdentityMgr>,   // shared with sockops layer
     telemetry:   Arc<TelemetrySink>, // shared with eBPF ringbuf consumer
-    tls:         Arc<TlsManager>,    // built-in CA, auto-rotation
+    tls:         Arc<TlsManager>,    // internal CA + embedded ACME, unified rotation
 }
 ```
 
-Route updates are in-process state mutations. TLS certificate rotation is handled by the same identity manager that handles workload SVIDs. Telemetry writes to the same DuckLake pipeline. Everything is coherent because it is the same binary.
+Route updates are in-process state mutations. TLS certificate rotation — for both internal-trust SVIDs and public-trust ACME-issued certs — is handled by the same identity manager. Telemetry writes to the same DuckLake pipeline. Everything is coherent because it is the same binary.
 
 ### Node Topologies
 
@@ -1035,11 +1082,52 @@ Production (dedicated ingress tier):
 
 ### Capabilities
 
-- TLS 1.3 termination via rustls and the built-in CA (automatic rotation)
+- TLS 1.3 termination via rustls; certs issued by either the built-in CA (internal trust) or an embedded ACMEv2 client (public trust), with unified rotation through `IdentityMgr`
 - HTTP/1.1, HTTP/2, gRPC, gRPC-Web, WebSocket
 - Declarative route configuration pushed from control plane
 - Composable middleware pipeline: rate limiting, JWT auth, CORS, circuit breaking, egress inspection
 - In-process BPF map access for routing table updates — route changes are atomic, no restart
+
+### Public-Trust Certificates
+
+The built-in CA issues certs in the Helios trust domain — used for SVIDs, node intermediates, and the gateway's east-west mTLS. Generic internet clients (browsers, third-party SDKs, mobile apps) do not trust the Helios root, so public north-south ingress needs **publicly-trusted certs**.
+
+Helios embeds [`lers`](https://docs.rs/lers) — a Rust ACMEv2 client (RFC 8555) — directly in the gateway. Certs from Let's Encrypt or any ACMEv2-compliant CA feed into the same `IdentityMgr` that handles SVID rotation. Two trust lanes, one manager:
+
+| Lane | Issuer | Clients | Use |
+|---|---|---|---|
+| Internal (east-west) | Built-in CA (§4) | Helios workloads, node agents, gateway east-west | Service mesh mTLS, SVIDs |
+| Public (north-south) | ACMEv2 via `lers` | Browsers, third-party clients | Gateway ingress on `https_port` |
+
+Both lanes share `IdentityMgr` for storage and rotation, rustls as the TLS terminator, and the same reconciler-driven watchdog for certs approaching expiry.
+
+```toml
+[node.gateway.acme]
+enabled       = true
+directory_url = "https://acme-v02.api.letsencrypt.org/directory"
+contact_email = "ops@example.com"
+challenge     = "dns-01"    # "http-01" | "dns-01" | "tls-alpn-01"
+dns_provider  = "route53"   # required when challenge = "dns-01"
+```
+
+Challenge support:
+- **HTTP-01** — the gateway serves `/.well-known/acme-challenge/` on port 80 in-process; no external state
+- **DNS-01** — required for wildcard certs (e.g. `*.workloads.example.com` covering per-workload URLs under one cert, §6 *Persistent MicroVMs*); pluggable DNS provider interface
+- **TLS-ALPN-01** — gateway-local, port 443 only
+
+Route configuration selects the cert source per host:
+
+```toml
+[[routes]]
+host    = "api.example.com"
+path    = "/payments/*"
+backend = "job/payments"
+tls     = "acme"            # "acme" | "internal" | "operator"
+```
+
+Storage boundary: operator-uploaded certs and ACME account keys live in the **IntentStore** (authoritative, linearizable, Raft-replicated in HA). Issued cert leaves and private keys live in the `IdentityMgr` cache alongside SVIDs — rotation is driven by the same reconciler that rotates workload identity.
+
+`lers` pulls in OpenSSL via the `openssl` crate for ACME cryptographic operations. This is background work during cert issuance and rotation — rustls remains the sole TLS terminator in the hot path. Design principle 7 (*no FFI to C++ in the critical path*) is preserved.
 
 ### Route Configuration
 
@@ -1050,6 +1138,7 @@ Routes are declared as top-level platform resources and pushed to gateway nodes 
 host = "api.example.com"
 path = "/payments/*"
 backend = "job/payments"
+tls    = "acme"
 timeout_ms = 5000
 
 [routes.middleware]
@@ -1060,17 +1149,17 @@ auth = { mode = "jwt", issuer = "https://auth.example.com" }
 ### External Traffic Path
 
 ```
-External client (TLS via rustls, built-in CA)
+External client (TLS via rustls; public-trust cert from ACME or operator upload)
     │
 Gateway subsystem (hyper, in-process route engine, middleware)
-    │ mTLS (SPIFFE identity, same identity manager as all workloads)
+    │ mTLS (SPIFFE identity, built-in CA, same IdentityMgr as all workloads)
     ▼
 XDP dataplane (in-process BPF map lookup, DNAT)
     │
 Backend service
 ```
 
-Every request carries cryptographic workload identity end-to-end. The gateway is the first hop in the same identity-aware dataplane, with no architectural boundary between it and the rest of the node agent.
+The public TLS boundary terminates at the gateway. Inside the gateway, traffic is re-wrapped in mTLS using the built-in CA — every east-west hop carries cryptographic workload identity, exactly as if the request had originated inside the cluster. Two trust lanes meet at the gateway; from that point onward, everything is Helios-native identity.
 
 ---
 
@@ -1923,6 +2012,7 @@ For exhaustive state-space exploration beyond what turmoil covers, Helios is des
 - Built-in sidecars: credential-proxy, content-inspector, rate-limiter, request-logger
 - Sidecar SDK (Rust + TypeScript)
 - Gateway (hyper + rustls)
+- Embedded ACMEv2 client via `lers` — public-trust certs for the gateway (HTTP-01, DNS-01, TLS-ALPN-01), rotation unified with SVIDs in `IdentityMgr`
 - DuckLake telemetry pipeline (catalog: libSQL, storage: Garage Parquet)
 
 ### Phase 5 — Intelligence (Months 12–18)
@@ -1931,6 +2021,10 @@ For exhaustive state-space exploration beyond what turmoil covers, Helios is des
 - Right-sizing reconciler (writes resource profiles into ObservationStore)
 - Incident memory (libSQL)
 - Predictive scaling
+- Persistent microVMs (step 1): Cloud Hypervisor snapshot/restore exposed in the `microvm` driver with `userfaultfd` lazy memory paging; VMGenID wired into the guest on restore
+- Persistent microVMs (step 2): object-backed rootfs (chunked over Garage) with NVMe hot-tier cache
+- Persistent microVMs (step 3): gateway auto-route (`expose = true`) + credential-proxy sidecar defaults
+- Persistent microVMs (step 4): idle-eviction reconciler with checkpoint (`snapshot_on_idle_seconds`) — scale-to-zero for long-lived stateful workloads
 
 ### Phase 6 — Federation and Ecosystem (Months 18+)
 - WASM Component Model SDK (Rust, TypeScript, Go)
