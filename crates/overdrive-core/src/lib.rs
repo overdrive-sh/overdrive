@@ -34,5 +34,5 @@ pub use id::{
     NodeId, PolicyId, Region, SchematicId, SpiffeId,
 };
 pub use traits::{
-    Clock, Dataplane, Driver, Entropy, IntentStore, Llm, ObservationStore, Transport,
+    Clock, Dataplane, Driver, DriverType, Entropy, IntentStore, Llm, ObservationStore, Transport,
 };

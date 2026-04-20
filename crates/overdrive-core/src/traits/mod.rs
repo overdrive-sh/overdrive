@@ -24,7 +24,7 @@ pub mod transport;
 
 pub use clock::Clock;
 pub use dataplane::Dataplane;
-pub use driver::Driver;
+pub use driver::{Driver, DriverType};
 pub use entropy::Entropy;
 pub use intent_store::IntentStore;
 pub use llm::Llm;
