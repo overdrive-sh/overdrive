@@ -61,13 +61,16 @@ containerd:
   user:   false
 
 # ────────────────────────────────────────────────────────────────────────────
-# Env — sourced on every shell login.
+# Env — literal values only. Lima writes these verbatim to /etc/environment
+# and `boot.sh` exports each line with `export "$line"`, which does NOT
+# expand ${HOME} / ${PATH} — a literal string ends up in the variable and
+# PATH-dependent commands (sed, etc.) break for the rest of boot.
+# Anything that needs shell expansion lives in ~/.profile instead (see the
+# user-mode provisioning step below).
 # ────────────────────────────────────────────────────────────────────────────
 env:
-  CARGO_TERM_COLOR:  "always"
-  CARGO_TARGET_DIR:  "${HOME}/.cargo-target-lima"
-  RUST_LOG:          "overdrive=info"
-  PATH:              "${HOME}/.cargo/bin:${HOME}/go/bin:${HOME}/.local/bin:${PATH}"
+  CARGO_TERM_COLOR: "always"
+  RUST_LOG:         "overdrive=info"
 
 # ────────────────────────────────────────────────────────────────────────────
 # Pinned versions for single-file binary downloads. Bump as releases land.
@@ -163,7 +166,29 @@ provision:
       wasmtime --version
 
   # -------------------------------------------------------------------------
-  # User-level — Rust, cargo tools, kraft, LVH, virtme-ng.
+  # kraft (Unikraft build CLI) — direct .deb from the kraftkit GitHub
+  # release. The official `get.kraftkit.sh` installer prompts for the sudo
+  # password on a TTY (which cloud-init doesn't have); `deb.pkg.kraftkit.sh`
+  # returns 404 on arm64. The .deb per-arch asset works on both.
+  # -------------------------------------------------------------------------
+  - mode: system
+    script: |
+      #!/usr/bin/env bash
+      set -euxo pipefail
+      export DEBIAN_FRONTEND=noninteractive
+      ARCH="$(dpkg --print-architecture)"
+      VER="$(curl -fsSL https://api.github.com/repos/unikraft/kraftkit/releases/latest \
+              | jq -r .tag_name | sed 's/^v//')"
+      DEB="kraftkit_${VER}_linux_${ARCH}.deb"
+      curl -fsSL -o "/tmp/${DEB}" \
+        "https://github.com/unikraft/kraftkit/releases/download/v${VER}/${DEB}"
+      apt-get install -y "/tmp/${DEB}"
+      rm -f "/tmp/${DEB}"
+      kraft version
+
+  # -------------------------------------------------------------------------
+  # User-level — Rust, cargo tools, LVH, virtme-ng. Kraft lives in system
+  # mode above because its .deb needs root.
   # -------------------------------------------------------------------------
   - mode: user
     script: |
@@ -178,11 +203,6 @@ provision:
       . "${HOME}/.cargo/env"
       rustup component add rustfmt clippy rust-src || true
       cargo install --locked cargo-deny cargo-nextest || true
-
-      # kraft (Unikraft build CLI) — official installer.
-      if ! command -v kraft >/dev/null 2>&1; then
-        curl --proto '=https' --tlsv1.2 -sSf https://get.kraftkit.sh | sh
-      fi
 
       # little-vm-helper (Tier 3 kernel-matrix harness).
       if ! command -v lvh >/dev/null 2>&1; then
@@ -200,6 +220,20 @@ provision:
       # aarch64-apple-darwin and Linux ELF x86_64/aarch64 targets share no
       # fingerprint but every write across the mount is slow.
       mkdir -p "${HOME}/.cargo-target-lima"
+
+      # Shell rc — PATH + CARGO_TARGET_DIR. These must live in ~/.profile
+      # rather than Lima's `env:` block because `${HOME}` and `${PATH}`
+      # need shell expansion; /etc/environment does not expand variables.
+      PROFILE="${HOME}/.profile"
+      if ! grep -q "# overdrive-dev begin" "${PROFILE}" 2>/dev/null; then
+        cat >> "${PROFILE}" <<'EOF'
+
+      # overdrive-dev begin
+      export CARGO_TARGET_DIR="${HOME}/.cargo-target-lima"
+      export PATH="${HOME}/.cargo/bin:${HOME}/go/bin:${HOME}/.local/bin:${PATH}"
+      # overdrive-dev end
+      EOF
+      fi
 
 # ────────────────────────────────────────────────────────────────────────────
 # Probes — Lima waits for each to succeed before reporting "ready".
@@ -233,9 +267,8 @@ probes:
     script: |
       #!/usr/bin/env bash
       set -eu
-      timeout 300 bash -c 'until command -v kraft >/dev/null 2>&1 \
-        || [ -x "$HOME/.local/bin/kraft" ]; do sleep 2; done'
-    hint: "kraftkit did not install — see https://kraftkit.sh/"
+      timeout 300 bash -c 'until command -v kraft >/dev/null 2>&1; do sleep 2; done'
+    hint: "kraftkit .deb install failed — check /var/log/cloud-init-output.log"
 
   - description: "little-vm-helper (lvh) installed"
     script: |
