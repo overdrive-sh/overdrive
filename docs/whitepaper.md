@@ -869,6 +869,52 @@ optional NIC offload for crypto operations
 
 IP addresses are routing hints, not security boundaries. Policy is expressed in terms of SPIFFE identities. A workload can move nodes, scale to 100 instances, and receive a new IP — the policy remains correct because it references `job/payments`, not `10.0.1.45`.
 
+### Operator Identity and CLI Authentication
+
+Human operators running `overdrive` from a laptop — and CI systems running it from a pipeline — need to authenticate to the control plane API. Overdrive reuses the SPIFFE and CA machinery that already exists for workloads rather than introducing a parallel auth stack. An operator is another SPIFFE identity, issued from the same CA, enforced by the same policy engine, carried over the same mTLS transport.
+
+**Operator SPIFFE IDs.** Each operator's identity is a SPIFFE URI SAN in the platform trust domain:
+
+```
+spiffe://overdrive.local/operator/marcus@schack.id
+```
+
+Operator roles — `operator:admin`, `operator:submitter`, `operator:reader`, `operator:ci/<scope>` — are encoded as path components under `operator/...`, never in the X.509 Common Name or Organization field. Regorus binds policy to the SPIFFE path; the certificate serves only as transport trust. This is a deliberate departure from the etcd and pre-RBAC Talos patterns, where identity and role shared a cert field (etcd CVE-2018-16886) — conflating the two is a known auth-bypass shape.
+
+**Global identity across regions.** Operator SPIFFE IDs are global, not per-region. In a multi-region deployment, operator certs are federated across all regional CAs — either by nesting per-region CAs under a single cluster-scoped operator root, or by distributing the operator trust bundle as observation state. The same `overdrive job submit` call works against any region without the CLI carrying a different cert per region. Workload SVIDs remain per-region (they never cross a region boundary anyway); operator SVIDs deliberately do.
+
+**Short TTLs, gossip-propagated revocation.** Operator leaf certs are minted with a default TTL of 8 hours — long enough to cover a working session without forcing repeated re-auth, short enough that expiry alone bounds the steady-state attack window. Renewal issues a fresh CSR to the control plane; the laptop holds only the current leaf, never the CA intermediate. This mirrors workload SVID rotation (§8 above) but is driven client-side.
+
+Emergency revocation — a compromised laptop, a departing operator, a leaked CI token — is handled through a `revoked_operator_certs` table in the ObservationStore. Revocations are observation, not intent: they need to reach every node quickly, they tolerate seconds of staleness, they never need cross-region linearizability.
+
+```sql
+CREATE TABLE revoked_operator_certs (
+    cert_serial   BLOB PRIMARY KEY,
+    spiffe_id     TEXT,
+    revoked_at    INTEGER,    -- logical timestamp
+    expires_at    INTEGER     -- original cert TTL; row is swept when passed
+);
+SELECT crsql_as_crr('revoked_operator_certs');
+```
+
+`overdrive op revoke <spiffe_id>` writes a row; Corrosion gossips it to every node within seconds. Every control-plane node consults its local SQLite on each authentication attempt against the gRPC API — no RPC to a central CRL distributor, no OCSP, no dependency on the regional Raft leader being reachable. A revocation-sweep reconciler (§18) deletes rows whose `expires_at` has passed, keeping the table bounded.
+
+This is not an X.509 CRL in the formal sense — there is no signed CRL artifact distributed over HTTP, no CRLDistributionPoints extension in the cert, no OCSP stapling. The revocation state is first-class Overdrive observation data, readable and enforceable in the same way BPF map hydration is. The 8-hour TTL is therefore a comfort bound, not a security bound: the actual attack window for a known-compromised cert is gossip-propagation time.
+
+The first admin cert is produced out-of-band by `overdrive cluster init`. Additional operator certs are minted by an existing admin:
+
+```
+overdrive op create marcus@schack.id \
+    --role operator:submitter \
+    --ttl 30m
+```
+
+**CLI configuration.** The resulting CA trust bundle, active operator SVID, and context (default cluster / region) live at `~/.overdrive/config` — the same shape as `~/.kube/config` and `~/.talos/config`. No environment variables, no token files, no separate truststore.
+
+**Deferred — OIDC enrolment.** A future phase introduces `overdrive login`, which performs OIDC Authorization Code + PKCE against a configured IdP (Google Workspace, GitHub, Okta) and mints an operator SVID on valid ID token. This closes the bootstrap-cert problem once team size exceeds a handful of operators — offboarding becomes an IdP concern rather than a Overdrive one — but it is not required for v0.1. Phase 6.
+
+**Deferred — Biscuit for CI delegation.** Request-level capability attenuation — an operator hands CI a token scoped to `job=payments AND action=submit AND expires<1h` without re-enrolling the CI in the CA — maps onto Biscuit: a Rust-native (`biscuit-auth`), Datalog-policied, Ed25519-signed capability token carried in a gRPC metadata header on top of an already-authenticated mTLS connection. Biscuit adds attenuation without weakening the primary auth path. Phase 6.
+
 ### Credential Proxy
 
 The credential proxy is a built-in sidecar — the first instance of a general pattern described fully in section 9. For workloads that interact with external services, it ensures real API keys and tokens never enter the workload sandbox. The platform generates dummy credentials, intercepts outbound requests via TC eBPF, swaps dummy credentials for real ones, and enforces domain allowlists. A compromised workload that exfiltrates its credentials has nothing useful.
@@ -2022,6 +2068,7 @@ This replaces the Kubernetes operator model, where extensions ship as Go binarie
 - Investigation lifecycle (§12)
 - LLM spend enforcement (§12)
 - Evaluation-broker reaper (cancellable-set bulk reaper)
+- Operator cert revocation sweep (§8) — deletes rows from `revoked_operator_certs` whose `expires_at` has passed; keeps the table bounded
 
 **Workflows** (orchestrate, durable):
 
@@ -2688,6 +2735,7 @@ Upgrades are handled by the OCI registry frontend. A node running Overdrive can 
 ### Phase 3 — Identity and Security (Months 6–9)
 - Built-in CA (rcgen + rustls)
 - SPIFFE SVID issuance and rotation
+- **Operator identity and CLI authentication (§8).** 8-hour default TTL client certs issued by the platform CA to human operators and CI systems, SPIFFE IDs under `spiffe://overdrive.local/operator/...` with role encoded in the path (never in CN/O — avoids the etcd CVE-2018-16886 shape), `~/.overdrive/config` layout matching `~/.kube/config` / `~/.talos/config`, `overdrive cluster init` mints the first admin cert, `overdrive op create` mints additional ones. Operator identity is global across regions from day one. Emergency revocation via a `revoked_operator_certs` table in the ObservationStore — gossip-propagated within seconds, consulted on every auth attempt from local SQLite, no CRL/OCSP, rows self-drop at `expires_at` via the revocation-sweep reconciler
 - sockops mTLS + kTLS installation
 - BPF LSM programs
 - Regorus policy evaluation (intent), verdict compilation into ObservationStore
@@ -2737,6 +2785,8 @@ Upgrades are handled by the OCI registry frontend. A node running Overdrive can 
 - Cross-region partition tolerance: each region continues to operate on locally-committed intent under partition; observation converges via LWW on heal
 - **`ShardedIntentStore` — Twine-shape pluggable backend for single-region density beyond the openraft+redb ceiling.** The `IntentStore` trait (§4) already abstracts over `LocalStore` and `RaftStore`; a third implementation narrows consensus to a coarse allocator (durable-Paxos regional index of machines → entitlements, weeks/months timescale) and delegates fine-grained task placement to per-entitlement schedulers with independent storage. Directly modelled on Meta's Twine (Tang et al., OSDI 2020), which operates one control plane per region over ~1M machines without cluster federation by using exactly this decomposition. **Gated on a design partner with a real single-region density requirement above ~10k nodes** — building this speculatively would ship complexity that cannot be tuned without representative workload shape. Until then, the evidence-backed single-region ceiling for openraft+redb is conservatively ~5–10k worker nodes (Borg's empirical cell-size median under Paxos is the closest public reference point); deployments exceeding this add regions rather than scaling a region.
 - Image Factory: OCI registry frontend, PXE boot, dm-verity + TPM attestation, Secure Boot signing
+- **OIDC enrolment bridge for operators (§8).** `overdrive login` performs OIDC Authorization Code + PKCE against a configured IdP (Google Workspace, GitHub, Okta), the control plane validates the ID token and mints a short-TTL operator SVID, replacing out-of-band admin-bootstrap. Removes the kubeconfig-style stolen-cert risk — offboarding becomes an IdP concern. Uses `openidconnect` / `jsonwebtoken` / `oauth2` Rust crates
+- **Biscuit tokens for CI delegation (§8).** `biscuit-auth` (Rust-native, Ed25519, Datalog policy) carried in a gRPC metadata header on top of mTLS — operators attenuate their own SVID into a short-lived capability token scoped to a specific job, action, and expiry, without the delegatee enrolling in the CA. Additive to mTLS, not a replacement; Regorus authorises the mTLS identity, Biscuit policy authorises the delegated capability
 
 ---
 
