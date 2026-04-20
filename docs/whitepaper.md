@@ -31,7 +31,7 @@ The foundational thesis: the primitives required to build a genuinely better orc
 15. [Zero Downtime Deployments](#15-zero-downtime-deployments)
 16. [Serverless WASM Functions](#16-serverless-wasm-functions)
 17. [Storage Architecture](#17-storage-architecture)
-18. [Reconciler Model](#18-reconciler-model)
+18. [Reconciler and Workflow Primitives](#18-reconciler-and-workflow-primitives)
 19. [Security Model](#19-security-model)
 20. [Efficiency Comparison](#20-efficiency-comparison)
 21. [Deterministic Simulation Testing](#21-deterministic-simulation-testing)
@@ -1843,7 +1843,7 @@ Persistent microVMs (§6) need a rootfs that survives workload migration, suppor
 - **Cache** — NVMe hot tier per node, 2Q eviction, write-back for locally-originated writes. Read miss hydrates from Garage; write commits to local NVMe and to the WAL stream.
 - **Frontend** — `vhost-user-fs` (Rust port of `virtiofsd`) speaking virtio-fs directly to Cloud Hypervisor. The guest sees a normal virtiofs mount; the daemon is invisible.
 
-The design is deliberately narrower than a general distributed filesystem. `overdrive-fs` assumes **single-writer per rootfs** — each rootfs is owned by exactly one running VM at a time, enforced by the allocation lifecycle. This deletes the hardest parts of distributed FS design: no distributed locking, no multi-client cache coherence, no cross-mount invalidation. Metadata mutations are single-process libSQL transactions. Migration is a quiesce-and-handoff between two nodes, coordinated by the workflow reconciler (§18).
+The design is deliberately narrower than a general distributed filesystem. `overdrive-fs` assumes **single-writer per rootfs** — each rootfs is owned by exactly one running VM at a time, enforced by the allocation lifecycle. This deletes the hardest parts of distributed FS design: no distributed locking, no multi-client cache coherence, no cross-mount invalidation. Metadata mutations are single-process libSQL transactions. Migration is a quiesce-and-handoff between two nodes, coordinated by a cross-region-migration workflow (§18).
 
 Snapshot and restore operate at the metadata layer only — chunks are already immutable, so a snapshot is an atomic libSQL transaction that forks the inode tree. This is what lets §14 *Scale-to-Zero for VM Workloads* resume a persistent microVM in tens of milliseconds: restore hydrates metadata (kilobytes), not the rootfs (gigabytes), and `userfaultfd` pages in memory on access while the guest is already running.
 
@@ -1906,11 +1906,22 @@ Each reconciler gets a private libSQL database for stateful memory across reconc
 
 ---
 
-## 18. Reconciler Model
+## 18. Reconciler and Workflow Primitives
 
-### Design
+### Overview
 
-Overdrive' reconciliation model is inspired by Kubernetes' control loop but with three key differences: reconcilers are strongly typed Rust trait objects (not Go processes with cluster-admin privileges), they have access to a private persistent store for stateful reasoning, and the platform ships a durable-workflow primitive alongside the reconciler for multi-step operations that cannot be cleanly expressed as diff-based convergence.
+Overdrive factors control-plane logic into two orthogonal primitives, both descended from Kubernetes' control-loop model but redesigned for DST-testability and formal verifiability:
+
+- **Reconcilers** — pure functions that converge cluster state toward a declared spec. Infinite lifecycle; no terminal state.
+- **Workflows** — durable async functions that orchestrate defined sequences to completion. Finite lifecycle; terminal result.
+
+Both are strongly typed Rust trait objects for first-party extensions, WASM modules for third-party. Both have access to private libSQL memory for stateful reasoning. Both honour the §4 Intent/Observation/Memory boundary. Neither runs with the cluster-admin privileges that Kubernetes operators do.
+
+This supersedes the "operator" pattern where Go binaries with arbitrary I/O and cluster-admin privileges drive reconciliation. Each primitive has its own contract; each contract is testable in the §21 simulation harness; each is a verification target. The platform's own durable sequences — certificate rotation, multi-stage deployment, cross-region migration, staged rollout — are themselves workflows, built on the same trait and the same runtime that will be exposed to application code through the WASM Workflow SDK (§23). No "platform workflow" / "user workflow" divergence.
+
+### The Reconciler Primitive
+
+Reconcilers converge. They are pure over `(desired, actual, db) → actions`:
 
 ```rust
 trait Reconciler: Send + Sync {
@@ -1923,7 +1934,9 @@ trait Reconciler: Send + Sync {
 }
 ```
 
-The `reconcile` function is pure over `(desired, actual, db) → actions`. Neither the trigger reason nor wall-clock time are inputs. This is the property that makes reconcilers testable in the simulation harness (§21) and tractable for formal verification (below).
+The purity is load-bearing. Neither the trigger reason nor wall-clock time are inputs. `reconcile` does not `.await`, does not spawn subprocesses, does not read wall-clock, does not write directly to the IntentStore or ObservationStore. This property is what makes reconcilers testable under DST (§21) and tractable for *Eventually Stable Reconciliation* proofs (see *Correctness Guarantees* below; USENIX OSDI '24 *Anvil*).
+
+Reconcilers have infinite lifecycle. They re-evaluate whenever their inputs change, forever; there is no terminal state, only convergence to desired-vs-actual equality.
 
 ### Triggering Model — Hybrid by Design
 
@@ -1942,47 +1955,9 @@ Overdrive ships the mitigation natively rather than retrofitting after an incide
 - Because reconciliation is idempotent, collapsing N pending evaluations for the same target into one is semantically free — the surviving evaluation sees the fully-converged delta anyway.
 - Back-pressure is measured in evaluations-per-second per reconciler; sustained over-budget shedding raises a platform alert rather than silently degrading.
 
-### Extension Model
-
-First-party reconcilers are Rust trait objects — maximum performance, full type safety. Third-party reconcilers are WASM modules loaded at runtime — sandboxed, hot-reloadable, language-agnostic. The interface is identical; the execution backend differs.
-
-Input and output types are fully serializable from day one, making the WASM migration path trivial.
-
-This replaces the Kubernetes operator model, where extensions ship as Go binaries running with cluster-admin privileges — the single largest source of cluster-destabilizing incidents in production Kubernetes. A misbehaving WASM reconciler cannot escape its sandbox, cannot mutate state without going through Raft, and can be evicted or hot-reloaded without restarting a pod. WASM as the control-plane extension model is now industry consensus (Helm 4, Cosmonic Control, wasmCloud) — Overdrive is early, not fringe.
-
-### Built-in Reconcilers
-
-- Job lifecycle (start, stop, migrate, restart)
-- Certificate rotation
-- Resource right-sizing
-- Rolling deployment strategies
-- Canary promotion/rollback
-- Node drain and replacement
-- WASM function scaling
-- Chaos engineering (deliberate fault injection for reliability testing)
-- Workflow execution (see below)
-
-### Workflow Reconciler — Durable Execution for Multi-Step Operations
-
-Some orchestration operations are fundamentally sequential: "roll certificate through DNS propagation, wait for validation, swap trust anchor, verify all nodes accepted, retire old cert." These do not fit cleanly into diff-based convergence because the correct next action depends on the *history* and the *timing* of prior steps, not just the current delta. Encoding them as reconciler memory works but reproduces what Temporal and Restate call *durable execution* — poorly.
-
-Overdrive therefore treats durable workflows as a first-class primitive, implemented *as* a built-in reconciler whose desired state is a workflow definition and whose memory is a replayable event journal:
-
-```rust
-trait Workflow {
-    async fn run(&self, ctx: &WorkflowCtx) -> WorkflowResult;
-}
-```
-
-- Each `await` point is a durable checkpoint written to libSQL. A crashed workflow resumes on any control plane node by replaying the journal.
-- Cross-workflow coordination uses typed signals, not ad-hoc StateStore writes.
-- Used internally for certificate lifecycle, multi-stage deployments, cross-region migrations, and human-in-the-loop staged rollouts.
-
-The reconciler primitive handles "converge cluster toward spec." The workflow primitive handles "execute this defined sequence to completion with crash-safe resume." They compose: a deployment workflow emits actions that are realized by the job-lifecycle reconciler.
-
 ### External I/O from Reconcilers
 
-Reconcilers sometimes need to issue requests to systems outside Overdrive — a Restate admin API, an AWS account, a payment processor, a custom internal service. The pure-function contract above does not preclude this; it reshapes how the I/O is expressed. Overdrive handles it with one Action variant and one ObservationStore table:
+Reconcilers sometimes need to issue requests to systems outside Overdrive — a Restate admin API, an AWS account, a payment processor, a custom internal service. The pure-function contract does not preclude this; it reshapes how the I/O is expressed. Overdrive handles it with one Action variant and one ObservationStore table:
 
 - Reconcilers emit `Action::HttpCall { request_id, correlation, target, method, body, timeout, idempotency_key }` as a normal Action. No new trait, no new purity exception.
 - The runtime executes the call via the `Transport` trait and writes the result into an `external_call_results` table in the ObservationStore. The write is gossiped like any other observation row; every node reads responses locally.
@@ -1990,7 +1965,71 @@ Reconcilers sometimes need to issue requests to systems outside Overdrive — a 
 
 This is the same architecture USENIX OSDI '24 *Anvil* validates for verified Kubernetes controllers: a pure `reconcile_core` emitting request descriptors, a shim layer dispatching them, responses fed back as observable state. It inherits the same DST and ESR properties as cluster-state reconciliation — Actions are data, responses are observable rows, the reconciler remains pure. Retry policy, idempotency, and failure-to-status propagation live in reconciler memory (private libSQL), where they belong.
 
-For multi-step external orchestration that requires crash-safe resume — cert rotations, cross-region migrations, staged rollouts, chains of three or more external calls that must complete as a unit — reconcilers emit `Action::StartWorkflow` and read the workflow's result on completion. The reconciler remains the supervisor; the workflow owns the imperative sequence. Reconcilers converge; workflows orchestrate.
+Chains of external calls that must complete as a unit compose upward to the workflow primitive rather than through chained `HttpCall` actions. See *Primitive Composition* below.
+
+### The Workflow Primitive
+
+Workflows orchestrate. They are durable async functions whose `await` points are checkpointed to a replayable journal:
+
+```rust
+trait Workflow: Send + Sync {
+    async fn run(&self, ctx: &WorkflowCtx) -> WorkflowResult;
+}
+```
+
+Workflows may perform I/O directly — `ctx.call(...).await`, `ctx.sleep(...).await`, `ctx.wait_for_signal(...).await`, `ctx.activity(...).await`. All non-determinism flows through `WorkflowCtx`, which itself consumes the same injected `Transport` / `Clock` / `Entropy` traits that the reconciler runtime uses, so every operation is DST-controllable (§21). The difference from reconcilers is not *whether* non-determinism is injected — it is — but *how correctness is guaranteed*:
+
+- **Reconciler correctness** = ESR: progress (converges toward desired state) and stability (remains at desired state absent external change). A pure function is the natural expression.
+- **Workflow correctness** = *deterministic replay from journal*: given the same journal, a workflow replays to bit-identical state. A crashed workflow resumes on any control-plane node by reading its journal. Version skew between journal and code is a named failure mode the SDK catches at load time.
+
+Workflows have finite lifecycle. They terminate with a `WorkflowResult` — succeeding, failing, or being cancelled. Completed workflow journals are retained in libSQL for audit, then compacted on a declared retention policy.
+
+Workflow journals live in per-primitive libSQL (§4, §17). Each `await` point writes a checkpoint before suspending; resume reads the journal, replays already-completed awaits from their recorded results, and picks up at the first unrecorded await. Cross-workflow coordination uses typed signals — a first-class primitive in the ObservationStore — not ad-hoc IntentStore writes.
+
+**First-class for platform and application code alike.** Certificate lifecycle, multi-stage deployment, cross-region migration, and human-in-the-loop staged rollout are all workflows. They use the same trait, the same runtime, the same journal format, and (once the SDK ships, §23) the same WASM ABI that application code does. The platform's durable sequences are the first workloads on the primitive; the WASM Workflow SDK is how external developers get the same surface. Overdrive does not ship two parallel workflow systems.
+
+### Primitive Composition
+
+The two primitives compose through the Action channel and the ObservationStore:
+
+- **Reconciler → Workflow** — reconciler emits `Action::StartWorkflow { spec, correlation }`; the workflow lifecycle reconciler brings the workflow up. Subsequent `reconcile` iterations read the workflow's state from the ObservationStore and branch on its result.
+- **Workflow → Reconciler** — a workflow that needs to mutate cluster intent emits a typed Action descriptor through the same Action channel the reconciler runtime consumes. The action lands in Raft; the target reconciler picks it up on commit. Workflows do not bypass Raft.
+- **Workflow → external service** — direct `ctx.call(...).await` through injected `Transport`. Crash-safe via journal; replayable under DST.
+- **Workflow → workflow** — typed signals via ObservationStore. Parent workflows may `await` child results; sibling workflows may `await` signals from any other workflow.
+
+Reconcilers converge; workflows orchestrate. Neither is expressible as the other.
+
+### Extension Model
+
+First-party reconcilers and workflows are Rust trait objects — maximum performance, full type safety, direct access to primitive internals (BPF maps, driver handles, Corrosion subscriptions) where appropriate.
+
+Third-party reconcilers and workflows are WASM modules loaded at runtime — sandboxed, hot-reloadable, language-agnostic, content-addressed in Garage. The trait surface for each primitive is identical between the first-party Rust and third-party WASM implementations; the execution backend differs. Input and output types are fully serializable from day one, making the WASM migration path trivial.
+
+This replaces the Kubernetes operator model, where extensions ship as Go binaries running with cluster-admin privileges — the single largest source of cluster-destabilizing incidents in production Kubernetes. A misbehaving WASM reconciler or workflow cannot escape its sandbox, cannot mutate state without going through Raft, and can be evicted or hot-reloaded without restarting a pod. WASM as the control-plane extension model is now industry consensus (Helm 4, Cosmonic Control, wasmCloud) — Overdrive is early, not fringe.
+
+### Built-in Primitives
+
+**Reconcilers** (converge, pure):
+
+- Job lifecycle (start, stop, migrate, restart)
+- Node drain and replacement
+- Resource right-sizing
+- Rolling deployment (BPF map weighted backends)
+- Canary promotion / rollback (weighted backends + LLM supervision)
+- WASM function scale-to-zero and warm-pool sizing
+- Chaos engineering (deliberate fault injection for reliability testing)
+- Workflow lifecycle (spec → running → journaled → terminated — the one reconciler that manages workflow instances)
+- Investigation lifecycle (§12)
+- LLM spend enforcement (§12)
+- Evaluation-broker reaper (cancellable-set bulk reaper)
+
+**Workflows** (orchestrate, durable):
+
+- Certificate rotation (DNS propagation → validation → trust-anchor swap → retirement)
+- Multi-stage deployment (canary → ramp → promotion with rollback signals)
+- Cross-region migration (quiesce source → metadata handoff → resume target)
+- Staged rollout (human-in-the-loop with ratification signals)
+- Persistent microVM snapshot/restore coordination (§6)
 
 ### Three-Layer State Taxonomy
 
@@ -2004,11 +2043,17 @@ Overdrive draws a hard boundary between three state layers, each with different 
 
 This boundary is load-bearing. Authoritative schedule decisions must go through Raft — CRDT state is correct for globe-spanning observation data but wrong for "this workload is definitely scheduled here." Private libSQL gives each primitive persistent memory for backoff counters, placement history, resource samples, and workflow journals without inflating the authoritative store. §4 and §17 specify the stores in detail; §18 specifies which primitive reads and writes each layer.
 
-### Formal Verification Path
+### Correctness Guarantees
 
-The typed Rust trait interface is deliberately aligned with the target shape of recent verified-controller research (USENIX OSDI '24 *Anvil*, built on Verus). The *Eventually Stable Reconciliation* property — progress (converges toward desired state) and stability (remains at desired state absent external change) — is specifiable for each built-in reconciler as a temporal-logic formula over the `reconcile` function's pre/post-state.
+Each primitive has a distinct formal correctness property; the type system reflects the distinction.
 
-First-party reconcilers ship with ESR specifications. WASM extensions declare ESR preconditions that the runtime enforces at load time. This is the largest future-proofing investment available to the platform: no existing production orchestrator has controllers with mechanically checked liveness properties, and the ecosystem around reconciler verification has reached academic maturity faster than around any alternative primitive.
+**Reconcilers — Eventually Stable Reconciliation (ESR).** A reconciler satisfies ESR when, starting from any configuration, repeated application of `reconcile` with stable inputs drives the system to `desired == actual` and holds it there. Progress (converges) and stability (stays converged) are expressible as a temporal-logic formula over the `reconcile` function's pre/post-state. USENIX OSDI '24 *Anvil* demonstrates this is mechanically checkable in Verus against a Rust implementation. First-party reconcilers ship with ESR specifications; WASM extensions declare ESR preconditions the runtime enforces at load time.
+
+**Workflows — Deterministic Replay + Bounded Progress.** A workflow satisfies the replay obligation when, given the same journal prefix, every execution produces the same sequence of `await` resolutions and the same state thereafter. This is tested by replaying the journal twice under the DST harness and asserting equivalence. A workflow satisfies bounded progress when, barring external failure, it reaches a terminal `WorkflowResult` within a declared step budget. Version skew between journal and code is a checkable property: on every SDK build, the workflow's `ctx` call graph is hashed; a code change that would deviate from an in-flight journal is rejected at load time rather than replay-diverging in production (the "workflow versioning" failure mode that historically bit Temporal and Cadence users).
+
+Both obligations are gated by DST (§21). Reconcilers additionally have an Anvil-style ESR verification target; workflows have a replay-equivalence property-based test that catches every well-known durable-execution bug class — non-determinism smuggled into the handler, side effects outside `ctx`, version skew between journal and code, unbounded step growth.
+
+This is the largest future-proofing investment available to the platform: no existing production orchestrator has primitives with mechanically-checked correctness properties of *either* kind, let alone both. The ecosystem around reconciler verification (Anvil, Verus) and durable-execution testing (Temporal's replayer, Restate's log-based tests) has reached maturity faster than the alternatives, and Overdrive consumes both from day one.
 
 ---
 
@@ -2265,6 +2310,18 @@ assert_eventually!("desired == actual",
 );
 ```
 
+**Workflow replay equivalence — durable workflows are deterministic under their journal (§18):**
+```rust
+// Run the workflow once; capture its journal. Replay from the journal;
+// assert bit-identical trajectory. Catches smuggled non-determinism.
+assert_replay_equivalent!("cert_rotation workflow replays deterministically",
+    WorkflowSpec::cert_rotation(domain));
+
+// Bounded progress — workflows must terminate within declared step budget.
+assert_eventually!("workflow terminates",
+    workflow_instances.iter().all(|w| w.is_terminal()));
+```
+
 ### Fault Injection Catalogue
 
 The simulation harness exercises the following fault classes against every release:
@@ -2480,6 +2537,7 @@ Neither Kubernetes nor Nomad ships the Tier 1 + Tier 3 composition, because neit
 - BPF LSM programs
 - Regorus policy evaluation (intent), verdict compilation into ObservationStore
 - Tier 3 sockops + kTLS test cases (verified via `ss -K` and veth wire capture) and BPF LSM positive/negative test fixtures (Tetragon-style, asserting on the BPF ringbuf event stream) added to the §22 kernel matrix
+- **Workflow primitive — Rust trait `Workflow { async fn run(&self, ctx: &WorkflowCtx) -> WorkflowResult }`, durable journal in per-primitive libSQL, typed-signal coordination via ObservationStore, workflow-lifecycle reconciler.** Certificate rotation lands as the first internal workflow on this primitive (replacing the "workflow reconciler" conflation — workflows are a peer primitive to reconcilers, not a reconciler variant). DST-gated via replay-equivalence property tests; injected Transport/Clock/Entropy.
 
 ### Phase 4 — Additional Drivers (Months 9–12)
 - Cloud Hypervisor microVM and VM driver (replaces Firecracker + QEMU)
@@ -2512,6 +2570,7 @@ Neither Kubernetes nor Nomad ships the Tier 1 + Tier 3 composition, because neit
 
 ### Phase 6 — Federation and Ecosystem (Months 18+)
 - WASM Component Model SDK (Rust, TypeScript, Go)
+- **Workflow WASM SDK (Rust, TypeScript, Go).** Application-facing durable execution on the same `Workflow` primitive the platform uses internally. `ctx.call(...)` / `ctx.sleep(...)` / `ctx.wait_for_signal(...)` / `ctx.activity(...)` as the core surface; journal-based versioning guard checked at module load; SPIFFE-identity-bound workflow instances; policy-gated tool surface. Migrates the Phase 3 internal-only primitive into a user-facing SDK without a second runtime — the platform's own durable sequences become reference workflows
 - OTel export adapter
 - Unikernel drivers (Nanos, Unikraft with virtiofs)
 - QEMU opt-in driver (exotic hardware emulation only)

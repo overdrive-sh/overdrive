@@ -224,6 +224,85 @@ HTTP client; fully DST-replayable.
 
 ---
 
+## Workflow contract
+
+Workflows are the §18 peer primitive to reconcilers. The rules are
+different from reconcilers — and different in specific ways that matter.
+
+**`async` is permitted in workflows. Only in workflows.** Anywhere else
+in the codebase — reconcilers, policies, sidecars — `async fn` that
+performs I/O is a violation. Workflow handlers are the one place where
+`.await` on real work is the *correct* shape.
+
+```rust
+trait Workflow: Send + Sync {
+    async fn run(&self, ctx: &WorkflowCtx) -> WorkflowResult;
+}
+
+// Good — all non-determinism flows through ctx; durable at each await
+#[overdrive::workflow]
+async fn cert_rotation(ctx: &WorkflowCtx, spec: CertSpec) -> Result<Cert> {
+    let challenge = ctx.call("acme", acme::new_order(&spec)).await?;
+    ctx.sleep(Duration::from_secs(spec.dns_propagation_seconds)).await;
+    let validated = ctx.call("acme", acme::validate(&challenge)).await?;
+    ctx.signal_all("workflow.cert_ready", validated.clone()).await?;
+    Ok(validated)
+}
+```
+
+Rules:
+
+1. **All non-determinism goes through `ctx`.** Clock, network, RNG,
+   signals, inter-workflow coordination — every source of non-determinism
+   is a method on `WorkflowCtx`, which consumes the same injected
+   `Clock` / `Transport` / `Entropy` traits the rest of the platform uses
+   under DST. No `Instant::now()`, no `reqwest::get()`, no
+   `tokio::time::sleep`, no `rand::random()` inside a workflow body.
+2. **No side effects outside `ctx`.** Writing to a file, calling a
+   non-`ctx` async function, spawning a task, mutating a global — these
+   break journal replay. The SDK lints them; the runtime rejects
+   workflows whose call graph references forbidden hosts.
+3. **Journal replay is bit-identical.** A workflow run twice against the
+   same journal must produce the same trajectory. The DST harness asserts
+   this as `assert_replay_equivalent!` (§21); treat replay-equivalence
+   failures as logic bugs, not flakes.
+4. **Workflow versioning is additive.** A running workflow may have
+   arbitrary in-flight instances. Changing the `run` body in a way that
+   would deviate from an existing journal is a *breaking* change and the
+   SDK rejects it at load time. Add new versions (`cert_rotation_v2`)
+   alongside the old; migrate in-flight instances explicitly via
+   `ctx.upgrade_to(...)` or let them drain.
+5. **Bounded step budget.** Every workflow declares a maximum number of
+   `await` points. Unbounded loops inside a workflow are a bug; if you
+   genuinely need indefinite lifecycle, use a reconciler, not a workflow.
+   The reconciler primitive exists exactly for "runs forever."
+6. **Workflow → cluster mutations go through Actions.** Workflows write
+   intent the same way reconcilers do: by emitting typed Actions that
+   the runtime commits through Raft. Workflows do not bypass Raft to
+   write IntentStore directly — `ctx` does not expose a `.put()` surface
+   on IntentStore; it exposes `ctx.emit_action(...)`.
+
+**When to reach for a workflow vs a reconciler:**
+
+```
+Runs forever; converges desired vs actual?           → Reconciler
+Terminates with a Result; orchestrates a sequence?   → Workflow
+
+"Keep N replicas running"                            → Reconciler
+"Roll the certificate through 4 steps"               → Workflow
+"Maintain BPF map == policy verdict"                 → Reconciler
+"Migrate allocation X from region A to region B"     → Workflow
+"Reach desired replica count from queue depth"       → Reconciler (rule-based)
+                                                       OR Workflow (predictive,
+                                                       multi-step rollout)
+```
+
+When in doubt: if the operation has a natural terminal `Ok(result)`,
+it's a workflow. If it's "the cluster should always look like X," it's
+a reconciler.
+
+---
+
 ## Rust patterns
 
 ### Errors

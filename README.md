@@ -31,7 +31,7 @@ The foundational thesis: the primitives required to build a genuinely better orc
 15. [Zero Downtime Deployments](#15-zero-downtime-deployments)
 16. [Serverless WASM Functions](#16-serverless-wasm-functions)
 17. [Storage Architecture](#17-storage-architecture)
-18. [Reconciler Model](#18-reconciler-model)
+18. [Reconciler and Workflow Primitives](#18-reconciler-and-workflow-primitives)
 19. [Security Model](#19-security-model)
 20. [Efficiency Comparison](#20-efficiency-comparison)
 21. [Deterministic Simulation Testing](#21-deterministic-simulation-testing)
@@ -445,11 +445,14 @@ Operators running three-node all-in-one clusters typically tolerate this taint c
 ### Core Data Model
 
 ```
-Job        — desired workload specification (driver, resources, constraints)
-Node       — registered worker node with capabilities and labels
-Allocation — binding of a job to a node, lifecycle state machine
-Policy     — Rego-based network and security rules
+Job         — desired workload specification (driver, resources, constraints)
+Node        — registered worker node with capabilities and labels
+Allocation  — binding of a job to a node, lifecycle state machine
+Policy      — Rego-based network and security rules
 Certificate — issued SVID, TTL, rotation schedule
+Investigation — live SRE-agent investigation: correlation key, affected
+              SPIFFE identities, token/wall-clock budget, tool-call trace.
+              Concludes into an incident row in the incident-memory libSQL.
 ```
 
 ### Built-in Certificate Authority
@@ -614,6 +617,57 @@ When `persistent = true`:
 2. **Checkpoint/restore via Cloud Hypervisor.** The driver exposes `snapshot()` and `restore()` as control-plane actions that delegate to Cloud Hypervisor's existing snapshot/restore API with `userfaultfd` lazy memory paging — restore is pay-as-you-access, not load-everything-upfront. Disk snapshots are metadata-only against the chunk store (chunks are already immutable). Memory uses Cloud Hypervisor's native mechanism.
 3. **Idle eviction with checkpoint (scale-to-zero).** After `snapshot_on_idle_seconds` of no traffic, the workload reconciler checkpoints the VM, tears down the running process, and records the handle in the ObservationStore. An inbound request via the gateway triggers a restore. The restore path is sub-second: metadata-only on disk plus `userfaultfd`-lazy on memory.
 4. **VMGenID wired into the guest.** Live-migrated or snapshot-restored VMs face entropy-reuse hazards — the kernel's RNG can produce identical output on both sides of a snapshot. Cloud Hypervisor exposes a VMGenID device; the node agent updates the generation counter on every restore, and the guest kernel reseeds.
+
+### Guest Agent for Persistent MicroVMs
+
+Three of the capabilities above — application-consistent snapshots, acknowledged VMGenID reseeds, and post-resume service restart — are intrinsically in-guest operations. The host cannot quiesce a database's in-flight transactions, cannot confirm the guest kernel has reseeded its RNG, and cannot tell a `systemd` unit to re-establish external connections after a thaw. Without cooperation from inside the VM, persistent microVM restores are *crash-consistent* — correct, but indistinguishable to the workload from a power cut. For agent sandboxes and dev environments this is acceptable; for stateful databases, queues, and anything with an open TCP session to a peer it is not.
+
+Overdrive handles this with a minimal guest agent, `overdrive-guest-agent`. The agent is a small Rust binary shipped as an opt-in Image Factory extension (§24) — not baked into every image, and not required for non-persistent microVMs. It follows the industry-proven Kata Containers pattern: ttRPC over virtio-vsock, with the boundary explicitly narrow.
+
+**Exactly four cooperation points.** The agent exposes no shell, no arbitrary command execution, and no filesystem surface. Its entire RPC interface is four methods:
+
+```
+fs_quiesce(timeout)       → freeze writes and fsync before host snapshot
+fs_thaw()                 → resume writes after snapshot completes
+vmgenid_ack(generation)   → confirm guest kernel reseeded RNG after restore
+resume_notify()           → fan out a "back from snapshot" signal to systemd
+```
+
+The node agent calls `fs_quiesce` immediately before triggering Cloud Hypervisor's snapshot, then `fs_thaw` once the snapshot transaction has committed in `overdrive-fs` metadata. On restore, the node agent updates the VMGenID device and waits for `vmgenid_ack` before releasing traffic via the gateway; `resume_notify` then fires a `sd_notify(3)`-style broadcast that systemd units can subscribe to via `systemd.restart-on-resume` drop-ins. The `userfaultfd` event surface from §14 remains host-side — the agent does not inspect memory pages.
+
+**Identity and trust.** The agent holds a SPIFFE SVID bound to the allocation ID, issued by the node's intermediate CA at VM start and delivered through the initial vsock handshake. Every RPC is authenticated mutually against the node agent's SVID. A compromised guest cannot impersonate another allocation's agent; a compromised host cannot forge guest acks (it will not have the agent's private key). The trust root remains on the host, consistent with §8.
+
+**What is not in the guest.** Storage is served by `overdrive-fs` + `vhost-user-fs` on the host (§17). Service management is the user's own `systemd`. Log collection is eBPF-native at the kernel level (§12). The credential proxy, content inspector, and any other request-path logic are host-side sidecars (§9). The guest agent does not include a control-plane component, a package manager, or a reverse shell — its binary footprint is a handful of ttRPC stubs and the four methods above.
+
+**Rejecting the broader framing.** Fly's sprites architecture slides additional services into the guest (service manager, log router, in-VM control agent). Overdrive rejects this for the same reason it ships the gateway as a node-agent subsystem rather than a workload: each concern belongs at the layer that can enforce it best. A guest-side log router cannot see kernel syscalls; a guest-side service manager duplicates `systemd`; a guest-side control agent contradicts the single-binary model. The only operations that *must* live in the guest are the ones the host physically cannot perform — and those are enumerated exactly above.
+
+**Composition with `overdrive-fs`.** The guest agent's `fs_quiesce` call is the natural integration point for the metadata-only snapshot in §17. The snapshot transaction in libSQL is:
+
+```
+1. node agent → guest agent: fs_quiesce(timeout=5s)
+2. guest agent: freezes filesystem writes, fsyncs, responds
+3. node agent: begin libSQL transaction; atomic inode-tree fork
+4. node agent: Cloud Hypervisor memory snapshot
+5. node agent: commit libSQL transaction
+6. node agent → guest agent: fs_thaw()
+```
+
+Without the agent the sequence degrades cleanly: `fs_quiesce` is skipped, the snapshot is crash-consistent, and the workload spec is expected to tolerate it. Both modes are valid; the agent is the upgrade path for workloads that need stronger guarantees.
+
+```toml
+[job]
+name = "agent-claude-code"
+driver = "microvm"
+
+[job.microvm]
+persistent = true
+guest_agent = true               # opt-in; requires Image Factory extension
+persistent_rootfs_size = "100GB"
+snapshot_on_idle_seconds = 30
+expose = true
+```
+
+The extension surface in the Image Factory schematic (§24) exposes this as `extensions.persistent-microvm-guest-agent = true`.
 
 ### Composition, Not a New Workload Type
 
@@ -1316,6 +1370,8 @@ Tools:
   propose_action(action)    → submit action through approval gate
 ```
 
+The tool list above is the default `builtin:overdrive-core` toolset. Toolsets are a first-class catalog — see *Native SRE Investigation Agent* below.
+
 ### Tiered Self-Healing
 
 Self-healing operates at three tiers, each appropriate to its response time requirements:
@@ -1339,6 +1395,28 @@ Self-healing operates at three tiers, each appropriate to its response time requ
 ### Incident Memory
 
 Every incident, its diagnosis, actions taken, and outcome are stored in **libSQL** (embedded SQLite). The LLM agent retrieves similar past incidents before reasoning about new anomalies using embedding-based similarity search. The platform's diagnostic accuracy improves with operational age.
+
+### Native SRE Investigation Agent
+
+Overdrive's Tier 3 reasoning surface is a native SRE investigation agent built on `rig-rs`, organized around four first-class primitives: **toolsets, runbooks, investigations, and typed remediations**. Each is implemented with primitives the platform already owns — no external agent runtime, no Python in the control plane, no separate self-hosted service mesh for AIOps.
+
+**Toolsets — the declarative catalog.** The agent's tool surface is a catalog of toolsets loaded at runtime, not a hard-coded list. `builtin:overdrive-core` is a Rust trait object shipped in the binary, exposing the default tools above plus read-only projections of the IntentStore and the incident-memory retriever. Third-party toolsets are WASM modules — the same execution primitive as reconcilers (§18), policies (§13), and sidecars (§9) — content-addressed by sha256 in Garage, loaded declaratively from the IntentStore, scoped to the subset of host functions their manifest requests. A toolset declares the tools it exposes (name, description, input/output JSON schemas, risk class); the agent sees the union of loaded toolsets' tools. Investigations cite the toolset hashes used so transcripts are reproducible.
+
+**Runbooks — LLM-interpreted investigation guides.** Runbooks are markdown documents with YAML frontmatter describing trigger conditions and required toolsets. They are stored content-addressed in Garage and indexed in the incident-memory libSQL alongside past incidents via the same embedding-similarity system. When an investigation is triggered, the agent's first step retrieves top-k runbooks matching the trigger description and includes them in context. Runbooks guide *reasoning* — the steps are interpretive, not deterministic. The deterministic counterpart is the workflow primitive (§18): runbooks produce diagnoses and proposals; workflows execute ratified proposals. Format matches HolmesGPT's runbook format so community-maintained runbook catalogs are leverageable directly.
+
+**Investigation — a first-class resource.** Investigations join `Job`, `Node`, `Allocation`, `Policy`, `Certificate` in the core data model (§4). An investigation carries a lifecycle (triggered → gathering → reasoning → concluding → concluded), a trigger (alert, reconciler escalation, operator query, scheduled), a correlation key, a list of affected SPIFFE identities, a token and wall-clock budget, and a trace of tool calls and LLM turns. Live investigation state lives in the ObservationStore (Corrosion `investigation_state` table); on conclusion, the investigation is compressed into an incident row in the incident-memory libSQL with embedding-indexed diagnosis for future retrieval. An `InvestigationReconciler` drives the lifecycle; proposals from the agent are queued through the graduated approval gate.
+
+**Correlation — identity-based, not label-based.** Every eBPF event in Overdrive carries cryptographic SPIFFE identity on both ends. Correlation across alerts is a DuckLake SQL query over events joined on `src_identity` / `dst_identity` / `alloc_id`, windowed by causal-time proximity. Investigations carry a `correlation_key` derived from the primary identity, signal class, and time bucket; an incoming event whose key matches a live investigation appends to that investigation rather than spawning a duplicate. This collapses alert-storm scenarios to one investigation per underlying phenomenon without label-based heuristics.
+
+**Typed remediation actions.** The agent proposes state changes by emitting typed `Action` enum variants — `RestartAllocation`, `ScaleJob`, `RollBackDeployment`, `DrainNode`, `ResizeAllocation`, `ProposePolicyEdit`, `AttachDiagnosticProbe`, `StartWorkflow`. The risk tier is encoded on the variant at the type level: Tier 0 (reversible reads) auto-executes; Tier 1 (low-blast-radius writes) auto-executes with operator notification; Tier 2 (high-blast-radius writes) requires human ratification. Proposals land in the IntentStore (Raft); once ratified, the target reconciler consumes the typed action and converges. Actions flowing through Raft rather than YAML patches through kubectl is a structural consequence of the §18 reconciler model: compile-time exhaustiveness, deterministic replay, SPIFFE-bound identity.
+
+**Hypothesis verification via the owned dataplane.** Where external-agent architectures are confined to querying existing instrumentation, the Overdrive investigation agent can propose *temporary diagnostic attachments* — `Action::AttachDiagnosticProbe { bpf_sha, alloc, duration }`. Probes come from a platform-maintained, platform-signed catalog; they attach via aya-rs, emit into the existing eBPF ringbuf, and detach automatically at deadline. Hypotheses become verifiable within one investigation turn rather than queued behind a human-executed instrumentation rollout. This capability is structurally unavailable to orchestrators that do not own their dataplane.
+
+**Credential and prompt-injection posture.** Where the LLM is an external API, `builtin:credential-proxy` (§8) holds the provider keys; the agent never sees them. Where the agent ingests third-party content (runbook bodies from the catalog, log chunks returned by tools, documentation excerpts), `builtin:content-inspector` (§9) scans on ingress and flags prompt-injection payloads before the LLM sees them. BPF LSM blocks raw socket creation and unauthorised binary execution regardless of what the agent decides to do (§19). The agent is itself a workload under the same structural security posture as any other workload — security is enforced by infrastructure, not by the model's judgment.
+
+**Cost metering.** Every LLM call is attributed to an `investigation_id`. Token spend is accumulated per investigation, per job (via the investigation's related allocations), and cluster-wide. External-provider calls route through `builtin:credential-proxy`, which parses the response `usage` object and writes costs into the ObservationStore; local-workload-hosted LLMs report token counts via rig-rs directly. A dedicated `llm_spend` reconciler enforces per-job and cluster-wide monthly caps — Tier-3 escalations route to queue-and-notify when the cap is approached, preserving observability without incurring further spend.
+
+**Simulation.** The `SimLlm` DST trait (§21) returns deterministic completions from seeded transcripts. The full investigation trace — prompt, tool calls, tool outputs, LLM turns — is captured per investigation; re-running deterministically in CI reproduces the final diagnosis or flags a regression. Investigation-agent correctness joins control-plane correctness as a DST-gated property.
 
 ### OpenTelemetry Compatibility
 
@@ -1765,7 +1843,7 @@ Persistent microVMs (§6) need a rootfs that survives workload migration, suppor
 - **Cache** — NVMe hot tier per node, 2Q eviction, write-back for locally-originated writes. Read miss hydrates from Garage; write commits to local NVMe and to the WAL stream.
 - **Frontend** — `vhost-user-fs` (Rust port of `virtiofsd`) speaking virtio-fs directly to Cloud Hypervisor. The guest sees a normal virtiofs mount; the daemon is invisible.
 
-The design is deliberately narrower than a general distributed filesystem. `overdrive-fs` assumes **single-writer per rootfs** — each rootfs is owned by exactly one running VM at a time, enforced by the allocation lifecycle. This deletes the hardest parts of distributed FS design: no distributed locking, no multi-client cache coherence, no cross-mount invalidation. Metadata mutations are single-process libSQL transactions. Migration is a quiesce-and-handoff between two nodes, coordinated by the workflow reconciler (§18).
+The design is deliberately narrower than a general distributed filesystem. `overdrive-fs` assumes **single-writer per rootfs** — each rootfs is owned by exactly one running VM at a time, enforced by the allocation lifecycle. This deletes the hardest parts of distributed FS design: no distributed locking, no multi-client cache coherence, no cross-mount invalidation. Metadata mutations are single-process libSQL transactions. Migration is a quiesce-and-handoff between two nodes, coordinated by a cross-region-migration workflow (§18).
 
 Snapshot and restore operate at the metadata layer only — chunks are already immutable, so a snapshot is an atomic libSQL transaction that forks the inode tree. This is what lets §14 *Scale-to-Zero for VM Workloads* resume a persistent microVM in tens of milliseconds: restore hydrates metadata (kilobytes), not the rootfs (gigabytes), and `userfaultfd` pages in memory on access while the guest is already running.
 
@@ -1828,11 +1906,22 @@ Each reconciler gets a private libSQL database for stateful memory across reconc
 
 ---
 
-## 18. Reconciler Model
+## 18. Reconciler and Workflow Primitives
 
-### Design
+### Overview
 
-Overdrive' reconciliation model is inspired by Kubernetes' control loop but with three key differences: reconcilers are strongly typed Rust trait objects (not Go processes with cluster-admin privileges), they have access to a private persistent store for stateful reasoning, and the platform ships a durable-workflow primitive alongside the reconciler for multi-step operations that cannot be cleanly expressed as diff-based convergence.
+Overdrive factors control-plane logic into two orthogonal primitives, both descended from Kubernetes' control-loop model but redesigned for DST-testability and formal verifiability:
+
+- **Reconcilers** — pure functions that converge cluster state toward a declared spec. Infinite lifecycle; no terminal state.
+- **Workflows** — durable async functions that orchestrate defined sequences to completion. Finite lifecycle; terminal result.
+
+Both are strongly typed Rust trait objects for first-party extensions, WASM modules for third-party. Both have access to private libSQL memory for stateful reasoning. Both honour the §4 Intent/Observation/Memory boundary. Neither runs with the cluster-admin privileges that Kubernetes operators do.
+
+This supersedes the "operator" pattern where Go binaries with arbitrary I/O and cluster-admin privileges drive reconciliation. Each primitive has its own contract; each contract is testable in the §21 simulation harness; each is a verification target. The platform's own durable sequences — certificate rotation, multi-stage deployment, cross-region migration, staged rollout — are themselves workflows, built on the same trait and the same runtime that will be exposed to application code through the WASM Workflow SDK (§23). No "platform workflow" / "user workflow" divergence.
+
+### The Reconciler Primitive
+
+Reconcilers converge. They are pure over `(desired, actual, db) → actions`:
 
 ```rust
 trait Reconciler: Send + Sync {
@@ -1845,7 +1934,9 @@ trait Reconciler: Send + Sync {
 }
 ```
 
-The `reconcile` function is pure over `(desired, actual, db) → actions`. Neither the trigger reason nor wall-clock time are inputs. This is the property that makes reconcilers testable in the simulation harness (§21) and tractable for formal verification (below).
+The purity is load-bearing. Neither the trigger reason nor wall-clock time are inputs. `reconcile` does not `.await`, does not spawn subprocesses, does not read wall-clock, does not write directly to the IntentStore or ObservationStore. This property is what makes reconcilers testable under DST (§21) and tractable for *Eventually Stable Reconciliation* proofs (see *Correctness Guarantees* below; USENIX OSDI '24 *Anvil*).
+
+Reconcilers have infinite lifecycle. They re-evaluate whenever their inputs change, forever; there is no terminal state, only convergence to desired-vs-actual equality.
 
 ### Triggering Model — Hybrid by Design
 
@@ -1864,43 +1955,81 @@ Overdrive ships the mitigation natively rather than retrofitting after an incide
 - Because reconciliation is idempotent, collapsing N pending evaluations for the same target into one is semantically free — the surviving evaluation sees the fully-converged delta anyway.
 - Back-pressure is measured in evaluations-per-second per reconciler; sustained over-budget shedding raises a platform alert rather than silently degrading.
 
-### Extension Model
+### External I/O from Reconcilers
 
-First-party reconcilers are Rust trait objects — maximum performance, full type safety. Third-party reconcilers are WASM modules loaded at runtime — sandboxed, hot-reloadable, language-agnostic. The interface is identical; the execution backend differs.
+Reconcilers sometimes need to issue requests to systems outside Overdrive — a Restate admin API, an AWS account, a payment processor, a custom internal service. The pure-function contract does not preclude this; it reshapes how the I/O is expressed. Overdrive handles it with one Action variant and one ObservationStore table:
 
-Input and output types are fully serializable from day one, making the WASM migration path trivial.
+- Reconcilers emit `Action::HttpCall { request_id, correlation, target, method, body, timeout, idempotency_key }` as a normal Action. No new trait, no new purity exception.
+- The runtime executes the call via the `Transport` trait and writes the result into an `external_call_results` table in the ObservationStore. The write is gossiped like any other observation row; every node reads responses locally.
+- The next reconcile iteration reads the row (a plain SQL query against local SQLite) and branches. `Pending`, `InFlight`, `Completed`, `Failed`, and `TimedOut` are all observable states.
 
-This replaces the Kubernetes operator model, where extensions ship as Go binaries running with cluster-admin privileges — the single largest source of cluster-destabilizing incidents in production Kubernetes. A misbehaving WASM reconciler cannot escape its sandbox, cannot mutate state without going through Raft, and can be evicted or hot-reloaded without restarting a pod. WASM as the control-plane extension model is now industry consensus (Helm 4, Cosmonic Control, wasmCloud) — Overdrive is early, not fringe.
+This is the same architecture USENIX OSDI '24 *Anvil* validates for verified Kubernetes controllers: a pure `reconcile_core` emitting request descriptors, a shim layer dispatching them, responses fed back as observable state. It inherits the same DST and ESR properties as cluster-state reconciliation — Actions are data, responses are observable rows, the reconciler remains pure. Retry policy, idempotency, and failure-to-status propagation live in reconciler memory (private libSQL), where they belong.
 
-### Built-in Reconcilers
+Chains of external calls that must complete as a unit compose upward to the workflow primitive rather than through chained `HttpCall` actions. See *Primitive Composition* below.
 
-- Job lifecycle (start, stop, migrate, restart)
-- Certificate rotation
-- Resource right-sizing
-- Rolling deployment strategies
-- Canary promotion/rollback
-- Node drain and replacement
-- WASM function scaling
-- Chaos engineering (deliberate fault injection for reliability testing)
-- Workflow execution (see below)
+### The Workflow Primitive
 
-### Workflow Reconciler — Durable Execution for Multi-Step Operations
-
-Some orchestration operations are fundamentally sequential: "roll certificate through DNS propagation, wait for validation, swap trust anchor, verify all nodes accepted, retire old cert." These do not fit cleanly into diff-based convergence because the correct next action depends on the *history* and the *timing* of prior steps, not just the current delta. Encoding them as reconciler memory works but reproduces what Temporal and Restate call *durable execution* — poorly.
-
-Overdrive therefore treats durable workflows as a first-class primitive, implemented *as* a built-in reconciler whose desired state is a workflow definition and whose memory is a replayable event journal:
+Workflows orchestrate. They are durable async functions whose `await` points are checkpointed to a replayable journal:
 
 ```rust
-trait Workflow {
+trait Workflow: Send + Sync {
     async fn run(&self, ctx: &WorkflowCtx) -> WorkflowResult;
 }
 ```
 
-- Each `await` point is a durable checkpoint written to libSQL. A crashed workflow resumes on any control plane node by replaying the journal.
-- Cross-workflow coordination uses typed signals, not ad-hoc StateStore writes.
-- Used internally for certificate lifecycle, multi-stage deployments, cross-region migrations, and human-in-the-loop staged rollouts.
+Workflows may perform I/O directly — `ctx.call(...).await`, `ctx.sleep(...).await`, `ctx.wait_for_signal(...).await`, `ctx.activity(...).await`. All non-determinism flows through `WorkflowCtx`, which itself consumes the same injected `Transport` / `Clock` / `Entropy` traits that the reconciler runtime uses, so every operation is DST-controllable (§21). The difference from reconcilers is not *whether* non-determinism is injected — it is — but *how correctness is guaranteed*:
 
-The reconciler primitive handles "converge cluster toward spec." The workflow primitive handles "execute this defined sequence to completion with crash-safe resume." They compose: a deployment workflow emits actions that are realized by the job-lifecycle reconciler.
+- **Reconciler correctness** = ESR: progress (converges toward desired state) and stability (remains at desired state absent external change). A pure function is the natural expression.
+- **Workflow correctness** = *deterministic replay from journal*: given the same journal, a workflow replays to bit-identical state. A crashed workflow resumes on any control-plane node by reading its journal. Version skew between journal and code is a named failure mode the SDK catches at load time.
+
+Workflows have finite lifecycle. They terminate with a `WorkflowResult` — succeeding, failing, or being cancelled. Completed workflow journals are retained in libSQL for audit, then compacted on a declared retention policy.
+
+Workflow journals live in per-primitive libSQL (§4, §17). Each `await` point writes a checkpoint before suspending; resume reads the journal, replays already-completed awaits from their recorded results, and picks up at the first unrecorded await. Cross-workflow coordination uses typed signals — a first-class primitive in the ObservationStore — not ad-hoc IntentStore writes.
+
+**First-class for platform and application code alike.** Certificate lifecycle, multi-stage deployment, cross-region migration, and human-in-the-loop staged rollout are all workflows. They use the same trait, the same runtime, the same journal format, and (once the SDK ships, §23) the same WASM ABI that application code does. The platform's durable sequences are the first workloads on the primitive; the WASM Workflow SDK is how external developers get the same surface. Overdrive does not ship two parallel workflow systems.
+
+### Primitive Composition
+
+The two primitives compose through the Action channel and the ObservationStore:
+
+- **Reconciler → Workflow** — reconciler emits `Action::StartWorkflow { spec, correlation }`; the workflow lifecycle reconciler brings the workflow up. Subsequent `reconcile` iterations read the workflow's state from the ObservationStore and branch on its result.
+- **Workflow → Reconciler** — a workflow that needs to mutate cluster intent emits a typed Action descriptor through the same Action channel the reconciler runtime consumes. The action lands in Raft; the target reconciler picks it up on commit. Workflows do not bypass Raft.
+- **Workflow → external service** — direct `ctx.call(...).await` through injected `Transport`. Crash-safe via journal; replayable under DST.
+- **Workflow → workflow** — typed signals via ObservationStore. Parent workflows may `await` child results; sibling workflows may `await` signals from any other workflow.
+
+Reconcilers converge; workflows orchestrate. Neither is expressible as the other.
+
+### Extension Model
+
+First-party reconcilers and workflows are Rust trait objects — maximum performance, full type safety, direct access to primitive internals (BPF maps, driver handles, Corrosion subscriptions) where appropriate.
+
+Third-party reconcilers and workflows are WASM modules loaded at runtime — sandboxed, hot-reloadable, language-agnostic, content-addressed in Garage. The trait surface for each primitive is identical between the first-party Rust and third-party WASM implementations; the execution backend differs. Input and output types are fully serializable from day one, making the WASM migration path trivial.
+
+This replaces the Kubernetes operator model, where extensions ship as Go binaries running with cluster-admin privileges — the single largest source of cluster-destabilizing incidents in production Kubernetes. A misbehaving WASM reconciler or workflow cannot escape its sandbox, cannot mutate state without going through Raft, and can be evicted or hot-reloaded without restarting a pod. WASM as the control-plane extension model is now industry consensus (Helm 4, Cosmonic Control, wasmCloud) — Overdrive is early, not fringe.
+
+### Built-in Primitives
+
+**Reconcilers** (converge, pure):
+
+- Job lifecycle (start, stop, migrate, restart)
+- Node drain and replacement
+- Resource right-sizing
+- Rolling deployment (BPF map weighted backends)
+- Canary promotion / rollback (weighted backends + LLM supervision)
+- WASM function scale-to-zero and warm-pool sizing
+- Chaos engineering (deliberate fault injection for reliability testing)
+- Workflow lifecycle (spec → running → journaled → terminated — the one reconciler that manages workflow instances)
+- Investigation lifecycle (§12)
+- LLM spend enforcement (§12)
+- Evaluation-broker reaper (cancellable-set bulk reaper)
+
+**Workflows** (orchestrate, durable):
+
+- Certificate rotation (DNS propagation → validation → trust-anchor swap → retirement)
+- Multi-stage deployment (canary → ramp → promotion with rollback signals)
+- Cross-region migration (quiesce source → metadata handoff → resume target)
+- Staged rollout (human-in-the-loop with ratification signals)
+- Persistent microVM snapshot/restore coordination (§6)
 
 ### Three-Layer State Taxonomy
 
@@ -1914,11 +2043,17 @@ Overdrive draws a hard boundary between three state layers, each with different 
 
 This boundary is load-bearing. Authoritative schedule decisions must go through Raft — CRDT state is correct for globe-spanning observation data but wrong for "this workload is definitely scheduled here." Private libSQL gives each primitive persistent memory for backoff counters, placement history, resource samples, and workflow journals without inflating the authoritative store. §4 and §17 specify the stores in detail; §18 specifies which primitive reads and writes each layer.
 
-### Formal Verification Path
+### Correctness Guarantees
 
-The typed Rust trait interface is deliberately aligned with the target shape of recent verified-controller research (USENIX OSDI '24 *Anvil*, built on Verus). The *Eventually Stable Reconciliation* property — progress (converges toward desired state) and stability (remains at desired state absent external change) — is specifiable for each built-in reconciler as a temporal-logic formula over the `reconcile` function's pre/post-state.
+Each primitive has a distinct formal correctness property; the type system reflects the distinction.
 
-First-party reconcilers ship with ESR specifications. WASM extensions declare ESR preconditions that the runtime enforces at load time. This is the largest future-proofing investment available to the platform: no existing production orchestrator has controllers with mechanically checked liveness properties, and the ecosystem around reconciler verification has reached academic maturity faster than around any alternative primitive.
+**Reconcilers — Eventually Stable Reconciliation (ESR).** A reconciler satisfies ESR when, starting from any configuration, repeated application of `reconcile` with stable inputs drives the system to `desired == actual` and holds it there. Progress (converges) and stability (stays converged) are expressible as a temporal-logic formula over the `reconcile` function's pre/post-state. USENIX OSDI '24 *Anvil* demonstrates this is mechanically checkable in Verus against a Rust implementation. First-party reconcilers ship with ESR specifications; WASM extensions declare ESR preconditions the runtime enforces at load time.
+
+**Workflows — Deterministic Replay + Bounded Progress.** A workflow satisfies the replay obligation when, given the same journal prefix, every execution produces the same sequence of `await` resolutions and the same state thereafter. This is tested by replaying the journal twice under the DST harness and asserting equivalence. A workflow satisfies bounded progress when, barring external failure, it reaches a terminal `WorkflowResult` within a declared step budget. Version skew between journal and code is a checkable property: on every SDK build, the workflow's `ctx` call graph is hashed; a code change that would deviate from an in-flight journal is rejected at load time rather than replay-diverging in production (the "workflow versioning" failure mode that historically bit Temporal and Cadence users).
+
+Both obligations are gated by DST (§21). Reconcilers additionally have an Anvil-style ESR verification target; workflows have a replay-equivalence property-based test that catches every well-known durable-execution bug class — non-determinism smuggled into the handler, side effects outside `ctx`, version skew between journal and code, unbounded step growth.
+
+This is the largest future-proofing investment available to the platform: no existing production orchestrator has primitives with mechanically-checked correctness properties of *either* kind, let alone both. The ecosystem around reconciler verification (Anvil, Verus) and durable-execution testing (Temporal's replayer, Restate's log-based tests) has reached maturity faster than the alternatives, and Overdrive consumes both from day one.
 
 ---
 
@@ -2052,6 +2187,15 @@ trait ObservationStore: Send + Sync {
     async fn write(&self, sql: &str, params: &[Value]) -> Result<()>;
     async fn subscribe(&self, sql: &str) -> Result<RowStream>;
 }
+
+// LLM inference — no external API calls in simulation
+trait Llm: Send + Sync {
+    async fn complete(
+        &self,
+        prompt: &Prompt,
+        tools:  &[ToolDef],
+    ) -> Result<Completion>;
+}
 ```
 
 Each trait has two implementations: a real implementation for production, and a simulation implementation for testing. The compiler enforces the boundary — `rand` and `std::time` are direct dependencies only in platform wiring crates, never in core logic crates.
@@ -2067,8 +2211,9 @@ Each trait has two implementations: a real implementation for production, and a 
 | `Driver` | `CloudHypervisorDriver` etc. | `SimDriver` (configurable failure modes) |
 | `IntentStore` | `LocalStore` / `RaftStore` | `LocalStore` (already pure Rust, no kernel) |
 | `ObservationStore` | `CorrosionStore` (cr-sqlite + SWIM/QUIC) | `SimObservationStore` (in-memory LWW, injectable gossip delay, injectable partition) |
+| `Llm` | `RigLlm` (rig-rs over real provider) | `SimLlm` (replays seeded transcript; deviations fail the test) |
 
-`SimDataplane` tracks policy and service state in memory and generates synthetic flow events — enough to test that the control plane correctly drives the dataplane without involving a real kernel. `SimDriver` can be configured to fail on start, crash after N operations, or consume exactly specified resources, making scheduler and reconciler logic fully testable without spawning real VMs. `SimObservationStore` implements the CR-SQLite LWW merge semantics in memory with a controllable gossip delay and partition matrix — the contagion-deadlock failure mode that hit Fly.io's fleet is a named scenario in the DST fault catalogue.
+`SimDataplane` tracks policy and service state in memory and generates synthetic flow events — enough to test that the control plane correctly drives the dataplane without involving a real kernel. `SimDriver` can be configured to fail on start, crash after N operations, or consume exactly specified resources, making scheduler and reconciler logic fully testable without spawning real VMs. `SimObservationStore` implements the CR-SQLite LWW merge semantics in memory with a controllable gossip delay and partition matrix — the contagion-deadlock failure mode that hit Fly.io's fleet is a named scenario in the DST fault catalogue. `SimLlm` replays a captured investigation transcript step-for-step: a test seed identifies the transcript; on mismatch (the agent chose a different tool or produced a different parameter set), the test fails with a diff. Investigation-agent invariants — "every investigation concludes within budget," "no Tier 2 action is proposed without a motivating prior tool call" — join control-plane invariants as DST-gated properties.
 
 ### The Simulation Harness
 
@@ -2163,6 +2308,18 @@ assert_eventually!("expiring certs rotated",
 assert_eventually!("desired == actual",
     desired_state == actual_state
 );
+```
+
+**Workflow replay equivalence — durable workflows are deterministic under their journal (§18):**
+```rust
+// Run the workflow once; capture its journal. Replay from the journal;
+// assert bit-identical trajectory. Catches smuggled non-determinism.
+assert_replay_equivalent!("cert_rotation workflow replays deterministically",
+    WorkflowSpec::cert_rotation(domain));
+
+// Bounded progress — workflows must terminate within declared step budget.
+assert_eventually!("workflow terminates",
+    workflow_instances.iter().all(|w| w.is_terminal()));
 ```
 
 ### Fault Injection Catalogue
@@ -2354,8 +2511,8 @@ Neither Kubernetes nor Nomad ships the Tier 1 + Tier 3 composition, because neit
 - Control plane API (tonic/gRPC — internal node-agent + CLI transport)
 - IntentStore abstraction: LocalStore (redb direct) for single mode
 - ObservationStore abstraction: single-process in-memory implementation (lays the trait boundary early, swapped for Corrosion in Phase 2)
-- Injectable Clock, Transport, Entropy, Dataplane, Driver, ObservationStore traits
-- turmoil simulation harness + SimDriver / SimDataplane / SimClock / SimObservationStore
+- Injectable Clock, Transport, Entropy, Dataplane, Driver, ObservationStore, Llm traits
+- turmoil simulation harness + SimDriver / SimDataplane / SimClock / SimObservationStore / SimLlm (transcript-replay)
 - Process driver
 - Basic scheduler (first-fit)
 - CLI (`overdrive job submit`, `overdrive node list`, `overdrive alloc status`)
@@ -2380,6 +2537,7 @@ Neither Kubernetes nor Nomad ships the Tier 1 + Tier 3 composition, because neit
 - BPF LSM programs
 - Regorus policy evaluation (intent), verdict compilation into ObservationStore
 - Tier 3 sockops + kTLS test cases (verified via `ss -K` and veth wire capture) and BPF LSM positive/negative test fixtures (Tetragon-style, asserting on the BPF ringbuf event stream) added to the §22 kernel matrix
+- **Workflow primitive — Rust trait `Workflow { async fn run(&self, ctx: &WorkflowCtx) -> WorkflowResult }`, durable journal in per-primitive libSQL, typed-signal coordination via ObservationStore, workflow-lifecycle reconciler.** Certificate rotation lands as the first internal workflow on this primitive (replacing the "workflow reconciler" conflation — workflows are a peer primitive to reconcilers, not a reconciler variant). DST-gated via replay-equivalence property tests; injected Transport/Clock/Entropy.
 
 ### Phase 4 — Additional Drivers (Months 9–12)
 - Cloud Hypervisor microVM and VM driver (replaces Firecracker + QEMU)
@@ -2394,21 +2552,30 @@ Neither Kubernetes nor Nomad ships the Tier 1 + Tier 3 composition, because neit
 - Mesh VPN underlay extensions (§7 *Node Underlay*): `wireguard` with platform-managed keys via enrollment (pubkeys gossiped through `node_health`), and `tailscale` with bring-your-own coordination (Tailscale tailnet or self-hosted Headscale) — mutually exclusive in the schematic
 
 ### Phase 5 — Intelligence (Months 12–18)
-- LLM observability agent (rig-rs)
+- LLM observability agent (rig-rs) with native SRE-investigation primitives:
+  - `Investigation` as a first-class resource (ObservationStore live state + incident-memory libSQL on conclusion)
+  - Declarative toolset catalog (`builtin:overdrive-core` Rust trait object + WASM-extensible third-party toolsets, content-addressed in Garage)
+  - Typed `Action` enum with risk-tier approval gate (Tier 0 auto / Tier 1 auto+notify / Tier 2 human-ratify)
+  - `correlation_key` on telemetry for alert de-duplication; SPIFFE-identity joins across DuckLake for cross-event correlation
+  - `llm_spend` reconciler for per-investigation, per-job, and cluster-wide token budget enforcement
 - Self-healing tier 3 (LLM reasoning)
 - Right-sizing reconciler (writes resource profiles into ObservationStore)
-- Incident memory (libSQL)
+- Incident memory (libSQL) with embedding-similarity retrieval for runbook + prior-incident lookup
 - Predictive scaling
 - Persistent microVMs (step 1): Cloud Hypervisor snapshot/restore exposed in the `microvm` driver with `userfaultfd` lazy memory paging; VMGenID wired into the guest on restore
 - Persistent microVMs (step 2): `overdrive-fs` — Rust-native single-writer chunk store (content-addressed chunks in Garage, per-rootfs libSQL metadata with streaming WAL, NVMe 2Q cache, `vhost-user-fs` frontend). Scope: rootfs only, not a general distributed filesystem
 - Persistent microVMs (step 3): gateway auto-route (`expose = true`) + credential-proxy sidecar defaults
 - Persistent microVMs (step 4): idle-eviction reconciler with checkpoint (`snapshot_on_idle_seconds`) — scale-to-zero for long-lived stateful workloads
+- Persistent microVMs (step 5): `overdrive-guest-agent` — minimal in-VM agent over ttRPC/virtio-vsock with SPIFFE identity; four-method surface (`fs_quiesce`, `fs_thaw`, `vmgenid_ack`, `resume_notify`) for application-consistent snapshots, acknowledged VMGenID reseeds, and post-resume service-restart signalling. Opt-in via Image Factory extension
 
 ### Phase 6 — Federation and Ecosystem (Months 18+)
 - WASM Component Model SDK (Rust, TypeScript, Go)
+- **Workflow WASM SDK (Rust, TypeScript, Go).** Application-facing durable execution on the same `Workflow` primitive the platform uses internally. `ctx.call(...)` / `ctx.sleep(...)` / `ctx.wait_for_signal(...)` / `ctx.activity(...)` as the core surface; journal-based versioning guard checked at module load; SPIFFE-identity-bound workflow instances; policy-gated tool surface. Migrates the Phase 3 internal-only primitive into a user-facing SDK without a second runtime — the platform's own durable sequences become reference workflows
 - OTel export adapter
 - Unikernel drivers (Nanos, Unikraft with virtiofs)
 - QEMU opt-in driver (exotic hardware emulation only)
+- Runbook primitive — markdown + YAML frontmatter matching the HolmesGPT runbook format for community-catalog reuse, content-addressed in Garage, indexed in incident-memory libSQL via embedding similarity, loaded by a `RunbookLoader` reconciler
+- Platform-signed diagnostic-probe catalog for `Action::AttachDiagnosticProbe` — curated BPF programs the investigation agent can attach to verify hypotheses, with duration-bounded auto-detach enforced by a deadline reconciler and a §22 Tier 3 integration-test fixture per probe
 - **Multi-region federation: per-region IntentStore (Raft) + global ObservationStore (Corrosion)**
 - **Regional Corrosion clusters + thin global membership cluster (regionalized blast radius from day one — the lesson Fly learned mid-incident)**
 - **Region-aware scheduler + gateway (reads `node_health.region` from local SQLite)**
@@ -2473,6 +2640,9 @@ official = ["nvidia-gpu"]   # resolved to versioned recipes by factory
 # Only one of `wireguard` or `tailscale` may appear in a schematic.
 #   wireguard — in-kernel mesh, platform-managed keys via enrollment
 #   tailscale — NAT-traversing mesh, bring-your-own Tailscale / Headscale
+# Guest-image extension (§6 Guest Agent for Persistent MicroVMs).
+# Applied to rootfs images used by persistent microVMs, not to node OS images.
+#   persistent-microvm-guest-agent — ttRPC/virtio-vsock agent for app-consistent snapshots
 
 [security]
 bpf_lsm = true   # locked true in production; configurable for dev only
