@@ -618,6 +618,57 @@ When `persistent = true`:
 3. **Idle eviction with checkpoint (scale-to-zero).** After `snapshot_on_idle_seconds` of no traffic, the workload reconciler checkpoints the VM, tears down the running process, and records the handle in the ObservationStore. An inbound request via the gateway triggers a restore. The restore path is sub-second: metadata-only on disk plus `userfaultfd`-lazy on memory.
 4. **VMGenID wired into the guest.** Live-migrated or snapshot-restored VMs face entropy-reuse hazards — the kernel's RNG can produce identical output on both sides of a snapshot. Cloud Hypervisor exposes a VMGenID device; the node agent updates the generation counter on every restore, and the guest kernel reseeds.
 
+### Guest Agent for Persistent MicroVMs
+
+Three of the capabilities above — application-consistent snapshots, acknowledged VMGenID reseeds, and post-resume service restart — are intrinsically in-guest operations. The host cannot quiesce a database's in-flight transactions, cannot confirm the guest kernel has reseeded its RNG, and cannot tell a `systemd` unit to re-establish external connections after a thaw. Without cooperation from inside the VM, persistent microVM restores are *crash-consistent* — correct, but indistinguishable to the workload from a power cut. For agent sandboxes and dev environments this is acceptable; for stateful databases, queues, and anything with an open TCP session to a peer it is not.
+
+Overdrive handles this with a minimal guest agent, `overdrive-guest-agent`. The agent is a small Rust binary shipped as an opt-in Image Factory extension (§24) — not baked into every image, and not required for non-persistent microVMs. It follows the industry-proven Kata Containers pattern: ttRPC over virtio-vsock, with the boundary explicitly narrow.
+
+**Exactly four cooperation points.** The agent exposes no shell, no arbitrary command execution, and no filesystem surface. Its entire RPC interface is four methods:
+
+```
+fs_quiesce(timeout)       → freeze writes and fsync before host snapshot
+fs_thaw()                 → resume writes after snapshot completes
+vmgenid_ack(generation)   → confirm guest kernel reseeded RNG after restore
+resume_notify()           → fan out a "back from snapshot" signal to systemd
+```
+
+The node agent calls `fs_quiesce` immediately before triggering Cloud Hypervisor's snapshot, then `fs_thaw` once the snapshot transaction has committed in `overdrive-fs` metadata. On restore, the node agent updates the VMGenID device and waits for `vmgenid_ack` before releasing traffic via the gateway; `resume_notify` then fires a `sd_notify(3)`-style broadcast that systemd units can subscribe to via `systemd.restart-on-resume` drop-ins. The `userfaultfd` event surface from §14 remains host-side — the agent does not inspect memory pages.
+
+**Identity and trust.** The agent holds a SPIFFE SVID bound to the allocation ID, issued by the node's intermediate CA at VM start and delivered through the initial vsock handshake. Every RPC is authenticated mutually against the node agent's SVID. A compromised guest cannot impersonate another allocation's agent; a compromised host cannot forge guest acks (it will not have the agent's private key). The trust root remains on the host, consistent with §8.
+
+**What is not in the guest.** Storage is served by `overdrive-fs` + `vhost-user-fs` on the host (§17). Service management is the user's own `systemd`. Log collection is eBPF-native at the kernel level (§12). The credential proxy, content inspector, and any other request-path logic are host-side sidecars (§9). The guest agent does not include a control-plane component, a package manager, or a reverse shell — its binary footprint is a handful of ttRPC stubs and the four methods above.
+
+**Rejecting the broader framing.** Fly's sprites architecture slides additional services into the guest (service manager, log router, in-VM control agent). Overdrive rejects this for the same reason it ships the gateway as a node-agent subsystem rather than a workload: each concern belongs at the layer that can enforce it best. A guest-side log router cannot see kernel syscalls; a guest-side service manager duplicates `systemd`; a guest-side control agent contradicts the single-binary model. The only operations that *must* live in the guest are the ones the host physically cannot perform — and those are enumerated exactly above.
+
+**Composition with `overdrive-fs`.** The guest agent's `fs_quiesce` call is the natural integration point for the metadata-only snapshot in §17. The snapshot transaction in libSQL is:
+
+```
+1. node agent → guest agent: fs_quiesce(timeout=5s)
+2. guest agent: freezes filesystem writes, fsyncs, responds
+3. node agent: begin libSQL transaction; atomic inode-tree fork
+4. node agent: Cloud Hypervisor memory snapshot
+5. node agent: commit libSQL transaction
+6. node agent → guest agent: fs_thaw()
+```
+
+Without the agent the sequence degrades cleanly: `fs_quiesce` is skipped, the snapshot is crash-consistent, and the workload spec is expected to tolerate it. Both modes are valid; the agent is the upgrade path for workloads that need stronger guarantees.
+
+```toml
+[job]
+name = "agent-claude-code"
+driver = "microvm"
+
+[job.microvm]
+persistent = true
+guest_agent = true               # opt-in; requires Image Factory extension
+persistent_rootfs_size = "100GB"
+snapshot_on_idle_seconds = 30
+expose = true
+```
+
+The extension surface in the Image Factory schematic (§24) exposes this as `extensions.persistent-microvm-guest-agent = true`.
+
 ### Composition, Not a New Workload Type
 
 A persistent microVM that also wants a stable public URL, credential sandboxing, and structural prompt-injection defense composes this from existing primitives:
@@ -2445,6 +2496,7 @@ Neither Kubernetes nor Nomad ships the Tier 1 + Tier 3 composition, because neit
 - Persistent microVMs (step 2): `overdrive-fs` — Rust-native single-writer chunk store (content-addressed chunks in Garage, per-rootfs libSQL metadata with streaming WAL, NVMe 2Q cache, `vhost-user-fs` frontend). Scope: rootfs only, not a general distributed filesystem
 - Persistent microVMs (step 3): gateway auto-route (`expose = true`) + credential-proxy sidecar defaults
 - Persistent microVMs (step 4): idle-eviction reconciler with checkpoint (`snapshot_on_idle_seconds`) — scale-to-zero for long-lived stateful workloads
+- Persistent microVMs (step 5): `overdrive-guest-agent` — minimal in-VM agent over ttRPC/virtio-vsock with SPIFFE identity; four-method surface (`fs_quiesce`, `fs_thaw`, `vmgenid_ack`, `resume_notify`) for application-consistent snapshots, acknowledged VMGenID reseeds, and post-resume service-restart signalling. Opt-in via Image Factory extension
 
 ### Phase 6 — Federation and Ecosystem (Months 18+)
 - WASM Component Model SDK (Rust, TypeScript, Go)
@@ -2517,6 +2569,9 @@ official = ["nvidia-gpu"]   # resolved to versioned recipes by factory
 # Only one of `wireguard` or `tailscale` may appear in a schematic.
 #   wireguard — in-kernel mesh, platform-managed keys via enrollment
 #   tailscale — NAT-traversing mesh, bring-your-own Tailscale / Headscale
+# Guest-image extension (§6 Guest Agent for Persistent MicroVMs).
+# Applied to rootfs images used by persistent microVMs, not to node OS images.
+#   persistent-microvm-guest-agent — ttRPC/virtio-vsock agent for app-consistent snapshots
 
 [security]
 bpf_lsm = true   # locked true in production; configurable for dev only
