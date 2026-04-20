@@ -310,9 +310,25 @@ a reconciler.
 - **Use `thiserror` for typed errors** in all library / core crates. Typed
   errors provide structured data for audit trails, reconciler retry logic,
   and investigation-agent tool outputs.
-- **Use `anyhow` only at CLI / API boundaries** for user-facing messages.
-  Library code should never return `anyhow::Error` — the caller loses the
-  ability to branch on variant.
+- **Use `eyre` only at CLI / binary boundaries** for user-facing messages.
+  `eyre` is a fork of `anyhow` with pluggable report handlers — pair it
+  with `color-eyre` in binaries to get backtraces, `tracing-error`
+  spantraces, and `Help` suggestions in one formatted report. Prefer
+  `eyre::Result<T>` over `anyhow::Result<T>` in new code; do not mix the
+  two in one crate.
+- **Library code never returns `eyre::Report` (or `anyhow::Error`).** The
+  caller loses the ability to branch on variant, and re-exporting a
+  `Report` as part of a public API ties your SemVer to eyre's — an
+  `eyre` major bump in a downstream app becomes a breaking change you
+  cannot control. Return a `thiserror` enum; let the binary convert at
+  the boundary via `?` (`eyre::Report: From<E>` for any `E: Error`).
+- **`wrap_err` / `wrap_err_with` for context**, not `Display` string
+  concatenation. The returned `Report` preserves the full error chain;
+  `color-eyre`'s formatter renders it as `Caused by:` sections. Do not
+  use `.map_err(|e| format!("...: {e}"))` — it collapses the chain to a
+  string and breaks downcasting.
+- **`eyre!` and `bail!` for one-off errors** at the boundary only.
+  Inside a library, construct the typed variant.
 - **Consistent constructors.** Every error enum variant should have an
   associated constructor method (`Error::validation(...)`,
   `Error::internal(...)`, `Error::not_found(...)`). Call sites read as
