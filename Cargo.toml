@@ -1,0 +1,135 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/overdrive-core",
+    "crates/overdrive-cli",
+    "xtask",
+]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.85"
+license = "FSL-1.1-ALv2"
+authors = ["Overdrive Contributors"]
+repository = "https://github.com/overdrive-sh/overdrive"
+homepage = "https://overdrive.sh"
+publish = false
+
+[workspace.dependencies]
+# --- Errors ---------------------------------------------------------------
+thiserror       = "2"
+eyre            = "0.6"
+color-eyre      = "0.6"
+
+# --- Async / concurrency --------------------------------------------------
+tokio           = { version = "1", features = ["full"] }
+async-trait     = "0.1"
+futures         = "0.3"
+parking_lot     = "0.12"
+
+# --- Serialization --------------------------------------------------------
+serde           = { version = "1", features = ["derive"] }
+serde_json      = "1"
+rkyv            = { version = "0.8", features = ["bytecheck"] }
+bytecheck       = "0.8"
+
+# --- CLI ------------------------------------------------------------------
+clap            = { version = "4", features = ["derive", "env"] }
+
+# --- Cryptography / hashing ----------------------------------------------
+sha2            = "0.10"
+blake3          = "1"
+ring            = "0.17"
+aws-lc-rs       = "1"
+rcgen           = "0.13"
+rustls          = { version = "0.23", default-features = false, features = ["ring", "tls12"] }
+
+# --- Networking / HTTP ----------------------------------------------------
+hyper           = { version = "1", features = ["full"] }
+hyper-util      = { version = "0.1", features = ["full"] }
+reqwest         = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+tonic           = "0.12"
+prost           = "0.13"
+quinn           = { version = "0.11", default-features = false, features = ["rustls", "runtime-tokio"] }
+instant-acme    = "0.8"
+
+# --- Storage --------------------------------------------------------------
+redb            = "2"
+
+# --- Allocation / arenas --------------------------------------------------
+bumpalo         = { version = "3", features = ["collections", "allocator-api2"] }
+
+# --- Runtime / eBPF / WASM / policy ---------------------------------------
+aya             = "0.13"
+wasmtime        = "26"
+regorus         = "0.2"
+
+# --- Observability --------------------------------------------------------
+tracing             = "0.1"
+tracing-subscriber  = { version = "0.3", features = ["env-filter"] }
+tracing-error       = "0.2"
+
+# --- DST ------------------------------------------------------------------
+turmoil         = "0.6"
+
+# --- Utilities ------------------------------------------------------------
+bytes           = "1"
+uuid            = { version = "1", features = ["v4", "v7", "serde"] }
+time            = { version = "0.3", features = ["serde", "macros"] }
+base64          = "0.22"
+hex             = "0.4"
+url             = { version = "2", features = ["serde"] }
+
+# --- Testing --------------------------------------------------------------
+proptest        = "1"
+rstest          = "0.23"
+insta           = "1"
+
+# --- Internal workspace crates -------------------------------------------
+overdrive-core = { path = "crates/overdrive-core" }
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn  = "deny"
+rust_2024_compatibility = { level = "warn", priority = -1 }
+# `missing_docs` is opt-in per crate via `#![warn(missing_docs)]`. Applying
+# it workspace-wide generates too much noise on partially-stubbed types
+# during Phase 1.
+
+[workspace.lints.clippy]
+# Correctness / ergonomics
+pedantic             = { level = "warn", priority = -1 }
+nursery              = { level = "warn", priority = -1 }
+cargo                = { level = "warn", priority = -1 }
+# Project-specific bans
+dbg_macro            = "deny"
+print_stdout         = "warn"
+print_stderr         = "warn"
+todo                 = "warn"
+unimplemented        = "warn"
+unwrap_used          = "warn"
+expect_used          = "warn"      # allowed in CLI binaries via crate-level override
+# Noisy pedantic lints we don't care about
+module_name_repetitions = "allow"
+must_use_candidate      = "allow"
+missing_errors_doc      = "allow"
+missing_panics_doc      = "allow"
+multiple_crate_versions = "allow"
+
+[profile.release]
+lto             = "thin"
+codegen-units   = 1
+debug           = "line-tables-only"
+panic           = "abort"
+strip           = "symbols"
+
+[profile.dev]
+debug           = "line-tables-only"
+
+# Fast test loop — opt build deps even in debug.
+[profile.dev.package."*"]
+opt-level       = 2
+
+[profile.bench]
+lto             = "thin"
+codegen-units   = 1
+debug           = true

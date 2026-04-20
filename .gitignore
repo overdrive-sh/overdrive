@@ -1,0 +1,25 @@
+# Build artifacts
+/target/
+**/*.rs.bk
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+
+# Cargo
+Cargo.lock.bak
+
+# Test / coverage
+/coverage/
+tarpaulin-report.html
+
+# Local-only conductor scratch
+.context/
+
+# Lefthook — per-dev overrides
+lefthook-local.yml
+.lefthook-local.yml

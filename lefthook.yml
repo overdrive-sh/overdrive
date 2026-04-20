@@ -1,0 +1,89 @@
+# Lefthook — git hooks for Overdrive.
+# https://lefthook.dev
+#
+# First-time setup:
+#   brew install lefthook          # or see https://lefthook.dev/installation/
+#   cargo xtask hooks install      # wires .git/hooks/* to this file
+#
+# Bypass (use sparingly):
+#   git commit --no-verify
+#   git push   --no-verify
+#
+# Local overrides go in `lefthook-local.yml` (gitignored).
+
+# Refuse to run if lefthook isn't installed — prevents a silently-degraded
+# commit pipeline on a teammate's laptop.
+assert_lefthook_installed: true
+
+# ────────────────────────────────────────────────────────────────────────────
+# pre-commit — cheap, per-commit checks. Must stay under a few seconds on
+# a warm cache so developers keep it enabled.
+# ────────────────────────────────────────────────────────────────────────────
+pre-commit:
+  parallel: true
+  skip:
+    - merge
+    - rebase
+  commands:
+    fmt:
+      tags: [rust, fast]
+      glob: "*.rs"
+      # rustfmt reads `rustfmt.toml` automatically. Checking the full
+      # workspace is faster than piping staged files individually, because
+      # it hits rustfmt's own parallelism.
+      run: cargo fmt --all -- --check
+      fail_text: |
+        Formatting drift. Run: cargo fmt --all
+    toml-check:
+      tags: [toml, fast]
+      glob:
+        - "**/Cargo.toml"
+        - "rust-toolchain.toml"
+        - "rustfmt.toml"
+        - "clippy.toml"
+        - "deny.toml"
+        - ".cargo/config.toml"
+      # Validate every staged TOML parses. Cheap, catches trailing-comma /
+      # unterminated-string mistakes before CI picks them up.
+      run: |
+        for f in {files}; do
+          if ! python3 -c 'import tomllib,sys; tomllib.loads(open(sys.argv[1],"rb").read())' "$f" 2>/dev/null; then
+            echo "invalid TOML: $f" >&2
+            exit 1
+          fi
+        done
+    yaml-lima:
+      tags: [yaml, lima]
+      glob: "infra/lima/*.yaml"
+      run: |
+        for f in {files}; do
+          limactl validate "$f" || exit 1
+        done
+      fail_text: |
+        Lima template invalid. See output above.
+
+# ────────────────────────────────────────────────────────────────────────────
+# pre-push — the full CI pipeline locally before it lands on a runner.
+# Slow-but-thorough; `--no-verify` is the escape hatch for WIP branches.
+# ────────────────────────────────────────────────────────────────────────────
+pre-push:
+  parallel: false
+  skip:
+    - merge
+    - rebase
+  commands:
+    ci:
+      # Mirrors `.github/workflows/ci.yml` — fmt-check + clippy -D warnings + test.
+      run: cargo xtask ci
+      fail_text: |
+        `cargo xtask ci` failed. Fix the reported issue or push with
+        --no-verify if you're publishing a WIP branch for backup.
+
+# ────────────────────────────────────────────────────────────────────────────
+# commit-msg — placeholder. Enable when we pick a convention
+# (Conventional Commits, gitmoji, …).
+# ────────────────────────────────────────────────────────────────────────────
+# commit-msg:
+#   commands:
+#     format:
+#       run: ...

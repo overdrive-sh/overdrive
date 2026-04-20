@@ -1,0 +1,23 @@
+[package]
+name        = "xtask"
+version     = "0.0.0"
+description = "Developer / CI entry points. Invoked via `cargo xtask <cmd>`."
+edition.workspace       = true
+rust-version.workspace  = true
+license.workspace       = true
+authors.workspace       = true
+repository.workspace    = true
+homepage.workspace      = true
+publish.workspace       = true
+
+[[bin]]
+name = "xtask"
+path = "src/main.rs"
+
+[lints]
+workspace = true
+
+[dependencies]
+eyre.workspace       = true
+color-eyre.workspace = true
+clap.workspace       = true

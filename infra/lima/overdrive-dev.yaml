@@ -1,0 +1,273 @@
+# Overdrive Linux dev VM for macOS hosts.
+#
+# Installs everything the Phase 1–4 roadmap needs for inner-loop development:
+#
+#   Runtime drivers (§6)   cloud-hypervisor, virtiofsd, wasmtime, kraft (Unikraft)
+#   eBPF toolchain (§7)    clang, llvm, libbpf, bpftool, xdp-tools
+#   Tier 2 BPF unit (§22)  via `BPF_PROG_TEST_RUN` — already in-kernel
+#   Tier 3 integration     little-vm-helper (Go), virtme-ng (Python), QEMU
+#   Rust                   rustup (toolchain governed by rust-toolchain.toml),
+#                          cargo-nextest, cargo-deny
+#   Networking             tcpdump, iproute2, bridge-utils
+#
+# Yocto / bitbake are deliberately NOT installed — Image Factory builds are
+# 60–90 minutes cold and 100 GB+ of sstate cache; belongs on dedicated CI.
+#
+# Usage:
+#   cargo xtask lima up                  # or: limactl start --name=overdrive ./infra/lima/overdrive-dev.yaml
+#   cargo xtask lima shell               # interactive shell
+#   cargo xtask lima run -- cargo xtask dst
+#   cargo xtask lima stop / delete
+
+minimumLimaVersion: 2.0.0
+
+# ────────────────────────────────────────────────────────────────────────────
+# Base image — Ubuntu 24.04 LTS (kernel 6.8: BPF LSM, kTLS, cgroups v2, KVM).
+# Native arch on host — amd64 on Intel, arm64 on Apple Silicon. All of the
+# tooling we install has working aarch64 support.
+# ────────────────────────────────────────────────────────────────────────────
+base:
+  - template:_images/ubuntu-24.04
+
+# ────────────────────────────────────────────────────────────────────────────
+# VM backend — Apple Virtualization.framework. Auto-selects virtiofs for
+# mounts. Nested virtualization is required for running QEMU (LVH kernel
+# matrix) and Cloud Hypervisor *inside* the Lima guest; it works on Apple
+# Silicon M3+ with macOS 15+, and on all Intel Macs.
+# ────────────────────────────────────────────────────────────────────────────
+vmType: "vz"
+nestedVirtualization: true
+
+vmOpts:
+  vz:
+    rosetta:
+      enabled: false    # native Linux arch only — we don't want x86-on-arm64
+      binfmt:  false
+
+# ────────────────────────────────────────────────────────────────────────────
+# Resources — tuned for parallel Rust + BPF + kernel builds. Override at
+# creation time with --cpus=N --memory=N --disk=N.
+# ────────────────────────────────────────────────────────────────────────────
+cpus: 8
+memory: "16GiB"
+disk: "150GiB"
+
+mounts:
+  - location: "~"
+    writable: true
+
+containerd:
+  system: false
+  user:   false
+
+# ────────────────────────────────────────────────────────────────────────────
+# Env — sourced on every shell login.
+# ────────────────────────────────────────────────────────────────────────────
+env:
+  CARGO_TERM_COLOR:  "always"
+  CARGO_TARGET_DIR:  "${HOME}/.cargo-target-lima"
+  RUST_LOG:          "overdrive=info"
+  PATH:              "${HOME}/.cargo/bin:${HOME}/go/bin:${HOME}/.local/bin:${PATH}"
+
+# ────────────────────────────────────────────────────────────────────────────
+# Pinned versions for single-file binary downloads. Bump as releases land.
+# Set via env so probes can reference them too.
+# ────────────────────────────────────────────────────────────────────────────
+param:
+  CLOUD_HYPERVISOR_VERSION: "v46.0"
+  WASMTIME_VERSION:         "v28.0.0"
+
+# ────────────────────────────────────────────────────────────────────────────
+# Provisioning.
+# ────────────────────────────────────────────────────────────────────────────
+provision:
+  # -------------------------------------------------------------------------
+  # apt packages — BPF toolchain, QEMU, Go, Python, networking, build tools.
+  # -------------------------------------------------------------------------
+  - mode: system
+    script: |
+      #!/usr/bin/env bash
+      set -euxo pipefail
+      export DEBIAN_FRONTEND=noninteractive
+
+      apt-get update
+      apt-get install -y --no-install-recommends \
+          build-essential pkg-config ca-certificates curl git jq \
+          unzip xz-utils cpio bzip2 zstd file \
+          clang lld llvm libclang-dev \
+          libelf-dev libbpf-dev linux-libc-dev \
+          linux-tools-common linux-tools-generic \
+          zlib1g-dev libssl-dev libzstd-dev libudev-dev \
+          qemu-system-x86 qemu-system-arm qemu-utils qemu-kvm \
+          virtiofsd \
+          xdp-tools bpfcc-tools \
+          tcpdump iproute2 bridge-utils \
+          python3 python3-venv python3-pip pipx \
+          golang-go \
+          e2fsprogs
+
+      # bpftool from linux-tools-generic on a stable PATH.
+      if [ ! -x /usr/local/bin/bpftool ]; then
+        BPFTOOL="$(find /usr/lib/linux-tools-*/bpftool 2>/dev/null | head -n1 || true)"
+        if [ -n "${BPFTOOL}" ]; then ln -sf "${BPFTOOL}" /usr/local/bin/bpftool; fi
+      fi
+
+  # -------------------------------------------------------------------------
+  # KVM permissions via udev — cleaner than `usermod -a -G kvm`. The rule
+  # survives kernel module reloads and applies to any user.
+  # -------------------------------------------------------------------------
+  - mode: system
+    script: |
+      #!/usr/bin/env bash
+      set -euxo pipefail
+      echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+        | tee /etc/udev/rules.d/99-kvm4all.rules
+      udevadm control --reload-rules
+      udevadm trigger --name-match=kvm || true
+
+  # -------------------------------------------------------------------------
+  # Cloud Hypervisor — single static binary. Replaces Firecracker + QEMU as
+  # the unified VMM (§6). Provides CPU/memory hotplug + virtiofs.
+  # -------------------------------------------------------------------------
+  - mode: system
+    script: |
+      #!/usr/bin/env bash
+      set -euxo pipefail
+      VER="{{ .Param.CLOUD_HYPERVISOR_VERSION }}"
+      ARCH="$(uname -m)"
+      case "${ARCH}" in
+        x86_64)  ASSET="cloud-hypervisor-static" ;;
+        aarch64) ASSET="cloud-hypervisor-static-aarch64" ;;
+        *) echo "unsupported arch: ${ARCH}"; exit 1 ;;
+      esac
+      curl -fsSL -o /usr/local/bin/cloud-hypervisor \
+        "https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/${VER}/${ASSET}"
+      chmod +x /usr/local/bin/cloud-hypervisor
+      cloud-hypervisor --version
+
+  # -------------------------------------------------------------------------
+  # Wasmtime — the WASM driver runtime (§6, §16).
+  # -------------------------------------------------------------------------
+  - mode: system
+    script: |
+      #!/usr/bin/env bash
+      set -euxo pipefail
+      VER="{{ .Param.WASMTIME_VERSION }}"
+      ARCH="$(uname -m)"
+      TARBALL="wasmtime-${VER}-${ARCH}-linux.tar.xz"
+      curl -fsSL -o "/tmp/${TARBALL}" \
+        "https://github.com/bytecodealliance/wasmtime/releases/download/${VER}/${TARBALL}"
+      tar -C /tmp -xf "/tmp/${TARBALL}"
+      install -m 0755 "/tmp/wasmtime-${VER}-${ARCH}-linux/wasmtime" /usr/local/bin/wasmtime
+      rm -rf "/tmp/wasmtime-${VER}-${ARCH}-linux" "/tmp/${TARBALL}"
+      wasmtime --version
+
+  # -------------------------------------------------------------------------
+  # User-level — Rust, cargo tools, kraft, LVH, virtme-ng.
+  # -------------------------------------------------------------------------
+  - mode: user
+    script: |
+      #!/usr/bin/env bash
+      set -euxo pipefail
+
+      # Rustup — no default toolchain; rust-toolchain.toml governs in-repo.
+      if ! command -v rustup >/dev/null 2>&1; then
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+          | sh -s -- -y --default-toolchain none --profile minimal
+      fi
+      . "${HOME}/.cargo/env"
+      rustup component add rustfmt clippy rust-src || true
+      cargo install --locked cargo-deny cargo-nextest || true
+
+      # kraft (Unikraft build CLI) — official installer.
+      if ! command -v kraft >/dev/null 2>&1; then
+        curl --proto '=https' --tlsv1.2 -sSf https://get.kraftkit.sh | sh
+      fi
+
+      # little-vm-helper (Tier 3 kernel-matrix harness).
+      if ! command -v lvh >/dev/null 2>&1; then
+        go install github.com/cilium/little-vm-helper/cmd/lvh@latest
+      fi
+
+      # virtme-ng (fast kernel boot from source tree) — via pipx so it gets
+      # its own venv and doesn't collide with system python packages.
+      pipx ensurepath
+      if ! command -v virtme-ng >/dev/null 2>&1; then
+        pipx install virtme-ng || true
+      fi
+
+      # Keep cargo target dir off the virtiofs mount — macOS Mach-O
+      # aarch64-apple-darwin and Linux ELF x86_64/aarch64 targets share no
+      # fingerprint but every write across the mount is slow.
+      mkdir -p "${HOME}/.cargo-target-lima"
+
+# ────────────────────────────────────────────────────────────────────────────
+# Probes — Lima waits for each to succeed before reporting "ready".
+# ────────────────────────────────────────────────────────────────────────────
+probes:
+  - description: "rustup installed"
+    script: |
+      #!/usr/bin/env bash
+      set -eu
+      timeout 300 bash -c 'until command -v rustup >/dev/null 2>&1 \
+        || [ -x "$HOME/.cargo/bin/rustup" ]; do sleep 2; done'
+    hint: "Rustup did not install within 5 minutes."
+
+  - description: "cloud-hypervisor installed"
+    script: |
+      #!/usr/bin/env bash
+      set -eu
+      timeout 300 bash -c 'until [ -x /usr/local/bin/cloud-hypervisor ]; do sleep 2; done'
+      /usr/local/bin/cloud-hypervisor --version
+    hint: "Cloud Hypervisor binary missing — check provisioning log."
+
+  - description: "wasmtime installed"
+    script: |
+      #!/usr/bin/env bash
+      set -eu
+      timeout 300 bash -c 'until command -v wasmtime >/dev/null 2>&1; do sleep 2; done'
+      wasmtime --version
+    hint: "Wasmtime binary missing — check provisioning log."
+
+  - description: "kraft (Unikraft) installed"
+    script: |
+      #!/usr/bin/env bash
+      set -eu
+      timeout 300 bash -c 'until command -v kraft >/dev/null 2>&1 \
+        || [ -x "$HOME/.local/bin/kraft" ]; do sleep 2; done'
+    hint: "kraftkit did not install — see https://kraftkit.sh/"
+
+  - description: "little-vm-helper (lvh) installed"
+    script: |
+      #!/usr/bin/env bash
+      set -eu
+      timeout 600 bash -c 'until command -v lvh >/dev/null 2>&1 \
+        || [ -x "$HOME/go/bin/lvh" ]; do sleep 3; done'
+    hint: "lvh did not install — `go install github.com/cilium/little-vm-helper/cmd/lvh@latest`"
+
+  - description: "KVM accessible"
+    script: |
+      #!/usr/bin/env bash
+      set -eu
+      test -c /dev/kvm
+    hint: |
+      /dev/kvm not present. Nested virt requires macOS 15+ and an M3/M4 or
+      Intel host. Tier 3 integration tests will not run without it.
+
+# ────────────────────────────────────────────────────────────────────────────
+# Message shown after first boot.
+# ────────────────────────────────────────────────────────────────────────────
+message: |
+  Overdrive dev VM ready.
+
+  Installed:
+    cloud-hypervisor   $(cloud-hypervisor --version 2>/dev/null || echo missing)
+    wasmtime           $(wasmtime --version 2>/dev/null || echo missing)
+    kraft              $(kraft version 2>/dev/null | head -n1 || echo missing)
+    lvh                $(lvh --version 2>/dev/null || echo 'in $HOME/go/bin')
+    rustup             $(rustup --version 2>/dev/null | head -n1)
+    qemu               $(qemu-system-$(uname -m) --version | head -n1)
+
+  Next:
+    limactl shell overdrive
+    cd {{ .Dir }} && cargo build

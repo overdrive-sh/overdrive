@@ -1,0 +1,17 @@
+[alias]
+# Developer conveniences — the real CI entry points live in xtask.
+xtask        = "run --package xtask --"
+xt           = "run --package xtask --"
+dst          = "run --package xtask -- dst"
+bpf-unit     = "run --package xtask -- bpf-unit"
+verifier     = "run --package xtask -- verifier-regress"
+xdp-perf     = "run --package xtask -- xdp-perf"
+it-vm        = "run --package xtask -- integration-test vm"
+lint         = "clippy --workspace --all-targets --all-features -- -D warnings"
+fmt-check    = "fmt --all -- --check"
+lima-up      = "run --package xtask -- lima up"
+lima-shell   = "run --package xtask -- lima shell"
+hooks-install = "run --package xtask -- hooks install"
+
+[build]
+# Keep incremental compilation on by default; CI overrides via CARGO_INCREMENTAL=0.

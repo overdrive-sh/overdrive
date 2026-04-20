@@ -1,0 +1,47 @@
+# cargo-deny configuration — run via `cargo deny check`.
+
+[graph]
+all-features = false
+
+[advisories]
+version    = 2
+yanked     = "deny"
+ignore     = []
+
+[licenses]
+version              = 2
+confidence-threshold = 0.93
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Zlib",
+    "CC0-1.0",
+    "MPL-2.0",
+    "FSL-1.1-ALv2",
+]
+
+[[licenses.exceptions]]
+name      = "ring"
+allow     = ["OpenSSL", "ISC", "MIT"]
+
+[bans]
+multiple-versions = "warn"
+wildcards         = "deny"
+# Reject crates that we have structurally replaced.
+deny = [
+    { name = "openssl" },
+    { name = "openssl-sys" },
+    { name = "native-tls" },
+    { name = "anyhow" },          # library code uses thiserror; binaries use eyre.
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git      = "deny"
+allow-registry   = ["https://github.com/rust-lang/crates.io-index"]

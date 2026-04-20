@@ -1,0 +1,38 @@
+[package]
+name        = "overdrive-core"
+version     = "0.0.0"
+description = "Overdrive core types: newtypes, errors, injectable trait boundaries."
+edition.workspace       = true
+rust-version.workspace  = true
+license.workspace       = true
+authors.workspace       = true
+repository.workspace    = true
+homepage.workspace      = true
+publish.workspace       = true
+
+[lints]
+workspace = true
+
+[dependencies]
+# Errors & serialization
+thiserror.workspace  = true
+serde.workspace      = true
+serde_json.workspace = true
+rkyv.workspace       = true
+bytecheck.workspace  = true
+
+# Identifiers
+sha2.workspace = true
+hex.workspace  = true
+time.workspace = true
+uuid.workspace = true
+
+# Trait boundaries — async, I/O types, streams.
+async-trait.workspace = true
+futures.workspace     = true
+bytes.workspace       = true
+tokio.workspace       = true
+
+[dev-dependencies]
+proptest.workspace = true
+rstest.workspace   = true

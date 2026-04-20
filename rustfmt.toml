@@ -1,0 +1,12 @@
+edition              = "2024"
+max_width            = 100
+use_small_heuristics = "Max"
+newline_style        = "Unix"
+reorder_imports      = true
+reorder_modules      = true
+
+# The following require nightly rustfmt. Enable them under
+# `rustfmt +nightly` / `cargo +nightly fmt` when desired; they are
+# ignored by the stable rustfmt pinned in `rust-toolchain.toml`.
+# imports_granularity = "Crate"
+# group_imports       = "StdExternalCrate"

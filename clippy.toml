@@ -1,0 +1,4 @@
+# Treat any identifier concept longer than this as needing a newtype, not a raw String.
+# (Advisory — the hard gate lives in CI via `cargo clippy -- -D warnings`.)
+avoid-breaking-exported-api = false
+allow-private-module-inception = false
