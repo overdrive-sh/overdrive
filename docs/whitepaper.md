@@ -1980,6 +1980,18 @@ trait Workflow {
 
 The reconciler primitive handles "converge cluster toward spec." The workflow primitive handles "execute this defined sequence to completion with crash-safe resume." They compose: a deployment workflow emits actions that are realized by the job-lifecycle reconciler.
 
+### External I/O from Reconcilers
+
+Reconcilers sometimes need to issue requests to systems outside Overdrive — a Restate admin API, an AWS account, a payment processor, a custom internal service. The pure-function contract above does not preclude this; it reshapes how the I/O is expressed. Overdrive handles it with one Action variant and one ObservationStore table:
+
+- Reconcilers emit `Action::HttpCall { request_id, correlation, target, method, body, timeout, idempotency_key }` as a normal Action. No new trait, no new purity exception.
+- The runtime executes the call via the `Transport` trait and writes the result into an `external_call_results` table in the ObservationStore. The write is gossiped like any other observation row; every node reads responses locally.
+- The next reconcile iteration reads the row (a plain SQL query against local SQLite) and branches. `Pending`, `InFlight`, `Completed`, `Failed`, and `TimedOut` are all observable states.
+
+This is the same architecture USENIX OSDI '24 *Anvil* validates for verified Kubernetes controllers: a pure `reconcile_core` emitting request descriptors, a shim layer dispatching them, responses fed back as observable state. It inherits the same DST and ESR properties as cluster-state reconciliation — Actions are data, responses are observable rows, the reconciler remains pure. Retry policy, idempotency, and failure-to-status propagation live in reconciler memory (private libSQL), where they belong.
+
+For multi-step external orchestration that requires crash-safe resume — cert rotations, cross-region migrations, staged rollouts, chains of three or more external calls that must complete as a unit — reconcilers emit `Action::StartWorkflow` and read the workflow's result on completion. The reconciler remains the supervisor; the workflow owns the imperative sequence. Reconcilers converge; workflows orchestrate.
+
 ### Three-Layer State Taxonomy
 
 Overdrive draws a hard boundary between three state layers, each with different consistency guarantees. The reconciler and workflow primitives read and write these layers with explicit rules:

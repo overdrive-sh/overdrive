@@ -1,0 +1,430 @@
+# Development Guidelines
+
+Rust-specific implementation patterns that apply across the Overdrive codebase.
+These are not architectural decisions (those live in the whitepaper); they are
+conventions for how we write Rust in the reconciler, dataplane, and store paths.
+
+---
+
+## Type-driven design
+
+Guiding principle: **make invalid states unrepresentable.** Lean on the type
+system to enforce correctness at compile time rather than runtime
+validation.
+
+### Sum types over sentinels
+
+Use `enum` to model mutually exclusive states explicitly. Do not use
+sentinels (`None`, `-1`, empty `Vec`) to carry semantic meaning.
+
+```rust
+// Bad — ambiguous: does None mean "not yet computed" or "no match"?
+struct Alloc {
+    placement: Option<NodeId>,
+}
+
+// Good — every state is explicit
+enum Placement {
+    Pending,
+    Scheduled(NodeId),
+    Rejected { reason: String },
+    Failed { error: DriverError },
+}
+```
+
+This compounds with the newtype rules below: once a concept has a
+dedicated type, its states should be a dedicated sum type.
+
+---
+
+## Allocation strategy
+
+Two complementary tools. Pick the right one for the lifetime shape of the data.
+
+### Arena allocation (bumpalo) — reconciler scratch
+
+Use for short-lived intermediate state whose lifetime is bounded by a single
+reconcile iteration, a single request, or a single workflow step.
+
+```rust
+fn reconcile(intent: &IntentNode) -> Result<Vec<Action>> {
+    let bump = Bump::new();
+    let parsed  = parse_spec_into(&bump, &intent.spec)?;
+    let actual  = fetch_actual_into(&bump, &intent.id)?;
+    let diff    = compute_diff(&bump, &parsed, &actual);
+    emit_actions(&diff)     // only the returned actions escape
+    // bump drops here — all intermediates freed in one pointer reset
+}
+```
+
+**When to reach for it:**
+- Reconciler hot path (diff buffers, derived intermediate state, per-iteration
+  scratch).
+- Per-request work in the gateway or sidecar handler chain.
+- Per-investigation work in the SRE agent (tool-call buffers, prompt
+  assembly).
+
+**When NOT to use it:**
+- Anything that needs to outlive the iteration. Cache entries, reconciler
+  memory rows, workflow journal entries — these go on the global heap or in
+  the per-primitive libSQL store.
+- Types with non-trivial `Drop` (file handles, sockets, other RAII
+  resources). Bump skips destructors by default; you'll leak.
+- Async scopes that span multiple reconcile iterations or `.await` points
+  outside the arena's scope. Keep the arena within a single synchronous span
+  or single async task.
+- I/O-bound work. If the bottleneck is the syscall, not the allocator,
+  bumpalo buys nothing.
+
+### Zero-copy deserialization (rkyv) — persistent inputs
+
+Use for durable data that reconcilers *read* — IntentStore rows, Raft log
+entries, Corrosion row payloads, incident-memory blobs. rkyv encodes the
+in-memory layout directly; readers access `&ArchivedT` against mmap'd bytes
+without a deserialization pass.
+
+**When to reach for it:**
+- Any hot-path read out of redb, the Raft log, or Corrosion row values.
+- Archived telemetry events in-flight (pre-Parquet).
+- Incident-memory blobs retrieved for LLM context assembly.
+
+**When NOT to use it:**
+- External wire formats (gRPC, REST, OTel export) — stay with serde +
+  protobuf/JSON for interop and schema evolution.
+- Data with rapidly evolving schemas under active design. rkyv's evolution
+  story is stricter than serde; additive-only discipline works, breaking
+  changes need a migration step.
+- Small, cold reads where deserialization cost is in the noise.
+
+### Composition
+
+The two stack naturally:
+
+```
+rkyv    →  read ArchivedJob directly from redb bytes         (no alloc)
+bumpalo →  build diff, candidate placements, action buffers   (arena alloc)
+heap    →  return Vec<Action> through Raft                    (global alloc)
+```
+
+The borrow checker enforces the boundaries: arena references can't escape the
+`Bump`, archived references can't escape the backing byte slice, and the
+`Action` values returned to Raft must be owned.
+
+---
+
+## Lifetime discipline in internal APIs
+
+Orthogonal to the allocator choice — applies even when bumpalo and rkyv are
+not in play.
+
+- **Prefer `&str` over `String`** in function signatures when the callee does
+  not need ownership. Borrow from the deserialized input for the duration of
+  the call.
+- **Use `Cow<'_, T>`** for data that is usually borrowed but occasionally
+  needs modification. Common in label / annotation / header handling — the
+  fast path stays zero-copy.
+- **Use `#[serde(borrow)]`** on serde-deserialized structs where the parsed
+  struct can hold `&str` into the original input bytes. Kills allocation for
+  every string field in JSON/YAML-heavy reconcilers.
+- **Reserve `Arc<T>`** for genuinely long-lived state shared across tasks
+  (engines, caches, connection pools). Do not reach for `Arc` to dodge
+  lifetime annotations on per-request data.
+
+---
+
+## State-layer hygiene (repeats §18 discipline in code form)
+
+The three state layers each map to a specific allocation / storage pattern.
+Crossing them accidentally is the class of bug the type system exists to
+prevent.
+
+| Layer | Store | Reading | Writing |
+|---|---|---|---|
+| Intent — what should be | `IntentStore` (redb / openraft+redb) | `&ArchivedT` via rkyv | Only via typed Raft actions |
+| Observation — what is | `ObservationStore` (Corrosion / CR-SQLite) | SQL subscriptions | Owner-writer only, full rows |
+| Memory — what happened | per-primitive libSQL | SQL | SQL |
+| Scratch — this iteration | `Bump` | arena refs | arena alloc, dies at iteration end |
+
+Enforce this with distinct trait objects (`IntentStore`, `ObservationStore`)
+and distinct types per layer. Do not expose a shared `put(key, value)`
+surface that lets the wrong call go to the wrong place.
+
+---
+
+## Reconciler I/O
+
+**Reconcilers do not perform I/O.** The §18 contract is
+`reconcile(desired, actual, db) → Vec<Action>` — pure over its inputs. No
+`.await` on network, no subprocess spawn, no wall-clock read, no direct
+store write. This is what makes DST (§21) and ESR verification (§18)
+possible; it is not optional.
+
+When a reconciler needs to talk to an external service (a Restate admin
+API, an AWS account, a webhook, a custom internal service), the shape is:
+
+```rust
+// Bad — violates §18 purity; no DST support; no ESR reasoning
+async fn reconcile(&self, /* ... */) -> Vec<Action> {
+    let resp = self.http.post("https://svc/register").await?;
+    // ...
+}
+
+// Good — emit an HttpCall action; read the response on the next tick
+fn reconcile(&self, desired: &State, actual: &State, db: &Db) -> Vec<Action> {
+    let correlation = CorrelationKey::from((desired.id, desired.spec_hash, "register"));
+    match actual.external_call(&correlation).latest_status() {
+        None => vec![Action::HttpCall {
+            correlation,
+            target: desired.endpoint.clone(),
+            method: Method::POST,
+            body: build_register_payload(desired),
+            timeout: Duration::from_secs(30),
+            idempotency_key: Some(correlation.to_string()),
+        }],
+        Some(Status::Pending) | Some(Status::InFlight) => vec![],
+        Some(Status::Completed { response }) => converge_from_response(actual, response),
+        Some(Status::Failed { .. } | Status::TimedOut { .. }) => handle_failure(db),
+    }
+}
+```
+
+Rules:
+
+1. **Every external call carries an `idempotency_key`** when the remote
+   API supports one. The runtime executes `HttpCall` at-least-once;
+   idempotency on the remote side is what makes the effect
+   exactly-once.
+2. **Correlation, not request ID, links cause to response.** A
+   `CorrelationKey` newtype derived from
+   `(reconciliation_target, spec_hash, purpose)` lets the next reconcile
+   find the prior response deterministically. Do not embed the
+   `request_id` in reconcile logic — it changes per attempt; the
+   correlation does not.
+3. **Retry budgets live in reconciler libSQL.** The runtime does not
+   auto-retry a failed `HttpCall` — that policy belongs to the
+   reconciler. Track attempts in the private DB; emit a new `HttpCall`
+   action until the budget is exhausted; then surface the failure to
+   status.
+4. **Multi-step external sequences become workflows, not chains of
+   `HttpCall`s.** If the reconciler would need to coordinate three or
+   more external calls that must complete as a unit, emit
+   `Action::StartWorkflow` and read the workflow's result on completion.
+   Reconcilers converge; workflows orchestrate.
+5. **`HttpCall` responses are observation, not intent.** The
+   `external_call_results` table lives in the ObservationStore and is
+   gossiped like any other observation row. Reconcilers read it
+   locally, same as `alloc_status` or `service_backends`.
+
+The reference case: a Restate-operator-equivalent in Overdrive is a
+reconciler that emits `HttpCall { target: restate_admin_url,
+method: POST, body: deployment_spec, idempotency_key: Some(...) }` on
+registration and reads `external_call_results` on the next tick to
+advance its state machine. No `async fn` in `reconcile`; no direct
+HTTP client; fully DST-replayable.
+
+---
+
+## Rust patterns
+
+### Errors
+
+- **Use `thiserror` for typed errors** in all library / core crates. Typed
+  errors provide structured data for audit trails, reconciler retry logic,
+  and investigation-agent tool outputs.
+- **Use `anyhow` only at CLI / API boundaries** for user-facing messages.
+  Library code should never return `anyhow::Error` — the caller loses the
+  ability to branch on variant.
+- **Consistent constructors.** Every error enum variant should have an
+  associated constructor method (`Error::validation(...)`,
+  `Error::internal(...)`, `Error::not_found(...)`). Call sites read as
+  English; variant shape can evolve without a breaking grep.
+- **Pass-through embedding, not duplication.** When a higher-level error
+  wraps a lower-level error, embed via `#[from]` rather than redefining
+  variants. Preserves the full nested structure (and its queryable
+  fields) through audit logs and investigation outputs.
+
+  ```rust
+  // Bad — duplicates lower variants; manual From impls; loses fields
+  pub enum ReconcilerError {
+      IntentPutFailed { source: DbError },
+      DriverStartFailed { message: String, alloc_id: Option<String> },
+  }
+
+  // Good — pass-through via #[from]; nested structure preserved
+  pub enum ReconcilerError {
+      Validation { message: String, field: Option<String> },
+      Intent { #[from] source: IntentStoreError },
+      Driver { #[from] source: DriverError },
+  }
+  ```
+
+  Use service-specific variants for local concerns (validation, business
+  logic); use pass-through for errors from lower layers that need no
+  transformation.
+
+### Concurrency & async
+
+- **Tokio is the standard runtime.** Do not reach for `async-std`,
+  `smol`, or a hand-rolled executor. Consistency matters more than
+  marginal performance differences.
+- **`Send + Sync` on core data structures.** Shared long-lived state
+  (engines, caches, pools) must be safely sendable across threads. If a
+  type is not `Send + Sync`, justify it in a comment.
+- **Cancellation safety.** Async tasks must tolerate being cancelled at
+  any `.await` point. A task holding a partially-applied mutation
+  across an `.await` is a bug.
+- **Never hold a lock across `.await`.** Grab the lock, mutate or clone,
+  drop the guard, then `await`. Holding `parking_lot` across `.await` is
+  a deadlock waiting for an unfair scheduler tick; holding `tokio::sync`
+  across `.await` is a latency spike waiting to happen.
+- **Use `parking_lot::RwLock` / `Mutex`** over `std::sync::RwLock` /
+  `Mutex` for synchronous critical sections. Avoids lock poisoning,
+  faster uncontended path, smaller. Use `tokio::sync::RwLock` / `Mutex`
+  only when the critical section *must* cross `.await` — and per the
+  rule above, try hard not to need that.
+- **`.expect()` in CLI binaries.** In `main()` and CLI entry points, use
+  `.expect("description")` instead of verbose `match` / `unwrap_or_else`
+  + `process::exit()` patterns. `expect` already prints and panics;
+  wrapping `process::exit` around fallible constructors adds noise with
+  no benefit.
+
+### Hashing requires deterministic serialization
+
+When a hash is used as an identity, address, or integrity check (content
+hashes in Garage, schematic IDs, Raft log digests, investigation-trace
+reproducibility), the serialization that feeds the hash MUST be
+deterministic.
+
+- **Internal data → rkyv.** rkyv's archived bytes are canonical by
+  construction. Hash the archived slice directly.
+- **External / JSON data → RFC 8785 (JCS).** If a hash must be computed
+  over JSON (interop requirement, external-facing audit log), use a JCS
+  implementation — never `serde_json::to_string()`. `{"a":1,"b":2}` and
+  `{"b":2,"a":1}` must produce the same hash; serde does not guarantee
+  that.
+- **TOML / YAML schematics → canonicalize, then hash.** Round-trip
+  through a canonical form before SHA-256. The schematic ID is a content
+  hash; non-deterministic input means non-deterministic ID.
+
+```rust
+// Bad — key ordering is not guaranteed; hash varies run to run
+let digest = sha256(&serde_json::to_string(&record)?);
+
+// Good — archived bytes are canonical
+let archived = rkyv::to_bytes::<_, 256>(&record)?;
+let digest = sha256(&archived);
+```
+
+### Dependencies
+
+- **Workspace dependencies always.** Use `foo.workspace = true` in
+  per-crate `Cargo.toml`; never hardcode versions in a leaf crate. Version
+  drift across crates is a merge-conflict generator and an audit
+  nightmare.
+- **Use standard crates.** Don't roll custom base64 / hex / crypto / UUID
+  / time formatting. Use `base64`, `hex`, `ring` / `aws-lc-rs`, `uuid`,
+  `time` / `chrono` — whichever is already in the workspace graph.
+
+### Newtypes — STRICT by default
+
+Raw primitives (`String`, `&str`, `u64`, `i64`, `[u8; 32]`) for domain
+concepts are blocking violations. All identifiers and domain-bearing
+values MUST use newtypes from `overdrive-core`:
+
+| Concept | Newtype |
+|---|---|
+| Workload identity | `SpiffeId` |
+| Job | `JobId` |
+| Allocation | `AllocationId` |
+| Node | `NodeId` |
+| Policy | `PolicyId` |
+| Region | `Region` |
+| Investigation | `InvestigationId` |
+| Correlation | `CorrelationKey` |
+| Image schematic | `SchematicId` |
+| WASM module / chunk | `ContentHash` (SHA-256) |
+| Certificate serial | `CertSerial` |
+
+**Only exception** — an explicitly approved, issue-tracked deferral with
+scope and exit criteria. Outside a tracked deferral, do not accept
+"follow-up" language in review — the types exist, use them now.
+
+**Symptom signals.** A new `normalize_spiffe_id()`, `normalize_node_id()`,
+or similar helper is almost always a symptom of a missing newtype
+constructor. If you find yourself writing one, the fix is to move the
+normalization into the newtype's constructor, not to ship the helper.
+
+### Newtype completeness
+
+Every newtype must implement:
+
+- `FromStr` — with validation; returns `Result<Self, ParseError>`.
+- `Display` — the canonical string form.
+- `Serialize` / `Deserialize` — matching `Display` / `FromStr` exactly.
+- Constructors that **validate and return `Result`**. No infallible
+  `new()` that silently accepts garbage.
+
+**Case-insensitive parsing.** `FromStr` for identifiers that humans type
+or paste — SPIFFE IDs, region codes, schematic IDs — must be
+case-insensitive. The canonical form emitted by `Display` is lowercase.
+SHA-256-style content hashes stay case-sensitive (they are not
+human-typed).
+
+### Documentation
+
+- **Rustdoc `///` on every public item.** If the public API is not worth
+  documenting, it probably should not be public.
+- **Doctests for usage examples.** Examples in rustdoc fenced blocks run
+  as tests — code that rots in a `README` is unverifiable; code in a
+  doctest fails the build when the API drifts.
+- **No aspirational docs.** Never document behaviour that is not
+  implemented. An empty doc comment is strictly better than a lie.
+
+### Import style
+
+Import types directly. Do not use fully-qualified paths in function
+signatures or struct fields.
+
+```rust
+// Bad
+fn reconcile(id: &overdrive_core::SpiffeId) -> Result<(), Error> {
+    let seen: HashSet<overdrive_core::SpiffeId> = HashSet::new();
+    // ...
+}
+
+// Good
+use overdrive_core::SpiffeId;
+
+fn reconcile(id: &SpiffeId) -> Result<(), Error> {
+    let seen: HashSet<SpiffeId> = HashSet::new();
+    // ...
+}
+```
+
+Exception: full paths only to disambiguate two types with the same name:
+
+```rust
+use overdrive_core::JobId;
+use legacy::JobId as LegacyJobId;
+```
+
+---
+
+## Why this matters
+
+The reconcile loop runs constantly, per object, across thousands of objects.
+Its allocator behaviour is one of the largest determinants of tail latency
+and steady-state memory use. The goal is not a micro-optimization; it is a
+predictable hot path:
+
+- Arena allocation removes malloc/free overhead on the transient middle and
+  eliminates heap fragmentation across iterations.
+- Zero-copy deserialization removes the deserialization pass entirely for
+  the durable inputs.
+- Lifetime-bound references make "this data cannot escape this iteration" a
+  compile-time guarantee, which is the only way the pattern survives across
+  a team.
+
+In a GC language this pattern is approximated with object pools and
+discipline. In C++ it is arenas plus hope. Rust makes the invariants
+mechanical.
