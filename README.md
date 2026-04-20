@@ -36,8 +36,8 @@ The foundational thesis: the primitives required to build a genuinely better orc
 20. [Efficiency Comparison](#20-efficiency-comparison)
 21. [Deterministic Simulation Testing](#21-deterministic-simulation-testing)
 22. [Real-Kernel Integration Testing](#22-real-kernel-integration-testing)
-23. [Roadmap](#23-roadmap)
-24. [Image Factory](#24-image-factory)
+23. [Immutable, Minimal, Secure OS](#23-immutable-minimal-secure-os)
+24. [Roadmap](#24-roadmap)
 
 ---
 
@@ -622,7 +622,7 @@ When `persistent = true`:
 
 Three of the capabilities above — application-consistent snapshots, acknowledged VMGenID reseeds, and post-resume service restart — are intrinsically in-guest operations. The host cannot quiesce a database's in-flight transactions, cannot confirm the guest kernel has reseeded its RNG, and cannot tell a `systemd` unit to re-establish external connections after a thaw. Without cooperation from inside the VM, persistent microVM restores are *crash-consistent* — correct, but indistinguishable to the workload from a power cut. For agent sandboxes and dev environments this is acceptable; for stateful databases, queues, and anything with an open TCP session to a peer it is not.
 
-Overdrive handles this with a minimal guest agent, `overdrive-guest-agent`. The agent is a small Rust binary shipped as an opt-in Image Factory extension (§24) — not baked into every image, and not required for non-persistent microVMs. It follows the industry-proven Kata Containers pattern: ttRPC over virtio-vsock, with the boundary explicitly narrow.
+Overdrive handles this with a minimal guest agent, `overdrive-guest-agent`. The agent is a small Rust binary shipped as an opt-in Image Factory extension (§23) — not baked into every image, and not required for non-persistent microVMs. It follows the industry-proven Kata Containers pattern: ttRPC over virtio-vsock, with the boundary explicitly narrow.
 
 **Exactly four cooperation points.** The agent exposes no shell, no arbitrary command execution, and no filesystem surface. Its entire RPC interface is four methods:
 
@@ -667,7 +667,7 @@ snapshot_on_idle_seconds = 30
 expose = true
 ```
 
-The extension surface in the Image Factory schematic (§24) exposes this as `extensions.persistent-microvm-guest-agent = true`.
+The extension surface in the Image Factory schematic (§23) exposes this as `extensions.persistent-microvm-guest-agent = true`.
 
 ### Composition, Not a New Workload Type
 
@@ -796,7 +796,7 @@ Every communication path described above — Raft between control-plane peers, C
 - UDP reachability between every pair of Corrosion peers in the same gossip group (intra-region mesh plus regional peers to the thin global membership cluster, §4).
 - TCP reachability between any workload calling `connect()` and the node hosting the destination workload — kTLS runs over TCP.
 
-The underlay itself is not required to be encrypted. Every payload above IP is authenticated-encrypted under the platform CA: sockops+kTLS for east-west workload traffic, rustls for Raft and gRPC, the Corrosion peer's QUIC handshake under the same trust bundle for observation. Operators who nonetheless require encrypted backhaul — for defense in depth, regulatory mandates, or untrusted transit — enable a mesh VPN as an Image Factory extension (§24). The Overdrive binary is agnostic to which, if any, is in use.
+The underlay itself is not required to be encrypted. Every payload above IP is authenticated-encrypted under the platform CA: sockops+kTLS for east-west workload traffic, rustls for Raft and gRPC, the Corrosion peer's QUIC handshake under the same trust bundle for observation. Operators who nonetheless require encrypted backhaul — for defense in depth, regulatory mandates, or untrusted transit — enable a mesh VPN as an Image Factory extension (§23). The Overdrive binary is agnostic to which, if any, is in use.
 
 **Three deployment shapes.**
 
@@ -806,7 +806,7 @@ The underlay itself is not required to be encrypted. Every payload above IP is a
 
 **`wireguard` extension — platform-managed keys via enrollment.**
 
-WireGuard is an in-tree kernel module since Linux 5.6. The extension adds `CONFIG_WIREGUARD=y` to the kernel config fragment, installs `wg-tools`, and drops a systemd unit that brings up the tunnel at boot. Key management is integrated with the enrollment flow from §24: on first boot, the node generates a WireGuard keypair, submits the public key alongside its TPM attestation, and receives back (a) its SVID, (b) the current peer set — pubkeys and endpoints for its region — and (c) its regional aggregator assignment. The initial peer set arrives *with* the SVID before any Corrosion connection is attempted, so the first WireGuard tunnel comes up before the ObservationStore hydrates; Corrosion then runs over the established tunnel.
+WireGuard is an in-tree kernel module since Linux 5.6. The extension adds `CONFIG_WIREGUARD=y` to the kernel config fragment, installs `wg-tools`, and drops a systemd unit that brings up the tunnel at boot. Key management is integrated with the enrollment flow from §23: on first boot, the node generates a WireGuard keypair, submits the public key alongside its TPM attestation, and receives back (a) its SVID, (b) the current peer set — pubkeys and endpoints for its region — and (c) its regional aggregator assignment. The initial peer set arrives *with* the SVID before any Corrosion connection is attempted, so the first WireGuard tunnel comes up before the ObservationStore hydrates; Corrosion then runs over the established tunnel.
 
 Subsequent peer changes flow through `node_health` in the ObservationStore. Every node's WireGuard pubkey and endpoint are observation data, gossiped alongside existing node health. Adding or removing a node is a `node_health` row change; each existing node's WireGuard daemon picks up the delta through the same subscription path that already drives BPF map hydration (see *BPF Map Architecture* above). No external key-distribution service, no operator-managed `wg0.conf`.
 
@@ -1917,7 +1917,7 @@ Overdrive factors control-plane logic into two orthogonal primitives, both desce
 
 Both are strongly typed Rust trait objects for first-party extensions, WASM modules for third-party. Both have access to private libSQL memory for stateful reasoning. Both honour the §4 Intent/Observation/Memory boundary. Neither runs with the cluster-admin privileges that Kubernetes operators do.
 
-This supersedes the "operator" pattern where Go binaries with arbitrary I/O and cluster-admin privileges drive reconciliation. Each primitive has its own contract; each contract is testable in the §21 simulation harness; each is a verification target. The platform's own durable sequences — certificate rotation, multi-stage deployment, cross-region migration, staged rollout — are themselves workflows, built on the same trait and the same runtime that will be exposed to application code through the WASM Workflow SDK (§23). No "platform workflow" / "user workflow" divergence.
+This supersedes the "operator" pattern where Go binaries with arbitrary I/O and cluster-admin privileges drive reconciliation. Each primitive has its own contract; each contract is testable in the §21 simulation harness; each is a verification target. The platform's own durable sequences — certificate rotation, multi-stage deployment, cross-region migration, staged rollout — are themselves workflows, built on the same trait and the same runtime that will be exposed to application code through the WASM Workflow SDK (§24). No "platform workflow" / "user workflow" divergence.
 
 ### The Reconciler Primitive
 
@@ -1986,7 +1986,7 @@ Workflows have finite lifecycle. They terminate with a `WorkflowResult` — succ
 
 Workflow journals live in per-primitive libSQL (§4, §17). Each `await` point writes a checkpoint before suspending; resume reads the journal, replays already-completed awaits from their recorded results, and picks up at the first unrecorded await. Cross-workflow coordination uses typed signals — a first-class primitive in the ObservationStore — not ad-hoc IntentStore writes.
 
-**First-class for platform and application code alike.** Certificate lifecycle, multi-stage deployment, cross-region migration, and human-in-the-loop staged rollout are all workflows. They use the same trait, the same runtime, the same journal format, and (once the SDK ships, §23) the same WASM ABI that application code does. The platform's durable sequences are the first workloads on the primitive; the WASM Workflow SDK is how external developers get the same surface. Overdrive does not ship two parallel workflow systems.
+**First-class for platform and application code alike.** Certificate lifecycle, multi-stage deployment, cross-region migration, and human-in-the-loop staged rollout are all workflows. They use the same trait, the same runtime, the same journal format, and (once the SDK ships, §24) the same WASM ABI that application code does. The platform's durable sequences are the first workloads on the primitive; the WASM Workflow SDK is how external developers get the same surface. Overdrive does not ship two parallel workflow systems.
 
 ### Primitive Composition
 
@@ -2504,7 +2504,162 @@ Neither Kubernetes nor Nomad ships the Tier 1 + Tier 3 composition, because neit
 
 ---
 
-## 23. Roadmap
+## 23. Immutable, Minimal, Secure OS
+
+Overdrive nodes run an immutable, purpose-built OS — no shell, no package manager, no SSH. This is not a constraint to work around; it is a deliberate security choice. Every component on the node is explicitly declared, compiled with hardening flags, and verified at boot.
+
+### The Problem
+
+Provisioning a Kubernetes node means installing a general-purpose Linux distribution and then running configuration management over it. The attack surface is whatever the distro ships. Security is whatever the configuration management enforced, subject to drift.
+
+Overdrive takes the opposite approach: the OS is minimal by construction, not by configuration. Operators get a bit-for-bit reproducible artifact they can verify and trust, rather than a distribution hardened after the fact.
+
+### Why Yocto
+
+Overdrive has non-trivial kernel requirements that cannot be satisfied by OCI layer assembly or a stock distribution:
+
+- `CONFIG_BPF_LSM=y` — required for BPF LSM MAC (kernel 5.7+)
+- `CONFIG_TLS=y` — required for kTLS and sockops mTLS
+- `CONFIG_KVM=y` / `CONFIG_VHOST_VSOCK=y` — required for Cloud Hypervisor
+- `CONFIG_BPF_SYSCALL=y` — required for aya-rs eBPF programs
+
+Yocto's `defconfig` + `security.cfg` fragment model gives precise, auditable control over every kernel option. Every installed package is an explicit BitBake recipe. `inherit create-spdx` produces a machine-readable SPDX SBOM for every build. This aligns directly with the "own your primitives" principle — there is no hidden package manager, no transitive dependency that snuck in through an Alpine apk.
+
+### `meta-overdrive` Layer
+
+The Yocto layer is a direct evolution of the `meta-opencapsule` pattern, with three additions:
+
+1. **Overdrive binary** via `inherit cargo_bin` + `meta-rust-bin` (prebuilt toolchain, single Cargo workspace)
+2. **Workload driver binaries** — Cloud Hypervisor (`cloud-hypervisor`), Wasmtime runtime (`wasmtime`), optional Unikraft tools
+3. **Kernel config fragments** — BPF LSM, kTLS, KVM, vhost-vsock additions to the base security config
+
+```
+meta-overdrive/
+  conf/machine/
+    overdrive-node-x86_64.conf      # bzImage, EFI_PROVIDER=grub-efi, wic+ext4
+    overdrive-node-aarch64.conf
+  recipes-core/images/
+    overdrive-node-image.bb         # inherits core-image, overdrive-hardening, create-spdx
+  recipes-overdrive/overdrive/
+    overdrive_git.bb                # inherit cargo_bin; single binary, all roles
+  recipes-drivers/
+    cloud-hypervisor/            # microVM driver
+    wasmtime/                    # WASM driver
+    unikraft/                    # optional unikernel driver
+  recipes-kernel/linux/
+    linux-yocto_%.bbappend       # kernel 6.x, defconfig + security.cfg
+  classes/
+    overdrive-hardening.bbclass     # RELRO/NOW, stack protector, -D_FORTIFY_SOURCE=2
+  wic/
+    overdrive-node.wks              # GPT: EFI + rootfs (+ verity hash partition, Phase 2)
+```
+
+The image has no shells, no package manager, no SSH server, no getty. Post-processing strips debug tooling. The only user-facing entry point is the Overdrive binary managed by systemd.
+
+### Image Factory
+
+Building the OS is one half; serving it on demand is the other. The **Image Factory** is the system that makes this tractable — it manages how node OS images are built, customized, versioned, and distributed.
+
+The Image Factory is two things:
+
+1. **`meta-overdrive`** — the Yocto layer described above. The output is a ~50 MB image: systemd, the Overdrive binary, Cloud Hypervisor, Wasmtime, and nothing else.
+
+2. **`overdrive-image-factory`** — a Rust service that wraps the Yocto build system behind an HTTP API, manages content-addressable image IDs, and caches artifacts in an OCI-compatible store.
+
+The factory service is thin. The heavy lifting — OS assembly, kernel compilation, SBOM generation — happens in Yocto. The service coordinates, caches, and serves.
+
+Build times are 60–90 minutes cold, ~5 minutes with a warm S3 sstate cache. For a factory service, this is acceptable: all official `(schematic_id, overdrive_version, arch)` tuples are pre-built at release time and served from cache. Operators waiting for a custom build are the exception.
+
+#### Schematics
+
+A **schematic** is a TOML document whose SHA-256 hash is the image ID. Identical schematics always produce the same ID. The empty schematic — a base Overdrive node with all defaults — has a fixed well-known ID.
+
+```toml
+[node]
+role = "worker"   # "control-plane" | "worker" | "control-plane+worker"
+
+[drivers]
+process   = true
+microvm   = true    # Cloud Hypervisor
+unikernel = false   # Unikraft (optional, increases image size)
+wasm      = true    # Wasmtime
+
+[kernel]
+extra_args = ["intel_iommu=on", "iommu=pt"]
+
+[extensions]
+official = ["nvidia-gpu"]   # resolved to versioned recipes by factory
+# Mesh VPN underlay extensions (§7 Node Underlay) — mutually exclusive.
+# Only one of `wireguard` or `tailscale` may appear in a schematic.
+#   wireguard — in-kernel mesh, platform-managed keys via enrollment
+#   tailscale — NAT-traversing mesh, bring-your-own Tailscale / Headscale
+# Guest-image extension (§6 Guest Agent for Persistent MicroVMs).
+# Applied to rootfs images used by persistent microVMs, not to node OS images.
+#   persistent-microvm-guest-agent — ttRPC/virtio-vsock agent for app-consistent snapshots
+
+[security]
+bpf_lsm = true   # locked true in production; configurable for dev only
+ktls    = true
+```
+
+The `role` field in the schematic maps directly to the `[node] role` declaration in the Overdrive binary — the same binary handles all roles, and the schematic makes that explicit at image build time.
+
+#### Profiles
+
+A **profile** combines a schematic with a Overdrive version, architecture, and output type:
+
+```
+Profile = (schematic_id, overdrive_version, arch, output_type)
+
+output_type:
+  raw.wic.gz    bare metal disk image (GPT: EFI + rootfs + verity)
+  rootfs.ext4   VM rootfs for Cloud Hypervisor or PXE
+  vmlinuz       bare kernel
+  initramfs.xz  bare initramfs
+  oci           OCI image for in-place upgrades via registry pull
+```
+
+Every profile tuple maps to exactly one artifact. The factory stores artifacts content-addressed in an OCI-compatible registry:
+
+```
+registry.overdrive.io/images/overdrive-node/{schematic_id}/{overdrive_version}/{arch}/
+  raw.wic.gz
+  rootfs.ext4
+  vmlinuz
+  initramfs.xz
+  sbom.spdx.json
+```
+
+#### API
+
+```
+POST   /v1/schematics                              → { id: SchematicId }
+GET    /v1/schematics/{id}                         → schematic TOML
+
+GET    /v1/versions                                → [ "0.1.0", ... ]
+
+GET    /v1/image/{id}/{version}/{arch}/raw.wic.gz  → streamed or 202 + poll
+GET    /v1/image/{id}/{version}/{arch}/rootfs.ext4
+GET    /v1/image/{id}/{version}/{arch}/vmlinuz
+GET    /v1/image/{id}/{version}/{arch}/initramfs.xz
+GET    /v1/image/{id}/{version}/{arch}/sbom.spdx.json
+
+GET    /v1/builds/{build_id}                       → { status, progress }
+
+# OCI Distribution Spec v2 — standard registry interface for upgrades
+GET    /v2/{name}/manifests/{reference}
+GET    /v2/{name}/blobs/{digest}
+```
+
+Requests for cached artifacts are served immediately. Cache misses trigger an async Yocto build — the response is `202 Accepted` with a build ID to poll.
+
+### Node Upgrade Path
+
+Upgrades are handled by the OCI registry frontend. A node running Overdrive can pull a new image as an OCI artifact, verify its digest against the schematic ID, write it to the inactive partition, and reboot into the new image — the same pattern as Talos upgrades, without requiring an external upgrade tool. This is Phase 2; Phase 1 upgrades are re-provisioning from a new image.
+
+---
+
+## 24. Roadmap
 
 ### Phase 1 — Foundation (Months 1–3)
 - Core data model (Job, Node, Allocation, Policy)
@@ -2581,159 +2736,6 @@ Neither Kubernetes nor Nomad ships the Tier 1 + Tier 3 composition, because neit
 - **Region-aware scheduler + gateway (reads `node_health.region` from local SQLite)**
 - Cross-region partition tolerance: each region continues to operate on locally-committed intent under partition; observation converges via LWW on heal
 - Image Factory: OCI registry frontend, PXE boot, dm-verity + TPM attestation, Secure Boot signing
-
----
-
-## 24. Image Factory
-
-Overdrive nodes run an immutable, purpose-built OS — no shell, no package manager, no SSH. This is not a constraint to work around; it is a deliberate security choice. Every component on the node is explicitly declared, compiled with hardening flags, and verified at boot. The Image Factory is the system that makes this tractable: it manages how node OS images are built, customized, versioned, and distributed.
-
-### The Problem
-
-Provisioning a Kubernetes node means installing a general-purpose Linux distribution and then running configuration management over it. The attack surface is whatever the distro ships. Security is whatever the configuration management enforced, subject to drift.
-
-Overdrive takes the opposite approach: the OS is minimal by construction, not by configuration. The Image Factory is how operators get from "I need a node image" to a bit-for-bit reproducible artifact they can verify and trust.
-
-### Design
-
-The Image Factory is two things:
-
-1. **`meta-overdrive`** — a Yocto layer that produces the node OS. It defines every package, every kernel config flag, every compiler flag. The output is a ~50 MB image: systemd, the Overdrive binary, Cloud Hypervisor, Wasmtime, and nothing else.
-
-2. **`overdrive-image-factory`** — a Rust service that wraps the Yocto build system behind an HTTP API, manages content-addressable image IDs, and caches artifacts in an OCI-compatible store.
-
-The factory service is thin. The heavy lifting — OS assembly, kernel compilation, SBOM generation — happens in Yocto. The service coordinates, caches, and serves.
-
-### Why Yocto
-
-Overdrive has non-trivial kernel requirements that cannot be satisfied by OCI layer assembly or a stock distribution:
-
-- `CONFIG_BPF_LSM=y` — required for BPF LSM MAC (kernel 5.7+)
-- `CONFIG_TLS=y` — required for kTLS and sockops mTLS
-- `CONFIG_KVM=y` / `CONFIG_VHOST_VSOCK=y` — required for Cloud Hypervisor
-- `CONFIG_BPF_SYSCALL=y` — required for aya-rs eBPF programs
-
-Yocto's `defconfig` + `security.cfg` fragment model gives precise, auditable control over every kernel option. Every installed package is an explicit BitBake recipe. `inherit create-spdx` produces a machine-readable SPDX SBOM for every build. This aligns directly with the "own your primitives" principle — there is no hidden package manager, no transitive dependency that snuck in through an Alpine apk.
-
-Build times are 60–90 minutes cold, ~5 minutes with a warm S3 sstate cache. For a factory service, this is acceptable: all official `(schematic_id, overdrive_version, arch)` tuples are pre-built at release time and served from cache. Operators waiting for a custom build are the exception.
-
-### Schematics
-
-A **schematic** is a TOML document whose SHA-256 hash is the image ID. Identical schematics always produce the same ID. The empty schematic — a base Overdrive node with all defaults — has a fixed well-known ID.
-
-```toml
-[node]
-role = "worker"   # "control-plane" | "worker" | "control-plane+worker"
-
-[drivers]
-process   = true
-microvm   = true    # Cloud Hypervisor
-unikernel = false   # Unikraft (optional, increases image size)
-wasm      = true    # Wasmtime
-
-[kernel]
-extra_args = ["intel_iommu=on", "iommu=pt"]
-
-[extensions]
-official = ["nvidia-gpu"]   # resolved to versioned recipes by factory
-# Mesh VPN underlay extensions (§7 Node Underlay) — mutually exclusive.
-# Only one of `wireguard` or `tailscale` may appear in a schematic.
-#   wireguard — in-kernel mesh, platform-managed keys via enrollment
-#   tailscale — NAT-traversing mesh, bring-your-own Tailscale / Headscale
-# Guest-image extension (§6 Guest Agent for Persistent MicroVMs).
-# Applied to rootfs images used by persistent microVMs, not to node OS images.
-#   persistent-microvm-guest-agent — ttRPC/virtio-vsock agent for app-consistent snapshots
-
-[security]
-bpf_lsm = true   # locked true in production; configurable for dev only
-ktls    = true
-```
-
-The `role` field in the schematic maps directly to the `[node] role` declaration in the Overdrive binary — the same binary handles all roles, and the schematic makes that explicit at image build time.
-
-### Profiles
-
-A **profile** combines a schematic with a Overdrive version, architecture, and output type:
-
-```
-Profile = (schematic_id, overdrive_version, arch, output_type)
-
-output_type:
-  raw.wic.gz    bare metal disk image (GPT: EFI + rootfs + verity)
-  rootfs.ext4   VM rootfs for Cloud Hypervisor or PXE
-  vmlinuz       bare kernel
-  initramfs.xz  bare initramfs
-  oci           OCI image for in-place upgrades via registry pull
-```
-
-Every profile tuple maps to exactly one artifact. The factory stores artifacts content-addressed in an OCI-compatible registry:
-
-```
-registry.overdrive.io/images/overdrive-node/{schematic_id}/{overdrive_version}/{arch}/
-  raw.wic.gz
-  rootfs.ext4
-  vmlinuz
-  initramfs.xz
-  sbom.spdx.json
-```
-
-### API
-
-```
-POST   /v1/schematics                              → { id: SchematicId }
-GET    /v1/schematics/{id}                         → schematic TOML
-
-GET    /v1/versions                                → [ "0.1.0", ... ]
-
-GET    /v1/image/{id}/{version}/{arch}/raw.wic.gz  → streamed or 202 + poll
-GET    /v1/image/{id}/{version}/{arch}/rootfs.ext4
-GET    /v1/image/{id}/{version}/{arch}/vmlinuz
-GET    /v1/image/{id}/{version}/{arch}/initramfs.xz
-GET    /v1/image/{id}/{version}/{arch}/sbom.spdx.json
-
-GET    /v1/builds/{build_id}                       → { status, progress }
-
-# OCI Distribution Spec v2 — standard registry interface for upgrades
-GET    /v2/{name}/manifests/{reference}
-GET    /v2/{name}/blobs/{digest}
-```
-
-Requests for cached artifacts are served immediately. Cache misses trigger an async Yocto build — the response is `202 Accepted` with a build ID to poll.
-
-### `meta-overdrive` Layer
-
-The Yocto layer is a direct evolution of the `meta-opencapsule` pattern, with three additions:
-
-1. **Overdrive binary** via `inherit cargo_bin` + `meta-rust-bin` (prebuilt toolchain, single Cargo workspace)
-2. **Workload driver binaries** — Cloud Hypervisor (`cloud-hypervisor`), Wasmtime runtime (`wasmtime`), optional Unikraft tools
-3. **Kernel config fragments** — BPF LSM, kTLS, KVM, vhost-vsock additions to the base security config
-
-```
-meta-overdrive/
-  conf/machine/
-    overdrive-node-x86_64.conf      # bzImage, EFI_PROVIDER=grub-efi, wic+ext4
-    overdrive-node-aarch64.conf
-  recipes-core/images/
-    overdrive-node-image.bb         # inherits core-image, overdrive-hardening, create-spdx
-  recipes-overdrive/overdrive/
-    overdrive_git.bb                # inherit cargo_bin; single binary, all roles
-  recipes-drivers/
-    cloud-hypervisor/            # microVM driver
-    wasmtime/                    # WASM driver
-    unikraft/                    # optional unikernel driver
-  recipes-kernel/linux/
-    linux-yocto_%.bbappend       # kernel 6.x, defconfig + security.cfg
-  classes/
-    overdrive-hardening.bbclass     # RELRO/NOW, stack protector, -D_FORTIFY_SOURCE=2
-  wic/
-    overdrive-node.wks              # GPT: EFI + rootfs (+ verity hash partition, Phase 2)
-```
-
-The image has no shells, no package manager, no SSH server, no getty. Post-processing strips debug tooling. The only user-facing entry point is the Overdrive binary managed by systemd.
-
-### Node Upgrade Path
-
-Upgrades are handled by the OCI registry frontend. A node running Overdrive can pull a new image as an OCI artifact, verify its digest against the schematic ID, write it to the inactive partition, and reboot into the new image — the same pattern as Talos upgrades, without requiring an external upgrade tool. This is Phase 2; Phase 1 upgrades are re-provisioning from a new image.
 
 ---
 
