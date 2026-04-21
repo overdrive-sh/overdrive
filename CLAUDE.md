@@ -1,5 +1,9 @@
 Read the entire @docs/whitepaper.md file
 
+## Development Paradigm
+
+This project follows the **object-oriented** paradigm. Use @nw-software-crafter for implementation.
+
 ## Rust library conventions
 
 Every library crate that defines its own error type also exposes a matching
