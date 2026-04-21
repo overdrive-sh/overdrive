@@ -1,0 +1,30 @@
+# SCAFFOLD: true — DISTILL placeholder per DWD-06. Crafter completes in place.
+#
+# `overdrive-sim` hosts the Sim* adapters, the turmoil harness, and the
+# invariant catalogue per ADR-0004 (single crate, not split). This file is
+# the minimum needed for `tests/acceptance/*.rs` to resolve the crate;
+# `[dependencies]` will grow during DELIVER to include `turmoil`, `rand`,
+# `async-trait`, and the `overdrive-core` / `overdrive-store-local`
+# workspace crates.
+
+[package]
+name        = "overdrive-sim"
+version     = "0.0.0"
+edition.workspace     = true
+rust-version.workspace = true
+license.workspace     = true
+authors.workspace     = true
+repository.workspace  = true
+publish               = false
+
+[package.metadata.overdrive]
+crate_class = "adapter-sim"
+
+[dependencies]
+overdrive-core.workspace = true
+
+[dev-dependencies]
+# Crafter adds turmoil, proptest, and overdrive-store-local here during DELIVER.
+
+[lints]
+workspace = true
