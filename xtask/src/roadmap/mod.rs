@@ -15,6 +15,7 @@
 )]
 
 pub mod gh;
+pub mod init;
 pub mod parse;
 pub mod state;
 pub mod sync;
