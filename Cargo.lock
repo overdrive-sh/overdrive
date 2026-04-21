@@ -1728,10 +1728,8 @@ dependencies = [
  "color-eyre",
  "dotenvy",
  "eyre",
- "regex",
  "serde",
  "serde_json",
- "time",
 ]
 
 [[package]]

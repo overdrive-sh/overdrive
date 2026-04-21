@@ -6,8 +6,6 @@
 
 #![allow(clippy::expect_used, clippy::print_stderr, clippy::unnecessary_wraps)]
 
-mod roadmap;
-
 use std::process::{Command, ExitCode};
 
 use clap::{Parser, Subcommand};
@@ -70,53 +68,6 @@ enum Task {
     Mcp {
         #[command(subcommand)]
         action: McpAction,
-    },
-
-    /// Bulk-manage GitHub issues from `.context/roadmap-issues.md`.
-    ///
-    /// Parses the roadmap markdown table, ensures required labels exist,
-    /// creates issues in two passes (body refs resolved in Pass 2), attaches
-    /// them to a pre-existing Project v2, and writes resume state to
-    /// `.context/roadmap-sync-state.json`. One-off utility — not a gated
-    /// production entry point.
-    Roadmap {
-        #[command(subcommand)]
-        action: RoadmapAction,
-    },
-}
-
-#[derive(Debug, Subcommand)]
-enum RoadmapAction {
-    /// Create or resume bulk issue creation.
-    Sync {
-        /// `owner/name` of the target repo.
-        #[arg(long, default_value = "overdrive-sh/overdrive")]
-        repo: String,
-        /// Project v2 number under the repo owner. Create the project
-        /// manually first (see `--help` on error for instructions).
-        #[arg(long)]
-        project_number: u64,
-        /// Actually call `gh`. Without this, the script plans and prints.
-        #[arg(long)]
-        commit: bool,
-        /// Explicit dry-run flag. Accepted for convenience; dry-run is the
-        /// default whenever `--commit` is absent.
-        #[arg(long)]
-        dry_run: bool,
-        /// Limit to the first N rows (after `--phase` filter). Useful for
-        /// smoke-testing a live run.
-        #[arg(long)]
-        limit: Option<usize>,
-        /// Only process rows in this phase (1–7).
-        #[arg(long)]
-        phase: Option<u8>,
-        /// Skip rows already present in the state file.
-        #[arg(long)]
-        resume: bool,
-        /// Path to the roadmap markdown. Defaults to
-        /// `.context/roadmap-issues.md` under the workspace root.
-        #[arg(long)]
-        roadmap_file: Option<std::path::PathBuf>,
     },
 }
 
@@ -200,42 +151,6 @@ fn run() -> Result<()> {
         Task::Lima { action } => lima(action),
         Task::Hooks { action } => hooks(action),
         Task::Mcp { action } => mcp(action),
-        Task::Roadmap { action } => roadmap_cmd(action),
-    }
-}
-
-fn roadmap_cmd(action: RoadmapAction) -> Result<()> {
-    match action {
-        RoadmapAction::Sync {
-            repo,
-            project_number,
-            commit,
-            dry_run,
-            limit,
-            phase,
-            resume,
-            roadmap_file,
-        } => {
-            // `--dry-run` and `--commit` are complementary. Conflict is a
-            // user error: refuse to guess.
-            if commit && dry_run {
-                bail!("--commit and --dry-run are mutually exclusive");
-            }
-            let workspace_root = std::env::current_dir()?;
-            let roadmap_file =
-                roadmap_file.unwrap_or_else(|| workspace_root.join(".context/roadmap-issues.md"));
-            let opts = roadmap::sync::SyncOpts {
-                repo,
-                project_number,
-                commit,
-                limit,
-                phase,
-                resume,
-                roadmap_file,
-                workspace_root,
-            };
-            roadmap::sync::sync(&opts)
-        }
     }
 }
 
@@ -251,7 +166,7 @@ const MCP_JSON: &str = ".mcp.json";
 /// Template for `.mcp.json`. Tokens are injected from the environment at
 /// setup time because Claude Code does not expand env vars at load time.
 /// Toolsets enabled on the remote GitHub MCP server. `default` preserves
-/// the server's built-in set (context, repos, issues, `pull_requests`,
+/// the server's built-in set (context, repos, issues, pull_requests,
 /// users); the rest extend it.
 const GITHUB_MCP_TOOLSETS: &str = "default,projects,discussions,labels";
 
