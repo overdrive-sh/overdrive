@@ -9,9 +9,7 @@ use super::{gh, parse, state};
 #[derive(Debug, Clone)]
 pub struct SyncOpts {
     pub repo: String,
-    /// Project v2 number. Optional at the CLI; if omitted, `sync` reads
-    /// `project.number` from the state file (populated by `roadmap init`).
-    pub project_number: Option<u64>,
+    pub project_number: u64,
     /// If true, make actual `gh` calls. When false (the safe default), we
     /// only print the plan.
     pub commit: bool,
@@ -30,27 +28,51 @@ fn repo_owner(repo: &str) -> Result<&str> {
         .ok_or_else(|| eyre!("--repo must look like owner/name, got {repo:?}"))
 }
 
+/// The 12 area labels + 6 type labels we need to exist in the repo.
+fn required_labels() -> Vec<Label> {
+    const AREAS: &[&str] = &[
+        "control-plane",
+        "dataplane",
+        "storage",
+        "security",
+        "observability",
+        "gateway",
+        "drivers",
+        "os",
+        "sdk",
+        "cli",
+        "testing",
+        "ci",
+    ];
+    const TYPES: &[&str] =
+        &["primitive", "integration", "migration", "sdk", "hardening", "research"];
+    let mut out: Vec<Label> = AREAS
+        .iter()
+        .map(|a| Label {
+            name: format!("area/{a}"),
+            color: "1d76db".into(),
+            description: format!("Area: {a}"),
+        })
+        .collect();
+    out.extend(TYPES.iter().map(|t| Label {
+        name: format!("type/{t}"),
+        color: "5319e7".into(),
+        description: format!("Type: {t}"),
+    }));
+    out
+}
+
+#[derive(Debug, Clone)]
+struct Label {
+    name: String,
+    color: String,
+    description: String,
+}
+
 pub fn sync(opts: &SyncOpts) -> Result<()> {
-    // Load state upfront so `init`-recorded project metadata is available
-    // to fill in an omitted `--project-number`. `--resume` still flips
-    // whether we *use* the recorded issue map; project metadata is used
-    // unconditionally.
-    let loaded_state = state::SyncState::load(&opts.workspace_root)?;
-
-    let Some(project_number) =
-        opts.project_number.or_else(|| loaded_state.project.as_ref().map(|p| p.number))
-    else {
-        bail!(
-            "no project number supplied and state file has no project metadata. \
-             Run `cargo xtask roadmap init --owner <owner> [--repo <owner/name>] --commit` first, \
-             or pass `--project-number <N>` explicitly."
-        );
-    };
-
     eprintln!(
-        "xtask roadmap sync: repo={}, project=#{project_number}, dry_run={}, phase={:?}, \
-         limit={:?}, resume={}",
-        opts.repo, !opts.commit, opts.phase, opts.limit, opts.resume
+        "xtask roadmap sync: repo={}, project={}, dry_run={}, phase={:?}, limit={:?}, resume={}",
+        opts.repo, opts.project_number, !opts.commit, opts.phase, opts.limit, opts.resume
     );
 
     // 1. Parse roadmap.
@@ -75,22 +97,12 @@ pub fn sync(opts: &SyncOpts) -> Result<()> {
 
     let owner = repo_owner(&opts.repo)?;
 
-    // 3. Label verification — `sync` no longer creates labels; that's
-    //    `init`'s job. Fail fast with a clear message if labels are
-    //    missing so operators don't end up with a half-labelled backlog.
-    if opts.commit {
-        gh::verify_labels(&opts.repo)?;
-    } else {
-        eprintln!(
-            "xtask roadmap sync: [dry-run] skipping label verification \
-             (would check 18 area/* + type/* labels on {})",
-            opts.repo
-        );
-    }
+    // 3. Label bootstrap.
+    ensure_labels(opts, &required_labels())?;
 
     // 4. Project validation — look up field IDs for "Phase" and "Depends on".
     let (project_id, phase_field, depends_field) = if opts.commit {
-        let fields = gh::project_field_list(owner, project_number)?;
+        let fields = gh::project_field_list(owner, opts.project_number)?;
         let phase_field = fields
             .fields
             .nodes
@@ -98,8 +110,9 @@ pub fn sync(opts: &SyncOpts) -> Result<()> {
             .find(|f| f.name().eq_ignore_ascii_case("Phase"))
             .ok_or_else(|| {
                 eyre!(
-                    "Project v2 #{project_number} under {owner} has no 'Phase' field. \
-                     Run `cargo xtask roadmap init` to create it."
+                    "Project v2 #{} under {owner} has no 'Phase' field. Create it as a \
+                     single-select with options phase-1 … phase-7.",
+                    opts.project_number
                 )
             })?
             .clone_single_select()?;
@@ -110,17 +123,19 @@ pub fn sync(opts: &SyncOpts) -> Result<()> {
             .find(|f| f.name().eq_ignore_ascii_case("Depends on"))
             .ok_or_else(|| {
                 eyre!(
-                    "Project v2 #{project_number} under {owner} has no 'Depends on' field. \
-                     Run `cargo xtask roadmap init` to create it."
+                    "Project v2 #{} under {owner} has no 'Depends on' field. Create it as a \
+                     text field.",
+                    opts.project_number
                 )
             })?
             .clone_text()?;
-        let project_id = gh::project_node_id(owner, project_number)?;
+        let project_id = gh::project_node_id(owner, opts.project_number)?;
         (Some(project_id), Some(phase_field), Some(depends_field))
     } else {
         eprintln!(
             "xtask roadmap sync: [dry-run] skipping Project v2 validation \
-             (would verify #{project_number} under {owner})"
+             (would verify #{} under {owner})",
+            opts.project_number
         );
         (None, None, None)
     };
@@ -136,16 +151,11 @@ pub fn sync(opts: &SyncOpts) -> Result<()> {
     // 6. Build known-ID set once (for dependency resolution).
     let all_ids: Vec<String> = rows.iter().map(|r| r.id.clone()).collect();
 
-    // 7. Seed sync state (for --resume). `--resume` only governs whether
-    //    we reuse the existing issue map; project metadata is preserved
-    //    on every write so a non-resuming run doesn't wipe it.
+    // 7. Load state (for --resume).
     let mut state = if opts.resume {
-        loaded_state
+        state::SyncState::load(&opts.workspace_root)?
     } else {
-        state::SyncState {
-            project: loaded_state.project,
-            created: std::collections::BTreeMap::new(),
-        }
+        state::SyncState::default()
     };
 
     // --- Pass 1: create issues -----------------------------------------
@@ -196,9 +206,7 @@ pub fn sync(opts: &SyncOpts) -> Result<()> {
                 // Attach to Project + set Phase field inline so we don't have to
                 // walk the list twice.
                 if let (Some(pid), Some(pf)) = (&project_id, &phase_field) {
-                    if let Err(e) =
-                        attach_to_project(owner, project_number, pid, pf, &url, row.phase)
-                    {
+                    if let Err(e) = attach_to_project(owner, opts, pid, pf, &url, row.phase) {
                         eprintln!("[{}] → #{number} (project attach failed: {e})", row.id);
                     }
                 }
@@ -257,7 +265,7 @@ pub fn sync(opts: &SyncOpts) -> Result<()> {
                         // idempotent and returns the existing item ID.
                         if let Ok(item_id) = gh::project_item_add(
                             owner,
-                            project_number,
+                            opts.project_number,
                             &state.issue_for(&row.id).unwrap().url,
                         ) {
                             let _ =
@@ -294,15 +302,35 @@ pub fn sync(opts: &SyncOpts) -> Result<()> {
     Ok(())
 }
 
+fn ensure_labels(opts: &SyncOpts, labels: &[Label]) -> Result<()> {
+    for label in labels {
+        if !opts.commit {
+            // Cheap path in dry-run: we don't want to error out if the repo
+            // is inaccessible; just describe what we'd do.
+            eprintln!("[label] {} (dry-run — would create if missing)", label.name);
+            continue;
+        }
+        match gh::label_exists(&opts.repo, &label.name) {
+            Ok(true) => eprintln!("[label] {} (exists)", label.name),
+            Ok(false) => {
+                gh::create_label(&opts.repo, &label.name, &label.color, &label.description)?;
+                eprintln!("[label] {} (created)", label.name);
+            }
+            Err(e) => bail!("label check failed for {}: {e}", label.name),
+        }
+    }
+    Ok(())
+}
+
 fn attach_to_project(
     owner: &str,
-    project_number: u64,
+    opts: &SyncOpts,
     project_id: &str,
     phase_field: &SingleSelectField,
     issue_url: &str,
     phase: u8,
 ) -> Result<()> {
-    let item_id = gh::project_item_add(owner, project_number, issue_url)?;
+    let item_id = gh::project_item_add(owner, opts.project_number, issue_url)?;
     let option_name = format!("phase-{phase}");
     let Some(opt) = phase_field.options.iter().find(|o| o.name == option_name) else {
         bail!(
@@ -312,7 +340,7 @@ fn attach_to_project(
     };
     gh::project_field_set_single_select(
         owner,
-        project_number,
+        opts.project_number,
         project_id,
         &item_id,
         &phase_field.id,

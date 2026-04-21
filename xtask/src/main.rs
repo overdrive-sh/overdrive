@@ -87,45 +87,15 @@ enum Task {
 
 #[derive(Debug, Subcommand)]
 enum RoadmapAction {
-    /// One-shot scaffold: create/reuse the Project v2, ensure `Phase` +
-    /// `Depends on` fields exist, optionally link a repo, and create the
-    /// 18 `area/*` + `type/*` labels. Idempotent; safe to re-run.
-    Init {
-        /// GitHub owner (user or org) under which the project lives.
-        #[arg(long)]
-        owner: String,
-        /// Project title. Matched case-insensitively against existing
-        /// projects before creating a new one.
-        #[arg(long, default_value = "Overdrive Roadmap")]
-        title: String,
-        /// Optional `owner/name` (or bare `name` under the same owner).
-        /// If set, links the project to the repo and ensures labels on
-        /// it.
-        #[arg(long)]
-        repo: Option<String>,
-        /// Actually call `gh`. Without this, the script plans and prints.
-        #[arg(long)]
-        commit: bool,
-        /// Explicit dry-run flag. Accepted for convenience; dry-run is the
-        /// default whenever `--commit` is absent.
-        #[arg(long)]
-        dry_run: bool,
-        /// Re-provision even if state already records a project. Off by
-        /// default so accidental re-runs don't duplicate resources.
-        #[arg(long)]
-        force: bool,
-    },
-
     /// Create or resume bulk issue creation.
     Sync {
         /// `owner/name` of the target repo.
         #[arg(long, default_value = "overdrive-sh/overdrive")]
         repo: String,
-        /// Project v2 number under the repo owner. Optional: if omitted,
-        /// read from `.context/roadmap-sync-state.json` (populated by
-        /// `roadmap init`).
+        /// Project v2 number under the repo owner. Create the project
+        /// manually first (see `--help` on error for instructions).
         #[arg(long)]
-        project_number: Option<u64>,
+        project_number: u64,
         /// Actually call `gh`. Without this, the script plans and prints.
         #[arg(long)]
         commit: bool,
@@ -236,15 +206,6 @@ fn run() -> Result<()> {
 
 fn roadmap_cmd(action: RoadmapAction) -> Result<()> {
     match action {
-        RoadmapAction::Init { owner, title, repo, commit, dry_run, force } => {
-            if commit && dry_run {
-                bail!("--commit and --dry-run are mutually exclusive");
-            }
-            let workspace_root = std::env::current_dir()?;
-            let opts =
-                roadmap::init::InitOpts { owner, title, repo, commit, force, workspace_root };
-            roadmap::init::init(&opts)
-        }
         RoadmapAction::Sync {
             repo,
             project_number,
