@@ -80,6 +80,7 @@ time            = { version = "0.3", features = ["serde", "macros"] }
 base64          = "0.22"
 hex             = "0.4"
 url             = { version = "2", features = ["serde"] }
+regex           = "1"
 
 # --- Testing --------------------------------------------------------------
 proptest        = "1"
