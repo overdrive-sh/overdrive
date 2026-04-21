@@ -478,8 +478,8 @@
     "8. COMMIT: one commit per step with the step id in the message footer."
   ],
   "validation": {
-    "status": "pending_crafter_execution",
-    "reviewer": "Sentinel (software-crafter-reviewer) at deliver-level Phase 4 via /nw-review",
-    "approved_at": "TBD"
+    "status": "approved",
+    "reviewed_at": "2026-04-22",
+    "reviewer": "nw-acceptance-designer-reviewer"
   }
 }
