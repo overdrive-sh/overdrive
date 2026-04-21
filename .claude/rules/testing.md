@@ -123,6 +123,53 @@ Four store modes. Use the narrowest that exercises the behaviour:
 
 ---
 
+## Property-based testing (proptest)
+
+Complements Tier 1. DST catches bugs from concurrency, timing, ordering,
+and partition; proptest catches bugs from inputs the author didn't think
+of. Neither substitutes for the other.
+
+### Mandatory call sites
+
+- **Newtype roundtrip.** Every newtype's `Display` / `FromStr` / serde
+  must round-trip bit-equivalent for every valid input, and every invalid
+  input must be rejected by `FromStr` with a structured `ParseError`. See
+  `development.md` — Newtype completeness.
+- **rkyv roundtrip.** Archive → access → deserialise → equal-to-original
+  for every durable type crossing the IntentStore boundary.
+- **Snapshot roundtrip.** `IntentStore::export_snapshot` →
+  `bootstrap_from` → `export_snapshot` is bit-identical. The
+  non-destructive single → HA migration story depends on this.
+- **Hash determinism.** Any content hash under `development.md`'s
+  "Hashing requires deterministic serialization" rule — N permutations of
+  the same logical value must produce one hash.
+
+Reach for it elsewhere whenever a pure function's argument space exceeds
+a dozen hand-picked cases. If you find yourself enumerating `#[test]`
+bodies — "case 1, case 2, case 3, …" — the function wants a proptest
+instead.
+
+**Not for** concurrency, partition, or timing — that is Tier 1. Not for
+kernel attachment — that is Tier 3.
+
+### Rules
+
+- **Seed printed on failure.** Reproduce with
+  `PROPTEST_CASES=1 PROPTEST_REPLAY=<seed> cargo test <name>`.
+- **Shrink before filing.** Never file a bug against a raw failure — let
+  proptest minimise the counter-example first. Unshrunk reports hide the
+  actual trigger.
+- **Flaky proptest is a bug, not reality.** Same discipline as flaky DST:
+  fix the generator or the code under test; never "just rerun it."
+- **Generators live next to the types they produce.** `SpiffeId` owns its
+  `Arbitrary` impl; tests import it. Don't scatter ad-hoc generators
+  across crates.
+- **CI runs the default case count per PR** (`PROPTEST_CASES=1024`).
+  Per-release soaks run higher. Don't lower the default to dodge a slow
+  generator — fix the generator.
+
+---
+
 ## Tier 2 — BPF Unit Tests
 
 ### Triptych shape
@@ -286,7 +333,7 @@ Tests and chaos share the fault definitions; a fault is specified once.
 
 ```
 Per-PR (critical path ≈ 15 minutes):
-  A  cargo test                          pure Rust, no BPF             (s)
+  A  cargo test                          unit + proptest, no BPF       (s)
   B  cargo xtask dst                     Tier 1                        (min)
   C  cargo xtask bpf-unit                Tier 2                        (min)
   D  cargo xtask integration-test vm     Tier 3, kernel matrix         (10 min)
@@ -324,6 +371,9 @@ Explicitly out of scope:
 ```
 Logic bug under concurrency, timing, ordering, or partition?
     → Tier 1 (DST)
+
+Pure function whose argument space exceeds a dozen hand-picked cases?
+    → Property-based test (proptest)
 
 eBPF program-level correctness against curated input?
     → Tier 2 (BPF unit)
