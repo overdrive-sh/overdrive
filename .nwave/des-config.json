@@ -3,5 +3,11 @@
     "last_checked": "2026-04-21T05:54:11.044587+00:00",
     "skipped_versions": [],
     "frequency": "daily"
+  },
+  "rigor": {
+    "agent_model": "inherit",
+    "reviewer_model": "inherit",
+    "review_enabled": true,
+    "mutation_enabled": true
   }
 }
