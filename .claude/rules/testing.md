@@ -170,6 +170,97 @@ kernel attachment — that is Tier 3.
 
 ---
 
+## Mutation testing (cargo-mutants)
+
+Complements Tier 1 and proptest. DST perturbs **schedules**; proptest
+perturbs **inputs**; [`cargo-mutants`](https://mutants.rs) perturbs
+**code**. The question each answers is distinct:
+
+- DST: does the logic hold under every interleaving?
+- proptest: does the logic hold for every input?
+- mutants: do the tests actually assert on the thing that matters?
+
+A passing suite with weak assertions is indistinguishable from a strong
+one until mutants finds the blind spots. `cargo-mutants` applies small,
+targeted edits — flipping a boolean, swapping `<` for `<=`, replacing a
+function body with `Default`, erasing a match arm — and reruns the test
+suite per mutation. Outcomes:
+
+- **Caught** — at least one test failed. The mutation was killed.
+- **Missed** — every test passed despite the change. Either a test is
+  missing, or the existing tests don't assert on the changed behaviour.
+- **Timeout / unviable** — investigate; these are not freebies.
+
+### Mandatory targets
+
+Every merge into `main` must meet a **kill rate ≥ 80%** on the code below
+(matching the `nw-mutation-test` skill threshold). Missed mutations are
+reviewed per-PR, not aggregated across releases.
+
+- **Reconciler logic.** Every `reconcile(desired, actual, db) →
+  Vec<Action>` implementation. A missed mutation here means a behaviour
+  the suite does not actually defend.
+- **Policy verdict compilation.** Regorus input → BPF map bytes. A
+  mutation that changes the compiled verdict must fail a test, or the
+  "policy enforced" claim is unverified.
+- **Newtype `FromStr` and validators.** Every accept/reject branch must
+  have at least one test that flips on the mutation. Case-insensitivity,
+  canonical form, and structured `ParseError` variants are all mutation
+  targets.
+- **Hash determinism paths.** The rkyv-archive / JCS canonicalisation
+  code per `development.md` — mutations that change the hash output must
+  fail a test, otherwise the content-addressed ID story is hollow.
+- **Scheduler bin-pack.** Placement decisions and the constraint
+  evaluator. Mutations that swap `>` for `>=` in capacity checks are the
+  canonical bug shape this catches.
+- **`IntentStore::export_snapshot` / `bootstrap_from`.** Single → HA
+  migration correctness rides on this code; a missed mutation means the
+  roundtrip proptest isn't actually closing the loop.
+- **Workflow `run` bodies.** Replay-equivalence depends on each `await`
+  point producing the right action. A missed mutation on a `ctx` call
+  means the replay harness isn't pinning the trajectory.
+
+### Rules
+
+- **Scoped per PR.** `cargo xtask mutants --in-diff origin/main` runs
+  only mutations that overlap the PR diff. Full-corpus runs are nightly;
+  per-PR budget is tight.
+- **One-line skip with justification.** Use `// mutants: skip` above
+  blocks that are genuinely untestable (panic paths, trivial getters
+  wrapping opaque state, FFI shims). Every skip carries a comment
+  explaining *why* — an unjustified skip is a review rejection.
+- **Missed mutations are actionable, not aspirational.** A PR that
+  introduces a missed mutation either adds a test or documents the
+  reason inline. "We'll fix it later" is rejected.
+- **Flaky tests break mutation testing.** A test that sometimes fails
+  independent of the code under test marks every mutation as "caught" —
+  worse than missing them. Fix flaky tests *before* adding them to the
+  mutants run.
+- **Regression gate on direction, not just level.** Baseline kill rate
+  per crate is stored under `mutants-baseline/main/`. A drop > 2
+  percentage points fails the PR even if absolute kill rate is still
+  ≥ 80% — trend matters.
+
+### What it's NOT for
+
+- **`unsafe` blocks and `aya-rs` eBPF programs.** Mutations can produce
+  code the verifier rejects, masquerading as "caught." Tier 2 and Tier 3
+  cover these — do not run mutants against `crates/overdrive-bpf`.
+- **Async scheduling logic.** Mutations to `select!` arms or future
+  polling interact poorly with timing; DST is the right tool.
+- **Generated code.** `#[derive(...)]`, `build.rs` output, proc-macro
+  expansions — exclude by path in `.cargo/mutants.toml`.
+- **Performance assertions.** A mutation that removes an optimisation
+  may still pass correctness tests. Performance regressions are Tier 4's
+  job.
+- **`cargo xtask dst` / Tier 3 integration.** `cargo-mutants` reruns
+  `cargo test` per mutation; DST and real-kernel tests are too slow for
+  the per-mutation budget and are excluded from the mutants run. This
+  means mutation testing only covers code reachable from the unit-level
+  suite — another reason unit-level invariants must be strong.
+
+---
+
 ## Tier 2 — BPF Unit Tests
 
 ### Triptych shape
@@ -339,14 +430,16 @@ Per-PR (critical path ≈ 15 minutes):
   D  cargo xtask integration-test vm     Tier 3, kernel matrix         (10 min)
   E  cargo xtask verifier-regress        Tier 4 — veristat             (min)
      cargo xtask xdp-perf                Tier 4 — xdp-bench            (min)
+  F  cargo xtask mutants --in-diff       diff-scoped; kill rate ≥ 80%  (min)
 
 Nightly:
-  F  Tier 3 + Tier 4 against bpf-next                                  soft-fail
-  G  PREVAIL second-opinion analysis                                   soft-fail
-  H  Long-run fault-injection soak with random netem profiles
+  G  Tier 3 + Tier 4 against bpf-next                                  soft-fail
+  H  PREVAIL second-opinion analysis                                   soft-fail
+  I  cargo xtask mutants --workspace     full corpus; trend tracking
+  J  Long-run fault-injection soak with random netem profiles
 
 Per-release:
-  I  Full Tier 3 matrix on aarch64 (self-hosted Graviton runner)
+  K  Full Tier 3 matrix on aarch64 (self-hosted Graviton runner)
 ```
 
 ---
@@ -374,6 +467,9 @@ Logic bug under concurrency, timing, ordering, or partition?
 
 Pure function whose argument space exceeds a dozen hand-picked cases?
     → Property-based test (proptest)
+
+Tests pass but not sure they actually assert on the behaviour?
+    → cargo-mutants — close the kill-rate gap
 
 eBPF program-level correctness against curated input?
     → Tier 2 (BPF unit)
