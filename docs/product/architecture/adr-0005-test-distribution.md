@@ -11,7 +11,7 @@ Accepted. 2026-04-21.
 in `crates/{crate}/tests/` (or in module-local `#[cfg(test)] mod tests`).
 It also says the crafter translates DISTILL scenarios into Rust
 integration tests "in `crates/{crate}/tests/acceptance/*.rs` (or
-`tests/*.rs`)" using `ScenarioBuilder`.
+`tests/*.rs`)".
 
 Two interpretations are operationally different:
 
@@ -55,8 +55,7 @@ Considerations:
    compiled as a single test binary via a `crates/{crate}/tests/acceptance.rs`
    entrypoint that `mod`-declares each scenario file. One `*.rs` file per
    DISTILL scenario. Filename and top-level function name mirror the
-   scenario title (snake-case). Each acceptance test is a thin wrapper
-   that invokes `ScenarioBuilder` (a helper to land in DISTILL).
+   scenario title (snake-case).
 4. **DST tests** — `crates/overdrive-sim/tests/dst/*.rs`, compiled via
    `tests/dst.rs`. Each file is one DST scenario run under the harness.
 
@@ -145,7 +144,11 @@ grow core-crate compile units unboundedly.
 
 ## References
 
-- `.claude/rules/testing.md` (no `.feature` files; `ScenarioBuilder`)
+- `.claude/rules/testing.md` (no `.feature` files)
 - `docs/feature/phase-1-foundation/discuss/user-stories.md` (UAT Scenarios)
 - Cargo book: [Integration
   tests](https://doc.rust-lang.org/cargo/guide/tests.html)
+
+## Changelog
+
+- 2026-04-22 — Removed `ScenarioBuilder` references (residual terminology from another project).

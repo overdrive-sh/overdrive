@@ -20,9 +20,9 @@ Gherkin-style scenarios may appear as GIVEN/WHEN/THEN blocks in
 `docs/feature/{id}/distill/test-scenarios.md` for specification purposes
 only — they are never parsed or executed. The crafter translates those
 scenarios into Rust integration tests in
-`crates/{crate}/tests/acceptance/*.rs` (or `tests/*.rs`) using
-`ScenarioBuilder`. Do NOT introduce cucumber-rs, pytest-bdd, conftest.py,
-or any `.feature` file consumer.
+`crates/{crate}/tests/acceptance/*.rs` (or `tests/*.rs`). Do NOT
+introduce cucumber-rs, pytest-bdd, conftest.py, or any `.feature` file
+consumer.
 
 ---
 
