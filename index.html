@@ -575,6 +575,93 @@
     padding-top: 14px;
   }
 
+  /* ====================== USE CASES ====================== */
+  .use-cases {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+  }
+  @media (max-width: 1080px) { .use-cases { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 680px)  { .use-cases { grid-template-columns: 1fr; } }
+  .uc {
+    padding: 32px 28px;
+    background: var(--bg-2);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    display: flex;
+    flex-direction: column;
+    transition: border-color 0.15s ease;
+  }
+  .uc:hover { border-color: var(--border-2); }
+  .uc-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 18px;
+    flex-wrap: wrap;
+  }
+  .uc-tag {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .uc-driver {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    text-transform: lowercase;
+    letter-spacing: 0.02em;
+  }
+  .uc h4 {
+    font-family: var(--font-serif);
+    font-style: italic;
+    font-weight: 400;
+    font-size: 24px;
+    letter-spacing: -0.01em;
+    line-height: 1.15;
+    margin: 0 0 14px;
+    color: var(--text);
+  }
+  .uc p {
+    font-size: 14px;
+    color: var(--text-muted);
+    line-height: 1.6;
+    margin: 0 0 20px;
+    flex-grow: 1;
+  }
+  .uc-list {
+    list-style: none;
+    padding: 18px 0 0;
+    margin: 0;
+    border-top: 1px dashed var(--border);
+    display: grid;
+    gap: 10px;
+  }
+  .uc-list li {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-muted);
+    display: flex;
+    gap: 10px;
+    line-height: 1.5;
+  }
+  .uc-list li::before {
+    content: '▸';
+    color: var(--accent);
+    flex-shrink: 0;
+  }
+  .uc code {
+    font-family: var(--font-mono);
+    font-size: 0.92em;
+    color: var(--text);
+    background: var(--surface);
+    padding: 1px 6px;
+    border-radius: var(--r-sm);
+  }
+
   /* ====================== CODE SHOWCASE ====================== */
   .code-grid {
     display: grid;
@@ -955,10 +1042,11 @@
       Overdrive<span class="brand-cursor" aria-hidden="true"></span>
     </a>
     <div class="nav-links">
+      <a href="#use-cases">Use cases</a>
+      <a href="#pricing">Pricing</a>
       <a href="#thesis">Why now</a>
       <a href="#architecture">Architecture</a>
       <a href="#compare">Compare</a>
-      <a href="#pricing">Pricing</a>
       <a href="https://github.com/overdrive-sh/overdrive/blob/main/docs/whitepaper.md" class="nav-cta">Read the whitepaper <span class="arrow">→</span></a>
     </div>
   </div>
@@ -1025,7 +1113,7 @@
           as four independent failure domains. Overdrive ships them as one binary, with
           three-node HA that fits in 80&nbsp;MB of memory.
         </p>
-        <a href="#thesis" class="btn btn-outline">See the architecture <span class="arrow">→</span></a>
+        <a href="#architecture" class="btn btn-outline">See the architecture <span class="arrow">→</span></a>
       </div>
 
       <div class="audience-card">
@@ -1053,20 +1141,311 @@
   </div>
 </section>
 
-<!-- ====================== CREDS ====================== -->
-<section class="creds" style="padding-top: 64px; padding-bottom: 64px;">
+<!-- ====================== USE CASES ====================== -->
+<section id="use-cases">
   <div class="container">
-    <p class="creds-label">Standing on production-grade Rust primitives</p>
-    <div class="creds-list">
-      <span>aya-rs</span>
-      <span>openraft</span>
-      <span>wasmtime</span>
-      <span>cloud-hypervisor</span>
-      <span>rustls + kTLS</span>
-      <span>regorus</span>
-      <span>corrosion / cr-sqlite</span>
-      <span>redb</span>
+    <div class="section-head">
+      <div class="eyebrow">Use cases</div>
+      <h2>Built for workloads <span class="display-serif">Kubernetes was never shaped for.</span></h2>
+      <p class="lead">
+        Persistent microVMs, structural credential isolation, per-workload WASM sandboxes, and
+        global-gossip service catalogs compose into operational shapes other orchestrators have to
+        bolt together from third-party pieces.
+      </p>
     </div>
+
+    <div class="use-cases">
+      <div class="uc">
+        <div class="uc-head">
+          <span class="uc-tag">AI coding agents</span>
+          <span class="uc-driver">microvm · persistent</span>
+        </div>
+        <h4>Claude Code. Cursor. Devin-style sessions.</h4>
+        <p>
+          State accumulates across turns. 100&nbsp;GB persistent rootfs per agent. Fast resume
+          from snapshot between turns. The credential proxy holds the real API keys; the content
+          inspector scans every tool response for injection payloads before the model sees them.
+        </p>
+        <ul class="uc-list">
+          <li>Persistent rootfs via <code>overdrive-fs</code></li>
+          <li>Checkpoint/restore with <code>userfaultfd</code> lazy paging</li>
+          <li>SPIFFE-bound credential proxy + domain allowlist</li>
+        </ul>
+      </div>
+
+      <div class="uc">
+        <div class="uc-head">
+          <span class="uc-tag">CI runners</span>
+          <span class="uc-driver">microvm · persistent</span>
+        </div>
+        <h4>Self-hosted Buildkite, GitLab, GitHub Actions.</h4>
+        <p>
+          Warm layer caches survive across builds. Artifact working sets persist. Scale-to-zero
+          between jobs without paying cold-start on the next one. Per-repo kernel isolation and no
+          shared node state between tenants.
+        </p>
+        <ul class="uc-list">
+          <li>Sub-second resume from snapshot</li>
+          <li>Per-workload SPIFFE identity, no shared secrets</li>
+          <li>BPF LSM blocks arbitrary binary execution</li>
+        </ul>
+      </div>
+
+      <div class="uc">
+        <div class="uc-head">
+          <span class="uc-tag">Remote dev environments</span>
+          <span class="uc-driver">microvm · persistent</span>
+        </div>
+        <h4>Codespaces. Remote Jupyter. Interactive notebooks.</h4>
+        <p>
+          Per-user persistent rootfs. User filesystem survives across restarts, migrations, and
+          idle eviction. Instant resume when the developer reconnects. Cross-workload volume
+          sharing via virtiofs for team-scale data sets.
+        </p>
+        <ul class="uc-list">
+          <li>Gateway auto-route &mdash; one URL per workload</li>
+          <li>virtiofs volumes shared across workload types</li>
+          <li>Idle eviction with transparent resume on request</li>
+        </ul>
+      </div>
+
+      <div class="uc">
+        <div class="uc-head">
+          <span class="uc-tag">Customer-code sandboxes</span>
+          <span class="uc-driver">wasm · microvm</span>
+        </div>
+        <h4>SaaS that runs arbitrary tenant code.</h4>
+        <p>
+          Per-tenant kernel-level isolation. Defense in depth across four independent layers:
+          WASM/VM boundary, BPF LSM, kTLS + SPIFFE, XDP network policy. Compromise one, the
+          other three still hold.
+        </p>
+        <ul class="uc-list">
+          <li>~1&nbsp;ms WASM cold start; warm pool per function</li>
+          <li>WASI capabilities explicitly granted per job spec</li>
+          <li>Wasmtime fuel prevents infinite-loop starvation</li>
+        </ul>
+      </div>
+
+      <div class="uc">
+        <div class="uc-head">
+          <span class="uc-tag">Multi-region services</span>
+          <span class="uc-driver">all drivers</span>
+        </div>
+        <h4>Regional autonomy without a federation plane.</h4>
+        <p>
+          Each region runs its own Raft. Global observation converges via CRDT gossip in seconds.
+          Under partition, every region keeps submitting jobs and serving traffic. The dataplane
+          never reads remote state. Replay across regions via a single response header.
+        </p>
+        <ul class="uc-list">
+          <li>Per-region Raft quorum &mdash; no WAN latency on writes</li>
+          <li>Global service catalog via Corrosion / CR-SQLite</li>
+          <li><code>overdrive-replay</code> header for app-driven routing</li>
+        </ul>
+      </div>
+
+      <div class="uc">
+        <div class="uc-head">
+          <span class="uc-tag">Serverless APIs</span>
+          <span class="uc-driver">wasm</span>
+        </div>
+        <h4>HTTP endpoints with AI-agent-grade isolation.</h4>
+        <p>
+          ~1&nbsp;ms cold start. Scale-to-zero. The credential proxy and content inspector ship
+          by default &mdash; so functions processing untrusted content hit the same structural walls
+          as full AI agents. TypeScript, Rust, Go, Python via the WASM Component Model.
+        </p>
+        <ul class="uc-list">
+          <li>Route config via BPF map &mdash; no proxy restart</li>
+          <li>Per-invocation SPIFFE identity on every call</li>
+          <li>Instance pool sized by LLM-predicted demand</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ====================== STATS ====================== -->
+<section>
+  <div class="container">
+    <div class="section-head">
+      <div class="eyebrow">By the numbers</div>
+      <h2>Architecture decisions, <span class="display-serif">measured at fleet scale.</span></h2>
+      <p class="lead">
+        Not micro-optimizations. These are direct consequences of the design &mdash; the kind of differences
+        that turn three racks back into one.
+      </p>
+    </div>
+
+    <div class="stats-grid">
+      <div class="stat">
+        <div class="stat-num">~10<span class="unit">×</span></div>
+        <div class="stat-label">Less control-plane RAM</div>
+        <div class="stat-vs">~100 MB vs ~1 GB on Kubernetes</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num">~100<span class="unit">×</span></div>
+        <div class="stat-label">Less mTLS CPU overhead</div>
+        <div class="stat-vs">kTLS in-kernel vs Envoy sidecar</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num">~50<span class="unit">×</span></div>
+        <div class="stat-label">Faster scheduling</div>
+        <div class="stat-vs">&lt; 100 ms vs 1–10 s on Kubernetes</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num">2.3<span class="unit">×</span></div>
+        <div class="stat-label">Workload density</div>
+        <div class="stat-vs">~70% utilization vs ~30% baseline</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num">&lt;10<span class="unit">s</span></div>
+        <div class="stat-label">Node join</div>
+        <div class="stat-vs">vs 2–5 minutes on Kubernetes</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num">~1<span class="unit">ms</span></div>
+        <div class="stat-label">WASM cold start</div>
+        <div class="stat-vs">Wasmtime warm pool, no Firecracker tax</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ====================== COMPARISON ====================== -->
+<section id="compare">
+  <div class="container">
+    <div class="section-head">
+      <div class="eyebrow">Compare</div>
+      <h2>Coherent by construction, <span class="display-serif">not by configuration.</span></h2>
+      <p class="lead">
+        When the dataplane, the identity model, the telemetry pipeline, and the service mesh all
+        emerge from the same kernel primitive with the same workload identity attached, you stop
+        gluing together products that were never designed to know about each other.
+      </p>
+    </div>
+
+    <div class="table-wrap">
+      <table class="cmp">
+        <thead>
+          <tr>
+            <th>Component</th>
+            <th>Kubernetes</th>
+            <th class="over">Overdrive</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="label">Service routing</td>
+            <td class="k8s">iptables · O(n) per packet</td>
+            <td class="over">XDP BPF · O(1) <span class="pill">in-kernel</span></td>
+          </tr>
+          <tr>
+            <td class="label">mTLS</td>
+            <td class="k8s">Envoy sidecar · ~0.5 vCPU each</td>
+            <td class="over">kTLS · NIC offload <span class="pill">~0 overhead</span></td>
+          </tr>
+          <tr>
+            <td class="label">Control-plane RAM</td>
+            <td class="k8s">~1 GB</td>
+            <td class="over">~30–80 MB</td>
+          </tr>
+          <tr>
+            <td class="label">Network policy</td>
+            <td class="k8s">Per-packet iptables walk</td>
+            <td class="over">BPF map lookup</td>
+          </tr>
+          <tr>
+            <td class="label">Workload types</td>
+            <td class="k8s">Containers</td>
+            <td class="over">Process · microVM · VM · unikernel · WASM</td>
+          </tr>
+          <tr>
+            <td class="label">Observability</td>
+            <td class="k8s">Scraped logs &amp; Prometheus</td>
+            <td class="over">Kernel-native · identity-tagged</td>
+          </tr>
+          <tr>
+            <td class="label">Multi-region</td>
+            <td class="k8s">Stretched Raft or federation plane</td>
+            <td class="over">Per-region Raft + global CRDT gossip</td>
+          </tr>
+          <tr>
+            <td class="label">Extension model</td>
+            <td class="k8s">Go operators with cluster-admin</td>
+            <td class="over">WASM · sandboxed · hot-reloadable</td>
+          </tr>
+          <tr>
+            <td class="label">Node join</td>
+            <td class="k8s">2–5 minutes</td>
+            <td class="over">&lt; 10 seconds</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ====================== PRICING ====================== -->
+<section id="pricing">
+  <div class="container">
+    <div class="section-head">
+      <div class="eyebrow">Cloud platform</div>
+      <h2>Run your own. <span class="display-serif">Or let us run it.</span></h2>
+      <p class="lead">
+        The source-available core is FSL-1.1-ALv2 and ships in one binary. Every release converts
+        to Apache 2.0 two years after publication. The cloud platform sells the operational
+        complexity we already absorbed for ourselves &mdash; metered exactly, by kernel telemetry.
+        No estimation. No sampling.
+      </p>
+    </div>
+
+    <div class="tiers">
+      <div class="tier">
+        <div class="tier-num">Tier 1</div>
+        <h4>Managed Overdrive</h4>
+        <p class="desc">A full Overdrive cluster as a service. Control plane, worker pool, and CLI &mdash; the way you'd run it yourself, only without running it.</p>
+        <div class="tier-billing">
+          <strong>per vCPU-hour + GB-hour</strong>
+          metered at allocation level
+        </div>
+      </div>
+
+      <div class="tier featured">
+        <div class="tier-num">Tier 2 · Most flexible</div>
+        <h4>Managed Workloads</h4>
+        <p class="desc">Submit jobs directly. No cluster to size. No control plane to patch. Nomad-style ergonomics with Overdrive's identity and isolation model underneath.</p>
+        <div class="tier-billing">
+          <strong>per vCPU-hour + GB-hour</strong>
+          tenant namespace, kernel-isolated
+        </div>
+      </div>
+
+      <div class="tier">
+        <div class="tier-num">Tier 3</div>
+        <h4>Serverless WASM</h4>
+        <p class="desc">Sub-10 ms cold start. Scale-to-zero. The credential proxy and content inspector ship by default &mdash; built for the AI agent workloads no one else has a story for.</p>
+        <div class="tier-billing">
+          <strong>per invocation + GB-second</strong>
+          minimum unit: one invocation
+        </div>
+      </div>
+
+      <div class="tier">
+        <div class="tier-num">Tier 4</div>
+        <h4>Bare Metal Dedicated</h4>
+        <p class="desc">Dedicated physical nodes inside the platform. Full hardware performance. Full Overdrive operational stack. No VM overhead between you and the silicon.</p>
+        <div class="tier-billing">
+          <strong>per node-hour</strong>
+          reserved capacity discounts
+        </div>
+      </div>
+    </div>
+
+    <p style="margin-top: 36px; color: var(--text-dim); font-size: 13px; font-family: var(--font-mono);">
+      Enterprise self-hosted licensing &mdash; FIPS crypto, HSM integration, air-gap tooling, DORA / NIS2 / SOC2 / HIPAA policy packs &mdash; available alongside the source-available release.
+    </p>
   </div>
 </section>
 
@@ -1117,53 +1496,6 @@
   </div>
 </section>
 
-<!-- ====================== STATS ====================== -->
-<section style="padding-top: 0;">
-  <div class="container">
-    <div class="section-head">
-      <div class="eyebrow">By the numbers</div>
-      <h2>Architecture decisions, <span class="display-serif">measured at fleet scale.</span></h2>
-      <p class="lead">
-        Not micro-optimizations. These are direct consequences of the design &mdash; the kind of differences
-        that turn three racks back into one.
-      </p>
-    </div>
-
-    <div class="stats-grid">
-      <div class="stat">
-        <div class="stat-num">~10<span class="unit">×</span></div>
-        <div class="stat-label">Less control-plane RAM</div>
-        <div class="stat-vs">~100 MB vs ~1 GB on Kubernetes</div>
-      </div>
-      <div class="stat">
-        <div class="stat-num">~100<span class="unit">×</span></div>
-        <div class="stat-label">Less mTLS CPU overhead</div>
-        <div class="stat-vs">kTLS in-kernel vs Envoy sidecar</div>
-      </div>
-      <div class="stat">
-        <div class="stat-num">~50<span class="unit">×</span></div>
-        <div class="stat-label">Faster scheduling</div>
-        <div class="stat-vs">&lt; 100 ms vs 1–10 s on Kubernetes</div>
-      </div>
-      <div class="stat">
-        <div class="stat-num">2.3<span class="unit">×</span></div>
-        <div class="stat-label">Workload density</div>
-        <div class="stat-vs">~70% utilization vs ~30% baseline</div>
-      </div>
-      <div class="stat">
-        <div class="stat-num">&lt;10<span class="unit">s</span></div>
-        <div class="stat-label">Node join</div>
-        <div class="stat-vs">vs 2–5 minutes on Kubernetes</div>
-      </div>
-      <div class="stat">
-        <div class="stat-num">~1<span class="unit">ms</span></div>
-        <div class="stat-label">WASM cold start</div>
-        <div class="stat-vs">Wasmtime warm pool, no Firecracker tax</div>
-      </div>
-    </div>
-  </div>
-</section>
-
 <!-- ====================== ARCHITECTURE ====================== -->
 <section id="architecture">
   <div class="container">
@@ -1179,9 +1511,9 @@
 
     <div class="arch">
 <pre><span class="h">┌────────────────────────────────────────────────────────────────────┐</span>
-<span class="h">│</span>                          <span class="k">CLI / API</span>  (gRPC + REST, tonic)         <span class="h">│</span>
+<span class="h">│</span>                           <span class="k">CLI / API</span>  (gRPC + REST, tonic)          <span class="h">│</span>
 <span class="h">├────────────────────────────────────────────────────────────────────┤</span>
-<span class="h">│</span>     <span class="k">CONTROL PLANE</span>  &mdash; co-located with node agent or dedicated     <span class="h">│</span>
+<span class="h">│</span>     <span class="k">CONTROL PLANE</span>  &mdash; co-located with node agent or dedicated       <span class="h">│</span>
 <span class="h">│</span>                                                                    <span class="h">│</span>
 <span class="h">│</span>   IntentStore        Reconcilers        Built-in CA  (SPIFFE)      <span class="h">│</span>
 <span class="h">│</span>   single: redb       Rust traits        Scheduler                  <span class="h">│</span>
@@ -1197,7 +1529,7 @@
 <span class="h">│</span>   ▸ Drivers:  process · microvm · vm · unikernel · wasm            <span class="h">│</span>
 <span class="h">│</span>   ▸ Gateway:  hyper · rustls · ACMEv2 · in-process route table     <span class="h">│</span>
 <span class="h">├────────────────────────────────────────────────────────────────────┤</span>
-<span class="h">│</span>   <span class="k">ObservationStore</span>  (Corrosion &mdash; CR-SQLite + SWIM/QUIC gossip)   <span class="h">│</span>
+<span class="h">│</span>   <span class="k">ObservationStore</span>  (Corrosion &mdash; CR-SQLite + SWIM/QUIC gossip)     <span class="h">│</span>
 <span class="h">│</span>   alloc status · service backends · node health · regional peers   <span class="h">│</span>
 <span class="h">├────────────────────────────────────────────────────────────────────┤</span>
 <span class="h">│</span>             <span class="k">Object Storage</span>  (Garage, S3-compatible)                <span class="h">│</span>
@@ -1207,15 +1539,15 @@
 </section>
 
 <!-- ====================== WORKLOADS ====================== -->
-<section id="workloads">
+<section id="workloads" style="padding-top: 0;">
   <div class="container">
     <div class="section-head">
       <div class="eyebrow">Workload model</div>
       <h2>Five drivers. <span class="display-serif">One identity. One policy.</span></h2>
       <p class="lead">
         VMs, processes, unikernels, containers, and WASM functions share the same SPIFFE identity,
-        the same eBPF dataplane, the same policy engine. Pick the right primitive for the workload &mdash;
-        not the only one your platform happens to support.
+        the same eBPF dataplane, the same policy engine. Match the primitive to the workload &mdash;
+        a VM for hard isolation, WASM for cold-start, a process for native speed.
       </p>
     </div>
 
@@ -1425,139 +1757,20 @@
   </div>
 </section>
 
-<!-- ====================== COMPARISON ====================== -->
-<section id="compare">
+<!-- ====================== CREDS ====================== -->
+<section class="creds" style="padding-top: 64px; padding-bottom: 64px;">
   <div class="container">
-    <div class="section-head">
-      <div class="eyebrow">Compare</div>
-      <h2>Coherent by construction, <span class="display-serif">not by configuration.</span></h2>
-      <p class="lead">
-        When the dataplane, the identity model, the telemetry pipeline, and the service mesh all
-        emerge from the same kernel primitive with the same workload identity attached, you stop
-        gluing together products that were never designed to know about each other.
-      </p>
+    <p class="creds-label">Standing on production-grade Rust primitives</p>
+    <div class="creds-list">
+      <span>aya-rs</span>
+      <span>openraft</span>
+      <span>wasmtime</span>
+      <span>cloud-hypervisor</span>
+      <span>rustls + kTLS</span>
+      <span>regorus</span>
+      <span>corrosion / cr-sqlite</span>
+      <span>redb</span>
     </div>
-
-    <div class="table-wrap">
-      <table class="cmp">
-        <thead>
-          <tr>
-            <th>Component</th>
-            <th>Kubernetes</th>
-            <th class="over">Overdrive</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td class="label">Service routing</td>
-            <td class="k8s">iptables · O(n) per packet</td>
-            <td class="over">XDP BPF · O(1) <span class="pill">in-kernel</span></td>
-          </tr>
-          <tr>
-            <td class="label">mTLS</td>
-            <td class="k8s">Envoy sidecar · ~0.5 vCPU each</td>
-            <td class="over">kTLS · NIC offload <span class="pill">~0 overhead</span></td>
-          </tr>
-          <tr>
-            <td class="label">Control-plane RAM</td>
-            <td class="k8s">~1 GB</td>
-            <td class="over">~30–80 MB</td>
-          </tr>
-          <tr>
-            <td class="label">Network policy</td>
-            <td class="k8s">Per-packet iptables walk</td>
-            <td class="over">BPF map lookup</td>
-          </tr>
-          <tr>
-            <td class="label">Workload types</td>
-            <td class="k8s">Containers</td>
-            <td class="over">Process · microVM · VM · unikernel · WASM</td>
-          </tr>
-          <tr>
-            <td class="label">Observability</td>
-            <td class="k8s">Scraped logs &amp; Prometheus</td>
-            <td class="over">Kernel-native · identity-tagged</td>
-          </tr>
-          <tr>
-            <td class="label">Multi-region</td>
-            <td class="k8s">Stretched Raft or federation plane</td>
-            <td class="over">Per-region Raft + global CRDT gossip</td>
-          </tr>
-          <tr>
-            <td class="label">Extension model</td>
-            <td class="k8s">Go operators with cluster-admin</td>
-            <td class="over">WASM · sandboxed · hot-reloadable</td>
-          </tr>
-          <tr>
-            <td class="label">Node join</td>
-            <td class="k8s">2–5 minutes</td>
-            <td class="over">&lt; 10 seconds</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-</section>
-
-<!-- ====================== PRICING ====================== -->
-<section id="pricing">
-  <div class="container">
-    <div class="section-head">
-      <div class="eyebrow">Cloud platform</div>
-      <h2>Run your own. <span class="display-serif">Or let us run it.</span></h2>
-      <p class="lead">
-        The source-available core is FSL-1.1-ALv2 and ships in one binary. Every release converts
-        to Apache 2.0 two years after publication. The cloud platform sells the operational
-        complexity we already absorbed for ourselves &mdash; metered exactly, by kernel telemetry.
-        No estimation. No sampling.
-      </p>
-    </div>
-
-    <div class="tiers">
-      <div class="tier">
-        <div class="tier-num">Tier 1</div>
-        <h4>Managed Overdrive</h4>
-        <p class="desc">A full Overdrive cluster as a service. Control plane, worker pool, and CLI &mdash; the way you'd run it yourself, only without running it.</p>
-        <div class="tier-billing">
-          <strong>per vCPU-hour + GB-hour</strong>
-          metered at allocation level
-        </div>
-      </div>
-
-      <div class="tier featured">
-        <div class="tier-num">Tier 2 · Most flexible</div>
-        <h4>Managed Workloads</h4>
-        <p class="desc">Submit jobs directly. No cluster to size. No control plane to patch. Nomad-style ergonomics with Overdrive's identity and isolation model underneath.</p>
-        <div class="tier-billing">
-          <strong>per vCPU-hour + GB-hour</strong>
-          tenant namespace, kernel-isolated
-        </div>
-      </div>
-
-      <div class="tier">
-        <div class="tier-num">Tier 3</div>
-        <h4>Serverless WASM</h4>
-        <p class="desc">Sub-10 ms cold start. Scale-to-zero. The credential proxy and content inspector ship by default &mdash; built for the AI agent workloads no one else has a story for.</p>
-        <div class="tier-billing">
-          <strong>per invocation + GB-second</strong>
-          minimum unit: one invocation
-        </div>
-      </div>
-
-      <div class="tier">
-        <div class="tier-num">Tier 4</div>
-        <h4>Bare Metal Dedicated</h4>
-        <p class="desc">Dedicated physical nodes inside the platform. Full hardware performance. Full Overdrive operational stack. No VM overhead between you and the silicon.</p>
-        <div class="tier-billing">
-          <strong>per node-hour</strong>
-          reserved capacity discounts
-        </div>
-      </div>
-    </div>
-
-    <p style="margin-top: 36px; color: var(--text-dim); font-size: 13px; font-family: var(--font-mono);">
-      Enterprise self-hosted licensing &mdash; FIPS crypto, HSM integration, air-gap tooling, DORA / NIS2 / SOC2 / HIPAA policy packs &mdash; available alongside the source-available release.
-    </p>
   </div>
 </section>
 
@@ -1568,7 +1781,7 @@
       <div class="eyebrow" style="margin-bottom: 22px; justify-content: center; display: inline-flex;">Source-available · FSL-1.1-ALv2 · Apache 2.0 after 2 years</div>
       <h2>Reimagining the foundation of modern infrastructure.</h2>
       <p>
-        One binary. Every workload type. Built for the kernel of 2026, not the cluster of 2014.
+        One binary. Every workload type. Built on the primitives Kubernetes never had.
       </p>
       <div class="hero-cta">
         <a href="https://github.com/overdrive-sh/overdrive/blob/main/docs/whitepaper.md" class="btn btn-primary">Read the whitepaper <span class="arrow">→</span></a>
@@ -1586,7 +1799,7 @@
         <a class="brand" href="#">
           Overdrive<span class="brand-cursor" aria-hidden="true"></span>
         </a>
-        <p>A workload orchestration platform compiled to the kernel of 2026. Source-available under FSL-1.1-ALv2; each release converts to Apache 2.0 after two years.</p>
+        <p>A workload orchestration platform built in Rust on the primitives Kubernetes never had. Source-available under FSL-1.1-ALv2; each release converts to Apache 2.0 after two years.</p>
       </div>
 
       <div class="footer-col">
@@ -1594,6 +1807,7 @@
         <ul>
           <li><a href="#architecture">Architecture</a></li>
           <li><a href="#workloads">Workloads</a></li>
+          <li><a href="#use-cases">Use cases</a></li>
           <li><a href="#sre">SRE agent</a></li>
           <li><a href="#agents">Agent isolation</a></li>
         </ul>
