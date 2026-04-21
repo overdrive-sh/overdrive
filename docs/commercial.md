@@ -6,9 +6,11 @@
 
 ## Overview
 
-Overdrive is source-available under the Functional Source License (FSL-1.1-ALv2); every release converts to Apache 2.0 two years after publication under the irrevocable future-grant built into the licence. The commercial opportunity is not the software itself — it is the operational complexity the software absorbs. Every team running Kubernetes today operates etcd, CNI plugins, cert-manager, a service mesh, an ingress controller, Prometheus, alertmanager, and a dozen other components that each need to be deployed, upgraded, and debugged independently. Overdrive collapses that stack into one binary.
+Overdrive is an open-source developer platform — functions, durable objects, sandboxed agents (persistent microVMs for AI coding agents, long-running autonomous workers, databases, CI runners), queues, cron, KV, per-workload SQL, and S3-compatible object storage — running on infrastructure you own. It is source-available under the Functional Source License (FSL-1.1-ALv2); every release converts to Apache 2.0 two years after publication under the irrevocable future-grant built into the licence.
 
-The cloud platform business charges for not having to operate that stack.
+The commercial opportunity is twofold. First, the developer-platform experience most teams today rent from Cloudflare, Vercel, or Fly.io is a cleanly-scoped purchase that every engineering team understands — and every EU regulatory regime (DORA, NIS2, sovereign-cloud tenders) prefers to operate outside a US hyperscaler. Second, the operational complexity that makes a developer platform *possible* is what Kubernetes shops already pay through the nose to assemble: etcd, CNI plugins, cert-manager, a service mesh, an ingress controller, Prometheus, alertmanager, an identity plane, a policy engine, and a dozen other components each deployed, upgraded, and debugged independently. Overdrive collapses both halves into one binary.
+
+The cloud platform business charges for not having to operate that stack. The enterprise self-hosted business charges for running it on your own hardware with warranty, compliance, and support. The developer-platform positioning is the front door; the orchestrator layer underneath is the credibility.
 
 ---
 
@@ -33,33 +35,33 @@ Tenant Overdrive clusters run as VM workloads on the infrastructure layer. Cloud
 
 ## Product Tiers
 
-### Tier 1 — Managed Overdrive
+### Tier 0 — Self-hosted (free)
 
-Full Overdrive cluster as a service. Tenant gets a control plane and worker node pool. They submit jobs, define policies, and operate their cluster through the Overdrive API and CLI. The infrastructure layer handles the underlying hardware, networking, and physical security.
+The full source-available binary under FSL-1.1-ALv2. Functions, durable objects, sandboxed agents, queues, cron, KV, per-workload SQL, object storage — the complete developer-platform surface, self-hosted on one box, one cluster, or a fleet. No tier gating, no feature fences. Apache 2.0 future grant at the two-year anniversary.
 
-Target: platform engineering teams building internal developer platforms, companies migrating off self-managed Kubernetes.
+Target: the community flywheel — individual developers, side projects, OSS adopters, regional clouds trialling the platform, teams validating the stack before going managed or enterprise. The "download and try it" on-ramp for every downstream tier.
+
+Billing model: none. This is the flywheel.
+
+### Tier 1 — Serverless &amp; Managed Workloads (flagship)
+
+The developer-platform front door on our cloud. Deploy a function, a durable object, a sandboxed agent (AI coding agents, autonomous workers), a stateful VM (Postgres, CI runners, dev environments), or a scheduled job; the platform schedules it within a tenant namespace with kernel-isolated primitives. Sub-10 ms cold start on WASM; tens-of-ms resume on persistent microVMs. Scale-to-zero. The credential proxy and content inspector ship by default — built for the AI-agent workloads no one else has a story for.
+
+Target: developers who want Cloudflare / Vercel / Fly.io economics without hyperscaler lock-in; teams subject to EU data-residency or DORA / NIS2 regimes that preclude US-cloud hosting; AI-agent teams needing egress control; regional clouds building a developer offering on top of Overdrive.
+
+Billing model: per invocation + per GB-second for function / durable-object workloads; per vCPU-hour + per GB-hour for containerised workloads. Minimum billing unit is one invocation.
+
+### Tier 2 — Managed Overdrive
+
+Full Overdrive cluster as a service for platform teams running their own internal developer platform. Tenant gets a control plane and worker node pool; they submit jobs, define policies, and operate their cluster through the Overdrive API and CLI. The infrastructure layer handles the underlying hardware, networking, and physical security.
+
+Target: platform-engineering teams building internal developer platforms, companies migrating off self-managed Kubernetes, organisations that want to re-sell an Overdrive-based developer platform to their own tenants.
 
 Billing model: per vCPU-hour + per GB-hour of memory consumed by the tenant cluster (including control plane overhead).
 
-### Tier 2 — Managed Workloads
+### Tier 3 — Bare Metal Dedicated
 
-Tenant does not manage a cluster. They submit jobs directly to the platform. The platform's Overdrive schedules their workloads within a tenant namespace. Simpler operational model — no cluster to size, no control plane to monitor.
-
-Target: engineering teams that want Nomad-style job submission without operating infrastructure.
-
-Billing model: per vCPU-hour + per GB-hour, metered at the allocation level.
-
-### Tier 3 — Serverless WASM
-
-Tenant deploys WASM functions only. Sub-10ms cold start, scale-to-zero, zero cluster management. The WASM sidecar model applies — credential proxy, content inspection, domain allowlists — without any configuration beyond the function spec.
-
-Target: developers who want Lambda economics without AWS lock-in. AI agent workloads with egress control requirements.
-
-Billing model: per invocation + per GB-second of execution. Minimum billing unit is one invocation.
-
-### Tier 4 — Bare Metal Dedicated
-
-Tenant gets dedicated physical nodes within the infrastructure Overdrive. Full hardware performance, no VM overhead, still managed by the platform control plane — node provisioning, OS management, eBPF dataplane, mTLS, observability all included. Tenant workloads run directly on the hardware.
+Tenant gets dedicated physical nodes within the managed platform. Full hardware performance, no VM overhead, still managed by the Overdrive control plane — node provisioning, OS management, eBPF dataplane, mTLS, observability all included. Tenant workloads run directly on the hardware.
 
 Target: compute-intensive workloads (ML training, HPC), latency-sensitive applications, tenants with compliance requirements around hardware isolation.
 
@@ -128,7 +130,7 @@ vs
 
 Tenants start in single-mode and are promoted to HA (`RaftStore`, 3-node) automatically when their SLA tier requires it or when their cluster exceeds a configured size threshold. The migration is non-destructive — `export_snapshot` / `bootstrap_from` handle the transition with zero downtime.
 
-This density advantage is the primary margin driver for Tiers 2 and 3.
+This density advantage is the primary margin driver for Tiers 1 and 2.
 
 ---
 
@@ -260,27 +262,31 @@ Enterprise self-hosted customers generate a second-order benefit beyond direct r
 
 ## Go-To-Market
 
-### Phase 1 — Open Source Traction
+### Phase 1 — Open Source Developer-Platform Traction
 
-Ship the open source platform. Target infrastructure engineers and platform teams who are frustrated with Kubernetes complexity. The efficiency story (section 20 of the whitepaper), the unified workload model, and the WASM-native architecture are the primary technical hooks.
+Ship the source-available binary with the developer-platform surface as the public pitch: `overdrive deploy` a function, attach a durable object, stand up a sandboxed agent or a Postgres workload, wire a queue and a cron, use KV and per-workload SQL, front it with a stable HTTPS URL. The "everything Cloudflare does, on infrastructure you own" framing is the top-of-funnel. The orchestrator layer underneath is the credibility, not the lede.
 
-Measure: GitHub stars, self-hosted deployments, community contributions, enterprise inbound.
+Channels: Hacker News technical deep-dives, Rust community (TWiR, users.rust-lang.org), r/selfhosted, Wasm / eBPF conferences, a public demo of `overdrive dev` with hot-reload against the full primitive surface. Parallel presence at KubeCon / eBPF Summit for the platform-engineering sub-audience.
 
-### Phase 2 — Cloud Platform (Managed Overdrive + Managed Workloads)
+Measure: GitHub stars, SDK npm / crates.io / PyPI installs, first-hour activation on `overdrive deploy`, self-hosted deployment count, enterprise inbound.
 
-Launch Tiers 1 and 2 on owned bare metal. Initial target: teams already self-hosting Overdrive who want to offload operations. Low acquisition cost — they already know the product.
+### Phase 2 — Cloud Platform (Serverless &amp; Managed Workloads)
 
-Expand to teams migrating off EKS/GKE who want operational simplicity without rebuilding their entire toolchain.
+Launch Tier 1 on owned bare metal. Primary acquisition: developers who hit the free Tier 0 on a single box and need to scale past it — zero switching cost because the binary is the same. Secondary acquisition: teams priced out of or regulatorily blocked from Cloudflare / Vercel / Fly.io who need a credible sovereign-cloud alternative.
 
-### Phase 3 — Serverless WASM + AI Agent Platform
+The credential proxy, content-inspection sidecar, and domain-allowlist model solve prompt-injection and credential-exfiltration problems every team building production AI agents faces — position the AI-agent story as a specific wedge within Tier 1 rather than a separate product.
 
-Tier 3 targets the AI agent workload market specifically. The credential proxy, content inspection sidecar, and domain allowlist model solve the prompt injection and credential exfiltration problems that every team building production AI agents faces. This is a distinct product from the orchestration story — position it separately.
+### Phase 3 — Managed Overdrive for Platform Teams
+
+Launch Tier 2. Target: platform-engineering teams migrating off EKS / GKE who want the developer-platform experience they already give their internal developers on an internal PaaS, without running the four-failure-domain Kubernetes stack underneath.
+
+This phase is also when regional clouds and sovereign-cloud providers become first-class customers — they buy Managed Overdrive (Tier 2) as the foundation on which they re-sell Tier 1 experiences to their own end-users. The €180M EU sovereign-cloud tender and the wider DORA / NIS2 compliance environment make this a load-bearing channel rather than an afterthought.
 
 ### Phase 4 — Enterprise Self-Hosted + Bare Metal
 
-Enterprise licensing and Tier 4 bare metal target organisations with compliance requirements that preclude the cloud platform: financial services, government, regulated healthcare, defence contractors.
+Enterprise licensing and Tier 3 bare metal target organisations with compliance requirements that preclude the cloud platform: financial services, government, regulated healthcare, defence contractors.
 
-The built-in MLS, BPF LSM enforcement, SPIFFE identity model, and audit-grade eBPF telemetry address requirements that most cloud platforms handle poorly. FIPS crypto, HSM integration, and compliance policy packs (DORA, NIS2, SOC2, HIPAA) are enterprise licence features.
+The built-in mTLS, BPF LSM enforcement, SPIFFE identity model, and audit-grade eBPF telemetry address requirements that most cloud platforms handle poorly. FIPS crypto, HSM integration, and compliance policy packs (DORA, NIS2, SOC2, HIPAA) are enterprise licence features.
 
 Air-gap deployment is a first-class scenario — one binary, embedded storage, no external dependencies makes Overdrive easier to deploy in classified environments than any platform with a dozen moving parts.
 
@@ -292,15 +298,14 @@ EU presence and Danish citizenship provides direct access to European government
 
 | Stream | Model | Target |
 |---|---|---|
-| Cloud — Managed Overdrive | Per vCPU-hour + GB-hour | Platform teams |
-| Cloud — Managed Workloads | Per vCPU-hour + GB-hour | Engineering teams |
-| Cloud — Serverless WASM | Per invocation + GB-second | Developers, AI agents |
-| Cloud — Bare Metal | Per node-hour | ML, HPC, latency-sensitive |
+| Cloud — Serverless &amp; Managed Workloads (Tier 1) | Per invocation + GB-second, or per vCPU-hour + GB-hour | Developers, AI-agent teams, sovereign-cloud end-users |
+| Cloud — Managed Overdrive (Tier 2) | Per vCPU-hour + GB-hour | Platform teams, regional clouds re-selling the platform |
+| Cloud — Bare Metal (Tier 3) | Per node-hour | ML, HPC, latency-sensitive |
 | Enterprise Licence | Annual per-node subscription | Regulated enterprises |
 | Enterprise Support | Annual subscription, tiered SLA | Enterprise + self-hosted |
 | Commercial Licence | Annual, negotiated | Embedding Overdrive in a product |
 
-Cloud revenue scales with tenant consumption. Enterprise licence revenue is predictable and high-margin — no infrastructure cost against the contract value. Support contracts compound with the install base.
+Cloud revenue scales with tenant consumption — Tier 1 scales horizontally with developer count, Tier 2 scales with platform-team count, Tier 3 scales with regulated workload count. Enterprise licence revenue is predictable and high-margin — no infrastructure cost against the contract value. Support contracts compound with the install base.
 
 ---
 
@@ -323,12 +328,12 @@ The gap that matters commercially: no existing platform handles AI agent workloa
 
 ## Summary
 
-Overdrive has three commercial pillars:
+Overdrive has three commercial pillars, all fed by the same developer-platform front door:
 
-**Cloud platform.** Run Overdrive on bare metal, sell tenants access to it at multiple abstraction levels — full cluster, managed workloads, serverless WASM, dedicated bare metal. The self-hosting architecture means tenants who outgrow one tier migrate upward without changing tooling. Billing is exact, funded by kernel-level telemetry.
+**Cloud platform.** Run Overdrive on bare metal, sell tenants access at four abstraction levels — free self-hosted (Tier 0) funnels into serverless-and-managed-workloads (Tier 1), which funnels into full managed clusters (Tier 2) and dedicated bare metal (Tier 3) for tenants who outgrow shared infrastructure. The self-hosting architecture means tenants migrate upward without changing tooling. Billing is exact, funded by kernel-level telemetry.
 
 **Enterprise self-hosted licensing.** Sell commercial licences and support contracts to regulated enterprises that cannot use the cloud platform. FIPS crypto, HSM integration, compliance policy packs, and air-gap tooling are enterprise-only features. High-margin, predictable annual revenue. The install base funds platform development.
 
-**Source-available flywheel.** FSL's Competing Use restriction prevents hyperscaler commodity competition for the first two years of each release; the Apache 2.0 future grant guarantees the community a path to true open source on a published schedule. Community deployments validate the product and surface improvements. Enterprise customers contribute patches. The permissive internal-use grant shortens sales cycles — engineers already know the product before procurement gets involved, and legal review clears it without the copyleft objections AGPL would have triggered.
+**Source-available flywheel.** FSL's Competing Use restriction prevents hyperscaler commodity competition for the first two years of each release; the Apache 2.0 future grant guarantees the community a path to true open source on a published schedule. Developer-platform community adoption (the largest audience by volume) validates the product at the primitive surface; enterprise customers contribute patches at the infrastructure layer; regional clouds adopt the managed tier to re-sell on top. The permissive internal-use grant shortens sales cycles — engineers already know the product before procurement gets involved, and legal review clears it without the copyleft objections AGPL would have triggered.
 
-The business model is simple: absorb complexity, return simplicity, charge for the difference.
+The business model is simple: absorb complexity, return simplicity, charge for the difference. The developer-platform framing is how the difference becomes visible.

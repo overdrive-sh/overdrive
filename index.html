@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Overdrive — Redefining how compute runs</title>
-<meta name="description" content="Orchestration infrastructure for a new generation of workloads. One Rust binary. Kernel-native dataplane. Built on the primitives Kubernetes never had." />
-<meta property="og:title" content="Overdrive — Redefining how compute runs" />
-<meta property="og:description" content="Orchestration infrastructure for a new generation of workloads. Source-available under FSL-1.1-ALv2." />
+<title>Overdrive — The open-source developer platform</title>
+<meta name="description" content="Deploy functions, durable objects, agents, queues, and cron — on infrastructure you own. One Rust binary. Kernel-native dataplane. Source-available." />
+<meta property="og:title" content="Overdrive — The open-source developer platform" />
+<meta property="og:description" content="Deploy functions, durable objects, agents, queues, and cron — on infrastructure you own. Source-available under FSL-1.1-ALv2." />
 <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -992,11 +992,11 @@
     </div>
 
     <h1 class="hero-title">
-      Redefining how compute&nbsp;runs.
+      Deploy functions, durable objects, agents, queues, and&nbsp;cron.
     </h1>
 
     <p class="hero-sub">
-      Orchestration infrastructure for a new generation of workloads.
+      On infrastructure you own. One Rust binary. Source-available.
     </p>
 
     <div class="hero-cta">
@@ -1005,8 +1005,8 @@
     </div>
 
     <div class="hero-meta">
+      <span><strong>~1&nbsp;ms</strong> WASM cold start</span>
       <span><strong>~50&nbsp;MB</strong> node image</span>
-      <span><strong>~30&nbsp;MB</strong> single-mode control plane</span>
       <span><strong>&lt;&nbsp;10s</strong> node join</span>
       <span><strong>FSL-1.1-ALv2</strong></span>
     </div>
@@ -1018,25 +1018,25 @@
   <div class="container" style="padding: 0;">
     <div class="audience-grid">
       <div class="audience-card">
-        <div class="audience-tag">Platform Engineering</div>
-        <h3>Get out from under the stack you maintain.</h3>
+        <div class="audience-tag">Developers</div>
+        <h3>Everything Cloudflare does. On infrastructure you own.</h3>
         <p>
-          Stop running etcd, cert-manager, an ingress controller, a service mesh, and a CNI plugin
-          as four independent failure domains. Overdrive ships them as one binary, with
-          three-node HA that fits in 80&nbsp;MB of memory.
+          Functions, durable objects, sandboxed agents, queues, cron, KV, per-workload SQL, S3-compatible storage.
+          One CLI, one config, one identity across every primitive.
+          Deploy from your laptop to a single bare-metal box or a multi-region fleet &mdash; same binary.
         </p>
-        <a href="#thesis" class="btn btn-outline">See the architecture <span class="arrow">→</span></a>
+        <a href="#workloads" class="btn btn-outline">See the primitives <span class="arrow">→</span></a>
       </div>
 
       <div class="audience-card">
-        <div class="audience-tag">SRE & On-Call</div>
-        <h3>Incidents that investigate themselves.</h3>
+        <div class="audience-tag">Platform Engineering</div>
+        <h3>Run the cluster. Expose the platform.</h3>
         <p>
-          Every eBPF event carries cryptographic workload identity. The native SRE agent correlates
-          across alerts via SQL joins, attaches signed BPF probes to verify hypotheses, and proposes
-          typed remediations through a graduated approval gate.
+          No etcd, no cert-manager, no CNI plugin, no service mesh &mdash; one binary with three-node HA
+          in 80&nbsp;MB of RAM. Operate a credible internal developer platform without maintaining
+          four independent failure domains underneath it.
         </p>
-        <a href="#sre" class="btn btn-outline">See the SRE agent <span class="arrow">→</span></a>
+        <a href="#thesis" class="btn btn-outline">See the architecture <span class="arrow">→</span></a>
       </div>
 
       <div class="audience-card">
@@ -1503,51 +1503,50 @@
 <section id="pricing">
   <div class="container">
     <div class="section-head">
-      <div class="eyebrow">Cloud platform</div>
-      <h2>Run your own. <span class="display-serif">Or let us run it.</span></h2>
+      <div class="eyebrow">How you use it</div>
+      <h2>Self-host free. <span class="display-serif">Let us run it when you don't want to.</span></h2>
       <p class="lead">
         The source-available core is FSL-1.1-ALv2 and ships in one binary. Every release converts
-        to Apache 2.0 two years after publication. The cloud platform sells the operational
-        complexity we already absorbed for ourselves &mdash; metered exactly, by kernel telemetry.
-        No estimation. No sampling.
+        to Apache 2.0 two years after publication. When you'd rather not operate the infrastructure yourself,
+        the managed cloud bills the same primitives &mdash; metered by kernel telemetry, not sampling.
       </p>
     </div>
 
     <div class="tiers">
       <div class="tier">
-        <div class="tier-num">Tier 1</div>
+        <div class="tier-num">Tier 0 · Free</div>
+        <h4>Self-hosted</h4>
+        <p class="desc">The full binary. Functions, durable objects, sandboxed agents, queues, cron, KV, SQL, object storage &mdash; all of it. One box, one cluster, or a fleet. No license fee; Apache 2.0 after two years.</p>
+        <div class="tier-billing">
+          <strong>FSL-1.1-ALv2</strong>
+          source-available · no tier gating
+        </div>
+      </div>
+
+      <div class="tier featured">
+        <div class="tier-num">Tier 1 · Flagship</div>
+        <h4>Serverless &amp; Managed Workloads</h4>
+        <p class="desc">Deploy a function, a durable object, a sandboxed agent (Claude Code, Cursor-style sessions), or a stateful VM (Postgres, CI runners, dev environments). Sub-10&nbsp;ms cold start on WASM; tens-of-ms resume on persistent microVMs. No cluster to size. Credential proxy and content inspector ship by default.</p>
+        <div class="tier-billing">
+          <strong>per invocation + GB-second</strong>
+          or per vCPU-hour + GB-hour
+        </div>
+      </div>
+
+      <div class="tier">
+        <div class="tier-num">Tier 2</div>
         <h4>Managed Overdrive</h4>
-        <p class="desc">A full Overdrive cluster as a service. Control plane, worker pool, and CLI &mdash; the way you'd run it yourself, only without running it.</p>
+        <p class="desc">A full Overdrive cluster as a service for platform teams running their own internal developer platform. Control plane, worker pool, and CLI &mdash; the way you'd run it yourself, only without running it.</p>
         <div class="tier-billing">
           <strong>per vCPU-hour + GB-hour</strong>
           metered at allocation level
         </div>
       </div>
 
-      <div class="tier featured">
-        <div class="tier-num">Tier 2 · Most flexible</div>
-        <h4>Managed Workloads</h4>
-        <p class="desc">Submit jobs directly. No cluster to size. No control plane to patch. Nomad-style ergonomics with Overdrive's identity and isolation model underneath.</p>
-        <div class="tier-billing">
-          <strong>per vCPU-hour + GB-hour</strong>
-          tenant namespace, kernel-isolated
-        </div>
-      </div>
-
       <div class="tier">
         <div class="tier-num">Tier 3</div>
-        <h4>Serverless WASM</h4>
-        <p class="desc">Sub-10 ms cold start. Scale-to-zero. The credential proxy and content inspector ship by default &mdash; built for the AI agent workloads no one else has a story for.</p>
-        <div class="tier-billing">
-          <strong>per invocation + GB-second</strong>
-          minimum unit: one invocation
-        </div>
-      </div>
-
-      <div class="tier">
-        <div class="tier-num">Tier 4</div>
         <h4>Bare Metal Dedicated</h4>
-        <p class="desc">Dedicated physical nodes inside the platform. Full hardware performance. Full Overdrive operational stack. No VM overhead between you and the silicon.</p>
+        <p class="desc">Dedicated physical nodes inside the managed platform. Full hardware performance. Full Overdrive operational stack. No VM overhead between you and the silicon.</p>
         <div class="tier-billing">
           <strong>per node-hour</strong>
           reserved capacity discounts
@@ -1566,9 +1565,10 @@
   <div class="container">
     <div class="final-cta">
       <div class="eyebrow" style="margin-bottom: 22px; justify-content: center; display: inline-flex;">Source-available · FSL-1.1-ALv2 · Apache 2.0 after 2 years</div>
-      <h2>Reimagining the foundation of modern infrastructure.</h2>
+      <h2>Everything Cloudflare does. On infrastructure you own.</h2>
       <p>
-        One binary. Every workload type. Built for the kernel of 2026, not the cluster of 2014.
+        Functions, durable objects, sandboxed agents, queues, cron, KV, SQL, object storage. One Rust binary.
+        Built for the kernel of 2026, not the cluster of 2014.
       </p>
       <div class="hero-cta">
         <a href="https://github.com/overdrive-sh/overdrive/blob/main/docs/whitepaper.md" class="btn btn-primary">Read the whitepaper <span class="arrow">→</span></a>
@@ -1586,7 +1586,7 @@
         <a class="brand" href="#">
           Overdrive<span class="brand-cursor" aria-hidden="true"></span>
         </a>
-        <p>A workload orchestration platform compiled to the kernel of 2026. Source-available under FSL-1.1-ALv2; each release converts to Apache 2.0 after two years.</p>
+        <p>An open-source developer platform compiled to the kernel of 2026. Functions, durable objects, sandboxed agents, queues, cron &mdash; on infrastructure you own. Source-available under FSL-1.1-ALv2; each release converts to Apache 2.0 after two years.</p>
       </div>
 
       <div class="footer-col">
@@ -1602,9 +1602,9 @@
       <div class="footer-col">
         <h5>Cloud</h5>
         <ul>
+          <li><a href="#pricing">Self-hosted (free)</a></li>
+          <li><a href="#pricing">Serverless &amp; Workloads</a></li>
           <li><a href="#pricing">Managed Overdrive</a></li>
-          <li><a href="#pricing">Managed Workloads</a></li>
-          <li><a href="#pricing">Serverless WASM</a></li>
           <li><a href="#pricing">Bare Metal</a></li>
         </ul>
       </div>

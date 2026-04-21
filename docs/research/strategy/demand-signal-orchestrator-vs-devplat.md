@@ -649,24 +649,6 @@ that the other follows architecturally.
 
 ---
 
-## Part 6 — Competitive Traction
-
-*Pending findings.*
-
----
-
-## Part 7 — Founder-Brand and Channel Fit
-
-*Pending findings.*
-
----
-
-## Part 8 — Cross-Audience Overlap
-
-*Pending findings.*
-
----
-
 ## Recommendation
 
 **Lead with the developer-platform framing in 2026–2027. Orchestrator-ness

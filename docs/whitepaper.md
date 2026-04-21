@@ -1,14 +1,16 @@
-# Overdrive: A Next-Generation Workload Orchestration Platform
+# Overdrive: An Open-Source Developer Platform on Kernel-Native Infrastructure
 
-**Version 0.12 — Draft**
+**Version 0.13 — Draft**
 
 ---
 
 ## Abstract
 
-Overdrive is an open-source workload orchestration platform built entirely in Rust, designed to replace Kubernetes, Nomad, and Talos for teams that demand simplicity, security, and efficiency without compromise. It unifies virtual machines, processes, unikernels, and serverless WASM functions under a single control plane, with a native eBPF dataplane, built-in mutual TLS, kernel-level mandatory access control, and LLM-driven self-healing observability — all without external dependencies like etcd, Envoy, SPIRE, or a CNI plugin.
+Overdrive is an open-source developer platform — functions, durable objects, sandboxed agents, queues, cron, KV, per-workload SQL, and S3-compatible object storage — built entirely in Rust and running on infrastructure you own. It exposes the primitive surface developers already use at Cloudflare, Vercel, and Fly.io (`deploy`, per-workload URLs, stateful actors, bindings-per-primitive, local hot-reload), on top of a foundation that also replaces Kubernetes, Nomad, and Talos for teams running their own infrastructure. Both audiences are served by a single Rust binary: a native eBPF dataplane, built-in mutual TLS, kernel-level mandatory access control, Cloud Hypervisor-backed persistent microVMs, and LLM-assisted observability — without external dependencies like etcd, Envoy, SPIRE, or a CNI plugin.
 
-The foundational thesis: the primitives required to build a genuinely better orchestration platform — stable eBPF APIs, production-ready Rust systems libraries, WASM runtimes, and kTLS offload — only reached maturity in the last two years. Overdrive makes different architectural choices than Kubernetes, not better ones for 2014, but definitively better ones for 2026.
+The foundational thesis: the primitives required to build a genuinely better platform — stable eBPF APIs, production-ready Rust systems libraries, WASM runtimes with WASI, kTLS offload, `userfaultfd`-based VM restore, SQLite CRDT replication, and a second generation of workload-identity standards (SPIFFE) — only reached maturity in the last two years. The developer experience that made Cloudflare's platform successful and the operational foundation that makes it possible can, for the first time, be built in one place by one team under one licence. Overdrive is that platform.
+
+The developer-platform framing is the front door; the orchestrator layer underneath — which would itself be a credible Kubernetes replacement — is the load-bearing technical story. Overdrive makes different architectural choices than Kubernetes: not better ones for 2014, but definitively better ones for 2026.
 
 ---
 
@@ -29,7 +31,7 @@ The foundational thesis: the primitives required to build a genuinely better orc
 13. [Dual Policy Engine](#13-dual-policy-engine)
 14. [Right-Sizing](#14-right-sizing)
 15. [Zero Downtime Deployments](#15-zero-downtime-deployments)
-16. [Serverless WASM Functions](#16-serverless-wasm-functions)
+16. [Developer Platform Primitives](#16-developer-platform-primitives)
 17. [Storage Architecture](#17-storage-architecture)
 18. [Reconciler and Workflow Primitives](#18-reconciler-and-workflow-primitives)
 19. [Security Model](#19-security-model)
@@ -1743,11 +1745,24 @@ The self-healing LLM agent watches deployment metrics automatically. For canary 
 
 ---
 
-## 16. Serverless WASM Functions
+## 16. Developer Platform Primitives
 
-### Cold Start
+The sections above describe the foundation: the drivers, the dataplane, the identity model, the policy engine, the storage taxonomy, the reconciler and workflow primitives. This section describes what a developer actually types, and what they receive in return — the primitive surface that composes the developer-platform framing. Every primitive here rides on the foundation already described; nothing here requires architectural compromise. The goal is a first-hour experience that looks like:
 
-WASM is the only workload type where cold start is genuinely negligible:
+```
+$ overdrive deploy function.ts
+✓ Function deployed to spiffe://overdrive.local/fn/hello
+✓ Public URL: https://hello.abc123.overdrive.dev
+✓ Bindings: KV=prod-kv, DB=prod-db, QUEUE=work
+```
+
+…from a single-node Overdrive running on the developer's laptop, on one bare-metal box, or on a managed cloud — same binary, same CLI, same primitive surface.
+
+### 16.1 WASM Functions
+
+The WASM driver remains the primary runtime for developer-authored functions. Cold start and sandboxing characteristics are the load-bearing differentiators.
+
+**Cold start:**
 
 | Workload Type | Cold Start |
 |---|---|
@@ -1757,43 +1772,249 @@ WASM is the only workload type where cold start is genuinely negligible:
 
 WASM modules are compiled to native code by Wasmtime at deployment time and cached on nodes. Subsequent invocations pay only instantiation cost.
 
-### Instance Pool
+**Instance pool.** The node agent maintains a pool of warm WASM instances per function. The observability layer predicts demand from traffic patterns and adjusts the warm-pool size proactively. Scale-to-zero drains the pool; scale-from-zero costs one instantiation (~1 ms).
 
-The node agent maintains a pool of warm WASM instances per function. The LLM observability layer predicts demand from traffic patterns and adjusts the warm pool size proactively. Scale-to-zero drains the pool; scale-from-zero costs one instantiation (~1ms).
-
-### Invocation Triggers
-
-- **HTTP** — gateway routes requests directly to the WASM driver
-- **Event** — platform event bus, jobs emit events that functions subscribe to
-- **Schedule** — cron expressions managed by the reconciler
-
-### Security
-
-WASM functions receive tighter sandboxing than other workload types:
+**Security.** WASM functions receive tighter sandboxing than other workload types:
 
 - **WASI capabilities** — filesystem, network, and environment access are explicitly granted in the job spec
 - **Wasmtime fuel** — computational budget prevents infinite loops and CPU starvation
 - **BPF LSM** — the Wasmtime process runs in a cgroup; LSM programs enforce syscall policy on the runtime itself
-- **WASM sidecars** — the full sidecar chain (section 9) applies to WASM functions identically to any other workload type; `builtin:credential-proxy` and `builtin:content-inspector` are particularly relevant for functions processing untrusted content
+- **WASM sidecars** — the full sidecar chain (§9) applies identically; `builtin:credential-proxy` and `builtin:content-inspector` are particularly relevant for functions processing untrusted content
 
 WASM functions processing untrusted content (documents, web pages, API responses) cannot exfiltrate data regardless of what instructions that content contains. LSM blocks raw socket creation. TC redirects all egress through the sidecar chain. Infrastructure enforces security; the model's judgment is not required.
 
-### Function SDK
+### 16.2 Durable Objects
+
+A Durable Object is a **single-writer WASM actor with a globally-unique addressable name and per-instance persistent storage**. Runs on the WASM driver (§16.1, Wasmtime, isolate-class cold start), not in a microVM. Requests targeting the same name serialise through the same instance; no other code can mutate that instance's storage. Storage is exposed as a KV surface and a per-object SQL handle (the per-workload libSQL from §16.7, scoped to the object).
 
 ```rust
-#[overdrive_fn::handler]
-async fn handle(req: Request, ctx: Context) -> Response {
-    // ctx.identity()          → SPIFFE ID for this invocation
-    // ctx.secret("API_KEY")   → credential fetched via proxy
-    // ctx.emit_event(...)     → platform event bus
-    // ctx.http()              → HTTP client routed via credential proxy
+#[overdrive::durable_object]
+struct Counter {
+    value: u64,
+}
 
-    let body: serde_json::Value = req.json()?;
-    Response::json(&process(body, &ctx).await?)
+impl Counter {
+    async fn increment(&mut self, ctx: &DoCtx) -> Result<u64> {
+        self.value += 1;
+        ctx.storage().put("v", self.value).await?;
+        Ok(self.value)
+    }
 }
 ```
 
-Language-agnostic via the WASM Component Model. TypeScript, Go, Python, and Rust functions share the same platform primitives.
+Invocation: `env.COUNTER.id("tenant-42").fetch(...)` reaches the instance serving `tenant-42`; if idle, it is instantiated from its storage snapshot at WASM instantiation cost (~1 ms warm, low-ms cold). Hibernation is the standard WASM scale-to-zero path — storage persists; the isolate is dropped until the next request.
+
+This is the Cloudflare Durable Objects shape: per-instance persistent state, globally-unique name, single-writer actor semantics, lightweight enough to stand up tens of thousands of instances per node. It is **not** a persistent microVM. For workloads that need a full kernel, arbitrary binaries, a file system, or an always-on process — AI coding agents, Postgres, CI runners, dev environments — use the persistent microVM primitive below.
+
+### 16.3 Persistent MicroVMs — Sandboxed and Stateful Workloads
+
+A distinct primitive from Durable Objects. A persistent microVM is a full Cloud-Hypervisor-backed VM with its own kernel, filesystem, and process space, designed for long-running stateful workloads that a WASM isolate cannot host. The full design is in §6 *Persistent MicroVMs — Long-Lived Stateful Workloads*; the developer-facing surface:
+
+```toml
+[job]
+name = "agent-sandbox"
+driver = "microvm"
+
+[job.microvm]
+persistent = true
+persistent_rootfs_size   = "100GB"
+snapshot_on_idle_seconds = 30
+expose                   = true    # auto-registers a gateway route
+```
+
+The rootfs is served by `overdrive-fs` (§17) as a single-writer content-addressed store; the workload survives migration between nodes. Cloud Hypervisor snapshot/restore with `userfaultfd` lazy memory paging (§14 *Scale-to-Zero for VM Workloads*) resumes the VM in tens of milliseconds on the next incoming request. VMGenID is updated on every restore so the guest kernel reseeds its RNG. Optional `overdrive-guest-agent` (§6) adds application-consistent snapshots for workloads that need stronger-than-crash-consistency guarantees.
+
+**When to use:**
+
+| Use case | Why persistent microVM |
+|---|---|
+| AI coding agents (Claude Code, Cursor sessions) | Arbitrary binaries; file system; long-running state across turns |
+| Stateful databases (Postgres, MySQL, Redis, Elasticsearch) | Real kernel; block device; per-instance WAL |
+| CI runners (Buildkite, GitLab self-hosted) | Arbitrary toolchains; warm build caches |
+| Remote dev environments (Codespaces-style, Jupyter) | Full OS; user filesystem persists across sessions |
+| Customer-code sandboxes in multi-tenant SaaS | Hardware isolation per tenant; arbitrary runtime |
+
+**Durable Object vs persistent microVM — picking the right primitive:**
+
+| Need | Primitive |
+|---|---|
+| Per-user counter, chat room, state machine, lightweight actor | Durable Object |
+| Function that occasionally needs KV or SQL | Function + KV / DB bindings |
+| Long-running agent executing arbitrary code | Persistent microVM |
+| Postgres, Kafka broker, full database workload | Persistent microVM |
+| Per-request compute, stateless | Function |
+
+Durable Objects are for small, isolate-class actor state. Persistent microVMs are for everything that needs a real OS.
+
+### 16.4 Schedule
+
+First-class resource (peer to `Job`, `Workflow`, `Investigation`) backed by the §18 workflow primitive. One rule variant is cron; others include interval, one-shot, and event-triggered. Explicit `DstPolicy`, bounded `CatchupPolicy`, UTC default with opt-in IANA timezones. The Kubernetes `CronJob` "100 missed starts silently disable" failure mode is banned by construction.
+
+```toml
+[[schedule]]
+name    = "daily-rollup"
+rule    = "cron"
+cron    = "0 2 * * *"
+tz      = "UTC"
+target  = "fn/rollup"
+catchup = { policy = "last-only", max_pending = 1 }
+```
+
+Or programmatically:
+
+```typescript
+export default defineSchedule({
+    name: "daily-rollup",
+    cron: "0 2 * * *",
+    handler: async (ctx) => { /* ... */ }
+});
+```
+
+### 16.5 EventBus
+
+Thin Rust trait convention over the existing `ObservationStore::subscribe` path (§4) — no new machinery. Scoped strictly to cluster signaling; durable messaging belongs on the Queue primitive.
+
+```typescript
+// publisher
+await env.EVENT.publish("order.created", { orderId: "42", amount: 99 });
+
+// subscriber
+export default defineEventHandler({
+    topic: "order.created",
+    handler: async (event, ctx) => { /* ... */ }
+});
+```
+
+Subscriptions map to Corrosion SQL subscriptions under the hood; every node reads its local SQLite, so propagation is gossip-latency (seconds) within and across regions. EventBus subsumes §9 sidecar audit events and §12 investigation-agent correlation inputs as standard consumers.
+
+### 16.6 Queue
+
+Durable pull-based messaging primitive for at-least-once delivery with acknowledgment. Embedded Rust implementation backed by `overdrive-fs` chunk-store log; one or more consumer groups per topic; consumer SPIFFE-identity-bound.
+
+```typescript
+// producer
+await env.QUEUE.send({ userId: "42", action: "sendEmail" });
+
+// consumer
+export default defineQueueConsumer({
+    queue: "work",
+    batchSize: 10,
+    handler: async (batch, ctx) => {
+        for (const msg of batch.messages) {
+            await process(msg.body);
+            msg.ack();
+        }
+    }
+});
+```
+
+The embedded queue ships with the binary. Operators who need Kafka-grade throughput or specific NATS / Redis semantics continue to deploy those as stateful workloads on `overdrive-fs` (§17) — the Queue primitive is deliberately narrower-than-Kafka and strictly sufficient for the CF Queues shape.
+
+### 16.7 KV
+
+Eventually-consistent key-value storage over a dedicated Corrosion table with LWW semantics under logical timestamps. Optimised for high-read, low-write, eventually-converging use cases: feature flags, edge config, session data.
+
+```typescript
+const value = await env.KV.get("feature:beta");
+await env.KV.put("session:abc", JSON.stringify(session), { expirationTtl: 3600 });
+const keys = await env.KV.list({ prefix: "session:" });
+```
+
+Reads are local-SQLite, sub-millisecond. Writes propagate via Corrosion gossip within seconds. KV is not a replacement for D1 or a durable queue — it is the primitive for the specific case where eventual consistency is correct.
+
+### 16.8 D1-Shape Addressable SQL
+
+Per-workload libSQL database, addressable from other workloads via SPIFFE identity. Every workload that declares `[sql]` gets a dedicated single-writer libSQL file backed by `overdrive-fs`; cross-workload reads go through the standard gateway + sockops mTLS path with a policy check against the declaring workload's egress allowlist.
+
+```typescript
+const stmt = env.DB.prepare("SELECT * FROM users WHERE id = ?").bind(userId);
+const { results } = await stmt.run();
+```
+
+Research: `docs/research/platform/libsql-per-workload-primitive-2026-04-20.md`. The per-workload model sidesteps the multi-tenant coordination cost that sinks shared SQLite deployments.
+
+### 16.9 R2 Bindings (Object Storage)
+
+Thin S3-API-compatible wrapper over Garage (§17) with a binding shape matching Cloudflare R2 for drop-in ergonomics.
+
+```typescript
+const obj = await env.R2.get("path/to/file.pdf");
+await env.R2.put("path/to/new.pdf", body, { httpMetadata: { contentType: "application/pdf" } });
+for await (const obj of env.R2.list({ prefix: "uploads/" })) { /* ... */ }
+```
+
+Garage is already in the platform stack; R2 bindings are an API translation layer, not a new store.
+
+### 16.10 Invocation Triggers
+
+Functions, Durable Objects, and persistent microVMs can be invoked by:
+
+- **HTTP / WebSocket** — gateway routes requests to the target driver, respecting the middleware pipeline (auth, rate-limit, CORS, region-replay)
+- **Schedule** — cron / interval / one-shot rules under §16.4
+- **Event** — EventBus subscription under §16.5
+- **Queue** — Queue consumer under §16.6
+
+All four triggers share the same SPIFFE-identity binding, the same §9 sidecar chain, and the same observability output. Persistent microVMs also support the auto-wake path: an HTTP request to a suspended microVM triggers restore via the gateway (§14 *Proxy-Triggered Resume*) before the request is replayed.
+
+### 16.11 Bindings ABI
+
+A WASM host interface that exposes `env.KV`, `env.DB`, `env.R2`, `env.QUEUE`, `env.EVENT`, `env.SCHEDULE`, and `env.DO` to function code. CF-compatible where possible so "port your Worker" is a credible story; Overdrive-native where the semantics diverge (e.g. DO addressability, Queue consumer semantics). The bindings ABI is the single largest developer-experience deliverable — every primitive above lands behind it.
+
+```rust
+// Rust
+use overdrive::{handler, Env, Request, Response};
+
+#[handler]
+async fn handle(req: Request, env: Env) -> Response {
+    let session = env.kv("sessions").get(&req.header("cookie")).await?;
+    let user = env.db("primary").query_one("SELECT * FROM users WHERE id = ?", &[&session.user_id]).await?;
+    env.queue("work").send(&AuditEvent { user_id: user.id }).await?;
+    Response::json(&user)
+}
+```
+
+```typescript
+// TypeScript
+export default {
+    async fetch(req: Request, env: Env): Promise<Response> {
+        const session = await env.SESSIONS.get(req.headers.get("cookie") ?? "");
+        const user = await env.DB.prepare("SELECT * FROM users WHERE id = ?").bind(session.userId).first();
+        await env.WORK.send({ userId: user.id });
+        return Response.json(user);
+    }
+};
+```
+
+### 16.12 `overdrive-ff` SDK
+
+The client-side SDK — `defineFunction`, `defineDurableObject`, `defineWorkflow`, `defineSchedule`, `defineEventHandler`, `defineQueueConsumer` — ships in a separate repository under Apache-2.0, published to npm, crates.io, and PyPI. The source-available server binary stays FSL-1.1-ALv2; the SDK is permissively licensed so it can be embedded freely in customer code without licence concerns.
+
+### 16.13 CLI — `overdrive deploy` and friends
+
+The same Overdrive binary exposes a developer verb tree alongside the operator verb tree:
+
+```
+overdrive deploy function.ts             # deploy a function or DO
+overdrive dev                            # local single-node + hot reload
+overdrive tail <fn>                      # stream logs and traces
+overdrive logs <fn> --since 10m          # historical logs query
+overdrive secret put <key>               # write a secret into the credential proxy
+overdrive kv put <ns> <key> <value>      # per-primitive operational verbs
+overdrive r2 put <bucket> <key> <file>
+overdrive d1 exec <db> --file migration.sql
+overdrive schedule list
+overdrive queue drain <queue>
+```
+
+Nothing here ships as a second binary or a separate install; it is the same `overdrive` command that operators already use, with a parallel verb tree scoped to application-developer tasks.
+
+### 16.14 Local Development — `overdrive dev`
+
+`overdrive dev` spins up a single-node Overdrive instance locally, runs the function under Wasmtime, and stubs every binding against a local persistence layer (libSQL files for KV / DB, a local filesystem for R2, an in-memory Queue). Hot reload on file change; logs stream to the terminal. This is the development-loop experience that makes Workers + wrangler usable; without it the platform's primitives are irrelevant to the audience that would actually adopt them.
+
+### 16.15 Language Support
+
+Language-agnostic via the WASM Component Model. Rust, TypeScript, Python, and Go SDKs share the same bindings ABI and the same `overdrive-ff` surface. A function authored in one language composes with Durable Objects authored in another; the platform sees only the exported WASM component.
 
 ---
 
@@ -2708,95 +2929,111 @@ Upgrades are handled by the OCI registry frontend. A node running Overdrive can 
 
 ## 24. Roadmap
 
+The roadmap is ordered to reach the **v1 developer-platform launch** (Phase 5) as the load-bearing milestone. The foundation phases (1–3) build the invisible infrastructure; Phase 4 lands the developer-facing primitives; Phase 5 wires them behind a bindings ABI, a wrangler-equivalent CLI, and a local-dev experience. Phase 6 broadens the developer-platform surface; Phase 7 runs in parallel when team size allows, landing the orchestrator-side features that serve the platform-engineering and sovereign-cloud audiences.
+
+Every primitive in Phase 4 is already specified in §16; the phases here enumerate the shipping order, not the design.
+
 ### Phase 1 — Foundation (Months 1–3)
-- Core data model (Job, Node, Allocation, Policy)
+- Core data model (`Job`, `Node`, `Allocation`, `Policy`, `Function`, `DurableObject`, `Schedule`)
 - Control plane API (tonic/gRPC — internal node-agent + CLI transport)
-- IntentStore abstraction: LocalStore (redb direct) for single mode
-- ObservationStore abstraction: single-process in-memory implementation (lays the trait boundary early, swapped for Corrosion in Phase 2)
-- Injectable Clock, Transport, Entropy, Dataplane, Driver, ObservationStore, Llm traits
-- turmoil simulation harness + SimDriver / SimDataplane / SimClock / SimObservationStore / SimLlm (transcript-replay)
+- `IntentStore` abstraction: `LocalStore` (redb direct) for single mode
+- `ObservationStore` abstraction: single-process in-memory implementation (trait boundary; swapped for Corrosion in Phase 2)
+- Injectable `Clock`, `Transport`, `Entropy`, `Dataplane`, `Driver`, `ObservationStore`, `Llm` traits
+- turmoil simulation harness + Sim* implementations (including `SimLlm` transcript-replay)
 - Process driver
 - Basic scheduler (first-fit)
-- CLI (`overdrive job submit`, `overdrive node list`, `overdrive alloc status`)
-- Image Factory MVP: `meta-overdrive` Yocto layer, `overdrive-image-factory` Rust service (schematic store, artifact cache, HTTP download frontend)
+- **Operator CLI** (`overdrive cluster`, `overdrive node`, `overdrive op`, `overdrive job`) **and initial developer-CLI skeleton** (`overdrive deploy`, `overdrive dev`, `overdrive tail` stubs wired to the control-plane API)
+- Image Factory MVP: `meta-overdrive` Yocto layer, `overdrive-image-factory` Rust service (schematic store, artifact cache, HTTP download frontend — minimum that supports a single-node installer and one cloud AMI; OCI registry, PXE, dm-verity, TPM attestation, Secure Boot move to Phase 7)
 
-### Phase 2 — Networking and Observation (Months 3–6)
+### Phase 2 — Dataplane + Observation (Months 3–6)
 - aya-rs eBPF scaffolding
 - XDP routing and service load balancing
 - TC egress control
-- RaftStore (openraft + redb) for HA mode + single → HA migration
-- **CorrosionStore — production ObservationStore backed by Corrosion + cr-sqlite**
-- **Corrosion schema: `alloc_status`, `service_backends`, `node_health`, `policy_verdicts`**
+- **CorrosionStore — production ObservationStore backed by Corrosion + cr-sqlite.** Even on single-node, Corrosion is the right backend for the observation layer — subscriptions drive BPF map hydration. `SimObservationStore` only covers DST.
+- **Corrosion schema: `alloc_status`, `service_backends`, `node_health`, `policy_verdicts`**, extended in Phase 4 with developer-primitive tables (`function_registry`, `kv_partitions`, `schedule_state`, `event_topics`)
 - BPF map hydration via Corrosion subscriptions (retires the gRPC push path for dataplane state)
 - Node-identity-scoped write authorisation on Corrosion peers
 - Additive-only schema migration tooling (avoids the Fly backfill-storm failure mode)
-- **Real-kernel integration test harness (§22)**: Tier 2 BPF unit tests via `BPF_PROG_TEST_RUN`, Tier 3 kernel-matrix CI via `little-vm-helper` reusing aya's `cargo xtask integration-test vm` entry point, Tier 4 verifier complexity gates via `veristat` and XDP perf baselines via `xdp-bench` — bootstrapped alongside the first XDP/TC programs so every subsequent eBPF addition lands with a kernel-matrix gate
+- **Real-kernel integration test harness (§22)** bootstrapped alongside the first XDP/TC programs: Tier 2 BPF unit tests via `BPF_PROG_TEST_RUN`, Tier 3 kernel-matrix CI via `little-vm-helper`, Tier 4 verifier complexity gates via `veristat`, XDP perf baselines via `xdp-bench`. Every subsequent eBPF addition lands with a kernel-matrix gate.
 
-### Phase 3 — Identity and Security (Months 6–9)
+(`RaftStore` for HA mode moves to Phase 7 — single-node devplat v1 sits on `LocalStore`.)
+
+### Phase 3 — Identity + Runtime Base (Months 6–9)
 - Built-in CA (rcgen + rustls)
 - SPIFFE SVID issuance and rotation
-- **Operator identity and CLI authentication (§8).** 8-hour default TTL client certs issued by the platform CA to human operators and CI systems, SPIFFE IDs under `spiffe://overdrive.local/operator/...` with role encoded in the path (never in CN/O — avoids the etcd CVE-2018-16886 shape), `~/.overdrive/config` layout matching `~/.kube/config` / `~/.talos/config`, `overdrive cluster init` mints the first admin cert, `overdrive op create` mints additional ones. Operator identity is global across regions from day one. Emergency revocation via a `revoked_operator_certs` table in the ObservationStore — gossip-propagated within seconds, consulted on every auth attempt from local SQLite, no CRL/OCSP, rows self-drop at `expires_at` via the revocation-sweep reconciler
+- **Operator identity and CLI authentication (§8).** 8-hour default TTL client certs, SPIFFE IDs under `spiffe://overdrive.local/operator/...`, `~/.overdrive/config` layout matching `~/.kube/config` / `~/.talos/config`, `overdrive cluster init` mints the first admin cert, `overdrive op create` mints additional ones. Emergency revocation via a `revoked_operator_certs` table in the ObservationStore — gossip-propagated within seconds; rows self-drop at `expires_at`. OIDC bridge and Biscuit delegation move to Phase 7.
 - sockops mTLS + kTLS installation
 - BPF LSM programs
-- Regorus policy evaluation (intent), verdict compilation into ObservationStore
-- Tier 3 sockops + kTLS test cases (verified via `ss -K` and veth wire capture) and BPF LSM positive/negative test fixtures (Tetragon-style, asserting on the BPF ringbuf event stream) added to the §22 kernel matrix
-- **Workflow primitive — Rust trait `Workflow { async fn run(&self, ctx: &WorkflowCtx) -> WorkflowResult }`, durable journal in per-primitive libSQL, typed-signal coordination via ObservationStore, workflow-lifecycle reconciler.** Certificate rotation lands as the first internal workflow on this primitive (replacing the "workflow reconciler" conflation — workflows are a peer primitive to reconcilers, not a reconciler variant). DST-gated via replay-equivalence property tests; injected Transport/Clock/Entropy.
+- Regorus policy evaluation (intent), verdict compilation into ObservationStore — platform-default policy set only in v1; custom policy authoring UX moves to Phase 7
+- Tier 3 sockops + kTLS test cases and BPF LSM positive/negative fixtures added to the §22 kernel matrix
+- **Workflow primitive — `Workflow { async fn run(&self, ctx: &WorkflowCtx) -> WorkflowResult }`**, durable journal in per-primitive libSQL, typed-signal coordination via ObservationStore, workflow-lifecycle reconciler. DST-gated via replay-equivalence property tests. Certificate rotation lands as the first internal workflow on this primitive.
 
-### Phase 4 — Additional Drivers (Months 9–12)
-- Cloud Hypervisor microVM and VM driver (replaces Firecracker + QEMU)
-- virtiofsd lifecycle management and cross-workload volume sharing
-- WASM serverless driver (Wasmtime)
+### Phase 4 — Runtime + Developer Primitives (Months 9–14)
+- Cloud Hypervisor microVM and VM driver
+- virtiofsd lifecycle management + cross-workload volume sharing
+- WASM driver (Wasmtime)
 - WASM sidecar runtime + TC eBPF interception generalisation
-- Built-in sidecars: credential-proxy, content-inspector, rate-limiter, request-logger
+- Built-in sidecars: `credential-proxy`, `content-inspector`, `rate-limiter`, `request-logger`
 - Sidecar SDK (Rust + TypeScript)
 - Gateway (hyper + rustls)
-- Embedded ACMEv2 client via `instant-acme` (rustls-native, `rcgen`-integrated) — public-trust certs for the gateway (HTTP-01, DNS-01, TLS-ALPN-01), rotation unified with SVIDs in `IdentityMgr` on a single cert-generation path
-- DuckLake telemetry pipeline (catalog: libSQL, storage: Garage Parquet)
-- Mesh VPN underlay extensions (§7 *Node Underlay*): `wireguard` with platform-managed keys via enrollment (pubkeys gossiped through `node_health`), and `tailscale` with bring-your-own coordination (Tailscale tailnet or self-hosted Headscale) — mutually exclusive in the schematic
+- Embedded ACMEv2 client via `instant-acme` — public-trust certs for the gateway (HTTP-01, DNS-01, TLS-ALPN-01), rotation unified with SVIDs in `IdentityMgr`
+- DuckLake telemetry pipeline (catalog: libSQL, storage: Garage Parquet) — basic `overdrive tail` / `overdrive logs` interface; full DuckLake SQL and time-travel API move to Phase 7
+- **Persistent microVMs** — Cloud Hypervisor snapshot/restore with `userfaultfd`; VMGenID on restore; `overdrive-fs` single-writer chunk store (content-addressed chunks in Garage, per-rootfs libSQL metadata with streaming WAL, NVMe 2Q cache, `vhost-user-fs` frontend); gateway auto-route via `expose = true` + credential-proxy defaults; idle-eviction reconciler with checkpoint (`snapshot_on_idle_seconds`) for scale-to-zero. Steps 1–4 of the persistent-microVM plan; step 5 (guest agent) lands in Phase 5. **This is Durable Objects.**
+- **WASM scale-to-zero** — true idle-zero for WASM functions. Control-plane contract uniform with microVM scale-to-zero: `suspended` is a first-class allocation state.
+- **Schedule primitive (§16.4)** — first-class resource, peer to Job/Workflow, backed by the §18 workflow primitive. Explicit `DstPolicy` and bounded `CatchupPolicy`.
+- **EventBus primitive (§16.5)** — thin Rust trait over `ObservationStore::subscribe`. Subsumes §16 WASM event triggers, §9 sidecar audit events, §12 investigation-agent correlation.
+- **KV primitive (§16.7)** — CF-shape eventually-consistent key-value over a dedicated Corrosion table with LWW semantics.
+- **D1-shape addressable libSQL (§16.8)** — per-workload single-writer libSQL database, SPIFFE-identity-addressable from other workloads via the gateway.
+- **R2 bindings (§16.9)** — thin S3-API-compatible wrapper over Garage with CF-shape binding API.
+- **Queue primitive (§16.6)** — embedded Rust pull-based queue, backed by `overdrive-fs` chunk-store log, at-least-once delivery, consumer-group semantics. Broker-grade external queues (Kafka, NATS) remain user-space workloads.
+- Mesh VPN underlay extensions (§7 *Node Underlay*) — `wireguard` and `tailscale` variants available as Image Factory extensions. Kept optional; not on the devplat-v1 critical path.
 
-### Phase 5 — Intelligence (Months 12–18)
-- LLM observability agent (rig-rs) with native SRE-investigation primitives:
-  - `Investigation` as a first-class resource (ObservationStore live state + incident-memory libSQL on conclusion)
-  - Declarative toolset catalog (`builtin:overdrive-core` Rust trait object + WASM-extensible third-party toolsets, content-addressed in Garage)
-  - Typed `Action` enum with risk-tier approval gate (Tier 0 auto / Tier 1 auto+notify / Tier 2 human-ratify)
-  - `correlation_key` on telemetry for alert de-duplication; SPIFFE-identity joins across DuckLake for cross-event correlation
-  - `llm_spend` reconciler for per-investigation, per-job, and cluster-wide token budget enforcement
-- Self-healing tier 3 (LLM reasoning)
-- Right-sizing reconciler (writes resource profiles into ObservationStore)
-- Incident memory (libSQL) with embedding-similarity retrieval for runbook + prior-incident lookup
-- Predictive scaling
-- Persistent microVMs (step 1): Cloud Hypervisor snapshot/restore exposed in the `microvm` driver with `userfaultfd` lazy memory paging; VMGenID wired into the guest on restore
-- Persistent microVMs (step 2): `overdrive-fs` — Rust-native single-writer chunk store (content-addressed chunks in Garage, per-rootfs libSQL metadata with streaming WAL, NVMe 2Q cache, `vhost-user-fs` frontend). Scope: rootfs only, not a general distributed filesystem
-- Persistent microVMs (step 3): gateway auto-route (`expose = true`) + credential-proxy sidecar defaults
-- Persistent microVMs (step 4): idle-eviction reconciler with checkpoint (`snapshot_on_idle_seconds`) — scale-to-zero for long-lived stateful workloads
-- Persistent microVMs (step 5): `overdrive-guest-agent` — minimal in-VM agent over ttRPC/virtio-vsock with SPIFFE identity; four-method surface (`fs_quiesce`, `fs_thaw`, `vmgenid_ack`, `resume_notify`) for application-consistent snapshots, acknowledged VMGenID reseeds, and post-resume service-restart signalling. Opt-in via Image Factory extension
+### Phase 5 — Developer Experience — **v1 DEVPLAT LAUNCH** (Months 14–18)
+- **Bindings ABI (§16.11)** — the WASM host interface that exposes `env.KV`, `env.DB`, `env.R2`, `env.QUEUE`, `env.EVENT`, `env.SCHEDULE`, `env.DO` to function code. CF-compatible where possible; Overdrive-native where semantics diverge. Single largest DX deliverable. Paper spec lands **before** the Phase 4 primitives begin, so each primitive builds against a known target shape.
+- **Wrangler-equivalent CLI (§16.13)** — `overdrive deploy`, `overdrive dev`, `overdrive tail`, `overdrive logs`, `overdrive secret`, plus per-primitive verbs (`overdrive kv`, `overdrive r2`, `overdrive d1`, `overdrive schedule`, `overdrive queue`). Same binary as the server and the operator CLI.
+- **Miniflare-equivalent local dev (§16.14)** — `overdrive dev` spins up a single-node Overdrive with hot-reload and local binding stubs.
+- **`overdrive-ff` SDK (§16.12)** — Rust / TypeScript / Python client-side library under Apache-2.0 in a separate repository; published to crates.io / npm / PyPI from launch.
+- **Persistent microVM guest agent (§6)** — `overdrive-guest-agent` over ttRPC/virtio-vsock with SPIFFE identity: four-method surface (`fs_quiesce`, `fs_thaw`, `vmgenid_ack`, `resume_notify`) for application-consistent snapshots. Opt-in Image Factory extension.
+- **v1 devplat launch criterion:** `overdrive deploy function.ts` against a single-node box produces a working public URL with KV / DB / R2 / Queue / EventBus / Schedule / Durable Object bindings, all wired against the Phase 4 primitives, all DST-gated where applicable, all exercised against the §22 kernel matrix where kernel code runs.
 
-### Phase 6 — Federation and Ecosystem (Months 18+)
-- WASM Component Model SDK (Rust, TypeScript, Go)
-- **Workflow WASM SDK (Rust, TypeScript, Go).** Application-facing durable execution on the same `Workflow` primitive the platform uses internally. `ctx.call(...)` / `ctx.sleep(...)` / `ctx.wait_for_signal(...)` / `ctx.activity(...)` as the core surface; journal-based versioning guard checked at module load; SPIFFE-identity-bound workflow instances; policy-gated tool surface. Migrates the Phase 3 internal-only primitive into a user-facing SDK without a second runtime — the platform's own durable sequences become reference workflows
+### Phase 6 — Devplat Breadth (Months 18–24)
+- WASM Component Model SDK (Rust, TypeScript, Python, Go)
+- **Workflow WASM SDK** — application-facing durable execution on the §18 Workflow primitive. `ctx.call(...)` / `ctx.sleep(...)` / `ctx.wait_for_signal(...)` / `ctx.activity(...)` as the core surface; journal-based versioning guard checked at module load; SPIFFE-identity-bound workflow instances. Migrates the Phase 3 internal-only primitive into a user-facing SDK without a second runtime.
+- **Pages-equivalent git-driven build pipeline** — static + SSR hosting on the WASM driver + gateway; git integration, build pipeline, preview URLs. Flagship Phase 6 item.
 - OTel export adapter
-- Unikernel drivers (Nanos, Unikraft with virtiofs)
-- QEMU opt-in driver (exotic hardware emulation only)
-- Runbook primitive — markdown + YAML frontmatter matching the HolmesGPT runbook format for community-catalog reuse, content-addressed in Garage, indexed in incident-memory libSQL via embedding similarity, loaded by a `RunbookLoader` reconciler
-- Platform-signed diagnostic-probe catalog for `Action::AttachDiagnosticProbe` — curated BPF programs the investigation agent can attach to verify hypotheses, with duration-bounded auto-detach enforced by a deadline reconciler and a §22 Tier 3 integration-test fixture per probe
-- **Multi-region federation: per-region IntentStore (Raft) + global ObservationStore (Corrosion)**
-- **Regional Corrosion clusters + thin global membership cluster (regionalized blast radius from day one — the lesson Fly learned mid-incident)**
-- **Region-aware scheduler + gateway (reads `node_health.region` from local SQLite)**
-- Cross-region partition tolerance: each region continues to operate on locally-committed intent under partition; observation converges via LWW on heal
-- **`ShardedIntentStore` — Twine-shape pluggable backend for single-region density beyond the openraft+redb ceiling.** The `IntentStore` trait (§4) already abstracts over `LocalStore` and `RaftStore`; a third implementation narrows consensus to a coarse allocator (durable-Paxos regional index of machines → entitlements, weeks/months timescale) and delegates fine-grained task placement to per-entitlement schedulers with independent storage. Directly modelled on Meta's Twine (Tang et al., OSDI 2020), which operates one control plane per region over ~1M machines without cluster federation by using exactly this decomposition. **Gated on a design partner with a real single-region density requirement above ~10k nodes** — building this speculatively would ship complexity that cannot be tuned without representative workload shape. Until then, the evidence-backed single-region ceiling for openraft+redb is conservatively ~5–10k worker nodes (Borg's empirical cell-size median under Paxos is the closest public reference point); deployments exceeding this add regions rather than scaling a region.
+- Workers AI equivalent — gated on a GPU-scheduling spike; defer if the spike doesn't produce a coherent primitive
+- Vectorize equivalent — gated on Rust-native embedded vector DB (Qdrant, LanceDB) composing cleanly
+
+### Phase 7 — Platform Scaling (Months 18–24, parallel to Phase 6 when team size allows)
+- `RaftStore` (openraft + redb) for HA mode + non-destructive `LocalStore → RaftStore` migration via `export_snapshot` / `bootstrap_from`
+- **Multi-region federation: per-region IntentStore (Raft) + global ObservationStore (Corrosion).** Regional Corrosion clusters + thin global membership cluster (regionalised blast radius from day one — the lesson Fly learned mid-incident). Region-aware scheduler + gateway read `node_health.region` from local SQLite. Cross-region partition tolerance: each region operates on locally-committed intent under partition; observation converges via LWW on heal.
+- **LLM observability agent (rig-rs) with native SRE-investigation primitives**, previously enumerated under Phase 5: `Investigation` as a first-class resource; declarative toolset catalog; typed `Action` enum with risk-tier approval gate; `correlation_key` on telemetry; `llm_spend` reconciler
+- Self-healing Tier 3 (LLM reasoning)
+- Right-sizing reconciler (writes resource profiles into ObservationStore)
+- Incident memory (libSQL) with embedding-similarity retrieval
+- Predictive scaling
+- Runbook primitive — HolmesGPT-format markdown + YAML frontmatter, content-addressed in Garage, indexed via embedding similarity
+- Platform-signed diagnostic-probe catalog for `Action::AttachDiagnosticProbe` — curated BPF programs the investigation agent can attach to verify hypotheses
 - Image Factory: OCI registry frontend, PXE boot, dm-verity + TPM attestation, Secure Boot signing
-- **OIDC enrolment bridge for operators (§8).** `overdrive login` performs OIDC Authorization Code + PKCE against a configured IdP (Google Workspace, GitHub, Okta), the control plane validates the ID token and mints a short-TTL operator SVID, replacing out-of-band admin-bootstrap. Removes the kubeconfig-style stolen-cert risk — offboarding becomes an IdP concern. Uses `openidconnect` / `jsonwebtoken` / `oauth2` Rust crates
-- **Biscuit tokens for CI delegation (§8).** `biscuit-auth` (Rust-native, Ed25519, Datalog policy) carried in a gRPC metadata header on top of mTLS — operators attenuate their own SVID into a short-lived capability token scoped to a specific job, action, and expiry, without the delegatee enrolling in the CA. Additive to mTLS, not a replacement; Regorus authorises the mTLS identity, Biscuit policy authorises the delegated capability
+- **OIDC enrolment bridge for operators (§8).** `overdrive login` performs OIDC Authorization Code + PKCE against a configured IdP (Google Workspace, GitHub, Okta), the control plane validates the ID token and mints a short-TTL operator SVID.
+- **Biscuit tokens for CI delegation (§8).** `biscuit-auth` carried in a gRPC metadata header on top of mTLS — operators attenuate their own SVID into a short-lived capability token scoped to a specific job, action, and expiry.
+- **`ShardedIntentStore` — Twine-shape pluggable backend for single-region density beyond the openraft+redb ceiling.** Gated on a design partner with a real single-region density requirement above ~10k nodes — building this speculatively ships complexity that cannot be tuned without representative workload shape.
+
+### Phase 8+ — Long Tail
+- Unikernel drivers (Nanos, Unikraft with virtiofs) — revisited only on concrete demand signal
+- QEMU opt-in driver — exotic hardware emulation only, revisited only on concrete demand signal
+
+Neither is on the devplat-v1 path or the orchestrator-track path; both were in earlier roadmap drafts and are retained here as deferred entries rather than deleted capabilities.
 
 ---
 
 ## Conclusion
 
-Overdrive is not a Kubernetes improvement. It is a clean-slate design that leverages a set of primitives — stable eBPF APIs, Rust systems libraries, WASM runtimes, kernel TLS — that simply did not exist at production quality when Kubernetes was designed.
+Overdrive is neither a Kubernetes improvement nor a closed-source-cloud clone. It is a clean-slate design that leverages a set of primitives — stable eBPF APIs, Rust systems libraries, WASM runtimes with WASI, kernel TLS, `userfaultfd`-based VM restore, SQLite CRDT replication, SPIFFE — that simply did not exist at production quality when Kubernetes was designed, and that no single proprietary platform has assembled under one roof.
 
-The result is a platform that is structurally more efficient, more secure, and more observable than any existing orchestrator, while supporting a broader range of workload types under a unified operational model.
+The result is a platform that is structurally more efficient, more secure, and more observable than any existing orchestrator, while exposing a developer surface — functions, durable objects, sandboxed agents, queues, cron, KV, per-workload SQL, object storage — that competitors ship only as proprietary hosted products. Both experiences run on the same binary. The foundation that enables the developer pitch is exactly the foundation that would be a credible Kubernetes replacement.
 
-The core insight is that eBPF is not a feature to add to an orchestrator. It is the right foundation for one. When the dataplane, the security model, the telemetry pipeline, and the service mesh all emerge from the same kernel primitive with the same workload identity attached, the platform is coherent in a way that bolted-on approaches cannot match.
+The core insight is that eBPF is not a feature to add to an orchestrator, and a developer platform is not a feature to bolt onto an orchestrator either. They share a foundation. When the dataplane, the security model, the identity layer, the telemetry pipeline, the service mesh, and the developer bindings all emerge from the same kernel primitives with the same workload identity attached, the platform is coherent in a way that bolted-on approaches cannot match — for the developer deploying their first function, and for the platform engineer operating the fleet beneath.
 
 ---
 
