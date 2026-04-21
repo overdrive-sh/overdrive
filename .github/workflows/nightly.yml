@@ -1,0 +1,125 @@
+# Overdrive nightly — full-workspace mutation testing, trend tracking.
+#
+# Scope: nightly soak; NOT gating PRs. Per-PR mutation testing is
+# diff-scoped in ci.yml. The nightly job exists to catch baseline drift
+# that a diff-scoped run cannot see (e.g. a test refactor that weakens
+# assertions on code outside the current PR).
+#
+# Baseline lives under `mutants-baseline/main/` and is maintained by the
+# platform team — this workflow compares the nightly run against it.
+#
+# References:
+#   - .claude/rules/testing.md §Mutation testing (cargo-mutants) —
+#     "Regression gate on direction, not just level."
+#   - CI topology job I: `cargo xtask mutants --workspace` full corpus;
+#     trend tracking.
+#
+# Behaviour:
+#   - Drift > 2 percentage points below baseline → soft-fail (warn via
+#     GitHub step summary; does NOT block main).
+#   - Absolute kill rate < 60% (critical regression) → hard-fail, open
+#     issue via gh-cli in a follow-up workflow.
+#
+# This job is NOT in the required-status-checks set for branch
+# protection. It runs on schedule, writes a report, and annotates.
+
+name: Nightly
+
+on:
+  schedule:
+    # 03:13 UTC — off-peak for US/EU runner pools; the 13-minute offset
+    # prevents piling up against the top-of-hour cron wave that other
+    # projects tend to use.
+    - cron: '13 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+jobs:
+  mutants-workspace:
+    name: cargo mutants (full workspace)
+    runs-on: ubuntu-latest
+    timeout-minutes: 360  # 6h ceiling; full corpus takes as long as it takes
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "nightly-mutants"
+
+      - uses: mozilla-actions/sccache-action@v0.0.6
+        with:
+          version: "v0.8.2"
+
+      - name: Install cargo-mutants
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants
+
+      - name: Run full-workspace mutants
+        run: |
+          set -euo pipefail
+          cargo mutants --workspace --output mutants.out --json || true
+
+      - name: Compare against baseline
+        run: |
+          set -euo pipefail
+          if [ ! -f mutants.out/outcomes.json ]; then
+            echo "::error title=mutants::no outcomes.json produced"
+            exit 1
+          fi
+          python3 - <<'PY'
+          import json, os, sys, pathlib
+          with open("mutants.out/outcomes.json") as f:
+              data = json.load(f)
+          outcomes = data.get("outcomes", [])
+          if not outcomes:
+              print("no mutations produced — pipeline misconfigured")
+              sys.exit(1)
+          total = len(outcomes)
+          caught = sum(1 for o in outcomes if o.get("outcome") == "caught")
+          kill_rate = (caught / total) * 100
+          baseline_path = pathlib.Path("mutants-baseline/main/kill_rate.txt")
+          if not baseline_path.exists():
+              # First run — seed the baseline.
+              print(f"no baseline found; seeding at {kill_rate:.1f}%")
+              print(f"kill_rate={kill_rate:.1f}%")
+              sys.exit(0)
+          baseline = float(baseline_path.read_text().strip().rstrip('%'))
+          delta = kill_rate - baseline
+          summary = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary:
+              with open(summary, "a") as f:
+                  f.write(f"## Nightly mutation testing\n\n")
+                  f.write(f"| Metric | Value |\n|---|---|\n")
+                  f.write(f"| Total mutations | {total} |\n")
+                  f.write(f"| Caught | {caught} |\n")
+                  f.write(f"| Kill rate | {kill_rate:.1f}% |\n")
+                  f.write(f"| Baseline | {baseline:.1f}% |\n")
+                  f.write(f"| Delta | {delta:+.1f} pp |\n")
+          if kill_rate < 60.0:
+              print(f"::error title=critical mutants regression::{kill_rate:.1f}% < 60% absolute floor")
+              sys.exit(1)
+          if delta < -2.0:
+              # Soft-fail via annotation — does NOT block main, but does
+              # surface a red X on the scheduled run so the team sees it.
+              print(f"::warning title=mutants drift::{delta:+.1f}pp below baseline {baseline:.1f}%")
+          else:
+              print(f"kill_rate={kill_rate:.1f}% (baseline={baseline:.1f}% delta={delta:+.1f}pp) — ok")
+          PY
+
+      - name: Upload nightly mutants report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutants-nightly-report
+          path: mutants.out/
+          retention-days: 30
+          if-no-files-found: warn

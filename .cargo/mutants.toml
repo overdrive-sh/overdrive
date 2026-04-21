@@ -1,0 +1,123 @@
+# cargo-mutants configuration — project-level exclusions.
+#
+# Source of truth for what IS and IS NOT mutation-tested in this repo is
+# `.claude/rules/testing.md` §Mutation testing (cargo-mutants).
+# This file mechanises the "What it's NOT for" list from that section so
+# the per-PR and nightly mutants runs do not produce false "caught"
+# signals from code paths we deliberately exclude.
+#
+# Version assumption: cargo-mutants 25.x (the version
+# taiki-e/install-action@v2 resolves at the time of writing; see
+# .github/workflows/ci.yml and nightly.yml, which install via
+# `tool: cargo-mutants` without a pin — this file uses only stable keys
+# documented on https://mutants.rs/). If a future upgrade renames a key
+# the CI will fail loudly rather than silently drop an exclusion; bump
+# this comment and adjust the key at that point.
+#
+# Keys used (all documented at https://mutants.rs/):
+#   - exclude_globs:         path-pattern exclusion (preferred)
+#   - examine_globs:         positive-scope allowlist (unused here; we
+#                            exclude, not allowlist)
+#   - exclude_re:            regex over the mutation description
+#   - additional_cargo_args: passed through to `cargo test` per mutation
+#
+# Rules (mirror .claude/rules/testing.md):
+#
+# 1. `unsafe` blocks and `aya-rs` eBPF programs. The kernel verifier can
+#    reject mutated code and cargo-mutants would count that rejection as
+#    "caught" — a false positive. Tier 2 (BPF_PROG_TEST_RUN) and Tier 3
+#    (real-kernel integration, kernel matrix) cover these. The BPF crate
+#    doesn't exist yet (Phase 2+); pre-list the exclusion so it is in
+#    place the day that crate lands.
+#
+# 2. Async scheduling logic. Mutations to `select!` arms or future
+#    polling interact poorly with scheduling and timing; DST (Tier 1)
+#    is the right tool. We exclude by description regex because there
+#    is no single path that cleanly identifies "the async scheduler."
+#
+# 3. Generated code. `#[derive(...)]` expansions, `build.rs` output, and
+#    proc-macro expansions are not hand-written — mutating them gates
+#    on library behaviour that isn't ours. We exclude generated output
+#    paths; derives inside source files are left to cargo-mutants'
+#    existing heuristics.
+#
+# 4. Performance assertions. Mutations that remove an optimisation may
+#    still pass correctness tests. Performance regressions are Tier 4's
+#    job (veristat, xdp-bench) — not mutation testing's.
+#
+# 5. Tests themselves. cargo-mutants already defaults to excluding
+#    `#[test]` / `#[cfg(test)]` modules, but we make it explicit via
+#    the excluded path pattern for clarity.
+
+# ---------------------------------------------------------------------------
+# Excluded paths
+# ---------------------------------------------------------------------------
+exclude_globs = [
+    # Rule 1 — aya-rs eBPF programs (pre-listed for Phase 2+; will be the
+    # canonical path once the crate is introduced).
+    "crates/overdrive-bpf/**",
+    "crates/*-bpf/**",
+
+    # Rule 3 — generated code.
+    "**/build.rs",
+    "**/target/**",
+    "**/generated/**",
+
+    # Rule 5 — tests themselves. cargo-mutants already avoids mutating
+    # test code by default; listing them explicitly is belt-and-braces so
+    # a future refactor of `#[cfg(test)]` boundaries does not surprise us.
+    "**/tests/**",
+    "**/benches/**",
+]
+
+# ---------------------------------------------------------------------------
+# Excluded mutation patterns (by description regex)
+# ---------------------------------------------------------------------------
+#
+# cargo-mutants emits a human-readable description for each mutation
+# ("replace `<` with `<=`", "replace function body with Default::default()").
+# `exclude_re` filters on that description. We use it narrowly — over-
+# matching here silently erodes coverage.
+exclude_re = [
+    # Rule 1 — unsafe blocks. Match mutations whose site is inside an
+    # `unsafe` block. cargo-mutants prefixes these with "unsafe" in the
+    # description. If that phrasing changes across versions, update here.
+    "unsafe",
+
+    # Rule 2 — async scheduling. Match `select!` arms and future-polling
+    # patterns. These are concurrency bugs, which DST catches.
+    "select!",
+    "poll_next",
+    "poll_ready",
+]
+
+# ---------------------------------------------------------------------------
+# Rule 4 — performance assertions are NOT mutation-tested.
+# ---------------------------------------------------------------------------
+#
+# We do not currently have a path or test-target convention for perf
+# assertions (Tier 4 — veristat, xdp-bench — lives outside `cargo test`).
+# If a benchmark or perf-regression test ever lands under `cargo test`,
+# add its module path to `exclude_globs` above and cross-reference here.
+
+# ---------------------------------------------------------------------------
+# Cargo args passed to the per-mutation `cargo test` run.
+# ---------------------------------------------------------------------------
+#
+# `--locked` to fail loudly on any dep drift during the per-mutation run
+# (mutants reruns `cargo test` many times; an unlocked run could waste an
+# hour re-resolving). The proptest cases count is pinned at the workflow
+# level (PROPTEST_CASES=1024) — we do NOT lower it here to speed up the
+# mutants run, per testing.md "Don't lower the default to dodge a slow
+# generator — fix the generator."
+additional_cargo_args = ["--locked"]
+
+# ---------------------------------------------------------------------------
+# Excluded mutation *kinds* — leave cargo-mutants defaults in place.
+# ---------------------------------------------------------------------------
+#
+# `skip_calls` can suppress entire mutation operators. We deliberately
+# leave this empty so the full operator set runs; per-file exclusions
+# above are the intended granularity. Revisit if a specific operator
+# shows up as a persistent source of noise.
+skip_calls = []

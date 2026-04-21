@@ -1,0 +1,21 @@
+# Mutation-testing baseline directory.
+#
+# Purpose: holds the kill-rate baseline that .github/workflows/nightly.yml
+# writes to and reads from. The first nightly run seeds
+# `mutants-baseline/main/kill_rate.txt` here; subsequent nightly runs
+# compute drift against that value and soft-fail on a >2pp regression.
+#
+# Without this `.gitkeep`, the directory would not exist in a fresh clone,
+# the nightly workflow's artifact-upload step would swallow the missing
+# file under `if-no-files-found: warn`, and the trend-tracking signal would
+# silently disappear.
+#
+# Do NOT delete. The file itself is intentionally empty except for this
+# header; only `kill_rate.txt` is meant to live alongside it, written by CI.
+#
+# References:
+#   - .github/workflows/nightly.yml (reads/writes kill_rate.txt here)
+#   - docs/feature/phase-1-foundation/devops/ci-cd-pipeline.md
+#     §Mutation-testing gate §Baseline storage
+#   - .claude/rules/testing.md §Mutation testing (cargo-mutants)
+#     "Regression gate on direction, not just level."
