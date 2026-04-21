@@ -343,6 +343,7 @@ CR-SQLite sacrifices strong ordering for availability. Overdrive enforces the bo
 - **Identity-scoped writes.** A Corrosion peer only accepts writes whose CRDT site ID matches a live node SVID signed by the platform CA. A compromised node cannot forge rows on behalf of another node, and a decommissioned node's site ID is purged from the trust bundle.
 - **Additive-only schema migrations.** Nullable column additions in CR-SQLite trigger cluster-wide backfill storms — Fly's most painful Corrosion incident. Overdrive schema migrations are strictly additive, versioned in the intent store, and gated through a two-phase rollout: new table first, readers cut over, old table drained, old table dropped. No `ALTER TABLE ADD COLUMN NULL` across the live fleet.
 - **Full rows over field diffs.** Learning from Fly's post-mortem on partial updates, node agents republish the complete row for an allocation on every state transition rather than diffing fields. Late or reordered gossip converges deterministically under LWW; diff-merge logic does not.
+- **Tombstones for deletion, with a bounded sweep window.** Row deletions flow through CR-SQLite as tombstone records — late gossip carrying a pre-delete version of a row cannot resurrect it, because the tombstone's logical timestamp dominates under LWW. A per-table sweeper reconciler (§18) reclaims tombstones older than the cluster's worst-case gossip propagation window, which must itself exceed the longest supported partition duration; a node returning from a partition older than the sweep window is refused rejoin and re-bootstrapped from a fresh snapshot rather than allowed to resurrect compacted rows. Deletes in `service_backends`, `policy_verdicts`, and the `revoked_operator_certs` sweep (§8) all follow this shape; the Tigris-style "delete-then-read" resurrection class — where a stale cache layer re-exposes a deleted object after metadata commit — is mitigated at the store level rather than left for application code to catch.
 - **Event-loop watchdogs.** Every subscription has a stall detector. A Corrosion peer whose event loop has not advanced within N seconds is killed and restarted before it can propagate stuck state — the bug class that contagion-deadlocked Fly's proxy fleet is a named DST scenario, not a hypothetical.
 - **Per-region blast radius.** The global Corrosion topology is not a single flat cluster. Regional clusters gossip internally; a thin global membership cluster maps regions to coordinates. A runaway write in one region does not fan out globally in the same tick.
 
@@ -2068,6 +2069,7 @@ This replaces the Kubernetes operator model, where extensions ship as Go binarie
 - LLM spend enforcement (§12)
 - Evaluation-broker reaper (cancellable-set bulk reaper)
 - Operator cert revocation sweep (§8) — deletes rows from `revoked_operator_certs` whose `expires_at` has passed; keeps the table bounded
+- Tombstone sweep (§4 *Consistency Guardrails*) — per gossiped table, reclaims CR-SQLite tombstones older than the configured max-partition window; refuses rejoin of nodes returning from partitions beyond that window
 
 **Workflows** (orchestrate, durable):
 
