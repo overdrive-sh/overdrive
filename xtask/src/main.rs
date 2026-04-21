@@ -58,6 +58,28 @@ enum Task {
         #[command(subcommand)]
         action: HooksAction,
     },
+
+    /// Manage MCP server configuration for this project (`.mcp.json`).
+    ///
+    /// Claude Code does not expand environment variables inside `.mcp.json`,
+    /// so secrets must be materialised at setup time. This subcommand reads
+    /// the required tokens from the process environment (or a local `.env`)
+    /// and writes a ready-to-use `.mcp.json` at the workspace root.
+    Mcp {
+        #[command(subcommand)]
+        action: McpAction,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Subcommand)]
+enum McpAction {
+    /// Render `.mcp.json` from the built-in template, injecting tokens
+    /// from the process environment or `.env` at the workspace root.
+    Setup {
+        /// Overwrite an existing `.mcp.json` without prompting.
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -128,7 +150,99 @@ fn run() -> Result<()> {
         Task::Ci => ci(),
         Task::Lima { action } => lima(action),
         Task::Hooks { action } => hooks(action),
+        Task::Mcp { action } => mcp(action),
     }
+}
+
+fn mcp(action: McpAction) -> Result<()> {
+    match action {
+        McpAction::Setup { force } => mcp_setup(force),
+    }
+}
+
+/// Project-root `.mcp.json` — rendered from the template below.
+const MCP_JSON: &str = ".mcp.json";
+
+/// Template for `.mcp.json`. Tokens are injected from the environment at
+/// setup time because Claude Code does not expand env vars at load time.
+/// Toolsets enabled on the remote GitHub MCP server. `default` preserves
+/// the server's built-in set (context, repos, issues, pull_requests,
+/// users); the rest extend it.
+const GITHUB_MCP_TOOLSETS: &str = "default,projects,discussions,labels";
+
+fn render_mcp_json(github_pat: &str) -> Result<String> {
+    let doc = serde_json::json!({
+        "mcpServers": {
+            "github": {
+                "type": "http",
+                "url": "https://api.githubcopilot.com/mcp/",
+                "headers": {
+                    "Authorization": format!("Bearer {github_pat}"),
+                    "X-MCP-Toolsets": GITHUB_MCP_TOOLSETS
+                }
+            }
+        }
+    });
+    Ok(serde_json::to_string_pretty(&doc)? + "\n")
+}
+
+fn mcp_setup(force: bool) -> Result<()> {
+    let workspace_root = std::env::current_dir()?;
+    let out_path = workspace_root.join(MCP_JSON);
+
+    if out_path.exists() && !force {
+        bail!("{} already exists; re-run with `--force` to overwrite", out_path.display());
+    }
+
+    let env_file = load_env_file(&workspace_root.join(".env"))?;
+    let github_pat = lookup_required(
+        &env_file,
+        &["GITHUB_PAT", "GITHUB_PERSONAL_ACCESS_TOKEN"],
+        "create one at https://github.com/settings/personal-access-tokens/new \
+         and either `export GITHUB_PAT=...` or add it to `.env`",
+    )?;
+
+    let rendered = render_mcp_json(&github_pat)?;
+    std::fs::write(&out_path, rendered)?;
+    eprintln!("xtask: wrote {}", out_path.display());
+    eprintln!("xtask: restart Claude Code and run `/mcp` to pick up the new server");
+    Ok(())
+}
+
+/// Parse a `.env` file into `(key, value)` pairs via `dotenvy`. Missing
+/// file is not an error — the process environment may still satisfy the
+/// lookup. Parse errors (malformed lines, IO) are propagated so the
+/// operator sees why setup refused to proceed.
+fn load_env_file(path: &std::path::Path) -> Result<Vec<(String, String)>> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    dotenvy::from_path_iter(path)?.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+/// Look up the first matching key in the process environment, falling
+/// back to the parsed `.env` file. Returns an error with the install
+/// hint when no source provides a value.
+fn lookup_required(
+    env_file: &[(String, String)],
+    keys: &[&str],
+    install_hint: &str,
+) -> Result<String> {
+    for key in keys {
+        if let Ok(val) = std::env::var(key) {
+            if !val.is_empty() {
+                return Ok(val);
+            }
+        }
+    }
+    for key in keys {
+        if let Some((_, val)) = env_file.iter().find(|(k, _)| k == key) {
+            if !val.is_empty() {
+                return Ok(val.clone());
+            }
+        }
+    }
+    bail!("none of {:?} set in the environment or `.env`. {}", keys, install_hint)
 }
 
 fn hooks(action: HooksAction) -> Result<()> {

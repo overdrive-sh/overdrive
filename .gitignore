@@ -23,3 +23,7 @@ tarpaulin-report.html
 # Lefthook — per-dev overrides
 lefthook-local.yml
 .lefthook-local.yml
+
+# Secrets — xtask mcp setup writes .mcp.json from .env
+.env
+.mcp.json
