@@ -36,3 +36,6 @@ tokio.workspace       = true
 [dev-dependencies]
 proptest.workspace = true
 rstest.workspace   = true
+# Static scan of `src/**/*.rs` for the §2.3 API-shape invariant. Used only
+# by `tests/public_api_shape.rs` — never referenced from production code.
+syn.workspace      = true
