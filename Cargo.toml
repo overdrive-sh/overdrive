@@ -88,6 +88,10 @@ proptest        = "1"
 rstest          = "0.23"
 insta           = "1"
 syn             = { version = "2", features = ["full", "visit", "extra-traits"] }
+tempfile        = "3"
+
+# --- Async streams --------------------------------------------------------
+tokio-stream    = { version = "0.1", features = ["sync"] }
 
 # --- Internal workspace crates -------------------------------------------
 overdrive-core = { path = "crates/overdrive-core" }

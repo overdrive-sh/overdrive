@@ -1,8 +1,6 @@
-# SCAFFOLD: true — DISTILL placeholder per DWD-06. Crafter completes in place.
-#
 # `overdrive-store-local` hosts the real redb-backed `LocalStore` adapter
 # (per the architecture brief §3 crate topology and the US-03 reuse
-# table row 20). Real redb is added by the crafter during DELIVER.
+# table row 20).
 
 [package]
 name        = "overdrive-store-local"
@@ -19,9 +17,17 @@ crate_class = "adapter-real"
 
 [dependencies]
 overdrive-core.workspace = true
+redb.workspace           = true
+async-trait.workspace    = true
+bytes.workspace          = true
+futures.workspace        = true
+thiserror.workspace      = true
+tokio.workspace          = true
+tokio-stream.workspace   = true
 
 [dev-dependencies]
-# Crafter adds tempfile, proptest during DELIVER.
+tempfile.workspace = true
+tokio              = { workspace = true }
 
 [lints]
 workspace = true

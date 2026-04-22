@@ -1,38 +1,27 @@
 //! `overdrive-store-local` — real redb-backed `LocalStore`.
 //!
-//! SCAFFOLD: true — DISTILL placeholder per DWD-06 in
-//! `docs/feature/phase-1-foundation/distill/wave-decisions.md`. Crafter
-//! completes in place during DELIVER using the `redb` crate already in
-//! the workspace dependency list.
+//! `LocalStore` is the Phase 1 concrete implementation of
+//! [`overdrive_core::traits::intent_store::IntentStore`]. It backs the
+//! whitepaper's `mode = "single"` deployment — single-node, no Raft,
+//! direct redb on disk. Phase 2 adds `RaftStore` on top of the same
+//! snapshot format and the same table layout, so reconcilers written
+//! against `IntentStore` are mode-agnostic.
 //!
-//! The shape follows the architecture brief §3 (crate topology) and
-//! implements the `IntentStore` trait from `overdrive_core::traits`.
+//! Snapshot round-trip (`export_snapshot` / `bootstrap_from`) is covered
+//! by step 03-02 and currently returns a typed error — see
+//! [`redb_backend`] for the exact message. Step 03-01 covers the
+//! `put` / `get` / `delete` / `watch` / `txn` surface against real
+//! redb I/O.
 
-#![allow(clippy::missing_errors_doc, clippy::missing_panics_doc, dead_code, unused_imports)]
+#![warn(missing_docs)]
 
-use std::path::Path;
+mod redb_backend;
 
-// These re-exports document the surface DELIVER must implement against.
-// The `unused_imports` allow above is temporary — DELIVER consumes all
-// of these when filling in the `IntentStore` impl.
+pub use redb_backend::LocalStore;
+
+// Re-export the `IntentStore` trait surface so downstream crates can
+// write `use overdrive_store_local::{LocalStore, IntentStore};` without
+// naming the core crate.
 pub use overdrive_core::traits::intent_store::{
     IntentStore, IntentStoreError, StateSnapshot, TxnOp, TxnOutcome,
 };
-
-/// Redb-backed `IntentStore` implementation.
-///
-/// SCAFFOLD: true — every public method is a RED stub that panics. The
-/// crafter opens a redb database file against the supplied path during
-/// DELIVER and implements the trait end-to-end.
-pub struct LocalStore {
-    _redb_path_placeholder: std::path::PathBuf,
-}
-
-impl LocalStore {
-    /// Construct a `LocalStore` backed by a redb file at `path`.
-    ///
-    /// SCAFFOLD: true.
-    pub fn open(_path: impl AsRef<Path>) -> Result<Self, IntentStoreError> {
-        unimplemented!("LocalStore::open — RED scaffold; DELIVER fills in")
-    }
-}

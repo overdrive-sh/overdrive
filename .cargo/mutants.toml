@@ -89,6 +89,15 @@ exclude_re = [
     "select!",
     "poll_next",
     "poll_ready",
+
+    # Step 03-01 deferral — `LocalStore::export_snapshot` and
+    # `LocalStore::bootstrap_from` are Err-returning stubs until step
+    # 03-02 replaces them with a real snapshot implementation. Mutating
+    # the stub body into `Ok(())` gives a misleading "missed" result
+    # because no test in 03-01 asserts the Err variant, by design.
+    # Remove these two lines in step 03-02 when the real impls land.
+    "replace <impl IntentStore for LocalStore>::bootstrap_from",
+    "replace <impl IntentStore for LocalStore>::export_snapshot",
 ]
 
 # ---------------------------------------------------------------------------
