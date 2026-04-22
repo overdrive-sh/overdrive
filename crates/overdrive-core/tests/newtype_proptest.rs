@@ -19,7 +19,8 @@
 use std::str::FromStr;
 
 use overdrive_core::id::{
-    AllocationId, ContentHash, IdParseError, JobId, NodeId, Region, SpiffeId,
+    AllocationId, CertSerial, ContentHash, IdParseError, InvestigationId, JobId, NodeId, PolicyId,
+    Region, SchematicId, SpiffeId,
 };
 use proptest::prelude::*;
 
@@ -410,5 +411,157 @@ proptest! {
         // mutation that preserves `Eq` but corrupts the bytes. The raw
         // 32-byte array carries the actual contract.
         prop_assert_eq!(first.as_bytes(), second.as_bytes());
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Extended identifiers (US-02 §3.1 property scenarios) — round-trip via
+// `Display` / `FromStr` AND via serde for every remaining Phase 1 newtype
+// not already covered above:
+//
+//   * `InvestigationId` — label-class; reuses `valid_label()`.
+//   * `PolicyId`        — label-class; reuses `valid_label()`.
+//   * `CertSerial`      — even-length lowercase hex, ≤ 40 chars; needs
+//                         its own generator.
+//   * `SchematicId`     — transparent `ContentHash` newtype; generator
+//                         picks 32 arbitrary bytes and wraps.
+//
+// `SpiffeId` and `ContentHash` are already covered above; `Region` has a
+// dedicated case-insensitivity property; `JobId` / `NodeId` /
+// `AllocationId` have the core label round-trips. Taken together the
+// file now pins Display↔FromStr and serde round-trip for every member of
+// the Phase 1 identifier set (§3.3 completeness contract).
+// -----------------------------------------------------------------------------
+
+proptest! {
+    /// InvestigationId round-trips through Display → FromStr.
+    #[test]
+    fn investigation_id_display_from_str_round_trip(raw in valid_label()) {
+        let original =
+            InvestigationId::new(&raw).expect("generator yields valid InvestigationId input");
+        let rendered = original.to_string();
+        let reparsed =
+            InvestigationId::from_str(&rendered).expect("canonical form re-parses");
+        prop_assert_eq!(reparsed, original);
+    }
+
+    /// InvestigationId round-trips through serde JSON.
+    #[test]
+    fn investigation_id_serde_round_trip(raw in valid_label()) {
+        let id = InvestigationId::new(&raw).expect("generator yields valid input");
+        let json = serde_json::to_string(&id).expect("serialises");
+        let expected = format!("\"{id}\"");
+        prop_assert_eq!(&json, &expected);
+        let back: InvestigationId = serde_json::from_str(&json).expect("deserialises");
+        prop_assert_eq!(back, id);
+    }
+
+    /// PolicyId round-trips through Display → FromStr.
+    #[test]
+    fn policy_id_display_from_str_round_trip(raw in valid_label()) {
+        let original = PolicyId::new(&raw).expect("generator yields valid PolicyId input");
+        let rendered = original.to_string();
+        let reparsed = PolicyId::from_str(&rendered).expect("canonical form re-parses");
+        prop_assert_eq!(reparsed, original);
+    }
+
+    /// PolicyId round-trips through serde JSON.
+    #[test]
+    fn policy_id_serde_round_trip(raw in valid_label()) {
+        let id = PolicyId::new(&raw).expect("generator yields valid input");
+        let json = serde_json::to_string(&id).expect("serialises");
+        let expected = format!("\"{id}\"");
+        prop_assert_eq!(&json, &expected);
+        let back: PolicyId = serde_json::from_str(&json).expect("deserialises");
+        prop_assert_eq!(back, id);
+    }
+}
+
+// -----------------------------------------------------------------------------
+// CertSerial generator — lowercase-hex only, even length, ≥ 2 and ≤ 40
+// chars (`CERT_SERIAL_MAX_BYTES * 2`, RFC 5280 §4.1.2.2). The only way
+// the validator accepts an input is if every character is in
+// `0-9a-f` AND the length is even AND non-zero.
+// -----------------------------------------------------------------------------
+
+/// One lowercase hex digit.
+fn lower_hex_char() -> impl Strategy<Value = char> {
+    proptest::sample::select("0123456789abcdef".chars().collect::<Vec<_>>())
+}
+
+/// A valid `CertSerial` hex input — even length in `2..=40`.
+fn valid_cert_serial_hex() -> impl Strategy<Value = String> {
+    // Pick the number of byte-pairs (1..=20). Each yields two hex chars.
+    (1_usize..=20_usize).prop_flat_map(|byte_pairs| {
+        prop::collection::vec(lower_hex_char(), byte_pairs * 2)
+            .prop_map(|chars| chars.into_iter().collect::<String>())
+    })
+}
+
+proptest! {
+    /// CertSerial round-trips through Display → FromStr.
+    #[test]
+    fn cert_serial_display_from_str_round_trip(raw in valid_cert_serial_hex()) {
+        let original = CertSerial::new(&raw).expect("generator yields valid CertSerial input");
+        let rendered = original.to_string();
+        // Display output equals the generator output byte-for-byte
+        // because the generator stays in the already-canonical
+        // (lowercase, even-length) form.
+        prop_assert_eq!(&rendered, &raw);
+        let reparsed = CertSerial::from_str(&rendered).expect("canonical form re-parses");
+        prop_assert_eq!(reparsed, original);
+    }
+
+    /// CertSerial round-trips through serde JSON.
+    #[test]
+    fn cert_serial_serde_round_trip(raw in valid_cert_serial_hex()) {
+        let id = CertSerial::new(&raw).expect("generator yields valid input");
+        let json = serde_json::to_string(&id).expect("serialises");
+        let expected = format!("\"{id}\"");
+        prop_assert_eq!(&json, &expected);
+        let back: CertSerial = serde_json::from_str(&json).expect("deserialises");
+        prop_assert_eq!(back, id);
+    }
+}
+
+// -----------------------------------------------------------------------------
+// SchematicId generator — `SchematicId` is a transparent `ContentHash`
+// wrapper per §17 and ADR-0002. Any 32-byte digest produces a valid
+// value; we generate bytes directly, wrap into `SchematicId::new`, and
+// assert both the Display↔FromStr and serde round-trips. The serde form
+// is transparent (`#[serde(transparent)]`) so the JSON representation is
+// a 64-char hex string, identical in shape to a bare `ContentHash`.
+// -----------------------------------------------------------------------------
+
+proptest! {
+    /// SchematicId round-trips through Display → FromStr.
+    #[test]
+    fn schematic_id_display_from_str_round_trip(
+        bytes in proptest::array::uniform32(any::<u8>()),
+    ) {
+        let original = SchematicId::new(ContentHash::from_bytes(bytes));
+        let rendered = original.to_string();
+        // The canonical hex form is always 64 characters — the transparent
+        // ContentHash shape is pinned by ADR-0002.
+        prop_assert_eq!(rendered.len(), 64);
+        let reparsed = SchematicId::from_str(&rendered).expect("canonical form re-parses");
+        prop_assert_eq!(reparsed, original);
+        // And the wrapped ContentHash survives the trip byte-for-byte.
+        prop_assert_eq!(reparsed.content_hash().as_bytes(), &bytes);
+    }
+
+    /// SchematicId round-trips through serde JSON. Because the impl is
+    /// `#[serde(transparent)]`, the JSON output is the 64-char hex
+    /// string surrounded by quotes — the same shape as `ContentHash`.
+    #[test]
+    fn schematic_id_serde_round_trip(
+        bytes in proptest::array::uniform32(any::<u8>()),
+    ) {
+        let id = SchematicId::new(ContentHash::from_bytes(bytes));
+        let json = serde_json::to_string(&id).expect("serialises");
+        let expected = format!("\"{id}\"");
+        prop_assert_eq!(&json, &expected);
+        let back: SchematicId = serde_json::from_str(&json).expect("deserialises");
+        prop_assert_eq!(back, id);
     }
 }
