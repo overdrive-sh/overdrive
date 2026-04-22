@@ -363,10 +363,38 @@ impl From<ContentHash> for String {
 }
 
 // -----------------------------------------------------------------------------
-// SchematicId — content hash of a schematic TOML. Distinct type for safety.
+// SchematicId — content hash of a schematic struct. Distinct type for safety.
 // -----------------------------------------------------------------------------
 
-/// Image Factory schematic identifier — SHA-256 of the canonical schematic.
+/// Image Factory schematic identifier — SHA-256 of the canonical schematic
+/// bytes.
+///
+/// # Canonicalisation — ADR-0002
+///
+/// `SchematicId` is the SHA-256 of the **rkyv-archived bytes** of the
+/// `Schematic` struct, per
+/// [ADR-0002 — *`SchematicId` canonicalisation uses rkyv-archived bytes*](
+/// ../../../docs/product/architecture/adr-0002-schematic-id-canonicalisation.md).
+/// The rkyv archival format is canonical by construction — field order
+/// matches the Rust struct definition, no whitespace, no map-key
+/// reordering, no float-format variance — which makes the resulting
+/// hash deterministic across machines, toolchain versions, and Rust
+/// editions.
+///
+/// JSON/RFC-8785 (JCS) was considered and explicitly rejected for this
+/// identifier: the `Schematic` is an internal Overdrive concept with
+/// no cross-toolchain consumer, and `development.md`'s hashing guidance
+/// ("Internal data → rkyv") places it unambiguously in the rkyv bucket.
+///
+/// # Phase 1 status
+///
+/// Phase 1 ships `SchematicId` as a transparent [`ContentHash`] newtype.
+/// The `Schematic` struct that it canonicalises — and therefore the
+/// concrete `rkyv::to_bytes::<_, 256>(&schematic)?` call site — is
+/// deferred to Phase 2 (Image Factory §23 of the whitepaper). Phase 1's
+/// contribution is the newtype and the rule documented here, so a
+/// future implementer cannot adopt a different canonicalisation without
+/// superseding ADR-0002.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct SchematicId(ContentHash);

@@ -12,6 +12,7 @@
 
 mod acceptance {
     //! Phase-1-foundation acceptance scenarios.
+    mod content_hash_cert_serial;
     mod core_newtype_roundtrip;
     mod core_newtype_validation;
     mod spiffe_region_validation;

@@ -18,7 +18,9 @@
 
 use std::str::FromStr;
 
-use overdrive_core::id::{AllocationId, IdParseError, JobId, NodeId, Region, SpiffeId};
+use overdrive_core::id::{
+    AllocationId, ContentHash, IdParseError, JobId, NodeId, Region, SpiffeId,
+};
 use proptest::prelude::*;
 
 // -----------------------------------------------------------------------------
@@ -347,5 +349,66 @@ proptest! {
         let reparsed =
             SpiffeId::from_str(&parsed.to_string()).expect("canonical form re-parses");
         prop_assert_eq!(reparsed, parsed);
+    }
+}
+
+// -----------------------------------------------------------------------------
+// ContentHash — hex round-trip and `ContentHash::of` determinism.
+//
+// Per `.claude/rules/testing.md` *Mandatory call sites — Hash
+// determinism paths*: "Any content hash under `development.md`'s
+// 'Hashing requires deterministic serialization' rule — N permutations
+// of the same logical value must produce one hash." `ContentHash::of`
+// is the primitive that anchors every content-addressed ID in the
+// platform (WASM modules, chunks, SchematicId, diagnostic-probe
+// catalogue entries); a non-deterministic implementation silently
+// breaks content-addressed routing everywhere.
+// -----------------------------------------------------------------------------
+
+proptest! {
+    /// For any valid 32-byte digest, rendering via `Display` and
+    /// re-parsing via `FromStr` round-trips to the same digest.
+    ///
+    /// Covers §3.1 "A ContentHash round-trips through its 64-character
+    /// hex form" under the property budget.
+    #[test]
+    fn content_hash_hex_round_trip(bytes in proptest::array::uniform32(any::<u8>())) {
+        let original = ContentHash::from_bytes(bytes);
+        let rendered = original.to_string();
+        // The canonical hex form is always 64 characters — 32 bytes * 2
+        // hex digits per byte. Shape check before the parse guards the
+        // length-ceiling branch against mutations that silently break
+        // the Display impl.
+        prop_assert_eq!(rendered.len(), 64);
+
+        let reparsed = ContentHash::from_str(&rendered).expect("canonical hex form re-parses");
+        prop_assert_eq!(reparsed, original);
+
+        // The underlying bytes survive the trip byte-for-byte — not
+        // merely `Eq`-equivalent under the derived impl.
+        prop_assert_eq!(reparsed.as_bytes(), &bytes);
+    }
+
+    /// For any byte payload, `ContentHash::of(&p) == ContentHash::of(&p)`
+    /// and the underlying digest is bit-identical across invocations.
+    ///
+    /// Covers §3.1 "A content hash is stable across invocations for any
+    /// byte payload" under the property budget. This is the mandatory
+    /// hash-determinism call site per `.claude/rules/testing.md`.
+    #[test]
+    fn content_hash_of_is_deterministic_over_any_byte_payload(
+        payload in prop::collection::vec(any::<u8>(), 0..=256),
+    ) {
+        let first = ContentHash::of(&payload);
+        let second = ContentHash::of(&payload);
+
+        // Equal under the derived `Eq` impl — catches hash-instability
+        // in the declarative sense.
+        prop_assert_eq!(first, second);
+
+        // And bit-identical in the underlying digest — catches a
+        // mutation that preserves `Eq` but corrupts the bytes. The raw
+        // 32-byte array carries the actual contract.
+        prop_assert_eq!(first.as_bytes(), second.as_bytes());
     }
 }
