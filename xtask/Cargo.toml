@@ -10,12 +10,19 @@ repository.workspace    = true
 homepage.workspace      = true
 publish.workspace       = true
 
+[lib]
+name = "xtask"
+path = "src/lib.rs"
+
 [[bin]]
 name = "xtask"
 path = "src/main.rs"
 
 [lints]
 workspace = true
+
+[package.metadata.overdrive]
+crate_class = "binary"
 
 [dependencies]
 eyre.workspace       = true
@@ -24,3 +31,11 @@ clap.workspace       = true
 serde.workspace      = true
 serde_json.workspace = true
 dotenvy.workspace    = true
+syn.workspace        = true
+# `span-locations` enables `Span::start()`/`end()` — required so
+# dst-lint can report `file:line:col` for each violation.
+proc-macro2          = { version = "1", features = ["span-locations"] }
+cargo_metadata       = "0.18"
+
+[dev-dependencies]
+tempfile.workspace = true

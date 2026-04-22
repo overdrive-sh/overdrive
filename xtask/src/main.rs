@@ -27,6 +27,16 @@ enum Task {
         seed: Option<u64>,
     },
 
+    /// Tier 1 — banned-API lint gate over `crate_class = "core"` crates.
+    /// See `docs/product/architecture/adr-0003-core-crate-labelling.md`
+    /// and `.claude/rules/development.md`.
+    DstLint {
+        /// Path to the workspace `Cargo.toml` to scan. Defaults to the
+        /// enclosing workspace root (cwd-relative).
+        #[arg(long, default_value = "Cargo.toml")]
+        manifest_path: std::path::PathBuf,
+    },
+
     /// Tier 2 — BPF unit tests via `BPF_PROG_TEST_RUN`.
     BpfUnit,
 
@@ -141,6 +151,7 @@ fn main() -> ExitCode {
 fn run() -> Result<()> {
     match Args::parse().cmd {
         Task::Dst { seed } => dst(seed),
+        Task::DstLint { manifest_path } => xtask::dst_lint::run(&manifest_path),
         Task::BpfUnit => bpf_unit(),
         Task::IntegrationTest { scope } => match scope {
             IntegrationScope::Vm { cache_dir, kernels } => integration_vm(&cache_dir, &kernels),
@@ -166,7 +177,7 @@ const MCP_JSON: &str = ".mcp.json";
 /// Template for `.mcp.json`. Tokens are injected from the environment at
 /// setup time because Claude Code does not expand env vars at load time.
 /// Toolsets enabled on the remote GitHub MCP server. `default` preserves
-/// the server's built-in set (context, repos, issues, pull_requests,
+/// the server's built-in set (context, repos, issues, `pull_requests`,
 /// users); the rest extend it.
 const GITHUB_MCP_TOOLSETS: &str = "default,projects,discussions,labels";
 

@@ -10,6 +10,9 @@ repository.workspace    = true
 homepage.workspace      = true
 publish.workspace       = true
 
+[package.metadata.overdrive]
+crate_class = "core"
+
 [lints]
 workspace = true
 
