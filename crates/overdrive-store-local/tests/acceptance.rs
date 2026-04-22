@@ -13,4 +13,5 @@
 mod acceptance {
     //! Phase-1-foundation — US-03 `LocalStore` acceptance scenarios.
     mod local_store_basic_ops;
+    mod snapshot_roundtrip;
 }

@@ -41,10 +41,12 @@ use futures::Stream;
 use overdrive_core::traits::intent_store::{
     IntentStore, IntentStoreError, StateSnapshot, TxnOp, TxnOutcome,
 };
-use redb::{Database, TableDefinition};
+use redb::{Database, ReadableTable, TableDefinition};
 use tokio::sync::broadcast;
 use tokio_stream::StreamExt as _;
 use tokio_stream::wrappers::BroadcastStream;
+
+use crate::snapshot_frame;
 
 /// Single redb table holding every key/value pair written by the store.
 /// Secondary indexes are deliberately out of scope for Phase 1 — reconcilers
@@ -235,22 +237,79 @@ impl IntentStore for LocalStore {
         Ok(Box::new(Box::pin(PrefixWatchStream { inner: Box::pin(stream) })))
     }
 
-    /// Snapshot export lands in step 03-02. Until then this stub keeps
-    /// the trait satisfied so `LocalStore: IntentStore` holds; no test
-    /// in 03-01 asserts the Err variant, by design. The matching
-    /// `exclude_re` entry in `.cargo/mutants.toml` suppresses mutation
-    /// testing of both stubs until 03-02 replaces them.
+    /// Export a full-state snapshot of this `LocalStore`.
+    ///
+    /// Reads every `(key, value)` pair in a single redb read
+    /// transaction, sorts them by key via
+    /// [`snapshot_frame::encode`], and returns a [`StateSnapshot`]
+    /// whose `bytes()` slice is canonical — two semantically-equal
+    /// stores produce byte-identical exports. The same frame format
+    /// is consumed by [`Self::bootstrap_from`] and will be consumed by
+    /// `RaftStore::bootstrap_from` in Phase 2.
     async fn export_snapshot(&self) -> Result<StateSnapshot, IntentStoreError> {
-        Err(IntentStoreError::SnapshotImport(
-            "snapshot export not yet implemented (step 03-02)".into(),
-        ))
+        let inner = Arc::clone(&self.inner);
+
+        tokio::task::spawn_blocking(move || {
+            let read = inner.db.begin_read().map_err(map_transaction_error)?;
+            let table = read.open_table(ENTRIES_TABLE).map_err(map_table_error)?;
+
+            let mut entries: Vec<(Bytes, Bytes)> = Vec::new();
+            let iter = table.iter().map_err(map_storage_error)?;
+            for item in iter {
+                let (k, v) = item.map_err(map_storage_error)?;
+                entries
+                    .push((Bytes::copy_from_slice(k.value()), Bytes::copy_from_slice(v.value())));
+            }
+
+            let bytes = snapshot_frame::encode(&entries)
+                .map_err(|e| IntentStoreError::SnapshotImport(e.to_string()))?;
+            // `entries` is stored post-encode for caller inspection;
+            // `encode` sorts internally on an owned copy, so we sort
+            // the caller-visible view here as well to keep the two
+            // projections consistent.
+            entries.sort_by(|a, b| a.0.as_ref().cmp(b.0.as_ref()));
+
+            Ok::<_, IntentStoreError>(StateSnapshot::from_parts(
+                u32::from(snapshot_frame::VERSION),
+                entries,
+                bytes,
+            ))
+        })
+        .await
+        .map_err(map_join_error)?
     }
 
-    /// See [`Self::export_snapshot`]. Implemented in step 03-02.
-    async fn bootstrap_from(&self, _snapshot: StateSnapshot) -> Result<(), IntentStoreError> {
-        Err(IntentStoreError::SnapshotImport(
-            "snapshot bootstrap not yet implemented (step 03-02)".into(),
-        ))
+    /// Replay a snapshot as the initial state of this `LocalStore`.
+    ///
+    /// Decodes the framed byte slice via [`snapshot_frame::decode`],
+    /// then writes every entry in a single redb write transaction so
+    /// partial bootstraps never appear to readers. Returns a typed
+    /// [`IntentStoreError::SnapshotImport`] on any frame-level
+    /// corruption — step 03-03 covers the specific corruption
+    /// scenarios.
+    async fn bootstrap_from(&self, snapshot: StateSnapshot) -> Result<(), IntentStoreError> {
+        let inner = Arc::clone(&self.inner);
+        // Clone out of the snapshot so the spawn_blocking closure owns
+        // its input — the frame bytes are the authoritative source,
+        // not the decoded `entries` view.
+        let frame = snapshot.bytes().to_vec();
+
+        tokio::task::spawn_blocking(move || {
+            let entries = snapshot_frame::decode(&frame)
+                .map_err(|e| IntentStoreError::SnapshotImport(e.to_string()))?;
+
+            let write = inner.db.begin_write().map_err(map_transaction_error)?;
+            {
+                let mut table = write.open_table(ENTRIES_TABLE).map_err(map_table_error)?;
+                for (k, v) in &entries {
+                    table.insert(k.as_ref(), v.as_ref()).map_err(map_storage_error)?;
+                }
+            }
+            write.commit().map_err(map_commit_error)?;
+            Ok::<_, IntentStoreError>(())
+        })
+        .await
+        .map_err(map_join_error)?
     }
 }
 

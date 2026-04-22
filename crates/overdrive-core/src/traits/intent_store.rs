@@ -41,10 +41,51 @@ pub enum TxnOutcome {
 
 /// Portable full-state snapshot — used for `LocalStore → RaftStore`
 /// migration, routine Raft snapshots in HA mode, and DR backups.
+///
+/// The snapshot carries its canonical **framed byte slice** alongside
+/// the decoded `entries` view. Byte identity is the migration contract:
+/// `export_snapshot → bootstrap_from → export_snapshot` must produce a
+/// bit-identical `bytes` slice regardless of insertion order, backing
+/// path, or store instance. The decoded `entries` remain available for
+/// callers that want to inspect contents without re-parsing the frame.
+///
+/// The concrete framing (magic `OSNP` + 2-byte LE version + rkyv
+/// payload) is documented in the `overdrive-store-local` crate's
+/// `snapshot_frame` module — it is shared with the future `RaftStore`
+/// so that a single-mode export can be replayed as the initial Raft
+/// log entry without re-encoding.
 #[derive(Debug, Clone)]
 pub struct StateSnapshot {
     pub version: u32,
     pub entries: Vec<(Bytes, Bytes)>,
+    /// Canonical framed form of this snapshot. Two snapshots of
+    /// semantically-equal store contents produce byte-identical slices
+    /// here — this is what migration consumers compare.
+    bytes: Vec<u8>,
+}
+
+impl StateSnapshot {
+    /// Construct a `StateSnapshot` from its logical components plus its
+    /// canonical framed byte slice.
+    ///
+    /// Callers are expected to have produced `bytes` via a framing
+    /// routine that matches the single documented layout (magic +
+    /// version + rkyv payload with entries sorted by key). No
+    /// validation is performed here — the store that produced this
+    /// snapshot is responsible for framing consistency.
+    #[must_use]
+    pub const fn from_parts(version: u32, entries: Vec<(Bytes, Bytes)>, bytes: Vec<u8>) -> Self {
+        Self { version, entries, bytes }
+    }
+
+    /// Canonical framed byte slice. Migration consumers compare by
+    /// value equality on this slice; it is also what gets written to
+    /// Garage for DR backups and what `RaftStore` consumes to seed a
+    /// new HA cluster.
+    #[must_use]
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
 }
 
 #[async_trait]

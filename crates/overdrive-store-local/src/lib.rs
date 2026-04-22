@@ -4,18 +4,19 @@
 //! [`overdrive_core::traits::intent_store::IntentStore`]. It backs the
 //! whitepaper's `mode = "single"` deployment — single-node, no Raft,
 //! direct redb on disk. Phase 2 adds `RaftStore` on top of the same
-//! snapshot format and the same table layout, so reconcilers written
-//! against `IntentStore` are mode-agnostic.
+//! snapshot format ([`snapshot_frame`]) and the same table layout, so
+//! reconcilers written against `IntentStore` are mode-agnostic and an
+//! exported snapshot seeds either backend without re-encoding.
 //!
-//! Snapshot round-trip (`export_snapshot` / `bootstrap_from`) is covered
-//! by step 03-02 and currently returns a typed error — see
-//! [`redb_backend`] for the exact message. Step 03-01 covers the
-//! `put` / `get` / `delete` / `watch` / `txn` surface against real
-//! redb I/O.
+//! Step 03-01 covers the `put` / `get` / `delete` / `watch` / `txn`
+//! surface against real redb I/O. Step 03-02 adds the byte-identical
+//! snapshot round-trip (`export_snapshot` / `bootstrap_from`) that
+//! KPI K6 rides on.
 
 #![warn(missing_docs)]
 
 mod redb_backend;
+pub mod snapshot_frame;
 
 pub use redb_backend::LocalStore;
 

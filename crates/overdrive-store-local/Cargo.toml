@@ -21,6 +21,7 @@ redb.workspace           = true
 async-trait.workspace    = true
 bytes.workspace          = true
 futures.workspace        = true
+rkyv.workspace           = true
 thiserror.workspace      = true
 tokio.workspace          = true
 tokio-stream.workspace   = true
@@ -28,6 +29,7 @@ tokio-stream.workspace   = true
 [dev-dependencies]
 tempfile.workspace = true
 tokio              = { workspace = true }
+proptest.workspace = true
 
 [lints]
 workspace = true

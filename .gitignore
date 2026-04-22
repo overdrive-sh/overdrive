@@ -3,6 +3,7 @@
 **/*.rs.bk
 
 mutants.out/
+mutants.out.old/
 
 # IDE
 .idea/
