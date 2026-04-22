@@ -14,4 +14,5 @@ mod acceptance {
     //! Phase-1-foundation acceptance scenarios.
     mod core_newtype_roundtrip;
     mod core_newtype_validation;
+    mod spiffe_region_validation;
 }

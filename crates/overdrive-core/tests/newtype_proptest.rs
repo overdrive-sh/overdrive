@@ -18,7 +18,7 @@
 
 use std::str::FromStr;
 
-use overdrive_core::id::{AllocationId, IdParseError, JobId, NodeId};
+use overdrive_core::id::{AllocationId, IdParseError, JobId, NodeId, Region, SpiffeId};
 use proptest::prelude::*;
 
 // -----------------------------------------------------------------------------
@@ -220,4 +220,132 @@ fn node_id_rejects_leading_hyphen_with_structured_error() {
     // Leading-non-alnum is a structural boundary case, not a property.
     let err = NodeId::from_str("-leading-hyphen").expect_err("leading hyphen must reject");
     assert!(matches!(err, IdParseError::InvalidFormat { .. }));
+}
+
+// -----------------------------------------------------------------------------
+// Region case-insensitivity — property per §3.1.
+//
+// For any valid label input `r`, upper- and lower-case variants must parse
+// to the same canonical form under `Display`. The case-insensitivity
+// contract is declared on the newtype (see `.claude/rules/development.md`
+// — *Newtype completeness*) and is the only way call sites avoid ad-hoc
+// normalisation helpers.
+// -----------------------------------------------------------------------------
+
+proptest! {
+    #[test]
+    fn region_case_insensitive_canonical_form_round_trip(raw in valid_label()) {
+        // `to_ascii_uppercase` / `to_ascii_lowercase` preserve non-alphabetic
+        // characters (digits, `-`, `_`, `.`), so generator constraints on
+        // the label shape remain satisfied after case-folding.
+        let upper = raw.to_ascii_uppercase();
+        let lower = raw.to_ascii_lowercase();
+
+        let from_upper =
+            Region::from_str(&upper).expect("upper-case valid label must parse as Region");
+        let from_lower =
+            Region::from_str(&lower).expect("lower-case valid label must parse as Region");
+
+        // Equal values: case-insensitivity is bidirectional — both inputs
+        // reach the same canonical form.
+        prop_assert_eq!(&from_upper, &from_lower);
+
+        // And canonical form is lowercase. Render once, compare via
+        // references so no intermediate clone is needed and `prop_assert_eq!`
+        // still sees matching owned-vs-owned types.
+        let rendered_upper = from_upper.to_string();
+        let rendered_lower = from_lower.to_string();
+        prop_assert_eq!(&rendered_upper, &lower);
+        prop_assert_eq!(&rendered_lower, &lower);
+    }
+}
+
+// -----------------------------------------------------------------------------
+// SpiffeId round-trip — property per §3.1.
+//
+// For any valid `(trust_domain, path)` tuple, the SPIFFE URI built from
+// those parts must round-trip losslessly through `Display` and `FromStr`.
+// The trust domain is a DNS-like label; the path is one or more segments
+// separated by `/`, each a valid label.
+//
+// The generator deliberately stays lowercase to keep the round-trip
+// Display-output-equals-input property strong: case-insensitivity for
+// SpiffeId is a separate concern handled by construction ordering
+// (`to_ascii_lowercase` happens inside `new`), and mixing it here would
+// weaken the byte-for-byte equality check the acceptance test in §3.1
+// asserts on the whitepaper canonical example.
+// -----------------------------------------------------------------------------
+
+/// A single lowercase-alphanumeric character — the strict subset used in
+/// the SPIFFE generator to keep canonical Display byte-equal to input.
+fn lower_alnum_char() -> impl Strategy<Value = char> {
+    proptest::sample::select("abcdefghijklmnopqrstuvwxyz0123456789".chars().collect::<Vec<_>>())
+}
+
+/// One character from the allowed label-interior class, lowercase-only.
+fn lower_interior_char() -> impl Strategy<Value = char> {
+    proptest::sample::select("abcdefghijklmnopqrstuvwxyz0123456789-_.".chars().collect::<Vec<_>>())
+}
+
+/// A single label — valid under the DNS-1123-like rules, lowercase-only,
+/// ≥ 1 char. Mirrors `valid_label()` above but with no uppercase branch,
+/// so `to_string()` output equals the generated input byte-for-byte.
+fn lower_label() -> impl Strategy<Value = String> {
+    prop_oneof![
+        lower_alnum_char().prop_map(|c| c.to_string()),
+        (
+            lower_alnum_char(),
+            prop::collection::vec(lower_interior_char(), 0..=8),
+            lower_alnum_char(),
+        )
+            .prop_map(|(first, interior, last)| {
+                let mut s = String::with_capacity(2 + interior.len());
+                s.push(first);
+                s.extend(interior);
+                s.push(last);
+                s
+            }),
+    ]
+}
+
+/// A SPIFFE path — one or more leading-slash-separated label segments.
+fn spiffe_path() -> impl Strategy<Value = String> {
+    prop::collection::vec(lower_label(), 1..=4).prop_map(|segments| {
+        let mut p = String::new();
+        for seg in segments {
+            p.push('/');
+            p.push_str(&seg);
+        }
+        p
+    })
+}
+
+proptest! {
+    #[test]
+    fn spiffe_id_round_trips_through_display_and_from_str(
+        trust_domain in lower_label(),
+        path in spiffe_path(),
+    ) {
+        let uri = format!("spiffe://{trust_domain}{path}");
+
+        let parsed = SpiffeId::from_str(&uri).expect("generator yields valid SPIFFE URI");
+
+        // Display output equals the input byte-for-byte because the
+        // generator stays in the already-canonical (lowercase) form.
+        // Render once, compare by reference — avoids both a clone and
+        // the `String == &String` type mismatch inside `prop_assert_eq!`.
+        let rendered = parsed.to_string();
+        prop_assert_eq!(&rendered, &uri);
+
+        // Accessors return the exact segments, never a re-parse of the
+        // stored string — this is the anti-string-splitting guard from AC.
+        prop_assert_eq!(parsed.trust_domain(), &trust_domain);
+        prop_assert_eq!(parsed.path(), &path);
+
+        // And re-parsing the rendered form yields an equal value — the
+        // round-trip leg proper.
+        let reparsed =
+            SpiffeId::from_str(&parsed.to_string()).expect("canonical form re-parses");
+        prop_assert_eq!(reparsed, parsed);
+    }
 }
