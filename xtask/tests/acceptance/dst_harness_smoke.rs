@@ -84,12 +84,52 @@ fn dst_with_fixed_seed_exits_zero_and_writes_artifacts() {
 
     // A non-empty invariants array (the catalogue ran to completion).
     let invariants = summary["invariants"].as_array().expect("invariants must be an array");
-    assert!(!invariants.is_empty(), "invariants array must be non-empty");
+    assert_eq!(
+        invariants.len(),
+        6,
+        "default catalogue must emit exactly six invariants; got {invariants:?}"
+    );
 
-    // wall_clock_ms is present and non-negative.
+    // Every entry has a canonical kebab-case name and status="pass" in
+    // Phase 1 — this pins both the stub evaluator and the canonical
+    // form on the wire. 06-02 will keep the same shape but may flip
+    // some status values.
+    for entry in invariants {
+        let name = entry["name"].as_str().expect("invariant name must be string");
+        assert!(!name.is_empty(), "invariant name must not be empty; got {entry}");
+        assert!(
+            name.chars().all(|c| c.is_ascii_lowercase() || c == '-'),
+            "invariant name must be kebab-case lowercase; got {name}"
+        );
+        assert_eq!(
+            entry["status"].as_str(),
+            Some("pass"),
+            "Phase 1 stub evaluators must report pass; got {entry}"
+        );
+    }
+
+    // The failures array is empty on a green run.
+    assert_eq!(
+        summary["failures"].as_array().map(Vec::len),
+        Some(0),
+        "green run must have empty failures; got {summary}"
+    );
+
+    // wall_clock_ms is present.
     assert!(
         summary["wall_clock_ms"].is_u64(),
         "summary must carry wall_clock_ms as a u64; got {summary}"
+    );
+
+    // git_sha and toolchain are captured (ADR-0006 failure-artifact
+    // schema) — assert non-empty so a mutation that returns "" is
+    // caught.
+    let git_sha = summary["git_sha"].as_str().expect("git_sha must be present");
+    assert!(!git_sha.is_empty(), "git_sha must be non-empty; got {summary}");
+    let toolchain = summary["toolchain"].as_str().expect("toolchain must be present");
+    assert!(
+        toolchain.contains("rustc") || toolchain == "unknown",
+        "toolchain must look like rustc output or 'unknown'; got {toolchain}"
     );
 }
 
@@ -153,6 +193,35 @@ fn first_line_of_stdout_names_the_seed_when_random() {
         Some(seed_in_line),
         "the seed on stdout line 1 must match summary.seed"
     );
+}
+
+// Two back-to-back default runs must produce *different* seeds (with
+// overwhelming probability) — catches a mutation that replaces
+// `fresh_seed` with a constant. A constant-seed fresh_seed would make
+// both runs show the same number on line 1; real OS entropy will not.
+#[test]
+fn two_default_runs_produce_different_seeds() {
+    let target_a = tempfile::tempdir().expect("tempdir a");
+    let target_b = tempfile::tempdir().expect("tempdir b");
+
+    let seed_a = extract_first_line_seed(&run_dst(target_a.path(), &[]));
+    let seed_b = extract_first_line_seed(&run_dst(target_b.path(), &[]));
+
+    assert_ne!(
+        seed_a, seed_b,
+        "two default runs must not use the same seed (probability 2^-64 otherwise)"
+    );
+}
+
+fn extract_first_line_seed(out: &Output) -> u64 {
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let first_line = stdout.lines().next().expect("dst must produce stdout");
+    first_line
+        .trim_start_matches("seed: ")
+        .trim_start_matches("dst: seed = ")
+        .trim()
+        .parse()
+        .unwrap_or_else(|_| panic!("first line must end with a numeric seed; got {first_line:?}"))
 }
 
 // -----------------------------------------------------------------------------

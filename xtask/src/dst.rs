@@ -268,3 +268,176 @@ fn toolchain() -> String {
 const fn _status_enum_used() -> InvariantStatus {
     InvariantStatus::Pass
 }
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
+mod tests {
+    //! Library-level unit tests — these are what cargo-mutants uses to
+    //! kill mutations in this file (integration-level subprocess tests
+    //! live under `xtask/tests/acceptance/` and are excluded from
+    //! mutation runs by `.mutants.toml`).
+
+    use super::*;
+
+    #[test]
+    fn fresh_seed_produces_distinct_values_across_calls() {
+        let a = fresh_seed();
+        let b = fresh_seed();
+        // The probability of a 64-bit collision from `OsRng` is 2^-64 —
+        // a flake here is signalling a mutation that pinned the seed to
+        // a constant, not a real RNG collision.
+        assert_ne!(a, b, "fresh_seed must sample OS entropy, not return a constant");
+    }
+
+    #[test]
+    fn git_sha_is_non_empty_or_unknown_sentinel() {
+        let sha = git_sha();
+        assert!(!sha.is_empty(), "git_sha must never return an empty string");
+        // Accept either a hex-ish short SHA (git available) or the
+        // fallback sentinel. A mutation to a fixed non-sentinel string
+        // (e.g. "xyzzy") will fail both branches.
+        assert!(
+            sha == "unknown" || sha.chars().all(|c| c.is_ascii_hexdigit()),
+            "git_sha must look like a git short-SHA or the 'unknown' sentinel; got {sha:?}"
+        );
+    }
+
+    #[test]
+    fn toolchain_looks_like_rustc_version_or_unknown_sentinel() {
+        let tc = toolchain();
+        assert!(!tc.is_empty(), "toolchain must never return an empty string");
+        assert!(
+            tc.contains("rustc") || tc == "unknown",
+            "toolchain must contain 'rustc' or be the 'unknown' sentinel; got {tc:?}"
+        );
+    }
+
+    #[test]
+    fn xtask_target_dir_ends_in_xtask() {
+        let dir = xtask_target_dir();
+        assert_eq!(
+            dir.file_name().and_then(|s| s.to_str()),
+            Some("xtask"),
+            "artifact directory must end in 'xtask' per ADR-0006; got {dir:?}"
+        );
+    }
+
+    #[test]
+    fn write_artifacts_writes_log_and_summary_on_green_run() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        // Point CARGO_TARGET_DIR at our tempdir so the artifacts land
+        // under tmp/xtask/.
+        // SAFETY: this test crate is single-threaded via `#[cfg(test)]`
+        // in cargo's default; setting an env var in-process is fine.
+        // We restore nothing — the env vanishes with the process.
+        let guard = EnvGuard::set("CARGO_TARGET_DIR", tmp.path().to_str().unwrap());
+
+        let report = RunReport {
+            seed: 1234,
+            invariants: vec![overdrive_sim::InvariantResult {
+                name: "single-leader".to_owned(),
+                status: InvariantStatus::Pass,
+                tick: 100,
+                host: "host-0".to_owned(),
+                cause: None,
+            }],
+            wall_clock: std::time::Duration::from_millis(5),
+            failures: Vec::new(),
+        };
+        write_artifacts(&report).expect("write_artifacts");
+        drop(guard);
+
+        let log_path = tmp.path().join("xtask").join("dst-output.log");
+        let summary_path = tmp.path().join("xtask").join("dst-summary.json");
+        assert!(log_path.is_file());
+        assert!(summary_path.is_file());
+
+        let log = std::fs::read_to_string(&log_path).unwrap();
+        assert!(log.starts_with("seed: 1234"), "log line 1 must name the seed; got {log}");
+        assert!(log.contains("single-leader"));
+        assert!(log.contains("1 invariants passed"));
+
+        let summary: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&summary_path).unwrap()).unwrap();
+        assert_eq!(summary["seed"].as_u64(), Some(1234));
+        assert_eq!(summary["invariants"][0]["name"].as_str(), Some("single-leader"));
+        assert_eq!(summary["invariants"][0]["status"].as_str(), Some("pass"));
+        assert_eq!(summary["failures"].as_array().map(Vec::len), Some(0));
+    }
+
+    #[test]
+    fn write_artifacts_records_failures_on_red_run() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let guard = EnvGuard::set("CARGO_TARGET_DIR", tmp.path().to_str().unwrap());
+
+        let report = RunReport {
+            seed: 9,
+            invariants: vec![overdrive_sim::InvariantResult {
+                name: "single-leader".to_owned(),
+                status: InvariantStatus::Fail,
+                tick: 42,
+                host: "host-1".to_owned(),
+                cause: Some("two leaders".to_owned()),
+            }],
+            wall_clock: std::time::Duration::from_millis(5),
+            failures: vec![overdrive_sim::Failure {
+                invariant: "single-leader".to_owned(),
+                tick: 42,
+                host: "host-1".to_owned(),
+                cause: "two leaders".to_owned(),
+            }],
+        };
+        write_artifacts(&report).expect("write_artifacts");
+        drop(guard);
+
+        let log_path = tmp.path().join("xtask").join("dst-output.log");
+        let log = std::fs::read_to_string(&log_path).unwrap();
+        assert!(
+            log.contains("FAILED") && log.contains("two leaders"),
+            "failure log must name FAILED and cause; got {log}"
+        );
+
+        let summary: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(tmp.path().join("xtask").join("dst-summary.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(summary["failures"].as_array().map(Vec::len), Some(1));
+        assert_eq!(summary["failures"][0]["invariant"].as_str(), Some("single-leader"));
+        assert_eq!(summary["failures"][0]["cause"].as_str(), Some("two leaders"));
+    }
+
+    /// RAII guard that restores (or clears) an env var on drop. Scoped
+    /// narrowly to these tests; real DST code reads through the
+    /// injected traits, not process env.
+    struct EnvGuard {
+        key: &'static str,
+        prior: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let prior = std::env::var(key).ok();
+            // SAFETY: Rust 2024's set_var is unsafe because concurrent
+            // getenv in other threads is UB. Our tests run
+            // single-threaded within this binary and the write is
+            // ordered before any later read in the same test, so the
+            // unsafe contract is met.
+            unsafe {
+                std::env::set_var(key, value);
+            }
+            Self { key, prior }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            // SAFETY: see EnvGuard::set.
+            unsafe {
+                match &self.prior {
+                    Some(v) => std::env::set_var(self.key, v),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
+    }
+}

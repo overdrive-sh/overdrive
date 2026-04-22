@@ -345,3 +345,124 @@ impl Default for Harness {
         Self::new()
     }
 }
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
+mod tests {
+    //! Library-level unit tests — these are what cargo-mutants uses to
+    //! kill mutations in this file. Integration-test-style assertions
+    //! (the xtask subprocess tests) are explicitly excluded by
+    //! `.mutants.toml` so mutation coverage must come from here.
+
+    use super::*;
+
+    #[test]
+    fn invariant_status_as_str_is_pass_or_fail() {
+        assert_eq!(InvariantStatus::Pass.as_str(), "pass");
+        assert_eq!(InvariantStatus::Fail.as_str(), "fail");
+    }
+
+    #[test]
+    fn run_report_is_green_reflects_failures_vector() {
+        let green = RunReport {
+            seed: 0,
+            invariants: Vec::new(),
+            wall_clock: Duration::ZERO,
+            failures: Vec::new(),
+        };
+        assert!(green.is_green());
+
+        let red = RunReport {
+            seed: 0,
+            invariants: Vec::new(),
+            wall_clock: Duration::ZERO,
+            failures: vec![Failure {
+                invariant: "single-leader".to_owned(),
+                tick: 1,
+                host: "host-0".to_owned(),
+                cause: "boom".to_owned(),
+            }],
+        };
+        assert!(!red.is_green());
+    }
+
+    #[test]
+    fn default_catalogue_is_the_full_invariant_set() {
+        let h = Harness::new();
+        let cat = h.catalogue();
+        assert_eq!(cat.len(), Invariant::ALL.len());
+        assert_eq!(cat, Invariant::ALL.to_vec());
+    }
+
+    #[test]
+    fn only_catalogue_is_the_single_requested_invariant() {
+        let h = Harness::new().only(Invariant::SingleLeader);
+        let cat = h.catalogue();
+        assert_eq!(cat, vec![Invariant::SingleLeader]);
+    }
+
+    #[test]
+    fn run_boots_the_default_number_of_hosts_and_reports_every_invariant() {
+        let report = Harness::new().run(42).expect("harness must compose");
+        // One result per invariant in the default catalogue.
+        assert_eq!(report.invariants.len(), Invariant::ALL.len());
+        // Phase 1 stubs all pass — failures array empty.
+        assert!(report.is_green());
+        assert!(report.failures.is_empty());
+        // Every invariant result carries a canonical name and a host.
+        for (result, canonical) in report.invariants.iter().zip(Invariant::ALL.iter()) {
+            assert_eq!(result.name, canonical.to_string());
+            assert_eq!(result.status, InvariantStatus::Pass);
+            assert!(!result.host.is_empty());
+        }
+        // Seed is echoed back verbatim.
+        assert_eq!(report.seed, 42);
+    }
+
+    #[test]
+    fn run_with_only_produces_one_invariant_result() {
+        let report = Harness::new()
+            .only(Invariant::EntropyDeterminismUnderReseed)
+            .run(7)
+            .expect("harness must compose");
+        assert_eq!(report.invariants.len(), 1);
+        assert_eq!(report.invariants[0].name, "entropy-determinism-under-reseed");
+        assert_eq!(report.invariants[0].status, InvariantStatus::Pass);
+    }
+
+    #[test]
+    fn build_hosts_produces_default_host_count_with_distinct_names() {
+        let hosts = Harness::build_hosts(0).expect("build_hosts must succeed");
+        assert_eq!(hosts.len(), DEFAULT_HOST_COUNT);
+        let names: Vec<&str> = hosts.iter().map(|h| h.name.as_str()).collect();
+        assert_eq!(names, vec!["host-0", "host-1", "host-2"]);
+    }
+
+    #[test]
+    fn evaluator_failure_produces_a_corresponding_failure_entry() {
+        // Synthesise a hand-crafted failure via a custom evaluation path.
+        // The real evaluator always returns Pass in Phase 1, so we test
+        // the `if result.status == Fail` branch by constructing a
+        // RunReport directly.
+        let fail = Failure {
+            invariant: "single-leader".to_owned(),
+            tick: 42,
+            host: "host-1".to_owned(),
+            cause: "synthetic".to_owned(),
+        };
+        let report = RunReport {
+            seed: 1,
+            invariants: vec![InvariantResult {
+                name: "single-leader".to_owned(),
+                status: InvariantStatus::Fail,
+                tick: 42,
+                host: "host-1".to_owned(),
+                cause: Some("synthetic".to_owned()),
+            }],
+            wall_clock: Duration::ZERO,
+            failures: vec![fail.clone()],
+        };
+        assert!(!report.is_green());
+        assert_eq!(report.failures, vec![fail]);
+    }
+}
