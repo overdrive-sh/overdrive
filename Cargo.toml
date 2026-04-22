@@ -89,6 +89,10 @@ rstest          = "0.23"
 insta           = "1"
 syn             = { version = "2", features = ["full", "visit", "extra-traits"] }
 tempfile        = "3"
+# `trybuild` is pinned for stable stderr diagnostics across rustc bumps —
+# the pin is relaxed when the compiler output changes and the expected
+# `.stderr` fixtures are regenerated with `TRYBUILD=overwrite`.
+trybuild        = "=1.0.101"
 
 # --- Async streams --------------------------------------------------------
 tokio-stream    = { version = "0.1", features = ["sync"] }

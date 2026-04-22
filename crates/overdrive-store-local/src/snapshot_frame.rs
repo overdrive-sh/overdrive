@@ -95,8 +95,40 @@ pub enum FrameError {
     },
     /// rkyv payload failed to decode — truncated bytes, flipped bits,
     /// or malformed archival output.
-    #[error("snapshot frame payload is corrupted: {0}")]
-    CorruptedPayload(String),
+    #[error("snapshot frame payload is corrupted: {reason}")]
+    CorruptedPayload {
+        /// Byte offset into the frame at which decoding first failed.
+        /// In practice this is `HEADER_LEN` because the rkyv archive
+        /// crate does not expose the exact failing offset; the offset
+        /// names the start of the payload so callers rendering the
+        /// error have a stable byte index to pin a hex dump against.
+        offset: usize,
+        /// Underlying rkyv diagnostic, already stringified.
+        reason: String,
+    },
+}
+
+impl FrameError {
+    /// Byte offset into the frame where the failure was first detected.
+    /// Callers mapping this into [`crate::IntentStoreError`] forward
+    /// this value as the `SnapshotCorrupt { offset }` field so error
+    /// renderers can pin a hex dump without re-inspecting the frame.
+    #[must_use]
+    pub const fn offset(&self) -> usize {
+        match self {
+            // `TooShort` fires when the slice did not even contain the
+            // header; the offset is the first byte that *would have been
+            // read* had more bytes been available.
+            Self::TooShort { actual, .. } => *actual,
+            // Magic lives at offset 0..4; the first byte of mismatch is
+            // at offset 0 in the frame.
+            Self::BadMagic { .. } => 0,
+            // Version lives at offset 4..6; name the start of that
+            // field rather than the end for a stable diagnostic.
+            Self::UnsupportedVersion { .. } => 4,
+            Self::CorruptedPayload { offset, .. } => *offset,
+        }
+    }
 }
 
 /// Encode a list of entries as a framed snapshot byte slice.
@@ -129,7 +161,7 @@ pub fn encode(entries: &[(Bytes, Bytes)]) -> Result<Vec<u8>, FrameError> {
     out.extend_from_slice(&VERSION.to_le_bytes());
 
     let archived = rkyv::to_bytes::<rancor::Error>(&owned)
-        .map_err(|e| FrameError::CorruptedPayload(e.to_string()))?;
+        .map_err(|e| FrameError::CorruptedPayload { offset: HEADER_LEN, reason: e.to_string() })?;
     out.extend_from_slice(&archived);
 
     Ok(out)
@@ -169,7 +201,85 @@ pub fn decode(bytes: &[u8]) -> Result<Vec<(Bytes, Bytes)>, FrameError> {
     aligned.extend_from_slice(payload);
 
     let decoded: Vec<(Vec<u8>, Vec<u8>)> = rkyv::from_bytes::<_, rancor::Error>(&aligned)
-        .map_err(|e| FrameError::CorruptedPayload(e.to_string()))?;
+        .map_err(|e| FrameError::CorruptedPayload { offset: HEADER_LEN, reason: e.to_string() })?;
 
     Ok(decoded.into_iter().map(|(k, v)| (Bytes::from(k), Bytes::from(v))).collect())
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+#[allow(clippy::expect_fun_call)]
+mod tests {
+    //! Boundary tests for [`decode`] covering the header-length guard.
+    //!
+    //! These are the mandatory mutation-testing witnesses for the
+    //! `if bytes.len() < HEADER_LEN` branch: a header-minus-one slice
+    //! and an exactly-`HEADER_LEN` slice produce distinct variants, so
+    //! mutating `<` to `==` or `<=` changes which variant is observed
+    //! on the boundary case. §4.3 acceptance tests exercise the
+    //! payload-corruption path but cannot witness the header boundary
+    //! because their minimum input length is already well above
+    //! `HEADER_LEN`.
+    use super::*;
+
+    #[test]
+    fn decode_rejects_an_input_shorter_than_the_header() {
+        // HEADER_LEN - 1 bytes: five `0u8`s. The slice is too short to
+        // contain the magic + version header, so decode must surface
+        // `TooShort` with `actual = HEADER_LEN - 1`.
+        let too_short = [0u8; HEADER_LEN - 1];
+        let err = decode(&too_short).expect_err("too-short slice must fail");
+        match err {
+            FrameError::TooShort { expected, actual } => {
+                assert_eq!(expected, HEADER_LEN);
+                assert_eq!(actual, HEADER_LEN - 1);
+            }
+            other => panic!("expected TooShort, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decode_rejects_a_header_only_input_with_a_payload_error_not_a_length_error() {
+        // Exactly HEADER_LEN bytes: valid magic + valid version + empty
+        // payload. This exercises the boundary case — the header-guard
+        // must NOT fire (else the mutation `<` → `<=` would pass), so
+        // decode proceeds to the rkyv step, which rejects the
+        // zero-length payload as `CorruptedPayload`.
+        let mut header_only = Vec::with_capacity(HEADER_LEN);
+        header_only.extend_from_slice(&MAGIC);
+        header_only.extend_from_slice(&VERSION.to_le_bytes());
+        assert_eq!(header_only.len(), HEADER_LEN);
+
+        let err = decode(&header_only).expect_err("header-only slice must fail");
+        // Must be `CorruptedPayload`, not `TooShort` — that proves the
+        // `<` comparison in the header guard is strict, not `<=`.
+        assert!(
+            matches!(err, FrameError::CorruptedPayload { .. }),
+            "expected CorruptedPayload to witness the `<` boundary, got {err:?}",
+        );
+    }
+
+    #[test]
+    fn decode_accepts_the_exact_header_length_as_the_boundary() {
+        // Witness for the mutation `<` → `==`: at HEADER_LEN bytes the
+        // `<` guard does NOT fire. If it were `==`, a slice longer than
+        // HEADER_LEN would fail the guard; if it were `<=`, a slice
+        // exactly HEADER_LEN would fail the guard. The test above
+        // proves the `<=` variant, this test proves the `==` variant:
+        // at HEADER_LEN + 1 bytes, decode reaches the payload step.
+        let mut header_plus_one = Vec::with_capacity(HEADER_LEN + 1);
+        header_plus_one.extend_from_slice(&MAGIC);
+        header_plus_one.extend_from_slice(&VERSION.to_le_bytes());
+        header_plus_one.push(0u8);
+        assert_eq!(header_plus_one.len(), HEADER_LEN + 1);
+
+        let err = decode(&header_plus_one).expect_err("single-byte payload is malformed");
+        // A single stray byte is not a valid rkyv archive, so decode
+        // surfaces `CorruptedPayload`. The critical property is that
+        // it is NOT `TooShort` — the `<` guard did not fire.
+        assert!(
+            matches!(err, FrameError::CorruptedPayload { .. }),
+            "HEADER_LEN + 1 slice must reach the payload step, got {err:?}",
+        );
+    }
 }

@@ -23,6 +23,18 @@ pub enum IntentStoreError {
     Conflict,
     #[error("snapshot import failed: {0}")]
     SnapshotImport(String),
+    /// A snapshot byte slice handed to `bootstrap_from` failed
+    /// validation at `offset`. Offsets are expressed in bytes from the
+    /// start of the frame; `0` names the magic, `4..6` names the
+    /// version word, and any offset ≥ `HEADER_LEN` names the rkyv
+    /// payload. Callers rendering this error should print the offset
+    /// alongside a hex dump of the surrounding bytes.
+    #[error("snapshot frame is corrupted at byte offset {offset}")]
+    SnapshotCorrupt {
+        /// Byte offset into the snapshot frame where corruption was
+        /// first detected.
+        offset: usize,
+    },
     #[error("intent store I/O: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -111,4 +123,44 @@ pub trait IntentStore: Send + Sync + 'static {
     /// Replay a snapshot as the initial state — used by `RaftStore` when
     /// bootstrapping a new HA cluster from a `LocalStore` export.
     async fn bootstrap_from(&self, snapshot: StateSnapshot) -> Result<(), IntentStoreError>;
+}
+
+#[cfg(test)]
+mod state_snapshot_tests {
+    //! Unit witnesses for [`StateSnapshot`]'s component getters.
+    //!
+    //! These are mutation-testing seams: `cargo mutants` targets the
+    //! `bytes()` getter independently from the storage-crate tests that
+    //! drive it end-to-end, and without a same-crate test every
+    //! getter-returns-`Vec::leak(Vec::new())` mutation is `MISSED`.
+    use super::*;
+    use bytes::Bytes;
+
+    #[test]
+    fn state_snapshot_bytes_returns_the_canonical_slice_supplied_to_from_parts() {
+        let canonical: Vec<u8> = vec![0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x01, 0x02];
+        let snap = StateSnapshot::from_parts(
+            1,
+            vec![(Bytes::from_static(b"k"), Bytes::from_static(b"v"))],
+            canonical.clone(),
+        );
+        assert_eq!(
+            snap.bytes(),
+            canonical.as_slice(),
+            "bytes() must return the exact slice handed to from_parts"
+        );
+        // A distinct canonical slice must produce a distinct `bytes()`
+        // projection — guards against a mutation that returns the same
+        // static slice regardless of input.
+        let other = StateSnapshot::from_parts(1, Vec::new(), vec![0x11, 0x22]);
+        assert_ne!(snap.bytes(), other.bytes(), "bytes() must reflect per-instance state");
+        assert_eq!(other.bytes(), &[0x11u8, 0x22u8][..]);
+    }
+
+    #[test]
+    fn state_snapshot_bytes_is_non_empty_when_from_parts_receives_non_empty_bytes() {
+        let snap = StateSnapshot::from_parts(1, Vec::new(), vec![0xAA]);
+        assert!(!snap.bytes().is_empty(), "bytes() must reflect the non-empty input");
+        assert_eq!(snap.bytes().len(), 1);
+    }
 }

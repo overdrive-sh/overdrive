@@ -295,8 +295,13 @@ impl IntentStore for LocalStore {
         let frame = snapshot.bytes().to_vec();
 
         tokio::task::spawn_blocking(move || {
+            // Decode BEFORE opening the write transaction. This is what
+            // makes `bootstrap_from` atomic across corruption: a frame
+            // that fails to decode never touches the target store, so
+            // the post-failure `export_snapshot` is byte-identical to
+            // the export of a fresh never-bootstrapped store.
             let entries = snapshot_frame::decode(&frame)
-                .map_err(|e| IntentStoreError::SnapshotImport(e.to_string()))?;
+                .map_err(|e| IntentStoreError::SnapshotCorrupt { offset: e.offset() })?;
 
             let write = inner.db.begin_write().map_err(map_transaction_error)?;
             {
