@@ -752,6 +752,7 @@ dependencies = [
  "futures",
  "overdrive-core",
  "parking_lot",
+ "proptest",
  "tokio",
  "tokio-stream",
 ]

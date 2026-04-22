@@ -32,6 +32,7 @@ tokio-stream.workspace   = true
 # Crafter adds turmoil, proptest, and overdrive-store-local here during DELIVER.
 tokio    = { workspace = true }
 futures.workspace = true
+proptest.workspace = true
 
 [lints]
 workspace = true

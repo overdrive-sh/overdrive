@@ -344,6 +344,41 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-04-22T05:40:18Z"
+    },
+    {
+      "sid": "04-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-22T05:44:51Z"
+    },
+    {
+      "sid": "04-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-22T05:47:55Z"
+    },
+    {
+      "sid": "04-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-22T05:49:23Z"
+    },
+    {
+      "sid": "04-03",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: Step 04-03 has one distinct behavior (LWW convergence is deterministic under seeded reordering). Behavior budget = 2x1 = 2. The witness test and the proptest in the acceptance file both target this behavior; the proptest subsumes every edge case the generator bounds (peers>=2, writes>=1) admit. Single-peer / empty-cluster unit tests would exercise input shapes the generator excludes by AC design. Helper is driven by the acceptance file.",
+      "t": "2026-04-22T05:49:48Z"
+    },
+    {
+      "sid": "04-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-22T06:04:27Z"
     }
   ]
 }

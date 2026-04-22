@@ -41,7 +41,7 @@
 //! the Phase 1 sim we care about observing *every convergent row*, not
 //! just the latest, so `broadcast` is the correct primitive.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -146,6 +146,14 @@ impl PeerState {
     fn latest_alloc_status(&self, alloc_id: &AllocationId) -> Option<AllocStatusRow> {
         self.by_alloc.lock().get(alloc_id).cloned()
     }
+
+    /// Snapshot every alloc-status row this peer holds as LWW winner,
+    /// keyed by `AllocationId` under `BTreeMap` (deterministic iteration
+    /// is load-bearing for the bit-identical comparison in
+    /// [`check_lww_convergence`]).
+    fn alloc_status_snapshot(&self) -> BTreeMap<AllocationId, AllocStatusRow> {
+        self.by_alloc.lock().iter().map(|(k, v)| (k.clone(), v.clone())).collect()
+    }
 }
 
 /// Total order on [`LogicalTimestamp`]: `(counter, writer)`
@@ -191,6 +199,18 @@ impl SimObservationStore {
     #[must_use]
     pub fn latest_alloc_status(&self, alloc_id: &AllocationId) -> Option<AllocStatusRow> {
         self.inner.latest_alloc_status(alloc_id)
+    }
+
+    /// Snapshot every alloc-status row this peer currently holds as its
+    /// LWW winner. Deterministic iteration is guaranteed by the
+    /// `BTreeMap` key ordering on [`AllocationId`].
+    ///
+    /// Used by [`check_lww_convergence`] to build a cross-peer report;
+    /// also useful for debugging a single peer's view of the cluster
+    /// from test code.
+    #[must_use]
+    pub fn alloc_status_snapshot(&self) -> BTreeMap<AllocationId, AllocStatusRow> {
+        self.inner.alloc_status_snapshot()
     }
 }
 
@@ -263,6 +283,14 @@ impl SimObservationCluster {
             .unwrap_or_else(|| panic!("peer {node_id} not part of this cluster"))
     }
 
+    /// Every peer in this cluster, paired with its [`NodeId`]. Order is
+    /// **not** guaranteed — callers that need deterministic iteration
+    /// must sort by [`NodeId`] themselves. [`check_lww_convergence`] does
+    /// so via `BTreeMap` to keep its output byte-comparable across runs.
+    pub fn peers(&self) -> impl Iterator<Item = (&NodeId, &Arc<SimObservationStore>)> {
+        self.peers.iter()
+    }
+
     /// Advance simulated time by `duration`. Drains any gossip messages
     /// whose delay has elapsed, subject to the partition matrix.
     ///
@@ -310,6 +338,114 @@ impl SimObservationCluster {
     pub async fn repair(&self, a: &NodeId, b: &NodeId) {
         self.router.repair(a, b);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Convergence helper — shared between proptest and US-06 invariant
+// ---------------------------------------------------------------------------
+
+/// Snapshot of the LWW state of every peer in a cluster.
+///
+/// Keyed by [`NodeId`] under `BTreeMap` so that iteration order — and
+/// therefore equality comparison — is deterministic across runs.
+/// See [`SimObservationCluster`].
+///
+/// Produced by [`check_lww_convergence`]. Step 04-03's proptest compares
+/// two reports across seeded runs for bit-identity; step 06-02 re-uses
+/// the same helper inside the `SimObservationLwwConverges`
+/// `assert_always!` invariant body. The assertion logic lives in one
+/// place — this type — and never duplicated across the two call sites.
+///
+/// # Equality
+///
+/// `ConvergenceReport::eq` compares the full nested map structure. Two
+/// reports are equal when and only when every peer holds the same set
+/// of `(alloc_id → AllocStatusRow)` entries. The `AllocStatusRow` fields
+/// are compared wholesale (no field-diff semantics — the §4 guardrail
+/// applies to the report just as it applies to the stored rows).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConvergenceReport {
+    peer_views: BTreeMap<NodeId, BTreeMap<AllocationId, AllocStatusRow>>,
+}
+
+impl ConvergenceReport {
+    /// Construct an empty report — a cluster with no writes at all.
+    /// Kept `pub(crate)` so tests in this crate can stub a report
+    /// without going through the cluster path when they want to assert
+    /// on the `is_converged` logic in isolation.
+    pub(crate) const fn new() -> Self {
+        Self { peer_views: BTreeMap::new() }
+    }
+
+    /// Borrow the per-peer views. The outer `BTreeMap` is keyed by
+    /// [`NodeId`]; the inner `BTreeMap` is keyed by [`AllocationId`].
+    /// Iteration order is deterministic on both axes.
+    #[must_use]
+    pub const fn peer_views(&self) -> &BTreeMap<NodeId, BTreeMap<AllocationId, AllocStatusRow>> {
+        &self.peer_views
+    }
+
+    /// True when every peer that has observed an allocation holds the
+    /// same `AllocStatusRow` for it as every other peer that has
+    /// observed it.
+    ///
+    /// A peer that has never seen a given allocation is not a
+    /// violation — the allocation's winning row may simply not have
+    /// reached that peer yet (partition, gossip still draining).
+    /// Convergence means *there is no disagreement among peers that
+    /// have seen a row*, not *every peer has seen every row*.
+    ///
+    /// This definition matches the §5.1 scenario 3 AC: "every peer's
+    /// final row set is bit-identical across two runs" is the stronger
+    /// cross-run property, enforced by `ConvergenceReport::eq`.
+    /// `is_converged` is the within-run property: for each `alloc_id`,
+    /// every peer that has a row for it has the **same** row.
+    #[must_use]
+    pub fn is_converged(&self) -> bool {
+        // Collect the union of alloc_ids seen across all peers; for
+        // each, verify every peer that has an entry agrees on the row.
+        let mut per_alloc: BTreeMap<&AllocationId, &AllocStatusRow> = BTreeMap::new();
+        for view in self.peer_views.values() {
+            for (alloc_id, row) in view {
+                match per_alloc.get(alloc_id) {
+                    None => {
+                        per_alloc.insert(alloc_id, row);
+                    }
+                    Some(existing) if *existing == row => {
+                        // Agreement so far — continue.
+                    }
+                    Some(_) => return false,
+                }
+            }
+        }
+        true
+    }
+}
+
+/// Snapshot every peer's LWW state in `cluster` and return a
+/// deterministic [`ConvergenceReport`].
+///
+/// The returned report is read-only: it captures the cluster state at
+/// the moment of the call. Call after `cluster.advance(...)` has
+/// drained the gossip window — otherwise the report reflects an
+/// in-flight state, which is valid but usually not what a convergence
+/// check wants to assert on.
+///
+/// # Used by
+///
+/// * The §5.1 scenario 3 proptest in
+///   `tests/acceptance/sim_observation_lww_converges.rs` — two reports
+///   across two seeded runs must be `==` (bit-identical).
+/// * The `SimObservationLwwConverges` `assert_always!` invariant
+///   evaluator added in step 06-02 — the invariant body checks
+///   `check_lww_convergence(cluster).is_converged()` on every tick.
+#[must_use]
+pub fn check_lww_convergence(cluster: &SimObservationCluster) -> ConvergenceReport {
+    let mut peer_views = BTreeMap::new();
+    for (node_id, peer) in cluster.peers() {
+        peer_views.insert(node_id.clone(), peer.alloc_status_snapshot());
+    }
+    ConvergenceReport { peer_views }
 }
 
 // ---------------------------------------------------------------------------
