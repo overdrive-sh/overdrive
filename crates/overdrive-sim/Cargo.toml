@@ -23,16 +23,31 @@ crate_class = "adapter-sim"
 [dependencies]
 overdrive-core.workspace = true
 async-trait.workspace    = true
+bytes.workspace          = true
 futures.workspace        = true
 tokio.workspace          = true
 parking_lot.workspace    = true
 tokio-stream.workspace   = true
+rand.workspace           = true
+
+[features]
+# `real-adapters` gates a `real` module that ships minimal, mostly-unimplemented
+# real adapters (`SystemClock`, `TcpTransport`, `OsEntropy`, and stub real
+# Dataplane / Driver / LLM adapters) so that `overdrive-core`'s trait bounds
+# can be discharged somewhere the dst-lint gate will NOT flag. The `Real*`
+# types here are a temporary home — they move out to `overdrive-node` /
+# `overdrive-control-plane` once those crates exist (post-Phase-1). The crate
+# metadata below keeps `crate_class = "adapter-sim"` because dst-lint scans
+# the crate, not the module — the wiring-crate exemption is enforced at
+# crate granularity.
+real-adapters = []
 
 [dev-dependencies]
 # Crafter adds turmoil, proptest, and overdrive-store-local here during DELIVER.
 tokio    = { workspace = true }
 futures.workspace = true
 proptest.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true

@@ -17,4 +17,7 @@ mod acceptance {
     mod sim_observation_gossip_mechanics;
     mod sim_observation_lww_converges;
     mod sim_observation_single_peer;
+
+    // US-06 §6.1 — Sim adapters for every nondeterminism port.
+    mod sim_adapters_deterministic;
 }
