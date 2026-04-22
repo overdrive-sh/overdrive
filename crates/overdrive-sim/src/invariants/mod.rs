@@ -19,6 +19,8 @@
 use std::fmt::{self, Display};
 use std::str::FromStr;
 
+pub mod evaluators;
+
 /// Catalogue of invariants the DST harness evaluates.
 ///
 /// Each variant name IS the canonical name printed in both green

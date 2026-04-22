@@ -44,9 +44,9 @@ use crate::adapters::dataplane::SimDataplane;
 use crate::adapters::driver::SimDriver;
 use crate::adapters::entropy::SimEntropy;
 use crate::adapters::llm::SimLlm;
-use crate::adapters::observation_store::SimObservationStore;
+use crate::adapters::observation_store::{SimObservationCluster, SimObservationStore};
 use crate::adapters::transport::SimTransport;
-use crate::invariants::Invariant;
+use crate::invariants::{Invariant, evaluators};
 
 /// Default number of hosts the harness boots when constructed via
 /// `Harness::default()`.
@@ -131,22 +131,17 @@ impl RunReport {
 
 /// A single host in the harness cluster — owns one of each adapter and
 /// one real `LocalStore` on a per-host tempdir.
-///
-/// Phase 1 instantiates the adapters to prove composition; the actual
-/// invariant evaluators plug in at 06-02. We keep the adapters alive
-/// via `_adapters` so that Drop does not run before the invariants
-/// observe them.
 struct Host {
     /// Host name used in summaries (e.g. `host-0`).
     name: String,
-    /// Backing tempdir; dropped when the harness drops. We keep it on
-    /// the host so that the `LocalStore`'s file handle remains valid
-    /// across the whole run.
+    /// Backing tempdir; dropped when the harness drops.
     _tempdir: tempfile::TempDir,
-    /// Path of the redb file — captured for error reporting; the store
-    /// itself is held behind an `Arc` so that 06-02 evaluators can share
-    /// it across async tasks without moving the host.
+    /// Path of the redb file — captured for error reporting.
     _store_path: PathBuf,
+    /// Real `LocalStore` this host writes intent through. Held on the
+    /// host so evaluator calls can read from the same instance the
+    /// harness initialised.
+    intent: Arc<overdrive_store_local::LocalStore>,
     /// Adapter bundle — constructed for composition; 06-02 consumes.
     #[allow(dead_code)]
     adapters: HostAdapters,
@@ -247,14 +242,31 @@ impl Harness {
         // before any invariant evaluator runs.
         let hosts = Self::build_hosts(seed)?;
 
+        // Build a shared SimObservationCluster for the LWW convergence
+        // evaluator. Each host retains its own single-peer observation
+        // store for unrelated invariants; the cluster is constructed
+        // anew here with its own gossip router.
+        let observation_cluster = build_observation_cluster(seed, &hosts);
+
         // Evaluate the invariant subset we were configured with.
         let catalogue = self.catalogue();
+
+        // Evaluators are async (the intent-crossing and LWW evaluators
+        // read through the `IntentStore` / `SimObservationStore` async
+        // APIs). Spin a single-threaded tokio runtime inside the
+        // synchronous `run` so the xtask binary's callsite remains
+        // synchronous — xtask is a boundary crate and does not want an
+        // async entry point per ADR-0003.
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|source| HarnessError::TempDir { index: usize::MAX, source })?;
 
         let mut invariants = Vec::with_capacity(catalogue.len());
         let mut failures = Vec::new();
 
         for invariant in catalogue {
-            let result = Self::evaluate(invariant, seed, &hosts);
+            let result = rt.block_on(Self::evaluate(invariant, seed, &hosts, &observation_cluster));
             if result.status == InvariantStatus::Fail {
                 failures.push(Failure {
                     invariant: result.name.clone(),
@@ -288,14 +300,13 @@ impl Harness {
 
         let store_path = tempdir.path().join("intent.redb");
 
-        // Real LocalStore on a per-host tempdir — proves the adapter
-        // wiring works with real redb I/O. We drop the store at the end
-        // of the function; 06-02 holds it in the HostAdapters struct
-        // once evaluators consume it. For now the presence of a working
-        // `open` on every host is what this step ships.
-        let store = overdrive_store_local::LocalStore::open(&store_path)
-            .map_err(|source| HarnessError::LocalStoreOpen { index, source })?;
-        drop(store);
+        // Real LocalStore on a per-host tempdir — shared with evaluator
+        // bodies via `Host::intent` so every invariant sees the same
+        // backing redb instance the harness composed.
+        let intent = Arc::new(
+            overdrive_store_local::LocalStore::open(&store_path)
+                .map_err(|source| HarnessError::LocalStoreOpen { index, source })?,
+        );
 
         // Per-host entropy — each host gets a deterministically-derived
         // seed so that a single global seed parameterises the whole
@@ -319,25 +330,81 @@ impl Harness {
             name: format!("host-{index}"),
             _tempdir: tempdir,
             _store_path: store_path,
+            intent,
             adapters,
         })
     }
 
-    /// Phase 1 evaluator: every invariant passes on the stub. 06-02
-    /// replaces this with a per-invariant evaluator dispatch.
-    fn evaluate(invariant: Invariant, _seed: u64, hosts: &[Host]) -> InvariantResult {
-        let host = hosts.first().map_or_else(|| "host-0".to_owned(), |h| h.name.clone());
-        // TODO(06-02): per-invariant evaluator bodies. Phase 1 stubs
-        // return pass so that the CLI, artifact shape, and --only
-        // filter are independently testable before the evaluators land.
-        InvariantResult {
-            name: invariant.to_string(),
-            status: InvariantStatus::Pass,
-            tick: DEFAULT_TICK_BUDGET,
-            host,
-            cause: None,
+    /// Dispatch to the matching per-invariant evaluator in
+    /// [`crate::invariants::evaluators`]. Every invariant in the
+    /// catalogue maps to exactly one evaluator; unknown variants cannot
+    /// compile because the enum is exhaustive.
+    async fn evaluate(
+        invariant: Invariant,
+        seed: u64,
+        hosts: &[Host],
+        cluster: &SimObservationCluster,
+    ) -> InvariantResult {
+        // The harness guarantees `hosts` is non-empty via `DEFAULT_HOST_COUNT`;
+        // `if let Some` keeps clippy's `expect_used` lint satisfied and
+        // documents the invariant for the reader.
+        let Some(first_host) = hosts.first() else {
+            return InvariantResult {
+                name: invariant.to_string(),
+                status: InvariantStatus::Fail,
+                tick: DEFAULT_TICK_BUDGET,
+                host: "cluster".to_owned(),
+                cause: Some("harness booted zero hosts — composition bug".to_owned()),
+            };
+        };
+
+        match invariant {
+            Invariant::SingleLeader => {
+                // Stubbed 3-host leader election per US-06 Technical
+                // Note 3: the "leader" is host-0 deterministically for
+                // every epoch in Phase 1. Phase 2 replaces this with a
+                // read against the real Raft leader term.
+                let hosts_ids: Vec<NodeId> =
+                    hosts.iter().filter_map(|h| NodeId::new(&h.name).ok()).collect();
+                let leader = hosts_ids.first().cloned();
+                evaluators::evaluate_single_leader_from_topology(&hosts_ids, leader.as_ref())
+            }
+            Invariant::IntentNeverCrossesIntoObservation => {
+                evaluators::evaluate_intent_crossing(
+                    first_host.intent.as_ref(),
+                    first_host.adapters.observation.as_ref(),
+                )
+                .await
+            }
+            Invariant::SnapshotRoundtripBitIdentical => {
+                evaluators::evaluate_snapshot_roundtrip(first_host.intent.as_ref()).await
+            }
+            Invariant::SimObservationLwwConverges => {
+                evaluators::evaluate_sim_observation_lww(cluster).await
+            }
+            Invariant::ReplayEquivalentEmptyWorkflow => {
+                evaluators::evaluate_replay_equivalent_empty_workflow(seed)
+            }
+            Invariant::EntropyDeterminismUnderReseed => {
+                evaluators::evaluate_entropy_determinism(seed)
+            }
         }
     }
+}
+
+/// Build a `SimObservationCluster` mirroring the harness's host set.
+/// The cluster has its own gossip router, so writes issued through
+/// `cluster.peer(&id).write(...)` converge as tested in step 04-03.
+/// Each host's single-peer `SimObservationStore` in its adapter bundle
+/// is separate from the cluster — the cluster is constructed here
+/// specifically to drive the `SimObservationLwwConverges` evaluator.
+fn build_observation_cluster(seed: u64, hosts: &[Host]) -> SimObservationCluster {
+    let peers: Vec<NodeId> = hosts.iter().filter_map(|h| NodeId::new(&h.name).ok()).collect();
+    SimObservationStore::cluster_builder()
+        .peers(peers)
+        .gossip_delay(std::time::Duration::from_millis(10))
+        .seed(seed)
+        .build()
 }
 
 impl Default for Harness {
