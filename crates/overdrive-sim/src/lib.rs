@@ -21,9 +21,11 @@
 #![allow(clippy::missing_errors_doc, clippy::missing_panics_doc, dead_code)]
 
 pub mod adapters;
+pub mod harness;
 pub mod invariants;
 
 #[cfg(feature = "real-adapters")]
 pub mod real;
 
+pub use harness::{Failure, Harness, InvariantResult, InvariantStatus, RunReport};
 pub use invariants::Invariant;

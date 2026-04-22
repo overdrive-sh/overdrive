@@ -13,5 +13,6 @@
 
 mod acceptance {
     //! Phase-1-foundation acceptance scenarios for xtask.
+    mod dst_harness_smoke;
     mod dst_lint_banned_apis;
 }

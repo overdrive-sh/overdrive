@@ -29,6 +29,9 @@ tokio.workspace          = true
 parking_lot.workspace    = true
 tokio-stream.workspace   = true
 rand.workspace           = true
+thiserror.workspace      = true
+tempfile.workspace       = true
+overdrive-store-local    = { path = "../overdrive-store-local" }
 
 [features]
 # `real-adapters` gates a `real` module that ships minimal, mostly-unimplemented

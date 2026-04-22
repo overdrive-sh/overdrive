@@ -32,6 +32,8 @@ serde.workspace      = true
 serde_json.workspace = true
 dotenvy.workspace    = true
 syn.workspace        = true
+rand.workspace       = true
+overdrive-sim        = { path = "../crates/overdrive-sim" }
 # `span-locations` enables `Span::start()`/`end()` — required so
 # dst-lint can report `file:line:col` for each violation.
 proc-macro2          = { version = "1", features = ["span-locations"] }

@@ -25,6 +25,10 @@ enum Task {
         /// Seed for reproducible runs. Defaults to a fresh random seed.
         #[arg(long)]
         seed: Option<u64>,
+        /// Run exactly one invariant by its canonical kebab-case name.
+        /// Unknown names fail fast before the harness is built.
+        #[arg(long)]
+        only: Option<String>,
     },
 
     /// Tier 1 — banned-API lint gate over `crate_class = "core"` crates.
@@ -150,7 +154,7 @@ fn main() -> ExitCode {
 
 fn run() -> Result<()> {
     match Args::parse().cmd {
-        Task::Dst { seed } => dst(seed),
+        Task::Dst { seed, only } => xtask::dst::run(seed, only.as_deref()),
         Task::DstLint { manifest_path } => xtask::dst_lint::run(&manifest_path),
         Task::BpfUnit => bpf_unit(),
         Task::IntegrationTest { scope } => match scope {
@@ -328,15 +332,6 @@ fn which_or_hint(binary: &str, install_hint: &str) -> Result<()> {
         bail!("`{binary}` not found on PATH. Install it with: {install_hint}");
     }
     Ok(())
-}
-
-fn dst(seed: Option<u64>) -> Result<()> {
-    let mut cmd = Command::new(cargo());
-    cmd.args(["test", "--workspace", "--features", "dst", "--", "--include-ignored"]);
-    if let Some(s) = seed {
-        cmd.env("OVERDRIVE_DST_SEED", s.to_string());
-    }
-    sh("cargo test (dst)", &mut cmd)
 }
 
 fn bpf_unit() -> Result<()> {

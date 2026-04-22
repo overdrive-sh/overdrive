@@ -90,8 +90,8 @@ fn row(
 
 /// Concrete scenario used as the RED→GREEN witness for the helper.
 ///
-/// Three peers; five writes touching three alloc_ids; two of them
-/// contend on the same alloc_id with different counters. A passing
+/// Three peers; five writes touching three `alloc_ids`; two of them
+/// contend on the same `alloc_id` with different counters. A passing
 /// assertion proves the helper recognises convergence on a fully
 /// converged cluster.
 #[tokio::test(flavor = "current_thread")]
@@ -197,7 +197,7 @@ async fn witness_three_peer_cluster_converges_on_overlapping_writes() {
 // ---------------------------------------------------------------------------
 
 /// Pins `is_converged() == false` when two peers hold **different**
-/// rows for the **same** alloc_id. Without this test, a mutation
+/// rows for the **same** `alloc_id`. Without this test, a mutation
 /// replacing `is_converged()` with `true` — or replacing the match
 /// guard `*existing == row` with `true` — would survive undetected:
 /// every other assertion in this file runs on fully-converged clusters.
