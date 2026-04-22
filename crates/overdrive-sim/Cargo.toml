@@ -22,9 +22,16 @@ crate_class = "adapter-sim"
 
 [dependencies]
 overdrive-core.workspace = true
+async-trait.workspace    = true
+futures.workspace        = true
+tokio.workspace          = true
+parking_lot.workspace    = true
+tokio-stream.workspace   = true
 
 [dev-dependencies]
 # Crafter adds turmoil, proptest, and overdrive-store-local here during DELIVER.
+tokio    = { workspace = true }
+futures.workspace = true
 
 [lints]
 workspace = true

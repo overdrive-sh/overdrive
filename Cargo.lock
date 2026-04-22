@@ -748,7 +748,12 @@ dependencies = [
 name = "overdrive-sim"
 version = "0.0.0"
 dependencies = [
+ "async-trait",
+ "futures",
  "overdrive-core",
+ "parking_lot",
+ "tokio",
+ "tokio-stream",
 ]
 
 [[package]]

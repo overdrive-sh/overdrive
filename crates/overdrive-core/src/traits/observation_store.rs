@@ -6,53 +6,150 @@
 //! `SimObservationStore` with an injectable gossip-delay and partition
 //! matrix.
 //!
+//! # Why typed rows, not `&[u8]`
+//!
+//! `ObservationStore` is the observation half of the §4 Intent /
+//! Observation split. Intent carries `JobSpec`, `Policy`, `Certificate`,
+//! and other declaration-of-what-should-be types through [`IntentStore`].
+//! Observation carries rows describing *what is happening right now*.
+//!
+//! A shared `write(&[u8])` surface on both stores would let a reconciler
+//! accidentally route a job spec into observation (or a node heartbeat
+//! into intent). The [`ObservationRow`] enum closes that door at the
+//! type level: a `JobSpec` (intent class) cannot be passed to
+//! [`ObservationStore::write`] — the compiler rejects it with a type
+//! mismatch that names both sides.
+//!
 //! See `docs/whitepaper.md` §4 (Intent / Observation split) and §17
 //! (storage rationale).
 
 use async_trait::async_trait;
 use futures::Stream;
-use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+use crate::id::{AllocationId, JobId, NodeId, Region};
 
 #[derive(Debug, Error)]
 pub enum ObservationStoreError {
-    #[error("query rejected: {0}")]
-    Query(String),
-    #[error("gossip peer {peer} unreachable")]
+    #[error("observation peer {peer} unreachable")]
     Unreachable { peer: String },
     #[error("observation store I/O: {0}")]
     Io(#[from] std::io::Error),
 }
 
-/// A single SQL parameter value — covers the scalar types CR-SQLite
-/// supports natively.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum Value {
-    Null,
-    Integer(i64),
-    Real(f64),
-    Text(String),
-    Blob(Vec<u8>),
+// ---------------------------------------------------------------------------
+// Row types — observation class
+// ---------------------------------------------------------------------------
+
+/// Lifecycle state for an allocation as observed by the owning node.
+///
+/// Matches the lifecycle documented in whitepaper §4 and §14 —
+/// `pending → running ⇄ suspended → terminated`, plus `draining` as the
+/// transient state a node reports while migrating an allocation away.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AllocState {
+    Pending,
+    Running,
+    Draining,
+    Suspended,
+    Terminated,
 }
 
-/// Rows returned from [`ObservationStore::read`]. Column order matches the
-/// query; callers interpret values positionally.
-#[derive(Debug, Clone)]
-pub struct Rows {
-    pub columns: Vec<String>,
-    pub rows: Vec<Vec<Value>>,
+/// Logical timestamp used for last-write-wins ordering across
+/// [`ObservationStore`] peers.
+///
+/// `(counter, writer)` is lexicographically ordered: the lamport counter
+/// dominates, and the writer's [`NodeId`] breaks ties deterministically.
+/// Clock skew across peers cannot invert ordering.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct LogicalTimestamp {
+    pub counter: u64,
+    pub writer: NodeId,
 }
+
+/// `alloc_status` row — Phase 1 minimal shape per brief §6.
+///
+/// Written by the node that owns the allocation; gossiped to every peer.
+/// Full-row writes only (no field-diff merges) per the §4 guardrail.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AllocStatusRow {
+    pub alloc_id: AllocationId,
+    pub job_id: JobId,
+    pub node_id: NodeId,
+    pub state: AllocState,
+    pub updated_at: LogicalTimestamp,
+}
+
+/// `node_health` row — Phase 1 minimal shape per brief §6.
+///
+/// Written by the node itself on each heartbeat tick.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeHealthRow {
+    pub node_id: NodeId,
+    pub region: Region,
+    pub last_heartbeat: LogicalTimestamp,
+}
+
+/// The closed set of row shapes [`ObservationStore`] accepts.
+///
+/// This enum *is* the compile-time boundary between intent and
+/// observation: any type that is not a variant of [`ObservationRow`]
+/// cannot be written into an [`ObservationStore`]. Phase 2+ extensions
+/// add variants here as new row shapes are introduced (service
+/// backends, compiled policy verdicts, revoked operator certs, ...).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ObservationRow {
+    AllocStatus(AllocStatusRow),
+    NodeHealth(NodeHealthRow),
+}
+
+// ---------------------------------------------------------------------------
+// Intent-class type used by the compile-fail fixture
+// ---------------------------------------------------------------------------
+
+/// Minimal `JobSpec` placeholder used exclusively by the §5.3
+/// compile-fail fixture to prove [`ObservationStore::write`] rejects
+/// intent-class payloads at compile time.
+///
+/// Phase 2+ will replace this stub with the full job-spec type declared
+/// in a dedicated `intent` module. Until then, this type is carried here
+/// solely so the compile-fail fixture has a concrete intent-class value
+/// to attempt to write into the wrong store.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JobSpec {
+    pub owner: NodeId,
+}
+
+impl JobSpec {
+    /// Construct a minimal job spec for compile-fail fixtures.
+    #[must_use]
+    pub const fn new(owner: NodeId) -> Self {
+        Self { owner }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Subscription stream alias
+// ---------------------------------------------------------------------------
+
+/// A subscription stream over all observation rows written to or
+/// gossiped into this peer.
+///
+/// Phase 2+ introduces a filter parameter (`prefix` / predicate) once
+/// there are enough row variants to justify it; the Phase 1 sim surface
+/// is intentionally "subscribe to everything."
+pub type ObservationSubscription = Box<dyn Stream<Item = ObservationRow> + Send + Unpin>;
+
+// ---------------------------------------------------------------------------
+// Trait
+// ---------------------------------------------------------------------------
 
 #[async_trait]
 pub trait ObservationStore: Send + Sync + 'static {
-    async fn read(&self, sql: &str, params: &[Value]) -> Result<Rows, ObservationStoreError>;
+    /// Persist a full observation row on this peer and fan it out to
+    /// any active subscriptions. Full-row writes only (§4 guardrail).
+    async fn write(&self, row: ObservationRow) -> Result<(), ObservationStoreError>;
 
-    async fn write(&self, sql: &str, params: &[Value]) -> Result<(), ObservationStoreError>;
-
-    /// Live subscription to rows matching `sql`. Every row-change event
-    /// yields a full row (§4 guardrail: full rows over field diffs).
-    async fn subscribe(
-        &self,
-        sql: &str,
-    ) -> Result<Box<dyn Stream<Item = Rows> + Send + Unpin>, ObservationStoreError>;
+    /// Subscribe to every observation row written to this peer.
+    async fn subscribe_all(&self) -> Result<ObservationSubscription, ObservationStoreError>;
 }

@@ -1,0 +1,17 @@
+//! Acceptance test entrypoint for `overdrive-sim`.
+//!
+//! Each scenario from `docs/feature/phase-1-foundation/distill/test-scenarios.md`
+//! is translated to a Rust integration-test module under
+//! `tests/acceptance/*.rs` per ADR-0005. This entrypoint wires those
+//! modules into Cargo's single integration-test binary.
+
+// `expect` / `expect_err` are the standard idiom in test code.
+#![allow(clippy::expect_used)]
+#![allow(clippy::expect_fun_call)]
+
+mod acceptance {
+    //! Phase-1-foundation acceptance scenarios.
+
+    // US-04 — ObservationStore trait + SimObservationStore.
+    mod sim_observation_single_peer;
+}
