@@ -26,6 +26,39 @@ consumer.
 
 ---
 
+## Running tests — foreground, always
+
+**Run test commands directly. Do not background them.** `cargo test`,
+`cargo xtask dst`, `cargo xtask bpf-unit`, `cargo xtask integration-test`,
+and every other test invocation goes through the `Bash` tool with
+`run_in_background: false` (the default). Wait for the command to finish;
+read the full output in the tool result.
+
+- **Do NOT** set `run_in_background: true` on a test command and then
+  poll with `tail`, `cat`, `wait`, or sleep loops against the output
+  file. Each poll burns a turn, the harness blocks long `sleep`s, and
+  you lose the structured output view that the direct tool result
+  gives you.
+- **Do NOT** redirect test output to a temp file and `tail` it. The
+  tool already captures stdout+stderr. Piping to `tail -N` in the
+  command itself is fine if you know you only want the last N lines —
+  but run it synchronously, not in the background.
+- **Prefer running only the affected tests.** Default to
+  `cargo test -p <crate>` for the crate you changed, or
+  `cargo test -p <crate> <filter>` for a specific test or module. A
+  whole-workspace run is the exception — reserve it for the final
+  pre-commit check or when a change crosses crate boundaries.
+- **Long-running suites are still foreground.** When a whole-workspace
+  run is genuinely warranted, set a `timeout` up to 600000ms (10 min)
+  and let it run. Minutes of waiting is cheaper than poll cycles that
+  each re-read context.
+- **The only exception** is a genuinely concurrent workflow — e.g. you
+  need to run the test while also editing unrelated files. Even then,
+  prefer to let the test finish first; backgrounding is rarely the
+  right tradeoff for a test run.
+
+---
+
 ## Tier 1 — Deterministic Simulation Testing
 
 ### Nondeterminism must be injectable
