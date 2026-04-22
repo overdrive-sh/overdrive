@@ -13,5 +13,7 @@ mod acceptance {
     //! Phase-1-foundation acceptance scenarios.
 
     // US-04 — ObservationStore trait + SimObservationStore.
+    mod sim_observation_gossip;
+    mod sim_observation_gossip_mechanics;
     mod sim_observation_single_peer;
 }
