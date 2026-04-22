@@ -40,4 +40,5 @@ proc-macro2          = { version = "1", features = ["span-locations"] }
 cargo_metadata       = "0.18"
 
 [dev-dependencies]
+proptest.workspace = true
 tempfile.workspace = true

@@ -284,20 +284,92 @@ pub async fn evaluate_snapshot_roundtrip(intent: &impl IntentStore) -> Invariant
 /// alloc holds the same row for it as every other peer that has
 /// observed it.
 pub async fn evaluate_sim_observation_lww(cluster: &SimObservationCluster) -> InvariantResult {
+    use std::str::FromStr;
+
+    use overdrive_core::id::{AllocationId, JobId};
+    use overdrive_core::traits::observation_store::{
+        AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
+    };
+
     let name = "sim-observation-lww-converges";
 
-    // Drain the gossip window before snapshotting — a pre-drain call
-    // would race any in-flight writes from earlier harness setup.
+    // Drive two concurrent writes from different peers to the same
+    // allocation. Without this, `check_lww_convergence` asserts
+    // trivially on an empty cluster — there is nothing for LWW to
+    // resolve. The WS-3 canary bug only manifests when LWW actually
+    // has to pick between competing timestamps.
+    let peers: Vec<NodeId> = cluster.peers().map(|(id, _)| id.clone()).collect();
+    if peers.len() >= 2 {
+        let alloc_id = match AllocationId::from_str("a1b2c3") {
+            Ok(a) => a,
+            Err(err) => {
+                return result(
+                    name,
+                    InvariantStatus::Fail,
+                    CLUSTER_HOST,
+                    Some(format!("could not construct alloc id: {err}")),
+                );
+            }
+        };
+        let job_id = match JobId::from_str("payments") {
+            Ok(j) => j,
+            Err(err) => {
+                return result(
+                    name,
+                    InvariantStatus::Fail,
+                    CLUSTER_HOST,
+                    Some(format!("could not construct job id: {err}")),
+                );
+            }
+        };
+
+        // Two writers, two different logical timestamps, same alloc.
+        // Counter 1 < counter 2 so LWW has a definitive winner.
+        for (i, writer) in peers.iter().take(2).enumerate() {
+            let counter = (i as u64) + 1;
+            let state = if i == 0 { AllocState::Pending } else { AllocState::Running };
+            let row = AllocStatusRow {
+                alloc_id: alloc_id.clone(),
+                job_id: job_id.clone(),
+                node_id: writer.clone(),
+                state,
+                updated_at: LogicalTimestamp { counter, writer: writer.clone() },
+            };
+            let peer = cluster.peer(writer);
+            if let Err(err) = peer.write(ObservationRow::AllocStatus(row)).await {
+                return result(
+                    name,
+                    InvariantStatus::Fail,
+                    &writer.to_string(),
+                    Some(format!("peer write failed: {err}")),
+                );
+            }
+        }
+    }
+
+    // Drain the gossip window after the writes so every peer has seen
+    // every row. Two advances past the gossip-delay ceiling so FIFOs
+    // fully drain even under the cluster's default delay.
+    cluster.advance(Duration::from_millis(500)).await;
     cluster.advance(Duration::from_millis(500)).await;
 
     let report = check_lww_convergence(cluster);
     if report.is_converged() {
         result(name, InvariantStatus::Pass, CLUSTER_HOST, None)
     } else {
+        // Report the first peer with a disagreement so the WS-3 failure
+        // block names a concrete host. The report is deterministic
+        // under the BTreeMap ordering in ConvergenceReport so "first"
+        // is stable across runs.
+        let host = report
+            .peer_views()
+            .keys()
+            .next()
+            .map_or_else(|| CLUSTER_HOST.to_owned(), ToString::to_string);
         result(
             name,
             InvariantStatus::Fail,
-            CLUSTER_HOST,
+            &host,
             Some("peers disagree on an alloc_status row after gossip drain".to_owned()),
         )
     }

@@ -124,6 +124,21 @@ fn xtask_target_dir() -> PathBuf {
 }
 
 /// Structured summary written to `dst-summary.json`.
+///
+/// The top-level failure fields (`invariant`, `failing_invariant`,
+/// `tick`, `host`, `cause`, `reproduce`) are populated from the first
+/// failure on a red run, and omitted on a green run. They exist so CI
+/// dashboards can read the failure without descending into the
+/// `failures` array.
+///
+/// # Field-naming compatibility
+///
+/// `.github/workflows/ci.yml` parses the top-level `.seed`, `.invariant`,
+/// `.tick`, `.host`, `.reproduce` fields. The roadmap AC additionally
+/// requires `.failing_invariant` + `.cause` under the same shape. Both
+/// are emitted so neither consumer has to pick one — renaming any field
+/// requires a matching update to the CI workflow (and the WS-3
+/// acceptance test).
 #[derive(Serialize)]
 struct Summary {
     seed: u64,
@@ -132,6 +147,19 @@ struct Summary {
     invariants: Vec<InvariantEntry>,
     failures: Vec<FailureEntry>,
     wall_clock_ms: u128,
+    // Top-level failure fields — populated only on red runs.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    invariant: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    failing_invariant: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tick: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    host: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cause: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reproduce: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -199,6 +227,13 @@ fn write_artifacts(report: &RunReport) -> Result<()> {
     }
     std::fs::write(&log_path, log).wrap_err_with(|| format!("write {}", log_path.display()))?;
 
+    // Top-level failure fields — populated from the first failure so
+    // CI dashboards + the WS-3 AC can read the failure detail without
+    // descending into `failures[0]`.
+    let first_failure = report.failures.first();
+    let reproduce = first_failure
+        .map(|f| format!("cargo xtask dst --seed {} --only {}", report.seed, f.invariant));
+
     // Structured summary — CI dashboards parse this.
     let summary = Summary {
         seed: report.seed,
@@ -226,6 +261,12 @@ fn write_artifacts(report: &RunReport) -> Result<()> {
             })
             .collect(),
         wall_clock_ms: report.wall_clock.as_millis(),
+        invariant: first_failure.map(|f| f.invariant.clone()),
+        failing_invariant: first_failure.map(|f| f.invariant.clone()),
+        tick: first_failure.map(|f| f.tick),
+        host: first_failure.map(|f| f.host.clone()),
+        cause: first_failure.map(|f| f.cause.clone()),
+        reproduce,
     };
     let summary_path = dir.join("dst-summary.json");
     let serialised =
