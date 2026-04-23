@@ -33,6 +33,7 @@
 use std::path::Path;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::task::{Context, Poll};
 
 use async_trait::async_trait;
@@ -80,6 +81,14 @@ struct Inner {
     /// as safe to share across threads. No external mutex is required.
     db: Database,
     watch_tx: broadcast::Sender<WatchEvent>,
+    /// Monotonically-increasing commit counter. Phase 1 handlers surface
+    /// this as the `commit_index` field on `POST /v1/jobs` responses per
+    /// US-03 AC — it is NOT a durable Raft log index (there is no Raft
+    /// in single mode) and it resets to zero when the process restarts.
+    /// Phase 2's `RaftStore` replaces this with the actual log index
+    /// while keeping the accessor signature (`-> u64`) unchanged so the
+    /// handler layer is mode-agnostic.
+    commit_counter: AtomicU64,
 }
 
 impl LocalStore {
@@ -104,13 +113,38 @@ impl LocalStore {
 
         let (watch_tx, _) = broadcast::channel(WATCH_CHANNEL_CAPACITY);
 
-        Ok(Self { inner: Arc::new(Inner { db, watch_tx }) })
+        Ok(Self { inner: Arc::new(Inner { db, watch_tx, commit_counter: AtomicU64::new(0) }) })
     }
 
     fn emit(&self, key: Bytes, value: Bytes) {
         // `send` returns `Err` only when there are no active
         // subscribers — that's not a failure for us.
         let _ = self.inner.watch_tx.send(WatchEvent { key, value });
+    }
+
+    /// Monotonically-increasing commit counter — advances on every
+    /// successful `put`, `delete`, or `txn` commit. Handlers surface
+    /// this value as the `commit_index` field on write responses per
+    /// US-03 AC.
+    ///
+    /// Phase 1 semantics: in-memory process-local counter, resets to
+    /// zero on restart. Phase 2's `RaftStore` replaces the
+    /// implementation with the actual Raft log index while keeping this
+    /// signature stable, so handler callers are mode-agnostic.
+    ///
+    /// Deliberately returns `u64` — not a `redb::WriteTransaction` or
+    /// `redb::Savepoint` — per ADR-0015 / US-03 AC "no leakage of redb
+    /// types through the accessor signature."
+    #[must_use]
+    pub fn commit_index(&self) -> u64 {
+        self.inner.commit_counter.load(Ordering::Acquire)
+    }
+
+    /// Bump the commit counter after a successful write. Uses
+    /// `Release` ordering so that any observation of the new
+    /// `commit_index` happens-after the redb commit that triggered it.
+    fn bump_commit(&self) {
+        self.inner.commit_counter.fetch_add(1, Ordering::Release);
     }
 }
 
@@ -149,6 +183,9 @@ impl IntentStore for LocalStore {
         .await
         .map_err(map_join_error)??;
 
+        // Bump the commit counter *after* the redb commit succeeds so
+        // the counter never outruns what has actually been persisted.
+        self.bump_commit();
         self.emit(Bytes::from(emit_key), Bytes::from(emit_value));
         Ok(())
     }
@@ -169,6 +206,7 @@ impl IntentStore for LocalStore {
         .await
         .map_err(map_join_error)??;
 
+        self.bump_commit();
         // Delete events carry an empty value per the trait docstring.
         self.emit(Bytes::from(emit_key), Bytes::new());
         Ok(())
@@ -200,6 +238,11 @@ impl IntentStore for LocalStore {
         })
         .await
         .map_err(map_join_error)??;
+
+        // A successful `txn` commit bumps the counter once regardless
+        // of how many ops the transaction carried — the counter tracks
+        // commits, not logical writes.
+        self.bump_commit();
 
         // Emit per-op events *after* the commit succeeds so subscribers
         // never see a phantom write.

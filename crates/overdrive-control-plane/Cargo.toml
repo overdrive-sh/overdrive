@@ -43,6 +43,12 @@ tokio.workspace       = true
 bytes.workspace       = true
 serde.workspace       = true
 serde_json.workspace  = true
+# rkyv — canonical archival of intent-side aggregates per
+# development.md ("Internal data → rkyv"). The `submit_job` handler
+# archives `Job` via `rkyv::to_bytes` before committing to the
+# IntentStore, so rkyv is a runtime dep of this crate, not just a test
+# dep.
+rkyv.workspace        = true
 
 # HTTP / TLS
 # NOTE — `axum`, `axum-server`, `utoipa`, `utoipa-axum`, and `libsql`

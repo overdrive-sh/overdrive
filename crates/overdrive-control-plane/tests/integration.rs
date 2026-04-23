@@ -25,5 +25,6 @@
 // resolve naturally.
 mod integration {
     mod server_lifecycle;
+    mod submit_round_trip;
     mod tls_bootstrap;
 }

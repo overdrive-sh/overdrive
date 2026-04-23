@@ -1,16 +1,17 @@
 //! `ControlPlaneError` — top-level typed error with pass-through `#[from]`.
 //!
-//! SCAFFOLD: true — created by DISTILL wave for phase-1-control-plane-core.
-//!
 //! Per ADR-0015, one top-level enum. Exhaustive `to_response` function
 //! maps every variant to `(StatusCode, Json<ErrorBody>)`. Body shape is
 //! a deliberate RFC 7807-compatible subset so v1.1 upgrade is additive.
 
+use axum::Json;
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
 use thiserror::Error;
 
+use crate::api::ErrorBody;
+
 /// Top-level control-plane error.
-///
-/// SCAFFOLD: true
 #[derive(Debug, Error)]
 pub enum ControlPlaneError {
     #[error("validation: {field:?}: {message}")]
@@ -35,12 +36,68 @@ pub enum ControlPlaneError {
     Internal(String),
 }
 
-/// Map a `ControlPlaneError` to `(StatusCode, Json<ErrorBody>)` per
-/// ADR-0015 Table §3.
+/// Map a `ControlPlaneError` to `(StatusCode, ErrorBody)` per ADR-0015
+/// Table §3. Exhaustive at the enum level so a forgotten variant is a
+/// compile-time error.
 ///
-/// SCAFFOLD: true — returns a stub shape so the call site compiles;
-/// the DELIVER crafter fills in per-variant mapping.
-#[allow(clippy::missing_errors_doc)]
-pub fn to_response(_err: ControlPlaneError) -> (u16, crate::api::ErrorBody) {
-    panic!("Not yet implemented -- RED scaffold")
+/// Returns the body as a plain struct (not `Json<...>`) so callers can
+/// decide whether to serialise immediately or attach headers first;
+/// [`IntoResponse`] wraps this in `Json(...)` for the axum handler path.
+#[must_use]
+pub fn to_response(err: ControlPlaneError) -> (StatusCode, ErrorBody) {
+    use overdrive_core::aggregate::AggregateError;
+    use overdrive_core::traits::intent_store::IntentStoreError;
+
+    match err {
+        ControlPlaneError::Validation { message, field } => {
+            (StatusCode::BAD_REQUEST, ErrorBody { error: "validation".into(), message, field })
+        }
+        ControlPlaneError::NotFound { resource } => (
+            StatusCode::NOT_FOUND,
+            ErrorBody { error: "not_found".into(), message: resource, field: None },
+        ),
+        ControlPlaneError::Conflict { message } => {
+            (StatusCode::CONFLICT, ErrorBody { error: "conflict".into(), message, field: None })
+        }
+        ControlPlaneError::Intent(IntentStoreError::NotFound) => (
+            StatusCode::NOT_FOUND,
+            ErrorBody {
+                error: "not_found".into(),
+                message: "intent-store key not found".into(),
+                field: None,
+            },
+        ),
+        ControlPlaneError::Intent(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
+        ),
+        ControlPlaneError::Observation(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
+        ),
+        ControlPlaneError::Aggregate(e) => {
+            // Pull the offending field out of the wrapped `AggregateError`
+            // when available, so the ErrorBody's `field` is not always
+            // `None` for validation errors routed through `#[from]`.
+            let field = match &e {
+                AggregateError::Validation { field, .. } => Some((*field).to_string()),
+                AggregateError::Id(_) | AggregateError::Resources(_) => None,
+            };
+            (
+                StatusCode::BAD_REQUEST,
+                ErrorBody { error: "validation".into(), message: e.to_string(), field },
+            )
+        }
+        ControlPlaneError::Internal(msg) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorBody { error: "internal".into(), message: msg, field: None },
+        ),
+    }
+}
+
+impl IntoResponse for ControlPlaneError {
+    fn into_response(self) -> Response {
+        let (status, body) = to_response(self);
+        (status, Json(body)).into_response()
+    }
 }

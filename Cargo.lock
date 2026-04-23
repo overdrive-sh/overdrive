@@ -1500,6 +1500,7 @@ dependencies = [
  "proptest",
  "rcgen",
  "reqwest",
+ "rkyv",
  "rustls",
  "rustls-pemfile",
  "serde",

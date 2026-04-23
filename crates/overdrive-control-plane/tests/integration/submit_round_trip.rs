@@ -1,0 +1,339 @@
+//! Integration tests for `POST /v1/jobs` — step 03-01.
+//!
+//! Proves the Phase 1 `submit_job` handler round-trip:
+//!
+//! 1. Validates the spec via `Job::from_spec` (errors map to HTTP 400).
+//! 2. Archives via `rkyv::to_bytes::<rancor::Error>`.
+//! 3. Commits through `IntentStore::put` at `jobs/<JobId>`.
+//! 4. Returns `(job_id, commit_index)` with `commit_index >= 1`.
+//! 5. Idempotency: byte-identical re-submission returns the same
+//!    `commit_index` and HTTP 200 (ADR-0015 §4).
+//! 6. Conflict: a different spec at the same intent key returns HTTP
+//!    409 with an `ErrorBody` (ADR-0015 §4).
+//!
+//! Tier 3 — real redb file on `tempfile`, real axum server, real rustls
+//! handshake, real reqwest. Gated by the `integration-tests` feature at
+//! the `tests/integration.rs` entrypoint.
+
+use std::net::SocketAddr;
+use std::time::Duration;
+
+use bytes::Bytes;
+use overdrive_control_plane::api::{ErrorBody, SubmitJobRequest, SubmitJobResponse};
+use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
+use overdrive_core::aggregate::{IntentKey, Job, JobSpecInput};
+use overdrive_core::id::JobId;
+use overdrive_core::traits::intent_store::IntentStore;
+use overdrive_store_local::LocalStore;
+use tempfile::TempDir;
+
+// -----------------------------------------------------------------------
+// Helpers — spawn a server, mint a reqwest client trusting the ephemeral
+// CA, and read the intent key straight out of the redb file the server
+// writes to. The back-door read opens the SAME redb path the server is
+// committing to; since redb supports concurrent read transactions even
+// with a live writer, this is a legitimate out-of-process observation.
+// -----------------------------------------------------------------------
+
+fn client_trusting(ca_pem: &str) -> reqwest::Client {
+    let cert = reqwest::Certificate::from_pem(ca_pem.as_bytes()).expect("parse CA PEM");
+    reqwest::Client::builder()
+        .add_root_certificate(cert)
+        .https_only(true)
+        .use_rustls_tls()
+        .build()
+        .expect("build reqwest client")
+}
+
+fn read_ca_from_trust_triple(data_dir: &std::path::Path) -> String {
+    use base64::Engine as _;
+    use base64::engine::general_purpose::STANDARD as BASE64;
+
+    let config_path = data_dir.join(".overdrive").join("config");
+    let yaml = std::fs::read_to_string(&config_path)
+        .expect(&format!("read trust triple at {}", config_path.display()));
+    let doc: serde_yaml::Value = serde_yaml::from_str(&yaml).expect("parse trust triple YAML");
+    let ca_b64 = doc
+        .get("contexts")
+        .and_then(|c| c.get("local"))
+        .and_then(|c| c.get("ca"))
+        .and_then(|v| v.as_str())
+        .expect("contexts.local.ca field");
+    let ca_bytes = BASE64.decode(ca_b64).expect("base64 decode ca");
+    String::from_utf8(ca_bytes).expect("ca PEM is UTF-8")
+}
+
+async fn spawn_server() -> (ServerHandle, SocketAddr, TempDir, String) {
+    let tmp = TempDir::new().expect("tempdir");
+    let config = ServerConfig {
+        bind: "127.0.0.1:0".parse().expect("parse bind addr"),
+        data_dir: tmp.path().to_path_buf(),
+    };
+    let handle = run_server(config).await.expect("run_server");
+    let bound = handle.local_addr().await.expect("bound addr");
+    let ca_pem = read_ca_from_trust_triple(tmp.path());
+    (handle, bound, tmp, ca_pem)
+}
+
+/// Back-door read: open a SECOND `LocalStore` at the same redb file the
+/// server is committing to, and return the raw bytes at `key` (if any).
+///
+/// `LocalStore::open` is safe under multi-handle read access — redb
+/// permits concurrent readers alongside a live writer, which is what we
+/// need here. We close this handle on drop by letting it fall out of
+/// scope.
+async fn read_intent_key_from_store(data_dir: &std::path::Path, key: &[u8]) -> Option<Bytes> {
+    // The server writes its redb file at `<data_dir>/intent.redb` — see
+    // step 01-04 / `overdrive-store-local` usage in `run_server`. If the
+    // name drifts, fail fast with a clear message so the test surface is
+    // the authoritative record of the path.
+    let path = data_dir.join("intent.redb");
+    assert!(path.exists(), "expected redb file at {}; found none", path.display());
+    let store = LocalStore::open(&path).expect("open LocalStore for back-door read");
+    store.get(key).await.expect("back-door get")
+}
+
+fn payments_spec() -> JobSpecInput {
+    JobSpecInput {
+        id: "payments".to_owned(),
+        replicas: 3,
+        cpu_milli: 500,
+        memory_bytes: 536_870_912, // 512 MiB
+    }
+}
+
+fn payments_spec_alt() -> JobSpecInput {
+    // Different replicas — same id/key, different spec -> should 409.
+    JobSpecInput {
+        id: "payments".to_owned(),
+        replicas: 7,
+        cpu_milli: 500,
+        memory_bytes: 536_870_912,
+    }
+}
+
+// -----------------------------------------------------------------------
+// AC — happy-path round trip: POST /v1/jobs returns 200 + commit_index
+// -----------------------------------------------------------------------
+
+#[tokio::test]
+async fn post_v1_jobs_with_valid_spec_returns_200_and_commit_index_gte_1() {
+    let (handle, bound, _tmp, ca_pem) = spawn_server().await;
+    let client = client_trusting(&ca_pem);
+    let url = format!("https://localhost:{}/v1/jobs", bound.port());
+
+    let resp = client
+        .post(&url)
+        .json(&SubmitJobRequest { spec: payments_spec() })
+        .send()
+        .await
+        .expect("POST /v1/jobs");
+
+    assert_eq!(resp.status(), reqwest::StatusCode::OK, "expected 200 OK");
+    let body: SubmitJobResponse = resp.json().await.expect("decode SubmitJobResponse");
+
+    assert_eq!(body.job_id, "payments", "job_id must echo the canonicalised JobId");
+    assert!(body.commit_index >= 1, "commit_index must be >= 1; got {}", body.commit_index);
+
+    handle.shutdown(Duration::from_secs(2)).await;
+}
+
+// -----------------------------------------------------------------------
+// AC — the archived Job is persisted at the canonical intent key
+// -----------------------------------------------------------------------
+
+#[tokio::test]
+async fn post_v1_jobs_persists_archived_job_under_jobs_prefix_in_local_store() {
+    let (handle, bound, tmp, ca_pem) = spawn_server().await;
+    let client = client_trusting(&ca_pem);
+    let url = format!("https://localhost:{}/v1/jobs", bound.port());
+
+    let spec = payments_spec();
+    let resp = client
+        .post(&url)
+        .json(&SubmitJobRequest { spec: spec.clone() })
+        .send()
+        .await
+        .expect("POST /v1/jobs");
+    assert_eq!(resp.status(), reqwest::StatusCode::OK);
+
+    // Shut the server down first so the redb file's write handle is
+    // released — our back-door read can then open the file cleanly in
+    // environments where redb's file lock is exclusive.
+    handle.shutdown(Duration::from_secs(2)).await;
+
+    let job_id = JobId::new("payments").expect("parse payments JobId");
+    let key = IntentKey::for_job(&job_id);
+    let persisted = read_intent_key_from_store(tmp.path(), key.as_bytes())
+        .await
+        .expect("jobs/payments must be populated after successful submit");
+
+    assert!(!persisted.is_empty(), "archived Job bytes must be non-empty");
+
+    // Rebuild the expected archive from the same spec and compare bytes.
+    let expected_job = Job::from_spec(spec).expect("canonical spec constructs a Job");
+    let expected_bytes =
+        rkyv::to_bytes::<rkyv::rancor::Error>(&expected_job).expect("rkyv archive of expected Job");
+
+    assert_eq!(
+        persisted.as_ref(),
+        expected_bytes.as_ref(),
+        "persisted bytes must equal rkyv archive of Job::from_spec(...) \
+         — handler must archive via rkyv, not via serde_json or another format"
+    );
+}
+
+// -----------------------------------------------------------------------
+// AC — invalid spec (zero replicas) -> HTTP 400 with field-pointing body
+// -----------------------------------------------------------------------
+
+#[tokio::test]
+async fn post_v1_jobs_with_invalid_spec_returns_400_with_error_body_naming_field() {
+    let (handle, bound, _tmp, ca_pem) = spawn_server().await;
+    let client = client_trusting(&ca_pem);
+    let url = format!("https://localhost:{}/v1/jobs", bound.port());
+
+    // `replicas = 0` fails `Job::from_spec` at the `NonZeroU32` gate with
+    // `AggregateError::Validation { field: "replicas", .. }`.
+    let bad = JobSpecInput {
+        id: "payments".to_owned(),
+        replicas: 0,
+        cpu_milli: 500,
+        memory_bytes: 536_870_912,
+    };
+
+    let resp = client
+        .post(&url)
+        .json(&SubmitJobRequest { spec: bad })
+        .send()
+        .await
+        .expect("POST /v1/jobs with bad spec");
+
+    assert_eq!(resp.status(), reqwest::StatusCode::BAD_REQUEST, "bad spec must be HTTP 400",);
+    let body: ErrorBody = resp.json().await.expect("decode ErrorBody");
+    assert_eq!(body.error, "validation", "error kind must be 'validation'");
+    assert!(
+        body.message.contains("replicas"),
+        "message must name the offending field; got {:?}",
+        body.message
+    );
+
+    handle.shutdown(Duration::from_secs(2)).await;
+}
+
+// -----------------------------------------------------------------------
+// AC — byte-identical re-submission is idempotent: same commit_index
+// -----------------------------------------------------------------------
+
+#[tokio::test]
+async fn post_v1_jobs_idempotent_byte_identical_spec_returns_same_commit_index() {
+    let (handle, bound, _tmp, ca_pem) = spawn_server().await;
+    let client = client_trusting(&ca_pem);
+    let url = format!("https://localhost:{}/v1/jobs", bound.port());
+
+    let spec = payments_spec();
+
+    let first: SubmitJobResponse = client
+        .post(&url)
+        .json(&SubmitJobRequest { spec: spec.clone() })
+        .send()
+        .await
+        .expect("first submit")
+        .json()
+        .await
+        .expect("decode first response");
+
+    let second_resp =
+        client.post(&url).json(&SubmitJobRequest { spec }).send().await.expect("second submit");
+
+    assert_eq!(
+        second_resp.status(),
+        reqwest::StatusCode::OK,
+        "byte-identical re-submission must be 200 OK (idempotent)",
+    );
+    let second: SubmitJobResponse = second_resp.json().await.expect("decode second response");
+
+    assert_eq!(first.job_id, second.job_id);
+    assert_eq!(
+        first.commit_index, second.commit_index,
+        "byte-identical re-submission must return the same commit_index \
+         (ADR-0015 §4: idempotent success)",
+    );
+
+    handle.shutdown(Duration::from_secs(2)).await;
+}
+
+// -----------------------------------------------------------------------
+// AC — different spec at same JobId -> HTTP 409 Conflict
+// -----------------------------------------------------------------------
+
+#[tokio::test]
+async fn post_v1_jobs_with_different_spec_at_existing_key_returns_409_conflict() {
+    let (handle, bound, _tmp, ca_pem) = spawn_server().await;
+    let client = client_trusting(&ca_pem);
+    let url = format!("https://localhost:{}/v1/jobs", bound.port());
+
+    // First submit: canonical spec.
+    let first = client
+        .post(&url)
+        .json(&SubmitJobRequest { spec: payments_spec() })
+        .send()
+        .await
+        .expect("first submit");
+    assert_eq!(first.status(), reqwest::StatusCode::OK);
+
+    // Second submit: same JobId, different replicas. Must be rejected
+    // with 409 per ADR-0015 §4 "Duplicate intent-key with *different*
+    // spec".
+    let conflict = client
+        .post(&url)
+        .json(&SubmitJobRequest { spec: payments_spec_alt() })
+        .send()
+        .await
+        .expect("second submit");
+
+    assert_eq!(
+        conflict.status(),
+        reqwest::StatusCode::CONFLICT,
+        "different spec at same JobId must be HTTP 409 Conflict",
+    );
+    let body: ErrorBody = conflict.json().await.expect("decode ErrorBody");
+    assert_eq!(body.error, "conflict", "error kind must be 'conflict'");
+
+    handle.shutdown(Duration::from_secs(2)).await;
+}
+
+// -----------------------------------------------------------------------
+// AC — LocalStore::commit_index() strictly increases per put
+// -----------------------------------------------------------------------
+
+#[tokio::test]
+async fn local_store_commit_index_monotonically_increases() {
+    let tmp = TempDir::new().expect("tempdir");
+    let path = tmp.path().join("store.redb");
+    let store = LocalStore::open(&path).expect("open LocalStore");
+
+    // Initial state — commit_index is zero on a freshly-created store.
+    // Any non-negative starting value would satisfy "monotonic"; pinning
+    // to zero here makes the invariant precise and catches a mutation
+    // that returns a fixed large value regardless of writes.
+    assert_eq!(store.commit_index(), 0, "fresh store must report commit_index = 0");
+
+    store.put(b"k1", b"v1").await.expect("first put");
+    let after_first = store.commit_index();
+    assert!(after_first >= 1, "commit_index must advance after the first put; got {after_first}",);
+
+    store.put(b"k2", b"v2").await.expect("second put");
+    let after_second = store.commit_index();
+    assert!(
+        after_second > after_first,
+        "commit_index must strictly increase; {after_second} <= {after_first}",
+    );
+
+    store.put(b"k1", b"v1-updated").await.expect("third put (overwrite)");
+    let after_third = store.commit_index();
+    assert!(
+        after_third > after_second,
+        "commit_index must strictly increase on overwrite too; {after_third} <= {after_second}",
+    );
+}

@@ -42,6 +42,30 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum_server::Handle as AxumHandle;
 use axum_server::tls_rustls::RustlsConfig;
+use overdrive_core::traits::observation_store::ObservationStore;
+use overdrive_store_local::LocalStore;
+
+/// Shared application state passed to every axum handler via
+/// [`axum::extract::State`]. Cheap to clone — the inner handles are
+/// `Arc`-shared.
+///
+/// * `store` — the authoritative [`IntentStore`] implementation
+///   (`LocalStore` in Phase 1 single mode).
+/// * `obs` — the `ObservationStore` trait object. Phase 1 wraps
+///   `SimObservationStore` (ADR-0012); Phase 2 swaps in `CorrosionStore`
+///   via a single trait-object replacement.
+///
+/// [`IntentStore`]: overdrive_core::traits::intent_store::IntentStore
+#[derive(Clone)]
+pub struct AppState {
+    /// Authoritative intent store — every write lands here.
+    pub store: Arc<LocalStore>,
+    /// Eventually-consistent observation store. Unused by 03-01's
+    /// `submit_job` handler, but wired in so observation-reading
+    /// handlers in later steps (03-03) can pick it up without
+    /// restructuring the state shape.
+    pub obs: Arc<dyn ObservationStore>,
+}
 
 /// Configuration for the Phase 1 control-plane server. Populated at
 /// startup from CLI flags and environment.
@@ -103,9 +127,7 @@ impl ServerHandle {
 /// load, trust-triple write, or TCP bind fails. The server task itself
 /// runs in the background; its errors are observable only via
 /// [`ServerHandle::shutdown`] which awaits the task.
-pub async fn run_server(
-    config: ServerConfig,
-) -> Result<ServerHandle, error::ControlPlaneError> {
+pub async fn run_server(config: ServerConfig) -> Result<ServerHandle, error::ControlPlaneError> {
     // Install the rustls process-wide CryptoProvider (ring) exactly
     // once. The workspace enables only the `ring` feature, but rustls
     // still requires an explicit install when neither provider is the
@@ -128,36 +150,49 @@ pub async fn run_server(
     let rustls_config = tls_bootstrap::load_server_tls_config(&material)?;
     let axum_rustls = RustlsConfig::from_config(Arc::new(rustls_config));
 
-    // Assemble the router — every ADR-0008 endpoint routed to `stub`
-    // for this slice. Real handlers land in 02-04.
+    // Open the authoritative intent store at <data_dir>/intent.redb.
+    // The parent directory is guaranteed to exist — callers pass a
+    // tempdir or an operator-created data directory; we do not create
+    // the directory ourselves here per `LocalStore::open`'s contract.
+    let store_path = config.data_dir.join("intent.redb");
+    let store = Arc::new(
+        LocalStore::open(&store_path)
+            .map_err(|e| error::ControlPlaneError::Internal(format!("open LocalStore: {e}")))?,
+    );
+
+    // Wire the Phase 1 observation store (`SimObservationStore`
+    // single-peer per ADR-0012).
+    let obs: Arc<dyn ObservationStore> =
+        Arc::from(observation_wiring::wire_single_node_observation()?);
+
+    let state = AppState { store, obs };
+
+    // Assemble the router — step 03-01 wires `POST /v1/jobs` through
+    // the real `submit_job` handler. Other endpoints continue to use
+    // `stub` until their owning steps land (03-02 … 03-05).
     let router = Router::new()
-        .route("/v1/jobs", post(stub))
+        .route("/v1/jobs", post(handlers::submit_job))
         .route("/v1/jobs/:id", get(stub))
         .route("/v1/allocs", get(stub))
         .route("/v1/nodes", get(stub))
-        .route("/v1/cluster/info", get(stub));
+        .route("/v1/cluster/info", get(stub))
+        .with_state(state);
 
     // Bind the listener synchronously so we can surface bind errors
     // before spawning the serve task.
-    let std_listener = std::net::TcpListener::bind(config.bind).map_err(|e| {
-        error::ControlPlaneError::Internal(format!("bind {}: {e}", config.bind))
-    })?;
-    std_listener.set_nonblocking(true).map_err(|e| {
-        error::ControlPlaneError::Internal(format!("set_nonblocking: {e}"))
-    })?;
+    let std_listener = std::net::TcpListener::bind(config.bind)
+        .map_err(|e| error::ControlPlaneError::Internal(format!("bind {}: {e}", config.bind)))?;
+    std_listener
+        .set_nonblocking(true)
+        .map_err(|e| error::ControlPlaneError::Internal(format!("set_nonblocking: {e}")))?;
 
     let axum_handle = AxumHandle::new();
-    let server = axum_server::from_tcp_rustls(std_listener, axum_rustls)
-        .handle(axum_handle.clone());
+    let server =
+        axum_server::from_tcp_rustls(std_listener, axum_rustls).handle(axum_handle.clone());
 
-    let server_task = tokio::spawn(async move {
-        server.serve(router.into_make_service()).await
-    });
+    let server_task = tokio::spawn(async move { server.serve(router.into_make_service()).await });
 
-    Ok(ServerHandle {
-        inner: axum_handle,
-        server_task,
-    })
+    Ok(ServerHandle { inner: axum_handle, server_task })
 }
 
 /// Stub handler — every ADR-0008 endpoint routes here until Slice 4
@@ -165,11 +200,7 @@ pub async fn run_server(
 /// JSON object so `reqwest::Response::status()` assertions in the
 /// acceptance test see a green path.
 async fn stub() -> impl IntoResponse {
-    (
-        StatusCode::OK,
-        [("content-type", "application/json")],
-        "{}",
-    )
+    (StatusCode::OK, [("content-type", "application/json")], "{}")
 }
 
 /// Construct the `noop-heartbeat` reconciler. Exposed as a public factory

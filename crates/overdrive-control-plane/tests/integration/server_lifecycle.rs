@@ -31,8 +31,7 @@ use tempfile::TempDir;
 /// Build a reqwest client that trusts the CA whose PEM lives in the
 /// trust triple written by `run_server` during boot.
 fn client_trusting(ca_pem: &str) -> reqwest::Client {
-    let cert = reqwest::Certificate::from_pem(ca_pem.as_bytes())
-        .expect("parse CA certificate PEM");
+    let cert = reqwest::Certificate::from_pem(ca_pem.as_bytes()).expect("parse CA certificate PEM");
     reqwest::Client::builder()
         .add_root_certificate(cert)
         .https_only(true)
@@ -51,8 +50,7 @@ fn read_ca_from_trust_triple(data_dir: &std::path::Path) -> String {
     let yaml = std::fs::read_to_string(&config_path)
         .expect(&format!("read trust triple at {}", config_path.display()));
 
-    let doc: serde_yaml::Value =
-        serde_yaml::from_str(&yaml).expect("parse trust triple YAML");
+    let doc: serde_yaml::Value = serde_yaml::from_str(&yaml).expect("parse trust triple YAML");
     let ca_b64 = doc
         .get("contexts")
         .and_then(|c| c.get("local"))
@@ -85,16 +83,8 @@ async fn spawn_server() -> (ServerHandle, SocketAddr, TempDir, String) {
 async fn run_server_binds_on_ephemeral_port_and_reports_bound_address() {
     let (handle, bound, _tmp, ca_pem) = spawn_server().await;
 
-    assert!(
-        bound.port() > 0,
-        "expected a non-zero ephemeral port, got {bound}",
-    );
-    assert_eq!(
-        bound.ip().to_string(),
-        "127.0.0.1",
-        "expected loopback bind, got {}",
-        bound.ip(),
-    );
+    assert!(bound.port() > 0, "expected a non-zero ephemeral port, got {bound}",);
+    assert_eq!(bound.ip().to_string(), "127.0.0.1", "expected loopback bind, got {}", bound.ip(),);
 
     // Prove the server is actually reachable on the reported port
     // before shutdown. This pins the local_addr() return value to the
@@ -111,8 +101,7 @@ async fn run_server_binds_on_ephemeral_port_and_reports_bound_address() {
     // TCP connect to the same port must fail. This kills the
     // `ServerHandle::shutdown -> ()` mutation: if shutdown did
     // nothing, the port would still be open.
-    let closed_result =
-        tokio::net::TcpStream::connect(("127.0.0.1", bound.port())).await;
+    let closed_result = tokio::net::TcpStream::connect(("127.0.0.1", bound.port())).await;
     assert!(
         closed_result.is_err(),
         "expected ConnectionRefused after shutdown; got {closed_result:?}",
@@ -129,11 +118,7 @@ async fn reqwest_client_with_minted_ca_gets_200_on_v1_cluster_info() {
     let client = client_trusting(&ca_pem);
 
     let url = format!("https://localhost:{}/v1/cluster/info", bound.port());
-    let resp = client
-        .get(&url)
-        .send()
-        .await
-        .expect("GET /v1/cluster/info");
+    let resp = client.get(&url).send().await.expect("GET /v1/cluster/info");
 
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
 
@@ -183,8 +168,7 @@ async fn cancellation_token_shutdown_drains_in_flight_request() {
     // Now start an in-flight request on the already-pooled connection.
     let in_flight_url = format!("https://localhost:{}/v1/cluster/info", bound.port());
     let client_c = client.clone();
-    let in_flight =
-        tokio::spawn(async move { client_c.get(&in_flight_url).send().await });
+    let in_flight = tokio::spawn(async move { client_c.get(&in_flight_url).send().await });
 
     // Give the request a moment to land on the wire before we issue
     // shutdown — without this the shutdown may race ahead of the
@@ -214,34 +198,36 @@ async fn all_adr_0008_paths_return_200_on_stub_router() {
     let (handle, bound, _tmp, ca_pem) = spawn_server().await;
     let client = client_trusting(&ca_pem);
 
-    // Per ADR-0008 §Endpoints.
-    let gets = [
-        "/v1/jobs/anything",
-        "/v1/allocs",
-        "/v1/nodes",
-        "/v1/cluster/info",
-    ];
+    // Per ADR-0008 §Endpoints — GETs still route through the stub in
+    // Phase 1 steps prior to their owning deliver step. Step 03-01
+    // replaces the `POST /v1/jobs` branch with the real handler; see
+    // the submit-side POST assertion below.
+    let gets = ["/v1/jobs/anything", "/v1/allocs", "/v1/nodes", "/v1/cluster/info"];
     for path in gets {
         let url = format!("https://localhost:{}{path}", bound.port());
         let resp = client.get(&url).send().await.expect(&format!("GET {path}"));
-        assert_eq!(
-            resp.status(),
-            reqwest::StatusCode::OK,
-            "GET {path} expected 200",
-        );
+        assert_eq!(resp.status(), reqwest::StatusCode::OK, "GET {path} expected 200",);
         let body = resp.text().await.expect("body");
         assert_eq!(body, "{}", "stub must return empty JSON object");
     }
 
-    // POST /v1/jobs
+    // POST /v1/jobs now routes through the real `submit_job` handler
+    // (step 03-01). A valid body yields 200 + a `SubmitJobResponse`;
+    // a malformed body would yield 422 from axum's `Json` extractor,
+    // which is precisely why this assertion uses a canonical payload
+    // rather than `{}`. Full happy-path + idempotency + conflict
+    // coverage lives in `integration::submit_round_trip` — this
+    // assertion only pins that the route remains mounted and reachable.
     let url = format!("https://localhost:{}/v1/jobs", bound.port());
-    let resp = client
-        .post(&url)
-        .body("{}")
-        .header("content-type", "application/json")
-        .send()
-        .await
-        .expect("POST /v1/jobs");
+    let body = serde_json::json!({
+        "spec": {
+            "id": "routing-check",
+            "replicas": 1,
+            "cpu_milli": 100,
+            "memory_bytes": 67_108_864_u64,
+        },
+    });
+    let resp = client.post(&url).json(&body).send().await.expect("POST /v1/jobs");
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
 
     handle.shutdown(Duration::from_secs(2)).await;
