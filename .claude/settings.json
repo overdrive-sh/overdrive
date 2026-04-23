@@ -15,6 +15,18 @@
             "command": "bun run .claude/hooks/block-cargo-test.ts",
             "timeout": 10,
             "statusMessage": "Checking for `cargo test` (use `cargo nextest run`)..."
+          },
+          {
+            "type": "command",
+            "command": "bun run .claude/hooks/block-cargo-mutants.ts",
+            "timeout": 10,
+            "statusMessage": "Checking for `cargo mutants` (use `cargo xtask mutants`)..."
+          },
+          {
+            "type": "command",
+            "command": "bun run .claude/hooks/block-cargo-build.ts",
+            "timeout": 10,
+            "statusMessage": "Checking for `cargo build` (use `cargo check`)..."
           }
         ]
       },

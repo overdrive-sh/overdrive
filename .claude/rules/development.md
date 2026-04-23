@@ -303,6 +303,43 @@ a reconciler.
 
 ---
 
+## Compile-checking
+
+> **Use `cargo check`, not `cargo build`.** `cargo build` is **blocked** by
+> a pre-tool hook (`.claude/hooks/block-cargo-build.ts`). For iterative
+> typecheck-and-diagnose loops — the overwhelming majority of what the
+> agent actually does — `cargo check` skips codegen and linking and is
+> dramatically faster on this workspace.
+>
+> **Rewrite your command before submitting it:**
+>
+> | ❌ don't | ✅ do |
+> |---|---|
+> | `cargo build` | `cargo check` |
+> | `cargo build -p CRATE` | `cargo check -p CRATE` |
+> | `cargo build --workspace` | `cargo check --workspace` |
+> | `cargo build --all-targets` | `cargo check --all-targets` |
+> | `cargo build --features X` | `cargo check --features X` |
+> | `cargo build --release` | `cargo check --release` |
+>
+> `cargo check` catches every `rustc` diagnostic `cargo build` would —
+> trait resolution, borrow checker, type inference, macro expansion,
+> lints via `cargo clippy`. It does NOT produce a binary or run
+> `build.rs` link steps.
+>
+> **Legitimate `cargo build` shapes** (the hook allows these):
+> - Producing a binary for a real execution target — xtask, CLI, a
+>   real-kernel integration test that must boot an artifact, anything
+>   about to be `exec`'d.
+> - `cargo xtask ...` subcommands that internally invoke `cargo build`
+>   as part of their own compilation pipeline.
+> - Tier 3 / Tier 4 harness flows where the build artifact is the
+>   point (`cargo xtask integration-test vm`, `cargo xtask xdp-perf`).
+>
+> If you find yourself needing `cargo build` for "just to see the
+> errors," you want `cargo check`. If you need the binary, reach for
+> the xtask wrapper that already knows how to produce it.
+
 ## Rust patterns
 
 ### Errors
