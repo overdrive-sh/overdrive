@@ -56,25 +56,15 @@ function deny(label: string): void {
   console.log(JSON.stringify(verdict));
 }
 
-async function main(): Promise<void> {
-  let raw: string;
-  try {
-    raw = await Bun.stdin.text();
-  } catch {
-    return; // no input — allow
-  }
+let cmd = "";
+try {
+  const raw = await Bun.stdin.text();
+  cmd = (JSON.parse(raw) as { tool_input?: { command?: string } }).tool_input?.command ?? "";
+} catch {
+  // missing stdin or malformed JSON — allow, don't break the tool call
+}
 
-  let cmd = "";
-  try {
-    const parsed = JSON.parse(raw) as { tool_input?: { command?: string } };
-    cmd = parsed.tool_input?.command ?? "";
-  } catch {
-    return; // malformed JSON — allow, don't break the tool call
-  }
-  if (!cmd) return;
-
+if (cmd) {
   const hit = RULES.find((r) => r.pattern.test(cmd));
   if (hit) deny(hit.label);
 }
-
-await main();

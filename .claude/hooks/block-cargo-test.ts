@@ -55,36 +55,24 @@ function isBlockedCargoTest(seg: string): boolean {
   return true;
 }
 
-async function main(): Promise<void> {
-  let raw: string;
-  try {
-    raw = await Bun.stdin.text();
-  } catch {
-    return; // no input — allow
-  }
-
-  let cmd = "";
-  try {
-    const parsed = JSON.parse(raw) as { tool_input?: { command?: string } };
-    cmd = parsed.tool_input?.command ?? "";
-  } catch {
-    return; // malformed JSON — allow, don't break the tool call
-  }
-  if (!cmd) return;
-
-  if (segments(cmd).some(isBlockedCargoTest)) {
-    deny(
-      "`cargo test` is blocked by pre-tool hook. This project uses " +
-        "`cargo nextest run` as the test runner — see " +
-        "`.claude/rules/testing.md` §\"Running tests — foreground, always\". " +
-        "Swap the command:\n" +
-        "  cargo test [ARGS]              →  cargo nextest run [ARGS]\n" +
-        "  cargo test -p CRATE            →  cargo nextest run -p CRATE\n" +
-        "  cargo test -- <filter>         →  cargo nextest run -E 'test(<filter>)'\n" +
-        "The only legitimate `cargo test` usage is `cargo test --doc ...` " +
-        "(nextest cannot execute doctests)."
-    );
-  }
+let cmd = "";
+try {
+  const raw = await Bun.stdin.text();
+  cmd = (JSON.parse(raw) as { tool_input?: { command?: string } }).tool_input?.command ?? "";
+} catch {
+  // missing stdin or malformed JSON — allow, don't break the tool call
 }
 
-await main();
+if (cmd && segments(cmd).some(isBlockedCargoTest)) {
+  deny(
+    "`cargo test` is blocked by pre-tool hook. This project uses " +
+      "`cargo nextest run` as the test runner — see " +
+      "`.claude/rules/testing.md` §\"Running tests — foreground, always\". " +
+      "Swap the command:\n" +
+      "  cargo test [ARGS]              →  cargo nextest run [ARGS]\n" +
+      "  cargo test -p CRATE            →  cargo nextest run -p CRATE\n" +
+      "  cargo test -- <filter>         →  cargo nextest run -E 'test(<filter>)'\n" +
+      "The only legitimate `cargo test` usage is `cargo test --doc ...` " +
+      "(nextest cannot execute doctests)."
+  );
+}
