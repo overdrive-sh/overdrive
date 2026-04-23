@@ -218,6 +218,42 @@ pre-push. Profile config lives in `.config/nextest.toml`.
 
 ---
 
+## RED scaffolds and intentionally-failing commits
+
+Outside-In TDD produces intentionally-failing test scaffolds: new
+`SimInvariant` variants, new arms in an exhaustive match, new trait
+methods the harness calls before the implementation exists. Mark the
+unimplemented branch with `panic!("Not yet implemented -- RED
+scaffold")` (or `todo!("RED scaffold: ...")`). The panic IS the
+specification of work not yet done.
+
+**Downstream fallout on pre-existing tests is expected and correct.**
+When a generic harness iterates every variant — DST walking every
+`SimInvariant`, a property test enumerating every action, a match
+covering every driver class — the new RED branch makes pre-existing
+tests panic the moment they touch it. Do NOT "fix" this by replacing
+the `panic!` with a neutral stub (`Ok(())`, `Verdict::Allow`, `return
+vec![]`). A neutral stub turns the bar green and masks the
+unfinished state — the whole point of the RED phase is that the bar
+is red until the implementation lands.
+
+When a pre-commit or pre-push hook fires on a RED scaffold:
+
+- **Do not** swap the `panic!` for a neutral stub to satisfy the gate.
+- **Do not** add `#[ignore]` to the pre-existing tests the new
+  scaffold now panics. That hides a regression surface the moment the
+  scaffold goes GREEN — the paired tests are precisely what will
+  validate the implementation.
+- **Commit with `git commit --no-verify`** and call it out explicitly
+  in the commit message or user-facing summary. Intentionally-RED
+  commits are one of the explicit exceptions to "never skip hooks":
+  forcing green with stubs is worse than acknowledging red. Full
+  pre-push lefthook and CI still catch anything that shouldn't ship;
+  the pre-commit gate is here to catch accidents, not to block the
+  GREEN-next-commit loop.
+
+---
+
 ## Tier 1 — Deterministic Simulation Testing
 
 ### Nondeterminism must be injectable
