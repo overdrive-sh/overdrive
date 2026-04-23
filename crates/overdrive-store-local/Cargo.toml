@@ -13,7 +13,7 @@ repository.workspace  = true
 publish               = false
 
 [package.metadata.overdrive]
-crate_class = "adapter-real"
+crate_class = "adapter-host"
 
 [features]
 # Opt-in gate for slow integration-shaped tests in this crate. The

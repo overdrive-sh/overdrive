@@ -788,6 +788,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "overdrive-host"
+version = "0.0.0"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "overdrive-core",
+ "rand 0.8.6",
+ "tokio",
+]
+
+[[package]]
 name = "overdrive-sim"
 version = "0.0.0"
 dependencies = [

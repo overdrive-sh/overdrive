@@ -115,7 +115,7 @@ workspace/
 │   ├── overdrive-core/          # ports + newtypes + Result alias + Error
 │   │                            # (class: core, lint-scanned, no I/O primitives)
 │   ├── overdrive-store-local/   # LocalStore (redb) adapter
-│   │                            # (class: adapter-real, uses redb directly)
+│   │                            # (class: adapter-host, uses redb directly)
 │   ├── overdrive-sim/           # Sim* adapters + invariants + turmoil harness
 │   │                            # (class: adapter-sim, dev-profile only)
 │   ├── overdrive-cli/           # bin: `overdrive` (binary boundary, eyre)
@@ -129,7 +129,7 @@ extends `xtask` with `dst`/`dst-lint`. `overdrive-cli` already exists;
 
 **Phase 1 control-plane-core extension** (ADR-0008 — ADR-0015):
 
-- **`crates/overdrive-control-plane/`** — NEW, class = `adapter-real`. Hosts
+- **`crates/overdrive-control-plane/`** — NEW, class = `adapter-host`. Hosts
   the axum router + handlers, rustls TLS bootstrap, `ReconcilerRuntime`,
   `EvaluationBroker`, and the `overdrive-control-plane::api` shared
   request/response types. Depends on `overdrive-core`,
@@ -150,14 +150,14 @@ New crate-class assignments:
 
 | Crate | Class | Notes |
 |---|---|---|
-| `overdrive-control-plane` | `adapter-real` | Uses rustls, hyper, axum; not DST-pure. Reconciler bodies inside this crate that want DST coverage must be in separate `core`-class sub-crates when they appear in Phase 2+. |
+| `overdrive-control-plane` | `adapter-host` | Uses rustls, hyper, axum; not DST-pure. Reconciler bodies inside this crate that want DST coverage must be in separate `core`-class sub-crates when they appear in Phase 2+. |
 
 **Crate classes** (`package.metadata.overdrive.crate_class`):
 
 | Class | Meaning | Banned-API lint | Examples |
 |---|---|---|---|
 | `core` | ports + pure logic | **yes** — lint scans for `Instant::now`, `rand::*`, `tokio::net::*`, `std::thread::sleep` | `overdrive-core` |
-| `adapter-real` | real adapter | no — allowed to use banned APIs to *implement* ports | `overdrive-store-local`, future `overdrive-node` |
+| `adapter-host` | host adapter | no — allowed to use banned APIs to *implement* ports against the host OS / kernel / network | `overdrive-host`, `overdrive-store-local`, future `overdrive-node` |
 | `adapter-sim` | sim adapter + harness | no — legitimately uses `turmoil`, `StdRng`, etc. | `overdrive-sim` |
 | `binary` | binary boundary | no | `overdrive-cli`, `xtask` |
 | *(unset)* | legacy / not classified | no | — |
@@ -611,9 +611,9 @@ C4Container
 
   Container_Boundary(workspace, "Overdrive workspace") {
     Container(core, "overdrive-core", "Rust crate (class: core)", "Ports + newtypes + aggregates (Job/Node/Allocation) + Reconciler trait + Action enum + IntentKey")
-    Container(store_local, "overdrive-store-local", "Rust crate (class: adapter-real)", "LocalStore: redb-backed IntentStore adapter + commit_index() accessor")
+    Container(store_local, "overdrive-store-local", "Rust crate (class: adapter-host)", "LocalStore: redb-backed IntentStore adapter + commit_index() accessor")
     Container(sim, "overdrive-sim", "Rust crate (class: adapter-sim)", "Sim* adapters + turmoil harness + invariant catalogue; also provides SimObservationStore for Phase 1 server")
-    Container(ctrl, "overdrive-control-plane", "Rust crate (class: adapter-real)", "Axum router + rustls TLS + ReconcilerRuntime + EvaluationBroker + handler error mapping")
+    Container(ctrl, "overdrive-control-plane", "Rust crate (class: adapter-host)", "Axum router + rustls TLS + ReconcilerRuntime + EvaluationBroker + handler error mapping")
     Container(xtask, "xtask", "Rust binary (class: binary)", "cargo xtask dst / dst-lint / openapi-gen / openapi-check")
     Container(cli, "overdrive-cli", "Rust binary (class: binary)", "overdrive CLI — reqwest HTTP client against /v1 REST API")
   }

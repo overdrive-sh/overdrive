@@ -125,8 +125,8 @@ fn dst_lint_exits_zero_on_the_real_overdrive_workspace() {
 // -----------------------------------------------------------------------------
 
 #[test]
-fn dst_lint_permits_adapter_real_crate_using_instant_now() {
-    // Given a non-core wiring crate (crate_class = "adapter-real") that
+fn dst_lint_permits_adapter_host_crate_using_instant_now() {
+    // Given a non-core wiring crate (crate_class = "adapter-host") that
     // constructs a real clock using Instant::now internally. We also
     // include a clean core crate so the fail-fast "no core crate"
     // guard-rail does not fire — the scenario under test is the
@@ -138,7 +138,7 @@ fn dst_lint_permits_adapter_real_crate_using_instant_now() {
             ("my-core", Some("core"), "pub fn noop() {}\n"),
             (
                 "my-adapter",
-                Some("adapter-real"),
+                Some("adapter-host"),
                 "pub fn now() -> std::time::Instant {\n    std::time::Instant::now()\n}\n",
             ),
         ],
@@ -151,7 +151,7 @@ fn dst_lint_permits_adapter_real_crate_using_instant_now() {
     // reported for the wiring crate.
     assert!(
         out.status.success(),
-        "dst-lint must permit Instant::now in adapter-real crate; stderr:\n{}",
+        "dst-lint must permit Instant::now in adapter-host crate; stderr:\n{}",
         String::from_utf8_lossy(&out.stderr)
     );
 }
@@ -265,7 +265,7 @@ fn dst_lint_fails_fast_when_core_class_set_is_empty() {
     let manifest = scaffold_workspace(
         tmp.path(),
         &[
-            ("my-adapter", Some("adapter-real"), "pub fn noop() {}\n"),
+            ("my-adapter", Some("adapter-host"), "pub fn noop() {}\n"),
             ("my-binary", Some("binary"), "pub fn noop() {}\n"),
         ],
     );

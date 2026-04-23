@@ -34,17 +34,6 @@ tempfile.workspace       = true
 overdrive-store-local    = { path = "../overdrive-store-local" }
 
 [features]
-# `real-adapters` gates a `real` module that ships minimal, mostly-unimplemented
-# real adapters (`SystemClock`, `TcpTransport`, `OsEntropy`, and stub real
-# Dataplane / Driver / LLM adapters) so that `overdrive-core`'s trait bounds
-# can be discharged somewhere the dst-lint gate will NOT flag. The `Real*`
-# types here are a temporary home — they move out to `overdrive-node` /
-# `overdrive-control-plane` once those crates exist (post-Phase-1). The crate
-# metadata below keeps `crate_class = "adapter-sim"` because dst-lint scans
-# the crate, not the module — the wiring-crate exemption is enforced at
-# crate granularity.
-real-adapters = []
-
 # `canary-bug` — TEST-ONLY feature that plants a deliberate LWW-convergence
 # break in `SimObservationStore` on the canary trigger seed (0xDEAD_BEEF).
 # Production builds MUST NEVER enable this feature. It exists so that the

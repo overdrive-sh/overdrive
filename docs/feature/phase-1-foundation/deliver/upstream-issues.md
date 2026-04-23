@@ -64,16 +64,17 @@ bytes in the same commit that introduces the reconciler.
 
 ---
 
-## 3. `overdrive-sim::real::CountingOsEntropy` — 5 missed mutants (feature-gated, excluded from scope)
+## 3. `overdrive-host::entropy::CountingOsEntropy` — 5 missed mutants (no live consumer, excluded from scope)
 
-**Location**: `crates/overdrive-sim/src/real/mod.rs:132,138,143`
+**Location**: `crates/overdrive-host/src/entropy.rs` (was
+`crates/overdrive-sim/src/real/mod.rs:132,138,143` before the
+`overdrive-host` extraction).
 
-**Why not a gap**: the `real/` module is compiled only under
-`--features real-adapters`; the per-PR mutation run does not enable the
-feature, so these mutants are tested in a build where the code is dead.
-They'll be covered when Phase 2+ adds production consumers of
-`SystemClock`/`OsEntropy`/`TcpTransport` under
-`overdrive-node` / `overdrive-control-plane`.
+**Why not a gap**: the host adapters have no production call site in
+Phase 1 — nothing depends on `overdrive-host` yet, so the mutation run
+has no test that could kill these. They'll be covered when Phase 2+
+wires `SystemClock` / `OsEntropy` / `TcpTransport` into the node agent
+and control plane.
 
 Listed here for completeness; not classified as a Phase 1 gap.
 
@@ -82,7 +83,7 @@ Listed here for completeness; not classified as a Phase 1 gap.
 ## Summary
 
 - Platform-code kill rate, excluding `xtask/**` (rule 6 in `.cargo/mutants.toml`)
-  and excluding feature-gated `real/` code: ≈ 95.5% (149 / 156).
+  and excluding the unwired `overdrive-host` code: ≈ 95.5% (149 / 156).
 - The two actionable residuals (items 1 and 2) live in `overdrive-sim`, do
   not affect any platform correctness claim, and have natural homes in
   Phase 2 work.

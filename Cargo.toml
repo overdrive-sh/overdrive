@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "crates/overdrive-core",
     "crates/overdrive-cli",
+    "crates/overdrive-host",
     "crates/overdrive-sim",
     "crates/overdrive-store-local",
     "xtask",

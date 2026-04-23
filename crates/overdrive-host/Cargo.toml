@@ -1,0 +1,27 @@
+[package]
+name         = "overdrive-host"
+version      = "0.0.0"
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+publish                = false
+
+[package.metadata.overdrive]
+# `adapter-host` per ADR-0003 — production bindings from the port traits
+# in `overdrive-core` to the host's OS clock, OS entropy, and host TCP
+# stack. The dst-lint gate (xtask/src/dst_lint.rs) only scans
+# `crate_class = "core"` crates, so real-infra calls here are expected
+# and permitted.
+crate_class = "adapter-host"
+
+[dependencies]
+overdrive-core.workspace = true
+async-trait.workspace    = true
+bytes.workspace          = true
+rand.workspace           = true
+tokio.workspace          = true
+
+[lints]
+workspace = true

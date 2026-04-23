@@ -202,7 +202,7 @@ pub fn scan_workspace(manifest_path: &Path) -> Result<Vec<Violation>> {
         bail!(
             "the following workspace crate(s) are missing \
              `[package.metadata.overdrive] crate_class = \"...\"` in Cargo.toml: {}. \
-             Add one of: core | adapter-real | adapter-sim | binary. \
+             Add one of: core | adapter-host | adapter-sim | binary. \
              See docs/product/architecture/adr-0003-core-crate-labelling.md.",
             names.join(", ")
         );

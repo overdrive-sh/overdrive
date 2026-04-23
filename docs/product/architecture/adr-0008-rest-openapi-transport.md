@@ -59,7 +59,7 @@ with HTTP/1.1 fallback (ALPN `http/1.1`), routes under the `/v1` prefix.**
   - `GET /v1/nodes` — NodeList
 
 The server binary lives in a new crate, `crates/overdrive-control-plane`,
-class = `adapter-real`. That crate owns: the axum router, the TLS
+class = `adapter-host`. That crate owns: the axum router, the TLS
 bootstrap (ADR-0010), the handler module (Slice 3), the ReconcilerRuntime
 wiring (ADR-0013), and the `ObservationStore` adapter wiring (ADR-0011).
 

@@ -282,7 +282,8 @@ None of these require crafter consultation.
   (new, Slice 5 AC).
 - Workspace deps to add: `axum`, `axum-server`, `utoipa`, `utoipa-axum`,
   `libsql` (versions per `Cargo.toml` pin).
-- New crate: `crates/overdrive-control-plane`, class `adapter-real`.
+- New crate: `crates/overdrive-control-plane`, class `adapter-host`
+  (renamed from `adapter-real` on 2026-04-23; see ADR-0016).
 - TLS/CA posture: in-process ephemeral (ADR-0010); no CI secret
   management in Phase 1.
 

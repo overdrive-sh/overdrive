@@ -61,7 +61,7 @@ walking skeleton is legitimately in that category — the "real" Corrosion
 store is a distributed system we don't need for a 1-node cluster. No
 ADR override of ADR-0003 (crate-class labelling) is required; the label
 accurately describes the crate's behaviour in both uses. The
-`adapter-real` class remains reserved for adapters that exercise real
+`adapter-host` class remains reserved for adapters that exercise real
 kernel / network / filesystem primitives.
 
 ## Considered alternatives
@@ -134,7 +134,7 @@ the place bugs hide.
   module. Handlers operate on `&dyn ObservationStore` (or `Arc<dyn
   ObservationStore>`) only.
 - A cargo-deny check (or equivalent) flags a future `overdrive-sim`
-  dependency creeping into other non-control-plane adapter-real
+  dependency creeping into other non-control-plane adapter-host
   crates — the sim crate is reachable from control-plane and
   xtask/dst, nowhere else.
 

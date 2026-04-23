@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted. 2026-04-21.
+Accepted. 2026-04-21. Amended 2026-04-23 — see **Amendment
+2026-04-23** below.
 
 ## Context
 
@@ -52,7 +53,9 @@ in each crate's `Cargo.toml`.
 The class values are a fixed enum:
 
 - `"core"` — ports + pure logic. Banned-API lint scans.
-- `"adapter-real"` — real adapter (implements a port with real I/O).
+- `"adapter-host"` — host adapter (implements a port against the host
+  OS / kernel / network with real I/O). Renamed from `"adapter-real"`
+  on 2026-04-23; see Amendment below.
 - `"adapter-sim"` — sim adapter (implements a port for DST; uses turmoil,
   StdRng, etc.).
 - `"binary"` — binary boundary (CLI, xtask).
@@ -79,7 +82,7 @@ crate_class = "core"
 
 # crates/overdrive-store-local/Cargo.toml
 [package.metadata.overdrive]
-crate_class = "adapter-real"
+crate_class = "adapter-host"
 
 # crates/overdrive-sim/Cargo.toml
 [package.metadata.overdrive]
@@ -105,7 +108,7 @@ a core crate without grepping the workspace root.
 ### Option B — Filesystem convention
 
 `crate_class = "core"` iff `crates/overdrive-core`-named. **Rejected.**
-Implicit labelling has no place to add new classes (`adapter-real`
+Implicit labelling has no place to add new classes (`adapter-host`
 vs `adapter-sim`) without either renaming crates or adding further
 regex rules. Naming is an organisational concern, not a contractual one.
 
@@ -141,7 +144,7 @@ See Decision above.
 - Slight duplication across crates (four classes listed in four places in
   Phase 1). Acceptable — the list grows linearly with crate count, not
   with code size.
-- A mistyped class value (`"adapter_real"` instead of `"adapter-real"`)
+- A mistyped class value (`"adapter_host"` instead of `"adapter-host"`)
   is not caught without a validating parser. Mitigated by a `FromStr`
   parser on the class enum inside xtask with an exhaustive error message.
 
@@ -150,6 +153,45 @@ See Decision above.
 - The mechanism scales naturally to future classes (`test-only`,
   `wasm-plugin`, etc.) without structural change.
 
+## Amendment 2026-04-23 — `adapter-real` renamed to `adapter-host`
+
+The `"adapter-real"` class value is renamed to `"adapter-host"`. The
+taxonomy shape (four classes, per-crate `package.metadata.overdrive.
+crate_class`, xtask-enforced declarations) is unchanged. Only the
+string value moves.
+
+Rationale:
+
+- **Symmetric vocabulary.** `adapter-host` vs `adapter-sim` is the
+  structural axis in the codebase — host-side bindings against the
+  OS / kernel / network vs simulated-host bindings against turmoil.
+  "Real vs fake" was DST-discourse framing, not an observable crate
+  property; "host vs sim" matches what the code actually is.
+- **Consistency with whitepaper.** The whitepaper already uses
+  host/guest vocabulary (§6 guest agent, §17 `vhost-user-fs`); the
+  class name now aligns.
+- **Co-landed crate extraction.** The same session extracted the
+  `overdrive-host` crate (holds `SystemClock`, `OsEntropy`,
+  `TcpTransport`) out of the `overdrive-sim::real::*` module that had
+  been parked behind a `real-adapters` Cargo feature. The new crate's
+  class name and the class value now share a word, which is the point.
+  The extraction itself is recorded in ADR-0016.
+
+Scope of the rename:
+
+- `xtask` taxonomy enum, `dst-lint` allow-list, allow-list failure
+  messages, and acceptance-test strings updated.
+- `crates/overdrive-host/Cargo.toml` and
+  `crates/overdrive-store-local/Cargo.toml` declare `crate_class =
+  "adapter-host"`.
+- Every doc referencing the class value (`CLAUDE.md`, `brief.md`,
+  ADR-0008, ADR-0012, `wave-decisions.md`) follows.
+- The `adapter-sim`, `core`, and `binary` values are unchanged.
+
+This is an in-place amendment, not a supersession: the labelling
+mechanism (per-crate metadata, every-crate-must-declare, etc.) stands
+unmodified. Only the string value of one enum variant changed.
+
 ## References
 
 - `docs/feature/phase-1-foundation/discuss/shared-artifacts-registry.md`
@@ -157,3 +199,5 @@ See Decision above.
 - `docs/feature/phase-1-foundation/discuss/user-stories.md` US-05
 - Cargo book: [Custom
   metadata](https://doc.rust-lang.org/cargo/reference/manifest.html#the-metadata-table)
+- ADR-0016 — `overdrive-host` crate extraction and `adapter-real` →
+  `adapter-host` rename.
