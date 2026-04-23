@@ -1533,6 +1533,7 @@ dependencies = [
  "time",
  "tokio",
  "trybuild",
+ "utoipa",
  "uuid",
 ]
 

@@ -115,7 +115,14 @@ impl Job {
 /// Input shape for `Job::from_spec`. The CLI deserialises TOML into this
 /// type; the server deserialises JSON into the same type; both route
 /// through the same constructor.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Carries `Serialize` / `Deserialize` so REST handlers and the CLI can
+/// reuse this type verbatim as the body / field shape for
+/// `POST /v1/jobs` and `GET /v1/jobs/{id}` (ADR-0014 §Shared types).
+/// Carries `utoipa::ToSchema` so the generated `OpenAPI` document
+/// (ADR-0009, `cargo xtask openapi-gen`) renders the spec shape
+/// consistently across the server and CLI lanes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct JobSpecInput {
     pub id: String,
     pub replicas: u32,
@@ -292,13 +299,13 @@ impl IntentKey {
     /// Canonical string form — `jobs/<JobId>`, `nodes/<NodeId>`, or
     /// `allocations/<AllocationId>`. Always succeeds: the byte buffer is
     /// UTF-8 by construction (see the struct-level docs).
+    ///
+    /// `expect` is the right idiom here: the buffer is built entirely
+    /// from a fixed ASCII prefix and the lowercased-ASCII output of
+    /// `validate_label`, so `from_utf8` cannot fail without violating a
+    /// type-system invariant the `id.rs` proptests pin.
+    #[allow(clippy::expect_used)]
     pub fn as_str(&self) -> &str {
-        // SAFETY-ish (no unsafe): the constructors only ever push ASCII
-        // bytes — a fixed prefix and a `Display` impl that emits the
-        // lowercased output of `validate_label`. `from_utf8` would only
-        // fail here if an invariant of `validate_label` were violated,
-        // which is covered by the id.rs proptests. `expect` is the right
-        // idiom for a type-system invariant the test suite pins.
         std::str::from_utf8(&self.0)
             .expect("IntentKey bytes are always valid UTF-8 by construction")
     }

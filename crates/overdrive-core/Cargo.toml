@@ -24,6 +24,14 @@ serde_json.workspace = true
 rkyv.workspace       = true
 bytecheck.workspace  = true
 
+# OpenAPI schema derivation — `JobSpecInput` carries `ToSchema` so
+# `overdrive-control-plane::api` can reuse it as the typed spec field in
+# `SubmitJobRequest` / `JobDescription` per ADR-0014 (shared types
+# between server and CLI) and ADR-0009 (utoipa-derived OpenAPI). utoipa
+# is not on the dst-lint banned-API list — it is a declarative
+# macro-derive crate with no runtime I/O.
+utoipa.workspace = true
+
 # Identifiers
 sha2.workspace = true
 hex.workspace  = true
