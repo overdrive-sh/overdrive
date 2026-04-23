@@ -13,6 +13,10 @@ publish.workspace       = true
 [package.metadata.overdrive]
 crate_class = "binary"
 
+[lib]
+name = "overdrive_cli"
+path = "src/lib.rs"
+
 [[bin]]
 name = "overdrive"
 path = "src/main.rs"
@@ -28,3 +32,9 @@ clap.workspace               = true
 tokio.workspace              = true
 tracing.workspace            = true
 tracing-subscriber.workspace = true
+
+[dev-dependencies]
+overdrive-control-plane.path = "../overdrive-control-plane"
+tempfile.workspace           = true
+base64.workspace             = true
+serde_yaml.workspace         = true

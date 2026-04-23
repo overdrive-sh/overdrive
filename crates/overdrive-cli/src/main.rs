@@ -4,75 +4,18 @@
 //! and error reporting, and hands off to library crates. Error handling
 //! uses `eyre` + `color-eyre` here because this is a binary boundary; the
 //! libraries below return typed `thiserror` enums.
+//!
+//! Per `crates/overdrive-cli/CLAUDE.md`, the argv surface lives in the
+//! `overdrive_cli::cli` library module so integration tests can invoke
+//! `Cli::try_parse_from(...)` in-process, without spawning `overdrive`
+//! as a subprocess.
 
 #![allow(clippy::expect_used)] // `expect` is the correct shape at bin boundaries.
 
-use clap::{Parser, Subcommand};
+use clap::Parser;
 use color_eyre::eyre::Result;
+use overdrive_cli::cli::Cli;
 use tracing_subscriber::EnvFilter;
-
-/// Overdrive — a next-generation workload orchestration platform.
-#[derive(Debug, Parser)]
-#[command(author, version, about, long_about = None)]
-struct Cli {
-    /// Control-plane endpoint (defaults to `OVERDRIVE_ENDPOINT` env var).
-    #[arg(long, env = "OVERDRIVE_ENDPOINT", default_value = "http://127.0.0.1:7001")]
-    endpoint: String,
-
-    #[command(subcommand)]
-    command: Command,
-}
-
-#[derive(Debug, Subcommand)]
-enum Command {
-    /// Job lifecycle — submit, list, stop.
-    #[command(subcommand)]
-    Job(JobCommand),
-
-    /// Node inspection.
-    #[command(subcommand)]
-    Node(NodeCommand),
-
-    /// Allocation inspection.
-    #[command(subcommand)]
-    Alloc(AllocCommand),
-
-    /// Cluster bootstrap and membership.
-    #[command(subcommand)]
-    Cluster(ClusterCommand),
-}
-
-#[derive(Debug, Subcommand)]
-enum JobCommand {
-    Submit {
-        #[arg(long)]
-        spec: std::path::PathBuf,
-    },
-    List,
-    Stop {
-        id: String,
-    },
-}
-
-#[derive(Debug, Subcommand)]
-enum NodeCommand {
-    List,
-}
-
-#[derive(Debug, Subcommand)]
-enum AllocCommand {
-    Status { id: String },
-}
-
-#[derive(Debug, Subcommand)]
-enum ClusterCommand {
-    Upgrade {
-        #[arg(long, value_parser = ["single", "ha"])]
-        mode: String,
-        #[arg(long, value_delimiter = ',')]
-        peers: Vec<String>,
-    },
-}
 
 fn main() -> Result<()> {
     color_eyre::install().expect("color-eyre installs once at startup");
