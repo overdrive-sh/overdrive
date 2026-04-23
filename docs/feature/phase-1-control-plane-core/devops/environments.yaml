@@ -1,0 +1,197 @@
+# Environment inventory — phase-1-control-plane-core DEVOPS wave.
+#
+# phase-1-control-plane-core is pure platform code (Rust library + axum
+# server binary + CLI + xtask). There is NO runtime deployment target
+# external to the developer's machine — Overdrive IS the orchestration
+# infrastructure; we do not ship it to a cloud service.
+#
+# This file retroactively fills the graceful-degradation gap flagged in
+# DISTILL DWD-12 ("DEVOPS wave had not run when DISTILL ran; default
+# environment matrix applied"). Every environment DISTILL assumed is
+# covered here. No environment is added that would retroactively
+# invalidate a DISTILL scenario.
+#
+# Cross-references:
+#   - docs/product/architecture/brief.md §12 (no external integrations)
+#   - docs/product/architecture/adr-0008-rest-openapi-transport.md
+#   - docs/product/architecture/adr-0010-phase-1-tls-bootstrap.md (server
+#     binds 127.0.0.1:7001 with rustls; no public endpoint)
+#   - docs/feature/phase-1-foundation/devops/environments.yaml (precedent
+#     — this file extends the same two-environment shape, does not
+#     replace it)
+#   - docs/feature/phase-1-control-plane-core/distill/wave-decisions.md
+#     DWD-01 (Strategy C — real local), DWD-12 (environment coverage)
+
+target_environments:
+  - name: ci
+    description: >-
+      GitHub Actions runner — the authoritative automated gate. Phase-1-
+      foundation's ci.yml and nightly.yml are extended (not replaced);
+      this feature adds exactly one new required status check
+      (`openapi-check`) on top of the existing five. The new
+      overdrive-control-plane crate, new workspace deps (axum,
+      axum-server, utoipa, utoipa-axum, libsql), and three new DST
+      invariants are picked up automatically by existing jobs — see
+      ci-cd-pipeline.md §"Coverage already handled without new jobs".
+    platform: [linux]
+    runner_class: ubuntu-latest
+    preconditions:
+      - "Rust stable toolchain pinned via rust-toolchain.toml"
+      - "sccache via mozilla-actions/sccache-action (warmed over PRs; soft-fail path preserved)"
+      - "Swatinem/rust-cache for cargo target cache (shared-key updated for openapi-check job)"
+      - "cargo-nextest installed via taiki-e/install-action (test + integration + mutants-diff jobs)"
+      - "cargo-mutants installed via taiki-e/install-action (mutants-diff job only)"
+      # New for this feature:
+      - "api/openapi.yaml checked into git at workspace root per ADR-0009"
+      - "xtask openapi-check subcommand wired to CI job (DELIVER populates)"
+    owned_by: "platform (DEVOPS)"
+    sla: "Critical-path PR check ≤ 15 minutes on warm cache (unchanged from phase-1-foundation)"
+
+  - name: dev-local
+    description: >-
+      Contributor laptop — where the walking-skeleton composition of
+      `overdrive cluster init` + `overdrive serve` + `overdrive job
+      submit` + `overdrive alloc status` actually runs end-to-end. The
+      server binds 127.0.0.1:7001 with an ephemeral in-process CA
+      (ADR-0010); there is no external host, no exposed port, no TLS
+      ceremony beyond what the binary mints on first boot. Acceptance
+      tests in `crates/overdrive-cli/tests/acceptance/` (ADR-0005 layout)
+      spawn the same subprocess composition in a `tempfile::TempDir`.
+    platform: [macos, linux, wsl]
+    runner_class: "Apple Silicon M-class MacBook Pro reference; Linux x86_64 secondary; Windows contributors via WSL2"
+    preconditions:
+      - "Rust stable toolchain via rustup + rust-toolchain.toml"
+      - "lefthook installed (brew install lefthook) and wired via `cargo xtask hooks install`"
+      - "cargo-nextest installed — `cargo install cargo-nextest --locked` or `brew install cargo-nextest`"
+      # New for this feature:
+      - "Write access to `$HOME/.overdrive/` — `cluster init` materialises the trust triple here per ADR-0010"
+      - "Free TCP port 7001 on loopback (or configurable via `overdrive serve --listen`)"
+      - "tempfile::TempDir availability — acceptance tests provision throwaway data dirs; no OS-level permission required beyond tmpdir write"
+    owned_by: "contributors (self-service)"
+    sla: >-
+      K1 DST wall-clock <60s on reference M-class laptop (inherits from
+      phase-1-foundation); CLI round-trip <100ms localhost per
+      DESIGN-wave-decisions §"Quality-attribute thresholds".
+
+coexistence_matrix:
+  - tool: lefthook
+    must_not_break: true
+    notes: >-
+      Existing pre-commit + pre-push hooks (fmt + clippy + doctest +
+      nextest-affected + toml-check + yaml-lima; pre-push nextest
+      full-workspace) continue to gate. The new overdrive-control-plane
+      crate is picked up automatically by the `nextest-affected` hook's
+      `rdeps(...)` filter — no lefthook.yml edit required. The crafter
+      must not introduce a new pre-commit stage for openapi-check —
+      that runs on PR only (too slow for pre-commit per skill <30s
+      budget).
+
+  - tool: cargo
+    must_not_break: true
+    notes: >-
+      Adding `overdrive-control-plane` to workspace members and five new
+      entries to `[workspace.dependencies]` (axum, axum-server, utoipa,
+      utoipa-axum, libsql) is additive. `cargo check --workspace` runs
+      implicitly before the existing `cargo nextest run --workspace
+      --locked` step in ci.yml — any resolution failure surfaces there
+      with no new job required.
+
+  - tool: cargo-nextest
+    must_not_break: true
+    notes: >-
+      The new overdrive-control-plane crate is picked up by the existing
+      `cargo nextest run --workspace --locked --profile ci` step without
+      edits. Acceptance tests under `crates/overdrive-cli/tests/
+      acceptance/*.rs` are discovered by nextest automatically.
+      Integration-gated tests (real server + tempdir + libsql) wire
+      through the existing `integration-tests` feature pattern per
+      testing.md §"Integration vs unit gating"; the `integration` CI
+      job runs `--features integration-tests -E 'binary(integration)'`
+      and will pick up any new `tests/integration/*.rs` the crafter
+      adds without further wiring.
+
+  - tool: cargo-mutants
+    must_not_break: true
+    notes: >-
+      `.cargo/mutants.toml` (phase-1-foundation) already excludes xtask,
+      aya-rs, generated code, tests, and benches. No updates required
+      for this feature — overdrive-control-plane is a new
+      adapter-host crate whose reconciler handlers, error mapping, and
+      libSQL provisioner are in-scope for diff-scoped mutation. The
+      ≥80% kill-rate gate applies unchanged.
+
+  - tool: xtask
+    must_not_break: true
+    notes: >-
+      Two new subcommands land in `xtask/src/main.rs` per ADR-0009:
+      `openapi-gen` (regenerates api/openapi.yaml) and `openapi-check`
+      (regenerates + diffs). DEVOPS names these and wires the CI job;
+      DELIVER implements the bodies. Existing `dst`, `dst-lint`,
+      `mutants`, `ci`, `lima`, `hooks`, `dev-setup`, `mcp`
+      subcommands unchanged.
+
+  - tool: "~/.overdrive/config"
+    must_not_break: true
+    notes: >-
+      ADR-0010's trust triple lands at `~/.overdrive/config` on first
+      `overdrive cluster init`. Acceptance tests MUST use
+      `XDG_CONFIG_HOME`-equivalent overrides (or a --config flag) to
+      avoid clobbering a contributor's real cluster. DISTILL §2.4
+      ("stale config") covers the stale-config case behaviourally.
+
+platform_coverage:
+  macOS:
+    - "Apple Silicon (primary local dev platform; all acceptance + DST + CLI round-trip tests green)"
+    - "Intel Mac — not blocked but unexercised; CI does not run on macOS"
+  Linux:
+    - "Ubuntu latest (GitHub Actions runner, ubuntu-latest)"
+    - "Any glibc-based distro for dev-local; rustls works unchanged"
+  Windows:
+    - "WSL2 only. Native Windows is not supported in Phase 1. The
+       axum+rustls server runs on Windows in principle, but phase-1-
+       foundation already scoped Phase 2+ eBPF dependencies to Linux, so
+       contributors standardise on WSL2 / Lima regardless."
+
+deployment_assumptions:
+  - "No runtime deployment target external to the contributor's machine.
+     The server binary is the walking skeleton; there is no production
+     host, no container registry, no deployment pipeline."
+  - "`cargo xtask openapi-check` is hermetic — it reads Rust types,
+     renders YAML, diffs against api/openapi.yaml. No network, no
+     external services."
+  - "Acceptance tests that spawn `overdrive serve` bind to an OS-chosen
+     free port (not hard-coded 7001) so parallel nextest runs do not
+     collide. The fixed 7001 in DISTILL is a *default* for manual
+     testing, not a test requirement — per Strategy C real-local
+     composition."
+  - "Every secret the CI workflow needs is a GitHub-native runtime
+     token (GITHUB_TOKEN for artifact upload; default automatic
+     permission). No AWS creds, LLM API keys, or paid-service tokens
+     enter the workflow for this feature."
+  - "Branch protection on `main` — phase-1-foundation documented the
+     `gh api` recipe. This feature adds `openapi-check` to the required-
+     check set; the recipe grows by exactly one entry. See
+     ci-cd-pipeline.md §Branch-protection delta."
+
+what_is_not_here:
+  # Explicit anti-inventory for skills / reviewers expecting cloud-native
+  # environments.
+  - "No staging environment — nothing to stage."
+  - "No production environment — nothing to run. The 'production
+     control plane' for this walking skeleton IS a contributor laptop
+     running `overdrive serve` against a `tempfile::TempDir`."
+  - "No container image, container registry, or image pipeline.
+     Overdrive ships as a single binary; Phase 1 has no packaging
+     target beyond `cargo build`."
+  - "No SLOs, no alerting, no dashboards. Per-wizard decision: Phase 1
+     instruments outcome KPIs via `tracing` spans only; DuckLake
+     ingestion is Phase 2+ (whitepaper §12). See kpi-instrumentation.md."
+  - "No external observability backend (Datadog, Grafana, Honeycomb,
+     OpenTelemetry collector). `tracing` subscriber is the only
+     telemetry surface in Phase 1."
+  - "No monitoring + alerting infrastructure — explicitly out of
+     scope per wizard decision. `kpi-instrumentation.md` names the
+     spans; nothing consumes them in Phase 1."
+  - "No continuous-learning / LLM-supervised canary — Phase 3+."
+  - "No infrastructure-integration artefact. brief.md §12 confirms zero
+     external integrations; nothing to integrate with."
