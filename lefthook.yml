@@ -84,6 +84,49 @@ pre-commit:
         done
       fail_text: |
         Doctest failed. Rustdoc examples are executable per development.md.
+    nextest-affected:
+      tags: [rust]
+      glob: "*.rs"
+      # Affected-tests smoke check at commit time. Walk up staged files
+      # to their owning crates, then run nextest with an `rdeps(...)`
+      # filter expression — which selects tests in those crates AND in
+      # every crate that transitively depends on them. Editing
+      # `overdrive-core` therefore reruns downstream acceptance tests,
+      # not just `overdrive-core`'s own. That's stronger than the
+      # per-crate scope clippy and doctest use above — nextest's filter
+      # DSL is the only thing in the toolchain that can express it.
+      #
+      # Rust has no file-level test-impact analysis, so crate-level is
+      # the best deterministic approximation. A touch to a foundational
+      # crate (e.g. `overdrive-core`) expands `rdeps` to most of the
+      # workspace — that's correct coverage, not a bug; the hook will
+      # take longer on those commits by design.
+      #
+      # Pre-push continues to run the full workspace suite as the
+      # gate. This is the smoke check.
+      run: |
+        set -euo pipefail
+        pkgs=$(for f in {staged_files}; do
+          d=$(dirname "$f")
+          while [ "$d" != "." ] && [ "$d" != "/" ]; do
+            if [ -f "$d/Cargo.toml" ] && grep -q '^\[package\]' "$d/Cargo.toml"; then
+              grep -m1 '^name[[:space:]]*=' "$d/Cargo.toml" | sed -E 's/.*"([^"]+)".*/\1/'
+              break
+            fi
+            d=$(dirname "$d")
+          done
+        done | sort -u)
+        if [ -z "$pkgs" ]; then
+          echo "nextest-affected: no owning crate resolved for staged files; skipping"
+          exit 0
+        fi
+        # Join crate names into `rdeps(c1) | rdeps(c2) | ...`.
+        filter=$(echo "$pkgs" | awk 'BEGIN{sep=""} {printf "%srdeps(%s)", sep, $0; sep=" | "}')
+        echo "nextest-affected: filter = $filter"
+        cargo nextest run -E "$filter"
+      fail_text: |
+        Affected tests failed. Pre-push runs the full suite — this
+        smoke check caught it earlier.
     toml-check:
       tags: [toml, fast]
       glob:
