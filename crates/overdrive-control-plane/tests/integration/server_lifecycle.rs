@@ -200,9 +200,13 @@ async fn all_adr_0008_paths_return_200_on_stub_router() {
 
     // Per ADR-0008 §Endpoints — GETs still route through the stub in
     // Phase 1 steps prior to their owning deliver step. Step 03-01
-    // replaces the `POST /v1/jobs` branch with the real handler; see
-    // the submit-side POST assertion below.
-    let gets = ["/v1/jobs/anything", "/v1/allocs", "/v1/nodes", "/v1/cluster/info"];
+    // replaced the `POST /v1/jobs` branch with the real handler; step
+    // 03-02 replaced `GET /v1/jobs/:id` with the real `describe_job`
+    // (which now returns 404 for an unknown id, not a stub 200). The
+    // remaining three GETs are still stubbed and owned by steps 03-03
+    // and 03-05. Describe happy-path + 404 coverage lives in
+    // `integration::describe_round_trip`.
+    let gets = ["/v1/allocs", "/v1/nodes", "/v1/cluster/info"];
     for path in gets {
         let url = format!("https://localhost:{}{path}", bound.port());
         let resp = client.get(&url).send().await.expect(&format!("GET {path}"));

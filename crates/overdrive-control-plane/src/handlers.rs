@@ -14,8 +14,9 @@
 //! scaffolds owned by subsequent deliver steps.
 
 use axum::Json;
-use axum::extract::State;
-use overdrive_core::aggregate::{IntentKey, Job};
+use axum::extract::{Path, State};
+use overdrive_core::aggregate::{IntentKey, Job, JobSpecInput};
+use overdrive_core::id::{ContentHash, JobId};
 use overdrive_core::traits::intent_store::IntentStore;
 
 use crate::AppState;
@@ -90,7 +91,18 @@ pub async fn submit_job(
 /// `GET /v1/jobs/{id}` — read via `IntentStore::get`, rkyv-access the
 /// bytes, recompute `spec_digest = ContentHash::of(archived_bytes)`.
 ///
-/// SCAFFOLD: true — owned by step 03-02.
+/// Canonical-hashing contract (ADR-0002 + development.md §Hashing):
+/// the `spec_digest` returned here is SHA-256 over the exact byte
+/// sequence we pulled out of the IntentStore — i.e. the rkyv-archived
+/// bytes of a validated `Job`. We deliberately do NOT re-canonicalise,
+/// do NOT route through JCS, and do NOT hash `serde_json::to_string(&job)`
+/// — any of those would break the byte-identity property the rest of
+/// the platform depends on.
+///
+/// 404 contract (ADR-0015 §3): `IntentStore::get -> Ok(None)` maps to
+/// `ControlPlaneError::NotFound { resource: <IntentKey::as_str()> }`,
+/// which `to_response` renders as HTTP 404 with an `ErrorBody { error:
+/// "not_found", ... }`.
 #[utoipa::path(
     get,
     path = "/v1/jobs/{id}",
@@ -104,8 +116,49 @@ pub async fn submit_job(
     ),
     tag = "jobs",
 )]
-pub async fn describe_job(_id: String) -> Result<api::JobDescription, ControlPlaneError> {
-    panic!("Not yet implemented -- RED scaffold")
+pub async fn describe_job(
+    State(state): State<AppState>,
+    Path(job_id_str): Path<String>,
+) -> Result<Json<api::JobDescription>, ControlPlaneError> {
+    // 1. Parse the path parameter through the JobId newtype. A malformed
+    //    identifier (non-ASCII, wrong length, bad charset) surfaces via
+    //    `AggregateError::Id(..)` → HTTP 400 through `IntoResponse`.
+    //    This is the same validation lane the submit path uses.
+    let job_id = JobId::new(&job_id_str).map_err(overdrive_core::aggregate::AggregateError::Id)?;
+
+    // 2. Derive the canonical intent key and read from the authoritative
+    //    store. Missing key → NotFound → HTTP 404.
+    //
+    //    The `NotFound` `resource` string uses `IntentKey::as_str()`
+    //    (the canonical `<prefix>/<id>` rendering) rather than
+    //    hand-formatting the literal here — doing the latter would
+    //    duplicate the job-prefix literal into a second production
+    //    file, which the `intent_key_canonical` grep-gate in
+    //    `overdrive-core` explicitly forbids.
+    let key = IntentKey::for_job(&job_id);
+    let bytes = state
+        .store
+        .get(key.as_bytes())
+        .await?
+        .ok_or_else(|| ControlPlaneError::NotFound { resource: key.as_str().to_owned() })?;
+
+    // 3. rkyv access + deserialise. Corruption / bit-rot in the redb
+    //    file surfaces here; it maps to HTTP 500 via `Internal`.
+    let archived = rkyv::access::<rkyv::Archived<Job>, rkyv::rancor::Error>(&bytes)
+        .map_err(|e| ControlPlaneError::Internal(format!("rkyv access of ArchivedJob: {e}")))?;
+    let job: Job = rkyv::deserialize::<Job, rkyv::rancor::Error>(archived)
+        .map_err(|e| ControlPlaneError::Internal(format!("rkyv deserialize of Job: {e}")))?;
+
+    // 4. Canonical spec_digest — SHA-256 of the exact archived bytes we
+    //    just read. This is what ADR-0002 calls "hash of canonical rkyv
+    //    bytes"; no re-archival, no re-canonicalisation.
+    let spec_digest = ContentHash::of(&bytes).to_string();
+
+    Ok(Json(api::JobDescription {
+        spec: JobSpecInput::from(&job),
+        commit_index: state.store.commit_index(),
+        spec_digest,
+    }))
 }
 
 /// `GET /v1/cluster/info` — mode, region, commit_index, reconciler

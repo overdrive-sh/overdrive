@@ -172,7 +172,7 @@ pub async fn run_server(config: ServerConfig) -> Result<ServerHandle, error::Con
     // `stub` until their owning steps land (03-02 … 03-05).
     let router = Router::new()
         .route("/v1/jobs", post(handlers::submit_job))
-        .route("/v1/jobs/:id", get(stub))
+        .route("/v1/jobs/:id", get(handlers::describe_job))
         .route("/v1/allocs", get(stub))
         .route("/v1/nodes", get(stub))
         .route("/v1/cluster/info", get(stub))

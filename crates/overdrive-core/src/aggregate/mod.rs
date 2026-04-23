@@ -130,6 +130,25 @@ pub struct JobSpecInput {
     pub memory_bytes: u64,
 }
 
+/// Reverse conversion — reconstruct the wire-shape `JobSpecInput` from a
+/// validated `Job` aggregate. Used by `describe_job` (ADR-0008 §GET
+/// /v1/jobs/{id}) to render the stored spec back onto the wire after
+/// rkyv access + deserialize.
+///
+/// Non-fallible by construction: every field in `JobSpecInput` is a
+/// projection of a field already validated by `Job::from_spec`. Cloning
+/// the `id` is cheap — `JobId::to_string()` is an owned ASCII string.
+impl From<&Job> for JobSpecInput {
+    fn from(job: &Job) -> Self {
+        Self {
+            id: job.id.to_string(),
+            replicas: job.replicas.get(),
+            cpu_milli: job.resources.cpu_milli,
+            memory_bytes: job.resources.memory_bytes,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Node aggregate
 // ---------------------------------------------------------------------------
