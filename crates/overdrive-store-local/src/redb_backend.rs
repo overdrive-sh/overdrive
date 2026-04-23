@@ -282,9 +282,18 @@ impl IntentStore for LocalStore {
     /// Replay a snapshot as the initial state of this `LocalStore`.
     ///
     /// Decodes the framed byte slice via [`snapshot_frame::decode`],
-    /// then writes every entry in a single redb write transaction so
-    /// partial bootstraps never appear to readers. Returns a typed
-    /// [`IntentStoreError::SnapshotImport`] on any frame-level
+    /// then, inside a single redb write transaction, clears every
+    /// pre-existing row before inserting the snapshot entries. Pre-
+    /// existing rows do NOT survive — the trait docstring specifies
+    /// that this replays a *full-state* snapshot as the initial state,
+    /// and preserving leftover keys would silently violate that
+    /// contract.
+    ///
+    /// The clear-then-insert sequence happens inside a single
+    /// `begin_write` / `commit` pair so the operation remains atomic:
+    /// concurrent readers observe either the pre-bootstrap state or
+    /// the fully-replayed state, never an intermediate view. Returns a
+    /// typed [`IntentStoreError::SnapshotImport`] on any frame-level
     /// corruption — step 03-03 covers the specific corruption
     /// scenarios.
     async fn bootstrap_from(&self, snapshot: StateSnapshot) -> Result<(), IntentStoreError> {
@@ -306,6 +315,12 @@ impl IntentStore for LocalStore {
             let write = inner.db.begin_write().map_err(map_transaction_error)?;
             {
                 let mut table = write.open_table(ENTRIES_TABLE).map_err(map_table_error)?;
+                // Drop every pre-existing row so bootstrap replaces
+                // state rather than merging into it. `retain` with a
+                // `false` predicate is redb's idiomatic full-table
+                // clear and keeps the whole operation inside the same
+                // write transaction as the subsequent inserts.
+                table.retain(|_, _| false).map_err(map_storage_error)?;
                 for (k, v) in &entries {
                     table.insert(k.as_ref(), v.as_ref()).map_err(map_storage_error)?;
                 }

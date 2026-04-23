@@ -88,3 +88,39 @@ async fn reopening_the_same_path_preserves_state() {
     let read = store.get(b"jobs/payments").await.expect("get");
     assert_eq!(read, Some(Bytes::copy_from_slice(b"durable")));
 }
+
+#[tokio::test]
+async fn bootstrap_from_replaces_rather_than_merges_into_existing_state() {
+    // The trait docstring describes `bootstrap_from` as replaying a
+    // *full-state* snapshot as the initial state of the target store.
+    // A merge semantics would silently corrupt that contract: a key
+    // that exists in the target but NOT in the snapshot would survive
+    // bootstrap, even though the snapshot's producer believed it was
+    // describing the complete cluster state.
+    let tmp = TempDir::new().expect("temp dir");
+
+    // Producer store: writes a single key we want preserved through
+    // bootstrap.
+    let producer_path = tmp.path().join("producer.redb");
+    let producer = LocalStore::open(&producer_path).expect("producer open");
+    producer.put(b"jobs/payments", b"from-producer").await.expect("producer put");
+    let snapshot = producer.export_snapshot().await.expect("export");
+
+    // Target store: seeded with a DIFFERENT key that must not survive
+    // bootstrap. Full-state semantics require this key be gone.
+    let target_path = tmp.path().join("target.redb");
+    let target = LocalStore::open(&target_path).expect("target open");
+    target.put(b"jobs/leftover", b"should-be-wiped").await.expect("target put");
+
+    target.bootstrap_from(snapshot).await.expect("bootstrap_from");
+
+    // The producer's key is visible.
+    let producer_value = target.get(b"jobs/payments").await.expect("get producer key");
+    assert_eq!(producer_value, Some(Bytes::copy_from_slice(b"from-producer")));
+
+    // The pre-existing target-only key is GONE. Without the clear
+    // step inside `bootstrap_from` this assertion fails — the leftover
+    // row would survive the snapshot replay.
+    let leftover = target.get(b"jobs/leftover").await.expect("get leftover");
+    assert_eq!(leftover, None, "bootstrap_from must replace, not merge");
+}
