@@ -1,22 +1,17 @@
 //! Intent-side aggregates — `Job`, `Node`, `Allocation`, `Policy`,
 //! `Investigation`.
 //!
-//! SCAFFOLD: true — created by DISTILL wave for phase-1-control-plane-core.
-//!
 //! Per ADR-0011, intent-side aggregates live here; observation-side row
 //! shapes live in `crate::traits::observation_store`. The two never merge.
 //!
-//! Every aggregate derives `rkyv::Archive + rkyv::Serialize +
-//! rkyv::Deserialize + serde::Serialize + serde::Deserialize`. Validating
-//! constructors return `Result<Self, AggregateError>`. Canonical hashing
-//! is `ContentHash::of(archived_bytes)` per whitepaper §4 and ADR-0002.
+//! Validating constructors return `Result<Self, AggregateError>`.
+//! Step 01-01 (delivered) lands the `Job` / `Node` / `Allocation`
+//! validating constructors and the `Resources`-deduplication invariant.
 //!
-//! The DELIVER crafter replaces every `panic!("Not yet implemented -- RED
-//! scaffold")` body below with the real implementation. The trait / struct
-//! shapes here match the signatures pinned by ADR-0011 and ADR-0014 so the
-//! acceptance scenarios in `docs/feature/phase-1-control-plane-core/distill/
-//! test-scenarios.md` can be translated to Rust `#[test]` functions without
-//! further API churn.
+//! Still scaffolded (RED — owned by later steps): `IntentKey::for_job` /
+//! `for_node` / `for_allocation` / `as_str`, rkyv/serde derives on the
+//! aggregate structs (step 01-03), and behavioural expansion of `Policy`
+//! and `Investigation` (Phase 2+).
 
 use std::num::NonZeroU32;
 
@@ -32,8 +27,6 @@ use crate::traits::driver::Resources;
 /// Errors produced by aggregate validating constructors. Per
 /// `development.md` typed-error discipline — variants are pass-through
 /// where appropriate and locally-defined otherwise.
-///
-/// SCAFFOLD: true
 #[derive(Debug, Error)]
 pub enum AggregateError {
     /// Scalar-field validation failure. `field` names the offending field
@@ -59,8 +52,6 @@ pub enum AggregateError {
 
 /// The intent-side Job aggregate. Carries the authoritative declaration
 /// of what the operator asked the platform to run.
-///
-/// SCAFFOLD: true
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Job {
     pub id: JobId,
@@ -73,17 +64,30 @@ impl Job {
     /// the intent-side `Job` aggregate. Every CLI handler and every
     /// server handler routes through here.
     ///
-    /// SCAFFOLD: true
-    pub fn from_spec(_spec: JobSpecInput) -> Result<Self, AggregateError> {
-        panic!("Not yet implemented -- RED scaffold")
+    /// Rejects zero replicas and zero-byte memory capacity; wraps
+    /// [`JobId`]'s `FromStr` error through `AggregateError::Id(..)` via
+    /// `#[from]`.
+    pub fn from_spec(spec: JobSpecInput) -> Result<Self, AggregateError> {
+        let JobSpecInput { id, replicas, cpu_milli, memory_bytes } = spec;
+        let id = JobId::new(&id)?;
+        let replicas = NonZeroU32::new(replicas).ok_or_else(|| AggregateError::Validation {
+            field: "replicas",
+            message: format!("replica count must be non-zero; got {replicas}"),
+        })?;
+        if memory_bytes == 0 {
+            return Err(AggregateError::Validation {
+                field: "memory_bytes",
+                message: "memory capacity must be non-zero".to_string(),
+            });
+        }
+        let resources = Resources { cpu_milli, memory_bytes };
+        Ok(Self { id, replicas, resources })
     }
 }
 
 /// Input shape for `Job::from_spec`. The CLI deserialises TOML into this
 /// type; the server deserialises JSON into the same type; both route
 /// through the same constructor.
-///
-/// SCAFFOLD: true
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JobSpecInput {
     pub id: String,
@@ -98,8 +102,6 @@ pub struct JobSpecInput {
 
 /// The intent-side Node aggregate. Carries a node's declared identity,
 /// region, and capacity envelope.
-///
-/// SCAFFOLD: true
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Node {
     pub id: NodeId,
@@ -110,15 +112,24 @@ pub struct Node {
 impl Node {
     /// Validating constructor. Rejects zero-memory capacity per US-01 AC.
     ///
-    /// SCAFFOLD: true
-    pub fn new(_spec: NodeSpecInput) -> Result<Self, AggregateError> {
-        panic!("Not yet implemented -- RED scaffold")
+    /// Wraps [`NodeId`] and [`Region`] `FromStr` errors through
+    /// `AggregateError::Id(..)` via `#[from]`.
+    pub fn new(spec: NodeSpecInput) -> Result<Self, AggregateError> {
+        let NodeSpecInput { id, region, cpu_milli, memory_bytes } = spec;
+        let id = NodeId::new(&id)?;
+        let region = Region::new(&region)?;
+        if memory_bytes == 0 {
+            return Err(AggregateError::Validation {
+                field: "memory_bytes",
+                message: "node capacity must not declare zero memory".to_string(),
+            });
+        }
+        let capacity = Resources { cpu_milli, memory_bytes };
+        Ok(Self { id, region, capacity })
     }
 }
 
 /// Input shape for `Node::new`.
-///
-/// SCAFFOLD: true
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NodeSpecInput {
     pub id: String,
@@ -133,8 +144,6 @@ pub struct NodeSpecInput {
 
 /// The intent-side Allocation aggregate. Links a Job and a Node through
 /// typed newtypes only — no raw String / u64 identifiers per US-01 AC.
-///
-/// SCAFFOLD: true
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Allocation {
     pub id: AllocationId,
@@ -144,18 +153,19 @@ pub struct Allocation {
 
 impl Allocation {
     /// Validating constructor. The `AllocationId` is typically freshly
-    /// minted by the caller; this constructor validates cross-field
-    /// consistency.
-    ///
-    /// SCAFFOLD: true
-    pub fn new(_spec: AllocationSpecInput) -> Result<Self, AggregateError> {
-        panic!("Not yet implemented -- RED scaffold")
+    /// minted by the caller; this constructor validates each newtype
+    /// parse via their `FromStr` impls, wrapping failures through
+    /// `AggregateError::Id(..)`.
+    pub fn new(spec: AllocationSpecInput) -> Result<Self, AggregateError> {
+        let AllocationSpecInput { id, job_id, node_id } = spec;
+        let id = AllocationId::new(&id)?;
+        let job_id = JobId::new(&job_id)?;
+        let node_id = NodeId::new(&node_id)?;
+        Ok(Self { id, job_id, node_id })
     }
 }
 
 /// Input shape for `Allocation::new`.
-///
-/// SCAFFOLD: true
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AllocationSpecInput {
     pub id: String,
