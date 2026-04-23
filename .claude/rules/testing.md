@@ -20,9 +20,201 @@ Gherkin-style scenarios may appear as GIVEN/WHEN/THEN blocks in
 `docs/feature/{id}/distill/test-scenarios.md` for specification purposes
 only — they are never parsed or executed. The crafter translates those
 scenarios into Rust integration tests in
-`crates/{crate}/tests/acceptance/*.rs` (or `tests/*.rs`) using
-`ScenarioBuilder`. Do NOT introduce cucumber-rs, pytest-bdd, conftest.py,
-or any `.feature` file consumer.
+`crates/{crate}/tests/acceptance/*.rs` (or `tests/*.rs`). Do NOT
+introduce cucumber-rs, pytest-bdd, conftest.py, or any `.feature` file
+consumer.
+
+---
+
+## Integration vs unit gating
+
+**Tests that touch real infrastructure MUST be gated behind an
+`integration-tests` feature on their owning crate.** "Real
+infrastructure" means anything outside the in-process pure-Rust
+fixture envelope:
+
+- Real filesystem I/O — opening real `redb` / `libSQL` / `sqlite`
+  files, writing to `tempfile::TempDir`, mmap'ing on-disk artifacts.
+- Real network — binding sockets, contacting localhost services,
+  spawning a real Corrosion peer, real Raft transport.
+- Real subprocesses — `Command::spawn`, `cargo run`, real Cloud
+  Hypervisor, real `wasmtime` outside the in-process API.
+- Real consensus / gossip — `RaftStore` with multiple peers, real
+  CR-SQLite LWW with multiple sites.
+- Heavy property-based suites — proptest invocations whose default
+  case count drives the per-test wall-clock past the 60s nextest
+  slow-test budget (e.g. 1024 cases × real redb roundtrip).
+
+The default unit/proptest suite covers in-process logic exclusively
+— `Sim*` traits, `LocalStore` against a tiny dataset, hand-picked
+proptest cases, trybuild compile-fail. Anything heavier moves out of
+the default lane.
+
+### Mechanics
+
+Add an opt-in feature to the owning crate's `Cargo.toml`:
+
+```toml
+[features]
+# Opt-in gate for slow / real-infra tests in this crate. Off by
+# default so `cargo nextest run --workspace` stays under the 60s
+# slow-test budget; CI exercises the gate in a dedicated
+# `integration` job.
+integration-tests = []
+```
+
+**Layout — integration tests live under `tests/integration/`.** All
+integration-shaped tests for a crate go in
+`crates/{crate}/tests/integration/<scenario>.rs`, wired through a
+single `crates/{crate}/tests/integration.rs` entrypoint:
+
+```
+crates/<crate>/tests/
+  integration.rs              # entrypoint, gates the whole binary
+  integration/
+    <scenario_a>.rs           # one file per scenario
+    <scenario_b>.rs
+```
+
+`tests/integration.rs` carries the feature gate at the top of the
+file; the per-scenario modules under `tests/integration/` inherit it
+and do not repeat the cfg attribute. **Submodules must be declared
+inside an inline `mod integration { … }` block** — Cargo treats each
+`tests/*.rs` file as a crate root, so a bare `mod foo;` resolves to
+`tests/foo.rs`, not `tests/integration/foo.rs`. The inline wrapper
+shifts the lookup base into the subdirectory. This is the same trick
+`tests/acceptance.rs` uses today.
+
+```rust
+// tests/integration.rs
+#![cfg(feature = "integration-tests")]
+
+mod integration {
+    mod <scenario_a>;
+    mod <scenario_b>;
+}
+```
+
+```rust
+// tests/integration/<scenario_a>.rs
+// (no cfg attribute — the entrypoint gates the whole binary)
+use proptest::prelude::*;
+// ... test code ...
+```
+
+The default `cargo nextest run` does not compile the entrypoint, so
+the per-scenario files are never reachable. CI runs a dedicated
+`integration` job that enables the feature explicitly via
+`--features <crate>/integration-tests`. Filter the slow lane with
+`-E 'binary(integration)'` so the unit suite is not re-run.
+
+**Why a dedicated subdirectory.** Plain `tests/<scenario>.rs` would
+work mechanically, but two adjacent files at `tests/` top level —
+one fast-and-default, one slow-and-gated — read the same to a
+reviewer and invite accidental ungating. The
+`tests/integration/<scenario>.rs` layout makes the lane visible at
+file-system level, mirrors the `tests/acceptance/<scenario>.rs`
+convention from ADR-0005, and gives the CI filter a single
+`binary(integration)` selector that does not need updating per
+scenario.
+
+### What stays in the default lane
+
+A test belongs in the default lane only if every one of these holds:
+
+- Runs in well under 60 seconds wall-clock on a developer laptop.
+- Performs no real I/O outside of in-memory sim traits.
+- Does not depend on subprocess spawning, real network sockets, or
+  real consensus / gossip.
+- Default proptest case count completes within the wall-clock budget
+  above (do NOT lower `PROPTEST_CASES` to dodge the budget — gate the
+  test instead).
+
+If a test outgrows the default lane (real infra creeps in, the
+proptest grows, etc.), move it under `integration-tests` immediately.
+Do not let a slow test sit in the default lane "until it gets fixed."
+
+### What this is NOT
+
+- Not a substitute for any of the four tiers above. Tier 1 (DST) is
+  still pure-Rust under sim traits and stays in the default lane.
+  Tier 2/3/4 still ship via `cargo xtask {bpf-unit,integration-test
+  vm,verifier-regress,xdp-perf}` — those wrappers own their own
+  scheduling.
+- Not "integration test" in the colloquial Rust sense (`tests/*.rs`).
+  Many `tests/*.rs` files are pure unit-shaped and stay in the
+  default lane. The gate is about *real infra*, not about file
+  location.
+
+---
+
+## Running tests — foreground, always
+
+> **The test runner is `cargo nextest run`. Not `cargo test`.**
+>
+> `cargo test` is **blocked** by a pre-tool hook
+> (`.claude/hooks/block-cargo-test.ts`) outside the one legitimate case:
+> `cargo test --doc ...` (nextest cannot execute doctests). Every other
+> shape — `cargo test`, `cargo test -p foo`, `cargo test --workspace`,
+> `cargo test -- <filter>` — is rejected at the tool-call boundary.
+>
+> **Rewrite your command before submitting it:**
+>
+> | ❌ don't | ✅ do |
+> |---|---|
+> | `cargo test` | `cargo nextest run` |
+> | `cargo test -p CRATE` | `cargo nextest run -p CRATE` |
+> | `cargo test -p CRATE --lib` | `cargo nextest run -p CRATE --lib` |
+> | `cargo test -p CRATE --test acceptance` | `cargo nextest run -p CRATE --test acceptance` |
+> | `cargo test --workspace --locked` | `cargo nextest run --workspace --locked` |
+> | `cargo test -- <filter>` | `cargo nextest run -E 'test(<filter>)'` |
+> | `cargo test -- --nocapture` | `cargo nextest run --no-capture` |
+> | `cargo test --features X` | `cargo nextest run --features X` |
+>
+> The **only** allowed `cargo test` is `cargo test --doc ...` for rustdoc
+> examples. Nothing else. If you think you need `cargo test` elsewhere,
+> you are wrong — reach for `cargo nextest run` instead.
+
+**Run test commands directly. Do not background them.**
+`cargo nextest run`, `cargo test --doc`, `cargo xtask dst`,
+`cargo xtask bpf-unit`, `cargo xtask integration-test`, and every other
+test invocation goes through the `Bash` tool with
+`run_in_background: false` (the default). Wait for the command to finish;
+read the full output in the tool result.
+
+**Runner: `cargo-nextest`.** The project-wide runner is
+[`cargo-nextest`](https://nexte.st). `cargo test` is reserved for
+*doctests only* — nextest does not execute them. Every nextest
+invocation in CI is paired with a `cargo test --doc` counterpart; in
+lefthook, doctests run scoped per-crate at *pre-commit* time (tight
+feedback for rustdoc examples), while the nextest suite runs at
+pre-push. Profile config lives in `.config/nextest.toml`.
+
+- **Do NOT** set `run_in_background: true` on a test command and then
+  poll with `tail`, `cat`, `wait`, or sleep loops against the output
+  file. Each poll burns a turn, the harness blocks long `sleep`s, and
+  you lose the structured output view that the direct tool result
+  gives you.
+- **Do NOT** redirect test output to a temp file and `tail` it. The
+  tool already captures stdout+stderr. Piping to `tail -N` in the
+  command itself is fine if you know you only want the last N lines —
+  but run it synchronously, not in the background.
+- **Prefer running only the affected tests.** Default to
+  `cargo nextest run -p <crate>` for the crate you changed, or
+  `cargo nextest run -p <crate> -E 'test(<filter>)'` for a specific
+  test. A whole-workspace run is the exception — reserve it for the
+  final pre-commit check or when a change crosses crate boundaries.
+- **Doctests are a separate step.** `cargo test --doc -p <crate>` when
+  you touch a rustdoc example; `cargo test --doc --workspace` before
+  push. Never rely on nextest to catch a broken doctest.
+- **Long-running suites are still foreground.** When a whole-workspace
+  run is genuinely warranted, set a `timeout` up to 600000ms (10 min)
+  and let it run. Minutes of waiting is cheaper than poll cycles that
+  each re-read context.
+- **The only exception** is a genuinely concurrent workflow — e.g. you
+  need to run the test while also editing unrelated files. Even then,
+  prefer to let the test finish first; backgrounding is rarely the
+  right tradeoff for a test run.
 
 ---
 
@@ -120,6 +312,189 @@ Four store modes. Use the narrowest that exercises the behaviour:
   are slower; reserve for the behaviour that requires real CR-SQLite LWW
   semantics).
 - `RaftStore` + real `CorrosionStore` — full-stack integration, sparing.
+
+---
+
+## Property-based testing (proptest)
+
+Complements Tier 1. DST catches bugs from concurrency, timing, ordering,
+and partition; proptest catches bugs from inputs the author didn't think
+of. Neither substitutes for the other.
+
+### Mandatory call sites
+
+- **Newtype roundtrip.** Every newtype's `Display` / `FromStr` / serde
+  must round-trip bit-equivalent for every valid input, and every invalid
+  input must be rejected by `FromStr` with a structured `ParseError`. See
+  `development.md` — Newtype completeness.
+- **rkyv roundtrip.** Archive → access → deserialise → equal-to-original
+  for every durable type crossing the IntentStore boundary.
+- **Snapshot roundtrip.** `IntentStore::export_snapshot` →
+  `bootstrap_from` → `export_snapshot` is bit-identical. The
+  non-destructive single → HA migration story depends on this.
+- **Hash determinism.** Any content hash under `development.md`'s
+  "Hashing requires deterministic serialization" rule — N permutations of
+  the same logical value must produce one hash.
+
+Reach for it elsewhere whenever a pure function's argument space exceeds
+a dozen hand-picked cases. If you find yourself enumerating `#[test]`
+bodies — "case 1, case 2, case 3, …" — the function wants a proptest
+instead.
+
+**Not for** concurrency, partition, or timing — that is Tier 1. Not for
+kernel attachment — that is Tier 3.
+
+### Rules
+
+- **Seed printed on failure.** Reproduce with
+  `PROPTEST_CASES=1 PROPTEST_REPLAY=<seed> cargo nextest run -E 'test(<name>)'`
+  (or `cargo test --doc <name>` if the failing case is a doctest).
+- **Shrink before filing.** Never file a bug against a raw failure — let
+  proptest minimise the counter-example first. Unshrunk reports hide the
+  actual trigger.
+- **Flaky proptest is a bug, not reality.** Same discipline as flaky DST:
+  fix the generator or the code under test; never "just rerun it."
+- **Generators live next to the types they produce.** `SpiffeId` owns its
+  `Arbitrary` impl; tests import it. Don't scatter ad-hoc generators
+  across crates.
+- **CI runs the default case count per PR** (`PROPTEST_CASES=1024`).
+  Per-release soaks run higher. Don't lower the default to dodge a slow
+  generator — fix the generator.
+
+---
+
+## Compile-fail testing (trybuild)
+
+Complements Tier 1 and proptest. DST perturbs schedules; proptest perturbs
+inputs; [`trybuild`](https://docs.rs/trybuild) proves **compile-time
+invariants** — that invalid code fails to compile with a predictable
+diagnostic. Used sparingly: only when a type-system property is
+load-bearing and the failure mode is "someone calls the wrong API with
+the wrong type."
+
+### Mandatory call sites
+
+- **Intent vs observation non-substitutability.** `&dyn IntentStore` must
+  NOT be usable where `&dyn ObservationStore` is expected, and vice
+  versa. Without a compile-fail test, a future refactor could blur the
+  two traits and nothing would catch it — the state-layer discipline
+  would silently erode. Lives under
+  `crates/overdrive-core/tests/compile_fail/`.
+- **Typed write surface.** `ObservationStore::write` takes
+  `ObservationRow`, not `&[u8]`. Passing an intent-class value (e.g. a
+  `JobSpec`) must fail to compile, not at runtime.
+
+Reach for it elsewhere only when the type system IS the invariant. If the
+check could be a `#[test]` assertion, prefer the `#[test]`.
+
+### Rules
+
+- **Check in the `.stderr` file** next to each fixture. The failure
+  output IS the assertion — flaky diagnostics are a bug in trybuild (pin
+  the version) or in your test (simplify the fixture).
+- **Pin trybuild exactly** (e.g. `trybuild = "=1.0.101"`). The stderr
+  format is sensitive to both rustc and trybuild itself; a floating
+  version breaks the check on every upstream release. Update the pin
+  deliberately, regenerate the `.stderr` files, review the diff.
+- **One invariant per fixture.** A file that fails for two reasons is a
+  flaky test — which reason fired is non-deterministic.
+- **Not for syntax errors or incidental type mismatches.** Reserve it for
+  deliberate type-system properties the project depends on.
+
+---
+
+## Mutation testing (cargo-mutants)
+
+Complements Tier 1 and proptest. DST perturbs **schedules**; proptest
+perturbs **inputs**; [`cargo-mutants`](https://mutants.rs) perturbs
+**code**. The question each answers is distinct:
+
+- DST: does the logic hold under every interleaving?
+- proptest: does the logic hold for every input?
+- mutants: do the tests actually assert on the thing that matters?
+
+A passing suite with weak assertions is indistinguishable from a strong
+one until mutants finds the blind spots. `cargo-mutants` applies small,
+targeted edits — flipping a boolean, swapping `<` for `<=`, replacing a
+function body with `Default`, erasing a match arm — and reruns the test
+suite per mutation. Outcomes:
+
+- **Caught** — at least one test failed. The mutation was killed.
+- **Missed** — every test passed despite the change. Either a test is
+  missing, or the existing tests don't assert on the changed behaviour.
+- **Timeout / unviable** — investigate; these are not freebies.
+
+### Mandatory targets
+
+Every merge into `main` must meet a **kill rate ≥ 80%** on the code below
+(matching the `nw-mutation-test` skill threshold). Missed mutations are
+reviewed per-PR, not aggregated across releases.
+
+- **Reconciler logic.** Every `reconcile(desired, actual, db) →
+  Vec<Action>` implementation. A missed mutation here means a behaviour
+  the suite does not actually defend.
+- **Policy verdict compilation.** Regorus input → BPF map bytes. A
+  mutation that changes the compiled verdict must fail a test, or the
+  "policy enforced" claim is unverified.
+- **Newtype `FromStr` and validators.** Every accept/reject branch must
+  have at least one test that flips on the mutation. Case-insensitivity,
+  canonical form, and structured `ParseError` variants are all mutation
+  targets.
+- **Hash determinism paths.** The rkyv-archive / JCS canonicalisation
+  code per `development.md` — mutations that change the hash output must
+  fail a test, otherwise the content-addressed ID story is hollow.
+- **Scheduler bin-pack.** Placement decisions and the constraint
+  evaluator. Mutations that swap `>` for `>=` in capacity checks are the
+  canonical bug shape this catches.
+- **`IntentStore::export_snapshot` / `bootstrap_from`.** Single → HA
+  migration correctness rides on this code; a missed mutation means the
+  roundtrip proptest isn't actually closing the loop.
+- **Workflow `run` bodies.** Replay-equivalence depends on each `await`
+  point producing the right action. A missed mutation on a `ctx` call
+  means the replay harness isn't pinning the trajectory.
+
+### Rules
+
+- **Scoped per PR.** `cargo xtask mutants --in-diff origin/main` runs
+  only mutations that overlap the PR diff. Full-corpus runs are nightly;
+  per-PR budget is tight.
+- **One-line skip with justification.** Use `// mutants: skip` above
+  blocks that are genuinely untestable (panic paths, trivial getters
+  wrapping opaque state, FFI shims). Every skip carries a comment
+  explaining *why* — an unjustified skip is a review rejection.
+- **Missed mutations are actionable, not aspirational.** A PR that
+  introduces a missed mutation either adds a test or documents the
+  reason inline. "We'll fix it later" is rejected.
+- **Flaky tests break mutation testing.** A test that sometimes fails
+  independent of the code under test marks every mutation as "caught" —
+  worse than missing them. Fix flaky tests *before* adding them to the
+  mutants run.
+- **Regression gate on direction, not just level.** Baseline kill rate
+  per crate is stored under `mutants-baseline/main/`. A drop > 2
+  percentage points fails the PR even if absolute kill rate is still
+  ≥ 80% — trend matters.
+
+### What it's NOT for
+
+- **`unsafe` blocks and `aya-rs` eBPF programs.** Mutations can produce
+  code the verifier rejects, masquerading as "caught." Tier 2 and Tier 3
+  cover these — do not run mutants against `crates/overdrive-bpf`.
+- **Async scheduling logic.** Mutations to `select!` arms or future
+  polling interact poorly with timing; DST is the right tool.
+- **Generated code.** `#[derive(...)]`, `build.rs` output, proc-macro
+  expansions — exclude by path in `.cargo/mutants.toml`.
+- **Performance assertions.** A mutation that removes an optimisation
+  may still pass correctness tests. Performance regressions are Tier 4's
+  job.
+- **`cargo xtask dst` / Tier 3 integration.** `cargo-mutants` reruns
+  the unit suite per mutation under `--test-tool=nextest` (matches the
+  project runner); DST and real-kernel tests are too slow for the
+  per-mutation budget and are excluded from the mutants run. Doctests
+  are also skipped by nextest and therefore by the mutants pass —
+  doctest coverage is verified by the paired `cargo test --doc` step,
+  not by mutation testing. This means mutation testing only covers
+  code reachable from the unit-level suite — another reason unit-level
+  invariants must be strong.
 
 ---
 
@@ -286,20 +661,24 @@ Tests and chaos share the fault definitions; a fault is specified once.
 
 ```
 Per-PR (critical path ≈ 15 minutes):
-  A  cargo test                          pure Rust, no BPF             (s)
+  A1 cargo nextest run --workspace       unit + proptest, no BPF       (s)
+  A2 cargo test --doc --workspace        rustdoc examples              (s)
   B  cargo xtask dst                     Tier 1                        (min)
   C  cargo xtask bpf-unit                Tier 2                        (min)
   D  cargo xtask integration-test vm     Tier 3, kernel matrix         (10 min)
   E  cargo xtask verifier-regress        Tier 4 — veristat             (min)
      cargo xtask xdp-perf                Tier 4 — xdp-bench            (min)
+  F  cargo xtask mutants --in-diff       diff-scoped (nextest per      (min)
+                                         mutation); kill rate ≥ 80%
 
 Nightly:
-  F  Tier 3 + Tier 4 against bpf-next                                  soft-fail
-  G  PREVAIL second-opinion analysis                                   soft-fail
-  H  Long-run fault-injection soak with random netem profiles
+  G  Tier 3 + Tier 4 against bpf-next                                  soft-fail
+  H  PREVAIL second-opinion analysis                                   soft-fail
+  I  cargo xtask mutants --workspace     full corpus; trend tracking
+  J  Long-run fault-injection soak with random netem profiles
 
 Per-release:
-  I  Full Tier 3 matrix on aarch64 (self-hosted Graviton runner)
+  K  Full Tier 3 matrix on aarch64 (self-hosted Graviton runner)
 ```
 
 ---
@@ -324,6 +703,16 @@ Explicitly out of scope:
 ```
 Logic bug under concurrency, timing, ordering, or partition?
     → Tier 1 (DST)
+
+Pure function whose argument space exceeds a dozen hand-picked cases?
+    → Property-based test (proptest)
+
+Type-system property that must hold at compile time (non-substitutable
+traits, banned parameter shapes)?
+    → trybuild compile-fail test
+
+Tests pass but not sure they actually assert on the behaviour?
+    → cargo-mutants — close the kill-rate gap
 
 eBPF program-level correctness against curated input?
     → Tier 2 (BPF unit)

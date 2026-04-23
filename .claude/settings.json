@@ -1,0 +1,23 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun run .claude/hooks/block-destructive-git.ts",
+            "timeout": 10,
+            "statusMessage": "Checking git command for destructive patterns..."
+          },
+          {
+            "type": "command",
+            "command": "bun run .claude/hooks/block-cargo-test.ts",
+            "timeout": 10,
+            "statusMessage": "Checking for `cargo test` (use `cargo nextest run`)..."
+          }
+        ]
+      }
+    ]
+  }
+}

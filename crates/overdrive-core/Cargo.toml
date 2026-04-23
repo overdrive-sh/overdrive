@@ -10,6 +10,9 @@ repository.workspace    = true
 homepage.workspace      = true
 publish.workspace       = true
 
+[package.metadata.overdrive]
+crate_class = "core"
+
 [lints]
 workspace = true
 
@@ -36,3 +39,17 @@ tokio.workspace       = true
 [dev-dependencies]
 proptest.workspace = true
 rstest.workspace   = true
+# Static scan of `src/**/*.rs` for the §2.3 API-shape invariant. Used only
+# by `tests/public_api_shape.rs` — never referenced from production code.
+syn.workspace      = true
+# Type-level separation between `IntentStore` and `ObservationStore`
+# (US-03 §4.4 / US-04) is a compile-time property. `trybuild` drives
+# `tests/compile_fail/*.rs` fixtures and asserts each produces the
+# expected compiler diagnostic. ADR-0001 row 24 approves this dev-dep.
+trybuild.workspace = true
+# The trybuild fixture under `tests/compile_fail/intent_vs_observation.rs`
+# constructs a real `LocalStore` via `LocalStore::open`, so the harness
+# needs the store crate on its compile graph.
+overdrive-store-local.path = "../overdrive-store-local"
+tempfile.workspace = true
+tokio              = { workspace = true }

@@ -1,0 +1,67 @@
+# SCAFFOLD: true — DISTILL placeholder per DWD-06. Crafter completes in place.
+#
+# `overdrive-sim` hosts the Sim* adapters, the turmoil harness, and the
+# invariant catalogue per ADR-0004 (single crate, not split). This file is
+# the minimum needed for `tests/acceptance/*.rs` to resolve the crate;
+# `[dependencies]` will grow during DELIVER to include `turmoil`, `rand`,
+# `async-trait`, and the `overdrive-core` / `overdrive-store-local`
+# workspace crates.
+
+[package]
+name        = "overdrive-sim"
+version     = "0.0.0"
+edition.workspace     = true
+rust-version.workspace = true
+license.workspace     = true
+authors.workspace     = true
+repository.workspace  = true
+publish               = false
+
+[package.metadata.overdrive]
+crate_class = "adapter-sim"
+
+[dependencies]
+overdrive-core.workspace = true
+async-trait.workspace    = true
+bytes.workspace          = true
+futures.workspace        = true
+tokio.workspace          = true
+parking_lot.workspace    = true
+tokio-stream.workspace   = true
+rand.workspace           = true
+thiserror.workspace      = true
+tempfile.workspace       = true
+overdrive-store-local    = { path = "../overdrive-store-local" }
+
+[features]
+# `real-adapters` gates a `real` module that ships minimal, mostly-unimplemented
+# real adapters (`SystemClock`, `TcpTransport`, `OsEntropy`, and stub real
+# Dataplane / Driver / LLM adapters) so that `overdrive-core`'s trait bounds
+# can be discharged somewhere the dst-lint gate will NOT flag. The `Real*`
+# types here are a temporary home — they move out to `overdrive-node` /
+# `overdrive-control-plane` once those crates exist (post-Phase-1). The crate
+# metadata below keeps `crate_class = "adapter-sim"` because dst-lint scans
+# the crate, not the module — the wiring-crate exemption is enforced at
+# crate granularity.
+real-adapters = []
+
+# `canary-bug` — TEST-ONLY feature that plants a deliberate LWW-convergence
+# break in `SimObservationStore` on the canary trigger seed (0xDEAD_BEEF).
+# Production builds MUST NEVER enable this feature. It exists so that the
+# WS-3 acceptance scenario (see `docs/feature/phase-1-foundation/distill/
+# test-scenarios.md` §1.3 and §7.2) can prove the harness catches real
+# bugs — an invariant suite that cannot go red is indistinguishable from an
+# empty suite. The gate is scoped to exactly one code path in
+# `adapters/observation_store.rs`; grep for `#[cfg(feature = "canary-bug")]`
+# to see the complete surface.
+canary-bug = []
+
+[dev-dependencies]
+# Crafter adds turmoil, proptest, and overdrive-store-local here during DELIVER.
+tokio    = { workspace = true }
+futures.workspace = true
+proptest.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

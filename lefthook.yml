@@ -16,8 +16,9 @@
 assert_lefthook_installed: true
 
 # ────────────────────────────────────────────────────────────────────────────
-# pre-commit — cheap, per-commit checks. Must stay under a few seconds on
-# a warm cache so developers keep it enabled.
+# pre-commit — fmt + clippy + cheap TOML/YAML validation. Clippy on a warm
+# cache is a few seconds; on a cold cache expect the first commit after a
+# `cargo clean` to take longer. Bypass with `git commit --no-verify`.
 # ────────────────────────────────────────────────────────────────────────────
 pre-commit:
   parallel: true
@@ -28,12 +29,104 @@ pre-commit:
     fmt:
       tags: [rust, fast]
       glob: "*.rs"
-      # rustfmt reads `rustfmt.toml` automatically. Checking the full
-      # workspace is faster than piping staged files individually, because
-      # it hits rustfmt's own parallelism.
-      run: cargo fmt --all -- --check
+      # rustfmt reads `rustfmt.toml` automatically. Check only the staged
+      # Rust files — fast even on large workspaces.
+      run: rustfmt --check --edition 2024 {staged_files}
       fail_text: |
         Formatting drift. Run: cargo fmt --all
+    clippy:
+      tags: [rust]
+      glob: "*.rs"
+      # Scope clippy to only the crates that contain staged Rust files.
+      # Clippy is crate-level (not file-level), so we walk up from each
+      # staged file to its owning Cargo.toml, dedupe, and run clippy
+      # once per affected package.
+      run: |
+        set -euo pipefail
+        pkgs=$(for f in {staged_files}; do
+          d=$(dirname "$f")
+          while [ "$d" != "." ] && [ "$d" != "/" ]; do
+            if [ -f "$d/Cargo.toml" ] && grep -q '^\[package\]' "$d/Cargo.toml"; then
+              grep -m1 '^name[[:space:]]*=' "$d/Cargo.toml" | sed -E 's/.*"([^"]+)".*/\1/'
+              break
+            fi
+            d=$(dirname "$d")
+          done
+        done | sort -u)
+        for p in $pkgs; do
+          cargo clippy -p "$p" --all-targets -- -D warnings
+        done
+      fail_text: |
+        Clippy warnings. Fix or `#[allow]` with justification.
+    doctest:
+      tags: [rust]
+      glob: "*.rs"
+      # Doctests run pre-commit, not pre-push — rustdoc examples are
+      # per `.claude/rules/development.md` §Documentation and break
+      # cheaply, so catch them at commit time. Scoped per-crate (same
+      # walk-up pattern as clippy) to keep the hook fast on focused
+      # commits. Nextest does not run doctests, so this step is the
+      # only place they get executed before CI.
+      run: |
+        set -euo pipefail
+        pkgs=$(for f in {staged_files}; do
+          d=$(dirname "$f")
+          while [ "$d" != "." ] && [ "$d" != "/" ]; do
+            if [ -f "$d/Cargo.toml" ] && grep -q '^\[package\]' "$d/Cargo.toml"; then
+              grep -m1 '^name[[:space:]]*=' "$d/Cargo.toml" | sed -E 's/.*"([^"]+)".*/\1/'
+              break
+            fi
+            d=$(dirname "$d")
+          done
+        done | sort -u)
+        for p in $pkgs; do
+          cargo test --doc -p "$p"
+        done
+      fail_text: |
+        Doctest failed. Rustdoc examples are executable per development.md.
+    nextest-affected:
+      tags: [rust]
+      glob: "*.rs"
+      # Affected-tests smoke check at commit time. Walk up staged files
+      # to their owning crates, then run nextest with an `rdeps(...)`
+      # filter expression — which selects tests in those crates AND in
+      # every crate that transitively depends on them. Editing
+      # `overdrive-core` therefore reruns downstream acceptance tests,
+      # not just `overdrive-core`'s own. That's stronger than the
+      # per-crate scope clippy and doctest use above — nextest's filter
+      # DSL is the only thing in the toolchain that can express it.
+      #
+      # Rust has no file-level test-impact analysis, so crate-level is
+      # the best deterministic approximation. A touch to a foundational
+      # crate (e.g. `overdrive-core`) expands `rdeps` to most of the
+      # workspace — that's correct coverage, not a bug; the hook will
+      # take longer on those commits by design.
+      #
+      # Pre-push continues to run the full workspace suite as the
+      # gate. This is the smoke check.
+      run: |
+        set -euo pipefail
+        pkgs=$(for f in {staged_files}; do
+          d=$(dirname "$f")
+          while [ "$d" != "." ] && [ "$d" != "/" ]; do
+            if [ -f "$d/Cargo.toml" ] && grep -q '^\[package\]' "$d/Cargo.toml"; then
+              grep -m1 '^name[[:space:]]*=' "$d/Cargo.toml" | sed -E 's/.*"([^"]+)".*/\1/'
+              break
+            fi
+            d=$(dirname "$d")
+          done
+        done | sort -u)
+        if [ -z "$pkgs" ]; then
+          echo "nextest-affected: no owning crate resolved for staged files; skipping"
+          exit 0
+        fi
+        # Join crate names into `rdeps(c1) | rdeps(c2) | ...`.
+        filter=$(echo "$pkgs" | awk 'BEGIN{sep=""} {printf "%srdeps(%s)", sep, $0; sep=" | "}')
+        echo "nextest-affected: filter = $filter"
+        cargo nextest run -E "$filter"
+      fail_text: |
+        Affected tests failed. Pre-push runs the full suite — this
+        smoke check caught it earlier.
     toml-check:
       tags: [toml, fast]
       glob:
@@ -63,8 +156,9 @@ pre-commit:
         Lima template invalid. See output above.
 
 # ────────────────────────────────────────────────────────────────────────────
-# pre-push — the full CI pipeline locally before it lands on a runner.
-# Slow-but-thorough; `--no-verify` is the escape hatch for WIP branches.
+# pre-push — run the test suite. fmt + clippy already ran pre-commit;
+# GitHub Actions is the authoritative gate for everything else.
+# `--no-verify` is the escape hatch for WIP branches.
 # ────────────────────────────────────────────────────────────────────────────
 pre-push:
   parallel: false
@@ -72,12 +166,21 @@ pre-push:
     - merge
     - rebase
   commands:
-    ci:
-      # Mirrors `.github/workflows/ci.yml` — fmt-check + clippy -D warnings + test.
-      run: cargo xtask ci
+    # Unit + integration + proptest via nextest. `cargo-nextest` must be
+    # installed locally — run `cargo xtask dev-setup` once per clone, or
+    # install manually via `cargo install cargo-nextest --locked` /
+    # `brew install cargo-nextest`. See `.config/nextest.toml` for the
+    # profile definitions.
+    #
+    # Doctests are not re-run here — they run scoped per-crate in the
+    # pre-commit hook above, which catches broken rustdoc examples at
+    # commit time.
+    nextest:
+      run: cargo nextest run --workspace
       fail_text: |
-        `cargo xtask ci` failed. Fix the reported issue or push with
-        --no-verify if you're publishing a WIP branch for backup.
+        Tests failed. Fix or push with --no-verify for a WIP branch.
+        If `cargo-nextest` is not installed, run:
+          cargo xtask dev-setup
 
 # ────────────────────────────────────────────────────────────────────────────
 # commit-msg — placeholder. Enable when we pick a convention

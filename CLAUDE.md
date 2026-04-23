@@ -1,5 +1,9 @@
 Read the entire @docs/whitepaper.md file
 
+## Development Paradigm
+
+This project follows the **object-oriented** paradigm. Use @nw-software-crafter for implementation.
+
 ## Rust library conventions
 
 Every library crate that defines its own error type also exposes a matching
@@ -24,3 +28,11 @@ Usage:
 This keeps the typed-error discipline from `.claude/rules/development.md`
 intact while removing the noise of repeating the error type at every call
 site.
+
+## Mutation Testing Strategy
+
+This project uses **per-feature** mutation testing. Per-PR runs are diff-scoped via `cargo mutants --in-diff origin/main` with a kill-rate gate of ≥80%. A nightly job runs the full workspace against the baseline in `mutants-baseline/main/` to catch drift. Mutations to `unsafe` blocks, `aya-rs` eBPF programs, generated code, and async scheduling logic are excluded per `.claude/rules/testing.md`.
+
+## Roadmap validator warnings
+
+`des.cli.roadmap validate` flags length-limit warnings (`STEP_NAME_TOO_LONG`, `CRITERIA_TOO_LONG`, `DESCRIPTION_TOO_LONG`) that are cosmetic and non-blocking — the validator exits 0 anyway. Overdrive roadmap ACs deliberately carry scenario-level specificity (test names, invariant names, proptest targets, kill-rate thresholds), and tightening them to the defaults would lose traceability. Ignore these warnings; do not ask the crafter to trim them.

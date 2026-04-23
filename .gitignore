@@ -2,6 +2,9 @@
 /target/
 **/*.rs.bk
 
+mutants.out/
+mutants.out.old/
+
 # IDE
 .idea/
 .vscode/
@@ -23,3 +26,10 @@ tarpaulin-report.html
 # Lefthook — per-dev overrides
 lefthook-local.yml
 .lefthook-local.yml
+
+# Secrets — xtask mcp setup writes .mcp.json from .env
+.env
+.mcp.json
+
+# Bun / TS tooling for scripts/
+/node_modules/

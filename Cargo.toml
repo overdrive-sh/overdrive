@@ -3,6 +3,8 @@ resolver = "3"
 members = [
     "crates/overdrive-core",
     "crates/overdrive-cli",
+    "crates/overdrive-sim",
+    "crates/overdrive-store-local",
     "xtask",
 ]
 
@@ -71,9 +73,11 @@ tracing-error       = "0.2"
 
 # --- DST ------------------------------------------------------------------
 turmoil         = "0.6"
+rand            = "0.8"
 
 # --- Utilities ------------------------------------------------------------
 bytes           = "1"
+dotenvy         = "0.15"
 uuid            = { version = "1", features = ["v4", "v7", "serde"] }
 time            = { version = "0.3", features = ["serde", "macros"] }
 base64          = "0.22"
@@ -84,6 +88,15 @@ url             = { version = "2", features = ["serde"] }
 proptest        = "1"
 rstest          = "0.23"
 insta           = "1"
+syn             = { version = "2", features = ["full", "visit", "extra-traits"] }
+tempfile        = "3"
+# `trybuild` is pinned for stable stderr diagnostics across rustc bumps —
+# the pin is relaxed when the compiler output changes and the expected
+# `.stderr` fixtures are regenerated with `TRYBUILD=overwrite`.
+trybuild        = "=1.0.101"
+
+# --- Async streams --------------------------------------------------------
+tokio-stream    = { version = "0.1", features = ["sync"] }
 
 # --- Internal workspace crates -------------------------------------------
 overdrive-core = { path = "crates/overdrive-core" }

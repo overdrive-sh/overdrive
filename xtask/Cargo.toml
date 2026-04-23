@@ -10,6 +10,10 @@ repository.workspace    = true
 homepage.workspace      = true
 publish.workspace       = true
 
+[lib]
+name = "xtask"
+path = "src/lib.rs"
+
 [[bin]]
 name = "xtask"
 path = "src/main.rs"
@@ -17,7 +21,36 @@ path = "src/main.rs"
 [lints]
 workspace = true
 
+[features]
+# Opt-in gate for xtask's integration-test binaries
+# (`tests/acceptance.rs` and `tests/dst_lint_self_test.rs`). The DST
+# canary suite spawns `cargo run -p xtask --features
+# overdrive-sim/canary-bug` as a subprocess with a fresh
+# `CARGO_TARGET_DIR` per test (full workspace recompile per run), and
+# the twin-run proptest boots a 3-host harness 32 times. Off by default
+# so `cargo nextest run --workspace` stays fast; enable with
+# `--features xtask/integration-tests` (or `-p xtask --features
+# integration-tests`) when you want to exercise them.
+integration-tests = []
+
+[package.metadata.overdrive]
+crate_class = "binary"
+
 [dependencies]
 eyre.workspace       = true
 color-eyre.workspace = true
 clap.workspace       = true
+serde.workspace      = true
+serde_json.workspace = true
+dotenvy.workspace    = true
+syn.workspace        = true
+rand.workspace       = true
+overdrive-sim        = { path = "../crates/overdrive-sim" }
+# `span-locations` enables `Span::start()`/`end()` — required so
+# dst-lint can report `file:line:col` for each violation.
+proc-macro2          = { version = "1", features = ["span-locations"] }
+cargo_metadata       = "0.18"
+
+[dev-dependencies]
+proptest.workspace = true
+tempfile.workspace = true

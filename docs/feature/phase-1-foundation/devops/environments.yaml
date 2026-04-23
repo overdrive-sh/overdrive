@@ -1,0 +1,115 @@
+# Environment inventory — phase-1-foundation DEVOPS wave.
+#
+# Phase 1 is a Rust library + CLI + xtask project. There is NO runtime
+# deployment target. The only "environments" that matter are:
+#
+#   - `ci`          — the GitHub Actions runner (the authoritative gate)
+#   - `dev-local`   — a contributor laptop (must match K1: <60s DST)
+#
+# Cross-references:
+#   - docs/product/architecture/brief.md §12 — "Phase 1 has no external
+#     integrations."
+#   - docs/feature/phase-1-foundation/design/upstream-changes.md — K4
+#     reframed: LocalStore density is a Phase 2+ commercial guardrail, not
+#     a Phase 1 CI gate.
+#   - docs/feature/phase-1-foundation/distill/wave-decisions.md DWD-01
+#     (Strategy C: real local adapters; no paid externals; no mocks).
+
+target_environments:
+  - name: ci
+    description: >-
+      GitHub Actions runner — the authoritative automated gate. Runs the
+      five required status checks (fmt-clippy, test, dst, dst-lint,
+      mutants-diff) on every PR against main.
+    platform: [linux]
+    runner_class: ubuntu-latest
+    preconditions:
+      - "Rust stable toolchain pinned via rust-toolchain.toml"
+      - "sccache via mozilla-actions/sccache-action (warmed over PRs)"
+      - "Swatinem/rust-cache for cargo target cache"
+      - "cargo-mutants installed via taiki-e/install-action for mutants-diff job"
+    owned_by: "platform (DEVOPS)"
+    sla: "Critical-path PR check ≤ 15 minutes on warm cache"
+
+  - name: dev-local
+    description: >-
+      Contributor laptop — the K1 wall-clock measurement surface. Lefthook
+      pre-commit + pre-push hooks mirror the CI commit stage (fmt + clippy
+      + test). `cargo xtask dst` produces the same artifacts locally as in
+      CI.
+    platform: [macos, linux]
+    runner_class: "Apple Silicon M-class MacBook Pro reference; Linux x86_64 secondary"
+    preconditions:
+      - "Rust stable toolchain via rustup + rust-toolchain.toml"
+      - "lefthook installed (brew install lefthook) and wired via `cargo xtask hooks install`"
+      - "Optional: Lima VM for Linux-specific builds (via `cargo xtask lima`)"
+    owned_by: "contributors (self-service)"
+    sla: "K1: `cargo xtask dst` completes green in <60s on reference M-class laptop"
+
+coexistence_matrix:
+  - tool: lefthook
+    must_not_break: true
+    notes: >-
+      Lefthook hooks (lefthook.yml) are installed locally for every
+      contributor. The CI workflow MUST run the same checks that pre-commit
+      runs (`cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`)
+      so drift between "passed my commit" and "passed CI" is structurally
+      impossible. Changes to one require the other be kept in sync.
+
+  - tool: xtask
+    must_not_break: true
+    notes: >-
+      `cargo xtask dst` and `cargo xtask dst-lint` are the ONLY canonical
+      invocations for the DST pipeline per ADR-0006. CI never calls
+      `cargo test --features dst` directly — only through the xtask
+      wrapper, because the wrapper owns seed generation, first-line seed
+      printing, and artifact file writing.
+
+  - tool: rust-toolchain.toml
+    must_not_break: true
+    notes: >-
+      Stable channel, pinned in rust-toolchain.toml. CI and local use the
+      same toolchain via dtolnay/rust-toolchain@stable honouring the
+      repo's pin.
+
+platform_coverage:
+  macOS:
+    - "Apple Silicon (Phase 1 primary local dev platform)"
+  Linux:
+    - "Ubuntu latest (GitHub Actions runner, ubuntu-latest)"
+  Windows:
+    - "Not supported in Phase 1. `aya` / eBPF dependencies (declared in
+       workspace Cargo.toml for Phase 2) are Linux-only. Contributors on
+       Windows must use WSL2 or the Lima VM path."
+
+deployment_assumptions:
+  - "`cargo xtask dst` is hermetic — no network, no external services, no
+    credentials. Reproducible from a u64 seed."
+  - "Workflow runs are idempotent and safe to re-trigger. The xtask
+    wrapper regenerates target/xtask/dst-output.log and dst-summary.json
+    on every run; no persistent state is written outside the target
+    directory."
+  - "Artifact paths (target/xtask/dst-output.log, target/xtask/dst-summary.json)
+    are relative to the repo root and land inside $CARGO_TARGET_DIR when
+    set. CI relies on the default (`./target/`) — if CARGO_TARGET_DIR
+    is ever overridden in CI, the artifact-upload path in ci.yml must be
+    updated in lockstep."
+  - "There is NO runtime deployment target. `cargo publish` to crates.io
+    is a future concern; Phase 1 ships zero published crates."
+  - "Branch protection on `main` is a GitHub Settings config that is
+    OUT of the workflow file itself — the user configures this once; see
+    ci-cd-pipeline.md §Branch-protection config."
+
+what_is_not_here:
+  # Explicit anti-inventory for skills / reviewers expecting cloud-native
+  # environments.
+  - "No staging environment — nothing to stage."
+  - "No production environment — nothing to run."
+  - "No container registry, image pipeline, or artifact store beyond
+     GitHub Actions workflow artifacts (30-day retention for DST, 14-day
+     for mutants)."
+  - "No observability backend (Datadog, Grafana, Honeycomb, etc.). Per
+     the user's DEVOPS-wave direction: `xtask dst` produces seed +
+     summary.json; that is the only telemetry in Phase 1."
+  - "No monitoring, alerting, or SLO dashboards. Phase 2+ introduces the
+     control-plane process the whitepaper §12 telemetry applies to."

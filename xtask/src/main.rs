@@ -25,6 +25,20 @@ enum Task {
         /// Seed for reproducible runs. Defaults to a fresh random seed.
         #[arg(long)]
         seed: Option<u64>,
+        /// Run exactly one invariant by its canonical kebab-case name.
+        /// Unknown names fail fast before the harness is built.
+        #[arg(long)]
+        only: Option<String>,
+    },
+
+    /// Tier 1 — banned-API lint gate over `crate_class = "core"` crates.
+    /// See `docs/product/architecture/adr-0003-core-crate-labelling.md`
+    /// and `.claude/rules/development.md`.
+    DstLint {
+        /// Path to the workspace `Cargo.toml` to scan. Defaults to the
+        /// enclosing workspace root (cwd-relative).
+        #[arg(long, default_value = "Cargo.toml")]
+        manifest_path: std::path::PathBuf,
     },
 
     /// Tier 2 — BPF unit tests via `BPF_PROG_TEST_RUN`.
@@ -43,6 +57,20 @@ enum Task {
     /// Tier 4 — XDP throughput / p99 regression (`xdp-bench`).
     XdpPerf,
 
+    /// Mutation testing (`cargo-mutants`) — diff-scoped per PR or
+    /// full-workspace (nightly).
+    ///
+    /// Exactly one of `--diff` or `--workspace` must be given. Both
+    /// write `target/xtask/mutants-summary.json` with the gate verdict
+    /// and kill-rate figures; exit status is zero iff the gate passed.
+    ///
+    /// Thresholds match `.claude/rules/testing.md`:
+    ///
+    /// - `--diff`: kill rate ≥ 80% (hard fail below).
+    /// - `--workspace`: kill rate ≥ 60% absolute floor (hard fail);
+    ///   drift ≤ -2pp vs. baseline is a soft-warn.
+    Mutants(MutantsArgs),
+
     /// Lint + format check (mirrors CI).
     Ci,
 
@@ -57,6 +85,73 @@ enum Task {
     Hooks {
         #[command(subcommand)]
         action: HooksAction,
+    },
+
+    /// One-shot developer bootstrap: installs the CLI tools this
+    /// workspace depends on (cargo-nextest), runs `lefthook install`
+    /// when lefthook is present, and prints install hints for anything
+    /// that cannot be auto-installed.
+    ///
+    /// Idempotent — running it against an already-set-up checkout is a
+    /// no-op modulo the `lefthook install` step (which itself is a
+    /// no-op when the hooks are already wired).
+    ///
+    /// Rationale: Cargo has no `[tool-deps]` concept, so the canonical
+    /// way to pin the project's tool versions is to treat "install the
+    /// tools" as a repo artifact. This subcommand IS that artifact.
+    DevSetup,
+
+    /// Manage MCP server configuration for this project (`.mcp.json`).
+    ///
+    /// Claude Code does not expand environment variables inside `.mcp.json`,
+    /// so secrets must be materialised at setup time. This subcommand reads
+    /// the required tokens from the process environment (or a local `.env`)
+    /// and writes a ready-to-use `.mcp.json` at the workspace root.
+    Mcp {
+        #[command(subcommand)]
+        action: McpAction,
+    },
+}
+
+#[derive(Debug, Parser)]
+#[command(
+    about = "Mutation testing (cargo-mutants) — diff or workspace mode",
+    long_about = "Exactly one of --diff or --workspace must be given. Writes \
+                  target/xtask/mutants-summary.json; exit status is zero iff \
+                  the gate passed (≥80% kill rate for --diff; ≥60% absolute \
+                  floor for --workspace, with drift ≤ -2pp as a soft-warn)."
+)]
+struct MutantsArgs {
+    /// Diff-scoped: git ref to diff against (e.g. `origin/main`).
+    /// Produces a diff file and passes it to `cargo mutants --in-diff`.
+    #[arg(long, group = "mutants_mode", value_name = "BASE_REF")]
+    diff: Option<String>,
+
+    /// Full-workspace mode. Compares the run against the baseline at
+    /// the path given by `--baseline` (default:
+    /// `mutants-baseline/main/kill_rate.txt`).
+    #[arg(long, group = "mutants_mode")]
+    workspace: bool,
+
+    /// Path to the stored baseline kill rate for `--workspace`
+    /// (percent as a float, e.g. `75.0`). Seeded if missing.
+    #[arg(
+        long,
+        value_name = "BASELINE_PATH",
+        default_value = "mutants-baseline/main/kill_rate.txt",
+        requires = "workspace"
+    )]
+    baseline: std::path::PathBuf,
+}
+
+#[derive(Debug, Clone, Copy, Subcommand)]
+enum McpAction {
+    /// Render `.mcp.json` from the built-in template, injecting tokens
+    /// from the process environment or `.env` at the workspace root.
+    Setup {
+        /// Overwrite an existing `.mcp.json` without prompting.
+        #[arg(long)]
+        force: bool,
     },
 }
 
@@ -118,17 +213,166 @@ fn main() -> ExitCode {
 
 fn run() -> Result<()> {
     match Args::parse().cmd {
-        Task::Dst { seed } => dst(seed),
+        Task::Dst { seed, only } => xtask::dst::run(seed, only.as_deref()),
+        Task::DstLint { manifest_path } => xtask::dst_lint::run(&manifest_path),
         Task::BpfUnit => bpf_unit(),
         Task::IntegrationTest { scope } => match scope {
             IntegrationScope::Vm { cache_dir, kernels } => integration_vm(&cache_dir, &kernels),
         },
         Task::VerifierRegress => verifier_regress(),
         Task::XdpPerf => xdp_perf(),
+        Task::Mutants(args) => mutants(args),
         Task::Ci => ci(),
         Task::Lima { action } => lima(action),
         Task::Hooks { action } => hooks(action),
+        Task::Mcp { action } => mcp(action),
+        Task::DevSetup => dev_setup(),
     }
+}
+
+/// One-shot developer bootstrap — installs the tools this workspace
+/// depends on. Keep the list here in sync with `.config/nextest.toml`
+/// and the install hints in `xtask::mutants` / `lefthook.yml`.
+fn dev_setup() -> Result<()> {
+    // 1. cargo-nextest — the project-wide test runner per
+    //    `.claude/rules/testing.md` §"Running tests — foreground, always".
+    //    Idempotent: `cargo install --locked` no-ops when the exact
+    //    locked version is already installed.
+    if Command::new("sh")
+        .arg("-c")
+        .arg("command -v cargo-nextest")
+        .status()
+        .is_ok_and(|s| s.success())
+    {
+        eprintln!("xtask dev-setup: cargo-nextest already on PATH");
+    } else {
+        sh(
+            "cargo install cargo-nextest --locked",
+            Command::new(cargo()).args(["install", "cargo-nextest", "--locked"]),
+        )?;
+    }
+
+    // 2. lefthook — cannot be installed via cargo (Go binary). Hint
+    //    and skip if absent; otherwise run `lefthook install` so the
+    //    repo's pre-commit / pre-push hooks are wired on this checkout.
+    let lefthook_present =
+        Command::new("sh").arg("-c").arg("command -v lefthook").status().is_ok_and(|s| s.success());
+    if lefthook_present {
+        sh("lefthook install", Command::new("lefthook").arg("install"))?;
+    } else {
+        eprintln!(
+            "xtask dev-setup: lefthook not found on PATH. Install it with:\n  \
+             brew install lefthook  # or see https://lefthook.dev/installation/\n  \
+             Then re-run `cargo xtask dev-setup` to wire the git hooks."
+        );
+    }
+
+    eprintln!("xtask dev-setup: done");
+    Ok(())
+}
+
+fn mcp(action: McpAction) -> Result<()> {
+    match action {
+        McpAction::Setup { force } => mcp_setup(force),
+    }
+}
+
+/// Project-root `.mcp.json` — rendered from the template below.
+const MCP_JSON: &str = ".mcp.json";
+
+/// Template for `.mcp.json`. Tokens are injected from the environment at
+/// setup time because Claude Code does not expand env vars at load time.
+/// Toolsets enabled on the remote GitHub MCP server. `default` preserves
+/// the server's built-in set (context, repos, issues, `pull_requests`,
+/// users); the rest extend it.
+const GITHUB_MCP_TOOLSETS: &str = "default,projects,discussions,labels";
+
+fn render_mcp_json(github_pat: &str, greptile_api_key: &str) -> Result<String> {
+    let doc = serde_json::json!({
+        "mcpServers": {
+            "github": {
+                "type": "http",
+                "url": "https://api.githubcopilot.com/mcp/",
+                "headers": {
+                    "Authorization": format!("Bearer {github_pat}"),
+                    "X-MCP-Toolsets": GITHUB_MCP_TOOLSETS
+                }
+            },
+            "greptile": {
+                "type": "http",
+                "url": "https://api.greptile.com/mcp",
+                "headers": {
+                    "Authorization": format!("Bearer {greptile_api_key}")
+                }
+            }
+        }
+    });
+    Ok(serde_json::to_string_pretty(&doc)? + "\n")
+}
+
+fn mcp_setup(force: bool) -> Result<()> {
+    let workspace_root = std::env::current_dir()?;
+    let out_path = workspace_root.join(MCP_JSON);
+
+    if out_path.exists() && !force {
+        bail!("{} already exists; re-run with `--force` to overwrite", out_path.display());
+    }
+
+    let env_file = load_env_file(&workspace_root.join(".env"))?;
+    let github_pat = lookup_required(
+        &env_file,
+        &["GITHUB_PAT", "GITHUB_PERSONAL_ACCESS_TOKEN"],
+        "create one at https://github.com/settings/personal-access-tokens/new \
+         and either `export GITHUB_PAT=...` or add it to `.env`",
+    )?;
+    let greptile_api_key = lookup_required(
+        &env_file,
+        &["GREPTILE_API_KEY"],
+        "create one at https://app.greptile.com (Settings → API Keys) \
+         and either `export GREPTILE_API_KEY=...` or add it to `.env`",
+    )?;
+
+    let rendered = render_mcp_json(&github_pat, &greptile_api_key)?;
+    std::fs::write(&out_path, rendered)?;
+    eprintln!("xtask: wrote {}", out_path.display());
+    eprintln!("xtask: restart Claude Code and run `/mcp` to pick up the new server");
+    Ok(())
+}
+
+/// Parse a `.env` file into `(key, value)` pairs via `dotenvy`. Missing
+/// file is not an error — the process environment may still satisfy the
+/// lookup. Parse errors (malformed lines, IO) are propagated so the
+/// operator sees why setup refused to proceed.
+fn load_env_file(path: &std::path::Path) -> Result<Vec<(String, String)>> {
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    dotenvy::from_path_iter(path)?.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
+}
+
+/// Look up the first matching key in the process environment, falling
+/// back to the parsed `.env` file. Returns an error with the install
+/// hint when no source provides a value.
+fn lookup_required(
+    env_file: &[(String, String)],
+    keys: &[&str],
+    install_hint: &str,
+) -> Result<String> {
+    for key in keys {
+        if let Ok(val) = std::env::var(key) {
+            if !val.is_empty() {
+                return Ok(val);
+            }
+        }
+    }
+    for key in keys {
+        if let Some((_, val)) = env_file.iter().find(|(k, _)| k == key) {
+            if !val.is_empty() {
+                return Ok(val.clone());
+            }
+        }
+    }
+    bail!("none of {:?} set in the environment or `.env`. {}", keys, install_hint)
 }
 
 fn hooks(action: HooksAction) -> Result<()> {
@@ -197,27 +441,19 @@ fn which_or_hint(binary: &str, install_hint: &str) -> Result<()> {
         .arg("-c")
         .arg(format!("command -v {binary}"))
         .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
+        .is_ok_and(|s| s.success());
     if !found {
         bail!("`{binary}` not found on PATH. Install it with: {install_hint}");
     }
     Ok(())
 }
 
-fn dst(seed: Option<u64>) -> Result<()> {
-    let mut cmd = Command::new(cargo());
-    cmd.args(["test", "--workspace", "--features", "dst", "--", "--include-ignored"]);
-    if let Some(s) = seed {
-        cmd.env("OVERDRIVE_DST_SEED", s.to_string());
-    }
-    sh("cargo test (dst)", &mut cmd)
-}
-
 fn bpf_unit() -> Result<()> {
     // Placeholder — `crates/overdrive-bpf` lands in Phase 2. This will
-    // invoke `cargo test --package overdrive-bpf --test '*'` against the
-    // BPF_PROG_TEST_RUN harness.
+    // invoke `cargo nextest run -p overdrive-bpf --test '*'` against the
+    // BPF_PROG_TEST_RUN harness. Nextest is the project-wide runner
+    // (see `.config/nextest.toml`); this subcommand keeps the same
+    // invariant.
     tracing_placeholder("bpf-unit: overdrive-bpf crate lands in Phase 2")
 }
 
@@ -243,6 +479,19 @@ fn xdp_perf() -> Result<()> {
     tracing_placeholder("xdp-perf: xdp-bench harness lands in Phase 2")
 }
 
+fn mutants(args: MutantsArgs) -> Result<()> {
+    let mode = match (args.diff, args.workspace) {
+        (Some(base), false) => xtask::mutants::Mode::Diff { base },
+        (None, true) => xtask::mutants::Mode::Workspace { baseline_path: args.baseline },
+        (Some(_), true) => {
+            // clap's `group` should prevent this, but defence in depth.
+            bail!("--diff and --workspace are mutually exclusive")
+        }
+        (None, false) => bail!("must give exactly one of --diff <BASE_REF> or --workspace"),
+    };
+    xtask::mutants::run(&mode)
+}
+
 fn ci() -> Result<()> {
     sh("cargo fmt --check", Command::new(cargo()).args(["fmt", "--all", "--", "--check"]))?;
     sh(
@@ -257,7 +506,18 @@ fn ci() -> Result<()> {
             "warnings",
         ]),
     )?;
-    sh("cargo test", Command::new(cargo()).args(["test", "--workspace", "--all-targets"]))
+    // nextest for the main suite, separate `cargo test --doc` for rustdoc
+    // examples. Nextest does not execute doctests — see `.config/nextest.toml`
+    // and `.github/workflows/ci.yml`'s `test` job for the paired structure.
+    which_or_hint(
+        "cargo-nextest",
+        "cargo install cargo-nextest --locked  # or: brew install cargo-nextest",
+    )?;
+    sh(
+        "cargo nextest run",
+        Command::new(cargo()).args(["nextest", "run", "--workspace", "--all-targets"]),
+    )?;
+    sh("cargo test --doc", Command::new(cargo()).args(["test", "--doc", "--workspace"]))
 }
 
 fn sh(label: &str, cmd: &mut Command) -> Result<()> {

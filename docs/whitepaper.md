@@ -37,7 +37,6 @@ The foundational thesis: the primitives required to build a genuinely better orc
 21. [Deterministic Simulation Testing](#21-deterministic-simulation-testing)
 22. [Real-Kernel Integration Testing](#22-real-kernel-integration-testing)
 23. [Immutable, Minimal, Secure OS](#23-immutable-minimal-secure-os)
-24. [Roadmap](#24-roadmap)
 
 ---
 
@@ -344,6 +343,7 @@ CR-SQLite sacrifices strong ordering for availability. Overdrive enforces the bo
 - **Identity-scoped writes.** A Corrosion peer only accepts writes whose CRDT site ID matches a live node SVID signed by the platform CA. A compromised node cannot forge rows on behalf of another node, and a decommissioned node's site ID is purged from the trust bundle.
 - **Additive-only schema migrations.** Nullable column additions in CR-SQLite trigger cluster-wide backfill storms — Fly's most painful Corrosion incident. Overdrive schema migrations are strictly additive, versioned in the intent store, and gated through a two-phase rollout: new table first, readers cut over, old table drained, old table dropped. No `ALTER TABLE ADD COLUMN NULL` across the live fleet.
 - **Full rows over field diffs.** Learning from Fly's post-mortem on partial updates, node agents republish the complete row for an allocation on every state transition rather than diffing fields. Late or reordered gossip converges deterministically under LWW; diff-merge logic does not.
+- **Tombstones for deletion, with a bounded sweep window.** Row deletions flow through CR-SQLite as tombstone records — late gossip carrying a pre-delete version of a row cannot resurrect it, because the tombstone's logical timestamp dominates under LWW. A per-table sweeper reconciler (§18) reclaims tombstones older than the cluster's worst-case gossip propagation window, which must itself exceed the longest supported partition duration; a node returning from a partition older than the sweep window is refused rejoin and re-bootstrapped from a fresh snapshot rather than allowed to resurrect compacted rows. Deletes in `service_backends`, `policy_verdicts`, and the `revoked_operator_certs` sweep (§8) all follow this shape; the Tigris-style "delete-then-read" resurrection class — where a stale cache layer re-exposes a deleted object after metadata commit — is mitigated at the store level rather than left for application code to catch.
 - **Event-loop watchdogs.** Every subscription has a stall detector. A Corrosion peer whose event loop has not advanced within N seconds is killed and restarted before it can propagate stuck state — the bug class that contagion-deadlocked Fly's proxy fleet is a named DST scenario, not a hypothetical.
 - **Per-region blast radius.** The global Corrosion topology is not a single flat cluster. Regional clusters gossip internally; a thin global membership cluster maps regions to coordinates. A runaway write in one region does not fan out globally in the same tick.
 
@@ -911,9 +911,9 @@ overdrive op create marcus@schack.id \
 
 **CLI configuration.** The resulting CA trust bundle, active operator SVID, and context (default cluster / region) live at `~/.overdrive/config` — the same shape as `~/.kube/config` and `~/.talos/config`. No environment variables, no token files, no separate truststore.
 
-**Deferred — OIDC enrolment.** A future phase introduces `overdrive login`, which performs OIDC Authorization Code + PKCE against a configured IdP (Google Workspace, GitHub, Okta) and mints an operator SVID on valid ID token. This closes the bootstrap-cert problem once team size exceeds a handful of operators — offboarding becomes an IdP concern rather than a Overdrive one — but it is not required for v0.1. Phase 6.
+**Deferred — OIDC enrolment.** A future phase introduces `overdrive login`, which performs OIDC Authorization Code + PKCE against a configured IdP (Google Workspace, GitHub, Okta) and mints an operator SVID on valid ID token. This closes the bootstrap-cert problem once team size exceeds a handful of operators — offboarding becomes an IdP concern rather than a Overdrive one — but it is not required for v0.1. Phase 7.
 
-**Deferred — Biscuit for CI delegation.** Request-level capability attenuation — an operator hands CI a token scoped to `job=payments AND action=submit AND expires<1h` without re-enrolling the CI in the CA — maps onto Biscuit: a Rust-native (`biscuit-auth`), Datalog-policied, Ed25519-signed capability token carried in a gRPC metadata header on top of an already-authenticated mTLS connection. Biscuit adds attenuation without weakening the primary auth path. Phase 6.
+**Deferred — Biscuit for CI delegation.** Request-level capability attenuation — an operator hands CI a token scoped to `job=payments AND action=submit AND expires<1h` without re-enrolling the CI in the CA — maps onto Biscuit: a Rust-native (`biscuit-auth`), Datalog-policied, Ed25519-signed capability token carried in a gRPC metadata header on top of an already-authenticated mTLS connection. Biscuit adds attenuation without weakening the primary auth path. Phase 7.
 
 ### Credential Proxy
 
@@ -1963,7 +1963,7 @@ Overdrive factors control-plane logic into two orthogonal primitives, both desce
 
 Both are strongly typed Rust trait objects for first-party extensions, WASM modules for third-party. Both have access to private libSQL memory for stateful reasoning. Both honour the §4 Intent/Observation/Memory boundary. Neither runs with the cluster-admin privileges that Kubernetes operators do.
 
-This supersedes the "operator" pattern where Go binaries with arbitrary I/O and cluster-admin privileges drive reconciliation. Each primitive has its own contract; each contract is testable in the §21 simulation harness; each is a verification target. The platform's own durable sequences — certificate rotation, multi-stage deployment, cross-region migration, staged rollout — are themselves workflows, built on the same trait and the same runtime that will be exposed to application code through the WASM Workflow SDK (§24). No "platform workflow" / "user workflow" divergence.
+This supersedes the "operator" pattern where Go binaries with arbitrary I/O and cluster-admin privileges drive reconciliation. Each primitive has its own contract; each contract is testable in the §21 simulation harness; each is a verification target. The platform's own durable sequences — certificate rotation, multi-stage deployment, cross-region migration, staged rollout — are themselves workflows, built on the same trait and the same runtime that will be exposed to application code through the WASM Workflow SDK. No "platform workflow" / "user workflow" divergence.
 
 ### The Reconciler Primitive
 
@@ -2032,7 +2032,7 @@ Workflows have finite lifecycle. They terminate with a `WorkflowResult` — succ
 
 Workflow journals live in per-primitive libSQL (§4, §17). Each `await` point writes a checkpoint before suspending; resume reads the journal, replays already-completed awaits from their recorded results, and picks up at the first unrecorded await. Cross-workflow coordination uses typed signals — a first-class primitive in the ObservationStore — not ad-hoc IntentStore writes.
 
-**First-class for platform and application code alike.** Certificate lifecycle, multi-stage deployment, cross-region migration, and human-in-the-loop staged rollout are all workflows. They use the same trait, the same runtime, the same journal format, and (once the SDK ships, §24) the same WASM ABI that application code does. The platform's durable sequences are the first workloads on the primitive; the WASM Workflow SDK is how external developers get the same surface. Overdrive does not ship two parallel workflow systems.
+**First-class for platform and application code alike.** Certificate lifecycle, multi-stage deployment, cross-region migration, and human-in-the-loop staged rollout are all workflows. They use the same trait, the same runtime, the same journal format, and (once the SDK ships) the same WASM ABI that application code does. The platform's durable sequences are the first workloads on the primitive; the WASM Workflow SDK is how external developers get the same surface. Overdrive does not ship two parallel workflow systems.
 
 ### Primitive Composition
 
@@ -2069,6 +2069,7 @@ This replaces the Kubernetes operator model, where extensions ship as Go binarie
 - LLM spend enforcement (§12)
 - Evaluation-broker reaper (cancellable-set bulk reaper)
 - Operator cert revocation sweep (§8) — deletes rows from `revoked_operator_certs` whose `expires_at` has passed; keeps the table bounded
+- Tombstone sweep (§4 *Consistency Guardrails*) — per gossiped table, reclaims CR-SQLite tombstones older than the configured max-partition window; refuses rejoin of nodes returning from partitions beyond that window
 
 **Workflows** (orchestrate, durable):
 
@@ -2504,7 +2505,7 @@ LSM assertions go against the BPF ringbuf event stream and audit metadata, **not
 
 ```
 Per-PR (critical path ≈ 15 minutes):
-  Job A   cargo test                                pure Rust, no BPF      (s)
+  Job A   cargo nextest run + cargo test --doc      pure Rust, no BPF      (s)
   Job B   cargo xtask dst                           turmoil DST (§21)      (min)
   Job C   cargo xtask bpf-unit                      Tier 2                 (min)
   Job D   cargo xtask integration-test vm <K>       Tier 3, kernel matrix  (10 min)
@@ -2598,7 +2599,7 @@ meta-overdrive/
   classes/
     overdrive-hardening.bbclass     # RELRO/NOW, stack protector, -D_FORTIFY_SOURCE=2
   wic/
-    overdrive-node.wks              # GPT: EFI + rootfs (+ verity hash partition, Phase 2)
+    overdrive-node.wks              # GPT: EFI + rootfs (+ verity hash partition, Phase 7)
 ```
 
 The image has no shells, no package manager, no SSH server, no getty. Post-processing strips debug tooling. The only user-facing entry point is the Overdrive binary managed by systemd.
@@ -2702,91 +2703,7 @@ Requests for cached artifacts are served immediately. Cache misses trigger an as
 
 ### Node Upgrade Path
 
-Upgrades are handled by the OCI registry frontend. A node running Overdrive can pull a new image as an OCI artifact, verify its digest against the schematic ID, write it to the inactive partition, and reboot into the new image — the same pattern as Talos upgrades, without requiring an external upgrade tool. This is Phase 2; Phase 1 upgrades are re-provisioning from a new image.
-
----
-
-## 24. Roadmap
-
-### Phase 1 — Foundation (Months 1–3)
-- Core data model (Job, Node, Allocation, Policy)
-- Control plane API (tonic/gRPC — internal node-agent + CLI transport)
-- IntentStore abstraction: LocalStore (redb direct) for single mode
-- ObservationStore abstraction: single-process in-memory implementation (lays the trait boundary early, swapped for Corrosion in Phase 2)
-- Injectable Clock, Transport, Entropy, Dataplane, Driver, ObservationStore, Llm traits
-- turmoil simulation harness + SimDriver / SimDataplane / SimClock / SimObservationStore / SimLlm (transcript-replay)
-- Process driver
-- Basic scheduler (first-fit)
-- CLI (`overdrive job submit`, `overdrive node list`, `overdrive alloc status`)
-- Image Factory MVP: `meta-overdrive` Yocto layer, `overdrive-image-factory` Rust service (schematic store, artifact cache, HTTP download frontend)
-
-### Phase 2 — Networking and Observation (Months 3–6)
-- aya-rs eBPF scaffolding
-- XDP routing and service load balancing
-- TC egress control
-- RaftStore (openraft + redb) for HA mode + single → HA migration
-- **CorrosionStore — production ObservationStore backed by Corrosion + cr-sqlite**
-- **Corrosion schema: `alloc_status`, `service_backends`, `node_health`, `policy_verdicts`**
-- BPF map hydration via Corrosion subscriptions (retires the gRPC push path for dataplane state)
-- Node-identity-scoped write authorisation on Corrosion peers
-- Additive-only schema migration tooling (avoids the Fly backfill-storm failure mode)
-- **Real-kernel integration test harness (§22)**: Tier 2 BPF unit tests via `BPF_PROG_TEST_RUN`, Tier 3 kernel-matrix CI via `little-vm-helper` reusing aya's `cargo xtask integration-test vm` entry point, Tier 4 verifier complexity gates via `veristat` and XDP perf baselines via `xdp-bench` — bootstrapped alongside the first XDP/TC programs so every subsequent eBPF addition lands with a kernel-matrix gate
-
-### Phase 3 — Identity and Security (Months 6–9)
-- Built-in CA (rcgen + rustls)
-- SPIFFE SVID issuance and rotation
-- **Operator identity and CLI authentication (§8).** 8-hour default TTL client certs issued by the platform CA to human operators and CI systems, SPIFFE IDs under `spiffe://overdrive.local/operator/...` with role encoded in the path (never in CN/O — avoids the etcd CVE-2018-16886 shape), `~/.overdrive/config` layout matching `~/.kube/config` / `~/.talos/config`, `overdrive cluster init` mints the first admin cert, `overdrive op create` mints additional ones. Operator identity is global across regions from day one. Emergency revocation via a `revoked_operator_certs` table in the ObservationStore — gossip-propagated within seconds, consulted on every auth attempt from local SQLite, no CRL/OCSP, rows self-drop at `expires_at` via the revocation-sweep reconciler
-- sockops mTLS + kTLS installation
-- BPF LSM programs
-- Regorus policy evaluation (intent), verdict compilation into ObservationStore
-- Tier 3 sockops + kTLS test cases (verified via `ss -K` and veth wire capture) and BPF LSM positive/negative test fixtures (Tetragon-style, asserting on the BPF ringbuf event stream) added to the §22 kernel matrix
-- **Workflow primitive — Rust trait `Workflow { async fn run(&self, ctx: &WorkflowCtx) -> WorkflowResult }`, durable journal in per-primitive libSQL, typed-signal coordination via ObservationStore, workflow-lifecycle reconciler.** Certificate rotation lands as the first internal workflow on this primitive (replacing the "workflow reconciler" conflation — workflows are a peer primitive to reconcilers, not a reconciler variant). DST-gated via replay-equivalence property tests; injected Transport/Clock/Entropy.
-
-### Phase 4 — Additional Drivers (Months 9–12)
-- Cloud Hypervisor microVM and VM driver (replaces Firecracker + QEMU)
-- virtiofsd lifecycle management and cross-workload volume sharing
-- WASM serverless driver (Wasmtime)
-- WASM sidecar runtime + TC eBPF interception generalisation
-- Built-in sidecars: credential-proxy, content-inspector, rate-limiter, request-logger
-- Sidecar SDK (Rust + TypeScript)
-- Gateway (hyper + rustls)
-- Embedded ACMEv2 client via `instant-acme` (rustls-native, `rcgen`-integrated) — public-trust certs for the gateway (HTTP-01, DNS-01, TLS-ALPN-01), rotation unified with SVIDs in `IdentityMgr` on a single cert-generation path
-- DuckLake telemetry pipeline (catalog: libSQL, storage: Garage Parquet)
-- Mesh VPN underlay extensions (§7 *Node Underlay*): `wireguard` with platform-managed keys via enrollment (pubkeys gossiped through `node_health`), and `tailscale` with bring-your-own coordination (Tailscale tailnet or self-hosted Headscale) — mutually exclusive in the schematic
-
-### Phase 5 — Intelligence (Months 12–18)
-- LLM observability agent (rig-rs) with native SRE-investigation primitives:
-  - `Investigation` as a first-class resource (ObservationStore live state + incident-memory libSQL on conclusion)
-  - Declarative toolset catalog (`builtin:overdrive-core` Rust trait object + WASM-extensible third-party toolsets, content-addressed in Garage)
-  - Typed `Action` enum with risk-tier approval gate (Tier 0 auto / Tier 1 auto+notify / Tier 2 human-ratify)
-  - `correlation_key` on telemetry for alert de-duplication; SPIFFE-identity joins across DuckLake for cross-event correlation
-  - `llm_spend` reconciler for per-investigation, per-job, and cluster-wide token budget enforcement
-- Self-healing tier 3 (LLM reasoning)
-- Right-sizing reconciler (writes resource profiles into ObservationStore)
-- Incident memory (libSQL) with embedding-similarity retrieval for runbook + prior-incident lookup
-- Predictive scaling
-- Persistent microVMs (step 1): Cloud Hypervisor snapshot/restore exposed in the `microvm` driver with `userfaultfd` lazy memory paging; VMGenID wired into the guest on restore
-- Persistent microVMs (step 2): `overdrive-fs` — Rust-native single-writer chunk store (content-addressed chunks in Garage, per-rootfs libSQL metadata with streaming WAL, NVMe 2Q cache, `vhost-user-fs` frontend). Scope: rootfs only, not a general distributed filesystem
-- Persistent microVMs (step 3): gateway auto-route (`expose = true`) + credential-proxy sidecar defaults
-- Persistent microVMs (step 4): idle-eviction reconciler with checkpoint (`snapshot_on_idle_seconds`) — scale-to-zero for long-lived stateful workloads
-- Persistent microVMs (step 5): `overdrive-guest-agent` — minimal in-VM agent over ttRPC/virtio-vsock with SPIFFE identity; four-method surface (`fs_quiesce`, `fs_thaw`, `vmgenid_ack`, `resume_notify`) for application-consistent snapshots, acknowledged VMGenID reseeds, and post-resume service-restart signalling. Opt-in via Image Factory extension
-
-### Phase 6 — Federation and Ecosystem (Months 18+)
-- WASM Component Model SDK (Rust, TypeScript, Go)
-- **Workflow WASM SDK (Rust, TypeScript, Go).** Application-facing durable execution on the same `Workflow` primitive the platform uses internally. `ctx.call(...)` / `ctx.sleep(...)` / `ctx.wait_for_signal(...)` / `ctx.activity(...)` as the core surface; journal-based versioning guard checked at module load; SPIFFE-identity-bound workflow instances; policy-gated tool surface. Migrates the Phase 3 internal-only primitive into a user-facing SDK without a second runtime — the platform's own durable sequences become reference workflows
-- OTel export adapter
-- Unikernel drivers (Nanos, Unikraft with virtiofs)
-- QEMU opt-in driver (exotic hardware emulation only)
-- Runbook primitive — markdown + YAML frontmatter matching the HolmesGPT runbook format for community-catalog reuse, content-addressed in Garage, indexed in incident-memory libSQL via embedding similarity, loaded by a `RunbookLoader` reconciler
-- Platform-signed diagnostic-probe catalog for `Action::AttachDiagnosticProbe` — curated BPF programs the investigation agent can attach to verify hypotheses, with duration-bounded auto-detach enforced by a deadline reconciler and a §22 Tier 3 integration-test fixture per probe
-- **Multi-region federation: per-region IntentStore (Raft) + global ObservationStore (Corrosion)**
-- **Regional Corrosion clusters + thin global membership cluster (regionalized blast radius from day one — the lesson Fly learned mid-incident)**
-- **Region-aware scheduler + gateway (reads `node_health.region` from local SQLite)**
-- Cross-region partition tolerance: each region continues to operate on locally-committed intent under partition; observation converges via LWW on heal
-- **`ShardedIntentStore` — Twine-shape pluggable backend for single-region density beyond the openraft+redb ceiling.** The `IntentStore` trait (§4) already abstracts over `LocalStore` and `RaftStore`; a third implementation narrows consensus to a coarse allocator (durable-Paxos regional index of machines → entitlements, weeks/months timescale) and delegates fine-grained task placement to per-entitlement schedulers with independent storage. Directly modelled on Meta's Twine (Tang et al., OSDI 2020), which operates one control plane per region over ~1M machines without cluster federation by using exactly this decomposition. **Gated on a design partner with a real single-region density requirement above ~10k nodes** — building this speculatively would ship complexity that cannot be tuned without representative workload shape. Until then, the evidence-backed single-region ceiling for openraft+redb is conservatively ~5–10k worker nodes (Borg's empirical cell-size median under Paxos is the closest public reference point); deployments exceeding this add regions rather than scaling a region.
-- Image Factory: OCI registry frontend, PXE boot, dm-verity + TPM attestation, Secure Boot signing
-- **OIDC enrolment bridge for operators (§8).** `overdrive login` performs OIDC Authorization Code + PKCE against a configured IdP (Google Workspace, GitHub, Okta), the control plane validates the ID token and mints a short-TTL operator SVID, replacing out-of-band admin-bootstrap. Removes the kubeconfig-style stolen-cert risk — offboarding becomes an IdP concern. Uses `openidconnect` / `jsonwebtoken` / `oauth2` Rust crates
-- **Biscuit tokens for CI delegation (§8).** `biscuit-auth` (Rust-native, Ed25519, Datalog policy) carried in a gRPC metadata header on top of mTLS — operators attenuate their own SVID into a short-lived capability token scoped to a specific job, action, and expiry, without the delegatee enrolling in the CA. Additive to mTLS, not a replacement; Regorus authorises the mTLS identity, Biscuit policy authorises the delegated capability
+Upgrades are handled by the OCI registry frontend. A node running Overdrive can pull a new image as an OCI artifact, verify its digest against the schematic ID, write it to the inactive partition, and reboot into the new image — the same pattern as Talos upgrades, without requiring an external upgrade tool. This is Phase 7; earlier phases upgrade by re-provisioning from a new image.
 
 ---
 

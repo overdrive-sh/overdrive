@@ -1,0 +1,485 @@
+{
+  "roadmap": {
+    "project_id": "phase-1-foundation",
+    "created_at": "2026-04-21T18:39:39Z",
+    "filled_at": "2026-04-22T00:00:00Z",
+    "total_steps": 16,
+    "phases": 6,
+    "walking_skeleton_gate": "06-03",
+    "notes": [
+      "The whole feature is ONE walking skeleton per DWD-03 — there is no Release 2. The skeleton is green when `cargo xtask dst` on a clean clone passes the default invariant catalogue (step 06-03).",
+      "Step decomposition ratio target: <= 2.5 (steps / production files). Final count = 16 steps against roughly 10 production files (id tests, error, store-local/{lib,snapshot,redb_keys}, overdrive-sim/{adapters/*, invariants, harness, lib}, xtask/{dst, dst_lint}) — ratio ~1.6.",
+      "Slice-to-phase mapping (6 slices, 6 phases): slice-1 -> phase 01 (core newtypes), slice-2 -> phase 02 (extended newtypes + SchematicId canonicalisation), slice-3 -> phase 03 (IntentStore + LocalStore on real redb), slice-4 -> phase 04 (ObservationStore + SimObservationStore), slice-5 -> phase 05 (remaining Sim adapters + xtask dst-lint), slice-6 -> phase 06 (xtask dst + turmoil harness + invariant catalogue).",
+      "ADR-0001 applies across every step that touches overdrive-core: complete scaffolding in place, do not refactor.",
+      "ADR-0005 applies to test layout: plumbing tests in `tests/*.rs`, acceptance scenarios in `tests/acceptance/*.rs`. No `.feature` files anywhere (testing.md + DWD-03).",
+      "ADR-0006 applies to xtask CI contract: seed on the first line of stdout; `target/xtask/dst-output.log` (text) and `target/xtask/dst-summary.json` (structured) written on every invocation; non-zero exit on any invariant failure.",
+      "Every step follows the Outside-In TDD rhythm: RED (acceptance test from DISTILL scenario) -> RED (unit test if GREEN is complex) -> GREEN (minimal impl) -> REFACTOR (apply project rules) -> PROPTEST (where mandated) -> MUTATION (>=80% kill rate on diff-scoped cargo-mutants)."
+    ]
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Slice 1 — Core identifier newtypes land with full completeness contract",
+      "slice": "slice-1",
+      "user_stories": ["US-01"],
+      "description": "Deliver JobId, NodeId, AllocationId with validating constructors, FromStr/Display/serde round-trip, rkyv byte-stability, and the no-bare-String public-API invariant. The scaffolding in crates/overdrive-core/src/id.rs via `define_label_newtype!` is structurally complete; this phase adds the proptest + negative-case + API-shape coverage that proves the completeness contract holds.",
+      "estimated_hours": 5,
+      "depends_on": [],
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "Core newtype round-trip is lossless through Display, FromStr, and serde",
+          "criteria": "Given a valid value for JobId, NodeId, or AllocationId, Display -> FromStr -> serde_json::to_string -> from_str produces the original value; serde_json output equals the Display form surrounded by quotes; a proptest with PROPTEST_CASES=1024 passes for randomised valid inputs. Covers test-scenarios.md §2.1 four round-trip scenarios plus the config-file realistic-value scenario. After GREEN, `cargo mutants --in-diff origin/main --package overdrive-core` reports >=80% kill rate on touched code.",
+          "test_file": "crates/overdrive-core/tests/acceptance/core_newtype_roundtrip.rs",
+          "scenario_name": "Newtype round-trip through Display and FromStr is lossless for JobId/NodeId/AllocationId; serde JSON output matches Display byte-for-byte",
+          "tier": "Tier 1 (DST-adjacent) + proptest",
+          "time_estimate_hours": 2,
+          "dependencies": [],
+          "implementation_scope": {
+            "production_files": [
+              "crates/overdrive-core/src/id.rs"
+            ],
+            "test_files": [
+              "crates/overdrive-core/tests/acceptance/core_newtype_roundtrip.rs",
+              "crates/overdrive-core/tests/newtype_proptest.rs"
+            ]
+          },
+          "notes": "Scaffolding already present — this is primarily adding tests; only adjust id.rs if a proptest surfaces a real bug (e.g. trailing-whitespace acceptance). Do NOT add any `normalize_*` helper — validation lives in the constructor per development.md."
+        },
+        {
+          "id": "01-02",
+          "name": "Core newtype constructors reject malformed input with structured ParseError variants",
+          "criteria": "Empty string, input with space, input starting with hyphen, and input exceeding 253 chars each return Err(IdParseError::{Empty|InvalidChar|InvalidFormat|TooLong}) naming the kind field and the position/character where applicable; no newtype value is constructed on failure. Covers test-scenarios.md §2.2 four error-boundary scenarios and §2.3 API-shape invariant (no bare &str/String identifier in overdrive-core public API). cargo-mutants >=80% kill rate on validator diff.",
+          "test_file": "crates/overdrive-core/tests/acceptance/core_newtype_validation.rs",
+          "scenario_name": "Empty/forbidden-character/over-length/non-alphanumeric-start input is rejected at the constructor; public API exposes no String-typed identifier",
+          "tier": "Tier 1 (unit, negative cases)",
+          "time_estimate_hours": 3,
+          "dependencies": ["01-01"],
+          "implementation_scope": {
+            "production_files": [
+              "crates/overdrive-core/src/id.rs",
+              "crates/overdrive-core/src/error.rs"
+            ],
+            "test_files": [
+              "crates/overdrive-core/tests/acceptance/core_newtype_validation.rs",
+              "crates/overdrive-core/tests/public_api_shape.rs"
+            ]
+          },
+          "notes": "The public-API-shape test inspects every exported function signature in overdrive-core. A practical implementation: parse `cargo public-api` output or trybuild-compile a sentinel file asserting `fn foo(_: &str)` is absent for identifier-shaped parameter names. Keep the test brittle-but-honest — we would rather refactor the test than silently lose the invariant."
+        }
+      ]
+    },
+    {
+      "id": "02",
+      "name": "Slice 2 — Extended identifier newtypes complete the Phase 1 identifier set",
+      "slice": "slice-2",
+      "user_stories": ["US-02"],
+      "description": "Bring the remaining eight identifier newtypes (SpiffeId, CorrelationKey, InvestigationId, PolicyId, CertSerial, Region, ContentHash, SchematicId) up to the US-01 completeness contract. Per ADR-0002, SchematicId canonicalisation commits to rkyv-archived bytes of the Schematic struct — but the Schematic struct itself is deferred to Phase 2 (see DESIGN open question). In Phase 1, SchematicId exists as a newtype that wraps ContentHash with the rkyv canonicalisation rule documented; a from_schematic constructor is out of scope until the Schematic struct lands.",
+      "estimated_hours": 6,
+      "depends_on": ["01"],
+      "steps": [
+        {
+          "id": "02-01",
+          "name": "SpiffeId and Region parse canonically and reject malformed input",
+          "criteria": "SpiffeId::from_str accepts `spiffe://overdrive.local/job/payments/alloc/a1b2c3`, exposes trust_domain() and path() accessors (no string-splitting at call sites), Display round-trips byte-for-byte; rejects missing-scheme/empty-trust-domain/empty-path inputs with SpiffeMissingScheme/SpiffeEmptyTrustDomain/SpiffeEmptyPath. Region::from_str is case-insensitive, Display emits lowercase canonical form, rejects space-containing input. Covers test-scenarios.md §3.1 SpiffeId happy-path + Region normalisation and §3.2 SpiffeId/Region error-boundary scenarios. cargo-mutants >=80% kill rate on the FromStr validator branches.",
+          "test_file": "crates/overdrive-core/tests/acceptance/spiffe_region_validation.rs",
+          "scenario_name": "SPIFFE identity parses from whitepaper canonical example and rejects malformed URIs; Region parses case-insensitively and rejects whitespace",
+          "tier": "Tier 1 (acceptance + proptest)",
+          "time_estimate_hours": 2,
+          "dependencies": ["01-01"],
+          "implementation_scope": {
+            "production_files": [
+              "crates/overdrive-core/src/id.rs"
+            ],
+            "test_files": [
+              "crates/overdrive-core/tests/acceptance/spiffe_region_validation.rs"
+            ]
+          }
+        },
+        {
+          "id": "02-02",
+          "name": "Content-addressed newtypes (ContentHash, SchematicId, CertSerial) enforce length and hex discipline",
+          "criteria": "ContentHash is fixed-length (32 bytes), hex Display/FromStr round-trips, from_str rejects wrong-length inputs with IdParseError::ContentHashWrongLength { expected: 64, actual }; ContentHash::of(payload) is deterministic across two invocations over any byte payload (proptest). CertSerial is lowercase hex only, rejects uppercase and odd-length inputs. SchematicId wraps ContentHash and carries a module-level doc committing to rkyv-archived-bytes canonicalisation per ADR-0002. Covers test-scenarios.md §3.1 ContentHash/CorrelationKey determinism, §3.2 wrong-length/uppercase/odd-length error scenarios. cargo-mutants >=80% on the hash-determinism and length-check paths.",
+          "test_file": "crates/overdrive-core/tests/acceptance/content_hash_cert_serial.rs",
+          "scenario_name": "ContentHash round-trips through hex and is stable across invocations; CertSerial rejects uppercase and odd-length hex",
+          "tier": "Tier 1 + proptest (hash determinism is a proptest mandatory call site per testing.md)",
+          "time_estimate_hours": 2,
+          "dependencies": ["01-01", "02-01"],
+          "implementation_scope": {
+            "production_files": [
+              "crates/overdrive-core/src/id.rs"
+            ],
+            "test_files": [
+              "crates/overdrive-core/tests/acceptance/content_hash_cert_serial.rs"
+            ]
+          },
+          "notes": "Hash determinism proptest covers testing.md Mandate 'Hash determinism paths'. ADR-0002 says SchematicId canonicalisation is rkyv-archived bytes of a Schematic struct that is deferred to Phase 2 — in Phase 1 SchematicId exists as a transparent ContentHash newtype with the canonicalisation rule documented in rustdoc only."
+        },
+        {
+          "id": "02-03",
+          "name": "Extended identifier round-trip and completeness contract hold across all 11 newtypes",
+          "criteria": "proptest with PROPTEST_CASES=1024 asserts Display -> FromStr round-trip is lossless for SpiffeId, InvestigationId, PolicyId, CertSerial, Region, ContentHash, SchematicId and serde round-trip is lossless for all of them. CorrelationKey derived from the same three inputs (target, spec_hash, purpose) yields equal values on two invocations. A completeness-contract test enumerates all 11 newtypes and asserts each implements FromStr, Display, Serialize, Deserialize, a validating constructor returning Result, and that no `normalize_*` helper exists for any of them. Covers test-scenarios.md §3.1 extended-identifier property scenarios, §3.3 completeness contract (kpi K5).",
+          "test_file": "crates/overdrive-core/tests/acceptance/extended_newtype_completeness.rs",
+          "scenario_name": "Round-trip is lossless for every extended identifier; CorrelationKey is deterministic; every Phase 1 identifier type implements the completeness contract",
+          "tier": "Tier 1 + proptest",
+          "time_estimate_hours": 2,
+          "dependencies": ["02-01", "02-02"],
+          "implementation_scope": {
+            "production_files": [
+              "crates/overdrive-core/src/id.rs"
+            ],
+            "test_files": [
+              "crates/overdrive-core/tests/acceptance/extended_newtype_completeness.rs",
+              "crates/overdrive-core/tests/newtype_proptest.rs"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "03",
+      "name": "Slice 3 — IntentStore trait + LocalStore on real redb with bit-identical snapshot round-trip",
+      "slice": "slice-3",
+      "user_stories": ["US-03"],
+      "description": "Complete the `overdrive-store-local` crate: replace LocalStore::open's unimplemented!() body with a real redb-backed adapter implementing the existing IntentStore trait (get/put/delete/txn/watch/export_snapshot/bootstrap_from). Snapshot framing is rkyv-archived bytes with a versioned header (ADR-0002 discipline). Per DWD-01 Strategy C, every test instantiates LocalStore against a `tempfile::TempDir` — deleting the redb dep must break compile. Per DWD-02, the K4 cold-start/RSS claims are explicitly out of scope; the commercial envelope scenario in US-03 is NOT translated.",
+      "estimated_hours": 8,
+      "depends_on": ["01", "02"],
+      "steps": [
+        {
+          "id": "03-01",
+          "name": "LocalStore reads back what it writes; watch fires once per prefix-matching write; delete removes the key",
+          "criteria": "LocalStore::open on a fresh TempDir returns Ok; put(K, B) followed by get(K) returns B; a watch on prefix `jobs/` fires exactly one event with key `jobs/payments` on a matching write and no event on non-matching writes; delete(K) causes subsequent get(K) to return None. A transaction of two puts and one delete commits atomically and all puts are readable while the deleted key returns nothing. Covers test-scenarios.md §4.1 four happy-path scenarios. Absence-read returns None without error (§4.3 first error scenario).",
+          "test_file": "crates/overdrive-store-local/tests/acceptance/local_store_basic_ops.rs",
+          "scenario_name": "A value written to LocalStore can be read back; watch subscription fires exactly once per matching write; delete removes the key; transaction commits atomically",
+          "tier": "Tier 3 (integration — real redb I/O per Strategy C)",
+          "time_estimate_hours": 4,
+          "dependencies": [],
+          "implementation_scope": {
+            "production_files": [
+              "crates/overdrive-store-local/src/lib.rs",
+              "crates/overdrive-store-local/src/redb_backend.rs"
+            ],
+            "test_files": [
+              "crates/overdrive-store-local/tests/acceptance/local_store_basic_ops.rs"
+            ]
+          },
+          "notes": "Replace the `_redb_path_placeholder` field with a `redb::Database` handle. Pick a single table (`entries: &[u8] -> &[u8]`) for Phase 1; Phase 2 can add secondary indexes when reconcilers need them. `watch` can be implemented with a `tokio::sync::broadcast` channel behind a mutex — this is a Phase 1 sim substitute for the future Raft-driven change notification. Document that decision in a module comment."
+        },
+        {
+          "id": "03-02",
+          "name": "Snapshot round-trip is byte-identical across two LocalStore instances",
+          "criteria": "Given a LocalStore populated with entries, export_snapshot -> construct a second LocalStore on a different TempDir -> bootstrap_from(first_snapshot) -> export_snapshot on the second produces a byte slice equal to the first. A proptest with randomised store contents (0..=256 entries; random keys and values up to 4 KB) asserts the same property for arbitrary valid contents. Covers test-scenarios.md §4.2 both snapshot scenarios (KPI K6). cargo-mutants >=80% kill rate on the snapshot framing + bootstrap code per testing.md mandatory target list.",
+          "test_file": "crates/overdrive-store-local/tests/acceptance/snapshot_roundtrip.rs",
+          "scenario_name": "Snapshot round-trip is byte-identical across LocalStore instances; snapshot round-trip is byte-identical for any valid store contents",
+          "tier": "Tier 3 + proptest (testing.md mandates snapshot roundtrip proptest)",
+          "time_estimate_hours": 3,
+          "dependencies": ["03-01"],
+          "implementation_scope": {
+            "production_files": [
+              "crates/overdrive-store-local/src/lib.rs",
+              "crates/overdrive-store-local/src/snapshot_frame.rs"
+            ],
+            "test_files": [
+              "crates/overdrive-store-local/tests/acceptance/snapshot_roundtrip.rs"
+            ]
+          },
+          "notes": "Snapshot framing = 4-byte magic (`OSNP`) + 2-byte version (u16 LE) + rkyv-archived Vec<(Bytes, Bytes)> payload. Byte-identical round-trip requires deterministic entry ordering — sort by key before archival. This framing is shared with the future RaftStore, so document the byte layout in rustdoc."
+        },
+        {
+          "id": "03-03",
+          "name": "LocalStore fails clean on corrupted snapshots and surfaces typed errors on I/O failure; IntentStore and ObservationStore are not substitutable at compile time",
+          "criteria": "bootstrap_from on snapshot bytes with one byte truncated returns Err(IntentStoreError::SnapshotCorrupt{offset}) and the target store's export_snapshot produces an empty snapshot (no partial write); same for single-bit-flipped payload. A put against a read-only backing directory returns a typed I/O error and persists no partial value. A trybuild compile-fail test asserts that passing an `&dyn IntentStore` to a function parameter typed `&dyn ObservationStore` fails to compile with a diagnostic distinguishing the two trait names. Covers test-scenarios.md §4.3 truncated/bit-flipped/read-only error scenarios and §4.4 type-level separation (cross-reference to US-04).",
+          "test_file": "crates/overdrive-store-local/tests/acceptance/local_store_error_paths.rs",
+          "scenario_name": "Bootstrapping from corrupted snapshots fails without writing state; a disk-write failure surfaces as a typed intent-store error; a function taking ObservationStore rejects an IntentStore at compile time",
+          "tier": "Tier 3 + trybuild",
+          "time_estimate_hours": 3,
+          "dependencies": ["03-02"],
+          "implementation_scope": {
+            "production_files": [
+              "crates/overdrive-store-local/src/lib.rs",
+              "crates/overdrive-store-local/src/snapshot_frame.rs",
+              "crates/overdrive-core/src/traits/intent_store.rs"
+            ],
+            "test_files": [
+              "crates/overdrive-store-local/tests/acceptance/local_store_error_paths.rs",
+              "crates/overdrive-core/tests/compile_fail/intent_vs_observation.rs"
+            ]
+          },
+          "notes": "The compile-fail harness uses `trybuild` (already approved as a dev-dependency in ADR-0001 row 24). The read-only-directory test requires chmod on the TempDir; on Windows this test is gated behind `#[cfg(unix)]` — document the gate in the test. A put can fail for reasons other than read-only; prefer injecting a known failure rather than exhaustively enumerating them."
+        }
+      ]
+    },
+    {
+      "id": "04",
+      "name": "Slice 4 — ObservationStore trait + SimObservationStore in-memory LWW",
+      "slice": "slice-4",
+      "user_stories": ["US-04"],
+      "description": "Complete `overdrive-sim/src/adapters/observation_store.rs` so SimObservationStore implements ObservationStore with last-write-wins semantics on logical timestamps `(lamport_counter, writer_node_id)`, in-memory storage, injectable gossip delay and partition, and the Phase 1 minimal row set (`alloc_status`, `node_health`) per brief §6. LWW convergence is deterministic under reordering given a seed. The intent/observation type-level separation is the load-bearing invariant — enforced by compile-fail tests and by making write parametric on observation-row shapes, not raw bytes.",
+      "estimated_hours": 7,
+      "depends_on": ["01", "02"],
+      "steps": [
+        {
+          "id": "04-01",
+          "name": "SimObservationStore writes and reads typed observation rows on a single peer",
+          "criteria": "Constructing a one-peer SimObservationStore with a fixed seed, writing an alloc_status row for alloc/a1b2c3, and reading via the ObservationStore subscription surface yields the same row bytes written. Writing via a JobSpec-typed value (intent class) fails to compile — the write surface is parametric on observation-row types, not `&[u8]`. Covers the single-peer happy path carved out of test-scenarios.md §5.1 scenario 1 (reduced to one peer for this step) and §5.3 compile-fail scenario.",
+          "test_file": "crates/overdrive-sim/tests/acceptance/sim_observation_single_peer.rs",
+          "scenario_name": "A row written on a sim peer is observable on that peer; attempting to persist a job spec into the observation store fails at compile time",
+          "tier": "Tier 1 (in-process sim) + trybuild",
+          "time_estimate_hours": 2,
+          "dependencies": [],
+          "implementation_scope": {
+            "production_files": [
+              "crates/overdrive-sim/src/adapters.rs",
+              "crates/overdrive-sim/src/adapters/observation_store.rs",
+              "crates/overdrive-core/src/traits/observation_store.rs"
+            ],
+            "test_files": [
+              "crates/overdrive-sim/tests/acceptance/sim_observation_single_peer.rs",
+              "crates/overdrive-core/tests/compile_fail/observation_write_rejects_intent.rs"
+            ]
+          },
+          "notes": "Row shape enum: `ObservationRow::AllocStatus(AllocStatusRow)` / `ObservationRow::NodeHealth(NodeHealthRow)`. write signature: `fn write(&self, row: ObservationRow) -> Result<()>` — the typed enum IS the compile-time boundary. Split the existing `adapters.rs` into `adapters/{clock,transport,entropy,dataplane,driver,llm,observation_store}.rs`; convert `adapters.rs` into `adapters/mod.rs` that re-exports."
+        },
+        {
+          "id": "04-02",
+          "name": "Gossip converges across three peers with injectable delay and partition",
+          "criteria": "A three-peer SimObservationStore cluster: peer A writes alloc_status for alloc/a1b2c3; the harness advances past the gossip convergence window; peers B and C each read the same row. When peer A is partitioned from B and C, a write by A is NOT observable on B/C after the usual gossip window; after the partition heals and the sim advances past convergence, B and C each read A's row. LWW chooses the higher-timestamp update regardless of arrival order — concurrent writes converge to the T2>T1 value on every peer. Full-row writes take precedence; no partial-field merge is ever applied. Covers test-scenarios.md §5.1 scenarios 1, 2, 4 and §5.3 partition scenario.",
+          "test_file": "crates/overdrive-sim/tests/acceptance/sim_observation_gossip.rs",
+          "scenario_name": "A row written on one sim peer is observable on every peer after gossip converges; LWW chooses the higher-timestamp update regardless of arrival order; a partition prevents gossip delivery until it heals; full-row writes take precedence over partial-field merges",
+          "tier": "Tier 1 (sim)",
+          "time_estimate_hours": 3,
+          "dependencies": ["04-01"],
+          "implementation_scope": {
+            "production_files": [
+              "crates/overdrive-sim/src/adapters/observation_store.rs"
+            ],
+            "test_files": [
+              "crates/overdrive-sim/tests/acceptance/sim_observation_gossip.rs"
+            ]
+          },
+          "notes": "Gossip delay is modeled as a per-peer FIFO of pending writes; the harness ticks the queue each sim step. Partition is a set of (peer_a, peer_b) pairs with gossip blocked bidirectionally until a `repair` call. Both are injectable via the `SimObservationStore::builder().gossip_delay(...).partition(a, b).build()` pattern."
+        },
+        {
+          "id": "04-03",
+          "name": "LWW convergence is deterministic under seeded reordering (property)",
+          "criteria": "Given a seeded run with any set of concurrent writes produced by a proptest generator (1..=20 writes across 2..=5 peers with random logical timestamps 1..=100 and random alloc_ids from a fixed 1..=10 pool), running the harness twice on the same seed yields bit-identical final row sets on every peer. cargo-mutants >=80% kill rate on the LWW merge path per testing.md. Covers test-scenarios.md §5.1 scenario 3 (property) which IS the US-04 determinism AC.",
+          "test_file": "crates/overdrive-sim/tests/acceptance/sim_observation_lww_converges.rs",
+          "scenario_name": "LWW convergence is deterministic across seeded delivery orders",
+          "tier": "Tier 1 + proptest",
+          "time_estimate_hours": 2,
+          "dependencies": ["04-02"],
+          "implementation_scope": {
+            "production_files": [
+              "crates/overdrive-sim/src/adapters/observation_store.rs"
+            ],
+            "test_files": [
+              "crates/overdrive-sim/tests/acceptance/sim_observation_lww_converges.rs"
+            ]
+          },
+          "notes": "This test file's name is used verbatim for the `SimObservationLwwConverges` invariant enum variant (US-06). The same assertion will be re-invoked by the harness in step 06-02 as an `assert_always!` invariant — do not duplicate the logic; factor it into a helper that both the proptest and the invariant call."
+        }
+      ]
+    },
+    {
+      "id": "05",
+      "name": "Slice 5 — Remaining Sim adapters + xtask dst-lint banned-API gate",
+      "slice": "slice-5",
+      "user_stories": ["US-05"],
+      "description": "Complete the remaining five Sim adapters (SimClock, SimTransport, SimEntropy, SimDataplane, SimDriver, SimLlm — SimObservationStore was completed in Slice 4) and ship `cargo xtask dst-lint` as a syn-based walker that scans crates labelled `crate_class = \"core\"` for banned APIs. Every banned violation prints file:line:col, the replacement trait, and a link to `.claude/rules/development.md`. Wiring crates (crate_class = adapter-real / adapter-sim / binary) are exempt. The lint gate fails fast if the core-class set is empty or a crate has no crate_class declaration.",
+      "estimated_hours": 8,
+      "depends_on": ["01", "02"],
+      "steps": [
+        {
+          "id": "05-01",
+          "name": "SimClock, SimTransport, SimEntropy, SimDataplane, SimDriver, SimLlm implement their ports deterministically under seed",
+          "criteria": "SimClock's now()/sleep() route through a turmoil::Sim tick (deterministic). SimTransport exposes injectable partition/loss/delay via a builder and implements the Transport trait end-to-end against an in-process echo pair. SimEntropy is a StdRng seeded from the harness seed; `u64()` is deterministic across two runs on the same seed (proptest over 0..=1024 draws). SimDataplane stores policy/service state in-memory HashMaps and drain_flow_events returns synthetic events. SimDriver's start/stop/status/resize manipulate an in-memory allocation table with configurable failure modes. SimLlm replays from a seeded transcript; a deviation (different tool choice) fails the test with a diff. Covers test-scenarios.md §6.1 'every nondeterminism port has both a real and a sim implementation available'.",
+          "test_file": "crates/overdrive-sim/tests/acceptance/sim_adapters_deterministic.rs",
+          "scenario_name": "Every nondeterminism port has both a real and a sim implementation available; each sim adapter is deterministic under a fixed seed",
+          "tier": "Tier 1",
+          "time_estimate_hours": 4,
+          "dependencies": [],
+          "implementation_scope": {
+            "production_files": [
+              "crates/overdrive-sim/src/adapters/clock.rs",
+              "crates/overdrive-sim/src/adapters/transport.rs",
+              "crates/overdrive-sim/src/adapters/entropy.rs",
+              "crates/overdrive-sim/src/adapters/dataplane.rs",
+              "crates/overdrive-sim/src/adapters/driver.rs",
+              "crates/overdrive-sim/src/adapters/llm.rs"
+            ],
+            "test_files": [
+              "crates/overdrive-sim/tests/acceptance/sim_adapters_deterministic.rs"
+            ]
+          },
+          "notes": "Real adapters (SystemClock/TcpTransport/OsEntropy) live in a sibling crate or inline in `overdrive-node` (future); for Phase 1 we only need them to exist as trait impls somewhere the lint gate will NOT flag. A minimal `SystemClock` can live in the future `overdrive-node` crate; if that crate doesn't exist yet, put it in a `overdrive-adapters-real` sub-crate OR keep the `Real*` types in a feature-gated module of `overdrive-sim` labelled crate_class=adapter-sim. Crafter picks; document the choice. `SimLlm` transcripts for Phase 1 can be empty — no investigation agent code exists yet."
+        },
+        {
+          "id": "05-02",
+          "name": "xtask dst-lint detects banned APIs in core crates and produces structured violations",
+          "criteria": "`cargo xtask dst-lint` exits 0 when no core-class crate contains a banned API (testing on a clean workspace). It exits non-zero and reports file:line:col, the banned symbol, the replacement trait name (Clock/Entropy/Transport/etc.), and a link to `.claude/rules/development.md` when a core crate contains `std::time::Instant::now`, `std::time::SystemTime::now`, `rand::random`, `rand::thread_rng`, `tokio::time::sleep`, `std::thread::sleep`, or any of `tokio::net::{TcpStream, TcpListener, UdpSocket}`. A wiring crate (crate_class != core) using `Instant::now` produces zero violations. A workspace with an empty core-class set fails fast with a named error. A workspace crate missing `package.metadata.overdrive.crate_class` fails fast naming the crate. An xtask self-test asserts each banned symbol in the BANNED_APIS constant is caught against a synthetic source file. Covers test-scenarios.md §6.1 scenarios 2-3 (silent clean run, wiring exemption) and §6.2 all four banned-API detection scenarios plus both fail-fast scenarios (KPI K2).",
+          "test_file": "xtask/tests/acceptance/dst_lint_banned_apis.rs",
+          "scenario_name": "Lint gate blocks core crates that use Instant::now / rand::random / std::thread::sleep / tokio::net::TcpStream; silent on clean core crates; permits wiring crates; fails fast when the core-class set is empty or a crate is unlabelled",
+          "tier": "Tier 1 (xtask subcommand, driving-port subprocess)",
+          "time_estimate_hours": 4,
+          "dependencies": ["05-01"],
+          "implementation_scope": {
+            "production_files": [
+              "xtask/src/main.rs",
+              "xtask/src/dst_lint.rs",
+              "crates/overdrive-core/Cargo.toml",
+              "crates/overdrive-store-local/Cargo.toml",
+              "crates/overdrive-sim/Cargo.toml",
+              "crates/overdrive-cli/Cargo.toml",
+              "xtask/Cargo.toml"
+            ],
+            "test_files": [
+              "xtask/tests/acceptance/dst_lint_banned_apis.rs",
+              "xtask/tests/dst_lint_self_test.rs"
+            ]
+          },
+          "notes": "BANNED_APIS is a single `&[(path, replacement_trait)]` constant in `xtask::dst_lint`. Use `syn::visit::Visit` to walk each `src/**/*.rs` in every core-class crate; match on `ExprPath` against fully-qualified names (resolve via `use` tracking or fall back to suffix match). `cargo metadata --format-version 1` gives package-level metadata for the crate_class read. Add `[package.metadata.overdrive] crate_class = \"core\"` (or adapter-real/adapter-sim/binary) to each existing crate's Cargo.toml. The dst-lint acceptance test runs `cargo xtask dst-lint` as a subprocess per DWD-04 driving-port discipline."
+        }
+      ]
+    },
+    {
+      "id": "06",
+      "name": "Slice 6 — `cargo xtask dst` turmoil harness runs the invariant catalogue green on a clean clone",
+      "slice": "slice-6",
+      "user_stories": ["US-06"],
+      "description": "Pull everything together: the turmoil harness composes real LocalStore (from overdrive-store-local) with every Sim adapter (from overdrive-sim); `cargo xtask dst` prints the seed on the first line, runs the default Invariant catalogue, writes `target/xtask/dst-output.log` (text) and `target/xtask/dst-summary.json` (structured) per ADR-0006, and exits non-zero on any invariant failure with a reproduction block naming invariant/seed/tick/host and the reproduction command. Twin-run identity under the same seed is the acceptance gate for the whole feature.",
+      "estimated_hours": 9,
+      "depends_on": ["03", "04", "05"],
+      "steps": [
+        {
+          "id": "06-01",
+          "name": "Invariant enum, harness skeleton, and xtask dst wiring boot a 3-node sim and print a summary",
+          "criteria": "`Invariant` enum (already scaffolded with variants SingleLeader / IntentNeverCrossesIntoObservation / SnapshotRoundtripBitIdentical / SimObservationLwwConverges / ReplayEquivalentEmptyWorkflow / EntropyDeterminismUnderReseed) implements Display (kebab-case) and FromStr (case-insensitive) with lossless round-trip (proptest). `overdrive-sim::harness::Harness::run(seed)` boots three turmoil hosts; each host constructs a real LocalStore on a per-host TempDir plus every Sim* adapter; the harness returns a `RunReport { seed, invariants, wall_clock, failures }`. `cargo xtask dst` takes an optional `--seed N` flag (random u64 if absent), calls the harness, prints the seed on the first line of stdout, writes `target/xtask/dst-output.log` and `target/xtask/dst-summary.json`. `--only <INVARIANT>` narrows to one invariant via `Invariant::from_str`. Covers test-scenarios.md §7.1 scenarios 1, 3, 4, 6 (harness composition, invariant enum round-trip, --only filter, first-line seed).",
+          "test_file": "xtask/tests/acceptance/dst_harness_smoke.rs",
+          "scenario_name": "The DST harness composes real LocalStore with every Sim adapter; every invariant name round-trips through the invariant enum FromStr; --only narrows to a single invariant; seed is printed on the first line of every run",
+          "tier": "Tier 1 (harness integration, driving-port subprocess)",
+          "time_estimate_hours": 4,
+          "dependencies": [],
+          "implementation_scope": {
+            "production_files": [
+              "crates/overdrive-sim/src/invariants.rs",
+              "crates/overdrive-sim/src/harness.rs",
+              "crates/overdrive-sim/src/lib.rs",
+              "xtask/src/main.rs",
+              "xtask/src/dst.rs"
+            ],
+            "test_files": [
+              "xtask/tests/acceptance/dst_harness_smoke.rs",
+              "crates/overdrive-sim/tests/invariant_roundtrip.rs"
+            ]
+          },
+          "notes": "Per ADR-0006, `xtask/src/dst.rs` hosts the command logic; `main.rs` just dispatches. The JSON summary schema: `{seed, git_sha, toolchain, invariants: [{name, status, tick, host}], failures: [...], wall_clock_ms}`. Invariant Display canonical form: `SingleLeader` -> `single-leader` (kebab-case lowercased)."
+        },
+        {
+          "id": "06-02",
+          "name": "Default invariant catalogue evaluates and green-passes on a clean clone within the wall-clock budget",
+          "criteria": "Running `cargo xtask dst` on a freshly cloned workspace exits 0; the default catalogue reports SingleLeader (against a stubbed leader topology per US-06 Technical Note 3 — document the stub), IntentNeverCrossesIntoObservation (assert_always: no intent-class row in any SimObservationStore, no observation-prefix key in LocalStore), SnapshotRoundtripBitIdentical (drives step 03-02 logic from within the harness), SimObservationLwwConverges (drives step 04-03 logic from within the harness), ReplayEquivalentEmptyWorkflow (trivial: no-op workflow replays bit-identically — proves the machinery works, full workflow runtime is Phase 2+), EntropyDeterminismUnderReseed (StdRng output is identical across two harness boots on the same seed). Wall-clock stays under 60s on an M-class laptop per KPI K1. Covers test-scenarios.md §1.1 (WS-1), §7.1 scenarios 1-2, the `intent_never_crosses_into_observation` invariant from §5.2.",
+          "test_file": "xtask/tests/acceptance/dst_clean_clone_green.rs",
+          "scenario_name": "Clean-clone cargo xtask dst is green within the wall-clock budget; the default invariant catalogue runs to completion; intent never crosses into observation throughout any DST run",
+          "tier": "Tier 1 (walking-skeleton scenario WS-1)",
+          "time_estimate_hours": 3,
+          "dependencies": ["06-01"],
+          "implementation_scope": {
+            "production_files": [
+              "crates/overdrive-sim/src/invariants.rs",
+              "crates/overdrive-sim/src/harness.rs"
+            ],
+            "test_files": [
+              "xtask/tests/acceptance/dst_clean_clone_green.rs"
+            ]
+          },
+          "notes": "WS-1. SingleLeader is evaluated against a stubbed 3-host leader election — the stub is a simple state machine in the harness that designates one host as leader per epoch; US-06 Technical Note 3 commits to retiring this in Phase 2 when the real Raft layer lands. The `replay_equivalent_empty_workflow` invariant in Phase 1 is a twin-run hash comparison over an empty workflow transcript — proves the replay-check machinery, not a real workflow runtime."
+        },
+        {
+          "id": "06-03",
+          "name": "Same seed reproduces bit-identical trajectory; red runs print a reproduction command; CI artifacts are written on red",
+          "criteria": "Running `cargo xtask dst --seed S` twice produces bit-identical output: ordered invariant results match, per-invariant tick numbers match, seed on the first line of both runs is S. A planted bug in SimObservationStore that breaks LWW convergence on a specific seed causes `cargo xtask dst` to exit non-zero with a failure block naming the failing invariant, seed, tick, turmoil host, cause, and a reproduction command embedding the same seed with `--only <invariant>`. Running the printed reproduction command fails at the same tick. On red, `target/xtask/dst-output.log` and `target/xtask/dst-summary.json` are both written; the JSON contains {failing_invariant, seed, tick, host, cause}. Twin-run identity holds for any seed drawn from the DST seed generator (proptest over 16 seeds). Covers test-scenarios.md §1.2 (WS-2), §1.3 (WS-3), §7.2 both error scenarios, §7.3 twin-run self-test.",
+          "test_file": "xtask/tests/acceptance/dst_seeded_reproduction.rs",
+          "scenario_name": "Same seed produces the same trajectory across two runs; a red invariant prints seed/tick/host/reproduction command; the reproduction command reproduces the failure at the same tick; twin-run identity holds for every seed",
+          "tier": "Tier 1 (walking-skeleton scenarios WS-2, WS-3; feature-level acceptance gate)",
+          "time_estimate_hours": 2,
+          "dependencies": ["06-02"],
+          "implementation_scope": {
+            "production_files": [
+              "crates/overdrive-sim/src/harness.rs",
+              "xtask/src/dst.rs"
+            ],
+            "test_files": [
+              "xtask/tests/acceptance/dst_seeded_reproduction.rs",
+              "xtask/tests/acceptance/dst_canary_red_run.rs"
+            ]
+          },
+          "notes": "This step is the feature-level acceptance gate per DISCUSS: the whole walking skeleton is green when this test is green. The canary red-run is enabled via a `cfg(feature = \"canary-bug\")` flag on SimObservationStore that deliberately breaks LWW on a specific seed — tests build with the feature, production builds do not. Document the feature flag in the SimObservationStore rustdoc. The JSON summary fields match the CI parser in `.github/workflows/ci.yml` lines 175-180 — do not rename fields without updating CI."
+        }
+      ]
+    }
+  ],
+  "implementation_scope": {
+    "source_directories": [
+      "crates/overdrive-core/src/",
+      "crates/overdrive-store-local/src/",
+      "crates/overdrive-sim/src/",
+      "xtask/src/"
+    ],
+    "test_directories": [
+      "crates/overdrive-core/tests/",
+      "crates/overdrive-store-local/tests/",
+      "crates/overdrive-sim/tests/",
+      "xtask/tests/"
+    ],
+    "excluded_patterns": [
+      "target/**",
+      "**/target/**",
+      ".github/**",
+      "docs/**"
+    ]
+  },
+  "walking_skeleton": {
+    "gate_step": "06-03",
+    "scenarios": [
+      "WS-1 (test-scenarios.md §1.1) — clean-clone cargo xtask dst is green within 60s",
+      "WS-2 (test-scenarios.md §1.2) — same seed reproduces trajectory bit-for-bit",
+      "WS-3 (test-scenarios.md §1.3) — red run prints a usable reproduction command"
+    ],
+    "strategy": "C (real local) per DWD-01 — LocalStore wraps real redb against tempfile::TempDir in every @walking_skeleton scenario",
+    "definition_of_done": "`cargo xtask dst` on a clean clone: seed printed on line 1, default invariant catalogue green, wall-clock < 60s, target/xtask/{dst-output.log,dst-summary.json} both written, `--seed N` reproduces bit-for-bit."
+  },
+  "quality_gates": {
+    "per_step": [
+      "Active acceptance test passes",
+      "All unit tests pass",
+      "All integration tests pass",
+      "cargo fmt passes",
+      "cargo clippy --workspace --all-targets -- -D warnings passes",
+      "cargo xtask dst-lint passes (from step 05-02 onward)",
+      "No test skips without documented justification",
+      "cargo mutants --in-diff origin/main reports >=80% kill rate on touched code"
+    ],
+    "feature_level": [
+      "All 65 scenarios from distill/test-scenarios.md have a corresponding Rust test",
+      "cargo xtask dst is green on a clean clone",
+      "cargo xtask dst-lint is green on a clean workspace",
+      "All three walking-skeleton scenarios (WS-1, WS-2, WS-3) pass",
+      "Required CI checks fmt-clippy / test / dst / dst-lint / mutants-diff all green"
+    ]
+  },
+  "tdd_rhythm_per_step": [
+    "1. RED (acceptance): write the failing #[test] translated from the DISTILL scenario into crates/{crate}/tests/acceptance/<name>.rs; confirm it fails for business-logic reason.",
+    "2. RED (unit, optional): if GREEN requires decomposition, add a failing unit test that drives the extracted helper.",
+    "3. GREEN: minimal implementation to pass.",
+    "4. REFACTOR: apply .claude/rules/development.md (Result alias, pass-through #[from], newtype completeness, rkyv for deterministic hashing, no Instant::now in core) and brief.md enforcement.",
+    "5. PROPTEST: where the step's scope includes a proptest mandatory call site per .claude/rules/testing.md (newtype roundtrip, rkyv roundtrip, snapshot roundtrip, hash determinism, LWW convergence), add the proptest block.",
+    "6. MUTATION: run `cargo mutants --in-diff origin/main --package <affected_crate>` locally; kill rate >=80% on the diff. Unjustified surviving mutants block the COMMIT.",
+    "7. POST-GREEN WIRING CHECK: git diff --name-only shows every file in implementation_scope.production_files actually changed — no Fixture Theater.",
+    "8. COMMIT: one commit per step with the step id in the message footer."
+  ],
+  "validation": {
+    "status": "approved",
+    "reviewed_at": "2026-04-22",
+    "reviewer": "nw-acceptance-designer-reviewer"
+  }
+}

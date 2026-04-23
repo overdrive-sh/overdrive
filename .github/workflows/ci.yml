@@ -1,0 +1,506 @@
+# Overdrive CI — Phase 1 foundation.
+#
+# Scope: Tier 1 of the four-tier model in `.claude/rules/testing.md`.
+# Phase 1 has no eBPF code, so Tiers 2 (BPF unit), 3 (integration-test vm
+# kernel matrix), and 4 (veristat / xdp-perf / PREVAIL) are deliberately
+# out of scope and will be introduced when the corresponding code lands.
+#
+# Required status checks for branch protection on `main` (configure on
+# GitHub under Settings > Branches > Branch protection rules):
+#
+#   - fmt-clippy
+#   - test
+#   - dst
+#   - dst-lint
+#   - mutants-diff
+#
+# Rationale references:
+#   - ADR-0006  (`cargo xtask dst` + `dst-lint` are the required CI checks;
+#                seed surfaced on failure; text + JSON artifacts uploaded)
+#   - ADR-0005  (test distribution — drives `cargo test` targets)
+#   - ADR-0003  (`package.metadata.overdrive.crate_class` labels; `dst-lint`
+#                uses these to identify core crates)
+#   - brief.md §9  (enforcement tooling surface)
+#   - .claude/rules/testing.md  (Tier 1 CI topology + mandatory mutation
+#                                testing kill-rate gate)
+#   - outcome-kpis.md  (K1: DST wall-clock < 60s; K2: lint gate 100%
+#                       effective, 0 false positives; K3: seed reproduces
+#                       bit-for-bit)
+
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Kill stale runs on force-push. Every run of the critical path rebuilds
+# the workspace; letting duplicates run is wasted runner time.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  # Proptest default matches .claude/rules/testing.md — CI runs 1024 cases
+  # per PR; nightly soaks higher elsewhere. Do not lower to dodge slow
+  # generators — fix the generator.
+  PROPTEST_CASES: "1024"
+  # NOTE: RUSTC_WRAPPER and SCCACHE_GHA_ENABLED are intentionally NOT set
+  # here. They are exported by each job's sccache setup step only when
+  # that step succeeds — so a GHA cache backend outage degrades the build
+  # to direct rustc (slow but successful) instead of failing every job
+  # before cargo runs. See docs/research/ci/sccache-gha-outage-hardening.md
+  # and mozilla/sccache#1751 (SCCACHE_IGNORE_SERVER_IO_ERROR does NOT
+  # cover backend startup probe failures).
+
+jobs:
+  # -------------------------------------------------------------------
+  # Format + Clippy — fastest feedback. Lefthook pre-commit runs the
+  # same checks locally (see lefthook.yml); CI is the authoritative gate.
+  # -------------------------------------------------------------------
+  fmt-clippy:
+    name: fmt + clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        # Pinned via rust-toolchain.toml (stable, rustfmt + clippy).
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "phase-1-fmt-clippy"
+
+      # sccache setup is soft-fail: if the GHA cache backend is unreachable
+      # (as happened on 2026-04-23), RUSTC_WRAPPER is left unset and cargo
+      # runs rustc directly. Slower, but green. See
+      # docs/research/ci/sccache-gha-outage-hardening.md §"Concrete Recommendation".
+      - id: sccache-setup
+        name: Setup sccache (soft-fail on cache backend outage)
+        continue-on-error: true
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Enable sccache when setup succeeded
+        if: steps.sccache-setup.outcome == 'success'
+        run: |
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+
+      - name: Warn when sccache unavailable
+        if: steps.sccache-setup.outcome != 'success'
+        run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+  # -------------------------------------------------------------------
+  # Unit + proptest — `cargo nextest run` for the main suite,
+  # `cargo test --doc` for rustdoc examples (nextest does not run
+  # doctests — https://nexte.st/book/usage.html#limitations).
+  #
+  # Default feature set only — slow / real-infra tests gated behind the
+  # `integration-tests` feature run in the dedicated `integration` job
+  # below. Splitting keeps this job under the K1 wall-clock budget and
+  # lets the slow lane fail independently without blocking unit
+  # feedback.
+  #
+  # Covers:
+  #   - Newtype roundtrip proptest (K5, K6)
+  #   - Trait non-substitutability compile-fail tests (trybuild)
+  #   - Rustdoc examples per `.claude/rules/development.md` §Documentation
+  #
+  # Does NOT cover:
+  #   - Snapshot roundtrip proptest (K6) — runs in `integration` job
+  #   - DST harness — runs in `dst` job below
+  # -------------------------------------------------------------------
+  test:
+    name: nextest + doctests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "phase-1-test"
+
+      # See fmt-clippy job above for rationale.
+      - id: sccache-setup
+        name: Setup sccache (soft-fail on cache backend outage)
+        continue-on-error: true
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Enable sccache when setup succeeded
+        if: steps.sccache-setup.outcome == 'success'
+        run: |
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+
+      - name: Warn when sccache unavailable
+        if: steps.sccache-setup.outcome != 'success'
+        run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+
+      - name: cargo nextest run --workspace (profile=ci)
+        # PROPTEST_CASES is inherited from the workflow-level env:
+        # declared at the top of this file (1024 per testing.md).
+        # Profile config lives in `.config/nextest.toml`.
+        run: cargo nextest run --workspace --locked --profile ci
+
+      - name: cargo test --doc --workspace
+        # Nextest does not execute doctests. Run them in a separate step
+        # so rustdoc examples are still verified — per
+        # `.claude/rules/development.md` §Documentation.
+        run: cargo test --doc --workspace --locked
+
+      - name: Upload nextest JUnit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nextest-junit
+          path: target/nextest/ci/junit.xml
+          retention-days: 14
+          if-no-files-found: warn
+
+  # -------------------------------------------------------------------
+  # Integration tests — slow / real-infra suites gated behind each
+  # crate's `integration-tests` feature. Per `.claude/rules/testing.md`
+  # §"Integration vs unit gating", any test that uses real infra,
+  # touches the filesystem, or otherwise exceeds the unit-test budget
+  # belongs here.
+  #
+  # Covers:
+  #   - Snapshot roundtrip proptest (K6 — LocalStore export → bootstrap
+  #     → export bit-identical) via overdrive-store-local
+  #
+  # Runs in parallel with the `test` job above so a slow integration
+  # failure does not delay unit-suite feedback.
+  # -------------------------------------------------------------------
+  integration:
+    name: nextest (integration-tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "phase-1-integration"
+
+      - id: sccache-setup
+        name: Setup sccache (soft-fail on cache backend outage)
+        continue-on-error: true
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Enable sccache when setup succeeded
+        if: steps.sccache-setup.outcome == 'success'
+        run: |
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+
+      - name: Warn when sccache unavailable
+        if: steps.sccache-setup.outcome != 'success'
+        run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+
+      - name: cargo nextest run --workspace --features integration-tests (profile=ci)
+        # Bare `--features integration-tests` enables the feature on
+        # every workspace member that defines it (Cargo silently
+        # ignores members without). New crates that add an
+        # integration-tests gate are picked up automatically — no edit
+        # to this step required.
+        #
+        # Filter `binary(integration)` selects only the integration
+        # entrypoint binaries (`tests/integration.rs` per
+        # `.claude/rules/testing.md` §"Integration vs unit gating") so
+        # the unit/proptest suite that already ran in the `test` job
+        # above is not re-executed here.
+        run: |
+          cargo nextest run --workspace --locked --profile ci \
+            --features integration-tests \
+            -E 'binary(integration)'
+
+      - name: Upload nextest JUnit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nextest-junit-integration
+          path: target/nextest/ci/junit.xml
+          retention-days: 14
+          if-no-files-found: warn
+
+  # -------------------------------------------------------------------
+  # DST — Tier 1 per testing.md. Invoked via the xtask wrapper per
+  # ADR-0006 (single canonical path for local + CI; seed printed on
+  # first line; failure block names invariant/seed/tick/host/reproduce;
+  # text log + JSON summary uploaded as artifacts regardless of outcome).
+  #
+  # Wall-clock budget: 60s per K1. CI job timeout guards against runaway
+  # runs that exceed the guardrail.
+  # -------------------------------------------------------------------
+  dst:
+    name: cargo xtask dst
+    runs-on: ubuntu-latest
+    # 10 min ceiling — K1 targets <60s; anything close to the ceiling
+    # means the guardrail is broken and the build should fail loudly.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "phase-1-dst"
+
+      # See fmt-clippy job above for rationale.
+      - id: sccache-setup
+        name: Setup sccache (soft-fail on cache backend outage)
+        continue-on-error: true
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Enable sccache when setup succeeded
+        if: steps.sccache-setup.outcome == 'success'
+        run: |
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+
+      - name: Warn when sccache unavailable
+        if: steps.sccache-setup.outcome != 'success'
+        run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
+
+      - name: cargo xtask dst
+        # The xtask wrapper writes:
+        #   target/xtask/dst-output.log   — full stdout/stderr
+        #   target/xtask/dst-summary.json — structured summary
+        # per ADR-0006 Decision § "Failure-artifact schema".
+        run: cargo xtask dst
+
+      - name: Upload DST artifacts
+        # Always upload — a killed or OOM-killed run still contains the
+        # seed on the first line of dst-output.log. The JSON summary is
+        # parseable by any CI dashboard without bespoke regex.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dst-output
+          path: |
+            target/xtask/dst-output.log
+            target/xtask/dst-summary.json
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Annotate failure with reproduction command
+        # On failure, extract the reproduction command from the JSON
+        # summary and emit it as a GitHub annotation so the seed is
+        # directly visible in the job summary UI — no artifact download
+        # needed to get the first-line seed.
+        if: failure()
+        run: |
+          if [ -f target/xtask/dst-summary.json ]; then
+            SEED=$(jq -r '.seed // "unknown"' target/xtask/dst-summary.json)
+            INV=$(jq -r '.invariant // "unknown"' target/xtask/dst-summary.json)
+            TICK=$(jq -r '.tick // "unknown"' target/xtask/dst-summary.json)
+            HOST=$(jq -r '.host // "unknown"' target/xtask/dst-summary.json)
+            REPRO=$(jq -r '.reproduce // "cargo xtask dst --seed <N>"' target/xtask/dst-summary.json)
+            {
+              echo "## DST failure"
+              echo ""
+              echo "| Field | Value |"
+              echo "|---|---|"
+              echo "| Seed | \`$SEED\` |"
+              echo "| Invariant | \`$INV\` |"
+              echo "| Tick | \`$TICK\` |"
+              echo "| Host | \`$HOST\` |"
+              echo ""
+              echo "Reproduce locally:"
+              echo ""
+              echo '```'
+              echo "$REPRO"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error title=DST failed::seed=$SEED invariant=$INV tick=$TICK host=$HOST — reproduce: $REPRO"
+          else
+            echo "::error title=DST failed::no dst-summary.json produced; check dst-output.log artifact for seed"
+          fi
+
+  # -------------------------------------------------------------------
+  # DST lint — banned-API scan per ADR-0003 + ADR-0006.
+  #
+  # Scans only crates with `package.metadata.overdrive.crate_class =
+  # "core"`. Blocks PRs that introduce Instant::now(), rand::random(),
+  # tokio::net::*, etc. in core crates.
+  #
+  # K2: 100% of smuggling attempts blocked; 0% false positives on
+  # wiring crates. A false positive here trains engineers to bypass
+  # the gate — treat one as a priority bug.
+  # -------------------------------------------------------------------
+  dst-lint:
+    name: cargo xtask dst-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "phase-1-dst-lint"
+
+      # See fmt-clippy job above for rationale.
+      - id: sccache-setup
+        name: Setup sccache (soft-fail on cache backend outage)
+        continue-on-error: true
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Enable sccache when setup succeeded
+        if: steps.sccache-setup.outcome == 'success'
+        run: |
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+
+      - name: Warn when sccache unavailable
+        if: steps.sccache-setup.outcome != 'success'
+        run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
+
+      - name: cargo xtask dst-lint
+        run: cargo xtask dst-lint
+
+  # -------------------------------------------------------------------
+  # Mutation testing — diff-scoped per PR.
+  #
+  # Delegates to `cargo xtask mutants --diff origin/main`, the canonical
+  # entry point per .claude/rules/testing.md §CI topology. The xtask
+  # wrapper owns:
+  #   - producing the diff file (`--in-diff` takes a file path, not a
+  #     git ref — https://mutants.rs/in-diff.html)
+  #   - invoking cargo-mutants
+  #   - parsing outcomes.json (the `summary` field, not `outcome`)
+  #   - enforcing the ≥80% kill-rate gate
+  #   - writing target/xtask/mutants-summary.json for the failure
+  #     annotation below (same shape idea as dst-summary.json)
+  #
+  # Excludes unsafe blocks, aya-rs eBPF programs, generated code, and
+  # async scheduling logic per testing.md "What it's NOT for" — exclusion
+  # paths live in .cargo/mutants.toml.
+  # -------------------------------------------------------------------
+  mutants-diff:
+    name: cargo mutants (diff)
+    runs-on: ubuntu-latest
+    # Only run on PRs — diff-scoping has nothing meaningful to do on a
+    # push to main (the diff is the merge commit itself).
+    if: github.event_name == 'pull_request'
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Fetch history so `git diff origin/main` has a base to diff
+          # against. Shallow clone + origin/main not fetched is the
+          # canonical mutants-diff misconfiguration.
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "phase-1-mutants"
+
+      # See fmt-clippy job above for rationale.
+      - id: sccache-setup
+        name: Setup sccache (soft-fail on cache backend outage)
+        continue-on-error: true
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Enable sccache when setup succeeded
+        if: steps.sccache-setup.outcome == 'success'
+        run: |
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+
+      - name: Warn when sccache unavailable
+        if: steps.sccache-setup.outcome != 'success'
+        run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
+
+      - name: Install cargo-mutants + cargo-nextest
+        # xtask mutants invokes cargo-mutants with `--test-tool=nextest`,
+        # so both binaries must be on PATH.
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants,cargo-nextest
+
+      - name: Ensure base ref available
+        run: git fetch origin main --depth=1 || true
+
+      - name: cargo xtask mutants --diff origin/main
+        run: cargo xtask mutants --diff origin/main
+
+      - name: Upload mutants report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutants-diff-report
+          path: |
+            target/xtask/mutants-summary.json
+            target/xtask/mutants.out/
+            target/xtask/mutants.diff
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Annotate failure with kill-rate detail
+        # Same pattern as the dst job — read the structured summary and
+        # render a step-summary table so the failure reason is visible
+        # in the GitHub UI without downloading the artifact.
+        if: failure()
+        run: |
+          SUMMARY=target/xtask/mutants-summary.json
+          if [ -f "$SUMMARY" ]; then
+            STATUS=$(jq -r '.status // "unknown"' "$SUMMARY")
+            RATE=$(jq -r '.kill_rate_pct // "unknown"' "$SUMMARY")
+            CAUGHT=$(jq -r '.caught // 0' "$SUMMARY")
+            MISSED=$(jq -r '.missed // 0' "$SUMMARY")
+            UNVIABLE=$(jq -r '.unviable // 0' "$SUMMARY")
+            REASON=$(jq -r '.reason // "see target/xtask/mutants.out/missed.txt"' "$SUMMARY")
+            {
+              echo "## mutants-diff failure"
+              echo ""
+              echo "| Field | Value |"
+              echo "|---|---|"
+              echo "| Status | \`$STATUS\` |"
+              echo "| Kill rate | ${RATE}% |"
+              echo "| Caught | $CAUGHT |"
+              echo "| Missed | $MISSED |"
+              echo "| Unviable | $UNVIABLE |"
+              echo "| Reason | $REASON |"
+              echo ""
+              echo "Reproduce locally:"
+              echo ""
+              echo '```'
+              echo "cargo xtask mutants --diff origin/main"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::error title=mutants failed::no mutants-summary.json produced; check artifact"
+          fi

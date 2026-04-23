@@ -1,0 +1,46 @@
+# `overdrive-store-local` hosts the real redb-backed `LocalStore` adapter
+# (per the architecture brief §3 crate topology and the US-03 reuse
+# table row 20).
+
+[package]
+name        = "overdrive-store-local"
+version     = "0.0.0"
+edition.workspace     = true
+rust-version.workspace = true
+license.workspace     = true
+authors.workspace     = true
+repository.workspace  = true
+publish               = false
+
+[package.metadata.overdrive]
+crate_class = "adapter-real"
+
+[features]
+# Opt-in gate for slow integration-shaped tests in this crate. The
+# snapshot-roundtrip proptest (`tests/snapshot_proptest.rs`) drives 1024
+# real redb open/put/export cycles per case and routinely exceeds the
+# 60-second nextest slow-test budget on developer hardware. Off by
+# default so `cargo nextest run --workspace` stays under the budget;
+# enable with `--features overdrive-store-local/integration-tests` (CI
+# does this in the dedicated slow lane). Mirrors the same gate shape
+# used in `xtask/Cargo.toml`.
+integration-tests = []
+
+[dependencies]
+overdrive-core.workspace = true
+redb.workspace           = true
+async-trait.workspace    = true
+bytes.workspace          = true
+futures.workspace        = true
+rkyv.workspace           = true
+thiserror.workspace      = true
+tokio.workspace          = true
+tokio-stream.workspace   = true
+
+[dev-dependencies]
+tempfile.workspace = true
+tokio              = { workspace = true }
+proptest.workspace = true
+
+[lints]
+workspace = true

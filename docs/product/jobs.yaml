@@ -1,0 +1,94 @@
+schema_version: 1
+
+# Jobs-to-be-done register for Overdrive.
+#
+# Phase 1 serves one job end-to-end. Other jobs are tracked here so we can
+# trace later stories to validated job statements rather than re-deriving
+# them. Per the wizard decisions, JTBD analysis is skipped for this feature
+# because motivation is already explicit in whitepaper §21 — the entries
+# below are distilled from the whitepaper, not from user interviews.
+
+jobs:
+  - id: J-PLAT-001
+    title: "Trust my distributed control plane under real failure conditions before I ship it"
+    situation: >
+      When I, an Overdrive platform engineer, change control-plane logic
+      (scheduler, reconciler, state-store behaviour, identity issuance),
+    motivation: >
+      I want to find concurrency, timing, partition, and ordering bugs
+      before they reach production and to reproduce any failure
+      deterministically from a seed,
+    outcome: >
+      so I can ship changes with evidence that named failure modes
+      (leader election under partition, gossip contagion, schema migration
+      storms, replay divergence) are caught on the CI critical path and not
+      in a customer incident at 3am.
+    source: whitepaper §21, .claude/rules/testing.md Tier 1
+    served_by_phase: 1
+    status: active
+
+  - id: J-PLAT-002
+    title: "Start a tenant in a 30MB footprint and grow to HA without downtime or a migration weekend"
+    situation: >
+      When an operator deploys a small tenant or dev cluster that does not
+      yet need three-node consensus,
+    motivation: >
+      I want a control plane that runs with no Raft overhead today and
+      can be promoted to HA later by re-exporting its state, without data
+      loss and without a rewrite,
+    outcome: >
+      so control plane density makes the small-tenant commercial tier
+      viable (~30MB per tenant vs ~24GB for HA-everywhere) and so the
+      single→HA migration is a commercial non-event.
+    source: whitepaper §4 (IntentStore), commercial.md "Control Plane Density"
+    served_by_phase: 1
+    status: active
+
+  - id: J-PLAT-003
+    title: "Enforce the intent/observation boundary as code, not as discipline"
+    situation: >
+      When I, an Overdrive platform engineer, write reconciler or store
+      code that touches cluster state,
+    motivation: >
+      I want the type system and a CI gate to prevent me from writing
+      intent into the eventually-consistent store or observation into the
+      linearizable store, rather than catching it in code review,
+    outcome: >
+      so the consistency-boundary violations that caused multi-year
+      production pain at other orchestrators (Fly gossip contagion,
+      schema-backfill storms) are structurally impossible in Overdrive.
+    source: whitepaper §4 "Consistency Guardrails", commercial.md
+    served_by_phase: 1
+    status: active
+
+  # Deferred to later features; tracked here for traceability.
+  - id: J-PLAT-004
+    title: "Run a reconciler I wrote against a simulated cluster and know it converges"
+    situation: >
+      When I write a new built-in reconciler,
+    motivation: >
+      I want to express its ESR contract (progress + stability) as
+      assert_always!/assert_eventually! invariants against the DST harness,
+    outcome: >
+      so reconciler correctness is mechanically checked before I rely on
+      it in production.
+    source: whitepaper §18
+    served_by_phase: 2
+    status: deferred
+
+  - id: J-OPS-001
+    title: "Bill a tenant for exactly what they used, with kernel evidence"
+    situation: >
+      When a billing dispute arises,
+    motivation: >
+      I want cryptographic identity on every flow event and per-tenant
+      resource totals that I can replay from source data,
+    outcome: >
+      so the resolution is a SQL query, not a negotiation.
+    source: commercial.md "Billing Infrastructure"
+    served_by_phase: 4+
+    status: deferred
+
+changelog:
+  - date: 2026-04-21
+    change: Initial job register for phase-1-foundation DISCUSS wave.

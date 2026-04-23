@@ -1,0 +1,119 @@
+# Overdrive nightly — full-workspace mutation testing, trend tracking.
+#
+# Scope: nightly soak; NOT gating PRs. Per-PR mutation testing is
+# diff-scoped in ci.yml. The nightly job exists to catch baseline drift
+# that a diff-scoped run cannot see (e.g. a test refactor that weakens
+# assertions on code outside the current PR).
+#
+# Baseline lives under `mutants-baseline/main/` and is maintained by the
+# platform team — this workflow compares the nightly run against it.
+#
+# References:
+#   - .claude/rules/testing.md §Mutation testing (cargo-mutants) —
+#     "Regression gate on direction, not just level."
+#   - CI topology job I: `cargo xtask mutants --workspace` full corpus;
+#     trend tracking.
+#
+# Behaviour:
+#   - Drift > 2 percentage points below baseline → soft-fail (warn via
+#     GitHub step summary; does NOT block main).
+#   - Absolute kill rate < 60% (critical regression) → hard-fail, open
+#     issue via gh-cli in a follow-up workflow.
+#
+# This job is NOT in the required-status-checks set for branch
+# protection. It runs on schedule, writes a report, and annotates.
+
+name: Nightly
+
+on:
+  schedule:
+    # 03:13 UTC — off-peak for US/EU runner pools; the 13-minute offset
+    # prevents piling up against the top-of-hour cron wave that other
+    # projects tend to use.
+    - cron: '13 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+jobs:
+  mutants-workspace:
+    name: cargo mutants (full workspace)
+    runs-on: ubuntu-latest
+    timeout-minutes: 360  # 6h ceiling; full corpus takes as long as it takes
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "nightly-mutants"
+
+      - uses: mozilla-actions/sccache-action@v0.0.6
+        with:
+          version: "v0.8.2"
+
+      - name: Install cargo-mutants + cargo-nextest
+        # xtask mutants invokes cargo-mutants with `--test-tool=nextest`,
+        # so both binaries must be on PATH.
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants,cargo-nextest
+
+      # Delegate to the canonical entry point per .claude/rules/testing.md
+      # §CI topology. The xtask wrapper owns cargo-mutants invocation,
+      # outcomes.json parsing, the ≥60% absolute floor, the -2pp drift
+      # warn, baseline seeding when absent, and the structured summary.
+      - name: cargo xtask mutants --workspace
+        run: cargo xtask mutants --workspace
+
+      # Render the nightly trend table into the job summary from the
+      # structured JSON produced by xtask — the same pattern the dst job
+      # uses on failure. Non-blocking: a missing summary means xtask
+      # failed earlier in the run (which already surfaced its own error).
+      - name: Render trend summary
+        if: always()
+        run: |
+          SUMMARY=target/xtask/mutants-summary.json
+          if [ ! -f "$SUMMARY" ]; then
+            echo "no mutants-summary.json — xtask did not produce a report"
+            exit 0
+          fi
+          RATE=$(jq -r '.kill_rate_pct // "unknown"' "$SUMMARY")
+          BASELINE=$(jq -r '.baseline_pct // "n/a"' "$SUMMARY")
+          DRIFT=$(jq -r '.drift_pp // "n/a"' "$SUMMARY")
+          TOTAL=$(jq -r '.total_mutants // 0' "$SUMMARY")
+          CAUGHT=$(jq -r '.caught // 0' "$SUMMARY")
+          MISSED=$(jq -r '.missed // 0' "$SUMMARY")
+          UNVIABLE=$(jq -r '.unviable // 0' "$SUMMARY")
+          STATUS=$(jq -r '.status // "unknown"' "$SUMMARY")
+          {
+            echo "## Nightly mutation testing"
+            echo ""
+            echo "| Metric | Value |"
+            echo "|---|---|"
+            echo "| Total mutations | $TOTAL |"
+            echo "| Caught | $CAUGHT |"
+            echo "| Missed | $MISSED |"
+            echo "| Unviable | $UNVIABLE |"
+            echo "| Kill rate | ${RATE}% |"
+            echo "| Baseline | ${BASELINE}% |"
+            echo "| Delta | ${DRIFT} pp |"
+            echo "| Status | \`$STATUS\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload nightly mutants report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutants-nightly-report
+          path: |
+            target/xtask/mutants-summary.json
+            target/xtask/mutants.out/
+          retention-days: 30
+          if-no-files-found: warn
