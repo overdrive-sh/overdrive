@@ -28,11 +28,45 @@ consumer.
 
 ## Running tests — foreground, always
 
-**Run test commands directly. Do not background them.** `cargo test`,
-`cargo xtask dst`, `cargo xtask bpf-unit`, `cargo xtask integration-test`,
-and every other test invocation goes through the `Bash` tool with
+> **The test runner is `cargo nextest run`. Not `cargo test`.**
+>
+> `cargo test` is **blocked** by a pre-tool hook
+> (`.claude/hooks/block-cargo-test.ts`) outside the one legitimate case:
+> `cargo test --doc ...` (nextest cannot execute doctests). Every other
+> shape — `cargo test`, `cargo test -p foo`, `cargo test --workspace`,
+> `cargo test -- <filter>` — is rejected at the tool-call boundary.
+>
+> **Rewrite your command before submitting it:**
+>
+> | ❌ don't | ✅ do |
+> |---|---|
+> | `cargo test` | `cargo nextest run` |
+> | `cargo test -p CRATE` | `cargo nextest run -p CRATE` |
+> | `cargo test -p CRATE --lib` | `cargo nextest run -p CRATE --lib` |
+> | `cargo test -p CRATE --test acceptance` | `cargo nextest run -p CRATE --test acceptance` |
+> | `cargo test --workspace --locked` | `cargo nextest run --workspace --locked` |
+> | `cargo test -- <filter>` | `cargo nextest run -E 'test(<filter>)'` |
+> | `cargo test -- --nocapture` | `cargo nextest run --no-capture` |
+> | `cargo test --features X` | `cargo nextest run --features X` |
+>
+> The **only** allowed `cargo test` is `cargo test --doc ...` for rustdoc
+> examples. Nothing else. If you think you need `cargo test` elsewhere,
+> you are wrong — reach for `cargo nextest run` instead.
+
+**Run test commands directly. Do not background them.**
+`cargo nextest run`, `cargo test --doc`, `cargo xtask dst`,
+`cargo xtask bpf-unit`, `cargo xtask integration-test`, and every other
+test invocation goes through the `Bash` tool with
 `run_in_background: false` (the default). Wait for the command to finish;
 read the full output in the tool result.
+
+**Runner: `cargo-nextest`.** The project-wide runner is
+[`cargo-nextest`](https://nexte.st). `cargo test` is reserved for
+*doctests only* — nextest does not execute them. Every nextest
+invocation in CI is paired with a `cargo test --doc` counterpart; in
+lefthook, doctests run scoped per-crate at *pre-commit* time (tight
+feedback for rustdoc examples), while the nextest suite runs at
+pre-push. Profile config lives in `.config/nextest.toml`.
 
 - **Do NOT** set `run_in_background: true` on a test command and then
   poll with `tail`, `cat`, `wait`, or sleep loops against the output
@@ -44,10 +78,13 @@ read the full output in the tool result.
   command itself is fine if you know you only want the last N lines —
   but run it synchronously, not in the background.
 - **Prefer running only the affected tests.** Default to
-  `cargo test -p <crate>` for the crate you changed, or
-  `cargo test -p <crate> <filter>` for a specific test or module. A
-  whole-workspace run is the exception — reserve it for the final
-  pre-commit check or when a change crosses crate boundaries.
+  `cargo nextest run -p <crate>` for the crate you changed, or
+  `cargo nextest run -p <crate> -E 'test(<filter>)'` for a specific
+  test. A whole-workspace run is the exception — reserve it for the
+  final pre-commit check or when a change crosses crate boundaries.
+- **Doctests are a separate step.** `cargo test --doc -p <crate>` when
+  you touch a rustdoc example; `cargo test --doc --workspace` before
+  push. Never rely on nextest to catch a broken doctest.
 - **Long-running suites are still foreground.** When a whole-workspace
   run is genuinely warranted, set a `timeout` up to 600000ms (10 min)
   and let it run. Minutes of waiting is cheaper than poll cycles that
@@ -188,7 +225,8 @@ kernel attachment — that is Tier 3.
 ### Rules
 
 - **Seed printed on failure.** Reproduce with
-  `PROPTEST_CASES=1 PROPTEST_REPLAY=<seed> cargo test <name>`.
+  `PROPTEST_CASES=1 PROPTEST_REPLAY=<seed> cargo nextest run -E 'test(<name>)'`
+  (or `cargo test --doc <name>` if the failing case is a doctest).
 - **Shrink before filing.** Never file a bug against a raw failure — let
   proptest minimise the counter-example first. Unshrunk reports hide the
   actual trigger.
@@ -327,10 +365,14 @@ reviewed per-PR, not aggregated across releases.
   may still pass correctness tests. Performance regressions are Tier 4's
   job.
 - **`cargo xtask dst` / Tier 3 integration.** `cargo-mutants` reruns
-  `cargo test` per mutation; DST and real-kernel tests are too slow for
-  the per-mutation budget and are excluded from the mutants run. This
-  means mutation testing only covers code reachable from the unit-level
-  suite — another reason unit-level invariants must be strong.
+  the unit suite per mutation under `--test-tool=nextest` (matches the
+  project runner); DST and real-kernel tests are too slow for the
+  per-mutation budget and are excluded from the mutants run. Doctests
+  are also skipped by nextest and therefore by the mutants pass —
+  doctest coverage is verified by the paired `cargo test --doc` step,
+  not by mutation testing. This means mutation testing only covers
+  code reachable from the unit-level suite — another reason unit-level
+  invariants must be strong.
 
 ---
 
@@ -497,13 +539,15 @@ Tests and chaos share the fault definitions; a fault is specified once.
 
 ```
 Per-PR (critical path ≈ 15 minutes):
-  A  cargo test                          unit + proptest, no BPF       (s)
+  A1 cargo nextest run --workspace       unit + proptest, no BPF       (s)
+  A2 cargo test --doc --workspace        rustdoc examples              (s)
   B  cargo xtask dst                     Tier 1                        (min)
   C  cargo xtask bpf-unit                Tier 2                        (min)
   D  cargo xtask integration-test vm     Tier 3, kernel matrix         (10 min)
   E  cargo xtask verifier-regress        Tier 4 — veristat             (min)
      cargo xtask xdp-perf                Tier 4 — xdp-bench            (min)
-  F  cargo xtask mutants --in-diff       diff-scoped; kill rate ≥ 80%  (min)
+  F  cargo xtask mutants --in-diff       diff-scoped (nextest per      (min)
+                                         mutation); kill rate ≥ 80%
 
 Nightly:
   G  Tier 3 + Tier 4 against bpf-next                                  soft-fail

@@ -58,6 +58,32 @@ pre-commit:
         done
       fail_text: |
         Clippy warnings. Fix or `#[allow]` with justification.
+    doctest:
+      tags: [rust]
+      glob: "*.rs"
+      # Doctests run pre-commit, not pre-push — rustdoc examples are
+      # per `.claude/rules/development.md` §Documentation and break
+      # cheaply, so catch them at commit time. Scoped per-crate (same
+      # walk-up pattern as clippy) to keep the hook fast on focused
+      # commits. Nextest does not run doctests, so this step is the
+      # only place they get executed before CI.
+      run: |
+        set -euo pipefail
+        pkgs=$(for f in {staged_files}; do
+          d=$(dirname "$f")
+          while [ "$d" != "." ] && [ "$d" != "/" ]; do
+            if [ -f "$d/Cargo.toml" ] && grep -q '^\[package\]' "$d/Cargo.toml"; then
+              grep -m1 '^name[[:space:]]*=' "$d/Cargo.toml" | sed -E 's/.*"([^"]+)".*/\1/'
+              break
+            fi
+            d=$(dirname "$d")
+          done
+        done | sort -u)
+        for p in $pkgs; do
+          cargo test --doc -p "$p"
+        done
+      fail_text: |
+        Doctest failed. Rustdoc examples are executable per development.md.
     toml-check:
       tags: [toml, fast]
       glob:
@@ -97,10 +123,21 @@ pre-push:
     - merge
     - rebase
   commands:
-    test:
-      run: cargo test --workspace
+    # Unit + integration + proptest via nextest. `cargo-nextest` must be
+    # installed locally — run `cargo xtask dev-setup` once per clone, or
+    # install manually via `cargo install cargo-nextest --locked` /
+    # `brew install cargo-nextest`. See `.config/nextest.toml` for the
+    # profile definitions.
+    #
+    # Doctests are not re-run here — they run scoped per-crate in the
+    # pre-commit hook above, which catches broken rustdoc examples at
+    # commit time.
+    nextest:
+      run: cargo nextest run --workspace
       fail_text: |
         Tests failed. Fix or push with --no-verify for a WIP branch.
+        If `cargo-nextest` is not installed, run:
+          cargo xtask dev-setup
 
 # ────────────────────────────────────────────────────────────────────────────
 # commit-msg — placeholder. Enable when we pick a convention

@@ -87,6 +87,20 @@ enum Task {
         action: HooksAction,
     },
 
+    /// One-shot developer bootstrap: installs the CLI tools this
+    /// workspace depends on (cargo-nextest), runs `lefthook install`
+    /// when lefthook is present, and prints install hints for anything
+    /// that cannot be auto-installed.
+    ///
+    /// Idempotent — running it against an already-set-up checkout is a
+    /// no-op modulo the `lefthook install` step (which itself is a
+    /// no-op when the hooks are already wired).
+    ///
+    /// Rationale: Cargo has no `[tool-deps]` concept, so the canonical
+    /// way to pin the project's tool versions is to treat "install the
+    /// tools" as a repo artifact. This subcommand IS that artifact.
+    DevSetup,
+
     /// Manage MCP server configuration for this project (`.mcp.json`).
     ///
     /// Claude Code does not expand environment variables inside `.mcp.json`,
@@ -212,7 +226,49 @@ fn run() -> Result<()> {
         Task::Lima { action } => lima(action),
         Task::Hooks { action } => hooks(action),
         Task::Mcp { action } => mcp(action),
+        Task::DevSetup => dev_setup(),
     }
+}
+
+/// One-shot developer bootstrap — installs the tools this workspace
+/// depends on. Keep the list here in sync with `.config/nextest.toml`
+/// and the install hints in `xtask::mutants` / `lefthook.yml`.
+fn dev_setup() -> Result<()> {
+    // 1. cargo-nextest — the project-wide test runner per
+    //    `.claude/rules/testing.md` §"Running tests — foreground, always".
+    //    Idempotent: `cargo install --locked` no-ops when the exact
+    //    locked version is already installed.
+    if Command::new("sh")
+        .arg("-c")
+        .arg("command -v cargo-nextest")
+        .status()
+        .is_ok_and(|s| s.success())
+    {
+        eprintln!("xtask dev-setup: cargo-nextest already on PATH");
+    } else {
+        sh(
+            "cargo install cargo-nextest --locked",
+            Command::new(cargo()).args(["install", "cargo-nextest", "--locked"]),
+        )?;
+    }
+
+    // 2. lefthook — cannot be installed via cargo (Go binary). Hint
+    //    and skip if absent; otherwise run `lefthook install` so the
+    //    repo's pre-commit / pre-push hooks are wired on this checkout.
+    let lefthook_present =
+        Command::new("sh").arg("-c").arg("command -v lefthook").status().is_ok_and(|s| s.success());
+    if lefthook_present {
+        sh("lefthook install", Command::new("lefthook").arg("install"))?;
+    } else {
+        eprintln!(
+            "xtask dev-setup: lefthook not found on PATH. Install it with:\n  \
+             brew install lefthook  # or see https://lefthook.dev/installation/\n  \
+             Then re-run `cargo xtask dev-setup` to wire the git hooks."
+        );
+    }
+
+    eprintln!("xtask dev-setup: done");
+    Ok(())
 }
 
 fn mcp(action: McpAction) -> Result<()> {
@@ -394,8 +450,10 @@ fn which_or_hint(binary: &str, install_hint: &str) -> Result<()> {
 
 fn bpf_unit() -> Result<()> {
     // Placeholder — `crates/overdrive-bpf` lands in Phase 2. This will
-    // invoke `cargo test --package overdrive-bpf --test '*'` against the
-    // BPF_PROG_TEST_RUN harness.
+    // invoke `cargo nextest run -p overdrive-bpf --test '*'` against the
+    // BPF_PROG_TEST_RUN harness. Nextest is the project-wide runner
+    // (see `.config/nextest.toml`); this subcommand keeps the same
+    // invariant.
     tracing_placeholder("bpf-unit: overdrive-bpf crate lands in Phase 2")
 }
 
@@ -448,7 +506,18 @@ fn ci() -> Result<()> {
             "warnings",
         ]),
     )?;
-    sh("cargo test", Command::new(cargo()).args(["test", "--workspace", "--all-targets"]))
+    // nextest for the main suite, separate `cargo test --doc` for rustdoc
+    // examples. Nextest does not execute doctests — see `.config/nextest.toml`
+    // and `.github/workflows/ci.yml`'s `test` job for the paired structure.
+    which_or_hint(
+        "cargo-nextest",
+        "cargo install cargo-nextest --locked  # or: brew install cargo-nextest",
+    )?;
+    sh(
+        "cargo nextest run",
+        Command::new(cargo()).args(["nextest", "run", "--workspace", "--all-targets"]),
+    )?;
+    sh("cargo test --doc", Command::new(cargo()).args(["test", "--doc", "--workspace"]))
 }
 
 fn sh(label: &str, cmd: &mut Command) -> Result<()> {

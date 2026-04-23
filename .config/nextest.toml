@@ -1,0 +1,39 @@
+# nextest — the test runner for Overdrive. See `.claude/rules/testing.md`
+# §"Running tests — foreground, always". Nextest replaces `cargo test` for
+# everything except doctests (which nextest does not run; the
+# `cargo test --doc` step exists alongside every nextest invocation in CI
+# and lefthook).
+#
+# Profiles:
+#   default — developer loop. Unlimited retries disabled; fail-fast on.
+#   ci      — CI gate. JUnit output for GitHub summary parsing, no retries
+#             (flaky tests are bugs — testing.md), and a slow-test timeout
+#             that matches K1's 60-second Tier 1 wall-clock budget.
+#
+# References:
+#   - https://nexte.st/book/configuration.html
+#   - .claude/rules/testing.md §"Running tests — foreground, always"
+#   - docs/product/architecture/adr-0006-ci-wiring-dst-gates.md (K1 budget)
+
+[profile.default]
+# Developer-loop: fail fast, no retries. A test that only passes on
+# rerun is either a real bug or a non-determinism leak — both must be
+# fixed at the source, never "just run it again."
+fail-fast = true
+retries = 0
+
+[profile.ci]
+# CI runs the same suite with structured output. Retries stay at zero:
+# `.claude/rules/testing.md` — "Flaky DST is a bug … never a just-rerun-it."
+# The same discipline applies to every other tier nextest covers.
+fail-fast = true
+retries = 0
+# Slow-test annotation fires at the K1 Tier 1 wall-clock budget. DST's
+# own 60s guardrail is enforced inside the xtask wrapper (ADR-0006); the
+# slow-timeout here is a belt-and-braces warning for other suites that
+# should not approach that budget.
+slow-timeout = { period = "60s", terminate-after = 3 }
+
+[profile.ci.junit]
+# Parsed by the GitHub Actions summary step in `.github/workflows/ci.yml`.
+path = "junit.xml"

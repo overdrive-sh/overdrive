@@ -69,6 +69,10 @@ pub const WORKSPACE_DRIFT_WARN_PP: f64 = -2.0;
 /// Entry point called from `main.rs`.
 pub fn run(mode: &Mode) -> Result<()> {
     which_cargo_mutants()?;
+    // We pass `--test-tool=nextest` below, so cargo-nextest must also
+    // be on PATH. Fail fast with an install hint rather than letting
+    // cargo-mutants report a cryptic subprocess error per mutation.
+    which_cargo_nextest()?;
 
     // `cargo-mutants --output <DIR>` *creates* a `mutants.out/` subdir
     // within <DIR> (see `cargo mutants --help`). So we pass the xtask
@@ -132,6 +136,24 @@ fn which_cargo_mutants() -> Result<()> {
     Ok(())
 }
 
+fn which_cargo_nextest() -> Result<()> {
+    let found = Command::new("sh")
+        .arg("-c")
+        .arg("command -v cargo-nextest")
+        .status()
+        .is_ok_and(|s| s.success());
+    if !found {
+        bail!(
+            "`cargo-nextest` not found on PATH. xtask mutants runs \
+             cargo-mutants with `--test-tool=nextest` per \
+             `.config/nextest.toml`. Install it with:\n\
+             cargo install cargo-nextest --locked\n\
+             (or, on CI, via `taiki-e/install-action` with `tool: cargo-nextest`)"
+        );
+    }
+    Ok(())
+}
+
 /// Run `cargo mutants` with the flags appropriate to `mode`. The diff
 /// file (if any) is written under the xtask target dir.
 ///
@@ -143,6 +165,14 @@ fn which_cargo_mutants() -> Result<()> {
 fn invoke_cargo_mutants(mode: &Mode, output_parent: &Path) -> Result<std::process::ExitStatus> {
     let mut cmd = Command::new(cargo());
     cmd.arg("mutants").arg("--output").arg(output_parent);
+    // Run the generated test suite under nextest — matches the project's
+    // primary runner (`.config/nextest.toml`) instead of plain
+    // `cargo test`. Doctests are not re-run per mutation (nextest skips
+    // them by design); the gates that matter for mutation testing live
+    // in the unit/integration/proptest suites that nextest does run.
+    // See https://mutants.rs/shards.html and
+    // https://github.com/sourcefrog/cargo-mutants#using-nextest.
+    cmd.arg("--test-tool=nextest");
 
     match mode {
         Mode::Diff { base } => {

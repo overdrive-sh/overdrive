@@ -58,10 +58,12 @@ jobs:
         with:
           version: "v0.8.2"
 
-      - name: Install cargo-mutants
+      - name: Install cargo-mutants + cargo-nextest
+        # xtask mutants invokes cargo-mutants with `--test-tool=nextest`,
+        # so both binaries must be on PATH.
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-mutants
+          tool: cargo-mutants,cargo-nextest
 
       # Delegate to the canonical entry point per .claude/rules/testing.md
       # §CI topology. The xtask wrapper owns cargo-mutants invocation,

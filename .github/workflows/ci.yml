@@ -107,20 +107,23 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
 
   # -------------------------------------------------------------------
-  # Unit + proptest (plain `cargo test --workspace`).
+  # Unit + proptest — `cargo nextest run` for the main suite,
+  # `cargo test --doc` for rustdoc examples (nextest does not run
+  # doctests — https://nexte.st/book/usage.html#limitations).
   #
   # Covers:
   #   - Newtype roundtrip proptest (K5, K6)
   #   - Snapshot roundtrip proptest (K6 — LocalStore export → bootstrap
   #     → export bit-identical)
   #   - Trait non-substitutability compile-fail tests (trybuild)
+  #   - Rustdoc examples per `.claude/rules/development.md` §Documentation
   #
   # Does NOT cover the DST harness — that is the dedicated `dst` job
   # below, which invokes the xtask wrapper for seed surfacing per
   # ADR-0006.
   # -------------------------------------------------------------------
   test:
-    name: cargo test (unit + proptest)
+    name: nextest + doctests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -147,10 +150,31 @@ jobs:
         if: steps.sccache-setup.outcome != 'success'
         run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
 
-      - name: cargo test --workspace
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+
+      - name: cargo nextest run --workspace (profile=ci)
         # PROPTEST_CASES is inherited from the workflow-level env:
         # declared at the top of this file (1024 per testing.md).
-        run: cargo test --workspace --locked
+        # Profile config lives in `.config/nextest.toml`.
+        run: cargo nextest run --workspace --locked --profile ci
+
+      - name: cargo test --doc --workspace
+        # Nextest does not execute doctests. Run them in a separate step
+        # so rustdoc examples are still verified — per
+        # `.claude/rules/development.md` §Documentation.
+        run: cargo test --doc --workspace --locked
+
+      - name: Upload nextest JUnit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nextest-junit
+          path: target/nextest/ci/junit.xml
+          retention-days: 14
+          if-no-files-found: warn
 
   # -------------------------------------------------------------------
   # DST — Tier 1 per testing.md. Invoked via the xtask wrapper per
@@ -344,10 +368,12 @@ jobs:
         if: steps.sccache-setup.outcome != 'success'
         run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
 
-      - name: Install cargo-mutants
+      - name: Install cargo-mutants + cargo-nextest
+        # xtask mutants invokes cargo-mutants with `--test-tool=nextest`,
+        # so both binaries must be on PATH.
         uses: taiki-e/install-action@v2
         with:
-          tool: cargo-mutants
+          tool: cargo-mutants,cargo-nextest
 
       - name: Ensure base ref available
         run: git fetch origin main --depth=1 || true
