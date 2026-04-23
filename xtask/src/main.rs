@@ -57,6 +57,20 @@ enum Task {
     /// Tier 4 — XDP throughput / p99 regression (`xdp-bench`).
     XdpPerf,
 
+    /// Mutation testing (`cargo-mutants`) — diff-scoped per PR or
+    /// full-workspace (nightly).
+    ///
+    /// Exactly one of `--diff` or `--workspace` must be given. Both
+    /// write `target/xtask/mutants-summary.json` with the gate verdict
+    /// and kill-rate figures; exit status is zero iff the gate passed.
+    ///
+    /// Thresholds match `.claude/rules/testing.md`:
+    ///
+    /// - `--diff`: kill rate ≥ 80% (hard fail below).
+    /// - `--workspace`: kill rate ≥ 60% absolute floor (hard fail);
+    ///   drift ≤ -2pp vs. baseline is a soft-warn.
+    Mutants(MutantsArgs),
+
     /// Lint + format check (mirrors CI).
     Ci,
 
@@ -83,6 +97,37 @@ enum Task {
         #[command(subcommand)]
         action: McpAction,
     },
+}
+
+#[derive(Debug, Parser)]
+#[command(
+    about = "Mutation testing (cargo-mutants) — diff or workspace mode",
+    long_about = "Exactly one of --diff or --workspace must be given. Writes \
+                  target/xtask/mutants-summary.json; exit status is zero iff \
+                  the gate passed (≥80% kill rate for --diff; ≥60% absolute \
+                  floor for --workspace, with drift ≤ -2pp as a soft-warn)."
+)]
+struct MutantsArgs {
+    /// Diff-scoped: git ref to diff against (e.g. `origin/main`).
+    /// Produces a diff file and passes it to `cargo mutants --in-diff`.
+    #[arg(long, group = "mutants_mode", value_name = "BASE_REF")]
+    diff: Option<String>,
+
+    /// Full-workspace mode. Compares the run against the baseline at
+    /// the path given by `--baseline` (default:
+    /// `mutants-baseline/main/kill_rate.txt`).
+    #[arg(long, group = "mutants_mode")]
+    workspace: bool,
+
+    /// Path to the stored baseline kill rate for `--workspace`
+    /// (percent as a float, e.g. `75.0`). Seeded if missing.
+    #[arg(
+        long,
+        value_name = "BASELINE_PATH",
+        default_value = "mutants-baseline/main/kill_rate.txt",
+        requires = "workspace"
+    )]
+    baseline: std::path::PathBuf,
 }
 
 #[derive(Debug, Clone, Copy, Subcommand)]
@@ -162,6 +207,7 @@ fn run() -> Result<()> {
         },
         Task::VerifierRegress => verifier_regress(),
         Task::XdpPerf => xdp_perf(),
+        Task::Mutants(args) => mutants(args),
         Task::Ci => ci(),
         Task::Lima { action } => lima(action),
         Task::Hooks { action } => hooks(action),
@@ -361,6 +407,19 @@ fn verifier_regress() -> Result<()> {
 
 fn xdp_perf() -> Result<()> {
     tracing_placeholder("xdp-perf: xdp-bench harness lands in Phase 2")
+}
+
+fn mutants(args: MutantsArgs) -> Result<()> {
+    let mode = match (args.diff, args.workspace) {
+        (Some(base), false) => xtask::mutants::Mode::Diff { base },
+        (None, true) => xtask::mutants::Mode::Workspace { baseline_path: args.baseline },
+        (Some(_), true) => {
+            // clap's `group` should prevent this, but defence in depth.
+            bail!("--diff and --workspace are mutually exclusive")
+        }
+        (None, false) => bail!("must give exactly one of --diff <BASE_REF> or --workspace"),
+    };
+    xtask::mutants::run(&mode)
 }
 
 fn ci() -> Result<()> {

@@ -230,16 +230,20 @@ jobs:
   # -------------------------------------------------------------------
   # Mutation testing — diff-scoped per PR.
   #
-  # Runs `cargo mutants --in-diff origin/main` so only mutations
-  # overlapping the PR diff are considered. Kill-rate gate ≥ 80% per
-  # .claude/rules/testing.md. Full-corpus runs are nightly (see
-  # nightly.yml).
+  # Delegates to `cargo xtask mutants --diff origin/main`, the canonical
+  # entry point per .claude/rules/testing.md §CI topology. The xtask
+  # wrapper owns:
+  #   - producing the diff file (`--in-diff` takes a file path, not a
+  #     git ref — https://mutants.rs/in-diff.html)
+  #   - invoking cargo-mutants
+  #   - parsing outcomes.json (the `summary` field, not `outcome`)
+  #   - enforcing the ≥80% kill-rate gate
+  #   - writing target/xtask/mutants-summary.json for the failure
+  #     annotation below (same shape idea as dst-summary.json)
   #
   # Excludes unsafe blocks, aya-rs eBPF programs, generated code, and
   # async scheduling logic per testing.md "What it's NOT for" — exclusion
-  # paths live in .cargo/mutants.toml (to be created by the crafter
-  # when mutants first runs; this workflow will fail loudly and point at
-  # the missing config if absent).
+  # paths live in .cargo/mutants.toml.
   # -------------------------------------------------------------------
   mutants-diff:
     name: cargo mutants (diff)
@@ -251,7 +255,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # Fetch history so `--in-diff origin/main` has a base to diff
+          # Fetch history so `git diff origin/main` has a base to diff
           # against. Shallow clone + origin/main not fetched is the
           # canonical mutants-diff misconfiguration.
           fetch-depth: 0
@@ -272,44 +276,53 @@ jobs:
       - name: Ensure base ref available
         run: git fetch origin main --depth=1 || true
 
-      - name: cargo mutants --in-diff
-        # Kill rate is enforced by cargo-mutants via --minimum-test-timeout
-        # and the default "missed" non-zero exit. The 80% gate is
-        # mechanised here: mutants writes its JSON to
-        # `mutants.out/outcomes.json`; we parse and compare.
-        run: |
-          set -euo pipefail
-          cargo mutants --in-diff origin/main --output mutants.out --json || true
-          if [ ! -f mutants.out/outcomes.json ]; then
-            echo "::error title=mutants::no outcomes.json produced — mutants invocation failed"
-            exit 1
-          fi
-          python3 - <<'PY'
-          import json, sys
-          with open("mutants.out/outcomes.json") as f:
-              data = json.load(f)
-          outcomes = data.get("outcomes", [])
-          if not outcomes:
-              print("no mutations in diff — nothing to gate on")
-              sys.exit(0)
-          total = len(outcomes)
-          caught = sum(1 for o in outcomes if o.get("outcome") == "caught")
-          missed = sum(1 for o in outcomes if o.get("outcome") == "missed")
-          timeout = sum(1 for o in outcomes if o.get("outcome") == "timeout")
-          unviable = sum(1 for o in outcomes if o.get("outcome") == "unviable")
-          kill_rate = (caught / total) * 100 if total else 100.0
-          print(f"mutations: total={total} caught={caught} missed={missed} "
-                f"timeout={timeout} unviable={unviable} kill_rate={kill_rate:.1f}%")
-          if kill_rate < 80.0:
-              print(f"::error title=mutants kill rate::{kill_rate:.1f}% < 80% threshold")
-              sys.exit(1)
-          PY
+      - name: cargo xtask mutants --diff origin/main
+        run: cargo xtask mutants --diff origin/main
 
       - name: Upload mutants report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: mutants-diff-report
-          path: mutants.out/
+          path: |
+            target/xtask/mutants-summary.json
+            target/xtask/mutants.out/
+            target/xtask/mutants.diff
           retention-days: 14
           if-no-files-found: warn
+
+      - name: Annotate failure with kill-rate detail
+        # Same pattern as the dst job — read the structured summary and
+        # render a step-summary table so the failure reason is visible
+        # in the GitHub UI without downloading the artifact.
+        if: failure()
+        run: |
+          SUMMARY=target/xtask/mutants-summary.json
+          if [ -f "$SUMMARY" ]; then
+            STATUS=$(jq -r '.status // "unknown"' "$SUMMARY")
+            RATE=$(jq -r '.kill_rate_pct // "unknown"' "$SUMMARY")
+            CAUGHT=$(jq -r '.caught // 0' "$SUMMARY")
+            MISSED=$(jq -r '.missed // 0' "$SUMMARY")
+            UNVIABLE=$(jq -r '.unviable // 0' "$SUMMARY")
+            REASON=$(jq -r '.reason // "see target/xtask/mutants.out/missed.txt"' "$SUMMARY")
+            {
+              echo "## mutants-diff failure"
+              echo ""
+              echo "| Field | Value |"
+              echo "|---|---|"
+              echo "| Status | \`$STATUS\` |"
+              echo "| Kill rate | ${RATE}% |"
+              echo "| Caught | $CAUGHT |"
+              echo "| Missed | $MISSED |"
+              echo "| Unviable | $UNVIABLE |"
+              echo "| Reason | $REASON |"
+              echo ""
+              echo "Reproduce locally:"
+              echo ""
+              echo '```'
+              echo "cargo xtask mutants --diff origin/main"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::error title=mutants failed::no mutants-summary.json produced; check artifact"
+          fi

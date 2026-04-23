@@ -63,63 +63,55 @@ jobs:
         with:
           tool: cargo-mutants
 
-      - name: Run full-workspace mutants
-        run: |
-          set -euo pipefail
-          cargo mutants --workspace --output mutants.out --json || true
+      # Delegate to the canonical entry point per .claude/rules/testing.md
+      # §CI topology. The xtask wrapper owns cargo-mutants invocation,
+      # outcomes.json parsing, the ≥60% absolute floor, the -2pp drift
+      # warn, baseline seeding when absent, and the structured summary.
+      - name: cargo xtask mutants --workspace
+        run: cargo xtask mutants --workspace
 
-      - name: Compare against baseline
+      # Render the nightly trend table into the job summary from the
+      # structured JSON produced by xtask — the same pattern the dst job
+      # uses on failure. Non-blocking: a missing summary means xtask
+      # failed earlier in the run (which already surfaced its own error).
+      - name: Render trend summary
+        if: always()
         run: |
-          set -euo pipefail
-          if [ ! -f mutants.out/outcomes.json ]; then
-            echo "::error title=mutants::no outcomes.json produced"
-            exit 1
+          SUMMARY=target/xtask/mutants-summary.json
+          if [ ! -f "$SUMMARY" ]; then
+            echo "no mutants-summary.json — xtask did not produce a report"
+            exit 0
           fi
-          python3 - <<'PY'
-          import json, os, sys, pathlib
-          with open("mutants.out/outcomes.json") as f:
-              data = json.load(f)
-          outcomes = data.get("outcomes", [])
-          if not outcomes:
-              print("no mutations produced — pipeline misconfigured")
-              sys.exit(1)
-          total = len(outcomes)
-          caught = sum(1 for o in outcomes if o.get("outcome") == "caught")
-          kill_rate = (caught / total) * 100
-          baseline_path = pathlib.Path("mutants-baseline/main/kill_rate.txt")
-          if not baseline_path.exists():
-              # First run — seed the baseline.
-              print(f"no baseline found; seeding at {kill_rate:.1f}%")
-              print(f"kill_rate={kill_rate:.1f}%")
-              sys.exit(0)
-          baseline = float(baseline_path.read_text().strip().rstrip('%'))
-          delta = kill_rate - baseline
-          summary = os.environ.get("GITHUB_STEP_SUMMARY")
-          if summary:
-              with open(summary, "a") as f:
-                  f.write(f"## Nightly mutation testing\n\n")
-                  f.write(f"| Metric | Value |\n|---|---|\n")
-                  f.write(f"| Total mutations | {total} |\n")
-                  f.write(f"| Caught | {caught} |\n")
-                  f.write(f"| Kill rate | {kill_rate:.1f}% |\n")
-                  f.write(f"| Baseline | {baseline:.1f}% |\n")
-                  f.write(f"| Delta | {delta:+.1f} pp |\n")
-          if kill_rate < 60.0:
-              print(f"::error title=critical mutants regression::{kill_rate:.1f}% < 60% absolute floor")
-              sys.exit(1)
-          if delta < -2.0:
-              # Soft-fail via annotation — does NOT block main, but does
-              # surface a red X on the scheduled run so the team sees it.
-              print(f"::warning title=mutants drift::{delta:+.1f}pp below baseline {baseline:.1f}%")
-          else:
-              print(f"kill_rate={kill_rate:.1f}% (baseline={baseline:.1f}% delta={delta:+.1f}pp) — ok")
-          PY
+          RATE=$(jq -r '.kill_rate_pct // "unknown"' "$SUMMARY")
+          BASELINE=$(jq -r '.baseline_pct // "n/a"' "$SUMMARY")
+          DRIFT=$(jq -r '.drift_pp // "n/a"' "$SUMMARY")
+          TOTAL=$(jq -r '.total_mutants // 0' "$SUMMARY")
+          CAUGHT=$(jq -r '.caught // 0' "$SUMMARY")
+          MISSED=$(jq -r '.missed // 0' "$SUMMARY")
+          UNVIABLE=$(jq -r '.unviable // 0' "$SUMMARY")
+          STATUS=$(jq -r '.status // "unknown"' "$SUMMARY")
+          {
+            echo "## Nightly mutation testing"
+            echo ""
+            echo "| Metric | Value |"
+            echo "|---|---|"
+            echo "| Total mutations | $TOTAL |"
+            echo "| Caught | $CAUGHT |"
+            echo "| Missed | $MISSED |"
+            echo "| Unviable | $UNVIABLE |"
+            echo "| Kill rate | ${RATE}% |"
+            echo "| Baseline | ${BASELINE}% |"
+            echo "| Delta | ${DRIFT} pp |"
+            echo "| Status | \`$STATUS\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload nightly mutants report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: mutants-nightly-report
-          path: mutants.out/
+          path: |
+            target/xtask/mutants-summary.json
+            target/xtask/mutants.out/
           retention-days: 30
           if-no-files-found: warn

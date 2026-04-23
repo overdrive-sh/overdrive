@@ -447,32 +447,53 @@ mod tests {
         assert_eq!(summary["failures"][0]["cause"].as_str(), Some("two leaders"));
     }
 
+    /// Serialises env-var mutation across tests in this module — cargo
+    /// runs `#[test]` cases in parallel threads by default, which would
+    /// race two tests both setting `CARGO_TARGET_DIR` to different
+    /// values and reading back the written artifact. The guard's
+    /// `MutexGuard` is held for the lifetime of the `EnvGuard`, so the
+    /// env-var write, the subsequent artifact write, and the artifact
+    /// read all sit under the same critical section.
+    static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     /// RAII guard that restores (or clears) an env var on drop. Scoped
     /// narrowly to these tests; real DST code reads through the
     /// injected traits, not process env.
     struct EnvGuard {
         key: &'static str,
         prior: Option<String>,
+        // Lock field ordering matters: declared last, dropped first per
+        // Rust's field-drop order, so the env-var restore in
+        // `Drop for EnvGuard` runs while still holding the lock.
+        _lock: std::sync::MutexGuard<'static, ()>,
     }
 
     impl EnvGuard {
         fn set(key: &'static str, value: &str) -> Self {
+            // Acquire the env-mutation lock *before* reading or writing
+            // the env var — a concurrent test might be mid-mutation.
+            // `.unwrap_or_else(...)` tolerates poisoning: a previous
+            // panicked test is still protected against interleaving,
+            // the residual env-var state is restored by this guard
+            // anyway, and failing here would cascade unrelated tests.
+            let lock = ENV_MUTEX.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
             let prior = std::env::var(key).ok();
             // SAFETY: Rust 2024's set_var is unsafe because concurrent
-            // getenv in other threads is UB. Our tests run
-            // single-threaded within this binary and the write is
-            // ordered before any later read in the same test, so the
-            // unsafe contract is met.
+            // getenv in other threads is UB. `ENV_MUTEX` serialises all
+            // env-var mutation in this module's tests; real DST code
+            // never touches process env (it reads through injected
+            // traits). No other thread in this process reads
+            // `CARGO_TARGET_DIR` concurrently.
             unsafe {
                 std::env::set_var(key, value);
             }
-            Self { key, prior }
+            Self { key, prior, _lock: lock }
         }
     }
 
     impl Drop for EnvGuard {
         fn drop(&mut self) {
-            // SAFETY: see EnvGuard::set.
+            // SAFETY: see EnvGuard::set — we still hold `_lock`.
             unsafe {
                 match &self.prior {
                     Some(v) => std::env::set_var(self.key, v),
