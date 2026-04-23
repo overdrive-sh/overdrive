@@ -70,16 +70,21 @@ pub const WORKSPACE_DRIFT_WARN_PP: f64 = -2.0;
 pub fn run(mode: &Mode) -> Result<()> {
     which_cargo_mutants()?;
 
-    let out_dir = xtask_target_dir().join("mutants.out");
-    let summary_path = xtask_target_dir().join("mutants-summary.json");
-    std::fs::create_dir_all(xtask_target_dir())
-        .wrap_err_with(|| format!("create_dir_all({})", xtask_target_dir().display()))?;
+    // `cargo-mutants --output <DIR>` *creates* a `mutants.out/` subdir
+    // within <DIR> (see `cargo mutants --help`). So we pass the xtask
+    // target dir as `--output`, and outcomes.json lands at
+    // `target/xtask/mutants.out/outcomes.json`.
+    let output_parent = xtask_target_dir();
+    let out_dir = output_parent.join("mutants.out");
+    let summary_path = output_parent.join("mutants-summary.json");
+    std::fs::create_dir_all(&output_parent)
+        .wrap_err_with(|| format!("create_dir_all({})", output_parent.display()))?;
 
     // 1. Run cargo-mutants. Exit status is intentionally ignored — a
     //    non-zero exit from cargo-mutants happens on any missed mutant,
     //    which we handle via our own gate below. We only care that the
     //    subprocess produced `outcomes.json`.
-    let _ = invoke_cargo_mutants(mode, &out_dir)?;
+    let _ = invoke_cargo_mutants(mode, &output_parent)?;
 
     // 2. Parse outcomes.json.
     let outcomes_path = out_dir.join("outcomes.json");
@@ -129,9 +134,15 @@ fn which_cargo_mutants() -> Result<()> {
 
 /// Run `cargo mutants` with the flags appropriate to `mode`. The diff
 /// file (if any) is written under the xtask target dir.
-fn invoke_cargo_mutants(mode: &Mode, out_dir: &Path) -> Result<std::process::ExitStatus> {
+///
+/// `output_parent` is the directory cargo-mutants will create its
+/// `mutants.out/` subdirectory inside (per `cargo mutants --help`
+/// wording: "Create mutants.out within this directory"). Do not pass
+/// the mutants.out path itself — that produces a double-nested
+/// `mutants.out/mutants.out/` layout and breaks outcomes.json discovery.
+fn invoke_cargo_mutants(mode: &Mode, output_parent: &Path) -> Result<std::process::ExitStatus> {
     let mut cmd = Command::new(cargo());
-    cmd.arg("mutants").arg("--output").arg(out_dir);
+    cmd.arg("mutants").arg("--output").arg(output_parent);
 
     match mode {
         Mode::Diff { base } => {
@@ -632,6 +643,32 @@ mod tests {
         // as of the outcomes.json used to write this test.
         let kr = kill_rate_percent(report.caught, report.missed);
         assert!(kr > 79.0 && kr < 80.0, "expected ~79.7%, got {kr}");
+    }
+
+    /// Pin the `cargo-mutants --output` contract we depend on.
+    ///
+    /// `run()` passes the xtask *target* dir (not `mutants.out/`) as
+    /// `--output`, because cargo-mutants *creates* a `mutants.out/`
+    /// subdirectory within the given directory. Passing the
+    /// `mutants.out/` path instead produces `mutants.out/mutants.out/
+    /// outcomes.json` and our parse step fails with "no outcomes.json"
+    /// — the exact failure mode this test exists to prevent.
+    ///
+    /// If cargo-mutants ever changes this wording, the test fails
+    /// loudly so the invocation can be updated in lockstep rather than
+    /// silently breaking CI again.
+    #[test]
+    fn cargo_mutants_output_flag_creates_subdir_within_given_directory() {
+        let help = Command::new("cargo")
+            .args(["mutants", "--help"])
+            .output()
+            .expect("run `cargo mutants --help`; is cargo-mutants installed?");
+        assert!(help.status.success(), "`cargo mutants --help` failed");
+        let stdout = String::from_utf8_lossy(&help.stdout);
+        assert!(
+            stdout.contains("Create mutants.out within this directory"),
+            "cargo-mutants --output semantics changed — review run() in mutants.rs. Got help:\n{stdout}"
+        );
     }
 
     #[test]
