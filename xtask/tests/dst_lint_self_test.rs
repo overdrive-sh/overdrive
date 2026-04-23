@@ -11,7 +11,11 @@
 //! port but uses the in-process visitor API rather than a subprocess
 //! boundary, because the purpose is to close the loop on the symbol
 //! table, not to exercise the CLI.
+//!
+//! Gated behind the `integration-tests` feature — see the feature
+//! comment in `xtask/Cargo.toml` for rationale.
 
+#![cfg(feature = "integration-tests")]
 #![allow(clippy::expect_used)]
 
 use xtask::dst_lint::{BANNED_APIS, Violation, scan_source};

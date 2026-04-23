@@ -18,6 +18,7 @@
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 
 use serde_json::Value;
 
@@ -27,17 +28,50 @@ fn workspace_root() -> PathBuf {
     crate_dir.parent().expect("xtask crate lives directly under the workspace root").to_path_buf()
 }
 
-/// Run `cargo run -p xtask --features overdrive-sim/canary-bug -- dst <args>`
-/// from a fresh target dir. `cargo run` is used instead of the pre-built
-/// `CARGO_BIN_EXE_xtask` because the latter is compiled without the
-/// canary-bug feature — we need a per-test compile that turns the
-/// feature on.
+/// Single `CARGO_TARGET_DIR` shared across every canary invocation in
+/// this process. The canary needs the `overdrive-sim/canary-bug` Cargo
+/// feature on — so `CARGO_BIN_EXE_xtask` is unusable and every
+/// invocation is a `cargo run`. Without a shared target dir each
+/// invocation triggers a full workspace compile; with one, the first
+/// invocation pays the compile cost and every subsequent invocation
+/// hits cargo's incremental cache.
 ///
-/// This is deliberately slow (one cargo compile per test). Two tests
-/// exist in this file: one invokes the failing run, and the second
-/// runs the reproduction command. Both share a single tempdir so the
-/// second test reuses the first compilation's target cache.
-fn run_dst_canary(target_dir: &Path, extra_args: &[&str]) -> Output {
+/// The `TempDir` is stored in a static `OnceLock` and therefore lives
+/// for the test process's lifetime — it is cleaned up when the process
+/// exits.
+fn shared_canary_target() -> &'static Path {
+    static DIR: OnceLock<tempfile::TempDir> = OnceLock::new();
+    DIR.get_or_init(|| {
+        tempfile::Builder::new()
+            .prefix("overdrive-canary-target-")
+            .tempdir()
+            .expect("shared canary target tempdir")
+    })
+    .path()
+}
+
+/// Canary invocations share a target dir and therefore share the
+/// `xtask/dst-summary.json` artifact path. Serialise them so tests that
+/// cargo would otherwise run in parallel do not race on the artifact.
+///
+/// Poison is ignored — a panic in one test must not cascade-fail the
+/// other by poisoning the mutex; the shared state (cargo's target dir)
+/// is not corrupted by a test panic.
+fn canary_guard() -> MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(())).lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Run `cargo run -p xtask --features overdrive-sim/canary-bug -- dst <args>`
+/// against the shared canary target dir. `cargo run` is used instead of
+/// the pre-built `CARGO_BIN_EXE_xtask` because the latter is compiled
+/// without the canary-bug feature — we need a per-test compile that
+/// turns the feature on.
+///
+/// The caller is expected to hold the canary mutex for the duration of
+/// the call so that `xtask/dst-summary.json` can be read without racing
+/// a parallel invocation overwriting it.
+fn run_dst_canary(extra_args: &[&str]) -> Output {
     let mut cmd = Command::new(cargo());
     cmd.args([
         "run",
@@ -53,7 +87,7 @@ fn run_dst_canary(target_dir: &Path, extra_args: &[&str]) -> Output {
         cmd.arg(arg);
     }
     cmd.current_dir(workspace_root());
-    cmd.env("CARGO_TARGET_DIR", target_dir);
+    cmd.env("CARGO_TARGET_DIR", shared_canary_target());
     cmd.output().expect("cargo run must be invokable")
 }
 
@@ -79,8 +113,9 @@ const CANARY_TRIGGER_SEED: u64 = 0xDEAD_BEEF;
 
 #[test]
 fn canary_feature_on_trigger_seed_fails_with_full_failure_block() {
-    let target = tempfile::tempdir().expect("tempdir for CARGO_TARGET_DIR");
-    let out = run_dst_canary(target.path(), &["--seed", &CANARY_TRIGGER_SEED.to_string()]);
+    let _guard = canary_guard();
+    let target = shared_canary_target();
+    let out = run_dst_canary(&["--seed", &CANARY_TRIGGER_SEED.to_string()]);
 
     // 1. The subprocess exits with non-zero status.
     assert!(
@@ -91,11 +126,11 @@ fn canary_feature_on_trigger_seed_fails_with_full_failure_block() {
     );
 
     // 2. A dst-output.log artifact is written on red.
-    let log_path = target.path().join("xtask").join("dst-output.log");
+    let log_path = target.join("xtask").join("dst-output.log");
     assert!(log_path.is_file(), "dst-output.log must exist on red runs at {}", log_path.display());
 
     // 3. A dst-summary.json artifact is written on red.
-    let summary = read_summary(target.path());
+    let summary = read_summary(target);
 
     // 4. Top-level summary carries the failure fields the CI parser in
     //    .github/workflows/ci.yml reads: .seed, .invariant, .tick, .host,
@@ -169,18 +204,18 @@ fn canary_feature_on_trigger_seed_fails_with_full_failure_block() {
 
 #[test]
 fn printed_reproduction_command_reproduces_the_failure_at_same_tick() {
-    // Share a target dir with the first test so cargo's build cache
-    // does not recompile overdrive-sim twice per test session. The
-    // tempdir is owned by each test though (no literal sharing across
-    // tests in Rust without #[ignore] + sequencing); this test pays
-    // the cargo-compile cost once more.
-    let target = tempfile::tempdir().expect("tempdir for CARGO_TARGET_DIR");
+    // Share the canary target dir with the sibling test so cargo's
+    // build cache is reused. The `canary_guard` mutex serialises the
+    // two tests — both read `xtask/dst-summary.json` from the shared
+    // dir, so they must not run concurrently.
+    let _guard = canary_guard();
+    let target = shared_canary_target();
 
     // Step 1 — run the canary to capture the reproduction command.
-    let first = run_dst_canary(target.path(), &["--seed", &CANARY_TRIGGER_SEED.to_string()]);
+    let first = run_dst_canary(&["--seed", &CANARY_TRIGGER_SEED.to_string()]);
     assert!(!first.status.success(), "first run must fail for the canary to trigger");
 
-    let summary = read_summary(target.path());
+    let summary = read_summary(target);
     let reproduce = summary["reproduce"]
         .as_str()
         .expect("summary must carry a reproduction command")
@@ -189,16 +224,14 @@ fn printed_reproduction_command_reproduces_the_failure_at_same_tick() {
     let first_host =
         summary["host"].as_str().expect("summary must carry a failing host").to_owned();
 
-    // Step 2 — replay the reproduction command as a fresh subprocess
-    // into a *different* tempdir. We parse the emitted command, strip
-    // the leading "cargo xtask", and re-invoke via the same cargo-run
-    // shape with the canary-bug feature enabled (the emitted command
-    // assumes the feature is on, consistent with how the production
-    // failure would have originated).
-    let replay_target = tempfile::tempdir().expect("tempdir for replay");
+    // Step 2 — replay the reproduction command. The replay overwrites
+    // `xtask/dst-summary.json` in the shared target dir; the claim
+    // being tested is that the emitted reproduce command deterministically
+    // reproduces the same failure (same tick, same host, same invariant)
+    // — not that it does so in an isolated target dir. Target-dir
+    // isolation is not part of the AC; determinism of the failure is.
     let args = parse_reproduce_args(&reproduce);
-    let replay =
-        run_dst_canary(replay_target.path(), &args.iter().map(String::as_str).collect::<Vec<_>>());
+    let replay = run_dst_canary(&args.iter().map(String::as_str).collect::<Vec<_>>());
     assert!(
         !replay.status.success(),
         "reproduction command must fail deterministically; stderr:\n{}",
@@ -207,7 +240,7 @@ fn printed_reproduction_command_reproduces_the_failure_at_same_tick() {
 
     // Step 3 — the replay's failing tick and host must match the first
     //    run's. This is the "same failure at the same tick" claim.
-    let replay_summary = read_summary(replay_target.path());
+    let replay_summary = read_summary(target);
     assert_eq!(
         replay_summary["tick"].as_u64(),
         Some(first_tick),

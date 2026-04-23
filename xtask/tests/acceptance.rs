@@ -5,7 +5,11 @@
 //! §6.2 is translated to a Rust integration-test module under
 //! `tests/acceptance/*.rs` per ADR-0005. This entrypoint wires those
 //! modules into a single Cargo integration-test binary.
+//!
+//! Gated behind the `integration-tests` feature — see the feature
+//! comment in `xtask/Cargo.toml` for rationale.
 
+#![cfg(feature = "integration-tests")]
 // `expect` is the standard idiom in test code — a panic with a message
 // is exactly what you want when a precondition fails.
 #![allow(clippy::expect_used)]
