@@ -55,6 +55,21 @@ pub enum AllocState {
     Terminated,
 }
 
+impl std::fmt::Display for AllocState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Canonical lowercase form matches whitepaper §4 lifecycle
+        // rendering. Used on the REST wire for `alloc_status.state`.
+        let s = match self {
+            Self::Pending => "pending",
+            Self::Running => "running",
+            Self::Draining => "draining",
+            Self::Suspended => "suspended",
+            Self::Terminated => "terminated",
+        };
+        f.write_str(s)
+    }
+}
+
 /// Logical timestamp used for last-write-wins ordering across
 /// [`ObservationStore`] peers.
 ///
@@ -152,4 +167,26 @@ pub trait ObservationStore: Send + Sync + 'static {
 
     /// Subscribe to every observation row written to this peer.
     async fn subscribe_all(&self) -> Result<ObservationSubscription, ObservationStoreError>;
+
+    /// Read a deterministic snapshot of every `alloc_status` row this
+    /// peer currently holds as LWW winner. Intended for point-in-time
+    /// reads from the REST API (`GET /v1/allocs`) — reads locally, no
+    /// cross-peer RPC. Iteration order is deterministic, keyed by
+    /// `AllocationId`.
+    ///
+    /// Phase 1 motivation: the REST observation-read handlers land in
+    /// step 03-03; the existing `subscribe_all` surface is suited to
+    /// long-lived reactive consumers (reconcilers, dataplane hydration),
+    /// not one-shot HTTP handlers. A typed snapshot is the honest read
+    /// primitive for request/response handlers.
+    async fn alloc_status_rows(&self)
+        -> Result<Vec<AllocStatusRow>, ObservationStoreError>;
+
+    /// Read a deterministic snapshot of every `node_health` row this
+    /// peer has observed. Phase 1 has no LWW current-row index for
+    /// `node_health` (see `SimObservationStore::apply`) — callers see
+    /// the full ordered history; Phase 2 will add LWW parallel
+    /// tracking and this method will return winners only.
+    async fn node_health_rows(&self)
+        -> Result<Vec<NodeHealthRow>, ObservationStoreError>;
 }

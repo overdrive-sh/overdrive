@@ -105,10 +105,17 @@ fn alloc_status_response_round_trips_with_empty_and_populated_rows() {
         serde_json::from_str(&wire).expect("deserialise empty AllocStatusResponse");
     assert!(round_tripped.rows.is_empty());
 
-    // Future phases will populate `AllocStatusRowBody`; today it is an
-    // empty struct. The round-trip still has to work — forward
-    // compatibility cuts in both directions.
-    let populated = AllocStatusResponse { rows: vec![AllocStatusRowBody {}] };
+    // Step 03-03 populated `AllocStatusRowBody` with the minimal Phase 1
+    // shape — alloc_id, job_id, node_id, state. The round-trip still
+    // has to work — forward compatibility cuts in both directions.
+    let populated = AllocStatusResponse {
+        rows: vec![AllocStatusRowBody {
+            alloc_id: "alloc-1".to_owned(),
+            job_id: "payments".to_owned(),
+            node_id: "node-a".to_owned(),
+            state: "running".to_owned(),
+        }],
+    };
     let wire = serde_json::to_string(&populated).expect("serialise populated AllocStatusResponse");
     let round_tripped: AllocStatusResponse =
         serde_json::from_str(&wire).expect("deserialise populated AllocStatusResponse");
@@ -123,7 +130,9 @@ fn node_list_round_trips_with_empty_and_populated_rows() {
     let round_tripped: NodeList = serde_json::from_str(&wire).expect("deserialise empty NodeList");
     assert!(round_tripped.rows.is_empty());
 
-    let populated = NodeList { rows: vec![NodeRowBody {}] };
+    let populated = NodeList {
+        rows: vec![NodeRowBody { node_id: "node-a".to_owned(), region: "us-east-1".to_owned() }],
+    };
     let wire = serde_json::to_string(&populated).expect("serialise populated NodeList");
     let round_tripped: NodeList =
         serde_json::from_str(&wire).expect("deserialise populated NodeList");

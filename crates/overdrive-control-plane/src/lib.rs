@@ -128,6 +128,25 @@ impl ServerHandle {
 /// runs in the background; its errors are observable only via
 /// [`ServerHandle::shutdown`] which awaits the task.
 pub async fn run_server(config: ServerConfig) -> Result<ServerHandle, error::ControlPlaneError> {
+    // Wire the Phase 1 observation store (`SimObservationStore`
+    // single-peer per ADR-0012) internally, then delegate to
+    // `run_server_with_obs`. The split exists so integration tests can
+    // hold a shared `Arc<dyn ObservationStore>` handle — needed for the
+    // 03-03 canary-injection Fixture-Theater defence — without
+    // introducing a test-only hook into the production boot path.
+    let obs: Arc<dyn ObservationStore> =
+        Arc::from(observation_wiring::wire_single_node_observation()?);
+    run_server_with_obs(config, obs).await
+}
+
+/// Start the control-plane server with a caller-supplied observation
+/// store. Used by integration tests that need to retain a handle to
+/// the observation store the server is reading from; the production
+/// boot path calls [`run_server`], which wires the Phase 1 default.
+pub async fn run_server_with_obs(
+    config: ServerConfig,
+    obs: Arc<dyn ObservationStore>,
+) -> Result<ServerHandle, error::ControlPlaneError> {
     // Install the rustls process-wide CryptoProvider (ring) exactly
     // once. The workspace enables only the `ring` feature, but rustls
     // still requires an explicit install when neither provider is the
@@ -160,21 +179,16 @@ pub async fn run_server(config: ServerConfig) -> Result<ServerHandle, error::Con
             .map_err(|e| error::ControlPlaneError::Internal(format!("open LocalStore: {e}")))?,
     );
 
-    // Wire the Phase 1 observation store (`SimObservationStore`
-    // single-peer per ADR-0012).
-    let obs: Arc<dyn ObservationStore> =
-        Arc::from(observation_wiring::wire_single_node_observation()?);
-
     let state = AppState { store, obs };
 
-    // Assemble the router — step 03-01 wires `POST /v1/jobs` through
-    // the real `submit_job` handler. Other endpoints continue to use
-    // `stub` until their owning steps land (03-02 … 03-05).
+    // Assemble the router. Step 03-03 wires the real `alloc_status` and
+    // `node_list` observation-read handlers; `cluster_status` remains a
+    // stub until step 03-05.
     let router = Router::new()
         .route("/v1/jobs", post(handlers::submit_job))
         .route("/v1/jobs/:id", get(handlers::describe_job))
-        .route("/v1/allocs", get(stub))
-        .route("/v1/nodes", get(stub))
+        .route("/v1/allocs", get(handlers::alloc_status))
+        .route("/v1/nodes", get(handlers::node_list))
         .route("/v1/cluster/info", get(stub))
         .with_state(state);
 

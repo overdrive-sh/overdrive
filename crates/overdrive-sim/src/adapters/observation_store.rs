@@ -53,8 +53,8 @@ use tokio_stream::wrappers::BroadcastStream;
 
 use overdrive_core::id::{AllocationId, NodeId};
 use overdrive_core::traits::observation_store::{
-    AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore, ObservationStoreError,
-    ObservationSubscription,
+    AllocStatusRow, LogicalTimestamp, NodeHealthRow, ObservationRow, ObservationStore,
+    ObservationStoreError, ObservationSubscription,
 };
 
 /// Default capacity for the fan-out broadcast channel. Writes beyond
@@ -305,6 +305,32 @@ impl ObservationStore for SimObservationStore {
         let rx = self.inner.fan_out.subscribe();
         let stream = BroadcastStream::new(rx).filter_map(ok_or_skip);
         Ok(Box::new(Box::pin(stream)) as ObservationSubscription)
+    }
+
+    async fn alloc_status_rows(
+        &self,
+    ) -> Result<Vec<AllocStatusRow>, ObservationStoreError> {
+        // Deterministic iteration via the BTreeMap ordering on
+        // AllocationId — every call on the same state returns rows in
+        // the same order, so byte-identical responses across runs are
+        // preserved (K3 reproducibility).
+        Ok(self.inner.alloc_status_snapshot().into_values().collect())
+    }
+
+    async fn node_health_rows(
+        &self,
+    ) -> Result<Vec<NodeHealthRow>, ObservationStoreError> {
+        // Phase 1: no LWW current-row index for node_health — surface
+        // the full receive-order history, filtered to NodeHealth
+        // variants. Phase 2 will replace with an LWW-winners snapshot.
+        let rows = self.inner.rows.lock();
+        Ok(rows
+            .iter()
+            .filter_map(|row| match row {
+                ObservationRow::NodeHealth(r) => Some(r.clone()),
+                ObservationRow::AllocStatus(_) => None,
+            })
+            .collect())
     }
 }
 

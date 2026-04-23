@@ -85,12 +85,17 @@ pub struct AllocStatusResponse {
     pub rows: Vec<AllocStatusRowBody>,
 }
 
-/// Allocation-status row body. Empty in Phase 1 — the fields land in
-/// Phase 2 alongside the observation-store schema. The type exists now
-/// so downstream callers (CLI, openapi-gen) can reference a stable
-/// name; future columns land additively.
+/// Allocation-status row body. Phase 1 shape mirrors the observation
+/// `AllocStatusRow` projected to the wire — minimal fields matching
+/// the whitepaper §4 schema (alloc_id, job_id, node_id, state). Phase
+/// 2+ adds columns additively.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, ToSchema, PartialEq, Eq)]
-pub struct AllocStatusRowBody {}
+pub struct AllocStatusRowBody {
+    pub alloc_id: String,
+    pub job_id: String,
+    pub node_id: String,
+    pub state: String,
+}
 
 /// Response for `GET /v1/nodes`. Phase 1 always renders an empty
 /// `rows` array per US-03 AC — node ingestion lands in a later phase.
@@ -99,10 +104,14 @@ pub struct NodeList {
     pub rows: Vec<NodeRowBody>,
 }
 
-/// Node row body. Empty in Phase 1 — same forward-compatibility
-/// rationale as [`AllocStatusRowBody`].
+/// Node row body. Phase 1 shape mirrors the observation `NodeHealthRow`
+/// projected to the wire — minimal fields (node_id, region). Phase 2+
+/// adds columns additively.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, ToSchema, PartialEq, Eq)]
-pub struct NodeRowBody {}
+pub struct NodeRowBody {
+    pub node_id: String,
+    pub region: String,
+}
 
 /// RFC-7807-compatible subset per ADR-0015. The three fields —
 /// `error`, `message`, `field` — are pinned; renaming breaks the

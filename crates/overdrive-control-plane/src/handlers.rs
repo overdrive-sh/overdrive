@@ -23,6 +23,23 @@ use crate::AppState;
 use crate::api;
 use crate::error::ControlPlaneError;
 
+impl From<overdrive_core::traits::observation_store::AllocStatusRow> for api::AllocStatusRowBody {
+    fn from(row: overdrive_core::traits::observation_store::AllocStatusRow) -> Self {
+        Self {
+            alloc_id: row.alloc_id.to_string(),
+            job_id: row.job_id.to_string(),
+            node_id: row.node_id.to_string(),
+            state: row.state.to_string(),
+        }
+    }
+}
+
+impl From<overdrive_core::traits::observation_store::NodeHealthRow> for api::NodeRowBody {
+    fn from(row: overdrive_core::traits::observation_store::NodeHealthRow) -> Self {
+        Self { node_id: row.node_id.to_string(), region: row.region.to_string() }
+    }
+}
+
 /// `POST /v1/jobs` — validate, archive via rkyv, commit through the
 /// intent store, return `(job_id, commit_index)`.
 ///
@@ -178,10 +195,13 @@ pub async fn cluster_status() -> Result<api::ClusterStatus, ControlPlaneError> {
     panic!("Not yet implemented -- RED scaffold")
 }
 
-/// `GET /v1/allocs` — observation read on `alloc_status`. Phase 1: zero
-/// rows per US-03 AC.
+/// `GET /v1/allocs` — observation read on `alloc_status`.
 ///
-/// SCAFFOLD: true — owned by step 03-03.
+/// Reads through the `ObservationStore::alloc_status_rows` trait method
+/// (not the concrete `SimObservationStore` type) so Phase 2's
+/// `CorrosionStore` swap is a single trait-object replacement with no
+/// handler changes. Fresh store → HTTP 200 with explicit `{"rows": []}`
+/// — honest empty state per K7; no fabrication, no hardcoded response.
 #[utoipa::path(
     get,
     path = "/v1/allocs",
@@ -191,14 +211,25 @@ pub async fn cluster_status() -> Result<api::ClusterStatus, ControlPlaneError> {
     ),
     tag = "observation",
 )]
-pub async fn alloc_status() -> Result<api::AllocStatusResponse, ControlPlaneError> {
-    panic!("Not yet implemented -- RED scaffold")
+pub async fn alloc_status(
+    State(state): State<AppState>,
+) -> Result<Json<api::AllocStatusResponse>, ControlPlaneError> {
+    let rows = state
+        .obs
+        .alloc_status_rows()
+        .await
+        .map_err(|e| ControlPlaneError::Internal(format!("alloc_status_rows: {e}")))?
+        .into_iter()
+        .map(api::AllocStatusRowBody::from)
+        .collect();
+    Ok(Json(api::AllocStatusResponse { rows }))
 }
 
-/// `GET /v1/nodes` — observation read on `node_health`. Phase 1: zero
-/// rows per US-03 AC.
+/// `GET /v1/nodes` — observation read on `node_health`.
 ///
-/// SCAFFOLD: true — owned by step 03-03.
+/// Symmetric to `alloc_status` — reads through
+/// `ObservationStore::node_health_rows`. Fresh store → HTTP 200 with
+/// explicit `{"rows": []}`.
 #[utoipa::path(
     get,
     path = "/v1/nodes",
@@ -208,6 +239,16 @@ pub async fn alloc_status() -> Result<api::AllocStatusResponse, ControlPlaneErro
     ),
     tag = "observation",
 )]
-pub async fn node_list() -> Result<api::NodeList, ControlPlaneError> {
-    panic!("Not yet implemented -- RED scaffold")
+pub async fn node_list(
+    State(state): State<AppState>,
+) -> Result<Json<api::NodeList>, ControlPlaneError> {
+    let rows = state
+        .obs
+        .node_health_rows()
+        .await
+        .map_err(|e| ControlPlaneError::Internal(format!("node_health_rows: {e}")))?
+        .into_iter()
+        .map(api::NodeRowBody::from)
+        .collect();
+    Ok(Json(api::NodeList { rows }))
 }

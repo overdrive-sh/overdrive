@@ -198,16 +198,28 @@ async fn all_adr_0008_paths_return_200_on_stub_router() {
     let (handle, bound, _tmp, ca_pem) = spawn_server().await;
     let client = client_trusting(&ca_pem);
 
-    // Per ADR-0008 §Endpoints — GETs still route through the stub in
-    // Phase 1 steps prior to their owning deliver step. Step 03-01
-    // replaced the `POST /v1/jobs` branch with the real handler; step
-    // 03-02 replaced `GET /v1/jobs/:id` with the real `describe_job`
-    // (which now returns 404 for an unknown id, not a stub 200). The
-    // remaining three GETs are still stubbed and owned by steps 03-03
-    // and 03-05. Describe happy-path + 404 coverage lives in
-    // `integration::describe_round_trip`.
-    let gets = ["/v1/allocs", "/v1/nodes", "/v1/cluster/info"];
-    for path in gets {
+    // Per ADR-0008 §Endpoints — Phase 1 endpoint coverage:
+    //   - `POST /v1/jobs` real handler (step 03-01)
+    //   - `GET /v1/jobs/:id` real handler (step 03-02)
+    //   - `GET /v1/allocs` + `GET /v1/nodes` real observation-read
+    //     handlers returning `{"rows":[]}` on a fresh store (step 03-03)
+    //   - `GET /v1/cluster/info` still stubbed, owned by step 03-05
+    // Per-endpoint happy-path coverage lives in the dedicated scenario
+    // modules; this test only pins that the routes remain mounted.
+    let observation_gets = ["/v1/allocs", "/v1/nodes"];
+    for path in observation_gets {
+        let url = format!("https://localhost:{}{path}", bound.port());
+        let resp = client.get(&url).send().await.expect(&format!("GET {path}"));
+        assert_eq!(resp.status(), reqwest::StatusCode::OK, "GET {path} expected 200",);
+        let body = resp.text().await.expect("body");
+        assert_eq!(
+            body, r#"{"rows":[]}"#,
+            "fresh-store observation read must surface explicit empty rows array"
+        );
+    }
+
+    let stub_gets = ["/v1/cluster/info"];
+    for path in stub_gets {
         let url = format!("https://localhost:{}{path}", bound.port());
         let resp = client.get(&url).send().await.expect(&format!("GET {path}"));
         assert_eq!(resp.status(), reqwest::StatusCode::OK, "GET {path} expected 200",);
