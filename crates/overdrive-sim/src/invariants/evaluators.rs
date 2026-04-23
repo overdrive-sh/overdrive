@@ -151,6 +151,24 @@ pub async fn evaluate_intent_crossing(
     _observation: &SimObservationStore,
 ) -> InvariantResult {
     let name = "intent-never-crosses-into-observation";
+    // Snapshot once, then scan every banned prefix against the same
+    // view. Scanning inside the loop would pay for N redb roundtrips
+    // and — worse — race against concurrent writers under Phase 2
+    // multi-writer scenarios, meaning a prefix that only showed up
+    // after the first snapshot could slip past the second scan and
+    // back before the third. A single atomic snapshot closes the
+    // window.
+    let snap = match intent.export_snapshot().await {
+        Ok(s) => s,
+        Err(err) => {
+            return result(
+                name,
+                InvariantStatus::Fail,
+                "host-0",
+                Some(format!("intent snapshot failed: {err}")),
+            );
+        }
+    };
     for prefix in OBSERVATION_KEY_PREFIXES {
         // `get` on a prefix key directly is not enough — we need to
         // check whether *any* key in intent starts with one of the
@@ -159,29 +177,17 @@ pub async fn evaluate_intent_crossing(
         // prefix; a production writer of observation-class data into
         // intent would almost certainly write the prefix verbatim
         // (the failure shape the test exercises) plus some alloc id
-        // suffix. We scan by export_snapshot to see every key.
-        match intent.export_snapshot().await {
-            Ok(snap) => {
-                for (k, _v) in &snap.entries {
-                    if k.starts_with(prefix) {
-                        return result(
-                            name,
-                            InvariantStatus::Fail,
-                            "host-0",
-                            Some(format!(
-                                "intent store holds observation-prefix key: {:?}",
-                                String::from_utf8_lossy(k),
-                            )),
-                        );
-                    }
-                }
-            }
-            Err(err) => {
+        // suffix.
+        for (k, _v) in &snap.entries {
+            if k.starts_with(prefix) {
                 return result(
                     name,
                     InvariantStatus::Fail,
                     "host-0",
-                    Some(format!("intent snapshot failed: {err}")),
+                    Some(format!(
+                        "intent store holds observation-prefix key: {:?}",
+                        String::from_utf8_lossy(k),
+                    )),
                 );
             }
         }
@@ -298,7 +304,12 @@ pub async fn evaluate_sim_observation_lww(cluster: &SimObservationCluster) -> In
     // trivially on an empty cluster — there is nothing for LWW to
     // resolve. The WS-3 canary bug only manifests when LWW actually
     // has to pick between competing timestamps.
-    let peers: Vec<NodeId> = cluster.peers().map(|(id, _)| id.clone()).collect();
+    // `cluster.peers()` is a `HashMap::iter()` under the hood — order
+    // varies per-run via Rust's default `RandomState` hasher. Sort
+    // explicitly so writer[0] vs writer[1] is pinned and K3 bit-for-bit
+    // reproducibility holds across invocations of the same seed.
+    let mut peers: Vec<NodeId> = cluster.peers().map(|(id, _)| id.clone()).collect();
+    peers.sort();
     if peers.len() >= 2 {
         let alloc_id = match AllocationId::from_str("a1b2c3") {
             Ok(a) => a,
