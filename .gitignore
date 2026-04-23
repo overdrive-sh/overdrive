@@ -30,3 +30,6 @@ lefthook-local.yml
 # Secrets — xtask mcp setup writes .mcp.json from .env
 .env
 .mcp.json
+
+# Bun / TS tooling for scripts/
+/node_modules/

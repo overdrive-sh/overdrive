@@ -1,0 +1,17 @@
+{
+  "name": "overdrive-scripts",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Bun-run tooling scripts for the Overdrive repo (pr-auto-resolve, etc).",
+  "scripts": {
+    "pr-auto-resolve": "bun --env-file=.env scripts/pr-auto-resolve.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.2.118"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.6.0"
+  }
+}
