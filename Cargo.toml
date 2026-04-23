@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "crates/overdrive-core",
     "crates/overdrive-cli",
+    "crates/overdrive-control-plane",
     "crates/overdrive-host",
     "crates/overdrive-sim",
     "crates/overdrive-store-local",
@@ -55,6 +56,15 @@ tonic           = "0.12"
 prost           = "0.13"
 quinn           = { version = "0.11", default-features = false, features = ["rustls", "runtime-tokio"] }
 instant-acme    = "0.8"
+# --- Control plane: axum + utoipa (phase-1-control-plane-core DISTILL) ---
+# SCAFFOLD: true — added for phase-1-control-plane-core per ADRs 0008 / 0009 /
+# 0013. Versions chosen per DESIGN wave-decisions §Tech stack. Crafter may
+# tighten pins after `cargo check`.
+axum            = { version = "0.7", default-features = false, features = ["http1", "http2", "json", "tokio"] }
+axum-server     = { version = "0.7", default-features = false, features = ["tls-rustls"] }
+utoipa          = { version = "5", features = ["axum_extras"] }
+utoipa-axum     = "0.1"
+libsql          = { version = "0.5", default-features = false, features = ["core"] }
 
 # --- Storage --------------------------------------------------------------
 redb            = "2"

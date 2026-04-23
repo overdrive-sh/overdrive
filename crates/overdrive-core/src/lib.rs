@@ -24,8 +24,10 @@
 #![cfg_attr(not(test), warn(clippy::expect_used, clippy::unwrap_used))]
 #![cfg_attr(test, allow(clippy::expect_used, clippy::unwrap_used))]
 
+pub mod aggregate; // SCAFFOLD: true — phase-1-control-plane-core DISTILL
 pub mod error;
 pub mod id;
+pub mod reconciler; // SCAFFOLD: true — phase-1-control-plane-core DISTILL
 pub mod traits;
 
 pub use error::{Error, Result};

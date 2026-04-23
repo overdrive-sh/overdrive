@@ -1,0 +1,69 @@
+# SCAFFOLD: true — created by DISTILL wave for phase-1-control-plane-core.
+#
+# New crate per ADR-0008 / ADR-0012 / ADR-0013. Hosts the Phase 1
+# control-plane binary's axum server, TLS bootstrap, reconciler runtime,
+# and observation-store wiring. `crate_class = "adapter-host"` per
+# ADR-0003 (renamed from `adapter-real` per ADR-0016) — production
+# bindings that talk to real host I/O (filesystem, network). DST-lint
+# does NOT scan this crate; real-infra calls are expected.
+
+[package]
+name         = "overdrive-control-plane"
+version      = "0.0.0"
+description  = "Phase 1 single-mode control-plane binary — axum + rustls + reconciler runtime."
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+publish                = false
+
+[package.metadata.overdrive]
+crate_class = "adapter-host"
+
+[dependencies]
+overdrive-core.workspace           = true
+# The Phase 1 observation-store impl is SimObservationStore (ADR-0012) —
+# `overdrive-sim` is therefore a runtime dep of this crate, not just a
+# test dep. See DESIGN wave-decisions §Tech stack.
+overdrive-sim.path                 = "../overdrive-sim"
+overdrive-store-local.path         = "../overdrive-store-local"
+
+# Errors / async / serde
+thiserror.workspace   = true
+async-trait.workspace = true
+tokio.workspace       = true
+bytes.workspace       = true
+serde.workspace       = true
+serde_json.workspace  = true
+
+# HTTP / TLS
+# NOTE — `axum`, `axum-server`, `utoipa`, `utoipa-axum`, and `libsql`
+# need to be added to [workspace.dependencies] at the workspace root.
+# DESIGN wave-decisions §Tech stack lists the proposed versions; this
+# Cargo.toml will fail to resolve until those workspace entries exist
+# (DELIVER crafter closes the loop via `cargo check`).
+axum             = { workspace = true }
+axum-server      = { workspace = true }
+rustls.workspace = true
+rcgen.workspace  = true
+hyper.workspace  = true
+
+# OpenAPI schema derivation
+utoipa       = { workspace = true }
+utoipa-axum  = { workspace = true }
+
+# Per-primitive libSQL memory
+libsql = { workspace = true }
+
+# Observability
+tracing.workspace            = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+reqwest.workspace  = true
+proptest.workspace = true
+
+[lints]
+workspace = true

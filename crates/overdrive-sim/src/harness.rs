@@ -398,6 +398,23 @@ impl Harness {
             Invariant::EntropyDeterminismUnderReseed => {
                 evaluators::evaluate_entropy_determinism(seed)
             }
+            // SCAFFOLD: true — phase-1-control-plane-core DISTILL per ADR-0013.
+            // Bodies panic until DELIVER wires the control-plane runtime
+            // and broker into the harness. The variant names exist in
+            // `Invariant::ALL` so `--only <name>` resolves today; running
+            // the invariant will panic with the RED-scaffold marker.
+            Invariant::AtLeastOneReconcilerRegistered => {
+                let _ = (hosts, first_host, cluster, seed);
+                panic!("Not yet implemented -- RED scaffold")
+            }
+            Invariant::DuplicateEvaluationsCollapse => {
+                let _ = (hosts, first_host, cluster, seed);
+                panic!("Not yet implemented -- RED scaffold")
+            }
+            Invariant::ReconcilerIsPure => {
+                let _ = (hosts, first_host, cluster, seed);
+                panic!("Not yet implemented -- RED scaffold")
+            }
         }
     }
 }
