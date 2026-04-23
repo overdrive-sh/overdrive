@@ -231,7 +231,7 @@ const MCP_JSON: &str = ".mcp.json";
 /// users); the rest extend it.
 const GITHUB_MCP_TOOLSETS: &str = "default,projects,discussions,labels";
 
-fn render_mcp_json(github_pat: &str) -> Result<String> {
+fn render_mcp_json(github_pat: &str, greptile_api_key: &str) -> Result<String> {
     let doc = serde_json::json!({
         "mcpServers": {
             "github": {
@@ -240,6 +240,13 @@ fn render_mcp_json(github_pat: &str) -> Result<String> {
                 "headers": {
                     "Authorization": format!("Bearer {github_pat}"),
                     "X-MCP-Toolsets": GITHUB_MCP_TOOLSETS
+                }
+            },
+            "greptile": {
+                "type": "http",
+                "url": "https://api.greptile.com/mcp",
+                "headers": {
+                    "Authorization": format!("Bearer {greptile_api_key}")
                 }
             }
         }
@@ -262,8 +269,14 @@ fn mcp_setup(force: bool) -> Result<()> {
         "create one at https://github.com/settings/personal-access-tokens/new \
          and either `export GITHUB_PAT=...` or add it to `.env`",
     )?;
+    let greptile_api_key = lookup_required(
+        &env_file,
+        &["GREPTILE_API_KEY"],
+        "create one at https://app.greptile.com (Settings → API Keys) \
+         and either `export GREPTILE_API_KEY=...` or add it to `.env`",
+    )?;
 
-    let rendered = render_mcp_json(&github_pat)?;
+    let rendered = render_mcp_json(&github_pat, &greptile_api_key)?;
     std::fs::write(&out_path, rendered)?;
     eprintln!("xtask: wrote {}", out_path.display());
     eprintln!("xtask: restart Claude Code and run `/mcp` to pick up the new server");
