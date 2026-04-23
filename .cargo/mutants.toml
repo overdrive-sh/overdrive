@@ -48,6 +48,13 @@
 # 5. Tests themselves. cargo-mutants already defaults to excluding
 #    `#[test]` / `#[cfg(test)]` modules, but we make it explicit via
 #    the excluded path pattern for clarity.
+#
+# 6. `xtask` — developer tooling, not platform code. Correctness of
+#    `cargo xtask ci` / `dst` / `dst-lint` / `mcp setup` etc. is
+#    exercised end-to-end by the CI workflow itself and by each
+#    subcommand's acceptance tests; per-line mutation coverage adds
+#    no safety signal against platform regressions and spends minutes
+#    of CI time on code that will never run in production.
 
 # ---------------------------------------------------------------------------
 # Excluded paths
@@ -68,6 +75,10 @@ exclude_globs = [
     # a future refactor of `#[cfg(test)]` boundaries does not surprise us.
     "**/tests/**",
     "**/benches/**",
+
+    # Rule 6 — xtask developer tooling. Not platform code; correctness
+    # surfaced by the CI workflow and subcommand acceptance tests.
+    "xtask/**",
 ]
 
 # ---------------------------------------------------------------------------

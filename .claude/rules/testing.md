@@ -203,6 +203,46 @@ kernel attachment — that is Tier 3.
 
 ---
 
+## Compile-fail testing (trybuild)
+
+Complements Tier 1 and proptest. DST perturbs schedules; proptest perturbs
+inputs; [`trybuild`](https://docs.rs/trybuild) proves **compile-time
+invariants** — that invalid code fails to compile with a predictable
+diagnostic. Used sparingly: only when a type-system property is
+load-bearing and the failure mode is "someone calls the wrong API with
+the wrong type."
+
+### Mandatory call sites
+
+- **Intent vs observation non-substitutability.** `&dyn IntentStore` must
+  NOT be usable where `&dyn ObservationStore` is expected, and vice
+  versa. Without a compile-fail test, a future refactor could blur the
+  two traits and nothing would catch it — the state-layer discipline
+  would silently erode. Lives under
+  `crates/overdrive-core/tests/compile_fail/`.
+- **Typed write surface.** `ObservationStore::write` takes
+  `ObservationRow`, not `&[u8]`. Passing an intent-class value (e.g. a
+  `JobSpec`) must fail to compile, not at runtime.
+
+Reach for it elsewhere only when the type system IS the invariant. If the
+check could be a `#[test]` assertion, prefer the `#[test]`.
+
+### Rules
+
+- **Check in the `.stderr` file** next to each fixture. The failure
+  output IS the assertion — flaky diagnostics are a bug in trybuild (pin
+  the version) or in your test (simplify the fixture).
+- **Pin trybuild exactly** (e.g. `trybuild = "=1.0.101"`). The stderr
+  format is sensitive to both rustc and trybuild itself; a floating
+  version breaks the check on every upstream release. Update the pin
+  deliberately, regenerate the `.stderr` files, review the diff.
+- **One invariant per fixture.** A file that fails for two reasons is a
+  flaky test — which reason fired is non-deterministic.
+- **Not for syntax errors or incidental type mismatches.** Reserve it for
+  deliberate type-system properties the project depends on.
+
+---
+
 ## Mutation testing (cargo-mutants)
 
 Complements Tier 1 and proptest. DST perturbs **schedules**; proptest
@@ -500,6 +540,10 @@ Logic bug under concurrency, timing, ordering, or partition?
 
 Pure function whose argument space exceeds a dozen hand-picked cases?
     → Property-based test (proptest)
+
+Type-system property that must hold at compile time (non-substitutable
+traits, banned parameter shapes)?
+    → trybuild compile-fail test
 
 Tests pass but not sure they actually assert on the behaviour?
     → cargo-mutants — close the kill-rate gap
