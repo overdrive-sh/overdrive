@@ -372,8 +372,7 @@ fn which_or_hint(binary: &str, install_hint: &str) -> Result<()> {
         .arg("-c")
         .arg(format!("command -v {binary}"))
         .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
+        .is_ok_and(|s| s.success());
     if !found {
         bail!("`{binary}` not found on PATH. Install it with: {install_hint}");
     }

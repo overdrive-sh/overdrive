@@ -449,7 +449,7 @@ pub fn evaluate_entropy_determinism_against(a: &SimEntropy, b: &SimEntropy) -> I
                 name,
                 InvariantStatus::Fail,
                 "host-0",
-                Some(format!("SimEntropy diverges at draw {i}: {x:#x} vs {y:#x}",)),
+                Some(format!("SimEntropy diverges at draw {i}: {x:#x} vs {y:#x}")),
             );
         }
     }

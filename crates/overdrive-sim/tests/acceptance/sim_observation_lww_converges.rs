@@ -163,7 +163,7 @@ async fn witness_three_peer_cluster_converges_on_overlapping_writes() {
     cluster.advance(PAST_CONVERGENCE).await;
 
     let report = check_lww_convergence(&cluster);
-    assert!(report.is_converged(), "witness cluster must converge — report = {report:?}",);
+    assert!(report.is_converged(), "witness cluster must converge — report = {report:?}");
 
     // Every peer must hold rows for all three alloc_ids — pins that
     // `alloc_status_snapshot` returns the actual stored rows (not an

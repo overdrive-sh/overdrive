@@ -116,8 +116,7 @@ fn which_cargo_mutants() -> Result<()> {
         .arg("-c")
         .arg("command -v cargo-mutants")
         .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
+        .is_ok_and(|s| s.success());
     if !found {
         bail!(
             "`cargo-mutants` not found on PATH. Install it with:\n\
