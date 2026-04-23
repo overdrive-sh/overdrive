@@ -1,0 +1,289 @@
+schema_version: 1
+
+journey:
+  name: "Submit a Job Through the Walking-Skeleton Control Plane"
+  goal: >
+    Ana runs `overdrive job submit <spec>` against a local single-mode
+    control plane, the REST API accepts the spec (JSON body against an
+    OpenAPI-described `/v1/jobs` endpoint), the IntentStore commits it
+    through LocalStore, the reconciler runtime is registered and idling
+    (no job-lifecycle reconciler in Phase 1), and `overdrive alloc
+    status --job <id>` returns the committed spec digest with an
+    explicit "nothing placed yet" empty state.
+  persona: >
+    Ana, Overdrive platform engineer (distributed-systems SRE background;
+    same persona as trust-the-sim). Secondary: Omar, an operator who will
+    use the same CLI once operator auth lands in Phase 5. Phase 1 auth
+    posture: unauthenticated against a local endpoint (default
+    `https://127.0.0.1:7001`).
+
+  emotional_arc:
+    start: "Skeptical — 'the CLI was a stub; does submit actually reach the control plane?'"
+    middle: "Focused then confident — the commit index, the reconciler registry, and the spec round-trip each deposit a small win."
+    end: "Trusting — the CLI echoes back what was submitted AND is honest that nothing is running yet (scheduler + drivers are next feature)."
+
+steps:
+  - id: 1
+    name: "Submit a job"
+    command: "overdrive job submit ./payments.toml"
+    tui_mockup: |
+      $ overdrive job submit ./payments.toml
+          Connecting to https://127.0.0.1:7001 ... ok
+          Reading spec from ./payments.toml ... ok
+          Submitting job "payments" ...
+
+          Accepted.
+
+              Job ID:        payments
+              Intent key:    jobs/payments
+              Commit index:  17
+              Endpoint:      https://127.0.0.1:7001
+
+          Next: overdrive alloc status --job payments
+    shared_artifacts:
+      - name: job_spec_bytes
+        source: >
+          CLI reads the TOML spec, constructs a typed Job aggregate in
+          overdrive-core, serialises it to JSON for the REST request
+          body, and the control plane deserialises, validates via the
+          aggregate constructor, then archives via rkyv when committing
+          to IntentStore. JSON at the wire edge, rkyv at the store.
+        displayed_as: "${job_spec_bytes}"
+        consumers:
+          - "CLI submit payload (JSON request body to POST /v1/jobs)"
+          - "API validator (rkyv-archive before commit; ContentHash::of over archived bytes)"
+          - "IntentStore value at jobs/<job_id>"
+          - "alloc status spec-digest display"
+      - name: rest_endpoint
+        source: "CLI --endpoint flag or OVERDRIVE_ENDPOINT env"
+        displayed_as: "${rest_endpoint}"
+        consumers:
+          - "CLI connect path"
+          - "CLI echoed output"
+      - name: intent_key
+        source: "jobs/<JobId::display()> canonical form, derived once in overdrive-core"
+        displayed_as: "${intent_key}"
+        consumers:
+          - "CLI submit success output"
+          - "IntentStore::put target key"
+          - "IntentStore::get target key for alloc status"
+      - name: commit_index
+        source: "LocalStore transaction sequence; returned in SubmitJobResponse"
+        displayed_as: "${commit_index}"
+        consumers:
+          - "CLI submit output"
+          - "alloc status read"
+          - "cluster status display"
+    emotional_state:
+      entry: "Skeptical — 'this CLI previously just logged and exited.'"
+      exit: "Focused — 'the API responded with a specific commit index I can ask for back.'"
+    integration_checkpoint: |
+      The JSON request body MUST decode into a Job aggregate whose
+      identifier newtypes (JobId, allocated Resources) were validated by
+      the overdrive-core constructors. The API MUST NOT commit if any
+      newtype validator rejects. The key the CLI prints MUST be
+      byte-identical to the key the API writes to the IntentStore.
+    failure_modes:
+      - "Endpoint unreachable — CLI must print an actionable error naming the endpoint and a likely cause"
+      - "Spec validation fails — HTTP 400 Bad Request with a structured JSON error body naming the offending field"
+      - "IntentStore put fails — HTTP 500 Internal Server Error with the typed error variant embedded in the JSON body (no raw stack trace)"
+      - "The CLI-displayed intent_key differs from the API-used key — key derivation lives in two places, a bug shape"
+    gherkin: |
+      Scenario: Ana submits a valid job spec and receives a commit index
+        Given a local control plane running in single mode at https://127.0.0.1:7001
+        And a file ./payments.toml containing a valid Job spec
+        When Ana runs `overdrive job submit ./payments.toml`
+        Then the CLI exits with status 0
+        And the output includes the Job ID, the canonical intent key, and a commit index ≥ 1
+        And the control plane has persisted the Job bytes under the intent key
+
+  - id: 2
+    name: "Commit to intent (control-plane internal)"
+    command: "(no direct user touchpoint — observable via step 4)"
+    tui_mockup: |
+      [ control plane ]
+      POST /v1/jobs (axum handler)
+        └─ deserialises Json<SubmitJobRequest>
+        └─ validates newtypes via Job::from_spec (JobId, Resources, …)
+        └─ wraps Job in rkyv archive bytes
+        └─ IntentStore::put("jobs/payments", bytes) via LocalStore::txn
+              └─ redb single-write transaction commits → commit_index = 17
+        └─ responds 200 OK with Json<SubmitJobResponse { job_id, commit_index }>
+    shared_artifacts:
+      - name: intent_key
+        source: "see step 1"
+        displayed_as: "${intent_key}"
+        consumers: ["IntentStore put target", "IntentStore get target"]
+      - name: commit_index
+        source: "see step 1"
+        displayed_as: "${commit_index}"
+        consumers: ["SubmitJobResponse JSON body", "alloc status read"]
+    emotional_state:
+      entry: "Focused — 'the API accepted my request; did the store actually take it?'"
+      exit: "Confident — 'the commit index is reproducible across reads.'"
+    integration_checkpoint: |
+      The bytes written to LocalStore MUST rkyv-access back into the same
+      Job aggregate. The IntentStore contract (single trait, linearizable
+      under LocalStore) MUST NOT be bypassed — there is no direct redb
+      access path from the handler. JSON is the wire format; rkyv is the
+      store format; the two are decoupled and the spec_digest is always
+      computed over the rkyv-archived bytes.
+    failure_modes:
+      - "rkyv archive of the validated Job diverges from what the client can compute locally from the same spec — fails rkyv-access round-trip"
+      - "Handler committed the job but responded with commit_index = 0 (off-by-one)"
+      - "Two back-to-back submits of identical bytes produce a different commit index the second time — non-idempotent submit"
+    gherkin: |
+      Scenario: Submit round-trip through IntentStore preserves the spec
+        Given Ana has submitted a valid Job spec that returned commit_index N
+        When the API reads the committed bytes back from IntentStore
+        Then the bytes rkyv-access into a Job aggregate equal to the original
+        And every identifier in the aggregate was produced by the validating constructor
+
+  - id: 3
+    name: "Reconciler primitive alive and idling"
+    command: "overdrive cluster status"
+    tui_mockup: |
+      $ overdrive cluster status
+          Connecting to https://127.0.0.1:7001 ... ok
+
+          Cluster
+              Mode:          single
+              Region:        local
+              Commit index:  17
+
+          Reconcilers
+              noop-heartbeat          idling (evaluations queued: 0, cancelled: 0)
+
+          Note: Phase 1 ships the reconciler primitive (trait + runtime +
+          evaluation broker). The job-lifecycle reconciler lands in
+          phase-1-first-workload.
+    shared_artifacts:
+      - name: reconciler_registry
+        source: "ReconcilerRuntime::registered() — single source inside the control plane"
+        displayed_as: "${reconciler_registry}"
+        consumers:
+          - "cluster status output"
+          - "DST invariants that assert at-least-one-registered"
+      - name: evaluation_broker_state
+        source: "EvaluationBroker counters (queued, cancelled) in the runtime"
+        displayed_as: "${evaluation_broker_state}"
+        consumers:
+          - "cluster status output"
+          - "DST evaluation_broker_collapses_duplicates invariant"
+    emotional_state:
+      entry: "Focused — 'I committed the spec, but is the runtime wired?'"
+      exit: "Confident — 'there's a registered reconciler and the broker counters are real, not hand-rolled.'"
+    integration_checkpoint: |
+      At least ONE reconciler (e.g. a noop-heartbeat placeholder) MUST be
+      registered at boot. The evaluation broker MUST accept at least one
+      Evaluation, drain it, and increment the cancelled counter when a
+      duplicate (reconciler, target) key arrives while one is pending —
+      validated in DST and reflected here.
+    failure_modes:
+      - "Runtime compiles but registered() returns empty — lifecycle bug not caught before production"
+      - "Duplicate evaluations never collapse — cancelled stays 0 forever (cancelable-eval-set regression)"
+      - "The broker panics on an evaluation rather than routing to the reconciler (typed-action channel bug)"
+    gherkin: |
+      Scenario: Reconciler primitive is alive at boot
+        Given a control plane is running in single mode
+        When Ana runs `overdrive cluster status`
+        Then the reconcilers section lists at least one registered reconciler
+        And the evaluation broker's queued and cancelled counters are reported
+
+      Scenario: Duplicate evaluations are collapsed by the broker
+        Given two evaluations arrive for the same (reconciler, target) key within one broker tick
+        When the broker processes the queue
+        Then only one evaluation is dispatched to the reconciler
+        And the cancelled counter increments by exactly one
+
+  - id: 4
+    name: "Inspect allocations (read-through via CLI)"
+    command: "overdrive alloc status --job payments"
+    tui_mockup: |
+      $ overdrive alloc status --job payments
+          Connecting to https://127.0.0.1:7001 ... ok
+
+          Job "payments"
+              Intent committed at:   index 17
+              Spec digest:           sha256:7f3a9b12…
+              Replicas requested:    1
+              Allocations:           0 (none placed — scheduler lands in
+                                      phase-1-first-workload)
+
+          Observation
+              No alloc_status rows for this job (nothing is running yet).
+    shared_artifacts:
+      - name: alloc_row
+        source: "ObservationStore::read on the alloc_status table (may return zero rows in Phase 1)"
+        displayed_as: "${alloc_row}"
+        consumers:
+          - "alloc status output (CLI)"
+          - "(later) gateway endpoint resolution"
+      - name: spec_digest
+        source: "ContentHash::of(rkyv_archived_job_bytes) — single source in overdrive-core"
+        displayed_as: "${spec_digest}"
+        consumers:
+          - "alloc status output"
+          - "(later) idempotent re-submit detection"
+    emotional_state:
+      entry: "Focused — 'did the whole loop close?'"
+      exit: "Trusting — 'the CLI echoes back what I submitted AND tells me honestly that nothing is running.'"
+    integration_checkpoint: |
+      The spec_digest displayed by `alloc status` MUST equal the digest
+      derivable locally from the submitted spec file. If
+      `alloc_status` rows are absent, the CLI MUST render an explicit
+      empty state that names the next feature, not pretend to be
+      populated.
+    failure_modes:
+      - "CLI shows stale data from its own cache instead of a round-trip through the API"
+      - "Empty state is silent (no rows, no text) — bad empty-state UX"
+      - "Spec digest diverges from what the local file produces — serialization-path bug"
+    gherkin: |
+      Scenario: Submitted-then-inspected spec digest is stable
+        Given Ana has submitted payments.toml and received commit_index N
+        When Ana runs `overdrive alloc status --job payments`
+        Then the output contains the same spec digest Ana can compute from the input file
+        And the output names the empty allocations state explicitly
+
+      Scenario: Alloc status honestly reports no placements exist yet
+        Given no scheduler or driver is shipped in Phase 1
+        When Ana runs `overdrive alloc status --job <any-submitted-job>`
+        Then the output explicitly states that no allocations are placed
+        And the output points to the next feature (phase-1-first-workload)
+
+integration_validation:
+  shared_artifact_consistency:
+    - artifact: intent_key
+      must_match_across: [1, 2]
+      failure_message: >
+        The key the CLI prints on submit MUST equal the key the API uses
+        for the IntentStore put. Divergence means key derivation lives in
+        two places, and the next reader (alloc status) could look at the
+        wrong row.
+    - artifact: commit_index
+      must_match_across: [1, 4]
+      failure_message: >
+        The commit index echoed after submit MUST equal the index alloc
+        status reads through. Divergence means readers are looking at a
+        different IntentStore transaction than the writer committed to.
+    - artifact: spec_digest
+      must_match_across: [1, 4]
+      failure_message: >
+        The spec digest derivable from the input file MUST equal the
+        digest `alloc status` displays. Divergence means the rkyv
+        canonicalization path differs between the CLI (local compute) and
+        the control plane (commit path) — breaking deterministic hashing
+        per development.md.
+
+changelog:
+  - date: 2026-04-23
+    feature: phase-1-control-plane-core
+    change: Initial journey capturing submit → commit → reconciler registry → alloc status end-to-end.
+  - date: 2026-04-23
+    feature: phase-1-control-plane-core
+    change: >
+      Transport pivot — reframed the journey around REST + JSON + OpenAPI
+      for the external API (axum + rustls). Renamed `grpc_endpoint`
+      shared artifact to `rest_endpoint` (https + `/v1` prefix).
+      Operator-visible CLI behaviour is unchanged; only the underlying
+      wire format description changed.
