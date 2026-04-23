@@ -657,8 +657,21 @@ mod tests {
     /// If cargo-mutants ever changes this wording, the test fails
     /// loudly so the invocation can be updated in lockstep rather than
     /// silently breaking CI again.
+    ///
+    /// Skips cleanly when `cargo-mutants` is not on PATH — the plain
+    /// `cargo test --workspace` CI job does not install it (only the
+    /// dedicated `mutants-diff` job does). Without the tool there is
+    /// nothing to schema-check against, and forcing a hard failure
+    /// would block the unrelated test job on a missing dev dependency.
     #[test]
     fn cargo_mutants_output_flag_creates_subdir_within_given_directory() {
+        if which_cargo_mutants().is_err() {
+            eprintln!(
+                "skipping: cargo-mutants not on PATH (install with \
+                 `cargo install cargo-mutants` to run this schema-drift guard)"
+            );
+            return;
+        }
         let help = Command::new("cargo")
             .args(["mutants", "--help"])
             .output()
