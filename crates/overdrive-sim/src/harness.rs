@@ -178,6 +178,16 @@ pub enum HarnessError {
         #[source]
         source: std::io::Error,
     },
+    /// Building the tokio runtime used to drive the async invariant
+    /// evaluators failed. This is not tied to any host and is surfaced
+    /// separately so the error message names the runtime rather than a
+    /// phantom `host-18446744073709551615`.
+    #[error("tokio runtime build failed: {source}")]
+    RuntimeBuild {
+        /// Underlying IO error from `tokio::runtime::Builder::build`.
+        #[source]
+        source: std::io::Error,
+    },
     /// Opening the real `LocalStore` failed.
     #[error("LocalStore open failed for host-{index}: {source}")]
     LocalStoreOpen {
@@ -260,7 +270,7 @@ impl Harness {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
-            .map_err(|source| HarnessError::TempDir { index: usize::MAX, source })?;
+            .map_err(|source| HarnessError::RuntimeBuild { source })?;
 
         let mut invariants = Vec::with_capacity(catalogue.len());
         let mut failures = Vec::new();
