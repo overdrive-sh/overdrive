@@ -16,6 +16,7 @@
 
 use std::num::NonZeroU32;
 
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::id::{AllocationId, InvestigationId, JobId, NodeId, PolicyId, Region};
@@ -53,7 +54,32 @@ pub enum AggregateError {
 
 /// The intent-side Job aggregate. Carries the authoritative declaration
 /// of what the operator asked the platform to run.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// # Canonicalisation (rkyv)
+///
+/// Per `.claude/rules/development.md` ("Internal data → rkyv"), the
+/// archived form of `Job` is THE canonical byte sequence used for
+/// content-addressed identity and Raft log payloads. Two archivals of
+/// the same logical `Job` MUST produce byte-identical output — the
+/// acceptance proptests in `tests/acceptance/aggregate_roundtrip.rs`
+/// pin this invariant.
+///
+/// # Wire form (serde)
+///
+/// serde + JSON is the wire lane for CLI-to-server and REST ingress.
+/// serde is NOT substitutable for rkyv in hashing contexts — see
+/// ADR-0002.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct Job {
     pub id: JobId,
     pub replicas: NonZeroU32,
@@ -103,7 +129,20 @@ pub struct JobSpecInput {
 
 /// The intent-side Node aggregate. Carries a node's declared identity,
 /// region, and capacity envelope.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// rkyv-archived bytes are canonical; serde-JSON is the wire form. See
+/// [`Job`] for the full canonicalisation story.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct Node {
     pub id: NodeId,
     pub region: Region,
@@ -145,7 +184,20 @@ pub struct NodeSpecInput {
 
 /// The intent-side Allocation aggregate. Links a Job and a Node through
 /// typed newtypes only — no raw String / u64 identifiers per US-01 AC.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// rkyv-archived bytes are canonical; serde-JSON is the wire form. See
+/// [`Job`] for the full canonicalisation story.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct Allocation {
     pub id: AllocationId,
     pub job_id: JobId,

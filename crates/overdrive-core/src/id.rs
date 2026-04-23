@@ -105,7 +105,20 @@ fn validate_label(kind: &'static str, raw: &str) -> Result<String, IdParseError>
 macro_rules! define_label_newtype {
     ($(#[$m:meta])* $name:ident, $kind:literal) => {
         $(#[$m])*
-        #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+        #[derive(
+            Debug,
+            Clone,
+            PartialEq,
+            Eq,
+            Hash,
+            PartialOrd,
+            Ord,
+            Serialize,
+            Deserialize,
+            rkyv::Archive,
+            rkyv::Serialize,
+            rkyv::Deserialize,
+        )]
         #[serde(try_from = "String", into = "String")]
         pub struct $name(String);
 
