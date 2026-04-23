@@ -24,4 +24,5 @@ mod acceptance {
     // Phase-1-control-plane-core acceptance scenarios.
     mod aggregate_constructors;
     mod aggregate_validation;
+    mod intent_key_canonical;
 }

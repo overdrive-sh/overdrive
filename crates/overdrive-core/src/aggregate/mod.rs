@@ -7,11 +7,12 @@
 //! Validating constructors return `Result<Self, AggregateError>`.
 //! Step 01-01 (delivered) lands the `Job` / `Node` / `Allocation`
 //! validating constructors and the `Resources`-deduplication invariant.
+//! Step 01-03 (delivered) lands the canonical `IntentKey` derivation —
+//! `jobs/<id>` / `nodes/<id>` / `allocations/<id>`.
 //!
-//! Still scaffolded (RED — owned by later steps): `IntentKey::for_job` /
-//! `for_node` / `for_allocation` / `as_str`, rkyv/serde derives on the
-//! aggregate structs (step 01-03), and behavioural expansion of `Policy`
-//! and `Investigation` (Phase 2+).
+//! Still scaffolded (RED — owned by later steps): rkyv/serde derives on
+//! the aggregate structs (Phase 2+), and behavioural expansion of
+//! `Policy` and `Investigation` (Phase 2+).
 
 use std::num::NonZeroU32;
 
@@ -201,50 +202,52 @@ pub struct Investigation {
 
 /// Canonical intent-key derivation surface.
 ///
-/// Every caller (CLI, handler, describe) routes through these functions.
-/// The string form is `jobs/<JobId::display>`, `nodes/<NodeId::display>`,
-/// or `allocations/<AllocationId::display>` per ADR-0011.
+/// Every caller (CLI, handler, describe) routes through these functions —
+/// any drift-prone second copy in production code violates US-01's
+/// shared-artifacts-registry entry for `intent_key`. The string form is
+/// `jobs/<JobId::display>`, `nodes/<NodeId::display>`, or
+/// `allocations/<AllocationId::display>` per ADR-0011.
 ///
-/// SCAFFOLD: true
+/// The wrapped bytes are always valid UTF-8 by construction — the `<id>`
+/// half flows through `Display` for a newtype whose `validate_label`
+/// guarantees ASCII-only output (see `id::validate_label`), and the
+/// prefix is a fixed ASCII literal.
 pub struct IntentKey(Vec<u8>);
 
 impl IntentKey {
     /// Derive the intent key for a Job. Stable for any valid `JobId` per
     /// US-01 AC (property test).
-    ///
-    /// SCAFFOLD: true
-    pub fn for_job(_id: &JobId) -> Self {
-        panic!("Not yet implemented -- RED scaffold")
+    pub fn for_job(id: &JobId) -> Self {
+        Self(format!("jobs/{id}").into_bytes())
     }
 
     /// Derive the intent key for a Node.
-    ///
-    /// SCAFFOLD: true
-    pub fn for_node(_id: &NodeId) -> Self {
-        panic!("Not yet implemented -- RED scaffold")
+    pub fn for_node(id: &NodeId) -> Self {
+        Self(format!("nodes/{id}").into_bytes())
     }
 
     /// Derive the intent key for an Allocation.
-    ///
-    /// SCAFFOLD: true
-    pub fn for_allocation(_id: &AllocationId) -> Self {
-        panic!("Not yet implemented -- RED scaffold")
+    pub fn for_allocation(id: &AllocationId) -> Self {
+        Self(format!("allocations/{id}").into_bytes())
     }
 
     /// Raw bytes view of the intent key. Used by `IntentStore::put` /
     /// `get`.
-    ///
-    /// SCAFFOLD: true
     pub fn as_bytes(&self) -> &[u8] {
         &self.0
     }
 
     /// Canonical string form — `jobs/<JobId>`, `nodes/<NodeId>`, or
-    /// `allocations/<AllocationId>`.
-    ///
-    /// SCAFFOLD: true
-    #[allow(clippy::unused_self)]
+    /// `allocations/<AllocationId>`. Always succeeds: the byte buffer is
+    /// UTF-8 by construction (see the struct-level docs).
     pub fn as_str(&self) -> &str {
-        panic!("Not yet implemented -- RED scaffold")
+        // SAFETY-ish (no unsafe): the constructors only ever push ASCII
+        // bytes — a fixed prefix and a `Display` impl that emits the
+        // lowercased output of `validate_label`. `from_utf8` would only
+        // fail here if an invariant of `validate_label` were violated,
+        // which is covered by the id.rs proptests. `expect` is the right
+        // idiom for a type-system invariant the test suite pins.
+        std::str::from_utf8(&self.0)
+            .expect("IntentKey bytes are always valid UTF-8 by construction")
     }
 }
