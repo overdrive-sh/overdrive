@@ -16,8 +16,9 @@
 assert_lefthook_installed: true
 
 # ────────────────────────────────────────────────────────────────────────────
-# pre-commit — cheap, per-commit checks. Must stay under a few seconds on
-# a warm cache so developers keep it enabled.
+# pre-commit — fmt + clippy + cheap TOML/YAML validation. Clippy on a warm
+# cache is a few seconds; on a cold cache expect the first commit after a
+# `cargo clean` to take longer. Bypass with `git commit --no-verify`.
 # ────────────────────────────────────────────────────────────────────────────
 pre-commit:
   parallel: true
@@ -28,12 +29,35 @@ pre-commit:
     fmt:
       tags: [rust, fast]
       glob: "*.rs"
-      # rustfmt reads `rustfmt.toml` automatically. Checking the full
-      # workspace is faster than piping staged files individually, because
-      # it hits rustfmt's own parallelism.
-      run: cargo fmt --all -- --check
+      # rustfmt reads `rustfmt.toml` automatically. Check only the staged
+      # Rust files — fast even on large workspaces.
+      run: rustfmt --check --edition 2024 {staged_files}
       fail_text: |
         Formatting drift. Run: cargo fmt --all
+    clippy:
+      tags: [rust]
+      glob: "*.rs"
+      # Scope clippy to only the crates that contain staged Rust files.
+      # Clippy is crate-level (not file-level), so we walk up from each
+      # staged file to its owning Cargo.toml, dedupe, and run clippy
+      # once per affected package.
+      run: |
+        set -euo pipefail
+        pkgs=$(for f in {staged_files}; do
+          d=$(dirname "$f")
+          while [ "$d" != "." ] && [ "$d" != "/" ]; do
+            if [ -f "$d/Cargo.toml" ] && grep -q '^\[package\]' "$d/Cargo.toml"; then
+              grep -m1 '^name[[:space:]]*=' "$d/Cargo.toml" | sed -E 's/.*"([^"]+)".*/\1/'
+              break
+            fi
+            d=$(dirname "$d")
+          done
+        done | sort -u)
+        for p in $pkgs; do
+          cargo clippy -p "$p" --all-targets -- -D warnings
+        done
+      fail_text: |
+        Clippy warnings. Fix or `#[allow]` with justification.
     toml-check:
       tags: [toml, fast]
       glob:
@@ -63,8 +87,9 @@ pre-commit:
         Lima template invalid. See output above.
 
 # ────────────────────────────────────────────────────────────────────────────
-# pre-push — the full CI pipeline locally before it lands on a runner.
-# Slow-but-thorough; `--no-verify` is the escape hatch for WIP branches.
+# pre-push — run the test suite. fmt + clippy already ran pre-commit;
+# GitHub Actions is the authoritative gate for everything else.
+# `--no-verify` is the escape hatch for WIP branches.
 # ────────────────────────────────────────────────────────────────────────────
 pre-push:
   parallel: false
@@ -72,12 +97,10 @@ pre-push:
     - merge
     - rebase
   commands:
-    ci:
-      # Mirrors `.github/workflows/ci.yml` — fmt-check + clippy -D warnings + test.
-      run: cargo xtask ci
+    test:
+      run: cargo test --workspace
       fail_text: |
-        `cargo xtask ci` failed. Fix the reported issue or push with
-        --no-verify if you're publishing a WIP branch for backup.
+        Tests failed. Fix or push with --no-verify for a WIP branch.
 
 # ────────────────────────────────────────────────────────────────────────────
 # commit-msg — placeholder. Enable when we pick a convention
