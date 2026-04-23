@@ -24,5 +24,6 @@
 // lookup base so the per-scenario files under `tests/integration/`
 // resolve naturally.
 mod integration {
+    mod server_lifecycle;
     mod tls_bootstrap;
 }

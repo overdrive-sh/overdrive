@@ -264,9 +264,51 @@ fn write_file_owner_only(path: &Path, bytes: &[u8]) -> Result<(), ControlPlaneEr
 /// Load a `rustls::ServerConfig` from minted server material. Pure on
 /// PEM inputs; no filesystem reads.
 ///
-/// SCAFFOLD: true — delivered in step 02-02.
+/// Parses `server_leaf_cert_pem` and `server_leaf_key_pem` via
+/// `rustls_pemfile`, constructs a `rustls::ServerConfig` with no client
+/// authentication (Phase 1 operator-auth via client cert lands later —
+/// see ADR-0010 Phase 2+), and sets ALPN to `h2, http/1.1` per
+/// ADR-0008 §Transport.
+///
+/// # Errors
+///
+/// Returns `ControlPlaneError::Internal` if the PEM parse fails, if
+/// the private key is missing, or if `rustls` rejects the cert/key
+/// combination (e.g. mismatched key algorithm vs certificate).
 pub fn load_server_tls_config(
-    _material: &CaMaterial,
+    material: &CaMaterial,
 ) -> Result<rustls::ServerConfig, ControlPlaneError> {
-    panic!("Not yet implemented -- RED scaffold")
+    use std::io::Cursor;
+
+    // Parse server leaf certificate chain from PEM.
+    let mut cert_reader = Cursor::new(material.server_leaf_cert_pem.as_bytes());
+    let cert_chain: Vec<rustls::pki_types::CertificateDer<'static>> =
+        rustls_pemfile::certs(&mut cert_reader)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| {
+                ControlPlaneError::Internal(format!("parse server cert PEM: {e}"))
+            })?;
+    if cert_chain.is_empty() {
+        return Err(ControlPlaneError::Internal(
+            "server leaf PEM contained no certificates".into(),
+        ));
+    }
+
+    // Parse private key from PEM (accepts PKCS#8, PKCS#1, or SEC1).
+    let mut key_reader = Cursor::new(material.server_leaf_key_pem.as_bytes());
+    let key = rustls_pemfile::private_key(&mut key_reader)
+        .map_err(|e| ControlPlaneError::Internal(format!("parse server key PEM: {e}")))?
+        .ok_or_else(|| {
+            ControlPlaneError::Internal("server key PEM contained no private key".into())
+        })?;
+
+    let mut config = rustls::ServerConfig::builder()
+        .with_no_client_auth()
+        .with_single_cert(cert_chain, key)
+        .map_err(|e| ControlPlaneError::Internal(format!("rustls with_single_cert: {e}")))?;
+
+    // ADR-0008 §ALPN: prefer h2, fall back to http/1.1.
+    config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+
+    Ok(config)
 }

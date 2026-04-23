@@ -55,6 +55,7 @@ axum-server      = { workspace = true }
 rustls.workspace = true
 rcgen.workspace  = true
 hyper.workspace  = true
+rustls-pemfile.workspace = true
 
 # TLS bootstrap — trust-triple serialisation + helpers per ADR-0010.
 base64.workspace     = true
@@ -76,7 +77,6 @@ tracing-subscriber.workspace = true
 tempfile.workspace       = true
 reqwest.workspace        = true
 proptest.workspace       = true
-rustls-pemfile.workspace = true
 serde_yaml.workspace     = true
 x509-parser.workspace    = true
 base64.workspace         = true

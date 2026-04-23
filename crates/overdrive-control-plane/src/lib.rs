@@ -1,7 +1,5 @@
 //! Overdrive Phase 1 single-mode control-plane.
 //!
-//! SCAFFOLD: true — created by DISTILL wave for phase-1-control-plane-core.
-//!
 //! This crate composes the intent-side `LocalStore`, the observation-side
 //! `SimObservationStore` (Phase 1 production impl per ADR-0012), the
 //! `axum` + `rustls` HTTP server (ADR-0008), the `rcgen`-minted ephemeral
@@ -21,9 +19,6 @@
 //! | `eval_broker` | `EvaluationBroker` + cancelable-eval-set (ADR-0013) |
 //! | `libsql_provisioner` | Per-primitive libSQL path derivation (ADR-0013) |
 //! | `observation_wiring` | `SimObservationStore` single-node wiring (ADR-0012) |
-//!
-//! Every public function below is a `panic!` stub. The DELIVER crafter
-//! replaces bodies as each slice lands.
 
 #![forbid(unsafe_code)]
 
@@ -38,28 +33,143 @@ pub mod tls_bootstrap;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
+
+use axum::Router;
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
+use axum::routing::{get, post};
+use axum_server::Handle as AxumHandle;
+use axum_server::tls_rustls::RustlsConfig;
 
 /// Configuration for the Phase 1 control-plane server. Populated at
 /// startup from CLI flags and environment.
-///
-/// SCAFFOLD: true
 #[derive(Debug, Clone)]
 pub struct ServerConfig {
     /// Socket address to bind the HTTPS listener. Default
-    /// `127.0.0.1:7001` per ADR-0008.
+    /// `127.0.0.1:7001` per ADR-0008. Use `127.0.0.1:0` in tests to
+    /// request an ephemeral port; the bound port is observable via
+    /// [`ServerHandle::local_addr`].
     pub bind: SocketAddr,
     /// Data directory — parent of the redb file, per-primitive libSQL
     /// files, and the trust triple config file.
     pub data_dir: PathBuf,
 }
 
-/// Start the control-plane server. Binds the TLS listener, registers the
-/// `noop-heartbeat` reconciler, and runs until SIGINT drains in-flight
-/// requests per US-02 AC.
+/// Handle to a running control-plane server. Drop does NOT stop the
+/// server; call [`ServerHandle::shutdown`] to drain in-flight requests
+/// and close the listener. The server task runs until the handle is
+/// shut down or the process exits.
+#[derive(Debug)]
+pub struct ServerHandle {
+    inner: AxumHandle,
+    server_task: tokio::task::JoinHandle<std::io::Result<()>>,
+}
+
+impl ServerHandle {
+    /// Return the socket address the server is actually listening on.
+    /// When [`ServerConfig::bind`] specified port 0, this reveals the
+    /// ephemeral port the OS chose. Awaits the server's "listening"
+    /// notification; resolves as soon as the listener is bound.
+    pub async fn local_addr(&self) -> Option<SocketAddr> {
+        self.inner.listening().await
+    }
+
+    /// Trigger graceful shutdown with a drain deadline. In-flight
+    /// requests complete; new connections are refused; the listener is
+    /// dropped. Awaits the server task to completion.
+    pub async fn shutdown(self, drain_deadline: Duration) {
+        self.inner.graceful_shutdown(Some(drain_deadline));
+        // The server task returns once the listener closes and in-flight
+        // connections drain. We ignore the inner result here — this is
+        // the shutdown path; test-level assertions on server outcome
+        // happen before shutdown is called.
+        let _ = self.server_task.await;
+    }
+}
+
+/// Start the control-plane server. Mints a fresh ephemeral CA, writes
+/// the trust triple under `<data_dir>/.overdrive/config`, builds the
+/// `rustls::ServerConfig` (HTTP/2 + HTTP/1.1 via ALPN), binds a TCP
+/// listener on [`ServerConfig::bind`], and spawns the `axum_server`
+/// serving task. Returns once the listener is bound — callers can
+/// observe the actually-bound address via
+/// [`ServerHandle::local_addr`].
 ///
-/// SCAFFOLD: true
-pub async fn run_server(_config: ServerConfig) -> Result<(), error::ControlPlaneError> {
-    panic!("Not yet implemented -- RED scaffold")
+/// # Errors
+///
+/// Returns `ControlPlaneError::Internal` if the CA mint, TLS config
+/// load, trust-triple write, or TCP bind fails. The server task itself
+/// runs in the background; its errors are observable only via
+/// [`ServerHandle::shutdown`] which awaits the task.
+pub async fn run_server(
+    config: ServerConfig,
+) -> Result<ServerHandle, error::ControlPlaneError> {
+    // Install the rustls process-wide CryptoProvider (ring) exactly
+    // once. The workspace enables only the `ring` feature, but rustls
+    // still requires an explicit install when neither provider is the
+    // sole compiled-in backend. Ignore the result: if the provider has
+    // already been installed (e.g. a prior test in the same process),
+    // that is a no-op success for our purposes.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
+    // Mint ephemeral CA + leafs per ADR-0010.
+    let material = tls_bootstrap::mint_ephemeral_ca()?;
+
+    // Write the trust triple so clients (tests, the CLI) can load the
+    // CA from a stable location. Endpoint is recorded even though the
+    // test binds ephemeral — consumers use the field but must ignore
+    // the port if they obtained a different one out-of-band.
+    let endpoint = format!("https://{}", config.bind);
+    tls_bootstrap::write_trust_triple(&config.data_dir, &endpoint, &material)?;
+
+    // Build the rustls::ServerConfig with ALPN h2/http1.1.
+    let rustls_config = tls_bootstrap::load_server_tls_config(&material)?;
+    let axum_rustls = RustlsConfig::from_config(Arc::new(rustls_config));
+
+    // Assemble the router — every ADR-0008 endpoint routed to `stub`
+    // for this slice. Real handlers land in 02-04.
+    let router = Router::new()
+        .route("/v1/jobs", post(stub))
+        .route("/v1/jobs/:id", get(stub))
+        .route("/v1/allocs", get(stub))
+        .route("/v1/nodes", get(stub))
+        .route("/v1/cluster/info", get(stub));
+
+    // Bind the listener synchronously so we can surface bind errors
+    // before spawning the serve task.
+    let std_listener = std::net::TcpListener::bind(config.bind).map_err(|e| {
+        error::ControlPlaneError::Internal(format!("bind {}: {e}", config.bind))
+    })?;
+    std_listener.set_nonblocking(true).map_err(|e| {
+        error::ControlPlaneError::Internal(format!("set_nonblocking: {e}"))
+    })?;
+
+    let axum_handle = AxumHandle::new();
+    let server = axum_server::from_tcp_rustls(std_listener, axum_rustls)
+        .handle(axum_handle.clone());
+
+    let server_task = tokio::spawn(async move {
+        server.serve(router.into_make_service()).await
+    });
+
+    Ok(ServerHandle {
+        inner: axum_handle,
+        server_task,
+    })
+}
+
+/// Stub handler — every ADR-0008 endpoint routes here until Slice 4
+/// delivers the real handler bodies. Returns HTTP 200 with an empty
+/// JSON object so `reqwest::Response::status()` assertions in the
+/// acceptance test see a green path.
+async fn stub() -> impl IntoResponse {
+    (
+        StatusCode::OK,
+        [("content-type", "application/json")],
+        "{}",
+    )
 }
 
 /// Construct the `noop-heartbeat` reconciler. Exposed as a public factory

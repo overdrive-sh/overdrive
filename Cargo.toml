@@ -51,7 +51,7 @@ rustls          = { version = "0.23", default-features = false, features = ["rin
 # --- Networking / HTTP ----------------------------------------------------
 hyper           = { version = "1", features = ["full"] }
 hyper-util      = { version = "0.1", features = ["full"] }
-reqwest         = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+reqwest         = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "http2"] }
 tonic           = "0.12"
 prost           = "0.13"
 quinn           = { version = "0.11", default-features = false, features = ["rustls", "runtime-tokio"] }
