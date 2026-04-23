@@ -111,6 +111,18 @@ enum Task {
         #[command(subcommand)]
         action: McpAction,
     },
+
+    /// Regenerate `api/openapi.yaml` from the live `OverdriveApi`
+    /// schema. Invoked by developers after adding or changing a DTO or
+    /// handler path. Per ADR-0009, the checked-in YAML is the contract;
+    /// drift is caught by `openapi-check` in CI.
+    OpenapiGen,
+
+    /// Verify `api/openapi.yaml` matches the live `OverdriveApi`
+    /// schema. Exits 0 on match; non-zero with a message naming the
+    /// first drifted schema/path and suggesting `cargo xtask
+    /// openapi-gen` to regenerate. CI gate per ADR-0009.
+    OpenapiCheck,
 }
 
 #[derive(Debug, Parser)]
@@ -227,6 +239,8 @@ fn run() -> Result<()> {
         Task::Hooks { action } => hooks(action),
         Task::Mcp { action } => mcp(action),
         Task::DevSetup => dev_setup(),
+        Task::OpenapiGen => xtask::openapi::openapi_gen(),
+        Task::OpenapiCheck => xtask::openapi::openapi_check(),
     }
 }
 

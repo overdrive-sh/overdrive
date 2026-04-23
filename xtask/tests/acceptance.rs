@@ -16,10 +16,12 @@
 #![allow(clippy::expect_fun_call)]
 
 mod acceptance {
-    //! Phase-1-foundation acceptance scenarios for xtask.
+    //! Acceptance scenarios for xtask — spans phase-1-foundation
+    //! (`dst_*`) and phase-1-control-plane-core (`openapi_gate`).
     mod dst_canary_red_run;
     mod dst_clean_clone_green;
     mod dst_harness_smoke;
     mod dst_lint_banned_apis;
     mod dst_seeded_reproduction;
+    mod openapi_gate;
 }

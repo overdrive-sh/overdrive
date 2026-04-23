@@ -9,3 +9,4 @@
 pub mod dst;
 pub mod dst_lint;
 pub mod mutants;
+pub mod openapi;

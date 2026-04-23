@@ -115,3 +115,49 @@ pub struct ErrorBody {
     pub message: String,
     pub field: Option<String>,
 }
+
+/// Root OpenAPI document per ADR-0009. Every ADR-0008 handler path is
+/// listed in `paths(...)` and every request/response DTO in
+/// `components(schemas(...))`. The schema is derived by `utoipa` at
+/// compile time; `cargo xtask openapi-gen` writes the YAML rendering of
+/// `OverdriveApi::openapi()` to `api/openapi.yaml`; `cargo xtask
+/// openapi-check` diffs the live render against the checked-in copy and
+/// fails on drift.
+///
+/// Adding a handler requires adding its path here; adding a DTO
+/// requires adding its schema. Drift between code and the OpenAPI doc
+/// is caught by the CI gate, not in review.
+#[derive(utoipa::OpenApi)]
+#[openapi(
+    info(
+        title = "Overdrive Control Plane",
+        description = "Phase 1 single-mode control-plane REST API (ADR-0008).",
+        version = "0.0.0",
+    ),
+    paths(
+        crate::handlers::submit_job,
+        crate::handlers::describe_job,
+        crate::handlers::cluster_status,
+        crate::handlers::alloc_status,
+        crate::handlers::node_list,
+    ),
+    components(schemas(
+        SubmitJobRequest,
+        SubmitJobResponse,
+        JobDescription,
+        ClusterStatus,
+        BrokerCountersBody,
+        AllocStatusResponse,
+        AllocStatusRowBody,
+        NodeList,
+        NodeRowBody,
+        ErrorBody,
+        JobSpecInput,
+    )),
+    tags(
+        (name = "jobs", description = "Job lifecycle endpoints"),
+        (name = "cluster", description = "Cluster status endpoints"),
+        (name = "observation", description = "Observation-store read endpoints"),
+    ),
+)]
+pub struct OverdriveApi;

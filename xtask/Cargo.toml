@@ -46,6 +46,11 @@ dotenvy.workspace    = true
 syn.workspace        = true
 rand.workspace       = true
 overdrive-sim        = { path = "../crates/overdrive-sim" }
+# `openapi-gen` / `openapi-check` call
+# `overdrive_control_plane::api::OverdriveApi::openapi()` to render the
+# live schema — ADR-0009.
+overdrive-control-plane = { path = "../crates/overdrive-control-plane" }
+utoipa.workspace     = true
 # `span-locations` enables `Span::start()`/`end()` — required so
 # dst-lint can report `file:line:col` for each violation.
 proc-macro2          = { version = "1", features = ["span-locations"] }

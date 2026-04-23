@@ -12,8 +12,9 @@
 //! | `GET /v1/allocs` | `alloc_status` |
 //! | `GET /v1/nodes` | `node_list` |
 //!
-//! Bodies are `panic!` stubs. Each handler will gain its `#[utoipa::path]`
-//! annotation when `utoipa` integration lands with Slice 3.
+//! Bodies remain `panic!` stubs until Slice 3 lands the real wiring —
+//! the `#[utoipa::path]` annotations below walk the attribute only, so
+//! the OpenAPI schema can be derived without exercising the bodies.
 
 use crate::api;
 use crate::error::ControlPlaneError;
@@ -22,6 +23,17 @@ use crate::error::ControlPlaneError;
 /// intent store, return `(job_id, commit_index)`.
 ///
 /// SCAFFOLD: true
+#[utoipa::path(
+    post,
+    path = "/v1/jobs",
+    request_body = api::SubmitJobRequest,
+    responses(
+        (status = 200, description = "Job accepted", body = api::SubmitJobResponse),
+        (status = 400, description = "Validation error", body = api::ErrorBody),
+        (status = 500, description = "Internal error", body = api::ErrorBody),
+    ),
+    tag = "jobs",
+)]
 pub async fn submit_job(
     _request: api::SubmitJobRequest,
 ) -> Result<api::SubmitJobResponse, ControlPlaneError> {
@@ -32,6 +44,19 @@ pub async fn submit_job(
 /// bytes, recompute `spec_digest = ContentHash::of(archived_bytes)`.
 ///
 /// SCAFFOLD: true
+#[utoipa::path(
+    get,
+    path = "/v1/jobs/{id}",
+    params(
+        ("id" = String, Path, description = "Canonical JobId"),
+    ),
+    responses(
+        (status = 200, description = "Job description", body = api::JobDescription),
+        (status = 404, description = "Job not found", body = api::ErrorBody),
+        (status = 500, description = "Internal error", body = api::ErrorBody),
+    ),
+    tag = "jobs",
+)]
 pub async fn describe_job(_id: String) -> Result<api::JobDescription, ControlPlaneError> {
     panic!("Not yet implemented -- RED scaffold")
 }
@@ -40,6 +65,15 @@ pub async fn describe_job(_id: String) -> Result<api::JobDescription, ControlPla
 /// registry, broker counters.
 ///
 /// SCAFFOLD: true
+#[utoipa::path(
+    get,
+    path = "/v1/cluster/info",
+    responses(
+        (status = 200, description = "Cluster status", body = api::ClusterStatus),
+        (status = 500, description = "Internal error", body = api::ErrorBody),
+    ),
+    tag = "cluster",
+)]
 pub async fn cluster_status() -> Result<api::ClusterStatus, ControlPlaneError> {
     panic!("Not yet implemented -- RED scaffold")
 }
@@ -48,6 +82,15 @@ pub async fn cluster_status() -> Result<api::ClusterStatus, ControlPlaneError> {
 /// rows per US-03 AC.
 ///
 /// SCAFFOLD: true
+#[utoipa::path(
+    get,
+    path = "/v1/allocs",
+    responses(
+        (status = 200, description = "Allocation status rows", body = api::AllocStatusResponse),
+        (status = 500, description = "Internal error", body = api::ErrorBody),
+    ),
+    tag = "observation",
+)]
 pub async fn alloc_status() -> Result<api::AllocStatusResponse, ControlPlaneError> {
     panic!("Not yet implemented -- RED scaffold")
 }
@@ -56,6 +99,15 @@ pub async fn alloc_status() -> Result<api::AllocStatusResponse, ControlPlaneErro
 /// rows per US-03 AC.
 ///
 /// SCAFFOLD: true
+#[utoipa::path(
+    get,
+    path = "/v1/nodes",
+    responses(
+        (status = 200, description = "Node rows", body = api::NodeList),
+        (status = 500, description = "Internal error", body = api::ErrorBody),
+    ),
+    tag = "observation",
+)]
 pub async fn node_list() -> Result<api::NodeList, ControlPlaneError> {
     panic!("Not yet implemented -- RED scaffold")
 }

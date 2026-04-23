@@ -1,0 +1,348 @@
+openapi: 3.1.0
+info:
+  title: Overdrive Control Plane
+  description: Phase 1 single-mode control-plane REST API (ADR-0008).
+  contact:
+    name: Overdrive Contributors
+  license:
+    name: FSL-1.1-ALv2
+    identifier: FSL-1.1-ALv2
+  version: 0.0.0
+paths:
+  /v1/allocs:
+    get:
+      tags:
+      - observation
+      summary: |-
+        `GET /v1/allocs` — observation read on `alloc_status`. Phase 1: zero
+        rows per US-03 AC.
+      description: 'SCAFFOLD: true'
+      operationId: alloc_status
+      responses:
+        '200':
+          description: Allocation status rows
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AllocStatusResponse'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+  /v1/cluster/info:
+    get:
+      tags:
+      - cluster
+      summary: |-
+        `GET /v1/cluster/info` — mode, region, commit_index, reconciler
+        registry, broker counters.
+      description: 'SCAFFOLD: true'
+      operationId: cluster_status
+      responses:
+        '200':
+          description: Cluster status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClusterStatus'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+  /v1/jobs:
+    post:
+      tags:
+      - jobs
+      summary: |-
+        `POST /v1/jobs` — validate, archive via rkyv, commit through the
+        intent store, return `(job_id, commit_index)`.
+      description: 'SCAFFOLD: true'
+      operationId: submit_job
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitJobRequest'
+        required: true
+      responses:
+        '200':
+          description: Job accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmitJobResponse'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+  /v1/jobs/{id}:
+    get:
+      tags:
+      - jobs
+      summary: |-
+        `GET /v1/jobs/{id}` — read via `IntentStore::get`, rkyv-access the
+        bytes, recompute `spec_digest = ContentHash::of(archived_bytes)`.
+      description: 'SCAFFOLD: true'
+      operationId: describe_job
+      parameters:
+      - name: id
+        in: path
+        description: Canonical JobId
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Job description
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobDescription'
+        '404':
+          description: Job not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+  /v1/nodes:
+    get:
+      tags:
+      - observation
+      summary: |-
+        `GET /v1/nodes` — observation read on `node_health`. Phase 1: zero
+        rows per US-03 AC.
+      description: 'SCAFFOLD: true'
+      operationId: node_list
+      responses:
+        '200':
+          description: Node rows
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeList'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+components:
+  schemas:
+    AllocStatusResponse:
+      type: object
+      description: |-
+        Response for `GET /v1/allocs`. Phase 1 always renders an empty
+        `rows` array per US-03 AC — the allocation-status path is owned by
+        Phase 2. The typed `rows` field is present so the CLI and external
+        clients can parse the response into a concrete shape rather than
+        `serde_json::Value`.
+      required:
+      - rows
+      properties:
+        rows:
+          type: array
+          items:
+            $ref: '#/components/schemas/AllocStatusRowBody'
+    AllocStatusRowBody:
+      type: object
+      description: |-
+        Allocation-status row body. Empty in Phase 1 — the fields land in
+        Phase 2 alongside the observation-store schema. The type exists now
+        so downstream callers (CLI, openapi-gen) can reference a stable
+        name; future columns land additively.
+    BrokerCountersBody:
+      type: object
+      description: |-
+        Broker counters rendered inside `ClusterStatus`. Tracks the
+        evaluation-broker ingress / cancel / dispatch shape from ADR-0013.
+      required:
+      - queued
+      - cancelled
+      - dispatched
+      properties:
+        cancelled:
+          type: integer
+          format: int64
+          minimum: 0
+        dispatched:
+          type: integer
+          format: int64
+          minimum: 0
+        queued:
+          type: integer
+          format: int64
+          minimum: 0
+    ClusterStatus:
+      type: object
+      description: |-
+        Response for `GET /v1/cluster/info`. Carries mode, region,
+        commit_index, the reconciler registry, and the broker counters per
+        ADR-0013 and US-04 AC.
+      required:
+      - mode
+      - region
+      - commit_index
+      - reconcilers
+      - broker
+      properties:
+        broker:
+          $ref: '#/components/schemas/BrokerCountersBody'
+        commit_index:
+          type: integer
+          format: int64
+          minimum: 0
+        mode:
+          type: string
+        reconcilers:
+          type: array
+          items:
+            type: string
+        region:
+          type: string
+    ErrorBody:
+      type: object
+      description: |-
+        RFC-7807-compatible subset per ADR-0015. The three fields —
+        `error`, `message`, `field` — are pinned; renaming breaks the
+        contract surface the CLI and external clients depend on. `field` is
+        `Option<String>` because not every error class maps to a single
+        field (e.g. transport-layer errors).
+      required:
+      - error
+      - message
+      properties:
+        error:
+          type: string
+        field:
+          type:
+          - string
+          - 'null'
+        message:
+          type: string
+    JobDescription:
+      type: object
+      description: |-
+        Response for `GET /v1/jobs/{id}`. Carries the re-hydrated spec, the
+        commit index at which it was written, and the canonical spec
+        digest per ADR-0014 and US-03 AC.
+
+        `spec` is typed (`JobSpecInput`), never `serde_json::Value` — the
+        CLI parses this response into a concrete type rather than a value
+        bag.
+      required:
+      - spec
+      - commit_index
+      - spec_digest
+      properties:
+        commit_index:
+          type: integer
+          format: int64
+          minimum: 0
+        spec:
+          $ref: '#/components/schemas/JobSpecInput'
+        spec_digest:
+          type: string
+    JobSpecInput:
+      type: object
+      description: |-
+        Input shape for `Job::from_spec`. The CLI deserialises TOML into this
+        type; the server deserialises JSON into the same type; both route
+        through the same constructor.
+
+        Carries `Serialize` / `Deserialize` so REST handlers and the CLI can
+        reuse this type verbatim as the body / field shape for
+        `POST /v1/jobs` and `GET /v1/jobs/{id}` (ADR-0014 §Shared types).
+        Carries `utoipa::ToSchema` so the generated `OpenAPI` document
+        (ADR-0009, `cargo xtask openapi-gen`) renders the spec shape
+        consistently across the server and CLI lanes.
+      required:
+      - id
+      - replicas
+      - cpu_milli
+      - memory_bytes
+      properties:
+        cpu_milli:
+          type: integer
+          format: int32
+          minimum: 0
+        id:
+          type: string
+        memory_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        replicas:
+          type: integer
+          format: int32
+          minimum: 0
+    NodeList:
+      type: object
+      description: |-
+        Response for `GET /v1/nodes`. Phase 1 always renders an empty
+        `rows` array per US-03 AC — node ingestion lands in a later phase.
+      required:
+      - rows
+      properties:
+        rows:
+          type: array
+          items:
+            $ref: '#/components/schemas/NodeRowBody'
+    NodeRowBody:
+      type: object
+      description: |-
+        Node row body. Empty in Phase 1 — same forward-compatibility
+        rationale as [`AllocStatusRowBody`].
+    SubmitJobRequest:
+      type: object
+      description: |-
+        Body of `POST /v1/jobs`. Carries the operator-submitted job spec
+        verbatim; the server routes it through `Job::from_spec` to validate
+        and derive the intent key / digest.
+      required:
+      - spec
+      properties:
+        spec:
+          $ref: '#/components/schemas/JobSpecInput'
+    SubmitJobResponse:
+      type: object
+      description: |-
+        Response for `POST /v1/jobs`. Carries `job_id` + `commit_index` per
+        journey step 1 and ADR-0008.
+
+        `job_id` is rendered as a `String` at the wire boundary; the server
+        converts back to `overdrive_core::id::JobId` in handlers.
+      required:
+      - job_id
+      - commit_index
+      properties:
+        commit_index:
+          type: integer
+          format: int64
+          minimum: 0
+        job_id:
+          type: string
+tags:
+- name: jobs
+  description: Job lifecycle endpoints
+- name: cluster
+  description: Cluster status endpoints
+- name: observation
+  description: Observation-store read endpoints
