@@ -94,6 +94,13 @@ time            = { version = "0.3", features = ["serde", "macros"] }
 base64          = "0.22"
 hex             = "0.4"
 url             = { version = "2", features = ["serde"] }
+hostname        = "0.4"
+# `serde_yaml` is marked deprecated upstream but remains the most-used
+# Rust YAML serde — required for Talos-shape `~/.overdrive/config`
+# (ADR-0010 §R2). Revisit when a maintained successor matures.
+serde_yaml      = "0.9"
+rustls-pemfile  = "2"
+x509-parser     = "0.18"
 
 # --- Testing --------------------------------------------------------------
 proptest        = "1"

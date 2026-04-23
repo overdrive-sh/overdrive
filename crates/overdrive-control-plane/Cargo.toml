@@ -21,6 +21,13 @@ publish                = false
 [package.metadata.overdrive]
 crate_class = "adapter-host"
 
+[features]
+# Opt-in gate for slow / real-infra tests in this crate. Off by default
+# so `cargo nextest run --workspace` stays under the 60s slow-test
+# budget; CI exercises the gate in a dedicated `integration` job. See
+# `.claude/rules/testing.md` §"Integration vs unit gating".
+integration-tests = []
+
 [dependencies]
 overdrive-core.workspace           = true
 # The Phase 1 observation-store impl is SimObservationStore (ADR-0012) —
@@ -49,6 +56,11 @@ rustls.workspace = true
 rcgen.workspace  = true
 hyper.workspace  = true
 
+# TLS bootstrap — trust-triple serialisation + helpers per ADR-0010.
+base64.workspace     = true
+serde_yaml.workspace = true
+hostname.workspace   = true
+
 # OpenAPI schema derivation
 utoipa       = { workspace = true }
 utoipa-axum  = { workspace = true }
@@ -61,9 +73,13 @@ tracing.workspace            = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
-tempfile.workspace = true
-reqwest.workspace  = true
-proptest.workspace = true
+tempfile.workspace       = true
+reqwest.workspace        = true
+proptest.workspace       = true
+rustls-pemfile.workspace = true
+serde_yaml.workspace     = true
+x509-parser.workspace    = true
+base64.workspace         = true
 
 [lints]
 workspace = true

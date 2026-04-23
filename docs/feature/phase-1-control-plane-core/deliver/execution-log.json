@@ -141,6 +141,27 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-04-23T16:18:21Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-23T16:35:13Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: integration tests fully cover observable behaviour through mint_ephemeral_ca / write_trust_triple driving ports",
+      "t": "2026-04-23T16:35:17Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-23T16:35:20Z"
     }
   ]
 }
