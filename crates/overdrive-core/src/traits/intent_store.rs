@@ -85,8 +85,14 @@ impl StateSnapshot {
     /// version + rkyv payload with entries sorted by key). No
     /// validation is performed here — the store that produced this
     /// snapshot is responsible for framing consistency.
+    // `const fn` is vacuous here: `bytes::Bytes` carries an `Arc`
+    // internally, so a caller who wanted a genuinely `const`
+    // StateSnapshot would not be able to produce the `Vec<(Bytes,
+    // Bytes)>` argument in a `const` context anyway. Keeping the
+    // signature non-`const` makes that clear at the call site.
     #[must_use]
-    pub const fn from_parts(version: u32, entries: Vec<(Bytes, Bytes)>, bytes: Vec<u8>) -> Self {
+    #[allow(clippy::missing_const_for_fn)]
+    pub fn from_parts(version: u32, entries: Vec<(Bytes, Bytes)>, bytes: Vec<u8>) -> Self {
         Self { version, entries, bytes }
     }
 
