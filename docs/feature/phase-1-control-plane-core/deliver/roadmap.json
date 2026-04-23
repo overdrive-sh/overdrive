@@ -1,0 +1,663 @@
+{
+  "roadmap": {
+    "project_id": "phase-1-control-plane-core",
+    "created_at": "2026-04-23T14:13:41Z",
+    "filled_at": "2026-04-23T18:00:00Z",
+    "total_steps": 25,
+    "phases": 5,
+    "walking_skeleton_gate": "05-05",
+    "notes": [
+      "Walking-skeleton gate is step 05-05 — the step that turns §1.1 (test-scenarios.md) GREEN: `overdrive cluster init` → `overdrive serve` → `overdrive job submit payments.toml` → `overdrive alloc status --job payments` prints a byte-identical spec digest. All prior steps are prerequisites; §1.1 is not expected to pass until 05-05 is GREEN.",
+      "Step decomposition ratio: 25 steps against ~14 production files (aggregate/mod.rs, reconciler.rs, core/lib.rs, control-plane/{lib,api,handlers,error,tls_bootstrap,reconciler_runtime,eval_broker,libsql_provisioner,observation_wiring}.rs, cli/main.rs + new http_client.rs, xtask/{main,openapi}.rs, sim invariants + harness) ≈ ratio 1.8. Matches the phase-1-foundation precedent (~1.6).",
+      "Slice-to-phase mapping (5 slices, 5 phases): slice-1 → phase 01 (aggregates + canonical keys), slice-2 → phase 02 (REST service surface + TLS bootstrap + OpenAPI gate), slice-3 → phase 03 (handlers + IntentStore commit + ObservationStore reads), slice-4 → phase 04 (reconciler primitive + runtime + broker + DST invariants), slice-5 → phase 05 (CLI handlers + walking-skeleton end-to-end).",
+      "ADR-0001 (phase-1-foundation) applies across every step that touches overdrive-core or the sim harness: complete scaffolding in place — do not refactor. Additional phase-1-control-plane-core scaffolds (DWD-06) exist in crates/overdrive-core/src/aggregate/mod.rs, crates/overdrive-core/src/reconciler.rs, and crates/overdrive-control-plane/src/{lib,api,handlers,error,tls_bootstrap,reconciler_runtime,eval_broker,libsql_provisioner,observation_wiring}.rs — every step below replaces specific `panic!(\"Not yet implemented -- RED scaffold\")` bodies marked `SCAFFOLD: true`, never invents a new module layout.",
+      "ADR-0005 test layout (phase-1-foundation): acceptance scenarios translated from distill/test-scenarios.md live in `crates/{crate}/tests/acceptance/*.rs`. Tests that touch real infrastructure (real redb file, real axum + rustls bind, real reqwest client, real rcgen CA, real libsql file, real SIGINT) are gated behind the owning crate's `integration-tests` feature per testing.md and live in `crates/{crate}/tests/integration/*.rs` wired through `crates/{crate}/tests/integration.rs`.",
+      "No `.feature` files anywhere per testing.md + DWD-03. Every Gherkin block in distill/test-scenarios.md is translated into a Rust `#[test]` / `#[tokio::test]` function. No cucumber-rs, pytest-bdd, or conftest.py is introduced.",
+      "Outside-In TDD rhythm per step (mirrors phase-1-foundation roadmap): RED (acceptance test from DISTILL scenario) → RED (unit tests where GREEN requires decomposition) → GREEN (minimal implementation to pass) → REFACTOR (apply .claude/rules/development.md: Result alias, pass-through #[from], newtype completeness, rkyv canonical hashing, no Instant::now in core, reconciler I/O contract) → PROPTEST (where the step's scope covers a proptest mandatory call site per testing.md) → MUTATION (`cargo xtask mutants --in-diff origin/main --package <crate>` ≥80% kill rate on the diff; unjustified survivors block commit) → POST-GREEN WIRING CHECK (`git diff --name-only` shows every file in implementation_scope.production_files actually changed — no Fixture Theater per quality-framework) → COMMIT (one commit per step; step id in commit message footer).",
+      "Scaffold panic replacement: each step replaces specific `SCAFFOLD: true` markers named in its notes. At step end the crafter runs `grep -rn 'SCAFFOLD: true' crates/ xtask/` and confirms only intentional markers remain (some remain across steps until the owning slice closes).",
+      "CI RED during DELIVER is expected (per devops/ci-cd-pipeline.md). The `--no-verify` git flag is the sanctioned escape hatch while scaffolds remain — each step's final commit should be `--verify`-clean on the files IT touched (cargo fmt, cargo clippy on touched crates, scoped cargo nextest run), even if whole-workspace clippy / nextest still reports errors coming from other scaffolds.",
+      "ADR-0006 applies to every `cargo xtask` subcommand shipped by this feature (openapi-check, openapi-gen): seed/first-line discipline does not apply (non-DST subcommands), but structured exit codes, actionable error messages naming the drifted type, and CI-parseable output are required.",
+      "Length-limit warnings from `des.cli.roadmap validate` (STEP_NAME_TOO_LONG / CRITERIA_TOO_LONG / DESCRIPTION_TOO_LONG) are non-blocking per CLAUDE.md — scenario-level specificity is deliberate and load-bearing for traceability.",
+      "Escalation protocol (three-attempt rule): Per `.claude/rules/testing.md` + nw-tdd-review-enforcement §Escalation, if GREEN implementation effort on any step exceeds 4 hours, log the escalation with reason and stop. Do NOT modify the test to accommodate a hard implementation — the test is always right; if GREEN is hard, the AC or step decomposition is wrong. Record the ESCALATION_NEEDED marker in `execution-log.json` and hand off to the tech lead.",
+      "ADR-0017 scope fold (post-remediation): the three reconciler-primitive invariants named in this roadmap (`at-least-one-reconciler-registered`, `duplicate-evaluations-collapse`, `reconciler-is-pure`) migrate single-cut into `crates/overdrive-invariants` per ADR-0017 §5. If the ADR-0017 PR lands before Slice 4, steps 04-02/04-04/04-05 register predicates into the new crate directly; if it lands after, they register into `crates/overdrive-sim/src/invariants/` and migrate mechanically at the ADR-0017 cut. Name set is stable across both orderings — the crafter does not choose.",
+      "ADR-0018 scope fold (post-remediation): the cert-rotation reconciler (Verus pilot target per ADR-0018 §1) is NOT scheduled in this roadmap — phase-1-control-plane-core ships `noop-heartbeat` only (ADR-0013 §9, roadmap step 04-04). The cert-rotation reconciler lands in a later feature. Phase 1's contribution to the Verus track is narrower: the `Reconciler` trait surface (step 04-01) must remain compatible with static-dispatch `Controller<C: ControllerApi>`-shape impls per Verus's `dyn Trait` limitation (research Finding 1.7). The trait as defined in 04-01 (synchronous, no trait-object parameter in the `reconcile` signature) is already compatible; no Phase-1 refactor required."
+    ]
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Slice 1 — Job / Node / Allocation aggregates + canonical intent-key derivation",
+      "slice": "slice-1",
+      "user_stories": ["US-01"],
+      "description": "Replace the scaffold panics in `crates/overdrive-core/src/aggregate/mod.rs` with real validating constructors for `Job`, `Node`, `Allocation`, keep `Policy` and `Investigation` as ID-only stubs per ADR-0011, and ship a single canonical `IntentKey::{for_job,for_node,for_allocation}` derivation used by every caller. Derive `rkyv::Archive + rkyv::Serialize + rkyv::Deserialize + serde::Serialize + serde::Deserialize` on each aggregate so the two serialisation lanes (serde-JSON at the REST boundary, rkyv at the IntentStore boundary) are both available. Reuse the existing `Resources` from `traits/driver.rs` — US-01 AC forbids a duplicate. Plumb `pub mod aggregate;` into `crates/overdrive-core/src/lib.rs`.",
+      "estimated_hours": 6,
+      "depends_on": [],
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "Job / Node / Allocation validating constructors accept valid specs and land the Resources-deduplication invariant",
+          "criteria": "`Job::from_spec(JobSpecInput { id: \"payments\", replicas: 1, cpu_milli: 2000, memory_bytes: 4*1024*1024*1024 })` returns `Ok(Job { id: JobId(\"payments\"), replicas: NonZeroU32::new(1).unwrap(), resources: Resources { … } })`. `Node::new(...)` and `Allocation::new(...)` accept canonical spec inputs and return `Ok`. Every aggregate field is a newtype or a phase-1-foundation primitive type — no bare `String` / `u64` appears in public struct fields (asserted by a `#[test]` inspecting the struct via `std::any::type_name`). The `Resources` used by `Job.resources` and `Node.capacity` resolves to the SAME `overdrive_core::traits::driver::Resources` (asserted via `std::any::TypeId::of::<_>()`); no second `Resources` type exists anywhere in the `overdrive-core` crate (grep gate in the test file). Replaces scaffolds at crates/overdrive-core/src/aggregate/mod.rs: `Job::from_spec`, `Node::new`, `Allocation::new`, `JobSpecInput`, `NodeSpecInput`, `AllocationSpecInput`. Also plumbs `pub mod aggregate;` into `crates/overdrive-core/src/lib.rs`. Covers test-scenarios.md §2.1 scenarios 1 (rkyv round-trip — landed in 01-03), 4 (Resources reuse), 5 (Allocation links through typed newtypes only). Post-GREEN: `git diff --name-only` shows aggregate/mod.rs and lib.rs modified.",
+          "test_file": "crates/overdrive-core/tests/acceptance/aggregate_constructors.rs",
+          "scenario_name": "Valid Job / Node / Allocation specs construct through the validating constructors; Resources is reused, not duplicated; Allocation exposes only typed newtypes in its public fields",
+          "tier": "Tier 1 (acceptance)",
+          "time_estimate_hours": 2,
+          "dependencies": [],
+          "implementation_scope": {
+            "production_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-core/src/aggregate/mod.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-core/src/lib.rs"
+            ],
+            "test_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-core/tests/acceptance/aggregate_constructors.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-core/tests/acceptance.rs"
+            ]
+          },
+          "notes": "Scaffold at crates/overdrive-core/src/aggregate/mod.rs:77 (Job::from_spec), :114 (Node::new), :151 (Allocation::new) — bodies currently panic. `JobId::from_str` / `NodeId::from_str` / `Region::from_str` already ship from phase-1-foundation — the constructor wraps them and returns `AggregateError::Id(...)` via the existing `#[from]` on `IdParseError`. Cross-reference ADR-0011 for the module ownership rule: no `JobSpec`-named struct may remain in observation_store.rs after this step. The crafter greps `crates/overdrive-core/src/traits/observation_store.rs` for `JobSpec` and confirms the observation-side shape is `AllocStatusRow`. Update `crates/overdrive-core/tests/acceptance.rs` to declare the new `aggregate_constructors` module (inline `mod acceptance { mod aggregate_constructors; }` per ADR-0005 test layout)."
+        },
+        {
+          "id": "01-02",
+          "name": "Validating constructors reject malformed specs with structured AggregateError before any archival attempt",
+          "criteria": "`Job::from_spec(JobSpecInput { replicas: 0, ... })` returns `Err(AggregateError::Validation { field: \"replicas\", message })` with the message mentioning the invalid value `0`; no `Job` value constructed. `Job::from_spec(JobSpecInput { id: \"PAY MENTS\", ... })` (forbidden space) returns `Err(AggregateError::Id(IdParseError::InvalidChar { … }))` via the existing `#[from]` pass-through; no rkyv archival attempt is observable (the test inserts a sentinel on the rkyv path via the type system — calling `from_spec` with invalid input never reaches the archival call). `Node::new(NodeSpecInput { memory_bytes: 0, ... })` returns `Err(AggregateError::Validation { field: \"memory.bytes\", message })` or `Err(AggregateError::Resources(...))` naming zero-memory. Covers test-scenarios.md §2.2 all three error-boundary scenarios. After GREEN: `cargo xtask mutants --in-diff origin/main --package overdrive-core` reports ≥80% kill rate on the validator diff per testing.md mutation target 'Newtype FromStr and validators'. Replaces scaffolds in aggregate/mod.rs: the validator bodies inside `Job::from_spec`, `Node::new`, `Allocation::new`.",
+          "test_file": "crates/overdrive-core/tests/acceptance/aggregate_validation.rs",
+          "scenario_name": "Zero-replica / forbidden-char JobId / zero-memory Node specs are rejected at the validating constructor with structured AggregateError; no archive attempt occurs on invalid input",
+          "tier": "Tier 1 (acceptance, negative cases)",
+          "time_estimate_hours": 2,
+          "dependencies": ["01-01"],
+          "implementation_scope": {
+            "production_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-core/src/aggregate/mod.rs"
+            ],
+            "test_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-core/tests/acceptance/aggregate_validation.rs"
+            ]
+          },
+          "notes": "`AggregateError` enum is already scaffolded with `Validation`, `Id(#[from] IdParseError)`, `Resources` variants — this step fills in the matchers. Per ADR-0015 §1, `ControlPlaneError::Aggregate(_)` will wrap `AggregateError` via `#[from]` so these variants surface as HTTP 400 in Slice 3 — do not redefine the shape. `field: &'static str` is the existing scaffold signature; use it as-is."
+        },
+        {
+          "id": "01-03",
+          "name": "IntentKey derivation is stable and canonical across CLI and server call sites",
+          "criteria": "`IntentKey::for_job(&JobId::from_str(\"payments\").unwrap()).as_str()` returns `\"jobs/payments\"` byte-for-byte; two calls on the same `JobId` produce byte-identical `as_bytes()` output. `IntentKey::for_node(...)` returns `\"nodes/<node-id>\"`; `IntentKey::for_allocation(...)` returns `\"allocations/<alloc-id>\"`. A proptest with `PROPTEST_CASES=1024` over arbitrary valid `JobId` values asserts `IntentKey::for_job(&id).as_bytes()` is stable across two invocations and equals `format!(\"jobs/{}\", id).as_bytes()`. A grep-based test asserts `jobs/` appears as a string literal in exactly ONE location across the workspace (the `IntentKey::for_job` body) — no drift-prone duplicate derivation anywhere. Replaces scaffolds at aggregate/mod.rs: `IntentKey::for_job`, `IntentKey::for_node`, `IntentKey::for_allocation`, `IntentKey::as_str`. Covers test-scenarios.md §2.1 scenario 3 (canonical key derivation stable) which IS the US-01 @property AC. `cargo xtask mutants --in-diff` on the derivation code expects ≥80% kill rate per testing.md mandatory target 'Newtype FromStr and validators' (applies by analogy to key derivation).",
+          "test_file": "crates/overdrive-core/tests/acceptance/intent_key_canonical.rs",
+          "scenario_name": "IntentKey derivation is byte-stable across calls; the canonical form is `<collection>/<id>`; no duplicate derivation exists anywhere in the workspace",
+          "tier": "Tier 1 + proptest (@property per DWD-05)",
+          "time_estimate_hours": 2,
+          "dependencies": ["01-01"],
+          "implementation_scope": {
+            "production_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-core/src/aggregate/mod.rs"
+            ],
+            "test_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-core/tests/acceptance/intent_key_canonical.rs"
+            ]
+          },
+          "notes": "The proptest generator reuses phase-1-foundation's `JobId` `Arbitrary` impl if one exists under the `proptest` feature, otherwise synthesises valid JobId strings matching `^[a-z][a-z0-9-]{0,62}$`. The grep-based test shells out to `rg` via `std::process::Command` — limit the search to `.rs` files under `crates/` to avoid matching documentation. Deliberately keeping CLI-side and server-side callers out of scope here; they route through this function in steps 03-01 and 05-01."
+        },
+        {
+          "id": "01-04",
+          "name": "Job / Node / Allocation round-trip through rkyv (canonical) and serde-JSON (wire-lane) without loss",
+          "criteria": "A `Job` constructed via `from_spec` round-trips through rkyv: `rkyv::to_bytes::<_, 256>(&job).unwrap()` → `rkyv::access::<ArchivedJob, _>(&bytes).unwrap()` → `rkyv::deserialize::<Job, _>(archived, &mut Infallible).unwrap()` equals the original. Two independent archivals of the same logical `Job` produce byte-identical `Vec<u8>` output (canonical-hash precondition per whitepaper §4 + ADR-0002). The same round-trip assertion holds for `Node` and `Allocation`. Separately, `serde_json::from_str::<Job>(&serde_json::to_string(&job).unwrap()).unwrap()` equals the original for all three aggregates. A proptest with `PROPTEST_CASES=1024` asserts rkyv round-trip equality AND byte-identical re-archival for arbitrary valid `Job` values — this IS a testing.md mandatory call site ('rkyv roundtrip'). A proptest asserts serde-JSON round-trip equality. Covers test-scenarios.md §2.1 scenarios 1 (rkyv round-trip property), 2 (serde-JSON round-trip property). Adds `#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, serde::Serialize, serde::Deserialize)]` on each aggregate struct. `cargo xtask mutants --in-diff --package overdrive-core` kill rate ≥80% on the rkyv / serde derivation area — hash-determinism paths per testing.md mandatory target.",
+          "test_file": "crates/overdrive-core/tests/acceptance/aggregate_roundtrip.rs",
+          "scenario_name": "Job / Node / Allocation aggregates round-trip through rkyv byte-identically and through serde-JSON lossy-free; two rkyv archivals of the same value produce byte-identical output",
+          "tier": "Tier 1 + proptest (@property, mandatory per testing.md — newtype roundtrip + rkyv roundtrip)",
+          "time_estimate_hours": 2,
+          "dependencies": ["01-01", "01-02"],
+          "implementation_scope": {
+            "production_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-core/src/aggregate/mod.rs"
+            ],
+            "test_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-core/tests/acceptance/aggregate_roundtrip.rs"
+            ]
+          },
+          "notes": "Precondition verified at roadmap-remediation time (2026-04-23): `grep -n '#\\[derive' crates/overdrive-core/src/aggregate/mod.rs` currently shows ONLY `#[derive(Debug, Clone, PartialEq, Eq)]` on `Job`, `Node`, `Allocation` — NO `rkyv::Archive`, `rkyv::Serialize`, `rkyv::Deserialize`, `serde::Serialize`, `serde::Deserialize` derives present. Step 01-04 is therefore a genuine GREEN step that must add these derives; the round-trip assertions cannot pass without them. This pre-check closes the Fixture-Theater door (quality-framework Pattern 8). **Post-GREEN Fixture-Theater check (MANDATORY)**: after the acceptance test flips RED→GREEN, run `git diff --stat crates/overdrive-core/src/aggregate/mod.rs` and confirm the file shows line additions in the `#[derive(...)]` attribute lines of `Job`, `Node`, `Allocation` (and their Input shapes if the round-trip exercises those). If the only file touched is the test file, BLOCK the commit — a Fixture-Theater pass would indicate rkyv/serde derives had been smuggled in earlier, contradicting the pre-check. `rkyv::Archive` + derive cascade requires `ArchivedJob`, `ArchivedNode`, `ArchivedAllocation` types — these are emitted by the derive; the test uses `rkyv::access::<ArchivedJob, rkyv::rancor::Error>(...)` per rkyv 0.8 API. `NonZeroU32` has a built-in rkyv impl. Keys / newtypes — `JobId`, `NodeId`, `AllocationId`, `Region` — must already derive rkyv from phase-1-foundation; confirm via `cargo check` before adding derives on aggregates. If a newtype is missing the rkyv derive, that's a phase-1-foundation regression — file under upstream-issues.md rather than patching here. ADR-0011 §Resources deduplication: `Resources` in `traits/driver.rs` also needs rkyv derives to cascade — this may require a one-line derive add there; document in the commit message. The serde-JSON path is separate from rkyv (different bytes, same semantic content) — the test asserts they are non-substitutable (different byte outputs for the same value) per test-scenarios.md §2.1 scenario 2."
+        }
+      ]
+    },
+    {
+      "id": "02",
+      "name": "Slice 2 — REST service surface: axum + rustls + utoipa + ephemeral TLS bootstrap",
+      "slice": "slice-2",
+      "user_stories": ["US-02"],
+      "description": "Stand up the axum + rustls HTTP/2 server in `overdrive-control-plane`, wire up the five ADR-0008 endpoints with placeholder handler bodies (full semantics land in Slice 3), mint the ephemeral CA + trust triple per ADR-0010 so the server can bind TLS on `https://127.0.0.1:7001`, add utoipa `#[derive(ToSchema)]` / `#[utoipa::path]` annotations on the shared request/response types per ADR-0009 to emit `api/openapi.yaml`, and ship `cargo xtask openapi-check` as the CI drift-detection gate. Also wire the `serve` and `cluster init` CLI subcommands enough that the server can be started as a subprocess from an integration test. Add `crates/overdrive-control-plane` to the workspace members; add `axum`, `axum-server`, `utoipa`, `utoipa-axum`, `reqwest`, `rustls`, `rcgen`, `libsql` to `[workspace.dependencies]`. Every request/response shape in `api.rs` is finalised in this phase so Slice 3 fills in handler bodies without touching type signatures.",
+      "estimated_hours": 10,
+      "depends_on": ["01"],
+      "steps": [
+        {
+          "id": "02-01",
+          "name": "Ephemeral CA mints a trust triple with multi-SAN server leaf and writes ~/.overdrive/config in Talos YAML shape",
+          "criteria": "`mint_ephemeral_ca()` returns `CaMaterial` with populated `ca_cert_pem`, `server_leaf_cert_pem`, `server_leaf_key_pem`, `client_leaf_cert_pem`, `client_leaf_key_pem` — each PEM is parseable via `rustls_pemfile::certs(...)` or `rustls_pemfile::private_key(...)`. The server leaf cert's `subjectAltName` extension includes `IP:127.0.0.1`, `IP:::1`, `DNS:localhost`, and `DNS:<hostname::get()>` (exactly these four SAN entries per ADR-0010 §R3 — asserted via `x509-parser` decode in the test). `write_trust_triple(&tmp_dir, \"https://127.0.0.1:7001\", &material)` creates `<tmp_dir>/.overdrive/config` as YAML parseable with `serde_yaml` into a struct matching ADR-0010 §R2 (`contexts[0].endpoint`, `.ca`, `.crt`, `.key`; `current-context: local`); the `ca` / `crt` / `key` fields decode base64 into the original PEM bytes. Re-running `mint_ephemeral_ca()` then `write_trust_triple` overwrites the config with different material (`ca != previous_ca` bytewise) and does not prompt for input. Replaces scaffolds at `tls_bootstrap.rs`: `mint_ephemeral_ca`, `write_trust_triple`. Covers test-scenarios.md §2b.1 (cluster init writes a fully-formed trust triple), §2b.2 (re-initialising re-mints the CA). Tier 3 integration test — writes a real file on tempfile::TempDir.",
+          "test_file": "crates/overdrive-control-plane/tests/integration/tls_bootstrap.rs",
+          "scenario_name": "Ephemeral CA minting produces a parseable trust triple with the full multi-SAN server leaf and writes ~/.overdrive/config in Talos YAML shape; re-minting produces different material without prompting",
+          "tier": "Tier 3 (real filesystem I/O, integration-tests feature)",
+          "time_estimate_hours": 3,
+          "dependencies": [],
+          "implementation_scope": {
+            "production_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/Cargo.toml",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/src/tls_bootstrap.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/Cargo.toml"
+            ],
+            "test_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/tests/integration.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/tests/integration/tls_bootstrap.rs"
+            ]
+          },
+          "notes": "Adds `crates/overdrive-control-plane` to workspace `members` if not already — the crate's Cargo.toml exists but workspace membership may need to be asserted. Add `rcgen`, `rustls_pemfile`, `base64`, `serde_yaml` to `[workspace.dependencies]` with the crafter choosing the latest 0.x pin at time of implementation (record choices in commit message). Gate this test under the `integration-tests` feature per testing.md (real file I/O). Entrypoint `tests/integration.rs` carries `#![cfg(feature = \"integration-tests\")]`; submodule declared as `mod integration { mod tls_bootstrap; }`. `load_server_tls_config` is covered in 02-02 where the axum server actually binds. No persistence of the CA key — scaffold docstring says so; the test asserts re-minting produces different `ca_cert_pem` bytes to prove ephemerality."
+        },
+        {
+          "id": "02-02",
+          "name": "axum + rustls server binds on https://127.0.0.1:7001 and accepts TLS handshakes from a reqwest client using the minted CA",
+          "criteria": "`run_server(ServerConfig { bind: \"127.0.0.1:0\".parse().unwrap(), data_dir: tmp_dir.path().into() })` succeeds in minting a trust triple, constructing a `rustls::ServerConfig` via `load_server_tls_config`, and binding an axum router over HTTP/2 with ALPN `h2, http/1.1` — the test obtains the actually-bound port via a `oneshot::channel` the server sends once listening. A `reqwest::Client::builder().add_root_certificate(ca_from_triple).build().unwrap().get(format!(\"https://127.0.0.1:{port}/v1/cluster/info\")).send().await` succeeds with HTTP status 200 and the response ALPN reports `h2` (via `.version() == Version::HTTP_2`). The server drops the listener on `tokio::select!` receiving SIGINT (the test uses a cancellation token in place of real SIGINT — same shutdown path); in-flight requests complete with status code 0 (the test deliberately makes one slow request, sends cancellation, asserts the request finishes). Replaces scaffolds at `lib.rs`: `run_server`, `load_server_tls_config` in tls_bootstrap.rs. The handler bodies remain panic-stubs at this step; the router maps every ADR-0008 path to a placeholder that returns `(StatusCode::OK, \"{}\")` so the TLS-only smoke test doesn't need real handler logic yet. Covers test-scenarios.md §3.2 (server binds over TLS and shuts down cleanly on SIGINT).",
+          "test_file": "crates/overdrive-control-plane/tests/integration/server_lifecycle.rs",
+          "scenario_name": "The server binds on an ephemeral port over TLS, accepts an HTTP/2 request from a reqwest client using the minted CA, and shuts down cleanly on cancellation with in-flight-request drain",
+          "tier": "Tier 3 (real network I/O, real TLS, integration-tests feature)",
+          "time_estimate_hours": 3,
+          "dependencies": ["02-01"],
+          "implementation_scope": {
+            "production_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/src/lib.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/src/tls_bootstrap.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/Cargo.toml"
+            ],
+            "test_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/tests/integration/server_lifecycle.rs"
+            ]
+          },
+          "notes": "Add `axum`, `axum-server`, `tokio-rustls`, `reqwest` with `rustls-tls` feature to workspace deps. Bind via `axum_server::from_tcp_rustls(listener, rustls_config).serve(router.into_make_service())` so the port can be inspected before serve begins. Per ADR-0008 §ALPN, `rustls::ServerConfig::alpn_protocols = vec![b\"h2\".into(), b\"http/1.1\".into()]`. The router for this step maps the five ADR-0008 paths to a single `async fn stub() -> impl IntoResponse { (StatusCode::OK, \"{}\") }` — real handlers come in 02-04. Cancellation uses `tokio_util::sync::CancellationToken` wired through `axum_server::Handle::graceful_shutdown(Some(deadline))`. Scoped under `integration-tests` feature. The scaffold's `ServerConfig` struct stays; only the `run_server` body changes."
+        },
+        {
+          "id": "02-03",
+          "name": "Shared REST request / response types carry utoipa ToSchema derives and finalised field sets",
+          "criteria": "`api::SubmitJobRequest` exposes `{ spec: JobSpecInput }` (or equivalent — the `Job`-building input shape reused from `overdrive_core::aggregate::JobSpecInput`); `SubmitJobResponse` exposes `{ job_id: String, commit_index: u64 }`; `JobDescription` exposes `{ spec: JobSpecInput, commit_index: u64, spec_digest: String }` (not `serde_json::Value` — finalised type; the scaffold's `serde_json::Value` placeholder is replaced); `ClusterStatus` exposes `{ mode: String, region: String, commit_index: u64, reconcilers: Vec<String>, broker: BrokerCountersBody }`; `BrokerCountersBody` `{ queued: u64, cancelled: u64, dispatched: u64 }`; `AllocStatusResponse` `{ rows: Vec<AllocStatusRowBody> }`; `NodeList` `{ rows: Vec<NodeRowBody> }` (empty-array renderings for Phase 1); `ErrorBody` `{ error: String, message: String, field: Option<String> }` (ADR-0015 shape). Every type derives `#[derive(Serialize, Deserialize, ToSchema)]`. A `#[test]` asserts every enum variant round-trips through `serde_json::to_string` → `from_str` for each request / response shape. Replaces scaffolds at `api.rs` — every `SCAFFOLD: true` type — plus the two new empty-row body types.",
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/api_type_shapes.rs",
+          "scenario_name": "Every REST request / response type round-trips through serde-JSON and carries the utoipa ToSchema derive",
+          "tier": "Tier 1 (acceptance)",
+          "time_estimate_hours": 2,
+          "dependencies": [],
+          "implementation_scope": {
+            "production_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/src/api.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/Cargo.toml"
+            ],
+            "test_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/tests/acceptance.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/tests/acceptance/api_type_shapes.rs"
+            ]
+          },
+          "notes": "ADR-0014 §Shared types: `overdrive-cli` will import these types directly in Slice 5 — DO NOT move them into a `common` crate; stay in `overdrive-control-plane::api`. Add `utoipa` + `utoipa-axum` to workspace deps. `AllocStatusRowBody` / `NodeRowBody` are finalised here as empty structs (no fields beyond those the Phase 1 ObservationStore exposes, which in Phase 1 means empty arrays per US-03 AC) — the scaffold's `serde_json::Value` is replaced with typed empty shapes so the CLI can parse responses into concrete types. `JobDescription.spec` is `JobSpecInput` (the input shape used for `Job::from_spec` round-trip), not `serde_json::Value`. Set up the new `tests/acceptance.rs` file with `mod acceptance { mod api_type_shapes; }` inline layout per ADR-0005 if not already created by Slice 2's earlier steps."
+        },
+        {
+          "id": "02-04",
+          "name": "utoipa emits api/openapi.yaml; cargo xtask openapi-check and openapi-gen ship as CI gate subcommands",
+          "criteria": "A `utoipa::OpenApi`-derived root struct (e.g. `OverdriveApi`) in `crates/overdrive-control-plane/src/api.rs` collects every request / response type (§02-03) and every handler `#[utoipa::path]` annotation (on the stub handlers; bodies remain panic until Slice 3). `cargo xtask openapi-gen` invokes `OverdriveApi::openapi().to_yaml()?` and writes `api/openapi.yaml` at the workspace root with a stable ordering (utoipa 5.x emits sorted paths / schemas — assert this via a byte-identical re-run test). `cargo xtask openapi-check` regenerates to a temp path and `diff`s against `api/openapi.yaml`; exits 0 on no diff; exits non-zero with a message naming the first drifted schema name + the suggestion `run \\`cargo xtask openapi-gen\\` to regenerate`. After generation, `api/openapi.yaml` is checked into the workspace and the `cargo xtask openapi-check` subprocess run (a fresh clone replaying both commands) produces exit 0 with no diff. Covers test-scenarios.md §3.3 (OpenAPI schema derivation byte-identical), §3.3 second scenario (handler drift fails openapi-check with a named field). Creates new file `xtask/src/openapi.rs` and wires `OpenApiCheck` + `OpenApiGen` subcommands into `xtask/src/main.rs`. Also creates `api/openapi.yaml` as a checked-in artifact.",
+          "test_file": "xtask/tests/acceptance/openapi_gate.rs",
+          "scenario_name": "cargo xtask openapi-gen writes api/openapi.yaml deterministically; cargo xtask openapi-check exits 0 on clean tree and non-zero with an actionable diff message on drift",
+          "tier": "Tier 1 (xtask subcommand driving-port subprocess)",
+          "time_estimate_hours": 3,
+          "dependencies": ["02-03"],
+          "implementation_scope": {
+            "production_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/xtask/src/main.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/xtask/src/openapi.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/xtask/Cargo.toml",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/src/api.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/src/handlers.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/api/openapi.yaml"
+            ],
+            "test_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/xtask/tests/acceptance/openapi_gate.rs"
+            ]
+          },
+          "notes": "The drift-detection test simulates drift by modifying a request type's field on a temporary git branch, running `cargo xtask openapi-check`, asserting non-zero exit and a message containing the drifted schema name — then rolling back. Alternative implementation: the test uses a synthetic source tree under `tempfile::TempDir` with a different type set — simpler and more reliable. `api/openapi.yaml` is directly under the workspace root (not under a crate) per ADR-0009. Per DEVOPS `ci-cd-pipeline.md` line 57, the CI pipeline runs `cargo xtask openapi-check` as a required check — this step ships the command; the CI config update is part of the DEVOPS ci.yml and not in this step's scope (the check runs locally via `cargo xtask openapi-check`). Stub handler bodies in handlers.rs remain panic-stubs but gain their `#[utoipa::path(...)]` annotations so utoipa can walk them. The handler signatures do NOT change in this step — the full handler body lands in Slice 3."
+        },
+        {
+          "id": "02-05",
+          "name": "--insecure argument is unknown; missing / malformed trust triple surfaces a structured config-parse error",
+          "criteria": "The `--insecure` rejection is tested at the clap-configuration layer — the legitimate Exception surface per `crates/overdrive-cli/CLAUDE.md`. The test imports the `Cli` clap type from `overdrive_cli::cli` and invokes `Cli::try_parse_from([\"overdrive\", \"--insecure\", \"cluster\", \"status\"])` directly in-process; the return is `Err(clap::Error { kind: UnknownArgument, ... })`; the error's `render()` output contains `--insecure`. This exercises the clap tree without spawning a subprocess — it is explicitly within the `crates/overdrive-cli/CLAUDE.md` Exception scope (\"argv parsing for the binary wrapper itself\") and must be tagged `@clap-config` in the test header comment so reviewers can see the distinction.\n\nSeparately, the trust-triple loader (new function `load_trust_triple(&Path) -> Result<TrustTriple, ControlPlaneError>` in `tls_bootstrap.rs`) rejects a `~/.overdrive/config` whose `ca` field is base64-garbage with `ControlPlaneError::Internal(_)` carrying a message naming the config file path and the `ca` field; the CLI-side error rendering prints the structured message rather than a panic. The test invokes `load_trust_triple` as a direct function call — not via subprocess — and asserts on the `ControlPlaneError` variant and its `Display` form.\n\nThe `<hostname>` SAN resolution edge-case — `hostname::get()` returns error — is covered by a unit test injecting a `HostnameSource` trait with a failing impl, asserting `mint_ephemeral_ca` degrades gracefully (continues with the other three SANs). Covers test-scenarios.md §2b.3 (no --insecure flag), §3.5 (malformed trust triple actionable error).",
+          "test_file": "crates/overdrive-cli/tests/acceptance/insecure_rejected.rs",
+          "scenario_name": "The CLI rejects --insecure as an unknown argument; a malformed trust triple surfaces a structured config-parse error naming the file and field",
+          "tier": "Tier 1 (acceptance, negative cases)",
+          "time_estimate_hours": 2,
+          "dependencies": ["02-01"],
+          "implementation_scope": {
+            "production_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/src/main.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/src/tls_bootstrap.rs"
+            ],
+            "test_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/tests/acceptance.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/tests/acceptance/insecure_rejected.rs"
+            ]
+          },
+          "notes": "The `--insecure` rejection is tested by in-process clap invocation (`Cli::try_parse_from(...)`), NOT by `assert_cmd::Command::cargo_bin(\"overdrive\")` or any subprocess — per `crates/overdrive-cli/CLAUDE.md` the subprocess pattern is rejected even for binary-wrapper testing; the Exception carved out is for argv-parsing-as-data, which the in-process `try_parse_from` path satisfies without a process fork. This requires that `Cli` (or whatever the top-level clap-derive struct is called) is exposed publicly from `overdrive_cli::cli` — 05-01's library split makes this trivial; for this step, `Cli` may need to be moved from a private mod into a `pub mod cli` in `crates/overdrive-cli/src/lib.rs` (add a one-line `pub mod cli;` in `lib.rs` and mark the `Cli` type `pub`).\n\nThe `--insecure` rejection is a zero-code-change test — clap rejects unknown arguments by default. The trust-triple loader is new — add a skeleton function `load_trust_triple` in `tls_bootstrap.rs` with a `LoadError` variant on `ControlPlaneError` (or reuse `Internal(String)` with a descriptive message). The `hostname` crate (or `gethostname` crate) gives the OS hostname; if the host has no hostname, `mint_ephemeral_ca` must not crash — a test-only `HostnameSource` trait keeps this unit-testable. Per ADR-0010 §R5 (no --insecure flag), the test is defensive — it guards against a future phase adding the flag in a refactor."
+        }
+      ]
+    },
+    {
+      "id": "03",
+      "name": "Slice 3 — Handlers commit to IntentStore + ObservationStore reads; commit_index monotonic; structured HTTP error mapping",
+      "slice": "slice-3",
+      "user_stories": ["US-03"],
+      "description": "Replace the panic-stubs in `handlers.rs` with real bodies wiring the axum router to LocalStore (intent) and SimObservationStore (observation-Phase-1). SubmitJob archives via rkyv and commits through `IntentStore::put`; DescribeJob reads via `IntentStore::get`, rkyv-accesses, recomputes `spec_digest = ContentHash::of(archived_bytes)`; AllocStatus and NodeList call `ObservationStore::read` and return the honest empty row sets. Add `LocalStore::commit_index()` accessor returning a plain `u64` (no redb handle leakage). Implement `ControlPlaneError::to_response` exhaustively per ADR-0015 §2. Handle the idempotent re-submit + 409-conflict-on-different-spec semantics per ADR-0015 §4. The `observation_wiring::wire_single_node_observation` returns the SimObservationStore-backed `Box<dyn ObservationStore>` per ADR-0012.",
+      "estimated_hours": 12,
+      "depends_on": ["01", "02"],
+      "steps": [
+        {
+          "id": "03-01",
+          "name": "SubmitJob handler validates, archives via rkyv, commits via IntentStore::put, returns commit_index",
+          "criteria": "`POST /v1/jobs` with a valid `SubmitJobRequest` body: the handler calls `Job::from_spec(request.spec)`, archives via `rkyv::to_bytes::<_, 256>(&job)`, calls `IntentStore::put(IntentKey::for_job(&job.id).as_bytes(), &archived_bytes)`, then returns `SubmitJobResponse { job_id: job.id.to_string(), commit_index: store.commit_index() }` with status 200. An integration test stands up the full server (from 02-02), POSTs a valid payments spec via reqwest, asserts status 200, JSON body `{ \"job_id\": \"payments\", \"commit_index\": N }` with `N >= 1`, and confirms the IntentStore holds the key `jobs/payments` with the rkyv-archived Job bytes (reads via a test-only backdoor, or asserts via the DescribeJob handler in 03-02). Covers test-scenarios.md §3.1 (HTTP POST commits through real intent store), §1.1 partial (WS submit half). Replaces scaffolds at `handlers.rs::submit_job`, `observation_wiring::wire_single_node_observation`, and adds `LocalStore::commit_index()` in overdrive-store-local. After GREEN: `cargo xtask mutants --in-diff --package overdrive-control-plane` kill rate ≥80% per testing.md mandatory target 'scheduler bin-pack' (by analogy — every conditional in the handler must be killed by a test).",
+          "test_file": "crates/overdrive-control-plane/tests/integration/submit_round_trip.rs",
+          "scenario_name": "POST /v1/jobs with a valid spec commits through the real IntentStore and returns a commit_index >= 1",
+          "tier": "Tier 3 (real redb + real axum + real reqwest, integration-tests feature)",
+          "time_estimate_hours": 3,
+          "dependencies": ["01-04", "02-02", "02-03"],
+          "implementation_scope": {
+            "production_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/src/handlers.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/src/observation_wiring.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/src/lib.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-store-local/src/lib.rs"
+            ],
+            "test_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/tests/integration/submit_round_trip.rs"
+            ]
+          },
+          "notes": "`LocalStore::commit_index() -> u64` is a new public accessor — redb's write-txn sequence number or a monotonically incrementing counter the store maintains alongside writes. Do NOT leak a `redb::WriteTransaction` or `redb::Savepoint` from the accessor signature (ADR-0015 / US-03 AC). The observation_wiring module's `wire_single_node_observation` constructs a `SimObservationStore::new(GossipProfile::single_node(), seed)` with a deterministic seed (e.g. 0) per ADR-0012 — the wiring is adapter-level; handlers only see `Box<dyn ObservationStore>`. Router wiring in `lib.rs::run_server` replaces the 02-02 stub mapping with real handler functions. Axum state — `Arc<LocalStore>`, `Box<dyn ObservationStore>`, `Arc<ReconcilerRuntime>` (landing in Slice 4 — pass an empty placeholder here) — is passed via `axum::Extension` or `axum::State`. Reply shape `SubmitJobResponse` was finalised in 02-03; do not change it. Integration-tests feature gated."
+        },
+        {
+          "id": "03-02",
+          "name": "DescribeJob handler reads from IntentStore, rkyv-accesses, recomputes spec_digest; unknown id returns 404",
+          "criteria": "`GET /v1/jobs/{id}` with a previously-submitted `payments` id: the handler calls `IntentStore::get(IntentKey::for_job(&job_id).as_bytes())`, on `Some(bytes)` it calls `rkyv::access::<ArchivedJob, rkyv::rancor::Error>(&bytes)?` and `rkyv::deserialize(...)` to reconstruct the `Job`, computes `ContentHash::of(&bytes).to_string()` as the spec_digest, returns `JobDescription { spec: JobSpecInput::from(&job), commit_index: store.commit_index(), spec_digest }` with status 200. A Submit-then-Describe round-trip proptest (`PROPTEST_CASES=256`, under `integration-tests` feature): submit an arbitrary valid `JobSpecInput`, describe the returned job_id, assert the response's `spec` equals the input (after rkyv access) and `spec_digest == ContentHash::of(canonical_rkyv_of(submitted_spec)).to_string()`. On `IntentStore::get` returning `None`, the handler returns `Err(ControlPlaneError::NotFound { resource: format!(\"jobs/{job_id}\") })` which maps to HTTP 404 via `to_response` (mapping lands in 03-05). Covers test-scenarios.md §4.1 (Submit then Describe round-trips byte-identical), §4.4 (Describe on unknown id returns 404), §4.6 (commit_index is a plain u64 — satisfied by 03-01).",
+          "test_file": "crates/overdrive-control-plane/tests/integration/describe_round_trip.rs",
+          "scenario_name": "Submit then Describe round-trips the spec byte-identical via rkyv; spec_digest matches ContentHash::of of the archived bytes; unknown id returns 404",
+          "tier": "Tier 3 + proptest (@property per DWD-05; testing.md mandatory rkyv roundtrip + scenario K1)",
+          "time_estimate_hours": 3,
+          "dependencies": ["03-01"],
+          "implementation_scope": {
+            "production_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/src/handlers.rs"
+            ],
+            "test_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/tests/integration/describe_round_trip.rs"
+            ]
+          },
+          "notes": "The `ContentHash::of(&bytes)` shape already ships from phase-1-foundation — do NOT re-canonicalise, do NOT JCS, do NOT hash `serde_json::to_string(&job)` — canonical hashing is rkyv-archived-bytes per ADR-0002 + development.md §Hashing. The proptest is mandatory per testing.md ('rkyv roundtrip' mandatory call site). On `ControlPlaneError::NotFound`, the handler returns `Err(ControlPlaneError::NotFound { resource })`; the `to_response` mapping (landing in 03-05) converts this to 404. For this step, if `to_response` is not yet wired via axum's `IntoResponse`, the handler wraps its own conversion inline — the clean IntoResponse impl comes in 03-05 when the full error mapping is exhaustively landed. Integration-tests feature gated.\n\n**Post-GREEN Fixture-Theater check (MANDATORY)**: the Submit-then-Describe round-trip proptest will flip RED→GREEN when the DescribeJob handler correctly calls `rkyv::access::<ArchivedJob, _>` and `rkyv::deserialize` on the bytes retrieved via `IntentStore::get`. To confirm the test is not passing because a fixture is reconstructing the Job directly, run after GREEN: `git diff --stat crates/overdrive-control-plane/src/handlers.rs` MUST show additions to the DescribeJob handler body, specifically: at least one call site to `rkyv::access::<ArchivedJob` AND at least one call site to `rkyv::deserialize` AND at least one call site to `ContentHash::of`. If `git diff --name-only` shows only the test file changed (i.e. the handler body is unchanged from 03-01's stub), BLOCK the commit — that's Fixture Theater (the test is reconstructing the job from the request body rather than from the stored archived bytes). Per quality-framework Pattern 8 + CLAUDE.md wiring-verification discipline."
+        },
+        {
+          "id": "03-03",
+          "name": "AllocStatus and NodeList handlers honestly return empty rows from SimObservationStore without fabrication",
+          "criteria": "`GET /v1/allocs`: the handler calls `observation_store.alloc_status_snapshot()` (Phase-1 read API on `SimObservationStore`, returning `BTreeMap<AllocationId, AllocStatusRow>`) OR calls `observation_store.subscribe_all()` and drains the first tick snapshot — whichever Phase-1-foundation's `ObservationStore` trait exposes as the canonical read path; confirm at step-start via `grep pub fn crates/overdrive-sim/src/adapters/observation_store.rs`. The handler maps the returned `AllocStatusRow` set to `Vec<AllocStatusRowBody>` (finalised in 02-03). On a freshly-wired SimObservationStore with zero writes, the snapshot is empty and the handler responds with status 200 and JSON body `{ \"rows\": [] }` — an explicit empty array, not a fabricated placeholder. `GET /v1/nodes`: same shape, reads `node_health` (or whatever the sim's read projection for nodes is — confirm at step-start), returns `{ \"rows\": [] }`. A **canary-row injection test** (Fixture-Theater defence per quality-framework Pattern 8) proves the handler actually routes through the store: the test constructs a canary `ObservationRow::AllocStatus(...)` with a sentinel `AllocationId`, calls `observation_store.write(canary_row).await` directly through the existing public `ObservationStore::write(ObservationRow)` trait surface (owner-writer discipline is still satisfied — the test IS the owning NodeId for the SimObservationStore it constructed), then confirms the handler's next GET /v1/allocs response includes the canary `AllocationId` in the returned rows. No test-only `#[cfg(any(test, feature = \"test-support\"))]` write hook is added — the existing trait surface `async fn write(&self, row: ObservationRow) -> Result<(), ObservationStoreError>` is sufficient. Covers test-scenarios.md §4.7 (AllocStatus returns zero rows, no fabrication), §4.8 (NodeList returns zero rows, no fabrication).",
+          "test_file": "crates/overdrive-control-plane/tests/integration/observation_empty_rows.rs",
+          "scenario_name": "GET /v1/allocs and /v1/nodes return empty row arrays when no observation rows exist; an injected canary row is correctly returned on the next read",
+          "tier": "Tier 3 (real axum + real SimObservationStore wiring, integration-tests feature)",
+          "time_estimate_hours": 2,
+          "dependencies": ["03-01"],
+          "implementation_scope": {
+            "production_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/src/handlers.rs"
+            ],
+            "test_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/tests/integration/observation_empty_rows.rs"
+            ]
+          },
+          "notes": "Empirical API check at roadmap-remediation time (2026-04-23): `crates/overdrive-sim/src/adapters/observation_store.rs` exposes `impl ObservationStore for SimObservationStore` with `async fn write(&self, row: ObservationRow) -> Result<(), ObservationStoreError>` and `async fn subscribe_all(&self) -> Result<ObservationSubscription, ObservationStoreError>` — NOT a `read(sql, params)` SQL-ish surface. The handler therefore uses the typed trait surface (either `alloc_status_snapshot()` inherent method on `SimObservationStore` or the subscription-drain pattern via `subscribe_all`). Confirm the exact read surface Phase-1-foundation exposes on the `ObservationStore` trait (vs `SimObservationStore` inherent) at step-start; the control plane handlers must depend on the trait, not the concrete type. `ObservationRow` variants are the typed write surface per §4 whitepaper (full rows, never field diffs); the canary-row test constructs one directly and writes via the public trait — no test-only hook required.\n\nThe Phase-1 schema for `alloc_status` / `node_health` is defined in the brief §6; the column set is already in the SimObservationStore. The integration test gates under `integration-tests` feature because it wires real axum + real reqwest — even though the sim store is in-memory, the harness is real I/O. Do NOT use `serde_json::Value` for row bodies — use the typed `AllocStatusRowBody` / `NodeRowBody` finalised in 02-03.\n\n**Post-GREEN Fixture-Theater check (MANDATORY)**: after the canary-row test flips RED→GREEN, run `git diff --stat crates/overdrive-control-plane/src/handlers.rs` and confirm the AllocStatus + NodeList handler bodies show additions — specifically at least one call to an `ObservationStore` trait method (e.g. `subscribe_all`, `alloc_status_snapshot`, or whatever the Phase-1 read surface is). If the only file touched is the test file but the canary-row test passes, BLOCK the commit — a fixture-based pass would mean the handler is still returning the 02-02 stub `{}` body and the test's canary is never observed."
+        },
+        {
+          "id": "03-04",
+          "name": "Idempotent re-submit returns original commit_index; different spec at same key returns 409 Conflict",
+          "criteria": "Given the intent store already holds `jobs/payments` with archived bytes `B1` at commit_index 17: re-submitting the byte-identical spec through POST /v1/jobs: the handler reads the existing key, compares rkyv-archived bytes (byte-equal), writes nothing new, and returns 200 with `commit_index: 17` (the existing one). Submitting a semantically-different spec (different replicas) at the same intent key: the handler compares archived bytes (not equal), refuses to overwrite, and returns `Err(ControlPlaneError::Conflict { message: \"a different spec is already committed at intent key jobs/payments\".into() })` mapped to HTTP 409 with `ErrorBody { error: \"conflict\", ... }`. The IntentStore still carries `B1` after the conflict attempt. Covers test-scenarios.md §4.9 (byte-identical re-submit is idempotent 200 same commit_index), §4.10 (different spec at same key is 409), §1.3 partial (WS byte-identical re-submit) — the CLI-side surface of §1.3 lands in 05-02.",
+          "test_file": "crates/overdrive-control-plane/tests/integration/idempotent_resubmit.rs",
+          "scenario_name": "Byte-identical re-submit at an occupied intent key returns the original commit_index; a different spec at the same key returns 409 Conflict and the IntentStore is unchanged",
+          "tier": "Tier 3 (real redb + real axum + real reqwest, integration-tests feature)",
+          "time_estimate_hours": 2,
+          "dependencies": ["03-02"],
+          "implementation_scope": {
+            "production_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/src/handlers.rs"
+            ],
+            "test_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/tests/integration/idempotent_resubmit.rs"
+            ]
+          },
+          "notes": "ADR-0015 §4 describes this explicitly: Phase 1's `LocalStore::put` is last-write-wins, so the handler implements a read-before-write pattern — `get(key)` then compare-archived-bytes then `put` only if missing. This introduces a narrow TOCTOU window the ADR acknowledges will be hardened post-Phase-1. Byte comparison uses `==` on `&[u8]` slices (rkyv-archived bytes are deterministic per 01-04). The test first submits a canonical payments spec, asserts commit_index=N, re-submits the same spec, asserts commit_index=N (unchanged), then submits a spec with `replicas=2`, asserts 409 + `error: conflict`, then describes `payments`, asserts the returned spec still has `replicas=1`. Integration-tests feature gated."
+        },
+        {
+          "id": "03-05",
+          "name": "ControlPlaneError::to_response maps every variant exhaustively per ADR-0015; axum handlers return Result and IntoResponse converts uniformly",
+          "criteria": "`to_response` is exhaustive over every `ControlPlaneError` variant — removing a match arm fails to compile (asserted by a compile-time check in a dedicated fixture under `tests/compile_fail/` via `trybuild`, optional if the exhaustiveness lint catches it by itself). Unit tests enumerate: `Validation { field: Some(\"replicas\".into()), message }` → (400, `error: \"validation\"`, `field: Some(\"replicas\")`); `NotFound { resource: \"jobs/unknown-id\".into() }` → (404, `error: \"not_found\"`); `Conflict { message }` → (409, `error: \"conflict\"`); `Intent(IntentStoreError::NotFound)` → (404, `error: \"not_found\"`); `Intent(IntentStoreError::Io(...))` → (500, `error: \"internal\"`); `Observation(...)` → (500, `error: \"internal\"`); `Aggregate(AggregateError::Validation { field: \"replicas\", ... })` → (400, `error: \"validation\"`); `Internal(\"store dropped mid-write\")` → (500, `error: \"internal\"`). Each handler signature changes to `Result<impl IntoResponse, ControlPlaneError>`; an `IntoResponse` impl on `ControlPlaneError` calls `to_response` — so handlers use `?` to propagate errors and the error body is rendered uniformly. No raw stack trace reaches the client on any error path (asserted via a test that seeds an `IntentStoreError::Io` and reads the response body). Covers test-scenarios.md §4.2, §4.3, §4.4, §4.10, §4.11 (infrastructure failure returns 500 with structured body). Replaces scaffold at `error.rs::to_response`.",
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/error_mapping_exhaustive.rs",
+          "scenario_name": "ControlPlaneError::to_response maps every variant to the ADR-0015 status + error-kind pair; axum handlers propagate errors via IntoResponse without leaking raw stack traces",
+          "tier": "Tier 1 (unit + compile-fail optional)",
+          "time_estimate_hours": 2,
+          "dependencies": ["03-01", "03-04"],
+          "implementation_scope": {
+            "production_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/src/error.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/src/handlers.rs"
+            ],
+            "test_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/tests/acceptance/error_mapping_exhaustive.rs"
+            ]
+          },
+          "notes": "Per ADR-0015 §2, the match in `to_response` is exhaustive at the enum level — Rust's exhaustiveness check catches missed variants at compile time; the trybuild compile-fail test is optional redundancy. `ControlPlaneError::Intent(IntentStoreError::NotFound)` requires the phase-1-foundation `IntentStoreError::NotFound` variant to exist; if it does not, use the existing variant set and adjust the match arms. The `IntoResponse` impl goes on `ControlPlaneError` — standard axum pattern: `fn into_response(self) -> Response { let (status, body) = to_response(self); (status, Json(body)).into_response() }`. After this step, every handler signature is uniformly `Result<Json<ResponseType>, ControlPlaneError>`. Phase-1-foundation's `IntentStoreError` and `ObservationStoreError` shapes are the authoritative source of wrapped variants — do not re-declare them."
+        }
+      ]
+    },
+    {
+      "id": "04",
+      "name": "Slice 4 — Reconciler primitive: trait wired, runtime + evaluation broker + libSQL isolation + three DST invariants",
+      "slice": "slice-4",
+      "user_stories": ["US-04"],
+      "description": "Replace the panics in `crates/overdrive-core/src/reconciler.rs` with the full trait + `Action` + `ReconcilerName` + `TargetResource` surfaces. Implement `ReconcilerRuntime`, `EvaluationBroker` with cancelable-eval-set semantics, and per-primitive libSQL path provisioning + DB opening. Ship the `noop-heartbeat` reconciler as a public factory in `lib.rs`. Register the runtime at server boot and surface its state through `ClusterStatus`. Fill in the three DST invariant evaluator bodies (AtLeastOneReconcilerRegistered, DuplicateEvaluationsCollapse, ReconcilerIsPure) in `crates/overdrive-sim/src/invariants/evaluators.rs` and the corresponding harness.rs arms. US-04 Technical Notes acknowledge this is the largest slice by risk; DESIGN (ADR-0013 §7) explicitly rejects a 4A/4B split but leaves one as a crafter-time escape hatch if material complexity surfaces.",
+      "estimated_hours": 14,
+      "depends_on": ["01"],
+      "steps": [
+        {
+          "id": "04-01",
+          "name": "Reconciler trait, Action enum, ReconcilerName + TargetResource newtypes pass their completeness contract",
+          "criteria": "`Reconciler` trait in `overdrive_core::reconciler` has signature `trait Reconciler: Send + Sync { fn name(&self) -> &ReconcilerName; fn reconcile(&self, desired: &State, actual: &State, db: &Db) -> Vec<Action>; }` — synchronous; no `async fn`; no `&dyn Clock` / `&dyn Transport` / `&dyn Entropy` parameter (asserted via a trait-method-introspection test using `std::any::TypeId`). `ReconcilerName::new(\"noop-heartbeat\")` returns `Ok`; `new(\"\")` returns `Err(Empty)`; `new(\"A\")` returns `Err(InvalidLead)` (uppercase); `new(\"0abc\")` returns `Err(InvalidLead)` (leading digit); `new(\"a.b\")`, `new(\"a..b\")`, `new(\"a/b\")`, `new(\"a\\\\b\")`, `new(\"a:b\")` each return `Err(ForbiddenCharacter { found })`; `new(&\"a\".repeat(64))` returns `Err(TooLong { got: 64 })`. `FromStr` forwards to `new` — proptest asserts round-trip through `Display` → `FromStr` is lossless for any valid name. `TargetResource::new(\"job/payments\")`, `new(\"node/n1\")`, `new(\"alloc/a1\")` return `Ok`; `new(\"\")` returns `Err(Empty)`; `new(\"garbage\")` returns `Err(UnknownShape)`. `Action::HttpCall` is constructable with a non-empty target URI, method \"GET\"/\"POST\", and optional idempotency_key. Replaces scaffolds at `reconciler.rs`: `ReconcilerName::new`, `TargetResource::new`, trait surface, `Action` variants. Plumbs `pub mod reconciler;` into `crates/overdrive-core/src/lib.rs`. Covers test-scenarios.md §5.1 partial (trait surface), §5.6 partial (trait enforces pure-function contract).",
+          "test_file": "crates/overdrive-core/tests/acceptance/reconciler_trait_surface.rs",
+          "scenario_name": "Reconciler trait enforces the pure-function contract; ReconcilerName and TargetResource reject path-traversal + malformed inputs at the constructor",
+          "tier": "Tier 1 + proptest (newtype completeness per testing.md mandatory call sites)",
+          "time_estimate_hours": 3,
+          "dependencies": [],
+          "implementation_scope": {
+            "production_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-core/src/reconciler.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-core/src/lib.rs"
+            ],
+            "test_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-core/tests/acceptance/reconciler_trait_surface.rs"
+            ]
+          },
+          "notes": "Per ADR-0013 §2, the trait is synchronous — DELIBERATELY. The test asserts the absence of async by type-inspection OR by a compile-time check that `fn _enforce<R: Reconciler>() { let _ = <R as Reconciler>::reconcile; }` compiles against a sync signature. The regex `^[a-z][a-z0-9-]{0,62}$` is enforced by hand-rolled char-by-char checks in `ReconcilerName::new` — no regex crate dependency per ADR-0013 §4 (strict character set). `pub mod reconciler;` addition in lib.rs is the second `pub mod` edit (first was `pub mod aggregate;` in 01-01). Action::HttpCall uses `String` for `target` / `method` per scaffold (avoids adding `http::Uri` dep to core); the runtime-shim (Phase 3) parses these. Newtype-completeness tests per testing.md mandatory 'Newtype roundtrip' call site — proptest over valid names. `cargo xtask mutants --in-diff --package overdrive-core` ≥80% kill rate per 'Newtype FromStr and validators' mandatory target.\n\nharness:\n- Turmoil Builder: NOT USED at this step. The trait surface and newtype constructors are pure compile-time/synchronous assertions — nothing to advance in turmoil-time. Subsequent steps 04-02/04-04/04-05 land the turmoil DST harness; this step deliberately stays outside it.\n- Sim trait bindings for this step: NONE. `SimClock` / `SimEntropy` / `SimDataplane` / `SimObservationStore` / `SimTransport` do NOT appear in the `Reconciler::reconcile` signature. The acceptance test asserts this absence via a TypeId introspection check — any future smuggling of a `Clock` / `Transport` / `Entropy` parameter into `reconcile` would fail that check.\n- Fault scenarios from testing.md 'Fault Injection Catalogue' this step must tolerate: NONE directly. Trait surface + newtype validators are pure in-process state; no network / clock / entropy dependencies to fault-inject.\n- Invariant-assertion shape for `reconciler_is_pure` (evaluator body lands in 04-05; the contract in code form lands here): twin-invocation acceptance assertion — `let a = r.reconcile(&desired, &actual, &db); let b = r.reconcile(&desired, &actual, &db); assert_eq!(a, b)` — per §18 whitepaper + ADR-0013 §2 + ADR-0017 (where the invariant migrates into the `overdrive-invariants::InvariantName::ReconcilerIsPure` Safety-class Predicate variant). The twin-invocation check for `noop_heartbeat` lands trivially-green (always returns `[Action::Noop]`); the machinery is asserted, even though the concrete reconciler under test is trivial.\n- ADR-0017 scope fold: the `Reconciler` trait surface and the three reconciler invariants (`at-least-one-reconciler-registered`, `duplicate-evaluations-collapse`, `reconciler-is-pure`) migrate to the new `overdrive-invariants` crate single-cut in the ADR-0017 landing PR. This step's trait definition MUST survive that migration without semantic change — the `Reconciler` trait stays in `overdrive-core::reconciler`; only the invariant name registry moves. Name-and-class contract per ADR-0017 §6: `InvariantName::ReconcilerIsPure` will be `InvariantClass::Safety` with `Predicate::PureState` (twin-invocation check is a pure state predicate over the reconciler + state triple). ADR-0018 scope fold: cert-rotation is the Verus pilot target (not `noop-heartbeat`), so this step's `Reconciler` trait surface must support static dispatch via `Controller<C: ControllerApi>`-shape impls — the trait as defined here (synchronous, no `dyn` parameter in the signature) is already compatible. No refactor required by ADR-0018."
+        },
+        {
+          "id": "04-02",
+          "name": "EvaluationBroker collapses duplicate (reconciler, target) evaluations into a cancelable set bounded by the reaper",
+          "criteria": "`EvaluationBroker::new()` returns an empty broker (counters all 0). `submit(Evaluation { reconciler: r, target: t })` with an empty pending map: pending gets one entry; `counters.queued == 1`. A second `submit` with the same `(r, t)` key: the prior evaluation moves to `cancelable`; pending is replaced; `counters.cancelled == 1`, `queued == 1` (the second submit is now queued). A third `submit` at the same key: `cancelled == 2`, `queued == 1`. `drain_pending()` returns a `Vec<Evaluation>` of length 1 (the surviving evaluation); `counters.dispatched == 1`; pending is empty. `reap_cancelable()` returns the count of items reclaimed (here, 2) and empties the cancelable vec. Over N ticks, `cancelled` grows only by the number of submissions at already-pending keys; the cancelable-vec length is bounded by the number of ticks since the last reap (invariant: `cancelable.len() <= N` where N is the configurable reap period). A proptest with arbitrary submit sequences (1..=50 submissions across 1..=5 keys, random interleave) asserts after drain+reap: `dispatched == distinct_keys`, `cancelled == total - distinct_keys`, `cancelable.len() == 0`. Replaces scaffolds at `eval_broker.rs`: `EvaluationBroker::new`, `submit`, `drain_pending`, `reap_cancelable`, `counters`. Covers test-scenarios.md §5.2 (three concurrent evaluations collapse to one dispatch), §5.3 (reaper bounds the set).",
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/eval_broker_collapse.rs",
+          "scenario_name": "Three concurrent evaluations at the same (reconciler, target) key collapse to one dispatch with two cancelled; the reaper empties the cancelable set in bulk",
+          "tier": "Tier 1 + proptest",
+          "time_estimate_hours": 3,
+          "dependencies": ["04-01"],
+          "implementation_scope": {
+            "production_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/src/eval_broker.rs"
+            ],
+            "test_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/tests/acceptance.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/tests/acceptance/eval_broker_collapse.rs"
+            ]
+          },
+          "notes": "Per ADR-0013 §8, the broker internal state is `pending: HashMap<(ReconcilerName, TargetResource), Evaluation>` and `cancelable: Vec<Evaluation>`. Counters is a `Cell<BrokerCounters>` or simple `u64` fields behind a `&mut self`. Phase 1 is single-threaded (ADR-0013 Consequences — 'Phase 1 runtime is single-threaded'); no `Mutex` needed for the broker. The reaper runs as an in-runtime loop every N=16 ticks (arbitrary bounded) per ADR-0013 §8 — the 'every N ticks' wiring lands in 04-04 when the runtime assembles; this step delivers the `reap_cancelable` primitive. Per testing.md mutation mandatory target 'Scheduler bin-pack' (by analogy — every counter-update path is a mutation target): ≥80% kill rate on `submit`, `drain_pending`, `reap_cancelable` diffs.\n\nharness:\n- Turmoil Builder: NOT USED. The broker is a synchronous, single-process data structure; there is no cross-host or async-timing dimension to schedule-perturb. The proptest with arbitrary interleaves of `(submit, drain, reap)` operations over 1..=50 operations × 1..=5 keys substitutes for turmoil's schedule-perturbation — it exhausts the ordering space the broker would see under any caller. Subsequent step 04-04 wraps the broker inside a turmoil single-host harness when the runtime assembles; this step asserts the broker in isolation.\n- Sim trait bindings for this step: NONE. The broker holds no clock, no entropy, no transport, no observation dependency. `Evaluation` values are constructed by the test directly (owned `ReconcilerName` + `TargetResource`); no `SimClock::now()` / `SeededEntropy::u64()` call is expected in the broker body. A grep assertion in the test file confirms `std::time::`, `rand::`, `tokio::net::` do not appear under `eval_broker.rs` (dst-lint already catches this at the crate level; the test-side check is defence-in-depth).\n- Fault scenarios from testing.md 'Fault Injection Catalogue' this step must tolerate: NONE directly at the broker layer (single-process data structure). The broker's downstream consumers in 04-04 MUST tolerate `Node clean crash + restart` — broker state is ephemeral by design; on restart, boot re-registers `noop_heartbeat` (landing in 04-04) and the pending/cancelable/counters zero out. No fault injection at this step; the `Node clean crash + restart` fault is exercised in 04-04's acceptance test when the runtime is assembled.\n- Invariant-assertion shapes landing here as oracle functions in the proptest (evaluator registration into `overdrive-invariants` per ADR-0017 lands in 04-05):\n  - `duplicate_evaluations_collapse` → `assert_always!(\"pending map is unique\", broker.pending.len() == broker.pending.keys().collect::<HashSet<_>>().len())` — structurally impossible given HashMap keying, but the proptest asserts it after every `submit` AND the derived invariant `assert_always!(\"dispatched equals distinct keys after drain\", after_drain.counters.dispatched == distinct_key_count && after_drain.counters.cancelled == total_submissions - distinct_key_count)` is checked at the drain boundary.\n- ADR-0017 scope fold: `DuplicateEvaluationsCollapse` migrates to `overdrive-invariants::InvariantName::DuplicateEvaluationsCollapse` at ADR-0017 landing PR; `InvariantClass::Safety` with `Predicate::PureState` (the post-drain counter equality is a pure-state predicate over the broker snapshot). This step's proptest oracle is the logical shape the eventual registered `Predicate<SimState>` evaluates — the migration is mechanical once 04-05 lands the evaluator body."
+        },
+        {
+          "id": "04-03",
+          "name": "libSQL per-primitive path provisioner isolates reconcilers by path and rejects traversal attempts",
+          "criteria": "`provision_db_path(Path::new(\"/tmp/data\"), &ReconcilerName::new(\"alpha\").unwrap())` returns `Ok(PathBuf::from(\"/tmp/data/reconcilers/alpha/memory.db\"))` after canonicalising the data_dir. `provision_db_path` for names `alpha` and `beta` returns distinct paths whose common prefix ends at `<data_dir>/reconcilers/`. A defensive-depth check asserts the returned path starts with `<canonicalised_data_dir>/reconcilers/` — tested by deliberately constructing a pathological `ReconcilerName` via the test-only `unsafe { mem::transmute }` path OR via a trybuild test asserting `ReconcilerName(\"../escape\".into())` does not compile (the field is private). `open_db(&path)` creates the directory tree if missing, opens a libSQL connection, and returns the handle; calling it twice on the same path returns two independent connections. A third test: two reconcilers `alpha` and `beta` are each provisioned; `alpha` writes a canary row to its own DB; `beta`'s handle, given only its own path, cannot read `alpha`'s canary (SQL `SELECT * FROM canary` on `beta` raises `no such table`). Replaces scaffolds at `libsql_provisioner.rs`: `provision_db_path`, `open_db`. Covers test-scenarios.md §5.4 (distinct libSQL paths), §5.5 (alpha cannot read beta's DB).",
+          "test_file": "crates/overdrive-control-plane/tests/integration/libsql_isolation.rs",
+          "scenario_name": "Two reconcilers get distinct libSQL database paths; each handle is filesystem-isolated; alpha cannot read beta's canary row",
+          "tier": "Tier 3 (real libsql file I/O, integration-tests feature)",
+          "time_estimate_hours": 2,
+          "dependencies": ["04-01"],
+          "implementation_scope": {
+            "production_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/src/libsql_provisioner.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/Cargo.toml"
+            ],
+            "test_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/tests/integration/libsql_isolation.rs"
+            ]
+          },
+          "notes": "Add `libsql` to workspace deps (0.5.x lineage per ADR-0013 §6; crafter pins exact version). `std::fs::canonicalize` fails if the directory does not exist — the provisioner creates it first OR canonicalises the parent then appends. Per ADR-0013 §5, the assertion `path.starts_with(canonicalised_data_dir.join(\"reconcilers\"))` is defence-in-depth; returns `ControlPlaneError::Internal` if it fails. libSQL is opened in local file mode (not replicated); Phase 1 uses it as embedded SQLite. The scaffold's `libsql::Connection` return type for `open_db` may need to be `libsql::Database` + separately-obtained connection depending on the libsql version's API shape — adjust the signature if needed and document in commit message. Integration-tests feature gated.\n\nharness:\n- Turmoil Builder: NOT USED. This step deliberately exercises REAL filesystem I/O — real `std::fs::canonicalize`, real `libsql::Database::open`, real `tempfile::TempDir`. DST (turmoil) provides nothing here because the correctness property under test is an effect of the real OS path-resolution and libsql SQLite-backing — an in-memory stub cannot surface symlink-resolution, path-canonicalisation-across-mountpoints, or libsql's actual file-open error shapes.\n- Sim trait bindings for this step: NONE. `SimClock` / `SimEntropy` / `SimDataplane` / `SimObservationStore` / `SimTransport` would be incorrect here — the invariant under test (filesystem isolation) requires a real filesystem. DST coverage of the *path-derivation pure function* (the `provision_db_path(&data_dir, &name) -> PathBuf` logic, separated from `open_db`) is possible and desirable; this step keeps them as two functions precisely so 04-04's DST harness can cover `provision_db_path` without touching the filesystem.\n- Fault scenarios from testing.md 'Fault Injection Catalogue' this step must tolerate: the closest Tier-3 complements to the DST catalogue are `tempfile::TempDir` destruction under a live handle (covered by real Drop semantics) and `std::fs::canonicalize` failure on a non-existent path (the provisioner creates the directory first, asserted in the acceptance test). Multi-node / partition / gossip faults do not apply — this is a single-process filesystem guarantee.\n- Invariant-assertion shapes landing here: none from the reconciler-invariants set (those are DST-class and land in 04-05). The step's isolation property is asserted directly by a Tier-3 assertion: `assert!(alpha_path != beta_path && alpha_path.starts_with(canon_data_dir.join(\"reconcilers\")) && beta_path.starts_with(canon_data_dir.join(\"reconcilers\")))` plus the canary-row SQL check `SELECT * FROM canary` on `beta` raises `no such table`.\n- ADR-0017 scope fold: the `provision_db_path` pure function is a natural fit for the `Predicate::PureState` evaluator shape in the `overdrive-invariants` crate once the `State` trait's `KernelTraceState` / `LiveClusterState` impls exist (Phase 2+ per ADR-0017 §4). Phase 1 does NOT register `LibsqlPathsAreIsolated` as an overdrive-invariants variant — the property is covered by the Tier-3 acceptance test here; promotion to a first-class invariant is deferred per ADR-0017 §Negative (\"`KernelTraceState` / `LiveClusterState` implementations do not exist yet\")."
+        },
+        {
+          "id": "04-04",
+          "name": "ReconcilerRuntime wires broker + registry + per-primitive libSQL and registers noop-heartbeat at boot (Tier 1 DST)",
+          "criteria": "**Tier 1 DST integration test** — this step exercises the runtime's assembly surface under turmoil + `Sim*` traits only. NO real axum bind, NO real redb file, NO real libsql file, NO real network. The cluster_status handler and the libSQL wiring are tested *as in-process function calls* against a synthetic `ReconcilerRuntime`; real-I/O wiring of the same surface is covered by Slice 5 (walking skeleton, 05-05). `ReconcilerRuntime::new(tmp_dir.path().into())` canonicalises the data_dir and returns an empty runtime — `tmp_dir` is a `tempfile::TempDir`, used for libSQL *path derivation* only (libsql open itself is covered by 04-03; this step stubs out `open_db` through the libsql_provisioner's path-derivation function and asserts paths, not handles). `runtime.register(noop_heartbeat())` adds the reconciler to the registry, provisions its libSQL path via 04-03's pure `provision_db_path`, and returns `Ok`. `runtime.registered()` returns a `Vec<ReconcilerName>` containing exactly `[ReconcilerName::new(\"noop-heartbeat\").unwrap()]`. `runtime.broker()` returns `&EvaluationBroker` with counters all 0. `noop_heartbeat()` (the public factory in `lib.rs`) constructs a `Box<dyn Reconciler>` whose `reconcile(_, _, _)` returns `vec![Action::Noop]` deterministically. Registering a second reconciler with the same name returns `Err(ControlPlaneError::Conflict { message })`. `cluster_status` handler body (landing full wire-up here) reads `runtime.registered()`, `runtime.broker().counters()`, and `store.commit_index()` and returns a `ClusterStatus { mode: \"single\".into(), region: \"local\".into(), commit_index, reconcilers: [\"noop-heartbeat\"], broker: BrokerCountersBody { queued, cancelled, dispatched } }` — the test calls the handler function DIRECTLY with constructed axum state (`State<AppState>` extractor invoked in-process), asserts on the returned `Json<ClusterStatus>`; no HTTP transport, no reqwest. `run_server` IS augmented to register `noop_heartbeat()` at boot but the assertion for that augmentation is deferred to 05-05 (walking skeleton real-I/O). Replaces scaffolds at `reconciler_runtime.rs`: `new`, `register`, `registered`, `broker`; `lib.rs`: `noop_heartbeat`, `run_server` (augmented — boot-time registration); `handlers.rs`: `cluster_status`. Covers test-scenarios.md §5.1 (runtime registers noop-heartbeat at boot), §5.6 (cluster status surfaces registry), §1.2 partial (WS cluster status shape — full surface lands in 05-05).",
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/runtime_registers_noop_heartbeat.rs",
+          "scenario_name": "ReconcilerRuntime registers noop-heartbeat at construction; cluster_status handler (invoked directly, not over HTTP) renders the registry and broker counters via constructed axum state",
+          "tier": "Tier 1 (DST — synchronous in-process; no real axum, no real libsql, no real redb)",
+          "time_estimate_hours": 3,
+          "dependencies": ["04-02", "04-03"],
+          "implementation_scope": {
+            "production_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/src/reconciler_runtime.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/src/lib.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/src/handlers.rs"
+            ],
+            "test_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/tests/acceptance/runtime_registers_noop_heartbeat.rs"
+            ]
+          },
+          "notes": "**Tier classification (disambiguation per review D4)**: this step is explicitly **Tier 1 DST** per testing.md §Tier 1. It is NOT Tier 3 integration. No real axum listener, no real redb write txn, no real libsql open, no real reqwest, no real TCP. The `tempfile::TempDir` is used only for the `provision_db_path` *path-derivation* assertion (pure function over a `&Path`) — libsql is NOT opened by this test. Every concrete dependency of `ReconcilerRuntime::new` / `register` / `registered` / `broker` / `cluster_status` is either an in-process pure value (the reconciler factory return) or a Sim trait. Real-I/O wiring of the same surface (real libsql open, real axum handler over HTTPS, real `run_server` boot-time registration) is covered exclusively by step 05-05 (walking skeleton, Tier 3).\n\nPer ADR-0013 §9, the `noop-heartbeat` reconciler returns `vec![Action::Noop]` on every invocation — it is proof-of-life for the runtime. The runtime stores reconcilers in `Vec<(ReconcilerName, Box<dyn Reconciler>)>` or `HashMap<ReconcilerName, Box<dyn Reconciler>>`; the registered() accessor returns the keys. `register` rejects duplicate names with `ControlPlaneError::Conflict`. Axum state: the router carries `Arc<ReconcilerRuntime>` via `Extension` or `State` — consistent with the LocalStore wiring from 03-01; the test invokes `cluster_status(State(app_state))` directly to get an `impl IntoResponse`, without binding a listener. `ClusterStatus.mode` is always `\"single\"` in Phase 1 (HA mode lands Phase 2+); `region` is always `\"local\"` (multi-region lands Phase 5+).\n\nharness:\n- Turmoil Builder: `turmoil::Builder::new().tick_duration(Duration::from_millis(1)).build()` with a SINGLE synthetic host (`\"control-plane-local\"`). Single-host because the runtime is single-process state that does not itself schedule work over time — the turmoil shell proves DST-compatibility (no banned primitives smuggled in) rather than adding temporal perturbation.\n- Sim trait bindings for this step (explicit):\n  - `SimClock::new()` — constructed even if `ReconcilerRuntime::new` does not currently consume a `Clock` param, to assert the runtime body contains no `std::time::Instant::now()` / `std::time::SystemTime::now()` call (dst-lint backstops this at the crate level; the test-side construction is documentation of the contract).\n  - `SeededEntropy::new(0)` — constructed; `noop_heartbeat` factory does not consume entropy per ADR-0013 §9 determinism, but the construction asserts no `rand::thread_rng()` is smuggled in at boot.\n  - `SimObservationStore::single_peer(NodeId::from_str(\"local\").unwrap(), 0)` — passed into the axum app state under an `Arc<dyn ObservationStore>` or `Box<dyn ObservationStore>` (Phase-1-foundation trait object shape).\n  - `SimTransport::new()` — constructed but unused in this step's assertions (handler is called in-process via the axum `State` extractor, no TCP).\n  - `SimDataplane::new()` — NOT constructed; Phase 1 runtime does not touch the dataplane and the `ReconcilerRuntime` has no dataplane dependency.\n- Fault scenarios from testing.md 'Fault Injection Catalogue' this step must tolerate:\n  - `Node clean crash + restart` — runtime state is ephemeral by design; on restart, boot re-registers `noop_heartbeat` and the invariant `AtLeastOneReconcilerRegistered` holds across the restart boundary because boot re-runs the registration path. Asserted via a turmoil `host.shutdown()` + reboot cycle in the acceptance test.\n  - `SimObservationStore` gossip stall — the runtime's read of `store.commit_index()` + `runtime.registered()` for cluster_status is not dependent on observation gossip; the invariant holds under a stalled Corrosion peer (observation staleness does not stall the registry read).\n  - Network partition — NOT APPLICABLE; this step's runtime is single-process. Partition faults apply at Slice 5+ when multi-region shape lands.\n- Invariant-assertion shapes for this step's three DST invariants (evaluator bodies register into `overdrive-invariants` per ADR-0017 at 04-05):\n  - `at_least_one_reconciler_registered` → `assert_always!(\"registry non-empty\", runtime.registered().len() >= 1)` — `InvariantClass::Safety` + `Predicate::PureState` post-ADR-0017.\n  - `duplicate_evaluations_collapse` → the broker invariant from 04-02 carries forward; the post-drain check `assert_always!(\"dispatched equals distinct keys after drain\", after_drain_counters.dispatched == distinct_key_count && after_drain_counters.cancelled == total_submissions - distinct_key_count)` — `InvariantClass::Safety` + `Predicate::PureState` post-ADR-0017.\n  - `reconciler_is_pure` → `assert_always!(\"reconcile is deterministic\", runtime.registered_reconcilers().iter().all(|r| r.reconcile(&s, &a, &db) == r.reconcile(&s, &a, &db)))` — twin-invocation contract per §18 + ADR-0013 §2; `InvariantClass::Safety` + `Predicate::PureState` post-ADR-0017.\n- ADR-0017 scope fold: the three invariants migrate into `overdrive-invariants::InvariantName::{AtLeastOneReconcilerRegistered, DuplicateEvaluationsCollapse, ReconcilerIsPure}` single-cut at ADR-0017 landing PR. The evaluator bodies, however, remain this step's responsibility — the registration (spec + predicate) lives in `overdrive-invariants`, and the DST harness in 04-05 calls the registered predicate. If the ADR-0017 PR has not landed when 04-04 reaches GREEN, the evaluators live temporarily in `overdrive-sim/src/invariants/evaluators.rs` and migrate mechanically at ADR-0017 cut; the name set stays stable through the migration.\n\nTest layout: this test is `tests/acceptance/` (not `tests/integration/`) because the Sim-based shape qualifies under ADR-0005 as acceptance — no real I/O. No `integration-tests` feature gate; runs in the default `cargo nextest run -p overdrive-control-plane` lane."
+        },
+        {
+          "id": "04-05",
+          "name": "DST invariants AtLeastOneReconcilerRegistered, DuplicateEvaluationsCollapse, ReconcilerIsPure evaluate green on a clean harness run",
+          "criteria": "The invariant enum variants `AtLeastOneReconcilerRegistered`, `DuplicateEvaluationsCollapse`, `ReconcilerIsPure` already exist in `crates/overdrive-sim/src/invariants/mod.rs` with panic bodies in harness.rs (confirmed by grep). This step fills in the evaluator bodies in `evaluators.rs` and replaces the harness.rs panic arms. `AtLeastOneReconcilerRegistered`: after the harness boots its simulated control-plane subsystem (which may be a test double or a real `ReconcilerRuntime` — crafter picks per harness architecture), the invariant queries the registry count; passes iff count >= 1. `DuplicateEvaluationsCollapse`: the harness submits 3 evaluations at the same `(ReconcilerName, TargetResource)` key within one broker tick, drains, and the invariant asserts `counters.dispatched == 1 && counters.cancelled == 2`. `ReconcilerIsPure`: the harness invokes the registered reconcilers' `reconcile(...)` method twice with the same `desired: State`, `actual: State`, `db: Db` triple (arbitrary test-only state values are fine) and asserts the two returned `Vec<Action>` sequences are element-for-element equal. `cargo xtask dst` on a clean clone exits 0 with all three invariants passing (the default catalogue from phase-1-foundation already includes them; this step makes their evaluators non-panic). Covers test-scenarios.md §5.7, §5.8, §5.9 (the three DST invariants per US-04). Replaces the panic bodies in `crates/overdrive-sim/src/invariants/evaluators.rs` arms for these three invariants and the harness.rs arms at lines 406, 410, 414.",
+          "test_file": "crates/overdrive-sim/tests/acceptance/reconciler_invariants_pass.rs",
+          "scenario_name": "DST harness evaluates the three reconciler-primitive invariants green on a clean run; each invariant's failure mode is caught by a seeded fault",
+          "tier": "Tier 1 (DST harness)",
+          "time_estimate_hours": 3,
+          "dependencies": ["04-04"],
+          "implementation_scope": {
+            "production_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-sim/src/invariants/evaluators.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-sim/src/harness.rs"
+            ],
+            "test_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-sim/tests/acceptance/reconciler_invariants_pass.rs"
+            ]
+          },
+          "notes": "The harness in `overdrive-sim/src/harness.rs` may not have direct access to `ReconcilerRuntime` because `overdrive-sim` is class `adapter-sim` and `overdrive-control-plane` is class `adapter-host` — cross-class dependency is not forbidden (neither is `core`), but the idiomatic answer is for the sim harness to carry a test-only `MockReconcilerRuntime` that the invariants evaluate against; alternatively the harness accepts a `dyn ReconcilerProbe` that the real runtime can also implement. Crafter picks the architecture and documents in commit message — either works. For `ReconcilerIsPure`, the `State` and `Db` scaffolds are empty unit-like types — the twin invocation constructs two instances and asserts equality of the returned Action vectors; `noop_heartbeat` always returns `[Action::Noop]` so the invariant passes trivially but the machinery is live. A canary test in a `cfg(feature = \"canary-bug\")` gate deliberately returns `vec![Action::Noop, Action::Noop]` every other call; running `cargo xtask dst --only reconciler-is-pure` under that feature exits non-zero — proves the invariant actually fires. Covers the DST K4 KPI (kpi-contract surface).",
+          "post_step_cleanup": "Grep `SCAFFOLD: true` across crates/overdrive-control-plane/ and crates/overdrive-core/src/reconciler.rs and crates/overdrive-core/src/aggregate/mod.rs — confirm the remaining markers are limited to: api.rs (finalised in 02-03 but scaffold comment may linger), tls_bootstrap.rs fully replaced in 02-01/02-02, eval_broker.rs / reconciler_runtime.rs / libsql_provisioner.rs fully replaced by this step. Any lingering marker is a regression and blocks commit."
+        },
+        {
+          "id": "04-06",
+          "name": "dst-lint blocks smuggled Instant::now / rand / thread sleep in a reconciler body",
+          "criteria": "A synthetic fixture file `crates/overdrive-control-plane/tests/fixtures/bad_reconciler.rs.in` (NOT compiled normally — stored as a text asset) contains a reconciler impl body invoking `std::time::Instant::now()`. The test copies the fixture into a temporary worktree crate labelled `crate_class = \"core\"`, runs `cargo xtask dst-lint`, and asserts: exit code non-zero; stderr / stdout names the file + line + column + the banned symbol `std::time::Instant::now`; output suggests the `Clock` trait as the replacement. The same fixture in a crate labelled `crate_class = \"adapter-host\"` passes (wiring exemption per phase-1-foundation ADR-0003). Covers test-scenarios.md §5.10 (smuggled Instant::now caught by dst-lint gate). This step is a negative-case integration test for phase-1-foundation's existing dst-lint gate — no changes to the dst-lint machinery, only confirming it catches a reconciler-body violation.",
+          "test_file": "xtask/tests/acceptance/dst_lint_catches_reconciler_violation.rs",
+          "scenario_name": "dst-lint catches a reconciler body that imports Instant::now in a core crate and names the replacement Clock trait in its remediation message",
+          "tier": "Tier 1 (xtask subcommand driving-port subprocess)",
+          "time_estimate_hours": 2,
+          "dependencies": ["04-01"],
+          "implementation_scope": {
+            "production_files": [],
+            "test_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/xtask/tests/acceptance/dst_lint_catches_reconciler_violation.rs"
+            ]
+          },
+          "notes": "No production code changes — dst-lint already exists (phase-1-foundation step 05-02). This step verifies it catches a reconciler-shaped violation; if the existing message does NOT name the Clock trait specifically, a small adjustment to `xtask/src/dst_lint.rs` BANNED_APIS replacement strings may be required — treat that as the minimum scope. The fixture approach: write a synthetic `Cargo.toml` + `src/lib.rs` under `tempfile::TempDir`, populate `package.metadata.overdrive.crate_class = \"core\"`, invoke `cargo xtask dst-lint --manifest-path <tmp_dir>/Cargo.toml` as a subprocess. Matches phase-1-foundation step 05-02's test pattern (self-test with synthetic source tree)."
+        }
+      ]
+    },
+    {
+      "id": "05",
+      "name": "Slice 5 — CLI handlers + serve / cluster init / walking-skeleton end-to-end",
+      "slice": "slice-5",
+      "user_stories": ["US-05"],
+      "description": "Replace the CLI stub body in `crates/overdrive-cli/src/main.rs` with real handlers. Add `cluster init` and `serve` subcommands (currently absent from the clap tree). Build a thin reqwest-based HTTP client per ADR-0014 that imports request/response types directly from `overdrive-control-plane::api`, loads the trust triple from `~/.overdrive/config`, and exposes one method per endpoint. Wire up `job submit`, `alloc status`, `cluster status`, `node list` as real handlers that read TOML, compute the spec digest via the same rkyv canonical path the server uses (01-04), POST / GET through the client, and render human-readable output (including honest empty states). Map HTTP errors to actionable 'what / why / how to fix' messages. Connection-refused surfaces as a structured multi-line error naming the endpoint and three next steps. The final step of this phase (05-05) is the walking-skeleton gate — it is the step that turns scenario §1.1 (Ana submits a job and reads the same spec digest back) GREEN.",
+      "estimated_hours": 10,
+      "depends_on": ["01", "02", "03", "04"],
+      "steps": [
+        {
+          "id": "05-01",
+          "name": "CLI reqwest client loads ~/.overdrive/config, pins the CA, exposes one method per endpoint, and maps HTTP errors to typed CliError",
+          "criteria": "A new module `crates/overdrive-cli/src/http_client.rs` exposes `pub struct ApiClient { inner: reqwest::Client, base: Url }` with `ApiClient::from_config(&Path) -> Result<Self, CliError>` that reads `~/.overdrive/config`, base64-decodes the `ca` / `crt` / `key` fields, builds a `reqwest::Client` with `.add_root_certificate(ca)` and `.identity(Identity::from_pem(crt+key))`, and stores the endpoint from `contexts[0].endpoint`. Methods: `submit_job(req: SubmitJobRequest) -> Result<SubmitJobResponse, CliError>`, `describe_job(id: &str) -> Result<JobDescription, CliError>`, `cluster_status() -> Result<ClusterStatus, CliError>`, `alloc_status() -> Result<AllocStatusResponse, CliError>`, `node_list() -> Result<NodeList, CliError>`. Request / response types are imported from `overdrive_control_plane::api` — no shadow types. `CliError` enum variants: `ConfigLoad { path, cause }`, `Transport { endpoint, cause }`, `HttpStatus { status, body: ErrorBody }`, `BodyDecode { cause }`. On HTTP 4xx / 5xx, the client deserialises the body into `ErrorBody` and returns `CliError::HttpStatus`. A test stands up a local mock server (or a real `overdrive serve` subprocess; crafter picks), confirms `client.cluster_status()` returns `Ok(ClusterStatus { ... })`; a second test with no server running confirms `client.cluster_status()` returns `Err(CliError::Transport { endpoint })` and the cause does NOT contain a raw `ECONNREFUSED` token or a raw `reqwest::Error` Debug format (asserted via `format!(\"{}\", err)` string search). Under ~250 LoC per ADR-0014. Covers test-scenarios.md §6.5 partial (connection refused actionable error), §3.4 partial (transport error rendering).",
+          "test_file": "crates/overdrive-cli/tests/integration/http_client.rs",
+          "scenario_name": "CLI reqwest client loads the trust triple, calls every endpoint, and maps HTTP errors + transport failures to typed CliError with actionable messages",
+          "tier": "Tier 3 (real reqwest + real TLS, integration-tests feature)",
+          "time_estimate_hours": 3,
+          "dependencies": ["02-03", "02-05", "03-05"],
+          "implementation_scope": {
+            "production_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/src/main.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/src/http_client.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/Cargo.toml"
+            ],
+            "test_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/tests/integration.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/tests/integration/http_client.rs"
+            ]
+          },
+          "notes": "Per ADR-0014 §2, `overdrive-cli` imports from `overdrive-control-plane::api` — add `overdrive-control-plane = { path = \"../overdrive-control-plane\" }` to `overdrive-cli/Cargo.toml`. This creates a dependency from a `binary` crate to an `adapter-host` crate — allowed per phase-1-foundation ADR-0003 (binaries can depend on any adapter). Add `reqwest` with `rustls-tls, json` features to workspace deps if not already. Endpoint precedence (`--endpoint` flag > env > default) is clap-level; the `ApiClient::from_config` constructor accepts a precomputed endpoint string. Per ADR-0010, the client cert is attached even though Phase 1 server doesn't validate it — Phase 5 mTLS flips one switch on the server. A future phase may move this to a sibling crate `overdrive-api-client` per ADR-0014 §The CLI HTTP client — not Phase 1."
+        },
+        {
+          "id": "05-02",
+          "name": "overdrive serve and overdrive cluster init subcommands wire the trust-triple bootstrap and server startup",
+          "criteria": "The clap Subcommand tree in `main.rs` gains two new commands: `Serve { #[arg(long, default_value = \"127.0.0.1:7001\")] bind: String, #[arg(long)] data_dir: Option<PathBuf> }` and a refactored `ClusterCommand::Init { #[arg(long)] force: bool }` (alongside existing `Upgrade`). Per `crates/overdrive-cli/CLAUDE.md`, the acceptance test calls the handler functions **directly** — no `overdrive` subprocess. `overdrive_cli::commands::cluster::init(InitArgs { force: false }, &clock, &fs).await` returns `Ok(InitOutput { config_path: PathBuf, endpoint: Url })`; the output names the written file and the file at `config_path` is parseable YAML matching ADR-0010 §R2. Re-invoking `cluster::init(InitArgs { force: false }, ...)` on an existing config re-mints the triple anyway (per ADR-0010 §R4 — re-init always re-mints; `--force` is reserved for future non-destructive modes) and the CA bytes differ between the two calls (byte-compare the PEM).\n\n`overdrive_cli::commands::serve::run(ServeArgs { bind: \"127.0.0.1:0\".parse().unwrap(), data_dir: tmp_dir.path().into() }, &clock, &transport).await` returns `Ok(ServeHandle)` where `ServeHandle::endpoint() -> Url` carries the ephemerally-bound port and `ServeHandle::shutdown().await` triggers the cancellation path wired into `overdrive_control_plane::run_server`'s graceful-shutdown loop. The test asserts: `serve_handle.endpoint().port()` is non-zero; a reqwest probe against `serve_handle.endpoint().join(\"/v1/cluster/status\").unwrap()` succeeds via the CLI's `ApiClient` (05-01); `serve_handle.shutdown().await` returns `Ok(())` within a 5-second deadline with any in-flight request completed; a second probe after shutdown returns `Err(CliError::Transport { ... })`. The serve handler maps a `ControlPlaneError` to an `CliError` variant when `run_server` errors out (e.g. bind failure on an occupied port). Covers test-scenarios.md §3.2 (server binds + clean shutdown), §2b.1 (cluster init writes trust triple), §2b.2 (re-init re-mints). Explicitly NOT covered here: SIGINT handling (signal delivery is a main.rs concern, not a handler concern; tested separately at the main.rs-layer in a dedicated clap-parsing test per `crates/overdrive-cli/CLAUDE.md` Exception clause — out of scope for Phase 1 per that same clause).",
+          "test_file": "crates/overdrive-cli/tests/integration/cluster_init_serve.rs",
+          "scenario_name": "overdrive_cli::commands::cluster::init and ::serve::run, invoked directly, mint a trust triple and bind a TLS listener on an ephemeral port; shutdown completes cleanly with in-flight-request drain",
+          "tier": "Tier 3 (direct CLI handler calls + real filesystem + real axum bind + real reqwest; integration-tests feature; NO subprocess per crates/overdrive-cli/CLAUDE.md)",
+          "time_estimate_hours": 2,
+          "dependencies": ["02-01", "02-02", "04-04"],
+          "implementation_scope": {
+            "production_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/src/main.rs"
+            ],
+            "test_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/tests/integration/cluster_init_serve.rs"
+            ]
+          },
+          "notes": "The current CLI scaffold `ClusterCommand` only has `Upgrade`. This step extends it with `Init { force: bool }`. The `Serve` subcommand is NEW to the top-level `Command` enum — it's not a cluster subcommand (mirrors Talos' `talos apiserver` shape). The `--data-dir` default is `dirs::data_dir().join(\"overdrive\")` per XDG convention per ADR-0013 §5. For `cluster init`, the handler accepts a config-dir path via `InitArgs { config_dir: Option<PathBuf>, force: bool }` — the binary wrapper (`main.rs`) resolves `config_dir` from `$OVERDRIVE_CONFIG_DIR` env or falls back to `~/.overdrive/`; the test passes a `tempfile::TempDir` path directly to the handler (no env override needed when invoking directly). This is the benefit of the direct-call pattern per `crates/overdrive-cli/CLAUDE.md` — no hidden globals, no env-inheritance.\n\n`run_server` in `overdrive_control_plane::lib.rs` returns `Result<ServerHandle, ControlPlaneError>` where `ServerHandle` carries the bound `SocketAddr` (for ephemeral-port discovery) and a `shutdown()` method. The `overdrive_cli::commands::serve::run` wraps this to return `ServeHandle` with the CLI-level endpoint/URL shape. SIGINT handling is a `main.rs`-only concern — wired via `tokio::select! { _ = tokio::signal::ctrl_c() => ..., _ = server.wait() => ... }` in the binary entry point. The acceptance test does NOT exercise SIGINT (direct-call pattern has no process signal surface); it exercises the `shutdown()` cancellation path that SIGINT ultimately drives. Integration-tests feature gated."
+        },
+        {
+          "id": "05-03",
+          "name": "overdrive cluster status and overdrive node list render the reconciler registry and honest empty states",
+          "criteria": "Per `crates/overdrive-cli/CLAUDE.md` (no-subprocess rule), the test spins up the in-process server via `overdrive_cli::commands::serve::run(...)` (from 05-02) then directly calls `overdrive_cli::commands::cluster::status(StatusArgs { endpoint }, &clock, &transport).await -> Result<ClusterStatusOutput, CliError>` and `overdrive_cli::commands::node::list(ListArgs { endpoint }, &clock, &transport).await -> Result<NodeListOutput, CliError>`. Structured output assertions (NOT stdout parsing): `cluster_status_output.mode == \"single\"`, `cluster_status_output.region == \"local\"`, `cluster_status_output.commit_index >= 0`, `cluster_status_output.reconcilers.contains(&\"noop-heartbeat\".to_string())`, `cluster_status_output.broker.queued/cancelled/dispatched` are typed `u64` fields. `node_list_output.rows.is_empty()` is true, `node_list_output.empty_state_message.contains(\"phase-1-first-workload\")` is true. A separate thin rendering unit test (no server dependency) asserts `render::cluster_status(&cluster_status_output)` produces a multi-line string containing `Mode:`, `Region:`, `Commit index:`, `Reconcilers:`, `Broker counters:` labels with the corresponding values — rendering drift cannot bleed into handler correctness. Replaces the `tracing::warn!(\"command not yet wired to control plane\")` stubs for these two commands. Covers test-scenarios.md §1.2 (cluster status WS), §6.3 (node list honest empty state), §6.4 (cluster status shows registry), §5.6 (cluster status surfaces registry).",
+          "test_file": "crates/overdrive-cli/tests/integration/cluster_and_node_commands.rs",
+          "scenario_name": "overdrive_cli::commands::cluster::status and ::node::list, invoked directly, return typed output carrying the reconciler registry + broker counters + commit index and an honest empty-nodes state",
+          "tier": "Tier 3 (direct CLI handler calls + in-process axum server + real reqwest; integration-tests feature; NO subprocess per crates/overdrive-cli/CLAUDE.md)",
+          "time_estimate_hours": 2,
+          "dependencies": ["05-01", "05-02"],
+          "implementation_scope": {
+            "production_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/src/main.rs"
+            ],
+            "test_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/tests/integration/cluster_and_node_commands.rs"
+            ]
+          },
+          "notes": "The rendering functions live in a new `crates/overdrive-cli/src/render.rs` module (extracted by 05-01's lib.rs split per `crates/overdrive-cli/CLAUDE.md`) so they are unit-testable without spinning up a server. Per US-05 AC, 'first output within 100ms on localhost' — the rendering path must be `println!`-based (no artificial spinners). The cluster status output format is not formally specified in the ADRs — crafter picks a readable layout (e.g. key-value pairs; mimics `talosctl cluster status`). The phrase 'phase-1-first-workload' is the canonical reference in Phase 1 per user-stories.md; the thin rendering test asserts the empty-state rendering contains it (structured-output test asserts `empty_state_message.contains(\"phase-1-first-workload\")`). Map HTTP errors via `CliError::HttpStatus.body.message` into a user-facing error type the `render.rs` layer formats — the handler NEVER renders to stdout directly. Integration-tests feature gated for the server-backed happy-path test; the rendering unit tests land in `tests/acceptance/` under the default lane (no server)."
+        },
+        {
+          "id": "05-04",
+          "name": "overdrive job submit reads TOML, constructs a Job via the same constructor, POSTs JSON, renders actionable errors on validation / connection failure",
+          "criteria": "Per `crates/overdrive-cli/CLAUDE.md` (no-subprocess rule), the test calls `overdrive_cli::commands::job::submit(SubmitArgs { spec: payments_toml_path, endpoint }, &clock, &transport).await -> Result<SubmitOutput, CliError>` directly. Happy path: the handler reads `<toml>` via `toml::from_str` into a `JobSpecInput` (the same input shape used by `Job::from_spec`), calls `Job::from_spec` locally to validate early (fails fast before any HTTP call on malformed input), POSTs `SubmitJobRequest { spec }` via `client.submit_job`, returns `Ok(SubmitOutput { job_id: \"payments\".into(), intent_key: \"jobs/payments\".into(), commit_index: N, endpoint, next_command: \"overdrive alloc status --job payments\".into() })`. A separate rendering unit test asserts `render::job_submit_accepted(&output)` produces a multi-line block containing `Accepted.`, `Job ID: payments`, `Intent key: jobs/payments`, `Commit index:`, `Endpoint:`, `Next: overdrive alloc status --job payments`.\n\nMalformed-TOML early-fail path: with `broken.toml` containing `replicas = 0`, the handler returns `Err(CliError::InvalidSpec { field: \"replicas\".into(), message })` — the error variant is typed, the test asserts on variant shape and that `message` contains `replicas` and `0`. NO HTTP request issued (asserted via a test-side in-process HTTP hit counter on the ServeHandle, OR by pointing the handler at an endpoint that rejects all connections and confirming no transport error surfaces — early-validation returns before the client is even constructed).\n\nConnection-refused path: the test constructs a `SubmitArgs { spec: valid_toml_path, endpoint: Url::parse(\"https://127.0.0.1:1\").unwrap() }` (a port nobody is listening on) and invokes the handler; the handler returns `Err(CliError::Transport { endpoint, cause })` where a structured `cause` enum variant names `ConnectionRefused` (or equivalent) and the `Display` impl on `CliError::Transport` formats three concrete next steps. Rendered form (via `render::cli_error`) contains `https://127.0.0.1:1`, explains the endpoint could not be reached, and lists three suggestions (start the control plane, verify endpoint, override endpoint); the `Debug` form of `reqwest::Error` MUST NOT appear — asserted by a `format!(\"{}\", err).contains(\"reqwest\")` negative check.\n\nReplaces the `tracing::warn!` stub for `JobCommand::Submit`. Covers test-scenarios.md §6.1 (submit output carries job id + intent key + commit index + Next), §6.5 (connection refused actionable error), §6.6 (malformed spec error names field), §3.4 (CLI renders connection-refused).",
+          "test_file": "crates/overdrive-cli/tests/integration/job_submit.rs",
+          "scenario_name": "overdrive_cli::commands::job::submit, invoked directly, returns Ok(SubmitOutput) on valid input + real server; rejects malformed TOML before any HTTP call with typed CliError::InvalidSpec; connection-refused returns typed CliError::Transport whose Display form avoids raw reqwest Debug format",
+          "tier": "Tier 3 (direct CLI handler calls + in-process axum server + real reqwest; integration-tests feature; NO subprocess per crates/overdrive-cli/CLAUDE.md)",
+          "time_estimate_hours": 2,
+          "dependencies": ["05-01", "05-02"],
+          "implementation_scope": {
+            "production_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/src/main.rs"
+            ],
+            "test_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/tests/integration/job_submit.rs"
+            ]
+          },
+          "notes": "The scaffold's `JobCommand::Submit { spec: PathBuf }` uses `--spec` as a flag, but WS §1.1 and US-05 AC use POSITIONAL: `overdrive job submit payments.toml`. Change the clap definition to `JobCommand::Submit { spec: std::path::PathBuf }` with no `#[arg(long)]` — positional (one-line clap change in `main.rs`). The handler function `commands::job::submit(SubmitArgs { spec: PathBuf, endpoint: Url }, ...)` takes `PathBuf` and the resolved endpoint; the binary wrapper maps `SubmitCommand { spec }` → `commands::job::submit(SubmitArgs { spec, endpoint: config.endpoint() }, adapters)`. `toml` crate is added to `overdrive-cli/Cargo.toml`. The client-side Job::from_spec early validation is the 'fast fail' path; the server ALSO validates (defence-in-depth per ADR-0011). The client-side validation is what Phase 1 uses to name the offending field without a round-trip (AC: malformed spec error names the field — more actionable if detected locally). The 'three concrete next steps' in the connection-refused error is a static multi-line template rendered by `render::cli_error(&CliError::Transport { ... })`; no dynamic logic. The handler body never calls `println!` — handlers return typed outputs; rendering is decoupled per `crates/overdrive-cli/CLAUDE.md`."
+        },
+        {
+          "id": "05-05",
+          "name": "overdrive alloc status — walking-skeleton end-to-end: byte-identical spec digest via direct handler calls",
+          "criteria": "**Walking-skeleton gate** — this step turns test-scenarios.md §1.1 (Ana submits a job and sees the spec digest round-trip byte-identical) GREEN, and it does so per `crates/overdrive-cli/CLAUDE.md` (firm rule) **by calling CLI command handlers directly as Rust functions — never by spawning the `overdrive` binary as a subprocess**. The acceptance-test entrypoint imports `overdrive_cli::commands::{cluster, serve, job, alloc}` (library surface introduced in 05-01) and invokes handlers on a shared axum-server task.\n\nGIVEN/WHEN/THEN shape (per DWD-05 discipline) — the test translates this sequence to direct-call Rust:\n```\nGIVEN a fresh tempfile config directory $OVERDRIVE_CONFIG_DIR and a valid payments.toml on disk\nWHEN the test calls, in sequence:\n  1. overdrive_cli::commands::cluster::init(InitArgs { force: false }, &clock, &fs).await\n     -- writes $OVERDRIVE_CONFIG_DIR/.overdrive/config with a freshly-minted trust triple (base64 PEM)\n  2. overdrive_cli::commands::serve::run(ServeArgs { bind: \"127.0.0.1:0\", data_dir: tmp_dir.path().into() }, &clock, &transport).await\n     -- spawns the axum-server on an in-process tokio task bound to an ephemeral port;\n        the handler returns a ServeHandle carrying the actually-bound port plus a cancellation token\n  3. overdrive_cli::commands::job::submit(SubmitArgs { spec: payments_toml_path, endpoint: serve_handle.endpoint() }, &clock, &transport).await\n     -- parses the TOML, calls Job::from_spec, POSTs to the in-process server via the CLI's reqwest client;\n        returns SubmitOutput { job_id, intent_key, commit_index }\n  4. overdrive_cli::commands::alloc::status(StatusArgs { job: \"payments\".into(), endpoint: serve_handle.endpoint() }, &clock, &transport).await\n     -- GETs /v1/jobs/payments + /v1/allocs via the same reqwest client;\n        returns AllocStatusOutput { spec_digest, allocations_total, empty_state_message }\n  5. serve_handle.shutdown().await -- cancels the serve task, awaits in-flight drain\nTHEN\n  - submit_output.job_id == \"payments\"\n  - submit_output.intent_key == \"jobs/payments\"\n  - submit_output.commit_index >= 1\n  - alloc_status_output.spec_digest == ContentHash::of(&rkyv::to_bytes::<_, 256>(&Job::from_spec(parsed_toml_input).unwrap()).unwrap()).to_string()  // byte-identical to the locally-computed digest\n  - alloc_status_output.allocations_total == 0\n  - alloc_status_output.empty_state_message contains \"phase-1-first-workload\"\n  - $OVERDRIVE_CONFIG_DIR/.overdrive/config remains on disk after shutdown\n```\n\nAdditionally, on `overdrive_cli::commands::alloc::status(StatusArgs { job: \"mystery\".into(), ... }).await` where no such job exists: the handler returns `Err(CliError::HttpStatus { status: StatusCode::NOT_FOUND, body: ErrorBody { message, ... } })`; the test asserts on variant shape + message content (names `mystery`, suggests `overdrive job submit`, per test-scenarios.md §6.7) — no stderr parsing, no exit-code check, because there is no subprocess.\n\nReplaces the `tracing::warn!` stub for `AllocCommand::Status`. Covers test-scenarios.md §1.1 (WS-1), §6.2 (alloc status spec digest equals local compute), §6.7 (unknown job actionable error).",
+          "test_file": "crates/overdrive-cli/tests/integration/walking_skeleton.rs",
+          "scenario_name": "Walking-skeleton end-to-end via direct CLI handler calls: cluster init → serve (in-process) → job submit → alloc status returns a spec digest byte-identical to the local rkyv compute; unknown job returns a typed CliError::HttpStatus",
+          "tier": "Tier 3 (walking-skeleton gate; direct CLI handler calls + in-process axum server + real rcgen + real redb + real libsql + real reqwest; integration-tests feature; NO subprocess per crates/overdrive-cli/CLAUDE.md)",
+          "time_estimate_hours": 2,
+          "dependencies": ["05-01", "05-02", "05-03", "05-04", "03-02"],
+          "implementation_scope": {
+            "production_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/src/main.rs"
+            ],
+            "test_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/tests/integration/walking_skeleton.rs"
+            ]
+          },
+          "notes": "**This is the walking-skeleton gate.** Per DWD-01 (Strategy C — real local), every adapter in this test is real: real `rcgen` CA, real `axum` + `rustls` server, real `redb` LocalStore, real `libsql` reconciler DB, real `reqwest` client. **What is NOT real: the `overdrive` binary process.** Per `crates/overdrive-cli/CLAUDE.md` (firm rule), the WS test calls `overdrive_cli::commands::{cluster, serve, job, alloc}` handlers directly as Rust functions on a single test process — NO `Command::new(env!(\"CARGO_BIN_EXE_overdrive\"))`, NO `assert_cmd`, NO `escargot`, NO subprocess wait-and-parse-stderr.\n\nLibrary-surface requirements landing earlier in Slice 5:\n- 05-01 introduces `crates/overdrive-cli/src/lib.rs` with `pub mod commands { pub mod cluster; pub mod serve; pub mod job; pub mod alloc; }`. `src/main.rs` is ≤~30 lines: install `color-eyre` + `tracing-subscriber`, parse `argv` via clap, construct real production adapters (`SystemClock`, `TcpTransport`, `reqwest::Client`), call `overdrive_cli::run(command, adapters).await`, map `eyre::Report` to exit code.\n- 05-02 exposes `overdrive_cli::commands::cluster::init(InitArgs, &Clock, &FileSystem).await -> Result<InitOutput, CliError>` and `overdrive_cli::commands::serve::run(ServeArgs, &Clock, &Transport).await -> Result<ServeHandle, CliError>` — the `ServeHandle` carries the actually-bound socket address (for ephemeral-port binding: `127.0.0.1:0` → `ServeHandle::endpoint() -> Url`) and a cancellation token / shutdown method.\n- 05-03 exposes `overdrive_cli::commands::cluster::status(...)`, `overdrive_cli::commands::node::list(...)` returning typed output.\n- 05-04 exposes `overdrive_cli::commands::job::submit(SubmitArgs { spec: PathBuf, endpoint: Url }, &Clock, &Transport).await -> Result<SubmitOutput, CliError>`.\n- 05-05 exposes `overdrive_cli::commands::alloc::status(StatusArgs { job: String, endpoint: Url }, &Clock, &Transport).await -> Result<AllocStatusOutput, CliError>` and composes all four above in the walking-skeleton test.\n\nAdapters in the WS test: the CLI handlers accept `&impl Clock` + `&impl Transport` trait generics per DWD-05 + `crates/overdrive-cli/CLAUDE.md`. In the WS test, `Clock = SystemClock` and `Transport = TcpTransport` (real adapters — DWD-01 Strategy C). A faster smoke variant of the WS under `SimClock` + `SimTransport` would run in the default nextest lane; this WS test is gated under `integration-tests` because it exercises real `rcgen`, real `redb`, real `libsql`, real `reqwest`.\n\nThe CLI-side spec-digest computation reuses the same `ContentHash::of(rkyv::to_bytes(&job))` path the server uses (03-02) — this is what makes the digests byte-identical. Do NOT implement a second canonicalisation path client-side — route through the same `overdrive-core` helpers. `CLI handlers` return structured `Output` types carrying typed fields (`commit_index: u64`, `spec_digest: String`, `empty_state_message: String`); the `main.rs` binary is responsible for rendering those outputs to stdout with a human-friendly format that contains `phase-1-first-workload` in the empty-state rendering — but the WS test asserts on the typed `Output` struct, NOT on stdout text. A separate thin rendering unit test (under `tests/acceptance/`) asserts that `render(AllocStatusOutput)` contains `phase-1-first-workload` in the empty-state string — decoupling rendering drift from handler correctness.\n\nThe scaffold `AllocCommand::Status { id: String }` uses positional `id`; the WS calls `alloc::status` with a `job` field per the GIVEN/WHEN/THEN above. Change the clap definition to `AllocCommand::Status { #[arg(long)] job: String }` and the handler function to take `StatusArgs { job: String, endpoint: Url }`. Post-step: scenario §1.1 is the walking-skeleton acceptance gate for the whole feature; this step's GREEN is the feature's GREEN. cargo mutants kill rate ≥80% on `commands::alloc::status` handler body + any CLI-side digest-compute path per testing.md mandatory target 'hash determinism paths'.",
+          "walking_skeleton_gate": true
+        }
+      ]
+    }
+  ],
+  "implementation_scope": {
+    "source_directories": [
+      "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-core/src/",
+      "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/src/",
+      "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/src/",
+      "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-store-local/src/",
+      "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-sim/src/",
+      "/Users/marcus/conductor/workspaces/helios/daegu-v1/xtask/src/"
+    ],
+    "test_directories": [
+      "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-core/tests/",
+      "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/tests/",
+      "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/tests/",
+      "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-sim/tests/",
+      "/Users/marcus/conductor/workspaces/helios/daegu-v1/xtask/tests/"
+    ],
+    "excluded_patterns": [
+      "target/**",
+      "**/target/**",
+      ".github/**",
+      "docs/**"
+    ]
+  },
+  "walking_skeleton": {
+    "gate_step": "05-05",
+    "scenarios": [
+      "§1.1 test-scenarios.md (WS-1) — Ana submits a job and reads a byte-identical spec digest back from overdrive alloc status",
+      "§1.2 test-scenarios.md (WS-2) — overdrive cluster status shows the noop-heartbeat reconciler registered with broker counters (turned GREEN in step 05-03, re-asserted by §1.1 composition in 05-05)",
+      "§1.3 test-scenarios.md (WS-3) — byte-identical resubmit is idempotent; different spec at same key is a conflict (turned GREEN by 03-04 server-side; CLI-side surface integrated at 05-05)"
+    ],
+    "strategy": "C (real local) per DWD-01 — every @walking_skeleton scenario uses real rcgen CA, real axum + rustls, real redb LocalStore, real libsql, real reqwest. Per `crates/overdrive-cli/CLAUDE.md` (firm rule), the CLI is exercised by direct library-handler calls (not by spawning `overdrive` as a subprocess) — the `overdrive_cli::commands::{cluster, serve, job, alloc}` handlers are invoked in-process on a single tokio runtime with the server on a sibling task. The integration shape remains Strategy C (no mocks on infrastructure); only the CLI-to-server coupling is in-process rather than inter-process. Deleting any of the real infrastructure adapters breaks the WS — the litmus test in DWD-01 has been verified.",
+    "definition_of_done": "`cargo nextest run -p overdrive-cli --features integration-tests -E 'test(walking_skeleton)'` is GREEN on a clean clone after `cargo xtask openapi-gen` has been run once. Specifically (all via direct `overdrive_cli::commands` handler invocation, no subprocess): `cluster::init(...)` writes a trust triple at the target config dir; `serve::run(...)` binds TLS on an ephemeral 127.0.0.1 port and returns a `ServeHandle`; `job::submit(...)` returns `Ok(SubmitOutput { commit_index >= 1, ... })`; `alloc::status(...)` returns `Ok(AllocStatusOutput)` whose `spec_digest` is byte-identical to the local rkyv compute and whose `empty_state_message` contains `phase-1-first-workload`; `serve_handle.shutdown().await` cleanly drains in-flight requests."
+  },
+  "quality_gates": {
+    "per_step": [
+      "Active acceptance test passes",
+      "All unit tests pass (cargo nextest run -p <affected_crate>)",
+      "All integration tests pass (cargo nextest run -p <affected_crate> --features integration-tests -E 'binary(integration)' when the step lands integration tests)",
+      "Rustdoc examples compile for touched crates (cargo test --doc -p <affected_crate>)",
+      "cargo fmt passes on touched crates",
+      "cargo clippy --workspace --all-targets -- -D warnings passes on touched crates (scoped; whole-workspace may remain RED until remaining slices land)",
+      "cargo xtask openapi-check passes (from step 02-04 onward, any step that touches api.rs or handlers.rs)",
+      "cargo xtask dst-lint passes (inherited from phase-1-foundation; any core-class crate added or modified must not import a banned API)",
+      "No test skips without documented justification",
+      "cargo xtask mutants --in-diff origin/main reports >= 80% kill rate on touched code (mandatory mutation-target cohort per testing.md — aggregate validators, rkyv roundtrip, intent-key derivation, eval broker, commit_index monotonicity, error mapping)",
+      "Post-GREEN wiring check: git diff --name-only shows every file in implementation_scope.production_files actually changed — no Fixture Theater"
+    ],
+    "feature_level": [
+      "All 51 scenarios from distill/test-scenarios.md have a corresponding Rust #[test] / #[tokio::test] function",
+      "cargo nextest run --workspace (default feature set) passes on a clean clone",
+      "cargo nextest run --workspace --features overdrive-cli/integration-tests,overdrive-control-plane/integration-tests,overdrive-sim/integration-tests passes on a clean clone (subject to the integration-tests feature names the crafter finalises per testing.md gating rule)",
+      "cargo test --doc --workspace passes",
+      "cargo xtask dst is GREEN on a clean clone — includes the three new reconciler invariants (AtLeastOneReconcilerRegistered, DuplicateEvaluationsCollapse, ReconcilerIsPure)",
+      "cargo xtask dst-lint is GREEN on a clean workspace",
+      "cargo xtask openapi-check is GREEN — api/openapi.yaml is byte-identical to utoipa-generated output",
+      "All three walking-skeleton scenarios (WS-1, WS-2, WS-3) pass",
+      "cargo mutants --workspace (nightly soak) kill rate >= 80% on the mandatory-target cohort listed in testing.md",
+      "Required CI checks fmt-clippy / test / dst / dst-lint / openapi-check / mutants-diff all green (per docs/feature/phase-1-control-plane-core/devops/ci-cd-pipeline.md)"
+    ]
+  },
+  "tdd_rhythm_per_step": [
+    "1. RED (acceptance): translate the DISTILL scenario(s) cited in `criteria` into a failing Rust #[test] / #[tokio::test] in the step's test_file; confirm it fails for a business-logic reason (not a compile error from a missing scaffold — the scaffold panics are the RED baseline).",
+    "2. RED (unit, optional): if the GREEN minimal implementation requires internal decomposition, add failing unit tests that drive each extracted helper. Skip if the acceptance test drives GREEN on its own.",
+    "3. GREEN: minimal implementation replacing the specific `SCAFFOLD: true` markers named in the step's notes. Do NOT add fields or methods not required by an active test.",
+    "4. REFACTOR: apply .claude/rules/development.md (Result alias per CLAUDE.md, pass-through #[from], newtype completeness, rkyv canonical hashing, no Instant::now in core, reconciler I/O contract, &str over String in internal APIs, parking_lot over std::sync where appropriate). Apply Object Calisthenics in the hexagonal core per quality-framework.",
+    "5. PROPTEST: where the step's scope covers a testing.md mandatory call site (newtype roundtrip, rkyv roundtrip, snapshot roundtrip, hash determinism, LWW convergence, intent-key derivation), add the proptest block with PROPTEST_CASES >= 1024 (default). Steps tagged `@property` in test-scenarios.md MUST land a proptest, not a single-example assertion.",
+    "6. MUTATION: run `cargo xtask mutants --in-diff origin/main --package <affected_crate>` locally; kill rate >=80% on the diff per testing.md mandatory target list. Unjustified surviving mutants block the COMMIT; justified skips carry `// mutants: skip` + a comment per testing.md §Rules.",
+    "7. POST-GREEN WIRING CHECK: `git diff --name-only` shows every file in implementation_scope.production_files actually changed. If only test files changed but tests flipped RED→GREEN, it's Fixture Theater — BLOCK the commit, return to GREEN. Per quality-framework Pattern 8.",
+    "8. SCAFFOLD INVENTORY: `rg 'SCAFFOLD: true' crates/ xtask/` — confirm only intentional scaffolds remain (some survive across steps until the owning slice closes; the step's notes declare which).",
+    "9. COMMIT: one commit per step; message footer carries the step id (e.g. `step: 03-01`); `--no-verify` is sanctioned while other scaffolds are RED but the commit must be `--verify`-clean on files IT touched (scoped `cargo fmt` + `cargo clippy` + `cargo nextest run -p <crate>`)."
+  ],
+  "validation": {
+    "status": "pending",
+    "reviewer": "nw-acceptance-designer-reviewer",
+    "approved_at": "TODO"
+  }
+}
