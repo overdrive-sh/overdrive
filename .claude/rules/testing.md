@@ -26,6 +26,128 @@ consumer.
 
 ---
 
+## Integration vs unit gating
+
+**Tests that touch real infrastructure MUST be gated behind an
+`integration-tests` feature on their owning crate.** "Real
+infrastructure" means anything outside the in-process pure-Rust
+fixture envelope:
+
+- Real filesystem I/O — opening real `redb` / `libSQL` / `sqlite`
+  files, writing to `tempfile::TempDir`, mmap'ing on-disk artifacts.
+- Real network — binding sockets, contacting localhost services,
+  spawning a real Corrosion peer, real Raft transport.
+- Real subprocesses — `Command::spawn`, `cargo run`, real Cloud
+  Hypervisor, real `wasmtime` outside the in-process API.
+- Real consensus / gossip — `RaftStore` with multiple peers, real
+  CR-SQLite LWW with multiple sites.
+- Heavy property-based suites — proptest invocations whose default
+  case count drives the per-test wall-clock past the 60s nextest
+  slow-test budget (e.g. 1024 cases × real redb roundtrip).
+
+The default unit/proptest suite covers in-process logic exclusively
+— `Sim*` traits, `LocalStore` against a tiny dataset, hand-picked
+proptest cases, trybuild compile-fail. Anything heavier moves out of
+the default lane.
+
+### Mechanics
+
+Add an opt-in feature to the owning crate's `Cargo.toml`:
+
+```toml
+[features]
+# Opt-in gate for slow / real-infra tests in this crate. Off by
+# default so `cargo nextest run --workspace` stays under the 60s
+# slow-test budget; CI exercises the gate in a dedicated
+# `integration` job.
+integration-tests = []
+```
+
+**Layout — integration tests live under `tests/integration/`.** All
+integration-shaped tests for a crate go in
+`crates/{crate}/tests/integration/<scenario>.rs`, wired through a
+single `crates/{crate}/tests/integration.rs` entrypoint:
+
+```
+crates/<crate>/tests/
+  integration.rs              # entrypoint, gates the whole binary
+  integration/
+    <scenario_a>.rs           # one file per scenario
+    <scenario_b>.rs
+```
+
+`tests/integration.rs` carries the feature gate at the top of the
+file; the per-scenario modules under `tests/integration/` inherit it
+and do not repeat the cfg attribute. **Submodules must be declared
+inside an inline `mod integration { … }` block** — Cargo treats each
+`tests/*.rs` file as a crate root, so a bare `mod foo;` resolves to
+`tests/foo.rs`, not `tests/integration/foo.rs`. The inline wrapper
+shifts the lookup base into the subdirectory. This is the same trick
+`tests/acceptance.rs` uses today.
+
+```rust
+// tests/integration.rs
+#![cfg(feature = "integration-tests")]
+
+mod integration {
+    mod <scenario_a>;
+    mod <scenario_b>;
+}
+```
+
+```rust
+// tests/integration/<scenario_a>.rs
+// (no cfg attribute — the entrypoint gates the whole binary)
+use proptest::prelude::*;
+// ... test code ...
+```
+
+The default `cargo nextest run` does not compile the entrypoint, so
+the per-scenario files are never reachable. CI runs a dedicated
+`integration` job that enables the feature explicitly via
+`--features <crate>/integration-tests`. Filter the slow lane with
+`-E 'binary(integration)'` so the unit suite is not re-run.
+
+**Why a dedicated subdirectory.** Plain `tests/<scenario>.rs` would
+work mechanically, but two adjacent files at `tests/` top level —
+one fast-and-default, one slow-and-gated — read the same to a
+reviewer and invite accidental ungating. The
+`tests/integration/<scenario>.rs` layout makes the lane visible at
+file-system level, mirrors the `tests/acceptance/<scenario>.rs`
+convention from ADR-0005, and gives the CI filter a single
+`binary(integration)` selector that does not need updating per
+scenario.
+
+### What stays in the default lane
+
+A test belongs in the default lane only if every one of these holds:
+
+- Runs in well under 60 seconds wall-clock on a developer laptop.
+- Performs no real I/O outside of in-memory sim traits.
+- Does not depend on subprocess spawning, real network sockets, or
+  real consensus / gossip.
+- Default proptest case count completes within the wall-clock budget
+  above (do NOT lower `PROPTEST_CASES` to dodge the budget — gate the
+  test instead).
+
+If a test outgrows the default lane (real infra creeps in, the
+proptest grows, etc.), move it under `integration-tests` immediately.
+Do not let a slow test sit in the default lane "until it gets fixed."
+
+### What this is NOT
+
+- Not a substitute for any of the four tiers above. Tier 1 (DST) is
+  still pure-Rust under sim traits and stays in the default lane.
+  Tier 2/3/4 still ship via `cargo xtask {bpf-unit,integration-test
+  vm,verifier-regress,xdp-perf}` — those wrappers own their own
+  scheduling.
+- Not "integration test" in the colloquial Rust sense (`tests/*.rs`).
+  Many `tests/*.rs` files are pure unit-shaped and stay in the
+  default lane. The gate is about *real infra*, not about file
+  location.
+
+---
+
 ## Running tests — foreground, always
 
 > **The test runner is `cargo nextest run`. Not `cargo test`.**

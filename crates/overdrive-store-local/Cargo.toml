@@ -15,6 +15,17 @@ publish               = false
 [package.metadata.overdrive]
 crate_class = "adapter-real"
 
+[features]
+# Opt-in gate for slow integration-shaped tests in this crate. The
+# snapshot-roundtrip proptest (`tests/snapshot_proptest.rs`) drives 1024
+# real redb open/put/export cycles per case and routinely exceeds the
+# 60-second nextest slow-test budget on developer hardware. Off by
+# default so `cargo nextest run --workspace` stays under the budget;
+# enable with `--features overdrive-store-local/integration-tests` (CI
+# does this in the dedicated slow lane). Mirrors the same gate shape
+# used in `xtask/Cargo.toml`.
+integration-tests = []
+
 [dependencies]
 overdrive-core.workspace = true
 redb.workspace           = true

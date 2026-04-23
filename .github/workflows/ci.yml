@@ -111,16 +111,20 @@ jobs:
   # `cargo test --doc` for rustdoc examples (nextest does not run
   # doctests — https://nexte.st/book/usage.html#limitations).
   #
+  # Default feature set only — slow / real-infra tests gated behind the
+  # `integration-tests` feature run in the dedicated `integration` job
+  # below. Splitting keeps this job under the K1 wall-clock budget and
+  # lets the slow lane fail independently without blocking unit
+  # feedback.
+  #
   # Covers:
   #   - Newtype roundtrip proptest (K5, K6)
-  #   - Snapshot roundtrip proptest (K6 — LocalStore export → bootstrap
-  #     → export bit-identical)
   #   - Trait non-substitutability compile-fail tests (trybuild)
   #   - Rustdoc examples per `.claude/rules/development.md` §Documentation
   #
-  # Does NOT cover the DST harness — that is the dedicated `dst` job
-  # below, which invokes the xtask wrapper for seed surfacing per
-  # ADR-0006.
+  # Does NOT cover:
+  #   - Snapshot roundtrip proptest (K6) — runs in `integration` job
+  #   - DST harness — runs in `dst` job below
   # -------------------------------------------------------------------
   test:
     name: nextest + doctests
@@ -172,6 +176,78 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: nextest-junit
+          path: target/nextest/ci/junit.xml
+          retention-days: 14
+          if-no-files-found: warn
+
+  # -------------------------------------------------------------------
+  # Integration tests — slow / real-infra suites gated behind each
+  # crate's `integration-tests` feature. Per `.claude/rules/testing.md`
+  # §"Integration vs unit gating", any test that uses real infra,
+  # touches the filesystem, or otherwise exceeds the unit-test budget
+  # belongs here.
+  #
+  # Covers:
+  #   - Snapshot roundtrip proptest (K6 — LocalStore export → bootstrap
+  #     → export bit-identical) via overdrive-store-local
+  #
+  # Runs in parallel with the `test` job above so a slow integration
+  # failure does not delay unit-suite feedback.
+  # -------------------------------------------------------------------
+  integration:
+    name: nextest (integration-tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "phase-1-integration"
+
+      - id: sccache-setup
+        name: Setup sccache (soft-fail on cache backend outage)
+        continue-on-error: true
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Enable sccache when setup succeeded
+        if: steps.sccache-setup.outcome == 'success'
+        run: |
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+
+      - name: Warn when sccache unavailable
+        if: steps.sccache-setup.outcome != 'success'
+        run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+
+      - name: cargo nextest run --workspace --features integration-tests (profile=ci)
+        # Bare `--features integration-tests` enables the feature on
+        # every workspace member that defines it (Cargo silently
+        # ignores members without). New crates that add an
+        # integration-tests gate are picked up automatically — no edit
+        # to this step required.
+        #
+        # Filter `binary(integration)` selects only the integration
+        # entrypoint binaries (`tests/integration.rs` per
+        # `.claude/rules/testing.md` §"Integration vs unit gating") so
+        # the unit/proptest suite that already ran in the `test` job
+        # above is not re-executed here.
+        run: |
+          cargo nextest run --workspace --locked --profile ci \
+            --features integration-tests \
+            -E 'binary(integration)'
+
+      - name: Upload nextest JUnit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nextest-junit-integration
           path: target/nextest/ci/junit.xml
           retention-days: 14
           if-no-files-found: warn

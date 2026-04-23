@@ -17,9 +17,12 @@
 //! `IntentStore::export_snapshot`, and `IntentStore::bootstrap_from`
 //! exclusively. Internal rkyv details are not inspected; only the
 //! framed byte slice returned by `StateSnapshot::bytes()` is compared.
-
-#![allow(clippy::expect_used)]
-#![allow(clippy::expect_fun_call)]
+//!
+//! Lives under `tests/integration/` because every case opens a real
+//! redb file in a `TempDir` — touching the filesystem at the default
+//! 1024-case budget routinely crosses the unit-lane wall-clock budget.
+//! The entrypoint at `tests/integration.rs` enforces the
+//! `integration-tests` feature gate; this module inherits it.
 
 use std::collections::BTreeMap;
 
