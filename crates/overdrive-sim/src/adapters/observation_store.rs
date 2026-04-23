@@ -641,7 +641,15 @@ struct RouterState {
     /// cannot be delivered to a specific recipient does not prevent
     /// later entries from different sources reaching a different
     /// recipient.
-    queues: HashMap<(NodeId, NodeId), VecDeque<Pending>>,
+    ///
+    /// `BTreeMap` rather than `HashMap` so `drain_pending` iterates
+    /// pairs in a deterministic `(source, recipient)` order. A
+    /// `HashMap` iteration order varies per-run via Rust's default
+    /// `RandomState` hasher — under Phase 2 multi-writer scenarios,
+    /// that randomness would change the order in which peers observe
+    /// each row and therefore the LWW winner, breaking K3 bit-for-bit
+    /// reproducibility at the router level.
+    queues: BTreeMap<(NodeId, NodeId), VecDeque<Pending>>,
     /// Unordered pairs of partitioned nodes. Stored canonicalised so
     /// insertion and lookup are symmetric regardless of argument order.
     partitions: HashSet<PartitionPair>,
@@ -672,7 +680,7 @@ impl GossipRouter {
             state: Mutex::new(RouterState {
                 now: Duration::from_secs(0),
                 known_peers: Vec::new(),
-                queues: HashMap::new(),
+                queues: BTreeMap::new(),
                 partitions: HashSet::new(),
             }),
             gossip_delay,
