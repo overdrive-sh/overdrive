@@ -51,9 +51,13 @@ env:
   # per PR; nightly soaks higher elsewhere. Do not lower to dodge slow
   # generators — fix the generator.
   PROPTEST_CASES: "1024"
-  # Consolidates sccache / rustc caches under a known prefix.
-  RUSTC_WRAPPER: sccache
-  SCCACHE_GHA_ENABLED: "true"
+  # NOTE: RUSTC_WRAPPER and SCCACHE_GHA_ENABLED are intentionally NOT set
+  # here. They are exported by each job's sccache setup step only when
+  # that step succeeds — so a GHA cache backend outage degrades the build
+  # to direct rustc (slow but successful) instead of failing every job
+  # before cargo runs. See docs/research/ci/sccache-gha-outage-hardening.md
+  # and mozilla/sccache#1751 (SCCACHE_IGNORE_SERVER_IO_ERROR does NOT
+  # cover backend startup probe failures).
 
 jobs:
   # -------------------------------------------------------------------
@@ -77,8 +81,24 @@ jobs:
         with:
           shared-key: "phase-1-fmt-clippy"
 
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@v0.0.6
+      # sccache setup is soft-fail: if the GHA cache backend is unreachable
+      # (as happened on 2026-04-23), RUSTC_WRAPPER is left unset and cargo
+      # runs rustc directly. Slower, but green. See
+      # docs/research/ci/sccache-gha-outage-hardening.md §"Concrete Recommendation".
+      - id: sccache-setup
+        name: Setup sccache (soft-fail on cache backend outage)
+        continue-on-error: true
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Enable sccache when setup succeeded
+        if: steps.sccache-setup.outcome == 'success'
+        run: |
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+
+      - name: Warn when sccache unavailable
+        if: steps.sccache-setup.outcome != 'success'
+        run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
 
       - name: cargo fmt --check
         run: cargo fmt --all -- --check
@@ -111,7 +131,21 @@ jobs:
         with:
           shared-key: "phase-1-test"
 
-      - uses: mozilla-actions/sccache-action@v0.0.6
+      # See fmt-clippy job above for rationale.
+      - id: sccache-setup
+        name: Setup sccache (soft-fail on cache backend outage)
+        continue-on-error: true
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Enable sccache when setup succeeded
+        if: steps.sccache-setup.outcome == 'success'
+        run: |
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+
+      - name: Warn when sccache unavailable
+        if: steps.sccache-setup.outcome != 'success'
+        run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
 
       - name: cargo test --workspace
         # PROPTEST_CASES is inherited from the workflow-level env:
@@ -142,7 +176,21 @@ jobs:
         with:
           shared-key: "phase-1-dst"
 
-      - uses: mozilla-actions/sccache-action@v0.0.6
+      # See fmt-clippy job above for rationale.
+      - id: sccache-setup
+        name: Setup sccache (soft-fail on cache backend outage)
+        continue-on-error: true
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Enable sccache when setup succeeded
+        if: steps.sccache-setup.outcome == 'success'
+        run: |
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+
+      - name: Warn when sccache unavailable
+        if: steps.sccache-setup.outcome != 'success'
+        run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
 
       - name: cargo xtask dst
         # The xtask wrapper writes:
@@ -222,7 +270,21 @@ jobs:
         with:
           shared-key: "phase-1-dst-lint"
 
-      - uses: mozilla-actions/sccache-action@v0.0.6
+      # See fmt-clippy job above for rationale.
+      - id: sccache-setup
+        name: Setup sccache (soft-fail on cache backend outage)
+        continue-on-error: true
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Enable sccache when setup succeeded
+        if: steps.sccache-setup.outcome == 'success'
+        run: |
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+
+      - name: Warn when sccache unavailable
+        if: steps.sccache-setup.outcome != 'success'
+        run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
 
       - name: cargo xtask dst-lint
         run: cargo xtask dst-lint
@@ -266,7 +328,21 @@ jobs:
         with:
           shared-key: "phase-1-mutants"
 
-      - uses: mozilla-actions/sccache-action@v0.0.6
+      # See fmt-clippy job above for rationale.
+      - id: sccache-setup
+        name: Setup sccache (soft-fail on cache backend outage)
+        continue-on-error: true
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Enable sccache when setup succeeded
+        if: steps.sccache-setup.outcome == 'success'
+        run: |
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+
+      - name: Warn when sccache unavailable
+        if: steps.sccache-setup.outcome != 'success'
+        run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
 
       - name: Install cargo-mutants
         uses: taiki-e/install-action@v2
