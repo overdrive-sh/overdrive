@@ -29,10 +29,11 @@ integration-tests = []
 
 [dependencies]
 overdrive-core.workspace           = true
-# The Phase 1 observation-store impl is SimObservationStore (ADR-0012) —
-# `overdrive-sim` is therefore a runtime dep of this crate, not just a
-# test dep. See DESIGN wave-decisions §Tech stack.
-overdrive-sim.path                 = "../overdrive-sim"
+# Per ADR-0012 (revised 2026-04-24) the Phase 1 observation-store impl
+# is `LocalObservationStore` in `overdrive-store-local` — a real
+# adapter-host crate. `overdrive-sim` is NOT a runtime dep of this
+# crate; it remains available as a dev-dep if needed for DST-style
+# tests.
 overdrive-store-local.path         = "../overdrive-store-local"
 
 # Errors / async / serde
@@ -79,6 +80,10 @@ tracing.workspace            = true
 tracing-subscriber.workspace = true
 
 [dev-dependencies]
+# `overdrive-sim` is used by tests only (`tests/acceptance/*.rs`) for
+# DST-style `Sim*` adapters — it is NOT a runtime dep (see note on
+# `overdrive-store-local` above + ADR-0012 revision 2026-04-24).
+overdrive-sim.path       = "../overdrive-sim"
 tempfile.workspace       = true
 reqwest.workspace        = true
 proptest.workspace       = true

@@ -67,17 +67,16 @@ fn read_ca_from_trust_triple(data_dir: &std::path::Path) -> String {
 /// handlers are reading from. The canary-injection tests write into
 /// THIS store via the public `ObservationStore::write` trait method
 /// and then assert the handler surfaces the row on the next GET.
-async fn spawn_server_with_obs_handle(
-) -> (ServerHandle, SocketAddr, TempDir, String, Arc<dyn ObservationStore>) {
+async fn spawn_server_with_obs_handle()
+-> (ServerHandle, SocketAddr, TempDir, String, Arc<dyn ObservationStore>) {
     let tmp = TempDir::new().expect("tempdir");
     let obs: Arc<dyn ObservationStore> =
-        Arc::from(wire_single_node_observation().expect("wire obs store"));
+        Arc::from(wire_single_node_observation(tmp.path()).expect("wire obs store"));
     let config = ServerConfig {
         bind: "127.0.0.1:0".parse().expect("parse bind addr"),
         data_dir: tmp.path().to_path_buf(),
     };
-    let handle =
-        run_server_with_obs(config, Arc::clone(&obs)).await.expect("run_server_with_obs");
+    let handle = run_server_with_obs(config, Arc::clone(&obs)).await.expect("run_server_with_obs");
     let bound = handle.local_addr().await.expect("bound addr");
     let ca_pem = read_ca_from_trust_triple(tmp.path());
     (handle, bound, tmp, ca_pem, obs)

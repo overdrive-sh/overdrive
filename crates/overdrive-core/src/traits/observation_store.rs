@@ -46,7 +46,7 @@ pub enum ObservationStoreError {
 /// Matches the lifecycle documented in whitepaper §4 and §14 —
 /// `pending → running ⇄ suspended → terminated`, plus `draining` as the
 /// transient state a node reports while migrating an allocation away.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum AllocState {
     Pending,
     Running,
@@ -76,7 +76,7 @@ impl std::fmt::Display for AllocState {
 /// `(counter, writer)` is lexicographically ordered: the lamport counter
 /// dominates, and the writer's [`NodeId`] breaks ties deterministically.
 /// Clock skew across peers cannot invert ordering.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct LogicalTimestamp {
     pub counter: u64,
     pub writer: NodeId,
@@ -86,7 +86,7 @@ pub struct LogicalTimestamp {
 ///
 /// Written by the node that owns the allocation; gossiped to every peer.
 /// Full-row writes only (no field-diff merges) per the §4 guardrail.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct AllocStatusRow {
     pub alloc_id: AllocationId,
     pub job_id: JobId,
@@ -98,7 +98,7 @@ pub struct AllocStatusRow {
 /// `node_health` row — Phase 1 minimal shape per brief §6.
 ///
 /// Written by the node itself on each heartbeat tick.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct NodeHealthRow {
     pub node_id: NodeId,
     pub region: Region,
@@ -179,14 +179,12 @@ pub trait ObservationStore: Send + Sync + 'static {
     /// long-lived reactive consumers (reconcilers, dataplane hydration),
     /// not one-shot HTTP handlers. A typed snapshot is the honest read
     /// primitive for request/response handlers.
-    async fn alloc_status_rows(&self)
-        -> Result<Vec<AllocStatusRow>, ObservationStoreError>;
+    async fn alloc_status_rows(&self) -> Result<Vec<AllocStatusRow>, ObservationStoreError>;
 
     /// Read a deterministic snapshot of every `node_health` row this
     /// peer has observed. Phase 1 has no LWW current-row index for
     /// `node_health` (see `SimObservationStore::apply`) — callers see
     /// the full ordered history; Phase 2 will add LWW parallel
     /// tracking and this method will return winners only.
-    async fn node_health_rows(&self)
-        -> Result<Vec<NodeHealthRow>, ObservationStoreError>;
+    async fn node_health_rows(&self) -> Result<Vec<NodeHealthRow>, ObservationStoreError>;
 }

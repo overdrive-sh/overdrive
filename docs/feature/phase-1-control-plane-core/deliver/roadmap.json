@@ -3,7 +3,7 @@
     "project_id": "phase-1-control-plane-core",
     "created_at": "2026-04-23T14:13:41Z",
     "filled_at": "2026-04-23T18:00:00Z",
-    "total_steps": 25,
+    "total_steps": 26,
     "phases": 5,
     "walking_skeleton_gate": "05-05",
     "notes": [
@@ -340,6 +340,30 @@
             ]
           },
           "notes": "Per ADR-0015 §2, the match in `to_response` is exhaustive at the enum level — Rust's exhaustiveness check catches missed variants at compile time; the trybuild compile-fail test is optional redundancy. `ControlPlaneError::Intent(IntentStoreError::NotFound)` requires the phase-1-foundation `IntentStoreError::NotFound` variant to exist; if it does not, use the existing variant set and adjust the match arms. The `IntoResponse` impl goes on `ControlPlaneError` — standard axum pattern: `fn into_response(self) -> Response { let (status, body) = to_response(self); (status, Json(body)).into_response() }`. After this step, every handler signature is uniformly `Result<Json<ResponseType>, ControlPlaneError>`. Phase-1-foundation's `IntentStoreError` and `ObservationStoreError` shapes are the authoritative source of wrapped variants — do not re-declare them."
+        },
+        {
+          "id": "03-06",
+          "name": "LocalObservationStore (redb-backed) replaces SimObservationStore in production wiring; persistence + restart round-trip + sim removed from overdrive-control-plane runtime deps",
+          "criteria": "Per ADR-0012 (revised 2026-04-24): `LocalObservationStore::open(path)` returns a redb-backed store implementing the existing `ObservationStore` trait. (1) Write-then-read within a single process: `write(AllocStatusRow)` makes the row visible on the next `alloc_status_rows()` call; same for `NodeHealthRow` + `node_health_rows()`. (2) **Restart round-trip** (objection-(1) regression gate): open store at path, write row, drop store, open new `LocalObservationStore::open(path)` against same file, call `alloc_status_rows()` — row from previous lifetime appears bit-identical. (3) Subscription delivery: `subscribe_all()` then write delivers the row on the subscription stream within bounded tokio poll; future-only contract. (4) Overwrite on same key: writing second row for same `AllocationId` replaces first; `alloc_status_rows()` returns exactly one row. (5) Phase 2 cutover seam intact: `wire_single_node_observation` keeps `Box<dyn ObservationStore>` return; full existing `crates/overdrive-control-plane/tests/integration/` suite passes unchanged after construction line swap. (6) Dep-graph hygiene: `overdrive-control-plane/Cargo.toml` no longer depends on `overdrive-sim` for runtime; `cargo tree -p overdrive-control-plane --edges normal` confirms.",
+          "test_file": "crates/overdrive-store-local/tests/acceptance/local_observation_store.rs",
+          "scenario_name": "local_observation_store_persists_rows_across_restart",
+          "tier": "Tier 3 (real redb file I/O; integration-tests feature)",
+          "time_estimate_hours": 3,
+          "dependencies": ["03-01", "03-03", "04-04"],
+          "implementation_scope": {
+            "production_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-store-local/src/observation_backend.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-store-local/src/lib.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-store-local/Cargo.toml",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/src/observation_wiring.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/Cargo.toml"
+            ],
+            "test_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-store-local/tests/acceptance.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-store-local/tests/acceptance/local_observation_store.rs"
+            ]
+          },
+          "notes": "Per ADR-0012 revision: trait-object swap site is exactly one line in observation_wiring.rs. No handler changes, no API changes, no roadmap-wide refactor. Add `rkyv::Archive + Serialize + Deserialize` derives on `AllocStatusRow` and `NodeHealthRow` if not already present (one-line per struct in traits/observation_store.rs). Phase 1 has no on-disk schema versioning for observation rows; record fact in execution log alongside Phase 2+ migration note. The `overdrive-sim` dep removal from `overdrive-control-plane` is part of THIS step — leaving the dep after the wiring stops using it is exactly the latent coupling the reversal fixes. Subscription via tokio::sync::broadcast channel."
         }
       ]
     },

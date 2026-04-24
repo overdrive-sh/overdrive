@@ -37,8 +37,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
-use axum::http::StatusCode;
-use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum_server::Handle as AxumHandle;
 use axum_server::tls_rustls::RustlsConfig;
@@ -140,7 +138,7 @@ pub async fn run_server(config: ServerConfig) -> Result<ServerHandle, error::Con
     // 03-03 canary-injection Fixture-Theater defence — without
     // introducing a test-only hook into the production boot path.
     let obs: Arc<dyn ObservationStore> =
-        Arc::from(observation_wiring::wire_single_node_observation()?);
+        Arc::from(observation_wiring::wire_single_node_observation(&config.data_dir)?);
     run_server_with_obs(config, obs).await
 }
 
@@ -196,14 +194,15 @@ pub async fn run_server_with_obs(
     let state = AppState { store, obs, runtime };
 
     // Assemble the router. Step 03-03 wires the real `alloc_status` and
-    // `node_list` observation-read handlers; `cluster_status` remains a
-    // stub until step 03-05.
+    // `node_list` observation-read handlers; step 03-05 aligned the
+    // `cluster_status` handler signature; step 05-03 wires it onto the
+    // real route (previously a `stub` placeholder).
     let router = Router::new()
         .route("/v1/jobs", post(handlers::submit_job))
         .route("/v1/jobs/:id", get(handlers::describe_job))
         .route("/v1/allocs", get(handlers::alloc_status))
         .route("/v1/nodes", get(handlers::node_list))
-        .route("/v1/cluster/info", get(stub))
+        .route("/v1/cluster/info", get(handlers::cluster_status))
         .with_state(state);
 
     // Bind the listener synchronously so we can surface bind errors
@@ -221,14 +220,6 @@ pub async fn run_server_with_obs(
     let server_task = tokio::spawn(async move { server.serve(router.into_make_service()).await });
 
     Ok(ServerHandle { inner: axum_handle, server_task })
-}
-
-/// Stub handler — every ADR-0008 endpoint routes here until Slice 4
-/// delivers the real handler bodies. Returns HTTP 200 with an empty
-/// JSON object so `reqwest::Response::status()` assertions in the
-/// acceptance test see a green path.
-async fn stub() -> impl IntoResponse {
-    (StatusCode::OK, [("content-type", "application/json")], "{}")
 }
 
 /// Construct the `noop-heartbeat` reconciler. Exposed as a public
