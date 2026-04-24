@@ -3,51 +3,42 @@
 ## Endpoint resolution — config only
 
 The operator config at `~/.overdrive/config` is the sole source of the
-client endpoint. There is no `--endpoint` flag, no `OVERDRIVE_ENDPOINT`
-env var. The CLI reads the endpoint, CA pin, and operator SVID from
-one trust triple; partial override would break the unit.
-
-### Why
-
-A per-command endpoint override — flag or env var — lets the operator
-point the CLI at an endpoint the trust triple does not match. The
-SVID, CA pin, and endpoint are a single unit per whitepaper §8, and
-this follows the same pattern as ADR-0010 §R4 (`--insecure` is
-rejected for the same reason — the trust posture is not runtime-tunable
-per command).
-
-Pre-fix, a clap default on `--endpoint` made the flag always-set,
-which short-circuited the config-file fallback in
-`ApiClient::from_config_with_endpoint`; the config was silently
-ignored, and operators saw `http://` in transport errors while
-`https://` was in the file. Removing the override surface removes the
-whole class of bug — there is no path in the CLI that can reach an
-endpoint the config does not name.
+client endpoint. The CLI reads the endpoint, CA pin, and operator SVID
+from one trust triple; the SVID, CA pin, and endpoint are a single
+unit per whitepaper §8, and partial override would break the unit.
+Same reasoning as ADR-0010 §R4 on `--insecure`: the trust posture is
+not runtime-tunable per command.
 
 ### Mechanics
 
 - `Cli` has no `endpoint` field — only `command`.
 - `ApiClient::from_config(config_path)` is the only constructor.
 - Handler arg structs (`SubmitArgs`, `StatusArgs`, `ListArgs`) carry
-  `config_path: PathBuf`, not `endpoint: Url`.
+  `config_path: PathBuf` — no endpoint field.
 - `SubmitOutput.endpoint` and the `CliError::Transport` rendering
-  both read from `ApiClient::base_url()` — the resolved endpoint
-  from the trust triple is the only source.
+  both read from `ApiClient::base_url()` — the endpoint the trust
+  triple names is the only source.
+- `overdrive serve` writes the trust triple *after* binding the
+  listener, so the recorded endpoint names the resolved port (not
+  the requested bind — which may be `:0` under tests and dev flows).
 
 ### Tests
 
-Tests do NOT pass an `endpoint` to handlers. They bind a server on an
-ephemeral port, rewrite the operator config on disk to name that port,
-and invoke the handler with just `config_path`. See
-`tests/integration/endpoint_from_config.rs` for the canonical shape.
+Tests do NOT pass an endpoint to handlers. They start a server on an
+ephemeral port and invoke the handler with just `config_path`; the
+trust triple `overdrive serve` writes already names the live
+endpoint. See `tests/integration/endpoint_from_config.rs` for the
+canonical shape.
 
-### Exception
+The transport-error tests in `tests/integration/job_submit.rs` are
+the only exception — they overwrite the config's endpoint with an
+unreachable one (`127.0.0.1:1`) to exercise `CliError::Transport`.
 
-None. If a future need requires the CLI to target a different endpoint
-than its default config, the operator swaps the active config via
-`$OVERDRIVE_CONFIG_DIR` — which moves the *whole* trust triple, not
-just the endpoint. The unit of trust is the config file; it is never
-partially overridden.
+### Operator flows that need a different endpoint
+
+Swap the active config via `$OVERDRIVE_CONFIG_DIR`. That moves the
+*whole* trust triple, not just the endpoint. The unit of trust is the
+config file; it is never partially overridden.
 
 ## Integration tests — no subprocess
 
