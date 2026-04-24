@@ -33,27 +33,51 @@ use overdrive_cli::commands::job::{SubmitArgs, SubmitOutput};
 use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
 use overdrive_cli::http_client::CliError;
 use tempfile::TempDir;
-use url::Url;
 
 /// Spin up a real in-process control-plane server on `127.0.0.1:0` and
-/// return the handle, the `TempDir` backing the data directory, and the
-/// endpoint URL pointing at the ephemeral port. The `TempDir` is
-/// returned so the caller can keep it alive for the duration of the
-/// test — dropping it deletes the config.
-async fn spawn_server() -> (ServeHandle, TempDir, Url) {
+/// return the handle and the `TempDir` backing the data directory. The
+/// `TempDir` is returned so the caller can keep it alive for the
+/// duration of the test — dropping it deletes the config.
+async fn spawn_server() -> (ServeHandle, TempDir) {
     let tmp = TempDir::new().expect("tempdir");
     let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
     let args = ServeArgs { bind, data_dir: tmp.path().to_path_buf() };
     let handle = overdrive_cli::commands::serve::run(args).await.expect("serve::run");
-    let port = handle.endpoint().port().expect("endpoint port");
-    let endpoint = Url::parse(&format!("https://localhost:{port}")).expect("parse endpoint");
-    (handle, tmp, endpoint)
+    (handle, tmp)
 }
 
 /// Path of the trust-triple config written by `serve::run` into
 /// `<data_dir>/.overdrive/config`.
 fn config_path(data_dir: &Path) -> PathBuf {
     data_dir.join(".overdrive").join("config")
+}
+
+/// Rewrite the `endpoint` field in the on-disk trust-triple TOML so it
+/// names the real ephemeral port the server bound to. `serve::run`
+/// records the requested bind (`https://127.0.0.1:0`), not the resolved
+/// port; since the operator config is the sole source of the endpoint
+/// (no `--endpoint` override), tests mutate the on-disk config to point
+/// at the live server.
+fn rewrite_config_endpoint(config_path: &Path, new_endpoint: &str) {
+    let original = std::fs::read_to_string(config_path).expect("read existing trust-triple config");
+    let mut doc: toml::Value = toml::from_str(&original).expect("parse existing config toml");
+    let contexts =
+        doc.get_mut("contexts").and_then(|c| c.as_array_mut()).expect("contexts array present");
+    for ctx in contexts.iter_mut() {
+        if let Some(tbl) = ctx.as_table_mut() {
+            tbl.insert("endpoint".to_owned(), toml::Value::String(new_endpoint.to_owned()));
+        }
+    }
+    let rewritten = toml::to_string(&doc).expect("reserialise config toml");
+    std::fs::write(config_path, rewritten).expect("write rewritten config");
+}
+
+/// Point the operator config for `data_dir` at the ephemeral endpoint
+/// the running server bound to.
+fn point_config_at(data_dir: &Path, endpoint: &str) -> PathBuf {
+    let cfg = config_path(data_dir);
+    rewrite_config_endpoint(&cfg, endpoint);
+    cfg
 }
 
 /// Write a valid `payments.toml` into `dir` and return its path.
@@ -76,14 +100,14 @@ memory_bytes = 536870912
 #[tokio::test]
 async fn submit_with_valid_toml_against_in_process_server_returns_submit_output_with_intent_key_and_next_command()
  {
-    let (handle, tmp, endpoint) = spawn_server().await;
+    let (handle, tmp) = spawn_server().await;
+    let port = handle.endpoint().port().expect("endpoint port");
+    let live_endpoint = format!("https://localhost:{port}");
+    let cfg = point_config_at(tmp.path(), &live_endpoint);
+
     let spec_path = write_valid_payments_toml(tmp.path());
 
-    let args = SubmitArgs {
-        spec: spec_path,
-        endpoint: endpoint.clone(),
-        config_path: config_path(tmp.path()),
-    };
+    let args = SubmitArgs { spec: spec_path, config_path: cfg };
     let output: SubmitOutput =
         overdrive_cli::commands::job::submit(args).await.expect("job::submit");
 
@@ -97,7 +121,11 @@ async fn submit_with_valid_toml_against_in_process_server_returns_submit_output_
         "SubmitOutput.commit_index must be >= 1; got {}",
         output.commit_index,
     );
-    assert_eq!(output.endpoint, endpoint, "SubmitOutput.endpoint must echo the input endpoint");
+    assert_eq!(
+        output.endpoint.as_str(),
+        format!("{live_endpoint}/"),
+        "SubmitOutput.endpoint must echo the endpoint recorded in the operator config",
+    );
     assert_eq!(
         output.next_command, "overdrive alloc status --job payments",
         "SubmitOutput.next_command must guide the operator to alloc status",
@@ -112,17 +140,18 @@ async fn submit_with_valid_toml_against_in_process_server_returns_submit_output_
 
 #[tokio::test]
 async fn submit_with_zero_replicas_returns_invalid_spec_before_any_http_call() {
-    // No server spawned — point at a port nobody listens on. If
+    // No server spawned — point the on-disk config at a dead port. If
     // local validation works, we never reach HTTP and do not see a
     // transport error.
     let tmp = TempDir::new().expect("tempdir");
 
-    // Need a trust-triple file on disk so `from_config_with_endpoint`
-    // doesn't fail with ConfigLoad before we even reach validation.
-    // Spawn-and-shutdown to write a valid config, then point at a dead
+    // Need a trust-triple file on disk so `from_config` doesn't fail
+    // with ConfigLoad before we even reach validation. Spawn-and-shutdown
+    // to write a valid config, then rewrite its endpoint to an unreachable
     // port. Early validation should short-circuit before any connect.
-    let (handle, tmp2, _endpoint) = spawn_server().await;
+    let (handle, tmp2) = spawn_server().await;
     handle.shutdown().await.expect("clean shutdown");
+    let cfg = point_config_at(tmp2.path(), "https://127.0.0.1:1");
 
     let broken_spec = r#"
 id = "payments"
@@ -133,14 +162,7 @@ memory_bytes = 536870912
     let spec_path = tmp.path().join("broken.toml");
     std::fs::write(&spec_path, broken_spec).expect("write broken.toml");
 
-    // Unreachable port. If the handler ever issues an HTTP request,
-    // we'd get a Transport error instead of InvalidSpec.
-    let dead_endpoint: Url = "https://127.0.0.1:1".parse().expect("parse dead endpoint");
-    let args = SubmitArgs {
-        spec: spec_path,
-        endpoint: dead_endpoint,
-        config_path: config_path(tmp2.path()),
-    };
+    let args = SubmitArgs { spec: spec_path, config_path: cfg };
     let err = overdrive_cli::commands::job::submit(args)
         .await
         .expect_err("replicas=0 must fail local validation");
@@ -173,8 +195,9 @@ memory_bytes = 536870912
 #[tokio::test]
 async fn submit_with_malformed_toml_syntax_returns_invalid_spec() {
     let tmp = TempDir::new().expect("tempdir");
-    let (handle, tmp2, _endpoint) = spawn_server().await;
+    let (handle, tmp2) = spawn_server().await;
     handle.shutdown().await.expect("clean shutdown");
+    let cfg = point_config_at(tmp2.path(), "https://127.0.0.1:1");
 
     // Unclosed array bracket — malformed TOML syntax.
     let broken_syntax = r#"
@@ -185,12 +208,7 @@ cpu_milli = 500
     let spec_path = tmp.path().join("broken_syntax.toml");
     std::fs::write(&spec_path, broken_syntax).expect("write broken_syntax.toml");
 
-    let dead_endpoint: Url = "https://127.0.0.1:1".parse().expect("parse dead endpoint");
-    let args = SubmitArgs {
-        spec: spec_path,
-        endpoint: dead_endpoint,
-        config_path: config_path(tmp2.path()),
-    };
+    let args = SubmitArgs { spec: spec_path, config_path: cfg };
     let err =
         overdrive_cli::commands::job::submit(args).await.expect_err("malformed TOML must fail");
 
@@ -201,27 +219,24 @@ cpu_milli = 500
 }
 
 // -------------------------------------------------------------------
-// (d) connection-refused endpoint → Transport with three suggestions
+// (d) connection-refused endpoint → Transport with two suggestions
 // -------------------------------------------------------------------
 
 #[tokio::test]
-async fn submit_against_unreachable_endpoint_returns_transport_error_naming_endpoint_with_three_suggestions()
+async fn submit_against_unreachable_endpoint_returns_transport_error_naming_endpoint_with_actionable_suggestions()
  {
     let tmp = TempDir::new().expect("tempdir");
-    // Write a valid trust triple so `ApiClient::from_config_with_endpoint`
-    // succeeds and we exercise the transport layer (not ConfigLoad).
-    let (handle, tmp2, _endpoint) = spawn_server().await;
+    // Write a valid trust triple so `ApiClient::from_config` succeeds
+    // and we exercise the transport layer (not ConfigLoad). Then
+    // rewrite its endpoint to a port nobody listens on — reqwest will
+    // fail to connect.
+    let (handle, tmp2) = spawn_server().await;
     handle.shutdown().await.expect("clean shutdown");
+    let cfg = point_config_at(tmp2.path(), "https://127.0.0.1:1");
 
     let spec_path = write_valid_payments_toml(tmp.path());
 
-    // Port 1 — nobody listens there; reqwest will fail to connect.
-    let dead_endpoint: Url = "https://127.0.0.1:1".parse().expect("parse dead endpoint");
-    let args = SubmitArgs {
-        spec: spec_path,
-        endpoint: dead_endpoint.clone(),
-        config_path: config_path(tmp2.path()),
-    };
+    let args = SubmitArgs { spec: spec_path, config_path: cfg };
     let err = overdrive_cli::commands::job::submit(args)
         .await
         .expect_err("unreachable endpoint must fail");
@@ -237,17 +252,16 @@ async fn submit_against_unreachable_endpoint_returns_transport_error_naming_endp
     }
 
     // Render through `render::cli_error` — must name the endpoint and
-    // list three concrete next-step suggestions.
+    // list the two concrete next-step suggestions (no override surface
+    // exists, so no third suggestion about `--endpoint`).
     let rendered = overdrive_cli::render::cli_error(&err);
     assert!(
         rendered.contains("127.0.0.1:1"),
         "rendered error must name the endpoint; got:\n{rendered}",
     );
-    // Three suggestions — flexible match on recognisable phrases.
     let suggestion_markers = [
+        ("verify", "Verify the endpoint in `~/.overdrive/config`"),
         ("start", "Start the control plane"),
-        ("verify", "Verify the endpoint"),
-        ("override", "Override the endpoint"),
     ];
     for (key, marker) in suggestion_markers {
         assert!(
@@ -255,6 +269,11 @@ async fn submit_against_unreachable_endpoint_returns_transport_error_naming_endp
             "rendered error must contain suggestion '{marker}' (key '{key}'); got:\n{rendered}",
         );
     }
+    // Negative check: the pre-fix override suggestion must not appear.
+    assert!(
+        !rendered.contains("--endpoint") && !rendered.contains("OVERDRIVE_ENDPOINT"),
+        "rendered error must NOT mention the removed --endpoint / OVERDRIVE_ENDPOINT override; got:\n{rendered}",
+    );
 }
 
 // -------------------------------------------------------------------
@@ -264,17 +283,13 @@ async fn submit_against_unreachable_endpoint_returns_transport_error_naming_endp
 #[tokio::test]
 async fn submit_transport_error_display_does_not_contain_raw_reqwest_token() {
     let tmp = TempDir::new().expect("tempdir");
-    let (handle, tmp2, _endpoint) = spawn_server().await;
+    let (handle, tmp2) = spawn_server().await;
     handle.shutdown().await.expect("clean shutdown");
+    let cfg = point_config_at(tmp2.path(), "https://127.0.0.1:1");
 
     let spec_path = write_valid_payments_toml(tmp.path());
 
-    let dead_endpoint: Url = "https://127.0.0.1:1".parse().expect("parse dead endpoint");
-    let args = SubmitArgs {
-        spec: spec_path,
-        endpoint: dead_endpoint,
-        config_path: config_path(tmp2.path()),
-    };
+    let args = SubmitArgs { spec: spec_path, config_path: cfg };
     let err = overdrive_cli::commands::job::submit(args)
         .await
         .expect_err("unreachable endpoint must fail");

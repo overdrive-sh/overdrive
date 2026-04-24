@@ -45,7 +45,7 @@ in-memory config.
 ```rust
 // Good — direct call, injected sim adapters, typed assertion
 let output = overdrive_cli::commands::job::submit(
-    SubmitArgs { spec: spec_path, endpoint: sim_endpoint },
+    SubmitArgs { spec: spec_path, config_path: cfg_path },
     &SimClock::new(),
     &SimTransport::new(),
 ).await?;

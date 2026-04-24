@@ -52,17 +52,15 @@ async fn run(cli: Cli) -> Result<()> {
             Ok(())
         }
         Command::Cluster(ClusterCommand::Status) => {
-            let endpoint = parse_cli_endpoint(&cli.endpoint)?;
             let config_path = default_config_path();
-            let args = overdrive_cli::commands::cluster::StatusArgs { endpoint, config_path };
+            let args = overdrive_cli::commands::cluster::StatusArgs { config_path };
             let out = overdrive_cli::commands::cluster::status(args).await?;
             print!("{}", overdrive_cli::render::cluster_status(&out));
             Ok(())
         }
         Command::Job(JobCommand::Submit { spec }) => {
-            let endpoint = parse_cli_endpoint(&cli.endpoint)?;
             let config_path = default_config_path();
-            let args = overdrive_cli::commands::job::SubmitArgs { spec, endpoint, config_path };
+            let args = overdrive_cli::commands::job::SubmitArgs { spec, config_path };
             match overdrive_cli::commands::job::submit(args).await {
                 Ok(out) => {
                     print!("{}", overdrive_cli::render::job_submit_accepted(&out));
@@ -78,9 +76,8 @@ async fn run(cli: Cli) -> Result<()> {
             }
         }
         Command::Alloc(AllocCommand::Status { job }) => {
-            let endpoint = parse_cli_endpoint(&cli.endpoint)?;
             let config_path = default_config_path();
-            let args = overdrive_cli::commands::alloc::StatusArgs { job, endpoint, config_path };
+            let args = overdrive_cli::commands::alloc::StatusArgs { job, config_path };
             match overdrive_cli::commands::alloc::status(args).await {
                 Ok(out) => {
                     print!("{}", overdrive_cli::render::alloc_status(&out));
@@ -93,9 +90,8 @@ async fn run(cli: Cli) -> Result<()> {
             }
         }
         Command::Node(NodeCommand::List) => {
-            let endpoint = parse_cli_endpoint(&cli.endpoint)?;
             let config_path = default_config_path();
-            let args = overdrive_cli::commands::node::ListArgs { endpoint, config_path };
+            let args = overdrive_cli::commands::node::ListArgs { config_path };
             let out = overdrive_cli::commands::node::list(args).await?;
             print!("{}", overdrive_cli::render::node_list(&out));
             Ok(())
@@ -123,18 +119,10 @@ async fn run(cli: Cli) -> Result<()> {
             // Remaining subcommands (Job, Alloc, Cluster::Upgrade) still
             // land in later Phase 1 steps. Log and exit 0 so smoke-tests
             // keep working.
-            tracing::warn!(endpoint = %cli.endpoint, command = ?other, "command not yet wired");
+            tracing::warn!(command = ?other, "command not yet wired");
             Ok(())
         }
     }
-}
-
-/// Parse the `--endpoint` / `OVERDRIVE_ENDPOINT` value into a `Url`,
-/// reporting a uniform diagnostic that names the raw string when the
-/// parse fails. Every subcommand except `cluster init` and `serve`
-/// routes through here so the operator-facing error is stable.
-fn parse_cli_endpoint(raw: &str) -> Result<url::Url> {
-    raw.parse().map_err(|e| color_eyre::eyre::eyre!("invalid --endpoint `{raw}`: {e}"))
 }
 
 /// Default operator config path per ADR-0010 / ADR-0014 / ADR-0019

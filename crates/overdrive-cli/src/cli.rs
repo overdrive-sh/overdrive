@@ -14,13 +14,15 @@
 use clap::{Parser, Subcommand};
 
 /// Overdrive — a next-generation workload orchestration platform.
+///
+/// The operator config at `~/.overdrive/config` is the sole source of
+/// the control-plane endpoint. `cluster init` writes the endpoint;
+/// subsequent commands read it. There is NO `--endpoint` flag and NO
+/// `OVERDRIVE_ENDPOINT` env var — an override surface defeats the
+/// purpose of the config.
 #[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
-    /// Control-plane endpoint (defaults to `OVERDRIVE_ENDPOINT` env var).
-    #[arg(long, env = "OVERDRIVE_ENDPOINT", default_value = "http://127.0.0.1:7001")]
-    pub endpoint: String,
-
     #[command(subcommand)]
     pub command: Command,
 }

@@ -107,11 +107,14 @@ pub fn alloc_status(out: &AllocStatusOutput) -> String {
 
 /// Render a [`CliError`] as an operator-facing multi-line error block.
 ///
-/// For [`CliError::Transport`] the rendered form carries three concrete
-/// next-step suggestions — "Start the control plane", "Verify the
-/// endpoint", "Override the endpoint" — so the operator has a clear
-/// recovery path without consulting docs. For other variants the
-/// `Display` form is sufficient and is returned verbatim.
+/// For [`CliError::Transport`] the rendered form carries two concrete
+/// next-step suggestions — "Verify the endpoint in the operator config"
+/// and "Start the control plane" — so the operator has a clear recovery
+/// path without consulting docs. There is no `--endpoint` / env-var
+/// override surface (per whitepaper §8 the operator config is the sole
+/// source), so no third suggestion pointing at a runtime override. For
+/// other variants the `Display` form is sufficient and is returned
+/// verbatim.
 ///
 /// This function NEVER emits raw reqwest Debug output or low-level
 /// transport tokens — those are stripped by `http_client.rs` before
@@ -125,13 +128,12 @@ pub fn cli_error(err: &CliError) -> String {
             let _ = writeln!(s, "Error: could not reach the control plane at {endpoint}.");
             let _ = writeln!(s, "Cause: {cause}.");
             let _ = writeln!(s, "The endpoint is unreachable. Try one of:");
-            let _ =
-                writeln!(s, "  1. Start the control plane: `overdrive serve --bind {endpoint}`");
-            let _ = writeln!(s, "  2. Verify the endpoint is correct (check the port and scheme).");
             let _ = writeln!(
                 s,
-                "  3. Override the endpoint via `--endpoint` or `OVERDRIVE_ENDPOINT`.",
+                "  1. Verify the endpoint in `~/.overdrive/config` is correct \
+                 (check the port and scheme).",
             );
+            let _ = writeln!(s, "  2. Start the control plane: `overdrive serve --bind <addr>`.");
             s
         }
         other => format!("{other}\n"),

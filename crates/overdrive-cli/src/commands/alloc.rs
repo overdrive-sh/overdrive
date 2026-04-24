@@ -22,23 +22,19 @@
 
 use std::path::PathBuf;
 
-use url::Url;
-
 use crate::http_client::{ApiClient, CliError};
 
 /// Arguments to [`status`].
 ///
-/// `job` is the canonical job id; `endpoint` overrides the URL recorded
-/// in the on-disk trust triple (integration tests bind an ephemeral
-/// port); `config_path` locates the trust triple.
+/// `job` is the canonical job id; `config_path` locates the operator
+/// trust triple, which is the sole source of the control-plane
+/// endpoint per whitepaper §8.
 #[derive(Debug, Clone)]
 pub struct StatusArgs {
     /// Canonical `JobId` to describe.
     pub job: String,
-    /// Explicit endpoint override, typically
-    /// `https://localhost:<port>` for the in-process server.
-    pub endpoint: Url,
-    /// Path to the Talos-shape trust triple on disk.
+    /// Path to the Talos-shape trust triple on disk. The endpoint
+    /// recorded in the triple is where the GETs are issued.
     pub config_path: PathBuf,
 }
 
@@ -89,8 +85,7 @@ pub struct AllocStatusOutput {
 /// * [`CliError::BodyDecode`] — the server returned a 2xx with a
 ///   malformed body.
 pub async fn status(args: StatusArgs) -> Result<AllocStatusOutput, CliError> {
-    let client =
-        ApiClient::from_config_with_endpoint(&args.config_path, Some(args.endpoint.as_str()))?;
+    let client = ApiClient::from_config(&args.config_path)?;
 
     // 1. Establish the job exists (and pull the authoritative
     //    spec_digest + commit_index). Unknown job → HttpStatus 404.

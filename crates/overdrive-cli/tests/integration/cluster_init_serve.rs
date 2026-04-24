@@ -46,14 +46,33 @@ fn read_ca_bytes_from_config(config_path: &Path) -> Vec<u8> {
     base64::engine::general_purpose::STANDARD.decode(ca_b64).expect("ca is valid base64")
 }
 
-/// Build an `ApiClient` for the live server bound on `bound`, loading
-/// the trust triple from `config_path` but overriding the endpoint so
-/// it names the real ephemeral port rather than the static configured
-/// bind recorded in the config file.
+/// Rewrite the `endpoint` field in the on-disk trust-triple TOML so it
+/// names the real ephemeral port the server bound to. The operator
+/// config is the sole source of the endpoint (no `--endpoint`
+/// override), so tests mutate the on-disk config to point at the live
+/// server.
+fn rewrite_config_endpoint(config_path: &Path, new_endpoint: &str) {
+    let original = std::fs::read_to_string(config_path).expect("read existing trust-triple config");
+    let mut doc: toml::Value = toml::from_str(&original).expect("parse existing config toml");
+    let contexts =
+        doc.get_mut("contexts").and_then(|c| c.as_array_mut()).expect("contexts array present");
+    for ctx in contexts.iter_mut() {
+        if let Some(tbl) = ctx.as_table_mut() {
+            tbl.insert("endpoint".to_owned(), toml::Value::String(new_endpoint.to_owned()));
+        }
+    }
+    let rewritten = toml::to_string(&doc).expect("reserialise config toml");
+    std::fs::write(config_path, rewritten).expect("write rewritten config");
+}
+
+/// Build an `ApiClient` for the live server bound on `bound` by first
+/// rewriting the on-disk trust triple so its `endpoint` field names the
+/// real ephemeral port, then loading through the sole `from_config`
+/// constructor.
 fn build_client(config_path: &Path, bound: SocketAddr) -> ApiClient {
-    let override_endpoint = format!("https://localhost:{}", bound.port());
-    ApiClient::from_config_with_endpoint(config_path, Some(&override_endpoint))
-        .expect("build ApiClient")
+    let live_endpoint = format!("https://localhost:{}", bound.port());
+    rewrite_config_endpoint(config_path, &live_endpoint);
+    ApiClient::from_config(config_path).expect("build ApiClient")
 }
 
 // -------------------------------------------------------------------

@@ -36,22 +36,46 @@ use overdrive_cli::http_client::CliError;
 use overdrive_core::aggregate::{Job, JobSpecInput};
 use overdrive_core::id::ContentHash;
 use tempfile::TempDir;
-use url::Url;
 
 /// Spin up a real in-process control-plane server on `127.0.0.1:0`. Returns
-/// `(handle, tmp, endpoint)`; the `TempDir` lives for the test duration.
-async fn spawn_server() -> (ServeHandle, TempDir, Url) {
+/// `(handle, tmp)`; the `TempDir` lives for the test duration.
+async fn spawn_server() -> (ServeHandle, TempDir) {
     let tmp = TempDir::new().expect("tempdir");
     let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
     let args = ServeArgs { bind, data_dir: tmp.path().to_path_buf() };
     let handle = overdrive_cli::commands::serve::run(args).await.expect("serve::run");
-    let port = handle.endpoint().port().expect("endpoint port");
-    let endpoint = Url::parse(&format!("https://localhost:{port}")).expect("parse endpoint");
-    (handle, tmp, endpoint)
+    (handle, tmp)
 }
 
 fn config_path(data_dir: &Path) -> PathBuf {
     data_dir.join(".overdrive").join("config")
+}
+
+/// Rewrite the `endpoint` field in the on-disk trust-triple TOML so it
+/// names the real ephemeral port the server bound to. The operator
+/// config is the sole source of the endpoint (no `--endpoint`
+/// override), so tests mutate the on-disk config to point at the live
+/// server.
+fn rewrite_config_endpoint(config_path: &Path, new_endpoint: &str) {
+    let original = std::fs::read_to_string(config_path).expect("read existing trust-triple config");
+    let mut doc: toml::Value = toml::from_str(&original).expect("parse existing config toml");
+    let contexts =
+        doc.get_mut("contexts").and_then(|c| c.as_array_mut()).expect("contexts array present");
+    for ctx in contexts.iter_mut() {
+        if let Some(tbl) = ctx.as_table_mut() {
+            tbl.insert("endpoint".to_owned(), toml::Value::String(new_endpoint.to_owned()));
+        }
+    }
+    let rewritten = toml::to_string(&doc).expect("reserialise config toml");
+    std::fs::write(config_path, rewritten).expect("write rewritten config");
+}
+
+/// Point the operator config for `data_dir` at the ephemeral port the
+/// running server bound to, returning the path to the written config.
+fn point_config_at(data_dir: &Path, port: u16) -> PathBuf {
+    let cfg = config_path(data_dir);
+    rewrite_config_endpoint(&cfg, &format!("https://localhost:{port}"));
+    cfg
 }
 
 const fn payments_toml_spec_str() -> &'static str {
@@ -100,15 +124,17 @@ async fn walking_skeleton_e2e_round_trips_byte_identical_spec_digest_via_direct_
         init_output.config_path.display()
     );
 
-    // Phase 1: serve — in-process axum+rustls on ephemeral port.
-    let (handle, server_tmp, endpoint) = spawn_server().await;
+    // Phase 1: serve — in-process axum+rustls on ephemeral port. Point
+    // the operator config at the live port so `from_config` reads it.
+    let (handle, server_tmp) = spawn_server().await;
+    let port = handle.endpoint().port().expect("endpoint port");
+    let server_cfg = point_config_at(server_tmp.path(), port);
 
     // Phase 2: write the job spec, then submit via handler.
     let spec_path = write_payments_toml(tmp.path());
     let submit_output = overdrive_cli::commands::job::submit(SubmitArgs {
         spec: spec_path,
-        endpoint: endpoint.clone(),
-        config_path: config_path(server_tmp.path()),
+        config_path: server_cfg.clone(),
     })
     .await
     .expect("job::submit");
@@ -123,8 +149,7 @@ async fn walking_skeleton_e2e_round_trips_byte_identical_spec_digest_via_direct_
     // Phase 3: alloc status — returns digest byte-identical to local compute.
     let status_output: AllocStatusOutput = overdrive_cli::commands::alloc::status(StatusArgs {
         job: "payments".to_string(),
-        endpoint: endpoint.clone(),
-        config_path: config_path(server_tmp.path()),
+        config_path: server_cfg,
     })
     .await
     .expect("alloc::status");
@@ -172,12 +197,13 @@ async fn walking_skeleton_e2e_round_trips_byte_identical_spec_digest_via_direct_
 
 #[tokio::test]
 async fn alloc_status_for_unknown_job_returns_typed_http_status_404_with_actionable_message() {
-    let (handle, server_tmp, endpoint) = spawn_server().await;
+    let (handle, server_tmp) = spawn_server().await;
+    let port = handle.endpoint().port().expect("endpoint port");
+    let server_cfg = point_config_at(server_tmp.path(), port);
 
     let err = overdrive_cli::commands::alloc::status(StatusArgs {
         job: "mystery".to_string(),
-        endpoint: endpoint.clone(),
-        config_path: config_path(server_tmp.path()),
+        config_path: server_cfg,
     })
     .await
     .expect_err("alloc::status must fail for an unknown job");
@@ -207,7 +233,7 @@ async fn alloc_status_for_unknown_job_returns_typed_http_status_404_with_actiona
 
 #[tokio::test]
 async fn config_file_remains_on_disk_after_serve_shutdown() {
-    let (handle, server_tmp, _endpoint) = spawn_server().await;
+    let (handle, server_tmp) = spawn_server().await;
     let cfg_path = config_path(server_tmp.path());
     assert!(
         cfg_path.exists(),

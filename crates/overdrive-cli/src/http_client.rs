@@ -100,36 +100,23 @@ impl ApiClient {
     /// Load the trust triple from `path` (typically
     /// `~/.overdrive/config`) and build a reqwest client that pins the
     /// minted CA and attaches the client leaf identity. The endpoint
-    /// is read from the first context's `endpoint` field.
+    /// is read from the first context's `endpoint` field — the operator
+    /// config is the sole source of the control-plane endpoint per
+    /// whitepaper §8 (*Operator Identity and CLI Authentication*).
     ///
     /// # Errors
     ///
     /// Returns [`CliError::ConfigLoad`] if the file cannot be read,
     /// parsed, or decoded, or if the minted CA / client identity is
-    /// rejected by rustls.
+    /// rejected by rustls, or if the recorded endpoint URL is
+    /// malformed.
     pub fn from_config(path: &Path) -> Result<Self, CliError> {
-        Self::from_config_with_endpoint(path, None)
-    }
-
-    /// Same as [`ApiClient::from_config`], but allows overriding the
-    /// endpoint recorded in the trust triple. Used by integration tests
-    /// that bind the server on an ephemeral port (the port in the
-    /// config file is the static configured bind, not the resolved
-    /// port), and by the CLI's `--endpoint` flag.
-    ///
-    /// # Errors
-    ///
-    /// See [`ApiClient::from_config`].
-    pub fn from_config_with_endpoint(
-        path: &Path,
-        endpoint_override: Option<&str>,
-    ) -> Result<Self, CliError> {
         let triple = load_trust_triple(path).map_err(|e| CliError::ConfigLoad {
             path: path.display().to_string(),
             cause: strip_leak(&e.to_string()),
         })?;
 
-        let endpoint_str = endpoint_override.unwrap_or_else(|| triple.endpoint());
+        let endpoint_str = triple.endpoint();
         let base = Url::parse(endpoint_str).map_err(|e| CliError::ConfigLoad {
             path: path.display().to_string(),
             cause: format!("invalid endpoint URL `{endpoint_str}`: {e}"),

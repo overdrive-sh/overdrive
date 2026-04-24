@@ -101,16 +101,12 @@ pub async fn init(args: InitArgs) -> Result<InitOutput, CliError> {
 
 /// Arguments to [`status`].
 ///
-/// `endpoint` overrides the URL recorded in the on-disk trust triple —
-/// integration tests pass the ephemeral port of an in-process server;
-/// the CLI binary passes the `--endpoint` flag or the
-/// `OVERDRIVE_ENDPOINT` env var.
+/// `config_path` locates the operator trust triple, which is the sole
+/// source of the control-plane endpoint per whitepaper §8.
 #[derive(Debug, Clone)]
 pub struct StatusArgs {
-    /// Explicit endpoint override, typically
-    /// `https://127.0.0.1:<port>` for the in-process server.
-    pub endpoint: Url,
-    /// Path to the Talos-shape trust triple on disk.
+    /// Path to the Talos-shape trust triple on disk. The endpoint
+    /// recorded in the triple is where the GET is issued.
     pub config_path: PathBuf,
 }
 
@@ -141,8 +137,7 @@ pub struct ClusterStatusOutput {
 /// `CliError::HttpStatus` / `CliError::BodyDecode` on a malformed
 /// server response.
 pub async fn status(args: StatusArgs) -> Result<ClusterStatusOutput, CliError> {
-    let client =
-        ApiClient::from_config_with_endpoint(&args.config_path, Some(args.endpoint.as_str()))?;
+    let client = ApiClient::from_config(&args.config_path)?;
     let cs = client.cluster_status().await?;
     Ok(ClusterStatusOutput {
         mode: cs.mode,

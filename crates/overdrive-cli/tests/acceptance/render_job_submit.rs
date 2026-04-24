@@ -12,8 +12,10 @@
 //!       `Accepted.`, `Job ID:`, `Intent key:`, `Commit index:`,
 //!       `Endpoint:`, `Next:` labels and the corresponding values.
 //!   (g) `render::cli_error` for `CliError::Transport` contains the
-//!       endpoint plus three suggestion markers ("Start", "Verify",
-//!       "Override") and does NOT leak the raw `reqwest` token.
+//!       endpoint plus the two suggestion markers ("Verify" the config,
+//!       "Start" the control plane) and does NOT leak the raw `reqwest`
+//!       token, and does NOT mention the removed `--endpoint` /
+//!       `OVERDRIVE_ENDPOINT` override surface.
 
 use overdrive_cli::commands::job::SubmitOutput;
 use overdrive_cli::http_client::CliError;
@@ -67,11 +69,11 @@ fn render_job_submit_accepted_contains_required_labels() {
 }
 
 // -------------------------------------------------------------------
-// (g) render::cli_error for Transport lists three suggestions
+// (g) render::cli_error for Transport lists two suggestions
 // -------------------------------------------------------------------
 
 #[test]
-fn render_cli_error_transport_contains_three_suggestions_and_endpoint() {
+fn render_cli_error_transport_contains_actionable_suggestions_and_endpoint() {
     let err = CliError::Transport {
         endpoint: "https://127.0.0.1:7001".to_string(),
         cause: "could not connect to server".to_string(),
@@ -82,14 +84,14 @@ fn render_cli_error_transport_contains_three_suggestions_and_endpoint() {
         rendered.contains("127.0.0.1:7001"),
         "rendered cli_error must name the endpoint; got:\n{rendered}",
     );
-    // Three concrete suggestion phrases — case-insensitive match on
-    // recognisable keywords so minor wording changes don't invalidate.
+    // Two concrete suggestion phrases — the override surface was removed
+    // (no `--endpoint` / `OVERDRIVE_ENDPOINT`), so the third suggestion
+    // about runtime overrides no longer applies. Case-insensitive match
+    // on recognisable keywords so minor wording changes don't invalidate.
     let rendered_lower = rendered.to_lowercase();
-    for (key, label) in [
-        ("start", "Start the control plane"),
-        ("verify", "Verify the endpoint"),
-        ("override", "Override the endpoint"),
-    ] {
+    for (key, label) in
+        [("verify", "Verify the endpoint in the config"), ("start", "Start the control plane")]
+    {
         assert!(
             rendered_lower.contains(key),
             "rendered cli_error must contain suggestion '{label}' (key '{key}'); got:\n{rendered}",
@@ -98,5 +100,10 @@ fn render_cli_error_transport_contains_three_suggestions_and_endpoint() {
     assert!(
         !rendered.contains("reqwest"),
         "rendered cli_error must not leak `reqwest` token; got:\n{rendered}",
+    );
+    // The override surface was removed; the render must not advertise it.
+    assert!(
+        !rendered.contains("--endpoint") && !rendered.contains("OVERDRIVE_ENDPOINT"),
+        "rendered cli_error must NOT mention the removed --endpoint / OVERDRIVE_ENDPOINT override; got:\n{rendered}",
     );
 }

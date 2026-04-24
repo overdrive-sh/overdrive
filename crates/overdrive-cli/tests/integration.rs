@@ -18,6 +18,7 @@
 mod integration {
     mod cluster_and_node_commands;
     mod cluster_init_serve;
+    mod endpoint_from_config;
     mod http_client;
     mod job_submit;
     mod walking_skeleton;

@@ -27,17 +27,14 @@ use crate::http_client::{ApiClient, CliError};
 /// Arguments to [`submit`].
 ///
 /// `spec` is the path to a TOML file containing a `JobSpecInput`-shaped
-/// document; `endpoint` overrides the endpoint recorded in the trust
-/// triple (integration tests bind an ephemeral port; the binary wrapper
-/// uses the `--endpoint` flag or `OVERDRIVE_ENDPOINT` env var).
+/// document; `config_path` locates the operator trust triple, which is
+/// the sole source of the control-plane endpoint per whitepaper §8.
 #[derive(Debug, Clone)]
 pub struct SubmitArgs {
     /// Path to the TOML job spec on disk.
     pub spec: PathBuf,
-    /// Explicit endpoint override (typically
-    /// `https://127.0.0.1:<port>` in tests).
-    pub endpoint: Url,
-    /// Path to the Talos-shape trust triple on disk.
+    /// Path to the Talos-shape trust triple on disk. The endpoint
+    /// recorded in the triple is where the POST is issued.
     pub config_path: PathBuf,
 }
 
@@ -100,9 +97,11 @@ pub async fn submit(args: SubmitArgs) -> Result<SubmitOutput, CliError> {
     //    field without a round-trip.
     let _validated: Job = Job::from_spec(spec_input.clone()).map_err(aggregate_to_cli_error)?;
 
-    // 4. Build the typed API client and POST.
-    let client =
-        ApiClient::from_config_with_endpoint(&args.config_path, Some(args.endpoint.as_str()))?;
+    // 4. Build the typed API client and POST. The endpoint is the one
+    //    recorded in the trust triple — the operator config is the
+    //    sole source.
+    let client = ApiClient::from_config(&args.config_path)?;
+    let endpoint = client.base_url().clone();
     let resp = client.submit_job(SubmitJobRequest { spec: spec_input }).await?;
 
     // 5. Compose the typed output. Intent key is derived via the
@@ -118,7 +117,7 @@ pub async fn submit(args: SubmitArgs) -> Result<SubmitOutput, CliError> {
         job_id: resp.job_id,
         intent_key,
         commit_index: resp.commit_index,
-        endpoint: args.endpoint,
+        endpoint,
         next_command,
     })
 }

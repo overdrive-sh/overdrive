@@ -44,15 +44,34 @@ async fn spawn_server() -> (ServerHandle, SocketAddr, TempDir, std::path::PathBu
     (handle, bound, tmp, config_path)
 }
 
-/// Build an `ApiClient` from the on-disk trust triple, overriding the
-/// recorded endpoint so it points at the actual ephemeral port the
-/// server bound. `run_server` writes the endpoint as
-/// `https://127.0.0.1:0` (the configured bind, NOT the resolved port —
-/// that's fine: tests supply the live port explicitly).
+/// Rewrite the `endpoint` field in the on-disk trust-triple TOML so it
+/// names the real ephemeral port the server bound to. The operator
+/// config is the sole source of the endpoint (no `--endpoint`
+/// override), so tests mutate the on-disk config to point at the live
+/// server.
+fn rewrite_config_endpoint(config_path: &Path, new_endpoint: &str) {
+    let original = std::fs::read_to_string(config_path).expect("read existing trust-triple config");
+    let mut doc: toml::Value = toml::from_str(&original).expect("parse existing config toml");
+    let contexts =
+        doc.get_mut("contexts").and_then(|c| c.as_array_mut()).expect("contexts array present");
+    for ctx in contexts.iter_mut() {
+        if let Some(tbl) = ctx.as_table_mut() {
+            tbl.insert("endpoint".to_owned(), toml::Value::String(new_endpoint.to_owned()));
+        }
+    }
+    let rewritten = toml::to_string(&doc).expect("reserialise config toml");
+    std::fs::write(config_path, rewritten).expect("write rewritten config");
+}
+
+/// Build an `ApiClient` from the on-disk trust triple pointed at the
+/// live server. `run_server` writes the endpoint as
+/// `https://127.0.0.1:0` (the configured bind, NOT the resolved port);
+/// we rewrite the config to name the live ephemeral port, then load
+/// through the sole `from_config` constructor.
 fn build_client_for(config_path: &Path, bound: SocketAddr) -> ApiClient {
-    let override_endpoint = format!("https://localhost:{}", bound.port());
-    ApiClient::from_config_with_endpoint(config_path, Some(&override_endpoint))
-        .expect("build ApiClient from trust triple")
+    let live_endpoint = format!("https://localhost:{}", bound.port());
+    rewrite_config_endpoint(config_path, &live_endpoint);
+    ApiClient::from_config(config_path).expect("build ApiClient from trust triple")
 }
 
 // -------------------------------------------------------------------
@@ -157,8 +176,8 @@ async fn cluster_status_with_no_server_returns_transport_error_with_actionable_m
     let (handle, bound, _tmp, config_path) = spawn_server().await;
     handle.shutdown(Duration::from_secs(1)).await;
 
-    // Point the client at the now-closed port. `from_config_with_endpoint`
-    // does NOT attempt to connect — it only loads the trust material.
+    // Point the client at the now-closed port. `from_config` does NOT
+    // attempt to connect — it only loads the trust material.
     let client = build_client_for(&config_path, bound);
 
     let err = client.cluster_status().await.expect_err("no server → transport error");

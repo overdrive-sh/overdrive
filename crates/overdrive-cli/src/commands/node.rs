@@ -12,24 +12,17 @@
 use std::path::PathBuf;
 
 use overdrive_control_plane::api::NodeRowBody;
-use url::Url;
 
 use crate::http_client::{ApiClient, CliError};
 
 /// Arguments to [`list`].
 ///
-/// `endpoint` overrides the URL recorded in the on-disk trust triple —
-/// integration tests pass the ephemeral port of an in-process server;
-/// the CLI binary passes the `--endpoint` flag or the
-/// `OVERDRIVE_ENDPOINT` env var.
+/// `config_path` locates the operator trust triple, which is the sole
+/// source of the control-plane endpoint per whitepaper §8.
 #[derive(Debug, Clone)]
 pub struct ListArgs {
-    /// Explicit endpoint override, typically
-    /// `https://127.0.0.1:<port>` for the in-process server. When
-    /// `main.rs` does not pass an override it uses the endpoint
-    /// recorded in the trust triple (ADR-0010 §R2).
-    pub endpoint: Url,
-    /// Path to the Talos-shape trust triple on disk.
+    /// Path to the Talos-shape trust triple on disk. The endpoint
+    /// recorded in the triple is where the GET is issued.
     pub config_path: PathBuf,
 }
 
@@ -61,8 +54,7 @@ const EMPTY_STATE_MESSAGE: &str =
 /// `CliError::HttpStatus` / `CliError::BodyDecode` on a malformed
 /// server response.
 pub async fn list(args: ListArgs) -> Result<NodeListOutput, CliError> {
-    let client =
-        ApiClient::from_config_with_endpoint(&args.config_path, Some(args.endpoint.as_str()))?;
+    let client = ApiClient::from_config(&args.config_path)?;
     let node_list = client.node_list().await?;
     Ok(NodeListOutput { rows: node_list.rows, empty_state_message: EMPTY_STATE_MESSAGE.to_owned() })
 }
