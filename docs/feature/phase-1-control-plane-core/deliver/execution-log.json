@@ -981,6 +981,41 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-04-24T13:23:00Z"
+    },
+    {
+      "sid": "04-07",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-24T13:29:53Z"
+    },
+    {
+      "sid": "04-08",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-24T13:37:41Z"
+    },
+    {
+      "sid": "04-08",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: existing acceptance test reconciler_is_pure_passes_on_default_harness already asserts the public-seam behavior; body refinement is internal. Canary-bug path (xtask dst --only reconciler-is-pure under overdrive-sim/canary-bug) already red pre-step and remains red post-step, confirming invariant still fires.",
+      "t": "2026-04-24T13:37:47Z"
+    },
+    {
+      "sid": "04-08",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: existing inline witnesses reconciler_is_pure_passes_for_deterministic_reconciler (default) and reconciler_is_pure_fails_for_non_deterministic_reconciler (canary-bug gated) already cover the pass/fail directions. Both updated to thread &SimClock through the new signature.",
+      "t": "2026-04-24T13:37:53Z"
+    },
+    {
+      "sid": "04-08",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-24T13:37:58Z"
     }
   ]
 }

@@ -30,13 +30,13 @@
 
 use std::time::Duration;
 
-use std::time::Instant;
-
 use overdrive_core::id::NodeId;
 use overdrive_core::reconciler::{AnyReconciler, AnyReconcilerView, State, TickContext};
+use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::entropy::Entropy;
 use overdrive_core::traits::intent_store::IntentStore;
 
+use crate::adapters::clock::SimClock;
 use crate::adapters::entropy::SimEntropy;
 use crate::adapters::observation_store::{
     SimObservationCluster, SimObservationStore, check_lww_convergence,
@@ -574,8 +574,8 @@ pub fn evaluate_duplicate_evaluations_collapse(
 // ---------------------------------------------------------------------------
 
 /// Evaluate `ReconcilerIsPure` — twin invocation of `reconciler.reconcile`
-/// with identical `(desired, actual, db)` inputs produces bit-identical
-/// `Vec<Action>` outputs.
+/// with identical `(desired, actual, view, tick)` inputs produces
+/// bit-identical `(Vec<Action>, NextView)` tuples.
 ///
 /// This is the runtime witness of the ADR-0013 §2 purity contract. A
 /// reconciler that smuggles non-determinism (wall-clock read,
@@ -585,33 +585,54 @@ pub fn evaluate_duplicate_evaluations_collapse(
 /// proves the machinery is live. The optional `canary-bug` gate in
 /// this crate exposes a deliberately non-deterministic reconciler to
 /// prove this evaluator actually catches divergences.
+///
+/// # Time injection
+///
+/// The `TickContext` passed to `reconcile` pulls its `now` from the
+/// caller-supplied `SimClock`, NOT from `std::time::Instant::now()`.
+/// Under DST, `SimClock::now()` is seed-deterministic — two harness
+/// runs at the same seed see the same `now`, and the twin invocation
+/// within a single run sees one `now` shared across both calls (the
+/// same `TickContext` reference is passed to each). This preserves
+/// the ADR-0013 §2c "time is input state, injected once per tick"
+/// contract even at the sim-layer callsite.
 #[must_use]
-pub fn evaluate_reconciler_is_pure(reconciler: &AnyReconciler) -> InvariantResult {
+pub fn evaluate_reconciler_is_pure(
+    reconciler: &AnyReconciler,
+    clock: &SimClock,
+) -> InvariantResult {
+    /// Monotonic tick counter — the evaluator runs once per harness
+    /// pass (not inside a real reconcile loop), so a fixed zero is
+    /// the right shape. The field exists to give reconcilers a
+    /// deterministic tie-breaker that does not depend on wall-clock
+    /// granularity; the harness's single-shot nature means there is
+    /// no per-call progression to model.
+    const TICK: u64 = 0;
+    /// Per-evaluation reconcile budget. No injected production
+    /// budget yet (§14 right-sizing will provide one); a 1-second
+    /// literal matches the 04-07 test-side `TickContext`
+    /// construction.
+    const BUDGET: Duration = Duration::from_secs(1);
+
     let name = "reconciler-is-pure";
 
     // Twin invocation with identical inputs per ADR-0013 §2 / §2c. ONE
     // `TickContext` is constructed and passed to BOTH calls so time is
     // a shared input, not a per-call side channel. The full §18 purity
     // semantics (pre-hydrated view + next-view tuple return) are
-    // exercised here; the evaluator-body refinement for step 04-08
-    // will add the hydrate() pre-step against a real libsql handle.
-    let desired_a = State;
-    let actual_a = State;
-    let view_a = AnyReconcilerView::Unit;
-    // The sim crate is `adapter-sim`-class (not `core`) so dst-lint
-    // does not flag `Instant::now()` here. The evaluator-body
-    // refinement for 04-08 will replace this with an injected
-    // `SimClock` snapshot and the full pre-hydration pattern.
-    let now = Instant::now();
-    let tick = TickContext { now, tick: 0, deadline: now + Duration::from_secs(1) };
-    let first = reconciler.reconcile(&desired_a, &actual_a, &view_a, &tick);
+    // exercised here — `(actions, next_view)` are asserted as paired
+    // but separate bit-identical comparisons so a mutation that drops
+    // either side is caught.
+    let desired = State;
+    let actual = State;
+    let view = AnyReconcilerView::Unit;
+    let now = clock.now();
+    let tick = TickContext { now, tick: TICK, deadline: now + BUDGET };
 
-    let desired_b = State;
-    let actual_b = State;
-    let view_b = AnyReconcilerView::Unit;
-    let second = reconciler.reconcile(&desired_b, &actual_b, &view_b, &tick);
+    let (actions_a, next_view_a) = reconciler.reconcile(&desired, &actual, &view, &tick);
+    let (actions_b, next_view_b) = reconciler.reconcile(&desired, &actual, &view, &tick);
 
-    if first == second {
+    if actions_a == actions_b && next_view_a == next_view_b {
         result(name, InvariantStatus::Pass, "host-0", None)
     } else {
         result(
@@ -619,10 +640,10 @@ pub fn evaluate_reconciler_is_pure(reconciler: &AnyReconciler) -> InvariantResul
             InvariantStatus::Fail,
             "host-0",
             Some(format!(
-                "reconciler {} diverged under twin invocation: first={:?} second={:?}",
+                "reconciler {} diverged under twin invocation: \
+                 first=(actions={actions_a:?}, next_view={next_view_a:?}) \
+                 second=(actions={actions_b:?}, next_view={next_view_b:?})",
                 reconciler.name(),
-                first,
-                second,
             )),
         )
     }
@@ -781,7 +802,8 @@ mod tests {
         // wrapping it in `AnyReconciler::NoopHeartbeat` exercises the
         // exact enum-dispatch path the evaluator runs in production.
         let r = AnyReconciler::NoopHeartbeat(NoopHeartbeat::canonical());
-        assert_eq!(evaluate_reconciler_is_pure(&r).status, InvariantStatus::Pass);
+        let clock = SimClock::new();
+        assert_eq!(evaluate_reconciler_is_pure(&r, &clock).status, InvariantStatus::Pass);
     }
 
     /// The non-deterministic witness requires the `canary-bug` feature.
@@ -808,7 +830,8 @@ mod tests {
         use overdrive_core::reconciler::{AnyReconciler, HarnessNoopHeartbeat};
 
         let r = AnyReconciler::HarnessNoopHeartbeat(HarnessNoopHeartbeat::canonical());
-        let result = evaluate_reconciler_is_pure(&r);
+        let clock = SimClock::new();
+        let result = evaluate_reconciler_is_pure(&r, &clock);
         assert_eq!(result.status, InvariantStatus::Fail);
         assert!(result.cause.as_ref().is_some_and(|c| c.contains("diverged")));
     }

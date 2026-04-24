@@ -418,7 +418,20 @@ impl Harness {
             }
             Invariant::ReconcilerIsPure => {
                 let reconciler = harness_purity_reconciler();
-                evaluators::evaluate_reconciler_is_pure(&reconciler)
+                // Pull the `TickContext::now` snapshot from the first
+                // host's injected `SimClock` rather than wall-clock.
+                // `first_host` is bound by the outer `let Some(...)`
+                // guard above. Under DST this is seed-deterministic;
+                // the sim crate is `adapter-sim`-class so dst-lint does
+                // not scan it, but pulling from the injected clock
+                // preserves the ADR-0013 §2c "time is input state"
+                // contract even at the harness-evaluator callsite and
+                // matches the shape any future production evaluator
+                // will use.
+                evaluators::evaluate_reconciler_is_pure(
+                    &reconciler,
+                    first_host.adapters.clock.as_ref(),
+                )
             }
         }
     }
