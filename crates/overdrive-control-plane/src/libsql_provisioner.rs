@@ -26,7 +26,7 @@ use crate::error::ControlPlaneError;
 /// Derive the canonicalised libSQL memory-db path for a reconciler.
 ///
 /// Returns `<canonicalise(data_dir)>/reconcilers/<name>/memory.db`.
-/// The data_dir is created on first call if absent so `canonicalize`
+/// The `data_dir` is created on first call if absent so `canonicalize`
 /// has a valid target; the per-reconciler `<name>/` subdirectory is
 /// left uncreated — `open_db` materialises it lazily.
 ///

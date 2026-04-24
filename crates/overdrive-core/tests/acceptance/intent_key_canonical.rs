@@ -243,9 +243,7 @@ fn workspace_root() -> std::path::PathBuf {
                 return dir;
             }
         }
-        if !dir.pop() {
-            panic!("could not locate workspace root from {}", env!("CARGO_MANIFEST_DIR"));
-        }
+        assert!(dir.pop(), "could not locate workspace root from {}", env!("CARGO_MANIFEST_DIR"));
     }
 }
 
@@ -281,7 +279,13 @@ fn count_files_matching(literal: &str) -> Option<Vec<std::path::PathBuf>> {
 fn assert_literal_in_exactly_one_production_file(literal: &str, expected_suffix: &str) {
     let Some(files) = count_files_matching(literal) else {
         // `rg` not on PATH. Log and skip — CI has rg, local dev may not.
-        eprintln!("skipping grep-gate for {literal:?}: `rg` not available on PATH");
+        // stderr is the correct channel for a test-skip informational
+        // notice (gets surfaced under `--no-capture`), and this is test
+        // code, not a library.
+        #[allow(clippy::print_stderr)]
+        {
+            eprintln!("skipping grep-gate for {literal:?}: `rg` not available on PATH");
+        }
         return;
     };
 
@@ -294,10 +298,11 @@ fn assert_literal_in_exactly_one_production_file(literal: &str, expected_suffix:
     );
 
     let only = &files[0];
+    let only_display = only.display();
     assert!(
         only.to_string_lossy().ends_with(expected_suffix),
         "literal {literal:?} must live in `{expected_suffix}`; \
-         found in {only:?}"
+         found in {only_display}"
     );
 }
 

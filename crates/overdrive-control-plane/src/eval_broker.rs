@@ -25,9 +25,11 @@ use std::collections::HashMap;
 use overdrive_core::reconciler::{ReconcilerName, TargetResource};
 
 /// Per-broker counter snapshot rendered by `cluster status` and the
-/// ADR-0017 storm-proofing invariant. `queued` is the current pending
-/// size (a snapshot); `cancelled` and `dispatched` are monotonically
-/// increasing accumulators across the broker's lifetime.
+/// ADR-0017 storm-proofing invariant.
+///
+/// `queued` is the current pending size (a snapshot); `cancelled` and
+/// `dispatched` are monotonically increasing accumulators across the
+/// broker's lifetime.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct BrokerCounters {
     /// Number of evaluations currently pending dispatch — equal to the
@@ -43,10 +45,11 @@ pub struct BrokerCounters {
     pub dispatched: u64,
 }
 
-/// One evaluation routed through the broker. Equality / hashing is
-/// delegated to the embedded identifiers so the broker's key-collapse
-/// logic operates on canonical name + target rather than on the
-/// `Evaluation` value as a whole.
+/// One evaluation routed through the broker.
+///
+/// Equality / hashing is delegated to the embedded identifiers so the
+/// broker's key-collapse logic operates on canonical name + target
+/// rather than on the `Evaluation` value as a whole.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Evaluation {
     pub reconciler: ReconcilerName,

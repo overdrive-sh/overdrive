@@ -8,7 +8,7 @@
 //! * Scenario — Node construction rejects zero-byte memory capacity.
 //! * Scenario — Job construction rejects a zero-replica count (field +
 //!   value echoed in the message).
-//! * Scenario — Job construction rejects a malformed JobId before any
+//! * Scenario — Job construction rejects a malformed `JobId` before any
 //!   archive attempt (pass-through via `AggregateError::Id(..)`).
 //!
 //! Also pins:
@@ -67,7 +67,7 @@ fn job_from_spec_rejects_zero_replicas_with_validation_variant_naming_replicas_f
     }
     // And the Display form ties field + message together so the HTTP
     // layer can render it verbatim per ADR-0015.
-    assert!(err.to_string().contains("replicas"), "Display must include the field; got {}", err);
+    assert!(err.to_string().contains("replicas"), "Display must include the field; got {err}");
 }
 
 // ---------------------------------------------------------------------------

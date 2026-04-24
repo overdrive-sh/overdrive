@@ -138,7 +138,7 @@ fn load_trust_triple_rejects_malformed_base64_ca_field_with_control_plane_error_
             );
         }
         other => {
-            panic!("malformed trust triple must map to ControlPlaneError::Internal, got {other:?}",)
+            panic!("malformed trust triple must map to ControlPlaneError::Internal, got {other:?}")
         }
     }
 }

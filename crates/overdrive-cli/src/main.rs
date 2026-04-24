@@ -12,6 +12,7 @@
 
 #![allow(clippy::expect_used)] // `expect` is the correct shape at bin boundaries.
 #![allow(clippy::print_stdout)] // Operator-facing CLI output is the intended use of stdout.
+#![allow(clippy::print_stderr)] // Error output on failing subcommands is the intended use of stderr.
 
 use clap::Parser;
 use color_eyre::eyre::Result;

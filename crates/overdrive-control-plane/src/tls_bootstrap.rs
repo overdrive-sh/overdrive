@@ -69,6 +69,10 @@ impl HostnameSource for SystemHostname {
 /// triple is a one-shot artefact handed back to the CLI bootstrap
 /// code; wrapping each PEM in a newtype would create types with no
 /// additional invariants worth encoding.
+// The `_pem` postfix is a deliberate encoding-format marker (vs. DER,
+// raw bytes, etc.), not redundant naming — every field carries PEM
+// text and readers need to know that at the call site.
+#[allow(clippy::struct_field_names)]
 #[derive(Debug, Clone)]
 pub struct CaMaterial {
     /// PEM-encoded self-signed CA certificate.
@@ -499,8 +503,13 @@ pub fn load_trust_triple(path: &Path) -> Result<TrustTriple, ControlPlaneError> 
 mod tests {
     //! Unit tests for `tls_bootstrap` — exercise pure paths through
     //! the hostname injection surface. Integration tests for the
-    //! real I/O paths (file read, TempDir) live under
+    //! real I/O paths (file read, `TempDir`) live under
     //! `tests/integration/tls_bootstrap.rs`.
+    //
+    // `expect` is the standard idiom for test preconditions — a panic
+    // with a message is the correct failure mode when a fixture
+    // invariant is violated.
+    #![allow(clippy::expect_used)]
     use super::*;
     use std::collections::HashSet;
     use std::io::Cursor;
@@ -582,7 +591,7 @@ mod tests {
             "failing-hostname path must retain loopback SANs, nothing else \
              (got {sans:?})",
         );
-        assert_eq!(sans.len(), 3, "failing hostname must produce EXACTLY three SANs, not four",);
+        assert_eq!(sans.len(), 3, "failing hostname must produce EXACTLY three SANs, not four");
     }
 
     #[test]

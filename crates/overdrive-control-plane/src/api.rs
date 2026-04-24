@@ -1,7 +1,7 @@
 //! Shared request/response types for the Phase 1 REST API.
 //!
 //! Per ADR-0014 (§Shared types), the CLI imports these same types
-//! directly — they ARE the wire contract. The OpenAPI schema derived
+//! directly — they ARE the wire contract. The `OpenAPI` schema derived
 //! via `utoipa` (ADR-0009) is a byproduct of these types, not a
 //! parallel definition.
 //!
@@ -16,6 +16,13 @@
 //! will construct `JobSpecInput` from its TOML input; the server will
 //! deserialise the same type out of JSON; both route through
 //! `Job::from_spec` for validation.
+
+// The `utoipa::OpenApi` derive on `OverdriveApi` below expands to code
+// using `.for_each(...)` on the collected schemas. The lint fires on
+// the macro expansion rather than any source we wrote, and outer
+// `#[allow]` attributes do not propagate into the derive. Scope the
+// allow to this module, which contains exactly one `utoipa` derive.
+#![allow(clippy::needless_for_each)]
 
 use overdrive_core::aggregate::JobSpecInput;
 use serde::{Deserialize, Serialize};
@@ -54,9 +61,10 @@ pub struct JobDescription {
     pub spec_digest: String,
 }
 
-/// Response for `GET /v1/cluster/info`. Carries mode, region,
-/// commit_index, the reconciler registry, and the broker counters per
-/// ADR-0013 and US-04 AC.
+/// Response for `GET /v1/cluster/info`.
+///
+/// Carries mode, region, `commit_index`, the reconciler registry, and
+/// the broker counters per ADR-0013 and US-04 AC.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ClusterStatus {
     pub mode: String,
@@ -75,20 +83,23 @@ pub struct BrokerCountersBody {
     pub dispatched: u64,
 }
 
-/// Response for `GET /v1/allocs`. Phase 1 always renders an empty
-/// `rows` array per US-03 AC — the allocation-status path is owned by
-/// Phase 2. The typed `rows` field is present so the CLI and external
-/// clients can parse the response into a concrete shape rather than
-/// `serde_json::Value`.
+/// Response for `GET /v1/allocs`.
+///
+/// Phase 1 always renders an empty `rows` array per US-03 AC — the
+/// allocation-status path is owned by Phase 2. The typed `rows` field
+/// is present so the CLI and external clients can parse the response
+/// into a concrete shape rather than `serde_json::Value`.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, ToSchema)]
 pub struct AllocStatusResponse {
     pub rows: Vec<AllocStatusRowBody>,
 }
 
-/// Allocation-status row body. Phase 1 shape mirrors the observation
-/// `AllocStatusRow` projected to the wire — minimal fields matching
-/// the whitepaper §4 schema (alloc_id, job_id, node_id, state). Phase
-/// 2+ adds columns additively.
+/// Allocation-status row body.
+///
+/// Phase 1 shape mirrors the observation `AllocStatusRow` projected to
+/// the wire — minimal fields matching the whitepaper §4 schema
+/// (`alloc_id`, `job_id`, `node_id`, `state`). Phase 2+ adds columns
+/// additively.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, ToSchema, PartialEq, Eq)]
 pub struct AllocStatusRowBody {
     pub alloc_id: String,
@@ -105,19 +116,20 @@ pub struct NodeList {
 }
 
 /// Node row body. Phase 1 shape mirrors the observation `NodeHealthRow`
-/// projected to the wire — minimal fields (node_id, region). Phase 2+
-/// adds columns additively.
+/// projected to the wire — minimal fields (`node_id`, `region`). Phase
+/// 2+ adds columns additively.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, ToSchema, PartialEq, Eq)]
 pub struct NodeRowBody {
     pub node_id: String,
     pub region: String,
 }
 
-/// RFC-7807-compatible subset per ADR-0015. The three fields —
-/// `error`, `message`, `field` — are pinned; renaming breaks the
-/// contract surface the CLI and external clients depend on. `field` is
-/// `Option<String>` because not every error class maps to a single
-/// field (e.g. transport-layer errors).
+/// RFC-7807-compatible subset per ADR-0015.
+///
+/// The three fields — `error`, `message`, `field` — are pinned;
+/// renaming breaks the contract surface the CLI and external clients
+/// depend on. `field` is `Option<String>` because not every error class
+/// maps to a single field (e.g. transport-layer errors).
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ErrorBody {
     pub error: String,
@@ -125,17 +137,18 @@ pub struct ErrorBody {
     pub field: Option<String>,
 }
 
-/// Root OpenAPI document per ADR-0009. Every ADR-0008 handler path is
-/// listed in `paths(...)` and every request/response DTO in
-/// `components(schemas(...))`. The schema is derived by `utoipa` at
-/// compile time; `cargo xtask openapi-gen` writes the YAML rendering of
-/// `OverdriveApi::openapi()` to `api/openapi.yaml`; `cargo xtask
-/// openapi-check` diffs the live render against the checked-in copy and
-/// fails on drift.
+/// Root `OpenAPI` document per ADR-0009.
+///
+/// Every ADR-0008 handler path is listed in `paths(...)` and every
+/// request/response DTO in `components(schemas(...))`. The schema is
+/// derived by `utoipa` at compile time; `cargo xtask openapi-gen`
+/// writes the YAML rendering of `OverdriveApi::openapi()` to
+/// `api/openapi.yaml`; `cargo xtask openapi-check` diffs the live
+/// render against the checked-in copy and fails on drift.
 ///
 /// Adding a handler requires adding its path here; adding a DTO
-/// requires adding its schema. Drift between code and the OpenAPI doc
-/// is caught by the CI gate, not in review.
+/// requires adding its schema. Drift between code and the `OpenAPI`
+/// doc is caught by the CI gate, not in review.
 #[derive(utoipa::OpenApi)]
 #[openapi(
     info(

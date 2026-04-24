@@ -19,10 +19,12 @@ use url::Url;
 
 use crate::http_client::{ApiClient, CliError};
 
-/// Arguments to [`init`]. `config_dir` overrides the default
-/// `~/.overdrive/` location — integration tests pass a `TempDir` path so
-/// each test gets its own clean state. `force` is reserved per
-/// ADR-0010 §R4; Phase 1 re-mints unconditionally.
+/// Arguments to [`init`].
+///
+/// `config_dir` overrides the default `~/.overdrive/` location —
+/// integration tests pass a `TempDir` path so each test gets its own
+/// clean state. `force` is reserved per ADR-0010 §R4; Phase 1 re-mints
+/// unconditionally.
 #[derive(Debug, Clone)]
 pub struct InitArgs {
     /// Override the default config directory. When `None`, falls back
@@ -58,6 +60,14 @@ pub struct InitOutput {
 /// resolved, or if the CA mint / trust-triple write fails. The `path`
 /// field names the resolved config directory so the operator can repair
 /// it; `cause` is a short, stripped summary.
+// `async` is kept to match the CLI command-handler contract documented
+// in `crates/overdrive-cli/CLAUDE.md` — every handler is a plain
+// `async fn` that tests call directly as `handler(args).await`. The
+// shape is uniform across the commands module even when a specific
+// handler happens to have no `.await` points yet (`init` will grow
+// them as `mint_ephemeral_ca` and `write_trust_triple` gain async
+// boundaries for file I/O).
+#[allow(clippy::unused_async)]
 pub async fn init(args: InitArgs) -> Result<InitOutput, CliError> {
     // Reserved flag in Phase 1 — ADR-0010 §R4. Suppress the
     // unused-field warning without silently dropping the field.
@@ -89,10 +99,12 @@ pub async fn init(args: InitArgs) -> Result<InitOutput, CliError> {
     Ok(InitOutput { config_path, endpoint })
 }
 
-/// Arguments to [`status`]. `endpoint` overrides the URL recorded in
-/// the on-disk trust triple — integration tests pass the ephemeral port
-/// of an in-process server; the CLI binary passes the `--endpoint`
-/// flag or the `OVERDRIVE_ENDPOINT` env var.
+/// Arguments to [`status`].
+///
+/// `endpoint` overrides the URL recorded in the on-disk trust triple —
+/// integration tests pass the ephemeral port of an in-process server;
+/// the CLI binary passes the `--endpoint` flag or the
+/// `OVERDRIVE_ENDPOINT` env var.
 #[derive(Debug, Clone)]
 pub struct StatusArgs {
     /// Explicit endpoint override, typically
@@ -111,7 +123,7 @@ pub struct ClusterStatusOutput {
     pub mode: String,
     /// Phase 1 region — always `local` until multi-region lands.
     pub region: String,
-    /// Monotonic IntentStore commit counter. Zero on a fresh store.
+    /// Monotonic `IntentStore` commit counter. Zero on a fresh store.
     pub commit_index: u64,
     /// Alphabetically-sorted reconciler names registered with the
     /// runtime. Phase 1 must contain `noop-heartbeat` per ADR-0013 §9.

@@ -161,7 +161,7 @@ impl ObservationStore for LocalObservationStore {
 
     async fn subscribe_all(&self) -> Result<ObservationSubscription, ObservationStoreError> {
         let rx = self.inner.subscription_tx.subscribe();
-        let stream = BroadcastStream::new(rx).filter_map(|evt| evt.ok());
+        let stream = BroadcastStream::new(rx).filter_map(Result::ok);
         Ok(Box::new(SubscriptionStream { inner: Box::pin(stream) }))
     }
 

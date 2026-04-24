@@ -236,10 +236,7 @@ async fn overdrive_sim_not_in_control_plane_runtime_deps() {
             // Strip line comments before the dep-name match so doc
             // references to `overdrive-sim` (the dep we just removed)
             // do not give a false positive.
-            let code = match trimmed.find('#') {
-                Some(i) => &trimmed[..i],
-                None => trimmed,
-            };
+            let code = trimmed.find('#').map_or(trimmed, |i| &trimmed[..i]);
             let code = code.trim();
             if !code.is_empty() {
                 runtime_dep_lines.push(code.to_string());

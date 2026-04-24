@@ -18,10 +18,11 @@ use crate::commands::node::NodeListOutput;
 use crate::http_client::CliError;
 
 /// Render a `ClusterStatusOutput` as a multi-line operator-facing
-/// summary. Each field is labelled on its own line so an operator can
-/// scan the output at a glance; reconciler names and broker counters
-/// expand onto subsequent indented lines so the top-level labels stay
-/// aligned.
+/// summary.
+///
+/// Each field is labelled on its own line so an operator can scan the
+/// output at a glance; reconciler names and broker counters expand onto
+/// subsequent indented lines so the top-level labels stay aligned.
 #[must_use]
 pub fn cluster_status(out: &ClusterStatusOutput) -> String {
     use std::fmt::Write as _;
@@ -39,10 +40,11 @@ pub fn cluster_status(out: &ClusterStatusOutput) -> String {
 }
 
 /// Render a `NodeListOutput` as a table, falling back to the
-/// empty-state message when no rows are present. The empty-state
-/// message is wired through `NodeListOutput::empty_state_message` so
-/// operators always see an explicit pointer to the
-/// `phase-1-first-workload` onboarding step.
+/// empty-state message when no rows are present.
+///
+/// The empty-state message is wired through
+/// `NodeListOutput::empty_state_message` so operators always see an
+/// explicit pointer to the `phase-1-first-workload` onboarding step.
 #[must_use]
 pub fn node_list(out: &NodeListOutput) -> String {
     use std::fmt::Write as _;
@@ -63,10 +65,12 @@ pub fn node_list(out: &NodeListOutput) -> String {
 }
 
 /// Render a successful `job submit` as a multi-line operator-facing
-/// summary. Each field is labelled on its own line so an operator can
-/// scan the output at a glance; the trailing `Next:` line points at
-/// the follow-up command so the operator can continue without
-/// consulting the docs.
+/// summary.
+///
+/// Each field is labelled on its own line so an operator can scan the
+/// output at a glance; the trailing `Next:` line points at the
+/// follow-up command so the operator can continue without consulting
+/// the docs.
 #[must_use]
 pub fn job_submit_accepted(out: &SubmitOutput) -> String {
     use std::fmt::Write as _;
@@ -81,11 +85,12 @@ pub fn job_submit_accepted(out: &SubmitOutput) -> String {
 }
 
 /// Render an `AllocStatusOutput` as a multi-line operator-facing
-/// summary. On empty-state (`allocations_total == 0`) the output
-/// includes the `phase-1-first-workload` reference carried in
-/// `empty_state_message` — this is the load-bearing onboarding
-/// signpost for an operator who has submitted a job but sees no
-/// allocations yet.
+/// summary.
+///
+/// On empty-state (`allocations_total == 0`) the output includes the
+/// `phase-1-first-workload` reference carried in `empty_state_message`
+/// — this is the load-bearing onboarding signpost for an operator who
+/// has submitted a job but sees no allocations yet.
 #[must_use]
 pub fn alloc_status(out: &AllocStatusOutput) -> String {
     use std::fmt::Write as _;
@@ -121,9 +126,8 @@ pub fn cli_error(err: &CliError) -> String {
             let _ = writeln!(s, "Cause: {cause}.");
             let _ = writeln!(s, "The endpoint is unreachable. Try one of:");
             let _ =
-                writeln!(s, "  1. Start the control plane: `overdrive serve --bind {endpoint}`",);
-            let _ =
-                writeln!(s, "  2. Verify the endpoint is correct (check the port and scheme).",);
+                writeln!(s, "  1. Start the control plane: `overdrive serve --bind {endpoint}`");
+            let _ = writeln!(s, "  2. Verify the endpoint is correct (check the port and scheme).");
             let _ = writeln!(
                 s,
                 "  3. Override the endpoint via `--endpoint` or `OVERDRIVE_ENDPOINT`.",

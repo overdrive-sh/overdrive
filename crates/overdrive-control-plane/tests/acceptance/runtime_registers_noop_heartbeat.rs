@@ -149,9 +149,9 @@ fn noop_heartbeat_factory_produces_reconciler_returning_noop() {
     let r: Box<dyn Reconciler> = noop_heartbeat();
     assert_eq!(r.name(), &rname("noop-heartbeat"), "factory name is noop-heartbeat");
 
-    let desired = ReconState::default();
-    let actual = ReconState::default();
-    let db = Db::default();
+    let desired = ReconState;
+    let actual = ReconState;
+    let db = Db;
 
     let first = r.reconcile(&desired, &actual, &db);
     let second = r.reconcile(&desired, &actual, &db);
@@ -239,9 +239,9 @@ fn reconciler_is_pure_invariant_holds_for_noop_heartbeat() {
     let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime::new");
     runtime.register(noop_heartbeat()).expect("register");
 
-    let desired = ReconState::default();
-    let actual = ReconState::default();
-    let db = Db::default();
+    let desired = ReconState;
+    let actual = ReconState;
+    let db = Db;
 
     for r in runtime.reconcilers_iter() {
         let a = r.reconcile(&desired, &actual, &db);

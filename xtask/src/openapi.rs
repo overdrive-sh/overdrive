@@ -1,5 +1,5 @@
-//! `cargo xtask openapi-gen` / `openapi-check` — OpenAPI schema CI gate
-//! per ADR-0009.
+//! `cargo xtask openapi-gen` / `openapi-check` — `OpenAPI` schema CI
+//! gate per ADR-0009.
 //!
 //! `generate_yaml` renders the live `utoipa::OpenApi`-derived schema
 //! from `overdrive-control-plane` to YAML. `check_against_disk` compares
@@ -18,11 +18,11 @@ use std::path::{Path, PathBuf};
 use color_eyre::eyre::{Result, WrapErr, bail};
 use utoipa::OpenApi as _;
 
-/// Checked-in OpenAPI document path, relative to the workspace root.
+/// Checked-in `OpenAPI` document path, relative to the workspace root.
 /// Per ADR-0009 this lives at the top-level `api/` directory.
 pub const OPENAPI_YAML_PATH: &str = "api/openapi.yaml";
 
-/// Render the live OpenAPI schema to YAML.
+/// Render the live `OpenAPI` schema to YAML.
 ///
 /// The schema is sourced from
 /// [`overdrive_control_plane::api::OverdriveApi`]. Output is
@@ -34,7 +34,7 @@ pub fn generate_yaml() -> Result<String> {
         .wrap_err("render OverdriveApi::openapi() to YAML")
 }
 
-/// Compare the live OpenAPI YAML against a checked-in reference file.
+/// Compare the live `OpenAPI` YAML against a checked-in reference file.
 ///
 /// Returns `Ok(())` iff the live render matches the file byte-for-byte.
 /// On drift, returns an error whose `Display` names the first divergent
@@ -93,8 +93,8 @@ fn first_drift(live: &str, on_disk: &str) -> String {
 fn anchor_for(live: &[&str], disk: &[&str], idx: usize) -> String {
     let scan = |lines: &[&str]| -> Option<String> {
         for back in (0..=idx.min(lines.len().saturating_sub(1))).rev() {
-            let line = lines[back];
-            if let Some(name) = schema_or_path_name(line) {
+            let candidate = lines[back];
+            if let Some(name) = schema_or_path_name(candidate) {
                 return Some(name);
             }
         }
@@ -104,7 +104,7 @@ fn anchor_for(live: &[&str], disk: &[&str], idx: usize) -> String {
     let header = scan(live).or_else(|| scan(disk)).unwrap_or_else(|| "<no header>".to_string());
     let l = live.get(idx).copied().unwrap_or("<eof>");
     let d = disk.get(idx).copied().unwrap_or("<eof>");
-    format!("`{header}` at line {} (live=`{}` vs on-disk=`{}`)", idx + 1, l.trim(), d.trim(),)
+    format!("`{header}` at line {} (live=`{}` vs on-disk=`{}`)", idx + 1, l.trim(), d.trim())
 }
 
 /// Return the schema or path name anchored by a YAML header line, or

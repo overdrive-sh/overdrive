@@ -10,7 +10,7 @@
 //! behind `&self`. Registration eagerly derives the per-reconciler
 //! libSQL path via [`crate::libsql_provisioner::provision_db_path`] —
 //! the DB itself is opened lazily by callers that need it (Phase 3+).
-//! Provisioning the path at register time surfaces invalid data_dirs
+//! Provisioning the path at register time surfaces invalid `data_dir`s
 //! (permission denied, traversal attempt) at registration rather than
 //! deferred until first use.
 
@@ -86,7 +86,7 @@ impl ReconcilerRuntime {
         Ok(())
     }
 
-    /// Registered reconciler names. Order is unspecified (HashMap) but
+    /// Registered reconciler names. Order is unspecified (`HashMap`) but
     /// stable within a single runtime lifetime given the same
     /// registration sequence — callers that need deterministic order
     /// should sort.

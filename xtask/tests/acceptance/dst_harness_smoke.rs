@@ -83,12 +83,36 @@ fn dst_with_fixed_seed_exits_zero_and_writes_artifacts() {
     assert_eq!(summary["seed"].as_u64(), Some(42), "summary seed must echo --seed; got {summary}");
 
     // A non-empty invariants array (the catalogue ran to completion).
+    // Named-set containment — pairs with the length check so both
+    // silent shrinkage (missing name) and silent drift (new name we
+    // didn't bless here) fail the test. Keep in sync with
+    // `Invariant::ALL` in `overdrive-sim` and with `EXPECTED_INVARIANTS`
+    // in `dst_clean_clone_green.rs`. The first six are the walking-
+    // skeleton catalogue; the last three landed in slice 4 alongside
+    // the reconciler-primitive runtime (ADR-0013 §9).
+    const EXPECTED_INVARIANTS: &[&str] = &[
+        "single-leader",
+        "intent-never-crosses-into-observation",
+        "snapshot-roundtrip-bit-identical",
+        "sim-observation-lww-converges",
+        "replay-equivalent-empty-workflow",
+        "entropy-determinism-under-reseed",
+        "at-least-one-reconciler-registered",
+        "duplicate-evaluations-collapse",
+        "reconciler-is-pure",
+    ];
     let invariants = summary["invariants"].as_array().expect("invariants must be an array");
     assert_eq!(
         invariants.len(),
-        6,
-        "default catalogue must emit exactly six invariants; got {invariants:?}"
+        EXPECTED_INVARIANTS.len(),
+        "default catalogue size must match the blessed set; got {invariants:?}"
     );
+    for expected in EXPECTED_INVARIANTS {
+        assert!(
+            invariants.iter().any(|e| e["name"].as_str() == Some(*expected)),
+            "catalogue missing {expected}; got {invariants:?}"
+        );
+    }
 
     // Every entry has a canonical kebab-case name and status="pass" in
     // Phase 1 — this pins both the stub evaluator and the canonical

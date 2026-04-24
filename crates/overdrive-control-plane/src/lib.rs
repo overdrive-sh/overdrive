@@ -84,10 +84,11 @@ pub struct ServerConfig {
     pub data_dir: PathBuf,
 }
 
-/// Handle to a running control-plane server. Drop does NOT stop the
-/// server; call [`ServerHandle::shutdown`] to drain in-flight requests
-/// and close the listener. The server task runs until the handle is
-/// shut down or the process exits.
+/// Handle to a running control-plane server.
+///
+/// Drop does NOT stop the server; call [`ServerHandle::shutdown`] to
+/// drain in-flight requests and close the listener. The server task
+/// runs until the handle is shut down or the process exits.
 #[derive(Debug)]
 pub struct ServerHandle {
     inner: AxumHandle,
@@ -116,13 +117,14 @@ impl ServerHandle {
     }
 }
 
-/// Start the control-plane server. Mints a fresh ephemeral CA, writes
-/// the trust triple under `<data_dir>/.overdrive/config`, builds the
-/// `rustls::ServerConfig` (HTTP/2 + HTTP/1.1 via ALPN), binds a TCP
-/// listener on [`ServerConfig::bind`], and spawns the `axum_server`
-/// serving task. Returns once the listener is bound — callers can
-/// observe the actually-bound address via
-/// [`ServerHandle::local_addr`].
+/// Start the control-plane server.
+///
+/// Mints a fresh ephemeral CA, writes the trust triple under
+/// `<data_dir>/.overdrive/config`, builds the `rustls::ServerConfig`
+/// (HTTP/2 + HTTP/1.1 via ALPN), binds a TCP listener on
+/// [`ServerConfig::bind`], and spawns the `axum_server` serving task.
+/// Returns once the listener is bound — callers can observe the
+/// actually-bound address via [`ServerHandle::local_addr`].
 ///
 /// # Errors
 ///
@@ -143,9 +145,17 @@ pub async fn run_server(config: ServerConfig) -> Result<ServerHandle, error::Con
 }
 
 /// Start the control-plane server with a caller-supplied observation
-/// store. Used by integration tests that need to retain a handle to
-/// the observation store the server is reading from; the production
-/// boot path calls [`run_server`], which wires the Phase 1 default.
+/// store.
+///
+/// Used by integration tests that need to retain a handle to the
+/// observation store the server is reading from; the production boot
+/// path calls [`run_server`], which wires the Phase 1 default.
+// `async` is kept to preserve the public-API shape: every caller
+// invokes `run_server_with_obs(...).await`, and the function may
+// grow real `.await` points as the boot sequence evolves
+// (observation provisioning, lifecycle handshakes). Removing it now
+// would churn every call site for no functional gain.
+#[allow(clippy::unused_async)]
 pub async fn run_server_with_obs(
     config: ServerConfig,
     obs: Arc<dyn ObservationStore>,
@@ -177,10 +187,10 @@ pub async fn run_server_with_obs(
     // tempdir or an operator-created data directory; we do not create
     // the directory ourselves here per `LocalIntentStore::open`'s contract.
     let store_path = config.data_dir.join("intent.redb");
-    let store = Arc::new(
-        LocalIntentStore::open(&store_path)
-            .map_err(|e| error::ControlPlaneError::Internal(format!("open LocalIntentStore: {e}")))?,
-    );
+    let store =
+        Arc::new(LocalIntentStore::open(&store_path).map_err(|e| {
+            error::ControlPlaneError::Internal(format!("open LocalIntentStore: {e}"))
+        })?);
 
     // Construct the reconciler runtime and register `noop_heartbeat` at
     // boot per ADR-0013 §9 — Phase 1's proof-of-life. Step 04-04 wires
@@ -250,6 +260,12 @@ pub fn noop_heartbeat() -> Box<dyn overdrive_core::reconciler::Reconciler> {
     }
 
     Box::new(NoopHeartbeat {
+        // Safety: `"noop-heartbeat"` is a compile-time string literal
+        // satisfying every `ReconcilerName` validation rule (non-empty,
+        // lowercase, hyphen-separated). The `expect` is genuinely
+        // infallible; failure would indicate a bug in the newtype
+        // constructor, not a runtime error path.
+        #[allow(clippy::expect_used)]
         name: ReconcilerName::new("noop-heartbeat")
             .expect("'noop-heartbeat' is a valid ReconcilerName by construction"),
     })

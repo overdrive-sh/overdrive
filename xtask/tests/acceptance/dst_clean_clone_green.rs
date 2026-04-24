@@ -7,7 +7,9 @@
 //! * §1.1 WS-1 — clean-clone `cargo xtask dst` is green within <60 s.
 //! * §7.1 scenario 1 — harness reports every Sim adapter and a real
 //!   `LocalIntentStore` backing the run.
-//! * §7.1 scenario 2 — the six default-catalogue invariants all ran.
+//! * §7.1 scenario 2 — the default-catalogue invariants all ran (the
+//!   original six from steps 06-0x plus the three added by slice 4 as
+//!   the reconciler-primitive runtime landed — see ADR-0013).
 //! * §5.2 — `intent_never_crosses_into_observation` invariant runs on
 //!   every tick and reports pass.
 //!
@@ -48,8 +50,16 @@ fn read_summary(target_dir: &Path) -> serde_json::Value {
     serde_json::from_str(&raw).expect("dst-summary.json must be valid JSON")
 }
 
-/// The six invariants in the Phase 1 default catalogue — in canonical
-/// kebab-case as printed by `Invariant::Display`.
+/// The invariants in the Phase 1 default catalogue — in canonical
+/// kebab-case as printed by `Invariant::Display`. The first six came
+/// in through the walking-skeleton slice (06-0x); the last three were
+/// added by slice 4 when the reconciler-primitive runtime landed
+/// (ADR-0013 §9 — `at-least-one-reconciler-registered`,
+/// `duplicate-evaluations-collapse`, `reconciler-is-pure`).
+///
+/// Keep this list in sync with `Invariant::ALL` in `overdrive-sim`; the
+/// length assertion in the test below pairs with the membership loop to
+/// catch both silent shrinkage and silent drift.
 const EXPECTED_INVARIANTS: &[&str] = &[
     "single-leader",
     "intent-never-crosses-into-observation",
@@ -57,6 +67,9 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     "sim-observation-lww-converges",
     "replay-equivalent-empty-workflow",
     "entropy-determinism-under-reseed",
+    "at-least-one-reconciler-registered",
+    "duplicate-evaluations-collapse",
+    "reconciler-is-pure",
 ];
 
 // -----------------------------------------------------------------------------

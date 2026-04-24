@@ -447,8 +447,14 @@ fn action_noop_is_constructable() {
 /// to typecheck if the trait method is `async fn` (the pointer would be
 /// `fn(...) -> impl Future<...>` or `fn(...) -> Pin<Box<dyn Future<...>>>`
 /// depending on the `async fn in trait` lowering).
-fn _enforce_pure_sync_signature<R: Reconciler>() {
+fn enforce_pure_sync_signature<R: Reconciler>() {
+    // Binding the trait method to an explicit `fn(...)` type IS the
+    // assertion — if the trait lowers to an async fn, typechecking
+    // fails on the right-hand side. The bindings are deliberately
+    // side-effect-free; the type annotation is the test.
+    #[allow(clippy::let_underscore_untyped, clippy::no_effect_underscore_binding)]
     let _reconcile: fn(&R, &State, &State, &Db) -> Vec<Action> = <R as Reconciler>::reconcile;
+    #[allow(clippy::let_underscore_untyped, clippy::no_effect_underscore_binding)]
     let _name: fn(&R) -> &ReconcilerName = <R as Reconciler>::name;
 }
 
@@ -472,7 +478,7 @@ impl Reconciler for NoopReconciler {
 fn reconciler_trait_signature_is_synchronous_no_async_no_clock_param() {
     // Exercise the compile-time bound — if the trait were async, this
     // line would not compile.
-    _enforce_pure_sync_signature::<NoopReconciler>();
+    enforce_pure_sync_signature::<NoopReconciler>();
 
     let reconciler = NoopReconciler { name: ReconcilerName::new("noop-heartbeat").expect("valid") };
 

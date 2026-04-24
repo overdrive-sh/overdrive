@@ -30,7 +30,7 @@ use crate::id::CorrelationKey;
 /// Vec<Action>`. It is NOT `async fn`, does NOT take `&dyn Clock` /
 /// `&dyn Transport` / `&dyn Entropy` parameters, and does NOT perform
 /// I/O. External calls flow through `Action::HttpCall`; the runtime
-/// observes responses via the ObservationStore on the next tick.
+/// observes responses via the `ObservationStore` on the next tick.
 ///
 /// Compile-time enforcement: the acceptance test
 /// `reconciler_trait_signature_is_synchronous_no_async_no_clock_param`
@@ -57,15 +57,17 @@ pub trait Reconciler: Send + Sync {
 // State / Db placeholder handles
 // ---------------------------------------------------------------------------
 
-/// Opaque placeholder for the `desired` / `actual` state handed to a
-/// reconciler. Phase 1 step 04-04 replaces with the real shape; the type
+/// Opaque placeholder for the `desired` / `actual` state handed to a reconciler.
+///
+/// Phase 1 step 04-04 replaces with the real shape; the type
 /// exists here so the `Reconciler` trait surface compiles and downstream
 /// reconcilers can implement against it today.
 #[derive(Debug, Default)]
 pub struct State;
 
-/// Opaque handle to a reconciler's private libSQL memory. Per ADR-0013,
-/// one `&Db` handle per reconciler, exclusive to that reconciler,
+/// Opaque handle to a reconciler's private libSQL memory.
+///
+/// Per ADR-0013, one `&Db` handle per reconciler, exclusive to that reconciler,
 /// provisioned by `libsql_provisioner::provision_db_path`. Phase 1 step
 /// 04-04 replaces with the real handle type.
 #[derive(Debug, Default)]
@@ -140,7 +142,8 @@ impl ReconcilerName {
         }
 
         let mut chars = raw.chars();
-        // SAFETY: checked `is_empty` above.
+        // Safety: `raw.is_empty()` rejected above, so `.next()` is Some.
+        #[allow(clippy::expect_used)]
         let lead = chars.next().expect("non-empty checked above");
         if !lead.is_ascii_lowercase() {
             return Err(ReconcilerNameError::InvalidLead);

@@ -1,19 +1,20 @@
-//! `overdrive alloc status --job <id>` — read the canonical
-//! `spec_digest` + `commit_index` from the control plane's
-//! `JobDescription`, count the allocations reported by
-//! `GET /v1/allocs`, and return a typed [`AllocStatusOutput`] with an
+//! `overdrive alloc status --job <id>`.
+//!
+//! Reads the canonical `spec_digest` + `commit_index` from the control
+//! plane's `JobDescription`, counts the allocations reported by
+//! `GET /v1/allocs`, and returns a typed [`AllocStatusOutput`] with an
 //! explicit empty-state message pointing at the
 //! `phase-1-first-workload` onboarding step.
 //!
 //! Per ADR-0002 + handler contract (`describe_job`): `spec_digest` is
-//! SHA-256 of the exact rkyv bytes the server wrote to the IntentStore.
-//! The CLI treats it as an opaque hex string and echoes it verbatim;
-//! any CLI-side recomputation would drift from the server-authoritative
-//! hash. The walking-skeleton gate test locally reproduces the digest
-//! and asserts byte-identity — byte-identity is the load-bearing
-//! guarantee Phase 1 depends on (the `allocations` subsystem in
-//! `phase-1-first-workload` reads the same digest to decide whether to
-//! trigger a driver reconcile).
+//! SHA-256 of the exact rkyv bytes the server wrote to the
+//! `IntentStore`. The CLI treats it as an opaque hex string and echoes
+//! it verbatim; any CLI-side recomputation would drift from the
+//! server-authoritative hash. The walking-skeleton gate test locally
+//! reproduces the digest and asserts byte-identity — byte-identity is
+//! the load-bearing guarantee Phase 1 depends on (the `allocations`
+//! subsystem in `phase-1-first-workload` reads the same digest to
+//! decide whether to trigger a driver reconcile).
 //!
 //! Per `crates/overdrive-cli/CLAUDE.md` the handler is a plain
 //! `async fn` that tests call directly — no subprocess, no `println!`.
@@ -25,10 +26,11 @@ use url::Url;
 
 use crate::http_client::{ApiClient, CliError};
 
-/// Arguments to [`status`]. `job` is the canonical job id; `endpoint`
-/// overrides the URL recorded in the on-disk trust triple (integration
-/// tests bind an ephemeral port); `config_path` locates the trust
-/// triple.
+/// Arguments to [`status`].
+///
+/// `job` is the canonical job id; `endpoint` overrides the URL recorded
+/// in the on-disk trust triple (integration tests bind an ephemeral
+/// port); `config_path` locates the trust triple.
 #[derive(Debug, Clone)]
 pub struct StatusArgs {
     /// Canonical `JobId` to describe.
@@ -40,8 +42,9 @@ pub struct StatusArgs {
     pub config_path: PathBuf,
 }
 
-/// Typed output of a successful `alloc status`. Carries the canonical
-/// `spec_digest` (byte-identical to a local
+/// Typed output of a successful `alloc status`.
+///
+/// Carries the canonical `spec_digest` (byte-identical to a local
 /// `ContentHash::of(rkyv::to_bytes(&Job::from_spec(parsed)))` compute
 /// — that's the walking-skeleton guarantee), the `commit_index` the
 /// spec was written at, the number of live allocations for the job,
@@ -51,11 +54,11 @@ pub struct StatusArgs {
 pub struct AllocStatusOutput {
     /// Canonical job id as echoed by the control plane.
     pub job_id: String,
-    /// SHA-256 (hex) of the archived rkyv bytes of the validated Job,
+    /// SHA-256 (hex) of the archived rkyv bytes of the validated `Job`,
     /// per ADR-0002. Opaque to the CLI — the CLI never recomputes this
     /// client-side, because a second canonicalisation would drift.
     pub spec_digest: String,
-    /// Monotonic IntentStore commit counter at which the spec was
+    /// Monotonic `IntentStore` commit counter at which the spec was
     /// written. Strictly greater than zero on success.
     pub commit_index: u64,
     /// Number of allocation rows in the observation store whose
@@ -70,9 +73,11 @@ pub struct AllocStatusOutput {
 }
 
 /// Read the canonical `JobDescription` for `args.job` + the allocation
-/// count from the observation store. Returns `Err(CliError::HttpStatus
-/// { status: 404, .. })` for unknown jobs, carrying an actionable
-/// `ErrorBody.message` that names the offending job id.
+/// count from the observation store.
+///
+/// Returns `Err(CliError::HttpStatus { status: 404, .. })` for unknown
+/// jobs, carrying an actionable `ErrorBody.message` that names the
+/// offending job id.
 ///
 /// # Errors
 ///

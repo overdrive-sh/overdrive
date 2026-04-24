@@ -505,11 +505,13 @@ pub fn evaluate_at_least_one_reconciler_registered(registered_count: usize) -> I
 // ---------------------------------------------------------------------------
 
 /// Observable broker counters the `DuplicateEvaluationsCollapse`
-/// evaluator inspects. Mirrors the shape of
+/// evaluator inspects.
+///
+/// Mirrors the shape of
 /// `overdrive_control_plane::eval_broker::BrokerCounters` but is
 /// redefined locally so the sim crate does not take a cyclic dependency
-/// on `overdrive-control-plane` (which already depends on `overdrive-sim`
-/// via `observation_wiring`).
+/// on `overdrive-control-plane` (which already depends on
+/// `overdrive-sim` via `observation_wiring`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BrokerCountersSnapshot {
     /// Number of evaluations currently pending dispatch.
@@ -520,10 +522,12 @@ pub struct BrokerCountersSnapshot {
     pub dispatched: u64,
 }
 
-/// Evaluate `DuplicateEvaluationsCollapse` — N (≥3) concurrent
-/// evaluations at the same `(ReconcilerName, TargetResource)` key
-/// collapse to exactly one dispatched invocation and `N - 1`
-/// cancellations, per ADR-0013 §8 storm-proofing.
+/// Evaluate `DuplicateEvaluationsCollapse`.
+///
+/// N (≥3) concurrent evaluations at the same
+/// `(ReconcilerName, TargetResource)` key collapse to exactly one
+/// dispatched invocation and `N - 1` cancellations, per ADR-0013 §8
+/// storm-proofing.
 ///
 /// The harness is responsible for driving the submit-N-at-same-key +
 /// drain sequence; the evaluator inspects the resulting counter
@@ -705,14 +709,8 @@ mod tests {
 
     #[test]
     fn at_least_one_reconciler_passes_on_nonzero_count() {
-        assert_eq!(
-            evaluate_at_least_one_reconciler_registered(1).status,
-            InvariantStatus::Pass,
-        );
-        assert_eq!(
-            evaluate_at_least_one_reconciler_registered(42).status,
-            InvariantStatus::Pass,
-        );
+        assert_eq!(evaluate_at_least_one_reconciler_registered(1).status, InvariantStatus::Pass,);
+        assert_eq!(evaluate_at_least_one_reconciler_registered(42).status, InvariantStatus::Pass,);
     }
 
     #[test]
@@ -768,9 +766,7 @@ mod tests {
 
     #[test]
     fn reconciler_is_pure_passes_for_deterministic_reconciler() {
-        use overdrive_core::reconciler::{
-            Action, Db, Reconciler as R, ReconcilerName, State,
-        };
+        use overdrive_core::reconciler::{Action, Db, Reconciler as R, ReconcilerName, State};
 
         struct Det {
             name: ReconcilerName,
@@ -791,9 +787,7 @@ mod tests {
     fn reconciler_is_pure_fails_for_non_deterministic_reconciler() {
         use std::sync::atomic::{AtomicU64, Ordering};
 
-        use overdrive_core::reconciler::{
-            Action, Db, Reconciler as R, ReconcilerName, State,
-        };
+        use overdrive_core::reconciler::{Action, Db, Reconciler as R, ReconcilerName, State};
 
         // `Reconciler: Send + Sync` so the witness uses an atomic
         // counter for per-call state rather than `RefCell` (not `Sync`).
@@ -809,11 +803,7 @@ mod tests {
             }
             fn reconcile(&self, _: &State, _: &State, _: &Db) -> Vec<Action> {
                 let n = self.counter.fetch_add(1, Ordering::SeqCst);
-                if n % 2 == 0 {
-                    vec![Action::Noop]
-                } else {
-                    vec![Action::Noop, Action::Noop]
-                }
+                if n % 2 == 0 { vec![Action::Noop] } else { vec![Action::Noop, Action::Noop] }
             }
         }
 

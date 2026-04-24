@@ -247,17 +247,18 @@ fn build_cargo_mutants_args(
 ) -> Vec<std::ffi::OsString> {
     use std::ffi::OsString;
 
-    let mut args: Vec<OsString> = Vec::new();
-    args.push("mutants".into());
-    // `--output <DIR>` points at the *parent* directory cargo-mutants
-    // will drop `mutants.out/` into. Passing the mutants.out path
-    // itself double-nests — see the doc comment on `run`.
-    args.push("--output".into());
-    args.push(output_parent.into());
-    // Match the project's primary test runner (`.config/nextest.toml`).
-    // Doctests are not re-run per mutation; nextest skips them and
-    // that is the documented mutation-testing behaviour.
-    args.push("--test-tool=nextest".into());
+    let mut args: Vec<OsString> = vec![
+        "mutants".into(),
+        // `--output <DIR>` points at the *parent* directory cargo-mutants
+        // will drop `mutants.out/` into. Passing the mutants.out path
+        // itself double-nests — see the doc comment on `run`.
+        "--output".into(),
+        output_parent.into(),
+        // Match the project's primary test runner (`.config/nextest.toml`).
+        // Doctests are not re-run per mutation; nextest skips them and
+        // that is the documented mutation-testing behaviour.
+        "--test-tool=nextest".into(),
+    ];
 
     match mode {
         Mode::Diff { .. } => {
@@ -1052,6 +1053,7 @@ mod tests {
         assert!(!declared);
     }
 
+    #[test]
     fn crate_declares_integration_tests_feature_rejects_prefix_collisions() {
         // The scanner must not match a hypothetical feature like
         // `integration-tests-slow = []`. Exercise the pure string-level

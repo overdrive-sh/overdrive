@@ -9,7 +9,7 @@
 //! Acceptance coverage:
 //!   (d) empty-state rendering contains the `phase-1-first-workload`
 //!       reference (walking-skeleton gate for the onboarding signpost).
-//!   (e) non-empty rendering shows the spec_digest + commit_index.
+//!   (e) non-empty rendering shows the `spec_digest` + `commit_index`.
 
 use overdrive_cli::commands::alloc::AllocStatusOutput;
 

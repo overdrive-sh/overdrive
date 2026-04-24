@@ -110,7 +110,7 @@ pub async fn submit_job(
 ///
 /// Canonical-hashing contract (ADR-0002 + development.md §Hashing):
 /// the `spec_digest` returned here is SHA-256 over the exact byte
-/// sequence we pulled out of the IntentStore — i.e. the rkyv-archived
+/// sequence we pulled out of the `IntentStore` — i.e. the rkyv-archived
 /// bytes of a validated `Job`. We deliberately do NOT re-canonicalise,
 /// do NOT route through JCS, and do NOT hash `serde_json::to_string(&job)`
 /// — any of those would break the byte-identity property the rest of
@@ -178,7 +178,7 @@ pub async fn describe_job(
     }))
 }
 
-/// `GET /v1/cluster/info` — mode, region, commit_index, reconciler
+/// `GET /v1/cluster/info` — mode, region, `commit_index`, reconciler
 /// registry, broker counters.
 #[utoipa::path(
     get,

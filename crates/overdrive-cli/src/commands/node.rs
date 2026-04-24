@@ -1,6 +1,8 @@
-//! `overdrive node list` — read the observation-store node_health rows
-//! from the control plane and return a typed `NodeListOutput` carrying
-//! the rows plus an explicit empty-state message referencing the
+//! `overdrive node list`.
+//!
+//! Reads the observation-store `node_health` rows from the control
+//! plane and returns a typed `NodeListOutput` carrying the rows plus an
+//! explicit empty-state message referencing the
 //! `phase-1-first-workload` onboarding step.
 //!
 //! Per `crates/overdrive-cli/CLAUDE.md` the handler is a plain
@@ -14,10 +16,12 @@ use url::Url;
 
 use crate::http_client::{ApiClient, CliError};
 
-/// Arguments to [`list`]. `endpoint` overrides the URL recorded in the
-/// on-disk trust triple — integration tests pass the ephemeral port of
-/// an in-process server; the CLI binary passes the `--endpoint` flag or
-/// the `OVERDRIVE_ENDPOINT` env var.
+/// Arguments to [`list`].
+///
+/// `endpoint` overrides the URL recorded in the on-disk trust triple —
+/// integration tests pass the ephemeral port of an in-process server;
+/// the CLI binary passes the `--endpoint` flag or the
+/// `OVERDRIVE_ENDPOINT` env var.
 #[derive(Debug, Clone)]
 pub struct ListArgs {
     /// Explicit endpoint override, typically

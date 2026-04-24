@@ -13,10 +13,13 @@ paths:
     get:
       tags:
       - observation
-      summary: |-
-        `GET /v1/allocs` — observation read on `alloc_status`. Phase 1: zero
-        rows per US-03 AC.
-      description: 'SCAFFOLD: true'
+      summary: '`GET /v1/allocs` — observation read on `alloc_status`.'
+      description: |-
+        Reads through the `ObservationStore::alloc_status_rows` trait method
+        (not the concrete `SimObservationStore` type) so Phase 2's
+        `CorrosionStore` swap is a single trait-object replacement with no
+        handler changes. Fresh store → HTTP 200 with explicit `{"rows": []}`
+        — honest empty state per K7; no fabrication, no hardcoded response.
       operationId: alloc_status
       responses:
         '200':
@@ -36,9 +39,8 @@ paths:
       tags:
       - cluster
       summary: |-
-        `GET /v1/cluster/info` — mode, region, commit_index, reconciler
+        `GET /v1/cluster/info` — mode, region, `commit_index`, reconciler
         registry, broker counters.
-      description: 'SCAFFOLD: true'
       operationId: cluster_status
       responses:
         '200':
@@ -60,7 +62,15 @@ paths:
       summary: |-
         `POST /v1/jobs` — validate, archive via rkyv, commit through the
         intent store, return `(job_id, commit_index)`.
-      description: 'SCAFFOLD: true'
+      description: |-
+        Idempotency contract (ADR-0015 §4):
+
+        * A spec whose rkyv-archived bytes are byte-identical to what is
+          already stored at the canonical `jobs/<JobId>` key returns HTTP
+          200 with the *current* `commit_index` — no additional write.
+        * A spec whose rkyv-archived bytes DIFFER from what is stored at
+          the same key returns HTTP 409 Conflict with an `ErrorBody`.
+        * An empty key returns a new commit with `commit_index` advanced.
       operationId: submit_job
       requestBody:
         content:
@@ -81,6 +91,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
+        '409':
+          description: Conflict at existing key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
         '500':
           description: Internal error
           content:
@@ -94,7 +110,19 @@ paths:
       summary: |-
         `GET /v1/jobs/{id}` — read via `IntentStore::get`, rkyv-access the
         bytes, recompute `spec_digest = ContentHash::of(archived_bytes)`.
-      description: 'SCAFFOLD: true'
+      description: |-
+        Canonical-hashing contract (ADR-0002 + development.md §Hashing):
+        the `spec_digest` returned here is SHA-256 over the exact byte
+        sequence we pulled out of the `IntentStore` — i.e. the rkyv-archived
+        bytes of a validated `Job`. We deliberately do NOT re-canonicalise,
+        do NOT route through JCS, and do NOT hash `serde_json::to_string(&job)`
+        — any of those would break the byte-identity property the rest of
+        the platform depends on.
+
+        404 contract (ADR-0015 §3): `IntentStore::get -> Ok(None)` maps to
+        `ControlPlaneError::NotFound { resource: <IntentKey::as_str()> }`,
+        which `to_response` renders as HTTP 404 with an `ErrorBody { error:
+        "not_found", ... }`.
       operationId: describe_job
       parameters:
       - name: id
@@ -126,10 +154,11 @@ paths:
     get:
       tags:
       - observation
-      summary: |-
-        `GET /v1/nodes` — observation read on `node_health`. Phase 1: zero
-        rows per US-03 AC.
-      description: 'SCAFFOLD: true'
+      summary: '`GET /v1/nodes` — observation read on `node_health`.'
+      description: |-
+        Symmetric to `alloc_status` — reads through
+        `ObservationStore::node_health_rows`. Fresh store → HTTP 200 with
+        explicit `{"rows": []}`.
       operationId: node_list
       responses:
         '200':
@@ -149,11 +178,12 @@ components:
     AllocStatusResponse:
       type: object
       description: |-
-        Response for `GET /v1/allocs`. Phase 1 always renders an empty
-        `rows` array per US-03 AC — the allocation-status path is owned by
-        Phase 2. The typed `rows` field is present so the CLI and external
-        clients can parse the response into a concrete shape rather than
-        `serde_json::Value`.
+        Response for `GET /v1/allocs`.
+
+        Phase 1 always renders an empty `rows` array per US-03 AC — the
+        allocation-status path is owned by Phase 2. The typed `rows` field
+        is present so the CLI and external clients can parse the response
+        into a concrete shape rather than `serde_json::Value`.
       required:
       - rows
       properties:
@@ -164,10 +194,26 @@ components:
     AllocStatusRowBody:
       type: object
       description: |-
-        Allocation-status row body. Empty in Phase 1 — the fields land in
-        Phase 2 alongside the observation-store schema. The type exists now
-        so downstream callers (CLI, openapi-gen) can reference a stable
-        name; future columns land additively.
+        Allocation-status row body.
+
+        Phase 1 shape mirrors the observation `AllocStatusRow` projected to
+        the wire — minimal fields matching the whitepaper §4 schema
+        (`alloc_id`, `job_id`, `node_id`, `state`). Phase 2+ adds columns
+        additively.
+      required:
+      - alloc_id
+      - job_id
+      - node_id
+      - state
+      properties:
+        alloc_id:
+          type: string
+        job_id:
+          type: string
+        node_id:
+          type: string
+        state:
+          type: string
     BrokerCountersBody:
       type: object
       description: |-
@@ -193,9 +239,10 @@ components:
     ClusterStatus:
       type: object
       description: |-
-        Response for `GET /v1/cluster/info`. Carries mode, region,
-        commit_index, the reconciler registry, and the broker counters per
-        ADR-0013 and US-04 AC.
+        Response for `GET /v1/cluster/info`.
+
+        Carries mode, region, `commit_index`, the reconciler registry, and
+        the broker counters per ADR-0013 and US-04 AC.
       required:
       - mode
       - region
@@ -220,11 +267,12 @@ components:
     ErrorBody:
       type: object
       description: |-
-        RFC-7807-compatible subset per ADR-0015. The three fields —
-        `error`, `message`, `field` — are pinned; renaming breaks the
-        contract surface the CLI and external clients depend on. `field` is
-        `Option<String>` because not every error class maps to a single
-        field (e.g. transport-layer errors).
+        RFC-7807-compatible subset per ADR-0015.
+
+        The three fields — `error`, `message`, `field` — are pinned;
+        renaming breaks the contract surface the CLI and external clients
+        depend on. `field` is `Option<String>` because not every error class
+        maps to a single field (e.g. transport-layer errors).
       required:
       - error
       - message
@@ -308,8 +356,17 @@ components:
     NodeRowBody:
       type: object
       description: |-
-        Node row body. Empty in Phase 1 — same forward-compatibility
-        rationale as [`AllocStatusRowBody`].
+        Node row body. Phase 1 shape mirrors the observation `NodeHealthRow`
+        projected to the wire — minimal fields (`node_id`, `region`). Phase
+        2+ adds columns additively.
+      required:
+      - node_id
+      - region
+      properties:
+        node_id:
+          type: string
+        region:
+          type: string
     SubmitJobRequest:
       type: object
       description: |-

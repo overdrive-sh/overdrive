@@ -1,8 +1,10 @@
-//! `overdrive job submit` — read a TOML job spec from disk, run
-//! `Job::from_spec` locally for fast-fail validation, POST the typed
-//! `SubmitJobRequest` to the control plane, and return a typed
-//! [`SubmitOutput`] carrying the `job_id`, derived `intent_key`, Raft
-//! `commit_index`, endpoint, and operator next-command hint.
+//! `overdrive job submit`.
+//!
+//! Reads a TOML job spec from disk, runs `Job::from_spec` locally for
+//! fast-fail validation, POSTs the typed `SubmitJobRequest` to the
+//! control plane, and returns a typed [`SubmitOutput`] carrying the
+//! `job_id`, derived `intent_key`, Raft `commit_index`, endpoint, and
+//! operator next-command hint.
 //!
 //! Per ADR-0011, `Job::from_spec` is THE validating constructor. The
 //! CLI runs it client-side for an immediate, operator-facing error
@@ -22,11 +24,12 @@ use url::Url;
 
 use crate::http_client::{ApiClient, CliError};
 
-/// Arguments to [`submit`]. `spec` is the path to a TOML file
-/// containing a `JobSpecInput`-shaped document; `endpoint` overrides
-/// the endpoint recorded in the trust triple (integration tests bind
-/// an ephemeral port; the binary wrapper uses the `--endpoint` flag or
-/// `OVERDRIVE_ENDPOINT` env var).
+/// Arguments to [`submit`].
+///
+/// `spec` is the path to a TOML file containing a `JobSpecInput`-shaped
+/// document; `endpoint` overrides the endpoint recorded in the trust
+/// triple (integration tests bind an ephemeral port; the binary wrapper
+/// uses the `--endpoint` flag or `OVERDRIVE_ENDPOINT` env var).
 #[derive(Debug, Clone)]
 pub struct SubmitArgs {
     /// Path to the TOML job spec on disk.
@@ -38,10 +41,12 @@ pub struct SubmitArgs {
     pub config_path: PathBuf,
 }
 
-/// Typed output of a successful `job submit`. Carries the server's
-/// assigned `job_id`, the derived `intent_key` (`jobs/<id>`), the
-/// monotonic Raft `commit_index` at which the spec was written, the
-/// endpoint actually POSTed to, and the operator next-command hint.
+/// Typed output of a successful `job submit`.
+///
+/// Carries the server's assigned `job_id`, the derived `intent_key`
+/// (`jobs/<id>`), the monotonic Raft `commit_index` at which the spec
+/// was written, the endpoint actually `POST`ed to, and the operator
+/// next-command hint.
 ///
 /// Handlers never render output themselves; the binary wrapper passes
 /// this value to [`crate::render::job_submit_accepted`].
@@ -50,9 +55,9 @@ pub struct SubmitOutput {
     /// Job ID echoed by the server — matches the `id` field of the
     /// input spec after validation.
     pub job_id: String,
-    /// Derived intent-store key — `jobs/<job_id>` per ADR-0011 §IntentKey.
+    /// Derived intent-store key — `jobs/<job_id>` per ADR-0011 §`IntentKey`.
     pub intent_key: String,
-    /// Monotonic IntentStore commit counter at which the spec was
+    /// Monotonic `IntentStore` commit counter at which the spec was
     /// written. Strictly greater than zero on success.
     pub commit_index: u64,
     /// Endpoint the POST was issued to, echoed for operator clarity.

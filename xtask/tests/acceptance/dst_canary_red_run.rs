@@ -173,12 +173,37 @@ fn canary_feature_on_trigger_seed_fails_with_full_failure_block() {
         "reproduce must narrow via --only to the failing invariant; got {reproduce}"
     );
 
-    // 5. The failures array carries the full detail, keyed to the same
-    //    invariant.
+    // 5. The failures array carries the full detail. The `canary-bug`
+    //    feature plants TWO independent bugs under the same flag so
+    //    the harness exercises both an observation-store divergence
+    //    and a reconciler-purity divergence; both fire on the trigger
+    //    seed. Assert named-set containment (both names present,
+    //    nothing extra) — stronger than a bare length check because
+    //    it catches both silent shrinkage and a third canary being
+    //    planted without updating the expectations here.
+    //
+    //    The top-level `invariant` / `failing_invariant` still resolves
+    //    to `sim-observation-lww-converges` because the xtask dst
+    //    driver (§dst.rs::first_failure) populates top-level fields
+    //    from `report.failures.first()` and the observation-LWW
+    //    evaluator runs earlier in the catalogue than
+    //    `reconciler-is-pure` — asserted in the earlier `summary`
+    //    block above.
+    const EXPECTED_CANARY_FAILURES: &[&str] =
+        &["sim-observation-lww-converges", "reconciler-is-pure"];
     let failures = summary["failures"].as_array().expect("failures array");
-    assert_eq!(failures.len(), 1, "canary triggers exactly one failure; got {failures:?}");
-    let failure = &failures[0];
-    assert_eq!(failure["invariant"].as_str(), Some("sim-observation-lww-converges"));
+    assert_eq!(
+        failures.len(),
+        EXPECTED_CANARY_FAILURES.len(),
+        "canary-bug feature plants exactly {} failures; got {failures:?}",
+        EXPECTED_CANARY_FAILURES.len(),
+    );
+    for expected in EXPECTED_CANARY_FAILURES {
+        assert!(
+            failures.iter().any(|f| f["invariant"].as_str() == Some(*expected)),
+            "expected canary failure {expected} not present; got {failures:?}",
+        );
+    }
 
     // 6. The stderr failure block names every field the AC requires —
     //    seed, tick, host, cause, and a reproduction command.
