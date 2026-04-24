@@ -122,11 +122,11 @@ pub fn mint_ephemeral_ca_with_hostname(
     hostname_source: &dyn HostnameSource,
 ) -> Result<CaMaterial, ControlPlaneError> {
     // --- CA -----------------------------------------------------------
-    let ca_key = KeyPair::generate()
-        .map_err(|e| ControlPlaneError::Internal(format!("ca keypair generation: {e}")))?;
+    let ca_key =
+        KeyPair::generate().map_err(|e| ControlPlaneError::internal("ca keypair generation", e))?;
 
     let mut ca_params = CertificateParams::new(Vec::<String>::new())
-        .map_err(|e| ControlPlaneError::Internal(format!("ca params: {e}")))?;
+        .map_err(|e| ControlPlaneError::internal("ca params", e))?;
     ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
     ca_params.distinguished_name = {
         let mut dn = DistinguishedName::new();
@@ -141,7 +141,7 @@ pub fn mint_ephemeral_ca_with_hostname(
 
     let ca_cert = ca_params
         .self_signed(&ca_key)
-        .map_err(|e| ControlPlaneError::Internal(format!("ca self-sign: {e}")))?;
+        .map_err(|e| ControlPlaneError::internal("ca self-sign", e))?;
     let ca_cert_pem = ca_cert.pem();
 
     // --- Server leaf --------------------------------------------------
@@ -158,7 +158,7 @@ pub fn mint_ephemeral_ca_with_hostname(
         SanType::DnsName(
             "localhost"
                 .try_into()
-                .map_err(|e| ControlPlaneError::Internal(format!("dns name `localhost`: {e}")))?,
+                .map_err(|e| ControlPlaneError::internal("dns name `localhost`", e))?,
         ),
     ];
 
@@ -185,10 +185,10 @@ pub fn mint_ephemeral_ca_with_hostname(
         }
     }
 
-    let server_key = KeyPair::generate()
-        .map_err(|e| ControlPlaneError::Internal(format!("server keypair: {e}")))?;
+    let server_key =
+        KeyPair::generate().map_err(|e| ControlPlaneError::internal("server keypair", e))?;
     let mut server_params = CertificateParams::new(Vec::<String>::new())
-        .map_err(|e| ControlPlaneError::Internal(format!("server params: {e}")))?;
+        .map_err(|e| ControlPlaneError::internal("server params", e))?;
     server_params.subject_alt_names = server_sans;
     server_params.distinguished_name = {
         let mut dn = DistinguishedName::new();
@@ -201,15 +201,15 @@ pub fn mint_ephemeral_ca_with_hostname(
 
     let server_cert = server_params
         .signed_by(&server_key, &ca_cert, &ca_key)
-        .map_err(|e| ControlPlaneError::Internal(format!("server sign: {e}")))?;
+        .map_err(|e| ControlPlaneError::internal("server sign", e))?;
     let server_leaf_cert_pem = server_cert.pem();
     let server_leaf_key_pem = server_key.serialize_pem();
 
     // --- Client leaf (local operator per ADR-0010 Phase 1) -----------
-    let client_key = KeyPair::generate()
-        .map_err(|e| ControlPlaneError::Internal(format!("client keypair: {e}")))?;
+    let client_key =
+        KeyPair::generate().map_err(|e| ControlPlaneError::internal("client keypair", e))?;
     let mut client_params = CertificateParams::new(Vec::<String>::new())
-        .map_err(|e| ControlPlaneError::Internal(format!("client params: {e}")))?;
+        .map_err(|e| ControlPlaneError::internal("client params", e))?;
     client_params.distinguished_name = {
         let mut dn = DistinguishedName::new();
         dn.push(DnType::CommonName, "local-operator");
@@ -221,7 +221,7 @@ pub fn mint_ephemeral_ca_with_hostname(
 
     let client_cert = client_params
         .signed_by(&client_key, &ca_cert, &ca_key)
-        .map_err(|e| ControlPlaneError::Internal(format!("client sign: {e}")))?;
+        .map_err(|e| ControlPlaneError::internal("client sign", e))?;
     let client_leaf_cert_pem = client_cert.pem();
     let client_leaf_key_pem = client_key.serialize_pem();
 
@@ -278,7 +278,7 @@ pub fn write_trust_triple(
 ) -> Result<(), ControlPlaneError> {
     let overdrive_dir = config_dir.join(".overdrive");
     std::fs::create_dir_all(&overdrive_dir).map_err(|e| {
-        ControlPlaneError::Internal(format!("create_dir_all({}): {e}", overdrive_dir.display()))
+        ControlPlaneError::internal(format!("create_dir_all({})", overdrive_dir.display()), e)
     })?;
 
     let config_path = overdrive_dir.join("config");
@@ -296,7 +296,7 @@ pub fn write_trust_triple(
     let doc = TalosConfigOut { context: "local", contexts };
 
     let yaml = serde_yaml::to_string(&doc)
-        .map_err(|e| ControlPlaneError::Internal(format!("yaml serialise: {e}")))?;
+        .map_err(|e| ControlPlaneError::internal("yaml serialise", e))?;
 
     write_file_owner_only(&config_path, yaml.as_bytes())?;
 
@@ -314,9 +314,9 @@ fn write_file_owner_only(path: &Path, bytes: &[u8]) -> Result<(), ControlPlaneEr
         .truncate(true)
         .mode(0o600)
         .open(path)
-        .map_err(|e| ControlPlaneError::Internal(format!("open({}): {e}", path.display())))?;
+        .map_err(|e| ControlPlaneError::internal(format!("open({})", path.display()), e))?;
     file.write_all(bytes)
-        .map_err(|e| ControlPlaneError::Internal(format!("write({}): {e}", path.display())))?;
+        .map_err(|e| ControlPlaneError::internal(format!("write({})", path.display()), e))?;
     Ok(())
 }
 
@@ -329,7 +329,7 @@ fn write_file_owner_only(path: &Path, bytes: &[u8]) -> Result<(), ControlPlaneEr
 #[cfg(not(unix))]
 fn write_file_owner_only(path: &Path, bytes: &[u8]) -> Result<(), ControlPlaneError> {
     std::fs::write(path, bytes)
-        .map_err(|e| ControlPlaneError::Internal(format!("write({}): {e}", path.display())))
+        .map_err(|e| ControlPlaneError::internal(format!("write({})", path.display()), e))
 }
 
 /// Load a `rustls::ServerConfig` from minted server material. Pure on
@@ -356,7 +356,7 @@ pub fn load_server_tls_config(
     let cert_chain: Vec<rustls::pki_types::CertificateDer<'static>> =
         rustls_pemfile::certs(&mut cert_reader)
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| ControlPlaneError::Internal(format!("parse server cert PEM: {e}")))?;
+            .map_err(|e| ControlPlaneError::internal("parse server cert PEM", e))?;
     if cert_chain.is_empty() {
         return Err(ControlPlaneError::Internal(
             "server leaf PEM contained no certificates".into(),
@@ -366,7 +366,7 @@ pub fn load_server_tls_config(
     // Parse private key from PEM (accepts PKCS#8, PKCS#1, or SEC1).
     let mut key_reader = Cursor::new(material.server_leaf_key_pem.as_bytes());
     let key = rustls_pemfile::private_key(&mut key_reader)
-        .map_err(|e| ControlPlaneError::Internal(format!("parse server key PEM: {e}")))?
+        .map_err(|e| ControlPlaneError::internal("parse server key PEM", e))?
         .ok_or_else(|| {
             ControlPlaneError::Internal("server key PEM contained no private key".into())
         })?;
@@ -374,7 +374,7 @@ pub fn load_server_tls_config(
     let mut config = rustls::ServerConfig::builder()
         .with_no_client_auth()
         .with_single_cert(cert_chain, key)
-        .map_err(|e| ControlPlaneError::Internal(format!("rustls with_single_cert: {e}")))?;
+        .map_err(|e| ControlPlaneError::internal("rustls with_single_cert", e))?;
 
     // ADR-0008 §ALPN: prefer h2, fall back to http/1.1.
     config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
@@ -456,17 +456,14 @@ struct TalosContextIn {
 ///   the path and the field.
 pub fn load_trust_triple(path: &Path) -> Result<TrustTriple, ControlPlaneError> {
     let bytes = std::fs::read(path).map_err(|e| {
-        ControlPlaneError::Internal(format!(
-            "failed to read trust triple at {}: {e}",
-            path.display()
-        ))
+        ControlPlaneError::internal(format!("failed to read trust triple at {}", path.display()), e)
     })?;
 
     let parsed: TalosConfigIn = serde_yaml::from_slice(&bytes).map_err(|e| {
-        ControlPlaneError::Internal(format!(
-            "failed to parse trust triple at {}: invalid YAML: {e}",
-            path.display()
-        ))
+        ControlPlaneError::internal(
+            format!("failed to parse trust triple at {}: invalid YAML", path.display()),
+            e,
+        )
     })?;
 
     let ctx = parsed.contexts.get(&parsed.context).ok_or_else(|| {
@@ -478,22 +475,31 @@ pub fn load_trust_triple(path: &Path) -> Result<TrustTriple, ControlPlaneError> 
     })?;
 
     let ca_cert_pem = BASE64.decode(ctx.ca.as_bytes()).map_err(|e| {
-        ControlPlaneError::Internal(format!(
-            "failed to parse trust triple at {}: field `ca` is not valid base64: {e}",
-            path.display(),
-        ))
+        ControlPlaneError::internal(
+            format!(
+                "failed to parse trust triple at {}: field `ca` is not valid base64",
+                path.display()
+            ),
+            e,
+        )
     })?;
     let client_cert_pem = BASE64.decode(ctx.crt.as_bytes()).map_err(|e| {
-        ControlPlaneError::Internal(format!(
-            "failed to parse trust triple at {}: field `crt` is not valid base64: {e}",
-            path.display(),
-        ))
+        ControlPlaneError::internal(
+            format!(
+                "failed to parse trust triple at {}: field `crt` is not valid base64",
+                path.display()
+            ),
+            e,
+        )
     })?;
     let client_key_pem = BASE64.decode(ctx.key.as_bytes()).map_err(|e| {
-        ControlPlaneError::Internal(format!(
-            "failed to parse trust triple at {}: field `key` is not valid base64: {e}",
-            path.display(),
-        ))
+        ControlPlaneError::internal(
+            format!(
+                "failed to parse trust triple at {}: field `key` is not valid base64",
+                path.display()
+            ),
+            e,
+        )
     })?;
 
     Ok(TrustTriple { endpoint: ctx.endpoint.clone(), ca_cert_pem, client_cert_pem, client_key_pem })

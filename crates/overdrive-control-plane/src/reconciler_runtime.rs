@@ -47,16 +47,16 @@ impl ReconcilerRuntime {
     /// be created or canonicalised.
     pub fn new(data_dir: &Path) -> Result<Self, ControlPlaneError> {
         std::fs::create_dir_all(data_dir).map_err(|e| {
-            ControlPlaneError::Internal(format!(
-                "ReconcilerRuntime::new: create_dir_all {} failed: {e}",
-                data_dir.display()
-            ))
+            ControlPlaneError::internal(
+                format!("ReconcilerRuntime::new: create_dir_all {} failed", data_dir.display()),
+                e,
+            )
         })?;
         let canon = std::fs::canonicalize(data_dir).map_err(|e| {
-            ControlPlaneError::Internal(format!(
-                "ReconcilerRuntime::new: canonicalize {} failed: {e}",
-                data_dir.display()
-            ))
+            ControlPlaneError::internal(
+                format!("ReconcilerRuntime::new: canonicalize {} failed", data_dir.display()),
+                e,
+            )
         })?;
         Ok(Self { data_dir: canon, reconcilers: HashMap::new(), broker: EvaluationBroker::new() })
     }

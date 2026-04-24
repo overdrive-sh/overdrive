@@ -187,10 +187,10 @@ pub async fn run_server_with_obs(
     // tempdir or an operator-created data directory; we do not create
     // the directory ourselves here per `LocalIntentStore::open`'s contract.
     let store_path = config.data_dir.join("intent.redb");
-    let store =
-        Arc::new(LocalIntentStore::open(&store_path).map_err(|e| {
-            error::ControlPlaneError::Internal(format!("open LocalIntentStore: {e}"))
-        })?);
+    let store = Arc::new(
+        LocalIntentStore::open(&store_path)
+            .map_err(|e| error::ControlPlaneError::internal("open LocalIntentStore", e))?,
+    );
 
     // Construct the reconciler runtime and register `noop_heartbeat` at
     // boot per ADR-0013 §9 — Phase 1's proof-of-life. Step 04-04 wires
@@ -218,10 +218,10 @@ pub async fn run_server_with_obs(
     // Bind the listener synchronously so we can surface bind errors
     // before spawning the serve task.
     let std_listener = std::net::TcpListener::bind(config.bind)
-        .map_err(|e| error::ControlPlaneError::Internal(format!("bind {}: {e}", config.bind)))?;
+        .map_err(|e| error::ControlPlaneError::internal(format!("bind {}", config.bind), e))?;
     std_listener
         .set_nonblocking(true)
-        .map_err(|e| error::ControlPlaneError::Internal(format!("set_nonblocking: {e}")))?;
+        .map_err(|e| error::ControlPlaneError::internal("set_nonblocking", e))?;
 
     let axum_handle = AxumHandle::new();
     let server =

@@ -38,10 +38,7 @@ pub fn wire_single_node_observation(
 ) -> Result<Box<dyn ObservationStore>, ControlPlaneError> {
     let path = data_dir.join(OBSERVATION_FILE);
     let store = LocalObservationStore::open(&path).map_err(|e| {
-        ControlPlaneError::Internal(format!(
-            "open LocalObservationStore at {}: {e}",
-            path.display()
-        ))
+        ControlPlaneError::internal(format!("open LocalObservationStore at {}", path.display()), e)
     })?;
     Ok(Box::new(store))
 }

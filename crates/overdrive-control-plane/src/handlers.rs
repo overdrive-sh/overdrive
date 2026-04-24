@@ -75,7 +75,7 @@ pub async fn submit_job(
     //    logical Job produce byte-identical bytes — this is what makes
     //    the idempotency check byte-equality instead of semantic-equality.
     let archived = rkyv::to_bytes::<rkyv::rancor::Error>(&job)
-        .map_err(|e| ControlPlaneError::Internal(format!("rkyv archive of Job: {e}")))?;
+        .map_err(|e| ControlPlaneError::internal("rkyv archive of Job", e))?;
 
     // 3. Derive the canonical intent key (`jobs/<JobId>`).
     let key = IntentKey::for_job(&job.id);
@@ -162,9 +162,9 @@ pub async fn describe_job(
     // 3. rkyv access + deserialise. Corruption / bit-rot in the redb
     //    file surfaces here; it maps to HTTP 500 via `Internal`.
     let archived = rkyv::access::<rkyv::Archived<Job>, rkyv::rancor::Error>(&bytes)
-        .map_err(|e| ControlPlaneError::Internal(format!("rkyv access of ArchivedJob: {e}")))?;
+        .map_err(|e| ControlPlaneError::internal("rkyv access of ArchivedJob", e))?;
     let job: Job = rkyv::deserialize::<Job, rkyv::rancor::Error>(archived)
-        .map_err(|e| ControlPlaneError::Internal(format!("rkyv deserialize of Job: {e}")))?;
+        .map_err(|e| ControlPlaneError::internal("rkyv deserialize of Job", e))?;
 
     // 4. Canonical spec_digest — SHA-256 of the exact archived bytes we
     //    just read. This is what ADR-0002 calls "hash of canonical rkyv
@@ -242,7 +242,7 @@ pub async fn alloc_status(
         .obs
         .alloc_status_rows()
         .await
-        .map_err(|e| ControlPlaneError::Internal(format!("alloc_status_rows: {e}")))?
+        .map_err(|e| ControlPlaneError::internal("alloc_status_rows", e))?
         .into_iter()
         .map(api::AllocStatusRowBody::from)
         .collect();
@@ -270,7 +270,7 @@ pub async fn node_list(
         .obs
         .node_health_rows()
         .await
-        .map_err(|e| ControlPlaneError::Internal(format!("node_health_rows: {e}")))?
+        .map_err(|e| ControlPlaneError::internal("node_health_rows", e))?
         .into_iter()
         .map(api::NodeRowBody::from)
         .collect();

@@ -4,6 +4,8 @@
 //! maps every variant to `(StatusCode, Json<ErrorBody>)`. Body shape is
 //! a deliberate RFC 7807-compatible subset so v1.1 upgrade is additive.
 
+use std::fmt;
+
 use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -34,6 +36,21 @@ pub enum ControlPlaneError {
 
     #[error("internal: {0}")]
     Internal(String),
+}
+
+impl ControlPlaneError {
+    /// Construct an [`ControlPlaneError::Internal`] from a context label
+    /// and an underlying error. The rendered message is
+    /// `"{context}: {source}"`, matching the shape call sites previously
+    /// built by hand with `format!`.
+    ///
+    /// Using this constructor over raw `Internal(format!(...))` keeps
+    /// the 40-odd infrastructure error sites in this crate consistent
+    /// and lets a future `Internal` variant evolution (e.g. structured
+    /// `{context, source}`) land without touching every call site.
+    pub fn internal(context: impl fmt::Display, source: impl fmt::Display) -> Self {
+        Self::Internal(format!("{context}: {source}"))
+    }
 }
 
 /// Map a `ControlPlaneError` to `(StatusCode, ErrorBody)` per ADR-0015

@@ -46,18 +46,18 @@ pub fn provision_db_path(
     // Step 1 — make the data_dir real so canonicalize can resolve it.
     // `create_dir_all` is a no-op if it already exists.
     std::fs::create_dir_all(data_dir).map_err(|e| {
-        ControlPlaneError::Internal(format!(
-            "libsql_provisioner: create data_dir {} failed: {e}",
-            data_dir.display()
-        ))
+        ControlPlaneError::internal(
+            format!("libsql_provisioner: create data_dir {} failed", data_dir.display()),
+            e,
+        )
     })?;
 
     // Step 2 — canonicalise.
     let canon = std::fs::canonicalize(data_dir).map_err(|e| {
-        ControlPlaneError::Internal(format!(
-            "libsql_provisioner: canonicalize {} failed: {e}",
-            data_dir.display()
-        ))
+        ControlPlaneError::internal(
+            format!("libsql_provisioner: canonicalize {} failed", data_dir.display()),
+            e,
+        )
     })?;
 
     // Step 3 — derive the path.
@@ -92,17 +92,17 @@ pub fn provision_db_path(
 pub async fn open_db(path: &Path) -> Result<libsql::Database, ControlPlaneError> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| {
-            ControlPlaneError::Internal(format!(
-                "libsql_provisioner: create parent {} failed: {e}",
-                parent.display()
-            ))
+            ControlPlaneError::internal(
+                format!("libsql_provisioner: create parent {} failed", parent.display()),
+                e,
+            )
         })?;
     }
 
     libsql::Builder::new_local(path).build().await.map_err(|e| {
-        ControlPlaneError::Internal(format!(
-            "libsql_provisioner: open {} failed: {e}",
-            path.display()
-        ))
+        ControlPlaneError::internal(
+            format!("libsql_provisioner: open {} failed", path.display()),
+            e,
+        )
     })
 }
