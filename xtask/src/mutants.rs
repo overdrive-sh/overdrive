@@ -124,6 +124,13 @@ pub fn run(mode: &Mode, scope: &Scope) -> Result<()> {
     std::fs::create_dir_all(&output_parent)
         .wrap_err_with(|| format!("create_dir_all({})", output_parent.display()))?;
 
+    // Clear any pre-existing `mutants-summary.json` upfront. If the
+    // current run gets killed mid-invocation, a stale summary from the
+    // prior run must not remain on disk looking authoritative —
+    // readers polling the file during an in-progress run would
+    // otherwise act on a verdict the current run never produced.
+    clear_stale_summary(&summary_path)?;
+
     // 1. Run cargo-mutants. Exit status is intentionally ignored — a
     //    non-zero exit from cargo-mutants happens on any missed mutant,
     //    which we handle via our own gate below. We only care that the
@@ -595,6 +602,25 @@ fn write_summary(path: &Path, report: &RawReport, gate: &Gate, mode: &Mode) -> R
         serde_json::to_string_pretty(&summary).wrap_err("serialise mutants-summary.json")?;
     std::fs::write(path, serialised)?;
     Ok(())
+}
+
+/// Remove any pre-existing `mutants-summary.json` so an in-progress
+/// run cannot leave a stale summary visible on disk. A prior run that
+/// was killed mid-invocation — SIGKILL, crash, CI-runner timeout —
+/// leaves its summary behind; a reader checking the file during the
+/// next run sees that stale verdict and may act on it. The authoritative
+/// verdict is "the summary written by the run that just finished" — so
+/// the contract is: no summary on disk until the current run has
+/// parsed cargo-mutants' outcomes and written its own.
+///
+/// Noop when the file is absent (fresh checkout, or the prior run
+/// cleaned up). Any other I/O error propagates with context.
+fn clear_stale_summary(path: &Path) -> Result<()> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e).wrap_err_with(|| format!("remove stale summary {}", path.display())),
+    }
 }
 
 /// Round to one decimal place so the summary stays stable across minor
@@ -1093,5 +1119,30 @@ mod tests {
             build_cargo_mutants_args(&mode, &Scope::default(), Path::new("/tmp/xtask"), None);
         let joined = argv_str(&args);
         assert!(joined.contains("--test-tool=nextest"), "got: {joined}");
+    }
+
+    // ---- clear_stale_summary ---------------------------------------------
+
+    #[test]
+    fn clear_stale_summary_removes_existing_file() {
+        let dir = tempfile::tempdir().expect("tmpdir");
+        let path = dir.path().join("mutants-summary.json");
+        std::fs::write(&path, r#"{"status":"pass"}"#).expect("seed stale summary");
+        assert!(path.exists(), "precondition — stale summary exists");
+
+        clear_stale_summary(&path).expect("clear must succeed when file present");
+
+        assert!(!path.exists(), "stale summary must be removed");
+    }
+
+    #[test]
+    fn clear_stale_summary_is_noop_when_file_absent() {
+        let dir = tempfile::tempdir().expect("tmpdir");
+        let path = dir.path().join("mutants-summary.json");
+        assert!(!path.exists(), "precondition — summary absent");
+
+        clear_stale_summary(&path).expect("clear must succeed when file absent");
+
+        assert!(!path.exists(), "file absent remains absent");
     }
 }
