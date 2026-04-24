@@ -131,7 +131,11 @@ enum Task {
     long_about = "Exactly one of --diff or --workspace must be given. Writes \
                   target/xtask/mutants-summary.json; exit status is zero iff \
                   the gate passed (≥80% kill rate for --diff; ≥60% absolute \
-                  floor for --workspace, with drift ≤ -2pp as a soft-warn)."
+                  floor for --workspace, with drift ≤ -2pp as a soft-warn). \
+                  Narrow further with --file, --package, and --features. \
+                  --package defaults to --test-workspace=false for speed; \
+                  --features auto-adds `integration-tests` when a scoped \
+                  package declares it (opt-out: --no-integration-tests)."
 )]
 struct MutantsArgs {
     /// Diff-scoped: git ref to diff against (e.g. `origin/main`).
@@ -154,6 +158,47 @@ struct MutantsArgs {
         requires = "workspace"
     )]
     baseline: std::path::PathBuf,
+
+    /// Files to mutate (repeatable). Passed through to cargo-mutants
+    /// as `--file <GLOB>`. Use to narrow a diff-scoped run to a
+    /// specific file, or a workspace run to a subset of files.
+    #[arg(long, value_name = "GLOB")]
+    file: Vec<std::path::PathBuf>,
+
+    /// Cargo package to mutate (repeatable). Passed through to
+    /// cargo-mutants as `--package <CRATE>`. When set,
+    /// `--test-workspace=false` is added automatically — mutation
+    /// reruns only the selected package's tests. Pass
+    /// `--test-whole-workspace` to opt out.
+    #[arg(long, value_name = "CRATE")]
+    package: Vec<String>,
+
+    /// Features to enable when building mutated code. Comma- or
+    /// space-separated; multiple `--features` flags append. Passed
+    /// through to cargo-mutants as `--features <LIST>`.
+    ///
+    /// `integration-tests` is added automatically when `--package`
+    /// names a crate that declares that feature — per
+    /// `.claude/rules/testing.md` §"Integration vs unit gating",
+    /// acceptance tests on this repo live behind that cfg and would
+    /// otherwise be invisible to the mutation run, silently lowering
+    /// kill rate. Pass `--no-integration-tests` to disable the
+    /// auto-add.
+    #[arg(long, value_name = "LIST", value_delimiter = ',')]
+    features: Vec<String>,
+
+    /// Skip the automatic `integration-tests` feature default. Use
+    /// when mutating a crate that does not declare that feature, or
+    /// when the user wants to measure kill rate without acceptance
+    /// tests participating.
+    #[arg(long)]
+    no_integration_tests: bool,
+
+    /// Force `--test-workspace=true` even with `--package`. Rare; use
+    /// when mutations in the selected package can only be killed by
+    /// tests in another crate.
+    #[arg(long)]
+    test_whole_workspace: bool,
 }
 
 #[derive(Debug, Clone, Copy, Subcommand)]
@@ -503,7 +548,16 @@ fn mutants(args: MutantsArgs) -> Result<()> {
         }
         (None, false) => bail!("must give exactly one of --diff <BASE_REF> or --workspace"),
     };
-    xtask::mutants::run(&mode)
+
+    let scope = xtask::mutants::Scope {
+        files: args.file,
+        packages: args.package,
+        features: args.features,
+        test_whole_workspace: args.test_whole_workspace,
+        auto_integration_tests: !args.no_integration_tests,
+    };
+
+    xtask::mutants::run(&mode, &scope)
 }
 
 fn ci() -> Result<()> {

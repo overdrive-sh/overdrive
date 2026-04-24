@@ -216,6 +216,40 @@ pre-push. Profile config lives in `.config/nextest.toml`.
   prefer to let the test finish first; backgrounding is rarely the
   right tradeoff for a test run.
 
+### Mutation testing is the exception
+
+`cargo mutants` and `cargo xtask mutants` — and only these — are
+exempt from the foreground-only rule. A mutation run does a full
+build + nextest rerun per mutant; even diff-scoped
+(`--in-diff origin/main`) the wall clock exceeds the 10 min Bash tool
+cap on this workspace. Running it foreground means it gets SIGKILLed
+at the cap, which is both misleading (the run wasn't actually
+failing) and destructive (`pkill -f "cargo mutants"` then leaves
+mutated source on disk — see the Post-Mutation Safety step in
+`nw-mutation-test`).
+
+Rules for mutation specifically:
+
+- **Invoke with `run_in_background: true`.** Capture stdout+stderr to
+  a file; the command returns immediately with a shell ID.
+- **Wait for exit, don't poll output.** Use the shell ID's completion
+  signal. Do not `tail -f` the log file in a loop — each read burns a
+  turn and the real signal is "the process exited," not "the log
+  looks done."
+- **No wall-clock kill.** If the run is taking longer than expected,
+  that's information — either the diff scope is wrong, the
+  `.cargo/mutants.toml` skip list is incomplete, or the test suite is
+  slower than budgeted. Investigate; do not `pkill`.
+- **Always run the post-mutation safety step** (`git checkout --
+  <src>`) whether the run succeeded, failed, was cancelled by the
+  user, or errored. Mutated source on disk is the failure mode that
+  makes this exception load-bearing.
+
+This exception is narrow. Nextest, `cargo test --doc`, `cargo xtask
+dst`, `cargo xtask bpf-unit`, `cargo xtask integration-test vm`,
+`cargo xtask verifier-regress`, and `cargo xtask xdp-perf` all stay
+foreground.
+
 ---
 
 ## RED scaffolds and intentionally-failing commits
@@ -460,6 +494,108 @@ suite per mutation. Outcomes:
   missing, or the existing tests don't assert on the changed behaviour.
 - **Timeout / unviable** — investigate; these are not freebies.
 
+### Usage
+
+Mutation testing goes through the `cargo xtask mutants` wrapper, not
+`cargo mutants` directly. The wrapper materialises the diff file
+cargo-mutants expects, pins `--test-tool=nextest` to match the project
+runner, writes `target/xtask/mutants-summary.json`, and implements the
+kill-rate gate. Invoking `cargo mutants` directly skips all of that.
+
+Two modes, mutually exclusive (clap rejects both-or-neither):
+
+```bash
+# Per-PR, diff-scoped. Gate: kill rate ≥ 80%. This is the default.
+cargo xtask mutants --diff origin/main
+
+# Nightly / full-corpus. Gate: ≥ 60% absolute floor; drift ≤ -2pp vs.
+# mutants-baseline/main/kill_rate.txt is a soft-warn.
+cargo xtask mutants --workspace
+
+# Override the baseline path for --workspace (rare; default is usually
+# correct):
+cargo xtask mutants --workspace \
+  --baseline mutants-baseline/main/kill_rate.txt
+```
+
+**Scope narrowing.** The wrapper exposes cargo-mutants' own `--file`
+and `--package` as pass-throughs, plus `--features` for feature
+selection. These compose with `--diff` or `--workspace`:
+
+```bash
+# Single file in a single package — the canonical TDD-inner-loop
+# invocation. The wrapper adds --test-workspace=false automatically
+# when --package is set (only that crate's test suite is rerun per
+# mutation — large wall-clock win) and --features integration-tests
+# automatically when the package declares that feature.
+cargo xtask mutants --diff origin/main \
+  --package overdrive-control-plane \
+  --file crates/overdrive-control-plane/src/handlers.rs
+
+# Whole package, no diff scoping:
+cargo xtask mutants --workspace --package overdrive-core
+
+# Extra features on top of the auto-added integration-tests:
+cargo xtask mutants --diff origin/main \
+  --package overdrive-control-plane \
+  --features unstable-foo,bar
+
+# Opt out of the integration-tests auto-add (rare; only if the
+# package under test doesn't declare the feature, or you're
+# deliberately measuring the kill rate without acceptance tests):
+cargo xtask mutants --diff origin/main \
+  --package some-crate-without-the-feature \
+  --no-integration-tests
+
+# Opt out of the --test-workspace=false default when mutations in one
+# crate can only be killed by tests in another:
+cargo xtask mutants --diff origin/main \
+  --package overdrive-control-plane \
+  --test-whole-workspace
+```
+
+**Why `integration-tests` auto-adds.** This repo's acceptance tests
+live behind `#[cfg(feature = "integration-tests")]` per §"Integration
+vs unit gating". Without the feature enabled, those tests don't
+compile — which means cargo-mutants runs the mutation against a
+build where the tests that would catch it are absent, and kill rate
+is silently understated. The wrapper auto-enables the feature when
+`--package <CRATE>` names a crate that declares it, so the number
+the gate reports is the number that actually matches the rule.
+
+**Flag confusion to avoid.** `cargo-mutants` itself takes
+`--in-diff <FILE>` — a *file path*, not a git ref. The xtask wrapper
+takes `--diff <BASE_REF>` — a git ref — and handles the diff
+materialisation. Passing `--in-diff` to `cargo xtask mutants` will
+fail; passing `--diff` to bare `cargo mutants` will fail. Use the
+wrapper with `--diff` and neither mistake comes up.
+
+**Invocation shape.** Mutation is the explicit exception to the
+foreground-only rule above (see "Mutation testing is the exception"
+at the top of "Running tests"):
+
+- Use `run_in_background: true`. A mutation run over a real diff
+  regularly exceeds the 10 min Bash tool cap; foreground execution
+  will SIGKILL mid-run.
+- Let it finish. The wrapper exits 0 on pass, non-zero on gate
+  failure. Do NOT `pkill -f "cargo mutants"` when it seems slow —
+  that leaves mutated source on disk and skips
+  `target/xtask/mutants-summary.json` generation.
+- After every run (pass, fail, cancel), run `git checkout -- crates/`
+  to restore any mutated source the wrapper didn't clean up itself.
+  This is a belt-and-braces step, not a substitute for letting the
+  run finish.
+
+**Reading the output.** The summary file at
+`target/xtask/mutants-summary.json` is the structured gate record —
+it contains kill rate, caught/missed/timeout/unviable counts, and the
+gate verdict. Parse that, not the human-readable stdout. CI reads
+the same file for the `GITHUB_STEP_SUMMARY` annotation.
+
+**Installation.** Both `cargo-mutants` and `cargo-nextest` must be on
+PATH — the wrapper checks for both up front and bails with an
+install hint if either is missing.
+
 ### Mandatory targets
 
 Every merge into `main` must meet a **kill rate ≥ 80%** on the code below
@@ -491,7 +627,7 @@ reviewed per-PR, not aggregated across releases.
 
 ### Rules
 
-- **Scoped per PR.** `cargo xtask mutants --in-diff origin/main` runs
+- **Scoped per PR.** `cargo xtask mutants --diff origin/main` runs
   only mutations that overlap the PR diff. Full-corpus runs are nightly;
   per-PR budget is tight.
 - **One-line skip with justification.** Use `// mutants: skip` above
@@ -704,7 +840,8 @@ Per-PR (critical path ≈ 15 minutes):
   D  cargo xtask integration-test vm     Tier 3, kernel matrix         (10 min)
   E  cargo xtask verifier-regress        Tier 4 — veristat             (min)
      cargo xtask xdp-perf                Tier 4 — xdp-bench            (min)
-  F  cargo xtask mutants --in-diff       diff-scoped (nextest per      (min)
+  F  cargo xtask mutants --diff origin/main
+                                         diff-scoped (nextest per      (min)
                                          mutation); kill rate ≥ 80%
 
 Nightly:

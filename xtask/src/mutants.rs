@@ -57,6 +57,47 @@ pub enum Mode {
     Workspace { baseline_path: PathBuf },
 }
 
+/// Further scope narrowing layered on top of `Mode`.
+///
+/// Orthogonal to `Mode` — a diff-scoped run can be narrowed to a
+/// single file; a workspace run can be narrowed to one package. These
+/// are pass-throughs to `cargo-mutants`' own `--file`, `--package`,
+/// and `--features` flags, plus two wrapper-level conveniences
+/// (`test_whole_workspace`, `auto_integration_tests`) that encode the
+/// defaults this project wants.
+///
+/// Defaults mirror `Default::default()`: empty file/package/feature
+/// lists, `test_whole_workspace = false` (tests run only against the
+/// selected package when `packages` is non-empty), and
+/// `auto_integration_tests = true` (this repo's acceptance tests
+/// live behind `#[cfg(feature = "integration-tests")]` per
+/// `.claude/rules/testing.md` §"Integration vs unit gating" —
+/// without that feature, the tests that would catch mutations do not
+/// compile and the kill rate is artificially low).
+#[derive(Debug, Clone, Default)]
+pub struct Scope {
+    /// `--file <GLOB>` (repeatable). Paths or globs passed verbatim to
+    /// cargo-mutants.
+    pub files: Vec<PathBuf>,
+    /// `--package <CRATE>` (repeatable). When non-empty and
+    /// `test_whole_workspace` is false, `--test-workspace=false` is
+    /// also passed — mutation reruns only the selected packages'
+    /// tests instead of the full workspace suite.
+    pub packages: Vec<String>,
+    /// `--features <LIST>` entries. Merged with `integration-tests`
+    /// when `auto_integration_tests` applies (see below).
+    pub features: Vec<String>,
+    /// Force `--test-workspace=true` even when `packages` is
+    /// non-empty. Rare escape hatch for mutations whose kill signal
+    /// only fires in another crate's tests.
+    pub test_whole_workspace: bool,
+    /// Auto-add `integration-tests` to the effective feature list
+    /// when at least one entry in `packages` declares that feature
+    /// in its Cargo.toml. Default true; the CLI exposes
+    /// `--no-integration-tests` as the opt-out.
+    pub auto_integration_tests: bool,
+}
+
 /// Hard gate thresholds (percentage of mutations caught).
 ///
 /// Kept as associated constants so a test can assert them and so a
@@ -66,8 +107,7 @@ pub const DIFF_KILL_RATE_FLOOR: f64 = 80.0;
 pub const WORKSPACE_ABSOLUTE_FLOOR: f64 = 60.0;
 pub const WORKSPACE_DRIFT_WARN_PP: f64 = -2.0;
 
-/// Entry point called from `main.rs`.
-pub fn run(mode: &Mode) -> Result<()> {
+pub fn run(mode: &Mode, scope: &Scope) -> Result<()> {
     which_cargo_mutants()?;
     // We pass `--test-tool=nextest` below, so cargo-nextest must also
     // be on PATH. Fail fast with an install hint rather than letting
@@ -88,7 +128,7 @@ pub fn run(mode: &Mode) -> Result<()> {
     //    non-zero exit from cargo-mutants happens on any missed mutant,
     //    which we handle via our own gate below. We only care that the
     //    subprocess produced `outcomes.json`.
-    let _ = invoke_cargo_mutants(mode, &output_parent)?;
+    let _ = invoke_cargo_mutants(mode, scope, &output_parent)?;
 
     // 2. Parse outcomes.json.
     let outcomes_path = out_dir.join("outcomes.json");
@@ -154,46 +194,35 @@ fn which_cargo_nextest() -> Result<()> {
     Ok(())
 }
 
-/// Run `cargo mutants` with the flags appropriate to `mode`. The diff
-/// file (if any) is written under the xtask target dir.
-///
-/// `output_parent` is the directory cargo-mutants will create its
-/// `mutants.out/` subdirectory inside (per `cargo mutants --help`
-/// wording: "Create mutants.out within this directory"). Do not pass
-/// the mutants.out path itself — that produces a double-nested
-/// `mutants.out/mutants.out/` layout and breaks outcomes.json discovery.
-fn invoke_cargo_mutants(mode: &Mode, output_parent: &Path) -> Result<std::process::ExitStatus> {
-    let mut cmd = Command::new(cargo());
-    cmd.arg("mutants").arg("--output").arg(output_parent);
-    // Run the generated test suite under nextest — matches the project's
-    // primary runner (`.config/nextest.toml`) instead of plain
-    // `cargo test`. Doctests are not re-run per mutation (nextest skips
-    // them by design); the gates that matter for mutation testing live
-    // in the unit/integration/proptest suites that nextest does run.
-    // See https://mutants.rs/shards.html and
-    // https://github.com/sourcefrog/cargo-mutants#using-nextest.
-    cmd.arg("--test-tool=nextest");
-
-    match mode {
+fn invoke_cargo_mutants(
+    mode: &Mode,
+    scope: &Scope,
+    output_parent: &Path,
+) -> Result<std::process::ExitStatus> {
+    // Materialise the diff file first (only for Diff mode). The pure
+    // arg-assembly below takes the file path, not the git ref, so
+    // tests can exercise it without hitting git.
+    let diff_path = match mode {
         Mode::Diff { base } => {
-            let diff_path = xtask_target_dir().join("mutants.diff");
-            let diff_bytes = git_diff_against(base).wrap_err_with(|| {
+            let path = xtask_target_dir().join("mutants.diff");
+            let bytes = git_diff_against(base).wrap_err_with(|| {
                 format!("git diff {base} failed — is `{base}` fetched in this clone?")
             })?;
-            std::fs::write(&diff_path, &diff_bytes)
-                .wrap_err_with(|| format!("write {}", diff_path.display()))?;
+            std::fs::write(&path, &bytes).wrap_err_with(|| format!("write {}", path.display()))?;
             eprintln!(
                 "xtask mutants: wrote {} ({} bytes) for --in-diff",
-                diff_path.display(),
-                diff_bytes.len()
+                path.display(),
+                bytes.len()
             );
-            cmd.arg("--in-diff").arg(&diff_path);
+            Some(path)
         }
-        Mode::Workspace { .. } => {
-            cmd.arg("--workspace");
-        }
-    }
+        Mode::Workspace { .. } => None,
+    };
 
+    let args = build_cargo_mutants_args(mode, scope, output_parent, diff_path.as_deref());
+
+    let mut cmd = Command::new(cargo());
+    cmd.args(&args);
     eprintln!("xtask mutants: running {}", format_cmd(&cmd));
     let status = cmd.status().wrap_err("spawn cargo-mutants")?;
     // Don't bail on non-zero — cargo-mutants returns non-zero for any
@@ -201,6 +230,139 @@ fn invoke_cargo_mutants(mode: &Mode, output_parent: &Path) -> Result<std::proces
     // ourselves. We only fail if `outcomes.json` was not written (the
     // parse step surfaces that).
     Ok(status)
+}
+
+/// Assemble the flag list for `cargo mutants`. Pure: given mode/scope
+/// and a pre-materialised diff path, returns the argv. No subprocess,
+/// no filesystem writes.
+///
+/// Every flag is documented alongside its case so a reviewer can see
+/// which `Mode` or `Scope` field produced it without cross-referencing
+/// the cargo-mutants man page.
+fn build_cargo_mutants_args(
+    mode: &Mode,
+    scope: &Scope,
+    output_parent: &Path,
+    diff_path: Option<&Path>,
+) -> Vec<std::ffi::OsString> {
+    use std::ffi::OsString;
+
+    let mut args: Vec<OsString> = Vec::new();
+    args.push("mutants".into());
+    // `--output <DIR>` points at the *parent* directory cargo-mutants
+    // will drop `mutants.out/` into. Passing the mutants.out path
+    // itself double-nests — see the doc comment on `run`.
+    args.push("--output".into());
+    args.push(output_parent.into());
+    // Match the project's primary test runner (`.config/nextest.toml`).
+    // Doctests are not re-run per mutation; nextest skips them and
+    // that is the documented mutation-testing behaviour.
+    args.push("--test-tool=nextest".into());
+
+    match mode {
+        Mode::Diff { .. } => {
+            let path = diff_path.expect("Mode::Diff must carry a materialised diff path");
+            args.push("--in-diff".into());
+            args.push(path.into());
+        }
+        Mode::Workspace { .. } => {
+            args.push("--workspace".into());
+        }
+    }
+
+    // Scope.files — `--file <GLOB>` (repeatable).
+    for file in &scope.files {
+        args.push("--file".into());
+        args.push(file.into());
+    }
+
+    // Scope.packages — `--package <CRATE>` (repeatable).
+    for pkg in &scope.packages {
+        args.push("--package".into());
+        args.push(pkg.into());
+    }
+
+    // Package-scoped runs default to rerunning only that package's
+    // tests per mutation. This is the single largest wall-clock win
+    // on a large workspace — the full suite may be hundreds of tests
+    // whereas one crate's suite is dozens.
+    if !scope.packages.is_empty() && !scope.test_whole_workspace {
+        args.push("--test-workspace=false".into());
+    }
+
+    // Effective feature list.
+    let mut features: Vec<String> = scope.features.clone();
+    if scope.auto_integration_tests {
+        // Add `integration-tests` when at least one scoped package
+        // declares the feature. If no packages are scoped we cannot
+        // safely assert the feature exists in the build graph, so
+        // we leave the caller's explicit `--features` alone.
+        let any_declares = scope
+            .packages
+            .iter()
+            .any(|p| crate_declares_integration_tests_feature(p).unwrap_or(false));
+        if any_declares && !features.iter().any(|f| f == "integration-tests") {
+            features.push("integration-tests".into());
+        }
+    }
+    if !features.is_empty() {
+        args.push("--features".into());
+        args.push(features.join(",").into());
+    }
+
+    args
+}
+
+fn crate_declares_integration_tests_feature(pkg: &str) -> Result<bool> {
+    // Resolve against the workspace root, not the current directory:
+    // `cargo xtask mutants` is normally invoked from the workspace
+    // root so `crates/<pkg>` resolves, but `cargo nextest` runs tests
+    // with cwd = the package being tested (xtask/), where those paths
+    // don't resolve. `CARGO_MANIFEST_DIR` is xtask's dir; its parent
+    // is the workspace root in this repo's layout.
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .ok_or_else(|| color_eyre::eyre::eyre!("CARGO_MANIFEST_DIR has no parent"))?
+        .to_path_buf();
+    let candidates = [
+        workspace_root.join("crates").join(pkg).join("Cargo.toml"),
+        workspace_root.join(pkg).join("Cargo.toml"),
+    ];
+    let manifest = candidates.iter().find(|p| p.is_file());
+    let Some(manifest) = manifest else {
+        return Ok(false);
+    };
+    let raw = std::fs::read_to_string(manifest)
+        .wrap_err_with(|| format!("read {}", manifest.display()))?;
+    Ok(manifest_declares_integration_tests_feature(&raw))
+}
+
+/// Pure text scan of a Cargo.toml body — extracted so the
+/// prefix-collision edge case (`integration-tests-slow = []` must not
+/// match) can be exercised without touching the filesystem.
+///
+/// `line.starts_with("integration-tests")` after `[features]` and
+/// before the next `[section]` header is sufficient — TOML arrays may
+/// span lines but the feature declaration itself always starts with
+/// the key on its own line.
+fn manifest_declares_integration_tests_feature(manifest: &str) -> bool {
+    let mut in_features = false;
+    for line in manifest.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            in_features = trimmed.starts_with("[features]");
+            continue;
+        }
+        if in_features && trimmed.starts_with("integration-tests") {
+            // Guard against `integration-tests-something = ...` by
+            // requiring either `=`, whitespace, or `.` after the key.
+            let after = trimmed.trim_start_matches("integration-tests");
+            if after.chars().next().is_none_or(|c| c == '=' || c.is_whitespace() || c == '.') {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 fn git_diff_against(base: &str) -> Result<Vec<u8>> {
@@ -691,5 +853,243 @@ mod tests {
             (WORKSPACE_DRIFT_WARN_PP - (-2.0)).abs() < 1e-9,
             "drift warn must match .claude/rules/testing.md (-2pp)"
         );
+    }
+
+    // ------------------------------------------------------------------
+    // build_cargo_mutants_args — pure argv assembly.
+    // ------------------------------------------------------------------
+
+    /// Convert the argv to a whitespace-joined string so assertions
+    /// read as the flag shape a human would recognise.
+    fn argv_str(args: &[std::ffi::OsString]) -> String {
+        args.iter().map(|a| a.to_string_lossy().into_owned()).collect::<Vec<_>>().join(" ")
+    }
+
+    #[test]
+    fn argv_diff_mode_carries_in_diff_file_path() {
+        let mode = Mode::Diff { base: "origin/main".into() };
+        let diff = Path::new("/tmp/mutants.diff");
+        let out = Path::new("/tmp/xtask");
+        let args = build_cargo_mutants_args(&mode, &Scope::default(), out, Some(diff));
+        let joined = argv_str(&args);
+        assert!(
+            joined.starts_with("mutants --output /tmp/xtask --test-tool=nextest"),
+            "got: {joined}"
+        );
+        assert!(joined.contains("--in-diff /tmp/mutants.diff"), "got: {joined}");
+        assert!(!joined.contains("--workspace"), "got: {joined}");
+    }
+
+    #[test]
+    fn argv_workspace_mode_uses_workspace_flag_not_in_diff() {
+        let mode = Mode::Workspace { baseline_path: PathBuf::from("/ignored") };
+        let out = Path::new("/tmp/xtask");
+        let args = build_cargo_mutants_args(&mode, &Scope::default(), out, None);
+        let joined = argv_str(&args);
+        assert!(joined.contains("--workspace"), "got: {joined}");
+        assert!(!joined.contains("--in-diff"), "got: {joined}");
+    }
+
+    #[test]
+    fn argv_includes_repeated_file_flags_in_order() {
+        let mode = Mode::Workspace { baseline_path: PathBuf::from("/ignored") };
+        let scope = Scope {
+            files: vec![
+                PathBuf::from("crates/a/src/lib.rs"),
+                PathBuf::from("crates/b/src/handlers.rs"),
+            ],
+            ..Scope::default()
+        };
+        let args = build_cargo_mutants_args(&mode, &scope, Path::new("/tmp/xtask"), None);
+        let joined = argv_str(&args);
+        // Two --file flags, in the declared order.
+        let a_pos = joined.find("--file crates/a/src/lib.rs").expect("first --file");
+        let b_pos = joined.find("--file crates/b/src/handlers.rs").expect("second --file");
+        assert!(a_pos < b_pos, "got: {joined}");
+    }
+
+    #[test]
+    fn argv_package_scope_adds_test_workspace_false_by_default() {
+        let mode = Mode::Workspace { baseline_path: PathBuf::from("/ignored") };
+        let scope = Scope { packages: vec!["overdrive-control-plane".into()], ..Scope::default() };
+        let args = build_cargo_mutants_args(&mode, &scope, Path::new("/tmp/xtask"), None);
+        let joined = argv_str(&args);
+        assert!(joined.contains("--package overdrive-control-plane"), "got: {joined}");
+        assert!(joined.contains("--test-workspace=false"), "got: {joined}");
+    }
+
+    #[test]
+    fn argv_test_whole_workspace_override_suppresses_test_workspace_false() {
+        let mode = Mode::Workspace { baseline_path: PathBuf::from("/ignored") };
+        let scope = Scope {
+            packages: vec!["overdrive-core".into()],
+            test_whole_workspace: true,
+            ..Scope::default()
+        };
+        let args = build_cargo_mutants_args(&mode, &scope, Path::new("/tmp/xtask"), None);
+        let joined = argv_str(&args);
+        assert!(joined.contains("--package overdrive-core"), "got: {joined}");
+        assert!(!joined.contains("--test-workspace=false"), "got: {joined}");
+    }
+
+    #[test]
+    fn argv_emits_features_joined_with_commas() {
+        let mode = Mode::Workspace { baseline_path: PathBuf::from("/ignored") };
+        let scope = Scope { features: vec!["foo".into(), "bar".into()], ..Scope::default() };
+        let args = build_cargo_mutants_args(&mode, &scope, Path::new("/tmp/xtask"), None);
+        let joined = argv_str(&args);
+        assert!(joined.contains("--features foo,bar"), "got: {joined}");
+    }
+
+    #[test]
+    fn argv_no_features_flag_when_list_empty_and_no_auto_trigger() {
+        // No packages scoped → no package could trigger auto-add →
+        // no --features flag should appear at all.
+        let mode = Mode::Workspace { baseline_path: PathBuf::from("/ignored") };
+        let scope = Scope { auto_integration_tests: true, ..Scope::default() };
+        let args = build_cargo_mutants_args(&mode, &scope, Path::new("/tmp/xtask"), None);
+        let joined = argv_str(&args);
+        assert!(!joined.contains("--features"), "got: {joined}");
+    }
+
+    #[test]
+    fn argv_auto_integration_tests_adds_feature_when_package_declares_it() {
+        // Run from the workspace root so `crates/<pkg>/Cargo.toml`
+        // resolves. This test is coupled to the repo: when the
+        // feature is removed from overdrive-control-plane the
+        // assertion will flip, which is the correct signal.
+        let mode = Mode::Workspace { baseline_path: PathBuf::from("/ignored") };
+        let scope = Scope {
+            packages: vec!["overdrive-control-plane".into()],
+            auto_integration_tests: true,
+            ..Scope::default()
+        };
+        let args = build_cargo_mutants_args(&mode, &scope, Path::new("/tmp/xtask"), None);
+        let joined = argv_str(&args);
+        assert!(
+            joined.contains("--features integration-tests"),
+            "overdrive-control-plane declares the feature; auto-add \
+             should have fired. got: {joined}"
+        );
+    }
+
+    #[test]
+    fn argv_auto_integration_tests_noop_when_package_does_not_declare_it() {
+        let mode = Mode::Workspace { baseline_path: PathBuf::from("/ignored") };
+        let scope = Scope {
+            packages: vec!["overdrive-core".into()],
+            auto_integration_tests: true,
+            ..Scope::default()
+        };
+        let args = build_cargo_mutants_args(&mode, &scope, Path::new("/tmp/xtask"), None);
+        let joined = argv_str(&args);
+        assert!(
+            !joined.contains("integration-tests"),
+            "overdrive-core does not declare the feature; auto-add \
+             should not have fired. got: {joined}"
+        );
+    }
+
+    #[test]
+    fn argv_auto_integration_tests_does_not_duplicate_when_user_already_passed_it() {
+        let mode = Mode::Workspace { baseline_path: PathBuf::from("/ignored") };
+        let scope = Scope {
+            packages: vec!["overdrive-control-plane".into()],
+            features: vec!["integration-tests".into()],
+            auto_integration_tests: true,
+            ..Scope::default()
+        };
+        let args = build_cargo_mutants_args(&mode, &scope, Path::new("/tmp/xtask"), None);
+        let joined = argv_str(&args);
+        // Exactly one integration-tests token, no duplicated comma
+        // form like "integration-tests,integration-tests".
+        assert_eq!(joined.matches("integration-tests").count(), 1, "got: {joined}");
+    }
+
+    #[test]
+    fn argv_no_integration_tests_opt_out_respected() {
+        let mode = Mode::Workspace { baseline_path: PathBuf::from("/ignored") };
+        let scope = Scope {
+            packages: vec!["overdrive-control-plane".into()],
+            auto_integration_tests: false,
+            ..Scope::default()
+        };
+        let args = build_cargo_mutants_args(&mode, &scope, Path::new("/tmp/xtask"), None);
+        let joined = argv_str(&args);
+        assert!(!joined.contains("integration-tests"), "got: {joined}");
+    }
+
+    #[test]
+    fn crate_declares_integration_tests_feature_true_for_control_plane() {
+        // Coupled to repo state — when the project convention reaches
+        // every crate this test is the reminder to update its peers.
+        let declared = crate_declares_integration_tests_feature("overdrive-control-plane")
+            .expect("Cargo.toml readable");
+        assert!(declared, "overdrive-control-plane declares `integration-tests`");
+    }
+
+    #[test]
+    fn crate_declares_integration_tests_feature_false_for_core() {
+        let declared = crate_declares_integration_tests_feature("overdrive-core")
+            .expect("Cargo.toml readable");
+        assert!(!declared, "overdrive-core does NOT declare `integration-tests`");
+    }
+
+    #[test]
+    fn crate_declares_integration_tests_feature_handles_xtask_outside_crates_dir() {
+        // xtask lives at `<root>/xtask/Cargo.toml`, not
+        // `<root>/crates/xtask/Cargo.toml`. The fallback path must
+        // locate it.
+        let declared =
+            crate_declares_integration_tests_feature("xtask").expect("Cargo.toml readable");
+        assert!(declared, "xtask/Cargo.toml declares `integration-tests`");
+    }
+
+    #[test]
+    fn crate_declares_integration_tests_feature_false_for_unknown_crate() {
+        let declared = crate_declares_integration_tests_feature("no-such-crate-xyz")
+            .expect("missing Cargo.toml yields Ok(false)");
+        assert!(!declared);
+    }
+
+    fn crate_declares_integration_tests_feature_rejects_prefix_collisions() {
+        // The scanner must not match a hypothetical feature like
+        // `integration-tests-slow = []`. Exercise the pure string-level
+        // helper directly so the test doesn't depend on filesystem or
+        // cwd state.
+        let manifest = "[package]\nname = \"fake\"\n\n\
+                    [features]\nintegration-tests-slow = []\n";
+        assert!(!manifest_declares_integration_tests_feature(manifest));
+
+        // And a positive control so the test documents both sides.
+        let manifest_ok = "[package]\nname = \"fake\"\n\n\
+                       [features]\nintegration-tests = []\n";
+        assert!(manifest_declares_integration_tests_feature(manifest_ok));
+
+        // Feature outside a `[features]` table must not count — e.g.
+        // a dependency named `integration-tests`.
+        let not_under_features = "[package]\nname = \"fake\"\n\n\
+                              [dependencies]\nintegration-tests = \"1\"\n";
+        assert!(!manifest_declares_integration_tests_feature(not_under_features));
+    }
+
+    #[test]
+    fn argv_output_flag_always_points_at_given_parent() {
+        // Guard against a silent default drift that could re-introduce
+        // the old `mutants.out/mutants.out/` double-nest bug.
+        let mode = Mode::Workspace { baseline_path: PathBuf::from("/ignored") };
+        let args =
+            build_cargo_mutants_args(&mode, &Scope::default(), Path::new("/tmp/custom"), None);
+        let joined = argv_str(&args);
+        assert!(joined.contains("--output /tmp/custom"), "got: {joined}");
+    }
+
+    #[test]
+    fn argv_always_pins_nextest_test_tool() {
+        let mode = Mode::Workspace { baseline_path: PathBuf::from("/ignored") };
+        let args =
+            build_cargo_mutants_args(&mode, &Scope::default(), Path::new("/tmp/xtask"), None);
+        let joined = argv_str(&args);
+        assert!(joined.contains("--test-tool=nextest"), "got: {joined}");
     }
 }
