@@ -69,7 +69,7 @@ fn write_payments_toml(dir: &Path) -> PathBuf {
     path
 }
 
-/// Locally compute the canonical spec_digest using the same primitives
+/// Locally compute the canonical `spec_digest` using the same primitives
 /// the server uses in `handlers::describe_job`:
 ///   SHA-256 of `rkyv::to_bytes::<rancor::Error>(&Job::from_spec(spec))`.
 /// Any drift between this and the server-side computation is a bug.

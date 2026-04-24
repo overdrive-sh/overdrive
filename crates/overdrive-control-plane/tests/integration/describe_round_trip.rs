@@ -50,15 +50,21 @@ fn read_ca_from_trust_triple(data_dir: &std::path::Path) -> String {
     use base64::engine::general_purpose::STANDARD as BASE64;
 
     let config_path = data_dir.join(".overdrive").join("config");
-    let yaml = std::fs::read_to_string(&config_path)
+    let text = std::fs::read_to_string(&config_path)
         .expect(&format!("read trust triple at {}", config_path.display()));
-    let doc: serde_yaml::Value = serde_yaml::from_str(&yaml).expect("parse trust triple YAML");
+    // ADR-0019 canonical TOML shape: `current-context = "local"` +
+    // `[[contexts]]` array-of-tables, each entry carrying `name`,
+    // `endpoint`, and the base64-PEM trust triple.
+    let doc: toml::Value = toml::from_str(&text).expect("parse trust triple TOML");
     let ca_b64 = doc
         .get("contexts")
-        .and_then(|c| c.get("local"))
+        .and_then(toml::Value::as_array)
+        .and_then(|arr| {
+            arr.iter().find(|c| c.get("name").and_then(toml::Value::as_str) == Some("local"))
+        })
         .and_then(|c| c.get("ca"))
-        .and_then(|v| v.as_str())
-        .expect("contexts.local.ca field");
+        .and_then(toml::Value::as_str)
+        .expect("[[contexts]] with name=\"local\" must carry a ca field");
     let ca_bytes = BASE64.decode(ca_b64).expect("base64 decode ca");
     String::from_utf8(ca_bytes).expect("ca PEM is UTF-8")
 }
@@ -84,7 +90,7 @@ fn payments_spec() -> JobSpecInput {
     }
 }
 
-/// Compute the canonical spec_digest a correct handler must return:
+/// Compute the canonical `spec_digest` a correct handler must return:
 /// `ContentHash::of(rkyv::to_bytes(Job::from_spec(spec))).to_string()`.
 ///
 /// This mirrors the handler's expected behaviour exactly — if the handler
@@ -167,7 +173,7 @@ async fn get_v1_jobs_unknown_id_returns_404_with_error_body() {
     );
 
     let body: ErrorBody = resp.json().await.expect("decode ErrorBody");
-    assert_eq!(body.error, "not_found", "error kind must be 'not_found'; got {:?}", body.error,);
+    assert_eq!(body.error, "not_found", "error kind must be 'not_found'; got {:?}", body.error);
     assert!(
         body.message.contains("no-such-job"),
         "message must identify the missing resource; got {:?}",
@@ -275,7 +281,7 @@ fn arb_valid_job_spec() -> impl Strategy<Value = JobSpecInput> {
     let id = "[a-z][a-z0-9]{0,15}";
     (id, 1u32..100u32, 1u32..10_000u32, 1u64..(1u64 << 40)).prop_map(
         |(id, replicas, cpu_milli, memory_bytes)| JobSpecInput {
-            id: id.to_owned(),
+            id,
             replicas,
             cpu_milli,
             memory_bytes,

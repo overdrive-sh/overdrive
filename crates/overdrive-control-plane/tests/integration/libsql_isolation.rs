@@ -81,7 +81,7 @@ async fn provision_db_path_distinct_for_distinct_names() {
 
 /// Defence-in-depth: the returned path always starts with
 /// `<canonicalised_data_dir>/reconcilers/` regardless of what the name
-/// looks like (ReconcilerName's regex is the primary guard; the check
+/// looks like (`ReconcilerName`'s regex is the primary guard; the check
 /// is insurance per ADR-0013 §5).
 #[tokio::test]
 async fn provision_db_path_starts_with_data_dir_reconcilers() {
@@ -161,7 +161,7 @@ async fn open_db_two_calls_same_path_two_independent_connections() {
 /// The load-bearing invariant: alpha's handle writes a canary row;
 /// beta's handle — provisioned separately by name — cannot see that
 /// row at all, because beta's DB file is a different file on disk.
-/// SQLite reports `no such table: canary` to beta.
+/// `SQLite` reports `no such table: canary` to beta.
 #[tokio::test]
 async fn alpha_canary_row_invisible_to_beta_handle() {
     let tmp = TempDir::new().expect("tempdir");
@@ -201,8 +201,8 @@ async fn alpha_canary_row_invisible_to_beta_handle() {
     assert!(lowered.contains("no such table"), "expected 'no such table' error, got: {err_msg}");
 }
 
-/// A data_dir whose parent does not exist is an error. The
-/// provisioner is permitted to create the data_dir itself (so
+/// A `data_dir` whose parent does not exist is an error. The
+/// provisioner is permitted to create the `data_dir` itself (so
 /// `canonicalize` succeeds), but it must not fabricate arbitrary
 /// paths under `/nonexistent`.
 #[tokio::test]

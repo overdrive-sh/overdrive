@@ -4,12 +4,12 @@
 //! `overdrive_control_plane::api` verbatim — there are no shadow types.
 //! The client is a thin typed wrapper around `reqwest::Client`:
 //!
-//! * `ApiClient::from_config(path)` loads the Talos-shape trust triple
-//!   from disk (ADR-0010), pins the minted CA as the sole root of
-//!   trust, and attaches the client leaf as a PEM identity. Per ADR-0010
-//!   Phase 1 the server does not yet validate the client cert; the cert
-//!   is attached anyway so Phase 5 mTLS flips a single switch on the
-//!   server side.
+//! * `ApiClient::from_config(path)` loads the trust triple from disk
+//!   (ADR-0010 shape, ADR-0019 TOML syntax), pins the minted CA as the
+//!   sole root of trust, and attaches the client leaf as a PEM
+//!   identity. Per ADR-0010 Phase 1 the server does not yet validate
+//!   the client cert; the cert is attached anyway so Phase 5 mTLS
+//!   flips a single switch on the server side.
 //! * Five endpoint methods map 1-1 onto ADR-0008's endpoint table and
 //!   return typed responses from `overdrive_control_plane::api`.
 //! * `CliError` is a small typed enum (`ConfigLoad`, `Transport`,
@@ -41,8 +41,8 @@ pub enum CliError {
     /// The `path` field names the file so the operator can repair it.
     /// `cause` is a short human-readable summary — it is deliberately
     /// NOT a nested `source` error, because the real cause
-    /// (`base64::DecodeError`, `serde_yaml::Error`) carries Debug
-    /// output that leaks implementation details.
+    /// (`base64::DecodeError`, `toml::de::Error`) carries Debug output
+    /// that leaks implementation details.
     #[error("failed to load overdrive config from {path}: {cause}")]
     ConfigLoad { path: String, cause: String },
 

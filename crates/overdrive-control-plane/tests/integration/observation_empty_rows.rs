@@ -50,15 +50,21 @@ fn read_ca_from_trust_triple(data_dir: &std::path::Path) -> String {
     use base64::engine::general_purpose::STANDARD as BASE64;
 
     let config_path = data_dir.join(".overdrive").join("config");
-    let yaml = std::fs::read_to_string(&config_path)
+    let text = std::fs::read_to_string(&config_path)
         .expect(&format!("read trust triple at {}", config_path.display()));
-    let doc: serde_yaml::Value = serde_yaml::from_str(&yaml).expect("parse trust triple YAML");
+    // ADR-0019 canonical TOML shape: `current-context = "local"` +
+    // `[[contexts]]` array-of-tables, each entry carrying `name`,
+    // `endpoint`, and the base64-PEM trust triple.
+    let doc: toml::Value = toml::from_str(&text).expect("parse trust triple TOML");
     let ca_b64 = doc
         .get("contexts")
-        .and_then(|c| c.get("local"))
+        .and_then(toml::Value::as_array)
+        .and_then(|arr| {
+            arr.iter().find(|c| c.get("name").and_then(toml::Value::as_str) == Some("local"))
+        })
         .and_then(|c| c.get("ca"))
-        .and_then(|v| v.as_str())
-        .expect("contexts.local.ca field");
+        .and_then(toml::Value::as_str)
+        .expect("[[contexts]] with name=\"local\" must carry a ca field");
     let ca_bytes = BASE64.decode(ca_b64).expect("base64 decode ca");
     String::from_utf8(ca_bytes).expect("ca PEM is UTF-8")
 }

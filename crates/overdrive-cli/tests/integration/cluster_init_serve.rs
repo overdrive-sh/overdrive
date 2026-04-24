@@ -3,19 +3,19 @@
 //!
 //! Per `crates/overdrive-cli/CLAUDE.md` these call the handlers directly
 //! (NO subprocess). The handlers stand up a real in-process control-plane
-//! server on an ephemeral port, probe it via the ApiClient from step
+//! server on an ephemeral port, probe it via the `ApiClient` from step
 //! 05-01, and then exercise the `ServeHandle::shutdown()` cancellation
 //! path.
 //!
 //! Acceptance coverage:
-//!   (a) `cluster::init` writes a parseable YAML trust triple at
-//!       `<config_dir>/.overdrive/config`
+//!   (a) `cluster::init` writes a parseable TOML trust triple at
+//!       `<config_dir>/.overdrive/config` (ADR-0019)
 //!   (b) re-invoking `cluster::init` on existing config re-mints (CA
 //!       bytes differ) per ADR-0010 §R4
-//!   (c) `serve::run` binds an ephemeral port and the ApiClient probe
+//!   (c) `serve::run` binds an ephemeral port and the `ApiClient` probe
 //!       through that port succeeds
 //!   (d) `ServeHandle::shutdown` completes within a 5-second deadline
-//!   (e) After shutdown, a fresh ApiClient probe returns
+//!   (e) After shutdown, a fresh `ApiClient` probe returns
 //!       `CliError::Transport`
 //!   (f) `serve::run` bind failure on an occupied port maps to
 //!       `CliError` with an actionable message
@@ -30,22 +30,23 @@ use overdrive_cli::http_client::{ApiClient, CliError};
 use tempfile::TempDir;
 
 /// Read and extract the base64-encoded `ca` field from the trust-triple
-/// YAML at `config_path`. Used to prove re-init re-mints with different
-/// CA bytes (ADR-0010 §R4).
+/// TOML at `config_path`. Used to prove re-init re-mints with different
+/// CA bytes (ADR-0010 §R4). Per ADR-0019, the file is TOML with
+/// `[[contexts]]` as an array-of-tables keyed on `name`.
 fn read_ca_bytes_from_config(config_path: &Path) -> Vec<u8> {
     use base64::Engine as _;
-    let yaml_bytes = std::fs::read(config_path).expect("read config yaml");
-    let doc: serde_yaml::Value = serde_yaml::from_slice(&yaml_bytes).expect("parse config yaml");
-    let ca_b64 = doc
-        .get("contexts")
-        .and_then(|c| c.get("local"))
-        .and_then(|l| l.get("ca"))
-        .and_then(|v| v.as_str())
-        .expect("ca field present as string");
+    let toml_str = std::fs::read_to_string(config_path).expect("read config toml");
+    let doc: toml::Value = toml::from_str(&toml_str).expect("parse config toml");
+    let contexts = doc.get("contexts").and_then(|c| c.as_array()).expect("contexts array");
+    let local = contexts
+        .iter()
+        .find(|c| c.get("name").and_then(|n| n.as_str()) == Some("local"))
+        .expect("local context present");
+    let ca_b64 = local.get("ca").and_then(|v| v.as_str()).expect("ca field present as string");
     base64::engine::general_purpose::STANDARD.decode(ca_b64).expect("ca is valid base64")
 }
 
-/// Build an ApiClient for the live server bound on `bound`, loading
+/// Build an `ApiClient` for the live server bound on `bound`, loading
 /// the trust triple from `config_path` but overriding the endpoint so
 /// it names the real ephemeral port rather than the static configured
 /// bind recorded in the config file.
@@ -56,7 +57,7 @@ fn build_client(config_path: &Path, bound: SocketAddr) -> ApiClient {
 }
 
 // -------------------------------------------------------------------
-// (a) cluster::init writes a parseable YAML trust triple
+// (a) cluster::init writes a parseable TOML trust triple (ADR-0019)
 // -------------------------------------------------------------------
 
 #[tokio::test]
@@ -70,15 +71,25 @@ async fn cluster_init_writes_trust_triple_at_config_path() {
     assert_eq!(output.config_path, expected, "config_path must be <config_dir>/.overdrive/config");
     assert!(output.config_path.exists(), "trust-triple file must exist on disk");
 
-    // Parseable YAML matching ADR-0010 §R2 (Talos-shape context/contexts).
-    let yaml_bytes = std::fs::read(&output.config_path).expect("read config");
-    let doc: serde_yaml::Value = serde_yaml::from_slice(&yaml_bytes).expect("valid YAML");
-    assert!(doc.get("context").is_some(), "top-level `context` field must exist");
-    let local = doc.get("contexts").and_then(|c| c.get("local")).expect("contexts.local present");
-    assert!(local.get("ca").is_some(), "contexts.local.ca must exist");
-    assert!(local.get("crt").is_some(), "contexts.local.crt must exist");
-    assert!(local.get("key").is_some(), "contexts.local.key must exist");
-    assert!(local.get("endpoint").is_some(), "contexts.local.endpoint must exist");
+    // Parseable TOML matching ADR-0019: `current-context = "local"`
+    // plus an `[[contexts]]` array-of-tables where each entry carries
+    // `name`, `endpoint`, `ca`, `crt`, `key`.
+    let toml_str = std::fs::read_to_string(&output.config_path).expect("read config");
+    let doc: toml::Value = toml::from_str(&toml_str).expect("valid TOML");
+    assert_eq!(
+        doc.get("current-context").and_then(|v| v.as_str()),
+        Some("local"),
+        "top-level `current-context` must be `\"local\"` per ADR-0019",
+    );
+    let contexts = doc.get("contexts").and_then(|c| c.as_array()).expect("contexts array present");
+    let local = contexts
+        .iter()
+        .find(|c| c.get("name").and_then(|n| n.as_str()) == Some("local"))
+        .expect("contexts entry with name = \"local\" must be present");
+    assert!(local.get("ca").is_some(), "contexts[local].ca must exist");
+    assert!(local.get("crt").is_some(), "contexts[local].crt must exist");
+    assert!(local.get("key").is_some(), "contexts[local].key must exist");
+    assert!(local.get("endpoint").is_some(), "contexts[local].endpoint must exist");
 }
 
 // -------------------------------------------------------------------
@@ -118,7 +129,7 @@ async fn cluster_init_re_init_re_mints_with_different_ca_bytes() {
 }
 
 // -------------------------------------------------------------------
-// (c) serve::run binds ephemeral port; ApiClient probe succeeds
+// (c) serve::run binds ephemeral port; `ApiClient` probe succeeds
 // -------------------------------------------------------------------
 
 #[tokio::test]
@@ -134,7 +145,7 @@ async fn serve_run_binds_ephemeral_port_and_returns_serve_handle() {
     let port = endpoint.port().expect("endpoint must carry a port");
     assert_ne!(port, 0, "ephemeral port must not be zero: got {endpoint}");
 
-    // ApiClient probe against the live server: /v1/nodes is the real
+    // `ApiClient` probe against the live server: /v1/nodes is the real
     // observation-read endpoint wired in step 03-03. A fresh store
     // returns {"rows":[]}.
     let config_path = tmp.path().join(".overdrive").join("config");

@@ -8,9 +8,11 @@
 //! * The server leaf cert carries EXACTLY the four SANs listed in
 //!   ADR-0010 §R3: `IP:127.0.0.1`, `IP:::1`, `DNS:localhost`,
 //!   `DNS:<hostname::get()>`.
-//! * The on-disk config file is Talos-shape YAML that round-trips
-//!   through `serde_yaml` and base64-decodes back to the original PEM
-//!   bytes (ADR-0010 §R2).
+//! * The on-disk config file is the ADR-0019 canonical TOML shape
+//!   (array-of-tables `[[contexts]]` with `current-context` pointer)
+//!   that round-trips through the `toml` crate and base64-decodes back
+//!   to the original PEM bytes. ADR-0010 §R2 YAML shape superseded by
+//!   ADR-0019.
 //! * Re-running `mint_ephemeral_ca` produces different material bytewise
 //!   without prompting — the function signature is the port-level proof
 //!   that no stdin is consumed (no parameters).
@@ -25,22 +27,31 @@ use std::io::Cursor;
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
-use overdrive_control_plane::tls_bootstrap::{CaMaterial, mint_ephemeral_ca, write_trust_triple};
+use overdrive_control_plane::tls_bootstrap::{
+    CaMaterial, load_trust_triple, mint_ephemeral_ca, write_trust_triple,
+};
 use serde::Deserialize;
 use tempfile::TempDir;
 use x509_parser::prelude::*;
 
-/// Minimal serde shape for the Talos-style `~/.overdrive/config`. This
-/// intentionally ignores unknown fields so ADR-0010 can extend the
-/// schema without breaking the assertion surface.
+/// Minimal serde shape for the ADR-0019 canonical TOML config.
+/// Array-of-tables `[[contexts]]` with `current-context` pointer, each
+/// context carries its own `name`. `deny_unknown_fields` matches the
+/// rejection posture of the production loader in `tls_bootstrap.rs` —
+/// any drift from the canonical shape fails the parse rather than
+/// succeeding silently.
 #[derive(Debug, Deserialize)]
-struct TalosConfig {
-    context: String,
-    contexts: std::collections::BTreeMap<String, TalosContext>,
+#[serde(deny_unknown_fields)]
+struct OperatorConfig {
+    #[serde(rename = "current-context")]
+    current_context: String,
+    contexts: Vec<OperatorContext>,
 }
 
 #[derive(Debug, Deserialize)]
-struct TalosContext {
+#[serde(deny_unknown_fields)]
+struct OperatorContext {
+    name: String,
     endpoint: String,
     ca: String,
     crt: String,
@@ -162,7 +173,7 @@ fn server_leaf_cert_has_exactly_four_san_entries_per_adr_0010_r3() {
 }
 
 #[test]
-fn write_trust_triple_creates_config_in_talos_yaml_shape() {
+fn write_trust_triple_creates_config_in_adr_0019_toml_shape() {
     let tmp = TempDir::new().expect("TempDir");
     let material = mint_ephemeral_ca().expect("mint_ephemeral_ca");
     let endpoint = "https://127.0.0.1:7001";
@@ -176,14 +187,18 @@ fn write_trust_triple_creates_config_in_talos_yaml_shape() {
         config_path.display()
     );
 
-    let bytes = std::fs::read(&config_path).expect("read config");
-    let parsed: TalosConfig = serde_yaml::from_slice(&bytes).expect(
-        "config must parse as Talos-shape YAML per ADR-0010 §R2 (keys: \
-         context / contexts / endpoint / ca / crt / key)",
+    let text = std::fs::read_to_string(&config_path).expect("read config");
+    let parsed: OperatorConfig = toml::from_str(&text).expect(
+        "config must parse as ADR-0019 TOML (keys: current-context, \
+         [[contexts]] with name/endpoint/ca/crt/key)",
     );
 
-    assert_eq!(parsed.context, "local", "current-context must be `local`");
-    let ctx = parsed.contexts.get("local").expect("contexts must include the `local` context");
+    assert_eq!(parsed.current_context, "local", "current-context must be `local`");
+    let ctx = parsed
+        .contexts
+        .iter()
+        .find(|c| c.name == "local")
+        .expect("contexts must include the `local` context");
     assert_eq!(
         ctx.endpoint, endpoint,
         "endpoint field must round-trip the value passed to write_trust_triple"
@@ -200,12 +215,13 @@ fn trust_triple_base64_fields_decode_to_original_pem_bytes() {
     write_trust_triple(tmp.path(), "https://127.0.0.1:7001", &material)
         .expect("write_trust_triple");
 
-    let bytes = std::fs::read(tmp.path().join(".overdrive").join("config")).expect("read config");
-    let parsed: TalosConfig = serde_yaml::from_slice(&bytes).expect("parse yaml");
-    let ctx = parsed.contexts.get("local").expect("local context");
+    let text =
+        std::fs::read_to_string(tmp.path().join(".overdrive").join("config")).expect("read config");
+    let parsed: OperatorConfig = toml::from_str(&text).expect("parse toml");
+    let ctx = parsed.contexts.iter().find(|c| c.name == "local").expect("local context");
 
     let ca_decoded =
-        BASE64.decode(ctx.ca.as_bytes()).expect("ca field must be valid base64 per ADR-0010 §R2");
+        BASE64.decode(ctx.ca.as_bytes()).expect("ca field must be valid base64 per ADR-0019");
     assert_eq!(
         ca_decoded,
         material.ca_cert_pem.as_bytes(),
@@ -272,12 +288,91 @@ fn write_trust_triple_is_idempotent_overwrite() {
 
     // Prove overwrite semantics: decoded `ca` of the on-disk file must
     // equal the SECOND material, not the first.
-    let parsed: TalosConfig = serde_yaml::from_slice(&second_bytes).expect("parse yaml");
-    let ctx = parsed.contexts.get("local").expect("local context");
+    let second_text = String::from_utf8(second_bytes).expect("second write is UTF-8 TOML");
+    let parsed: OperatorConfig = toml::from_str(&second_text).expect("parse toml");
+    let ctx = parsed.contexts.iter().find(|c| c.name == "local").expect("local context");
     let ca_decoded = BASE64.decode(ctx.ca.as_bytes()).expect("base64");
     assert_eq!(
         ca_decoded,
         second.ca_cert_pem.as_bytes(),
         "overwritten config must carry the SECOND CA, not the first"
+    );
+}
+
+#[test]
+fn load_trust_triple_rejects_unknown_fields() {
+    // ADR-0019 §Consequences → Enforcement: the serde `deny_unknown_fields`
+    // attribute makes malformed input fail the parse rather than silently
+    // accept unrelated keys. Drift in the on-disk schema — an operator
+    // hand-editing the file and typo'ing a key, a future field added to
+    // the writer but not the reader, a mischievous extension — must
+    // surface as a loud `Internal` error, not a degraded-but-successful
+    // load. Behaviour asserted through the driving port
+    // (`load_trust_triple`).
+    let tmp = TempDir::new().expect("TempDir");
+    let overdrive_dir = tmp.path().join(".overdrive");
+    std::fs::create_dir_all(&overdrive_dir).expect("create_dir_all");
+    let config_path = overdrive_dir.join("config");
+
+    // Start from a legitimate on-disk trust triple so the only diff
+    // between this fixture and a valid file is the extra `rogue_field`.
+    let material = mint_ephemeral_ca().expect("mint_ephemeral_ca");
+    write_trust_triple(tmp.path(), "https://127.0.0.1:7001", &material)
+        .expect("seed a valid trust triple");
+
+    let mut text = std::fs::read_to_string(&config_path).expect("read seed");
+    // Inject an extra top-level key. Because `OperatorConfigIn` carries
+    // `#[serde(deny_unknown_fields)]`, this must cause the parse to
+    // fail rather than be silently ignored.
+    text.push_str("\nrogue_field = \"unexpected\"\n");
+    std::fs::write(&config_path, text.as_bytes()).expect("write tampered config");
+
+    let err = load_trust_triple(&config_path)
+        .expect_err("load_trust_triple must reject TOML containing unknown fields");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("invalid TOML") || msg.contains("rogue_field") || msg.contains("unknown"),
+        "error message must indicate a TOML parse failure; got: {msg}"
+    );
+}
+
+#[test]
+fn load_trust_triple_rejects_unknown_field_inside_context() {
+    // Same posture as above but at the per-context level:
+    // `OperatorContextIn` also carries `#[serde(deny_unknown_fields)]`,
+    // so an extra key inside a `[[contexts]]` table must also fail the
+    // parse. Guards the distinct serde attribute on the inner struct —
+    // without it, a mutation that drops `deny_unknown_fields` from
+    // `OperatorContextIn` alone would still pass the outer-field test.
+    let tmp = TempDir::new().expect("TempDir");
+    let overdrive_dir = tmp.path().join(".overdrive");
+    std::fs::create_dir_all(&overdrive_dir).expect("create_dir_all");
+    let config_path = overdrive_dir.join("config");
+
+    let material = mint_ephemeral_ca().expect("mint_ephemeral_ca");
+    write_trust_triple(tmp.path(), "https://127.0.0.1:7001", &material)
+        .expect("seed a valid trust triple");
+
+    // Append an extra key inside the existing `[[contexts]]` table by
+    // parsing, mutating, and re-serialising — more robust than textual
+    // injection because it preserves TOML validity.
+    let text = std::fs::read_to_string(&config_path).expect("read seed");
+    let mut doc: toml::Value = toml::from_str(&text).expect("parse seed");
+    let contexts = doc
+        .get_mut("contexts")
+        .and_then(toml::Value::as_array_mut)
+        .expect("[[contexts]] must be an array");
+    let ctx = contexts.first_mut().expect("at least one context");
+    let table = ctx.as_table_mut().expect("context must be a table");
+    table.insert("rogue_inner".to_string(), toml::Value::String("unexpected".to_string()));
+    let tampered = toml::to_string(&doc).expect("re-serialise tampered config as TOML");
+    std::fs::write(&config_path, tampered.as_bytes()).expect("write tampered config");
+
+    let err = load_trust_triple(&config_path)
+        .expect_err("load_trust_triple must reject unknown fields inside [[contexts]]");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("invalid TOML") || msg.contains("rogue_inner") || msg.contains("unknown"),
+        "error message must indicate a TOML parse failure; got: {msg}"
     );
 }

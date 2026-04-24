@@ -106,6 +106,11 @@ fn read_summary(target_dir: &Path) -> Value {
 /// so a grep for `3735928559` in code points at exactly one place.
 const CANARY_TRIGGER_SEED: u64 = 0xDEAD_BEEF;
 
+/// The two invariants the canary-bug feature deliberately trips —
+/// `sim-observation-lww-converges` (LWW evaluator, runs first) and
+/// `reconciler-is-pure` (purity evaluator, runs later in the catalogue).
+const EXPECTED_CANARY_FAILURES: &[&str] = &["sim-observation-lww-converges", "reconciler-is-pure"];
+
 // -----------------------------------------------------------------------------
 // §1.3 WS-3 — red run produces seed/tick/host/cause + reproduction command.
 // §7.2 error boundary — dst-summary.json contains the failure fields.
@@ -189,8 +194,6 @@ fn canary_feature_on_trigger_seed_fails_with_full_failure_block() {
     //    evaluator runs earlier in the catalogue than
     //    `reconciler-is-pure` — asserted in the earlier `summary`
     //    block above.
-    const EXPECTED_CANARY_FAILURES: &[&str] =
-        &["sim-observation-lww-converges", "reconciler-is-pure"];
     let failures = summary["failures"].as_array().expect("failures array");
     assert_eq!(
         failures.len(),

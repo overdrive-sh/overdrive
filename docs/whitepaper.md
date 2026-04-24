@@ -1968,20 +1968,42 @@ This supersedes the "operator" pattern where Go binaries with arbitrary I/O and 
 
 ### The Reconciler Primitive
 
-Reconcilers converge. They are pure over `(desired, actual, db) → actions`:
+Reconcilers converge. Authoring one is two methods — an async read phase and a sync pure compute phase — with the split chosen so `reconcile` remains pure over its inputs, while the libSQL backing store (which exposes only an async API) is accessed exclusively inside `hydrate`:
 
 ```rust
 trait Reconciler: Send + Sync {
+    /// Author-declared projection of the reconciler's private memory.
+    type View: Send + Sync;
+
+    /// Async read phase. The ONLY place a reconciler author touches
+    /// libSQL. The runtime diffs the returned NextView against this
+    /// view and persists the delta — reconcilers never write libSQL
+    /// directly.
+    async fn hydrate(
+        &self,
+        target: &TargetResource,
+        db:     &LibsqlHandle,     // private libSQL — reconciler memory
+    ) -> Result<Self::View, HydrateError>;
+
+    /// Pure compute phase. Sync. No .await. No I/O. All mutations
+    /// through Raft (via returned Actions) or through NextView (via
+    /// the runtime's diff-and-persist path), never direct. Wall-clock
+    /// only via `tick.now`, never `Instant::now()`.
     fn reconcile(
         &self,
         desired: &State,
-        actual: &State,
-        db: &Db,          // private libSQL — reconciler memory
-    ) -> Vec<Action>;     // all mutations through Raft, never direct
+        actual:  &State,
+        view:    &Self::View,
+        tick:    &TickContext,
+    ) -> (Vec<Action>, Self::View);
 }
 ```
 
-The purity is load-bearing. Neither the trigger reason nor wall-clock time are inputs. `reconcile` does not `.await`, does not spawn subprocesses, does not read wall-clock, does not write directly to the IntentStore or ObservationStore. This property is what makes reconcilers testable under DST (§21) and tractable for *Eventually Stable Reconciliation* proofs (see *Correctness Guarantees* below; USENIX OSDI '24 *Anvil*).
+How authors declare reads: the `async fn hydrate` body reads the reconciler's private libSQL and decodes rows into `Self::View` via free-form SQL. The runtime ensures `reconcile` sees an immutable view, never the live handle. The View is an input to the pure function; writes are expressed as the returned `NextView` (data), persisted by the runtime — not as side effects inside `reconcile`.
+
+Time is injected the same way storage is — as input state, not as a side channel. The runtime snapshots `Clock::now()` via the same injected trait DST controls (`SystemClock` in production, `SimClock` under simulation), packages it into a `TickContext { now, tick, deadline }` alongside a monotonic tick counter and a per-tick deadline, and passes it by reference to `reconcile` as a fourth parameter. Reading wall-clock from inside `reconcile` is banned for the same reason reading libsql is banned: it would break the pure-function contract that ESR verification and DST replay both rely on. Time has a different consistency model from observation (node-local snapshot at evaluation start vs CRDT-gossiped seconds-fresh peer state), and the type system reflects that — `actual: &State` carries observation, `tick: &TickContext` carries time, neither substitutes for the other. The `deadline` field is the natural home for the per-tick reconcile budget the evaluation broker imposes; the `tick` counter gives reconcilers a deterministic tie-breaker that does not depend on wall-clock granularity.
+
+The purity is load-bearing. Neither the trigger reason nor wall-clock time are *implicit* inputs to `reconcile`. `reconcile` does not `.await`, does not spawn subprocesses, does not call `Instant::now()` / `SystemTime::now()` directly, does not write directly to the IntentStore or ObservationStore, and does not write directly to libSQL. This property is what makes `reconcile` testable under DST (§21) and tractable for *Eventually Stable Reconciliation* proofs (see *Correctness Guarantees* below; USENIX OSDI '24 *Anvil*). The pre-hydration pattern is the same architectural shape every mature precedent converges on: kube-rs `Store<K>`, controller-runtime's cache-backed Reader, Anvil's `reconcile_core` + shim, the Elm Architecture's `update : Msg -> Model -> (Model, Cmd Msg)`, and Redux's middleware + pure-reducer. The same precedents converge on time-as-injected-state: controller-runtime threads time through `ctx.Deadline()`, Anvil models time via `expires_at` observation fields, Elm exposes `Time.now` as a command rather than a synchronous function. `hydrate` is deliberately outside the purity contract — its explicit purpose is the async libSQL read.
 
 Reconcilers have infinite lifecycle. They re-evaluate whenever their inputs change, forever; there is no terminal state, only convergence to desired-vs-actual equality.
 

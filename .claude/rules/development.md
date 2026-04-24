@@ -153,11 +153,17 @@ surface that lets the wrong call go to the wrong place.
 
 ## Reconciler I/O
 
-**Reconcilers do not perform I/O.** The §18 contract is
-`reconcile(desired, actual, db) → Vec<Action>` — pure over its inputs. No
-`.await` on network, no subprocess spawn, no wall-clock read, no direct
-store write. This is what makes DST (§21) and ESR verification (§18)
-possible; it is not optional.
+**`reconcile` does not perform I/O.** The §18 contract splits the
+reconciler into two methods: async `hydrate(target, &LibsqlHandle) ->
+Result<Self::View, HydrateError>` and sync pure
+`reconcile(desired, actual, &view, &tick) -> (Vec<Action>, NextView)`.
+All libSQL access lives exclusively in `hydrate`. No `.await` inside
+`reconcile`; no network, no subprocess spawn, no direct libSQL /
+IntentStore / ObservationStore write anywhere in `reconcile`.
+Wall-clock reads come from `tick.now` (a field on the
+`TickContext` parameter the runtime constructs once per evaluation),
+never `Instant::now()` / `SystemTime::now()`. This is what makes DST
+(§21) and ESR verification (§18) possible; it is not optional.
 
 When a reconciler needs to talk to an external service (a Restate admin
 API, an AWS account, a webhook, a custom internal service), the shape is:
@@ -169,21 +175,68 @@ async fn reconcile(&self, /* ... */) -> Vec<Action> {
     // ...
 }
 
-// Good — emit an HttpCall action; read the response on the next tick
-fn reconcile(&self, desired: &State, actual: &State, db: &Db) -> Vec<Action> {
-    let correlation = CorrelationKey::from((desired.id, desired.spec_hash, "register"));
-    match actual.external_call(&correlation).latest_status() {
-        None => vec![Action::HttpCall {
-            correlation,
-            target: desired.endpoint.clone(),
-            method: Method::POST,
-            body: build_register_payload(desired),
-            timeout: Duration::from_secs(30),
-            idempotency_key: Some(correlation.to_string()),
-        }],
-        Some(Status::Pending) | Some(Status::InFlight) => vec![],
-        Some(Status::Completed { response }) => converge_from_response(actual, response),
-        Some(Status::Failed { .. } | Status::TimedOut { .. }) => handle_failure(db),
+// Good — hydrate reads retry memory from libsql (the ONLY place this
+// reconciler author touches libsql); reconcile is sync + pure, emits
+// an HttpCall action, and returns a NextView the runtime persists.
+// The response arrives as observation on the next tick via `actual`.
+// Wall-clock comes from `tick.now`, never `Instant::now()`.
+impl Reconciler for RegisterReconciler {
+    type View = RetryMemory;
+
+    fn name(&self) -> &ReconcilerName { &self.name }
+
+    async fn hydrate(
+        &self,
+        target: &TargetResource,
+        db:     &LibsqlHandle,
+    ) -> Result<Self::View, HydrateError> {
+        // Free-form SQL in hydrate. Schema management
+        // (CREATE TABLE IF NOT EXISTS, ALTER TABLE ADD COLUMN) lives
+        // here too — no framework migrations Phase 1.
+        let row = db.query_one(
+            "SELECT attempts, last_correlation, next_attempt_at \
+             FROM register_memory WHERE target = ?",
+            &[target.as_str()],
+        ).await?;
+        Ok(RetryMemory::from_row(row))
+    }
+
+    fn reconcile(
+        &self,
+        desired: &State,
+        actual:  &State,
+        view:    &Self::View,
+        tick:    &TickContext,
+    ) -> (Vec<Action>, Self::View) {
+        let correlation = CorrelationKey::from((desired.id, desired.spec_hash, "register"));
+        let actions = match actual.external_call(&correlation).latest_status() {
+            None => vec![Action::HttpCall {
+                correlation: correlation.clone(),
+                target: desired.endpoint.clone(),
+                method: Method::POST,
+                body: build_register_payload(desired),
+                timeout: Duration::from_secs(30),
+                idempotency_key: Some(correlation.to_string()),
+            }],
+            Some(Status::Pending) | Some(Status::InFlight) => vec![],
+            Some(Status::Completed { response }) => converge_from_response(actual, response),
+            // Retry-budget gate: only re-dispatch once the backoff
+            // window has elapsed. `tick.now` is the runtime's
+            // single-snapshot of wall-clock for this evaluation —
+            // pure input, DST-controllable.
+            Some(Status::Failed { .. } | Status::TimedOut { .. })
+                if tick.now >= view.next_attempt_at =>
+            {
+                handle_failure(view)
+            }
+            Some(Status::Failed { .. } | Status::TimedOut { .. }) => vec![],
+        };
+        // NextView carries the updated retry memory; the runtime
+        // diffs (view → next_view) and persists the delta to libsql.
+        // Reconcile never writes libsql directly. Compute the next
+        // backoff deadline from `tick.now`, not from `Instant::now()`.
+        let next_view = view.bump_if_dispatched(&actions, tick.now);
+        (actions, next_view)
     }
 }
 ```
@@ -202,9 +255,9 @@ Rules:
    correlation does not.
 3. **Retry budgets live in reconciler libSQL.** The runtime does not
    auto-retry a failed `HttpCall` — that policy belongs to the
-   reconciler. Track attempts in the private DB; emit a new `HttpCall`
-   action until the budget is exhausted; then surface the failure to
-   status.
+   reconciler. Track attempts in the private DB via `hydrate` reads
+   and `NextView` writes; emit a new `HttpCall` action until the
+   budget is exhausted; then surface the failure to status.
 4. **Multi-step external sequences become workflows, not chains of
    `HttpCall`s.** If the reconciler would need to coordinate three or
    more external calls that must complete as a unit, emit
@@ -214,13 +267,26 @@ Rules:
    `external_call_results` table lives in the ObservationStore and is
    gossiped like any other observation row. Reconcilers read it
    locally, same as `alloc_status` or `service_backends`.
+6. **Reading wall-clock: use `tick.now` from the `TickContext`
+   parameter.** Never call `Instant::now()` / `SystemTime::now()`
+   inside `reconcile`. The dst-lint gate catches violations at PR
+   time. Time is input state, injected by the runtime — the same
+   `Clock` trait DST already controls (`SystemClock` in production,
+   `SimClock` under simulation). The `tick.now` snapshot is taken
+   once per evaluation; every `reconcile` call sees one consistent
+   "now," which is what makes the function pure over its inputs.
+   `tick.deadline` is the per-tick budget (consult to checkpoint
+   bounded work into `NextView`); `tick.tick` is a monotonic counter
+   useful as a deterministic tie-breaker.
 
 The reference case: a Restate-operator-equivalent in Overdrive is a
-reconciler that emits `HttpCall { target: restate_admin_url,
-method: POST, body: deployment_spec, idempotency_key: Some(...) }` on
-registration and reads `external_call_results` on the next tick to
-advance its state machine. No `async fn` in `reconcile`; no direct
-HTTP client; fully DST-replayable.
+reconciler whose `hydrate` reads retry memory, whose `reconcile` emits
+`HttpCall { target: restate_admin_url, method: POST, body:
+deployment_spec, idempotency_key: Some(...) }` on registration when
+`tick.now >= view.next_attempt_at`, and which reads
+`external_call_results` on the next tick to advance its state
+machine. No `async fn` in `reconcile`; no direct HTTP client; no
+direct wall-clock read; fully DST-replayable.
 
 ---
 

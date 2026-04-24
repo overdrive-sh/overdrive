@@ -654,8 +654,9 @@ Scenario: overdrive cluster init writes a fully-formed trust triple
   Given a scratch home directory with no previous overdrive state
   When Ana runs overdrive cluster init
   Then the CLI exits with status zero
-    And the file <home>/.overdrive/config exists and parses as YAML
-    And the YAML carries an endpoint, a ca field with base64-encoded PEM, a crt field, and a key field
+    And the file <home>/.overdrive/config exists and parses as ADR-0019 TOML
+    And the TOML carries a current-context pointer and a [[contexts]] array-of-tables
+    And each context carries an endpoint, a ca field with base64-encoded PEM, a crt field, and a key field
     And the CA's subject alternative names include 127.0.0.1 and ::1 and localhost
 ```
 

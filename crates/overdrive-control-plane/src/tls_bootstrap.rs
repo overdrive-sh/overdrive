@@ -234,15 +234,31 @@ pub fn mint_ephemeral_ca_with_hostname(
     })
 }
 
-/// Internal serde shape for the Talos-style `~/.overdrive/config`.
+/// Internal serde shape for the operator config at
+/// `~/.overdrive/config` (ADR-0019 canonical TOML shape).
+///
+/// `current-context` is a bare TOML key carrying the name of the
+/// active context; `contexts` is an array-of-tables where each entry
+/// carries its own `name`, `endpoint`, and the base64-PEM trust
+/// triple.
+///
+/// `deny_unknown_fields` on both structs surfaces malformed TOML as
+/// loud parse errors rather than silently accepting unrelated keys —
+/// per ADR-0019 Consequences → Enforcement, the rejection shape
+/// matches ADR-0010 §Enforcement (reject any context missing
+/// `ca`/`crt`/`key`).
 #[derive(Debug, Serialize)]
-struct TalosConfigOut<'a> {
-    context: &'static str,
-    contexts: std::collections::BTreeMap<&'static str, TalosContextOut<'a>>,
+#[serde(deny_unknown_fields)]
+struct OperatorConfigOut<'a> {
+    #[serde(rename = "current-context")]
+    current_context: &'static str,
+    contexts: Vec<OperatorContextOut<'a>>,
 }
 
 #[derive(Debug, Serialize)]
-struct TalosContextOut<'a> {
+#[serde(deny_unknown_fields)]
+struct OperatorContextOut<'a> {
+    name: &'static str,
     endpoint: &'a str,
     ca: String,
     crt: String,
@@ -250,16 +266,17 @@ struct TalosContextOut<'a> {
 }
 
 /// Write the trust triple to `<config_dir>/.overdrive/config` in the
-/// Talos-shape YAML per ADR-0010 §R2:
+/// ADR-0019 canonical TOML shape:
 ///
-/// ```yaml
-/// context: local
-/// contexts:
-///   local:
-///     endpoint: https://127.0.0.1:7001
-///     ca: <base64 PEM>
-///     crt: <base64 PEM>
-///     key: <base64 PEM>
+/// ```toml
+/// current-context = "local"
+///
+/// [[contexts]]
+/// name     = "local"
+/// endpoint = "https://127.0.0.1:7001"
+/// ca       = "<base64 PEM>"
+/// crt      = "<base64 PEM>"
+/// key      = "<base64 PEM>"
 /// ```
 ///
 /// The file is written with mode 0600 on Unix (owner read/write only)
@@ -269,7 +286,7 @@ struct TalosContextOut<'a> {
 /// # Errors
 ///
 /// Returns `ControlPlaneError::Internal` if the parent directory
-/// cannot be created, the file cannot be written, or YAML
+/// cannot be created, the file cannot be written, or TOML
 /// serialisation fails.
 pub fn write_trust_triple(
     config_dir: &Path,
@@ -283,22 +300,21 @@ pub fn write_trust_triple(
 
     let config_path = overdrive_dir.join("config");
 
-    let mut contexts = std::collections::BTreeMap::new();
-    contexts.insert(
-        "local",
-        TalosContextOut {
+    let doc = OperatorConfigOut {
+        current_context: "local",
+        contexts: vec![OperatorContextOut {
+            name: "local",
             endpoint,
             ca: BASE64.encode(material.ca_cert_pem.as_bytes()),
             crt: BASE64.encode(material.client_leaf_cert_pem.as_bytes()),
             key: BASE64.encode(material.client_leaf_key_pem.as_bytes()),
-        },
-    );
-    let doc = TalosConfigOut { context: "local", contexts };
+        }],
+    };
 
-    let yaml = serde_yaml::to_string(&doc)
-        .map_err(|e| ControlPlaneError::internal("yaml serialise", e))?;
+    let toml_text =
+        toml::to_string(&doc).map_err(|e| ControlPlaneError::internal("toml serialise", e))?;
 
-    write_file_owner_only(&config_path, yaml.as_bytes())?;
+    write_file_owner_only(&config_path, toml_text.as_bytes())?;
 
     Ok(())
 }
@@ -422,24 +438,35 @@ impl TrustTriple {
     }
 }
 
-/// Deserialisation shape for loading the Talos-style
-/// `~/.overdrive/config` — mirror image of `TalosConfigOut`.
+/// Deserialisation shape for loading the ADR-0019 TOML config —
+/// mirror image of `OperatorConfigOut`.
+///
+/// `deny_unknown_fields` matches ADR-0019 Consequences → Enforcement:
+/// malformed input surfaces as a loud parse error rather than a
+/// silent coercion. A context missing `ca` / `crt` / `key` fails the
+/// TOML parse (each is a required field, not `Option<String>`) rather
+/// than surviving into a runtime check — preserving ADR-0010
+/// §Enforcement last bullet at the serde layer.
 #[derive(Debug, Deserialize)]
-struct TalosConfigIn {
-    context: String,
-    contexts: std::collections::BTreeMap<String, TalosContextIn>,
+#[serde(deny_unknown_fields)]
+struct OperatorConfigIn {
+    #[serde(rename = "current-context")]
+    current_context: String,
+    contexts: Vec<OperatorContextIn>,
 }
 
 #[derive(Debug, Deserialize)]
-struct TalosContextIn {
+#[serde(deny_unknown_fields)]
+struct OperatorContextIn {
+    name: String,
     endpoint: String,
     ca: String,
     crt: String,
     key: String,
 }
 
-/// Load and validate a trust triple from a Talos-shape config file on
-/// disk. Pairs with [`write_trust_triple`].
+/// Load and validate a trust triple from the operator config file on
+/// disk (ADR-0019 TOML shape). Pairs with [`write_trust_triple`].
 ///
 /// On any parse or decode failure, returns
 /// `ControlPlaneError::Internal` whose message names the file path AND
@@ -449,30 +476,32 @@ struct TalosContextIn {
 /// # Errors
 ///
 /// - File-not-found, read errors: `Internal` naming the path.
-/// - YAML parse errors: `Internal` naming the path.
+/// - TOML parse errors: `Internal` naming the path.
 /// - Missing current-context entry in `contexts`: `Internal` naming
 ///   the path and the missing context name.
 /// - Base64 decode errors on `ca` / `crt` / `key`: `Internal` naming
 ///   the path and the field.
 pub fn load_trust_triple(path: &Path) -> Result<TrustTriple, ControlPlaneError> {
-    let bytes = std::fs::read(path).map_err(|e| {
+    let text = std::fs::read_to_string(path).map_err(|e| {
         ControlPlaneError::internal(format!("failed to read trust triple at {}", path.display()), e)
     })?;
 
-    let parsed: TalosConfigIn = serde_yaml::from_slice(&bytes).map_err(|e| {
+    let parsed: OperatorConfigIn = toml::from_str(&text).map_err(|e| {
         ControlPlaneError::internal(
-            format!("failed to parse trust triple at {}: invalid YAML", path.display()),
+            format!("failed to parse trust triple at {}: invalid TOML", path.display()),
             e,
         )
     })?;
 
-    let ctx = parsed.contexts.get(&parsed.context).ok_or_else(|| {
-        ControlPlaneError::Internal(format!(
-            "failed to parse trust triple at {}: current context `{}` not present in `contexts`",
-            path.display(),
-            parsed.context,
-        ))
-    })?;
+    let ctx = parsed.contexts.iter().find(|c| c.name == parsed.current_context).ok_or_else(
+        || {
+            ControlPlaneError::Internal(format!(
+                "failed to parse trust triple at {}: current-context `{}` not present in `contexts`",
+                path.display(),
+                parsed.current_context,
+            ))
+        },
+    )?;
 
     let ca_cert_pem = BASE64.decode(ctx.ca.as_bytes()).map_err(|e| {
         ControlPlaneError::internal(

@@ -198,12 +198,16 @@ fn trust_triple_accessors_return_distinct_material() {
 fn trust_triple_raw_base64_fields_map_to_ca_crt_key_in_that_order() {
     use serde::Deserialize;
     #[derive(Debug, Deserialize)]
-    struct TalosConfig {
-        context: String,
-        contexts: std::collections::BTreeMap<String, TalosContext>,
+    #[serde(deny_unknown_fields)]
+    struct OperatorConfig {
+        #[serde(rename = "current-context")]
+        current_context: String,
+        contexts: Vec<OperatorContext>,
     }
     #[derive(Debug, Deserialize)]
-    struct TalosContext {
+    #[serde(deny_unknown_fields)]
+    struct OperatorContext {
+        name: String,
         endpoint: String,
         ca: String,
         crt: String,
@@ -213,11 +217,15 @@ fn trust_triple_raw_base64_fields_map_to_ca_crt_key_in_that_order() {
     let (triple, material, tmp) = load_round_trip();
 
     let config_path = tmp.path().join(".overdrive").join("config");
-    let bytes = std::fs::read(&config_path).expect("read config");
-    let doc: TalosConfig = serde_yaml::from_slice(&bytes).expect("parse YAML");
-    let ctx = doc.contexts.get(&doc.context).expect("current context present");
+    let text = std::fs::read_to_string(&config_path).expect("read config");
+    let doc: OperatorConfig = toml::from_str(&text).expect("parse ADR-0019 TOML");
+    let ctx = doc
+        .contexts
+        .iter()
+        .find(|c| c.name == doc.current_context)
+        .expect("current context present");
 
-    // The Talos-shape fields must map to the three PEM components in
+    // The ADR-0019 TOML fields must map to the three PEM components in
     // ca / crt / key order. A mutation that swaps fields would be
     // caught here.
     assert_eq!(

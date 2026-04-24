@@ -2,7 +2,12 @@
 
 ## Status
 
-Accepted. 2026-04-23.
+Accepted. 2026-04-23. **§R2 superseded 2026-04-24 by ADR-0019**
+(on-disk format YAML → TOML; every other aspect of R2 — field names,
+context model, `current-context` pointer, base64 PEM embedding,
+`OVERDRIVE_CONFIG` env override, kubeconfig-shape ergonomics,
+Phase 5 forward-compat — preserved bit-for-bit). R1, R3, R4, R5
+remain in force.
 
 ## Context
 
@@ -211,3 +216,15 @@ for `127.0.0.1` requires DNS-01 or a local ACME server like
   describing how operators move from Phase 1 ephemeral CA to Phase 5
   persistent CA without a file-format migration. Mechanism TBD in
   Phase 5 DESIGN; this ADR guarantees forward-compatibility only.
+- 2026-04-24 — §R2 superseded by ADR-0019. On-disk format swapped
+  YAML → TOML; all other R2 content (field names, `current-context`,
+  `[[contexts]]` semantics, base64 PEM embedding, `OVERDRIVE_CONFIG`
+  env override, kubeconfig-shape ergonomics, Phase 5 forward-compat)
+  preserved bit-for-bit. Rationale: consistency with every other
+  operator-facing config surface in the project (already TOML per
+  ADR-0002, ADR-0003, whitepaper §§4, 6, 11, 23); `serde_yaml` was
+  archived upstream (design principle 7 better served by `toml`);
+  YAML 1.1 footguns (Norway problem, octal coercion, sexagesimal,
+  indentation-sensitive misparse) eliminated by construction. R1,
+  R3, R4, R5 unchanged. See ADR-0019 for full rationale and
+  considered alternatives (including JSON).

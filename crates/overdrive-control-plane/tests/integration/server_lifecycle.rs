@@ -8,10 +8,10 @@
 //! * `run_server` binds on `127.0.0.1:0` (ephemeral port), reports the
 //!   actually-bound address back through an `axum_server::Handle`, and
 //!   serves TLS over HTTP/2 with ALPN `h2, http/1.1`.
-//! * A `reqwest::Client` trusting the minted CA performs a real TLS 1.3
-//!   + HTTP/2 handshake against the server and receives HTTP 200 for
-//!   every one of the five ADR-0008 endpoint paths from the stub
-//!   router.
+//! * A `reqwest::Client` trusting the minted CA performs a real
+//!   TLS 1.3 and HTTP/2 handshake against the server and receives
+//!   HTTP 200 for every one of the five ADR-0008 endpoint paths
+//!   from the stub router.
 //! * ALPN negotiation produces HTTP/2 (not HTTP/1.1).
 //! * A `CancellationToken` triggers `graceful_shutdown`; an in-flight
 //!   request that began before cancellation still completes with 200.
@@ -40,23 +40,29 @@ fn client_trusting(ca_pem: &str) -> reqwest::Client {
         .expect("build reqwest client")
 }
 
-/// Read the CA PEM out of the trust-triple YAML that `run_server`
-/// wrote to `data_dir/.overdrive/config`.
+/// Read the CA PEM out of the ADR-0019 TOML trust triple that
+/// `run_server` wrote to `data_dir/.overdrive/config`.
 fn read_ca_from_trust_triple(data_dir: &std::path::Path) -> String {
     use base64::Engine as _;
     use base64::engine::general_purpose::STANDARD as BASE64;
 
     let config_path = data_dir.join(".overdrive").join("config");
-    let yaml = std::fs::read_to_string(&config_path)
+    let text = std::fs::read_to_string(&config_path)
         .expect(&format!("read trust triple at {}", config_path.display()));
 
-    let doc: serde_yaml::Value = serde_yaml::from_str(&yaml).expect("parse trust triple YAML");
+    // ADR-0019 canonical TOML shape: `current-context = "local"` +
+    // `[[contexts]]` array-of-tables, each entry carrying `name`,
+    // `endpoint`, and the base64-PEM trust triple.
+    let doc: toml::Value = toml::from_str(&text).expect("parse trust triple TOML");
     let ca_b64 = doc
         .get("contexts")
-        .and_then(|c| c.get("local"))
+        .and_then(toml::Value::as_array)
+        .and_then(|arr| {
+            arr.iter().find(|c| c.get("name").and_then(toml::Value::as_str) == Some("local"))
+        })
         .and_then(|c| c.get("ca"))
-        .and_then(|v| v.as_str())
-        .expect("contexts.local.ca field");
+        .and_then(toml::Value::as_str)
+        .expect("[[contexts]] with name=\"local\" must carry a ca field");
     let ca_bytes = BASE64.decode(ca_b64).expect("base64 decode ca");
     String::from_utf8(ca_bytes).expect("ca PEM is UTF-8")
 }
@@ -83,8 +89,8 @@ async fn spawn_server() -> (ServerHandle, SocketAddr, TempDir, String) {
 async fn run_server_binds_on_ephemeral_port_and_reports_bound_address() {
     let (handle, bound, _tmp, ca_pem) = spawn_server().await;
 
-    assert!(bound.port() > 0, "expected a non-zero ephemeral port, got {bound}",);
-    assert_eq!(bound.ip().to_string(), "127.0.0.1", "expected loopback bind, got {}", bound.ip(),);
+    assert!(bound.port() > 0, "expected a non-zero ephemeral port, got {bound}");
+    assert_eq!(bound.ip().to_string(), "127.0.0.1", "expected loopback bind, got {}", bound.ip());
 
     // Prove the server is actually reachable on the reported port
     // before shutdown. This pins the local_addr() return value to the
@@ -213,7 +219,7 @@ async fn all_adr_0008_paths_return_200_on_stub_router() {
     for path in observation_gets {
         let url = format!("https://localhost:{}{path}", bound.port());
         let resp = client.get(&url).send().await.expect(&format!("GET {path}"));
-        assert_eq!(resp.status(), reqwest::StatusCode::OK, "GET {path} expected 200",);
+        assert_eq!(resp.status(), reqwest::StatusCode::OK, "GET {path} expected 200");
         let body = resp.text().await.expect("body");
         assert_eq!(
             body, r#"{"rows":[]}"#,

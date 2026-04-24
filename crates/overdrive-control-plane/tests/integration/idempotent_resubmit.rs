@@ -4,10 +4,10 @@
 //! Tightens the contract pinned in `submit_round_trip.rs` beyond what
 //! step 03-01's tests already cover:
 //!
-//! 1. **§4.9** "IntentStore contains only one entry at the intent key" —
+//! 1. **§4.9** "`IntentStore` contains only one entry at the intent key" —
 //!    byte-identical re-submit must not produce a second stored copy or
 //!    drift the stored bytes.
-//! 2. **§4.10** "IntentStore still carries the original spec under that
+//! 2. **§4.10** "`IntentStore` still carries the original spec under that
 //!    intent key" after a 409 — verified through the live HTTP surface
 //!    via `GET /v1/jobs/{id}` rather than a back-door redb read, so the
 //!    invariant is phrased in terms an operator can observe.
@@ -25,7 +25,7 @@
 //! - ADR-0015 §4 — idempotent re-submit + 409 contract, Phase 1
 //!   LWW / read-before-write note.
 //! - ADR-0011 — rkyv-archived bytes deterministic per Job.
-//! - ADR-0008 — ErrorBody shape `{error, message, field}`.
+//! - ADR-0008 — `ErrorBody` shape `{error, message, field}`.
 //!
 //! Tier 3 — real redb file on `tempfile`, real axum server, real rustls
 //! handshake, real reqwest. Gated by the `integration-tests` feature at
@@ -68,15 +68,21 @@ fn read_ca_from_trust_triple(data_dir: &std::path::Path) -> String {
     use base64::engine::general_purpose::STANDARD as BASE64;
 
     let config_path = data_dir.join(".overdrive").join("config");
-    let yaml = std::fs::read_to_string(&config_path)
+    let text = std::fs::read_to_string(&config_path)
         .expect(&format!("read trust triple at {}", config_path.display()));
-    let doc: serde_yaml::Value = serde_yaml::from_str(&yaml).expect("parse trust triple YAML");
+    // ADR-0019 canonical TOML shape: `current-context = "local"` +
+    // `[[contexts]]` array-of-tables, each entry carrying `name`,
+    // `endpoint`, and the base64-PEM trust triple.
+    let doc: toml::Value = toml::from_str(&text).expect("parse trust triple TOML");
     let ca_b64 = doc
         .get("contexts")
-        .and_then(|c| c.get("local"))
+        .and_then(toml::Value::as_array)
+        .and_then(|arr| {
+            arr.iter().find(|c| c.get("name").and_then(toml::Value::as_str) == Some("local"))
+        })
         .and_then(|c| c.get("ca"))
-        .and_then(|v| v.as_str())
-        .expect("contexts.local.ca field");
+        .and_then(toml::Value::as_str)
+        .expect("[[contexts]] with name=\"local\" must carry a ca field");
     let ca_bytes = BASE64.decode(ca_b64).expect("base64 decode ca");
     String::from_utf8(ca_bytes).expect("ca PEM is UTF-8")
 }
@@ -328,14 +334,12 @@ async fn triple_resubmit_byte_identical_all_return_same_commit_index() {
     // every submission would drift the index on attempts 2 and 3.
     assert_eq!(
         indices[0], indices[1],
-        "commit_index must match on submits 1 and 2; got {:?}",
-        indices,
+        "commit_index must match on submits 1 and 2; got {indices:?}",
     );
     assert_eq!(
         indices[1], indices[2],
         "commit_index must match on submits 2 and 3 — idempotency must \
-         be stable across N re-submits, not just 2; got {:?}",
-        indices,
+         be stable across N re-submits, not just 2; got {indices:?}",
     );
 
     handle.shutdown(Duration::from_secs(2)).await;

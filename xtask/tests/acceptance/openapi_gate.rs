@@ -2,7 +2,7 @@
 //! Acceptance scenarios for phase-1-control-plane-core step 02-04 —
 //! `cargo xtask openapi-gen` / `openapi-check` subcommands.
 //!
-//! Covers test-scenarios.md §3.3 — OpenAPI schema derivation is
+//! Covers test-scenarios.md §3.3 — `OpenAPI` schema derivation is
 //! byte-identical on repeat runs, and `openapi-check` surfaces drift
 //! with an actionable message pointing at the first drifted schema.
 //!

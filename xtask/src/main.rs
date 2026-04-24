@@ -41,6 +41,17 @@ enum Task {
         manifest_path: std::path::PathBuf,
     },
 
+    /// ADR-0019 gate — assert no `serde_yaml` / `serde_yml` appears in
+    /// the `overdrive-cli` resolved dependency graph. Scoped to
+    /// non-dev dependencies; test-only YAML is out of scope.
+    /// See `docs/product/architecture/adr-0019-operator-config-format-toml.md`.
+    YamlFreeCli {
+        /// Path to the workspace `Cargo.toml` to scan. Defaults to the
+        /// enclosing workspace root (cwd-relative).
+        #[arg(long, default_value = "Cargo.toml")]
+        manifest_path: std::path::PathBuf,
+    },
+
     /// Tier 2 — BPF unit tests via `BPF_PROG_TEST_RUN`.
     BpfUnit,
 
@@ -272,6 +283,7 @@ fn run() -> Result<()> {
     match Args::parse().cmd {
         Task::Dst { seed, only } => xtask::dst::run(seed, only.as_deref()),
         Task::DstLint { manifest_path } => xtask::dst_lint::run(&manifest_path),
+        Task::YamlFreeCli { manifest_path } => xtask::yaml_free_cli::run(&manifest_path),
         Task::BpfUnit => bpf_unit(),
         Task::IntegrationTest { scope } => match scope {
             IntegrationScope::Vm { cache_dir, kernels } => integration_vm(&cache_dir, &kernels),

@@ -307,9 +307,7 @@ impl ObservationStore for SimObservationStore {
         Ok(Box::new(Box::pin(stream)) as ObservationSubscription)
     }
 
-    async fn alloc_status_rows(
-        &self,
-    ) -> Result<Vec<AllocStatusRow>, ObservationStoreError> {
+    async fn alloc_status_rows(&self) -> Result<Vec<AllocStatusRow>, ObservationStoreError> {
         // Deterministic iteration via the BTreeMap ordering on
         // AllocationId — every call on the same state returns rows in
         // the same order, so byte-identical responses across runs are
@@ -317,9 +315,7 @@ impl ObservationStore for SimObservationStore {
         Ok(self.inner.alloc_status_snapshot().into_values().collect())
     }
 
-    async fn node_health_rows(
-        &self,
-    ) -> Result<Vec<NodeHealthRow>, ObservationStoreError> {
+    async fn node_health_rows(&self) -> Result<Vec<NodeHealthRow>, ObservationStoreError> {
         // Phase 1: no LWW current-row index for node_health — surface
         // the full receive-order history, filtered to NodeHealth
         // variants. Phase 2 will replace with an LWW-winners snapshot.

@@ -89,12 +89,11 @@ fn write_config_with_malformed_field(dir: &std::path::Path, field: &str) -> std:
     let mut key = BASE64.encode(material.client_leaf_key_pem.as_bytes());
 
     // Corrupt only the named field with a string that is NOT valid
-    // base64. `@` and `#` are outside the base64 alphabet. We quote
-    // the YAML scalar so the garbage arrives at `BASE64.decode`
-    // byte-for-byte — without quoting, a leading `!` would be parsed
-    // as a YAML tag directive and the malformed-field test would
-    // collide with YAML's tag resolver rather than exercise the
-    // base64 decode path we care about.
+    // base64. `@` and `#` are outside the base64 alphabet. The TOML
+    // `"..."` basic-string form preserves the garbage byte-for-byte so
+    // it arrives at `BASE64.decode` intact — TOML does not have YAML's
+    // tag-resolver surface, so no escaping beyond the closing quote is
+    // required.
     let garbage = "@@@not-valid-base64###".to_string();
     match field {
         "ca" => ca = garbage,
@@ -103,16 +102,19 @@ fn write_config_with_malformed_field(dir: &std::path::Path, field: &str) -> std:
         other => panic!("test bug: unknown field {other}"),
     }
 
-    let yaml = format!(
-        "context: local\n\
-         contexts:\n  \
-           local:\n    \
-             endpoint: https://127.0.0.1:7001\n    \
-             ca: \"{ca}\"\n    \
-             crt: \"{crt}\"\n    \
-             key: \"{key}\"\n",
+    // ADR-0019 canonical shape: `current-context` + `[[contexts]]`
+    // array-of-tables, each entry carrying its own `name`.
+    let toml_text = format!(
+        "current-context = \"local\"\n\
+         \n\
+         [[contexts]]\n\
+         name = \"local\"\n\
+         endpoint = \"https://127.0.0.1:7001\"\n\
+         ca = \"{ca}\"\n\
+         crt = \"{crt}\"\n\
+         key = \"{key}\"\n",
     );
-    fs::write(&config_path, yaml).expect("write malformed config");
+    fs::write(&config_path, toml_text).expect("write malformed config");
     config_path
 }
 

@@ -521,7 +521,7 @@ fn harness_purity_reconciler() -> Box<dyn overdrive_core::reconciler::Reconciler
                 if n % 2 == 0 {
                     return vec![Action::Noop];
                 }
-                return vec![Action::Noop, Action::Noop];
+                vec![Action::Noop, Action::Noop]
             }
             #[cfg(not(feature = "canary-bug"))]
             vec![Action::Noop]
