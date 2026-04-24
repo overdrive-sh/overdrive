@@ -15,6 +15,7 @@ mod acceptance {
     mod commit_index_monotonic;
     mod local_store_basic_ops;
     mod local_store_error_paths;
+    mod put_if_absent;
     mod snapshot_roundtrip;
 
     // Phase-1-control-plane-core — step 03-06 `LocalObservationStore`.

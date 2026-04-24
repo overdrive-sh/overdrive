@@ -17,7 +17,7 @@ use axum::Json;
 use axum::extract::{Path, State};
 use overdrive_core::aggregate::{IntentKey, Job, JobSpecInput};
 use overdrive_core::id::{ContentHash, JobId};
-use overdrive_core::traits::intent_store::IntentStore;
+use overdrive_core::traits::intent_store::{IntentStore, PutOutcome};
 
 use crate::AppState;
 use crate::api;
@@ -80,29 +80,33 @@ pub async fn submit_job(
     // 3. Derive the canonical intent key (`jobs/<JobId>`).
     let key = IntentKey::for_job(&job.id);
 
-    // 4. Idempotency / conflict detection — read-then-write against the
-    //    LocalIntentStore (ADR-0015 §4 Phase 1 note).
-    if let Some(existing) = state.store.get(key.as_bytes()).await? {
-        if existing.as_ref() == archived.as_ref() {
-            // Byte-identical re-submission: return the current
-            // commit_index without writing again.
-            return Ok(Json(api::SubmitJobResponse {
-                job_id: job.id.to_string(),
-                commit_index: state.store.commit_index(),
-            }));
+    // 4. Atomic idempotency / conflict detection via `put_if_absent`.
+    //    The existence check and the insert happen in a single store
+    //    transaction — this closes the TOCTOU window that would open
+    //    under a naive `get` (read txn) + `put` (write txn) pair,
+    //    where two concurrent submitters for the same key could both
+    //    see `None` on the read and both fall through to the write,
+    //    silently clobbering the first spec.
+    match state.store.put_if_absent(key.as_bytes(), archived.as_ref()).await? {
+        PutOutcome::Inserted => Ok(Json(api::SubmitJobResponse {
+            job_id: job.id.to_string(),
+            commit_index: state.store.commit_index(),
+        })),
+        PutOutcome::KeyExists { existing } => {
+            if existing.as_ref() == archived.as_ref() {
+                // Byte-identical re-submission: return the current
+                // commit_index without advancing it.
+                Ok(Json(api::SubmitJobResponse {
+                    job_id: job.id.to_string(),
+                    commit_index: state.store.commit_index(),
+                }))
+            } else {
+                Err(ControlPlaneError::Conflict {
+                    message: format!("a different spec is already registered at {}", key.as_str()),
+                })
+            }
         }
-        return Err(ControlPlaneError::Conflict {
-            message: format!("a different spec is already registered at {}", key.as_str()),
-        });
     }
-
-    // 5. Commit. The counter advances post-commit inside `LocalIntentStore::put`.
-    state.store.put(key.as_bytes(), archived.as_ref()).await?;
-
-    Ok(Json(api::SubmitJobResponse {
-        job_id: job.id.to_string(),
-        commit_index: state.store.commit_index(),
-    }))
 }
 
 /// `GET /v1/jobs/{id}` — read via `IntentStore::get`, rkyv-access the

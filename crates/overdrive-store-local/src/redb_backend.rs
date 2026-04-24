@@ -40,7 +40,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use futures::Stream;
 use overdrive_core::traits::intent_store::{
-    IntentStore, IntentStoreError, StateSnapshot, TxnOp, TxnOutcome,
+    IntentStore, IntentStoreError, PutOutcome, StateSnapshot, TxnOp, TxnOutcome,
 };
 use redb::{Database, ReadableTable, TableDefinition};
 use tokio::sync::broadcast;
@@ -188,6 +188,57 @@ impl IntentStore for LocalIntentStore {
         self.bump_commit();
         self.emit(Bytes::from(emit_key), Bytes::from(emit_value));
         Ok(())
+    }
+
+    /// Atomic compare-and-set backed by a single redb write
+    /// transaction. The `get` + `insert` pair executes inside one
+    /// `begin_write` / `commit` cycle; redb serialises write
+    /// transactions, so two concurrent `put_if_absent` calls for the
+    /// same key cannot both observe the key as absent.
+    ///
+    /// This closes the TOCTOU window that opens when a caller does a
+    /// separate `get` (read txn) followed by a `put` (write txn):
+    /// another writer can interleave between the two and silently
+    /// overwrite the first write.
+    async fn put_if_absent(
+        &self,
+        key: &[u8],
+        value: &[u8],
+    ) -> Result<PutOutcome, IntentStoreError> {
+        let key_vec = key.to_vec();
+        let value_vec = value.to_vec();
+        let inner = Arc::clone(&self.inner);
+
+        let (outcome, emit) = tokio::task::spawn_blocking(move || {
+            let write = inner.db.begin_write().map_err(map_transaction_error)?;
+            let (outcome, emit) = {
+                let mut table = write.open_table(ENTRIES_TABLE).map_err(map_table_error)?;
+                // `get` inside the write transaction sees a consistent
+                // view with the subsequent `insert` — this is what makes
+                // the check-and-set atomic.
+                if let Some(existing) = table.get(key_vec.as_slice()).map_err(map_storage_error)? {
+                    let bytes = Bytes::copy_from_slice(existing.value());
+                    (PutOutcome::KeyExists { existing: bytes }, None)
+                } else {
+                    table
+                        .insert(key_vec.as_slice(), value_vec.as_slice())
+                        .map_err(map_storage_error)?;
+                    (PutOutcome::Inserted, Some((key_vec, value_vec)))
+                }
+            };
+            write.commit().map_err(map_commit_error)?;
+            Ok::<_, IntentStoreError>((outcome, emit))
+        })
+        .await
+        .map_err(map_join_error)??;
+
+        // Counter and watch events only fire on the insert branch —
+        // a `KeyExists` return is a no-op commit, semantically.
+        if let Some((emit_key, emit_value)) = emit {
+            self.bump_commit();
+            self.emit(Bytes::from(emit_key), Bytes::from(emit_value));
+        }
+        Ok(outcome)
     }
 
     async fn delete(&self, key: &[u8]) -> Result<(), IntentStoreError> {

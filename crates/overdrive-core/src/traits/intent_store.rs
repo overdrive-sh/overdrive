@@ -51,6 +51,35 @@ pub enum TxnOutcome {
     Conflict,
 }
 
+/// Outcome of an atomic compare-and-set `put_if_absent` against the
+/// [`IntentStore`].
+///
+/// The existence check and the write happen inside a single store
+/// transaction — a concurrent caller racing on the same key cannot
+/// observe an intermediate state where both callers see `None` on the
+/// read and both fall through to a blind `put`. Exactly one caller
+/// wins with [`Inserted`]; every other caller loses with
+/// [`KeyExists`], receiving the bytes that actually occupy the key.
+///
+/// Handlers use the returned bytes to distinguish idempotent
+/// re-submission (byte-identical to the losing caller's payload) from
+/// genuine conflict (different payload at the same key) — see
+/// `overdrive_control_plane::handlers::submit_job`.
+///
+/// [`Inserted`]: PutOutcome::Inserted
+/// [`KeyExists`]: PutOutcome::KeyExists
+#[derive(Debug, Clone)]
+pub enum PutOutcome {
+    /// The key was absent when the transaction began; the new value
+    /// was written.
+    Inserted,
+    /// The key was already populated when the transaction began; no
+    /// write occurred. `existing` carries the bytes that currently
+    /// occupy the key so the caller can compare byte-for-byte before
+    /// deciding whether to return 200 (idempotent) or 409 (conflict).
+    KeyExists { existing: Bytes },
+}
+
 /// Portable full-state snapshot — used for `LocalIntentStore → RaftStore`
 /// migration, routine Raft snapshots in HA mode, and DR backups.
 ///
@@ -111,6 +140,22 @@ pub trait IntentStore: Send + Sync + 'static {
     async fn get(&self, key: &[u8]) -> Result<Option<Bytes>, IntentStoreError>;
 
     async fn put(&self, key: &[u8], value: &[u8]) -> Result<(), IntentStoreError>;
+
+    /// Atomic compare-and-set — insert `value` at `key` only if `key`
+    /// is currently absent. The existence check and the write happen
+    /// inside a single store transaction, so two concurrent callers
+    /// racing on the same key cannot both see the key as absent and
+    /// both commit a write: exactly one wins with
+    /// [`PutOutcome::Inserted`]; the other observes
+    /// [`PutOutcome::KeyExists`] carrying the bytes that actually
+    /// occupy the key.
+    ///
+    /// This is the correct primitive for handlers that need to
+    /// implement an idempotent create-or-conflict HTTP contract (`POST
+    /// /v1/jobs`); a naive `get` followed by a separate `put` has a
+    /// TOCTOU window and silently loses writes under concurrency.
+    async fn put_if_absent(&self, key: &[u8], value: &[u8])
+    -> Result<PutOutcome, IntentStoreError>;
 
     async fn delete(&self, key: &[u8]) -> Result<(), IntentStoreError>;
 

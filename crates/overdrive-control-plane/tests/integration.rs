@@ -24,6 +24,7 @@
 // lookup base so the per-scenario files under `tests/integration/`
 // resolve naturally.
 mod integration {
+    mod concurrent_submit_toctou;
     mod describe_round_trip;
     mod idempotent_resubmit;
     mod libsql_isolation;
