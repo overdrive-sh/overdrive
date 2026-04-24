@@ -1051,6 +1051,41 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-04-24T13:44:08Z"
+    },
+    {
+      "sid": "04-09",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-24T13:45:11Z"
+    },
+    {
+      "sid": "04-10",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-24T13:49:13Z"
+    },
+    {
+      "sid": "04-10",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-24T13:50:15Z"
+    },
+    {
+      "sid": "04-10",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: documentation-only step; doctest from RED_ACCEPTANCE is the sole acceptance surface",
+      "t": "2026-04-24T13:50:15Z"
+    },
+    {
+      "sid": "04-10",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-24T13:53:28Z"
     }
   ]
 }

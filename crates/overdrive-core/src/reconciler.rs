@@ -2,25 +2,142 @@
 //! pre-hydration + `TickContext` time injection per ADR-0013 (amended
 //! 2026-04-24).
 //!
-//! The trait splits into two methods:
+//! A reconciler is a pure function over `(desired, actual, view, tick)`
+//! that emits a list of [`Action`]s to converge the system toward the
+//! desired state. Four patterns govern how an author writes one; each
+//! is load-bearing for DST replay (whitepaper §21) and ESR verification
+//! (whitepaper §18 / research §1.1, §10.5).
 //!
-//! * `async fn hydrate(&self, target, db) -> Result<Self::View, HydrateError>`
-//!   — the ONLY place a reconciler author touches libSQL. Reads the
-//!   reconciler's private memory into an author-declared `View`.
-//! * `fn reconcile(&self, desired, actual, view, tick) ->
-//!   (Vec<Action>, Self::View)` — pure, synchronous, no I/O. The
-//!   returned `NextView` is diffed by the runtime and persisted
-//!   back to libSQL; reconcilers never write libSQL directly.
+//! # The pre-hydration pattern — ADR-0013 §2, §2b
 //!
-//! `TickContext` carries the runtime's single-snapshot view of
-//! wall-clock, the monotonic tick counter, and the per-tick deadline —
-//! reading `Instant::now()` / `SystemTime::now()` inside `reconcile` is
-//! banned (dst-lint catches it at PR time).
+//! The trait splits into two methods with distinct purity contracts:
 //!
-//! `AnyReconciler` is an enum that dispatches the trait across every
-//! first-party reconciler kind via match arms — no `Box<dyn>`, no
-//! `async_trait`, no object-safety concerns. Adding a reconciler means
-//! adding a variant (and its arm).
+//! * [`Reconciler::hydrate`] is `async` — the ONLY place a reconciler
+//!   author touches libSQL. It reads the reconciler's private memory
+//!   into an author-declared [`Reconciler::View`]. Free-form SQL lives
+//!   here; so does schema management (CREATE TABLE IF NOT EXISTS, ALTER
+//!   TABLE ADD COLUMN). No framework migrations in Phase 1.
+//! * [`Reconciler::reconcile`] is sync and pure — no `.await`, no I/O,
+//!   no direct store write. It operates only on its arguments. Two
+//!   invocations with the same inputs MUST produce byte-identical
+//!   output tuples.
+//!
+//! The runtime owns the `.await` on `hydrate`, the diff-and-persist of
+//! the returned view, and the commit of emitted actions through Raft.
+//!
+//! # The time-injection pattern — ADR-0013 §2c
+//!
+//! [`TickContext::now`] is the only legitimate source of "now" inside
+//! `reconcile`. The runtime snapshots the injected `Clock` trait once
+//! per evaluation and passes the result as a pure input — the same
+//! `SystemClock` in production and `SimClock` under simulation that
+//! control every other non-determinism boundary (whitepaper §21).
+//!
+//! Reading `Instant::now()` or `SystemTime::now()` inside a `reconcile`
+//! body breaks DST replay and ESR verification; dst-lint catches it at
+//! PR time (see `.claude/rules/development.md` §Reconciler I/O).
+//!
+//! # The `AnyReconciler` enum-dispatch convention — ADR-0013 §2a
+//!
+//! `async fn` in traits is not dyn-compatible, and
+//! [`Reconciler::View`] is an associated type — together they make
+//! `Box<dyn Reconciler>` impossible. [`AnyReconciler`] is a hand-rolled
+//! enum that dispatches each trait method via a match arm per variant.
+//! Static dispatch, zero heap allocation on the hot path, compile-time
+//! exhaustiveness across every registered reconciler kind. **Adding a
+//! new first-party reconciler means adding one variant and one match
+//! arm** in each of `name`, `hydrate`, and `reconcile`. Third-party
+//! reconcilers land through the WASM extension path (whitepaper §18
+//! "Extension Model") and do not go through `AnyReconciler`.
+//!
+//! # The `NextView` return convention — ADR-0013 §2b
+//!
+//! Reconcilers express writes as **data**, not side effects. The
+//! [`Reconciler::reconcile`] signature returns `(Vec<Action>,
+//! Self::View)`; the second element is the *next* view. The runtime
+//! diffs it against the hydrated view and persists the delta back to
+//! libSQL. Reconcilers never write libSQL directly — the
+//! `&LibsqlHandle` is not passed to `reconcile` at all. Phase 1
+//! convention is full-View replacement (`NextView = Self::View`); a
+//! typed-diff shape is an additive future extension.
+//!
+//! # Example
+//!
+//! A minimal Phase 2+ author walkthrough, modeled on the Phase 1
+//! [`NoopHeartbeat`] shape. Returns one [`Action::Noop`] and an
+//! unchanged `()` next-view. The `view` and `tick` parameters are
+//! referenced explicitly to demonstrate how a real reconciler would
+//! consume them.
+//!
+//! ```
+//! use overdrive_core::reconciler::{
+//!     Action, HydrateError, LibsqlHandle, Reconciler, ReconcilerName,
+//!     State, TargetResource, TickContext,
+//! };
+//!
+//! struct HelloReconciler {
+//!     name: ReconcilerName,
+//! }
+//!
+//! impl HelloReconciler {
+//!     fn new() -> Self {
+//!         Self {
+//!             name: ReconcilerName::new("hello")
+//!                 .expect("'hello' is a valid ReconcilerName"),
+//!         }
+//!     }
+//! }
+//!
+//! impl Reconciler for HelloReconciler {
+//!     // Phase 1 reconcilers carry no private memory — View is ().
+//!     // Phase 2+ authors declare a struct decoded from libSQL rows
+//!     // inside `hydrate`.
+//!     type View = ();
+//!
+//!     fn name(&self) -> &ReconcilerName {
+//!         &self.name
+//!     }
+//!
+//!     // The ONLY place a reconciler author touches libSQL. Phase 1
+//!     // reconcilers hold no memory, so this is trivially Ok(()).
+//!     async fn hydrate(
+//!         &self,
+//!         _target: &TargetResource,
+//!         _db: &LibsqlHandle,
+//!     ) -> Result<Self::View, HydrateError> {
+//!         Ok(())
+//!     }
+//!
+//!     // Pure, synchronous. No `.await`, no I/O, no direct store
+//!     // write. The signature IS the contract.
+//!     fn reconcile(
+//!         &self,
+//!         _desired: &State,
+//!         _actual: &State,
+//!         view: &Self::View,
+//!         tick: &TickContext,
+//!     ) -> (Vec<Action>, Self::View) {
+//!         // `tick.now` is the only legitimate source of "now" inside
+//!         // reconcile. Phase 2+ reconcilers consult it for retry-
+//!         // budget gates, backoff deadlines, and lease-renewal
+//!         // decisions. NEVER call `Instant::now()` here — dst-lint
+//!         // will reject the PR.
+//!         let _now = tick.now;
+//!
+//!         // `view` carries the hydrated private memory. The returned
+//!         // next-view (second element of the tuple) is diffed by the
+//!         // runtime against this value and persisted back to libSQL.
+//!         // Reconcilers never write libSQL directly.
+//!         let next_view: Self::View = *view;
+//!
+//!         (vec![Action::Noop], next_view)
+//!     }
+//! }
+//!
+//! // Construction is plain — the runtime wraps the instance in
+//! // `AnyReconciler::<Variant>` when registering.
+//! let _reconciler = HelloReconciler::new();
+//! ```
 
 use std::fmt;
 use std::str::FromStr;
@@ -167,12 +284,23 @@ pub trait Reconciler: Send + Sync {
 
     /// Canonical name. Used for libSQL path derivation and evaluation
     /// broker keying.
+    ///
+    /// Per ADR-0013 §2 and §2a, the name is the [`AnyReconciler`]
+    /// registry key; match arms in [`AnyReconciler::name`],
+    /// [`AnyReconciler::hydrate`], and [`AnyReconciler::reconcile`]
+    /// dispatch on the variant that holds this name.
     fn name(&self) -> &ReconcilerName;
 
     /// Async read phase. The ONLY place a reconciler author touches
     /// libSQL. Free-form SQL lives here; schema management (CREATE
     /// TABLE IF NOT EXISTS, ALTER TABLE ADD COLUMN) lives here too —
     /// no framework migrations in Phase 1.
+    ///
+    /// Per ADR-0013 §2 and §2b, the runtime's tick loop is
+    /// hydrate-then-reconcile: the runtime owns the `.await` on this
+    /// method, hands the resulting [`Reconciler::View`] to
+    /// [`Reconciler::reconcile`] as a pure input, and never exposes
+    /// the `&LibsqlHandle` to `reconcile`.
     ///
     /// # Errors
     ///
@@ -185,8 +313,16 @@ pub trait Reconciler: Send + Sync {
     ) -> impl std::future::Future<Output = Result<Self::View, HydrateError>> + Send;
 
     /// Pure function over `(desired, actual, view, tick) ->
-    /// (Vec<Action>, NextView)`. See whitepaper §18, ADR-0013 §2 /
-    /// §2c, and `.claude/rules/development.md` §Reconciler I/O.
+    /// (Vec<Action>, NextView)`. See whitepaper §18, ADR-0013 §2 / §2b
+    /// / §2c, and `.claude/rules/development.md` §Reconciler I/O.
+    ///
+    /// Per ADR-0013 §2b, `view` is the hydrated [`Reconciler::View`]
+    /// and the second element of the returned tuple is the next-view
+    /// — the runtime diffs it against `view` and persists the delta
+    /// back to libSQL. Per ADR-0013 §2c, `tick` is the single pure
+    /// time input constructed by the runtime once per evaluation;
+    /// reading `Instant::now()` / `SystemTime::now()` inside this body
+    /// is banned.
     ///
     /// Purity contract: two invocations with the same inputs MUST
     /// produce byte-identical `(actions, next_view)` tuples. The
@@ -231,20 +367,39 @@ pub enum Action {
     /// the result from observation on the next tick per
     /// `development.md` §Reconciler I/O.
     HttpCall {
+        /// Cause-to-response linkage. Derived from
+        /// `(reconciliation_target, spec_hash, purpose)` per
+        /// `development.md` §Reconciler I/O so the next tick's
+        /// `hydrate` + `reconcile` pair can find the prior response
+        /// deterministically.
         correlation: CorrelationKey,
-        // `String` rather than `http::Uri` / `http::Method` per ADR-0013
-        // §4 — avoid pulling a transport dep onto the core compile path.
-        // The runtime shim parses these.
+        /// Target URL. `String` rather than `http::Uri` per ADR-0013 §4
+        /// — the runtime shim parses this, keeping the transport dep
+        /// off the core compile path.
         target: String,
+        /// HTTP method. `String` rather than `http::Method` for the
+        /// same reason as `target`.
         method: String,
+        /// Request body bytes.
         body: Bytes,
+        /// Per-attempt timeout.
         timeout: Duration,
+        /// Idempotency key supplied to the remote API when supported.
+        /// The runtime executes `HttpCall` at-least-once; remote-side
+        /// idempotency is what makes the effect exactly-once per
+        /// `development.md` §Reconciler I/O.
         idempotency_key: Option<String>,
     },
 
     /// Start a workflow. `WorkflowSpec` is a placeholder in Phase 1;
     /// workflow runtime lands Phase 3.
-    StartWorkflow { spec: WorkflowSpec, correlation: CorrelationKey },
+    StartWorkflow {
+        /// The workflow to start. Phase 1 placeholder — see
+        /// [`WorkflowSpec`].
+        spec: WorkflowSpec,
+        /// Cause-to-response linkage per [`Action::HttpCall`].
+        correlation: CorrelationKey,
+    },
 }
 
 /// Placeholder for the workflow spec. Phase 3 replaces with real shape.
@@ -330,12 +485,23 @@ impl FromStr for ReconcilerName {
 /// Errors from `ReconcilerName::new`.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ReconcilerNameError {
+    /// Empty input string.
     #[error("empty reconciler name")]
     Empty,
+    /// Input longer than the 63-byte cap.
     #[error("reconciler name too long: {got} > 63")]
-    TooLong { got: usize },
+    TooLong {
+        /// Observed length of the rejected input.
+        got: usize,
+    },
+    /// Input contained a character outside `[a-z0-9-]`. Path-traversal
+    /// characters (`.`, `/`, `\`, `:`) are rejected on this arm.
     #[error("reconciler name contains forbidden character: {found:?}")]
-    ForbiddenCharacter { found: char },
+    ForbiddenCharacter {
+        /// The offending character.
+        found: char,
+    },
+    /// Input did not start with a lowercase ASCII letter.
     #[error("reconciler name must start with a lowercase letter")]
     InvalidLead,
 }
@@ -403,10 +569,16 @@ impl FromStr for TargetResource {
 /// Errors from `TargetResource::new`.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum TargetResourceError {
+    /// Empty input string.
     #[error("empty target resource")]
     Empty,
+    /// Input did not match any canonical prefix (`job/`, `node/`,
+    /// `alloc/`) with a non-empty id component.
     #[error("target resource has unknown shape: {raw}")]
-    UnknownShape { raw: String },
+    UnknownShape {
+        /// The rejected input, echoed back for diagnostics.
+        raw: String,
+    },
 }
 
 // ---------------------------------------------------------------------------
