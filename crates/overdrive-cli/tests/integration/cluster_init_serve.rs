@@ -46,32 +46,10 @@ fn read_ca_bytes_from_config(config_path: &Path) -> Vec<u8> {
     base64::engine::general_purpose::STANDARD.decode(ca_b64).expect("ca is valid base64")
 }
 
-/// Rewrite the `endpoint` field in the on-disk trust-triple TOML so it
-/// names the real ephemeral port the server bound to. The operator
-/// config is the sole source of the endpoint (no `--endpoint`
-/// override), so tests mutate the on-disk config to point at the live
-/// server.
-fn rewrite_config_endpoint(config_path: &Path, new_endpoint: &str) {
-    let original = std::fs::read_to_string(config_path).expect("read existing trust-triple config");
-    let mut doc: toml::Value = toml::from_str(&original).expect("parse existing config toml");
-    let contexts =
-        doc.get_mut("contexts").and_then(|c| c.as_array_mut()).expect("contexts array present");
-    for ctx in contexts.iter_mut() {
-        if let Some(tbl) = ctx.as_table_mut() {
-            tbl.insert("endpoint".to_owned(), toml::Value::String(new_endpoint.to_owned()));
-        }
-    }
-    let rewritten = toml::to_string(&doc).expect("reserialise config toml");
-    std::fs::write(config_path, rewritten).expect("write rewritten config");
-}
-
-/// Build an `ApiClient` for the live server bound on `bound` by first
-/// rewriting the on-disk trust triple so its `endpoint` field names the
-/// real ephemeral port, then loading through the sole `from_config`
-/// constructor.
-fn build_client(config_path: &Path, bound: SocketAddr) -> ApiClient {
-    let live_endpoint = format!("https://localhost:{}", bound.port());
-    rewrite_config_endpoint(config_path, &live_endpoint);
+/// Build an `ApiClient` from the on-disk trust triple written by
+/// `run_server`. The triple's `endpoint` names the resolved-port URL
+/// the server bound to, so `from_config` is the only call needed.
+fn build_client(config_path: &Path) -> ApiClient {
     ApiClient::from_config(config_path).expect("build ApiClient")
 }
 
@@ -168,8 +146,7 @@ async fn serve_run_binds_ephemeral_port_and_returns_serve_handle() {
     // observation-read endpoint wired in step 03-03. A fresh store
     // returns {"rows":[]}.
     let config_path = tmp.path().join(".overdrive").join("config");
-    let bound: SocketAddr = format!("127.0.0.1:{port}").parse().expect("parse bound addr");
-    let client = build_client(&config_path, bound);
+    let client = build_client(&config_path);
     let nodes = client.node_list().await.expect("node_list against live server");
     assert!(nodes.rows.is_empty(), "fresh store must report zero node rows");
 
@@ -209,13 +186,12 @@ async fn probe_after_shutdown_returns_transport_error() {
 
     let port = handle.endpoint().port().expect("port");
     let config_path = tmp.path().join(".overdrive").join("config");
-    let bound: SocketAddr = format!("127.0.0.1:{port}").parse().expect("parse bound addr");
 
     // Shut down FIRST, then build a fresh client and probe — the
     // server is gone.
     handle.shutdown().await.expect("clean shutdown");
 
-    let client = build_client(&config_path, bound);
+    let client = build_client(&config_path);
     let err = client.cluster_status().await.expect_err("probe after shutdown must fail");
 
     match &err {

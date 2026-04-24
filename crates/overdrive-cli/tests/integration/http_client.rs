@@ -44,33 +44,10 @@ async fn spawn_server() -> (ServerHandle, SocketAddr, TempDir, std::path::PathBu
     (handle, bound, tmp, config_path)
 }
 
-/// Rewrite the `endpoint` field in the on-disk trust-triple TOML so it
-/// names the real ephemeral port the server bound to. The operator
-/// config is the sole source of the endpoint (no `--endpoint`
-/// override), so tests mutate the on-disk config to point at the live
-/// server.
-fn rewrite_config_endpoint(config_path: &Path, new_endpoint: &str) {
-    let original = std::fs::read_to_string(config_path).expect("read existing trust-triple config");
-    let mut doc: toml::Value = toml::from_str(&original).expect("parse existing config toml");
-    let contexts =
-        doc.get_mut("contexts").and_then(|c| c.as_array_mut()).expect("contexts array present");
-    for ctx in contexts.iter_mut() {
-        if let Some(tbl) = ctx.as_table_mut() {
-            tbl.insert("endpoint".to_owned(), toml::Value::String(new_endpoint.to_owned()));
-        }
-    }
-    let rewritten = toml::to_string(&doc).expect("reserialise config toml");
-    std::fs::write(config_path, rewritten).expect("write rewritten config");
-}
-
-/// Build an `ApiClient` from the on-disk trust triple pointed at the
-/// live server. `run_server` writes the endpoint as
-/// `https://127.0.0.1:0` (the configured bind, NOT the resolved port);
-/// we rewrite the config to name the live ephemeral port, then load
-/// through the sole `from_config` constructor.
-fn build_client_for(config_path: &Path, bound: SocketAddr) -> ApiClient {
-    let live_endpoint = format!("https://localhost:{}", bound.port());
-    rewrite_config_endpoint(config_path, &live_endpoint);
+/// Build an `ApiClient` from the on-disk trust triple written by
+/// `run_server`. The triple's `endpoint` names the resolved-port URL
+/// the server bound to, so `from_config` is the only call needed.
+fn build_client_for(config_path: &Path) -> ApiClient {
     ApiClient::from_config(config_path).expect("build ApiClient from trust triple")
 }
 
@@ -80,7 +57,7 @@ fn build_client_for(config_path: &Path, bound: SocketAddr) -> ApiClient {
 
 #[tokio::test]
 async fn from_config_loads_trust_triple_and_builds_client() {
-    let (handle, bound, _tmp, config_path) = spawn_server().await;
+    let (handle, _bound, _tmp, config_path) = spawn_server().await;
 
     // No endpoint override — consume whatever `run_server` wrote.
     let client = ApiClient::from_config(&config_path).expect("build ApiClient from on-disk config");
@@ -99,7 +76,7 @@ async fn from_config_loads_trust_triple_and_builds_client() {
     // renders `{"rows":[]}` on a fresh store. The `/v1/cluster/info`
     // route is still stubbed until step 03-05 wires the real handler,
     // so we cannot decode it as `ClusterStatus` from this test.
-    let live = build_client_for(&config_path, bound);
+    let live = build_client_for(&config_path);
     let nodes = live.node_list().await.expect("live node_list");
     assert!(nodes.rows.is_empty(), "fresh store must report zero node rows");
 
@@ -121,8 +98,8 @@ async fn from_config_loads_trust_triple_and_builds_client() {
 
 #[tokio::test]
 async fn observation_reads_against_in_process_server_return_ok() {
-    let (handle, bound, _tmp, config_path) = spawn_server().await;
-    let client = build_client_for(&config_path, bound);
+    let (handle, _bound, _tmp, config_path) = spawn_server().await;
+    let client = build_client_for(&config_path);
 
     let allocs = client.alloc_status().await.expect("alloc_status");
     assert!(allocs.rows.is_empty(), "fresh store must report zero alloc rows");
@@ -139,8 +116,8 @@ async fn observation_reads_against_in_process_server_return_ok() {
 
 #[tokio::test]
 async fn submit_job_then_describe_round_trips_via_http_client() {
-    let (handle, bound, _tmp, config_path) = spawn_server().await;
-    let client = build_client_for(&config_path, bound);
+    let (handle, _bound, _tmp, config_path) = spawn_server().await;
+    let client = build_client_for(&config_path);
 
     let spec = JobSpecInput {
         id: "payments".to_owned(),
@@ -178,7 +155,7 @@ async fn cluster_status_with_no_server_returns_transport_error_with_actionable_m
 
     // Point the client at the now-closed port. `from_config` does NOT
     // attempt to connect — it only loads the trust material.
-    let client = build_client_for(&config_path, bound);
+    let client = build_client_for(&config_path);
 
     let err = client.cluster_status().await.expect_err("no server → transport error");
 
@@ -216,8 +193,8 @@ async fn cluster_status_with_no_server_returns_transport_error_with_actionable_m
 
 #[tokio::test]
 async fn submit_with_invalid_spec_returns_http_status_400_with_error_body() {
-    let (handle, bound, _tmp, config_path) = spawn_server().await;
-    let client = build_client_for(&config_path, bound);
+    let (handle, _bound, _tmp, config_path) = spawn_server().await;
+    let client = build_client_for(&config_path);
 
     // `replicas = 0` fails `Job::from_spec` at the NonZeroU32 gate;
     // server returns 400 with ErrorBody { error: "validation",

@@ -168,15 +168,11 @@ pub async fn run_server_with_obs(
     // that is a no-op success for our purposes.
     let _ = rustls::crypto::ring::default_provider().install_default();
 
-    // Mint ephemeral CA + leafs per ADR-0010.
+    // Mint ephemeral CA + leafs per ADR-0010. The trust triple is
+    // written AFTER `TcpListener::bind` so the recorded endpoint
+    // names the resolved port (not the requested `config.bind`,
+    // which may be `:0` under tests and dev flows).
     let material = tls_bootstrap::mint_ephemeral_ca()?;
-
-    // Write the trust triple so clients (tests, the CLI) can load the
-    // CA from a stable location. Endpoint is recorded even though the
-    // test binds ephemeral — consumers use the field but must ignore
-    // the port if they obtained a different one out-of-band.
-    let endpoint = format!("https://{}", config.bind);
-    tls_bootstrap::write_trust_triple(&config.data_dir, &endpoint, &material)?;
 
     // Build the rustls::ServerConfig with ALPN h2/http1.1.
     let rustls_config = tls_bootstrap::load_server_tls_config(&material)?;
@@ -222,6 +218,16 @@ pub async fn run_server_with_obs(
     std_listener
         .set_nonblocking(true)
         .map_err(|e| error::ControlPlaneError::internal("set_nonblocking", e))?;
+
+    // Write the trust triple using the RESOLVED listener address so
+    // clients (tests, the CLI) load a config whose `endpoint` names
+    // the actual bound port. Deferred until after bind: a failure
+    // before this point leaves no stale config on disk.
+    let bound = std_listener
+        .local_addr()
+        .map_err(|e| error::ControlPlaneError::internal("local_addr", e))?;
+    let endpoint = format!("https://{bound}");
+    tls_bootstrap::write_trust_triple(&config.data_dir, &endpoint, &material)?;
 
     let axum_handle = AxumHandle::new();
     let server =

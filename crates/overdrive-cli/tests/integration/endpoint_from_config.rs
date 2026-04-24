@@ -47,27 +47,6 @@ fn config_path(data_dir: &Path) -> PathBuf {
     data_dir.join(".overdrive").join("config")
 }
 
-/// Rewrite the `endpoint` field in the on-disk trust-triple TOML so it
-/// names the real ephemeral port the server bound to. `serve::run`
-/// records the *requested* bind (`https://127.0.0.1:0`), not the
-/// resolved port — the operator-facing path goes through
-/// `cluster::init` which records the default `https://127.0.0.1:7001`.
-/// In this test we simulate the operator-flow end-state: the config
-/// points at the real server.
-fn rewrite_config_endpoint(config_path: &Path, new_endpoint: &str) {
-    let original = std::fs::read_to_string(config_path).expect("read existing trust-triple config");
-    let mut doc: toml::Value = toml::from_str(&original).expect("parse existing config toml");
-    let contexts =
-        doc.get_mut("contexts").and_then(|c| c.as_array_mut()).expect("contexts array present");
-    for ctx in contexts.iter_mut() {
-        if let Some(tbl) = ctx.as_table_mut() {
-            tbl.insert("endpoint".to_owned(), toml::Value::String(new_endpoint.to_owned()));
-        }
-    }
-    let rewritten = toml::to_string(&doc).expect("reserialise config toml");
-    std::fs::write(config_path, rewritten).expect("write rewritten config");
-}
-
 fn write_valid_payments_toml(dir: &Path) -> PathBuf {
     let spec = r#"
 id = "payments"
@@ -80,30 +59,18 @@ memory_bytes = 536870912
     path
 }
 
-/// The fix contract: when the operator config names the server's
-/// endpoint, `job::submit` — invoked WITHOUT any endpoint argument —
-/// reads that endpoint from the config and the POST reaches the server.
+/// When the operator config names the server's endpoint, `job::submit`
+/// — invoked WITHOUT any endpoint argument — reads that endpoint from
+/// the config and the POST reaches the server.
 ///
-/// This test fails to compile against the pre-fix code (`SubmitArgs`
-/// still has an `endpoint: Url` field). That is the RED-phase signal:
-/// the type the production code accepts no longer has an `endpoint`
-/// field because there is no override surface. Landing the GREEN-phase
-/// changes to `SubmitArgs` is what makes this test compile; the
-/// handler-level correctness is what makes it pass.
+/// Pins the fix for the bug where a clap `default_value` on `--endpoint`
+/// short-circuited the config-file fallback. Removing the override
+/// surface means the handler can only reach the endpoint the config
+/// names; if that endpoint is wrong, this test fails.
 #[tokio::test]
 async fn job_submit_reads_endpoint_from_config_when_no_override_is_provided() {
     let (handle, tmp) = spawn_server().await;
     let cfg = config_path(tmp.path());
-
-    // Rewrite the config so its `endpoint` field names the actual
-    // ephemeral port the server bound — mirroring the operator flow
-    // where `cluster init` writes the endpoint and subsequent commands
-    // read it. The pre-fix behaviour would ignore this and fall back
-    // to the clap default (`http://127.0.0.1:7001`), which would miss
-    // the live server entirely.
-    let port = handle.endpoint().port().expect("endpoint port");
-    let live_endpoint = format!("https://localhost:{port}");
-    rewrite_config_endpoint(&cfg, &live_endpoint);
 
     let spec_path = write_valid_payments_toml(tmp.path());
     let args = SubmitArgs { spec: spec_path, config_path: cfg };
@@ -120,12 +87,13 @@ async fn job_submit_reads_endpoint_from_config_when_no_override_is_provided() {
         output.commit_index,
     );
 
-    // The resolved endpoint MUST be the one recorded in the config —
-    // proving the client read it from disk rather than from a hardcoded
-    // default. The scheme is `https`, not the pre-fix `http` default.
+    // The resolved endpoint MUST match the one the server recorded in
+    // the config — proving the client read it from disk rather than
+    // from a hardcoded default. The scheme is `https`, not the pre-fix
+    // `http` default.
     assert_eq!(
-        output.endpoint.as_str(),
-        format!("{live_endpoint}/"),
+        output.endpoint,
+        *handle.endpoint(),
         "SubmitOutput.endpoint must echo the endpoint recorded in the operator config",
     );
 

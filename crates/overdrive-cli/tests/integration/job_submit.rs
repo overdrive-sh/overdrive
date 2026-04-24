@@ -52,12 +52,13 @@ fn config_path(data_dir: &Path) -> PathBuf {
     data_dir.join(".overdrive").join("config")
 }
 
-/// Rewrite the `endpoint` field in the on-disk trust-triple TOML so it
-/// names the real ephemeral port the server bound to. `serve::run`
-/// records the requested bind (`https://127.0.0.1:0`), not the resolved
-/// port; since the operator config is the sole source of the endpoint
-/// (no `--endpoint` override), tests mutate the on-disk config to point
-/// at the live server.
+/// Rewrite the `endpoint` field in the on-disk trust-triple TOML.
+/// Used only by the transport-error tests below — they start a real
+/// server (so the trust material is valid), shut it down, and then
+/// overwrite the endpoint with an unreachable one to exercise the
+/// `CliError::Transport` path. The operator config is the sole source
+/// of the endpoint, so changing it here is the only way to point the
+/// handler at a chosen dead endpoint.
 fn rewrite_config_endpoint(config_path: &Path, new_endpoint: &str) {
     let original = std::fs::read_to_string(config_path).expect("read existing trust-triple config");
     let mut doc: toml::Value = toml::from_str(&original).expect("parse existing config toml");
@@ -72,8 +73,9 @@ fn rewrite_config_endpoint(config_path: &Path, new_endpoint: &str) {
     std::fs::write(config_path, rewritten).expect("write rewritten config");
 }
 
-/// Point the operator config for `data_dir` at the ephemeral endpoint
-/// the running server bound to.
+/// Overwrite the on-disk config's endpoint with a chosen one and return
+/// the config path. Used only by transport-error tests — valid-case
+/// tests read the endpoint `run_server` already recorded.
 fn point_config_at(data_dir: &Path, endpoint: &str) -> PathBuf {
     let cfg = config_path(data_dir);
     rewrite_config_endpoint(&cfg, endpoint);
@@ -101,9 +103,7 @@ memory_bytes = 536870912
 async fn submit_with_valid_toml_against_in_process_server_returns_submit_output_with_intent_key_and_next_command()
  {
     let (handle, tmp) = spawn_server().await;
-    let port = handle.endpoint().port().expect("endpoint port");
-    let live_endpoint = format!("https://localhost:{port}");
-    let cfg = point_config_at(tmp.path(), &live_endpoint);
+    let cfg = config_path(tmp.path());
 
     let spec_path = write_valid_payments_toml(tmp.path());
 
@@ -122,8 +122,8 @@ async fn submit_with_valid_toml_against_in_process_server_returns_submit_output_
         output.commit_index,
     );
     assert_eq!(
-        output.endpoint.as_str(),
-        format!("{live_endpoint}/"),
+        output.endpoint,
+        *handle.endpoint(),
         "SubmitOutput.endpoint must echo the endpoint recorded in the operator config",
     );
     assert_eq!(
