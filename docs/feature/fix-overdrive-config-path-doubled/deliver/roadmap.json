@@ -1,0 +1,103 @@
+{
+  "roadmap": {
+    "project_id": "fix-overdrive-config-path-doubled",
+    "created_at": "2026-04-24T15:00:00Z",
+    "filled_at": "2026-04-24T15:00:00Z",
+    "total_steps": 1,
+    "phases": 1,
+    "walking_skeleton_gate": "01-01",
+    "notes": [
+      "Bug fix via /nw-bugfix pipeline. RCA at deliver/rca.md is the authoritative specification for this work — it was user-reviewed and approved in Phase 2 of /nw-bugfix before roadmap creation.",
+      "Scope: operator CLI computes two inconsistent paths on the $HOME fallback branch. `cluster init` writes to $HOME/.overdrive/.overdrive/config (doubled segment, Bug A at commands/cluster.rs:174). The read side at main.rs:148 computes $HOME/.overdrive/config correctly, BUT its doc comment at main.rs:140-141 lies — documenting the doubled form as expected behaviour (Bug B is a documentation + drift-surface bug; the code already computes the correct path). Both stem from raw PathBuf carrying implicit `is-this-already-suffixed?` semantics that the type system does not enforce, and from two sibling functions computing the canonical path independently.",
+      "Three fixes in scope (all shipped together in this step per user confirmation — Fix 3 is in-scope, not deferred). Fix 1: commands/cluster.rs:174 — change `Ok(PathBuf::from(home).join(\".overdrive\"))` so resolve_config_dir returns a base dir (write_trust_triple already owns the .overdrive/config suffix). Fix 2: main.rs:140-151 — rewrite default_config_path against the shared helper from Fix 3 and replace the lying doc comment. Fix 3: extract `pub fn default_operator_config_path()` in overdrive_cli::commands::cluster (or new overdrive_cli::config module at crafter's discretion) that encodes the canonical $OVERDRIVE_CONFIG_DIR → $HOME → . fallback and appends .overdrive/config exactly once; both main.rs and cluster.rs's HOME fallback delegate to it. Fix 3 collapses the drift surface structurally so this class of bug cannot recur.",
+      "Env-var serialisation choice (user-confirmed): `serial_test` crate with #[serial(env)] annotation — lowest coupling, dev-dep only, no test-binary split. Rust edition 2024 + rust-version 1.85 + workspace-wide `unsafe_op_in_unsafe_fn = deny` requires explicit unsafe{} around env::set_var / env::remove_var.",
+      "Single-step TDD per testing.md §RED scaffolds (\"bundle with the GREEN commit if the crafter judges a single commit cleaner\") and user memory `feedback_single_cut_greenfield_migrations`. Test + fix land in one commit so the reviewer sees the coupling; no --no-verify exception needed. The RED→GREEN transition is verifiable within the step: the crafter runs the test BEFORE applying the fix (must fail), then AFTER (must pass).",
+      "No new ADR required — ADR-0010, ADR-0014, and ADR-0019 already specify `~/.overdrive/config` as the canonical operator config path. This is a conformance fix against existing spec, not a design change.",
+      "Mutation testing scope: diff-scoped via `cargo xtask mutants --diff origin/main --package overdrive-cli` — kill-rate gate ≥80% per project policy. Diff is ~15 LOC across 2 source files + test scaffolding; mutant count will be small."
+    ],
+    "reviews": [
+      {
+        "reviewed_at": "2026-04-24",
+        "reviewer": "user",
+        "scope": "RCA + fix direction + regression test design + env-var serialisation choice (serial_test) + Fix 3 in-scope decision",
+        "verdict": "APPROVED",
+        "notes": "User confirmed: (1) root cause including read/write-path asymmetry matches mental model, (2) Fix 3 is in-scope (not deferred), (3) serial_test is the env-mutation serialisation mechanism."
+      }
+    ]
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Conformance fix for $HOME-fallback config path (RED regression test + GREEN fix in one commit)",
+      "slice": "bugfix",
+      "user_stories": [],
+      "description": "Write a regression test on the $HOME fallback branch that FAILS on current code (proves Bug A). Apply Fix 1 + Fix 2 + Fix 3 so the test passes and the read/write sites call one shared helper. All pre-existing tests continue to pass.",
+      "estimated_hours": 2,
+      "depends_on": [],
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "Regression test + Fix 1+2+3 (one TDD cycle, one commit)",
+          "criteria": "Test lands in crates/overdrive-cli/tests/integration/cluster_init_serve.rs: `resolve_config_dir_home_fallback_writes_at_canonical_path` annotated `#[tokio::test]` + `#[serial_test::serial(env)]`. Body: create TempDir; save $HOME + $OVERDRIVE_CONFIG_DIR; `unsafe { std::env::set_var(\"HOME\", tmp.path()); std::env::remove_var(\"OVERDRIVE_CONFIG_DIR\"); }`; invoke `overdrive_cli::commands::cluster::init(InitArgs { config_dir: None, force: false })`; assert (a) `tmp.path().join(\".overdrive\").join(\"config\")` exists, (b) `tmp.path().join(\".overdrive\").join(\".overdrive\").join(\"config\")` does NOT exist (explicit regression guard — this is the doubled-segment case), (c) returned `InitOutput::config_path` equals the canonical path; restore env in unsafe{}. Optionally add a second smaller test `default_config_path_matches_init_write_location_on_home_fallback` that asserts the shared helper from Fix 3 returns a path equal to what init writes — catches future drift if the two sites ever diverge again. serial_test added to workspace deps: root Cargo.toml `[workspace.dependencies]` under `# --- Testing ---` section add `serial_test = \"3\"` (pin nearest stable major), crates/overdrive-cli/Cargo.toml `[dev-dependencies]` add `serial_test.workspace = true`. Fix 1 (cluster.rs:174): return `Ok(PathBuf::from(home))` instead of the `.join(\".overdrive\")` form; update doc comment at line 157 so it documents the return as a BASE directory (write_trust_triple owns the .overdrive suffix). Fix 3 (new pub fn): extract `pub fn default_operator_config_path() -> PathBuf` into commands::cluster (or new `overdrive_cli::config` module — crafter's call based on what reads cleanly) that encodes the $OVERDRIVE_CONFIG_DIR → $HOME → `.` fallback and appends `.overdrive/config` exactly once. Fix 2 (main.rs:140-151): replace default_config_path body with a thin delegate to the Fix 3 helper; replace the lying doc comment with correct spec per ADR-0019 (`~/.overdrive/config`, single segment). Verification: `cargo nextest run -p overdrive-cli --features integration-tests` — new regression tests pass; all pre-existing tests still pass. `cargo clippy -p overdrive-cli --all-targets --features integration-tests -- -D warnings` clean on touched files. Commit message: `fix(cli): write operator config to ~/.overdrive/config (single segment)` with `Step-ID: 01-01` trailer. No --no-verify (normal pre-commit hooks pass).",
+          "test_file": "crates/overdrive-cli/tests/integration/cluster_init_serve.rs",
+          "scenario_name": "Operator CLI writes trust triple to canonical $HOME/.overdrive/config on HOME fallback; read and write sites compute the same path via a shared helper",
+          "tier": "Tier 1 (acceptance / integration — requires integration-tests feature per testing.md)",
+          "time_estimate_hours": 2,
+          "dependencies": [],
+          "implementation_scope": {
+            "production_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/src/commands/cluster.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/src/main.rs"
+            ],
+            "test_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/tests/integration/cluster_init_serve.rs"
+            ],
+            "config_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/Cargo.toml",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/Cargo.toml"
+            ]
+          },
+          "notes": "Context: deliver/rca.md — full RCA including code-level before/after for all three fixes. Bug sites verified on HEAD: cluster.rs:174 returns the suffixed form; main.rs:140-141 doc comment lies about `$HOME/.overdrive/.overdrive/config` as expected (code at 148 actually computes the single-segment form correctly; the lie is in the documentation); tls_bootstrap.rs:296/301 confirms write_trust_triple joins `.overdrive/config` onto config_dir. TDD ordering within this single step: (1) PREPARE — read the RCA; verify bug sites on current HEAD; confirm test file + Cargo.toml patterns. (2) RED_ACCEPTANCE — write the regression test(s); add serial_test dep; run `cargo nextest run -p overdrive-cli --features integration-tests -E 'test(resolve_config_dir_home_fallback_writes_at_canonical_path)'` — MUST fail; the failure message must be the canonical vs doubled path assertion, NOT an import/type error. (3) RED_UNIT — SKIPPED (NOT_APPLICABLE: acceptance-level regression test covers the structural invariant; a unit test on the helper would be a tautology). (4) GREEN — apply Fix 3 (new shared helper), then Fix 1 (cluster.rs delegate), then Fix 2 (main.rs delegate + comment). Re-run the regression test — MUST pass. Run full cluster-init-serve suite — MUST still pass. (5) COMMIT — `git add`; commit with the conventional message + Step-ID trailer. Post-GREEN wiring smoke check per testing.md: `git diff --name-only` shows cluster.rs AND main.rs modified (Fix 3's new helper must actually be called from both sites). The operator's existing broken-path file at `~/.overdrive/.overdrive/config` is NOT auto-migrated; mention in the commit body that operators can `mv` the file or re-run `cluster init` (Phase 1 CA is ephemeral per ADR-0010 §R4). Record all DES phases via `python3 -m des.cli.log_phase` per the template — do NOT edit execution-log.json directly."
+        }
+      ]
+    }
+  ],
+  "implementation_scope": {
+    "production_files": [
+      "crates/overdrive-cli/src/commands/cluster.rs",
+      "crates/overdrive-cli/src/main.rs"
+    ],
+    "test_files": [
+      "crates/overdrive-cli/tests/integration/cluster_init_serve.rs"
+    ],
+    "config_files": [
+      "Cargo.toml (workspace — add serial_test under [workspace.dependencies])",
+      "crates/overdrive-cli/Cargo.toml (add serial_test.workspace = true under [dev-dependencies])"
+    ]
+  },
+  "walking_skeleton": {
+    "gate_step": "01-01",
+    "description": "After 01-01 commits: `cargo nextest run -p overdrive-cli --features integration-tests` all green, including the new regression test(s). On the user's laptop, re-running `overdrive cluster init` writes to $HOME/.overdrive/config (single segment) rather than the doubled path."
+  },
+  "quality_gates": {
+    "per_step": [
+      "Regression test fails BEFORE the fix is applied (RED verified)",
+      "Regression test passes AFTER the fix is applied (GREEN verified)",
+      "All pre-existing tests continue to pass (no regressions)",
+      "No unjustified clippy warnings on touched files",
+      "Commit message includes `Step-ID: 01-01` trailer"
+    ],
+    "post_deliver": [
+      "DES integrity verification: verify_deliver_integrity exits 0",
+      "Adversarial review via nw-software-crafter-reviewer (rigor.review_enabled = true)",
+      "Diff-scoped mutation testing: `cargo xtask mutants --diff origin/main --package overdrive-cli` with ≥80% kill rate (rigor.mutation_enabled = true, .claude/rules/testing.md per-feature policy)"
+    ]
+  },
+  "tdd_rhythm_per_step": "Canonical 5-phase cycle within one step: PREPARE → RED_ACCEPTANCE (write failing test, verify RED) → RED_UNIT (SKIPPED, NOT_APPLICABLE) → GREEN (apply Fix 1+2+3, verify GREEN) → COMMIT (single conventional commit, Step-ID trailer). No --no-verify; normal pre-commit hooks apply.",
+  "validation": {
+    "status": "approved",
+    "reviewer": "user-via-nw-bugfix-phase-2",
+    "approved_at": "2026-04-24T15:00:00Z",
+    "notes": "Phase 2 of /nw-bugfix is the user review gate. User approved: root cause match, Fix 3 in scope, serial_test serialisation mechanism. Roadmap reflects those decisions."
+  }
+}
