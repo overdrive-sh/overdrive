@@ -22,6 +22,7 @@ mod acceptance {
     mod dst_clean_clone_green;
     mod dst_harness_smoke;
     mod dst_lint_banned_apis;
+    mod dst_lint_catches_reconciler_violation;
     mod dst_seeded_reproduction;
     mod openapi_gate;
 }
