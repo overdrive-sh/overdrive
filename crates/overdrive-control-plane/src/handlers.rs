@@ -180,8 +180,6 @@ pub async fn describe_job(
 
 /// `GET /v1/cluster/info` — mode, region, commit_index, reconciler
 /// registry, broker counters.
-///
-/// SCAFFOLD: true — owned by step 03-05.
 #[utoipa::path(
     get,
     path = "/v1/cluster/info",

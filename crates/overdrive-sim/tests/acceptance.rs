@@ -20,4 +20,7 @@ mod acceptance {
 
     // US-06 §6.1 — Sim adapters for every nondeterminism port.
     mod sim_adapters_deterministic;
+
+    // Step 04-05 — Reconciler-primitive DST invariants.
+    mod reconciler_invariants_pass;
 }

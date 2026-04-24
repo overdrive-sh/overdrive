@@ -1,11 +1,10 @@
-# SCAFFOLD: true — created by DISTILL wave for phase-1-control-plane-core.
-#
-# New crate per ADR-0008 / ADR-0012 / ADR-0013. Hosts the Phase 1
-# control-plane binary's axum server, TLS bootstrap, reconciler runtime,
-# and observation-store wiring. `crate_class = "adapter-host"` per
-# ADR-0003 (renamed from `adapter-real` per ADR-0016) — production
-# bindings that talk to real host I/O (filesystem, network). DST-lint
-# does NOT scan this crate; real-infra calls are expected.
+# `overdrive-control-plane` — Phase 1 single-mode control-plane crate
+# per ADR-0008 / ADR-0012 / ADR-0013. Hosts the axum server, TLS
+# bootstrap, reconciler runtime, and observation-store wiring.
+# `crate_class = "adapter-host"` per ADR-0003 (renamed from
+# `adapter-real` per ADR-0016) — production bindings that talk to real
+# host I/O (filesystem, network). DST-lint does NOT scan this crate;
+# real-infra calls are expected.
 
 [package]
 name         = "overdrive-control-plane"

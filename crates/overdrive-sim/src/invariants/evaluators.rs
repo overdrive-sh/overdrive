@@ -31,6 +31,7 @@
 use std::time::Duration;
 
 use overdrive_core::id::NodeId;
+use overdrive_core::reconciler::{Db, Reconciler, State};
 use overdrive_core::traits::entropy::Entropy;
 use overdrive_core::traits::intent_store::IntentStore;
 
@@ -467,6 +468,153 @@ pub fn evaluate_entropy_determinism_against(a: &SimEntropy, b: &SimEntropy) -> I
     result(name, InvariantStatus::Pass, "host-0", None)
 }
 
+// ---------------------------------------------------------------------------
+// AtLeastOneReconcilerRegistered (step 04-05)
+// ---------------------------------------------------------------------------
+
+/// Evaluate `AtLeastOneReconcilerRegistered` — the registry is never
+/// empty after boot.
+///
+/// Per whitepaper §18 and ADR-0013 §2, a control-plane boot with zero
+/// registered reconcilers is a silent-failure shape: the cluster sees
+/// no convergence pressure and the operator sees no error. Phase 1
+/// registers `noop-heartbeat` as proof-of-life; this invariant catches
+/// any future regression that skips registration.
+///
+/// The harness passes the count of registered reconcilers it composed;
+/// the evaluator asserts the count is non-zero. `count` rather than a
+/// trait-object dependency on `overdrive-control-plane` keeps the sim
+/// crate a leaf adapter.
+#[must_use]
+pub fn evaluate_at_least_one_reconciler_registered(registered_count: usize) -> InvariantResult {
+    let name = "at-least-one-reconciler-registered";
+    if registered_count >= 1 {
+        result(name, InvariantStatus::Pass, "host-0", None)
+    } else {
+        result(
+            name,
+            InvariantStatus::Fail,
+            "host-0",
+            Some("reconciler registry is empty after boot".to_owned()),
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DuplicateEvaluationsCollapse (step 04-05)
+// ---------------------------------------------------------------------------
+
+/// Observable broker counters the `DuplicateEvaluationsCollapse`
+/// evaluator inspects. Mirrors the shape of
+/// `overdrive_control_plane::eval_broker::BrokerCounters` but is
+/// redefined locally so the sim crate does not take a cyclic dependency
+/// on `overdrive-control-plane` (which already depends on `overdrive-sim`
+/// via `observation_wiring`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BrokerCountersSnapshot {
+    /// Number of evaluations currently pending dispatch.
+    pub queued: u64,
+    /// Cumulative count of superseded evaluations.
+    pub cancelled: u64,
+    /// Cumulative count of dispatched evaluations.
+    pub dispatched: u64,
+}
+
+/// Evaluate `DuplicateEvaluationsCollapse` — N (≥3) concurrent
+/// evaluations at the same `(ReconcilerName, TargetResource)` key
+/// collapse to exactly one dispatched invocation and `N - 1`
+/// cancellations, per ADR-0013 §8 storm-proofing.
+///
+/// The harness is responsible for driving the submit-N-at-same-key +
+/// drain sequence; the evaluator inspects the resulting counter
+/// snapshot. Passing requires `dispatched == 1`, `cancelled == n - 1`,
+/// and `queued == 0` (drain completed).
+#[must_use]
+pub fn evaluate_duplicate_evaluations_collapse(
+    n_submitted: u64,
+    counters: BrokerCountersSnapshot,
+) -> InvariantResult {
+    let name = "duplicate-evaluations-collapse";
+
+    if n_submitted < 3 {
+        return result(
+            name,
+            InvariantStatus::Fail,
+            CLUSTER_HOST,
+            Some(format!(
+                "harness submitted {n_submitted} evaluations — invariant requires at least 3",
+            )),
+        );
+    }
+
+    let expected_cancelled = n_submitted - 1;
+    if counters.dispatched == 1 && counters.cancelled == expected_cancelled && counters.queued == 0
+    {
+        result(name, InvariantStatus::Pass, CLUSTER_HOST, None)
+    } else {
+        result(
+            name,
+            InvariantStatus::Fail,
+            CLUSTER_HOST,
+            Some(format!(
+                "expected dispatched=1 cancelled={expected_cancelled} queued=0 after {n_submitted} same-key submits; got {counters:?}",
+            )),
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ReconcilerIsPure (step 04-05)
+// ---------------------------------------------------------------------------
+
+/// Evaluate `ReconcilerIsPure` — twin invocation of `reconciler.reconcile`
+/// with identical `(desired, actual, db)` inputs produces bit-identical
+/// `Vec<Action>` outputs.
+///
+/// This is the runtime witness of the ADR-0013 §2 purity contract. A
+/// reconciler that smuggles non-determinism (wall-clock read,
+/// `rand::thread_rng`, internal `RefCell` counter, ...) fails here.
+/// Phase 1 runs this against the `noop-heartbeat` reconciler, which
+/// always returns `vec![Action::Noop]` — a deterministic baseline that
+/// proves the machinery is live. The optional `canary-bug` gate in
+/// this crate exposes a deliberately non-deterministic reconciler to
+/// prove this evaluator actually catches divergences.
+#[must_use]
+pub fn evaluate_reconciler_is_pure(reconciler: &dyn Reconciler) -> InvariantResult {
+    let name = "reconciler-is-pure";
+
+    // Twin invocation with identical inputs. `State` and `Db` are
+    // unit-like placeholders in Phase 1, so two fresh instances are
+    // byte-equivalent by construction — the evaluator's job is to
+    // compare the outputs a second time in case the reconciler itself
+    // diverges between calls.
+    let desired_a = State;
+    let actual_a = State;
+    let db_a = Db;
+    let first = reconciler.reconcile(&desired_a, &actual_a, &db_a);
+
+    let desired_b = State;
+    let actual_b = State;
+    let db_b = Db;
+    let second = reconciler.reconcile(&desired_b, &actual_b, &db_b);
+
+    if first == second {
+        result(name, InvariantStatus::Pass, "host-0", None)
+    } else {
+        result(
+            name,
+            InvariantStatus::Fail,
+            "host-0",
+            Some(format!(
+                "reconciler {} diverged under twin invocation: first={:?} second={:?}",
+                reconciler.name(),
+                first,
+                second,
+            )),
+        )
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::unwrap_used)]
 mod tests {
@@ -549,5 +697,132 @@ mod tests {
     fn replay_equivalent_empty_workflow_passes_on_deterministic_seed() {
         let r = evaluate_replay_equivalent_empty_workflow(42);
         assert_eq!(r.status, InvariantStatus::Pass);
+    }
+
+    // -----------------------------------------------------------------
+    // Step 04-05 — reconciler-primitive invariant witnesses
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn at_least_one_reconciler_passes_on_nonzero_count() {
+        assert_eq!(
+            evaluate_at_least_one_reconciler_registered(1).status,
+            InvariantStatus::Pass,
+        );
+        assert_eq!(
+            evaluate_at_least_one_reconciler_registered(42).status,
+            InvariantStatus::Pass,
+        );
+    }
+
+    #[test]
+    fn at_least_one_reconciler_fails_on_empty_registry() {
+        let r = evaluate_at_least_one_reconciler_registered(0);
+        assert_eq!(r.status, InvariantStatus::Fail);
+        assert!(r.cause.as_ref().is_some_and(|c| c.contains("empty")));
+    }
+
+    #[test]
+    fn duplicate_evaluations_collapse_passes_on_clean_3_way_collapse() {
+        let counters = BrokerCountersSnapshot { queued: 0, cancelled: 2, dispatched: 1 };
+        assert_eq!(
+            evaluate_duplicate_evaluations_collapse(3, counters).status,
+            InvariantStatus::Pass,
+        );
+    }
+
+    #[test]
+    fn duplicate_evaluations_collapse_fails_when_dispatched_not_one() {
+        // dispatched == 2 means the second submit didn't supersede the
+        // first — key-collapse is broken.
+        let counters = BrokerCountersSnapshot { queued: 0, cancelled: 1, dispatched: 2 };
+        let r = evaluate_duplicate_evaluations_collapse(3, counters);
+        assert_eq!(r.status, InvariantStatus::Fail);
+    }
+
+    #[test]
+    fn duplicate_evaluations_collapse_fails_when_cancelled_count_wrong() {
+        // N=3 should yield cancelled=2; cancelled=0 means nothing was
+        // actually superseded.
+        let counters = BrokerCountersSnapshot { queued: 0, cancelled: 0, dispatched: 1 };
+        let r = evaluate_duplicate_evaluations_collapse(3, counters);
+        assert_eq!(r.status, InvariantStatus::Fail);
+    }
+
+    #[test]
+    fn duplicate_evaluations_collapse_fails_when_queued_not_drained() {
+        // queued > 0 means the drain half of the sequence never ran.
+        let counters = BrokerCountersSnapshot { queued: 1, cancelled: 2, dispatched: 0 };
+        let r = evaluate_duplicate_evaluations_collapse(3, counters);
+        assert_eq!(r.status, InvariantStatus::Fail);
+    }
+
+    #[test]
+    fn duplicate_evaluations_collapse_fails_when_n_below_three() {
+        // Invariant requires at least 3 submitted to be meaningful.
+        let counters = BrokerCountersSnapshot { queued: 0, cancelled: 1, dispatched: 1 };
+        let r = evaluate_duplicate_evaluations_collapse(2, counters);
+        assert_eq!(r.status, InvariantStatus::Fail);
+        assert!(r.cause.as_ref().is_some_and(|c| c.contains("at least 3")));
+    }
+
+    #[test]
+    fn reconciler_is_pure_passes_for_deterministic_reconciler() {
+        use overdrive_core::reconciler::{
+            Action, Db, Reconciler as R, ReconcilerName, State,
+        };
+
+        struct Det {
+            name: ReconcilerName,
+        }
+        impl R for Det {
+            fn name(&self) -> &ReconcilerName {
+                &self.name
+            }
+            fn reconcile(&self, _: &State, _: &State, _: &Db) -> Vec<Action> {
+                vec![Action::Noop]
+            }
+        }
+        let r = Det { name: ReconcilerName::new("det").expect("valid") };
+        assert_eq!(evaluate_reconciler_is_pure(&r).status, InvariantStatus::Pass);
+    }
+
+    #[test]
+    fn reconciler_is_pure_fails_for_non_deterministic_reconciler() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        use overdrive_core::reconciler::{
+            Action, Db, Reconciler as R, ReconcilerName, State,
+        };
+
+        // `Reconciler: Send + Sync` so the witness uses an atomic
+        // counter for per-call state rather than `RefCell` (not `Sync`).
+        // The reconciler flips its output on every call — twin
+        // invocation must report Fail.
+        struct Flappy {
+            name: ReconcilerName,
+            counter: AtomicU64,
+        }
+        impl R for Flappy {
+            fn name(&self) -> &ReconcilerName {
+                &self.name
+            }
+            fn reconcile(&self, _: &State, _: &State, _: &Db) -> Vec<Action> {
+                let n = self.counter.fetch_add(1, Ordering::SeqCst);
+                if n % 2 == 0 {
+                    vec![Action::Noop]
+                } else {
+                    vec![Action::Noop, Action::Noop]
+                }
+            }
+        }
+
+        let r = Flappy {
+            name: ReconcilerName::new("flappy").expect("valid"),
+            counter: AtomicU64::new(0),
+        };
+        let result = evaluate_reconciler_is_pure(&r);
+        assert_eq!(result.status, InvariantStatus::Fail);
+        assert!(result.cause.as_ref().is_some_and(|c| c.contains("diverged")));
     }
 }

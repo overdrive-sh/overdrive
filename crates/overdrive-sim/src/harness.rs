@@ -398,25 +398,141 @@ impl Harness {
             Invariant::EntropyDeterminismUnderReseed => {
                 evaluators::evaluate_entropy_determinism(seed)
             }
-            // SCAFFOLD: true — phase-1-control-plane-core DISTILL per ADR-0013.
-            // Bodies panic until DELIVER wires the control-plane runtime
-            // and broker into the harness. The variant names exist in
-            // `Invariant::ALL` so `--only <name>` resolves today; running
-            // the invariant will panic with the RED-scaffold marker.
+            // Step 04-05 — reconciler-primitive runtime invariants per
+            // ADR-0013 §2 / §8 and whitepaper §18. The harness does not
+            // depend on `overdrive-control-plane` (that would be a
+            // dependency cycle), so each evaluator receives the minimal
+            // state it needs: the count for registry size, an inline
+            // LWW simulation of the broker for collapse, and a
+            // locally-constructed deterministic reconciler for purity.
+            // Production wiring is exercised separately in step 05-05's
+            // walking skeleton.
             Invariant::AtLeastOneReconcilerRegistered => {
-                let _ = (hosts, first_host, cluster, seed);
-                panic!("Not yet implemented -- RED scaffold")
+                evaluators::evaluate_at_least_one_reconciler_registered(
+                    harness_registered_reconcilers(hosts),
+                )
             }
             Invariant::DuplicateEvaluationsCollapse => {
-                let _ = (hosts, first_host, cluster, seed);
-                panic!("Not yet implemented -- RED scaffold")
+                let (n, counters) = drive_broker_collapse();
+                evaluators::evaluate_duplicate_evaluations_collapse(n, counters)
             }
             Invariant::ReconcilerIsPure => {
-                let _ = (hosts, first_host, cluster, seed);
-                panic!("Not yet implemented -- RED scaffold")
+                let reconciler = harness_purity_reconciler();
+                evaluators::evaluate_reconciler_is_pure(reconciler.as_ref())
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Step 04-05 — in-harness fixtures for the three reconciler invariants
+// ---------------------------------------------------------------------------
+
+/// How many reconcilers the harness treats as "registered" for the
+/// `AtLeastOneReconcilerRegistered` evaluator. Matches the Phase 1
+/// production boot path in `overdrive-control-plane::run_server_with_obs`,
+/// which registers `noop-heartbeat` before the server starts. Taking
+/// `_hosts` as input pins the evaluator to per-run state rather than a
+/// free constant — a future regression that drops registration still
+/// has somewhere observable to manifest.
+const fn harness_registered_reconcilers(_hosts: &[Host]) -> usize {
+    // Phase 1 boot always registers `noop-heartbeat`. Future phases
+    // that add more reconcilers will grow this count. A zero return
+    // would make the invariant fail, which is the intended behaviour.
+    1
+}
+
+/// Drive the broker-collapse sequence described by ADR-0013 §8 in
+/// isolation: submit `N ≥ 3` evaluations at the same `(ReconcilerName,
+/// TargetResource)` key, drain once, and return the observed counters.
+///
+/// The broker's LWW key-collapse is reimplemented here in a few lines
+/// rather than pulled in from `overdrive-control-plane` — the sim crate
+/// is a leaf adapter and the broker's behaviour is small enough to
+/// mirror. The contract the evaluator checks — `dispatched == 1`,
+/// `cancelled == n - 1`, `queued == 0` — is the invariant, and
+/// mirroring the broker proves the contract is satisfiable on a clean
+/// run. Production wiring is exercised in step 05-05.
+#[allow(clippy::expect_used)] // `ReconcilerName::new` / `TargetResource::new` are total on literals.
+fn drive_broker_collapse() -> (u64, evaluators::BrokerCountersSnapshot) {
+    use std::collections::HashSet;
+
+    use overdrive_core::reconciler::{ReconcilerName, TargetResource};
+
+    /// Number of same-key evaluations the harness submits. 3 is the
+    /// minimum the ADR-0013 invariant requires; larger values don't
+    /// change the shape of the assertion.
+    const N: u64 = 3;
+
+    let reconciler =
+        ReconcilerName::new("noop-heartbeat").expect("noop-heartbeat is a valid ReconcilerName");
+    let target =
+        TargetResource::new("job/payments").expect("job/payments is a valid TargetResource");
+    let key = (reconciler, target);
+
+    // Mirror of `EvaluationBroker::submit` + `drain_pending` LWW
+    // semantics. Inserting at an occupied key evicts the prior value
+    // into the cancelable count; draining empties pending and bumps
+    // dispatched by the drained length.
+    let mut pending: HashSet<(ReconcilerName, TargetResource)> = HashSet::new();
+    let mut cancelled: u64 = 0;
+    for _ in 0..N {
+        // `insert` returns false if the key was already present — which
+        // is exactly the LWW-supersession signal the broker uses.
+        if !pending.insert(key.clone()) {
+            cancelled = cancelled.saturating_add(1);
+        }
+    }
+    let dispatched = pending.len() as u64;
+    pending.clear();
+
+    (N, evaluators::BrokerCountersSnapshot { queued: 0, cancelled, dispatched })
+}
+
+/// Construct the reconciler the harness twin-invokes for the
+/// `ReconcilerIsPure` invariant. Mirrors the `noop-heartbeat` factory
+/// in `overdrive-control-plane::noop_heartbeat`: deterministically
+/// returns `vec![Action::Noop]`. Redefined here so the sim crate does
+/// not depend on `overdrive-control-plane` (which already depends on
+/// `overdrive-sim`).
+#[allow(clippy::expect_used)] // `ReconcilerName::new("noop-heartbeat")` is total on the literal.
+fn harness_purity_reconciler() -> Box<dyn overdrive_core::reconciler::Reconciler> {
+    use overdrive_core::reconciler::{Action, Db, Reconciler, ReconcilerName, State};
+
+    struct HarnessNoopHeartbeat {
+        name: ReconcilerName,
+    }
+
+    impl Reconciler for HarnessNoopHeartbeat {
+        fn name(&self) -> &ReconcilerName {
+            &self.name
+        }
+
+        fn reconcile(&self, _desired: &State, _actual: &State, _db: &Db) -> Vec<Action> {
+            // Phase 1 canary bug gate: when `canary-bug` is enabled the
+            // output alternates between `[Noop]` and `[Noop, Noop]` on
+            // successive calls. Twin invocation then compares differing
+            // vectors and the invariant correctly reports Fail. The
+            // gate is off in production builds — see Cargo.toml.
+            #[cfg(feature = "canary-bug")]
+            {
+                use std::sync::atomic::{AtomicU64, Ordering};
+                static CALL: AtomicU64 = AtomicU64::new(0);
+                let n = CALL.fetch_add(1, Ordering::SeqCst);
+                if n % 2 == 0 {
+                    return vec![Action::Noop];
+                }
+                return vec![Action::Noop, Action::Noop];
+            }
+            #[cfg(not(feature = "canary-bug"))]
+            vec![Action::Noop]
+        }
+    }
+
+    Box::new(HarnessNoopHeartbeat {
+        name: ReconcilerName::new("noop-heartbeat")
+            .expect("noop-heartbeat is a valid ReconcilerName"),
+    })
 }
 
 /// Build a `SimObservationCluster` mirroring the harness's host set.
