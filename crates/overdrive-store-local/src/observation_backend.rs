@@ -93,16 +93,16 @@ impl LocalObservationStore {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(ObservationStoreError::Io)?;
         }
-        let db = Database::create(path).map_err(map_database_error)?;
+        let db = Database::create(path).map_err(map_to_io)?;
 
         // Materialize both tables up-front.
         {
-            let write = db.begin_write().map_err(map_transaction_error)?;
+            let write = db.begin_write().map_err(map_to_io)?;
             {
-                let _ = write.open_table(ALLOC_STATUS_TABLE).map_err(map_table_error)?;
-                let _ = write.open_table(NODE_HEALTH_TABLE).map_err(map_table_error)?;
+                let _ = write.open_table(ALLOC_STATUS_TABLE).map_err(map_to_io)?;
+                let _ = write.open_table(NODE_HEALTH_TABLE).map_err(map_to_io)?;
             }
-            write.commit().map_err(map_commit_error)?;
+            write.commit().map_err(map_to_io)?;
         }
 
         let (subscription_tx, _) = broadcast::channel(SUBSCRIPTION_CHANNEL_CAPACITY);
@@ -124,34 +124,30 @@ impl ObservationStore for LocalObservationStore {
         let row_for_commit = row.clone();
 
         tokio::task::spawn_blocking(move || {
-            let write = inner.db.begin_write().map_err(map_transaction_error)?;
+            let write = inner.db.begin_write().map_err(map_to_io)?;
             {
                 match &row_for_commit {
                     ObservationRow::AllocStatus(r) => {
-                        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(r)
-                            .map_err(map_rkyv_serialize_error)?;
-                        let mut table =
-                            write.open_table(ALLOC_STATUS_TABLE).map_err(map_table_error)?;
+                        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(r).map_err(map_to_io)?;
+                        let mut table = write.open_table(ALLOC_STATUS_TABLE).map_err(map_to_io)?;
                         table
                             .insert(r.alloc_id.as_str().as_bytes(), bytes.as_ref())
-                            .map_err(map_storage_error)?;
+                            .map_err(map_to_io)?;
                     }
                     ObservationRow::NodeHealth(r) => {
-                        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(r)
-                            .map_err(map_rkyv_serialize_error)?;
-                        let mut table =
-                            write.open_table(NODE_HEALTH_TABLE).map_err(map_table_error)?;
+                        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(r).map_err(map_to_io)?;
+                        let mut table = write.open_table(NODE_HEALTH_TABLE).map_err(map_to_io)?;
                         table
                             .insert(r.node_id.as_str().as_bytes(), bytes.as_ref())
-                            .map_err(map_storage_error)?;
+                            .map_err(map_to_io)?;
                     }
                 }
             }
-            write.commit().map_err(map_commit_error)?;
+            write.commit().map_err(map_to_io)?;
             Ok::<_, ObservationStoreError>(())
         })
         .await
-        .map_err(map_join_error)??;
+        .map_err(map_to_io)??;
 
         // Emit after the redb commit succeeds — subscribers never see a
         // row that failed to persist.
@@ -168,12 +164,12 @@ impl ObservationStore for LocalObservationStore {
     async fn alloc_status_rows(&self) -> Result<Vec<AllocStatusRow>, ObservationStoreError> {
         let inner = Arc::clone(&self.inner);
         tokio::task::spawn_blocking(move || {
-            let read = inner.db.begin_read().map_err(map_transaction_error)?;
-            let table = read.open_table(ALLOC_STATUS_TABLE).map_err(map_table_error)?;
+            let read = inner.db.begin_read().map_err(map_to_io)?;
+            let table = read.open_table(ALLOC_STATUS_TABLE).map_err(map_to_io)?;
             let mut out: Vec<AllocStatusRow> = Vec::new();
-            let iter = table.iter().map_err(map_storage_error)?;
+            let iter = table.iter().map_err(map_to_io)?;
             for item in iter {
-                let (_k, v) = item.map_err(map_storage_error)?;
+                let (_k, v) = item.map_err(map_to_io)?;
                 // redb returns a byte slice with unknown alignment; rkyv
                 // requires 8-byte-aligned access. Copy into an AlignedVec
                 // before deserialising.
@@ -181,24 +177,24 @@ impl ObservationStore for LocalObservationStore {
                 aligned.extend_from_slice(v.value());
                 let row: AllocStatusRow =
                     rkyv::from_bytes::<AllocStatusRow, rkyv::rancor::Error>(&aligned)
-                        .map_err(map_rkyv_deserialize_error)?;
+                        .map_err(map_to_io)?;
                 out.push(row);
             }
             Ok::<_, ObservationStoreError>(out)
         })
         .await
-        .map_err(map_join_error)?
+        .map_err(map_to_io)?
     }
 
     async fn node_health_rows(&self) -> Result<Vec<NodeHealthRow>, ObservationStoreError> {
         let inner = Arc::clone(&self.inner);
         tokio::task::spawn_blocking(move || {
-            let read = inner.db.begin_read().map_err(map_transaction_error)?;
-            let table = read.open_table(NODE_HEALTH_TABLE).map_err(map_table_error)?;
+            let read = inner.db.begin_read().map_err(map_to_io)?;
+            let table = read.open_table(NODE_HEALTH_TABLE).map_err(map_to_io)?;
             let mut out: Vec<NodeHealthRow> = Vec::new();
-            let iter = table.iter().map_err(map_storage_error)?;
+            let iter = table.iter().map_err(map_to_io)?;
             for item in iter {
-                let (_k, v) = item.map_err(map_storage_error)?;
+                let (_k, v) = item.map_err(map_to_io)?;
                 // redb returns a byte slice with unknown alignment; rkyv
                 // requires 8-byte-aligned access. Copy into an AlignedVec
                 // before deserialising.
@@ -206,13 +202,13 @@ impl ObservationStore for LocalObservationStore {
                 aligned.extend_from_slice(v.value());
                 let row: NodeHealthRow =
                     rkyv::from_bytes::<NodeHealthRow, rkyv::rancor::Error>(&aligned)
-                        .map_err(map_rkyv_deserialize_error)?;
+                        .map_err(map_to_io)?;
                 out.push(row);
             }
             Ok::<_, ObservationStoreError>(out)
         })
         .await
-        .map_err(map_join_error)?
+        .map_err(map_to_io)?
     }
 }
 
@@ -230,41 +226,25 @@ impl Stream for SubscriptionStream {
 }
 
 // -----------------------------------------------------------------------------
-// Error mapping helpers — collapse every redb / rkyv / tokio error class
+// Error mapping helper — collapses every redb / rkyv / tokio error class
 // onto `ObservationStoreError::Io`. The outer trait only distinguishes
 // `Unreachable` (gossip) from `Io` — Phase 2's Corrosion impl will grow
 // the error surface as needed; Phase 1 folds low-level failures into
 // `Io`.
+//
+// Generic over any `std::error::Error + Send + Sync + 'static` source
+// so the eight distinct concrete error types (`redb::DatabaseError`,
+// `redb::TransactionError`, `redb::TableError`, `redb::StorageError`,
+// `redb::CommitError`, `tokio::task::JoinError`, and the two
+// `rkyv::rancor::Error` lanes) route through one definition instead of
+// eight type-specialised stubs. The function-pointer coercion
+// (`map_err(map_to_io)`) requires a concrete fn type at each call
+// site; turbofishing the generic parameter pins it.
 // -----------------------------------------------------------------------------
 
-fn map_database_error(err: redb::DatabaseError) -> ObservationStoreError {
-    ObservationStoreError::Io(std::io::Error::other(err))
-}
-
-fn map_transaction_error(err: redb::TransactionError) -> ObservationStoreError {
-    ObservationStoreError::Io(std::io::Error::other(err))
-}
-
-fn map_table_error(err: redb::TableError) -> ObservationStoreError {
-    ObservationStoreError::Io(std::io::Error::other(err))
-}
-
-fn map_storage_error(err: redb::StorageError) -> ObservationStoreError {
-    ObservationStoreError::Io(std::io::Error::other(err))
-}
-
-fn map_commit_error(err: redb::CommitError) -> ObservationStoreError {
-    ObservationStoreError::Io(std::io::Error::other(err))
-}
-
-fn map_join_error(err: tokio::task::JoinError) -> ObservationStoreError {
-    ObservationStoreError::Io(std::io::Error::other(err))
-}
-
-fn map_rkyv_serialize_error(err: rkyv::rancor::Error) -> ObservationStoreError {
-    ObservationStoreError::Io(std::io::Error::other(err))
-}
-
-fn map_rkyv_deserialize_error(err: rkyv::rancor::Error) -> ObservationStoreError {
+fn map_to_io<E>(err: E) -> ObservationStoreError
+where
+    E: std::error::Error + Send + Sync + 'static,
+{
     ObservationStoreError::Io(std::io::Error::other(err))
 }
