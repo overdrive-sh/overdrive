@@ -77,10 +77,7 @@ fn job_rkyv_roundtrip_equals_original() {
     let deserialized: Job = rkyv::deserialize::<Job, rancor::Error>(archived)
         .expect("ArchivedJob must deserialize back to Job");
 
-    assert_eq!(
-        deserialized, original,
-        "rkyv round-trip must preserve Job equality"
-    );
+    assert_eq!(deserialized, original, "rkyv round-trip must preserve Job equality");
 }
 
 #[test]
@@ -111,10 +108,7 @@ fn node_rkyv_roundtrip_equals_original() {
     let deserialized: Node = rkyv::deserialize::<Node, rancor::Error>(archived)
         .expect("ArchivedNode must deserialize back to Node");
 
-    assert_eq!(
-        deserialized, original,
-        "rkyv round-trip must preserve Node equality"
-    );
+    assert_eq!(deserialized, original, "rkyv round-trip must preserve Node equality");
 }
 
 #[test]
@@ -144,10 +138,7 @@ fn allocation_rkyv_roundtrip_equals_original() {
     let deserialized: Allocation = rkyv::deserialize::<Allocation, rancor::Error>(archived)
         .expect("ArchivedAllocation must deserialize back to Allocation");
 
-    assert_eq!(
-        deserialized, original,
-        "rkyv round-trip must preserve Allocation equality"
-    );
+    assert_eq!(deserialized, original, "rkyv round-trip must preserve Allocation equality");
 }
 
 #[test]
@@ -192,15 +183,11 @@ fn node_serde_json_roundtrip_equals_original() {
 fn allocation_serde_json_roundtrip_equals_original() {
     let original = sample_allocation();
 
-    let json =
-        serde_json::to_string(&original).expect("serde-JSON serialization of Allocation");
+    let json = serde_json::to_string(&original).expect("serde-JSON serialization of Allocation");
     let back: Allocation =
         serde_json::from_str(&json).expect("serde-JSON deserialization of Allocation");
 
-    assert_eq!(
-        back, original,
-        "serde-JSON round-trip must preserve Allocation equality"
-    );
+    assert_eq!(back, original, "serde-JSON round-trip must preserve Allocation equality");
 }
 
 // ---------------------------------------------------------------------------
@@ -215,8 +202,7 @@ fn allocation_serde_json_roundtrip_equals_original() {
 fn rkyv_and_serde_json_are_non_substitutable() {
     let job = sample_job();
 
-    let rkyv_bytes =
-        rkyv::to_bytes::<rancor::Error>(&job).expect("rkyv archival of Job succeeds");
+    let rkyv_bytes = rkyv::to_bytes::<rancor::Error>(&job).expect("rkyv archival of Job succeeds");
     let json_string = serde_json::to_string(&job).expect("serde-JSON of Job succeeds");
 
     assert_ne!(

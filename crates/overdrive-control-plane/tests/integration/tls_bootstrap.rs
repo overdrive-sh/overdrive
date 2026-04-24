@@ -58,10 +58,7 @@ fn assert_parseable_certs(label: &str, pem: &str) -> Vec<Vec<u8>> {
         .into_iter()
         .map(|c| c.as_ref().to_vec())
         .collect();
-    assert!(
-        !certs.is_empty(),
-        "{label} produced zero certs — expected at least one"
-    );
+    assert!(!certs.is_empty(), "{label} produced zero certs — expected at least one");
     certs
 }
 
@@ -70,10 +67,7 @@ fn assert_parseable_key(label: &str, pem: &str) {
     let mut reader = Cursor::new(pem.as_bytes());
     let key = rustls_pemfile::private_key(&mut reader)
         .unwrap_or_else(|e| panic!("{label} failed to parse as PEM key: {e}"));
-    assert!(
-        key.is_some(),
-        "{label} did not contain a recognisable private key"
-    );
+    assert!(key.is_some(), "{label} did not contain a recognisable private key");
 }
 
 #[test]
@@ -93,9 +87,7 @@ fn server_leaf_cert_has_exactly_four_san_entries_per_adr_0010_r3() {
     let material = mint_ephemeral_ca().expect("mint_ephemeral_ca must succeed");
 
     let der_list = assert_parseable_certs("server_leaf_cert_pem", &material.server_leaf_cert_pem);
-    let der = der_list
-        .first()
-        .expect("server leaf PEM must contain at least one cert");
+    let der = der_list.first().expect("server leaf PEM must contain at least one cert");
 
     let (_, cert) =
         X509Certificate::from_der(der).expect("server leaf DER must parse via x509-parser");
@@ -191,10 +183,7 @@ fn write_trust_triple_creates_config_in_talos_yaml_shape() {
     );
 
     assert_eq!(parsed.context, "local", "current-context must be `local`");
-    let ctx = parsed
-        .contexts
-        .get("local")
-        .expect("contexts must include the `local` context");
+    let ctx = parsed.contexts.get("local").expect("contexts must include the `local` context");
     assert_eq!(
         ctx.endpoint, endpoint,
         "endpoint field must round-trip the value passed to write_trust_triple"
@@ -215,27 +204,22 @@ fn trust_triple_base64_fields_decode_to_original_pem_bytes() {
     let parsed: TalosConfig = serde_yaml::from_slice(&bytes).expect("parse yaml");
     let ctx = parsed.contexts.get("local").expect("local context");
 
-    let ca_decoded = BASE64
-        .decode(ctx.ca.as_bytes())
-        .expect("ca field must be valid base64 per ADR-0010 §R2");
+    let ca_decoded =
+        BASE64.decode(ctx.ca.as_bytes()).expect("ca field must be valid base64 per ADR-0010 §R2");
     assert_eq!(
         ca_decoded,
         material.ca_cert_pem.as_bytes(),
         "base64-decoded `ca` must equal the CA cert PEM bytes"
     );
 
-    let crt_decoded = BASE64
-        .decode(ctx.crt.as_bytes())
-        .expect("crt field must be valid base64");
+    let crt_decoded = BASE64.decode(ctx.crt.as_bytes()).expect("crt field must be valid base64");
     assert_eq!(
         crt_decoded,
         material.client_leaf_cert_pem.as_bytes(),
         "base64-decoded `crt` must equal the client leaf cert PEM bytes"
     );
 
-    let key_decoded = BASE64
-        .decode(ctx.key.as_bytes())
-        .expect("key field must be valid base64");
+    let key_decoded = BASE64.decode(ctx.key.as_bytes()).expect("key field must be valid base64");
     assert_eq!(
         key_decoded,
         material.client_leaf_key_pem.as_bytes(),

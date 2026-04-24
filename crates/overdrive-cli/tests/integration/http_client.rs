@@ -177,8 +177,10 @@ async fn cluster_status_with_no_server_returns_transport_error_with_actionable_m
     // Display-level assertion: message must be actionable (names the
     // endpoint) and must NOT leak low-level transport internals.
     let rendered = format!("{err}");
-    assert!(rendered.contains("127.0.0.1") || rendered.contains("localhost"),
-        "Display must name the endpoint so operators can act on the error; got: {rendered}");
+    assert!(
+        rendered.contains("127.0.0.1") || rendered.contains("localhost"),
+        "Display must name the endpoint so operators can act on the error; got: {rendered}"
+    );
     assert!(
         !rendered.contains("ECONNREFUSED"),
         "Display must not leak raw `ECONNREFUSED` token; got: {rendered}",

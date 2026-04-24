@@ -32,7 +32,7 @@
 #![allow(clippy::expect_fun_call)]
 
 use overdrive_core::aggregate::{
-    Allocation, AllocationSpecInput, AggregateError, Job, JobSpecInput, Node, NodeSpecInput,
+    AggregateError, Allocation, AllocationSpecInput, Job, JobSpecInput, Node, NodeSpecInput,
 };
 use overdrive_core::id::IdParseError;
 
@@ -67,11 +67,7 @@ fn job_from_spec_rejects_zero_replicas_with_validation_variant_naming_replicas_f
     }
     // And the Display form ties field + message together so the HTTP
     // layer can render it verbatim per ADR-0015.
-    assert!(
-        err.to_string().contains("replicas"),
-        "Display must include the field; got {}",
-        err
-    );
+    assert!(err.to_string().contains("replicas"), "Display must include the field; got {}", err);
 }
 
 // ---------------------------------------------------------------------------
@@ -127,12 +123,8 @@ fn job_from_spec_rejects_forbidden_space_in_id_via_id_parse_error_passthrough_wi
 #[test]
 fn job_from_spec_rejects_zero_memory_with_validation_variant_naming_memory_bytes_field() {
     // Given a Job spec with zero memory_bytes and every other field valid.
-    let spec = JobSpecInput {
-        id: "payments".to_string(),
-        replicas: 1,
-        cpu_milli: 2000,
-        memory_bytes: 0,
-    };
+    let spec =
+        JobSpecInput { id: "payments".to_string(), replicas: 1, cpu_milli: 2000, memory_bytes: 0 };
 
     // When Ana calls the validating constructor.
     let err = Job::from_spec(spec).expect_err("zero memory must be rejected");
@@ -140,10 +132,7 @@ fn job_from_spec_rejects_zero_memory_with_validation_variant_naming_memory_bytes
     // Then the error names the memory_bytes field.
     match err {
         AggregateError::Validation { field, message: _ } => {
-            assert_eq!(
-                field, "memory_bytes",
-                "field must name `memory_bytes`; got {field:?}"
-            );
+            assert_eq!(field, "memory_bytes", "field must name `memory_bytes`; got {field:?}");
         }
         other => panic!("expected AggregateError::Validation, got {other:?}"),
     }
@@ -169,10 +158,7 @@ fn node_new_rejects_zero_memory_with_validation_variant_naming_memory_bytes_fiel
     // Then the error names the memory_bytes field.
     match err {
         AggregateError::Validation { field, message: _ } => {
-            assert_eq!(
-                field, "memory_bytes",
-                "field must name `memory_bytes`; got {field:?}"
-            );
+            assert_eq!(field, "memory_bytes", "field must name `memory_bytes`; got {field:?}");
         }
         other => panic!("expected AggregateError::Validation, got {other:?}"),
     }

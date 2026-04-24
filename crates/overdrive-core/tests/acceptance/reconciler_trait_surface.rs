@@ -370,11 +370,8 @@ fn target_resource_display_renders_canonical_string() {
 
 #[test]
 fn action_http_call_constructable_with_get_method_and_idempotency_key() {
-    let correlation = CorrelationKey::derive(
-        "job/payments",
-        &ContentHash::from_bytes([0u8; 32]),
-        "register",
-    );
+    let correlation =
+        CorrelationKey::derive("job/payments", &ContentHash::from_bytes([0u8; 32]), "register");
 
     let action = Action::HttpCall {
         correlation: correlation.clone(),
@@ -407,11 +404,8 @@ fn action_http_call_constructable_with_get_method_and_idempotency_key() {
 
 #[test]
 fn action_http_call_constructable_with_post_method_and_no_idempotency_key() {
-    let correlation = CorrelationKey::derive(
-        "node/n1",
-        &ContentHash::from_bytes([1u8; 32]),
-        "drain",
-    );
+    let correlation =
+        CorrelationKey::derive("node/n1", &ContentHash::from_bytes([1u8; 32]), "drain");
 
     let action = Action::HttpCall {
         correlation,
@@ -480,9 +474,7 @@ fn reconciler_trait_signature_is_synchronous_no_async_no_clock_param() {
     // line would not compile.
     _enforce_pure_sync_signature::<NoopReconciler>();
 
-    let reconciler = NoopReconciler {
-        name: ReconcilerName::new("noop-heartbeat").expect("valid"),
-    };
+    let reconciler = NoopReconciler { name: ReconcilerName::new("noop-heartbeat").expect("valid") };
 
     let desired = State;
     let actual = State;
@@ -502,9 +494,7 @@ fn reconciler_twin_invocation_produces_identical_output() {
     // byte-identical action vectors. This is the shape the ADR-0017
     // `reconciler_is_pure` invariant will evaluate against the full
     // registry.
-    let reconciler = NoopReconciler {
-        name: ReconcilerName::new("noop-heartbeat").expect("valid"),
-    };
+    let reconciler = NoopReconciler { name: ReconcilerName::new("noop-heartbeat").expect("valid") };
 
     let desired = State;
     let actual = State;

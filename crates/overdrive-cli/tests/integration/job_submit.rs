@@ -191,9 +191,8 @@ cpu_milli = 500
         endpoint: dead_endpoint,
         config_path: config_path(tmp2.path()),
     };
-    let err = overdrive_cli::commands::job::submit(args)
-        .await
-        .expect_err("malformed TOML must fail");
+    let err =
+        overdrive_cli::commands::job::submit(args).await.expect_err("malformed TOML must fail");
 
     match &err {
         CliError::InvalidSpec { .. } => (),

@@ -183,8 +183,8 @@ async fn byte_identical_resubmit_returns_original_commit_index_unchanged() {
         .expect("jobs/payments must be populated after successful submit");
 
     let expected_job = Job::from_spec(spec).expect("canonical spec constructs a Job");
-    let expected_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&expected_job)
-        .expect("rkyv archive of expected Job");
+    let expected_bytes =
+        rkyv::to_bytes::<rkyv::rancor::Error>(&expected_job).expect("rkyv archive of expected Job");
     assert_eq!(
         persisted.as_ref(),
         expected_bytes.as_ref(),
@@ -263,8 +263,7 @@ async fn intent_store_unchanged_after_conflict_attempt() {
     // Capture the commit_index at the moment of the original submit so
     // we can assert the 409 did not advance it (read-before-write must
     // NOT call `put` on the conflict branch).
-    let commit_at_prime: SubmitJobResponse =
-        primed.json().await.expect("decode prime response");
+    let commit_at_prime: SubmitJobResponse = primed.json().await.expect("decode prime response");
 
     // Reject with replicas = 7 — must be 409.
     let conflict = client

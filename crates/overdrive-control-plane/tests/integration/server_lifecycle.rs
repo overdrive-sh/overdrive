@@ -203,7 +203,10 @@ async fn all_adr_0008_paths_return_200_on_stub_router() {
     //   - `GET /v1/jobs/:id` real handler (step 03-02)
     //   - `GET /v1/allocs` + `GET /v1/nodes` real observation-read
     //     handlers returning `{"rows":[]}` on a fresh store (step 03-03)
-    //   - `GET /v1/cluster/info` still stubbed, owned by step 03-05
+    //   - `GET /v1/cluster/info` real handler returning a
+    //     `ClusterStatus` body (step 03-05). Per-field content coverage
+    //     lives in `acceptance::runtime_registers_noop_heartbeat` and
+    //     serde shape is pinned by `acceptance::api_type_shapes`.
     // Per-endpoint happy-path coverage lives in the dedicated scenario
     // modules; this test only pins that the routes remain mounted.
     let observation_gets = ["/v1/allocs", "/v1/nodes"];
@@ -218,14 +221,17 @@ async fn all_adr_0008_paths_return_200_on_stub_router() {
         );
     }
 
-    let stub_gets = ["/v1/cluster/info"];
-    for path in stub_gets {
-        let url = format!("https://localhost:{}{path}", bound.port());
-        let resp = client.get(&url).send().await.expect(&format!("GET {path}"));
-        assert_eq!(resp.status(), reqwest::StatusCode::OK, "GET {path} expected 200",);
-        let body = resp.text().await.expect("body");
-        assert_eq!(body, "{}", "stub must return empty JSON object");
-    }
+    // `GET /v1/cluster/info` is a routing check: the body must
+    // deserialise into the `ClusterStatus` shape, proving the real
+    // handler is wired. Per-field values are pinned by
+    // `acceptance::runtime_registers_noop_heartbeat`.
+    let url = format!("https://localhost:{}/v1/cluster/info", bound.port());
+    let resp = client.get(&url).send().await.expect("GET /v1/cluster/info");
+    assert_eq!(resp.status(), reqwest::StatusCode::OK, "GET /v1/cluster/info expected 200");
+    let body = resp.text().await.expect("body");
+    serde_json::from_str::<overdrive_control_plane::api::ClusterStatus>(&body).expect(
+        "GET /v1/cluster/info body must deserialise as ClusterStatus — route must reach the real handler",
+    );
 
     // POST /v1/jobs now routes through the real `submit_job` handler
     // (step 03-01). A valid body yields 200 + a `SubmitJobResponse`;

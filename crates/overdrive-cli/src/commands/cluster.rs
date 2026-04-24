@@ -13,10 +13,11 @@
 
 use std::path::PathBuf;
 
+use overdrive_control_plane::api::BrokerCountersBody;
 use overdrive_control_plane::tls_bootstrap::{mint_ephemeral_ca, write_trust_triple};
 use url::Url;
 
-use crate::http_client::CliError;
+use crate::http_client::{ApiClient, CliError};
 
 /// Arguments to [`init`]. `config_dir` overrides the default
 /// `~/.overdrive/` location — integration tests pass a `TempDir` path so
@@ -86,6 +87,58 @@ pub async fn init(args: InitArgs) -> Result<InitOutput, CliError> {
     })?;
 
     Ok(InitOutput { config_path, endpoint })
+}
+
+/// Arguments to [`status`]. `endpoint` overrides the URL recorded in
+/// the on-disk trust triple — integration tests pass the ephemeral port
+/// of an in-process server; the CLI binary passes the `--endpoint`
+/// flag or the `OVERDRIVE_ENDPOINT` env var.
+#[derive(Debug, Clone)]
+pub struct StatusArgs {
+    /// Explicit endpoint override, typically
+    /// `https://127.0.0.1:<port>` for the in-process server.
+    pub endpoint: Url,
+    /// Path to the Talos-shape trust triple on disk.
+    pub config_path: PathBuf,
+}
+
+/// Typed output of a successful `cluster status`. Carries the control
+/// plane's self-reported mode, region, Raft commit index, the
+/// reconciler registry, and the typed broker counters per ADR-0013.
+#[derive(Debug, Clone)]
+pub struct ClusterStatusOutput {
+    /// Phase 1 control-plane mode — always `single` until HA lands.
+    pub mode: String,
+    /// Phase 1 region — always `local` until multi-region lands.
+    pub region: String,
+    /// Monotonic IntentStore commit counter. Zero on a fresh store.
+    pub commit_index: u64,
+    /// Alphabetically-sorted reconciler names registered with the
+    /// runtime. Phase 1 must contain `noop-heartbeat` per ADR-0013 §9.
+    pub reconcilers: Vec<String>,
+    /// Evaluation-broker counters (queued / cancelled / dispatched).
+    pub broker: BrokerCountersBody,
+}
+
+/// Read cluster status from the control plane.
+///
+/// # Errors
+///
+/// Returns `CliError::ConfigLoad` if the trust triple cannot be loaded,
+/// `CliError::Transport` if the control plane is unreachable, and
+/// `CliError::HttpStatus` / `CliError::BodyDecode` on a malformed
+/// server response.
+pub async fn status(args: StatusArgs) -> Result<ClusterStatusOutput, CliError> {
+    let client =
+        ApiClient::from_config_with_endpoint(&args.config_path, Some(args.endpoint.as_str()))?;
+    let cs = client.cluster_status().await?;
+    Ok(ClusterStatusOutput {
+        mode: cs.mode,
+        region: cs.region,
+        commit_index: cs.commit_index,
+        reconcilers: cs.reconcilers,
+        broker: cs.broker,
+    })
 }
 
 /// Resolve the effective config directory. Explicit override wins;

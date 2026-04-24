@@ -104,12 +104,7 @@ fn anchor_for(live: &[&str], disk: &[&str], idx: usize) -> String {
     let header = scan(live).or_else(|| scan(disk)).unwrap_or_else(|| "<no header>".to_string());
     let l = live.get(idx).copied().unwrap_or("<eof>");
     let d = disk.get(idx).copied().unwrap_or("<eof>");
-    format!(
-        "`{header}` at line {} (live=`{}` vs on-disk=`{}`)",
-        idx + 1,
-        l.trim(),
-        d.trim(),
-    )
+    format!("`{header}` at line {} (live=`{}` vs on-disk=`{}`)", idx + 1, l.trim(), d.trim(),)
 }
 
 /// Return the schema or path name anchored by a YAML header line, or

@@ -84,10 +84,11 @@ pub async fn submit(args: SubmitArgs) -> Result<SubmitOutput, CliError> {
     // 2. Parse TOML into the shared wire shape. Parse failures map to
     //    InvalidSpec with field="toml" so the operator sees the parser
     //    diagnostic without a cryptic stack trace.
-    let spec_input: JobSpecInput = toml::from_str(&toml_str).map_err(|e| CliError::InvalidSpec {
-        field: "toml".to_string(),
-        message: format!("failed to parse TOML: {e}"),
-    })?;
+    let spec_input: JobSpecInput =
+        toml::from_str(&toml_str).map_err(|e| CliError::InvalidSpec {
+            field: "toml".to_string(),
+            message: format!("failed to parse TOML: {e}"),
+        })?;
 
     // 3. Client-side validation via the shared ADR-0011 constructor.
     //    Fast-fail BEFORE any HTTP call — operators see the offending
@@ -95,10 +96,8 @@ pub async fn submit(args: SubmitArgs) -> Result<SubmitOutput, CliError> {
     let _validated: Job = Job::from_spec(spec_input.clone()).map_err(aggregate_to_cli_error)?;
 
     // 4. Build the typed API client and POST.
-    let client = ApiClient::from_config_with_endpoint(
-        &args.config_path,
-        Some(args.endpoint.as_str()),
-    )?;
+    let client =
+        ApiClient::from_config_with_endpoint(&args.config_path, Some(args.endpoint.as_str()))?;
     let resp = client.submit_job(SubmitJobRequest { spec: spec_input }).await?;
 
     // 5. Compose the typed output. Intent key is derived via the

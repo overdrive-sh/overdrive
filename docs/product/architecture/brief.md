@@ -67,7 +67,7 @@ The whitepaper §21 nondeterminism-trait table *is* the ports layer:
 | `Dataplane` | kernel/eBPF | `EbpfDataplane` (Phase 2+) | `SimDataplane` |
 | `Driver` | workload exec | `CloudHypervisorDriver` etc. (Phase 2+) | `SimDriver` |
 | `IntentStore` | linearizable state | `LocalStore` (Phase 1) / `RaftStore` (Phase 2+) | `LocalStore` reused |
-| `ObservationStore` | eventually-consistent state | `CorrosionStore` (Phase 2+) | `SimObservationStore` |
+| `ObservationStore` | eventually-consistent state | `LocalObservationStore` (Phase 1, redb) / `CorrosionStore` (Phase 2+) | `SimObservationStore` |
 | `Llm` | inference | `RigLlm` (Phase 3+) | `SimLlm` |
 
 Core logic (future reconcilers, workflows, investigation agent) depends on
@@ -133,9 +133,12 @@ extends `xtask` with `dst`/`dst-lint`. `overdrive-cli` already exists;
   the axum router + handlers, rustls TLS bootstrap, `ReconcilerRuntime`,
   `EvaluationBroker`, and the `overdrive-control-plane::api` shared
   request/response types. Depends on `overdrive-core`,
-  `overdrive-store-local`, `overdrive-sim` (for `SimObservationStore` —
-  ADR-0012), `axum`, `utoipa`, `utoipa-axum`, `rustls`, `rcgen`, `libsql`,
-  `hyper`, `tokio`, `bytes`, `serde`, `serde_json`, `thiserror`.
+  `overdrive-store-local` (for both `LocalStore` and
+  `LocalObservationStore` — ADR-0012, revised 2026-04-24),
+  `axum`, `utoipa`, `utoipa-axum`, `rustls`, `rcgen`, `libsql`, `hyper`,
+  `tokio`, `bytes`, `serde`, `serde_json`, `thiserror`. `overdrive-sim`
+  is **not** a runtime dep — it stays in `overdrive-control-plane`'s
+  `[dev-dependencies]` only (if used for DST-shaped crate-local tests).
 - **`crates/overdrive-cli/`** — EXTENDED. Gains `reqwest` dep (ADR-0014),
   imports shared types from `overdrive-control-plane::api`, adds HTTP
   client module under `src/client.rs`, fills in the previously-stub
@@ -177,7 +180,7 @@ Application architecture enforces it by type:
 | Layer | Trait | Impl (Phase 1) | Enforcement |
 |---|---|---|---|
 | Intent (should-be) | `IntentStore` | `LocalStore` (redb) | Distinct trait, distinct types; no shared `put(key, value)` surface |
-| Observation (is) | `ObservationStore` | `SimObservationStore` (in-mem LWW) | Distinct trait, distinct types; compile-time test asserts non-substitutability |
+| Observation (is) | `ObservationStore` | `LocalObservationStore` (redb, single-writer) | Distinct trait, distinct types; compile-time test asserts non-substitutability |
 | Memory (was) | per-primitive libSQL (Phase 2+) | — | N/A in Phase 1 |
 | Scratch (this tick) | `bumpalo::Bump` | — | N/A in Phase 1 (reconcilers land Phase 2) |
 
@@ -216,21 +219,40 @@ missing. No refactor. See **ADR-0001**.
 
 ### 6. Observation-store row shapes — Phase 1 minimal set
 
-`SimObservationStore` implements the `ObservationStore` trait over a fixed,
-versioned set of typed row shapes. For Phase 1 the minimum the DST harness
-needs (per US-04 and the whitepaper §4 schema):
+Two implementations of `ObservationStore` coexist in the Phase 1 workspace:
+
+- **`LocalObservationStore`** (class `adapter-host`, in
+  `overdrive-store-local`, per ADR-0012 revised 2026-04-24) — the
+  **production** single-node server adapter. Redb-backed on disk
+  (`<data_dir>/observation.redb`); single-writer overwrite semantics (no
+  LWW merge, no site-IDs, no tombstones — those land with Phase 2's
+  `CorrosionStore`); subscriptions via `tokio::sync::broadcast` in the
+  same idiom as `LocalStore::watch`.
+- **`SimObservationStore`** (class `adapter-sim`, in `overdrive-sim`)
+  — the **DST harness** adapter. In-memory LWW with injectable gossip
+  delay + partition; used exclusively by the simulation test suite
+  (`SimObservationLwwConverges` invariant, Fly-style contagion scenarios,
+  reconciler DST tests).
+
+Both implement the same trait surface against the same typed row shapes,
+the minimum the DST harness needs (per US-04 and whitepaper §4):
 
 - `alloc_status { alloc_id, job_id, node_id, state, updated_at }`
 - `node_health { node_id, region, last_heartbeat }`
 
 Rows are full-row writes (§4 guardrail) — no field-diff merges. Logical
-timestamps are `(lamport_counter, writer_node_id)` tuples, LWW under
-lexicographic tuple ordering. Gossip delay and partition are injectable via
-the `SimObservationStore` constructor.
+timestamps are `(lamport_counter, writer_node_id)` tuples preserved in
+every row for forward-compatibility with the Phase 2 Corrosion gossip
+layer; `LocalObservationStore` does not consult them (single-writer has
+no ordering question to resolve), `SimObservationStore` and the future
+`CorrosionStore` do.
 
-Production `CorrosionStore` (Phase 2+) will implement the same trait with the
-same row shapes, but backed by cr-sqlite and SWIM/QUIC. Sim and real share
-the shape definitions; they do not share the wire format.
+Production `CorrosionStore` (Phase 2+) will implement the same trait with
+the same row shapes, backed by cr-sqlite and SWIM/QUIC. It replaces
+`LocalObservationStore` at the `wire_single_node_observation` construction
+seam via a single `Box<dyn ObservationStore>` swap. Sim, local, and
+real-distributed share the shape definitions; they do not share the wire
+format.
 
 Row schema versioning (for Phase 2+ forward compatibility of Phase 1 test
 artifacts) is a crafter decision at implementation time; Phase 2 feature
@@ -462,18 +484,44 @@ Canonical intent-key derivation: `overdrive-core::intent_key` exposes
 canonical string form is `jobs/<JobId::display>` / `nodes/<NodeId::display>` /
 `allocations/<AllocationId::display>`.
 
-### 18. ObservationStore server impl — `SimObservationStore` via wiring
+### 18. ObservationStore server impl — real `LocalObservationStore` in `overdrive-store-local`
 
-Per ADR-0012. The Phase 1 server reuses `SimObservationStore` (from
-`overdrive-sim`) as its `ObservationStore` implementation, constructed
-with `GossipProfile::single_node()`. Phase 2+ swaps in `CorrosionStore`
-via a single `Box<dyn ObservationStore>` trait-object replacement; no
-handler changes.
+Per ADR-0012 (revised 2026-04-24, reversing the original 2026-04-23
+decision to reuse `SimObservationStore`). The Phase 1 server uses
+`LocalObservationStore`, a real redb-backed, single-writer adapter
+living alongside `LocalStore` in `overdrive-store-local` (class
+`adapter-host`). Phase 2+ swaps in `CorrosionStore` via a single
+`Box<dyn ObservationStore>` trait-object replacement at the
+`observation_wiring::wire_single_node_observation` construction seam;
+no handler changes.
 
-`overdrive-sim` becomes a runtime dep of `overdrive-control-plane` for
-Phase 1. The `adapter-sim` class label stays — the sim crate is
-legitimately "simulation or single-node LWW," and the single-node case
-is the intended Phase 1 posture.
+Key properties of `LocalObservationStore`:
+
+- **Persistent.** Rows survive process restart; `<data_dir>/observation.redb`
+  is the backing file. The restart-round-trip case is the objection that
+  drove the ADR revision.
+- **Class `adapter-host`.** Production posture, not a sim crate pressed
+  into production service. `overdrive-sim` is no longer a runtime
+  dependency of `overdrive-control-plane`; it stays the DST harness's
+  home.
+- **No CRDT machinery.** Single-writer overwrite semantics. Owner-writer
+  site-IDs, LWW logical-timestamp merges, and tombstone discipline land
+  with `CorrosionStore` in Phase 2, where they have peers to
+  coordinate.
+- **Subscriptions via `tokio::sync::broadcast`.** Same idiom as
+  `LocalStore::watch` per its Phase 1 substitute; lagging subscribers
+  get `RecvError::Lagged`, stream wrapper terminates, caller
+  resubscribes.
+- **Trait-object swap seam unchanged.**
+  `wire_single_node_observation() -> Result<Box<dyn ObservationStore>>`
+  keeps its signature; only the construction line moves from
+  `SimObservationStore::single_peer(...)` to
+  `LocalObservationStore::open(path)`.
+
+The DST harness continues to exercise `SimObservationStore` (for LWW
+convergence invariants, gossip-delay scenarios, partition matrices) —
+that adapter stays in `overdrive-sim` where `adapter-sim` is the
+accurate class for what the code does.
 
 ### 19. Reconciler primitive — trait in `overdrive-core`, runtime in `overdrive-control-plane`
 
@@ -572,7 +620,7 @@ can be added additively in a future v1.1.
 **None.** The Phase 1 control-plane talks only to:
 
 - The local `LocalStore` (redb file on disk) — not external.
-- The in-process `SimObservationStore` — not external.
+- The local `LocalObservationStore` (redb file on disk) — not external.
 - The local CLI over localhost rustls — not external.
 - Per-primitive libSQL files on disk — not external.
 
@@ -611,8 +659,8 @@ C4Container
 
   Container_Boundary(workspace, "Overdrive workspace") {
     Container(core, "overdrive-core", "Rust crate (class: core)", "Ports + newtypes + aggregates (Job/Node/Allocation) + Reconciler trait + Action enum + IntentKey")
-    Container(store_local, "overdrive-store-local", "Rust crate (class: adapter-host)", "LocalStore: redb-backed IntentStore adapter + commit_index() accessor")
-    Container(sim, "overdrive-sim", "Rust crate (class: adapter-sim)", "Sim* adapters + turmoil harness + invariant catalogue; also provides SimObservationStore for Phase 1 server")
+    Container(store_local, "overdrive-store-local", "Rust crate (class: adapter-host)", "LocalStore (redb-backed IntentStore + commit_index) + LocalObservationStore (redb-backed single-writer ObservationStore)")
+    Container(sim, "overdrive-sim", "Rust crate (class: adapter-sim)", "Sim* adapters + turmoil harness + invariant catalogue; SimObservationStore is used by DST only — not a runtime dep of the control plane")
     Container(ctrl, "overdrive-control-plane", "Rust crate (class: adapter-host)", "Axum router + rustls TLS + ReconcilerRuntime + EvaluationBroker + handler error mapping")
     Container(xtask, "xtask", "Rust binary (class: binary)", "cargo xtask dst / dst-lint / openapi-gen / openapi-check")
     Container(cli, "overdrive-cli", "Rust binary (class: binary)", "overdrive CLI — reqwest HTTP client against /v1 REST API")
@@ -633,8 +681,7 @@ C4Container
   Rel(cli, core, "Imports aggregate types, newtypes, IntentKey from")
 
   Rel(ctrl, core, "Implements handlers against ports in; uses aggregates from")
-  Rel(ctrl, store_local, "Writes intent via IntentStore::put; reads via IntentStore::get")
-  Rel(ctrl, sim, "Wires SimObservationStore as the Phase 1 observation adapter (ADR-0012)")
+  Rel(ctrl, store_local, "Writes intent via IntentStore::put + reads via IntentStore::get; writes observation via ObservationStore::write + reads via alloc_status_rows/node_health_rows (ADR-0012, revised 2026-04-24)")
   Rel(ctrl, libsql_files, "Provisions one libSQL DB per registered reconciler")
   Rel(store_local, redb_file, "ACID transactions to")
 
@@ -671,8 +718,7 @@ C4Component
   }
 
   Container(core, "overdrive-core", "ports + aggregates + Reconciler trait + Action + IntentKey")
-  Container(store_local, "overdrive-store-local", "LocalStore (redb)")
-  Container(sim, "overdrive-sim", "SimObservationStore (ADR-0012)")
+  Container(store_local, "overdrive-store-local", "LocalStore (redb-backed intent) + LocalObservationStore (redb-backed observation, ADR-0012 revised)")
   Container(config, "~/.overdrive/config", "YAML trust triple")
   ContainerDb(libsql_files, "libSQL files", "per-reconciler")
 
@@ -685,7 +731,7 @@ C4Component
   Rel(handlers, api, "Uses request / response types from")
   Rel(handlers, core, "Calls Job::from_spec, IntentKey::for_job, rkyv::Archive against aggregates in")
   Rel(handlers, store_local, "Writes via IntentStore::put; reads via IntentStore::get")
-  Rel(handlers, sim, "Reads observation rows via ObservationStore::read against")
+  Rel(handlers, store_local, "Reads observation rows via ObservationStore::alloc_status_rows / node_health_rows against")
   Rel(handlers, runtime, "Reads registered() + broker counters for ClusterStatus")
   Rel(handlers, errmap, "Returns ControlPlaneError on failure paths")
 
@@ -786,7 +832,7 @@ Rules to enforce:
 | 0009 | OpenAPI schema is derived from Rust types via `utoipa`, checked-in, CI-gated | Accepted |
 | 0010 | Phase 1 TLS bootstrap: ephemeral in-process CA, embedded trust triple in `~/.overdrive/config` | Accepted |
 | 0011 | Intent-side `Job` aggregate and observation-side `AllocStatusRow` stay separate types | Accepted |
-| 0012 | Phase 1 server reuses `SimObservationStore` behind a wiring adapter | Accepted |
+| 0012 | Phase 1 server uses a real `LocalObservationStore` (redb-backed, single-writer) | Accepted (revised 2026-04-24) |
 | 0013 | Reconciler primitive: trait in `overdrive-core`, runtime in `overdrive-control-plane`, libSQL private memory | Accepted |
 | 0014 | CLI HTTP client is hand-rolled `reqwest`; CLI and server share Rust request/response types | Accepted |
 | 0015 | HTTP error mapping: `ControlPlaneError` with `#[from]`, bespoke 7807-compatible JSON body | Accepted |

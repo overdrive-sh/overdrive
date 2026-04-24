@@ -137,7 +137,9 @@ fn valid_label() -> impl Strategy<Value = String> {
                 proptest::sample::select(ALNUM_DASH.chars().collect::<Vec<_>>()),
                 0..=60,
             ),
-            proptest::sample::select("abcdefghijklmnopqrstuvwxyz0123456789".chars().collect::<Vec<_>>()),
+            proptest::sample::select(
+                "abcdefghijklmnopqrstuvwxyz0123456789".chars().collect::<Vec<_>>()
+            ),
         )
             .prop_map(|(first, interior, last)| {
                 let mut s = String::with_capacity(2 + interior.len());
@@ -272,20 +274,14 @@ fn count_files_matching(literal: &str) -> Option<Vec<std::path::PathBuf>> {
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let paths = stdout
-        .lines()
-        .filter(|l| !l.is_empty())
-        .map(|l| root.join(l))
-        .collect::<Vec<_>>();
+    let paths = stdout.lines().filter(|l| !l.is_empty()).map(|l| root.join(l)).collect::<Vec<_>>();
     Some(paths)
 }
 
 fn assert_literal_in_exactly_one_production_file(literal: &str, expected_suffix: &str) {
     let Some(files) = count_files_matching(literal) else {
         // `rg` not on PATH. Log and skip — CI has rg, local dev may not.
-        eprintln!(
-            "skipping grep-gate for {literal:?}: `rg` not available on PATH"
-        );
+        eprintln!("skipping grep-gate for {literal:?}: `rg` not available on PATH");
         return;
     };
 

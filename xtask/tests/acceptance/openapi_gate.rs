@@ -43,13 +43,7 @@ fn openapi_gen_writes_deterministic_yaml_in_repeat_runs() {
 #[test]
 fn openapi_gen_output_contains_every_adr_0008_path() {
     let yaml = xtask::openapi::generate_yaml().expect("generate_yaml must succeed");
-    for expected in [
-        "/v1/jobs",
-        "/v1/jobs/{id}",
-        "/v1/allocs",
-        "/v1/nodes",
-        "/v1/cluster/info",
-    ] {
+    for expected in ["/v1/jobs", "/v1/jobs/{id}", "/v1/allocs", "/v1/nodes", "/v1/cluster/info"] {
         assert!(
             yaml.contains(expected),
             "generated YAML must include path {expected}; got:\n{yaml}"
@@ -140,10 +134,7 @@ fn xtask_bin() -> PathBuf {
 /// The workspace root — `xtask/` lives directly under it.
 fn workspace_root() -> PathBuf {
     let crate_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    crate_dir
-        .parent()
-        .expect("xtask crate lives directly under the workspace root")
-        .to_path_buf()
+    crate_dir.parent().expect("xtask crate lives directly under the workspace root").to_path_buf()
 }
 
 #[test]
