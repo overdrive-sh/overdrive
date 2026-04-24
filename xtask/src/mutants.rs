@@ -301,16 +301,40 @@ fn build_cargo_mutants_args(
     // Effective feature list.
     let mut features: Vec<String> = scope.features.clone();
     if scope.auto_integration_tests {
-        // Add `integration-tests` when at least one scoped package
-        // declares the feature. If no packages are scoped we cannot
-        // safely assert the feature exists in the build graph, so
-        // we leave the caller's explicit `--features` alone.
-        let any_declares = scope
-            .packages
-            .iter()
-            .any(|p| crate_declares_integration_tests_feature(p).unwrap_or(false));
-        if any_declares && !features.iter().any(|f| f == "integration-tests") {
-            features.push("integration-tests".into());
+        if scope.packages.is_empty() {
+            // Diff-scoped or workspace-scoped run with no explicit
+            // `--package`. The old behaviour skipped integration-tests
+            // auto-enable here, which silently dropped every
+            // acceptance test gated behind `#[cfg(feature =
+            // "integration-tests")]` from the mutation lane —
+            // measurably lowering kill rate (the phase-1-control-plane-
+            // core diff-scoped run without this fix finished at 72.9%;
+            // with it, the integration-gated tests participate and
+            // catch the per-crate missed mutations). We use cargo's
+            // per-package feature syntax (`<pkg>/integration-tests`)
+            // so crates that do NOT declare the feature never see an
+            // unknown-feature build error — enablement is narrowed to
+            // the crates that actually declare it.
+            if let Ok(declaring_crates) = workspace_crates_with_integration_tests_feature() {
+                for pkg in declaring_crates {
+                    let qualified = format!("{pkg}/integration-tests");
+                    if !features.iter().any(|f| f == &qualified) {
+                        features.push(qualified);
+                    }
+                }
+            }
+        } else {
+            // Package-scoped: enable the bare `integration-tests`
+            // feature if at least one scoped package declares it.
+            // Cargo's scoping rules mean the bare feature name applies
+            // to the packages under test.
+            let any_declares = scope
+                .packages
+                .iter()
+                .any(|p| crate_declares_integration_tests_feature(p).unwrap_or(false));
+            if any_declares && !features.iter().any(|f| f == "integration-tests") {
+                features.push("integration-tests".into());
+            }
         }
     }
     if !features.is_empty() {
@@ -343,6 +367,147 @@ fn crate_declares_integration_tests_feature(pkg: &str) -> Result<bool> {
     let raw = std::fs::read_to_string(manifest)
         .wrap_err_with(|| format!("read {}", manifest.display()))?;
     Ok(manifest_declares_integration_tests_feature(&raw))
+}
+
+/// Enumerate workspace member crates that declare the
+/// `integration-tests` feature in their `Cargo.toml`.
+///
+/// Used by `build_cargo_mutants_args` in diff-scoped mode: without a
+/// `--package` scope, the existing per-package auto-enable has no
+/// targets to walk, so a diff-scoped run otherwise invisibly strips
+/// integration-gated tests from the mutation lane. Reading the root
+/// workspace manifest and enumerating its `members` list is the
+/// narrowest fix — no crate is tested against a feature it does not
+/// declare, and cargo-mutants' per-package `<pkg>/integration-tests`
+/// feature syntax lets us enable each one independently.
+///
+/// Only members under `crates/` are returned. `xtask/` also declares
+/// the feature for its own acceptance tests, but those tests exercise
+/// xtask subcommands — they do not kill mutations in the platform
+/// crates, and enabling the feature on every per-mutation build adds
+/// wall-clock without raising kill rate. `xtask` is already excluded
+/// from `cargo mutants` via `.cargo/mutants.toml`'s Rule 6 glob, so
+/// skipping it here keeps the two filters consistent.
+///
+/// # Errors
+///
+/// Returns the I/O error wrapped in context if the workspace
+/// `Cargo.toml` cannot be read. A workspace Cargo.toml without a
+/// `members` list or without any integration-tests-declaring member
+/// yields `Ok(vec![])`.
+fn workspace_crates_with_integration_tests_feature() -> Result<Vec<String>> {
+    let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .ok_or_else(|| color_eyre::eyre::eyre!("CARGO_MANIFEST_DIR has no parent"))?
+        .to_path_buf();
+    let root_manifest = workspace_root.join("Cargo.toml");
+    let raw = std::fs::read_to_string(&root_manifest)
+        .wrap_err_with(|| format!("read {}", root_manifest.display()))?;
+
+    let members = parse_workspace_members(&raw);
+
+    let mut declared = Vec::new();
+    for member_path in members {
+        // Skip members outside `crates/` — see the doc comment above
+        // for why `xtask/` is deliberately not auto-enabled.
+        if !member_path.starts_with("crates/") {
+            continue;
+        }
+        // Member paths are workspace-relative (e.g. `crates/overdrive-cli`).
+        // The crate name is the last path component — matches Cargo's
+        // default of `package.name == last path component` across every
+        // member in this workspace.
+        let Some(crate_name) =
+            member_path.rsplit('/').next().filter(|s| !s.is_empty()).map(str::to_owned)
+        else {
+            continue;
+        };
+        if crate_declares_integration_tests_feature(&crate_name).unwrap_or(false) {
+            declared.push(crate_name);
+        }
+    }
+    declared.sort();
+    Ok(declared)
+}
+
+/// Pure text scan of the root `Cargo.toml` — returns the entries under
+/// `[workspace] members = [ ... ]`, in source order, with surrounding
+/// whitespace and quotes stripped.
+///
+/// Tolerates single-line `members = ["a", "b"]` and multi-line forms.
+/// Comment lines (`#`) and entries mentioning `.` in leading position
+/// (defensive — workspace members shouldn't be `.` but any stray entry
+/// would be meaningless in the per-crate feature-discovery pass) are
+/// silently dropped.
+fn parse_workspace_members(manifest: &str) -> Vec<String> {
+    let mut in_workspace = false;
+    let mut in_members = false;
+    let mut out = Vec::new();
+    for line in manifest.lines() {
+        let trimmed = line.trim();
+
+        // Section boundary — reset the members-array state if we cross
+        // into another section.
+        if trimmed.starts_with('[') {
+            in_workspace = trimmed.starts_with("[workspace]");
+            in_members = false;
+            continue;
+        }
+
+        if !in_workspace {
+            continue;
+        }
+
+        // Enter members array. Handles both `members = [` (start on this
+        // line) and inline `members = ["a", "b"]`.
+        if let Some(after) = trimmed.strip_prefix("members") {
+            let after = after.trim_start().trim_start_matches('=').trim_start();
+            if let Some(inside) = after.strip_prefix('[') {
+                in_members = true;
+                // `inside` drops the opening `[` so a single-line form
+                // lands in the element-parsing path below.
+                for entry in inside.split(',') {
+                    let e = entry.trim().trim_end_matches(']').trim();
+                    if let Some(name) = strip_string_literal(e) {
+                        out.push(name.to_owned());
+                    }
+                }
+                if after.contains(']') {
+                    in_members = false;
+                }
+            }
+            continue;
+        }
+
+        if in_members {
+            for entry in trimmed.split(',') {
+                let e = entry.trim().trim_end_matches(']').trim();
+                if let Some(name) = strip_string_literal(e) {
+                    out.push(name.to_owned());
+                }
+            }
+            if trimmed.contains(']') {
+                in_members = false;
+            }
+        }
+    }
+    out
+}
+
+/// Strip surrounding `"..."` or `'...'` from a TOML string literal,
+/// rejecting bare identifiers and comments.
+fn strip_string_literal(s: &str) -> Option<&str> {
+    let s = s.trim();
+    if s.is_empty() || s.starts_with('#') {
+        return None;
+    }
+    let (first, last) = (s.chars().next()?, s.chars().last()?);
+    if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
+        let inner = &s[1..s.len() - 1];
+        if inner.is_empty() { None } else { Some(inner) }
+    } else {
+        None
+    }
 }
 
 /// Pure text scan of a Cargo.toml body — extracted so the
@@ -969,14 +1134,34 @@ mod tests {
     }
 
     #[test]
-    fn argv_no_features_flag_when_list_empty_and_no_auto_trigger() {
-        // No packages scoped → no package could trigger auto-add →
-        // no --features flag should appear at all.
+    fn argv_no_features_flag_when_list_empty_and_auto_off() {
+        // With auto_integration_tests=false and no user features,
+        // no --features flag should appear at all. Diff mode and
+        // workspace mode behave identically here.
+        let mode = Mode::Workspace { baseline_path: PathBuf::from("/ignored") };
+        let scope = Scope { auto_integration_tests: false, ..Scope::default() };
+        let args = build_cargo_mutants_args(&mode, &scope, Path::new("/tmp/xtask"), None);
+        let joined = argv_str(&args);
+        assert!(!joined.contains("--features"), "got: {joined}");
+    }
+
+    #[test]
+    fn argv_workspace_mode_empty_packages_auto_adds_qualified_features() {
+        // Workspace mode (nightly full-corpus run) with empty packages
+        // and auto_integration_tests=true now enables the feature for
+        // every workspace crate that declares it — same rationale as
+        // diff-scoped: the full corpus should see integration-gated
+        // tests participate. Behaviour change vs. the pre-04-10 code,
+        // which skipped the auto-add whenever packages was empty.
         let mode = Mode::Workspace { baseline_path: PathBuf::from("/ignored") };
         let scope = Scope { auto_integration_tests: true, ..Scope::default() };
         let args = build_cargo_mutants_args(&mode, &scope, Path::new("/tmp/xtask"), None);
         let joined = argv_str(&args);
-        assert!(!joined.contains("--features"), "got: {joined}");
+        assert!(joined.contains("--features"), "expected --features; got: {joined}");
+        assert!(
+            joined.contains("overdrive-control-plane/integration-tests"),
+            "expected qualified integration-tests feature; got: {joined}",
+        );
     }
 
     #[test]
@@ -1144,5 +1329,172 @@ mod tests {
         clear_stale_summary(&path).expect("clear must succeed when file absent");
 
         assert!(!path.exists(), "file absent remains absent");
+    }
+
+    // ---- workspace member / feature discovery -------------------------------
+
+    #[test]
+    fn parse_workspace_members_handles_multiline_form() {
+        let manifest = r#"
+[workspace]
+resolver = "3"
+members = [
+    "crates/overdrive-core",
+    "crates/overdrive-cli",
+    # a comment line
+    "xtask",
+]
+
+[workspace.package]
+edition = "2024"
+"#;
+        let members = parse_workspace_members(manifest);
+        assert_eq!(
+            members,
+            vec![
+                "crates/overdrive-core".to_owned(),
+                "crates/overdrive-cli".to_owned(),
+                "xtask".to_owned()
+            ],
+        );
+    }
+
+    #[test]
+    fn parse_workspace_members_handles_single_line_form() {
+        let manifest = r#"[workspace]
+members = ["crates/a", "crates/b"]
+resolver = "3"
+"#;
+        let members = parse_workspace_members(manifest);
+        assert_eq!(members, vec!["crates/a".to_owned(), "crates/b".to_owned()]);
+    }
+
+    #[test]
+    fn parse_workspace_members_ignores_other_sections_array_named_members() {
+        let manifest = r#"
+[features]
+members = [
+    "this is not a workspace members array",
+]
+
+[workspace]
+members = ["xtask"]
+"#;
+        let members = parse_workspace_members(manifest);
+        assert_eq!(members, vec!["xtask".to_owned()]);
+    }
+
+    #[test]
+    fn workspace_crates_with_integration_tests_feature_finds_declaring_crates() {
+        // Runs against the real repo's Cargo.toml via
+        // `CARGO_MANIFEST_DIR`. Asserts the set of crates that declare
+        // the feature — stable enough to keep in CI, and exactly the
+        // crates the diff-scoped auto-enable needs to target.
+        let found = workspace_crates_with_integration_tests_feature()
+            .expect("workspace manifest must be readable");
+        // Known-at-time-of-writing set. If a new crate declares the
+        // feature (or an existing one drops it), this test fails
+        // loudly — update the list and the commit message.
+        assert_eq!(
+            found,
+            vec![
+                "overdrive-cli".to_owned(),
+                "overdrive-control-plane".to_owned(),
+                "overdrive-store-local".to_owned(),
+            ],
+        );
+    }
+
+    // ---- build_cargo_mutants_args: diff-scoped integration-tests auto ------
+
+    #[test]
+    fn argv_diff_mode_auto_adds_qualified_integration_tests_features() {
+        // Diff mode with auto_integration_tests=true and empty packages
+        // must append `<pkg>/integration-tests` for each workspace
+        // crate that declares the feature — no bare
+        // `integration-tests` (which would fail to build against
+        // crates that do not declare it).
+        let mode = Mode::Diff { base: "origin/main".into() };
+        let scope = Scope { auto_integration_tests: true, ..Scope::default() };
+        let args = build_cargo_mutants_args(
+            &mode,
+            &scope,
+            Path::new("/tmp/xtask"),
+            Some(Path::new("/tmp/mutants.diff")),
+        );
+        let joined = argv_str(&args);
+
+        assert!(joined.contains("--features"), "expected --features flag; got: {joined}");
+        // Each declaring crate from the current workspace must appear
+        // in the joined feature list.
+        for pkg in ["overdrive-cli", "overdrive-control-plane", "overdrive-store-local"] {
+            let qualified = format!("{pkg}/integration-tests");
+            assert!(
+                joined.contains(&qualified),
+                "expected per-package feature `{qualified}` in argv; got: {joined}",
+            );
+        }
+        // Must NOT contain the bare feature name alone — cargo would
+        // reject it against crates that do not declare the feature.
+        // Every `integration-tests` occurrence must be preceded by `/`
+        // (the qualified `<pkg>/integration-tests` form).
+        let mut remaining = joined.as_str();
+        while let Some(idx) = remaining.find("integration-tests") {
+            assert!(idx > 0, "`integration-tests` at argv start is bare; got: {joined}");
+            let preceding = remaining.as_bytes()[idx - 1];
+            assert_eq!(
+                preceding as char, '/',
+                "bare `integration-tests` must not appear (preceding char: {:?}); got: {joined}",
+                preceding as char,
+            );
+            remaining = &remaining[idx + "integration-tests".len()..];
+        }
+    }
+
+    #[test]
+    fn argv_diff_mode_opt_out_suppresses_auto_integration_tests() {
+        let mode = Mode::Diff { base: "origin/main".into() };
+        let scope = Scope { auto_integration_tests: false, ..Scope::default() };
+        let args = build_cargo_mutants_args(
+            &mode,
+            &scope,
+            Path::new("/tmp/xtask"),
+            Some(Path::new("/tmp/mutants.diff")),
+        );
+        let joined = argv_str(&args);
+        assert!(
+            !joined.contains("integration-tests"),
+            "opt-out must suppress all integration-tests feature entries; got: {joined}",
+        );
+    }
+
+    #[test]
+    fn argv_package_scope_still_uses_bare_integration_tests_feature_name() {
+        // Package-scoped runs keep the prior bare-feature behaviour
+        // because cargo applies bare features only to the packages
+        // under test — scoping is implicit.
+        let mode = Mode::Diff { base: "origin/main".into() };
+        let scope = Scope {
+            packages: vec!["overdrive-control-plane".to_owned()],
+            auto_integration_tests: true,
+            ..Scope::default()
+        };
+        let args = build_cargo_mutants_args(
+            &mode,
+            &scope,
+            Path::new("/tmp/xtask"),
+            Some(Path::new("/tmp/mutants.diff")),
+        );
+        let joined = argv_str(&args);
+        assert!(
+            joined.contains(",integration-tests") || joined.ends_with("integration-tests"),
+            "package-scoped run must pass bare `integration-tests`; got: {joined}",
+        );
+        // And must NOT also add the qualified form — cargo would
+        // enable the feature twice, harmless but noisy.
+        assert!(
+            !joined.contains("overdrive-control-plane/integration-tests"),
+            "package-scoped run must not duplicate as `<pkg>/integration-tests`; got: {joined}",
+        );
     }
 }
