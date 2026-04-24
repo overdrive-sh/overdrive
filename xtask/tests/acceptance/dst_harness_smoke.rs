@@ -55,7 +55,7 @@ fn read_summary(target_dir: &Path) -> serde_json::Value {
 }
 
 // -----------------------------------------------------------------------------
-// §7.1 scenario 1 — "The DST harness composes real LocalStore with every Sim
+// §7.1 scenario 1 — "The DST harness composes real LocalIntentStore with every Sim
 // adapter" — end-to-end smoke: exits 0, artifacts exist, seed present.
 // -----------------------------------------------------------------------------
 

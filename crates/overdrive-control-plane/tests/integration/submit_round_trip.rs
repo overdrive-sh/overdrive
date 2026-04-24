@@ -24,7 +24,7 @@ use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
 use overdrive_core::aggregate::{IntentKey, Job, JobSpecInput};
 use overdrive_core::id::JobId;
 use overdrive_core::traits::intent_store::IntentStore;
-use overdrive_store_local::LocalStore;
+use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
 
 // -----------------------------------------------------------------------
@@ -75,10 +75,10 @@ async fn spawn_server() -> (ServerHandle, SocketAddr, TempDir, String) {
     (handle, bound, tmp, ca_pem)
 }
 
-/// Back-door read: open a SECOND `LocalStore` at the same redb file the
+/// Back-door read: open a SECOND `LocalIntentStore` at the same redb file the
 /// server is committing to, and return the raw bytes at `key` (if any).
 ///
-/// `LocalStore::open` is safe under multi-handle read access — redb
+/// `LocalIntentStore::open` is safe under multi-handle read access — redb
 /// permits concurrent readers alongside a live writer, which is what we
 /// need here. We close this handle on drop by letting it fall out of
 /// scope.
@@ -89,7 +89,7 @@ async fn read_intent_key_from_store(data_dir: &std::path::Path, key: &[u8]) -> O
     // the authoritative record of the path.
     let path = data_dir.join("intent.redb");
     assert!(path.exists(), "expected redb file at {}; found none", path.display());
-    let store = LocalStore::open(&path).expect("open LocalStore for back-door read");
+    let store = LocalIntentStore::open(&path).expect("open LocalIntentStore for back-door read");
     store.get(key).await.expect("back-door get")
 }
 
@@ -304,14 +304,14 @@ async fn post_v1_jobs_with_different_spec_at_existing_key_returns_409_conflict()
 }
 
 // -----------------------------------------------------------------------
-// AC — LocalStore::commit_index() strictly increases per put
+// AC — LocalIntentStore::commit_index() strictly increases per put
 // -----------------------------------------------------------------------
 
 #[tokio::test]
 async fn local_store_commit_index_monotonically_increases() {
     let tmp = TempDir::new().expect("tempdir");
     let path = tmp.path().join("store.redb");
-    let store = LocalStore::open(&path).expect("open LocalStore");
+    let store = LocalIntentStore::open(&path).expect("open LocalIntentStore");
 
     // Initial state — commit_index is zero on a freshly-created store.
     // Any non-negative starting value would satisfy "monotonic"; pinning

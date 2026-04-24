@@ -1,6 +1,6 @@
 //! Overdrive Phase 1 single-mode control-plane.
 //!
-//! This crate composes the intent-side `LocalStore`, the observation-side
+//! This crate composes the intent-side `LocalIntentStore`, the observation-side
 //! `SimObservationStore` (Phase 1 production impl per ADR-0012), the
 //! `axum` + `rustls` HTTP server (ADR-0008), the `rcgen`-minted ephemeral
 //! CA (ADR-0010), the reconciler runtime (ADR-0013), and the shared
@@ -41,14 +41,14 @@ use axum::routing::{get, post};
 use axum_server::Handle as AxumHandle;
 use axum_server::tls_rustls::RustlsConfig;
 use overdrive_core::traits::observation_store::ObservationStore;
-use overdrive_store_local::LocalStore;
+use overdrive_store_local::LocalIntentStore;
 
 /// Shared application state passed to every axum handler via
 /// [`axum::extract::State`]. Cheap to clone — the inner handles are
 /// `Arc`-shared.
 ///
 /// * `store` — the authoritative [`IntentStore`] implementation
-///   (`LocalStore` in Phase 1 single mode).
+///   (`LocalIntentStore` in Phase 1 single mode).
 /// * `obs` — the `ObservationStore` trait object. Phase 1 wraps
 ///   `SimObservationStore` (ADR-0012); Phase 2 swaps in `CorrosionStore`
 ///   via a single trait-object replacement.
@@ -57,7 +57,7 @@ use overdrive_store_local::LocalStore;
 #[derive(Clone)]
 pub struct AppState {
     /// Authoritative intent store — every write lands here.
-    pub store: Arc<LocalStore>,
+    pub store: Arc<LocalIntentStore>,
     /// Eventually-consistent observation store. Unused by 03-01's
     /// `submit_job` handler, but wired in so observation-reading
     /// handlers in later steps (03-03) can pick it up without
@@ -175,11 +175,11 @@ pub async fn run_server_with_obs(
     // Open the authoritative intent store at <data_dir>/intent.redb.
     // The parent directory is guaranteed to exist — callers pass a
     // tempdir or an operator-created data directory; we do not create
-    // the directory ourselves here per `LocalStore::open`'s contract.
+    // the directory ourselves here per `LocalIntentStore::open`'s contract.
     let store_path = config.data_dir.join("intent.redb");
     let store = Arc::new(
-        LocalStore::open(&store_path)
-            .map_err(|e| error::ControlPlaneError::Internal(format!("open LocalStore: {e}")))?,
+        LocalIntentStore::open(&store_path)
+            .map_err(|e| error::ControlPlaneError::Internal(format!("open LocalIntentStore: {e}")))?,
     );
 
     // Construct the reconciler runtime and register `noop_heartbeat` at

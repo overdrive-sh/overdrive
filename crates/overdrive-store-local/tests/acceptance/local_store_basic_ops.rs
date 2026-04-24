@@ -1,4 +1,4 @@
-//! Acceptance scenarios for US-03 §4.1 and §4.3 — `LocalStore` basic
+//! Acceptance scenarios for US-03 §4.1 and §4.3 — `LocalIntentStore` basic
 //! operations on real redb.
 //!
 //! Translates `docs/feature/phase-1-foundation/distill/test-scenarios.md`
@@ -7,7 +7,7 @@
 //! error) into Rust `#[tokio::test]` bodies.
 //!
 //! Port-to-port discipline: every assertion drives the `IntentStore`
-//! trait surface that `LocalStore` implements. No internal types are
+//! trait surface that `LocalIntentStore` implements. No internal types are
 //! inspected.
 //!
 //! Strategy C per DWD-01: real redb, `tempfile::TempDir` backing path.
@@ -17,21 +17,21 @@ use std::time::Duration;
 use bytes::Bytes;
 use futures::StreamExt;
 use overdrive_core::traits::intent_store::{IntentStore, TxnOp, TxnOutcome};
-use overdrive_store_local::LocalStore;
+use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
 use tokio::time::timeout;
 
 // -----------------------------------------------------------------------------
-// §4.1 scenario 1 — "A value written to LocalStore can be read back on the
+// §4.1 scenario 1 — "A value written to LocalIntentStore can be read back on the
 // same store"
 // -----------------------------------------------------------------------------
 
 #[tokio::test]
 async fn a_value_written_can_be_read_back() {
-    // Given a freshly constructed LocalStore backed by real redb on a
+    // Given a freshly constructed LocalIntentStore backed by real redb on a
     // temporary path.
     let tmp = TempDir::new().expect("temp dir");
-    let store = LocalStore::open(tmp.path().join("intent.redb")).expect("open");
+    let store = LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open");
 
     // When Ana writes bytes B under key K.
     let key: &[u8] = b"jobs/payments";
@@ -52,10 +52,10 @@ async fn a_value_written_can_be_read_back() {
 
 #[tokio::test]
 async fn watch_fires_once_per_prefix_matching_write_and_ignores_non_matching() {
-    // Given a freshly constructed LocalStore backed by real redb, and a
+    // Given a freshly constructed LocalIntentStore backed by real redb, and a
     // watch subscription for the prefix "jobs/".
     let tmp = TempDir::new().expect("temp dir");
-    let store = LocalStore::open(tmp.path().join("intent.redb")).expect("open");
+    let store = LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open");
 
     let mut watch = store.watch(b"jobs/").await.expect("watch subscribe");
 
@@ -87,9 +87,9 @@ async fn watch_fires_once_per_prefix_matching_write_and_ignores_non_matching() {
 
 #[tokio::test]
 async fn deleting_a_key_removes_it_from_subsequent_reads() {
-    // Given a LocalStore containing a value under key K.
+    // Given a LocalIntentStore containing a value under key K.
     let tmp = TempDir::new().expect("temp dir");
-    let store = LocalStore::open(tmp.path().join("intent.redb")).expect("open");
+    let store = LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open");
     let key: &[u8] = b"jobs/payments";
     store.put(key, b"spec-v1").await.expect("put");
     assert!(store.get(key).await.expect("get pre-delete").is_some());
@@ -111,9 +111,9 @@ async fn deleting_a_key_removes_it_from_subsequent_reads() {
 
 #[tokio::test]
 async fn a_transaction_commits_all_operations_atomically() {
-    // Given a freshly constructed LocalStore.
+    // Given a freshly constructed LocalIntentStore.
     let tmp = TempDir::new().expect("temp dir");
-    let store = LocalStore::open(tmp.path().join("intent.redb")).expect("open");
+    let store = LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open");
 
     // Seed a key that the transaction will delete.
     store.put(b"jobs/legacy", b"legacy-spec").await.expect("seed");
@@ -151,9 +151,9 @@ async fn a_transaction_commits_all_operations_atomically() {
 
 #[tokio::test]
 async fn a_read_on_an_absent_key_returns_nothing_without_error() {
-    // Given a freshly constructed LocalStore with no entries.
+    // Given a freshly constructed LocalIntentStore with no entries.
     let tmp = TempDir::new().expect("temp dir");
-    let store = LocalStore::open(tmp.path().join("intent.redb")).expect("open");
+    let store = LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open");
 
     // When Ana reads a key that has never been written.
     let result = store.get(b"nonexistent/key").await;

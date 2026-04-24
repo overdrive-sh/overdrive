@@ -42,7 +42,7 @@ use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
 use overdrive_core::aggregate::{IntentKey, Job, JobSpecInput};
 use overdrive_core::id::JobId;
 use overdrive_core::traits::intent_store::IntentStore;
-use overdrive_store_local::LocalStore;
+use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
 
 // -----------------------------------------------------------------------
@@ -100,7 +100,7 @@ async fn spawn_server() -> (ServerHandle, SocketAddr, TempDir, String) {
 async fn read_intent_key_from_store(data_dir: &std::path::Path, key: &[u8]) -> Option<Bytes> {
     let path = data_dir.join("intent.redb");
     assert!(path.exists(), "expected redb file at {}; found none", path.display());
-    let store = LocalStore::open(&path).expect("open LocalStore for back-door read");
+    let store = LocalIntentStore::open(&path).expect("open LocalIntentStore for back-door read");
     store.get(key).await.expect("back-door get")
 }
 

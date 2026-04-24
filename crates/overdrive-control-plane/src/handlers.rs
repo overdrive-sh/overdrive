@@ -81,7 +81,7 @@ pub async fn submit_job(
     let key = IntentKey::for_job(&job.id);
 
     // 4. Idempotency / conflict detection — read-then-write against the
-    //    LocalStore (ADR-0015 §4 Phase 1 note).
+    //    LocalIntentStore (ADR-0015 §4 Phase 1 note).
     if let Some(existing) = state.store.get(key.as_bytes()).await? {
         if existing.as_ref() == archived.as_ref() {
             // Byte-identical re-submission: return the current
@@ -96,7 +96,7 @@ pub async fn submit_job(
         });
     }
 
-    // 5. Commit. The counter advances post-commit inside `LocalStore::put`.
+    // 5. Commit. The counter advances post-commit inside `LocalIntentStore::put`.
     state.store.put(key.as_bytes(), archived.as_ref()).await?;
 
     Ok(Json(api::SubmitJobResponse {

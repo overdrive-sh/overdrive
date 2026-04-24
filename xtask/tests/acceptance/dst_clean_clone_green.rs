@@ -6,7 +6,7 @@
 //!
 //! * §1.1 WS-1 — clean-clone `cargo xtask dst` is green within <60 s.
 //! * §7.1 scenario 1 — harness reports every Sim adapter and a real
-//!   `LocalStore` backing the run.
+//!   `LocalIntentStore` backing the run.
 //! * §7.1 scenario 2 — the six default-catalogue invariants all ran.
 //! * §5.2 — `intent_never_crosses_into_observation` invariant runs on
 //!   every tick and reports pass.

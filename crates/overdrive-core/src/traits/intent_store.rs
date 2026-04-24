@@ -51,7 +51,7 @@ pub enum TxnOutcome {
     Conflict,
 }
 
-/// Portable full-state snapshot — used for `LocalStore → RaftStore`
+/// Portable full-state snapshot — used for `LocalIntentStore → RaftStore`
 /// migration, routine Raft snapshots in HA mode, and DR backups.
 ///
 /// The snapshot carries its canonical **framed byte slice** alongside
@@ -127,7 +127,7 @@ pub trait IntentStore: Send + Sync + 'static {
     async fn export_snapshot(&self) -> Result<StateSnapshot, IntentStoreError>;
 
     /// Replay a snapshot as the initial state — used by `RaftStore` when
-    /// bootstrapping a new HA cluster from a `LocalStore` export.
+    /// bootstrapping a new HA cluster from a `LocalIntentStore` export.
     async fn bootstrap_from(&self, snapshot: StateSnapshot) -> Result<(), IntentStoreError>;
 }
 

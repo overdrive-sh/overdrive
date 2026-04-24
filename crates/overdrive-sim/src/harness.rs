@@ -1,4 +1,4 @@
-//! DST harness — composes a real `LocalStore` with every `Sim*` adapter
+//! DST harness — composes a real `LocalIntentStore` with every `Sim*` adapter
 //! on each of three turmoil-style hosts, evaluates a catalogue of
 //! invariants, and returns a structured [`RunReport`].
 //!
@@ -18,7 +18,7 @@
 //!
 //! * Three hosts, named `host-0`, `host-1`, `host-2` — the baseline
 //!   three-peer DST cluster shape.
-//! * Each host owns a `LocalStore` (real redb) on a per-host tempdir,
+//! * Each host owns a `LocalIntentStore` (real redb) on a per-host tempdir,
 //!   plus one instance of every `Sim*` adapter.
 //! * `Harness::run(seed)` iterates the invariant catalogue (or a
 //!   filtered subset) and collects one [`InvariantResult`] per entry.
@@ -130,7 +130,7 @@ impl RunReport {
 }
 
 /// A single host in the harness cluster — owns one of each adapter and
-/// one real `LocalStore` on a per-host tempdir.
+/// one real `LocalIntentStore` on a per-host tempdir.
 struct Host {
     /// Host name used in summaries (e.g. `host-0`).
     name: String,
@@ -138,10 +138,10 @@ struct Host {
     _tempdir: tempfile::TempDir,
     /// Path of the redb file — captured for error reporting.
     _store_path: PathBuf,
-    /// Real `LocalStore` this host writes intent through. Held on the
+    /// Real `LocalIntentStore` this host writes intent through. Held on the
     /// host so evaluator calls can read from the same instance the
     /// harness initialised.
-    intent: Arc<overdrive_store_local::LocalStore>,
+    intent: Arc<overdrive_store_local::LocalIntentStore>,
     /// Adapter bundle — constructed for composition; 06-02 consumes.
     #[allow(dead_code)]
     adapters: HostAdapters,
@@ -188,9 +188,9 @@ pub enum HarnessError {
         #[source]
         source: std::io::Error,
     },
-    /// Opening the real `LocalStore` failed.
-    #[error("LocalStore open failed for host-{index}: {source}")]
-    LocalStoreOpen {
+    /// Opening the real `LocalIntentStore` failed.
+    #[error("LocalIntentStore open failed for host-{index}: {source}")]
+    LocalIntentStoreOpen {
         /// Host index that failed.
         index: usize,
         /// Underlying intent-store error.
@@ -310,12 +310,12 @@ impl Harness {
 
         let store_path = tempdir.path().join("intent.redb");
 
-        // Real LocalStore on a per-host tempdir — shared with evaluator
+        // Real LocalIntentStore on a per-host tempdir — shared with evaluator
         // bodies via `Host::intent` so every invariant sees the same
         // backing redb instance the harness composed.
         let intent = Arc::new(
-            overdrive_store_local::LocalStore::open(&store_path)
-                .map_err(|source| HarnessError::LocalStoreOpen { index, source })?,
+            overdrive_store_local::LocalIntentStore::open(&store_path)
+                .map_err(|source| HarnessError::LocalIntentStoreOpen { index, source })?,
         );
 
         // Per-host entropy — each host gets a deterministically-derived

@@ -203,7 +203,7 @@ pub async fn evaluate_intent_crossing(
 /// Evaluate the snapshot roundtrip invariant against `intent`.
 ///
 /// Drives the step 03-02 logic from within the harness: export,
-/// bootstrap a second `LocalStore` from the frame, re-export, and
+/// bootstrap a second `LocalIntentStore` from the frame, re-export, and
 /// compare bytes.
 pub async fn evaluate_snapshot_roundtrip(intent: &impl IntentStore) -> InvariantResult {
     let name = "snapshot-roundtrip-bit-identical";
@@ -220,7 +220,7 @@ pub async fn evaluate_snapshot_roundtrip(intent: &impl IntentStore) -> Invariant
         }
     };
 
-    // Bootstrap a fresh LocalStore from the frame.
+    // Bootstrap a fresh LocalIntentStore from the frame.
     let tmp = match tempfile::tempdir() {
         Ok(t) => t,
         Err(err) => {
@@ -233,7 +233,7 @@ pub async fn evaluate_snapshot_roundtrip(intent: &impl IntentStore) -> Invariant
         }
     };
     let path = tmp.path().join("roundtrip.redb");
-    let second_store = match overdrive_store_local::LocalStore::open(&path) {
+    let second_store = match overdrive_store_local::LocalIntentStore::open(&path) {
         Ok(s) => s,
         Err(err) => {
             return result(

@@ -1,5 +1,5 @@
 //! redb-backed implementation of `IntentStore` for the single-node
-//! `LocalStore`.
+//! `LocalIntentStore`.
 //!
 //! # Watch: Phase 1 substitute
 //!
@@ -11,7 +11,7 @@
 //! filter.
 //!
 //! This is an **in-process** notification surface: it is correct for a
-//! single-node `LocalStore` (the `mode = "single"` deployment per the
+//! single-node `LocalIntentStore` (the `mode = "single"` deployment per the
 //! whitepaper §4), where every reader of `IntentStore` lives in the same
 //! process as the writer. **Phase 2 replaces this with a Raft-log-driven
 //! change notification** once `RaftStore` lands — at that point,
@@ -71,7 +71,7 @@ struct WatchEvent {
 
 /// Redb-backed `IntentStore`. Cheap to clone via `Arc`; safe to share
 /// across tasks and threads.
-pub struct LocalStore {
+pub struct LocalIntentStore {
     inner: Arc<Inner>,
 }
 
@@ -91,8 +91,8 @@ struct Inner {
     commit_counter: AtomicU64,
 }
 
-impl LocalStore {
-    /// Open (or create) a redb-backed `LocalStore` at `path`.
+impl LocalIntentStore {
+    /// Open (or create) a redb-backed `LocalIntentStore` at `path`.
     ///
     /// The parent directory must already exist; callers are expected
     /// to pass a path whose parent has been created. Initializes the
@@ -149,7 +149,7 @@ impl LocalStore {
 }
 
 #[async_trait]
-impl IntentStore for LocalStore {
+impl IntentStore for LocalIntentStore {
     async fn get(&self, key: &[u8]) -> Result<Option<Bytes>, IntentStoreError> {
         let inner = Arc::clone(&self.inner);
         let key = key.to_vec();
@@ -280,7 +280,7 @@ impl IntentStore for LocalStore {
         Ok(Box::new(Box::pin(PrefixWatchStream { inner: Box::pin(stream) })))
     }
 
-    /// Export a full-state snapshot of this `LocalStore`.
+    /// Export a full-state snapshot of this `LocalIntentStore`.
     ///
     /// Reads every `(key, value)` pair in a single redb read
     /// transaction, sorts them by key via
@@ -322,7 +322,7 @@ impl IntentStore for LocalStore {
         .map_err(map_join_error)?
     }
 
-    /// Replay a snapshot as the initial state of this `LocalStore`.
+    /// Replay a snapshot as the initial state of this `LocalIntentStore`.
     ///
     /// Decodes the framed byte slice via [`snapshot_frame::decode`],
     /// then, inside a single redb write transaction, clears every

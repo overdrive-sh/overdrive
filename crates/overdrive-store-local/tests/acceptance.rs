@@ -11,7 +11,7 @@
 #![allow(clippy::expect_fun_call)]
 
 mod acceptance {
-    //! Phase-1-foundation — US-03 `LocalStore` acceptance scenarios.
+    //! Phase-1-foundation — US-03 `LocalIntentStore` acceptance scenarios.
     mod local_store_basic_ops;
     mod local_store_error_paths;
     mod snapshot_roundtrip;

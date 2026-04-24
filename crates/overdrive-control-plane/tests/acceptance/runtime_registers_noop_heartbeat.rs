@@ -36,7 +36,7 @@ use overdrive_sim::adapters::dataplane::SimDataplane;
 use overdrive_sim::adapters::entropy::SimEntropy;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::transport::SimTransport;
-use overdrive_store_local::LocalStore;
+use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
 
 // ---------------------------------------------------------------------------
@@ -58,7 +58,7 @@ fn sim_adapters() -> (SimClock, SimEntropy, SimTransport, SimDataplane) {
 fn build_app_state(tmp: &TempDir) -> AppState {
     let runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime::new");
     let store_path = tmp.path().join("intent.redb");
-    let store = Arc::new(LocalStore::open(&store_path).expect("LocalStore::open"));
+    let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("NodeId"), 0));
     AppState { store, obs, runtime: Arc::new(runtime) }

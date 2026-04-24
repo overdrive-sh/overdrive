@@ -136,7 +136,7 @@ impl FrameError {
 /// Sorts the entries by key byte-lexicographically before archival so
 /// that two stores holding semantically-equal contents produce
 /// byte-identical output. Duplicate keys are *not* collapsed here; the
-/// caller (typically [`crate::LocalStore::export_snapshot`]) is
+/// caller (typically [`crate::LocalIntentStore::export_snapshot`]) is
 /// responsible for producing a unique-key list, which the backing
 /// redb schema guarantees.
 ///
