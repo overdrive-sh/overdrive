@@ -8,9 +8,12 @@
 // There is exactly one sanctioned exception in this repo:
 // `.claude/rules/testing.md` §"RED scaffolds and intentionally-failing
 // commits" — committing a deliberately-RED scaffold where a neutral
-// stub would be worse than an acknowledged red bar. The hook still
-// blocks that case; the user can approve via the permission prompt
-// when it genuinely applies.
+// stub would be worse than an acknowledged red bar. The rule says the
+// commit message MUST call it out explicitly; the hook enforces that
+// by looking for the `RED` token (all-caps, word-bounded) in the
+// commit command. When the token is present the commit flows; when
+// it is absent the block stands and the user must approve via the
+// permission prompt.
 //
 // Block policy:
 //   git commit --no-verify            any form, any flag order
@@ -19,6 +22,8 @@
 //
 // Intentional non-blocks:
 //   git commit -m "..."               normal commit — hooks run
+//   git commit --no-verify -m "...    RED scaffold — hook allows
+//      ... RED scaffold ..."
 //   git commit -n                     NOT blocked; see note below
 //   git push --no-verify              separate concern, not matched
 //   echo "--no-verify"                not a git commit
@@ -35,6 +40,13 @@
 const BOUND = String.raw`(?:^|[\s;&|])`;
 const GIT_COMMIT = new RegExp(`${BOUND}git\\s+commit\\b`);
 const NO_VERIFY = /--no-verify\b/;
+// RED-scaffold escape hatch. Word-bounded, case-sensitive — the
+// testing rule uses the all-caps `RED` token specifically, and
+// case-sensitivity avoids matching "red" in arbitrary prose (colour
+// names, log levels, etc.). Matched anywhere in the offending
+// command segment, which covers `-m "... RED ..."`, heredoc bodies
+// (`-m "$(cat <<'EOF' ... RED ... EOF)"`), and multi-`-m` forms.
+const RED_SCAFFOLD = /\bRED\b/;
 
 function deny(reason: string): void {
   const verdict = {
@@ -64,23 +76,37 @@ try {
   // missing stdin or malformed JSON — allow, don't break the tool call
 }
 
-if (cmd && segments(cmd).some((seg) => GIT_COMMIT.test(seg) && NO_VERIFY.test(seg))) {
-  deny(
-    "`git commit --no-verify` is blocked by pre-tool hook. Skipping " +
-      "pre-commit hooks to push past a failing lint, clippy, formatter, " +
-      "or test is the shortcut this guard exists to stop — the correct " +
-      "response to a hook failure is to fix the underlying issue.\n" +
-      "\n" +
-      "If the hook is reporting real drift (clippy, rustfmt, etc.), " +
-      "fix it in this commit. That is almost always cheaper than the " +
-      "follow-up cleanup commit the `--no-verify` shortcut implies.\n" +
-      "\n" +
-      "The only sanctioned exception is intentionally-RED scaffold " +
-      "commits per `.claude/rules/testing.md` §\"RED scaffolds and " +
-      "intentionally-failing commits\" — committing a deliberately " +
-      "failing test before the GREEN implementation lands. If that is " +
-      "genuinely the case here, stop and tell the user so they can " +
-      "approve via the permission prompt. Do not retry without " +
-      "explicit approval."
+if (cmd) {
+  const flagged = segments(cmd).filter(
+    (seg) => GIT_COMMIT.test(seg) && NO_VERIFY.test(seg)
   );
+  // Allow only when every `--no-verify` segment also carries the RED
+  // marker. If one segment is a legitimate RED scaffold and another is
+  // a plain `--no-verify` bypass, the plain one still trips the block.
+  const allRedScaffolds =
+    flagged.length > 0 && flagged.every((seg) => RED_SCAFFOLD.test(seg));
+
+  if (flagged.length > 0 && !allRedScaffolds) {
+    deny(
+      "`git commit --no-verify` is blocked by pre-tool hook. Skipping " +
+        "pre-commit hooks to push past a failing lint, clippy, formatter, " +
+        "or test is the shortcut this guard exists to stop — the correct " +
+        "response to a hook failure is to fix the underlying issue.\n" +
+        "\n" +
+        "If the hook is reporting real drift (clippy, rustfmt, etc.), " +
+        "fix it in this commit. That is almost always cheaper than the " +
+        "follow-up cleanup commit the `--no-verify` shortcut implies.\n" +
+        "\n" +
+        "The only sanctioned exception is intentionally-RED scaffold " +
+        "commits per `.claude/rules/testing.md` §\"RED scaffolds and " +
+        "intentionally-failing commits\" — committing a deliberately " +
+        "failing test before the GREEN implementation lands. The hook " +
+        "recognises these automatically when the commit message contains " +
+        "the token `RED` (all-caps, word-bounded); mark the scaffold " +
+        "explicitly and the commit flows. If your commit is genuinely a " +
+        "RED scaffold, add `RED` to the message and retry. Otherwise, " +
+        "stop and tell the user so they can approve via the permission " +
+        "prompt. Do not retry without explicit approval."
+    );
+  }
 }
