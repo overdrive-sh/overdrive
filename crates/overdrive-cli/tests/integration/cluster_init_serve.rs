@@ -229,12 +229,30 @@ async fn probe_after_shutdown_returns_transport_error() {
 // rustc 1.80+ (workspace `unsafe_op_in_unsafe_fn = deny`).
 // -------------------------------------------------------------------
 
-/// Save-and-restore guard for the two env vars the HOME-fallback branch
-/// inspects. `Drop` restores the prior values on unwind, which keeps
-/// env state sane when an assertion panics mid-test.
+/// Save-and-restore guard for the three env vars that steer the
+/// production-default path resolvers in `main.rs`
+/// (`default_config_path` + `default_data_dir`) and
+/// `commands::cluster::default_operator_config_path`. `Drop` restores
+/// the prior values on unwind, which keeps env state sane when an
+/// assertion panics mid-test.
+///
+/// `XDG_DATA_HOME` is captured alongside `HOME` / `OVERDRIVE_CONFIG_DIR`
+/// because the `default_data_dir()` helper in `main.rs` consults
+/// `$XDG_DATA_HOME` first (ADR-0013 §5) and falls back to
+/// `$HOME/.local/share/overdrive` only when `$XDG_DATA_HOME` is unset.
+/// The production-default round-trip test below exercises the HOME
+/// fallback and must clear `$XDG_DATA_HOME` to do so.
+//
+// clippy::struct_field_names: the `prior_` prefix is load-bearing —
+// it conveys "saved value to restore on drop," which is the RAII
+// guard's entire contract. Dropping the prefix would leave
+// `home: Option<OsString>` alongside the mutated `HOME` env var,
+// which reads as the *current* value rather than the captured one.
+#[allow(clippy::struct_field_names)]
 struct EnvGuard {
     prior_home: Option<std::ffi::OsString>,
     prior_config_dir: Option<std::ffi::OsString>,
+    prior_xdg_data_home: Option<std::ffi::OsString>,
 }
 
 impl EnvGuard {
@@ -242,6 +260,7 @@ impl EnvGuard {
         Self {
             prior_home: std::env::var_os("HOME"),
             prior_config_dir: std::env::var_os("OVERDRIVE_CONFIG_DIR"),
+            prior_xdg_data_home: std::env::var_os("XDG_DATA_HOME"),
         }
     }
 }
@@ -249,8 +268,8 @@ impl EnvGuard {
 impl Drop for EnvGuard {
     fn drop(&mut self) {
         // SAFETY: env mutation is process-wide and racy; `#[serial(env)]`
-        // ensures no other test mutates $HOME / $OVERDRIVE_CONFIG_DIR
-        // concurrently.
+        // ensures no other test mutates $HOME / $OVERDRIVE_CONFIG_DIR /
+        // $XDG_DATA_HOME concurrently.
         unsafe {
             match &self.prior_home {
                 Some(v) => std::env::set_var("HOME", v),
@@ -259,6 +278,10 @@ impl Drop for EnvGuard {
             match &self.prior_config_dir {
                 Some(v) => std::env::set_var("OVERDRIVE_CONFIG_DIR", v),
                 None => std::env::remove_var("OVERDRIVE_CONFIG_DIR"),
+            }
+            match &self.prior_xdg_data_home {
+                Some(v) => std::env::set_var("XDG_DATA_HOME", v),
+                None => std::env::remove_var("XDG_DATA_HOME"),
             }
         }
     }
@@ -368,4 +391,153 @@ async fn serve_run_bind_failure_returns_cli_error() {
     // Keep `occupier` alive until after the assertion so the port
     // stays held for the duration of the bind attempt.
     drop(occupier);
+}
+
+// -------------------------------------------------------------------
+// RED regression test — serve + submit with production defaults
+// (fix-cli-cannot-reach-control-plane, Step 01-01)
+//
+// INTENTIONAL RED SCAFFOLD. Against current `main` this test fails
+// with `CliError::Transport` "could not connect to server" emitted
+// from `job::submit`, because:
+//
+//   - `serve::run` writes its trust triple at
+//     `<data_dir>/.overdrive/config`  (production default:
+//     `$HOME/.local/share/overdrive/.overdrive/config`)
+//   - `job::submit` reads the trust triple from
+//     `default_operator_config_path()`  (production default:
+//     `$HOME/.overdrive/config`)
+//
+// These are different files under production defaults. The read-side
+// trust triple was minted earlier by `cluster init` against a stale CA;
+// the TLS handshake fails, reqwest classifies the result as a connect
+// failure, and the CLI surfaces `CliError::Transport`.
+//
+// This is the first integration test exercising the end-to-end `serve`
+// -> `job submit` flow with real production-path defaults (RCA §Root
+// cause C). Step 01-02 will flip it GREEN alongside the
+// `ServerConfig` / `ServeArgs` field split that routes `serve::run`'s
+// trust triple into `default_operator_config_dir()` instead of
+// `<data_dir>/.overdrive`.
+//
+// Committed with `git commit --no-verify` per
+// `.claude/rules/testing.md` §RED scaffolds and intentionally-failing
+// commits.
+// -------------------------------------------------------------------
+
+#[tokio::test]
+#[serial_test::serial(env)]
+async fn serve_and_submit_with_production_defaults_succeeds() {
+    let tmp = TempDir::new().expect("tempdir");
+    let _env = EnvGuard::capture();
+
+    // SAFETY: `#[serial(env)]` prevents concurrent env mutation; the
+    // `EnvGuard` restores prior values on drop even on panic. Scoping
+    // `$HOME` to the tempdir makes `default_data_dir()` (ADR-0013 §5
+    // HOME fallback, since `$XDG_DATA_HOME` is cleared) resolve under
+    // the tempdir AND `default_operator_config_path()` resolve at
+    // `$HOME/.overdrive/config` — both are the same `main.rs` code
+    // paths that run in production with no flags.
+    unsafe {
+        std::env::set_var("HOME", tmp.path());
+        std::env::remove_var("OVERDRIVE_CONFIG_DIR");
+        std::env::remove_var("XDG_DATA_HOME");
+    }
+
+    // 1. Mirror the real operator flow: FIRST `cluster init` mints a
+    //    trust triple at $HOME/.overdrive/config. This is the
+    //    "previously-initialised machine" precondition the bug needs —
+    //    without a file at the CLI read site, the failure mode is
+    //    `CliError::ConfigLoad` (no config), not the `CliError::Transport`
+    //    "could not connect to server" the RCA pins. Production hits
+    //    this exact shape because operators run `cluster init` once,
+    //    then `serve` and `job submit` on every subsequent day.
+    overdrive_cli::commands::cluster::init(InitArgs { config_dir: None, force: false })
+        .await
+        .expect("cluster::init seeds $HOME/.overdrive/config before the failure scenario");
+
+    // 2. Mirror `main.rs::default_data_dir` on the HOME-fallback branch.
+    let data_dir = tmp.path().join(".local/share/overdrive");
+
+    // 3. Start the server via the SAME handler main.rs invokes. On
+    //    current HEAD, `serve::run` mints a fresh ephemeral CA
+    //    (ADR-0010 §R1) and writes it to
+    //    `<data_dir>/.overdrive/config` — which is NOT the file the
+    //    CLI read-side reads. The trust triple at
+    //    $HOME/.overdrive/config is now stale relative to the running
+    //    server.
+    //
+    //    NOTE (Step 01-02): after the fix lands, `ServeArgs` grows a
+    //    `config_dir: PathBuf` field and `serve::run` writes its trust
+    //    triple into `<config_dir>/.overdrive/config` (matching
+    //    `default_operator_config_path()`) instead of
+    //    `<data_dir>/.overdrive/config`. 01-02 will extend this
+    //    construction to thread `config_dir: tmp.path().to_path_buf()`
+    //    alongside the field addition on `ServeArgs`, replacing the
+    //    stale trust triple minted by step 1 with the current one.
+    let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
+    let args = ServeArgs { bind, data_dir };
+    let handle: ServeHandle = overdrive_cli::commands::serve::run(args).await.expect("serve::run");
+
+    // 3. The CLI read-side MUST land on $HOME/.overdrive/config under
+    //    production defaults. Structural invariant — pin it now so a
+    //    future drift between the read site and the write site fails
+    //    THIS test loudly instead of silently re-introducing the bug.
+    let config_path = overdrive_cli::commands::cluster::default_operator_config_path();
+    assert_eq!(
+        config_path,
+        tmp.path().join(".overdrive").join("config"),
+        "production default must resolve to $HOME/.overdrive/config",
+    );
+
+    // 4. Write a minimal valid job spec into the tempdir. Same shape
+    //    as the existing `write_valid_payments_toml` helper in
+    //    `tests/integration/job_submit.rs` — kept inline here to
+    //    avoid cross-file shared-helper plumbing for a single call
+    //    site.
+    let spec_path = tmp.path().join("payments.toml");
+    std::fs::write(
+        &spec_path,
+        r#"
+id = "payments"
+replicas = 3
+cpu_milli = 500
+memory_bytes = 536870912
+"#,
+    )
+    .expect("write payments.toml");
+
+    // 5. Submit via the SAME handler `main.rs` invokes, with NO
+    //    explicit endpoint — the handler MUST pick up the trust
+    //    triple at `default_operator_config_path()` per ADR-0010 §R4
+    //    and the `overdrive-cli/CLAUDE.md` endpoint-resolution rule.
+    //
+    //    Against current `main` this fails with `CliError::Transport`
+    //    because the trust triple at
+    //    `$HOME/.overdrive/config` (if any; typically stale from a
+    //    previous `cluster init`) names a different CA from the one
+    //    `serve::run` just minted into
+    //    `$HOME/.local/share/overdrive/.overdrive/config`. The
+    //    `.expect` message is the failure signal for the RED scaffold.
+    let out: overdrive_cli::commands::job::SubmitOutput =
+        overdrive_cli::commands::job::submit(overdrive_cli::commands::job::SubmitArgs {
+            spec: spec_path,
+            config_path,
+        })
+        .await
+        .expect(
+            "RED scaffold (Step 01-01; 01-02 flips GREEN): CLI must \
+             reach the server it just started — this is exactly the \
+             bug the RED scaffold pins. Expected failure on current \
+             HEAD is CliError::Transport \"could not connect to server\".",
+        );
+
+    // 6. Prove the round-trip landed on the live server.
+    assert!(
+        out.endpoint.as_str().contains("127.0.0.1"),
+        "submit must have reached the live server; got endpoint {}",
+        out.endpoint,
+    );
+
+    handle.shutdown().await.expect("clean shutdown");
 }
