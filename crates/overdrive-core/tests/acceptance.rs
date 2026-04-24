@@ -26,5 +26,6 @@ mod acceptance {
     mod aggregate_roundtrip;
     mod aggregate_validation;
     mod intent_key_canonical;
+    mod observation_row_display;
     mod reconciler_trait_surface;
 }

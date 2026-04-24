@@ -98,10 +98,8 @@ fn duplicate_evaluations_collapse_passes_on_default_harness() {
 /// and asserts the two outputs are element-for-element equal.
 #[test]
 fn reconciler_is_pure_passes_on_default_harness() {
-    let report = Harness::new()
-        .only(Invariant::ReconcilerIsPure)
-        .run(7)
-        .expect("harness must compose");
+    let report =
+        Harness::new().only(Invariant::ReconcilerIsPure).run(7).expect("harness must compose");
 
     assert_eq!(report.invariants.len(), 1);
     assert_eq!(report.invariants[0].name, "reconciler-is-pure");

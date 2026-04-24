@@ -21,5 +21,8 @@ mod acceptance {
     mod api_type_shapes;
     mod error_mapping_exhaustive;
     mod eval_broker_collapse;
+    mod row_body_conversions;
     mod runtime_registers_noop_heartbeat;
+    mod submit_job_idempotency;
+    mod trust_triple_getters;
 }
