@@ -190,15 +190,32 @@ lefthook, doctests run scoped per-crate at *pre-commit* time (tight
 feedback for rustdoc examples), while the nextest suite runs at
 pre-push. Profile config lives in `.config/nextest.toml`.
 
+**Quiet output by default.** The `default` profile sets
+`status-level = "fail"` and `final-status-level = "fail"` — clean runs
+print a one-line summary, failing runs show the failures directly
+rather than burying them under dozens of PASS lines. This removes the
+usual reason to reach for `| tail -N`, which eats the non-zero exit
+code (bash pipelines do not enable `pipefail` per tool call). When
+`--no-fail-fast` multi-failure inspection still warrants piping (for
+example `cargo nextest run ... --no-fail-fast 2>&1 | grep -E
+'^(\s+(PASS|FAIL|SKIP)|Summary|test result)' | tail -30`), the
+PostToolUse hook `.claude/hooks/flag-test-failure.ts` scans the
+captured output for FAIL markers and nextest summaries reporting
+N failed, so exit-code loss cannot silently mask a failure.
+
 - **Do NOT** set `run_in_background: true` on a test command and then
   poll with `tail`, `cat`, `wait`, or sleep loops against the output
   file. Each poll burns a turn, the harness blocks long `sleep`s, and
   you lose the structured output view that the direct tool result
   gives you.
 - **Do NOT** redirect test output to a temp file and `tail` it. The
-  tool already captures stdout+stderr. Piping to `tail -N` in the
-  command itself is fine if you know you only want the last N lines —
-  but run it synchronously, not in the background.
+  tool already captures stdout+stderr, and the `default` nextest
+  profile only surfaces failures anyway. Piping to `| tail -N`
+  in-command is acceptable when you specifically need the tail of a
+  `--no-fail-fast` multi-failure inspection — skip it otherwise, since
+  the pipe masks the exit code. The PostToolUse failure scanner is the
+  backstop when piping is unavoidable, not a licence to pipe by
+  default.
 - **Prefer running only the affected tests.** Default to
   `cargo nextest run -p <crate>` for the crate you changed, or
   `cargo nextest run -p <crate> -E 'test(<filter>)'` for a specific

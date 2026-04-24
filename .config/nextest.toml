@@ -21,6 +21,17 @@
 # fixed at the source, never "just run it again."
 fail-fast = true
 retries = 0
+# Quiet output: only surface failures during the run and in the final
+# summary. A clean run prints a one-line summary; a failing run shows
+# the failures directly, not buried under dozens of PASS lines.
+# Removes the usual reason to reach for `| tail -N`, which eats the
+# non-zero exit code (bash pipelines do not enable `pipefail` per tool
+# call). When `--no-fail-fast` multi-failure inspection still warrants
+# piping, the PostToolUse hook `.claude/hooks/flag-test-failure.ts`
+# scans the captured output for FAIL markers and nextest summaries
+# reporting N failed, so exit-code loss cannot silently mask a failure.
+status-level = "fail"
+final-status-level = "fail"
 
 [profile.ci]
 # CI runs the same suite with structured output. Retries stay at zero:
