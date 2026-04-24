@@ -42,6 +42,19 @@ pub enum Command {
     /// Cluster bootstrap and membership.
     #[command(subcommand)]
     Cluster(ClusterCommand),
+
+    /// Start the Phase 1 control-plane server on a TLS-bound listener.
+    Serve {
+        /// Socket address to bind (default `127.0.0.1:7001` per
+        /// ADR-0008). Pass `127.0.0.1:0` to request an ephemeral port.
+        #[arg(long, default_value = "127.0.0.1:7001")]
+        bind: String,
+        /// Data directory — parent of the redb file, per-primitive
+        /// libSQL files, and the trust-triple config. Default:
+        /// `dirs::data_dir()/overdrive` per ADR-0013 §5.
+        #[arg(long)]
+        data_dir: Option<std::path::PathBuf>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -68,6 +81,14 @@ pub enum AllocCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum ClusterCommand {
+    /// Mint a fresh ephemeral CA and write the trust triple to the
+    /// config directory (`$OVERDRIVE_CONFIG_DIR` or `~/.overdrive/`).
+    /// Re-invoking always re-mints per ADR-0010 §R4; `--force` is
+    /// reserved for future non-destructive modes.
+    Init {
+        #[arg(long)]
+        force: bool,
+    },
     Upgrade {
         #[arg(long, value_parser = ["single", "ha"])]
         mode: String,

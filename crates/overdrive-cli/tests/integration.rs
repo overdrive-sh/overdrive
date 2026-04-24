@@ -16,5 +16,6 @@
 #![allow(clippy::unwrap_used)]
 
 mod integration {
+    mod cluster_init_serve;
     mod http_client;
 }
