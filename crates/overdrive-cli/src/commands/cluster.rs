@@ -80,21 +80,21 @@ pub async fn init(args: InitArgs) -> Result<InitOutput, CliError> {
     // without a separate endpoint flag.
     let endpoint_str = "https://127.0.0.1:7001";
 
-    let material = mint_ephemeral_ca().map_err(|e| CliError::ConfigLoad {
+    // Every failure in this function surfaces the same `path` (the
+    // config dir we resolved above) with a per-operation cause — the
+    // closure factors the three copies out.
+    let config_load_err = |cause_prefix: &str, err: &dyn std::fmt::Display| CliError::ConfigLoad {
         path: config_dir.display().to_string(),
-        cause: format!("mint ephemeral CA: {e}"),
-    })?;
+        cause: format!("{cause_prefix}: {err}"),
+    };
 
-    write_trust_triple(&config_dir, endpoint_str, &material).map_err(|e| CliError::ConfigLoad {
-        path: config_dir.display().to_string(),
-        cause: format!("write trust triple: {e}"),
-    })?;
+    let material = mint_ephemeral_ca().map_err(|e| config_load_err("mint ephemeral CA", &e))?;
+
+    write_trust_triple(&config_dir, endpoint_str, &material)
+        .map_err(|e| config_load_err("write trust triple", &e))?;
 
     let config_path = config_dir.join(".overdrive").join("config");
-    let endpoint = Url::parse(endpoint_str).map_err(|e| CliError::ConfigLoad {
-        path: config_dir.display().to_string(),
-        cause: format!("parse endpoint: {e}"),
-    })?;
+    let endpoint = Url::parse(endpoint_str).map_err(|e| config_load_err("parse endpoint", &e))?;
 
     Ok(InitOutput { config_path, endpoint })
 }

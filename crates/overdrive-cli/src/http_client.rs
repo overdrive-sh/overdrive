@@ -153,10 +153,7 @@ impl ApiClient {
     ///
     /// See [`CliError`] variants.
     pub async fn submit_job(&self, req: SubmitJobRequest) -> Result<SubmitJobResponse, CliError> {
-        let url = self.build_url("v1/jobs")?;
-        let resp =
-            self.inner.post(url).json(&req).send().await.map_err(|e| self.transport_err(&e))?;
-        self.decode_typed(resp).await
+        self.post_typed("v1/jobs", &req).await
     }
 
     /// `GET /v1/jobs/{id}` — describe a previously-submitted job.
@@ -165,9 +162,7 @@ impl ApiClient {
     ///
     /// See [`CliError`] variants.
     pub async fn describe_job(&self, id: &str) -> Result<JobDescription, CliError> {
-        let url = self.build_url(&format!("v1/jobs/{id}"))?;
-        let resp = self.inner.get(url).send().await.map_err(|e| self.transport_err(&e))?;
-        self.decode_typed(resp).await
+        self.get_typed(&format!("v1/jobs/{id}")).await
     }
 
     /// `GET /v1/cluster/info` — read control-plane mode, region,
@@ -177,9 +172,7 @@ impl ApiClient {
     ///
     /// See [`CliError`] variants.
     pub async fn cluster_status(&self) -> Result<ClusterStatus, CliError> {
-        let url = self.build_url("v1/cluster/info")?;
-        let resp = self.inner.get(url).send().await.map_err(|e| self.transport_err(&e))?;
-        self.decode_typed(resp).await
+        self.get_typed("v1/cluster/info").await
     }
 
     /// `GET /v1/allocs` — read allocation-status rows from the
@@ -189,9 +182,7 @@ impl ApiClient {
     ///
     /// See [`CliError`] variants.
     pub async fn alloc_status(&self) -> Result<AllocStatusResponse, CliError> {
-        let url = self.build_url("v1/allocs")?;
-        let resp = self.inner.get(url).send().await.map_err(|e| self.transport_err(&e))?;
-        self.decode_typed(resp).await
+        self.get_typed("v1/allocs").await
     }
 
     /// `GET /v1/nodes` — read node-health rows from the observation
@@ -201,12 +192,34 @@ impl ApiClient {
     ///
     /// See [`CliError`] variants.
     pub async fn node_list(&self) -> Result<NodeList, CliError> {
-        let url = self.build_url("v1/nodes")?;
+        self.get_typed("v1/nodes").await
+    }
+
+    // ---- Internals ----
+
+    /// Execute `GET <path>` and decode the body as `T`. Wraps the three
+    /// steps every GET endpoint repeats — URL build, transport send,
+    /// typed decode — so the public endpoint methods stay one-liners.
+    async fn get_typed<T: serde::de::DeserializeOwned>(&self, path: &str) -> Result<T, CliError> {
+        let url = self.build_url(path)?;
         let resp = self.inner.get(url).send().await.map_err(|e| self.transport_err(&e))?;
         self.decode_typed(resp).await
     }
 
-    // ---- Internals ----
+    /// Execute `POST <path>` with a JSON body and decode the response
+    /// as `T`. Counterpart to [`get_typed`] for mutating endpoints.
+    ///
+    /// [`get_typed`]: ApiClient::get_typed
+    async fn post_typed<B, T>(&self, path: &str, body: &B) -> Result<T, CliError>
+    where
+        B: serde::Serialize + Sync,
+        T: serde::de::DeserializeOwned,
+    {
+        let url = self.build_url(path)?;
+        let resp =
+            self.inner.post(url).json(body).send().await.map_err(|e| self.transport_err(&e))?;
+        self.decode_typed(resp).await
+    }
 
     /// Join a path onto the base URL, surfacing parse failures as
     /// [`CliError::ConfigLoad`] — an invalid URL here means the
