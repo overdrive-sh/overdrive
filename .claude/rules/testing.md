@@ -305,6 +305,106 @@ When a pre-commit or pre-push hook fires on a RED scaffold:
 
 ---
 
+## Tests that mutate process-global state (`serial_test`)
+
+Some tests need to mutate state that is shared across the whole
+process — most commonly environment variables (`$HOME`,
+`$OVERDRIVE_CONFIG_DIR`, `$XDG_DATA_HOME`), the current working
+directory, or a global `OnceLock` used by production code. Nextest
+runs tests in parallel threads within a single binary by default,
+so two tests touching the same env var race and corrupt each other's
+fixtures. The fix is serialisation, not coarser locks.
+
+**Use [`serial_test`](https://docs.rs/serial_test) with
+`#[serial(env)]`** for every test that mutates a process-global
+resource. Dev-dep only, declared once in
+`[workspace.dependencies]` and pulled into the consuming crate via
+`serial_test.workspace = true`.
+
+```rust
+use serial_test::serial;
+
+#[tokio::test]
+#[serial(env)]
+async fn honours_home_env_var_fallback() {
+    let _guard = EnvGuard::scoped(&[("HOME", Some(tmp.path())),
+                                    ("OVERDRIVE_CONFIG_DIR", None)]);
+    // ... test body — env is exclusive for the duration of this test
+}
+```
+
+### Rules
+
+- **`#[serial(env)]`, not bare `#[serial]`.** The `(env)` key groups
+  env-mutating tests together; other `#[serial(...)]` groups (and
+  all un-annotated tests) continue running in parallel. Bare
+  `#[serial]` serialises against *every other* `#[serial]` test in
+  the process, which is coarser than needed and slower.
+- **Always wrap env mutations in an explicit `unsafe { }` block.**
+  Rust 2024 + workspace-wide `unsafe_op_in_unsafe_fn = deny` makes
+  this mandatory — `std::env::set_var` / `remove_var` / `set_current_dir`
+  are `unsafe fn` and the compiler rejects bare calls. Add a
+  `// SAFETY:` comment explaining *why* it is safe (typically:
+  "`#[serial(env)]` guarantees exclusive access for the duration of
+  this test").
+- **Save and restore via RAII, never by hand.** Assertion failures
+  panic mid-test; leaked env state corrupts subsequent tests in the
+  same binary. Use an `EnvGuard`-shaped helper (saves prior values
+  in `new()`, restores in `Drop`) rather than manual
+  save-mutate-restore, so the restore runs even when the test
+  panics. One such helper per crate that needs it; don't scatter
+  ad-hoc save-restore dances across test files.
+- **Workspace dev-dep.** Declare `serial_test = "3"` (or current
+  stable major) under the `# --- Testing ---` block of
+  `[workspace.dependencies]` in the root `Cargo.toml`. Consuming
+  crates add `serial_test.workspace = true` under
+  `[dev-dependencies]`. Never pin a version in a leaf crate per
+  `development.md` — Dependencies.
+- **Every test that *reads* the mutated resource is still fair
+  game.** `#[serial(env)]` only locks out *other `#[serial(env)]`
+  tests*. An un-annotated test that reads `$HOME` while an
+  annotated test mutates it still races. If a variable is in play,
+  every test that touches it gets the annotation — not just the
+  writers.
+
+### What NOT to use instead
+
+- **Crate-local `std::sync::Mutex` guard.** Works mechanically, but
+  every new env-mutating test must remember to take the lock AND
+  remember to save/restore manually — a landmine that produces
+  phantom nextest failures the first time a third test lands in the
+  same binary without the guard. `serial_test` makes the correct
+  pattern declarative; the mutex pattern makes it discretionary.
+- **Separate test binary with `threads = 1` via a nextest profile
+  override.** Overkill for a concurrency-of-2 constraint; splits
+  the `tests/integration/<scenario>.rs` layout without buying
+  anything a `#[serial(env)]` annotation doesn't, and costs CI
+  minutes on extra binary spin-up.
+- **Bare `#[serial]` (no group key).** Serialises against every
+  other `#[serial]` test — too coarse; slows unrelated suites.
+- **`std::env::set_var` without `unsafe { }`.** Fails to compile on
+  Rust 2024. Don't try to silence with `#[allow(unsafe_op_in_unsafe_fn)]`
+  — the workspace-wide `deny` is load-bearing for the rest of the
+  codebase.
+
+### When it's not the answer
+
+`serial_test` fixes *process-shared* state. It does NOT fix:
+
+- **Shared filesystem paths.** Two tests both writing to
+  `/tmp/overdrive-cache` race regardless of env locks. Use
+  `tempfile::TempDir` (per-test) instead.
+- **Shared port numbers.** Two tests both binding `127.0.0.1:7001`
+  race on the OS kernel, not on the process. Bind `127.0.0.1:0`
+  and read the assigned port.
+- **Shared global state the production code caches.** A `OnceLock`
+  populated on first access stays populated for the whole process;
+  no test-level lock can reset it. Either inject the state via a
+  constructor parameter in production code, or accept that the
+  test order matters and gate behind `integration-tests`.
+
+---
+
 ## Tier 1 — Deterministic Simulation Testing
 
 ### Nondeterminism must be injectable
@@ -903,6 +1003,10 @@ traits, banned parameter shapes)?
 
 Tests pass but not sure they actually assert on the behaviour?
     → cargo-mutants — close the kill-rate gap
+
+Test mutates env vars / cwd / other process-global state?
+    → `#[serial_test::serial(env)]` + RAII guard
+      (see "Tests that mutate process-global state")
 
 eBPF program-level correctness against curated input?
     → Tier 2 (BPF unit)
