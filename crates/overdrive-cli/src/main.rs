@@ -40,7 +40,7 @@ fn main() -> Result<()> {
 }
 
 async fn run(cli: Cli) -> Result<()> {
-    use overdrive_cli::cli::{ClusterCommand, Command, JobCommand, NodeCommand};
+    use overdrive_cli::cli::{AllocCommand, ClusterCommand, Command, JobCommand, NodeCommand};
 
     match cli.command {
         Command::Cluster(ClusterCommand::Init { force }) => {
@@ -77,6 +77,23 @@ async fn run(cli: Cli) -> Result<()> {
                     // `CliError::Transport`, not the raw Display form.
                     eprint!("{}", overdrive_cli::render::cli_error(&err));
                     Err(color_eyre::eyre::eyre!("job submit failed"))
+                }
+            }
+        }
+        Command::Alloc(AllocCommand::Status { job }) => {
+            let endpoint = cli.endpoint.parse().map_err(|e| {
+                color_eyre::eyre::eyre!("invalid --endpoint `{}`: {e}", cli.endpoint)
+            })?;
+            let config_path = default_config_path();
+            let args = overdrive_cli::commands::alloc::StatusArgs { job, endpoint, config_path };
+            match overdrive_cli::commands::alloc::status(args).await {
+                Ok(out) => {
+                    print!("{}", overdrive_cli::render::alloc_status(&out));
+                    Ok(())
+                }
+                Err(err) => {
+                    eprint!("{}", overdrive_cli::render::cli_error(&err));
+                    Err(color_eyre::eyre::eyre!("alloc status failed"))
                 }
             }
         }

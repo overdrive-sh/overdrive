@@ -20,4 +20,5 @@ mod integration {
     mod cluster_init_serve;
     mod http_client;
     mod job_submit;
+    mod walking_skeleton;
 }

@@ -52,3 +52,9 @@ overdrive-control-plane.path = "../overdrive-control-plane"
 tempfile.workspace           = true
 base64.workspace             = true
 serde_yaml.workspace         = true
+# `rkyv` + `toml` are used ONLY by the walking-skeleton test to
+# locally reproduce the server-side spec-digest computation (SHA-256
+# of rkyv-archived Job bytes, per ADR-0002) so the test can assert
+# byte-identity with the server's response. They are NOT used by the
+# CLI itself — `toml` IS a runtime dep already for `job submit`.
+rkyv.workspace               = true

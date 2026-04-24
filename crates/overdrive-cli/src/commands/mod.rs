@@ -6,6 +6,7 @@
 //! The binary (`main.rs`) is a thin wrapper that parses `argv`, constructs
 //! production adapters, and dispatches into the matching handler here.
 
+pub mod alloc;
 pub mod cluster;
 pub mod job;
 pub mod node;
