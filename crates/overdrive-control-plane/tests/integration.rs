@@ -26,6 +26,7 @@
 mod integration {
     mod describe_round_trip;
     mod idempotent_resubmit;
+    mod libsql_isolation;
     mod observation_empty_rows;
     mod server_lifecycle;
     mod submit_round_trip;
