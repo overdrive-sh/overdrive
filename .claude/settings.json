@@ -18,6 +18,12 @@
           },
           {
             "type": "command",
+            "command": "bun run .claude/hooks/block-git-commit-no-verify.ts",
+            "timeout": 10,
+            "statusMessage": "Checking `git commit` is not using `--no-verify`..."
+          },
+          {
+            "type": "command",
             "command": "bun run .claude/hooks/block-cargo-test.ts",
             "timeout": 10,
             "statusMessage": "Checking for `cargo test` (use `cargo nextest run`)..."
