@@ -65,6 +65,11 @@ pub struct AppState {
     /// handlers in later steps (03-03) can pick it up without
     /// restructuring the state shape.
     pub obs: Arc<dyn ObservationStore>,
+    /// Reconciler runtime — registry of `Reconciler` trait objects
+    /// and the `EvaluationBroker`. Step 04-04 threads this through
+    /// `AppState` so the `cluster_status` handler can render the
+    /// registry and broker counters without a side channel.
+    pub runtime: Arc<reconciler_runtime::ReconcilerRuntime>,
 }
 
 /// Configuration for the Phase 1 control-plane server. Populated at
@@ -179,7 +184,16 @@ pub async fn run_server_with_obs(
             .map_err(|e| error::ControlPlaneError::Internal(format!("open LocalStore: {e}")))?,
     );
 
-    let state = AppState { store, obs };
+    // Construct the reconciler runtime and register `noop_heartbeat` at
+    // boot per ADR-0013 §9 — Phase 1's proof-of-life. Step 04-04 wires
+    // this here so every server boot establishes the
+    // `AtLeastOneReconcilerRegistered` invariant; step 05-05's walking
+    // skeleton will assert it end-to-end.
+    let mut runtime = reconciler_runtime::ReconcilerRuntime::new(&config.data_dir)?;
+    runtime.register(noop_heartbeat())?;
+    let runtime = Arc::new(runtime);
+
+    let state = AppState { store, obs, runtime };
 
     // Assemble the router. Step 03-03 wires the real `alloc_status` and
     // `node_list` observation-read handlers; `cluster_status` remains a
@@ -217,11 +231,35 @@ async fn stub() -> impl IntoResponse {
     (StatusCode::OK, [("content-type", "application/json")], "{}")
 }
 
-/// Construct the `noop-heartbeat` reconciler. Exposed as a public factory
-/// so the DST harness can register the same instance the control-plane
-/// boot registers.
+/// Construct the `noop-heartbeat` reconciler. Exposed as a public
+/// factory so the DST harness and the server boot path register the
+/// same canonical instance.
 ///
-/// SCAFFOLD: true
+/// Per ADR-0013 §9, `noop-heartbeat` is Phase 1's proof-of-life
+/// reconciler: its `reconcile` returns `vec![Action::Noop]`
+/// deterministically, serving as the fixture against which the
+/// `ReconcilerIsPure` invariant's twin-invocation check runs and as
+/// the seed entry for the `AtLeastOneReconcilerRegistered` invariant.
+#[must_use]
 pub fn noop_heartbeat() -> Box<dyn overdrive_core::reconciler::Reconciler> {
-    panic!("Not yet implemented -- RED scaffold")
+    use overdrive_core::reconciler::{Action, Db, Reconciler, ReconcilerName, State};
+
+    struct NoopHeartbeat {
+        name: ReconcilerName,
+    }
+
+    impl Reconciler for NoopHeartbeat {
+        fn name(&self) -> &ReconcilerName {
+            &self.name
+        }
+
+        fn reconcile(&self, _desired: &State, _actual: &State, _db: &Db) -> Vec<Action> {
+            vec![Action::Noop]
+        }
+    }
+
+    Box::new(NoopHeartbeat {
+        name: ReconcilerName::new("noop-heartbeat")
+            .expect("'noop-heartbeat' is a valid ReconcilerName by construction"),
+    })
 }

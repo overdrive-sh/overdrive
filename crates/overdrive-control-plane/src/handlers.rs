@@ -191,13 +191,34 @@ pub async fn describe_job(
     ),
     tag = "cluster",
 )]
-pub async fn cluster_status() -> Result<Json<api::ClusterStatus>, ControlPlaneError> {
-    // Step 03-05 aligns every handler's return type on
-    // `Result<Json<T>, ControlPlaneError>` so `IntoResponse` funnels
-    // uniformly through `error::to_response`. The body remains a
-    // RED scaffold until the owning step (not 03-05) delivers the
-    // cluster-status projection.
-    panic!("Not yet implemented -- RED scaffold")
+pub async fn cluster_status(
+    State(state): State<AppState>,
+) -> Result<Json<api::ClusterStatus>, ControlPlaneError> {
+    // Phase 1 scope — `mode` is always "single" (HA arrives Phase 2+)
+    // and `region` is always "local" (multi-region arrives Phase 5+).
+    // These are hard-pinned here rather than derived from config so a
+    // stray config typo cannot put a non-canonical value on the wire.
+    let counters = state.runtime.broker().counters();
+    let mut reconcilers: Vec<String> =
+        state.runtime.registered().into_iter().map(|n| n.to_string()).collect();
+    // Sort for stable JSON output — `ReconcilerRuntime::registered`
+    // returns HashMap keys, whose iteration order is unspecified. Wire
+    // stability matters here because this body is serialised into an
+    // OpenAPI-covered response; tests and clients expect deterministic
+    // rendering.
+    reconcilers.sort();
+
+    Ok(Json(api::ClusterStatus {
+        mode: "single".to_string(),
+        region: "local".to_string(),
+        commit_index: state.store.commit_index(),
+        reconcilers,
+        broker: api::BrokerCountersBody {
+            queued: counters.queued,
+            cancelled: counters.cancelled,
+            dispatched: counters.dispatched,
+        },
+    }))
 }
 
 /// `GET /v1/allocs` — observation read on `alloc_status`.

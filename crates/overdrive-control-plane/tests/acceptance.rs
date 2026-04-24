@@ -21,4 +21,5 @@ mod acceptance {
     mod api_type_shapes;
     mod error_mapping_exhaustive;
     mod eval_broker_collapse;
+    mod runtime_registers_noop_heartbeat;
 }
