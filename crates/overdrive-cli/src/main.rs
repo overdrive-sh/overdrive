@@ -52,9 +52,7 @@ async fn run(cli: Cli) -> Result<()> {
             Ok(())
         }
         Command::Cluster(ClusterCommand::Status) => {
-            let endpoint = cli.endpoint.parse().map_err(|e| {
-                color_eyre::eyre::eyre!("invalid --endpoint `{}`: {e}", cli.endpoint)
-            })?;
+            let endpoint = parse_cli_endpoint(&cli.endpoint)?;
             let config_path = default_config_path();
             let args = overdrive_cli::commands::cluster::StatusArgs { endpoint, config_path };
             let out = overdrive_cli::commands::cluster::status(args).await?;
@@ -62,9 +60,7 @@ async fn run(cli: Cli) -> Result<()> {
             Ok(())
         }
         Command::Job(JobCommand::Submit { spec }) => {
-            let endpoint = cli.endpoint.parse().map_err(|e| {
-                color_eyre::eyre::eyre!("invalid --endpoint `{}`: {e}", cli.endpoint)
-            })?;
+            let endpoint = parse_cli_endpoint(&cli.endpoint)?;
             let config_path = default_config_path();
             let args = overdrive_cli::commands::job::SubmitArgs { spec, endpoint, config_path };
             match overdrive_cli::commands::job::submit(args).await {
@@ -82,9 +78,7 @@ async fn run(cli: Cli) -> Result<()> {
             }
         }
         Command::Alloc(AllocCommand::Status { job }) => {
-            let endpoint = cli.endpoint.parse().map_err(|e| {
-                color_eyre::eyre::eyre!("invalid --endpoint `{}`: {e}", cli.endpoint)
-            })?;
+            let endpoint = parse_cli_endpoint(&cli.endpoint)?;
             let config_path = default_config_path();
             let args = overdrive_cli::commands::alloc::StatusArgs { job, endpoint, config_path };
             match overdrive_cli::commands::alloc::status(args).await {
@@ -99,9 +93,7 @@ async fn run(cli: Cli) -> Result<()> {
             }
         }
         Command::Node(NodeCommand::List) => {
-            let endpoint = cli.endpoint.parse().map_err(|e| {
-                color_eyre::eyre::eyre!("invalid --endpoint `{}`: {e}", cli.endpoint)
-            })?;
+            let endpoint = parse_cli_endpoint(&cli.endpoint)?;
             let config_path = default_config_path();
             let args = overdrive_cli::commands::node::ListArgs { endpoint, config_path };
             let out = overdrive_cli::commands::node::list(args).await?;
@@ -135,6 +127,14 @@ async fn run(cli: Cli) -> Result<()> {
             Ok(())
         }
     }
+}
+
+/// Parse the `--endpoint` / `OVERDRIVE_ENDPOINT` value into a `Url`,
+/// reporting a uniform diagnostic that names the raw string when the
+/// parse fails. Every subcommand except `cluster init` and `serve`
+/// routes through here so the operator-facing error is stable.
+fn parse_cli_endpoint(raw: &str) -> Result<url::Url> {
+    raw.parse().map_err(|e| color_eyre::eyre::eyre!("invalid --endpoint `{raw}`: {e}"))
 }
 
 /// Default config path per ADR-0010: `$OVERDRIVE_CONFIG_DIR/.overdrive/config`
