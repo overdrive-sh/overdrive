@@ -100,6 +100,22 @@ exclude_re = [
     "select!",
     "poll_next",
     "poll_ready",
+
+    # Rule 1 addendum — feature-gated canary-bug fixture. The
+    # `harness_purity_reconciler::HarnessNoopHeartbeat::reconcile` body
+    # splits across `#[cfg(feature = "canary-bug")]` branches. The
+    # non-canary branch is the trivial `vec![Action::Noop]` return whose
+    # `vec![]` mutation is indistinguishable under the default mutation
+    # run (twin invocations compare equal either way → the
+    # `ReconcilerIsPure` invariant still PASSes). The canary-bug branch's
+    # alternation + modulo logic is exercised end-to-end by
+    # `xtask/tests/acceptance/dst_canary_red_run.rs` and
+    # `crates/overdrive-sim/tests/acceptance/reconciler_invariants_pass.rs`
+    # under `--features overdrive-sim/canary-bug`, but
+    # `cargo xtask mutants` runs without that feature. Same class as
+    # Rule 1 unsafe — the site is genuinely not killable by the default
+    # mutation lane and is covered by a dedicated test lane instead.
+    "harness_purity_reconciler",
 ]
 
 # ---------------------------------------------------------------------------
