@@ -1016,6 +1016,41 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-04-24T13:37:58Z"
+    },
+    {
+      "sid": "04-08",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-24T13:40:14Z"
+    },
+    {
+      "sid": "04-09",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-24T13:42:47Z"
+    },
+    {
+      "sid": "04-09",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-24T13:43:24Z"
+    },
+    {
+      "sid": "04-09",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: compile-fail fixtures are their own acceptance surface",
+      "t": "2026-04-24T13:43:26Z"
+    },
+    {
+      "sid": "04-09",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-24T13:44:08Z"
     }
   ]
 }
