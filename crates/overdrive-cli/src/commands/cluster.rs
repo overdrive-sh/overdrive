@@ -154,7 +154,10 @@ pub async fn status(args: StatusArgs) -> Result<ClusterStatusOutput, CliError> {
 }
 
 /// Resolve the effective config directory. Explicit override wins;
-/// otherwise fall back to `$OVERDRIVE_CONFIG_DIR` then `~/.overdrive/`.
+/// otherwise fall back to `$OVERDRIVE_CONFIG_DIR` then `$HOME`. The
+/// returned path is always a BASE directory — `write_trust_triple`
+/// owns the `.overdrive/config` suffix and appends it exactly once
+/// (see `overdrive-control-plane/src/tls_bootstrap.rs::write_trust_triple`).
 fn resolve_config_dir(explicit: Option<PathBuf>) -> Result<PathBuf, CliError> {
     if let Some(p) = explicit {
         return Ok(p);
@@ -171,5 +174,29 @@ fn resolve_config_dir(explicit: Option<PathBuf>) -> Result<PathBuf, CliError> {
         cause: "home directory could not be resolved ($HOME unset); pass --config-dir explicitly"
             .to_owned(),
     })?;
-    Ok(PathBuf::from(home).join(".overdrive"))
+    Ok(PathBuf::from(home))
+}
+
+/// Canonical operator config file path per ADR-0010 / ADR-0014 /
+/// ADR-0019 and whitepaper §8.
+///
+/// Resolves the base directory from `$OVERDRIVE_CONFIG_DIR` first, then
+/// `$HOME`, then the current directory as a last-resort fallback. The
+/// `.overdrive` segment and `config` filename are always appended
+/// exactly once — callers MUST pass bare base-dir env-var values and
+/// MUST NOT pre-suffix. Returns the full path to the file (for example
+/// `~/.overdrive/config`), not the containing directory.
+///
+/// This is the single source of truth for where the operator CLI
+/// reads and writes its trust triple. Both `main.rs::default_config_path`
+/// (read side) and the HOME fallback of `resolve_config_dir` +
+/// `write_trust_triple` (write side) compose around this function so
+/// the two sites cannot drift — the drift between them is the bug this
+/// function's existence prevents (`fix-overdrive-config-path-doubled`).
+#[must_use]
+pub fn default_operator_config_path() -> PathBuf {
+    let base = std::env::var_os("OVERDRIVE_CONFIG_DIR")
+        .or_else(|| std::env::var_os("HOME"))
+        .map_or_else(|| PathBuf::from("."), PathBuf::from);
+    base.join(".overdrive").join("config")
 }

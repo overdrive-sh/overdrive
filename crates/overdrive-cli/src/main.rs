@@ -137,17 +137,22 @@ fn parse_cli_endpoint(raw: &str) -> Result<url::Url> {
     raw.parse().map_err(|e| color_eyre::eyre::eyre!("invalid --endpoint `{raw}`: {e}"))
 }
 
-/// Default config path per ADR-0010: `$OVERDRIVE_CONFIG_DIR/.overdrive/config`
-/// if set, `$HOME/.overdrive/.overdrive/config` otherwise. The CLI binary
-/// resolves this once; library tests always pass an explicit path.
+/// Default operator config path per ADR-0010 / ADR-0014 / ADR-0019
+/// and whitepaper §8: `~/.overdrive/config` (single `.overdrive`
+/// segment). Resolves the base directory from `$OVERDRIVE_CONFIG_DIR`
+/// first, then `$HOME`, then `.` as a last resort; the `.overdrive`
+/// segment and `config` filename are appended exactly once by the
+/// shared helper. Both `$OVERDRIVE_CONFIG_DIR` and `$HOME` are BASE
+/// directories — callers do not pre-suffix with `.overdrive`.
+///
+/// The CLI binary resolves this once; library tests always pass an
+/// explicit path. Delegates to
+/// `overdrive_cli::commands::cluster::default_operator_config_path`
+/// so the read side of the CLI computes the same canonical path as
+/// the write side (`cluster::init` + `write_trust_triple`) — the two
+/// sites previously drifted (`fix-overdrive-config-path-doubled`).
 fn default_config_path() -> std::path::PathBuf {
-    if let Some(cfg) = std::env::var_os("OVERDRIVE_CONFIG_DIR") {
-        return std::path::PathBuf::from(cfg).join(".overdrive").join("config");
-    }
-    if let Some(home) = std::env::var_os("HOME") {
-        return std::path::PathBuf::from(home).join(".overdrive").join("config");
-    }
-    std::path::PathBuf::from("./.overdrive/config")
+    overdrive_cli::commands::cluster::default_operator_config_path()
 }
 
 /// Default data directory per ADR-0013 §5 — XDG `data_dir()/overdrive`.

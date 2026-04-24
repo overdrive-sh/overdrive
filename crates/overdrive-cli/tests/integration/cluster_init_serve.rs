@@ -211,6 +211,138 @@ async fn probe_after_shutdown_returns_transport_error() {
 }
 
 // -------------------------------------------------------------------
+// Regression guard (bugfix fix-overdrive-config-path-doubled):
+//
+// Every test above passes `Some(tmp.path())` as `config_dir`, exercising
+// only the explicit-override branch of `resolve_config_dir`. The HOME
+// fallback branch — the one that actually runs in production when an
+// operator runs `overdrive cluster init` with no flags — was previously
+// untested, and that branch was writing the trust triple to
+// `$HOME/.overdrive/.overdrive/config` (doubled `.overdrive` segment)
+// instead of the ADR-0010 / ADR-0014 / ADR-0019 canonical
+// `$HOME/.overdrive/config`.
+//
+// These two tests pin the HOME-fallback invariant:
+//   (1) cluster::init writes to `$HOME/.overdrive/config` AND NOT to
+//       `$HOME/.overdrive/.overdrive/config` (primary regression guard).
+//   (2) the shared `default_operator_config_path` helper returns the
+//       path that `cluster::init` actually writes — read and write
+//       sites cannot drift again (structural invariant guard).
+//
+// Both mutate `$HOME` / `$OVERDRIVE_CONFIG_DIR` so they are serialised
+// via `#[serial_test::serial(env)]`. Env mutation is `unsafe` on
+// rustc 1.80+ (workspace `unsafe_op_in_unsafe_fn = deny`).
+// -------------------------------------------------------------------
+
+/// Save-and-restore guard for the two env vars the HOME-fallback branch
+/// inspects. `Drop` restores the prior values on unwind, which keeps
+/// env state sane when an assertion panics mid-test.
+struct EnvGuard {
+    prior_home: Option<std::ffi::OsString>,
+    prior_config_dir: Option<std::ffi::OsString>,
+}
+
+impl EnvGuard {
+    fn capture() -> Self {
+        Self {
+            prior_home: std::env::var_os("HOME"),
+            prior_config_dir: std::env::var_os("OVERDRIVE_CONFIG_DIR"),
+        }
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        // SAFETY: env mutation is process-wide and racy; `#[serial(env)]`
+        // ensures no other test mutates $HOME / $OVERDRIVE_CONFIG_DIR
+        // concurrently.
+        unsafe {
+            match &self.prior_home {
+                Some(v) => std::env::set_var("HOME", v),
+                None => std::env::remove_var("HOME"),
+            }
+            match &self.prior_config_dir {
+                Some(v) => std::env::set_var("OVERDRIVE_CONFIG_DIR", v),
+                None => std::env::remove_var("OVERDRIVE_CONFIG_DIR"),
+            }
+        }
+    }
+}
+
+#[tokio::test]
+#[serial_test::serial(env)]
+async fn resolve_config_dir_home_fallback_writes_at_canonical_path() {
+    let tmp = TempDir::new().expect("tempdir");
+    let _env = EnvGuard::capture();
+
+    // SAFETY: `#[serial(env)]` prevents concurrent env mutation; the
+    // `EnvGuard` restores prior values on drop even on panic.
+    unsafe {
+        std::env::set_var("HOME", tmp.path());
+        std::env::remove_var("OVERDRIVE_CONFIG_DIR");
+    }
+
+    let output =
+        overdrive_cli::commands::cluster::init(InitArgs { config_dir: None, force: false })
+            .await
+            .expect("cluster::init on HOME fallback");
+
+    let canonical = tmp.path().join(".overdrive").join("config");
+    let doubled = tmp.path().join(".overdrive").join(".overdrive").join("config");
+
+    assert!(
+        canonical.exists(),
+        "cluster::init must write trust triple at canonical $HOME/.overdrive/config; not found at {}",
+        canonical.display(),
+    );
+    assert!(
+        !doubled.exists(),
+        "regression guard: doubled .overdrive/.overdrive/config must NOT be created; found at {}",
+        doubled.display(),
+    );
+    assert_eq!(
+        output.config_path, canonical,
+        "InitOutput::config_path must equal the canonical $HOME/.overdrive/config",
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial(env)]
+async fn default_config_path_matches_init_write_location_on_home_fallback() {
+    let tmp = TempDir::new().expect("tempdir");
+    let _env = EnvGuard::capture();
+
+    // SAFETY: `#[serial(env)]` prevents concurrent env mutation; the
+    // `EnvGuard` restores prior values on drop even on panic.
+    unsafe {
+        std::env::set_var("HOME", tmp.path());
+        std::env::remove_var("OVERDRIVE_CONFIG_DIR");
+    }
+
+    // The shared helper (Fix 3) — read-side computation. This is the
+    // path `main.rs::default_config_path` delegates to, so whatever
+    // this function returns must be exactly where `cluster::init`
+    // writes on the HOME fallback. The invariant this test pins is
+    // the one the bug violated: read and write sites computing the
+    // same canonical path.
+    let read_path = overdrive_cli::commands::cluster::default_operator_config_path();
+
+    let output =
+        overdrive_cli::commands::cluster::init(InitArgs { config_dir: None, force: false })
+            .await
+            .expect("cluster::init on HOME fallback");
+
+    assert_eq!(
+        read_path, output.config_path,
+        "default_operator_config_path() must equal InitOutput::config_path on HOME fallback — read and write sites must compute the same canonical path",
+    );
+    assert!(
+        read_path.exists(),
+        "path returned by default_operator_config_path() must be what cluster::init actually wrote",
+    );
+}
+
+// -------------------------------------------------------------------
 // (f) bind failure on occupied port returns CliError
 // -------------------------------------------------------------------
 

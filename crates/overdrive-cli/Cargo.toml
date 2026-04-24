@@ -63,3 +63,10 @@ base64.workspace             = true
 # rkyv-archived Job bytes, per ADR-0002) so the test can assert
 # byte-identity with the server's response.
 rkyv.workspace               = true
+# `serial_test` serialises tests that mutate process-wide environment
+# variables. Rust edition 2024 + `unsafe_op_in_unsafe_fn = deny` makes
+# `std::env::set_var` / `std::env::remove_var` explicit unsafe, but
+# that only guards the function signature — racing calls across
+# parallel nextest threads would still clobber one another. The
+# `#[serial(env)]` attribute gives per-group mutual exclusion.
+serial_test.workspace        = true

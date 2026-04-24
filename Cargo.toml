@@ -105,6 +105,7 @@ rstest          = "0.23"
 insta           = "1"
 syn             = { version = "2", features = ["full", "visit", "extra-traits"] }
 tempfile        = "3"
+serial_test     = "3"
 # `trybuild` is pinned for stable stderr diagnostics across rustc bumps —
 # the pin is relaxed when the compiler output changes and the expected
 # `.stderr` fixtures are regenerated with `TRYBUILD=overwrite`.
