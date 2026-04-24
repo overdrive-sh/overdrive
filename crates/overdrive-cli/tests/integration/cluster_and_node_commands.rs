@@ -1,0 +1,131 @@
+//! Integration tests for `overdrive_cli::commands::cluster::status` and
+//! `overdrive_cli::commands::node::list` — step 05-03.
+//!
+//! Per `crates/overdrive-cli/CLAUDE.md` these call the handlers directly
+//! (NO subprocess). The handlers stand up a real in-process control-plane
+//! server via `commands::serve::run(...)` (from step 05-02), then call
+//! the cluster-status and node-list handlers which in turn go through
+//! the `ApiClient` from step 05-01.
+//!
+//! Acceptance coverage:
+//!   (a) `cluster::status` against in-process server returns typed
+//!       `ClusterStatusOutput` carrying `mode`, `region`, `commit_index`,
+//!       the reconciler registry (includes `noop-heartbeat`), and typed
+//!       broker counters.
+//!   (b) `node::list` against in-process server returns an honest empty
+//!       rows vector + an empty-state message naming
+//!       `phase-1-first-workload`.
+//!   (c) `cluster::status` with no server returns `CliError::Transport`
+//!       whose Display names the endpoint so the operator can act on it.
+
+use std::net::SocketAddr;
+use std::path::Path;
+
+use overdrive_cli::commands::cluster::{ClusterStatusOutput, StatusArgs};
+use overdrive_cli::commands::node::{ListArgs, NodeListOutput};
+use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
+use overdrive_cli::http_client::CliError;
+use tempfile::TempDir;
+use url::Url;
+
+/// Spin up a real in-process control-plane server on `127.0.0.1:0` and
+/// return the handle, the resolved bound address, the `TempDir` backing
+/// the data directory, and the endpoint URL pointing at the ephemeral
+/// port. The `TempDir` is returned so the caller can keep it alive for
+/// the duration of the test — dropping it deletes the config.
+async fn spawn_server() -> (ServeHandle, SocketAddr, TempDir, Url) {
+    let tmp = TempDir::new().expect("tempdir");
+    let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
+    let args = ServeArgs { bind, data_dir: tmp.path().to_path_buf() };
+    let handle = overdrive_cli::commands::serve::run(args).await.expect("serve::run");
+    let port = handle.endpoint().port().expect("endpoint port");
+    let bound: SocketAddr = format!("127.0.0.1:{port}").parse().expect("parse bound addr");
+    let endpoint = Url::parse(&format!("https://localhost:{port}")).expect("parse endpoint");
+    (handle, bound, tmp, endpoint)
+}
+
+/// Path of the trust-triple config written by `serve::run` into
+/// `<data_dir>/.overdrive/config`.
+fn config_path(data_dir: &Path) -> std::path::PathBuf {
+    data_dir.join(".overdrive").join("config")
+}
+
+// -------------------------------------------------------------------
+// (a) cluster::status returns typed output with reconciler registry
+// -------------------------------------------------------------------
+
+#[tokio::test]
+async fn cluster_status_against_in_process_server_returns_typed_output_with_reconciler_registry() {
+    let (handle, _bound, tmp, endpoint) = spawn_server().await;
+
+    let args = StatusArgs { endpoint: endpoint.clone(), config_path: config_path(tmp.path()) };
+    let output: ClusterStatusOutput =
+        overdrive_cli::commands::cluster::status(args).await.expect("cluster::status");
+
+    assert_eq!(output.mode, "single", "Phase 1 control plane mode must be `single`");
+    assert_eq!(output.region, "local", "Phase 1 region must be `local`");
+    assert!(
+        output.reconcilers.contains(&"noop-heartbeat".to_string()),
+        "reconciler registry must contain `noop-heartbeat`; got {:?}",
+        output.reconcilers,
+    );
+
+    // broker counters are typed u64 fields — on a fresh server they
+    // are all zero, but the structural assertion (values are u64 and
+    // start at zero) is the important part.
+    assert_eq!(output.broker.queued, 0_u64, "fresh broker must report queued=0");
+    assert_eq!(output.broker.cancelled, 0_u64, "fresh broker must report cancelled=0");
+    assert_eq!(output.broker.dispatched, 0_u64, "fresh broker must report dispatched=0");
+
+    handle.shutdown().await.expect("clean shutdown");
+}
+
+// -------------------------------------------------------------------
+// (b) node::list returns empty rows and phase-1-first-workload message
+// -------------------------------------------------------------------
+
+#[tokio::test]
+async fn node_list_against_in_process_server_returns_empty_rows_with_phase_1_first_workload_message()
+ {
+    let (handle, _bound, tmp, endpoint) = spawn_server().await;
+
+    let args = ListArgs { endpoint: endpoint.clone(), config_path: config_path(tmp.path()) };
+    let output: NodeListOutput =
+        overdrive_cli::commands::node::list(args).await.expect("node::list");
+
+    assert!(output.rows.is_empty(), "fresh store must report zero node rows");
+    assert!(
+        output.empty_state_message.contains("phase-1-first-workload"),
+        "empty-state message must reference `phase-1-first-workload`; got: {}",
+        output.empty_state_message,
+    );
+
+    handle.shutdown().await.expect("clean shutdown");
+}
+
+// -------------------------------------------------------------------
+// (c) cluster::status with no server returns CliError::Transport
+// -------------------------------------------------------------------
+
+#[tokio::test]
+async fn cluster_status_with_no_server_returns_transport_error() {
+    // Spawn-and-shutdown to get a valid trust-triple file on disk, then
+    // point the handler at the (now-closed) endpoint.
+    let (handle, bound, tmp, endpoint) = spawn_server().await;
+    handle.shutdown().await.expect("clean shutdown");
+
+    let args = StatusArgs { endpoint: endpoint.clone(), config_path: config_path(tmp.path()) };
+    let err = overdrive_cli::commands::cluster::status(args)
+        .await
+        .expect_err("no server → cluster::status must fail");
+
+    match &err {
+        CliError::Transport { endpoint: ep, .. } => {
+            assert!(
+                ep.contains(&bound.port().to_string()),
+                "Transport.endpoint must name the endpoint; got {ep}",
+            );
+        }
+        other => panic!("expected CliError::Transport, got {other:?}"),
+    }
+}
