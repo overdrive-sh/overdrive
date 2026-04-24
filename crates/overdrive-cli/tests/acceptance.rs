@@ -19,4 +19,6 @@
 
 mod acceptance {
     mod insecure_rejected;
+    mod render_cluster_and_node;
+    mod render_job_submit;
 }

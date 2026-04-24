@@ -16,3 +16,4 @@
 pub mod cli;
 pub mod commands;
 pub mod http_client;
+pub mod render;

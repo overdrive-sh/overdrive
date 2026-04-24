@@ -16,6 +16,8 @@
 #![allow(clippy::unwrap_used)]
 
 mod integration {
+    mod cluster_and_node_commands;
     mod cluster_init_serve;
     mod http_client;
+    mod job_submit;
 }

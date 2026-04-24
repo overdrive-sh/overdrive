@@ -40,7 +40,7 @@ fn main() -> Result<()> {
 }
 
 async fn run(cli: Cli) -> Result<()> {
-    use overdrive_cli::cli::{ClusterCommand, Command};
+    use overdrive_cli::cli::{ClusterCommand, Command, JobCommand, NodeCommand};
 
     match cli.command {
         Command::Cluster(ClusterCommand::Init { force }) => {
@@ -48,6 +48,46 @@ async fn run(cli: Cli) -> Result<()> {
             let out = overdrive_cli::commands::cluster::init(args).await?;
             println!("wrote trust triple to {}", out.config_path.display());
             println!("endpoint: {}", out.endpoint);
+            Ok(())
+        }
+        Command::Cluster(ClusterCommand::Status) => {
+            let endpoint = cli.endpoint.parse().map_err(|e| {
+                color_eyre::eyre::eyre!("invalid --endpoint `{}`: {e}", cli.endpoint)
+            })?;
+            let config_path = default_config_path();
+            let args = overdrive_cli::commands::cluster::StatusArgs { endpoint, config_path };
+            let out = overdrive_cli::commands::cluster::status(args).await?;
+            print!("{}", overdrive_cli::render::cluster_status(&out));
+            Ok(())
+        }
+        Command::Job(JobCommand::Submit { spec }) => {
+            let endpoint = cli.endpoint.parse().map_err(|e| {
+                color_eyre::eyre::eyre!("invalid --endpoint `{}`: {e}", cli.endpoint)
+            })?;
+            let config_path = default_config_path();
+            let args = overdrive_cli::commands::job::SubmitArgs { spec, endpoint, config_path };
+            match overdrive_cli::commands::job::submit(args).await {
+                Ok(out) => {
+                    print!("{}", overdrive_cli::render::job_submit_accepted(&out));
+                    Ok(())
+                }
+                Err(err) => {
+                    // Render through the CLI-side error formatter so
+                    // operators see actionable next steps on
+                    // `CliError::Transport`, not the raw Display form.
+                    eprint!("{}", overdrive_cli::render::cli_error(&err));
+                    Err(color_eyre::eyre::eyre!("job submit failed"))
+                }
+            }
+        }
+        Command::Node(NodeCommand::List) => {
+            let endpoint = cli.endpoint.parse().map_err(|e| {
+                color_eyre::eyre::eyre!("invalid --endpoint `{}`: {e}", cli.endpoint)
+            })?;
+            let config_path = default_config_path();
+            let args = overdrive_cli::commands::node::ListArgs { endpoint, config_path };
+            let out = overdrive_cli::commands::node::list(args).await?;
+            print!("{}", overdrive_cli::render::node_list(&out));
             Ok(())
         }
         Command::Serve { bind, data_dir } => {
@@ -70,14 +110,26 @@ async fn run(cli: Cli) -> Result<()> {
             Ok(())
         }
         other => {
-            // The remaining subcommands (Job, Node, Alloc,
-            // Cluster::Upgrade, Cluster::Status) still land in Phase 1
-            // but are not part of step 05-02. Log and exit 0 so
-            // smoke-tests keep working.
+            // Remaining subcommands (Job, Alloc, Cluster::Upgrade) still
+            // land in later Phase 1 steps. Log and exit 0 so smoke-tests
+            // keep working.
             tracing::warn!(endpoint = %cli.endpoint, command = ?other, "command not yet wired");
             Ok(())
         }
     }
+}
+
+/// Default config path per ADR-0010: `$OVERDRIVE_CONFIG_DIR/.overdrive/config`
+/// if set, `$HOME/.overdrive/.overdrive/config` otherwise. The CLI binary
+/// resolves this once; library tests always pass an explicit path.
+fn default_config_path() -> std::path::PathBuf {
+    if let Some(cfg) = std::env::var_os("OVERDRIVE_CONFIG_DIR") {
+        return std::path::PathBuf::from(cfg).join(".overdrive").join("config");
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        return std::path::PathBuf::from(home).join(".overdrive").join("config");
+    }
+    std::path::PathBuf::from("./.overdrive/config")
 }
 
 /// Default data directory per ADR-0013 §5 — XDG `data_dir()/overdrive`.

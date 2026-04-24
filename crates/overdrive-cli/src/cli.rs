@@ -59,8 +59,9 @@ pub enum Command {
 
 #[derive(Debug, Subcommand)]
 pub enum JobCommand {
+    /// Submit a job spec — positional path per US-05 AC.
     Submit {
-        #[arg(long)]
+        /// Path to a TOML job-spec file.
         spec: std::path::PathBuf,
     },
     List,

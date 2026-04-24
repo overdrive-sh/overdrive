@@ -7,4 +7,6 @@
 //! production adapters, and dispatches into the matching handler here.
 
 pub mod cluster;
+pub mod job;
+pub mod node;
 pub mod serve;

@@ -73,6 +73,17 @@ pub enum CliError {
     /// instead of papering over.
     #[error("failed to decode response body from control plane: {cause}")]
     BodyDecode { cause: String },
+
+    /// Client-side spec validation failed before any HTTP call. Per
+    /// ADR-0011 the CLI runs `Job::from_spec` (the same validating
+    /// constructor the server uses) locally so operators see the
+    /// offending field without a round-trip. `field` names the
+    /// offending field in the aggregate's public shape; `message` is
+    /// the human-readable reason. Separate variant from
+    /// `CliError::HttpStatus { error = "validation", .. }` — the
+    /// client-side path never reaches the server.
+    #[error("invalid job spec: field `{field}`: {message}")]
+    InvalidSpec { field: String, message: String },
 }
 
 /// Hand-rolled typed REST client for the Phase 1 control-plane. One
@@ -123,10 +134,8 @@ impl ApiClient {
             cause: format!("invalid endpoint URL `{endpoint_str}`: {e}"),
         })?;
 
-        let inner = build_reqwest_client(&triple).map_err(|cause| CliError::ConfigLoad {
-            path: path.display().to_string(),
-            cause,
-        })?;
+        let inner = build_reqwest_client(&triple)
+            .map_err(|cause| CliError::ConfigLoad { path: path.display().to_string(), cause })?;
 
         Ok(Self { inner, base })
     }
@@ -143,18 +152,10 @@ impl ApiClient {
     /// # Errors
     ///
     /// See [`CliError`] variants.
-    pub async fn submit_job(
-        &self,
-        req: SubmitJobRequest,
-    ) -> Result<SubmitJobResponse, CliError> {
+    pub async fn submit_job(&self, req: SubmitJobRequest) -> Result<SubmitJobResponse, CliError> {
         let url = self.build_url("v1/jobs")?;
-        let resp = self
-            .inner
-            .post(url)
-            .json(&req)
-            .send()
-            .await
-            .map_err(|e| self.transport_err(&e))?;
+        let resp =
+            self.inner.post(url).json(&req).send().await.map_err(|e| self.transport_err(&e))?;
         self.decode_typed(resp).await
     }
 
@@ -221,10 +222,7 @@ impl ApiClient {
     /// stripped `cause` string. Never returns raw `reqwest::Error`
     /// Debug output or kernel error tokens (`ECONNREFUSED`).
     fn transport_err(&self, err: &reqwest::Error) -> CliError {
-        CliError::Transport {
-            endpoint: self.base.to_string(),
-            cause: stringify_reqwest_error(err),
-        }
+        CliError::Transport { endpoint: self.base.to_string(), cause: stringify_reqwest_error(err) }
     }
 
     /// Decode a reqwest response into a typed 2xx body or a typed
@@ -236,19 +234,17 @@ impl ApiClient {
     ) -> Result<T, CliError> {
         let status = resp.status();
         if status.is_success() {
-            return resp.json::<T>().await.map_err(|e| CliError::BodyDecode {
-                cause: stringify_reqwest_error(&e),
-            });
+            return resp
+                .json::<T>()
+                .await
+                .map_err(|e| CliError::BodyDecode { cause: stringify_reqwest_error(&e) });
         }
 
         // 4xx / 5xx — decode ErrorBody per ADR-0015. If the body is
         // not a valid ErrorBody we fall back to a synthesised ErrorBody
         // so the caller still sees a well-typed variant.
         let status_u16 = status.as_u16();
-        let body = resp
-            .json::<ErrorBody>()
-            .await
-            .unwrap_or_else(|_| synthesize_error_body(status));
+        let body = resp.json::<ErrorBody>().await.unwrap_or_else(|_| synthesize_error_body(status));
         Err(CliError::HttpStatus { status: status_u16, body })
     }
 }
@@ -264,9 +260,8 @@ fn build_reqwest_client(triple: &TrustTriple) -> Result<reqwest::Client, String>
     // blob. Glue them together with a newline so the separator is
     // explicit regardless of whether each blob carries a trailing
     // newline.
-    let mut identity_pem = Vec::with_capacity(
-        triple.client_cert_pem().len() + triple.client_key_pem().len() + 1,
-    );
+    let mut identity_pem =
+        Vec::with_capacity(triple.client_cert_pem().len() + triple.client_key_pem().len() + 1);
     identity_pem.extend_from_slice(triple.client_cert_pem());
     if !identity_pem.ends_with(b"\n") {
         identity_pem.push(b'\n');
