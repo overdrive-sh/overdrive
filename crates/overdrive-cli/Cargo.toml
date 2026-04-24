@@ -24,14 +24,27 @@ path = "src/main.rs"
 [lints]
 workspace = true
 
+[features]
+# Opt-in gate for slow / real-infra tests in this crate. Off by
+# default so `cargo nextest run --workspace` stays under the 60s
+# slow-test budget; CI exercises the gate in a dedicated
+# `integration` job. Per `.claude/rules/testing.md`.
+integration-tests = []
+
 [dependencies]
-overdrive-core.workspace     = true
-eyre.workspace               = true
-color-eyre.workspace         = true
-clap.workspace               = true
-tokio.workspace              = true
-tracing.workspace            = true
-tracing-subscriber.workspace = true
+overdrive-core.workspace           = true
+overdrive-control-plane.path       = "../overdrive-control-plane"
+eyre.workspace                     = true
+color-eyre.workspace               = true
+clap.workspace                     = true
+tokio.workspace                    = true
+tracing.workspace                  = true
+tracing-subscriber.workspace       = true
+reqwest.workspace                  = true
+url.workspace                      = true
+thiserror.workspace                = true
+serde.workspace                    = true
+serde_json.workspace               = true
 
 [dev-dependencies]
 overdrive-control-plane.path = "../overdrive-control-plane"
