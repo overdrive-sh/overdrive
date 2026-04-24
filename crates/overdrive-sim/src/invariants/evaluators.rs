@@ -601,19 +601,6 @@ pub fn evaluate_reconciler_is_pure(
     reconciler: &AnyReconciler,
     clock: &SimClock,
 ) -> InvariantResult {
-    /// Monotonic tick counter — the evaluator runs once per harness
-    /// pass (not inside a real reconcile loop), so a fixed zero is
-    /// the right shape. The field exists to give reconcilers a
-    /// deterministic tie-breaker that does not depend on wall-clock
-    /// granularity; the harness's single-shot nature means there is
-    /// no per-call progression to model.
-    const TICK: u64 = 0;
-    /// Per-evaluation reconcile budget. No injected production
-    /// budget yet (§14 right-sizing will provide one); a 1-second
-    /// literal matches the 04-07 test-side `TickContext`
-    /// construction.
-    const BUDGET: Duration = Duration::from_secs(1);
-
     let name = "reconciler-is-pure";
 
     // Twin invocation with identical inputs per ADR-0013 §2 / §2c. ONE
@@ -626,8 +613,7 @@ pub fn evaluate_reconciler_is_pure(
     let desired = State;
     let actual = State;
     let view = AnyReconcilerView::Unit;
-    let now = clock.now();
-    let tick = TickContext { now, tick: TICK, deadline: now + BUDGET };
+    let tick = build_tick_context(clock);
 
     let (actions_a, next_view_a) = reconciler.reconcile(&desired, &actual, &view, &tick);
     let (actions_b, next_view_b) = reconciler.reconcile(&desired, &actual, &view, &tick);
@@ -647,6 +633,41 @@ pub fn evaluate_reconciler_is_pure(
             )),
         )
     }
+}
+
+/// Construct the `TickContext` snapshot handed to both twin
+/// invocations inside `evaluate_reconciler_is_pure`.
+///
+/// Extracted from the evaluator body so the `now + BUDGET` arithmetic
+/// can be unit-tested. With the `TickContext` construction inlined,
+/// the `+` mutation survived — the Phase 1 reconciler fixtures
+/// (`NoopHeartbeat`, `HarnessNoopHeartbeat` under default features)
+/// ignore `tick.deadline` entirely, so a deadline-in-the-past produced
+/// no observable divergence. The helper form gives mutation testing a
+/// direct target: a unit test asserts `tick.deadline > tick.now` and
+/// `+ -> -` flips the sign on that difference.
+///
+/// The `tick` counter stays zero (the evaluator runs once per harness
+/// pass, not inside a real reconcile loop) and the budget is a
+/// 1-second literal matching the 04-07 test-side `TickContext`
+/// construction — no injected production budget exists yet per ADR-0013.
+#[inline]
+fn build_tick_context(clock: &SimClock) -> TickContext {
+    /// Monotonic tick counter — the evaluator runs once per harness
+    /// pass (not inside a real reconcile loop), so a fixed zero is
+    /// the right shape. The field exists to give reconcilers a
+    /// deterministic tie-breaker that does not depend on wall-clock
+    /// granularity; the harness's single-shot nature means there is
+    /// no per-call progression to model.
+    const TICK: u64 = 0;
+    /// Per-evaluation reconcile budget. No injected production
+    /// budget yet (§14 right-sizing will provide one); a 1-second
+    /// literal matches the 04-07 test-side `TickContext`
+    /// construction.
+    const BUDGET: Duration = Duration::from_secs(1);
+
+    let now = clock.now();
+    TickContext { now, tick: TICK, deadline: now + BUDGET }
 }
 
 #[cfg(test)]
@@ -792,6 +813,28 @@ mod tests {
         let r = evaluate_duplicate_evaluations_collapse(2, counters);
         assert_eq!(r.status, InvariantStatus::Fail);
         assert!(r.cause.as_ref().is_some_and(|c| c.contains("at least 3")));
+    }
+
+    #[test]
+    fn build_tick_context_produces_deadline_strictly_after_now() {
+        // Kills the `+ with -` mutation on the deadline arithmetic in
+        // `build_tick_context`: with `-`, `now - BUDGET` would produce
+        // a deadline in the past (before `now`), failing this
+        // assertion. With the original `+`, deadline is exactly
+        // `BUDGET` ahead of `now`. The Phase 1 reconcilers
+        // (`NoopHeartbeat`, `HarnessNoopHeartbeat`) ignore
+        // `tick.deadline`, so without a direct test on the helper the
+        // mutation survives — the evaluator returns a deterministic
+        // Pass either way.
+        let clock = SimClock::new();
+        let tick = build_tick_context(&clock);
+        assert!(
+            tick.deadline > tick.now,
+            "deadline must be strictly after now; got now={:?} deadline={:?}",
+            tick.now,
+            tick.deadline,
+        );
+        assert_eq!(tick.tick, 0, "tick counter is a fixed zero per the evaluator contract");
     }
 
     #[test]

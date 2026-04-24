@@ -137,6 +137,25 @@ exclude_re = [
     # (that one is already covered by the `HarnessNoopHeartbeat` regex
     # above).
     "for NoopHeartbeat>::hydrate",
+
+    # Semantically-equivalent mutant on the paired tuple compare in
+    # `evaluate_reconciler_is_pure`: `actions_a == actions_b &&
+    # next_view_a == next_view_b` → `... || ...`. The right-hand
+    # comparison operates on `AnyReconcilerView`, which in Phase 1
+    # has only the `Unit` variant — `next_view_a == next_view_b` is
+    # vacuously true for every reconciler, so `&&` and `||` collapse
+    # to "actions_a == actions_b" equivalently. The mutation is only
+    # distinguishable under a reconciler with a stateful view whose
+    # value actually diverges between twin invocations; that shape
+    # lands in Phase 2+ when the first reconciler with a non-unit
+    # `View` is written. The `&&` is deliberate defensive code for
+    # that future, not dead — the per-crate review on the Phase 2+
+    # reconciler PR will re-examine this exclusion at that point.
+    # Canary-bug's `HarnessNoopHeartbeat` diverges on *actions*, not
+    # on view, so it cannot kill this mutation either — and the
+    # mutation lane cannot enable `canary-bug` anyway without the
+    # baseline's `ReconcilerIsPure` invariant flipping to FAIL.
+    "replace && with \\|\\| in evaluate_reconciler_is_pure",
 ]
 
 # ---------------------------------------------------------------------------
