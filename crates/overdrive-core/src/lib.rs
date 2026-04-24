@@ -27,7 +27,7 @@
 pub mod aggregate;
 pub mod error;
 pub mod id;
-pub mod reconciler; // SCAFFOLD: true — phase-1-control-plane-core DISTILL
+pub mod reconciler;
 pub mod traits;
 
 pub use error::{Error, Result};

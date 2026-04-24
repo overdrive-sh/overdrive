@@ -491,6 +491,62 @@
       "s": "EXECUTED",
       "d": "PASS: 15 new acceptance tests pin variant\u00d7response mapping; cluster_status handler signature aligned to Result<Json<T>, ControlPlaneError>; all 26 overdrive-control-plane tests green",
       "t": "2026-04-24T03:14:22Z"
+    },
+    {
+      "sid": "03-05",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: commit 9d484f7 \u2014 15 acceptance tests pin ControlPlaneError->HTTP mapping; handler signatures aligned; 100% mutation kill rate on viable mutants",
+      "t": "2026-04-24T03:17:22Z"
+    },
+    {
+      "sid": "03-05",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-24T03:17:43Z"
+    },
+    {
+      "sid": "03-05",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-24T03:17:44Z"
+    },
+    {
+      "sid": "03-05",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-24T03:17:45Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-24T03:20:19Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-24T03:22:09Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: acceptance proptests at PROPTEST_CASES=1024 cover the newtype completeness contract; trait-shape compile-time checks are the strongest possible test",
+      "t": "2026-04-24T03:22:15Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-24T03:24:01Z"
     }
   ]
 }
