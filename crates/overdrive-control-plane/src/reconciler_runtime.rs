@@ -1,23 +1,29 @@
-//! `ReconcilerRuntime` — composes the `Reconciler` trait, the
-//! `EvaluationBroker`, and per-primitive libSQL path provisioning.
+//! `ReconcilerRuntime` — composes `AnyReconciler` enum-dispatched
+//! reconcilers, the `EvaluationBroker`, and per-primitive libSQL path
+//! provisioning.
+//!
+//! Per ADR-0013 (amended 2026-04-24), the trait's pre-hydration +
+//! `TickContext` shape broke object safety, so the runtime registers
+//! `AnyReconciler` (enum-dispatched) rather than `Box<dyn Reconciler>`.
 //!
 //! Per ADR-0013, the runtime lives in this crate (NOT in `overdrive-core`),
 //! because it pulls in `libsql` and wiring-layer concerns. Core stays
 //! port-only.
 //!
-//! Phase 1 shape: the runtime owns a `HashMap<ReconcilerName, Box<dyn
-//! Reconciler>>` keyed by the canonical name, plus an `EvaluationBroker`
-//! behind `&self`. Registration eagerly derives the per-reconciler
-//! libSQL path via [`crate::libsql_provisioner::provision_db_path`] —
-//! the DB itself is opened lazily by callers that need it (Phase 3+).
-//! Provisioning the path at register time surfaces invalid `data_dir`s
-//! (permission denied, traversal attempt) at registration rather than
-//! deferred until first use.
+//! Phase 1 shape: the runtime owns a `HashMap<ReconcilerName,
+//! AnyReconciler>` keyed by the canonical name, plus an
+//! `EvaluationBroker` behind `&self`. Registration eagerly derives the
+//! per-reconciler libSQL path via
+//! [`crate::libsql_provisioner::provision_db_path`] — the DB itself is
+//! opened lazily by callers that need it (Phase 3+). Provisioning the
+//! path at register time surfaces invalid `data_dir`s (permission
+//! denied, traversal attempt) at registration rather than deferred
+//! until first use.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use overdrive_core::reconciler::{Reconciler, ReconcilerName};
+use overdrive_core::reconciler::{AnyReconciler, ReconcilerName};
 
 use crate::error::ControlPlaneError;
 use crate::eval_broker::EvaluationBroker;
@@ -30,7 +36,7 @@ pub struct ReconcilerRuntime {
     data_dir: PathBuf,
     /// Registry keyed on canonical reconciler name. Duplicate
     /// registration is rejected with `ControlPlaneError::Conflict`.
-    reconcilers: HashMap<ReconcilerName, Box<dyn Reconciler>>,
+    reconcilers: HashMap<ReconcilerName, AnyReconciler>,
     /// Cancelable-eval-set evaluation broker per ADR-0013 §8.
     broker: EvaluationBroker,
 }
@@ -72,7 +78,7 @@ impl ReconcilerRuntime {
     ///   rejected cleanly — the registry is left unchanged.
     /// * [`ControlPlaneError::Internal`] if path provisioning fails
     ///   (permission denied, traversal rejected, etc.).
-    pub fn register(&mut self, reconciler: Box<dyn Reconciler>) -> Result<(), ControlPlaneError> {
+    pub fn register(&mut self, reconciler: AnyReconciler) -> Result<(), ControlPlaneError> {
         let name = reconciler.name().clone();
         if self.reconcilers.contains_key(&name) {
             return Err(ControlPlaneError::Conflict {
@@ -104,7 +110,7 @@ impl ReconcilerRuntime {
     /// Iterate the registered reconcilers. Used by the ADR-0017
     /// `reconciler_is_pure` invariant to twin-invocation-check every
     /// reconciler in the registry from a single harness entry point.
-    pub fn reconcilers_iter(&self) -> impl Iterator<Item = &dyn Reconciler> {
-        self.reconcilers.values().map(std::convert::AsRef::as_ref)
+    pub fn reconcilers_iter(&self) -> impl Iterator<Item = &AnyReconciler> {
+        self.reconcilers.values()
     }
 }

@@ -30,8 +30,10 @@
 
 use std::time::Duration;
 
+use std::time::Instant;
+
 use overdrive_core::id::NodeId;
-use overdrive_core::reconciler::{Db, Reconciler, State};
+use overdrive_core::reconciler::{AnyReconciler, AnyReconcilerView, State, TickContext};
 use overdrive_core::traits::entropy::Entropy;
 use overdrive_core::traits::intent_store::IntentStore;
 
@@ -584,23 +586,30 @@ pub fn evaluate_duplicate_evaluations_collapse(
 /// this crate exposes a deliberately non-deterministic reconciler to
 /// prove this evaluator actually catches divergences.
 #[must_use]
-pub fn evaluate_reconciler_is_pure(reconciler: &dyn Reconciler) -> InvariantResult {
+pub fn evaluate_reconciler_is_pure(reconciler: &AnyReconciler) -> InvariantResult {
     let name = "reconciler-is-pure";
 
-    // Twin invocation with identical inputs. `State` and `Db` are
-    // unit-like placeholders in Phase 1, so two fresh instances are
-    // byte-equivalent by construction — the evaluator's job is to
-    // compare the outputs a second time in case the reconciler itself
-    // diverges between calls.
+    // Twin invocation with identical inputs per ADR-0013 §2 / §2c. ONE
+    // `TickContext` is constructed and passed to BOTH calls so time is
+    // a shared input, not a per-call side channel. The full §18 purity
+    // semantics (pre-hydrated view + next-view tuple return) are
+    // exercised here; the evaluator-body refinement for step 04-08
+    // will add the hydrate() pre-step against a real libsql handle.
     let desired_a = State;
     let actual_a = State;
-    let db_a = Db;
-    let first = reconciler.reconcile(&desired_a, &actual_a, &db_a);
+    let view_a = AnyReconcilerView::Unit;
+    // The sim crate is `adapter-sim`-class (not `core`) so dst-lint
+    // does not flag `Instant::now()` here. The evaluator-body
+    // refinement for 04-08 will replace this with an injected
+    // `SimClock` snapshot and the full pre-hydration pattern.
+    let now = Instant::now();
+    let tick = TickContext { now, tick: 0, deadline: now + Duration::from_secs(1) };
+    let first = reconciler.reconcile(&desired_a, &actual_a, &view_a, &tick);
 
     let desired_b = State;
     let actual_b = State;
-    let db_b = Db;
-    let second = reconciler.reconcile(&desired_b, &actual_b, &db_b);
+    let view_b = AnyReconcilerView::Unit;
+    let second = reconciler.reconcile(&desired_b, &actual_b, &view_b, &tick);
 
     if first == second {
         result(name, InvariantStatus::Pass, "host-0", None)
@@ -766,51 +775,39 @@ mod tests {
 
     #[test]
     fn reconciler_is_pure_passes_for_deterministic_reconciler() {
-        use overdrive_core::reconciler::{Action, Db, Reconciler as R, ReconcilerName, State};
+        use overdrive_core::reconciler::{AnyReconciler, NoopHeartbeat};
 
-        struct Det {
-            name: ReconcilerName,
-        }
-        impl R for Det {
-            fn name(&self) -> &ReconcilerName {
-                &self.name
-            }
-            fn reconcile(&self, _: &State, _: &State, _: &Db) -> Vec<Action> {
-                vec![Action::Noop]
-            }
-        }
-        let r = Det { name: ReconcilerName::new("det").expect("valid") };
+        // The deterministic witness is the real `NoopHeartbeat` —
+        // wrapping it in `AnyReconciler::NoopHeartbeat` exercises the
+        // exact enum-dispatch path the evaluator runs in production.
+        let r = AnyReconciler::NoopHeartbeat(NoopHeartbeat::canonical());
         assert_eq!(evaluate_reconciler_is_pure(&r).status, InvariantStatus::Pass);
     }
 
+    /// The non-deterministic witness requires the `canary-bug` feature.
+    ///
+    /// Under the `AnyReconciler` enum-dispatch model (04-07), inhabiting
+    /// the enum is restricted to first-party variants — a one-off
+    /// `Flappy` struct from a test module cannot be dispatched through
+    /// `AnyReconciler` without modifying the enum. The `canary-bug`
+    /// feature exists precisely to ship a flip-on-call variant in-tree:
+    /// `HarnessNoopHeartbeat` under `#[cfg(feature = "canary-bug")]`
+    /// alternates one/two `Noop`s per call, which the twin-invocation
+    /// check must flag.
+    ///
+    /// The default unit lane does NOT exercise this branch (the feature
+    /// is off). End-to-end coverage that this evaluator actually flags
+    /// a real divergence is provided by
+    /// `xtask/tests/acceptance/dst_canary_red_run.rs` and the sim
+    /// acceptance suite run under `--features
+    /// overdrive-sim/canary-bug`, both of which drive a full harness
+    /// run with the canary variant in the registry.
+    #[cfg(feature = "canary-bug")]
     #[test]
     fn reconciler_is_pure_fails_for_non_deterministic_reconciler() {
-        use std::sync::atomic::{AtomicU64, Ordering};
+        use overdrive_core::reconciler::{AnyReconciler, HarnessNoopHeartbeat};
 
-        use overdrive_core::reconciler::{Action, Db, Reconciler as R, ReconcilerName, State};
-
-        // `Reconciler: Send + Sync` so the witness uses an atomic
-        // counter for per-call state rather than `RefCell` (not `Sync`).
-        // The reconciler flips its output on every call — twin
-        // invocation must report Fail.
-        struct Flappy {
-            name: ReconcilerName,
-            counter: AtomicU64,
-        }
-        impl R for Flappy {
-            fn name(&self) -> &ReconcilerName {
-                &self.name
-            }
-            fn reconcile(&self, _: &State, _: &State, _: &Db) -> Vec<Action> {
-                let n = self.counter.fetch_add(1, Ordering::SeqCst);
-                if n % 2 == 0 { vec![Action::Noop] } else { vec![Action::Noop, Action::Noop] }
-            }
-        }
-
-        let r = Flappy {
-            name: ReconcilerName::new("flappy").expect("valid"),
-            counter: AtomicU64::new(0),
-        };
+        let r = AnyReconciler::HarnessNoopHeartbeat(HarnessNoopHeartbeat::canonical());
         let result = evaluate_reconciler_is_pure(&r);
         assert_eq!(result.status, InvariantStatus::Fail);
         assert!(result.cause.as_ref().is_some_and(|c| c.contains("diverged")));

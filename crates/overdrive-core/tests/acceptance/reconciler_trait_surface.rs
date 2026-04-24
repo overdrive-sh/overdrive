@@ -1,38 +1,31 @@
-//! Acceptance scenarios for step 04-01 — Reconciler trait surface and
-//! `ReconcilerName` / `TargetResource` newtype completeness.
+//! Acceptance scenarios for step 04-01 + 04-07 — Reconciler trait surface
+//! and `ReconcilerName` / `TargetResource` newtype completeness.
 //!
-//! Translates the step 04-01 acceptance criteria from
-//! `docs/feature/phase-1-control-plane-core/roadmap.json` into Rust tests.
+//! Per ADR-0013 amendments 2026-04-24: the trait migrated to the
+//! pre-hydration + `TickContext` time-injection shape. The compile-time
+//! signature pin now asserts
+//! `fn(&R, &State, &State, &R::View, &TickContext) -> (Vec<Action>, R::View)`.
+//! The twin-invocation unit test constructs ONE `TickContext` and passes
+//! it to BOTH calls, asserting both tuples equal bit-for-bit.
+//!
 //! Every test enters through the driving port (`ReconcilerName::new`,
 //! `TargetResource::new`, or the `Reconciler` trait surface) and asserts
 //! observable outcomes (error variants, type signatures). No internal
 //! state is peeked.
-//!
-//! Per ADR-0013 §2 and whitepaper §18, the `Reconciler` trait is
-//! synchronous by design — purity is load-bearing. The trait-shape
-//! assertions use compile-time bounds: if `reconcile` were `async fn` or
-//! took a `&dyn Clock` parameter, `_enforce_pure_sync_signature` below
-//! would fail to compile.
-//!
-//! Per ADR-0013 §4 the `^[a-z][a-z0-9-]{0,62}$` regex is enforced by a
-//! hand-rolled char-by-char check — NO regex crate dep on the core
-//! compile graph. Proptest at `PROPTEST_CASES=1024` verifies the
-//! `Display`->`FromStr` round-trip contract from `testing.md` §Newtype
-//! roundtrip.
 
 #![allow(clippy::expect_used)]
 #![allow(clippy::expect_fun_call)]
 
 use std::str::FromStr;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use proptest::prelude::*;
 
 use overdrive_core::id::{ContentHash, CorrelationKey};
 use overdrive_core::reconciler::{
-    Action, Db, Reconciler, ReconcilerName, ReconcilerNameError, State, TargetResource,
-    TargetResourceError,
+    Action, HydrateError, LibsqlHandle, Reconciler, ReconcilerName, ReconcilerNameError, State,
+    TargetResource, TargetResourceError, TickContext,
 };
 
 // ---------------------------------------------------------------------------
@@ -49,8 +42,6 @@ fn reconciler_name_new_accepts_valid_name() {
 
 #[test]
 fn reconciler_name_new_accepts_single_lowercase_letter() {
-    // Minimum-length case — a single lowercase letter matches
-    // `^[a-z][a-z0-9-]{0,62}$` at length 1.
     let outcome = ReconcilerName::new("a");
 
     let name = outcome.expect("single lowercase letter must be accepted");
@@ -59,8 +50,6 @@ fn reconciler_name_new_accepts_single_lowercase_letter() {
 
 #[test]
 fn reconciler_name_new_accepts_maximum_length_63() {
-    // Upper-bound case — 63 chars (first + 62 interior) is exactly the
-    // length ceiling from `^[a-z][a-z0-9-]{0,62}$`.
     let raw: String = "a".repeat(63);
 
     let outcome = ReconcilerName::new(&raw);
@@ -112,8 +101,6 @@ fn reconciler_name_new_rejects_digit_lead() {
 
 #[test]
 fn reconciler_name_new_rejects_hyphen_lead() {
-    // A leading hyphen would let the name start with a path-traversal-ish
-    // shape; reject it at the constructor.
     let outcome = ReconcilerName::new("-abc");
 
     match outcome {
@@ -190,9 +177,6 @@ fn reconciler_name_new_rejects_colon() {
 
 #[test]
 fn reconciler_name_new_rejects_uppercase_after_lead() {
-    // Uppercase anywhere in the interior must be rejected — the
-    // `ForbiddenCharacter` variant carries the offending letter so the
-    // operator can find it.
     let outcome = ReconcilerName::new("aBc");
 
     match outcome {
@@ -334,7 +318,6 @@ fn target_resource_new_rejects_unknown_shape() {
 
 #[test]
 fn target_resource_new_rejects_shape_missing_id() {
-    // `job/` with no identifier is not a valid canonical form.
     let outcome = TargetResource::new("job/");
 
     match outcome {
@@ -354,10 +337,6 @@ fn target_resource_from_str_forwards_to_new() {
 
 #[test]
 fn target_resource_display_renders_canonical_string() {
-    // Display is part of the newtype completeness contract from
-    // development.md §Newtypes — every newtype has `FromStr` + `Display`
-    // matching exactly. A regression that replaces the Display body with
-    // `Default::default()` must fail this assertion.
     let target = TargetResource::new("job/payments").expect("valid");
 
     assert_eq!(target.to_string(), "job/payments");
@@ -434,43 +413,72 @@ fn action_noop_is_constructable() {
 }
 
 // ---------------------------------------------------------------------------
-// Reconciler trait — synchronous pure contract (acceptance criterion 5)
+// Reconciler trait — pre-hydration + TickContext contract (04-07)
 //
-// These are compile-time assertions. If `reconcile` were `async fn` or
-// its signature took a `&dyn Clock` / `Transport` / `Entropy` parameter,
-// these bounds would fail to compile. The tests exist so a regression
-// that weakens the trait surface is caught before merge.
+// These are compile-time assertions. Per ADR-0013 §2 and §2c, the trait's
+// pure-compute method takes `(desired, actual, view, tick) ->
+// (Vec<Action>, NextView)`. `view` is the pre-hydrated async read
+// (typed as the associated `R::View`); `tick` is the injected
+// `TickContext` carrying wall-clock, monotonic tick counter, and
+// per-tick deadline. Both parameters are passed by reference.
 // ---------------------------------------------------------------------------
 
-/// Compile-time pin of `Reconciler::reconcile`'s synchronous signature.
-/// Taking the function as a value with an explicit `fn(...)` type fails
-/// to typecheck if the trait method is `async fn` (the pointer would be
-/// `fn(...) -> impl Future<...>` or `fn(...) -> Pin<Box<dyn Future<...>>>`
-/// depending on the `async fn in trait` lowering).
+/// Compile-time pin of `Reconciler::reconcile`'s synchronous,
+/// pre-hydration, time-injected signature.
+///
+/// The 5-parameter `fn(...)` type annotation IS the assertion. If the
+/// trait regressed to `async fn`, took `&dyn Clock`, or reverted the
+/// `NextView` tuple return, the right-hand side would fail to
+/// typecheck.
+// Factored into a type alias so the 5-parameter assertion stays readable
+// and clippy::type_complexity does not fire. The alias IS the assertion
+// — a regression that makes `reconcile` `async fn` or drops the
+// `(Vec<Action>, R::View)` tuple return fails to typecheck at the
+// binding site below.
+type ReconcileFn<R> = fn(
+    &R,
+    &State,
+    &State,
+    &<R as Reconciler>::View,
+    &TickContext,
+) -> (Vec<Action>, <R as Reconciler>::View);
+
 fn enforce_pure_sync_signature<R: Reconciler>() {
-    // Binding the trait method to an explicit `fn(...)` type IS the
-    // assertion — if the trait lowers to an async fn, typechecking
-    // fails on the right-hand side. The bindings are deliberately
-    // side-effect-free; the type annotation is the test.
     #[allow(clippy::let_underscore_untyped, clippy::no_effect_underscore_binding)]
-    let _reconcile: fn(&R, &State, &State, &Db) -> Vec<Action> = <R as Reconciler>::reconcile;
+    let _reconcile: ReconcileFn<R> = <R as Reconciler>::reconcile;
     #[allow(clippy::let_underscore_untyped, clippy::no_effect_underscore_binding)]
     let _name: fn(&R) -> &ReconcilerName = <R as Reconciler>::name;
 }
 
-/// Minimal implementor used to prove the trait is inhabited and that
-/// `reconcile` returns `Vec<Action>` directly (not a `Future`).
+/// Minimal implementor used to prove the trait is inhabited with
+/// `View = ()` and that `reconcile` returns `(Vec<Action>, ())` directly.
 struct NoopReconciler {
     name: ReconcilerName,
 }
 
 impl Reconciler for NoopReconciler {
+    type View = ();
+
     fn name(&self) -> &ReconcilerName {
         &self.name
     }
 
-    fn reconcile(&self, _desired: &State, _actual: &State, _db: &Db) -> Vec<Action> {
-        vec![Action::Noop]
+    async fn hydrate(
+        &self,
+        _target: &overdrive_core::reconciler::TargetResource,
+        _db: &LibsqlHandle,
+    ) -> Result<Self::View, HydrateError> {
+        Ok(())
+    }
+
+    fn reconcile(
+        &self,
+        _desired: &State,
+        _actual: &State,
+        _view: &Self::View,
+        _tick: &TickContext,
+    ) -> (Vec<Action>, Self::View) {
+        (vec![Action::Noop], ())
     }
 }
 
@@ -484,10 +492,14 @@ fn reconciler_trait_signature_is_synchronous_no_async_no_clock_param() {
 
     let desired = State;
     let actual = State;
-    let db = Db;
+    let view: () = ();
+    // Construct one `TickContext`. Test code is exempt from the
+    // `Instant::now()` dst-lint ban (dst-lint only scans `src/**/*.rs`).
+    let now = Instant::now();
+    let tick = TickContext { now, tick: 0, deadline: now + Duration::from_secs(1) };
 
-    // `reconcile` returns `Vec<Action>` directly — no `.await` needed.
-    let actions = reconciler.reconcile(&desired, &actual, &db);
+    // `reconcile` returns `(Vec<Action>, Self::View)` directly — no `.await` needed.
+    let (actions, _next_view) = reconciler.reconcile(&desired, &actual, &view, &tick);
 
     assert_eq!(actions, vec![Action::Noop]);
     assert_eq!(reconciler.name().as_str(), "noop-heartbeat");
@@ -495,19 +507,21 @@ fn reconciler_trait_signature_is_synchronous_no_async_no_clock_param() {
 
 #[test]
 fn reconciler_twin_invocation_produces_identical_output() {
-    // §18 purity: `reconcile` is a pure function of its inputs. Two
-    // invocations on the same `(desired, actual, db)` MUST produce
-    // byte-identical action vectors. This is the shape the ADR-0017
-    // `reconciler_is_pure` invariant will evaluate against the full
-    // registry.
+    // §18 purity: two invocations with the same `(desired, actual, view,
+    // tick)` MUST produce byte-identical action vectors. Per the
+    // ADR-0013 §2c amendment we construct ONE `TickContext` and pass it
+    // to BOTH calls — time is an input to the pure function, shared
+    // across the twin invocation.
     let reconciler = NoopReconciler { name: ReconcilerName::new("noop-heartbeat").expect("valid") };
 
     let desired = State;
     let actual = State;
-    let db = Db;
+    let view: () = ();
+    let now = Instant::now();
+    let tick = TickContext { now, tick: 0, deadline: now + Duration::from_secs(1) };
 
-    let first = reconciler.reconcile(&desired, &actual, &db);
-    let second = reconciler.reconcile(&desired, &actual, &db);
+    let (actions_a, next_view_a) = reconciler.reconcile(&desired, &actual, &view, &tick);
+    let (actions_b, next_view_b) = reconciler.reconcile(&desired, &actual, &view, &tick);
 
-    assert_eq!(first, second);
+    assert_eq!((actions_a, next_view_a), (actions_b, next_view_b));
 }

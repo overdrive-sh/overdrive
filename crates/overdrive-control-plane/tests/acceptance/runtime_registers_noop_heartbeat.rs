@@ -2,6 +2,12 @@
 //! primitive libSQL path provisioning, registers `noop_heartbeat()` at
 //! construction, and renders itself through the `cluster_status` handler.
 //!
+//! Updated for step 04-07: the runtime now stores `AnyReconciler`
+//! (enum-dispatched) rather than `Box<dyn Reconciler>`, and `reconcile`
+//! takes a `&TickContext` fourth parameter plus returns a
+//! `(Vec<Action>, AnyReconcilerView)` tuple. Twin-invocation checks
+//! construct ONE `TickContext` and pass it to BOTH calls.
+//!
 //! Tier classification: **Tier 1 DST** per `.claude/rules/testing.md`.
 //! NO real axum listener, NO real libsql open, NO real redb write txn,
 //! NO real TCP. The `tempfile::TempDir` here is used only so the
@@ -9,17 +15,11 @@
 //! path to canonicalise against — the DB is never opened. Real-I/O
 //! wiring of the same surface is covered by step 05-05 (walking
 //! skeleton, Tier 3).
-//!
-//! Sim adapters constructed but mostly unused — their construction
-//! proves DST compatibility (no banned `Instant::now` / `rand::random`
-//! / `tokio::net::*` smuggled into the runtime's compile path) rather
-//! than adding temporal perturbation, per the 04-04 task harness
-//! spec. The dst-lint gate is the structural backstop; test-side
-//! construction documents the contract.
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use axum::Json;
 use axum::extract::State;
@@ -29,7 +29,9 @@ use overdrive_control_plane::handlers::cluster_status;
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_control_plane::{AppState, noop_heartbeat};
 use overdrive_core::id::NodeId;
-use overdrive_core::reconciler::{Action, Db, Reconciler, ReconcilerName, State as ReconState};
+use overdrive_core::reconciler::{
+    Action, AnyReconcilerView, ReconcilerName, State as ReconState, TickContext,
+};
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::dataplane::SimDataplane;
@@ -45,6 +47,14 @@ use tempfile::TempDir;
 
 fn rname(raw: &str) -> ReconcilerName {
     ReconcilerName::new(raw).expect("valid ReconcilerName")
+}
+
+/// Construct a fresh `TickContext` for twin-invocation checks. Test
+/// code is exempt from the `Instant::now()` dst-lint ban (dst-lint
+/// scans `src/**/*.rs` only).
+fn fresh_tick() -> TickContext {
+    let now = Instant::now();
+    TickContext { now, tick: 0, deadline: now + Duration::from_secs(1) }
 }
 
 /// Construct the Sim adapters declared in the 04-04 harness spec. The
@@ -141,22 +151,28 @@ fn register_duplicate_name_returns_conflict() {
 
 // ---------------------------------------------------------------------------
 // (d) noop_heartbeat() factory produces a reconciler whose `reconcile`
-//     returns vec![Action::Noop] deterministically.
+//     returns vec![Action::Noop] deterministically. Twin-invocation
+//     passes ONE TickContext instance to BOTH calls per ADR-0013 §2c.
 // ---------------------------------------------------------------------------
 
 #[test]
 fn noop_heartbeat_factory_produces_reconciler_returning_noop() {
-    let r: Box<dyn Reconciler> = noop_heartbeat();
+    let r = noop_heartbeat();
     assert_eq!(r.name(), &rname("noop-heartbeat"), "factory name is noop-heartbeat");
 
     let desired = ReconState;
     let actual = ReconState;
-    let db = Db;
+    let view = AnyReconcilerView::Unit;
+    let tick = fresh_tick();
 
-    let first = r.reconcile(&desired, &actual, &db);
-    let second = r.reconcile(&desired, &actual, &db);
+    let first = r.reconcile(&desired, &actual, &view, &tick);
+    let second = r.reconcile(&desired, &actual, &view, &tick);
 
-    assert_eq!(first, vec![Action::Noop], "noop-heartbeat always emits [Action::Noop]");
+    assert_eq!(
+        first,
+        (vec![Action::Noop], AnyReconcilerView::Unit),
+        "noop-heartbeat always emits [Action::Noop] with unchanged view"
+    );
     assert_eq!(first, second, "noop-heartbeat is deterministic (twin-invocation)");
 }
 
@@ -230,7 +246,9 @@ fn at_least_one_reconciler_registered_invariant_holds_after_boot() {
 
 // ---------------------------------------------------------------------------
 // (g) ADR-0017 invariant `reconciler_is_pure` — twin-invocation check on
-//     every registered reconciler emits byte-identical action vectors.
+//     every registered reconciler emits byte-identical `(actions,
+//     next_view)` tuples. One `TickContext` is constructed and passed
+//     to both calls per ADR-0013 §2c.
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -241,11 +259,12 @@ fn reconciler_is_pure_invariant_holds_for_noop_heartbeat() {
 
     let desired = ReconState;
     let actual = ReconState;
-    let db = Db;
+    let view = AnyReconcilerView::Unit;
+    let tick = fresh_tick();
 
     for r in runtime.reconcilers_iter() {
-        let a = r.reconcile(&desired, &actual, &db);
-        let b = r.reconcile(&desired, &actual, &db);
+        let a = r.reconcile(&desired, &actual, &view, &tick);
+        let b = r.reconcile(&desired, &actual, &view, &tick);
         assert_eq!(
             a,
             b,

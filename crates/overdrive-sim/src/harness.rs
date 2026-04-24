@@ -418,7 +418,7 @@ impl Harness {
             }
             Invariant::ReconcilerIsPure => {
                 let reconciler = harness_purity_reconciler();
-                evaluators::evaluate_reconciler_is_pure(reconciler.as_ref())
+                evaluators::evaluate_reconciler_is_pure(&reconciler)
             }
         }
     }
@@ -490,48 +490,32 @@ fn drive_broker_collapse() -> (u64, evaluators::BrokerCountersSnapshot) {
 }
 
 /// Construct the reconciler the harness twin-invokes for the
-/// `ReconcilerIsPure` invariant. Mirrors the `noop-heartbeat` factory
-/// in `overdrive-control-plane::noop_heartbeat`: deterministically
-/// returns `vec![Action::Noop]`. Redefined here so the sim crate does
-/// not depend on `overdrive-control-plane` (which already depends on
-/// `overdrive-sim`).
-#[allow(clippy::expect_used)] // `ReconcilerName::new("noop-heartbeat")` is total on the literal.
-fn harness_purity_reconciler() -> Box<dyn overdrive_core::reconciler::Reconciler> {
-    use overdrive_core::reconciler::{Action, Db, Reconciler, ReconcilerName, State};
-
-    struct HarnessNoopHeartbeat {
-        name: ReconcilerName,
+/// `ReconcilerIsPure` invariant.
+///
+/// When compiled without `canary-bug`, returns
+/// `AnyReconciler::NoopHeartbeat(NoopHeartbeat::canonical())` — the
+/// deterministic Phase 1 proof-of-life reconciler. Under
+/// `--features canary-bug`, returns
+/// `AnyReconciler::HarnessNoopHeartbeat(HarnessNoopHeartbeat::canonical())`
+/// whose `reconcile` flips on every call, so the twin-invocation
+/// check goes red.
+///
+/// The mutants-skip entry for `harness_purity_reconciler` in
+/// `.cargo/mutants.toml` still matches by function name; the canary
+/// logic itself now lives in `overdrive-core::reconciler` so mutation
+/// testing sees the same byte surface regardless of which crate the
+/// function is declared in.
+fn harness_purity_reconciler() -> overdrive_core::reconciler::AnyReconciler {
+    #[cfg(feature = "canary-bug")]
+    {
+        use overdrive_core::reconciler::{AnyReconciler, HarnessNoopHeartbeat};
+        AnyReconciler::HarnessNoopHeartbeat(HarnessNoopHeartbeat::canonical())
     }
-
-    impl Reconciler for HarnessNoopHeartbeat {
-        fn name(&self) -> &ReconcilerName {
-            &self.name
-        }
-
-        // Mutation-skip for this fn lives in `.cargo/mutants.toml` under
-        // the `harness_purity_reconciler` exclude_re entry — cargo-mutants'
-        // comment-based skip syntax is not honoured by the 25.x CLI we
-        // pin in CI. See that file for the full justification.
-        fn reconcile(&self, _desired: &State, _actual: &State, _db: &Db) -> Vec<Action> {
-            #[cfg(feature = "canary-bug")]
-            {
-                use std::sync::atomic::{AtomicU64, Ordering};
-                static CALL: AtomicU64 = AtomicU64::new(0);
-                let n = CALL.fetch_add(1, Ordering::SeqCst);
-                if n % 2 == 0 {
-                    return vec![Action::Noop];
-                }
-                vec![Action::Noop, Action::Noop]
-            }
-            #[cfg(not(feature = "canary-bug"))]
-            vec![Action::Noop]
-        }
+    #[cfg(not(feature = "canary-bug"))]
+    {
+        use overdrive_core::reconciler::{AnyReconciler, NoopHeartbeat};
+        AnyReconciler::NoopHeartbeat(NoopHeartbeat::canonical())
     }
-
-    Box::new(HarnessNoopHeartbeat {
-        name: ReconcilerName::new("noop-heartbeat")
-            .expect("noop-heartbeat is a valid ReconcilerName"),
-    })
 }
 
 /// Build a `SimObservationCluster` mirroring the harness's host set.

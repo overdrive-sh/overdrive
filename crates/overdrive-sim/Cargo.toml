@@ -21,7 +21,11 @@ publish               = false
 crate_class = "adapter-sim"
 
 [dependencies]
-overdrive-core.workspace = true
+# Sim depends on overdrive-core and — when the sim crate's own
+# `canary-bug` feature is enabled — forwards that into
+# `overdrive-core/canary-bug` so the `HarnessNoopHeartbeat` variant of
+# `AnyReconciler` is available.
+overdrive-core = { workspace = true }
 async-trait.workspace    = true
 bytes.workspace          = true
 futures.workspace        = true
@@ -43,7 +47,7 @@ overdrive-store-local    = { path = "../overdrive-store-local" }
 # empty suite. The gate is scoped to exactly one code path in
 # `adapters/observation_store.rs`; grep for `#[cfg(feature = "canary-bug")]`
 # to see the complete surface.
-canary-bug = []
+canary-bug = ["overdrive-core/canary-bug"]
 
 [dev-dependencies]
 # Crafter adds turmoil, proptest, and overdrive-store-local here during DELIVER.

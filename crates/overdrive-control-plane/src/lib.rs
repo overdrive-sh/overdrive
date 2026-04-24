@@ -241,32 +241,13 @@ pub async fn run_server_with_obs(
 /// deterministically, serving as the fixture against which the
 /// `ReconcilerIsPure` invariant's twin-invocation check runs and as
 /// the seed entry for the `AtLeastOneReconcilerRegistered` invariant.
+///
+/// Returns `AnyReconciler::NoopHeartbeat(NoopHeartbeat)` per the 04-07
+/// migration — `Box<dyn Reconciler>` is no longer object-safe under
+/// the trait's new `type View` + `async fn hydrate` shape.
 #[must_use]
-pub fn noop_heartbeat() -> Box<dyn overdrive_core::reconciler::Reconciler> {
-    use overdrive_core::reconciler::{Action, Db, Reconciler, ReconcilerName, State};
+pub fn noop_heartbeat() -> overdrive_core::reconciler::AnyReconciler {
+    use overdrive_core::reconciler::{AnyReconciler, NoopHeartbeat};
 
-    struct NoopHeartbeat {
-        name: ReconcilerName,
-    }
-
-    impl Reconciler for NoopHeartbeat {
-        fn name(&self) -> &ReconcilerName {
-            &self.name
-        }
-
-        fn reconcile(&self, _desired: &State, _actual: &State, _db: &Db) -> Vec<Action> {
-            vec![Action::Noop]
-        }
-    }
-
-    Box::new(NoopHeartbeat {
-        // Safety: `"noop-heartbeat"` is a compile-time string literal
-        // satisfying every `ReconcilerName` validation rule (non-empty,
-        // lowercase, hyphen-separated). The `expect` is genuinely
-        // infallible; failure would indicate a bug in the newtype
-        // constructor, not a runtime error path.
-        #[allow(clippy::expect_used)]
-        name: ReconcilerName::new("noop-heartbeat")
-            .expect("'noop-heartbeat' is a valid ReconcilerName by construction"),
-    })
+    AnyReconciler::NoopHeartbeat(NoopHeartbeat::canonical())
 }
