@@ -191,7 +191,12 @@ pub async fn describe_job(
     ),
     tag = "cluster",
 )]
-pub async fn cluster_status() -> Result<api::ClusterStatus, ControlPlaneError> {
+pub async fn cluster_status() -> Result<Json<api::ClusterStatus>, ControlPlaneError> {
+    // Step 03-05 aligns every handler's return type on
+    // `Result<Json<T>, ControlPlaneError>` so `IntoResponse` funnels
+    // uniformly through `error::to_response`. The body remains a
+    // RED scaffold until the owning step (not 03-05) delivers the
+    // cluster-status projection.
     panic!("Not yet implemented -- RED scaffold")
 }
 

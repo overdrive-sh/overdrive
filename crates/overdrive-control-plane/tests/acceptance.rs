@@ -19,4 +19,5 @@
 
 mod acceptance {
     mod api_type_shapes;
+    mod error_mapping_exhaustive;
 }
