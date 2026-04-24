@@ -508,12 +508,19 @@ fn harness_purity_reconciler() -> Box<dyn overdrive_core::reconciler::Reconciler
             &self.name
         }
 
+        // mutants: skip — body is split across `#[cfg(feature = "canary-bug")]`
+        // branches. The non-canary branch is the trivial `vec![Action::Noop]`
+        // return whose mutation (`vec![]`) is indistinguishable under the
+        // default mutation run (twin invocations still compare equal → the
+        // `ReconcilerIsPure` invariant still PASSes either way). The
+        // canary-bug branch's alternation + modulo logic is exercised end-to-end
+        // by `xtask/tests/acceptance/dst_canary_red_run.rs` and
+        // `crates/overdrive-sim/tests/acceptance/reconciler_invariants_pass.rs::
+        // fixture_alternates_under_canary_bug_feature` under
+        // `--features overdrive-sim/canary-bug` — but `cargo xtask mutants`
+        // runs without that feature, so mutations against the cfg-gated block
+        // cannot be killed by the default mutation lane.
         fn reconcile(&self, _desired: &State, _actual: &State, _db: &Db) -> Vec<Action> {
-            // Phase 1 canary bug gate: when `canary-bug` is enabled the
-            // output alternates between `[Noop]` and `[Noop, Noop]` on
-            // successive calls. Twin invocation then compares differing
-            // vectors and the invariant correctly reports Fail. The
-            // gate is off in production builds — see Cargo.toml.
             #[cfg(feature = "canary-bug")]
             {
                 use std::sync::atomic::{AtomicU64, Ordering};
