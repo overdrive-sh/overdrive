@@ -18,6 +18,7 @@
 //!   format, no low-level transport tokens like `ECONNREFUSED`.
 
 use std::path::Path;
+use std::time::Duration;
 
 use overdrive_control_plane::api::{
     AllocStatusResponse, ClusterStatus, ErrorBody, JobDescription, NodeList, SubmitJobRequest,
@@ -223,10 +224,11 @@ impl ApiClient {
 
     /// Join a path onto the base URL, surfacing parse failures as
     /// [`CliError::ConfigLoad`] — an invalid URL here means the
-    /// recorded endpoint is malformed.
+    /// recorded endpoint in the loaded trust-triple config is
+    /// malformed, not a transport-layer failure.
     fn build_url(&self, path: &str) -> Result<Url, CliError> {
-        self.base.join(path).map_err(|e| CliError::Transport {
-            endpoint: self.base.to_string(),
+        self.base.join(path).map_err(|e| CliError::ConfigLoad {
+            path: self.base.to_string(),
             cause: format!("invalid URL path `{path}`: {e}"),
         })
     }
@@ -288,6 +290,13 @@ fn build_reqwest_client(triple: &TrustTriple) -> Result<reqwest::Client, String>
         .identity(identity)
         .https_only(true)
         .use_rustls_tls()
+        // Bounded connect + total-request deadlines so the CLI cannot
+        // hang indefinitely on an unreachable or silent control plane.
+        // Chosen to fit the Phase 1 single-node / localhost shape — the
+        // operator sees a typed `CliError::Transport` with a "request
+        // timed out" cause instead of a process that never returns.
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(30))
         .build()
         .map_err(|e| format!("failed to build HTTPS client: {e}"))
 }

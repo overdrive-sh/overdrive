@@ -242,13 +242,14 @@ pub fn mint_ephemeral_ca_with_hostname(
 /// carries its own `name`, `endpoint`, and the base64-PEM trust
 /// triple.
 ///
-/// `deny_unknown_fields` on both structs surfaces malformed TOML as
-/// loud parse errors rather than silently accepting unrelated keys —
-/// per ADR-0019 Consequences → Enforcement, the rejection shape
+/// `deny_unknown_fields` is applied to the `*In` deserialisation
+/// counterparts below — it only affects `Deserialize`, so putting it
+/// on these Serialize-only writer structs would be a no-op. Malformed
+/// TOML on load surfaces as a loud parse error via the `*In` structs;
+/// per ADR-0019 Consequences → Enforcement the rejection shape
 /// matches ADR-0010 §Enforcement (reject any context missing
 /// `ca`/`crt`/`key`).
 #[derive(Debug, Serialize)]
-#[serde(deny_unknown_fields)]
 struct OperatorConfigOut<'a> {
     #[serde(rename = "current-context")]
     current_context: &'static str,
@@ -256,7 +257,6 @@ struct OperatorConfigOut<'a> {
 }
 
 #[derive(Debug, Serialize)]
-#[serde(deny_unknown_fields)]
 struct OperatorContextOut<'a> {
     name: &'static str,
     endpoint: &'a str,

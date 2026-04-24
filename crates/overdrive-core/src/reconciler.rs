@@ -772,10 +772,21 @@ impl AnyReconciler {
     }
 
     /// Pure compute phase — dispatches to the inner reconciler's
-    /// `reconcile`. The caller supplies the matching view variant;
-    /// mismatched variants are surfaced by returning an empty action
-    /// vector and an unchanged view (Phase 1 has only `View = ()`, so
-    /// this path is unreachable via construction).
+    /// `reconcile`. The caller supplies the matching view variant.
+    ///
+    /// Variant alignment is a compile-time invariant: the dispatch
+    /// `match` below is exhaustive, and every arm pairs an
+    /// `AnyReconciler` variant with its declared [`AnyReconcilerView`]
+    /// counterpart. Adding a new reconciler variant whose `View` type
+    /// does not line up with a matching `AnyReconcilerView` arm
+    /// produces a non-exhaustive-match compile error, forcing the
+    /// developer to extend the dispatch explicitly. There is no
+    /// runtime fallback — a mismatched pair cannot be constructed in
+    /// the first place.
+    ///
+    /// Phase 1 has only `View = ()`, so every arm routes through
+    /// [`AnyReconcilerView::Unit`]; Phase 2+ widens the sum as new
+    /// reconcilers land.
     #[must_use]
     pub fn reconcile(
         &self,
