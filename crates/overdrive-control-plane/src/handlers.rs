@@ -156,10 +156,22 @@ pub async fn describe_job(
     Path(job_id_str): Path<String>,
 ) -> Result<Json<api::JobDescription>, ControlPlaneError> {
     // 1. Parse the path parameter through the JobId newtype. A malformed
-    //    identifier (non-ASCII, wrong length, bad charset) surfaces via
-    //    `AggregateError::Id(..)` → HTTP 400 through `IntoResponse`.
-    //    This is the same validation lane the submit path uses.
-    let job_id = JobId::new(&job_id_str).map_err(overdrive_core::aggregate::AggregateError::Id)?;
+    //    identifier (non-ASCII, wrong length, bad charset) surfaces as
+    //    HTTP 400 with `field: Some("id")` — the path-parameter name
+    //    the OpenAPI spec declares.
+    //
+    //    Routing through `AggregateError::Id` here would lose the field
+    //    name: that variant is a `#[from]` pass-through of `IdParseError`
+    //    and the `to_response` mapping for `Aggregate(Id(_))` correctly
+    //    leaves `field = None` (it has no caller-side context to name).
+    //    The handler DOES have caller-side context — the path parameter
+    //    is named `id` — so we attach it explicitly. Without this, a
+    //    client branching on the `field` discriminator cannot tell
+    //    path-parameter validation from request-body validation.
+    let job_id = JobId::new(&job_id_str).map_err(|e| ControlPlaneError::Validation {
+        message: e.to_string(),
+        field: Some("id".to_owned()),
+    })?;
 
     // 2. Derive the canonical intent key and read from the authoritative
     //    store. Missing key → NotFound → HTTP 404.

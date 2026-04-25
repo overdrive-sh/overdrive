@@ -160,6 +160,56 @@ async fn get_v1_jobs_id_returns_described_job_after_submit() {
 }
 
 // -----------------------------------------------------------------------
+// Regression — malformed `{id}` path parameter returns 400 with
+// `field: Some("id")` so client tooling can branch on the discriminator.
+//
+// Pre-fix shape: `JobId::new(...).map_err(AggregateError::Id)?` routed
+// through `to_response`'s `Aggregate(Id(_))` arm, which hardcodes
+// `field = None`. The handler holds stronger context than the wrapped
+// aggregate error — the path parameter name is statically known — and
+// must attach it explicitly.
+// -----------------------------------------------------------------------
+
+#[tokio::test]
+async fn get_v1_jobs_malformed_id_returns_400_with_field_id() {
+    let (handle, bound, _tmp, ca_pem) = spawn_server().await;
+    let client = client_trusting(&ca_pem);
+
+    // `JobId::new` rejects labels that don't start with an alphanumeric
+    // character (`validate_label` enforces `InvalidFormat`). A leading
+    // hyphen is URL-safe (no percent-encoding required, distinguishable
+    // from a captured path segment) and forces the validation lane the
+    // bug report targets — distinct from the `no-such-job` 404 path
+    // which uses a *valid* JobId form that simply isn't stored.
+    //
+    // (Note: uppercase ASCII canonicalises to lowercase via
+    // `to_ascii_lowercase` in the parser, so `INVALID` → `invalid`
+    // and yields a 404, not a 400 — the wrong lane for this test.)
+    let describe_url = format!("https://localhost:{}/v1/jobs/-bad", bound.port());
+    let resp = client.get(&describe_url).send().await.expect("GET /v1/jobs/{malformed}");
+
+    assert_eq!(
+        resp.status(),
+        reqwest::StatusCode::BAD_REQUEST,
+        "describe of a malformed JobId must be HTTP 400",
+    );
+
+    let body: ErrorBody = resp.json().await.expect("decode ErrorBody");
+    assert_eq!(body.error, "validation", "error kind must be 'validation'; got {:?}", body.error);
+    assert_eq!(
+        body.field.as_deref(),
+        Some("id"),
+        "field discriminator must name the offending path parameter; \
+         got {:?}. Without this, client tooling branching on `field` \
+         loses the ability to distinguish path-parameter validation \
+         from request-body validation.",
+        body.field,
+    );
+
+    handle.shutdown(Duration::from_secs(2)).await;
+}
+
+// -----------------------------------------------------------------------
 // AC — §4.4: Describe unknown id returns 404 with `not_found` error body
 // -----------------------------------------------------------------------
 
