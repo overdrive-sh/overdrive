@@ -36,6 +36,20 @@
 //! close, so a caller relying on end-of-stream as a catch-up trigger
 //! will miss the lost events. Phase 2's Corrosion replacement
 //! recovers via CR-SQLite gossip catch-up.
+//!
+//! # LWW guard on `write`
+//!
+//! Per the `ObservationStore::write` trait contract codified in
+//! `overdrive-core`, a write whose `updated_at` (alloc-status) or
+//! `last_heartbeat` (node-health) does not dominate the existing row
+//! at the same primary key MUST NOT mutate state and MUST NOT be
+//! emitted on subscriptions. This implementation runs the comparison
+//! INSIDE the redb `begin_write` transaction (no TOCTOU window) and
+//! suppresses the post-commit broadcast on loss. Comparator:
+//! [`overdrive_core::traits::observation_store::LogicalTimestamp::dominates`].
+//! See `docs/feature/fix-observation-lww-merge/deliver/rca.md` for the
+//! bug RCA and `docs/product/architecture/adr-0012-observation-store-server-impl.md`
+//! for the third-revision rationale.
 
 use std::path::Path;
 use std::pin::Pin;
@@ -48,7 +62,7 @@ use overdrive_core::traits::observation_store::{
     AllocStatusRow, NodeHealthRow, ObservationRow, ObservationStore, ObservationStoreError,
     ObservationSubscription,
 };
-use redb::{Database, ReadableTable, TableDefinition};
+use redb::{Database, ReadableTable, Table, TableDefinition};
 use tokio::sync::broadcast;
 use tokio_stream::StreamExt as _;
 use tokio_stream::wrappers::BroadcastStream;
@@ -128,35 +142,44 @@ impl ObservationStore for LocalObservationStore {
         let inner = Arc::clone(&self.inner);
         let row_for_commit = row.clone();
 
-        tokio::task::spawn_blocking(move || {
+        // The LWW comparison runs INSIDE the `begin_write` transaction
+        // — a TOCTOU between read and insert is impossible because
+        // redb's serializable isolation already linearises writers.
+        // The closure returns whether the write was accepted; the
+        // post-await branch suppresses `self.emit` on LWW reject.
+        // See `ObservationStore::write`'s trait docstring in
+        // `overdrive-core` for the trait-level contract; see
+        // `docs/feature/fix-observation-lww-merge/deliver/rca.md` for
+        // the bug RCA that motivated this guard.
+        let accepted: bool = tokio::task::spawn_blocking(move || {
             let write = inner.db.begin_write().map_err(map_to_io)?;
-            {
-                match &row_for_commit {
-                    ObservationRow::AllocStatus(r) => {
-                        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(r).map_err(map_to_io)?;
-                        let mut table = write.open_table(ALLOC_STATUS_TABLE).map_err(map_to_io)?;
-                        table
-                            .insert(r.alloc_id.as_str().as_bytes(), bytes.as_ref())
-                            .map_err(map_to_io)?;
-                    }
-                    ObservationRow::NodeHealth(r) => {
-                        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(r).map_err(map_to_io)?;
-                        let mut table = write.open_table(NODE_HEALTH_TABLE).map_err(map_to_io)?;
-                        table
-                            .insert(r.node_id.as_str().as_bytes(), bytes.as_ref())
-                            .map_err(map_to_io)?;
-                    }
+            let accepted = match &row_for_commit {
+                ObservationRow::AllocStatus(incoming) => {
+                    let mut table = write.open_table(ALLOC_STATUS_TABLE).map_err(map_to_io)?;
+                    apply_alloc_status_lww(&mut table, incoming)?
                 }
-            }
+                ObservationRow::NodeHealth(incoming) => {
+                    let mut table = write.open_table(NODE_HEALTH_TABLE).map_err(map_to_io)?;
+                    apply_node_health_lww(&mut table, incoming)?
+                }
+            };
+            // Commit unconditionally — a rejected write performed only
+            // a read inside the transaction; redb handles the no-op
+            // commit cleanly.
             write.commit().map_err(map_to_io)?;
-            Ok::<_, ObservationStoreError>(())
+            Ok::<_, ObservationStoreError>(accepted)
         })
         .await
         .map_err(map_to_io)??;
 
-        // Emit after the redb commit succeeds — subscribers never see a
-        // row that failed to persist.
-        self.emit(row);
+        // Suppress emit on LWW reject — subscribers must NEVER observe
+        // a row the store will then refuse to return on read. Matches
+        // `SimObservationStore::apply_alloc_status` /
+        // `apply_node_health` semantics: the broadcast `send` happens
+        // only inside the dominate branch.
+        if accepted {
+            self.emit(row);
+        }
         Ok(())
     }
 
@@ -215,6 +238,83 @@ impl ObservationStore for LocalObservationStore {
         .await
         .map_err(map_to_io)?
     }
+}
+
+// -----------------------------------------------------------------------------
+// LWW-guarded inserts — read-then-conditional-insert inside the open
+// `begin_write` transaction. The `ObservationStore::write` trait
+// docstring in `overdrive-core` codifies the contract: an incoming row
+// whose `updated_at` does not dominate the existing row at the same
+// primary key MUST NOT mutate state.
+//
+// Returns `true` when the write was accepted (the row dominates a
+// prior, or there is no prior); `false` when the write loses to an
+// existing row. The caller (`LocalObservationStore::write`) gates the
+// post-commit emit on the returned bool — losers must never be emitted
+// on subscriptions.
+// -----------------------------------------------------------------------------
+
+/// Decode a prior rkyv-archived `AllocStatusRow` from redb-returned
+/// bytes. Mirrors the alignment-aware decoding pattern at the top of
+/// [`LocalObservationStore::alloc_status_rows`] — redb returns slices
+/// with unknown alignment; rkyv requires 8-byte alignment.
+fn decode_alloc_status(bytes: &[u8]) -> Result<AllocStatusRow, ObservationStoreError> {
+    let mut aligned = rkyv::util::AlignedVec::<8>::new();
+    aligned.extend_from_slice(bytes);
+    rkyv::from_bytes::<AllocStatusRow, rkyv::rancor::Error>(&aligned).map_err(map_to_io)
+}
+
+/// Decode a prior rkyv-archived `NodeHealthRow` from redb-returned
+/// bytes. See [`decode_alloc_status`] for the alignment rationale.
+fn decode_node_health(bytes: &[u8]) -> Result<NodeHealthRow, ObservationStoreError> {
+    let mut aligned = rkyv::util::AlignedVec::<8>::new();
+    aligned.extend_from_slice(bytes);
+    rkyv::from_bytes::<NodeHealthRow, rkyv::rancor::Error>(&aligned).map_err(map_to_io)
+}
+
+/// LWW-guarded insert for `AllocStatusRow`. Reads the prior row at
+/// `incoming.alloc_id` (if any), compares via
+/// [`overdrive_core::traits::observation_store::LogicalTimestamp::dominates`],
+/// and inserts only on dominate. Returns `true` if the row was inserted.
+fn apply_alloc_status_lww(
+    table: &mut Table<'_, &[u8], &[u8]>,
+    incoming: &AllocStatusRow,
+) -> Result<bool, ObservationStoreError> {
+    let key = incoming.alloc_id.as_str().as_bytes();
+    let dominates = match table.get(key).map_err(map_to_io)? {
+        None => true,
+        Some(prior) => {
+            let prior_row = decode_alloc_status(prior.value())?;
+            incoming.updated_at.dominates(&prior_row.updated_at)
+        }
+    };
+    if dominates {
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(incoming).map_err(map_to_io)?;
+        table.insert(key, bytes.as_ref()).map_err(map_to_io)?;
+    }
+    Ok(dominates)
+}
+
+/// LWW-guarded insert for `NodeHealthRow`. Mirrors
+/// [`apply_alloc_status_lww`] — keyed by `incoming.node_id`, compares
+/// `incoming.last_heartbeat` via `LogicalTimestamp::dominates`.
+fn apply_node_health_lww(
+    table: &mut Table<'_, &[u8], &[u8]>,
+    incoming: &NodeHealthRow,
+) -> Result<bool, ObservationStoreError> {
+    let key = incoming.node_id.as_str().as_bytes();
+    let dominates = match table.get(key).map_err(map_to_io)? {
+        None => true,
+        Some(prior) => {
+            let prior_row = decode_node_health(prior.value())?;
+            incoming.last_heartbeat.dominates(&prior_row.last_heartbeat)
+        }
+    };
+    if dominates {
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(incoming).map_err(map_to_io)?;
+        table.insert(key, bytes.as_ref()).map_err(map_to_io)?;
+    }
+    Ok(dominates)
 }
 
 /// Thin `Unpin` wrapper so we can return a `Box<dyn Stream + Unpin>`.

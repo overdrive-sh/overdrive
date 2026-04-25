@@ -82,6 +82,41 @@ pub struct LogicalTimestamp {
     pub writer: NodeId,
 }
 
+impl LogicalTimestamp {
+    /// Total order on [`LogicalTimestamp`]: `(counter, writer)`
+    /// lexicographic. Returns `true` when `self` strictly dominates
+    /// `other` and therefore wins under last-write-wins.
+    ///
+    /// Equal timestamps (same counter AND same writer) are treated as
+    /// "not dominating" — the existing value is retained. This is the
+    /// LWW idempotency case: re-delivering the same row via gossip is a
+    /// no-op.
+    ///
+    /// The counter dominates first; on a tie, the writer's
+    /// [`NodeId::Display`] form is the canonical ordering key, matching
+    /// the §4 whitepaper rule for deterministic tiebreak. Clock skew
+    /// across peers cannot invert ordering — the counter is a Lamport
+    /// stamp, not a wall-clock time.
+    ///
+    /// This is the single comparator both [`ObservationStore`] adapters
+    /// (`SimObservationStore` in `overdrive-sim`, `LocalObservationStore`
+    /// in `overdrive-store-local`) MUST consult when applying a write.
+    /// See `docs/feature/fix-observation-lww-merge/deliver/rca.md` for
+    /// the bug RCA that motivated promoting this comparator out of the
+    /// sim leaf crate.
+    #[must_use]
+    pub fn dominates(&self, other: &Self) -> bool {
+        match self.counter.cmp(&other.counter) {
+            std::cmp::Ordering::Greater => true,
+            std::cmp::Ordering::Less => false,
+            // Tiebreak on writer: lexicographically greater writer wins.
+            // `NodeId`'s `Display` form is the canonical ordering key
+            // and is what the §4 "deterministic tiebreak" rule consumes.
+            std::cmp::Ordering::Equal => self.writer.to_string() > other.writer.to_string(),
+        }
+    }
+}
+
 /// `alloc_status` row — Phase 1 minimal shape per brief §6.
 ///
 /// Written by the node that owns the allocation; gossiped to every peer.
@@ -163,6 +198,27 @@ pub type ObservationSubscription = Box<dyn Stream<Item = ObservationRow> + Send 
 pub trait ObservationStore: Send + Sync + 'static {
     /// Persist a full observation row on this peer and fan it out to
     /// any active subscriptions. Full-row writes only (§4 guardrail).
+    ///
+    /// # LWW contract
+    ///
+    /// An incoming row whose `updated_at` does not dominate the existing
+    /// row at the same primary key MUST NOT mutate state and MUST NOT be
+    /// emitted on subscriptions. Adapters MUST consult
+    /// [`LogicalTimestamp::dominates`] for this comparison; the equal
+    /// timestamp case (re-delivery of the same row) is treated as a
+    /// no-op for the same reason.
+    ///
+    /// This contract is exercised by the trait-conformance harness at
+    /// `overdrive_core::testing::observation_store::run_lww_conformance`.
+    /// The two adapter implementations in this workspace —
+    /// `SimObservationStore` and `LocalObservationStore` — honour the
+    /// contract. Future adapters (Phase 2 Corrosion replacement, any
+    /// future test fakes) MUST honour it identically.
+    ///
+    /// See `docs/whitepaper.md` §4 (Intent / Observation split,
+    /// "tombstones, full rows over field diffs") and
+    /// `docs/feature/fix-observation-lww-merge/deliver/rca.md` for the
+    /// bug RCA that codified this trait-level invariant.
     async fn write(&self, row: ObservationRow) -> Result<(), ObservationStoreError>;
 
     /// Subscribe to every observation row written to this peer.

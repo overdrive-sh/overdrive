@@ -5,13 +5,14 @@
 //!
 //! # Shape
 //!
-//! A peer owns three pieces of state behind a single mutex:
+//! A peer owns four pieces of state behind a single mutex each:
 //!
-//! * a `Vec<ObservationRow>` of every row observed by this peer
-//!   (local writes + gossip receives), ordered by receive time,
+//! * a `Vec<ObservationRow>` of every LWW-winning row observed by this
+//!   peer (local writes + gossip receives), ordered by receive time,
 //! * an `AllocIndex` (`HashMap<AllocationId, AllocStatusRow>`) that
 //!   lets queries answer "latest LWW winner for this alloc" in O(1),
-//!   and
+//! * a parallel `NodeIndex` (`HashMap<NodeId, NodeHealthRow>`) that
+//!   does the same for `node_health` rows, and
 //! * a `tokio::sync::broadcast::Sender<ObservationRow>` used to fan
 //!   rows out to any active subscriptions on this peer — only rows
 //!   that WIN the LWW comparison (or are new) are broadcast; losers
@@ -26,12 +27,14 @@
 //! # LWW merge
 //!
 //! On receive (whether a local write or a gossip delivery), the peer
-//! compares the incoming row's `updated_at` against the current
-//! alloc-index entry. `LogicalTimestamp` orders lexicographically by
-//! `(counter, writer)` — the counter dominates, the writer's `NodeId`
-//! breaks ties deterministically. Full rows only: losers are dropped
-//! wholesale; winners replace the prior row wholesale. No field-diff
-//! merge is ever applied (§4 guardrail).
+//! compares the incoming row's `updated_at` (alloc-status) or
+//! `last_heartbeat` (node-health) against the current index entry via
+//! the shared comparator [`LogicalTimestamp::dominates`] in
+//! `overdrive-core`. Full rows only: losers are dropped wholesale and
+//! NEVER fan out on the broadcast channel; winners replace the prior
+//! row wholesale. No field-diff merge is ever applied (§4 guardrail).
+//! See the `ObservationStore::write` trait docstring in `overdrive-core`
+//! for the trait-level contract this implementation honours.
 //!
 //! # Why `broadcast` rather than a `watch` channel
 //!
@@ -97,12 +100,17 @@ pub struct SimObservationStore {
     router: Option<Arc<GossipRouter>>,
 }
 
-/// Per-peer state. Rows are stored twice: once in the ordered `rows`
-/// vector (for subscription fan-out and debug inspection) and once in
-/// `by_alloc` (for O(1) latest-LWW queries).
+/// Per-peer state. Rows are stored thrice: once in the ordered `rows`
+/// vector (for subscription fan-out and debug inspection), once in
+/// `by_alloc` (for O(1) latest-LWW queries on alloc-status), and once
+/// in `by_node` (for the same on node-health). Both indexes track LWW
+/// winners only — losing rows are dropped wholesale before reaching
+/// the `rows` vector or the broadcast channel, per the
+/// `ObservationStore::write` LWW contract.
 struct PeerState {
     rows: Mutex<Vec<ObservationRow>>,
     by_alloc: Mutex<HashMap<AllocationId, AllocStatusRow>>,
+    by_node: Mutex<HashMap<NodeId, NodeHealthRow>>,
     fan_out: broadcast::Sender<ObservationRow>,
     /// Seed this peer was built under. Only observed by the
     /// `canary-bug` feature; in non-canary builds the field is unused
@@ -118,6 +126,7 @@ impl PeerState {
         Arc::new(Self {
             rows: Mutex::new(Vec::new()),
             by_alloc: Mutex::new(HashMap::new()),
+            by_node: Mutex::new(HashMap::new()),
             fan_out,
             seed,
         })
@@ -133,11 +142,7 @@ impl PeerState {
     fn apply(&self, row: ObservationRow, owner: &NodeId) -> bool {
         let accepted = match &row {
             ObservationRow::AllocStatus(incoming) => self.apply_alloc_status(incoming, owner),
-            // `NodeHealth` has no current-row index in Phase 1 — every
-            // write is accepted and fanned out. Step 04-03 / Phase 2
-            // will add parallel LWW tracking for each row class as
-            // they gain a "current value" concept.
-            ObservationRow::NodeHealth(_) => true,
+            ObservationRow::NodeHealth(incoming) => self.apply_node_health(incoming, owner),
         };
 
         if accepted {
@@ -176,17 +181,42 @@ impl PeerState {
         }
     }
 
-    /// Wrapper around [`lww_dominates`] that honours the `canary-bug`
-    /// feature. Without the feature this delegates unchanged. With the
-    /// feature AND the canary trigger seed AND the owning peer is
-    /// `host-0`, the comparison is flipped — losers win on that peer
-    /// only, the LWW total order is broken asymmetrically, and
-    /// cross-peer views disagree. Every other peer in the cluster
-    /// continues to use the standard LWW comparison, so the
-    /// disagreement is observable in `ConvergenceReport`. Every seed
-    /// other than the trigger passes through unchanged even when the
-    /// feature is enabled so that enabling the feature does not break
-    /// unrelated tests sharing the binary.
+    /// LWW merge for `node_health`. Mirrors [`apply_alloc_status`] —
+    /// keyed by [`NodeHealthRow::node_id`], compares
+    /// [`NodeHealthRow::last_heartbeat`] via the shared comparator
+    /// (`canary-bug` planted bug honoured identically).
+    fn apply_node_health(&self, incoming: &NodeHealthRow, owner: &NodeId) -> bool {
+        let mut by_node = self.by_node.lock();
+        match by_node.get(&incoming.node_id) {
+            None => {
+                by_node.insert(incoming.node_id.clone(), incoming.clone());
+                true
+            }
+            Some(existing)
+                if self.dominates_for_merge(
+                    &incoming.last_heartbeat,
+                    &existing.last_heartbeat,
+                    owner,
+                ) =>
+            {
+                by_node.insert(incoming.node_id.clone(), incoming.clone());
+                true
+            }
+            Some(_) => false,
+        }
+    }
+
+    /// Wrapper around [`LogicalTimestamp::dominates`] that honours the
+    /// `canary-bug` feature. Without the feature this delegates
+    /// unchanged. With the feature AND the canary trigger seed AND the
+    /// owning peer is `host-0`, the comparison is flipped — losers win
+    /// on that peer only, the LWW total order is broken
+    /// asymmetrically, and cross-peer views disagree. Every other peer
+    /// in the cluster continues to use the standard LWW comparison, so
+    /// the disagreement is observable in `ConvergenceReport`. Every
+    /// seed other than the trigger passes through unchanged even when
+    /// the feature is enabled so that enabling the feature does not
+    /// break unrelated tests sharing the binary.
     // `self` is unused in non-canary builds (the feature gate reads
     // `self.seed`); clippy's `unused_self` lint fires in that branch.
     #[cfg_attr(not(feature = "canary-bug"), allow(clippy::unused_self))]
@@ -201,10 +231,10 @@ impl PeerState {
             // Planted bug: on host-0 only, losing rows win the merge.
             // Other peers still apply normal LWW; the asymmetry is
             // what produces cross-peer divergence.
-            return !lww_dominates(a, b);
+            return !a.dominates(b);
         }
         let _ = owner; // silence unused-variable warning in non-canary builds
-        lww_dominates(a, b)
+        a.dominates(b)
     }
 
     fn latest_alloc_status(&self, alloc_id: &AllocationId) -> Option<AllocStatusRow> {
@@ -218,22 +248,12 @@ impl PeerState {
     fn alloc_status_snapshot(&self) -> BTreeMap<AllocationId, AllocStatusRow> {
         self.by_alloc.lock().iter().map(|(k, v)| (k.clone(), v.clone())).collect()
     }
-}
 
-/// Total order on [`LogicalTimestamp`]: `(counter, writer)`
-/// lexicographic. Returns `true` when `a` strictly dominates `b`.
-///
-/// Equal timestamps (same counter AND same writer) are treated as "not
-/// dominating" — the existing value is retained. This is the LWW
-/// idempotency case: re-delivering the same row via gossip is a no-op.
-fn lww_dominates(a: &LogicalTimestamp, b: &LogicalTimestamp) -> bool {
-    match a.counter.cmp(&b.counter) {
-        std::cmp::Ordering::Greater => true,
-        std::cmp::Ordering::Less => false,
-        // Tiebreak on writer: lexicographically greater writer wins.
-        // `NodeId`'s `Display` form is the canonical ordering key and
-        // is what the §4 "deterministic tiebreak" rule consumes.
-        std::cmp::Ordering::Equal => a.writer.to_string() > b.writer.to_string(),
+    /// Snapshot every node-health row this peer holds as LWW winner,
+    /// keyed by [`NodeId`] under `BTreeMap`. Same determinism rationale
+    /// as [`alloc_status_snapshot`].
+    fn node_health_snapshot(&self) -> BTreeMap<NodeId, NodeHealthRow> {
+        self.by_node.lock().iter().map(|(k, v)| (k.clone(), v.clone())).collect()
     }
 }
 
@@ -316,17 +336,12 @@ impl ObservationStore for SimObservationStore {
     }
 
     async fn node_health_rows(&self) -> Result<Vec<NodeHealthRow>, ObservationStoreError> {
-        // Phase 1: no LWW current-row index for node_health — surface
-        // the full receive-order history, filtered to NodeHealth
-        // variants. Phase 2 will replace with an LWW-winners snapshot.
-        let rows = self.inner.rows.lock();
-        Ok(rows
-            .iter()
-            .filter_map(|row| match row {
-                ObservationRow::NodeHealth(r) => Some(r.clone()),
-                ObservationRow::AllocStatus(_) => None,
-            })
-            .collect())
+        // LWW winners only — keyed by `NodeId` under `BTreeMap` for
+        // deterministic iteration. The `ObservationStore::write` LWW
+        // contract requires losers be dropped before reaching either
+        // the broadcast channel or the read snapshot; the index is
+        // already maintained that way by `apply_node_health`.
+        Ok(self.inner.node_health_snapshot().into_values().collect())
     }
 }
 

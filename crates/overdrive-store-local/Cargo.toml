@@ -41,6 +41,12 @@ tokio-stream.workspace   = true
 tempfile.workspace = true
 tokio              = { workspace = true }
 proptest.workspace = true
+# `test-utils` exposes the trait-conformance harness at
+# `overdrive_core::testing::observation_store::run_lww_conformance`.
+# Per `docs/feature/fix-observation-lww-merge/deliver/rca.md` Cause B,
+# every `ObservationStore` adapter exercises this harness from its
+# own test suite to enforce the LWW contract at trait level.
+overdrive-core = { workspace = true, features = ["test-utils"] }
 
 [lints]
 workspace = true

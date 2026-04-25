@@ -30,6 +30,19 @@ pub mod id;
 pub mod reconciler;
 pub mod traits;
 
+/// Trait-conformance harnesses exposed to adapter test suites.
+///
+/// Gated behind `cfg(any(test, feature = "test-utils"))` so the module
+/// never enters production builds — adapter `dev-dependencies` opt in
+/// via `overdrive-core = { ..., features = ["test-utils"] }`. See
+/// `docs/feature/fix-observation-lww-merge/deliver/rca.md` for the
+/// motivation: every adapter implementing a trait whose contract
+/// constrains semantics (LWW domination on `ObservationStore::write`)
+/// invokes the same harness so divergence between adapters is caught
+/// at trait level rather than per-implementation.
+#[cfg(any(test, feature = "test-utils"))]
+pub mod testing;
+
 pub use error::{Error, Result};
 pub use id::{
     AllocationId, CertSerial, ContentHash, CorrelationKey, IdParseError, InvestigationId, JobId,

@@ -63,6 +63,17 @@ libsql.workspace = true
 # this via `overdrive-core/canary-bug`.
 canary-bug = []
 
+# `test-utils` — TEST-ONLY feature. Exposes
+# `overdrive_core::testing::observation_store::run_lww_conformance`, the
+# trait-generic LWW conformance harness exercised by every
+# `ObservationStore` adapter's test suite. Per
+# `docs/feature/fix-observation-lww-merge/deliver/rca.md` Cause C, the
+# comparator MUST live in `overdrive-core` so both adapters call the
+# same primitive; the conformance harness MUST be reachable from each
+# adapter's `dev-dependencies` to enforce the trait-level invariant.
+# Production builds MUST NEVER enable this feature.
+test-utils = []
+
 [dev-dependencies]
 proptest.workspace = true
 rstest.workspace   = true
