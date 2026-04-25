@@ -502,6 +502,92 @@ fn drive_broker_collapse() -> (u64, evaluators::BrokerCountersSnapshot) {
     (N, evaluators::BrokerCountersSnapshot { queued: 0, cancelled, dispatched })
 }
 
+/// Drive the broker-collapse sequence across **two distinct keys** with
+/// interleaved submits, drain once, and return the observed counters.
+///
+/// This is the multi-key sibling of [`drive_broker_collapse`]. The
+/// single-key driver remains untouched and continues to pin the
+/// `DuplicateEvaluationsCollapse` invariant; this driver exists so the
+/// future `BrokerDrainOrderIsDeterministic` invariant (step 01-05) has a
+/// scenario where multiple keys coexist in `pending` at drain time.
+/// Open-closed: both drivers coexist; neither replaces the other.
+///
+/// ## Submit pattern
+///
+/// Two keys (`K1 = ("noop-heartbeat", "job/payments")` and
+/// `K2 = ("noop-heartbeat", "job/frontend")`), `N = 3` submits per key,
+/// strictly interleaved as `[K1, K2, K1, K2, K1, K2]`. After all six
+/// submits land, drain once.
+///
+/// ## Expected snapshot
+///
+/// - `dispatched = 2` — two distinct keys remain in `pending` at drain
+///   time, so drain emits one invocation per key.
+/// - `cancelled = 4` — each key was submitted N times; the first submit
+///   per key occupies `pending`, every subsequent same-key submit
+///   evicts the prior version into the cancelable count. With N=3 and
+///   2 keys: `2 * (N - 1) = 4`.
+/// - `queued = 0` — drain emptied `pending`.
+///
+/// ## Mirroring discipline
+///
+/// As with [`drive_broker_collapse`], the broker's `submit` +
+/// `drain_pending` LWW semantics are mirrored here in a few lines
+/// rather than imported from `overdrive-control-plane`. `overdrive-sim`
+/// is `adapter-sim` (per CLAUDE.md crate classes) and must not depend
+/// on `overdrive-control-plane` (which already depends on
+/// `overdrive-sim` via `observation_wiring` — the reverse edge would
+/// invert the dep graph). The contract the future evaluator checks is
+/// the invariant; mirroring proves the contract is satisfiable on a
+/// clean run.
+///
+/// See `docs/feature/fix-eval-broker-drain-determinism/discuss/rca-context.md`
+/// for the failure mode this driver is the prerequisite for catching.
+#[allow(clippy::expect_used)] // `ReconcilerName::new` / `TargetResource::new` are total on literals.
+fn drive_broker_collapse_multi_key() -> (u64, evaluators::BrokerCountersSnapshot) {
+    use std::collections::HashSet;
+
+    use overdrive_core::reconciler::{ReconcilerName, TargetResource};
+
+    /// Number of submits per key. 3 matches the single-key driver and
+    /// the ADR-0013 invariant minimum; with two keys this yields the
+    /// `cancelled = 4` snapshot the multi-key invariant pins.
+    const N: u64 = 3;
+
+    let reconciler =
+        ReconcilerName::new("noop-heartbeat").expect("noop-heartbeat is a valid ReconcilerName");
+    let target_a =
+        TargetResource::new("job/payments").expect("job/payments is a valid TargetResource");
+    let target_b =
+        TargetResource::new("job/frontend").expect("job/frontend is a valid TargetResource");
+    let key_a = (reconciler.clone(), target_a);
+    let key_b = (reconciler, target_b);
+
+    // Mirror of `EvaluationBroker::submit` + `drain_pending` LWW
+    // semantics, identical in shape to `drive_broker_collapse` above
+    // — only the submit sequence differs. Inserting at an occupied
+    // key evicts the prior value into the cancelable count; draining
+    // empties pending and bumps dispatched by the drained length.
+    let mut pending: HashSet<(ReconcilerName, TargetResource)> = HashSet::new();
+    let mut cancelled: u64 = 0;
+    for _ in 0..N {
+        // Strict interleave: K1, then K2, repeated. The order
+        // matters for the `BrokerDrainOrderIsDeterministic`
+        // invariant in step 01-05, but the counter snapshot this
+        // driver returns is order-independent.
+        if !pending.insert(key_a.clone()) {
+            cancelled = cancelled.saturating_add(1);
+        }
+        if !pending.insert(key_b.clone()) {
+            cancelled = cancelled.saturating_add(1);
+        }
+    }
+    let dispatched = pending.len() as u64;
+    pending.clear();
+
+    (N, evaluators::BrokerCountersSnapshot { queued: 0, cancelled, dispatched })
+}
+
 /// Construct the reconciler the harness twin-invokes for the
 /// `ReconcilerIsPure` invariant.
 ///
@@ -642,6 +728,22 @@ mod tests {
         assert_eq!(hosts.len(), DEFAULT_HOST_COUNT);
         let names: Vec<&str> = hosts.iter().map(|h| h.name.as_str()).collect();
         assert_eq!(names, vec!["host-0", "host-1", "host-2"]);
+    }
+
+    #[test]
+    fn drive_broker_collapse_multi_key_returns_expected_snapshot() {
+        // Pins the counter snapshot for the multi-key drain driver.
+        // Two distinct keys, N=3 submits each, interleaved → drain
+        // should leave dispatched=2 (one per key still in pending),
+        // cancelled=4 (each key superseded N-1=2 times), queued=0
+        // (drain emptied pending). Step 01-04 prerequisite for the
+        // BrokerDrainOrderIsDeterministic invariant in step 01-05.
+        let (per_key_n, counters) = drive_broker_collapse_multi_key();
+        assert_eq!(per_key_n, 3);
+        assert_eq!(
+            counters,
+            evaluators::BrokerCountersSnapshot { queued: 0, cancelled: 4, dispatched: 2 }
+        );
     }
 
     #[test]
