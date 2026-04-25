@@ -199,16 +199,37 @@ impl LocalIntentStore {
         self.inner.commit_counter.load(Ordering::Acquire)
     }
 
-    /// Bump the commit counter and return the new value. Uses
-    /// `AcqRel` ordering so any observation of the new counter
-    /// happens-after the call site (which itself is inside a redb
-    /// write transaction whose `commit()` provides the durability
-    /// fence). The returned value IS the index assigned to the write
-    /// transaction inside which `bump_commit_inside` is called — every
-    /// caller of this helper does so **inside** the
-    /// `tokio::task::spawn_blocking` body that owns the redb write
-    /// transaction.
-    fn bump_commit_inside(inner: &Inner) -> u64 {
+    /// Peek the next `commit_index` *without* advancing the counter.
+    ///
+    /// Returns `commit_counter + 1` — the value the next successful
+    /// commit will be assigned. Safe to call inside the redb write
+    /// transaction body because redb serialises writers (a second
+    /// `begin_write` blocks until the first transaction commits or
+    /// drops), so there is no concurrent peeker that could race on the
+    /// load.
+    ///
+    /// Used as the per-entry `commit_index` prefix in `encode_entry`
+    /// before the row is inserted. The companion
+    /// [`Self::bump_commit_after_commit`] is called **only after**
+    /// `write.commit()` succeeds — that ordering is what keeps the
+    /// global counter aligned with the durable on-disk state. A bump
+    /// before commit would advance the counter for a write that fails
+    /// to land, breaking the "`commit_index` reflects committed writes"
+    /// invariant in the module-header docstring.
+    fn peek_next_inside(inner: &Inner) -> u64 {
+        inner.commit_counter.load(Ordering::Acquire) + 1
+    }
+
+    /// Bump the commit counter and return the new value. **Must be
+    /// called only after `write.commit()` returns `Ok`** — see
+    /// [`Self::peek_next_inside`] for the ordering rationale.
+    ///
+    /// Uses `AcqRel` ordering so any observation of the new counter
+    /// happens-after the call site (which itself is post-redb-commit;
+    /// the redb commit is the durability fence). The returned value
+    /// matches the prior peek inside the same write transaction (redb
+    /// writer serialisation guarantees no other writer interleaved).
+    fn bump_commit_after_commit(inner: &Inner) -> u64 {
         // `fetch_add` returns the prior value; the assigned index is
         // therefore prior + 1. Using AcqRel here pairs with the load
         // ordering on the inherent `commit_index()` accessor below.
@@ -270,17 +291,29 @@ impl IntentStore for LocalIntentStore {
 
         let (emit_key, emit_value) = tokio::task::spawn_blocking(move || {
             let write = inner.db.begin_write().map_err(map_transaction_error)?;
-            // Bump-and-capture INSIDE the write transaction. The
-            // assigned commit_index lands on disk together with the
-            // value — see the `commit_index` storage docstring at the
-            // top of this module.
-            let new_idx = Self::bump_commit_inside(&inner);
-            let row = encode_entry(new_idx, value_vec.as_slice());
+            // Peek the next commit_index INSIDE the write transaction
+            // (redb serialises writers, so the load is race-free). Use
+            // it as the per-entry index prefix in the encoded row. The
+            // counter is bumped AFTER `write.commit()` returns Ok so a
+            // failed commit does not leak phantom monotone advancement
+            // — see the `commit_index` storage docstring at the top of
+            // this module.
+            let peeked = Self::peek_next_inside(&inner);
+            let row = encode_entry(peeked, value_vec.as_slice());
             {
                 let mut table = write.open_table(ENTRIES_TABLE).map_err(map_table_error)?;
                 table.insert(key_vec.as_slice(), row.as_slice()).map_err(map_storage_error)?;
             }
             write.commit().map_err(map_commit_error)?;
+            // Commit landed — bump the global counter. redb's writer
+            // serialisation guarantees the bumped value matches the
+            // peek (a debug_assert pins this in dev builds).
+            let bumped = Self::bump_commit_after_commit(&inner);
+            debug_assert_eq!(
+                bumped, peeked,
+                "redb writer serialisation is load-bearing for commit_index \
+                 alignment; peek/bump diverged ({peeked} vs {bumped})",
+            );
             Ok::<_, IntentStoreError>((key_vec, value_vec))
         })
         .await
@@ -302,9 +335,11 @@ impl IntentStore for LocalIntentStore {
     /// overwrite the first write.
     ///
     /// On the `Inserted` branch, the per-entry `commit_index` returned
-    /// inside [`PutOutcome::Inserted`] is the index assigned by
-    /// `bump_commit_inside` **inside** the write transaction — no
-    /// race window with concurrent committers for *different* keys.
+    /// inside [`PutOutcome::Inserted`] is the index assigned by the
+    /// pre-commit peek — bumped to the global counter only after
+    /// `write.commit()` returns Ok. The bump and the peek match (redb
+    /// writer serialisation), so the value the caller sees IS the
+    /// final on-disk per-entry index.
     /// On the `KeyExists` branch, `commit_index` carries the prior
     /// write's index, decoded from the stored row.
     async fn put_if_absent(
@@ -316,9 +351,9 @@ impl IntentStore for LocalIntentStore {
         let value_vec = value.to_vec();
         let inner = Arc::clone(&self.inner);
 
-        let (outcome, emit) = tokio::task::spawn_blocking(move || {
+        let (outcome, emit, peeked_idx) = tokio::task::spawn_blocking(move || {
             let write = inner.db.begin_write().map_err(map_transaction_error)?;
-            let (outcome, emit) = {
+            let (outcome, emit, peeked_idx) = {
                 let mut table = write.open_table(ENTRIES_TABLE).map_err(map_table_error)?;
                 // `get` inside the write transaction sees a consistent
                 // view with the subsequent `insert` — this is what makes
@@ -331,27 +366,45 @@ impl IntentStore for LocalIntentStore {
                             commit_index: existing_idx,
                         },
                         None,
+                        None,
                     )
                 } else {
-                    // Bump-and-capture INSIDE the same write txn that
-                    // commits the row. The returned `commit_index` is
-                    // exactly the one stored on disk — no separate
-                    // post-await read of the global counter.
-                    let new_idx = Self::bump_commit_inside(&inner);
-                    let row = encode_entry(new_idx, value_vec.as_slice());
+                    // Peek (does NOT advance) INSIDE the same write txn
+                    // that commits the row. The bump is deferred until
+                    // after `write.commit()` returns Ok — a failed
+                    // commit must not leak counter advancement.
+                    let peeked = Self::peek_next_inside(&inner);
+                    let row = encode_entry(peeked, value_vec.as_slice());
                     table.insert(key_vec.as_slice(), row.as_slice()).map_err(map_storage_error)?;
-                    (PutOutcome::Inserted { commit_index: new_idx }, Some((key_vec, value_vec)))
+                    (
+                        PutOutcome::Inserted { commit_index: peeked },
+                        Some((key_vec, value_vec)),
+                        Some(peeked),
+                    )
                 }
             };
             write.commit().map_err(map_commit_error)?;
-            Ok::<_, IntentStoreError>((outcome, emit))
+            // Commit succeeded. Bump only on the Inserted branch — the
+            // KeyExists branch is a no-op write semantically (the
+            // commit was strictly to release the write transaction).
+            if let Some(peeked) = peeked_idx {
+                let bumped = Self::bump_commit_after_commit(&inner);
+                debug_assert_eq!(
+                    bumped, peeked,
+                    "put_if_absent::Inserted peek/bump diverged ({peeked} vs {bumped})",
+                );
+            }
+            Ok::<_, IntentStoreError>((outcome, emit, peeked_idx))
         })
         .await
         .map_err(map_join_error)??;
 
         // Watch events only fire on the insert branch — a `KeyExists`
-        // return is a no-op commit, semantically. The counter has
-        // already been bumped inside the spawn_blocking body.
+        // return is a no-op commit, semantically. `peeked_idx` is
+        // `Some(_)` exactly on the insert branch and was retained for
+        // the caller-visible debug_assert above; the emit gate uses
+        // the parallel `emit` Option.
+        let _ = peeked_idx;
         if let Some((emit_key, emit_value)) = emit {
             self.emit(Bytes::from(emit_key), Bytes::from(emit_value));
         }
@@ -369,22 +422,26 @@ impl IntentStore for LocalIntentStore {
         // false monotone advancement, and `watch(prefix)` subscribers
         // see a phantom `(key, empty)` event. Both bump and emit are
         // therefore conditional on the remove having actually removed.
+        //
+        // The bump is also gated on `write.commit()` returning Ok —
+        // a remove that the in-memory transaction observed but the
+        // commit failed to persist must not leak counter advancement
+        // (see the `commit_index` storage docstring at the top of this
+        // module).
         let emit_key = tokio::task::spawn_blocking(move || {
             let write = inner.db.begin_write().map_err(map_transaction_error)?;
             let removed = {
                 let mut table = write.open_table(ENTRIES_TABLE).map_err(map_table_error)?;
                 table.remove(key_vec.as_slice()).map_err(map_storage_error)?.is_some()
             };
-            if removed {
-                // Bump inside the write transaction so the global
-                // counter tracks committed deletes consistently with
-                // puts. Delete does not store a per-entry index (the
-                // row is gone), so we discard the returned index —
-                // only the global cursor observers (e.g.
-                // `cluster_status`) read this advance.
-                let _new_idx = Self::bump_commit_inside(&inner);
-            }
             write.commit().map_err(map_commit_error)?;
+            // Commit landed. Bump only when the remove actually
+            // removed a row — the absent-key case is a no-op
+            // semantically (the commit was strictly to release the
+            // write transaction).
+            if removed {
+                Self::bump_commit_after_commit(&inner);
+            }
             Ok::<_, IntentStoreError>(removed.then_some(key_vec))
         })
         .await
@@ -417,40 +474,63 @@ impl IntentStore for LocalIntentStore {
         // mask so phantom delete events for absent keys never reach
         // `watch(prefix)` subscribers — the same gate as the standalone
         // `delete` path, applied per-op inside the transaction.
-        let effective = tokio::task::spawn_blocking(move || {
-            let write = inner.db.begin_write().map_err(map_transaction_error)?;
-            // Bump-and-capture once for the whole transaction — every
-            // put inside this txn shares the same per-entry index.
-            // This matches the trait contract that `txn` advances the
-            // commit cursor by exactly 1 regardless of op count, with
-            // the natural exception of an empty `ops` vector handled
-            // above.
-            let txn_idx = Self::bump_commit_inside(&inner);
-            let mut effective = Vec::with_capacity(ops_for_commit.len());
-            {
-                let mut table = write.open_table(ENTRIES_TABLE).map_err(map_table_error)?;
-                for op in &ops_for_commit {
-                    match op {
-                        TxnOp::Put { key, value } => {
-                            let row = encode_entry(txn_idx, value.as_ref());
-                            table
-                                .insert(key.as_ref(), row.as_slice())
-                                .map_err(map_storage_error)?;
-                            effective.push(true);
-                        }
-                        TxnOp::Delete { key } => {
-                            let removed =
-                                table.remove(key.as_ref()).map_err(map_storage_error)?.is_some();
-                            effective.push(removed);
+        let effective =
+            tokio::task::spawn_blocking(move || {
+                let write = inner.db.begin_write().map_err(map_transaction_error)?;
+                // Peek (does NOT advance) once for the whole transaction —
+                // every put inside this txn shares the same per-entry
+                // index. This matches the trait contract that `txn`
+                // advances the commit cursor by exactly 1 regardless of
+                // op count, with the natural exception of an empty `ops`
+                // vector handled above and the no-effect case (every op
+                // is an absent-key delete) gated below.
+                //
+                // The bump is deferred until after `write.commit()`
+                // returns Ok AND at least one op was effective. A txn
+                // whose only op is `Delete` of an absent key advances no
+                // committed state and must not advance the global counter
+                // either.
+                let txn_idx = Self::peek_next_inside(&inner);
+                let mut effective = Vec::with_capacity(ops_for_commit.len());
+                {
+                    let mut table = write.open_table(ENTRIES_TABLE).map_err(map_table_error)?;
+                    for op in &ops_for_commit {
+                        match op {
+                            TxnOp::Put { key, value } => {
+                                let row = encode_entry(txn_idx, value.as_ref());
+                                table
+                                    .insert(key.as_ref(), row.as_slice())
+                                    .map_err(map_storage_error)?;
+                                effective.push(true);
+                            }
+                            TxnOp::Delete { key } => {
+                                let removed = table
+                                    .remove(key.as_ref())
+                                    .map_err(map_storage_error)?
+                                    .is_some();
+                                effective.push(removed);
+                            }
                         }
                     }
                 }
-            }
-            write.commit().map_err(map_commit_error)?;
-            Ok::<_, IntentStoreError>(effective)
-        })
-        .await
-        .map_err(map_join_error)??;
+                write.commit().map_err(map_commit_error)?;
+                // Commit landed. Bump the global counter once iff at
+                // least one op had effect — every put always does, an
+                // absent-key delete does not. The `txn_idx` value used
+                // for per-entry encoding above and the post-commit bump
+                // align under redb's writer serialisation; debug_assert
+                // pins the invariant in dev builds.
+                if effective.iter().any(|&e| e) {
+                    let bumped = Self::bump_commit_after_commit(&inner);
+                    debug_assert_eq!(
+                        bumped, txn_idx,
+                        "txn peek/bump diverged ({txn_idx} vs {bumped})",
+                    );
+                }
+                Ok::<_, IntentStoreError>(effective)
+            })
+            .await
+            .map_err(map_join_error)??;
 
         // Emit per-op events *after* the commit succeeds so subscribers
         // never see a phantom write — and only for ops that actually

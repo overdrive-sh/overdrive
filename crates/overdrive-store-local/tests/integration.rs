@@ -23,5 +23,6 @@
 // lookup base so the per-scenario files under `tests/integration/`
 // resolve naturally.
 mod integration {
+    mod commit_counter_invariant;
     mod snapshot_proptest;
 }
