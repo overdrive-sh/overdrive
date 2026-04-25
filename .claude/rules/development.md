@@ -151,6 +151,84 @@ surface that lets the wrong call go to the wrong place.
 
 ---
 
+## Ordered-collection choice
+
+`core` and control-plane hot paths default to `BTreeMap` for keyed maps
+whose iteration order is observed (drain, snapshot, JSON output,
+invariant evaluation). `HashMap` is a first-class nondeterminism source
+on the same footing as `Clock` / `Transport` / `Entropy` and must be
+treated with the same discipline.
+
+| Iteration shape | Choice | Notes |
+|---|---|---|
+| Drained / iterated / snapshotted | `BTreeMap<K, V>` | Default. Order is `Ord` on `K` — deterministic across processes, runs, seeds. |
+| Serialised (JSON, rkyv archived field, audit log) | `BTreeMap<K, V>` | Output bytes must be canonical for content hashing and trace-equivalence DST assertions. |
+| Walked by an invariant or property test | `BTreeMap<K, V>` | Reproduction requires bit-identical traversal under the seed. |
+| Point-accessed only (`get` / `insert` / `remove`, never iterated) | `HashMap<K, V>` with `// dst-lint: hashmap-ok <reason>` | Allowed in `core` only with the justification comment. |
+
+The escape hatch — `HashMap` in a `core`-class crate — requires an
+explicit `// dst-lint: hashmap-ok <one-line reason>` comment on (or
+immediately above) the use site. Without the comment the dst-lint gate
+rejects the file at PR time. The comment is the load-bearing artifact:
+it documents *why* iteration nondeterminism cannot surface here, and a
+reviewer who disagrees with the reason has a single line to push back
+on.
+
+### Why
+
+`std::collections::HashMap`'s default `RandomState` is per-process
+random-seeded — two seeded DST runs produce divergent dispatch
+orderings the moment ≥2 distinct keys are held. That violates the K3
+*seed → bit-identical trajectory* property documented in whitepaper §21
+and `.claude/rules/testing.md` § "Sources of Nondeterminism": every
+source of nondeterminism in core logic must be injectable, and `RandomState`
+is the one the type system silently smuggles past every other gate.
+
+The defect was discovered in
+`crates/overdrive-control-plane/src/eval_broker.rs`, where
+`EvaluationBroker::drain_pending` returned evaluations in
+non-deterministic order. The fix landed as a `BTreeMap` swap in commit
+`8cf9119` (`fix(eval-broker): switch pending map to BTreeMap for
+deterministic drain order`). The structural rule prevents the class
+from recurring; the dst-lint clause enforces it.
+
+### When NOT to apply
+
+Bounded-cardinality maps that are NEVER iterated — point-accessed only
+via `get` / `contains_key` / `insert` / `remove`, with no observable
+drop order or iteration call site — MAY use `HashMap` with the
+justification comment, since the iteration nondeterminism never
+surfaces. Examples: per-allocation handle caches keyed by
+`AllocationId` where the cache is consulted only by point lookup and
+never enumerated, or per-request memo tables whose lifetime ends before
+any reduction over their entries.
+
+If you find yourself reaching for the escape hatch and the cardinality
+is small (say, <16), prefer `BTreeMap` anyway — the constant-factor
+cost is in the noise and the `// dst-lint: hashmap-ok` comment is
+upkeep that future contributors must justify.
+
+### Sim-internal exception
+
+`adapter-sim` and `adapter-host` crates are NOT scanned by the dst-lint
+clause (only `core` is), but the principle applies as guidance —
+multi-step DST harnesses that observe iteration order should still
+prefer `BTreeMap`. The precedent at
+`crates/overdrive-sim/src/adapters/observation_store.rs:215-218`
+documents this choice for `BTreeMap<AllocationId, AllocStatusRow>` with
+the same rationale: when the harness asserts on the row stream, the
+stream must be deterministic across seeds.
+
+### Cross-references
+
+- Whitepaper §21 — *Deterministic Simulation Testing*; the K3
+  reproducibility property (seed → bit-identical trajectory).
+- `.claude/rules/testing.md` § *Sources of Nondeterminism* — every
+  nondeterminism source must be injectable behind a trait; `HashMap`
+  iteration order is the one the trait surface cannot intercept.
+
+---
+
 ## Reconciler I/O
 
 **`reconcile` does not perform I/O.** The §18 contract splits the
