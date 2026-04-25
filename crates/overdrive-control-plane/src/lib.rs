@@ -192,9 +192,9 @@ pub async fn run_server_with_obs(
     let axum_rustls = RustlsConfig::from_config(Arc::new(rustls_config));
 
     // Open the authoritative intent store at <data_dir>/intent.redb.
-    // The parent directory is guaranteed to exist — callers pass a
-    // tempdir or an operator-created data directory; we do not create
-    // the directory ourselves here per `LocalIntentStore::open`'s contract.
+    // `LocalIntentStore::open` creates the parent directory if missing,
+    // so the boot path does not depend on caller ordering or a sibling
+    // store's directory-creation side effect to satisfy this open.
     let store_path = config.data_dir.join("intent.redb");
     let store = Arc::new(
         LocalIntentStore::open(&store_path)

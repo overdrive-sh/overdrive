@@ -147,12 +147,18 @@ struct Inner {
 impl LocalIntentStore {
     /// Open (or create) a redb-backed `LocalIntentStore` at `path`.
     ///
-    /// The parent directory must already exist; callers are expected
-    /// to pass a path whose parent has been created. Initializes the
-    /// single `entries` table so that the first read doesn't need to
-    /// take a write transaction.
+    /// The parent directory is created if missing — mirrors
+    /// `LocalObservationStore::open` so the boot path does not depend
+    /// on caller ordering or sibling-store side effects to satisfy a
+    /// "parent must exist" precondition. Initializes the single
+    /// `entries` table so that the first read doesn't need to take a
+    /// write transaction.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, IntentStoreError> {
-        let db = Database::create(path.as_ref()).map_err(map_database_error)?;
+        let path = path.as_ref();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(IntentStoreError::Io)?;
+        }
+        let db = Database::create(path).map_err(map_database_error)?;
 
         // Materialize the table on open so the first read doesn't have
         // to open a write transaction to create it.

@@ -129,3 +129,27 @@ async fn bootstrap_from_replaces_rather_than_merges_into_existing_state() {
     let leftover = target.get(b"jobs/leftover").await.expect("get leftover");
     assert_eq!(leftover, None, "bootstrap_from must replace, not merge");
 }
+
+#[tokio::test]
+async fn open_creates_missing_parent_directory() {
+    // On a fresh production install the XDG-default `data_dir`
+    // (`~/.local/share/overdrive`) does not yet exist. Boot paths that
+    // open `LocalIntentStore` first — i.e. without relying on a sibling
+    // store's directory-creation side effect — must still succeed.
+    // Pinning this contract here keeps the store self-sufficient and
+    // independent of caller ordering, mirroring the same shape
+    // `LocalObservationStore::open` already implements.
+    let tmp = TempDir::new().expect("temp dir");
+    let missing_parent = tmp.path().join("does-not-exist-yet");
+    let path = missing_parent.join("intent.redb");
+
+    assert!(!missing_parent.exists(), "precondition: parent must be absent");
+
+    let store = LocalIntentStore::open(&path).expect("open creates parent");
+
+    // The store is usable end-to-end after open — not just a no-op
+    // success that papered over a half-initialised database.
+    store.put(b"jobs/payments", b"v1").await.expect("put after open");
+    let read = store.get(b"jobs/payments").await.expect("get after open");
+    assert_eq!(read, Some((Bytes::copy_from_slice(b"v1"), 1)));
+}
