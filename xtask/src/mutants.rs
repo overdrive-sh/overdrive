@@ -1128,6 +1128,19 @@ mod tests {
     }
 
     #[test]
+    fn read_outcomes_returns_none_when_file_absent_and_exit_zero() {
+        // Simulate cargo-mutants short-circuiting on "No mutants to filter":
+        // outcomes.json absent, exit 0 ⇒ Ok(None).
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let absent = tmp.path().join("outcomes.json");
+        let zero = std::process::Command::new("true")
+            .status()
+            .expect("spawn true");
+        let result = read_outcomes_or_short_circuit(&absent, zero).expect("must not bail");
+        assert!(result.is_none(), "absent file + clean exit ⇒ None");
+    }
+
+    #[test]
     fn kill_rate_floor_constants_match_testing_rules() {
         // Guards against a drive-by edit silently lowering the bar.
         // The rules doc is .claude/rules/testing.md §Mutation testing.
