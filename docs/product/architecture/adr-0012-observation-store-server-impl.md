@@ -6,7 +6,12 @@ Accepted. 2026-04-23. **Revised in place 2026-04-24 — see Revision
 2026-04-24 below.** The original decision (reuse `SimObservationStore`
 via a wiring adapter) is reversed; the ADR number is kept because the
 decision scope is the same (which `ObservationStore` implementation
-backs the Phase 1 server), only the answer changes.
+backs the Phase 1 server), only the answer changes. **Revised in place
+2026-04-25 — see Revision 2026-04-25 below.** The Phase-1 "no LWW
+merge" claim is struck; `ObservationStore::write` now applies LWW under
+`overdrive_core::traits::observation_store::LogicalTimestamp::dominates`
+as a trait-level contract honoured by every adapter. RCA at
+`docs/feature/fix-observation-lww-merge/deliver/rca.md`.
 
 ## Context
 
@@ -148,8 +153,9 @@ Backing store:
 - **redb database file** at `<data_dir>/observation.redb` (one file
   per store instance, sibling to the intent `store.redb`).
 - **Per-row-kind redb tables**, keyed on the row's natural primary key
-  (not on a logical-timestamp composite, because there is no LWW in
-  Phase 1 — see below):
+  (not on a logical-timestamp composite — the LWW guard is enforced by
+  read-then-conditional-insert inside the open `begin_write` transaction,
+  not by table-key shape; see the LWW subsection below):
 
   | redb table | key | value |
   |---|---|---|
@@ -167,11 +173,18 @@ Backing store:
 Writes:
 
 - `write(ObservationRow)` is a single redb write transaction per call.
-  Phase 1 is single-writer, so no merge logic runs: an incoming
-  `alloc_status` row for a given `AllocationId` **overwrites** the
-  existing entry. Full-row writes only — the §4 guardrail (never
-  field-diff merges) is preserved because the trait accepts only a
-  `ObservationRow`, never a patch.
+  The LWW guard runs INSIDE the transaction: read prior row at the
+  same primary key, decode `updated_at`, compare via
+  `LogicalTimestamp::dominates`, conditionally insert. An incoming
+  `alloc_status` row for a given `AllocationId` overwrites the
+  existing entry IFF its `updated_at` dominates; otherwise the txn
+  commits without mutating the table and the post-commit emit is
+  suppressed. (Phase 1's single, monotonic writer makes the guard
+  trivially-satisfied today; the structural protection is for
+  Phase 2 and any non-noop writer that lands in the meantime — see
+  Revision 2026-04-25 below.) Full-row writes only — the §4
+  guardrail (never field-diff merges) is preserved because the
+  trait accepts only an `ObservationRow`, never a patch.
 - After the redb commit succeeds, the row is fanned out on a
   per-instance `tokio::sync::broadcast::Sender<ObservationRow>` for
   any active subscribers.
@@ -198,20 +211,58 @@ Reads:
 - `node_health_rows()` is the same shape against the `node_health`
   table, ordered by `NodeId`.
 
-No CRDT machinery, by design:
+LWW merge is mandatory at the trait level (revised 2026-04-25):
 
-- No owner-writer site IDs. The `LogicalTimestamp.writer` field on a
-  row is still carried for *row authenticity* — a Phase 2 `CorrosionStore`
-  consumer needs it, and the control-plane hands the field through
-  from whichever source produced the row — but `LocalObservationStore`
-  does not reject writes from "the wrong" writer. Single-writer
-  deployment makes the check meaningless; Phase 2 adds it back at the
-  Corrosion layer.
-- No LWW merge. Last write wins by the trivial "most recent redb
-  transaction commits" rule. The `updated_at` field is preserved in
-  the row (it is part of the row's schema) so Phase 2 gossip can
-  honour it once peers exist; Phase 1's own overwrite semantics do
-  not consult it.
+- `ObservationStore::write` applies last-write-wins under
+  `overdrive_core::traits::observation_store::LogicalTimestamp::dominates`.
+  The comparator is pure `(counter, writer)` lex order with the
+  writer-string tiebreak required by the §4 deterministic-tiebreak rule;
+  equality returns `false` (idempotent re-writes are no-ops). It lives
+  on the trait module so every `ObservationStore` adapter consults the
+  same primitive — `SimObservationStore` (DST harness) and
+  `LocalObservationStore` (Phase 1 production) both delegate to it,
+  and `CorrosionStore` will when it lands.
+- An incoming row whose `updated_at` does not dominate the existing row
+  at the same primary key MUST NOT mutate state and MUST NOT be emitted
+  on subscriptions. The "loser is silent" rule is part of the trait
+  contract, not a per-adapter policy: subscribers must never observe
+  a row the store will then refuse to return on read.
+- `LocalObservationStore::write` honours the contract by reading the
+  prior row inside the existing redb `begin_write` transaction,
+  comparing `updated_at` via `dominates`, and skipping both the
+  `table.insert` and the post-commit `tokio::sync::broadcast` emit on
+  loss. Read-then-conditional-insert under one txn — redb's
+  serialisable isolation makes this trivially correct.
+- The contract is enforced by the trait-conformance harness
+  `overdrive_core::testing::observation_store::run_lww_conformance`,
+  exposed behind a `test-utils` feature on `overdrive-core` and
+  exercised against both `SimObservationStore` (default lane —
+  `crates/overdrive-sim/tests/acceptance/lww_conformance.rs`) and
+  `LocalObservationStore` (gated `integration-tests` —
+  `crates/overdrive-store-local/tests/integration/lww_conformance.rs`).
+  The harness IS the trait contract — a future adapter that fails to
+  honour LWW fails the harness.
+
+The 2026-04-24 revision's "no LWW merge" claim conflated two distinct
+properties: *single-writer deployment shape* (true in Phase 1 — one
+node agent, no peers) with *single-writer trait contract* (false —
+the trait is shared with `SimObservationStore` today and ships to
+Corrosion in Phase 2). The first does not imply the second. The
+moment any non-noop observation writer lands — `noop-heartbeat` is
+the only writer today — out-of-order delivery becomes a silent
+data-loss path. LWW at the trait level closes the gap structurally
+rather than hoping every future writer is monotonic.
+
+The other CRDT machinery is still absent in Phase 1, by design:
+
+- No owner-writer site-ID *enforcement*. The `LogicalTimestamp.writer`
+  field on a row is carried for *row authenticity* — Phase 2
+  `CorrosionStore` rejects writes whose site ID does not match a live
+  node SVID (§4 *Consistency Guardrails*) — and is now consumed by
+  `dominates` as the deterministic tiebreak when counters collide. But
+  `LocalObservationStore` does not reject writes from "the wrong"
+  writer; single-writer deployment makes the SVID check vacuous, and
+  Phase 2 adds it back at the Corrosion layer where it belongs.
 - No tombstones. Phase 1 has no `delete` surface on the trait; row
   removal is deferred to the §18 sweeper reconcilers in a later
   phase.
@@ -272,16 +323,26 @@ production impl in Phase 1." This revision restores that invariant.
 **Rejected.** See the three objections enumerated in Context. Summary:
 no persistence (silent data loss on restart once Phase 2 introduces
 real writers); sim adapter in production wiring is a category error
-against ADR-0003's class taxonomy; CRDT machinery (site IDs, LWW,
-tombstones, gossip knobs) is overhead for a single-writer deployment.
+against ADR-0003's class taxonomy; CRDT machinery beyond the LWW
+merge primitive (site-ID enforcement, tombstones, gossip-delay knobs,
+partition matrix) is overhead for a single-writer deployment. (As
+revised 2026-04-25, LWW itself is *not* in that "overhead" set — it
+is now a trait-level contract every adapter honours, including
+`LocalObservationStore`. Alternative A's "stays in `overdrive-sim`,
+keeps every machinery the sim has" framing remains rejected for the
+class-taxonomy and persistence reasons; the LWW property in
+particular is now provided by both adapters identically.)
 
 ### Alternative B — New trivial in-process LWW map in `overdrive-control-plane`
 
 **Rejected.** Also in-memory, also no persistence — has the same
 restart-loses-data problem as Alternative A and does not solve
-objection (1). Adds duplicate LWW logic next to `SimObservationStore`'s
-existing implementation, which this revision's approach is careful to
-*avoid* (the real store has no LWW at all).
+objection (1). Would also have duplicated the LWW comparator across
+crates, which the chosen approach explicitly avoids: as revised
+2026-04-25, `LogicalTimestamp::dominates` lives on the trait module
+in `overdrive-core` and every adapter delegates to it. Two adapters
+of the same trait MUST consult the same comparator, not parallel
+implementations.
 
 ### Alternative C — Zero-row stub
 
@@ -298,9 +359,11 @@ See Decision above. Concretely addresses all three objections:
    invariant.
 2. **Class taxonomy.** `adapter-host` crate; `adapter-sim` is reserved
    for its legitimate DST role.
-3. **No CRDT overhead.** Single-writer overwrite semantics; merge,
-   site-ID checks, and tombstones land with the Phase 2 store that
-   needs them.
+3. **Minimal CRDT surface.** LWW merge IS in the trait contract
+   (revised 2026-04-25) and `LocalObservationStore::write` honours it
+   under `LogicalTimestamp::dominates`; site-ID enforcement,
+   tombstones, gossip-delay knobs, and partition-matrix injection
+   are NOT — those land with the Phase 2 store that needs them.
 
 ### Alternative E — Real `LocalObservationStore` in a new `overdrive-store-observation` crate
 
@@ -365,11 +428,32 @@ not a feature-sized loop through discuss/distill/design/deliver.
    closed before the write receives no event; subscriber opened
    after the write does not see the historical row (subscription is
    future-only, same contract as the intent-side `watch`).
-4. **Overwrite on same key.** Writing a second `AllocStatusRow` for
-   the same `AllocationId` replaces the first — `alloc_status_rows()`
-   returns exactly one row, the second-write copy. (Validates the
-   single-writer "no LWW, overwrite wins" semantics.)
-5. **Phase 2 cutover seam intact.**
+4. **Monotonic overwrite on same key.** Writing a second
+   `AllocStatusRow` for the same `AllocationId` whose `updated_at`
+   dominates the prior row's replaces the first —
+   `alloc_status_rows()` returns exactly one row, the second-write
+   copy. Under Phase 1's single, monotonic writer this is the
+   common path; under the LWW contract (revised 2026-04-25) it is
+   the *dominating-write-wins* case.
+5. **Out-of-order delivery is rejected.** Writing an
+   `AllocStatusRow` and then writing a second row for the same
+   `AllocationId` whose `updated_at` does NOT dominate the first
+   leaves the store at the first row. The second `write(...)` call
+   returns `Ok` (the trait method does not surface a domain error
+   for LWW losers — it is silent rejection by contract); a
+   subscription opened before the second write does NOT see the
+   second row on its stream. Validates the trait-level LWW
+   contract on the production adapter.
+6. **Trait-conformance harness pins both adapters.**
+   `overdrive_core::testing::observation_store::run_lww_conformance`
+   is exercised against `LocalObservationStore` (gated
+   `integration-tests`) and against `SimObservationStore` (default
+   lane). Both pass the same property set: idempotent re-write,
+   monotonic-counter domination, equal-counter writer tiebreak,
+   out-of-order rejection, and "subscribers never observe a
+   loser". A future adapter implementing `ObservationStore` MUST
+   pass the same harness — the harness is the trait contract.
+7. **Phase 2 cutover seam intact.**
    `overdrive-control-plane::observation_wiring::wire_single_node_observation`
    keeps its `Box<dyn ObservationStore>` return type; the control-plane
    handler tests (`submit_round_trip`, `describe_round_trip`,
@@ -377,7 +461,7 @@ not a feature-sized loop through discuss/distill/design/deliver.
    the construction line swaps. Asserted by running the full existing
    `crates/overdrive-control-plane/tests/integration/` suite green
    under the new wiring.
-6. **Dep-graph hygiene.** `overdrive-control-plane/Cargo.toml` no
+8. **Dep-graph hygiene.** `overdrive-control-plane/Cargo.toml` no
    longer depends on `overdrive-sim`. Asserted by a `cargo tree`
    spot-check in the step's execution log; long-term this is a
    `cargo-deny` rule that lands in a later hygiene step.
@@ -514,11 +598,24 @@ dispatch.
 - The existing compile-fail fixtures under
   `crates/overdrive-core/tests/compile_fail/` continue to assert
   intent/observation non-substitutability; no new fixtures needed —
-  the contract is unchanged.
+  the ADR-0011 contract is unchanged.
 - The new Tier 3 acceptance test's restart-roundtrip case is the
   regression gate for objection (1). A future refactor that
   accidentally re-introduces an in-memory-only store (or "cache
   rows in a HashMap and hope for the best") fails this test.
+- (Added 2026-04-25) The trait-conformance harness
+  `overdrive_core::testing::observation_store::run_lww_conformance`
+  is the regression gate for the LWW contract. It is exercised
+  against `LocalObservationStore` in
+  `crates/overdrive-store-local/tests/integration/lww_conformance.rs`
+  (gated `integration-tests`) and against `SimObservationStore` in
+  `crates/overdrive-sim/tests/acceptance/lww_conformance.rs`
+  (default lane). A future adapter that accepts non-dominating
+  writes, or emits an LWW loser on a subscription, fails the
+  harness. Mutation-testing the comparator is in scope:
+  `cargo xtask mutants --diff origin/main --package overdrive-core
+  --file crates/overdrive-core/src/traits/observation_store.rs`
+  closes the loop on the comparator's branch shape.
 
 ## Changelog
 
@@ -537,10 +634,46 @@ dispatch.
   Phase 2 cutover to `CorrosionStore` is unchanged in shape. ADR
   number kept (same decision scope, corrected answer). This is a
   revision, not a supersession.
+- **2026-04-25** — Revised in place. Trigger: code review on
+  `crates/overdrive-store-local/src/observation_backend.rs`
+  surfaced that `LocalObservationStore::write` overwrote prior rows
+  by arrival order alone, while `SimObservationStore` rejected
+  non-dominating writes via a sim-local `lww_dominates`. The
+  2026-04-24 revision's "no LWW merge" claim conflated *Phase 1
+  single-writer deployment* with *single-writer trait contract* —
+  the latter does not follow from the former, and the moment any
+  non-noop observation writer landed in Phase 2 (or sooner) the
+  divergence became a silent data-loss path. Strike "No CRDT
+  machinery, by design" in its prior form. New decision:
+  `ObservationStore::write` applies LWW under
+  `overdrive_core::traits::observation_store::LogicalTimestamp::dominates`
+  as a trait-level contract; losers MUST NOT mutate state and
+  MUST NOT be emitted on subscriptions. Comparator promoted out
+  of `overdrive-sim` to the trait module so every adapter
+  consults one primitive. The contract is enforced by the
+  trait-conformance harness
+  `overdrive_core::testing::observation_store::run_lww_conformance`
+  (gated `test-utils` on `overdrive-core`), exercised against
+  both `SimObservationStore` and `LocalObservationStore` from
+  each adapter's test suite. The §"Restart semantics"
+  justification is unchanged — single-writer makes the LWW guard
+  trivially-satisfied today; the structural protection is for
+  Phase 2 (Corrosion replacement) and for any non-noop
+  observation writer that lands in the meantime. RCA at
+  `docs/feature/fix-observation-lww-merge/deliver/rca.md`. ADR
+  number kept (same decision scope, corrected answer). This is a
+  revision, not a supersession.
 
 ## References
 
-- `docs/whitepaper.md` §4 (ObservationStore — Live Cluster Map)
+- `docs/whitepaper.md` §4 (ObservationStore — Live Cluster Map; the
+  Intent / Observation split and the LWW logical-timestamp model that
+  `LogicalTimestamp::dominates` realises in code)
+- `docs/whitepaper.md` §4 *Consistency Guardrails* (full-rows-over-diffs,
+  identity-scoped writes — both still in force; LWW is the merge
+  primitive those guardrails compose with)
+- `docs/feature/fix-observation-lww-merge/deliver/rca.md` (the RCA that
+  motivated the 2026-04-25 revision)
 - `docs/product/architecture/brief.md` §4 (state-layer discipline),
   §6 (ObservationStore row shapes), §18 (this ADR's companion edit)
 - `docs/feature/phase-1-control-plane-core/discuss/wave-decisions.md`
