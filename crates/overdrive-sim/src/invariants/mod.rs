@@ -56,6 +56,14 @@ pub enum Invariant {
     /// invocation and `N - 1` cancellations. The evaluator body panics
     /// until DELIVER ships the broker.
     DuplicateEvaluationsCollapse,
+    /// Two drain passes against identical submit sequences produce
+    /// element-equal `dispatched_order` vecs at every position. Closes
+    /// `docs/feature/fix-eval-broker-drain-determinism` RCA — the
+    /// broker's drain order MUST be deterministic, not dependent on
+    /// `HashSet` iteration order or other implicit state. Sibling to
+    /// `DuplicateEvaluationsCollapse`: that invariant pins counters,
+    /// this one pins ordering.
+    BrokerDrainOrderIsDeterministic,
     /// SCAFFOLD: true — phase-1-control-plane-core DISTILL per ADR-0013.
     /// Twin invocation of a reconciler's `reconcile` with identical
     /// inputs produces bit-identical `Vec<Action>` outputs. The
@@ -79,6 +87,7 @@ impl Invariant {
         // SCAFFOLD: true — phase-1-control-plane-core DISTILL per ADR-0013.
         Self::AtLeastOneReconcilerRegistered,
         Self::DuplicateEvaluationsCollapse,
+        Self::BrokerDrainOrderIsDeterministic,
         Self::ReconcilerIsPure,
     ];
 
@@ -97,6 +106,7 @@ impl Invariant {
             // SCAFFOLD: true — phase-1-control-plane-core DISTILL per ADR-0013.
             Self::AtLeastOneReconcilerRegistered => "at-least-one-reconciler-registered",
             Self::DuplicateEvaluationsCollapse => "duplicate-evaluations-collapse",
+            Self::BrokerDrainOrderIsDeterministic => "broker-drain-order-is-deterministic",
             Self::ReconcilerIsPure => "reconciler-is-pure",
         }
     }

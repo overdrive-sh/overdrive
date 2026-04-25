@@ -416,6 +416,19 @@ impl Harness {
                 let (n, counters) = drive_broker_collapse();
                 evaluators::evaluate_duplicate_evaluations_collapse(n, counters)
             }
+            Invariant::BrokerDrainOrderIsDeterministic => {
+                // Drive the multi-key submit-and-drain sequence twice
+                // with identical inputs and feed both order snapshots
+                // to the evaluator. Two passes is the minimum that can
+                // catch order divergence; if the underlying drain
+                // depends on `HashSet` iteration or any other implicit
+                // state, the two snapshots will differ at some
+                // position and the evaluator returns Fail. See the RCA
+                // at `docs/feature/fix-eval-broker-drain-determinism/`.
+                let (_, _, order_a) = drive_broker_collapse_multi_key();
+                let (_, _, order_b) = drive_broker_collapse_multi_key();
+                evaluators::evaluate_broker_drain_order_is_deterministic(&order_a, &order_b)
+            }
             Invariant::ReconcilerIsPure => {
                 let reconciler = harness_purity_reconciler();
                 // Pull the `TickContext::now` snapshot from the first
@@ -544,9 +557,8 @@ fn drive_broker_collapse() -> (u64, evaluators::BrokerCountersSnapshot) {
 /// See `docs/feature/fix-eval-broker-drain-determinism/discuss/rca-context.md`
 /// for the failure mode this driver is the prerequisite for catching.
 #[allow(clippy::expect_used)] // `ReconcilerName::new` / `TargetResource::new` are total on literals.
-fn drive_broker_collapse_multi_key() -> (u64, evaluators::BrokerCountersSnapshot) {
-    use std::collections::HashSet;
-
+fn drive_broker_collapse_multi_key()
+-> (u64, evaluators::BrokerCountersSnapshot, evaluators::BrokerDrainOrderSnapshot) {
     use overdrive_core::reconciler::{ReconcilerName, TargetResource};
 
     /// Number of submits per key. 3 matches the single-key driver and
@@ -564,28 +576,39 @@ fn drive_broker_collapse_multi_key() -> (u64, evaluators::BrokerCountersSnapshot
     let key_b = (reconciler, target_b);
 
     // Mirror of `EvaluationBroker::submit` + `drain_pending` LWW
-    // semantics, identical in shape to `drive_broker_collapse` above
-    // — only the submit sequence differs. Inserting at an occupied
-    // key evicts the prior value into the cancelable count; draining
-    // empties pending and bumps dispatched by the drained length.
-    let mut pending: HashSet<(ReconcilerName, TargetResource)> = HashSet::new();
+    // semantics, with a `Vec`-based pending buffer instead of
+    // `HashSet`. The single-key driver above gets away with `HashSet`
+    // because there is only one key — drain order is trivially
+    // deterministic. The multi-key sibling cannot: `HashSet` iteration
+    // order is randomised per process, so two drain passes against
+    // identical submits would diverge non-deterministically. The
+    // 01-05 RCA names this exact failure shape — the broker's drain
+    // order must be stable, not implicit on `HashSet` state. Using
+    // `Vec` + linear dedup mirrors the *fix* shape (insertion-ordered
+    // pending) so the invariant has a clean pass to assert against.
+    let mut pending: Vec<(ReconcilerName, TargetResource)> = Vec::new();
     let mut cancelled: u64 = 0;
     for _ in 0..N {
-        // Strict interleave: K1, then K2, repeated. The order
-        // matters for the `BrokerDrainOrderIsDeterministic`
-        // invariant in step 01-05, but the counter snapshot this
-        // driver returns is order-independent.
-        if !pending.insert(key_a.clone()) {
-            cancelled = cancelled.saturating_add(1);
-        }
-        if !pending.insert(key_b.clone()) {
-            cancelled = cancelled.saturating_add(1);
+        // Strict interleave: K1, then K2, repeated. Each submit either
+        // appends (key absent) or evicts-and-appends (key present),
+        // both yielding LWW semantics with deterministic ordering.
+        for key in [&key_a, &key_b] {
+            if let Some(idx) = pending.iter().position(|p| p == key) {
+                pending.remove(idx);
+                cancelled = cancelled.saturating_add(1);
+            }
+            pending.push(key.clone());
         }
     }
-    let dispatched = pending.len() as u64;
+    let dispatched_order = pending.clone();
+    let dispatched = dispatched_order.len() as u64;
     pending.clear();
 
-    (N, evaluators::BrokerCountersSnapshot { queued: 0, cancelled, dispatched })
+    (
+        N,
+        evaluators::BrokerCountersSnapshot { queued: 0, cancelled, dispatched },
+        evaluators::BrokerDrainOrderSnapshot { dispatched_order },
+    )
 }
 
 /// Construct the reconciler the harness twin-invokes for the
@@ -738,11 +761,22 @@ mod tests {
         // cancelled=4 (each key superseded N-1=2 times), queued=0
         // (drain emptied pending). Step 01-04 prerequisite for the
         // BrokerDrainOrderIsDeterministic invariant in step 01-05.
-        let (per_key_n, counters) = drive_broker_collapse_multi_key();
+        //
+        // The driver's return tuple was extended additively in 01-05
+        // to also yield a `BrokerDrainOrderSnapshot` for the new
+        // invariant; this test continues to pin the counters and now
+        // also asserts the order snapshot is non-empty (the order
+        // contract itself is exercised by the evaluator unit test).
+        let (per_key_n, counters, order) = drive_broker_collapse_multi_key();
         assert_eq!(per_key_n, 3);
         assert_eq!(
             counters,
             evaluators::BrokerCountersSnapshot { queued: 0, cancelled: 4, dispatched: 2 }
+        );
+        assert_eq!(
+            order.dispatched_order.len(),
+            2,
+            "drain order must hold exactly the two distinct keys after dedup"
         );
     }
 

@@ -31,6 +31,7 @@ const ALL_VARIANTS: &[Invariant] = &[
     // SCAFFOLD: true — phase-1-control-plane-core DISTILL per ADR-0013.
     Invariant::AtLeastOneReconcilerRegistered,
     Invariant::DuplicateEvaluationsCollapse,
+    Invariant::BrokerDrainOrderIsDeterministic,
     Invariant::ReconcilerIsPure,
 ];
 
@@ -47,6 +48,7 @@ fn variant_strategy() -> impl Strategy<Value = Invariant> {
         // SCAFFOLD: true — phase-1-control-plane-core DISTILL per ADR-0013.
         Just(Invariant::AtLeastOneReconcilerRegistered),
         Just(Invariant::DuplicateEvaluationsCollapse),
+        Just(Invariant::BrokerDrainOrderIsDeterministic),
         Just(Invariant::ReconcilerIsPure),
     ]
 }
@@ -85,6 +87,10 @@ fn display_is_kebab_case_lowercase() {
     assert_eq!(
         Invariant::DuplicateEvaluationsCollapse.to_string(),
         "duplicate-evaluations-collapse"
+    );
+    assert_eq!(
+        Invariant::BrokerDrainOrderIsDeterministic.to_string(),
+        "broker-drain-order-is-deterministic"
     );
     assert_eq!(Invariant::ReconcilerIsPure.to_string(), "reconciler-is-pure");
 }
