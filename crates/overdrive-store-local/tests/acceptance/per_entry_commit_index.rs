@@ -66,10 +66,8 @@ async fn put_if_absent_returns_commit_index_assigned_in_txn() {
     let (store, _tmp) = store();
 
     // First put — distinct key.
-    let outcome_a = store
-        .put_if_absent(b"jobs/payments", b"spec-a")
-        .await
-        .expect("put_if_absent A");
+    let outcome_a =
+        store.put_if_absent(b"jobs/payments", b"spec-a").await.expect("put_if_absent A");
     let idx_a = match outcome_a {
         PutOutcome::Inserted { commit_index } => commit_index,
         PutOutcome::KeyExists { .. } => panic!("expected Inserted on empty key A"),
@@ -77,10 +75,8 @@ async fn put_if_absent_returns_commit_index_assigned_in_txn() {
 
     // Second put — DIFFERENT key. Both writes succeed via `Inserted`,
     // but each must carry the index assigned in its own write txn.
-    let outcome_b = store
-        .put_if_absent(b"jobs/frontend", b"spec-b")
-        .await
-        .expect("put_if_absent B");
+    let outcome_b =
+        store.put_if_absent(b"jobs/frontend", b"spec-b").await.expect("put_if_absent B");
     let idx_b = match outcome_b {
         PutOutcome::Inserted { commit_index } => commit_index,
         PutOutcome::KeyExists { .. } => panic!("expected Inserted on empty key B"),

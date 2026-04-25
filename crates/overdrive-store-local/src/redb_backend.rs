@@ -70,9 +70,11 @@
 //! Trade-offs of the Phase 1 substitute:
 //!
 //! * Subscribers that lag past the broadcast capacity drop events
-//!   (`RecvError::Lagged`). The current stream-wrapper layer treats that
-//!   as an end-of-stream signal; the Raft-driven replacement will recover
-//!   via log catch-up.
+//!   (`RecvError::Lagged`). The current stream-wrapper layer silently
+//!   drops the lagged notification and continues delivering subsequent
+//!   events — the stream does not close, so a caller relying on
+//!   end-of-stream as a catch-up trigger will miss the lost events. The
+//!   Raft-driven replacement will recover via log catch-up.
 //! * Events fire only after successful redb commit, so a subscriber
 //!   never sees a phantom write that failed to persist.
 //! * The table layout is deliberately minimal for Phase 1: a single
@@ -108,7 +110,8 @@ const ENTRIES_TABLE: TableDefinition<&[u8], &[u8]> = TableDefinition::new("entri
 /// Big enough to absorb a short-lived reader stall without dropping
 /// events on a single-node workload; small enough that an infinite lag
 /// in a subscriber doesn't balloon memory. Subscribers that lag past
-/// this are signalled as end-of-stream (see module docs).
+/// this silently lose the dropped events and keep receiving subsequent
+/// ones — the stream does not close on lag (see module docs).
 const WATCH_CHANNEL_CAPACITY: usize = 1024;
 
 #[derive(Debug, Clone)]
@@ -353,40 +356,71 @@ impl IntentStore for LocalIntentStore {
         let key_vec = key.to_vec();
         let inner = Arc::clone(&self.inner);
 
+        // `delete` is idempotent for absent keys: `redb::Table::remove`
+        // returns `Ok(None)` when the key is not present. Without
+        // gating on that return, the counter bump and watch emit fire
+        // for a row that never existed — `commit_index()` observers see
+        // false monotone advancement, and `watch(prefix)` subscribers
+        // see a phantom `(key, empty)` event. Both bump and emit are
+        // therefore conditional on the remove having actually removed.
         let emit_key = tokio::task::spawn_blocking(move || {
             let write = inner.db.begin_write().map_err(map_transaction_error)?;
-            // Bump inside the write transaction so the global counter
-            // tracks committed deletes consistently with puts. Delete
-            // does not store a per-entry index (the row is gone), so
-            // we discard the returned index — only the global cursor
-            // observers (e.g. `cluster_status`) read this advance.
-            let _new_idx = Self::bump_commit_inside(&inner);
-            {
+            let removed = {
                 let mut table = write.open_table(ENTRIES_TABLE).map_err(map_table_error)?;
-                table.remove(key_vec.as_slice()).map_err(map_storage_error)?;
+                table.remove(key_vec.as_slice()).map_err(map_storage_error)?.is_some()
+            };
+            if removed {
+                // Bump inside the write transaction so the global
+                // counter tracks committed deletes consistently with
+                // puts. Delete does not store a per-entry index (the
+                // row is gone), so we discard the returned index —
+                // only the global cursor observers (e.g.
+                // `cluster_status`) read this advance.
+                let _new_idx = Self::bump_commit_inside(&inner);
             }
             write.commit().map_err(map_commit_error)?;
-            Ok::<_, IntentStoreError>(key_vec)
+            Ok::<_, IntentStoreError>(removed.then_some(key_vec))
         })
         .await
         .map_err(map_join_error)??;
 
         // Delete events carry an empty value per the trait docstring.
-        self.emit(Bytes::from(emit_key), Bytes::new());
+        // Emit only when the row actually existed pre-delete — a
+        // phantom event for an absent key is the bug this gate closes.
+        if let Some(key) = emit_key {
+            self.emit(Bytes::from(key), Bytes::new());
+        }
         Ok(())
     }
 
     async fn txn(&self, ops: Vec<TxnOp>) -> Result<TxnOutcome, IntentStoreError> {
+        // An empty `txn` has nothing to commit. Opening a write
+        // transaction and bumping the counter for it would leak false
+        // monotone advancement to `commit_index()` observers and waste
+        // a redb commit on a no-op. Short-circuit before any I/O.
+        if ops.is_empty() {
+            return Ok(TxnOutcome::Committed);
+        }
+
         let inner = Arc::clone(&self.inner);
         let ops_for_commit = ops.clone();
 
-        tokio::task::spawn_blocking(move || {
+        // For each op, record whether it had observable effect: every
+        // `Put` always does; a `Delete` only when `redb::Table::remove`
+        // returned `Some(_)`. The post-commit emit loop reads this
+        // mask so phantom delete events for absent keys never reach
+        // `watch(prefix)` subscribers — the same gate as the standalone
+        // `delete` path, applied per-op inside the transaction.
+        let effective = tokio::task::spawn_blocking(move || {
             let write = inner.db.begin_write().map_err(map_transaction_error)?;
             // Bump-and-capture once for the whole transaction — every
             // put inside this txn shares the same per-entry index.
             // This matches the trait contract that `txn` advances the
-            // commit cursor by exactly 1 regardless of op count.
+            // commit cursor by exactly 1 regardless of op count, with
+            // the natural exception of an empty `ops` vector handled
+            // above.
             let txn_idx = Self::bump_commit_inside(&inner);
+            let mut effective = Vec::with_capacity(ops_for_commit.len());
             {
                 let mut table = write.open_table(ENTRIES_TABLE).map_err(map_table_error)?;
                 for op in &ops_for_commit {
@@ -396,22 +430,29 @@ impl IntentStore for LocalIntentStore {
                             table
                                 .insert(key.as_ref(), row.as_slice())
                                 .map_err(map_storage_error)?;
+                            effective.push(true);
                         }
                         TxnOp::Delete { key } => {
-                            table.remove(key.as_ref()).map_err(map_storage_error)?;
+                            let removed =
+                                table.remove(key.as_ref()).map_err(map_storage_error)?.is_some();
+                            effective.push(removed);
                         }
                     }
                 }
             }
             write.commit().map_err(map_commit_error)?;
-            Ok::<_, IntentStoreError>(())
+            Ok::<_, IntentStoreError>(effective)
         })
         .await
         .map_err(map_join_error)??;
 
         // Emit per-op events *after* the commit succeeds so subscribers
-        // never see a phantom write.
-        for op in ops {
+        // never see a phantom write — and only for ops that actually
+        // changed state.
+        for (op, effective) in ops.into_iter().zip(effective) {
+            if !effective {
+                continue;
+            }
             match op {
                 TxnOp::Put { key, value } => self.emit(key, value),
                 TxnOp::Delete { key } => self.emit(key, Bytes::new()),
@@ -429,8 +470,10 @@ impl IntentStore for LocalIntentStore {
         let rx = self.inner.watch_tx.subscribe();
 
         // Drop `Lagged` / drain errors silently by filtering them out —
-        // the Phase 1 substitute treats lag as "subscriber fell behind";
-        // Phase 2 log-driven notification is the recovery path.
+        // returning `None` from `filter_map` skips the lagged notification
+        // and keeps the stream alive; subsequent events still arrive.
+        // Phase 2 log-driven notification is the recovery path for the
+        // lost events.
         let stream = BroadcastStream::new(rx).filter_map(move |evt| match evt {
             Ok(event) => {
                 if event.key.starts_with(&prefix) {
