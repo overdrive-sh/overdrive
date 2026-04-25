@@ -131,21 +131,26 @@ pub fn run(mode: &Mode, scope: &Scope) -> Result<()> {
     // otherwise act on a verdict the current run never produced.
     clear_stale_summary(&summary_path)?;
 
-    // 1. Run cargo-mutants. Exit status is intentionally ignored — a
-    //    non-zero exit from cargo-mutants happens on any missed mutant,
-    //    which we handle via our own gate below. We only care that the
-    //    subprocess produced `outcomes.json`.
-    let _ = invoke_cargo_mutants(mode, scope, &output_parent)?;
+    // 1. Run cargo-mutants. Exit status is partially trusted — a
+    //    non-zero exit happens both for missed mutants (our gate
+    //    handles it) and for genuine subprocess crashes. We
+    //    distinguish them via the report file: a clean run always
+    //    writes `outcomes.json`, *unless* cargo-mutants
+    //    short-circuited at filter time ("INFO No mutants to filter")
+    //    — in which case it exits 0 and writes nothing. That third
+    //    state is treated as a vacuously-passing zero-mutant run.
+    let status = invoke_cargo_mutants(mode, scope, &output_parent)?;
 
-    // 2. Parse outcomes.json.
+    // 2. Parse outcomes.json — or, if absent AND the subprocess
+    //    exited cleanly, treat as a zero-mutant short-circuit.
     let outcomes_path = out_dir.join("outcomes.json");
-    let report = parse_outcomes(&outcomes_path).wrap_err_with(|| {
-        format!(
-            "parse cargo-mutants outcomes at {} — cargo-mutants may have crashed \
-             before writing its report",
-            outcomes_path.display()
-        )
-    })?;
+    let Some(report) = read_outcomes_or_short_circuit(&outcomes_path, status)? else {
+        // cargo-mutants exited 0 but wrote nothing — the
+        // "INFO No mutants to filter" path. Vacuously pass:
+        // emit a synthetic zero-mutant report, write the
+        // summary, print one line, exit 0.
+        return finalise_zero_mutant_run(&summary_path, mode);
+    };
 
     // 3. Evaluate the mode-specific gate.
     let gate = match mode {
@@ -582,6 +587,74 @@ fn parse_outcomes(path: &Path) -> Result<RawReport> {
     let report: RawReport =
         serde_json::from_str(&raw).wrap_err_with(|| format!("parse {}", path.display()))?;
     Ok(report)
+}
+
+/// Discriminate between three post-subprocess states:
+///   1. outcomes.json present  → parse and return Some(report).
+///   2. outcomes.json absent + exit 0 → short-circuit (filter
+///      intersection empty); return None and let the caller emit
+///      a synthetic zero-mutant report.
+///   3. outcomes.json absent + non-zero exit → genuine crash; bail
+///      with the original "may have crashed" error.
+///
+/// The exit-status check is the only thing distinguishing (2) from
+/// (3); cargo-mutants does not expose a structured "I had nothing
+/// to do" signal.
+fn read_outcomes_or_short_circuit(
+    path: &Path,
+    status: std::process::ExitStatus,
+) -> Result<Option<RawReport>> {
+    if path.is_file() {
+        return Ok(Some(parse_outcomes(path)?));
+    }
+    if status.success() {
+        // Filter intersection produced zero mutants. cargo-mutants
+        // logged "INFO No mutants to filter" and returned 0 without
+        // creating mutants.out/. Vacuously pass.
+        eprintln!(
+            "xtask mutants: cargo-mutants produced no report (filter \
+             intersection is empty) — treating as zero-mutant vacuous pass"
+        );
+        return Ok(None);
+    }
+    bail!(
+        "no outcomes.json at {} — cargo-mutants exited {} without producing \
+         a report (subprocess likely crashed)",
+        path.display(),
+        status.code().map_or_else(|| "?".into(), |c| c.to_string()),
+    )
+}
+
+/// Emit a `mutants-summary.json` representing a vacuously-passing
+/// zero-mutant run, print a one-line report, and return Ok(()) so
+/// the wrapper exits 0. Mirrors `write_summary` + `print_report`
+/// for the case where there is no `RawReport` to populate them
+/// from.
+fn finalise_zero_mutant_run(summary_path: &Path, mode: &Mode) -> Result<()> {
+    let synthetic = RawReport {
+        total_mutants: 0,
+        caught: 0,
+        missed: 0,
+        timeout: 0,
+        unviable: 0,
+        success: 0,
+        cargo_mutants_version: String::new(),
+    };
+    // Workspace mode never short-circuits to zero mutants in
+    // practice (no --in-diff filter), but model it consistently:
+    // the diff-gate logic already returns Pass on total_mutants=0,
+    // so both arms collapse to the same call.
+    let gate = match mode {
+        Mode::Diff { .. } | Mode::Workspace { .. } => evaluate_diff_gate(&synthetic),
+    };
+    write_summary(summary_path, &synthetic, &gate, mode)
+        .wrap_err_with(|| format!("write {}", summary_path.display()))?;
+    println!(
+        "mutants: mode={} total=0 — no mutants in scope (filter intersection empty); vacuous pass",
+        gate.mode_label
+    );
+    println!("mutants: PASS");
+    Ok(())
 }
 
 /// Kill rate (caught / (caught + missed)) in percent. Returns 100.0 if
@@ -1133,11 +1206,60 @@ mod tests {
         // outcomes.json absent, exit 0 ⇒ Ok(None).
         let tmp = tempfile::tempdir().expect("tempdir");
         let absent = tmp.path().join("outcomes.json");
-        let zero = std::process::Command::new("true")
-            .status()
-            .expect("spawn true");
+        let zero = std::process::Command::new("true").status().expect("spawn true");
         let result = read_outcomes_or_short_circuit(&absent, zero).expect("must not bail");
         assert!(result.is_none(), "absent file + clean exit ⇒ None");
+    }
+
+    #[test]
+    fn read_outcomes_bails_when_file_absent_and_exit_nonzero() {
+        // Crash case: outcomes.json absent AND subprocess returned
+        // non-zero. Must bail.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let absent = tmp.path().join("outcomes.json");
+        let nonzero = std::process::Command::new("false").status().expect("spawn false");
+        let err = read_outcomes_or_short_circuit(&absent, nonzero)
+            .expect_err("must bail on absent file + non-zero exit");
+        let msg = format!("{err:#}");
+        assert!(msg.contains("no outcomes.json"), "got: {msg}");
+        assert!(msg.contains("subprocess likely crashed"), "got: {msg}");
+    }
+
+    #[test]
+    fn read_outcomes_returns_some_when_file_present() {
+        // Happy path: file present ⇒ parse and return Some(report).
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("outcomes.json");
+        std::fs::write(
+            &path,
+            r#"{"outcomes":[],"total_mutants":1,"caught":1,"missed":0,
+                "timeout":0,"unviable":0,"success":1,
+                "cargo_mutants_version":"27.0.0"}"#,
+        )
+        .unwrap();
+        let zero = std::process::Command::new("true").status().expect("spawn true");
+        let report = read_outcomes_or_short_circuit(&path, zero)
+            .expect("must parse")
+            .expect("Some when file present");
+        assert_eq!(report.caught, 1);
+    }
+
+    #[test]
+    fn finalise_zero_mutant_run_writes_pass_summary() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let summary = tmp.path().join("mutants-summary.json");
+        finalise_zero_mutant_run(&summary, &Mode::Diff { base: "origin/main".into() })
+            .expect("must succeed");
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&summary).unwrap()).unwrap();
+        assert_eq!(v["status"].as_str(), Some("pass"));
+        assert_eq!(v["total_mutants"].as_u64(), Some(0));
+        assert_eq!(v["caught"].as_u64(), Some(0));
+        assert_eq!(v["missed"].as_u64(), Some(0));
+        // 100.0 because kill_rate_percent(0, 0) == 100.0 by the
+        // existing vacuous-pass convention.
+        assert!((v["kill_rate_pct"].as_f64().unwrap() - 100.0).abs() < 1e-6);
+        assert_eq!(v["base_ref"].as_str(), Some("origin/main"));
     }
 
     #[test]
