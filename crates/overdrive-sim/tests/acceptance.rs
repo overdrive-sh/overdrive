@@ -19,6 +19,11 @@ mod acceptance {
     mod sim_observation_row_readers;
     mod sim_observation_single_peer;
 
+    // Step 01-01 — LWW conformance harness invocation. RED scaffold;
+    // GREEN counterpart is step 01-02 (lands the harness in
+    // `overdrive-core::testing::observation_store`).
+    mod lww_conformance;
+
     // US-06 §6.1 — Sim adapters for every nondeterminism port.
     mod sim_adapters_deterministic;
 

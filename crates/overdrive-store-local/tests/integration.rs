@@ -24,5 +24,6 @@
 // resolve naturally.
 mod integration {
     mod commit_counter_invariant;
+    mod lww_conformance;
     mod snapshot_proptest;
 }
