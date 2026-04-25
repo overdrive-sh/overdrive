@@ -41,6 +41,16 @@ tokio.workspace                    = true
 tracing.workspace                  = true
 tracing-subscriber.workspace       = true
 reqwest.workspace                  = true
+# Used in `http_client::stringify_reqwest_error` to walk a
+# `reqwest::Error` source chain looking for
+# `rustls::Error::InvalidCertificate(...)` so the operator-facing
+# message can distinguish a TLS handshake failure (trust-material
+# mismatch — re-run `overdrive serve`) from a pure TCP-`ECONNREFUSED`
+# (server not running). Per `fix-cli-cannot-reach-control-plane` Step
+# 01-03 (RCA §Secondary fix). The reqwest client itself is configured
+# `.use_rustls_tls()` so the rustls error type is what surfaces in the
+# `Error::source()` chain on cert-verification failure.
+rustls.workspace                   = true
 url.workspace                      = true
 thiserror.workspace                = true
 serde.workspace                    = true

@@ -1477,6 +1477,7 @@ dependencies = [
  "overdrive-core",
  "reqwest",
  "rkyv",
+ "rustls",
  "serde",
  "serde_json",
  "serial_test",

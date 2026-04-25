@@ -304,11 +304,26 @@ fn synthesize_error_body(status: StatusCode) -> ErrorBody {
 /// Debug format, or deeply-chained source contexts. The shape is one
 /// adjective per failure category — enough context for the operator
 /// to act, not enough for an attacker to fingerprint.
+///
+/// The `is_connect()` arm splits further: if the source chain carries
+/// a `rustls::Error::InvalidCertificate(...)`, the failure is a TLS
+/// handshake fault (trust material mismatch) rather than a pure TCP
+/// `ECONNREFUSED`. The two render distinctly so the operator's hint
+/// points at the right remediation — re-run `overdrive serve` to
+/// re-mint, vs check the server is running. Per
+/// `fix-cli-cannot-reach-control-plane` Step 01-03 (RCA §Secondary
+/// fix).
 fn stringify_reqwest_error(err: &reqwest::Error) -> String {
     let category = if err.is_timeout() {
         "request timed out"
     } else if err.is_connect() {
-        "could not connect to server"
+        if has_rustls_cert_error(err) {
+            "TLS handshake failed (certificate not trusted by the client) \
+             — hint: re-run `overdrive serve` to re-mint trust material if the CA \
+             was rotated since the operator config was written"
+        } else {
+            "could not connect to server"
+        }
     } else if err.is_decode() {
         "response body decode failed"
     } else if err.is_request() {
@@ -323,6 +338,56 @@ fn stringify_reqwest_error(err: &reqwest::Error) -> String {
         "transport error"
     };
     strip_leak(category)
+}
+
+/// Walk the `Error::source()` chain looking for any
+/// `rustls::Error::InvalidCertificate(...)`. Returns `true` when a
+/// rustls cert-verification error is present anywhere in the chain.
+///
+/// This is the discriminator for the `is_connect()` split in
+/// `stringify_reqwest_error`: rustls' cert-verification failures
+/// surface as `is_connect() == true` because the TCP side completed
+/// before the handshake failed, but the cause is trust material, not
+/// reachability. Per `fix-cli-cannot-reach-control-plane` Step 01-03.
+///
+/// We deliberately match ONLY `InvalidCertificate` rather than the
+/// broader "any rustls error" — other rustls variants (`PeerMisbehaved`,
+/// `AlertReceived`, etc.) describe protocol-level faults the operator
+/// cannot fix by re-minting, and the catch-all 'could not connect to
+/// server' message is a safer default for those.
+fn has_rustls_cert_error(err: &reqwest::Error) -> bool {
+    use std::error::Error as _;
+    let mut source: Option<&dyn std::error::Error> = err.source();
+    while let Some(cause) = source {
+        // Direct downcast: rustls::Error appears in the chain when a
+        // cert-verification failure was the immediate TLS fault.
+        if let Some(rustls_err) = cause.downcast_ref::<rustls::Error>() {
+            if matches!(rustls_err, rustls::Error::InvalidCertificate(_)) {
+                return true;
+            }
+        }
+        // Fallback: rustls' webpki/aws-lc-rs verifier errors are
+        // sometimes wrapped (e.g. via std::io::Error or hyper-tls
+        // adapters) such that the concrete `rustls::Error` type does
+        // not survive the downcast. Match on Display text as a
+        // last-resort discriminator. The exact text varies across
+        // rustls versions but consistently mentions either
+        // 'InvalidCertificate', 'invalid certificate', or
+        // 'UnknownIssuer' / 'unknown issuer'.
+        let display = cause.to_string();
+        let display_lower = display.to_lowercase();
+        if display_lower.contains("invalidcertificate")
+            || display_lower.contains("invalid certificate")
+            || display_lower.contains("unknownissuer")
+            || display_lower.contains("unknown issuer")
+            || display_lower.contains("certificate verify failed")
+            || display_lower.contains("invalid peer certificate")
+        {
+            return true;
+        }
+        source = cause.source();
+    }
+    false
 }
 
 /// Scrub low-level tokens that reveal transport / decoder internals

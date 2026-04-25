@@ -25,6 +25,7 @@ use std::time::Duration;
 
 use overdrive_cli::http_client::{ApiClient, CliError};
 use overdrive_control_plane::api::{JobDescription, SubmitJobRequest};
+use overdrive_control_plane::tls_bootstrap::{mint_ephemeral_ca, write_trust_triple};
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
 use overdrive_core::aggregate::JobSpecInput;
 use tempfile::TempDir;
@@ -286,4 +287,116 @@ contexts:
         !rendered.contains("DecodeError"),
         "Display must not leak base64::DecodeError Debug format; got: {rendered}",
     );
+}
+
+// -------------------------------------------------------------------
+// (g) TLS handshake failure (mismatched CA) → CliError::Transport
+//     with TLS-handshake-specific cause distinct from TCP-refused
+//
+// Step 01-03 — `fix-cli-cannot-reach-control-plane`. Pins the
+// classifier split in `stringify_reqwest_error` so a rustls
+// cert-verification error in the `reqwest::Error` source chain renders
+// as 'TLS handshake' / 'certificate' rather than collapsing into the
+// 'could not connect to server' message reserved for pure
+// TCP-`ECONNREFUSED`. Without the split the operator chases a network
+// problem when the real fault is trust material.
+//
+// Test shape: stand up a real in-process server with mint #1, build an
+// `ApiClient` from a SECOND independently-minted trust triple whose
+// endpoint points at server #1's bound address, then issue any request.
+// The TCP handshake completes (server is listening); the TLS handshake
+// fails (server presents CA #1, client trusts only CA #2). The
+// resulting `CliError::Transport.cause` MUST name TLS / certificate so
+// the operator's hint is "re-mint or check trust material", not
+// "check the network".
+// -------------------------------------------------------------------
+
+#[tokio::test]
+async fn stringify_reqwest_error_reports_tls_handshake_distinctly_from_tcp_refused() {
+    // Server side: spawn the real control plane on an ephemeral port.
+    // `run_server` mints CA #1 and writes the trust triple to
+    // `<operator_config_dir_a>/.overdrive/config`. We deliberately do
+    // NOT load that triple — it would make the handshake succeed.
+    let (handle, bound, _tmp_a, _config_path_a) = spawn_server().await;
+
+    // Client side: mint a SECOND, independent CA. This produces a
+    // bytewise-different CA cert (per `tls_bootstrap` test
+    // `mint_ephemeral_ca_is_unique_per_call`), so the client's pinned
+    // root will NOT verify the server's leaf.
+    let tmp_b = TempDir::new().expect("tempdir for mismatched-CA client config");
+    let other_material = mint_ephemeral_ca().expect("second independent mint");
+
+    // Write a trust triple under `tmp_b` whose endpoint NAMES SERVER A
+    // — but whose CA is from mint #2. `write_trust_triple` writes to
+    // `<config_dir>/.overdrive/config` per ADR-0019.
+    let target_endpoint = format!("https://{bound}");
+    write_trust_triple(tmp_b.path(), &target_endpoint, &other_material)
+        .expect("write mismatched-CA trust triple");
+    let mismatched_config_path = tmp_b.path().join(".overdrive").join("config");
+
+    // `from_config` succeeds — the file is well-formed; the mismatch
+    // only manifests on the wire during the TLS handshake.
+    let client = ApiClient::from_config(&mismatched_config_path)
+        .expect("from_config: mismatched-CA triple is structurally valid");
+
+    // Any endpoint exercises the same code path; `cluster_status` is
+    // shortest. TCP completes (server is listening); TLS handshake
+    // fails (cert verification rejects unknown CA).
+    let err = client.cluster_status().await.expect_err("mismatched CA → TLS handshake must fail");
+
+    // Variant-level: must surface as Transport (the failure class is
+    // still transport, just the cause string is different).
+    let rendered = match &err {
+        CliError::Transport { endpoint, cause } => {
+            assert!(
+                endpoint.contains(&bound.port().to_string()),
+                "Transport.endpoint must name the live endpoint; got {endpoint}",
+            );
+            // The Display rendering — operator-facing message — is
+            // what `stringify_reqwest_error` ultimately feeds via
+            // `cause`. Pin both the variant cause and the rendered
+            // form so a future refactor of `Display` cannot drop the
+            // distinguishing token.
+            format!("{err} | cause={cause}")
+        }
+        other => panic!("expected CliError::Transport for TLS handshake failure, got {other:?}"),
+    };
+
+    // The classifier split: the message must reference 'TLS handshake'
+    // or 'certificate' DISTINCT from the 'could not connect to server'
+    // string reserved for pure TCP-refused. Either token alone is
+    // sufficient — they describe the same root cause from slightly
+    // different angles, and rustls' wording shifts across versions.
+    let names_tls_or_cert = rendered.contains("TLS handshake") || rendered.contains("certificate");
+    assert!(
+        names_tls_or_cert,
+        "TLS handshake failure must render with 'TLS handshake' or 'certificate' in the \
+         message so operators recognise the trust-material fault distinctly from \
+         TCP-refused; got: {rendered}",
+    );
+
+    // Negative cross-check: the pure-TCP-refused string must NOT
+    // appear, otherwise the split has not happened. Without this the
+    // assertion above could pass on a message that contains BOTH
+    // strings (e.g. an erroneous append).
+    assert!(
+        !rendered.contains("could not connect to server"),
+        "TLS handshake failure must NOT render as 'could not connect to server' — that \
+         message is reserved for pure TCP-refused; got: {rendered}",
+    );
+
+    // Hint regression: the Display format string in `CliError::Transport`
+    // already carries `hint: check that the server is running and the
+    // endpoint is correct`, but the TLS-specific cause SHOULD direct
+    // the operator at re-running `overdrive serve` (the canonical write
+    // site after Step 01-02) since the fault is trust material, not
+    // reachability.
+    assert!(
+        rendered.contains("overdrive serve"),
+        "TLS-handshake message must hint at re-running `overdrive serve` since \
+         the canonical trust-material write site is `serve` after Step 01-02; \
+         got: {rendered}",
+    );
+
+    handle.shutdown(Duration::from_secs(2)).await;
 }
