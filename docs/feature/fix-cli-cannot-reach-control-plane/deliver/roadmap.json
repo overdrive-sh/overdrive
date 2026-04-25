@@ -1,0 +1,271 @@
+{
+  "roadmap": {
+    "project_id": "fix-cli-cannot-reach-control-plane",
+    "feature_id": "fix-cli-cannot-reach-control-plane",
+    "created_at": "2026-04-24T16:30:00Z",
+    "filled_at": "2026-04-24T16:30:00Z",
+    "total_steps": 3,
+    "phases": 1,
+    "walking_skeleton_gate": "01-02",
+    "notes": [
+      "Bug fix via /nw-bugfix pipeline. RCA at deliver/rca.md is the authoritative specification — user-reviewed and approved in Phase 2 before roadmap creation.",
+      "Two fixes bundled in this bugfix (user-approved scope expansion). PRIMARY: decouple operator-config dir from data dir so `overdrive serve` writes the trust triple to `$HOME/.overdrive/config` (where the CLI reads) instead of `$XDG_DATA_HOME/overdrive/.overdrive/config`. SECONDARY: split `stringify_reqwest_error`'s `is_connect()` arm so TLS handshake failures render as a distinct cause from TCP connect-refused — the misleading 'could not connect to server' is what misdirected the operator toward network debugging. Originally proposed as a follow-up PR; user asked to bundle.",
+      "Single-cut migration per user memory `feedback_single_cut_greenfield_migrations` — no compatibility shims. `ServerConfig` gains a new `operator_config_dir` field; every in-workspace caller updated in the same PR. User explicitly approved that `serve` overwrites the `local` context in `~/.overdrive/config` on every start, consistent with ADR-0010 §R4 ephemeral-CA model.",
+      "Outside-In TDD discipline for three steps: Step A is a RED regression test (pinned via `panic!` or genuinely-failing assertion per testing.md §RED scaffolds, commit with `--no-verify` since bar is intentionally red); Step B is the GREEN primary-fix step that both satisfies Step A's regression test and decouples data-dir from operator-config-dir across every caller + integration test; Step C is the GREEN secondary-fix step with its own RED unit test for the TLS handshake classifier arm.",
+      "Testing tier mapping (all Tier 1 / acceptance — no DST / proptest / trybuild in play; path-composition defect and error-classifier defect, not a concurrency / input-space / type-system property): integration tests under the existing `integration-tests` feature + existing `tests/integration.rs` entrypoint. `#[serial_test::serial(env)]` mandatory for Step A because it mutates `$HOME`, `$OVERDRIVE_CONFIG_DIR`, `$XDG_DATA_HOME`; RAII `EnvGuard` helper already exists in `cluster_init_serve.rs`.",
+      "No new ADR required. ADR-0010 §R1/§R4 (ephemeral CA, re-mint unconditionally) and ADR-0013 §5 (data dir = XDG) remain authoritative; this fix clarifies their structural boundary rather than changing design. ADR alignment note about the two-directory distinction is a separate follow-up dispatched through the architect agent (per `feedback_delegate_to_architect`).",
+      "Mutation testing scope: diff-scoped via `cargo xtask mutants --diff origin/main --package overdrive-cli` and `--package overdrive-control-plane` — kill-rate gate ≥80% per testing.md §Mutation testing. Diff touches path composition (new `default_operator_config_dir`), `ServerConfig` field plumbing, trust-triple write site, error-classifier match arm. Existing mutation coverage for `write_trust_triple` and `default_operator_config_path` already in place; new code carries coverage through Step A's round-trip test and Step C's classifier unit test."
+    ],
+    "reviews": [
+      {
+        "reviewed_at": "2026-04-24",
+        "reviewer": "user",
+        "scope": "RCA + primary fix direction (decouple operator-config dir from data dir via new `ServerConfig::operator_config_dir` field) + regression test shape (`#[serial(env)]`, scope $HOME/$OVERDRIVE_CONFIG_DIR/$XDG_DATA_HOME, production default helpers, assert `out.endpoint` contains `127.0.0.1`) + scope expansion to bundle the reqwest TLS-classifier fix into this bugfix",
+        "verdict": "APPROVED",
+        "notes": "User confirmed: (1) root cause match — `serve` writes to `$XDG_DATA_HOME/overdrive/.overdrive/config` while CLI reads from `$HOME/.overdrive/config`; (2) primary fix = new explicit `operator_config_dir` field on ServerConfig + ServeArgs + helper `default_operator_config_dir()`; (3) `serve` overwriting `~/.overdrive/config` on every start is acceptable and consistent with ADR-0010 §R4; (4) reqwest classifier fix bundles into this bugfix as Step C."
+      }
+    ]
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Decouple operator-config dir from data dir; improve TLS handshake error classification",
+      "slice": "bugfix",
+      "user_stories": [],
+      "description": "Three-step Outside-In TDD bugfix. Step 01-01 writes the end-to-end regression test that pins production-default `serve` + `job submit` round-trip (RED). Step 01-02 introduces `ServerConfig::operator_config_dir`, threads it through `ServeArgs` + `main.rs` + `default_operator_config_dir()` helper, rewrites `run_server_with_obs` to write the trust triple at the operator-config location, and updates every in-workspace integration test to pass separate `data_dir` and `operator_config_dir` subdirectories (GREEN — Step 01-01 flips RED→GREEN, all pre-existing tests stay green). Step 01-03 adds a RED classifier unit test for TLS handshake failures and splits `stringify_reqwest_error`'s `is_connect()` arm to render handshake failures as a distinct cause (GREEN).",
+      "estimated_hours": 4,
+      "depends_on": [],
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "RED regression test — serve + submit with production defaults round-trip",
+          "description": "Write a new acceptance-level integration test that reproduces the reported bug by running `serve` and `job submit` through their default helpers with `$HOME` scoped to a tempdir. This is the test that would have caught the class of bug described in RCA §Root cause C (no integration test exercises the end-to-end `serve` → `job submit` flow with real production-path defaults). The test MUST fail against current `main` with `CliError::Transport` — proving the bug is real and that Step 01-02's fix is load-bearing. Commit the RED scaffold with `git commit --no-verify` per testing.md §RED scaffolds and intentionally-failing commits.",
+          "criteria": "Test function `serve_and_submit_with_production_defaults_succeeds` is added to `crates/overdrive-cli/tests/integration/cluster_init_serve.rs` annotated `#[tokio::test]` + `#[serial_test::serial(env)]`. Body: (1) create `TempDir`; (2) scope `$HOME = tmp.path()`, unset `$OVERDRIVE_CONFIG_DIR`, unset `$XDG_DATA_HOME` via the existing `EnvGuard::scoped(&[...])` RAII helper already in that file; (3) compute `data_dir` from the same logic `main.rs`' `default_data_dir()` uses (currently resolves to `tmp.path().join(\".local/share/overdrive\")` on the `$HOME` fallback branch); (4) compute `config_dir` from the new `default_operator_config_dir()` helper shape (returns `tmp.path()` — the base — per RCA §Proposed fix step 1); (5) run `overdrive_cli::commands::serve::run(ServeArgs { bind: '127.0.0.1:0'.parse().unwrap(), data_dir, config_dir })` — this shape reflects the ServeArgs that will exist after Step 01-02; (6) assert `overdrive_cli::commands::cluster::default_operator_config_path()` equals `tmp.path().join(\".overdrive\").join(\"config\")`; (7) write a minimal job spec to the tempdir (reuse the existing `write_minimal_job_spec` helper or equivalent already used in this file — if absent, craft inline); (8) call `overdrive_cli::commands::job::submit(SubmitArgs { spec: spec_path, config_path: default_operator_config_path() })` and `.expect('CLI must reach the server it just started')`; (9) assert `out.endpoint.as_str().contains(\"127.0.0.1\")` — proves the round-trip landed on the live server; (10) `handle.shutdown().await.expect('clean shutdown')`. Traceability: RCA §WHY 3A (CLI reads `$HOME/.overdrive/config`; `serve` writes to `<data_dir>/.overdrive/config` — different paths) and RCA §Regression test shape (authoritative sketch, lines 544-607). RED verification: `cargo nextest run -p overdrive-cli --features integration-tests -E 'test(serve_and_submit_with_production_defaults_succeeds)'` MUST fail with `CliError::Transport` / 'could not connect to server' against HEAD — failure message must be the transport error from submit(), NOT an import/type error. If the test compiles but fails for a different reason (e.g. spec parse error), fix the test shape before committing — the RED must be exactly the bug the RCA describes. Because `ServeArgs.config_dir` does not yet exist on HEAD, Step 01-01 accepts one of two shapes (crafter's judgment): (a) use a `#[cfg(feature = \"...\")]`-gated stub or `#[ignore]`-for-this-commit marker that is removed in 01-02, OR (b) let the test fail to compile and document that in the commit body — but the preferred shape is (a) so the test always compiles and runs, failing on the *behaviour* not on the *type system*. The commit message is `test(cli): add regression test for serve+submit production-defaults round-trip (RED scaffold — see Step-ID: 01-01 trailer)` and includes a note that `--no-verify` is used because this is an intentional RED scaffold per `.claude/rules/testing.md`.",
+          "acceptance_criteria": [
+            "RCA §WHY 3A — the new test pins the invariant that `default_operator_config_path()` (CLI read) and the path where `serve::run` writes the trust triple (currently `<data_dir>/.overdrive/config`) are the same file under production defaults.",
+            "RCA §Root cause C — this test is the first integration test that exercises the end-to-end `serve` → `job submit` flow with real production-path defaults (no explicit config_path plumbing; `$HOME` scoped via `EnvGuard`).",
+            "RCA §Regression test shape (lines 544-607) — the test body matches the sketch: `#[tokio::test]` + `#[serial(env)]`, scoped env via `EnvGuard::scoped`, bind `127.0.0.1:0`, submit via `default_operator_config_path()`, assert `out.endpoint.as_str().contains(\"127.0.0.1\")`.",
+            "Test lives under the existing `integration-tests` feature via the existing `tests/integration.rs` entrypoint — no CI wiring change, no new nextest binary.",
+            "RED verified before commit: `cargo nextest run -p overdrive-cli --features integration-tests -E 'test(serve_and_submit_with_production_defaults_succeeds)'` exits non-zero with a `CliError::Transport` failure (the exact reqwest 'could not connect to server' cause the RCA §WHY 1A documents).",
+            "Commit uses `git commit --no-verify` per `.claude/rules/testing.md` §RED scaffolds — commit body explicitly calls out the intentional RED and references the Step 01-02 GREEN step that flips it.",
+            "Commit message carries `Step-ID: 01-01` trailer."
+          ],
+          "files_to_modify": [
+            "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/tests/integration/cluster_init_serve.rs"
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/cluster_init_serve.rs",
+          "scenario_name": "serve_and_submit_with_production_defaults_succeeds",
+          "tier": "Tier 1 (acceptance / integration — requires integration-tests feature per testing.md)",
+          "time_estimate_hours": 1,
+          "estimated_hours": 1,
+          "dependencies": [],
+          "quality_gates": [
+            "RED verified: test fails against current HEAD with the `CliError::Transport` 'could not connect to server' cause (not an import or compile error).",
+            "Test lives under the existing integration-tests feature gate; no new CI wiring introduced.",
+            "`#[serial_test::serial(env)]` annotation present; env mutations wrapped in `unsafe { }` blocks with `// SAFETY:` comments per `.claude/rules/development.md`.",
+            "Uses the existing `EnvGuard` RAII helper from `cluster_init_serve.rs`; no manual save-and-restore pattern.",
+            "Commit message includes `Step-ID: 01-01` trailer and explicit `--no-verify` rationale."
+          ],
+          "deliverables": [
+            "New `#[tokio::test] #[serial_test::serial(env)]` function `serve_and_submit_with_production_defaults_succeeds` in `crates/overdrive-cli/tests/integration/cluster_init_serve.rs`.",
+            "Single commit with `--no-verify` and `Step-ID: 01-01` trailer, explicitly marked as RED scaffold."
+          ],
+          "implementation_scope": {
+            "production_files": [],
+            "test_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/tests/integration/cluster_init_serve.rs"
+            ],
+            "config_files": []
+          },
+          "implementation_notes": "TDD phase mapping within this step: PREPARE — re-read RCA §Regression test shape (authoritative sketch); verify `EnvGuard::scoped` and any `write_minimal_job_spec` helper already exist in `cluster_init_serve.rs` (inline a helper if absent); confirm `SubmitArgs` fields and `job::submit` signature on HEAD. RED_ACCEPTANCE — write the test; run `cargo nextest run -p overdrive-cli --features integration-tests -E 'test(serve_and_submit_with_production_defaults_succeeds)'`; MUST fail with `CliError::Transport`. The test references `ServeArgs { bind, data_dir, config_dir }` — `config_dir` does not yet exist on HEAD; the accepted shape is a test body that compiles against current `ServeArgs` (using whatever shape HEAD has) and fails at runtime with the transport error, to be refined in 01-02 alongside the field addition. Alternative: mark the test `#[ignore = \"unblocks after 01-02\"]` with a commit-body note — LESS preferred because the RED is then invisible to nextest by default; only use if the test cannot be made to compile against HEAD without an awkward workaround. RED_UNIT — SKIPPED (NOT_APPLICABLE: the structural invariant is end-to-end path equality, captured by the acceptance test; a unit test on `default_operator_config_dir` would be a tautology before it exists). GREEN — SKIPPED in this step (occurs in 01-02). COMMIT — `git commit --no-verify` with message `test(cli): pin serve+submit round-trip with production defaults (RED — 01-02 will flip GREEN)` and `Step-ID: 01-01` trailer. Post-commit: do NOT push; downstream steps expect the RED commit at the tip of the branch. Record phase transitions via `python3 -m des.cli.log_phase` — do NOT edit `execution-log.json` directly."
+        },
+        {
+          "id": "01-02",
+          "name": "GREEN primary fix — add `operator_config_dir`, rewrite trust-triple write site, decouple tests",
+          "description": "Apply the RCA §Proposed fix (steps 1-6). Add `operator_config_dir: PathBuf` to `ServerConfig` and `ServeArgs`; introduce `default_operator_config_dir()` in `commands::cluster`; rewrite `run_server_with_obs` so `write_trust_triple` receives `config.operator_config_dir` (not `config.data_dir`); thread the new field through `main.rs`. Update every in-workspace integration test that currently passes one `TempDir` as both `data_dir` and the read target — each test now creates two subdirectories. Step 01-01's regression test flips RED→GREEN; all pre-existing tests remain GREEN. Single-cut migration per `feedback_single_cut_greenfield_migrations`: no compatibility shims; `ServerConfig::data_dir` doc comment updated to say it is the redb + libSQL storage root ONLY (retire the 'and the trust triple config file' overloaded wording).",
+          "criteria": "Production changes: (1) `crates/overdrive-control-plane/src/lib.rs` — `ServerConfig` gains `pub operator_config_dir: PathBuf` field; `data_dir` doc comment is rewritten to name it as redb + libSQL storage root only (remove 'trust triple config file' overload); `run_server_with_obs` at lines 222-230 is rewritten to call `tls_bootstrap::write_trust_triple(&config.operator_config_dir, &endpoint, &material)`. (2) `crates/overdrive-cli/src/commands/serve.rs` — `ServeArgs` gains `pub config_dir: PathBuf`; `serve::run` forwards it into `ServerConfig { operator_config_dir: args.config_dir, .. }`. (3) `crates/overdrive-cli/src/commands/cluster.rs` — add `pub fn default_operator_config_dir() -> PathBuf` that returns the base directory (`$OVERDRIVE_CONFIG_DIR` → `$HOME` → `.`, NO `.overdrive/config` suffix) — companion to the existing `default_operator_config_path()`. The existing `default_operator_config_path()` SHOULD internally delegate to the new helper + `.join(\".overdrive\").join(\"config\")` so both helpers share the base-dir resolution exactly once (single source of truth; prevents drift regression of the shape Step 01-01 pins). (4) `crates/overdrive-cli/src/main.rs` — the `Command::Serve` arm threads `default_operator_config_dir()` into `ServeArgs { bind, data_dir, config_dir }`. Test changes (decouple `data_dir` from operator-config read target): (5) `crates/overdrive-control-plane/tests/integration/{describe_round_trip,server_lifecycle,observation_empty_rows,submit_round_trip,concurrent_submit_toctou,idempotent_resubmit,tls_bootstrap}.rs` — each test that previously passed one `TempDir` as `data_dir` AND read trust triple from `tmp.path().join(\".overdrive/config\")` now passes `tmp.path().join(\"data\")` as `data_dir` and `tmp.path().join(\"conf\")` as `operator_config_dir`, reading the trust triple from `tmp.path().join(\"conf\").join(\".overdrive\").join(\"config\")`. (6) `crates/overdrive-cli/tests/integration/{cluster_init_serve,http_client,endpoint_from_config,walking_skeleton,cluster_and_node_commands,job_submit}.rs` — same decoupling. The crafter verifies each file's actual shape before editing; `job_submit.rs` exists on HEAD per the `tests/integration/` glob. Verification: `cargo nextest run -p overdrive-cli --features integration-tests` AND `cargo nextest run -p overdrive-control-plane --features integration-tests` — ALL tests green, including Step 01-01's regression test (now flipped). `cargo clippy --all-targets --features integration-tests -- -D warnings` clean on touched crates. `cargo test --doc -p overdrive-cli -p overdrive-control-plane` green (doctest guard for any `ServerConfig` / `ServeArgs` examples touched by the field addition). Commit message: `fix(cli,control-plane): decouple operator-config dir from data dir` with `Step-ID: 01-02` trailer. Normal pre-commit hooks apply (no `--no-verify`). Post-GREEN smoke check: `git diff --name-only` shows the full set of production and test files modified; Step 01-01's regression test was flipped GREEN within the same commit (not a separate commit) so the reviewer sees test and fix coupled.",
+          "acceptance_criteria": [
+            "RCA §Proposed fix steps 1-6 — all production and test-site changes land: new `operator_config_dir` field, new `default_operator_config_dir()` helper, rewritten `run_server_with_obs` trust-triple write call, decoupled test tempdir layout across all listed integration tests.",
+            "RCA §WHY 4B (data_dir overload is the structural defect) — `ServerConfig::data_dir` doc comment is rewritten to describe it as redb + libSQL storage root only; the trust-triple responsibility moves to the new `operator_config_dir` field.",
+            "RCA §WHY 4C — test files that previously hid the bug by passing one TempDir as both roles now pass two explicit subdirectories, so a future refactor that re-overloads the two concerns fails the suite.",
+            "Step 01-01's regression test `serve_and_submit_with_production_defaults_succeeds` transitions RED→GREEN in this commit without modification (proving the fix is load-bearing and the test pins the invariant).",
+            "All pre-existing tests across `overdrive-cli` and `overdrive-control-plane` remain GREEN — no regressions.",
+            "Single-cut migration per `feedback_single_cut_greenfield_migrations`: no compatibility shim, no deprecated alias; `ServerConfig` field rename / addition is a clean break inside the workspace and every caller is updated in this commit.",
+            "`default_operator_config_path()` internally delegates to `default_operator_config_dir()` — shared base-dir resolution guarantees read and write sites cannot drift again (structural drift-surface closure, same shape as `fix-overdrive-config-path-doubled` Fix 3).",
+            "`cargo clippy --all-targets --features integration-tests -- -D warnings` green on both touched crates; typed errors per `.claude/rules/development.md` (no new `eyre::Report` on library boundaries).",
+            "Commit message includes `Step-ID: 01-02` trailer; normal pre-commit hooks pass (no `--no-verify`)."
+          ],
+          "files_to_modify": [
+            "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/src/main.rs",
+            "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/src/commands/serve.rs",
+            "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/src/commands/cluster.rs",
+            "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/src/lib.rs",
+            "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/tests/integration/describe_round_trip.rs",
+            "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/tests/integration/server_lifecycle.rs",
+            "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/tests/integration/observation_empty_rows.rs",
+            "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/tests/integration/submit_round_trip.rs",
+            "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/tests/integration/concurrent_submit_toctou.rs",
+            "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/tests/integration/idempotent_resubmit.rs",
+            "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/tests/integration/tls_bootstrap.rs",
+            "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/tests/integration/cluster_init_serve.rs",
+            "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/tests/integration/http_client.rs",
+            "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/tests/integration/endpoint_from_config.rs",
+            "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/tests/integration/walking_skeleton.rs",
+            "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/tests/integration/cluster_and_node_commands.rs",
+            "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/tests/integration/job_submit.rs"
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/cluster_init_serve.rs",
+          "scenario_name": "serve_and_submit_with_production_defaults_succeeds",
+          "tier": "Tier 1 (acceptance / integration — requires integration-tests feature per testing.md)",
+          "time_estimate_hours": 2,
+          "estimated_hours": 2,
+          "dependencies": ["01-01"],
+          "quality_gates": [
+            "GREEN verified: `cargo nextest run -p overdrive-cli --features integration-tests -E 'test(serve_and_submit_with_production_defaults_succeeds)'` exits 0 (Step 01-01's RED is now GREEN).",
+            "Full suite green: `cargo nextest run -p overdrive-cli --features integration-tests` AND `cargo nextest run -p overdrive-control-plane --features integration-tests` — no pre-existing regressions.",
+            "Doctests green: `cargo test --doc -p overdrive-cli -p overdrive-control-plane`.",
+            "Clippy clean: `cargo clippy --all-targets --features integration-tests -- -D warnings` on both touched crates.",
+            "`ServerConfig::data_dir` docstring rewritten to name it as redb + libSQL storage root only (overload explicitly retired).",
+            "`default_operator_config_path()` delegates to `default_operator_config_dir()` (drift-surface closure).",
+            "Commit message includes `Step-ID: 01-02` trailer; normal pre-commit hooks pass."
+          ],
+          "deliverables": [
+            "`operator_config_dir` field added to `ServerConfig` and `ServeArgs` with threaded plumbing through `main.rs`.",
+            "`default_operator_config_dir()` helper in `commands::cluster` with `default_operator_config_path()` delegating to it.",
+            "`run_server_with_obs` rewritten to write the trust triple to the operator-config dir.",
+            "All 16 touched files updated in one commit; Step 01-01's regression test flipped to GREEN.",
+            "Commit with `Step-ID: 01-02` trailer, no `--no-verify`."
+          ],
+          "implementation_scope": {
+            "production_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/src/main.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/src/commands/serve.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/src/commands/cluster.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/src/lib.rs"
+            ],
+            "test_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/tests/integration/describe_round_trip.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/tests/integration/server_lifecycle.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/tests/integration/observation_empty_rows.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/tests/integration/submit_round_trip.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/tests/integration/concurrent_submit_toctou.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/tests/integration/idempotent_resubmit.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-control-plane/tests/integration/tls_bootstrap.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/tests/integration/cluster_init_serve.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/tests/integration/http_client.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/tests/integration/endpoint_from_config.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/tests/integration/walking_skeleton.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/tests/integration/cluster_and_node_commands.rs",
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/tests/integration/job_submit.rs"
+            ],
+            "config_files": []
+          },
+          "implementation_notes": "TDD phase mapping within this step: PREPARE — reread RCA §Proposed fix and §Files affected; verify on HEAD the current shapes of `ServerConfig`, `ServeArgs`, `run_server_with_obs`, `default_operator_config_path`, and each test file's tempdir setup (most use `tmp.path()` directly and read from `tmp.path().join(\".overdrive\").join(\"config\")` — confirm per file before editing). GREEN — apply production changes in this order to minimise broken intermediate states: (1) introduce `default_operator_config_dir()` and refactor `default_operator_config_path()` to delegate; (2) add `operator_config_dir` field to `ServerConfig`; (3) update `run_server_with_obs` to use the new field; (4) add `config_dir` to `ServeArgs` and forward it into `ServerConfig`; (5) thread `default_operator_config_dir()` into `main.rs`. Compilation error surface is proportional to the number of `ServerConfig { bind, data_dir }` literal construction sites and `ServeArgs { bind, data_dir }` sites — fix each one to pass a second directory (test files create `tmp.path().join(\"data\")` and `tmp.path().join(\"conf\")`, read the trust triple from `conf/.overdrive/config`). After each crate compiles, run its test suite to catch test-site decoupling mistakes immediately. Verify Step 01-01's regression test flips GREEN by running `cargo nextest run -p overdrive-cli --features integration-tests -E 'test(serve_and_submit_with_production_defaults_succeeds)'`. RED_UNIT — SKIPPED (NOT_APPLICABLE: the invariant under test is the end-to-end path equality, already covered by 01-01's acceptance test; a unit test on `default_operator_config_dir` would be a tautology). COMMIT — `git commit` (no `--no-verify`) with message `fix(cli,control-plane): decouple operator-config dir from data dir; write trust triple to ~/.overdrive/config` and `Step-ID: 01-02` trailer. Note: if the crafter discovers during editing that `job_submit.rs` does NOT read the trust triple from a `TempDir`-derived path (e.g. it already uses `default_operator_config_path` indirectly), remove it from the edit list — the authoritative criterion is 'reads trust triple from `tmp.path().join(\".overdrive/config\")` and needs decoupling'. Record phase transitions via `python3 -m des.cli.log_phase`."
+        },
+        {
+          "id": "01-03",
+          "name": "GREEN secondary fix — split `stringify_reqwest_error` to distinguish TLS handshake from TCP refused",
+          "description": "Apply the RCA §Secondary fix (bundled into this bugfix per user scope expansion). Currently `stringify_reqwest_error`'s `is_connect()` arm renders BOTH pure TCP `ECONNREFUSED` and rustls certificate-verification failures as 'could not connect to server' — that collapse actively misdirects operators toward network debugging when the real fault is trust material. Write a RED unit test that constructs a `reqwest::Error` whose `source()` chain contains a rustls cert-verification failure and asserts the classifier returns a TLS-handshake-specific cause. Then split the `is_connect()` arm so when the error chain contains a rustls `CertificateError` / `InvalidCertificate` variant, the classifier returns a message like 'TLS handshake failed (certificate not trusted)' with a hint to re-run `overdrive serve` if the CA was re-minted. Preserve the existing 'could not connect to server' message for the pure-TCP-refused arm so unaffected diagnostics do not change.",
+          "criteria": "Test changes (RED first): add a new test function to `crates/overdrive-cli/tests/acceptance/insecure_rejected.rs` (closest existing acceptance file for TLS-shaped assertions — crafter may instead extend `tests/integration/http_client.rs` if that reads more naturally, but NOT create a new file for a single test). Test shape: `#[tokio::test]` that stands up an axum-server listener on `127.0.0.1:0` with a self-signed leaf whose CA is NOT in the client's trust bundle (reuse `tls_bootstrap::mint_ephemeral_ca` for server material; build a reqwest client that pins a DIFFERENT CA via `build_reqwest_client` with a second mint), issues a GET or HEAD against the server endpoint, catches the resulting `reqwest::Error`, passes it to `stringify_reqwest_error`, and asserts the returned string contains 'TLS handshake' OR 'certificate' (distinct from 'could not connect to server'). This is structurally easier than synthesising a `reqwest::Error` manually — reqwest's constructors are private. RED verification: test fails on HEAD because the current arm returns 'could not connect to server' for the handshake case. GREEN production change: `crates/overdrive-cli/src/http_client.rs` — split the `err.is_connect()` arm in `stringify_reqwest_error` (currently lines 307-326 per RCA) by walking `err.source()` chain via `std::error::Error::source` and checking `downcast_ref` for rustls' `rustls::Error` variants (specifically `InvalidCertificate(_)` or whatever the current rustls version exposes for cert-verification failures — crafter verifies against `Cargo.lock` rustls version on HEAD). When a rustls cert-verification error is present in the chain, return a TLS-handshake-specific category string like `'TLS handshake failed (certificate not trusted by the client)'` with a hint recommending re-running `overdrive serve` if the CA was re-minted since the CLI config was written. When the chain does not contain a rustls cert error, fall through to the existing 'could not connect to server' string — pure TCP-refused diagnostics stay byte-identical. Verification: `cargo nextest run -p overdrive-cli --features integration-tests` green, including both the new classifier test and Step 01-01's regression test. `cargo test --doc -p overdrive-cli` green. Clippy clean. Commit message: `fix(cli): classify TLS handshake failures separately from TCP connect-refused` with `Step-ID: 01-03` trailer. Normal pre-commit hooks apply.",
+          "acceptance_criteria": [
+            "RCA §Secondary fix — classifier split lands; rustls cert-verification errors in the `err.source()` chain render as a TLS-handshake category distinct from pure TCP-refused.",
+            "RCA §WHY 1A — the original misleading 'could not connect to server' message is preserved exclusively for the pure-TCP-refused path (byte-identical diagnostic for unaffected error paths).",
+            "RCA §Contributing factors point 2 — the diagnostic-quality improvement closes the 'handshake classifier ambiguity' smell documented in the RCA (operators no longer misdirected toward network debugging when the fault is trust material).",
+            "RED unit/acceptance test first: new test in `crates/overdrive-cli/tests/acceptance/insecure_rejected.rs` (or `tests/integration/http_client.rs` at crafter's discretion if that reads more naturally) constructs a handshake failure via a pinned-wrong-CA client against a live mint'd server and asserts the classifier returns a TLS-specific message — this test MUST fail on HEAD before the classifier split is applied.",
+            "GREEN verified: new test passes after the classifier split; `cargo nextest run -p overdrive-cli --features integration-tests` full suite green (Step 01-01's regression test and all pre-existing tests stay green).",
+            "Message text references 'TLS handshake' or 'certificate' distinctly — the operator reading the CLI output immediately knows the fault is trust material, not network reachability. Hint recommends re-running `overdrive serve` (NOT `overdrive cluster init`, because after Step 01-02 `serve` is the canonical trust-triple write site for the live server).",
+            "Clippy clean on touched files; typed errors preserved — no new `eyre::Report` on library boundaries.",
+            "Commit message includes `Step-ID: 01-03` trailer; normal pre-commit hooks pass."
+          ],
+          "files_to_modify": [
+            "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/src/http_client.rs",
+            "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/tests/acceptance/insecure_rejected.rs"
+          ],
+          "test_file": "crates/overdrive-cli/tests/acceptance/insecure_rejected.rs",
+          "scenario_name": "stringify_reqwest_error_reports_tls_handshake_distinctly_from_tcp_refused",
+          "tier": "Tier 1 (acceptance / integration)",
+          "time_estimate_hours": 1,
+          "estimated_hours": 1,
+          "dependencies": ["01-02"],
+          "quality_gates": [
+            "RED verified before the classifier change: new test fails on HEAD with the old 'could not connect to server' text for the handshake case.",
+            "GREEN verified: new test passes after the split; full overdrive-cli suite green.",
+            "Clippy clean: `cargo clippy -p overdrive-cli --all-targets --features integration-tests -- -D warnings`.",
+            "Pure-TCP-refused diagnostic unchanged (existing 'could not connect to server' string preserved).",
+            "Hint text recommends re-running `overdrive serve` — consistent with 01-02's new canonical write site.",
+            "Commit message includes `Step-ID: 01-03` trailer; normal pre-commit hooks pass."
+          ],
+          "deliverables": [
+            "New acceptance test `stringify_reqwest_error_reports_tls_handshake_distinctly_from_tcp_refused` (exact name at crafter's discretion — criterion is 'pins the TLS-handshake arm').",
+            "`stringify_reqwest_error` split: rustls cert-verification in source chain → TLS-handshake message; otherwise → existing TCP-refused message.",
+            "Commit with `Step-ID: 01-03` trailer."
+          ],
+          "implementation_scope": {
+            "production_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/src/http_client.rs"
+            ],
+            "test_files": [
+              "/Users/marcus/conductor/workspaces/helios/daegu-v1/crates/overdrive-cli/tests/acceptance/insecure_rejected.rs"
+            ],
+            "config_files": []
+          },
+          "implementation_notes": "TDD phase mapping: PREPARE — read `http_client.rs:307-326` and `insecure_rejected.rs` on HEAD; verify the rustls version in `Cargo.lock` to determine the exact error variant to downcast against (`rustls::Error::InvalidCertificate(CertificateError::...)` shape is the typical target but the enum layout varies by rustls major). Confirm `build_reqwest_client` signature — the test constructs a client pinned to a DIFFERENT CA than the server's leaf chain. RED_ACCEPTANCE — write the new test; stand up an axum-server TLS listener using `mint_ephemeral_ca` (same helper the existing `insecure_rejected.rs` tests use); build a reqwest client pinned to a SECOND independent mint; issue a GET/HEAD; assert `stringify_reqwest_error(&err)` contains 'TLS handshake' or 'certificate'. Run the test — MUST fail on HEAD with the old 'could not connect to server' classifier output. RED_UNIT — SKIPPED (NOT_APPLICABLE: synthesising a `reqwest::Error` with a private rustls source in a pure unit test is structurally harder than standing up a real mismatched-CA handshake; the acceptance-level RED covers the invariant and reuses the existing `mint_ephemeral_ca` plumbing). GREEN — in `stringify_reqwest_error`, before the existing `else if err.is_connect()` arm (or inside it before falling through to the 'could not connect' return), walk the `Error::source()` chain; for each source, `downcast_ref::<rustls::Error>()` (or the equivalent reqwest-level wrapper, whichever surfaces the cert error per the linked rustls version); on match, return a handshake-specific message. Do NOT introduce a new error variant in `CliError` — the fix is strictly inside the classifier's string output (the category the caller sees is still Transport). Re-run the full cli suite — MUST be green. COMMIT — `git commit` with message `fix(cli): distinguish TLS handshake failure from TCP connect-refused in reqwest error classifier` and `Step-ID: 01-03` trailer. Record phase transitions via `python3 -m des.cli.log_phase`."
+        }
+      ]
+    }
+  ],
+  "implementation_scope": {
+    "production_files": [
+      "crates/overdrive-cli/src/main.rs",
+      "crates/overdrive-cli/src/commands/serve.rs",
+      "crates/overdrive-cli/src/commands/cluster.rs",
+      "crates/overdrive-cli/src/http_client.rs",
+      "crates/overdrive-control-plane/src/lib.rs"
+    ],
+    "test_files": [
+      "crates/overdrive-cli/tests/integration/cluster_init_serve.rs",
+      "crates/overdrive-cli/tests/integration/http_client.rs",
+      "crates/overdrive-cli/tests/integration/endpoint_from_config.rs",
+      "crates/overdrive-cli/tests/integration/walking_skeleton.rs",
+      "crates/overdrive-cli/tests/integration/cluster_and_node_commands.rs",
+      "crates/overdrive-cli/tests/integration/job_submit.rs",
+      "crates/overdrive-cli/tests/acceptance/insecure_rejected.rs",
+      "crates/overdrive-control-plane/tests/integration/describe_round_trip.rs",
+      "crates/overdrive-control-plane/tests/integration/server_lifecycle.rs",
+      "crates/overdrive-control-plane/tests/integration/observation_empty_rows.rs",
+      "crates/overdrive-control-plane/tests/integration/submit_round_trip.rs",
+      "crates/overdrive-control-plane/tests/integration/concurrent_submit_toctou.rs",
+      "crates/overdrive-control-plane/tests/integration/idempotent_resubmit.rs",
+      "crates/overdrive-control-plane/tests/integration/tls_bootstrap.rs"
+    ],
+    "config_files": []
+  },
+  "walking_skeleton": {
+    "gate_step": "01-02",
+    "description": "After 01-02 commits: `cargo nextest run -p overdrive-cli --features integration-tests` and `cargo nextest run -p overdrive-control-plane --features integration-tests` all green including Step 01-01's regression test flipped to GREEN. On the user's laptop, after `cargo install --path crates/overdrive-cli`, `overdrive serve` in one terminal followed by `overdrive job submit ./payments.toml` in another terminal succeeds end-to-end (no `CliError::Transport`). Step 01-03 is a diagnostic-quality follow-on within the same bugfix — not required for the walking-skeleton gate, but blocking for the feature's overall completion."
+  },
+  "quality_gates": {
+    "per_step": [
+      "RED verified BEFORE the fix in steps where a RED scaffold is written (01-01 and 01-03)",
+      "GREEN verified AFTER the fix in steps that deliver production code (01-02 and 01-03)",
+      "All pre-existing tests continue to pass at the end of every step (no regressions)",
+      "`cargo clippy` clean on touched files with `-D warnings`",
+      "`cargo test --doc` green for any crate whose public API surface changes",
+      "Each commit message includes a `Step-ID: NN-NN` trailer",
+      "`--no-verify` used ONLY in Step 01-01 (intentional RED scaffold) with explicit rationale in commit body"
+    ],
+    "post_deliver": [
+      "DES integrity verification: verify_deliver_integrity exits 0",
+      "Adversarial review via nw-software-crafter-reviewer (rigor.review_enabled = true)",
+      "Diff-scoped mutation testing: `cargo xtask mutants --diff origin/main --package overdrive-cli` AND `--package overdrive-control-plane` with ≥80% kill rate each (rigor.mutation_enabled = true per testing.md §Mutation testing)",
+      "Manual smoke verification by user: `overdrive serve` + `overdrive job submit ./payments.toml` from two terminals on the user's laptop — primary acceptance signal for the reported bug"
+    ]
+  },
+  "tdd_rhythm_per_step": "Outside-In TDD across three steps: Step 01-01 produces a RED acceptance test that fails against HEAD with CliError::Transport (the exact failure shape documented in RCA §WHY 1A), committed with --no-verify. Step 01-02 applies the primary fix (operator_config_dir decoupling + test-site decoupling across 16 files) and flips Step 01-01's test GREEN within a single commit — test and production code coupled in one reviewer-visible diff. Step 01-03 adds a new RED classifier test + the reqwest error-arm split (GREEN in one commit, normal hooks).",
+  "validation": {
+    "status": "pending",
+    "reviewer": "user-via-nw-bugfix-phase-2",
+    "approved_at": null,
+    "notes": "Roadmap drafted against user-approved RCA and Phase 2 scope decisions (primary fix + bundled secondary fix, single-cut migration, `serve` overwrites `~/.overdrive/config` on every start consistent with ADR-0010 §R4). Awaiting final roadmap-level validation before step execution begins."
+  }
+}
