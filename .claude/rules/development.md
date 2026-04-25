@@ -447,6 +447,18 @@ the working tree is dirty with parallel work. Do not reach for
 `--no-verify` to bypass the lefthook auto-staging — the hook is also
 running clippy and tests, and skipping it lands unverified code.
 
+**Always-include path: `.nwave/des-config.json`.** When this file shows
+as modified, untracked, or otherwise affected in `git status`, it MUST
+be staged into the current commit — never stashed under the
+focused-subset pattern, never deferred to a follow-up commit. The file
+captures the active nWave rigor profile (lean / standard / thorough /
+exhaustive / custom / inherit) and is the SSOT for how subsequent wave
+runs in this repo behave; leaving it out of a commit that touched it
+silently desyncs the committed profile from the one the next agent
+will read. If the commit you are landing is otherwise unrelated, add
+`.nwave/des-config.json` to it anyway — it is the one file exempt from
+the "focused subset" discipline above.
+
 ## Rust patterns
 
 ### Errors
