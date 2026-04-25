@@ -15,9 +15,10 @@
 //! at the type level.
 
 use std::ffi::OsString;
+use std::fmt;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use base64::Engine as _;
 use base64::engine::general_purpose::STANDARD as BASE64;
@@ -26,8 +27,134 @@ use rcgen::{
     KeyPair, KeyUsagePurpose, SanType,
 };
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 
-use crate::error::ControlPlaneError;
+/// Structured TLS-bootstrap error.
+///
+/// One variant per upstream error type encountered along the cert-mint
+/// → trust-triple-write → trust-triple-load path. Embedded into
+/// [`crate::error::ControlPlaneError`] via `#[from]`; the HTTP mapping
+/// (ADR-0015 §3) collapses every variant to `500 Internal` (TLS
+/// bootstrap is infra failure), but the structured chain is preserved
+/// for audit logs and the §12 investigation agent — exactly the
+/// "specific pass-through variants for each known error source"
+/// hardening ADR-0015 §Consequences calls for.
+///
+/// Per `development.md` §Errors — Pass-through embedding: every variant
+/// names the underlying error via `#[source]`, never via `Display`
+/// concatenation.
+#[derive(Debug, Error)]
+pub enum TlsBootstrapError {
+    /// `rcgen` failed during cert/key generation, params construction,
+    /// signing, or DNS-name encoding. `context` names which step.
+    #[error("rcgen {context}: {source}")]
+    Rcgen {
+        context: &'static str,
+        #[source]
+        source: rcgen::Error,
+    },
+
+    /// Filesystem operation against the trust-triple path failed.
+    /// `op` names the syscall (`create_dir_all`, `open`, `write`,
+    /// `read trust triple`); `path` is the offending path.
+    #[error("filesystem {op} on {}: {source}", path.display())]
+    Io {
+        op: &'static str,
+        path: PathBuf,
+        #[source]
+        source: io::Error,
+    },
+
+    /// `rustls_pemfile` failed to parse a PEM stream. `context` names
+    /// which buffer (server cert, server key).
+    #[error("PEM parse {context}: {source}")]
+    Pem {
+        context: &'static str,
+        #[source]
+        source: io::Error,
+    },
+
+    /// `rustls` rejected the cert/key combination passed to
+    /// `with_single_cert` (typically a key-algorithm mismatch).
+    #[error("rustls config: {source}")]
+    Rustls {
+        #[source]
+        source: rustls::Error,
+    },
+
+    /// TOML serialisation of the trust-triple writer struct failed.
+    #[error("toml serialise: {source}")]
+    TomlSerialise {
+        #[source]
+        source: toml::ser::Error,
+    },
+
+    /// TOML parse of the on-disk trust-triple config failed.
+    /// Display retains the `"failed to parse trust triple at {path}:
+    /// invalid TOML"` phrasing the integration tests pin (see
+    /// `tests/integration/tls_bootstrap.rs::load_trust_triple_*`).
+    #[error("failed to parse trust triple at {}: invalid TOML: {source}", path.display())]
+    TomlParse {
+        path: PathBuf,
+        #[source]
+        source: toml::de::Error,
+    },
+
+    /// `current-context` in the trust-triple config did not match any
+    /// entry in the `contexts` array. ADR-0010 §Enforcement requires
+    /// rejection rather than a degraded load.
+    #[error(
+        "failed to parse trust triple at {}: current-context `{name}` \
+         not present in `contexts`",
+        path.display()
+    )]
+    MissingContext { path: PathBuf, name: String },
+
+    /// One of the base64 fields (`ca` / `crt` / `key`) in the trust
+    /// triple did not decode.
+    #[error(
+        "failed to parse trust triple at {}: field `{field}` is not \
+         valid base64: {source}",
+        path.display()
+    )]
+    Base64 {
+        path: PathBuf,
+        field: TrustTripleField,
+        #[source]
+        source: base64::DecodeError,
+    },
+
+    /// Minted material was structurally malformed — empty cert chain
+    /// or missing private key. Distinct from a PEM parse error: parsing
+    /// succeeded, but the result is unusable.
+    #[error("malformed material: {reason}")]
+    MalformedMaterial { reason: &'static str },
+}
+
+/// Which base64 field of a trust-triple context failed to decode.
+///
+/// Lifted to a typed enum (rather than a `&'static str`) so the
+/// queryable kind survives any future structured-audit consumer that
+/// branches on field identity.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum TrustTripleField {
+    /// CA certificate PEM (`ca`).
+    Ca,
+    /// Client leaf certificate PEM (`crt`).
+    Crt,
+    /// Client leaf private key PEM (`key`).
+    Key,
+}
+
+impl fmt::Display for TrustTripleField {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Ca => "ca",
+            Self::Crt => "crt",
+            Self::Key => "key",
+        })
+    }
+}
 
 /// Abstraction over "get the host's hostname".
 ///
@@ -102,10 +229,11 @@ pub struct CaMaterial {
 ///
 /// # Errors
 ///
-/// Returns `ControlPlaneError::Internal` if `rcgen` key generation or
-/// PEM serialisation fails. Hostname resolution failures are tolerated
-/// — the leaf degrades to the remaining three SANs.
-pub fn mint_ephemeral_ca() -> Result<CaMaterial, ControlPlaneError> {
+/// Returns a [`TlsBootstrapError`] if `rcgen` key generation, params
+/// construction, signing, or DNS-name encoding fails. Hostname
+/// resolution failures are tolerated — the leaf degrades to the
+/// remaining three SANs.
+pub fn mint_ephemeral_ca() -> Result<CaMaterial, TlsBootstrapError> {
     mint_ephemeral_ca_with_hostname(&SystemHostname)
 }
 
@@ -120,13 +248,13 @@ pub fn mint_ephemeral_ca() -> Result<CaMaterial, ControlPlaneError> {
 /// Same as [`mint_ephemeral_ca`].
 pub fn mint_ephemeral_ca_with_hostname(
     hostname_source: &dyn HostnameSource,
-) -> Result<CaMaterial, ControlPlaneError> {
+) -> Result<CaMaterial, TlsBootstrapError> {
     // --- CA -----------------------------------------------------------
-    let ca_key =
-        KeyPair::generate().map_err(|e| ControlPlaneError::internal("ca keypair generation", e))?;
+    let ca_key = KeyPair::generate()
+        .map_err(|source| TlsBootstrapError::Rcgen { context: "ca keypair generation", source })?;
 
     let mut ca_params = CertificateParams::new(Vec::<String>::new())
-        .map_err(|e| ControlPlaneError::internal("ca params", e))?;
+        .map_err(|source| TlsBootstrapError::Rcgen { context: "ca params", source })?;
     ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
     ca_params.distinguished_name = {
         let mut dn = DistinguishedName::new();
@@ -141,7 +269,7 @@ pub fn mint_ephemeral_ca_with_hostname(
 
     let ca_cert = ca_params
         .self_signed(&ca_key)
-        .map_err(|e| ControlPlaneError::internal("ca self-sign", e))?;
+        .map_err(|source| TlsBootstrapError::Rcgen { context: "ca self-sign", source })?;
     let ca_cert_pem = ca_cert.pem();
 
     // --- Server leaf --------------------------------------------------
@@ -155,11 +283,10 @@ pub fn mint_ephemeral_ca_with_hostname(
     let mut server_sans = vec![
         SanType::IpAddress(IpAddr::V4(Ipv4Addr::LOCALHOST)),
         SanType::IpAddress(IpAddr::V6(Ipv6Addr::LOCALHOST)),
-        SanType::DnsName(
-            "localhost"
-                .try_into()
-                .map_err(|e| ControlPlaneError::internal("dns name `localhost`", e))?,
-        ),
+        SanType::DnsName("localhost".try_into().map_err(|source| TlsBootstrapError::Rcgen {
+            context: "dns name `localhost`",
+            source,
+        })?),
     ];
 
     match hostname_source.get() {
@@ -185,10 +312,10 @@ pub fn mint_ephemeral_ca_with_hostname(
         }
     }
 
-    let server_key =
-        KeyPair::generate().map_err(|e| ControlPlaneError::internal("server keypair", e))?;
+    let server_key = KeyPair::generate()
+        .map_err(|source| TlsBootstrapError::Rcgen { context: "server keypair", source })?;
     let mut server_params = CertificateParams::new(Vec::<String>::new())
-        .map_err(|e| ControlPlaneError::internal("server params", e))?;
+        .map_err(|source| TlsBootstrapError::Rcgen { context: "server params", source })?;
     server_params.subject_alt_names = server_sans;
     server_params.distinguished_name = {
         let mut dn = DistinguishedName::new();
@@ -201,15 +328,15 @@ pub fn mint_ephemeral_ca_with_hostname(
 
     let server_cert = server_params
         .signed_by(&server_key, &ca_cert, &ca_key)
-        .map_err(|e| ControlPlaneError::internal("server sign", e))?;
+        .map_err(|source| TlsBootstrapError::Rcgen { context: "server sign", source })?;
     let server_leaf_cert_pem = server_cert.pem();
     let server_leaf_key_pem = server_key.serialize_pem();
 
     // --- Client leaf (local operator per ADR-0010 Phase 1) -----------
-    let client_key =
-        KeyPair::generate().map_err(|e| ControlPlaneError::internal("client keypair", e))?;
+    let client_key = KeyPair::generate()
+        .map_err(|source| TlsBootstrapError::Rcgen { context: "client keypair", source })?;
     let mut client_params = CertificateParams::new(Vec::<String>::new())
-        .map_err(|e| ControlPlaneError::internal("client params", e))?;
+        .map_err(|source| TlsBootstrapError::Rcgen { context: "client params", source })?;
     client_params.distinguished_name = {
         let mut dn = DistinguishedName::new();
         dn.push(DnType::CommonName, "local-operator");
@@ -221,7 +348,7 @@ pub fn mint_ephemeral_ca_with_hostname(
 
     let client_cert = client_params
         .signed_by(&client_key, &ca_cert, &ca_key)
-        .map_err(|e| ControlPlaneError::internal("client sign", e))?;
+        .map_err(|source| TlsBootstrapError::Rcgen { context: "client sign", source })?;
     let client_leaf_cert_pem = client_cert.pem();
     let client_leaf_key_pem = client_key.serialize_pem();
 
@@ -285,17 +412,20 @@ struct OperatorContextOut<'a> {
 ///
 /// # Errors
 ///
-/// Returns `ControlPlaneError::Internal` if the parent directory
-/// cannot be created, the file cannot be written, or TOML
-/// serialisation fails.
+/// Returns a [`TlsBootstrapError`] if the parent directory cannot be
+/// created ([`TlsBootstrapError::Io`]), the file cannot be written
+/// ([`TlsBootstrapError::Io`]), or TOML serialisation fails
+/// ([`TlsBootstrapError::TomlSerialise`]).
 pub fn write_trust_triple(
     config_dir: &Path,
     endpoint: &str,
     material: &CaMaterial,
-) -> Result<(), ControlPlaneError> {
+) -> Result<(), TlsBootstrapError> {
     let overdrive_dir = config_dir.join(".overdrive");
-    std::fs::create_dir_all(&overdrive_dir).map_err(|e| {
-        ControlPlaneError::internal(format!("create_dir_all({})", overdrive_dir.display()), e)
+    std::fs::create_dir_all(&overdrive_dir).map_err(|source| TlsBootstrapError::Io {
+        op: "create_dir_all",
+        path: overdrive_dir.clone(),
+        source,
     })?;
 
     let config_path = overdrive_dir.join("config");
@@ -312,7 +442,7 @@ pub fn write_trust_triple(
     };
 
     let toml_text =
-        toml::to_string(&doc).map_err(|e| ControlPlaneError::internal("toml serialise", e))?;
+        toml::to_string(&doc).map_err(|source| TlsBootstrapError::TomlSerialise { source })?;
 
     write_file_owner_only(&config_path, toml_text.as_bytes())?;
 
@@ -320,7 +450,7 @@ pub fn write_trust_triple(
 }
 
 #[cfg(unix)]
-fn write_file_owner_only(path: &Path, bytes: &[u8]) -> Result<(), ControlPlaneError> {
+fn write_file_owner_only(path: &Path, bytes: &[u8]) -> Result<(), TlsBootstrapError> {
     use std::io::Write as _;
     use std::os::unix::fs::OpenOptionsExt as _;
 
@@ -330,9 +460,12 @@ fn write_file_owner_only(path: &Path, bytes: &[u8]) -> Result<(), ControlPlaneEr
         .truncate(true)
         .mode(0o600)
         .open(path)
-        .map_err(|e| ControlPlaneError::internal(format!("open({})", path.display()), e))?;
-    file.write_all(bytes)
-        .map_err(|e| ControlPlaneError::internal(format!("write({})", path.display()), e))?;
+        .map_err(|source| TlsBootstrapError::Io { op: "open", path: path.to_path_buf(), source })?;
+    file.write_all(bytes).map_err(|source| TlsBootstrapError::Io {
+        op: "write",
+        path: path.to_path_buf(),
+        source,
+    })?;
     Ok(())
 }
 
@@ -343,9 +476,12 @@ fn write_file_owner_only(path: &Path, bytes: &[u8]) -> Result<(), ControlPlaneEr
 // not a test-suite gap. Revisit if Windows enters the matrix — at
 // that point a Windows CI runner will naturally catch mutations here.
 #[cfg(not(unix))]
-fn write_file_owner_only(path: &Path, bytes: &[u8]) -> Result<(), ControlPlaneError> {
-    std::fs::write(path, bytes)
-        .map_err(|e| ControlPlaneError::internal(format!("write({})", path.display()), e))
+fn write_file_owner_only(path: &Path, bytes: &[u8]) -> Result<(), TlsBootstrapError> {
+    std::fs::write(path, bytes).map_err(|source| TlsBootstrapError::Io {
+        op: "write",
+        path: path.to_path_buf(),
+        source,
+    })
 }
 
 /// Load a `rustls::ServerConfig` from minted server material. Pure on
@@ -359,38 +495,39 @@ fn write_file_owner_only(path: &Path, bytes: &[u8]) -> Result<(), ControlPlaneEr
 ///
 /// # Errors
 ///
-/// Returns `ControlPlaneError::Internal` if the PEM parse fails, if
-/// the private key is missing, or if `rustls` rejects the cert/key
-/// combination (e.g. mismatched key algorithm vs certificate).
+/// Returns a [`TlsBootstrapError`] if the PEM parse fails
+/// ([`TlsBootstrapError::Pem`]), if the cert chain or key is missing
+/// ([`TlsBootstrapError::MalformedMaterial`]), or if `rustls` rejects
+/// the cert/key combination ([`TlsBootstrapError::Rustls`]).
 pub fn load_server_tls_config(
     material: &CaMaterial,
-) -> Result<rustls::ServerConfig, ControlPlaneError> {
+) -> Result<rustls::ServerConfig, TlsBootstrapError> {
     use std::io::Cursor;
 
     // Parse server leaf certificate chain from PEM.
     let mut cert_reader = Cursor::new(material.server_leaf_cert_pem.as_bytes());
     let cert_chain: Vec<rustls::pki_types::CertificateDer<'static>> =
-        rustls_pemfile::certs(&mut cert_reader)
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| ControlPlaneError::internal("parse server cert PEM", e))?;
+        rustls_pemfile::certs(&mut cert_reader).collect::<Result<Vec<_>, _>>().map_err(
+            |source| TlsBootstrapError::Pem { context: "parse server cert PEM", source },
+        )?;
     if cert_chain.is_empty() {
-        return Err(ControlPlaneError::Internal(
-            "server leaf PEM contained no certificates".into(),
-        ));
+        return Err(TlsBootstrapError::MalformedMaterial {
+            reason: "server leaf PEM contained no certificates",
+        });
     }
 
     // Parse private key from PEM (accepts PKCS#8, PKCS#1, or SEC1).
     let mut key_reader = Cursor::new(material.server_leaf_key_pem.as_bytes());
     let key = rustls_pemfile::private_key(&mut key_reader)
-        .map_err(|e| ControlPlaneError::internal("parse server key PEM", e))?
-        .ok_or_else(|| {
-            ControlPlaneError::Internal("server key PEM contained no private key".into())
+        .map_err(|source| TlsBootstrapError::Pem { context: "parse server key PEM", source })?
+        .ok_or(TlsBootstrapError::MalformedMaterial {
+            reason: "server key PEM contained no private key",
         })?;
 
     let mut config = rustls::ServerConfig::builder()
         .with_no_client_auth()
         .with_single_cert(cert_chain, key)
-        .map_err(|e| ControlPlaneError::internal("rustls with_single_cert", e))?;
+        .map_err(|source| TlsBootstrapError::Rustls { source })?;
 
     // ADR-0008 §ALPN: prefer h2, fall back to http/1.1.
     config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
@@ -468,67 +605,49 @@ struct OperatorContextIn {
 /// Load and validate a trust triple from the operator config file on
 /// disk (ADR-0019 TOML shape). Pairs with [`write_trust_triple`].
 ///
-/// On any parse or decode failure, returns
-/// `ControlPlaneError::Internal` whose message names the file path AND
-/// the offending field name (`ca`, `crt`, or `key`) so operators can
-/// locate and repair the bad config without attaching a debugger.
+/// On any parse or decode failure, returns a [`TlsBootstrapError`]
+/// whose Display names the file path AND the offending field
+/// (`ca`/`crt`/`key`) so operators can locate and repair the bad config
+/// without attaching a debugger.
 ///
 /// # Errors
 ///
-/// - File-not-found, read errors: `Internal` naming the path.
-/// - TOML parse errors: `Internal` naming the path.
-/// - Missing current-context entry in `contexts`: `Internal` naming
-///   the path and the missing context name.
-/// - Base64 decode errors on `ca` / `crt` / `key`: `Internal` naming
-///   the path and the field.
-pub fn load_trust_triple(path: &Path) -> Result<TrustTriple, ControlPlaneError> {
-    let text = std::fs::read_to_string(path).map_err(|e| {
-        ControlPlaneError::internal(format!("failed to read trust triple at {}", path.display()), e)
+/// - File-not-found, read errors: [`TlsBootstrapError::Io`] naming the
+///   path with `op = "read trust triple"`.
+/// - TOML parse errors: [`TlsBootstrapError::TomlParse`] naming the
+///   path.
+/// - Missing current-context entry in `contexts`:
+///   [`TlsBootstrapError::MissingContext`] naming the path and the
+///   missing context name.
+/// - Base64 decode errors on `ca` / `crt` / `key`:
+///   [`TlsBootstrapError::Base64`] naming the path and the
+///   [`TrustTripleField`].
+pub fn load_trust_triple(path: &Path) -> Result<TrustTriple, TlsBootstrapError> {
+    let text = std::fs::read_to_string(path).map_err(|source| TlsBootstrapError::Io {
+        op: "read trust triple",
+        path: path.to_path_buf(),
+        source,
     })?;
 
-    let parsed: OperatorConfigIn = toml::from_str(&text).map_err(|e| {
-        ControlPlaneError::internal(
-            format!("failed to parse trust triple at {}: invalid TOML", path.display()),
-            e,
-        )
-    })?;
+    let parsed: OperatorConfigIn = toml::from_str(&text)
+        .map_err(|source| TlsBootstrapError::TomlParse { path: path.to_path_buf(), source })?;
 
-    let ctx = parsed.contexts.iter().find(|c| c.name == parsed.current_context).ok_or_else(
-        || {
-            ControlPlaneError::Internal(format!(
-                "failed to parse trust triple at {}: current-context `{}` not present in `contexts`",
-                path.display(),
-                parsed.current_context,
-            ))
-        },
-    )?;
+    let ctx =
+        parsed.contexts.iter().find(|c| c.name == parsed.current_context).ok_or_else(|| {
+            TlsBootstrapError::MissingContext {
+                path: path.to_path_buf(),
+                name: parsed.current_context.clone(),
+            }
+        })?;
 
-    let ca_cert_pem = BASE64.decode(ctx.ca.as_bytes()).map_err(|e| {
-        ControlPlaneError::internal(
-            format!(
-                "failed to parse trust triple at {}: field `ca` is not valid base64",
-                path.display()
-            ),
-            e,
-        )
+    let ca_cert_pem = BASE64.decode(ctx.ca.as_bytes()).map_err(|source| {
+        TlsBootstrapError::Base64 { path: path.to_path_buf(), field: TrustTripleField::Ca, source }
     })?;
-    let client_cert_pem = BASE64.decode(ctx.crt.as_bytes()).map_err(|e| {
-        ControlPlaneError::internal(
-            format!(
-                "failed to parse trust triple at {}: field `crt` is not valid base64",
-                path.display()
-            ),
-            e,
-        )
+    let client_cert_pem = BASE64.decode(ctx.crt.as_bytes()).map_err(|source| {
+        TlsBootstrapError::Base64 { path: path.to_path_buf(), field: TrustTripleField::Crt, source }
     })?;
-    let client_key_pem = BASE64.decode(ctx.key.as_bytes()).map_err(|e| {
-        ControlPlaneError::internal(
-            format!(
-                "failed to parse trust triple at {}: field `key` is not valid base64",
-                path.display()
-            ),
-            e,
-        )
+    let client_key_pem = BASE64.decode(ctx.key.as_bytes()).map_err(|source| {
+        TlsBootstrapError::Base64 { path: path.to_path_buf(), field: TrustTripleField::Key, source }
     })?;
 
     Ok(TrustTriple { endpoint: ctx.endpoint.clone(), ca_cert_pem, client_cert_pem, client_key_pem })

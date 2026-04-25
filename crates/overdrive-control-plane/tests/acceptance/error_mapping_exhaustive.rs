@@ -20,6 +20,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use overdrive_control_plane::api::ErrorBody;
 use overdrive_control_plane::error::{ControlPlaneError, to_response};
+use overdrive_control_plane::tls_bootstrap::TlsBootstrapError;
 use overdrive_core::aggregate::AggregateError;
 use overdrive_core::traits::intent_store::IntentStoreError;
 use overdrive_core::traits::observation_store::ObservationStoreError;
@@ -169,6 +170,30 @@ fn aggregate_resources_error_renders_as_400_with_validation_kind() {
 
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(body.error, "validation");
+}
+
+#[test]
+fn tls_bootstrap_error_renders_as_500_with_internal_kind_and_preserves_chain() {
+    // ADR-0015 §4: TLS bootstrap is infra failure → 500 internal.
+    // Pass-through embedding (`Tls(#[from] TlsBootstrapError)`) MUST
+    // preserve the structured chain in the rendered message — the
+    // `MalformedMaterial.reason` text appears in `body.message` because
+    // `to_response` calls `e.to_string()` on the embedded variant
+    // rather than collapsing to a generic "tls failed" string.
+    let err = ControlPlaneError::Tls(TlsBootstrapError::MalformedMaterial {
+        reason: "server leaf PEM contained no certificates",
+    });
+
+    let (status, body) = to_response(err);
+
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(body.error, "internal");
+    assert!(
+        body.message.contains("server leaf PEM contained no certificates"),
+        "Tls(_) mapping must preserve the structured chain in the message; got {:?}",
+        body.message,
+    );
+    assert!(body.field.is_none());
 }
 
 #[test]

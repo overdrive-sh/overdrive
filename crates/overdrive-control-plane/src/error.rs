@@ -34,6 +34,17 @@ pub enum ControlPlaneError {
     #[error(transparent)]
     Aggregate(#[from] overdrive_core::aggregate::AggregateError),
 
+    /// TLS-bootstrap failure (cert mint, trust-triple I/O, PEM parse,
+    /// rustls config). Pass-through embedding per ADR-0015 §Consequences:
+    /// preserves the structured upstream chain (`rcgen::Error`,
+    /// `io::Error`, `toml::de::Error`, `base64::DecodeError`,
+    /// `rustls::Error`) for audit logs and the §12 investigation agent
+    /// instead of stringifying it through [`ControlPlaneError::Internal`].
+    /// Maps to `500 Internal` on the wire — TLS bootstrap is infra
+    /// failure (ADR-0015 §4 Status-code matrix).
+    #[error(transparent)]
+    Tls(#[from] crate::tls_bootstrap::TlsBootstrapError),
+
     #[error("internal: {0}")]
     Internal(String),
 }
@@ -105,6 +116,10 @@ pub fn to_response(err: ControlPlaneError) -> (StatusCode, ErrorBody) {
                 ErrorBody { error: "validation".into(), message: e.to_string(), field },
             )
         }
+        ControlPlaneError::Tls(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
+        ),
         ControlPlaneError::Internal(msg) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             ErrorBody { error: "internal".into(), message: msg, field: None },

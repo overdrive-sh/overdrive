@@ -9,7 +9,7 @@
 //!    introduce `--insecure` without also touching this test.
 //!
 //! B) Malformed trust triple: `load_trust_triple` surfaces a
-//!    structured `ControlPlaneError` naming the file and the field
+//!    structured [`TlsBootstrapError`] naming the file and the field
 //!    that failed to decode. No panic, no unwrap.
 //!
 //! Per `crates/overdrive-cli/CLAUDE.md`, the tests in this module
@@ -24,9 +24,8 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use clap::Parser as _;
 use clap::error::ErrorKind;
 use overdrive_cli::cli::Cli;
-use overdrive_control_plane::error::ControlPlaneError;
 use overdrive_control_plane::tls_bootstrap::{
-    load_trust_triple, mint_ephemeral_ca, write_trust_triple,
+    TlsBootstrapError, TrustTripleField, load_trust_triple, mint_ephemeral_ca, write_trust_triple,
 };
 use tempfile::TempDir;
 
@@ -119,7 +118,7 @@ fn write_config_with_malformed_field(dir: &std::path::Path, field: &str) -> std:
 }
 
 #[test]
-fn load_trust_triple_rejects_malformed_base64_ca_field_with_control_plane_error_internal() {
+fn load_trust_triple_rejects_malformed_base64_ca_field_with_typed_base64_variant() {
     let tmp = TempDir::new().expect("TempDir");
     let config_path = write_config_with_malformed_field(tmp.path(), "ca");
 
@@ -127,26 +126,29 @@ fn load_trust_triple_rejects_malformed_base64_ca_field_with_control_plane_error_
         .expect_err("malformed base64 in the `ca` field must surface a structured error, not Ok");
 
     match &err {
-        ControlPlaneError::Internal(msg) => {
-            assert!(
-                msg.contains(&config_path.display().to_string()),
-                "error message must name the config file path `{}` so operators \
-                 can locate the bad file; got: {msg}",
+        TlsBootstrapError::Base64 { path, field, .. } => {
+            assert_eq!(
+                path,
+                &config_path,
+                "Base64 variant must carry the config path `{}` so operators \
+                 can locate the bad file; got: {}",
                 config_path.display(),
+                path.display(),
             );
-            assert!(
-                msg.contains("ca"),
-                "error message must name the offending field `ca`; got: {msg}",
+            assert_eq!(
+                *field,
+                TrustTripleField::Ca,
+                "field must identify the offending base64 field as `ca`",
             );
         }
         other => {
-            panic!("malformed trust triple must map to ControlPlaneError::Internal, got {other:?}")
+            panic!("malformed `ca` must surface as TlsBootstrapError::Base64, got {other:?}")
         }
     }
 }
 
 #[test]
-fn load_trust_triple_rejects_malformed_base64_crt_field_with_control_plane_error_internal() {
+fn load_trust_triple_rejects_malformed_base64_crt_field_with_typed_base64_variant() {
     let tmp = TempDir::new().expect("TempDir");
     let config_path = write_config_with_malformed_field(tmp.path(), "crt");
 
@@ -154,19 +156,20 @@ fn load_trust_triple_rejects_malformed_base64_crt_field_with_control_plane_error
         .expect_err("malformed `crt` base64 must surface a structured error");
 
     match &err {
-        ControlPlaneError::Internal(msg) => {
-            assert!(
-                msg.contains(&config_path.display().to_string()),
-                "error must name path; got: {msg}",
+        TlsBootstrapError::Base64 { path, field, .. } => {
+            assert_eq!(path, &config_path, "Base64 variant must carry the config path");
+            assert_eq!(
+                *field,
+                TrustTripleField::Crt,
+                "field must identify the offending base64 field as `crt`",
             );
-            assert!(msg.contains("crt"), "error must name field `crt`; got: {msg}");
         }
-        other => panic!("expected Internal variant, got {other:?}"),
+        other => panic!("expected Base64 variant, got {other:?}"),
     }
 }
 
 #[test]
-fn load_trust_triple_rejects_malformed_base64_key_field_with_control_plane_error_internal() {
+fn load_trust_triple_rejects_malformed_base64_key_field_with_typed_base64_variant() {
     let tmp = TempDir::new().expect("TempDir");
     let config_path = write_config_with_malformed_field(tmp.path(), "key");
 
@@ -174,19 +177,20 @@ fn load_trust_triple_rejects_malformed_base64_key_field_with_control_plane_error
         .expect_err("malformed `key` base64 must surface a structured error");
 
     match &err {
-        ControlPlaneError::Internal(msg) => {
-            assert!(
-                msg.contains(&config_path.display().to_string()),
-                "error must name path; got: {msg}",
+        TlsBootstrapError::Base64 { path, field, .. } => {
+            assert_eq!(path, &config_path, "Base64 variant must carry the config path");
+            assert_eq!(
+                *field,
+                TrustTripleField::Key,
+                "field must identify the offending base64 field as `key`",
             );
-            assert!(msg.contains("key"), "error must name field `key`; got: {msg}");
         }
-        other => panic!("expected Internal variant, got {other:?}"),
+        other => panic!("expected Base64 variant, got {other:?}"),
     }
 }
 
 #[test]
-fn load_trust_triple_rejects_missing_file_with_control_plane_error_internal_naming_path() {
+fn load_trust_triple_rejects_missing_file_with_typed_io_variant_naming_path() {
     let tmp = TempDir::new().expect("TempDir");
     let missing = tmp.path().join(".overdrive").join("config");
 
@@ -194,14 +198,19 @@ fn load_trust_triple_rejects_missing_file_with_control_plane_error_internal_nami
         .expect_err("nonexistent config path must surface a structured error");
 
     match &err {
-        ControlPlaneError::Internal(msg) => {
-            assert!(
-                msg.contains(&missing.display().to_string()),
-                "error must name the missing path `{}`; got: {msg}",
+        TlsBootstrapError::Io { op, path, .. } => {
+            assert_eq!(
+                *op, "read trust triple",
+                "Io variant must name the syscall context as `read trust triple`",
+            );
+            assert_eq!(
+                path,
+                &missing,
+                "Io variant must carry the missing path `{}` so operators can locate it",
                 missing.display(),
             );
         }
-        other => panic!("expected Internal variant for missing file, got {other:?}"),
+        other => panic!("expected Io variant for missing file, got {other:?}"),
     }
 }
 
