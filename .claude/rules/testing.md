@@ -704,6 +704,18 @@ test-only, schema migration with no logic, generated code), skip the
 mutation run for that step entirely — `--file` with no logic source has
 nothing to mutate. The final per-PR run still catches anything missed.
 
+**Empty filter intersection is a vacuous pass.** When `--file` (or
+`--file` × `--diff`) names paths whose diff lines do not overlap a
+mutable mutation operator, cargo-mutants logs `INFO No mutants to filter`
+and exits 0 without producing `outcomes.json`. The wrapper treats this
+as a vacuous pass — kill rate is undefined, the gate is satisfied, and
+`target/xtask/mutants-summary.json` records `total_mutants=0` with
+`status="pass"`. If you expected mutants and got zero, double-check
+that the file actually changed against the diff base
+(`git diff <base> -- <file>`) and that the change includes mutable
+operator sites (return values, comparison operators, match arms — not
+just whitespace, comments, or rustdoc).
+
 **Why `integration-tests` auto-adds.** This repo's acceptance tests
 live behind `#[cfg(feature = "integration-tests")]` per §"Integration
 vs unit gating". Without the feature enabled, those tests don't
