@@ -45,11 +45,11 @@ fn client_trusting(ca_pem: &str) -> reqwest::Client {
         .expect("build reqwest client")
 }
 
-fn read_ca_from_trust_triple(data_dir: &std::path::Path) -> String {
+fn read_ca_from_trust_triple(operator_config_dir: &std::path::Path) -> String {
     use base64::Engine as _;
     use base64::engine::general_purpose::STANDARD as BASE64;
 
-    let config_path = data_dir.join(".overdrive").join("config");
+    let config_path = operator_config_dir.join(".overdrive").join("config");
     let text = std::fs::read_to_string(&config_path)
         .expect(&format!("read trust triple at {}", config_path.display()));
     // ADR-0019 canonical TOML shape: `current-context = "local"` +
@@ -69,16 +69,40 @@ fn read_ca_from_trust_triple(data_dir: &std::path::Path) -> String {
     String::from_utf8(ca_bytes).expect("ca PEM is UTF-8")
 }
 
+/// Spawn a server. `data_dir` and `operator_config_dir` are SEPARATE
+/// subdirectories of the tempdir per `fix-cli-cannot-reach-control-plane`
+/// Step 01-02: `data_dir` is the redb storage root; the trust triple
+/// goes under `operator_config_dir`. Callers that read the redb file
+/// back-door derive the `data_dir` as `tmp.path().join("data")` (see
+/// the `data_dir_under` helper).
 async fn spawn_server() -> (ServerHandle, SocketAddr, TempDir, String) {
     let tmp = TempDir::new().expect("tempdir");
+    let data_dir = data_dir_under(tmp.path());
+    let operator_config_dir = operator_config_dir_under(tmp.path());
+    std::fs::create_dir_all(&data_dir).expect("create data dir");
+    std::fs::create_dir_all(&operator_config_dir).expect("create operator config dir");
     let config = ServerConfig {
         bind: "127.0.0.1:0".parse().expect("parse bind addr"),
-        data_dir: tmp.path().to_path_buf(),
+        data_dir,
+        operator_config_dir: operator_config_dir.clone(),
     };
     let handle = run_server(config).await.expect("run_server");
     let bound = handle.local_addr().await.expect("bound addr");
-    let ca_pem = read_ca_from_trust_triple(tmp.path());
+    let ca_pem = read_ca_from_trust_triple(&operator_config_dir);
     (handle, bound, tmp, ca_pem)
+}
+
+/// Resolve the redb storage root for a tempdir-rooted server fixture.
+/// Mirrors the layout `spawn_server` writes — kept in one place so the
+/// back-door redb readers in this file cannot drift from `spawn_server`.
+fn data_dir_under(tmp: &std::path::Path) -> std::path::PathBuf {
+    tmp.join("data")
+}
+
+/// Resolve the operator config base directory for a tempdir-rooted
+/// server fixture. Pair of [`data_dir_under`].
+fn operator_config_dir_under(tmp: &std::path::Path) -> std::path::PathBuf {
+    tmp.join("conf")
 }
 
 /// Back-door read: open a SECOND `LocalIntentStore` at the same redb file the
@@ -170,7 +194,7 @@ async fn post_v1_jobs_persists_archived_job_under_jobs_prefix_in_local_store() {
 
     let job_id = JobId::new("payments").expect("parse payments JobId");
     let key = IntentKey::for_job(&job_id);
-    let persisted = read_intent_key_from_store(tmp.path(), key.as_bytes())
+    let persisted = read_intent_key_from_store(&data_dir_under(tmp.path()), key.as_bytes())
         .await
         .expect("jobs/payments must be populated after successful submit");
 

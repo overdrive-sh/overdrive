@@ -28,21 +28,32 @@ use overdrive_cli::http_client::CliError;
 use tempfile::TempDir;
 
 /// Spin up a real in-process control-plane server on `127.0.0.1:0` and
-/// return the handle and the `TempDir` backing the data directory. The
+/// return the handle and the `TempDir` backing both directories. The
 /// `TempDir` is returned so the caller can keep it alive for the
 /// duration of the test — dropping it deletes the config.
+///
+/// `data_dir` and `config_dir` are SEPARATE subdirectories of the
+/// tempdir (`data` and `conf` respectively) per
+/// `fix-cli-cannot-reach-control-plane` Step 01-02 (RCA §WHY 4C):
+/// the redb + libSQL storage root MUST stay decoupled from the
+/// operator-config base.
 async fn spawn_server() -> (ServeHandle, TempDir) {
     let tmp = TempDir::new().expect("tempdir");
     let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
-    let args = ServeArgs { bind, data_dir: tmp.path().to_path_buf() };
+    let data_dir = tmp.path().join("data");
+    let config_dir = tmp.path().join("conf");
+    std::fs::create_dir_all(&data_dir).expect("create data dir");
+    std::fs::create_dir_all(&config_dir).expect("create operator config dir");
+    let args = ServeArgs { bind, data_dir, config_dir };
     let handle = overdrive_cli::commands::serve::run(args).await.expect("serve::run");
     (handle, tmp)
 }
 
 /// Path of the trust-triple config written by `serve::run` into
-/// `<data_dir>/.overdrive/config`.
-fn config_path(data_dir: &Path) -> std::path::PathBuf {
-    data_dir.join(".overdrive").join("config")
+/// `<config_dir>/.overdrive/config` — given the tempdir root from
+/// [`spawn_server`].
+fn config_path(tmp: &Path) -> std::path::PathBuf {
+    tmp.join("conf").join(".overdrive").join("config")
 }
 
 // -------------------------------------------------------------------

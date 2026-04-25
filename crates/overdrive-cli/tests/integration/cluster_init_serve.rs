@@ -134,7 +134,13 @@ async fn serve_run_binds_ephemeral_port_and_returns_serve_handle() {
     let tmp = TempDir::new().expect("tempdir");
     let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
 
-    let args = ServeArgs { bind, data_dir: tmp.path().to_path_buf() };
+    // `data_dir` and `config_dir` are SEPARATE subdirectories per
+    // `fix-cli-cannot-reach-control-plane` Step 01-02 (RCA §WHY 4C).
+    let data_dir = tmp.path().join("data");
+    let config_dir = tmp.path().join("conf");
+    std::fs::create_dir_all(&data_dir).expect("create data dir");
+    std::fs::create_dir_all(&config_dir).expect("create operator config dir");
+    let args = ServeArgs { bind, data_dir, config_dir: config_dir.clone() };
     let handle: ServeHandle = overdrive_cli::commands::serve::run(args).await.expect("serve::run");
 
     // Ephemerally bound port must be non-zero.
@@ -145,7 +151,7 @@ async fn serve_run_binds_ephemeral_port_and_returns_serve_handle() {
     // `ApiClient` probe against the live server: /v1/nodes is the real
     // observation-read endpoint wired in step 03-03. A fresh store
     // returns {"rows":[]}.
-    let config_path = tmp.path().join(".overdrive").join("config");
+    let config_path = config_dir.join(".overdrive").join("config");
     let client = build_client(&config_path);
     let nodes = client.node_list().await.expect("node_list against live server");
     assert!(nodes.rows.is_empty(), "fresh store must report zero node rows");
@@ -162,7 +168,11 @@ async fn serve_handle_shutdown_completes_cleanly_within_5s_deadline() {
     let tmp = TempDir::new().expect("tempdir");
     let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
 
-    let args = ServeArgs { bind, data_dir: tmp.path().to_path_buf() };
+    let data_dir = tmp.path().join("data");
+    let config_dir = tmp.path().join("conf");
+    std::fs::create_dir_all(&data_dir).expect("create data dir");
+    std::fs::create_dir_all(&config_dir).expect("create operator config dir");
+    let args = ServeArgs { bind, data_dir, config_dir };
     let handle = overdrive_cli::commands::serve::run(args).await.expect("serve::run");
 
     let shutdown_fut = handle.shutdown();
@@ -181,11 +191,15 @@ async fn probe_after_shutdown_returns_transport_error() {
     let tmp = TempDir::new().expect("tempdir");
     let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
 
-    let args = ServeArgs { bind, data_dir: tmp.path().to_path_buf() };
+    let data_dir = tmp.path().join("data");
+    let config_dir = tmp.path().join("conf");
+    std::fs::create_dir_all(&data_dir).expect("create data dir");
+    std::fs::create_dir_all(&config_dir).expect("create operator config dir");
+    let args = ServeArgs { bind, data_dir, config_dir: config_dir.clone() };
     let handle = overdrive_cli::commands::serve::run(args).await.expect("serve::run");
 
     let port = handle.endpoint().port().expect("port");
-    let config_path = tmp.path().join(".overdrive").join("config");
+    let config_path = config_dir.join(".overdrive").join("config");
 
     // Shut down FIRST, then build a fresh client and probe — the
     // server is gone.
@@ -373,7 +387,11 @@ async fn serve_run_bind_failure_returns_cli_error() {
     let occupied_addr = occupier.local_addr().expect("occupier addr");
 
     let tmp = TempDir::new().expect("tempdir");
-    let args = ServeArgs { bind: occupied_addr, data_dir: tmp.path().to_path_buf() };
+    let data_dir = tmp.path().join("data");
+    let config_dir = tmp.path().join("conf");
+    std::fs::create_dir_all(&data_dir).expect("create data dir");
+    std::fs::create_dir_all(&config_dir).expect("create operator config dir");
+    let args = ServeArgs { bind: occupied_addr, data_dir, config_dir };
     let err = overdrive_cli::commands::serve::run(args)
         .await
         .expect_err("serve::run must fail to bind an already-occupied port");
@@ -394,35 +412,28 @@ async fn serve_run_bind_failure_returns_cli_error() {
 }
 
 // -------------------------------------------------------------------
-// RED regression test — serve + submit with production defaults
-// (fix-cli-cannot-reach-control-plane, Step 01-01)
+// Regression test — serve + submit with production defaults
+// (fix-cli-cannot-reach-control-plane, Steps 01-01 and 01-02)
 //
-// INTENTIONAL RED SCAFFOLD. Against current `main` this test fails
-// with `CliError::Transport` "could not connect to server" emitted
-// from `job::submit`, because:
+// Step 01-01 introduced this test as a RED scaffold; Step 01-02 split
+// `ServeArgs::config_dir` from `data_dir` and rewrote
+// `run_server_with_obs` to write the trust triple under
+// `operator_config_dir`, flipping it GREEN.
 //
-//   - `serve::run` writes its trust triple at
-//     `<data_dir>/.overdrive/config`  (production default:
-//     `$HOME/.local/share/overdrive/.overdrive/config`)
-//   - `job::submit` reads the trust triple from
-//     `default_operator_config_path()`  (production default:
-//     `$HOME/.overdrive/config`)
+// The structural invariant pinned here:
 //
-// These are different files under production defaults. The read-side
-// trust triple was minted earlier by `cluster init` against a stale CA;
-// the TLS handshake fails, reqwest classifies the result as a connect
-// failure, and the CLI surfaces `CliError::Transport`.
+//   - `serve::run`'s trust-triple write site MUST equal the path
+//     `default_operator_config_path()` resolves to.
 //
-// This is the first integration test exercising the end-to-end `serve`
-// -> `job submit` flow with real production-path defaults (RCA §Root
-// cause C). Step 01-02 will flip it GREEN alongside the
-// `ServerConfig` / `ServeArgs` field split that routes `serve::run`'s
-// trust triple into `default_operator_config_dir()` instead of
-// `<data_dir>/.overdrive`.
-//
-// Committed with `git commit --no-verify` per
-// `.claude/rules/testing.md` §RED scaffolds and intentionally-failing
-// commits.
+// Pre-fix, those drifted: `serve::run` wrote at
+// `<data_dir>/.overdrive/config` (`$HOME/.local/share/overdrive/.overdrive/config`)
+// while `job::submit` read from `<config_dir>/.overdrive/config`
+// (`$HOME/.overdrive/config`). With production defaults, the CLI
+// loaded a stale CA from a previous `cluster init` while the live
+// server presented a freshly-minted CA — the TLS handshake failed and
+// reqwest surfaced `CliError::Transport "could not connect to server"`.
+// Re-introducing the overload between data dir and operator-config
+// dir at any future call site fails THIS test loudly.
 // -------------------------------------------------------------------
 
 #[tokio::test]
@@ -459,24 +470,17 @@ async fn serve_and_submit_with_production_defaults_succeeds() {
     // 2. Mirror `main.rs::default_data_dir` on the HOME-fallback branch.
     let data_dir = tmp.path().join(".local/share/overdrive");
 
-    // 3. Start the server via the SAME handler main.rs invokes. On
-    //    current HEAD, `serve::run` mints a fresh ephemeral CA
-    //    (ADR-0010 §R1) and writes it to
-    //    `<data_dir>/.overdrive/config` — which is NOT the file the
-    //    CLI read-side reads. The trust triple at
-    //    $HOME/.overdrive/config is now stale relative to the running
-    //    server.
-    //
-    //    NOTE (Step 01-02): after the fix lands, `ServeArgs` grows a
-    //    `config_dir: PathBuf` field and `serve::run` writes its trust
-    //    triple into `<config_dir>/.overdrive/config` (matching
-    //    `default_operator_config_path()`) instead of
-    //    `<data_dir>/.overdrive/config`. 01-02 will extend this
-    //    construction to thread `config_dir: tmp.path().to_path_buf()`
-    //    alongside the field addition on `ServeArgs`, replacing the
-    //    stale trust triple minted by step 1 with the current one.
+    // 3. Mirror `main.rs::Command::Serve` on the HOME-fallback branch:
+    //    `default_operator_config_dir()` resolves to `$HOME` (the
+    //    tempdir), and `serve::run` writes the trust triple to
+    //    `<config_dir>/.overdrive/config` — replacing the stale CA
+    //    minted by step 1 with the live one. This is the structural
+    //    fix from Step 01-02: `ServeArgs` carries `config_dir`
+    //    distinct from `data_dir`, and `run_server_with_obs` writes
+    //    the trust triple under `operator_config_dir`, not `data_dir`.
+    let config_dir = tmp.path().to_path_buf();
     let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
-    let args = ServeArgs { bind, data_dir };
+    let args = ServeArgs { bind, data_dir, config_dir };
     let handle: ServeHandle = overdrive_cli::commands::serve::run(args).await.expect("serve::run");
 
     // 3. The CLI read-side MUST land on $HOME/.overdrive/config under
@@ -512,13 +516,11 @@ memory_bytes = 536870912
     //    triple at `default_operator_config_path()` per ADR-0010 §R4
     //    and the `overdrive-cli/CLAUDE.md` endpoint-resolution rule.
     //
-    //    Against current `main` this fails with `CliError::Transport`
-    //    because the trust triple at
-    //    `$HOME/.overdrive/config` (if any; typically stale from a
-    //    previous `cluster init`) names a different CA from the one
-    //    `serve::run` just minted into
-    //    `$HOME/.local/share/overdrive/.overdrive/config`. The
-    //    `.expect` message is the failure signal for the RED scaffold.
+    //    After Step 01-02's fix, `serve::run` writes its trust triple
+    //    to `$HOME/.overdrive/config` — the same file the CLI reads —
+    //    so the CA pinned client-side and the leaf presented
+    //    server-side share a chain. The TLS handshake succeeds and
+    //    `submit` round-trips through the live server.
     let out: overdrive_cli::commands::job::SubmitOutput =
         overdrive_cli::commands::job::submit(overdrive_cli::commands::job::SubmitArgs {
             spec: spec_path,
@@ -526,10 +528,11 @@ memory_bytes = 536870912
         })
         .await
         .expect(
-            "RED scaffold (Step 01-01; 01-02 flips GREEN): CLI must \
-             reach the server it just started — this is exactly the \
-             bug the RED scaffold pins. Expected failure on current \
-             HEAD is CliError::Transport \"could not connect to server\".",
+            "CLI must reach the server it just started — \
+             pre-fix this failed with CliError::Transport \
+             \"could not connect to server\" because \
+             default_operator_config_path() and serve::run's \
+             trust-triple write site resolved to different files",
         );
 
     // 6. Prove the round-trip landed on the live server.

@@ -30,9 +30,17 @@ pub struct ServeArgs {
     /// Socket address to bind the HTTPS listener. Use `127.0.0.1:0` in
     /// tests to request an ephemeral port.
     pub bind: SocketAddr,
-    /// Data directory — parent of the redb file, per-primitive libSQL
-    /// files, and the trust triple. Must exist.
+    /// Storage root for the redb file and per-primitive libSQL files
+    /// (ADR-0013 §5). The trust triple does NOT live here — see
+    /// [`Self::config_dir`].
     pub data_dir: PathBuf,
+    /// Operator-config base directory. The trust triple is written to
+    /// `<config_dir>/.overdrive/config` so the operator CLI reads the
+    /// same file the server writes (whitepaper §8, ADR-0019). The
+    /// binary wrapper in `main.rs` defaults this via
+    /// `commands::cluster::default_operator_config_dir()`; tests pass
+    /// an explicit subdirectory of their `TempDir`.
+    pub config_dir: PathBuf,
 }
 
 /// Handle to a running control-plane server, owned by the CLI layer.
@@ -86,7 +94,11 @@ impl ServeHandle {
 pub async fn run(args: ServeArgs) -> Result<ServeHandle, CliError> {
     let requested_endpoint = format!("https://{}", args.bind);
 
-    let config = ServerConfig { bind: args.bind, data_dir: args.data_dir };
+    let config = ServerConfig {
+        bind: args.bind,
+        data_dir: args.data_dir,
+        operator_config_dir: args.config_dir,
+    };
     let inner = run_server(config).await.map_err(|e| CliError::Transport {
         endpoint: requested_endpoint.clone(),
         cause: stripped_server_error(&e.to_string()),

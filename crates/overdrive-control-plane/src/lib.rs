@@ -79,9 +79,22 @@ pub struct ServerConfig {
     /// request an ephemeral port; the bound port is observable via
     /// [`ServerHandle::local_addr`].
     pub bind: SocketAddr,
-    /// Data directory — parent of the redb file, per-primitive libSQL
-    /// files, and the trust triple config file.
+    /// Storage root for the redb file (`<data_dir>/intent.redb`) and
+    /// per-primitive libSQL files (`<data_dir>/reconciler-memory/...`).
+    /// Per ADR-0013 §5 this is XDG `data_dir()/overdrive` in production.
+    /// The operator trust triple does NOT live here — see
+    /// [`Self::operator_config_dir`].
     pub data_dir: PathBuf,
+    /// Operator-config base directory. The trust triple is written to
+    /// `<operator_config_dir>/.overdrive/config` so the operator CLI
+    /// reads the same file the server writes. Per whitepaper §8 and
+    /// ADR-0019 this is `$HOME/.overdrive` (or
+    /// `$OVERDRIVE_CONFIG_DIR`) in production. Decoupled from
+    /// [`Self::data_dir`] per `fix-cli-cannot-reach-control-plane`:
+    /// the data dir is a storage root; the operator config dir is an
+    /// identity-artefact root, and conflating the two left the CLI
+    /// pinning a stale CA on the production-default path.
+    pub operator_config_dir: PathBuf,
 }
 
 /// Handle to a running control-plane server.
@@ -120,11 +133,11 @@ impl ServerHandle {
 /// Start the control-plane server.
 ///
 /// Mints a fresh ephemeral CA, writes the trust triple under
-/// `<data_dir>/.overdrive/config`, builds the `rustls::ServerConfig`
-/// (HTTP/2 + HTTP/1.1 via ALPN), binds a TCP listener on
-/// [`ServerConfig::bind`], and spawns the `axum_server` serving task.
-/// Returns once the listener is bound — callers can observe the
-/// actually-bound address via [`ServerHandle::local_addr`].
+/// `<operator_config_dir>/.overdrive/config`, builds the
+/// `rustls::ServerConfig` (HTTP/2 + HTTP/1.1 via ALPN), binds a TCP
+/// listener on [`ServerConfig::bind`], and spawns the `axum_server`
+/// serving task. Returns once the listener is bound — callers can
+/// observe the actually-bound address via [`ServerHandle::local_addr`].
 ///
 /// # Errors
 ///
@@ -223,11 +236,20 @@ pub async fn run_server_with_obs(
     // clients (tests, the CLI) load a config whose `endpoint` names
     // the actual bound port. Deferred until after bind: a failure
     // before this point leaves no stale config on disk.
+    //
+    // The triple goes under `operator_config_dir`, NOT `data_dir`:
+    // `data_dir` is the storage root for redb + libSQL (ADR-0013 §5);
+    // `operator_config_dir` is the operator-CLI read site
+    // (whitepaper §8, ADR-0019). Pre-fix this used `config.data_dir`
+    // and the resulting trust triple landed at
+    // `<data_dir>/.overdrive/config`, which the CLI never read —
+    // the production-default path was broken
+    // (`fix-cli-cannot-reach-control-plane`).
     let bound = std_listener
         .local_addr()
         .map_err(|e| error::ControlPlaneError::internal("local_addr", e))?;
     let endpoint = format!("https://{bound}");
-    tls_bootstrap::write_trust_triple(&config.data_dir, &endpoint, &material)?;
+    tls_bootstrap::write_trust_triple(&config.operator_config_dir, &endpoint, &material)?;
 
     let axum_handle = AxumHandle::new();
     let server =

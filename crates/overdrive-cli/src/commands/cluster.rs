@@ -172,26 +172,41 @@ fn resolve_config_dir(explicit: Option<PathBuf>) -> Result<PathBuf, CliError> {
     Ok(PathBuf::from(home))
 }
 
-/// Canonical operator config file path per ADR-0010 / ADR-0014 /
+/// Canonical operator config BASE directory per ADR-0010 / ADR-0014 /
 /// ADR-0019 and whitepaper §8.
 ///
-/// Resolves the base directory from `$OVERDRIVE_CONFIG_DIR` first, then
-/// `$HOME`, then the current directory as a last-resort fallback. The
-/// `.overdrive` segment and `config` filename are always appended
-/// exactly once — callers MUST pass bare base-dir env-var values and
-/// MUST NOT pre-suffix. Returns the full path to the file (for example
-/// `~/.overdrive/config`), not the containing directory.
+/// Resolves from `$OVERDRIVE_CONFIG_DIR` first, then `$HOME`, then the
+/// current directory as a last-resort fallback. Returns the BASE
+/// directory only — the `.overdrive` segment and `config` filename are
+/// NOT appended. `write_trust_triple` owns that suffix.
 ///
-/// This is the single source of truth for where the operator CLI
-/// reads and writes its trust triple. Both `main.rs::default_config_path`
-/// (read side) and the HOME fallback of `resolve_config_dir` +
-/// `write_trust_triple` (write side) compose around this function so
-/// the two sites cannot drift — the drift between them is the bug this
-/// function's existence prevents (`fix-overdrive-config-path-doubled`).
+/// This is the single source of truth for the operator-config base
+/// directory. `default_operator_config_path` delegates here for read
+/// resolution; `serve::run` threads this value into
+/// `ServerConfig::operator_config_dir` so the trust-triple write site
+/// composes exactly the same path. Drift between read and write sites
+/// is the bug class this function's existence prevents
+/// (`fix-cli-cannot-reach-control-plane`,
+/// `fix-overdrive-config-path-doubled`).
+#[must_use]
+pub fn default_operator_config_dir() -> PathBuf {
+    std::env::var_os("OVERDRIVE_CONFIG_DIR")
+        .or_else(|| std::env::var_os("HOME"))
+        .map_or_else(|| PathBuf::from("."), PathBuf::from)
+}
+
+/// Canonical operator config FILE path per ADR-0010 / ADR-0014 /
+/// ADR-0019 and whitepaper §8.
+///
+/// Returns `<base>/.overdrive/config` where `<base>` is
+/// [`default_operator_config_dir`]. Delegates to that helper so the
+/// read-side computation cannot drift from the write-side base
+/// resolution (`fix-cli-cannot-reach-control-plane` Fix step 7;
+/// `fix-overdrive-config-path-doubled` Fix 3).
+///
+/// Callers that need the containing directory rather than the file
+/// path call [`default_operator_config_dir`] directly.
 #[must_use]
 pub fn default_operator_config_path() -> PathBuf {
-    let base = std::env::var_os("OVERDRIVE_CONFIG_DIR")
-        .or_else(|| std::env::var_os("HOME"))
-        .map_or_else(|| PathBuf::from("."), PathBuf::from);
-    base.join(".overdrive").join("config")
+    default_operator_config_dir().join(".overdrive").join("config")
 }

@@ -30,17 +30,25 @@ use overdrive_core::aggregate::JobSpecInput;
 use tempfile::TempDir;
 
 /// Spawn a server on an ephemeral port and return (handle, bound addr,
-/// tempdir kept alive, path to the trust-triple config). The trust
-/// triple is written by `run_server` to `<data_dir>/.overdrive/config`.
+/// tempdir kept alive, path to the trust-triple config). `data_dir`
+/// and `operator_config_dir` are SEPARATE subdirectories of the tempdir
+/// per `fix-cli-cannot-reach-control-plane` Step 01-02 (RCA §WHY 4C):
+/// `data_dir` is the redb storage root; the trust triple is written to
+/// `<operator_config_dir>/.overdrive/config`.
 async fn spawn_server() -> (ServerHandle, SocketAddr, TempDir, std::path::PathBuf) {
     let tmp = TempDir::new().expect("tempdir");
+    let data_dir = tmp.path().join("data");
+    let operator_config_dir = tmp.path().join("conf");
+    std::fs::create_dir_all(&data_dir).expect("create data dir");
+    std::fs::create_dir_all(&operator_config_dir).expect("create operator config dir");
     let config = ServerConfig {
         bind: "127.0.0.1:0".parse().expect("parse bind addr"),
-        data_dir: tmp.path().to_path_buf(),
+        data_dir,
+        operator_config_dir: operator_config_dir.clone(),
     };
     let handle: ServerHandle = run_server(config).await.expect("run_server");
     let bound: SocketAddr = handle.local_addr().await.expect("bound addr");
-    let config_path = tmp.path().join(".overdrive").join("config");
+    let config_path = operator_config_dir.join(".overdrive").join("config");
     (handle, bound, tmp, config_path)
 }
 

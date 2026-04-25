@@ -101,7 +101,13 @@ async fn run(cli: Cli) -> Result<()> {
                 .parse()
                 .map_err(|e| color_eyre::eyre::eyre!("invalid --bind address `{bind}`: {e}"))?;
             let data_dir = data_dir.unwrap_or_else(default_data_dir);
-            let args = overdrive_cli::commands::serve::ServeArgs { bind: bind_addr, data_dir };
+            // Operator config dir is the canonical write target for
+            // the trust triple — must equal what `default_config_path`
+            // resolves to on the read side, so `serve` and `job submit`
+            // share the same file (`fix-cli-cannot-reach-control-plane`).
+            let config_dir = overdrive_cli::commands::cluster::default_operator_config_dir();
+            let args =
+                overdrive_cli::commands::serve::ServeArgs { bind: bind_addr, data_dir, config_dir };
             let handle = overdrive_cli::commands::serve::run(args).await?;
             tracing::info!(endpoint = %handle.endpoint(), "control plane listening");
 
