@@ -57,8 +57,10 @@ fn read_summary(target_dir: &Path) -> serde_json::Value {
 /// The blessed invariant catalogue for DST runs. Keep in sync with
 /// `Invariant::ALL` in `overdrive-sim` and with `EXPECTED_INVARIANTS`
 /// in `dst_clean_clone_green.rs`. The first six are the walking-
-/// skeleton catalogue; the last three landed in slice 4 alongside the
-/// reconciler-primitive runtime (ADR-0013 §9).
+/// skeleton catalogue; the next three landed in slice 4 alongside the
+/// reconciler-primitive runtime (ADR-0013 §9); `broker-drain-order-is-
+/// deterministic` landed with the eval-broker drain-determinism fix
+/// (commit `bc95506`).
 const EXPECTED_INVARIANTS: &[&str] = &[
     "single-leader",
     "intent-never-crosses-into-observation",
@@ -68,6 +70,7 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     "entropy-determinism-under-reseed",
     "at-least-one-reconciler-registered",
     "duplicate-evaluations-collapse",
+    "broker-drain-order-is-deterministic",
     "reconciler-is-pure",
 ];
 

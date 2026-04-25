@@ -69,6 +69,7 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     "entropy-determinism-under-reseed",
     "at-least-one-reconciler-registered",
     "duplicate-evaluations-collapse",
+    "broker-drain-order-is-deterministic",
     "reconciler-is-pure",
 ];
 
