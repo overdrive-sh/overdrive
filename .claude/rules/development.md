@@ -406,6 +406,47 @@ a reconciler.
 > errors," you want `cargo check`. If you need the binary, reach for
 > the xtask wrapper that already knows how to produce it.
 
+## Committing a focused subset
+
+The lefthook pre-commit pipeline auto-stages modified files into the
+in-flight commit (it runs `cargo fmt`, clippy, and nextest-affected
+across the working tree, and re-stages whatever they touch). When the
+working tree carries unrelated modifications and you only want to
+commit a focused subset, `git add <one-file>` is **not** sufficient —
+the hook will silently bundle every other modified file into your
+commit on its way through. The previous commit you just landed will
+contain changes you never staged.
+
+**Pattern: stash the unrelated paths first, then commit.**
+
+```bash
+git stash push -m "unrelated-{summary}" -- \
+  <path-1> <path-2> ... <path-N>     && \
+git add <path-you-actually-want>     && \
+git commit -m "..."                  ; \
+git stash pop
+```
+
+Three things to note:
+
+- **`;` before `git stash pop`, not `&&`.** The stash must be restored
+  even if the commit fails (e.g. a pre-commit gate rejects it),
+  otherwise the unrelated work is left only in the stash and the
+  working tree appears empty. The `git stash` pre-tool hook in this
+  repo enforces the matched-pair shape — see the message it prints
+  when blocking.
+- **Path-scoped stash, not `git stash -u`.** Stashing the whole tree
+  would also stash the file you want to commit; pass paths to `git
+  stash push -- <paths>` so only the unrelated changes move.
+- **Verify with `git show --stat HEAD` after the commit.** "1 file
+  changed" should match what you intended to land. If the commit
+  bundles more, the stash scope was wrong — soft-reset and retry.
+
+This pattern is the only safe shape for landing a focused fix when
+the working tree is dirty with parallel work. Do not reach for
+`--no-verify` to bypass the lefthook auto-staging — the hook is also
+running clippy and tests, and skipping it lands unverified code.
+
 ## Rust patterns
 
 ### Errors

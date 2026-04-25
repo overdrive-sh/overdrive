@@ -671,6 +671,39 @@ cargo xtask mutants --diff origin/main \
   --test-whole-workspace
 ```
 
+**Per-step vs per-PR scoping.** Running the unscoped
+`cargo xtask mutants --diff origin/main --package <crate>` after every
+DELIVER step takes 15+ minutes and is the wrong default for the inner
+loop — by the end of a multi-step feature you have re-mutated earlier
+commits' code dozens of times. Two-tier discipline:
+
+- **Per DELIVER step (inner loop).** Pass `--file` for every file you
+  touched in *this* step. Mutates only the lines you just changed; PR-wide
+  gate semantics are preserved (still `--diff origin/main`), and
+  `--test-workspace=false` keeps the rerun scoped to the package's own
+  tests.
+
+  ```bash
+  cargo xtask mutants --diff origin/main \
+    --package overdrive-store-local \
+    --file crates/overdrive-store-local/src/<file-from-this-step>.rs \
+    --file crates/overdrive-store-local/src/<another-file>.rs
+  ```
+
+- **Once before opening the PR (final check).** Drop the `--file` flags
+  and run the full per-package diff. This is the gate CI runs; it must
+  pass before merge regardless of how many times the per-step scoped
+  runs passed.
+
+  ```bash
+  cargo xtask mutants --diff origin/main --package overdrive-store-local
+  ```
+
+If a step did not touch any source the mutation gate covers (docs-only,
+test-only, schema migration with no logic, generated code), skip the
+mutation run for that step entirely — `--file` with no logic source has
+nothing to mutate. The final per-PR run still catches anything missed.
+
 **Why `integration-tests` auto-adds.** This repo's acceptance tests
 live behind `#[cfg(feature = "integration-tests")]` per §"Integration
 vs unit gating". Without the feature enabled, those tests don't
