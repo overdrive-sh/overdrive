@@ -180,11 +180,27 @@ exclude_re = [
 additional_cargo_args = ["--locked"]
 
 # ---------------------------------------------------------------------------
-# Excluded mutation *kinds* — leave cargo-mutants defaults in place.
+# Excluded mutation *kinds* — suppress operators that this codebase
+# cannot produce viable mutants for.
 # ---------------------------------------------------------------------------
 #
-# `skip_calls` can suppress entire mutation operators. We deliberately
-# leave this empty so the full operator set runs; per-file exclusions
-# above are the intended granularity. Revisit if a specific operator
-# shows up as a persistent source of noise.
-skip_calls = []
+# `skip_calls` suppresses cargo-mutants' replacement operators by the
+# call expression they would synthesise — see https://mutants.rs/skip_calls.html.
+#
+# `Default::default` — Phase 1 deliberately avoids `Default` impls on
+# domain types (newtypes per `.claude/rules/development.md` §STRICT-by-default,
+# `thiserror` enums for errors, sum types modelling business state).
+# cargo-mutants' default operator "replace function body with
+# `Default::default()`" therefore produces `error[E0277]: the trait
+# bound X: Default is not satisfied` for almost every site, surfacing
+# in CI as `WARN No mutants were viable: perhaps there is a problem
+# with building in a scratch directory` and (formerly) a vacuous PASS.
+# Suppressing the operator at generation time stops cargo-mutants
+# spending the per-mutant build budget on guaranteed-unviable rustc
+# rejections. Re-evaluate when this codebase grows broad `Default`
+# impls (Phase 2+ if a domain type genuinely has a sensible identity).
+#
+# Other operators (`replace body with ()`, `replace body with
+# Vec::new()`, arithmetic flips, comparison flips, etc.) remain
+# enabled — those are the ones the test suite is supposed to kill.
+skip_calls = ["Default::default"]

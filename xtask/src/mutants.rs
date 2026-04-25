@@ -624,10 +624,26 @@ enum GateStatus {
 
 fn evaluate_diff_gate(report: &RawReport) -> Gate {
     let kill_rate_pct = kill_rate_percent(report.caught, report.missed);
-    let status = if report.caught == 0 && report.missed == 0 {
-        // No gate-relevant mutations generated from the diff — e.g. the
-        // PR only touched excluded paths or comments. Vacuously pass.
+    let status = if report.total_mutants == 0 {
+        // No mutants generated from the diff — e.g. the PR only
+        // touched excluded paths or comments. Truly vacuous: pass.
         GateStatus::Pass
+    } else if report.caught == 0 && report.missed == 0 {
+        // Mutants WERE generated but none were evaluated — every one
+        // was unviable (rustc rejected the mutated source) or timed
+        // out. cargo-mutants logs this as
+        // `WARN No mutants were viable`. The gate has no quality
+        // signal and must not pass: a future repeat of this state
+        // would silently mask a broken mutation lane.
+        GateStatus::Fail {
+            reason: format!(
+                "no quality signal: total={total} unviable={unviable} timeout={timeout} \
+                 — see target/xtask/mutants.out/log/* for rustc diagnostics",
+                total = report.total_mutants,
+                unviable = report.unviable,
+                timeout = report.timeout,
+            ),
+        }
     } else if kill_rate_pct + f64::EPSILON < DIFF_KILL_RATE_FLOOR {
         GateStatus::Fail {
             reason: format!(
@@ -652,6 +668,28 @@ fn evaluate_diff_gate(report: &RawReport) -> Gate {
 
 fn evaluate_workspace_gate(report: &RawReport, baseline_path: &Path) -> Result<Gate> {
     let kill_rate_pct = kill_rate_percent(report.caught, report.missed);
+
+    // Symmetric guard with `evaluate_diff_gate`: mutants WERE
+    // generated but none were evaluated — every one unviable or
+    // timed out. No quality signal; must fail before consulting the
+    // baseline.
+    if report.total_mutants > 0 && report.caught == 0 && report.missed == 0 {
+        return Ok(Gate {
+            mode_label: "workspace".to_owned(),
+            kill_rate_pct,
+            baseline_pct: None,
+            drift_pp: None,
+            status: GateStatus::Fail {
+                reason: format!(
+                    "no quality signal: total={total} unviable={unviable} timeout={timeout} \
+                     — see target/xtask/mutants.out/log/* for rustc diagnostics",
+                    total = report.total_mutants,
+                    unviable = report.unviable,
+                    timeout = report.timeout,
+                ),
+            },
+        });
+    }
 
     // Read or seed the baseline.
     let (baseline_pct, drift_pp, status) = if baseline_path.is_file() {
@@ -906,11 +944,71 @@ mod tests {
     }
 
     #[test]
-    fn diff_gate_passes_when_diff_generated_no_mutations() {
-        // PR touched only excluded paths — caught=missed=0. Must pass
-        // (vacuously). Gate reason must not claim a kill-rate failure.
-        let gate = evaluate_diff_gate(&report(0, 0, 5, 0));
+    fn diff_gate_passes_when_no_mutants_in_scope() {
+        // PR touched only excluded paths or comments — cargo-mutants
+        // generated zero mutants. Truly vacuous: must pass.
+        let no_mutants = RawReport {
+            total_mutants: 0,
+            caught: 0,
+            missed: 0,
+            timeout: 0,
+            unviable: 0,
+            success: 0,
+            cargo_mutants_version: "27.0.0".to_owned(),
+        };
+        let gate = evaluate_diff_gate(&no_mutants);
         assert!(matches!(gate.status, GateStatus::Pass));
+    }
+
+    #[test]
+    fn diff_gate_fails_when_every_mutant_unviable() {
+        // cargo-mutants generated mutants but every single one was
+        // rejected by rustc — the WARN
+        // `No mutants were viable: perhaps there is a problem with
+        // building in a scratch directory` case. The gate has no
+        // quality signal and must FAIL: silently passing here
+        // would mask any future cause of all-unviable runs (broken
+        // workspace lints, scratch-dir issue, build.rs path bug,
+        // mutation operator producing rustc-rejected code).
+        let gate = evaluate_diff_gate(&report(0, 0, 250, 0));
+        let reason = match gate.status {
+            GateStatus::Fail { reason } => reason,
+            other => panic!("expected Fail on all-unviable, got {other:?}"),
+        };
+        assert!(reason.contains("no quality signal"), "got: {reason}");
+        assert!(reason.contains("unviable=250"), "got: {reason}");
+        assert!(reason.contains("mutants.out/log"), "got: {reason}");
+    }
+
+    #[test]
+    fn diff_gate_fails_when_every_mutant_timed_out() {
+        // Symmetric to all-unviable: every mutant exceeded the test
+        // budget. Same loss of quality signal; must FAIL with the
+        // same reason shape.
+        let gate = evaluate_diff_gate(&report(0, 0, 0, 250));
+        let reason = match gate.status {
+            GateStatus::Fail { reason } => reason,
+            other => panic!("expected Fail on all-timeout, got {other:?}"),
+        };
+        assert!(reason.contains("no quality signal"), "got: {reason}");
+        assert!(reason.contains("timeout=250"), "got: {reason}");
+    }
+
+    #[test]
+    fn workspace_gate_fails_when_every_mutant_unviable() {
+        // Same predicate as diff: a fully-unviable workspace run is
+        // not a baseline-relative regression — it is a quality-signal
+        // failure that must short-circuit before the baseline read.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let baseline = tmp.path().join("kill_rate.txt");
+        std::fs::write(&baseline, "85.0\n").unwrap();
+        let gate = evaluate_workspace_gate(&report(0, 0, 250, 0), &baseline).unwrap();
+        let reason = match gate.status {
+            GateStatus::Fail { reason } => reason,
+            other => panic!("expected Fail on all-unviable, got {other:?}"),
+        };
+        assert!(reason.contains("no quality signal"), "got: {reason}");
+        assert!(reason.contains("unviable=250"), "got: {reason}");
     }
 
     #[test]
