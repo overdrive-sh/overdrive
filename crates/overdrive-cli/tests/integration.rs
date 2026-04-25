@@ -21,5 +21,6 @@ mod integration {
     mod endpoint_from_config;
     mod http_client;
     mod job_submit;
+    mod post_http_invalid_job_id;
     mod walking_skeleton;
 }

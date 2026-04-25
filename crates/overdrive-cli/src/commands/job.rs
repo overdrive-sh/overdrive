@@ -107,10 +107,7 @@ pub async fn submit(args: SubmitArgs) -> Result<SubmitOutput, CliError> {
     // 5. Compose the typed output. Intent key is derived via the
     //    shared `IntentKey::for_job` helper (ADR-0011 SSOT) — no
     //    drift-prone second `jobs/` literal in this crate.
-    let job_id = JobId::new(&resp.job_id).map_err(|e| CliError::InvalidSpec {
-        field: "id".to_string(),
-        message: format!("server returned invalid job_id `{}`: {e}", resp.job_id),
-    })?;
+    let job_id = parse_response_job_id(&resp.job_id)?;
     let intent_key = IntentKey::for_job(&job_id).as_str().to_string();
     let next_command = format!("overdrive alloc status --job {}", resp.job_id);
     Ok(SubmitOutput {
@@ -119,6 +116,30 @@ pub async fn submit(args: SubmitArgs) -> Result<SubmitOutput, CliError> {
         commit_index: resp.commit_index,
         endpoint,
         next_command,
+    })
+}
+
+/// Parse a `job_id` string echoed back in a successful 2xx control-plane
+/// response into a typed [`JobId`].
+///
+/// On `JobId::new` failure, the call site at [`submit`] is *post-HTTP*:
+/// the server returned a 200 OK whose `job_id` field cannot be parsed by
+/// the same validating constructor the spec went through. Per the
+/// rustdoc on [`CliError::InvalidSpec`] (client-side spec validation
+/// BEFORE any HTTP call) and [`CliError::BodyDecode`] (a successful 2xx
+/// response whose body failed to deserialise into the expected typed
+/// shape — server-side contract violation), this is a `BodyDecode`
+/// shape, not an `InvalidSpec` shape.
+///
+/// **NOTE**: this helper currently maps to `InvalidSpec` — that is the
+/// bug under regression. Step 01-02 swaps the variant to `BodyDecode`.
+/// The regression test in `tests/integration/post_http_invalid_job_id.rs`
+/// pins the correct variant; this file is the GREEN call site that
+/// satisfies the test in step 01-02.
+pub fn parse_response_job_id(raw: &str) -> Result<JobId, CliError> {
+    JobId::new(raw).map_err(|e| CliError::InvalidSpec {
+        field: "id".to_string(),
+        message: format!("server returned invalid job_id `{raw}`: {e}"),
     })
 }
 

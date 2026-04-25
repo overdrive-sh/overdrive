@@ -1,0 +1,59 @@
+{
+  "roadmap": {
+    "project_id": "fix-job-submit-body-decode-variant",
+    "created_at": "2026-04-25T15:12:00Z",
+    "total_steps": 2,
+    "scope": "bug-fix",
+    "rca_reference": "docs/feature/fix-job-submit-body-decode-variant/deliver/rca-context.md"
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Regression test then fix",
+      "description": "Pin the CliError variant for server-response job_id validation failures, then swap InvalidSpec to BodyDecode at the single call site.",
+      "default_agent": "nw-software-crafter",
+      "default_deps_strategy": "sequential",
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "RED regression test for BodyDecode variant",
+          "criteria": [
+            "Test lives in crates/overdrive-cli/tests/integration/<file>.rs and is gated by the integration-tests feature; entrypoint crates/overdrive-cli/tests/integration.rs declares the new submodule inside the inline mod integration block.",
+            "Test stands up a stub control plane returning 200 OK with a JSON body whose job_id is JSON-decodable but rejected by JobId::new (e.g. uppercase letters), then invokes commands::job::submit() directly per crate CLAUDE.md (NO subprocess).",
+            "Test asserts matches!(err, CliError::BodyDecode { cause } if cause.contains(\"server returned invalid job_id\")) AND negative-asserts !matches!(err, CliError::InvalidSpec { .. }).",
+            "Running cargo nextest run -p overdrive-cli --features overdrive-cli/integration-tests -E 'binary(integration)' against the unmodified production code RESULTS in this test FAILING (variant is currently InvalidSpec).",
+            "All previously-green tests in the crate remain green at this step (RED scope is the new test only)."
+          ],
+          "agent": "nw-software-crafter",
+          "files_to_modify": [
+            "crates/overdrive-cli/tests/integration.rs",
+            "crates/overdrive-cli/tests/integration/<new_scenario>.rs"
+          ],
+          "implementation_notes": "Reuse existing stub-server scaffolding from crates/overdrive-cli/tests/integration/ if any exists (e.g. helpers used by job_submit.rs or endpoint_from_config.rs). The stub need only respond to POST /v1/jobs once with a fixed JSON body. Use serial_test::serial(env) only if the test mutates env vars; otherwise plain #[tokio::test] is fine. Commit with --no-verify is permitted ONLY for the RED scaffold per testing.md (intentionally-failing commits)."
+        },
+        {
+          "id": "01-02",
+          "name": "GREEN swap InvalidSpec to BodyDecode",
+          "criteria": [
+            "At crates/overdrive-cli/src/commands/job.rs lines 110-113, the JobId::new(&resp.job_id) failure is mapped to CliError::BodyDecode { cause: format!(\"server returned invalid job_id `{}`: {e}\", resp.job_id) } — InvalidSpec mapping is DELETED in the same change (single-cut).",
+            "The regression test from step 01-01 PASSES under cargo nextest run -p overdrive-cli --features overdrive-cli/integration-tests -E 'binary(integration)'.",
+            "All other tests in the workspace remain green: cargo nextest run -p overdrive-cli passes; cargo test --doc -p overdrive-cli passes; cargo clippy -p overdrive-cli --all-targets --features overdrive-cli/integration-tests -- -D warnings reports zero issues.",
+            "Rustdoc on the submit() function (job.rs:69-77) is consistent with the change — InvalidSpec is documented as pre-HTTP only; BodyDecode is documented as the variant for malformed 2xx response shapes. Update if drifted.",
+            "git diff for this step is bounded to crates/overdrive-cli/src/commands/job.rs (and rustdoc lines if updated). No other production files changed."
+          ],
+          "agent": "nw-software-crafter",
+          "deps": ["01-01"],
+          "files_to_modify": [
+            "crates/overdrive-cli/src/commands/job.rs"
+          ],
+          "implementation_notes": "Single-cut greenfield migration per project memory feedback_single_cut_greenfield_migrations: do NOT keep the old mapping behind a feature flag, deprecation, or fallback. Delete the InvalidSpec arm and land BodyDecode in one edit. Preserve the message text exactly: `server returned invalid job_id `{}`: {e}` with backticks around the id. Fix any clippy warnings the change surfaces in scope (memory feedback_fix_clippy_dont_defer); do NOT defer them."
+        }
+      ]
+    }
+  ],
+  "validation": {
+    "status": "approved",
+    "approved_by": "orchestrator-inline",
+    "rationale": "Bug-fix scope with operator-supplied two-step roadmap derived from a precise reviewer RCA. The /nw-deliver invocation authored both steps' acceptance criteria; the architect dispatch would only transcribe. ACs are pinned to file paths and exact assertions; no DISTILL artifacts exist (bug-fix scope). Cosmetic length-limit warnings from des.cli.roadmap validate are expected and non-blocking per project CLAUDE.md (Roadmap validator warnings)."
+  }
+}
