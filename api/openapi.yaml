@@ -261,6 +261,20 @@ components:
 
         Carries mode, region, `commit_index`, the reconciler registry, and
         the broker counters per ADR-0013 and US-04 AC.
+
+        **Store-wide cursor semantics.** `commit_index` here is the
+        store-wide commit counter — total successful writes since the
+        process started, advancing on every `put` / `delete` / `txn`
+        commit. This is intentionally NOT a per-entry index: aggregate
+        observability ("how many writes has this control plane committed?")
+        is the use case, not "what index was assigned to a specific
+        entry?".
+
+        Distinct from [`SubmitJobResponse::commit_index`] and
+        [`JobDescription::commit_index`], which carry per-entry indices —
+        the index at which a specific job's bytes were written. Use those
+        for optimistic-concurrency / watch-resume / audit-ordering against
+        a single entry; use this for cluster-level commit-rate signals.
       required:
       - mode
       - region
@@ -309,6 +323,17 @@ components:
         Response for `GET /v1/jobs/{id}`. Carries the re-hydrated spec, the
         commit index at which it was written, and the canonical spec
         digest per ADR-0014 and US-03 AC.
+
+        **Per-entry semantics.** `commit_index` here is the index at which
+        THIS specific job's bytes were committed — read alongside the
+        stored value via `IntentStore::get`'s `(bytes, commit_index)`
+        tuple. Stable across the job's lifetime: subsequent writes to
+        other keys do NOT advance the value returned here. Equal to the
+        `commit_index` the original `POST /v1/jobs` returned for this
+        `job_id`.
+
+        Distinct from [`ClusterStatus::commit_index`], which is the
+        store-wide commit counter — see that field's docstring.
 
         `spec` is typed (`JobSpecInput`), never `serde_json::Value` — the
         CLI parses this response into a concrete type rather than a value
@@ -402,8 +427,23 @@ components:
         Response for `POST /v1/jobs`. Carries `job_id` + `commit_index` per
         journey step 1 and ADR-0008.
 
+        **Per-entry semantics.** `commit_index` here is the index at which
+        THIS submission's bytes were written — captured atomically inside
+        the `IntentStore` write transaction via `PutOutcome::Inserted` /
+        `PutOutcome::KeyExists`. A byte-identical resubmission returns the
+        index of the original insert (idempotent); a different spec at the
+        same key returns 409 Conflict without a fresh index. This is the
+        same per-entry value [`JobDescription::commit_index`] returns for
+        the same job, regardless of how many other writes have landed
+        since.
+
+        Distinct from [`ClusterStatus::commit_index`], which is the
+        store-wide commit counter — see that field's docstring.
+
         `job_id` is rendered as a `String` at the wire boundary; the server
         converts back to `overdrive_core::id::JobId` in handlers.
+
+        [`JobDescription::commit_index`]: JobDescription::commit_index
       required:
       - job_id
       - commit_index
