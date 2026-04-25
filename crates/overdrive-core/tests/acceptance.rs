@@ -28,4 +28,10 @@ mod acceptance {
     mod intent_key_canonical;
     mod observation_row_display;
     mod reconciler_trait_surface;
+
+    // Bug-fix `fix-observation-lww-merge` — function-level mutation-killing
+    // surface for `LogicalTimestamp::dominates`. Trait-level conformance
+    // is exercised from each adapter's test suite via
+    // `overdrive_core::testing::observation_store::run_lww_conformance`.
+    mod logical_timestamp_dominates;
 }
