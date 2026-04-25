@@ -216,6 +216,20 @@ pub trait IntentStore: Send + Sync + 'static {
 
     /// Watch for changes under a key prefix. Each item is `(key, value)`;
     /// deletes are reported as empty `value`.
+    ///
+    /// `value` is the **caller-provided bytes** as passed to [`put`],
+    /// [`put_if_absent`], or [`TxnOp::Put`] — not whatever on-disk
+    /// encoding the implementation chose for storage. Implementations
+    /// that frame stored rows (e.g. with a per-entry `commit_index`
+    /// prefix, as `LocalIntentStore` does) MUST strip the framing
+    /// before emitting watch events. Subscribers that subsequently
+    /// call [`get`] on the same key receive the same logical value;
+    /// they are not interchangeable byte-for-byte with any internal
+    /// row encoding.
+    ///
+    /// [`put`]: Self::put
+    /// [`put_if_absent`]: Self::put_if_absent
+    /// [`get`]: Self::get
     async fn watch(
         &self,
         prefix: &[u8],
