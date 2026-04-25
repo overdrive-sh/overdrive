@@ -1,8 +1,8 @@
 //! Overdrive Phase 1 single-mode control-plane.
 //!
 //! This crate composes the intent-side `LocalIntentStore`, the observation-side
-//! `SimObservationStore` (Phase 1 production impl per ADR-0012), the
-//! `axum` + `rustls` HTTP server (ADR-0008), the `rcgen`-minted ephemeral
+//! `LocalObservationStore` (Phase 1 production impl per ADR-0012, revised
+//! 2026-04-24), the `axum` + `rustls` HTTP server (ADR-0008), the `rcgen`-minted ephemeral
 //! CA (ADR-0010), the reconciler runtime (ADR-0013), and the shared
 //! request/response types (ADR-0014) into the `overdrive serve` binary's
 //! server loop.
@@ -18,7 +18,7 @@
 //! | `reconciler_runtime` | `ReconcilerRuntime` + registry (ADR-0013) |
 //! | `eval_broker` | `EvaluationBroker` + cancelable-eval-set (ADR-0013) |
 //! | `libsql_provisioner` | Per-primitive libSQL path derivation (ADR-0013) |
-//! | `observation_wiring` | `SimObservationStore` single-node wiring (ADR-0012) |
+//! | `observation_wiring` | `LocalObservationStore` single-node wiring (ADR-0012, revised 2026-04-24) |
 
 #![forbid(unsafe_code)]
 
@@ -49,9 +49,9 @@ use overdrive_store_local::LocalIntentStore;
 ///
 /// * `store` — the authoritative [`IntentStore`] implementation
 ///   (`LocalIntentStore` in Phase 1 single mode).
-/// * `obs` — the `ObservationStore` trait object. Phase 1 wraps
-///   `SimObservationStore` (ADR-0012); Phase 2 swaps in `CorrosionStore`
-///   via a single trait-object replacement.
+/// * `obs` — the `ObservationStore` trait object. Phase 1 uses
+///   `LocalObservationStore` (redb-backed, ADR-0012 revised 2026-04-24);
+///   Phase 2 swaps in `CorrosionStore` via a single trait-object replacement.
 ///
 /// [`IntentStore`]: overdrive_core::traits::intent_store::IntentStore
 #[derive(Clone)]
@@ -146,8 +146,8 @@ impl ServerHandle {
 /// runs in the background; its errors are observable only via
 /// [`ServerHandle::shutdown`] which awaits the task.
 pub async fn run_server(config: ServerConfig) -> Result<ServerHandle, error::ControlPlaneError> {
-    // Wire the Phase 1 observation store (`SimObservationStore`
-    // single-peer per ADR-0012) internally, then delegate to
+    // Wire the Phase 1 observation store (`LocalObservationStore`
+    // single-node per ADR-0012, revised 2026-04-24) internally, then delegate to
     // `run_server_with_obs`. The split exists so integration tests can
     // hold a shared `Arc<dyn ObservationStore>` handle — needed for the
     // 03-03 canary-injection Fixture-Theater defence — without

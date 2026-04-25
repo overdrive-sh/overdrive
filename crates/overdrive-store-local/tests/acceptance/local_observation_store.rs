@@ -228,10 +228,7 @@ async fn out_of_order_alloc_status_does_not_regress() {
 
     // Newer (counter=5, Running) is written first.
     let newer = alloc_row("alloc-1", AllocState::Running, 5);
-    store
-        .write(ObservationRow::AllocStatus(newer.clone()))
-        .await
-        .expect("write newer row");
+    store.write(ObservationRow::AllocStatus(newer.clone())).await.expect("write newer row");
 
     // Subscribe BEFORE the older write — if the older row is emitted,
     // the subscription will deliver it within the bounded poll window.
@@ -241,26 +238,17 @@ async fn out_of_order_alloc_status_does_not_regress() {
     // delivery. The state field differs so a regression to the older
     // row is observable.
     let older = alloc_row("alloc-1", AllocState::Pending, 2);
-    store
-        .write(ObservationRow::AllocStatus(older))
-        .await
-        .expect("write older row");
+    store.write(ObservationRow::AllocStatus(older)).await.expect("write older row");
 
     // Contract: losers do not emit. The subscription must time out
     // because the older write was rejected by LWW.
     let delivery = timeout(Duration::from_millis(50), sub.next()).await;
-    assert!(
-        delivery.is_err(),
-        "LWW loser must not emit on subscriptions; got {delivery:?}"
-    );
+    assert!(delivery.is_err(), "LWW loser must not emit on subscriptions; got {delivery:?}");
 
     // Read returns the newer row, not the older one.
     let rows = store.alloc_status_rows().await.expect("read alloc rows");
     assert_eq!(rows.len(), 1, "exactly one row per key after LWW merge");
-    assert_eq!(
-        rows[0], newer,
-        "older counter=2 row must not regress the counter=5 row"
-    );
+    assert_eq!(rows[0], newer, "older counter=2 row must not regress the counter=5 row");
 }
 
 #[tokio::test]
@@ -271,10 +259,7 @@ async fn out_of_order_node_health_does_not_regress() {
 
     // Newer (counter=5) is written first.
     let newer = node_row("control-plane-0", 5);
-    store
-        .write(ObservationRow::NodeHealth(newer.clone()))
-        .await
-        .expect("write newer row");
+    store.write(ObservationRow::NodeHealth(newer.clone())).await.expect("write newer row");
 
     // Subscribe BEFORE the older write.
     let mut sub = store.subscribe_all().await.expect("subscribe");
@@ -282,25 +267,16 @@ async fn out_of_order_node_health_does_not_regress() {
     // Older (counter=2) arrives second. Distinct counter on the
     // `last_heartbeat` field makes a regression observable on read.
     let older = node_row("control-plane-0", 2);
-    store
-        .write(ObservationRow::NodeHealth(older))
-        .await
-        .expect("write older row");
+    store.write(ObservationRow::NodeHealth(older)).await.expect("write older row");
 
     // Contract: losers do not emit.
     let delivery = timeout(Duration::from_millis(50), sub.next()).await;
-    assert!(
-        delivery.is_err(),
-        "LWW loser must not emit on subscriptions; got {delivery:?}"
-    );
+    assert!(delivery.is_err(), "LWW loser must not emit on subscriptions; got {delivery:?}");
 
     // Read returns the newer row, not the older one.
     let rows = store.node_health_rows().await.expect("read node rows");
     assert_eq!(rows.len(), 1, "exactly one row per key after LWW merge");
-    assert_eq!(
-        rows[0], newer,
-        "older counter=2 row must not regress the counter=5 row"
-    );
+    assert_eq!(rows[0], newer, "older counter=2 row must not regress the counter=5 row");
 }
 
 // ---------------------------------------------------------------------------
