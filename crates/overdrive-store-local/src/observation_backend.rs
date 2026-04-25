@@ -30,9 +30,12 @@
 //!
 //! Subscribers receive a `tokio::sync::broadcast` stream of every row
 //! written to this peer AFTER the subscription opens — the future-only
-//! contract from the `ObservationStore` trait. A subscriber that lags
-//! past the broadcast capacity is signalled end-of-stream; Phase 2's
-//! Corrosion replacement recovers via CR-SQLite gossip catch-up.
+//! contract from the `ObservationStore` trait. Subscribers that lag
+//! past the broadcast capacity drop the lagged notifications silently
+//! and continue delivering subsequent events; the stream does not
+//! close, so a caller relying on end-of-stream as a catch-up trigger
+//! will miss the lost events. Phase 2's Corrosion replacement
+//! recovers via CR-SQLite gossip catch-up.
 
 use std::path::Path;
 use std::pin::Pin;
@@ -62,8 +65,10 @@ const NODE_HEALTH_TABLE: TableDefinition<&[u8], &[u8]> =
 
 /// Capacity of the in-process broadcast channel used for
 /// `subscribe_all`. Sized to absorb a short-lived reader stall on a
-/// single-node workload without backing memory to the moon. Lag past
-/// this is signalled as end-of-stream (see module docs).
+/// single-node workload without backing memory to the moon. Subscribers
+/// that lag past this silently lose the dropped notifications and keep
+/// receiving subsequent ones — the stream does not close on lag (see
+/// module docs).
 const SUBSCRIPTION_CHANNEL_CAPACITY: usize = 1024;
 
 /// Redb-backed `ObservationStore`. Cheap to clone via `Arc`; safe to
