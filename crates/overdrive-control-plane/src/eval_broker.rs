@@ -20,7 +20,7 @@
 //! lives in the runtime assembly at step 04-04 — this module delivers
 //! only the `reap_cancelable()` primitive the cadence will drive.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use overdrive_core::reconciler::{ReconcilerName, TargetResource};
 
@@ -62,7 +62,7 @@ pub struct EvaluationBroker {
     /// Current pending evaluations, keyed on
     /// `(ReconcilerName, TargetResource)`. A second submit at the same
     /// key evicts the prior value into `cancelable`.
-    pending: HashMap<(ReconcilerName, TargetResource), Evaluation>,
+    pending: BTreeMap<(ReconcilerName, TargetResource), Evaluation>,
     /// Evaluations that were superseded at their key, awaiting bulk
     /// reap by the runtime reaper tick.
     cancelable: Vec<Evaluation>,
@@ -96,7 +96,11 @@ impl EvaluationBroker {
     /// `dispatched` increments by the number of drained evaluations;
     /// the cancelable vec is untouched.
     pub fn drain_pending(&mut self) -> Vec<Evaluation> {
-        let drained: Vec<Evaluation> = self.pending.drain().map(|(_, v)| v).collect();
+        // `BTreeMap::drain` is nightly-only on stable Rust; `mem::take` +
+        // `into_values` is the equivalent pattern that yields entries in
+        // ascending key order — exactly the determinism property this
+        // method exists to guarantee.
+        let drained: Vec<Evaluation> = std::mem::take(&mut self.pending).into_values().collect();
         self.dispatched = self.dispatched.saturating_add(drained.len() as u64);
         drained
     }

@@ -422,7 +422,7 @@ const RECONCILER_NAME_MAX: usize = 63;
 /// crate dep on the core compile path. Path-traversal characters
 /// (`.`, `/`, `\`, `:`) are rejected at the constructor, so any name
 /// that parses here is safe to interpolate into a path.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ReconcilerName(String);
 
 impl ReconcilerName {
@@ -521,7 +521,7 @@ const CANONICAL_TARGET_PREFIXES: &[&str] = &["job/", "node/", "alloc/"];
 /// whitepaper §18. Phase 1 carries a canonical string form with prefix
 /// validation; Phase 2+ may refine into a typed sum over concrete
 /// resource kinds.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct TargetResource(String);
 
 impl TargetResource {

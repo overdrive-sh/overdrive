@@ -307,3 +307,45 @@ fn eval_broker_does_not_import_clock_transport_entropy() {
     assert!(!src.contains("tokio::net"), "eval_broker must not import tokio::net");
     assert!(!src.contains("std::net::"), "eval_broker must not import std::net");
 }
+
+// ---------------------------------------------------------------------------
+// (l) Regression for fix-eval-broker-drain-determinism. With `pending`
+// declared as `std::collections::HashMap`, two brokers in the same
+// process see different `RandomState` seeds (hash randomization is
+// per-instance, not just per-process) — so even an identical submit
+// sequence drains in different orders the moment the broker holds
+// >=2 distinct keys. Switching to `BTreeMap` makes drain order a pure
+// function of the keys currently held: identical key sets must yield
+// bit-identical drains. Sixteen iterations with fresh broker pairs is
+// enough to eliminate the lucky-equal case while keeping the test
+// instant.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn drain_pending_is_deterministic_across_two_brokers() {
+    // Canonical five-key fixture lifted from
+    // `arbitrary_interleave_satisfies_invariants` above. Each key is
+    // submitted exactly once, in a fixed order, into both brokers.
+    let keys: [(&str, &str); 5] = [
+        ("noop-heartbeat", "job/payments"),
+        ("noop-heartbeat", "job/frontend"),
+        ("cert-rotator", "job/payments"),
+        ("scheduler", "node/n-001"),
+        ("right-sizer", "alloc/a-42"),
+    ];
+
+    for iteration in 0..16 {
+        let mut a = EvaluationBroker::new();
+        let mut b = EvaluationBroker::new();
+        for (r, t) in &keys {
+            a.submit(eval_for(r, t));
+            b.submit(eval_for(r, t));
+        }
+        let drained_a = a.drain_pending();
+        let drained_b = b.drain_pending();
+        assert_eq!(
+            drained_a, drained_b,
+            "broker drain order must be deterministic across instances (iteration {iteration})",
+        );
+    }
+}
