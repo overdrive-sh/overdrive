@@ -273,3 +273,59 @@ fn reconciler_is_pure_invariant_holds_for_noop_heartbeat() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// (h) Step 01-03 regression — `ReconcilerRuntime.reconcilers` registry
+//     iteration order must be deterministic across two runtime
+//     constructions given the same registration sequence. Without the
+//     fix (HashMap<RandomState>), two runtimes in the same process would
+//     iterate keys in per-process-randomised order the moment the
+//     registry holds ≥2 distinct names; with the fix (BTreeMap), the
+//     order is canonical (Ord) by construction.
+//
+//     CAVEAT: at Phase 1, the only reachable production registerable
+//     variant is `NoopHeartbeat`. The canary-bug variant
+//     `HarnessNoopHeartbeat` (gated behind the `canary-bug` feature)
+//     uses the SAME canonical name (`"noop-heartbeat"`), so the two
+//     cannot coexist in one registry — the second register returns
+//     `ControlPlaneError::Conflict`. As a consequence this test
+//     exercises only the trivial single-key case, which passes on
+//     `HashMap` too. It is authored now to lock the contract before
+//     Phase 2 lands a second built-in reconciler — once that arrives
+//     the property becomes a real (non-trivial) regression gate.
+//
+//     FIXME: extend with ≥2 distinct reconciler names once a second
+//     built-in reconciler ships in Phase 2.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn registered_returns_deterministic_order_across_two_runtimes() {
+    // 16 iterations — well above HashMap RandomState's
+    // single-process-stable bias, so a HashMap-backed registry would
+    // (in the multi-key case Phase 2 will introduce) fail this gate
+    // almost-certainly. With BTreeMap the assertion is true by
+    // construction; with HashMap it is true only as long as a single
+    // distinct key is registered.
+    for iteration in 0..16 {
+        let tmp_a = TempDir::new().expect("tmpdir a");
+        let tmp_b = TempDir::new().expect("tmpdir b");
+
+        let mut runtime_a = ReconcilerRuntime::new(tmp_a.path()).expect("runtime_a::new");
+        let mut runtime_b = ReconcilerRuntime::new(tmp_b.path()).expect("runtime_b::new");
+
+        // Same registration sequence into each runtime.
+        runtime_a.register(noop_heartbeat()).expect("register a");
+        runtime_b.register(noop_heartbeat()).expect("register b");
+
+        let names_a = runtime_a.registered();
+        let names_b = runtime_b.registered();
+
+        assert_eq!(
+            names_a, names_b,
+            "iteration {iteration}: registered() must return bit-identical \
+             order across two runtimes given the same registration \
+             sequence — required for cluster_status JSON wire \
+             determinism (handlers.rs)"
+        );
+    }
+}

@@ -223,14 +223,11 @@ pub async fn cluster_status(
     // These are hard-pinned here rather than derived from config so a
     // stray config typo cannot put a non-canonical value on the wire.
     let counters = state.runtime.broker().counters();
-    let mut reconcilers: Vec<String> =
+    // `ReconcilerRuntime::registered` already returns names in canonical
+    // (Ord-sorted) order — the registry is a `BTreeMap` — so JSON wire
+    // stability is by construction here. No `.sort()` needed.
+    let reconcilers: Vec<String> =
         state.runtime.registered().into_iter().map(|n| n.to_string()).collect();
-    // Sort for stable JSON output — `ReconcilerRuntime::registered`
-    // returns HashMap keys, whose iteration order is unspecified. Wire
-    // stability matters here because this body is serialised into an
-    // OpenAPI-covered response; tests and clients expect deterministic
-    // rendering.
-    reconcilers.sort();
 
     Ok(Json(api::ClusterStatus {
         mode: "single".to_string(),

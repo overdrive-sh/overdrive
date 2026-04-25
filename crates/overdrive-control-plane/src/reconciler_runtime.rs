@@ -10,9 +10,16 @@
 //! because it pulls in `libsql` and wiring-layer concerns. Core stays
 //! port-only.
 //!
-//! Phase 1 shape: the runtime owns a `HashMap<ReconcilerName,
+//! Phase 1 shape: the runtime owns a `BTreeMap<ReconcilerName,
 //! AnyReconciler>` keyed by the canonical name, plus an
-//! `EvaluationBroker` behind `&self`. Registration eagerly derives the
+//! `EvaluationBroker` behind `&self`. The `BTreeMap` choice — over
+//! `HashMap` — is deliberate: registry iteration must be deterministic
+//! across runtime constructions because [`Self::registered`] is
+//! consumed by the operator-facing `cluster status` JSON output, and
+//! `HashMap`'s `RandomState` hasher would put per-process-randomised
+//! key order on the wire (see ADR-0013 §8 storm-proofing rationale and
+//! the project-wide ordered-collection-as-nondeterminism rule in
+//! `.claude/rules/development.md`). Registration eagerly derives the
 //! per-reconciler libSQL path via
 //! [`crate::libsql_provisioner::provision_db_path`] — the DB itself is
 //! opened lazily by callers that need it (Phase 3+). Provisioning the
@@ -20,7 +27,7 @@
 //! denied, traversal attempt) at registration rather than deferred
 //! until first use.
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use overdrive_core::reconciler::{AnyReconciler, ReconcilerName};
@@ -36,7 +43,7 @@ pub struct ReconcilerRuntime {
     data_dir: PathBuf,
     /// Registry keyed on canonical reconciler name. Duplicate
     /// registration is rejected with `ControlPlaneError::Conflict`.
-    reconcilers: HashMap<ReconcilerName, AnyReconciler>,
+    reconcilers: BTreeMap<ReconcilerName, AnyReconciler>,
     /// Cancelable-eval-set evaluation broker per ADR-0013 §8.
     broker: EvaluationBroker,
 }
@@ -64,7 +71,7 @@ impl ReconcilerRuntime {
                 e,
             )
         })?;
-        Ok(Self { data_dir: canon, reconcilers: HashMap::new(), broker: EvaluationBroker::new() })
+        Ok(Self { data_dir: canon, reconcilers: BTreeMap::new(), broker: EvaluationBroker::new() })
     }
 
     /// Register a reconciler. Derives its libSQL path under
@@ -92,10 +99,9 @@ impl ReconcilerRuntime {
         Ok(())
     }
 
-    /// Registered reconciler names. Order is unspecified (`HashMap`) but
-    /// stable within a single runtime lifetime given the same
-    /// registration sequence — callers that need deterministic order
-    /// should sort.
+    /// Registered reconciler names in canonical (Ord) order —
+    /// deterministic across runtime constructions given the same
+    /// registration sequence.
     #[must_use]
     pub fn registered(&self) -> Vec<ReconcilerName> {
         self.reconcilers.keys().cloned().collect()
