@@ -299,11 +299,22 @@ fn synthesize_error_body(status: StatusCode) -> ErrorBody {
     }
 }
 
-/// Render a `reqwest::Error` as a short, operator-readable string that
-/// does NOT leak raw tokens like `ECONNREFUSED`, `reqwest::Error`
-/// Debug format, or deeply-chained source contexts. The shape is one
-/// adjective per failure category — enough context for the operator
-/// to act, not enough for an attacker to fingerprint.
+/// Render a `reqwest::Error` as a short, operator-readable string.
+/// Each arm returns a curated `&'static str` chosen to be both
+/// operator-actionable and disjoint from the `strip_leak` deny-list
+/// (`ECONNREFUSED`, `reqwest::Error`, `DecodeError`) — one adjective
+/// per failure category, enough context for the operator to act, not
+/// enough for an attacker to fingerprint. No source-chain text is
+/// embedded, so `strip_leak` is *not* load-bearing on this path and
+/// is deliberately not called: applying it here was historically a
+/// no-op that gave a false sense of sanitization. The dynamic scrub
+/// is reserved for call sites that interpolate `Display`-of-error
+/// directly (see `from_config` and `CliError::ConfigLoad`). The
+/// `category_strings_are_leak_free_by_construction` test below pins
+/// the disjointness invariant — anyone adding a new arm that
+/// embeds dynamic content (e.g. `format!("...: {err}")`) MUST design
+/// a scrub strategy for it; the existing `strip_leak` token set is
+/// not sufficient for arbitrary `reqwest`/`hyper`/`io` Display text.
 ///
 /// The `is_connect()` arm splits further: if the source chain carries
 /// a `rustls::Error::InvalidCertificate(...)`, the failure is a TLS
@@ -337,7 +348,7 @@ fn stringify_reqwest_error(err: &reqwest::Error) -> String {
     } else {
         "transport error"
     };
-    strip_leak(category)
+    category.to_owned()
 }
 
 /// Walk the `Error::source()` chain looking for any
@@ -397,4 +408,58 @@ fn strip_leak(s: &str) -> String {
     s.replace("ECONNREFUSED", "connection refused")
         .replace("reqwest::Error", "transport error")
         .replace("DecodeError", "decode error")
+}
+
+#[cfg(test)]
+mod tests {
+    /// `stringify_reqwest_error` returns one of a small, hand-curated
+    /// set of `&'static str` literals — never an interpolation of a
+    /// `reqwest::Error` Display chain. The disjointness contract: each
+    /// of those literals is leak-free against `strip_leak`'s deny-list
+    /// by construction, which is why the function does not (and must
+    /// not need to) call `strip_leak` on its output.
+    ///
+    /// This test pins the contract by enumerating the literal set
+    /// inline and asserting each against the deny-list. The list MUST
+    /// mirror the arms in `stringify_reqwest_error` — when a new arm
+    /// is added, this test must be updated. If a future arm embeds
+    /// dynamic content (e.g. `format!("transport error: {err}")`), the
+    /// new string will not be a static literal and the maintainer must
+    /// design a scrub strategy specific to that arm — `strip_leak`'s
+    /// existing three-token set is not sufficient for arbitrary
+    /// `reqwest` / `hyper` / `io` Display text.
+    #[test]
+    fn category_strings_are_leak_free_by_construction() {
+        // Mirror of every literal `stringify_reqwest_error` can return.
+        // Keep in sync with the function body above.
+        let categories: &[&str] = &[
+            "request timed out",
+            "TLS handshake failed (certificate not trusted by the client) \
+             — hint: re-run `overdrive serve` to re-mint trust material if the CA \
+             was rotated since the operator config was written",
+            "could not connect to server",
+            "response body decode failed",
+            "request build failed",
+            "request body error",
+            "too many redirects",
+            "unexpected status",
+            "transport error",
+        ];
+
+        // The deny-list `strip_leak` scrubs. The contract is that every
+        // category string is disjoint from this set, so calling
+        // `strip_leak` on the function's output would be a no-op.
+        let leak_tokens: &[&str] = &["ECONNREFUSED", "reqwest::Error", "DecodeError"];
+
+        for &category in categories {
+            for &token in leak_tokens {
+                assert!(
+                    !category.contains(token),
+                    "category string {category:?} contains leak token {token:?} — \
+                     either the literal must change or this arm needs its own scrub \
+                     (strip_leak's three-token set is not load-bearing on this path)",
+                );
+            }
+        }
+    }
 }
