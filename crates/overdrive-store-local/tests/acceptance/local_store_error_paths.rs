@@ -261,7 +261,7 @@ async fn a_put_against_a_read_only_backing_directory_surfaces_a_typed_io_error()
     let read_seed = store.get(b"seed/key").await.expect("get seed after failed put");
     assert_eq!(
         read_seed,
-        Some(Bytes::copy_from_slice(b"seed-value")),
+        Some((Bytes::copy_from_slice(b"seed-value"), 1)),
         "pre-existing state must be untouched by a failed put"
     );
 }

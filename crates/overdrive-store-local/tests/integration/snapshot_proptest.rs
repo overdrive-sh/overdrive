@@ -43,6 +43,13 @@ use tokio::runtime::Runtime;
 /// * Keys within a single generation are unique — a `BTreeMap` collapses
 ///   duplicates before we return. Ordering does not leak: the store's
 ///   export re-sorts anyway.
+///
+/// The generator returns `(key, value)` pairs; per-entry
+/// `commit_index` values are assigned implicitly by the source store
+/// at insertion time (one bump per `put`). The frame v2 round-trip
+/// property therefore proves that whatever indices the source assigns
+/// (1, 2, 3, ... in `BTreeMap` iteration order) survive bootstrap
+/// byte-identically.
 fn store_contents() -> impl Strategy<Value = Vec<(Vec<u8>, Vec<u8>)>> {
     prop::collection::vec(
         (prop::collection::vec(any::<u8>(), 1..=64), prop::collection::vec(any::<u8>(), 0..=4096)),

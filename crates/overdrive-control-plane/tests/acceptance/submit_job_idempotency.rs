@@ -192,13 +192,19 @@ async fn fresh_submit_on_empty_key_advances_commit_index_and_persists_spec() {
     assert_eq!(resp.commit_index, 1, "first put must advance commit_index to 1");
 
     // The key must be populated (get returns Some) — proves the put
-    // actually fired.
+    // actually fired. `IntentStore::get` returns `(Bytes, u64)` per
+    // `fix-commit-index-per-entry`; we destructure the bytes side
+    // only.
     let key = b"jobs/payments";
     let stored = state.store.get(key).await.expect("get must succeed");
-    assert!(
-        stored.is_some(),
+    let (bytes, idx) = stored.expect(
         "after successful submit the intent key must be populated — \
          a mutation that bypassed the put would leave it empty",
     );
-    assert!(!stored.unwrap().is_empty(), "stored bytes must be non-empty");
+    assert!(!bytes.is_empty(), "stored bytes must be non-empty");
+    assert_eq!(
+        idx, resp.commit_index,
+        "stored per-entry commit_index ({idx}) must match the index returned by submit ({})",
+        resp.commit_index,
+    );
 }

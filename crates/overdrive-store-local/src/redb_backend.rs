@@ -1,6 +1,55 @@
 //! redb-backed implementation of `IntentStore` for the single-node
 //! `LocalIntentStore`.
 //!
+//! # Per-entry `commit_index` storage
+//!
+//! Each entry's `commit_index` is persisted **inline** with its value in
+//! the existing `entries` table. The on-disk byte layout for a stored
+//! row is:
+//!
+//! ```text
+//! [u64 little-endian commit_index || raw value bytes]
+//! ```
+//!
+//! `decode_entry` splits the prefix off; `encode_entry` prepends it.
+//! Both helpers are private to this module — the trait surface only
+//! sees `(Bytes, u64)` tuples.
+//!
+//! ## Why packed inline rather than a parallel index table
+//!
+//! Two layouts were considered for `fix-commit-index-per-entry`
+//! Step 01-02:
+//!
+//! 1. **Parallel `entry_index: &[u8] -> u64` redb table** written in
+//!    the same write transaction as `entries`.
+//! 2. **Packed `[u64-LE-prefix || value]` frame** in the existing
+//!    `entries` table.
+//!
+//! The packed layout was chosen because:
+//!
+//! * **Atomicity.** A single redb `insert` writes both bytes and
+//!   index, eliminating the cross-table consistency window that an
+//!   intermediate `RaftStore` adapter (or a partial-commit recovery
+//!   path) would otherwise have to reason about. The `txn` path also
+//!   stays a single-table loop instead of a two-table dance.
+//! * **Read cost.** `get` is a single `table.get()` whose returned
+//!   slice is sliced into prefix + value — no second table lookup.
+//! * **Snapshot frame v2.** The on-disk row IS the rkyv-archived
+//!   value, so the frame v2 payload becomes
+//!   `Vec<(Vec<u8>, Vec<u8>, u64)>` — three obvious fields per entry,
+//!   no implicit join. Forward compat with v1 just means projecting
+//!   the missing index column to `0`.
+//! * **Bootstrap atomicity.** `bootstrap_from`'s clear-and-replace is
+//!   a single-table operation; a parallel-table layout would need to
+//!   clear two tables in lockstep or risk a half-bootstrapped state.
+//!
+//! The downside of the packed layout — that a future `range scan with
+//! commit_index >= N` query has to deserialise every value in range —
+//! is not relevant to Phase 1 reconcilers (which read by exact key,
+//! not range). When that query shape arrives, a secondary index table
+//! is the standard answer; it does not require migrating the primary
+//! layout.
+//!
 //! # Watch: Phase 1 substitute
 //!
 //! Per the roadmap note for step 03-01, the current `watch` implementation
@@ -27,7 +76,8 @@
 //! * Events fire only after successful redb commit, so a subscriber
 //!   never sees a phantom write that failed to persist.
 //! * The table layout is deliberately minimal for Phase 1: a single
-//!   `entries: &[u8] -> &[u8]` table. Secondary indexes land when
+//!   `entries: &[u8] -> &[u8]` table holding packed
+//!   `[u64-LE-prefix || value]` rows. Secondary indexes land when
 //!   reconcilers need them (Phase 2).
 
 use std::path::Path;
@@ -140,17 +190,57 @@ impl LocalIntentStore {
         self.inner.commit_counter.load(Ordering::Acquire)
     }
 
-    /// Bump the commit counter after a successful write. Uses
-    /// `Release` ordering so that any observation of the new
-    /// `commit_index` happens-after the redb commit that triggered it.
-    fn bump_commit(&self) {
-        self.inner.commit_counter.fetch_add(1, Ordering::Release);
+    /// Bump the commit counter and return the new value. Uses
+    /// `AcqRel` ordering so any observation of the new counter
+    /// happens-after the call site (which itself is inside a redb
+    /// write transaction whose `commit()` provides the durability
+    /// fence). The returned value IS the index assigned to the write
+    /// transaction inside which `bump_commit_inside` is called — every
+    /// caller of this helper does so **inside** the
+    /// `tokio::task::spawn_blocking` body that owns the redb write
+    /// transaction.
+    fn bump_commit_inside(inner: &Inner) -> u64 {
+        // `fetch_add` returns the prior value; the assigned index is
+        // therefore prior + 1. Using AcqRel here pairs with the load
+        // ordering on the inherent `commit_index()` accessor below.
+        inner.commit_counter.fetch_add(1, Ordering::AcqRel) + 1
     }
+}
+
+/// Encode a value + per-entry `commit_index` into the on-disk row form.
+///
+/// The frame is `[u64 little-endian commit_index || value bytes]` —
+/// the `commit_index` is a fixed 8-byte prefix; the remainder is the
+/// caller's value verbatim. Two callers writing the same logical
+/// `(value, idx)` produce byte-identical frames.
+fn encode_entry(commit_index: u64, value: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(8 + value.len());
+    out.extend_from_slice(&commit_index.to_le_bytes());
+    out.extend_from_slice(value);
+    out
+}
+
+/// Decode an on-disk row into `(value_bytes, commit_index)`. Returns
+/// an `IntentStoreError::Io` (mapped through a synthetic `io::Error`)
+/// if the slice is shorter than the 8-byte prefix — that shape can
+/// only arise from a backing-file corruption since the encoder always
+/// writes the prefix.
+fn decode_entry(raw: &[u8]) -> Result<(Bytes, u64), IntentStoreError> {
+    if raw.len() < 8 {
+        return Err(IntentStoreError::Io(std::io::Error::other(
+            "entry row corrupted: shorter than 8-byte commit_index prefix",
+        )));
+    }
+    let mut idx_bytes = [0u8; 8];
+    idx_bytes.copy_from_slice(&raw[..8]);
+    let commit_index = u64::from_le_bytes(idx_bytes);
+    let value = Bytes::copy_from_slice(&raw[8..]);
+    Ok((value, commit_index))
 }
 
 #[async_trait]
 impl IntentStore for LocalIntentStore {
-    async fn get(&self, key: &[u8]) -> Result<Option<Bytes>, IntentStoreError> {
+    async fn get(&self, key: &[u8]) -> Result<Option<(Bytes, u64)>, IntentStoreError> {
         let inner = Arc::clone(&self.inner);
         let key = key.to_vec();
 
@@ -158,7 +248,7 @@ impl IntentStore for LocalIntentStore {
             let read = inner.db.begin_read().map_err(map_transaction_error)?;
             let table = read.open_table(ENTRIES_TABLE).map_err(map_table_error)?;
             let got = table.get(key.as_slice()).map_err(map_storage_error)?;
-            Ok(got.map(|v| Bytes::copy_from_slice(v.value())))
+            got.map_or(Ok(None), |v| decode_entry(v.value()).map(Some))
         })
         .await
         .map_err(map_join_error)?
@@ -171,11 +261,15 @@ impl IntentStore for LocalIntentStore {
 
         let (emit_key, emit_value) = tokio::task::spawn_blocking(move || {
             let write = inner.db.begin_write().map_err(map_transaction_error)?;
+            // Bump-and-capture INSIDE the write transaction. The
+            // assigned commit_index lands on disk together with the
+            // value — see the `commit_index` storage docstring at the
+            // top of this module.
+            let new_idx = Self::bump_commit_inside(&inner);
+            let row = encode_entry(new_idx, value_vec.as_slice());
             {
                 let mut table = write.open_table(ENTRIES_TABLE).map_err(map_table_error)?;
-                table
-                    .insert(key_vec.as_slice(), value_vec.as_slice())
-                    .map_err(map_storage_error)?;
+                table.insert(key_vec.as_slice(), row.as_slice()).map_err(map_storage_error)?;
             }
             write.commit().map_err(map_commit_error)?;
             Ok::<_, IntentStoreError>((key_vec, value_vec))
@@ -183,9 +277,6 @@ impl IntentStore for LocalIntentStore {
         .await
         .map_err(map_join_error)??;
 
-        // Bump the commit counter *after* the redb commit succeeds so
-        // the counter never outruns what has actually been persisted.
-        self.bump_commit();
         self.emit(Bytes::from(emit_key), Bytes::from(emit_value));
         Ok(())
     }
@@ -200,6 +291,13 @@ impl IntentStore for LocalIntentStore {
     /// separate `get` (read txn) followed by a `put` (write txn):
     /// another writer can interleave between the two and silently
     /// overwrite the first write.
+    ///
+    /// On the `Inserted` branch, the per-entry `commit_index` returned
+    /// inside [`PutOutcome::Inserted`] is the index assigned by
+    /// `bump_commit_inside` **inside** the write transaction — no
+    /// race window with concurrent committers for *different* keys.
+    /// On the `KeyExists` branch, `commit_index` carries the prior
+    /// write's index, decoded from the stored row.
     async fn put_if_absent(
         &self,
         key: &[u8],
@@ -217,13 +315,23 @@ impl IntentStore for LocalIntentStore {
                 // view with the subsequent `insert` — this is what makes
                 // the check-and-set atomic.
                 if let Some(existing) = table.get(key_vec.as_slice()).map_err(map_storage_error)? {
-                    let bytes = Bytes::copy_from_slice(existing.value());
-                    (PutOutcome::KeyExists { existing: bytes }, None)
+                    let (existing_bytes, existing_idx) = decode_entry(existing.value())?;
+                    (
+                        PutOutcome::KeyExists {
+                            existing: existing_bytes,
+                            commit_index: existing_idx,
+                        },
+                        None,
+                    )
                 } else {
-                    table
-                        .insert(key_vec.as_slice(), value_vec.as_slice())
-                        .map_err(map_storage_error)?;
-                    (PutOutcome::Inserted, Some((key_vec, value_vec)))
+                    // Bump-and-capture INSIDE the same write txn that
+                    // commits the row. The returned `commit_index` is
+                    // exactly the one stored on disk — no separate
+                    // post-await read of the global counter.
+                    let new_idx = Self::bump_commit_inside(&inner);
+                    let row = encode_entry(new_idx, value_vec.as_slice());
+                    table.insert(key_vec.as_slice(), row.as_slice()).map_err(map_storage_error)?;
+                    (PutOutcome::Inserted { commit_index: new_idx }, Some((key_vec, value_vec)))
                 }
             };
             write.commit().map_err(map_commit_error)?;
@@ -232,10 +340,10 @@ impl IntentStore for LocalIntentStore {
         .await
         .map_err(map_join_error)??;
 
-        // Counter and watch events only fire on the insert branch —
-        // a `KeyExists` return is a no-op commit, semantically.
+        // Watch events only fire on the insert branch — a `KeyExists`
+        // return is a no-op commit, semantically. The counter has
+        // already been bumped inside the spawn_blocking body.
         if let Some((emit_key, emit_value)) = emit {
-            self.bump_commit();
             self.emit(Bytes::from(emit_key), Bytes::from(emit_value));
         }
         Ok(outcome)
@@ -247,6 +355,12 @@ impl IntentStore for LocalIntentStore {
 
         let emit_key = tokio::task::spawn_blocking(move || {
             let write = inner.db.begin_write().map_err(map_transaction_error)?;
+            // Bump inside the write transaction so the global counter
+            // tracks committed deletes consistently with puts. Delete
+            // does not store a per-entry index (the row is gone), so
+            // we discard the returned index — only the global cursor
+            // observers (e.g. `cluster_status`) read this advance.
+            let _new_idx = Self::bump_commit_inside(&inner);
             {
                 let mut table = write.open_table(ENTRIES_TABLE).map_err(map_table_error)?;
                 table.remove(key_vec.as_slice()).map_err(map_storage_error)?;
@@ -257,7 +371,6 @@ impl IntentStore for LocalIntentStore {
         .await
         .map_err(map_join_error)??;
 
-        self.bump_commit();
         // Delete events carry an empty value per the trait docstring.
         self.emit(Bytes::from(emit_key), Bytes::new());
         Ok(())
@@ -269,13 +382,19 @@ impl IntentStore for LocalIntentStore {
 
         tokio::task::spawn_blocking(move || {
             let write = inner.db.begin_write().map_err(map_transaction_error)?;
+            // Bump-and-capture once for the whole transaction — every
+            // put inside this txn shares the same per-entry index.
+            // This matches the trait contract that `txn` advances the
+            // commit cursor by exactly 1 regardless of op count.
+            let txn_idx = Self::bump_commit_inside(&inner);
             {
                 let mut table = write.open_table(ENTRIES_TABLE).map_err(map_table_error)?;
                 for op in &ops_for_commit {
                     match op {
                         TxnOp::Put { key, value } => {
+                            let row = encode_entry(txn_idx, value.as_ref());
                             table
-                                .insert(key.as_ref(), value.as_ref())
+                                .insert(key.as_ref(), row.as_slice())
                                 .map_err(map_storage_error)?;
                         }
                         TxnOp::Delete { key } => {
@@ -289,11 +408,6 @@ impl IntentStore for LocalIntentStore {
         })
         .await
         .map_err(map_join_error)??;
-
-        // A successful `txn` commit bumps the counter once regardless
-        // of how many ops the transaction carried — the counter tracks
-        // commits, not logical writes.
-        self.bump_commit();
 
         // Emit per-op events *after* the commit succeeds so subscribers
         // never see a phantom write.
@@ -333,12 +447,14 @@ impl IntentStore for LocalIntentStore {
 
     /// Export a full-state snapshot of this `LocalIntentStore`.
     ///
-    /// Reads every `(key, value)` pair in a single redb read
-    /// transaction, sorts them by key via
+    /// Reads every `(key, value, commit_index)` triple in a single
+    /// redb read transaction, sorts them by key via
     /// [`snapshot_frame::encode`], and returns a [`StateSnapshot`]
     /// whose `bytes()` slice is canonical — two semantically-equal
-    /// stores produce byte-identical exports. The same frame format
-    /// is consumed by [`Self::bootstrap_from`] and will be consumed by
+    /// stores produce byte-identical exports. The frame format is v2
+    /// (carries per-entry `commit_index`); see `snapshot_frame.rs`
+    /// for the byte layout. The same frame format is consumed by
+    /// [`Self::bootstrap_from`] and will be consumed by
     /// `RaftStore::bootstrap_from` in Phase 2.
     async fn export_snapshot(&self) -> Result<StateSnapshot, IntentStoreError> {
         let inner = Arc::clone(&self.inner);
@@ -347,25 +463,32 @@ impl IntentStore for LocalIntentStore {
             let read = inner.db.begin_read().map_err(map_transaction_error)?;
             let table = read.open_table(ENTRIES_TABLE).map_err(map_table_error)?;
 
-            let mut entries: Vec<(Bytes, Bytes)> = Vec::new();
+            let mut entries: Vec<(Bytes, Bytes, u64)> = Vec::new();
             let iter = table.iter().map_err(map_storage_error)?;
             for item in iter {
-                let (k, v) = item.map_err(map_storage_error)?;
-                entries
-                    .push((Bytes::copy_from_slice(k.value()), Bytes::copy_from_slice(v.value())));
+                let (k, raw) = item.map_err(map_storage_error)?;
+                let (value, idx) = decode_entry(raw.value())?;
+                entries.push((Bytes::copy_from_slice(k.value()), value, idx));
             }
 
             let bytes = snapshot_frame::encode(&entries)
                 .map_err(|e| IntentStoreError::SnapshotImport(e.to_string()))?;
-            // `entries` is stored post-encode for caller inspection;
             // `encode` sorts internally on an owned copy, so we sort
             // the caller-visible view here as well to keep the two
             // projections consistent.
             entries.sort_by(|a, b| a.0.as_ref().cmp(b.0.as_ref()));
 
+            // The trait-level `StateSnapshot` view exposes
+            // `Vec<(Bytes, Bytes)>` — drop the index column for the
+            // logical view; the canonical byte slice still carries
+            // them losslessly, and `bootstrap_from` reads from
+            // `bytes()` not from `entries`.
+            let logical: Vec<(Bytes, Bytes)> =
+                entries.into_iter().map(|(k, v, _idx)| (k, v)).collect();
+
             Ok::<_, IntentStoreError>(StateSnapshot::from_parts(
                 u32::from(snapshot_frame::VERSION),
-                entries,
+                logical,
                 bytes,
             ))
         })
@@ -403,8 +526,20 @@ impl IntentStore for LocalIntentStore {
             // that fails to decode never touches the target store, so
             // the post-failure `export_snapshot` is byte-identical to
             // the export of a fresh never-bootstrapped store.
+            //
+            // `decode` accepts both v1 frames (zero-padded indices)
+            // and v2 frames (per-entry indices); see `snapshot_frame`
+            // module docstring for the forward-compat behaviour.
             let entries = snapshot_frame::decode(&frame)
                 .map_err(|e| IntentStoreError::SnapshotCorrupt { offset: e.offset() })?;
+
+            // Compute the maximum per-entry commit_index in the
+            // incoming snapshot — the global counter must be
+            // >= every per-entry index after bootstrap so subsequent
+            // writes do not assign a clashing index. Empty snapshots
+            // keep the counter at its current value (typically 0 for
+            // a freshly-opened target store).
+            let max_idx = entries.iter().map(|(_, _, idx)| *idx).max().unwrap_or(0);
 
             let write = inner.db.begin_write().map_err(map_transaction_error)?;
             {
@@ -415,11 +550,24 @@ impl IntentStore for LocalIntentStore {
                 // clear and keeps the whole operation inside the same
                 // write transaction as the subsequent inserts.
                 table.retain(|_, _| false).map_err(map_storage_error)?;
-                for (k, v) in &entries {
-                    table.insert(k.as_ref(), v.as_ref()).map_err(map_storage_error)?;
+                for (k, v, idx) in &entries {
+                    let row = encode_entry(*idx, v.as_ref());
+                    table.insert(k.as_ref(), row.as_slice()).map_err(map_storage_error)?;
                 }
             }
             write.commit().map_err(map_commit_error)?;
+
+            // Advance the global counter to at least max_idx so the
+            // next write does not collide with any imported entry's
+            // commit_index. `store` with Release ordering is correct
+            // here because the redb commit above is the durability
+            // fence; this is a "raise to floor" not a bump.
+            //
+            // Use `fetch_max` to avoid clobbering a higher counter on
+            // a future re-import scenario — though in practice the
+            // target is freshly-opened with counter == 0.
+            inner.commit_counter.fetch_max(max_idx, Ordering::AcqRel);
+
             Ok::<_, IntentStoreError>(())
         })
         .await

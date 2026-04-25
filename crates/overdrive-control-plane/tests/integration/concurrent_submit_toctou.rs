@@ -30,7 +30,9 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use bytes::Bytes;
-use overdrive_control_plane::api::{ErrorBody, JobDescription, SubmitJobRequest, SubmitJobResponse};
+use overdrive_control_plane::api::{
+    ErrorBody, JobDescription, SubmitJobRequest, SubmitJobResponse,
+};
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
 use overdrive_core::aggregate::{IntentKey, Job, JobSpecInput};
 use overdrive_core::id::JobId;
@@ -110,7 +112,11 @@ async fn read_intent_key_from_store(data_dir: &std::path::Path, key: &[u8]) -> O
     let path = data_dir.join("intent.redb");
     assert!(path.exists(), "expected redb file at {}; found none", path.display());
     let store = LocalIntentStore::open(&path).expect("open LocalIntentStore for back-door read");
-    store.get(key).await.expect("back-door get")
+    // `IntentStore::get` returns `(Bytes, u64)` per
+    // `fix-commit-index-per-entry`; this helper projects to bytes
+    // only because every back-door reader in this file asserts on
+    // the rkyv archive shape, not on the per-entry commit_index.
+    store.get(key).await.expect("back-door get").map(|(bytes, _idx)| bytes)
 }
 
 fn spec_with_replicas(replicas: u32) -> JobSpecInput {
@@ -331,11 +337,8 @@ async fn concurrent_byte_identical_submits_return_single_commit_index() {
     // trait + handler change.
     let job_id_str = responses.first().expect("at least one response").job_id.clone();
     let describe_url = format!("https://localhost:{}/v1/jobs/{}", bound.port(), job_id_str);
-    let describe_resp = client
-        .get(&describe_url)
-        .send()
-        .await
-        .expect("GET /v1/jobs/{id} after concurrent burst");
+    let describe_resp =
+        client.get(&describe_url).send().await.expect("GET /v1/jobs/{id} after concurrent burst");
     assert_eq!(
         describe_resp.status(),
         reqwest::StatusCode::OK,

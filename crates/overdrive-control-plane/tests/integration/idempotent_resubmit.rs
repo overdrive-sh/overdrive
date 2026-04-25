@@ -127,7 +127,11 @@ async fn read_intent_key_from_store(data_dir: &std::path::Path, key: &[u8]) -> O
     let path = data_dir.join("intent.redb");
     assert!(path.exists(), "expected redb file at {}; found none", path.display());
     let store = LocalIntentStore::open(&path).expect("open LocalIntentStore for back-door read");
-    store.get(key).await.expect("back-door get")
+    // `IntentStore::get` returns `(Bytes, u64)` per
+    // `fix-commit-index-per-entry`; this helper projects to bytes
+    // only because the back-door readers in this file assert on the
+    // rkyv archive shape, not on the per-entry commit_index.
+    store.get(key).await.expect("back-door get").map(|(bytes, _idx)| bytes)
 }
 
 fn payments_spec() -> JobSpecInput {

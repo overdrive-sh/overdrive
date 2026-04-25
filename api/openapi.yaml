@@ -67,10 +67,20 @@ paths:
 
         * A spec whose rkyv-archived bytes are byte-identical to what is
           already stored at the canonical `jobs/<JobId>` key returns HTTP
-          200 with the *current* `commit_index` — no additional write.
+          200 with the *original* `commit_index` — the index of the prior
+          write at this key, surfaced via `PutOutcome::KeyExists`.
         * A spec whose rkyv-archived bytes DIFFER from what is stored at
           the same key returns HTTP 409 Conflict with an `ErrorBody`.
-        * An empty key returns a new commit with `commit_index` advanced.
+        * An empty key returns a new commit with `commit_index` carrying
+          the per-entry index assigned inside the write transaction
+          (`PutOutcome::Inserted::commit_index`).
+
+        Per-entry `commit_index` semantics (`fix-commit-index-per-entry`
+        RCA §WHY 5B): the index returned to the client is the index at
+        which *this* write committed, not the live store-wide cursor at
+        response-construction time. Concurrent committers for *different*
+        keys cannot drift this value — the bump and the response read are
+        atomic with the write transaction.
       operationId: submit_job
       requestBody:
         content:
@@ -123,6 +133,14 @@ paths:
         `ControlPlaneError::NotFound { resource: <IntentKey::as_str()> }`,
         which `to_response` renders as HTTP 404 with an `ErrorBody { error:
         "not_found", ... }`.
+
+        Per-entry `commit_index` semantics (`fix-commit-index-per-entry`
+        RCA §WHY 5A): the `commit_index` returned in the
+        `JobDescription` body is the per-entry index at which *this* job
+        was written — surfaced by `IntentStore::get` as the second
+        element of the returned tuple — NOT the live store-wide cursor at
+        describe-time. Subsequent writes to *other* keys do not drift the
+        describe response.
       operationId: describe_job
       parameters:
       - name: id

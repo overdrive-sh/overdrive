@@ -16,6 +16,12 @@
 #![allow(clippy::expect_used)]
 #![allow(clippy::expect_fun_call)]
 #![allow(clippy::unwrap_used)]
+// `submit_a_body` / `submit_b_body` style bindings naturally read as
+// "submission A's body" vs "submission B's body" in scenarios that
+// pin a property across two submits. The `similar_names` lint flags
+// the shared prefix; renaming to `_payments_body` / `_frontend_body`
+// would couple the variable name to a fixture detail, which is worse.
+#![allow(clippy::similar_names)]
 
 // The inline `mod integration { ... }` mirrors the `tests/acceptance.rs`
 // pattern: an integration-test crate root resolves `mod foo;` against

@@ -47,10 +47,20 @@ impl From<overdrive_core::traits::observation_store::NodeHealthRow> for api::Nod
 ///
 /// * A spec whose rkyv-archived bytes are byte-identical to what is
 ///   already stored at the canonical `jobs/<JobId>` key returns HTTP
-///   200 with the *current* `commit_index` — no additional write.
+///   200 with the *original* `commit_index` — the index of the prior
+///   write at this key, surfaced via `PutOutcome::KeyExists`.
 /// * A spec whose rkyv-archived bytes DIFFER from what is stored at
 ///   the same key returns HTTP 409 Conflict with an `ErrorBody`.
-/// * An empty key returns a new commit with `commit_index` advanced.
+/// * An empty key returns a new commit with `commit_index` carrying
+///   the per-entry index assigned inside the write transaction
+///   (`PutOutcome::Inserted::commit_index`).
+///
+/// Per-entry `commit_index` semantics (`fix-commit-index-per-entry`
+/// RCA §WHY 5B): the index returned to the client is the index at
+/// which *this* write committed, not the live store-wide cursor at
+/// response-construction time. Concurrent committers for *different*
+/// keys cannot drift this value — the bump and the response read are
+/// atomic with the write transaction.
 #[utoipa::path(
     post,
     path = "/v1/jobs",
@@ -88,18 +98,14 @@ pub async fn submit_job(
     //    see `None` on the read and both fall through to the write,
     //    silently clobbering the first spec.
     match state.store.put_if_absent(key.as_bytes(), archived.as_ref()).await? {
-        PutOutcome::Inserted => Ok(Json(api::SubmitJobResponse {
-            job_id: job.id.to_string(),
-            commit_index: state.store.commit_index(),
-        })),
-        PutOutcome::KeyExists { existing } => {
+        PutOutcome::Inserted { commit_index } => {
+            Ok(Json(api::SubmitJobResponse { job_id: job.id.to_string(), commit_index }))
+        }
+        PutOutcome::KeyExists { existing, commit_index } => {
             if existing.as_ref() == archived.as_ref() {
-                // Byte-identical re-submission: return the current
-                // commit_index without advancing it.
-                Ok(Json(api::SubmitJobResponse {
-                    job_id: job.id.to_string(),
-                    commit_index: state.store.commit_index(),
-                }))
+                // Byte-identical re-submission: return the prior
+                // write's per-entry index — stable across N retries.
+                Ok(Json(api::SubmitJobResponse { job_id: job.id.to_string(), commit_index }))
             } else {
                 Err(ControlPlaneError::Conflict {
                     message: format!("a different spec is already registered at {}", key.as_str()),
@@ -124,6 +130,14 @@ pub async fn submit_job(
 /// `ControlPlaneError::NotFound { resource: <IntentKey::as_str()> }`,
 /// which `to_response` renders as HTTP 404 with an `ErrorBody { error:
 /// "not_found", ... }`.
+///
+/// Per-entry `commit_index` semantics (`fix-commit-index-per-entry`
+/// RCA §WHY 5A): the `commit_index` returned in the
+/// `JobDescription` body is the per-entry index at which *this* job
+/// was written — surfaced by `IntentStore::get` as the second
+/// element of the returned tuple — NOT the live store-wide cursor at
+/// describe-time. Subsequent writes to *other* keys do not drift the
+/// describe response.
 #[utoipa::path(
     get,
     path = "/v1/jobs/{id}",
@@ -157,7 +171,7 @@ pub async fn describe_job(
     //    file, which the `intent_key_canonical` grep-gate in
     //    `overdrive-core` explicitly forbids.
     let key = IntentKey::for_job(&job_id);
-    let bytes = state
+    let (bytes, commit_index) = state
         .store
         .get(key.as_bytes())
         .await?
@@ -175,11 +189,7 @@ pub async fn describe_job(
     //    bytes"; no re-archival, no re-canonicalisation.
     let spec_digest = ContentHash::of(&bytes).to_string();
 
-    Ok(Json(api::JobDescription {
-        spec: JobSpecInput::from(&job),
-        commit_index: state.store.commit_index(),
-        spec_digest,
-    }))
+    Ok(Json(api::JobDescription { spec: JobSpecInput::from(&job), commit_index, spec_digest }))
 }
 
 /// `GET /v1/cluster/info` — mode, region, `commit_index`, reconciler
