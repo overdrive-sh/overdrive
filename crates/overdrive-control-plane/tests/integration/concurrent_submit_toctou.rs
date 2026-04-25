@@ -30,7 +30,7 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use bytes::Bytes;
-use overdrive_control_plane::api::{ErrorBody, SubmitJobRequest, SubmitJobResponse};
+use overdrive_control_plane::api::{ErrorBody, JobDescription, SubmitJobRequest, SubmitJobResponse};
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
 use overdrive_core::aggregate::{IntentKey, Job, JobSpecInput};
 use overdrive_core::id::JobId;
@@ -319,6 +319,38 @@ async fn concurrent_byte_identical_submits_return_single_commit_index() {
     );
     let the_index = *unique_indices.iter().next().expect("one element");
     assert!(the_index >= 1, "commit_index must be >= 1 after insert; got {the_index}");
+
+    // Per-entry commit_index contract (fix-commit-index-per-entry RCA
+    // §WHY 1A) — a follow-on `describe` of the same job_id MUST return
+    // the same commit_index every concurrent submitter saw. A handler
+    // that returns the live store counter at describe-time would drift
+    // here if any other write had happened between submit and describe;
+    // even with no intervening write, this assertion pins the
+    // describe-returns-write-index property by construction. RED
+    // scaffold (Step 01-01) — flips GREEN once Step 01-02 lands the
+    // trait + handler change.
+    let job_id_str = responses.first().expect("at least one response").job_id.clone();
+    let describe_url = format!("https://localhost:{}/v1/jobs/{}", bound.port(), job_id_str);
+    let describe_resp = client
+        .get(&describe_url)
+        .send()
+        .await
+        .expect("GET /v1/jobs/{id} after concurrent burst");
+    assert_eq!(
+        describe_resp.status(),
+        reqwest::StatusCode::OK,
+        "describe of the just-burst-submitted job must be HTTP 200",
+    );
+    let description: JobDescription =
+        describe_resp.json().await.expect("decode JobDescription after burst");
+    assert_eq!(
+        description.commit_index, the_index,
+        "RED scaffold (Step 01-01) — describe(job_id).commit_index must \
+         equal the index every concurrent submitter saw ({the_index}); got \
+         {} from describe — this is the per-entry contract violation \
+         (RCA §WHY 1A) the fix-commit-index-per-entry feature pins shut.",
+        description.commit_index,
+    );
 
     // IntentStore must hold exactly one rkyv archive of the spec —
     // byte-equal to what any of the concurrent submitters would have

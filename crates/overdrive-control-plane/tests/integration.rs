@@ -29,6 +29,7 @@ mod integration {
     mod idempotent_resubmit;
     mod libsql_isolation;
     mod observation_empty_rows;
+    mod per_entry_commit_index;
     mod server_lifecycle;
     mod submit_round_trip;
     mod tls_bootstrap;
