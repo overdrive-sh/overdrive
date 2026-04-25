@@ -208,6 +208,67 @@ is small (say, <16), prefer `BTreeMap` anyway — the constant-factor
 cost is in the noise and the `// dst-lint: hashmap-ok` comment is
 upkeep that future contributors must justify.
 
+### Marker comment syntax
+
+The dst-lint scanner accepts exactly one escape form. Other shapes —
+`#[allow(dst_lint::hashmap)]` attributes, `// SAFETY:`-style prose,
+crate-level `#![allow(...)]` — are NOT recognised; the scanner will
+still reject the file.
+
+**Form**:
+
+```
+// dst-lint: hashmap-ok <one-line reason>
+```
+
+- The literal prefix is `// dst-lint: hashmap-ok` (single space after
+  the colon, single space before `hashmap-ok`). Casing matters — the
+  scanner is case-sensitive on the marker tokens.
+- A one-line reason is **required** in human-readable code review
+  contexts even though the scanner does not enforce reason text. A
+  marker without a reason will be rejected at code review time, not at
+  lint time. Put the *why* on the line; the *what* is obvious from the
+  next line of source.
+- **Placement**: on the line **immediately above** the use site, OR as
+  a trailing comment **on the same line** as the use site. Both are
+  recognised:
+
+  ```rust
+  // dst-lint: hashmap-ok per-allocation handle cache, point access only
+  let cache: HashMap<AllocationId, Handle> = HashMap::new();
+  ```
+
+  ```rust
+  let cache: HashMap<AllocationId, Handle> = HashMap::new(); // dst-lint: hashmap-ok per-allocation handle cache, point access only
+  ```
+
+- The marker suppresses violations on the marked line only. Multiple
+  use sites in the same function each need their own marker. Do not
+  put one marker at the top of a function and expect it to cover the
+  whole body.
+- The marker covers `HashMap` and `HashSet` together — a single
+  `// dst-lint: hashmap-ok` suppresses both type families on the
+  marked line. There is no separate `hashset-ok` form.
+
+**What the marker does not cover**:
+
+- `std::collections::hash_map::HashMap` — the scanner walks
+  `TypePath` and `ExprPath` and catches the type by last segment
+  regardless of qualifying path; the marker still applies.
+- `BuildHasherDefault<...>` / `RandomState` / custom hashers — these
+  are different concerns and require their own justification at the
+  use site (typically a `// SAFETY:`-style prose comment, since they
+  do not flow through dst-lint).
+- Type aliases (`type Cache = HashMap<...>;`) — the alias declaration
+  IS the use site; the marker goes on the alias line. Subsequent
+  references to the alias type do not need their own markers (the
+  alias's marker is the load-bearing artifact).
+
+**Why the marker has to be precise**: ad-hoc patterns (`// hashmap-ok`,
+`// dst: hashmap-ok`, `// allow hashmap`) would silently slip past the
+scanner without a clear failure mode. The strict syntax is the
+trade-off for catching the rule's enforcement gap mechanically.
+
 ### Sim-internal exception
 
 `adapter-sim` and `adapter-host` crates are NOT scanned by the dst-lint
