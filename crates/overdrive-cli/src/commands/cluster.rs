@@ -69,7 +69,12 @@ pub async fn status(args: StatusArgs) -> Result<ClusterStatusOutput, CliError> {
     Ok(ClusterStatusOutput {
         mode: cs.mode,
         region: cs.region,
-        commit_index: cs.commit_index,
+        // ADR-0020: the API no longer surfaces a commit_index. The
+        // CLI-internal field is dead-data carried until step 01-03
+        // deletes the wire-render shape; populate with 0 so the
+        // workspace compiles and the deletion in 01-03 is purely
+        // mechanical.
+        commit_index: 0,
         reconcilers: cs.reconcilers,
         broker: cs.broker,
     })

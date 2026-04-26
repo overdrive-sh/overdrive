@@ -36,80 +36,86 @@ pub struct SubmitJobRequest {
     pub spec: JobSpecInput,
 }
 
-/// Response for `POST /v1/jobs`. Carries `job_id` + `commit_index` per
-/// journey step 1 and ADR-0008.
+/// Response for `POST /v1/jobs`. Carries `job_id`, the canonical
+/// `spec_digest`, and the idempotency `outcome` per ADR-0008 and
+/// ADR-0020.
 ///
-/// **Per-entry semantics.** `commit_index` here is the index at which
-/// THIS submission's bytes were written — captured atomically inside
-/// the `IntentStore` write transaction via `PutOutcome::Inserted` /
-/// `PutOutcome::KeyExists`. A byte-identical resubmission returns the
-/// index of the original insert (idempotent); a different spec at the
-/// same key returns 409 Conflict without a fresh index. This is the
-/// same per-entry value [`JobDescription::commit_index`] returns for
-/// the same job, regardless of how many other writes have landed
-/// since.
+/// Idempotency contract (ADR-0015 §4 amended by ADR-0020):
 ///
-/// Distinct from [`ClusterStatus::commit_index`], which is the
-/// store-wide commit counter — see that field's docstring.
+/// * Fresh insert → `outcome = IdempotencyOutcome::Inserted`, HTTP 200.
+/// * Byte-identical resubmission of the same spec at the same key →
+///   `outcome = IdempotencyOutcome::Unchanged`, HTTP 200. No write
+///   occurred; `spec_digest` is stable across N retries.
+/// * Different spec at the same key → HTTP 409 Conflict, no `outcome`
+///   field on the wire (conflict is an HTTP-status concern, never an
+///   enum value — see ADR-0015 §4 amendment via ADR-0020).
 ///
 /// `job_id` is rendered as a `String` at the wire boundary; the server
 /// converts back to `overdrive_core::id::JobId` in handlers.
-///
-/// [`JobDescription::commit_index`]: JobDescription::commit_index
+/// `spec_digest` is the lowercase-hex SHA-256 of the canonical
+/// rkyv-archived `Job` bytes (ADR-0002, development.md §Hashing); 64
+/// characters.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SubmitJobResponse {
     pub job_id: String,
-    pub commit_index: u64,
+    pub spec_digest: String,
+    pub outcome: IdempotencyOutcome,
 }
 
-/// Response for `GET /v1/jobs/{id}`. Carries the re-hydrated spec, the
-/// commit index at which it was written, and the canonical spec
-/// digest per ADR-0014 and US-03 AC.
+/// Outcome of an idempotent `POST /v1/jobs` submission.
 ///
-/// **Per-entry semantics.** `commit_index` here is the index at which
-/// THIS specific job's bytes were committed — read alongside the
-/// stored value via `IntentStore::get`'s `(bytes, commit_index)`
-/// tuple. Stable across the job's lifetime: subsequent writes to
-/// other keys do NOT advance the value returned here. Equal to the
-/// `commit_index` the original `POST /v1/jobs` returned for this
-/// `job_id`.
+/// Distinguishes "your spec landed fresh" from "your spec was already
+/// there." Conflict (different spec at same key) is an HTTP-status
+/// concern (409), never an enumeration value here — see ADR-0015 §4
+/// amendment via ADR-0020.
 ///
-/// Distinct from [`ClusterStatus::commit_index`], which is the
-/// store-wide commit counter — see that field's docstring.
+/// Wire shape: `"inserted"` | `"unchanged"` (lowercase JSON via
+/// `#[serde(rename_all = "lowercase")]`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum IdempotencyOutcome {
+    /// The handler took the insert branch — `IntentStore::put_if_absent`
+    /// returned `PutOutcome::Inserted`.
+    Inserted,
+    /// The handler took the idempotency branch —
+    /// `IntentStore::put_if_absent` returned
+    /// `PutOutcome::KeyExists { existing }` and the candidate bytes
+    /// were byte-equal to `existing`. No write occurred.
+    Unchanged,
+}
+
+/// Response for `GET /v1/jobs/{id}`. Carries the re-hydrated spec and
+/// the canonical spec digest per ADR-0014 and US-03 AC (amended by
+/// ADR-0020).
 ///
 /// `spec` is typed (`JobSpecInput`), never `serde_json::Value` — the
 /// CLI parses this response into a concrete type rather than a value
-/// bag.
+/// bag. `spec_digest` equals the lowercase-hex SHA-256 of the
+/// rkyv-archived bytes pulled out of the `IntentStore` — i.e. the
+/// same value the original `POST /v1/jobs` returned for this `job_id`.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct JobDescription {
     pub spec: JobSpecInput,
-    pub commit_index: u64,
     pub spec_digest: String,
 }
 
 /// Response for `GET /v1/cluster/info`.
 ///
-/// Carries mode, region, `commit_index`, the reconciler registry, and
-/// the broker counters per ADR-0013 and US-04 AC.
+/// Carries mode, region, the reconciler registry, and the broker
+/// counters per ADR-0013 and US-04 AC (amended by ADR-0020 — the
+/// `commit_index` field is dropped, no replacement).
 ///
-/// **Store-wide cursor semantics.** `commit_index` here is the
-/// store-wide commit counter — total successful writes since the
-/// process started, advancing on every `put` / `delete` / `txn`
-/// commit. This is intentionally NOT a per-entry index: aggregate
-/// observability ("how many writes has this control plane committed?")
-/// is the use case, not "what index was assigned to a specific
-/// entry?".
-///
-/// Distinct from [`SubmitJobResponse::commit_index`] and
-/// [`JobDescription::commit_index`], which carry per-entry indices —
-/// the index at which a specific job's bytes were written. Use those
-/// for optimistic-concurrency / watch-resume / audit-ordering against
-/// a single entry; use this for cluster-level commit-rate signals.
+/// Activity-rate observability is provided by `broker.dispatched`
+/// (heartbeat reconciler ticks) plus the `reconcilers` list (the
+/// "did the runtime register?" wiring witness). A dedicated metrics
+/// endpoint covers cluster-level commit-rate signals starting in
+/// Phase 5; the dropped in-memory counter was not a substitute for
+/// it. See ADR-0020 §Considered alternatives §D for the full
+/// rationale.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ClusterStatus {
     pub mode: String,
     pub region: String,
-    pub commit_index: u64,
     pub reconcilers: Vec<String>,
     pub broker: BrokerCountersBody,
 }
@@ -206,6 +212,7 @@ pub struct ErrorBody {
     components(schemas(
         SubmitJobRequest,
         SubmitJobResponse,
+        IdempotencyOutcome,
         JobDescription,
         ClusterStatus,
         BrokerCountersBody,

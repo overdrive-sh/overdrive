@@ -270,7 +270,7 @@ fn decode_entry(raw: &[u8]) -> Result<(Bytes, u64), IntentStoreError> {
 
 #[async_trait]
 impl IntentStore for LocalIntentStore {
-    async fn get(&self, key: &[u8]) -> Result<Option<(Bytes, u64)>, IntentStoreError> {
+    async fn get(&self, key: &[u8]) -> Result<Option<Bytes>, IntentStoreError> {
         let inner = Arc::clone(&self.inner);
         let key = key.to_vec();
 
@@ -278,7 +278,16 @@ impl IntentStore for LocalIntentStore {
             let read = inner.db.begin_read().map_err(map_transaction_error)?;
             let table = read.open_table(ENTRIES_TABLE).map_err(map_table_error)?;
             let got = table.get(key.as_slice()).map_err(map_storage_error)?;
-            got.map_or(Ok(None), |v| decode_entry(v.value()).map(Some))
+            got.map_or(Ok(None), |v| {
+                // The on-disk row still carries a per-entry index prefix
+                // because the inline framing has not yet been removed
+                // (see ADR-0020 §Decision §2; field deletion is owned by
+                // step 01-02). Project away the index at the trait
+                // boundary so the surface matches the new IntentStore
+                // contract — the trait no longer surfaces commit_index.
+                let (value, _idx) = decode_entry(v.value())?;
+                Ok(Some(value))
+            })
         })
         .await
         .map_err(map_join_error)?
@@ -359,28 +368,20 @@ impl IntentStore for LocalIntentStore {
                 // view with the subsequent `insert` — this is what makes
                 // the check-and-set atomic.
                 if let Some(existing) = table.get(key_vec.as_slice()).map_err(map_storage_error)? {
-                    let (existing_bytes, existing_idx) = decode_entry(existing.value())?;
-                    (
-                        PutOutcome::KeyExists {
-                            existing: existing_bytes,
-                            commit_index: existing_idx,
-                        },
-                        None,
-                        None,
-                    )
+                    let (existing_bytes, _existing_idx) = decode_entry(existing.value())?;
+                    (PutOutcome::KeyExists { existing: existing_bytes }, None, None)
                 } else {
                     // Peek (does NOT advance) INSIDE the same write txn
                     // that commits the row. The bump is deferred until
                     // after `write.commit()` returns Ok — a failed
-                    // commit must not leak counter advancement.
+                    // commit must not leak counter advancement. Per
+                    // ADR-0020 the trait no longer surfaces the index;
+                    // the inline-framed row encoding is retained until
+                    // step 01-02 deletes the framing wholesale.
                     let peeked = Self::peek_next_inside(&inner);
                     let row = encode_entry(peeked, value_vec.as_slice());
                     table.insert(key_vec.as_slice(), row.as_slice()).map_err(map_storage_error)?;
-                    (
-                        PutOutcome::Inserted { commit_index: peeked },
-                        Some((key_vec, value_vec)),
-                        Some(peeked),
-                    )
+                    (PutOutcome::Inserted, Some((key_vec, value_vec)), Some(peeked))
                 }
             };
             write.commit().map_err(map_commit_error)?;

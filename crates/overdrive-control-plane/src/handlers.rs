@@ -41,26 +41,30 @@ impl From<overdrive_core::traits::observation_store::NodeHealthRow> for api::Nod
 }
 
 /// `POST /v1/jobs` — validate, archive via rkyv, commit through the
-/// intent store, return `(job_id, commit_index)`.
+/// intent store, return `{job_id, spec_digest, outcome}`.
 ///
-/// Idempotency contract (ADR-0015 §4):
+/// Idempotency contract (ADR-0015 §4 amended by ADR-0020):
 ///
+/// * A spec whose rkyv-archived bytes are absent at the canonical
+///   `jobs/<JobId>` key returns HTTP 200 with `outcome =
+///   IdempotencyOutcome::Inserted` and the canonical `spec_digest`
+///   (`PutOutcome::Inserted` path).
 /// * A spec whose rkyv-archived bytes are byte-identical to what is
-///   already stored at the canonical `jobs/<JobId>` key returns HTTP
-///   200 with the *original* `commit_index` — the index of the prior
-///   write at this key, surfaced via `PutOutcome::KeyExists`.
+///   already stored at the same key returns HTTP 200 with `outcome =
+///   IdempotencyOutcome::Unchanged` and the same `spec_digest`. No
+///   write occurred (`PutOutcome::KeyExists { existing }` path with
+///   byte equality).
 /// * A spec whose rkyv-archived bytes DIFFER from what is stored at
 ///   the same key returns HTTP 409 Conflict with an `ErrorBody`.
-/// * An empty key returns a new commit with `commit_index` carrying
-///   the per-entry index assigned inside the write transaction
-///   (`PutOutcome::Inserted::commit_index`).
+///   Conflict is an HTTP-status concern; the `outcome` field is
+///   absent on the 409 path (ADR-0015 §4 amendment).
 ///
-/// Per-entry `commit_index` semantics (`fix-commit-index-per-entry`
-/// RCA §WHY 5B): the index returned to the client is the index at
-/// which *this* write committed, not the live store-wide cursor at
-/// response-construction time. Concurrent committers for *different*
-/// keys cannot drift this value — the bump and the response read are
-/// atomic with the write transaction.
+/// `spec_digest` is the lowercase-hex SHA-256 of the canonical
+/// rkyv-archived bytes (ADR-0002, development.md §Hashing). On the
+/// `Unchanged` path the digest is computed once over the candidate
+/// bytes and used both for the byte-equality check (against the
+/// `existing` bytes returned by `PutOutcome::KeyExists`) and for the
+/// response body.
 #[utoipa::path(
     post,
     path = "/v1/jobs",
@@ -90,7 +94,13 @@ pub async fn submit_job(
     // 3. Derive the canonical intent key (`jobs/<JobId>`).
     let key = IntentKey::for_job(&job.id);
 
-    // 4. Atomic idempotency / conflict detection via `put_if_absent`.
+    // 4. Compute the canonical `spec_digest` over the rkyv-archived
+    //    bytes. Used both as the response field and (on the
+    //    `KeyExists` branch) as the equality check against the
+    //    bytes already stored at this key — see step 5.
+    let spec_digest = ContentHash::of(archived.as_ref()).to_string();
+
+    // 5. Atomic idempotency / conflict detection via `put_if_absent`.
     //    The existence check and the insert happen in a single store
     //    transaction — this closes the TOCTOU window that would open
     //    under a naive `get` (read txn) + `put` (write txn) pair,
@@ -98,15 +108,26 @@ pub async fn submit_job(
     //    see `None` on the read and both fall through to the write,
     //    silently clobbering the first spec.
     match state.store.put_if_absent(key.as_bytes(), archived.as_ref()).await? {
-        PutOutcome::Inserted { commit_index } => {
-            Ok(Json(api::SubmitJobResponse { job_id: job.id.to_string(), commit_index }))
-        }
-        PutOutcome::KeyExists { existing, commit_index } => {
+        PutOutcome::Inserted => Ok(Json(api::SubmitJobResponse {
+            job_id: job.id.to_string(),
+            spec_digest,
+            outcome: api::IdempotencyOutcome::Inserted,
+        })),
+        PutOutcome::KeyExists { existing } => {
             if existing.as_ref() == archived.as_ref() {
-                // Byte-identical re-submission: return the prior
-                // write's per-entry index — stable across N retries.
-                Ok(Json(api::SubmitJobResponse { job_id: job.id.to_string(), commit_index }))
+                // Byte-identical re-submission: 200 OK with
+                // `outcome = Unchanged`; the `spec_digest` is stable
+                // across N retries by construction (rkyv archival is
+                // canonical).
+                Ok(Json(api::SubmitJobResponse {
+                    job_id: job.id.to_string(),
+                    spec_digest,
+                    outcome: api::IdempotencyOutcome::Unchanged,
+                }))
             } else {
+                // Different spec at the same key — 409 Conflict.
+                // Conflict is HTTP-status, never a wire `outcome`
+                // value (ADR-0015 §4 amended by ADR-0020).
                 Err(ControlPlaneError::Conflict {
                     message: format!("a different spec is already registered at {}", key.as_str()),
                 })
@@ -131,13 +152,9 @@ pub async fn submit_job(
 /// which `to_response` renders as HTTP 404 with an `ErrorBody { error:
 /// "not_found", ... }`.
 ///
-/// Per-entry `commit_index` semantics (`fix-commit-index-per-entry`
-/// RCA §WHY 5A): the `commit_index` returned in the
-/// `JobDescription` body is the per-entry index at which *this* job
-/// was written — surfaced by `IntentStore::get` as the second
-/// element of the returned tuple — NOT the live store-wide cursor at
-/// describe-time. Subsequent writes to *other* keys do not drift the
-/// describe response.
+/// Post-ADR-0020: the response shape is `{spec, spec_digest}` only.
+/// The `commit_index` field is dropped wholesale — there is no
+/// store-wide nor per-entry index on the wire (see ADR-0020).
 #[utoipa::path(
     get,
     path = "/v1/jobs/{id}",
@@ -183,7 +200,7 @@ pub async fn describe_job(
     //    file, which the `intent_key_canonical` grep-gate in
     //    `overdrive-core` explicitly forbids.
     let key = IntentKey::for_job(&job_id);
-    let (bytes, commit_index) = state
+    let bytes = state
         .store
         .get(key.as_bytes())
         .await?
@@ -201,11 +218,20 @@ pub async fn describe_job(
     //    bytes"; no re-archival, no re-canonicalisation.
     let spec_digest = ContentHash::of(&bytes).to_string();
 
-    Ok(Json(api::JobDescription { spec: JobSpecInput::from(&job), commit_index, spec_digest }))
+    Ok(Json(api::JobDescription { spec: JobSpecInput::from(&job), spec_digest }))
 }
 
-/// `GET /v1/cluster/info` — mode, region, `commit_index`, reconciler
-/// registry, broker counters.
+/// `GET /v1/cluster/info` — mode, region, reconciler registry, broker
+/// counters.
+///
+/// Post-ADR-0020 the response is the four-field shape
+/// `{mode, region, reconcilers, broker}`. The `commit_index` field is
+/// dropped wholesale (no rename to `writes_since_boot` — that
+/// preserves the same race conditions and reset-on-restart gap under
+/// a different name; see ADR-0020 §Considered alternatives §D).
+/// Activity-rate observability is provided by `broker.dispatched`
+/// plus the `reconcilers` list; cluster-level commit-rate signals
+/// belong on Phase 5's metrics endpoint.
 #[utoipa::path(
     get,
     path = "/v1/cluster/info",
@@ -232,7 +258,6 @@ pub async fn cluster_status(
     Ok(Json(api::ClusterStatus {
         mode: "single".to_string(),
         region: "local".to_string(),
-        commit_index: state.store.commit_index(),
         reconcilers,
         broker: api::BrokerCountersBody {
             queued: counters.queued,

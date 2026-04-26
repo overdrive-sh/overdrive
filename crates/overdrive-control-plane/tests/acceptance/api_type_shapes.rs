@@ -1,6 +1,14 @@
 //! Step 02-03 — Shared REST request/response types carry utoipa
 //! `ToSchema` derives and finalised field sets.
 //!
+//! Step 01-01 (`redesign-drop-commit-index`, ADR-0020): the
+//! `commit_index` field is dropped from `SubmitJobResponse`,
+//! `JobDescription`, and `ClusterStatus`; `SubmitJobResponse` now
+//! carries `{job_id, spec_digest, outcome}` and `JobDescription`
+//! carries `{spec, spec_digest}`. A new `IdempotencyOutcome` enum at
+//! the api layer distinguishes `inserted` from `unchanged`. The 409
+//! Conflict path remains an HTTP-status concern — never an enum value.
+//!
 //! These tests pin the wire contract exposed by
 //! `overdrive_control_plane::api`. The CLI (Slice 5, ADR-0014) will
 //! import these same types, so field names and shapes here ARE the
@@ -15,7 +23,7 @@
 
 use overdrive_control_plane::api::{
     AllocStatusResponse, AllocStatusRowBody, BrokerCountersBody, ClusterStatus, ErrorBody,
-    JobDescription, NodeList, NodeRowBody, SubmitJobRequest, SubmitJobResponse,
+    IdempotencyOutcome, JobDescription, NodeList, NodeRowBody, SubmitJobRequest, SubmitJobResponse,
 };
 use overdrive_core::aggregate::JobSpecInput;
 use utoipa::ToSchema;
@@ -38,29 +46,80 @@ fn submit_job_request_round_trips_through_serde_json() {
     assert_eq!(round_tripped.spec, original.spec);
 }
 
+/// RED-phase pin (Step 01-01): `SubmitJobResponse` MUST carry
+/// `{job_id, spec_digest, outcome}` per ADR-0020. The `outcome`
+/// field MUST round-trip as `IdempotencyOutcome::Inserted` on the
+/// fresh-insert path. This test compiles only against the new
+/// post-ADR-0020 wire shape — by name, the
+/// `submit_response_carries_spec_digest_and_outcome_inserted`
+/// scenario.
 #[test]
-fn submit_job_response_round_trips_through_serde_json() {
-    let original = SubmitJobResponse { job_id: "payments".to_string(), commit_index: 42 };
+fn submit_response_carries_spec_digest_and_outcome_inserted() {
+    let digest = "deadbeef".repeat(8);
+    let original = SubmitJobResponse {
+        job_id: "payments".to_string(),
+        spec_digest: digest.clone(),
+        outcome: IdempotencyOutcome::Inserted,
+    };
     let wire = serde_json::to_string(&original).expect("serialise SubmitJobResponse");
     let round_tripped: SubmitJobResponse =
         serde_json::from_str(&wire).expect("deserialise SubmitJobResponse");
     assert_eq!(round_tripped.job_id, "payments");
-    assert_eq!(round_tripped.commit_index, 42);
+    assert_eq!(round_tripped.spec_digest, digest);
+    assert_eq!(round_tripped.outcome, IdempotencyOutcome::Inserted);
+}
+
+/// RED-phase pin (Step 01-01): the `IdempotencyOutcome::Unchanged`
+/// arm renders to `"unchanged"` on the wire and round-trips back.
+/// This is the byte-equal idempotent re-submission path —
+/// distinct from the 409 Conflict path which is HTTP-status, not an
+/// enum value (ADR-0015 §4 amendment via ADR-0020).
+#[test]
+fn submit_response_carries_outcome_unchanged_on_idempotent_resubmit() {
+    let digest = "abcdef01".repeat(8);
+    let original = SubmitJobResponse {
+        job_id: "payments".to_string(),
+        spec_digest: digest.clone(),
+        outcome: IdempotencyOutcome::Unchanged,
+    };
+    let wire = serde_json::to_string(&original).expect("serialise SubmitJobResponse");
+    // The lowercase JSON form is the wire contract — pinned via
+    // `#[serde(rename_all = "lowercase")]` on `IdempotencyOutcome`.
+    assert!(
+        wire.contains(r#""outcome":"unchanged""#),
+        "outcome must serialise lowercase; got: {wire}"
+    );
+    let round_tripped: SubmitJobResponse =
+        serde_json::from_str(&wire).expect("deserialise SubmitJobResponse");
+    assert_eq!(round_tripped.outcome, IdempotencyOutcome::Unchanged);
+    assert_eq!(round_tripped.spec_digest, digest);
+}
+
+#[test]
+fn idempotency_outcome_serialises_lowercase_inserted() {
+    let wire = serde_json::to_string(&IdempotencyOutcome::Inserted).expect("serialise Inserted");
+    assert_eq!(wire, r#""inserted""#);
+    let parsed: IdempotencyOutcome = serde_json::from_str(&wire).expect("deserialise Inserted");
+    assert_eq!(parsed, IdempotencyOutcome::Inserted);
+}
+
+#[test]
+fn idempotency_outcome_serialises_lowercase_unchanged() {
+    let wire = serde_json::to_string(&IdempotencyOutcome::Unchanged).expect("serialise Unchanged");
+    assert_eq!(wire, r#""unchanged""#);
+    let parsed: IdempotencyOutcome = serde_json::from_str(&wire).expect("deserialise Unchanged");
+    assert_eq!(parsed, IdempotencyOutcome::Unchanged);
 }
 
 #[test]
 fn job_description_round_trips_with_typed_spec() {
-    let original = JobDescription {
-        spec: sample_job_spec(),
-        commit_index: 7,
-        spec_digest: "deadbeef".repeat(8),
-    };
+    let original = JobDescription { spec: sample_job_spec(), spec_digest: "deadbeef".repeat(8) };
     let wire = serde_json::to_string(&original).expect("serialise JobDescription");
     let round_tripped: JobDescription =
         serde_json::from_str(&wire).expect("deserialise JobDescription");
     assert_eq!(round_tripped.spec, original.spec);
-    assert_eq!(round_tripped.commit_index, 7);
     assert_eq!(round_tripped.spec_digest.len(), 64);
+    assert_eq!(round_tripped.spec_digest, original.spec_digest);
 }
 
 #[test]
@@ -68,7 +127,6 @@ fn cluster_status_round_trips_through_serde_json() {
     let original = ClusterStatus {
         mode: "single".to_string(),
         region: "eu-west-1".to_string(),
-        commit_index: 11,
         reconcilers: vec!["job_lifecycle".to_string(), "node_lifecycle".to_string()],
         broker: BrokerCountersBody { queued: 1, cancelled: 2, dispatched: 3 },
     };
@@ -77,11 +135,29 @@ fn cluster_status_round_trips_through_serde_json() {
         serde_json::from_str(&wire).expect("deserialise ClusterStatus");
     assert_eq!(round_tripped.mode, "single");
     assert_eq!(round_tripped.region, "eu-west-1");
-    assert_eq!(round_tripped.commit_index, 11);
     assert_eq!(round_tripped.reconcilers, original.reconcilers);
     assert_eq!(round_tripped.broker.queued, 1);
     assert_eq!(round_tripped.broker.cancelled, 2);
     assert_eq!(round_tripped.broker.dispatched, 3);
+}
+
+/// RED-phase pin (Step 01-01): `ClusterStatus` MUST NOT carry a
+/// `commit_index` field on the wire after ADR-0020. Pure-drop
+/// (no rename to `writes_since_boot`); the four-field shape
+/// `{mode, region, reconcilers, broker}` is the contract.
+#[test]
+fn cluster_status_does_not_serialise_commit_index_field() {
+    let status = ClusterStatus {
+        mode: "single".to_string(),
+        region: "local".to_string(),
+        reconcilers: Vec::new(),
+        broker: BrokerCountersBody::default(),
+    };
+    let wire = serde_json::to_string(&status).expect("serialise ClusterStatus");
+    assert!(
+        !wire.contains("commit_index"),
+        "ClusterStatus must not surface commit_index post-ADR-0020; got: {wire}"
+    );
 }
 
 #[test]
@@ -184,4 +260,5 @@ fn every_api_type_implements_utoipa_to_schema() {
     assert_to_schema::<NodeList>();
     assert_to_schema::<NodeRowBody>();
     assert_to_schema::<ErrorBody>();
+    assert_to_schema::<IdempotencyOutcome>();
 }

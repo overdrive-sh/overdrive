@@ -66,55 +66,20 @@ pub enum TxnOutcome {
 /// genuine conflict (different payload at the same key) — see
 /// `overdrive_control_plane::handlers::submit_job`.
 ///
-/// # Per-entry `commit_index` semantics
-///
-/// Both variants surface a `commit_index` whose meaning is **per-entry**,
-/// not store-wide:
-///
-/// * [`Inserted::commit_index`] is the index assigned **inside the same
-///   write transaction** that committed the new bytes. A handler that
-///   surfaces this value back over the wire returns the index at which
-///   *this* write landed, immune to interleaved writes by concurrent
-///   committers for *different* keys.
-/// * [`KeyExists::commit_index`] is the index of the **prior write**
-///   that placed the bytes in `existing` at this key — i.e. the index
-///   the original `Inserted` caller saw. Byte-identical idempotent
-///   re-submission therefore returns a value stable across N retries.
-///
-/// This is distinct from the store-wide commit cursor exposed via
-/// `LocalIntentStore::commit_index()` — that accessor is a separate
-/// inherent on the concrete type, intended for endpoints that document
-/// store-wide commit count semantics (e.g. `cluster_status`).
-///
 /// [`Inserted`]: PutOutcome::Inserted
 /// [`KeyExists`]: PutOutcome::KeyExists
-/// [`Inserted::commit_index`]: PutOutcome::Inserted
-/// [`KeyExists::commit_index`]: PutOutcome::KeyExists
 #[derive(Debug, Clone)]
 pub enum PutOutcome {
     /// The key was absent when the transaction began; the new value
-    /// was written. `commit_index` is the per-entry index assigned
-    /// inside the same write transaction — see the type-level
-    /// docstring on [`PutOutcome`].
-    Inserted {
-        /// Per-entry index assigned to the new write inside its
-        /// transaction. Two consecutive distinct-key writes return
-        /// strictly increasing values here.
-        commit_index: u64,
-    },
+    /// was written.
+    Inserted,
     /// The key was already populated when the transaction began; no
     /// write occurred. `existing` carries the bytes that currently
     /// occupy the key so the caller can compare byte-for-byte before
     /// deciding whether to return 200 (idempotent) or 409 (conflict).
-    /// `commit_index` is the per-entry index of the prior `Inserted`
-    /// that placed those bytes at this key — see the type-level
-    /// docstring on [`PutOutcome`].
     KeyExists {
         /// The bytes currently occupying the key.
         existing: Bytes,
-        /// Per-entry index of the prior write that placed `existing`
-        /// at this key. Stable across N idempotent re-submissions.
-        commit_index: u64,
     },
 }
 
@@ -175,22 +140,17 @@ impl StateSnapshot {
 
 #[async_trait]
 pub trait IntentStore: Send + Sync + 'static {
-    /// Read the bytes at `key` together with the per-entry
-    /// `commit_index` at which they were written.
+    /// Read the bytes at `key`.
     ///
-    /// Returns `Ok(None)` when the key is absent, `Ok(Some((bytes,
-    /// commit_index)))` when populated. The `commit_index` is the
-    /// per-entry index assigned at *write* time (the same index
-    /// surfaced by [`PutOutcome::Inserted`]) — **not** the live
-    /// store-wide commit cursor at read time.
+    /// Returns `Ok(None)` when the key is absent, `Ok(Some(bytes))`
+    /// when populated. The bytes returned are the caller-provided
+    /// bytes as passed to [`put`], [`put_if_absent`], or
+    /// [`TxnOp::Put`] — implementations do not surface any internal
+    /// row encoding.
     ///
-    /// This per-entry semantics is what lets a `describe`-style
-    /// handler return "the index at which this entry was written"
-    /// regardless of how many writes to *other* keys have landed in
-    /// between. A handler that wants the store-wide cursor uses the
-    /// inherent accessor on the concrete store type
-    /// (`LocalIntentStore::commit_index()`), not this read.
-    async fn get(&self, key: &[u8]) -> Result<Option<(Bytes, u64)>, IntentStoreError>;
+    /// [`put`]: Self::put
+    /// [`put_if_absent`]: Self::put_if_absent
+    async fn get(&self, key: &[u8]) -> Result<Option<Bytes>, IntentStoreError>;
 
     async fn put(&self, key: &[u8], value: &[u8]) -> Result<(), IntentStoreError>;
 
@@ -218,14 +178,9 @@ pub trait IntentStore: Send + Sync + 'static {
     /// deletes are reported as empty `value`.
     ///
     /// `value` is the **caller-provided bytes** as passed to [`put`],
-    /// [`put_if_absent`], or [`TxnOp::Put`] — not whatever on-disk
-    /// encoding the implementation chose for storage. Implementations
-    /// that frame stored rows (e.g. with a per-entry `commit_index`
-    /// prefix, as `LocalIntentStore` does) MUST strip the framing
-    /// before emitting watch events. Subscribers that subsequently
-    /// call [`get`] on the same key receive the same logical value;
-    /// they are not interchangeable byte-for-byte with any internal
-    /// row encoding.
+    /// [`put_if_absent`], or [`TxnOp::Put`]. Subscribers that
+    /// subsequently call [`get`] on the same key receive the same
+    /// logical value.
     ///
     /// [`put`]: Self::put
     /// [`put_if_absent`]: Self::put_if_absent
