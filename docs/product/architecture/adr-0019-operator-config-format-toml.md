@@ -82,8 +82,10 @@ shape.
 
 ### What stays from ADR-0010
 
-- **R1** — ephemeral in-process CA at `overdrive cluster init`.
-  Unchanged.
+- **R1** — ephemeral in-process CA at `overdrive serve` (the sole
+  Phase 1 cert-minting site per ADR-0010 *Amendment 2026-04-26*; this
+  ADR's §R2 supersession is orthogonal and does not interact with the
+  R1 amendment). Unchanged by this ADR.
 - **R3** — multi-SAN server leaf cert (`IP:127.0.0.1`, `IP:::1`,
   `DNS:localhost`, `DNS:<hostname>`). Unchanged.
 - **R4** — no `--insecure` flag. Unchanged.
