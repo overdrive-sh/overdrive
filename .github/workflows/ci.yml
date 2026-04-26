@@ -499,7 +499,14 @@ jobs:
         run: git fetch origin main --depth=1 || true
 
       - name: cargo xtask mutants --diff origin/main
-        run: cargo xtask mutants --diff origin/main
+        # `--features integration-tests` is passed explicitly so
+        # acceptance tests gated behind that cfg participate in the
+        # mutation lane (see .claude/rules/testing.md §"Integration vs
+        # unit gating"). The workspace convention requires every
+        # member to declare the feature, so the bare flag resolves
+        # uniformly under cargo-mutants v27's per-package scoping —
+        # the wrapper does not auto-add anything.
+        run: cargo xtask mutants --diff origin/main --features integration-tests
 
       - name: Upload mutants report
         if: always()
@@ -542,7 +549,7 @@ jobs:
               echo "Reproduce locally:"
               echo ""
               echo '```'
-              echo "cargo xtask mutants --diff origin/main"
+              echo "cargo xtask mutants --diff origin/main --features integration-tests"
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
           else

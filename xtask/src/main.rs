@@ -144,9 +144,12 @@ enum Task {
                   the gate passed (≥80% kill rate for --diff; ≥60% absolute \
                   floor for --workspace, with drift ≤ -2pp as a soft-warn). \
                   Narrow further with --file, --package, and --features. \
-                  --package defaults to --test-workspace=false for speed; \
-                  --features auto-adds `integration-tests` when a scoped \
-                  package declares it (opt-out: --no-integration-tests)."
+                  --package defaults to --test-workspace=false for speed. \
+                  Pass --features integration-tests explicitly when you want \
+                  acceptance tests gated behind that cfg to participate — \
+                  the workspace convention requires every member to declare \
+                  the feature (see .claude/rules/testing.md §\"Integration \
+                  vs unit gating\"), so the bare flag resolves uniformly."
 )]
 struct MutantsArgs {
     /// Diff-scoped: git ref to diff against (e.g. `origin/main`).
@@ -186,24 +189,18 @@ struct MutantsArgs {
 
     /// Features to enable when building mutated code. Comma- or
     /// space-separated; multiple `--features` flags append. Passed
-    /// through to cargo-mutants as `--features <LIST>`.
+    /// through to cargo-mutants as `--features <LIST>` verbatim — the
+    /// wrapper does not add or rewrite anything.
     ///
-    /// `integration-tests` is added automatically when `--package`
-    /// names a crate that declares that feature — per
-    /// `.claude/rules/testing.md` §"Integration vs unit gating",
-    /// acceptance tests on this repo live behind that cfg and would
-    /// otherwise be invisible to the mutation run, silently lowering
-    /// kill rate. Pass `--no-integration-tests` to disable the
-    /// auto-add.
+    /// To exercise acceptance tests gated behind `#[cfg(feature =
+    /// "integration-tests")]` (see `.claude/rules/testing.md`
+    /// §"Integration vs unit gating"), pass `--features
+    /// integration-tests` explicitly. Every workspace member declares
+    /// the feature (no-op `[]` for crates without integration tests),
+    /// so the bare flag resolves uniformly under cargo-mutants v27's
+    /// per-package scoping.
     #[arg(long, value_name = "LIST", value_delimiter = ',')]
     features: Vec<String>,
-
-    /// Skip the automatic `integration-tests` feature default. Use
-    /// when mutating a crate that does not declare that feature, or
-    /// when the user wants to measure kill rate without acceptance
-    /// tests participating.
-    #[arg(long)]
-    no_integration_tests: bool,
 
     /// Force `--test-workspace=true` even with `--package`. Rare; use
     /// when mutations in the selected package can only be killed by
@@ -566,7 +563,6 @@ fn mutants(args: MutantsArgs) -> Result<()> {
         packages: args.package,
         features: args.features,
         test_whole_workspace: args.test_whole_workspace,
-        auto_integration_tests: !args.no_integration_tests,
     };
 
     xtask::mutants::run(&mode, &scope)

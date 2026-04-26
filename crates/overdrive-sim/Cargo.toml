@@ -49,6 +49,14 @@ overdrive-store-local    = { path = "../overdrive-store-local" }
 # to see the complete surface.
 canary-bug = ["overdrive-core/canary-bug"]
 
+# `integration-tests` — workspace-wide convention. Every workspace
+# member declares this feature so `cargo {check,test,mutants}
+# --features integration-tests` resolves uniformly under per-package
+# scoping. This crate has no integration-shaped tests of its own — the
+# declaration is a deliberate no-op. See `.claude/rules/testing.md`
+# §"Integration vs unit gating".
+integration-tests = []
+
 [dev-dependencies]
 # Crafter adds turmoil, proptest, and overdrive-store-local here during DELIVER.
 tokio    = { workspace = true }

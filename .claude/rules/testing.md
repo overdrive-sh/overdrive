@@ -50,16 +50,44 @@ The default unit/proptest suite covers in-process logic exclusively
 proptest cases, trybuild compile-fail. Anything heavier moves out of
 the default lane.
 
+### Workspace convention — every member declares the feature
+
+**Every workspace member MUST declare `integration-tests = []` in its
+`[features]` block, even crates that have no integration tests of
+their own.** For crates without integration tests the declaration is a
+deliberate no-op; for crates with them it gates the slow lane (see
+*Mechanics* below).
+
+Why: `cargo xtask mutants --features integration-tests` (the canonical
+mutation invocation; CI passes it on every PR) propagates the bare
+feature flag to per-mutant cargo invocations. cargo-mutants v27.0.0
+scopes those invocations to `--package <owning-crate>`. Cargo's
+feature resolution requires the scoped package to declare the feature
+— a non-declaring package in the mutation surface produces
+`error: the package 'X' does not contain this feature: integration-tests`
+and marks every mutant under it unviable, collapsing the kill-rate
+signal to zero. The convention makes the bare flag universally valid.
+
+Enforcement is automated: `xtask::mutants::tests::every_workspace_
+member_declares_integration_tests_feature` walks the workspace
+`members` list and fails the PR if any member is missing the
+declaration. A new crate added without it cannot land.
+
+The narrative behind the convention — and the original failure mode
+that motivated it — lives in PR #132's RCA (April 2026).
+
 ### Mechanics
 
-Add an opt-in feature to the owning crate's `Cargo.toml`:
+Declaration shape, identical for every member:
 
 ```toml
 [features]
-# Opt-in gate for slow / real-infra tests in this crate. Off by
-# default so `cargo nextest run --workspace` stays under the 60s
-# slow-test budget; CI exercises the gate in a dedicated
-# `integration` job.
+# Workspace-wide convention. Every workspace member declares this
+# feature so `cargo {check,test,mutants} --features integration-tests`
+# resolves uniformly under per-package scoping. For crates with
+# integration tests, this is the gate; for crates without, the
+# declaration is a deliberate no-op. See § "Integration vs unit
+# gating" above.
 integration-tests = []
 ```
 
@@ -622,51 +650,54 @@ kill-rate gate. Invoking `cargo mutants` directly skips all of that.
 Two modes, mutually exclusive (clap rejects both-or-neither):
 
 ```bash
-# Per-PR, diff-scoped. Gate: kill rate ≥ 80%. This is the default.
-cargo xtask mutants --diff origin/main
+# Per-PR, diff-scoped. Gate: kill rate ≥ 80%. This is the default
+# CI invocation. `--features integration-tests` is the canonical
+# feature flag — every workspace member declares it (see § "Workspace
+# convention" above), so the bare flag resolves uniformly under
+# cargo-mutants v27's per-package scoping. The wrapper does not
+# auto-add anything; pass it explicitly.
+cargo xtask mutants --diff origin/main --features integration-tests
 
 # Nightly / full-corpus. Gate: ≥ 60% absolute floor; drift ≤ -2pp vs.
 # mutants-baseline/main/kill_rate.txt is a soft-warn.
-cargo xtask mutants --workspace
+cargo xtask mutants --workspace --features integration-tests
 
 # Override the baseline path for --workspace (rare; default is usually
 # correct):
-cargo xtask mutants --workspace \
+cargo xtask mutants --workspace --features integration-tests \
   --baseline mutants-baseline/main/kill_rate.txt
 ```
 
-**Scope narrowing.** The wrapper exposes cargo-mutants' own `--file`
-and `--package` as pass-throughs, plus `--features` for feature
-selection. These compose with `--diff` or `--workspace`:
+**Scope narrowing.** The wrapper exposes cargo-mutants' own `--file`,
+`--package`, and `--features` as pass-throughs. These compose with
+`--diff` or `--workspace`:
 
 ```bash
 # Single file in a single package — the canonical TDD-inner-loop
 # invocation. The wrapper adds --test-workspace=false automatically
 # when --package is set (only that crate's test suite is rerun per
-# mutation — large wall-clock win) and --features integration-tests
-# automatically when the package declares that feature.
-cargo xtask mutants --diff origin/main \
+# mutation — large wall-clock win).
+cargo xtask mutants --diff origin/main --features integration-tests \
   --package overdrive-control-plane \
   --file crates/overdrive-control-plane/src/handlers.rs
 
 # Whole package, no diff scoping:
-cargo xtask mutants --workspace --package overdrive-core
+cargo xtask mutants --workspace --features integration-tests \
+  --package overdrive-core
 
-# Extra features on top of the auto-added integration-tests:
+# Extra features on top of integration-tests:
 cargo xtask mutants --diff origin/main \
-  --package overdrive-control-plane \
-  --features unstable-foo,bar
+  --features integration-tests,unstable-foo,bar \
+  --package overdrive-control-plane
 
-# Opt out of the integration-tests auto-add (rare; only if the
-# package under test doesn't declare the feature, or you're
-# deliberately measuring the kill rate without acceptance tests):
+# Drop integration-tests (rare; deliberately measuring kill rate
+# without acceptance tests participating):
 cargo xtask mutants --diff origin/main \
-  --package some-crate-without-the-feature \
-  --no-integration-tests
+  --package overdrive-control-plane
 
 # Opt out of the --test-workspace=false default when mutations in one
 # crate can only be killed by tests in another:
-cargo xtask mutants --diff origin/main \
+cargo xtask mutants --diff origin/main --features integration-tests \
   --package overdrive-control-plane \
   --test-whole-workspace
 ```
@@ -716,14 +747,21 @@ that the file actually changed against the diff base
 operator sites (return values, comparison operators, match arms — not
 just whitespace, comments, or rustdoc).
 
-**Why `integration-tests` auto-adds.** This repo's acceptance tests
-live behind `#[cfg(feature = "integration-tests")]` per §"Integration
-vs unit gating". Without the feature enabled, those tests don't
-compile — which means cargo-mutants runs the mutation against a
-build where the tests that would catch it are absent, and kill rate
-is silently understated. The wrapper auto-enables the feature when
-`--package <CRATE>` names a crate that declares it, so the number
-the gate reports is the number that actually matches the rule.
+**Why `--features integration-tests` is explicit, not auto-added.**
+This repo's acceptance tests live behind `#[cfg(feature =
+"integration-tests")]` per §"Integration vs unit gating". Without the
+feature enabled, those tests don't compile — which means cargo-mutants
+runs the mutation against a build where the tests that would catch it
+are absent, and kill rate is silently understated. CI passes the flag
+explicitly on every mutants invocation; the wrapper does not auto-add
+it. The workspace convention (every member declares
+`integration-tests = []`, even no-op crates — see §"Workspace
+convention" above) is what makes the bare flag safe under cargo-mutants
+v27's per-package scoping. An earlier auto-add scheme tried to emit
+per-package qualified `<pkg>/integration-tests` features for crates
+that declared them; that scheme broke when v27 scoped per-mutant
+builds to `--package <owner>` and cargo refused cross-package
+qualifiers — see PR #132's RCA (April 2026).
 
 **Flag confusion to avoid.** `cargo-mutants` itself takes
 `--in-diff <FILE>` — a *file path*, not a git ref. The xtask wrapper

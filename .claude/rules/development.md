@@ -715,6 +715,20 @@ let digest = sha256(&archived);
   / time formatting. Use `base64`, `hex`, `ring` / `aws-lc-rs`, `uuid`,
   `time` / `chrono` — whichever is already in the workspace graph.
 
+### Cargo.toml conventions
+
+- **Every workspace member declares `integration-tests = []`** in its
+  `[features]` block, even crates with no integration tests of their
+  own. The declaration is a no-op for the latter and the actual gate
+  for the former. This makes `cargo {check,test,mutants} --features
+  integration-tests` resolve uniformly under per-package scoping —
+  cargo refuses the bare feature on packages that don't declare it,
+  which historically broke mutation testing's per-mutant invocations.
+  See `.claude/rules/testing.md` § "Integration vs unit gating" /
+  "Workspace convention" for the full story; an xtask `#[test]`
+  enforces the rule mechanically (`xtask::mutants::tests::every_
+  workspace_member_declares_integration_tests_feature`).
+
 ### Newtypes — STRICT by default
 
 Raw primitives (`String`, `&str`, `u64`, `i64`, `[u8; 32]`) for domain

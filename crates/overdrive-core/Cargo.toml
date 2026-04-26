@@ -74,6 +74,16 @@ canary-bug = []
 # Production builds MUST NEVER enable this feature.
 test-utils = []
 
+# `integration-tests` — workspace-wide convention. Every workspace
+# member declares this feature so `cargo {check,test,mutants}
+# --features integration-tests` resolves uniformly under per-package
+# scoping (cargo refuses the bare feature on packages that do not
+# declare it, which breaks mutation testing's per-mutant invocations).
+# This crate has no integration-shaped tests of its own — the
+# declaration is a deliberate no-op. See `.claude/rules/testing.md`
+# §"Integration vs unit gating".
+integration-tests = []
+
 [dev-dependencies]
 proptest.workspace = true
 rstest.workspace   = true
