@@ -12,6 +12,22 @@
 > + operator-cert ceremony per ADR-0010 §Amendment 2026-04-26 and
 > GH #81. RCA:
 > `docs/analysis/root-cause-analysis-cluster-init-cert-overwritten-by-serve.md`.
+>
+> **Amendment 2026-04-26 (ADR-0020) — `commit_index` dropped from
+> Phase 1.** WS-1 / WS-2 / WS-3 are revised. WS-1's per-write witness
+> is the spec-digest round-trip (no `commit_index` printed by the
+> CLI; the submit output prints `spec_digest` + `outcome`). WS-2's
+> wiring witness is `broker.dispatched > 0` plus the `reconcilers`
+> registry list (the cluster-status output narrows from five lines to
+> four — no Commit-index line). WS-3's idempotency witness is
+> `outcome == "unchanged"` + `spec_digest` equality (no
+> `commit index 17` magic-number). The demo script's step-2 line
+> ("the commit index, and a 'Next' line") and step-5 line ("the
+> server returns the same commit index — byte-identical content is
+> idempotent") are revised. The traceability section's
+> `shared-artifacts-registry.md` reference to `commit_index` is
+> dropped. Source: ADR-0020;
+> `docs/feature/redesign-drop-commit-index/design/wave-decisions.md`.
 
 ## User goal the skeleton proves
 
@@ -33,8 +49,9 @@ session: *"Submit a job and trust what the CLI tells me."*
    with the persistent-CA + operator-cert ceremony it actually
    needs. See ADR-0010 §Amendment 2026-04-26.)"
 2. "In a second terminal, Ana runs `overdrive job submit payments.toml`.
-   The CLI prints the job ID, the canonical intent key, the commit
-   index, and a 'Next' line pointing her at the status command."
+   The CLI prints the job ID, the canonical intent key, the spec
+   digest, the outcome (`created` for first submit), and a 'Next'
+   line pointing her at the status command. ~~the commit index, and a 'Next' line pointing her at the status command.~~ (Revised 2026-04-26 (ADR-0020) — no commit index in Phase 1; spec digest + outcome replace it on the per-write surface.)"
 3. "Ana runs `overdrive alloc status --job payments`. The CLI prints
    a spec digest — a short hash — that exactly matches what she can
    compute locally from the same TOML file. The CLI also tells her
@@ -44,10 +61,9 @@ session: *"Submit a job and trust what the CLI tells me."*
    reconciler primitive registered at boot — `noop-heartbeat` — and
    shows the evaluation broker's counters."
 5. "Ana changes a whitespace character in `payments.toml` that doesn't
-   affect the semantic content. She resubmits. The server returns the
-   same commit index — byte-identical content is idempotent. She
-   changes a real field. She resubmits. The server returns a conflict
-   error — same key, different spec, different story."
+   affect the semantic content. She resubmits. The server returns
+   the same spec digest with `outcome: unchanged` — byte-identical
+   content is idempotent. ~~the same commit index — byte-identical content is idempotent.~~ (Revised 2026-04-26 (ADR-0020) — no commit index; the witness is the typed outcome enum plus the digest equality.) She changes a real field. She resubmits. The server returns a conflict error — same key, different spec, different story."
 
 Every noun in the demo script names an observable operator outcome.
 The stakeholder can confirm "yes, that is what engineers need" without
@@ -69,8 +85,9 @@ Enters through the `overdrive` CLI subprocess. The scenario:
    `serve` is the sole Phase 1 minter). Waits for the HTTPS listener
    to be ready on `127.0.0.1:7001`.
 2. Runs `overdrive job submit payments.toml`. Asserts exit 0, that
-   stdout names the Job ID, the canonical intent key, and the commit
-   index, and ends with a "Next" line pointing at `alloc status`.
+   stdout names the Job ID, the canonical intent key, the spec
+   digest, and the outcome (`created`), and ends with a "Next" line
+   pointing at `alloc status`. ~~the Job ID, the canonical intent key, and the commit index, and ends with a "Next" line pointing at `alloc status`.~~ (Revised 2026-04-26 (ADR-0020).)
 3. Runs `overdrive alloc status --job payments`. Asserts the printed
    spec digest equals the digest Ana can compute locally via
    `ContentHash::of(rkyv_archived_bytes)`.
@@ -92,8 +109,8 @@ Starts the control plane, runs `overdrive cluster status`, asserts:
 - The reconcilers section lists `noop-heartbeat`.
 - The broker counters (queued / cancelled / dispatched) render as
   non-negative integers.
-- The mode is reported as `single`, the region is the default, and the
-  commit_index equals whatever LocalStore is at.
+- The mode is reported as `single`, the region is the default. ~~and the commit_index equals whatever LocalStore is at.~~ (Revised 2026-04-26 (ADR-0020) — no commit_index field on the cluster-status response; the wiring witness for "the reconciler primitive ran" is `broker.dispatched > 0` after the broker has had a tick to drain. Cluster-status output is four fields total: `{mode, region, reconcilers, broker}`.)
+- The output does not contain a Commit-index line.
 
 This is the operator-visible proof that the §18 primitive is wired.
 WS-1 creates the IntentStore state and tests round-trip; WS-2 tests
@@ -104,12 +121,14 @@ that the reconciler layer is alive and visible to the operator.
 §1.3. Tags:
 `@walking_skeleton @real-io @adapter-integration @driving_adapter @error-path @us-03 @us-05 @journey:submit-a-job @kpi K1 @kpi K6`.
 
-Two submits with the same spec bytes → both return the same
-commit_index (200 OK both times). Then a submit with a *different*
-spec at the *same* intent key → 409 Conflict with an actionable error
-body. Then a submit of the original spec again → still the same
-original commit_index (idempotency does not depend on intervening
-conflicts).
+Two submits with the same spec bytes → both return 200 OK with
+`outcome == "unchanged"` (on the second) and the same `spec_digest`
+(on both). ~~commit_index (200 OK both times).~~ Then a submit with a
+*different* spec at the *same* intent key → 409 Conflict with an
+actionable error body. Then a submit of the original spec again →
+still 200 OK with `outcome == "unchanged"` and the same
+`spec_digest` (idempotency does not depend on intervening conflicts).
+~~original commit_index (idempotency does not depend on intervening conflicts).~~ (Revised 2026-04-26 (ADR-0020) — no commit index; the witness is the typed outcome enum + digest equality.)
 
 This is the scenario that proves the error-path claim: operators can
 re-submit safely, and the server distinguishes "same thing again"
@@ -193,6 +212,8 @@ rendering — the exact behaviours US-05 is designed to prove.
   (CLI handlers).
 - **KPIs**: K1 (WS-1), K4 + K5 (WS-2), K1 + K6 (WS-3). K2/K3/K7
   covered by focused scenarios §4 and §6.
-- **Shared artifacts**: `spec_digest`, `commit_index`, `intent_key`,
+- **Shared artifacts**: `spec_digest`, ~~`commit_index`~~ (revised
+  2026-04-26 (ADR-0020) — no commit_index in Phase 1; replaced by
+  `outcome: IdempotencyOutcome` on `SubmitJobResponse`), `intent_key`,
   `rest_endpoint`, `openapi_schema` (see
   `discuss/shared-artifacts-registry.md`).

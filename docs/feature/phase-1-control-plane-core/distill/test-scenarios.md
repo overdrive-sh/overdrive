@@ -15,6 +15,33 @@
 > persistent CA + operator-cert ceremony per ADR-0010 §Amendment
 > 2026-04-26 and GH #81. RCA:
 > `docs/analysis/root-cause-analysis-cluster-init-cert-overwritten-by-serve.md`.
+>
+> **Amendment 2026-04-26 (ADR-0020) — `commit_index` dropped from
+> Phase 1.** Walking-skeleton §1.1, §1.2, §1.3 are revised to drop
+> `commit_index` references; §1.1's per-write witness becomes the
+> spec-digest round-trip; §1.2's wiring witness becomes
+> `broker.dispatched > 0` plus the `reconcilers` registry list (the
+> cluster-status output narrows from five fields to four); §1.3's
+> idempotency witness becomes `outcome == "unchanged"` plus
+> `spec_digest` equality, with no `commit index 17` magic-number.
+> §3.1 (REST submit body) revised to drop `commit_index` field.
+> §4.5 (monotonic commit index) deleted in full — there is no
+> counter, no monotonic property to assert. §4.6 (`LocalStore`
+> commit_index accessor) deleted in full — the accessor is dropped.
+> §4.9 (byte-identical re-submit) revised to assert
+> `outcome == "unchanged"` plus `spec_digest` equality plus single-
+> entry back-door read. §5.6 (cluster status surfaces registry)
+> revised to drop the commit-index assertion. §6.1 (`job submit`
+> output line) revised to print `spec_digest` + `outcome` instead of
+> `commit_index`. §6.2 (`alloc status` digest) revised to drop the
+> "Ana has previously submitted ... and received a commit index"
+> Given clause. The "Adapter coverage summary" entry for
+> `LocalStore::commit_index` deletes; the "Idempotent re-submit"
+> entry remains but the scenario list narrows. Scenario counts
+> table revised. Original prose retained throughout via
+> `~~strikethrough~~` markup so the diff is auditable. Source:
+> ADR-0020;
+> `docs/feature/redesign-drop-commit-index/design/wave-decisions.md`.
 
 Per `.claude/rules/testing.md` — **no `.feature` files**. Every scenario
 below is a fenced `gherkin` markdown block. The crafter translates each
@@ -43,6 +70,35 @@ to a Rust `#[test]` / `#[tokio::test]` function in
 
 ### 1.1 Ana submits a job and reads the same spec digest back
 
+> **Revised 2026-04-26 (ADR-0020).** The "submit output reports a
+> commit index equal to or greater than one" Then-line is dropped;
+> the per-write witness is the spec-digest round-trip in the
+> following line. Replacement Then-lines: the submit output names
+> the spec digest the server computed; the submit output names the
+> outcome (`created` for first submit). Original gherkin retained
+> via `~~strikethrough~~`.
+
+~~```gherkin~~
+~~@walking_skeleton @real-io @adapter-integration @driving_adapter~~
+~~@us-01 @us-02 @us-03 @us-05 @journey:submit-a-job @kpi K1~~
+~~Scenario: Ana submits a job and sees the spec digest round-trip byte-identical~~
+~~  Given Ana has a freshly cloned overdrive workspace~~
+~~    And a scratch data directory on a temporary filesystem path~~
+~~    And a TOML file payments.toml that describes a single-replica payments service~~
+~~    And the control plane has been started via overdrive serve against that directory~~
+~~    And serve has minted the trust triple in-process and written it to that directory's .overdrive/config~~
+~~    And the server is listening on the default local endpoint~~
+~~  When Ana runs overdrive job submit payments.toml as a subprocess~~
+~~    And Ana runs overdrive alloc status --job payments as a subprocess~~
+~~  Then both subprocesses exit with status zero~~
+~~    And the submit output names the job ID payments~~
+~~    And the submit output names the canonical intent key jobs/payments~~
+~~    And the submit output reports a commit index equal to or greater than one~~
+~~    And the alloc status output shows a spec digest byte-identical to what Ana can compute locally from the same file~~
+~~    And the alloc status output explicitly states that zero allocations are placed~~
+~~    And the alloc status output names phase-1-first-workload as the next feature~~
+~~```~~
+
 ```gherkin
 @walking_skeleton @real-io @adapter-integration @driving_adapter
 @us-01 @us-02 @us-03 @us-05 @journey:submit-a-job @kpi K1
@@ -58,13 +114,37 @@ Scenario: Ana submits a job and sees the spec digest round-trip byte-identical
   Then both subprocesses exit with status zero
     And the submit output names the job ID payments
     And the submit output names the canonical intent key jobs/payments
-    And the submit output reports a commit index equal to or greater than one
+    And the submit output names a spec digest byte-identical to what Ana can compute locally from the same file
+    And the submit output names the outcome created
     And the alloc status output shows a spec digest byte-identical to what Ana can compute locally from the same file
     And the alloc status output explicitly states that zero allocations are placed
     And the alloc status output names phase-1-first-workload as the next feature
 ```
 
 ### 1.2 Ana confirms the reconciler primitive is alive via cluster status
+
+> **Revised 2026-04-26 (ADR-0020).** The "commit index reported
+> matches what the intent store reports" Then-line is dropped — the
+> intent store no longer carries a commit index; the wiring witness
+> for the reconciler primitive is the broker dispatched counter
+> advancing past zero (after the broker has had a tick to drain).
+> The cluster-status output is four fields total
+> (`{mode, region, reconcilers, broker}`) per ADR-0020. Original
+> gherkin retained via `~~strikethrough~~`.
+
+~~```gherkin~~
+~~@walking_skeleton @real-io @adapter-integration @driving_adapter~~
+~~@us-04 @us-05 @journey:submit-a-job @kpi K4 @kpi K5~~
+~~Scenario: Reconciler primitive is registered and observable after clean boot~~
+~~  Given a freshly initialised and started control plane in single mode~~
+~~  When Ana runs overdrive cluster status as a subprocess~~
+~~  Then the subprocess exits with status zero~~
+~~    And the output names mode single~~
+~~    And the reconcilers section lists noop-heartbeat~~
+~~    And the broker counters section names queued and cancelled and dispatched~~
+~~    And every broker counter renders as a non-negative integer~~
+~~    And the commit index reported matches what the intent store reports~~
+~~```~~
 
 ```gherkin
 @walking_skeleton @real-io @adapter-integration @driving_adapter
@@ -74,26 +154,51 @@ Scenario: Reconciler primitive is registered and observable after clean boot
   When Ana runs overdrive cluster status as a subprocess
   Then the subprocess exits with status zero
     And the output names mode single
+    And the output names the region default
     And the reconcilers section lists noop-heartbeat
     And the broker counters section names queued and cancelled and dispatched
     And every broker counter renders as a non-negative integer
-    And the commit index reported matches what the intent store reports
+    And the output does not contain a commit index line
 ```
 
 ### 1.3 Byte-identical resubmit is idempotent; different spec at same key is a conflict
+
+> **Revised 2026-04-26 (ADR-0020).** The "commit index 17"
+> magic-number framing is dropped — there is no commit index. The
+> idempotency witness is `outcome == "unchanged"` on the wire (CLI
+> renders as `unchanged`) plus `spec_digest` equality across all
+> three submits of the original spec. Original gherkin retained via
+> `~~strikethrough~~`.
+
+~~```gherkin~~
+~~@walking_skeleton @real-io @adapter-integration @driving_adapter @error-path~~
+~~@us-03 @us-05 @journey:submit-a-job @kpi K1 @kpi K6~~
+~~Scenario: Ana resubmits the same spec and then submits a different one at the same key~~
+~~  Given a running control plane with a previously-committed job payments at commit index 17~~
+~~    And Ana has the original payments.toml on disk~~
+~~    And Ana has a modified payments-altered.toml whose content differs by one replica count~~
+~~  When Ana runs overdrive job submit payments.toml a second time~~
+~~    And Ana runs overdrive job submit --job-id payments payments-altered.toml~~
+~~    And Ana runs overdrive job submit payments.toml a third time~~
+~~  Then the second submit exits with status zero and reports commit index 17~~
+~~    And the third invocation of the original spec exits with status zero and reports commit index 17~~
+~~    And the submit of payments-altered.toml exits with status one~~
+~~    And its error output names the conflict by explaining that a different spec exists at the same intent key~~
+~~    And its error output does not contain a raw Rust panic or a raw reqwest error format~~
+~~```~~
 
 ```gherkin
 @walking_skeleton @real-io @adapter-integration @driving_adapter @error-path
 @us-03 @us-05 @journey:submit-a-job @kpi K1 @kpi K6
 Scenario: Ana resubmits the same spec and then submits a different one at the same key
-  Given a running control plane with a previously-committed job payments at commit index 17
+  Given a running control plane with a previously-committed job payments whose first submit returned spec digest D and outcome created
     And Ana has the original payments.toml on disk
     And Ana has a modified payments-altered.toml whose content differs by one replica count
   When Ana runs overdrive job submit payments.toml a second time
     And Ana runs overdrive job submit --job-id payments payments-altered.toml
     And Ana runs overdrive job submit payments.toml a third time
-  Then the second submit exits with status zero and reports commit index 17
-    And the third invocation of the original spec exits with status zero and reports commit index 17
+  Then the second submit exits with status zero and reports outcome unchanged and spec digest equal to D
+    And the third invocation of the original spec exits with status zero and reports outcome unchanged and spec digest equal to D
     And the submit of payments-altered.toml exits with status one
     And its error output names the conflict by explaining that a different spec exists at the same intent key
     And its error output does not contain a raw Rust panic or a raw reqwest error format
@@ -195,14 +300,31 @@ Scenario: Intent-side Job and observation-side AllocStatusRow are distinct Rust 
 
 ### 3.1 Happy path — submit round-trip through the REST port
 
+> **Revised 2026-04-26 (ADR-0020).** The submit response body fields
+> are revised from `{job_id, commit_index}` to
+> `{job_id, spec_digest, outcome}`. Original gherkin retained via
+> `~~strikethrough~~`.
+
+~~```gherkin~~
+~~@us-02 @real-io @adapter-integration @kpi K1~~
+~~Scenario: HTTP POST to the submit endpoint commits through the real intent store~~
+~~  Given a running control plane on https://127.0.0.1:7001 backed by real redb~~
+~~  When a reqwest client posts a valid Job spec as JSON to /v1/jobs~~
+~~  Then the response carries status 200~~
+~~    And the response body is a JSON object with a job_id field and a commit_index field~~
+~~    And the commit_index is greater than or equal to one~~
+~~    And a subsequent GET to /v1/jobs/{id} returns the same spec as the request body~~
+~~```~~
+
 ```gherkin
 @us-02 @real-io @adapter-integration @kpi K1
 Scenario: HTTP POST to the submit endpoint commits through the real intent store
   Given a running control plane on https://127.0.0.1:7001 backed by real redb
   When a reqwest client posts a valid Job spec as JSON to /v1/jobs
   Then the response carries status 200
-    And the response body is a JSON object with a job_id field and a commit_index field
-    And the commit_index is greater than or equal to one
+    And the response body is a JSON object with a job_id field, a spec_digest field, and an outcome field
+    And the outcome equals inserted
+    And the spec_digest equals ContentHash::of of the rkyv archive of the submitted spec
     And a subsequent GET to /v1/jobs/{id} returns the same spec as the request body
 ```
 
@@ -330,26 +452,37 @@ Scenario: Describe on an unknown JobId returns 404 with a structured body
     And the IntentStore is unchanged
 ```
 
-### 4.5 Commit index is strictly monotonic across successive submits
+### 4.5 ~~Commit index is strictly monotonic across successive submits~~ — DELETED 2026-04-26 (ADR-0020)
 
-```gherkin
-@us-03 @real-io @property @kpi K3
-Scenario: Any sequence of valid submits produces a strictly increasing commit index
-  Given a running control plane and any sequence of at least three distinct valid Job specs
-  When Ana submits each spec in order
-  Then each response's commit_index is strictly greater than the previous response's commit_index
-```
+> **Deleted 2026-04-26 (ADR-0020).** There is no commit index; the
+> monotonic property has no consumer. The behavioural property the
+> scenario was a proxy for ("submits do not silently overwrite or
+> skip") is preserved by §4.1 (Submit-then-Describe round-trip) and
+> §4.9 (byte-identical re-submit). Original gherkin retained for
+> diff auditability.
 
-### 4.6 Commit index accessor returns a raw sequence, not an internal handle
+~~```gherkin~~
+~~@us-03 @real-io @property @kpi K3~~
+~~Scenario: Any sequence of valid submits produces a strictly increasing commit index~~
+~~  Given a running control plane and any sequence of at least three distinct valid Job specs~~
+~~  When Ana submits each spec in order~~
+~~  Then each response's commit_index is strictly greater than the previous response's commit_index~~
+~~```~~
 
-```gherkin
-@us-03 @library_port
-Scenario: LocalStore exposes commit_index as a plain u64 accessor
-  Given a LocalStore backed by a redb file on a temporary path
-  When Ana calls the commit_index accessor on that store
-  Then the return type is u64
-    And no redb transaction or internal handle type leaks into the return signature
-```
+### 4.6 ~~Commit index accessor returns a raw sequence, not an internal handle~~ — DELETED 2026-04-26 (ADR-0020)
+
+> **Deleted 2026-04-26 (ADR-0020).** The `LocalStore::commit_index()`
+> accessor is dropped from the public API. There is no accessor to
+> assert against. Original gherkin retained for diff auditability.
+
+~~```gherkin~~
+~~@us-03 @library_port~~
+~~Scenario: LocalStore exposes commit_index as a plain u64 accessor~~
+~~  Given a LocalStore backed by a redb file on a temporary path~~
+~~  When Ana calls the commit_index accessor on that store~~
+~~  Then the return type is u64~~
+~~    And no redb transaction or internal handle type leaks into the return signature~~
+~~```~~
 
 ### 4.7 AllocStatus returns an empty row set in Phase 1
 
@@ -377,14 +510,32 @@ Scenario: NodeList returns zero rows when no node agent has registered
 
 ### 4.9 Byte-identical re-submit is an idempotent 200
 
+> **Revised 2026-04-26 (ADR-0020).** The "commit index 17" framing is
+> dropped — the idempotency witness is `outcome == "unchanged"` plus
+> `spec_digest` equality across submits. The single-entry property
+> at the intent key is unchanged. Original gherkin retained via
+> `~~strikethrough~~`.
+
+~~```gherkin~~
+~~@us-03 @real-io @adapter-integration~~
+~~Scenario: Re-submitting the exact same spec at the same key returns the original commit index~~
+~~  Given a running control plane where Ana has already submitted a Job spec at commit index 17~~
+~~  When Ana submits the byte-identical spec a second time at the same intent key~~
+~~  Then the response carries status 200~~
+~~    And the response commit_index is 17~~
+~~    And the IntentStore contains only one entry at the intent key~~
+~~```~~
+
 ```gherkin
 @us-03 @real-io @adapter-integration
-Scenario: Re-submitting the exact same spec at the same key returns the original commit index
-  Given a running control plane where Ana has already submitted a Job spec at commit index 17
+Scenario: Re-submitting the exact same spec at the same key returns outcome unchanged
+  Given a running control plane where Ana has already submitted a Job spec whose first submit returned spec digest D and outcome inserted
   When Ana submits the byte-identical spec a second time at the same intent key
   Then the response carries status 200
-    And the response commit_index is 17
+    And the response outcome is unchanged
+    And the response spec_digest equals D
     And the IntentStore contains only one entry at the intent key
+    And the bytes stored under that intent key are byte-equal to the bytes stored after the first submit
 ```
 
 ### 4.10 Different spec at same key is 409 Conflict
@@ -538,25 +689,62 @@ Scenario: Smuggled Instant::now in a reconciler body is blocked by the lint gate
 
 ### 6.1 job submit round-trips and prints actionable next steps
 
+> **Revised 2026-04-26 (ADR-0020).** The "commit index ≥ 1" line is
+> dropped from the assertion list; the per-write witness is the
+> spec-digest line (which the CLI gets from the `SubmitJobResponse`
+> body) plus the outcome. Original gherkin retained via
+> `~~strikethrough~~`.
+
+~~```gherkin~~
+~~@us-05 @driving_adapter @real-io @adapter-integration @kpi K1~~
+~~Scenario: overdrive job submit prints the job ID, intent key, commit index, and a Next hint~~
+~~  Given a running control plane on the default endpoint~~
+~~    And a file payments.toml containing a valid Job spec~~
+~~  When Ana runs overdrive job submit payments.toml~~
+~~  Then the CLI exits with status zero~~
+~~    And the output contains the Job ID payments~~
+~~    And the output contains the canonical intent key jobs/payments~~
+~~    And the output contains a commit index greater than or equal to one~~
+~~    And the output ends with a line suggesting overdrive alloc status --job payments as the next step~~
+~~```~~
+
 ```gherkin
 @us-05 @driving_adapter @real-io @adapter-integration @kpi K1
-Scenario: overdrive job submit prints the job ID, intent key, commit index, and a Next hint
+Scenario: overdrive job submit prints the job ID, intent key, spec digest, outcome, and a Next hint
   Given a running control plane on the default endpoint
     And a file payments.toml containing a valid Job spec
   When Ana runs overdrive job submit payments.toml
   Then the CLI exits with status zero
     And the output contains the Job ID payments
     And the output contains the canonical intent key jobs/payments
-    And the output contains a commit index greater than or equal to one
+    And the output contains a spec digest equal to what Ana can compute locally from the same file
+    And the output contains the outcome created
     And the output ends with a line suggesting overdrive alloc status --job payments as the next step
 ```
 
 ### 6.2 alloc status renders a spec digest equal to the local compute
 
+> **Revised 2026-04-26 (ADR-0020).** The Given-clause "received a
+> commit index" reference is dropped — there is no commit index.
+> The spec-digest property is unchanged; it stays load-bearing as
+> the per-write content witness. Original gherkin retained via
+> `~~strikethrough~~`.
+
+~~```gherkin~~
+~~@us-05 @driving_adapter @real-io @adapter-integration @kpi K1 @kpi K7~~
+~~Scenario: alloc status shows the same spec digest Ana can compute locally~~
+~~  Given Ana has previously submitted payments.toml and received a commit index~~
+~~  When Ana runs overdrive alloc status --job payments~~
+~~  Then the output names a spec digest~~
+~~    And that digest equals what Ana computes locally by archiving the same payments.toml via rkyv and hashing~~
+~~    And the output states explicitly that zero allocations are placed~~
+~~    And the output names phase-1-first-workload as the next feature~~
+~~```~~
+
 ```gherkin
 @us-05 @driving_adapter @real-io @adapter-integration @kpi K1 @kpi K7
 Scenario: alloc status shows the same spec digest Ana can compute locally
-  Given Ana has previously submitted payments.toml and received a commit index
+  Given Ana has previously submitted payments.toml and received a 200 OK with outcome inserted
   When Ana runs overdrive alloc status --job payments
   Then the output names a spec digest
     And that digest equals what Ana computes locally by archiving the same payments.toml via rkyv and hashing
@@ -716,7 +904,7 @@ covered by at least one scenario above:
 | `reqwest` CLI client | §1.1, §6.1, §6.5 |
 | `libsql` per-primitive memory | §5.4, §5.5 |
 | Evaluation broker | §5.2, §5.3, §5.6, §5.8 |
-| `LocalStore::commit_index` | §4.5, §4.6 |
+| ~~`LocalStore::commit_index`~~ — DELETED 2026-04-26 (ADR-0020): accessor dropped; §4.5 and §4.6 are deleted as scenarios. | ~~§4.5, §4.6~~ |
 | `SimObservationStore` wired as Phase 1 server impl | §4.7, §4.8, §6.3 |
 | `Reconciler` trait + runtime | §5.1, §5.7, §5.9, §5.10 |
 | HTTP error mapping `ControlPlaneError::to_response` | §4.2, §4.3, §4.4, §4.10, §4.11 |
@@ -732,14 +920,14 @@ covered by at least one scenario above:
 | §2 US-01 aggregates | 9 | 5 (§2.1 property, §2.2 property, §2.3 property, §2.4 error, §2.5 error, §2.6 error) — 4 error + 3 property |
 | §2b US-01 TLS bootstrap | 3 | 1 error (§2b.3) |
 | §3 US-02 REST surface | 6 | 3 (§3.2 error, §3.3 error, §3.4 error, §3.5 error) |
-| §4 US-03 handlers | 11 | 7 (§4.2, §4.3 property, §4.4, §4.5 property, §4.10, §4.11) |
+| §4 US-03 handlers | ~~11~~ 9 (Revised 2026-04-26 ADR-0020: §4.5 and §4.6 deleted) | ~~7 (§4.2, §4.3 property, §4.4, §4.5 property, §4.10, §4.11)~~ 6 (§4.2, §4.3 property, §4.4, §4.10, §4.11) |
 | §5 US-04 reconciler | 10 | 4 error + 3 property (§5.5, §5.7, §5.8, §5.9, §5.10) |
 | §6 US-05 CLI | 9 | 3 error (§6.5, §6.6, §6.7) |
-| **Total** | **51** | **22 @error-path + 8 @property** = **30 boundary-exercising** |
+| **Total** | ~~**51**~~ **49** (Revised 2026-04-26 ADR-0020: §4.5 + §4.6 deleted) | ~~**22 @error-path + 8 @property** = **30 boundary-exercising**~~ **22 @error-path + 7 @property** = **29 boundary-exercising** |
 
-Raw error-path ratio: 22/51 ≈ 43%. With property-shaped boundary
-coverage: 30/51 ≈ 59%. Target ≥ 40% per DWD-10 — met on raw count
-alone.
+Raw error-path ratio: ~~22/51 ≈ 43%~~ 22/49 ≈ 45%. With
+property-shaped boundary coverage: ~~30/51 ≈ 59%~~ 29/49 ≈ 59%.
+Target ≥ 40% per DWD-10 — met on raw count alone.
 
 ---
 
@@ -749,3 +937,4 @@ alone.
 |---|---|
 | 2026-04-23 | Initial DISTILL acceptance scenarios for phase-1-control-plane-core. 51 scenarios across 3 walking skeletons + 5 US sections + TLS bootstrap sub-section. |
 | 2026-04-26 | Amendment — `cluster init` removed from Phase 1 (commit `d294fb8`). §1.1 Given clause revised to drop the `cluster init` step (`serve` is now the sole minter). §2b.1 / §2b.2 rewritten to assert against `serve`'s trust-triple write (ADR-0010 §R1 as amended 2026-04-26). §2b.3 unchanged. RCA: `docs/analysis/root-cause-analysis-cluster-init-cert-overwritten-by-serve.md`. Phase 5 reintroduction: GH #81. |
+| 2026-04-26 | Amendment — `commit_index` dropped from Phase 1 wire contract per ADR-0020. §1.1 / §1.2 / §1.3 revised; §3.1 revised to drop `commit_index` from response body assertion; §4.5 (monotonic commit index) and §4.6 (`LocalStore::commit_index` accessor) deleted in full; §4.9 revised to assert `outcome == "unchanged"` plus digest equality; §6.1 revised to print `spec_digest` + `outcome` instead of `commit_index`; §6.2 Given-clause revised. Adapter coverage table and Scenario counts table revised. Original prose retained throughout via `~~strikethrough~~` markup. Source: ADR-0020; `docs/feature/redesign-drop-commit-index/design/wave-decisions.md`. |

@@ -2,6 +2,42 @@
 
 # User Stories — phase-1-control-plane-core
 
+> **Amendment 2026-04-26.** `commit_index` is dropped from the Phase 1
+> wire contract per ADR-0020. The user-stories below predate the
+> drop; affected acceptance criteria and Domain Examples in **US-03**
+> and **US-04** are revised in-place with `~~strikethrough~~` markup
+> on the original prose so the diff is auditable. The replacements:
+>
+> - `SubmitJobResponse` carries `{job_id, spec_digest, outcome}` where
+>   `outcome: IdempotencyOutcome ∈ {"inserted", "unchanged"}`. No
+>   `commit_index` field.
+> - `JobDescription` carries `{spec, spec_digest}`. No `commit_index`
+>   field.
+> - `ClusterStatus` carries `{mode, region, reconcilers, broker}`.
+>   **No replacement** for the dropped `commit_index` (no
+>   `writes_since_boot`, no `process_started_at`); a `writes_since_boot`
+>   field would carry the same race conditions and restart-reset gap
+>   as the dropped `commit_index`, just renamed — see ADR-0020 for
+>   the structural argument.
+> - `LocalStore::commit_index()` accessor is dropped. US-03 and US-04
+>   acceptance criteria that reference it are revised to use
+>   `spec_digest` (where a content-addressed witness is desired) or
+>   are dropped (where no witness is desired).
+> - The walking-skeleton US-04 wiring witness is now
+>   `broker.dispatched > 0` (the reconciler ran) plus the
+>   `reconcilers` registry list (the reconciler is registered) — no
+>   monotonic counter is involved.
+>
+> US-01, US-02, US-05 carry incidental `commit_index` references in
+> Domain Examples and BDD scenarios; those references are revised
+> with `~~strikethrough~~` markup wherever they appear so the
+> implementation lane is unambiguous. Test-scenarios and walking-
+> skeleton get matching amendment blocks. Brief and ADRs are
+> updated separately.
+>
+> Source: ADR-0020;
+> `docs/feature/redesign-drop-commit-index/design/wave-decisions.md`.
+
 Five LeanUX stories, each delivering a single carpaccio slice from `story-map.md`. All stories share the persona and the vision context from `docs/product/vision.md` and `docs/product/jobs.yaml`, and build on the phase-1-foundation walking skeleton (newtypes, trait ports, `LocalStore`, `SimObservationStore`, DST harness).
 
 ## System Constraints (cross-cutting)
@@ -227,11 +263,24 @@ Implement SubmitJob, DescribeJob, AllocStatus, NodeList as axum handlers in the 
 
 #### 1: Happy Path — Ana submits a spec, then describes the same job
 
-Ana POSTs `payments.toml`'s serialised form to `/v1/jobs`. The handler decodes the JSON body, calls `Job::from_spec(...)` (constructors fire), archives via rkyv, calls `IntentStore::put("jobs/payments", archived_bytes)`. Commit index is 17. Ana then GETs `/v1/jobs/payments`. The handler calls `IntentStore::get("jobs/payments")`, rkyv-accesses the bytes, recomputes `ContentHash::of(archived_bytes) = sha256:7f3a9b12…`, and responds `200 OK` with `{"spec": <same>, "commit_index": 17, "spec_digest": "sha256:7f3a9b12…"}`.
+> **Revised 2026-04-26 (ADR-0020).** Original prose retained for diff
+> auditability; new prose follows.
+>
+> ~~Ana POSTs `payments.toml`'s serialised form to `/v1/jobs`. The handler decodes the JSON body, calls `Job::from_spec(...)` (constructors fire), archives via rkyv, calls `IntentStore::put("jobs/payments", archived_bytes)`. Commit index is 17. Ana then GETs `/v1/jobs/payments`. The handler calls `IntentStore::get("jobs/payments")`, rkyv-accesses the bytes, recomputes `ContentHash::of(archived_bytes) = sha256:7f3a9b12…`, and responds `200 OK` with `{"spec": <same>, "commit_index": 17, "spec_digest": "sha256:7f3a9b12…"}`.~~
 
-#### 2: Edge Case — Ana submits twice and sees monotonic commit indexes
+Ana POSTs `payments.toml`'s serialised form to `/v1/jobs`. The handler decodes the JSON body, calls `Job::from_spec(...)` (constructors fire), archives via rkyv, computes `ContentHash::of(archived_bytes) = sha256:7f3a9b12…`, and calls `IntentStore::put("jobs/payments", archived_bytes)` which returns `PutOutcome::Inserted`. The handler responds `200 OK` with `{"job_id": "payments", "spec_digest": "sha256:7f3a9b12…", "outcome": "inserted"}`. Ana then GETs `/v1/jobs/payments`. The handler calls `IntentStore::get("jobs/payments")`, rkyv-accesses the bytes, recomputes the digest, and responds `200 OK` with `{"spec": <same>, "spec_digest": "sha256:7f3a9b12…"}`.
 
-Ana submits `payments.toml`, gets commit_index 17. She submits a (different) `frontend.toml`, gets commit_index 18. She describes `payments` — the commit_index returned is still 17 (the submit's), not the latest store index. The commit counter is monotonic; reads do not invent a new one.
+#### 2: Edge Case — Ana submits a different spec and reads back the same digest she submitted
+
+> **Revised 2026-04-26 (ADR-0020).** Original prose retained for diff
+> auditability; new prose follows. The "monotonic commit index"
+> framing is dropped — there is no counter, no monotonic property to
+> assert. The replacement property is "the digest the operator can
+> compute locally equals the digest the server returns."
+>
+> ~~Ana submits `payments.toml`, gets commit_index 17. She submits a (different) `frontend.toml`, gets commit_index 18. She describes `payments` — the commit_index returned is still 17 (the submit's), not the latest store index. The commit counter is monotonic; reads do not invent a new one.~~
+
+Ana submits `payments.toml`, gets `{spec_digest: D_pay, outcome: "inserted"}`. She submits a (different) `frontend.toml`, gets `{spec_digest: D_front, outcome: "inserted"}` — `D_pay ≠ D_front`. She describes `payments`. The describe response carries `D_pay` (the digest of the spec at that key), not `D_front`. Ana can compute `D_pay` locally from her TOML file via the same rkyv canonical path; the local digest equals the server digest byte-for-byte.
 
 #### 3: Error Boundary — Ana submits a Job whose JobId would round-trip-fail
 
@@ -247,11 +296,19 @@ When Ana GETs `/v1/jobs/{id}` with the returned JobId
 Then the response spec equals the submitted spec after rkyv access
 And the response `spec_digest` equals `ContentHash::of` of the archived submitted bytes
 
-#### Scenario: Commit index strictly increases across submits
-
-Given the server is running
-When Ana submits three different valid Job specs in sequence
-Then each submit response's `commit_index` is strictly greater than the previous one
+> **Revised 2026-04-26 (ADR-0020).** The "monotonic commit index"
+> scenario below is deleted — there is no counter, no monotonic
+> property to assert. The behaviour the scenario was defending
+> ("submits do not silently overwrite or skip") is preserved by the
+> Submit-then-Describe round-trip and the byte-identical re-submit
+> scenarios; nothing about the wire contract requires a numeric
+> witness across distinct submits.
+>
+> ~~#### Scenario: Commit index strictly increases across submits~~
+>
+> ~~Given the server is running~~
+> ~~When Ana submits three different valid Job specs in sequence~~
+> ~~Then each submit response's `commit_index` is strictly greater than the previous one~~
 
 #### Scenario: Validating constructor rejects before IntentStore is touched
 
@@ -283,11 +340,11 @@ And the IntentStore is unchanged
 
 ### Acceptance Criteria
 
-- [ ] SubmitJob handler archives via rkyv, commits via `IntentStore::put`, returns the commit_index in a JSON response
-- [ ] DescribeJob handler reads via `IntentStore::get`, rkyv-accesses the bytes, recomputes spec_digest
+- [ ] ~~SubmitJob handler archives via rkyv, commits via `IntentStore::put`, returns the commit_index in a JSON response~~ **Revised 2026-04-26 (ADR-0020):** SubmitJob handler archives via rkyv, computes `spec_digest = ContentHash::of(archived_bytes)`, commits via `IntentStore::put`, and returns `{job_id, spec_digest, outcome}` where `outcome: IdempotencyOutcome ∈ {"inserted", "unchanged"}` is derived from the `PutOutcome` variant the trait returns
+- [ ] ~~DescribeJob handler reads via `IntentStore::get`, rkyv-accesses the bytes, recomputes spec_digest~~ **Revised 2026-04-26 (ADR-0020):** DescribeJob handler reads via `IntentStore::get`, rkyv-accesses the bytes, recomputes spec_digest, returns `{spec, spec_digest}`
 - [ ] AllocStatus handler calls `ObservationStore::read` against `alloc_status` (schema from phase-1-foundation brief §6)
 - [ ] NodeList handler calls `ObservationStore::read` against `node_health`
-- [ ] `LocalStore::commit_index()` accessor exists and is strictly monotonic
+- [ ] ~~`LocalStore::commit_index()` accessor exists and is strictly monotonic~~ **Removed 2026-04-26 (ADR-0020):** the `LocalStore::commit_index()` accessor is dropped; the monotonicity property has no consumer in Phase 1 and the in-memory counter has been the source of three production bugs in 26 hours. The Submit-then-Describe round-trip + byte-identical re-submit scenarios cover the behavioural property the monotonicity assertion was a proxy for.
 - [ ] Validating constructors fire BEFORE any IntentStore write (test asserts no new entry on malformed input)
 - [ ] Unknown-JobId Describe returns `404 Not Found` with no store side effects
 - [ ] Validation failures return `400 Bad Request`; duplicate-intent-key conflicts (if DESIGN surfaces them) return `409 Conflict`; unexpected infrastructure failures return `500 Internal Server Error` with a structured error body (never a raw stack trace)
@@ -298,14 +355,14 @@ And the IntentStore is unchanged
 
 - **Who**: Overdrive platform engineer + operator running `overdrive job submit` end-to-end
 - **Does what**: submits a spec, sees the platform commit it, and reads it back byte-identical
-- **By how much**: 100% of valid submit/describe round-trips return byte-identical specs; 100% of malformed submits reject before any write; commit_index strictly monotonic
-- **Measured by**: round-trip proptest in `tests/acceptance/`; commit_index monotonicity test; negative test asserting no-write on rejection
+- **By how much**: 100% of valid submit/describe round-trips return byte-identical specs; 100% of malformed submits reject before any write; ~~commit_index strictly monotonic~~ **Revised 2026-04-26 (ADR-0020):** byte-identical re-submit returns `outcome: "unchanged"` and the same `spec_digest` as the original; different spec at same key returns 409 Conflict
+- **Measured by**: round-trip proptest in `tests/acceptance/`; ~~commit_index monotonicity test~~ **Revised 2026-04-26 (ADR-0020):** `outcome == "unchanged"` + back-door byte-equality assertion on byte-identical re-submit; 409 assertion on different-spec-same-key; negative test asserting no-write on rejection
 - **Baseline**: none — no server handlers exist today
 
 ### Technical Notes
 
 - Per phase-1-foundation DWD-01 (Walking Skeleton Strategy C): `LocalStore` in these tests is the real redb-backed adapter against `tempfile::TempDir`. No mocks.
-- The `commit_index` surface is new but should not leak redb internals — the accessor returns a `u64` sequence, not a redb transaction handle.
+- ~~The `commit_index` surface is new but should not leak redb internals — the accessor returns a `u64` sequence, not a redb transaction handle.~~ **Revised 2026-04-26 (ADR-0020):** No `commit_index` surface ships in Phase 1. The trait returns `IntentStore::get(...) -> Option<Bytes>` (no `(Bytes, u64)` tuple); the `PutOutcome` enum is `{Inserted, KeyExists { existing }}` (no `commit_index` field on the variants); the public `commit_index()` accessor on `LocalStore` is dropped. The behavioural property the surface was carrying ("did the handler take the idempotency branch?") is preserved by `IdempotencyOutcome` on the wire and by a back-door byte-equality assertion in tests; "is this the same logical record" is preserved by `spec_digest`.
 - `ObservationStore::read` in Phase 1 goes through `SimObservationStore` in DST, and through whichever implementation DESIGN picks for the server. For the walking-skeleton CLI round-trip test, using `SimObservationStore` is acceptable (no scheduler writes are expected); DESIGN may also wire a trivial in-process LWW map for the server if a real Corrosion adapter is out of scope.
 - HTTP status-code convention: `400 Bad Request` for validation failures, `404 Not Found` for unknown resources, `409 Conflict` for duplicate-intent-key scenarios if DESIGN surfaces them, `500 Internal Server Error` for infra failures. Error bodies are structured JSON (`{"error": "...", "message": "...", "field": "..."}`). No raw stack traces.
 - **Depends on**: US-01, US-02.
@@ -396,7 +453,7 @@ And the output shows the broker's queued / cancelled / dispatched counters
 - [ ] `Action` enum exists with at minimum `Noop`, `HttpCall { … }` (per development.md), `StartWorkflow { spec, correlation }` (placeholder; workflow runtime is Phase 3)
 - [ ] `ReconcilerRuntime` exposes `registered() -> impl Iterator<Item=&dyn ReconcilerHandle>` (exact shape DESIGN owns)
 - [ ] `EvaluationBroker` is keyed on `(reconciler_name, target_resource)`; implements cancelable-eval-set semantics
-- [ ] Broker surfaces `queued`, `cancelled`, `dispatched` counters readable by the `ClusterStatus` RPC
+- [ ] Broker surfaces `queued`, `cancelled`, `dispatched` counters readable by the `ClusterStatus` RPC. **Revised 2026-04-26 (ADR-0020):** `ClusterStatus` carries four fields total — `{mode, region, reconcilers, broker}` — with no `commit_index` and no `writes_since_boot` replacement. The walking-skeleton wiring witness for "the reconciler primitive ran" is `broker.dispatched > 0`; the wiring witness for "the reconciler primitive is registered" is the presence of `noop-heartbeat` in the `reconcilers` list. No counter on the status RPC is required to prove either property.
 - [ ] Per-primitive private libSQL databases are provisioned with distinct paths and isolated `&Db` handles
 - [ ] A `noop-heartbeat` reconciler is registered at boot as living proof of the contract
 - [ ] DST invariant `at_least_one_reconciler_registered` passes on every run
@@ -440,11 +497,21 @@ Replace the CLI stub body with real handlers that call the REST API through a th
 
 #### 1: Happy Path — Ana submits a Job and inspects it
 
-Ana runs `overdrive job submit ./payments.toml`. The CLI prints `Accepted. Job ID: payments, Intent key: jobs/payments, Commit index: 17, Endpoint: https://127.0.0.1:7001, Next: overdrive alloc status --job payments`. She runs `overdrive alloc status --job payments` and sees `Spec digest: sha256:7f3a9b12…` matching what she can compute locally from the same file, plus `Allocations: 0 (none placed — scheduler lands in phase-1-first-workload)`.
+> **Revised 2026-04-26 (ADR-0020).** Original prose retained for diff
+> auditability; new prose follows.
+>
+> ~~Ana runs `overdrive job submit ./payments.toml`. The CLI prints `Accepted. Job ID: payments, Intent key: jobs/payments, Commit index: 17, Endpoint: https://127.0.0.1:7001, Next: overdrive alloc status --job payments`. She runs `overdrive alloc status --job payments` and sees `Spec digest: sha256:7f3a9b12…` matching what she can compute locally from the same file, plus `Allocations: 0 (none placed — scheduler lands in phase-1-first-workload)`.~~
+
+Ana runs `overdrive job submit ./payments.toml`. The CLI prints `Accepted. Job ID: payments, Intent key: jobs/payments, Spec digest: sha256:7f3a9b12…, Outcome: created, Endpoint: https://127.0.0.1:7001, Next: overdrive alloc status --job payments`. She runs `overdrive alloc status --job payments` and sees `Spec digest: sha256:7f3a9b12…` matching what she can compute locally from the same file, plus `Allocations: 0 (none placed — scheduler lands in phase-1-first-workload)`.
 
 #### 2: Edge Case — Ana inspects a fresh cluster with zero nodes
 
-Ana runs `overdrive node list` against a just-started control plane. The CLI prints: `No nodes registered yet — node agent lands in phase-1-first-workload.` She runs `overdrive cluster status` and sees the commit_index, mode, and the `noop-heartbeat` reconciler registered with zero-queued evaluations. She understands from the output exactly what is and isn't alive.
+> **Revised 2026-04-26 (ADR-0020).** Original prose retained for diff
+> auditability; new prose follows.
+>
+> ~~Ana runs `overdrive node list` against a just-started control plane. The CLI prints: `No nodes registered yet — node agent lands in phase-1-first-workload.` She runs `overdrive cluster status` and sees the commit_index, mode, and the `noop-heartbeat` reconciler registered with zero-queued evaluations. She understands from the output exactly what is and isn't alive.~~
+
+Ana runs `overdrive node list` against a just-started control plane. The CLI prints: `No nodes registered yet — node agent lands in phase-1-first-workload.` She runs `overdrive cluster status` and sees mode (`single`), region (`default`), the `noop-heartbeat` reconciler registered, and the broker counters (`queued`, `cancelled`, `dispatched`) — the four fields the status RPC carries per ADR-0020. She understands from the output exactly what is and isn't alive.
 
 #### 3: Error Boundary — Ana submits against a down endpoint
 
@@ -520,10 +587,10 @@ And the effective endpoint is echoed in the CLI output
 
 ### Acceptance Criteria
 
-- [ ] `overdrive job submit <file>` reads the TOML, constructs a Job via validating constructors, POSTs JSON to `/v1/jobs`, prints commit_index and canonical intent_key
+- [ ] ~~`overdrive job submit <file>` reads the TOML, constructs a Job via validating constructors, POSTs JSON to `/v1/jobs`, prints commit_index and canonical intent_key~~ **Revised 2026-04-26 (ADR-0020):** `overdrive job submit <file>` reads the TOML, constructs a Job via validating constructors, POSTs JSON to `/v1/jobs`, prints `job_id`, canonical `intent_key`, `spec_digest`, and `outcome` (`created` or `unchanged`)
 - [ ] `overdrive alloc status --job <id>` GETs `/v1/jobs/{id}` and `/v1/allocs`, renders spec_digest + replicas + alloc list (possibly empty with explicit state)
 - [ ] `overdrive node list` GETs `/v1/nodes`; zero rows render as an explicit empty state naming the next feature
-- [ ] `overdrive cluster status` GETs `/v1/cluster/info`; renders mode, region, commit_index, reconciler registry, broker counters
+- [ ] ~~`overdrive cluster status` GETs `/v1/cluster/info`; renders mode, region, commit_index, reconciler registry, broker counters~~ **Revised 2026-04-26 (ADR-0020):** `overdrive cluster status` GETs `/v1/cluster/info`; renders mode, region, reconciler registry, broker counters (four fields total — no `commit_index`, no `writes_since_boot` replacement; ADR-0020 rationale)
 - [ ] All error paths answer "what / why / how to fix" per `nw-ux-tui-patterns`
 - [ ] Exit codes: 0 success, 1 generic error, 2 usage error
 - [ ] Endpoint precedence: `--endpoint` flag > `OVERDRIVE_ENDPOINT` env > default `https://127.0.0.1:7001`
@@ -557,3 +624,4 @@ And the effective endpoint is echoed in the CLI output
 |---|---|
 | 2026-04-23 | Initial five user stories for phase-1-control-plane-core DISCUSS wave. |
 | 2026-04-23 | Transport pivot: US-02 retitled to "Control-plane HTTP/REST service surface" (was gRPC); US-03 and US-05 re-shaped around axum handlers and a REST client; System Constraints updated to capture the REST + OpenAPI external / tarpc internal two-lane split and the JSON-at-edge / rkyv-at-store serialisation discipline. |
+| 2026-04-26 | Amendment per ADR-0020 — `commit_index` dropped from Phase 1 wire contract. US-03 Domain Examples #1 and #2 revised; "monotonic commit index" BDD scenario deleted (no counter, no monotonic property). US-03 ACs updated: SubmitJob returns `{job_id, spec_digest, outcome}`; `LocalStore::commit_index()` accessor AC removed. US-04 ClusterStatus AC revised to four fields (`{mode, region, reconcilers, broker}`) with no replacement for the dropped commit_index — see ADR-0020 *Why no `writes_since_boot` replacement* for the structural argument. US-05 Domain Examples #1 and #2 revised; cluster status AC revised. Original prose retained throughout via `~~strikethrough~~` markup so the diff is auditable. |
