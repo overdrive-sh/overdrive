@@ -598,6 +598,47 @@ will read. If the commit you are landing is otherwise unrelated, add
 `.nwave/des-config.json` to it anyway — it is the one file exempt from
 the "focused subset" discipline above.
 
+## Deletion discipline
+
+When production code becomes unused — typically after a refactor that
+collapses or replaces a subsystem — **delete the production code AND
+its tests in the same commit**. Do not gate, annotate, salvage, or
+relocate.
+
+Specifically, when you see a `dead_code` warning (or `unused_imports`,
+`unused_variables`) after a deletion pass, the warning is the signal
+that **more code needs deleting**, not that the existing code needs a
+gate or an allow. The wrong moves:
+
+- `#[cfg(test)]` on a helper that's now only called from tests.
+- Moving a helper into `mod tests { … }` to keep the same effect.
+- `#[allow(dead_code)]` to silence the warning.
+- "Rewriting" the existing tests to test something else so they keep
+  earning their keep.
+
+The right move is a single commit that removes the production code
+*and* every test that was defending it. A test exists to defend
+production code; if the production code is gone, the test is gone too.
+You cannot defend something that doesn't exist, and preserving the
+test by repurposing it just hides the deletion in the git log — a
+future reviewer reading the test name expects it to be telling them
+something about a function whose name no longer resolves.
+
+A genuinely new requirement that needs a genuinely new test (e.g. a
+convention to enforce after a sweeping deletion) is a separate matter
+— write it from scratch, with a name and assertions that describe
+the new requirement. Don't pretend the salvaged-and-rewritten old
+test was "already" testing the new thing.
+
+The deleted code does not get a stub, a deprecation comment, a
+`// removed in PR #N` marker, or a re-export shim. None of these
+forms exist in this codebase; per CLAUDE.md and
+`feedback_single_cut_greenfield_migrations.md`, removed is removed.
+
+The corollary: **a test file shrinking is the correct shape of a
+deletion PR**. If your "deletion" PR adds tests on net, double-check
+you actually deleted what you set out to delete.
+
 ## Rust patterns
 
 ### Errors
