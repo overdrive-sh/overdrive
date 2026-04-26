@@ -4,16 +4,17 @@
 //! (NO subprocess, NO `Command::new(env!("CARGO_BIN_EXE_overdrive"))`).
 //! The full WS-1 sequence:
 //!
-//!   1. `cluster::init` writes a trust triple to a tempdir.
-//!   2. `serve::run` spawns an in-process axum+rustls server on an
-//!      ephemeral port.
-//!   3. `job::submit` POSTs a `payments.toml` to the live server via
+//!   1. `serve::run` spawns an in-process axum+rustls server on an
+//!      ephemeral port AND writes the resolved-port trust triple to
+//!      disk — `serve` is the sole cert-minting site in Phase 1 per
+//!      `fix-remove-phase-1-cluster-init` (#81).
+//!   2. `job::submit` POSTs a `payments.toml` to the live server via
 //!      reqwest.
-//!   4. `alloc::status` GETs the job description + alloc rows and
+//!   3. `alloc::status` GETs the job description + alloc rows and
 //!      returns an `AllocStatusOutput` whose `spec_digest` is
 //!      BYTE-IDENTICAL to a locally-computed
 //!      `ContentHash::of(rkyv::to_bytes(&Job::from_spec(...)))`.
-//!   5. `serve_handle.shutdown()` drains in-flight connections.
+//!   4. `serve_handle.shutdown()` drains in-flight connections.
 //!
 //! THIS TEST IS THE WALKING-SKELETON GATE — flipping it GREEN marks the
 //! entire feature walking-skeleton as complete per DWD-05.
@@ -29,7 +30,6 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 
 use overdrive_cli::commands::alloc::{AllocStatusOutput, StatusArgs};
-use overdrive_cli::commands::cluster::InitArgs;
 use overdrive_cli::commands::job::SubmitArgs;
 use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
 use overdrive_cli::http_client::CliError;
@@ -42,7 +42,10 @@ use tempfile::TempDir;
 ///
 /// `data_dir` and `config_dir` are SEPARATE subdirectories of the
 /// tempdir (`data` and `conf`) per `fix-cli-cannot-reach-control-plane`
-/// Step 01-02 (RCA §WHY 4C).
+/// Step 01-02 (RCA §WHY 4C). `serve::run` is the sole cert-minting
+/// site in Phase 1 per `fix-remove-phase-1-cluster-init` (#81); the
+/// trust triple it writes at `<config_dir>/.overdrive/config` is the
+/// only config the CLI subsequently reads.
 async fn spawn_server() -> (ServeHandle, TempDir) {
     let tmp = TempDir::new().expect("tempdir");
     let bind: SocketAddr = "127.0.0.1:0".parse().expect("parse bind addr");
@@ -94,28 +97,17 @@ fn local_spec_digest(spec_toml: &str) -> String {
 
 #[tokio::test]
 async fn walking_skeleton_e2e_round_trips_byte_identical_spec_digest_via_direct_handler_calls() {
-    // Phase 0: cluster init.
-    let tmp = TempDir::new().expect("tempdir");
-    let init_output = overdrive_cli::commands::cluster::init(InitArgs {
-        config_dir: Some(tmp.path().to_path_buf()),
-        force: false,
-    })
-    .await
-    .expect("cluster::init");
-    assert!(
-        init_output.config_path.exists(),
-        "trust triple must exist on disk after init: {}",
-        init_output.config_path.display()
-    );
-
     // Phase 1: serve — in-process axum+rustls on ephemeral port.
     // `run_server` writes the resolved-port trust triple to disk, so
     // `from_config` picks up the live endpoint without further help.
+    // Per `fix-remove-phase-1-cluster-init` (#81), `serve` is the sole
+    // cert-minting site in Phase 1; there is no separate `cluster init`
+    // pre-step.
     let (handle, server_tmp) = spawn_server().await;
     let server_cfg = config_path(server_tmp.path());
 
     // Phase 2: write the job spec, then submit via handler.
-    let spec_path = write_payments_toml(tmp.path());
+    let spec_path = write_payments_toml(server_tmp.path());
     let submit_output = overdrive_cli::commands::job::submit(SubmitArgs {
         spec: spec_path,
         config_path: server_cfg.clone(),
@@ -160,18 +152,19 @@ async fn walking_skeleton_e2e_round_trips_byte_identical_spec_digest_via_direct_
         status_output.spec_digest, expected_digest,
         "WS-1: spec_digest returned via alloc::status MUST be byte-identical to \
          ContentHash::of(rkyv::to_bytes(&Job::from_spec(parsed))); this proves \
-         the whole cluster init → serve → submit → describe round-trip preserves \
+         the whole serve → submit → describe round-trip preserves \
          canonical rkyv bytes (ADR-0002 + ADR-0011). Mismatch indicates a \
          client-side second canonicalisation, a server-side re-archival, or a \
          serde-JSON-driven digest recomputation somewhere in the pipeline.",
     );
 
-    // Phase 4: clean shutdown; cluster init config persists on disk.
+    // Phase 4: clean shutdown; trust-triple config persists on disk.
     handle.shutdown().await.expect("clean shutdown");
+    let post_shutdown_cfg = config_path(server_tmp.path());
     assert!(
-        init_output.config_path.exists(),
-        "cluster init config must survive serve shutdown: {}",
-        init_output.config_path.display(),
+        post_shutdown_cfg.exists(),
+        "trust-triple config must survive serve shutdown: {}",
+        post_shutdown_cfg.display(),
     );
 }
 

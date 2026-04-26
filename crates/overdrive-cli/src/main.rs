@@ -44,13 +44,6 @@ async fn run(cli: Cli) -> Result<()> {
     use overdrive_cli::cli::{AllocCommand, ClusterCommand, Command, JobCommand, NodeCommand};
 
     match cli.command {
-        Command::Cluster(ClusterCommand::Init { force }) => {
-            let args = overdrive_cli::commands::cluster::InitArgs { config_dir: None, force };
-            let out = overdrive_cli::commands::cluster::init(args).await?;
-            println!("wrote trust triple to {}", out.config_path.display());
-            println!("endpoint: {}", out.endpoint);
-            Ok(())
-        }
         Command::Cluster(ClusterCommand::Status) => {
             let config_path = default_config_path();
             let args = overdrive_cli::commands::cluster::StatusArgs { config_path };
@@ -143,8 +136,10 @@ async fn run(cli: Cli) -> Result<()> {
 /// explicit path. Delegates to
 /// `overdrive_cli::commands::cluster::default_operator_config_path`
 /// so the read side of the CLI computes the same canonical path as
-/// the write side (`cluster::init` + `write_trust_triple`) — the two
+/// the write side (`serve::run` + `write_trust_triple`) — the two
 /// sites previously drifted (`fix-overdrive-config-path-doubled`).
+/// `serve` is the sole cert-minting site in Phase 1 per
+/// `fix-remove-phase-1-cluster-init` (#81).
 fn default_config_path() -> std::path::PathBuf {
     overdrive_cli::commands::cluster::default_operator_config_path()
 }

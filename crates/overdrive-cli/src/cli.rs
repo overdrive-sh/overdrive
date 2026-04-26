@@ -10,16 +10,25 @@
 //! argument. Clap's default behaviour does this; the test in
 //! `tests/acceptance/insecure_rejected.rs` pins that behaviour
 //! against future refactors.
+//!
+//! Per `fix-remove-phase-1-cluster-init` (#81), there is NO
+//! `cluster init` subcommand in Phase 1 — it was a Phase 5 verb
+//! shipped early that conflicted with `serve`'s own cert-mint path
+//! (RCA: `docs/analysis/root-cause-analysis-cluster-init-cert-overwritten-by-serve.md`).
+//! ADR-0010 §R5 (no cert persistence in the server process) makes
+//! Phase 1 structurally incapable of honouring an init-produced cert.
+//! The regression test in `tests/integration/cluster_init_removed.rs`
+//! pins the deletion against future re-introduction before Phase 5.
 
 use clap::{Parser, Subcommand};
 
 /// Overdrive — a next-generation workload orchestration platform.
 ///
 /// The operator config at `~/.overdrive/config` is the sole source of
-/// the control-plane endpoint. `cluster init` writes the endpoint;
-/// subsequent commands read it. There is NO `--endpoint` flag and NO
-/// `OVERDRIVE_ENDPOINT` env var — an override surface defeats the
-/// purpose of the config.
+/// the control-plane endpoint. `serve` writes the endpoint when it
+/// binds its TLS listener; subsequent commands read it. There is NO
+/// `--endpoint` flag and NO `OVERDRIVE_ENDPOINT` env var — an override
+/// surface defeats the purpose of the config.
 #[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
@@ -92,14 +101,6 @@ pub enum AllocCommand {
 
 #[derive(Debug, Subcommand)]
 pub enum ClusterCommand {
-    /// Mint a fresh ephemeral CA and write the trust triple to the
-    /// config directory (`$OVERDRIVE_CONFIG_DIR` or `~/.overdrive/`).
-    /// Re-invoking always re-mints per ADR-0010 §R4; `--force` is
-    /// reserved for future non-destructive modes.
-    Init {
-        #[arg(long)]
-        force: bool,
-    },
     Upgrade {
         #[arg(long, value_parser = ["single", "ha"])]
         mode: String,
