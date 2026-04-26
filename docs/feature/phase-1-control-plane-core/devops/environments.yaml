@@ -50,13 +50,14 @@ target_environments:
   - name: dev-local
     description: >-
       Contributor laptop — where the walking-skeleton composition of
-      `overdrive cluster init` + `overdrive serve` + `overdrive job
-      submit` + `overdrive alloc status` actually runs end-to-end. The
-      server binds 127.0.0.1:7001 with an ephemeral in-process CA
-      (ADR-0010); there is no external host, no exposed port, no TLS
-      ceremony beyond what the binary mints on first boot. Acceptance
-      tests in `crates/overdrive-cli/tests/acceptance/` (ADR-0005 layout)
-      spawn the same subprocess composition in a `tempfile::TempDir`.
+      `overdrive serve` + `overdrive job submit` + `overdrive alloc
+      status` actually runs end-to-end. The server binds 127.0.0.1:7001
+      with an ephemeral in-process CA — `serve` is the sole cert-minting
+      site in Phase 1 per ADR-0010 §R1 (Amendment 2026-04-26); there is
+      no external host, no exposed port, no TLS ceremony beyond what the
+      binary mints on every `serve` start. Acceptance tests in
+      `crates/overdrive-cli/tests/acceptance/` (ADR-0005 layout) spawn
+      the same subprocess composition in a `tempfile::TempDir`.
     platform: [macos, linux, wsl]
     runner_class: "Apple Silicon M-class MacBook Pro reference; Linux x86_64 secondary; Windows contributors via WSL2"
     preconditions:
@@ -64,7 +65,7 @@ target_environments:
       - "lefthook installed (brew install lefthook) and wired via `cargo xtask hooks install`"
       - "cargo-nextest installed — `cargo install cargo-nextest --locked` or `brew install cargo-nextest`"
       # New for this feature:
-      - "Write access to `$HOME/.overdrive/` — `cluster init` materialises the trust triple here per ADR-0010"
+      - "Write access to `$HOME/.overdrive/` — `overdrive serve` materialises the trust triple here on every start per ADR-0010 §R1 (Amendment 2026-04-26)"
       - "Free TCP port 7001 on loopback (or configurable via `overdrive serve --listen`)"
       - "tempfile::TempDir availability — acceptance tests provision throwaway data dirs; no OS-level permission required beyond tmpdir write"
     owned_by: "contributors (self-service)"
@@ -133,8 +134,9 @@ coexistence_matrix:
   - tool: "~/.overdrive/config"
     must_not_break: true
     notes: >-
-      ADR-0010's trust triple lands at `~/.overdrive/config` on first
-      `overdrive cluster init`. Acceptance tests MUST use
+      ADR-0010's trust triple lands at `~/.overdrive/config` on every
+      `overdrive serve` start (Amendment 2026-04-26 — `serve` is the
+      sole cert-minting site in Phase 1). Acceptance tests MUST use
       `XDG_CONFIG_HOME`-equivalent overrides (or a --config flag) to
       avoid clobbering a contributor's real cluster. DISTILL §2.4
       ("stale config") covers the stale-config case behaviourally.
