@@ -72,6 +72,7 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     "duplicate-evaluations-collapse",
     "broker-drain-order-is-deterministic",
     "reconciler-is-pure",
+    "intent-store-returns-caller-bytes",
 ];
 
 // -----------------------------------------------------------------------------

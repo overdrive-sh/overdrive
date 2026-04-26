@@ -283,6 +283,142 @@ pub async fn evaluate_snapshot_roundtrip(intent: &impl IntentStore) -> Invariant
 }
 
 // ---------------------------------------------------------------------------
+// IntentStoreReturnsCallerBytes
+// ---------------------------------------------------------------------------
+
+/// Evaluate the structural-regression guard from ADR-0020 §Enforcement.
+///
+/// Writes a small fixed set of `(key, value)` pairs through
+/// [`IntentStore::put`] and [`IntentStore::put_if_absent`], then reads
+/// each key back and checks the returned bytes are byte-identical to
+/// the bytes that went in. This catches any future re-introduction of
+/// inline framing (`[u64-LE-prefix || value]`) or any other on-disk
+/// row encoding that would surface a transformed value at the trait
+/// boundary.
+///
+/// The fixtures cover the failure shapes inline framing produces:
+/// * an empty value (an inline u64 prefix would surface as 8 bytes)
+/// * a value whose bytes start with what would be a plausible u64-LE
+///   prefix (an inline framing would slice off the first 8 bytes)
+/// * a long value (general round-trip witness)
+///
+/// The invariant uses a fresh tempdir-backed `LocalIntentStore` rather
+/// than the harness's per-host store so it cannot interact with state
+/// other invariants leave behind.
+pub async fn evaluate_intent_store_returns_caller_bytes() -> InvariantResult {
+    let name = "intent-store-returns-caller-bytes";
+
+    let tmp = match tempfile::tempdir() {
+        Ok(t) => t,
+        Err(err) => {
+            return result(
+                name,
+                InvariantStatus::Fail,
+                "host-0",
+                Some(format!("tempdir for intent-store probe failed: {err}")),
+            );
+        }
+    };
+    let path = tmp.path().join("caller-bytes.redb");
+    let store = match overdrive_store_local::LocalIntentStore::open(&path) {
+        Ok(s) => s,
+        Err(err) => {
+            return result(
+                name,
+                InvariantStatus::Fail,
+                "host-0",
+                Some(format!("intent store open failed: {err}")),
+            );
+        }
+    };
+
+    // Fixtures chosen to flush inline-framing regressions:
+    //   * empty value — inline framing would surface 8 prefix bytes
+    //   * 8-byte LE-looking prefix — inline framing would slice it off
+    //   * arbitrary 32-byte payload — general round-trip witness
+    let fixtures: &[(&[u8], &[u8])] = &[
+        (b"jobs/k-empty", b""),
+        (b"jobs/k-le-prefix", &[0x07, 0, 0, 0, 0, 0, 0, 0, b'a', b'b', b'c']),
+        (
+            b"jobs/k-long",
+            b"the-rain-in-spain-falls-mainly-on",
+        ),
+    ];
+
+    // Write the first two via `put`, the third via `put_if_absent` so
+    // the invariant covers both insert paths. A regression that
+    // re-introduces framing on only one path would still be caught.
+    for (k, v) in &fixtures[..2] {
+        if let Err(err) = store.put(k, v).await {
+            return result(
+                name,
+                InvariantStatus::Fail,
+                "host-0",
+                Some(format!("put({:?}) failed: {err}", String::from_utf8_lossy(k))),
+            );
+        }
+    }
+    if let Err(err) = store.put_if_absent(fixtures[2].0, fixtures[2].1).await {
+        return result(
+            name,
+            InvariantStatus::Fail,
+            "host-0",
+            Some(format!(
+                "put_if_absent({:?}) failed: {err}",
+                String::from_utf8_lossy(fixtures[2].0),
+            )),
+        );
+    }
+
+    for (k, expected) in fixtures {
+        match store.get(k).await {
+            Ok(Some(actual)) => {
+                if actual.as_ref() != *expected {
+                    return result(
+                        name,
+                        InvariantStatus::Fail,
+                        "host-0",
+                        Some(format!(
+                            "get({key:?}) returned {actual_len} bytes, expected {expected_len}: \
+                             actual={actual:?} expected={expected:?}",
+                            key = String::from_utf8_lossy(k),
+                            actual_len = actual.len(),
+                            expected_len = expected.len(),
+                            actual = actual.as_ref(),
+                            expected = expected,
+                        )),
+                    );
+                }
+            }
+            Ok(None) => {
+                return result(
+                    name,
+                    InvariantStatus::Fail,
+                    "host-0",
+                    Some(format!(
+                        "get({:?}) returned None after put",
+                        String::from_utf8_lossy(k),
+                    )),
+                );
+            }
+            Err(err) => {
+                return result(
+                    name,
+                    InvariantStatus::Fail,
+                    "host-0",
+                    Some(format!(
+                        "get({:?}) failed: {err}",
+                        String::from_utf8_lossy(k),
+                    )),
+                );
+            }
+        }
+    }
+
+    result(name, InvariantStatus::Pass, "host-0", None)
+}
+
+// ---------------------------------------------------------------------------
 // SimObservationLwwConverges
 // ---------------------------------------------------------------------------
 

@@ -70,6 +70,12 @@ pub enum Invariant {
     /// evaluator body panics until DELIVER wires the noop-heartbeat
     /// reconciler into the harness.
     ReconcilerIsPure,
+    /// `IntentStore::put(k, v)` followed by `IntentStore::get(k)`
+    /// returns `Some(v)` byte-for-byte — no framing, no prefix, no
+    /// transformation. Closes ADR-0020 §Enforcement: the structural-
+    /// regression guard against re-introducing inline row encoding
+    /// in `LocalIntentStore`.
+    IntentStoreReturnsCallerBytes,
 }
 
 impl Invariant {
@@ -89,6 +95,7 @@ impl Invariant {
         Self::DuplicateEvaluationsCollapse,
         Self::BrokerDrainOrderIsDeterministic,
         Self::ReconcilerIsPure,
+        Self::IntentStoreReturnsCallerBytes,
     ];
 
     /// The canonical kebab-case spelling of this invariant, as a static
@@ -108,6 +115,7 @@ impl Invariant {
             Self::DuplicateEvaluationsCollapse => "duplicate-evaluations-collapse",
             Self::BrokerDrainOrderIsDeterministic => "broker-drain-order-is-deterministic",
             Self::ReconcilerIsPure => "reconciler-is-pure",
+            Self::IntentStoreReturnsCallerBytes => "intent-store-returns-caller-bytes",
         }
     }
 }

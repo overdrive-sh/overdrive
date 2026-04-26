@@ -446,6 +446,14 @@ impl Harness {
                     first_host.adapters.clock.as_ref(),
                 )
             }
+            Invariant::IntentStoreReturnsCallerBytes => {
+                // ADR-0020 §Enforcement structural-regression guard.
+                // Uses an evaluator-owned tempdir-backed
+                // `LocalIntentStore` rather than the harness's per-host
+                // store so it cannot interact with state other
+                // invariants leave behind.
+                evaluators::evaluate_intent_store_returns_caller_bytes().await
+            }
         }
     }
 }

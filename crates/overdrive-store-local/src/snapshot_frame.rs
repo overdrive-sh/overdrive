@@ -8,15 +8,15 @@
 //! ```text
 //! offset 0..4      magic    = b"OSNP"           (4 bytes)
 //! offset 4..6      version  = u16 little-endian (2 bytes)
-//! offset 6..N      payload  = rkyv-archived Vec<(Vec<u8>, Vec<u8>, u64)>
-//!                             (key, value, commit_index)
+//! offset 6..N      payload  = rkyv-archived Vec<(Vec<u8>, Vec<u8>)>
+//!                             (key, value)
 //! ```
 //!
 //! The payload is the rkyv archival of the entry list, with entries
 //! sorted by key byte-lexicographically *before* archival. Sorting is
 //! what makes the framed bytes deterministic: two stores holding the
-//! same set of entries (with the same per-entry indices) produce
-//! byte-identical exports regardless of insertion order.
+//! same set of entries produce byte-identical exports regardless of
+//! insertion order.
 //!
 //! This framing is shared with the future `RaftStore`: a single-mode
 //! export must be replayable as the initial Raft log entry without
@@ -24,15 +24,15 @@
 //! frame. Any change to the magic, version encoding, or payload shape
 //! is a cross-crate breaking change and must bump the version field.
 //!
-//! # Versions
+//! # Versioning
 //!
-//! * **v1** — payload is `Vec<(Vec<u8>, Vec<u8>)>`; carries no
-//!   per-entry index. Decode-only; never produced by [`encode`].
-//!   Bytes already on disk (DR backups, prior-release exports) decode
-//!   under v1 and every entry is assigned `commit_index = 0` — the
-//!   migration semantics for `fix-commit-index-per-entry` Step 01-02.
-//! * **v2** — payload is `Vec<(Vec<u8>, Vec<u8>, u64)>`; carries
-//!   per-entry indices. This is the only version [`encode`] emits.
+//! Phase 1 ships frame v1 only — the canonical payload is
+//! `Vec<(Vec<u8>, Vec<u8>)>`. ADR-0020 §Decision §3 retired the v2
+//! frame variant that briefly carried a per-entry `commit_index`
+//! column; v2 frames written during the bug-cascade window are not
+//! externally observable (Phase 1 has not shipped) and no upgrade
+//! story is required. The single `VERSION` constant below is what
+//! [`encode`] writes and [`decode`] accepts.
 //!
 //! # Determinism guarantees
 //!
@@ -46,12 +46,10 @@
 //!
 //! # Decoder contract
 //!
-//! [`decode`] validates magic and version, dispatches on the version
-//! word to either the v1 or v2 rkyv schema, and returns
-//! `Vec<(Bytes, Bytes, u64)>` in either case. v1 inputs project the
-//! missing index column to `0`. Any mismatch — wrong magic, unknown
-//! version, truncated payload, corrupted rkyv bytes — surfaces as a
-//! typed [`FrameError`].
+//! [`decode`] validates magic and version, then deserialises the rkyv
+//! payload into `Vec<(Bytes, Bytes)>`. Any mismatch — wrong magic,
+//! unknown version, truncated payload, corrupted rkyv bytes — surfaces
+//! as a typed [`FrameError`].
 //!
 //! The concrete corruption paths — truncated payload, flipped payload
 //! bit, wrong magic, unknown version — each map to a distinct
@@ -67,20 +65,11 @@ use thiserror::Error;
 /// 0..4.
 pub const MAGIC: [u8; 4] = *b"OSNP";
 
-/// Current frame version produced by [`encode`]. Stored at offset
-/// 4..6 as a little-endian `u16`. Bumping this is a cross-crate
-/// breaking change — `RaftStore` consumes the same frame.
-///
-/// v2 carries per-entry `commit_index` values in the payload.
-pub const VERSION: u16 = 2;
-
-/// Legacy frame version. Decode-only.
-///
-/// [`decode`] accepts v1 inputs for forward compatibility with DR
-/// backups produced before `fix-commit-index-per-entry` Step 01-02
-/// landed. Every entry in a v1 frame is assigned `commit_index = 0`
-/// on decode.
-pub const VERSION_V1: u16 = 1;
+/// Current frame version produced by [`encode`] and accepted by
+/// [`decode`]. Stored at offset 4..6 as a little-endian `u16`. Bumping
+/// this is a cross-crate breaking change — `RaftStore` consumes the
+/// same frame.
+pub const VERSION: u16 = 1;
 
 /// Length of the fixed-size header (magic + version).
 pub const HEADER_LEN: usize = 6;
@@ -152,7 +141,7 @@ impl FrameError {
     }
 }
 
-/// Encode a list of entries as a framed snapshot byte slice (v2).
+/// Encode a list of entries as a framed snapshot byte slice.
 ///
 /// Sorts the entries by key byte-lexicographically before archival so
 /// that two stores holding semantically-equal contents produce
@@ -161,27 +150,23 @@ impl FrameError {
 /// responsible for producing a unique-key list, which the backing
 /// redb schema guarantees.
 ///
-/// Always emits frame v2 — the per-entry `commit_index` is part of
-/// the canonical payload. v1 frames exist only for decode-time
-/// forward compatibility (DR backups predating Step 01-02).
-///
 /// Returns [`FrameError::CorruptedPayload`] if rkyv fails to serialise
 /// the entries — the only realistic cause is allocator exhaustion on
 /// a machine close to OOM. The caller maps this onto a typed
 /// `IntentStoreError::SnapshotImport` at the trait boundary.
-pub fn encode(entries: &[(Bytes, Bytes, u64)]) -> Result<Vec<u8>, FrameError> {
-    // Clone into owned `Vec<(Vec<u8>, Vec<u8>, u64)>` so rkyv derives
+pub fn encode(entries: &[(Bytes, Bytes)]) -> Result<Vec<u8>, FrameError> {
+    // Clone into owned `Vec<(Vec<u8>, Vec<u8>)>` so rkyv derives
     // work off concrete fields. `Bytes` does not implement rkyv's
     // `Serialize` trait in the shape the frame needs, and copying is
     // negligible against the disk I/O that already happened.
-    let mut owned: Vec<(Vec<u8>, Vec<u8>, u64)> =
-        entries.iter().map(|(k, v, idx)| (k.to_vec(), v.to_vec(), *idx)).collect();
+    let mut owned: Vec<(Vec<u8>, Vec<u8>)> =
+        entries.iter().map(|(k, v)| (k.to_vec(), v.to_vec())).collect();
 
     // Deterministic ordering — byte-lexicographic on key.
     owned.sort_by(|a, b| a.0.cmp(&b.0));
 
     // Build the frame: magic + version LE + rkyv payload.
-    let mut out = Vec::with_capacity(HEADER_LEN + owned.len() * 24);
+    let mut out = Vec::with_capacity(HEADER_LEN + owned.len() * 16);
     out.extend_from_slice(&MAGIC);
     out.extend_from_slice(&VERSION.to_le_bytes());
 
@@ -194,11 +179,10 @@ pub fn encode(entries: &[(Bytes, Bytes, u64)]) -> Result<Vec<u8>, FrameError> {
 
 /// Decode a framed snapshot byte slice into its entry list.
 ///
-/// Validates the magic and version header, dispatches on the version
-/// to either the v1 or v2 rkyv schema, and returns
-/// `Vec<(Bytes, Bytes, u64)>`. v1 inputs project the missing index
-/// column to `0`. Returns a typed [`FrameError`] on any mismatch.
-pub fn decode(bytes: &[u8]) -> Result<Vec<(Bytes, Bytes, u64)>, FrameError> {
+/// Validates the magic and version header, then deserialises the rkyv
+/// payload into `Vec<(Bytes, Bytes)>`. Returns a typed [`FrameError`]
+/// on any mismatch.
+pub fn decode(bytes: &[u8]) -> Result<Vec<(Bytes, Bytes)>, FrameError> {
     if bytes.len() < HEADER_LEN {
         return Err(FrameError::TooShort { expected: HEADER_LEN, actual: bytes.len() });
     }
@@ -212,6 +196,9 @@ pub fn decode(bytes: &[u8]) -> Result<Vec<(Bytes, Bytes, u64)>, FrameError> {
     let mut ver = [0u8; 2];
     ver.copy_from_slice(&bytes[4..6]);
     let version = u16::from_le_bytes(ver);
+    if version != VERSION {
+        return Err(FrameError::UnsupportedVersion { expected: VERSION, actual: version });
+    }
 
     // rkyv requires the payload to be properly aligned (16-byte by
     // default under the `AlignedVec` allocator). The frame header is
@@ -223,31 +210,9 @@ pub fn decode(bytes: &[u8]) -> Result<Vec<(Bytes, Bytes, u64)>, FrameError> {
     let mut aligned: AlignedVec = AlignedVec::with_capacity(payload.len());
     aligned.extend_from_slice(payload);
 
-    match version {
-        VERSION_V1 => {
-            let decoded: Vec<(Vec<u8>, Vec<u8>)> =
-                rkyv::from_bytes::<_, rancor::Error>(&aligned).map_err(|e| {
-                    FrameError::CorruptedPayload { offset: HEADER_LEN, reason: e.to_string() }
-                })?;
-            // v1 frames carry no per-entry index — project to 0 so
-            // bootstrap from a pre-Step-01-02 backup produces a store
-            // whose entries all read as `commit_index = 0`. The
-            // global counter is raised to the max (also 0), so
-            // subsequent writes start at 1.
-            Ok(decoded.into_iter().map(|(k, v)| (Bytes::from(k), Bytes::from(v), 0u64)).collect())
-        }
-        VERSION => {
-            let decoded: Vec<(Vec<u8>, Vec<u8>, u64)> =
-                rkyv::from_bytes::<_, rancor::Error>(&aligned).map_err(|e| {
-                    FrameError::CorruptedPayload { offset: HEADER_LEN, reason: e.to_string() }
-                })?;
-            Ok(decoded
-                .into_iter()
-                .map(|(k, v, idx)| (Bytes::from(k), Bytes::from(v), idx))
-                .collect())
-        }
-        _ => Err(FrameError::UnsupportedVersion { expected: VERSION, actual: version }),
-    }
+    let decoded: Vec<(Vec<u8>, Vec<u8>)> = rkyv::from_bytes::<_, rancor::Error>(&aligned)
+        .map_err(|e| FrameError::CorruptedPayload { offset: HEADER_LEN, reason: e.to_string() })?;
+    Ok(decoded.into_iter().map(|(k, v)| (Bytes::from(k), Bytes::from(v))).collect())
 }
 
 #[cfg(test)]
