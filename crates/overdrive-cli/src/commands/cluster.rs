@@ -1,6 +1,12 @@
 //! `overdrive cluster status` — read the live control-plane mode,
-//! region, Raft commit index, reconciler registry, and broker counters
-//! over the operator trust triple at `<config_dir>/.overdrive/config`.
+//! region, reconciler registry, and broker counters over the operator
+//! trust triple at `<config_dir>/.overdrive/config`.
+//!
+//! Per ADR-0020 (drop `commit_index` from Phase 1) the wire shape is
+//! four fields — `{mode, region, reconcilers, broker}`. Activity-rate
+//! observability is provided by `broker.dispatched` (heartbeat
+//! reconciler ticks); the dropped commit-index counter was an
+//! in-memory `u64` and never a substitute for a real metrics endpoint.
 //!
 //! Phase 1 has exactly one cert-minting site, and it is `serve` — the
 //! `cluster init` verb that previously lived in this module was deleted
@@ -38,16 +44,15 @@ pub struct StatusArgs {
 }
 
 /// Typed output of a successful `cluster status`. Carries the control
-/// plane's self-reported mode, region, Raft commit index, the
-/// reconciler registry, and the typed broker counters per ADR-0013.
+/// plane's self-reported mode, region, reconciler registry, and typed
+/// broker counters per ADR-0013 (amended by ADR-0020 — `commit_index`
+/// dropped, no replacement).
 #[derive(Debug, Clone)]
 pub struct ClusterStatusOutput {
     /// Phase 1 control-plane mode — always `single` until HA lands.
     pub mode: String,
     /// Phase 1 region — always `local` until multi-region lands.
     pub region: String,
-    /// Monotonic `IntentStore` commit counter. Zero on a fresh store.
-    pub commit_index: u64,
     /// Alphabetically-sorted reconciler names registered with the
     /// runtime. Phase 1 must contain `noop-heartbeat` per ADR-0013 §9.
     pub reconcilers: Vec<String>,
@@ -69,12 +74,6 @@ pub async fn status(args: StatusArgs) -> Result<ClusterStatusOutput, CliError> {
     Ok(ClusterStatusOutput {
         mode: cs.mode,
         region: cs.region,
-        // ADR-0020: the API no longer surfaces a commit_index. The
-        // CLI-internal field is dead-data carried until step 01-03
-        // deletes the wire-render shape; populate with 0 so the
-        // workspace compiles and the deletion in 01-03 is purely
-        // mechanical.
-        commit_index: 0,
         reconcilers: cs.reconcilers,
         broker: cs.broker,
     })

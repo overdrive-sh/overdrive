@@ -3,8 +3,14 @@
 //! Reads a TOML job spec from disk, runs `Job::from_spec` locally for
 //! fast-fail validation, POSTs the typed `SubmitJobRequest` to the
 //! control plane, and returns a typed [`SubmitOutput`] carrying the
-//! `job_id`, derived `intent_key`, Raft `commit_index`, endpoint, and
-//! operator next-command hint.
+//! `job_id`, derived `intent_key`, canonical `spec_digest`, idempotency
+//! `outcome`, endpoint, and operator next-command hint.
+//!
+//! Per ADR-0020 (drop `commit_index` from Phase 1) the wire shape is
+//! `{job_id, spec_digest, outcome}` — the Raft commit-index field was
+//! dropped. `spec_digest` is the lowercase-hex SHA-256 of the canonical
+//! rkyv-archived `Job` bytes (ADR-0002), 64 characters; `outcome` is
+//! `IdempotencyOutcome::{Inserted, Unchanged}`.
 //!
 //! Per ADR-0011, `Job::from_spec` is THE validating constructor. The
 //! CLI runs it client-side for an immediate, operator-facing error
@@ -17,7 +23,7 @@
 
 use std::path::PathBuf;
 
-use overdrive_control_plane::api::SubmitJobRequest;
+use overdrive_control_plane::api::{IdempotencyOutcome, SubmitJobRequest};
 use overdrive_core::aggregate::{AggregateError, IntentKey, Job, JobSpecInput};
 use overdrive_core::id::JobId;
 use url::Url;
@@ -41,9 +47,13 @@ pub struct SubmitArgs {
 /// Typed output of a successful `job submit`.
 ///
 /// Carries the server's assigned `job_id`, the derived `intent_key`
-/// (`jobs/<id>`), the monotonic Raft `commit_index` at which the spec
-/// was written, the endpoint actually `POST`ed to, and the operator
+/// (`jobs/<id>`), the canonical `spec_digest`, the idempotency
+/// `outcome`, the endpoint actually `POST`ed to, and the operator
 /// next-command hint.
+///
+/// Per ADR-0020 the Raft `commit_index` field is dropped — it was an
+/// in-memory `u64` and never a substitute for an authoritative
+/// observability surface.
 ///
 /// Handlers never render output themselves; the binary wrapper passes
 /// this value to [`crate::render::job_submit_accepted`].
@@ -54,9 +64,14 @@ pub struct SubmitOutput {
     pub job_id: String,
     /// Derived intent-store key — `jobs/<job_id>` per ADR-0011 §`IntentKey`.
     pub intent_key: String,
-    /// Monotonic `IntentStore` commit counter at which the spec was
-    /// written. Strictly greater than zero on success.
-    pub commit_index: u64,
+    /// Lowercase-hex SHA-256 of the canonical rkyv-archived `Job`
+    /// bytes (ADR-0002, development.md §Hashing); 64 characters.
+    /// Stable across byte-identical resubmissions.
+    pub spec_digest: String,
+    /// Idempotency outcome echoed by the control plane. `Inserted` on
+    /// fresh submission, `Unchanged` on a byte-identical resubmission
+    /// at the same intent key per ADR-0015 §4 (amended by ADR-0020).
+    pub outcome: IdempotencyOutcome,
     /// Endpoint the POST was issued to, echoed for operator clarity.
     pub endpoint: Url,
     /// Next-command hint the operator can run to inspect allocation
@@ -113,12 +128,8 @@ pub async fn submit(args: SubmitArgs) -> Result<SubmitOutput, CliError> {
     Ok(SubmitOutput {
         job_id: resp.job_id,
         intent_key,
-        // ADR-0020: the API no longer surfaces a commit_index. The
-        // CLI-internal field is dead-data carried until step 01-03
-        // deletes the wire-render shape; populate with 0 so the
-        // workspace compiles and the deletion in 01-03 is purely
-        // mechanical.
-        commit_index: 0,
+        spec_digest: resp.spec_digest,
+        outcome: resp.outcome,
         endpoint,
         next_command,
     })

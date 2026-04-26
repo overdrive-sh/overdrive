@@ -1,5 +1,5 @@
 //! Acceptance tests for `overdrive_cli::render::{cluster_status, node_list}`
-//! — step 05-03.
+//! — step 05-03, amended at 01-03 of redesign-drop-commit-index.
 //!
 //! Rendering functions are pure string-builders — no I/O, no server
 //! dependency — so they belong in the default acceptance lane rather
@@ -9,13 +9,18 @@
 //!
 //! Acceptance coverage:
 //!   (d) `render::cluster_status` emits a multi-line string with
-//!       `Mode:`, `Region:`, `Commit index:`, `Reconcilers:`,
-//!       `Broker counters:` labels and the corresponding values.
+//!       `Mode:`, `Region:`, `Reconcilers:`, `Broker counters:` labels
+//!       and the corresponding values — four fields, NOT five. The
+//!       `Commit index:` line was dropped per ADR-0020 §Decision §4.
 //!   (e) `render::node_list` on an empty result emits a string
 //!       containing a zero-node marker AND the
 //!       `phase-1-first-workload` reference from the empty-state
 //!       message.
 //!   (f) `render::node_list` with rows emits one line per node.
+//!
+//! The walking-skeleton scenario WS-2 (`distill/test-scenarios.md`
+//! §1.2 Amendment 2026-04-26 ADR-0020) names this output shape: four
+//! fields, broker.dispatched proves the reconciler ran.
 
 use overdrive_cli::commands::cluster::ClusterStatusOutput;
 use overdrive_cli::commands::node::NodeListOutput;
@@ -25,28 +30,35 @@ fn fixture_cluster_status_output() -> ClusterStatusOutput {
     ClusterStatusOutput {
         mode: "single".to_string(),
         region: "local".to_string(),
-        commit_index: 42,
         reconcilers: vec!["noop-heartbeat".to_string()],
         broker: BrokerCountersBody { queued: 7, cancelled: 2, dispatched: 5 },
     }
 }
 
 // -------------------------------------------------------------------
-// (d) render::cluster_status contains all field labels + values
+// (d) render::cluster_status — four-field shape, no Commit-index line
 // -------------------------------------------------------------------
 
 #[test]
-fn render_cluster_status_contains_all_field_labels() {
+fn cluster_status_renders_four_fields_no_commit_index_line() {
     let out = fixture_cluster_status_output();
     let rendered = overdrive_cli::render::cluster_status(&out);
 
-    // Labels — pinned keys the operator scans visually.
-    for label in ["Mode:", "Region:", "Commit index:", "Reconcilers:", "Broker counters:"] {
+    // Four expected labels, in order — pinned keys the operator scans.
+    for label in ["Mode:", "Region:", "Reconcilers:", "Broker counters:"] {
         assert!(
             rendered.contains(label),
             "rendered cluster-status must contain label `{label}`; got:\n{rendered}",
         );
     }
+
+    // The `Commit index:` line was dropped per ADR-0020 §Decision §4 —
+    // `ClusterStatus` is now `{mode, region, reconcilers, broker}`. A
+    // re-introduction of the line is a wire-shape regression.
+    assert!(
+        !rendered.contains("Commit index"),
+        "rendered cluster-status MUST NOT contain a `Commit index` line per ADR-0020; got:\n{rendered}",
+    );
 
     // Values — prove values are rendered, not just labels.
     assert!(
@@ -56,10 +68,6 @@ fn render_cluster_status_contains_all_field_labels() {
     assert!(
         rendered.contains("local"),
         "rendered cluster-status must contain region value; got:\n{rendered}",
-    );
-    assert!(
-        rendered.contains("42"),
-        "rendered cluster-status must contain commit_index value; got:\n{rendered}",
     );
     assert!(
         rendered.contains("noop-heartbeat"),

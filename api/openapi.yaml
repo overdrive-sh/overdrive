@@ -39,8 +39,17 @@ paths:
       tags:
       - cluster
       summary: |-
-        `GET /v1/cluster/info` — mode, region, `commit_index`, reconciler
-        registry, broker counters.
+        `GET /v1/cluster/info` — mode, region, reconciler registry, broker
+        counters.
+      description: |-
+        Post-ADR-0020 the response is the four-field shape
+        `{mode, region, reconcilers, broker}`. The `commit_index` field is
+        dropped wholesale (no rename to `writes_since_boot` — that
+        preserves the same race conditions and reset-on-restart gap under
+        a different name; see ADR-0020 §Considered alternatives §D).
+        Activity-rate observability is provided by `broker.dispatched`
+        plus the `reconcilers` list; cluster-level commit-rate signals
+        belong on Phase 5's metrics endpoint.
       operationId: cluster_status
       responses:
         '200':
@@ -61,26 +70,30 @@ paths:
       - jobs
       summary: |-
         `POST /v1/jobs` — validate, archive via rkyv, commit through the
-        intent store, return `(job_id, commit_index)`.
+        intent store, return `{job_id, spec_digest, outcome}`.
       description: |-
-        Idempotency contract (ADR-0015 §4):
+        Idempotency contract (ADR-0015 §4 amended by ADR-0020):
 
+        * A spec whose rkyv-archived bytes are absent at the canonical
+          `jobs/<JobId>` key returns HTTP 200 with `outcome =
+          IdempotencyOutcome::Inserted` and the canonical `spec_digest`
+          (`PutOutcome::Inserted` path).
         * A spec whose rkyv-archived bytes are byte-identical to what is
-          already stored at the canonical `jobs/<JobId>` key returns HTTP
-          200 with the *original* `commit_index` — the index of the prior
-          write at this key, surfaced via `PutOutcome::KeyExists`.
+          already stored at the same key returns HTTP 200 with `outcome =
+          IdempotencyOutcome::Unchanged` and the same `spec_digest`. No
+          write occurred (`PutOutcome::KeyExists { existing }` path with
+          byte equality).
         * A spec whose rkyv-archived bytes DIFFER from what is stored at
           the same key returns HTTP 409 Conflict with an `ErrorBody`.
-        * An empty key returns a new commit with `commit_index` carrying
-          the per-entry index assigned inside the write transaction
-          (`PutOutcome::Inserted::commit_index`).
+          Conflict is an HTTP-status concern; the `outcome` field is
+          absent on the 409 path (ADR-0015 §4 amendment).
 
-        Per-entry `commit_index` semantics (`fix-commit-index-per-entry`
-        RCA §WHY 5B): the index returned to the client is the index at
-        which *this* write committed, not the live store-wide cursor at
-        response-construction time. Concurrent committers for *different*
-        keys cannot drift this value — the bump and the response read are
-        atomic with the write transaction.
+        `spec_digest` is the lowercase-hex SHA-256 of the canonical
+        rkyv-archived bytes (ADR-0002, development.md §Hashing). On the
+        `Unchanged` path the digest is computed once over the candidate
+        bytes and used both for the byte-equality check (against the
+        `existing` bytes returned by `PutOutcome::KeyExists`) and for the
+        response body.
       operationId: submit_job
       requestBody:
         content:
@@ -134,13 +147,9 @@ paths:
         which `to_response` renders as HTTP 404 with an `ErrorBody { error:
         "not_found", ... }`.
 
-        Per-entry `commit_index` semantics (`fix-commit-index-per-entry`
-        RCA §WHY 5A): the `commit_index` returned in the
-        `JobDescription` body is the per-entry index at which *this* job
-        was written — surfaced by `IntentStore::get` as the second
-        element of the returned tuple — NOT the live store-wide cursor at
-        describe-time. Subsequent writes to *other* keys do not drift the
-        describe response.
+        Post-ADR-0020: the response shape is `{spec, spec_digest}` only.
+        The `commit_index` field is dropped wholesale — there is no
+        store-wide nor per-entry index on the wire (see ADR-0020).
       operationId: describe_job
       parameters:
       - name: id
@@ -259,35 +268,25 @@ components:
       description: |-
         Response for `GET /v1/cluster/info`.
 
-        Carries mode, region, `commit_index`, the reconciler registry, and
-        the broker counters per ADR-0013 and US-04 AC.
+        Carries mode, region, the reconciler registry, and the broker
+        counters per ADR-0013 and US-04 AC (amended by ADR-0020 — the
+        `commit_index` field is dropped, no replacement).
 
-        **Store-wide cursor semantics.** `commit_index` here is the
-        store-wide commit counter — total successful writes since the
-        process started, advancing on every `put` / `delete` / `txn`
-        commit. This is intentionally NOT a per-entry index: aggregate
-        observability ("how many writes has this control plane committed?")
-        is the use case, not "what index was assigned to a specific
-        entry?".
-
-        Distinct from [`SubmitJobResponse::commit_index`] and
-        [`JobDescription::commit_index`], which carry per-entry indices —
-        the index at which a specific job's bytes were written. Use those
-        for optimistic-concurrency / watch-resume / audit-ordering against
-        a single entry; use this for cluster-level commit-rate signals.
+        Activity-rate observability is provided by `broker.dispatched`
+        (heartbeat reconciler ticks) plus the `reconcilers` list (the
+        "did the runtime register?" wiring witness). A dedicated metrics
+        endpoint covers cluster-level commit-rate signals starting in
+        Phase 5; the dropped in-memory counter was not a substitute for
+        it. See ADR-0020 §Considered alternatives §D for the full
+        rationale.
       required:
       - mode
       - region
-      - commit_index
       - reconcilers
       - broker
       properties:
         broker:
           $ref: '#/components/schemas/BrokerCountersBody'
-        commit_index:
-          type: integer
-          format: int64
-          minimum: 0
         mode:
           type: string
         reconcilers:
@@ -317,36 +316,37 @@ components:
           - 'null'
         message:
           type: string
+    IdempotencyOutcome:
+      type: string
+      description: |-
+        Outcome of an idempotent `POST /v1/jobs` submission.
+
+        Distinguishes "your spec landed fresh" from "your spec was already
+        there." Conflict (different spec at same key) is an HTTP-status
+        concern (409), never an enumeration value here — see ADR-0015 §4
+        amendment via ADR-0020.
+
+        Wire shape: `"inserted"` | `"unchanged"` (lowercase JSON via
+        `#[serde(rename_all = "lowercase")]`).
+      enum:
+      - inserted
+      - unchanged
     JobDescription:
       type: object
       description: |-
-        Response for `GET /v1/jobs/{id}`. Carries the re-hydrated spec, the
-        commit index at which it was written, and the canonical spec
-        digest per ADR-0014 and US-03 AC.
-
-        **Per-entry semantics.** `commit_index` here is the index at which
-        THIS specific job's bytes were committed — read alongside the
-        stored value via `IntentStore::get`'s `(bytes, commit_index)`
-        tuple. Stable across the job's lifetime: subsequent writes to
-        other keys do NOT advance the value returned here. Equal to the
-        `commit_index` the original `POST /v1/jobs` returned for this
-        `job_id`.
-
-        Distinct from [`ClusterStatus::commit_index`], which is the
-        store-wide commit counter — see that field's docstring.
+        Response for `GET /v1/jobs/{id}`. Carries the re-hydrated spec and
+        the canonical spec digest per ADR-0014 and US-03 AC (amended by
+        ADR-0020).
 
         `spec` is typed (`JobSpecInput`), never `serde_json::Value` — the
         CLI parses this response into a concrete type rather than a value
-        bag.
+        bag. `spec_digest` equals the lowercase-hex SHA-256 of the
+        rkyv-archived bytes pulled out of the `IntentStore` — i.e. the
+        same value the original `POST /v1/jobs` returned for this `job_id`.
       required:
       - spec
-      - commit_index
       - spec_digest
       properties:
-        commit_index:
-          type: integer
-          format: int64
-          minimum: 0
         spec:
           $ref: '#/components/schemas/JobSpecInput'
         spec_digest:
@@ -424,35 +424,35 @@ components:
     SubmitJobResponse:
       type: object
       description: |-
-        Response for `POST /v1/jobs`. Carries `job_id` + `commit_index` per
-        journey step 1 and ADR-0008.
+        Response for `POST /v1/jobs`. Carries `job_id`, the canonical
+        `spec_digest`, and the idempotency `outcome` per ADR-0008 and
+        ADR-0020.
 
-        **Per-entry semantics.** `commit_index` here is the index at which
-        THIS submission's bytes were written — captured atomically inside
-        the `IntentStore` write transaction via `PutOutcome::Inserted` /
-        `PutOutcome::KeyExists`. A byte-identical resubmission returns the
-        index of the original insert (idempotent); a different spec at the
-        same key returns 409 Conflict without a fresh index. This is the
-        same per-entry value [`JobDescription::commit_index`] returns for
-        the same job, regardless of how many other writes have landed
-        since.
+        Idempotency contract (ADR-0015 §4 amended by ADR-0020):
 
-        Distinct from [`ClusterStatus::commit_index`], which is the
-        store-wide commit counter — see that field's docstring.
+        * Fresh insert → `outcome = IdempotencyOutcome::Inserted`, HTTP 200.
+        * Byte-identical resubmission of the same spec at the same key →
+          `outcome = IdempotencyOutcome::Unchanged`, HTTP 200. No write
+          occurred; `spec_digest` is stable across N retries.
+        * Different spec at the same key → HTTP 409 Conflict, no `outcome`
+          field on the wire (conflict is an HTTP-status concern, never an
+          enum value — see ADR-0015 §4 amendment via ADR-0020).
 
         `job_id` is rendered as a `String` at the wire boundary; the server
         converts back to `overdrive_core::id::JobId` in handlers.
-
-        [`JobDescription::commit_index`]: JobDescription::commit_index
+        `spec_digest` is the lowercase-hex SHA-256 of the canonical
+        rkyv-archived `Job` bytes (ADR-0002, development.md §Hashing); 64
+        characters.
       required:
       - job_id
-      - commit_index
+      - spec_digest
+      - outcome
       properties:
-        commit_index:
-          type: integer
-          format: int64
-          minimum: 0
         job_id:
+          type: string
+        outcome:
+          $ref: '#/components/schemas/IdempotencyOutcome'
+        spec_digest:
           type: string
 tags:
 - name: jobs

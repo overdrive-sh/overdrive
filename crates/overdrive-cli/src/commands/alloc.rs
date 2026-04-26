@@ -1,10 +1,14 @@
 //! `overdrive alloc status --job <id>`.
 //!
-//! Reads the canonical `spec_digest` + `commit_index` from the control
-//! plane's `JobDescription`, counts the allocations reported by
+//! Reads the canonical `spec_digest` from the control plane's
+//! `JobDescription`, counts the allocations reported by
 //! `GET /v1/allocs`, and returns a typed [`AllocStatusOutput`] with an
 //! explicit empty-state message pointing at the
 //! `phase-1-first-workload` onboarding step.
+//!
+//! Per ADR-0020 (drop `commit_index` from Phase 1) the wire shape of
+//! `JobDescription` is `{spec, spec_digest}` — the Raft commit-index
+//! field was dropped.
 //!
 //! Per ADR-0002 + handler contract (`describe_job`): `spec_digest` is
 //! SHA-256 of the exact rkyv bytes the server wrote to the
@@ -42,10 +46,11 @@ pub struct StatusArgs {
 ///
 /// Carries the canonical `spec_digest` (byte-identical to a local
 /// `ContentHash::of(rkyv::to_bytes(&Job::from_spec(parsed)))` compute
-/// — that's the walking-skeleton guarantee), the `commit_index` the
-/// spec was written at, the number of live allocations for the job,
-/// and an operator-facing empty-state message referencing
-/// `phase-1-first-workload` when `allocations_total == 0`.
+/// — that's the walking-skeleton guarantee), the number of live
+/// allocations for the job, and an operator-facing empty-state message
+/// referencing `phase-1-first-workload` when `allocations_total == 0`.
+///
+/// Per ADR-0020 the Raft `commit_index` field is dropped.
 #[derive(Debug, Clone)]
 pub struct AllocStatusOutput {
     /// Canonical job id as echoed by the control plane.
@@ -54,9 +59,6 @@ pub struct AllocStatusOutput {
     /// per ADR-0002. Opaque to the CLI — the CLI never recomputes this
     /// client-side, because a second canonicalisation would drift.
     pub spec_digest: String,
-    /// Monotonic `IntentStore` commit counter at which the spec was
-    /// written. Strictly greater than zero on success.
-    pub commit_index: u64,
     /// Number of allocation rows in the observation store whose
     /// `job_id` matches [`Self::job_id`]. Phase 1 is always zero — the
     /// scheduler + driver land in `phase-1-first-workload`.
@@ -88,7 +90,7 @@ pub async fn status(args: StatusArgs) -> Result<AllocStatusOutput, CliError> {
     let client = ApiClient::from_config(&args.config_path)?;
 
     // 1. Establish the job exists (and pull the authoritative
-    //    spec_digest + commit_index). Unknown job → HttpStatus 404.
+    //    spec_digest). Unknown job → HttpStatus 404.
     let description = client.describe_job(&args.job).await?;
 
     // 2. Count the allocations for this job. Phase 1 reads an empty
@@ -111,12 +113,6 @@ pub async fn status(args: StatusArgs) -> Result<AllocStatusOutput, CliError> {
     Ok(AllocStatusOutput {
         job_id: args.job,
         spec_digest: description.spec_digest,
-        // ADR-0020: the API no longer surfaces a commit_index. The
-        // CLI-internal field is dead-data carried until step 01-03
-        // deletes the wire-render shape; populate with 0 so the
-        // workspace compiles and the deletion in 01-03 is purely
-        // mechanical.
-        commit_index: 0,
         allocations_total,
         empty_state_message,
     })
