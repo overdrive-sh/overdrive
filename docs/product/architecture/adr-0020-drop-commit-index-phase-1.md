@@ -2,9 +2,12 @@
 
 ## Status
 
-Proposed. 2026-04-26. Transitions to Accepted on DELIVER completion
-(per project ADR convention — Status flips when the change-set lands
-on `main`, not when the design is approved).
+Accepted. 2026-04-26. (Originally Proposed 2026-04-26; flipped to
+Accepted on DELIVER completion per project ADR convention — Status
+flips when the change-set lands on `main`, not when the design is
+approved. The Phase 1 surgery — wire shape, store, tests, OpenAPI,
+ADR amendments, brief edits — landed on `main` in the
+`redesign-drop-commit-index` feature commits 01-01 through 01-05.)
 
 Amends:
 

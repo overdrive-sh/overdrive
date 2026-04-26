@@ -2,7 +2,38 @@
 
 ## Status
 
-Accepted. 2026-04-23.
+Accepted. 2026-04-23. **Endpoint table amended 2026-04-26 by ADR-0020**
+(`commit_index` field dropped from `POST /v1/jobs`, `GET /v1/jobs/{id}`,
+and `GET /v1/cluster/info` response shapes; replaced by `spec_digest`
+plus a typed `IdempotencyOutcome` on submit, and by a four-field
+cluster-status shape that drops the counter — see Amendment 2026-04-26
+(ADR-0020) below).
+
+> **Amendment 2026-04-26 (ADR-0020) — `commit_index` dropped from
+> Phase 1.** The endpoint table in *Decision* below is revised. The
+> three response shapes that previously carried `commit_index` are
+> revised to the post-ADR-0020 wire shape:
+>
+> - `POST /v1/jobs` returns `{job_id, spec_digest, outcome}`. The
+>   `outcome` field is the typed `IdempotencyOutcome` enum
+>   (`Inserted` | `Unchanged`) per ADR-0020 *Decision* §1; the
+>   `spec_digest` is the rkyv-archive SHA-256 of the canonical Job
+>   spec per ADR-0020 *Decision* §2. There is no per-write counter
+>   in any submit response.
+> - `GET /v1/jobs/{id}` returns `{spec, spec_digest}`. The `spec`
+>   carries the full Job; the `spec_digest` is the same content hash
+>   the submit handler returned. There is no `commit_index` field.
+> - `GET /v1/cluster/info` returns `{mode, region, reconcilers,
+>   broker}` — four fields. The cluster-status response no longer
+>   carries a fifth `commit_index` field; the wiring witness for the
+>   walking skeleton is `broker.dispatched > 0` plus the
+>   `reconcilers` registry list (per ADR-0020 *Decision* §4).
+>
+> The `/v1/allocs` and `/v1/nodes` endpoints are unaffected. The
+> `409 Conflict` semantics remain (different spec at an occupied
+> intent-key) — the change is to the success-row shape, not to the
+> conflict-row shape (see ADR-0015 *Amendment 2026-04-26 (ADR-0020)*).
+> Source: `docs/product/architecture/adr-0020-drop-commit-index-phase-1.md`.
 
 ## Context
 
@@ -51,10 +82,11 @@ with HTTP/1.1 fallback (ALPN `http/1.1`), routes under the `/v1` prefix.**
   under `/v1`.
 - Binding: `https://127.0.0.1:7001` default, overridable by flag.
 - Endpoints (walking-skeleton set; exact shapes fixed by the OpenAPI
-  schema per ADR-0009):
-  - `POST /v1/jobs` — SubmitJob
-  - `GET /v1/jobs/{id}` — DescribeJob
-  - `GET /v1/cluster/info` — ClusterStatus
+  schema per ADR-0009; revised 2026-04-26 by ADR-0020 — see Amendment
+  block in *Status* above):
+  - `POST /v1/jobs` — SubmitJob; returns `{job_id, spec_digest, outcome}`
+  - `GET /v1/jobs/{id}` — DescribeJob; returns `{spec, spec_digest}`
+  - `GET /v1/cluster/info` — ClusterStatus; returns `{mode, region, reconcilers, broker}`
   - `GET /v1/allocs` — AllocStatus
   - `GET /v1/nodes` — NodeList
 
@@ -150,3 +182,4 @@ streaming (whitepaper §11).
 - `docs/feature/phase-1-control-plane-core/slices/slice-2-rest-service-surface.md`
 - ADR-0009 (OpenAPI schema derivation)
 - ADR-0010 (Phase 1 TLS bootstrap)
+- ADR-0020 (Drop `commit_index` from Phase 1 — endpoint-table amendment 2026-04-26)

@@ -2,7 +2,34 @@
 
 ## Status
 
-Accepted. 2026-04-23.
+Accepted. 2026-04-23. **§4 *Status-code matrix* idempotent-success row
+amended 2026-04-26 by ADR-0020** (the post-prose paragraph that read
+"byte-identical re-submission of the same spec at the same intent key
+is idempotent success (200 OK, same `commit_index` as the original)"
+is revised to read "200 OK, same `spec_digest` as the original, with
+`outcome: IdempotencyOutcome::Unchanged`"; the 409 Conflict row is
+unaffected — see Amendment 2026-04-26 (ADR-0020) below).
+
+> **Amendment 2026-04-26 (ADR-0020) — `commit_index` dropped from
+> Phase 1.** §4 *Status-code matrix* — the idempotent-success row
+> previously expressed the byte-identical re-submission contract as
+> "200 OK, same `commit_index` as the original." With `commit_index`
+> removed from the wire shape per ADR-0020 *Decision* §1/§2/§4, the
+> equivalence relation that defines "same" is now the rkyv-archive
+> SHA-256 content hash, and the typed signal that distinguishes
+> insert from idempotent replay is `IdempotencyOutcome::Unchanged`
+> on the response body. The revised row reads:
+>
+> > "200 OK, same `spec_digest` as the original, with `outcome:
+> > IdempotencyOutcome::Unchanged`."
+>
+> The 409 Conflict row is unaffected — the conflict semantics
+> ("different spec at an occupied intent-key") do not depend on the
+> success-row shape; the read-then-write conflict-detection pattern
+> the post-prose paragraph describes is unchanged. The `IntentStore`
+> trait surface that backs this contract is the
+> `IntentStore::put_if_absent` method per ADR-0020 *Decision* §1.
+> Source: `docs/product/architecture/adr-0020-drop-commit-index-phase-1.md`.
 
 ## Context
 
@@ -148,10 +175,12 @@ upgrade to `application/problem+json` when the additional fields land.
 | Infra failure (store I/O, etc.) | `500 Internal Server Error` | `"internal"` |
 | Server not running | transport error (no HTTP response at all) | — (CLI renders the transport error) |
 
-Per Slice 3 AC: **byte-identical re-submission of the same spec at the
-same intent key is idempotent success (200 OK, same commit_index as
-the original)**. A 409 fires only when a re-submission presents a
-*different* spec at a key already occupied.
+Per Slice 3 AC (revised 2026-04-26 by ADR-0020 — see Amendment block
+in *Status* above): **byte-identical re-submission of the same spec at
+the same intent key is idempotent success (200 OK, same `spec_digest`
+as the original, with `outcome: IdempotencyOutcome::Unchanged`)**. A
+409 fires only when a re-submission presents a *different* spec at a
+key already occupied.
 
 Note: Phase 1's `LocalStore::put` is last-write-wins — there is no
 built-in "reject if a different value is present" surface. The Phase 1
@@ -236,4 +265,5 @@ The CLI's error-rendering AC depends on distinguishing 404 from 500.
 - `docs/feature/phase-1-control-plane-core/discuss/user-stories.md`
   US-02, US-03
 - `docs/feature/phase-1-control-plane-core/slices/slice-3-api-handlers-intent-commit.md`
+- ADR-0020 (Drop `commit_index` from Phase 1 — §4 idempotent-success row amendment 2026-04-26)
 - RFC 7807 (`application/problem+json`) — future upgrade path

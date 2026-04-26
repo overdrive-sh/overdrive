@@ -412,9 +412,9 @@ per ADR-0009):
 
 | Method + path | Handler | Purpose |
 |---|---|---|
-| `POST /v1/jobs` | SubmitJob | Submit a Job spec; returns `{job_id, commit_index}` |
-| `GET /v1/jobs/{id}` | DescribeJob | Read back a committed Job; returns `{spec, commit_index, spec_digest}` |
-| `GET /v1/cluster/info` | ClusterStatus | Mode / region / commit_index / reconciler registry / broker counters |
+| `POST /v1/jobs` | SubmitJob | Submit a Job spec; returns `{job_id, spec_digest, outcome}` |
+| `GET /v1/jobs/{id}` | DescribeJob | Read back a committed Job; returns `{spec, spec_digest}` |
+| `GET /v1/cluster/info` | ClusterStatus | Mode / region / reconciler registry / broker counters |
 | `GET /v1/allocs` | AllocStatus | ObservationStore read on `alloc_status` (Phase 1: zero rows) |
 | `GET /v1/nodes` | NodeList | ObservationStore read on `node_health` (Phase 1: zero rows) |
 
@@ -596,9 +596,10 @@ Status-code matrix:
 | Infra failure | `500` | `"internal"` |
 
 Byte-identical re-submission of the same spec is idempotent success
-(200 OK, same commit_index). 409 fires only on a *different* spec at
-an occupied key — the handler implements idempotency as a read-then-write
-pattern against `LocalStore`.
+(200 OK, same `spec_digest`, with `outcome: IdempotencyOutcome::Unchanged`
+per ADR-0020). 409 fires only on a *different* spec at an occupied
+key — the handler implements idempotency as a read-then-write pattern
+against `LocalStore` via `IntentStore::put_if_absent`.
 
 Body shape is bespoke `{error, message, field}` — deliberately a
 **subset compatible with RFC 7807** so that `type: Uri` and `instance: Uri`
@@ -661,7 +662,7 @@ C4Container
 
   Container_Boundary(workspace, "Overdrive workspace") {
     Container(core, "overdrive-core", "Rust crate (class: core)", "Ports + newtypes + aggregates (Job/Node/Allocation) + Reconciler trait + Action enum + IntentKey")
-    Container(store_local, "overdrive-store-local", "Rust crate (class: adapter-host)", "LocalStore (redb-backed IntentStore + commit_index) + LocalObservationStore (redb-backed single-writer ObservationStore)")
+    Container(store_local, "overdrive-store-local", "Rust crate (class: adapter-host)", "LocalStore (redb-backed IntentStore with put_if_absent semantics per ADR-0020) + LocalObservationStore (redb-backed single-writer ObservationStore)")
     Container(sim, "overdrive-sim", "Rust crate (class: adapter-sim)", "Sim* adapters + turmoil harness + invariant catalogue; SimObservationStore is used by DST only — not a runtime dep of the control plane")
     Container(ctrl, "overdrive-control-plane", "Rust crate (class: adapter-host)", "Axum router + rustls TLS + ReconcilerRuntime + EvaluationBroker + handler error mapping")
     Container(xtask, "xtask", "Rust binary (class: binary)", "cargo xtask dst / dst-lint / openapi-gen / openapi-check")

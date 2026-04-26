@@ -89,7 +89,7 @@ let output = overdrive_cli::commands::job::submit(
     &SimClock::new(),
     &SimTransport::new(),
 ).await?;
-assert_eq!(output.commit_index, 1);
+assert_eq!(output.outcome, IdempotencyOutcome::Inserted);
 assert_eq!(output.spec_digest, expected_digest);
 ```
 
