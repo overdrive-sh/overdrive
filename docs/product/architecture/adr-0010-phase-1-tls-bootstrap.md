@@ -6,8 +6,15 @@ Accepted. 2026-04-23. **§R2 superseded 2026-04-24 by ADR-0019**
 (on-disk format YAML → TOML; every other aspect of R2 — field names,
 context model, `current-context` pointer, base64 PEM embedding,
 `OVERDRIVE_CONFIG` env override, kubeconfig-shape ergonomics,
-Phase 5 forward-compat — preserved bit-for-bit). R1, R3, R4, R5
-remain in force.
+Phase 5 forward-compat — preserved bit-for-bit). **§R1 and §R4
+amended 2026-04-26** (Phase 1 has exactly one cert-minting site, and
+it is `overdrive serve`; the `cluster init` arm of the original §R1
+disjunction and the `cluster init --force` recovery clause in §R4 are
+removed from Phase 1; both return in Phase 5 with the persistent CA
+and operator-cert ceremony they require — see Amendment 2026-04-26
+below and GH #81). §R3, §R5 remain in force as originally
+written; §R5 in particular is the constraint that *required* the
+amendment.
 
 ## Context
 
@@ -40,11 +47,9 @@ exists.**
 
 Concretely:
 
-### R1 — Ephemeral in-process CA at `overdrive cluster init`
+### R1 — Ephemeral in-process CA at `overdrive serve` (amended 2026-04-26)
 
-On first `overdrive cluster init` (or its Phase 1 equivalent entry
-point — the server binary's startup path), the binary generates
-in-memory:
+On every `overdrive serve` start, the binary generates in-memory:
 
 - A self-signed CA (P-256, `rcgen` — already in workspace).
 - A server leaf certificate signed by that CA, presented on
@@ -53,8 +58,18 @@ in-memory:
   operator through `~/.overdrive/config`.
 
 The CA private key lives in process memory only. No persistence.
-Process stop discards the CA. Re-starting `cluster init` (or
-`--force`) re-mints everything.
+Process stop discards the CA. Re-starting `overdrive serve` re-mints
+everything.
+
+**Phase 1 has exactly one cert-minting site, and it is `serve`.**
+The original §R1 named `cluster init` *or* the server startup path
+as triggers; that disjunction was a Phase 5 ceremony shipped early
+and is removed (commit `d294fb8`, RCA
+`docs/analysis/root-cause-analysis-cluster-init-cert-overwritten-by-serve.md`).
+`cluster init` returns in Phase 5 with the persistent CA, operator
+SPIFFE IDs, Corrosion-gossiped revocation, and the Talos two-file
+operatorconfig/machineconfig split that give the verb its meaning
+(GH #81). See *Amendment 2026-04-26* below.
 
 ### R2 — Base64-embedded trust triple in `~/.overdrive/config`
 
@@ -86,12 +101,19 @@ The server leaf cert carries SANs:
 CN is set to `<hostname>` for older-tooling compatibility but is
 not load-bearing — rustls verifies via SAN.
 
-### R4 — No `--insecure` flag
+### R4 — No `--insecure` flag (amended 2026-04-26)
 
 No CLI flag bypasses server-cert verification. There is no pre-PKI
 window (the CA is minted before `bind()` is called), so the flag
-would have nothing to justify its existence. Recovery on lost client
-cert is `overdrive cluster init --force`, not a verification-skip.
+would have nothing to justify its existence. Recovery on lost
+client cert in Phase 1 is to **stop and restart `overdrive serve`** —
+the next start mints a fresh trust triple and writes it to
+`~/.overdrive/config`, which is the only durable artefact (§R5).
+The original §R4 recovery clause named
+`overdrive cluster init --force`; that verb no longer exists in
+Phase 1 (commit `d294fb8`, RCA
+`docs/analysis/root-cause-analysis-cluster-init-cert-overwritten-by-serve.md`)
+and the `--force` reservation moves with it to Phase 5 (GH #81).
 
 ### R5 — Defer rotation / revocation / roles / persistence to Phase 5
 
@@ -228,3 +250,99 @@ for `127.0.0.1` requires DNS-01 or a local ACME server like
   indentation-sensitive misparse) eliminated by construction. R1,
   R3, R4, R5 unchanged. See ADR-0019 for full rationale and
   considered alternatives (including JSON).
+- 2026-04-26 — §R1 and §R4 amended in place to encode that Phase 1
+  has exactly one cert-minting site, and it is `overdrive serve`.
+  See *Amendment 2026-04-26* below for full rationale, before/after
+  R-clause text, and cross-references.
+
+## Amendment 2026-04-26 — `cluster init` removed from Phase 1; `serve` is the sole minter
+
+### Date
+
+2026-04-26.
+
+### Rationale (one paragraph, dominant root cause B5 from the RCA)
+
+`overdrive cluster init` and `overdrive serve` both unconditionally
+minted a fresh ephemeral CA and wrote a trust triple to
+`<config_dir>/.overdrive/config`. With both targeting the production
+default `$HOME/.overdrive/`, `serve` ran second and overwrote the
+trust triple `cluster init` had just produced — operators were left
+with the now-stale CA and handshakes failed. The original §R1
+disjunction (`cluster init` *or* server startup as triggers for
+minting) was a Phase 5 / Talos-shape ceremony shipped early; §R5
+(*"no cert persistence on disk in the server process"*) is precisely
+what *prevents* Phase 1 from honouring the operator artefact
+`cluster init` produces — every `serve` boot must re-mint, and the
+operator's `cluster init`-issued cert is unsignable by the next-boot
+server. Backwards-chain validation (RCA §6) falsified every
+"make serve consume an existing triple" / "split mint from
+endpoint-record" / "Talos two-file split" remediation under Phase 1
+constraints; only deletion-in-Phase-1 + Phase-5-reintroduction
+passed. §R5 is the constraint that *required* the amendment, not a
+defect — it is preserved unchanged. Full backwards-chain analysis
+in `docs/analysis/root-cause-analysis-cluster-init-cert-overwritten-by-serve.md`.
+
+### R-clause changes
+
+**§R1 — before** (original 2026-04-23 text):
+
+> *On first `overdrive cluster init` (or its Phase 1 equivalent
+> entry point — the server binary's startup path), the binary
+> generates in-memory: A self-signed CA […] A server leaf
+> certificate […] A client leaf certificate […] Re-starting
+> `cluster init` (or `--force`) re-mints everything.*
+
+**§R1 — after** (this amendment):
+
+> *On every `overdrive serve` start, the binary generates in-memory:
+> A self-signed CA […] A server leaf certificate […] A client leaf
+> certificate […] Re-starting `overdrive serve` re-mints everything.*
+> *Phase 1 has exactly one cert-minting site, and it is `serve`.*
+
+**§R4 — before** (original 2026-04-23 text):
+
+> *Recovery on lost client cert is `overdrive cluster init --force`,
+> not a verification-skip.*
+
+**§R4 — after** (this amendment):
+
+> *Recovery on lost client cert in Phase 1 is to stop and restart
+> `overdrive serve` — the next start mints a fresh trust triple and
+> writes it to `~/.overdrive/config`, which is the only durable
+> artefact (§R5).*
+
+§R3 (multi-SAN cert) and §R5 (defer rotation/revocation/roles/
+persistence to Phase 5) are unchanged. The Overdrive-specific
+divergence from Talos (no role in cert O-field) is unchanged.
+
+### Phase 5 reintroduction
+
+`cluster init` returns in Phase 5 with the invariants that give it
+meaning: a persistent CA private key on disk, operator SPIFFE IDs
+(`spiffe://overdrive.local/operator/...` per whitepaper §8),
+Corrosion-gossiped operator-cert revocation
+(`revoked_operator_certs` table, also whitepaper §8), the Talos
+two-file `operatorconfig` / `machineconfig` split, the `--force`
+non-destructive-modes reservation, and the operator-cert ceremony
+(`overdrive op create` / `overdrive op revoke`) the verb actually
+implies. Phase 5 reintroduction is tracked in **GH #81**. The
+forward-compatible config-file shape preserved by ADR-0019
+(kubeconfig-shape `[[contexts]]` array-of-tables) survives the
+deletion unchanged; Phase 5 lands on top, not as a migration.
+
+### Cross-references
+
+- RCA: `docs/analysis/root-cause-analysis-cluster-init-cert-overwritten-by-serve.md`
+  (multi-causal Toyota 5 Whys; B5 dominant root cause; backwards-chain
+  validation eliminates S1 / S2 / S3 under Phase 1 constraints).
+- Implementation commit: `d294fb8` ("fix(cli): remove Phase 1 cluster
+  init verb").
+- Phase 5 reintroduction tracking: GH #81 (`cluster init` + `op
+  create` + `op revoke`).
+- DELIVER artefacts updated in lockstep:
+  `docs/feature/phase-1-control-plane-core/distill/{wave-decisions,walking-skeleton,test-scenarios}.md`,
+  `docs/feature/phase-1-control-plane-core/design/wave-decisions.md`,
+  `docs/feature/phase-1-control-plane-core/deliver/roadmap.json`,
+  and the SSOT scenario mirrors at
+  `docs/scenarios/phase-1-control-plane-core/{walking-skeleton,test-scenarios}.md`.

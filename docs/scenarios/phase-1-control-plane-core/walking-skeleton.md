@@ -3,6 +3,16 @@
 **Strategy**: C (real local adapters; no paid externals; no mocks). See
 `wave-decisions.md` DWD-01.
 
+> **Amendment 2026-04-26.** `overdrive cluster init` was removed from
+> Phase 1 in commit `d294fb8`. The walking-skeleton sequence is now
+> `serve` → `job submit` → `alloc status` (the dual-tempdir / Phase-0
+> `cluster init` step is gone). `serve` is the sole Phase 1
+> CA-minting site; it writes the trust triple to `~/.overdrive/config`
+> on every start. The verb returns in Phase 5 with the persistent CA
+> + operator-cert ceremony per ADR-0010 §Amendment 2026-04-26 and
+> GH #81. RCA:
+> `docs/analysis/root-cause-analysis-cluster-init-cert-overwritten-by-serve.md`.
+
 ## User goal the skeleton proves
 
 Ana, the Overdrive platform engineer, can clone the repository onto a
@@ -15,23 +25,25 @@ session: *"Submit a job and trust what the CLI tells me."*
 ## Demo script for a non-technical stakeholder
 
 1. "Ana has a fresh clone and a TOML file with her payment service's
-   job description. She runs `overdrive cluster init` to mint the
-   local trust material."
-2. "Ana runs `overdrive serve` in one terminal. The control plane is
-   now listening on the engineer's laptop, over TLS, on the default
-   address."
-3. "In a second terminal, Ana runs `overdrive job submit payments.toml`.
+   job description. She runs `overdrive serve` in one terminal. The
+   control plane mints a fresh trust triple, writes it to
+   `~/.overdrive/config`, and starts listening on the engineer's
+   laptop, over TLS, on the default address. (No separate
+   `cluster init` step in Phase 1 — that verb returns in Phase 5
+   with the persistent-CA + operator-cert ceremony it actually
+   needs. See ADR-0010 §Amendment 2026-04-26.)"
+2. "In a second terminal, Ana runs `overdrive job submit payments.toml`.
    The CLI prints the job ID, the canonical intent key, the commit
    index, and a 'Next' line pointing her at the status command."
-4. "Ana runs `overdrive alloc status --job payments`. The CLI prints
+3. "Ana runs `overdrive alloc status --job payments`. The CLI prints
    a spec digest — a short hash — that exactly matches what she can
    compute locally from the same TOML file. The CLI also tells her
    honestly that zero allocations are placed, because the scheduler
    lands in the next feature."
-5. "Ana runs `overdrive cluster status`. The CLI lists the
+4. "Ana runs `overdrive cluster status`. The CLI lists the
    reconciler primitive registered at boot — `noop-heartbeat` — and
    shows the evaluation broker's counters."
-6. "Ana changes a whitespace character in `payments.toml` that doesn't
+5. "Ana changes a whitespace character in `payments.toml` that doesn't
    affect the semantic content. She resubmits. The server returns the
    same commit index — byte-identical content is idempotent. She
    changes a real field. She resubmits. The server returns a conflict
@@ -50,17 +62,19 @@ reading any Rust.
 
 Enters through the `overdrive` CLI subprocess. The scenario:
 
-1. Starts `overdrive cluster init` (materialises CA + trust triple in
-   a scratch `tempfile::TempDir`).
-2. Starts `overdrive serve` as a child process. Waits for the HTTPS
-   listener to be ready on `127.0.0.1:7001`.
-3. Runs `overdrive job submit payments.toml`. Asserts exit 0, that
+1. Starts `overdrive serve` as a child process pointed at a scratch
+   `tempfile::TempDir`. `serve` mints the CA + trust triple
+   in-process and writes the triple to the configured
+   `<dir>/.overdrive/config` (ADR-0010 §R1 as amended 2026-04-26 —
+   `serve` is the sole Phase 1 minter). Waits for the HTTPS listener
+   to be ready on `127.0.0.1:7001`.
+2. Runs `overdrive job submit payments.toml`. Asserts exit 0, that
    stdout names the Job ID, the canonical intent key, and the commit
    index, and ends with a "Next" line pointing at `alloc status`.
-4. Runs `overdrive alloc status --job payments`. Asserts the printed
+3. Runs `overdrive alloc status --job payments`. Asserts the printed
    spec digest equals the digest Ana can compute locally via
    `ContentHash::of(rkyv_archived_bytes)`.
-5. Stops the server cleanly via SIGINT. Asserts in-flight drain.
+4. Stops the server cleanly via SIGINT. Asserts in-flight drain.
 
 Exercises every adapter named in DWD-09: `rcgen`, `rustls`, `axum`,
 `reqwest`, `LocalStore` (real redb in a TempDir), `SimObservationStore`
@@ -127,8 +141,9 @@ would be no previously-committed spec to test conflict against.
 
 - Delete `redb` → the LocalStore can't commit the submit → §1.1/§1.3
   fail at the submit step.
-- Delete `rcgen` → `cluster init` can't mint the CA → every WS fails
-  at the bootstrap step.
+- Delete `rcgen` → `serve` can't mint the CA → every WS fails at the
+  bootstrap step (per ADR-0010 §R1 as amended 2026-04-26, `serve` is
+  the sole Phase 1 cert-minting site).
 - Delete `axum`+`rustls` → the server never binds → every WS times
   out on the "wait for listener" step.
 - Delete `reqwest` → the CLI can't call the server → every WS fails at

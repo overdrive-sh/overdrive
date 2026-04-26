@@ -5,6 +5,15 @@
 **Date**: 2026-04-23
 **Status**: COMPLETE — handoff-ready for DISTILL (acceptance-designer) + DEVOPS (platform-architect), pending peer review.
 
+> **Amendment 2026-04-26.** D3 (ADR-0010 — Phase 1 TLS bootstrap)
+> revised: the cert-minting trigger named below as `cluster init` is
+> now `overdrive serve` exclusively (commit `d294fb8`). The R1
+> disjunction was a Phase 5 ceremony shipped early; §R5 (no on-disk
+> CA persistence) made it structurally incapable of being honoured in
+> Phase 1. ADR-0010 §Amendment 2026-04-26 carries the full
+> rationale; the verb returns in Phase 5 (GH #81). RCA:
+> `docs/analysis/root-cause-analysis-cluster-init-cert-overwritten-by-serve.md`.
+
 ---
 
 ## Wizard decisions honoured
@@ -78,11 +87,13 @@ hand-maintained YAML (rejected as defeating the purpose).
 ### D3 — Phase 1 TLS bootstrap (ADR-0010)
 
 **Recommendation**: Adopt Talos research R1–R5 wholesale. Ephemeral
-in-process CA at `cluster init`; base64-embedded trust triple in
-`~/.overdrive/config`; multi-SAN server cert; **no `--insecure`**; rotation /
-revocation / roles / persistence deferred to Phase 5. One deliberate
-divergence from Talos: role is NOT encoded in cert O-field (whitepaper §8
-SPIFFE URI SANs).
+in-process CA at `overdrive serve` start (per ADR-0010 §R1 as amended
+2026-04-26 — `serve` is the sole Phase 1 cert-minting site;
+`cluster init` returns in Phase 5 per GH #81); base64-embedded trust
+triple in `~/.overdrive/config`; multi-SAN server cert; **no
+`--insecure`**; rotation / revocation / roles / persistence deferred
+to Phase 5. One deliberate divergence from Talos: role is NOT encoded
+in cert O-field (whitepaper §8 SPIFFE URI SANs).
 
 **Recommendation posture**: PINNED — research is DESIGN-ready; R1–R5 were
 self-contained from the review.
@@ -312,3 +323,4 @@ research R1–R5, or downstream design invariants).
 | Date | Change |
 |---|---|
 | 2026-04-23 | Initial DESIGN wave decisions for phase-1-control-plane-core. 8 new ADRs (0008–0015). Brief.md §14–§23 extension. C4 container diagram updated. New L3 component diagram for `overdrive-control-plane`. |
+| 2026-04-26 | Amendment — D3 ADR-0010 summary revised: `cluster init` removed from Phase 1 (commit `d294fb8`); `serve` is the sole Phase 1 cert-minting site per ADR-0010 §Amendment 2026-04-26. Phase 5 reintroduction tracked in GH #81. RCA: `docs/analysis/root-cause-analysis-cluster-init-cert-overwritten-by-serve.md`. |

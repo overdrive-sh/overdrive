@@ -5,6 +5,17 @@
 **Date**: 2026-04-23
 **Status**: Draft — awaits peer review + crafter translation
 
+> **Amendment 2026-04-26.** `overdrive cluster init` was removed from
+> Phase 1 in commit `d294fb8`. The walking-skeleton scenario §1.1 now
+> starts at `serve` (the sole Phase 1 CA-minting site); §2b.1 / §2b.2
+> are revised to assert against `serve`'s trust-triple write rather
+> than `cluster init`'s; §2b.2's "re-init re-mints" property survives
+> as "re-starting `serve` re-mints" (ADR-0010 §R1 as amended
+> 2026-04-26). The `cluster init` verb returns in Phase 5 with the
+> persistent CA + operator-cert ceremony per ADR-0010 §Amendment
+> 2026-04-26 and GH #81. RCA:
+> `docs/analysis/root-cause-analysis-cluster-init-cert-overwritten-by-serve.md`.
+
 Per `.claude/rules/testing.md` — **no `.feature` files**. Every scenario
 below is a fenced `gherkin` markdown block. The crafter translates each
 to a Rust `#[test]` / `#[tokio::test]` function in
@@ -39,8 +50,8 @@ Scenario: Ana submits a job and sees the spec digest round-trip byte-identical
   Given Ana has a freshly cloned overdrive workspace
     And a scratch data directory on a temporary filesystem path
     And a TOML file payments.toml that describes a single-replica payments service
-    And the control plane has been initialised via overdrive cluster init into that directory
     And the control plane has been started via overdrive serve against that directory
+    And serve has minted the trust triple in-process and written it to that directory's .overdrive/config
     And the server is listening on the default local endpoint
   When Ana runs overdrive job submit payments.toml as a subprocess
     And Ana runs overdrive alloc status --job payments as a subprocess
@@ -646,30 +657,36 @@ These scenarios live under US-02's numbering in §3 but are TLS-bootstrap-
 specific; they prove the ADR-0010 adapters. Renumbered §2b here for
 readability.
 
+> Per ADR-0010 §R1 as amended 2026-04-26, `serve` is the sole Phase 1
+> cert-minting site (`cluster init` removed in commit `d294fb8`). The
+> bootstrap-asserting scenarios below are written against `serve`'s
+> trust-triple write; the "re-init re-mints" property is preserved as
+> "re-starting `serve` re-mints."
+
 ### 2b.1 First boot writes a valid trust triple
 
 ```gherkin
 @us-02 @driving_adapter @real-io @adapter-integration
-Scenario: overdrive cluster init writes a fully-formed trust triple
+Scenario: overdrive serve writes a fully-formed trust triple on first boot
   Given a scratch home directory with no previous overdrive state
-  When Ana runs overdrive cluster init
-  Then the CLI exits with status zero
+  When Ana runs overdrive serve against that directory
+  Then serve binds the TLS listener
     And the file <home>/.overdrive/config exists and parses as ADR-0019 TOML
     And the TOML carries a current-context pointer and a [[contexts]] array-of-tables
     And each context carries an endpoint, a ca field with base64-encoded PEM, a crt field, and a key field
     And the CA's subject alternative names include 127.0.0.1 and ::1 and localhost
 ```
 
-### 2b.2 Re-initialising mints a fresh CA
+### 2b.2 Re-starting serve re-mints the ephemeral CA
 
 ```gherkin
 @us-02 @driving_adapter @real-io
-Scenario: Re-running cluster init re-mints the ephemeral CA
-  Given a previous cluster init produced a CA certificate C1
-  When Ana runs overdrive cluster init a second time
+Scenario: A second overdrive serve start re-mints the ephemeral CA
+  Given a previous overdrive serve start produced a CA certificate C1 and was stopped cleanly
+  When Ana runs overdrive serve a second time against the same directory
   Then a new CA certificate C2 is present in the config
     And C2 is not byte-identical to C1
-    And the CLI does not prompt for a password or for confirmation
+    And serve does not prompt for a password or for confirmation
 ```
 
 ### 2b.3 No --insecure flag exists
@@ -731,3 +748,4 @@ alone.
 | Date | Change |
 |---|---|
 | 2026-04-23 | Initial DISTILL acceptance scenarios for phase-1-control-plane-core. 51 scenarios across 3 walking skeletons + 5 US sections + TLS bootstrap sub-section. |
+| 2026-04-26 | Amendment — `cluster init` removed from Phase 1 (commit `d294fb8`). §1.1 Given clause revised to drop the `cluster init` step (`serve` is now the sole minter). §2b.1 / §2b.2 rewritten to assert against `serve`'s trust-triple write (ADR-0010 §R1 as amended 2026-04-26). §2b.3 unchanged. RCA: `docs/analysis/root-cause-analysis-cluster-init-cert-overwritten-by-serve.md`. Phase 5 reintroduction: GH #81. |

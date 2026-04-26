@@ -5,6 +5,14 @@
 **Date**: 2026-04-23
 **Status**: COMPLETE — handoff-ready for DEVOPS (platform-architect) and DELIVER (software-crafter), pending peer review.
 
+> **Amendment 2026-04-26.** `overdrive cluster init` was removed from
+> Phase 1 in commit `d294fb8`. The walking-skeleton CA-minting site is
+> now `overdrive serve` exclusively; the demo / litmus / strategy-C
+> references below are revised in place. The `cluster init` verb
+> returns in Phase 5 with the persistent CA + operator-cert ceremony
+> per ADR-0010 §Amendment 2026-04-26 and GH #81. Full rationale in
+> `docs/analysis/root-cause-analysis-cluster-init-cert-overwritten-by-serve.md`.
+
 ---
 
 ## Reconciliation
@@ -43,8 +51,9 @@ Procedure run per skill Wave-Decision Reconciliation:
 **Decision**: Strategy **C (real local)**. The walking skeleton exercises:
 
 - Real `LocalStore` (redb) against `tempfile::TempDir`.
-- Real `rcgen`-minted ephemeral CA at `overdrive cluster init`
-  (ADR-0010).
+- Real `rcgen`-minted ephemeral CA at `overdrive serve` start
+  (ADR-0010 §R1 as amended 2026-04-26 — `serve` is the sole
+  Phase 1 cert-minting site).
 - Real `axum` + `rustls` server bound on `https://127.0.0.1:7001`
   (ADR-0008).
 - Real `reqwest`-based CLI client hitting the real server (ADR-0014).
@@ -58,8 +67,8 @@ Procedure run per skill Wave-Decision Reconciliation:
 pass?"):
 
 - Delete `redb` → compile failure. WS fails. ✅
-- Delete `rcgen` → no CA can be minted → `cluster init` fails → every
-  WS scenario fails. ✅
+- Delete `rcgen` → no CA can be minted → `serve` fails to bootstrap
+  TLS → every WS scenario fails. ✅
 - Delete `axum` / `rustls` → server cannot bind. WS fails. ✅
 - Delete `reqwest` → CLI has no client. WS fails. ✅
 - Delete `libsql` → reconciler-runtime cannot provision per-primitive
@@ -318,3 +327,4 @@ No contradictions surfaced. `CLARIFICATION_NEEDED` not required.
 | Date | Change |
 |---|---|
 | 2026-04-23 | Initial DISTILL wave decisions for phase-1-control-plane-core. 12 DWDs + reconciliation + scaffold inventory. |
+| 2026-04-26 | Amendment — `cluster init` removed from Phase 1 (commit `d294fb8`). DWD-01 strategy-C litmus revised to read `serve` as the sole CA-minting site; banner added at top pointing to ADR-0010 §Amendment 2026-04-26 and GH #81. RCA: `docs/analysis/root-cause-analysis-cluster-init-cert-overwritten-by-serve.md`. |
