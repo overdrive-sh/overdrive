@@ -1,0 +1,268 @@
+{
+  "roadmap": {
+    "project_id": "redesign-drop-commit-index",
+    "created_at": "2026-04-26T00:00:00Z",
+    "total_steps": 5,
+    "scope": "redesign",
+    "adr_reference": "docs/product/architecture/adr-0020-drop-commit-index-phase-1.md",
+    "design_reference": "docs/feature/redesign-drop-commit-index/design/upstream-changes.md",
+    "wave_decisions_reference": "docs/feature/redesign-drop-commit-index/design/wave-decisions.md",
+    "rationale": "Pure-drop of `commit_index` from Phase 1 single-mode per ADR-0020. The field has no consumer, is structurally redundant with `spec_digest`, cannot meet its Phase 2 forward-compat promise, and has generated three production bugs in 26 hours. Single-cut migration discipline applies \u2014 Phase 1 is unshipped. The DELIVER PR replaces the per-write surface with `spec_digest` + `IdempotencyOutcome`, narrows `ClusterStatus` to four fields, and reverts the snapshot frame from v2 to v1. The complete surgery surface \u2014 every file with line numbers, change shape, and rationale tag \u2014 is enumerated in `docs/feature/redesign-drop-commit-index/design/upstream-changes.md`."
+  },
+  "validation": {
+    "status": "approved",
+    "approver": "Atlas (nw-solution-architect-reviewer)",
+    "approved_at": "2026-04-26",
+    "rationale": "Reviewed by Atlas (nw-solution-architect-reviewer) on 2026-04-26. Verdict: APPROVED with zero blocking issues. All 3 walking-skeleton scenarios (WS-1/WS-2/WS-3 per test-scenarios.md Amendment 2026-04-26 ADR-0020) covered. Surgery surface (upstream-changes.md \u00a71-\u00a712) completely decomposed across 5 steps in correct order. Architectural decisions locked (snapshot frame v1, IdempotencyOutcome location in api.rs, ClusterStatus pure-drop rationale). Quality gates comprehensive and ordered from weakest to strongest. Single-cut migration discipline preserved."
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Drop commit_index across trait, impl, handlers, API, CLI, tests, and docs",
+      "description": "Single-cut migration per project memory `feedback_single_cut_greenfield_migrations`. Phase 1 is unshipped; no external consumer; no deprecation path. The five steps below partition the surgery surface enumerated in `upstream-changes.md` along verification-gate boundaries: each step has a distinct CI signal that proves it landed correctly. Step 01-01 lands the wire-contract change coherently (trait + handlers + api.rs cannot ship piecemeal without compile breakage). Step 01-02 lands the storage-layer simplification under the new contract. Step 01-03 regenerates the OpenAPI schema and updates CLI rendering \u2014 both are downstream of the wire change and gate on `cargo xtask openapi-check` + CLI render acceptance tests. Step 01-04 deletes and revises the test surface that asserted on the dropped field. Step 01-05 amends the architectural records and runs the \u00a712 catch-all grep audit. Each step is a single commit; the PR lands as one breaking-internal change.",
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "Land the wire contract \u2014 trait surface, handlers, api.rs",
+          "description": "Drop `commit_index` from the `IntentStore` trait surface (return type of `get`, fields on `PutOutcome::Inserted` and `PutOutcome::KeyExists`, all related docstrings). Introduce the `IdempotencyOutcome` enum colocated with the other API response types in `crates/overdrive-control-plane/src/api.rs`. Update the three handlers (`submit_job`, `describe_job`, `cluster_status`) to consume the new trait surface and emit the new response shapes. This step lands the wire contract change coherently \u2014 splitting trait, api.rs, and handlers across multiple steps would require placeholder shims that violate single-cut migration. The crate compiles after this step against the new shapes; the impl crate (`overdrive-store-local`) compiles because its `LocalIntentStore` already carries the data the new variants need (the `commit_index` field becomes dead code, deleted in 01-02). Implements \u00a71 (trait surface) + \u00a73 (handlers.rs and api.rs) of `upstream-changes.md`.",
+          "criteria": [
+            "`crates/overdrive-core/src/traits/intent_store.rs` \u2014 `IntentStore::get` returns `Result<Option<Bytes>, IntentStoreError>` (drop the `u64`); `PutOutcome::Inserted` is a unit variant; `PutOutcome::KeyExists` carries only `existing: Bytes`; all docstrings on `PutOutcome`, `get`, and `watch` revised to drop per-entry / store-wide / inline-framing / Phase-2-stable-signature framing.",
+            "`crates/overdrive-control-plane/src/api.rs` \u2014 `SubmitJobResponse` is `{job_id, spec_digest, outcome}`; `JobDescription` is `{spec, spec_digest}`; `ClusterStatus` is `{mode, region, reconcilers, broker}`; new `IdempotencyOutcome` enum with derives `Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema` and `#[serde(rename_all = \"lowercase\")]`, variants `Inserted` | `Unchanged`.",
+            "`crates/overdrive-control-plane/src/handlers.rs` \u2014 `submit_job` matches `PutOutcome` to compute `IdempotencyOutcome`, computes `spec_digest` from the rkyv archive, returns the new shape; the byte-equality check inside `KeyExists { existing }` decides between `Unchanged` (200) and 409 Conflict; `describe_job` no longer destructures `(Bytes, u64)`; `cluster_status` no longer reads `LocalStore::commit_index()`.",
+            "`cargo nextest run -p overdrive-core -p overdrive-control-plane --lib` is GREEN (unit-level only \u2014 integration tests asserting on `commit_index` are revised in 01-04 and may still fail on this step; intentionally-RED test surface is acceptable per `.claude/rules/testing.md` \u00a7 'RED scaffolds and intentionally-failing commits' \u2014 commit with `--no-verify` if pre-commit gates reject and call it out in the commit body).",
+            "`cargo check --workspace` is GREEN \u2014 no compile errors anywhere in the workspace; the `overdrive-store-local` impl carries the data the new variants need without changes (the `commit_counter` field becomes dead code, deleted in 01-02).",
+            "Commit-message shape: `feat!(intent-store): drop commit_index from trait + API surface (ADR-0020)`. Breaking is internal-only \u2014 Phase 1 is unshipped \u2014 but the `!` flags it for changelog tools. Body cites ADR-0020 and `Step-ID: 01-01`."
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/api_type_shapes.rs",
+          "scenario_name": "submit_response_carries_spec_digest_and_outcome_inserted",
+          "files_to_modify": [
+            "crates/overdrive-core/src/traits/intent_store.rs",
+            "crates/overdrive-control-plane/src/api.rs",
+            "crates/overdrive-control-plane/src/handlers.rs"
+          ],
+          "implementation_notes": "Compile-ordering: the `overdrive-store-local` impl carries `commit_counter: AtomicU64` and a public `commit_index()` accessor on `LocalIntentStore`. After this step the trait no longer surfaces those, but the impl can still own the field as dead code without compile error \u2014 the dead code becomes deletable in 01-02. The handler change in `submit_job` requires recomputing `spec_digest` on the conflict path to compare against `existing`; this computation already exists for `JobDescription` (per ADR-0020 \u00a7Decision \u00a72) and is reused. `IdempotencyOutcome::Unchanged` is returned when the byte-equality check passes on `KeyExists { existing }`; 409 Conflict is returned when bytes differ \u2014 the `outcome` field never carries `\"conflict\"` (conflict is HTTP-status, not enum value, per ADR-0015 \u00a74 amendment). The `IdempotencyOutcome` enum location and derives are decision-locked in `upstream-changes.md` \u00a73 \u2014 do not re-open. Per `.claude/rules/development.md` \u00a7 Newtype completeness, `IdempotencyOutcome` is small enough that `FromStr`/`Display` are not required; serde-via-rename_all is the canonical wire form.",
+          "quality_gates": [
+            "cargo check --workspace passes",
+            "cargo nextest run -p overdrive-core --lib passes",
+            "cargo nextest run -p overdrive-control-plane --lib passes",
+            "single commit",
+            "ADR-0020 cited in body"
+          ],
+          "estimated_hours": 2.0,
+          "deliverables": [
+            "trait surface narrowed (intent_store.rs)",
+            "IdempotencyOutcome enum (api.rs)",
+            "three response types updated (api.rs)",
+            "three handlers updated (handlers.rs)"
+          ]
+        },
+        {
+          "id": "01-02",
+          "name": "Simplify single-mode impl + revert snapshot frame v2 \u2192 v1",
+          "description": "Delete the `commit_counter`, `peek_next_inside`, `bump_commit_after_commit`, public `commit_index()` accessor, inline `[u64-LE-prefix || value]` row encoding, and all three `debug_assert_eq!` calls (lines 312, 392, 525 \u2014 re-grep at edit time per `upstream-changes.md` \u00a72). Simplify `put`, `put_if_absent`, `delete`, `txn`, and `bootstrap_from` to the shapes that do not include the bump/peek dance. Revert `snapshot_frame.rs` from v2 to v1 \u2014 encoder emits `Vec<(Vec<u8>, Vec<u8>)>` under schema discriminator v1; the v1 decoder is preserved verbatim; v2 frame definition / encoder / decoder branch deleted entirely; `pub const VERSION: u16 = 1;` (or the `_V1` alias is unified to a single constant \u2014 crafter picks the cleaner mechanical edit). Apply downstream-of-trait edits across the sim crate (grep `crates/overdrive-sim/` for `commit_index`, `(Bytes, u64)`, `PutOutcome::Inserted { commit_index }`, `PutOutcome::KeyExists { commit_index, .. }` \u2014 each match becomes the same mechanical edit as the production-side equivalent; there is no standalone sim adapter file for IntentStore \u2014 the harness reuses the real LocalIntentStore on a per-host tempdir per `upstream-changes.md` \u00a72). Implements \u00a72 (single-mode impl + snapshot frame + sim downstream) of `upstream-changes.md`.",
+          "criteria": [
+            "`crates/overdrive-store-local/src/redb_backend.rs` \u2014 no `commit_counter` field; no `peek_next_inside` / `bump_commit_after_commit` helpers; no public `commit_index()` accessor; no `encode_entry` / `decode_entry` inline-framing helpers; zero `debug_assert_eq!` calls (verify by grep \u2014 was 3 at lines 312/392/525); `put` / `put_if_absent` / `delete` / `txn` / `bootstrap_from` all simplified per `upstream-changes.md` \u00a72; module docstring rewritten end-to-end (Per-entry / inline framing / Phase 2 forward-compat sections deleted).",
+            "`crates/overdrive-store-local/src/snapshot_frame.rs` \u2014 `pub const VERSION: u16 = 1;` (single constant); encoder emits `Vec<(Vec<u8>, Vec<u8>)>`; v2 encoder/decoder branch deleted; v1 decoder branch preserved verbatim; module docstring revised to drop the 'v1 inputs project the missing index column to 0' framing (the v1 frame is canonical).",
+            "`crates/overdrive-sim/` \u2014 grep-clean for `commit_index`, `(Bytes, u64)`, `Option<(Bytes, u64)>`, `PutOutcome::Inserted { commit_index`, `PutOutcome::KeyExists { commit_index`. Each prior match has been edited to the trait's new shape (drop tuple unpack, drop field bind, drop index assertion).",
+            "`cargo nextest run -p overdrive-store-local -p overdrive-sim --lib` is GREEN.",
+            "`cargo xtask dst` is GREEN \u2014 the harness invariant `intent_store_returns_caller_bytes` (per ADR-0020 \u00a7Enforcement) is added if not yet present, asserting that `IntentStore::get` returns the bytes as supplied to `put` with no framing overhead. This is the structural-regression guard against a future contributor re-introducing inline encoding.",
+            "Commit-message shape: `refactor(store-local): drop commit_counter and revert snapshot frame to v1 (ADR-0020)`. Body cites ADR-0020 \u00a7Decision \u00a73 + \u00a7Enforcement and `Step-ID: 01-02`."
+          ],
+          "test_file": "crates/overdrive-sim/tests/integration/dst_invariants.rs",
+          "scenario_name": "intent_store_returns_caller_bytes",
+          "files_to_modify": [
+            "crates/overdrive-store-local/src/redb_backend.rs",
+            "crates/overdrive-store-local/src/snapshot_frame.rs",
+            "crates/overdrive-sim/src/harness.rs",
+            "crates/overdrive-sim/src/invariants/intent_store_caller_bytes.rs"
+          ],
+          "implementation_notes": "On-disk format change: redb files written by the current code are not readable by the post-step code (rows are no longer prefixed with the `[u64-LE-prefix || value]` frame). This is deliberately accepted \u2014 Phase 1 development databases are scratch, no production data exists to migrate. The cross-writer race documented in `f5b361c`'s RCA is unreachable post-step because the bump call site is gone. The `bootstrap_from` simplification: the previous code read a `commit_index` from the snapshot frame and seeded `commit_counter` via `fetch_max`; the new code clears the `entries` table and replays snapshot rows verbatim. The sim crate audit: the file paths to grep are under `crates/overdrive-sim/src/` \u2014 `harness.rs` is the most likely site (per `upstream-changes.md` \u00a72 it reuses `LocalIntentStore`), but the audit covers the whole crate. Snapshot proptests live in `tests/integration/snapshot_proptest.rs` and are revised in 01-04 \u2014 the impl-level edits here may make them fail until 01-04 lands; that is intentionally-RED per `.claude/rules/testing.md`. The `intent_store_returns_caller_bytes` invariant is the structural-regression guard required by ADR-0020 \u00a7Enforcement; if it does not yet exist, the `files_to_modify` above includes its creation site (`crates/overdrive-sim/src/invariants/intent_store_caller_bytes.rs` \u2014 verify the actual `invariants/` module path at edit time).",
+          "quality_gates": [
+            "cargo nextest run -p overdrive-store-local -p overdrive-sim --lib passes",
+            "cargo xtask dst passes (with intent_store_returns_caller_bytes invariant)",
+            "grep clean for commit_index across overdrive-sim",
+            "single commit",
+            "ADR-0020 cited in body"
+          ],
+          "estimated_hours": 2.5,
+          "deliverables": [
+            "redb_backend.rs simplified",
+            "snapshot_frame.rs reverted to v1",
+            "sim crate downstream edits",
+            "intent_store_returns_caller_bytes DST invariant"
+          ]
+        },
+        {
+          "id": "01-03",
+          "name": "Regenerate OpenAPI schema + update CLI rendering",
+          "description": "Regenerate `api/openapi.yaml` from the new Rust types via `cargo xtask openapi`, then verify `cargo xtask openapi-check` passes. The expected diff: `SubmitJobResponse` drops `commit_index`, adds `spec_digest` (string) and `outcome` (enum); `JobDescription` drops `commit_index`; `ClusterStatus` drops `commit_index`; new `IdempotencyOutcome` component schema (string enum `inserted` | `unchanged`). Update CLI rendering across `render.rs` (three `Commit index:` lines at 32, 81, 100 \u2014 re-grep at edit time), `cli.rs` (line 91 rustdoc), `commands/cluster.rs` (`ClusterStatusOutput` field set), `commands/job.rs` (submit + describe rendering), `commands/alloc.rs` (drop any 'Commit index' line). The `job submit` output prints the outcome in human form (`created` for `inserted`, `unchanged` for `unchanged`) \u2014 the JSON wire form is `inserted` | `unchanged`, the CLI surfaces the human form per `upstream-changes.md` \u00a75. The walking-skeleton test-scenarios amendment (test-scenarios.md \u00a71.1, \u00a71.2, \u00a71.3) maps directly to this step's CLI rendering output. Implements \u00a74 (OpenAPI regen) + \u00a75 (CLI rendering) of `upstream-changes.md`.",
+          "criteria": [
+            "`api/openapi.yaml` regenerated via `cargo xtask openapi`; `cargo xtask openapi-check` is GREEN. Three component schemas changed (`SubmitJobResponse`, `JobDescription`, `ClusterStatus`); one new component schema (`IdempotencyOutcome`).",
+            "`crates/overdrive-cli/src/render.rs` \u2014 three `Commit index:` writeln sites deleted (was lines 32, 81, 100); `render::job_submit` prints `Spec digest:` + `Outcome:` (human form `created` | `unchanged`); `render::alloc_status` no longer prints a Commit-index line; `render::cluster_status` output narrows from five lines to four (`Mode`, `Region`, `Reconcilers`, `Broker`).",
+            "`crates/overdrive-cli/src/cli.rs` \u2014 line 91 rustdoc updated to drop the `commit_index` mention.",
+            "`crates/overdrive-cli/src/commands/cluster.rs` \u2014 `ClusterStatusOutput` (or equivalent) drops `commit_index: u64`; print logic mirrors the four-field shape.",
+            "`crates/overdrive-cli/src/commands/job.rs` \u2014 submit handler prints `spec_digest` + `outcome`; describe handler prints `spec` + `spec_digest`.",
+            "`crates/overdrive-cli/src/commands/alloc.rs` \u2014 no `Commit index` line in alloc-status rendering.",
+            "`cargo nextest run -p overdrive-cli --lib` is GREEN (CLI render acceptance tests live in `tests/acceptance/render_*.rs` and are revised in 01-04 \u2014 they may still fail on this step intentionally; the lib-level CLI tests still gate this step).",
+            "Commit-message shape: `refactor(cli,api): regenerate OpenAPI + update CLI rendering for ADR-0020 wire shape`. Body cites ADR-0020 \u00a7Decision \u00a72/\u00a74 and `Step-ID: 01-03`."
+          ],
+          "test_file": "crates/overdrive-cli/tests/acceptance/render_cluster_and_node.rs",
+          "scenario_name": "cluster_status_renders_four_fields_no_commit_index_line",
+          "files_to_modify": [
+            "api/openapi.yaml",
+            "crates/overdrive-cli/src/render.rs",
+            "crates/overdrive-cli/src/cli.rs",
+            "crates/overdrive-cli/src/commands/cluster.rs",
+            "crates/overdrive-cli/src/commands/job.rs",
+            "crates/overdrive-cli/src/commands/alloc.rs"
+          ],
+          "implementation_notes": "Do NOT hand-edit `api/openapi.yaml` \u2014 it is generated. Run `cargo xtask openapi` and check in the generated bytes; `cargo xtask openapi-check` then asserts no drift between generator output and checked-in YAML. Per memory `feedback_no_user_install_instructions`, do not surface install hints if `cargo xtask openapi` is missing \u2014 just run it. The label set printed by `render::job_submit` (per `upstream-changes.md` \u00a77 `render_job_submit.rs` enumeration line 12) is: `Accepted.`, `Job ID:`, `Intent key:`, `Spec digest:`, `Outcome:`, `Endpoint:`, `Next:`. The walking-skeleton scenarios in `distill/test-scenarios.md` \u00a71.1, \u00a71.2, \u00a71.3 (Amendment 2026-04-26 ADR-0020) describe the operator-visible behaviour that the CLI rendering must produce \u2014 those scenarios are translated into Rust acceptance tests in `crates/overdrive-cli/tests/integration/walking_skeleton.rs` and revised in 01-04. CLI render fixture revisions (`render_job_submit.rs`, `render_alloc_status.rs`, `render_cluster_and_node.rs`) are also revised in 01-04 \u2014 this step lands the source-side rendering changes; 01-04 lands the matching test-side fixture revisions.",
+          "quality_gates": [
+            "cargo xtask openapi-check passes",
+            "cargo nextest run -p overdrive-cli --lib passes",
+            "no hand-edits to api/openapi.yaml",
+            "single commit",
+            "ADR-0020 cited in body"
+          ],
+          "estimated_hours": 1.5,
+          "deliverables": [
+            "regenerated OpenAPI schema",
+            "render.rs updated (3 sites)",
+            "cli.rs rustdoc updated",
+            "three command files updated"
+          ]
+        },
+        {
+          "id": "01-04",
+          "name": "Test surface \u2014 delete obsolete tests, revise survivors",
+          "description": "Delete the four test files that exist solely to assert properties of `commit_index` (`tests/integration/commit_counter_invariant.rs`, `tests/acceptance/per_entry_commit_index.rs`, `tests/integration/per_entry_commit_index.rs`, `tests/acceptance/commit_index_monotonic.rs` \u2014 verify exact paths via `crates/{store-local,control-plane}/tests/` greps at edit time). Revise the test surface that asserts on adjacent properties: 11 enumerated test files across the store-local crate, the control-plane crate, and the CLI crate. Each revision shape is enumerated explicitly in `upstream-changes.md` \u00a77 with line citations from the 2026-04-26 grep audit. The walking-skeleton CLI integration test (`crates/overdrive-cli/tests/integration/walking_skeleton.rs`) is revised per the test-scenarios.md Amendment 2026-04-26 (ADR-0020) block \u2014 WS-1 asserts on `outcome == \"inserted\"` + digest equality (lines 120-122); WS-2 asserts on `broker.dispatched > 0` plus the `reconcilers` registry list and the absence of a Commit-index line (lines 135-137); WS-3 asserts on `outcome == \"unchanged\"` plus digest equality across re-submits. The mod-declaration files (`tests/integration.rs`, `tests/acceptance.rs`) are updated to drop the `mod` lines for deleted files. Implements \u00a76 (delete-in-full: 4 test files) + \u00a77 (revise: 14 test files including all CLI integration tests + control-plane tests) of `upstream-changes.md`.",
+          "criteria": [
+            "Deleted in full: `crates/overdrive-store-local/tests/integration/commit_counter_invariant.rs`, `crates/overdrive-store-local/tests/acceptance/per_entry_commit_index.rs`, `crates/overdrive-store-local/tests/integration/per_entry_commit_index.rs`, `crates/overdrive-store-local/tests/acceptance/commit_index_monotonic.rs` (verify exact paths at edit time \u2014 the `crates/...` prefix is the operative path).",
+            "Mod-declaration files updated: any `mod commit_counter_invariant;` / `mod per_entry_commit_index;` / `mod commit_index_monotonic;` lines removed from `tests/integration.rs` / `tests/acceptance.rs` entrypoints.",
+            "Revised \u2014 store-local acceptance: `phantom_writes.rs` (drop counter-bump assertion, preserve no-emit assertion; rename if appropriate), `snapshot_roundtrip.rs` (assert v1 frame round-trips key+value, no per-entry index column), `put_if_absent.rs` (assert variant only, drop index value assertion), `local_store_basic_ops.rs` (drop tuple unpack), `local_store_edges.rs` (drop tuple unpack).",
+            "Revised \u2014 store-local integration: `snapshot_proptest.rs` (generator emits `Vec<(Vec<u8>, Vec<u8>)>`, no index column).",
+            "Revised \u2014 control-plane integration: `concurrent_submit_toctou.rs` (drop any commit_index assertion; TOCTOU property preserved by `outcome == unchanged` + back-door byte-equality), `idempotent_resubmit.rs` (assert `outcome == unchanged` + spec_digest equality across N re-submits; rename test to drop `commit_index` reference), `submit_round_trip.rs` (assert `outcome == inserted` + spec_digest equality, drop `>= 1` assertion), `describe_round_trip.rs` (assert spec_digest equality between submit and describe responses, drop commit_index assertion), `submit_job_idempotency.rs` (assert outcome + digest, drop commit_index equality).",
+            "Revised \u2014 control-plane acceptance: `runtime_registers_noop_heartbeat.rs` line 202 (drop `assert_eq!(body.commit_index, state.store.commit_index(), ...)`; assert on four-field ClusterStatus + broker.dispatched advancement instead), `api_type_shapes.rs` lines 43/48/55/62/71/80 (drop `commit_index` field from three fixtures + three round-trip assertions; replace SubmitJobResponse round-trip with spec_digest + outcome assertions, JobDescription round-trip with spec_digest only, ClusterStatus round-trip with four-field shape).",
+            "Revised \u2014 CLI integration: `http_client.rs` lines 141/146 (drop `commit_index > 0` and `description.commit_index == submit_resp.commit_index`; replace with `outcome == Inserted` + digest equality), `job_submit.rs` lines 10/15/129-131 (rustdoc + assertion), `endpoint_from_config.rs` lines 94-96 (assertion), `cluster_and_node_commands.rs` line 12 (rustdoc-only), `walking_skeleton.rs` lines 120-122/135-137 (WS-1 outcome + digest; WS-2 broker.dispatched).",
+            "Revised \u2014 CLI acceptance render fixtures: `render_job_submit.rs` lines 12/28/43/59 (rustdoc + fixture + label list + assertion message), `render_alloc_status.rs` lines 12/20/32/110/143 (rustdoc + four fixtures), `render_cluster_and_node.rs` lines 12/28/44/62 (rustdoc + fixture + label list `[\"Mode:\", \"Region:\", \"Reconcilers:\", \"Broker counters:\"]` + assertion).",
+            "`cargo nextest run --workspace` is GREEN \u2014 every assertion now matches the post-ADR-0020 wire shape.",
+            "`cargo test --doc --workspace` is GREEN \u2014 any rustdoc example referencing `commit_index` has been updated.",
+            "Commit-message shape: `test: drop commit_index test surface and revise survivors for ADR-0020`. Body cites ADR-0020 and `Step-ID: 01-04`."
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/walking_skeleton.rs",
+          "scenario_name": "walking_skeleton_ws1_ws2_ws3_post_adr_0020_wire_shape",
+          "files_to_modify": [
+            "crates/overdrive-store-local/tests/integration/commit_counter_invariant.rs",
+            "crates/overdrive-store-local/tests/acceptance/per_entry_commit_index.rs",
+            "crates/overdrive-store-local/tests/integration/per_entry_commit_index.rs",
+            "crates/overdrive-store-local/tests/acceptance/commit_index_monotonic.rs",
+            "crates/overdrive-store-local/tests/integration.rs",
+            "crates/overdrive-store-local/tests/acceptance.rs",
+            "crates/overdrive-store-local/tests/acceptance/phantom_writes.rs",
+            "crates/overdrive-store-local/tests/acceptance/snapshot_roundtrip.rs",
+            "crates/overdrive-store-local/tests/acceptance/put_if_absent.rs",
+            "crates/overdrive-store-local/tests/acceptance/local_store_basic_ops.rs",
+            "crates/overdrive-store-local/tests/acceptance/local_store_edges.rs",
+            "crates/overdrive-store-local/tests/integration/snapshot_proptest.rs",
+            "crates/overdrive-control-plane/tests/integration/concurrent_submit_toctou.rs",
+            "crates/overdrive-control-plane/tests/integration/idempotent_resubmit.rs",
+            "crates/overdrive-control-plane/tests/integration/submit_round_trip.rs",
+            "crates/overdrive-control-plane/tests/integration/describe_round_trip.rs",
+            "crates/overdrive-control-plane/tests/acceptance/submit_job_idempotency.rs",
+            "crates/overdrive-control-plane/tests/acceptance/runtime_registers_noop_heartbeat.rs",
+            "crates/overdrive-control-plane/tests/acceptance/api_type_shapes.rs",
+            "crates/overdrive-cli/tests/integration/http_client.rs",
+            "crates/overdrive-cli/tests/integration/job_submit.rs",
+            "crates/overdrive-cli/tests/integration/endpoint_from_config.rs",
+            "crates/overdrive-cli/tests/integration/cluster_and_node_commands.rs",
+            "crates/overdrive-cli/tests/integration/walking_skeleton.rs",
+            "crates/overdrive-cli/tests/acceptance/render_job_submit.rs",
+            "crates/overdrive-cli/tests/acceptance/render_alloc_status.rs",
+            "crates/overdrive-cli/tests/acceptance/render_cluster_and_node.rs"
+          ],
+          "implementation_notes": "Verify each test file's exact path via grep at edit time \u2014 the upstream-changes.md document cites paths as `tests/integration/<file>.rs` style; the actual on-disk paths are scoped to a specific crate (e.g. `crates/overdrive-store-local/tests/integration/commit_counter_invariant.rs`). Per `.claude/rules/testing.md` \u00a7 Layout, integration-shaped tests live under `tests/integration/` and acceptance-shaped under `tests/acceptance/`; do not let the upstream-changes.md `tests/integration/...` shorthand confuse the actual crate-scoped path. The walking-skeleton revisions here MUST match the test-scenarios.md \u00a71.1 / \u00a71.2 / \u00a71.3 amendment block (Amendment 2026-04-26 ADR-0020) \u2014 that is the spec; the test is the implementation. The \u00a712 catch-all grep audit lives in 01-05; this step's gate is that `cargo nextest run --workspace` is GREEN. Some renamed test functions (e.g. `byte_identical_resubmit_returns_outcome_unchanged_and_same_digest`) are noted in `upstream-changes.md` \u00a77 \u2014 apply the rename in this step. The `phantom_writes.rs` test name change (e.g. `phantom_writes_dont_emit_events`) is also applied here. Per memory `feedback_no_rename_stubs`, do not leave behind rename-marker stubs of deleted tests \u2014 the four deleted files are deleted with their `mod` declarations; no compatibility stubs.",
+          "quality_gates": [
+            "cargo nextest run --workspace passes",
+            "cargo test --doc --workspace passes",
+            "four files deleted",
+            "all 14+ enumerated revisions land",
+            "single commit",
+            "ADR-0020 cited in body"
+          ],
+          "estimated_hours": 4.0,
+          "deliverables": [
+            "4 test files deleted",
+            "2 mod-declaration files updated",
+            "14 test files revised across store-local + control-plane + CLI",
+            "walking-skeleton WS-1/WS-2/WS-3 aligned with test-scenarios.md amendment"
+          ]
+        },
+        {
+          "id": "01-05",
+          "name": "Architecture amendments + brief edits + grep-audit completion",
+          "description": "Amend ADR-0008 (REST/OpenAPI transport) and ADR-0015 (HTTP error mapping) with `> **Amendment 2026-04-26 (ADR-0020).**` blocks at the head of each file (matching the project's existing amendment-block style). ADR-0008's endpoint table is revised to list the three responses with the new field sets; ADR-0015 \u00a74 idempotent-success row is revised from `200 OK, same commit_index as the original` to `200 OK, same spec_digest as the original, with outcome: IdempotencyOutcome::Unchanged`. ADR-0020's status flips from Proposed to Accepted (project ADR convention \u2014 Status flips when the change-set lands on `main`). Edit `docs/product/architecture/brief.md` to revise the three references inline (no strikethrough \u2014 the brief is architecture SSOT, not an amendable artifact; references are deleted/replaced cleanly per `upstream-changes.md` \u00a79). Run the \u00a712 catch-all grep audit: `grep -rln 'commit_index\\|Commit index' crates/ tests/ api/ | grep -v target/ | grep -v evolution/` returns zero matches. Run mutation testing per the per-feature strategy. Implements \u00a78 (ADR amendments) + \u00a79 (brief edits) + \u00a712 (verification gates) of `upstream-changes.md`. Per project memory `feedback_delegate_to_architect`, ADR amendments and brief edits are architect-owned \u2014 the crafter executing this step works through the architect agent for these specific files, not inline.",
+          "criteria": [
+            "`docs/product/architecture/adr-0008-rest-openapi-transport.md` \u2014 Amendment 2026-04-26 (ADR-0020) block at file head; endpoint table revised: `POST /v1/jobs` returns `{job_id, spec_digest, outcome}`, `GET /v1/jobs/{id}` returns `{spec, spec_digest}`, `GET /v1/cluster/info` returns `{mode, region, reconcilers, broker}`; cites ADR-0020 as source.",
+            "`docs/product/architecture/adr-0015-http-error-mapping.md` \u2014 Amendment 2026-04-26 (ADR-0020) block at file head; \u00a74 status-code matrix idempotent-success row revised to `200 OK, same spec_digest as the original, with outcome: IdempotencyOutcome::Unchanged`; 409 Conflict row unaffected; cites ADR-0020 as source.",
+            "`docs/product/architecture/adr-0020-drop-commit-index-phase-1.md` \u2014 Status flipped from `Proposed. 2026-04-26.` to `Accepted. 2026-04-26.` (per project ADR convention \u2014 Status flips when the change-set lands on `main`).",
+            "`docs/product/architecture/brief.md` \u2014 three `commit_index` references revised inline (no strikethrough): per-entry idempotency-contract references replaced with `spec_digest` + `IdempotencyOutcome`; cluster-status references removed (no replacement field).",
+            "ADRs 0013 and 0014 are NOT amended (verified by grep at amend time \u2014 both have zero `commit_index` references per ADR-0020's grep audit; this is documented as intentional non-amendment).",
+            "Catch-all grep audit: `grep -rln 'commit_index\\|Commit index' crates/ tests/ api/ | grep -v target/` returns zero matches. Any docs/ surface that retains `commit_index` is correctly preserved as historical record (the `docs/evolution/` files capturing the bug cascade, the `docs/feature/.../deliver/roadmap.json` files for prior features) \u2014 verify each remaining match is justified.",
+            "`cargo nextest run --workspace` is GREEN (every step's gate must still hold at the end).",
+            "`cargo test --doc --workspace` is GREEN.",
+            "`cargo xtask openapi-check` is GREEN.",
+            "`cargo xtask dst` is GREEN.",
+            "`cargo xtask mutants --diff origin/main` returns kill-rate \u2265 80% per the per-feature mutation strategy. Run with `run_in_background: true` per `.claude/rules/testing.md` \u00a7 'Mutation testing is the exception'.",
+            "Commit-message shape: `docs(architecture): amend ADRs 0008/0015 + brief + flip ADR-0020 to Accepted`. Body cites ADR-0020 and `Step-ID: 01-05`."
+          ],
+          "test_file": null,
+          "scenario_name": null,
+          "files_to_modify": [
+            "docs/product/architecture/adr-0008-rest-openapi-transport.md",
+            "docs/product/architecture/adr-0015-http-error-mapping.md",
+            "docs/product/architecture/adr-0020-drop-commit-index-phase-1.md",
+            "docs/product/architecture/brief.md"
+          ],
+          "implementation_notes": "Per project memory `feedback_delegate_to_architect`, ADR amendments and brief.md edits go through the architect agent (Morgan), not inline editing by the crafter. The crafter dispatches to architect for these four files; the crafter runs the grep audit, the test gates, the OpenAPI check, the DST gate, and the mutation gate directly. The grep audit is the definitive completeness check per ADR-0020 \u00a7Enforcement and `upstream-changes.md` \u00a712 \u2014 zero matches outside `docs/` is the bar. Each remaining `docs/` match is verified justified: `docs/evolution/2026-04-25-fix-commit-index-per-entry.md`, `docs/evolution/2026-04-25-fix-commit-counter-and-watch-doc.md`, `docs/evolution/2026-04-26-fix-commit-counter-and-watch-doc.md` (bug-cascade historical record), `docs/feature/phase-1-control-plane-core/deliver/roadmap.json` and `docs/feature/fix-commit-index-per-entry/deliver/roadmap.json` (frozen feature roadmaps), `docs/feature/redesign-drop-commit-index/...` (this feature's own DESIGN/DELIVER artefacts including this roadmap.json \u2014 the references are by-design). Per memory `feedback_fix_clippy_dont_defer`, any clippy issues surfaced during the workspace-wide checks land in this step; do not defer to follow-up. Per memory `feedback_no_unrequested_ci_lefthook`, do not auto-wire any new tests into CI/lefthook beyond what already gates the workspace. Mutation gate semantics: per-PR, diff-scoped via `cargo xtask mutants --diff origin/main`; kill-rate \u2265 80% per the per-feature strategy in this repo. After the mutation run completes (pass, fail, or cancel), run `git checkout -- crates/` to restore any mutated source the wrapper did not clean up itself per `.claude/rules/testing.md` \u00a7 'Mutation testing is the exception'.",
+          "quality_gates": [
+            "ADR-0008 amended",
+            "ADR-0015 amended",
+            "ADR-0020 status flipped to Accepted",
+            "brief.md edited",
+            "grep audit zero matches outside docs/",
+            "cargo nextest run --workspace passes",
+            "cargo test --doc --workspace passes",
+            "cargo xtask openapi-check passes",
+            "cargo xtask dst passes",
+            "cargo xtask mutants --diff origin/main kill-rate >= 80%",
+            "single commit",
+            "ADR-0020 cited in body"
+          ],
+          "estimated_hours": 1.5,
+          "deliverables": [
+            "ADR-0008 amendment block",
+            "ADR-0015 amendment block",
+            "ADR-0020 status flipped to Accepted",
+            "brief.md three references revised",
+            "grep-audit completion",
+            "mutation kill-rate >= 80% witnessed"
+          ]
+        }
+      ]
+    }
+  ],
+  "review": {
+    "date": "2026-04-26",
+    "reviewer": "Atlas (nw-solution-architect-reviewer)",
+    "verdict": "APPROVED",
+    "blocking_issues_count": 0,
+    "non_blocking_issues_count": 0,
+    "findings_summary": "10 findings, all resolved (DISTILL coverage, surgery surface coverage, step ordering, sizing flags non-blocking per project convention, single-cut discipline, quality gates, locked decisions, ADR ownership).",
+    "praise": [
+      "37-file surgery surface partitioned across 5 steps with each step having exactly one observable outcome",
+      "All four upstream-changes.md peer-review findings (snapshot frame, IdempotencyOutcome location, test enumeration, sim adapter path) incorporated with locked decisions and explicit citations",
+      "Implementation notes carry load-bearing detail; crafter has no ambiguous decision points",
+      "Quality gates ordered weakest to strongest (unit tests \u2192 workspace nextest \u2192 mutation testing); respects CI budget and feedback velocity"
+    ]
+  }
+}
