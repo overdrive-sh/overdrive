@@ -1,24 +1,22 @@
 //! Regression tests for the "phantom write" defect class — operations
-//! that observe no underlying state change must not advance
-//! `commit_index` and must not emit watch events.
+//! that observe no underlying state change must not emit watch events.
 //!
-//! The redb backend formerly bumped the commit counter and fired a
-//! `(key, empty-value)` delete event regardless of whether
-//! `redb::Table::remove` actually removed a row, and committed a no-op
-//! write transaction (with a counter bump) when handed an empty `txn`
-//! ops vector. Two consequences:
+//! The redb backend formerly fired a `(key, empty-value)` delete event
+//! regardless of whether `redb::Table::remove` actually removed a row,
+//! so `watch(prefix)` subscribers received a spurious delete event for
+//! a key that was never present.
 //!
-//! 1. `commit_index()` / `cluster_status` observers saw false
-//!    monotonic advancement.
-//! 2. `watch(prefix)` subscribers received a spurious delete event for
-//!    a key that was never present.
+//! Per ADR-0020 (drop `commit_index` from Phase 1) the previous
+//! companion assertion — "no `commit_index` advancement" — has no
+//! counter to assert against; only the watch-event property remains.
+//! See `redesign-drop-commit-index/design/upstream-changes.md` §7.
 //!
 //! These tests pin the desired contract:
 //!
-//! * `delete(absent_key)` — counter unchanged, no watch event.
-//! * `txn([])` — counter unchanged, returns `Committed`, no events.
-//! * `txn([Delete{absent}, Put{...}])` — single bump (the put), no
-//!   delete event for the absent key, put event still fires.
+//! * `delete(absent_key)` — no watch event.
+//! * `txn([])` — returns `Committed`, no events.
+//! * `txn([Delete{absent}, Put{...}])` — single put event, no
+//!   delete event for the absent key.
 
 #![allow(clippy::expect_used)]
 
@@ -35,27 +33,6 @@ fn store() -> (LocalIntentStore, TempDir) {
     let tmp = TempDir::new().expect("TempDir");
     let store = LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open");
     (store, tmp)
-}
-
-// ---------------------------------------------------------------------------
-// delete(absent_key) must NOT advance commit_index. The store starts at
-// 0 and stays at 0 — a phantom bump would surface this immediately.
-// ---------------------------------------------------------------------------
-
-#[tokio::test]
-async fn delete_of_absent_key_does_not_advance_commit_index() {
-    let (store, _tmp) = store();
-    assert_eq!(store.commit_index(), 0);
-
-    store.delete(b"jobs/never-existed").await.expect("delete absent");
-
-    assert_eq!(
-        store.commit_index(),
-        0,
-        "delete of an absent key must be an idempotent no-op — no \
-         counter advancement, no false monotone for cluster_status \
-         observers",
-    );
 }
 
 // ---------------------------------------------------------------------------
@@ -81,55 +58,8 @@ async fn delete_of_absent_key_emits_no_watch_event() {
 }
 
 // ---------------------------------------------------------------------------
-// delete(absent_key) followed by a real put must produce exactly one
-// commit_index advance — pins the boundary where the bump is gated on
-// the remove having effect.
-// ---------------------------------------------------------------------------
-
-#[tokio::test]
-async fn delete_absent_then_put_advances_commit_index_by_exactly_one() {
-    let (store, _tmp) = store();
-    assert_eq!(store.commit_index(), 0);
-
-    store.delete(b"jobs/never-existed").await.expect("delete absent");
-    store.put(b"jobs/payments", b"spec").await.expect("put");
-
-    assert_eq!(
-        store.commit_index(),
-        1,
-        "the put advances by 1; the prior absent-delete must have been \
-         a no-op — a phantom bump would land us at 2",
-    );
-}
-
-// ---------------------------------------------------------------------------
-// Empty txn must NOT advance commit_index. Returns Committed (the txn
-// is logically valid; it just had nothing to do) but the counter is
-// untouched.
-// ---------------------------------------------------------------------------
-
-#[tokio::test]
-async fn empty_txn_does_not_advance_commit_index() {
-    let (store, _tmp) = store();
-    assert_eq!(store.commit_index(), 0);
-
-    let outcome = store.txn(Vec::new()).await.expect("empty txn");
-
-    assert!(
-        matches!(outcome, TxnOutcome::Committed),
-        "empty txn must report Committed (no failure), got {outcome:?}",
-    );
-    assert_eq!(
-        store.commit_index(),
-        0,
-        "an empty txn has no effect — bumping commit_index would leak \
-         false monotone advancement to cluster_status observers",
-    );
-}
-
-// ---------------------------------------------------------------------------
-// Empty txn must NOT emit any watch events. There is nothing to
-// announce.
+// Empty txn returns Committed (the txn is logically valid; it just had
+// nothing to do) and emits no watch events.
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
@@ -138,24 +68,25 @@ async fn empty_txn_emits_no_watch_event() {
 
     let mut watch = store.watch(b"jobs/").await.expect("watch subscribe");
 
-    store.txn(Vec::new()).await.expect("empty txn");
+    let outcome = store.txn(Vec::new()).await.expect("empty txn");
 
+    assert!(
+        matches!(outcome, TxnOutcome::Committed),
+        "empty txn must report Committed (no failure), got {outcome:?}",
+    );
     let next = timeout(Duration::from_millis(150), watch.next()).await;
     assert!(next.is_err(), "empty txn must not emit any watch events; got {next:?}");
 }
 
 // ---------------------------------------------------------------------------
 // txn containing a Delete of an absent key + a real Put must:
-//   - bump commit_index by exactly 1 (the txn-level bump, unchanged)
 //   - emit a watch event for the put
 //   - NOT emit a phantom delete event for the absent key
-// This is the "per-op effective" gating extension of the same fix.
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
 async fn txn_with_absent_delete_and_real_put_emits_only_the_put_event() {
     let (store, _tmp) = store();
-    assert_eq!(store.commit_index(), 0);
 
     let mut watch = store.watch(b"jobs/").await.expect("watch subscribe");
 
@@ -171,11 +102,6 @@ async fn txn_with_absent_delete_and_real_put_emits_only_the_put_event() {
         .expect("mixed txn");
 
     assert!(matches!(outcome, TxnOutcome::Committed), "mixed txn must commit");
-    assert_eq!(
-        store.commit_index(),
-        1,
-        "mixed txn advances commit_index by exactly 1 (per-txn bump)",
-    );
 
     // First event must be the put — not a phantom delete.
     let first = timeout(Duration::from_secs(2), watch.next())

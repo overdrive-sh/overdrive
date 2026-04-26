@@ -9,9 +9,10 @@
 //!
 //! Acceptance coverage:
 //!   (a) `cluster::status` against in-process server returns typed
-//!       `ClusterStatusOutput` carrying `mode`, `region`, `commit_index`,
-//!       the reconciler registry (includes `noop-heartbeat`), and typed
-//!       broker counters.
+//!       `ClusterStatusOutput` carrying `mode`, `region`, the reconciler
+//!       registry (includes `noop-heartbeat`), and typed broker
+//!       counters (per ADR-0020 the four-field shape; the
+//!       `commit_index` field is dropped).
 //!   (b) `node::list` against in-process server returns an honest empty
 //!       rows vector + an empty-state message naming
 //!       `phase-1-first-workload`.

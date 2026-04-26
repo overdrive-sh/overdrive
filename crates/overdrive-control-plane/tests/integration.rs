@@ -30,12 +30,15 @@
 // lookup base so the per-scenario files under `tests/integration/`
 // resolve naturally.
 mod integration {
+    //! Per ADR-0020 (drop `commit_index` from Phase 1) the
+    //! `per_entry_commit_index` module was deleted in step 01-04 of
+    //! `redesign-drop-commit-index` — the per-entry index assertion
+    //! has no consumer on the post-ADR-0020 wire shape.
     mod concurrent_submit_toctou;
     mod describe_round_trip;
     mod idempotent_resubmit;
     mod libsql_isolation;
     mod observation_empty_rows;
-    mod per_entry_commit_index;
     mod server_lifecycle;
     mod submit_round_trip;
     mod tls_bootstrap;

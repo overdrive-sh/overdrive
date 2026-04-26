@@ -91,7 +91,7 @@ pub enum AllocCommand {
     /// Read canonical `spec_digest` for a job and the number of live
     /// allocations for it. Named after ADR-0014's `GET /v1/jobs/{id}`
     /// + `GET /v1/allocs` composition — the CLI surface is a single
-    /// command even though it spans two handlers.
+    ///   command even though it spans two handlers.
     Status {
         /// Canonical `JobId` to describe.
         #[arg(long)]

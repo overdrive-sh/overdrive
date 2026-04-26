@@ -3,6 +3,11 @@
 //! control-plane `submit_job` handler relies on to close the TOCTOU
 //! race between idempotent re-submit and conflicting-spec detection.
 //!
+//! Per ADR-0020 (drop `commit_index` from Phase 1) the `PutOutcome`
+//! variants are unit-like (`Inserted`) / single-field (`KeyExists {
+//! existing }`); the per-entry index column was dropped. See
+//! `redesign-drop-commit-index/design/upstream-changes.md` §7.
+//!
 //! Port-to-port discipline: every assertion drives the `IntentStore`
 //! trait surface. No internal redb types are inspected.
 //!
@@ -29,16 +34,15 @@ async fn put_if_absent_on_empty_key_inserts_and_reports_inserted() {
     let value: &[u8] = b"spec-bytes-v1";
 
     let outcome = store.put_if_absent(key, value).await.expect("put_if_absent");
-    let inserted_idx = match outcome {
-        PutOutcome::Inserted { commit_index } => commit_index,
-        PutOutcome::KeyExists { existing, commit_index } => panic!(
-            "expected Inserted on empty key; got KeyExists {{ existing: {existing:?}, commit_index: {commit_index} }}"
-        ),
-    };
-    assert!(inserted_idx >= 1, "Inserted on empty key must assign a commit_index >= 1");
+    match outcome {
+        PutOutcome::Inserted => {}
+        PutOutcome::KeyExists { existing } => {
+            panic!("expected Inserted on empty key; got KeyExists {{ existing: {existing:?} }}")
+        }
+    }
 
     let read = store.get(key).await.expect("get");
-    assert_eq!(read, Some((Bytes::copy_from_slice(value), inserted_idx)));
+    assert_eq!(read, Some(Bytes::copy_from_slice(value)));
 }
 
 // -----------------------------------------------------------------------------
@@ -55,86 +59,67 @@ async fn put_if_absent_on_populated_key_returns_existing_bytes_and_does_not_over
     let first: &[u8] = b"incumbent-bytes";
     store.put(key, first).await.expect("seed put");
 
-    // Capture the seed put's index via a follow-up `get` so we can
-    // assert KeyExists carries the SAME index — the per-entry contract.
-    let (_, seed_idx) = store.get(key).await.expect("get post-seed").expect("seed must be present");
-
     let outcome = store.put_if_absent(key, b"would-have-clobbered").await.expect("put_if_absent");
     match outcome {
-        PutOutcome::KeyExists { existing, commit_index } => {
+        PutOutcome::KeyExists { existing } => {
             assert_eq!(
                 existing.as_ref(),
                 first,
                 "KeyExists must carry the incumbent bytes so the caller can compare",
             );
-            assert_eq!(
-                commit_index, seed_idx,
-                "KeyExists.commit_index must carry the prior write's per-entry \
-                 index ({seed_idx}); got {commit_index}",
-            );
         }
-        PutOutcome::Inserted { commit_index } => panic!(
-            "expected KeyExists on populated key; got Inserted {{ commit_index: {commit_index} }}"
-        ),
+        PutOutcome::Inserted => {
+            panic!("expected KeyExists on populated key; got Inserted")
+        }
     }
 
     // The underlying store must still hold the original bytes — the
-    // losing payload never touched the key. The per-entry index also
-    // remains the seed's index.
+    // losing payload never touched the key.
     let read = store.get(key).await.expect("get");
     assert_eq!(
         read,
-        Some((Bytes::copy_from_slice(first), seed_idx)),
+        Some(Bytes::copy_from_slice(first)),
         "`put_if_absent` on a populated key must be a no-op write; \
-         the incumbent bytes AND per-entry index must be untouched",
+         the incumbent bytes must be untouched",
     );
 }
 
 // -----------------------------------------------------------------------------
-// Scenario 3 — `put_if_absent` does NOT bump `commit_index` on the
-// `KeyExists` branch. This is what makes concurrent idempotent
-// re-submissions through the handler return the SAME index N times.
+// Scenario 3 — repeated `put_if_absent` against a populated key always
+// returns `KeyExists` with the same incumbent bytes — the idempotency
+// witness handlers rely on (no overwrite, no drift).
 // -----------------------------------------------------------------------------
 
 #[tokio::test]
-async fn put_if_absent_does_not_advance_commit_index_on_key_exists() {
+async fn put_if_absent_repeated_calls_against_populated_key_always_return_key_exists() {
     let tmp = TempDir::new().expect("temp dir");
     let store = LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open");
 
     let key: &[u8] = b"jobs/payments";
     store.put(key, b"seed").await.expect("seed put");
-    let after_seed = store.commit_index();
 
-    // Capture the seed's per-entry index so every KeyExists in the
-    // loop can be asserted to carry it.
-    let (_, seed_idx) = store.get(key).await.expect("get post-seed").expect("seed must be present");
-
-    // Every no-op put_if_absent must leave the counter alone AND
-    // return the seed's per-entry index.
+    // Every no-op put_if_absent must return the seed's bytes.
     for _ in 0..5 {
         let outcome =
             store.put_if_absent(key, b"would-have-clobbered").await.expect("put_if_absent");
         match outcome {
-            PutOutcome::KeyExists { commit_index, .. } => {
+            PutOutcome::KeyExists { existing } => {
                 assert_eq!(
-                    commit_index, seed_idx,
-                    "every KeyExists must carry the seed's per-entry index ({seed_idx}); \
-                     got {commit_index} — drift here means the index is being recomputed \
-                     rather than read from the stored row",
+                    existing.as_ref(),
+                    b"seed".as_slice(),
+                    "KeyExists must carry the seed bytes verbatim — drift here means \
+                     the incumbent is being overwritten or the read is racing the write",
                 );
             }
-            PutOutcome::Inserted { commit_index } => panic!(
-                "every attempt against a populated key must return KeyExists; got \
-                 Inserted {{ commit_index: {commit_index} }}"
-            ),
+            PutOutcome::Inserted => {
+                panic!("every attempt against a populated key must return KeyExists")
+            }
         }
     }
-    assert_eq!(
-        store.commit_index(),
-        after_seed,
-        "commit_index must NOT advance on KeyExists — a bump here would surface \
-         to the handler as a spurious commit_index drift across idempotent submits",
-    );
+
+    // The store still holds the seed bytes after the loop.
+    let read = store.get(key).await.expect("get");
+    assert_eq!(read, Some(Bytes::copy_from_slice(b"seed")));
 }
 
 // -----------------------------------------------------------------------------
@@ -164,14 +149,14 @@ async fn concurrent_put_if_absent_same_key_different_values_yields_exactly_one_w
         });
     }
 
-    let mut winners: Vec<(Vec<u8>, u64)> = Vec::new();
-    let mut losers_saw_incumbent: Vec<(Bytes, u64)> = Vec::new();
+    let mut winners: Vec<Vec<u8>> = Vec::new();
+    let mut losers_saw_incumbent: Vec<Bytes> = Vec::new();
     while let Some(res) = set.join_next().await {
         let (value, outcome) = res.expect("join task");
         match outcome {
-            PutOutcome::Inserted { commit_index } => winners.push((value, commit_index)),
-            PutOutcome::KeyExists { existing, commit_index } => {
-                losers_saw_incumbent.push((existing, commit_index));
+            PutOutcome::Inserted => winners.push(value),
+            PutOutcome::KeyExists { existing } => {
+                losers_saw_incumbent.push(existing);
             }
         }
     }
@@ -188,64 +173,22 @@ async fn concurrent_put_if_absent_same_key_different_values_yields_exactly_one_w
         winners.len(),
     );
 
-    // Every loser must see the winner's bytes AND the winner's
-    // per-entry commit_index — the per-entry contract: KeyExists
-    // reflects the prior Inserted's index.
-    let (winning_value, winning_idx) = winners[0].clone();
+    // Every loser must see the winner's bytes.
+    let winning_value = winners[0].clone();
     assert_eq!(
         losers_saw_incumbent.len(),
         (N as usize) - 1,
         "every non-winner must return KeyExists",
     );
-    for (existing, loser_idx) in &losers_saw_incumbent {
+    for existing in &losers_saw_incumbent {
         assert_eq!(
             existing.as_ref(),
             winning_value.as_slice(),
             "every loser must observe the winner's bytes via KeyExists",
         );
-        assert_eq!(
-            *loser_idx, winning_idx,
-            "every loser's KeyExists.commit_index must equal the winner's \
-             Inserted.commit_index ({winning_idx}); got {loser_idx} — this \
-             is the per-entry-index contract under contention",
-        );
     }
 
-    // And the store must hold byte-exactly the winner's bytes at the
-    // winner's per-entry index.
+    // And the store must hold byte-exactly the winner's bytes.
     let read = store.get(key).await.expect("get");
-    assert_eq!(read, Some((Bytes::from(winning_value), winning_idx)));
-}
-
-// -----------------------------------------------------------------------------
-// Scenario 5 — `Inserted` bumps `commit_index` exactly once. The
-// counter-advance contract is the same as `put`; handlers that
-// surface `commit_index` on write responses depend on it.
-// -----------------------------------------------------------------------------
-
-#[tokio::test]
-async fn put_if_absent_inserted_branch_advances_commit_index_once() {
-    let tmp = TempDir::new().expect("temp dir");
-    let store = LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open");
-
-    let before = store.commit_index();
-    let outcome = store.put_if_absent(b"jobs/payments", b"v1").await.expect("put_if_absent");
-    let inserted_idx = match outcome {
-        PutOutcome::Inserted { commit_index } => commit_index,
-        PutOutcome::KeyExists { .. } => panic!("expected Inserted on empty key"),
-    };
-    assert_eq!(
-        store.commit_index(),
-        before + 1,
-        "Inserted branch must bump commit_index by exactly 1 (same contract as `put`)",
-    );
-    // The per-entry index returned by Inserted must equal the
-    // post-bump global counter — both bump-and-capture happens inside
-    // the same write transaction.
-    assert_eq!(
-        inserted_idx,
-        before + 1,
-        "Inserted.commit_index must equal the post-bump global counter ({}); got {inserted_idx}",
-        before + 1,
-    );
+    assert_eq!(read, Some(Bytes::from(winning_value)));
 }

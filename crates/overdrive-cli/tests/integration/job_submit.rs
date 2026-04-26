@@ -7,12 +7,14 @@
 //! TOML file from disk, validates locally through `Job::from_spec`
 //! (ADR-0011 constructor), POSTs `SubmitJobRequest` via the `ApiClient`
 //! from step 05-01, and returns a typed `SubmitOutput` with `job_id`,
-//! `intent_key`, `commit_index`, `endpoint`, and `next_command`.
+//! `intent_key`, `spec_digest`, `outcome`, `endpoint`, and
+//! `next_command` (per ADR-0020 the `commit_index` field is dropped).
 //!
 //! Acceptance coverage:
 //!   (a) valid TOML against in-process server returns `SubmitOutput`
 //!       with `job_id = "payments"`, `intent_key = "jobs/payments"`,
-//!       `commit_index >= 1`, `next_command` naming
+//!       `outcome = IdempotencyOutcome::Inserted`, a 64-char
+//!       `spec_digest`, and `next_command` naming
 //!       `overdrive alloc status --job payments`.
 //!   (b) `replicas = 0` returns `CliError::InvalidSpec { field:
 //!       "replicas", message }` WITHOUT issuing any HTTP — the handler
@@ -32,6 +34,7 @@ use std::path::{Path, PathBuf};
 use overdrive_cli::commands::job::{SubmitArgs, SubmitOutput};
 use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
 use overdrive_cli::http_client::CliError;
+use overdrive_control_plane::api::IdempotencyOutcome;
 use tempfile::TempDir;
 
 /// Spin up a real in-process control-plane server on `127.0.0.1:0` and
@@ -125,10 +128,17 @@ async fn submit_with_valid_toml_against_in_process_server_returns_submit_output_
         output.intent_key, "jobs/payments",
         "SubmitOutput.intent_key must be 'jobs/payments'",
     );
-    assert!(
-        output.commit_index >= 1,
-        "SubmitOutput.commit_index must be >= 1; got {}",
-        output.commit_index,
+    assert_eq!(
+        output.outcome,
+        IdempotencyOutcome::Inserted,
+        "SubmitOutput.outcome must be `Inserted` on a fresh submit; got {:?}",
+        output.outcome,
+    );
+    assert_eq!(
+        output.spec_digest.len(),
+        64,
+        "SubmitOutput.spec_digest must be 64 hex chars (SHA-256); got {} chars",
+        output.spec_digest.len(),
     );
     assert_eq!(
         output.endpoint,

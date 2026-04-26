@@ -12,8 +12,10 @@
 //!    via `GET /v1/jobs/{id}` rather than a back-door redb read, so the
 //!    invariant is phrased in terms an operator can observe.
 //! 3. Triple byte-identical re-submit is stable — N submissions of the
-//!    same spec return the same `commit_index` every time, not just the
-//!    first pair.
+//!    same spec return the same `spec_digest` and `outcome ==
+//!    Unchanged` every time after the first, not just the first pair
+//!    (per ADR-0020 the per-write witness is `outcome` + `spec_digest`,
+//!    not `commit_index`).
 //! 4. The 409 `ErrorBody.message` names the intent key path (`jobs/...`)
 //!    so an operator can identify *which* key conflicted from the wire
 //!    response alone.
@@ -36,7 +38,7 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use overdrive_control_plane::api::{
-    ErrorBody, JobDescription, SubmitJobRequest, SubmitJobResponse,
+    ErrorBody, IdempotencyOutcome, JobDescription, SubmitJobRequest, SubmitJobResponse,
 };
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
 use overdrive_core::aggregate::{IntentKey, Job, JobSpecInput};
@@ -127,11 +129,8 @@ async fn read_intent_key_from_store(data_dir: &std::path::Path, key: &[u8]) -> O
     let path = data_dir.join("intent.redb");
     assert!(path.exists(), "expected redb file at {}; found none", path.display());
     let store = LocalIntentStore::open(&path).expect("open LocalIntentStore for back-door read");
-    // `IntentStore::get` returns `(Bytes, u64)` per
-    // `fix-commit-index-per-entry`; this helper projects to bytes
-    // only because the back-door readers in this file assert on the
-    // rkyv archive shape, not on the per-entry commit_index.
-    store.get(key).await.expect("back-door get").map(|(bytes, _idx)| bytes)
+    // Per ADR-0020 `IntentStore::get` returns `Option<Bytes>`.
+    store.get(key).await.expect("back-door get")
 }
 
 fn payments_spec() -> JobSpecInput {
@@ -155,20 +154,21 @@ fn payments_spec_alt_replicas() -> JobSpecInput {
 }
 
 // -----------------------------------------------------------------------
-// AC (a) — byte-identical re-submit returns the original commit_index
-// and the store still contains exactly one entry at the intent key
-// (test-scenarios §4.9, ADR-0015 §4 idempotent success).
+// AC (a) — byte-identical re-submit returns `outcome = Unchanged` plus
+// the SAME `spec_digest` as the first submit, and the store still
+// contains exactly one entry at the intent key (test-scenarios §4.9,
+// ADR-0015 §4 amended by ADR-0020).
 // -----------------------------------------------------------------------
 
 #[tokio::test]
-async fn byte_identical_resubmit_returns_original_commit_index_unchanged() {
+async fn byte_identical_resubmit_returns_outcome_unchanged_and_same_digest() {
     let (handle, bound, tmp, ca_pem) = spawn_server().await;
     let client = client_trusting(&ca_pem);
     let url = format!("https://localhost:{}/v1/jobs", bound.port());
 
     let spec = payments_spec();
 
-    // First submit — captures the ambient commit_index N.
+    // First submit — outcome = Inserted, captures the spec_digest.
     let first: SubmitJobResponse = client
         .post(&url)
         .json(&SubmitJobRequest { spec: spec.clone() })
@@ -179,8 +179,15 @@ async fn byte_identical_resubmit_returns_original_commit_index_unchanged() {
         .await
         .expect("decode first response");
 
-    // Second submit — byte-identical spec; must return the SAME
-    // commit_index, not the next one.
+    assert_eq!(
+        first.outcome,
+        IdempotencyOutcome::Inserted,
+        "first submit must report `outcome = Inserted`; got {:?}",
+        first.outcome,
+    );
+
+    // Second submit — byte-identical spec; must return outcome =
+    // Unchanged and the SAME spec_digest.
     let second: SubmitJobResponse = client
         .post(&url)
         .json(&SubmitJobRequest { spec: spec.clone() })
@@ -192,10 +199,17 @@ async fn byte_identical_resubmit_returns_original_commit_index_unchanged() {
         .expect("decode second response");
 
     assert_eq!(
-        second.commit_index, first.commit_index,
-        "byte-identical re-submit must return the ORIGINAL commit_index; \
+        second.outcome,
+        IdempotencyOutcome::Unchanged,
+        "byte-identical re-submit must report `outcome = Unchanged`; \
+         got {:?}",
+        second.outcome,
+    );
+    assert_eq!(
+        second.spec_digest, first.spec_digest,
+        "byte-identical re-submit must return the ORIGINAL spec_digest; \
          got first = {}, second = {}",
-        first.commit_index, second.commit_index,
+        first.spec_digest, second.spec_digest,
     );
     assert_eq!(second.job_id, first.job_id, "job_id must echo canonical JobId on both submits");
 
@@ -290,10 +304,11 @@ async fn intent_store_unchanged_after_conflict_attempt() {
         .expect("prime submit");
     assert_eq!(primed.status(), reqwest::StatusCode::OK);
 
-    // Capture the commit_index at the moment of the original submit so
-    // we can assert the 409 did not advance it (read-before-write must
-    // NOT call `put` on the conflict branch).
-    let commit_at_prime: SubmitJobResponse = primed.json().await.expect("decode prime response");
+    // Capture the spec_digest at the moment of the original submit so
+    // we can assert that describe() returns the SAME digest after the
+    // 409 (the conflict branch must NOT call `put`, so the stored
+    // bytes must be unchanged).
+    let prime_response: SubmitJobResponse = primed.json().await.expect("decode prime response");
 
     // Reject with replicas = 7 — must be 409.
     let conflict = client
@@ -320,8 +335,9 @@ async fn intent_store_unchanged_after_conflict_attempt() {
         desc_body.spec,
     );
     assert_eq!(
-        desc_body.commit_index, commit_at_prime.commit_index,
-        "commit_index must not advance on a 409 — the conflict branch must NOT call put",
+        desc_body.spec_digest, prime_response.spec_digest,
+        "spec_digest must not change on a 409 — the conflict branch must NOT call put. \
+         If the stored bytes changed, describe would now return a different digest.",
     );
 
     handle.shutdown(Duration::from_secs(2)).await;
@@ -329,18 +345,20 @@ async fn intent_store_unchanged_after_conflict_attempt() {
 
 // -----------------------------------------------------------------------
 // AC (d) — triple byte-identical re-submit is stable: all three return
-// the same commit_index, not just the first pair.
+// the same `spec_digest`; submits 2 and 3 report `outcome = Unchanged`.
+// (Per ADR-0020 the per-write witness is `outcome` + `spec_digest`,
+// not `commit_index`.)
 // -----------------------------------------------------------------------
 
 #[tokio::test]
-async fn triple_resubmit_byte_identical_all_return_same_commit_index() {
+async fn triple_resubmit_byte_identical_all_return_same_digest_with_unchanged_outcome() {
     let (handle, bound, _tmp, ca_pem) = spawn_server().await;
     let client = client_trusting(&ca_pem);
     let url = format!("https://localhost:{}/v1/jobs", bound.port());
 
     let spec = payments_spec();
 
-    let mut indices = Vec::with_capacity(3);
+    let mut responses = Vec::with_capacity(3);
     for attempt in 0..3 {
         let resp: SubmitJobResponse = client
             .post(&url)
@@ -351,19 +369,42 @@ async fn triple_resubmit_byte_identical_all_return_same_commit_index() {
             .json()
             .await
             .expect(&format!("decode response attempt {attempt}"));
-        indices.push(resp.commit_index);
+        responses.push(resp);
     }
 
-    // All three commit indices must be equal — a handler that writes on
-    // every submission would drift the index on attempts 2 and 3.
+    // All three digests must be equal — byte-identical specs hash to
+    // the same digest by SHA-256 construction.
     assert_eq!(
-        indices[0], indices[1],
-        "commit_index must match on submits 1 and 2; got {indices:?}",
+        responses[0].spec_digest, responses[1].spec_digest,
+        "spec_digest must match on submits 1 and 2; got {:?} vs {:?}",
+        responses[0].spec_digest, responses[1].spec_digest,
     );
     assert_eq!(
-        indices[1], indices[2],
-        "commit_index must match on submits 2 and 3 — idempotency must \
-         be stable across N re-submits, not just 2; got {indices:?}",
+        responses[1].spec_digest, responses[2].spec_digest,
+        "spec_digest must match on submits 2 and 3 — byte-identical \
+         specs always hash to the same value; got {:?} vs {:?}",
+        responses[1].spec_digest, responses[2].spec_digest,
+    );
+
+    // Outcome shape: first = Inserted, 2 and 3 = Unchanged.
+    assert_eq!(
+        responses[0].outcome,
+        IdempotencyOutcome::Inserted,
+        "submit 1 must report `outcome = Inserted`; got {:?}",
+        responses[0].outcome,
+    );
+    assert_eq!(
+        responses[1].outcome,
+        IdempotencyOutcome::Unchanged,
+        "submit 2 (byte-identical resubmit) must report `outcome = Unchanged`; got {:?}",
+        responses[1].outcome,
+    );
+    assert_eq!(
+        responses[2].outcome,
+        IdempotencyOutcome::Unchanged,
+        "submit 3 (byte-identical resubmit) must report `outcome = Unchanged` — \
+         idempotency must be stable across N re-submits, not just 2; got {:?}",
+        responses[2].outcome,
     );
 
     handle.shutdown(Duration::from_secs(2)).await;

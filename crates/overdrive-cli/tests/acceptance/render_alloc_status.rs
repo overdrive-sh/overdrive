@@ -9,7 +9,9 @@
 //! Acceptance coverage:
 //!   (d) empty-state rendering contains the `phase-1-first-workload`
 //!       reference (walking-skeleton gate for the onboarding signpost).
-//!   (e) non-empty rendering shows the `spec_digest` + `commit_index`.
+//!   (e) non-empty rendering shows the `spec_digest` (per ADR-0020 the
+//!       `commit_index` field is dropped — the digest is the per-write
+//!       witness).
 
 use overdrive_cli::commands::alloc::AllocStatusOutput;
 
@@ -17,7 +19,6 @@ fn fixture_empty_state() -> AllocStatusOutput {
     AllocStatusOutput {
         job_id: "payments".to_string(),
         spec_digest: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789".to_string(),
-        commit_index: 1,
         allocations_total: 0,
         empty_state_message: "0 allocations for job payments — the scheduler + driver land in \
              phase-1-first-workload"
@@ -29,7 +30,6 @@ fn fixture_with_allocations() -> AllocStatusOutput {
     AllocStatusOutput {
         job_id: "payments".to_string(),
         spec_digest: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string(),
-        commit_index: 7,
         allocations_total: 3,
         empty_state_message: String::new(),
     }
@@ -107,7 +107,6 @@ fn render_alloc_status_suppresses_hint_when_allocations_exist_even_with_message_
     let out = AllocStatusOutput {
         job_id: "payments".to_string(),
         spec_digest: "deadbeef".repeat(8),
-        commit_index: 11,
         allocations_total: 5,
         empty_state_message: "0 allocations for job payments — the scheduler + driver land in \
              phase-1-first-workload"
@@ -140,7 +139,6 @@ fn render_alloc_status_suppresses_hint_when_message_is_empty_even_with_zero_allo
     let out = AllocStatusOutput {
         job_id: "payments".to_string(),
         spec_digest: "cafebabe".repeat(8),
-        commit_index: 3,
         allocations_total: 0,
         empty_state_message: String::new(),
     };

@@ -41,10 +41,9 @@ async fn a_value_written_can_be_read_back() {
     // And Ana reads key K from the same store.
     let read = store.get(key).await.expect("get");
 
-    // Then the returned bytes equal B; the per-entry commit_index is
-    // the index assigned to the put — the freshly-opened store starts
-    // at 0, so the first put's per-entry index is 1.
-    assert_eq!(read, Some((Bytes::copy_from_slice(value), 1)));
+    // Then the returned bytes equal B. Per ADR-0020 the read returns
+    // bytes only — there is no per-entry index column.
+    assert_eq!(read, Some(Bytes::copy_from_slice(value)));
 }
 
 // -----------------------------------------------------------------------------
@@ -132,17 +131,15 @@ async fn a_transaction_commits_all_operations_atomically() {
     // Then the transaction outcome is committed.
     assert!(matches!(outcome, TxnOutcome::Committed), "expected Committed, got {outcome:?}");
 
-    // And every put is readable from the store. The per-entry
-    // commit_index for both txn-written keys is the same (a single
-    // txn shares one index across all its puts) — index 2, since the
-    // seed put took index 1.
+    // And every put is readable from the store. Per ADR-0020 the
+    // read returns bytes only — there is no per-entry index column.
     assert_eq!(
         store.get(b"jobs/payments").await.expect("get payments"),
-        Some((Bytes::copy_from_slice(b"v1"), 2))
+        Some(Bytes::copy_from_slice(b"v1"))
     );
     assert_eq!(
         store.get(b"jobs/auth").await.expect("get auth"),
-        Some((Bytes::copy_from_slice(b"v1"), 2))
+        Some(Bytes::copy_from_slice(b"v1"))
     );
 
     // And the deleted key returns nothing.

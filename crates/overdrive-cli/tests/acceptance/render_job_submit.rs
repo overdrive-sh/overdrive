@@ -9,8 +9,9 @@
 //!
 //! Acceptance coverage:
 //!   (f) `render::job_submit_accepted` emits a multi-line string with
-//!       `Accepted.`, `Job ID:`, `Intent key:`, `Commit index:`,
-//!       `Endpoint:`, `Next:` labels and the corresponding values.
+//!       `Accepted.`, `Job ID:`, `Intent key:`, `Spec digest:`,
+//!       `Outcome:`, `Endpoint:`, `Next:` labels and the corresponding
+//!       values (per ADR-0020 the `Commit index:` line was dropped).
 //!   (g) `render::cli_error` for `CliError::Transport` contains the
 //!       endpoint plus the two suggestion markers ("Verify" the config,
 //!       "Start" the control plane) and does NOT leak the raw `reqwest`
@@ -19,13 +20,17 @@
 
 use overdrive_cli::commands::job::SubmitOutput;
 use overdrive_cli::http_client::CliError;
+use overdrive_control_plane::api::IdempotencyOutcome;
 use url::Url;
+
+const FIXTURE_DIGEST: &str = "deadbeefcafebabe0123456789abcdefdeadbeefcafebabe0123456789abcdef";
 
 fn fixture_submit_output() -> SubmitOutput {
     SubmitOutput {
         job_id: "payments".to_string(),
         intent_key: "jobs/payments".to_string(),
-        commit_index: 17,
+        spec_digest: FIXTURE_DIGEST.to_string(),
+        outcome: IdempotencyOutcome::Inserted,
         endpoint: Url::parse("https://127.0.0.1:7001").expect("parse endpoint"),
         next_command: "overdrive alloc status --job payments".to_string(),
     }
@@ -40,7 +45,9 @@ fn render_job_submit_accepted_contains_required_labels() {
     let out = fixture_submit_output();
     let rendered = overdrive_cli::render::job_submit_accepted(&out);
 
-    for label in ["Accepted.", "Job ID:", "Intent key:", "Commit index:", "Endpoint:", "Next:"] {
+    for label in
+        ["Accepted.", "Job ID:", "Intent key:", "Spec digest:", "Outcome:", "Endpoint:", "Next:"]
+    {
         assert!(
             rendered.contains(label),
             "rendered job_submit_accepted must contain `{label}`; got:\n{rendered}",
@@ -55,8 +62,8 @@ fn render_job_submit_accepted_contains_required_labels() {
         "rendered block must contain intent_key `jobs/payments`; got:\n{rendered}",
     );
     assert!(
-        rendered.contains("17"),
-        "rendered block must contain commit_index 17; got:\n{rendered}",
+        rendered.contains(FIXTURE_DIGEST),
+        "rendered block must contain spec_digest value; got:\n{rendered}",
     );
     assert!(
         rendered.contains("127.0.0.1:7001"),

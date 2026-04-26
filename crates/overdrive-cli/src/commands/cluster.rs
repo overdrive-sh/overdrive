@@ -43,10 +43,11 @@ pub struct StatusArgs {
     pub config_path: PathBuf,
 }
 
-/// Typed output of a successful `cluster status`. Carries the control
-/// plane's self-reported mode, region, reconciler registry, and typed
-/// broker counters per ADR-0013 (amended by ADR-0020 — `commit_index`
-/// dropped, no replacement).
+/// Typed output of a successful `cluster status`.
+///
+/// Carries the control plane's self-reported mode, region, reconciler
+/// registry, and typed broker counters per ADR-0013 (amended by
+/// ADR-0020 — `commit_index` dropped, no replacement).
 #[derive(Debug, Clone)]
 pub struct ClusterStatusOutput {
     /// Phase 1 control-plane mode — always `single` until HA lands.

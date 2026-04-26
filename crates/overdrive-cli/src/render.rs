@@ -110,7 +110,7 @@ pub fn job_submit_accepted(out: &SubmitOutput) -> String {
 /// `unchanged` (verbatim). The JSON wire form is `inserted` /
 /// `unchanged` per `serde(rename_all = "lowercase")` and stays
 /// distinct from this human-form rendering.
-fn outcome_human(outcome: IdempotencyOutcome) -> &'static str {
+const fn outcome_human(outcome: IdempotencyOutcome) -> &'static str {
     match outcome {
         IdempotencyOutcome::Inserted => "created",
         IdempotencyOutcome::Unchanged => "unchanged",

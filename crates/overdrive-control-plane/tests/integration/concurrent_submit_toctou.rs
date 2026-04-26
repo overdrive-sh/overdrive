@@ -10,14 +10,16 @@
 //!
 //! The invariant this test defends:
 //!
-//! * **Exactly one `201 Inserted` (HTTP 200 with a new `commit_index`)
-//!   per unique intent key, no matter how many concurrent submissions
-//!   race on the same key.**
+//! * **Exactly one HTTP 200 with `outcome == Inserted` per unique
+//!   intent key, no matter how many concurrent submissions race on
+//!   the same key.** (Per ADR-0020 the wire-level per-write witness
+//!   is `outcome` + `spec_digest`, not `commit_index`.)
 //! * Every other concurrent submission whose spec differs from the
 //!   winner returns HTTP 409 with `ErrorBody.error == "conflict"`.
 //! * Every other concurrent submission whose spec is byte-identical
-//!   to the winner returns HTTP 200 with the winner's
-//!   `commit_index` — this is the idempotency leg.
+//!   to the winner returns HTTP 200 with `outcome == Unchanged` and
+//!   the same `spec_digest` as the winner — this is the idempotency
+//!   leg.
 //! * The stored bytes at the intent key equal the rkyv archive of
 //!   the winning spec; they are never mutated by the losers.
 //!
@@ -31,7 +33,7 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use overdrive_control_plane::api::{
-    ErrorBody, JobDescription, SubmitJobRequest, SubmitJobResponse,
+    ErrorBody, IdempotencyOutcome, JobDescription, SubmitJobRequest, SubmitJobResponse,
 };
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
 use overdrive_core::aggregate::{IntentKey, Job, JobSpecInput};
@@ -112,11 +114,8 @@ async fn read_intent_key_from_store(data_dir: &std::path::Path, key: &[u8]) -> O
     let path = data_dir.join("intent.redb");
     assert!(path.exists(), "expected redb file at {}; found none", path.display());
     let store = LocalIntentStore::open(&path).expect("open LocalIntentStore for back-door read");
-    // `IntentStore::get` returns `(Bytes, u64)` per
-    // `fix-commit-index-per-entry`; this helper projects to bytes
-    // only because every back-door reader in this file asserts on
-    // the rkyv archive shape, not on the per-entry commit_index.
-    store.get(key).await.expect("back-door get").map(|(bytes, _idx)| bytes)
+    // Per ADR-0020 `IntentStore::get` returns `Option<Bytes>`.
+    store.get(key).await.expect("back-door get")
 }
 
 fn spec_with_replicas(replicas: u32) -> JobSpecInput {
@@ -128,8 +127,8 @@ fn spec_with_replicas(replicas: u32) -> JobSpecInput {
 //
 // Fires N concurrent submits against the same JobId, each carrying a
 // DISTINCT spec (distinct `replicas` — produces distinct rkyv archive
-// bytes). Exactly one must win with HTTP 200 and produce the only
-// commit_index advance; every other submit must return HTTP 409.
+// bytes). Exactly one must win with HTTP 200 + `outcome == Inserted`;
+// every other submit must return HTTP 409.
 //
 // The key property: it does not matter WHICH spec wins — what matters
 // is that exactly one does, and the IntentStore ends up holding
@@ -228,7 +227,8 @@ async fn concurrent_distinct_specs_same_key_commit_exactly_once() {
     // The IntentStore must contain byte-exactly the rkyv archive of the
     // winning spec — no post-commit drift from a losing writer.
     let winning_spec = ok_outcomes[0].0.clone();
-    let winning_commit_index = ok_outcomes[0].1.commit_index;
+    let winning_outcome = ok_outcomes[0].1.outcome;
+    let winning_digest = ok_outcomes[0].1.spec_digest.clone();
 
     handle.shutdown(Duration::from_secs(2)).await;
 
@@ -251,12 +251,22 @@ async fn concurrent_distinct_specs_same_key_commit_exactly_once() {
         winning_spec.replicas,
     );
 
-    // Guard against the winner's commit_index collapsing to zero — if
-    // the atomic insert never bumped the counter the whole round-trip
-    // is suspect even when the stored bytes look right.
-    assert!(
-        winning_commit_index >= 1,
-        "winner's commit_index must advance on insert; got {winning_commit_index}",
+    // Per ADR-0020 the wire-level winner witness is `outcome ==
+    // Inserted` and a non-empty `spec_digest`. A drift to `Unchanged`
+    // here would mean the handler never took the insert branch at
+    // all under contention — the exact bug class the TOCTOU defence
+    // exists to prevent.
+    assert_eq!(
+        winning_outcome,
+        IdempotencyOutcome::Inserted,
+        "winner must report `outcome = Inserted`; got {winning_outcome:?} \
+         — the handler took the idempotency branch instead of inserting",
+    );
+    assert_eq!(
+        winning_digest.len(),
+        64,
+        "winner's spec_digest must be 64 hex chars (SHA-256); got {} chars",
+        winning_digest.len(),
     );
 }
 
@@ -268,11 +278,11 @@ async fn concurrent_distinct_specs_same_key_commit_exactly_once() {
 // could pass the 409 test but silently double-write on the idempotent
 // path — this test would catch that by asserting the IntentStore
 // bytes remain exactly one rkyv archive AND every submit returns the
-// same commit_index.
+// same `spec_digest` (per ADR-0020 the per-write witness).
 // -----------------------------------------------------------------------
 
 #[tokio::test]
-async fn concurrent_byte_identical_submits_return_single_commit_index() {
+async fn concurrent_byte_identical_submits_return_single_spec_digest() {
     const CONCURRENCY: usize = 8;
 
     let (handle, bound, tmp, ca_pem) = spawn_server().await;
@@ -310,31 +320,54 @@ async fn concurrent_byte_identical_submits_return_single_commit_index() {
         responses.push(res.expect("join concurrent identical submit task"));
     }
 
-    // All N responses must carry the same commit_index — the one the
-    // first writer produced. A second commit_index value in the set
+    // All N responses must carry the same `spec_digest` — the one the
+    // first writer produced (per ADR-0020 the spec digest is the
+    // per-write witness; byte-identical specs hash to the same digest
+    // by SHA-256 construction). A second digest value in the set
     // means a second write committed, which is the double-write
     // TOCTOU failure shape.
-    let unique_indices: std::collections::HashSet<u64> =
-        responses.iter().map(|r| r.commit_index).collect();
+    let unique_digests: std::collections::BTreeSet<String> =
+        responses.iter().map(|r| r.spec_digest.clone()).collect();
     assert_eq!(
-        unique_indices.len(),
+        unique_digests.len(),
         1,
         "byte-identical concurrent submits must all return the SAME \
-         commit_index; got {unique_indices:?}. More than one distinct \
-         index means the handler double-wrote under concurrency.",
+         spec_digest; got {unique_digests:?}. More than one distinct \
+         digest means the handler double-wrote under concurrency.",
     );
-    let the_index = *unique_indices.iter().next().expect("one element");
-    assert!(the_index >= 1, "commit_index must be >= 1 after insert; got {the_index}");
+    let the_digest = unique_digests.iter().next().expect("one element").clone();
+    assert_eq!(
+        the_digest.len(),
+        64,
+        "spec_digest must be 64 hex chars (SHA-256); got {} chars",
+        the_digest.len(),
+    );
 
-    // Per-entry commit_index contract (fix-commit-index-per-entry RCA
-    // §WHY 1A) — a follow-on `describe` of the same job_id MUST return
-    // the same commit_index every concurrent submitter saw. A handler
-    // that returns the live store counter at describe-time would drift
-    // here if any other write had happened between submit and describe;
-    // even with no intervening write, this assertion pins the
-    // describe-returns-write-index property by construction. RED
-    // scaffold (Step 01-01) — flips GREEN once Step 01-02 lands the
-    // trait + handler change.
+    // Exactly one response must report `outcome = Inserted` (the
+    // winner); every other must report `outcome = Unchanged`. The
+    // idempotency leg for byte-identical resubmits (ADR-0015 §4
+    // amended by ADR-0020).
+    let inserted_count =
+        responses.iter().filter(|r| r.outcome == IdempotencyOutcome::Inserted).count();
+    let unchanged_count =
+        responses.iter().filter(|r| r.outcome == IdempotencyOutcome::Unchanged).count();
+    assert_eq!(
+        inserted_count, 1,
+        "exactly one byte-identical concurrent submit must report \
+         `outcome = Inserted` (the winner); got {inserted_count}",
+    );
+    assert_eq!(
+        unchanged_count,
+        CONCURRENCY - 1,
+        "every loser of a byte-identical concurrent submit must report \
+         `outcome = Unchanged`; got {unchanged_count} unchanged out of {} losers",
+        CONCURRENCY - 1,
+    );
+
+    // Describe(job_id) must return the same `spec_digest` every
+    // concurrent submitter saw. Per ADR-0020 the digest is the
+    // round-trip witness that submit and describe agree on the same
+    // canonical bytes.
     let job_id_str = responses.first().expect("at least one response").job_id.clone();
     let describe_url = format!("https://localhost:{}/v1/jobs/{}", bound.port(), job_id_str);
     let describe_resp =
@@ -347,12 +380,12 @@ async fn concurrent_byte_identical_submits_return_single_commit_index() {
     let description: JobDescription =
         describe_resp.json().await.expect("decode JobDescription after burst");
     assert_eq!(
-        description.commit_index, the_index,
-        "RED scaffold (Step 01-01) — describe(job_id).commit_index must \
-         equal the index every concurrent submitter saw ({the_index}); got \
-         {} from describe — this is the per-entry contract violation \
-         (RCA §WHY 1A) the fix-commit-index-per-entry feature pins shut.",
-        description.commit_index,
+        description.spec_digest, the_digest,
+        "describe(job_id).spec_digest must equal the digest every \
+         concurrent submitter saw ({the_digest}); got {} from describe \
+         — this is the round-trip property the per-write digest \
+         witness (ADR-0020) defends.",
+        description.spec_digest,
     );
 
     // IntentStore must hold exactly one rkyv archive of the spec —

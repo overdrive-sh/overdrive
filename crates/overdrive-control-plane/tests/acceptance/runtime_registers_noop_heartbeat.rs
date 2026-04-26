@@ -199,7 +199,8 @@ async fn cluster_status_handler_renders_registry_and_broker_counters_via_axum_st
 
     assert_eq!(body.mode, "single", "Phase 1 mode is always 'single'");
     assert_eq!(body.region, "local", "Phase 1 region is always 'local'");
-    assert_eq!(body.commit_index, state.store.commit_index(), "commit_index from store");
+    // Per ADR-0020 `ClusterStatus` is four fields (mode, region,
+    // reconcilers, broker); the `commit_index` field was dropped.
     assert_eq!(
         body.reconcilers,
         vec!["noop-heartbeat".to_string()],

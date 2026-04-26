@@ -3,8 +3,8 @@
 //! Proves the Phase 1 `describe_job` handler round-trip:
 //!
 //! 1. After `POST /v1/jobs`, `GET /v1/jobs/{id}` returns HTTP 200 with
-//!    the canonical `JobDescription` shape — `spec`, `commit_index`,
-//!    `spec_digest`.
+//!    the canonical `JobDescription` shape — `spec`, `spec_digest`
+//!    (per ADR-0020 the `commit_index` field is dropped).
 //! 2. The returned `spec` is byte-identical (via rkyv archive of the
 //!    round-tripped `Job`) to the spec the operator submitted.
 //! 3. `spec_digest` is `ContentHash::of(<rkyv-archived-bytes>).to_string()`.
@@ -149,11 +149,15 @@ async fn get_v1_jobs_id_returns_described_job_after_submit() {
         "described spec must be byte-identical (via rkyv) to the submitted spec",
     );
 
-    // 4. commit_index must be >= 1 — at least one write happened.
-    assert!(
-        description.commit_index >= 1,
-        "described commit_index must be >= 1; got {}",
-        description.commit_index,
+    // 4. spec_digest must be present and non-empty — the per-write
+    //    witness that submit and describe agree on the canonical bytes
+    //    (per ADR-0020). The full digest-equality property is pinned
+    //    in `describe_spec_digest_equals_content_hash_of_archived_bytes`.
+    assert_eq!(
+        description.spec_digest.len(),
+        64,
+        "described spec_digest must be 64 hex chars (SHA-256); got {} chars",
+        description.spec_digest.len(),
     );
 
     handle.shutdown(Duration::from_secs(2)).await;
@@ -291,11 +295,14 @@ async fn describe_spec_digest_equals_content_hash_of_archived_bytes() {
 }
 
 // -----------------------------------------------------------------------
-// AC — §4.6 (reinforced): Describe returns commit_index matching store
+// AC — Describe returns spec_digest matching what submit returned —
+// the round-trip witness that submit and describe agree on the same
+// canonical bytes (per ADR-0020 the per-write witness is `spec_digest`,
+// not `commit_index`).
 // -----------------------------------------------------------------------
 
 #[tokio::test]
-async fn describe_returns_commit_index_matching_store_state() {
+async fn describe_returns_spec_digest_matching_submit_response() {
     let (handle, bound, _tmp, ca_pem) = spawn_server().await;
     let client = client_trusting(&ca_pem);
 
@@ -313,9 +320,9 @@ async fn describe_returns_commit_index_matching_store_state() {
     let description: JobDescription = resp.json().await.expect("decode JobDescription");
 
     assert_eq!(
-        description.commit_index, submit_body.commit_index,
-        "described commit_index must match the value returned by submit \
-         (no writes happened between submit and describe)",
+        description.spec_digest, submit_body.spec_digest,
+        "described spec_digest must match the value returned by submit \
+         — both come from hashing the same rkyv-archived bytes",
     );
 
     handle.shutdown(Duration::from_secs(2)).await;

@@ -66,9 +66,10 @@ use thiserror::Error;
 pub const MAGIC: [u8; 4] = *b"OSNP";
 
 /// Current frame version produced by [`encode`] and accepted by
-/// [`decode`]. Stored at offset 4..6 as a little-endian `u16`. Bumping
-/// this is a cross-crate breaking change — `RaftStore` consumes the
-/// same frame.
+/// [`decode`].
+///
+/// Stored at offset 4..6 as a little-endian `u16`. Bumping this is a
+/// cross-crate breaking change — `RaftStore` consumes the same frame.
 pub const VERSION: u16 = 1;
 
 /// Length of the fixed-size header (magic + version).

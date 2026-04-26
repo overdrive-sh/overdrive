@@ -24,7 +24,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use overdrive_cli::http_client::{ApiClient, CliError};
-use overdrive_control_plane::api::{JobDescription, SubmitJobRequest};
+use overdrive_control_plane::api::{IdempotencyOutcome, JobDescription, SubmitJobRequest};
 use overdrive_control_plane::tls_bootstrap::{mint_ephemeral_ca, write_trust_triple};
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
 use overdrive_core::aggregate::JobSpecInput;
@@ -138,13 +138,30 @@ async fn submit_job_then_describe_round_trips_via_http_client() {
     let submit_resp =
         client.submit_job(SubmitJobRequest { spec: spec.clone() }).await.expect("submit_job");
     assert!(!submit_resp.job_id.is_empty(), "job_id must not be empty");
-    assert!(submit_resp.commit_index > 0, "commit_index must be > 0");
+    // Per ADR-0020 the per-write witness is `outcome` + `spec_digest`;
+    // a fresh insert reports `outcome = Inserted` with a 64-char digest.
+    assert_eq!(
+        submit_resp.outcome,
+        IdempotencyOutcome::Inserted,
+        "fresh submit must report `outcome = Inserted`; got {:?}",
+        submit_resp.outcome,
+    );
+    assert_eq!(
+        submit_resp.spec_digest.len(),
+        64,
+        "spec_digest must be 64 hex chars (SHA-256); got {} chars",
+        submit_resp.spec_digest.len(),
+    );
 
     let description: JobDescription =
         client.describe_job(&submit_resp.job_id).await.expect("describe_job");
     assert_eq!(description.spec, spec, "round-tripped spec must match submitted spec");
-    assert_eq!(description.commit_index, submit_resp.commit_index);
-    assert!(!description.spec_digest.is_empty(), "spec_digest must not be empty");
+    assert_eq!(
+        description.spec_digest, submit_resp.spec_digest,
+        "describe must echo the same spec_digest submit returned — \
+         the round-trip witness submit and describe agree on the same \
+         canonical bytes (ADR-0020).",
+    );
 
     handle.shutdown(Duration::from_secs(2)).await;
 }

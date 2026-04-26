@@ -286,6 +286,30 @@ pub async fn evaluate_snapshot_roundtrip(intent: &impl IntentStore) -> Invariant
 // IntentStoreReturnsCallerBytes
 // ---------------------------------------------------------------------------
 
+/// Probe keys for [`evaluate_intent_store_returns_caller_bytes`]. Owns
+/// each [`overdrive_core::aggregate::IntentKey`] so the slice borrows
+/// returned by `as_bytes()` outlive the evaluator's loop.
+struct IntentStoreProbeKeys {
+    empty: overdrive_core::aggregate::IntentKey,
+    le_prefix: overdrive_core::aggregate::IntentKey,
+    long: overdrive_core::aggregate::IntentKey,
+}
+
+/// Derive the three probe keys via `IntentKey::for_job` so the literal
+/// `jobs/` prefix is sourced from `aggregate/mod.rs` (the SSOT).
+fn derive_intent_store_probe_keys() -> Result<IntentStoreProbeKeys, String> {
+    let mk = |raw: &str| -> Result<overdrive_core::aggregate::IntentKey, String> {
+        overdrive_core::id::JobId::new(raw)
+            .map(|id| overdrive_core::aggregate::IntentKey::for_job(&id))
+            .map_err(|e| format!("derive IntentKey for {raw}: {e}"))
+    };
+    Ok(IntentStoreProbeKeys {
+        empty: mk("k-empty")?,
+        le_prefix: mk("k-le-prefix")?,
+        long: mk("k-long")?,
+    })
+}
+
 /// Evaluate the structural-regression guard from ADR-0020 §Enforcement.
 ///
 /// Writes a small fixed set of `(key, value)` pairs through
@@ -336,13 +360,22 @@ pub async fn evaluate_intent_store_returns_caller_bytes() -> InvariantResult {
     //   * empty value — inline framing would surface 8 prefix bytes
     //   * 8-byte LE-looking prefix — inline framing would slice it off
     //   * arbitrary 32-byte payload — general round-trip witness
+    //
+    // Keys are derived through `IntentKey::for_job` so the literal
+    // `jobs/` prefix appears in exactly one production file (the
+    // SSOT in `aggregate/mod.rs`); the canonical-key grep gate in
+    // `overdrive-core/tests/acceptance/intent_key_canonical.rs`
+    // enforces this.
+    let keys = match derive_intent_store_probe_keys() {
+        Ok(k) => k,
+        Err(err) => {
+            return result(name, InvariantStatus::Fail, "host-0", Some(err));
+        }
+    };
     let fixtures: &[(&[u8], &[u8])] = &[
-        (b"jobs/k-empty", b""),
-        (b"jobs/k-le-prefix", &[0x07, 0, 0, 0, 0, 0, 0, 0, b'a', b'b', b'c']),
-        (
-            b"jobs/k-long",
-            b"the-rain-in-spain-falls-mainly-on",
-        ),
+        (keys.empty.as_bytes(), b""),
+        (keys.le_prefix.as_bytes(), &[0x07, 0, 0, 0, 0, 0, 0, 0, b'a', b'b', b'c']),
+        (keys.long.as_bytes(), b"the-rain-in-spain-falls-mainly-on"),
     ];
 
     // Write the first two via `put`, the third via `put_if_absent` so
@@ -395,10 +428,7 @@ pub async fn evaluate_intent_store_returns_caller_bytes() -> InvariantResult {
                     name,
                     InvariantStatus::Fail,
                     "host-0",
-                    Some(format!(
-                        "get({:?}) returned None after put",
-                        String::from_utf8_lossy(k),
-                    )),
+                    Some(format!("get({:?}) returned None after put", String::from_utf8_lossy(k))),
                 );
             }
             Err(err) => {
@@ -406,10 +436,7 @@ pub async fn evaluate_intent_store_returns_caller_bytes() -> InvariantResult {
                     name,
                     InvariantStatus::Fail,
                     "host-0",
-                    Some(format!(
-                        "get({:?}) failed: {err}",
-                        String::from_utf8_lossy(k),
-                    )),
+                    Some(format!("get({:?}) failed: {err}", String::from_utf8_lossy(k))),
                 );
             }
         }

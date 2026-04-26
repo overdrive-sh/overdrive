@@ -4,10 +4,13 @@
 //!
 //! 1. Validates the spec via `Job::from_spec` (errors map to HTTP 400).
 //! 2. Archives via `rkyv::to_bytes::<rancor::Error>`.
-//! 3. Commits through `IntentStore::put` at `jobs/<JobId>`.
-//! 4. Returns `(job_id, commit_index)` with `commit_index >= 1`.
+//! 3. Commits through `IntentStore::put_if_absent` at `jobs/<JobId>`.
+//! 4. Returns `{job_id, spec_digest, outcome}` with
+//!    `outcome == Inserted` on a fresh insert (per ADR-0020 the
+//!    `commit_index` field is dropped).
 //! 5. Idempotency: byte-identical re-submission returns the same
-//!    `commit_index` and HTTP 200 (ADR-0015 §4).
+//!    `spec_digest` and `outcome == Unchanged` (ADR-0015 §4 amended
+//!    by ADR-0020).
 //! 6. Conflict: a different spec at the same intent key returns HTTP
 //!    409 with an `ErrorBody` (ADR-0015 §4).
 //!
@@ -19,7 +22,9 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use bytes::Bytes;
-use overdrive_control_plane::api::{ErrorBody, SubmitJobRequest, SubmitJobResponse};
+use overdrive_control_plane::api::{
+    ErrorBody, IdempotencyOutcome, SubmitJobRequest, SubmitJobResponse,
+};
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
 use overdrive_core::aggregate::{IntentKey, Job, JobSpecInput};
 use overdrive_core::id::JobId;
@@ -120,11 +125,8 @@ async fn read_intent_key_from_store(data_dir: &std::path::Path, key: &[u8]) -> O
     let path = data_dir.join("intent.redb");
     assert!(path.exists(), "expected redb file at {}; found none", path.display());
     let store = LocalIntentStore::open(&path).expect("open LocalIntentStore for back-door read");
-    // `IntentStore::get` returns `(Bytes, u64)` per
-    // `fix-commit-index-per-entry`; this helper projects to bytes
-    // only because the back-door readers in this file assert on the
-    // rkyv archive shape, not on the per-entry commit_index.
-    store.get(key).await.expect("back-door get").map(|(bytes, _idx)| bytes)
+    // Per ADR-0020 `IntentStore::get` returns `Option<Bytes>`.
+    store.get(key).await.expect("back-door get")
 }
 
 fn payments_spec() -> JobSpecInput {
@@ -147,18 +149,22 @@ fn payments_spec_alt() -> JobSpecInput {
 }
 
 // -----------------------------------------------------------------------
-// AC — happy-path round trip: POST /v1/jobs returns 200 + commit_index
+// AC — happy-path round trip: POST /v1/jobs returns 200 + Inserted +
+// non-empty spec_digest. Per ADR-0020 the per-write witness is
+// `outcome` + `spec_digest`, not `commit_index`.
 // -----------------------------------------------------------------------
 
 #[tokio::test]
-async fn post_v1_jobs_with_valid_spec_returns_200_and_commit_index_gte_1() {
+async fn post_v1_jobs_with_valid_spec_returns_200_inserted_with_canonical_digest() {
     let (handle, bound, _tmp, ca_pem) = spawn_server().await;
     let client = client_trusting(&ca_pem);
     let url = format!("https://localhost:{}/v1/jobs", bound.port());
 
+    let spec = payments_spec();
+
     let resp = client
         .post(&url)
-        .json(&SubmitJobRequest { spec: payments_spec() })
+        .json(&SubmitJobRequest { spec: spec.clone() })
         .send()
         .await
         .expect("POST /v1/jobs");
@@ -167,7 +173,27 @@ async fn post_v1_jobs_with_valid_spec_returns_200_and_commit_index_gte_1() {
     let body: SubmitJobResponse = resp.json().await.expect("decode SubmitJobResponse");
 
     assert_eq!(body.job_id, "payments", "job_id must echo the canonicalised JobId");
-    assert!(body.commit_index >= 1, "commit_index must be >= 1; got {}", body.commit_index);
+    assert_eq!(
+        body.outcome,
+        IdempotencyOutcome::Inserted,
+        "fresh insert must report `outcome = Inserted`; got {:?}",
+        body.outcome,
+    );
+
+    // spec_digest must equal the locally-computable SHA-256 of the
+    // rkyv-archived Job bytes (ADR-0002 + ADR-0020). Mismatch means
+    // a server-side re-archival or a serde-driven recomputation
+    // somewhere in the pipeline.
+    let local_job = Job::from_spec(spec).expect("Job::from_spec for digest reference");
+    let local_archived =
+        rkyv::to_bytes::<rkyv::rancor::Error>(&local_job).expect("local rkyv archive");
+    let local_digest = overdrive_core::id::ContentHash::of(local_archived.as_ref()).to_string();
+    assert_eq!(
+        body.spec_digest, local_digest,
+        "spec_digest must equal the locally-computable canonical \
+         hash; got server={}, local={}",
+        body.spec_digest, local_digest,
+    );
 
     handle.shutdown(Duration::from_secs(2)).await;
 }
@@ -256,11 +282,12 @@ async fn post_v1_jobs_with_invalid_spec_returns_400_with_error_body_naming_field
 }
 
 // -----------------------------------------------------------------------
-// AC — byte-identical re-submission is idempotent: same commit_index
+// AC — byte-identical re-submission is idempotent: same spec_digest
+// and `outcome = Unchanged` (ADR-0015 §4 amended by ADR-0020).
 // -----------------------------------------------------------------------
 
 #[tokio::test]
-async fn post_v1_jobs_idempotent_byte_identical_spec_returns_same_commit_index() {
+async fn post_v1_jobs_idempotent_byte_identical_spec_returns_unchanged_with_same_digest() {
     let (handle, bound, _tmp, ca_pem) = spawn_server().await;
     let client = client_trusting(&ca_pem);
     let url = format!("https://localhost:{}/v1/jobs", bound.port());
@@ -289,9 +316,22 @@ async fn post_v1_jobs_idempotent_byte_identical_spec_returns_same_commit_index()
 
     assert_eq!(first.job_id, second.job_id);
     assert_eq!(
-        first.commit_index, second.commit_index,
-        "byte-identical re-submission must return the same commit_index \
-         (ADR-0015 §4: idempotent success)",
+        first.outcome,
+        IdempotencyOutcome::Inserted,
+        "first submit must report `outcome = Inserted`; got {:?}",
+        first.outcome,
+    );
+    assert_eq!(
+        second.outcome,
+        IdempotencyOutcome::Unchanged,
+        "byte-identical re-submission must report `outcome = Unchanged`; \
+         got {:?}",
+        second.outcome,
+    );
+    assert_eq!(
+        first.spec_digest, second.spec_digest,
+        "byte-identical re-submission must return the same spec_digest \
+         (ADR-0015 §4 amended by ADR-0020: idempotent success)",
     );
 
     handle.shutdown(Duration::from_secs(2)).await;
@@ -337,37 +377,7 @@ async fn post_v1_jobs_with_different_spec_at_existing_key_returns_409_conflict()
     handle.shutdown(Duration::from_secs(2)).await;
 }
 
-// -----------------------------------------------------------------------
-// AC — LocalIntentStore::commit_index() strictly increases per put
-// -----------------------------------------------------------------------
-
-#[tokio::test]
-async fn local_store_commit_index_monotonically_increases() {
-    let tmp = TempDir::new().expect("tempdir");
-    let path = tmp.path().join("store.redb");
-    let store = LocalIntentStore::open(&path).expect("open LocalIntentStore");
-
-    // Initial state — commit_index is zero on a freshly-created store.
-    // Any non-negative starting value would satisfy "monotonic"; pinning
-    // to zero here makes the invariant precise and catches a mutation
-    // that returns a fixed large value regardless of writes.
-    assert_eq!(store.commit_index(), 0, "fresh store must report commit_index = 0");
-
-    store.put(b"k1", b"v1").await.expect("first put");
-    let after_first = store.commit_index();
-    assert!(after_first >= 1, "commit_index must advance after the first put; got {after_first}");
-
-    store.put(b"k2", b"v2").await.expect("second put");
-    let after_second = store.commit_index();
-    assert!(
-        after_second > after_first,
-        "commit_index must strictly increase; {after_second} <= {after_first}",
-    );
-
-    store.put(b"k1", b"v1-updated").await.expect("third put (overwrite)");
-    let after_third = store.commit_index();
-    assert!(
-        after_third > after_second,
-        "commit_index must strictly increase on overwrite too; {after_third} <= {after_second}",
-    );
-}
+// Per ADR-0020 the `LocalIntentStore::commit_index()` accessor was
+// removed; the previous `local_store_commit_index_monotonically_increases`
+// test has no counter to assert against and is deleted in
+// `redesign-drop-commit-index` step 01-04.

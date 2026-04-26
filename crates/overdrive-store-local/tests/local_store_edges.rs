@@ -55,10 +55,10 @@ async fn overwriting_a_key_returns_the_latest_value() {
     store.put(b"jobs/payments", b"v1").await.expect("first put");
     store.put(b"jobs/payments", b"v2").await.expect("second put");
 
-    // Overwrite assigns a new per-entry index — the second put took
-    // global counter slot 2.
+    // Per ADR-0020 the read returns bytes only — the latest value
+    // (v2) is what surfaces.
     let read = store.get(b"jobs/payments").await.expect("get");
-    assert_eq!(read, Some((Bytes::copy_from_slice(b"v2"), 2)));
+    assert_eq!(read, Some(Bytes::copy_from_slice(b"v2")));
 }
 
 #[tokio::test]
@@ -85,12 +85,11 @@ async fn reopening_the_same_path_preserves_state() {
         store.put(b"jobs/payments", b"durable").await.expect("put");
     }
 
-    // Open a fresh LocalIntentStore on the same path. The per-entry
-    // commit_index survives reopen — the first put assigned index 1
-    // before the original handle dropped.
+    // Open a fresh LocalIntentStore on the same path. Per ADR-0020 the
+    // read returns bytes only — there is no per-entry index column.
     let store = LocalIntentStore::open(&path).expect("second open");
     let read = store.get(b"jobs/payments").await.expect("get");
-    assert_eq!(read, Some((Bytes::copy_from_slice(b"durable"), 1)));
+    assert_eq!(read, Some(Bytes::copy_from_slice(b"durable")));
 }
 
 #[tokio::test]
@@ -118,10 +117,10 @@ async fn bootstrap_from_replaces_rather_than_merges_into_existing_state() {
 
     target.bootstrap_from(snapshot).await.expect("bootstrap_from");
 
-    // The producer's key is visible at its original per-entry index
-    // (1 — the producer's first put).
+    // The producer's key is visible after bootstrap. Per ADR-0020 the
+    // read returns bytes only.
     let producer_value = target.get(b"jobs/payments").await.expect("get producer key");
-    assert_eq!(producer_value, Some((Bytes::copy_from_slice(b"from-producer"), 1)));
+    assert_eq!(producer_value, Some(Bytes::copy_from_slice(b"from-producer")));
 
     // The pre-existing target-only key is GONE. Without the clear
     // step inside `bootstrap_from` this assertion fails — the leftover
@@ -151,5 +150,5 @@ async fn open_creates_missing_parent_directory() {
     // success that papered over a half-initialised database.
     store.put(b"jobs/payments", b"v1").await.expect("put after open");
     let read = store.get(b"jobs/payments").await.expect("get after open");
-    assert_eq!(read, Some((Bytes::copy_from_slice(b"v1"), 1)));
+    assert_eq!(read, Some(Bytes::copy_from_slice(b"v1")));
 }

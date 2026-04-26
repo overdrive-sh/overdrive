@@ -290,10 +290,8 @@ impl IntentStore for LocalIntentStore {
                             effective.push(true);
                         }
                         TxnOp::Delete { key } => {
-                            let removed = table
-                                .remove(key.as_ref())
-                                .map_err(map_storage_error)?
-                                .is_some();
+                            let removed =
+                                table.remove(key.as_ref()).map_err(map_storage_error)?.is_some();
                             effective.push(removed);
                         }
                     }
@@ -354,7 +352,7 @@ impl IntentStore for LocalIntentStore {
     /// and returns a [`StateSnapshot`] whose `bytes()` slice is
     /// canonical — two semantically-equal stores produce byte-identical
     /// exports. The frame format is v1 (key + value, no per-entry
-    /// commit_index per ADR-0020 §Decision §3); see `snapshot_frame.rs`
+    /// `commit_index` per ADR-0020 §Decision §3); see `snapshot_frame.rs`
     /// for the byte layout. The same frame format is consumed by
     /// [`Self::bootstrap_from`] and will be consumed by
     /// `RaftStore::bootstrap_from` in Phase 2.
@@ -369,10 +367,8 @@ impl IntentStore for LocalIntentStore {
             let iter = table.iter().map_err(map_storage_error)?;
             for item in iter {
                 let (k, v) = item.map_err(map_storage_error)?;
-                entries.push((
-                    Bytes::copy_from_slice(k.value()),
-                    Bytes::copy_from_slice(v.value()),
-                ));
+                entries
+                    .push((Bytes::copy_from_slice(k.value()), Bytes::copy_from_slice(v.value())));
             }
 
             let bytes = snapshot_frame::encode(&entries)
