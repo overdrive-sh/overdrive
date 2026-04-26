@@ -46,7 +46,7 @@ pub enum ObservationStoreError {
 /// Matches the lifecycle documented in whitepaper §4 and §14 —
 /// `pending → running ⇄ suspended → terminated`, plus `draining` as the
 /// transient state a node reports while migrating an allocation away.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum AllocState {
     Pending,
     Running,
@@ -55,23 +55,73 @@ pub enum AllocState {
     Terminated,
 }
 
+impl std::fmt::Display for AllocState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Canonical lowercase form matches whitepaper §4 lifecycle
+        // rendering. Used on the REST wire for `alloc_status.state`.
+        let s = match self {
+            Self::Pending => "pending",
+            Self::Running => "running",
+            Self::Draining => "draining",
+            Self::Suspended => "suspended",
+            Self::Terminated => "terminated",
+        };
+        f.write_str(s)
+    }
+}
+
 /// Logical timestamp used for last-write-wins ordering across
 /// [`ObservationStore`] peers.
 ///
 /// `(counter, writer)` is lexicographically ordered: the lamport counter
 /// dominates, and the writer's [`NodeId`] breaks ties deterministically.
 /// Clock skew across peers cannot invert ordering.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct LogicalTimestamp {
     pub counter: u64,
     pub writer: NodeId,
+}
+
+impl LogicalTimestamp {
+    /// Total order on [`LogicalTimestamp`]: `(counter, writer)`
+    /// lexicographic. Returns `true` when `self` strictly dominates
+    /// `other` and therefore wins under last-write-wins.
+    ///
+    /// Equal timestamps (same counter AND same writer) are treated as
+    /// "not dominating" — the existing value is retained. This is the
+    /// LWW idempotency case: re-delivering the same row via gossip is a
+    /// no-op.
+    ///
+    /// The counter dominates first; on a tie, the writer's
+    /// [`NodeId::Display`] form is the canonical ordering key, matching
+    /// the §4 whitepaper rule for deterministic tiebreak. Clock skew
+    /// across peers cannot invert ordering — the counter is a Lamport
+    /// stamp, not a wall-clock time.
+    ///
+    /// This is the single comparator both [`ObservationStore`] adapters
+    /// (`SimObservationStore` in `overdrive-sim`, `LocalObservationStore`
+    /// in `overdrive-store-local`) MUST consult when applying a write.
+    /// See `docs/feature/fix-observation-lww-merge/deliver/rca.md` for
+    /// the bug RCA that motivated promoting this comparator out of the
+    /// sim leaf crate.
+    #[must_use]
+    pub fn dominates(&self, other: &Self) -> bool {
+        match self.counter.cmp(&other.counter) {
+            std::cmp::Ordering::Greater => true,
+            std::cmp::Ordering::Less => false,
+            // Tiebreak on writer: lexicographically greater writer wins.
+            // `NodeId`'s `Display` form is the canonical ordering key
+            // and is what the §4 "deterministic tiebreak" rule consumes.
+            std::cmp::Ordering::Equal => self.writer.to_string() > other.writer.to_string(),
+        }
+    }
 }
 
 /// `alloc_status` row — Phase 1 minimal shape per brief §6.
 ///
 /// Written by the node that owns the allocation; gossiped to every peer.
 /// Full-row writes only (no field-diff merges) per the §4 guardrail.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct AllocStatusRow {
     pub alloc_id: AllocationId,
     pub job_id: JobId,
@@ -83,7 +133,7 @@ pub struct AllocStatusRow {
 /// `node_health` row — Phase 1 minimal shape per brief §6.
 ///
 /// Written by the node itself on each heartbeat tick.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct NodeHealthRow {
     pub node_id: NodeId,
     pub region: Region,
@@ -148,8 +198,49 @@ pub type ObservationSubscription = Box<dyn Stream<Item = ObservationRow> + Send 
 pub trait ObservationStore: Send + Sync + 'static {
     /// Persist a full observation row on this peer and fan it out to
     /// any active subscriptions. Full-row writes only (§4 guardrail).
+    ///
+    /// # LWW contract
+    ///
+    /// An incoming row whose `updated_at` does not dominate the existing
+    /// row at the same primary key MUST NOT mutate state and MUST NOT be
+    /// emitted on subscriptions. Adapters MUST consult
+    /// [`LogicalTimestamp::dominates`] for this comparison; the equal
+    /// timestamp case (re-delivery of the same row) is treated as a
+    /// no-op for the same reason.
+    ///
+    /// This contract is exercised by the trait-conformance harness at
+    /// `overdrive_core::testing::observation_store::run_lww_conformance`.
+    /// The two adapter implementations in this workspace —
+    /// `SimObservationStore` and `LocalObservationStore` — honour the
+    /// contract. Future adapters (Phase 2 Corrosion replacement, any
+    /// future test fakes) MUST honour it identically.
+    ///
+    /// See `docs/whitepaper.md` §4 (Intent / Observation split,
+    /// "tombstones, full rows over field diffs") and
+    /// `docs/feature/fix-observation-lww-merge/deliver/rca.md` for the
+    /// bug RCA that codified this trait-level invariant.
     async fn write(&self, row: ObservationRow) -> Result<(), ObservationStoreError>;
 
     /// Subscribe to every observation row written to this peer.
     async fn subscribe_all(&self) -> Result<ObservationSubscription, ObservationStoreError>;
+
+    /// Read a deterministic snapshot of every `alloc_status` row this
+    /// peer currently holds as LWW winner. Intended for point-in-time
+    /// reads from the REST API (`GET /v1/allocs`) — reads locally, no
+    /// cross-peer RPC. Iteration order is deterministic, keyed by
+    /// `AllocationId`.
+    ///
+    /// Phase 1 motivation: the REST observation-read handlers land in
+    /// step 03-03; the existing `subscribe_all` surface is suited to
+    /// long-lived reactive consumers (reconcilers, dataplane hydration),
+    /// not one-shot HTTP handlers. A typed snapshot is the honest read
+    /// primitive for request/response handlers.
+    async fn alloc_status_rows(&self) -> Result<Vec<AllocStatusRow>, ObservationStoreError>;
+
+    /// Read a deterministic snapshot of every `node_health` row this
+    /// peer has observed. Phase 1 has no LWW current-row index for
+    /// `node_health` (see `SimObservationStore::apply`) — callers see
+    /// the full ordered history; Phase 2 will add LWW parallel
+    /// tracking and this method will return winners only.
+    async fn node_health_rows(&self) -> Result<Vec<NodeHealthRow>, ObservationStoreError>;
 }

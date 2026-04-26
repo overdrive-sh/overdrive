@@ -57,6 +57,46 @@ pub enum Mode {
     Workspace { baseline_path: PathBuf },
 }
 
+/// Further scope narrowing layered on top of `Mode`.
+///
+/// Orthogonal to `Mode` — a diff-scoped run can be narrowed to a
+/// single file; a workspace run can be narrowed to one package. These
+/// are pass-throughs to `cargo-mutants`' own `--file`, `--package`,
+/// and `--features` flags, plus one wrapper-level convenience
+/// (`test_whole_workspace`) that encodes the default this project
+/// wants when `--package` is set.
+///
+/// Defaults mirror `Default::default()`: empty file/package/feature
+/// lists, and `test_whole_workspace = false` (tests run only against
+/// the selected package when `packages` is non-empty).
+///
+/// Feature handling is a flat pass-through. Callers that want
+/// integration-gated tests to participate must pass `--features
+/// integration-tests` explicitly (CI does this; see
+/// `.claude/rules/testing.md` §"Integration vs unit gating"). The
+/// workspace-wide convention requires every member to declare
+/// `integration-tests = []`, so a bare `integration-tests` resolves
+/// uniformly under cargo-mutants v27's per-package scoping — no
+/// per-package qualifier games here.
+#[derive(Debug, Clone, Default)]
+pub struct Scope {
+    /// `--file <GLOB>` (repeatable). Paths or globs passed verbatim to
+    /// cargo-mutants.
+    pub files: Vec<PathBuf>,
+    /// `--package <CRATE>` (repeatable). When non-empty and
+    /// `test_whole_workspace` is false, `--test-workspace=false` is
+    /// also passed — mutation reruns only the selected packages'
+    /// tests instead of the full workspace suite.
+    pub packages: Vec<String>,
+    /// `--features <LIST>` entries, joined with commas and passed
+    /// through to cargo-mutants verbatim.
+    pub features: Vec<String>,
+    /// Force `--test-workspace=true` even when `packages` is
+    /// non-empty. Rare escape hatch for mutations whose kill signal
+    /// only fires in another crate's tests.
+    pub test_whole_workspace: bool,
+}
+
 /// Hard gate thresholds (percentage of mutations caught).
 ///
 /// Kept as associated constants so a test can assert them and so a
@@ -66,8 +106,7 @@ pub const DIFF_KILL_RATE_FLOOR: f64 = 80.0;
 pub const WORKSPACE_ABSOLUTE_FLOOR: f64 = 60.0;
 pub const WORKSPACE_DRIFT_WARN_PP: f64 = -2.0;
 
-/// Entry point called from `main.rs`.
-pub fn run(mode: &Mode) -> Result<()> {
+pub fn run(mode: &Mode, scope: &Scope) -> Result<()> {
     which_cargo_mutants()?;
     // We pass `--test-tool=nextest` below, so cargo-nextest must also
     // be on PATH. Fail fast with an install hint rather than letting
@@ -84,21 +123,36 @@ pub fn run(mode: &Mode) -> Result<()> {
     std::fs::create_dir_all(&output_parent)
         .wrap_err_with(|| format!("create_dir_all({})", output_parent.display()))?;
 
-    // 1. Run cargo-mutants. Exit status is intentionally ignored — a
-    //    non-zero exit from cargo-mutants happens on any missed mutant,
-    //    which we handle via our own gate below. We only care that the
-    //    subprocess produced `outcomes.json`.
-    let _ = invoke_cargo_mutants(mode, &output_parent)?;
+    // Clear any pre-existing wrapper / cargo-mutants verdict files
+    // upfront. If the current run gets killed mid-invocation, a stale
+    // verdict from the prior run must not remain on disk looking
+    // authoritative — readers polling the files during an in-progress
+    // run would otherwise act on verdicts the current run never
+    // produced. See [`clear_stale_summary`] for which files are
+    // cleared and why both `mutants-summary.json` AND
+    // `mutants.out/outcomes.json` are at risk.
+    clear_stale_summary(&output_parent)?;
 
-    // 2. Parse outcomes.json.
+    // 1. Run cargo-mutants. Exit status is partially trusted — a
+    //    non-zero exit happens both for missed mutants (our gate
+    //    handles it) and for genuine subprocess crashes. We
+    //    distinguish them via the report file: a clean run always
+    //    writes `outcomes.json`, *unless* cargo-mutants
+    //    short-circuited at filter time ("INFO No mutants to filter")
+    //    — in which case it exits 0 and writes nothing. That third
+    //    state is treated as a vacuously-passing zero-mutant run.
+    let status = invoke_cargo_mutants(mode, scope, &output_parent)?;
+
+    // 2. Parse outcomes.json — or, if absent AND the subprocess
+    //    exited cleanly, treat as a zero-mutant short-circuit.
     let outcomes_path = out_dir.join("outcomes.json");
-    let report = parse_outcomes(&outcomes_path).wrap_err_with(|| {
-        format!(
-            "parse cargo-mutants outcomes at {} — cargo-mutants may have crashed \
-             before writing its report",
-            outcomes_path.display()
-        )
-    })?;
+    let Some(report) = read_outcomes_or_short_circuit(&outcomes_path, status)? else {
+        // cargo-mutants exited 0 but wrote nothing — the
+        // "INFO No mutants to filter" path. Vacuously pass:
+        // emit a synthetic zero-mutant report, write the
+        // summary, print one line, exit 0.
+        return finalise_zero_mutant_run(&summary_path, mode);
+    };
 
     // 3. Evaluate the mode-specific gate.
     let gate = match mode {
@@ -154,46 +208,35 @@ fn which_cargo_nextest() -> Result<()> {
     Ok(())
 }
 
-/// Run `cargo mutants` with the flags appropriate to `mode`. The diff
-/// file (if any) is written under the xtask target dir.
-///
-/// `output_parent` is the directory cargo-mutants will create its
-/// `mutants.out/` subdirectory inside (per `cargo mutants --help`
-/// wording: "Create mutants.out within this directory"). Do not pass
-/// the mutants.out path itself — that produces a double-nested
-/// `mutants.out/mutants.out/` layout and breaks outcomes.json discovery.
-fn invoke_cargo_mutants(mode: &Mode, output_parent: &Path) -> Result<std::process::ExitStatus> {
-    let mut cmd = Command::new(cargo());
-    cmd.arg("mutants").arg("--output").arg(output_parent);
-    // Run the generated test suite under nextest — matches the project's
-    // primary runner (`.config/nextest.toml`) instead of plain
-    // `cargo test`. Doctests are not re-run per mutation (nextest skips
-    // them by design); the gates that matter for mutation testing live
-    // in the unit/integration/proptest suites that nextest does run.
-    // See https://mutants.rs/shards.html and
-    // https://github.com/sourcefrog/cargo-mutants#using-nextest.
-    cmd.arg("--test-tool=nextest");
-
-    match mode {
+fn invoke_cargo_mutants(
+    mode: &Mode,
+    scope: &Scope,
+    output_parent: &Path,
+) -> Result<std::process::ExitStatus> {
+    // Materialise the diff file first (only for Diff mode). The pure
+    // arg-assembly below takes the file path, not the git ref, so
+    // tests can exercise it without hitting git.
+    let diff_path = match mode {
         Mode::Diff { base } => {
-            let diff_path = xtask_target_dir().join("mutants.diff");
-            let diff_bytes = git_diff_against(base).wrap_err_with(|| {
+            let path = xtask_target_dir().join("mutants.diff");
+            let bytes = git_diff_against(base).wrap_err_with(|| {
                 format!("git diff {base} failed — is `{base}` fetched in this clone?")
             })?;
-            std::fs::write(&diff_path, &diff_bytes)
-                .wrap_err_with(|| format!("write {}", diff_path.display()))?;
+            std::fs::write(&path, &bytes).wrap_err_with(|| format!("write {}", path.display()))?;
             eprintln!(
                 "xtask mutants: wrote {} ({} bytes) for --in-diff",
-                diff_path.display(),
-                diff_bytes.len()
+                path.display(),
+                bytes.len()
             );
-            cmd.arg("--in-diff").arg(&diff_path);
+            Some(path)
         }
-        Mode::Workspace { .. } => {
-            cmd.arg("--workspace");
-        }
-    }
+        Mode::Workspace { .. } => None,
+    };
 
+    let args = build_cargo_mutants_args(mode, scope, output_parent, diff_path.as_deref());
+
+    let mut cmd = Command::new(cargo());
+    cmd.args(&args);
     eprintln!("xtask mutants: running {}", format_cmd(&cmd));
     let status = cmd.status().wrap_err("spawn cargo-mutants")?;
     // Don't bail on non-zero — cargo-mutants returns non-zero for any
@@ -201,6 +244,73 @@ fn invoke_cargo_mutants(mode: &Mode, output_parent: &Path) -> Result<std::proces
     // ourselves. We only fail if `outcomes.json` was not written (the
     // parse step surfaces that).
     Ok(status)
+}
+
+fn build_cargo_mutants_args(
+    mode: &Mode,
+    scope: &Scope,
+    output_parent: &Path,
+    diff_path: Option<&Path>,
+) -> Vec<std::ffi::OsString> {
+    use std::ffi::OsString;
+
+    let mut args: Vec<OsString> = vec![
+        "mutants".into(),
+        // `--output <DIR>` points at the *parent* directory cargo-mutants
+        // will drop `mutants.out/` into. Passing the mutants.out path
+        // itself double-nests — see the doc comment on `run`.
+        "--output".into(),
+        output_parent.into(),
+        // Match the project's primary test runner (`.config/nextest.toml`).
+        // Doctests are not re-run per mutation; nextest skips them and
+        // that is the documented mutation-testing behaviour.
+        "--test-tool=nextest".into(),
+    ];
+
+    match mode {
+        Mode::Diff { .. } => {
+            let path = diff_path.expect("Mode::Diff must carry a materialised diff path");
+            args.push("--in-diff".into());
+            args.push(path.into());
+        }
+        Mode::Workspace { .. } => {
+            args.push("--workspace".into());
+        }
+    }
+
+    // Scope.files — `--file <GLOB>` (repeatable).
+    for file in &scope.files {
+        args.push("--file".into());
+        args.push(file.into());
+    }
+
+    // Scope.packages — `--package <CRATE>` (repeatable).
+    for pkg in &scope.packages {
+        args.push("--package".into());
+        args.push(pkg.into());
+    }
+
+    // Package-scoped runs default to rerunning only that package's
+    // tests per mutation. This is the single largest wall-clock win
+    // on a large workspace — the full suite may be hundreds of tests
+    // whereas one crate's suite is dozens.
+    if !scope.packages.is_empty() && !scope.test_whole_workspace {
+        args.push("--test-workspace=false".into());
+    }
+
+    // Feature list — flat pass-through. The workspace-wide convention
+    // is that every member declares `integration-tests = []` (see
+    // `.claude/rules/testing.md` §"Integration vs unit gating" and the
+    // enforcement test below), so a bare `--features integration-tests`
+    // resolves uniformly under cargo-mutants v27's per-package scoping.
+    // CI is responsible for passing `--features integration-tests`
+    // explicitly when it wants integration-gated tests to participate.
+    if !scope.features.is_empty() {
+        args.push("--features".into());
+        args.push(scope.features.join(",").into());
+    }
+
+    args
 }
 
 fn git_diff_against(base: &str) -> Result<Vec<u8>> {
@@ -249,6 +359,74 @@ fn parse_outcomes(path: &Path) -> Result<RawReport> {
     Ok(report)
 }
 
+/// Discriminate between three post-subprocess states:
+///   1. outcomes.json present  → parse and return Some(report).
+///   2. outcomes.json absent + exit 0 → short-circuit (filter
+///      intersection empty); return None and let the caller emit
+///      a synthetic zero-mutant report.
+///   3. outcomes.json absent + non-zero exit → genuine crash; bail
+///      with the original "may have crashed" error.
+///
+/// The exit-status check is the only thing distinguishing (2) from
+/// (3); cargo-mutants does not expose a structured "I had nothing
+/// to do" signal.
+fn read_outcomes_or_short_circuit(
+    path: &Path,
+    status: std::process::ExitStatus,
+) -> Result<Option<RawReport>> {
+    if path.is_file() {
+        return Ok(Some(parse_outcomes(path)?));
+    }
+    if status.success() {
+        // Filter intersection produced zero mutants. cargo-mutants
+        // logged "INFO No mutants to filter" and returned 0 without
+        // creating mutants.out/. Vacuously pass.
+        eprintln!(
+            "xtask mutants: cargo-mutants produced no report (filter \
+             intersection is empty) — treating as zero-mutant vacuous pass"
+        );
+        return Ok(None);
+    }
+    bail!(
+        "no outcomes.json at {} — cargo-mutants exited {} without producing \
+         a report (subprocess likely crashed)",
+        path.display(),
+        status.code().map_or_else(|| "?".into(), |c| c.to_string()),
+    )
+}
+
+/// Emit a `mutants-summary.json` representing a vacuously-passing
+/// zero-mutant run, print a one-line report, and return Ok(()) so
+/// the wrapper exits 0. Mirrors `write_summary` + `print_report`
+/// for the case where there is no `RawReport` to populate them
+/// from.
+fn finalise_zero_mutant_run(summary_path: &Path, mode: &Mode) -> Result<()> {
+    let synthetic = RawReport {
+        total_mutants: 0,
+        caught: 0,
+        missed: 0,
+        timeout: 0,
+        unviable: 0,
+        success: 0,
+        cargo_mutants_version: String::new(),
+    };
+    // Workspace mode never short-circuits to zero mutants in
+    // practice (no --in-diff filter), but model it consistently:
+    // the diff-gate logic already returns Pass on total_mutants=0,
+    // so both arms collapse to the same call.
+    let gate = match mode {
+        Mode::Diff { .. } | Mode::Workspace { .. } => evaluate_diff_gate(&synthetic),
+    };
+    write_summary(summary_path, &synthetic, &gate, mode)
+        .wrap_err_with(|| format!("write {}", summary_path.display()))?;
+    println!(
+        "mutants: mode={} total=0 — no mutants in scope (filter intersection empty); vacuous pass",
+        gate.mode_label
+    );
+    println!("mutants: PASS");
+    Ok(())
+}
+
 /// Kill rate (caught / (caught + missed)) in percent. Returns 100.0 if
 /// there are no mutations to evaluate (vacuously passing) — the caller
 /// decides whether that counts as "pass" or "nothing to do."
@@ -289,10 +467,26 @@ enum GateStatus {
 
 fn evaluate_diff_gate(report: &RawReport) -> Gate {
     let kill_rate_pct = kill_rate_percent(report.caught, report.missed);
-    let status = if report.caught == 0 && report.missed == 0 {
-        // No gate-relevant mutations generated from the diff — e.g. the
-        // PR only touched excluded paths or comments. Vacuously pass.
+    let status = if report.total_mutants == 0 {
+        // No mutants generated from the diff — e.g. the PR only
+        // touched excluded paths or comments. Truly vacuous: pass.
         GateStatus::Pass
+    } else if report.caught == 0 && report.missed == 0 {
+        // Mutants WERE generated but none were evaluated — every one
+        // was unviable (rustc rejected the mutated source) or timed
+        // out. cargo-mutants logs this as
+        // `WARN No mutants were viable`. The gate has no quality
+        // signal and must not pass: a future repeat of this state
+        // would silently mask a broken mutation lane.
+        GateStatus::Fail {
+            reason: format!(
+                "no quality signal: total={total} unviable={unviable} timeout={timeout} \
+                 — see target/xtask/mutants.out/log/* for rustc diagnostics",
+                total = report.total_mutants,
+                unviable = report.unviable,
+                timeout = report.timeout,
+            ),
+        }
     } else if kill_rate_pct + f64::EPSILON < DIFF_KILL_RATE_FLOOR {
         GateStatus::Fail {
             reason: format!(
@@ -317,6 +511,28 @@ fn evaluate_diff_gate(report: &RawReport) -> Gate {
 
 fn evaluate_workspace_gate(report: &RawReport, baseline_path: &Path) -> Result<Gate> {
     let kill_rate_pct = kill_rate_percent(report.caught, report.missed);
+
+    // Symmetric guard with `evaluate_diff_gate`: mutants WERE
+    // generated but none were evaluated — every one unviable or
+    // timed out. No quality signal; must fail before consulting the
+    // baseline.
+    if report.total_mutants > 0 && report.caught == 0 && report.missed == 0 {
+        return Ok(Gate {
+            mode_label: "workspace".to_owned(),
+            kill_rate_pct,
+            baseline_pct: None,
+            drift_pp: None,
+            status: GateStatus::Fail {
+                reason: format!(
+                    "no quality signal: total={total} unviable={unviable} timeout={timeout} \
+                     — see target/xtask/mutants.out/log/* for rustc diagnostics",
+                    total = report.total_mutants,
+                    unviable = report.unviable,
+                    timeout = report.timeout,
+                ),
+            },
+        });
+    }
 
     // Read or seed the baseline.
     let (baseline_pct, drift_pp, status) = if baseline_path.is_file() {
@@ -432,6 +648,59 @@ fn write_summary(path: &Path, report: &RawReport, gate: &Gate, mode: &Mode) -> R
         serde_json::to_string_pretty(&summary).wrap_err("serialise mutants-summary.json")?;
     std::fs::write(path, serialised)?;
     Ok(())
+}
+
+/// Remove pre-existing wrapper / cargo-mutants verdict files so an
+/// in-progress run cannot leave a stale verdict visible on disk. Two
+/// files are at risk and BOTH must be cleared upfront:
+///
+/// * `<output_parent>/mutants-summary.json` — the wrapper's own
+///   structured summary.
+/// * `<output_parent>/mutants.out/outcomes.json` — cargo-mutants'
+///   per-run report.
+///
+/// Why both. cargo-mutants writes `outcomes.json` ONLY when it actually
+/// runs mutations; if the resolved filter intersection is empty it
+/// logs `INFO No mutants to filter`, exits 0, and writes nothing. Our
+/// post-subprocess [`read_outcomes_or_short_circuit`] then trusts a
+/// pre-existing `outcomes.json` on disk as the current run's report —
+/// even though the current run never produced it. A prior run with a
+/// different `.cargo/mutants.toml` `exclude_re` (or a different scope,
+/// or a different `--in-diff` baseline) leaves its verdict behind, and
+/// the next run that short-circuits silently inherits it. The fix
+/// mirrors the existing summary-clearing semantic: the only valid
+/// `outcomes.json` on disk is "the one written by the run that just
+/// finished."
+///
+/// Clearing only `mutants-summary.json` was the *original* shape of
+/// this function; a wrapper-driven mutation run on
+/// `crates/overdrive-cli/src/commands/job.rs` (the
+/// `fix-job-submit-body-decode-variant` PR) surfaced the asymmetry —
+/// a freshly-suppressed `Default::default` `exclude_re` correctly
+/// short-circuited cargo-mutants, but the wrapper still reported
+/// `total=3 unviable=3` from a prior pre-edit run's `outcomes.json`.
+///
+/// Noop on either file when absent (fresh checkout, or the prior run
+/// cleaned up). Any other I/O error propagates with context.
+fn clear_stale_summary(output_parent: &Path) -> Result<()> {
+    let summary_path = output_parent.join("mutants-summary.json");
+    let outcomes_path = output_parent.join("mutants.out").join("outcomes.json");
+    remove_file_if_present(&summary_path)
+        .wrap_err_with(|| format!("remove stale summary {}", summary_path.display()))?;
+    remove_file_if_present(&outcomes_path)
+        .wrap_err_with(|| format!("remove stale outcomes {}", outcomes_path.display()))?;
+    Ok(())
+}
+
+/// Idempotent file removal: `Ok(())` if removed or absent, error
+/// otherwise. Factored out so [`clear_stale_summary`] reads as two
+/// declarative removals rather than two repeated `match` blocks.
+fn remove_file_if_present(path: &Path) -> std::io::Result<()> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e),
+    }
 }
 
 /// Round to one decimal place so the summary stays stable across minor
@@ -552,11 +821,71 @@ mod tests {
     }
 
     #[test]
-    fn diff_gate_passes_when_diff_generated_no_mutations() {
-        // PR touched only excluded paths — caught=missed=0. Must pass
-        // (vacuously). Gate reason must not claim a kill-rate failure.
-        let gate = evaluate_diff_gate(&report(0, 0, 5, 0));
+    fn diff_gate_passes_when_no_mutants_in_scope() {
+        // PR touched only excluded paths or comments — cargo-mutants
+        // generated zero mutants. Truly vacuous: must pass.
+        let no_mutants = RawReport {
+            total_mutants: 0,
+            caught: 0,
+            missed: 0,
+            timeout: 0,
+            unviable: 0,
+            success: 0,
+            cargo_mutants_version: "27.0.0".to_owned(),
+        };
+        let gate = evaluate_diff_gate(&no_mutants);
         assert!(matches!(gate.status, GateStatus::Pass));
+    }
+
+    #[test]
+    fn diff_gate_fails_when_every_mutant_unviable() {
+        // cargo-mutants generated mutants but every single one was
+        // rejected by rustc — the WARN
+        // `No mutants were viable: perhaps there is a problem with
+        // building in a scratch directory` case. The gate has no
+        // quality signal and must FAIL: silently passing here
+        // would mask any future cause of all-unviable runs (broken
+        // workspace lints, scratch-dir issue, build.rs path bug,
+        // mutation operator producing rustc-rejected code).
+        let gate = evaluate_diff_gate(&report(0, 0, 250, 0));
+        let reason = match gate.status {
+            GateStatus::Fail { reason } => reason,
+            other => panic!("expected Fail on all-unviable, got {other:?}"),
+        };
+        assert!(reason.contains("no quality signal"), "got: {reason}");
+        assert!(reason.contains("unviable=250"), "got: {reason}");
+        assert!(reason.contains("mutants.out/log"), "got: {reason}");
+    }
+
+    #[test]
+    fn diff_gate_fails_when_every_mutant_timed_out() {
+        // Symmetric to all-unviable: every mutant exceeded the test
+        // budget. Same loss of quality signal; must FAIL with the
+        // same reason shape.
+        let gate = evaluate_diff_gate(&report(0, 0, 0, 250));
+        let reason = match gate.status {
+            GateStatus::Fail { reason } => reason,
+            other => panic!("expected Fail on all-timeout, got {other:?}"),
+        };
+        assert!(reason.contains("no quality signal"), "got: {reason}");
+        assert!(reason.contains("timeout=250"), "got: {reason}");
+    }
+
+    #[test]
+    fn workspace_gate_fails_when_every_mutant_unviable() {
+        // Same predicate as diff: a fully-unviable workspace run is
+        // not a baseline-relative regression — it is a quality-signal
+        // failure that must short-circuit before the baseline read.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let baseline = tmp.path().join("kill_rate.txt");
+        std::fs::write(&baseline, "85.0\n").unwrap();
+        let gate = evaluate_workspace_gate(&report(0, 0, 250, 0), &baseline).unwrap();
+        let reason = match gate.status {
+            GateStatus::Fail { reason } => reason,
+            other => panic!("expected Fail on all-unviable, got {other:?}"),
+        };
+        assert!(reason.contains("no quality signal"), "got: {reason}");
+        assert!(reason.contains("unviable=250"), "got: {reason}");
     }
 
     #[test]
@@ -676,6 +1005,68 @@ mod tests {
     }
 
     #[test]
+    fn read_outcomes_returns_none_when_file_absent_and_exit_zero() {
+        // Simulate cargo-mutants short-circuiting on "No mutants to filter":
+        // outcomes.json absent, exit 0 ⇒ Ok(None).
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let absent = tmp.path().join("outcomes.json");
+        let zero = std::process::Command::new("true").status().expect("spawn true");
+        let result = read_outcomes_or_short_circuit(&absent, zero).expect("must not bail");
+        assert!(result.is_none(), "absent file + clean exit ⇒ None");
+    }
+
+    #[test]
+    fn read_outcomes_bails_when_file_absent_and_exit_nonzero() {
+        // Crash case: outcomes.json absent AND subprocess returned
+        // non-zero. Must bail.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let absent = tmp.path().join("outcomes.json");
+        let nonzero = std::process::Command::new("false").status().expect("spawn false");
+        let err = read_outcomes_or_short_circuit(&absent, nonzero)
+            .expect_err("must bail on absent file + non-zero exit");
+        let msg = format!("{err:#}");
+        assert!(msg.contains("no outcomes.json"), "got: {msg}");
+        assert!(msg.contains("subprocess likely crashed"), "got: {msg}");
+    }
+
+    #[test]
+    fn read_outcomes_returns_some_when_file_present() {
+        // Happy path: file present ⇒ parse and return Some(report).
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("outcomes.json");
+        std::fs::write(
+            &path,
+            r#"{"outcomes":[],"total_mutants":1,"caught":1,"missed":0,
+                "timeout":0,"unviable":0,"success":1,
+                "cargo_mutants_version":"27.0.0"}"#,
+        )
+        .unwrap();
+        let zero = std::process::Command::new("true").status().expect("spawn true");
+        let report = read_outcomes_or_short_circuit(&path, zero)
+            .expect("must parse")
+            .expect("Some when file present");
+        assert_eq!(report.caught, 1);
+    }
+
+    #[test]
+    fn finalise_zero_mutant_run_writes_pass_summary() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let summary = tmp.path().join("mutants-summary.json");
+        finalise_zero_mutant_run(&summary, &Mode::Diff { base: "origin/main".into() })
+            .expect("must succeed");
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&summary).unwrap()).unwrap();
+        assert_eq!(v["status"].as_str(), Some("pass"));
+        assert_eq!(v["total_mutants"].as_u64(), Some(0));
+        assert_eq!(v["caught"].as_u64(), Some(0));
+        assert_eq!(v["missed"].as_u64(), Some(0));
+        // 100.0 because kill_rate_percent(0, 0) == 100.0 by the
+        // existing vacuous-pass convention.
+        assert!((v["kill_rate_pct"].as_f64().unwrap() - 100.0).abs() < 1e-6);
+        assert_eq!(v["base_ref"].as_str(), Some("origin/main"));
+    }
+
+    #[test]
     fn kill_rate_floor_constants_match_testing_rules() {
         // Guards against a drive-by edit silently lowering the bar.
         // The rules doc is .claude/rules/testing.md §Mutation testing.
@@ -690,6 +1081,261 @@ mod tests {
         assert!(
             (WORKSPACE_DRIFT_WARN_PP - (-2.0)).abs() < 1e-9,
             "drift warn must match .claude/rules/testing.md (-2pp)"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // build_cargo_mutants_args — pure argv assembly.
+    // ------------------------------------------------------------------
+
+    /// Convert the argv to a whitespace-joined string so assertions
+    /// read as the flag shape a human would recognise.
+    fn argv_str(args: &[std::ffi::OsString]) -> String {
+        args.iter().map(|a| a.to_string_lossy().into_owned()).collect::<Vec<_>>().join(" ")
+    }
+
+    #[test]
+    fn argv_diff_mode_carries_in_diff_file_path() {
+        let mode = Mode::Diff { base: "origin/main".into() };
+        let diff = Path::new("/tmp/mutants.diff");
+        let out = Path::new("/tmp/xtask");
+        let args = build_cargo_mutants_args(&mode, &Scope::default(), out, Some(diff));
+        let joined = argv_str(&args);
+        assert!(
+            joined.starts_with("mutants --output /tmp/xtask --test-tool=nextest"),
+            "got: {joined}"
+        );
+        assert!(joined.contains("--in-diff /tmp/mutants.diff"), "got: {joined}");
+        assert!(!joined.contains("--workspace"), "got: {joined}");
+    }
+
+    #[test]
+    fn argv_workspace_mode_uses_workspace_flag_not_in_diff() {
+        let mode = Mode::Workspace { baseline_path: PathBuf::from("/ignored") };
+        let out = Path::new("/tmp/xtask");
+        let args = build_cargo_mutants_args(&mode, &Scope::default(), out, None);
+        let joined = argv_str(&args);
+        assert!(joined.contains("--workspace"), "got: {joined}");
+        assert!(!joined.contains("--in-diff"), "got: {joined}");
+    }
+
+    #[test]
+    fn argv_includes_repeated_file_flags_in_order() {
+        let mode = Mode::Workspace { baseline_path: PathBuf::from("/ignored") };
+        let scope = Scope {
+            files: vec![
+                PathBuf::from("crates/a/src/lib.rs"),
+                PathBuf::from("crates/b/src/handlers.rs"),
+            ],
+            ..Scope::default()
+        };
+        let args = build_cargo_mutants_args(&mode, &scope, Path::new("/tmp/xtask"), None);
+        let joined = argv_str(&args);
+        // Two --file flags, in the declared order.
+        let a_pos = joined.find("--file crates/a/src/lib.rs").expect("first --file");
+        let b_pos = joined.find("--file crates/b/src/handlers.rs").expect("second --file");
+        assert!(a_pos < b_pos, "got: {joined}");
+    }
+
+    #[test]
+    fn argv_package_scope_adds_test_workspace_false_by_default() {
+        let mode = Mode::Workspace { baseline_path: PathBuf::from("/ignored") };
+        let scope = Scope { packages: vec!["overdrive-control-plane".into()], ..Scope::default() };
+        let args = build_cargo_mutants_args(&mode, &scope, Path::new("/tmp/xtask"), None);
+        let joined = argv_str(&args);
+        assert!(joined.contains("--package overdrive-control-plane"), "got: {joined}");
+        assert!(joined.contains("--test-workspace=false"), "got: {joined}");
+    }
+
+    #[test]
+    fn argv_test_whole_workspace_override_suppresses_test_workspace_false() {
+        let mode = Mode::Workspace { baseline_path: PathBuf::from("/ignored") };
+        let scope = Scope {
+            packages: vec!["overdrive-core".into()],
+            test_whole_workspace: true,
+            ..Scope::default()
+        };
+        let args = build_cargo_mutants_args(&mode, &scope, Path::new("/tmp/xtask"), None);
+        let joined = argv_str(&args);
+        assert!(joined.contains("--package overdrive-core"), "got: {joined}");
+        assert!(!joined.contains("--test-workspace=false"), "got: {joined}");
+    }
+
+    #[test]
+    fn argv_emits_features_joined_with_commas() {
+        let mode = Mode::Workspace { baseline_path: PathBuf::from("/ignored") };
+        let scope = Scope { features: vec!["foo".into(), "bar".into()], ..Scope::default() };
+        let args = build_cargo_mutants_args(&mode, &scope, Path::new("/tmp/xtask"), None);
+        let joined = argv_str(&args);
+        assert!(joined.contains("--features foo,bar"), "got: {joined}");
+    }
+
+    #[test]
+    fn argv_no_features_flag_when_list_empty() {
+        // With no user features, no --features flag should appear at
+        // all. Diff mode and workspace mode behave identically here —
+        // the wrapper does not auto-add anything; CI is responsible
+        // for passing `--features integration-tests` explicitly.
+        let mode = Mode::Workspace { baseline_path: PathBuf::from("/ignored") };
+        let scope = Scope::default();
+        let args = build_cargo_mutants_args(&mode, &scope, Path::new("/tmp/xtask"), None);
+        let joined = argv_str(&args);
+        assert!(!joined.contains("--features"), "got: {joined}");
+    }
+
+    #[test]
+    fn argv_features_pass_through_verbatim() {
+        // Confirms the flat pass-through: whatever the caller puts in
+        // `Scope.features` lands in `--features`, comma-joined, no
+        // wrapper-side rewriting. Replaces the prior auto-add tests.
+        let mode = Mode::Workspace { baseline_path: PathBuf::from("/ignored") };
+        let scope = Scope {
+            features: vec!["integration-tests".into(), "canary-bug".into()],
+            ..Scope::default()
+        };
+        let args = build_cargo_mutants_args(&mode, &scope, Path::new("/tmp/xtask"), None);
+        let joined = argv_str(&args);
+        assert!(joined.contains("--features integration-tests,canary-bug"), "got: {joined}");
+    }
+
+    #[test]
+    fn argv_output_flag_always_points_at_given_parent() {
+        // Guard against a silent default drift that could re-introduce
+        // the old `mutants.out/mutants.out/` double-nest bug.
+        let mode = Mode::Workspace { baseline_path: PathBuf::from("/ignored") };
+        let args =
+            build_cargo_mutants_args(&mode, &Scope::default(), Path::new("/tmp/custom"), None);
+        let joined = argv_str(&args);
+        assert!(joined.contains("--output /tmp/custom"), "got: {joined}");
+    }
+
+    #[test]
+    fn argv_always_pins_nextest_test_tool() {
+        let mode = Mode::Workspace { baseline_path: PathBuf::from("/ignored") };
+        let args =
+            build_cargo_mutants_args(&mode, &Scope::default(), Path::new("/tmp/xtask"), None);
+        let joined = argv_str(&args);
+        assert!(joined.contains("--test-tool=nextest"), "got: {joined}");
+    }
+
+    // ---- clear_stale_summary ---------------------------------------------
+
+    #[test]
+    fn clear_stale_summary_removes_existing_file() {
+        let dir = tempfile::tempdir().expect("tmpdir");
+        let summary = dir.path().join("mutants-summary.json");
+        std::fs::write(&summary, r#"{"status":"pass"}"#).expect("seed stale summary");
+        assert!(summary.exists(), "precondition — stale summary exists");
+
+        clear_stale_summary(dir.path()).expect("clear must succeed when file present");
+
+        assert!(!summary.exists(), "stale summary must be removed");
+    }
+
+    #[test]
+    fn clear_stale_summary_is_noop_when_file_absent() {
+        let dir = tempfile::tempdir().expect("tmpdir");
+        let summary = dir.path().join("mutants-summary.json");
+        assert!(!summary.exists(), "precondition — summary absent");
+
+        clear_stale_summary(dir.path()).expect("clear must succeed when file absent");
+
+        assert!(!summary.exists(), "file absent remains absent");
+    }
+
+    /// Regression test for the stale-`outcomes.json` bug surfaced on
+    /// `fix-job-submit-body-decode-variant`. cargo-mutants writes
+    /// `outcomes.json` ONLY when it actually runs mutations; on
+    /// short-circuit ("INFO No mutants to filter") it writes nothing
+    /// and exits 0, leaving any prior run's `outcomes.json` on disk.
+    /// `read_outcomes_or_short_circuit` then trusted the stale file
+    /// as the current run's report — silently importing a verdict the
+    /// current run never produced (e.g. a 3-mutant `unviable` outcome
+    /// from a prior run, after the operator added an `exclude_re`
+    /// entry that should have made the next run vacuously pass).
+    /// `clear_stale_summary` now wipes both files upfront.
+    #[test]
+    fn clear_stale_summary_removes_stale_outcomes_json_too() {
+        let dir = tempfile::tempdir().expect("tmpdir");
+        let summary = dir.path().join("mutants-summary.json");
+        let mutants_out = dir.path().join("mutants.out");
+        let outcomes = mutants_out.join("outcomes.json");
+        std::fs::create_dir_all(&mutants_out).expect("create mutants.out");
+        std::fs::write(&summary, r#"{"status":"pass"}"#).expect("seed stale summary");
+        std::fs::write(&outcomes, r#"{"outcomes":[]}"#).expect("seed stale outcomes");
+        assert!(summary.exists() && outcomes.exists(), "precondition — both stale");
+
+        clear_stale_summary(dir.path()).expect("clear must succeed");
+
+        assert!(!summary.exists(), "stale summary must be removed");
+        assert!(!outcomes.exists(), "stale outcomes.json must be removed");
+        // The mutants.out/ directory itself MAY remain (cargo-mutants
+        // recreates it as needed); only the verdict file is the
+        // authority-leaking artefact.
+    }
+
+    #[test]
+    fn clear_stale_summary_handles_missing_mutants_out_directory() {
+        // The fresh-checkout case: nothing on disk yet. Both files
+        // absent must not error.
+        let dir = tempfile::tempdir().expect("tmpdir");
+        assert!(!dir.path().join("mutants-summary.json").exists());
+        assert!(!dir.path().join("mutants.out").exists());
+
+        clear_stale_summary(dir.path()).expect("must succeed on fresh checkout");
+    }
+
+    // ---- workspace convention enforcement ----------------------------------
+
+    /// Workspace-wide convention: every member declares
+    /// `integration-tests = []` in its `[features]` block, even crates
+    /// with no integration tests of their own (no-op declaration).
+    ///
+    /// Why: cargo-mutants v27.0.0 scopes per-mutant test invocations
+    /// to `--package <owning-crate>` and inherits the workspace
+    /// `--features` list. A bare `--features integration-tests` on the
+    /// CLI breaks the moment cargo-mutants scopes to a non-declaring
+    /// package — cargo refuses with `error: the package 'X' does not
+    /// contain this feature: integration-tests` and every mutant under
+    /// that package is marked unviable, collapsing the kill-rate signal
+    /// to zero. The convention makes the bare feature universally
+    /// valid; this test enforces the convention so a newly-added crate
+    /// cannot silently re-introduce the failure mode.
+    ///
+    /// See `.claude/rules/testing.md` §"Integration vs unit gating"
+    /// and the prior incident on PR #132 (April 2026).
+    #[test]
+    fn every_workspace_member_declares_integration_tests_feature() {
+        // `cargo metadata` is the source of truth for workspace
+        // members — same data Cargo uses when resolving builds, no
+        // hand-rolled TOML parsing of our own. xtask already depends
+        // on `cargo_metadata` for unrelated subcommands.
+        let metadata = cargo_metadata::MetadataCommand::new()
+            .manifest_path(
+                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .parent()
+                    .expect("CARGO_MANIFEST_DIR has a parent (workspace root)")
+                    .join("Cargo.toml"),
+            )
+            .no_deps()
+            .exec()
+            .expect("cargo metadata succeeds");
+
+        let mut missing = Vec::new();
+        for pkg_id in &metadata.workspace_members {
+            let pkg = &metadata[pkg_id];
+            if !pkg.features.contains_key("integration-tests") {
+                missing.push(pkg.name.clone());
+            }
+        }
+
+        assert!(
+            missing.is_empty(),
+            "workspace convention violation — every member must declare \
+             `integration-tests = []` in its `[features]` block (no-op \
+             for crates without integration tests). See \
+             `.claude/rules/testing.md` §\"Integration vs unit gating\". \
+             Missing in: {missing:?}"
         );
     }
 }

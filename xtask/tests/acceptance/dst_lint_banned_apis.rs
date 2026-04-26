@@ -125,8 +125,8 @@ fn dst_lint_exits_zero_on_the_real_overdrive_workspace() {
 // -----------------------------------------------------------------------------
 
 #[test]
-fn dst_lint_permits_adapter_real_crate_using_instant_now() {
-    // Given a non-core wiring crate (crate_class = "adapter-real") that
+fn dst_lint_permits_adapter_host_crate_using_instant_now() {
+    // Given a non-core wiring crate (crate_class = "adapter-host") that
     // constructs a real clock using Instant::now internally. We also
     // include a clean core crate so the fail-fast "no core crate"
     // guard-rail does not fire — the scenario under test is the
@@ -138,7 +138,7 @@ fn dst_lint_permits_adapter_real_crate_using_instant_now() {
             ("my-core", Some("core"), "pub fn noop() {}\n"),
             (
                 "my-adapter",
-                Some("adapter-real"),
+                Some("adapter-host"),
                 "pub fn now() -> std::time::Instant {\n    std::time::Instant::now()\n}\n",
             ),
         ],
@@ -151,7 +151,7 @@ fn dst_lint_permits_adapter_real_crate_using_instant_now() {
     // reported for the wiring crate.
     assert!(
         out.status.success(),
-        "dst-lint must permit Instant::now in adapter-real crate; stderr:\n{}",
+        "dst-lint must permit Instant::now in adapter-host crate; stderr:\n{}",
         String::from_utf8_lossy(&out.stderr)
     );
 }
@@ -265,7 +265,7 @@ fn dst_lint_fails_fast_when_core_class_set_is_empty() {
     let manifest = scaffold_workspace(
         tmp.path(),
         &[
-            ("my-adapter", Some("adapter-real"), "pub fn noop() {}\n"),
+            ("my-adapter", Some("adapter-host"), "pub fn noop() {}\n"),
             ("my-binary", Some("binary"), "pub fn noop() {}\n"),
         ],
     );
@@ -302,4 +302,135 @@ fn dst_lint_fails_fast_when_a_crate_is_unlabelled() {
         stderr.contains("crate_class"),
         "stderr must mention the missing metadata key:\n{stderr}"
     );
+}
+
+// -----------------------------------------------------------------------------
+// §"Ordered-collection choice" — bare HashMap / HashSet ban in core crates.
+// Mechanically enforces the rule from `.claude/rules/development.md` landed
+// in commit e50146a (Step-ID 01-06). See `docs/feature/
+// fix-eval-broker-drain-determinism/deliver/rca-context.md` for the defect
+// chain that motivated the rule (RCA root cause #5).
+// -----------------------------------------------------------------------------
+
+#[test]
+fn dst_lint_blocks_hashmap_in_core_crate() {
+    // Given a core crate uses bare std::collections::HashMap (the rule from
+    // step 01-06 forbids this without an explicit justification comment).
+    let tmp = TempDir::new().expect("tempdir");
+    let manifest = scaffold_workspace(
+        tmp.path(),
+        &[(
+            "my-core",
+            Some("core"),
+            "pub fn build() -> std::collections::HashMap<String, u32> { \
+             std::collections::HashMap::new() }\n",
+        )],
+    );
+
+    // When Ana runs cargo xtask dst-lint as a subprocess.
+    let out = run_dst_lint(&manifest);
+
+    // Then the subprocess exits with non-zero status.
+    assert!(!out.status.success(), "dst-lint must fail on bare HashMap in core");
+
+    // And the output names the file and the offending line.
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("src/lib.rs"), "stderr must name the file:\n{stderr}");
+    assert!(stderr.contains(":1:"), "stderr must name line 1 of the synthetic crate:\n{stderr}");
+
+    // And the output names BTreeMap as the recommended replacement.
+    assert!(stderr.contains("BTreeMap"), "stderr must name BTreeMap as the replacement:\n{stderr}");
+
+    // And the output cites the rules file rather than smuggling in install hints
+    // (per user-memory feedback_no_user_install_instructions).
+    assert!(
+        stderr.contains(".claude/rules/development.md"),
+        "stderr must link to development.md:\n{stderr}"
+    );
+}
+
+#[test]
+fn dst_lint_permits_hashmap_with_justification_comment_in_core_crate() {
+    // Given a core crate uses bare HashMap but documents the choice with the
+    // sanctioned `// dst-lint: hashmap-ok <reason>` escape comment immediately
+    // above the use site.
+    let tmp = TempDir::new().expect("tempdir");
+    let manifest = scaffold_workspace(
+        tmp.path(),
+        &[(
+            "my-core",
+            Some("core"),
+            "// dst-lint: hashmap-ok bounded cache, point access only\n\
+             pub fn build() -> std::collections::HashMap<String, u32> { \
+             std::collections::HashMap::new() }\n",
+        )],
+    );
+
+    // When Ana runs cargo xtask dst-lint as a subprocess.
+    let out = run_dst_lint(&manifest);
+
+    // Then the subprocess exits cleanly — the justification is accepted.
+    assert!(
+        out.status.success(),
+        "dst-lint must permit HashMap with justification comment; stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn dst_lint_permits_hashmap_in_adapter_host_crate() {
+    // Given a non-core wiring crate (crate_class = "adapter-host") uses bare
+    // HashMap. We include a clean core crate so the fail-fast "no core crate"
+    // guard-rail does not fire — the scenario under test is the wiring-crate
+    // *exemption*, not the empty-core guard.
+    let tmp = TempDir::new().expect("tempdir");
+    let manifest = scaffold_workspace(
+        tmp.path(),
+        &[
+            ("my-core", Some("core"), "pub fn noop() {}\n"),
+            (
+                "my-adapter",
+                Some("adapter-host"),
+                "pub fn build() -> std::collections::HashMap<String, u32> { \
+                 std::collections::HashMap::new() }\n",
+            ),
+        ],
+    );
+
+    // When Ana runs cargo xtask dst-lint as a subprocess.
+    let out = run_dst_lint(&manifest);
+
+    // Then the subprocess exits cleanly — adapter-host is out of scope.
+    assert!(
+        out.status.success(),
+        "dst-lint must permit HashMap in adapter-host crate; stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn dst_lint_blocks_hashset_in_core_crate() {
+    // Given a core crate uses bare std::collections::HashSet — the same rule
+    // from step 01-06 covers HashSet alongside HashMap, since the iteration
+    // order on HashSet has the same per-process random RandomState issue.
+    let tmp = TempDir::new().expect("tempdir");
+    let manifest = scaffold_workspace(
+        tmp.path(),
+        &[(
+            "my-core",
+            Some("core"),
+            "pub fn build() -> std::collections::HashSet<String> { \
+             std::collections::HashSet::new() }\n",
+        )],
+    );
+
+    // When Ana runs cargo xtask dst-lint as a subprocess.
+    let out = run_dst_lint(&manifest);
+
+    // Then the subprocess exits with non-zero status.
+    assert!(!out.status.success(), "dst-lint must fail on bare HashSet in core");
+
+    // And the output names BTreeSet as the recommended replacement.
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("BTreeSet"), "stderr must name BTreeSet as the replacement:\n{stderr}");
 }

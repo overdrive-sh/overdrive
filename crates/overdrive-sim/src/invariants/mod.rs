@@ -45,6 +45,37 @@ pub enum Invariant {
     /// `SimEntropy` seeded with the same `u64` twice produces the same
     /// draw sequence — the twin-run identity property.
     EntropyDeterminismUnderReseed,
+    /// SCAFFOLD: true — phase-1-control-plane-core DISTILL per ADR-0013.
+    /// At least one reconciler is registered with the runtime after
+    /// boot; the registry is never empty. The evaluator body panics
+    /// until DELIVER wires the control-plane runtime into the harness.
+    AtLeastOneReconcilerRegistered,
+    /// SCAFFOLD: true — phase-1-control-plane-core DISTILL per ADR-0013.
+    /// N (≥3) concurrent evaluations at the same `(ReconcilerName,
+    /// TargetResource)` key collapse to exactly one dispatched
+    /// invocation and `N - 1` cancellations. The evaluator body panics
+    /// until DELIVER ships the broker.
+    DuplicateEvaluationsCollapse,
+    /// Two drain passes against identical submit sequences produce
+    /// element-equal `dispatched_order` vecs at every position. Closes
+    /// `docs/feature/fix-eval-broker-drain-determinism` RCA — the
+    /// broker's drain order MUST be deterministic, not dependent on
+    /// `HashSet` iteration order or other implicit state. Sibling to
+    /// `DuplicateEvaluationsCollapse`: that invariant pins counters,
+    /// this one pins ordering.
+    BrokerDrainOrderIsDeterministic,
+    /// SCAFFOLD: true — phase-1-control-plane-core DISTILL per ADR-0013.
+    /// Twin invocation of a reconciler's `reconcile` with identical
+    /// inputs produces bit-identical `Vec<Action>` outputs. The
+    /// evaluator body panics until DELIVER wires the noop-heartbeat
+    /// reconciler into the harness.
+    ReconcilerIsPure,
+    /// `IntentStore::put(k, v)` followed by `IntentStore::get(k)`
+    /// returns `Some(v)` byte-for-byte — no framing, no prefix, no
+    /// transformation. Closes ADR-0020 §Enforcement: the structural-
+    /// regression guard against re-introducing inline row encoding
+    /// in `LocalIntentStore`.
+    IntentStoreReturnsCallerBytes,
 }
 
 impl Invariant {
@@ -59,6 +90,12 @@ impl Invariant {
         Self::SimObservationLwwConverges,
         Self::ReplayEquivalentEmptyWorkflow,
         Self::EntropyDeterminismUnderReseed,
+        // SCAFFOLD: true — phase-1-control-plane-core DISTILL per ADR-0013.
+        Self::AtLeastOneReconcilerRegistered,
+        Self::DuplicateEvaluationsCollapse,
+        Self::BrokerDrainOrderIsDeterministic,
+        Self::ReconcilerIsPure,
+        Self::IntentStoreReturnsCallerBytes,
     ];
 
     /// The canonical kebab-case spelling of this invariant, as a static
@@ -73,6 +110,12 @@ impl Invariant {
             Self::SimObservationLwwConverges => "sim-observation-lww-converges",
             Self::ReplayEquivalentEmptyWorkflow => "replay-equivalent-empty-workflow",
             Self::EntropyDeterminismUnderReseed => "entropy-determinism-under-reseed",
+            // SCAFFOLD: true — phase-1-control-plane-core DISTILL per ADR-0013.
+            Self::AtLeastOneReconcilerRegistered => "at-least-one-reconciler-registered",
+            Self::DuplicateEvaluationsCollapse => "duplicate-evaluations-collapse",
+            Self::BrokerDrainOrderIsDeterministic => "broker-drain-order-is-deterministic",
+            Self::ReconcilerIsPure => "reconciler-is-pure",
+            Self::IntentStoreReturnsCallerBytes => "intent-store-returns-caller-bytes",
         }
     }
 }

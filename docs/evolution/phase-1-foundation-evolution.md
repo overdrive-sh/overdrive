@@ -6,6 +6,13 @@
 **Status**: Delivered
 **Walking-skeleton gate**: step 06-03 (`cargo xtask dst` green + canary red-run with usable reproduction command)
 
+> **Nomenclature note (2026-04-23).** This archived evolution doc describes
+> crates with `crate_class = "adapter-real"`. That class value was renamed
+> to `"adapter-host"` on 2026-04-23 (see ADR-0003 Amendment 2026-04-23 and
+> ADR-0016). The prose below preserves the name as it stood at delivery.
+> Current crate declarations use `adapter-host`; the taxonomy shape is
+> unchanged.
+
 ## What shipped
 
 The project's walking skeleton: the type universe (11 identifier newtypes),
@@ -168,15 +175,17 @@ From
    *result* is what CI gates on, not the setup bytes. **Phase 2 home**:
    real reconcilers writing through the observation store make the
    evaluator's setup code a test subject on its own.
-3. **`overdrive-sim::real::CountingOsEntropy` — 5 feature-gated mutants**
-   (`real/mod.rs:132,138,143`). Compiled only under `--features
-   real-adapters`; per-PR mutation runs don't enable the feature. Not a
-   Phase 1 gap. **Phase 2+ home**: production consumers of
-   `SystemClock` / `OsEntropy` / `TcpTransport` land in
-   `overdrive-node` / `overdrive-control-plane`.
+3. **`overdrive-host::entropy::CountingOsEntropy` — 5 unwired mutants**
+   (moved from `overdrive-sim/src/real/mod.rs:132,138,143` when the
+   host adapters were extracted into their own `adapter-real` crate).
+   No production call site depends on `overdrive-host` yet, so the
+   mutation run has no test that could kill these. Not a Phase 1 gap.
+   **Phase 2+ home**: node-agent and control-plane wiring land
+   `SystemClock` / `OsEntropy` / `TcpTransport` on real call paths.
 
-Platform-code kill rate excluding `xtask/**` and feature-gated `real/`
-code: ≈ 95.5% (149 / 156). No Phase 1 rework required.
+Platform-code kill rate excluding `xtask/**` and the unwired
+`overdrive-host` code: ≈ 95.5% (149 / 156). No Phase 1 rework
+required.
 
 ## What this unblocks
 

@@ -82,7 +82,7 @@ async fn intent_never_crosses_passes_on_a_fresh_cluster() {
     // A clean cluster has no crossings.
     let tmp = tempfile::tempdir().expect("tempdir");
     let store_path = tmp.path().join("intent.redb");
-    let intent = overdrive_store_local::LocalStore::open(&store_path).expect("open");
+    let intent = overdrive_store_local::LocalIntentStore::open(&store_path).expect("open");
     let observation = SimObservationStore::single_peer(node("host-0"), 42);
 
     let result = evaluators::evaluate_intent_crossing(&intent, &observation).await;
@@ -90,7 +90,7 @@ async fn intent_never_crosses_passes_on_a_fresh_cluster() {
 }
 
 /// Planted failure: write an observation-prefixed key into the
-/// `LocalStore`. The evaluator must catch that intent has an
+/// `LocalIntentStore`. The evaluator must catch that intent has an
 /// observation-class key.
 #[tokio::test(flavor = "current_thread")]
 async fn intent_never_crosses_fails_when_localstore_holds_alloc_status_prefix_key() {
@@ -98,7 +98,7 @@ async fn intent_never_crosses_fails_when_localstore_holds_alloc_status_prefix_ke
 
     let tmp = tempfile::tempdir().expect("tempdir");
     let store_path = tmp.path().join("intent.redb");
-    let intent = overdrive_store_local::LocalStore::open(&store_path).expect("open");
+    let intent = overdrive_store_local::LocalIntentStore::open(&store_path).expect("open");
     // Observation-class prefix written into intent is a §4 guardrail
     // violation — the evaluator must flag it.
     intent.put(b"alloc_status/a1b2c3", b"bogus").await.expect("put");
@@ -123,7 +123,7 @@ async fn snapshot_roundtrip_passes_on_any_real_localstore() {
 
     let tmp = tempfile::tempdir().expect("tempdir");
     let store_path = tmp.path().join("intent.redb");
-    let intent = overdrive_store_local::LocalStore::open(&store_path).expect("open");
+    let intent = overdrive_store_local::LocalIntentStore::open(&store_path).expect("open");
 
     // Some entries to exercise framing, sorted vs insertion-order.
     intent.put(b"job/frontend", b"{}").await.expect("put");

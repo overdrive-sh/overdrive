@@ -87,7 +87,18 @@ pub enum DriverError {
 
 /// Resource envelope for an allocation — cgroup limits for processes,
 /// virtio-mem / hotplug target for VMs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub struct Resources {
     pub cpu_milli: u32,
     pub memory_bytes: u64,

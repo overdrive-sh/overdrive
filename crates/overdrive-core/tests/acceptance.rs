@@ -11,10 +11,27 @@
 #![allow(clippy::expect_fun_call)]
 
 mod acceptance {
-    //! Phase-1-foundation acceptance scenarios.
+    //! Phase-1-foundation + phase-1-control-plane-core acceptance
+    //! scenarios.
+
+    // Phase-1-foundation acceptance scenarios.
     mod content_hash_cert_serial;
     mod core_newtype_roundtrip;
     mod core_newtype_validation;
     mod extended_newtype_completeness;
     mod spiffe_region_validation;
+
+    // Phase-1-control-plane-core acceptance scenarios.
+    mod aggregate_constructors;
+    mod aggregate_roundtrip;
+    mod aggregate_validation;
+    mod intent_key_canonical;
+    mod observation_row_display;
+    mod reconciler_trait_surface;
+
+    // Bug-fix `fix-observation-lww-merge` — function-level mutation-killing
+    // surface for `LogicalTimestamp::dominates`. Trait-level conformance
+    // is exercised from each adapter's test suite via
+    // `overdrive_core::testing::observation_store::run_lww_conformance`.
+    mod logical_timestamp_dominates;
 }

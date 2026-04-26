@@ -1,4 +1,4 @@
-//! Acceptance scenarios for US-03 §4.3 — `LocalStore` error boundaries.
+//! Acceptance scenarios for US-03 §4.3 — `LocalIntentStore` error boundaries.
 //!
 //! Translates `docs/feature/phase-1-foundation/distill/test-scenarios.md`
 //! §4.3 (corrupted-snapshot / disk-write-failure) into Rust
@@ -7,7 +7,7 @@
 //! harness — this module covers only the runtime error-path scenarios.
 //!
 //! Port-to-port discipline: every assertion drives the `IntentStore`
-//! trait surface that `LocalStore` implements. Corruption is injected
+//! trait surface that `LocalIntentStore` implements. Corruption is injected
 //! at the byte-slice layer (the only surface `bootstrap_from` consumes);
 //! the failed-write case injects failure by mutating filesystem
 //! permissions on the backing directory. No internal types are
@@ -30,32 +30,32 @@
 
 use bytes::Bytes;
 use overdrive_core::traits::intent_store::{IntentStore, IntentStoreError, StateSnapshot};
-use overdrive_store_local::{LocalStore, snapshot_frame};
+use overdrive_store_local::{LocalIntentStore, snapshot_frame};
 use tempfile::TempDir;
 
 // -----------------------------------------------------------------------------
 // Helpers
 // -----------------------------------------------------------------------------
 
-/// Build a source `LocalStore` populated with a small known entry set
+/// Build a source `LocalIntentStore` populated with a small known entry set
 /// and return its export. The entries are deliberately non-trivial so
 /// the payload has enough bytes for the bit-flip scenario to hit rkyv
 /// structure (not just a pad byte).
 async fn build_populated_snapshot() -> StateSnapshot {
     let tmp = TempDir::new().expect("temp dir");
-    let store = LocalStore::open(tmp.path().join("intent.redb")).expect("open src");
+    let store = LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open src");
     store.put(b"jobs/payments", b"spec-payments-v1").await.expect("put payments");
     store.put(b"jobs/auth", b"spec-auth-v1").await.expect("put auth");
     store.put(b"jobs/frontend", b"spec-frontend-v1").await.expect("put frontend");
     store.export_snapshot().await.expect("export snapshot")
 }
 
-/// Open a fresh target `LocalStore` on a new `TempDir` and return
-/// `(TempDir, LocalStore)`. The `TempDir` is returned so the caller
+/// Open a fresh target `LocalIntentStore` on a new `TempDir` and return
+/// `(TempDir, LocalIntentStore)`. The `TempDir` is returned so the caller
 /// keeps the backing directory alive for the duration of the test.
-fn fresh_target() -> (TempDir, LocalStore) {
+fn fresh_target() -> (TempDir, LocalIntentStore) {
     let tmp = TempDir::new().expect("target temp dir");
-    let store = LocalStore::open(tmp.path().join("intent.redb")).expect("open target");
+    let store = LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open target");
     (tmp, store)
 }
 
@@ -84,7 +84,7 @@ async fn bootstrapping_from_a_truncated_snapshot_fails_without_writing_state() {
     truncated_bytes.pop();
     let truncated = StateSnapshot::from_parts(snap.version, snap.entries.clone(), truncated_bytes);
 
-    // When Ana bootstraps a freshly constructed LocalStore from the
+    // When Ana bootstraps a freshly constructed LocalIntentStore from the
     // truncated bytes.
     let (_target_tmp, target) = fresh_target();
     let reference_empty = fresh_target_reference_bytes().await;
@@ -153,7 +153,7 @@ async fn bootstrapping_from_a_bit_flipped_snapshot_fails_without_writing_state()
     flipped[target_index] ^= 0b1000_0000;
     let flipped_snap = StateSnapshot::from_parts(snap.version, snap.entries.clone(), flipped);
 
-    // When Ana bootstraps a freshly constructed LocalStore from the
+    // When Ana bootstraps a freshly constructed LocalIntentStore from the
     // corrupted bytes.
     let (_target_tmp, target) = fresh_target();
     let reference_empty = fresh_target_reference_bytes().await;
@@ -194,7 +194,7 @@ async fn a_put_against_a_read_only_backing_directory_surfaces_a_typed_io_error()
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
 
-    // Given a LocalStore whose backing directory has been made read-only
+    // Given a LocalIntentStore whose backing directory has been made read-only
     // after open. Opening first is deliberate — the roadmap note prefers
     // injecting a *known* failure mode rather than enumerating every
     // reason a put could fail. A chmod to `0o555` on the parent directory
@@ -202,10 +202,10 @@ async fn a_put_against_a_read_only_backing_directory_surfaces_a_typed_io_error()
     // path without corrupting the already-opened file handle.
     let tmp = TempDir::new().expect("temp dir");
     let db_path = tmp.path().join("intent.redb");
-    let store = LocalStore::open(&db_path).expect("open before chmod");
+    let store = LocalIntentStore::open(&db_path).expect("open before chmod");
 
     // Pre-seed one value so a successful put has already been observed
-    // through the same LocalStore instance. The post-failure read
+    // through the same LocalIntentStore instance. The post-failure read
     // assertion below then has a meaningful reference value: if a
     // partial write DID leak, `get` would return the attempted-but-failed
     // bytes instead.

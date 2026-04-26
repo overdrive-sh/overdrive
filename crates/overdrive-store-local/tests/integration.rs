@@ -23,5 +23,10 @@
 // lookup base so the per-scenario files under `tests/integration/`
 // resolve naturally.
 mod integration {
+    //! Per ADR-0020 (drop `commit_index` from Phase 1) the
+    //! `commit_counter_invariant` module was deleted in step 01-04 of
+    //! `redesign-drop-commit-index` — the counter it asserted no
+    //! longer exists.
+    mod lww_conformance;
     mod snapshot_proptest;
 }

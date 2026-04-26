@@ -27,7 +27,7 @@
 use std::collections::BTreeMap;
 
 use overdrive_core::traits::intent_store::IntentStore;
-use overdrive_store_local::LocalStore;
+use overdrive_store_local::LocalIntentStore;
 use proptest::prelude::*;
 use tempfile::TempDir;
 use tokio::runtime::Runtime;
@@ -43,6 +43,11 @@ use tokio::runtime::Runtime;
 /// * Keys within a single generation are unique — a `BTreeMap` collapses
 ///   duplicates before we return. Ordering does not leak: the store's
 ///   export re-sorts anyway.
+///
+/// Per ADR-0020 (drop `commit_index` from Phase 1) the generator
+/// returns `(key, value)` pairs only — no per-entry index column. The
+/// v1 frame round-trip property proves the (key, value) bytes survive
+/// bootstrap byte-identically.
 fn store_contents() -> impl Strategy<Value = Vec<(Vec<u8>, Vec<u8>)>> {
     prop::collection::vec(
         (prop::collection::vec(any::<u8>(), 1..=64), prop::collection::vec(any::<u8>(), 0..=4096)),
@@ -78,7 +83,7 @@ proptest! {
             // Source store: insert every (key, value) pair exactly
             // once. The generator guarantees unique keys.
             let tmp_src = TempDir::new().expect("temp dir src");
-            let src = LocalStore::open(tmp_src.path().join("intent.redb"))
+            let src = LocalIntentStore::open(tmp_src.path().join("intent.redb"))
                 .expect("open src");
             for (key, value) in &contents {
                 src.put(key, value).await.expect("put src");
@@ -88,7 +93,7 @@ proptest! {
 
             // Target store: bootstrap from the source snapshot.
             let tmp_dst = TempDir::new().expect("temp dir dst");
-            let dst = LocalStore::open(tmp_dst.path().join("intent.redb"))
+            let dst = LocalIntentStore::open(tmp_dst.path().join("intent.redb"))
                 .expect("open dst");
             dst.bootstrap_from(snap_src.clone())
                 .await

@@ -144,9 +144,9 @@ async fn runtime_partition_blocks_subsequent_gossip() {
 }
 
 /// Equal-timestamp rows (same counter AND same writer) are idempotent —
-/// re-delivery must not flip `lww_dominates` to `true`. Pins the strict
-/// `>` in the tiebreak branch; `>=` would misclassify a re-delivered row
-/// as dominant.
+/// re-delivery must not flip `LogicalTimestamp::dominates` to `true`.
+/// Pins the strict `>` in the tiebreak branch; `>=` would misclassify a
+/// re-delivered row as dominant.
 #[tokio::test(flavor = "current_thread")]
 async fn lww_equal_timestamps_are_idempotent_no_redelivery_flip() {
     // Construct two single-peer stores directly — this test is about

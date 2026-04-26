@@ -9,3 +9,5 @@
 pub mod dst;
 pub mod dst_lint;
 pub mod mutants;
+pub mod openapi;
+pub mod yaml_free_cli;

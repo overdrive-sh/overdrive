@@ -29,11 +29,16 @@ pre-commit:
     fmt:
       tags: [rust, fast]
       glob: "*.rs"
-      # rustfmt reads `rustfmt.toml` automatically. Check only the staged
-      # Rust files — fast even on large workspaces.
-      run: rustfmt --check --edition 2024 {staged_files}
+      # rustfmt reads `rustfmt.toml` automatically. Format the staged
+      # Rust files in place and re-stage via `stage_fixed` — routine
+      # formatting drift is fixed silently and the commit proceeds.
+      # `fail_text` only fires if rustfmt itself cannot run (e.g. a
+      # syntax error in the file). CI runs `cargo fmt --all -- --check`
+      # as the hard gate; pre-commit exists to unblock the dev.
+      run: rustfmt --edition 2024 {staged_files}
+      stage_fixed: true
       fail_text: |
-        Formatting drift. Run: cargo fmt --all
+        rustfmt failed to run — check for a syntax error in the staged files.
     clippy:
       tags: [rust]
       glob: "*.rs"
@@ -54,7 +59,7 @@ pre-commit:
           done
         done | sort -u)
         for p in $pkgs; do
-          cargo clippy -p "$p" --all-targets -- -D warnings
+          cargo clippy -p "$p" --all-targets --all-features -- -D warnings
         done
       fail_text: |
         Clippy warnings. Fix or `#[allow]` with justification.

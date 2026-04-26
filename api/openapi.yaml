@@ -1,0 +1,463 @@
+openapi: 3.1.0
+info:
+  title: Overdrive Control Plane
+  description: Phase 1 single-mode control-plane REST API (ADR-0008).
+  contact:
+    name: Overdrive Contributors
+  license:
+    name: FSL-1.1-ALv2
+    identifier: FSL-1.1-ALv2
+  version: 0.0.0
+paths:
+  /v1/allocs:
+    get:
+      tags:
+      - observation
+      summary: '`GET /v1/allocs` — observation read on `alloc_status`.'
+      description: |-
+        Reads through the `ObservationStore::alloc_status_rows` trait method
+        (not the concrete `SimObservationStore` type) so Phase 2's
+        `CorrosionStore` swap is a single trait-object replacement with no
+        handler changes. Fresh store → HTTP 200 with explicit `{"rows": []}`
+        — honest empty state per K7; no fabrication, no hardcoded response.
+      operationId: alloc_status
+      responses:
+        '200':
+          description: Allocation status rows
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AllocStatusResponse'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+  /v1/cluster/info:
+    get:
+      tags:
+      - cluster
+      summary: |-
+        `GET /v1/cluster/info` — mode, region, reconciler registry, broker
+        counters.
+      description: |-
+        Post-ADR-0020 the response is the four-field shape
+        `{mode, region, reconcilers, broker}`. The `commit_index` field is
+        dropped wholesale (no rename to `writes_since_boot` — that
+        preserves the same race conditions and reset-on-restart gap under
+        a different name; see ADR-0020 §Considered alternatives §D).
+        Activity-rate observability is provided by `broker.dispatched`
+        plus the `reconcilers` list; cluster-level commit-rate signals
+        belong on Phase 5's metrics endpoint.
+      operationId: cluster_status
+      responses:
+        '200':
+          description: Cluster status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClusterStatus'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+  /v1/jobs:
+    post:
+      tags:
+      - jobs
+      summary: |-
+        `POST /v1/jobs` — validate, archive via rkyv, commit through the
+        intent store, return `{job_id, spec_digest, outcome}`.
+      description: |-
+        Idempotency contract (ADR-0015 §4 amended by ADR-0020):
+
+        * A spec whose rkyv-archived bytes are absent at the canonical
+          `jobs/<JobId>` key returns HTTP 200 with `outcome =
+          IdempotencyOutcome::Inserted` and the canonical `spec_digest`
+          (`PutOutcome::Inserted` path).
+        * A spec whose rkyv-archived bytes are byte-identical to what is
+          already stored at the same key returns HTTP 200 with `outcome =
+          IdempotencyOutcome::Unchanged` and the same `spec_digest`. No
+          write occurred (`PutOutcome::KeyExists { existing }` path with
+          byte equality).
+        * A spec whose rkyv-archived bytes DIFFER from what is stored at
+          the same key returns HTTP 409 Conflict with an `ErrorBody`.
+          Conflict is an HTTP-status concern; the `outcome` field is
+          absent on the 409 path (ADR-0015 §4 amendment).
+
+        `spec_digest` is the lowercase-hex SHA-256 of the canonical
+        rkyv-archived bytes (ADR-0002, development.md §Hashing). On the
+        `Unchanged` path the digest is computed once over the candidate
+        bytes and used both for the byte-equality check (against the
+        `existing` bytes returned by `PutOutcome::KeyExists`) and for the
+        response body.
+      operationId: submit_job
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitJobRequest'
+        required: true
+      responses:
+        '200':
+          description: Job accepted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SubmitJobResponse'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '409':
+          description: Conflict at existing key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+  /v1/jobs/{id}:
+    get:
+      tags:
+      - jobs
+      summary: |-
+        `GET /v1/jobs/{id}` — read via `IntentStore::get`, rkyv-access the
+        bytes, recompute `spec_digest = ContentHash::of(archived_bytes)`.
+      description: |-
+        Canonical-hashing contract (ADR-0002 + development.md §Hashing):
+        the `spec_digest` returned here is SHA-256 over the exact byte
+        sequence we pulled out of the `IntentStore` — i.e. the rkyv-archived
+        bytes of a validated `Job`. We deliberately do NOT re-canonicalise,
+        do NOT route through JCS, and do NOT hash `serde_json::to_string(&job)`
+        — any of those would break the byte-identity property the rest of
+        the platform depends on.
+
+        404 contract (ADR-0015 §3): `IntentStore::get -> Ok(None)` maps to
+        `ControlPlaneError::NotFound { resource: <IntentKey::as_str()> }`,
+        which `to_response` renders as HTTP 404 with an `ErrorBody { error:
+        "not_found", ... }`.
+
+        Post-ADR-0020: the response shape is `{spec, spec_digest}` only.
+        The `commit_index` field is dropped wholesale — there is no
+        store-wide nor per-entry index on the wire (see ADR-0020).
+      operationId: describe_job
+      parameters:
+      - name: id
+        in: path
+        description: Canonical JobId
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Job description
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobDescription'
+        '404':
+          description: Job not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+  /v1/nodes:
+    get:
+      tags:
+      - observation
+      summary: '`GET /v1/nodes` — observation read on `node_health`.'
+      description: |-
+        Symmetric to `alloc_status` — reads through
+        `ObservationStore::node_health_rows`. Fresh store → HTTP 200 with
+        explicit `{"rows": []}`.
+      operationId: node_list
+      responses:
+        '200':
+          description: Node rows
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NodeList'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+components:
+  schemas:
+    AllocStatusResponse:
+      type: object
+      description: |-
+        Response for `GET /v1/allocs`.
+
+        Phase 1 always renders an empty `rows` array per US-03 AC — the
+        allocation-status path is owned by Phase 2. The typed `rows` field
+        is present so the CLI and external clients can parse the response
+        into a concrete shape rather than `serde_json::Value`.
+      required:
+      - rows
+      properties:
+        rows:
+          type: array
+          items:
+            $ref: '#/components/schemas/AllocStatusRowBody'
+    AllocStatusRowBody:
+      type: object
+      description: |-
+        Allocation-status row body.
+
+        Phase 1 shape mirrors the observation `AllocStatusRow` projected to
+        the wire — minimal fields matching the whitepaper §4 schema
+        (`alloc_id`, `job_id`, `node_id`, `state`). Phase 2+ adds columns
+        additively.
+      required:
+      - alloc_id
+      - job_id
+      - node_id
+      - state
+      properties:
+        alloc_id:
+          type: string
+        job_id:
+          type: string
+        node_id:
+          type: string
+        state:
+          type: string
+    BrokerCountersBody:
+      type: object
+      description: |-
+        Broker counters rendered inside `ClusterStatus`. Tracks the
+        evaluation-broker ingress / cancel / dispatch shape from ADR-0013.
+      required:
+      - queued
+      - cancelled
+      - dispatched
+      properties:
+        cancelled:
+          type: integer
+          format: int64
+          minimum: 0
+        dispatched:
+          type: integer
+          format: int64
+          minimum: 0
+        queued:
+          type: integer
+          format: int64
+          minimum: 0
+    ClusterStatus:
+      type: object
+      description: |-
+        Response for `GET /v1/cluster/info`.
+
+        Carries mode, region, the reconciler registry, and the broker
+        counters per ADR-0013 and US-04 AC (amended by ADR-0020 — the
+        `commit_index` field is dropped, no replacement).
+
+        Activity-rate observability is provided by `broker.dispatched`
+        (heartbeat reconciler ticks) plus the `reconcilers` list (the
+        "did the runtime register?" wiring witness). A dedicated metrics
+        endpoint covers cluster-level commit-rate signals starting in
+        Phase 5; the dropped in-memory counter was not a substitute for
+        it. See ADR-0020 §Considered alternatives §D for the full
+        rationale.
+      required:
+      - mode
+      - region
+      - reconcilers
+      - broker
+      properties:
+        broker:
+          $ref: '#/components/schemas/BrokerCountersBody'
+        mode:
+          type: string
+        reconcilers:
+          type: array
+          items:
+            type: string
+        region:
+          type: string
+    ErrorBody:
+      type: object
+      description: |-
+        RFC-7807-compatible subset per ADR-0015.
+
+        The three fields — `error`, `message`, `field` — are pinned;
+        renaming breaks the contract surface the CLI and external clients
+        depend on. `field` is `Option<String>` because not every error class
+        maps to a single field (e.g. transport-layer errors).
+      required:
+      - error
+      - message
+      properties:
+        error:
+          type: string
+        field:
+          type:
+          - string
+          - 'null'
+        message:
+          type: string
+    IdempotencyOutcome:
+      type: string
+      description: |-
+        Outcome of an idempotent `POST /v1/jobs` submission.
+
+        Distinguishes "your spec landed fresh" from "your spec was already
+        there." Conflict (different spec at same key) is an HTTP-status
+        concern (409), never an enumeration value here — see ADR-0015 §4
+        amendment via ADR-0020.
+
+        Wire shape: `"inserted"` | `"unchanged"` (lowercase JSON via
+        `#[serde(rename_all = "lowercase")]`).
+      enum:
+      - inserted
+      - unchanged
+    JobDescription:
+      type: object
+      description: |-
+        Response for `GET /v1/jobs/{id}`. Carries the re-hydrated spec and
+        the canonical spec digest per ADR-0014 and US-03 AC (amended by
+        ADR-0020).
+
+        `spec` is typed (`JobSpecInput`), never `serde_json::Value` — the
+        CLI parses this response into a concrete type rather than a value
+        bag. `spec_digest` equals the lowercase-hex SHA-256 of the
+        rkyv-archived bytes pulled out of the `IntentStore` — i.e. the
+        same value the original `POST /v1/jobs` returned for this `job_id`.
+      required:
+      - spec
+      - spec_digest
+      properties:
+        spec:
+          $ref: '#/components/schemas/JobSpecInput'
+        spec_digest:
+          type: string
+    JobSpecInput:
+      type: object
+      description: |-
+        Input shape for `Job::from_spec`. The CLI deserialises TOML into this
+        type; the server deserialises JSON into the same type; both route
+        through the same constructor.
+
+        Carries `Serialize` / `Deserialize` so REST handlers and the CLI can
+        reuse this type verbatim as the body / field shape for
+        `POST /v1/jobs` and `GET /v1/jobs/{id}` (ADR-0014 §Shared types).
+        Carries `utoipa::ToSchema` so the generated `OpenAPI` document
+        (ADR-0009, `cargo xtask openapi-gen`) renders the spec shape
+        consistently across the server and CLI lanes.
+      required:
+      - id
+      - replicas
+      - cpu_milli
+      - memory_bytes
+      properties:
+        cpu_milli:
+          type: integer
+          format: int32
+          minimum: 0
+        id:
+          type: string
+        memory_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+        replicas:
+          type: integer
+          format: int32
+          minimum: 0
+    NodeList:
+      type: object
+      description: |-
+        Response for `GET /v1/nodes`. Phase 1 always renders an empty
+        `rows` array per US-03 AC — node ingestion lands in a later phase.
+      required:
+      - rows
+      properties:
+        rows:
+          type: array
+          items:
+            $ref: '#/components/schemas/NodeRowBody'
+    NodeRowBody:
+      type: object
+      description: |-
+        Node row body. Phase 1 shape mirrors the observation `NodeHealthRow`
+        projected to the wire — minimal fields (`node_id`, `region`). Phase
+        2+ adds columns additively.
+      required:
+      - node_id
+      - region
+      properties:
+        node_id:
+          type: string
+        region:
+          type: string
+    SubmitJobRequest:
+      type: object
+      description: |-
+        Body of `POST /v1/jobs`. Carries the operator-submitted job spec
+        verbatim; the server routes it through `Job::from_spec` to validate
+        and derive the intent key / digest.
+      required:
+      - spec
+      properties:
+        spec:
+          $ref: '#/components/schemas/JobSpecInput'
+    SubmitJobResponse:
+      type: object
+      description: |-
+        Response for `POST /v1/jobs`. Carries `job_id`, the canonical
+        `spec_digest`, and the idempotency `outcome` per ADR-0008 and
+        ADR-0020.
+
+        Idempotency contract (ADR-0015 §4 amended by ADR-0020):
+
+        * Fresh insert → `outcome = IdempotencyOutcome::Inserted`, HTTP 200.
+        * Byte-identical resubmission of the same spec at the same key →
+          `outcome = IdempotencyOutcome::Unchanged`, HTTP 200. No write
+          occurred; `spec_digest` is stable across N retries.
+        * Different spec at the same key → HTTP 409 Conflict, no `outcome`
+          field on the wire (conflict is an HTTP-status concern, never an
+          enum value — see ADR-0015 §4 amendment via ADR-0020).
+
+        `job_id` is rendered as a `String` at the wire boundary; the server
+        converts back to `overdrive_core::id::JobId` in handlers.
+        `spec_digest` is the lowercase-hex SHA-256 of the canonical
+        rkyv-archived `Job` bytes (ADR-0002, development.md §Hashing); 64
+        characters.
+      required:
+      - job_id
+      - spec_digest
+      - outcome
+      properties:
+        job_id:
+          type: string
+        outcome:
+          $ref: '#/components/schemas/IdempotencyOutcome'
+        spec_digest:
+          type: string
+tags:
+- name: jobs
+  description: Job lifecycle endpoints
+- name: cluster
+  description: Cluster status endpoints
+- name: observation
+  description: Observation-store read endpoints

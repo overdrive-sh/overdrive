@@ -50,16 +50,44 @@ The default unit/proptest suite covers in-process logic exclusively
 proptest cases, trybuild compile-fail. Anything heavier moves out of
 the default lane.
 
+### Workspace convention — every member declares the feature
+
+**Every workspace member MUST declare `integration-tests = []` in its
+`[features]` block, even crates that have no integration tests of
+their own.** For crates without integration tests the declaration is a
+deliberate no-op; for crates with them it gates the slow lane (see
+*Mechanics* below).
+
+Why: `cargo xtask mutants --features integration-tests` (the canonical
+mutation invocation; CI passes it on every PR) propagates the bare
+feature flag to per-mutant cargo invocations. cargo-mutants v27.0.0
+scopes those invocations to `--package <owning-crate>`. Cargo's
+feature resolution requires the scoped package to declare the feature
+— a non-declaring package in the mutation surface produces
+`error: the package 'X' does not contain this feature: integration-tests`
+and marks every mutant under it unviable, collapsing the kill-rate
+signal to zero. The convention makes the bare flag universally valid.
+
+Enforcement is automated: `xtask::mutants::tests::every_workspace_
+member_declares_integration_tests_feature` walks the workspace
+`members` list and fails the PR if any member is missing the
+declaration. A new crate added without it cannot land.
+
+The narrative behind the convention — and the original failure mode
+that motivated it — lives in PR #132's RCA (April 2026).
+
 ### Mechanics
 
-Add an opt-in feature to the owning crate's `Cargo.toml`:
+Declaration shape, identical for every member:
 
 ```toml
 [features]
-# Opt-in gate for slow / real-infra tests in this crate. Off by
-# default so `cargo nextest run --workspace` stays under the 60s
-# slow-test budget; CI exercises the gate in a dedicated
-# `integration` job.
+# Workspace-wide convention. Every workspace member declares this
+# feature so `cargo {check,test,mutants} --features integration-tests`
+# resolves uniformly under per-package scoping. For crates with
+# integration tests, this is the gate; for crates without, the
+# declaration is a deliberate no-op. See § "Integration vs unit
+# gating" above.
 integration-tests = []
 ```
 
@@ -190,15 +218,32 @@ lefthook, doctests run scoped per-crate at *pre-commit* time (tight
 feedback for rustdoc examples), while the nextest suite runs at
 pre-push. Profile config lives in `.config/nextest.toml`.
 
+**Quiet output by default.** The `default` profile sets
+`status-level = "fail"` and `final-status-level = "fail"` — clean runs
+print a one-line summary, failing runs show the failures directly
+rather than burying them under dozens of PASS lines. This removes the
+usual reason to reach for `| tail -N`, which eats the non-zero exit
+code (bash pipelines do not enable `pipefail` per tool call). When
+`--no-fail-fast` multi-failure inspection still warrants piping (for
+example `cargo nextest run ... --no-fail-fast 2>&1 | grep -E
+'^(\s+(PASS|FAIL|SKIP)|Summary|test result)' | tail -30`), the
+PostToolUse hook `.claude/hooks/flag-test-failure.ts` scans the
+captured output for FAIL markers and nextest summaries reporting
+N failed, so exit-code loss cannot silently mask a failure.
+
 - **Do NOT** set `run_in_background: true` on a test command and then
   poll with `tail`, `cat`, `wait`, or sleep loops against the output
   file. Each poll burns a turn, the harness blocks long `sleep`s, and
   you lose the structured output view that the direct tool result
   gives you.
 - **Do NOT** redirect test output to a temp file and `tail` it. The
-  tool already captures stdout+stderr. Piping to `tail -N` in the
-  command itself is fine if you know you only want the last N lines —
-  but run it synchronously, not in the background.
+  tool already captures stdout+stderr, and the `default` nextest
+  profile only surfaces failures anyway. Piping to `| tail -N`
+  in-command is acceptable when you specifically need the tail of a
+  `--no-fail-fast` multi-failure inspection — skip it otherwise, since
+  the pipe masks the exit code. The PostToolUse failure scanner is the
+  backstop when piping is unavoidable, not a licence to pipe by
+  default.
 - **Prefer running only the affected tests.** Default to
   `cargo nextest run -p <crate>` for the crate you changed, or
   `cargo nextest run -p <crate> -E 'test(<filter>)'` for a specific
@@ -215,6 +260,176 @@ pre-push. Profile config lives in `.config/nextest.toml`.
   need to run the test while also editing unrelated files. Even then,
   prefer to let the test finish first; backgrounding is rarely the
   right tradeoff for a test run.
+
+### Mutation testing is the exception
+
+`cargo mutants` and `cargo xtask mutants` — and only these — are
+exempt from the foreground-only rule. A mutation run does a full
+build + nextest rerun per mutant; even diff-scoped
+(`--in-diff origin/main`) the wall clock exceeds the 10 min Bash tool
+cap on this workspace. Running it foreground means it gets SIGKILLed
+at the cap, which is both misleading (the run wasn't actually
+failing) and destructive (`pkill -f "cargo mutants"` then leaves
+mutated source on disk — see the Post-Mutation Safety step in
+`nw-mutation-test`).
+
+Rules for mutation specifically:
+
+- **Invoke with `run_in_background: true`.** Capture stdout+stderr to
+  a file; the command returns immediately with a shell ID.
+- **Wait for exit, don't poll output.** Use the shell ID's completion
+  signal. Do not `tail -f` the log file in a loop — each read burns a
+  turn and the real signal is "the process exited," not "the log
+  looks done."
+- **No wall-clock kill.** If the run is taking longer than expected,
+  that's information — either the diff scope is wrong, the
+  `.cargo/mutants.toml` skip list is incomplete, or the test suite is
+  slower than budgeted. Investigate; do not `pkill`.
+- **Always run the post-mutation safety step** (`git checkout --
+  <src>`) whether the run succeeded, failed, was cancelled by the
+  user, or errored. Mutated source on disk is the failure mode that
+  makes this exception load-bearing.
+
+This exception is narrow. Nextest, `cargo test --doc`, `cargo xtask
+dst`, `cargo xtask bpf-unit`, `cargo xtask integration-test vm`,
+`cargo xtask verifier-regress`, and `cargo xtask xdp-perf` all stay
+foreground.
+
+---
+
+## RED scaffolds and intentionally-failing commits
+
+Outside-In TDD produces intentionally-failing test scaffolds: new
+`SimInvariant` variants, new arms in an exhaustive match, new trait
+methods the harness calls before the implementation exists. Mark the
+unimplemented branch with `panic!("Not yet implemented -- RED
+scaffold")` (or `todo!("RED scaffold: ...")`). The panic IS the
+specification of work not yet done.
+
+**Downstream fallout on pre-existing tests is expected and correct.**
+When a generic harness iterates every variant — DST walking every
+`SimInvariant`, a property test enumerating every action, a match
+covering every driver class — the new RED branch makes pre-existing
+tests panic the moment they touch it. Do NOT "fix" this by replacing
+the `panic!` with a neutral stub (`Ok(())`, `Verdict::Allow`, `return
+vec![]`). A neutral stub turns the bar green and masks the
+unfinished state — the whole point of the RED phase is that the bar
+is red until the implementation lands.
+
+When a pre-commit or pre-push hook fires on a RED scaffold:
+
+- **Do not** swap the `panic!` for a neutral stub to satisfy the gate.
+- **Do not** add `#[ignore]` to the pre-existing tests the new
+  scaffold now panics. That hides a regression surface the moment the
+  scaffold goes GREEN — the paired tests are precisely what will
+  validate the implementation.
+- **Commit with `git commit --no-verify`** and call it out explicitly
+  in the commit message or user-facing summary. Intentionally-RED
+  commits are one of the explicit exceptions to "never skip hooks":
+  forcing green with stubs is worse than acknowledging red. Full
+  pre-push lefthook and CI still catch anything that shouldn't ship;
+  the pre-commit gate is here to catch accidents, not to block the
+  GREEN-next-commit loop.
+
+---
+
+## Tests that mutate process-global state (`serial_test`)
+
+Some tests need to mutate state that is shared across the whole
+process — most commonly environment variables (`$HOME`,
+`$OVERDRIVE_CONFIG_DIR`, `$XDG_DATA_HOME`), the current working
+directory, or a global `OnceLock` used by production code. Nextest
+runs tests in parallel threads within a single binary by default,
+so two tests touching the same env var race and corrupt each other's
+fixtures. The fix is serialisation, not coarser locks.
+
+**Use [`serial_test`](https://docs.rs/serial_test) with
+`#[serial(env)]`** for every test that mutates a process-global
+resource. Dev-dep only, declared once in
+`[workspace.dependencies]` and pulled into the consuming crate via
+`serial_test.workspace = true`.
+
+```rust
+use serial_test::serial;
+
+#[tokio::test]
+#[serial(env)]
+async fn honours_home_env_var_fallback() {
+    let _guard = EnvGuard::scoped(&[("HOME", Some(tmp.path())),
+                                    ("OVERDRIVE_CONFIG_DIR", None)]);
+    // ... test body — env is exclusive for the duration of this test
+}
+```
+
+### Rules
+
+- **`#[serial(env)]`, not bare `#[serial]`.** The `(env)` key groups
+  env-mutating tests together; other `#[serial(...)]` groups (and
+  all un-annotated tests) continue running in parallel. Bare
+  `#[serial]` serialises against *every other* `#[serial]` test in
+  the process, which is coarser than needed and slower.
+- **Always wrap env mutations in an explicit `unsafe { }` block.**
+  Rust 2024 + workspace-wide `unsafe_op_in_unsafe_fn = deny` makes
+  this mandatory — `std::env::set_var` / `remove_var` / `set_current_dir`
+  are `unsafe fn` and the compiler rejects bare calls. Add a
+  `// SAFETY:` comment explaining *why* it is safe (typically:
+  "`#[serial(env)]` guarantees exclusive access for the duration of
+  this test").
+- **Save and restore via RAII, never by hand.** Assertion failures
+  panic mid-test; leaked env state corrupts subsequent tests in the
+  same binary. Use an `EnvGuard`-shaped helper (saves prior values
+  in `new()`, restores in `Drop`) rather than manual
+  save-mutate-restore, so the restore runs even when the test
+  panics. One such helper per crate that needs it; don't scatter
+  ad-hoc save-restore dances across test files.
+- **Workspace dev-dep.** Declare `serial_test = "3"` (or current
+  stable major) under the `# --- Testing ---` block of
+  `[workspace.dependencies]` in the root `Cargo.toml`. Consuming
+  crates add `serial_test.workspace = true` under
+  `[dev-dependencies]`. Never pin a version in a leaf crate per
+  `development.md` — Dependencies.
+- **Every test that *reads* the mutated resource is still fair
+  game.** `#[serial(env)]` only locks out *other `#[serial(env)]`
+  tests*. An un-annotated test that reads `$HOME` while an
+  annotated test mutates it still races. If a variable is in play,
+  every test that touches it gets the annotation — not just the
+  writers.
+
+### What NOT to use instead
+
+- **Crate-local `std::sync::Mutex` guard.** Works mechanically, but
+  every new env-mutating test must remember to take the lock AND
+  remember to save/restore manually — a landmine that produces
+  phantom nextest failures the first time a third test lands in the
+  same binary without the guard. `serial_test` makes the correct
+  pattern declarative; the mutex pattern makes it discretionary.
+- **Separate test binary with `threads = 1` via a nextest profile
+  override.** Overkill for a concurrency-of-2 constraint; splits
+  the `tests/integration/<scenario>.rs` layout without buying
+  anything a `#[serial(env)]` annotation doesn't, and costs CI
+  minutes on extra binary spin-up.
+- **Bare `#[serial]` (no group key).** Serialises against every
+  other `#[serial]` test — too coarse; slows unrelated suites.
+- **`std::env::set_var` without `unsafe { }`.** Fails to compile on
+  Rust 2024. Don't try to silence with `#[allow(unsafe_op_in_unsafe_fn)]`
+  — the workspace-wide `deny` is load-bearing for the rest of the
+  codebase.
+
+### When it's not the answer
+
+`serial_test` fixes *process-shared* state. It does NOT fix:
+
+- **Shared filesystem paths.** Two tests both writing to
+  `/tmp/overdrive-cache` race regardless of env locks. Use
+  `tempfile::TempDir` (per-test) instead.
+- **Shared port numbers.** Two tests both binding `127.0.0.1:7001`
+  race on the OS kernel, not on the process. Bind `127.0.0.1:0`
+  and read the assigned port.
+- **Shared global state the production code caches.** A `OnceLock`
+  populated on first access stays populated for the whole process;
+  no test-level lock can reset it. Either inject the state via a
+  constructor parameter in production code, or accept that the
+  test order matters and gate behind `integration-tests`.
 
 ---
 
@@ -424,6 +639,163 @@ suite per mutation. Outcomes:
   missing, or the existing tests don't assert on the changed behaviour.
 - **Timeout / unviable** — investigate; these are not freebies.
 
+### Usage
+
+Mutation testing goes through the `cargo xtask mutants` wrapper, not
+`cargo mutants` directly. The wrapper materialises the diff file
+cargo-mutants expects, pins `--test-tool=nextest` to match the project
+runner, writes `target/xtask/mutants-summary.json`, and implements the
+kill-rate gate. Invoking `cargo mutants` directly skips all of that.
+
+Two modes, mutually exclusive (clap rejects both-or-neither):
+
+```bash
+# Per-PR, diff-scoped. Gate: kill rate ≥ 80%. This is the default
+# CI invocation. `--features integration-tests` is the canonical
+# feature flag — every workspace member declares it (see § "Workspace
+# convention" above), so the bare flag resolves uniformly under
+# cargo-mutants v27's per-package scoping. The wrapper does not
+# auto-add anything; pass it explicitly.
+cargo xtask mutants --diff origin/main --features integration-tests
+
+# Nightly / full-corpus. Gate: ≥ 60% absolute floor; drift ≤ -2pp vs.
+# mutants-baseline/main/kill_rate.txt is a soft-warn.
+cargo xtask mutants --workspace --features integration-tests
+
+# Override the baseline path for --workspace (rare; default is usually
+# correct):
+cargo xtask mutants --workspace --features integration-tests \
+  --baseline mutants-baseline/main/kill_rate.txt
+```
+
+**Scope narrowing.** The wrapper exposes cargo-mutants' own `--file`,
+`--package`, and `--features` as pass-throughs. These compose with
+`--diff` or `--workspace`:
+
+```bash
+# Single file in a single package — the canonical TDD-inner-loop
+# invocation. The wrapper adds --test-workspace=false automatically
+# when --package is set (only that crate's test suite is rerun per
+# mutation — large wall-clock win).
+cargo xtask mutants --diff origin/main --features integration-tests \
+  --package overdrive-control-plane \
+  --file crates/overdrive-control-plane/src/handlers.rs
+
+# Whole package, no diff scoping:
+cargo xtask mutants --workspace --features integration-tests \
+  --package overdrive-core
+
+# Extra features on top of integration-tests:
+cargo xtask mutants --diff origin/main \
+  --features integration-tests,unstable-foo,bar \
+  --package overdrive-control-plane
+
+# Drop integration-tests (rare; deliberately measuring kill rate
+# without acceptance tests participating):
+cargo xtask mutants --diff origin/main \
+  --package overdrive-control-plane
+
+# Opt out of the --test-workspace=false default when mutations in one
+# crate can only be killed by tests in another:
+cargo xtask mutants --diff origin/main --features integration-tests \
+  --package overdrive-control-plane \
+  --test-whole-workspace
+```
+
+**Per-step vs per-PR scoping.** Running the unscoped
+`cargo xtask mutants --diff origin/main --package <crate>` after every
+DELIVER step takes 15+ minutes and is the wrong default for the inner
+loop — by the end of a multi-step feature you have re-mutated earlier
+commits' code dozens of times. Two-tier discipline:
+
+- **Per DELIVER step (inner loop).** Pass `--file` for every file you
+  touched in *this* step. Mutates only the lines you just changed; PR-wide
+  gate semantics are preserved (still `--diff origin/main`), and
+  `--test-workspace=false` keeps the rerun scoped to the package's own
+  tests.
+
+  ```bash
+  cargo xtask mutants --diff origin/main \
+    --package overdrive-store-local \
+    --file crates/overdrive-store-local/src/<file-from-this-step>.rs \
+    --file crates/overdrive-store-local/src/<another-file>.rs
+  ```
+
+- **Once before opening the PR (final check).** Drop the `--file` flags
+  and run the full per-package diff. This is the gate CI runs; it must
+  pass before merge regardless of how many times the per-step scoped
+  runs passed.
+
+  ```bash
+  cargo xtask mutants --diff origin/main --package overdrive-store-local
+  ```
+
+If a step did not touch any source the mutation gate covers (docs-only,
+test-only, schema migration with no logic, generated code), skip the
+mutation run for that step entirely — `--file` with no logic source has
+nothing to mutate. The final per-PR run still catches anything missed.
+
+**Empty filter intersection is a vacuous pass.** When `--file` (or
+`--file` × `--diff`) names paths whose diff lines do not overlap a
+mutable mutation operator, cargo-mutants logs `INFO No mutants to filter`
+and exits 0 without producing `outcomes.json`. The wrapper treats this
+as a vacuous pass — kill rate is undefined, the gate is satisfied, and
+`target/xtask/mutants-summary.json` records `total_mutants=0` with
+`status="pass"`. If you expected mutants and got zero, double-check
+that the file actually changed against the diff base
+(`git diff <base> -- <file>`) and that the change includes mutable
+operator sites (return values, comparison operators, match arms — not
+just whitespace, comments, or rustdoc).
+
+**Why `--features integration-tests` is explicit, not auto-added.**
+This repo's acceptance tests live behind `#[cfg(feature =
+"integration-tests")]` per §"Integration vs unit gating". Without the
+feature enabled, those tests don't compile — which means cargo-mutants
+runs the mutation against a build where the tests that would catch it
+are absent, and kill rate is silently understated. CI passes the flag
+explicitly on every mutants invocation; the wrapper does not auto-add
+it. The workspace convention (every member declares
+`integration-tests = []`, even no-op crates — see §"Workspace
+convention" above) is what makes the bare flag safe under cargo-mutants
+v27's per-package scoping. An earlier auto-add scheme tried to emit
+per-package qualified `<pkg>/integration-tests` features for crates
+that declared them; that scheme broke when v27 scoped per-mutant
+builds to `--package <owner>` and cargo refused cross-package
+qualifiers — see PR #132's RCA (April 2026).
+
+**Flag confusion to avoid.** `cargo-mutants` itself takes
+`--in-diff <FILE>` — a *file path*, not a git ref. The xtask wrapper
+takes `--diff <BASE_REF>` — a git ref — and handles the diff
+materialisation. Passing `--in-diff` to `cargo xtask mutants` will
+fail; passing `--diff` to bare `cargo mutants` will fail. Use the
+wrapper with `--diff` and neither mistake comes up.
+
+**Invocation shape.** Mutation is the explicit exception to the
+foreground-only rule above (see "Mutation testing is the exception"
+at the top of "Running tests"):
+
+- Use `run_in_background: true`. A mutation run over a real diff
+  regularly exceeds the 10 min Bash tool cap; foreground execution
+  will SIGKILL mid-run.
+- Let it finish. The wrapper exits 0 on pass, non-zero on gate
+  failure. Do NOT `pkill -f "cargo mutants"` when it seems slow —
+  that leaves mutated source on disk and skips
+  `target/xtask/mutants-summary.json` generation.
+- After every run (pass, fail, cancel), run `git checkout -- crates/`
+  to restore any mutated source the wrapper didn't clean up itself.
+  This is a belt-and-braces step, not a substitute for letting the
+  run finish.
+
+**Reading the output.** The summary file at
+`target/xtask/mutants-summary.json` is the structured gate record —
+it contains kill rate, caught/missed/timeout/unviable counts, and the
+gate verdict. Parse that, not the human-readable stdout. CI reads
+the same file for the `GITHUB_STEP_SUMMARY` annotation.
+
+**Installation.** Both `cargo-mutants` and `cargo-nextest` must be on
+PATH — the wrapper checks for both up front and bails with an
+install hint if either is missing.
+
 ### Mandatory targets
 
 Every merge into `main` must meet a **kill rate ≥ 80%** on the code below
@@ -455,7 +827,7 @@ reviewed per-PR, not aggregated across releases.
 
 ### Rules
 
-- **Scoped per PR.** `cargo xtask mutants --in-diff origin/main` runs
+- **Scoped per PR.** `cargo xtask mutants --diff origin/main` runs
   only mutations that overlap the PR diff. Full-corpus runs are nightly;
   per-PR budget is tight.
 - **One-line skip with justification.** Use `// mutants: skip` above
@@ -668,7 +1040,8 @@ Per-PR (critical path ≈ 15 minutes):
   D  cargo xtask integration-test vm     Tier 3, kernel matrix         (10 min)
   E  cargo xtask verifier-regress        Tier 4 — veristat             (min)
      cargo xtask xdp-perf                Tier 4 — xdp-bench            (min)
-  F  cargo xtask mutants --in-diff       diff-scoped (nextest per      (min)
+  F  cargo xtask mutants --diff origin/main
+                                         diff-scoped (nextest per      (min)
                                          mutation); kill rate ≥ 80%
 
 Nightly:
@@ -713,6 +1086,10 @@ traits, banned parameter shapes)?
 
 Tests pass but not sure they actually assert on the behaviour?
     → cargo-mutants — close the kill-rate gap
+
+Test mutates env vars / cwd / other process-global state?
+    → `#[serial_test::serial(env)]` + RAII guard
+      (see "Tests that mutate process-global state")
 
 eBPF program-level correctness against curated input?
     → Tier 2 (BPF unit)

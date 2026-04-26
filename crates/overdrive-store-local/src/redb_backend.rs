@@ -1,5 +1,16 @@
 //! redb-backed implementation of `IntentStore` for the single-node
-//! `LocalStore`.
+//! `LocalIntentStore`.
+//!
+//! # Storage layout
+//!
+//! A single `entries: &[u8] -> &[u8]` table holds every key/value pair.
+//! The stored row IS the caller-provided value — no inline framing, no
+//! prefix, no transformation. `IntentStore::put(k, v)` followed by
+//! `IntentStore::get(k)` returns `v` byte-for-byte.
+//!
+//! Secondary indexes are deliberately out of scope for Phase 1 —
+//! reconcilers that need them will add them in Phase 2 alongside
+//! `RaftStore`.
 //!
 //! # Watch: Phase 1 substitute
 //!
@@ -11,7 +22,7 @@
 //! filter.
 //!
 //! This is an **in-process** notification surface: it is correct for a
-//! single-node `LocalStore` (the `mode = "single"` deployment per the
+//! single-node `LocalIntentStore` (the `mode = "single"` deployment per the
 //! whitepaper §4), where every reader of `IntentStore` lives in the same
 //! process as the writer. **Phase 2 replaces this with a Raft-log-driven
 //! change notification** once `RaftStore` lands — at that point,
@@ -21,14 +32,13 @@
 //! Trade-offs of the Phase 1 substitute:
 //!
 //! * Subscribers that lag past the broadcast capacity drop events
-//!   (`RecvError::Lagged`). The current stream-wrapper layer treats that
-//!   as an end-of-stream signal; the Raft-driven replacement will recover
-//!   via log catch-up.
+//!   (`RecvError::Lagged`). The current stream-wrapper layer silently
+//!   drops the lagged notification and continues delivering subsequent
+//!   events — the stream does not close, so a caller relying on
+//!   end-of-stream as a catch-up trigger will miss the lost events. The
+//!   Raft-driven replacement will recover via log catch-up.
 //! * Events fire only after successful redb commit, so a subscriber
 //!   never sees a phantom write that failed to persist.
-//! * The table layout is deliberately minimal for Phase 1: a single
-//!   `entries: &[u8] -> &[u8]` table. Secondary indexes land when
-//!   reconcilers need them (Phase 2).
 
 use std::path::Path;
 use std::pin::Pin;
@@ -39,7 +49,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use futures::Stream;
 use overdrive_core::traits::intent_store::{
-    IntentStore, IntentStoreError, StateSnapshot, TxnOp, TxnOutcome,
+    IntentStore, IntentStoreError, PutOutcome, StateSnapshot, TxnOp, TxnOutcome,
 };
 use redb::{Database, ReadableTable, TableDefinition};
 use tokio::sync::broadcast;
@@ -57,7 +67,8 @@ const ENTRIES_TABLE: TableDefinition<&[u8], &[u8]> = TableDefinition::new("entri
 /// Big enough to absorb a short-lived reader stall without dropping
 /// events on a single-node workload; small enough that an infinite lag
 /// in a subscriber doesn't balloon memory. Subscribers that lag past
-/// this are signalled as end-of-stream (see module docs).
+/// this silently lose the dropped events and keep receiving subsequent
+/// ones — the stream does not close on lag (see module docs).
 const WATCH_CHANNEL_CAPACITY: usize = 1024;
 
 #[derive(Debug, Clone)]
@@ -70,7 +81,7 @@ struct WatchEvent {
 
 /// Redb-backed `IntentStore`. Cheap to clone via `Arc`; safe to share
 /// across tasks and threads.
-pub struct LocalStore {
+pub struct LocalIntentStore {
     inner: Arc<Inner>,
 }
 
@@ -82,15 +93,21 @@ struct Inner {
     watch_tx: broadcast::Sender<WatchEvent>,
 }
 
-impl LocalStore {
-    /// Open (or create) a redb-backed `LocalStore` at `path`.
+impl LocalIntentStore {
+    /// Open (or create) a redb-backed `LocalIntentStore` at `path`.
     ///
-    /// The parent directory must already exist; callers are expected
-    /// to pass a path whose parent has been created. Initializes the
-    /// single `entries` table so that the first read doesn't need to
-    /// take a write transaction.
+    /// The parent directory is created if missing — mirrors
+    /// `LocalObservationStore::open` so the boot path does not depend
+    /// on caller ordering or sibling-store side effects to satisfy a
+    /// "parent must exist" precondition. Initializes the single
+    /// `entries` table so that the first read doesn't need to take a
+    /// write transaction.
     pub fn open(path: impl AsRef<Path>) -> Result<Self, IntentStoreError> {
-        let db = Database::create(path.as_ref()).map_err(map_database_error)?;
+        let path = path.as_ref();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(IntentStoreError::Io)?;
+        }
+        let db = Database::create(path).map_err(map_database_error)?;
 
         // Materialize the table on open so the first read doesn't have
         // to open a write transaction to create it.
@@ -115,7 +132,7 @@ impl LocalStore {
 }
 
 #[async_trait]
-impl IntentStore for LocalStore {
+impl IntentStore for LocalIntentStore {
     async fn get(&self, key: &[u8]) -> Result<Option<Bytes>, IntentStoreError> {
         let inner = Arc::clone(&self.inner);
         let key = key.to_vec();
@@ -124,6 +141,8 @@ impl IntentStore for LocalStore {
             let read = inner.db.begin_read().map_err(map_transaction_error)?;
             let table = read.open_table(ENTRIES_TABLE).map_err(map_table_error)?;
             let got = table.get(key.as_slice()).map_err(map_storage_error)?;
+            // The stored row IS the caller-provided value — no
+            // framing, no prefix, no transformation (ADR-0020 §Decision §2).
             Ok(got.map(|v| Bytes::copy_from_slice(v.value())))
         })
         .await
@@ -139,6 +158,9 @@ impl IntentStore for LocalStore {
             let write = inner.db.begin_write().map_err(map_transaction_error)?;
             {
                 let mut table = write.open_table(ENTRIES_TABLE).map_err(map_table_error)?;
+                // Store the caller-provided bytes verbatim. ADR-0020
+                // §Decision §2: `IntentStore::put(k, v)` followed by
+                // `IntentStore::get(k)` returns `v` byte-for-byte.
                 table
                     .insert(key_vec.as_slice(), value_vec.as_slice())
                     .map_err(map_storage_error)?;
@@ -153,33 +175,110 @@ impl IntentStore for LocalStore {
         Ok(())
     }
 
+    /// Atomic compare-and-set backed by a single redb write
+    /// transaction. The `get` + `insert` pair executes inside one
+    /// `begin_write` / `commit` cycle; redb serialises write
+    /// transactions, so two concurrent `put_if_absent` calls for the
+    /// same key cannot both observe the key as absent.
+    ///
+    /// This closes the TOCTOU window that opens when a caller does a
+    /// separate `get` (read txn) followed by a `put` (write txn):
+    /// another writer can interleave between the two and silently
+    /// overwrite the first write.
+    ///
+    /// On the `KeyExists` branch, `existing` carries the bytes that
+    /// currently occupy the key — used by handlers to distinguish
+    /// idempotent re-submission from genuine conflict.
+    async fn put_if_absent(
+        &self,
+        key: &[u8],
+        value: &[u8],
+    ) -> Result<PutOutcome, IntentStoreError> {
+        let key_vec = key.to_vec();
+        let value_vec = value.to_vec();
+        let inner = Arc::clone(&self.inner);
+
+        let (outcome, emit) = tokio::task::spawn_blocking(move || {
+            let write = inner.db.begin_write().map_err(map_transaction_error)?;
+            let (outcome, emit) = {
+                let mut table = write.open_table(ENTRIES_TABLE).map_err(map_table_error)?;
+                // `get` inside the write transaction sees a consistent
+                // view with the subsequent `insert` — this is what makes
+                // the check-and-set atomic.
+                if let Some(existing) = table.get(key_vec.as_slice()).map_err(map_storage_error)? {
+                    let existing_bytes = Bytes::copy_from_slice(existing.value());
+                    (PutOutcome::KeyExists { existing: existing_bytes }, None)
+                } else {
+                    table
+                        .insert(key_vec.as_slice(), value_vec.as_slice())
+                        .map_err(map_storage_error)?;
+                    (PutOutcome::Inserted, Some((key_vec, value_vec)))
+                }
+            };
+            write.commit().map_err(map_commit_error)?;
+            Ok::<_, IntentStoreError>((outcome, emit))
+        })
+        .await
+        .map_err(map_join_error)??;
+
+        // Watch events only fire on the insert branch — a `KeyExists`
+        // return is a no-op commit, semantically.
+        if let Some((emit_key, emit_value)) = emit {
+            self.emit(Bytes::from(emit_key), Bytes::from(emit_value));
+        }
+        Ok(outcome)
+    }
+
     async fn delete(&self, key: &[u8]) -> Result<(), IntentStoreError> {
         let key_vec = key.to_vec();
         let inner = Arc::clone(&self.inner);
 
+        // `delete` is idempotent for absent keys: `redb::Table::remove`
+        // returns `Ok(None)` when the key is not present. Without
+        // gating on that return, the watch emit fires for a row that
+        // never existed — `watch(prefix)` subscribers would see a
+        // phantom `(key, empty)` event. The emit is therefore
+        // conditional on the remove having actually removed.
         let emit_key = tokio::task::spawn_blocking(move || {
             let write = inner.db.begin_write().map_err(map_transaction_error)?;
-            {
+            let removed = {
                 let mut table = write.open_table(ENTRIES_TABLE).map_err(map_table_error)?;
-                table.remove(key_vec.as_slice()).map_err(map_storage_error)?;
-            }
+                table.remove(key_vec.as_slice()).map_err(map_storage_error)?.is_some()
+            };
             write.commit().map_err(map_commit_error)?;
-            Ok::<_, IntentStoreError>(key_vec)
+            Ok::<_, IntentStoreError>(removed.then_some(key_vec))
         })
         .await
         .map_err(map_join_error)??;
 
         // Delete events carry an empty value per the trait docstring.
-        self.emit(Bytes::from(emit_key), Bytes::new());
+        // Emit only when the row actually existed pre-delete — a
+        // phantom event for an absent key is the bug this gate closes.
+        if let Some(key) = emit_key {
+            self.emit(Bytes::from(key), Bytes::new());
+        }
         Ok(())
     }
 
     async fn txn(&self, ops: Vec<TxnOp>) -> Result<TxnOutcome, IntentStoreError> {
+        // An empty `txn` has nothing to commit. Short-circuit before
+        // any I/O — opening a write transaction for it is wasted work.
+        if ops.is_empty() {
+            return Ok(TxnOutcome::Committed);
+        }
+
         let inner = Arc::clone(&self.inner);
         let ops_for_commit = ops.clone();
 
-        tokio::task::spawn_blocking(move || {
+        // For each op, record whether it had observable effect: every
+        // `Put` always does; a `Delete` only when `redb::Table::remove`
+        // returned `Some(_)`. The post-commit emit loop reads this
+        // mask so phantom delete events for absent keys never reach
+        // `watch(prefix)` subscribers — the same gate as the standalone
+        // `delete` path, applied per-op inside the transaction.
+        let effective = tokio::task::spawn_blocking(move || {
             let write = inner.db.begin_write().map_err(map_transaction_error)?;
+            let mut effective = Vec::with_capacity(ops_for_commit.len());
             {
                 let mut table = write.open_table(ENTRIES_TABLE).map_err(map_table_error)?;
                 for op in &ops_for_commit {
@@ -188,22 +287,29 @@ impl IntentStore for LocalStore {
                             table
                                 .insert(key.as_ref(), value.as_ref())
                                 .map_err(map_storage_error)?;
+                            effective.push(true);
                         }
                         TxnOp::Delete { key } => {
-                            table.remove(key.as_ref()).map_err(map_storage_error)?;
+                            let removed =
+                                table.remove(key.as_ref()).map_err(map_storage_error)?.is_some();
+                            effective.push(removed);
                         }
                     }
                 }
             }
             write.commit().map_err(map_commit_error)?;
-            Ok::<_, IntentStoreError>(())
+            Ok::<_, IntentStoreError>(effective)
         })
         .await
         .map_err(map_join_error)??;
 
         // Emit per-op events *after* the commit succeeds so subscribers
-        // never see a phantom write.
-        for op in ops {
+        // never see a phantom write — and only for ops that actually
+        // changed state.
+        for (op, effective) in ops.into_iter().zip(effective) {
+            if !effective {
+                continue;
+            }
             match op {
                 TxnOp::Put { key, value } => self.emit(key, value),
                 TxnOp::Delete { key } => self.emit(key, Bytes::new()),
@@ -221,8 +327,10 @@ impl IntentStore for LocalStore {
         let rx = self.inner.watch_tx.subscribe();
 
         // Drop `Lagged` / drain errors silently by filtering them out —
-        // the Phase 1 substitute treats lag as "subscriber fell behind";
-        // Phase 2 log-driven notification is the recovery path.
+        // returning `None` from `filter_map` skips the lagged notification
+        // and keeps the stream alive; subsequent events still arrive.
+        // Phase 2 log-driven notification is the recovery path for the
+        // lost events.
         let stream = BroadcastStream::new(rx).filter_map(move |evt| match evt {
             Ok(event) => {
                 if event.key.starts_with(&prefix) {
@@ -237,14 +345,16 @@ impl IntentStore for LocalStore {
         Ok(Box::new(Box::pin(PrefixWatchStream { inner: Box::pin(stream) })))
     }
 
-    /// Export a full-state snapshot of this `LocalStore`.
+    /// Export a full-state snapshot of this `LocalIntentStore`.
     ///
     /// Reads every `(key, value)` pair in a single redb read
-    /// transaction, sorts them by key via
-    /// [`snapshot_frame::encode`], and returns a [`StateSnapshot`]
-    /// whose `bytes()` slice is canonical — two semantically-equal
-    /// stores produce byte-identical exports. The same frame format
-    /// is consumed by [`Self::bootstrap_from`] and will be consumed by
+    /// transaction, sorts them by key via [`snapshot_frame::encode`],
+    /// and returns a [`StateSnapshot`] whose `bytes()` slice is
+    /// canonical — two semantically-equal stores produce byte-identical
+    /// exports. The frame format is v1 (key + value, no per-entry
+    /// `commit_index` per ADR-0020 §Decision §3); see `snapshot_frame.rs`
+    /// for the byte layout. The same frame format is consumed by
+    /// [`Self::bootstrap_from`] and will be consumed by
     /// `RaftStore::bootstrap_from` in Phase 2.
     async fn export_snapshot(&self) -> Result<StateSnapshot, IntentStoreError> {
         let inner = Arc::clone(&self.inner);
@@ -263,7 +373,6 @@ impl IntentStore for LocalStore {
 
             let bytes = snapshot_frame::encode(&entries)
                 .map_err(|e| IntentStoreError::SnapshotImport(e.to_string()))?;
-            // `entries` is stored post-encode for caller inspection;
             // `encode` sorts internally on an owned copy, so we sort
             // the caller-visible view here as well to keep the two
             // projections consistent.
@@ -279,7 +388,7 @@ impl IntentStore for LocalStore {
         .map_err(map_join_error)?
     }
 
-    /// Replay a snapshot as the initial state of this `LocalStore`.
+    /// Replay a snapshot as the initial state of this `LocalIntentStore`.
     ///
     /// Decodes the framed byte slice via [`snapshot_frame::decode`],
     /// then, inside a single redb write transaction, clears every
@@ -326,6 +435,7 @@ impl IntentStore for LocalStore {
                 }
             }
             write.commit().map_err(map_commit_error)?;
+
             Ok::<_, IntentStoreError>(())
         })
         .await

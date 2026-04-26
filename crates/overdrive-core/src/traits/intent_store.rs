@@ -51,7 +51,39 @@ pub enum TxnOutcome {
     Conflict,
 }
 
-/// Portable full-state snapshot — used for `LocalStore → RaftStore`
+/// Outcome of an atomic compare-and-set `put_if_absent` against the
+/// [`IntentStore`].
+///
+/// The existence check and the write happen inside a single store
+/// transaction — a concurrent caller racing on the same key cannot
+/// observe an intermediate state where both callers see `None` on the
+/// read and both fall through to a blind `put`. Exactly one caller
+/// wins with [`Inserted`]; every other caller loses with
+/// [`KeyExists`], receiving the bytes that actually occupy the key.
+///
+/// Handlers use the returned bytes to distinguish idempotent
+/// re-submission (byte-identical to the losing caller's payload) from
+/// genuine conflict (different payload at the same key) — see
+/// `overdrive_control_plane::handlers::submit_job`.
+///
+/// [`Inserted`]: PutOutcome::Inserted
+/// [`KeyExists`]: PutOutcome::KeyExists
+#[derive(Debug, Clone)]
+pub enum PutOutcome {
+    /// The key was absent when the transaction began; the new value
+    /// was written.
+    Inserted,
+    /// The key was already populated when the transaction began; no
+    /// write occurred. `existing` carries the bytes that currently
+    /// occupy the key so the caller can compare byte-for-byte before
+    /// deciding whether to return 200 (idempotent) or 409 (conflict).
+    KeyExists {
+        /// The bytes currently occupying the key.
+        existing: Bytes,
+    },
+}
+
+/// Portable full-state snapshot — used for `LocalIntentStore → RaftStore`
 /// migration, routine Raft snapshots in HA mode, and DR backups.
 ///
 /// The snapshot carries its canonical **framed byte slice** alongside
@@ -108,9 +140,35 @@ impl StateSnapshot {
 
 #[async_trait]
 pub trait IntentStore: Send + Sync + 'static {
+    /// Read the bytes at `key`.
+    ///
+    /// Returns `Ok(None)` when the key is absent, `Ok(Some(bytes))`
+    /// when populated. The bytes returned are the caller-provided
+    /// bytes as passed to [`put`], [`put_if_absent`], or
+    /// [`TxnOp::Put`] — implementations do not surface any internal
+    /// row encoding.
+    ///
+    /// [`put`]: Self::put
+    /// [`put_if_absent`]: Self::put_if_absent
     async fn get(&self, key: &[u8]) -> Result<Option<Bytes>, IntentStoreError>;
 
     async fn put(&self, key: &[u8], value: &[u8]) -> Result<(), IntentStoreError>;
+
+    /// Atomic compare-and-set — insert `value` at `key` only if `key`
+    /// is currently absent. The existence check and the write happen
+    /// inside a single store transaction, so two concurrent callers
+    /// racing on the same key cannot both see the key as absent and
+    /// both commit a write: exactly one wins with
+    /// [`PutOutcome::Inserted`]; the other observes
+    /// [`PutOutcome::KeyExists`] carrying the bytes that actually
+    /// occupy the key.
+    ///
+    /// This is the correct primitive for handlers that need to
+    /// implement an idempotent create-or-conflict HTTP contract (`POST
+    /// /v1/jobs`); a naive `get` followed by a separate `put` has a
+    /// TOCTOU window and silently loses writes under concurrency.
+    async fn put_if_absent(&self, key: &[u8], value: &[u8])
+    -> Result<PutOutcome, IntentStoreError>;
 
     async fn delete(&self, key: &[u8]) -> Result<(), IntentStoreError>;
 
@@ -118,6 +176,15 @@ pub trait IntentStore: Send + Sync + 'static {
 
     /// Watch for changes under a key prefix. Each item is `(key, value)`;
     /// deletes are reported as empty `value`.
+    ///
+    /// `value` is the **caller-provided bytes** as passed to [`put`],
+    /// [`put_if_absent`], or [`TxnOp::Put`]. Subscribers that
+    /// subsequently call [`get`] on the same key receive the same
+    /// logical value.
+    ///
+    /// [`put`]: Self::put
+    /// [`put_if_absent`]: Self::put_if_absent
+    /// [`get`]: Self::get
     async fn watch(
         &self,
         prefix: &[u8],
@@ -127,7 +194,7 @@ pub trait IntentStore: Send + Sync + 'static {
     async fn export_snapshot(&self) -> Result<StateSnapshot, IntentStoreError>;
 
     /// Replay a snapshot as the initial state — used by `RaftStore` when
-    /// bootstrapping a new HA cluster from a `LocalStore` export.
+    /// bootstrapping a new HA cluster from a `LocalIntentStore` export.
     async fn bootstrap_from(&self, snapshot: StateSnapshot) -> Result<(), IntentStoreError>;
 }
 

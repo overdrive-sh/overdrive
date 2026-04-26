@@ -151,13 +151,158 @@ surface that lets the wrong call go to the wrong place.
 
 ---
 
+## Ordered-collection choice
+
+`core` and control-plane hot paths default to `BTreeMap` for keyed maps
+whose iteration order is observed (drain, snapshot, JSON output,
+invariant evaluation). `HashMap` is a first-class nondeterminism source
+on the same footing as `Clock` / `Transport` / `Entropy` and must be
+treated with the same discipline.
+
+| Iteration shape | Choice | Notes |
+|---|---|---|
+| Drained / iterated / snapshotted | `BTreeMap<K, V>` | Default. Order is `Ord` on `K` — deterministic across processes, runs, seeds. |
+| Serialised (JSON, rkyv archived field, audit log) | `BTreeMap<K, V>` | Output bytes must be canonical for content hashing and trace-equivalence DST assertions. |
+| Walked by an invariant or property test | `BTreeMap<K, V>` | Reproduction requires bit-identical traversal under the seed. |
+| Point-accessed only (`get` / `insert` / `remove`, never iterated) | `HashMap<K, V>` with `// dst-lint: hashmap-ok <reason>` | Allowed in `core` only with the justification comment. |
+
+The escape hatch — `HashMap` in a `core`-class crate — requires an
+explicit `// dst-lint: hashmap-ok <one-line reason>` comment on (or
+immediately above) the use site. Without the comment the dst-lint gate
+rejects the file at PR time. The comment is the load-bearing artifact:
+it documents *why* iteration nondeterminism cannot surface here, and a
+reviewer who disagrees with the reason has a single line to push back
+on.
+
+### Why
+
+`std::collections::HashMap`'s default `RandomState` is per-process
+random-seeded — two seeded DST runs produce divergent dispatch
+orderings the moment ≥2 distinct keys are held. That violates the K3
+*seed → bit-identical trajectory* property documented in whitepaper §21
+and `.claude/rules/testing.md` § "Sources of Nondeterminism": every
+source of nondeterminism in core logic must be injectable, and `RandomState`
+is the one the type system silently smuggles past every other gate.
+
+The defect was discovered in
+`crates/overdrive-control-plane/src/eval_broker.rs`, where
+`EvaluationBroker::drain_pending` returned evaluations in
+non-deterministic order. The fix landed as a `BTreeMap` swap in commit
+`8cf9119` (`fix(eval-broker): switch pending map to BTreeMap for
+deterministic drain order`). The structural rule prevents the class
+from recurring; the dst-lint clause enforces it.
+
+### When NOT to apply
+
+Bounded-cardinality maps that are NEVER iterated — point-accessed only
+via `get` / `contains_key` / `insert` / `remove`, with no observable
+drop order or iteration call site — MAY use `HashMap` with the
+justification comment, since the iteration nondeterminism never
+surfaces. Examples: per-allocation handle caches keyed by
+`AllocationId` where the cache is consulted only by point lookup and
+never enumerated, or per-request memo tables whose lifetime ends before
+any reduction over their entries.
+
+If you find yourself reaching for the escape hatch and the cardinality
+is small (say, <16), prefer `BTreeMap` anyway — the constant-factor
+cost is in the noise and the `// dst-lint: hashmap-ok` comment is
+upkeep that future contributors must justify.
+
+### Marker comment syntax
+
+The dst-lint scanner accepts exactly one escape form. Other shapes —
+`#[allow(dst_lint::hashmap)]` attributes, `// SAFETY:`-style prose,
+crate-level `#![allow(...)]` — are NOT recognised; the scanner will
+still reject the file.
+
+**Form**:
+
+```
+// dst-lint: hashmap-ok <one-line reason>
+```
+
+- The literal prefix is `// dst-lint: hashmap-ok` (single space after
+  the colon, single space before `hashmap-ok`). Casing matters — the
+  scanner is case-sensitive on the marker tokens.
+- A one-line reason is **required** in human-readable code review
+  contexts even though the scanner does not enforce reason text. A
+  marker without a reason will be rejected at code review time, not at
+  lint time. Put the *why* on the line; the *what* is obvious from the
+  next line of source.
+- **Placement**: on the line **immediately above** the use site, OR as
+  a trailing comment **on the same line** as the use site. Both are
+  recognised:
+
+  ```rust
+  // dst-lint: hashmap-ok per-allocation handle cache, point access only
+  let cache: HashMap<AllocationId, Handle> = HashMap::new();
+  ```
+
+  ```rust
+  let cache: HashMap<AllocationId, Handle> = HashMap::new(); // dst-lint: hashmap-ok per-allocation handle cache, point access only
+  ```
+
+- The marker suppresses violations on the marked line only. Multiple
+  use sites in the same function each need their own marker. Do not
+  put one marker at the top of a function and expect it to cover the
+  whole body.
+- The marker covers `HashMap` and `HashSet` together — a single
+  `// dst-lint: hashmap-ok` suppresses both type families on the
+  marked line. There is no separate `hashset-ok` form.
+
+**What the marker does not cover**:
+
+- `std::collections::hash_map::HashMap` — the scanner walks
+  `TypePath` and `ExprPath` and catches the type by last segment
+  regardless of qualifying path; the marker still applies.
+- `BuildHasherDefault<...>` / `RandomState` / custom hashers — these
+  are different concerns and require their own justification at the
+  use site (typically a `// SAFETY:`-style prose comment, since they
+  do not flow through dst-lint).
+- Type aliases (`type Cache = HashMap<...>;`) — the alias declaration
+  IS the use site; the marker goes on the alias line. Subsequent
+  references to the alias type do not need their own markers (the
+  alias's marker is the load-bearing artifact).
+
+**Why the marker has to be precise**: ad-hoc patterns (`// hashmap-ok`,
+`// dst: hashmap-ok`, `// allow hashmap`) would silently slip past the
+scanner without a clear failure mode. The strict syntax is the
+trade-off for catching the rule's enforcement gap mechanically.
+
+### Sim-internal exception
+
+`adapter-sim` and `adapter-host` crates are NOT scanned by the dst-lint
+clause (only `core` is), but the principle applies as guidance —
+multi-step DST harnesses that observe iteration order should still
+prefer `BTreeMap`. The precedent at
+`crates/overdrive-sim/src/adapters/observation_store.rs:215-218`
+documents this choice for `BTreeMap<AllocationId, AllocStatusRow>` with
+the same rationale: when the harness asserts on the row stream, the
+stream must be deterministic across seeds.
+
+### Cross-references
+
+- Whitepaper §21 — *Deterministic Simulation Testing*; the K3
+  reproducibility property (seed → bit-identical trajectory).
+- `.claude/rules/testing.md` § *Sources of Nondeterminism* — every
+  nondeterminism source must be injectable behind a trait; `HashMap`
+  iteration order is the one the trait surface cannot intercept.
+
+---
+
 ## Reconciler I/O
 
-**Reconcilers do not perform I/O.** The §18 contract is
-`reconcile(desired, actual, db) → Vec<Action>` — pure over its inputs. No
-`.await` on network, no subprocess spawn, no wall-clock read, no direct
-store write. This is what makes DST (§21) and ESR verification (§18)
-possible; it is not optional.
+**`reconcile` does not perform I/O.** The §18 contract splits the
+reconciler into two methods: async `hydrate(target, &LibsqlHandle) ->
+Result<Self::View, HydrateError>` and sync pure
+`reconcile(desired, actual, &view, &tick) -> (Vec<Action>, NextView)`.
+All libSQL access lives exclusively in `hydrate`. No `.await` inside
+`reconcile`; no network, no subprocess spawn, no direct libSQL /
+IntentStore / ObservationStore write anywhere in `reconcile`.
+Wall-clock reads come from `tick.now` (a field on the
+`TickContext` parameter the runtime constructs once per evaluation),
+never `Instant::now()` / `SystemTime::now()`. This is what makes DST
+(§21) and ESR verification (§18) possible; it is not optional.
 
 When a reconciler needs to talk to an external service (a Restate admin
 API, an AWS account, a webhook, a custom internal service), the shape is:
@@ -169,21 +314,68 @@ async fn reconcile(&self, /* ... */) -> Vec<Action> {
     // ...
 }
 
-// Good — emit an HttpCall action; read the response on the next tick
-fn reconcile(&self, desired: &State, actual: &State, db: &Db) -> Vec<Action> {
-    let correlation = CorrelationKey::from((desired.id, desired.spec_hash, "register"));
-    match actual.external_call(&correlation).latest_status() {
-        None => vec![Action::HttpCall {
-            correlation,
-            target: desired.endpoint.clone(),
-            method: Method::POST,
-            body: build_register_payload(desired),
-            timeout: Duration::from_secs(30),
-            idempotency_key: Some(correlation.to_string()),
-        }],
-        Some(Status::Pending) | Some(Status::InFlight) => vec![],
-        Some(Status::Completed { response }) => converge_from_response(actual, response),
-        Some(Status::Failed { .. } | Status::TimedOut { .. }) => handle_failure(db),
+// Good — hydrate reads retry memory from libsql (the ONLY place this
+// reconciler author touches libsql); reconcile is sync + pure, emits
+// an HttpCall action, and returns a NextView the runtime persists.
+// The response arrives as observation on the next tick via `actual`.
+// Wall-clock comes from `tick.now`, never `Instant::now()`.
+impl Reconciler for RegisterReconciler {
+    type View = RetryMemory;
+
+    fn name(&self) -> &ReconcilerName { &self.name }
+
+    async fn hydrate(
+        &self,
+        target: &TargetResource,
+        db:     &LibsqlHandle,
+    ) -> Result<Self::View, HydrateError> {
+        // Free-form SQL in hydrate. Schema management
+        // (CREATE TABLE IF NOT EXISTS, ALTER TABLE ADD COLUMN) lives
+        // here too — no framework migrations Phase 1.
+        let row = db.query_one(
+            "SELECT attempts, last_correlation, next_attempt_at \
+             FROM register_memory WHERE target = ?",
+            &[target.as_str()],
+        ).await?;
+        Ok(RetryMemory::from_row(row))
+    }
+
+    fn reconcile(
+        &self,
+        desired: &State,
+        actual:  &State,
+        view:    &Self::View,
+        tick:    &TickContext,
+    ) -> (Vec<Action>, Self::View) {
+        let correlation = CorrelationKey::from((desired.id, desired.spec_hash, "register"));
+        let actions = match actual.external_call(&correlation).latest_status() {
+            None => vec![Action::HttpCall {
+                correlation: correlation.clone(),
+                target: desired.endpoint.clone(),
+                method: Method::POST,
+                body: build_register_payload(desired),
+                timeout: Duration::from_secs(30),
+                idempotency_key: Some(correlation.to_string()),
+            }],
+            Some(Status::Pending) | Some(Status::InFlight) => vec![],
+            Some(Status::Completed { response }) => converge_from_response(actual, response),
+            // Retry-budget gate: only re-dispatch once the backoff
+            // window has elapsed. `tick.now` is the runtime's
+            // single-snapshot of wall-clock for this evaluation —
+            // pure input, DST-controllable.
+            Some(Status::Failed { .. } | Status::TimedOut { .. })
+                if tick.now >= view.next_attempt_at =>
+            {
+                handle_failure(view)
+            }
+            Some(Status::Failed { .. } | Status::TimedOut { .. }) => vec![],
+        };
+        // NextView carries the updated retry memory; the runtime
+        // diffs (view → next_view) and persists the delta to libsql.
+        // Reconcile never writes libsql directly. Compute the next
+        // backoff deadline from `tick.now`, not from `Instant::now()`.
+        let next_view = view.bump_if_dispatched(&actions, tick.now);
+        (actions, next_view)
     }
 }
 ```
@@ -202,9 +394,9 @@ Rules:
    correlation does not.
 3. **Retry budgets live in reconciler libSQL.** The runtime does not
    auto-retry a failed `HttpCall` — that policy belongs to the
-   reconciler. Track attempts in the private DB; emit a new `HttpCall`
-   action until the budget is exhausted; then surface the failure to
-   status.
+   reconciler. Track attempts in the private DB via `hydrate` reads
+   and `NextView` writes; emit a new `HttpCall` action until the
+   budget is exhausted; then surface the failure to status.
 4. **Multi-step external sequences become workflows, not chains of
    `HttpCall`s.** If the reconciler would need to coordinate three or
    more external calls that must complete as a unit, emit
@@ -214,13 +406,26 @@ Rules:
    `external_call_results` table lives in the ObservationStore and is
    gossiped like any other observation row. Reconcilers read it
    locally, same as `alloc_status` or `service_backends`.
+6. **Reading wall-clock: use `tick.now` from the `TickContext`
+   parameter.** Never call `Instant::now()` / `SystemTime::now()`
+   inside `reconcile`. The dst-lint gate catches violations at PR
+   time. Time is input state, injected by the runtime — the same
+   `Clock` trait DST already controls (`SystemClock` in production,
+   `SimClock` under simulation). The `tick.now` snapshot is taken
+   once per evaluation; every `reconcile` call sees one consistent
+   "now," which is what makes the function pure over its inputs.
+   `tick.deadline` is the per-tick budget (consult to checkpoint
+   bounded work into `NextView`); `tick.tick` is a monotonic counter
+   useful as a deterministic tie-breaker.
 
 The reference case: a Restate-operator-equivalent in Overdrive is a
-reconciler that emits `HttpCall { target: restate_admin_url,
-method: POST, body: deployment_spec, idempotency_key: Some(...) }` on
-registration and reads `external_call_results` on the next tick to
-advance its state machine. No `async fn` in `reconcile`; no direct
-HTTP client; fully DST-replayable.
+reconciler whose `hydrate` reads retry memory, whose `reconcile` emits
+`HttpCall { target: restate_admin_url, method: POST, body:
+deployment_spec, idempotency_key: Some(...) }` on registration when
+`tick.now >= view.next_attempt_at`, and which reads
+`external_call_results` on the next tick to advance its state
+machine. No `async fn` in `reconcile`; no direct HTTP client; no
+direct wall-clock read; fully DST-replayable.
 
 ---
 
@@ -302,6 +507,137 @@ it's a workflow. If it's "the cluster should always look like X," it's
 a reconciler.
 
 ---
+
+## Compile-checking
+
+> **Use `cargo check`, not `cargo build`.** `cargo build` is **blocked** by
+> a pre-tool hook (`.claude/hooks/block-cargo-build.ts`). For iterative
+> typecheck-and-diagnose loops — the overwhelming majority of what the
+> agent actually does — `cargo check` skips codegen and linking and is
+> dramatically faster on this workspace.
+>
+> **Rewrite your command before submitting it:**
+>
+> | ❌ don't | ✅ do |
+> |---|---|
+> | `cargo build` | `cargo check` |
+> | `cargo build -p CRATE` | `cargo check -p CRATE` |
+> | `cargo build --workspace` | `cargo check --workspace` |
+> | `cargo build --all-targets` | `cargo check --all-targets` |
+> | `cargo build --features X` | `cargo check --features X` |
+> | `cargo build --release` | `cargo check --release` |
+>
+> `cargo check` catches every `rustc` diagnostic `cargo build` would —
+> trait resolution, borrow checker, type inference, macro expansion,
+> lints via `cargo clippy`. It does NOT produce a binary or run
+> `build.rs` link steps.
+>
+> **Legitimate `cargo build` shapes** (the hook allows these):
+> - Producing a binary for a real execution target — xtask, CLI, a
+>   real-kernel integration test that must boot an artifact, anything
+>   about to be `exec`'d.
+> - `cargo xtask ...` subcommands that internally invoke `cargo build`
+>   as part of their own compilation pipeline.
+> - Tier 3 / Tier 4 harness flows where the build artifact is the
+>   point (`cargo xtask integration-test vm`, `cargo xtask xdp-perf`).
+>
+> If you find yourself needing `cargo build` for "just to see the
+> errors," you want `cargo check`. If you need the binary, reach for
+> the xtask wrapper that already knows how to produce it.
+
+## Committing a focused subset
+
+The lefthook pre-commit pipeline auto-stages modified files into the
+in-flight commit (it runs `cargo fmt`, clippy, and nextest-affected
+across the working tree, and re-stages whatever they touch). When the
+working tree carries unrelated modifications and you only want to
+commit a focused subset, `git add <one-file>` is **not** sufficient —
+the hook will silently bundle every other modified file into your
+commit on its way through. The previous commit you just landed will
+contain changes you never staged.
+
+**Pattern: stash the unrelated paths first, then commit.**
+
+```bash
+git stash push -m "unrelated-{summary}" -- \
+  <path-1> <path-2> ... <path-N>     && \
+git add <path-you-actually-want>     && \
+git commit -m "..."                  ; \
+git stash pop
+```
+
+Three things to note:
+
+- **`;` before `git stash pop`, not `&&`.** The stash must be restored
+  even if the commit fails (e.g. a pre-commit gate rejects it),
+  otherwise the unrelated work is left only in the stash and the
+  working tree appears empty. The `git stash` pre-tool hook in this
+  repo enforces the matched-pair shape — see the message it prints
+  when blocking.
+- **Path-scoped stash, not `git stash -u`.** Stashing the whole tree
+  would also stash the file you want to commit; pass paths to `git
+  stash push -- <paths>` so only the unrelated changes move.
+- **Verify with `git show --stat HEAD` after the commit.** "1 file
+  changed" should match what you intended to land. If the commit
+  bundles more, the stash scope was wrong — soft-reset and retry.
+
+This pattern is the only safe shape for landing a focused fix when
+the working tree is dirty with parallel work. Do not reach for
+`--no-verify` to bypass the lefthook auto-staging — the hook is also
+running clippy and tests, and skipping it lands unverified code.
+
+**Always-include path: `.nwave/des-config.json`.** When this file shows
+as modified, untracked, or otherwise affected in `git status`, it MUST
+be staged into the current commit — never stashed under the
+focused-subset pattern, never deferred to a follow-up commit. The file
+captures the active nWave rigor profile (lean / standard / thorough /
+exhaustive / custom / inherit) and is the SSOT for how subsequent wave
+runs in this repo behave; leaving it out of a commit that touched it
+silently desyncs the committed profile from the one the next agent
+will read. If the commit you are landing is otherwise unrelated, add
+`.nwave/des-config.json` to it anyway — it is the one file exempt from
+the "focused subset" discipline above.
+
+## Deletion discipline
+
+When production code becomes unused — typically after a refactor that
+collapses or replaces a subsystem — **delete the production code AND
+its tests in the same commit**. Do not gate, annotate, salvage, or
+relocate.
+
+Specifically, when you see a `dead_code` warning (or `unused_imports`,
+`unused_variables`) after a deletion pass, the warning is the signal
+that **more code needs deleting**, not that the existing code needs a
+gate or an allow. The wrong moves:
+
+- `#[cfg(test)]` on a helper that's now only called from tests.
+- Moving a helper into `mod tests { … }` to keep the same effect.
+- `#[allow(dead_code)]` to silence the warning.
+- "Rewriting" the existing tests to test something else so they keep
+  earning their keep.
+
+The right move is a single commit that removes the production code
+*and* every test that was defending it. A test exists to defend
+production code; if the production code is gone, the test is gone too.
+You cannot defend something that doesn't exist, and preserving the
+test by repurposing it just hides the deletion in the git log — a
+future reviewer reading the test name expects it to be telling them
+something about a function whose name no longer resolves.
+
+A genuinely new requirement that needs a genuinely new test (e.g. a
+convention to enforce after a sweeping deletion) is a separate matter
+— write it from scratch, with a name and assertions that describe
+the new requirement. Don't pretend the salvaged-and-rewritten old
+test was "already" testing the new thing.
+
+The deleted code does not get a stub, a deprecation comment, a
+`// removed in PR #N` marker, or a re-export shim. None of these
+forms exist in this codebase; per CLAUDE.md and
+`feedback_single_cut_greenfield_migrations.md`, removed is removed.
+
+The corollary: **a test file shrinking is the correct shape of a
+deletion PR**. If your "deletion" PR adds tests on net, double-check
+you actually deleted what you set out to delete.
 
 ## Rust patterns
 
@@ -419,6 +755,20 @@ let digest = sha256(&archived);
 - **Use standard crates.** Don't roll custom base64 / hex / crypto / UUID
   / time formatting. Use `base64`, `hex`, `ring` / `aws-lc-rs`, `uuid`,
   `time` / `chrono` — whichever is already in the workspace graph.
+
+### Cargo.toml conventions
+
+- **Every workspace member declares `integration-tests = []`** in its
+  `[features]` block, even crates with no integration tests of their
+  own. The declaration is a no-op for the latter and the actual gate
+  for the former. This makes `cargo {check,test,mutants} --features
+  integration-tests` resolve uniformly under per-package scoping —
+  cargo refuses the bare feature on packages that don't declare it,
+  which historically broke mutation testing's per-mutant invocations.
+  See `.claude/rules/testing.md` § "Integration vs unit gating" /
+  "Workspace convention" for the full story; an xtask `#[test]`
+  enforces the rule mechanically (`xtask::mutants::tests::every_
+  workspace_member_declares_integration_tests_feature`).
 
 ### Newtypes — STRICT by default
 

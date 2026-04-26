@@ -1,0 +1,97 @@
+# `overdrive-control-plane` — Phase 1 single-mode control-plane crate
+# per ADR-0008 / ADR-0012 / ADR-0013. Hosts the axum server, TLS
+# bootstrap, reconciler runtime, and observation-store wiring.
+# `crate_class = "adapter-host"` per ADR-0003 (renamed from
+# `adapter-real` per ADR-0016) — production bindings that talk to real
+# host I/O (filesystem, network). DST-lint does NOT scan this crate;
+# real-infra calls are expected.
+
+[package]
+name         = "overdrive-control-plane"
+version      = "0.0.0"
+description  = "Phase 1 single-mode control-plane binary — axum + rustls + reconciler runtime."
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+publish                = false
+
+[package.metadata.overdrive]
+crate_class = "adapter-host"
+
+[features]
+# Opt-in gate for slow / real-infra tests in this crate. Off by default
+# so `cargo nextest run --workspace` stays under the 60s slow-test
+# budget; CI exercises the gate in a dedicated `integration` job. See
+# `.claude/rules/testing.md` §"Integration vs unit gating".
+integration-tests = []
+
+[dependencies]
+overdrive-core.workspace           = true
+# Per ADR-0012 (revised 2026-04-24) the Phase 1 observation-store impl
+# is `LocalObservationStore` in `overdrive-store-local` — a real
+# adapter-host crate. `overdrive-sim` is NOT a runtime dep of this
+# crate; it remains available as a dev-dep if needed for DST-style
+# tests.
+overdrive-store-local.path         = "../overdrive-store-local"
+
+# Errors / async / serde
+thiserror.workspace   = true
+async-trait.workspace = true
+tokio.workspace       = true
+bytes.workspace       = true
+serde.workspace       = true
+serde_json.workspace  = true
+# rkyv — canonical archival of intent-side aggregates per
+# development.md ("Internal data → rkyv"). The `submit_job` handler
+# archives `Job` via `rkyv::to_bytes` before committing to the
+# IntentStore, so rkyv is a runtime dep of this crate, not just a test
+# dep.
+rkyv.workspace        = true
+
+# HTTP / TLS
+# NOTE — `axum`, `axum-server`, `utoipa`, `utoipa-axum`, and `libsql`
+# need to be added to [workspace.dependencies] at the workspace root.
+# DESIGN wave-decisions §Tech stack lists the proposed versions; this
+# Cargo.toml will fail to resolve until those workspace entries exist
+# (DELIVER crafter closes the loop via `cargo check`).
+axum             = { workspace = true }
+axum-server      = { workspace = true }
+rustls.workspace = true
+rcgen.workspace  = true
+hyper.workspace  = true
+rustls-pemfile.workspace = true
+
+# TLS bootstrap — trust-triple serialisation + helpers per ADR-0010
+# and ADR-0019 (on-disk format TOML).
+base64.workspace     = true
+toml.workspace       = true
+hostname.workspace   = true
+
+# OpenAPI schema derivation
+utoipa       = { workspace = true }
+utoipa-axum  = { workspace = true }
+
+# Per-primitive libSQL memory
+libsql = { workspace = true }
+
+# Observability
+tracing.workspace            = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+# `overdrive-sim` is used by tests only (`tests/acceptance/*.rs`) for
+# DST-style `Sim*` adapters — it is NOT a runtime dep (see note on
+# `overdrive-store-local` above + ADR-0012 revision 2026-04-24).
+overdrive-sim.path       = "../overdrive-sim"
+tempfile.workspace       = true
+reqwest.workspace        = true
+proptest.workspace       = true
+# Per ADR-0019, operator config is TOML. Tests parse it via the same
+# `toml` crate pulled in at runtime (listed in [dependencies] above).
+x509-parser.workspace    = true
+base64.workspace         = true
+
+[lints]
+workspace = true

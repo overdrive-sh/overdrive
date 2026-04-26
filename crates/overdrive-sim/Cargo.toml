@@ -21,7 +21,11 @@ publish               = false
 crate_class = "adapter-sim"
 
 [dependencies]
-overdrive-core.workspace = true
+# Sim depends on overdrive-core and — when the sim crate's own
+# `canary-bug` feature is enabled — forwards that into
+# `overdrive-core/canary-bug` so the `HarnessNoopHeartbeat` variant of
+# `AnyReconciler` is available.
+overdrive-core = { workspace = true }
 async-trait.workspace    = true
 bytes.workspace          = true
 futures.workspace        = true
@@ -34,17 +38,6 @@ tempfile.workspace       = true
 overdrive-store-local    = { path = "../overdrive-store-local" }
 
 [features]
-# `real-adapters` gates a `real` module that ships minimal, mostly-unimplemented
-# real adapters (`SystemClock`, `TcpTransport`, `OsEntropy`, and stub real
-# Dataplane / Driver / LLM adapters) so that `overdrive-core`'s trait bounds
-# can be discharged somewhere the dst-lint gate will NOT flag. The `Real*`
-# types here are a temporary home — they move out to `overdrive-node` /
-# `overdrive-control-plane` once those crates exist (post-Phase-1). The crate
-# metadata below keeps `crate_class = "adapter-sim"` because dst-lint scans
-# the crate, not the module — the wiring-crate exemption is enforced at
-# crate granularity.
-real-adapters = []
-
 # `canary-bug` — TEST-ONLY feature that plants a deliberate LWW-convergence
 # break in `SimObservationStore` on the canary trigger seed (0xDEAD_BEEF).
 # Production builds MUST NEVER enable this feature. It exists so that the
@@ -54,7 +47,15 @@ real-adapters = []
 # empty suite. The gate is scoped to exactly one code path in
 # `adapters/observation_store.rs`; grep for `#[cfg(feature = "canary-bug")]`
 # to see the complete surface.
-canary-bug = []
+canary-bug = ["overdrive-core/canary-bug"]
+
+# `integration-tests` — workspace-wide convention. Every workspace
+# member declares this feature so `cargo {check,test,mutants}
+# --features integration-tests` resolves uniformly under per-package
+# scoping. This crate has no integration-shaped tests of its own — the
+# declaration is a deliberate no-op. See `.claude/rules/testing.md`
+# §"Integration vs unit gating".
+integration-tests = []
 
 [dev-dependencies]
 # Crafter adds turmoil, proptest, and overdrive-store-local here during DELIVER.
@@ -62,6 +63,12 @@ tokio    = { workspace = true }
 futures.workspace = true
 proptest.workspace = true
 serde_json.workspace = true
+# `test-utils` exposes the trait-conformance harness at
+# `overdrive_core::testing::observation_store::run_lww_conformance`.
+# Per `docs/feature/fix-observation-lww-merge/deliver/rca.md` Cause B,
+# every `ObservationStore` adapter exercises this harness from its
+# own test suite to enforce the LWW contract at trait level.
+overdrive-core = { workspace = true, features = ["test-utils"] }
 
 [lints]
 workspace = true

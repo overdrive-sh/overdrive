@@ -1,0 +1,65 @@
+{
+  "roadmap": {
+    "project_id": "fix-xtask-mutants-zero-mutant-crash",
+    "created_at": "2026-04-25T21:50:00+07:00",
+    "total_steps": 2,
+    "scope": "bugfix",
+    "summary": "Add zero-mutant-no-report branch to xtask mutants wrapper so empty filter intersections (cargo-mutants exits 0 without writing outcomes.json) become vacuous passes instead of crashes.",
+    "rca_ref": "docs/feature/fix-xtask-mutants-zero-mutant-crash/rca.md",
+    "validation": {
+      "status": "approved",
+      "reason": "Bug-fix scope. RCA is the design SSOT; structure is deterministic (RED test + GREEN fix). No DESIGN/DISTILL waves; no architect dispatch needed."
+    },
+    "exclusions": {
+      "phase_3_refactor": "Skip L1-L4 refactor pass — bug fix is intentionally minimal per project convention.",
+      "phase_5_mutation": "Skip mutation testing — xtask is excluded from cargo-mutants per project CLAUDE.md and dev memory."
+    }
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Regression test + fix",
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "RED: regression test for absent outcomes.json + exit 0 path",
+          "description": "Add a unit test inside xtask::mutants::tests that drives the absent-file + clean-exit path and observes the wrapper crash. The test will FAIL on current main because read_outcomes_or_short_circuit does not yet exist (compile-fail is the RED signal). This commit may use --no-verify per .claude/rules/testing.md § 'RED scaffolds and intentionally-failing commits'.",
+          "files_to_modify": [
+            "xtask/src/mutants.rs"
+          ],
+          "criteria": [
+            "A test named read_outcomes_returns_none_when_file_absent_and_exit_zero exists in mod tests in xtask/src/mutants.rs.",
+            "The test exercises a function read_outcomes_or_short_circuit(path, ExitStatus) -> Result<Option<RawReport>>; on RED commit this fails to compile (function does not yet exist) — that IS the regression signal."
+          ],
+          "implementation_notes": [
+            "Existing test fixture conventions live in mod tests at xtask/src/mutants.rs:897.",
+            "Use tempfile::tempdir for a non-existent outcomes.json path.",
+            "Use Command::new(\"true\").status() for ExitStatus::success() and Command::new(\"false\").status() for non-zero.",
+            "tempfile is already a workspace dev-dep; verify before reaching for it."
+          ]
+        },
+        {
+          "id": "01-02",
+          "name": "GREEN: introduce zero-mutant-no-report branch",
+          "description": "Per RCA changes 1.1–1.4 in docs/feature/fix-xtask-mutants-zero-mutant-crash/rca.md (lines 199–402): capture the ExitStatus returned by invoke_cargo_mutants (already typed Result<ExitStatus> at xtask/src/mutants.rs:208); add fn read_outcomes_or_short_circuit(&Path, ExitStatus) -> Result<Option<RawReport>>; add fn finalise_zero_mutant_run(&Path, &Mode) -> Result<()>; route run() at xtask/src/mutants.rs:138-148 through both helpers; add the four unit tests from RCA § 'Change 1.4'. After GREEN, the regression test from 01-01 passes and the original repro (cargo xtask mutants --diff origin/main --package xtask --file xtask/src/dst_lint.rs) no longer crashes — emits 'mutants: PASS' and writes target/xtask/mutants-summary.json with status=pass.",
+          "files_to_modify": [
+            "xtask/src/mutants.rs"
+          ],
+          "criteria": [
+            "cargo nextest run -p xtask --lib passes including the four new tests.",
+            "cargo check --workspace passes.",
+            "cargo clippy --workspace -- -D warnings passes (or matches project default).",
+            "Manual repro: cargo xtask mutants --diff origin/main --package xtask --file xtask/src/dst_lint.rs prints PASS, exits 0, writes target/xtask/mutants-summary.json with status=\"pass\" total_mutants=0.",
+            "The kill-rate gate is NOT weakened: no change to evaluate_diff_gate / evaluate_workspace_gate — synthetic RawReport routes through existing total_mutants==0 → Pass branch.",
+            "Crash-detection preserved: absent file + non-zero exit still bails with 'subprocess likely crashed'."
+          ],
+          "implementation_notes": [
+            "RCA contains exact before/after snippets at lines 207–402.",
+            "kill_rate_percent at xtask/src/mutants.rs:590 already returns 100.0 for caught+missed==0, which is what the synthetic report needs.",
+            "DO NOT add prose comments beyond what RCA specifies. Bug-fix discipline: no scope creep, no opportunistic refactoring."
+          ]
+        }
+      ]
+    }
+  ]
+}

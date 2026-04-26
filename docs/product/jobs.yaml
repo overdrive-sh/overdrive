@@ -89,6 +89,31 @@ jobs:
     served_by_phase: 4+
     status: deferred
 
+  - id: J-OPS-002
+    title: "Submit a job to the walking-skeleton control plane and trust what the CLI tells me"
+    situation: >
+      When I, a Overdrive platform engineer, have a job spec in a TOML
+      file and a local single-mode control plane running,
+    motivation: >
+      I want to submit the spec through `overdrive job submit`, watch
+      the control plane commit it through the real IntentStore, observe
+      the reconciler primitive alive, and read the spec back via
+      `overdrive alloc status` with a byte-identical spec digest,
+    outcome: >
+      so the walking-skeleton guarantees from phase-1-foundation (typed
+      identifiers, bit-identical snapshot round-trip, reconciler purity)
+      carry through to operator-observable behaviour, and the platform
+      is honest about what it does and does not know — no silent blank
+      outputs, no fabricated placeholder rows.
+    source: whitepaper §4, §18; phase-1-control-plane-core scope
+    served_by_phase: 1
+    status: active
+
 changelog:
   - date: 2026-04-21
     change: Initial job register for phase-1-foundation DISCUSS wave.
+  - date: 2026-04-23
+    change: >
+      Added J-OPS-002 for phase-1-control-plane-core — the
+      engineer-facing counterpart of J-PLAT-001/2/3, which cover the
+      DST-facing walking-skeleton outcomes.

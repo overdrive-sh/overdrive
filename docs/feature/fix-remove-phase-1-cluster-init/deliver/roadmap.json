@@ -1,0 +1,86 @@
+{
+  "roadmap": {
+    "project_id": "fix-remove-phase-1-cluster-init",
+    "created_at": "2026-04-26T00:00:00Z",
+    "total_steps": 2,
+    "scope": "bug-fix",
+    "rca_reference": "docs/analysis/root-cause-analysis-cluster-init-cert-overwritten-by-serve.md",
+    "bug_context_reference": "docs/feature/fix-remove-phase-1-cluster-init/deliver/bug-context.md",
+    "rationale": "RCA concluded `overdrive cluster init` is a Phase 5 verb shipped early — `serve` overwrites the init cert on every boot under ADR-0010 §R5 (no cert persistence). GitHub #81 tracks the Phase 5 reintroduction."
+  },
+  "validation": {
+    "status": "approved",
+    "approver": "user",
+    "approved_at": "2026-04-26",
+    "rationale": "Single-cut deletion; bug-context.md is the authoritative design. Lightweight bugfix path (option B) — orchestrator overhead waived per user direction."
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Remove cluster init verb",
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "RED — regression test asserting `serve` is the sole cert-minting site",
+          "description": "Add a regression test that asserts the invariant: Phase 1 has exactly one cert-minting site, and it is `serve`. The test must FAIL against current code (where `cluster init` still exists) and PASS after step 01-02 deletes it. Choose the cleanest expression of the invariant — recommended shape is a clap-parse test asserting `Cli::try_parse_from(['overdrive', 'cluster', 'init'])` is rejected as an unknown subcommand. A second assertion that `overdrive_cli::commands::cluster::init` is no longer a public symbol is welcome but optional (the clap test alone covers the operator-facing surface).",
+          "criteria": [
+            "A new test file or test function under `crates/overdrive-cli/tests/integration/` asserts `cluster init` is rejected as an unknown clap subcommand.",
+            "The test fails against current `main` (proves the bug exists) — verify by running it BEFORE step 01-02.",
+            "Test name conveys the regression invariant — e.g. `cluster_init_subcommand_is_not_registered` or similar.",
+            "Test follows direct-handler / `Cli::try_parse_from` pattern per `crates/overdrive-cli/CLAUDE.md` — no subprocess."
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/cluster_init_removed.rs",
+          "scenario_name": "cluster_init_subcommand_is_not_registered",
+          "files_to_modify": [
+            "crates/overdrive-cli/tests/integration/cluster_init_removed.rs",
+            "crates/overdrive-cli/tests/integration.rs"
+          ],
+          "implementation_notes": "Mod-declare the new test file from `tests/integration.rs`. Use `Cli::try_parse_from(['overdrive', 'cluster', 'init'])` and assert `.is_err()` with an `ErrorKind::InvalidSubcommand`-shape error. The test is ALLOWED to fail on this commit — that IS the RED phase. Per `.claude/rules/testing.md` § 'RED scaffolds and intentionally-failing commits', commit with `--no-verify` if pre-commit gates reject the failing test, and call it out in the commit body.",
+          "quality_gates": ["test exists", "test fails before step 01-02"],
+          "estimated_hours": 0.5,
+          "deliverables": ["regression test file"]
+        },
+        {
+          "id": "01-02",
+          "name": "GREEN — single-cut deletion across CLI code + tests",
+          "description": "Delete the `cluster init` verb across the CLI code and tests per the deletion-scope table in bug-context.md. Single commit; no deprecation path; no compatibility stubs; no flag. After deletion, the regression test from step 01-01 must pass. ALL existing tests (workspace-wide) must still pass — including the simplified `walking_skeleton.rs` whose Phase 0 is removed as part of this step.",
+          "criteria": [
+            "`crates/overdrive-cli/src/commands/cluster.rs` — `init` fn, `InitArgs`, `InitOutput` deleted; `status`, `default_operator_config_dir`, `default_operator_config_path` retained.",
+            "`crates/overdrive-cli/src/cli.rs` — `Init { force }` variant removed from `ClusterCommand`.",
+            "`crates/overdrive-cli/src/main.rs` — `Command::Cluster(ClusterCommand::Init { .. })` match arm removed.",
+            "`crates/overdrive-cli/tests/integration/cluster_init_serve.rs` — file deleted.",
+            "`crates/overdrive-cli/tests/integration/walking_skeleton.rs` — Phase 0 (init call + dual-tempdir façade) removed; test starts at `serve`.",
+            "`crates/overdrive-cli/tests/integration.rs` — `mod cluster_init_serve;` line removed.",
+            "Step 01-01 regression test passes.",
+            "`cargo nextest run -p overdrive-cli` is GREEN.",
+            "Workspace-wide build is GREEN — no other crate references the removed symbols.",
+            "Commit message body contains `Refs #81`.",
+            "README.md is grep-checked for `cluster init`; if found, leave a TODO inline and FLAG to the user (do NOT silently edit README)."
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/cluster_init_removed.rs",
+          "scenario_name": "cluster_init_subcommand_is_not_registered",
+          "files_to_modify": [
+            "crates/overdrive-cli/src/commands/cluster.rs",
+            "crates/overdrive-cli/src/cli.rs",
+            "crates/overdrive-cli/src/main.rs",
+            "crates/overdrive-cli/tests/integration/cluster_init_serve.rs",
+            "crates/overdrive-cli/tests/integration/walking_skeleton.rs",
+            "crates/overdrive-cli/tests/integration.rs"
+          ],
+          "implementation_notes": "Single-cut per memory `feedback_single_cut_greenfield_migrations.md`. Reject any 'compatibility stub' suggestion per memory `feedback_no_rename_stubs.md`. Architect-owned follow-ups (ADR-0010 amendment, `docs/feature/phase-1-control-plane-core/` DELIVER artefact updates, `docs/scenarios/...` updates) are OUT OF SCOPE — leave them alone. Commit-message shape: `fix(cli): remove Phase 1 cluster init verb` (or similar) with body containing `Refs #81` and `Step-ID: 01-02`. Branch: stay on `marcus-sa/phase-1-control-plane-core`.",
+          "quality_gates": [
+            "regression test passes",
+            "cargo nextest run -p overdrive-cli passes",
+            "single commit",
+            "Refs #81 in body"
+          ],
+          "estimated_hours": 1.0,
+          "deliverables": [
+            "deletion across 6 files",
+            "single commit referencing #81"
+          ]
+        }
+      ]
+    }
+  ]
+}

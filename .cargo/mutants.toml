@@ -100,6 +100,91 @@ exclude_re = [
     "select!",
     "poll_next",
     "poll_ready",
+
+    # Rule 1 addendum — feature-gated canary-bug fixture. The
+    # `HarnessNoopHeartbeat::reconcile` body (moved from
+    # `overdrive-sim::harness::harness_purity_reconciler` into
+    # `overdrive-core::reconciler` in step 04-07) splits across
+    # `#[cfg(feature = "canary-bug")]` branches. The non-canary branch
+    # is the trivial `vec![Action::Noop]` return whose `vec![]` mutation
+    # is indistinguishable under the default mutation run (twin
+    # invocations compare equal either way → the `ReconcilerIsPure`
+    # invariant still PASSes). The canary-bug branch's alternation +
+    # modulo logic is exercised end-to-end by
+    # `xtask/tests/acceptance/dst_canary_red_run.rs` and
+    # `crates/overdrive-sim/tests/acceptance/reconciler_invariants_pass.rs`
+    # under `--features overdrive-sim/canary-bug`, but
+    # `cargo xtask mutants` cannot enable that feature — doing so
+    # inverts the baseline's `ReconcilerIsPure` invariant from PASS to
+    # FAIL (the canary IS non-deterministic), and cargo-mutants
+    # aborts before running a single mutant when the baseline fails.
+    # Same class as Rule 1 unsafe: the site is genuinely not killable
+    # by the default mutation lane and is covered by a dedicated test
+    # lane instead.
+    #
+    # Two regex entries cover old and new code paths so a future
+    # rename or partial move is still caught:
+    "harness_purity_reconciler",
+    "HarnessNoopHeartbeat",
+
+    # Semantically-equivalent mutant on `NoopHeartbeat::hydrate`. The
+    # body is `Ok(())` and the mutation is `Ok(Default::default())`;
+    # since `<() as Default>::default() == ()`, both expressions
+    # compile to byte-identical behaviour — no test can distinguish
+    # them. Classic equivalent-mutant case: skip rather than write a
+    # tautological test. Scoped to `for NoopHeartbeat>::hydrate` so the
+    # match does NOT collapse onto `for HarnessNoopHeartbeat>::hydrate`
+    # (that one is already covered by the `HarnessNoopHeartbeat` regex
+    # above).
+    "for NoopHeartbeat>::hydrate",
+
+    # Semantically-equivalent mutant on the paired tuple compare in
+    # `evaluate_reconciler_is_pure`: `actions_a == actions_b &&
+    # next_view_a == next_view_b` → `... || ...`. The right-hand
+    # comparison operates on `AnyReconcilerView`, which in Phase 1
+    # has only the `Unit` variant — `next_view_a == next_view_b` is
+    # vacuously true for every reconciler, so `&&` and `||` collapse
+    # to "actions_a == actions_b" equivalently. The mutation is only
+    # distinguishable under a reconciler with a stateful view whose
+    # value actually diverges between twin invocations; that shape
+    # lands in Phase 2+ when the first reconciler with a non-unit
+    # `View` is written. The `&&` is deliberate defensive code for
+    # that future, not dead — the per-crate review on the Phase 2+
+    # reconciler PR will re-examine this exclusion at that point.
+    # Canary-bug's `HarnessNoopHeartbeat` diverges on *actions*, not
+    # on view, so it cannot kill this mutation either — and the
+    # mutation lane cannot enable `canary-bug` anyway without the
+    # baseline's `ReconcilerIsPure` invariant flipping to FAIL.
+    "replace && with \\|\\| in evaluate_reconciler_is_pure",
+
+    # Rule 7 — function-body replacement with `Default::default()`.
+    # cargo-mutants' default operator synthesises three replacement
+    # bodies for any function returning `Result<T, E>`: `Ok(T::default())`,
+    # `Err(E::default())`, and `T::default()` for plain returns.
+    # Phase 1 deliberately avoids `Default` impls on domain types
+    # (newtypes per `.claude/rules/development.md` §STRICT-by-default,
+    # `thiserror` enums for errors, sum types modelling business state),
+    # so each of those replacements fails to compile with
+    # `error[E0277]: the trait bound X: Default is not satisfied`.
+    # cargo-mutants reports them as UNVIABLE — which the gate (correctly)
+    # treats as "no quality signal" rather than vacuous PASS.
+    #
+    # The `skip_calls = ["Default::default"]` setting below is the wrong
+    # knob for this: `skip_calls` suppresses mutation of source-level
+    # CALLS to `Default::default()` (per https://mutants.rs/skip_calls.html),
+    # not the operator that synthesises `Default::default()` as a
+    # replacement. The right knob for the synthesised replacement is
+    # description-regex exclusion at generation time.
+    #
+    # Match the three description shapes cargo-mutants emits:
+    #   - "replace <fn> -> <T> with Default::default()"
+    #   - "replace <fn> -> Result<...> with Ok(Default::default())"
+    #   - "replace <fn> -> Result<...> with Err(Default::default())"
+    # A single regex covers all three — `Default::default` is unique
+    # to the synthesised replacement bodies and never appears in
+    # legitimate mutation descriptions for arithmetic flips,
+    # comparison flips, or `Vec::new()`/`()` body replacements.
+    "Default::default",
 ]
 
 # ---------------------------------------------------------------------------
@@ -124,11 +209,19 @@ exclude_re = [
 additional_cargo_args = ["--locked"]
 
 # ---------------------------------------------------------------------------
-# Excluded mutation *kinds* — leave cargo-mutants defaults in place.
+# Excluded mutation *kinds* — suppress operators that this codebase
+# cannot produce viable mutants for.
 # ---------------------------------------------------------------------------
 #
-# `skip_calls` can suppress entire mutation operators. We deliberately
-# leave this empty so the full operator set runs; per-file exclusions
-# above are the intended granularity. Revisit if a specific operator
-# shows up as a persistent source of noise.
-skip_calls = []
+# `skip_calls` suppresses cargo-mutants from MUTATING source-level CALLS
+# to a particular function — see https://mutants.rs/skip_calls.html. It
+# is NOT the knob for suppressing the operator that synthesises
+# `Default::default()` as a replacement body; that lives in `exclude_re`
+# above (Rule 7).
+#
+# Kept for now because the entry has historically been documented as
+# the Default-suppression rule. Removing it without auditing every CI
+# run that referenced "Rule 7 — Default" risks losing institutional
+# context. Re-evaluate during the next mutants-toml audit; the actual
+# operator suppression now lives in `exclude_re` above.
+skip_calls = ["Default::default"]

@@ -43,6 +43,51 @@ pub const BANNED_APIS: &[(&str, &str)] = &[
     ("tokio::net::UdpSocket", "Transport"),
 ];
 
+/// Type names whose iteration order is a per-process nondeterminism
+/// source — banned in `crate_class = "core"` crates per
+/// `.claude/rules/development.md` § "Ordered-collection choice".
+///
+/// Matched on the LAST segment of any `ExprPath` / `TypePath` the visitor
+/// walks. This catches every common reference shape: bare `HashMap<K, V>`,
+/// `collections::HashMap`, `std::collections::HashMap`, and the
+/// expression form `HashMap::new()`.
+///
+/// # Escape hatch
+///
+/// A use site documented with `// dst-lint: hashmap-ok <reason>` on the
+/// preceding line (or as a trailing same-line comment) is permitted —
+/// see [`collect_hashmap_ok_lines`]. The justification text after the
+/// keyword is mandatory in the rule but the scanner accepts any
+/// trailing content (the reason is for human reviewers).
+///
+/// The defect class this catches is documented in
+/// `docs/feature/fix-eval-broker-drain-determinism/deliver/rca-context.md`
+/// (RCA root cause #5) and was landed as a project-wide rule in commit
+/// `e50146a` (Step-ID 01-06).
+pub const BANNED_TYPES: &[(&str, &str)] = &[("HashMap", "BTreeMap"), ("HashSet", "BTreeSet")];
+
+/// Marker comment that suppresses [`BANNED_TYPES`] violations on the
+/// next line (or the same line as a trailing comment). Format is fixed:
+/// `// dst-lint: hashmap-ok` followed optionally by ` <reason>`.
+const HASHMAP_OK_MARKER: &str = "dst-lint: hashmap-ok";
+
+/// What kind of banned reference was found.
+///
+/// `BannedKind::Api` covers function / type symbols banned because the
+/// real implementation is a determinism boundary (`Instant::now`,
+/// `tokio::net::TcpStream`, etc.) — replacement is a trait under
+/// dependency injection. `BannedKind::OrderedCollection` covers
+/// `HashMap` / `HashSet`, banned because their iteration order is a
+/// per-process nondeterminism source — replacement is the
+/// corresponding ordered collection (`BTreeMap`, `BTreeSet`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BannedKind {
+    /// Determinism-boundary API listed in [`BANNED_APIS`].
+    Api,
+    /// Ordered-collection type listed in [`BANNED_TYPES`].
+    OrderedCollection,
+}
+
 /// A single banned-API usage found in a core-class crate source file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Violation {
@@ -54,8 +99,11 @@ pub struct Violation {
     pub column: usize,
     /// The banned path (e.g. `std::time::Instant::now`).
     pub banned_path: String,
-    /// The replacement trait the crate should use instead.
+    /// The replacement trait or type the crate should use instead.
     pub replacement_trait: String,
+    /// Which kind of ban this is — disambiguates the help text rendered
+    /// in the stderr block.
+    pub kind: BannedKind,
 }
 
 /// Entry point for a scan.
@@ -66,9 +114,40 @@ pub struct Violation {
 pub fn scan_source(source: &str, file: impl AsRef<Path>) -> Result<Vec<Violation>> {
     let file = file.as_ref().to_path_buf();
     let parsed = syn::parse_file(source).with_context(|| format!("parse {}", file.display()))?;
-    let mut collector = Collector::new(&file);
+    let hashmap_ok_lines = collect_hashmap_ok_lines(source);
+    let mut collector = Collector::new(&file, hashmap_ok_lines);
     collector.visit_file(&parsed);
     Ok(collector.violations)
+}
+
+/// Pre-pass over raw source text — return the 1-based line numbers
+/// that carry a `// dst-lint: hashmap-ok …` marker comment.
+///
+/// `syn` strips comments during parsing, so we cannot recover the
+/// marker from the AST. A per-line text scan is sufficient because the
+/// marker syntax is fixed: `//` followed by the [`HASHMAP_OK_MARKER`]
+/// constant, with arbitrary trailing reason text.
+///
+/// A use site on line N is permitted if either line `N - 1` or line
+/// `N` carries the marker (preceding-line and trailing same-line forms,
+/// matching the `#[allow(...)]` attribute convention reviewers expect).
+fn collect_hashmap_ok_lines(source: &str) -> std::collections::BTreeSet<usize> {
+    // dst-lint: hashmap-ok the marker set is point-accessed only via
+    // `contains`, never iterated; BTreeSet keeps determinism by default
+    // even though correctness here would tolerate HashSet.
+    let mut out = std::collections::BTreeSet::new();
+    for (idx, line) in source.lines().enumerate() {
+        if let Some(comment_start) = line.find("//") {
+            let comment_body = &line[comment_start + 2..];
+            // Trim leading whitespace from the comment body so
+            // `// dst-lint: hashmap-ok` and `//   dst-lint: hashmap-ok`
+            // both match.
+            if comment_body.trim_start().starts_with(HASHMAP_OK_MARKER) {
+                out.insert(idx + 1); // lines are 1-based externally.
+            }
+        }
+    }
+    out
 }
 
 // -----------------------------------------------------------------------------
@@ -76,15 +155,20 @@ pub fn scan_source(source: &str, file: impl AsRef<Path>) -> Result<Vec<Violation
 // -----------------------------------------------------------------------------
 
 /// `syn::visit::Visit` implementation that walks every path expression,
-/// path type, and `use` tree, matching segments against `BANNED_APIS`.
+/// path type, and `use` tree, matching segments against [`BANNED_APIS`]
+/// and the LAST segment against [`BANNED_TYPES`].
 struct Collector<'a> {
     file: &'a Path,
     violations: Vec<Violation>,
+    /// 1-based line numbers carrying a `// dst-lint: hashmap-ok` marker.
+    /// A [`BannedKind::OrderedCollection`] violation on line N is
+    /// suppressed if `N - 1` or `N` is in this set.
+    hashmap_ok_lines: std::collections::BTreeSet<usize>,
 }
 
 impl<'a> Collector<'a> {
-    const fn new(file: &'a Path) -> Self {
-        Self { file, violations: Vec::new() }
+    const fn new(file: &'a Path, hashmap_ok_lines: std::collections::BTreeSet<usize>) -> Self {
+        Self { file, violations: Vec::new(), hashmap_ok_lines }
     }
 
     /// If `segments` — joined by `::` — matches any banned entry (by
@@ -99,12 +183,45 @@ impl<'a> Collector<'a> {
                     column,
                     banned_path: (*banned).to_string(),
                     replacement_trait: (*replacement).to_string(),
+                    kind: BannedKind::Api,
                 });
                 // Stop after first match for this path — one banned
                 // path cannot be two different banned entries.
                 return;
             }
         }
+
+        // [`BANNED_TYPES`] match on the LAST segment of the source path.
+        // This catches every common reference shape (`HashMap<K, V>`,
+        // `collections::HashMap`, `std::collections::HashMap`,
+        // `HashMap::new()`) without the suffix-alignment caveat that
+        // makes [`path_matches`] reject single-leading-segment forms
+        // like bare `HashMap::new()`.
+        if let Some(last) = segments.last() {
+            for (banned, replacement) in BANNED_TYPES {
+                if last == banned {
+                    if self.is_hashmap_ok_suppressed(line) {
+                        return;
+                    }
+                    self.violations.push(Violation {
+                        file: self.file.to_path_buf(),
+                        line,
+                        column,
+                        banned_path: (*banned).to_string(),
+                        replacement_trait: (*replacement).to_string(),
+                        kind: BannedKind::OrderedCollection,
+                    });
+                    return;
+                }
+            }
+        }
+    }
+
+    /// Is the given 1-based line covered by a preceding-line or
+    /// same-line `// dst-lint: hashmap-ok` marker?
+    fn is_hashmap_ok_suppressed(&self, line: usize) -> bool {
+        self.hashmap_ok_lines.contains(&line)
+            || (line > 0 && self.hashmap_ok_lines.contains(&(line - 1)))
     }
 }
 
@@ -202,7 +319,7 @@ pub fn scan_workspace(manifest_path: &Path) -> Result<Vec<Violation>> {
         bail!(
             "the following workspace crate(s) are missing \
              `[package.metadata.overdrive] crate_class = \"...\"` in Cargo.toml: {}. \
-             Add one of: core | adapter-real | adapter-sim | binary. \
+             Add one of: core | adapter-host | adapter-sim | binary. \
              See docs/product/architecture/adr-0003-core-crate-labelling.md.",
             names.join(", ")
         );
@@ -264,19 +381,33 @@ fn collect_rs_files(dir: &Path) -> Result<Vec<PathBuf>> {
 
 /// Render a single violation as a rustc-style stderr block.
 pub fn render_violation(v: &Violation) -> String {
+    let (header, help, note) = match v.kind {
+        BannedKind::Api => (
+            "error: banned API used in core crate",
+            format!("use {}::... via dependency injection instead", v.replacement_trait),
+            "see .claude/rules/development.md (\"Reconciler I/O\" / banned APIs)",
+        ),
+        BannedKind::OrderedCollection => (
+            "error: banned ordered-collection type used in core crate",
+            format!(
+                "use {} instead, or document the choice with `// dst-lint: hashmap-ok <reason>`",
+                v.replacement_trait,
+            ),
+            "see .claude/rules/development.md (\"Ordered-collection choice\")",
+        ),
+    };
     format!(
-        "error: banned API used in core crate\n  \
+        "{header}\n  \
          --> {file}:{line}:{col}\n  \
          |\n  \
          |    {banned}\n  \
          |\n  \
-         = help: use {replacement}::... via dependency injection instead\n  \
-         = note: see .claude/rules/development.md (\"Reconciler I/O\" / banned APIs)\n",
+         = help: {help}\n  \
+         = note: {note}\n",
         file = v.file.display(),
         line = v.line,
         col = v.column,
         banned = v.banned_path,
-        replacement = v.replacement_trait,
     )
 }
 

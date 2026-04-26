@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 3c68499e28a3a21e7407da0134bc4662473f4ec356e2b9aeec836c5341fc4812 # shrinks to spec = JobSpecInput { id: "a", replicas: 1, cpu_milli: 1, memory_bytes: 1 }

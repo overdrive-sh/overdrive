@@ -109,7 +109,8 @@ Cluster state divides cleanly along a consistency boundary. *Intent* — job spe
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                        CLI / API                                │
-│                  (gRPC + REST, tonic)                           │
+│       (REST + OpenAPI via axum/rustls for external clients;     │
+│        tarpc / postcard-rpc for internal control-flow streams)  │
 ├─────────────────────────────────────────────────────────────────┤
 │          Control Plane  (co-located with node agent             │
 │          on same bare metal, or dedicated — role config)        │
@@ -483,13 +484,13 @@ The node agent is a single Rust binary that runs on every worker node. It is res
 
 - Registering with the regional control plane and writing live state (`alloc_status`, `node_health`, `service_backends`) into its local Corrosion ObservationStore
 - Loading and managing eBPF programs via aya-rs
-- Subscribing to Corrosion tables and materialising BPF maps (`SERVICE_MAP`, `IDENTITY_MAP`, `POLICY_MAP`, `FS_POLICY_MAP`) on row change — there is no gRPC push path for dataplane state
+- Subscribing to Corrosion tables and materialising BPF maps (`SERVICE_MAP`, `IDENTITY_MAP`, `POLICY_MAP`, `FS_POLICY_MAP`) on row change — there is no push path for dataplane state
 - Requesting and distributing workload SVIDs from the built-in CA
 - Running workloads via the appropriate driver
 - Collecting telemetry from the eBPF ringbuf and forwarding to DuckLake
-- Responding to reconciler actions (start, stop, migrate, resize) — control-flow RPCs still arrive via gRPC streaming from the regional control plane
+- Responding to reconciler actions (start, stop, migrate, resize) — control-flow RPCs still arrive via bidirectional streaming from the regional control plane (tarpc / postcard-rpc over HTTP/2 with rustls, pure-Rust throughout per design principle 7; no protoc toolchain)
 
-The agent is event-driven throughout. BPF ringbuf events push telemetry without polling. Observation changes arrive as SQLite subscription events from the local Corrosion peer. Intent-level reconciler instructions arrive via gRPC streaming. There are no periodic polling loops in the critical path.
+The agent is event-driven throughout. BPF ringbuf events push telemetry without polling. Observation changes arrive as SQLite subscription events from the local Corrosion peer. Intent-level reconciler instructions arrive via tarpc streaming. There are no periodic polling loops in the critical path.
 
 ---
 
@@ -792,7 +793,7 @@ Every communication path described above — Raft between control-plane peers, C
 
 **Reachability requirements.**
 
-- TCP reachability between nodes running control-plane roles (Raft quorum, gRPC control RPCs).
+- TCP reachability between nodes running control-plane roles (Raft quorum, internal control RPCs).
 - UDP reachability between every pair of Corrosion peers in the same gossip group (intra-region mesh plus regional peers to the thin global membership cluster, §4).
 - TCP reachability between any workload calling `connect()` and the node hosting the destination workload — kTLS runs over TCP.
 
@@ -897,7 +898,7 @@ CREATE TABLE revoked_operator_certs (
 SELECT crsql_as_crr('revoked_operator_certs');
 ```
 
-`overdrive op revoke <spiffe_id>` writes a row; Corrosion gossips it to every node within seconds. Every control-plane node consults its local SQLite on each authentication attempt against the gRPC API — no RPC to a central CRL distributor, no OCSP, no dependency on the regional Raft leader being reachable. A revocation-sweep reconciler (§18) deletes rows whose `expires_at` has passed, keeping the table bounded.
+`overdrive op revoke <spiffe_id>` writes a row; Corrosion gossips it to every node within seconds. Every control-plane node consults its local SQLite on each authentication attempt against the REST API — no RPC to a central CRL distributor, no OCSP, no dependency on the regional Raft leader being reachable. A revocation-sweep reconciler (§18) deletes rows whose `expires_at` has passed, keeping the table bounded.
 
 This is not an X.509 CRL in the formal sense — there is no signed CRL artifact distributed over HTTP, no CRLDistributionPoints extension in the cert, no OCSP stapling. The revocation state is first-class Overdrive observation data, readable and enforceable in the same way BPF map hydration is. The 8-hour TTL is therefore a comfort bound, not a security bound: the actual attack window for a known-compromised cert is gossip-propagation time.
 
@@ -913,7 +914,7 @@ overdrive op create marcus@schack.id \
 
 **Deferred — OIDC enrolment.** A future phase introduces `overdrive login`, which performs OIDC Authorization Code + PKCE against a configured IdP (Google Workspace, GitHub, Okta) and mints an operator SVID on valid ID token. This closes the bootstrap-cert problem once team size exceeds a handful of operators — offboarding becomes an IdP concern rather than a Overdrive one — but it is not required for v0.1. Phase 7.
 
-**Deferred — Biscuit for CI delegation.** Request-level capability attenuation — an operator hands CI a token scoped to `job=payments AND action=submit AND expires<1h` without re-enrolling the CI in the CA — maps onto Biscuit: a Rust-native (`biscuit-auth`), Datalog-policied, Ed25519-signed capability token carried in a gRPC metadata header on top of an already-authenticated mTLS connection. Biscuit adds attenuation without weakening the primary auth path. Phase 7.
+**Deferred — Biscuit for CI delegation.** Request-level capability attenuation — an operator hands CI a token scoped to `job=payments AND action=submit AND expires<1h` without re-enrolling the CI in the CA — maps onto Biscuit: a Rust-native (`biscuit-auth`), Datalog-policied, Ed25519-signed capability token carried in the `Authorization: Bearer <biscuit>` header on top of an already-authenticated mTLS connection. Biscuit adds attenuation without weakening the primary auth path. Phase 7.
 
 ### Credential Proxy
 
@@ -1161,7 +1162,7 @@ BPF maps (node agent)      — stores compiled verdicts
 XDP / LSM (kernel)         — enforces verdicts per packet / syscall
 ```
 
-Policy changes propagate within a sub-second window: Regorus re-evaluates, node agents receive updated maps via gRPC, kernel programs enforce new policy.
+Policy changes propagate within a sub-second window: Regorus re-evaluates, verdicts land in `policy_verdicts` in the ObservationStore, node agents observe the change via Corrosion subscriptions and materialise the BPF maps, kernel programs enforce new policy.
 
 ### Example Policy
 
@@ -1967,20 +1968,42 @@ This supersedes the "operator" pattern where Go binaries with arbitrary I/O and 
 
 ### The Reconciler Primitive
 
-Reconcilers converge. They are pure over `(desired, actual, db) → actions`:
+Reconcilers converge. Authoring one is two methods — an async read phase and a sync pure compute phase — with the split chosen so `reconcile` remains pure over its inputs, while the libSQL backing store (which exposes only an async API) is accessed exclusively inside `hydrate`:
 
 ```rust
 trait Reconciler: Send + Sync {
+    /// Author-declared projection of the reconciler's private memory.
+    type View: Send + Sync;
+
+    /// Async read phase. The ONLY place a reconciler author touches
+    /// libSQL. The runtime diffs the returned NextView against this
+    /// view and persists the delta — reconcilers never write libSQL
+    /// directly.
+    async fn hydrate(
+        &self,
+        target: &TargetResource,
+        db:     &LibsqlHandle,     // private libSQL — reconciler memory
+    ) -> Result<Self::View, HydrateError>;
+
+    /// Pure compute phase. Sync. No .await. No I/O. All mutations
+    /// through Raft (via returned Actions) or through NextView (via
+    /// the runtime's diff-and-persist path), never direct. Wall-clock
+    /// only via `tick.now`, never `Instant::now()`.
     fn reconcile(
         &self,
         desired: &State,
-        actual: &State,
-        db: &Db,          // private libSQL — reconciler memory
-    ) -> Vec<Action>;     // all mutations through Raft, never direct
+        actual:  &State,
+        view:    &Self::View,
+        tick:    &TickContext,
+    ) -> (Vec<Action>, Self::View);
 }
 ```
 
-The purity is load-bearing. Neither the trigger reason nor wall-clock time are inputs. `reconcile` does not `.await`, does not spawn subprocesses, does not read wall-clock, does not write directly to the IntentStore or ObservationStore. This property is what makes reconcilers testable under DST (§21) and tractable for *Eventually Stable Reconciliation* proofs (see *Correctness Guarantees* below; USENIX OSDI '24 *Anvil*).
+How authors declare reads: the `async fn hydrate` body reads the reconciler's private libSQL and decodes rows into `Self::View` via free-form SQL. The runtime ensures `reconcile` sees an immutable view, never the live handle. The View is an input to the pure function; writes are expressed as the returned `NextView` (data), persisted by the runtime — not as side effects inside `reconcile`.
+
+Time is injected the same way storage is — as input state, not as a side channel. The runtime snapshots `Clock::now()` via the same injected trait DST controls (`SystemClock` in production, `SimClock` under simulation), packages it into a `TickContext { now, tick, deadline }` alongside a monotonic tick counter and a per-tick deadline, and passes it by reference to `reconcile` as a fourth parameter. Reading wall-clock from inside `reconcile` is banned for the same reason reading libsql is banned: it would break the pure-function contract that ESR verification and DST replay both rely on. Time has a different consistency model from observation (node-local snapshot at evaluation start vs CRDT-gossiped seconds-fresh peer state), and the type system reflects that — `actual: &State` carries observation, `tick: &TickContext` carries time, neither substitutes for the other. The `deadline` field is the natural home for the per-tick reconcile budget the evaluation broker imposes; the `tick` counter gives reconcilers a deterministic tie-breaker that does not depend on wall-clock granularity.
+
+The purity is load-bearing. Neither the trigger reason nor wall-clock time are *implicit* inputs to `reconcile`. `reconcile` does not `.await`, does not spawn subprocesses, does not call `Instant::now()` / `SystemTime::now()` directly, does not write directly to the IntentStore or ObservationStore, and does not write directly to libSQL. This property is what makes `reconcile` testable under DST (§21) and tractable for *Eventually Stable Reconciliation* proofs (see *Correctness Guarantees* below; USENIX OSDI '24 *Anvil*). The pre-hydration pattern is the same architectural shape every mature precedent converges on: kube-rs `Store<K>`, controller-runtime's cache-backed Reader, Anvil's `reconcile_core` + shim, the Elm Architecture's `update : Msg -> Model -> (Model, Cmd Msg)`, and Redux's middleware + pure-reducer. The same precedents converge on time-as-injected-state: controller-runtime threads time through `ctx.Deadline()`, Anvil models time via `expires_at` observation fields, Elm exposes `Time.now` as a command rather than a synchronous function. `hydrate` is deliberately outside the purity contract — its explicit purpose is the async libSQL read.
 
 Reconcilers have infinite lifecycle. They re-evaluate whenever their inputs change, forever; there is no terminal state, only convergence to desired-vs-actual equality.
 

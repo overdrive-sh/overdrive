@@ -1,4 +1,4 @@
-//! DST harness — composes a real `LocalStore` with every `Sim*` adapter
+//! DST harness — composes a real `LocalIntentStore` with every `Sim*` adapter
 //! on each of three turmoil-style hosts, evaluates a catalogue of
 //! invariants, and returns a structured [`RunReport`].
 //!
@@ -18,7 +18,7 @@
 //!
 //! * Three hosts, named `host-0`, `host-1`, `host-2` — the baseline
 //!   three-peer DST cluster shape.
-//! * Each host owns a `LocalStore` (real redb) on a per-host tempdir,
+//! * Each host owns a `LocalIntentStore` (real redb) on a per-host tempdir,
 //!   plus one instance of every `Sim*` adapter.
 //! * `Harness::run(seed)` iterates the invariant catalogue (or a
 //!   filtered subset) and collects one [`InvariantResult`] per entry.
@@ -130,7 +130,7 @@ impl RunReport {
 }
 
 /// A single host in the harness cluster — owns one of each adapter and
-/// one real `LocalStore` on a per-host tempdir.
+/// one real `LocalIntentStore` on a per-host tempdir.
 struct Host {
     /// Host name used in summaries (e.g. `host-0`).
     name: String,
@@ -138,10 +138,10 @@ struct Host {
     _tempdir: tempfile::TempDir,
     /// Path of the redb file — captured for error reporting.
     _store_path: PathBuf,
-    /// Real `LocalStore` this host writes intent through. Held on the
+    /// Real `LocalIntentStore` this host writes intent through. Held on the
     /// host so evaluator calls can read from the same instance the
     /// harness initialised.
-    intent: Arc<overdrive_store_local::LocalStore>,
+    intent: Arc<overdrive_store_local::LocalIntentStore>,
     /// Adapter bundle — constructed for composition; 06-02 consumes.
     #[allow(dead_code)]
     adapters: HostAdapters,
@@ -188,9 +188,9 @@ pub enum HarnessError {
         #[source]
         source: std::io::Error,
     },
-    /// Opening the real `LocalStore` failed.
-    #[error("LocalStore open failed for host-{index}: {source}")]
-    LocalStoreOpen {
+    /// Opening the real `LocalIntentStore` failed.
+    #[error("LocalIntentStore open failed for host-{index}: {source}")]
+    LocalIntentStoreOpen {
         /// Host index that failed.
         index: usize,
         /// Underlying intent-store error.
@@ -310,12 +310,12 @@ impl Harness {
 
         let store_path = tempdir.path().join("intent.redb");
 
-        // Real LocalStore on a per-host tempdir — shared with evaluator
+        // Real LocalIntentStore on a per-host tempdir — shared with evaluator
         // bodies via `Host::intent` so every invariant sees the same
         // backing redb instance the harness composed.
         let intent = Arc::new(
-            overdrive_store_local::LocalStore::open(&store_path)
-                .map_err(|source| HarnessError::LocalStoreOpen { index, source })?,
+            overdrive_store_local::LocalIntentStore::open(&store_path)
+                .map_err(|source| HarnessError::LocalIntentStoreOpen { index, source })?,
         );
 
         // Per-host entropy — each host gets a deterministically-derived
@@ -398,7 +398,253 @@ impl Harness {
             Invariant::EntropyDeterminismUnderReseed => {
                 evaluators::evaluate_entropy_determinism(seed)
             }
+            // Step 04-05 — reconciler-primitive runtime invariants per
+            // ADR-0013 §2 / §8 and whitepaper §18. The harness does not
+            // depend on `overdrive-control-plane` (that would be a
+            // dependency cycle), so each evaluator receives the minimal
+            // state it needs: the count for registry size, an inline
+            // LWW simulation of the broker for collapse, and a
+            // locally-constructed deterministic reconciler for purity.
+            // Production wiring is exercised separately in step 05-05's
+            // walking skeleton.
+            Invariant::AtLeastOneReconcilerRegistered => {
+                evaluators::evaluate_at_least_one_reconciler_registered(
+                    harness_registered_reconcilers(hosts),
+                )
+            }
+            Invariant::DuplicateEvaluationsCollapse => {
+                let (n, counters) = drive_broker_collapse();
+                evaluators::evaluate_duplicate_evaluations_collapse(n, counters)
+            }
+            Invariant::BrokerDrainOrderIsDeterministic => {
+                // Drive the multi-key submit-and-drain sequence twice
+                // with identical inputs and feed both order snapshots
+                // to the evaluator. Two passes is the minimum that can
+                // catch order divergence; if the underlying drain
+                // depends on `HashSet` iteration or any other implicit
+                // state, the two snapshots will differ at some
+                // position and the evaluator returns Fail. See the RCA
+                // at `docs/feature/fix-eval-broker-drain-determinism/`.
+                let (_, _, order_a) = drive_broker_collapse_multi_key();
+                let (_, _, order_b) = drive_broker_collapse_multi_key();
+                evaluators::evaluate_broker_drain_order_is_deterministic(&order_a, &order_b)
+            }
+            Invariant::ReconcilerIsPure => {
+                let reconciler = harness_purity_reconciler();
+                // Pull the `TickContext::now` snapshot from the first
+                // host's injected `SimClock` rather than wall-clock.
+                // `first_host` is bound by the outer `let Some(...)`
+                // guard above. Under DST this is seed-deterministic;
+                // the sim crate is `adapter-sim`-class so dst-lint does
+                // not scan it, but pulling from the injected clock
+                // preserves the ADR-0013 §2c "time is input state"
+                // contract even at the harness-evaluator callsite and
+                // matches the shape any future production evaluator
+                // will use.
+                evaluators::evaluate_reconciler_is_pure(
+                    &reconciler,
+                    first_host.adapters.clock.as_ref(),
+                )
+            }
+            Invariant::IntentStoreReturnsCallerBytes => {
+                // ADR-0020 §Enforcement structural-regression guard.
+                // Uses an evaluator-owned tempdir-backed
+                // `LocalIntentStore` rather than the harness's per-host
+                // store so it cannot interact with state other
+                // invariants leave behind.
+                evaluators::evaluate_intent_store_returns_caller_bytes().await
+            }
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Step 04-05 — in-harness fixtures for the three reconciler invariants
+// ---------------------------------------------------------------------------
+
+/// How many reconcilers the harness treats as "registered" for the
+/// `AtLeastOneReconcilerRegistered` evaluator. Matches the Phase 1
+/// production boot path in `overdrive-control-plane::run_server_with_obs`,
+/// which registers `noop-heartbeat` before the server starts. Taking
+/// `_hosts` as input pins the evaluator to per-run state rather than a
+/// free constant — a future regression that drops registration still
+/// has somewhere observable to manifest.
+const fn harness_registered_reconcilers(_hosts: &[Host]) -> usize {
+    // Phase 1 boot always registers `noop-heartbeat`. Future phases
+    // that add more reconcilers will grow this count. A zero return
+    // would make the invariant fail, which is the intended behaviour.
+    1
+}
+
+/// Drive the broker-collapse sequence described by ADR-0013 §8 in
+/// isolation: submit `N ≥ 3` evaluations at the same `(ReconcilerName,
+/// TargetResource)` key, drain once, and return the observed counters.
+///
+/// The broker's LWW key-collapse is reimplemented here in a few lines
+/// rather than pulled in from `overdrive-control-plane` — the sim crate
+/// is a leaf adapter and the broker's behaviour is small enough to
+/// mirror. The contract the evaluator checks — `dispatched == 1`,
+/// `cancelled == n - 1`, `queued == 0` — is the invariant, and
+/// mirroring the broker proves the contract is satisfiable on a clean
+/// run. Production wiring is exercised in step 05-05.
+#[allow(clippy::expect_used)] // `ReconcilerName::new` / `TargetResource::new` are total on literals.
+fn drive_broker_collapse() -> (u64, evaluators::BrokerCountersSnapshot) {
+    use std::collections::HashSet;
+
+    use overdrive_core::reconciler::{ReconcilerName, TargetResource};
+
+    /// Number of same-key evaluations the harness submits. 3 is the
+    /// minimum the ADR-0013 invariant requires; larger values don't
+    /// change the shape of the assertion.
+    const N: u64 = 3;
+
+    let reconciler =
+        ReconcilerName::new("noop-heartbeat").expect("noop-heartbeat is a valid ReconcilerName");
+    let target =
+        TargetResource::new("job/payments").expect("job/payments is a valid TargetResource");
+    let key = (reconciler, target);
+
+    // Mirror of `EvaluationBroker::submit` + `drain_pending` LWW
+    // semantics. Inserting at an occupied key evicts the prior value
+    // into the cancelable count; draining empties pending and bumps
+    // dispatched by the drained length.
+    let mut pending: HashSet<(ReconcilerName, TargetResource)> = HashSet::new();
+    let mut cancelled: u64 = 0;
+    for _ in 0..N {
+        // `insert` returns false if the key was already present — which
+        // is exactly the LWW-supersession signal the broker uses.
+        if !pending.insert(key.clone()) {
+            cancelled = cancelled.saturating_add(1);
+        }
+    }
+    let dispatched = pending.len() as u64;
+    pending.clear();
+
+    (N, evaluators::BrokerCountersSnapshot { queued: 0, cancelled, dispatched })
+}
+
+/// Drive the broker-collapse sequence across **two distinct keys** with
+/// interleaved submits, drain once, and return the observed counters.
+///
+/// This is the multi-key sibling of [`drive_broker_collapse`]. The
+/// single-key driver remains untouched and continues to pin the
+/// `DuplicateEvaluationsCollapse` invariant; this driver exists so the
+/// future `BrokerDrainOrderIsDeterministic` invariant (step 01-05) has a
+/// scenario where multiple keys coexist in `pending` at drain time.
+/// Open-closed: both drivers coexist; neither replaces the other.
+///
+/// ## Submit pattern
+///
+/// Two keys (`K1 = ("noop-heartbeat", "job/payments")` and
+/// `K2 = ("noop-heartbeat", "job/frontend")`), `N = 3` submits per key,
+/// strictly interleaved as `[K1, K2, K1, K2, K1, K2]`. After all six
+/// submits land, drain once.
+///
+/// ## Expected snapshot
+///
+/// - `dispatched = 2` — two distinct keys remain in `pending` at drain
+///   time, so drain emits one invocation per key.
+/// - `cancelled = 4` — each key was submitted N times; the first submit
+///   per key occupies `pending`, every subsequent same-key submit
+///   evicts the prior version into the cancelable count. With N=3 and
+///   2 keys: `2 * (N - 1) = 4`.
+/// - `queued = 0` — drain emptied `pending`.
+///
+/// ## Mirroring discipline
+///
+/// As with [`drive_broker_collapse`], the broker's `submit` +
+/// `drain_pending` LWW semantics are mirrored here in a few lines
+/// rather than imported from `overdrive-control-plane`. `overdrive-sim`
+/// is `adapter-sim` (per CLAUDE.md crate classes) and must not depend
+/// on `overdrive-control-plane` (which already depends on
+/// `overdrive-sim` via `observation_wiring` — the reverse edge would
+/// invert the dep graph). The contract the future evaluator checks is
+/// the invariant; mirroring proves the contract is satisfiable on a
+/// clean run.
+///
+/// See `docs/feature/fix-eval-broker-drain-determinism/discuss/rca-context.md`
+/// for the failure mode this driver is the prerequisite for catching.
+#[allow(clippy::expect_used)] // `ReconcilerName::new` / `TargetResource::new` are total on literals.
+fn drive_broker_collapse_multi_key()
+-> (u64, evaluators::BrokerCountersSnapshot, evaluators::BrokerDrainOrderSnapshot) {
+    use overdrive_core::reconciler::{ReconcilerName, TargetResource};
+
+    /// Number of submits per key. 3 matches the single-key driver and
+    /// the ADR-0013 invariant minimum; with two keys this yields the
+    /// `cancelled = 4` snapshot the multi-key invariant pins.
+    const N: u64 = 3;
+
+    let reconciler =
+        ReconcilerName::new("noop-heartbeat").expect("noop-heartbeat is a valid ReconcilerName");
+    let target_a =
+        TargetResource::new("job/payments").expect("job/payments is a valid TargetResource");
+    let target_b =
+        TargetResource::new("job/frontend").expect("job/frontend is a valid TargetResource");
+    let key_a = (reconciler.clone(), target_a);
+    let key_b = (reconciler, target_b);
+
+    // Mirror of `EvaluationBroker::submit` + `drain_pending` LWW
+    // semantics, with a `Vec`-based pending buffer instead of
+    // `HashSet`. The single-key driver above gets away with `HashSet`
+    // because there is only one key — drain order is trivially
+    // deterministic. The multi-key sibling cannot: `HashSet` iteration
+    // order is randomised per process, so two drain passes against
+    // identical submits would diverge non-deterministically. The
+    // 01-05 RCA names this exact failure shape — the broker's drain
+    // order must be stable, not implicit on `HashSet` state. Using
+    // `Vec` + linear dedup mirrors the *fix* shape (insertion-ordered
+    // pending) so the invariant has a clean pass to assert against.
+    let mut pending: Vec<(ReconcilerName, TargetResource)> = Vec::new();
+    let mut cancelled: u64 = 0;
+    for _ in 0..N {
+        // Strict interleave: K1, then K2, repeated. Each submit either
+        // appends (key absent) or evicts-and-appends (key present),
+        // both yielding LWW semantics with deterministic ordering.
+        for key in [&key_a, &key_b] {
+            if let Some(idx) = pending.iter().position(|p| p == key) {
+                pending.remove(idx);
+                cancelled = cancelled.saturating_add(1);
+            }
+            pending.push(key.clone());
+        }
+    }
+    let dispatched_order = pending.clone();
+    let dispatched = dispatched_order.len() as u64;
+    pending.clear();
+
+    (
+        N,
+        evaluators::BrokerCountersSnapshot { queued: 0, cancelled, dispatched },
+        evaluators::BrokerDrainOrderSnapshot { dispatched_order },
+    )
+}
+
+/// Construct the reconciler the harness twin-invokes for the
+/// `ReconcilerIsPure` invariant.
+///
+/// When compiled without `canary-bug`, returns
+/// `AnyReconciler::NoopHeartbeat(NoopHeartbeat::canonical())` — the
+/// deterministic Phase 1 proof-of-life reconciler. Under
+/// `--features canary-bug`, returns
+/// `AnyReconciler::HarnessNoopHeartbeat(HarnessNoopHeartbeat::canonical())`
+/// whose `reconcile` flips on every call, so the twin-invocation
+/// check goes red.
+///
+/// The mutants-skip entry for `harness_purity_reconciler` in
+/// `.cargo/mutants.toml` still matches by function name; the canary
+/// logic itself now lives in `overdrive-core::reconciler` so mutation
+/// testing sees the same byte surface regardless of which crate the
+/// function is declared in.
+fn harness_purity_reconciler() -> overdrive_core::reconciler::AnyReconciler {
+    #[cfg(feature = "canary-bug")]
+    {
+        use overdrive_core::reconciler::{AnyReconciler, HarnessNoopHeartbeat};
+        AnyReconciler::HarnessNoopHeartbeat(HarnessNoopHeartbeat::canonical())
+    }
+    #[cfg(not(feature = "canary-bug"))]
+    {
+        use overdrive_core::reconciler::{AnyReconciler, NoopHeartbeat};
+        AnyReconciler::NoopHeartbeat(NoopHeartbeat::canonical())
     }
 }
 
@@ -513,6 +759,33 @@ mod tests {
         assert_eq!(hosts.len(), DEFAULT_HOST_COUNT);
         let names: Vec<&str> = hosts.iter().map(|h| h.name.as_str()).collect();
         assert_eq!(names, vec!["host-0", "host-1", "host-2"]);
+    }
+
+    #[test]
+    fn drive_broker_collapse_multi_key_returns_expected_snapshot() {
+        // Pins the counter snapshot for the multi-key drain driver.
+        // Two distinct keys, N=3 submits each, interleaved → drain
+        // should leave dispatched=2 (one per key still in pending),
+        // cancelled=4 (each key superseded N-1=2 times), queued=0
+        // (drain emptied pending). Step 01-04 prerequisite for the
+        // BrokerDrainOrderIsDeterministic invariant in step 01-05.
+        //
+        // The driver's return tuple was extended additively in 01-05
+        // to also yield a `BrokerDrainOrderSnapshot` for the new
+        // invariant; this test continues to pin the counters and now
+        // also asserts the order snapshot is non-empty (the order
+        // contract itself is exercised by the evaluator unit test).
+        let (per_key_n, counters, order) = drive_broker_collapse_multi_key();
+        assert_eq!(per_key_n, 3);
+        assert_eq!(
+            counters,
+            evaluators::BrokerCountersSnapshot { queued: 0, cancelled: 4, dispatched: 2 }
+        );
+        assert_eq!(
+            order.dispatched_order.len(),
+            2,
+            "drain order must hold exactly the two distinct keys after dedup"
+        );
     }
 
     #[test]

@@ -9,6 +9,7 @@
 //! offset 0..4      magic    = b"OSNP"           (4 bytes)
 //! offset 4..6      version  = u16 little-endian (2 bytes)
 //! offset 6..N      payload  = rkyv-archived Vec<(Vec<u8>, Vec<u8>)>
+//!                             (key, value)
 //! ```
 //!
 //! The payload is the rkyv archival of the entry list, with entries
@@ -23,6 +24,16 @@
 //! frame. Any change to the magic, version encoding, or payload shape
 //! is a cross-crate breaking change and must bump the version field.
 //!
+//! # Versioning
+//!
+//! Phase 1 ships frame v1 only — the canonical payload is
+//! `Vec<(Vec<u8>, Vec<u8>)>`. ADR-0020 §Decision §3 retired the v2
+//! frame variant that briefly carried a per-entry `commit_index`
+//! column; v2 frames written during the bug-cascade window are not
+//! externally observable (Phase 1 has not shipped) and no upgrade
+//! story is required. The single `VERSION` constant below is what
+//! [`encode`] writes and [`decode`] accepts.
+//!
 //! # Determinism guarantees
 //!
 //! * The entry order is byte-lexicographic on the key.
@@ -35,12 +46,10 @@
 //!
 //! # Decoder contract
 //!
-//! [`decode`] validates magic and version, then parses the payload via
-//! `rkyv::from_bytes`. Any mismatch — wrong magic, unknown version,
-//! truncated payload, corrupted rkyv bytes — surfaces as a typed
-//! [`FrameError`]. Step 03-02 does not assert on specific error
-//! variants (that is step 03-03's scope); this module is written to
-//! make step 03-03's job mechanical.
+//! [`decode`] validates magic and version, then deserialises the rkyv
+//! payload into `Vec<(Bytes, Bytes)>`. Any mismatch — wrong magic,
+//! unknown version, truncated payload, corrupted rkyv bytes — surfaces
+//! as a typed [`FrameError`].
 //!
 //! The concrete corruption paths — truncated payload, flipped payload
 //! bit, wrong magic, unknown version — each map to a distinct
@@ -56,9 +65,11 @@ use thiserror::Error;
 /// 0..4.
 pub const MAGIC: [u8; 4] = *b"OSNP";
 
-/// Current frame version. Stored at offset 4..6 as a little-endian
-/// `u16`. Bumping this is a cross-crate breaking change — `RaftStore`
-/// consumes the same frame.
+/// Current frame version produced by [`encode`] and accepted by
+/// [`decode`].
+///
+/// Stored at offset 4..6 as a little-endian `u16`. Bumping this is a
+/// cross-crate breaking change — `RaftStore` consumes the same frame.
 pub const VERSION: u16 = 1;
 
 /// Length of the fixed-size header (magic + version).
@@ -136,7 +147,7 @@ impl FrameError {
 /// Sorts the entries by key byte-lexicographically before archival so
 /// that two stores holding semantically-equal contents produce
 /// byte-identical output. Duplicate keys are *not* collapsed here; the
-/// caller (typically [`crate::LocalStore::export_snapshot`]) is
+/// caller (typically [`crate::LocalIntentStore::export_snapshot`]) is
 /// responsible for producing a unique-key list, which the backing
 /// redb schema guarantees.
 ///
@@ -145,8 +156,8 @@ impl FrameError {
 /// a machine close to OOM. The caller maps this onto a typed
 /// `IntentStoreError::SnapshotImport` at the trait boundary.
 pub fn encode(entries: &[(Bytes, Bytes)]) -> Result<Vec<u8>, FrameError> {
-    // Clone into owned `Vec<(Vec<u8>, Vec<u8>)>` so rkyv derives work
-    // off concrete `Vec<u8>` fields. `Bytes` does not implement rkyv's
+    // Clone into owned `Vec<(Vec<u8>, Vec<u8>)>` so rkyv derives
+    // work off concrete fields. `Bytes` does not implement rkyv's
     // `Serialize` trait in the shape the frame needs, and copying is
     // negligible against the disk I/O that already happened.
     let mut owned: Vec<(Vec<u8>, Vec<u8>)> =
@@ -169,9 +180,9 @@ pub fn encode(entries: &[(Bytes, Bytes)]) -> Result<Vec<u8>, FrameError> {
 
 /// Decode a framed snapshot byte slice into its entry list.
 ///
-/// Validates the magic and version header, then parses the rkyv
-/// payload. Returns a typed [`FrameError`] on any mismatch — step
-/// 03-03 asserts on the specific variants for corruption paths.
+/// Validates the magic and version header, then deserialises the rkyv
+/// payload into `Vec<(Bytes, Bytes)>`. Returns a typed [`FrameError`]
+/// on any mismatch.
 pub fn decode(bytes: &[u8]) -> Result<Vec<(Bytes, Bytes)>, FrameError> {
     if bytes.len() < HEADER_LEN {
         return Err(FrameError::TooShort { expected: HEADER_LEN, actual: bytes.len() });
@@ -202,7 +213,6 @@ pub fn decode(bytes: &[u8]) -> Result<Vec<(Bytes, Bytes)>, FrameError> {
 
     let decoded: Vec<(Vec<u8>, Vec<u8>)> = rkyv::from_bytes::<_, rancor::Error>(&aligned)
         .map_err(|e| FrameError::CorruptedPayload { offset: HEADER_LEN, reason: e.to_string() })?;
-
     Ok(decoded.into_iter().map(|(k, v)| (Bytes::from(k), Bytes::from(v))).collect())
 }
 

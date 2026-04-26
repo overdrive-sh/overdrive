@@ -13,6 +13,10 @@ publish.workspace       = true
 [package.metadata.overdrive]
 crate_class = "binary"
 
+[lib]
+name = "overdrive_cli"
+path = "src/lib.rs"
+
 [[bin]]
 name = "overdrive"
 path = "src/main.rs"
@@ -20,11 +24,59 @@ path = "src/main.rs"
 [lints]
 workspace = true
 
+[features]
+# Opt-in gate for slow / real-infra tests in this crate. Off by
+# default so `cargo nextest run --workspace` stays under the 60s
+# slow-test budget; CI exercises the gate in a dedicated
+# `integration` job. Per `.claude/rules/testing.md`.
+integration-tests = []
+
 [dependencies]
-overdrive-core.workspace     = true
-eyre.workspace               = true
-color-eyre.workspace         = true
-clap.workspace               = true
-tokio.workspace              = true
-tracing.workspace            = true
-tracing-subscriber.workspace = true
+overdrive-core.workspace           = true
+overdrive-control-plane.path       = "../overdrive-control-plane"
+eyre.workspace                     = true
+color-eyre.workspace               = true
+clap.workspace                     = true
+tokio.workspace                    = true
+tracing.workspace                  = true
+tracing-subscriber.workspace       = true
+reqwest.workspace                  = true
+# Used in `http_client::stringify_reqwest_error` to walk a
+# `reqwest::Error` source chain looking for
+# `rustls::Error::InvalidCertificate(...)` so the operator-facing
+# message can distinguish a TLS handshake failure (trust-material
+# mismatch — re-run `overdrive serve`) from a pure TCP-`ECONNREFUSED`
+# (server not running). Per `fix-cli-cannot-reach-control-plane` Step
+# 01-03 (RCA §Secondary fix). The reqwest client itself is configured
+# `.use_rustls_tls()` so the rustls error type is what surfaces in the
+# `Error::source()` chain on cert-verification failure.
+rustls.workspace                   = true
+url.workspace                      = true
+thiserror.workspace                = true
+serde.workspace                    = true
+serde_json.workspace               = true
+toml.workspace                     = true
+
+[dev-dependencies]
+overdrive-control-plane.path = "../overdrive-control-plane"
+tempfile.workspace           = true
+base64.workspace             = true
+# Per ADR-0019 the operator config is TOML; the `toml` runtime dep
+# above covers both the `job submit` spec loader and the integration
+# tests that round-trip the trust triple. No YAML serde backend
+# (`serde_yaml` / `serde_yml`) in this crate's dependency graph — the
+# absence is enforced by `cargo xtask yaml-free-cli` in CI (ADR-0019
+# §Consequences → Enforcement).
+#
+# `rkyv` is used ONLY by the walking-skeleton test to locally
+# reproduce the server-side spec-digest computation (SHA-256 of
+# rkyv-archived Job bytes, per ADR-0002) so the test can assert
+# byte-identity with the server's response.
+rkyv.workspace               = true
+# `serial_test` serialises tests that mutate process-wide environment
+# variables. Rust edition 2024 + `unsafe_op_in_unsafe_fn = deny` makes
+# `std::env::set_var` / `std::env::remove_var` explicit unsafe, but
+# that only guards the function signature — racing calls across
+# parallel nextest threads would still clobber one another. The
+# `#[serial(env)]` attribute gives per-group mutual exclusion.
+serial_test.workspace        = true

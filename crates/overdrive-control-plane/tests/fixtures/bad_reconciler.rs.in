@@ -1,0 +1,28 @@
+//! Synthetic fixture — a reconciler-shaped body that smuggles
+//! `std::time::Instant::now()` past the §18 purity contract.
+//!
+//! This file is NOT compiled as part of the workspace — the `.rs.in`
+//! extension prevents rustc picking it up. It is copied into a
+//! synthetic workspace by `xtask/tests/acceptance/dst_lint_catches_reconciler_violation.rs`
+//! at test time and scanned by `cargo xtask dst-lint` against two
+//! crate-class labellings: `core` (must fail) and `adapter-host`
+//! (must pass per ADR-0003 wiring exemption).
+//!
+//! Covers test-scenarios.md §5.10.
+
+use std::time::Instant;
+
+pub struct JobReconciler;
+
+pub struct Action;
+
+impl JobReconciler {
+    /// Reconciler body that illicitly reads the wall clock. Per §18
+    /// this MUST be refused by dst-lint when the enclosing crate is
+    /// core-class — the only correct source of "now" inside the
+    /// hexagonal core is a `Clock` trait method invoked via DI.
+    pub fn reconcile(&self) -> Vec<Action> {
+        let _now = Instant::now();
+        vec![]
+    }
+}

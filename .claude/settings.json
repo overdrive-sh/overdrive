@@ -12,9 +12,86 @@
           },
           {
             "type": "command",
+            "command": "bun run .claude/hooks/block-git-stash-without-pop.ts",
+            "timeout": 10,
+            "statusMessage": "Checking `git stash` has matching `git stash pop`..."
+          },
+          {
+            "type": "command",
+            "command": "bun run .claude/hooks/block-git-commit-no-verify.ts",
+            "timeout": 10,
+            "statusMessage": "Checking `git commit` is not using `--no-verify`..."
+          },
+          {
+            "type": "command",
             "command": "bun run .claude/hooks/block-cargo-test.ts",
             "timeout": 10,
             "statusMessage": "Checking for `cargo test` (use `cargo nextest run`)..."
+          },
+          {
+            "type": "command",
+            "command": "bun run .claude/hooks/block-cargo-mutants.ts",
+            "timeout": 10,
+            "statusMessage": "Checking for `cargo mutants` (use `cargo xtask mutants`)..."
+          },
+          {
+            "type": "command",
+            "command": "bun run .claude/hooks/block-cargo-build.ts",
+            "timeout": 10,
+            "statusMessage": "Checking for `cargo build` (use `cargo check`)..."
+          }
+        ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "serena-hooks remind --client=claude-code"
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__serena__*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "serena-hooks auto-approve --client=claude-code"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bun run .claude/hooks/flag-test-failure.ts",
+            "timeout": 10,
+            "statusMessage": "Scanning test output for FAIL / `test run failed`..."
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "serena-hooks activate --client=claude-code"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "serena-hooks cleanup --client=claude-code"
           }
         ]
       }

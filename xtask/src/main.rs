@@ -41,6 +41,17 @@ enum Task {
         manifest_path: std::path::PathBuf,
     },
 
+    /// ADR-0019 gate — assert no `serde_yaml` / `serde_yml` appears in
+    /// the `overdrive-cli` resolved dependency graph. Scoped to
+    /// non-dev dependencies; test-only YAML is out of scope.
+    /// See `docs/product/architecture/adr-0019-operator-config-format-toml.md`.
+    YamlFreeCli {
+        /// Path to the workspace `Cargo.toml` to scan. Defaults to the
+        /// enclosing workspace root (cwd-relative).
+        #[arg(long, default_value = "Cargo.toml")]
+        manifest_path: std::path::PathBuf,
+    },
+
     /// Tier 2 — BPF unit tests via `BPF_PROG_TEST_RUN`.
     BpfUnit,
 
@@ -111,6 +122,18 @@ enum Task {
         #[command(subcommand)]
         action: McpAction,
     },
+
+    /// Regenerate `api/openapi.yaml` from the live `OverdriveApi`
+    /// schema. Invoked by developers after adding or changing a DTO or
+    /// handler path. Per ADR-0009, the checked-in YAML is the contract;
+    /// drift is caught by `openapi-check` in CI.
+    OpenapiGen,
+
+    /// Verify `api/openapi.yaml` matches the live `OverdriveApi`
+    /// schema. Exits 0 on match; non-zero with a message naming the
+    /// first drifted schema/path and suggesting `cargo xtask
+    /// openapi-gen` to regenerate. CI gate per ADR-0009.
+    OpenapiCheck,
 }
 
 #[derive(Debug, Parser)]
@@ -119,7 +142,14 @@ enum Task {
     long_about = "Exactly one of --diff or --workspace must be given. Writes \
                   target/xtask/mutants-summary.json; exit status is zero iff \
                   the gate passed (≥80% kill rate for --diff; ≥60% absolute \
-                  floor for --workspace, with drift ≤ -2pp as a soft-warn)."
+                  floor for --workspace, with drift ≤ -2pp as a soft-warn). \
+                  Narrow further with --file, --package, and --features. \
+                  --package defaults to --test-workspace=false for speed. \
+                  Pass --features integration-tests explicitly when you want \
+                  acceptance tests gated behind that cfg to participate — \
+                  the workspace convention requires every member to declare \
+                  the feature (see .claude/rules/testing.md §\"Integration \
+                  vs unit gating\"), so the bare flag resolves uniformly."
 )]
 struct MutantsArgs {
     /// Diff-scoped: git ref to diff against (e.g. `origin/main`).
@@ -142,6 +172,41 @@ struct MutantsArgs {
         requires = "workspace"
     )]
     baseline: std::path::PathBuf,
+
+    /// Files to mutate (repeatable). Passed through to cargo-mutants
+    /// as `--file <GLOB>`. Use to narrow a diff-scoped run to a
+    /// specific file, or a workspace run to a subset of files.
+    #[arg(long, value_name = "GLOB")]
+    file: Vec<std::path::PathBuf>,
+
+    /// Cargo package to mutate (repeatable). Passed through to
+    /// cargo-mutants as `--package <CRATE>`. When set,
+    /// `--test-workspace=false` is added automatically — mutation
+    /// reruns only the selected package's tests. Pass
+    /// `--test-whole-workspace` to opt out.
+    #[arg(long, value_name = "CRATE")]
+    package: Vec<String>,
+
+    /// Features to enable when building mutated code. Comma- or
+    /// space-separated; multiple `--features` flags append. Passed
+    /// through to cargo-mutants as `--features <LIST>` verbatim — the
+    /// wrapper does not add or rewrite anything.
+    ///
+    /// To exercise acceptance tests gated behind `#[cfg(feature =
+    /// "integration-tests")]` (see `.claude/rules/testing.md`
+    /// §"Integration vs unit gating"), pass `--features
+    /// integration-tests` explicitly. Every workspace member declares
+    /// the feature (no-op `[]` for crates without integration tests),
+    /// so the bare flag resolves uniformly under cargo-mutants v27's
+    /// per-package scoping.
+    #[arg(long, value_name = "LIST", value_delimiter = ',')]
+    features: Vec<String>,
+
+    /// Force `--test-workspace=true` even with `--package`. Rare; use
+    /// when mutations in the selected package can only be killed by
+    /// tests in another crate.
+    #[arg(long)]
+    test_whole_workspace: bool,
 }
 
 #[derive(Debug, Clone, Copy, Subcommand)]
@@ -215,6 +280,7 @@ fn run() -> Result<()> {
     match Args::parse().cmd {
         Task::Dst { seed, only } => xtask::dst::run(seed, only.as_deref()),
         Task::DstLint { manifest_path } => xtask::dst_lint::run(&manifest_path),
+        Task::YamlFreeCli { manifest_path } => xtask::yaml_free_cli::run(&manifest_path),
         Task::BpfUnit => bpf_unit(),
         Task::IntegrationTest { scope } => match scope {
             IntegrationScope::Vm { cache_dir, kernels } => integration_vm(&cache_dir, &kernels),
@@ -227,6 +293,8 @@ fn run() -> Result<()> {
         Task::Hooks { action } => hooks(action),
         Task::Mcp { action } => mcp(action),
         Task::DevSetup => dev_setup(),
+        Task::OpenapiGen => xtask::openapi::openapi_gen(),
+        Task::OpenapiCheck => xtask::openapi::openapi_check(),
     }
 }
 
@@ -489,7 +557,15 @@ fn mutants(args: MutantsArgs) -> Result<()> {
         }
         (None, false) => bail!("must give exactly one of --diff <BASE_REF> or --workspace"),
     };
-    xtask::mutants::run(&mode)
+
+    let scope = xtask::mutants::Scope {
+        files: args.file,
+        packages: args.package,
+        features: args.features,
+        test_whole_workspace: args.test_whole_workspace,
+    };
+
+    xtask::mutants::run(&mode, &scope)
 }
 
 fn ci() -> Result<()> {

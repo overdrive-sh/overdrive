@@ -1,0 +1,100 @@
+schema_version: 1
+
+# Second canonical product-level journey.
+#
+# Pairs with `trust-the-sim.yaml`: trust-the-sim proves the simulation
+# harness, submit-a-job proves the engineer-facing control surface.
+#
+# Feature origin: phase-1-control-plane-core DISCUSS wave (2026-04-23).
+# The per-feature journey file
+# (`docs/feature/phase-1-control-plane-core/discuss/journey-submit-a-job.yaml`)
+# is the authoritative detailed version — this file captures the
+# product-level summary for cross-feature reference and for DIVERGE /
+# DISCOVER waves that want a persona's end-to-end path.
+
+journey:
+  name: "Submit a job through the walking-skeleton control plane"
+  goal: >
+    A Overdrive platform engineer runs `overdrive job submit <spec>`
+    against a local single-mode control plane, sees the spec committed
+    through a real IntentStore, observes the reconciler primitive alive
+    via `overdrive cluster status`, and reads the spec back byte-
+    identical via `overdrive alloc status`.
+  persona: >
+    Ana, Overdrive platform engineer (same persona as trust-the-sim).
+    Secondary: Omar, operator who will use the same CLI once auth lands
+    in Phase 5.
+
+  emotional_arc:
+    start: "Skeptical — the CLI was a stub; will a real submit reach the store?"
+    middle: "Focused then confident — the commit index, the reconciler registry, and the spec round-trip each deposit a small win."
+    end: "Trusting — the CLI echoes what was submitted AND honestly says nothing is running yet (scheduler + drivers are next feature)."
+
+steps:
+  - id: 1
+    name: "Submit a job"
+    command: "overdrive job submit ./payments.toml"
+    summary: >
+      CLI reads TOML, constructs a typed Job aggregate, opens a gRPC
+      client to the local endpoint, calls SubmitJob. Server validates
+      through newtype constructors, archives via rkyv, commits via
+      IntentStore::put on LocalStore. Response carries commit_index and
+      JobId.
+    emotional_state:
+      entry: "Skeptical — 'is the walking skeleton actually wired end-to-end?'"
+      exit: "Focused — 'the commit_index is real, I can ask for it back.'"
+
+  - id: 2
+    name: "Commit to intent"
+    command: "(internal — observable via step 4)"
+    summary: >
+      IntentStore::put commits through LocalStore's redb transaction.
+      The monotonic commit_index accessor exposes the transaction
+      sequence. No direct redb access path from the API — every write
+      routes through the IntentStore trait.
+    emotional_state:
+      entry: "Focused — 'did the store actually take it?'"
+      exit: "Confident — 'the commit_index is reproducible across reads.'"
+
+  - id: 3
+    name: "Reconciler primitive alive and idling"
+    command: "overdrive cluster status"
+    summary: >
+      ReconcilerRuntime registers the noop-heartbeat reconciler at boot.
+      EvaluationBroker exposes queued / cancelled / dispatched counters.
+      The cancelable-eval-set semantics ship native (not retrofitted),
+      satisfying whitepaper §18's differentiator vs Nomad. CLI cluster
+      status renders the registry and counters.
+    emotional_state:
+      entry: "Focused — 'is the runtime wired?'"
+      exit: "Confident — 'a reconciler is registered and the broker is real.'"
+
+  - id: 4
+    name: "Inspect allocations via CLI"
+    command: "overdrive alloc status --job payments"
+    summary: >
+      CLI calls DescribeJob + AllocStatus. Spec digest (ContentHash of
+      rkyv-archived bytes) echoes back byte-identical to what the
+      operator can compute locally from the same input file. Zero
+      alloc_status rows render as an explicit empty state naming the
+      next feature (phase-1-first-workload). No silent blank output.
+    emotional_state:
+      entry: "Focused — 'did the whole loop close?'"
+      exit: "Trusting — 'the CLI echoes what I submitted AND honestly names what isn't running.'"
+
+integration_validation:
+  shared_artifacts_summary:
+    - "spec_digest — ContentHash::of(rkyv archive); computable locally by Ana; returned by DescribeJob. Must match byte-for-byte or the walking-skeleton hypothesis fails."
+    - "commit_index — LocalStore monotonic sequence; returned by SubmitJob; echoed by DescribeJob + ClusterStatus."
+    - "intent_key — canonical form from a single overdrive-core function; used by CLI display AND by server's IntentStore::put."
+
+related_features:
+  - id: phase-1-control-plane-core
+    role: "Ships the walking-skeleton implementation of this journey."
+  - id: phase-1-first-workload
+    role: "Extends the journey by adding scheduler + process driver + job-lifecycle reconciler — at which point the empty states in step 4 start filling with real data."
+
+changelog:
+  - date: 2026-04-23
+    feature: phase-1-control-plane-core
+    change: Initial product-level journey for the walking-skeleton submit flow.

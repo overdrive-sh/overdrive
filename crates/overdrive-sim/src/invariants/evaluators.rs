@@ -31,9 +31,12 @@
 use std::time::Duration;
 
 use overdrive_core::id::NodeId;
+use overdrive_core::reconciler::{AnyReconciler, AnyReconcilerView, State, TickContext};
+use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::entropy::Entropy;
 use overdrive_core::traits::intent_store::IntentStore;
 
+use crate::adapters::clock::SimClock;
 use crate::adapters::entropy::SimEntropy;
 use crate::adapters::observation_store::{
     SimObservationCluster, SimObservationStore, check_lww_convergence,
@@ -202,7 +205,7 @@ pub async fn evaluate_intent_crossing(
 /// Evaluate the snapshot roundtrip invariant against `intent`.
 ///
 /// Drives the step 03-02 logic from within the harness: export,
-/// bootstrap a second `LocalStore` from the frame, re-export, and
+/// bootstrap a second `LocalIntentStore` from the frame, re-export, and
 /// compare bytes.
 pub async fn evaluate_snapshot_roundtrip(intent: &impl IntentStore) -> InvariantResult {
     let name = "snapshot-roundtrip-bit-identical";
@@ -219,7 +222,7 @@ pub async fn evaluate_snapshot_roundtrip(intent: &impl IntentStore) -> Invariant
         }
     };
 
-    // Bootstrap a fresh LocalStore from the frame.
+    // Bootstrap a fresh LocalIntentStore from the frame.
     let tmp = match tempfile::tempdir() {
         Ok(t) => t,
         Err(err) => {
@@ -232,7 +235,7 @@ pub async fn evaluate_snapshot_roundtrip(intent: &impl IntentStore) -> Invariant
         }
     };
     let path = tmp.path().join("roundtrip.redb");
-    let second_store = match overdrive_store_local::LocalStore::open(&path) {
+    let second_store = match overdrive_store_local::LocalIntentStore::open(&path) {
         Ok(s) => s,
         Err(err) => {
             return result(
@@ -277,6 +280,169 @@ pub async fn evaluate_snapshot_roundtrip(intent: &impl IntentStore) -> Invariant
             )),
         )
     }
+}
+
+// ---------------------------------------------------------------------------
+// IntentStoreReturnsCallerBytes
+// ---------------------------------------------------------------------------
+
+/// Probe keys for [`evaluate_intent_store_returns_caller_bytes`]. Owns
+/// each [`overdrive_core::aggregate::IntentKey`] so the slice borrows
+/// returned by `as_bytes()` outlive the evaluator's loop.
+struct IntentStoreProbeKeys {
+    empty: overdrive_core::aggregate::IntentKey,
+    le_prefix: overdrive_core::aggregate::IntentKey,
+    long: overdrive_core::aggregate::IntentKey,
+}
+
+/// Derive the three probe keys via `IntentKey::for_job` so the literal
+/// `jobs/` prefix is sourced from `aggregate/mod.rs` (the SSOT).
+fn derive_intent_store_probe_keys() -> Result<IntentStoreProbeKeys, String> {
+    let mk = |raw: &str| -> Result<overdrive_core::aggregate::IntentKey, String> {
+        overdrive_core::id::JobId::new(raw)
+            .map(|id| overdrive_core::aggregate::IntentKey::for_job(&id))
+            .map_err(|e| format!("derive IntentKey for {raw}: {e}"))
+    };
+    Ok(IntentStoreProbeKeys {
+        empty: mk("k-empty")?,
+        le_prefix: mk("k-le-prefix")?,
+        long: mk("k-long")?,
+    })
+}
+
+/// Evaluate the structural-regression guard from ADR-0020 §Enforcement.
+///
+/// Writes a small fixed set of `(key, value)` pairs through
+/// [`IntentStore::put`] and [`IntentStore::put_if_absent`], then reads
+/// each key back and checks the returned bytes are byte-identical to
+/// the bytes that went in. This catches any future re-introduction of
+/// inline framing (`[u64-LE-prefix || value]`) or any other on-disk
+/// row encoding that would surface a transformed value at the trait
+/// boundary.
+///
+/// The fixtures cover the failure shapes inline framing produces:
+/// * an empty value (an inline u64 prefix would surface as 8 bytes)
+/// * a value whose bytes start with what would be a plausible u64-LE
+///   prefix (an inline framing would slice off the first 8 bytes)
+/// * a long value (general round-trip witness)
+///
+/// The invariant uses a fresh tempdir-backed `LocalIntentStore` rather
+/// than the harness's per-host store so it cannot interact with state
+/// other invariants leave behind.
+pub async fn evaluate_intent_store_returns_caller_bytes() -> InvariantResult {
+    let name = "intent-store-returns-caller-bytes";
+
+    let tmp = match tempfile::tempdir() {
+        Ok(t) => t,
+        Err(err) => {
+            return result(
+                name,
+                InvariantStatus::Fail,
+                "host-0",
+                Some(format!("tempdir for intent-store probe failed: {err}")),
+            );
+        }
+    };
+    let path = tmp.path().join("caller-bytes.redb");
+    let store = match overdrive_store_local::LocalIntentStore::open(&path) {
+        Ok(s) => s,
+        Err(err) => {
+            return result(
+                name,
+                InvariantStatus::Fail,
+                "host-0",
+                Some(format!("intent store open failed: {err}")),
+            );
+        }
+    };
+
+    // Fixtures chosen to flush inline-framing regressions:
+    //   * empty value — inline framing would surface 8 prefix bytes
+    //   * 8-byte LE-looking prefix — inline framing would slice it off
+    //   * arbitrary 32-byte payload — general round-trip witness
+    //
+    // Keys are derived through `IntentKey::for_job` so the literal
+    // `jobs/` prefix appears in exactly one production file (the
+    // SSOT in `aggregate/mod.rs`); the canonical-key grep gate in
+    // `overdrive-core/tests/acceptance/intent_key_canonical.rs`
+    // enforces this.
+    let keys = match derive_intent_store_probe_keys() {
+        Ok(k) => k,
+        Err(err) => {
+            return result(name, InvariantStatus::Fail, "host-0", Some(err));
+        }
+    };
+    let fixtures: &[(&[u8], &[u8])] = &[
+        (keys.empty.as_bytes(), b""),
+        (keys.le_prefix.as_bytes(), &[0x07, 0, 0, 0, 0, 0, 0, 0, b'a', b'b', b'c']),
+        (keys.long.as_bytes(), b"the-rain-in-spain-falls-mainly-on"),
+    ];
+
+    // Write the first two via `put`, the third via `put_if_absent` so
+    // the invariant covers both insert paths. A regression that
+    // re-introduces framing on only one path would still be caught.
+    for (k, v) in &fixtures[..2] {
+        if let Err(err) = store.put(k, v).await {
+            return result(
+                name,
+                InvariantStatus::Fail,
+                "host-0",
+                Some(format!("put({:?}) failed: {err}", String::from_utf8_lossy(k))),
+            );
+        }
+    }
+    if let Err(err) = store.put_if_absent(fixtures[2].0, fixtures[2].1).await {
+        return result(
+            name,
+            InvariantStatus::Fail,
+            "host-0",
+            Some(format!(
+                "put_if_absent({:?}) failed: {err}",
+                String::from_utf8_lossy(fixtures[2].0),
+            )),
+        );
+    }
+
+    for (k, expected) in fixtures {
+        match store.get(k).await {
+            Ok(Some(actual)) => {
+                if actual.as_ref() != *expected {
+                    return result(
+                        name,
+                        InvariantStatus::Fail,
+                        "host-0",
+                        Some(format!(
+                            "get({key:?}) returned {actual_len} bytes, expected {expected_len}: \
+                             actual={actual:?} expected={expected:?}",
+                            key = String::from_utf8_lossy(k),
+                            actual_len = actual.len(),
+                            expected_len = expected.len(),
+                            actual = actual.as_ref(),
+                            expected = expected,
+                        )),
+                    );
+                }
+            }
+            Ok(None) => {
+                return result(
+                    name,
+                    InvariantStatus::Fail,
+                    "host-0",
+                    Some(format!("get({:?}) returned None after put", String::from_utf8_lossy(k))),
+                );
+            }
+            Err(err) => {
+                return result(
+                    name,
+                    InvariantStatus::Fail,
+                    "host-0",
+                    Some(format!("get({:?}) failed: {err}", String::from_utf8_lossy(k))),
+                );
+            }
+        }
+    }
+
+    result(name, InvariantStatus::Pass, "host-0", None)
 }
 
 // ---------------------------------------------------------------------------
@@ -467,6 +633,282 @@ pub fn evaluate_entropy_determinism_against(a: &SimEntropy, b: &SimEntropy) -> I
     result(name, InvariantStatus::Pass, "host-0", None)
 }
 
+// ---------------------------------------------------------------------------
+// AtLeastOneReconcilerRegistered (step 04-05)
+// ---------------------------------------------------------------------------
+
+/// Evaluate `AtLeastOneReconcilerRegistered` — the registry is never
+/// empty after boot.
+///
+/// Per whitepaper §18 and ADR-0013 §2, a control-plane boot with zero
+/// registered reconcilers is a silent-failure shape: the cluster sees
+/// no convergence pressure and the operator sees no error. Phase 1
+/// registers `noop-heartbeat` as proof-of-life; this invariant catches
+/// any future regression that skips registration.
+///
+/// The harness passes the count of registered reconcilers it composed;
+/// the evaluator asserts the count is non-zero. `count` rather than a
+/// trait-object dependency on `overdrive-control-plane` keeps the sim
+/// crate a leaf adapter.
+#[must_use]
+pub fn evaluate_at_least_one_reconciler_registered(registered_count: usize) -> InvariantResult {
+    let name = "at-least-one-reconciler-registered";
+    if registered_count >= 1 {
+        result(name, InvariantStatus::Pass, "host-0", None)
+    } else {
+        result(
+            name,
+            InvariantStatus::Fail,
+            "host-0",
+            Some("reconciler registry is empty after boot".to_owned()),
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
+// DuplicateEvaluationsCollapse (step 04-05)
+// ---------------------------------------------------------------------------
+
+/// Observable broker counters the `DuplicateEvaluationsCollapse`
+/// evaluator inspects.
+///
+/// Mirrors the shape of
+/// `overdrive_control_plane::eval_broker::BrokerCounters` but is
+/// redefined locally so the sim crate does not take a cyclic dependency
+/// on `overdrive-control-plane` (which already depends on
+/// `overdrive-sim` via `observation_wiring`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BrokerCountersSnapshot {
+    /// Number of evaluations currently pending dispatch.
+    pub queued: u64,
+    /// Cumulative count of superseded evaluations.
+    pub cancelled: u64,
+    /// Cumulative count of dispatched evaluations.
+    pub dispatched: u64,
+}
+
+/// Evaluate `DuplicateEvaluationsCollapse`.
+///
+/// N (≥3) concurrent evaluations at the same
+/// `(ReconcilerName, TargetResource)` key collapse to exactly one
+/// dispatched invocation and `N - 1` cancellations, per ADR-0013 §8
+/// storm-proofing.
+///
+/// The harness is responsible for driving the submit-N-at-same-key +
+/// drain sequence; the evaluator inspects the resulting counter
+/// snapshot. Passing requires `dispatched == 1`, `cancelled == n - 1`,
+/// and `queued == 0` (drain completed).
+#[must_use]
+pub fn evaluate_duplicate_evaluations_collapse(
+    n_submitted: u64,
+    counters: BrokerCountersSnapshot,
+) -> InvariantResult {
+    let name = "duplicate-evaluations-collapse";
+
+    if n_submitted < 3 {
+        return result(
+            name,
+            InvariantStatus::Fail,
+            CLUSTER_HOST,
+            Some(format!(
+                "harness submitted {n_submitted} evaluations — invariant requires at least 3",
+            )),
+        );
+    }
+
+    let expected_cancelled = n_submitted - 1;
+    if counters.dispatched == 1 && counters.cancelled == expected_cancelled && counters.queued == 0
+    {
+        result(name, InvariantStatus::Pass, CLUSTER_HOST, None)
+    } else {
+        result(
+            name,
+            InvariantStatus::Fail,
+            CLUSTER_HOST,
+            Some(format!(
+                "expected dispatched=1 cancelled={expected_cancelled} queued=0 after {n_submitted} same-key submits; got {counters:?}",
+            )),
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
+// BrokerDrainOrderIsDeterministic (step 01-05)
+// ---------------------------------------------------------------------------
+
+/// Observable per-pass drain order the
+/// `BrokerDrainOrderIsDeterministic` evaluator inspects.
+///
+/// Sibling to [`BrokerCountersSnapshot`] — counters proves the LWW
+/// key-collapse invariant, this snapshot proves drain-order
+/// determinism. Both coexist; neither replaces the other.
+///
+/// The harness captures one of these from a FIRST drain pass and a
+/// SECOND drain pass (each drain replays identical submit semantics)
+/// and the evaluator asserts the two `dispatched_order` vecs are
+/// element-equal in the same positions. A divergence at any position
+/// means the broker's drain order depends on something other than the
+/// submit sequence — `HashSet` iteration order, allocator placement,
+/// thread scheduling — and the invariant fails.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BrokerDrainOrderSnapshot {
+    /// The ordered sequence of `(ReconcilerName, TargetResource)` keys
+    /// the broker dispatched during a single drain pass.
+    pub dispatched_order: Vec<(
+        overdrive_core::reconciler::ReconcilerName,
+        overdrive_core::reconciler::TargetResource,
+    )>,
+}
+
+/// Evaluate `BrokerDrainOrderIsDeterministic`.
+///
+/// Two drain passes against identical submit sequences must produce
+/// element-equal `dispatched_order` vecs at every position. On
+/// mismatch, the failure cause names the first divergent position by
+/// index — a structured signal mutation testing can target precisely.
+///
+/// The harness is responsible for driving two copies of the same
+/// submit-and-drain sequence and capturing both
+/// `BrokerDrainOrderSnapshot`s; this evaluator inspects only the
+/// snapshots.
+#[must_use]
+pub fn evaluate_broker_drain_order_is_deterministic(
+    a: &BrokerDrainOrderSnapshot,
+    b: &BrokerDrainOrderSnapshot,
+) -> InvariantResult {
+    let name = "broker-drain-order-is-deterministic";
+
+    // Find the first divergent position via zip().enumerate().find().
+    // Length mismatch is also a divergence: the shorter vec ends
+    // first, so a missing trailing entry shows up as a position-equal
+    // length comparison after the zip exhausts.
+    let first_divergence = a
+        .dispatched_order
+        .iter()
+        .zip(b.dispatched_order.iter())
+        .enumerate()
+        .find(|(_, (lhs, rhs))| lhs != rhs)
+        .map(|(idx, _)| idx);
+
+    if first_divergence.is_none() && a.dispatched_order.len() == b.dispatched_order.len() {
+        result(name, InvariantStatus::Pass, CLUSTER_HOST, None)
+    } else {
+        let position = first_divergence
+            .unwrap_or_else(|| a.dispatched_order.len().min(b.dispatched_order.len()));
+        result(
+            name,
+            InvariantStatus::Fail,
+            CLUSTER_HOST,
+            Some(format!(
+                "drain order diverged at position {position}: \
+                 first={:?} second={:?}",
+                a.dispatched_order, b.dispatched_order,
+            )),
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ReconcilerIsPure (step 04-05)
+// ---------------------------------------------------------------------------
+
+/// Evaluate `ReconcilerIsPure` — twin invocation of `reconciler.reconcile`
+/// with identical `(desired, actual, view, tick)` inputs produces
+/// bit-identical `(Vec<Action>, NextView)` tuples.
+///
+/// This is the runtime witness of the ADR-0013 §2 purity contract. A
+/// reconciler that smuggles non-determinism (wall-clock read,
+/// `rand::thread_rng`, internal `RefCell` counter, ...) fails here.
+/// Phase 1 runs this against the `noop-heartbeat` reconciler, which
+/// always returns `vec![Action::Noop]` — a deterministic baseline that
+/// proves the machinery is live. The optional `canary-bug` gate in
+/// this crate exposes a deliberately non-deterministic reconciler to
+/// prove this evaluator actually catches divergences.
+///
+/// # Time injection
+///
+/// The `TickContext` passed to `reconcile` pulls its `now` from the
+/// caller-supplied `SimClock`, NOT from `std::time::Instant::now()`.
+/// Under DST, `SimClock::now()` is seed-deterministic — two harness
+/// runs at the same seed see the same `now`, and the twin invocation
+/// within a single run sees one `now` shared across both calls (the
+/// same `TickContext` reference is passed to each). This preserves
+/// the ADR-0013 §2c "time is input state, injected once per tick"
+/// contract even at the sim-layer callsite.
+#[must_use]
+pub fn evaluate_reconciler_is_pure(
+    reconciler: &AnyReconciler,
+    clock: &SimClock,
+) -> InvariantResult {
+    let name = "reconciler-is-pure";
+
+    // Twin invocation with identical inputs per ADR-0013 §2 / §2c. ONE
+    // `TickContext` is constructed and passed to BOTH calls so time is
+    // a shared input, not a per-call side channel. The full §18 purity
+    // semantics (pre-hydrated view + next-view tuple return) are
+    // exercised here — `(actions, next_view)` are asserted as paired
+    // but separate bit-identical comparisons so a mutation that drops
+    // either side is caught.
+    let desired = State;
+    let actual = State;
+    let view = AnyReconcilerView::Unit;
+    let tick = build_tick_context(clock);
+
+    let (actions_a, next_view_a) = reconciler.reconcile(&desired, &actual, &view, &tick);
+    let (actions_b, next_view_b) = reconciler.reconcile(&desired, &actual, &view, &tick);
+
+    if actions_a == actions_b && next_view_a == next_view_b {
+        result(name, InvariantStatus::Pass, "host-0", None)
+    } else {
+        result(
+            name,
+            InvariantStatus::Fail,
+            "host-0",
+            Some(format!(
+                "reconciler {} diverged under twin invocation: \
+                 first=(actions={actions_a:?}, next_view={next_view_a:?}) \
+                 second=(actions={actions_b:?}, next_view={next_view_b:?})",
+                reconciler.name(),
+            )),
+        )
+    }
+}
+
+/// Construct the `TickContext` snapshot handed to both twin
+/// invocations inside `evaluate_reconciler_is_pure`.
+///
+/// Extracted from the evaluator body so the `now + BUDGET` arithmetic
+/// can be unit-tested. With the `TickContext` construction inlined,
+/// the `+` mutation survived — the Phase 1 reconciler fixtures
+/// (`NoopHeartbeat`, `HarnessNoopHeartbeat` under default features)
+/// ignore `tick.deadline` entirely, so a deadline-in-the-past produced
+/// no observable divergence. The helper form gives mutation testing a
+/// direct target: a unit test asserts `tick.deadline > tick.now` and
+/// `+ -> -` flips the sign on that difference.
+///
+/// The `tick` counter stays zero (the evaluator runs once per harness
+/// pass, not inside a real reconcile loop) and the budget is a
+/// 1-second literal matching the 04-07 test-side `TickContext`
+/// construction — no injected production budget exists yet per ADR-0013.
+#[inline]
+fn build_tick_context(clock: &SimClock) -> TickContext {
+    /// Monotonic tick counter — the evaluator runs once per harness
+    /// pass (not inside a real reconcile loop), so a fixed zero is
+    /// the right shape. The field exists to give reconcilers a
+    /// deterministic tie-breaker that does not depend on wall-clock
+    /// granularity; the harness's single-shot nature means there is
+    /// no per-call progression to model.
+    const TICK: u64 = 0;
+    /// Per-evaluation reconcile budget. No injected production
+    /// budget yet (§14 right-sizing will provide one); a 1-second
+    /// literal matches the 04-07 test-side `TickContext`
+    /// construction.
+    const BUDGET: Duration = Duration::from_secs(1);
+
+    let now = clock.now();
+    TickContext { now, tick: TICK, deadline: now + BUDGET }
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::unwrap_used)]
 mod tests {
@@ -549,5 +991,180 @@ mod tests {
     fn replay_equivalent_empty_workflow_passes_on_deterministic_seed() {
         let r = evaluate_replay_equivalent_empty_workflow(42);
         assert_eq!(r.status, InvariantStatus::Pass);
+    }
+
+    // -----------------------------------------------------------------
+    // Step 04-05 — reconciler-primitive invariant witnesses
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn at_least_one_reconciler_passes_on_nonzero_count() {
+        assert_eq!(evaluate_at_least_one_reconciler_registered(1).status, InvariantStatus::Pass,);
+        assert_eq!(evaluate_at_least_one_reconciler_registered(42).status, InvariantStatus::Pass,);
+    }
+
+    #[test]
+    fn at_least_one_reconciler_fails_on_empty_registry() {
+        let r = evaluate_at_least_one_reconciler_registered(0);
+        assert_eq!(r.status, InvariantStatus::Fail);
+        assert!(r.cause.as_ref().is_some_and(|c| c.contains("empty")));
+    }
+
+    #[test]
+    fn duplicate_evaluations_collapse_passes_on_clean_3_way_collapse() {
+        let counters = BrokerCountersSnapshot { queued: 0, cancelled: 2, dispatched: 1 };
+        assert_eq!(
+            evaluate_duplicate_evaluations_collapse(3, counters).status,
+            InvariantStatus::Pass,
+        );
+    }
+
+    #[test]
+    fn duplicate_evaluations_collapse_fails_when_dispatched_not_one() {
+        // dispatched == 2 means the second submit didn't supersede the
+        // first — key-collapse is broken.
+        let counters = BrokerCountersSnapshot { queued: 0, cancelled: 1, dispatched: 2 };
+        let r = evaluate_duplicate_evaluations_collapse(3, counters);
+        assert_eq!(r.status, InvariantStatus::Fail);
+    }
+
+    #[test]
+    fn duplicate_evaluations_collapse_fails_when_cancelled_count_wrong() {
+        // N=3 should yield cancelled=2; cancelled=0 means nothing was
+        // actually superseded.
+        let counters = BrokerCountersSnapshot { queued: 0, cancelled: 0, dispatched: 1 };
+        let r = evaluate_duplicate_evaluations_collapse(3, counters);
+        assert_eq!(r.status, InvariantStatus::Fail);
+    }
+
+    #[test]
+    fn duplicate_evaluations_collapse_fails_when_queued_not_drained() {
+        // queued > 0 means the drain half of the sequence never ran.
+        let counters = BrokerCountersSnapshot { queued: 1, cancelled: 2, dispatched: 0 };
+        let r = evaluate_duplicate_evaluations_collapse(3, counters);
+        assert_eq!(r.status, InvariantStatus::Fail);
+    }
+
+    #[test]
+    fn duplicate_evaluations_collapse_fails_when_n_below_three() {
+        // Invariant requires at least 3 submitted to be meaningful.
+        let counters = BrokerCountersSnapshot { queued: 0, cancelled: 1, dispatched: 1 };
+        let r = evaluate_duplicate_evaluations_collapse(2, counters);
+        assert_eq!(r.status, InvariantStatus::Fail);
+        assert!(r.cause.as_ref().is_some_and(|c| c.contains("at least 3")));
+    }
+
+    // -----------------------------------------------------------------
+    // Step 01-05 — BrokerDrainOrderIsDeterministic witnesses
+    // -----------------------------------------------------------------
+
+    /// Build a small fixture of `(ReconcilerName, TargetResource)` pairs
+    /// for the broker-drain-order tests. Two entries is the minimum that
+    /// can demonstrate divergence at a non-trivial position; 01-05 keeps
+    /// the fixture deliberately tiny so the failure-message assertion
+    /// pins the position index, not incidental ordering.
+    fn drain_fixture()
+    -> Vec<(overdrive_core::reconciler::ReconcilerName, overdrive_core::reconciler::TargetResource)>
+    {
+        use overdrive_core::reconciler::{ReconcilerName, TargetResource};
+        let r = ReconcilerName::new("noop-heartbeat")
+            .expect("noop-heartbeat is a valid ReconcilerName");
+        let t_a =
+            TargetResource::new("job/payments").expect("job/payments is a valid TargetResource");
+        let t_b =
+            TargetResource::new("job/frontend").expect("job/frontend is a valid TargetResource");
+        vec![(r.clone(), t_a), (r, t_b)]
+    }
+
+    #[test]
+    fn evaluate_broker_drain_order_is_deterministic_pass_and_fail() {
+        // PASS: two snapshots with identical dispatched_order vecs.
+        let order = drain_fixture();
+        let a = BrokerDrainOrderSnapshot { dispatched_order: order.clone() };
+        let b = BrokerDrainOrderSnapshot { dispatched_order: order.clone() };
+        let pass = evaluate_broker_drain_order_is_deterministic(&a, &b);
+        assert_eq!(pass.status, InvariantStatus::Pass);
+
+        // FAIL: divergence at position 0 — swap the first pair so the
+        // first index differs. The failure message must name the
+        // divergent position.
+        let mut divergent = order.clone();
+        divergent.swap(0, 1);
+        let a2 = BrokerDrainOrderSnapshot { dispatched_order: order };
+        let b2 = BrokerDrainOrderSnapshot { dispatched_order: divergent };
+        let fail = evaluate_broker_drain_order_is_deterministic(&a2, &b2);
+        assert_eq!(fail.status, InvariantStatus::Fail);
+        // Structured assertion: the failure message must name the first
+        // divergent position by index. Position 0 is where the swap
+        // takes effect.
+        assert!(
+            fail.cause.as_ref().is_some_and(|c| c.contains("position 0")),
+            "failure message must name divergent position; got {:?}",
+            fail.cause,
+        );
+    }
+
+    #[test]
+    fn build_tick_context_produces_deadline_strictly_after_now() {
+        // Kills the `+ with -` mutation on the deadline arithmetic in
+        // `build_tick_context`: with `-`, `now - BUDGET` would produce
+        // a deadline in the past (before `now`), failing this
+        // assertion. With the original `+`, deadline is exactly
+        // `BUDGET` ahead of `now`. The Phase 1 reconcilers
+        // (`NoopHeartbeat`, `HarnessNoopHeartbeat`) ignore
+        // `tick.deadline`, so without a direct test on the helper the
+        // mutation survives — the evaluator returns a deterministic
+        // Pass either way.
+        let clock = SimClock::new();
+        let tick = build_tick_context(&clock);
+        assert!(
+            tick.deadline > tick.now,
+            "deadline must be strictly after now; got now={:?} deadline={:?}",
+            tick.now,
+            tick.deadline,
+        );
+        assert_eq!(tick.tick, 0, "tick counter is a fixed zero per the evaluator contract");
+    }
+
+    #[test]
+    fn reconciler_is_pure_passes_for_deterministic_reconciler() {
+        use overdrive_core::reconciler::{AnyReconciler, NoopHeartbeat};
+
+        // The deterministic witness is the real `NoopHeartbeat` —
+        // wrapping it in `AnyReconciler::NoopHeartbeat` exercises the
+        // exact enum-dispatch path the evaluator runs in production.
+        let r = AnyReconciler::NoopHeartbeat(NoopHeartbeat::canonical());
+        let clock = SimClock::new();
+        assert_eq!(evaluate_reconciler_is_pure(&r, &clock).status, InvariantStatus::Pass);
+    }
+
+    /// The non-deterministic witness requires the `canary-bug` feature.
+    ///
+    /// Under the `AnyReconciler` enum-dispatch model (04-07), inhabiting
+    /// the enum is restricted to first-party variants — a one-off
+    /// `Flappy` struct from a test module cannot be dispatched through
+    /// `AnyReconciler` without modifying the enum. The `canary-bug`
+    /// feature exists precisely to ship a flip-on-call variant in-tree:
+    /// `HarnessNoopHeartbeat` under `#[cfg(feature = "canary-bug")]`
+    /// alternates one/two `Noop`s per call, which the twin-invocation
+    /// check must flag.
+    ///
+    /// The default unit lane does NOT exercise this branch (the feature
+    /// is off). End-to-end coverage that this evaluator actually flags
+    /// a real divergence is provided by
+    /// `xtask/tests/acceptance/dst_canary_red_run.rs` and the sim
+    /// acceptance suite run under `--features
+    /// overdrive-sim/canary-bug`, both of which drive a full harness
+    /// run with the canary variant in the registry.
+    #[cfg(feature = "canary-bug")]
+    #[test]
+    fn reconciler_is_pure_fails_for_non_deterministic_reconciler() {
+        use overdrive_core::reconciler::{AnyReconciler, HarnessNoopHeartbeat};
+
+        let r = AnyReconciler::HarnessNoopHeartbeat(HarnessNoopHeartbeat::canonical());
+        let clock = SimClock::new();
+        let result = evaluate_reconciler_is_pure(&r, &clock);
+        assert_eq!(result.status, InvariantStatus::Fail);
+        assert!(result.cause.as_ref().is_some_and(|c| c.contains("diverged")));
     }
 }

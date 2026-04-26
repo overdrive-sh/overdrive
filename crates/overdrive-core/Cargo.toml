@@ -24,6 +24,14 @@ serde_json.workspace = true
 rkyv.workspace       = true
 bytecheck.workspace  = true
 
+# OpenAPI schema derivation — `JobSpecInput` carries `ToSchema` so
+# `overdrive-control-plane::api` can reuse it as the typed spec field in
+# `SubmitJobRequest` / `JobDescription` per ADR-0014 (shared types
+# between server and CLI) and ADR-0009 (utoipa-derived OpenAPI). utoipa
+# is not on the dst-lint banned-API list — it is a declarative
+# macro-derive crate with no runtime I/O.
+utoipa.workspace = true
+
 # Identifiers
 sha2.workspace = true
 hex.workspace  = true
@@ -35,6 +43,46 @@ async-trait.workspace = true
 futures.workspace     = true
 bytes.workspace       = true
 tokio.workspace       = true
+
+# Reconciler trait's `HydrateError` wraps `libsql::Error` via `#[from]`
+# per ADR-0013 pre-hydration shape. `libsql` with `default-features =
+# false, features = ["core"]` is a type-dep only — no runtime I/O is
+# initiated from core-class code paths. Not on the dst-lint banned-API
+# list (the list covers `Instant::now`, `rand::random`, `tokio::net::*` —
+# libsql is not enumerated). Real connections are opened by the
+# reconciler runtime in `overdrive-control-plane`.
+libsql.workspace = true
+
+[features]
+# `canary-bug` — TEST-ONLY feature. Enables the `HarnessNoopHeartbeat`
+# reconciler variant (and its corresponding `AnyReconciler` variant)
+# whose `reconcile` body is deliberately non-deterministic — used by
+# the `overdrive-sim` DST harness to prove the `ReconcilerIsPure`
+# invariant actually catches divergences. Production builds MUST NEVER
+# enable this feature. The sim crate's `canary-bug` feature toggles
+# this via `overdrive-core/canary-bug`.
+canary-bug = []
+
+# `test-utils` — TEST-ONLY feature. Exposes
+# `overdrive_core::testing::observation_store::run_lww_conformance`, the
+# trait-generic LWW conformance harness exercised by every
+# `ObservationStore` adapter's test suite. Per
+# `docs/feature/fix-observation-lww-merge/deliver/rca.md` Cause C, the
+# comparator MUST live in `overdrive-core` so both adapters call the
+# same primitive; the conformance harness MUST be reachable from each
+# adapter's `dev-dependencies` to enforce the trait-level invariant.
+# Production builds MUST NEVER enable this feature.
+test-utils = []
+
+# `integration-tests` — workspace-wide convention. Every workspace
+# member declares this feature so `cargo {check,test,mutants}
+# --features integration-tests` resolves uniformly under per-package
+# scoping (cargo refuses the bare feature on packages that do not
+# declare it, which breaks mutation testing's per-mutant invocations).
+# This crate has no integration-shaped tests of its own — the
+# declaration is a deliberate no-op. See `.claude/rules/testing.md`
+# §"Integration vs unit gating".
+integration-tests = []
 
 [dev-dependencies]
 proptest.workspace = true
