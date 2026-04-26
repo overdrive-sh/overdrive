@@ -29,6 +29,41 @@
       "s": "SKIPPED",
       "d": "NOT_APPLICABLE: this step is the RED scaffold; GREEN is step 01-02 (variant swap to BodyDecode in parse_response_job_id).",
       "t": "2026-04-25T15:28:16Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-25T15:28:53Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-26T03:53:00Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: regression test already RED from step 01-01 (SHA 2af64f1); this step is the GREEN swap.",
+      "t": "2026-04-26T03:53:02Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: regression test already RED from step 01-01 (SHA 2af64f1); this step is the GREEN swap.",
+      "t": "2026-04-26T03:53:04Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-26T03:54:39Z"
     }
   ]
 }
