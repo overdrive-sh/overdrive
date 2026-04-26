@@ -124,12 +124,15 @@ pub fn run(mode: &Mode, scope: &Scope) -> Result<()> {
     std::fs::create_dir_all(&output_parent)
         .wrap_err_with(|| format!("create_dir_all({})", output_parent.display()))?;
 
-    // Clear any pre-existing `mutants-summary.json` upfront. If the
-    // current run gets killed mid-invocation, a stale summary from the
-    // prior run must not remain on disk looking authoritative —
-    // readers polling the file during an in-progress run would
-    // otherwise act on a verdict the current run never produced.
-    clear_stale_summary(&summary_path)?;
+    // Clear any pre-existing wrapper / cargo-mutants verdict files
+    // upfront. If the current run gets killed mid-invocation, a stale
+    // verdict from the prior run must not remain on disk looking
+    // authoritative — readers polling the files during an in-progress
+    // run would otherwise act on verdicts the current run never
+    // produced. See [`clear_stale_summary`] for which files are
+    // cleared and why both `mutants-summary.json` AND
+    // `mutants.out/outcomes.json` are at risk.
+    clear_stale_summary(&output_parent)?;
 
     // 1. Run cargo-mutants. Exit status is partially trusted — a
     //    non-zero exit happens both for missed mutants (our gate
@@ -244,13 +247,6 @@ fn invoke_cargo_mutants(
     Ok(status)
 }
 
-/// Assemble the flag list for `cargo mutants`. Pure: given mode/scope
-/// and a pre-materialised diff path, returns the argv. No subprocess,
-/// no filesystem writes.
-///
-/// Every flag is documented alongside its case so a reviewer can see
-/// which `Mode` or `Scope` field produced it without cross-referencing
-/// the cargo-mutants man page.
 fn build_cargo_mutants_args(
     mode: &Mode,
     scope: &Scope,
@@ -880,22 +876,56 @@ fn write_summary(path: &Path, report: &RawReport, gate: &Gate, mode: &Mode) -> R
     Ok(())
 }
 
-/// Remove any pre-existing `mutants-summary.json` so an in-progress
-/// run cannot leave a stale summary visible on disk. A prior run that
-/// was killed mid-invocation — SIGKILL, crash, CI-runner timeout —
-/// leaves its summary behind; a reader checking the file during the
-/// next run sees that stale verdict and may act on it. The authoritative
-/// verdict is "the summary written by the run that just finished" — so
-/// the contract is: no summary on disk until the current run has
-/// parsed cargo-mutants' outcomes and written its own.
+/// Remove pre-existing wrapper / cargo-mutants verdict files so an
+/// in-progress run cannot leave a stale verdict visible on disk. Two
+/// files are at risk and BOTH must be cleared upfront:
 ///
-/// Noop when the file is absent (fresh checkout, or the prior run
+/// * `<output_parent>/mutants-summary.json` — the wrapper's own
+///   structured summary.
+/// * `<output_parent>/mutants.out/outcomes.json` — cargo-mutants'
+///   per-run report.
+///
+/// Why both. cargo-mutants writes `outcomes.json` ONLY when it actually
+/// runs mutations; if the resolved filter intersection is empty it
+/// logs `INFO No mutants to filter`, exits 0, and writes nothing. Our
+/// post-subprocess [`read_outcomes_or_short_circuit`] then trusts a
+/// pre-existing `outcomes.json` on disk as the current run's report —
+/// even though the current run never produced it. A prior run with a
+/// different `.cargo/mutants.toml` `exclude_re` (or a different scope,
+/// or a different `--in-diff` baseline) leaves its verdict behind, and
+/// the next run that short-circuits silently inherits it. The fix
+/// mirrors the existing summary-clearing semantic: the only valid
+/// `outcomes.json` on disk is "the one written by the run that just
+/// finished."
+///
+/// Clearing only `mutants-summary.json` was the *original* shape of
+/// this function; a wrapper-driven mutation run on
+/// `crates/overdrive-cli/src/commands/job.rs` (the
+/// `fix-job-submit-body-decode-variant` PR) surfaced the asymmetry —
+/// a freshly-suppressed `Default::default` `exclude_re` correctly
+/// short-circuited cargo-mutants, but the wrapper still reported
+/// `total=3 unviable=3` from a prior pre-edit run's `outcomes.json`.
+///
+/// Noop on either file when absent (fresh checkout, or the prior run
 /// cleaned up). Any other I/O error propagates with context.
-fn clear_stale_summary(path: &Path) -> Result<()> {
+fn clear_stale_summary(output_parent: &Path) -> Result<()> {
+    let summary_path = output_parent.join("mutants-summary.json");
+    let outcomes_path = output_parent.join("mutants.out").join("outcomes.json");
+    remove_file_if_present(&summary_path)
+        .wrap_err_with(|| format!("remove stale summary {}", summary_path.display()))?;
+    remove_file_if_present(&outcomes_path)
+        .wrap_err_with(|| format!("remove stale outcomes {}", outcomes_path.display()))?;
+    Ok(())
+}
+
+/// Idempotent file removal: `Ok(())` if removed or absent, error
+/// otherwise. Factored out so [`clear_stale_summary`] reads as two
+/// declarative removals rather than two repeated `match` blocks.
+fn remove_file_if_present(path: &Path) -> std::io::Result<()> {
     match std::fs::remove_file(path) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(e).wrap_err_with(|| format!("remove stale summary {}", path.display())),
+        Err(e) => Err(e),
     }
 }
 
@@ -1544,24 +1574,66 @@ mod tests {
     #[test]
     fn clear_stale_summary_removes_existing_file() {
         let dir = tempfile::tempdir().expect("tmpdir");
-        let path = dir.path().join("mutants-summary.json");
-        std::fs::write(&path, r#"{"status":"pass"}"#).expect("seed stale summary");
-        assert!(path.exists(), "precondition — stale summary exists");
+        let summary = dir.path().join("mutants-summary.json");
+        std::fs::write(&summary, r#"{"status":"pass"}"#).expect("seed stale summary");
+        assert!(summary.exists(), "precondition — stale summary exists");
 
-        clear_stale_summary(&path).expect("clear must succeed when file present");
+        clear_stale_summary(dir.path()).expect("clear must succeed when file present");
 
-        assert!(!path.exists(), "stale summary must be removed");
+        assert!(!summary.exists(), "stale summary must be removed");
     }
 
     #[test]
     fn clear_stale_summary_is_noop_when_file_absent() {
         let dir = tempfile::tempdir().expect("tmpdir");
-        let path = dir.path().join("mutants-summary.json");
-        assert!(!path.exists(), "precondition — summary absent");
+        let summary = dir.path().join("mutants-summary.json");
+        assert!(!summary.exists(), "precondition — summary absent");
 
-        clear_stale_summary(&path).expect("clear must succeed when file absent");
+        clear_stale_summary(dir.path()).expect("clear must succeed when file absent");
 
-        assert!(!path.exists(), "file absent remains absent");
+        assert!(!summary.exists(), "file absent remains absent");
+    }
+
+    /// Regression test for the stale-`outcomes.json` bug surfaced on
+    /// `fix-job-submit-body-decode-variant`. cargo-mutants writes
+    /// `outcomes.json` ONLY when it actually runs mutations; on
+    /// short-circuit ("INFO No mutants to filter") it writes nothing
+    /// and exits 0, leaving any prior run's `outcomes.json` on disk.
+    /// `read_outcomes_or_short_circuit` then trusted the stale file
+    /// as the current run's report — silently importing a verdict the
+    /// current run never produced (e.g. a 3-mutant `unviable` outcome
+    /// from a prior run, after the operator added an `exclude_re`
+    /// entry that should have made the next run vacuously pass).
+    /// `clear_stale_summary` now wipes both files upfront.
+    #[test]
+    fn clear_stale_summary_removes_stale_outcomes_json_too() {
+        let dir = tempfile::tempdir().expect("tmpdir");
+        let summary = dir.path().join("mutants-summary.json");
+        let mutants_out = dir.path().join("mutants.out");
+        let outcomes = mutants_out.join("outcomes.json");
+        std::fs::create_dir_all(&mutants_out).expect("create mutants.out");
+        std::fs::write(&summary, r#"{"status":"pass"}"#).expect("seed stale summary");
+        std::fs::write(&outcomes, r#"{"outcomes":[]}"#).expect("seed stale outcomes");
+        assert!(summary.exists() && outcomes.exists(), "precondition — both stale");
+
+        clear_stale_summary(dir.path()).expect("clear must succeed");
+
+        assert!(!summary.exists(), "stale summary must be removed");
+        assert!(!outcomes.exists(), "stale outcomes.json must be removed");
+        // The mutants.out/ directory itself MAY remain (cargo-mutants
+        // recreates it as needed); only the verdict file is the
+        // authority-leaking artefact.
+    }
+
+    #[test]
+    fn clear_stale_summary_handles_missing_mutants_out_directory() {
+        // The fresh-checkout case: nothing on disk yet. Both files
+        // absent must not error.
+        let dir = tempfile::tempdir().expect("tmpdir");
+        assert!(!dir.path().join("mutants-summary.json").exists());
+        assert!(!dir.path().join("mutants.out").exists());
+
+        clear_stale_summary(dir.path()).expect("must succeed on fresh checkout");
     }
 
     // ---- workspace member / feature discovery -------------------------------
