@@ -156,6 +156,35 @@ exclude_re = [
     # mutation lane cannot enable `canary-bug` anyway without the
     # baseline's `ReconcilerIsPure` invariant flipping to FAIL.
     "replace && with \\|\\| in evaluate_reconciler_is_pure",
+
+    # Rule 7 — function-body replacement with `Default::default()`.
+    # cargo-mutants' default operator synthesises three replacement
+    # bodies for any function returning `Result<T, E>`: `Ok(T::default())`,
+    # `Err(E::default())`, and `T::default()` for plain returns.
+    # Phase 1 deliberately avoids `Default` impls on domain types
+    # (newtypes per `.claude/rules/development.md` §STRICT-by-default,
+    # `thiserror` enums for errors, sum types modelling business state),
+    # so each of those replacements fails to compile with
+    # `error[E0277]: the trait bound X: Default is not satisfied`.
+    # cargo-mutants reports them as UNVIABLE — which the gate (correctly)
+    # treats as "no quality signal" rather than vacuous PASS.
+    #
+    # The `skip_calls = ["Default::default"]` setting below is the wrong
+    # knob for this: `skip_calls` suppresses mutation of source-level
+    # CALLS to `Default::default()` (per https://mutants.rs/skip_calls.html),
+    # not the operator that synthesises `Default::default()` as a
+    # replacement. The right knob for the synthesised replacement is
+    # description-regex exclusion at generation time.
+    #
+    # Match the three description shapes cargo-mutants emits:
+    #   - "replace <fn> -> <T> with Default::default()"
+    #   - "replace <fn> -> Result<...> with Ok(Default::default())"
+    #   - "replace <fn> -> Result<...> with Err(Default::default())"
+    # A single regex covers all three — `Default::default` is unique
+    # to the synthesised replacement bodies and never appears in
+    # legitimate mutation descriptions for arithmetic flips,
+    # comparison flips, or `Vec::new()`/`()` body replacements.
+    "Default::default",
 ]
 
 # ---------------------------------------------------------------------------
@@ -184,23 +213,15 @@ additional_cargo_args = ["--locked"]
 # cannot produce viable mutants for.
 # ---------------------------------------------------------------------------
 #
-# `skip_calls` suppresses cargo-mutants' replacement operators by the
-# call expression they would synthesise — see https://mutants.rs/skip_calls.html.
+# `skip_calls` suppresses cargo-mutants from MUTATING source-level CALLS
+# to a particular function — see https://mutants.rs/skip_calls.html. It
+# is NOT the knob for suppressing the operator that synthesises
+# `Default::default()` as a replacement body; that lives in `exclude_re`
+# above (Rule 7).
 #
-# `Default::default` — Phase 1 deliberately avoids `Default` impls on
-# domain types (newtypes per `.claude/rules/development.md` §STRICT-by-default,
-# `thiserror` enums for errors, sum types modelling business state).
-# cargo-mutants' default operator "replace function body with
-# `Default::default()`" therefore produces `error[E0277]: the trait
-# bound X: Default is not satisfied` for almost every site, surfacing
-# in CI as `WARN No mutants were viable: perhaps there is a problem
-# with building in a scratch directory` and (formerly) a vacuous PASS.
-# Suppressing the operator at generation time stops cargo-mutants
-# spending the per-mutant build budget on guaranteed-unviable rustc
-# rejections. Re-evaluate when this codebase grows broad `Default`
-# impls (Phase 2+ if a domain type genuinely has a sensible identity).
-#
-# Other operators (`replace body with ()`, `replace body with
-# Vec::new()`, arithmetic flips, comparison flips, etc.) remain
-# enabled — those are the ones the test suite is supposed to kill.
+# Kept for now because the entry has historically been documented as
+# the Default-suppression rule. Removing it without auditing every CI
+# run that referenced "Rule 7 — Default" risks losing institutional
+# context. Re-evaluate during the next mutants-toml audit; the actual
+# operator suppression now lives in `exclude_re` above.
 skip_calls = ["Default::default"]
