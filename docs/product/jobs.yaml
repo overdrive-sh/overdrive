@@ -109,6 +109,30 @@ jobs:
     served_by_phase: 1
     status: active
 
+  - id: J-OPS-003
+    title: "Run my actual workload on the walking-skeleton control plane and trust the platform to converge to the declared replica count"
+    situation: >
+      When I, an Overdrive platform engineer, submit a process job
+      through the walking-skeleton control plane on my single-node dev
+      host (control plane and worker co-located on one machine),
+    motivation: >
+      I want the platform to schedule the job onto the local host, start
+      a real OS process under cgroup-isolated supervision, and converge
+      the running set to the declared replica count — including
+      restarting on crash and stopping cleanly on `overdrive job stop`
+      — without me having to babysit the process or invent ad-hoc
+      supervision,
+    outcome: >
+      so the §18 reconciler primitive moves from "registered and idle"
+      to "actively converging declared intent into running workloads",
+      the workload-versus-control-plane cgroup split protects platform
+      responsiveness under workload pressure, and `alloc status` honestly
+      reflects whether each allocation is Pending (with a reason),
+      Running, Draining, Terminated, or Failed (with backoff state).
+    source: whitepaper §6 (Process driver), §18 (Built-in Reconcilers — Job lifecycle), §4 (Workload isolation on co-located nodes); phase-1-first-workload scope
+    served_by_phase: 1
+    status: active
+
 changelog:
   - date: 2026-04-21
     change: Initial job register for phase-1-foundation DISCUSS wave.
@@ -117,3 +141,15 @@ changelog:
       Added J-OPS-002 for phase-1-control-plane-core — the
       engineer-facing counterpart of J-PLAT-001/2/3, which cover the
       DST-facing walking-skeleton outcomes.
+  - date: 2026-04-27
+    change: >
+      Added J-OPS-003 for phase-1-first-workload — the execution-layer
+      counterpart of J-OPS-002. J-OPS-002 covered "platform commits
+      things"; J-OPS-003 covers "platform runs things and converges."
+  - date: 2026-04-27
+    change: >
+      Tightened J-OPS-003 to single-node phrasing per scope correction
+      — Phase 1 has exactly one local node (control plane and worker
+      co-located on the same machine); no operator-facing node
+      registration verb. Multi-node, multi-region, and node
+      registration are explicit non-goals for Phase 1.

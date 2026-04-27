@@ -1,0 +1,467 @@
+schema_version: 1
+
+# Journey extension for phase-1-first-workload.
+#
+# This is NOT a new journey. It EXTENDS
+# `docs/product/journeys/submit-a-job.yaml` (the canonical product-level
+# journey landed by phase-1-control-plane-core) by filling in the empty
+# states that existed at step 4 once the scheduler, process driver,
+# job-lifecycle reconciler, and cgroup isolation land. The original four
+# steps are inherited unchanged; new steps capture what becomes
+# observable when an allocation actually starts running.
+#
+# Phase 1 is SINGLE-NODE: control plane and worker run co-located on
+# the same machine. There is exactly one node — the local host — and
+# it is implicit. There is NO operator-facing node-registration verb,
+# no taint, no toleration, no multi-node placement choice. The local
+# node is a precondition, not a user story.
+#
+# The persona, the goal, and the emotional arc all carry forward. The
+# only change from the perspective of an external reader of
+# `submit-a-job.yaml` is that step 4 stops needing the apologetic
+# "scheduler + drivers are next feature" tail — the rows are populated
+# with real allocation status from a real process.
+
+journey:
+  name: "Submit a job and watch it run on the walking-skeleton control plane"
+  goal: >
+    Ana, an Overdrive platform engineer, runs `overdrive job submit
+    ./payments.toml` against a local single-mode control plane on her
+    dev host (control plane and worker co-located on the same machine),
+    sees the spec committed (as before), and now sees the
+    job-lifecycle reconciler converge: the scheduler picks the local
+    node, the process driver starts a real OS process inside a workload
+    cgroup scope, `overdrive alloc status` shows a `Running`
+    allocation, and the control plane's own resource budget is
+    structurally protected from the workload by cgroup isolation.
+  persona: >
+    Ana, Overdrive platform engineer (same persona as the original
+    submit-a-job journey and the phase-1-foundation trust-the-sim
+    journey). She is now operating against a single-node control plane
+    that includes a real driver, not a stub.
+
+  emotional_arc:
+    start: "Curious — 'phase-1-control-plane-core gave me a CLI that echoes my submission honestly. Will the empty states actually fill in once a workload runs?'"
+    middle: "Focused then confident — scheduler picks the local host, driver starts a process, alloc_status flips to Running. Each transition deposits a small win."
+    end: "Trusting — the platform converges to the desired replica count, restarts a crashed process without prompting, and stays responsive to operator commands even when the workload is bursting CPU on the same machine."
+
+  preconditions:
+    - >
+      Phase 1 single-node topology: the control plane and worker are
+      co-located on one machine. Exactly one row exists in the
+      `node_health` table (the local host); the server writes it at
+      startup as an implementation detail. No operator action is
+      required to "add" or "register" a node, and no CLI verb exists
+      for either.
+    - >
+      Multi-node, multi-region, taints, and tolerations are explicit
+      Phase 1 non-goals. They land in a later phase together with real
+      Raft and the ability to choose between distinct hosts.
+
+  inheritance:
+    base_journey: "docs/product/journeys/submit-a-job.yaml"
+    inherited_steps:
+      - id: 1
+        name: "Submit a job"
+        change: "unchanged — same `overdrive job submit ./payments.toml`."
+      - id: 2
+        name: "Commit to intent"
+        change: "unchanged — same IntentStore::put through LocalStore."
+      - id: 3
+        name: "Reconciler primitive alive and idling"
+        change: >
+          extended — the reconciler list now includes
+          `job-lifecycle` alongside `noop-heartbeat`. Broker counters
+          start moving as the lifecycle reconciler is evaluated against
+          the newly committed Job.
+      - id: 4
+        name: "Inspect allocations via CLI"
+        change: >
+          materially extended — the empty-state tail
+          ("scheduler + drivers are next feature") is replaced with
+          real `Running` allocation rows. The honest empty state still
+          appears on a fresh control plane before any job has been
+          committed; it is no longer a feature-roadmap apology.
+
+steps:
+
+  - id: 1
+    name: "Submit a job (inherited from submit-a-job.yaml)"
+    inherited: true
+    inheritance_note: >
+      Identical to step 1 of the base journey. Phase 1 keeps the Job
+      aggregate exactly as shipped by phase-1-control-plane-core; no
+      `tolerations` field is added in this feature.
+    command: "overdrive job submit ./payments.toml"
+
+  - id: 2
+    name: "Commit to intent (inherited from submit-a-job.yaml)"
+    inherited: true
+    inheritance_note: "Identical to step 2 of the base journey."
+    command: "(internal — observable via step 4)"
+
+  - id: 3
+    name: "Reconciler primitive alive — now with job-lifecycle"
+    command: "overdrive cluster status"
+    summary: >
+      The cluster status output adds a `job-lifecycle` reconciler row
+      alongside `noop-heartbeat`. Broker counters reflect the lifecycle
+      reconciler's work — `dispatched` increments as the broker drains
+      evaluations queued for the newly-submitted job. The pure-function
+      contract still holds (DST `ReconcilerIsPure` invariant covers it).
+
+    tui_mockup: |
+      $ overdrive cluster status
+      Mode:               single
+      Region:             default
+      Reconcilers:
+        - noop-heartbeat
+        - job-lifecycle      <-- new in this feature
+      Broker:
+        Queued:             0
+        Cancelled:          0
+        Dispatched:         2  <-- non-zero now: lifecycle ran for `payments`
+
+    shared_artifacts:
+      - name: "reconciler_registry"
+        source: "control-plane ReconcilerRuntime::registered() — same source as in phase-1-control-plane-core; this feature adds one entry"
+        displayed_as: "${reconciler_registry}"
+        consumers:
+          - "CLI cluster status output"
+          - "DST invariant: at_least_one_reconciler_registered (still passes)"
+
+    emotional_state:
+      entry: "Focused — 'is the lifecycle reconciler actually wired and running?'"
+      exit: "Confident — 'two reconcilers registered, broker dispatched > 0. The contract holds.'"
+
+    integration_checkpoint: |
+      `AnyReconciler::JobLifecycle` variant lands; `AnyReconcilerView::JobLifecycle` lands; the new variant is registered in `run_server_with_obs()` alongside `noop_heartbeat()`.
+
+    failure_modes:
+      - "Lifecycle reconciler is registered but never evaluated because no Job has been committed yet — broker `dispatched` stays at zero. Acceptable empty state on a fresh cluster."
+
+    gherkin: |
+      Scenario: cluster status surfaces the job-lifecycle reconciler
+        Given a control plane is running in single mode
+        When Ana runs `overdrive cluster status`
+        Then the Reconcilers section lists both `noop-heartbeat` and `job-lifecycle`
+        And the Broker section reports queued / cancelled / dispatched counters
+
+  # Step 4 from the base journey is materially extended — it now carries
+  # real allocation rows when a job has been submitted. The empty state
+  # still appears (with different copy) when no job has been committed.
+  - id: 4
+    name: "Inspect allocations via CLI — now with running rows"
+    command: "overdrive alloc status --job payments"
+    summary: >
+      DescribeJob still returns the spec digest byte-identical (this
+      property is inherited unchanged). What's new: the `Allocations`
+      section now lists real `AllocStatusRow` records with `state =
+      Running`, the local host's `node_id`, and a stable `alloc_id`.
+      The honest empty state is preserved for the no-job-submitted
+      case — but the apologetic "scheduler + drivers are next feature"
+      tail is gone.
+
+    tui_mockup: |
+      $ overdrive alloc status --job payments
+      Job ID:             payments
+      Spec digest:        sha256:7f3a9b12...
+      Replicas (desired): 1
+      Allocations:
+        ALLOC ID         NODE      STATE      RESOURCES           STARTED
+        a1b2c3...        local     Running    2000mCPU / 4 GiB    2026-04-27T10:15:32Z
+
+    shared_artifacts:
+      - name: "alloc_id"
+        source: "overdrive-core::aggregate::Allocation::id (AllocationId newtype) emitted by the scheduler in Action::StartAllocation"
+        displayed_as: "${alloc_id}"
+        consumers:
+          - "Reconciler emits in Action::StartAllocation"
+          - "Action shim passes to Driver::start"
+          - "ProcessDriver creates cgroup scope at workloads.slice/<alloc_id>.scope"
+          - "ObservationStore alloc_status_rows.alloc_id"
+          - "CLI alloc status output"
+      - name: "alloc_state"
+        source: "overdrive-core::traits::driver::AllocationState (Pending / Running / Draining / Terminated / Failed)"
+        displayed_as: "${alloc_state}"
+        consumers:
+          - "Driver::status return value"
+          - "Action shim writes into AllocStatusRow"
+          - "Lifecycle reconciler reads from State.actual"
+          - "CLI alloc status output"
+      - name: "spec_digest"
+        source: "ContentHash::of(rkyv_archived_job_bytes) — same as inherited from base journey"
+        displayed_as: "${spec_digest}"
+        consumers:
+          - "CLI alloc status output (unchanged from base journey)"
+
+    emotional_state:
+      entry: "Focused — 'will the loop close end-to-end? Will I see a real Running row?'"
+      exit: "Trusting — 'scheduler picked the local node, driver started the process, the allocation is Running. The platform converges.'"
+
+    integration_checkpoint: |
+      The lifecycle reconciler emitted `Action::StartAllocation`, the runtime action shim consumed it, ProcessDriver started a real process inside `overdrive.slice/workloads.slice/<alloc_id>.scope`, and the action shim wrote `AllocStatusRow { state: Running }` to ObservationStore. All four integration points must be wired for the journey to close.
+
+    failure_modes:
+      - "Job demands more resources than the local node has free (e.g., 10 GiB on a 4 GiB host) — alloc_status shows an explicit `Pending: no node has capacity (...)` row, not a silent missing allocation."
+      - "ProcessDriver::start fails (binary missing, permission denied) — alloc_status shows `Failed: <reason>`, the lifecycle reconciler retries per its libSQL-tracked backoff budget."
+      - "Process exits non-zero after starting — Driver::status reports `Terminated`, lifecycle reconciler emits Action::StartAllocation again to converge to declared replica count."
+
+    gherkin: |
+      Scenario: A submitted job with one replica reaches Running on the local node
+        Given a control plane in single mode (one local node with capacity 4000 mCPU / 8 GiB)
+        When Ana runs `overdrive job submit ./payments.toml`
+        And the job-lifecycle reconciler converges
+        Then `overdrive alloc status --job payments` lists exactly one allocation
+        And the allocation `state` is `Running`
+        And the spec digest equals the digest Ana computes locally from `payments.toml` under the same rkyv canonical path
+
+      Scenario: A job whose resource request exceeds capacity stays Pending with an honest reason
+        Given a control plane whose local node has 4 GiB total memory
+        And a Job spec requesting 10 GiB
+        When Ana submits the spec
+        Then `overdrive alloc status --job <id>` shows zero `Running` rows
+        And the output includes an explicit `Pending: no node has capacity (...)` row naming the requested-vs-free numbers
+
+  # New step: convergence after process death.
+  - id: 5
+    name: "Recover from a process crash"
+    command: "(observable via repeated `overdrive alloc status`)"
+    summary: >
+      The operator (or chaos) kills the workload process directly
+      (e.g. `kill -9 <pid>`). The ProcessDriver's status method (called
+      by the action shim on the next reconciler tick) reports the
+      allocation as `Terminated`. The lifecycle reconciler observes
+      `actual.replicas_running = 0 < desired = 1`, emits
+      `Action::StartAllocation` again, the action shim calls
+      `ProcessDriver::start`, and the new allocation lands at `Running`.
+      The lifecycle reconciler tracks restart count in its private
+      libSQL DB so a runaway crash loop can be bounded by a backoff
+      policy.
+
+    tui_mockup: |
+      # Operator kills the process directly
+      $ kill -9 12345
+
+      # Within seconds, alloc_status reflects the failure...
+      $ overdrive alloc status --job payments
+      Job ID:             payments
+      Allocations:
+        ALLOC ID         NODE      STATE         RESOURCES           STARTED
+        a1b2c3...        local     Terminated    2000mCPU / 4 GiB    2026-04-27T10:15:32Z
+
+      # ...and the next tick converges back to Running with a fresh alloc_id
+      $ overdrive alloc status --job payments
+      Job ID:             payments
+      Allocations:
+        ALLOC ID         NODE      STATE      RESOURCES           STARTED
+        d4e5f6...        local     Running    2000mCPU / 4 GiB    2026-04-27T10:15:48Z
+
+    shared_artifacts:
+      - name: "restart_count"
+        source: "lifecycle reconciler private libSQL — `view: &JobLifecycleView` field; written via NextView at end of reconcile"
+        displayed_as: "(internal — visible via Phase 2+ telemetry)"
+        consumers:
+          - "Lifecycle reconciler's own backoff logic"
+      - name: "alloc_state"
+        source: "(see step 4) — transitions Running → Terminated → Running"
+        displayed_as: "${alloc_state}"
+        consumers:
+          - "CLI alloc status output across the convergence window"
+
+    emotional_state:
+      entry: "Curious — 'will it actually restart, or am I babysitting this thing?'"
+      exit: "Trusting — 'the platform converged on its own. I didn't have to type anything.'"
+
+    integration_checkpoint: |
+      The reconciler runtime calls Driver::status periodically (or via a future reconciler-driven trigger), the action shim updates AllocStatusRow on state transitions, the lifecycle reconciler reads `actual` (now reflecting Terminated), and emits a fresh StartAllocation. The cycle is bounded by libSQL-tracked backoff.
+
+    failure_modes:
+      - "Process crashes on every start — backoff in lifecycle reconciler's libSQL view caps restart attempts; alloc_status shows `Failed (backoff exhausted): <reason>`."
+      - "Driver::status returns `Unknown` (e.g. PID file gone) — action shim treats as `Terminated` for convergence purposes; reconciler retries."
+
+    gherkin: |
+      Scenario: A killed workload process is restarted by the lifecycle reconciler
+        Given a job `payments` is `Running` with 1 replica
+        When the workload process is killed externally (SIGKILL)
+        Then within N reconciler ticks `overdrive alloc status --job payments` shows the prior allocation as `Terminated`
+        And shortly after, a new allocation with a fresh `alloc_id` appears in `Running` state
+
+      Scenario: A repeatedly-crashing process triggers backoff
+        Given a job whose binary exits with status 1 immediately
+        When the lifecycle reconciler attempts to start it M times in succession
+        Then the reconciler's private libSQL view records the restart count
+        And after the configured ceiling, the allocation enters `Failed (backoff exhausted)` state
+        And the reconciler stops attempting to restart it until external intervention
+
+  # New step: control-plane isolation under workload pressure.
+  - id: 6
+    name: "Control-plane stays responsive under workload pressure"
+    command: "(observable via `overdrive cluster status` while a workload bursts CPU)"
+    summary: >
+      A workload that bursts to 100% CPU on the same machine cannot
+      starve the control plane, because the control plane lives in
+      `overdrive.slice/control-plane.slice/` with reserved budget and
+      the workload lives in `overdrive.slice/workloads.slice/<id>.scope`.
+      The kernel's cgroups v2 bandwidth controller enforces the split.
+      `overdrive cluster status` continues to respond at single-digit
+      milliseconds even when the workload is consuming all of its
+      allocated CPU shares. Phase 1 is single-node — the workload and
+      the control plane are necessarily on the same host, which is
+      exactly the case the cgroup split exists to defend.
+
+    tui_mockup: |
+      # Workload is bursting CPU on the same host
+      $ stress --cpu 4 &     # inside the workload
+      $ time overdrive cluster status
+      Mode:               single
+      ...
+      real    0m0.012s    <-- control plane still snappy
+
+    shared_artifacts:
+      - name: "cgroup_path"
+        source: "ProcessDriver::start derives `overdrive.slice/workloads.slice/<alloc_id>.scope`; control-plane process enrolled in `overdrive.slice/control-plane.slice/` at server boot"
+        displayed_as: "(internal — visible via `systemctl status` or `cat /sys/fs/cgroup/.../cgroup.procs`)"
+        consumers:
+          - "ProcessDriver::start (writes the workload scope)"
+          - "Server boot (writes the control-plane slice and enrolls itself)"
+          - "Operator debug via host tooling"
+
+    emotional_state:
+      entry: "Skeptical — 'does the cgroup story actually hold under real pressure, or only on paper?'"
+      exit: "Trusting — 'CLI still answers fast. The kernel is enforcing the split, not Overdrive.'"
+
+    integration_checkpoint: |
+      Server boot must enrol the running process into the control-plane slice; ProcessDriver::start must place each new workload into a uniquely-named workload scope; the slice hierarchy must be created if it doesn't exist (one-time bootstrap).
+
+    failure_modes:
+      - "Server is run as a non-root user without cgroup v2 delegation — slice creation fails. Server logs an explicit `error: cgroup v2 delegation required (run via systemd unit, or grant delegation to UID)` and refuses to start."
+      - "cgroup v2 not available (cgroup v1 host) — server logs an explicit incompatibility error and refuses to start."
+
+    gherkin: |
+      Scenario: Control plane stays responsive while a workload bursts CPU
+        Given a job `payments` is `Running` on the same host as the control plane
+        And the control plane is enrolled in `overdrive.slice/control-plane.slice/`
+        And the workload is enrolled in `overdrive.slice/workloads.slice/<alloc_id>.scope`
+        When the workload bursts to 100% CPU
+        Then `overdrive cluster status` returns within 100 ms on localhost
+        And the control plane's CPU budget is not starved
+
+      Scenario: Server refuses to start without cgroup v2 delegation
+        Given a host with cgroup v2 not delegated to the running UID
+        When the operator runs `overdrive serve`
+        Then the server logs an actionable error explaining cgroup delegation
+        And exits with a non-zero code
+
+  - id: 7
+    name: "Stop the job and watch the allocation drain"
+    command: "overdrive job stop payments"
+    summary: >
+      The CLI calls a (DESIGN-named) stop endpoint that updates the Job's
+      desired-replicas-or-terminal-state intent. The lifecycle reconciler
+      observes desired=0 (or a `Terminated` desired state, DESIGN picks
+      the model), emits `Action::StopAllocation`, the action shim calls
+      `ProcessDriver::stop`, the workload exits gracefully, and
+      `alloc_status` shows the allocation transitioning Running → Draining
+      → Terminated. The cgroup scope is removed.
+
+    tui_mockup: |
+      $ overdrive job stop payments
+      Accepted. Stop requested for job `payments`.
+
+      $ overdrive alloc status --job payments
+      Job ID:             payments
+      Allocations:
+        ALLOC ID         NODE      STATE         RESOURCES           STOPPED
+        d4e5f6...        local     Terminated    2000mCPU / 4 GiB    2026-04-27T10:18:01Z
+
+    shared_artifacts:
+      - name: "alloc_state"
+        source: "(same as step 4) — now transitions Running → Draining → Terminated"
+        displayed_as: "${alloc_state}"
+        consumers:
+          - "CLI alloc status output"
+
+    emotional_state:
+      entry: "Focused — 'when I say stop, will it actually clean up?'"
+      exit: "Trusting — 'process is gone, cgroup scope is gone, alloc is Terminated. Clean shutdown.'"
+
+    integration_checkpoint: |
+      ProcessDriver::stop sends SIGTERM, waits a configurable grace, then SIGKILL if needed; cgroup scope is removed once the process exits. The action shim writes the terminal AllocStatusRow.
+
+    failure_modes:
+      - "Process ignores SIGTERM — driver escalates to SIGKILL after grace; alloc transitions Draining → Terminated regardless."
+      - "User stops a job that doesn't exist — handler returns 404 Not Found; alloc_status is unchanged."
+
+    gherkin: |
+      Scenario: Stopping a Running job drives it to Terminated cleanly
+        Given a job `payments` is `Running`
+        When Ana runs `overdrive job stop payments`
+        Then within N reconciler ticks the allocation transitions Running → Draining → Terminated
+        And the workload's cgroup scope is removed from the host
+        And the allocation appears in `Terminated` state in `alloc status` output
+
+integration_validation:
+
+  shared_artifact_consistency:
+    - artifact: "alloc_id"
+      must_match_across: [4, 5, 6, 7]
+      failure_message: >
+        alloc_id flows from the scheduler's StartAllocation action
+        through the action shim into the Driver::start call, into
+        the cgroup scope name, and into the AllocStatusRow.
+        Any drift means the CLI displays an alloc_id that doesn't
+        correspond to a real cgroup scope or process — a multi-hop
+        debugging nightmare.
+
+    - artifact: "spec_digest"
+      must_match_across: [1, 4]
+      failure_message: >
+        Inherited from base journey — same property still holds.
+        The CLI must compute the same digest the server computed.
+
+    - artifact: "alloc_state"
+      must_match_across: [4, 5, 7]
+      failure_message: >
+        AllocationState (Pending / Running / Draining / Terminated /
+        Failed) is the join term between Driver::status, the action
+        shim's writes to AllocStatusRow, the lifecycle reconciler's
+        reads of State.actual, and the CLI display. One enum, one
+        source of truth.
+
+  schema_evolution_notes: >
+    This feature adds NO fields to the existing `Node` or `Job`
+    aggregates. Phase 1 is single-node; the `Node::taints` and
+    `Job::tolerations` fields originally proposed in this wave were
+    pulled per the 2026-04-27 scope correction (see
+    `wave-decisions.md`). The aggregate roundtrip proptest from
+    `phase-1-control-plane-core` continues to pass byte-identical with
+    no extension.
+
+related_features:
+  - id: phase-1-control-plane-core
+    role: "Provides the inherited base journey (steps 1-4 unchanged) and every prerequisite (aggregates, REST API, IntentStore commit, reconciler primitive, CLI handlers)."
+  - id: phase-1-first-workload
+    role: "This feature. Lands the scheduler, process driver, job-lifecycle reconciler, and control-plane cgroup isolation that fill the empty states in step 4."
+
+changelog:
+  - date: 2026-04-27
+    feature: phase-1-first-workload
+    change: >
+      Initial journey extension. Inherits steps 1-4 from
+      `submit-a-job.yaml`; adds steps 5 (recover from crash), 6
+      (control plane stays responsive), and 7 (stop the job). Marks
+      step 3's reconciler registry as extended (job-lifecycle now
+      alongside noop-heartbeat) and step 4 as materially extended
+      (real Running rows replacing the apologetic empty-state tail).
+  - date: 2026-04-27
+    feature: phase-1-first-workload
+    change: >
+      Scope correction — Phase 1 is single-node. Removed the prior
+      "step 0 (register a host node)" entirely; the local node is a
+      precondition, not a step. Removed every reference to taints,
+      tolerations, the `control-plane:NoSchedule` default, and
+      multi-node placement choice. Removed the
+      `Node::taints` / `Job::tolerations` aggregate field plumbing.
+      Renumbered remaining steps to 1-7 with the inherited 1-4 carried
+      over from the base journey.

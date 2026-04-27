@@ -98,3 +98,12 @@ changelog:
   - date: 2026-04-23
     feature: phase-1-control-plane-core
     change: Initial product-level journey for the walking-skeleton submit flow.
+  - date: 2026-04-27
+    feature: phase-1-first-workload
+    change: >
+      Extension landed in `docs/feature/phase-1-first-workload/discuss/journey-submit-a-job-extended.yaml`.
+      Steps 1-4 unchanged here; step 4's empty allocation rows become populated by the
+      execution-layer feature. New steps for crash recovery, control-plane responsiveness
+      under workload pressure, and stop-and-drain live in the extension file. Phase 1 is
+      single-node — the local host is the only node and is implicit; no operator-facing
+      node-registration step.
