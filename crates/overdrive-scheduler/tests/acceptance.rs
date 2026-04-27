@@ -13,12 +13,16 @@
 #![allow(clippy::expect_fun_call)]
 #![allow(clippy::unwrap_used)]
 
-// SCAFFOLD: true — phase-1-first-workload DISTILL. The per-scenario
-// modules below all panic with the RED-scaffold message until DELIVER
-// implements the body.
 mod acceptance {
-    mod first_fit_happy_path;
-    mod determinism;
+    // Shared generators / fixtures used across the per-scenario modules.
+    // Per the RED→GREEN crafter discipline, the scenarios share a single
+    // proptest strategy file rather than duplicating valid_label / arb_job
+    // boilerplate (the same pattern overdrive-core uses in
+    // tests/acceptance/aggregate_roundtrip.rs).
+    mod common;
+
     mod capacity_accounting;
+    mod determinism;
     mod empty_node_set;
+    mod first_fit_happy_path;
 }
