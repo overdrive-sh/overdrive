@@ -31,7 +31,7 @@
 use std::time::Duration;
 
 use overdrive_core::id::NodeId;
-use overdrive_core::reconciler::{AnyReconciler, AnyReconcilerView, State, TickContext};
+use overdrive_core::reconciler::{AnyReconciler, AnyReconcilerView, AnyState, TickContext};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::entropy::Entropy;
 use overdrive_core::traits::intent_store::IntentStore;
@@ -849,8 +849,16 @@ pub fn evaluate_reconciler_is_pure(
     // exercised here — `(actions, next_view)` are asserted as paired
     // but separate bit-identical comparisons so a mutation that drops
     // either side is caught.
-    let desired = State;
-    let actual = State;
+    //
+    // Per ADR-0021 (step 02-01), `desired`/`actual` are now typed
+    // `&AnyState` rather than the prior `&State, &State` placeholder
+    // pair. Phase 1 reconcilers (`NoopHeartbeat`,
+    // `HarnessNoopHeartbeat`) use `AnyState::Unit` because their
+    // `Reconciler::State = ()`; the `JobLifecycle` reconciler's
+    // `AnyState::JobLifecycle(...)` arm becomes reachable in step
+    // 02-03 when the runtime tick loop ships.
+    let desired = AnyState::Unit;
+    let actual = AnyState::Unit;
     let view = AnyReconcilerView::Unit;
     let tick = build_tick_context(clock);
 

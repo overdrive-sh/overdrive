@@ -72,7 +72,7 @@
 //! ```
 //! use overdrive_core::reconciler::{
 //!     Action, HydrateError, LibsqlHandle, Reconciler, ReconcilerName,
-//!     State, TargetResource, TickContext,
+//!     TargetResource, TickContext,
 //! };
 //!
 //! struct HelloReconciler {
@@ -89,6 +89,11 @@
 //! }
 //!
 //! impl Reconciler for HelloReconciler {
+//!     // Per ADR-0021, every reconciler picks its own `State`
+//!     // projection. A reconciler with no meaningful desired/actual
+//!     // shape picks `()`; the first real reconciler (`JobLifecycle`)
+//!     // picks `JobLifecycleState`.
+//!     type State = ();
 //!     // Phase 1 reconcilers carry no private memory — View is ().
 //!     // Phase 2+ authors declare a struct decoded from libSQL rows
 //!     // inside `hydrate`.
@@ -112,8 +117,8 @@
 //!     // write. The signature IS the contract.
 //!     fn reconcile(
 //!         &self,
-//!         _desired: &State,
-//!         _actual: &State,
+//!         _desired: &Self::State,
+//!         _actual: &Self::State,
 //!         view: &Self::View,
 //!         tick: &TickContext,
 //!     ) -> (Vec<Action>, Self::View) {
@@ -278,10 +283,22 @@ pub enum HydrateError {
 /// Compile-time enforcement: the acceptance test
 /// `reconciler_trait_signature_is_synchronous_no_async_no_clock_param`
 /// pins the signature via an
-/// `fn(&R, &State, &State, &R::View, &TickContext) -> (Vec<Action>, R::View)`
-/// type assertion. A regression that makes `reconcile` `async fn` or
-/// adds a `&dyn Clock` parameter fails that test at compile time.
+/// `fn(&R, &R::State, &R::State, &R::View, &TickContext) -> (Vec<Action>, R::View)`
+/// type assertion. A regression that makes `reconcile` `async fn`,
+/// adds a `&dyn Clock` parameter, or reverts the per-reconciler typed
+/// `State` associated type (ADR-0021) fails that test at compile time.
 pub trait Reconciler: Send + Sync {
+    /// Author-declared projection of the reconciler's `desired` /
+    /// `actual` cluster state. Per ADR-0021, every reconciler picks
+    /// its own typed projection rather than sharing a single
+    /// placeholder — the runtime owns hydrate-desired / hydrate-actual
+    /// and constructs the matching [`AnyState`] variant on each tick.
+    ///
+    /// Reconcilers with no meaningful projection pick `type State =
+    /// ()`; the first real reconciler (`JobLifecycle`) picks
+    /// `type State = JobLifecycleState`.
+    type State: Send + Sync;
+
     /// Author-declared projection of the reconciler's private memory.
     /// The runtime diffs the returned `NextView` against this view and
     /// persists the delta — reconcilers never write libSQL directly.
@@ -335,35 +352,23 @@ pub trait Reconciler: Send + Sync {
     /// twin-invocation check against the full reconciler registry.
     fn reconcile(
         &self,
-        desired: &State,
-        actual: &State,
+        desired: &Self::State,
+        actual: &Self::State,
         view: &Self::View,
         tick: &TickContext,
     ) -> (Vec<Action>, Self::View);
 }
 
 // ---------------------------------------------------------------------------
-// State placeholder
-// ---------------------------------------------------------------------------
-
-/// Opaque placeholder for the `desired` / `actual` state handed to a
-/// reconciler.
-///
-/// Phase 2+ replaces with the real shape when a reconciler dereferences
-/// it; Phase 1 reconcilers (just `NoopHeartbeat`) treat `State` as
-/// opaque.
-#[derive(Debug, Default)]
-pub struct State;
-
-// ---------------------------------------------------------------------------
 // AnyState enum — per-reconciler typed `desired`/`actual` projection
 // ---------------------------------------------------------------------------
 
-/// Sum of every `desired`/`actual` shape consumed by a registered
-/// reconciler. Per ADR-0021 (the State-shape decision), this enum
-/// mirrors the existing `AnyReconciler` and `AnyReconcilerView`
-/// dispatch shape — every reconciler kind has a typed `State`, a
-/// typed `View`, and is dispatched by enum match.
+/// Sum of every `desired`/`actual` shape consumed by a registered reconciler.
+///
+/// Per ADR-0021 (the State-shape decision), this enum mirrors the
+/// existing `AnyReconciler` and `AnyReconcilerView` dispatch shape —
+/// every reconciler kind has a typed `State`, a typed `View`, and is
+/// dispatched by enum match.
 ///
 /// Phase 1 ships two variants:
 ///
@@ -408,7 +413,7 @@ pub struct JobLifecycleState {
     pub job: Option<Job>,
     /// Registered nodes with their declared capacity. Drives the
     /// scheduler input map. Phase 1 single-node has exactly one
-    /// entry; the BTreeMap discipline holds at N=1.
+    /// entry; the `BTreeMap` discipline holds at N=1.
     pub nodes: BTreeMap<NodeId, Node>,
     /// Current allocations belonging to this job, keyed by alloc id.
     /// Read from `ObservationStore::alloc_status_rows` filtered by
@@ -504,7 +509,7 @@ pub enum Action {
     /// scenarios (per US-03 Domain Example 2).
     RestartAllocation {
         /// Allocation to restart. The action shim mints a fresh
-        /// alloc_id for the replacement.
+        /// `alloc_id` for the replacement.
         alloc_id: AllocationId,
     },
 }
@@ -728,6 +733,10 @@ impl NoopHeartbeat {
 }
 
 impl Reconciler for NoopHeartbeat {
+    // Per ADR-0021, reconcilers with no meaningful projection pick
+    // `type State = ()`. `NoopHeartbeat` ignores `desired`/`actual`
+    // entirely and always emits `Action::Noop`.
+    type State = ();
     type View = ();
 
     fn name(&self) -> &ReconcilerName {
@@ -744,8 +753,8 @@ impl Reconciler for NoopHeartbeat {
 
     fn reconcile(
         &self,
-        _desired: &State,
-        _actual: &State,
+        _desired: &Self::State,
+        _actual: &Self::State,
         _view: &Self::View,
         _tick: &TickContext,
     ) -> (Vec<Action>, Self::View) {
@@ -793,6 +802,11 @@ impl HarnessNoopHeartbeat {
 
 #[cfg(feature = "canary-bug")]
 impl Reconciler for HarnessNoopHeartbeat {
+    // Per ADR-0021, reconcilers with no meaningful projection pick
+    // `type State = ()`. `HarnessNoopHeartbeat` mirrors `NoopHeartbeat`'s
+    // shape; the deliberate non-determinism lives in `reconcile`'s body,
+    // not in its signature.
+    type State = ();
     type View = ();
 
     fn name(&self) -> &ReconcilerName {
@@ -809,8 +823,8 @@ impl Reconciler for HarnessNoopHeartbeat {
 
     fn reconcile(
         &self,
-        _desired: &State,
-        _actual: &State,
+        _desired: &Self::State,
+        _actual: &Self::State,
         _view: &Self::View,
         _tick: &TickContext,
     ) -> (Vec<Action>, Self::View) {
@@ -849,7 +863,7 @@ pub enum AnyReconciler {
     /// First real (non-proof-of-life) reconciler. Converges declared
     /// replica count for a `Job`. SCAFFOLD: true — match arms in
     /// `name` / `hydrate` / `reconcile` panic with the RED-scaffold
-    /// message; DELIVER implements them against the JobLifecycle
+    /// message; DELIVER implements them against the `JobLifecycle`
     /// reconciler body.
     JobLifecycle(JobLifecycle),
 }
@@ -862,10 +876,12 @@ impl AnyReconciler {
             Self::NoopHeartbeat(r) => r.name(),
             #[cfg(feature = "canary-bug")]
             Self::HarnessNoopHeartbeat(r) => r.name(),
-            // SCAFFOLD: phase-1-first-workload DISTILL — RED arm.
-            // DELIVER wires this through the inner reconciler's
-            // canonical name field.
-            Self::JobLifecycle(_) => panic!("Not yet implemented -- RED scaffold"),
+            // SCAFFOLD: 02-02 lands the JobLifecycle reconciler body;
+            // until then the variant cannot be constructed at runtime
+            // (no production caller registers it), so the panic is
+            // unreachable. Keeping the arm preserves match
+            // exhaustiveness across the AnyReconciler enum.
+            Self::JobLifecycle(_) => panic!("Not yet implemented -- 02-02 RED scaffold"),
         }
     }
 
@@ -887,72 +903,96 @@ impl AnyReconciler {
             Self::HarnessNoopHeartbeat(r) => {
                 r.hydrate(target, db).await.map(|()| AnyReconcilerView::Unit)
             }
-            // SCAFFOLD: phase-1-first-workload DISTILL — RED arm.
-            // DELIVER reads the JobLifecycle's libSQL schema (CREATE
-            // TABLE IF NOT EXISTS plus row decode) and constructs an
-            // `AnyReconcilerView::JobLifecycle(JobLifecycleView)`.
-            Self::JobLifecycle(_) => panic!("Not yet implemented -- RED scaffold"),
+            // SCAFFOLD: 02-02 lands the JobLifecycle hydrate body;
+            // until then the variant cannot be constructed at
+            // runtime, so the panic is unreachable. Keeping the arm
+            // preserves match exhaustiveness across the AnyReconciler
+            // enum.
+            Self::JobLifecycle(_) => panic!("Not yet implemented -- 02-02 RED scaffold"),
         }
     }
 
     /// Pure compute phase — dispatches to the inner reconciler's
-    /// `reconcile`. The caller supplies the matching view variant.
+    /// `reconcile`. The caller supplies the matching state and view
+    /// variants.
     ///
     /// Variant alignment is a compile-time invariant: the dispatch
     /// `match` below is exhaustive, and every arm pairs an
-    /// `AnyReconciler` variant with its declared [`AnyReconcilerView`]
-    /// counterpart. Adding a new reconciler variant whose `View` type
-    /// does not line up with a matching `AnyReconcilerView` arm
-    /// produces a non-exhaustive-match compile error, forcing the
-    /// developer to extend the dispatch explicitly. There is no
-    /// runtime fallback — a mismatched pair cannot be constructed in
-    /// the first place.
+    /// `AnyReconciler` variant with its declared [`AnyState`] /
+    /// [`AnyReconcilerView`] counterparts. Adding a new reconciler
+    /// variant whose `State` or `View` type does not line up with a
+    /// matching `AnyState` / `AnyReconcilerView` arm produces a
+    /// non-exhaustive-match compile error, forcing the developer to
+    /// extend the dispatch explicitly. There is no runtime fallback —
+    /// a mismatched triple cannot be constructed in the first place
+    /// once the runtime's hydrate-desired / hydrate-actual paths are
+    /// wired (Phase 02-02+).
     ///
-    /// Phase 1 has only `View = ()`, so every arm routes through
-    /// [`AnyReconcilerView::Unit`]; Phase 2+ widens the sum as new
-    /// reconcilers land.
+    /// Per ADR-0021, `state` is a single `&AnyState` parameter
+    /// (replacing the prior `&State, &State` placeholder pair). The
+    /// runtime hydrates the matching variant for both desired and
+    /// actual; under the symmetric per-reconciler model, the inner
+    /// reconciler receives two `&Self::State` references that live
+    /// inside the same `AnyState` variant.
+    ///
+    /// **Phase 02-01 caller contract**: the runtime tick loop has not
+    /// shipped yet, so callers (the sim invariant evaluator and the
+    /// runtime acceptance test) construct `AnyState::Unit` directly.
+    /// Phase 02-02 lands the action shim and `JobLifecycle::reconcile`
+    /// body; Phase 02-03 lands the runtime tick loop that builds
+    /// `AnyState::JobLifecycle(...)` from the `IntentStore` /
+    /// `ObservationStore` reads.
     #[must_use]
     pub fn reconcile(
         &self,
-        desired: &State,
-        actual: &State,
+        desired: &AnyState,
+        actual: &AnyState,
         view: &AnyReconcilerView,
         tick: &TickContext,
     ) -> (Vec<Action>, AnyReconcilerView) {
-        match (self, view) {
-            (Self::NoopHeartbeat(r), AnyReconcilerView::Unit) => {
-                let (actions, ()) = r.reconcile(desired, actual, &(), tick);
+        match (self, desired, actual, view) {
+            (
+                Self::NoopHeartbeat(r),
+                AnyState::Unit,
+                AnyState::Unit,
+                AnyReconcilerView::Unit,
+            ) => {
+                let (actions, ()) = r.reconcile(&(), &(), &(), tick);
                 (actions, AnyReconcilerView::Unit)
             }
             #[cfg(feature = "canary-bug")]
-            (Self::HarnessNoopHeartbeat(r), AnyReconcilerView::Unit) => {
-                let (actions, ()) = r.reconcile(desired, actual, &(), tick);
+            (
+                Self::HarnessNoopHeartbeat(r),
+                AnyState::Unit,
+                AnyState::Unit,
+                AnyReconcilerView::Unit,
+            ) => {
+                let (actions, ()) = r.reconcile(&(), &(), &(), tick);
                 (actions, AnyReconcilerView::Unit)
             }
-            // SCAFFOLD: phase-1-first-workload DISTILL — RED arm.
-            // ADR-0021 §1 requires the `desired`/`actual` parameters
-            // here to widen from `&State` to typed `&AnyState` —
-            // DELIVER threads that change through the trait
-            // signature, the runtime hydrate paths, and this match.
-            // The body emits StartAllocation / StopAllocation /
-            // RestartAllocation against scheduler decisions and the
-            // libSQL-tracked backoff.
-            (Self::JobLifecycle(_), AnyReconcilerView::JobLifecycle(_)) => {
-                panic!("Not yet implemented -- RED scaffold")
+            // SCAFFOLD: phase-1-first-workload step 02-01 — the
+            // typed-State widening lands here, but the JobLifecycle
+            // reconcile body (action shim, scheduler call, backoff
+            // arithmetic) is deferred to step 02-02. Constructing this
+            // arm at runtime requires the runtime tick loop (step
+            // 02-03), which does not yet exist; the panic is
+            // unreachable from any current caller.
+            (
+                Self::JobLifecycle(_),
+                AnyState::JobLifecycle(_),
+                AnyState::JobLifecycle(_),
+                AnyReconcilerView::JobLifecycle(_),
+            ) => {
+                panic!("Not yet implemented -- 02-02 RED scaffold")
             }
-            // The cross-variant branches (e.g. JobLifecycle ×
-            // AnyReconcilerView::Unit) are statically impossible
-            // once the runtime correctly hydrates the matching
-            // view kind; under RED scaffold the runtime hasn't
-            // shipped yet so the unreachable! arm catches the
-            // misalignment loudly.
-            (Self::JobLifecycle(_), AnyReconcilerView::Unit)
-            | (Self::NoopHeartbeat(_), AnyReconcilerView::JobLifecycle(_)) => {
-                panic!("Not yet implemented -- RED scaffold")
-            }
-            #[cfg(feature = "canary-bug")]
-            (Self::HarnessNoopHeartbeat(_), AnyReconcilerView::JobLifecycle(_)) => {
-                panic!("Not yet implemented -- RED scaffold")
+            // Cross-variant branches — statically impossible once the
+            // runtime correctly hydrates matching state and view kinds.
+            // The runtime tick loop ships in 02-03; until then these
+            // arms cannot be reached from any caller, but the match
+            // must remain exhaustive so a future variant addition is a
+            // compile error rather than a silent runtime panic.
+            _ => {
+                panic!("Not yet implemented -- 02-02 RED scaffold (mismatched dispatch)")
             }
         }
     }
@@ -993,6 +1033,10 @@ pub enum AnyReconcilerView {
 /// `view.next_attempt_at` (read from `tick.now`, NEVER
 /// `Instant::now()`).
 pub struct JobLifecycle {
+    // Reserved for the 02-02 `impl Reconciler for JobLifecycle` —
+    // the `name()` method will read this field. Until that lands the
+    // canonical constructor panics so the field cannot be observed.
+    #[allow(dead_code)]
     name: ReconcilerName,
 }
 
@@ -1023,8 +1067,8 @@ impl JobLifecycle {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct JobLifecycleView {
     /// How many times each alloc has been started under this
-    /// reconciler's lifecycle. Reset by alloc_id when a new
-    /// alloc_id is minted (per US-03 Domain Example 2).
+    /// reconciler's lifecycle. Reset by `alloc_id` when a new
+    /// `alloc_id` is minted (per US-03 Domain Example 2).
     pub restart_counts: BTreeMap<AllocationId, u32>,
     /// Backoff deadline per alloc — read against `tick.now`.
     pub next_attempt_at: BTreeMap<AllocationId, Instant>,

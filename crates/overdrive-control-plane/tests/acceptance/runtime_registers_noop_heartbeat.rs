@@ -30,7 +30,7 @@ use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_control_plane::{AppState, noop_heartbeat};
 use overdrive_core::id::NodeId;
 use overdrive_core::reconciler::{
-    Action, AnyReconcilerView, ReconcilerName, State as ReconState, TickContext,
+    Action, AnyReconcilerView, AnyState, ReconcilerName, TickContext,
 };
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_sim::adapters::clock::SimClock;
@@ -160,8 +160,11 @@ fn noop_heartbeat_factory_produces_reconciler_returning_noop() {
     let r = noop_heartbeat();
     assert_eq!(r.name(), &rname("noop-heartbeat"), "factory name is noop-heartbeat");
 
-    let desired = ReconState;
-    let actual = ReconState;
+    // Per ADR-0021 (step 02-01), `desired`/`actual` are typed
+    // `&AnyState` rather than two `&State` placeholders. NoopHeartbeat
+    // uses `AnyState::Unit` because its `Reconciler::State = ()`.
+    let desired = AnyState::Unit;
+    let actual = AnyState::Unit;
     let view = AnyReconcilerView::Unit;
     let tick = fresh_tick();
 
@@ -258,8 +261,11 @@ fn reconciler_is_pure_invariant_holds_for_noop_heartbeat() {
     let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime::new");
     runtime.register(noop_heartbeat()).expect("register");
 
-    let desired = ReconState;
-    let actual = ReconState;
+    // Per ADR-0021 (step 02-01), `desired`/`actual` are typed
+    // `&AnyState`. NoopHeartbeat uses `AnyState::Unit` because its
+    // `Reconciler::State = ()`.
+    let desired = AnyState::Unit;
+    let actual = AnyState::Unit;
     let view = AnyReconcilerView::Unit;
     let tick = fresh_tick();
 
