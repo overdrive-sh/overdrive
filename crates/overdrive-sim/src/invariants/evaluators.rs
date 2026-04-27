@@ -30,11 +30,12 @@
 
 use std::time::Duration;
 
-use overdrive_core::id::NodeId;
+use overdrive_core::id::{JobId, NodeId};
 use overdrive_core::reconciler::{AnyReconciler, AnyReconcilerView, AnyState, TickContext};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::entropy::Entropy;
 use overdrive_core::traits::intent_store::IntentStore;
+use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow};
 
 use crate::adapters::clock::SimClock;
 use crate::adapters::entropy::SimEntropy;
@@ -917,6 +918,125 @@ fn build_tick_context(clock: &SimClock) -> TickContext {
     TickContext { now, tick: TICK, deadline: now + BUDGET }
 }
 
+// ---------------------------------------------------------------------------
+// phase-1-first-workload — slice 3 (US-03) — convergence invariants
+// ---------------------------------------------------------------------------
+
+/// Evaluate `JobScheduledAfterSubmission` (eventually).
+///
+/// Per US-03 AC: for every submitted job in `submitted_jobs`, an
+/// `AllocStatusRow{state: Running}` referencing that job MUST exist in
+/// `alloc_status` after the convergence-loop budget elapsed. The harness
+/// drives the runtime tick loop forward N ticks and then snapshots the
+/// `ObservationStore`'s `alloc_status` table; that snapshot is fed to
+/// this evaluator.
+///
+/// **Pure verdict** — `submitted_jobs` is the desired set;
+/// `alloc_status` is the actual observation. The evaluator counts pass
+/// iff every submitted job has at least one Running alloc in the
+/// snapshot. Pure, no I/O — the harness owns the tick loop.
+#[must_use]
+pub fn evaluate_job_scheduled_after_submission(
+    submitted_jobs: &[JobId],
+    alloc_status: &[AllocStatusRow],
+) -> InvariantResult {
+    let name = "job-scheduled-after-submission";
+    // Vacuous-pass when no jobs were submitted — the invariant is
+    // "for every submitted job ..." and ∀ ∅ holds trivially. Without
+    // this the empty-input case would surface as a "0 jobs running"
+    // false positive on the next mutation of the `submitted_jobs.len()`
+    // comparison.
+    if submitted_jobs.is_empty() {
+        return result(name, InvariantStatus::Pass, CLUSTER_HOST, None);
+    }
+    for job_id in submitted_jobs {
+        let has_running = alloc_status
+            .iter()
+            .any(|row| &row.job_id == job_id && row.state == AllocState::Running);
+        if !has_running {
+            return result(
+                name,
+                InvariantStatus::Fail,
+                CLUSTER_HOST,
+                Some(format!("submitted job {job_id} has no Running alloc within budget")),
+            );
+        }
+    }
+    result(name, InvariantStatus::Pass, CLUSTER_HOST, None)
+}
+
+/// Evaluate `DesiredReplicaCountConverges` (eventually).
+///
+/// Per US-03 AC: `count(state == Running for job_j) == replicas_j` for
+/// every submitted job. Phase 1 jobs are 1-replica so this is a
+/// vacuous-pass at N=1 — but the evaluator still walks the rows to
+/// catch the leak-across-jobs case where one job's Running row is
+/// double-counted against another.
+///
+/// `desired_replicas` carries the per-job replica count; `alloc_status`
+/// is the observation snapshot.
+#[must_use]
+pub fn evaluate_desired_replica_count_converges(
+    desired_replicas: &[(JobId, u32)],
+    alloc_status: &[AllocStatusRow],
+) -> InvariantResult {
+    let name = "desired-replica-count-converges";
+    for (job_id, want) in desired_replicas {
+        let running_count = u32::try_from(
+            alloc_status
+                .iter()
+                .filter(|row| &row.job_id == job_id && row.state == AllocState::Running)
+                .count(),
+        )
+        .unwrap_or(u32::MAX);
+        if running_count != *want {
+            return result(
+                name,
+                InvariantStatus::Fail,
+                CLUSTER_HOST,
+                Some(format!("job {job_id}: want {want} Running, observed {running_count}")),
+            );
+        }
+    }
+    result(name, InvariantStatus::Pass, CLUSTER_HOST, None)
+}
+
+/// Evaluate `NoDoubleScheduling` (always).
+///
+/// Per US-03 AC: every `alloc_id` in the snapshot agrees on a single
+/// `node_id`. Two rows for the same `alloc_id` pinned to different
+/// nodes is a double-scheduling violation. Operates on a single
+/// snapshot; the "always" semantics come from the harness invoking
+/// this evaluator on every tick rather than just at the end.
+///
+/// Implementation note: a `BTreeMap<AllocationId, NodeId>` accumulates
+/// the first observed pin and rejects subsequent rows whose node
+/// differs.
+#[must_use]
+pub fn evaluate_no_double_scheduling(alloc_status: &[AllocStatusRow]) -> InvariantResult {
+    let name = "no-double-scheduling";
+    let mut pinned: std::collections::BTreeMap<overdrive_core::id::AllocationId, NodeId> =
+        std::collections::BTreeMap::new();
+    for row in alloc_status {
+        if let Some(prior) = pinned.get(&row.alloc_id) {
+            if prior != &row.node_id {
+                return result(
+                    name,
+                    InvariantStatus::Fail,
+                    CLUSTER_HOST,
+                    Some(format!(
+                        "alloc {} pinned to two nodes: {prior} and {}",
+                        row.alloc_id, row.node_id,
+                    )),
+                );
+            }
+        } else {
+            pinned.insert(row.alloc_id.clone(), row.node_id.clone());
+        }
+    }
+    result(name, InvariantStatus::Pass, CLUSTER_HOST, None)
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::unwrap_used)]
 mod tests {
@@ -1174,5 +1294,119 @@ mod tests {
         let result = evaluate_reconciler_is_pure(&r, &clock);
         assert_eq!(result.status, InvariantStatus::Fail);
         assert!(result.cause.as_ref().is_some_and(|c| c.contains("diverged")));
+    }
+
+    // -----------------------------------------------------------------
+    // phase-1-first-workload — slice 3 (US-03) — convergence invariants
+    // -----------------------------------------------------------------
+
+    /// Build an `AllocStatusRow` fixture for the convergence-invariant
+    /// witnesses. Centralises the boilerplate so individual tests stay
+    /// focused on their assertion.
+    fn alloc_row(alloc: &str, job: &str, node: &str, state: AllocState) -> AllocStatusRow {
+        use overdrive_core::id::AllocationId;
+        use overdrive_core::traits::observation_store::LogicalTimestamp;
+        AllocStatusRow {
+            alloc_id: AllocationId::new(alloc).expect("valid alloc id"),
+            job_id: JobId::new(job).expect("valid job id"),
+            node_id: NodeId::new(node).expect("valid node id"),
+            state,
+            updated_at: LogicalTimestamp {
+                counter: 1,
+                writer: NodeId::new(node).expect("valid node id"),
+            },
+        }
+    }
+
+    #[test]
+    fn job_scheduled_after_submission_passes_when_every_job_has_running_alloc() {
+        let jobs = vec![JobId::new("payments").expect("valid job id")];
+        let rows = vec![alloc_row("alloc-payments-0", "payments", "node-1", AllocState::Running)];
+        let r = evaluate_job_scheduled_after_submission(&jobs, &rows);
+        assert_eq!(r.status, InvariantStatus::Pass);
+    }
+
+    #[test]
+    fn job_scheduled_after_submission_fails_when_no_running_alloc_for_submitted_job() {
+        let jobs = vec![JobId::new("payments").expect("valid job id")];
+        let rows = vec![alloc_row("alloc-payments-0", "payments", "node-1", AllocState::Pending)];
+        let r = evaluate_job_scheduled_after_submission(&jobs, &rows);
+        assert_eq!(r.status, InvariantStatus::Fail);
+        assert!(r.cause.as_ref().is_some_and(|c| c.contains("no Running alloc")));
+    }
+
+    #[test]
+    fn job_scheduled_after_submission_passes_vacuously_with_no_submissions() {
+        let jobs: Vec<JobId> = Vec::new();
+        let rows: Vec<AllocStatusRow> = Vec::new();
+        let r = evaluate_job_scheduled_after_submission(&jobs, &rows);
+        assert_eq!(r.status, InvariantStatus::Pass);
+    }
+
+    #[test]
+    fn job_scheduled_after_submission_fails_when_running_alloc_belongs_to_different_job() {
+        let jobs = vec![JobId::new("payments").expect("valid job id")];
+        let rows = vec![alloc_row("alloc-frontend-0", "frontend", "node-1", AllocState::Running)];
+        let r = evaluate_job_scheduled_after_submission(&jobs, &rows);
+        assert_eq!(r.status, InvariantStatus::Fail);
+    }
+
+    #[test]
+    fn desired_replica_count_converges_passes_at_n_equals_one() {
+        let want = vec![(JobId::new("payments").expect("valid job id"), 1)];
+        let rows = vec![alloc_row("alloc-payments-0", "payments", "node-1", AllocState::Running)];
+        let r = evaluate_desired_replica_count_converges(&want, &rows);
+        assert_eq!(r.status, InvariantStatus::Pass);
+    }
+
+    #[test]
+    fn desired_replica_count_converges_fails_when_observed_count_undershoots() {
+        let want = vec![(JobId::new("payments").expect("valid job id"), 2)];
+        let rows = vec![alloc_row("alloc-payments-0", "payments", "node-1", AllocState::Running)];
+        let r = evaluate_desired_replica_count_converges(&want, &rows);
+        assert_eq!(r.status, InvariantStatus::Fail);
+        assert!(r.cause.as_ref().is_some_and(|c| c.contains("want 2")));
+    }
+
+    #[test]
+    fn desired_replica_count_converges_fails_when_observed_count_overshoots() {
+        let want = vec![(JobId::new("payments").expect("valid job id"), 1)];
+        let rows = vec![
+            alloc_row("alloc-payments-0", "payments", "node-1", AllocState::Running),
+            alloc_row("alloc-payments-1", "payments", "node-1", AllocState::Running),
+        ];
+        let r = evaluate_desired_replica_count_converges(&want, &rows);
+        assert_eq!(r.status, InvariantStatus::Fail);
+    }
+
+    #[test]
+    fn no_double_scheduling_passes_on_consistent_pinning() {
+        let rows = vec![
+            alloc_row("alloc-a", "payments", "node-1", AllocState::Running),
+            alloc_row("alloc-b", "frontend", "node-2", AllocState::Running),
+            // Same alloc, same node — duplicate row from gossip is not
+            // a violation.
+            alloc_row("alloc-a", "payments", "node-1", AllocState::Running),
+        ];
+        let r = evaluate_no_double_scheduling(&rows);
+        assert_eq!(r.status, InvariantStatus::Pass);
+    }
+
+    #[test]
+    fn no_double_scheduling_fails_when_alloc_pinned_to_two_nodes() {
+        let rows = vec![
+            alloc_row("alloc-a", "payments", "node-1", AllocState::Running),
+            alloc_row("alloc-a", "payments", "node-2", AllocState::Running),
+        ];
+        let r = evaluate_no_double_scheduling(&rows);
+        assert_eq!(r.status, InvariantStatus::Fail);
+        assert!(r.cause.as_ref().is_some_and(|c| c.contains("two nodes")));
+    }
+
+    #[test]
+    fn no_double_scheduling_passes_on_empty_snapshot() {
+        let rows: Vec<AllocStatusRow> = Vec::new();
+        let r = evaluate_no_double_scheduling(&rows);
+        assert_eq!(r.status, InvariantStatus::Pass);
     }
 }

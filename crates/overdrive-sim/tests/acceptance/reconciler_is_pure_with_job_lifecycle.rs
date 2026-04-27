@@ -10,8 +10,8 @@
 //! `JobLifecycle` — the first reconciler with a non-trivial `State`
 //! and `View`. Twin invocation is performed directly (the harness's
 //! `evaluate_reconciler_is_pure` evaluator currently constructs an
-//! `AnyState::Unit` for every reconciler; we test JobLifecycle against
-//! its own typed state directly here).
+//! `AnyState::Unit` for every reconciler; we test `JobLifecycle`
+//! against its own typed state directly here).
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
@@ -20,8 +20,8 @@ use std::time::{Duration, Instant};
 
 use overdrive_core::aggregate::{Job, JobSpecInput, Node, NodeSpecInput};
 use overdrive_core::reconciler::{
-    AnyReconciler, AnyReconcilerView, AnyState, JobLifecycle, JobLifecycleState,
-    JobLifecycleView, TickContext,
+    AnyReconciler, AnyReconcilerView, AnyState, JobLifecycle, JobLifecycleState, JobLifecycleView,
+    TickContext,
 };
 
 fn fresh_tick() -> TickContext {
@@ -53,18 +53,11 @@ fn happy_path_state() -> JobLifecycleState {
     let mut nodes = BTreeMap::new();
     let n = node_alpha();
     nodes.insert(n.id.clone(), n);
-    JobLifecycleState {
-        job: Some(payments_job()),
-        nodes,
-        allocations: BTreeMap::new(),
-    }
+    JobLifecycleState { job: Some(payments_job()), nodes, allocations: BTreeMap::new() }
 }
 
-fn empty_view() -> JobLifecycleView {
-    JobLifecycleView {
-        restart_counts: BTreeMap::new(),
-        next_attempt_at: BTreeMap::new(),
-    }
+const fn empty_view() -> JobLifecycleView {
+    JobLifecycleView { restart_counts: BTreeMap::new(), next_attempt_at: BTreeMap::new() }
 }
 
 #[test]

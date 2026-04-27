@@ -49,7 +49,7 @@ fn build_app_state(tmp: &TempDir) -> AppState {
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::from_str("local").expect("NodeId"), 0));
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Process));
-    AppState { store, obs, runtime: Arc::new(runtime), driver }
+    AppState::new(store, obs, Arc::new(runtime), driver)
 }
 
 fn payments_spec() -> JobSpecInput {

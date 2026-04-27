@@ -6,7 +6,7 @@
 //! `cluster_status` axum handler against an `AppState` whose runtime
 //! has both reconcilers registered, and asserts the rendered
 //! `ClusterStatus.reconcilers` Vec contains both names in canonical
-//! Ord order (BTreeMap iteration).
+//! Ord order (`BTreeMap` iteration).
 //!
 //! This is the walking-skeleton driver for 02-02: until the runtime
 //! boot path actually registers `JobLifecycle`, the test fails because
@@ -40,7 +40,7 @@ fn build_app_state(tmp: &TempDir) -> AppState {
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("NodeId"), 0));
     let driver: Arc<dyn overdrive_core::traits::driver::Driver> =
         Arc::new(SimDriver::new(DriverType::Process));
-    AppState { store, obs, runtime: Arc::new(runtime), driver }
+    AppState::new(store, obs, Arc::new(runtime), driver)
 }
 
 #[tokio::test]

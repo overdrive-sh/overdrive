@@ -42,4 +42,13 @@ mod integration {
     mod server_lifecycle;
     mod submit_round_trip;
     mod tls_bootstrap;
+    /// phase-1-first-workload — slice 3 (US-03) — Linux-only walking
+    /// skeletons. Each scenario file gates itself with
+    /// `#[cfg(target_os = "linux")]` so the module declarations
+    /// compile cleanly on macOS/Windows even when no test bodies
+    /// exist there.
+    mod job_lifecycle {
+        mod crash_recovery;
+        mod submit_to_running;
+    }
 }

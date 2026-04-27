@@ -163,7 +163,7 @@ pub struct AllocStatusRowBody {
 
 impl AllocStatusRowBody {
     /// Construct a Pending row body decorated with an actionable
-    /// diagnostic `reason` — the JobLifecycle reconciler calls this
+    /// diagnostic `reason` — the `JobLifecycle` reconciler calls this
     /// shape when surfacing `PlacementError::NoCapacity` to the CLI.
     #[must_use]
     pub fn pending_with_reason(

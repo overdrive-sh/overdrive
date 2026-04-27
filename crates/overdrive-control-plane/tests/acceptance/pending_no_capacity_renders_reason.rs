@@ -17,9 +17,7 @@
 
 use overdrive_control_plane::api::AllocStatusRowBody;
 use overdrive_core::id::{AllocationId, JobId, NodeId};
-use overdrive_core::traits::observation_store::{
-    AllocState, AllocStatusRow, LogicalTimestamp,
-};
+use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
 
 #[test]
 fn pending_renders_no_capacity_reason_actionably() {
@@ -48,9 +46,7 @@ fn pending_renders_no_capacity_reason_actionably() {
         cpu_milli: 500,
         memory_bytes: 1024 * 1024 * 1024,
     };
-    let reason = format!(
-        "no node has capacity: needed {needed:?}, max free {max_free:?}"
-    );
+    let reason = format!("no node has capacity: needed {needed:?}, max free {max_free:?}");
 
     let body = AllocStatusRowBody::pending_with_reason(&row, reason.clone());
 

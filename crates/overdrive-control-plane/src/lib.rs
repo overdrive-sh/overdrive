@@ -33,9 +33,10 @@ pub mod observation_wiring;
 pub mod reconciler_runtime;
 pub mod tls_bootstrap;
 
+use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::Router;
@@ -79,6 +80,46 @@ pub struct AppState {
     /// is mechanically migrated by DELIVER to pass an
     /// `Arc<SimDriver>` value.
     pub driver: Arc<dyn Driver>,
+    /// Per-`(ReconcilerName, TargetResource)` View cache. Phase 1
+    /// reconcilers carry no libSQL memory yet (per-primitive libSQL
+    /// is Phase 2+), but `JobLifecycle`'s `restart_counts` /
+    /// `next_attempt_at` MUST persist across ticks for backoff
+    /// exhaustion to be observable. The runtime tick loop reads the
+    /// hydrated view from this cache before each `reconcile` call
+    /// and writes back the returned `next_view`. Boxed-Any so a
+    /// single map handles every reconciler kind's `View` type.
+    ///
+    /// Phase 2+: replaced by per-primitive libSQL diff-and-persist
+    /// per ADR-0013 §2b.
+    pub view_cache: Arc<Mutex<BTreeMap<(String, String), CachedView>>>,
+}
+
+/// A View persisted across ticks in [`AppState::view_cache`].
+///
+/// Phase 1 only stores the `JobLifecycle` view because no other
+/// reconciler carries non-`()` memory. Adding a new reconciler with
+/// non-trivial memory means adding a variant here.
+#[derive(Debug, Clone)]
+pub enum CachedView {
+    /// Unit view — no actual memory. Stored for completeness so the
+    /// cache is queried uniformly by reconciler.
+    Unit,
+    /// `JobLifecycle::View`.
+    JobLifecycle(overdrive_core::reconciler::JobLifecycleView),
+}
+
+impl AppState {
+    /// Build an `AppState` with a fresh empty view cache. Used by
+    /// every test fixture and the production boot path.
+    #[must_use]
+    pub fn new(
+        store: Arc<LocalIntentStore>,
+        obs: Arc<dyn ObservationStore>,
+        runtime: Arc<reconciler_runtime::ReconcilerRuntime>,
+        driver: Arc<dyn Driver>,
+    ) -> Self {
+        Self { store, obs, runtime, driver, view_cache: Arc::new(Mutex::new(BTreeMap::new())) }
+    }
 }
 
 /// Configuration for the Phase 1 control-plane server. Populated at
@@ -176,9 +217,8 @@ pub async fn run_server(config: ServerConfig) -> Result<ServerHandle, error::Con
     // ADR-0028's `--allow-no-cgroups` flag is out of scope for 02-02
     // (lands in 03-01); on non-Linux dev hosts the spawn step itself
     // surfaces `StartRejected` per `overdrive-worker`'s contract.
-    let driver: Arc<dyn Driver> = Arc::new(overdrive_worker::ProcessDriver::new(
-        std::path::PathBuf::from("/sys/fs/cgroup"),
-    ));
+    let driver: Arc<dyn Driver> =
+        Arc::new(overdrive_worker::ProcessDriver::new(std::path::PathBuf::from("/sys/fs/cgroup")));
 
     run_server_with_obs_and_driver(config, obs, driver).await
 }
@@ -243,7 +283,7 @@ pub async fn run_server_with_obs_and_driver(
     runtime.register(job_lifecycle())?;
     let runtime = Arc::new(runtime);
 
-    let state: AppState = AppState { store, obs, runtime, driver };
+    let state: AppState = AppState::new(store, obs, runtime, driver);
 
     // Assemble the router. Step 03-03 wires the real `alloc_status` and
     // `node_list` observation-read handlers; step 03-05 aligned the
@@ -313,10 +353,11 @@ pub fn noop_heartbeat() -> overdrive_core::reconciler::AnyReconciler {
     AnyReconciler::NoopHeartbeat(NoopHeartbeat::canonical())
 }
 
-/// Construct the `job-lifecycle` reconciler — the first real (non-
-/// proof-of-life) reconciler. Converges declared replica count for a
-/// `Job` against the running `AllocStatusRow` set, calling
-/// inline first-fit placement equivalent to
+/// Construct the `job-lifecycle` reconciler.
+///
+/// The first real (non-proof-of-life) reconciler. Converges declared
+/// replica count for a `Job` against the running `AllocStatusRow`
+/// set, calling inline first-fit placement equivalent to
 /// `overdrive_scheduler::schedule`.
 ///
 /// Per US-03 (Slice 3 of phase-1-first-workload), this is registered

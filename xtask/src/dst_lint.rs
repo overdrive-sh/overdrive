@@ -527,9 +527,7 @@ impl ReconcileBodyInspector {
         for (banned, _replacement) in BANNED_APIS {
             if path_matches(&joined, banned) {
                 self.violations.push(ReconcileBodyViolation {
-                    kind: ReconcileBodyViolationKind::BannedApi {
-                        path: (*banned).to_string(),
-                    },
+                    kind: ReconcileBodyViolationKind::BannedApi { path: (*banned).to_string() },
                     line,
                     column,
                 });
@@ -549,9 +547,7 @@ impl ReconcileBodyInspector {
 /// # Errors
 ///
 /// Propagates any `syn::parse_file` failure as `Err`.
-pub fn inspect_job_lifecycle_reconcile_body(
-    source: &str,
-) -> Result<Vec<ReconcileBodyViolation>> {
+pub fn inspect_job_lifecycle_reconcile_body(source: &str) -> Result<Vec<ReconcileBodyViolation>> {
     let parsed = syn::parse_file(source).context("parse source")?;
     let mut found_impl = false;
     let mut violations = Vec::new();
@@ -561,22 +557,15 @@ pub fn inspect_job_lifecycle_reconcile_body(
 
         // Match `impl Reconciler for JobLifecycle`.
         let Some((_, trait_path, _)) = &item_impl.trait_ else { continue };
-        let trait_name = trait_path
-            .segments
-            .last()
-            .map(|s| s.ident.to_string())
-            .unwrap_or_default();
+        let trait_name =
+            trait_path.segments.last().map(|s| s.ident.to_string()).unwrap_or_default();
         if trait_name != "Reconciler" {
             continue;
         }
 
         let syn::Type::Path(type_path) = &*item_impl.self_ty else { continue };
-        let self_name = type_path
-            .path
-            .segments
-            .last()
-            .map(|s| s.ident.to_string())
-            .unwrap_or_default();
+        let self_name =
+            type_path.path.segments.last().map(|s| s.ident.to_string()).unwrap_or_default();
         if self_name != "JobLifecycle" {
             continue;
         }
@@ -662,7 +651,7 @@ mod tests {
 
     #[test]
     fn inspector_flags_await_inside_reconcile_body() {
-        let source = r#"
+        let source = r"
             pub trait Reconciler {}
             pub struct JobLifecycle;
             impl Reconciler for JobLifecycle {
@@ -670,20 +659,17 @@ mod tests {
                     let _x = some_future().await;
                 }
             }
-        "#;
-        let violations =
-            inspect_job_lifecycle_reconcile_body(source).expect("source must parse");
+        ";
+        let violations = inspect_job_lifecycle_reconcile_body(source).expect("source must parse");
         assert!(
-            violations
-                .iter()
-                .any(|v| matches!(v.kind, ReconcileBodyViolationKind::Await)),
+            violations.iter().any(|v| matches!(v.kind, ReconcileBodyViolationKind::Await)),
             ".await must be flagged; got {violations:?}"
         );
     }
 
     #[test]
     fn inspector_flags_instant_now_inside_reconcile_body() {
-        let source = r#"
+        let source = r"
             pub trait Reconciler {}
             pub struct JobLifecycle;
             impl Reconciler for JobLifecycle {
@@ -691,9 +677,8 @@ mod tests {
                     let _ = std::time::Instant::now();
                 }
             }
-        "#;
-        let violations =
-            inspect_job_lifecycle_reconcile_body(source).expect("source must parse");
+        ";
+        let violations = inspect_job_lifecycle_reconcile_body(source).expect("source must parse");
         assert!(
             violations.iter().any(|v| matches!(
                 &v.kind,
@@ -705,7 +690,7 @@ mod tests {
 
     #[test]
     fn inspector_flags_rand_inside_reconcile_body() {
-        let source = r#"
+        let source = r"
             pub trait Reconciler {}
             pub struct JobLifecycle;
             impl Reconciler for JobLifecycle {
@@ -713,9 +698,8 @@ mod tests {
                     let _x = rand::random::<u64>();
                 }
             }
-        "#;
-        let violations =
-            inspect_job_lifecycle_reconcile_body(source).expect("source must parse");
+        ";
+        let violations = inspect_job_lifecycle_reconcile_body(source).expect("source must parse");
         assert!(
             violations.iter().any(|v| matches!(v.kind, ReconcileBodyViolationKind::Rand)),
             "rand::* must be flagged; got {violations:?}"
@@ -724,7 +708,7 @@ mod tests {
 
     #[test]
     fn inspector_passes_clean_body() {
-        let source = r#"
+        let source = r"
             pub trait Reconciler {}
             pub struct JobLifecycle;
             impl Reconciler for JobLifecycle {
@@ -733,9 +717,8 @@ mod tests {
                     vec![]
                 }
             }
-        "#;
-        let violations =
-            inspect_job_lifecycle_reconcile_body(source).expect("source must parse");
+        ";
+        let violations = inspect_job_lifecycle_reconcile_body(source).expect("source must parse");
         assert!(
             violations.is_empty(),
             "clean body must produce zero violations; got {violations:?}"

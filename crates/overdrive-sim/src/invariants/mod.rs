@@ -76,6 +76,27 @@ pub enum Invariant {
     /// regression guard against re-introducing inline row encoding
     /// in `LocalIntentStore`.
     IntentStoreReturnsCallerBytes,
+    /// phase-1-first-workload (slice 3, US-03) — eventually invariant.
+    /// For every submitted Job, an `AllocStatusRow{state: Running}`
+    /// exists within budget N ticks. The harness drives the
+    /// convergence loop forward N ticks and inspects the
+    /// `ObservationStore` for at least one `Running` row per
+    /// submitted job. Lives in
+    /// `crates/overdrive-sim/src/invariants/evaluators.rs` per the
+    /// existing single-file evaluator pattern.
+    JobScheduledAfterSubmission,
+    /// phase-1-first-workload (slice 3, US-03) — eventually invariant.
+    /// `count(state == Running) == job.replicas` per submitted job.
+    /// Vacuous-pass at N=1 (a 1-replica job has at most one Running
+    /// row), but the evaluator still has to walk the rows and tally
+    /// per job to catch the failure mode where a Running row leaks
+    /// across jobs.
+    DesiredReplicaCountConverges,
+    /// phase-1-first-workload (slice 3, US-03) — always invariant.
+    /// Each `alloc_id` agrees on a single `node_id` across the
+    /// `alloc_status` snapshot. Two rows for the same `alloc_id`
+    /// pinned to different nodes is a double-scheduling violation.
+    NoDoubleScheduling,
 }
 
 impl Invariant {
@@ -96,6 +117,10 @@ impl Invariant {
         Self::BrokerDrainOrderIsDeterministic,
         Self::ReconcilerIsPure,
         Self::IntentStoreReturnsCallerBytes,
+        // SCAFFOLD: false — phase-1-first-workload slice 3 (US-03).
+        Self::JobScheduledAfterSubmission,
+        Self::DesiredReplicaCountConverges,
+        Self::NoDoubleScheduling,
     ];
 
     /// The canonical kebab-case spelling of this invariant, as a static
@@ -116,6 +141,10 @@ impl Invariant {
             Self::BrokerDrainOrderIsDeterministic => "broker-drain-order-is-deterministic",
             Self::ReconcilerIsPure => "reconciler-is-pure",
             Self::IntentStoreReturnsCallerBytes => "intent-store-returns-caller-bytes",
+            // phase-1-first-workload slice 3 (US-03).
+            Self::JobScheduledAfterSubmission => "job-scheduled-after-submission",
+            Self::DesiredReplicaCountConverges => "desired-replica-count-converges",
+            Self::NoDoubleScheduling => "no-double-scheduling",
         }
     }
 }

@@ -1,7 +1,8 @@
-//! Control-plane cgroup management — pre-flight check + slice-creation
-//! at server boot. Per ADR-0028 (hard refusal on missing delegation,
-//! `--allow-no-cgroups` dev escape hatch) and ADR-0026 (cgroup v2
-//! ONLY, direct cgroupfs writes).
+//! Control-plane cgroup management.
+//!
+//! Pre-flight check + slice-creation at server boot. Per ADR-0028
+//! (hard refusal on missing delegation, `--allow-no-cgroups` dev
+//! escape hatch) and ADR-0026 (cgroup v2 ONLY, direct cgroupfs writes).
 //!
 //! The workload half of the cgroup hierarchy
 //! (`overdrive.slice/workloads.slice/`) is owned by `overdrive-worker`;

@@ -229,6 +229,17 @@ impl LibsqlHandle {
     pub(crate) const fn empty() -> Self {
         Self { _handle: None }
     }
+
+    /// Phase 1 default handle — no underlying libSQL connection. The
+    /// runtime tick loop hands this to every `Reconciler::hydrate`
+    /// call until Phase 2+ wires per-primitive libSQL files.
+    /// Reconcilers that touch the handle in Phase 1 are a bug — every
+    /// Phase 1 reconciler's `View = ()` (or carries no row data) and
+    /// returns `Ok(default)` without using the handle.
+    #[must_use]
+    pub const fn default_phase1() -> Self {
+        Self { _handle: None }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -944,12 +955,7 @@ impl AnyReconciler {
         tick: &TickContext,
     ) -> (Vec<Action>, AnyReconcilerView) {
         match (self, desired, actual, view) {
-            (
-                Self::NoopHeartbeat(r),
-                AnyState::Unit,
-                AnyState::Unit,
-                AnyReconcilerView::Unit,
-            ) => {
+            (Self::NoopHeartbeat(r), AnyState::Unit, AnyState::Unit, AnyReconcilerView::Unit) => {
                 let (actions, ()) = r.reconcile(&(), &(), &(), tick);
                 (actions, AnyReconcilerView::Unit)
             }
@@ -984,8 +990,10 @@ impl AnyReconciler {
             // must remain exhaustive so a future variant addition is a
             // compile error rather than a silent runtime panic.
             _ => {
-                panic!("AnyReconciler::reconcile dispatch mismatch — \
-                    runtime supplied incompatible (reconciler, state, view) triple")
+                panic!(
+                    "AnyReconciler::reconcile dispatch mismatch — \
+                    runtime supplied incompatible (reconciler, state, view) triple"
+                )
             }
         }
     }
@@ -1025,6 +1033,13 @@ pub enum AnyReconcilerView {
 /// in `view.restart_counts`; backoff is gated against
 /// `view.next_attempt_at` (read from `tick.now`, NEVER
 /// `Instant::now()`).
+/// Maximum number of restart attempts before the `JobLifecycle`
+/// reconciler stops emitting `RestartAllocation` for a persistently
+/// failing alloc. Per US-03 step 02-03 — the ceiling exists to keep a
+/// repeatedly-crashing workload from consuming infinite driver
+/// resources.
+pub const RESTART_BACKOFF_CEILING: u32 = 5;
+
 pub struct JobLifecycle {
     name: ReconcilerName,
 }
@@ -1088,8 +1103,7 @@ impl Reconciler for JobLifecycle {
                 // than calling the scheduler crate because
                 // overdrive-core cannot depend on overdrive-scheduler
                 // (would invert the dependency direction).
-                let allocs_vec: Vec<&AllocStatusRow> =
-                    actual.allocations.values().collect();
+                let allocs_vec: Vec<&AllocStatusRow> = actual.allocations.values().collect();
 
                 // Is any allocation already Running for this job? If so
                 // we are converged — emit nothing. Failed allocations
@@ -1097,37 +1111,41 @@ impl Reconciler for JobLifecycle {
                 // backoff state in the View). For 02-02, treat
                 // Failed-with-no-backoff as "needs restart" and emit
                 // RestartAllocation.
-                let running_alloc = allocs_vec
-                    .iter()
-                    .find(|r| r.state == AllocState::Running);
+                let running_alloc = allocs_vec.iter().find(|r| r.state == AllocState::Running);
                 if running_alloc.is_some() {
                     return (Vec::new(), view.clone());
                 }
 
                 // Failed alloc with attempt budget remaining and
-                // backoff elapsed → emit RestartAllocation. For 02-02
-                // we only emit RestartAllocation when the previous
-                // alloc was already in the View's `restart_counts`
-                // (i.e. we have history). Backoff ceiling logic lands
-                // in 02-03.
-                let failed_alloc = allocs_vec.iter().find(|r| {
-                    matches!(r.state, AllocState::Terminated | AllocState::Draining)
-                });
+                // backoff elapsed → emit RestartAllocation. Per US-03
+                // (slice 3, step 02-03) the reconciler tracks restart
+                // attempts in `view.restart_counts` and STOPS emitting
+                // RestartAllocation once the configured ceiling is
+                // reached. The alloc then stays Terminated indefinitely
+                // (backoff exhausted).
+                let failed_alloc = allocs_vec
+                    .iter()
+                    .find(|r| matches!(r.state, AllocState::Terminated | AllocState::Draining));
                 if let Some(failed) = failed_alloc {
+                    // Backoff exhaustion check — emit no further
+                    // RestartAllocation past the ceiling. Pure check
+                    // against `view.restart_counts`.
+                    let attempts = view.restart_counts.get(&failed.alloc_id).copied().unwrap_or(0);
+                    if attempts >= RESTART_BACKOFF_CEILING {
+                        // Backoff exhausted — alloc stays Terminated,
+                        // no further actions emitted.
+                        return (Vec::new(), view.clone());
+                    }
                     if let Some(deadline) = view.next_attempt_at.get(&failed.alloc_id) {
                         if tick.now < *deadline {
                             // Backoff window not yet elapsed.
                             return (Vec::new(), view.clone());
                         }
                     }
-                    let action = Action::RestartAllocation {
-                        alloc_id: failed.alloc_id.clone(),
-                    };
+                    let action = Action::RestartAllocation { alloc_id: failed.alloc_id.clone() };
                     let mut next_view = view.clone();
-                    let count = next_view
-                        .restart_counts
-                        .entry(failed.alloc_id.clone())
-                        .or_insert(0);
+                    let count =
+                        next_view.restart_counts.entry(failed.alloc_id.clone()).or_insert(0);
                     *count = count.saturating_add(1);
                     return (vec![action], next_view);
                 }
@@ -1203,8 +1221,7 @@ fn node_free_capacity(
             .count(),
     )
     .unwrap_or(u64::MAX);
-    let total_cpu_reserved =
-        u64::from(per_alloc.cpu_milli).saturating_mul(running_on_node);
+    let total_cpu_reserved = u64::from(per_alloc.cpu_milli).saturating_mul(running_on_node);
     let total_mem_reserved = per_alloc.memory_bytes.saturating_mul(running_on_node);
     let cpu_after = u64::from(node.capacity.cpu_milli).saturating_sub(total_cpu_reserved);
     Resources {
@@ -1224,11 +1241,8 @@ fn mint_alloc_id(job_id: &JobId) -> AllocationId {
 
 /// Mint a deterministic [`SpiffeId`] for an allocation.
 fn mint_identity(job_id: &JobId, alloc_id: &AllocationId) -> SpiffeId {
-    let raw = format!(
-        "spiffe://overdrive.local/job/{}/alloc/{}",
-        job_id.as_str(),
-        alloc_id.as_str()
-    );
+    let raw =
+        format!("spiffe://overdrive.local/job/{}/alloc/{}", job_id.as_str(), alloc_id.as_str());
     #[allow(clippy::expect_used)]
     SpiffeId::new(&raw).expect("derived SpiffeId is valid")
 }

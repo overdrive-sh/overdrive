@@ -32,8 +32,8 @@ use overdrive_core::id::NodeId;
 use overdrive_core::reconciler::{
     Action, AnyReconcilerView, AnyState, ReconcilerName, TickContext,
 };
-use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_core::traits::driver::{Driver, DriverType};
+use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::dataplane::SimDataplane;
 use overdrive_sim::adapters::driver::SimDriver;
@@ -74,7 +74,7 @@ fn build_app_state(tmp: &TempDir) -> AppState {
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("NodeId"), 0));
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Process));
-    AppState { store, obs, runtime: Arc::new(runtime), driver }
+    AppState::new(store, obs, Arc::new(runtime), driver)
 }
 
 // ---------------------------------------------------------------------------

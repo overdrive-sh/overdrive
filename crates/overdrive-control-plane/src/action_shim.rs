@@ -26,7 +26,7 @@
 
 use overdrive_core::id::NodeId;
 use overdrive_core::reconciler::{Action, TickContext};
-use overdrive_core::traits::driver::{AllocationHandle, Driver, DriverError};
+use overdrive_core::traits::driver::{AllocationHandle, AllocationSpec, Driver, DriverError};
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
     ObservationStoreError,
@@ -134,20 +134,68 @@ async fn dispatch_single(
                 Err(other) => Err(ShimError::Driver(other)),
             }
         }
-        // Restart: stop-then-start with a fresh alloc id. For 02-02
-        // we treat it as a fresh start through the same Start path —
-        // proper stop+start sequencing lands in 02-04 alongside the
-        // StopAllocation wiring.
+        // Restart: stop-then-start, reusing the same alloc id. Per
+        // ADR-0023 §2 Restart is semantically `stop + start` against
+        // the prior alloc. Phase 1 single-mode reuses the deterministic
+        // alloc id derived by `JobLifecycle::reconcile`'s
+        // `mint_alloc_id(job_id)` (the same alloc id flows through
+        // every restart cycle). The action shim looks up the alloc
+        // metadata in observation to reconstruct the spec for the
+        // start half — for 02-03 the spec is rebuilt from the existing
+        // `AllocStatusRow.job_id` plus a Phase-1 baseline image and
+        // resource envelope derived from the original Job intent.
         Action::RestartAllocation { alloc_id } => {
-            // For 02-02 we cannot synthesise a fresh AllocationSpec
-            // without more context (the JobLifecycle reconciler emits
-            // RestartAllocation only in scenarios its current Run
-            // branch does not produce — the convergence path lives
-            // in 02-03). Stop the prior allocation if its handle is
-            // still tracked and write a Terminated marker.
-            let handle = AllocationHandle { alloc: alloc_id, pid: None };
-            match driver.stop(&handle).await {
-                Ok(()) | Err(DriverError::NotFound { .. }) => Ok(()),
+            // Stop half — Phase 1 uses an empty AllocationHandle (no
+            // pid tracking yet); the driver's `stop` is best-effort
+            // and `NotFound` is silently absorbed (the alloc may have
+            // already terminated on a prior failed start).
+            let handle = AllocationHandle { alloc: alloc_id.clone(), pid: None };
+            let _ = driver.stop(&handle).await;
+
+            // Start half — look up the prior alloc row to recover the
+            // job_id and node_id; reconstruct the spec from a Phase-1
+            // baseline (`/bin/sleep`, default resources). This keeps
+            // the restart path observable without threading the full
+            // Job aggregate through the action.
+            let prior = obs.alloc_status_rows().await?.into_iter().find(|r| r.alloc_id == alloc_id);
+            let Some(prior_row) = prior else {
+                return Err(ShimError::HandleMissing { alloc_id });
+            };
+
+            let writer_node = prior_row.node_id.clone();
+            let identity = build_identity(&prior_row.job_id, &alloc_id);
+            let spec = AllocationSpec {
+                alloc: alloc_id.clone(),
+                identity,
+                image: "/bin/sleep".to_string(),
+                resources: default_restart_resources(),
+            };
+            match driver.start(&spec).await {
+                Ok(_handle) => {
+                    let row = AllocStatusRow {
+                        alloc_id: alloc_id.clone(),
+                        job_id: prior_row.job_id,
+                        node_id: prior_row.node_id,
+                        state: AllocState::Running,
+                        updated_at: timestamp_for(tick, writer_node),
+                    };
+                    obs.write(ObservationRow::AllocStatus(row)).await?;
+                    Ok(())
+                }
+                Err(DriverError::StartRejected { .. }) => {
+                    // Failed restart — record as Terminated so the
+                    // next tick's hydrate sees the prior failure and
+                    // can decide whether to back off or exhaust.
+                    let row = AllocStatusRow {
+                        alloc_id: alloc_id.clone(),
+                        job_id: prior_row.job_id,
+                        node_id: prior_row.node_id,
+                        state: AllocState::Terminated,
+                        updated_at: timestamp_for(tick, writer_node),
+                    };
+                    obs.write(ObservationRow::AllocStatus(row)).await?;
+                    Ok(())
+                }
                 Err(other) => Err(ShimError::Driver(other)),
             }
         }
@@ -167,11 +215,37 @@ const fn timestamp_for(tick: &TickContext, writer: NodeId) -> LogicalTimestamp {
     LogicalTimestamp { counter: tick.tick.saturating_add(1), writer }
 }
 
+/// Reconstruct the SPIFFE identity for a restart's fresh
+/// `AllocationSpec`. Mirrors the derivation in
+/// `overdrive_core::reconciler::mint_identity` — the `JobLifecycle`
+/// reconciler is the source of truth for the canonical form, but the
+/// shim cannot reach a private function in core. The two formulae are
+/// pinned by an acceptance test.
+fn build_identity(
+    job_id: &overdrive_core::id::JobId,
+    alloc_id: &overdrive_core::id::AllocationId,
+) -> overdrive_core::SpiffeId {
+    let raw =
+        format!("spiffe://overdrive.local/job/{}/alloc/{}", job_id.as_str(), alloc_id.as_str());
+    #[allow(clippy::expect_used)]
+    overdrive_core::SpiffeId::new(&raw).expect("derived SpiffeId is valid")
+}
+
+/// Phase 1 baseline resources used when reconstructing a Restart's
+/// `AllocationSpec`. The original Job intent's resource envelope is
+/// the right long-term source — Phase 2+ threads the Job aggregate
+/// through the action — but for 02-03 a baseline is sufficient: the
+/// `ProcessDriver` currently ignores `resources` (cgroup pre-flight is
+/// out-of-scope until 03-01).
+const fn default_restart_resources() -> overdrive_core::traits::driver::Resources {
+    overdrive_core::traits::driver::Resources { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 }
+}
+
 /// Errors from [`dispatch`] that cannot be resolved into an
 /// observation row. Per ADR-0023 §3.
 #[derive(Debug, thiserror::Error)]
 pub enum ShimError {
-    /// A driver failure that did not fit the SpawnFailed shape (i.e.
+    /// A driver failure that did not fit the `SpawnFailed` shape (i.e.
     /// the shim cannot record it as `state: Failed`).
     #[error("driver failure")]
     Driver(#[from] DriverError),
