@@ -97,6 +97,7 @@ base64          = "0.22"
 hex             = "0.4"
 url             = { version = "2", features = ["serde"] }
 hostname        = "0.4"
+libc            = "0.2"
 rustls-pemfile  = "2"
 x509-parser     = "0.18"
 toml            = "0.8"

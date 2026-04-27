@@ -12,7 +12,14 @@
 //! # Status — RED scaffold
 //!
 //! Phase: phase-1-first-workload, slice 4 (US-04 cgroup isolation
-//! shares the boot path with the node_health writer). Wave: DISTILL.
+//! shares the boot path with the `node_health` writer). Wave: DISTILL.
+
+// `unused_async` lint fires because the panic-bodied scaffold has no
+// `.await`. The production signature must remain `async` because the
+// real implementation will call `ObservationStore::write` (async).
+// Allow the lint while the body is the RED scaffold; remove this
+// allow when slice 4 GREEN lands.
+#![allow(clippy::unused_async)]
 
 use std::sync::Arc;
 

@@ -5,20 +5,22 @@
 //! `adapter-host`) so that the boundary between the control-plane and
 //! the worker is enforced at compile time. The control-plane crate
 //! sees only the `Driver` trait surface (from `overdrive-core`); the
-//! impl is plugged in by the binary at AppState construction time.
+//! impl is plugged in by the binary at `AppState` construction time.
 //!
-//! # Status — RED scaffold
+//! # Status
 //!
-//! Phase: phase-1-first-workload, slice 2 (US-02) and slice 4 (US-04
-//! node_health writer half).
-//! Wave: DISTILL. Every body in this crate is `panic!("Not yet
-//! implemented -- RED scaffold")` per `.claude/rules/testing.md` §
-//! RED scaffolds. The DELIVER crafter implements
-//! `tokio::process::Command::spawn`, the five cgroupfs operations,
-//! the SIGTERM-then-SIGKILL `stop` flow, and the boot-time
-//! `node_health` write.
+//! Phase: phase-1-first-workload, slice 2 (US-02) GREEN landed; slice
+//! 4 (US-04 `node_health` writer half) remains RED scaffold until
+//! delivered.
 
-#![forbid(unsafe_code)]
+// `forbid(unsafe_code)` is intentionally NOT set: `Driver::stop` on
+// Linux invokes `libc::kill(pid, SIGTERM)`, which requires `unsafe`.
+// Per `.claude/rules/development.md`, the worker crate is class
+// `adapter-host` — host-OS interaction is its raison d'être. The
+// workspace-wide `unsafe_op_in_unsafe_fn = deny` lint still requires
+// every `unsafe { ... }` block to be explicit, with a `// SAFETY:`
+// comment documenting the precondition.
+#![deny(unsafe_op_in_unsafe_fn)]
 #![allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]
 
 /// SCAFFOLD marker — see this file's module docs.

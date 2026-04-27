@@ -32,13 +32,26 @@ integration-tests = []
 [dependencies]
 overdrive-core.workspace = true
 async-trait.workspace    = true
+parking_lot.workspace    = true
+rkyv.workspace           = true
 serde.workspace          = true
 thiserror.workspace      = true
 tokio.workspace          = true
 tracing.workspace        = true
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# Used only for `libc::kill(pid, SIGTERM)` in `Driver::stop` — the
+# tokio API exposes `Child::kill()` for SIGKILL but not SIGTERM. The
+# call lives behind `cfg(target_os = "linux")` because Phase 1 only
+# runs ProcessDriver on Linux.
+libc = { workspace = true }
+
 [dev-dependencies]
-proptest.workspace = true
+overdrive-sim.path  = "../overdrive-sim"
+proptest.workspace  = true
+tempfile.workspace  = true
+serial_test.workspace = true
+tracing-subscriber.workspace = true
 
 [lints]
 workspace = true
