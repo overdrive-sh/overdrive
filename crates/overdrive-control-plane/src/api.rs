@@ -146,12 +146,38 @@ pub struct AllocStatusResponse {
 /// the wire — minimal fields matching the whitepaper §4 schema
 /// (`alloc_id`, `job_id`, `node_id`, `state`). Phase 2+ adds columns
 /// additively.
+///
+/// `reason` is `Option<String>` — populated when the underlying state
+/// carries actionable diagnostic context (currently only Pending rows
+/// resulting from a `PlacementError::NoCapacity`). Other states leave
+/// it `None`.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, ToSchema, PartialEq, Eq)]
 pub struct AllocStatusRowBody {
     pub alloc_id: String,
     pub job_id: String,
     pub node_id: String,
     pub state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+impl AllocStatusRowBody {
+    /// Construct a Pending row body decorated with an actionable
+    /// diagnostic `reason` — the JobLifecycle reconciler calls this
+    /// shape when surfacing `PlacementError::NoCapacity` to the CLI.
+    #[must_use]
+    pub fn pending_with_reason(
+        row: &overdrive_core::traits::observation_store::AllocStatusRow,
+        reason: String,
+    ) -> Self {
+        Self {
+            alloc_id: row.alloc_id.to_string(),
+            job_id: row.job_id.to_string(),
+            node_id: row.node_id.to_string(),
+            state: row.state.to_string(),
+            reason: Some(reason),
+        }
+    }
 }
 
 /// Response for `GET /v1/nodes`. Phase 1 always renders an empty

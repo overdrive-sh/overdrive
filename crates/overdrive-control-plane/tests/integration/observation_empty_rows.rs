@@ -21,11 +21,13 @@ use std::time::Duration;
 
 use overdrive_control_plane::api::{AllocStatusResponse, NodeList};
 use overdrive_control_plane::observation_wiring::wire_single_node_observation;
-use overdrive_control_plane::{ServerConfig, ServerHandle, run_server_with_obs};
+use overdrive_control_plane::{ServerConfig, ServerHandle, run_server_with_obs_and_driver};
 use overdrive_core::id::{AllocationId, JobId, NodeId, Region};
+use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, NodeHealthRow, ObservationRow, ObservationStore,
 };
+use overdrive_sim::adapters::driver::SimDriver;
 use tempfile::TempDir;
 
 // -----------------------------------------------------------------------
@@ -92,7 +94,10 @@ async fn spawn_server_with_obs_handle()
         data_dir,
         operator_config_dir: operator_config_dir.clone(),
     };
-    let handle = run_server_with_obs(config, Arc::clone(&obs)).await.expect("run_server_with_obs");
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Process));
+    let handle = run_server_with_obs_and_driver(config, Arc::clone(&obs), driver)
+        .await
+        .expect("run_server_with_obs_and_driver");
     let bound = handle.local_addr().await.expect("bound addr");
     let ca_pem = read_ca_from_trust_triple(&operator_config_dir);
     (handle, bound, tmp, ca_pem, obs)

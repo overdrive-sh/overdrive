@@ -427,6 +427,182 @@ pub fn run(manifest_path: &Path) -> Result<()> {
 }
 
 // -----------------------------------------------------------------------------
+// Structural inspector — JobLifecycle::reconcile body
+// -----------------------------------------------------------------------------
+//
+// Scenario 3.3 of phase-1-first-workload Slice 3A.2: the `JobLifecycle`
+// reconciler's `reconcile` body must contain no banned API call,
+// including `.await` (which dst-lint's project-wide scanner does NOT
+// catch — the rule is "no `.await` inside `reconcile`" per ADR-0013 §2,
+// not a banned-symbol rule). This inspector walks the impl block, finds
+// the `fn reconcile` body, and asserts the absence of:
+//
+//   - `Instant::now` / `SystemTime::now`
+//   - `tokio::time::sleep` / `std::thread::sleep`
+//   - `rand::*`
+//   - `.await` expressions
+//
+// Run as a `#[cfg(test)]` unit test in this crate; fails with a
+// non-zero exit code if any banned construct appears in the body.
+
+/// Banned constructs inside a `reconcile` body. Mirrors the
+/// `BANNED_APIS` shape but adds `.await` (an expression form, not a
+/// path) and `rand::*` (any segment-suffix match against `rand`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReconcileBodyViolation {
+    /// The kind of forbidden construct.
+    pub kind: ReconcileBodyViolationKind,
+    /// 1-based line within the source file.
+    pub line: usize,
+    /// 1-based column within the source line.
+    pub column: usize,
+}
+
+/// Categorical kinds of forbidden constructs in `reconcile` bodies.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReconcileBodyViolationKind {
+    /// `.await` expression.
+    Await,
+    /// Banned API path (e.g. `Instant::now`).
+    BannedApi {
+        /// The banned path.
+        path: String,
+    },
+    /// `rand::*` reference.
+    Rand,
+}
+
+/// Inspector visitor — walks an impl-block body looking for forbidden
+/// constructs.
+struct ReconcileBodyInspector {
+    violations: Vec<ReconcileBodyViolation>,
+}
+
+impl<'ast> Visit<'ast> for ReconcileBodyInspector {
+    fn visit_expr_await(&mut self, node: &'ast syn::ExprAwait) {
+        let span = node.await_token.span;
+        let start = span.start();
+        self.violations.push(ReconcileBodyViolation {
+            kind: ReconcileBodyViolationKind::Await,
+            line: start.line,
+            column: start.column + 1,
+        });
+        // Continue walking inner expressions.
+        visit::visit_expr_await(self, node);
+    }
+
+    fn visit_expr_path(&mut self, node: &'ast syn::ExprPath) {
+        let segments: Vec<String> =
+            node.path.segments.iter().map(|s| s.ident.to_string()).collect();
+        self.check_segments(&segments, &node.path.segments[0].ident.span());
+        visit::visit_expr_path(self, node);
+    }
+
+    fn visit_type_path(&mut self, node: &'ast syn::TypePath) {
+        let segments: Vec<String> =
+            node.path.segments.iter().map(|s| s.ident.to_string()).collect();
+        self.check_segments(&segments, &node.path.segments[0].ident.span());
+        visit::visit_type_path(self, node);
+    }
+}
+
+impl ReconcileBodyInspector {
+    fn check_segments(&mut self, segments: &[String], span: &proc_macro2::Span) {
+        let joined = segments.join("::");
+        let start = span.start();
+        let line = start.line;
+        let column = start.column + 1;
+
+        // `rand::*` — any path with `rand` as the leading or sole
+        // segment (`rand::random`, `rand::thread_rng`, `rand::Rng`, ...)
+        if segments.first().map(String::as_str) == Some("rand") {
+            self.violations.push(ReconcileBodyViolation {
+                kind: ReconcileBodyViolationKind::Rand,
+                line,
+                column,
+            });
+            return;
+        }
+
+        for (banned, _replacement) in BANNED_APIS {
+            if path_matches(&joined, banned) {
+                self.violations.push(ReconcileBodyViolation {
+                    kind: ReconcileBodyViolationKind::BannedApi {
+                        path: (*banned).to_string(),
+                    },
+                    line,
+                    column,
+                });
+                return;
+            }
+        }
+    }
+}
+
+/// Inspect a Rust source file for any `JobLifecycle::reconcile` body
+/// that contains a banned construct.
+///
+/// Returns a list of every forbidden construct found inside the
+/// `fn reconcile` body of the `impl Reconciler for JobLifecycle`
+/// block. An empty Vec means the body is clean.
+///
+/// # Errors
+///
+/// Propagates any `syn::parse_file` failure as `Err`.
+pub fn inspect_job_lifecycle_reconcile_body(
+    source: &str,
+) -> Result<Vec<ReconcileBodyViolation>> {
+    let parsed = syn::parse_file(source).context("parse source")?;
+    let mut found_impl = false;
+    let mut violations = Vec::new();
+
+    for item in &parsed.items {
+        let syn::Item::Impl(item_impl) = item else { continue };
+
+        // Match `impl Reconciler for JobLifecycle`.
+        let Some((_, trait_path, _)) = &item_impl.trait_ else { continue };
+        let trait_name = trait_path
+            .segments
+            .last()
+            .map(|s| s.ident.to_string())
+            .unwrap_or_default();
+        if trait_name != "Reconciler" {
+            continue;
+        }
+
+        let syn::Type::Path(type_path) = &*item_impl.self_ty else { continue };
+        let self_name = type_path
+            .path
+            .segments
+            .last()
+            .map(|s| s.ident.to_string())
+            .unwrap_or_default();
+        if self_name != "JobLifecycle" {
+            continue;
+        }
+
+        found_impl = true;
+
+        // Walk every fn item for `reconcile`.
+        for impl_item in &item_impl.items {
+            let syn::ImplItem::Fn(fn_item) = impl_item else { continue };
+            if fn_item.sig.ident != "reconcile" {
+                continue;
+            }
+            let mut inspector = ReconcileBodyInspector { violations: Vec::new() };
+            inspector.visit_block(&fn_item.block);
+            violations.extend(inspector.violations);
+        }
+    }
+
+    if !found_impl {
+        bail!("could not locate `impl Reconciler for JobLifecycle` in source");
+    }
+
+    Ok(violations)
+}
+
+// -----------------------------------------------------------------------------
 // Unit tests — path-matching logic
 // -----------------------------------------------------------------------------
 
@@ -468,5 +644,121 @@ mod tests {
         // off-by-one in the length guard would silently flip this
         // into a match.
         assert!(!path_matches("a::b::c::d::e", "std::time::Instant::now"));
+    }
+
+    // -------------------------------------------------------------
+    // Reconcile-body inspector tests (scenario 3.3)
+    // -------------------------------------------------------------
+
+    /// Path to the real `overdrive-core` reconciler source — relative
+    /// to `xtask/Cargo.toml`'s manifest dir, which is `xtask/`.
+    fn real_core_reconciler_source_path() -> std::path::PathBuf {
+        let crate_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        crate_dir
+            .parent()
+            .expect("xtask crate lives directly under workspace root")
+            .join("crates/overdrive-core/src/reconciler.rs")
+    }
+
+    #[test]
+    fn inspector_flags_await_inside_reconcile_body() {
+        let source = r#"
+            pub trait Reconciler {}
+            pub struct JobLifecycle;
+            impl Reconciler for JobLifecycle {
+                fn reconcile(&self) {
+                    let _x = some_future().await;
+                }
+            }
+        "#;
+        let violations =
+            inspect_job_lifecycle_reconcile_body(source).expect("source must parse");
+        assert!(
+            violations
+                .iter()
+                .any(|v| matches!(v.kind, ReconcileBodyViolationKind::Await)),
+            ".await must be flagged; got {violations:?}"
+        );
+    }
+
+    #[test]
+    fn inspector_flags_instant_now_inside_reconcile_body() {
+        let source = r#"
+            pub trait Reconciler {}
+            pub struct JobLifecycle;
+            impl Reconciler for JobLifecycle {
+                fn reconcile(&self) {
+                    let _ = std::time::Instant::now();
+                }
+            }
+        "#;
+        let violations =
+            inspect_job_lifecycle_reconcile_body(source).expect("source must parse");
+        assert!(
+            violations.iter().any(|v| matches!(
+                &v.kind,
+                ReconcileBodyViolationKind::BannedApi { path } if path.contains("Instant::now")
+            )),
+            "Instant::now must be flagged; got {violations:?}"
+        );
+    }
+
+    #[test]
+    fn inspector_flags_rand_inside_reconcile_body() {
+        let source = r#"
+            pub trait Reconciler {}
+            pub struct JobLifecycle;
+            impl Reconciler for JobLifecycle {
+                fn reconcile(&self) {
+                    let _x = rand::random::<u64>();
+                }
+            }
+        "#;
+        let violations =
+            inspect_job_lifecycle_reconcile_body(source).expect("source must parse");
+        assert!(
+            violations.iter().any(|v| matches!(v.kind, ReconcileBodyViolationKind::Rand)),
+            "rand::* must be flagged; got {violations:?}"
+        );
+    }
+
+    #[test]
+    fn inspector_passes_clean_body() {
+        let source = r#"
+            pub trait Reconciler {}
+            pub struct JobLifecycle;
+            impl Reconciler for JobLifecycle {
+                fn reconcile(&self, tick: &TickContext) -> Vec<u8> {
+                    let _now = tick.now;
+                    vec![]
+                }
+            }
+        "#;
+        let violations =
+            inspect_job_lifecycle_reconcile_body(source).expect("source must parse");
+        assert!(
+            violations.is_empty(),
+            "clean body must produce zero violations; got {violations:?}"
+        );
+    }
+
+    /// Scenario 3.3 — the real `JobLifecycle::reconcile` body inside
+    /// `crates/overdrive-core/src/reconciler.rs` must contain no
+    /// banned construct.
+    #[test]
+    fn job_lifecycle_reconcile_body_passes_dst_lint() {
+        let path = real_core_reconciler_source_path();
+        let source = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        let violations = inspect_job_lifecycle_reconcile_body(&source)
+            .expect("overdrive-core reconciler.rs must parse");
+        assert!(
+            violations.is_empty(),
+            "JobLifecycle::reconcile body must contain no banned construct \
+             (.await, Instant::now, SystemTime::now, rand::*, tokio::time::sleep, \
+             std::thread::sleep); found {} violation(s): {:#?}",
+            violations.len(),
+            violations
+        );
     }
 }

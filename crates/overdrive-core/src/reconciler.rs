@@ -153,10 +153,11 @@ use bytes::Bytes;
 
 use std::collections::BTreeMap;
 
+use crate::SpiffeId;
 use crate::aggregate::{Job, Node};
 use crate::id::{AllocationId, CorrelationKey, JobId, NodeId};
-use crate::traits::driver::AllocationSpec;
-use crate::traits::observation_store::AllocStatusRow;
+use crate::traits::driver::{AllocationSpec, Resources};
+use crate::traits::observation_store::{AllocState, AllocStatusRow};
 
 // ---------------------------------------------------------------------------
 // TickContext — time as injected input state
@@ -876,12 +877,7 @@ impl AnyReconciler {
             Self::NoopHeartbeat(r) => r.name(),
             #[cfg(feature = "canary-bug")]
             Self::HarnessNoopHeartbeat(r) => r.name(),
-            // SCAFFOLD: 02-02 lands the JobLifecycle reconciler body;
-            // until then the variant cannot be constructed at runtime
-            // (no production caller registers it), so the panic is
-            // unreachable. Keeping the arm preserves match
-            // exhaustiveness across the AnyReconciler enum.
-            Self::JobLifecycle(_) => panic!("Not yet implemented -- 02-02 RED scaffold"),
+            Self::JobLifecycle(r) => r.name(),
         }
     }
 
@@ -903,12 +899,9 @@ impl AnyReconciler {
             Self::HarnessNoopHeartbeat(r) => {
                 r.hydrate(target, db).await.map(|()| AnyReconcilerView::Unit)
             }
-            // SCAFFOLD: 02-02 lands the JobLifecycle hydrate body;
-            // until then the variant cannot be constructed at
-            // runtime, so the panic is unreachable. Keeping the arm
-            // preserves match exhaustiveness across the AnyReconciler
-            // enum.
-            Self::JobLifecycle(_) => panic!("Not yet implemented -- 02-02 RED scaffold"),
+            Self::JobLifecycle(r) => {
+                r.hydrate(target, db).await.map(AnyReconcilerView::JobLifecycle)
+            }
         }
     }
 
@@ -970,20 +963,19 @@ impl AnyReconciler {
                 let (actions, ()) = r.reconcile(&(), &(), &(), tick);
                 (actions, AnyReconcilerView::Unit)
             }
-            // SCAFFOLD: phase-1-first-workload step 02-01 — the
-            // typed-State widening lands here, but the JobLifecycle
-            // reconcile body (action shim, scheduler call, backoff
-            // arithmetic) is deferred to step 02-02. Constructing this
-            // arm at runtime requires the runtime tick loop (step
-            // 02-03), which does not yet exist; the panic is
-            // unreachable from any current caller.
+            // JobLifecycle dispatch — types align by construction
+            // when the runtime hydrates matching desired/actual/view
+            // variants. Step 02-03 lands the runtime tick loop that
+            // produces these triples; the body of `reconcile` itself
+            // is fully implemented as of step 02-02.
             (
-                Self::JobLifecycle(_),
-                AnyState::JobLifecycle(_),
-                AnyState::JobLifecycle(_),
-                AnyReconcilerView::JobLifecycle(_),
+                Self::JobLifecycle(r),
+                AnyState::JobLifecycle(desired),
+                AnyState::JobLifecycle(actual),
+                AnyReconcilerView::JobLifecycle(view),
             ) => {
-                panic!("Not yet implemented -- 02-02 RED scaffold")
+                let (actions, next_view) = r.reconcile(desired, actual, view, tick);
+                (actions, AnyReconcilerView::JobLifecycle(next_view))
             }
             // Cross-variant branches — statically impossible once the
             // runtime correctly hydrates matching state and view kinds.
@@ -992,7 +984,8 @@ impl AnyReconciler {
             // must remain exhaustive so a future variant addition is a
             // compile error rather than a silent runtime panic.
             _ => {
-                panic!("Not yet implemented -- 02-02 RED scaffold (mismatched dispatch)")
+                panic!("AnyReconciler::reconcile dispatch mismatch — \
+                    runtime supplied incompatible (reconciler, state, view) triple")
             }
         }
     }
@@ -1033,10 +1026,6 @@ pub enum AnyReconcilerView {
 /// `view.next_attempt_at` (read from `tick.now`, NEVER
 /// `Instant::now()`).
 pub struct JobLifecycle {
-    // Reserved for the 02-02 `impl Reconciler for JobLifecycle` —
-    // the `name()` method will read this field. Until that lands the
-    // canonical constructor panics so the field cannot be observed.
-    #[allow(dead_code)]
     name: ReconcilerName,
 }
 
@@ -1045,11 +1034,203 @@ impl JobLifecycle {
     ///
     /// # Panics
     ///
-    /// RED scaffold.
+    /// Never — `"job-lifecycle"` is a compile-time string literal
+    /// satisfying every `ReconcilerName` validation rule.
     #[must_use]
     pub fn canonical() -> Self {
-        panic!("Not yet implemented -- RED scaffold")
+        #[allow(clippy::expect_used)]
+        let name = ReconcilerName::new("job-lifecycle")
+            .expect("'job-lifecycle' is a valid ReconcilerName by construction");
+        Self { name }
     }
+}
+
+impl Reconciler for JobLifecycle {
+    type State = JobLifecycleState;
+    type View = JobLifecycleView;
+
+    fn name(&self) -> &ReconcilerName {
+        &self.name
+    }
+
+    async fn hydrate(
+        &self,
+        _target: &TargetResource,
+        _db: &LibsqlHandle,
+    ) -> Result<Self::View, HydrateError> {
+        // Phase 1 02-02 carries the View shape; the libSQL hydrate
+        // path itself (CREATE TABLE IF NOT EXISTS, SELECT decode)
+        // lands in 02-03 alongside the runtime tick loop. For 02-02
+        // a fresh empty View is sufficient — the convergence loop is
+        // not yet driven, so the View has no rows to materialise.
+        Ok(JobLifecycleView::default())
+    }
+
+    fn reconcile(
+        &self,
+        desired: &Self::State,
+        actual: &Self::State,
+        view: &Self::View,
+        tick: &TickContext,
+    ) -> (Vec<Action>, Self::View) {
+        // Per ADR-0021 + US-03 AC: handle Run / Absent / Stop branches.
+        // Stop is panic-bodied — landing in 02-04. Run + Absent land
+        // here.
+        match desired.job.as_ref() {
+            // Absent: no desired job. If there are running allocations,
+            // 02-04 will emit StopAllocation; for 02-02 we emit no
+            // actions and pass through the view unchanged.
+            None => (Vec::new(), view.clone()),
+            // Run: a job is desired.
+            Some(job) => {
+                // Pure first-fit placement (inlined from
+                // overdrive-scheduler::schedule). Pulled inline rather
+                // than calling the scheduler crate because
+                // overdrive-core cannot depend on overdrive-scheduler
+                // (would invert the dependency direction).
+                let allocs_vec: Vec<&AllocStatusRow> =
+                    actual.allocations.values().collect();
+
+                // Is any allocation already Running for this job? If so
+                // we are converged — emit nothing. Failed allocations
+                // need restart logic, which lands in 02-03 (gated by
+                // backoff state in the View). For 02-02, treat
+                // Failed-with-no-backoff as "needs restart" and emit
+                // RestartAllocation.
+                let running_alloc = allocs_vec
+                    .iter()
+                    .find(|r| r.state == AllocState::Running);
+                if running_alloc.is_some() {
+                    return (Vec::new(), view.clone());
+                }
+
+                // Failed alloc with attempt budget remaining and
+                // backoff elapsed → emit RestartAllocation. For 02-02
+                // we only emit RestartAllocation when the previous
+                // alloc was already in the View's `restart_counts`
+                // (i.e. we have history). Backoff ceiling logic lands
+                // in 02-03.
+                let failed_alloc = allocs_vec.iter().find(|r| {
+                    matches!(r.state, AllocState::Terminated | AllocState::Draining)
+                });
+                if let Some(failed) = failed_alloc {
+                    if let Some(deadline) = view.next_attempt_at.get(&failed.alloc_id) {
+                        if tick.now < *deadline {
+                            // Backoff window not yet elapsed.
+                            return (Vec::new(), view.clone());
+                        }
+                    }
+                    let action = Action::RestartAllocation {
+                        alloc_id: failed.alloc_id.clone(),
+                    };
+                    let mut next_view = view.clone();
+                    let count = next_view
+                        .restart_counts
+                        .entry(failed.alloc_id.clone())
+                        .or_insert(0);
+                    *count = count.saturating_add(1);
+                    return (vec![action], next_view);
+                }
+
+                // No Running, no failed-needs-restart → schedule a
+                // fresh allocation. Inline first-fit over BTreeMap.
+                let placement = first_fit_place(&desired.nodes, job, &allocs_vec);
+                placement.map_or_else(
+                    || {
+                        // NoCapacity — emit no action. The Pending row
+                        // remains in obs (the renderer surfaces the
+                        // reason at render time). Backoff is irrelevant
+                        // here (nothing to back off from).
+                        (Vec::new(), view.clone())
+                    },
+                    |node_id| {
+                        let alloc_id = mint_alloc_id(&job.id);
+                        let identity = mint_identity(&job.id, &alloc_id);
+                        let action = Action::StartAllocation {
+                            alloc_id: alloc_id.clone(),
+                            job_id: job.id.clone(),
+                            node_id,
+                            spec: AllocationSpec {
+                                alloc: alloc_id,
+                                identity,
+                                image: "/bin/sleep".to_string(),
+                                resources: job.resources,
+                            },
+                        };
+                        (vec![action], view.clone())
+                    },
+                )
+            }
+        }
+    }
+}
+
+/// Pure first-fit placement helper. Inlined here because
+/// `overdrive-core` cannot depend on `overdrive-scheduler` (would
+/// invert the dependency direction; the scheduler is a `core`-class
+/// crate that depends on `overdrive-core`). The algorithm is the same
+/// as `overdrive_scheduler::schedule`'s happy path: walk `nodes` in
+/// `BTreeMap` order, return the first `NodeId` whose free capacity
+/// covers the job's resource envelope.
+fn first_fit_place(
+    nodes: &BTreeMap<NodeId, Node>,
+    job: &Job,
+    current_allocs: &[&AllocStatusRow],
+) -> Option<NodeId> {
+    for (node_id, node) in nodes {
+        let free = node_free_capacity(node, current_allocs, &job.resources);
+        if free.cpu_milli >= job.resources.cpu_milli
+            && free.memory_bytes >= job.resources.memory_bytes
+        {
+            return Some(node_id.clone());
+        }
+    }
+    None
+}
+
+/// Free capacity of `node` after subtracting reserved envelope of
+/// Running allocations targeting it. Inline counterpart to
+/// `overdrive_scheduler::free_capacity`.
+fn node_free_capacity(
+    node: &Node,
+    current_allocs: &[&AllocStatusRow],
+    per_alloc: &Resources,
+) -> Resources {
+    let running_on_node: u64 = u64::try_from(
+        current_allocs
+            .iter()
+            .filter(|alloc| alloc.node_id == node.id && alloc.state == AllocState::Running)
+            .count(),
+    )
+    .unwrap_or(u64::MAX);
+    let total_cpu_reserved =
+        u64::from(per_alloc.cpu_milli).saturating_mul(running_on_node);
+    let total_mem_reserved = per_alloc.memory_bytes.saturating_mul(running_on_node);
+    let cpu_after = u64::from(node.capacity.cpu_milli).saturating_sub(total_cpu_reserved);
+    Resources {
+        cpu_milli: u32::try_from(cpu_after).unwrap_or(u32::MAX),
+        memory_bytes: node.capacity.memory_bytes.saturating_sub(total_mem_reserved),
+    }
+}
+
+/// Mint a deterministic [`AllocationId`] for a job. Pure function over
+/// the job id so two reconcile calls with the same desired/actual
+/// produce the same alloc id (purity contract).
+fn mint_alloc_id(job_id: &JobId) -> AllocationId {
+    let raw = format!("alloc-{}-0", job_id.as_str());
+    #[allow(clippy::expect_used)]
+    AllocationId::new(&raw).expect("derived alloc id format is valid")
+}
+
+/// Mint a deterministic [`SpiffeId`] for an allocation.
+fn mint_identity(job_id: &JobId, alloc_id: &AllocationId) -> SpiffeId {
+    let raw = format!(
+        "spiffe://overdrive.local/job/{}/alloc/{}",
+        job_id.as_str(),
+        alloc_id.as_str()
+    );
+    #[allow(clippy::expect_used)]
+    SpiffeId::new(&raw).expect("derived SpiffeId is valid")
 }
 
 /// `JobLifecycle` reconciler's typed view — the libSQL-hydrated

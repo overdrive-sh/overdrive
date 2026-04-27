@@ -29,4 +29,7 @@ mod acceptance {
 
     // Step 04-05 — Reconciler-primitive DST invariants.
     mod reconciler_invariants_pass;
+
+    // Step 02-02 — `ReconcilerIsPure` holds for `JobLifecycle` (scenario 3.2).
+    mod reconciler_is_pure_with_job_lifecycle;
 }

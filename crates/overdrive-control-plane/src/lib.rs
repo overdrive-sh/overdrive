@@ -158,52 +158,52 @@ impl ServerHandle {
 /// [`ServerHandle::shutdown`] which awaits the task.
 pub async fn run_server(config: ServerConfig) -> Result<ServerHandle, error::ControlPlaneError> {
     // Wire the Phase 1 observation store (`LocalObservationStore`
-    // single-node per ADR-0012, revised 2026-04-24) internally, then delegate to
-    // `run_server_with_obs`. The split exists so integration tests can
-    // hold a shared `Arc<dyn ObservationStore>` handle — needed for the
-    // 03-03 canary-injection Fixture-Theater defence — without
+    // single-node per ADR-0012, revised 2026-04-24) internally and the
+    // production `ProcessDriver` from the worker subsystem (ADR-0029),
+    // then delegate to `run_server_with_obs_and_driver`. The split
+    // exists so integration tests can hold a shared `Arc<dyn ObservationStore>`
+    // handle for the canary-injection Fixture-Theater defence without
     // introducing a test-only hook into the production boot path.
     //
-    // SCAFFOLD: phase-1-first-workload DISTILL — the production
-    // `ProcessDriver` lives in `overdrive-worker` per ADR-0029.
-    // `run_server` is a binary-composition boundary; the binary
-    // (`overdrive-cli::serve`) is responsible for instantiating the
-    // worker subsystem and threading `Arc<ProcessDriver>` through
-    // here. For the RED-scaffold moment, `run_server` panics — the
-    // production boot path lands in DELIVER alongside the worker
-    // subsystem entrypoint.
-    panic!("Not yet implemented -- RED scaffold (worker driver wiring per ADR-0029)")
+    // Per ADR-0029, this is the binary-composition boundary. The CLI's
+    // `serve` subcommand may also call `run_server_with_obs_and_driver`
+    // directly when it needs a non-default driver under tests.
+    let obs: Arc<dyn ObservationStore> =
+        Arc::from(observation_wiring::wire_single_node_observation(&config.data_dir)?);
+
+    // Production default — `ProcessDriver` rooted at `/sys/fs/cgroup`.
+    // The path is hard-coded here rather than configurable because
+    // ADR-0028's `--allow-no-cgroups` flag is out of scope for 02-02
+    // (lands in 03-01); on non-Linux dev hosts the spawn step itself
+    // surfaces `StartRejected` per `overdrive-worker`'s contract.
+    let driver: Arc<dyn Driver> = Arc::new(overdrive_worker::ProcessDriver::new(
+        std::path::PathBuf::from("/sys/fs/cgroup"),
+    ));
+
+    run_server_with_obs_and_driver(config, obs, driver).await
 }
 
-/// Start the control-plane server with a caller-supplied observation
-/// store.
+/// Start the control-plane server with caller-supplied observation
+/// store and driver.
 ///
-/// SCAFFOLD: phase-1-first-workload DISTILL. Per ADR-0022 (amended by
-/// ADR-0029), this function gains a third parameter — `driver:
-/// Arc<dyn Driver>` — and is renamed `run_server_with_obs_and_driver`.
-/// Existing 2-arg callers under
-/// `crates/overdrive-control-plane/tests/integration/*.rs` get a
-/// compile error at the call site; the DELIVER crafter migrates them
-/// mechanically (each one passes `Arc::new(SimDriver::new())` as the
-/// new third argument).
-///
-/// For the RED-scaffold moment we keep the 2-arg surface delegating
-/// into the new 3-arg form, with a panic body. This lets existing
-/// imports compile (no churn at the import site) while making the
-/// runtime behaviour deliberately RED.
+/// Per ADR-0022 (amended by ADR-0029), the binary owns the
+/// composition: the CLI's `serve` subcommand instantiates
+/// `Arc<ProcessDriver>` (Linux production) or `Arc<SimDriver>`
+/// (non-Linux dev host) and threads it through this function.
+/// Test callers pass `Arc::new(SimDriver::new(DriverType::Process))`.
 ///
 /// Used by integration tests that need to retain a handle to the
-/// observation store the server is reading from; the production boot
-/// path calls [`run_server`], which wires the Phase 1 default.
+/// observation store the server is reading from.
 // `async` is kept to preserve the public-API shape: every caller
-// invokes `run_server_with_obs(...).await`, and the function may
-// grow real `.await` points as the boot sequence evolves
+// invokes `run_server_with_obs_and_driver(...).await`, and the function
+// may grow real `.await` points as the boot sequence evolves
 // (observation provisioning, lifecycle handshakes). Removing it now
 // would churn every call site for no functional gain.
 #[allow(clippy::unused_async)]
-pub async fn run_server_with_obs(
+pub async fn run_server_with_obs_and_driver(
     config: ServerConfig,
     obs: Arc<dyn ObservationStore>,
+    driver: Arc<dyn Driver>,
 ) -> Result<ServerHandle, error::ControlPlaneError> {
     // Install the rustls process-wide CryptoProvider (ring) exactly
     // once. The workspace enables only the `ring` feature, but rustls
@@ -233,26 +233,17 @@ pub async fn run_server_with_obs(
             .map_err(|e| error::ControlPlaneError::internal("open LocalIntentStore", e))?,
     );
 
-    // Construct the reconciler runtime and register `noop_heartbeat` at
-    // boot per ADR-0013 §9 — Phase 1's proof-of-life. Step 04-04 wires
-    // this here so every server boot establishes the
-    // `AtLeastOneReconcilerRegistered` invariant; step 05-05's walking
-    // skeleton will assert it end-to-end.
+    // Construct the reconciler runtime and register both Phase 1
+    // reconcilers at boot: `noop-heartbeat` (proof-of-life,
+    // ADR-0013 §9) and `job-lifecycle` (the first real reconciler,
+    // US-03). Step 04-04 wired noop-heartbeat; step 02-02 adds
+    // job-lifecycle alongside.
     let mut runtime = reconciler_runtime::ReconcilerRuntime::new(&config.data_dir)?;
     runtime.register(noop_heartbeat())?;
+    runtime.register(job_lifecycle())?;
     let runtime = Arc::new(runtime);
 
-    // SCAFFOLD: phase-1-first-workload DISTILL — the AppState gained
-    // `driver: Arc<dyn Driver>` per ADR-0022 (amended ADR-0029). This
-    // 2-arg `run_server_with_obs` does NOT have a Driver in scope.
-    // DELIVER's first migration step replaces the call with
-    // `run_server_with_obs_and_driver`, and every test caller passes
-    // `Arc::new(SimDriver::new())`. For the RED-scaffold moment we
-    // panic at the construction site to make the missing parameter
-    // loud rather than silently fielding a stub.
-    let state: AppState = panic!("Not yet implemented -- RED scaffold (AppState::driver missing per ADR-0022)");
-    #[allow(unreachable_code)]
-    let _ = (store, obs, runtime, &state);
+    let state: AppState = AppState { store, obs, runtime, driver };
 
     // Assemble the router. Step 03-03 wires the real `alloc_status` and
     // `node_list` observation-read handlers; step 03-05 aligned the
@@ -320,4 +311,19 @@ pub fn noop_heartbeat() -> overdrive_core::reconciler::AnyReconciler {
     use overdrive_core::reconciler::{AnyReconciler, NoopHeartbeat};
 
     AnyReconciler::NoopHeartbeat(NoopHeartbeat::canonical())
+}
+
+/// Construct the `job-lifecycle` reconciler — the first real (non-
+/// proof-of-life) reconciler. Converges declared replica count for a
+/// `Job` against the running `AllocStatusRow` set, calling
+/// inline first-fit placement equivalent to
+/// `overdrive_scheduler::schedule`.
+///
+/// Per US-03 (Slice 3 of phase-1-first-workload), this is registered
+/// at boot alongside `noop-heartbeat`.
+#[must_use]
+pub fn job_lifecycle() -> overdrive_core::reconciler::AnyReconciler {
+    use overdrive_core::reconciler::{AnyReconciler, JobLifecycle};
+
+    AnyReconciler::JobLifecycle(JobLifecycle::canonical())
 }

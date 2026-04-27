@@ -30,6 +30,7 @@ impl From<overdrive_core::traits::observation_store::AllocStatusRow> for api::Al
             job_id: row.job_id.to_string(),
             node_id: row.node_id.to_string(),
             state: row.state.to_string(),
+            reason: None,
         }
     }
 }
