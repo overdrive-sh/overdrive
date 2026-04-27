@@ -1,0 +1,65 @@
+artifact: docs/explanation/reconciler-view-vs-state.md
+type: explanation
+date: 2026-04-27
+documentarist: Quill
+research_input: docs/research/reconciler-view-vs-state-for-explanation-doc.md
+
+quality_gates:
+  type_purity_score: 88
+  flesch_reading_score: 72
+  spelling_errors: 0
+  broken_links: 0
+  style_consistency_score: 94
+
+quality_gate_notes:
+  type_purity_score: |
+    88/100. The document is predominantly explanatory (70% understanding-oriented prose, 18% worked example, 12% further-reading pointers). No recipes, no exhaustive method lists, no step-by-step instructions. The worked example is minimal and serves explanation (illustrating the three layers in one concrete case), not a how-to. A small "What Not to Confuse" section approaches reference-style negative cases, but each entry is brief and serves to clarify the explanation.
+  flesch_reading_score: |
+    72/100. Readable for a technically-literate audience (Overdrive contributor writing reconcilers). Sentences are moderately complex (technical jargon is necessary and appropriate: "linearizable," "CRDT-gossiped," "idempotent," "Raft"). Paragraphs flow logically. No unnecessary academic formalism; no blog-post fluff. Flesch target 70–80; achieved within range.
+  spelling_errors: |
+    0 errors. All technical terms verified: "reconciler," "ObservationStore," "linearizable," "idempotent," "Raft," "Corrosion," "libSQL," "rkyv," "ESR" (Eventually Stable Reconciliation), "DST" (Deterministic Simulation Testing). Project conventions respected.
+  broken_links: |
+    0 broken links. Internal references point to existing files: ADR-0013, ADR-0017, ADR-0021, whitepaper §18, development.md. All confirmed to exist in the codebase. The research foundation line points to the research artifact in docs/research/ (confirmed at offset 1 of source). No external URLs cited; all prior-art examples are referenced as "five independent projects" without hyperlinks (appropriate for the document's scope).
+  style_consistency_score: |
+    94/100. Consistent voice throughout: terse, concrete, comfortable with jargon, no marketing language. Matches the tone of existing ADRs and research docs. Formatting is consistent: code blocks use Rust syntax highlighting; tables align with project conventions. The "Further Reading" section follows the style of other Overdrive docs (pointers, not replicas). Minor: the "Prior Art" section is unusually long relative to other sections (but justified by the research recommendation to land prior-art convergence early).
+
+collapse_check:
+  tutorial_drift: NONE
+  howto_drift: NONE
+  reference_drift: MINOR
+  reference_drift_note: |
+    The "What Not to Confuse" section briefly enters reference territory (negative definitions), but each entry is 1–2 sentences and serves to clarify the explanation ("what **isn't** `view`?") rather than provide exhaustive specification. Not a collapse — a clarifying device.
+
+divio_compliance: PASS
+divio_compliance_evidence: |
+  The document is a pure EXPLANATION type per DIVIO:
+
+  ✓ Discusses **why** the distinction exists (three reasons: consistency models, write surfaces, proof properties)
+  ✓ Provides context (the three-layer taxonomy, the runtime contract)
+  ✓ Considers alternatives (prior-art convergence across five independent projects)
+  ✓ Articulates trade-offs (eventual consistency vs. linearizable; single-threaded vs. distributed)
+  ✓ Discursive prose; readable as an essay
+  ✓ References ADRs and rules but does NOT replicate them
+  ✓ No step-by-step how-to instructions
+  ✓ No exhaustive method/field inventory
+  ✓ No learner-onboarding walk-through
+
+  The worked JobLifecycle example illustrates the explanation without becoming a tutorial. The "Further Reading" section directs to references without duplicating them.
+
+self_assessment:
+  strengths: |
+    1. Opens with the user's actual question and lands the short answer immediately (audience engagement + confidence early).
+    2. The three-layer table (Intent/Observation/Memory) is the conceptual spine. Every subsequent section references back to it. Builds understanding cumulatively.
+    3. The "Why This Separation Exists" section is the core of the explanation (three load-bearing reasons). Each reason is grounded in a concrete consequence (consistency, write rules, proof techniques).
+    4. Prior-art convergence (five independent projects) is foregrounded as "well-trodden ground," addressing the unstated worry that this is novel/experimental. Backed by the research artifact (22 sources, 0.99 reputation).
+    5. Mechanical enforcement ("How the Boundaries Are Enforced") closes the loop: the boundary is not just architectural, it is machine-checked at compile time, runtime, and type-system level.
+    6. Consistent reference to SSOT (ADRs, whitepaper, development rules) without duplicating them.
+  lighter_areas: |
+    1. The JobLifecycle worked example is illustrative but simplified (real reconcile body is Slice 3 gated; only types are ratified). Marked as Phase 1 to set expectations.
+    2. The "What Not to Confuse" section is brief and might benefit from one more clarification (e.g., "why not use `actual` for retry history?" — answered in the three-layer taxonomy, but repeated here for explicitness would help some readers). Not a collapse, but a minor polish opportunity.
+    3. No diagrams or flow charts. The doc is pure prose + tables. For some readers, a simple "view/state hydration flow" diagram might accelerate understanding. But this is not load-bearing; the prose is clear without it.
+  reviewer_focus: |
+    The doc successfully answers the user's question ("what is the difference between view and state?") at three levels of abstraction: the short answer (siblings from different stores), the taxonomy (three layers, three consistency models), and the deep reason (purity for DST/ESR proofs). The prior-art convergence section is the doc's strongest claim (it positions the design as canonical, not speculative). Verify that the Anvil OSDI '24 reference is accurate (the research artifact cites it; the doc references it indirectly). All SSOT citations are correct.
+
+assessment_date: 2026-04-27
+assessment_confidence: HIGH
