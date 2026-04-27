@@ -1563,6 +1563,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "overdrive-scheduler"
+version = "0.0.0"
+dependencies = [
+ "overdrive-core",
+ "proptest",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "overdrive-sim"
 version = "0.0.0"
 dependencies = [
@@ -1596,6 +1605,19 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
+]
+
+[[package]]
+name = "overdrive-worker"
+version = "0.0.0"
+dependencies = [
+ "async-trait",
+ "overdrive-core",
+ "proptest",
+ "serde",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

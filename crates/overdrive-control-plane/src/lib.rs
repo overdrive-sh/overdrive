@@ -22,7 +22,9 @@
 
 #![forbid(unsafe_code)]
 
+pub mod action_shim;
 pub mod api;
+pub mod cgroup_manager;
 pub mod error;
 pub mod eval_broker;
 pub mod handlers;
@@ -40,6 +42,7 @@ use axum::Router;
 use axum::routing::{get, post};
 use axum_server::Handle as AxumHandle;
 use axum_server::tls_rustls::RustlsConfig;
+use overdrive_core::traits::driver::Driver;
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_store_local::LocalIntentStore;
 
@@ -68,6 +71,14 @@ pub struct AppState {
     /// `AppState` so the `cluster_status` handler can render the
     /// registry and broker counters without a side channel.
     pub runtime: Arc<reconciler_runtime::ReconcilerRuntime>,
+    /// Production `Driver` impl per ADR-0022 (amended by ADR-0029):
+    /// the action shim's reference to the workload driver. In Phase
+    /// 1 single-mode this is `Arc<ProcessDriver>` from
+    /// `overdrive-worker`; under DST tests it is `Arc<SimDriver>`.
+    /// SCAFFOLD: true — every test caller (`run_server_with_obs`)
+    /// is mechanically migrated by DELIVER to pass an
+    /// `Arc<SimDriver>` value.
+    pub driver: Arc<dyn Driver>,
 }
 
 /// Configuration for the Phase 1 control-plane server. Populated at
@@ -152,13 +163,34 @@ pub async fn run_server(config: ServerConfig) -> Result<ServerHandle, error::Con
     // hold a shared `Arc<dyn ObservationStore>` handle — needed for the
     // 03-03 canary-injection Fixture-Theater defence — without
     // introducing a test-only hook into the production boot path.
-    let obs: Arc<dyn ObservationStore> =
-        Arc::from(observation_wiring::wire_single_node_observation(&config.data_dir)?);
-    run_server_with_obs(config, obs).await
+    //
+    // SCAFFOLD: phase-1-first-workload DISTILL — the production
+    // `ProcessDriver` lives in `overdrive-worker` per ADR-0029.
+    // `run_server` is a binary-composition boundary; the binary
+    // (`overdrive-cli::serve`) is responsible for instantiating the
+    // worker subsystem and threading `Arc<ProcessDriver>` through
+    // here. For the RED-scaffold moment, `run_server` panics — the
+    // production boot path lands in DELIVER alongside the worker
+    // subsystem entrypoint.
+    panic!("Not yet implemented -- RED scaffold (worker driver wiring per ADR-0029)")
 }
 
 /// Start the control-plane server with a caller-supplied observation
 /// store.
+///
+/// SCAFFOLD: phase-1-first-workload DISTILL. Per ADR-0022 (amended by
+/// ADR-0029), this function gains a third parameter — `driver:
+/// Arc<dyn Driver>` — and is renamed `run_server_with_obs_and_driver`.
+/// Existing 2-arg callers under
+/// `crates/overdrive-control-plane/tests/integration/*.rs` get a
+/// compile error at the call site; the DELIVER crafter migrates them
+/// mechanically (each one passes `Arc::new(SimDriver::new())` as the
+/// new third argument).
+///
+/// For the RED-scaffold moment we keep the 2-arg surface delegating
+/// into the new 3-arg form, with a panic body. This lets existing
+/// imports compile (no churn at the import site) while making the
+/// runtime behaviour deliberately RED.
 ///
 /// Used by integration tests that need to retain a handle to the
 /// observation store the server is reading from; the production boot
@@ -210,7 +242,17 @@ pub async fn run_server_with_obs(
     runtime.register(noop_heartbeat())?;
     let runtime = Arc::new(runtime);
 
-    let state = AppState { store, obs, runtime };
+    // SCAFFOLD: phase-1-first-workload DISTILL — the AppState gained
+    // `driver: Arc<dyn Driver>` per ADR-0022 (amended ADR-0029). This
+    // 2-arg `run_server_with_obs` does NOT have a Driver in scope.
+    // DELIVER's first migration step replaces the call with
+    // `run_server_with_obs_and_driver`, and every test caller passes
+    // `Arc::new(SimDriver::new())`. For the RED-scaffold moment we
+    // panic at the construction site to make the missing parameter
+    // loud rather than silently fielding a stub.
+    let state: AppState = panic!("Not yet implemented -- RED scaffold (AppState::driver missing per ADR-0022)");
+    #[allow(unreachable_code)]
+    let _ = (store, obs, runtime, &state);
 
     // Assemble the router. Step 03-03 wires the real `alloc_status` and
     // `node_list` observation-read handlers; step 03-05 aligned the

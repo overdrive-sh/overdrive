@@ -1,0 +1,44 @@
+# `overdrive-worker` — worker subsystem per ADR-0029. Hosts
+# `ProcessDriver`, workload-cgroup management, and the `node_health`
+# row writer at startup. Class `adapter-host`.
+#
+# SCAFFOLD: true — phase-1-first-workload DISTILL wave landed the
+# crate with panic-bodied bodies per `.claude/rules/testing.md`
+# § "RED scaffolds and intentionally-failing commits". The DELIVER
+# crafter implements the `Driver` trait impl + cgroupfs writes.
+
+[package]
+name         = "overdrive-worker"
+version      = "0.0.0"
+description  = "Worker subsystem: ProcessDriver + workload-cgroup management + node_health writer."
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+publish                = false
+
+[package.metadata.overdrive]
+crate_class = "adapter-host"
+
+[features]
+# Workspace-wide convention. Every member declares this feature so
+# `cargo {check,test,mutants} --features integration-tests` resolves
+# uniformly under per-package scoping. Slice 2's real-process /
+# real-cgroup tests live behind this gate. See
+# `.claude/rules/testing.md` § Workspace convention.
+integration-tests = []
+
+[dependencies]
+overdrive-core.workspace = true
+async-trait.workspace    = true
+serde.workspace          = true
+thiserror.workspace      = true
+tokio.workspace          = true
+tracing.workspace        = true
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

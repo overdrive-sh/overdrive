@@ -5,8 +5,10 @@ members = [
     "crates/overdrive-cli",
     "crates/overdrive-control-plane",
     "crates/overdrive-host",
+    "crates/overdrive-scheduler",
     "crates/overdrive-sim",
     "crates/overdrive-store-local",
+    "crates/overdrive-worker",
     "xtask",
 ]
 

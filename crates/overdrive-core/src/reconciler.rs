@@ -146,7 +146,12 @@ use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 
-use crate::id::CorrelationKey;
+use std::collections::BTreeMap;
+
+use crate::aggregate::{Job, Node};
+use crate::id::{AllocationId, CorrelationKey, JobId, NodeId};
+use crate::traits::driver::AllocationSpec;
+use crate::traits::observation_store::AllocStatusRow;
 
 // ---------------------------------------------------------------------------
 // TickContext — time as injected input state
@@ -351,6 +356,67 @@ pub trait Reconciler: Send + Sync {
 pub struct State;
 
 // ---------------------------------------------------------------------------
+// AnyState enum — per-reconciler typed `desired`/`actual` projection
+// ---------------------------------------------------------------------------
+
+/// Sum of every `desired`/`actual` shape consumed by a registered
+/// reconciler. Per ADR-0021 (the State-shape decision), this enum
+/// mirrors the existing `AnyReconciler` and `AnyReconcilerView`
+/// dispatch shape — every reconciler kind has a typed `State`, a
+/// typed `View`, and is dispatched by enum match.
+///
+/// Phase 1 ships two variants:
+///
+/// - `Unit` — carried by reconcilers whose `desired`/`actual`
+///   projections are degenerate. `NoopHeartbeat` uses this.
+/// - `JobLifecycle` — the first real reconciler's projection
+///   (job + nodes + allocations). Lands in this DISTILL wave but
+///   the `JobLifecycleState` body is RED scaffold.
+///
+/// Compile-time exhaustiveness: a new reconciler variant whose
+/// `State` does not have a matching `AnyState` arm produces a
+/// non-exhaustive-match compile error in `AnyReconciler::reconcile`,
+/// matching the existing `AnyReconcilerView` discipline.
+///
+/// SCAFFOLD: true — phase-1-first-workload DISTILL.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AnyState {
+    /// `State = ()` variant for Phase 1 reconcilers that do not
+    /// dereference their projection (`NoopHeartbeat`).
+    Unit,
+    /// `JobLifecycle` reconciler's typed projection. RED scaffold —
+    /// the inner struct is `JobLifecycleState` and DELIVER fills the
+    /// hydrate path.
+    JobLifecycle(JobLifecycleState),
+}
+
+/// Desired/actual projection consumed by `JobLifecycle::reconcile`.
+/// Hydrated by the runtime from `IntentStore` (job + nodes) and
+/// `ObservationStore` (allocations) per ADR-0021.
+///
+/// The same struct serves both `desired` and `actual` — the
+/// reconciler interprets `desired.job` as "what should exist" and
+/// `actual.allocations` as "what is currently running."
+///
+/// SCAFFOLD: true — RED scaffold. The fields below are pinned by
+/// ADR-0021 §1; DELIVER wires the hydration paths.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JobLifecycleState {
+    /// The target job. `None` when the desired-state read returned
+    /// no row (job was deleted) or the actual-state read found no
+    /// surviving row to project against.
+    pub job: Option<Job>,
+    /// Registered nodes with their declared capacity. Drives the
+    /// scheduler input map. Phase 1 single-node has exactly one
+    /// entry; the BTreeMap discipline holds at N=1.
+    pub nodes: BTreeMap<NodeId, Node>,
+    /// Current allocations belonging to this job, keyed by alloc id.
+    /// Read from `ObservationStore::alloc_status_rows` filtered by
+    /// `job_id`. Empty when no allocations yet exist.
+    pub allocations: BTreeMap<AllocationId, AllocStatusRow>,
+}
+
+// ---------------------------------------------------------------------------
 // Action enum
 // ---------------------------------------------------------------------------
 
@@ -399,6 +465,47 @@ pub enum Action {
         spec: WorkflowSpec,
         /// Cause-to-response linkage per [`Action::HttpCall`].
         correlation: CorrelationKey,
+    },
+
+    // -----------------------------------------------------------------
+    // phase-1-first-workload — allocation-management variants
+    // (US-03, ADR-0023). Phase: DISTILL. SCAFFOLD: true — emit and
+    // dispatch sites are RED. The action shim's
+    // `dispatch(actions, ...)` consumes these and calls
+    // `Driver::start` / `Driver::stop` per ADR-0023.
+    // -----------------------------------------------------------------
+    /// Start a fresh allocation for a job. Emitted by the
+    /// `JobLifecycle` reconciler when `desired.replicas >
+    /// actual.replicas_running`.
+    StartAllocation {
+        /// Newly-minted allocation identifier (the reconciler reads
+        /// this from its hydrated view; the view used the runtime's
+        /// seeded `Entropy` port to mint it).
+        alloc_id: AllocationId,
+        /// Owning job.
+        job_id: JobId,
+        /// Placement decision from `overdrive-scheduler::schedule`.
+        node_id: NodeId,
+        /// Resources / image / identity for the workload. The action
+        /// shim passes this directly to `Driver::start`.
+        spec: AllocationSpec,
+    },
+    /// Stop a Running allocation. Emitted by the `JobLifecycle`
+    /// reconciler when desired state is "stopped" (set by
+    /// `IntentKey::for_job_stop`).
+    StopAllocation {
+        /// Target allocation. The action shim looks up the
+        /// `AllocationHandle` via observation store.
+        alloc_id: AllocationId,
+    },
+    /// Restart an allocation — semantically a `StopAllocation`
+    /// followed by a fresh `StartAllocation` with a new `alloc_id`.
+    /// Emitted by the `JobLifecycle` reconciler in crash-recovery
+    /// scenarios (per US-03 Domain Example 2).
+    RestartAllocation {
+        /// Allocation to restart. The action shim mints a fresh
+        /// alloc_id for the replacement.
+        alloc_id: AllocationId,
     },
 }
 
@@ -729,6 +836,8 @@ impl Reconciler for HarnessNoopHeartbeat {
 /// Phase 1 ships exactly one production variant: `NoopHeartbeat`. The
 /// canary-bug feature adds `HarnessNoopHeartbeat` — available only
 /// when the crate is compiled with the `canary-bug` feature enabled.
+/// The `phase-1-first-workload` DISTILL adds `JobLifecycle` as the
+/// first real (non-proof-of-life) reconciler.
 pub enum AnyReconciler {
     /// The Phase 1 proof-of-life reconciler. See [`NoopHeartbeat`].
     NoopHeartbeat(NoopHeartbeat),
@@ -737,6 +846,12 @@ pub enum AnyReconciler {
     /// [`HarnessNoopHeartbeat`].
     #[cfg(feature = "canary-bug")]
     HarnessNoopHeartbeat(HarnessNoopHeartbeat),
+    /// First real (non-proof-of-life) reconciler. Converges declared
+    /// replica count for a `Job`. SCAFFOLD: true — match arms in
+    /// `name` / `hydrate` / `reconcile` panic with the RED-scaffold
+    /// message; DELIVER implements them against the JobLifecycle
+    /// reconciler body.
+    JobLifecycle(JobLifecycle),
 }
 
 impl AnyReconciler {
@@ -747,6 +862,10 @@ impl AnyReconciler {
             Self::NoopHeartbeat(r) => r.name(),
             #[cfg(feature = "canary-bug")]
             Self::HarnessNoopHeartbeat(r) => r.name(),
+            // SCAFFOLD: phase-1-first-workload DISTILL — RED arm.
+            // DELIVER wires this through the inner reconciler's
+            // canonical name field.
+            Self::JobLifecycle(_) => panic!("Not yet implemented -- RED scaffold"),
         }
     }
 
@@ -768,6 +887,11 @@ impl AnyReconciler {
             Self::HarnessNoopHeartbeat(r) => {
                 r.hydrate(target, db).await.map(|()| AnyReconcilerView::Unit)
             }
+            // SCAFFOLD: phase-1-first-workload DISTILL — RED arm.
+            // DELIVER reads the JobLifecycle's libSQL schema (CREATE
+            // TABLE IF NOT EXISTS plus row decode) and constructs an
+            // `AnyReconcilerView::JobLifecycle(JobLifecycleView)`.
+            Self::JobLifecycle(_) => panic!("Not yet implemented -- RED scaffold"),
         }
     }
 
@@ -805,15 +929,103 @@ impl AnyReconciler {
                 let (actions, ()) = r.reconcile(desired, actual, &(), tick);
                 (actions, AnyReconcilerView::Unit)
             }
+            // SCAFFOLD: phase-1-first-workload DISTILL — RED arm.
+            // ADR-0021 §1 requires the `desired`/`actual` parameters
+            // here to widen from `&State` to typed `&AnyState` —
+            // DELIVER threads that change through the trait
+            // signature, the runtime hydrate paths, and this match.
+            // The body emits StartAllocation / StopAllocation /
+            // RestartAllocation against scheduler decisions and the
+            // libSQL-tracked backoff.
+            (Self::JobLifecycle(_), AnyReconcilerView::JobLifecycle(_)) => {
+                panic!("Not yet implemented -- RED scaffold")
+            }
+            // The cross-variant branches (e.g. JobLifecycle ×
+            // AnyReconcilerView::Unit) are statically impossible
+            // once the runtime correctly hydrates the matching
+            // view kind; under RED scaffold the runtime hasn't
+            // shipped yet so the unreachable! arm catches the
+            // misalignment loudly.
+            (Self::JobLifecycle(_), AnyReconcilerView::Unit)
+            | (Self::NoopHeartbeat(_), AnyReconcilerView::JobLifecycle(_)) => {
+                panic!("Not yet implemented -- RED scaffold")
+            }
+            #[cfg(feature = "canary-bug")]
+            (Self::HarnessNoopHeartbeat(_), AnyReconcilerView::JobLifecycle(_)) => {
+                panic!("Not yet implemented -- RED scaffold")
+            }
         }
     }
 }
 
 /// Sum of every view type produced by `AnyReconciler::hydrate`. Phase 1
-/// only has `View = ()` so the sum carries a single `Unit` variant;
-/// Phase 2+ adds real variants as new reconcilers land.
+/// originally only had `View = ()` (the `Unit` variant); the
+/// phase-1-first-workload DISTILL adds the `JobLifecycle` arm.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AnyReconcilerView {
-    /// The `View = ()` variant used by Phase 1 reconcilers.
+    /// The `View = ()` variant used by Phase 1 reconcilers
+    /// (`NoopHeartbeat`).
     Unit,
+    /// `JobLifecycle` reconciler's view. SCAFFOLD: true — the inner
+    /// struct is `JobLifecycleView` and DELIVER fills the hydrate
+    /// path.
+    JobLifecycle(JobLifecycleView),
+}
+
+// ---------------------------------------------------------------------------
+// JobLifecycle reconciler — first real reconciler (US-03)
+// ---------------------------------------------------------------------------
+
+/// The Phase 1 first real reconciler. Converges declared replica
+/// count for a `Job` against the running `AllocStatusRow` set.
+///
+/// Phase: phase-1-first-workload, slice 3 (US-03).
+/// Wave: DISTILL. SCAFFOLD: true — `reconcile` panics with the
+/// RED-scaffold message; DELIVER implements the convergence +
+/// backoff logic against the trait shape pinned by ADR-0021.
+///
+/// The reconciler reads `desired.job` (the target job) and
+/// `actual.allocations` (running set), calls
+/// `overdrive_scheduler::schedule(...)` on `desired.nodes` +
+/// `desired.job`, and emits `Action::StartAllocation` /
+/// `Action::StopAllocation` to converge. Restart counts are tracked
+/// in `view.restart_counts`; backoff is gated against
+/// `view.next_attempt_at` (read from `tick.now`, NEVER
+/// `Instant::now()`).
+pub struct JobLifecycle {
+    name: ReconcilerName,
+}
+
+impl JobLifecycle {
+    /// Construct the canonical `job-lifecycle` instance.
+    ///
+    /// # Panics
+    ///
+    /// RED scaffold.
+    #[must_use]
+    pub fn canonical() -> Self {
+        panic!("Not yet implemented -- RED scaffold")
+    }
+}
+
+/// `JobLifecycle` reconciler's typed view — the libSQL-hydrated
+/// private memory.
+///
+/// Per US-03 AC, the view carries:
+/// - `restart_counts: BTreeMap<AllocationId, u32>` — how many times
+///   each alloc has been started in this incarnation.
+/// - `next_attempt_at: BTreeMap<AllocationId, Instant>` — backoff
+///   deadline, computed from `tick.now + backoff_duration`.
+///
+/// SCAFFOLD: true — the field shapes are pinned by US-03 AC; DELIVER
+/// wires the libSQL schema (`CREATE TABLE IF NOT EXISTS ...` inline
+/// in `hydrate`) and the row decoder.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct JobLifecycleView {
+    /// How many times each alloc has been started under this
+    /// reconciler's lifecycle. Reset by alloc_id when a new
+    /// alloc_id is minted (per US-03 Domain Example 2).
+    pub restart_counts: BTreeMap<AllocationId, u32>,
+    /// Backoff deadline per alloc — read against `tick.now`.
+    pub next_attempt_at: BTreeMap<AllocationId, Instant>,
 }
