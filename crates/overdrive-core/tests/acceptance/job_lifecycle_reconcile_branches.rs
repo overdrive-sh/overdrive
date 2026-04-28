@@ -44,8 +44,8 @@ use std::time::{Duration, Instant};
 use overdrive_core::aggregate::{Job, Node};
 use overdrive_core::id::{AllocationId, JobId, NodeId, Region};
 use overdrive_core::reconciler::{
-    Action, JobLifecycle, JobLifecycleState, JobLifecycleView, RESTART_BACKOFF_CEILING, Reconciler,
-    TickContext,
+    Action, JobLifecycle, JobLifecycleState, JobLifecycleView, RESTART_BACKOFF_CEILING,
+    RESTART_BACKOFF_DURATION, Reconciler, TickContext,
 };
 use overdrive_core::traits::driver::Resources;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
@@ -508,4 +508,227 @@ fn run_with_failed_alloc_and_deadline(now: Instant, deadline: Instant) -> Vec<Ac
     let r = JobLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
     actions
+}
+
+// -------------------------------------------------------------------
+// Write-side regression — RestartAllocation branch must materialise
+// `next_view.next_attempt_at`
+// -------------------------------------------------------------------
+//
+// Companion to the L1146 read-side gate tests above. The existing
+// tests hand-seed `view.next_attempt_at` and assert the gate fires
+// correctly given a populated deadline; they cannot detect that
+// `reconcile`'s emission branch never *writes* a deadline back into
+// `next_view`. Without these write-side assertions the field is
+// inert from one tick to the next, every Terminated alloc re-emits
+// `RestartAllocation` immediately, and `RESTART_BACKOFF_CEILING = 5`
+// is exhausted in ~500 ms instead of the spec'd
+// `5 × RESTART_BACKOFF_DURATION` window.
+//
+// See `docs/feature/fix-restart-backoff-deadline-not-written/deliver/rca.md`.
+//
+// These three tests reference `RESTART_BACKOFF_DURATION` directly.
+// The constant lands in step 01-02; until then the import is
+// unresolved and the file fails to compile. The compile failure IS
+// the RED state per `.claude/rules/testing.md` § "RED scaffolds and
+// intentionally-failing commits".
+
+/// Single-tick: a fresh Terminated alloc with no prior view entries
+/// must emit `RestartAllocation` AND populate
+/// `next_view.next_attempt_at[<alloc_id>]` with `tick.now +
+/// RESTART_BACKOFF_DURATION`. Restart count goes from 0 to 1.
+///
+/// This is the load-bearing assertion. Against current `main` the
+/// `next_attempt_at` map remains empty after the call — the bug.
+#[test]
+fn fresh_failure_writes_deadline_into_next_view() {
+    let nodes = one_node_map("local");
+    let allocations = one_alloc_map(
+        "alloc-payments-0",
+        alloc_with_state("alloc-payments-0", "payments", "local", AllocState::Terminated),
+    );
+    let desired = JobLifecycleState {
+        job: Some(make_job("payments")),
+        desired_to_stop: false,
+        nodes: nodes.clone(),
+        allocations: BTreeMap::new(),
+    };
+    let actual = JobLifecycleState {
+        job: Some(make_job("payments")),
+        desired_to_stop: false,
+        nodes,
+        allocations,
+    };
+    // view is empty — fresh failure, no prior restart bookkeeping.
+    let view = JobLifecycleView::default();
+    let now = Instant::now();
+    let tick = fresh_tick(now);
+
+    let r = JobLifecycle::canonical();
+    let (actions, next_view) = r.reconcile(&desired, &actual, &view, &tick);
+
+    // RestartAllocation emitted for the failed alloc.
+    assert_eq!(actions.len(), 1, "fresh failure must emit one RestartAllocation; got {actions:?}");
+    match &actions[0] {
+        Action::RestartAllocation { alloc_id } => {
+            assert_eq!(alloc_id.as_str(), "alloc-payments-0");
+        }
+        other => panic!("expected RestartAllocation, got {other:?}"),
+    }
+
+    // Restart count incremented from 0 to 1.
+    assert_eq!(
+        next_view.restart_counts.get(&aid("alloc-payments-0")).copied(),
+        Some(1),
+        "restart count must be incremented to 1 on first failure",
+    );
+
+    // Deadline written: tick.now + RESTART_BACKOFF_DURATION. This is
+    // the assertion that catches the dead-code bug.
+    assert_eq!(
+        next_view.next_attempt_at.get(&aid("alloc-payments-0")).copied(),
+        Some(now + RESTART_BACKOFF_DURATION),
+        "next_attempt_at must be populated with tick.now + RESTART_BACKOFF_DURATION; \
+         empty map indicates the deadline was never written",
+    );
+}
+
+/// Two-tick chain: tick 1 emits a restart and writes a deadline;
+/// tick 2 advances `tick.now` by less than `RESTART_BACKOFF_DURATION`
+/// and asserts the gate fires — empty actions, count NOT bumped,
+/// deadline NOT advanced. This is the regression evidence: against
+/// current `main`, tick 2 re-emits `RestartAllocation` because
+/// `view.next_attempt_at` was never populated by tick 1.
+#[test]
+fn subsequent_tick_within_backoff_window_emits_nothing() {
+    let nodes = one_node_map("local");
+    let allocations = one_alloc_map(
+        "alloc-payments-0",
+        alloc_with_state("alloc-payments-0", "payments", "local", AllocState::Terminated),
+    );
+    let desired = JobLifecycleState {
+        job: Some(make_job("payments")),
+        desired_to_stop: false,
+        nodes: nodes.clone(),
+        allocations: BTreeMap::new(),
+    };
+    let actual = JobLifecycleState {
+        job: Some(make_job("payments")),
+        desired_to_stop: false,
+        nodes,
+        allocations,
+    };
+
+    // Tick 1: fresh failure. Capture next_view as the input to tick 2.
+    let view_1 = JobLifecycleView::default();
+    let now_1 = Instant::now();
+    let tick_1 = fresh_tick(now_1);
+
+    let r = JobLifecycle::canonical();
+    let (_actions_1, next_view_1) = r.reconcile(&desired, &actual, &view_1, &tick_1);
+
+    // Tick 2: advance now by less than RESTART_BACKOFF_DURATION. The
+    // gate must fire (now < deadline) and emit nothing. The view fed
+    // in IS the next_view from tick 1 — this is what makes the test
+    // a true regression for the "deadline never written" bug.
+    let now_2 = now_1 + Duration::from_millis(500);
+    let tick_2 = fresh_tick(now_2);
+
+    let (actions_2, next_view_2) = r.reconcile(&desired, &actual, &next_view_1, &tick_2);
+
+    assert!(
+        actions_2.is_empty(),
+        "tick 2 within backoff window (now < deadline) must emit nothing; got {actions_2:?}",
+    );
+
+    // Count NOT bumped during a gated tick — the alloc was never
+    // restarted on this tick.
+    assert_eq!(
+        next_view_2.restart_counts.get(&aid("alloc-payments-0")).copied(),
+        next_view_1.restart_counts.get(&aid("alloc-payments-0")).copied(),
+        "restart count must not advance on a gated tick",
+    );
+
+    // Deadline NOT advanced — the same deadline survives a gated
+    // tick. (Advancing the deadline on a gated tick would let
+    // failures slip past the ceiling indefinitely.)
+    assert_eq!(
+        next_view_2.next_attempt_at.get(&aid("alloc-payments-0")).copied(),
+        next_view_1.next_attempt_at.get(&aid("alloc-payments-0")).copied(),
+        "next_attempt_at must not advance on a gated tick",
+    );
+}
+
+/// Two-tick chain: tick 1 emits a restart and writes a deadline;
+/// tick 2 advances `tick.now` past `RESTART_BACKOFF_DURATION` and
+/// asserts another restart fires, count is bumped, AND the deadline
+/// rolls forward to `new tick.now + RESTART_BACKOFF_DURATION` (NOT
+/// the previous deadline + RESTART_BACKOFF_DURATION — the spec
+/// pins the new window to the current tick).
+#[test]
+fn tick_after_backoff_elapsed_emits_restart_and_advances_deadline() {
+    let nodes = one_node_map("local");
+    let allocations = one_alloc_map(
+        "alloc-payments-0",
+        alloc_with_state("alloc-payments-0", "payments", "local", AllocState::Terminated),
+    );
+    let desired = JobLifecycleState {
+        job: Some(make_job("payments")),
+        desired_to_stop: false,
+        nodes: nodes.clone(),
+        allocations: BTreeMap::new(),
+    };
+    let actual = JobLifecycleState {
+        job: Some(make_job("payments")),
+        desired_to_stop: false,
+        nodes,
+        allocations,
+    };
+
+    // Tick 1: fresh failure.
+    let view_1 = JobLifecycleView::default();
+    let now_1 = Instant::now();
+    let tick_1 = fresh_tick(now_1);
+
+    let r = JobLifecycle::canonical();
+    let (_actions_1, next_view_1) = r.reconcile(&desired, &actual, &view_1, &tick_1);
+
+    // Tick 2: advance now strictly past RESTART_BACKOFF_DURATION.
+    // Gate elapsed → another restart must fire, deadline rolls
+    // forward to the new tick's now + window.
+    let now_2 = now_1 + RESTART_BACKOFF_DURATION + Duration::from_millis(1);
+    let tick_2 =
+        TickContext { now: now_2, tick: 1, deadline: now_2 + Duration::from_secs(1) };
+
+    let (actions_2, next_view_2) = r.reconcile(&desired, &actual, &next_view_1, &tick_2);
+
+    assert_eq!(
+        actions_2.len(),
+        1,
+        "tick 2 after backoff elapsed must emit one RestartAllocation; got {actions_2:?}",
+    );
+    assert!(
+        matches!(actions_2[0], Action::RestartAllocation { .. }),
+        "first action must be RestartAllocation; got {:?}",
+        actions_2[0],
+    );
+
+    // Count bumped by exactly 1.
+    let count_1 = next_view_1.restart_counts.get(&aid("alloc-payments-0")).copied().unwrap_or(0);
+    let count_2 = next_view_2.restart_counts.get(&aid("alloc-payments-0")).copied().unwrap_or(0);
+    assert_eq!(
+        count_2,
+        count_1 + 1,
+        "restart count must advance by exactly 1 on a non-gated tick",
+    );
+
+    // Deadline rolls forward to the *new* tick's now + window — NOT
+    // the old deadline + window. This pins the spec semantics:
+    // backoff window resets relative to the current tick on each
+    // restart attempt.
+    assert_eq!(
+        next_view_2.next_attempt_at.get(&aid("alloc-payments-0")).copied(),
+        Some(now_2 + RESTART_BACKOFF_DURATION),
+        "deadline must roll forward to new tick.now + RESTART_BACKOFF_DURATION",
+    );
 }
