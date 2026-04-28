@@ -57,6 +57,7 @@ mod integration {
         // reuse the same `AllocCleanup` guard via `super::super::`.
         #[cfg(target_os = "linux")]
         pub mod cleanup;
+        mod convergence_loop_spawned_in_production_boot;
         mod crash_recovery;
         mod stop_to_terminated;
         mod submit_to_running;
