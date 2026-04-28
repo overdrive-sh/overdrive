@@ -288,36 +288,12 @@ async fn hydrate_desired(
         AnyReconciler::HarnessNoopHeartbeat(_) => Ok(AnyState::Unit),
         AnyReconciler::JobLifecycle(_) => {
             let job_id = job_id_from_target(target)?;
-            let key = IntentKey::for_job(&job_id);
-            let bytes = state
-                .store
-                .get(key.as_bytes())
-                .await
-                .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
-            let job: Option<Job> = match bytes {
-                None => None,
-                Some(ref b) => {
-                    let archived =
-                        rkyv::access::<rkyv::Archived<Job>, rkyv::rancor::Error>(b.as_ref())
-                            .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
-                    Some(
-                        rkyv::deserialize::<Job, rkyv::rancor::Error>(archived)
-                            .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?,
-                    )
-                }
-            };
-
+            let job = read_job(state, &job_id).await?;
             // ADR-0027: also read the stop intent. If present →
             // desired_to_stop = true. The reconciler's Stop branch
             // fires only when the spec is also Some (a stop intent
             // for an absent job is a no-op).
-            let stop_key = IntentKey::for_job_stop(&job_id);
-            let stop_bytes = state
-                .store
-                .get(stop_key.as_bytes())
-                .await
-                .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
-            let desired_to_stop = stop_bytes.is_some();
+            let desired_to_stop = stop_intent_present(state, &job_id).await?;
 
             let nodes = baseline_nodes_phase1();
             // `desired.allocations` is unused by the JobLifecycle
@@ -326,6 +302,35 @@ async fn hydrate_desired(
             Ok(AnyState::JobLifecycle(s))
         }
     }
+}
+
+/// Read a `Job` from the `IntentStore` at the canonical `jobs/<id>` key,
+/// rkyv-decoding the archived bytes. Returns `Ok(None)` when the key is
+/// absent. Errors map to `ConvergenceError::IntentRead`.
+async fn read_job(state: &AppState, job_id: &JobId) -> Result<Option<Job>, ConvergenceError> {
+    let key = IntentKey::for_job(job_id);
+    let bytes = state
+        .store
+        .get(key.as_bytes())
+        .await
+        .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
+    let Some(b) = bytes else { return Ok(None) };
+    let archived = rkyv::access::<rkyv::Archived<Job>, rkyv::rancor::Error>(b.as_ref())
+        .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
+    let job = rkyv::deserialize::<Job, rkyv::rancor::Error>(archived)
+        .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
+    Ok(Some(job))
+}
+
+/// Probe the canonical `jobs/<id>:stop` key; presence is the signal.
+async fn stop_intent_present(state: &AppState, job_id: &JobId) -> Result<bool, ConvergenceError> {
+    let stop_key = IntentKey::for_job_stop(job_id);
+    let stop_bytes = state
+        .store
+        .get(stop_key.as_bytes())
+        .await
+        .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
+    Ok(stop_bytes.is_some())
 }
 
 /// Hydrate the `actual` cluster-state projection for `reconciler`
