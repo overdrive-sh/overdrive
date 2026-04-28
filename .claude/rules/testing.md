@@ -647,6 +647,24 @@ cargo-mutants expects, pins `--test-tool=nextest` to match the project
 runner, writes `target/xtask/mutants-summary.json`, and implements the
 kill-rate gate. Invoking `cargo mutants` directly skips all of that.
 
+**On macOS: every mutation invocation that includes `--features
+integration-tests` MUST be prefixed with `cargo xtask lima run --`** —
+same Lima requirement that governs `cargo nextest run --features
+integration-tests` (see § "Running integration tests locally on macOS
+— Lima VM" below). The integration-tests-gated test surface is
+`#[cfg(target_os = "linux")]`; on macOS those tests compile (with
+`--no-run`) but the runtime surface is unreachable, so a mutation run
+that supposedly uses these tests has a degraded signal that catches
+almost nothing — kill rate becomes meaningless. Every example in this
+section that shows a `cargo xtask mutants ... --features
+integration-tests` invocation runs on macOS as `cargo xtask lima run
+-- cargo xtask mutants ... --features integration-tests`. Mutation
+runs without `--features integration-tests` (rare; the
+"deliberately measuring kill rate without acceptance tests"
+escape-hatch example below) MAY run directly on macOS — Lima is only
+required when integration tests are participating. CI runs on Linux
+and does not need the prefix.
+
 Two modes, mutually exclusive (clap rejects both-or-neither):
 
 ```bash
@@ -1006,6 +1024,16 @@ not.
 running the per-step integration suite during the inner loop. The
 kernel-matrix tier 3 harness still runs on CI via LVH; do not collapse
 the two.
+
+**Mutation testing falls under the same rule.** Any `cargo xtask
+mutants` invocation that includes `--features integration-tests` runs
+through `cargo xtask lima run --` on macOS — see § "Mutation testing
+(cargo-mutants)" → "Usage" for the full rationale. Without the prefix
+the mutation run uses a degraded test signal (the `#[cfg(target_os =
+"linux")]` surface is unreachable) and the kill-rate gate becomes
+meaningless. The check is mechanical: does this command pass
+`--features integration-tests`? If yes, prefix with `cargo xtask lima
+run --`.
 
 ### Assertion rules
 
