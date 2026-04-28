@@ -145,14 +145,19 @@ pub enum CgroupPathError {
 /// Create the workload scope directory under `root`.
 /// `mkdir -p` semantics; idempotent on directory already existing.
 ///
+/// Uses `tokio::fs::create_dir_all` per `.claude/rules/development.md`
+/// § Concurrency & async — sync `std::fs::*` is forbidden inside
+/// `async fn` in adapter-host crates and the dst-lint gate enforces
+/// it at PR time.
+///
 /// # Errors
 ///
 /// Returns an error if the cgroupfs is not mounted, the parent slice
 /// does not exist (when not creating recursively), or the running UID
 /// lacks delegation.
-pub fn create_workload_scope(root: &Path, scope: &CgroupPath) -> Result<(), std::io::Error> {
+pub async fn create_workload_scope(root: &Path, scope: &CgroupPath) -> Result<(), std::io::Error> {
     let dir = scope.resolve(root);
-    std::fs::create_dir_all(&dir)
+    tokio::fs::create_dir_all(&dir).await
 }
 
 /// Place a process PID into the workload scope's `cgroup.procs` file.
@@ -160,9 +165,13 @@ pub fn create_workload_scope(root: &Path, scope: &CgroupPath) -> Result<(), std:
 /// # Errors
 ///
 /// Returns an error if the scope's `cgroup.procs` cannot be written.
-pub fn place_pid_in_scope(root: &Path, scope: &CgroupPath, pid: u32) -> Result<(), std::io::Error> {
+pub async fn place_pid_in_scope(
+    root: &Path,
+    scope: &CgroupPath,
+    pid: u32,
+) -> Result<(), std::io::Error> {
     let path = scope.resolve(root).join("cgroup.procs");
-    std::fs::write(&path, format!("{pid}\n"))
+    tokio::fs::write(&path, format!("{pid}\n")).await
 }
 
 /// Compute `cpu.weight` from `cpu_milli` per ADR-0026 D9:
@@ -183,23 +192,27 @@ pub fn cpu_weight_for(cpu_milli: u32) -> u32 {
 ///
 /// Returns the underlying io error if either limit file cannot be
 /// written.
-pub fn write_resource_limits(
+pub async fn write_resource_limits(
     root: &Path,
     scope: &CgroupPath,
     resources: &Resources,
 ) -> Result<(), std::io::Error> {
     let dir = scope.resolve(root);
     let weight = cpu_weight_for(resources.cpu_milli);
-    std::fs::write(dir.join("cpu.weight"), format!("{weight}\n"))?;
-    std::fs::write(dir.join("memory.max"), format!("{}\n", resources.memory_bytes))?;
+    tokio::fs::write(dir.join("cpu.weight"), format!("{weight}\n")).await?;
+    tokio::fs::write(dir.join("memory.max"), format!("{}\n", resources.memory_bytes)).await?;
     Ok(())
 }
 
 /// Wrapper for `write_resource_limits` that converts a write error
 /// into a structured warning log AND returns `Ok(())` to the caller
 /// per ADR-0026 D9 warn-and-continue disposition.
-pub fn write_resource_limits_warn_on_error(root: &Path, scope: &CgroupPath, resources: &Resources) {
-    if let Err(err) = write_resource_limits(root, scope, resources) {
+pub async fn write_resource_limits_warn_on_error(
+    root: &Path,
+    scope: &CgroupPath,
+    resources: &Resources,
+) {
+    if let Err(err) = write_resource_limits(root, scope, resources).await {
         warn!(
             scope = %scope,
             error = %err,
@@ -227,9 +240,9 @@ pub fn write_resource_limits_warn_on_error(root: &Path, scope: &CgroupPath, reso
 /// other than the scope being absent. The caller is expected to
 /// `tracing::warn!` and continue — terminal cleanup is best-effort by
 /// design.
-pub fn cgroup_kill(root: &Path, scope: &CgroupPath) -> Result<(), std::io::Error> {
+pub async fn cgroup_kill(root: &Path, scope: &CgroupPath) -> Result<(), std::io::Error> {
     let path = scope.resolve(root).join("cgroup.kill");
-    match std::fs::write(&path, "1\n") {
+    match tokio::fs::write(&path, "1\n").await {
         Ok(()) => Ok(()),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(err) => Err(err),
@@ -252,16 +265,16 @@ pub fn cgroup_kill(root: &Path, scope: &CgroupPath) -> Result<(), std::io::Error
 ///
 /// Returns the underlying io error if neither `rmdir` nor the
 /// `remove_dir_all` fallback succeeds.
-pub fn remove_workload_scope(root: &Path, scope: &CgroupPath) -> Result<(), std::io::Error> {
+pub async fn remove_workload_scope(root: &Path, scope: &CgroupPath) -> Result<(), std::io::Error> {
     let dir = scope.resolve(root);
-    match std::fs::remove_dir(&dir) {
+    match tokio::fs::remove_dir(&dir).await {
         Ok(()) => Ok(()),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(err) if is_dir_not_empty(&err) => {
             // Tempdir-as-cgroupfs path (tests). Real cgroupfs never
             // returns ENOTEMPTY for a workload scope because the
             // virtual files are reaped on `rmdir`.
-            match std::fs::remove_dir_all(&dir) {
+            match tokio::fs::remove_dir_all(&dir).await {
                 Ok(()) => Ok(()),
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
                 Err(e) => Err(e),
@@ -356,13 +369,13 @@ mod tests {
     /// `cgroup_kill` is idempotent on `NotFound` (the scope is gone
     /// or never existed). Pins the match-guard mutations on the
     /// `err.kind() == NotFound` branch.
-    #[test]
-    fn cgroup_kill_is_idempotent_on_missing_scope() {
+    #[tokio::test]
+    async fn cgroup_kill_is_idempotent_on_missing_scope() {
         let tmp = tempfile::TempDir::new().expect("tempdir");
         let scope_path = "overdrive.slice/workloads.slice/alloc-missing-0.scope";
         let scope = CgroupPath::from_str(scope_path).expect("valid CgroupPath");
 
-        let result = cgroup_kill(tmp.path(), &scope);
+        let result = cgroup_kill(tmp.path(), &scope).await;
         assert!(
             result.is_ok(),
             "cgroup_kill on a missing scope must be idempotent (Ok); got {result:?}",
@@ -371,13 +384,13 @@ mod tests {
 
     /// `remove_workload_scope` is idempotent on `NotFound`. Pins
     /// the outer match-guard mutations.
-    #[test]
-    fn remove_workload_scope_is_idempotent_on_missing_scope() {
+    #[tokio::test]
+    async fn remove_workload_scope_is_idempotent_on_missing_scope() {
         let tmp = tempfile::TempDir::new().expect("tempdir");
         let scope_path = "overdrive.slice/workloads.slice/alloc-missing-1.scope";
         let scope = CgroupPath::from_str(scope_path).expect("valid CgroupPath");
 
-        let result = remove_workload_scope(tmp.path(), &scope);
+        let result = remove_workload_scope(tmp.path(), &scope).await;
         assert!(
             result.is_ok(),
             "remove_workload_scope on missing scope must be idempotent; got {result:?}",
@@ -387,8 +400,8 @@ mod tests {
     /// `remove_workload_scope` falls back to `remove_dir_all` on
     /// `ENOTEMPTY` (the tempdir-as-cgroupfs path). Pins the
     /// `is_dir_not_empty(&err)` match-guard mutation.
-    #[test]
-    fn remove_workload_scope_falls_back_to_remove_dir_all_on_enotempty() {
+    #[tokio::test]
+    async fn remove_workload_scope_falls_back_to_remove_dir_all_on_enotempty() {
         let tmp = tempfile::TempDir::new().expect("tempdir");
         let scope_path = "overdrive.slice/workloads.slice/alloc-non-empty-0.scope";
         let scope = CgroupPath::from_str(scope_path).expect("valid CgroupPath");
@@ -397,7 +410,7 @@ mod tests {
         std::fs::write(scope_dir.join("cgroup.procs"), "").expect("write fake cgroup.procs");
         assert!(scope_dir.exists(), "scope dir must exist before removal");
 
-        let result = remove_workload_scope(tmp.path(), &scope);
+        let result = remove_workload_scope(tmp.path(), &scope).await;
         assert!(
             result.is_ok(),
             "remove_workload_scope must succeed via the ENOTEMPTY fallback; got {result:?}",
@@ -411,13 +424,13 @@ mod tests {
     /// `create_workload_scope` writes a directory. Kills body→Ok(())
     /// — the mutant skips `create_dir_all`, so the directory does
     /// NOT appear on disk; the assertion catches the missing dir.
-    #[test]
-    fn create_workload_scope_writes_a_real_directory() {
+    #[tokio::test]
+    async fn create_workload_scope_writes_a_real_directory() {
         let tmp = tempfile::TempDir::new().expect("tempdir");
         let scope_path = "overdrive.slice/workloads.slice/alloc-create-0.scope";
         let scope = CgroupPath::from_str(scope_path).expect("valid CgroupPath");
 
-        let result = create_workload_scope(tmp.path(), &scope);
+        let result = create_workload_scope(tmp.path(), &scope).await;
         assert!(result.is_ok(), "create_workload_scope must succeed; got {result:?}");
         let scope_dir = scope.resolve(tmp.path());
         assert!(scope_dir.exists(), "scope dir must exist on disk after create");
@@ -426,14 +439,14 @@ mod tests {
 
     /// `place_pid_in_scope` writes the pid to `cgroup.procs`. Kills
     /// body→Ok(()).
-    #[test]
-    fn place_pid_in_scope_writes_pid_to_cgroup_procs() {
+    #[tokio::test]
+    async fn place_pid_in_scope_writes_pid_to_cgroup_procs() {
         let tmp = tempfile::TempDir::new().expect("tempdir");
         let scope_path = "overdrive.slice/workloads.slice/alloc-place-0.scope";
         let scope = CgroupPath::from_str(scope_path).expect("valid CgroupPath");
         std::fs::create_dir_all(scope.resolve(tmp.path())).expect("create scope dir");
 
-        let result = place_pid_in_scope(tmp.path(), &scope, 1234);
+        let result = place_pid_in_scope(tmp.path(), &scope, 1234).await;
         assert!(result.is_ok(), "place_pid_in_scope must succeed; got {result:?}");
 
         let procs = std::fs::read_to_string(scope.resolve(tmp.path()).join("cgroup.procs"))
@@ -443,15 +456,15 @@ mod tests {
 
     /// `write_resource_limits` writes cpu.weight and memory.max.
     /// Kills body→Ok(()) and pins the cpu_weight_for delegation.
-    #[test]
-    fn write_resource_limits_writes_cpu_weight_and_memory_max() {
+    #[tokio::test]
+    async fn write_resource_limits_writes_cpu_weight_and_memory_max() {
         let tmp = tempfile::TempDir::new().expect("tempdir");
         let scope_path = "overdrive.slice/workloads.slice/alloc-limits-0.scope";
         let scope = CgroupPath::from_str(scope_path).expect("valid CgroupPath");
         std::fs::create_dir_all(scope.resolve(tmp.path())).expect("create scope dir");
 
         let resources = Resources { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 };
-        let result = write_resource_limits(tmp.path(), &scope, &resources);
+        let result = write_resource_limits(tmp.path(), &scope, &resources).await;
         assert!(result.is_ok(), "write_resource_limits must succeed; got {result:?}");
 
         let weight = std::fs::read_to_string(scope.resolve(tmp.path()).join("cpu.weight"))
@@ -472,15 +485,15 @@ mod tests {
     /// either, but production also writes side effects on success;
     /// the mutant skips the call entirely → cpu.weight does NOT
     /// appear on disk). The assertion catches the missing file.
-    #[test]
-    fn write_resource_limits_warn_on_error_writes_files_on_success() {
+    #[tokio::test]
+    async fn write_resource_limits_warn_on_error_writes_files_on_success() {
         let tmp = tempfile::TempDir::new().expect("tempdir");
         let scope_path = "overdrive.slice/workloads.slice/alloc-warn-ok-0.scope";
         let scope = CgroupPath::from_str(scope_path).expect("valid CgroupPath");
         std::fs::create_dir_all(scope.resolve(tmp.path())).expect("create scope dir");
 
         let resources = Resources { cpu_milli: 200, memory_bytes: 1024 * 1024 };
-        write_resource_limits_warn_on_error(tmp.path(), &scope, &resources);
+        write_resource_limits_warn_on_error(tmp.path(), &scope, &resources).await;
 
         assert!(
             scope.resolve(tmp.path()).join("cpu.weight").exists(),

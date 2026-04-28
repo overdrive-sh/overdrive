@@ -718,6 +718,28 @@ you actually deleted what you set out to delete.
   + `process::exit()` patterns. `expect` already prints and panics;
   wrapping `process::exit` around fallible constructors adds noise with
   no benefit.
+- **No blocking `std::fs::*` inside `async fn`.** Filesystem I/O inside
+  an `async fn` body in an `adapter-host`-class crate goes through
+  `tokio::fs::*` (preferred — same syscall surface, async API) or
+  `tokio::task::spawn_blocking` (escape hatch — the sync closure runs
+  on the blocking pool). Sync `std::fs::*` blocks the tokio worker
+  thread and stalls every other future scheduled on it until the
+  syscall returns. The dst-lint gate enforces this at PR time:
+  `xtask/src/dst_lint.rs::scan_source_async_fs` walks every `async fn`
+  body (plus `async {}` blocks and `async fn` inside `#[async_trait]`
+  impls) in `adapter-host` crate `src/` and flags any path under
+  `std::fs::*`. Two exemptions:
+  - **Sync helper fns** are allowed to use `std::fs::*` directly. The
+    lint only fires when the *enclosing* fn / closure / async block
+    is async — sync helpers called from an `async fn` are still a
+    smell, but if you genuinely cannot make the helper async, wrap
+    its call site in `tokio::task::spawn_blocking`.
+  - **`#[cfg(test)]` items.** Tests may use sync `std::fs` for fixture
+    setup without penalty. The lint detects `#[cfg(test)]` on modules
+    and on individual fns and skips both.
+  Note: `tokio::fs::*` itself dispatches each call onto the blocking
+  pool internally — the *kernel* still does blocking I/O. The
+  difference is that the `async fn` body is never the one blocked.
 
 ### Hashing requires deterministic serialization
 

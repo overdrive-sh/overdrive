@@ -91,7 +91,7 @@ pub fn provision_db_path(
 /// cannot be created or the libSQL builder rejects the path.
 pub async fn open_db(path: &Path) -> Result<libsql::Database, ControlPlaneError> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| {
+        tokio::fs::create_dir_all(parent).await.map_err(|e| {
             ControlPlaneError::internal(
                 format!("libsql_provisioner: create parent {} failed", parent.display()),
                 e,

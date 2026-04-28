@@ -12,8 +12,7 @@ use proptest::prelude::*;
 /// Strategy producing valid alloc IDs (DNS-1123-like: lowercase
 /// alphanumerics, `-`, `_`, `.`, length 1..=64).
 fn arb_alloc_id() -> impl Strategy<Value = String> {
-    "[a-z0-9][a-z0-9._-]{0,62}[a-z0-9]"
-        .prop_filter("non-empty", |s: &String| !s.is_empty())
+    "[a-z0-9][a-z0-9._-]{0,62}[a-z0-9]".prop_filter("non-empty", |s: &String| !s.is_empty())
 }
 
 proptest! {

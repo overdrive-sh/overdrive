@@ -219,7 +219,7 @@ impl Driver for ProcessDriver {
 
         // 1. Create the scope directory. Failure here is fatal — we
         //    never have a PID to clean up.
-        if let Err(err) = create_workload_scope(&self.cgroup_root, &scope) {
+        if let Err(err) = create_workload_scope(&self.cgroup_root, &scope).await {
             return Err(start_rejected(format!("create workload scope: {err}")));
         }
 
@@ -231,7 +231,7 @@ impl Driver for ProcessDriver {
                 "force_limit_write_failure injected",
             ))
         } else {
-            write_resource_limits(&self.cgroup_root, &scope, &spec.resources)
+            write_resource_limits(&self.cgroup_root, &scope, &spec.resources).await
         };
         if let Err(err) = limit_result {
             warn!(
@@ -249,7 +249,7 @@ impl Driver for ProcessDriver {
         let child = match cmd.spawn() {
             Ok(child) => child,
             Err(err) => {
-                let _ = remove_workload_scope(&self.cgroup_root, &scope);
+                let _ = remove_workload_scope(&self.cgroup_root, &scope).await;
                 return Err(start_rejected(format!("spawn {}: {err}", spec.image)));
             }
         };
@@ -261,10 +261,10 @@ impl Driver for ProcessDriver {
             // child.id() returns None only after wait() — should not
             // happen here since we just spawned. Treat as fatal start
             // failure for safety.
-            let _ = remove_workload_scope(&self.cgroup_root, &scope);
+            let _ = remove_workload_scope(&self.cgroup_root, &scope).await;
             return Err(start_rejected("tokio Child returned no pid (already reaped?)"));
         };
-        if let Err(err) = place_pid_in_scope(&self.cgroup_root, &scope, pid) {
+        if let Err(err) = place_pid_in_scope(&self.cgroup_root, &scope, pid).await {
             // Best-effort kill + cleanup. We don't await here —
             // the tokio Child's drop handler does not reap, but the
             // OS will reap orphans. For defence-in-depth we send
@@ -277,7 +277,7 @@ impl Driver for ProcessDriver {
             unsafe {
                 libc::kill(pid as libc::pid_t, libc::SIGKILL);
             }
-            let _ = remove_workload_scope(&self.cgroup_root, &scope);
+            let _ = remove_workload_scope(&self.cgroup_root, &scope).await;
             return Err(start_rejected(format!("place pid in scope: {err}")));
         }
 
@@ -346,9 +346,9 @@ impl Driver for ProcessDriver {
             send_sigkill_pgrp(pid);
         }
         if !self.allow_no_cgroups {
-            let _ = cgroup_kill(&self.cgroup_root, &scope);
+            let _ = cgroup_kill(&self.cgroup_root, &scope).await;
             // 5. Tear down the cgroup scope. NotFound is benign.
-            let _ = remove_workload_scope(&self.cgroup_root, &scope);
+            let _ = remove_workload_scope(&self.cgroup_root, &scope).await;
         }
 
         // 6. Record terminal state so subsequent status() calls
@@ -372,20 +372,22 @@ impl Driver for ProcessDriver {
         handle: &AllocationHandle,
         resources: Resources,
     ) -> Result<(), DriverError> {
-        let live = self.live.lock();
-        match live.get(&handle.alloc) {
-            Some(LiveAllocation::Running { scope, .. }) => {
-                cgroup_manager::write_resource_limits_warn_on_error(
-                    &self.cgroup_root,
-                    scope,
-                    &resources,
-                );
-                Ok(())
+        // Clone the scope out under the lock and drop the guard before
+        // any `.await` — parking_lot mutexes must not be held across
+        // suspension points (`.claude/rules/development.md`
+        // § Concurrency & async).
+        let scope = {
+            let live = self.live.lock();
+            match live.get(&handle.alloc) {
+                Some(LiveAllocation::Running { scope, .. }) => scope.clone(),
+                Some(LiveAllocation::Terminated) | None => {
+                    return Err(DriverError::NotFound { alloc: handle.alloc.clone() });
+                }
             }
-            Some(LiveAllocation::Terminated) | None => {
-                Err(DriverError::NotFound { alloc: handle.alloc.clone() })
-            }
-        }
+        };
+        cgroup_manager::write_resource_limits_warn_on_error(&self.cgroup_root, &scope, &resources)
+            .await;
+        Ok(())
     }
 }
 

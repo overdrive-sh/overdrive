@@ -9,7 +9,7 @@
 #![allow(clippy::unwrap_used)]
 
 mod acceptance {
-    mod sim_driver_only_in_default_lane;
     mod cgroup_path_roundtrip;
     mod cgroup_path_validation;
+    mod sim_driver_only_in_default_lane;
 }
