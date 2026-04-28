@@ -79,6 +79,9 @@ fn allow_no_cgroups_bypasses_preflight_with_warning_banner() {
         data_dir,
         operator_config_dir,
         allow_no_cgroups: true,
+        // `tick_cadence` + `clock` default per
+        // `fix-convergence-loop-not-spawned` Step 01-02.
+        ..Default::default()
     };
 
     let runtime = tokio::runtime::Builder::new_current_thread()

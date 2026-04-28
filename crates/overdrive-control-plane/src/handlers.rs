@@ -17,6 +17,7 @@ use axum::Json;
 use axum::extract::{Path, State};
 use overdrive_core::aggregate::{IntentKey, Job, JobSpecInput};
 use overdrive_core::id::{ContentHash, JobId};
+use overdrive_core::reconciler::{ReconcilerName, TargetResource};
 use overdrive_core::traits::intent_store::{IntentStore, PutOutcome};
 
 use crate::api::{StopJobResponse, StopOutcome};
@@ -24,6 +25,30 @@ use crate::api::{StopJobResponse, StopOutcome};
 use crate::AppState;
 use crate::api;
 use crate::error::ControlPlaneError;
+use crate::eval_broker::Evaluation;
+
+/// Enqueue a `(job-lifecycle, job/<id>)` evaluation onto the runtime
+/// broker. Called from `submit_job` and `stop_job` after the
+/// `IntentStore` write commits — the edge-triggered ingress half of
+/// whitepaper §18 *Triggering Model — Hybrid by Design*. The
+/// convergence-loop spawn in [`crate::run_server_with_obs_and_driver`]
+/// drains the broker on the next tick and dispatches one
+/// [`crate::reconciler_runtime::run_convergence_tick`] call per pending
+/// evaluation.
+///
+/// Per `fix-convergence-loop-not-spawned` Step 01-02 (RCA Option B2):
+/// without this enqueue, `IntentStore` writes would commit but no
+/// convergence would ever run — `cluster_status.broker.dispatched`
+/// would permanently read 0.
+fn enqueue_job_lifecycle_eval(state: &AppState, job_id: &JobId) -> Result<(), ControlPlaneError> {
+    let reconciler = ReconcilerName::new("job-lifecycle")
+        .map_err(|e| ControlPlaneError::internal("ReconcilerName::new(\"job-lifecycle\")", e))?;
+    let target_string = format!("job/{job_id}");
+    let target = TargetResource::new(&target_string)
+        .map_err(|e| ControlPlaneError::internal("TargetResource::new(job/<id>)", e))?;
+    state.runtime.broker().submit(Evaluation { reconciler, target });
+    Ok(())
+}
 
 /// Parse a `JobId` from a path parameter, attaching `field = Some("id")` to
 /// the validation error so HTTP clients can branch on the error origin.
@@ -127,17 +152,29 @@ pub async fn submit_job(
     //    see `None` on the read and both fall through to the write,
     //    silently clobbering the first spec.
     match state.store.put_if_absent(key.as_bytes(), archived.as_ref()).await? {
-        PutOutcome::Inserted => Ok(Json(api::SubmitJobResponse {
-            job_id: job.id.to_string(),
-            spec_digest,
-            outcome: api::IdempotencyOutcome::Inserted,
-        })),
+        PutOutcome::Inserted => {
+            // Edge-triggered ingress per whitepaper §18: enqueue an
+            // evaluation for the job-lifecycle reconciler so the
+            // convergence-loop spawn picks it up on the next tick.
+            // Per `fix-convergence-loop-not-spawned` Step 01-02.
+            enqueue_job_lifecycle_eval(&state, &job.id)?;
+            Ok(Json(api::SubmitJobResponse {
+                job_id: job.id.to_string(),
+                spec_digest,
+                outcome: api::IdempotencyOutcome::Inserted,
+            }))
+        }
         PutOutcome::KeyExists { existing } => {
             if existing.as_ref() == archived.as_ref() {
                 // Byte-identical re-submission: 200 OK with
                 // `outcome = Unchanged`; the `spec_digest` is stable
                 // across N retries by construction (rkyv archival is
-                // canonical).
+                // canonical). Enqueue an evaluation anyway: the
+                // resubmit is operator intent to re-converge against
+                // any drift, and the broker collapses duplicates per
+                // §18 evaluation-broker semantics so a flapping
+                // resubmit produces one pending eval, not N.
+                enqueue_job_lifecycle_eval(&state, &job.id)?;
                 Ok(Json(api::SubmitJobResponse {
                     job_id: job.id.to_string(),
                     spec_digest,
@@ -146,7 +183,8 @@ pub async fn submit_job(
             } else {
                 // Different spec at the same key — 409 Conflict.
                 // Conflict is HTTP-status, never a wire `outcome`
-                // value (ADR-0015 §4 amended by ADR-0020).
+                // value (ADR-0015 §4 amended by ADR-0020). No
+                // evaluation enqueued — the intent did not change.
                 Err(ControlPlaneError::Conflict {
                     message: format!("a different spec is already registered at {}", key.as_str()),
                 })
@@ -292,6 +330,15 @@ pub async fn stop_job(
         PutOutcome::Inserted => StopOutcome::Stopped,
         PutOutcome::KeyExists { .. } => StopOutcome::AlreadyStopped,
     };
+
+    // Edge-triggered ingress per whitepaper §18: enqueue an
+    // evaluation for the job-lifecycle reconciler so the
+    // convergence-loop spawn drives the running allocations to
+    // Terminated. Both Stopped and AlreadyStopped enqueue: a redundant
+    // stop arriving while the prior stop has not yet converged is
+    // collapsed by the broker's `(reconciler, target)` keying.
+    // Per `fix-convergence-loop-not-spawned` Step 01-02.
+    enqueue_job_lifecycle_eval(&state, &job_id)?;
 
     Ok(axum::Json(StopJobResponse { job_id: job_id.to_string(), outcome }))
 }

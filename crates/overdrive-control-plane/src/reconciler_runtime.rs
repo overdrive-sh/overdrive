@@ -42,7 +42,7 @@ use overdrive_core::traits::intent_store::IntentStore;
 use crate::AppState;
 use crate::action_shim;
 use crate::error::ControlPlaneError;
-use crate::eval_broker::EvaluationBroker;
+use crate::eval_broker::{Evaluation, EvaluationBroker};
 use crate::libsql_provisioner::provision_db_path;
 
 /// Registry + broker + libSQL path owner.
@@ -54,7 +54,21 @@ pub struct ReconcilerRuntime {
     /// registration is rejected with `ControlPlaneError::Conflict`.
     reconcilers: BTreeMap<ReconcilerName, AnyReconciler>,
     /// Cancelable-eval-set evaluation broker per ADR-0013 §8.
-    broker: EvaluationBroker,
+    ///
+    /// Wrapped in [`parking_lot::Mutex`] per
+    /// `fix-convergence-loop-not-spawned` Step 01-02 (RCA Option B2):
+    /// `submit_job` / `stop_job` (handler path) and the spawn loop in
+    /// [`crate::run_server_with_obs_and_driver`] both call broker
+    /// methods that need `&mut self` (`submit`, `drain_pending`).
+    /// Since `state.runtime` is `Arc<ReconcilerRuntime>`, neither
+    /// caller has unique ownership; a sync mutex is the smallest
+    /// adapter. Per `.claude/rules/development.md` § Concurrency &
+    /// async — `parking_lot` over `std::sync` because the critical
+    /// sections are straight-line and panic-free; no `.await` is
+    /// ever held across the lock (broker methods are sync; the
+    /// spawn loop drains into a local `Vec<Evaluation>` and drops
+    /// the guard before per-eval `.await`).
+    broker: parking_lot::Mutex<EvaluationBroker>,
 }
 
 impl ReconcilerRuntime {
@@ -80,7 +94,11 @@ impl ReconcilerRuntime {
                 e,
             )
         })?;
-        Ok(Self { data_dir: canon, reconcilers: BTreeMap::new(), broker: EvaluationBroker::new() })
+        Ok(Self {
+            data_dir: canon,
+            reconcilers: BTreeMap::new(),
+            broker: parking_lot::Mutex::new(EvaluationBroker::new()),
+        })
     }
 
     /// Register a reconciler. Derives its libSQL path under
@@ -116,10 +134,19 @@ impl ReconcilerRuntime {
         self.reconcilers.keys().cloned().collect()
     }
 
-    /// Borrow the evaluation broker.
-    #[must_use]
-    pub const fn broker(&self) -> &EvaluationBroker {
-        &self.broker
+    /// Borrow the evaluation broker through the per-runtime mutex.
+    ///
+    /// Returns a [`parking_lot::MutexGuard`] which derefs to
+    /// `&EvaluationBroker` AND `&mut EvaluationBroker` so both reads
+    /// (`counters`) and writes (`submit`, `drain_pending`) work
+    /// uniformly through the same accessor. Callers MUST drop the
+    /// guard before any `.await` per the no-locks-across-await rule
+    /// in `.claude/rules/development.md` § Concurrency & async; the
+    /// spawn loop in [`crate::run_server_with_obs_and_driver`] drains
+    /// into a local `Vec<Evaluation>` and drops the guard before
+    /// dispatching.
+    pub fn broker(&self) -> parking_lot::MutexGuard<'_, EvaluationBroker> {
+        self.broker.lock()
     }
 
     /// Iterate the registered reconcilers. Used by the ADR-0017
@@ -152,10 +179,26 @@ pub const DEFAULT_TICK_CADENCE: Duration = Duration::from_millis(100);
 /// (hydrate, libSQL) are surfaced through the same channel for now;
 /// Phase 2+ refines the error taxonomy.
 ///
-/// This function is the public seam tests use to drive the tick loop
-/// deterministically. Production wiring spawns a tokio task that
-/// calls this in a loop with `clock.sleep(tick_cadence)` between
-/// invocations.
+/// Spawned by [`crate::run_server_with_obs_and_driver`] as a tokio
+/// task that drains the [`crate::eval_broker::EvaluationBroker`] each
+/// tick (`config.tick_cadence`, default [`DEFAULT_TICK_CADENCE`]) and
+/// dispatches one call per pending [`crate::eval_broker::Evaluation`].
+/// Tests call this directly per-tick to drive the tick loop
+/// deterministically without booting the full server.
+///
+/// Self-re-enqueue: when `reconcile` returns a non-empty `Vec<Action>`
+/// (i.e. desired ≠ actual, the cluster has not converged yet), this
+/// function re-submits `(reconciler_name, target)` to the broker so
+/// the next drained tick re-evaluates. This is the "level-triggered
+/// inside the reconciler" half of the §18 hybrid model — without it
+/// the reconciler runs once after submit, the broker drains empty,
+/// and convergence stalls.
+///
+/// Shutdown ordering: [`crate::ServerHandle::shutdown`] cancels the
+/// convergence task FIRST (via `convergence_shutdown` token), awaits
+/// its join, THEN triggers axum graceful shutdown. The reverse
+/// ordering risks reconciler tasks holding `Arc<dyn Driver>` while
+/// axum-shutting-down state is accessed.
 ///
 /// # Errors
 ///
@@ -204,11 +247,32 @@ pub async fn run_convergence_tick(
         // this through libSQL diff-and-persist per ADR-0013 §2b.
         store_cached_view(reconciler, target, state, next_view);
 
+        // Capture `has_work` BEFORE dispatch — `action_shim::dispatch`
+        // consumes `actions: Vec<Action>` by value, so checking
+        // `actions.is_empty()` after the call would not compile. The
+        // self-re-enqueue gate (`has_work`) is what makes the
+        // level-triggered §18 half work: the next tick re-evaluates
+        // only when the cluster has not yet converged.
+        let has_work = !actions.is_empty();
+
         // Dispatch through the action shim — this is where `.await`
         // is permitted. Per-action error isolation lives in the shim.
         action_shim::dispatch(actions, state.driver.as_ref(), state.obs.as_ref(), &tick)
             .await
             .map_err(ConvergenceError::Shim)?;
+
+        // Self-re-enqueue per whitepaper §18 *Level-triggered inside
+        // the reconciler*: if `reconcile` emitted at least one action,
+        // desired ≠ actual on this tick — re-submit so the next drain
+        // re-evaluates. The broker collapses duplicates by
+        // `(reconciler, target)` so a flapping target produces one
+        // pending evaluation, not N.
+        if has_work {
+            state
+                .runtime
+                .broker()
+                .submit(Evaluation { reconciler: name.clone(), target: target.clone() });
+        }
     }
     Ok(())
 }

@@ -94,6 +94,16 @@ async fn spawn_server() -> (ServerHandle, SocketAddr, TempDir, String) {
         // bypass the cgroup pre-flight so they run uniformly on macOS
         // and on Linux without delegation.
         allow_no_cgroups: true,
+        // `tick_cadence` and `clock` default to
+        // `DEFAULT_TICK_CADENCE` (100ms) and `Arc::new(SystemClock)`.
+        // Per `fix-convergence-loop-not-spawned` Step 01-02: the
+        // production server now spawns a convergence-tick loop. This
+        // test does not assert on convergence outcomes — its
+        // assertions ride on the IntentStore round-trip through the
+        // submit_job handler — and shutdown ordering in
+        // `ServerHandle::shutdown` cancels the convergence task
+        // before axum graceful so any in-flight ticks land cleanly.
+        ..Default::default()
     };
     let handle = run_server(config).await.expect("run_server");
     let bound = handle.local_addr().await.expect("bound addr");

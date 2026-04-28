@@ -52,9 +52,13 @@ use axum::Router;
 use axum::routing::{get, post};
 use axum_server::Handle as AxumHandle;
 use axum_server::tls_rustls::RustlsConfig;
+use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::Driver;
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_store_local::LocalIntentStore;
+use tokio_util::sync::CancellationToken;
+
+use crate::reconciler_runtime::{DEFAULT_TICK_CADENCE, run_convergence_tick};
 
 /// Shared application state passed to every axum handler via
 /// [`axum::extract::State`]. Cheap to clone — the inner handles are
@@ -133,7 +137,7 @@ impl AppState {
 
 /// Configuration for the Phase 1 control-plane server. Populated at
 /// startup from CLI flags and environment.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ServerConfig {
     /// Socket address to bind the HTTPS listener. Default
     /// `127.0.0.1:7001` per ADR-0008. Use `127.0.0.1:0` in tests to
@@ -163,6 +167,40 @@ pub struct ServerConfig {
     /// banner on boot. Default: `false` (production safe default).
     /// Set via `overdrive serve --allow-no-cgroups` (dev only).
     pub allow_no_cgroups: bool,
+    /// Cadence between drains of the [`crate::eval_broker::EvaluationBroker`]
+    /// in the convergence-loop spawn (see
+    /// [`run_server_with_obs_and_driver`]). Default
+    /// [`reconciler_runtime::DEFAULT_TICK_CADENCE`] (100ms) per
+    /// ADR-0023. Tests inject a slower cadence with a [`SimClock`] to
+    /// step through the loop deterministically.
+    ///
+    /// [`SimClock`]: overdrive_core::traits::clock::Clock
+    pub tick_cadence: Duration,
+    /// Injected [`Clock`] used by the convergence-loop spawn for the
+    /// per-tick `now()` snapshot, the `tick.deadline` budget, and the
+    /// `clock.sleep(tick_cadence)` between drains. Production wires
+    /// this to `Arc::new(SystemClock)` from the
+    /// [`overdrive_host`] crate (the only crate permitted to
+    /// instantiate `SystemClock` per CLAUDE.md "Repository
+    /// structure"); DST tests inject `Arc<SimClock>` so the harness
+    /// controls time.
+    pub clock: Arc<dyn Clock>,
+}
+
+impl std::fmt::Debug for ServerConfig {
+    /// `Arc<dyn Clock>` is not [`Debug`], so the auto-derive on
+    /// `ServerConfig` is replaced by a manual impl that elides the
+    /// clock field.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ServerConfig")
+            .field("bind", &self.bind)
+            .field("data_dir", &self.data_dir)
+            .field("operator_config_dir", &self.operator_config_dir)
+            .field("allow_no_cgroups", &self.allow_no_cgroups)
+            .field("tick_cadence", &self.tick_cadence)
+            .field("clock", &"<dyn Clock>")
+            .finish()
+    }
 }
 
 impl Default for ServerConfig {
@@ -173,6 +211,13 @@ impl Default for ServerConfig {
     /// override; the `Default` impl exists exclusively to make
     /// `..Default::default()` rest-pattern construction ergonomic for
     /// test fixtures that override the three required fields.
+    ///
+    /// `tick_cadence` defaults to [`reconciler_runtime::DEFAULT_TICK_CADENCE`]
+    /// (100ms) and `clock` defaults to `Arc::new(SystemClock)` from
+    /// the [`overdrive_host`] crate — the only crate permitted to
+    /// instantiate `SystemClock` per CLAUDE.md "Repository structure".
+    /// Tests that need a controllable clock construct the
+    /// `ServerConfig` directly with `clock: Arc::new(SimClock::new())`.
     fn default() -> Self {
         // 127.0.0.1:0 — IPv4 loopback, ephemeral port. Constructed
         // directly rather than via `parse()` so the `Default` impl
@@ -183,6 +228,8 @@ impl Default for ServerConfig {
             data_dir: PathBuf::new(),
             operator_config_dir: PathBuf::new(),
             allow_no_cgroups: false,
+            tick_cadence: DEFAULT_TICK_CADENCE,
+            clock: Arc::new(overdrive_host::SystemClock),
         }
     }
 }
@@ -190,12 +237,23 @@ impl Default for ServerConfig {
 /// Handle to a running control-plane server.
 ///
 /// Drop does NOT stop the server; call [`ServerHandle::shutdown`] to
-/// drain in-flight requests and close the listener. The server task
-/// runs until the handle is shut down or the process exits.
+/// drain in-flight requests, stop the convergence-loop spawn, and
+/// close the listener. The server task runs until the handle is shut
+/// down or the process exits.
 #[derive(Debug)]
 pub struct ServerHandle {
     inner: AxumHandle,
     server_task: tokio::task::JoinHandle<std::io::Result<()>>,
+    /// `JoinHandle` for the convergence-tick spawn loop that drains
+    /// the `EvaluationBroker` and dispatches actions through the
+    /// action shim. See [`run_server_with_obs_and_driver`] for the
+    /// spawn site. Per `fix-convergence-loop-not-spawned` Step 01-02.
+    convergence_task: tokio::task::JoinHandle<()>,
+    /// Token observed by the convergence-tick spawn loop. Cancelled
+    /// in [`Self::shutdown`] BEFORE axum graceful so reconciler tasks
+    /// holding `Arc<dyn Driver>` references stop driving the driver
+    /// before axum begins to tear down `AppState`.
+    convergence_shutdown: CancellationToken,
 }
 
 impl ServerHandle {
@@ -208,14 +266,33 @@ impl ServerHandle {
     }
 
     /// Trigger graceful shutdown with a drain deadline. In-flight
-    /// requests complete; new connections are refused; the listener is
-    /// dropped. Awaits the server task to completion.
+    /// requests complete; new connections are refused; the convergence
+    /// loop stops draining the broker; the listener is dropped.
+    /// Awaits the server task to completion.
+    ///
+    /// Ordering — convergence task FIRST, then axum graceful, then
+    /// `server_task` join. The convergence task holds `Arc<dyn Driver>`
+    /// references; reversing this ordering risks reconciler tasks
+    /// driving the driver while axum is tearing down `AppState`. Per
+    /// `fix-convergence-loop-not-spawned` Step 01-02 (RCA Option B2).
     pub async fn shutdown(self, drain_deadline: Duration) {
+        // 1. Cancel the convergence loop and await its completion.
+        //    The loop's `tokio::select!` resolves the cancellation
+        //    branch on the next poll and `break`s; the join here
+        //    waits for the active tick (if any) to finish through
+        //    `action_shim::dispatch`.
+        self.convergence_shutdown.cancel();
+        let _ = self.convergence_task.await;
+
+        // 2. Trigger axum graceful shutdown. In-flight requests
+        //    complete within `drain_deadline`; new connections are
+        //    refused.
         self.inner.graceful_shutdown(Some(drain_deadline));
-        // The server task returns once the listener closes and in-flight
-        // connections drain. We ignore the inner result here — this is
-        // the shutdown path; test-level assertions on server outcome
-        // happen before shutdown is called.
+
+        // 3. Wait for the axum task to drain and exit. We ignore the
+        //    inner result here — this is the shutdown path;
+        //    test-level assertions on server outcome happen before
+        //    shutdown is called.
         let _ = self.server_task.await;
     }
 }
@@ -353,6 +430,81 @@ pub async fn run_server_with_obs_and_driver(
 
     let state: AppState = AppState::new(store, obs, runtime, driver);
 
+    // Spawn the convergence-tick loop per `fix-convergence-loop-not-
+    // spawned` Step 01-02 (RCA Option B2 broker-driven §18 wiring).
+    // Each iteration drains the EvaluationBroker, dispatches one
+    // `run_convergence_tick` per pending Evaluation, then sleeps
+    // `tick_cadence` before re-draining. Cancellation via
+    // `convergence_shutdown` is observed in `tokio::select!` between
+    // ticks so an in-flight dispatch always completes before exit.
+    //
+    // Without this spawn, `submit_job` and `stop_job` would only
+    // write to the IntentStore — the broker would never be drained,
+    // no allocations would ever be scheduled, and
+    // `cluster_status.broker.dispatched` would permanently read 0.
+    // See `docs/feature/fix-convergence-loop-not-spawned/bugfix-rca.md`
+    // for the full root-cause chain.
+    let convergence_shutdown = CancellationToken::new();
+    let convergence_task = {
+        let state = state.clone();
+        let clock = config.clock.clone();
+        let cadence = config.tick_cadence;
+        let token = convergence_shutdown.clone();
+        tokio::spawn(async move {
+            let mut tick_n: u64 = 0;
+            loop {
+                let now = clock.now();
+                let deadline = now + cadence;
+
+                // Drain the broker into a local Vec — the
+                // parking_lot::MutexGuard MUST be dropped before any
+                // `.await` per `.claude/rules/development.md`
+                // § Concurrency & async (no locks across `.await`).
+                // The broker is sync; capture the pending list, drop
+                // the guard, then iterate.
+                let pending = {
+                    let mut broker = state.runtime.broker();
+                    broker.drain_pending()
+                };
+
+                for eval in pending {
+                    if let Err(e) =
+                        run_convergence_tick(&state, &eval.target, now, tick_n, deadline).await
+                    {
+                        tracing::warn!(
+                            target: "overdrive::reconciler",
+                            ?e,
+                            target_name = %eval.target.as_str(),
+                            "convergence tick error"
+                        );
+                    }
+                }
+
+                tick_n = tick_n.saturating_add(1);
+
+                // Cooperative shutdown: the cancellation branch wins
+                // immediately when the token is cancelled; otherwise
+                // we sleep one cadence and re-drain.
+                //
+                // The explicit `yield_now` after the select is what
+                // makes this loop play nicely with `SimClock` under
+                // tests: `SimClock::sleep` advances logical time and
+                // returns immediately (no `tokio::time` integration),
+                // so without an explicit yield this would be a tight
+                // CPU loop that starves the test thread, the HTTP
+                // handler tasks, and the cancellation observer. Under
+                // `SystemClock` the `clock.sleep(cadence)` itself
+                // yields via `tokio::time::sleep`, making the
+                // `yield_now` redundant but harmless.
+                tokio::select! {
+                    () = clock.sleep(cadence) => {},
+                    () = token.cancelled()    => break,
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+    };
+
     // Assemble the router. Step 03-03 wires the real `alloc_status` and
     // `node_list` observation-read handlers; step 03-05 aligned the
     // `cluster_status` handler signature; step 05-03 wires it onto the
@@ -399,7 +551,7 @@ pub async fn run_server_with_obs_and_driver(
 
     let server_task = tokio::spawn(async move { server.serve(router.into_make_service()).await });
 
-    Ok(ServerHandle { inner: axum_handle, server_task })
+    Ok(ServerHandle { inner: axum_handle, server_task, convergence_task, convergence_shutdown })
 }
 
 /// Construct the `noop-heartbeat` reconciler. Exposed as a public

@@ -97,6 +97,9 @@ async fn spawn_server_with_obs_handle()
         // bypass the cgroup pre-flight so they run uniformly on macOS
         // and on Linux without delegation.
         allow_no_cgroups: true,
+        // `tick_cadence` + `clock` default per
+        // `fix-convergence-loop-not-spawned` Step 01-02.
+        ..Default::default()
     };
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Process));
     let handle = run_server_with_obs_and_driver(config, Arc::clone(&obs), driver)

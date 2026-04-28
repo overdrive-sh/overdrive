@@ -33,6 +33,9 @@ async fn boots_with_allow_no_cgroups_on_any_host() {
         // The contract: this flag bypasses the cgroup pre-flight so the
         // default lane runs uniformly on every host.
         allow_no_cgroups: true,
+        // `tick_cadence` + `clock` default per
+        // `fix-convergence-loop-not-spawned` Step 01-02.
+        ..Default::default()
     };
     let handle = run_server(config).await.expect("run_server with allow_no_cgroups");
 

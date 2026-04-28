@@ -9,7 +9,7 @@
 //! permanently reads `0`.
 //!
 //! This regression test boots the real server end-to-end (axum +
-//! rustls + reqwest + LocalIntentStore on tempdir) with a `SimClock`
+//! rustls + reqwest + `LocalIntentStore` on tempdir) with a `SimClock`
 //! and `SimDriver` so the test runs uniformly on macOS and Linux in
 //! the default `--features integration-tests` lane (no real kernel,
 //! no `ProcessDriver` cleanup).
@@ -31,7 +31,7 @@
 //!      Root Cause C (no automated gate on `broker.dispatched`).
 //!   2. Submitted job reaches `Running` — kills Roots A + B
 //!      together (production omission of the spawn AND
-//!      submit_job not enqueueing an evaluation).
+//!      `submit_job` not enqueueing an evaluation).
 //!
 //! Tier 3 — real axum server, real rustls handshake, real reqwest
 //! client. Gated by the `integration-tests` feature at the
@@ -204,8 +204,14 @@ async fn submitted_job_reaches_running_via_real_server_boot() {
         .json()
         .await
         .expect("decode AllocStatusResponse");
+    // `AllocState::Display` renders the canonical lowercase form
+    // (`"running"`) — see `overdrive-core::traits::observation_store::AllocState::fmt`.
+    // The Step 01-01 RED scaffold mistakenly asserted on the
+    // capitalised form; the case fix is a test-bug correction, not a
+    // weakening of the assertion (the assertion still pins
+    // `state.to_string() == "running"` AND `job_id == "payments"`).
     assert!(
-        allocs.rows.iter().any(|a| a.job_id == "payments" && a.state == "Running"),
+        allocs.rows.iter().any(|a| a.job_id == "payments" && a.state == "running"),
         "submitted job must reach Running via the production convergence loop; \
          got {:?}",
         allocs.rows,

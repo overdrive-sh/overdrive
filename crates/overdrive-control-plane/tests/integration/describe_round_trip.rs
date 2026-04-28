@@ -86,6 +86,9 @@ async fn spawn_server() -> (ServerHandle, SocketAddr, TempDir, String) {
         // bypass the cgroup pre-flight so they run uniformly on macOS
         // and on Linux without delegation.
         allow_no_cgroups: true,
+        // `tick_cadence` + `clock` default per
+        // `fix-convergence-loop-not-spawned` Step 01-02.
+        ..Default::default()
     };
     let handle = run_server(config).await.expect("run_server");
     let bound = handle.local_addr().await.expect("bound addr");
