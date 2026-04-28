@@ -47,6 +47,14 @@ use super::super::job_lifecycle::cleanup::AllocCleanup;
 
 #[tokio::test]
 async fn cluster_status_responsive_under_workload_cpu_burst() {
+    // This test exercises the real /sys/fs/cgroup hierarchy and requires
+    // root or cgroup delegation. Stock GitHub Actions runners are neither;
+    // run the full test via `cargo xtask lima run`.
+    // SAFETY: getuid() is always safe to call.
+    if unsafe { libc::getuid() } != 0 {
+        return;
+    }
+
     let tmp = TempDir::new().expect("tempdir");
     let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime");
     runtime.register(noop_heartbeat()).expect("register noop");

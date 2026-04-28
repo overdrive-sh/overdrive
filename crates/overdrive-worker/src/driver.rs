@@ -177,7 +177,6 @@ impl ProcessDriver {
         // POSIX async-signal-safe list.
         #[cfg(target_os = "linux")]
         {
-            use std::os::unix::process::CommandExt;
             // SAFETY: `setsid` is async-signal-safe; the closure is
             // executed in the forked child between fork and exec, no
             // shared state is touched.
@@ -273,9 +272,12 @@ impl Driver for ProcessDriver {
             // SAFETY: `pid` came from `Child::id()` so it is a live
             // child PID owned by this process. `libc::kill` with a
             // valid pid + signal is sound; we ignore the return code
-            // because cleanup is best-effort.
+            // because cleanup is best-effort. PIDs fit in pid_t; if
+            // conversion somehow fails (theoretical), skip the kill.
             unsafe {
-                libc::kill(pid as libc::pid_t, libc::SIGKILL);
+                if let Ok(raw) = libc::pid_t::try_from(pid) {
+                    libc::kill(raw, libc::SIGKILL);
+                }
             }
             let _ = remove_workload_scope(&self.cgroup_root, &scope).await;
             return Err(start_rejected(format!("place pid in scope: {err}")));
@@ -402,8 +404,11 @@ fn send_sigterm(pid: u32) {
     // SAFETY: `libc::kill` is a thin syscall wrapper. Passing a pid
     // we obtained from `Child::id()` and a documented signal constant
     // is sound. We do not interpret the return — best-effort.
+    // PIDs always fit in pid_t; the try_from handles the theoretical edge.
     unsafe {
-        libc::kill(pid as libc::pid_t, libc::SIGTERM);
+        if let Ok(raw) = libc::pid_t::try_from(pid) {
+            libc::kill(raw, libc::SIGTERM);
+        }
     }
 }
 
@@ -422,9 +427,11 @@ const fn send_sigterm(_pid: u32) {
 fn send_sigkill_pgrp(pid: u32) {
     // SAFETY: `libc::kill` with a negative pid targets a process group
     // and is sound for any signed pid_t. We ignore the return — best-effort.
+    // PIDs always fit in pid_t; the try_from handles the theoretical edge.
     unsafe {
-        let pgid = -(pid as libc::pid_t);
-        libc::kill(pgid, libc::SIGKILL);
+        if let Ok(raw) = libc::pid_t::try_from(pid) {
+            libc::kill(-raw, libc::SIGKILL);
+        }
     }
 }
 
