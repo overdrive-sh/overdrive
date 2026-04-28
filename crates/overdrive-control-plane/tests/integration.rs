@@ -48,6 +48,13 @@ mod integration {
     /// compile cleanly on macOS/Windows even when no test bodies
     /// exist there.
     mod job_lifecycle {
+        // Shared cleanup helper — reaps real `/bin/sleep` workloads
+        // spawned by the action shim so nextest does not flag the
+        // tests as `LEAK`. Used by `crash_recovery` and
+        // `submit_to_running`; `stop_to_terminated` cleans up via the
+        // production stop path under test.
+        #[cfg(target_os = "linux")]
+        mod cleanup;
         mod crash_recovery;
         mod stop_to_terminated;
         mod submit_to_running;

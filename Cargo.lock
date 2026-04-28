@@ -1501,6 +1501,7 @@ dependencies = [
  "bytes",
  "hostname",
  "hyper",
+ "libc",
  "libsql",
  "overdrive-core",
  "overdrive-sim",

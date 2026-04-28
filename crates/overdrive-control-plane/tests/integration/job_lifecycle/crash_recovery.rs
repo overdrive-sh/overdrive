@@ -35,6 +35,8 @@ use overdrive_store_local::LocalIntentStore;
 use overdrive_worker::ProcessDriver;
 use tempfile::TempDir;
 
+use super::cleanup::AllocCleanup;
+
 #[tokio::test]
 async fn killed_workload_is_restarted_with_fresh_alloc_id() {
     let tmp = TempDir::new().expect("tempdir");
@@ -50,6 +52,16 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
         Arc::new(ProcessDriver::new(std::path::PathBuf::from("/sys/fs/cgroup")));
 
     let state = AppState::new(store, obs, Arc::new(runtime), driver);
+
+    // Cleanup guard — fires when the test exits (panic or success) and
+    // mass-kills every workload cgroup the test created via
+    // `cgroup.kill`. Prevents the `LEAK` flag from nextest without
+    // depending on the `tokio::test` runtime that owns the `Child`
+    // handles being alive at drop time.
+    let _cleanup = AllocCleanup {
+        obs: state.obs.clone(),
+        cgroup_root: std::path::PathBuf::from("/sys/fs/cgroup"),
+    };
 
     let job = Job::from_spec(JobSpecInput {
         id: "payments".to_string(),
@@ -91,15 +103,26 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
     // write). Phase 1 has no real crash detector wired yet — the
     // direct-write models the post-detection state the reconciler
     // would observe.
+    //
+    // The crash-row counter is `prior + 1` — just enough to win LWW
+    // against the Phase-1 Running row. The action shim's
+    // `timestamp_for(tick)` writes counter = `tick.tick + 1`, so for
+    // the Phase-3 restart write to dominate the crash row we must also
+    // skip `tick_n` forward by 1 below — otherwise the next shim write
+    // would tie or lose. An earlier draft used `+100` which deadlocked
+    // the test: subsequent shim writes (counter ≤ 60) all lost LWW
+    // against a counter=~103 Terminated row, so Running was never
+    // re-observable.
     let rows = state.obs.alloc_status_rows().await.expect("read rows");
     let prior = rows.into_iter().find(|r| r.state == AllocState::Running).expect("running row");
+    let crashed_counter = prior.updated_at.counter.saturating_add(1);
     let crashed = overdrive_core::traits::observation_store::AllocStatusRow {
         alloc_id: prior.alloc_id.clone(),
         job_id: prior.job_id.clone(),
         node_id: prior.node_id.clone(),
         state: AllocState::Terminated,
         updated_at: overdrive_core::traits::observation_store::LogicalTimestamp {
-            counter: prior.updated_at.counter.saturating_add(100),
+            counter: crashed_counter,
             writer: prior.node_id.clone(),
         },
     };
@@ -108,6 +131,15 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
         .write(overdrive_core::traits::observation_store::ObservationRow::AllocStatus(crashed))
         .await
         .expect("write crash");
+
+    // Skip `tick_n` past the crash counter so the next shim write
+    // (counter = `tick.tick + 1`) strictly dominates the crash row
+    // under LWW. Without this, a tied (counter, writer) pair is a
+    // no-op per the §4 LWW idempotency rule and the Running row is
+    // silently dropped on every restart attempt.
+    if tick_n < crashed_counter {
+        tick_n = crashed_counter;
+    }
 
     // Phase 3: drive the convergence loop forward and observe
     // Terminated → Running. The reconciler emits RestartAllocation
@@ -128,5 +160,9 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
         recovered = rows.iter().any(|r| r.state == AllocState::Running);
         tick_n += 1;
     }
-    assert!(recovered, "alloc must reach Running again after crash within 30 additional ticks");
+    assert!(
+        recovered,
+        "alloc must reach Running again after crash within the Phase-3 tick budget \
+         (final tick_n={tick_n})"
+    );
 }

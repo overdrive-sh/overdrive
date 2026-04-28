@@ -23,6 +23,8 @@ use overdrive_core::reconciler::TargetResource;
 use overdrive_core::traits::driver::Driver;
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{AllocState, ObservationStore};
+
+use super::cleanup::AllocCleanup;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
 use overdrive_worker::ProcessDriver;
@@ -43,6 +45,16 @@ async fn submitted_job_reaches_running_via_real_process_driver() {
         Arc::new(ProcessDriver::new(std::path::PathBuf::from("/sys/fs/cgroup")));
 
     let state = AppState::new(store, obs, Arc::new(runtime), driver);
+
+    // Cleanup guard — fires on test exit (panic or success) and
+    // mass-kills every workload cgroup the test created via
+    // `cgroup.kill` + `waitpid`. Prevents the `LEAK` flag from
+    // nextest. See `cleanup` module for why we don't reuse
+    // `Driver::stop` here (tokio runtime cross-runtime hang).
+    let _cleanup = AllocCleanup {
+        obs: state.obs.clone(),
+        cgroup_root: std::path::PathBuf::from("/sys/fs/cgroup"),
+    };
 
     // Submit a 1-replica job that runs `/bin/sleep` for a long time.
     let job = Job::from_spec(JobSpecInput {
