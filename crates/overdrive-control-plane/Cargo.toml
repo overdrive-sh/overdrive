@@ -26,6 +26,14 @@ crate_class = "adapter-host"
 # budget; CI exercises the gate in a dedicated `integration` job. See
 # `.claude/rules/testing.md` §"Integration vs unit gating".
 integration-tests = []
+# `canary-bug` — TEST-ONLY feature. Forwards to `overdrive-core/canary-bug`
+# so the `HarnessNoopHeartbeat` variant of `AnyReconciler` becomes
+# visible to this crate's match arms in `reconciler_runtime.rs`. The
+# DST canary suite (`xtask/tests/acceptance/dst_canary_red_run.rs`)
+# enables both `overdrive-sim/canary-bug` and this feature on the
+# `cargo run -p xtask` subprocess so the runtime can dispatch through
+# the variant. Production builds never enable this feature.
+canary-bug = ["overdrive-core/canary-bug"]
 
 [dependencies]
 overdrive-core.workspace           = true

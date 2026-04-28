@@ -236,6 +236,11 @@ fn cached_view_or_default(
     let cache = state.view_cache.lock().expect("view_cache mutex");
     match (reconciler, cache.get(&key)) {
         (AnyReconciler::NoopHeartbeat(_), _) => AnyReconcilerView::Unit,
+        // The canary-bug fixture is a Unit-view reconciler under the
+        // same dispatch shape as `NoopHeartbeat`; gated on the
+        // crate-level feature so production builds never see it.
+        #[cfg(feature = "canary-bug")]
+        (AnyReconciler::HarnessNoopHeartbeat(_), _) => AnyReconcilerView::Unit,
         (AnyReconciler::JobLifecycle(_), Some(crate::CachedView::JobLifecycle(v))) => {
             AnyReconcilerView::JobLifecycle(v.clone())
         }
@@ -276,6 +281,11 @@ async fn hydrate_desired(
 ) -> Result<AnyState, ConvergenceError> {
     match reconciler {
         AnyReconciler::NoopHeartbeat(_) => Ok(AnyState::Unit),
+        // Canary-bug fixture mirrors `NoopHeartbeat` for hydrate-desired
+        // — Unit state, no `IntentStore` read. Production builds do not
+        // see this arm because the variant itself is feature-gated.
+        #[cfg(feature = "canary-bug")]
+        AnyReconciler::HarnessNoopHeartbeat(_) => Ok(AnyState::Unit),
         AnyReconciler::JobLifecycle(_) => {
             let job_id = job_id_from_target(target)?;
             let key = IntentKey::for_job(&job_id);
@@ -327,6 +337,11 @@ async fn hydrate_actual(
 ) -> Result<AnyState, ConvergenceError> {
     match reconciler {
         AnyReconciler::NoopHeartbeat(_) => Ok(AnyState::Unit),
+        // Canary-bug fixture mirrors `NoopHeartbeat` for hydrate-actual
+        // — Unit state, no `ObservationStore` read. Production builds
+        // do not see this arm because the variant itself is feature-gated.
+        #[cfg(feature = "canary-bug")]
+        AnyReconciler::HarnessNoopHeartbeat(_) => Ok(AnyState::Unit),
         AnyReconciler::JobLifecycle(_) => {
             let job_id = job_id_from_target(target)?;
             let rows = state

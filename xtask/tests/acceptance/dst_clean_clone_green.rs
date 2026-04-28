@@ -52,10 +52,13 @@ fn read_summary(target_dir: &Path) -> serde_json::Value {
 
 /// The invariants in the Phase 1 default catalogue — in canonical
 /// kebab-case as printed by `Invariant::Display`. The first six came
-/// in through the walking-skeleton slice (06-0x); the last three were
+/// in through the walking-skeleton slice (06-0x); the next three were
 /// added by slice 4 when the reconciler-primitive runtime landed
 /// (ADR-0013 §9 — `at-least-one-reconciler-registered`,
-/// `duplicate-evaluations-collapse`, `reconciler-is-pure`).
+/// `duplicate-evaluations-collapse`, `reconciler-is-pure`); the final
+/// three convergence invariants (`job-scheduled-after-submission`,
+/// `desired-replica-count-converges`, `no-double-scheduling`) landed in
+/// step 02-03 of phase-1-first-workload (slice 3, US-03).
 ///
 /// Keep this list in sync with `Invariant::ALL` in `overdrive-sim`; the
 /// length assertion in the test below pairs with the membership loop to
@@ -72,6 +75,9 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     "broker-drain-order-is-deterministic",
     "reconciler-is-pure",
     "intent-store-returns-caller-bytes",
+    "job-scheduled-after-submission",
+    "desired-replica-count-converges",
+    "no-double-scheduling",
 ];
 
 // -----------------------------------------------------------------------------

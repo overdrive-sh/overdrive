@@ -62,11 +62,21 @@ fn canary_guard() -> MutexGuard<'static, ()> {
     LOCK.get_or_init(|| Mutex::new(())).lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// Run `cargo run -p xtask --features overdrive-sim/canary-bug -- dst <args>`
-/// against the shared canary target dir. `cargo run` is used instead of
-/// the pre-built `CARGO_BIN_EXE_xtask` because the latter is compiled
+/// Run `cargo run -p xtask --features ... -- dst <args>` against the
+/// shared canary target dir. `cargo run` is used instead of the
+/// pre-built `CARGO_BIN_EXE_xtask` because the latter is compiled
 /// without the canary-bug feature — we need a per-test compile that
 /// turns the feature on.
+///
+/// Two crate-level features are enabled together:
+///   * `overdrive-sim/canary-bug` — plants the deliberate LWW /
+///     reconciler-purity bugs the harness must catch.
+///   * `overdrive-control-plane/canary-bug` — forwards to
+///     `overdrive-core/canary-bug` so the runtime's match arms in
+///     `reconciler_runtime.rs` see and dispatch through the
+///     `HarnessNoopHeartbeat` variant of `AnyReconciler`. Without this
+///     the `cargo run` subprocess fails at compile time with
+///     non-exhaustive-match errors and no DST artifacts are written.
 ///
 /// The caller is expected to hold the canary mutex for the duration of
 /// the call so that `xtask/dst-summary.json` can be read without racing
@@ -79,7 +89,7 @@ fn run_dst_canary(extra_args: &[&str]) -> Output {
         "-p",
         "xtask",
         "--features",
-        "overdrive-sim/canary-bug",
+        "overdrive-sim/canary-bug,overdrive-control-plane/canary-bug",
         "--",
         "dst",
     ]);
