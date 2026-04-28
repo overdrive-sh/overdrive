@@ -15,6 +15,45 @@ use overdrive_worker::ProcessDriver;
 use tempfile::TempDir;
 use tokio::time::Instant;
 
+/// Bit mask for SIGTERM (signal 15) in the `SigIgn` mask reported by
+/// `/proc/<pid>/status`. Bit `n-1` corresponds to signal `n`.
+const SIGTERM_BIT: u64 = 1u64 << (15 - 1);
+
+/// Poll `/proc/<pid>/status` until the workload has set up its
+/// SIGTERM ignore-trap, OR a deadline elapses. Eliminates the
+/// race where SIGTERM is delivered to the freshly-spawned shell
+/// before it has executed `trap '' TERM`.
+///
+/// Returns `Ok(())` once the bit is observed; `Err(...)` on timeout
+/// or when `/proc/<pid>/status` cannot be read at all.
+async fn await_sigterm_trap_installed(pid: u32, deadline: Duration) -> Result<(), String> {
+    let started = std::time::Instant::now();
+    loop {
+        let path = format!("/proc/{pid}/status");
+        match std::fs::read_to_string(&path) {
+            Ok(status) => {
+                if let Some(line) = status.lines().find(|l| l.starts_with("SigIgn:")) {
+                    // Format: `SigIgn:\t0000000000004000`
+                    let hex = line.trim_start_matches("SigIgn:").trim();
+                    if let Ok(mask) = u64::from_str_radix(hex, 16) {
+                        if mask & SIGTERM_BIT != 0 {
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+            Err(_) => {
+                // Process may have already exited — bail.
+                return Err(format!("could not read {path}"));
+            }
+        }
+        if started.elapsed() >= deadline {
+            return Err(format!("SIGTERM trap not installed within {deadline:?}"));
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+}
+
 #[tokio::test]
 async fn stop_escalates_to_sigkill_when_sigterm_ignored() {
     let cgroup_root = TempDir::new().expect("tempdir created");
@@ -38,6 +77,16 @@ async fn stop_escalates_to_sigkill_when_sigterm_ignored() {
     };
 
     let handle = driver.start(&spec).await.expect("start succeeds");
+
+    // Wait for the shell to actually install `trap '' TERM` before we
+    // probe stop()'s escalation behaviour. Without this, SIGTERM races
+    // the shell's startup and kills it with the default action — the
+    // grace window then never applies and the test sees a sub-grace
+    // elapsed (~100µs).
+    let pid = handle.pid.expect("ProcessDriver always populates pid on Linux");
+    await_sigterm_trap_installed(pid, Duration::from_secs(2))
+        .await
+        .expect("workload installed SIGTERM trap before stop()");
 
     let started = Instant::now();
     driver.stop(&handle).await.expect("stop eventually succeeds via SIGKILL");

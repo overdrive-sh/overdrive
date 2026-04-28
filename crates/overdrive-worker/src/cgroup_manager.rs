@@ -160,11 +160,7 @@ pub fn create_workload_scope(root: &Path, scope: &CgroupPath) -> Result<(), std:
 /// # Errors
 ///
 /// Returns an error if the scope's `cgroup.procs` cannot be written.
-pub fn place_pid_in_scope(
-    root: &Path,
-    scope: &CgroupPath,
-    pid: u32,
-) -> Result<(), std::io::Error> {
+pub fn place_pid_in_scope(root: &Path, scope: &CgroupPath, pid: u32) -> Result<(), std::io::Error> {
     let path = scope.resolve(root).join("cgroup.procs");
     std::fs::write(&path, format!("{pid}\n"))
 }
@@ -202,11 +198,7 @@ pub fn write_resource_limits(
 /// Wrapper for `write_resource_limits` that converts a write error
 /// into a structured warning log AND returns `Ok(())` to the caller
 /// per ADR-0026 D9 warn-and-continue disposition.
-pub fn write_resource_limits_warn_on_error(
-    root: &Path,
-    scope: &CgroupPath,
-    resources: &Resources,
-) {
+pub fn write_resource_limits_warn_on_error(root: &Path, scope: &CgroupPath, resources: &Resources) {
     if let Err(err) = write_resource_limits(root, scope, resources) {
         warn!(
             scope = %scope,
@@ -216,21 +208,77 @@ pub fn write_resource_limits_warn_on_error(
     }
 }
 
-/// Remove the workload scope directory after process reap.
-/// Idempotent — succeeds when the directory is already gone.
+/// Mass-kill every process in the workload cgroup.
+///
+/// Uses the kernel's `cgroup.kill` interface (cgroup v2, kernel 5.14+)
+/// — writes `1\n` to `<scope>/cgroup.kill`, which atomically delivers
+/// SIGKILL to every task in the cgroup including grandchildren that
+/// escaped the driver's tokio `Child` handle (e.g. `/bin/sh -c '...'`
+/// shells whose `sleep` child reparents to init when the shell dies).
+///
+/// Idempotent — `NotFound` (scope already gone) is reported as `Ok`.
+/// Invalid-argument writes (a path that exists but is not a v2 cgroup)
+/// surface to the caller; production wires `/sys/fs/cgroup` so this
+/// code path is the happy path on Lima / LVH / production hosts alike.
 ///
 /// # Errors
 ///
-/// Returns the underlying io error if `rmdir` fails for a reason
-/// other than `NotFound`.
-pub fn remove_workload_scope(
-    root: &Path,
-    scope: &CgroupPath,
-) -> Result<(), std::io::Error> {
-    let dir = scope.resolve(root);
-    match std::fs::remove_dir(&dir) {
+/// Returns the underlying io error if the write fails for a reason
+/// other than the scope being absent. The caller is expected to
+/// `tracing::warn!` and continue — terminal cleanup is best-effort by
+/// design.
+pub fn cgroup_kill(root: &Path, scope: &CgroupPath) -> Result<(), std::io::Error> {
+    let path = scope.resolve(root).join("cgroup.kill");
+    match std::fs::write(&path, "1\n") {
         Ok(()) => Ok(()),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(err) => Err(err),
     }
+}
+
+/// Remove the workload scope directory after process reap.
+/// Idempotent — succeeds when the directory is already gone.
+///
+/// On real cgroupfs the directory looks empty to userspace because
+/// the kernel-managed virtual files (`cgroup.procs`, `cpu.weight`,
+/// `memory.max`, ...) cannot be `unlink`ed individually — they are
+/// reaped automatically by `rmdir`. On a non-cgroupfs (the integration
+/// tests use a `tempfile::TempDir`) those files are real on-disk
+/// entries and `rmdir` returns `ENOTEMPTY`. To make production code
+/// portable across both, fall back to `remove_dir_all` on
+/// `ENOTEMPTY` so the test-fixture path also succeeds.
+///
+/// # Errors
+///
+/// Returns the underlying io error if neither `rmdir` nor the
+/// `remove_dir_all` fallback succeeds.
+pub fn remove_workload_scope(root: &Path, scope: &CgroupPath) -> Result<(), std::io::Error> {
+    let dir = scope.resolve(root);
+    match std::fs::remove_dir(&dir) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) if is_dir_not_empty(&err) => {
+            // Tempdir-as-cgroupfs path (tests). Real cgroupfs never
+            // returns ENOTEMPTY for a workload scope because the
+            // virtual files are reaped on `rmdir`.
+            match std::fs::remove_dir_all(&dir) {
+                Ok(()) => Ok(()),
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                Err(e) => Err(e),
+            }
+        }
+        Err(err) => Err(err),
+    }
+}
+
+/// Detect the `ENOTEMPTY` `io::Error` from `remove_dir`. Rust's
+/// `io::ErrorKind::DirectoryNotEmpty` is stable in 1.83+; fall back
+/// to the raw OS error code for portability against older toolchains.
+fn is_dir_not_empty(err: &std::io::Error) -> bool {
+    // The stable kind name (Rust 1.83+).
+    if format!("{:?}", err.kind()) == "DirectoryNotEmpty" {
+        return true;
+    }
+    // Linux: ENOTEMPTY = 39. The OS error survives any libc surface.
+    err.raw_os_error() == Some(39)
 }

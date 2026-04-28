@@ -25,8 +25,8 @@ use overdrive_core::traits::driver::{
 };
 
 use crate::cgroup_manager::{
-    self, create_workload_scope, place_pid_in_scope, remove_workload_scope,
-    write_resource_limits, CgroupPath,
+    self, CgroupPath, cgroup_kill, create_workload_scope, place_pid_in_scope,
+    remove_workload_scope, write_resource_limits,
 };
 
 /// Default grace window between SIGTERM and SIGKILL during stop.
@@ -113,6 +113,33 @@ impl ProcessDriver {
             cmd.arg("-c").arg("trap '' TERM; sleep 60");
         }
         cmd.kill_on_drop(false);
+
+        // Put the child in a fresh process group so the driver can
+        // reach reparented grandchildren via `kill(-pgid, SIGKILL)`.
+        // Without this, a `/bin/sh -c 'trap ""; sleep 60'` shell that
+        // gets SIGKILL'd reparents its `sleep` child to init, and the
+        // tokio `Child` handle has no way to find it. `cgroup.kill`
+        // covers production (real cgroupfs); the process-group fallback
+        // covers the integration tests, which mount a `tempfile::TempDir`
+        // as a fake cgroupfs root where `cgroup.kill` is a no-op file
+        // write. Linux-only — `pre_exec` is `unsafe` because the closure
+        // runs between fork and exec, where the contract is to call
+        // only async-signal-safe functions; `setsid(2)` is on the
+        // POSIX async-signal-safe list.
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::unix::process::CommandExt;
+            // SAFETY: `setsid` is async-signal-safe; the closure is
+            // executed in the forked child between fork and exec, no
+            // shared state is touched.
+            unsafe {
+                cmd.pre_exec(|| {
+                    libc::setsid();
+                    Ok(())
+                });
+            }
+        }
+
         cmd
     }
 }
@@ -203,9 +230,7 @@ impl Driver for ProcessDriver {
         }
 
         // 5. Record the allocation as live.
-        self.live
-            .lock()
-            .insert(spec.alloc.clone(), LiveAllocation::Running { child, scope });
+        self.live.lock().insert(spec.alloc.clone(), LiveAllocation::Running { child, scope });
 
         Ok(AllocationHandle { alloc: spec.alloc.clone(), pid: Some(pid) })
     }
@@ -221,16 +246,19 @@ impl Driver for ProcessDriver {
             Some(LiveAllocation::Running { child, scope }) => (child, scope),
             Some(LiveAllocation::Terminated) => {
                 // Already stopped — record terminal again, idempotent.
-                self.live
-                    .lock()
-                    .insert(handle.alloc.clone(), LiveAllocation::Terminated);
+                self.live.lock().insert(handle.alloc.clone(), LiveAllocation::Terminated);
                 return Ok(());
             }
             None => return Err(DriverError::NotFound { alloc: handle.alloc.clone() }),
         };
 
+        // Capture the PID before any wait — `Child::id()` returns
+        // `None` once the child is reaped, but we still need it to
+        // address the process group at cleanup time.
+        let pid_for_pgrp_kill = child.id();
+
         // 1. Send SIGTERM via libc::kill.
-        if let Some(pid) = child.id() {
+        if let Some(pid) = pid_for_pgrp_kill {
             send_sigterm(pid);
         }
 
@@ -249,7 +277,25 @@ impl Driver for ProcessDriver {
             }
         }
 
-        // 4. Tear down the cgroup scope. NotFound is benign.
+        // 4. Mass-kill any reparented grandchildren. /bin/sh-class
+        //    workloads fork helpers (e.g. `/bin/sleep`) that reparent
+        //    to init when the shell dies; the tokio `Child` only
+        //    tracks the parent. Two complementary mechanisms:
+        //
+        //    a) `cgroup.kill` (real cgroupfs) — atomic SIGKILL of every
+        //       task in the workload's scope.
+        //    b) Process-group SIGKILL (TempDir test path, where
+        //       `cgroup.kill` is a regular file write that doesn't
+        //       reach the kernel). The child was `setsid`-ed at spawn
+        //       so its PGID = its PID; `kill(-pid, SIGKILL)` reaches
+        //       every member of that group regardless of what the
+        //       fake-cgroupfs root happens to be.
+        if let Some(pid) = pid_for_pgrp_kill {
+            send_sigkill_pgrp(pid);
+        }
+        let _ = cgroup_kill(&self.cgroup_root, &scope);
+
+        // 5. Tear down the cgroup scope. NotFound is benign.
         let _ = remove_workload_scope(&self.cgroup_root, &scope);
 
         // Suppress unused warning — `scope` is consumed by
@@ -258,9 +304,7 @@ impl Driver for ProcessDriver {
 
         // 5. Record terminal state so subsequent status() calls
         //    return `Terminated` rather than `NotFound`.
-        self.live
-            .lock()
-            .insert(handle.alloc.clone(), LiveAllocation::Terminated);
+        self.live.lock().insert(handle.alloc.clone(), LiveAllocation::Terminated);
 
         Ok(())
     }
@@ -297,7 +341,7 @@ impl Driver for ProcessDriver {
 }
 
 // ---------------------------------------------------------------------------
-// SIGTERM signalling
+// SIGTERM / SIGKILL signalling
 // ---------------------------------------------------------------------------
 
 /// Send SIGTERM to a process. Linux uses `libc::kill`; non-Linux
@@ -317,3 +361,23 @@ const fn send_sigterm(_pid: u32) {
     // Non-Linux builds compile but do not run real-process tests.
 }
 
+/// Send SIGKILL to the entire process group led by `pid`. Used as a
+/// fallback to reach reparented grandchildren whose lineage left the
+/// driver's tokio `Child` handle. The child is placed in its own
+/// session via `setsid` at spawn time (see [`ProcessDriver::build_command`])
+/// so its PGID equals its PID; passing `-pid` to `kill(2)` delivers
+/// SIGKILL to every member of that process group.
+#[cfg(target_os = "linux")]
+fn send_sigkill_pgrp(pid: u32) {
+    // SAFETY: `libc::kill` with a negative pid targets a process group
+    // and is sound for any signed pid_t. We ignore the return — best-effort.
+    unsafe {
+        let pgid = -(pid as libc::pid_t);
+        libc::kill(pgid, libc::SIGKILL);
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+const fn send_sigkill_pgrp(_pid: u32) {
+    // Non-Linux builds compile but do not run real-process tests.
+}
