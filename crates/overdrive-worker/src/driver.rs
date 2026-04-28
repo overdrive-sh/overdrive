@@ -53,6 +53,13 @@ pub struct ProcessDriver {
     /// Validates ADR-0026 D9 warn-and-continue under controlled
     /// failure.
     force_limit_write_failure: bool,
+    /// Per ADR-0028: when `true`, `Driver::start` SKIPS workload
+    /// cgroup operations (scope creation, PID placement, limit
+    /// writes, scope removal). Workloads run as ordinary child
+    /// processes under the running UID with no cgroup isolation.
+    /// Plumbed from `--allow-no-cgroups` at the CLI boundary.
+    /// Production deployments leave this `false`.
+    allow_no_cgroups: bool,
     /// Live allocations indexed by ID. `BTreeMap` for deterministic
     /// iteration per `.claude/rules/development.md` § Ordered
     /// collections.
@@ -65,6 +72,7 @@ impl std::fmt::Debug for ProcessDriver {
             .field("cgroup_root", &self.cgroup_root)
             .field("stop_grace", &self.stop_grace)
             .field("force_limit_write_failure", &self.force_limit_write_failure)
+            .field("allow_no_cgroups", &self.allow_no_cgroups)
             .finish_non_exhaustive()
     }
 }
@@ -78,6 +86,7 @@ impl ProcessDriver {
             cgroup_root,
             stop_grace: DEFAULT_STOP_GRACE,
             force_limit_write_failure: false,
+            allow_no_cgroups: false,
             live: Arc::new(Mutex::new(BTreeMap::new())),
         }
     }
@@ -98,14 +107,46 @@ impl ProcessDriver {
         self
     }
 
-    /// Build the argv for the spec — Phase 1 hardcodes `/bin/sleep`
-    /// at 60s if the image is `/bin/sleep`, otherwise `["-c","sleep 60"]`
-    /// for `/bin/sh` (used in stop-escalation test). For other paths
-    /// (e.g. an absolute path that does not exist) we just pass the
-    /// image as-is — the spawn will fail with `NotFound` and the
-    /// caller converts to `StartRejected`.
+    /// Per ADR-0028: when `allow` is `true`, subsequent `Driver::start`
+    /// calls SKIP workload-cgroup operations (scope creation, PID
+    /// placement, limit writes, scope removal). The control-plane
+    /// `--allow-no-cgroups` flag plumbs into this constructor knob.
+    /// Production deployments leave this `false`.
+    #[must_use]
+    pub const fn with_allow_no_cgroups(mut self, allow: bool) -> Self {
+        self.allow_no_cgroups = allow;
+        self
+    }
+
+    /// Build the argv for the spec.
+    ///
+    /// Phase 1 hardcodes a small set of image-name conventions. This
+    /// stands in for a real container/runtime resolver (Phase 2+):
+    ///
+    /// | Image | Behaviour |
+    /// |---|---|
+    /// | `/bin/sleep` | spawn `sleep 60` (canonical happy path) |
+    /// | `/bin/sh` | SIGTERM-ignoring shell (`trap '' TERM; sleep 60`); used by stop-escalation tests |
+    /// | `/bin/cpuburn` | spawn a CPU-busy `/bin/sh` loop that pegs every CPU until killed; used by the cgroup-isolation burst test (slice 4 scenario 4.2) |
+    /// | other | passed as-is — spawn will fail with `NotFound` and the caller converts to `StartRejected` |
+    ///
+    /// The `cpuburn` shape is a deliberate Phase-1 affordance: the
+    /// burst test needs a workload that consumes 100% CPU on every
+    /// online core to disprove §4 paper-guarantees; baking the busy
+    /// loop into the driver avoids depending on `stress(1)` (not
+    /// installed in the Lima image by default).
     fn build_command(spec: &AllocationSpec) -> Command {
-        let mut cmd = Command::new(&spec.image);
+        let mut cmd = if spec.image == "/bin/cpuburn" {
+            // Pin every online core. `nproc` returns the count; the
+            // shell forks one busy loop per CPU and `wait`s. SIGKILL
+            // via cgroup.kill or process-group reaches the entire
+            // group at teardown.
+            let mut c = Command::new("/bin/sh");
+            c.arg("-c").arg("for i in $(seq 1 $(nproc)); do (while :; do :; done) & done; wait");
+            c
+        } else {
+            Command::new(&spec.image)
+        };
         if spec.image == "/bin/sleep" {
             cmd.arg("60");
         } else if spec.image == "/bin/sh" {
@@ -152,6 +193,22 @@ impl Driver for ProcessDriver {
 
     async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
         let scope = CgroupPath::for_alloc(&spec.alloc);
+
+        // Per ADR-0028 dev escape hatch: when `--allow-no-cgroups` is
+        // set, skip every cgroup operation. The workload runs as an
+        // ordinary child process with no cgroup scope of its own.
+        // Lifecycle tracking still flows through `LiveAllocation` so
+        // status/stop work correctly.
+        if self.allow_no_cgroups {
+            let mut cmd = Self::build_command(spec);
+            let child = cmd.spawn().map_err(|err| DriverError::StartRejected {
+                driver: DriverType::Process,
+                reason: format!("spawn {}: {err}", spec.image),
+            })?;
+            let pid = child.id();
+            self.live.lock().insert(spec.alloc.clone(), LiveAllocation::Running { child, scope });
+            return Ok(AllocationHandle { alloc: spec.alloc.clone(), pid });
+        }
 
         // 1. Create the scope directory. Failure here is fatal — we
         //    never have a PID to clean up.
@@ -293,10 +350,11 @@ impl Driver for ProcessDriver {
         if let Some(pid) = pid_for_pgrp_kill {
             send_sigkill_pgrp(pid);
         }
-        let _ = cgroup_kill(&self.cgroup_root, &scope);
-
-        // 5. Tear down the cgroup scope. NotFound is benign.
-        let _ = remove_workload_scope(&self.cgroup_root, &scope);
+        if !self.allow_no_cgroups {
+            let _ = cgroup_kill(&self.cgroup_root, &scope);
+            // 5. Tear down the cgroup scope. NotFound is benign.
+            let _ = remove_workload_scope(&self.cgroup_root, &scope);
+        }
 
         // Suppress unused warning — `scope` is consumed by
         // remove_workload_scope above.

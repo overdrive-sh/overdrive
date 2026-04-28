@@ -92,6 +92,11 @@ libsql = { workspace = true }
 tracing.workspace            = true
 tracing-subscriber.workspace = true
 
+# Linux-only — `geteuid` for the cgroup pre-flight (ADR-0028) and
+# `getpid` for control-plane slice enrolment.
+[target.'cfg(target_os = "linux")'.dependencies]
+libc.workspace = true
+
 [dev-dependencies]
 # `overdrive-sim` is used by tests only (`tests/acceptance/*.rs`) for
 # DST-style `Sim*` adapters — it is NOT a runtime dep (see note on

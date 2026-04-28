@@ -65,6 +65,14 @@ pub enum Command {
         /// `dirs::data_dir()/overdrive` per ADR-0013 §5.
         #[arg(long)]
         data_dir: Option<std::path::PathBuf>,
+        /// Per ADR-0028 — bypass the cgroup v2 delegation pre-flight
+        /// and run workloads outside any cgroup scope. Development
+        /// only; the control plane is NOT protected from workload
+        /// CPU bursts in this mode. The flag exists so dev hosts
+        /// without delegated cgroup v2 (e.g. an unconfigured Linux
+        /// laptop) can still run `overdrive serve` end-to-end.
+        #[arg(long)]
+        allow_no_cgroups: bool,
     },
 }
 

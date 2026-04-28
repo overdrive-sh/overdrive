@@ -57,6 +57,10 @@ async fn spawn_server() -> (ServerHandle, SocketAddr, TempDir, String) {
         bind: "127.0.0.1:0".parse().expect("parse bind addr"),
         data_dir,
         operator_config_dir: operator_config_dir.clone(),
+        // Default-lane acceptance tests don't start real workloads;
+        // bypass the cgroup pre-flight so this test runs uniformly
+        // on macOS and Linux without delegation.
+        allow_no_cgroups: true,
     };
     let handle = run_server(config).await.expect("run_server");
     let bound = handle.local_addr().await.expect("bound addr");

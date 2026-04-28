@@ -20,11 +20,20 @@
 //! | `libsql_provisioner` | Per-primitive libSQL path derivation (ADR-0013) |
 //! | `observation_wiring` | `LocalObservationStore` single-node wiring (ADR-0012, revised 2026-04-24) |
 
-#![forbid(unsafe_code)]
+// Per ADR-0028, this crate's `cgroup_preflight` and `cgroup_manager`
+// modules call `libc::geteuid` / `libc::getpid` directly under
+// `#[cfg(target_os = "linux")]`. Both are thin syscall wrappers with
+// no preconditions, but they are `extern "C"` and therefore require
+// an `unsafe` block. We `deny(unsafe_code)` workspace-wide and
+// `#[allow(unsafe_code)]` scope-locally on the two call sites that
+// need it; switching from `forbid` to `deny` is what enables the
+// scoped allow. Every other module in this crate stays unsafe-free.
+#![deny(unsafe_code)]
 
 pub mod action_shim;
 pub mod api;
 pub mod cgroup_manager;
+pub mod cgroup_preflight;
 pub mod error;
 pub mod eval_broker;
 pub mod handlers;
@@ -147,6 +156,35 @@ pub struct ServerConfig {
     /// identity-artefact root, and conflating the two left the CLI
     /// pinning a stale CA on the production-default path.
     pub operator_config_dir: PathBuf,
+    /// Per ADR-0028: when `true`, the server skips the cgroup v2
+    /// delegation pre-flight, does NOT enrol its own PID into
+    /// `overdrive.slice/control-plane.slice/`, and downstream
+    /// drivers skip workload-cgroup operations. Logs a WARNING
+    /// banner on boot. Default: `false` (production safe default).
+    /// Set via `overdrive serve --allow-no-cgroups` (dev only).
+    pub allow_no_cgroups: bool,
+}
+
+impl Default for ServerConfig {
+    /// Production-safe default — `allow_no_cgroups: false` so a caller
+    /// who builds a `ServerConfig` via `..Default::default()` does not
+    /// accidentally bypass the pre-flight. `bind`, `data_dir`, and
+    /// `operator_config_dir` get sentinel values that callers MUST
+    /// override; the `Default` impl exists exclusively to make
+    /// `..Default::default()` rest-pattern construction ergonomic for
+    /// test fixtures that override the three required fields.
+    fn default() -> Self {
+        // 127.0.0.1:0 — IPv4 loopback, ephemeral port. Constructed
+        // directly rather than via `parse()` so the `Default` impl
+        // is infallible and clippy's `expect_used` lint stays clean.
+        let loopback = SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST), 0);
+        Self {
+            bind: loopback,
+            data_dir: PathBuf::new(),
+            operator_config_dir: PathBuf::new(),
+            allow_no_cgroups: false,
+        }
+    }
 }
 
 /// Handle to a running control-plane server.
@@ -213,12 +251,15 @@ pub async fn run_server(config: ServerConfig) -> Result<ServerHandle, error::Con
         Arc::from(observation_wiring::wire_single_node_observation(&config.data_dir)?);
 
     // Production default — `ProcessDriver` rooted at `/sys/fs/cgroup`.
-    // The path is hard-coded here rather than configurable because
-    // ADR-0028's `--allow-no-cgroups` flag is out of scope for 02-02
-    // (lands in 03-01); on non-Linux dev hosts the spawn step itself
-    // surfaces `StartRejected` per `overdrive-worker`'s contract.
-    let driver: Arc<dyn Driver> =
-        Arc::new(overdrive_worker::ProcessDriver::new(std::path::PathBuf::from("/sys/fs/cgroup")));
+    // Per ADR-0028, when `--allow-no-cgroups` is set we still construct
+    // a ProcessDriver but flip its `allow_no_cgroups` flag so
+    // `Driver::start` skips cgroup scope creation / PID placement /
+    // limit writes; workloads run as ordinary child processes under
+    // the running UID.
+    let driver: Arc<dyn Driver> = Arc::new(
+        overdrive_worker::ProcessDriver::new(std::path::PathBuf::from("/sys/fs/cgroup"))
+            .with_allow_no_cgroups(config.allow_no_cgroups),
+    );
 
     run_server_with_obs_and_driver(config, obs, driver).await
 }
@@ -245,6 +286,33 @@ pub async fn run_server_with_obs_and_driver(
     obs: Arc<dyn ObservationStore>,
     driver: Arc<dyn Driver>,
 ) -> Result<ServerHandle, error::ControlPlaneError> {
+    // Per ADR-0028, run the cgroup v2 delegation pre-flight at the
+    // start of the boot path — BEFORE any on-disk side effects (no CA
+    // mint, no IntentStore open, no listener bind). On failure, the
+    // server refuses to start and produces no on-disk artefacts.
+    //
+    // Skip when:
+    //   - `--allow-no-cgroups` was set (dev escape hatch); a WARNING
+    //     banner names the disposition.
+    //   - The host is not Linux (cgroup v2 is Linux-only by design;
+    //     macOS / Windows dev hosts get a no-op).
+    if config.allow_no_cgroups {
+        tracing::warn!(
+            target: "overdrive::cgroup",
+            "!!! WARNING: --allow-no-cgroups set. Workloads run without cgroup \
+             isolation; the control plane is not protected from workload CPU \
+             bursts. Development use only — production deployments require \
+             cgroup v2 delegation. !!!"
+        );
+    } else {
+        #[cfg(target_os = "linux")]
+        {
+            cgroup_preflight::run_preflight().map_err(error::ControlPlaneError::from)?;
+            cgroup_manager::create_and_enrol_control_plane_slice()
+                .map_err(|e| error::ControlPlaneError::internal("create control-plane slice", e))?;
+        }
+    }
+
     // Install the rustls process-wide CryptoProvider (ring) exactly
     // once. The workspace enables only the `ring` feature, but rustls
     // still requires an explicit install when neither provider is the

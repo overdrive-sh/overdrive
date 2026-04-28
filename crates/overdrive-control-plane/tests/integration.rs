@@ -47,16 +47,33 @@ mod integration {
     /// `#[cfg(target_os = "linux")]` so the module declarations
     /// compile cleanly on macOS/Windows even when no test bodies
     /// exist there.
-    mod job_lifecycle {
+    pub mod job_lifecycle {
         // Shared cleanup helper — reaps real `/bin/sleep` workloads
         // spawned by the action shim so nextest does not flag the
         // tests as `LEAK`. Used by `crash_recovery` and
         // `submit_to_running`; `stop_to_terminated` cleans up via the
-        // production stop path under test.
+        // production stop path under test. `pub` so the slice-4
+        // `cgroup_isolation::cluster_status_under_burst` test can
+        // reuse the same `AllocCleanup` guard via `super::super::`.
         #[cfg(target_os = "linux")]
-        mod cleanup;
+        pub mod cleanup;
         mod crash_recovery;
         mod stop_to_terminated;
         mod submit_to_running;
+    }
+    /// phase-1-first-workload — slice 4 (US-03 final) — Linux-only
+    /// cgroup-isolation harness. Per ADR-0028 the control-plane
+    /// boots through a 4-step pre-flight check + creates its own
+    /// slice. The scenario files gate themselves with
+    /// `#[cfg(target_os = "linux")]` so the module declarations
+    /// compile cleanly on macOS/Windows.
+    mod cgroup_isolation {
+        mod allow_no_cgroups_flag;
+        mod cluster_status_under_burst;
+        mod idempotent_slice_creation;
+        mod preflight_missing_cpu;
+        mod preflight_no_delegation;
+        mod preflight_v1_host;
+        mod server_enrols_in_slice;
     }
 }

@@ -1,109 +1,71 @@
 //! Control-plane cgroup management.
 //!
-//! Pre-flight check + slice-creation at server boot. Per ADR-0028
-//! (hard refusal on missing delegation, `--allow-no-cgroups` dev
-//! escape hatch) and ADR-0026 (cgroup v2 ONLY, direct cgroupfs writes).
+//! Per ADR-0028 the server creates `overdrive.slice/control-plane.slice/`
+//! at boot and enrols its own PID into it via `cgroup.procs`.
+//! Idempotent: a second boot reuses the existing slice.
 //!
 //! The workload half of the cgroup hierarchy
 //! (`overdrive.slice/workloads.slice/`) is owned by `overdrive-worker`;
 //! this module owns ONLY the control-plane half
 //! (`overdrive.slice/control-plane.slice/`).
-//!
-//! # Status — RED scaffold
-//!
-//! Phase: phase-1-first-workload, slice 4 (US-04).
-//! Wave: DISTILL. SCAFFOLD: true — every entrypoint panics.
 
-use thiserror::Error;
+use std::path::Path;
 
-/// SCAFFOLD marker.
-pub const SCAFFOLD: bool = true;
+/// Relative path of the control-plane slice under the cgroupfs root.
+pub const CONTROL_PLANE_SLICE: &str = "overdrive.slice/control-plane.slice";
 
-// ---------------------------------------------------------------------------
-// Pre-flight check
-// ---------------------------------------------------------------------------
-
-/// Run the cgroup v2 delegation pre-flight check at server boot per
-/// ADR-0028.
+/// Create `overdrive.slice/control-plane.slice/` under `cgroup_root`
+/// and enrol the running process into it via `cgroup.procs`.
 ///
-/// Performs four checks in order:
-/// 1. Kernel exposes cgroup v2 (`cgroup2` in `/proc/filesystems`).
-/// 2. cgroup v2 is mounted (`/sys/fs/cgroup/cgroup.controllers`
-///    exists).
-/// 3. Running as root, OR delegation is granted to the running UID.
-/// 4. Required controllers (`cpu` + `memory`) are in
-///    `cgroup.subtree_control`.
+/// `mkdir -p` semantics — idempotent on the directory already
+/// existing. Production callers pass `/sys/fs/cgroup`; tests pass a
+/// `tempfile::TempDir` so the assertion can read the resulting tree
+/// without touching the real cgroupfs.
 ///
-/// Returns `Ok(())` on full success. Any failure produces a typed
-/// `CgroupPreflightError` whose Display string answers
-/// "what / why / how to fix" per the `nw-ux-tui-patterns` shape.
+/// `pid` is the PID to enrol — production passes `getpid()`; the
+/// post-boot smoke test passes a known value.
 ///
 /// # Errors
 ///
-/// See [`CgroupPreflightError`] variants.
-///
-/// # Panics
-///
-/// RED scaffold.
-pub fn run_preflight() -> Result<(), CgroupPreflightError> {
-    panic!("Not yet implemented -- RED scaffold")
+/// Returns the underlying io error if either the `mkdir_p` or the
+/// `cgroup.procs` write fails.
+pub fn create_and_enrol_control_plane_slice_at(
+    cgroup_root: &Path,
+    pid: u32,
+) -> Result<(), std::io::Error> {
+    let dir = cgroup_root.join(CONTROL_PLANE_SLICE);
+    // `mkdir -p` — idempotent on already-exists per std::fs docs.
+    std::fs::create_dir_all(&dir)?;
+    let procs = dir.join("cgroup.procs");
+    std::fs::write(&procs, format!("{pid}\n"))?;
+    Ok(())
 }
 
-/// Pre-flight failure modes per ADR-0028 §4.
-#[derive(Debug, Error)]
-pub enum CgroupPreflightError {
-    /// Kernel does not expose cgroup v2 (no `cgroup2` in
-    /// `/proc/filesystems`). Names the kernel version observed and
-    /// the minimum-supported kernel doc.
-    #[error(
-        "cgroup v2 not available on this kernel (uname: {kernel}); see \
-         https://docs.overdrive.sh/operations/cgroup-delegation"
-    )]
-    NoCgroupV2 {
-        /// Kernel version (output of `uname -r`).
-        kernel: String,
-    },
-    /// cgroup v2 exists but is not mounted at the expected path.
-    #[error(
-        "cgroup v2 not mounted; expected /sys/fs/cgroup/cgroup.controllers; \
-         try mounting via systemd-cgroup-mount"
-    )]
-    NotMounted,
-    /// Running as a non-root user, and `subtree_control` lacks one or
-    /// both of `cpu` / `memory`. Names the missing controller(s) and
-    /// the systemd `Delegate=yes` fix.
-    #[error(
-        "controllers {missing:?} not delegated to UID {uid}; \
-         try: sudo systemctl set-property user-{uid}.slice Delegate=yes; \
-         or run with --allow-no-cgroups (dev only)"
-    )]
-    DelegationMissing {
-        /// UID of the running process (`geteuid()`).
-        uid: u32,
-        /// Missing controllers (`cpu` and/or `memory`).
-        missing: Vec<String>,
-    },
-}
-
-// ---------------------------------------------------------------------------
-// Control-plane slice creation + enrolment
-// ---------------------------------------------------------------------------
-
-/// Create `overdrive.slice/control-plane.slice/` (idempotent on
-/// directory already existing) and enrol the running process into it
-/// by writing its PID to `cgroup.procs`.
-///
-/// Per ADR-0028 §2, this runs after pre-flight but before listener
-/// bind. A failure here aborts boot (no on-disk side effects survive).
+/// Production wrapper — resolves the running PID from `getpid()` and
+/// targets `/sys/fs/cgroup`. Linux-only; non-Linux is unreachable in
+/// the production boot path.
 ///
 /// # Errors
 ///
-/// Returns an error if the slice cannot be created or the PID write
-/// fails.
-///
-/// # Panics
-///
-/// RED scaffold.
+/// See [`create_and_enrol_control_plane_slice_at`].
+#[cfg(target_os = "linux")]
 pub fn create_and_enrol_control_plane_slice() -> Result<(), std::io::Error> {
-    panic!("Not yet implemented -- RED scaffold")
+    // `std::process::id()` returns the OS-assigned process id as a
+    // safe u32 — no FFI, no unsafe block required. (Older drafts of
+    // this code reached for `libc::getpid()` directly; the std API
+    // is the right choice once `forbid(unsafe_code)` is on.)
+    let pid = std::process::id();
+    create_and_enrol_control_plane_slice_at(
+        Path::new(crate::cgroup_preflight::DEFAULT_CGROUP_ROOT),
+        pid,
+    )
+}
+
+/// Non-Linux stub — control-plane slice creation is only invoked
+/// under `#[cfg(target_os = "linux")]` in the boot path; this
+/// signature exists so the call site in `lib.rs` compiles uniformly.
+#[cfg(not(target_os = "linux"))]
+#[allow(clippy::unnecessary_wraps, clippy::missing_const_for_fn)]
+pub fn create_and_enrol_control_plane_slice() -> Result<(), std::io::Error> {
+    Ok(())
 }

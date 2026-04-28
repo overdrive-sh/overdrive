@@ -46,6 +46,10 @@ async fn spawn_server() -> (ServerHandle, SocketAddr, TempDir, std::path::PathBu
         bind: "127.0.0.1:0".parse().expect("parse bind addr"),
         data_dir,
         operator_config_dir: operator_config_dir.clone(),
+        // CLI integration tests don't start real workloads; bypass
+        // the cgroup pre-flight so they run uniformly on macOS and
+        // on Linux without delegation.
+        allow_no_cgroups: true,
     };
     let handle: ServerHandle = run_server(config).await.expect("run_server");
     let bound: SocketAddr = handle.local_addr().await.expect("bound addr");

@@ -93,6 +93,10 @@ async fn spawn_server_with_obs_handle()
         bind: "127.0.0.1:0".parse().expect("parse bind addr"),
         data_dir,
         operator_config_dir: operator_config_dir.clone(),
+        // Control-plane integration tests don't start real workloads;
+        // bypass the cgroup pre-flight so they run uniformly on macOS
+        // and on Linux without delegation.
+        allow_no_cgroups: true,
     };
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Process));
     let handle = run_server_with_obs_and_driver(config, Arc::clone(&obs), driver)

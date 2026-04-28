@@ -20,6 +20,7 @@
 mod acceptance {
     mod api_type_shapes;
     mod cluster_status_lists_both_reconcilers;
+    mod default_lane_no_cgroup_dependency;
     mod error_mapping_exhaustive;
     mod eval_broker_collapse;
     mod job_lifecycle_backoff;
