@@ -29,6 +29,7 @@ mod acceptance {
     mod job_stop_unknown;
     mod pending_no_capacity_renders_reason;
     mod row_body_conversions;
+    mod runtime_convergence_loop;
     mod runtime_registers_noop_heartbeat;
     mod submit_job_idempotency;
     mod trust_triple_getters;
