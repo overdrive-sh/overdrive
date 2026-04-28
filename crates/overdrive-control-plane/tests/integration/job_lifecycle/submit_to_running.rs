@@ -38,7 +38,7 @@ async fn submitted_job_reaches_running_via_real_process_driver() {
     runtime.register(job_lifecycle()).expect("register job-lifecycle");
 
     let store =
-        Arc::new(LocalIntentStore::open(&tmp.path().join("intent.redb")).expect("open store"));
+        Arc::new(LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open store"));
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
     let driver: Arc<dyn Driver> =

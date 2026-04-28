@@ -36,10 +36,7 @@ impl Drop for AllocCleanup {
         // workload termination happens via direct cgroupfs writes.
         let obs = self.obs.clone();
         let rows = std::thread::spawn(move || {
-            let rt = match tokio::runtime::Runtime::new() {
-                Ok(rt) => rt,
-                Err(_) => return Vec::new(),
-            };
+            let Ok(rt) = tokio::runtime::Runtime::new() else { return Vec::new() };
             rt.block_on(async move { obs.alloc_status_rows().await.unwrap_or_default() })
         })
         .join()

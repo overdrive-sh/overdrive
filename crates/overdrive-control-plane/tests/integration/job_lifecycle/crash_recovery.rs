@@ -4,10 +4,10 @@
 //! Submits a 1-replica job; waits until the alloc is Running; SIGKILLs
 //! the workload externally; drives the convergence loop forward; and
 //! asserts the alloc state transitions through Terminated → Running
-//! again under the (deterministic, same) alloc_id (Phase 1 reuses
+//! again under the (deterministic, same) `alloc_id` (Phase 1 reuses
 //! `mint_alloc_id(job_id)` per ADR-0023).
 //!
-//! The "fresh alloc_id" framing in the scenario name reflects the
+//! The "fresh `alloc_id`" framing in the scenario name reflects the
 //! Phase-2+ direction; in Phase 1 single-mode the alloc id is a pure
 //! function of the job id (`alloc-{job_id}-0`), so observable rebirth
 //! is the state transition Terminated → Running with a distinct PID
@@ -45,7 +45,7 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
     runtime.register(job_lifecycle()).expect("register job-lifecycle");
 
     let store =
-        Arc::new(LocalIntentStore::open(&tmp.path().join("intent.redb")).expect("open store"));
+        Arc::new(LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open store"));
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
     let driver: Arc<dyn Driver> =
@@ -63,8 +63,12 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
         cgroup_root: std::path::PathBuf::from("/sys/fs/cgroup"),
     };
 
+    // Use a distinct job_id so the derived cgroup scope
+    // (`alloc-recovery-0.scope`) does not collide with the scope used by
+    // submit_to_running (`alloc-payments-0.scope`) when both tests run in
+    // parallel under nextest.
     let job = Job::from_spec(JobSpecInput {
-        id: "payments".to_string(),
+        id: "recovery".to_string(),
         replicas: 1,
         cpu_milli: 100,
         memory_bytes: 256 * 1024 * 1024,
@@ -74,7 +78,7 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
     let key = IntentKey::for_job(&job.id);
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
-    let target = TargetResource::new("job/payments").expect("valid target");
+    let target = TargetResource::new("job/recovery").expect("valid target");
     let start = Instant::now();
     let deadline = start + Duration::from_secs(120);
 

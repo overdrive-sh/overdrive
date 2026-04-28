@@ -17,7 +17,7 @@
 //!
 //! The test bypasses the action shim and submits a `/bin/cpuburn`
 //! workload directly via `Driver::start` because Phase 1's action
-//! shim hardcodes `/bin/sleep` (see action_shim.rs); going around
+//! shim hardcodes `/bin/sleep` (see `action_shim.rs`); going around
 //! it keeps the test scoped to the cgroup-scheduling property under
 //! verification rather than the shim's image-resolution behaviour.
 //!

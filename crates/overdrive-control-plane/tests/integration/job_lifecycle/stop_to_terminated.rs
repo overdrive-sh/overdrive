@@ -36,7 +36,7 @@ async fn job_stop_drives_running_to_terminated() {
     runtime.register(job_lifecycle()).expect("register job-lifecycle");
 
     let store =
-        Arc::new(LocalIntentStore::open(&tmp.path().join("intent.redb")).expect("open store"));
+        Arc::new(LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open store"));
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
     let driver: Arc<dyn Driver> =
@@ -44,9 +44,11 @@ async fn job_stop_drives_running_to_terminated() {
 
     let state = AppState::new(store, obs, Arc::new(runtime), driver);
 
-    // Submit a 1-replica job.
+    // Use a distinct job_id so the derived cgroup scope
+    // (`alloc-stopper-0.scope`) does not collide with submit_to_running
+    // (`alloc-payments-0.scope`) when both tests run in parallel under nextest.
     let job = Job::from_spec(JobSpecInput {
-        id: "payments".to_string(),
+        id: "stopper".to_string(),
         replicas: 1,
         cpu_milli: 100,
         memory_bytes: 256 * 1024 * 1024,
@@ -56,7 +58,7 @@ async fn job_stop_drives_running_to_terminated() {
     let key = IntentKey::for_job(&job.id);
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
-    let target = TargetResource::new("job/payments").expect("valid target");
+    let target = TargetResource::new("job/stopper").expect("valid target");
     let now = Instant::now();
     let deadline = now + Duration::from_secs(60);
 
