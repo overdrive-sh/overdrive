@@ -34,4 +34,10 @@ mod acceptance {
     // is exercised from each adapter's test suite via
     // `overdrive_core::testing::observation_store::run_lww_conformance`.
     mod logical_timestamp_dominates;
+
+    // phase-1-first-workload — branch-coverage tests pinning the
+    // `JobLifecycle::reconcile` decision points (Stop/Run/Restart).
+    mod any_reconciler_dispatch;
+    mod first_fit_place_branches;
+    mod job_lifecycle_reconcile_branches;
 }

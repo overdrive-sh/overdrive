@@ -25,4 +25,5 @@ mod acceptance {
     mod determinism;
     mod empty_node_set;
     mod first_fit_happy_path;
+    mod free_capacity_strict_inequality;
 }

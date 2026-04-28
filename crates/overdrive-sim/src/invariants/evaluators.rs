@@ -1379,6 +1379,34 @@ mod tests {
         assert_eq!(r.status, InvariantStatus::Fail);
     }
 
+    /// Pin the `&&` clause in the row filter against `||`. The
+    /// fixture mixes a Running alloc for the target job with a
+    /// non-Running alloc for the SAME job — under `&&` only the
+    /// Running one counts (count=1, equals desired); under `||`
+    /// both clauses are independently true so both rows count
+    /// (count=2, mismatches desired). The `Pass` outcome is unique
+    /// to the `&&` shape.
+    #[test]
+    fn desired_replica_count_converges_distinguishes_and_from_or_in_row_filter() {
+        let want = vec![(JobId::new("payments").expect("valid job id"), 1)];
+        // Two rows for the SAME job: one Running, one Terminated.
+        // Under production `&&`: only Running matches → count=1 ⇒
+        // matches desired (1) ⇒ Pass.
+        // Under mutant `||`: both match (first via state==Running,
+        // second via job_id==payments) → count=2 ⇒ mismatches
+        // desired (1) ⇒ Fail.
+        let rows = vec![
+            alloc_row("alloc-payments-0", "payments", "node-1", AllocState::Running),
+            alloc_row("alloc-payments-1", "payments", "node-1", AllocState::Terminated),
+        ];
+        let r = evaluate_desired_replica_count_converges(&want, &rows);
+        assert_eq!(
+            r.status,
+            InvariantStatus::Pass,
+            "`&&` filter must count only Running allocs of target job; got {r:?}",
+        );
+    }
+
     #[test]
     fn no_double_scheduling_passes_on_consistent_pinning() {
         let rows = vec![

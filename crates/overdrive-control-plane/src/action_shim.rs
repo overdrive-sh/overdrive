@@ -274,3 +274,42 @@ pub enum ShimError {
         alloc_id: overdrive_core::id::AllocationId,
     },
 }
+
+// ---------------------------------------------------------------------------
+// Unit tests for the private const helpers
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::default_restart_resources;
+
+    /// Pin every numeric field of `default_restart_resources` to its
+    /// exact production value. Kills the four mutations on the
+    /// `cpu_milli: 100, memory_bytes: 256 * 1024 * 1024` literal:
+    ///
+    ///   - `*` -> `+` at position 83 (between 256 and the first
+    ///     1024) — would yield `256 + 1024 * 1024 = 1048832`.
+    ///   - `*` -> `/` at position 83 — would yield `256 / 1024 *
+    ///     1024 = 0`.
+    ///   - `*` -> `+` at position 90 (between 1024 and 1024) — would
+    ///     yield `256 * (1024 + 1024) = 524288`.
+    ///   - `*` -> `/` at position 90 — would yield `256 * (1024 /
+    ///     1024) = 256`.
+    ///
+    /// Pinning the exact production value `268435456` (= 256 MiB)
+    /// rejects every mutant because their values differ.
+    #[test]
+    fn default_restart_resources_pins_exact_values() {
+        let r = default_restart_resources();
+        assert_eq!(r.cpu_milli, 100, "cpu_milli must be exactly 100");
+        assert_eq!(
+            r.memory_bytes,
+            256 * 1024 * 1024,
+            "memory_bytes must be exactly 256 MiB = 268435456",
+        );
+        // Belt-and-braces: pin the absolute byte count too, so a
+        // mutation that happens to yield the right SHAPE but the
+        // wrong VALUE is still caught.
+        assert_eq!(r.memory_bytes, 268_435_456_u64);
+    }
+}
