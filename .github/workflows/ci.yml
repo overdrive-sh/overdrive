@@ -241,8 +241,15 @@ jobs:
         # `.claude/rules/testing.md` §"Integration vs unit gating") so
         # the unit/proptest suite that already ran in the `test` job
         # above is not re-executed here.
+        #
+        # `sudo -E` preserves the runner user's environment (PATH,
+        # CARGO_HOME, RUSTUP_HOME, RUSTC_WRAPPER) so cargo/nextest/
+        # sccache resolve correctly while running as root. Root access
+        # is required for ProcessDriver: creating cgroup scope directories
+        # and writing child PIDs to cgroup.procs both fail with EACCES
+        # for the unprivileged runner user.
         run: |
-          cargo nextest run --workspace --locked --profile ci \
+          sudo -E cargo nextest run --workspace --locked --profile ci \
             --features integration-tests \
             -E 'binary(integration)'
 
