@@ -394,16 +394,13 @@ pub trait Reconciler: Send + Sync {
 /// `State` does not have a matching `AnyState` arm produces a
 /// non-exhaustive-match compile error in `AnyReconciler::reconcile`,
 /// matching the existing `AnyReconcilerView` discipline.
-///
-/// SCAFFOLD: true — phase-1-first-workload DISTILL.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AnyState {
     /// `State = ()` variant for Phase 1 reconcilers that do not
     /// dereference their projection (`NoopHeartbeat`).
     Unit,
-    /// `JobLifecycle` reconciler's typed projection. RED scaffold —
-    /// the inner struct is `JobLifecycleState` and DELIVER fills the
-    /// hydrate path.
+    /// `JobLifecycle` reconciler's typed projection — see
+    /// [`JobLifecycleState`].
     JobLifecycle(JobLifecycleState),
 }
 
@@ -413,10 +410,8 @@ pub enum AnyState {
 ///
 /// The same struct serves both `desired` and `actual` — the
 /// reconciler interprets `desired.job` as "what should exist" and
-/// `actual.allocations` as "what is currently running."
-///
-/// SCAFFOLD: true — RED scaffold. The fields below are pinned by
-/// ADR-0021 §1; DELIVER wires the hydration paths.
+/// `actual.allocations` as "what is currently running." Field shapes
+/// are pinned by ADR-0021 §1.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JobLifecycleState {
     /// The target job. `None` when the desired-state read returned
@@ -493,8 +488,7 @@ pub enum Action {
 
     // -----------------------------------------------------------------
     // phase-1-first-workload — allocation-management variants
-    // (US-03, ADR-0023). Phase: DISTILL. SCAFFOLD: true — emit and
-    // dispatch sites are RED. The action shim's
+    // (US-03, ADR-0023). The action shim's
     // `dispatch(actions, ...)` consumes these and calls
     // `Driver::start` / `Driver::stop` per ADR-0023.
     // -----------------------------------------------------------------
@@ -880,10 +874,7 @@ pub enum AnyReconciler {
     #[cfg(feature = "canary-bug")]
     HarnessNoopHeartbeat(HarnessNoopHeartbeat),
     /// First real (non-proof-of-life) reconciler. Converges declared
-    /// replica count for a `Job`. SCAFFOLD: true — match arms in
-    /// `name` / `hydrate` / `reconcile` panic with the RED-scaffold
-    /// message; DELIVER implements them against the `JobLifecycle`
-    /// reconciler body.
+    /// replica count for a `Job` — see [`JobLifecycle`].
     JobLifecycle(JobLifecycle),
 }
 
@@ -1014,9 +1005,7 @@ pub enum AnyReconcilerView {
     /// The `View = ()` variant used by Phase 1 reconcilers
     /// (`NoopHeartbeat`).
     Unit,
-    /// `JobLifecycle` reconciler's view. SCAFFOLD: true — the inner
-    /// struct is `JobLifecycleView` and DELIVER fills the hydrate
-    /// path.
+    /// `JobLifecycle` reconciler's view — see [`JobLifecycleView`].
     JobLifecycle(JobLifecycleView),
 }
 
@@ -1027,10 +1016,8 @@ pub enum AnyReconcilerView {
 /// The Phase 1 first real reconciler. Converges declared replica
 /// count for a `Job` against the running `AllocStatusRow` set.
 ///
-/// Phase: phase-1-first-workload, slice 3 (US-03).
-/// Wave: DISTILL. SCAFFOLD: true — `reconcile` panics with the
-/// RED-scaffold message; DELIVER implements the convergence +
-/// backoff logic against the trait shape pinned by ADR-0021.
+/// Trait shape pinned by ADR-0021; convergence + backoff logic per
+/// US-03 (phase-1-first-workload, slice 3).
 ///
 /// The reconciler reads `desired.job` (the target job) and
 /// `actual.allocations` (running set), calls
@@ -1095,13 +1082,14 @@ impl Reconciler for JobLifecycle {
         view: &Self::View,
         tick: &TickContext,
     ) -> (Vec<Action>, Self::View) {
-        // Per ADR-0021 + US-03 AC: handle Run / Absent / Stop branches.
-        // Stop branch lands in 02-04 — when a stop intent is recorded
-        // (`desired.desired_to_stop`) and there is a Running alloc, the
-        // reconciler emits `Action::StopAllocation` for each Running
-        // alloc. Allocs in any other state (Pending, Draining, or
-        // already Terminated) require no action; the next tick's
-        // hydrate will re-evaluate.
+        // Per ADR-0021 + US-03 AC: handle Stop / Absent / Run branches.
+        //
+        // Stop: when a stop intent is recorded (`desired.desired_to_stop`)
+        // AND a job spec exists, emit `Action::StopAllocation` for every
+        // Running alloc. Allocs in any other state (Pending, Draining,
+        // Terminated) require no action; the next tick's hydrate
+        // re-evaluates. A stop intent against an absent job is a no-op
+        // (the second `desired.job.is_some()` clause).
         if desired.desired_to_stop && desired.job.is_some() {
             let stop_actions: Vec<Action> = actual
                 .allocations
@@ -1112,9 +1100,10 @@ impl Reconciler for JobLifecycle {
             return (stop_actions, view.clone());
         }
         match desired.job.as_ref() {
-            // Absent: no desired job. If there are running allocations,
-            // 02-04 will emit StopAllocation; for 02-02 we emit no
-            // actions and pass through the view unchanged.
+            // Absent: no desired job. The Stop branch above handles
+            // explicit stops; an absent job with stale Running allocs
+            // is a Phase 2+ concern (cleanup reconciler) — for now we
+            // emit nothing and pass the view through unchanged.
             None => (Vec::new(), view.clone()),
             // Run: a job is desired.
             Some(job) => {
@@ -1126,11 +1115,8 @@ impl Reconciler for JobLifecycle {
                 let allocs_vec: Vec<&AllocStatusRow> = actual.allocations.values().collect();
 
                 // Is any allocation already Running for this job? If so
-                // we are converged — emit nothing. Failed allocations
-                // need restart logic, which lands in 02-03 (gated by
-                // backoff state in the View). For 02-02, treat
-                // Failed-with-no-backoff as "needs restart" and emit
-                // RestartAllocation.
+                // we are converged — emit nothing. Failed allocs flow
+                // into the restart-with-backoff branch below.
                 let running_alloc = allocs_vec.iter().find(|r| r.state == AllocState::Running);
                 if running_alloc.is_some() {
                     return (Vec::new(), view.clone());
@@ -1138,9 +1124,9 @@ impl Reconciler for JobLifecycle {
 
                 // Failed alloc with attempt budget remaining and
                 // backoff elapsed → emit RestartAllocation. Per US-03
-                // (slice 3, step 02-03) the reconciler tracks restart
-                // attempts in `view.restart_counts` and STOPS emitting
-                // RestartAllocation once the configured ceiling is
+                // the reconciler tracks restart attempts in
+                // `view.restart_counts` and STOPS emitting
+                // RestartAllocation once `RESTART_BACKOFF_CEILING` is
                 // reached. The alloc then stays Terminated indefinitely
                 // (backoff exhausted).
                 let failed_alloc = allocs_vec
@@ -1276,9 +1262,10 @@ fn mint_identity(job_id: &JobId, alloc_id: &AllocationId) -> SpiffeId {
 /// - `next_attempt_at: BTreeMap<AllocationId, Instant>` — backoff
 ///   deadline, computed from `tick.now + backoff_duration`.
 ///
-/// SCAFFOLD: true — the field shapes are pinned by US-03 AC; DELIVER
-/// wires the libSQL schema (`CREATE TABLE IF NOT EXISTS ...` inline
-/// in `hydrate`) and the row decoder.
+/// Field shapes are pinned by US-03 AC. Phase 1 hydrates this from
+/// the runtime's view cache (`AppState::view_cache`); Phase 2+
+/// migrates the cache to per-primitive libSQL via `CREATE TABLE IF
+/// NOT EXISTS` inside `hydrate` per ADR-0013 §2b.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct JobLifecycleView {
     /// How many times each alloc has been started under this
