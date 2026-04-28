@@ -19,6 +19,8 @@ use overdrive_core::aggregate::{IntentKey, Job, JobSpecInput};
 use overdrive_core::id::{ContentHash, JobId};
 use overdrive_core::traits::intent_store::{IntentStore, PutOutcome};
 
+use crate::api::{StopJobResponse, StopOutcome};
+
 use crate::AppState;
 use crate::api;
 use crate::error::ControlPlaneError;
@@ -220,6 +222,80 @@ pub async fn describe_job(
     let spec_digest = ContentHash::of(&bytes).to_string();
 
     Ok(Json(api::JobDescription { spec: JobSpecInput::from(&job), spec_digest }))
+}
+
+/// `POST /v1/jobs/{id}/stop` — record a stop intent for a previously-
+/// submitted job. Per ADR-0027.
+///
+/// AIP-136 prescribes `POST /v1/jobs/{id}:stop`. axum 0.7 cannot
+/// route the `:stop` verb suffix as a single path segment because its
+/// matcher (matchit) treats `:` as the path-parameter prefix —
+/// `/v1/jobs/:id:stop` is rejected. We use the path-subsegment form
+/// `/v1/jobs/{id}/stop` which is industry-standard, semantically
+/// equivalent, and free of framework conflict. ADR-0027's guidance
+/// stands; only the URL form differs.
+///
+/// Idempotency: the handler writes `IntentKey::for_job_stop(<id>)`
+/// via `IntentStore::put_if_absent` (atomic compare-and-set). A
+/// second call sees `KeyExists` and returns
+/// `outcome = AlreadyStopped` — no second write occurs.
+///
+/// 404 contract: a stop call against an `<id>` that was never
+/// submitted (no `IntentKey::for_job(<id>)` row) returns HTTP 404.
+/// The original spec key MUST exist before a stop intent can be
+/// recorded — stopping a non-existent job is operator error, not an
+/// idempotent no-op.
+///
+/// Empty request body. The response body is `{ job_id, outcome }`.
+#[utoipa::path(
+    post,
+    path = "/v1/jobs/{id}/stop",
+    params(
+        ("id" = String, Path, description = "Canonical JobId"),
+    ),
+    responses(
+        (status = 200, description = "Job stop recorded", body = StopJobResponse),
+        (status = 400, description = "Validation error", body = api::ErrorBody),
+        (status = 404, description = "Job not found", body = api::ErrorBody),
+        (status = 500, description = "Internal error", body = api::ErrorBody),
+    ),
+    tag = "jobs",
+)]
+pub async fn stop_job(
+    State(state): State<AppState>,
+    Path(job_id_str): Path<String>,
+) -> Result<axum::Json<StopJobResponse>, ControlPlaneError> {
+    // 1. Parse the path parameter through the JobId newtype. Same
+    //    field-naming discipline as `describe_job` — the validation
+    //    error names the path parameter ("id") so clients can branch
+    //    on field origin.
+    let job_id = JobId::new(&job_id_str).map_err(|e| ControlPlaneError::Validation {
+        message: e.to_string(),
+        field: Some("id".to_owned()),
+    })?;
+
+    // 2. The job must exist before a stop can be recorded. Reading
+    //    the canonical job key is the cheapest 404 check — if the
+    //    row is absent we have no stop target, so 404 surfaces with
+    //    the same `resource = jobs/<id>` shape as describe_job's
+    //    NotFound path.
+    let job_key = IntentKey::for_job(&job_id);
+    let job_exists = state.store.get(job_key.as_bytes()).await?.is_some();
+    if !job_exists {
+        return Err(ControlPlaneError::NotFound { resource: job_key.as_str().to_owned() });
+    }
+
+    // 3. Atomic put_if_absent on the stop key. The empty value is
+    //    deliberate — the key's existence IS the signal. A second
+    //    stop call lands on the KeyExists branch and reports
+    //    AlreadyStopped without a second write.
+    let stop_key = IntentKey::for_job_stop(&job_id);
+    let outcome = match state.store.put_if_absent(stop_key.as_bytes(), b"").await? {
+        PutOutcome::Inserted => StopOutcome::Stopped,
+        PutOutcome::KeyExists { .. } => StopOutcome::AlreadyStopped,
+    };
+
+    Ok(axum::Json(StopJobResponse { job_id: job_id.to_string(), outcome }))
 }
 
 /// `GET /v1/cluster/info` — mode, region, reconciler registry, broker

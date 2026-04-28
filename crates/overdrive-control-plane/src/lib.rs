@@ -292,6 +292,7 @@ pub async fn run_server_with_obs_and_driver(
     let router = Router::new()
         .route("/v1/jobs", post(handlers::submit_job))
         .route("/v1/jobs/:id", get(handlers::describe_job))
+        .route("/v1/jobs/:id/stop", post(handlers::stop_job))
         .route("/v1/allocs", get(handlers::alloc_status))
         .route("/v1/nodes", get(handlers::node_list))
         .route("/v1/cluster/info", get(handlers::cluster_status))

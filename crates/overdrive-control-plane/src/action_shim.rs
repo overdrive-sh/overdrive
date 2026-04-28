@@ -199,10 +199,39 @@ async fn dispatch_single(
                 Err(other) => Err(ShimError::Driver(other)),
             }
         }
-        // Stop: panic-bodied per the 02-02 scope. The convergence
-        // path that emits Action::StopAllocation lands in 02-04.
-        Action::StopAllocation { .. } => {
-            panic!("Not yet implemented -- 02-04 RED scaffold")
+        // Stop: best-effort driver stop, then write a Terminated row
+        // for the alloc. Per ADR-0023 §2 the stop path is best-effort
+        // — if the driver no longer tracks the alloc (NotFound), the
+        // shim still records Terminated so the next tick's hydrate
+        // sees the alloc gone. Per-variant error isolation: a Stop
+        // failure does NOT abort dispatch of subsequent actions.
+        Action::StopAllocation { alloc_id } => {
+            // Look up prior obs row to recover (job_id, node_id) for
+            // the Terminated row we will write. If the alloc has no
+            // obs row at all (e.g. the reconciler emitted Stop
+            // without ever having seen the alloc Running) there is
+            // nothing to write — return Ok.
+            let prior = obs.alloc_status_rows().await?.into_iter().find(|r| r.alloc_id == alloc_id);
+            let Some(prior_row) = prior else {
+                return Ok(());
+            };
+
+            let writer_node = prior_row.node_id.clone();
+            let handle = AllocationHandle { alloc: alloc_id.clone(), pid: None };
+            // Driver stop is best-effort — NotFound and other
+            // failures are absorbed; the Terminated row records the
+            // outcome regardless. This mirrors the Restart variant's
+            // stop-half pattern.
+            let _ = driver.stop(&handle).await;
+            let row = AllocStatusRow {
+                alloc_id: alloc_id.clone(),
+                job_id: prior_row.job_id,
+                node_id: prior_row.node_id,
+                state: AllocState::Terminated,
+                updated_at: timestamp_for(tick, writer_node),
+            };
+            obs.write(ObservationRow::AllocStatus(row)).await?;
+            Ok(())
         }
     }
 }

@@ -23,6 +23,9 @@ mod acceptance {
     mod error_mapping_exhaustive;
     mod eval_broker_collapse;
     mod job_lifecycle_backoff;
+    mod job_stop_idempotent;
+    mod job_stop_intent_key;
+    mod job_stop_unknown;
     mod pending_no_capacity_renders_reason;
     mod row_body_conversions;
     mod runtime_registers_noop_heartbeat;

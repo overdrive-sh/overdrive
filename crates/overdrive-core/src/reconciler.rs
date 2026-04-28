@@ -423,6 +423,13 @@ pub struct JobLifecycleState {
     /// no row (job was deleted) or the actual-state read found no
     /// surviving row to project against.
     pub job: Option<Job>,
+    /// Whether a stop intent has been recorded for this job (i.e.
+    /// `IntentKey::for_job_stop(<id>)` is populated). When true and
+    /// `job` is `Some`, the reconciler's Stop branch fires —
+    /// emitting `Action::StopAllocation` for every Running alloc.
+    /// Set false on the actual side; only the desired-side hydrator
+    /// sets it. Per ADR-0027 / US-03 step 02-04.
+    pub desired_to_stop: bool,
     /// Registered nodes with their declared capacity. Drives the
     /// scheduler input map. Phase 1 single-node has exactly one
     /// entry; the `BTreeMap` discipline holds at N=1.
@@ -1089,8 +1096,21 @@ impl Reconciler for JobLifecycle {
         tick: &TickContext,
     ) -> (Vec<Action>, Self::View) {
         // Per ADR-0021 + US-03 AC: handle Run / Absent / Stop branches.
-        // Stop is panic-bodied — landing in 02-04. Run + Absent land
-        // here.
+        // Stop branch lands in 02-04 — when a stop intent is recorded
+        // (`desired.desired_to_stop`) and there is a Running alloc, the
+        // reconciler emits `Action::StopAllocation` for each Running
+        // alloc. Allocs in any other state (Pending, Draining, or
+        // already Terminated) require no action; the next tick's
+        // hydrate will re-evaluate.
+        if desired.desired_to_stop && desired.job.is_some() {
+            let stop_actions: Vec<Action> = actual
+                .allocations
+                .values()
+                .filter(|r| r.state == AllocState::Running)
+                .map(|r| Action::StopAllocation { alloc_id: r.alloc_id.clone() })
+                .collect();
+            return (stop_actions, view.clone());
+        }
         match desired.job.as_ref() {
             // Absent: no desired job. If there are running allocations,
             // 02-04 will emit StopAllocation; for 02-02 we emit no

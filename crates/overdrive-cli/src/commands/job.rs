@@ -23,7 +23,7 @@
 
 use std::path::PathBuf;
 
-use overdrive_control_plane::api::{IdempotencyOutcome, SubmitJobRequest};
+use overdrive_control_plane::api::{IdempotencyOutcome, StopOutcome, SubmitJobRequest};
 use overdrive_core::aggregate::{AggregateError, IntentKey, Job, JobSpecInput};
 use overdrive_core::id::JobId;
 use url::Url;
@@ -150,6 +150,56 @@ pub fn parse_response_job_id(raw: &str) -> Result<JobId, CliError> {
     JobId::new(raw).map_err(|e| CliError::BodyDecode {
         cause: format!("server returned invalid job_id `{raw}`: {e}"),
     })
+}
+
+// ---------------------------------------------------------------------------
+// `overdrive job stop <id>` — Step 02-04 / Slice 3B (US-03 stop scope).
+// ---------------------------------------------------------------------------
+
+/// Arguments to [`stop`].
+#[derive(Debug, Clone)]
+pub struct StopArgs {
+    /// Canonical `JobId` to stop. Validated client-side via
+    /// `JobId::new` before any HTTP call so operators see the
+    /// offending byte without a round-trip.
+    pub id: String,
+    /// Path to the trust triple. Same conventions as [`SubmitArgs`].
+    pub config_path: PathBuf,
+}
+
+/// Typed output of `overdrive job stop`. Carries the server's echoed
+/// `job_id`, the `outcome` (`Stopped` vs `AlreadyStopped`), the endpoint
+/// the POST was issued to, and the operator's next-step hint.
+#[derive(Debug, Clone)]
+pub struct StopOutput {
+    pub job_id: String,
+    pub outcome: StopOutcome,
+    pub endpoint: Url,
+}
+
+/// Stop a previously-submitted job by writing the stop intent.
+///
+/// Per ADR-0027: returns 200 OK with `outcome = Stopped` on first
+/// stop and `AlreadyStopped` on idempotent re-stop. Returns 404 if
+/// the job was never submitted.
+///
+/// # Errors
+///
+/// * [`CliError::InvalidSpec`] — `id` does not parse as a canonical `JobId`.
+/// * [`CliError::ConfigLoad`] — trust triple unloadable.
+/// * [`CliError::Transport`] — control plane unreachable.
+/// * [`CliError::HttpStatus`] — server returned non-2xx (404 unknown).
+/// * [`CliError::BodyDecode`] — 2xx body decode failed.
+pub async fn stop(args: StopArgs) -> Result<StopOutput, CliError> {
+    // Client-side validation — fail fast on malformed ids.
+    let _ = JobId::new(&args.id)
+        .map_err(|e| CliError::InvalidSpec { field: "id".to_string(), message: e.to_string() })?;
+
+    let client = ApiClient::from_config(&args.config_path)?;
+    let endpoint = client.base_url().clone();
+    let resp = client.stop_job(&args.id).await?;
+
+    Ok(StopOutput { job_id: resp.job_id, outcome: resp.outcome, endpoint })
 }
 
 /// Map [`AggregateError`] (from `overdrive_core`) into a

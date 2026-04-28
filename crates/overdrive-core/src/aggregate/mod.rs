@@ -299,6 +299,16 @@ impl IntentKey {
         Self(format!("jobs/{id}").into_bytes())
     }
 
+    /// Derive the intent key for a Job's stop signal — `jobs/<id>/stop`.
+    /// Per ADR-0027, the stop signal is a separate intent record so the
+    /// original job spec stays readable for audit / rollback / debug.
+    /// `IntentKey::for_job_stop(&id)` is byte-stable for any valid
+    /// `JobId`; the `/stop` suffix is fixed ASCII and the prefix `jobs/`
+    /// reuses the canonical ASCII derivation from `for_job`.
+    pub fn for_job_stop(id: &JobId) -> Self {
+        Self(format!("jobs/{id}/stop").into_bytes())
+    }
+
     /// Derive the intent key for a Node.
     pub fn for_node(id: &NodeId) -> Self {
         Self(format!("nodes/{id}").into_bytes())

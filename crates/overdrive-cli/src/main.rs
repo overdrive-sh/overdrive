@@ -68,6 +68,20 @@ async fn run(cli: Cli) -> Result<()> {
                 }
             }
         }
+        Command::Job(JobCommand::Stop { id }) => {
+            let config_path = default_config_path();
+            let args = overdrive_cli::commands::job::StopArgs { id, config_path };
+            match overdrive_cli::commands::job::stop(args).await {
+                Ok(out) => {
+                    print!("{}", overdrive_cli::render::job_stop_accepted(&out));
+                    Ok(())
+                }
+                Err(err) => {
+                    eprint!("{}", overdrive_cli::render::cli_error(&err));
+                    Err(color_eyre::eyre::eyre!("job stop failed"))
+                }
+            }
+        }
         Command::Alloc(AllocCommand::Status { job }) => {
             let config_path = default_config_path();
             let args = overdrive_cli::commands::alloc::StatusArgs { job, config_path };

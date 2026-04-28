@@ -62,6 +62,29 @@ pub struct SubmitJobResponse {
     pub outcome: IdempotencyOutcome,
 }
 
+/// Response for `POST /v1/jobs/{id}/stop`. Per ADR-0027 the body shape
+/// is `{ job_id, outcome }` where `outcome ∈ { "stopped",
+/// "already_stopped" }`. 404 on unknown job (separate path).
+///
+/// `outcome` is wire-stringly-typed (lowercase JSON via
+/// `#[serde(rename_all = "snake_case")]`) so future verbs (start,
+/// restart, cancel) can extend the enum additively.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct StopJobResponse {
+    pub job_id: String,
+    pub outcome: StopOutcome,
+}
+
+/// Outcome of `POST /v1/jobs/{id}/stop` per ADR-0027.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum StopOutcome {
+    /// First successful stop — the stop intent was newly recorded.
+    Stopped,
+    /// A stop intent was already on file for this job — no-op.
+    AlreadyStopped,
+}
+
 /// Outcome of an idempotent `POST /v1/jobs` submission.
 ///
 /// Distinguishes "your spec landed fresh" from "your spec was already
@@ -231,6 +254,7 @@ pub struct ErrorBody {
     paths(
         crate::handlers::submit_job,
         crate::handlers::describe_job,
+        crate::handlers::stop_job,
         crate::handlers::cluster_status,
         crate::handlers::alloc_status,
         crate::handlers::node_list,
@@ -239,6 +263,8 @@ pub struct ErrorBody {
         SubmitJobRequest,
         SubmitJobResponse,
         IdempotencyOutcome,
+        StopJobResponse,
+        StopOutcome,
         JobDescription,
         ClusterStatus,
         BrokerCountersBody,

@@ -21,8 +21,8 @@ use std::path::Path;
 use std::time::Duration;
 
 use overdrive_control_plane::api::{
-    AllocStatusResponse, ClusterStatus, ErrorBody, JobDescription, NodeList, SubmitJobRequest,
-    SubmitJobResponse,
+    AllocStatusResponse, ClusterStatus, ErrorBody, JobDescription, NodeList, StopJobResponse,
+    SubmitJobRequest, SubmitJobResponse,
 };
 use overdrive_control_plane::tls_bootstrap::{TrustTriple, load_trust_triple};
 use reqwest::StatusCode;
@@ -142,6 +142,20 @@ impl ApiClient {
     /// See [`CliError`] variants.
     pub async fn submit_job(&self, req: SubmitJobRequest) -> Result<SubmitJobResponse, CliError> {
         self.post_typed("v1/jobs", &req).await
+    }
+
+    /// `POST /v1/jobs/{id}/stop` — record a stop intent for a
+    /// previously-submitted job. Per ADR-0027.
+    ///
+    /// Empty request body. Returns `StopJobResponse` on 200 OK with
+    /// `outcome ∈ { Stopped, AlreadyStopped }`. A 404 maps to
+    /// [`CliError::HttpStatus`] with `body.error == "not_found"`.
+    ///
+    /// # Errors
+    ///
+    /// See [`CliError`] variants.
+    pub async fn stop_job(&self, id: &str) -> Result<StopJobResponse, CliError> {
+        self.post_typed(&format!("v1/jobs/{id}/stop"), &serde_json::json!({})).await
     }
 
     /// `GET /v1/jobs/{id}` — describe a previously-submitted job.

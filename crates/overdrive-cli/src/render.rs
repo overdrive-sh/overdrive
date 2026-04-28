@@ -11,11 +11,11 @@
 //! (no progress spinners) so the first output lands within the
 //! 100ms target on localhost per US-05 AC.
 
-use overdrive_control_plane::api::IdempotencyOutcome;
+use overdrive_control_plane::api::{IdempotencyOutcome, StopOutcome};
 
 use crate::commands::alloc::AllocStatusOutput;
 use crate::commands::cluster::ClusterStatusOutput;
-use crate::commands::job::SubmitOutput;
+use crate::commands::job::{StopOutput, SubmitOutput};
 use crate::commands::node::NodeListOutput;
 use crate::http_client::CliError;
 
@@ -115,6 +115,27 @@ const fn outcome_human(outcome: IdempotencyOutcome) -> &'static str {
         IdempotencyOutcome::Inserted => "created",
         IdempotencyOutcome::Unchanged => "unchanged",
     }
+}
+
+/// Render the result of `overdrive job stop` per AC.
+///
+/// On `Stopped`, the line is `Stopped job '<id>'.`; on `AlreadyStopped`
+/// the line names the idempotent path so the operator knows the call
+/// was a no-op. Per ADR-0027 + Step 02-04 AC.
+#[must_use]
+pub fn job_stop_accepted(out: &StopOutput) -> String {
+    use std::fmt::Write as _;
+    let mut s = String::new();
+    match out.outcome {
+        StopOutcome::Stopped => {
+            let _ = writeln!(s, "Stopped job '{}'.", out.job_id);
+        }
+        StopOutcome::AlreadyStopped => {
+            let _ = writeln!(s, "Job '{}' was already stopped (no-op).", out.job_id);
+        }
+    }
+    let _ = writeln!(s, "Endpoint: {}", out.endpoint);
+    s
 }
 
 /// Render an `AllocStatusOutput` as a multi-line operator-facing

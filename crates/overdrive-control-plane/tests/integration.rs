@@ -49,6 +49,7 @@ mod integration {
     /// exist there.
     mod job_lifecycle {
         mod crash_recovery;
+        mod stop_to_terminated;
         mod submit_to_running;
     }
 }

@@ -53,7 +53,12 @@ fn happy_path_state() -> JobLifecycleState {
     let mut nodes = BTreeMap::new();
     let n = node_alpha();
     nodes.insert(n.id.clone(), n);
-    JobLifecycleState { job: Some(payments_job()), nodes, allocations: BTreeMap::new() }
+    JobLifecycleState {
+        job: Some(payments_job()),
+        desired_to_stop: false,
+        nodes,
+        allocations: BTreeMap::new(),
+    }
 }
 
 const fn empty_view() -> JobLifecycleView {
@@ -68,6 +73,7 @@ fn job_lifecycle_satisfies_reconciler_is_pure_invariant() {
     let desired_inner = happy_path_state();
     let actual_inner = JobLifecycleState {
         job: desired_inner.job.clone(),
+        desired_to_stop: false,
         nodes: desired_inner.nodes.clone(),
         allocations: BTreeMap::new(),
     };
@@ -105,6 +111,7 @@ fn job_lifecycle_run_emits_start_allocation_when_no_running_alloc() {
     let desired_inner = happy_path_state();
     let actual_inner = JobLifecycleState {
         job: desired_inner.job.clone(),
+        desired_to_stop: false,
         nodes: desired_inner.nodes.clone(),
         allocations: BTreeMap::new(),
     };

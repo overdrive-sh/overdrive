@@ -9,18 +9,18 @@
 //!  - cgroup v2 delegated to the running UID
 //!  - `/bin/sleep` on PATH
 
-#![cfg(feature = "integration-tests")]
+#![cfg(all(feature = "integration-tests", target_os = "linux"))]
 #![allow(clippy::expect_used)]
 #![allow(clippy::unwrap_used)]
 
 mod integration {
     mod process_driver {
-        mod start_and_running;
         mod cgroup_procs;
-        mod resource_enforcement;
-        mod missing_binary;
-        mod stop_with_grace;
-        mod stop_escalates_to_sigkill;
         mod limit_write_failure_warns;
+        mod missing_binary;
+        mod resource_enforcement;
+        mod start_and_running;
+        mod stop_escalates_to_sigkill;
+        mod stop_with_grace;
     }
 }

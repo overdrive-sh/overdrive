@@ -297,10 +297,22 @@ async fn hydrate_desired(
                 }
             };
 
+            // ADR-0027: also read the stop intent. If present →
+            // desired_to_stop = true. The reconciler's Stop branch
+            // fires only when the spec is also Some (a stop intent
+            // for an absent job is a no-op).
+            let stop_key = IntentKey::for_job_stop(&job_id);
+            let stop_bytes = state
+                .store
+                .get(stop_key.as_bytes())
+                .await
+                .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
+            let desired_to_stop = stop_bytes.is_some();
+
             let nodes = baseline_nodes_phase1();
             // `desired.allocations` is unused by the JobLifecycle
             // reconciler — it inspects `actual.allocations`.
-            let s = JobLifecycleState { job, nodes, allocations: BTreeMap::new() };
+            let s = JobLifecycleState { job, desired_to_stop, nodes, allocations: BTreeMap::new() };
             Ok(AnyState::JobLifecycle(s))
         }
     }
@@ -328,7 +340,9 @@ async fn hydrate_actual(
             }
             let nodes = baseline_nodes_phase1();
             // `actual.job` is unused — the reconciler reads desired.job.
-            let s = JobLifecycleState { job: None, nodes, allocations };
+            // `actual.desired_to_stop` is also unused (only the desired
+            // side carries it); set false unconditionally.
+            let s = JobLifecycleState { job: None, desired_to_stop: false, nodes, allocations };
             Ok(AnyState::JobLifecycle(s))
         }
     }
