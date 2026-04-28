@@ -26,10 +26,20 @@ fn preflight_refuses_on_cgroup_v1_host() {
     match &err {
         CgroupPreflightError::NoCgroupV2 { kernel } => {
             // Kernel field is populated; in a real run on this host
-            // it reads /proc/sys/kernel/osrelease and falls back to
-            // "unknown" only when that file is also absent. We assert
-            // it is non-empty so the error has SOME diagnostic context.
+            // it reads /proc/sys/kernel/osrelease (populated by the
+            // Linux kernel) and falls back to "unknown" only when
+            // that file is also absent. We assert it is non-empty
+            // AND has a kernel-version shape (contains a `.`) so a
+            // body→`String::new()` or body→`"xyzzy".into()` mutation
+            // on `uname_release` would fail one of these checks.
             assert!(!kernel.is_empty(), "kernel field must be non-empty");
+            assert!(
+                kernel == "unknown" || kernel.contains('.'),
+                "kernel field must be either the fallback `unknown` or a real kernel version (`x.y.z`); \
+                 got {kernel:?}",
+            );
+            // Belt-and-braces: reject the explicit mutant marker.
+            assert_ne!(kernel, "xyzzy", "kernel must not be the mutant marker `xyzzy`");
         }
         other => panic!("expected NoCgroupV2, got {other:?}"),
     }

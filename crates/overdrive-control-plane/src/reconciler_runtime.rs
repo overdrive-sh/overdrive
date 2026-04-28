@@ -413,3 +413,39 @@ pub enum ConvergenceError {
     #[error("shim failure: {0}")]
     Shim(crate::action_shim::ShimError),
 }
+
+// ---------------------------------------------------------------------------
+// Unit tests — pure-logic helpers
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    /// Pin every numeric field of `baseline_nodes_phase1`'s
+    /// hardcoded local node. Kills the `*` mutation on
+    /// `8 * 1024 * 1024 * 1024` (would yield 8 + ... = 1073741832
+    /// or 8 / ... = 0 etc). The exact 8 GiB value (`8 * 1024^3`)
+    /// distinguishes every variant.
+    #[test]
+    fn baseline_nodes_phase1_pins_local_node_capacity() {
+        let nodes = baseline_nodes_phase1();
+        assert_eq!(nodes.len(), 1, "phase 1 baseline must have exactly one node");
+
+        let local_id = NodeId::new("local").expect("valid NodeId");
+        let local = nodes.get(&local_id).expect("local node must be present");
+        assert_eq!(local.capacity.cpu_milli, 4_000, "cpu must be exactly 4000 mCPU");
+        assert_eq!(
+            local.capacity.memory_bytes,
+            8_u64 * 1024 * 1024 * 1024,
+            "memory must be exactly 8 GiB",
+        );
+        // Belt-and-braces: pin the exact byte count so no `*`
+        // mutation that happens to yield a similar shape escapes.
+        assert_eq!(
+            local.capacity.memory_bytes, 8_589_934_592_u64,
+            "memory must be exactly 8 GiB = 8589934592 bytes",
+        );
+    }
+}

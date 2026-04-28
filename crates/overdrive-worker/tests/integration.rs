@@ -18,6 +18,7 @@ mod integration {
         mod cgroup_procs;
         mod limit_write_failure_warns;
         mod missing_binary;
+        mod resize_updates_limits;
         mod resource_enforcement;
         mod start_and_running;
         mod stop_escalates_to_sigkill;

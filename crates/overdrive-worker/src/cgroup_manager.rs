@@ -282,3 +282,213 @@ fn is_dir_not_empty(err: &std::io::Error) -> bool {
     // Linux: ENOTEMPTY = 39. The OS error survives any libc surface.
     err.raw_os_error() == Some(39)
 }
+
+// ---------------------------------------------------------------------------
+// Unit tests — pure-logic helpers (no real cgroupfs)
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::unwrap_used, clippy::doc_markdown)]
+mod tests {
+    use super::*;
+
+    /// `CgroupPath::as_str` returns the canonical relative form. Pin
+    /// the exact string for a representative `for_alloc` construction
+    /// — kills the two body-replacement mutations
+    /// (`as_str -> &str with ""` and `with "xyzzy"`).
+    #[test]
+    fn cgroup_path_as_str_returns_canonical_string() {
+        let alloc = AllocationId::new("alloc-as-str-0").expect("valid AllocationId");
+        let scope = CgroupPath::for_alloc(&alloc);
+        assert_eq!(
+            scope.as_str(),
+            "overdrive.slice/workloads.slice/alloc-as-str-0.scope",
+            "as_str must return the canonical form",
+        );
+        // Belt-and-braces: explicitly reject the mutant marker and
+        // empty string.
+        assert_ne!(scope.as_str(), "", "as_str must not be empty");
+        assert_ne!(scope.as_str(), "xyzzy", "as_str must not be the mutant marker `xyzzy`");
+    }
+
+    /// `cpu_weight_for` is `cpu_milli / 10` clamped to `[1, 10000]`.
+    /// Pin samples at the divider, lower clamp, and upper clamp —
+    /// together they kill the four mutations on this function:
+    ///
+    ///   - body → 0  — fails the 1 mCPU lower-clamp test (expects 1)
+    ///   - body → 1  — fails the 100_000 mCPU upper-clamp test
+    ///   - `/` → `*` — 100 mCPU becomes 1000, not 10
+    ///   - `/` → `%` — 1000 mCPU becomes 0, then clamps to 1, not 100
+    #[test]
+    fn cpu_weight_for_pins_division_and_clamp() {
+        assert_eq!(cpu_weight_for(100), 10, "100 mCPU → weight 10");
+        assert_eq!(cpu_weight_for(1), 1, "1 mCPU clamps up to 1 (lower bound)");
+        assert_eq!(cpu_weight_for(100_000), 10_000, "100k mCPU at upper clamp");
+        assert_eq!(cpu_weight_for(200_000), 10_000, "200k mCPU clamps down to 10_000");
+        assert_eq!(cpu_weight_for(1000), 100, "1000 mCPU → weight 100");
+    }
+
+    /// `is_dir_not_empty` returns true for `ENOTEMPTY` (raw os
+    /// error 39 on Linux, or the named `DirectoryNotEmpty` kind in
+    /// Rust 1.83+) and false for other error kinds. Pin both
+    /// branches and the negative case — kills the four mutations
+    /// on this function (body→true / body→false / two `==` flips).
+    #[test]
+    fn is_dir_not_empty_recognises_directory_not_empty_kind() {
+        let err = std::io::Error::from(std::io::ErrorKind::DirectoryNotEmpty);
+        assert!(is_dir_not_empty(&err), "DirectoryNotEmpty kind must be recognised");
+    }
+
+    #[test]
+    fn is_dir_not_empty_recognises_raw_enotempty_os_error() {
+        let err = std::io::Error::from_raw_os_error(39);
+        assert!(is_dir_not_empty(&err), "raw ENOTEMPTY (39) must be recognised");
+    }
+
+    #[test]
+    fn is_dir_not_empty_rejects_unrelated_errors() {
+        let err = std::io::Error::from(std::io::ErrorKind::NotFound);
+        assert!(!is_dir_not_empty(&err), "NotFound must not be recognised as ENOTEMPTY");
+        let err = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        assert!(!is_dir_not_empty(&err), "PermissionDenied must not be recognised as ENOTEMPTY");
+    }
+
+    /// `cgroup_kill` is idempotent on `NotFound` (the scope is gone
+    /// or never existed). Pins the match-guard mutations on the
+    /// `err.kind() == NotFound` branch.
+    #[test]
+    fn cgroup_kill_is_idempotent_on_missing_scope() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let scope_path = "overdrive.slice/workloads.slice/alloc-missing-0.scope";
+        let scope = CgroupPath::from_str(scope_path).expect("valid CgroupPath");
+
+        let result = cgroup_kill(tmp.path(), &scope);
+        assert!(
+            result.is_ok(),
+            "cgroup_kill on a missing scope must be idempotent (Ok); got {result:?}",
+        );
+    }
+
+    /// `remove_workload_scope` is idempotent on `NotFound`. Pins
+    /// the outer match-guard mutations.
+    #[test]
+    fn remove_workload_scope_is_idempotent_on_missing_scope() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let scope_path = "overdrive.slice/workloads.slice/alloc-missing-1.scope";
+        let scope = CgroupPath::from_str(scope_path).expect("valid CgroupPath");
+
+        let result = remove_workload_scope(tmp.path(), &scope);
+        assert!(
+            result.is_ok(),
+            "remove_workload_scope on missing scope must be idempotent; got {result:?}",
+        );
+    }
+
+    /// `remove_workload_scope` falls back to `remove_dir_all` on
+    /// `ENOTEMPTY` (the tempdir-as-cgroupfs path). Pins the
+    /// `is_dir_not_empty(&err)` match-guard mutation.
+    #[test]
+    fn remove_workload_scope_falls_back_to_remove_dir_all_on_enotempty() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let scope_path = "overdrive.slice/workloads.slice/alloc-non-empty-0.scope";
+        let scope = CgroupPath::from_str(scope_path).expect("valid CgroupPath");
+        let scope_dir = scope.resolve(tmp.path());
+        std::fs::create_dir_all(&scope_dir).expect("create scope dir");
+        std::fs::write(scope_dir.join("cgroup.procs"), "").expect("write fake cgroup.procs");
+        assert!(scope_dir.exists(), "scope dir must exist before removal");
+
+        let result = remove_workload_scope(tmp.path(), &scope);
+        assert!(
+            result.is_ok(),
+            "remove_workload_scope must succeed via the ENOTEMPTY fallback; got {result:?}",
+        );
+        assert!(
+            !scope_dir.exists(),
+            "scope dir must be gone after remove_workload_scope's fallback path",
+        );
+    }
+
+    /// `create_workload_scope` writes a directory. Kills body→Ok(())
+    /// — the mutant skips `create_dir_all`, so the directory does
+    /// NOT appear on disk; the assertion catches the missing dir.
+    #[test]
+    fn create_workload_scope_writes_a_real_directory() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let scope_path = "overdrive.slice/workloads.slice/alloc-create-0.scope";
+        let scope = CgroupPath::from_str(scope_path).expect("valid CgroupPath");
+
+        let result = create_workload_scope(tmp.path(), &scope);
+        assert!(result.is_ok(), "create_workload_scope must succeed; got {result:?}");
+        let scope_dir = scope.resolve(tmp.path());
+        assert!(scope_dir.exists(), "scope dir must exist on disk after create");
+        assert!(scope_dir.is_dir(), "scope path must be a directory");
+    }
+
+    /// `place_pid_in_scope` writes the pid to `cgroup.procs`. Kills
+    /// body→Ok(()).
+    #[test]
+    fn place_pid_in_scope_writes_pid_to_cgroup_procs() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let scope_path = "overdrive.slice/workloads.slice/alloc-place-0.scope";
+        let scope = CgroupPath::from_str(scope_path).expect("valid CgroupPath");
+        std::fs::create_dir_all(scope.resolve(tmp.path())).expect("create scope dir");
+
+        let result = place_pid_in_scope(tmp.path(), &scope, 1234);
+        assert!(result.is_ok(), "place_pid_in_scope must succeed; got {result:?}");
+
+        let procs = std::fs::read_to_string(scope.resolve(tmp.path()).join("cgroup.procs"))
+            .expect("read cgroup.procs");
+        assert_eq!(procs, "1234\n", "cgroup.procs must contain the pid + newline");
+    }
+
+    /// `write_resource_limits` writes cpu.weight and memory.max.
+    /// Kills body→Ok(()) and pins the cpu_weight_for delegation.
+    #[test]
+    fn write_resource_limits_writes_cpu_weight_and_memory_max() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let scope_path = "overdrive.slice/workloads.slice/alloc-limits-0.scope";
+        let scope = CgroupPath::from_str(scope_path).expect("valid CgroupPath");
+        std::fs::create_dir_all(scope.resolve(tmp.path())).expect("create scope dir");
+
+        let resources = Resources { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 };
+        let result = write_resource_limits(tmp.path(), &scope, &resources);
+        assert!(result.is_ok(), "write_resource_limits must succeed; got {result:?}");
+
+        let weight = std::fs::read_to_string(scope.resolve(tmp.path()).join("cpu.weight"))
+            .expect("read cpu.weight");
+        assert_eq!(weight, "10\n", "cpu.weight must be cpu_milli/10 = 10");
+
+        let memmax = std::fs::read_to_string(scope.resolve(tmp.path()).join("memory.max"))
+            .expect("read memory.max");
+        assert_eq!(
+            memmax,
+            format!("{}\n", 256 * 1024 * 1024),
+            "memory.max must equal memory_bytes",
+        );
+    }
+
+    /// `write_resource_limits_warn_on_error` returns `()` and only
+    /// warns on failure. Pins body→() (the mutant returns nothing
+    /// either, but production also writes side effects on success;
+    /// the mutant skips the call entirely → cpu.weight does NOT
+    /// appear on disk). The assertion catches the missing file.
+    #[test]
+    fn write_resource_limits_warn_on_error_writes_files_on_success() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let scope_path = "overdrive.slice/workloads.slice/alloc-warn-ok-0.scope";
+        let scope = CgroupPath::from_str(scope_path).expect("valid CgroupPath");
+        std::fs::create_dir_all(scope.resolve(tmp.path())).expect("create scope dir");
+
+        let resources = Resources { cpu_milli: 200, memory_bytes: 1024 * 1024 };
+        write_resource_limits_warn_on_error(tmp.path(), &scope, &resources);
+
+        assert!(
+            scope.resolve(tmp.path()).join("cpu.weight").exists(),
+            "cpu.weight must be written on the happy path",
+        );
+        assert!(
+            scope.resolve(tmp.path()).join("memory.max").exists(),
+            "memory.max must be written on the happy path",
+        );
+    }
+}

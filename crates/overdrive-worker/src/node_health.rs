@@ -73,3 +73,47 @@ pub enum NodeHealthWriteError {
     #[error("observation store write failed: {0}")]
     Write(String),
 }
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::unwrap_used, clippy::doc_markdown)]
+mod tests {
+    use super::*;
+
+    /// Pin the RED scaffold panic. While `write_node_health_row` is
+    /// not yet implemented (Phase 1 slice 4 DISTILL — the body is
+    /// `panic!("Not yet implemented -- RED scaffold")`), the panic
+    /// IS the specification per
+    /// `.claude/rules/testing.md` § "RED scaffolds". A
+    /// `body→Ok(())` mutation would silently succeed and erase the
+    /// "this is unimplemented" signal — exactly the regression this
+    /// test guards against.
+    ///
+    /// When slice 4 GREEN lands, this test is REMOVED (the panic is
+    /// no longer the spec; the new test asserts the row was written
+    /// to the ObservationStore via a Lima integration test).
+    #[tokio::test]
+    #[should_panic(expected = "Not yet implemented")]
+    async fn write_node_health_row_is_red_scaffold_until_slice_4_green() {
+        use std::sync::Arc;
+
+        use overdrive_core::id::NodeId;
+        use overdrive_sim::adapters::observation_store::SimObservationStore;
+
+        let obs: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(
+            NodeId::new("local").expect("valid NodeId"),
+            42,
+        ));
+        let config = NodeConfig {
+            id_override: Some("local".to_string()),
+            region: "local".to_string(),
+            capacity: overdrive_core::traits::driver::Resources {
+                cpu_milli: 1_000,
+                memory_bytes: 1024 * 1024 * 1024,
+            },
+        };
+
+        // Production: panics with "Not yet implemented -- RED scaffold".
+        // Mutant body→Ok(()) returns Ok without panicking → test fails.
+        let _ = write_node_health_row(&obs, &config).await;
+    }
+}
