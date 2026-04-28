@@ -25,6 +25,22 @@ use crate::AppState;
 use crate::api;
 use crate::error::ControlPlaneError;
 
+/// Parse a `JobId` from a path parameter, attaching `field = Some("id")` to
+/// the validation error so HTTP clients can branch on the error origin.
+///
+/// The `field` discriminator is the contract that lets a client tell
+/// path-parameter validation apart from request-body validation —
+/// `AggregateError::Id`'s `#[from]` pass-through correctly leaves
+/// `field = None` because it has no caller-side context to name. Handlers
+/// that DO have caller-side context (the `OpenAPI` path parameter `id`)
+/// attach it explicitly through this helper.
+fn parse_job_id_path(job_id_str: &str) -> Result<JobId, ControlPlaneError> {
+    JobId::new(job_id_str).map_err(|e| ControlPlaneError::Validation {
+        message: e.to_string(),
+        field: Some("id".to_owned()),
+    })
+}
+
 impl From<overdrive_core::traits::observation_store::AllocStatusRow> for api::AllocStatusRowBody {
     fn from(row: overdrive_core::traits::observation_store::AllocStatusRow) -> Self {
         Self {
@@ -177,21 +193,8 @@ pub async fn describe_job(
 ) -> Result<Json<api::JobDescription>, ControlPlaneError> {
     // 1. Parse the path parameter through the JobId newtype. A malformed
     //    identifier (non-ASCII, wrong length, bad charset) surfaces as
-    //    HTTP 400 with `field: Some("id")` — the path-parameter name
-    //    the OpenAPI spec declares.
-    //
-    //    Routing through `AggregateError::Id` here would lose the field
-    //    name: that variant is a `#[from]` pass-through of `IdParseError`
-    //    and the `to_response` mapping for `Aggregate(Id(_))` correctly
-    //    leaves `field = None` (it has no caller-side context to name).
-    //    The handler DOES have caller-side context — the path parameter
-    //    is named `id` — so we attach it explicitly. Without this, a
-    //    client branching on the `field` discriminator cannot tell
-    //    path-parameter validation from request-body validation.
-    let job_id = JobId::new(&job_id_str).map_err(|e| ControlPlaneError::Validation {
-        message: e.to_string(),
-        field: Some("id".to_owned()),
-    })?;
+    //    HTTP 400 with `field: Some("id")` via `parse_job_id_path`.
+    let job_id = parse_job_id_path(&job_id_str)?;
 
     // 2. Derive the canonical intent key and read from the authoritative
     //    store. Missing key → NotFound → HTTP 404.
@@ -266,13 +269,8 @@ pub async fn stop_job(
     Path(job_id_str): Path<String>,
 ) -> Result<axum::Json<StopJobResponse>, ControlPlaneError> {
     // 1. Parse the path parameter through the JobId newtype. Same
-    //    field-naming discipline as `describe_job` — the validation
-    //    error names the path parameter ("id") so clients can branch
-    //    on field origin.
-    let job_id = JobId::new(&job_id_str).map_err(|e| ControlPlaneError::Validation {
-        message: e.to_string(),
-        field: Some("id".to_owned()),
-    })?;
+    //    field-naming discipline as `describe_job` — see `parse_job_id_path`.
+    let job_id = parse_job_id_path(&job_id_str)?;
 
     // 2. The job must exist before a stop can be recorded. Reading
     //    the canonical job key is the cheapest 404 check — if the

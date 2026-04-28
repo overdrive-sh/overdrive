@@ -14,17 +14,11 @@
 //! `overdrive_control_plane::reconciler_runtime::action_shim`. The
 //! existing `reconciler_runtime` is currently a single .rs file;
 //! during DELIVER's first refactor pass, it becomes a directory and
-//! this module is re-exported from inside it. For the RED-scaffold
-//! moment, the shim lives at the crate root as `action_shim` and is
-//! re-exported under the canonical path via `pub mod` in lib.rs.
-//!
-//! # Status — RED scaffold
-//!
-//! Phase: phase-1-first-workload, slice 3 (US-03).
-//! Wave: DISTILL. SCAFFOLD: true — `dispatch` panics; DELIVER
-//! implements the per-action match per ADR-0023 §2.
+//! this module is re-exported from inside it. For Phase 1 the shim
+//! lives at the crate root as `action_shim` and is re-exported under
+//! the canonical path via `pub mod` in lib.rs.
 
-use overdrive_core::id::NodeId;
+use overdrive_core::id::{AllocationId, JobId, NodeId};
 use overdrive_core::reconciler::{Action, TickContext};
 use overdrive_core::traits::driver::{AllocationHandle, AllocationSpec, Driver, DriverError};
 use overdrive_core::traits::observation_store::{
@@ -34,6 +28,22 @@ use overdrive_core::traits::observation_store::{
 
 /// SCAFFOLD marker.
 pub const SCAFFOLD: bool = false;
+
+/// Build an `AllocStatusRow` for a state transition driven by the shim.
+/// Used by every variant that writes observation: `StartAllocation`,
+/// `RestartAllocation`, and `StopAllocation` all funnel through this
+/// helper so the row shape is constructed in exactly one place. Pure
+/// over its inputs — does not touch the observation store.
+fn build_alloc_status_row(
+    alloc_id: AllocationId,
+    job_id: JobId,
+    node_id: NodeId,
+    state: AllocState,
+    tick: &TickContext,
+) -> AllocStatusRow {
+    let writer = node_id.clone();
+    AllocStatusRow { alloc_id, job_id, node_id, state, updated_at: timestamp_for(tick, writer) }
+}
 
 /// Dispatch a reconciler's emitted `Vec<Action>` against the active
 /// driver and observation store. Called by the runtime's tick loop
@@ -61,10 +71,6 @@ pub const SCAFFOLD: bool = false;
 /// representable as an [`AllocStatusRow`]. Returns
 /// [`ShimError::Observation`] when the observation store rejects the
 /// write itself.
-///
-/// # Panics
-///
-/// `Action::StopAllocation` arm is panic-bodied — landing in 02-04.
 pub async fn dispatch(
     actions: Vec<Action>,
     driver: &dyn Driver,
@@ -103,36 +109,17 @@ async fn dispatch_single(
         // Start: spawn the allocation via the driver and write a
         // Running AllocStatusRow on success. On StartRejected, write
         // a Terminated row recording the failure (per ADR-0023 §2).
+        // Phase 1 does not yet model a `Failed` AllocState variant —
+        // Terminated is the closest match.
         Action::StartAllocation { alloc_id, job_id, node_id, spec } => {
-            let writer_node = node_id.clone();
-            match driver.start(&spec).await {
-                Ok(_handle) => {
-                    let row = AllocStatusRow {
-                        alloc_id: alloc_id.clone(),
-                        job_id,
-                        node_id,
-                        state: AllocState::Running,
-                        updated_at: timestamp_for(tick, writer_node),
-                    };
-                    obs.write(ObservationRow::AllocStatus(row)).await?;
-                    Ok(())
-                }
-                Err(DriverError::StartRejected { reason: _, .. }) => {
-                    // Record failure as a Terminated row. Phase 1
-                    // does not yet model a `Failed` AllocState
-                    // variant — Terminated is the closest match.
-                    let row = AllocStatusRow {
-                        alloc_id: alloc_id.clone(),
-                        job_id,
-                        node_id,
-                        state: AllocState::Terminated,
-                        updated_at: timestamp_for(tick, writer_node),
-                    };
-                    obs.write(ObservationRow::AllocStatus(row)).await?;
-                    Ok(())
-                }
-                Err(other) => Err(ShimError::Driver(other)),
-            }
+            let state = match driver.start(&spec).await {
+                Ok(_handle) => AllocState::Running,
+                Err(DriverError::StartRejected { reason: _, .. }) => AllocState::Terminated,
+                Err(other) => return Err(ShimError::Driver(other)),
+            };
+            let row = build_alloc_status_row(alloc_id, job_id, node_id, state, tick);
+            obs.write(ObservationRow::AllocStatus(row)).await?;
+            Ok(())
         }
         // Restart: stop-then-start, reusing the same alloc id. Per
         // ADR-0023 §2 Restart is semantically `stop + start` against
@@ -157,47 +144,23 @@ async fn dispatch_single(
             // baseline (`/bin/sleep`, default resources). This keeps
             // the restart path observable without threading the full
             // Job aggregate through the action.
-            let prior = obs.alloc_status_rows().await?.into_iter().find(|r| r.alloc_id == alloc_id);
-            let Some(prior_row) = prior else {
+            let Some(prior_row) = find_prior_alloc_row(obs, &alloc_id).await? else {
                 return Err(ShimError::HandleMissing { alloc_id });
             };
 
-            let writer_node = prior_row.node_id.clone();
-            let identity = build_identity(&prior_row.job_id, &alloc_id);
-            let spec = AllocationSpec {
-                alloc: alloc_id.clone(),
-                identity,
-                image: "/bin/sleep".to_string(),
-                resources: default_restart_resources(),
+            let spec = build_phase1_restart_spec(&alloc_id, &prior_row.job_id);
+            // Failed restart — record as Terminated so the next tick's
+            // hydrate sees the prior failure and can decide whether to
+            // back off or exhaust.
+            let state = match driver.start(&spec).await {
+                Ok(_handle) => AllocState::Running,
+                Err(DriverError::StartRejected { .. }) => AllocState::Terminated,
+                Err(other) => return Err(ShimError::Driver(other)),
             };
-            match driver.start(&spec).await {
-                Ok(_handle) => {
-                    let row = AllocStatusRow {
-                        alloc_id: alloc_id.clone(),
-                        job_id: prior_row.job_id,
-                        node_id: prior_row.node_id,
-                        state: AllocState::Running,
-                        updated_at: timestamp_for(tick, writer_node),
-                    };
-                    obs.write(ObservationRow::AllocStatus(row)).await?;
-                    Ok(())
-                }
-                Err(DriverError::StartRejected { .. }) => {
-                    // Failed restart — record as Terminated so the
-                    // next tick's hydrate sees the prior failure and
-                    // can decide whether to back off or exhaust.
-                    let row = AllocStatusRow {
-                        alloc_id: alloc_id.clone(),
-                        job_id: prior_row.job_id,
-                        node_id: prior_row.node_id,
-                        state: AllocState::Terminated,
-                        updated_at: timestamp_for(tick, writer_node),
-                    };
-                    obs.write(ObservationRow::AllocStatus(row)).await?;
-                    Ok(())
-                }
-                Err(other) => Err(ShimError::Driver(other)),
-            }
+            let row =
+                build_alloc_status_row(alloc_id, prior_row.job_id, prior_row.node_id, state, tick);
+            obs.write(ObservationRow::AllocStatus(row)).await?;
+            Ok(())
         }
         // Stop: best-effort driver stop, then write a Terminated row
         // for the alloc. Per ADR-0023 §2 the stop path is best-effort
@@ -211,25 +174,23 @@ async fn dispatch_single(
             // obs row at all (e.g. the reconciler emitted Stop
             // without ever having seen the alloc Running) there is
             // nothing to write — return Ok.
-            let prior = obs.alloc_status_rows().await?.into_iter().find(|r| r.alloc_id == alloc_id);
-            let Some(prior_row) = prior else {
+            let Some(prior_row) = find_prior_alloc_row(obs, &alloc_id).await? else {
                 return Ok(());
             };
 
-            let writer_node = prior_row.node_id.clone();
             let handle = AllocationHandle { alloc: alloc_id.clone(), pid: None };
             // Driver stop is best-effort — NotFound and other
             // failures are absorbed; the Terminated row records the
             // outcome regardless. This mirrors the Restart variant's
             // stop-half pattern.
             let _ = driver.stop(&handle).await;
-            let row = AllocStatusRow {
-                alloc_id: alloc_id.clone(),
-                job_id: prior_row.job_id,
-                node_id: prior_row.node_id,
-                state: AllocState::Terminated,
-                updated_at: timestamp_for(tick, writer_node),
-            };
+            let row = build_alloc_status_row(
+                alloc_id,
+                prior_row.job_id,
+                prior_row.node_id,
+                AllocState::Terminated,
+                tick,
+            );
             obs.write(ObservationRow::AllocStatus(row)).await?;
             Ok(())
         }
@@ -242,6 +203,29 @@ async fn dispatch_single(
 /// ordered under LWW.
 const fn timestamp_for(tick: &TickContext, writer: NodeId) -> LogicalTimestamp {
     LogicalTimestamp { counter: tick.tick.saturating_add(1), writer }
+}
+
+/// Look up the most recent observation row for `alloc_id`, used by the
+/// Restart and Stop variants to recover `(job_id, node_id)` for the
+/// Terminated row they write. Returns `Ok(None)` when no row exists —
+/// callers decide whether that is an error (Restart) or a no-op (Stop).
+async fn find_prior_alloc_row(
+    obs: &dyn ObservationStore,
+    alloc_id: &AllocationId,
+) -> Result<Option<AllocStatusRow>, ShimError> {
+    Ok(obs.alloc_status_rows().await?.into_iter().find(|r| &r.alloc_id == alloc_id))
+}
+
+/// Build the Phase-1 baseline `AllocationSpec` used to reconstruct a
+/// Restart's spawn from observation alone. Phase 2+ threads the full
+/// Job aggregate through the action so this helper goes away.
+fn build_phase1_restart_spec(alloc_id: &AllocationId, job_id: &JobId) -> AllocationSpec {
+    AllocationSpec {
+        alloc: alloc_id.clone(),
+        identity: build_identity(job_id, alloc_id),
+        image: "/bin/sleep".to_string(),
+        resources: default_restart_resources(),
+    }
 }
 
 /// Reconstruct the SPIFFE identity for a restart's fresh
