@@ -1034,6 +1034,17 @@ pub enum AnyReconcilerView {
 /// resources.
 pub const RESTART_BACKOFF_CEILING: u32 = 5;
 
+/// Backoff window between successive `RestartAllocation` emissions
+/// for the same alloc.
+///
+/// Per US-03 Domain Example 2 (user-stories.md:421-424) the deadline
+/// is `tick.now + initial_backoff` — singular, no progression. One
+/// second balances transient-hiccup tolerance (slow startup,
+/// dependency flap) against operator visibility within Phase 1's
+/// single-node envelope: 1 s × `RESTART_BACKOFF_CEILING` = ~5 s
+/// wall-clock to "Failed (backoff exhausted)".
+pub const RESTART_BACKOFF_DURATION: Duration = Duration::from_secs(1);
+
 pub struct JobLifecycle {
     name: ReconcilerName,
 }
@@ -1153,6 +1164,9 @@ impl Reconciler for JobLifecycle {
                     let count =
                         next_view.restart_counts.entry(failed.alloc_id.clone()).or_insert(0);
                     *count = count.saturating_add(1);
+                    next_view
+                        .next_attempt_at
+                        .insert(failed.alloc_id.clone(), tick.now + RESTART_BACKOFF_DURATION);
                     return (vec![action], next_view);
                 }
 
@@ -1260,7 +1274,7 @@ fn mint_identity(job_id: &JobId, alloc_id: &AllocationId) -> SpiffeId {
 /// - `restart_counts: BTreeMap<AllocationId, u32>` — how many times
 ///   each alloc has been started in this incarnation.
 /// - `next_attempt_at: BTreeMap<AllocationId, Instant>` — backoff
-///   deadline, computed from `tick.now + backoff_duration`.
+///   deadline, computed from `tick.now + RESTART_BACKOFF_DURATION`.
 ///
 /// Field shapes are pinned by US-03 AC. Phase 1 hydrates this from
 /// the runtime's view cache (`AppState::view_cache`); Phase 2+

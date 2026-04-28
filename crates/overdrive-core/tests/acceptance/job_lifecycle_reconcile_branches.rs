@@ -663,7 +663,7 @@ fn subsequent_tick_within_backoff_window_emits_nothing() {
 /// tick 2 advances `tick.now` past `RESTART_BACKOFF_DURATION` and
 /// asserts another restart fires, count is bumped, AND the deadline
 /// rolls forward to `new tick.now + RESTART_BACKOFF_DURATION` (NOT
-/// the previous deadline + RESTART_BACKOFF_DURATION — the spec
+/// the previous deadline + `RESTART_BACKOFF_DURATION` — the spec
 /// pins the new window to the current tick).
 #[test]
 fn tick_after_backoff_elapsed_emits_restart_and_advances_deadline() {
@@ -697,8 +697,7 @@ fn tick_after_backoff_elapsed_emits_restart_and_advances_deadline() {
     // Gate elapsed → another restart must fire, deadline rolls
     // forward to the new tick's now + window.
     let now_2 = now_1 + RESTART_BACKOFF_DURATION + Duration::from_millis(1);
-    let tick_2 =
-        TickContext { now: now_2, tick: 1, deadline: now_2 + Duration::from_secs(1) };
+    let tick_2 = TickContext { now: now_2, tick: 1, deadline: now_2 + Duration::from_secs(1) };
 
     let (actions_2, next_view_2) = r.reconcile(&desired, &actual, &next_view_1, &tick_2);
 
@@ -716,11 +715,7 @@ fn tick_after_backoff_elapsed_emits_restart_and_advances_deadline() {
     // Count bumped by exactly 1.
     let count_1 = next_view_1.restart_counts.get(&aid("alloc-payments-0")).copied().unwrap_or(0);
     let count_2 = next_view_2.restart_counts.get(&aid("alloc-payments-0")).copied().unwrap_or(0);
-    assert_eq!(
-        count_2,
-        count_1 + 1,
-        "restart count must advance by exactly 1 on a non-gated tick",
-    );
+    assert_eq!(count_2, count_1 + 1, "restart count must advance by exactly 1 on a non-gated tick");
 
     // Deadline rolls forward to the *new* tick's now + window — NOT
     // the old deadline + window. This pins the spec semantics:
