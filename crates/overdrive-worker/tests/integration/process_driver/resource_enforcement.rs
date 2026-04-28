@@ -7,9 +7,7 @@
 use std::sync::Arc;
 
 use overdrive_core::id::{AllocationId, SpiffeId};
-use overdrive_core::traits::driver::{
-    AllocationSpec, Driver, Resources,
-};
+use overdrive_core::traits::driver::{AllocationSpec, Driver, Resources};
 use overdrive_worker::ProcessDriver;
 use tempfile::TempDir;
 
@@ -19,8 +17,7 @@ async fn cpu_weight_and_memory_max_are_written_from_spec() {
     std::fs::create_dir_all(cgroup_root.path().join("overdrive.slice/workloads.slice"))
         .expect("workloads.slice created");
 
-    let driver: Arc<dyn Driver> =
-        Arc::new(ProcessDriver::new(cgroup_root.path().to_path_buf()));
+    let driver: Arc<dyn Driver> = Arc::new(ProcessDriver::new(cgroup_root.path().to_path_buf()));
 
     // cpu_milli=2000 -> cpu.weight=200; memory_bytes=128MiB.
     let alloc = AllocationId::new("alloc-resource-enforcement").expect("valid alloc id");
@@ -34,9 +31,8 @@ async fn cpu_weight_and_memory_max_are_written_from_spec() {
 
     let handle = driver.start(&spec).await.expect("start succeeds");
 
-    let scope_dir = cgroup_root
-        .path()
-        .join(format!("overdrive.slice/workloads.slice/{alloc}.scope"));
+    let scope_dir =
+        cgroup_root.path().join(format!("overdrive.slice/workloads.slice/{alloc}.scope"));
 
     let cpu_weight = std::fs::read_to_string(scope_dir.join("cpu.weight"))
         .expect("cpu.weight readable")

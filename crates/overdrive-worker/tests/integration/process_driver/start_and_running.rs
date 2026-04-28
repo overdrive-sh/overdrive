@@ -12,9 +12,7 @@
 use std::sync::Arc;
 
 use overdrive_core::id::{AllocationId, SpiffeId};
-use overdrive_core::traits::driver::{
-    AllocationSpec, AllocationState, Driver, Resources,
-};
+use overdrive_core::traits::driver::{AllocationSpec, AllocationState, Driver, Resources};
 use overdrive_worker::ProcessDriver;
 use tempfile::TempDir;
 
@@ -28,8 +26,7 @@ async fn process_driver_starts_real_sleep_in_cgroup_scope() {
     std::fs::create_dir_all(cgroup_root.path().join("overdrive.slice/workloads.slice"))
         .expect("workloads.slice created");
 
-    let driver: Arc<dyn Driver> =
-        Arc::new(ProcessDriver::new(cgroup_root.path().to_path_buf()));
+    let driver: Arc<dyn Driver> = Arc::new(ProcessDriver::new(cgroup_root.path().to_path_buf()));
 
     let alloc = AllocationId::new("alloc-walking-skeleton-2-2").expect("valid alloc id");
     let spec = AllocationSpec {
@@ -41,10 +38,7 @@ async fn process_driver_starts_real_sleep_in_cgroup_scope() {
     };
 
     // Action — through driving port.
-    let handle = driver
-        .start(&spec)
-        .await
-        .expect("ProcessDriver::start succeeds for /bin/sleep");
+    let handle = driver.start(&spec).await.expect("ProcessDriver::start succeeds for /bin/sleep");
 
     // Observable outcome 1 — handle carries the live PID.
     let pid = handle.pid.expect("ProcessDriver populates pid on start");
@@ -56,14 +50,9 @@ async fn process_driver_starts_real_sleep_in_cgroup_scope() {
 
     // Observable outcome 3 — the workload scope dir exists under the
     // tempdir cgroup root.
-    let scope_dir = cgroup_root
-        .path()
-        .join(format!("overdrive.slice/workloads.slice/{alloc}.scope"));
-    assert!(
-        scope_dir.exists(),
-        "workload scope directory must exist at {}",
-        scope_dir.display()
-    );
+    let scope_dir =
+        cgroup_root.path().join(format!("overdrive.slice/workloads.slice/{alloc}.scope"));
+    assert!(scope_dir.exists(), "workload scope directory must exist at {}", scope_dir.display());
 
     // Cleanup — stop the process, drop tempdir.
     driver.stop(&handle).await.expect("stop succeeds");

@@ -10,9 +10,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use overdrive_core::id::{AllocationId, SpiffeId};
-use overdrive_core::traits::driver::{
-    AllocationSpec, AllocationState, Driver, Resources,
-};
+use overdrive_core::traits::driver::{AllocationSpec, AllocationState, Driver, Resources};
 use overdrive_worker::ProcessDriver;
 use tempfile::TempDir;
 use tokio::time::Instant;
@@ -51,10 +49,7 @@ async fn stop_escalates_to_sigkill_when_sigterm_ignored() {
         elapsed >= Duration::from_millis(250),
         "stop returned faster than the configured grace ({elapsed:?})"
     );
-    assert!(
-        elapsed < Duration::from_secs(10),
-        "stop did not escalate within budget ({elapsed:?})"
-    );
+    assert!(elapsed < Duration::from_secs(10), "stop did not escalate within budget ({elapsed:?})");
 
     let state = driver.status(&handle).await.expect("status succeeds");
     assert_eq!(state, AllocationState::Terminated);

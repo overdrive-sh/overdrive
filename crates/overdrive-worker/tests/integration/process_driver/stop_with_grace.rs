@@ -8,9 +8,7 @@
 use std::sync::Arc;
 
 use overdrive_core::id::{AllocationId, SpiffeId};
-use overdrive_core::traits::driver::{
-    AllocationSpec, AllocationState, Driver, Resources,
-};
+use overdrive_core::traits::driver::{AllocationSpec, AllocationState, Driver, Resources};
 use overdrive_worker::ProcessDriver;
 use tempfile::TempDir;
 
@@ -20,8 +18,7 @@ async fn stop_with_grace_drives_to_terminated_and_removes_scope() {
     std::fs::create_dir_all(cgroup_root.path().join("overdrive.slice/workloads.slice"))
         .expect("workloads.slice created");
 
-    let driver: Arc<dyn Driver> =
-        Arc::new(ProcessDriver::new(cgroup_root.path().to_path_buf()));
+    let driver: Arc<dyn Driver> = Arc::new(ProcessDriver::new(cgroup_root.path().to_path_buf()));
 
     let alloc = AllocationId::new("alloc-stop-grace").expect("valid alloc id");
     let spec = AllocationSpec {
@@ -38,9 +35,8 @@ async fn stop_with_grace_drives_to_terminated_and_removes_scope() {
     let state = driver.status(&handle).await.expect("status succeeds after stop");
     assert_eq!(state, AllocationState::Terminated);
 
-    let scope_dir = cgroup_root
-        .path()
-        .join(format!("overdrive.slice/workloads.slice/{alloc}.scope"));
+    let scope_dir =
+        cgroup_root.path().join(format!("overdrive.slice/workloads.slice/{alloc}.scope"));
     assert!(
         !scope_dir.exists(),
         "scope directory must be removed after stop, still present at {}",

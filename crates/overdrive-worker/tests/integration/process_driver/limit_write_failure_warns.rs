@@ -11,9 +11,7 @@
 use std::sync::Arc;
 
 use overdrive_core::id::{AllocationId, SpiffeId};
-use overdrive_core::traits::driver::{
-    AllocationSpec, AllocationState, Driver, Resources,
-};
+use overdrive_core::traits::driver::{AllocationSpec, AllocationState, Driver, Resources};
 use overdrive_worker::ProcessDriver;
 use tempfile::TempDir;
 
@@ -24,8 +22,7 @@ async fn limit_write_failure_warns_and_continues() {
         .expect("workloads.slice created");
 
     let driver: Arc<dyn Driver> = Arc::new(
-        ProcessDriver::new(cgroup_root.path().to_path_buf())
-            .with_force_limit_write_failure(true),
+        ProcessDriver::new(cgroup_root.path().to_path_buf()).with_force_limit_write_failure(true),
     );
 
     let alloc = AllocationId::new("alloc-limit-write-fail").expect("valid alloc id");
@@ -40,10 +37,7 @@ async fn limit_write_failure_warns_and_continues() {
     // With force-fail injection, the limit-write helper returns
     // an error; the driver warn-and-continues, so start MUST still
     // succeed and the alloc MUST reach Running.
-    let handle = driver
-        .start(&spec)
-        .await
-        .expect("start succeeds even when limit writes fail");
+    let handle = driver.start(&spec).await.expect("start succeeds even when limit writes fail");
     let state = driver.status(&handle).await.expect("status succeeds");
     assert_eq!(state, AllocationState::Running);
 

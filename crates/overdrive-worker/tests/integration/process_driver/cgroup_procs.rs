@@ -7,9 +7,7 @@
 use std::sync::Arc;
 
 use overdrive_core::id::{AllocationId, SpiffeId};
-use overdrive_core::traits::driver::{
-    AllocationSpec, Driver, Resources,
-};
+use overdrive_core::traits::driver::{AllocationSpec, Driver, Resources};
 use overdrive_worker::ProcessDriver;
 use tempfile::TempDir;
 
@@ -19,8 +17,7 @@ async fn child_pid_appears_in_cgroup_procs() {
     std::fs::create_dir_all(cgroup_root.path().join("overdrive.slice/workloads.slice"))
         .expect("workloads.slice created");
 
-    let driver: Arc<dyn Driver> =
-        Arc::new(ProcessDriver::new(cgroup_root.path().to_path_buf()));
+    let driver: Arc<dyn Driver> = Arc::new(ProcessDriver::new(cgroup_root.path().to_path_buf()));
 
     let alloc = AllocationId::new("alloc-cgroup-procs-test").expect("valid alloc id");
     let spec = AllocationSpec {
@@ -37,13 +34,9 @@ async fn child_pid_appears_in_cgroup_procs() {
     let procs_path = cgroup_root
         .path()
         .join(format!("overdrive.slice/workloads.slice/{alloc}.scope/cgroup.procs"));
-    let contents = std::fs::read_to_string(&procs_path)
-        .expect("cgroup.procs readable");
+    let contents = std::fs::read_to_string(&procs_path).expect("cgroup.procs readable");
 
-    let pids: Vec<u32> = contents
-        .lines()
-        .filter_map(|l| l.trim().parse().ok())
-        .collect();
+    let pids: Vec<u32> = contents.lines().filter_map(|l| l.trim().parse().ok()).collect();
     assert!(
         pids.contains(&pid),
         "expected pid {pid} in cgroup.procs ({}), got {pids:?}",
