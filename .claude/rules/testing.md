@@ -923,6 +923,90 @@ kernel requires an ADR.
 - GitHub Actions runners work with `--qemu-disable-kvm`; self-hosted
   KVM-capable runners optional for latency budget.
 
+### Running integration tests locally on macOS — Lima VM
+
+`cargo nextest run --features integration-tests` does not work on macOS.
+ProcessDriver, control-plane cgroup management, eBPF programs, and every
+`#[cfg(target_os = "linux")]` test surface require a real Linux kernel
+plus cgroup v2. macOS-side `--no-run` catches type and wiring errors but
+not runtime or permission issues — every shipped integration test must
+be exercised on Linux at least once before merge, and the Lima VM is the
+canonical inner-loop path.
+
+**Where the VM is defined.** `infra/lima/overdrive-dev.yaml` describes
+the project's standard dev VM (Ubuntu 24.04, kernel 6.8, cgroup v2,
+KVM, full eBPF + BPF LSM toolchain, `cargo-nextest`, `cargo-mutants`).
+The repo is virtiofs-mounted into the guest at the same path; no rsync,
+no `git clone` inside the VM.
+
+**Default invocation:**
+
+```bash
+limactl shell overdrive bash -lc \
+  'cargo nextest run --workspace --features integration-tests'
+```
+
+The path inherits from `pwd` on the host because the working tree is
+mounted at the same absolute path in the guest. `--features
+integration-tests` is mandatory; without it, the Linux-gated tests are
+skipped and the run signal is meaningless.
+
+**Cgroup writes need root or delegation.** Tests that exercise the
+workload-cgroup path (`overdrive-worker::ProcessDriver`, the
+JobLifecycle convergence loop) `mkdir`
+`/sys/fs/cgroup/overdrive.slice/...`. The Lima default user is
+unprivileged and lacks delegation for that subtree, so the production
+path returns `EACCES` and Pending allocs never reach Running. Two
+acceptable shapes for the inner loop:
+
+- **`cargo xtask lima run` (canonical, 1:1 with CI)** — the wrapper
+  defaults to running the test process as root inside the VM, the same
+  permission surface CI's LVH harness uses. It re-injects `PATH` and
+  `CARGO_TARGET_DIR` so cargo and its target dir continue to resolve
+  under the `lima` user's home (where rustup is installed):
+
+  ```bash
+  cargo xtask lima run -- cargo nextest run --workspace --features integration-tests
+  ```
+
+  Equivalent under the hood to:
+
+  ```bash
+  limactl shell overdrive bash -lc \
+    'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
+     cargo nextest run --workspace --features integration-tests'
+  ```
+
+  Pass `--no-sudo` (`cargo xtask lima run --no-sudo -- <cmd>`) to run
+  as the unprivileged `lima` user — for non-test commands or when you
+  specifically want to observe the EACCES surface without privileged
+  delegation. `cargo xtask lima shell` still drops you in as the
+  `lima` user; use `sudo -i` inside if you want an interactive root
+  shell.
+- **`--allow-no-cgroups`** (ADR-0028) — the dev escape hatch for tests
+  that want to skip cgroup ops entirely. Production refuses to start on
+  delegation gaps; this flag bypasses the pre-flight and the driver
+  skips scope creation. Use only when the test is asserting on the
+  control-plane convergence shape, not on cgroup side effects.
+
+Do not paper over `EACCES` failures by removing the cgroup writes — the
+production code path IS the cgroup writes.
+
+**The `--no-run` macOS gate is necessary, not sufficient.** Every step's
+quality gate includes `cargo nextest run --workspace --features
+integration-tests --no-run` on macOS to catch compile errors before
+shipping. That gate cannot detect convergence-loop bugs, race
+conditions, missing match arms behind `#[cfg(target_os = "linux")]`,
+permission shape issues, or any runtime invariant. A green `--no-run`
+on macOS plus a green Lima run is the honest signal; either alone is
+not.
+
+**Tier 3 / Tier 4 stays on `cargo xtask integration-test vm` and
+`cargo xtask xdp-perf`.** The Lima VM is the macOS dev convenience for
+running the per-step integration suite during the inner loop. The
+kernel-matrix tier 3 harness still runs on CI via LVH; do not collapse
+the two.
+
 ### Assertion rules
 
 Assert on observable kernel side effects. Never on program internal

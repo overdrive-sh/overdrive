@@ -236,10 +236,22 @@ enum HooksAction {
 enum LimaAction {
     /// Create & start the VM (or start an existing one).
     Up,
-    /// Open an interactive shell in the VM.
+    /// Open an interactive shell in the VM (runs as the unprivileged
+    /// `lima` user; use `sudo -i` inside if you need root).
     Shell,
     /// Run a one-off command inside the VM (remaining args forwarded).
+    ///
+    /// Default behaviour wraps the command in
+    /// `sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" ...`
+    /// so the test process runs as root — the same permission surface
+    /// CI's LVH VM sees. Pass `--no-sudo` to run as the unprivileged
+    /// `lima` user instead.
     Run {
+        /// Run the command as the `lima` user instead of wrapping in
+        /// `sudo -E ...`. Use when the command does not need cgroup
+        /// writes or other root-only operations.
+        #[arg(long)]
+        no_sudo: bool,
         #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
         args: Vec<String>,
     },
@@ -484,12 +496,28 @@ fn lima(action: LimaAction) -> Result<()> {
         LimaAction::Shell => {
             sh("limactl shell", Command::new("limactl").args(["shell", LIMA_INSTANCE]))
         }
-        LimaAction::Run { args } => {
+        LimaAction::Run { no_sudo, args } => {
             if args.is_empty() {
                 bail!("no command given; use `cargo xtask lima run -- cargo xtask dst` etc.");
             }
             let mut cmd = Command::new("limactl");
-            cmd.args(["shell", LIMA_INSTANCE]).args(&args);
+            if no_sudo {
+                cmd.args(["shell", LIMA_INSTANCE]).args(&args);
+            } else {
+                // Default: run the test process as root inside the VM
+                // so cgroup writes and other privileged ops succeed —
+                // the same permission shape CI's LVH harness uses.
+                // `sudo -E` preserves env; `env "PATH=$PATH"
+                // "CARGO_TARGET_DIR=$CARGO_TARGET_DIR"` re-injects the
+                // two vars sudo's `secure_path` would otherwise scrub
+                // so cargo and its target dir resolve under the
+                // `lima` user's home (where rustup is installed).
+                let joined = args.iter().map(|a| sh_escape(a)).collect::<Vec<_>>().join(" ");
+                let inner = format!(
+                    r#"sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" {joined}"#
+                );
+                cmd.args(["shell", LIMA_INSTANCE, "bash", "-lc", &inner]);
+            }
             sh("limactl shell <cmd>", &mut cmd)
         }
         LimaAction::Stop => {
@@ -502,6 +530,24 @@ fn lima(action: LimaAction) -> Result<()> {
             sh("limactl validate", Command::new("limactl").args(["validate", LIMA_TEMPLATE]))
         }
     }
+}
+
+/// Single-quote-wrap an argument so it survives `bash -lc` re-parsing
+/// inside the Lima guest. POSIX single quotes preserve every byte
+/// except `'` itself, which closes the quoted span; we close, escape
+/// the literal quote, and reopen.
+fn sh_escape(s: &str) -> String {
+    if s.is_empty() {
+        return "''".into();
+    }
+    let safe = s
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | '=' | ',' | ':'));
+    if safe {
+        return s.into();
+    }
+    let escaped = s.replace('\'', r"'\''");
+    format!("'{escaped}'")
 }
 
 fn which_or_hint(binary: &str, install_hint: &str) -> Result<()> {
