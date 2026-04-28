@@ -32,6 +32,14 @@ use crate::cgroup_manager::{
 /// Default grace window between SIGTERM and SIGKILL during stop.
 const DEFAULT_STOP_GRACE: Duration = Duration::from_secs(5);
 
+/// Construct a `DriverError::StartRejected` for the process driver. The
+/// `driver: DriverType::Process` discriminator is fixed by construction,
+/// so the call sites only need to supply the human-readable reason. Used
+/// by every fallible step in `Driver::start`.
+fn start_rejected(reason: impl Into<String>) -> DriverError {
+    DriverError::StartRejected { driver: DriverType::Process, reason: reason.into() }
+}
+
 /// Tracking state for an allocation owned by the driver.
 enum LiveAllocation {
     /// Process is running; the driver owns the `Child`.
@@ -201,10 +209,9 @@ impl Driver for ProcessDriver {
         // status/stop work correctly.
         if self.allow_no_cgroups {
             let mut cmd = Self::build_command(spec);
-            let child = cmd.spawn().map_err(|err| DriverError::StartRejected {
-                driver: DriverType::Process,
-                reason: format!("spawn {}: {err}", spec.image),
-            })?;
+            let child = cmd
+                .spawn()
+                .map_err(|err| start_rejected(format!("spawn {}: {err}", spec.image)))?;
             let pid = child.id();
             self.live.lock().insert(spec.alloc.clone(), LiveAllocation::Running { child, scope });
             return Ok(AllocationHandle { alloc: spec.alloc.clone(), pid });
@@ -213,10 +220,7 @@ impl Driver for ProcessDriver {
         // 1. Create the scope directory. Failure here is fatal — we
         //    never have a PID to clean up.
         if let Err(err) = create_workload_scope(&self.cgroup_root, &scope) {
-            return Err(DriverError::StartRejected {
-                driver: DriverType::Process,
-                reason: format!("create workload scope: {err}"),
-            });
+            return Err(start_rejected(format!("create workload scope: {err}")));
         }
 
         // 2. Write limits BEFORE PID enrolment per ADR-0026 D9.
@@ -246,10 +250,7 @@ impl Driver for ProcessDriver {
             Ok(child) => child,
             Err(err) => {
                 let _ = remove_workload_scope(&self.cgroup_root, &scope);
-                return Err(DriverError::StartRejected {
-                    driver: DriverType::Process,
-                    reason: format!("spawn {}: {err}", spec.image),
-                });
+                return Err(start_rejected(format!("spawn {}: {err}", spec.image)));
             }
         };
 
@@ -261,10 +262,7 @@ impl Driver for ProcessDriver {
             // happen here since we just spawned. Treat as fatal start
             // failure for safety.
             let _ = remove_workload_scope(&self.cgroup_root, &scope);
-            return Err(DriverError::StartRejected {
-                driver: DriverType::Process,
-                reason: "tokio Child returned no pid (already reaped?)".to_owned(),
-            });
+            return Err(start_rejected("tokio Child returned no pid (already reaped?)"));
         };
         if let Err(err) = place_pid_in_scope(&self.cgroup_root, &scope, pid) {
             // Best-effort kill + cleanup. We don't await here —
@@ -280,10 +278,7 @@ impl Driver for ProcessDriver {
                 libc::kill(pid as libc::pid_t, libc::SIGKILL);
             }
             let _ = remove_workload_scope(&self.cgroup_root, &scope);
-            return Err(DriverError::StartRejected {
-                driver: DriverType::Process,
-                reason: format!("place pid in scope: {err}"),
-            });
+            return Err(start_rejected(format!("place pid in scope: {err}")));
         }
 
         // 5. Record the allocation as live.
@@ -356,11 +351,7 @@ impl Driver for ProcessDriver {
             let _ = remove_workload_scope(&self.cgroup_root, &scope);
         }
 
-        // Suppress unused warning — `scope` is consumed by
-        // remove_workload_scope above.
-        let _ = scope;
-
-        // 5. Record terminal state so subsequent status() calls
+        // 6. Record terminal state so subsequent status() calls
         //    return `Terminated` rather than `NotFound`.
         self.live.lock().insert(handle.alloc.clone(), LiveAllocation::Terminated);
 
