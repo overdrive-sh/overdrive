@@ -34,8 +34,8 @@ use std::time::{Duration, Instant};
 use overdrive_core::aggregate::{IntentKey, Job, Node};
 use overdrive_core::id::{JobId, NodeId};
 use overdrive_core::reconciler::{
-    AnyReconciler, AnyReconcilerView, AnyState, JobLifecycleState, JobLifecycleView, LibsqlHandle,
-    ReconcilerName, TargetResource, TickContext,
+    Action, AnyReconciler, AnyReconcilerView, AnyState, JobLifecycleState, JobLifecycleView,
+    LibsqlHandle, ReconcilerName, TargetResource, TickContext,
 };
 use overdrive_core::traits::intent_store::IntentStore;
 
@@ -253,7 +253,16 @@ pub async fn run_convergence_tick(
         // self-re-enqueue gate (`has_work`) is what makes the
         // level-triggered §18 half work: the next tick re-evaluates
         // only when the cluster has not yet converged.
-        let has_work = !actions.is_empty();
+        //
+        // `Action::Noop` is the documented "nothing to do this tick"
+        // sentinel (see `core/reconciler.rs` `Action::Noop` variant)
+        // and `action_shim::dispatch` already treats it as a no-op
+        // (see `action_shim.rs`). The §18 re-enqueue gate must honor
+        // that documented semantic — an all-Noop actions vec is
+        // semantically empty, so it must NOT trip a self-re-enqueue
+        // (otherwise a converged target with a heartbeat reconciler
+        // self-re-enqueues forever).
+        let has_work = actions.iter().any(|a| !matches!(a, Action::Noop));
 
         // Dispatch through the action shim — this is where `.await`
         // is permitted. Per-action error isolation lives in the shim.

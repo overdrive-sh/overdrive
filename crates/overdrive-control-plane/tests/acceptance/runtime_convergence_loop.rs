@@ -71,7 +71,6 @@ fn build_converged_state(tmp: &TempDir, clock: &SimClock) -> AppState {
 /// With the fix landed: `dispatched == 1` (only the seed eval is drained)
 /// and `queued == 0` (convergence is stable).
 #[tokio::test]
-#[ignore = "RED scaffold for fix-noop-self-reenqueue — un-ignore in the GREEN step"]
 async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
     let tmp = TempDir::new().expect("tempdir");
     let clock = SimClock::new();
