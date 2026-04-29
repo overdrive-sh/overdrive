@@ -141,9 +141,10 @@ async fn dispatch_single(
 
             // Start half — look up the prior alloc row to recover the
             // job_id and node_id; reconstruct the spec from a Phase-1
-            // baseline (`/bin/sleep`, default resources). This keeps
-            // the restart path observable without threading the full
-            // Job aggregate through the action.
+            // baseline (`/bin/sleep` with argv `["60"]`, default
+            // resources). This keeps the restart path observable
+            // without threading the full Job aggregate through the
+            // action.
             let Some(prior_row) = find_prior_alloc_row(obs, &alloc_id).await? else {
                 return Err(ShimError::HandleMissing { alloc_id });
             };
@@ -223,7 +224,8 @@ fn build_phase1_restart_spec(alloc_id: &AllocationId, job_id: &JobId) -> Allocat
     AllocationSpec {
         alloc: alloc_id.clone(),
         identity: build_identity(job_id, alloc_id),
-        image: "/bin/sleep".to_string(),
+        command: "/bin/sleep".to_string(),
+        args: vec!["60".to_string()],
         resources: default_restart_resources(),
     }
 }

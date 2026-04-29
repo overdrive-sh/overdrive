@@ -70,9 +70,13 @@ async fn cluster_status_responsive_under_workload_cpu_burst() {
     let _cleanup =
         AllocCleanup { obs: obs.clone(), cgroup_root: std::path::PathBuf::from("/sys/fs/cgroup") };
 
-    // Spawn the CPU burner directly via ExecDriver. The
-    // `/bin/cpuburn` image marker invokes a `nproc`-many busy-loop
-    // shell — see `overdrive_worker::driver::ExecDriver::build_command`.
+    // Spawn the CPU burner directly via ExecDriver. Since ADR-0030 +
+    // ADR-0029 amendment 2026-04-28 removed magic image-name dispatch
+    // from `ExecDriver::build_command`, the busy-loop script that was
+    // previously baked behind the `/bin/cpuburn` marker is now passed
+    // inline as argv. The script forks one busy loop per online CPU
+    // core and `wait`s — `cgroup.kill` (real cgroupfs) or process-group
+    // SIGKILL (test fakes) reaches the entire group at teardown.
     let alloc_id = AllocationId::new("alloc-burner-0").expect("valid alloc id");
     let job_id = JobId::new("burner").expect("valid job id");
     let identity = SpiffeId::new("spiffe://overdrive.local/job/burner/alloc/alloc-burner-0")
@@ -80,10 +84,14 @@ async fn cluster_status_responsive_under_workload_cpu_burst() {
     let spec = AllocationSpec {
         alloc: alloc_id.clone(),
         identity,
-        image: "/bin/cpuburn".to_string(),
+        command: "/bin/sh".to_string(),
+        args: vec![
+            "-c".to_string(),
+            "for i in $(seq 1 $(nproc)); do (while :; do :; done) & done; wait".to_string(),
+        ],
         resources: Resources { cpu_milli: 1000, memory_bytes: 256 * 1024 * 1024 },
     };
-    let handle = driver.start(&spec).await.expect("driver.start /bin/cpuburn");
+    let handle = driver.start(&spec).await.expect("driver.start cpu-burner");
 
     // Record an alloc row so the read path under measurement returns
     // non-empty data (matches what the action shim would have written).

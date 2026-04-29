@@ -25,7 +25,8 @@ async fn missing_binary_does_not_create_cgroup_scope() {
         alloc: alloc.clone(),
         identity: SpiffeId::new("spiffe://overdrive.local/job/x/alloc/mb")
             .expect("valid spiffe id"),
-        image: "/this/binary/does/not/exist/anywhere".to_owned(),
+        command: "/this/binary/does/not/exist/anywhere".to_owned(),
+        args: vec![],
         resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
     };
 

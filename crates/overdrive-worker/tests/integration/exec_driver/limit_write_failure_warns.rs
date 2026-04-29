@@ -30,7 +30,8 @@ async fn limit_write_failure_warns_and_continues() {
         alloc: alloc.clone(),
         identity: SpiffeId::new("spiffe://overdrive.local/job/x/alloc/lw")
             .expect("valid spiffe id"),
-        image: "/bin/sleep".to_owned(),
+        command: "/bin/sleep".to_owned(),
+        args: vec!["60".to_owned()],
         resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
     };
 

@@ -275,7 +275,8 @@ fn sample_spec() -> AllocationSpec {
     AllocationSpec {
         alloc: alloc("alloc-a1b2c3"),
         identity: spiffe("job/payments/alloc/a1b2c3"),
-        image: "registry/payments:1.0".to_owned(),
+        command: "registry/payments:1.0".to_owned(),
+        args: vec![],
         resources: Resources { cpu_milli: 500, memory_bytes: 256 * 1024 * 1024 },
     }
 }

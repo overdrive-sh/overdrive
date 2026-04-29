@@ -504,7 +504,7 @@ pub enum Action {
         job_id: JobId,
         /// Placement decision from `overdrive-scheduler::schedule`.
         node_id: NodeId,
-        /// Resources / image / identity for the workload. The action
+        /// Resources / command / args / identity for the workload. The action
         /// shim passes this directly to `Driver::start`.
         spec: AllocationSpec,
     },
@@ -1191,7 +1191,8 @@ impl Reconciler for JobLifecycle {
                             spec: AllocationSpec {
                                 alloc: alloc_id,
                                 identity,
-                                image: "/bin/sleep".to_string(),
+                                command: "/bin/sleep".to_string(),
+                                args: vec!["60".to_string()],
                                 resources: job.resources,
                             },
                         };

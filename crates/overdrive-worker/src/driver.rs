@@ -129,60 +129,40 @@ impl ExecDriver {
         self
     }
 
-    /// Build the argv for the spec.
+    /// Build the [`Command`] that this driver will exec for `spec`.
     ///
-    /// Phase 1 hardcodes a small set of image-name conventions. This
-    /// stands in for a real container/runtime resolver (Phase 2+):
+    /// `ExecDriver` invokes the binary at `spec.command` verbatim against
+    /// `spec.args`; magic image-name dispatch (the pre-2026-04-28
+    /// hardcoded `/bin/sleep` / `/bin/sh` / CPU-burner arg-injection
+    /// tree that previously read test-fixture intent from production
+    /// code) was removed per ADR-0029 amendment 2026-04-28 + ADR-0026
+    /// amendment 2026-04-28 + ADR-0030. Test fixtures construct argv
+    /// inline.
     ///
-    /// | Image | Behaviour |
-    /// |---|---|
-    /// | `/bin/sleep` | spawn `sleep 60` (canonical happy path) |
-    /// | `/bin/sh` | SIGTERM-ignoring shell (`trap '' TERM; sleep 60`); used by stop-escalation tests |
-    /// | `/bin/cpuburn` | spawn a CPU-busy `/bin/sh` loop that pegs every CPU until killed; used by the cgroup-isolation burst test (slice 4 scenario 4.2) |
-    /// | other | passed as-is — spawn will fail with `NotFound` and the caller converts to `StartRejected` |
-    ///
-    /// The `cpuburn` shape is a deliberate Phase-1 affordance: the
-    /// burst test needs a workload that consumes 100% CPU on every
-    /// online core to disprove §4 paper-guarantees; baking the busy
-    /// loop into the driver avoids depending on `stress(1)` (not
-    /// installed in the Lima image by default).
+    /// The `setsid(2)` pre-exec hook is unconditional: every spawned
+    /// child becomes its own process group leader so the driver can
+    /// reach reparented grandchildren via `kill(-pgid, SIGKILL)` at
+    /// stop time. `cgroup.kill` covers the production path (real
+    /// cgroupfs); the process-group fallback covers the integration
+    /// tests, which mount a `tempfile::TempDir` as a fake cgroupfs root
+    /// where `cgroup.kill` is a no-op file write. Linux-only —
+    /// `pre_exec` is `unsafe` because the closure runs between fork
+    /// and exec where the contract is to call only async-signal-safe
+    /// functions; `setsid(2)` is on the POSIX async-signal-safe list.
     fn build_command(spec: &AllocationSpec) -> Command {
-        let mut cmd = if spec.image == "/bin/cpuburn" {
-            // Pin every online core. `nproc` returns the count; the
-            // shell forks one busy loop per CPU and `wait`s. SIGKILL
-            // via cgroup.kill or process-group reaches the entire
-            // group at teardown.
-            let mut c = Command::new("/bin/sh");
-            c.arg("-c").arg("for i in $(seq 1 $(nproc)); do (while :; do :; done) & done; wait");
-            c
-        } else {
-            Command::new(&spec.image)
-        };
-        if spec.image == "/bin/sleep" {
-            cmd.arg("60");
-        } else if spec.image == "/bin/sh" {
-            // SIGTERM-ignoring shell — used by scenario 2.7.
-            cmd.arg("-c").arg("trap '' TERM; sleep 60");
-        }
+        let mut cmd = Command::new(&spec.command);
+        cmd.args(&spec.args);
         cmd.kill_on_drop(false);
 
-        // Put the child in a fresh process group so the driver can
-        // reach reparented grandchildren via `kill(-pgid, SIGKILL)`.
-        // Without this, a `/bin/sh -c 'trap ""; sleep 60'` shell that
-        // gets SIGKILL'd reparents its `sleep` child to init, and the
-        // tokio `Child` handle has no way to find it. `cgroup.kill`
-        // covers production (real cgroupfs); the process-group fallback
-        // covers the integration tests, which mount a `tempfile::TempDir`
-        // as a fake cgroupfs root where `cgroup.kill` is a no-op file
-        // write. Linux-only — `pre_exec` is `unsafe` because the closure
-        // runs between fork and exec, where the contract is to call
-        // only async-signal-safe functions; `setsid(2)` is on the
-        // POSIX async-signal-safe list.
         #[cfg(target_os = "linux")]
         {
             // SAFETY: `setsid` is async-signal-safe; the closure is
             // executed in the forked child between fork and exec, no
-            // shared state is touched.
+            // shared state is touched. `setsid()` places the spawned
+            // child in its own process group so SIGKILL at stop time
+            // reaches the entire workload tree (matches the pre-rename
+            // behaviour for `/bin/sh`-class workloads, made unconditional
+            // because every exec workload deserves the same guarantee).
             unsafe {
                 cmd.pre_exec(|| {
                     libc::setsid();
@@ -213,7 +193,7 @@ impl Driver for ExecDriver {
             let mut cmd = Self::build_command(spec);
             let child = cmd
                 .spawn()
-                .map_err(|err| start_rejected(format!("spawn {}: {err}", spec.image)))?;
+                .map_err(|err| start_rejected(format!("spawn {}: {err}", spec.command)))?;
             let pid = child.id();
             self.live.lock().insert(spec.alloc.clone(), LiveAllocation::Running { child, scope });
             return Ok(AllocationHandle { alloc: spec.alloc.clone(), pid });
@@ -252,7 +232,7 @@ impl Driver for ExecDriver {
             Ok(child) => child,
             Err(err) => {
                 let _ = remove_workload_scope(&self.cgroup_root, &scope).await;
-                return Err(start_rejected(format!("spawn {}: {err}", spec.image)));
+                return Err(start_rejected(format!("spawn {}: {err}", spec.command)));
             }
         };
 

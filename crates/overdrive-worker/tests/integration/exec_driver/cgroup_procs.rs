@@ -24,7 +24,8 @@ async fn child_pid_appears_in_cgroup_procs() {
         alloc: alloc.clone(),
         identity: SpiffeId::new("spiffe://overdrive.local/job/x/alloc/cp")
             .expect("valid spiffe id"),
-        image: "/bin/sleep".to_owned(),
+        command: "/bin/sleep".to_owned(),
+        args: vec!["60".to_owned()],
         resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
     };
 

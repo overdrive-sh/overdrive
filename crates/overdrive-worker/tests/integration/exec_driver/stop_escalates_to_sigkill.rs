@@ -72,7 +72,8 @@ async fn stop_escalates_to_sigkill_when_sigterm_ignored() {
         alloc: alloc.clone(),
         identity: SpiffeId::new("spiffe://overdrive.local/job/x/alloc/sk")
             .expect("valid spiffe id"),
-        image: "/bin/sh".to_owned(),
+        command: "/bin/sh".to_owned(),
+        args: vec!["-c".to_owned(), "trap '' TERM; sleep 60".to_owned()],
         resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
     };
 

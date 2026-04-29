@@ -111,7 +111,13 @@ pub struct Resources {
 pub struct AllocationSpec {
     pub alloc: AllocationId,
     pub identity: SpiffeId,
-    pub image: String,
+    /// Host filesystem path to the binary the driver execs (e.g. `/bin/sleep`).
+    /// Container drivers (Phase 2+ MicroVm/Wasm) carry their own
+    /// `ContentHash`-typed image field on per-driver-type spec types.
+    pub command: String,
+    /// Argv passed verbatim to the binary; the driver invokes
+    /// `Command::new(&self.command).args(&self.args)`.
+    pub args: Vec<String>,
     pub resources: Resources,
 }
 

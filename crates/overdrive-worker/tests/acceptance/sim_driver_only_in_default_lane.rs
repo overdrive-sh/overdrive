@@ -21,7 +21,8 @@ async fn default_lane_does_not_spawn_real_processes() {
         alloc: AllocationId::new("alloc-default-lane").expect("valid alloc id"),
         identity: SpiffeId::new("spiffe://overdrive.local/job/payments/alloc/a1")
             .expect("valid spiffe id"),
-        image: "/bin/sleep".to_owned(),
+        command: "/bin/sleep".to_owned(),
+        args: vec![],
         resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
     };
 
