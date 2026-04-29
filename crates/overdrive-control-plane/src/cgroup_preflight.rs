@@ -221,7 +221,14 @@ pub fn run_preflight_at(
     proc_self_cgroup: &Path,
 ) -> Result<(), CgroupPreflightError> {
     // Step 1 — kernel exposes cgroup v2.
-    let proc_fs = std::fs::read_to_string(proc_filesystems).unwrap_or_default();
+    let proc_fs = match std::fs::read_to_string(proc_filesystems) {
+        Ok(s) => s,
+        // NotFound IS the v1-host signal — fall through to the
+        // cgroup_v2_available = false branch below, which returns
+        // NoCgroupV2 with the kernel-upgrade remediation.
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(err) => return Err(CgroupPreflightError::ProcFilesystemsUnreadable { source: err }),
+    };
     let cgroup_v2_available = proc_fs.lines().any(|line| line.contains("cgroup2"));
     if !cgroup_v2_available {
         return Err(CgroupPreflightError::NoCgroupV2 { kernel: uname_release() });

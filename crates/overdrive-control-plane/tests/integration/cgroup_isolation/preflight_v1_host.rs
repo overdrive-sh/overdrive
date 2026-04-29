@@ -53,3 +53,50 @@ fn preflight_refuses_on_cgroup_v1_host() {
     assert!(msg.contains("--allow-no-cgroups"), "must mention --allow-no-cgroups: {msg}");
     assert!(msg.contains("docs.overdrive.sh"), "must mention docs URL: {msg}");
 }
+
+/// Belt-and-braces — `NotFound` on `/proc/filesystems` is the v1-host
+/// signal on a stripped kernel without procfs entries, and must
+/// continue to flow through `NoCgroupV2` (NOT the new
+/// `ProcFilesystemsUnreadable` variant added by the
+/// `fix-cgroup-preflight-procfs-unreadable` bugfix).
+///
+/// This test locks in the `NotFound → NoCgroupV2` mapping so a future
+/// refactor cannot silently route `NotFound` through the new variant.
+/// Without this test, the existing `preflight_refuses_on_cgroup_v1_host`
+/// fixture above (which writes a real file with cgroup v1 content)
+/// would not exercise the `Err(io::Error)` branch — its `read_to_string`
+/// returns `Ok(non_empty_string)`. Pointing `proc_filesystems` at a
+/// path that does not exist forces `read_to_string` to return
+/// `Err(NotFound)` and proves the match arm `Err(err) if err.kind() ==
+/// ErrorKind::NotFound => String::new()` is wired correctly.
+#[test]
+fn preflight_treats_missing_proc_filesystems_as_v1_host() {
+    let tmp = TempDir::new().expect("tempdir");
+    // Path inside tmpdir that we deliberately do NOT create. Reading
+    // it returns Err(io::Error { kind: NotFound, .. }), which the
+    // forthcoming match arm maps to String::new() so step 1 falls
+    // through to NoCgroupV2 — same behaviour the prior
+    // `unwrap_or_default()` had for this specific kind, but now via
+    // an explicit, named branch.
+    let proc_fs_missing = tmp.path().join("does-not-exist");
+    let proc_self_cgroup = tmp.path().join("proc-self-cgroup");
+
+    let err =
+        run_preflight_at(tmp.path(), /* uid = */ 1000, &proc_fs_missing, &proc_self_cgroup)
+            .expect_err("missing /proc/filesystems must still fail step 1");
+
+    match &err {
+        CgroupPreflightError::NoCgroupV2 { .. } => {
+            // Correct: NotFound is the v1-host signal.
+        }
+        CgroupPreflightError::ProcFilesystemsUnreadable { source } => panic!(
+            "NotFound must NOT route through ProcFilesystemsUnreadable — \
+             that variant is reserved for I/O errors with kinds OTHER \
+             than NotFound (PermissionDenied, EIO, IsADirectory, broken \
+             procfs). NotFound is the v1-host signal and must flow to \
+             NoCgroupV2 with the kernel-upgrade remediation. Got \
+             source = {source:?}",
+        ),
+        other => panic!("expected NoCgroupV2, got {other:?}"),
+    }
+}
