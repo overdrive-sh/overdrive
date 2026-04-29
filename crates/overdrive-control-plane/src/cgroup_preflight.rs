@@ -329,7 +329,19 @@ pub fn run_preflight_at(
     let enclosing_abs = cgroup_root.join(enclosing_rel.trim_start_matches('/'));
     let subtree_control = enclosing_abs.join("cgroup.subtree_control");
 
-    let contents = std::fs::read_to_string(&subtree_control).unwrap_or_default();
+    // Every io::Error (NotFound included) surfaces as
+    // SubtreeControlUnreadable per Option B of the RCA at
+    // docs/feature/fix-cgroup-preflight-subtree-unreadable/bugfix-rca.md.
+    // The kernel guarantees cgroup.subtree_control exists under every
+    // cgroup-v2 directory, so its absence is structurally distinct
+    // from "no controllers delegated" — it indicates the enclosing
+    // slice path is not a cgroup directory at all. Absorbing any kind
+    // here would misdiagnose the failure as DelegationMissing and
+    // prescribe `Delegate=yes`, which doesn't fix any of the actual
+    // causes (PermissionDenied, EIO, IsADirectory, NotFound, …).
+    let contents = std::fs::read_to_string(&subtree_control).map_err(|err| {
+        CgroupPreflightError::SubtreeControlUnreadable { slice: enclosing_abs.clone(), source: err }
+    })?;
     let mut missing = Vec::new();
     if !contents.split_ascii_whitespace().any(|t| t == "cpu") {
         missing.push("cpu".to_owned());
