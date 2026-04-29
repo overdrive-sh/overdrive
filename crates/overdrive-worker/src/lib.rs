@@ -1,4 +1,4 @@
-//! Overdrive worker subsystem — `ProcessDriver`, workload-cgroup
+//! Overdrive worker subsystem — `ExecDriver`, workload-cgroup
 //! management, and the boot-time `node_health` row writer.
 //!
 //! Per ADR-0029, the worker subsystem is its own crate (class
@@ -31,4 +31,4 @@ pub mod driver;
 pub mod node_health;
 
 pub use cgroup_manager::CgroupPath;
-pub use driver::ProcessDriver;
+pub use driver::ExecDriver;

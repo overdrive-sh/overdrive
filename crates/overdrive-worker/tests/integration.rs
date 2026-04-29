@@ -14,7 +14,7 @@
 #![allow(clippy::unwrap_used)]
 
 mod integration {
-    mod process_driver {
+    mod exec_driver {
         mod cgroup_procs;
         mod limit_write_failure_warns;
         mod missing_binary;

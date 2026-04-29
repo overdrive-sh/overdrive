@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use overdrive_core::id::{AllocationId, SpiffeId};
 use overdrive_core::traits::driver::{AllocationSpec, AllocationState, Driver, Resources};
-use overdrive_worker::ProcessDriver;
+use overdrive_worker::ExecDriver;
 use tempfile::TempDir;
 
 #[tokio::test]
@@ -18,7 +18,7 @@ async fn stop_with_grace_drives_to_terminated_and_removes_scope() {
     std::fs::create_dir_all(cgroup_root.path().join("overdrive.slice/workloads.slice"))
         .expect("workloads.slice created");
 
-    let driver: Arc<dyn Driver> = Arc::new(ProcessDriver::new(cgroup_root.path().to_path_buf()));
+    let driver: Arc<dyn Driver> = Arc::new(ExecDriver::new(cgroup_root.path().to_path_buf()));
 
     let alloc = AllocationId::new("alloc-stop-grace").expect("valid alloc id");
     let spec = AllocationSpec {

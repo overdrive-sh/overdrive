@@ -331,7 +331,7 @@ impl Harness {
             transport: Arc::new(SimTransport::new()),
             entropy: Arc::new(SimEntropy::new(host_seed)),
             dataplane: Arc::new(SimDataplane::new()),
-            driver: Arc::new(SimDriver::new(DriverType::Process)),
+            driver: Arc::new(SimDriver::new(DriverType::Exec)),
             llm: Arc::new(SimLlm::new(Vec::new())),
             observation: Arc::new(SimObservationStore::single_peer(node_id, host_seed)),
         };

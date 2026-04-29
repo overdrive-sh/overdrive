@@ -5,14 +5,14 @@
 //! semantics), the driver emits a `tracing::warn!` log and proceeds
 //! to PID enrolment — `Driver::start` succeeds, the alloc reaches
 //! `Running`. We force the failure with a test-injected toggle on
-//! `ProcessDriver` that makes the limit-write helper return error
+//! `ExecDriver` that makes the limit-write helper return error
 //! synthetically.
 
 use std::sync::Arc;
 
 use overdrive_core::id::{AllocationId, SpiffeId};
 use overdrive_core::traits::driver::{AllocationSpec, AllocationState, Driver, Resources};
-use overdrive_worker::ProcessDriver;
+use overdrive_worker::ExecDriver;
 use tempfile::TempDir;
 
 #[tokio::test]
@@ -22,7 +22,7 @@ async fn limit_write_failure_warns_and_continues() {
         .expect("workloads.slice created");
 
     let driver: Arc<dyn Driver> = Arc::new(
-        ProcessDriver::new(cgroup_root.path().to_path_buf()).with_force_limit_write_failure(true),
+        ExecDriver::new(cgroup_root.path().to_path_buf()).with_force_limit_write_failure(true),
     );
 
     let alloc = AllocationId::new("alloc-limit-write-fail").expect("valid alloc id");

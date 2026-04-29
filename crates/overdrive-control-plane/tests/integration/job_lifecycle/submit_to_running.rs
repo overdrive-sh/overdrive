@@ -1,8 +1,8 @@
 //! Step 02-03 / Slice 3A.3 scenario 3.1 — walking-skeleton:
-//! `submitted_job_reaches_running_via_real_process_driver`.
+//! `submitted_job_reaches_running_via_real_exec_driver`.
 //!
 //! Submits a 1-replica job through the in-process server with a real
-//! `Arc<ProcessDriver>`, drives the convergence tick loop until the
+//! `Arc<ExecDriver>`, drives the convergence tick loop until the
 //! alloc reaches `Running`, then asserts cgroup membership of the
 //! workload PID.
 //!
@@ -27,11 +27,11 @@ use overdrive_core::traits::observation_store::{AllocState, ObservationStore};
 use super::cleanup::AllocCleanup;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
-use overdrive_worker::ProcessDriver;
+use overdrive_worker::ExecDriver;
 use tempfile::TempDir;
 
 #[tokio::test]
-async fn submitted_job_reaches_running_via_real_process_driver() {
+async fn submitted_job_reaches_running_via_real_exec_driver() {
     let tmp = TempDir::new().expect("tempdir");
     let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime");
     runtime.register(noop_heartbeat()).expect("register noop");
@@ -42,7 +42,7 @@ async fn submitted_job_reaches_running_via_real_process_driver() {
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
     let driver: Arc<dyn Driver> =
-        Arc::new(ProcessDriver::new(std::path::PathBuf::from("/sys/fs/cgroup")));
+        Arc::new(ExecDriver::new(std::path::PathBuf::from("/sys/fs/cgroup")));
 
     let state = AppState::new(store, obs, Arc::new(runtime), driver);
 

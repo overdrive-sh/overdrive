@@ -53,7 +53,7 @@ impl AlwaysFailDriver {
 #[async_trait]
 impl Driver for AlwaysFailDriver {
     fn r#type(&self) -> DriverType {
-        DriverType::Process
+        DriverType::Exec
     }
 
     async fn start(&self, _spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
@@ -62,7 +62,7 @@ impl Driver for AlwaysFailDriver {
             *n = n.saturating_add(1);
         }
         Err(DriverError::StartRejected {
-            driver: DriverType::Process,
+            driver: DriverType::Exec,
             reason: "deliberate failure injection for backoff test".to_string(),
         })
     }

@@ -101,7 +101,7 @@ async fn spawn_server_with_obs_handle()
         // `fix-convergence-loop-not-spawned` Step 01-02.
         ..Default::default()
     };
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Process));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
     let handle = run_server_with_obs_and_driver(config, Arc::clone(&obs), driver)
         .await
         .expect("run_server_with_obs_and_driver");

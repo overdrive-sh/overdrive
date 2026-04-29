@@ -54,7 +54,7 @@ fn build_converged_state(tmp: &TempDir, clock: &SimClock) -> AppState {
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("NodeId"), 0));
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Process));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
     let _ = clock; // explicit `clock` retained as the test's logical-time source
     AppState::new(store, obs, Arc::new(runtime), driver)
 }

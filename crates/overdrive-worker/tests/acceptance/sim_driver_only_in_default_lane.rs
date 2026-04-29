@@ -15,7 +15,7 @@ use overdrive_sim::adapters::driver::SimDriver;
 #[tokio::test]
 async fn default_lane_does_not_spawn_real_processes() {
     // Driving port — `Driver` trait, wired to `SimDriver`.
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Process));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
 
     let spec = AllocationSpec {
         alloc: AllocationId::new("alloc-default-lane").expect("valid alloc id"),

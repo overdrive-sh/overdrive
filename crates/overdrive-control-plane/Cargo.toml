@@ -43,7 +43,7 @@ overdrive-core.workspace           = true
 # crate; it remains available as a dev-dep if needed for DST-style
 # tests.
 overdrive-store-local.path         = "../overdrive-store-local"
-# Per ADR-0029, `run_server` instantiates the production `ProcessDriver`
+# Per ADR-0029, `run_server` instantiates the production `ExecDriver`
 # from `overdrive-worker` and threads it into the AppState. This makes
 # `overdrive-worker` a runtime dep of `overdrive-control-plane`.
 overdrive-worker.path              = "../overdrive-worker"

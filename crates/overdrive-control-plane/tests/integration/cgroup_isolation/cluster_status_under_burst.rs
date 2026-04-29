@@ -2,7 +2,7 @@
 //!
 //! `cluster_status_responsive_under_workload_cpu_burst`: spawn a
 //! CPU-burst workload (one busy loop per online core) under
-//! `ProcessDriver`, then exercise the read paths the
+//! `ExecDriver`, then exercise the read paths the
 //! `cluster_status` HTTP handler hits — `ReconcilerRuntime`
 //! enumeration + `ObservationStore::alloc_status_rows`. Median
 //! sample latency must be comfortably under the 100 ms KPI ceiling.
@@ -40,7 +40,7 @@ use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
 };
 use overdrive_sim::adapters::observation_store::SimObservationStore;
-use overdrive_worker::ProcessDriver;
+use overdrive_worker::ExecDriver;
 use tempfile::TempDir;
 
 use super::super::job_lifecycle::cleanup::AllocCleanup;
@@ -64,15 +64,15 @@ async fn cluster_status_responsive_under_workload_cpu_burst() {
     let local_node = NodeId::new("local").expect("node id");
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(local_node.clone(), 0));
-    let driver = Arc::new(ProcessDriver::new(std::path::PathBuf::from("/sys/fs/cgroup")));
+    let driver = Arc::new(ExecDriver::new(std::path::PathBuf::from("/sys/fs/cgroup")));
 
     // Cleanup guard — see job_lifecycle/cleanup.rs.
     let _cleanup =
         AllocCleanup { obs: obs.clone(), cgroup_root: std::path::PathBuf::from("/sys/fs/cgroup") };
 
-    // Spawn the CPU burner directly via ProcessDriver. The
+    // Spawn the CPU burner directly via ExecDriver. The
     // `/bin/cpuburn` image marker invokes a `nproc`-many busy-loop
-    // shell — see `overdrive_worker::driver::ProcessDriver::build_command`.
+    // shell — see `overdrive_worker::driver::ExecDriver::build_command`.
     let alloc_id = AllocationId::new("alloc-burner-0").expect("valid alloc id");
     let job_id = JobId::new("burner").expect("valid job id");
     let identity = SpiffeId::new("spiffe://overdrive.local/job/burner/alloc/alloc-burner-0")

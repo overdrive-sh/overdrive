@@ -248,7 +248,7 @@ fn build_identity(
 /// `AllocationSpec`. The original Job intent's resource envelope is
 /// the right long-term source — Phase 2+ threads the Job aggregate
 /// through the action — but for 02-03 a baseline is sufficient: the
-/// `ProcessDriver` currently ignores `resources` (cgroup pre-flight is
+/// `ExecDriver` currently ignores `resources` (cgroup pre-flight is
 /// out-of-scope until 03-01).
 const fn default_restart_resources() -> overdrive_core::traits::driver::Resources {
     overdrive_core::traits::driver::Resources { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 }

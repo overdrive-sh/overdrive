@@ -87,7 +87,7 @@ pub struct AppState {
     pub runtime: Arc<reconciler_runtime::ReconcilerRuntime>,
     /// Production `Driver` impl per ADR-0022 (amended by ADR-0029):
     /// the action shim's reference to the workload driver. In Phase
-    /// 1 single-mode this is `Arc<ProcessDriver>` from
+    /// 1 single-mode this is `Arc<ExecDriver>` from
     /// `overdrive-worker`; under DST tests it is `Arc<SimDriver>`.
     /// SCAFFOLD: true — every test caller (`run_server_with_obs`)
     /// is mechanically migrated by DELIVER to pass an
@@ -315,7 +315,7 @@ impl ServerHandle {
 pub async fn run_server(config: ServerConfig) -> Result<ServerHandle, error::ControlPlaneError> {
     // Wire the Phase 1 observation store (`LocalObservationStore`
     // single-node per ADR-0012, revised 2026-04-24) internally and the
-    // production `ProcessDriver` from the worker subsystem (ADR-0029),
+    // production `ExecDriver` from the worker subsystem (ADR-0029),
     // then delegate to `run_server_with_obs_and_driver`. The split
     // exists so integration tests can hold a shared `Arc<dyn ObservationStore>`
     // handle for the canary-injection Fixture-Theater defence without
@@ -327,14 +327,14 @@ pub async fn run_server(config: ServerConfig) -> Result<ServerHandle, error::Con
     let obs: Arc<dyn ObservationStore> =
         Arc::from(observation_wiring::wire_single_node_observation(&config.data_dir)?);
 
-    // Production default — `ProcessDriver` rooted at `/sys/fs/cgroup`.
+    // Production default — `ExecDriver` rooted at `/sys/fs/cgroup`.
     // Per ADR-0028, when `--allow-no-cgroups` is set we still construct
-    // a ProcessDriver but flip its `allow_no_cgroups` flag so
+    // an ExecDriver but flip its `allow_no_cgroups` flag so
     // `Driver::start` skips cgroup scope creation / PID placement /
     // limit writes; workloads run as ordinary child processes under
     // the running UID.
     let driver: Arc<dyn Driver> = Arc::new(
-        overdrive_worker::ProcessDriver::new(std::path::PathBuf::from("/sys/fs/cgroup"))
+        overdrive_worker::ExecDriver::new(std::path::PathBuf::from("/sys/fs/cgroup"))
             .with_allow_no_cgroups(config.allow_no_cgroups),
     );
 
@@ -346,9 +346,9 @@ pub async fn run_server(config: ServerConfig) -> Result<ServerHandle, error::Con
 ///
 /// Per ADR-0022 (amended by ADR-0029), the binary owns the
 /// composition: the CLI's `serve` subcommand instantiates
-/// `Arc<ProcessDriver>` (Linux production) or `Arc<SimDriver>`
+/// `Arc<ExecDriver>` (Linux production) or `Arc<SimDriver>`
 /// (non-Linux dev host) and threads it through this function.
-/// Test callers pass `Arc::new(SimDriver::new(DriverType::Process))`.
+/// Test callers pass `Arc::new(SimDriver::new(DriverType::Exec))`.
 ///
 /// Used by integration tests that need to retain a handle to the
 /// observation store the server is reading from.

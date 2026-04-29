@@ -1,7 +1,7 @@
-//! [`Driver`] — a workload backend (process, microVM, VM, unikernel, WASM).
+//! [`Driver`] — a workload backend (exec, microVM, VM, unikernel, WASM).
 //!
 //! Each driver is a thin trait object owned by the node agent. Production
-//! wires concrete drivers (`CloudHypervisorDriver`, `ProcessDriver`,
+//! wires concrete drivers (`CloudHypervisorDriver`, `ExecDriver`,
 //! `WasmDriver`); simulation wires `SimDriver` with configurable failure
 //! modes for scheduler and reconciler tests.
 //!
@@ -19,13 +19,15 @@ use crate::{AllocationId, SpiffeId};
 /// Driver class — the `driver` field in a job spec maps 1:1 to a variant.
 ///
 /// Stable: new drivers are appended; existing variants never change their
-/// wire form. [`Display`] and [`FromStr`] emit `process`, `microvm`, `vm`,
-/// `unikernel`, `wasm` — matching `docs/whitepaper.md` §6 exactly.
+/// wire form. [`Display`] and [`FromStr`] emit `exec`, `microvm`, `vm`,
+/// `unikernel`, `wasm` — matching `docs/whitepaper.md` §6 exactly. The
+/// `exec` vocabulary aligns with Nomad's `exec` task driver and Talos's
+/// terminology (see ADR-0029 amendment 2026-04-28).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum DriverType {
     /// Native binary under cgroups v2 (`tokio::process`).
-    Process,
+    Exec,
     /// Fast-boot Cloud Hypervisor microVM.
     MicroVm,
     /// Full Cloud Hypervisor VM (hotplug, virtiofs, any OS).
@@ -41,7 +43,7 @@ impl DriverType {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::Process => "process",
+            Self::Exec => "exec",
             Self::MicroVm => "microvm",
             Self::Vm => "vm",
             Self::Unikernel => "unikernel",
@@ -61,7 +63,7 @@ impl FromStr for DriverType {
 
     fn from_str(raw: &str) -> Result<Self, Self::Err> {
         match raw {
-            "process" => Ok(Self::Process),
+            "exec" => Ok(Self::Exec),
             "microvm" => Ok(Self::MicroVm),
             "vm" => Ok(Self::Vm),
             "unikernel" => Ok(Self::Unikernel),

@@ -12,7 +12,7 @@
 //! rustls + reqwest + `LocalIntentStore` on tempdir) with a `SimClock`
 //! and `SimDriver` so the test runs uniformly on macOS and Linux in
 //! the default `--features integration-tests` lane (no real kernel,
-//! no `ProcessDriver` cleanup).
+//! no `ExecDriver` cleanup).
 //!
 //! It references `ServerConfig.clock` and `ServerConfig.tick_cadence`
 //! — fields that do NOT yet exist on `ServerConfig` against current
@@ -112,7 +112,7 @@ async fn submitted_job_reaches_running_via_real_server_boot() {
     let clock = Arc::new(SimClock::new());
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
-    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Process));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
 
     // The `clock` and `tick_cadence` field references below are
     // load-bearing for the RED scaffold — they do NOT exist on

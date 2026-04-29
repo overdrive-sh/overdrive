@@ -1,5 +1,5 @@
 # `overdrive-worker` — worker subsystem per ADR-0029. Hosts
-# `ProcessDriver`, workload-cgroup management, and the `node_health`
+# `ExecDriver`, workload-cgroup management, and the `node_health`
 # row writer at startup. Class `adapter-host`.
 #
 # SCAFFOLD: true — phase-1-first-workload DISTILL wave landed the
@@ -10,7 +10,7 @@
 [package]
 name         = "overdrive-worker"
 version      = "0.0.0"
-description  = "Worker subsystem: ProcessDriver + workload-cgroup management + node_health writer."
+description  = "Worker subsystem: ExecDriver + workload-cgroup management + node_health writer."
 edition.workspace      = true
 rust-version.workspace = true
 license.workspace      = true
@@ -43,7 +43,7 @@ tracing.workspace        = true
 # Used only for `libc::kill(pid, SIGTERM)` in `Driver::stop` — the
 # tokio API exposes `Child::kill()` for SIGKILL but not SIGTERM. The
 # call lives behind `cfg(target_os = "linux")` because Phase 1 only
-# runs ProcessDriver on Linux.
+# runs ExecDriver on Linux.
 libc = { workspace = true }
 
 [dev-dependencies]

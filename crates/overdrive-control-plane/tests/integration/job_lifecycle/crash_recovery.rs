@@ -32,7 +32,7 @@ use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{AllocState, ObservationStore};
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
-use overdrive_worker::ProcessDriver;
+use overdrive_worker::ExecDriver;
 use tempfile::TempDir;
 
 use super::cleanup::AllocCleanup;
@@ -49,7 +49,7 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
     let driver: Arc<dyn Driver> =
-        Arc::new(ProcessDriver::new(std::path::PathBuf::from("/sys/fs/cgroup")));
+        Arc::new(ExecDriver::new(std::path::PathBuf::from("/sys/fs/cgroup")));
 
     let state = AppState::new(store, obs, Arc::new(runtime), driver);
 

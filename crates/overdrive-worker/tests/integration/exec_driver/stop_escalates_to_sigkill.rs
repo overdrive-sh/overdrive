@@ -11,7 +11,7 @@ use std::time::Duration;
 
 use overdrive_core::id::{AllocationId, SpiffeId};
 use overdrive_core::traits::driver::{AllocationSpec, AllocationState, Driver, Resources};
-use overdrive_worker::ProcessDriver;
+use overdrive_worker::ExecDriver;
 use tempfile::TempDir;
 use tokio::time::Instant;
 
@@ -62,7 +62,7 @@ async fn stop_escalates_to_sigkill_when_sigterm_ignored() {
 
     // Custom stop-grace duration to keep the test fast — 250ms.
     let driver: Arc<dyn Driver> = Arc::new(
-        ProcessDriver::new(cgroup_root.path().to_path_buf())
+        ExecDriver::new(cgroup_root.path().to_path_buf())
             .with_stop_grace(Duration::from_millis(250)),
     );
 
@@ -83,7 +83,7 @@ async fn stop_escalates_to_sigkill_when_sigterm_ignored() {
     // the shell's startup and kills it with the default action — the
     // grace window then never applies and the test sees a sub-grace
     // elapsed (~100µs).
-    let pid = handle.pid.expect("ProcessDriver always populates pid on Linux");
+    let pid = handle.pid.expect("ExecDriver always populates pid on Linux");
     await_sigterm_trap_installed(pid, Duration::from_secs(2))
         .await
         .expect("workload installed SIGTERM trap before stop()");

@@ -282,7 +282,7 @@ fn sample_spec() -> AllocationSpec {
 
 #[tokio::test]
 async fn sim_driver_start_stop_status_round_trip() {
-    let driver = SimDriver::new(DriverType::Process);
+    let driver = SimDriver::new(DriverType::Exec);
     let spec = sample_spec();
 
     let handle = driver.start(&spec).await.expect("start succeeds");
@@ -453,7 +453,7 @@ async fn sim_clock_clone_shares_logical_counter() {
 
 #[tokio::test]
 async fn sim_driver_resize_returns_error_for_unknown_allocation() {
-    let driver = SimDriver::new(DriverType::Process);
+    let driver = SimDriver::new(DriverType::Exec);
     let unknown_handle = overdrive_core::traits::driver::AllocationHandle {
         alloc: alloc("alloc-unknown"),
         pid: None,
@@ -471,7 +471,7 @@ async fn sim_driver_resize_succeeds_for_running_allocation() {
     // Guards against `resize -> Ok(())` mutation AND the `!contains`
     // flip: a running allocation's resize must succeed; missing must
     // fail. Together with the previous test, both branches are covered.
-    let driver = SimDriver::new(DriverType::Process);
+    let driver = SimDriver::new(DriverType::Exec);
     let handle = driver.start(&sample_spec()).await.expect("start succeeds");
 
     driver

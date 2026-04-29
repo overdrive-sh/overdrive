@@ -1,6 +1,6 @@
 //! US-02 Scenario 2.2 — WALKING SKELETON @real-io @adapter-integration.
 //!
-//! `ProcessDriver` starts a real `/bin/sleep` and places it under a
+//! `ExecDriver` starts a real `/bin/sleep` and places it under a
 //! workload-scope directory. PORT-TO-PORT: enters via `Driver::start`,
 //! asserts on the returned PID and on the scope directory's existence
 //! under the test cgroup-root.
@@ -13,11 +13,11 @@ use std::sync::Arc;
 
 use overdrive_core::id::{AllocationId, SpiffeId};
 use overdrive_core::traits::driver::{AllocationSpec, AllocationState, Driver, Resources};
-use overdrive_worker::ProcessDriver;
+use overdrive_worker::ExecDriver;
 use tempfile::TempDir;
 
 #[tokio::test]
-async fn process_driver_starts_real_sleep_in_cgroup_scope() {
+async fn exec_driver_starts_real_sleep_in_cgroup_scope() {
     // Test fixture — point cgroup_root at a tempdir so the test
     // does not write under the real `/sys/fs/cgroup`. The slices
     // below are pre-created in the tempdir to mimic the host's
@@ -26,7 +26,7 @@ async fn process_driver_starts_real_sleep_in_cgroup_scope() {
     std::fs::create_dir_all(cgroup_root.path().join("overdrive.slice/workloads.slice"))
         .expect("workloads.slice created");
 
-    let driver: Arc<dyn Driver> = Arc::new(ProcessDriver::new(cgroup_root.path().to_path_buf()));
+    let driver: Arc<dyn Driver> = Arc::new(ExecDriver::new(cgroup_root.path().to_path_buf()));
 
     let alloc = AllocationId::new("alloc-walking-skeleton-2-2").expect("valid alloc id");
     let spec = AllocationSpec {
@@ -38,10 +38,10 @@ async fn process_driver_starts_real_sleep_in_cgroup_scope() {
     };
 
     // Action — through driving port.
-    let handle = driver.start(&spec).await.expect("ProcessDriver::start succeeds for /bin/sleep");
+    let handle = driver.start(&spec).await.expect("ExecDriver::start succeeds for /bin/sleep");
 
     // Observable outcome 1 — handle carries the live PID.
-    let pid = handle.pid.expect("ProcessDriver populates pid on start");
+    let pid = handle.pid.expect("ExecDriver populates pid on start");
     assert!(pid > 0, "pid must be positive, got {pid}");
 
     // Observable outcome 2 — driver reports `Running`.

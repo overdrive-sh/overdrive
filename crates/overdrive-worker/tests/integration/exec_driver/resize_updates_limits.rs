@@ -1,7 +1,7 @@
 //! Linux-only integration test for `Driver::resize`.
 //!
 //! Pins the resize → cgroup write delegation. Kills the mutation
-//! `<impl Driver for ProcessDriver>::resize -> Result<(),
+//! `<impl Driver for ExecDriver>::resize -> Result<(),
 //! DriverError> with Ok(())` — under the mutation, `resize` skips
 //! the `write_resource_limits_warn_on_error` call entirely, so
 //! `cpu.weight` and `memory.max` retain their original values.
@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use overdrive_core::id::{AllocationId, SpiffeId};
 use overdrive_core::traits::driver::{AllocationSpec, Driver, Resources};
-use overdrive_worker::ProcessDriver;
+use overdrive_worker::ExecDriver;
 use tempfile::TempDir;
 
 #[tokio::test]
@@ -21,7 +21,7 @@ async fn resize_updates_cpu_weight_and_memory_max_in_cgroup() {
     std::fs::create_dir_all(cgroup_root.path().join("overdrive.slice/workloads.slice"))
         .expect("workloads.slice created");
 
-    let driver: Arc<dyn Driver> = Arc::new(ProcessDriver::new(cgroup_root.path().to_path_buf()));
+    let driver: Arc<dyn Driver> = Arc::new(ExecDriver::new(cgroup_root.path().to_path_buf()));
 
     let alloc = AllocationId::new("alloc-resize-test").expect("valid alloc id");
     let initial_spec = AllocationSpec {

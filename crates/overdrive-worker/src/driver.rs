@@ -1,9 +1,12 @@
-//! `ProcessDriver` — the Phase 1 production driver impl per ADR-0026
+//! `ExecDriver` — the Phase 1 production driver impl per ADR-0026
 //! and ADR-0029.
 //!
 //! Linux-only by design. Spawns child processes via
 //! `tokio::process::Command`, places them into a workload cgroup
 //! scope, writes resource limits, and supervises lifecycle.
+//!
+//! The `exec` vocabulary aligns with Nomad's `exec` task driver and
+//! Talos's terminology — see ADR-0029 amendment 2026-04-28.
 //!
 //! Per ADR-0026 D6: direct cgroupfs writes; no `cgroups-rs` dep.
 //! Per ADR-0026 D9: `cpu.weight` + `memory.max` derived from
@@ -32,12 +35,12 @@ use crate::cgroup_manager::{
 /// Default grace window between SIGTERM and SIGKILL during stop.
 const DEFAULT_STOP_GRACE: Duration = Duration::from_secs(5);
 
-/// Construct a `DriverError::StartRejected` for the process driver. The
-/// `driver: DriverType::Process` discriminator is fixed by construction,
+/// Construct a `DriverError::StartRejected` for the exec driver. The
+/// `driver: DriverType::Exec` discriminator is fixed by construction,
 /// so the call sites only need to supply the human-readable reason. Used
 /// by every fallible step in `Driver::start`.
 fn start_rejected(reason: impl Into<String>) -> DriverError {
-    DriverError::StartRejected { driver: DriverType::Process, reason: reason.into() }
+    DriverError::StartRejected { driver: DriverType::Exec, reason: reason.into() }
 }
 
 /// Tracking state for an allocation owned by the driver.
@@ -53,7 +56,7 @@ enum LiveAllocation {
 /// supervision. Linux-only; non-Linux builds compile but every
 /// `Driver::start` returns `DriverError::StartRejected`.
 #[derive(Clone)]
-pub struct ProcessDriver {
+pub struct ExecDriver {
     cgroup_root: PathBuf,
     stop_grace: Duration,
     /// Test-only injection: when `true`, force `write_resource_limits`
@@ -74,9 +77,9 @@ pub struct ProcessDriver {
     live: Arc<Mutex<BTreeMap<AllocationId, LiveAllocation>>>,
 }
 
-impl std::fmt::Debug for ProcessDriver {
+impl std::fmt::Debug for ExecDriver {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ProcessDriver")
+        f.debug_struct("ExecDriver")
             .field("cgroup_root", &self.cgroup_root)
             .field("stop_grace", &self.stop_grace)
             .field("force_limit_write_failure", &self.force_limit_write_failure)
@@ -85,8 +88,8 @@ impl std::fmt::Debug for ProcessDriver {
     }
 }
 
-impl ProcessDriver {
-    /// Construct a fresh `ProcessDriver` rooted at `cgroup_root`.
+impl ExecDriver {
+    /// Construct a fresh `ExecDriver` rooted at `cgroup_root`.
     /// Production wires `/sys/fs/cgroup`; tests pass a tempdir.
     #[must_use]
     pub fn new(cgroup_root: PathBuf) -> Self {
@@ -193,9 +196,9 @@ impl ProcessDriver {
 }
 
 #[async_trait]
-impl Driver for ProcessDriver {
+impl Driver for ExecDriver {
     fn r#type(&self) -> DriverType {
-        DriverType::Process
+        DriverType::Exec
     }
 
     async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
@@ -420,7 +423,7 @@ const fn send_sigterm(_pid: u32) {
 /// Send SIGKILL to the entire process group led by `pid`. Used as a
 /// fallback to reach reparented grandchildren whose lineage left the
 /// driver's tokio `Child` handle. The child is placed in its own
-/// session via `setsid` at spawn time (see [`ProcessDriver::build_command`])
+/// session via `setsid` at spawn time (see [`ExecDriver::build_command`])
 /// so its PGID equals its PID; passing `-pid` to `kill(2)` delivers
 /// SIGKILL to every member of that process group.
 #[cfg(target_os = "linux")]
