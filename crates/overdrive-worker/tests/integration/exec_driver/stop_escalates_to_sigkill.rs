@@ -65,9 +65,8 @@ async fn await_sigterm_trap_installed(pid: u32, deadline: Duration) -> Result<()
 /// yields an empty vec.
 fn read_direct_children(pid: u32) -> Vec<u32> {
     let path = format!("/proc/{pid}/task/{pid}/children");
-    let raw = match std::fs::read_to_string(&path) {
-        Ok(s) => s,
-        Err(_) => return Vec::new(),
+    let Ok(raw) = std::fs::read_to_string(&path) else {
+        return Vec::new();
     };
     raw.split_whitespace().filter_map(|s| s.parse::<u32>().ok()).collect()
 }
@@ -82,17 +81,15 @@ fn read_direct_children(pid: u32) -> Vec<u32> {
 ///   * the process is in zombie / dead state.
 fn sleep_grandchild_is_live(pid: u32) -> bool {
     let comm_path = format!("/proc/{pid}/comm");
-    let comm = match std::fs::read_to_string(&comm_path) {
-        Ok(s) => s,
-        Err(_) => return false, // process gone
+    let Ok(comm) = std::fs::read_to_string(&comm_path) else {
+        return false; // process gone
     };
     if comm.trim() != "sleep" {
         return false; // pid recycled to a different program
     }
     let status_path = format!("/proc/{pid}/status");
-    let status = match std::fs::read_to_string(&status_path) {
-        Ok(s) => s,
-        Err(_) => return false,
+    let Ok(status) = std::fs::read_to_string(&status_path) else {
+        return false;
     };
     // Find the `State:` line; format `State:\tR (running)` etc.
     let state_char = status

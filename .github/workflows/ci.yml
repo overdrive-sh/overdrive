@@ -249,7 +249,7 @@ jobs:
         # and writing child PIDs to cgroup.procs both fail with EACCES
         # for the unprivileged runner user.
         run: |
-          sudo -E cargo nextest run --workspace --locked --profile ci \
+          sudo -E env "PATH=$PATH" cargo nextest run --workspace --locked --profile ci \
             --features integration-tests \
             -E 'binary(integration)'
 
