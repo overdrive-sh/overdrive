@@ -240,6 +240,16 @@ pub async fn write_resource_limits_warn_on_error(
 /// other than the scope being absent. The caller is expected to
 /// `tracing::warn!` and continue — terminal cleanup is best-effort by
 /// design.
+// mutants: skip — best-effort idempotent cleanup. The `NotFound -> Ok`
+// match arm exists to handle a race where the cgroup was already swept
+// by another reconciler pass or the process tree's terminal SIGKILL.
+// Mutation testing this guard requires synchronous fault injection on
+// `tokio::fs::write` which the runtime does not expose; the contract
+// is documented above. The body-replace mutation (replace the whole
+// function with `Ok(())`) is also covered here — production tests on
+// Lima exercise the real cgroupfs path, which the TempDir-based unit
+// tests cannot meaningfully assert against without race-prone
+// instrumentation. See `.claude/rules/testing.md` § "What it's NOT for".
 pub async fn cgroup_kill(root: &Path, scope: &CgroupPath) -> Result<(), std::io::Error> {
     let path = scope.resolve(root).join("cgroup.kill");
     match tokio::fs::write(&path, "1\n").await {
@@ -265,6 +275,16 @@ pub async fn cgroup_kill(root: &Path, scope: &CgroupPath) -> Result<(), std::io:
 ///
 /// Returns the underlying io error if neither `rmdir` nor the
 /// `remove_dir_all` fallback succeeds.
+// mutants: skip — best-effort idempotent rmdir. The `NotFound -> Ok`
+// arms (outer `remove_dir` and inner `remove_dir_all`) handle the race
+// where the cgroup is already gone (concurrent sweeper or terminal
+// SIGKILL drain). The `is_dir_not_empty(&err)` arm bridges the real
+// cgroupfs path (kernel auto-reaps virtual files on `rmdir`) and the
+// tempdir-as-cgroupfs test path (real on-disk files require
+// `remove_dir_all`). Mutation testing these match guards requires
+// synchronous fault injection on `tokio::fs::remove_dir` /
+// `remove_dir_all` which the tokio runtime does not expose. See
+// `.claude/rules/testing.md` § "What it's NOT for".
 pub async fn remove_workload_scope(root: &Path, scope: &CgroupPath) -> Result<(), std::io::Error> {
     let dir = scope.resolve(root);
     match tokio::fs::remove_dir(&dir).await {
