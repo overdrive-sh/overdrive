@@ -121,7 +121,7 @@ workspace/
 │   ├── overdrive-host/          # production adapters: SystemClock, OsEntropy,
 │   │                            # TcpTransport (host-OS primitives — ADR-0016)
 │   │                            # (class: adapter-host)
-│   ├── overdrive-worker/        # ProcessDriver + workload-cgroup management
+│   ├── overdrive-worker/        # ExecDriver + workload-cgroup management
 │   │                            # + node_health writer (ADR-0029 — first-workload)
 │   │                            # (class: adapter-host)
 │   ├── overdrive-control-plane/ # axum + rustls + reconciler runtime
@@ -168,8 +168,11 @@ extends `xtask` with `dst`/`dst-lint`. `overdrive-cli` already exists;
   `overdrive-core`. `dst-lint` mechanically enforces the BTreeMap-only
   iteration discipline + banned-API contract.
 - **`crates/overdrive-worker/`** — NEW, class = `adapter-host`
-  (ADR-0029). Hosts `ProcessDriver` (ADR-0026, formerly slated for
-  `overdrive-host`), workload-cgroup management
+  (ADR-0029, amended 2026-04-28 — `ProcessDriver` renamed to
+  `ExecDriver`; `DriverType::Process` renamed to `DriverType::Exec`;
+  `AllocationSpec.image` renamed to `AllocationSpec.command` and
+  `args: Vec<String>` field added). Hosts `ExecDriver` (ADR-0026,
+  formerly slated for `overdrive-host`), workload-cgroup management
   (`overdrive.slice/workloads.slice/<alloc_id>.scope` create / limit
   writes / teardown), and the boot-time `node_health` row writer
   (relocated from control-plane bootstrap per ADR-0025 amendment).
@@ -205,7 +208,7 @@ New crate-class assignments:
 |---|---|---|
 | `overdrive-control-plane` | `adapter-host` | Uses rustls, hyper, axum; not DST-pure. Reconciler bodies inside this crate that want DST coverage must be in separate `core`-class sub-crates when they appear in Phase 2+. |
 | `overdrive-scheduler` | `core` | NEW (ADR-0024). Pure synchronous placement function; `dst-lint`-scanned; depends only on `overdrive-core`. |
-| `overdrive-worker` | `adapter-host` | NEW (ADR-0029). ProcessDriver + workload-cgroup management + node_health writer. Composed alongside `overdrive-control-plane` by the binary; control-plane crate does NOT depend on it. |
+| `overdrive-worker` | `adapter-host` | NEW (ADR-0029; amended 2026-04-28 — type renamed `ProcessDriver` → `ExecDriver`, `AllocationSpec.image` → `AllocationSpec.command`, `args` field added). ExecDriver + workload-cgroup management + node_health writer. Composed alongside `overdrive-control-plane` by the binary; control-plane crate does NOT depend on it. |
 
 **Crate classes** (`package.metadata.overdrive.crate_class`):
 
@@ -728,8 +731,9 @@ reconciler, not the registered set.
 
 Per ADR-0022 (amended 2026-04-27 by ADR-0029). `AppState` gains a
 `driver: Arc<dyn Driver>` field; production wiring threads an
-`Arc<ProcessDriver>` from the worker subsystem (`overdrive-worker`,
-per ADR-0029); test fixtures thread `SimDriver`. The renamed entry
+`Arc<ExecDriver>` from the worker subsystem (`overdrive-worker`,
+per ADR-0029, type renamed from `ProcessDriver` 2026-04-28); test
+fixtures thread `SimDriver`. The renamed entry
 point `run_server_with_obs_and_driver(config, obs, driver)` is the
 test-fixture seam; the binary's `serve` subcommand instantiates the
 worker subsystem and threads its `Arc<dyn Driver>` into the
@@ -823,7 +827,7 @@ subsystem that owns the node's runtime presence:
 4. Worker subsystem startup                       (ADR-0029):
      a. Resolve NodeId, Region, Capacity from config   (ADR-0025)
      b. Write node_health row to ObservationStore      (ADR-0025 amended)
-     c. Construct ProcessDriver                        (ADR-0026)
+     c. Construct ExecDriver                           (ADR-0026 amended 2026-04-28; formerly ProcessDriver)
 5. Construct ReconcilerRuntime; thread Arc<dyn Driver> (ADR-0022)
 6. Build AppState, Router                         (existing)
 7. Bind TCP listener                              (existing)
@@ -837,7 +841,12 @@ NEVER write it. The trust triple stays server-managed at
 
 ### 29. cgroup v2 direct writes; resource enforcement
 
-Per ADR-0026 (amended 2026-04-27 by ADR-0029). `ProcessDriver`
+Per ADR-0026 (amended 2026-04-27 by ADR-0029; amended 2026-04-28 —
+`ProcessDriver` renamed to `ExecDriver`, `DriverType::Process` to
+`DriverType::Exec`, `AllocationSpec.image` to `AllocationSpec.command`,
+`args: Vec<String>` field added; magic image-name dispatch in
+`build_command` removed in favour of
+`Command::new(&spec.command).args(&spec.args)`). `ExecDriver`
 (hosted in `overdrive-worker`) writes cgroup files directly via
 `std::fs::write` / `std::fs::create_dir_all` — no `cgroups-rs` dep.
 Five filesystem operations per workload lifecycle:
@@ -1005,7 +1014,8 @@ C4Context
 This diagram extends the prior phase's container view with four new
 containers: the dedicated `overdrive-scheduler` crate (ADR-0024
 override), the dedicated `overdrive-worker` crate (ADR-0029) hosting
-`ProcessDriver` and workload-cgroup management and the
+`ExecDriver` (renamed from `ProcessDriver` 2026-04-28 per ADR-0029
+amendment) and workload-cgroup management and the
 `node_health` writer, the binary-composition pattern in
 `overdrive-cli` (which hard-depends on both `overdrive-control-plane`
 and `overdrive-worker`), and the on-host kernel cgroup hierarchy that
@@ -1023,7 +1033,7 @@ C4Container
     Container(scheduler, "overdrive-scheduler", "Rust crate (class: core, NEW per ADR-0024)", "Pure-fn first-fit `schedule(nodes, job, allocs)` over BTreeMap inputs; dst-lint-scanned; depends only on overdrive-core")
     Container(store_local, "overdrive-store-local", "Rust crate (class: adapter-host)", "LocalStore (redb-backed IntentStore with put_if_absent semantics per ADR-0020) + LocalObservationStore (redb-backed single-writer ObservationStore)")
     Container(host, "overdrive-host", "Rust crate (class: adapter-host)", "Host-OS primitive bindings: SystemClock, OsEntropy, TcpTransport (ADR-0016 intent preserved per ADR-0029)")
-    Container(worker, "overdrive-worker", "Rust crate (class: adapter-host, NEW per ADR-0029)", "ProcessDriver (Linux-only) + workload-cgroup management (overdrive.slice/workloads.slice/<alloc>.scope per ADR-0026) + boot-time node_health row writer (per ADR-0025 amendment)")
+    Container(worker, "overdrive-worker", "Rust crate (class: adapter-host, NEW per ADR-0029; amended 2026-04-28)", "ExecDriver (Linux-only; renamed from ProcessDriver) + workload-cgroup management (overdrive.slice/workloads.slice/<alloc>.scope per ADR-0026) + boot-time node_health row writer (per ADR-0025 amendment)")
     Container(sim, "overdrive-sim", "Rust crate (class: adapter-sim)", "Sim* adapters + turmoil harness + invariant catalogue; SimDriver / SimObservationStore are used by DST only — not runtime deps of the control plane or worker")
     Container(ctrl, "overdrive-control-plane", "Rust crate (class: adapter-host)", "Axum router + rustls TLS + ReconcilerRuntime + EvaluationBroker + ActionShim + JobLifecycle reconciler + control-plane cgroup management + pre-flight (ADR-0028)")
     Container(xtask, "xtask", "Rust binary (class: binary)", "cargo xtask dst / dst-lint / openapi-gen / openapi-check")
@@ -1035,7 +1045,7 @@ C4Container
   ContainerDb(config_file, "~/.overdrive/config", "TOML file", "Operator endpoint + trust triple (ADR-0010) + optional [node] block (ADR-0025)")
   ContainerDb(openapi_yaml, "api/openapi.yaml", "YAML file", "Checked-in OpenAPI 3.1 schema; derived from Rust types via utoipa (ADR-0009)")
   System_Ext(kernel, "Linux kernel cgroup v2", "Unified hierarchy at /sys/fs/cgroup/", "overdrive.slice/{control-plane.slice (ctrl-owned), workloads.slice/<alloc>.scope (worker-owned)}")
-  System_Ext(workload, "Workload process", "tokio::process child", "fork/exec child placed in cgroup scope by ProcessDriver")
+  System_Ext(workload, "Workload process", "tokio::process child", "fork/exec child placed in cgroup scope by ExecDriver")
   System_Ext(ci, "CI pipeline")
 
   Rel(engineer, xtask, "Runs `cargo xtask ...`")
@@ -1057,7 +1067,7 @@ C4Container
 
   Rel(worker, core, "Implements Driver port against; reads NodeId / Region / Resources newtypes; writes AllocStatusRow + NodeHealthRow shapes from")
   Rel(worker, store_local, "Writes node_health row at startup via ObservationStore::write (per ADR-0025 amended)")
-  Rel(worker, kernel, "ProcessDriver mkdirs workload scope; writes cpu.weight + memory.max + cgroup.procs; rmdirs scope on stop (ADR-0026 + ADR-0029)")
+  Rel(worker, kernel, "ExecDriver mkdirs workload scope; writes cpu.weight + memory.max + cgroup.procs; rmdirs scope on stop (ADR-0026 + ADR-0029)")
   Rel(worker, workload, "tokio::process spawns child; SIGTERM/SIGKILL on stop")
   Rel(worker, config_file, "Reads optional [node] block at worker startup")
 
@@ -1133,7 +1143,7 @@ C4Component
 The convergence loop is the central architectural feature of the
 first-workload feature: it is the path from `overdrive job submit`
 through the JobLifecycle reconciler + scheduler + action shim +
-ProcessDriver and back into ObservationStore, where the next tick
+ExecDriver and back into ObservationStore, where the next tick
 sees the new state. The diagram below shows the components and
 their async / sync boundaries explicitly.
 
@@ -1156,7 +1166,7 @@ C4Component
   }
 
   Container_Boundary(worker_crate, "overdrive-worker (class: adapter-host, NEW per ADR-0029)") {
-    Component(process_driver, "ProcessDriver", "Driver impl (NEW — ADR-0026 hosted here per ADR-0029)", "tokio::process spawn + cgroup v2 direct cgroupfs writes; cpu.weight + memory.max from AllocationSpec::resources")
+    Component(process_driver, "ExecDriver", "Driver impl (NEW — ADR-0026 hosted here per ADR-0029; renamed from ProcessDriver 2026-04-28)", "tokio::process spawn (binary + args directly from AllocationSpec) + cgroup v2 direct cgroupfs writes; cpu.weight + memory.max from AllocationSpec::resources")
     Component(node_health_writer, "node_health writer", "worker-startup helper (NEW — ADR-0025 amended by ADR-0029)", "Resolves NodeId/Region/Capacity from config; writes one node_health row at worker startup before listener bind")
   }
 
@@ -1182,7 +1192,7 @@ C4Component
 
   Rel(runtime, libsql_db, "Persists diff(view, NextView) (async)")
   Rel(runtime, shim, "Awaits dispatch(actions, &driver, &obs, &tick)")
-  Rel(shim, process_driver, "Driver::start(&AllocationSpec) / Driver::stop(&AllocationHandle) (async)")
+  Rel(shim, process_driver, "Driver::start(&AllocationSpec { command, args, .. }) / Driver::stop(&AllocationHandle) (async)")
   Rel(shim, obs, "Writes AllocStatusRow {Running | Failed | Terminated} (async)")
   Rel(process_driver, kernel, "mkdir scope; cpu.weight; memory.max; cgroup.procs; SIGTERM/SIGKILL on stop")
   Rel(node_health_writer, obs, "Writes node_health row at worker startup, before listener bind (ADR-0025 amended by ADR-0029)")
@@ -1299,7 +1309,7 @@ Rules to enforce:
 | 0026 | cgroup v2 direct cgroupfs writes (no `cgroups-rs` dep); `cpu.weight` + `memory.max` from spec | Accepted |
 | 0027 | Job-stop HTTP shape: `POST /v1/jobs/{id}:stop`; separate `IntentKey::for_job_stop` | Accepted |
 | 0028 | cgroup v2 delegation pre-flight: hard refusal + explicit `--allow-no-cgroups` dev flag | Accepted |
-| 0029 | Dedicated `overdrive-worker` crate (class `adapter-host`); ProcessDriver + workload-cgroup management + node_health writer extracted from `overdrive-host` | Accepted |
+| 0029 | Dedicated `overdrive-worker` crate (class `adapter-host`); ExecDriver (formerly ProcessDriver, renamed 2026-04-28) + workload-cgroup management + node_health writer extracted from `overdrive-host` | Accepted (amended 2026-04-28) |
 
 ---
 
@@ -1339,12 +1349,12 @@ Rules to enforce:
     rkyv canonicalisation paths). First-workload extension adds:
     `overdrive-scheduler::schedule` (pure function — proptest +
     mutants), `JobLifecycle::reconcile` body, action shim Action
-    match arms, ProcessDriver cgroup operations.
+    match arms, ExecDriver cgroup operations.
   - Workspace-feature self-test (`every_workspace_member_declares_integration_tests_feature`)
     continues to pass — `overdrive-scheduler/Cargo.toml` declares the
     `integration-tests = []` no-op feature per the workspace
     convention.
-  - Linux-only `integration-tests`-gated suites: ProcessDriver real-
+  - Linux-only `integration-tests`-gated suites: ExecDriver real-
     cgroup tests (US-02), control-plane cgroup-isolation burst test
     (US-04). Run on the Linux Tier 3 matrix per
     `.claude/rules/testing.md`.

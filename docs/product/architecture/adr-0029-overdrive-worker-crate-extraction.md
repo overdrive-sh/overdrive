@@ -464,3 +464,129 @@ document.
   revision.
 - User ratification 2026-04-27 (orchestrator recommendation +
   "confirmed. proceed").
+
+## Amendment 2026-04-28 — Exec driver rename + `AllocationSpec.args`
+
+The crate boundary established by this ADR's body is unchanged —
+`overdrive-worker` still hosts the exec driver, the workload-cgroup
+manager, and the boot-time `node_health` writer; the dependency
+graph, the binary-composition pattern, and the
+`overdrive-control-plane`-does-not-depend-on-`overdrive-worker`
+discipline all carry through. **What changes are the type names and
+the spec shape inside the crate.**
+
+### Renames
+
+| Old name | New name | Where |
+|---|---|---|
+| `ProcessDriver` (struct) | **`ExecDriver`** | `crates/overdrive-worker/src/driver.rs` (struct, every reference inside the crate, and the binary-composition site in `crates/overdrive-cli/src/...`) |
+| `DriverType::Process` | **`DriverType::Exec`** | `crates/overdrive-core/src/traits/driver.rs` (enum variant, every match arm across the workspace, every fixture pinning the variant) |
+| `AllocationSpec.image` | **`AllocationSpec.command`** | `crates/overdrive-core/src/traits/driver.rs` (struct field, every constructor, every read site). Matches Nomad's `exec` task driver field name (`command`). |
+| *(missing)* | **`AllocationSpec.args: Vec<String>`** | New field on the same struct; constructed by every existing call site. |
+
+### Why this is an amendment, not a new ADR
+
+The architectural decision in this ADR's body — *the worker
+subsystem is its own crate* — is not affected by the rename. The
+exec driver still has the same Cargo.toml dependencies, the same
+`#[cfg(target_os = "linux")]` conditional compilation, the same
+trait impl surface, the same five-filesystem-operation cgroup
+lifecycle, the same dependency direction
+(`overdrive-core ← overdrive-worker ← overdrive-cli`), and the same
+binary-composition pattern. The amendment records a vocabulary
+change inside the crate boundary; the boundary itself is preserved.
+
+The amendment-in-place pattern matches the precedent ADR-0029 itself
+established by amending ADR-0026, ADR-0022, ADR-0025, and ADR-0023.
+Stacking a new ADR-0030 on top of ADR-0029 for a rename would
+fragment the worker-crate narrative for no benefit.
+
+### Cleanup the rename forces
+
+The original `ProcessDriver::build_command` body contained a
+hardcoded image-name dispatch table that is removed by this
+amendment:
+
+```text
+/bin/sleep   → hardcoded args ["60"]
+/bin/sh      → hardcoded args ["-c", "trap '' TERM; sleep 60"]
+/bin/cpuburn → hardcoded busy-loop sh script
+```
+
+The dispatch was a workaround for the missing `args` field on
+`AllocationSpec`. With `args: Vec<String>` present, the new
+`ExecDriver::build_command` body is one line:
+
+```rust
+let mut cmd = Command::new(&spec.command);
+cmd.args(&spec.args);
+```
+
+Plus the existing `setsid()` pre-exec hook (which was previously
+gated behind the `image == "/bin/sh"` branch — see
+`crates/overdrive-worker/src/driver.rs:147-170`) becomes
+unconditional. Every exec workload gets its own process group;
+the conditional was only ever there because the magic dispatch
+needed a switch site.
+
+The test fixtures that previously relied on the magic dispatch
+construct argv inline:
+
+| Test | Pre-rename | Post-rename |
+|---|---|---|
+| `stop_escalates_to_sigkill` | `image: "/bin/sh"` (magic) | `command: "/bin/sh", args: vec!["-c", "trap '' TERM; sleep 60"]` |
+| `cluster_status_under_burst` (cgroup-isolation 4.2) | `image: "/bin/cpuburn"` (magic — `/bin/cpuburn` does not exist in the Lima image) | `command: "/bin/sh", args: vec!["-c", "<busy loop script>"]` |
+| every other `process_driver/*.rs` test | `image: "/bin/sleep"` + magic args `["60"]` | `command: "/bin/sleep", args: vec!["60"]` |
+
+### Single-cut greenfield migration
+
+Per `feedback_single_cut_greenfield_migrations`, the migration is a
+single cohesive PR (decomposed into two commits per the roadmap),
+no compatibility shim, no `#[deprecated]` aliases, no
+feature-flagged old name. The two commits are mechanical:
+
+- **Commit 1** (`feat(worker): rename ProcessDriver → ExecDriver,
+  DriverType::Process → DriverType::Exec`) — type-name rename only;
+  no behavior change. Every consumer of either name migrates in the
+  same commit.
+- **Commit 2** (`feat(driver): rename AllocationSpec.image →
+  command; add args; drop magic image-name dispatch`) — the
+  substantive change. Every `AllocationSpec { … }` construction in
+  the workspace migrates; `ExecDriver::build_command` body is
+  rewritten; every test fixture that relied on magic dispatch
+  constructs argv inline.
+
+### What does NOT change
+
+- The crate name (`overdrive-worker`) — only the type name inside
+  the crate changes.
+- The crate's `package.metadata.overdrive.crate_class = "adapter-host"`
+  declaration.
+- The dependency graph
+  (`overdrive-core ← overdrive-worker ← overdrive-cli`).
+- The binary-composition pattern (`serve` subcommand instantiates
+  control-plane + worker; threads `Arc<dyn Driver>` from worker into
+  control-plane's `AppState`).
+- `overdrive-control-plane` still does NOT depend on
+  `overdrive-worker`.
+- The `Driver` trait surface (method signatures, async-trait
+  attribute, `Send + Sync + 'static`).
+- The action shim contract (ADR-0023): `dispatch` calls
+  `Driver::start/stop/status` against `&dyn Driver`; the spec type
+  passed to `start` reshapes but the trait method signature is
+  unchanged.
+- ADR-0028's pre-flight check.
+- The `node_health` row writer's relocation to worker startup
+  (ADR-0025 amendment).
+
+### Phase 2+ posture
+
+The `DriverType::MicroVm` and `DriverType::Wasm` variants land in
+Phase 2+. Those drivers will carry their own image surface — a
+`ContentHash`-typed `image` field on a future `MicroVmAllocationSpec`
+or a multi-driver `Spec` enum, distinct from `ExecAllocationSpec.command`.
+The current shared `AllocationSpec` is a Phase-1 simplification; it
+will likely split per driver-type when the second driver lands.
+This amendment does not try to anticipate that split — `command` is
+the right name today (matches Nomad's `exec` driver field), and a
+future PR can refactor the type hierarchy when MicroVm enters scope.

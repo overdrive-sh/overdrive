@@ -406,3 +406,89 @@ before either subsystem begins its own cgroup work.
 See ADR-0029 for the extraction rationale and the binary-composition
 pattern.
 
+## Amendment 2026-04-28 — Exec driver rename + `AllocationSpec.args`
+
+This ADR's body is unchanged in substance — cgroup v2 is still the
+sole supported hierarchy, direct cgroupfs writes remain the chosen
+mechanism, `cpu.weight` and `memory.max` are still written from
+`AllocationSpec::resources` at start time, and warn-and-continue is
+still the disposition for limit-write failures. **What changes is
+the driver type name and the spec field surface the cgroup
+operations are keyed off.**
+
+### Renames
+
+| Old | New | Rationale |
+|---|---|---|
+| `ProcessDriver` (struct, `overdrive-worker`) | **`ExecDriver`** | Aligns with Nomad's `exec` driver (https://developer.hashicorp.com/nomad/docs/deploy/task-driver/exec) and Talos's vocabulary. "Process" was an internal-implementation noun (we use `tokio::process`); the operator-facing concept is "execute a binary directly," which Nomad and the wider operator community already call `exec`. |
+| `DriverType::Process` (enum variant, `overdrive-core`) | **`DriverType::Exec`** | Same. The driver-type enum is the operator-facing identity (it appears in job specs and in `Driver::r#type()`); using the operator-canonical noun matters more here than internal symmetry with `tokio::process`. |
+| `AllocationSpec.image: String` | **`AllocationSpec.command: String`** | Container-image terminology is wrong for an exec driver — `/bin/sleep` is a binary path, not a content-addressed image identifier (`docker.io/library/postgres:15`). The current field is read by `ExecDriver` as `Command::new(&spec.image)`, which is the give-away that the field is misnamed. Rename to match Nomad's `exec` task driver field name (`command`). Container drivers (Phase 2+ MicroVm + Wasm) will carry their own ContentHash-typed `image` field — distinct from the exec driver's `command`. |
+| `AllocationSpec` (no argv) | **`AllocationSpec.command: String` + `AllocationSpec.args: Vec<String>`** | The original spec couldn't carry argv; `ExecDriver::build_command` papered over the gap with magic image-name dispatch (`/bin/sleep` → hardcoded `["60"]`; `/bin/sh` → hardcoded `["-c", "trap '' TERM; sleep 60"]`; `/bin/cpuburn` → hardcoded busy-loop sh script). That dispatch is technical debt: the driver's production code is reading test-fixture intent. The right shape is the spec carries argv, the driver runs `Command::new(&spec.command).args(&spec.args)`, and test fixtures construct argv inline at the test (e.g. SIGTERM-trap test → `command: "/bin/sh", args: ["-c", "trap '' TERM; sleep 60"]`). |
+
+### Why this lives as an amendment to ADR-0026, not a new ADR
+
+The cgroup-v2 mechanism, the `cpu.weight` / `memory.max` derivation,
+the warn-and-continue posture, the limits-then-PID ordering, and the
+five-filesystem-operation surface are all unchanged. The amendment
+records a *naming* and *spec-shape* change that affects which symbols
+the driver writes against, but the cgroup work itself — the body of
+this ADR — stays exactly as written. ADR-0026 amendment-in-place
+matches the established pattern (ADR-0026's first amendment by
+ADR-0029 used the same shape; ADR-0022 / ADR-0025 / ADR-0023 have
+similar amendments-in-place).
+
+### Single-cut greenfield migration
+
+Per `feedback_single_cut_greenfield_migrations`, the migration is a
+single cohesive PR per step, no compatibility shim. Every fixture in
+the workspace migrates in lockstep with the spec field rename:
+
+- `crates/overdrive-core/src/traits/driver.rs` — `AllocationSpec`
+  field rename (`image` → `command`) and `args: Vec<String>` field
+  add land in the same edit.
+- `crates/overdrive-core/src/reconciler.rs` — the one
+  `AllocationSpec { ..., image: "/bin/sleep".to_string(), ... }`
+  construction in `JobLifecycle::reconcile` migrates to the new
+  shape (`command: "/bin/sleep".to_string(), args: vec!["60".to_string()]`).
+- `crates/overdrive-control-plane/src/action_shim.rs` —
+  `build_phase1_restart_spec` migrates to the new shape.
+- `crates/overdrive-worker/src/driver.rs` — `build_command`'s magic
+  image-name dispatch is **deleted entirely**; the new body is a
+  simple `Command::new(&spec.command).args(&spec.args)`. The setsid
+  + TERM-trap workaround at the existing `if spec.image == "/bin/sh"`
+  branch becomes unconditional (every exec workload gets its own
+  process group; that is the correct shape and was only conditional
+  because the magic dispatch needed a switch site).
+- `crates/overdrive-sim/tests/acceptance/sim_adapters_deterministic.rs`,
+  `crates/overdrive-worker/tests/acceptance/sim_driver_only_in_default_lane.rs`,
+  every fixture under
+  `crates/overdrive-worker/tests/integration/process_driver/*.rs`,
+  `crates/overdrive-control-plane/tests/integration/cgroup_isolation/cluster_status_under_burst.rs`
+  — every test fixture constructing `AllocationSpec` migrates to
+  `command` + `args`. The `cluster_status_under_burst` test (which
+  used `image: "/bin/cpuburn"` to trigger the magic dispatch) now
+  constructs the CPU-burst command directly:
+  `command: "/bin/sh".to_string(), args: vec!["-c".to_string(), "<busy loop script>".to_string()]`.
+
+### What does NOT change
+
+- The five filesystem operations (`mkdir scope`, `cgroup.procs`,
+  `cpu.weight`, `memory.max`, `rmdir`).
+- The cgroup-v2-only constraint and ADR-0028's pre-flight.
+- The warn-and-continue posture on limit-write failures.
+- The cgroup-hierarchy ownership split established by the prior
+  amendment (worker owns `workloads.slice/<alloc>.scope`;
+  control-plane owns `control-plane.slice/`).
+- The `overdrive-worker` crate boundary (the renamed `ExecDriver`
+  still lives there per ADR-0029; the crate itself is not renamed).
+- The `Driver` trait method signatures (`start` / `stop` / `status` /
+  `resize`) — the trait surface is unchanged; only the spec type
+  carried by `start` changes shape.
+- The `DriverType` enum is the structural surface; a future
+  `DriverType::MicroVm` / `DriverType::Wasm` will be added without
+  reshaping the enum.
+
+See ADR-0029's amendment 2026-04-28 for the type-rename surface
+(`ProcessDriver` → `ExecDriver`) inside the worker crate; this
+ADR amendment is the cgroup-side narrative.
+
