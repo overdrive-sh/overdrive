@@ -28,10 +28,28 @@ fn preflight_refuses_without_delegation() {
 
     // Step 4 must FAIL: subtree_control is missing both controllers
     // (operator has not been delegated cpu/memory).
+    //
+    // Dual-write fixture for the RED-scaffold transition (bugfix
+    // `fix-cgroup-preflight-wrong-slice`): the buggy step-4 body
+    // (step 01-01) reads `<cgroup_root>/cgroup.subtree_control`; the
+    // fixed body (step 01-02) reads
+    // `<cgroup_root>/<enclosing_slice>/cgroup.subtree_control`. We
+    // write BOTH to the same `io pids` content so this test stays
+    // GREEN under both code shapes — the structural changes from
+    // step 01-01 (signature gains `proc_self_cgroup`, fixture gains
+    // user-slice file) flip the test's compile shape, not its
+    // assertion.
     std::fs::write(cgroup_root.join("cgroup.subtree_control"), "io pids\n")
         .expect("write subtree_control");
+    let user_slice_dir = cgroup_root.join("user.slice").join("user-1000.slice");
+    std::fs::create_dir_all(&user_slice_dir).expect("create user-1000.slice dir");
+    std::fs::write(user_slice_dir.join("cgroup.subtree_control"), "io pids\n")
+        .expect("write user-slice subtree_control");
+    let proc_self_cgroup = tmp.path().join("proc-self-cgroup");
+    std::fs::write(&proc_self_cgroup, "0::/user.slice/user-1000.slice\n")
+        .expect("write proc/self/cgroup");
 
-    let err = run_preflight_at(cgroup_root, /* uid = */ 1000, &proc_fs)
+    let err = run_preflight_at(cgroup_root, /* uid = */ 1000, &proc_fs, &proc_self_cgroup)
         .expect_err("delegation missing must fail");
 
     let msg = err.to_string();

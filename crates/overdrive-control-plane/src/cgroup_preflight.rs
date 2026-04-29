@@ -135,6 +135,14 @@ pub enum CgroupPreflightError {
 /// On non-Linux this is unreachable in production because the boot
 /// path only invokes the pre-flight under `#[cfg(target_os = "linux")]`.
 ///
+/// `proc_self_cgroup` names the file from which the *enclosing* slice
+/// path is discovered for step 4 (production: `/proc/self/cgroup`;
+/// tests: a tempdir-fabricated file). The parameter is wired in this
+/// commit (RED scaffold for bugfix `fix-cgroup-preflight-wrong-slice`,
+/// step 01-01) but the buggy step-4 body that reads
+/// `<cgroup_root>/cgroup.subtree_control` is intentionally unchanged
+/// here — it is rewritten in step 01-02.
+///
 /// # Errors
 ///
 /// See [`CgroupPreflightError`] variants.
@@ -142,7 +150,13 @@ pub fn run_preflight_at(
     cgroup_root: &Path,
     uid: u32,
     proc_filesystems: &Path,
+    proc_self_cgroup: &Path,
 ) -> Result<(), CgroupPreflightError> {
+    // Step 01-01 RED scaffold: the parameter is in the signature so
+    // that callers (production wrapper + integration tests) wire it
+    // through, but step 4 below still reads the wrong file. Step
+    // 01-02 rewrites the body to actually use this path.
+    let _ = proc_self_cgroup;
     // Step 1 — kernel exposes cgroup v2.
     let proc_fs = std::fs::read_to_string(proc_filesystems).unwrap_or_default();
     let cgroup_v2_available = proc_fs.lines().any(|line| line.contains("cgroup2"));
@@ -209,7 +223,12 @@ pub fn run_preflight() -> Result<(), CgroupPreflightError> {
     // unsafe-free.
     #[allow(unsafe_code)]
     let uid = unsafe { libc::geteuid() };
-    run_preflight_at(Path::new(DEFAULT_CGROUP_ROOT), uid, Path::new("/proc/filesystems"))
+    run_preflight_at(
+        Path::new(DEFAULT_CGROUP_ROOT),
+        uid,
+        Path::new("/proc/filesystems"),
+        Path::new("/proc/self/cgroup"),
+    )
 }
 
 /// Non-Linux stub — pre-flight is only invoked under

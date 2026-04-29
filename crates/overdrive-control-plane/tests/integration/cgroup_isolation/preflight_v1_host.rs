@@ -20,7 +20,11 @@ fn preflight_refuses_on_cgroup_v1_host() {
     let proc_fs = tmp.path().join("filesystems");
     std::fs::write(&proc_fs, "nodev\tcgroup\nnodev\ttmpfs\n").expect("write proc/filesystems");
 
-    let err = run_preflight_at(tmp.path(), /* uid = */ 1000, &proc_fs)
+    // Step 1 fails before step 4 ever runs, so the contents and
+    // existence of `proc_self_cgroup` are irrelevant here — pass an
+    // unused tempdir-relative path purely to satisfy the signature.
+    let proc_self_cgroup = tmp.path().join("proc-self-cgroup");
+    let err = run_preflight_at(tmp.path(), /* uid = */ 1000, &proc_fs, &proc_self_cgroup)
         .expect_err("cgroup-v1-only host must fail step 1");
 
     match &err {

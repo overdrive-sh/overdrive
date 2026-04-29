@@ -22,10 +22,21 @@ fn preflight_names_missing_cpu_controller_specifically() {
     std::fs::write(cgroup_root.join("cgroup.controllers"), "cpu memory io\n")
         .expect("write cgroup.controllers");
     // Only `memory` and `io` are delegated; `cpu` is missing.
+    // Dual-write fixture so the test stays GREEN through the RED
+    // scaffold (buggy code reads <cgroup_root>/cgroup.subtree_control)
+    // and through the fix (correct code reads
+    // <cgroup_root>/user.slice/user-1000.slice/cgroup.subtree_control).
     std::fs::write(cgroup_root.join("cgroup.subtree_control"), "memory io\n")
         .expect("write subtree_control");
+    let user_slice_dir = cgroup_root.join("user.slice").join("user-1000.slice");
+    std::fs::create_dir_all(&user_slice_dir).expect("create user-1000.slice dir");
+    std::fs::write(user_slice_dir.join("cgroup.subtree_control"), "memory io\n")
+        .expect("write user-slice subtree_control");
+    let proc_self_cgroup = tmp.path().join("proc-self-cgroup");
+    std::fs::write(&proc_self_cgroup, "0::/user.slice/user-1000.slice\n")
+        .expect("write proc/self/cgroup");
 
-    let err = run_preflight_at(cgroup_root, /* uid = */ 1000, &proc_fs)
+    let err = run_preflight_at(cgroup_root, /* uid = */ 1000, &proc_fs, &proc_self_cgroup)
         .expect_err("missing-cpu must fail");
 
     match &err {
@@ -54,10 +65,19 @@ fn preflight_names_missing_memory_controller_specifically() {
     std::fs::write(cgroup_root.join("cgroup.controllers"), "cpu memory io\n")
         .expect("write cgroup.controllers");
     // Only `cpu` and `io` are delegated; `memory` is missing.
+    // Dual-write fixture — see the comment on the cpu-missing test
+    // above for the rationale.
     std::fs::write(cgroup_root.join("cgroup.subtree_control"), "cpu io\n")
         .expect("write subtree_control");
+    let user_slice_dir = cgroup_root.join("user.slice").join("user-1000.slice");
+    std::fs::create_dir_all(&user_slice_dir).expect("create user-1000.slice dir");
+    std::fs::write(user_slice_dir.join("cgroup.subtree_control"), "cpu io\n")
+        .expect("write user-slice subtree_control");
+    let proc_self_cgroup = tmp.path().join("proc-self-cgroup");
+    std::fs::write(&proc_self_cgroup, "0::/user.slice/user-1000.slice\n")
+        .expect("write proc/self/cgroup");
 
-    let err = run_preflight_at(cgroup_root, /* uid = */ 1000, &proc_fs)
+    let err = run_preflight_at(cgroup_root, /* uid = */ 1000, &proc_fs, &proc_self_cgroup)
         .expect_err("missing-memory must fail");
 
     match &err {
