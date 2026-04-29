@@ -189,6 +189,65 @@ pub enum CgroupPreflightError {
         #[source]
         source: std::io::Error,
     },
+
+    /// Step 4 — the enclosing slice's `cgroup.subtree_control` is
+    /// unreadable for any reason (`PermissionDenied`, `EIO`,
+    /// `IsADirectory`, `NotFound`, `Other`, …). `NotFound` on this
+    /// read indicates the enclosing-slice path is not a real cgroup-v2
+    /// directory — the kernel guarantees `cgroup.subtree_control`
+    /// exists under every cgroup directory per
+    /// `Documentation/admin-guide/cgroup-v2.rst`, so its absence is
+    /// structurally distinct from "no controllers delegated"
+    /// (`DelegationMissing`). Every `io::Error` from the step-4 read
+    /// surfaces via this variant — see Option B of the RCA at
+    /// `docs/feature/fix-cgroup-preflight-subtree-unreadable/bugfix-rca.md`.
+    ///
+    /// The Display message names the failure cause and the
+    /// `--allow-no-cgroups` dev escape hatch — and deliberately does
+    /// NOT mention `Delegate=yes` or "delegation required", because
+    /// those phrases are reserved for `DelegationMissing` and are
+    /// exactly the misdiagnosis this variant exists to correct.
+    #[error(
+        "could not read cgroup.subtree_control of enclosing slice {slice}: {source}.\n\
+        \n\
+        Detected: cgroup v2 IS available and the enclosing slice path was\n\
+        discovered, BUT the slice's cgroup.subtree_control could not be\n\
+        read. This is distinct from delegation being absent — the kernel\n\
+        creates cgroup.subtree_control under every cgroup directory, so an\n\
+        I/O failure here points at a cgroupfs configuration issue or a\n\
+        race against the slice being unmounted, not at missing controllers.\n\
+        \n\
+        Try one of:\n\
+        \n\
+          1. Verify the enclosing slice is a real cgroup-v2 directory:\n\
+             confirm /sys/fs/cgroup is the cgroup-v2 unified hierarchy\n\
+             mount and that /proc/self/cgroup matches your environment.\n\
+          2. Verify the running UID can read files under the enclosing\n\
+             slice (a NotFound here is unusual — cgroup.subtree_control\n\
+             is kernel-created for every cgroup directory).\n\
+          3. Run as root (development only — no isolation guarantees):\n\
+               sudo overdrive serve\n\
+          4. Run without cgroup isolation (development only — workloads\n\
+             are unbounded; control plane is not protected):\n\
+               overdrive serve --allow-no-cgroups\n\
+        \n\
+        Documentation: https://docs.overdrive.sh/operations/cgroup-delegation",
+        slice = slice.display(),
+    )]
+    SubtreeControlUnreadable {
+        /// Enclosing slice directory whose `cgroup.subtree_control`
+        /// could not be read. Captured for operator triage —
+        /// parallel to `DelegationMissing.slice`.
+        slice: PathBuf,
+        /// I/O error from reading `<slice>/cgroup.subtree_control`.
+        /// Every `io::ErrorKind` flows through this variant per
+        /// Option B of the RCA — including `NotFound`, which is
+        /// structurally distinct from "no controllers delegated"
+        /// because the kernel guarantees the file exists under every
+        /// cgroup directory.
+        #[source]
+        source: std::io::Error,
+    },
 }
 
 /// Run the four-step pre-flight check rooted at `cgroup_root` for
