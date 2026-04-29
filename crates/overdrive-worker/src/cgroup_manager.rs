@@ -240,16 +240,6 @@ pub async fn write_resource_limits_warn_on_error(
 /// other than the scope being absent. The caller is expected to
 /// `tracing::warn!` and continue — terminal cleanup is best-effort by
 /// design.
-// mutants: skip — best-effort idempotent cleanup. The `NotFound -> Ok`
-// match arm exists to handle a race where the cgroup was already swept
-// by another reconciler pass or the process tree's terminal SIGKILL.
-// Mutation testing this guard requires synchronous fault injection on
-// `tokio::fs::write` which the runtime does not expose; the contract
-// is documented above. The body-replace mutation (replace the whole
-// function with `Ok(())`) is also covered here — production tests on
-// Lima exercise the real cgroupfs path, which the TempDir-based unit
-// tests cannot meaningfully assert against without race-prone
-// instrumentation. See `.claude/rules/testing.md` § "What it's NOT for".
 pub async fn cgroup_kill(root: &Path, scope: &CgroupPath) -> Result<(), std::io::Error> {
     let path = scope.resolve(root).join("cgroup.kill");
     match tokio::fs::write(&path, "1\n").await {
@@ -275,16 +265,6 @@ pub async fn cgroup_kill(root: &Path, scope: &CgroupPath) -> Result<(), std::io:
 ///
 /// Returns the underlying io error if neither `rmdir` nor the
 /// `remove_dir_all` fallback succeeds.
-// mutants: skip — best-effort idempotent rmdir. The `NotFound -> Ok`
-// arms (outer `remove_dir` and inner `remove_dir_all`) handle the race
-// where the cgroup is already gone (concurrent sweeper or terminal
-// SIGKILL drain). The `is_dir_not_empty(&err)` arm bridges the real
-// cgroupfs path (kernel auto-reaps virtual files on `rmdir`) and the
-// tempdir-as-cgroupfs test path (real on-disk files require
-// `remove_dir_all`). Mutation testing these match guards requires
-// synchronous fault injection on `tokio::fs::remove_dir` /
-// `remove_dir_all` which the tokio runtime does not expose. See
-// `.claude/rules/testing.md` § "What it's NOT for".
 pub async fn remove_workload_scope(root: &Path, scope: &CgroupPath) -> Result<(), std::io::Error> {
     let dir = scope.resolve(root);
     match tokio::fs::remove_dir(&dir).await {
@@ -293,12 +273,15 @@ pub async fn remove_workload_scope(root: &Path, scope: &CgroupPath) -> Result<()
         Err(err) if is_dir_not_empty(&err) => {
             // Tempdir-as-cgroupfs path (tests). Real cgroupfs never
             // returns ENOTEMPTY for a workload scope because the
-            // virtual files are reaped on `rmdir`.
-            match tokio::fs::remove_dir_all(&dir).await {
-                Ok(()) => Ok(()),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-                Err(e) => Err(e),
-            }
+            // virtual files are reaped on `rmdir`. Single-writer
+            // ownership through `ExecDriver`'s `live` mutex serialises
+            // start/stop for a given allocation, so the inner
+            // `remove_dir_all` cannot race with another caller of
+            // `remove_workload_scope` for the same scope; a NotFound
+            // here would imply an out-of-band remover that the
+            // architecture forbids. Surface the error rather than
+            // swallow it.
+            tokio::fs::remove_dir_all(&dir).await
         }
         Err(err) => Err(err),
     }
@@ -402,6 +385,58 @@ mod tests {
         );
     }
 
+    /// `cgroup_kill` writes `1\n` to `<scope>/cgroup.kill` on the
+    /// happy path. Pins the body-replace mutation (`-> Ok(())` skips
+    /// the write entirely; `cgroup.kill` would not appear on disk).
+    #[tokio::test]
+    async fn cgroup_kill_writes_one_to_cgroup_kill_file() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let scope_path = "overdrive.slice/workloads.slice/alloc-kill-write-0.scope";
+        let scope = CgroupPath::from_str(scope_path).expect("valid CgroupPath");
+        let scope_dir = scope.resolve(tmp.path());
+        std::fs::create_dir_all(&scope_dir).expect("create scope dir");
+
+        cgroup_kill(tmp.path(), &scope).await.expect("cgroup_kill on real dir succeeds");
+
+        let written = std::fs::read_to_string(scope_dir.join("cgroup.kill"))
+            .expect("cgroup.kill must be written");
+        assert_eq!(
+            written, "1\n",
+            "cgroup_kill must write '1\\n' to cgroup.kill (kernel cgroup.kill protocol)",
+        );
+    }
+
+    /// `cgroup_kill` propagates non-`NotFound` errors rather than
+    /// swallowing them. Pins the match-guard mutation that flips
+    /// `err.kind() == NotFound` to `true` (which would route every
+    /// error through the idempotent arm).
+    ///
+    /// Setup creates a regular file at the *scope* path; writing
+    /// `<file>/cgroup.kill` then fails with a non-`NotFound` error
+    /// (typically `NotADirectory` / `ENOTDIR`). The unmutated guard
+    /// propagates; the `-> true` mutant turns it into `Ok(())`.
+    #[tokio::test]
+    async fn cgroup_kill_propagates_non_notfound_errors() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let scope_path = "overdrive.slice/workloads.slice/alloc-blocker-0.scope";
+        let scope = CgroupPath::from_str(scope_path).expect("valid CgroupPath");
+        let scope_as_path = scope.resolve(tmp.path());
+        if let Some(parent) = scope_as_path.parent() {
+            std::fs::create_dir_all(parent).expect("create parent slice dirs");
+        }
+        // Place a regular file where the scope DIR would be — writing
+        // `<file>/cgroup.kill` produces a non-NotFound error.
+        std::fs::write(&scope_as_path, b"blocker").expect("write blocker file");
+
+        let result = cgroup_kill(tmp.path(), &scope).await;
+        let err = result.expect_err("non-NotFound errors must propagate");
+        assert_ne!(
+            err.kind(),
+            std::io::ErrorKind::NotFound,
+            "the test setup must NOT produce NotFound (would render the test vacuous)",
+        );
+    }
+
     /// `remove_workload_scope` is idempotent on `NotFound`. Pins
     /// the outer match-guard mutations.
     #[tokio::test]
@@ -438,6 +473,59 @@ mod tests {
         assert!(
             !scope_dir.exists(),
             "scope dir must be gone after remove_workload_scope's fallback path",
+        );
+    }
+
+    /// `remove_workload_scope` propagates non-`ENOTEMPTY`
+    /// non-`NotFound` errors from the outer `remove_dir` rather than
+    /// routing them through the `remove_dir_all` fallback. Pins the
+    /// `is_dir_not_empty(&err)` match-guard mutation that would flip
+    /// to `true` and incorrectly mask a hard error as a transient
+    /// ENOTEMPTY.
+    ///
+    /// Setup creates a SYMLINK at the scope path pointing to a real
+    /// directory elsewhere in the tempdir. On Linux:
+    ///
+    ///   * `remove_dir(symlink_to_dir)` returns `NotADirectory` —
+    ///     `lstat(2)` resolves the symlink and `rmdir(2)` rejects
+    ///     a non-directory inode.
+    ///   * `remove_dir_all(symlink_to_dir)` returns `Ok(())` —
+    ///     standard library follows the symlink, finds an empty
+    ///     directory, and removes the link itself.
+    ///
+    /// The two functions producing different observable outcomes on
+    /// the same path is exactly what makes mutant 3 killable: the
+    /// unmutated guard returns `Err(NotADirectory)`; the `-> true`
+    /// mutant routes through `remove_dir_all` and returns `Ok(())`.
+    #[tokio::test]
+    #[cfg(target_os = "linux")]
+    async fn remove_workload_scope_propagates_non_enotempty_non_notfound_errors() {
+        use std::os::unix::fs::symlink;
+
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let scope_path = "overdrive.slice/workloads.slice/alloc-symlink-1.scope";
+        let scope = CgroupPath::from_str(scope_path).expect("valid CgroupPath");
+        let scope_link = scope.resolve(tmp.path());
+        if let Some(parent) = scope_link.parent() {
+            std::fs::create_dir_all(parent).expect("create parent slice dirs");
+        }
+        // The symlink target — a real, empty directory elsewhere in
+        // the tempdir.
+        let target_dir = tmp.path().join("symlink-target");
+        std::fs::create_dir_all(&target_dir).expect("create symlink target dir");
+        symlink(&target_dir, &scope_link).expect("create symlink at scope path");
+
+        let result = remove_workload_scope(tmp.path(), &scope).await;
+        let err = result.expect_err(
+            "remove_workload_scope on a symlink-to-dir must propagate the \
+             outer remove_dir error (NotADirectory) without falling back to \
+             remove_dir_all; the `is_dir_not_empty -> true` mutation diverges \
+             by calling remove_dir_all on the symlink, which succeeds",
+        );
+        assert_ne!(
+            err.kind(),
+            std::io::ErrorKind::NotFound,
+            "the test setup must NOT produce NotFound (would render the test vacuous)",
         );
     }
 
