@@ -74,6 +74,7 @@ mod integration {
         mod idempotent_slice_creation;
         mod preflight_missing_cpu;
         mod preflight_no_delegation;
+        mod preflight_proc_self_cgroup_malformed;
         mod preflight_reads_enclosing_slice;
         mod preflight_v1_host;
         mod server_enrols_in_slice;

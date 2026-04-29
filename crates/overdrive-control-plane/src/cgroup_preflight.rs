@@ -11,7 +11,10 @@
 //!      exists).
 //!   3. Running as root (skip step 4 — root has implicit access), OR
 //!   4. Required controllers (`cpu` AND `memory`) are present in the
-//!      `cgroup.subtree_control` of the parent slice.
+//!      `cgroup.subtree_control` of the *enclosing* slice. The
+//!      enclosing slice is discovered by reading `/proc/self/cgroup`
+//!      and parsing the cgroup-v2 (`0::/...`) line — see ADR-0028 §4
+//!      step 4.
 //!
 //! Each error message answers "what / why / how to fix" per the
 //! `nw-ux-tui-patterns` shape.
@@ -108,7 +111,9 @@ pub enum CgroupPreflightError {
     DelegationMissing {
         /// UID of the running process (`geteuid()`).
         uid: u32,
-        /// Slice path where `subtree_control` was inspected.
+        /// Enclosing slice directory (per `/proc/self/cgroup`); the
+        /// missing controllers are absent from
+        /// `<this directory>/cgroup.subtree_control`.
         slice: PathBuf,
         /// Missing controllers (`cpu` and/or `memory`).
         missing: Vec<String>,
@@ -119,6 +124,35 @@ pub enum CgroupPreflightError {
         plural: &'static str,
         /// "is" or "are" matching `plural`.
         is_or_are: &'static str,
+    },
+
+    /// Step 4 — could not discover the enclosing cgroup. Either
+    /// `/proc/self/cgroup` is unreadable, or it does not contain a
+    /// cgroup v2 (`0::`) line (cgroup v1-only host shape that
+    /// slipped past step 1 — extremely rare).
+    #[error(
+        "could not discover enclosing cgroup from /proc/self/cgroup: {source}.\n\
+        \n\
+        Detected: cgroup v2 IS available, BUT the running process's enclosing\n\
+        cgroup could not be determined.\n\
+        \n\
+        Try one of:\n\
+        \n\
+          1. Verify /proc/self/cgroup is readable and contains a cgroup v2\n\
+             (`0::`) line. On a healthy systemd-managed host this is\n\
+             automatic.\n\
+          2. Run without cgroup isolation (development only — workloads\n\
+             are unbounded; control plane is not protected):\n\
+               overdrive serve --allow-no-cgroups\n\
+        \n\
+        Documentation: https://docs.overdrive.sh/operations/cgroup-delegation"
+    )]
+    CgroupPathDiscoveryFailed {
+        /// I/O error from reading `/proc/self/cgroup`, OR a synthetic
+        /// `InvalidData` error when the file is readable but contains
+        /// no cgroup-v2 (`0::`) line.
+        #[source]
+        source: std::io::Error,
     },
 }
 
@@ -136,12 +170,11 @@ pub enum CgroupPreflightError {
 /// path only invokes the pre-flight under `#[cfg(target_os = "linux")]`.
 ///
 /// `proc_self_cgroup` names the file from which the *enclosing* slice
-/// path is discovered for step 4 (production: `/proc/self/cgroup`;
-/// tests: a tempdir-fabricated file). The parameter is wired in this
-/// commit (RED scaffold for bugfix `fix-cgroup-preflight-wrong-slice`,
-/// step 01-01) but the buggy step-4 body that reads
-/// `<cgroup_root>/cgroup.subtree_control` is intentionally unchanged
-/// here — it is rewritten in step 01-02.
+/// path is discovered for step 4 per ADR-0028 §4 step 4 (production:
+/// `/proc/self/cgroup`; tests: a tempdir-fabricated file). Step 4
+/// reads this file, parses the cgroup-v2 (`0::/...`) line, joins the
+/// parsed path to `cgroup_root`, and inspects the resulting
+/// directory's `cgroup.subtree_control`.
 ///
 /// # Errors
 ///
@@ -152,11 +185,6 @@ pub fn run_preflight_at(
     proc_filesystems: &Path,
     proc_self_cgroup: &Path,
 ) -> Result<(), CgroupPreflightError> {
-    // Step 01-01 RED scaffold: the parameter is in the signature so
-    // that callers (production wrapper + integration tests) wire it
-    // through, but step 4 below still reads the wrong file. Step
-    // 01-02 rewrites the body to actually use this path.
-    let _ = proc_self_cgroup;
     // Step 1 — kernel exposes cgroup v2.
     let proc_fs = std::fs::read_to_string(proc_filesystems).unwrap_or_default();
     let cgroup_v2_available = proc_fs.lines().any(|line| line.contains("cgroup2"));
@@ -175,11 +203,31 @@ pub fn run_preflight_at(
         return Ok(());
     }
 
-    // Step 4 — required controllers in subtree_control of the parent
-    // slice. Convention: tests fabricate the parent slice file directly
-    // under the cgroup_root; production (root path skipped above) reads
-    // the user slice's subtree_control.
-    let subtree_control = cgroup_root.join("cgroup.subtree_control");
+    // Step 4 — required controllers in subtree_control of the
+    // *enclosing* slice. Per ADR-0028 §4 step 4 the enclosing slice is
+    // discovered by reading /proc/self/cgroup (a single line of the
+    // form "0::/user.slice/user-1000.slice/session-3.scope" on cgroup
+    // v2). The parsed path is relative to the cgroupfs mount root.
+    let proc_self = std::fs::read_to_string(proc_self_cgroup)
+        .map_err(|err| CgroupPreflightError::CgroupPathDiscoveryFailed { source: err })?;
+    let enclosing_rel = parse_cgroup_v2_path(&proc_self).ok_or_else(|| {
+        CgroupPreflightError::CgroupPathDiscoveryFailed {
+            source: std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "{} did not contain a cgroup v2 (`0::`) line; got {proc_self:?}",
+                    proc_self_cgroup.display(),
+                ),
+            ),
+        }
+    })?;
+    // Trim any trailing newline/whitespace; strip the leading `/` so
+    // Path::join treats it as a relative path (Path::join on an
+    // absolute argument discards the prefix).
+    let enclosing_rel = enclosing_rel.trim();
+    let enclosing_abs = cgroup_root.join(enclosing_rel.trim_start_matches('/'));
+    let subtree_control = enclosing_abs.join("cgroup.subtree_control");
+
     let contents = std::fs::read_to_string(&subtree_control).unwrap_or_default();
     let mut missing = Vec::new();
     if !contents.split_ascii_whitespace().any(|t| t == "cpu") {
@@ -196,7 +244,7 @@ pub fn run_preflight_at(
         };
         return Err(CgroupPreflightError::DelegationMissing {
             uid,
-            slice: subtree_control,
+            slice: enclosing_abs,
             missing,
             missing_human,
             plural,
@@ -205,6 +253,15 @@ pub fn run_preflight_at(
     }
 
     Ok(())
+}
+
+/// Parse the cgroup v2 line (`"0::/path/to/slice"`) out of
+/// `/proc/self/cgroup`. Returns the path tail (e.g.
+/// `/user.slice/user-1000.slice/session-3.scope`) on success, or
+/// `None` if the file lists only cgroup v1 hierarchy lines or is
+/// empty. The returned slice borrows from `contents`.
+fn parse_cgroup_v2_path(contents: &str) -> Option<&str> {
+    contents.lines().find_map(|line| line.strip_prefix("0::"))
 }
 
 /// Run pre-flight against the production defaults. Convenience wrapper
