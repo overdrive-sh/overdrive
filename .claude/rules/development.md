@@ -693,6 +693,55 @@ you actually deleted what you set out to delete.
   logic); use pass-through for errors from lower layers that need no
   transformation.
 
+- **Distinct failure modes get distinct error variants. Never silently
+  absorb a `Result<_, io::Error>` (or any other fallible boundary read)
+  into a default value.** Using `.unwrap_or_default()`, `.ok()`, or
+  `.unwrap_or(_)` on a boundary I/O / parse / env read collapses every
+  distinguishable failure (PermissionDenied, EIO, broken procfs, missing
+  mount, malformed input, ...) into the same neutral value. The next
+  downstream check then misdiagnoses the cause and prescribes the wrong
+  remediation — and the cost is paid by the operator, who follows
+  guidance that does not fix the actual problem. "Boot a newer kernel"
+  does not repair a permissions error on `/proc/filesystems`; "the JSON
+  field is missing" is not the same diagnosis as "the JSON file is
+  unparseable." **Default to propagation**: `.map_err(...)?` into a
+  discrete typed variant whose `Display` form names the actual cause
+  and the actual fix. Absorbing a specific `ErrorKind` into a default
+  is allowed only when the application semantics legitimately treat
+  that kind the same as the default — `NotFound` on `/proc/filesystems`
+  IS the cgroup-v1-host signal, but `PermissionDenied` is not, even
+  when the downstream check happens to fire in both cases.
+
+  ```rust
+  // Bad — every io::Error becomes the empty string, which then
+  // triggers NoCgroupV2 with a "boot a newer kernel" remediation
+  // regardless of the actual cause (permission denied, EIO, broken
+  // procfs, /proc unmounted).
+  let proc_fs = std::fs::read_to_string(proc_filesystems).unwrap_or_default();
+  if !proc_fs.lines().any(|l| l.contains("cgroup2")) {
+      return Err(NoCgroupV2 { kernel: uname_release() });
+  }
+
+  // Good — NotFound flows to the v1-host signal because that IS the
+  // application semantics; every other ErrorKind surfaces as its own
+  // discrete variant with its own Display message and its own
+  // remediation.
+  let proc_fs = match std::fs::read_to_string(proc_filesystems) {
+      Ok(s) => s,
+      Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
+      Err(err) => return Err(ProcFilesystemsUnreadable { source: err }),
+  };
+  ```
+
+  Symptom to watch for during review: an error variant whose docstring
+  describes one failure mode but whose *triggering code path* fires for
+  several unrelated reasons. That is the smell — a variant has become a
+  catch-all for everything not explicitly handled, and operators
+  downstream receive the wrong remediation. The structural fix is
+  always the same: split the catch-all into discrete variants, propagate
+  the originating error via `.map_err(...)?`, and let `Display` carry
+  the cause-specific guidance.
+
 ### Concurrency & async
 
 - **Tokio is the standard runtime.** Do not reach for `async-std`,

@@ -1,0 +1,34 @@
+{
+  "schema_version": "3.0",
+  "feature_id": "fix-cgroup-preflight-procfs-unreadable",
+  "events": [
+    {
+      "sid": "01-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-29T17:01:50Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-29T17:02:46Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: the new oracle test IS the integration-shaped regression test for this scaffold step; no separate unit test exists or is needed",
+      "t": "2026-04-29T17:02:54Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-29T17:04:02Z"
+    }
+  ]
+}

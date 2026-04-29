@@ -1,0 +1,138 @@
+{
+  "roadmap": {
+    "project_id": "fix-cgroup-preflight-procfs-unreadable",
+    "feature_id": "fix-cgroup-preflight-procfs-unreadable",
+    "created_at": "2026-04-29T16:00:00Z",
+    "filled_at": "2026-04-29T16:00:00Z",
+    "total_steps": 2,
+    "phases": 1,
+    "walking_skeleton_gate": "01-02",
+    "validation": {
+      "status": "approved",
+      "approved_at": "2026-04-29T16:00:00Z",
+      "approver": "user",
+      "rationale": "User reviewed and approved the RCA + fix shape in nw-bugfix Phase 2 prior to invoking /nw-deliver. The same user codified the underlying principle as a development.md rule in the same conversation. Roadmap mirrors the canonical bugfix shape from the sibling fix-cgroup-preflight-wrong-slice/deliver/roadmap.json."
+    },
+    "notes": [
+      "Bug fix via /nw-bugfix → /nw-deliver. The authoritative specification is the RCA at `docs/feature/fix-cgroup-preflight-procfs-unreadable/bugfix-rca.md` (user-reviewed and APPROVED 2026-04-29 in Phase 2 before roadmap creation). Approved fix shape: new `ProcFilesystemsUnreadable { source: io::Error }` variant; replace line 189 `unwrap_or_default()` with a match that maps `io::ErrorKind::NotFound` to the existing v1-host fallthrough (NotFound IS the v1-host signal) and surfaces every other ErrorKind via the new variant.",
+      "Single-cut migration per `feedback_single_cut_greenfield_migrations`: no deprecated `unwrap_or_default()` path retained, no shadow read, no feature-flagged fallback. The fix lands as one cohesive commit (step 01-02).",
+      "Two-step Outside-In TDD shape per the canonical bugfix template at `docs/feature/fix-cgroup-preflight-wrong-slice/deliver/roadmap.json`. Step 01-01 lands the new error variant + the new regression test in RED state — the variant exists so the test compiles, but line 189 is unchanged, so the I/O error still flows to `NoCgroupV2` and the test's `match err { ProcFilesystemsUnreadable { .. } => …, other => panic!(…) }` panics. Commit via `git commit --no-verify` per `.claude/rules/testing.md` §RED scaffolds. Step 01-02 replaces line 189 with the match expression and adds the belt-and-braces `NotFound`-as-v1-host test inline in `preflight_v1_host.rs`; the RED regression test transitions RED → GREEN within the same commit (standard commit, hooks enabled).",
+      "Per `.claude/rules/testing.md` mutation-testing rules, step 01-02 runs `cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-control-plane --file crates/overdrive-control-plane/src/cgroup_preflight.rs`. Kill-rate gate ≥80%. The mutation surface is small (one match expression + one Display message + one variant constructor); the new regression test plus the existing `preflight_v1_host.rs` cover the relevant arms.",
+      "The new regression test uses a directory-path fixture (point `proc_filesystems` at a directory that exists, so `read_to_string` returns `IsADirectory`/`Other` deterministically) rather than a chmod-based fixture. Rationale: portable across nextest's UID surface (Lima root, CI non-root, macOS dev `--no-run`) and gives a deterministic `io::ErrorKind` independent of test-process UID.",
+      "Out of scope (do NOT touch): step-2 `cgroup.controllers` existence check, step-3 root short-circuit, step-4 enclosing-slice discovery, the `cgroup_manager` slice creation path, the `--allow-no-cgroups` flag.",
+      "ADR-0028 is unchanged. This fix improves diagnostic accuracy of step 1 without changing the §4 step-1 semantics (cgroup-v1-only host → `NoCgroupV2`)."
+    ]
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Bug fix — surface /proc/filesystems I/O errors discretely",
+      "slice": "single-vertical",
+      "user_stories": [
+        "As an operator running `overdrive serve` on a host where `/proc/filesystems` is unreadable for any reason other than absence (permission denied, EIO, broken procfs, /proc not mounted in this container), the preflight refuses startup with an actionable `ProcFilesystemsUnreadable` message naming the actual I/O cause — not a misleading `cgroup v2 not available on this kernel` message that prescribes booting a newer kernel."
+      ],
+      "description": "Replace the buggy step-1 read of `/proc/filesystems` via `unwrap_or_default()` (which collapses every io::Error into the empty string and routes the failure to `NoCgroupV2` with a 'boot a newer kernel' remediation) with a match that distinguishes `NotFound` (legitimate v1-host signal — fall through to `NoCgroupV2`) from every other `io::ErrorKind` (surface via a new `ProcFilesystemsUnreadable` variant with its own remediation message).",
+      "estimated_hours": 1.0,
+      "depends_on": [],
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "RED — add ProcFilesystemsUnreadable variant + new regression test",
+          "description": "Land the new error variant `CgroupPreflightError::ProcFilesystemsUnreadable { source: std::io::Error }` (parallel shape to the existing `CgroupPathDiscoveryFailed`) AND the new regression test that exercises the unreadable-procfs shape, but DO NOT change line 189 yet. The variant must exist for the test to compile (the test pattern-matches on the new variant). The Display message names the failure ('could not read /proc/filesystems'), embeds the wrapped I/O error via `{source}`, and surfaces `--allow-no-cgroups` as the dev escape hatch — same shape as `CgroupPathDiscoveryFailed`. Critically the Display message must NOT prescribe 'boot a newer kernel' — that is the specific misdiagnosis the fix corrects. The new regression test fabricates an unreadable `/proc/filesystems` analogue by pointing the parameter at a directory inside `tempfile::TempDir` (so `read_to_string` returns `IsADirectory`/`Other` deterministically). It calls `run_preflight_at` with a non-zero `uid` and asserts (a) the error matches `ProcFilesystemsUnreadable { source }`, (b) the rendered message contains the I/O cause and `--allow-no-cgroups`, (c) the message does NOT contain 'boot a newer kernel' or 'cgroup v2 not available'. Wire the new test through `tests/integration.rs` under `mod cgroup_isolation { … }`. Commit with `git commit --no-verify` per testing.md §RED scaffolds — line 189 still routes the I/O error to `NoCgroupV2`, so the new test panics with 'expected ProcFilesystemsUnreadable, got NoCgroupV2'. The existing `preflight_v1_host.rs`, `preflight_no_delegation.rs`, `preflight_missing_cpu.rs`, `preflight_proc_self_cgroup_malformed.rs`, `preflight_reads_enclosing_slice.rs` continue to pass unchanged (the variant addition is non-breaking).",
+          "criteria": [
+            "AC1: New variant `CgroupPreflightError::ProcFilesystemsUnreadable { source: std::io::Error }` exists with a `#[error(\"…\")]` attribute that names the failure cause, embeds the source via `{source}`, surfaces `--allow-no-cgroups`, and explicitly does NOT mention 'boot a newer kernel' or 'cgroup v2 not available on this kernel'.",
+            "AC2: New file `crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_proc_filesystems_unreadable.rs` exists; the test uses a directory-path fixture (cf. `tempfile::TempDir`); the test fails on the buggy code by panicking with 'expected ProcFilesystemsUnreadable, got NoCgroupV2'.",
+            "AC3: The new test is wired through `crates/overdrive-control-plane/tests/integration.rs` under `mod cgroup_isolation { … }` adjacent to the existing `preflight_*` modules.",
+            "AC4: `cargo nextest run -p overdrive-control-plane --features integration-tests --no-run` succeeds on macOS (compile-only gate); commit message clearly marks the RED scaffold state (e.g., `test(control-plane): RED — preflight oracle for procfs I/O error`).",
+            "AC5: `cargo nextest run -p overdrive-control-plane` (default lane, no integration feature) continues to pass — the variant addition does not break unit tests."
+          ],
+          "acceptance_criteria": [
+            "AC1: New variant `CgroupPreflightError::ProcFilesystemsUnreadable { source: std::io::Error }` exists with a `#[error(\"…\")]` attribute that names the failure cause, embeds the source via `{source}`, surfaces `--allow-no-cgroups`, and explicitly does NOT mention 'boot a newer kernel' or 'cgroup v2 not available on this kernel'.",
+            "AC2: New file `crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_proc_filesystems_unreadable.rs` exists; the test uses a directory-path fixture (cf. `tempfile::TempDir`); the test fails on the buggy code by panicking with 'expected ProcFilesystemsUnreadable, got NoCgroupV2'.",
+            "AC3: The new test is wired through `crates/overdrive-control-plane/tests/integration.rs` under `mod cgroup_isolation { … }` adjacent to the existing `preflight_*` modules.",
+            "AC4: `cargo nextest run -p overdrive-control-plane --features integration-tests --no-run` succeeds on macOS (compile-only gate); commit message clearly marks the RED scaffold state (e.g., `test(control-plane): RED — preflight oracle for procfs I/O error`).",
+            "AC5: `cargo nextest run -p overdrive-control-plane` (default lane, no integration feature) continues to pass — the variant addition does not break unit tests."
+          ],
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/cgroup_preflight.rs",
+            "crates/overdrive-control-plane/tests/integration.rs",
+            "crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_proc_filesystems_unreadable.rs"
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_proc_filesystems_unreadable.rs",
+          "scenario_name": "preflight_surfaces_procfs_io_error_not_no_cgroup_v2",
+          "tier": "structural",
+          "time_estimate_hours": 0.5,
+          "estimated_hours": 0.5,
+          "dependencies": [],
+          "quality_gates": [
+            "Compile-only on macOS via `cargo nextest run -p overdrive-control-plane --features integration-tests --no-run`.",
+            "Default lane: `cargo nextest run -p overdrive-control-plane` continues to pass (variant addition is non-breaking).",
+            "Linux runtime via `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests` (new oracle FAILS as expected with the documented panic message; remaining tests PASS).",
+            "Commit shape: `--no-verify` with explicit RED-scaffold marker in the message."
+          ],
+          "deliverables": [
+            "One commit landing the new variant + new regression test in RED state."
+          ],
+          "implementation_scope": {
+            "production": [
+              "crates/overdrive-control-plane/src/cgroup_preflight.rs (add `ProcFilesystemsUnreadable` variant; line 189 unchanged)"
+            ],
+            "tests": [
+              "crates/overdrive-control-plane/tests/integration.rs (mod declaration)",
+              "crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_proc_filesystems_unreadable.rs (new oracle)"
+            ]
+          }
+        },
+        {
+          "id": "01-02",
+          "name": "GREEN — replace line 189 with discrete-failure-mode match; add NotFound v1-host belt-and-braces test",
+          "description": "Replace `let proc_fs = std::fs::read_to_string(proc_filesystems).unwrap_or_default();` at line 189 with the match expression that maps `io::ErrorKind::NotFound` to `String::new()` (fall through to the existing v1-host `NoCgroupV2` branch — `NotFound` IS the v1-host signal on a stripped kernel without procfs entries) and every other `Err(err)` to `return Err(CgroupPreflightError::ProcFilesystemsUnreadable { source: err })`. The downstream `cgroup_v2_available` check is unchanged. Add a belt-and-braces test inline in `preflight_v1_host.rs` named `preflight_treats_missing_proc_filesystems_as_v1_host` that points `proc_filesystems` at a tempdir-relative path that does not exist (so `read_to_string` returns `NotFound`) and asserts `NoCgroupV2` fires (not the new variant). Standard commit (no `--no-verify`) — the RED regression test transitions to GREEN within this commit. Run mutation testing on the file.",
+          "criteria": [
+            "AC1: Line 189 is replaced with a match expression that handles `Ok`, `Err(err) if err.kind() == ErrorKind::NotFound`, and `Err(err)` (the catch-all) — the catch-all returns `CgroupPreflightError::ProcFilesystemsUnreadable { source: err }`.",
+            "AC2: The new regression test `preflight_proc_filesystems_unreadable.rs` from step 01-01 transitions RED → GREEN.",
+            "AC3: New `#[test]` `preflight_treats_missing_proc_filesystems_as_v1_host` lives inline in `preflight_v1_host.rs`, points `proc_filesystems` at a non-existent tempdir-relative path, and asserts `NoCgroupV2` fires (not `ProcFilesystemsUnreadable`).",
+            "AC4: `cargo nextest run -p overdrive-control-plane --features integration-tests --no-run` succeeds on macOS.",
+            "AC5: Existing tests `preflight_v1_host.rs::preflight_refuses_on_cgroup_v1_host`, `preflight_no_delegation.rs`, `preflight_missing_cpu.rs`, `preflight_reads_enclosing_slice.rs`, `preflight_proc_self_cgroup_malformed.rs` all pass unchanged.",
+            "AC6: Mutation testing kill rate ≥80% on the diff via `cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-control-plane --file crates/overdrive-control-plane/src/cgroup_preflight.rs`."
+          ],
+          "acceptance_criteria": [
+            "AC1: Line 189 is replaced with a match expression that handles `Ok`, `Err(err) if err.kind() == ErrorKind::NotFound`, and `Err(err)` (the catch-all) — the catch-all returns `CgroupPreflightError::ProcFilesystemsUnreadable { source: err }`.",
+            "AC2: The new regression test `preflight_proc_filesystems_unreadable.rs` from step 01-01 transitions RED → GREEN.",
+            "AC3: New `#[test]` `preflight_treats_missing_proc_filesystems_as_v1_host` lives inline in `preflight_v1_host.rs`, points `proc_filesystems` at a non-existent tempdir-relative path, and asserts `NoCgroupV2` fires (not `ProcFilesystemsUnreadable`).",
+            "AC4: `cargo nextest run -p overdrive-control-plane --features integration-tests --no-run` succeeds on macOS.",
+            "AC5: Existing tests `preflight_v1_host.rs::preflight_refuses_on_cgroup_v1_host`, `preflight_no_delegation.rs`, `preflight_missing_cpu.rs`, `preflight_reads_enclosing_slice.rs`, `preflight_proc_self_cgroup_malformed.rs` all pass unchanged.",
+            "AC6: Mutation testing kill rate ≥80% on the diff via `cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-control-plane --file crates/overdrive-control-plane/src/cgroup_preflight.rs`."
+          ],
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/cgroup_preflight.rs",
+            "crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_v1_host.rs"
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_proc_filesystems_unreadable.rs",
+          "scenario_name": "preflight_surfaces_procfs_io_error_not_no_cgroup_v2",
+          "tier": "behavioural",
+          "time_estimate_hours": 0.5,
+          "estimated_hours": 0.5,
+          "dependencies": ["01-01"],
+          "quality_gates": [
+            "Compile-only on macOS via `cargo nextest run -p overdrive-control-plane --features integration-tests --no-run`.",
+            "Linux runtime via `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests` — all tests PASS.",
+            "Mutation testing kill rate ≥80% on the diff (file-scoped to `cgroup_preflight.rs`).",
+            "Standard commit shape (no `--no-verify`) — pre-commit hook must pass."
+          ],
+          "deliverables": [
+            "One commit landing the line-189 fix + belt-and-braces NotFound test, transitioning RED to GREEN.",
+            "One mutation-testing run with documented kill rate."
+          ],
+          "implementation_scope": {
+            "production": [
+              "crates/overdrive-control-plane/src/cgroup_preflight.rs (line 189 match; the rest of the function unchanged)"
+            ],
+            "tests": [
+              "crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_v1_host.rs (add second `#[test]` for NotFound → NoCgroupV2)"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

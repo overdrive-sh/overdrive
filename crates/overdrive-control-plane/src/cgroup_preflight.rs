@@ -154,6 +154,41 @@ pub enum CgroupPreflightError {
         #[source]
         source: std::io::Error,
     },
+
+    /// Step 1 — `/proc/filesystems` is unreadable for a reason other
+    /// than absence (`PermissionDenied`, `EIO`, `IsADirectory`, broken
+    /// procfs, /proc not mounted in this container, etc.). `NotFound`
+    /// does NOT trigger this variant — a missing `/proc/filesystems`
+    /// is the v1-host signal and falls through to `NoCgroupV2`.
+    ///
+    /// The Display message names the failure cause and the
+    /// `--allow-no-cgroups` dev escape hatch — and deliberately does
+    /// NOT prescribe "boot a newer kernel", because that is the
+    /// specific misdiagnosis this variant exists to correct.
+    #[error(
+        "could not read /proc/filesystems: {source}.\n\
+        \n\
+        Detected: /proc/filesystems is present but the running process\n\
+        could not read it. This is distinct from cgroup v2 being unavailable\n\
+        on the kernel — fix the procfs access issue and retry.\n\
+        \n\
+        Try one of:\n\
+        \n\
+          1. Verify /proc is mounted and /proc/filesystems is readable\n\
+             by the running UID (a missing /proc mount in a container\n\
+             sandbox is the most common cause).\n\
+          2. Run without cgroup isolation (development only — workloads\n\
+             are unbounded; control plane is not protected):\n\
+               overdrive serve --allow-no-cgroups\n\
+        \n\
+        Documentation: https://docs.overdrive.sh/operations/cgroup-delegation"
+    )]
+    ProcFilesystemsUnreadable {
+        /// I/O error from reading `/proc/filesystems` with a kind
+        /// other than `NotFound`.
+        #[source]
+        source: std::io::Error,
+    },
 }
 
 /// Run the four-step pre-flight check rooted at `cgroup_root` for
