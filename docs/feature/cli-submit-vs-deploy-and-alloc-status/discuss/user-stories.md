@@ -192,17 +192,19 @@ Ana edits `payments.toml` so `exec.command =
 "/usr/local/bin/payments"` (no such binary). She runs
 `overdrive job submit ./payments.toml`. First NDJSON line:
 `Accepted`. Reconciler emits `pending starting (attempt 1)`;
-ProcessDriver returns ENOENT-class error; reconciler emits `failed
-driver: stat /usr/local/bin/payments: no such file or directory`;
-backoff window 5 s; reconciler retries 4 more times, each failing
-identically. After 5 attempts, restart budget exhausted; stream
-closes with `ConvergedFailed { terminal_reason: backoff_exhausted,
-error: "stat /usr/local/bin/payments: no such file or directory"
-}`. CLI prints:
+ExecDriver returns ENOENT-class error; the action shim classifies
+the verbatim text into `TransitionReason::ExecBinaryNotFound { path:
+"/usr/local/bin/payments" }` and writes both `reason` (typed) and
+`detail` (verbatim) into the AllocStatusRow; backoff window 5 s;
+reconciler retries 4 more times, each failing identically. After 5
+attempts, restart budget exhausted; stream closes with
+`ConvergedFailed { terminal_reason: BackoffExhausted { attempts: 5,
+cause: ExecBinaryNotFound { path: "/usr/local/bin/payments" } } }`.
+CLI prints:
 
 ```
 Error: job 'payments-v2' did not converge to running.
-  reason: driver start failed (binary not found)
+  reason: binary not found: /usr/local/bin/payments
   last-event: stat /usr/local/bin/payments: no such file or directory
   reproducer: overdrive alloc status --job payments-v2
 
@@ -224,8 +226,10 @@ exits 1.
 Ana points the spec at a binary that takes 90 seconds to start
 (pathological case). The server-side wall-clock cap is configured
 at 60 seconds. After 60 s, the stream closes with `ConvergedFailed
-{ terminal_reason: timeout, error: "did not converge in 60s" }`.
-CLI prints `did not converge in 60s` and exits 1. The allocation is
+{ terminal_reason: Timeout { after_seconds: 60 } }` — the cap value
+is on the wire as a structured field, not as a free-form error string.
+The CLI renders the prose `did not converge in 60s` from the
+structured `after_seconds` field and exits 1. The allocation is
 still Pending in `alloc status`; the operator can decide to wait
 longer (raising the cap) or fix the spec.
 
@@ -260,10 +264,15 @@ And the CLI exits with code 1
 - [ ] The CLI output names a reproducer command (`alloc status
   --job ...`).
 - [ ] Server wall-clock cap exceeded produces `ConvergedFailed
-  { terminal_reason: timeout, ... }`; CLI exits 1.
-- [ ] The `reason` string in `ConvergedFailed` for a given
-  allocation equals the `last_transition.reason` rendered by `alloc
-  status` for the same allocation, byte-for-byte.
+  { terminal_reason: Timeout { after_seconds: 60 } }`; CLI exits 1
+  (the cap value is on the wire as a structured field).
+- [ ] The `reason` field in streaming `LifecycleTransition` /
+  `ConvergedFailed.terminal_reason.cause` equals the
+  `last_transition.reason` rendered by `alloc status` for the same
+  allocation — byte-for-byte across the **typed payload** (e.g.
+  `data: { path: "/usr/local/bin/payments" }` on
+  `ExecBinaryNotFound`), not just the `kind` discriminator. Same
+  Rust enum on both surfaces; same serde shape.
 
 ### Outcome KPIs
 
@@ -517,10 +526,10 @@ not retrying.
 
 After US-02's broken-binary submit failed, Ana runs `alloc status`.
 Output shows `STATE: Failed`, `Last transition: Pending → Failed
-reason: driver start failed source: driver(process) error: stat
-/usr/local/bin/payments: no such file or directory`, `Restart
-budget: 5 / 5 used (backoff exhausted)`. She knows the platform
-gave up and what to fix.
+reason: binary not found: /usr/local/bin/payments source:
+driver(exec) error: stat /usr/local/bin/payments: no such file or
+directory`, `Restart budget: 5 / 5 used (backoff exhausted)`. She
+knows the platform gave up and what to fix.
 
 #### 3: Pending — capacity exceeded
 
@@ -627,33 +636,45 @@ from the same lineage. AC asserts byte-for-byte equality.
 
 #### 1: Same string in both surfaces — broken binary
 
-After US-02, Ana captures the streaming submit's `ConvergedFailed`
-event: `error: "stat /usr/local/bin/payments: no such file or
-directory"`. She runs `alloc status` and the snapshot's
-`last_transition` shows `error: stat /usr/local/bin/payments: no
-such file or directory` — byte-identical.
+After US-02, Ana captures the streaming submit's last
+`LifecycleTransition` event:
+`reason: { kind: "exec_binary_not_found", data: { path:
+"/usr/local/bin/payments" } }` plus the verbatim driver text in
+`detail`. She runs `alloc status` and the snapshot's
+`last_transition.reason` serialises to the **same typed payload**
+(byte-identical including the `data` object), and `last_transition.detail`
+carries the same verbatim driver text. Equality covers the structured
+`data: { path: ... }` payload, not just the `kind` discriminator —
+single Rust enum on both surfaces guarantees this by construction.
 
 #### 2: Same string — backoff exhaustion
 
 The streaming `ConvergedFailed` carries `terminal_reason:
-backoff_exhausted` and the same driver error string. The snapshot
-shows `Restart budget: 5 / 5 used (backoff exhausted)` (a
-human-readable rendering of the same machine-readable terminal
-reason) AND the same driver error string in the
-`last_transition.error` field.
+TerminalReason::BackoffExhausted { attempts: 5, cause:
+ExecBinaryNotFound { path: "/usr/local/bin/payments" } }`. The
+snapshot's `last_transition.reason` carries the same
+`ExecBinaryNotFound { path: "/usr/local/bin/payments" }` cause
+variant on the per-allocation row (the structural cause that drove
+the terminal). The snapshot also shows `Restart budget: 5 / 5 used
+(backoff exhausted)` — a human-readable rendering derived from the
+`restart_budget` field. Byte-equality across surfaces applies to the
+**cause-class typed payload** on both `terminal_reason.cause` and
+`last_transition.reason`, not just the variant tag.
 
 #### 3: Same string — server timeout
 
-Streaming `ConvergedFailed { terminal_reason: timeout, error: "did
-not converge in 60s" }`. Snapshot shows `Last transition: Pending
-→ ... reason: ... source: reconciler` reflecting the most recent
-transition the reconciler observed; the snapshot does NOT display
-the server-side timeout (the timeout is a streaming-specific
-concern). Acceptable — the streaming surface and the snapshot
-surface have different temporal scopes (point-in-time vs
-event-stream); the SoT discipline applies to the
-*per-transition* `reason` field, not to the streaming-only
-terminal-cap concept.
+Streaming `ConvergedFailed { terminal_reason: Timeout {
+after_seconds: 60 } }` — the cap value is on the wire as a structured
+field; the CLI renders the prose `did not converge in 60s` from
+`after_seconds`, not from a free-form error string. Snapshot shows
+`Last transition: Pending → ... reason: ... source: reconciler`
+reflecting the most recent transition the reconciler observed; the
+snapshot does NOT display the server-side timeout (the timeout is a
+streaming-specific concern, scoped to the request lifetime, not the
+allocation lifetime). Acceptable — the streaming surface and the
+snapshot surface have different temporal scopes (point-in-time vs
+event-stream); the SoT discipline applies to the *per-transition*
+`reason` field, not to the streaming-only terminal-cap concept.
 
 ### UAT Scenarios (BDD)
 
@@ -702,3 +723,12 @@ Then the snapshot's per-row `error` field for allocation A equals E verbatim
 - Implementation: same `String` (or typed `Reason` enum if DESIGN
   prefers) flows through the lineage; no string formatting
   divergence between the two emit sites.
+
+---
+
+## Changelog
+
+| Date | Change |
+|---|---|
+| 2026-04-30 | Initial DISCUSS user-stories. |
+| 2026-04-30 | Cause-class refactor of `TransitionReason` per ADR-0032 §3 Amendment 2026-04-30. US-02 Domain Example #1 rendering changed from `reason: driver start failed (binary not found)` to `reason: binary not found: /usr/local/bin/payments` (cause-class direct rendering); terminal event in same example updated to `BackoffExhausted { attempts: 5, cause: ExecBinaryNotFound { path } }`. US-02 Example #3 timeout rendering updated to structured `Timeout { after_seconds: 60 }`. US-02 AC #5 strengthened — byte-equality covers the typed payload (`data: { path: ... }`), not just the `kind` discriminator. US-05 Example #2 driver source updated `driver(process)` → `driver(exec)` and rendering aligned with cause-class. US-06 Examples #1/#2/#3 rewritten to assert byte-equality of the typed payload across surfaces. |

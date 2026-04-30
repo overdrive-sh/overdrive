@@ -167,7 +167,7 @@ same.
 | `rows[].resources` | `Job.driver`'s `Resources` (Phase 1: pulled from the Job aggregate; Phase 2+: per-alloc when the runtime tracks resize history) | EXTEND — handler reads Job and projects |
 | `rows[].started_at` | First `LogicalTimestamp` where row state transitioned to `Running` | NEW — per-alloc tracking via the lifecycle reconciler view (libSQL `JobLifecycleView` extension) |
 | `rows[].exit_code` | Phase 1 not tracked (the ExecDriver does not currently capture the child's exit status; it tracks lifecycle state only). Field is present-but-`None` until Phase 2 ExecDriver enhancement. | NEW — explicit `None` projection |
-| `rows[].last_transition` | `obs.alloc_status_rows()`-derived row's `reason` + `detail` + the prior row's state for `from` (lifecycle reconciler view caches prior state per alloc) | EXTEND — handler computes from row + view |
+| `rows[].last_transition` | `obs.alloc_status_rows()`-derived row's `reason: Option<TransitionReason>` (cause-class enum carrying typed payload per ADR-0032 §3 amendment 2026-04-30) + `detail: Option<String>` (verbatim driver text not captured by the typed payload) + the prior row's state for `from` (lifecycle reconciler view caches prior state per alloc) | EXTEND — handler computes from row + view |
 | `rows[].error` | `AllocStatusRow.detail` (verbatim driver text or NoCapacity diagnostic) — populated by the action shim per ADR-0032 §4 | EXTEND — direct projection |
 | `restart_budget.used` | `JobLifecycleView::restart_counts.values().sum::<u32>()` (single-replica Phase 1 collapses to one alloc's count) | REUSE — view exists |
 | `restart_budget.max` | `RESTART_BUDGET_MAX = 5` constant | REUSE — Phase 1 hard-coded; Phase 2 makes it per-job-config |
@@ -217,18 +217,42 @@ Restart budget: 0 / 5 used
 
 `reason: driver started` is the human-readable rendering of
 `TransitionReason::Started`; the `(pid 12345)` is the `detail` field
-when present. Mapping:
+when present. **Amended 2026-04-30 in lockstep with ADR-0032 §3
+amendment** — `TransitionReason` is cause-class; failure variants
+carry typed payloads, progress markers stay payload-less. The
+mapping table below is the canonical CLI rendering for every Phase 1
+variant:
 
 | `TransitionReason` variant | Human-readable rendering |
 |---|---|
 | `Scheduling` | `scheduling` |
 | `Starting` | `starting` |
 | `Started` | `driver started` |
-| `DriverStartFailed` | `driver start failed` |
-| `BackoffPending` | `backoff (attempt N)` (N from view) |
-| `BackoffExhausted` | `backoff exhausted` |
-| `Stopped` | `stopped` |
-| `NoCapacity` | `no capacity` |
+| `BackoffPending { attempt }` | `backoff (attempt {attempt})` |
+| `Stopped { by: Operator }` | `stopped (by operator)` |
+| `Stopped { by: Reconciler }` | `stopped` |
+| `ExecBinaryNotFound { path }` | `binary not found: {path}` |
+| `ExecPermissionDenied { path }` | `permission denied: {path}` |
+| `ExecBinaryInvalid { path, kind }` | `binary invalid ({kind}): {path}` |
+| `CgroupSetupFailed { kind, source }` | `cgroup {kind} failed: {source}` |
+| `DriverInternalError { detail }` | `driver internal error: {detail}` |
+| `RestartBudgetExhausted { attempts, last_cause_summary }` | `restart budget exhausted after {attempts} attempts (last: {last_cause_summary})` |
+| `Cancelled { by: Operator }` | `cancelled (by operator)` |
+| `Cancelled { by: Cluster }` | `cancelled (by cluster)` |
+| `NoCapacity { requested, free }` | `no capacity (requested {requested.cpu_milli}mCPU/{requested.memory_bytes}B / free {free.cpu_milli}mCPU/{free.memory_bytes}B)` |
+| `OutOfMemory { peak_bytes, limit_bytes }` (Phase 2) | `OOM-killed (peak {peak_bytes} / limit {limit_bytes})` |
+| `WorkloadCrashedImmediately { exit_code, signal, .. }` (Phase 2) | `crashed (exit {exit_code:?}, signal {signal:?})` |
+
+The `detail: Option<String>` field on `AllocStatusRow` is **no longer
+the primary cause carrier** — cause-specific data lives in the typed
+payload above. `detail` is preserved for verbatim driver text the
+typed payload does not capture (e.g. the raw `errno`-decorated
+`std::io::Error::Display` text). The CLI renderer:
+
+1. emits `reason: <human_readable()>` from the variant;
+2. when `detail` is present, emits a separate `error:` line
+   carrying the verbatim text (matching the Failed-render shape
+   below).
 
 #### Failed (broken-binary regression target)
 
@@ -277,12 +301,22 @@ mode 3.)
 
 `TransitionRecord.reason: TransitionReason` IS the same type as
 `SubmitEvent::LifecycleTransition.reason: TransitionReason`. Both
-surfaces serialise it identically via the same `Serialize` derive.
-Both surfaces source it from the same `AllocStatusRow.reason: Option<TransitionReason>`
-field — the row is the lineage; the streaming endpoint reads it
-through the broadcast `LifecycleEvent`, the snapshot endpoint reads
-it directly. **An integration test asserts byte-for-byte equality** in
-the broken-binary regression case (US-06 AC #4, KPI-04).
+surfaces serialise it identically via the same `Serialize` derive
+— including the **cause-class typed payload** (per ADR-0032 §3
+amendment 2026-04-30): a `LifecycleTransition` carrying
+`reason: ExecBinaryNotFound { path: "/usr/local/bin/payments" }`
+serialises to the same JSON object on the streaming wire as
+`TransitionRecord.reason` does inside the snapshot's `last_transition`
+block. Byte-equality is structural across both wire shapes AND across
+the typed payload — no string drift, no re-stringification.
+
+Both surfaces source it from the same `AllocStatusRow.reason:
+Option<TransitionReason>` field — the row is the lineage; the
+streaming endpoint reads it through the broadcast `LifecycleEvent`,
+the snapshot endpoint reads it directly. **An integration test
+asserts byte-for-byte equality of the serialised JSON in the
+broken-binary regression case (US-06 AC #4, KPI-04)**, including
+the `data: { path: ... }` payload.
 
 ## Considered alternatives
 
@@ -451,3 +485,4 @@ the structured `TransitionReason::NoCapacity` plus the diagnostic
 | Date | Change |
 |---|---|
 | 2026-04-30 | Initial ADR. Decision D2 / D7 from the DESIGN wave; constraints carried from DISCUSS wave-decisions. Slice 01 back-prop completed. Echo peer review pending. |
+| 2026-04-30 | **Amendment** — `TransitionReason` cross-references updated in lockstep with ADR-0032 amendment of the same date. §2 field-source-map row clarifies that `reason` now carries a cause-class typed payload, not just an opaque enum + free-form `detail`. §4 CLI render contract mapping table replaced with the full Phase 1 cause-class variant set; `detail: Option<String>` demoted to "verbatim text not captured by the typed payload." §5 single-source-of-truth text tightened to call out byte-equality across the typed payload, not just the variant tag. Slice 01 back-prop list (in `docs/feature/cli-submit-vs-deploy-and-alloc-status/design/upstream-changes.md`) catalogues consequent updates needed in DISCUSS / DISTILL / roadmap. |

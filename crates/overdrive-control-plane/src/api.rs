@@ -315,30 +315,54 @@ pub struct OverdriveApi;
 /// Streaming `SubmitEvent::ConvergedFailed` terminal-cause discriminator.
 ///
 /// Phase 1 variants per ADR-0032 §3 (additive going forward —
-/// `#[non_exhaustive]`):
+/// `#[non_exhaustive]`).
+///
+/// **Amended 2026-04-30 in lockstep with `TransitionReason`'s cause-
+/// class refactor**: the variants now carry structured payloads. The
+/// inner `cause: TransitionReason` on `BackoffExhausted` and
+/// `DriverError` duplicates the most recent cause-class
+/// `LifecycleTransition.reason` so a CLI rendering only the terminal
+/// line still has structured cause data; the `Timeout` variant carries
+/// the configured cap so renderers can say "did not converge in 60s"
+/// without reading server config.
 ///
 /// | Variant | When emitted by the streaming handler |
 /// |---|---|
-/// | `DriverError` | unrecoverable driver error after one attempt |
-/// | `BackoffExhausted` | restart budget hit (5 attempts) |
-/// | `Timeout` | server wall-clock cap hit |
+/// | `DriverError { cause }` | unrecoverable driver error on a path the reconciler will not retry |
+/// | `BackoffExhausted { attempts, cause }` | restart budget hit (5 attempts in Phase 1) |
+/// | `Timeout { after_seconds }` | server wall-clock cap fired |
 ///
 /// The CLI maps `ConvergedRunning → 0` and `ConvergedFailed → 1` regardless
 /// of the inner `terminal_reason`; the terminal reason controls *rendering*,
 /// not exit code (ADR-0032 §9).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "snake_case")]
+///
+/// Wire shape via `#[serde(tag = "kind", content = "data", rename_all =
+/// "snake_case")]` — same shape as `TransitionReason`.
+///
+/// SCAFFOLD note: the `cause: overdrive_core::TransitionReason` field
+/// references the cause-class enum from `overdrive-core`. The crafter
+/// promotes this scaffold to GREEN in slice 02-02 alongside the
+/// `SubmitEvent` declaration; importing `TransitionReason` here is
+/// already valid because the type is re-exported from
+/// `overdrive_core::transition_reason`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum TerminalReason {
-    /// Streaming handler observed an unrecoverable driver error after
-    /// one attempt where the reconciler will not retry.
-    DriverError,
-    /// Streaming handler observed `restart_count == max` and latest
-    /// row state is Failed.
-    BackoffExhausted,
+    /// Streaming handler observed an unrecoverable driver error on a
+    /// path the reconciler will not retry. `cause` is the cause-class
+    /// `TransitionReason` that originated the terminal failure.
+    DriverError { cause: overdrive_core::TransitionReason },
+    /// Streaming handler observed `restart_count == max` and the latest
+    /// row state is `Failed`. `attempts` is the number of attempts made
+    /// (= `RESTART_BUDGET_MAX` in Phase 1, hard-coded to 5); `cause` is
+    /// the cause-class `TransitionReason` of the final failed attempt.
+    BackoffExhausted { attempts: u32, cause: overdrive_core::TransitionReason },
     /// Streaming handler's wall-clock cap fired before any terminal
-    /// event arrived.
-    Timeout,
+    /// event arrived. `after_seconds` is the configured cap so the CLI
+    /// can render `"did not converge in {after_seconds}s"` without
+    /// reading server config.
+    Timeout { after_seconds: u32 },
 }
 
 /// Wire-shaped projection of the internal `AllocState` enum.

@@ -26,16 +26,35 @@ defect.
 ### `convergence_event` — typed NDJSON line
 
 Source: typed enum in `overdrive-control-plane::api` per ADR-0014.
-Variants (DESIGN names; this is the journey-level shape):
+Top-level variants (locked by ADR-0032 §3 Amendment 2026-04-30):
 
 | Variant | Carries | Emitted when |
 |---|---|---|
 | `Accepted` | `spec_digest`, `intent_key`, `outcome` | First line, after IntentStore commit. |
-| `LifecycleTransition` | `alloc_id`, `from`, `to`, `reason`, `source`, `at` | Each ObservationStore AllocStatusRow transition. |
+| `LifecycleTransition` | `alloc_id`, `from`, `to`, `reason: TransitionReason`, `source`, `at` | Each ObservationStore AllocStatusRow transition. |
 | `ConvergedRunning` | `alloc_id`, `started_at` | Allocation reaches Running and replicas_running ≥ desired. |
-| `ConvergedFailed` | `alloc_id`, `terminal_reason`, `error` | Backoff exhausted, server wall-clock cap hit, or unrecoverable driver error. |
+| `ConvergedFailed` | `alloc_id`, `terminal_reason: TerminalReason`, `error: Option<String>` | Backoff exhausted, server wall-clock cap hit, or unrecoverable driver error. |
 
-`source` is structured (`reconciler` | `driver(process)` | future
+`reason` is the cause-class `TransitionReason` enum from
+`overdrive-core` per ADR-0032 §3 Amendment 2026-04-30. Phase 1 variants:
+
+- **5 progress markers** — `Scheduling`, `Starting`, `Started`,
+  `BackoffPending { attempt }`, `Stopped { by: StoppedBy }`.
+- **9 cause-class failure variants** — `ExecBinaryNotFound { path }`,
+  `ExecPermissionDenied { path }`, `ExecBinaryInvalid { path, kind }`,
+  `CgroupSetupFailed { kind, source }`, `DriverInternalError { detail }`,
+  `RestartBudgetExhausted { attempts, last_cause_summary }`,
+  `Cancelled { by: CancelledBy }`, `NoCapacity { requested, free }`.
+- **2 Phase 2 emit-deferred** (declared for forward-compat; ExecDriver
+  Phase 1 does not currently observe these) — `OutOfMemory { peak_bytes,
+  limit_bytes }`, `WorkloadCrashedImmediately { exit_code, signal,
+  stderr_tail }`.
+
+`terminal_reason` is the structured `TerminalReason` enum:
+`BackoffExhausted { attempts, cause: TransitionReason }`,
+`DriverError { cause: TransitionReason }`, `Timeout { after_seconds }`.
+
+`source` is structured (`reconciler` | `driver(exec)` | future
 driver kinds), not a free string.
 
 Consumers:
@@ -66,21 +85,33 @@ Consumers:
 
 ## Cross-cutting: `transition_reason`
 
-The `reason` string is the load-bearing artifact for the journey's
-"told the truth" promise.
+The cause-class `TransitionReason` enum is the load-bearing artifact
+for the journey's "told the truth" promise — typed payloads, not
+free-form strings.
 
-- **One source**: emitted by the lifecycle reconciler (when reason
-  is reconciler-domain, e.g. `scheduling on local`,
-  `backoff_exhausted`) or by the ProcessDriver via the action shim
-  (when reason is driver-domain, e.g. the verbatim
-  `stat /usr/local/bin/payments: no such file or directory`).
-- **Two consumers**: streaming `LifecycleTransition` and
-  `ConvergedFailed` events; snapshot `last_transition` and per-row
-  `error` field.
+- **One source**: emitted by the lifecycle reconciler (for
+  reconciler-domain causes — `Scheduling`, `Starting`, `BackoffPending`,
+  `BackoffExhausted` (terminal), `NoCapacity { requested, free }`) or
+  written by the action shim (for driver-domain causes — the shim
+  classifies `DriverError::StartRejected.reason` text into a cause-class
+  variant via a small prefix matcher per ADR-0032 §4 amended
+  classification table; e.g. `"No such file or directory"` →
+  `ExecBinaryNotFound { path }`, `"Permission denied"` →
+  `ExecPermissionDenied { path }`, etc.). The verbatim driver text is
+  preserved unchanged in `AllocStatusRow.detail` for audit.
+- **Two consumers**: streaming `LifecycleTransition.reason` and
+  `ConvergedFailed.terminal_reason.cause`; snapshot
+  `last_transition.reason` and per-row `error` field.
 
-Drift between the two consumption surfaces is a defect — covered by
-explicit AC and an `integration_validation.shared_artifact_consistency`
-entry on the journey YAML.
+Both surfaces serialise from the **same Rust enum** — byte-equality
+across surfaces extends to the cause-class typed payload (`data: { path }`
+on `ExecBinaryNotFound`, `data: { attempts, cause: { kind, data } }` on
+`BackoffExhausted`, etc.), not just the `kind` discriminator. Drift
+between the two consumption surfaces is structurally impossible by
+construction; an integration test asserts byte-equality of the typed
+payload as the regression-target — covered by explicit AC and an
+`integration_validation.shared_artifact_consistency` entry on the
+journey YAML.
 
 ---
 
@@ -92,9 +123,10 @@ phase-1-first-workload step 5 introduced it. This feature exposes it
 on the wire shape of `alloc_status_snapshot` (and the snapshot is the
 ONLY surface it crosses; the streaming event does not need to carry
 the full budget structure on every transition — the terminal
-`ConvergedFailed` event with `terminal_reason: backoff_exhausted` is
-the streaming surface, and the operator pivots to `alloc status` for
-the count if curious).
+`ConvergedFailed { terminal_reason: BackoffExhausted { attempts,
+cause } }` event carries the count and the structural cause on the
+streaming surface, and the operator pivots to `alloc status` for the
+human-readable `5 / 5 used (backoff exhausted)` rendering if curious).
 
 ---
 
@@ -104,3 +136,12 @@ the count if curious).
 |---|---|---|
 | `commit_index` | (DROPPED per ADR-0020) | Not used in any wire shape this feature touches. |
 | `cgroup_path` | ProcessDriver — phase-1-first-workload step 6 | Not surfaced in streaming or snapshot. Visible via `systemctl status` for debugging. Out of scope here. |
+
+---
+
+## Changelog
+
+| Date | Change |
+|---|---|
+| 2026-04-30 | Initial DISCUSS shared-artifacts registry. |
+| 2026-04-30 | Cause-class refactor of `TransitionReason` per ADR-0032 §3 Amendment 2026-04-30. `### convergence_event` variant catalogue updated from journey-level deferral ("DESIGN names") to the locked Phase 1 cause-class shape (5 progress markers + 9 cause-class + 2 Phase 2 emit-deferred). `## Cross-cutting: transition_reason` paragraph rewritten — typed payloads, not free-form strings; classifier described per ADR-0032 §4 amended; byte-equality assertion now covers the typed payload, not just the `kind` discriminator. |

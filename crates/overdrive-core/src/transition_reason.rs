@@ -11,37 +11,183 @@
 // surface serialise the SAME variant; byte-equality across surfaces is a
 // structural property guaranteed by the type system, not by discipline.
 //
-// The action shim writes `Option<TransitionReason>` into
-// `AllocStatusRow.reason` as part of the row-write amendment in slice 01;
-// the field-extension on `AllocStatusRow` is deferred from this DISTILL
-// scaffold to the crafter's GREEN-phase work because adding a field to a
-// load-bearing type breaks compilation across the workspace, which would
-// classify the scaffold as BROKEN rather than RED. See
-// `docs/feature/cli-submit-vs-deploy-and-alloc-status/distill/wave-decisions.md`
-// DWD-03.
+// Variant taxonomy (ADR-0032 §3 amended 2026-04-30, cause-class refactor):
+// the enum carries TWO classes of variant:
+//
+//   1. **Progress markers** — payload-less, name the lifecycle phase
+//      (`Scheduling`, `Starting`, `Started`, `BackoffPending`, `Stopped`).
+//      Emitted on healthy progress.
+//
+//   2. **Cause-class failure variants** — typed payloads naming the
+//      structured cause (`ExecBinaryNotFound { path }`,
+//      `ExecPermissionDenied { path }`, etc.). Emitted on failure
+//      transitions; the payload IS the cause-specific data the operator
+//      needs and a free-form `detail: String` cannot encode without
+//      stringly-typing.
+//
+// The enum is NOT `Copy` (cause-class variants carry `String` /
+// non-`Copy` payloads) and NOT `Hash` (same reason). Consumers that
+// previously relied on `Copy` either clone (cheap for progress markers,
+// owned-data for cause variants) or take by reference. The action shim
+// is the single writer of `AllocStatusRow.reason` (cf. ADR-0023); the
+// reconciler emits the variant on `Action::*` payloads at action emit
+// time.
 
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 /// Structured reason for a lifecycle transition.
 ///
-/// Phase 1 variants per ADR-0032 §3 (additive going forward — `#[non_exhaustive]`):
+/// Phase 1 variants per ADR-0032 §3 (additive going forward — `#[non_exhaustive]`).
+/// `#[serde(tag = "kind", content = "data", rename_all = "snake_case")]`
+/// gives a self-describing wire shape: `{"kind": "exec_binary_not_found",
+/// "data": {"path": "/usr/local/bin/payments"}}` for cause-class variants;
+/// `{"kind": "scheduling"}` for progress markers (serde elides the empty
+/// `data` for unit variants by default).
 ///
-/// | Variant | Emitted by |
-/// |---|---|
-/// | `Scheduling` | reconciler — placement decided, action emitted |
-/// | `Starting` | reconciler — driver invocation underway |
-/// | `Started` | driver(exec) — driver returned `Ok(handle)` |
-/// | `DriverStartFailed` | driver(exec) — driver returned `StartRejected` |
-/// | `BackoffPending` | reconciler — holding off restart |
-/// | `BackoffExhausted` | reconciler — restart budget hit |
-/// | `Stopped` | reconciler — observed terminal stop |
-/// | `NoCapacity` | reconciler — scheduler returned `NoCapacity` |
+/// | Variant | Class | Emitted by | Phase 1 emit? |
+/// |---|---|---|---|
+/// | `Scheduling` | progress | reconciler — placement decided, action emitted | yes |
+/// | `Starting` | progress | reconciler — driver invocation underway | yes |
+/// | `Started` | progress | driver(exec) — driver returned `Ok(handle)` | yes |
+/// | `BackoffPending { attempt }` | progress | reconciler — holding off restart | yes |
+/// | `Stopped { by }` | progress | reconciler — observed terminal stop | yes |
+/// | `ExecBinaryNotFound { path }` | cause | `ExecDriver` — `spawn(2)` ENOENT | yes |
+/// | `ExecPermissionDenied { path }` | cause | `ExecDriver` — `spawn(2)` EACCES | yes |
+/// | `ExecBinaryInvalid { path, kind }` | cause | `ExecDriver` — `spawn(2)` ENOEXEC / ELIBBAD | yes |
+/// | `CgroupSetupFailed { kind, source }` | cause | `ExecDriver` — cgroup mkdir / write failure | yes |
+/// | `DriverInternalError { detail }` | cause | `ExecDriver` — uncategorised driver failure | yes |
+/// | `RestartBudgetExhausted { attempts, last_cause_summary }` | cause | reconciler — restart budget hit | yes |
+/// | `Cancelled { by }` | cause | reconciler — operator stop intent observed | yes |
+/// | `NoCapacity { requested, free }` | cause | reconciler — scheduler returned `NoCapacity` | yes |
+/// | `OutOfMemory { peak_bytes, limit_bytes }` | cause | `ExecDriver` — cgroup OOM-killed | NO — Phase 2 |
+/// | `WorkloadCrashedImmediately { exit_code, signal, stderr_tail }` | cause | `ExecDriver` — post-spawn exit-code observation | NO — Phase 2 |
 ///
-/// Verbatim driver text (e.g. `"stat /no/such: no such file or directory"`)
-/// lives in the row's `detail: Option<String>` field, NOT in this enum.
-/// This separation is intentional: the enum carries the structured class;
-/// the detail carries opaque diagnostic text.
+/// **Phase 2 emit-deferred variants**: `OutOfMemory` and
+/// `WorkloadCrashedImmediately` require driver observability the Phase 1
+/// `ExecDriver` does not have (cgroup OOM-killed event subscription;
+/// post-spawn exit-code wait-and-classify). The variants are defined now
+/// so the wire shape is forward-stable; the driver emits them in Phase 2.
+/// This mirrors the `exit_code: Option<i32>` field on `AllocStatusRowBody`
+/// (always `None` in Phase 1; populated in Phase 2 — see ADR-0033 §2).
+///
+/// **Cause-class payloads carry typed cause-specific data**, NOT a
+/// free-form `detail: String`. The previous state-class shape relied on
+/// `AllocStatusRow.detail: Option<String>` to encode the cause, which
+/// stringly-typed every renderer and forced re-parsing on every read.
+/// The cause-class refactor moves that data into the type system. The
+/// `detail` field on the row remains for verbatim driver text the
+/// payload does not capture (e.g. the raw `errno`-decorated message
+/// from `std::io::Error::Display`).
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    ToSchema,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[serde(tag = "kind", content = "data", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum TransitionReason {
+    // -----------------------------------------------------------------
+    // Progress markers (payload-less or minimal payload)
+    // -----------------------------------------------------------------
+    /// Reconciler picked a placement; action was emitted.
+    Scheduling,
+    /// Driver invocation underway.
+    Starting,
+    /// Driver returned `Ok(handle)`.
+    Started,
+    /// Reconciler holding off restart per backoff window.
+    /// `attempt` is the 1-indexed retry number that will fire when the
+    /// backoff elapses (matches `JobLifecycleView::restart_counts + 1`).
+    BackoffPending { attempt: u32 },
+    /// Reconciler observed terminal stop. `by` carries who initiated:
+    /// `"operator"` for explicit stop intent, `"reconciler"` for
+    /// converged terminal state.
+    Stopped { by: StoppedBy },
+
+    // -----------------------------------------------------------------
+    // Cause-class failure variants (Phase 1 ExecDriver-observable)
+    // -----------------------------------------------------------------
+    /// `spawn(2)` returned ENOENT for the configured binary path.
+    /// Replaces the previous state-class `DriverStartFailed` for the
+    /// missing-binary case; the broken-binary regression target
+    /// (US-02 KPI-02) emits this variant.
+    ExecBinaryNotFound { path: String },
+    /// `spawn(2)` returned EACCES — the binary exists but is not
+    /// executable by the running uid.
+    ExecPermissionDenied { path: String },
+    /// `spawn(2)` returned ENOEXEC / ELIBBAD / similar — the file is
+    /// not a valid executable for this kernel/architecture.
+    /// `kind` carries the OS-reported sub-cause (e.g. `"not_executable"`,
+    /// `"bad_elf"`, `"wrong_arch"`).
+    ExecBinaryInvalid { path: String, kind: String },
+    /// Cgroup setup failed (scope mkdir, PID enrolment, limit write).
+    /// `kind` is one of `"create_scope"`, `"place_pid"`,
+    /// `"write_limits"`; `source` is the verbatim `std::io::Error`
+    /// `Display`.
+    CgroupSetupFailed { kind: String, source: String },
+    /// Driver returned an uncategorised failure that did not fit any
+    /// of the more specific cause variants. Falls back on the verbatim
+    /// driver `Display` text in `detail`. Operators seeing this variant
+    /// have a signal to file an issue — the driver should grow a more
+    /// specific variant.
+    DriverInternalError { detail: String },
+    /// Reconciler hit restart budget; will not emit further restart
+    /// actions for this alloc id. `last_cause_summary` carries the
+    /// `human_readable()` rendering of the most recent failure cause-
+    /// variant the reconciler observed, so the operator sees both
+    /// "we gave up" and "this is what kept failing" in one transition.
+    /// `attempts` is the count of attempts made (= the budget max in
+    /// Phase 1, hard-coded to 5).
+    ///
+    /// **Why `String` and not `Box<TransitionReason>`**: rkyv's
+    /// `Archive` derive cannot resolve a recursive enum — the
+    /// archived-size computation overflows. The reconciler renders the
+    /// prior cause via `human_readable()` at observe time; the
+    /// rendered prose IS the auditable artifact, and the structured
+    /// per-attempt history (cause-of-each-attempt) lives in the
+    /// reconciler's private libSQL view (`NextView`), not on the wire.
+    /// The wire only carries the terminal "we gave up because of X"
+    /// summary.
+    RestartBudgetExhausted { attempts: u32, last_cause_summary: String },
+    /// Operator submitted a stop intent and the reconciler converged
+    /// the allocation to the terminal state in response.
+    /// `by` distinguishes operator stop from cluster-driven stop
+    /// (e.g. node drain — Phase 2+).
+    Cancelled { by: CancelledBy },
+    /// Scheduler returned `NoCapacity`. Carries the requested vs free
+    /// resource envelope at the time of the placement attempt; the
+    /// previous string-formatted "requested X / free Y" diagnostic
+    /// becomes typed structured data.
+    NoCapacity { requested: ResourceEnvelope, free: ResourceEnvelope },
+
+    // -----------------------------------------------------------------
+    // Cause-class failure variants (Phase 2 emit-deferred)
+    // -----------------------------------------------------------------
+    /// Cgroup OOM-killed the workload. Requires Phase 2 `ExecDriver`
+    /// cgroup-events subscription; defined now for wire-shape forward-
+    /// compatibility.
+    OutOfMemory { peak_bytes: u64, limit_bytes: u64 },
+    /// Workload exited within the post-spawn settle window. Requires
+    /// Phase 2 `ExecDriver` post-spawn `wait()` + classification;
+    /// defined now for wire-shape forward-compatibility. The
+    /// `exit_code` field on `AllocStatusRowBody` is the snapshot
+    /// counterpart (also Phase-2-populated).
+    WorkloadCrashedImmediately {
+        exit_code: Option<i32>,
+        signal: Option<u8>,
+        stderr_tail: Option<String>,
+    },
+}
+
+/// Initiator of a `Stopped` transition.
 #[derive(
     Debug,
     Clone,
@@ -58,45 +204,126 @@ use utoipa::ToSchema;
 )]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
-pub enum TransitionReason {
-    /// Reconciler picked a placement; action was emitted.
-    Scheduling,
-    /// Driver invocation underway.
-    Starting,
-    /// Driver returned `Ok(handle)`.
-    Started,
-    /// Driver returned `StartRejected`. Verbatim driver text lives in
-    /// the row's `detail` field; this variant only signals the class.
-    DriverStartFailed,
-    /// Reconciler holding off restart per backoff window.
-    BackoffPending,
-    /// Reconciler hit restart budget; will not emit further restart
-    /// actions for this alloc id.
-    BackoffExhausted,
-    /// Reconciler observed terminal stop (operator stop intent, or
-    /// converged terminal state).
-    Stopped,
-    /// Scheduler returned `NoCapacity`. Verbatim "requested X / free Y"
-    /// text lives in the row's `detail`.
-    NoCapacity,
+pub enum StoppedBy {
+    /// Operator submitted explicit stop intent.
+    Operator,
+    /// Reconciler observed terminal convergence (e.g. clean exit).
+    Reconciler,
+}
+
+/// Initiator of a `Cancelled` transition.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    ToSchema,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum CancelledBy {
+    /// Operator submitted explicit stop intent.
+    Operator,
+    /// Cluster-driven cancellation (Phase 2+: node drain, eviction).
+    Cluster,
+}
+
+/// Resource envelope carried by the `NoCapacity` cause variant.
+///
+/// Mirrors the production `Resources` shape from
+/// `overdrive_core::traits::driver` but is defined here to keep the
+/// `TransitionReason` self-contained without pulling the full driver
+/// trait surface into wire-typed contexts. The crafter wires the
+/// `From<&Resources> for ResourceEnvelope` projection in slice 01
+/// GREEN.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    Serialize,
+    Deserialize,
+    ToSchema,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ResourceEnvelope {
+    pub cpu_milli: u32,
+    pub memory_bytes: u64,
 }
 
 impl TransitionReason {
     /// Human-readable rendering for the snapshot's `Last transition:`
     /// block (ADR-0033 §4 mapping table). The streaming surface
-    /// serialises the `snake_case` discriminator via serde; the CLI
-    /// renderer maps the enum to this human-readable shape.
+    /// serialises the `snake_case` discriminator + structured payload
+    /// via serde; the CLI renderer maps the enum to this human-readable
+    /// shape on the snapshot side AND on the streaming-line render side
+    /// (operators see the same prose in both surfaces).
     ///
-    /// The bodies below MUST remain panicking under this scaffold.
-    /// The crafter replaces the panic with the real mapping in slice
-    /// 01 GREEN.
+    /// Returns `String` rather than `&'static str` because cause-class
+    /// variants interpolate their payloads (`"binary not found:
+    /// /usr/local/bin/payments"`); progress markers return owned copies
+    /// of static strings to keep the return type uniform.
+    ///
+    /// The body MUST remain panicking under this scaffold. The crafter
+    /// replaces the panic with the real mapping in slice 01 GREEN.
+    /// Reference rendering shapes (per ADR-0033 §4 amendment 2026-04-30):
+    ///
+    /// | Variant | Rendering |
+    /// |---|---|
+    /// | `Scheduling` | `"scheduling"` |
+    /// | `Starting` | `"starting"` |
+    /// | `Started` | `"driver started"` |
+    /// | `BackoffPending { attempt }` | `format!("backoff (attempt {attempt})")` |
+    /// | `Stopped { by: Operator }` | `"stopped (by operator)"` |
+    /// | `Stopped { by: Reconciler }` | `"stopped"` |
+    /// | `ExecBinaryNotFound { path }` | `format!("binary not found: {path}")` |
+    /// | `ExecPermissionDenied { path }` | `format!("permission denied: {path}")` |
+    /// | `ExecBinaryInvalid { path, kind }` | `format!("binary invalid ({kind}): {path}")` |
+    /// | `CgroupSetupFailed { kind, source }` | `format!("cgroup {kind} failed: {source}")` |
+    /// | `DriverInternalError { detail }` | `format!("driver internal error: {detail}")` |
+    /// | `RestartBudgetExhausted { attempts, last_cause_summary }` | `format!("restart budget exhausted after {attempts} attempts (last: {last_cause_summary})")` |
+    /// | `Cancelled { by: Operator }` | `"cancelled (by operator)"` |
+    /// | `Cancelled { by: Cluster }` | `"cancelled (by cluster)"` |
+    /// | `NoCapacity { requested, free }` | `format!("no capacity (requested {requested:?} / free {free:?})")` |
+    /// | `OutOfMemory { peak_bytes, limit_bytes }` | `format!("OOM-killed (peak {peak_bytes} / limit {limit_bytes})")` |
+    /// | `WorkloadCrashedImmediately { exit_code, signal, .. }` | `format!("crashed (exit {exit_code:?}, signal {signal:?})")` |
     #[must_use]
-    pub fn human_readable(self) -> &'static str {
+    pub fn human_readable(&self) -> String {
         // RED scaffold — replaced by the real mapping during DELIVER
-        // slice 01. The crafter wires per-variant string literals from
-        // ADR-0033 §4 ("scheduling", "starting", "driver started",
-        // "driver start failed", "backoff (attempt N)",
-        // "backoff exhausted", "stopped", "no capacity").
+        // slice 01. The crafter wires per-variant rendering from the
+        // table above.
+        let _ = self;
+        panic!("Not yet implemented -- RED scaffold")
+    }
+
+    /// Returns `true` for cause-class variants (failure transitions);
+    /// `false` for progress markers.
+    ///
+    /// Useful for renderers that distinguish "tell me the phase" from
+    /// "tell me what went wrong." The streaming `LifecycleTransition`
+    /// line carries either class; the snapshot's `last_transition`
+    /// renders both with the same `human_readable()` output but the
+    /// CLI's `Error:` block in `submit` only fires on cause-class
+    /// terminal events.
+    ///
+    /// The body MUST remain panicking under this scaffold.
+    #[must_use]
+    pub fn is_failure(&self) -> bool {
+        // RED scaffold — replaced by the real mapping during DELIVER
+        // slice 01. Match arms: progress markers (Scheduling, Starting,
+        // Started, BackoffPending, Stopped) return false; everything
+        // else returns true.
         let _ = self;
         panic!("Not yet implemented -- RED scaffold")
     }

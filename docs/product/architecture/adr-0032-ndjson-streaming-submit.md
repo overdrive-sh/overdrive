@@ -132,52 +132,128 @@ pub enum SubmitEvent {
 
 ### 3. Structured reason types
 
+**Amended 2026-04-30**: `TransitionReason` is **cause-class** —
+failure variants carry typed payloads naming the structured cause;
+progress markers retain their phase-naming form. The enum is no
+longer `Copy + Hash` (cause-class payloads include `String` /
+non-`Copy` data) and `Box<TransitionReason>` is rejected for any
+recursive shape (rkyv `Archive` cannot resolve recursion). See
+`Amendment 2026-04-30` at the foot of this ADR for the full
+rationale; the original state-class shape (`DriverStartFailed`,
+`BackoffExhausted`, `Stopped`, `NoCapacity` — all unit variants)
+is now the rejected alternative captured under `Alternative D`.
+
 ```rust
 // in overdrive-core (so both action shim and reconciler can produce);
 // re-exported through overdrive-control-plane::api with ToSchema.
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema,
+/// Tagged-payload wire shape: serde emits
+///   {"kind":"scheduling"}                                              for unit
+///   {"kind":"exec_binary_not_found","data":{"path":"/usr/local/..."}}  for cause
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema,
          rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum TransitionReason {
+    // --- Progress markers (payload-less or minimal payload) ----------
     /// Reconciler picked a placement; action was emitted.
     Scheduling,
     /// Driver invocation underway.
     Starting,
     /// Driver returned `Ok(handle)`.
     Started,
-    /// Driver returned `StartRejected`. Verbatim driver text lives in
-    /// the row's `detail` field; this enum variant only signals "the
-    /// reason class is driver start failure".
-    DriverStartFailed,
-    /// Reconciler holding off restart per backoff window.
-    BackoffPending,
-    /// Reconciler hit restart budget; will not emit further restart
-    /// actions for this alloc id.
-    BackoffExhausted,
-    /// Reconciler observed terminal stop (operator stop intent, or
-    /// converged terminal state).
-    Stopped,
-    /// Scheduler returned `NoCapacity`. Verbatim "requested X / free Y"
-    /// text lives in the row's `detail`.
-    NoCapacity,
+    /// Reconciler holding off restart per backoff window. `attempt`
+    /// is the 1-indexed retry that fires when the backoff elapses.
+    BackoffPending { attempt: u32 },
+    /// Reconciler observed terminal stop. `by` distinguishes operator
+    /// stop intent from converged terminal state.
+    Stopped { by: StoppedBy },
+
+    // --- Cause-class failure variants (Phase 1 ExecDriver-observable)-
+    /// `spawn(2)` returned ENOENT. Replaces the old `DriverStartFailed`
+    /// for the missing-binary case (US-02 KPI-02 regression target).
+    ExecBinaryNotFound { path: String },
+    /// `spawn(2)` returned EACCES — binary exists but is not executable.
+    ExecPermissionDenied { path: String },
+    /// `spawn(2)` returned ENOEXEC / ELIBBAD — binary is invalid for
+    /// this kernel/architecture. `kind` ∈ {"not_executable","bad_elf",
+    /// "wrong_arch"}.
+    ExecBinaryInvalid { path: String, kind: String },
+    /// Cgroup setup failed (mkdir, place_pid, write_limits). `source`
+    /// carries the verbatim `std::io::Error` Display text.
+    CgroupSetupFailed { kind: String, source: String },
+    /// Uncategorised driver failure. Falls back on verbatim Display.
+    /// Operators seeing this signal a missing specific variant — the
+    /// driver should grow one.
+    DriverInternalError { detail: String },
+    /// Reconciler hit restart budget. `last_cause_summary` is the
+    /// `human_readable()` rendering of the most recent cause variant
+    /// the reconciler observed (rendered at observe time — `Box<Self>`
+    /// is rejected because rkyv `Archive` cannot resolve recursive
+    /// types). Per-attempt history lives in reconciler private libSQL.
+    RestartBudgetExhausted { attempts: u32, last_cause_summary: String },
+    /// Operator submitted stop intent and the reconciler converged the
+    /// allocation. `by` ∈ {Operator, Cluster}; Cluster is Phase 2+.
+    Cancelled { by: CancelledBy },
+    /// Scheduler returned `NoCapacity`. Carries typed requested / free
+    /// envelopes — replaces the previous string-formatted diagnostic.
+    NoCapacity { requested: ResourceEnvelope, free: ResourceEnvelope },
+
+    // --- Cause-class failure variants (Phase 2 emit-deferred) --------
+    /// Cgroup OOM-killed. Phase 2 emit (requires cgroup-events
+    /// subscription); defined now for wire-shape forward-compat.
+    OutOfMemory { peak_bytes: u64, limit_bytes: u64 },
+    /// Workload exited within post-spawn settle window. Phase 2 emit
+    /// (requires post-spawn `wait()` + classification); defined now.
+    /// Mirrors the `exit_code: Option<i32>` field on
+    /// `AllocStatusRowBody` (also Phase-2-populated, see ADR-0033 §2).
+    WorkloadCrashedImmediately {
+        exit_code:   Option<i32>,
+        signal:      Option<u8>,
+        stderr_tail: Option<String>,
+    },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+/// Initiator of a `Stopped` transition. Distinct enum (not a String
+/// field) so the renderer dispatches on a closed set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize,
+         ToSchema, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]
+pub enum StoppedBy { Operator, Reconciler }
+
+/// Initiator of a `Cancelled` transition.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize,
+         ToSchema, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum CancelledBy { Operator, Cluster }
+
+/// Resource envelope carried by the `NoCapacity` cause variant. Mirrors
+/// `traits::driver::Resources` but defined here so `TransitionReason`
+/// is self-contained at the wire-typed boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize,
+         ToSchema, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct ResourceEnvelope { pub cpu_milli: u32, pub memory_bytes: u64 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "kind", content = "data", rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum TerminalReason {
-    /// Streaming handler observed an unrecoverable driver error after
-    /// one attempt where the reconciler will not retry (e.g. validation
-    /// error returned by the driver pre-spawn).
-    DriverError,
     /// Streaming handler observed `restart_count == max` and latest
-    /// row state is Failed.
-    BackoffExhausted,
+    /// row state is Failed. The inner `cause` carries the cause-class
+    /// `TransitionReason` of the final failed attempt — duplicating
+    /// the most recent `LifecycleTransition.reason` so a CLI rendering
+    /// only the terminal line still has structured cause data.
+    BackoffExhausted { attempts: u32, cause: TransitionReason },
+    /// Streaming handler observed an unrecoverable driver error on a
+    /// path the reconciler will not retry. The inner `cause` is the
+    /// originating cause-class variant.
+    DriverError { cause: TransitionReason },
     /// Streaming handler's wall-clock cap fired before any terminal
-    /// event arrived.
-    Timeout,
+    /// event arrived. Carries the configured cap so CLI render can
+    /// say "did not converge in 60s" without re-derivation.
+    Timeout { after_seconds: u32 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -223,11 +299,39 @@ pub struct AllocStatusRow {
 ```
 
 The action shim (per ADR-0023) is the single writer of this row. It
-constructs both fields at the point of writing — for driver-domain
-reasons (`DriverError::StartRejected.reason` becomes `detail`; the
-enum variant becomes `Started` or `DriverStartFailed`); for
-reconciler-domain reasons the reconciler emits the variant in the
-`Action::*` payload and the shim threads it through.
+constructs both fields at the point of writing.
+
+For driver-domain reasons the shim **classifies the
+`DriverError::StartRejected.reason` text into a cause-class variant**
+at write time — the verbatim text becomes `detail` (preserved for
+audit), AND the typed cause becomes the enum variant. The
+classification is a small string-prefix matcher run inside the
+shim against the verbatim driver text:
+
+| Prefix substring (verbatim driver text) | `TransitionReason` variant |
+|---|---|
+| `"spawn ..."` containing `"No such file or directory"` (ENOENT) | `ExecBinaryNotFound { path }` |
+| `"spawn ..."` containing `"Permission denied"` (EACCES) | `ExecPermissionDenied { path }` |
+| `"spawn ..."` containing `"Exec format error"` (ENOEXEC) | `ExecBinaryInvalid { path, kind: "not_executable" }` |
+| `"create workload scope: ..."` | `CgroupSetupFailed { kind: "create_scope", source }` |
+| `"place pid in scope: ..."` | `CgroupSetupFailed { kind: "place_pid", source }` |
+| Any other `StartRejected.reason` | `DriverInternalError { detail }` |
+
+The shim parses the path out of the `"spawn <path>: ..."` prefix the
+ExecDriver constructs (cf. `crates/overdrive-worker/src/exec_driver.rs`
+`start_rejected(format!("spawn {}: {err}", spec.command))`). On the
+happy path the variant is `Started` (no payload) and `detail` is
+`None`. For reconciler-domain reasons the reconciler emits the cause-
+class variant directly on the `Action::*` payload and the shim
+threads it through verbatim — `NoCapacity { requested, free }` and
+`RestartBudgetExhausted { attempts, last_cause_summary }` originate
+in the reconciler.
+
+**Future-proofing**: when Phase 2 ExecDriver gains structured error
+classes (rather than `String` reasons), the shim's classification
+table collapses to a `From<DriverError> for TransitionReason` impl
+and the prefix-matching logic deletes. The intermediate string-prefix
+shape is a Phase 1 cost the cause-class refactor pays once.
 
 The streaming endpoint reads `reason` + `detail` off the
 `LifecycleEvent` broadcast payload (which is constructed from the row
@@ -239,8 +343,12 @@ The `Action` enum gains `reason: TransitionReason` on
 `StartAllocation`, `RestartAllocation`, `StopAllocation` so the
 reconciler can declare its rationale at action emit time. Phase 1
 defaults: `Scheduling` for first start, `Scheduling` for restart
-(driver outcome refines to `Started` / `DriverStartFailed` post-call),
-`Stopped` for stop. Future reconcilers can refine.
+(driver outcome refines to `Started` on success or to a cause-class
+variant on `DriverError::StartRejected` per the classification table
+above), `Stopped { by: Reconciler }` or `Stopped { by: Operator }`
+on stop depending on whether the stop intent was operator-driven.
+Future reconcilers (right-sizing, cert-rotation) extend the variant
+set additively under `#[non_exhaustive]`.
 
 ### 5. `AllocState::Failed` variant addition
 
@@ -511,17 +619,42 @@ at an already-side-effecting layer. Push-via-broadcast also avoids
 the from-state derivation cost: the shim already knows the prior
 state via `find_prior_alloc_row`.
 
-### Alternative D — Discriminated-union event enum (Call A2)
+### Alternative D — State-class `TransitionReason` (originally A1, retired 2026-04-30)
 
-**Rejected.** Splitting `LifecycleTransition` into
-`ExecFailed { detail }`, `OOMKilled { ... }`,
-`RestartBudgetExhausted { ... }`, `CgroupFailed { ... }` etc. would
-balloon the top-level variant count to ~10 and force the CLI's
-exit-code dispatch to enumerate every cause. The CLI's actual
-dispatch is `Running → 0` / `Failed → 1` / pre-`Accepted` error → 2;
-the cause is a *rendering* concern. A1 (flat enum + structured
-`reason` field) keeps the dispatch shape independent of the cause
-taxonomy.
+**Rejected — was the initial 2026-04-30 decision; superseded by the
+Amendment 2026-04-30 below.** The original variant set was unit-only
+and named the *lifecycle phase* rather than the cause:
+`Scheduling`, `Starting`, `Started`, `DriverStartFailed`,
+`BackoffPending`, `BackoffExhausted`, `Stopped`, `NoCapacity`. Cause-
+specific data (binary path, errno class, cgroup setup stage,
+requested-vs-free capacity, OOM peak vs limit) was relegated to a
+free-form `detail: Option<String>` field on the row.
+
+Two structural problems forced the retirement:
+
+1. **The cause taxonomy belongs in the type system, not in opaque
+   strings.** Every renderer that distinguished "binary not found"
+   from "permission denied" had to re-parse the `detail` string.
+   Type erasure at the wire boundary defeats the [C6] single-source-
+   of-truth pin: the typed enum agreed across surfaces, but the
+   actual *cause* drifted because both surfaces re-stringified
+   independently.
+2. **`DriverStartFailed` collapsed five distinguishable failure
+   modes.** ENOENT, EACCES, ENOEXEC, cgroup setup failure, and
+   uncategorised driver error all serialised to `kind:
+   "driver_start_failed"`; operators got the same label for every
+   class. The cause-class refactor lifts the distinction into the
+   variant.
+
+Splitting the top-level *event* enum into per-cause variants —
+`SubmitEvent::ExecFailed { detail }`, `SubmitEvent::OOMKilled
+{ ... }` — was *also* rejected (originally as A2 and remains
+rejected): the CLI's exit-code dispatch is `Running → 0` /
+`Failed → 1` / pre-`Accepted` error → 2, never branched on the
+cause. The cause is a *rendering* concern, not an event-type one.
+The current shape keeps `SubmitEvent` flat (4 top-level variants)
+and pushes the cause taxonomy down into `TransitionReason`'s
+payload — which is the right layer.
 
 ### Alternative E — Two-level event with `Outcome { kind, detail }` (Call A3)
 
@@ -681,8 +814,76 @@ supported by the row-schema single-source-of-truth.
   documented at `https://github.com/ndjson/ndjson-spec`.
 - OpenAPI 3.1 spec on multiple `content` types per response.
 
+## Amendment 2026-04-30 — `TransitionReason` is cause-class, not state-class
+
+**Trigger**: post-acceptance review the user surfaced the cost of
+`detail: Option<String>` carrying cause-specific data the type system
+should own. The original `[D1]` variant set named the lifecycle phase
+(`Scheduling` / `Starting` / `Started` / `DriverStartFailed` / ...);
+cause-specific information (binary path, errno class, cgroup stage,
+requested-vs-free capacity, OOM peak/limit) was free-form text. The
+amendment moves that data into typed payloads on cause-class variants.
+
+**What changed**:
+
+- `TransitionReason`'s variant set is now mixed: progress markers
+  (unit) for the healthy-path phases, and cause-class (typed payloads)
+  for failure transitions. See §3 above for the full enumeration.
+- The enum drops `Copy` and `Hash` derives — cause variants carry
+  `String` payloads. Consumers that previously pattern-matched by
+  value clone or take by reference. Only call sites today are the
+  scaffold itself and the action shim's writer; cost is contained.
+- `TerminalReason` extends with structured payloads
+  (`BackoffExhausted { attempts, cause }`, `DriverError { cause }`,
+  `Timeout { after_seconds }`) so the streaming terminal line
+  carries the cause without depending on the immediately-preceding
+  `LifecycleTransition` line.
+- `RestartBudgetExhausted` carries `last_cause_summary: String`
+  (rendered via `human_readable()` at observe time), NOT
+  `Box<TransitionReason>` — rkyv `Archive` cannot resolve a
+  recursive enum. Per-attempt structured cause history lives in
+  reconciler private libSQL.
+- The action shim grows a small string-prefix matcher that
+  classifies `DriverError::StartRejected.reason` text into the
+  right cause-class variant at write time. The verbatim text is
+  preserved in `AllocStatusRow.detail` for audit. Phase 2
+  ExecDriver structured-error refactor collapses the matcher to a
+  `From<DriverError>` impl.
+- Phase 2 emit-deferred variants (`OutOfMemory`,
+  `WorkloadCrashedImmediately`) ship in the enum now for forward
+  wire-compatibility, mirroring the `exit_code: Option<i32>`
+  pattern on `AllocStatusRowBody` (also Phase-2-populated).
+
+**What did not change**:
+
+- The `LifecycleTransition.reason: TransitionReason` field shape
+  (still one field, still the same type — only the variant set
+  grows).
+- The single-source-of-truth pin ([C6]) — both surfaces still
+  serialise the same enum value via the same `Serialize` derive.
+- The streaming wire shape (`SubmitEvent` is still the 4-variant
+  flat enum).
+- The wall-clock cap mechanism (§6), the subscription mechanism
+  (§7), the OpenAPI declaration (§11). The CLI exit-code dispatch
+  (§9) still does NOT branch on cause — `terminal_reason` controls
+  rendering, exit code is `Running → 0` / `Failed → 1`.
+- DISCUSS [D1]–[D8] all stay locked. The amendment is to
+  `TransitionReason`'s shape, not to any DISCUSS commitment.
+
+**Compile-cleanliness during the GREEN transition**: the scaffold at
+`crates/overdrive-core/src/transition_reason.rs` compiles with
+`panic!("Not yet implemented -- RED scaffold")` on
+`human_readable()` and `is_failure()`. The cause-class enum
+declaration itself is fully typed — downstream consumers
+(`AllocStatusRow.reason: Option<TransitionReason>`,
+`SubmitEvent::LifecycleTransition.reason: TransitionReason`,
+`TerminalReason::{BackoffExhausted, DriverError}.cause:
+TransitionReason`) reference it by name and compile against the new
+shape immediately.
+
 ## Changelog
 
 | Date | Change |
 |---|---|
 | 2026-04-30 | Initial ADR. Decisions D1 / D3 / D4 / D5 / D6 / D8 from the DESIGN wave; constraints carried from DISCUSS wave-decisions. Slice 02 back-prop completed. Echo peer review pending. |
+| 2026-04-30 | **Amendment** — `TransitionReason` refactored from state-class to cause-class. `TerminalReason` extended with structured payloads. Original variant set retired and captured under Alternative D as the rejected predecessor. See `Amendment 2026-04-30` section above. Slice 02 back-prop list (in `docs/feature/cli-submit-vs-deploy-and-alloc-status/design/upstream-changes.md`) catalogues the consequent updates needed in DISCUSS / DISTILL / roadmap. |

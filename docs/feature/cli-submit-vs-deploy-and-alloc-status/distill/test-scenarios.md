@@ -79,6 +79,11 @@ verification through real protocol). `S-CP-*` = control-plane handler
 scenarios. `S-CLI-*` = CLI-side scenarios. `S-AS-*` = `alloc status`
 snapshot scenarios.
 
+> **Note**: All scenarios referencing `TransitionReason` byte-equality
+> cover the cause-class typed payload (`data: { path: ... }`,
+> `data: { attempts, cause }`, etc.), not just the `kind` discriminator.
+> See ADR-0032 §3 Amendment 2026-04-30 for the locked variant catalogue.
+
 ---
 
 ## 2. Adapter coverage table (Mandate 6)
@@ -212,11 +217,16 @@ crafter per render contract) contains the literal substring `stat
 /usr/local/bin/no-such-binary: no such file or directory` (or whatever
 the real ENOENT formatter emits — assertion is "substring of the live
 syscall error"); CLI stdout contains the substring "reproducer";
-streaming `ConvergedFailed.terminal_reason` is `backoff_exhausted`;
+streaming `ConvergedFailed.terminal_reason` is
+`BackoffExhausted { attempts, cause: ExecBinaryNotFound { path } }`;
 streaming `ConvergedFailed.error` byte-equals the snapshot's per-row
 `error`; streaming `LifecycleTransition.reason` (the last
-`driver_start_failed` event) byte-equals the snapshot's
-`last_transition.reason`.
+`exec_binary_not_found` event) byte-equals the snapshot's
+`last_transition.reason` — both wire forms include the structured
+`data: { path: "/usr/local/bin/no-such-binary" }` payload, not just
+the `kind` discriminator. The byte-equality assertion covers the
+typed payload, catching drift in `path` separately from drift in the
+variant tag.
 
 **KPI binding**: KPI-02 (broken-binary surfaces failure inline) — this
 scenario IS the boolean test for the load-bearing KPI. KPI-04
@@ -343,25 +353,43 @@ event's pair.
 sequence of state transitions; assert line count and ordering across
 1024 generator cases.
 
-#### S-CP-05 — Driver-start-failed transition surfaces verbatim driver text in detail
+#### S-CP-05 — Action-shim classifier produces cause-class TransitionReason variants from DriverError text
 
 ```gherkin
-Scenario: Driver-start-failed transition surfaces verbatim driver text in detail
-  Given a sim driver configured to return DriverError::StartRejected with reason text "stat /no/such: no such file or directory"
-  When the streaming-submit handler observes the resulting AllocStatusRow
-  Then the corresponding NDJSON `LifecycleTransition` line carries `reason: driver_start_failed`
-  And the line carries `detail: "stat /no/such: no such file or directory"`
+Scenario Outline: Action-shim classifier maps DriverError text to cause-class TransitionReason
+  Given a sim driver configured to return DriverError::StartRejected with <reason_text>
+  When the action shim's classifier processes the StartRejected
+  Then it writes AllocStatusRow.reason as <variant>
+  And it preserves the verbatim text in AllocStatusRow.detail
+  And the corresponding NDJSON LifecycleTransition line carries reason: { kind: <kind>, data: <payload> }
+
+Examples:
+  | reason_text                                                          | variant                                          | kind                       | payload                         |
+  | "spawn /no/such: No such file or directory (os error 2)"             | ExecBinaryNotFound { path: "/no/such" }          | exec_binary_not_found      | { path: "/no/such" }            |
+  | "spawn /usr/local/bin/payments: Permission denied (os error 13)"     | ExecPermissionDenied { path: "/usr/.../payments" } | exec_permission_denied  | { path: "/usr/.../payments" }   |
+  | "spawn /tmp/garbage: Exec format error (os error 8)"                 | ExecBinaryInvalid { path: "/tmp/garbage", kind } | exec_binary_invalid        | { path: "/tmp/garbage", kind }  |
+  | "cgroup setup failed: cgroup.procs: ..."                             | CgroupSetupFailed { kind, source }               | cgroup_setup_failed        | { kind, source }                |
+  | "(unclassified driver text)"                                         | DriverInternalError { detail }                   | driver_internal_error      | { detail }                      |
 ```
 
-**Driving port**: `axum::Router::oneshot` with `SimDriver` configured
-to return `StartRejected`.
+**Driving port**: direct unit test against `action_shim::dispatch_single`'s
+classification path with a `SimDriver` returning each `StartRejected.reason`
+text.
 
-**Asserts**: the `detail` field on the line is set; the `reason` field
-is the `DriverStartFailed` variant; the `source` is
+**Asserts**: per-row, `reason` field is the named cause-class variant
+(structured payload, not unit); `detail` field carries the verbatim
+driver text (preserved for audit); the NDJSON line's `reason` field
+serialises as a tagged-union with `kind` + `data`; the `source` is
 `Driver(DriverType::Exec)`.
 
+**Cite**: ADR-0032 §4 amended classification table — the prefix
+matcher inside `action_shim::dispatch_single` performs the
+text-to-variant mapping.
+
 **Note**: this is the Tier-1 mirror of `S-WS-02`. T1 catches the
-serialisation shape; T3 catches that real ENOENT actually propagates.
+classifier and serialisation shape across every cause-class branch;
+T3 catches that real ENOENT actually propagates through the live
+syscall path.
 
 #### S-CP-06 — Server wall-clock cap fires when convergence does not complete in time
 
@@ -370,9 +398,9 @@ Scenario: Server wall-clock cap fires when convergence does not complete in time
   Given the streaming-submit handler is configured with a 60-second cap
   And the broadcast channel never delivers a terminal LifecycleEvent
   When the simulated clock advances past 60 seconds
-  Then the response body's terminal line is `ConvergedFailed` with `terminal_reason: timeout`
-  And the response body's terminal line carries `error: "did not converge in 60s"`
+  Then the response body's terminal line is `ConvergedFailed` with `terminal_reason: TerminalReason::Timeout { after_seconds: 60 }`
   And the response stream closes after the terminal line
+  And the CLI renders the prose "did not converge in 60s" from the structured after_seconds field (not from a wire-error string)
 ```
 
 **Driving port**: `axum::Router::oneshot` with `SimClock` driving the
@@ -383,10 +411,12 @@ harness (`turmoil::sim::advance(...)`); broadcast channel held open
 with no events sent.
 
 **Asserts**: terminal line is `SubmitEvent::ConvergedFailed`; inner
-`terminal_reason` is `TerminalReason::Timeout`; inner `error` is the
-exact string `"did not converge in 60s"`; the cap timer fired exactly
-once; no `LifecycleTransition` lines appeared between `Accepted` and
-the timeout terminal.
+`terminal_reason` is `TerminalReason::Timeout { after_seconds: 60 }`
+(structured payload — `after_seconds` is on the wire); the
+`"did not converge in 60s"` text is a CLI-render assertion derived
+from `after_seconds`, not a wire-field assertion; the cap timer
+fired exactly once; no `LifecycleTransition` lines appeared between
+`Accepted` and the timeout terminal.
 
 **KPI / mandate binding**: structurally enforces ADR-0032 §6 (handler-
 local `select!` with injected `Clock`); the DST invariant
@@ -416,8 +446,12 @@ between the two invocations; real broadcast channel.
 assert structural equality (same variant); assert the serialised JSON
 strings are byte-equal across the two surfaces.
 
-**Property-test shape**: parametrise the `TransitionReason` variant
-over all 8 enum values; assert the round-trip property in every case.
+**Property-test shape**: parametrise over the 14 Phase 1
+`TransitionReason` variants (5 progress markers + 9 cause-class) with
+proptest-generated payloads per cause-class variant (e.g. arbitrary
+`path: String` for `ExecBinaryNotFound`); assert the round-trip
+property in every case. Cite ADR-0032 §3 Amendment 2026-04-30 for the
+locked variant catalogue.
 
 #### S-CP-08 — JSON-lane (Accept: application/json) returns the existing SubmitJobResponse shape unchanged
 
@@ -462,10 +496,11 @@ Scenario: AllocStatusRow round-trips through rkyv with the new reason and detail
 **Asserts**: round-trip equality; backwards compatibility with
 pre-feature serialised bytes.
 
-**Property-test shape**: parametrise over all 8 `TransitionReason`
-variants × `Option<String>` detail × every `AllocState` variant
-including the new `Failed`; assert bidirectional round-trip across
-1024 cases.
+**Property-test shape**: parametrise over every `TransitionReason`
+variant (cause-class with proptest-generated payloads via `Arbitrary`)
+× `Option<String>` detail × every `AllocState` variant including the
+new `Failed`; assert bidirectional round-trip across 1024 cases. Cite
+ADR-0032 §3 Amendment 2026-04-30 for the locked variant catalogue.
 
 **Mandate binding**: ADR-0032 §4 — `AllocStatusRow` rkyv archive shape
 is additive and forward-compatible.
@@ -697,7 +732,10 @@ Scenario: TransitionRecord and SubmitEvent::LifecycleTransition share the same T
 (`fn _check<T: ?Sized>(_: T, _: T) where ...`) or `static_assertions::assert_type_eq_all!`.
 
 **Asserts**: compile-time type equality. This is the Tier-1 enforcement
-of ADR-0032/0033's [C6] single-source-of-truth.
+of ADR-0032/0033's [C6] single-source-of-truth. Byte-equality across
+surfaces extends to the cause-class typed payload (`data: { path: ... }`,
+`data: { attempts, cause: { kind, data } }`, etc.), not just the variant
+tag — same Rust type, same serde shape, by construction.
 
 **Mandate binding**: KPI-04 structural property — the same enum, by
 construction.
@@ -754,7 +792,7 @@ Scenario: CLI renders the Failed TUI mockup with verbatim driver error
   When the CLI alloc-status renderer runs against the response
   Then stdout includes the literal verbatim driver error string
   And stdout includes `Restart budget: 5 / 5 used (backoff exhausted)`
-  And stdout includes `Last transition: ... Pending → Failed reason: driver start failed source: driver(exec)`
+  And stdout includes `Last transition: ... Pending → Failed reason: binary not found: /usr/local/bin/payments source: driver(exec)`
 ```
 
 **Driving port**: CLI rendering function with a Failed-case fixture.
@@ -801,9 +839,11 @@ Scenario: alloc_status handler projects row reason to snapshot last_transition r
 **Sim/real adapter substitutions**: sim observation store seeded with
 the row.
 
-**Property-test shape**: parametrise over all 8 `TransitionReason`
-variants × representative `Option<String>` detail values; assert the
-projection is identity in every case.
+**Property-test shape**: parametrise over every `TransitionReason`
+variant (cause-class with proptest-generated payloads via `Arbitrary`)
+× representative `Option<String>` detail values; assert the projection
+is identity in every case. Cite ADR-0032 §3 Amendment 2026-04-30 for
+the locked variant catalogue.
 
 **Mandate binding**: US-06 AC #1; KPI-04.
 
@@ -879,10 +919,10 @@ scaffold the generators alongside the production types.
 |---|---|---|
 | S-CP-02 | IntentStore commit latency ∈ [0 ms, 100 ms] | 1024 |
 | S-CP-04 | sequence of N transitions, N ∈ [1, 32] | 1024 |
-| S-CP-07 | every TransitionReason variant | 8 (exhaustive) |
-| S-CP-09 | every TransitionReason × Option<String> × every AllocState | 1024 |
+| S-CP-07 | every TransitionReason variant (cause-class) with payload generation per variant | 14 + payload cases |
+| S-CP-09 | every TransitionReason variant (cause-class with proptest payloads via `Arbitrary`) × Option<String> × every AllocState | 1024 |
 | S-CLI-05 | every HTTP status from {400, 404, 409, 500, transport_err} | 5 (exhaustive) |
-| S-AS-07 | every TransitionReason × Option<String> | 1024 |
+| S-AS-07 | every TransitionReason variant (cause-class with proptest payloads via `Arbitrary`) × Option<String> | 1024 |
 | S-AS-08 | restart count N ∈ [0, 16] | 1024 |
 
 All `@property`-tagged scenarios. The crafter implements them as
@@ -907,6 +947,14 @@ on failure.
 ---
 
 ## 7. References
+
+### Changelog
+
+| Date | Change |
+|---|---|
+| 2026-04-30 | Cause-class refactor of `TransitionReason` per ADR-0032 §3 Amendment 2026-04-30 / ADR-0033 §4 Amendment 2026-04-30. S-CP-05 retargeted from unit-variant `DriverStartFailed` to cause-class branches (ENOENT/EACCES/ENOEXEC/cgroup-failure/unclassified) via the action-shim classifier; S-CP-06 terminal shape updated to structured `Timeout { after_seconds }`; S-CP-07 / S-CP-09 / S-AS-07 generator domains grow to 14 Phase 1 variants with proptest payload generation; S-AS-02 strengthens byte-equality language to cover the typed payload; S-AS-05 render assertion updated to cause-class `binary not found:` prose; S-WS-02 byte-equality tightened to typed payload (catches drift in `path` separately from drift in variant tag); § 5 cardinality table updated; § 1 footnote added. |
+
+### Source documents
 
 - `discuss/wave-decisions.md`, `discuss/user-stories.md`,
   `discuss/outcome-kpis.md`, `discuss/journey-submit-streams-default.yaml`

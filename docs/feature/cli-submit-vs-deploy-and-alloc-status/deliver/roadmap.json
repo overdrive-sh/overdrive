@@ -1,0 +1,115 @@
+{
+  "roadmap": {
+    "project_id": "cli-submit-vs-deploy-and-alloc-status",
+    "created_at": "2026-04-30T12:01:57Z",
+    "total_steps": 9,
+    "phases": 3
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Slice 01 — alloc status snapshot enrichment",
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "Land AllocState::Failed + AllocStatusRow.{reason,detail} (single source of truth foundation)",
+          "criteria": "Add `AllocState::Failed` variant in `overdrive-core` and extend the `AllocStatusRow` archive shape with `reason: Option<TransitionReason>` and `detail: Option<String>` (rkyv-additive, default None). The `TransitionReason` enum is the cause-class shape per ADR-0032 §3 Amendment 2026-04-30 — 14 Phase 1 variants (5 progress markers + 9 cause-class failure variants) + 2 Phase 2 emit-deferred forward-compat variants; supporting types `StoppedBy`, `CancelledBy`, `ResourceEnvelope` land in this step alongside the enum. Action shim is the single writer of these fields per ADR-0023; populate from `Action::*` `TransitionReason` and from the action shim's classifier on `DriverError::StartRejected.reason` text → cause-class variant (the classifier itself lands in step 02-01; this step lands the type surface and the row write path). Existing on-disk redb files round-trip without re-archive (forward-compat). Acceptance: S-CP-09 (rkyv round-trip property over every TransitionReason variant — cause-class with proptest-generated payloads via `Arbitrary` — × Option<detail> × every AllocState including Failed) passes; existing `submit_to_running` and `submit_round_trip` Tier-3 scenarios remain green; `cargo check -p overdrive-core -p overdrive-control-plane -p overdrive-store-local --tests` clean. Files: `crates/overdrive-core/src/lib.rs` (new variant + re-exports), `crates/overdrive-core/src/transition_reason.rs` (RED scaffold → GREEN, cause-class enum + supporting types), `crates/overdrive-control-plane/src/action_shim.rs` (write reason+detail). No deps. ~2h.",
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/alloc_status_row_archive_roundtrip.rs",
+          "scenario_name": "S-CP-09"
+        },
+        {
+          "id": "01-02",
+          "name": "Promote api.rs RED scaffolds to GREEN: TransitionRecord, RestartBudget, ResourcesBody, AllocStateWire (with DriverType: ToSchema)",
+          "criteria": "Replace the `// SCAFFOLD: true` placeholders for `TerminalReason`, `AllocStateWire`, `RestartBudget`, `ResourcesBody` with full `Serialize`/`Deserialize`/`ToSchema`/`Debug`/`Clone`/`PartialEq` derives, and land the deferred `TransitionSource` enum + `TransitionRecord` struct (depends on `DriverType` deriving `ToSchema` — that cross-cutting derive change lands in this same step per DWD-03). Per ADR-0032 §3 Amendment 2026-04-30, `TerminalReason` carries structured payloads (no longer a unit enum): `BackoffExhausted { attempts, cause: TransitionReason }`, `DriverError { cause: TransitionReason }`, `Timeout { after_seconds }`. Variants are no longer `Copy` (they carry inner `cause: TransitionReason` payloads); the `TransitionReason` cause-class enum landed in step 01-01, so the inner `cause` field references resolve cleanly. Acceptance: S-AS-02 (compile-time type equality between `TransitionRecord.reason` and `SubmitEvent::LifecycleTransition.reason` — same `TransitionReason` enum, including the cause-class typed payload) passes via `static_assertions::assert_type_eq_all!`; S-AS-03 partial pass (the `AllocStatusResponse` half lands in 01-03; the new types appear in `utoipa` schema with this step). Files: `crates/overdrive-control-plane/src/api.rs`, `crates/overdrive-core/src/traits/driver.rs` (`DriverType` ToSchema). Deps: 01-01. ~2h.",
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/transition_reason_type_identity.rs",
+          "scenario_name": "S-AS-02"
+        },
+        {
+          "id": "01-03",
+          "name": "Extend AllocStatusResponse + rewrite alloc_status handler hydration + CLI snapshot renderer",
+          "criteria": "Extend `AllocStatusResponse` with top-level `replicas_desired`, `replicas_running`, `restart_budget` and `AllocStatusRowBody` with `state: AllocStateWire`, `resources: ResourcesBody`, `started_at`, `exit_code: Option<i32>`, `last_transition: Option<TransitionRecord>`, `error: Option<String>`. Rewrite `handlers::alloc_status` to hydrate from `ObservationStore::alloc_status_rows()` + `ReconcilerViewCache::get_view(JobLifecycle, target=job_id)` per architecture.md §7; project row.reason → `last_transition.reason` byte-identically (the [C6] pin). Rewrite `crates/overdrive-cli/src/commands/alloc.rs` + `render.rs` to produce the journey TUI mockup; honest empty-state for Pending-no-capacity (explicit reason row, never `Allocations: 0`). Acceptance: S-AS-01 (six populated fields in Running case), S-AS-04 (Running TUI mockup match), S-AS-05 (Failed mockup with cause-class rendering — e.g. `reason: binary not found: /usr/local/bin/payments` per ADR-0033 §4 Amendment 2026-04-30 mapping table — plus verbatim driver error in `error:` line + `Restart budget: M / M used (backoff exhausted)`), S-AS-06 (Pending-no-capacity explicit reason), S-AS-07 (row.reason → `last_transition.reason` projection identity over every TransitionReason variant with proptest-generated payloads via `Arbitrary` — property test, 1024 cases), S-AS-08 (RestartBudget.exhausted derivation property), S-AS-09 (404 on missing job). KPI-03 satisfied. Files: `crates/overdrive-control-plane/src/api.rs`, `crates/overdrive-control-plane/src/handlers.rs`, `crates/overdrive-cli/src/commands/alloc.rs`, `crates/overdrive-cli/src/render.rs`, `crates/overdrive-cli/src/http_client.rs` (typed response). Deps: 01-02. ~3h.",
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/alloc_status_snapshot.rs",
+          "scenario_name": "S-AS-01,S-AS-04,S-AS-05,S-AS-06,S-AS-07,S-AS-08,S-AS-09"
+        }
+      ]
+    },
+    {
+      "id": "02",
+      "name": "Slice 02 — NDJSON streaming submit",
+      "steps": [
+        {
+          "id": "02-01",
+          "name": "Land LifecycleEvent (broadcast payload) + broadcast::Sender on AppState + action shim emit",
+          "criteria": "Add `LifecycleEvent { job_id, alloc_id, from: AllocStateWire, to: AllocStateWire, reason: TransitionReason, detail: Option<String>, source: TransitionSource, at }` (internal — does NOT carry `AllocStatusRow` directly per architecture.md §8 trybuild rule). Add `lifecycle_events: Arc<tokio::sync::broadcast::Sender<LifecycleEvent>>` to `AppState` and `streaming_cap: Duration` (default 60s, configurable via `[server] streaming_submit_cap_seconds`). Wire `action_shim::dispatch` to `bus.send(...)` after every successful `obs.write(...)`; broadcast-send error is logged and discarded (row already committed; per-variant error isolation preserved). Land the action-shim classifier in this step: classify `DriverError::StartRejected.reason` text into a cause-class `TransitionReason` variant per ADR-0032 §4 Amendment 2026-04-30 classification table. The classifier is a small prefix matcher inside `action_shim::dispatch_single`; the existing `Err(DriverError::StartRejected { reason: _, .. }) => AllocState::Terminated` arms at L117/L148 become `Err(DriverError::StartRejected { reason, driver }) => { let cause = classify_driver_failure(&reason, driver, &spec.command); /* write reason+detail+state=Failed */ }`. The verbatim driver text continues to populate `AllocStatusRow.detail` for audit. Acceptance: S-CP-04 (N transitions → exactly N LifecycleEvent broadcasts, ordering preserved — property test, N ∈ [1,32], 1024 cases) passes via in-test broadcast subscription against the real channel; trybuild compile-fail fixture rejects a `LifecycleEvent` whose field carries `AllocStatusRow`. Files: `crates/overdrive-control-plane/src/lib.rs` (AppState), `crates/overdrive-control-plane/src/api.rs` (event type), `crates/overdrive-control-plane/src/action_shim.rs`, `crates/overdrive-control-plane/tests/compile_fail/` (new trybuild fixture). Deps: 01-01, 01-02. ~3h.",
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/lifecycle_broadcast.rs",
+          "scenario_name": "S-CP-04"
+        },
+        {
+          "id": "02-02",
+          "name": "Land SubmitEvent enum + TerminalReason wire serialization (snake_case) + serde round-trip",
+          "criteria": "Promote `SubmitEvent` from DWD-03 deferred to GREEN: `Accepted { spec_digest, intent_key, outcome }`, `LifecycleTransition { alloc_id, from: AllocStateWire, to: AllocStateWire, reason: TransitionReason, detail: Option<String>, source: TransitionSource, at }`, `ConvergedRunning { alloc_id, started_at }`, `ConvergedFailed { alloc_id, terminal_reason: TerminalReason, reason: Option<TransitionReason>, error: Option<String> }`. Both `SubmitEvent` and `TerminalReason` use `#[serde(tag = \"kind\", content = \"data\", rename_all = \"snake_case\")]` — the cause-class typed payload serialises as `{ \"kind\": \"exec_binary_not_found\", \"data\": { \"path\": \"...\" } }` per ADR-0032 §3 Amendment 2026-04-30. `TerminalReason` variants are no longer `Copy` (they carry inner `cause: TransitionReason` payloads); the serde round-trip proptest constructs representative payloads per variant, not just match on the discriminator. NDJSON line emitter uses `serde_json::to_writer` + `\\n`. Acceptance: serde round-trip proptest over the variant space (with cause-class payload generation) passes; OpenAPI gate (S-AS-03 second half — `POST /v1/jobs` declares both `application/json` and `application/x-ndjson`) passes via `cargo xtask openapi-check`. Files: `crates/overdrive-control-plane/src/api.rs` (SubmitEvent declaration + utoipa annotations), `crates/overdrive-control-plane/src/lib.rs` (`OverdriveApi` schema list update). Deps: 02-01. ~2h.",
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/submit_event_serialization.rs",
+          "scenario_name": "S-AS-03"
+        },
+        {
+          "id": "02-03",
+          "name": "Wire content negotiation in submit_job + streaming_submit_loop with select! cap timer + lagged-recovery fallback",
+          "criteria": "Branch `submit_job` on `Accept` header: `application/json` retains the existing `SubmitJobResponse` shape unchanged (S-CP-08 back-compat regression); `application/x-ndjson` returns a chunked `Body::from_stream(...)` and delegates to `streaming_submit_loop`. The loop subscribes to `lifecycle_events.subscribe()` filtered by `job_id`, emits `Accepted` synchronously after `IntentStore::put_if_absent` returns (KPI-01 200ms p95 — push-based, not poll-based), then enters a `tokio::select! { biased; lifecycle = bus.recv() => …, _ = clock.sleep(streaming_cap) => emit Timeout terminal }`. On `RecvError::Lagged(_)`, fall back to `obs.alloc_status_rows()` snapshot, synthesise a single LifecycleTransition from the latest row, resubscribe, continue (ADR-0032 §7). Terminal-event detection per architecture.md §4 (cause-class shapes per ADR-0032 §3 Amendment 2026-04-30): when `state == Running && replicas_running >= replicas_desired` emit `ConvergedRunning { alloc_id, started_at }`; when `state == Failed && restart_budget.exhausted` (read from view cache) emit `ConvergedFailed { terminal_reason: TerminalReason::BackoffExhausted { attempts, cause: <last cause-class TransitionReason from row> } }` — the `cause` is read off the most recent `AllocStatusRow.reason` field for the alloc, the same source the snapshot uses (single-source-of-truth [D7] preserved structurally); when the cap timer fires emit `ConvergedFailed { terminal_reason: TerminalReason::Timeout { after_seconds: cap.as_secs() as u32 } }` — the cap value is on the wire as a structured field, the CLI renders the prose from it. Cap timer uses injected `Arc<dyn Clock>`, never `tokio::time::sleep` directly (dst_lint enforces). Acceptance: S-CP-01 (Accepted+LifecycleTransition+ConvergedRunning sequence), S-CP-02 (KPI-01 first-line ≤200ms p95 under SimClock, 1024 cases), S-CP-03 (re-submit unchanged → outcome: Unchanged), S-CP-05 (driver_start_failed surfaces verbatim detail), S-CP-06 (cap timer fires Timeout terminal under SimClock), S-CP-07 (KPI-04 streaming reason byte-equals snapshot reason — property test over all 8 TransitionReason variants), S-CP-08 (Accept: application/json back-compat byte-identical), S-CP-10 (Lagged-fallback). Files: `crates/overdrive-control-plane/src/handlers.rs`, `crates/overdrive-control-plane/src/lib.rs` (route wiring). Deps: 02-02. ~5h.",
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/streaming_submit.rs",
+          "scenario_name": "S-CP-01,S-CP-02,S-CP-03,S-CP-05,S-CP-06,S-CP-07,S-CP-08,S-CP-10"
+        },
+        {
+          "id": "02-04",
+          "name": "CLI NDJSON consumer + exit-code mapping + structured Error block + broken-binary regression target (S-WS-02)",
+          "criteria": "In `crates/overdrive-cli/src/commands/job.rs` submit handler: send `Accept: application/x-ndjson` (Slice 03 adds the TTY/--detach branch; this step defaults to streaming), drive `reqwest::Response::bytes_stream()` line-delimited through `serde_json::Deserializer::from_slice` per parsed line into `SubmitEvent`, render LifecycleTransition lines inline (`alloc_id state reason` shape), match terminal: `ConvergedRunning` → print summary `Job '<name>' is running with N/N replicas (took D)` and exit 0 (per [D3]); `ConvergedFailed` → print `Error: job '<name>' did not converge to running.` block including `reason:` (rendered via `TransitionReason::human_readable()` per ADR-0033 §4 Amendment 2026-04-30 mapping table — e.g. `binary not found: /usr/local/bin/payments` for `ExecBinaryNotFound { path }`), `last-event:` (the verbatim `detail` text), `reproducer: overdrive alloc status --job <name>`, and a `Hint:` line that maps from the cause-class variant — `ExecBinaryNotFound` / `ExecPermissionDenied` get the existing `fix the spec's exec.command path and re-run` hint; other cause variants get neutral hints — and exit 1; pre-Accepted HTTP errors (4xx/5xx ErrorBody, transport failures) → print message and exit 2 (S-CLI-05 parametrised over 400/404/409/500/transport_err). Acceptance: S-CLI-04 (CLI Failed-block render with reproducer — Tier 1 against fake NDJSON backend), S-CLI-05 (exit code 2 across HTTP error variants), S-WS-01 (Tier 3 Linux-gated happy path through real CLI subprocess + real reqwest + real ExecDriver against `/bin/sleep`), S-WS-02 (Tier 3 REGRESSION TARGET — KPI-02: real ENOENT through `tokio::process::Command::spawn` against `/usr/local/bin/no-such-binary`, exit code 1, verbatim driver error in stdout, snapshot's `last_transition.reason` byte-equals streaming reason — including the cause-class typed payload `data: { path: \"/usr/local/bin/no-such-binary\" }` on `ExecBinaryNotFound`, not just the `kind` discriminator — after subsequent `alloc status` invocation; the load-bearing scenario for the entire feature). Tier 3 tests live under `crates/overdrive-cli/tests/integration/<scenario>.rs` per `.claude/rules/testing.md` § Integration vs unit gating; gated `#[cfg(target_os = \"linux\")]`; macOS dev runs via `cargo xtask lima run --`. Files: `crates/overdrive-cli/src/commands/job.rs`, `crates/overdrive-cli/src/http_client.rs`, `crates/overdrive-cli/src/render.rs` (Error block formatter), `crates/overdrive-cli/tests/integration/streaming_submit_happy_path.rs` (NEW), `crates/overdrive-cli/tests/integration/streaming_submit_broken_binary.rs` (NEW), `crates/overdrive-cli/tests/integration.rs` (entrypoint, may need creation per DWD-05). Deps: 02-03. ~4h.",
+          "test_file": "crates/overdrive-cli/tests/integration/streaming_submit_broken_binary.rs",
+          "scenario_name": "S-WS-01,S-WS-02,S-CLI-04,S-CLI-05"
+        }
+      ]
+    },
+    {
+      "id": "03",
+      "name": "Slice 03 — --detach flag + pipe auto-detect (CONDITIONAL polish)",
+      "steps": [
+        {
+          "id": "03-01",
+          "name": "Add --detach flag on `overdrive job submit` (forces Accept: application/json regardless of TTY)",
+          "criteria": "Add `--detach` boolean to the `Submit` clap struct in `crates/overdrive-cli/src/commands/job.rs`. When set, CLI sends `Accept: application/json` and consumes the JSON ack only (today's pre-feature shape) — does NOT engage the NDJSON consumer regardless of stdout being a TTY. Exit code 0 on Inserted/Unchanged outcome; exit code 2 on transport / server-validation error per ADR-0015 (no NDJSON terminal-mapping path active). Acceptance: S-CLI-01 (Tier 1, in-process axum oneshot — `--detach` sets the Accept header to `application/json`, output is a single JSON object with `spec_digest`/`intent_key`/`outcome`, exit 0, KPI-05 wall-clock ≤ 200ms p95). Files: `crates/overdrive-cli/src/commands/job.rs`, `crates/overdrive-cli/src/http_client.rs`. Deps: 02-04. ~2h.",
+          "test_file": "crates/overdrive-cli/tests/acceptance/submit_detach_flag.rs",
+          "scenario_name": "S-CLI-01"
+        },
+        {
+          "id": "03-02",
+          "name": "Auto-detach via std::io::IsTerminal + Tier 3 jq-pipeline scenario",
+          "criteria": "Replace the unconditional NDJSON branch from 02-04 with `let stream = !args.detach && std::io::IsTerminal::is_terminal(&std::io::stdout());` per architecture.md §6. When stream is false (stdout is not a TTY OR --detach), send `Accept: application/json`; otherwise `Accept: application/x-ndjson`. Extract the IsTerminal probe behind a thin trait seam to keep S-CLI-02 Tier-1 testable without subprocess overhead (production wires to `std::io::IsTerminal`). Acceptance: S-CLI-02 (Tier 1 — stdout redirected to tempfile produces single JSON object, Accept header is application/json), S-CLI-06 (Tier 1 — TTY without --detach selects application/x-ndjson, NDJSON consumer engages), S-CLI-03 (Tier 3 Linux-gated — `overdrive job submit ./payments.toml | jq -r .spec_digest` outputs a single 64-hex-char digest line, shell pipeline exit 0; macOS via `cargo xtask lima run --`). Files: `crates/overdrive-cli/src/commands/job.rs`, `crates/overdrive-cli/tests/acceptance/submit_pipe_autodetect.rs`, `crates/overdrive-cli/tests/integration/submit_jq_pipeline.rs`. Deps: 03-01. ~2h.",
+          "test_file": "crates/overdrive-cli/tests/integration/submit_jq_pipeline.rs",
+          "scenario_name": "S-CLI-02,S-CLI-03,S-CLI-06"
+        }
+      ]
+    }
+  ],
+  "implementation_scope": {
+    "source_directories": [
+      "crates/overdrive-core/src/",
+      "crates/overdrive-control-plane/src/",
+      "crates/overdrive-cli/src/"
+    ],
+    "test_directories": [
+      "crates/overdrive-core/tests/",
+      "crates/overdrive-control-plane/tests/acceptance/",
+      "crates/overdrive-control-plane/tests/integration/",
+      "crates/overdrive-control-plane/tests/compile_fail/",
+      "crates/overdrive-cli/tests/acceptance/",
+      "crates/overdrive-cli/tests/integration/"
+    ],
+    "excluded_patterns": [
+      "target/**",
+      "**/*.rkyv"
+    ]
+  },
+  "validation": {
+    "status": "pending",
+    "reviewer": "nw-software-crafter-reviewer",
+    "approved_at": "TODO"
+  }
+}
