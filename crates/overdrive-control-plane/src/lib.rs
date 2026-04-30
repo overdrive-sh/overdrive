@@ -40,6 +40,7 @@ pub mod handlers;
 pub mod libsql_provisioner;
 pub mod observation_wiring;
 pub mod reconciler_runtime;
+pub mod streaming;
 pub mod tls_bootstrap;
 
 use std::collections::BTreeMap;
@@ -118,6 +119,14 @@ pub struct AppState {
     /// stream. Default 60s; configurable via
     /// `[server] streaming_submit_cap_seconds` per architecture.md §10.
     pub streaming_cap: Duration,
+    /// Injected `Clock` used by the streaming submit handler for the
+    /// cap timer. The dst-lint gate enforces that `tokio::time::sleep`
+    /// is never used for this cap — the handler MUST go through
+    /// `clock.sleep(cap)` so DST tests can advance time deterministically.
+    /// Production wires `Arc::new(SystemClock)` from the `overdrive-host`
+    /// crate (the only crate permitted to instantiate `SystemClock`);
+    /// tests inject `Arc<SimClock>`.
+    pub clock: Arc<dyn Clock>,
 }
 
 /// A View persisted across ticks in [`AppState::view_cache`].
@@ -170,6 +179,10 @@ impl AppState {
             view_cache: Arc::new(Mutex::new(BTreeMap::new())),
             lifecycle_events: Arc::new(tx),
             streaming_cap: DEFAULT_STREAMING_CAP,
+            // Default to `SystemClock` from the host crate. Tests that
+            // need controllable time replace this field directly with
+            // `Arc::new(SimClock::new())`.
+            clock: Arc::new(overdrive_host::SystemClock),
         }
     }
 }
@@ -467,7 +480,12 @@ pub async fn run_server_with_obs_and_driver(
     runtime.register(job_lifecycle())?;
     let runtime = Arc::new(runtime);
 
-    let state: AppState = AppState::new(store, obs, runtime, driver);
+    let mut state: AppState = AppState::new(store, obs, runtime, driver);
+    // Production boot threads the `ServerConfig.clock` into AppState
+    // so the streaming submit handler's cap timer uses the same clock
+    // as the convergence-loop spawn. Tests construct AppState directly
+    // and replace this field as needed.
+    state.clock = config.clock.clone();
 
     // Spawn the convergence-tick loop per `fix-convergence-loop-not-
     // spawned` Step 01-02 (RCA Option B2 broker-driven §18 wiring).

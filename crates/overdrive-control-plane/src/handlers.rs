@@ -14,7 +14,10 @@
 //! scaffolds owned by subsequent deliver steps.
 
 use axum::Json;
+use axum::body::Body;
 use axum::extract::{Path, Query, State};
+use axum::http::{HeaderMap, header};
+use axum::response::{IntoResponse, Response};
 use overdrive_core::aggregate::{AggregateError, IntentKey, Job, JobSpecInput};
 use overdrive_core::id::{ContentHash, JobId};
 use overdrive_core::reconciler::{
@@ -186,8 +189,10 @@ impl From<overdrive_core::traits::observation_store::NodeHealthRow> for api::Nod
 )]
 pub async fn submit_job(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(request): Json<api::SubmitJobRequest>,
-) -> Result<Json<api::SubmitJobResponse>, ControlPlaneError> {
+) -> Result<Response, ControlPlaneError> {
+    let want_streaming = wants_ndjson(&headers);
     // 1. Validate via the single aggregate constructor (ADR-0011 —
     //    THE-single-validating-constructor). The `Job::from_spec` call
     //    is the server-side defence-in-depth complement to the CLI's
@@ -236,18 +241,14 @@ pub async fn submit_job(
     //    where two concurrent submitters for the same key could both
     //    see `None` on the read and both fall through to the write,
     //    silently clobbering the first spec.
-    match state.store.put_if_absent(key.as_bytes(), archived.as_ref()).await? {
+    let outcome = match state.store.put_if_absent(key.as_bytes(), archived.as_ref()).await? {
         PutOutcome::Inserted => {
             // Edge-triggered ingress per whitepaper §18: enqueue an
             // evaluation for the job-lifecycle reconciler so the
             // convergence-loop spawn picks it up on the next tick.
             // Per `fix-convergence-loop-not-spawned` Step 01-02.
             enqueue_job_lifecycle_eval(&state, &job.id)?;
-            Ok(Json(api::SubmitJobResponse {
-                job_id: job.id.to_string(),
-                spec_digest,
-                outcome: api::IdempotencyOutcome::Inserted,
-            }))
+            api::IdempotencyOutcome::Inserted
         }
         PutOutcome::KeyExists { existing } => {
             if existing.as_ref() == archived.as_ref() {
@@ -260,22 +261,53 @@ pub async fn submit_job(
                 // §18 evaluation-broker semantics so a flapping
                 // resubmit produces one pending eval, not N.
                 enqueue_job_lifecycle_eval(&state, &job.id)?;
-                Ok(Json(api::SubmitJobResponse {
-                    job_id: job.id.to_string(),
-                    spec_digest,
-                    outcome: api::IdempotencyOutcome::Unchanged,
-                }))
+                api::IdempotencyOutcome::Unchanged
             } else {
                 // Different spec at the same key — 409 Conflict.
                 // Conflict is HTTP-status, never a wire `outcome`
                 // value (ADR-0015 §4 amended by ADR-0020). No
                 // evaluation enqueued — the intent did not change.
-                Err(ControlPlaneError::Conflict {
+                return Err(ControlPlaneError::Conflict {
                     message: format!("a different spec is already registered at {}", key.as_str()),
-                })
+                });
             }
         }
+    };
+
+    // Branch on Accept header per [D6] / [D8]. JSON lane preserves
+    // the existing `SubmitJobResponse` shape unchanged (back-compat
+    // S-CP-08). NDJSON lane delegates to `streaming_submit_loop` for
+    // the per-line emit + cap timer + lagged-recovery.
+    if want_streaming {
+        let accepted =
+            crate::streaming::build_accepted(spec_digest, key.as_str().to_owned(), outcome);
+        let stream = crate::streaming::build_stream(state.clone(), job.id, accepted);
+        let body = Body::from_stream(stream);
+        let response = Response::builder()
+            .status(axum::http::StatusCode::OK)
+            .header(header::CONTENT_TYPE, "application/x-ndjson")
+            .body(body)
+            .map_err(|e| ControlPlaneError::internal("build streaming response", e))?;
+        Ok(response)
+    } else {
+        let body = api::SubmitJobResponse { job_id: job.id.to_string(), spec_digest, outcome };
+        Ok(Json(body).into_response())
     }
+}
+
+/// Returns `true` when the `Accept` header signals the
+/// `application/x-ndjson` streaming lane. Missing header, `*/*`, and
+/// `application/json` all fall through to the JSON back-compat lane.
+///
+/// Phase 1 uses simple `contains("application/x-ndjson")` — no
+/// q-value parsing — because the CLI sends one explicit value at a
+/// time. Phase 2+ may upgrade to RFC 7231 §5.3.2 q-value resolution
+/// if multiple Accept values become common.
+fn wants_ndjson(headers: &HeaderMap) -> bool {
+    headers
+        .get(header::ACCEPT)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|s| s.contains("application/x-ndjson"))
 }
 
 /// `GET /v1/jobs/{id}` — read via `IntentStore::get`, rkyv-access the

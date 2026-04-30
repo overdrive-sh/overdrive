@@ -70,4 +70,11 @@ mod acceptance {
     // SubmitEvent wire enum serde round-trip + literal wire-shape
     // regression assertions per ADR-0032 §3 Amendment 2026-04-30.
     mod submit_event_serialization;
+
+    // cli-submit-vs-deploy-and-alloc-status — Slice 02 step 02-03.
+    // Content-negotiated submit_job + streaming_submit_loop with
+    // select! cap timer + lagged-recovery fallback.
+    // Scenarios: S-CP-01, S-CP-02, S-CP-03, S-CP-06, S-CP-07,
+    // S-CP-08, S-CP-10 (#[ignore]'d per wave-decisions.md).
+    mod streaming_submit;
 }

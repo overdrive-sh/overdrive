@@ -117,6 +117,13 @@ trybuild        = "=1.0.101"
 
 # --- Async streams --------------------------------------------------------
 tokio-stream    = { version = "0.1", features = ["sync"] }
+async-stream    = "0.3"
+# `tower` and `http-body-util` are dev-only — used by acceptance tests
+# that drive the production router via `Router::oneshot(...)` and read
+# response bodies via `BodyExt::frame()`. Already transitive deps of
+# axum 0.7; declared here for direct dev-dep imports.
+tower             = { version = "0.5", features = ["util"] }
+http-body-util    = "0.1"
 
 # --- Internal workspace crates -------------------------------------------
 overdrive-core = { path = "crates/overdrive-core" }

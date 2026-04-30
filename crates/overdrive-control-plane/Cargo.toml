@@ -103,6 +103,14 @@ hostname.workspace   = true
 utoipa       = { workspace = true }
 utoipa-axum  = { workspace = true }
 
+# `async-stream` is used by the streaming submit handler (slice 02
+# step 02-03) to build the NDJSON Body::from_stream(...) future via
+# the `stream! { ... }` macro. Pure-Rust, no FFI; pinned to workspace.
+async-stream.workspace = true
+# `futures` provides the `Stream` trait re-exports used by the
+# stream returned to `Body::from_stream`.
+futures.workspace = true
+
 # Per-primitive libSQL memory
 libsql = { workspace = true }
 
@@ -135,6 +143,11 @@ libc.workspace           = true
 # `LifecycleEvent` field MUST NOT be `AllocStatusRow`). Pinned exact
 # version per `.claude/rules/testing.md` § "Compile-fail testing".
 trybuild.workspace       = true
+# Acceptance tests for the streaming submit handler (slice 02 step
+# 02-03) drive the production Router via `ServiceExt::oneshot` and
+# read NDJSON response bodies via `BodyExt::frame()`.
+tower.workspace             = true
+http-body-util.workspace    = true
 
 [lints]
 workspace = true

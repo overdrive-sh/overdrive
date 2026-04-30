@@ -25,11 +25,28 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use axum::Json;
+use axum::body::to_bytes;
 use axum::extract::State;
+use axum::http::HeaderMap;
+use axum::response::Response;
 use overdrive_control_plane::AppState;
 use overdrive_control_plane::api::{IdempotencyOutcome, SubmitJobRequest, SubmitJobResponse};
 use overdrive_control_plane::error::ControlPlaneError;
 use overdrive_control_plane::handlers::submit_job;
+
+/// Helper: invoke the content-negotiated `submit_job` handler with no
+/// `Accept` header (back-compat JSON lane) and parse the response body
+/// into the typed `SubmitJobResponse`. Slice 02 step 02-03 made
+/// `submit_job` content-negotiate; the existing acceptance tests
+/// continue to assert on the JSON shape via this shim.
+async fn submit_json(
+    state: AppState,
+    request: SubmitJobRequest,
+) -> Result<SubmitJobResponse, ControlPlaneError> {
+    let response: Response = submit_job(State(state), HeaderMap::new(), Json(request)).await?;
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.expect("body to bytes");
+    Ok(serde_json::from_slice(&bytes).expect("JSON SubmitJobResponse"))
+}
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
 use overdrive_core::id::NodeId;
@@ -83,8 +100,8 @@ async fn byte_identical_resubmit_returns_ok_with_unchanged_outcome_and_same_dige
     let spec = payments_spec();
 
     // First submit — Ok, outcome = Inserted.
-    let Json(first): Json<SubmitJobResponse> =
-        submit_job(State(state.clone()), Json(SubmitJobRequest { spec: spec.clone() }))
+    let first: SubmitJobResponse =
+        submit_json(state.clone(), SubmitJobRequest { spec: spec.clone() })
             .await
             .expect("first submit must be Ok");
     assert_eq!(first.job_id, "payments");
@@ -104,11 +121,10 @@ async fn byte_identical_resubmit_returns_ok_with_unchanged_outcome_and_same_dige
     // takes the idempotency branch and returns Ok with the SAME
     // spec_digest and `outcome = Unchanged`. Under mutation `!=` this
     // takes the conflict branch and returns ControlPlaneError::Conflict.
-    let second =
-        submit_job(State(state.clone()), Json(SubmitJobRequest { spec: spec.clone() })).await;
+    let second = submit_json(state.clone(), SubmitJobRequest { spec: spec.clone() }).await;
 
     match second {
-        Ok(Json(body)) => {
+        Ok(body) => {
             assert_eq!(
                 body.outcome,
                 IdempotencyOutcome::Unchanged,
@@ -143,8 +159,8 @@ async fn different_spec_at_occupied_key_returns_conflict_variant() {
     let state = build_app_state(&tmp);
 
     // Prime with canonical spec.
-    let Json(primed): Json<SubmitJobResponse> =
-        submit_job(State(state.clone()), Json(SubmitJobRequest { spec: payments_spec() }))
+    let primed: SubmitJobResponse =
+        submit_json(state.clone(), SubmitJobRequest { spec: payments_spec() })
             .await
             .expect("prime submit");
     assert_eq!(primed.outcome, IdempotencyOutcome::Inserted);
@@ -153,11 +169,8 @@ async fn different_spec_at_occupied_key_returns_conflict_variant() {
     // this takes the conflict branch and returns Conflict. Under
     // mutation `!=` this takes the idempotency branch and returns
     // Ok.
-    let outcome = submit_job(
-        State(state.clone()),
-        Json(SubmitJobRequest { spec: payments_spec_alt_replicas() }),
-    )
-    .await;
+    let outcome =
+        submit_json(state.clone(), SubmitJobRequest { spec: payments_spec_alt_replicas() }).await;
 
     match outcome {
         Err(ControlPlaneError::Conflict { message }) => {
@@ -211,8 +224,8 @@ async fn fresh_submit_on_empty_key_returns_inserted_and_persists_spec() {
     let tmp = TempDir::new().expect("tmpdir");
     let state = build_app_state(&tmp);
 
-    let Json(resp): Json<SubmitJobResponse> =
-        submit_job(State(state.clone()), Json(SubmitJobRequest { spec: payments_spec() }))
+    let resp: SubmitJobResponse =
+        submit_json(state.clone(), SubmitJobRequest { spec: payments_spec() })
             .await
             .expect("submit");
     assert_eq!(resp.job_id, "payments");
