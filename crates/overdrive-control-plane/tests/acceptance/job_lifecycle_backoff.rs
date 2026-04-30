@@ -136,11 +136,14 @@ async fn repeatedly_crashing_workload_exhausts_backoff_and_stops_retrying() {
     let target = JobId::new("payments").expect("valid job id");
     let target_resource = overdrive_core::reconciler::TargetResource::new(&format!("job/{target}"))
         .expect("valid target");
+    let job_lifecycle_name = overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
+        .expect("job-lifecycle reconciler name");
     let now = Instant::now();
     let deadline = now + Duration::from_secs(60);
     for tick_n in 0..20_u64 {
         run_convergence_tick(
             &state,
+            &job_lifecycle_name,
             &target_resource,
             now + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,

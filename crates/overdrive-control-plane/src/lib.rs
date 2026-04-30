@@ -468,12 +468,20 @@ pub async fn run_server_with_obs_and_driver(
                 };
 
                 for eval in pending {
-                    if let Err(e) =
-                        run_convergence_tick(&state, &eval.target, now, tick_n, deadline).await
+                    if let Err(e) = run_convergence_tick(
+                        &state,
+                        &eval.reconciler,
+                        &eval.target,
+                        now,
+                        tick_n,
+                        deadline,
+                    )
+                    .await
                     {
                         tracing::warn!(
                             target: "overdrive::reconciler",
                             ?e,
+                            reconciler = %eval.reconciler,
                             target_name = %eval.target.as_str(),
                             "convergence tick error"
                         );

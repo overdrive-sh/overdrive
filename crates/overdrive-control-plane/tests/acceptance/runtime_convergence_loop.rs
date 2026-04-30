@@ -106,8 +106,10 @@ async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
 
     // --- Submit ONE evaluation. The convergence-tick loop in
     //     `lib.rs::run_server_with_obs_and_driver` drains the broker per
-    //     tick and runs every registered reconciler against each drained
-    //     target — we replicate that loop here without binding to TCP.
+    //     tick and dispatches each drained Evaluation to exactly the
+    //     reconciler named in `eval.reconciler` against the eval's
+    //     target — N entries collapse to N dispatches per distinct
+    //     `(reconciler, target)` key, per whitepaper §18 / ADR-0013 §8.
     let target = TargetResource::new("job/payments").expect("valid target");
     state.runtime.broker().submit(Evaluation {
         reconciler: ReconcilerName::new("job-lifecycle").expect("valid reconciler name"),
@@ -127,7 +129,7 @@ async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
             broker.drain_pending()
         };
         for eval in pending {
-            run_convergence_tick(&state, &eval.target, now, tick_n, deadline)
+            run_convergence_tick(&state, &eval.reconciler, &eval.target, now, tick_n, deadline)
                 .await
                 .expect("convergence tick succeeds");
         }
@@ -191,7 +193,7 @@ async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
 ///
 /// * **Pre-fix**: the dispatch loop iterates every registered
 ///   reconciler (`for name in &registered`) and runs both
-///   `JobLifecycle` and `NoopHeartbeat` against the JobLifecycle
+///   `JobLifecycle` and `NoopHeartbeat` against the `JobLifecycle`
 ///   target, so `view_cache` ends up with TWO entries —
 ///   `("job-lifecycle", "job/payments")` AND
 ///   `("noop-heartbeat", "job/payments")`. The latter entry is the
@@ -205,7 +207,6 @@ async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
 /// reconciler_name, target, now, tick_n, deadline)` signature — the
 /// arity mismatch against current main is the proof-of-RED.
 #[tokio::test]
-#[ignore = "RED scaffold for fix-eval-reconciler-discarded — un-ignore in the GREEN step"]
 async fn eval_dispatch_runs_only_the_named_reconciler() {
     let tmp = TempDir::new().expect("tempdir");
     let clock = SimClock::new();
@@ -218,10 +219,8 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
 
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
-    let obs: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(
-        NodeId::new("local").expect("NodeId"),
-        0,
-    ));
+    let obs: Arc<dyn ObservationStore> =
+        Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("NodeId"), 0));
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
     let state = AppState::new(store, obs, Arc::new(runtime), driver);
 
@@ -230,19 +229,12 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
         id: "payments".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput {
-            command: "/bin/true".to_string(),
-            args: vec![],
-        }),
+        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     })
     .expect("valid job spec");
     let archived = rkyv::to_bytes::<rkyv::rancor::Error>(&job).expect("rkyv archive");
     let payments_intent_key = IntentKey::for_job(&job.id);
-    state
-        .store
-        .put(payments_intent_key.as_bytes(), archived.as_ref())
-        .await
-        .expect("put job");
+    state.store.put(payments_intent_key.as_bytes(), archived.as_ref()).await.expect("put job");
 
     // --- Preload ObservationStore: one Running alloc against the same
     //     job so `JobLifecycle::reconcile` sees `desired ≈ actual` and
@@ -256,11 +248,7 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
         state: AllocState::Running,
         updated_at: LogicalTimestamp { counter: 1, writer: writer.clone() },
     };
-    state
-        .obs
-        .write(ObservationRow::AllocStatus(alloc_row))
-        .await
-        .expect("seed Running alloc row");
+    state.obs.write(ObservationRow::AllocStatus(alloc_row)).await.expect("seed Running alloc row");
 
     // --- Submit ONE evaluation naming `job-lifecycle` only.
     let target = TargetResource::new("job/payments").expect("valid target");
@@ -283,15 +271,8 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
         broker.drain_pending()
     };
     for eval in pending {
-        let _ = run_convergence_tick(
-            &state,
-            &eval.reconciler,
-            &eval.target,
-            now,
-            tick_n,
-            deadline,
-        )
-        .await;
+        let _ = run_convergence_tick(&state, &eval.reconciler, &eval.target, now, tick_n, deadline)
+            .await;
     }
 
     // --- Assertion (kills the bugged behaviour): only `job-lifecycle`
@@ -302,11 +283,10 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
     //
     //     Pre-fix the cache has TWO entries — both reconcilers ran.
     //     Post-fix the cache has ONE entry — only the named reconciler.
-    let cache = state.view_cache.lock().expect("view_cache mutex");
-    let entries_for_target: Vec<&(String, String)> = cache
-        .keys()
-        .filter(|(_, t)| t == &target.to_string())
-        .collect();
+    let entries_for_target: Vec<(String, String)> = {
+        let cache = state.view_cache.lock().expect("view_cache mutex");
+        cache.keys().filter(|(_, t)| t == &target.to_string()).cloned().collect()
+    };
     assert_eq!(
         entries_for_target.len(),
         1,
@@ -319,7 +299,7 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
         entries_for_target.len(),
         entries_for_target
     );
-    let only_entry = entries_for_target[0];
+    let only_entry = &entries_for_target[0];
     assert_eq!(
         only_entry.0, "job-lifecycle",
         "expected the surviving cache entry to be `job-lifecycle` — \

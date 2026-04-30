@@ -74,6 +74,8 @@ async fn submitted_job_reaches_running_via_real_exec_driver() {
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
     let target = TargetResource::new("job/payments").expect("valid target");
+    let job_lifecycle_name = overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
+        .expect("job-lifecycle reconciler name");
     let now = Instant::now();
     let deadline = now + Duration::from_secs(60);
 
@@ -83,6 +85,7 @@ async fn submitted_job_reaches_running_via_real_exec_driver() {
     for tick_n in 0..30_u64 {
         run_convergence_tick(
             &state,
+            &job_lifecycle_name,
             &target,
             now + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,

@@ -170,8 +170,13 @@ impl ReconcilerRuntime {
 /// production. Per ADR-0023 + .claude/rules/development.md.
 pub const DEFAULT_TICK_CADENCE: Duration = Duration::from_millis(100);
 
-/// Drive ONE convergence tick against `target` for the registered
-/// `JobLifecycle` reconciler (Phase 1 single-target shape).
+/// Drive ONE convergence tick against `target` for the reconciler
+/// named in `reconciler_name`.
+///
+/// The reconciler is looked up via `reconcilers_iter().find(...)`; if
+/// not registered, the function logs a structured warning and returns
+/// Ok cleanly (the reconciler may have been deregistered between
+/// submit and drain — Phase 2+ concern, defensively handled).
 ///
 /// Returns `Err(ShimError)` only when the action shim cannot resolve
 /// a dispatched action into an observation row (the shim itself is
@@ -183,16 +188,17 @@ pub const DEFAULT_TICK_CADENCE: Duration = Duration::from_millis(100);
 /// task that drains the [`crate::eval_broker::EvaluationBroker`] each
 /// tick (`config.tick_cadence`, default [`DEFAULT_TICK_CADENCE`]) and
 /// dispatches one call per pending [`crate::eval_broker::Evaluation`].
-/// Tests call this directly per-tick to drive the tick loop
+/// Each drained Evaluation runs exactly one reconciler — the one it
+/// names. Tests call this directly per-tick to drive the tick loop
 /// deterministically without booting the full server.
 ///
-/// Self-re-enqueue: when `reconcile` returns a non-empty `Vec<Action>`
-/// (i.e. desired ≠ actual, the cluster has not converged yet), this
-/// function re-submits `(reconciler_name, target)` to the broker so
-/// the next drained tick re-evaluates. This is the "level-triggered
-/// inside the reconciler" half of the §18 hybrid model — without it
-/// the reconciler runs once after submit, the broker drains empty,
-/// and convergence stalls.
+/// Self-re-enqueue: when `reconcile` returns at least one
+/// non-`Action::Noop` action (i.e. desired ≠ actual, the cluster has
+/// not converged yet), this function re-submits under the same
+/// `(reconciler_name, target)` key the inbound Evaluation carried —
+/// the broker collapses redundant submits at the same key per
+/// ADR-0013 §8 / whitepaper §18. Without this, the reconciler runs
+/// once after submit, the broker drains empty, and convergence stalls.
 ///
 /// Shutdown ordering: [`crate::ServerHandle::shutdown`] cancels the
 /// convergence task FIRST (via `convergence_shutdown` token), awaits
@@ -206,82 +212,87 @@ pub const DEFAULT_TICK_CADENCE: Duration = Duration::from_millis(100);
 /// fail in a way the runtime cannot represent as observation.
 pub async fn run_convergence_tick(
     state: &AppState,
+    reconciler_name: &ReconcilerName,
     target: &TargetResource,
     now: Instant,
     tick_n: u64,
     deadline: Instant,
 ) -> Result<(), ConvergenceError> {
-    // Phase 1: drive only the JobLifecycle reconciler against the
-    // target. NoopHeartbeat has no convergence behaviour against a
-    // resource target — it emits Action::Noop unconditionally.
-    let registered = state.runtime.registered();
-    for name in &registered {
-        // Find the reconciler instance.
-        let Some(reconciler) = state.runtime.reconcilers_iter().find(|r| r.name() == name) else {
-            continue;
-        };
+    // Look up the named reconciler from the registered set. The
+    // Evaluation's `reconciler` field is the broker's key half and
+    // is now the dispatch target. Each drained Evaluation runs
+    // exactly one reconciler — the one it names.
+    let Some(reconciler) = state.runtime.reconcilers_iter().find(|r| r.name() == reconciler_name)
+    else {
+        tracing::warn!(
+            target: "overdrive::reconciler",
+            reconciler = %reconciler_name,
+            target = %target.as_str(),
+            "convergence tick: reconciler not registered; skipping"
+        );
+        return Ok(());
+    };
 
-        // Construct the per-tick TickContext.
-        let tick = TickContext { now, tick: tick_n, deadline };
+    // Construct the per-tick TickContext.
+    let tick = TickContext { now, tick: tick_n, deadline };
 
-        // Hydrate desired (intent-side) and actual (observation-side).
-        let desired = hydrate_desired(reconciler, target, state).await?;
-        let actual = hydrate_actual(reconciler, target, state).await?;
+    // Hydrate desired (intent-side) and actual (observation-side).
+    let desired = hydrate_desired(reconciler, target, state).await?;
+    let actual = hydrate_actual(reconciler, target, state).await?;
 
-        // Hydrate the typed View — Phase 1 carries the View in
-        // `AppState::view_cache` rather than libSQL (per-primitive
-        // libSQL is Phase 2+). On first tick the cache is empty;
-        // `cached_view_or_default` returns a fresh `default()` view.
-        // We still call `reconciler.hydrate` to stay on-contract with
-        // ADR-0013 §2 (hydrate is the ONLY async read seam) — Phase
-        // 1 reconcilers' hydrate impls return a default view that
-        // we discard in favour of the cached value.
-        let db = LibsqlHandle::default_phase1();
-        let _ = reconciler.hydrate(target, &db).await.map_err(ConvergenceError::Hydrate)?;
-        let view = cached_view_or_default(reconciler, target, state);
+    // Hydrate the typed View — Phase 1 carries the View in
+    // `AppState::view_cache` rather than libSQL (per-primitive
+    // libSQL is Phase 2+). On first tick the cache is empty;
+    // `cached_view_or_default` returns a fresh `default()` view.
+    // We still call `reconciler.hydrate` to stay on-contract with
+    // ADR-0013 §2 (hydrate is the ONLY async read seam) — Phase
+    // 1 reconcilers' hydrate impls return a default view that
+    // we discard in favour of the cached value.
+    let db = LibsqlHandle::default_phase1();
+    let _ = reconciler.hydrate(target, &db).await.map_err(ConvergenceError::Hydrate)?;
+    let view = cached_view_or_default(reconciler, target, state);
 
-        // Pure reconcile.
-        let (actions, next_view) = reconciler.reconcile(&desired, &actual, &view, &tick);
+    // Pure reconcile.
+    let (actions, next_view) = reconciler.reconcile(&desired, &actual, &view, &tick);
 
-        // Persist the next-view back into the cache. Phase 2+ wires
-        // this through libSQL diff-and-persist per ADR-0013 §2b.
-        store_cached_view(reconciler, target, state, next_view);
+    // Persist the next-view back into the cache. Phase 2+ wires
+    // this through libSQL diff-and-persist per ADR-0013 §2b.
+    store_cached_view(reconciler, target, state, next_view);
 
-        // Capture `has_work` BEFORE dispatch — `action_shim::dispatch`
-        // consumes `actions: Vec<Action>` by value, so checking
-        // `actions.is_empty()` after the call would not compile. The
-        // self-re-enqueue gate (`has_work`) is what makes the
-        // level-triggered §18 half work: the next tick re-evaluates
-        // only when the cluster has not yet converged.
-        //
-        // `Action::Noop` is the documented "nothing to do this tick"
-        // sentinel (see `core/reconciler.rs` `Action::Noop` variant)
-        // and `action_shim::dispatch` already treats it as a no-op
-        // (see `action_shim.rs`). The §18 re-enqueue gate must honor
-        // that documented semantic — an all-Noop actions vec is
-        // semantically empty, so it must NOT trip a self-re-enqueue
-        // (otherwise a converged target with a heartbeat reconciler
-        // self-re-enqueues forever).
-        let has_work = actions.iter().any(|a| !matches!(a, Action::Noop));
+    // Capture `has_work` BEFORE dispatch — `action_shim::dispatch`
+    // consumes `actions: Vec<Action>` by value, so checking
+    // `actions.is_empty()` after the call would not compile. The
+    // self-re-enqueue gate (`has_work`) is what makes the
+    // level-triggered §18 half work: the next tick re-evaluates
+    // only when the cluster has not yet converged.
+    //
+    // `Action::Noop` is the documented "nothing to do this tick"
+    // sentinel (see `core/reconciler.rs` `Action::Noop` variant)
+    // and `action_shim::dispatch` already treats it as a no-op
+    // (see `action_shim.rs`). The §18 re-enqueue gate must honor
+    // that documented semantic — an all-Noop actions vec is
+    // semantically empty, so it must NOT trip a self-re-enqueue
+    // (otherwise a converged target with a heartbeat reconciler
+    // self-re-enqueues forever).
+    let has_work = actions.iter().any(|a| !matches!(a, Action::Noop));
 
-        // Dispatch through the action shim — this is where `.await`
-        // is permitted. Per-action error isolation lives in the shim.
-        action_shim::dispatch(actions, state.driver.as_ref(), state.obs.as_ref(), &tick)
-            .await
-            .map_err(ConvergenceError::Shim)?;
+    // Dispatch through the action shim — this is where `.await`
+    // is permitted. Per-action error isolation lives in the shim.
+    action_shim::dispatch(actions, state.driver.as_ref(), state.obs.as_ref(), &tick)
+        .await
+        .map_err(ConvergenceError::Shim)?;
 
-        // Self-re-enqueue per whitepaper §18 *Level-triggered inside
-        // the reconciler*: if `reconcile` emitted at least one action,
-        // desired ≠ actual on this tick — re-submit so the next drain
-        // re-evaluates. The broker collapses duplicates by
-        // `(reconciler, target)` so a flapping target produces one
-        // pending evaluation, not N.
-        if has_work {
-            state
-                .runtime
-                .broker()
-                .submit(Evaluation { reconciler: name.clone(), target: target.clone() });
-        }
+    // Self-re-enqueue per whitepaper §18 *Level-triggered inside
+    // the reconciler*: if `reconcile` emitted at least one action,
+    // desired ≠ actual on this tick — re-submit so the next drain
+    // re-evaluates. The broker collapses duplicates by
+    // `(reconciler, target)` so a flapping target produces one
+    // pending evaluation, not N.
+    if has_work {
+        state
+            .runtime
+            .broker()
+            .submit(Evaluation { reconciler: reconciler_name.clone(), target: target.clone() });
     }
     Ok(())
 }

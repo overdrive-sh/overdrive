@@ -64,6 +64,8 @@ async fn job_stop_drives_running_to_terminated() {
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
     let target = TargetResource::new("job/stopper").expect("valid target");
+    let job_lifecycle_name = overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
+        .expect("job-lifecycle reconciler name");
     let now = Instant::now();
     let deadline = now + Duration::from_secs(60);
 
@@ -72,6 +74,7 @@ async fn job_stop_drives_running_to_terminated() {
     for tick_n in 0..30_u64 {
         run_convergence_tick(
             &state,
+            &job_lifecycle_name,
             &target,
             now + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
@@ -95,6 +98,7 @@ async fn job_stop_drives_running_to_terminated() {
     for tick_n in 30..60_u64 {
         run_convergence_tick(
             &state,
+            &job_lifecycle_name,
             &target,
             now + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,

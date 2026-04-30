@@ -84,6 +84,8 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
     let target = TargetResource::new("job/recovery").expect("valid target");
+    let job_lifecycle_name = overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
+        .expect("job-lifecycle reconciler name");
     let start = Instant::now();
     let deadline = start + Duration::from_secs(120);
 
@@ -93,6 +95,7 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
     while tick_n < 30 && !first_running {
         run_convergence_tick(
             &state,
+            &job_lifecycle_name,
             &target,
             start + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
@@ -158,6 +161,7 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
     while tick_n < 60 && !recovered {
         run_convergence_tick(
             &state,
+            &job_lifecycle_name,
             &target,
             start + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
