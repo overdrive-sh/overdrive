@@ -26,7 +26,7 @@ paths:
           Every row in the observation store, blank envelope. Used by
           integration tests and forward-compat operator surfaces.
         * `GET /v1/allocs?job=<id>` — full snapshot. The handler reads the
-          IntentStore for `<id>`'s `Job`, returns 404 if absent, then
+          `IntentStore` for `<id>`'s `Job`, returns 404 if absent, then
           projects matching rows + the `JobLifecycle` view-cache restart
           counts into the populated envelope shape per ADR-0033 §1.
 
@@ -121,11 +121,14 @@ paths:
         required: true
       responses:
         '200':
-          description: Job accepted
+          description: Job accepted (Accept negotiates one-shot vs streaming)
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/SubmitJobResponse'
+            application/x-ndjson:
+              schema:
+                $ref: '#/components/schemas/SubmitEvent'
         '400':
           description: Validation error
           content:
@@ -314,7 +317,7 @@ components:
         Per ADR-0033 §1 amended 2026-04-30 / Slice 01 step 01-03 — the
         envelope carries top-level identity (`job_id`, `spec_digest`),
         replica counts (`replicas_desired` / `replicas_running`) projected
-        from the IntentStore + observation rows, and a `restart_budget`
+        from the `IntentStore` + observation rows, and a `restart_budget`
         block hydrated from the `JobLifecycle` reconciler view cache.
 
         On the empty / 200 path with no rows the envelope still carries
@@ -795,6 +798,203 @@ components:
       enum:
       - operator
       - reconciler
+    SubmitEvent:
+      oneOf:
+      - type: object
+        description: |-
+          First line of every streaming response — confirms the
+          `IntentStore` commit. `outcome` carries the idempotency verdict
+          (Inserted / Unchanged) per ADR-0020.
+        required:
+        - data
+        - kind
+        properties:
+          data:
+            type: object
+            description: |-
+              First line of every streaming response — confirms the
+              `IntentStore` commit. `outcome` carries the idempotency verdict
+              (Inserted / Unchanged) per ADR-0020.
+            required:
+            - spec_digest
+            - intent_key
+            - outcome
+            properties:
+              intent_key:
+                type: string
+              outcome:
+                $ref: '#/components/schemas/IdempotencyOutcome'
+              spec_digest:
+                type: string
+          kind:
+            type: string
+            enum:
+            - accepted
+      - type: object
+        description: |-
+          Lifecycle transition observed on the broadcast channel.
+          Mirrors the snapshot's `TransitionRecord` shape with the alloc
+          id added so a stream consumer can disambiguate concurrent
+          allocations. `from` is the wire-state the alloc was in before
+          the transition; `to` is the new wire-state. `detail` carries
+          the verbatim driver / OS text the typed cause-class payload
+          does not encode.
+        required:
+        - data
+        - kind
+        properties:
+          data:
+            type: object
+            description: |-
+              Lifecycle transition observed on the broadcast channel.
+              Mirrors the snapshot's `TransitionRecord` shape with the alloc
+              id added so a stream consumer can disambiguate concurrent
+              allocations. `from` is the wire-state the alloc was in before
+              the transition; `to` is the new wire-state. `detail` carries
+              the verbatim driver / OS text the typed cause-class payload
+              does not encode.
+            required:
+            - alloc_id
+            - from
+            - to
+            - reason
+            - source
+            - at
+            properties:
+              alloc_id:
+                type: string
+              at:
+                type: string
+              detail:
+                type:
+                - string
+                - 'null'
+              from:
+                $ref: '#/components/schemas/AllocStateWire'
+              reason:
+                $ref: '#/components/schemas/TransitionReason'
+              source:
+                $ref: '#/components/schemas/TransitionSource'
+              to:
+                $ref: '#/components/schemas/AllocStateWire'
+          kind:
+            type: string
+            enum:
+            - lifecycle_transition
+      - type: object
+        description: |-
+          Terminal — convergence reached `Running`. The CLI maps this to
+          exit code 0 per ADR-0032 §9.
+        required:
+        - data
+        - kind
+        properties:
+          data:
+            type: object
+            description: |-
+              Terminal — convergence reached `Running`. The CLI maps this to
+              exit code 0 per ADR-0032 §9.
+            required:
+            - alloc_id
+            - started_at
+            properties:
+              alloc_id:
+                type: string
+              started_at:
+                type: string
+          kind:
+            type: string
+            enum:
+            - converged_running
+      - type: object
+        description: |-
+          Terminal — convergence failed. The CLI maps this to exit code 1
+          per ADR-0032 §9 regardless of the inner `terminal_reason`; the
+          terminal reason controls *rendering*, not exit code.
+
+          `alloc_id` is `Option` because some terminal failures fire
+          before any allocation has been written (e.g. a wall-clock
+          timeout that observes no broadcast events). `reason` carries
+          the most recent cause-class `TransitionReason` for renderers
+          that want the structured cause without re-parsing the
+          `terminal_reason`'s inner payload. `error` carries the verbatim
+          driver text the typed payloads do not capture.
+        required:
+        - data
+        - kind
+        properties:
+          data:
+            type: object
+            description: |-
+              Terminal — convergence failed. The CLI maps this to exit code 1
+              per ADR-0032 §9 regardless of the inner `terminal_reason`; the
+              terminal reason controls *rendering*, not exit code.
+
+              `alloc_id` is `Option` because some terminal failures fire
+              before any allocation has been written (e.g. a wall-clock
+              timeout that observes no broadcast events). `reason` carries
+              the most recent cause-class `TransitionReason` for renderers
+              that want the structured cause without re-parsing the
+              `terminal_reason`'s inner payload. `error` carries the verbatim
+              driver text the typed payloads do not capture.
+            required:
+            - terminal_reason
+            properties:
+              alloc_id:
+                type:
+                - string
+                - 'null'
+              error:
+                type:
+                - string
+                - 'null'
+              reason:
+                oneOf:
+                - type: 'null'
+                - $ref: '#/components/schemas/TransitionReason'
+              terminal_reason:
+                $ref: '#/components/schemas/TerminalReason'
+          kind:
+            type: string
+            enum:
+            - converged_failed
+      description: |-
+        Streaming-submit event emitted on the `Accept: application/x-ndjson`
+        lane of `POST /v1/jobs` per ADR-0032 §3 (cause-class amendment
+        2026-04-30).
+
+        Each event renders as one NDJSON line. The wire shape is
+        `#[serde(tag = "kind", content = "data", rename_all = "snake_case")]`
+        — `Accepted`, `LifecycleTransition`, `ConvergedRunning`,
+        `ConvergedFailed`. Cause-class payloads (`TransitionReason`,
+        `TerminalReason`) carry the same tag/content shape, producing
+        nested structures like:
+
+        ```text
+        kind=accepted             data={spec_digest, intent_key, outcome}
+        kind=lifecycle_transition data={alloc_id, from, to, reason, detail?, source, at}
+        kind=converged_running    data={alloc_id, started_at}
+        kind=converged_failed     data={alloc_id?, terminal_reason, reason?, error?}
+        ```
+
+        `reason` and `terminal_reason` carry their own `{kind, data}`
+        structures (the cause-class amendment): a Phase-1 `ExecDriver`
+        `spawn(2)` ENOENT renders as `reason = {kind=exec_binary_not_found,
+        data={path}}`. A `BackoffExhausted` terminal carries the nested
+        cause: `terminal_reason = {kind=backoff_exhausted, data={attempts,
+        cause}}` where `cause` is itself a typed `TransitionReason`.
+
+        `LifecycleTransition` is a wire projection of (a subset of)
+        [`crate::action_shim::LifecycleEvent`]'s fields. The streaming
+        handler (slice 02 step 02-03) subscribes to the broadcast channel
+        on `AppState`, projects each `LifecycleEvent` onto a
+        `SubmitEvent::LifecycleTransition`, and writes one NDJSON line via
+        `serde_json::to_writer` + `b'\n'`.
+
+        **Source-of-truth pin**: `LifecycleTransition.reason` is the SAME
+        `TransitionReason` enum as the snapshot's
+        `AllocStatusRowBody.reason` and `TransitionRecord.reason` — byte-
+        equality across surfaces is structural, not discipline ([C6]).
     SubmitJobRequest:
       type: object
       description: |-

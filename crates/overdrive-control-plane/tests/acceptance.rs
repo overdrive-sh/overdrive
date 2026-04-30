@@ -65,4 +65,9 @@ mod acceptance {
     // cli-submit-vs-deploy-and-alloc-status — Slice 02 step 02-01.
     // S-CP-04 broadcast property test + S-CP-05 classifier scenarios.
     mod lifecycle_broadcast;
+
+    // cli-submit-vs-deploy-and-alloc-status — Slice 02 step 02-02.
+    // SubmitEvent wire enum serde round-trip + literal wire-shape
+    // regression assertions per ADR-0032 §3 Amendment 2026-04-30.
+    mod submit_event_serialization;
 }

@@ -159,12 +159,25 @@ impl From<overdrive_core::traits::observation_store::NodeHealthRow> for api::Nod
 /// bytes and used both for the byte-equality check (against the
 /// `existing` bytes returned by `PutOutcome::KeyExists`) and for the
 /// response body.
+// Slice 02 step 02-02 — `POST /v1/jobs` 200 response is polymorphic
+// on `Accept` per DESIGN [D6] / [D8]. The path declares both content
+// types under a single 200 response — `application/json` returns a
+// one-shot `SubmitJobResponse`; `application/x-ndjson` returns a
+// stream of `SubmitEvent` lines. utoipa 5.x's `responses(..., content(
+// (T1 = "mime1"), (T2 = "mime2") ))` group form is the multi-content-
+// type shape (see utoipa-gen 5.4.0 src/path/response.rs §"content"
+// branch).
 #[utoipa::path(
     post,
     path = "/v1/jobs",
     request_body = api::SubmitJobRequest,
     responses(
-        (status = 200, description = "Job accepted", body = api::SubmitJobResponse),
+        (status = 200, description = "Job accepted (Accept negotiates one-shot vs streaming)",
+            content(
+                (api::SubmitJobResponse = "application/json"),
+                (api::SubmitEvent       = "application/x-ndjson"),
+            )
+        ),
         (status = 400, description = "Validation error", body = api::ErrorBody),
         (status = 409, description = "Conflict at existing key", body = api::ErrorBody),
         (status = 500, description = "Internal error", body = api::ErrorBody),

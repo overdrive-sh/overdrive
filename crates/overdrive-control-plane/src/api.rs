@@ -329,6 +329,12 @@ pub struct ErrorBody {
         // cutting derive change); the `TransitionSource::Driver`
         // variant references it inline so the schema must register.
         DriverType,
+        // Slice 02 step 02-02 — `SubmitEvent` is the streaming
+        // `application/x-ndjson` line shape on `POST /v1/jobs`. Registered
+        // here so the OpenAPI document carries the schema reference even
+        // though the path's `#[utoipa::path(...)]` macro declares the
+        // multi-content-type response shape.
+        SubmitEvent,
     )),
     tags(
         (name = "jobs", description = "Job lifecycle endpoints"),
@@ -509,6 +515,92 @@ pub enum TransitionSource {
     Reconciler,
     /// Driver (named) produced this row directly.
     Driver(DriverType),
+}
+
+/// Streaming-submit event emitted on the `Accept: application/x-ndjson`
+/// lane of `POST /v1/jobs` per ADR-0032 §3 (cause-class amendment
+/// 2026-04-30).
+///
+/// Each event renders as one NDJSON line. The wire shape is
+/// `#[serde(tag = "kind", content = "data", rename_all = "snake_case")]`
+/// — `Accepted`, `LifecycleTransition`, `ConvergedRunning`,
+/// `ConvergedFailed`. Cause-class payloads (`TransitionReason`,
+/// `TerminalReason`) carry the same tag/content shape, producing
+/// nested structures like:
+///
+/// ```text
+/// kind=accepted             data={spec_digest, intent_key, outcome}
+/// kind=lifecycle_transition data={alloc_id, from, to, reason, detail?, source, at}
+/// kind=converged_running    data={alloc_id, started_at}
+/// kind=converged_failed     data={alloc_id?, terminal_reason, reason?, error?}
+/// ```
+///
+/// `reason` and `terminal_reason` carry their own `{kind, data}`
+/// structures (the cause-class amendment): a Phase-1 `ExecDriver`
+/// `spawn(2)` ENOENT renders as `reason = {kind=exec_binary_not_found,
+/// data={path}}`. A `BackoffExhausted` terminal carries the nested
+/// cause: `terminal_reason = {kind=backoff_exhausted, data={attempts,
+/// cause}}` where `cause` is itself a typed `TransitionReason`.
+///
+/// `LifecycleTransition` is a wire projection of (a subset of)
+/// [`crate::action_shim::LifecycleEvent`]'s fields. The streaming
+/// handler (slice 02 step 02-03) subscribes to the broadcast channel
+/// on `AppState`, projects each `LifecycleEvent` onto a
+/// `SubmitEvent::LifecycleTransition`, and writes one NDJSON line via
+/// `serde_json::to_writer` + `b'\n'`.
+///
+/// **Source-of-truth pin**: `LifecycleTransition.reason` is the SAME
+/// `TransitionReason` enum as the snapshot's
+/// `AllocStatusRowBody.reason` and `TransitionRecord.reason` — byte-
+/// equality across surfaces is structural, not discipline ([C6]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "kind", content = "data", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum SubmitEvent {
+    /// First line of every streaming response — confirms the
+    /// `IntentStore` commit. `outcome` carries the idempotency verdict
+    /// (Inserted / Unchanged) per ADR-0020.
+    Accepted { spec_digest: String, intent_key: String, outcome: IdempotencyOutcome },
+    /// Lifecycle transition observed on the broadcast channel.
+    /// Mirrors the snapshot's `TransitionRecord` shape with the alloc
+    /// id added so a stream consumer can disambiguate concurrent
+    /// allocations. `from` is the wire-state the alloc was in before
+    /// the transition; `to` is the new wire-state. `detail` carries
+    /// the verbatim driver / OS text the typed cause-class payload
+    /// does not encode.
+    LifecycleTransition {
+        alloc_id: String,
+        from: AllocStateWire,
+        to: AllocStateWire,
+        reason: TransitionReason,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+        source: TransitionSource,
+        at: String,
+    },
+    /// Terminal — convergence reached `Running`. The CLI maps this to
+    /// exit code 0 per ADR-0032 §9.
+    ConvergedRunning { alloc_id: String, started_at: String },
+    /// Terminal — convergence failed. The CLI maps this to exit code 1
+    /// per ADR-0032 §9 regardless of the inner `terminal_reason`; the
+    /// terminal reason controls *rendering*, not exit code.
+    ///
+    /// `alloc_id` is `Option` because some terminal failures fire
+    /// before any allocation has been written (e.g. a wall-clock
+    /// timeout that observes no broadcast events). `reason` carries
+    /// the most recent cause-class `TransitionReason` for renderers
+    /// that want the structured cause without re-parsing the
+    /// `terminal_reason`'s inner payload. `error` carries the verbatim
+    /// driver text the typed payloads do not capture.
+    ConvergedFailed {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        alloc_id: Option<String>,
+        terminal_reason: TerminalReason,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<TransitionReason>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
 }
 
 /// Lifecycle-transition record carried inside the snapshot's
