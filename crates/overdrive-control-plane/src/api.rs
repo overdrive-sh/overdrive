@@ -285,3 +285,112 @@ pub struct ErrorBody {
     ),
 )]
 pub struct OverdriveApi;
+
+// ---------------------------------------------------------------------------
+// SCAFFOLD: true
+//
+// RED scaffolds (DISTILL wave, feature cli-submit-vs-deploy-and-alloc-status).
+// Per `.claude/rules/testing.md` § "RED scaffolds and intentionally-failing
+// commits": the type declarations below compile cleanly so tests written
+// ahead of the crafter's DELIVER work can import them. Where a method or
+// constructor needs to exist for a test to type-check, its body panics
+// with the RED marker. Methods that DON'T exist yet remain absent — the
+// test that calls them will fail with a name-resolution error, which is
+// also a valid RED signal under the project's discipline.
+//
+// The crafter replaces these scaffolds with the real implementations
+// during DELIVER:
+//   - slice 01: `TerminalReason`, `AllocStateWire`, `RestartBudget`,
+//     `ResourcesBody`, plus the `TransitionRecord`/`TransitionSource`/
+//     `SubmitEvent` declarations once their dependencies (`ToSchema` on
+//     `DriverType`) land.
+//   - slice 02: `SubmitEvent`, the broadcast channel wiring on `AppState`,
+//     and the streaming handler.
+//
+// See `docs/feature/cli-submit-vs-deploy-and-alloc-status/distill/wave-decisions.md`
+// DWD-03 for the rationale on which net-new types are scaffolded here vs.
+// deferred to the crafter.
+// ---------------------------------------------------------------------------
+
+/// Streaming `SubmitEvent::ConvergedFailed` terminal-cause discriminator.
+///
+/// Phase 1 variants per ADR-0032 §3 (additive going forward —
+/// `#[non_exhaustive]`):
+///
+/// | Variant | When emitted by the streaming handler |
+/// |---|---|
+/// | `DriverError` | unrecoverable driver error after one attempt |
+/// | `BackoffExhausted` | restart budget hit (5 attempts) |
+/// | `Timeout` | server wall-clock cap hit |
+///
+/// The CLI maps `ConvergedRunning → 0` and `ConvergedFailed → 1` regardless
+/// of the inner `terminal_reason`; the terminal reason controls *rendering*,
+/// not exit code (ADR-0032 §9).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum TerminalReason {
+    /// Streaming handler observed an unrecoverable driver error after
+    /// one attempt where the reconciler will not retry.
+    DriverError,
+    /// Streaming handler observed `restart_count == max` and latest
+    /// row state is Failed.
+    BackoffExhausted,
+    /// Streaming handler's wall-clock cap fired before any terminal
+    /// event arrived.
+    Timeout,
+}
+
+/// Wire-shaped projection of the internal `AllocState` enum.
+///
+/// The internal `AllocState` (in `overdrive-core::traits::observation_store`)
+/// derives `rkyv::*` for the observation store. The wire shape needs
+/// `Serialize`/`Deserialize`/`ToSchema` and a stable lowercase string repr.
+/// Adding all those derives to the internal type would entangle storage
+/// and wire concerns, so this mirror enum exists for the wire surface
+/// (ADR-0032 §3, reuse-analysis CREATE NEW rationale).
+///
+/// `Failed` is the new variant per ADR-0032 §5 — the action shim, when
+/// handling `DriverError::StartRejected`, writes `state: Failed` (instead
+/// of `Terminated`). The internal `AllocState::Failed` variant addition
+/// is deferred to the crafter (slice 01 GREEN); this wire type already
+/// names the variant so tests can reference it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+#[non_exhaustive]
+pub enum AllocStateWire {
+    Pending,
+    Running,
+    Draining,
+    Suspended,
+    Terminated,
+    /// NEW per ADR-0032 §5 — distinguishes "operator stopped" from
+    /// "driver could not start".
+    Failed,
+}
+
+/// Snapshot's restart-budget block per ADR-0033 §1.
+///
+/// `exhausted` is redundant with `used >= max`; carried explicitly on the
+/// wire so a CLI that wants to render the `(backoff exhausted)` annotation
+/// does not have to compare two integers each time.
+///
+/// Phase 1: `max` is hard-coded to 5 (matching the existing
+/// `RESTART_BUDGET_MAX` constant in `JobLifecycle::reconcile`); Phase 2+
+/// makes it per-job-config (DESIGN [D7]).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+pub struct RestartBudget {
+    pub used: u32,
+    pub max: u32,
+    pub exhausted: bool,
+}
+
+/// Snapshot's per-row `resources` block per ADR-0033 §1.
+///
+/// Mirrors the internal `overdrive_core::traits::driver::Resources` shape
+/// for the wire. Conversion is mechanical (slice 01 GREEN wires it).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+pub struct ResourcesBody {
+    pub cpu_milli: u32,
+    pub memory_bytes: u64,
+}

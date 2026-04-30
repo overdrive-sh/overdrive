@@ -29,6 +29,14 @@ pub mod error;
 pub mod id;
 pub mod reconciler;
 pub mod traits;
+// RED scaffold (DISTILL wave, feature cli-submit-vs-deploy-and-alloc-status).
+// Per `.claude/rules/testing.md` § "RED scaffolds and intentionally-failing
+// commits": this module exists so acceptance tests written ahead of the
+// crafter's DELIVER work can import the type. Methods panic with the RED
+// marker; the type declaration itself compiles cleanly. See
+// `docs/feature/cli-submit-vs-deploy-and-alloc-status/distill/wave-decisions.md`
+// DWD-03.
+pub mod transition_reason;
 
 /// Trait-conformance harnesses exposed to adapter test suites.
 ///
@@ -51,3 +59,9 @@ pub use id::{
 pub use traits::{
     Clock, Dataplane, Driver, DriverType, Entropy, IntentStore, Llm, ObservationStore, Transport,
 };
+// RED scaffold export (DISTILL wave, feature
+// cli-submit-vs-deploy-and-alloc-status). Re-exported from
+// `transition_reason` for convenience; the snapshot wire surface in
+// `overdrive-control-plane::api` will further re-export with a
+// `ToSchema` derive in slice 01 GREEN.
+pub use transition_reason::TransitionReason;
