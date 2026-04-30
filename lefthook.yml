@@ -59,7 +59,7 @@ pre-commit:
           done
         done | sort -u)
         for p in $pkgs; do
-          cargo clippy -p "$p" --all-targets --all-features -- -D warnings
+          cargo clippy -p "$p" --all-targets --all-features --tests -- -D warnings
         done
       fail_text: |
         Clippy warnings. Fix or `#[allow]` with justification.

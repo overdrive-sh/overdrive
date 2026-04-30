@@ -83,7 +83,7 @@ fn write_toml(dir: &Path, name: &str, body: &str) -> PathBuf {
 
 /// Minimal valid spec — `/bin/true` exists on every Linux runner and
 /// terminates immediately. The JSON-ack lane returns as soon as the
-/// IntentStore commit lands, so the workload's runtime behaviour is
+/// `IntentStore` commit lands, so the workload's runtime behaviour is
 /// not load-bearing — only that the spec validates and submits.
 const fn payments_spec_toml() -> &'static str {
     r#"

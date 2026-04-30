@@ -77,6 +77,7 @@ args = []
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[allow(clippy::too_many_lines)]
 async fn streaming_submit_against_missing_binary_emits_backoff_exhausted_with_cause_class_payload()
 {
     let (handle, server_tmp) = spawn_server().await;

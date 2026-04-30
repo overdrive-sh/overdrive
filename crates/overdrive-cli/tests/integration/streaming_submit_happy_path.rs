@@ -20,7 +20,7 @@
 //!     (the test does not assert this — KPI-01 is the streaming-server
 //!     property — but the stream IS observed end-to-end).
 //!   * KPI-04 — byte-equality of streaming `Accepted.spec_digest` and
-//!     the pre-existing one-shot ack response (the spec_digest is
+//!     the pre-existing one-shot ack response (the `spec_digest` is
 //!     stable across surfaces).
 
 #![cfg(target_os = "linux")]
