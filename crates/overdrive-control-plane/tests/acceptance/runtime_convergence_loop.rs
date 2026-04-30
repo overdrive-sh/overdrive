@@ -151,3 +151,179 @@ async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
         counters.queued
     );
 }
+
+// ---------------------------------------------------------------------------
+// fix-eval-reconciler-discarded — RED regression scaffold (Step 01-01).
+//
+// Pins the dispatch-routing contract that lives at
+// `reconciler_runtime.rs::run_convergence_tick`: a drained
+// `Evaluation { reconciler, target }` MUST dispatch ONLY the named
+// reconciler against the target — not fan out across every registered
+// reconciler. The current production loop (`for name in &registered`)
+// ignores `eval.reconciler` entirely, so a single eval submitted at
+// `(job-lifecycle, job/payments)` causes BOTH `JobLifecycle::hydrate_desired`
+// AND `NoopHeartbeat::hydrate_desired` to read from the IntentStore — see
+// `docs/feature/fix-eval-reconciler-discarded/deliver/bugfix-rca.md` §Defect.
+//
+// This test is written against the POST-FIX `run_convergence_tick`
+// signature (`run_convergence_tick(state, reconciler_name, target, ...)`),
+// so it WILL NOT COMPILE against current main — that compile failure IS
+// the RED proof per `.claude/rules/testing.md` § "RED scaffolds and
+// intentionally-failing commits". The `#[ignore]` attribute only skips
+// runtime; cargo check still catches the arity mismatch, which is why
+// this commit must land via `git commit --no-verify`.
+//
+// Step 01-02 lands the production fix in `run_convergence_tick`,
+// updates the lib.rs caller and the cascade test sites, and removes
+// the `#[ignore]` — the test transitions un-compiled-and-ignored →
+// compiled-and-passing in one cohesive commit.
+// ---------------------------------------------------------------------------
+
+/// RED — drives the runtime convergence loop with a single
+/// `Evaluation { reconciler: job-lifecycle, target: job/payments }` and
+/// asserts that ONLY `JobLifecycle` is dispatched against the target.
+///
+/// Counting strategy: every reconciler that runs through
+/// `run_convergence_tick` writes a `(reconciler_name, target_string)`
+/// entry into `AppState::view_cache` via `store_cached_view`
+/// (`reconciler_runtime.rs:248`). The cache is `pub` and observable from
+/// the test:
+///
+/// * **Pre-fix**: the dispatch loop iterates every registered
+///   reconciler (`for name in &registered`) and runs both
+///   `JobLifecycle` and `NoopHeartbeat` against the JobLifecycle
+///   target, so `view_cache` ends up with TWO entries —
+///   `("job-lifecycle", "job/payments")` AND
+///   `("noop-heartbeat", "job/payments")`. The latter entry is the
+///   smoking gun: `NoopHeartbeat` was never named in the submitted
+///   evaluation, yet it executed.
+/// * **Post-fix**: the dispatch path looks up only the named
+///   reconciler, so `view_cache` contains exactly ONE entry —
+///   `("job-lifecycle", "job/payments")`.
+///
+/// Written against the post-fix `run_convergence_tick(state,
+/// reconciler_name, target, now, tick_n, deadline)` signature — the
+/// arity mismatch against current main is the proof-of-RED.
+#[tokio::test]
+#[ignore = "RED scaffold for fix-eval-reconciler-discarded — un-ignore in the GREEN step"]
+async fn eval_dispatch_runs_only_the_named_reconciler() {
+    let tmp = TempDir::new().expect("tempdir");
+    let clock = SimClock::new();
+
+    // --- Build a converged AppState (same fixture shape as the test
+    //     above; both reconcilers registered).
+    let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime::new");
+    runtime.register(noop_heartbeat()).expect("register noop-heartbeat");
+    runtime.register(job_lifecycle()).expect("register job-lifecycle");
+
+    let store_path = tmp.path().join("intent.redb");
+    let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
+    let obs: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(
+        NodeId::new("local").expect("NodeId"),
+        0,
+    ));
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let state = AppState::new(store, obs, Arc::new(runtime), driver);
+
+    // --- Preload IntentStore with one converged Job (replicas=1).
+    let job = Job::from_spec(JobSpecInput {
+        id: "payments".to_string(),
+        replicas: 1,
+        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
+        driver: DriverInput::Exec(ExecInput {
+            command: "/bin/true".to_string(),
+            args: vec![],
+        }),
+    })
+    .expect("valid job spec");
+    let archived = rkyv::to_bytes::<rkyv::rancor::Error>(&job).expect("rkyv archive");
+    let payments_intent_key = IntentKey::for_job(&job.id);
+    state
+        .store
+        .put(payments_intent_key.as_bytes(), archived.as_ref())
+        .await
+        .expect("put job");
+
+    // --- Preload ObservationStore: one Running alloc against the same
+    //     job so `JobLifecycle::reconcile` sees `desired ≈ actual` and
+    //     emits no actions — keeps the assertion focused on the
+    //     dispatch-routing defect rather than convergence work.
+    let writer = NodeId::new("local").expect("writer node id");
+    let alloc_row = AllocStatusRow {
+        alloc_id: AllocationId::new("alloc-payments-0").expect("valid alloc id"),
+        job_id: job.id.clone(),
+        node_id: writer.clone(),
+        state: AllocState::Running,
+        updated_at: LogicalTimestamp { counter: 1, writer: writer.clone() },
+    };
+    state
+        .obs
+        .write(ObservationRow::AllocStatus(alloc_row))
+        .await
+        .expect("seed Running alloc row");
+
+    // --- Submit ONE evaluation naming `job-lifecycle` only.
+    let target = TargetResource::new("job/payments").expect("valid target");
+    state.runtime.broker().submit(Evaluation {
+        reconciler: ReconcilerName::new("job-lifecycle").expect("valid reconciler name"),
+        target: target.clone(),
+    });
+
+    // --- Drain and dispatch using the POST-FIX call shape. The
+    //     compile error against current main is the RED proof: the
+    //     present-day `run_convergence_tick` takes `(&state, &target,
+    //     now, tick_n, deadline)` — this call site adds
+    //     `&eval.reconciler` as the second arg and won't compile until
+    //     the production fix in 01-02 lands the matching signature.
+    let now = clock.now();
+    let deadline = now + Duration::from_millis(100);
+    let tick_n = 0_u64;
+    let pending = {
+        let mut broker = state.runtime.broker();
+        broker.drain_pending()
+    };
+    for eval in pending {
+        let _ = run_convergence_tick(
+            &state,
+            &eval.reconciler,
+            &eval.target,
+            now,
+            tick_n,
+            deadline,
+        )
+        .await;
+    }
+
+    // --- Assertion (kills the bugged behaviour): only `job-lifecycle`
+    //     ran against `job/payments`. `view_cache` is keyed on
+    //     `(reconciler_name_string, target_string)`; every reconciler
+    //     that runs through `run_convergence_tick` writes its entry
+    //     via `store_cached_view`.
+    //
+    //     Pre-fix the cache has TWO entries — both reconcilers ran.
+    //     Post-fix the cache has ONE entry — only the named reconciler.
+    let cache = state.view_cache.lock().expect("view_cache mutex");
+    let entries_for_target: Vec<&(String, String)> = cache
+        .keys()
+        .filter(|(_, t)| t == &target.to_string())
+        .collect();
+    assert_eq!(
+        entries_for_target.len(),
+        1,
+        "expected exactly one reconciler to run against {} — \
+         JobLifecycle only — got {} entries: {:?} \
+         (pre-fix value 2 indicates fan-out across both reconcilers; \
+         the smoking gun is the noop-heartbeat entry, which was never \
+         named in the submitted evaluation)",
+        target,
+        entries_for_target.len(),
+        entries_for_target
+    );
+    let only_entry = entries_for_target[0];
+    assert_eq!(
+        only_entry.0, "job-lifecycle",
+        "expected the surviving cache entry to be `job-lifecycle` — \
+         got `{}`",
+        only_entry.0
+    );
+}
