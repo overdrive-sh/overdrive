@@ -11,7 +11,9 @@
 //! (no progress spinners) so the first output lands within the
 //! 100ms target on localhost per US-05 AC.
 
-use overdrive_control_plane::api::{IdempotencyOutcome, StopOutcome};
+use overdrive_control_plane::api::{
+    AllocStateWire, AllocStatusResponse, IdempotencyOutcome, StopOutcome, TransitionSource,
+};
 
 use crate::commands::alloc::AllocStatusOutput;
 use crate::commands::cluster::ClusterStatusOutput;
@@ -156,6 +158,101 @@ pub fn alloc_status(out: &AllocStatusOutput) -> String {
         let _ = writeln!(s, "{}", out.empty_state_message);
     }
     s
+}
+
+/// Render a typed [`AllocStatusResponse`] as the journey TUI mockup
+/// from ADR-0033 §4 (amended 2026-04-30 — cause-class rendering).
+///
+/// Per slice 01 step 01-03 / S-AS-04 / S-AS-05 / S-AS-06: the renderer
+/// is a pure function over the typed response. Three case-arms drive
+/// the output:
+///
+/// * **Running** — full envelope with `Restart budget: U / M used`,
+///   per-row `Last transition` block.
+/// * **Failed** — adds `(backoff exhausted)` to the budget line when
+///   `restart_budget.exhausted` is set; surfaces the verbatim
+///   driver error from the row's `error` field.
+/// * **Pending-no-capacity** — never shows `Allocations: 0`; the
+///   row's `reason: TransitionReason::NoCapacity` is rendered
+///   explicitly via `human_readable()` plus the `error` line for
+///   the requested-vs-free diagnostic.
+///
+/// `human_readable()` lives on `TransitionReason` so the snapshot and
+/// streaming surfaces share one rendering function.
+#[must_use]
+pub fn alloc_snapshot(out: &AllocStatusResponse) -> String {
+    use std::fmt::Write as _;
+    let mut s = String::new();
+    if let Some(job_id) = &out.job_id {
+        let _ = writeln!(s, "Job ID:        {job_id}");
+    }
+    if let Some(digest) = &out.spec_digest {
+        let _ = writeln!(s, "Spec digest:   {digest}");
+    }
+    let _ = writeln!(s, "Replicas:      {}/{}", out.replicas_running, out.replicas_desired);
+    if let Some(budget) = &out.restart_budget {
+        if budget.exhausted {
+            let _ = writeln!(
+                s,
+                "Restart budget: {used} / {max} used (backoff exhausted)",
+                used = budget.used,
+                max = budget.max,
+            );
+        } else {
+            let _ = writeln!(s, "Restart budget: {} / {} used", budget.used, budget.max);
+        }
+    }
+
+    for row in &out.rows {
+        let _ = writeln!(s);
+        let _ = writeln!(s, "Allocation:    {}", row.alloc_id);
+        let _ = writeln!(s, "  state:       {}", state_label(row.state));
+        if let Some(reason) = &row.reason {
+            let _ = writeln!(s, "  reason:      {}", reason.human_readable());
+        }
+        if let Some(error) = &row.error {
+            let _ = writeln!(s, "  error:       {error}");
+        }
+        if let Some(last) = &row.last_transition {
+            let from =
+                last.from.map_or_else(|| "(initial)".to_owned(), |f| state_label(f).to_owned());
+            let to = state_label(last.to);
+            let _ = writeln!(
+                s,
+                "  Last transition: {at} {from} → {to} reason: {reason} source: {source}",
+                at = last.at,
+                reason = last.reason.human_readable(),
+                source = source_label(last.source),
+            );
+        }
+    }
+    s
+}
+
+/// Lowercase variant label for an `AllocStateWire`. Shared between
+/// the headline state line and the transition arrow rendering.
+const fn state_label(state: AllocStateWire) -> &'static str {
+    match state {
+        AllocStateWire::Pending => "Pending",
+        AllocStateWire::Running => "Running",
+        AllocStateWire::Draining => "Draining",
+        AllocStateWire::Suspended => "Suspended",
+        AllocStateWire::Terminated => "Terminated",
+        AllocStateWire::Failed => "Failed",
+        // `AllocStateWire` is `#[non_exhaustive]`; render unknown
+        // future variants verbatim rather than panicking.
+        _ => "(unknown)",
+    }
+}
+
+/// Render the source-attribution segment of a `Last transition` line.
+fn source_label(source: TransitionSource) -> String {
+    match source {
+        TransitionSource::Reconciler => "reconciler".to_owned(),
+        TransitionSource::Driver(driver) => format!("driver({driver})"),
+        // `TransitionSource` is `#[non_exhaustive]` — forward-compat fallback.
+        _ => "(unknown)".to_owned(),
+    }
 }
 
 /// Render a [`CliError`] as an operator-facing multi-line error block.

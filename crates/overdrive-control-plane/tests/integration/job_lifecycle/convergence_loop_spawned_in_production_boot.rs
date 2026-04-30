@@ -211,7 +211,8 @@ async fn submitted_job_reaches_running_via_real_server_boot() {
     // weakening of the assertion (the assertion still pins
     // `state.to_string() == "running"` AND `job_id == "payments"`).
     assert!(
-        allocs.rows.iter().any(|a| a.job_id == "payments" && a.state == "running"),
+        allocs.rows.iter().any(|a| a.job_id == "payments"
+            && matches!(a.state, overdrive_control_plane::api::AllocStateWire::Running)),
         "submitted job must reach Running via the production convergence loop; \
          got {:?}",
         allocs.rows,

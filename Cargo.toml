@@ -63,7 +63,7 @@ instant-acme    = "0.8"
 # SCAFFOLD: true — added for phase-1-control-plane-core per ADRs 0008 / 0009 /
 # 0013. Versions chosen per DESIGN wave-decisions §Tech stack. Crafter may
 # tighten pins after `cargo check`.
-axum            = { version = "0.7", default-features = false, features = ["http1", "http2", "json", "tokio"] }
+axum            = { version = "0.7", default-features = false, features = ["http1", "http2", "json", "tokio", "query"] }
 axum-server     = { version = "0.7", default-features = false, features = ["tls-rustls"] }
 utoipa          = { version = "5", features = ["axum_extras", "yaml"] }
 utoipa-axum     = "0.1"

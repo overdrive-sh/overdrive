@@ -18,6 +18,10 @@
 #![allow(clippy::unwrap_used)]
 
 mod acceptance {
+    // Slice 01 step 01-03 — journey TUI mockup renderer for the
+    // extended `AllocStatusResponse`. S-AS-04 / S-AS-05 / S-AS-06.
+    mod alloc_status_render;
+
     mod insecure_rejected;
     mod render_alloc_status;
     mod render_cluster_and_node;

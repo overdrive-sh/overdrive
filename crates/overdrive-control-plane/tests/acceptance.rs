@@ -23,6 +23,11 @@ mod acceptance {
     // fields per ADR-0032 §3 (Amendment 2026-04-30) and §4.
     mod alloc_status_row_archive_roundtrip;
 
+    // S-AS-01 / S-AS-07 / S-AS-08 / S-AS-09 (Slice 01 step 01-03) —
+    // `AllocStatusResponse` extension, handler hydration via observation
+    // rows + `JobLifecycleView`, 404 on missing job. KPI-03 satisfaction.
+    mod alloc_status_snapshot;
+
     mod api_type_shapes;
     mod cluster_status_lists_both_reconcilers;
 
@@ -37,7 +42,13 @@ mod acceptance {
     mod job_stop_idempotent;
     mod job_stop_intent_key;
     mod job_stop_unknown;
-    mod pending_no_capacity_renders_reason;
+    // `pending_no_capacity_renders_reason` was retired in slice 01 step
+    // 01-03: the legacy `AllocStatusRowBody.reason: Option<String>`
+    // surface is replaced by the typed `Option<TransitionReason>` per
+    // the cause-class refactor (ADR-0032 §3 Amendment 2026-04-30).
+    // S-AS-06 in `alloc_status_render` covers the new contract:
+    // Pending-no-capacity renders an explicit reason row, never
+    // `Allocations: 0`.
     mod row_body_conversions;
     mod runtime_convergence_loop;
     mod runtime_registers_noop_heartbeat;

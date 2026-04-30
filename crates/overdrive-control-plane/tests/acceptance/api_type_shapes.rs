@@ -174,24 +174,43 @@ fn broker_counters_body_round_trips_through_serde_json() {
 #[test]
 fn alloc_status_response_round_trips_with_empty_and_populated_rows() {
     // Phase 1 ships the empty-array case — US-03 AC pins this.
-    let empty = AllocStatusResponse { rows: Vec::new() };
+    let empty = AllocStatusResponse::default();
     let wire = serde_json::to_string(&empty).expect("serialise empty AllocStatusResponse");
-    assert_eq!(wire, r#"{"rows":[]}"#);
+    // Empty default — defaulted u32 fields render as 0; rows is [].
+    assert!(wire.contains(r#""rows":[]"#), "empty wire must include rows: []; got {wire}");
     let round_tripped: AllocStatusResponse =
         serde_json::from_str(&wire).expect("deserialise empty AllocStatusResponse");
     assert!(round_tripped.rows.is_empty());
 
-    // Step 03-03 populated `AllocStatusRowBody` with the minimal Phase 1
-    // shape — alloc_id, job_id, node_id, state. The round-trip still
-    // has to work — forward compatibility cuts in both directions.
+    // Slice 01 step 01-03 — the populated shape carries the typed
+    // `AllocStateWire` state, structured `resources`, optional
+    // `last_transition` and `error` fields, plus the envelope's
+    // identity + replica counts + restart_budget block.
     let populated = AllocStatusResponse {
+        job_id: Some("payments".to_owned()),
+        spec_digest: Some("0".repeat(64)),
+        replicas_desired: 1,
+        replicas_running: 1,
         rows: vec![AllocStatusRowBody {
             alloc_id: "alloc-1".to_owned(),
             job_id: "payments".to_owned(),
             node_id: "node-a".to_owned(),
-            state: "running".to_owned(),
+            state: overdrive_control_plane::api::AllocStateWire::Running,
             reason: None,
+            resources: overdrive_control_plane::api::ResourcesBody {
+                cpu_milli: 500,
+                memory_bytes: 134_217_728,
+            },
+            started_at: None,
+            exit_code: None,
+            last_transition: None,
+            error: None,
         }],
+        restart_budget: Some(overdrive_control_plane::api::RestartBudget {
+            used: 0,
+            max: 5,
+            exhausted: false,
+        }),
     };
     let wire = serde_json::to_string(&populated).expect("serialise populated AllocStatusResponse");
     let round_tripped: AllocStatusResponse =

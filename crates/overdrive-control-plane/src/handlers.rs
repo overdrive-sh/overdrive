@@ -14,13 +14,20 @@
 //! scaffolds owned by subsequent deliver steps.
 
 use axum::Json;
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use overdrive_core::aggregate::{AggregateError, IntentKey, Job, JobSpecInput};
 use overdrive_core::id::{ContentHash, JobId};
-use overdrive_core::reconciler::{ReconcilerName, TargetResource};
+use overdrive_core::reconciler::{
+    JobLifecycleView, RESTART_BACKOFF_CEILING, ReconcilerName, TargetResource,
+};
 use overdrive_core::traits::intent_store::{IntentStore, PutOutcome};
+use overdrive_core::traits::observation_store::AllocState;
+use serde::Deserialize;
 
-use crate::api::{StopJobResponse, StopOutcome};
+use crate::CachedView;
+use crate::api::{
+    AllocStateWire, RestartBudget, StopJobResponse, StopOutcome, TransitionRecord, TransitionSource,
+};
 
 use crate::AppState;
 use crate::api;
@@ -68,14 +75,57 @@ fn parse_job_id_path(job_id_str: &str) -> Result<JobId, ControlPlaneError> {
 
 impl From<overdrive_core::traits::observation_store::AllocStatusRow> for api::AllocStatusRowBody {
     fn from(row: overdrive_core::traits::observation_store::AllocStatusRow) -> Self {
+        // Phase 1 the action shim writes Driver(Exec) for rows it
+        // produced post-spawn; the reconciler emits its own progress
+        // markers via Reconciler. Without the source-attribution
+        // metadata on the row itself we default to Reconciler — Phase 2
+        // adds explicit attribution per ADR-0033 §1.
+        let last_transition = row.reason.clone().map(|reason| TransitionRecord {
+            from: None,
+            to: AllocStateWire::from(row.state),
+            reason,
+            source: TransitionSource::Reconciler,
+            at: format!("(c={},w={})", row.updated_at.counter, row.updated_at.writer),
+        });
+
+        // The `started_at` field is populated for rows that have left
+        // the Pending state at least once. Phase 1 detects this by the
+        // observed state being non-Pending — Phase 2+ will track the
+        // first-non-Pending logical timestamp explicitly.
+        let started_at = match row.state {
+            AllocState::Pending => None,
+            _ => Some(format!("(c={},w={})", row.updated_at.counter, row.updated_at.writer)),
+        };
+
         Self {
             alloc_id: row.alloc_id.to_string(),
             job_id: row.job_id.to_string(),
             node_id: row.node_id.to_string(),
-            state: row.state.to_string(),
-            reason: None,
+            state: AllocStateWire::from(row.state),
+            reason: row.reason,
+            // Resources cannot be reconstructed from the row alone in
+            // Phase 1 — the row schema does not carry the requested
+            // envelope. The handler that knows the JobSpec overrides
+            // this field; the bare conversion uses zeroes.
+            resources: api::ResourcesBody { cpu_milli: 0, memory_bytes: 0 },
+            started_at,
+            exit_code: None,
+            last_transition,
+            error: row.detail,
         }
     }
+}
+
+/// Query parameters for `GET /v1/allocs`.
+///
+/// `job` selects the snapshot for a specific `JobId`; absent → legacy
+/// rows-only view (every alloc row, blank envelope), present → full
+/// snapshot with envelope hydration + 404 on missing job.
+#[derive(Debug, Clone, Deserialize)]
+pub struct AllocStatusQuery {
+    /// Canonical `JobId` to filter on. When absent the handler returns
+    /// every observation row in legacy rows-only shape.
+    pub job: Option<String>,
 }
 
 impl From<overdrive_core::traits::observation_store::NodeHealthRow> for api::NodeRowBody {
@@ -416,29 +466,131 @@ pub async fn cluster_status(
 /// Reads through the `ObservationStore::alloc_status_rows` trait method
 /// (not the concrete `SimObservationStore` type) so Phase 2's
 /// `CorrosionStore` swap is a single trait-object replacement with no
-/// handler changes. Fresh store → HTTP 200 with explicit `{"rows": []}`
-/// — honest empty state per K7; no fabrication, no hardcoded response.
+/// handler changes.
+///
+/// Two query shapes per slice 01 step 01-03:
+///
+/// * `GET /v1/allocs` (no `?job=...`) — legacy rows-only response.
+///   Every row in the observation store, blank envelope. Used by
+///   integration tests and forward-compat operator surfaces.
+/// * `GET /v1/allocs?job=<id>` — full snapshot. The handler reads the
+///   `IntentStore` for `<id>`'s `Job`, returns 404 if absent, then
+///   projects matching rows + the `JobLifecycle` view-cache restart
+///   counts into the populated envelope shape per ADR-0033 §1.
+///
+/// Fresh store → HTTP 200 with explicit `{"rows": []}` — honest empty
+/// state per K7; no fabrication.
 #[utoipa::path(
     get,
     path = "/v1/allocs",
     responses(
         (status = 200, description = "Allocation status rows", body = api::AllocStatusResponse),
+        (status = 404, description = "Job not found", body = api::ErrorBody),
         (status = 500, description = "Internal error", body = api::ErrorBody),
     ),
     tag = "observation",
 )]
 pub async fn alloc_status(
     State(state): State<AppState>,
+    Query(query): Query<AllocStatusQuery>,
 ) -> Result<Json<api::AllocStatusResponse>, ControlPlaneError> {
-    let rows = state
+    // Legacy bare GET — preserves the integration-test contract from
+    // step 03-03 (`get_v1_allocs_returns_*`). No envelope hydration,
+    // no IntentStore read, no 404 surface.
+    let Some(ref job_str) = query.job else {
+        let rows = state
+            .obs
+            .alloc_status_rows()
+            .await
+            .map_err(|e| ControlPlaneError::internal("alloc_status_rows", e))?
+            .into_iter()
+            .map(api::AllocStatusRowBody::from)
+            .collect();
+        return Ok(Json(api::AllocStatusResponse { rows, ..Default::default() }));
+    };
+
+    // Validate the JobId (returns 400 with field=Some("job") on bad
+    // input — the path-param helper handles this naming).
+    let job_id = JobId::new(job_str).map_err(|e| ControlPlaneError::Validation {
+        message: e.to_string(),
+        field: Some("job".to_owned()),
+    })?;
+
+    // Read the Job aggregate — 404 if absent.
+    let key = IntentKey::for_job(&job_id);
+    let bytes = state
+        .store
+        .get(key.as_bytes())
+        .await?
+        .ok_or_else(|| ControlPlaneError::NotFound { resource: key.as_str().to_owned() })?;
+    let archived = rkyv::access::<rkyv::Archived<Job>, rkyv::rancor::Error>(&bytes)
+        .map_err(|e| ControlPlaneError::internal("rkyv access of ArchivedJob", e))?;
+    let job: Job = rkyv::deserialize::<Job, rkyv::rancor::Error>(archived)
+        .map_err(|e| ControlPlaneError::internal("rkyv deserialize of Job", e))?;
+    let spec_digest = ContentHash::of(&bytes).to_string();
+
+    // Pull the JobLifecycle view from AppState's view cache. A fresh
+    // job (never reconciled) yields the default empty view, which
+    // converts to a `RestartBudget { used: 0, max: 5, exhausted: false }`.
+    let view = read_job_lifecycle_view(&state, &job_id);
+    let restart_budget = restart_budget_from_view(&view);
+
+    // Filter rows to this job, project them, and stamp the requested
+    // resource envelope from the JobSpec onto each row body (the bare
+    // conversion zeroes resources; the handler is the only call site
+    // that knows the spec).
+    let resources_body = api::ResourcesBody {
+        cpu_milli: job.resources.cpu_milli,
+        memory_bytes: job.resources.memory_bytes,
+    };
+    let rows: Vec<api::AllocStatusRowBody> = state
         .obs
         .alloc_status_rows()
         .await
         .map_err(|e| ControlPlaneError::internal("alloc_status_rows", e))?
         .into_iter()
-        .map(api::AllocStatusRowBody::from)
+        .filter(|row| row.job_id == job_id)
+        .map(|row| {
+            let mut body = api::AllocStatusRowBody::from(row);
+            body.resources = resources_body;
+            body
+        })
         .collect();
-    Ok(Json(api::AllocStatusResponse { rows }))
+    let replicas_running =
+        u32::try_from(rows.iter().filter(|r| matches!(r.state, AllocStateWire::Running)).count())
+            .unwrap_or(u32::MAX);
+
+    Ok(Json(api::AllocStatusResponse {
+        job_id: Some(job.id.to_string()),
+        spec_digest: Some(spec_digest),
+        replicas_desired: job.replicas.get(),
+        replicas_running,
+        rows,
+        restart_budget: Some(restart_budget),
+    }))
+}
+
+/// Read the cached `JobLifecycleView` for `(job-lifecycle, job/<id>)`
+/// from the runtime view cache. Returns the default empty view if the
+/// job has never been reconciled (the canonical fresh-job case).
+fn read_job_lifecycle_view(state: &AppState, job_id: &JobId) -> JobLifecycleView {
+    let key = ("job-lifecycle".to_owned(), format!("job/{job_id}"));
+    #[allow(clippy::expect_used)]
+    let cache = state.view_cache.lock().expect("view_cache mutex");
+    match cache.get(&key) {
+        Some(CachedView::JobLifecycle(view)) => view.clone(),
+        Some(CachedView::Unit) | None => JobLifecycleView::default(),
+    }
+}
+
+/// Derive a `RestartBudget` from the reconciler's per-allocation
+/// `restart_counts`. Phase 1: `max` is hard-coded to
+/// `RESTART_BACKOFF_CEILING` (5); the budget is exhausted when any
+/// allocation has used `>= max` restarts. The aggregate `used` is the
+/// max across allocations — operators see the highest-pressure replica.
+fn restart_budget_from_view(view: &JobLifecycleView) -> RestartBudget {
+    let used = view.restart_counts.values().copied().max().unwrap_or(0);
+    RestartBudget { used, max: RESTART_BACKOFF_CEILING, exhausted: used >= RESTART_BACKOFF_CEILING }
 }
 
 /// `GET /v1/nodes` — observation read on `node_health`.

@@ -157,53 +157,86 @@ pub struct BrokerCountersBody {
 
 /// Response for `GET /v1/allocs`.
 ///
-/// Phase 1 always renders an empty `rows` array per US-03 AC — the
-/// allocation-status path is owned by Phase 2. The typed `rows` field
-/// is present so the CLI and external clients can parse the response
-/// into a concrete shape rather than `serde_json::Value`.
+/// Per ADR-0033 §1 amended 2026-04-30 / Slice 01 step 01-03 — the
+/// envelope carries top-level identity (`job_id`, `spec_digest`),
+/// replica counts (`replicas_desired` / `replicas_running`) projected
+/// from the `IntentStore` + observation rows, and a `restart_budget`
+/// block hydrated from the `JobLifecycle` reconciler view cache.
+///
+/// On the empty / 200 path with no rows the envelope still carries
+/// `replicas_desired` (from the spec) so the CLI can render an
+/// honest empty state — see step 01-03 task description and
+/// `wave-decisions.md` [D2].
 #[derive(Debug, Clone, Serialize, Deserialize, Default, ToSchema)]
 pub struct AllocStatusResponse {
+    /// Canonical job id this snapshot describes. `None` is reserved
+    /// for forward-compat (Phase 2 may add cluster-wide reads); Phase 1
+    /// always populates it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub job_id: Option<String>,
+    /// SHA-256 (hex, 64 chars) of the canonical rkyv-archived `Job`
+    /// bytes — see `JobDescription::spec_digest`. Pinned per ADR-0002.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spec_digest: Option<String>,
+    /// Desired replica count from `Job.spec.replicas`.
+    #[serde(default)]
+    pub replicas_desired: u32,
+    /// Number of `rows` whose state is `Running`.
+    #[serde(default)]
+    pub replicas_running: u32,
     pub rows: Vec<AllocStatusRowBody>,
+    /// Aggregate restart-budget block for the job — derived from the
+    /// `JobLifecycle` reconciler view cache. `max` is hard-coded to
+    /// `RESTART_BACKOFF_CEILING` (5) in Phase 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restart_budget: Option<RestartBudget>,
 }
 
-/// Allocation-status row body.
+/// Allocation-status row body — extended per ADR-0033 §1 / Slice 01
+/// step 01-03.
 ///
-/// Phase 1 shape mirrors the observation `AllocStatusRow` projected to
-/// the wire — minimal fields matching the whitepaper §4 schema
-/// (`alloc_id`, `job_id`, `node_id`, `state`). Phase 2+ adds columns
-/// additively.
+/// `state` is the typed `AllocStateWire` (promoted from `String` per
+/// [C9] greenfield single-cut — no parallel legacy field). `reason`
+/// remains the typed `Option<TransitionReason>` from ADR-0032 §3
+/// Amendment; the renderer calls `TransitionReason::human_readable()`
+/// for display. New cause-class payloads carry their structured data
+/// directly on the wire, and the row's `error` field carries the
+/// verbatim driver detail string (mirrors `AllocStatusRow.detail`).
 ///
-/// `reason` is `Option<String>` — populated when the underlying state
-/// carries actionable diagnostic context (currently only Pending rows
-/// resulting from a `PlacementError::NoCapacity`). Other states leave
-/// it `None`.
-#[derive(Debug, Clone, Serialize, Deserialize, Default, ToSchema, PartialEq, Eq)]
+/// `last_transition` is `Option<TransitionRecord>` — populated when
+/// the row's `reason` is set; the renderer reads it to produce the
+/// `from → to reason: ... source: ... at: ...` block.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 pub struct AllocStatusRowBody {
     pub alloc_id: String,
     pub job_id: String,
     pub node_id: String,
-    pub state: String,
+    pub state: AllocStateWire,
+    /// Structured cause for this row's most recent transition.
+    /// Source-of-truth pin: this enum is identical to the streaming
+    /// `LifecycleTransition.reason` surface; byte-equality across
+    /// surfaces is structural ([C6]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reason: Option<String>,
-}
-
-impl AllocStatusRowBody {
-    /// Construct a Pending row body decorated with an actionable
-    /// diagnostic `reason` — the `JobLifecycle` reconciler calls this
-    /// shape when surfacing `PlacementError::NoCapacity` to the CLI.
-    #[must_use]
-    pub fn pending_with_reason(
-        row: &overdrive_core::traits::observation_store::AllocStatusRow,
-        reason: String,
-    ) -> Self {
-        Self {
-            alloc_id: row.alloc_id.to_string(),
-            job_id: row.job_id.to_string(),
-            node_id: row.node_id.to_string(),
-            state: row.state.to_string(),
-            reason: Some(reason),
-        }
-    }
+    pub reason: Option<overdrive_core::TransitionReason>,
+    /// Resource envelope this allocation requested.
+    pub resources: ResourcesBody,
+    /// Logical-timestamp string of the row's first observed transition
+    /// to a non-Pending state. `None` for never-started Pending rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<String>,
+    /// Phase 2+ — exit code observation. `None` in Phase 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    /// Last-transition structured record. `None` for never-transitioned
+    /// rows (e.g. the very first Pending observation).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_transition: Option<TransitionRecord>,
+    /// Verbatim driver / OS detail text — mirrors the underlying row's
+    /// `detail: Option<String>`. This is the audit-preserving sidecar
+    /// the typed `reason` payload cannot capture (e.g. raw `errno`
+    /// strings).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 /// Response for `GET /v1/nodes`. Phase 1 always renders an empty
@@ -435,12 +468,17 @@ pub struct RestartBudget {
 /// Snapshot's per-row `resources` block per ADR-0033 §1.
 ///
 /// Mirrors the internal `overdrive_core::traits::driver::Resources` shape
-/// for the wire. Conversion is mechanical (call site at step 01-03 wires
-/// the `From<&Resources>` projection).
+/// for the wire. Conversion is mechanical via [`From<&Resources>`].
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 pub struct ResourcesBody {
     pub cpu_milli: u32,
     pub memory_bytes: u64,
+}
+
+impl From<&overdrive_core::traits::driver::Resources> for ResourcesBody {
+    fn from(r: &overdrive_core::traits::driver::Resources) -> Self {
+        Self { cpu_milli: r.cpu_milli, memory_bytes: r.memory_bytes }
+    }
 }
 
 /// Source of a lifecycle transition — who/what produced the row write.
