@@ -246,16 +246,6 @@ impl ApiClient {
         self.get_typed("v1/cluster/info").await
     }
 
-    /// `GET /v1/allocs` — read allocation-status rows from the
-    /// observation store.
-    ///
-    /// # Errors
-    ///
-    /// See [`CliError`] variants.
-    pub async fn alloc_status(&self) -> Result<AllocStatusResponse, CliError> {
-        self.get_typed("v1/allocs").await
-    }
-
     /// `GET /v1/allocs?job=<id>` — full allocation snapshot for a
     /// specific job. Slice 01 step 01-03. 404 on unknown job carries
     /// `body.error == "not_found"` per ADR-0015.

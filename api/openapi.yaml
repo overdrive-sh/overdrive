@@ -13,33 +13,33 @@ paths:
     get:
       tags:
       - observation
-      summary: '`GET /v1/allocs` — observation read on `alloc_status`.'
+      summary: '`GET /v1/allocs?job=<id>` — observation read on `alloc_status`.'
       description: |-
         Reads through the `ObservationStore::alloc_status_rows` trait method
         (not the concrete `SimObservationStore` type) so Phase 2's
         `CorrosionStore` swap is a single trait-object replacement with no
         handler changes.
 
-        Two query shapes per slice 01 step 01-03:
-
-        * `GET /v1/allocs` (no `?job=...`) — legacy rows-only response.
-          Every row in the observation store, blank envelope. Used by
-          integration tests and forward-compat operator surfaces.
-        * `GET /v1/allocs?job=<id>` — full snapshot. The handler reads the
-          `IntentStore` for `<id>`'s `Job`, returns 404 if absent, then
-          projects matching rows + the `JobLifecycle` view-cache restart
-          counts into the populated envelope shape per ADR-0033 §1.
-
-        Fresh store → HTTP 200 with explicit `{"rows": []}` — honest empty
-        state per K7; no fabrication.
+        The `job` query parameter is REQUIRED. The handler reads the
+        `IntentStore` for `<id>`'s `Job`, returns 404 if absent, then
+        projects matching rows + the `JobLifecycle` view-cache restart
+        counts into the populated envelope shape per ADR-0033 §1. A missing
+        `?job=` query parameter returns HTTP 400 with
+        `field = Some("job")`.
       operationId: alloc_status
       responses:
         '200':
-          description: Allocation status rows
+          description: Allocation snapshot for the named job
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/AllocStatusResponse'
+        '400':
+          description: Validation error (missing or malformed job query)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
         '404':
           description: Job not found
           content:

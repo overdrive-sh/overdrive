@@ -100,25 +100,22 @@ async fn from_config_loads_trust_triple_and_builds_client() {
 }
 
 // -------------------------------------------------------------------
-// (b) alloc_status + node_list against in-process server return Ok
+// (b) node_list against in-process server returns Ok
 // -------------------------------------------------------------------
 //
-// `/v1/cluster/info` is still stubbed until step 03-05 wires the real
-// `cluster_status` handler; exercising it against the stub would force
-// this test to assert on `{}` rather than on a real `ClusterStatus`
-// shape, which would turn into a contradicting test the moment 03-05
-// lands. We instead pin the two observation-read endpoints
-// (`/v1/allocs`, `/v1/nodes`) that ARE wired to real handlers as of
-// step 03-03 — those return `{"rows":[]}` on a fresh store and
-// decode deterministically into their typed responses.
+// Pins the `/v1/nodes` observation-read endpoint that IS wired to the
+// real handler as of step 03-03. `/v1/nodes` returns `{"rows":[]}` on
+// a fresh store and decodes deterministically into `NodeList`.
+//
+// `/v1/allocs` was previously exercised via the bare `alloc_status()`
+// method; the bare-GET shape is gone (S-AS-09 / single-cut greenfield).
+// `?job=<id>` coverage lives in the CLI's `alloc_status_for_job`
+// integration tests and the control-plane's `acceptance::alloc_status_snapshot`.
 
 #[tokio::test]
-async fn observation_reads_against_in_process_server_return_ok() {
+async fn node_list_against_in_process_server_returns_ok() {
     let (handle, _bound, _tmp, config_path) = spawn_server().await;
     let client = build_client_for(&config_path);
-
-    let allocs = client.alloc_status().await.expect("alloc_status");
-    assert!(allocs.rows.is_empty(), "fresh store must report zero alloc rows");
 
     let nodes = client.node_list().await.expect("node_list");
     assert!(nodes.rows.is_empty(), "fresh store must report zero node rows");

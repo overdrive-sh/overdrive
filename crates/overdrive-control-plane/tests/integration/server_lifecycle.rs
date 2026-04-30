@@ -226,34 +226,37 @@ async fn all_adr_0008_paths_return_200_on_stub_router() {
     // Per ADR-0008 §Endpoints — Phase 1 endpoint coverage:
     //   - `POST /v1/jobs` real handler (step 03-01)
     //   - `GET /v1/jobs/:id` real handler (step 03-02)
-    //   - `GET /v1/allocs` + `GET /v1/nodes` real observation-read
-    //     handlers returning `{"rows":[]}` on a fresh store (step 03-03)
+    //   - `GET /v1/allocs?job=<id>` + `GET /v1/nodes` real observation-read
+    //     handlers (step 03-03 + slice 01 step 01-03).
     //   - `GET /v1/cluster/info` real handler returning a
     //     `ClusterStatus` body (step 03-05). Per-field content coverage
     //     lives in `acceptance::runtime_registers_noop_heartbeat` and
     //     serde shape is pinned by `acceptance::api_type_shapes`.
     // Per-endpoint happy-path coverage lives in the dedicated scenario
     // modules; this test only pins that the routes remain mounted.
-    // Per slice 01 step 01-03 (`AllocStatusResponse` envelope reshape),
-    // `/v1/allocs` now returns the extended shape with replica-count
-    // fields alongside `rows`; `/v1/nodes` (`NodeList`) was NOT
-    // reshaped and keeps the bare `{"rows":[]}` shape. Encoding the
-    // expected body per-path keeps this routing-check honest as
-    // observation envelopes evolve independently per resource.
-    let observation_gets = [
-        ("/v1/allocs", r#"{"replicas_desired":0,"replicas_running":0,"rows":[]}"#),
-        ("/v1/nodes", r#"{"rows":[]}"#),
-    ];
-    for (path, expected_body) in observation_gets {
-        let url = format!("https://localhost:{}{path}", bound.port());
-        let resp = client.get(&url).send().await.expect(&format!("GET {path}"));
-        assert_eq!(resp.status(), reqwest::StatusCode::OK, "GET {path} expected 200");
-        let body = resp.text().await.expect("body");
-        assert_eq!(
-            body, expected_body,
-            "fresh-store observation read at {path} must surface its canonical empty envelope"
-        );
-    }
+    //
+    // `/v1/allocs` requires `?job=<id>` (S-AS-09 / single-cut greenfield);
+    // a query against an unknown job returns HTTP 404 with
+    // `body.error == "not_found"`. That shape proves both the route is
+    // mounted AND the handler is the real one (a stub returning 200
+    // would not produce 404). `/v1/nodes` keeps the bare `{"rows":[]}`
+    // shape (no query, no envelope reshape).
+    let nodes_url = format!("https://localhost:{}/v1/nodes", bound.port());
+    let nodes_resp = client.get(&nodes_url).send().await.expect("GET /v1/nodes");
+    assert_eq!(nodes_resp.status(), reqwest::StatusCode::OK, "GET /v1/nodes expected 200");
+    let nodes_body = nodes_resp.text().await.expect("body");
+    assert_eq!(
+        nodes_body, r#"{"rows":[]}"#,
+        "fresh-store observation read at /v1/nodes must surface canonical empty envelope"
+    );
+
+    let allocs_url = format!("https://localhost:{}/v1/allocs?job=ghost-v0", bound.port());
+    let allocs_resp = client.get(&allocs_url).send().await.expect("GET /v1/allocs?job=ghost-v0");
+    assert_eq!(
+        allocs_resp.status(),
+        reqwest::StatusCode::NOT_FOUND,
+        "GET /v1/allocs?job=<unknown> must surface 404 from the real alloc_status handler",
+    );
 
     // `GET /v1/cluster/info` is a routing check: the body must
     // deserialise into the `ClusterStatus` shape, proving the real

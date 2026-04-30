@@ -195,12 +195,12 @@ async fn submitted_job_reaches_running_via_real_server_boot() {
     // submit enqueues an evaluation, the spawned loop drains it, the
     // job-lifecycle reconciler runs, and the SimDriver advances the
     // alloc to Running. Under current main the alloc is never created.
-    let allocs_url = format!("https://localhost:{}/v1/allocs", bound.port());
+    let allocs_url = format!("https://localhost:{}/v1/allocs?job=payments", bound.port());
     let allocs: AllocStatusResponse = client
         .get(&allocs_url)
         .send()
         .await
-        .expect("GET /v1/allocs")
+        .expect("GET /v1/allocs?job=payments")
         .json()
         .await
         .expect("decode AllocStatusResponse");

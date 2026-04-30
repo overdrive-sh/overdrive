@@ -121,13 +121,16 @@ impl From<overdrive_core::traits::observation_store::AllocStatusRow> for api::Al
 
 /// Query parameters for `GET /v1/allocs`.
 ///
-/// `job` selects the snapshot for a specific `JobId`; absent → legacy
-/// rows-only view (every alloc row, blank envelope), present → full
-/// snapshot with envelope hydration + 404 on missing job.
+/// `job` selects the snapshot for a specific `JobId`. The query
+/// parameter is REQUIRED — a missing `?job=` returns HTTP 400 with
+/// `field = Some("job")`. The handler reads the `IntentStore` for the
+/// named job, returns 404 if absent, then projects matching rows + the
+/// `JobLifecycle` view-cache restart counts into the populated
+/// envelope shape per ADR-0033 §1.
 #[derive(Debug, Clone, Deserialize)]
 pub struct AllocStatusQuery {
-    /// Canonical `JobId` to filter on. When absent the handler returns
-    /// every observation row in legacy rows-only shape.
+    /// Canonical `JobId` to filter on. Required. Missing → HTTP 400
+    /// with `field = Some("job")`.
     pub job: Option<String>,
 }
 
@@ -506,30 +509,25 @@ pub async fn cluster_status(
     }))
 }
 
-/// `GET /v1/allocs` — observation read on `alloc_status`.
+/// `GET /v1/allocs?job=<id>` — observation read on `alloc_status`.
 ///
 /// Reads through the `ObservationStore::alloc_status_rows` trait method
 /// (not the concrete `SimObservationStore` type) so Phase 2's
 /// `CorrosionStore` swap is a single trait-object replacement with no
 /// handler changes.
 ///
-/// Two query shapes per slice 01 step 01-03:
-///
-/// * `GET /v1/allocs` (no `?job=...`) — legacy rows-only response.
-///   Every row in the observation store, blank envelope. Used by
-///   integration tests and forward-compat operator surfaces.
-/// * `GET /v1/allocs?job=<id>` — full snapshot. The handler reads the
-///   `IntentStore` for `<id>`'s `Job`, returns 404 if absent, then
-///   projects matching rows + the `JobLifecycle` view-cache restart
-///   counts into the populated envelope shape per ADR-0033 §1.
-///
-/// Fresh store → HTTP 200 with explicit `{"rows": []}` — honest empty
-/// state per K7; no fabrication.
+/// The `job` query parameter is REQUIRED. The handler reads the
+/// `IntentStore` for `<id>`'s `Job`, returns 404 if absent, then
+/// projects matching rows + the `JobLifecycle` view-cache restart
+/// counts into the populated envelope shape per ADR-0033 §1. A missing
+/// `?job=` query parameter returns HTTP 400 with
+/// `field = Some("job")`.
 #[utoipa::path(
     get,
     path = "/v1/allocs",
     responses(
-        (status = 200, description = "Allocation status rows", body = api::AllocStatusResponse),
+        (status = 200, description = "Allocation snapshot for the named job", body = api::AllocStatusResponse),
+        (status = 400, description = "Validation error (missing or malformed job query)", body = api::ErrorBody),
         (status = 404, description = "Job not found", body = api::ErrorBody),
         (status = 500, description = "Internal error", body = api::ErrorBody),
     ),
@@ -539,19 +537,14 @@ pub async fn alloc_status(
     State(state): State<AppState>,
     Query(query): Query<AllocStatusQuery>,
 ) -> Result<Json<api::AllocStatusResponse>, ControlPlaneError> {
-    // Legacy bare GET — preserves the integration-test contract from
-    // step 03-03 (`get_v1_allocs_returns_*`). No envelope hydration,
-    // no IntentStore read, no 404 surface.
+    // The `job` query parameter is required. A missing `?job=` is a
+    // client error (HTTP 400), not a wildcard read — slice 01 step
+    // 01-03 made `?job=<id>` the canonical shape per S-AS-09.
     let Some(ref job_str) = query.job else {
-        let rows = state
-            .obs
-            .alloc_status_rows()
-            .await
-            .map_err(|e| ControlPlaneError::internal("alloc_status_rows", e))?
-            .into_iter()
-            .map(api::AllocStatusRowBody::from)
-            .collect();
-        return Ok(Json(api::AllocStatusResponse { rows, ..Default::default() }));
+        return Err(ControlPlaneError::Validation {
+            message: "missing required query parameter: job".to_owned(),
+            field: Some("job".to_owned()),
+        });
     };
 
     // Validate the JobId (returns 400 with field=Some("job") on bad
