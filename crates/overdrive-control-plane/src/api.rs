@@ -24,7 +24,7 @@
 // allow to this module, which contains exactly one `utoipa` derive.
 #![allow(clippy::needless_for_each)]
 
-use overdrive_core::aggregate::JobSpecInput;
+use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -274,6 +274,9 @@ pub struct ErrorBody {
         NodeRowBody,
         ErrorBody,
         JobSpecInput,
+        ResourcesInput,
+        ExecInput,
+        DriverInput,
     )),
     tags(
         (name = "jobs", description = "Job lifecycle endpoints"),

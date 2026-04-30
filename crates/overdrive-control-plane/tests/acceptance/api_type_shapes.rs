@@ -25,7 +25,7 @@ use overdrive_control_plane::api::{
     AllocStatusResponse, AllocStatusRowBody, BrokerCountersBody, ClusterStatus, ErrorBody,
     IdempotencyOutcome, JobDescription, NodeList, NodeRowBody, SubmitJobRequest, SubmitJobResponse,
 };
-use overdrive_core::aggregate::JobSpecInput;
+use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
 use utoipa::ToSchema;
 
 fn sample_job_spec() -> JobSpecInput {
@@ -262,4 +262,12 @@ fn every_api_type_implements_utoipa_to_schema() {
     assert_to_schema::<NodeRowBody>();
     assert_to_schema::<ErrorBody>();
     assert_to_schema::<IdempotencyOutcome>();
+    // Step 04-02 — wire-shape input twins per ADR-0031 §8 / DWD-8.
+    // `JobSpecInput` already carried `ToSchema` (Step 02-03); the 3
+    // supporting types land here now that they are registered in
+    // `OverdriveApi`'s `components(schemas(...))`.
+    assert_to_schema::<JobSpecInput>();
+    assert_to_schema::<ResourcesInput>();
+    assert_to_schema::<ExecInput>();
+    assert_to_schema::<DriverInput>();
 }

@@ -365,6 +365,26 @@ components:
             type: string
         region:
           type: string
+    DriverInput:
+      oneOf:
+      - type: object
+        description: Native binary under cgroups v2 — the `[exec]` table in TOML.
+        required:
+        - exec
+        properties:
+          exec:
+            $ref: '#/components/schemas/ExecInput'
+            description: Native binary under cgroups v2 — the `[exec]` table in TOML.
+      description: |-
+        Driver dispatch on a [`JobSpecInput`].
+
+        Per ADR-0031 §2 a tagged enum with `#[serde(flatten)]` on the field
+        surfaces the table name as the discriminator in TOML / JSON: `[exec]`
+        → `DriverInput::Exec(...)`. `deny_unknown_fields` on the enum rejects
+        unknown driver tables.
+
+        Today: one variant (`Exec`). Future drivers (`microvm`, `wasm`) add
+        new variants additively; no shape change to surrounding code.
     ErrorBody:
       type: object
       description: |-
@@ -386,6 +406,27 @@ components:
           - 'null'
         message:
           type: string
+    ExecInput:
+      type: object
+      description: Operator-facing `[exec]` table fields per ADR-0031 §2.
+      required:
+      - command
+      - args
+      properties:
+        args:
+          type: array
+          items:
+            type: string
+          description: |-
+            Argv passed verbatim. Required field — an absent `args` is a
+            parse error, not "default to no args" (per ADR-0031 §8). Empty
+            `Vec` is the legitimate zero-args case.
+        command:
+          type: string
+          description: |-
+            Host filesystem path to the binary. Validated non-empty (after
+            trim) at `Job::from_spec` per ADR-0031 §4.
+      additionalProperties: false
     IdempotencyOutcome:
       type: string
       description: |-
@@ -422,11 +463,31 @@ components:
         spec_digest:
           type: string
     JobSpecInput:
-      type: object
+      allOf:
+      - $ref: '#/components/schemas/DriverInput'
+      - type: object
+        required:
+        - id
+        - replicas
+        - resources
+        properties:
+          id:
+            type: string
+          replicas:
+            type: integer
+            format: int32
+            minimum: 0
+          resources:
+            $ref: '#/components/schemas/ResourcesInput'
       description: |-
         Input shape for `Job::from_spec`. The CLI deserialises TOML into this
         type; the server deserialises JSON into the same type; both route
         through the same constructor.
+
+        Per ADR-0031 §2 the shape is flat top-level (`id`, `replicas`),
+        `resources: ResourcesInput`, `#[serde(flatten)] driver: DriverInput`.
+        `deny_unknown_fields` on every struct + a tagged enum enforce
+        exactly-one driver table at parse time.
 
         Carries `Serialize` / `Deserialize` so REST handlers and the CLI can
         reuse this type verbatim as the body / field shape for
@@ -434,26 +495,6 @@ components:
         Carries `utoipa::ToSchema` so the generated `OpenAPI` document
         (ADR-0009, `cargo xtask openapi-gen`) renders the spec shape
         consistently across the server and CLI lanes.
-      required:
-      - id
-      - replicas
-      - cpu_milli
-      - memory_bytes
-      properties:
-        cpu_milli:
-          type: integer
-          format: int32
-          minimum: 0
-        id:
-          type: string
-        memory_bytes:
-          type: integer
-          format: int64
-          minimum: 0
-        replicas:
-          type: integer
-          format: int32
-          minimum: 0
     NodeList:
       type: object
       description: |-
@@ -480,6 +521,29 @@ components:
           type: string
         region:
           type: string
+    ResourcesInput:
+      type: object
+      description: |-
+        Wire-shape twin of [`Resources`].
+
+        Per ADR-0031 §2 / `.claude/rules/development.md` § State-layer
+        hygiene: the rkyv-archived intent-side `Resources` is kept clean of
+        serde-only / utoipa-only concerns; this twin carries the wire-side
+        derives. `From<ResourcesInput> for Resources` is non-fallible — the
+        validation rules (`memory_bytes != 0`) live in `Job::from_spec`.
+      required:
+      - cpu_milli
+      - memory_bytes
+      properties:
+        cpu_milli:
+          type: integer
+          format: int32
+          minimum: 0
+        memory_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+      additionalProperties: false
     StopJobResponse:
       type: object
       description: |-

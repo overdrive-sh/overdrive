@@ -169,6 +169,48 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-04-30T06:14:06Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-30T06:14:51Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: The two acceptance scenarios in submit_job_handler_rejects_empty_exec_command_with_400.rs cover the handler boundary port-to-port; per step instructions RED_UNIT is optional and the validation predicate from 01-02 (aggregate/mod.rs:194-198) is already pinned by Job::from_spec acceptance tests in overdrive-core. No unit-level decomposition needed for the handler's map_err arm.",
+      "t": "2026-04-30T06:15:15Z"
+    },
+    {
+      "sid": "04-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-30T06:18:29Z"
+    },
+    {
+      "sid": "04-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-30T06:18:31Z"
+    },
+    {
+      "sid": "04-02",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-30T06:18:35Z"
+    },
+    {
+      "sid": "04-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-30T06:20:36Z"
     }
   ]
 }
