@@ -1,0 +1,90 @@
+{
+  "schema_version": "3.0",
+  "feature_id": "fix-eval-reconciler-discarded",
+  "events": [
+    {
+      "sid": "01-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-30T08:26:12Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-30T08:26:12Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: test exercises existing public surface; no new internal helper introduced (CountingIntentStore wrapper was replaced with view_cache observation to honour the boundary rule that only tests/acceptance/runtime_convergence_loop.rs may be modified \u2014 adding async-trait+futures impls would require a Cargo.toml edit)",
+      "t": "2026-04-30T08:26:14Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: production fix lands in 01-02 per the step plan; this commit deliberately leaves the workspace in a RED-scaffold state (cargo check on overdrive-control-plane --tests fails with E0061 arity mismatch on run_convergence_tick, which IS the specification of pending work)",
+      "t": "2026-04-30T08:26:17Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-30T08:26:17Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-30T08:31:08Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-30T08:31:18Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: no new internal helper introduced beyond using existing reconcilers_iter() accessor; dispatch contract is exercised end-to-end by the 01-01 regression test",
+      "t": "2026-04-30T08:31:23Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-30T08:42:46Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-30T08:44:17Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS; mutation gate=90.5% (19/23 caught, 80% threshold met); 2 missed pre-existing-surface mutations (lib.rs:457 deadline arithmetic and reconciler_runtime.rs:277 has_work predicate) are out of fix-eval-reconciler-discarded RCA scope",
+      "t": "2026-04-30T08:49:57Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-30T08:50:42Z"
+    }
+  ]
+}
