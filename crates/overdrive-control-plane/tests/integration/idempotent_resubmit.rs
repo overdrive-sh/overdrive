@@ -41,7 +41,9 @@ use overdrive_control_plane::api::{
     ErrorBody, IdempotencyOutcome, JobDescription, SubmitJobRequest, SubmitJobResponse,
 };
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
-use overdrive_core::aggregate::{IntentKey, Job, JobSpecInput};
+use overdrive_core::aggregate::{
+    DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
+};
 use overdrive_core::id::JobId;
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_store_local::LocalIntentStore;
@@ -144,8 +146,8 @@ fn payments_spec() -> JobSpecInput {
     JobSpecInput {
         id: "payments".to_owned(),
         replicas: 3,
-        cpu_milli: 500,
-        memory_bytes: 536_870_912, // 512 MiB
+        resources: ResourcesInput { cpu_milli: 500, memory_bytes: 536_870_912 }, // 512 MiB
+        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     }
 }
 
@@ -155,8 +157,8 @@ fn payments_spec_alt_replicas() -> JobSpecInput {
     JobSpecInput {
         id: "payments".to_owned(),
         replicas: 7,
-        cpu_milli: 500,
-        memory_bytes: 536_870_912,
+        resources: ResourcesInput { cpu_milli: 500, memory_bytes: 536_870_912 },
+        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     }
 }
 

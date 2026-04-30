@@ -17,7 +17,9 @@ use std::time::{Duration, Instant};
 
 use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
 use overdrive_control_plane::{AppState, job_lifecycle, noop_heartbeat};
-use overdrive_core::aggregate::{IntentKey, Job, JobSpecInput};
+use overdrive_core::aggregate::{
+    DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
+};
 use overdrive_core::id::NodeId;
 use overdrive_core::reconciler::TargetResource;
 use overdrive_core::traits::driver::Driver;
@@ -60,8 +62,11 @@ async fn submitted_job_reaches_running_via_real_exec_driver() {
     let job = Job::from_spec(JobSpecInput {
         id: "payments".to_string(),
         replicas: 1,
-        cpu_milli: 100,
-        memory_bytes: 256 * 1024 * 1024,
+        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
+        driver: DriverInput::Exec(ExecInput {
+            command: "/bin/sleep".to_string(),
+            args: vec!["3600".to_string()],
+        }),
     })
     .expect("valid job spec");
     let archived = rkyv::to_bytes::<rkyv::rancor::Error>(&job).expect("rkyv archive");

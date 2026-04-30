@@ -1,11 +1,11 @@
-//! Acceptance — `wire-exec-spec-end-to-end` OpenAPI propagation.
+//! Acceptance — `wire-exec-spec-end-to-end` `OpenAPI` propagation.
 //!
 //! Per ADR-0031 §8 / DWD-8 in
 //! `docs/feature/wire-exec-spec-end-to-end/distill/wave-decisions.md`:
 //! the live `OverdriveApi::openapi()` rendering must include
 //! `JobSpecInput` with the nested `resources` object and the
 //! tagged-driver `oneOf` carrying an `exec` variant. This is Layer 1
-//! of the two-layer OpenAPI defence — Layer 2 is the existing
+//! of the two-layer `OpenAPI` defence — Layer 2 is the existing
 //! `cargo xtask openapi-check` CI gate that diffs the live render
 //! against the checked-in `api/openapi.yaml`.
 //!
@@ -26,7 +26,7 @@
 use overdrive_control_plane::api::OverdriveApi;
 use utoipa::OpenApi as _;
 
-/// Helper — render the live OpenAPI document to YAML.
+/// Helper — render the live `OpenAPI` document to YAML.
 fn render_yaml() -> String {
     OverdriveApi::openapi().to_yaml().expect("to_yaml must succeed for the live OpenAPI document")
 }

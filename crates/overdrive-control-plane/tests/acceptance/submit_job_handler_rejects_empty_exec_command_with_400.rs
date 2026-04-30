@@ -9,8 +9,8 @@
 //! ADR-0015 RFC 7807 body shape.
 //!
 //! Mirrors the in-process pattern from `submit_job_idempotency.rs` —
-//! constructs an `AppState` from real `LocalIntentStore` over `TempDir`
-//! + `SimObservationStore` + `SimDriver`, then calls the handler
+//! constructs an `AppState` from real `LocalIntentStore` over `TempDir`,
+//! plus `SimObservationStore` + `SimDriver`, then calls the handler
 //! directly. No reqwest, no TLS, no port binding.
 //!
 //! Covers `docs/feature/wire-exec-spec-end-to-end/distill/test-scenarios.md`
@@ -80,7 +80,7 @@ async fn submit_job_handler_rejects_empty_exec_command_with_validation_error_nam
                 "field must name `exec.command` (the ADR-0011 typed-error contract \
                  the HTTP layer uses to render RFC 7807); got {field:?}",
             );
-            assert!(!message.is_empty(), "validation message must be non-empty; got {message:?}",);
+            assert!(!message.is_empty(), "validation message must be non-empty; got {message:?}");
         }
         Err(other) => panic!(
             "expected ControlPlaneError::Validation {{ field: Some(\"exec.command\"), .. }}; \

@@ -27,7 +27,7 @@ use overdrive_cli::http_client::{ApiClient, CliError};
 use overdrive_control_plane::api::{IdempotencyOutcome, JobDescription, SubmitJobRequest};
 use overdrive_control_plane::tls_bootstrap::{mint_ephemeral_ca, write_trust_triple};
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
-use overdrive_core::aggregate::JobSpecInput;
+use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
 use tempfile::TempDir;
 
 /// Spawn a server on an ephemeral port and return (handle, bound addr,
@@ -138,8 +138,8 @@ async fn submit_job_then_describe_round_trips_via_http_client() {
     let spec = JobSpecInput {
         id: "payments".to_owned(),
         replicas: 3,
-        cpu_milli: 500,
-        memory_bytes: 536_870_912,
+        resources: ResourcesInput { cpu_milli: 500, memory_bytes: 536_870_912 },
+        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     };
 
     let submit_resp =
@@ -235,8 +235,8 @@ async fn submit_with_invalid_spec_returns_http_status_400_with_error_body() {
     let bad = JobSpecInput {
         id: "payments".to_owned(),
         replicas: 0,
-        cpu_milli: 500,
-        memory_bytes: 536_870_912,
+        resources: ResourcesInput { cpu_milli: 500, memory_bytes: 536_870_912 },
+        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     };
 
     let err = client.submit_job(SubmitJobRequest { spec: bad }).await.expect_err("bad spec");
@@ -252,8 +252,8 @@ async fn submit_with_invalid_spec_returns_http_status_400_with_error_body() {
                 body.field,
             );
             assert!(
-                body.message.contains("replicas"),
-                "message must name the offending field; got {:?}",
+                body.message.contains("replica"),
+                "message must name the offending field (substring `replica`); got {:?}",
                 body.message,
             );
         }

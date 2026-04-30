@@ -31,7 +31,7 @@ use overdrive_control_plane::api::{IdempotencyOutcome, SubmitJobRequest, SubmitJ
 use overdrive_control_plane::error::ControlPlaneError;
 use overdrive_control_plane::handlers::submit_job;
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
-use overdrive_core::aggregate::JobSpecInput;
+use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
 use overdrive_core::id::NodeId;
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;
@@ -56,8 +56,8 @@ fn payments_spec() -> JobSpecInput {
     JobSpecInput {
         id: "payments".to_owned(),
         replicas: 3,
-        cpu_milli: 500,
-        memory_bytes: 536_870_912,
+        resources: ResourcesInput { cpu_milli: 500, memory_bytes: 536_870_912 },
+        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     }
 }
 
@@ -65,8 +65,8 @@ fn payments_spec_alt_replicas() -> JobSpecInput {
     JobSpecInput {
         id: "payments".to_owned(),
         replicas: 7,
-        cpu_milli: 500,
-        memory_bytes: 536_870_912,
+        resources: ResourcesInput { cpu_milli: 500, memory_bytes: 536_870_912 },
+        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     }
 }
 

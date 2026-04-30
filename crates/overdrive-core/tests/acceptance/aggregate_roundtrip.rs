@@ -22,7 +22,8 @@
 #![allow(clippy::expect_fun_call)]
 
 use overdrive_core::aggregate::{
-    Allocation, AllocationSpecInput, Job, JobSpecInput, Node, NodeSpecInput,
+    Allocation, AllocationSpecInput, DriverInput, ExecInput, Job, JobSpecInput, Node,
+    NodeSpecInput, ResourcesInput,
 };
 use proptest::prelude::*;
 use rkyv::rancor;
@@ -35,8 +36,11 @@ fn sample_job() -> Job {
     Job::from_spec(JobSpecInput {
         id: "payments".to_owned(),
         replicas: 3,
-        cpu_milli: 1500,
-        memory_bytes: 512 * 1024 * 1024,
+        resources: ResourcesInput { cpu_milli: 1500, memory_bytes: 512 * 1024 * 1024 },
+        driver: DriverInput::Exec(ExecInput {
+            command: "/opt/payments/bin/payments-server".to_string(),
+            args: vec!["--port".to_string(), "8080".to_string()],
+        }),
     })
     .expect("canonical JobSpecInput constructs a Job")
 }
@@ -254,8 +258,16 @@ fn valid_region() -> impl Strategy<Value = String> {
 fn arb_job() -> impl Strategy<Value = Job> {
     (valid_label(), 1u32..=1024, 0u32..=64_000, 1u64..=(128 * 1024 * 1024 * 1024)).prop_map(
         |(id, replicas, cpu_milli, memory_bytes)| {
-            Job::from_spec(JobSpecInput { id, replicas, cpu_milli, memory_bytes })
-                .expect("generator yields valid Job")
+            Job::from_spec(JobSpecInput {
+                id,
+                replicas,
+                resources: ResourcesInput { cpu_milli, memory_bytes },
+                driver: DriverInput::Exec(ExecInput {
+                    command: "/bin/true".to_string(),
+                    args: vec![],
+                }),
+            })
+            .expect("generator yields valid Job")
         },
     )
 }

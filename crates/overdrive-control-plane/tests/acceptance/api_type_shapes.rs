@@ -32,8 +32,8 @@ fn sample_job_spec() -> JobSpecInput {
     JobSpecInput {
         id: "payments".to_string(),
         replicas: 3,
-        cpu_milli: 500,
-        memory_bytes: 256 * 1024 * 1024,
+        resources: ResourcesInput { cpu_milli: 500, memory_bytes: 256 * 1024 * 1024 },
+        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     }
 }
 

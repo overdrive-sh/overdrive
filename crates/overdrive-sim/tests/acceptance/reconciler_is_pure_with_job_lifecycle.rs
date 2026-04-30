@@ -18,7 +18,9 @@
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
-use overdrive_core::aggregate::{Job, JobSpecInput, Node, NodeSpecInput};
+use overdrive_core::aggregate::{
+    DriverInput, ExecInput, Job, JobSpecInput, Node, NodeSpecInput, ResourcesInput,
+};
 use overdrive_core::reconciler::{
     AnyReconciler, AnyReconcilerView, AnyState, JobLifecycle, JobLifecycleState, JobLifecycleView,
     TickContext,
@@ -33,8 +35,8 @@ fn payments_job() -> Job {
     Job::from_spec(JobSpecInput {
         id: "payments".to_string(),
         replicas: 1,
-        cpu_milli: 500,
-        memory_bytes: 256 * 1024 * 1024,
+        resources: ResourcesInput { cpu_milli: 500, memory_bytes: 256 * 1024 * 1024 },
+        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     })
     .expect("valid Job spec")
 }

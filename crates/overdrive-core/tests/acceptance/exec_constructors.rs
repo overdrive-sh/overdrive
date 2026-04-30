@@ -47,7 +47,7 @@ fn job_from_spec_preserves_operator_command_casing_verbatim() {
     let spec = spec_with("/Opt/Payments/Server", vec![]);
     let job = Job::from_spec(spec).expect("mixed-case command is valid");
     let WorkloadDriver::Exec(Exec { command, .. }) = &job.driver;
-    assert_eq!(command, "/Opt/Payments/Server", "command must preserve operator casing verbatim",);
+    assert_eq!(command, "/Opt/Payments/Server", "command must preserve operator casing verbatim");
 }
 
 #[test]

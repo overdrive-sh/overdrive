@@ -83,8 +83,14 @@ const fn payments_toml_spec_str() -> &'static str {
     r#"
 id = "payments"
 replicas = 3
+
+[resources]
 cpu_milli = 500
 memory_bytes = 536870912
+
+[exec]
+command = "/bin/true"
+args = []
 "#
 }
 
@@ -95,8 +101,14 @@ const fn payments_altered_toml_spec_str() -> &'static str {
     r#"
 id = "payments"
 replicas = 5
+
+[resources]
 cpu_milli = 500
 memory_bytes = 536870912
+
+[exec]
+command = "/bin/true"
+args = []
 "#
 }
 

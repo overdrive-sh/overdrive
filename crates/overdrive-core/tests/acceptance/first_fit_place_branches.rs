@@ -38,7 +38,7 @@ use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 use std::time::{Duration, Instant};
 
-use overdrive_core::aggregate::{Job, Node};
+use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver};
 use overdrive_core::id::{AllocationId, JobId, NodeId, Region};
 use overdrive_core::reconciler::{
     Action, JobLifecycle, JobLifecycleState, JobLifecycleView, Reconciler, TickContext,
@@ -67,7 +67,12 @@ fn make_node(id: &str, capacity: Resources) -> Node {
 }
 
 fn make_job_with_resources(id: &str, resources: Resources) -> Job {
-    Job { id: jid(id), replicas: NonZeroU32::new(1).expect("1 is non-zero"), resources }
+    Job {
+        id: jid(id),
+        replicas: NonZeroU32::new(1).expect("1 is non-zero"),
+        resources,
+        driver: WorkloadDriver::Exec(Exec { command: "/bin/true".to_string(), args: vec![] }),
+    }
 }
 
 fn alloc_with_state_on(

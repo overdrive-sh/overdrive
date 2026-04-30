@@ -21,7 +21,9 @@ use async_trait::async_trait;
 
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_control_plane::{AppState, job_lifecycle, noop_heartbeat};
-use overdrive_core::aggregate::{IntentKey, Job, JobSpecInput};
+use overdrive_core::aggregate::{
+    DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
+};
 use overdrive_core::id::{JobId, NodeId};
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverType, Resources,
@@ -116,8 +118,8 @@ async fn repeatedly_crashing_workload_exhausts_backoff_and_stops_retrying() {
     let job = Job::from_spec(JobSpecInput {
         id: "payments".to_string(),
         replicas: 1,
-        cpu_milli: 100,
-        memory_bytes: 256 * 1024 * 1024,
+        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
+        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     })
     .expect("valid job spec");
     let archived = rkyv::to_bytes::<rkyv::rancor::Error>(&job).expect("rkyv archive");

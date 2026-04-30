@@ -41,7 +41,7 @@ use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 use std::time::{Duration, Instant};
 
-use overdrive_core::aggregate::{Job, Node};
+use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver};
 use overdrive_core::id::{AllocationId, JobId, NodeId, Region};
 use overdrive_core::reconciler::{
     Action, JobLifecycle, JobLifecycleState, JobLifecycleView, RESTART_BACKOFF_CEILING,
@@ -79,6 +79,7 @@ fn make_job(id: &str) -> Job {
         id: jid(id),
         replicas: NonZeroU32::new(1).expect("1 is non-zero"),
         resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+        driver: WorkloadDriver::Exec(Exec { command: "/bin/true".to_string(), args: vec![] }),
     }
 }
 
@@ -570,7 +571,7 @@ fn fresh_failure_writes_deadline_into_next_view() {
     // RestartAllocation emitted for the failed alloc.
     assert_eq!(actions.len(), 1, "fresh failure must emit one RestartAllocation; got {actions:?}");
     match &actions[0] {
-        Action::RestartAllocation { alloc_id } => {
+        Action::RestartAllocation { alloc_id, .. } => {
             assert_eq!(alloc_id.as_str(), "alloc-payments-0");
         }
         other => panic!("expected RestartAllocation, got {other:?}"),

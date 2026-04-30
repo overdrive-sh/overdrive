@@ -36,7 +36,9 @@ use overdrive_control_plane::api::{
     ErrorBody, IdempotencyOutcome, JobDescription, SubmitJobRequest, SubmitJobResponse,
 };
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
-use overdrive_core::aggregate::{IntentKey, Job, JobSpecInput};
+use overdrive_core::aggregate::{
+    DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
+};
 use overdrive_core::id::JobId;
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_store_local::LocalIntentStore;
@@ -126,7 +128,12 @@ async fn read_intent_key_from_store(data_dir: &std::path::Path, key: &[u8]) -> O
 }
 
 fn spec_with_replicas(replicas: u32) -> JobSpecInput {
-    JobSpecInput { id: "payments".to_owned(), replicas, cpu_milli: 500, memory_bytes: 536_870_912 }
+    JobSpecInput {
+        id: "payments".to_owned(),
+        replicas,
+        resources: ResourcesInput { cpu_milli: 500, memory_bytes: 536_870_912 },
+        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+    }
 }
 
 // -----------------------------------------------------------------------

@@ -24,7 +24,7 @@ use overdrive_control_plane::api::{
     ErrorBody, JobDescription, SubmitJobRequest, SubmitJobResponse,
 };
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
-use overdrive_core::aggregate::{Job, JobSpecInput};
+use overdrive_core::aggregate::{DriverInput, ExecInput, Job, JobSpecInput, ResourcesInput};
 use proptest::prelude::*;
 use tempfile::TempDir;
 
@@ -100,8 +100,8 @@ fn payments_spec() -> JobSpecInput {
     JobSpecInput {
         id: "payments".to_owned(),
         replicas: 3,
-        cpu_milli: 500,
-        memory_bytes: 536_870_912, // 512 MiB
+        resources: ResourcesInput { cpu_milli: 500, memory_bytes: 536_870_912 }, // 512 MiB
+        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     }
 }
 
@@ -355,8 +355,8 @@ fn arb_valid_job_spec() -> impl Strategy<Value = JobSpecInput> {
         |(id, replicas, cpu_milli, memory_bytes)| JobSpecInput {
             id,
             replicas,
-            cpu_milli,
-            memory_bytes,
+            resources: ResourcesInput { cpu_milli, memory_bytes },
+            driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
         },
     )
 }

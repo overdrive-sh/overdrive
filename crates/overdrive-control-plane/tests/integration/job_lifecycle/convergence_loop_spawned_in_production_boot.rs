@@ -44,7 +44,7 @@ use overdrive_control_plane::api::{
     AllocStatusResponse, ClusterStatus, IdempotencyOutcome, SubmitJobRequest, SubmitJobResponse,
 };
 use overdrive_control_plane::{ServerConfig, run_server_with_obs_and_driver};
-use overdrive_core::aggregate::JobSpecInput;
+use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
 use overdrive_core::id::NodeId;
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::observation_store::ObservationStore;
@@ -146,8 +146,8 @@ async fn submitted_job_reaches_running_via_real_server_boot() {
     let spec = JobSpecInput {
         id: "payments".to_owned(),
         replicas: 1,
-        cpu_milli: 100,
-        memory_bytes: 256 * 1024 * 1024,
+        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
+        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     };
     let resp = client
         .post(&submit_url)

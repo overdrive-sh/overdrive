@@ -24,7 +24,7 @@
 //! LocalIntentStore (real redb)
 //! ```
 //!
-//! The load-bearing assertion: the IntentStore at `jobs/payments`
+//! The load-bearing assertion: the `IntentStore` at `jobs/payments`
 //! carries an rkyv-archived `Job` whose `command` and `args` fields
 //! equal the operator's declared values — proving the wire shape
 //! flows end-to-end without literal substitution along the way.
@@ -173,10 +173,7 @@ async fn walking_skeleton_submit_with_exec_block_returns_inserted_and_persists_c
         .expect("re-open intent.redb for back-door read");
     let job_id = JobId::from_str("payments").expect("JobId::from_str(\"payments\")");
     let key = IntentKey::for_job(&job_id);
-    let stored = store
-        .get(key.as_bytes())
-        .await
-        .expect("back-door IntentStore::get must succeed");
+    let stored = store.get(key.as_bytes()).await.expect("back-door IntentStore::get must succeed");
     let bytes = stored.expect(
         "after a successful submit the intent key `jobs/payments` MUST be \
          populated; an empty key here means the server skipped \

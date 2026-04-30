@@ -64,8 +64,14 @@ fn write_valid_payments_toml(dir: &Path) -> PathBuf {
     let spec = r#"
 id = "payments"
 replicas = 3
+
+[resources]
 cpu_milli = 500
 memory_bytes = 536870912
+
+[exec]
+command = "/bin/true"
+args = []
 "#;
     let path = dir.join("payments.toml");
     std::fs::write(&path, spec).expect("write payments.toml");

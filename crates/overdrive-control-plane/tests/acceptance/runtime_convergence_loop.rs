@@ -27,7 +27,9 @@ use std::time::Duration;
 use overdrive_control_plane::eval_broker::Evaluation;
 use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
 use overdrive_control_plane::{AppState, job_lifecycle, noop_heartbeat};
-use overdrive_core::aggregate::{IntentKey, Job, JobSpecInput};
+use overdrive_core::aggregate::{
+    DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
+};
 use overdrive_core::id::{AllocationId, NodeId};
 use overdrive_core::reconciler::{ReconcilerName, TargetResource};
 use overdrive_core::traits::clock::Clock;
@@ -81,8 +83,8 @@ async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
     let job = Job::from_spec(JobSpecInput {
         id: "payments".to_string(),
         replicas: 1,
-        cpu_milli: 100,
-        memory_bytes: 256 * 1024 * 1024,
+        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
+        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     })
     .expect("valid job spec");
     let archived = rkyv::to_bytes::<rkyv::rancor::Error>(&job).expect("rkyv archive");

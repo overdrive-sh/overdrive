@@ -102,8 +102,14 @@ fn write_valid_payments_toml(dir: &Path) -> PathBuf {
     let spec = r#"
 id = "payments"
 replicas = 3
+
+[resources]
 cpu_milli = 500
 memory_bytes = 536870912
+
+[exec]
+command = "/bin/true"
+args = []
 "#;
     let path = dir.join("payments.toml");
     std::fs::write(&path, spec).expect("write payments.toml");
@@ -178,8 +184,14 @@ async fn submit_with_zero_replicas_returns_invalid_spec_before_any_http_call() {
     let broken_spec = r#"
 id = "payments"
 replicas = 0
+
+[resources]
 cpu_milli = 500
 memory_bytes = 536870912
+
+[exec]
+command = "/bin/true"
+args = []
 "#;
     let spec_path = tmp.path().join("broken.toml");
     std::fs::write(&spec_path, broken_spec).expect("write broken.toml");

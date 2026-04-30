@@ -91,7 +91,7 @@ fn job_from_spec_rejects_whitespace_only_exec_command_via_trim_rule() {
 
     match err {
         AggregateError::Validation { field, .. } => {
-            assert_eq!(field, "exec.command", "field must name `exec.command`; got {field:?}",);
+            assert_eq!(field, "exec.command", "field must name `exec.command`; got {field:?}");
         }
         other => panic!("expected AggregateError::Validation, got {other:?}"),
     }

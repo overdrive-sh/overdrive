@@ -132,15 +132,18 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
 
     // The shim must have called `Driver::start` exactly once with the
     // spec carried on the action — NOT with the deleted /bin/sleep
-    // fabrication.
-    let specs = captured.lock().expect("mutex");
-    assert_eq!(
-        specs.len(),
-        1,
-        "Driver::start must be invoked exactly once for a Restart; got {} calls",
-        specs.len(),
-    );
-    let captured_spec = &specs[0];
+    // fabrication. Clone-out + drop the guard to keep the lock window
+    // tight (clippy::significant_drop_tightening).
+    let captured_spec = {
+        let specs = captured.lock().expect("mutex");
+        assert_eq!(
+            specs.len(),
+            1,
+            "Driver::start must be invoked exactly once for a Restart; got {} calls",
+            specs.len(),
+        );
+        specs[0].clone()
+    };
     assert_eq!(
         captured_spec.command, "/opt/x/y",
         "Driver::start must receive the action's command, NOT the deleted /bin/sleep literal",

@@ -270,8 +270,14 @@ async fn all_adr_0008_paths_return_200_on_stub_router() {
         "spec": {
             "id": "routing-check",
             "replicas": 1,
-            "cpu_milli": 100,
-            "memory_bytes": 67_108_864_u64,
+            "resources": {
+                "cpu_milli": 100,
+                "memory_bytes": 67_108_864_u64,
+            },
+            "exec": {
+                "command": "/bin/true",
+                "args": [],
+            },
         },
     });
     let resp = client.post(&url).json(&body).send().await.expect("POST /v1/jobs");
