@@ -55,6 +55,15 @@ pub enum AggregateError {
 /// The intent-side Job aggregate. Carries the authoritative declaration
 /// of what the operator asked the platform to run.
 ///
+/// Per ADR-0031 Amendment 1 the aggregate carries a tagged-enum
+/// `driver: WorkloadDriver` field instead of flat `command` / `args`.
+/// `WorkloadDriver::Exec(Exec { command, args })` is the single Phase-1
+/// variant; future variants (`MicroVm(MicroVm)`, `Wasm(Wasm)`) append
+/// additively. The driver passes the inner `Exec.command` / `Exec.args`
+/// to `tokio::process::Command::new(impl AsRef<OsStr>).args(...)` — no
+/// newtype is warranted (per `.claude/rules/development.md` § Newtypes),
+/// and validation lives in `Job::from_spec`.
+///
 /// # Canonicalisation (rkyv)
 ///
 /// Per `.claude/rules/development.md` ("Internal data → rkyv"), the
@@ -84,6 +93,67 @@ pub struct Job {
     pub id: JobId,
     pub replicas: NonZeroU32,
     pub resources: Resources,
+    /// Driver-class declaration carrying the operator's invocation
+    /// shape. Per ADR-0031 Amendment 1 this is a tagged enum mirroring
+    /// the wire-shape `DriverInput`; the projection from
+    /// `DriverInput::Exec` → `WorkloadDriver::Exec` happens inside
+    /// `Job::from_spec`.
+    pub driver: WorkloadDriver,
+}
+
+/// Validated intent-side counterpart to wire-shape [`DriverInput`]. One
+/// variant per driver class; new variants append in Phase 2+
+/// (`MicroVm(MicroVm)`, `Wasm(Wasm)`).
+///
+/// Naming: `WorkloadDriver`, not `Driver`, to disambiguate from the
+/// `Driver` *trait* at `crates/overdrive-core/src/traits/driver.rs`
+/// (per ADR-0030 §1). The trait is the driver implementation surface
+/// (`Driver::start(&AllocationSpec)`); this enum is the operator's
+/// declared driver-class intent on the [`Job`] aggregate.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub enum WorkloadDriver {
+    /// Native binary under cgroups v2. Mirrors wire-shape
+    /// [`DriverInput::Exec`].
+    Exec(Exec),
+    // Future Phase 2+: MicroVm(MicroVm), Wasm(Wasm).
+}
+
+/// Exec-driver invocation fields. Mirrors wire-shape [`ExecInput`] on
+/// the intent side.
+///
+/// Naming: bare `Exec`, not `ExecSpec` / `ExecInvocation` — the
+/// `WorkloadDriver::Exec(Exec)` qualified path disambiguates from the
+/// `[exec]` TOML table identifier and from the `ExecDriver` trait impl
+/// in `overdrive-worker`. The bare noun reads cleanest in context.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct Exec {
+    /// Host filesystem path to the binary the driver execs. Per ADR-0031
+    /// this is mandatory and validated non-empty (after trim) at
+    /// `Job::from_spec`.
+    pub command: String,
+    /// Argv passed verbatim to the binary. No per-element validation —
+    /// argv is opaque to the platform per ADR-0031 §4.
+    pub args: Vec<String>,
 }
 
 impl Job {
@@ -91,30 +161,60 @@ impl Job {
     /// the intent-side `Job` aggregate. Every CLI handler and every
     /// server handler routes through here.
     ///
-    /// Rejects zero replicas and zero-byte memory capacity; wraps
+    /// Rejects zero replicas, zero-byte memory capacity, and (per
+    /// ADR-0031 §4) empty / whitespace-only `exec.command`. Wraps
     /// [`JobId`]'s `FromStr` error through `AggregateError::Id(..)` via
     /// `#[from]`.
     pub fn from_spec(spec: JobSpecInput) -> Result<Self, AggregateError> {
-        let JobSpecInput { id, replicas, cpu_milli, memory_bytes } = spec;
+        let JobSpecInput { id, replicas, resources, driver } = spec;
         let id = JobId::new(&id)?;
         let replicas = NonZeroU32::new(replicas).ok_or_else(|| AggregateError::Validation {
             field: "replicas",
             message: format!("replica count must be non-zero; got {replicas}"),
         })?;
-        if memory_bytes == 0 {
+        if resources.memory_bytes == 0 {
             return Err(AggregateError::Validation {
                 field: "memory_bytes",
                 message: "memory capacity must be non-zero".to_string(),
             });
         }
-        let resources = Resources { cpu_milli, memory_bytes };
-        Ok(Self { id, replicas, resources })
+        let resources_struct =
+            Resources { cpu_milli: resources.cpu_milli, memory_bytes: resources.memory_bytes };
+        // RED scaffold — project the wire-shape `DriverInput` into the
+        // intent-shape `WorkloadDriver` per ADR-0031 Amendment 1, applying
+        // the ADR-0031 §4 non-empty-after-trim rule on the way. The match
+        // arm that destructures `DriverInput::Exec` is in place; the
+        // validation body that fires `AggregateError::Validation
+        // { field: "exec.command", message: "command must be non-empty" }`
+        // is the RED scaffold the DELIVER crafter replaces with the real
+        // predicate.
+        let DriverInput::Exec(exec_input) = driver;
+        // The trim check is the load-bearing predicate. Until the
+        // crafter lands the real body, the panic IS the specification
+        // of work not yet done — the matching acceptance scenarios in
+        // `tests/acceptance/aggregate_validation.rs` will hit this
+        // arm at RED time.
+        if exec_input.command.trim().is_empty() {
+            todo!(
+                "RED scaffold: ADR-0031 §4 — Job::from_spec must reject empty / \
+                 whitespace-only `exec.command` with AggregateError::Validation \
+                 {{ field: \"exec.command\", message: \"command must be non-empty\" }}"
+            );
+        }
+        let driver =
+            WorkloadDriver::Exec(Exec { command: exec_input.command, args: exec_input.args });
+        Ok(Self { id, replicas, resources: resources_struct, driver })
     }
 }
 
 /// Input shape for `Job::from_spec`. The CLI deserialises TOML into this
 /// type; the server deserialises JSON into the same type; both route
 /// through the same constructor.
+///
+/// Per ADR-0031 §2 the shape is flat top-level (`id`, `replicas`),
+/// `resources: ResourcesInput`, `#[serde(flatten)] driver: DriverInput`.
+/// `deny_unknown_fields` on every struct + a tagged enum enforce
+/// exactly-one driver table at parse time.
 ///
 /// Carries `Serialize` / `Deserialize` so REST handlers and the CLI can
 /// reuse this type verbatim as the body / field shape for
@@ -123,11 +223,54 @@ impl Job {
 /// (ADR-0009, `cargo xtask openapi-gen`) renders the spec shape
 /// consistently across the server and CLI lanes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct JobSpecInput {
     pub id: String,
     pub replicas: u32,
+    pub resources: ResourcesInput,
+    #[serde(flatten)]
+    pub driver: DriverInput,
+}
+
+/// Wire-shape twin of [`Resources`]. Per ADR-0031 §2 / `.claude/rules/development.md`
+/// § State-layer hygiene: the rkyv-archived intent-side `Resources` is
+/// kept clean of serde-only / utoipa-only concerns; this twin carries
+/// the wire-side derives. `From<ResourcesInput> for Resources` is
+/// non-fallible — the validation rules (`memory_bytes != 0`) live in
+/// `Job::from_spec`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ResourcesInput {
     pub cpu_milli: u32,
     pub memory_bytes: u64,
+}
+
+/// Driver dispatch on a [`JobSpecInput`]. Per ADR-0031 §2 a tagged enum
+/// with `#[serde(flatten)]` on the field surfaces the table name as the
+/// discriminator in TOML / JSON: `[exec]` → `DriverInput::Exec(...)`.
+/// `deny_unknown_fields` on the enum rejects unknown driver tables.
+///
+/// Today: one variant (`Exec`). Future drivers (`microvm`, `wasm`) add
+/// new variants additively; no shape change to surrounding code.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+pub enum DriverInput {
+    /// Native binary under cgroups v2 — the `[exec]` table in TOML.
+    Exec(ExecInput),
+    // Future: MicroVm(MicroVmInput), Wasm(WasmInput)
+}
+
+/// Operator-facing `[exec]` table fields per ADR-0031 §2.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ExecInput {
+    /// Host filesystem path to the binary. Validated non-empty (after
+    /// trim) at `Job::from_spec` per ADR-0031 §4.
+    pub command: String,
+    /// Argv passed verbatim. Required field — an absent `args` is a
+    /// parse error, not "default to no args" (per ADR-0031 §8). Empty
+    /// `Vec` is the legitimate zero-args case.
+    pub args: Vec<String>,
 }
 
 /// Reverse conversion — reconstruct the wire-shape `JobSpecInput` from a
@@ -140,11 +283,23 @@ pub struct JobSpecInput {
 /// the `id` is cheap — `JobId::to_string()` is an owned ASCII string.
 impl From<&Job> for JobSpecInput {
     fn from(job: &Job) -> Self {
+        // Per ADR-0031 Amendment 1, project the intent-shape
+        // `WorkloadDriver` back to the wire-shape `DriverInput`. Today
+        // the destructure is irrefutable (single Phase-1 variant); when
+        // future variants land it becomes a `match` and each arm
+        // projects to its sibling `DriverInput::*` variant.
+        let WorkloadDriver::Exec(exec) = &job.driver;
         Self {
             id: job.id.to_string(),
             replicas: job.replicas.get(),
-            cpu_milli: job.resources.cpu_milli,
-            memory_bytes: job.resources.memory_bytes,
+            resources: ResourcesInput {
+                cpu_milli: job.resources.cpu_milli,
+                memory_bytes: job.resources.memory_bytes,
+            },
+            driver: DriverInput::Exec(ExecInput {
+                command: exec.command.clone(),
+                args: exec.args.clone(),
+            }),
         }
     }
 }

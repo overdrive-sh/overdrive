@@ -19,6 +19,7 @@ mod integration {
     mod cluster_and_node_commands;
     mod cluster_init_removed;
     mod endpoint_from_config;
+    mod exec_spec_walking_skeleton;
     mod http_client;
     mod job_submit;
     mod post_http_invalid_job_id;

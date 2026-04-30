@@ -101,3 +101,9 @@ trybuild.workspace = true
 overdrive-store-local.path = "../overdrive-store-local"
 tempfile.workspace = true
 tokio              = { workspace = true }
+# Used by `tests/acceptance/exec_validation.rs` to exercise the
+# tagged-enum + deny_unknown_fields TOML parse path for the new
+# `wire-exec-spec-end-to-end` shape (per ADR-0031 §3 acceptance
+# coverage). The runtime production code does not parse TOML in
+# overdrive-core — that lives in overdrive-cli.
+toml.workspace     = true

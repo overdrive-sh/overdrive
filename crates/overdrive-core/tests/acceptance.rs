@@ -40,4 +40,13 @@ mod acceptance {
     mod any_reconciler_dispatch;
     mod first_fit_place_branches;
     mod job_lifecycle_reconcile_branches;
+
+    // wire-exec-spec-end-to-end — operator-facing job spec carries
+    // explicit `[exec]` block (command + args) and the projection
+    // flows end-to-end through Job::from_spec → Action::Start/Restart.
+    // Per ADR-0031.
+    mod exec_constructors;
+    mod exec_reconciler_purity;
+    mod exec_roundtrip;
+    mod exec_validation;
 }

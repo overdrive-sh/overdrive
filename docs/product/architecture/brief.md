@@ -992,6 +992,79 @@ worth contract-testing.
 
 ---
 
+### 34. Job spec — exec block wiring
+
+The Phase 1 operator-facing TOML now nests `[resources]` and `[exec]`
+tables; driver dispatch is implicit by table name. Top-level scalars
+(`id`, `replicas`) carry identity and scale; `[resources]` carries the
+resource envelope; `[exec]` carries the driver invocation. Future
+drivers (`[microvm]`, `[wasm]`) slot in additively as new sibling
+tables — exactly one driver table per spec is enforced by serde
+(`deny_unknown_fields` + tagged-enum dispatch with `#[serde(flatten)]`)
+at parse time.
+
+```toml
+id = "payments"
+replicas = 1
+
+[resources]
+cpu_milli    = 500
+memory_bytes = 134217728
+
+[exec]
+command = "/opt/payments/bin/payments-server"
+args    = ["--port", "8080"]
+```
+
+The validated `Job` aggregate carries a tagged-enum `driver:
+WorkloadDriver` field (mirroring the wire-shape `JobSpecInput.driver:
+DriverInput`). Today the enum has one variant — `WorkloadDriver::Exec(Exec
+{ command, args })` — that holds the operator's exec-driver invocation.
+Future drivers add variants (`WorkloadDriver::MicroVm(MicroVm)`,
+`WorkloadDriver::Wasm(Wasm)`) additively; the compiler enforces match
+exhaustiveness at every reconciler/shim site, making driver-class
+exclusivity structurally enforced at the intent layer (`make invalid
+states unrepresentable` per development.md). `Job::from_spec` remains
+THE single validating constructor (per ADR-0011) on both CLI and server
+lanes, and projects `DriverInput → WorkloadDriver` as part of the
+construction; the new `exec.command` non-empty rule slots in alongside
+the existing replicas/memory rules and surfaces as
+`AggregateError::Validation { field: "exec.command", message: "command
+must be non-empty" }`. The validation field name is the operator-facing
+path through the spec (matches the TOML the operator typed), not the
+internal Rust nesting. Argv carries no per-element validation — it is
+opaque to the driver, and the kernel's `execve(2)` enforces NUL-byte
+and `PATH_MAX` posture at exec time.
+
+The `Action::RestartAllocation` variant grows `spec: AllocationSpec`,
+mirroring `StartAllocation { spec }`. `AllocationSpec` itself stays
+flat per ADR-0030 §6 — at the driver-trait input boundary the
+implementing driver knows its own class (`impl Driver for ExecDriver`
+IS the discriminator), and ADR-0030's predicted Phase 2+ shape is
+**per-driver-class spec types** (a future `Spec` enum with
+`Spec::Exec(ExecSpec) | Spec::MicroVm(MicroVmSpec) | Spec::Wasm(WasmSpec)`),
+NOT a discriminator on a shared `AllocationSpec`. The reconciler
+projects `&job.driver` (today an irrefutable destructure of
+`WorkloadDriver::Exec(Exec { command, args })`; tomorrow a `match`)
+into the flat `AllocationSpec` at action-emit time. The shim's
+`build_phase1_restart_spec`, `build_identity`, and
+`default_restart_resources` placeholders delete in the same PR — the
+Restart arm reads `spec` straight off the action.
+
+See [ADR-0031](./adr-0031-job-spec-exec-block.md) for the full decision
+record (TOML wire shape, Rust types, `Action` enum revision, action-shim
+deletions, single-cut migration scope, C4 component diagram, and
+Alternatives A-E). ADR-0031 was amended 2026-04-30 (Amendment 1) to
+introduce the `WorkloadDriver` tagged-enum on `Job` for type-shape
+consistency across the wire (`JobSpecInput.driver`) and intent
+(`Job.driver`) layers; AllocationSpec was deliberately preserved flat
+per ADR-0030 §6. [ADR-0030](./adr-0030-exec-driver-and-allocation-spec-args.md)
+is the upstream type-shape decision that ratified `AllocationSpec
+{ command, args }` on the internal driver surface; ADR-0030 is
+unaffected by Amendment 1.
+
+---
+
 ### C4 Level 1 — System Context
 
 ```mermaid

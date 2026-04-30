@@ -33,4 +33,10 @@ mod acceptance {
     mod runtime_registers_noop_heartbeat;
     mod submit_job_idempotency;
     mod trust_triple_getters;
+
+    // wire-exec-spec-end-to-end — operator-facing job spec carries
+    // `[exec]` block end-to-end. Per ADR-0031.
+    mod action_shim_restart_uses_spec_from_action;
+    mod openapi_exec_block;
+    mod submit_job_handler_rejects_empty_exec_command_with_400;
 }

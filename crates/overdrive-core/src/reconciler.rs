@@ -154,7 +154,7 @@ use bytes::Bytes;
 use std::collections::BTreeMap;
 
 use crate::SpiffeId;
-use crate::aggregate::{Job, Node};
+use crate::aggregate::{Exec, Job, Node, WorkloadDriver};
 use crate::id::{AllocationId, CorrelationKey, JobId, NodeId};
 use crate::traits::driver::{AllocationSpec, Resources};
 use crate::traits::observation_store::{AllocState, AllocStatusRow};
@@ -517,13 +517,24 @@ pub enum Action {
         alloc_id: AllocationId,
     },
     /// Restart an allocation — semantically a `StopAllocation`
-    /// followed by a fresh `StartAllocation` with a new `alloc_id`.
+    /// followed by a fresh `StartAllocation` with the same `alloc_id`.
     /// Emitted by the `JobLifecycle` reconciler in crash-recovery
     /// scenarios (per US-03 Domain Example 2).
+    ///
+    /// Per ADR-0031 §5 the variant carries a fully-populated
+    /// `AllocationSpec` — mirroring `StartAllocation { spec }`. The
+    /// reconciler has the live `Job` in scope at emit time, so the
+    /// spec is constructed there (in pure code) and the action shim
+    /// reads it straight off the action. The shim's
+    /// `build_phase1_restart_spec`, `build_identity`, and
+    /// `default_restart_resources` helpers are deleted in the same PR.
     RestartAllocation {
-        /// Allocation to restart. The action shim mints a fresh
-        /// `alloc_id` for the replacement.
+        /// Allocation to restart.
         alloc_id: AllocationId,
+        /// Resources / command / args / identity for the workload —
+        /// mirrors [`Action::StartAllocation::spec`]. The action shim
+        /// passes this directly to `Driver::start`.
+        spec: AllocationSpec,
     },
 }
 
@@ -1159,7 +1170,32 @@ impl Reconciler for JobLifecycle {
                             return (Vec::new(), view.clone());
                         }
                     }
-                    let action = Action::RestartAllocation { alloc_id: failed.alloc_id.clone() };
+                    // Per ADR-0031 §5 the Restart action carries the
+                    // fully-populated `AllocationSpec` — mirroring the
+                    // Start path. The reconciler has the live Job in
+                    // scope; constructing the spec here is pure (two
+                    // .clone() calls + identity derivation), and
+                    // preserves the shim's stateless-dispatcher
+                    // contract per ADR-0023.
+                    let identity = mint_identity(&job.id, &failed.alloc_id);
+                    // Per ADR-0031 Amendment 1: destructure the
+                    // tagged-enum `WorkloadDriver` to project to the
+                    // flat `AllocationSpec` (which stays flat per
+                    // ADR-0030 §6). The destructure is irrefutable
+                    // today (single Phase-1 variant); when Phase-2+
+                    // adds variants it becomes a `match` and each arm
+                    // projects to its per-driver-class spec.
+                    let WorkloadDriver::Exec(Exec { command, args }) = &job.driver;
+                    let action = Action::RestartAllocation {
+                        alloc_id: failed.alloc_id.clone(),
+                        spec: AllocationSpec {
+                            alloc: failed.alloc_id.clone(),
+                            identity,
+                            command: command.clone(),
+                            args: args.clone(),
+                            resources: job.resources,
+                        },
+                    };
                     let mut next_view = view.clone();
                     let count =
                         next_view.restart_counts.entry(failed.alloc_id.clone()).or_insert(0);
@@ -1184,6 +1220,14 @@ impl Reconciler for JobLifecycle {
                     |node_id| {
                         let alloc_id = mint_alloc_id(&job.id);
                         let identity = mint_identity(&job.id, &alloc_id);
+                        // Per ADR-0031 §5 + Amendment 1: the Start
+                        // action carries the operator-declared command
+                        // + args projected from the tagged-enum
+                        // `WorkloadDriver` field on `Job`. No more
+                        // literal `/bin/sleep` / `["60"]`. The
+                        // destructure is irrefutable today (single
+                        // Phase-1 variant); future variants append.
+                        let WorkloadDriver::Exec(Exec { command, args }) = &job.driver;
                         let action = Action::StartAllocation {
                             alloc_id: alloc_id.clone(),
                             job_id: job.id.clone(),
@@ -1191,8 +1235,8 @@ impl Reconciler for JobLifecycle {
                             spec: AllocationSpec {
                                 alloc: alloc_id,
                                 identity,
-                                command: "/bin/sleep".to_string(),
-                                args: vec!["60".to_string()],
+                                command: command.clone(),
+                                args: args.clone(),
                                 resources: job.resources,
                             },
                         };

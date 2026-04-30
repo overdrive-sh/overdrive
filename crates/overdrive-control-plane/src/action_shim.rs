@@ -20,7 +20,7 @@
 
 use overdrive_core::id::{AllocationId, JobId, NodeId};
 use overdrive_core::reconciler::{Action, TickContext};
-use overdrive_core::traits::driver::{AllocationHandle, AllocationSpec, Driver, DriverError};
+use overdrive_core::traits::driver::{AllocationHandle, Driver, DriverError};
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
     ObservationStoreError,
@@ -123,15 +123,15 @@ async fn dispatch_single(
         }
         // Restart: stop-then-start, reusing the same alloc id. Per
         // ADR-0023 §2 Restart is semantically `stop + start` against
-        // the prior alloc. Phase 1 single-mode reuses the deterministic
-        // alloc id derived by `JobLifecycle::reconcile`'s
-        // `mint_alloc_id(job_id)` (the same alloc id flows through
-        // every restart cycle). The action shim looks up the alloc
-        // metadata in observation to reconstruct the spec for the
-        // start half — for 02-03 the spec is rebuilt from the existing
-        // `AllocStatusRow.job_id` plus a Phase-1 baseline image and
-        // resource envelope derived from the original Job intent.
-        Action::RestartAllocation { alloc_id } => {
+        // the prior alloc. Per ADR-0031 §5 the action carries a
+        // fully-populated `AllocationSpec` constructed in the
+        // reconciler from the live `Job`; the shim reads it straight
+        // off the action. `find_prior_alloc_row` survives — it is
+        // still needed to recover `(job_id, node_id)` for the
+        // `AllocStatusRow` write — but the spec-rebuild path
+        // (`build_phase1_restart_spec`, `build_identity`,
+        // `default_restart_resources`) is deleted.
+        Action::RestartAllocation { alloc_id, spec } => {
             // Stop half — Phase 1 uses an empty AllocationHandle (no
             // pid tracking yet); the driver's `stop` is best-effort
             // and `NotFound` is silently absorbed (the alloc may have
@@ -139,17 +139,10 @@ async fn dispatch_single(
             let handle = AllocationHandle { alloc: alloc_id.clone(), pid: None };
             let _ = driver.stop(&handle).await;
 
-            // Start half — look up the prior alloc row to recover the
-            // job_id and node_id; reconstruct the spec from a Phase-1
-            // baseline (`/bin/sleep` with argv `["60"]`, default
-            // resources). This keeps the restart path observable
-            // without threading the full Job aggregate through the
-            // action.
             let Some(prior_row) = find_prior_alloc_row(obs, &alloc_id).await? else {
                 return Err(ShimError::HandleMissing { alloc_id });
             };
 
-            let spec = build_phase1_restart_spec(&alloc_id, &prior_row.job_id);
             // Failed restart — record as Terminated so the next tick's
             // hydrate sees the prior failure and can decide whether to
             // back off or exhaust.
@@ -217,44 +210,12 @@ async fn find_prior_alloc_row(
     Ok(obs.alloc_status_rows().await?.into_iter().find(|r| &r.alloc_id == alloc_id))
 }
 
-/// Build the Phase-1 baseline `AllocationSpec` used to reconstruct a
-/// Restart's spawn from observation alone. Phase 2+ threads the full
-/// Job aggregate through the action so this helper goes away.
-fn build_phase1_restart_spec(alloc_id: &AllocationId, job_id: &JobId) -> AllocationSpec {
-    AllocationSpec {
-        alloc: alloc_id.clone(),
-        identity: build_identity(job_id, alloc_id),
-        command: "/bin/sleep".to_string(),
-        args: vec!["60".to_string()],
-        resources: default_restart_resources(),
-    }
-}
-
-/// Reconstruct the SPIFFE identity for a restart's fresh
-/// `AllocationSpec`. Mirrors the derivation in
-/// `overdrive_core::reconciler::mint_identity` — the `JobLifecycle`
-/// reconciler is the source of truth for the canonical form, but the
-/// shim cannot reach a private function in core. The two formulae are
-/// pinned by an acceptance test.
-fn build_identity(
-    job_id: &overdrive_core::id::JobId,
-    alloc_id: &overdrive_core::id::AllocationId,
-) -> overdrive_core::SpiffeId {
-    let raw =
-        format!("spiffe://overdrive.local/job/{}/alloc/{}", job_id.as_str(), alloc_id.as_str());
-    #[allow(clippy::expect_used)]
-    overdrive_core::SpiffeId::new(&raw).expect("derived SpiffeId is valid")
-}
-
-/// Phase 1 baseline resources used when reconstructing a Restart's
-/// `AllocationSpec`. The original Job intent's resource envelope is
-/// the right long-term source — Phase 2+ threads the Job aggregate
-/// through the action — but for 02-03 a baseline is sufficient: the
-/// `ExecDriver` currently ignores `resources` (cgroup pre-flight is
-/// out-of-scope until 03-01).
-const fn default_restart_resources() -> overdrive_core::traits::driver::Resources {
-    overdrive_core::traits::driver::Resources { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 }
-}
+// Per ADR-0031 §6 the helpers `build_phase1_restart_spec`,
+// `build_identity`, and `default_restart_resources` are DELETED.
+// The `Action::RestartAllocation` variant now carries a fully-populated
+// `AllocationSpec` constructed in the reconciler from the live `Job`;
+// the shim reads it straight off the action. The deletion is pinned
+// by `crates/overdrive-control-plane/tests/compile_fail/build_phase1_restart_spec_deleted.rs`.
 
 /// Errors from [`dispatch`] that cannot be resolved into an
 /// observation row. Per ADR-0023 §3.
@@ -277,41 +238,7 @@ pub enum ShimError {
     },
 }
 
-// ---------------------------------------------------------------------------
-// Unit tests for the private const helpers
-// ---------------------------------------------------------------------------
-
-#[cfg(test)]
-mod tests {
-    use super::default_restart_resources;
-
-    /// Pin every numeric field of `default_restart_resources` to its
-    /// exact production value. Kills the four mutations on the
-    /// `cpu_milli: 100, memory_bytes: 256 * 1024 * 1024` literal:
-    ///
-    ///   - `*` -> `+` at position 83 (between 256 and the first
-    ///     1024) — would yield `256 + 1024 * 1024 = 1048832`.
-    ///   - `*` -> `/` at position 83 — would yield `256 / 1024 *
-    ///     1024 = 0`.
-    ///   - `*` -> `+` at position 90 (between 1024 and 1024) — would
-    ///     yield `256 * (1024 + 1024) = 524288`.
-    ///   - `*` -> `/` at position 90 — would yield `256 * (1024 /
-    ///     1024) = 256`.
-    ///
-    /// Pinning the exact production value `268435456` (= 256 MiB)
-    /// rejects every mutant because their values differ.
-    #[test]
-    fn default_restart_resources_pins_exact_values() {
-        let r = default_restart_resources();
-        assert_eq!(r.cpu_milli, 100, "cpu_milli must be exactly 100");
-        assert_eq!(
-            r.memory_bytes,
-            256 * 1024 * 1024,
-            "memory_bytes must be exactly 256 MiB = 268435456",
-        );
-        // Belt-and-braces: pin the absolute byte count too, so a
-        // mutation that happens to yield the right SHAPE but the
-        // wrong VALUE is still caught.
-        assert_eq!(r.memory_bytes, 268_435_456_u64);
-    }
-}
+// Per ADR-0031 §6 / `feedback_delete_dont_gate`: the
+// `default_restart_resources_pins_exact_values` test is DELETED in
+// the same PR as `default_restart_resources` itself. A test cannot
+// defend a function that no longer exists.
