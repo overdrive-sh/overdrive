@@ -158,8 +158,9 @@
     ]
   },
   "validation": {
-    "status": "pending",
-    "reviewer": "TODO",
-    "approved_at": "TODO"
+    "status": "approved",
+    "reviewer": "nw-acceptance-designer-reviewer",
+    "approved_at": "2026-04-30T05:30:00Z",
+    "review_artifact": "docs/feature/wire-exec-spec-end-to-end/deliver/review-from-acceptance-designer-reviewer.md"
   }
 }
