@@ -529,8 +529,10 @@ components:
         Per ADR-0031 §2 / `.claude/rules/development.md` § State-layer
         hygiene: the rkyv-archived intent-side `Resources` is kept clean of
         serde-only / utoipa-only concerns; this twin carries the wire-side
-        derives. `From<ResourcesInput> for Resources` is non-fallible — the
-        validation rules (`memory_bytes != 0`) live in `Job::from_spec`.
+        derives. The projection onto `Resources` is field-by-field inside
+        `Job::from_spec` (no `From` impl: the ≥3-call-sites rule isn't met,
+        and the validation rules — `memory_bytes != 0` — must fire on the
+        way through anyway).
       required:
       - cpu_milli
       - memory_bytes

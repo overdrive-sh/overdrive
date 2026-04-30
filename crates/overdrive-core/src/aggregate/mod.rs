@@ -178,8 +178,6 @@ impl Job {
                 message: "memory capacity must be non-zero".to_string(),
             });
         }
-        let resources_struct =
-            Resources { cpu_milli: resources.cpu_milli, memory_bytes: resources.memory_bytes };
         // Project the wire-shape `DriverInput` into the intent-shape
         // `WorkloadDriver` per ADR-0031 Amendment 1, applying the
         // ADR-0031 §4 non-empty-after-trim rule on the way. The trim
@@ -197,9 +195,18 @@ impl Job {
                 message: "command must be non-empty".to_string(),
             });
         }
-        let driver =
-            WorkloadDriver::Exec(Exec { command: exec_input.command, args: exec_input.args });
-        Ok(Self { id, replicas, resources: resources_struct, driver })
+        Ok(Self {
+            id,
+            replicas,
+            resources: Resources {
+                cpu_milli: resources.cpu_milli,
+                memory_bytes: resources.memory_bytes,
+            },
+            driver: WorkloadDriver::Exec(Exec {
+                command: exec_input.command,
+                args: exec_input.args,
+            }),
+        })
     }
 }
 
@@ -233,8 +240,10 @@ pub struct JobSpecInput {
 /// Per ADR-0031 §2 / `.claude/rules/development.md` § State-layer
 /// hygiene: the rkyv-archived intent-side `Resources` is kept clean of
 /// serde-only / utoipa-only concerns; this twin carries the wire-side
-/// derives. `From<ResourcesInput> for Resources` is non-fallible — the
-/// validation rules (`memory_bytes != 0`) live in `Job::from_spec`.
+/// derives. The projection onto `Resources` is field-by-field inside
+/// `Job::from_spec` (no `From` impl: the ≥3-call-sites rule isn't met,
+/// and the validation rules — `memory_bytes != 0` — must fire on the
+/// way through anyway).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ResourcesInput {
