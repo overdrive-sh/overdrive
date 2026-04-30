@@ -46,6 +46,8 @@ fn alloc_row(alloc_id: &str, state: AllocState, counter: u64) -> AllocStatusRow 
             counter,
             writer: NodeId::new("control-plane-0").expect("valid writer node id"),
         },
+        reason: None,
+        detail: None,
     }
 }
 

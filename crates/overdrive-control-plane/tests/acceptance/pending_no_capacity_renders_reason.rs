@@ -33,6 +33,8 @@ fn pending_renders_no_capacity_reason_actionably() {
             counter: 1,
             writer: NodeId::new("node-0").expect("writer node id"),
         },
+        reason: None,
+        detail: None,
     };
 
     // Render with the NoCapacity reason — the rendering layer must
@@ -86,6 +88,8 @@ fn non_pending_row_renders_with_no_reason() {
             counter: 1,
             writer: NodeId::new("node-0").expect("writer node id"),
         },
+        reason: None,
+        detail: None,
     };
 
     let body = AllocStatusRowBody::from(row);

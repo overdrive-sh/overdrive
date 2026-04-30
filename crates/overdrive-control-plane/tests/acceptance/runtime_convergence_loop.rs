@@ -101,6 +101,8 @@ async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
         node_id: writer.clone(),
         state: AllocState::Running,
         updated_at: LogicalTimestamp { counter: 1, writer: writer.clone() },
+        reason: None,
+        detail: None,
     };
     state.obs.write(ObservationRow::AllocStatus(alloc_row)).await.expect("seed Running alloc row");
 
@@ -247,6 +249,8 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
         node_id: writer.clone(),
         state: AllocState::Running,
         updated_at: LogicalTimestamp { counter: 1, writer: writer.clone() },
+        reason: None,
+        detail: None,
     };
     state.obs.write(ObservationRow::AllocStatus(alloc_row)).await.expect("seed Running alloc row");
 

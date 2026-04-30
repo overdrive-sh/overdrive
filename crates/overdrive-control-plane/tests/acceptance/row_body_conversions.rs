@@ -32,6 +32,8 @@ fn sample_alloc_status_row() -> AllocStatusRow {
             counter: 1,
             writer: NodeId::from_str("node-a").expect("valid node id"),
         },
+        reason: None,
+        detail: None,
     }
 }
 

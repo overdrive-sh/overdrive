@@ -84,6 +84,8 @@ fn free_capacity_excludes_pending_allocs_on_same_node() {
             counter: 1,
             writer: nid("local"),
         },
+        reason: None,
+        detail: None,
     }];
 
     let result = schedule(&nodes, &job, &allocs);

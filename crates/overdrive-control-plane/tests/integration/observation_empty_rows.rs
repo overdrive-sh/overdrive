@@ -120,6 +120,8 @@ fn canary_alloc_row() -> AllocStatusRow {
             counter: 1,
             writer: NodeId::new("control-plane-0").expect("writer node id"),
         },
+        reason: None,
+        detail: None,
     }
 }
 

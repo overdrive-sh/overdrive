@@ -28,6 +28,7 @@ use futures::Stream;
 use thiserror::Error;
 
 use crate::id::{AllocationId, JobId, NodeId, Region};
+use crate::transition_reason::TransitionReason;
 
 #[derive(Debug, Error)]
 pub enum ObservationStoreError {
@@ -46,6 +47,12 @@ pub enum ObservationStoreError {
 /// Matches the lifecycle documented in whitepaper §4 and §14 —
 /// `pending → running ⇄ suspended → terminated`, plus `draining` as the
 /// transient state a node reports while migrating an allocation away.
+///
+/// `Failed` is the explicit terminal state a driver-rejected start
+/// (or any cause-class failure transition) lands in. Per ADR-0032 §3
+/// (Amendment 2026-04-30) the failure cause is structurally captured
+/// on the `AllocStatusRow` via `reason: Option<TransitionReason>`; the
+/// `Failed` state is the lifecycle bucket those rows live in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum AllocState {
     Pending,
@@ -53,6 +60,10 @@ pub enum AllocState {
     Draining,
     Suspended,
     Terminated,
+    /// Driver-rejected start, restart-budget exhaustion, cancellation,
+    /// no-capacity, or any other cause-class failure. Mirrors
+    /// `TransitionReason::is_failure() == true`. Per ADR-0032 §3.
+    Failed,
 }
 
 impl std::fmt::Display for AllocState {
@@ -65,6 +76,7 @@ impl std::fmt::Display for AllocState {
             Self::Draining => "draining",
             Self::Suspended => "suspended",
             Self::Terminated => "terminated",
+            Self::Failed => "failed",
         };
         f.write_str(s)
     }
@@ -117,10 +129,37 @@ impl LogicalTimestamp {
     }
 }
 
-/// `alloc_status` row — Phase 1 minimal shape per brief §6.
+/// `alloc_status` row — Phase 1 minimal shape per brief §6, extended
+/// per ADR-0032 §3 (Amendment 2026-04-30) and §4 with cause-class
+/// attribution.
 ///
 /// Written by the node that owns the allocation; gossiped to every peer.
 /// Full-row writes only (no field-diff merges) per the §4 guardrail.
+///
+/// # Cause-class attribution
+///
+/// `reason` carries the structured `TransitionReason` for the most
+/// recent transition that produced this row. Progress markers
+/// (`Scheduling`, `Starting`, `Started`, `BackoffPending`, `Stopped`)
+/// describe healthy lifecycle progress; cause-class variants
+/// (`ExecBinaryNotFound`, `CgroupSetupFailed`, `RestartBudgetExhausted`,
+/// `Cancelled`, `NoCapacity`, …) describe failure transitions and
+/// pair with `state == AllocState::Failed`.
+///
+/// `detail` carries verbatim driver text the typed `reason` payload
+/// does not capture — most commonly the raw `errno`-decorated message
+/// from `std::io::Error::Display` for cgroup / spawn failures. The
+/// typed payload is the load-bearing artifact; `detail` is the human-
+/// readable fallback for cases the cause-class taxonomy has not yet
+/// grown a variant for.
+///
+/// # Forward compatibility
+///
+/// Both `reason` and `detail` are `Option<…>` and additive on the rkyv
+/// archive shape — pre-feature redb files (where neither field exists)
+/// continue to deserialise (rkyv treats `Option<T>` such that omitted
+/// data deserialises to `None`). New writers populate both fields per
+/// the action-shim contract (ADR-0023); old readers tolerate them.
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct AllocStatusRow {
     pub alloc_id: AllocationId,
@@ -128,6 +167,17 @@ pub struct AllocStatusRow {
     pub node_id: NodeId,
     pub state: AllocState,
     pub updated_at: LogicalTimestamp,
+    /// Structured cause for this transition. `None` when the writer
+    /// (Phase 1: action shim) has not yet been wired to populate it,
+    /// or when the row predates the schema extension.
+    pub reason: Option<TransitionReason>,
+    /// Verbatim driver / OS text the `reason` payload does not capture.
+    /// Used for diagnostic fidelity on cause variants whose typed
+    /// payload is incomplete (e.g. `DriverInternalError { detail }`
+    /// duplicates this for self-containment, but other cause variants
+    /// may carry only structured fields and rely on `detail` for the
+    /// raw `errno` text).
+    pub detail: Option<String>,
 }
 
 /// `node_health` row — Phase 1 minimal shape per brief §6.

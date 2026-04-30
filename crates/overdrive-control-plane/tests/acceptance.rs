@@ -18,6 +18,11 @@
 #![allow(clippy::unwrap_used)]
 
 mod acceptance {
+    // S-CP-09 — AllocStatusRow rkyv round-trip with the new
+    // `reason: Option<TransitionReason>` and `detail: Option<String>`
+    // fields per ADR-0032 §3 (Amendment 2026-04-30) and §4.
+    mod alloc_status_row_archive_roundtrip;
+
     mod api_type_shapes;
     mod cluster_status_lists_both_reconcilers;
     mod default_lane_no_cgroup_dependency;

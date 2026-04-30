@@ -82,6 +82,8 @@ pub fn make_alloc_running(alloc_id: &str, job_id: &str, target_node: &str) -> Al
         node_id: nid(target_node),
         state: AllocState::Running,
         updated_at: LogicalTimestamp { counter: 1, writer: nid(target_node) },
+        reason: None,
+        detail: None,
     }
 }
 
@@ -93,6 +95,8 @@ pub fn make_alloc_terminated(alloc_id: &str, job_id: &str, target_node: &str) ->
         node_id: nid(target_node),
         state: AllocState::Terminated,
         updated_at: LogicalTimestamp { counter: 1, writer: nid(target_node) },
+        reason: None,
+        detail: None,
     }
 }
 
@@ -192,6 +196,8 @@ pub fn arb_allocs_for_nodes(node_ids: Vec<NodeId>) -> BoxedStrategy<Vec<AllocSta
                         alloc_id: AllocationId::new(&alloc_label).expect("valid AllocationId"),
                         job_id: JobId::new(&job_label).expect("valid JobId"),
                         node_id: target.clone(),
+                        reason: None,
+                        detail: None,
                         state: if is_running {
                             AllocState::Running
                         } else {

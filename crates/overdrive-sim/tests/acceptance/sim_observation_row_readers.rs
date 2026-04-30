@@ -35,6 +35,8 @@ fn alloc_row(alloc: &str, state: AllocState, counter: u64) -> AllocStatusRow {
         node_id: peer(),
         state,
         updated_at: LogicalTimestamp { counter, writer: peer() },
+        reason: None,
+        detail: None,
     }
 }
 

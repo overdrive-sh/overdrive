@@ -18,6 +18,7 @@
 //! lives at the crate root as `action_shim` and is re-exported under
 //! the canonical path via `pub mod` in lib.rs.
 
+use overdrive_core::TransitionReason;
 use overdrive_core::id::{AllocationId, JobId, NodeId};
 use overdrive_core::reconciler::{Action, TickContext};
 use overdrive_core::traits::driver::{AllocationHandle, Driver, DriverError};
@@ -34,15 +35,33 @@ pub const SCAFFOLD: bool = false;
 /// `RestartAllocation`, and `StopAllocation` all funnel through this
 /// helper so the row shape is constructed in exactly one place. Pure
 /// over its inputs — does not touch the observation store.
+///
+/// Per ADR-0032 §3 (Amendment 2026-04-30) the row carries
+/// `reason: Option<TransitionReason>` and `detail: Option<String>`
+/// for cause-class attribution. Phase 1 callers populate `reason`
+/// only on `StartAllocation` failure (placeholder
+/// `DriverInternalError { detail: reason_text }` until step 02-01
+/// lands the structured classifier); other call sites pass `None` /
+/// `None` for now and grow per their respective steps.
 fn build_alloc_status_row(
     alloc_id: AllocationId,
     job_id: JobId,
     node_id: NodeId,
     state: AllocState,
     tick: &TickContext,
+    reason: Option<TransitionReason>,
+    detail: Option<String>,
 ) -> AllocStatusRow {
     let writer = node_id.clone();
-    AllocStatusRow { alloc_id, job_id, node_id, state, updated_at: timestamp_for(tick, writer) }
+    AllocStatusRow {
+        alloc_id,
+        job_id,
+        node_id,
+        state,
+        updated_at: timestamp_for(tick, writer),
+        reason,
+        detail,
+    }
 }
 
 /// Dispatch a reconciler's emitted `Vec<Action>` against the active
@@ -112,12 +131,29 @@ async fn dispatch_single(
         // Phase 1 does not yet model a `Failed` AllocState variant —
         // Terminated is the closest match.
         Action::StartAllocation { alloc_id, job_id, node_id, spec } => {
-            let state = match driver.start(&spec).await {
-                Ok(_handle) => AllocState::Running,
-                Err(DriverError::StartRejected { reason: _, .. }) => AllocState::Terminated,
-                Err(other) => return Err(ShimError::Driver(other)),
-            };
-            let row = build_alloc_status_row(alloc_id, job_id, node_id, state, tick);
+            // Per ADR-0032 §3 (Amendment 2026-04-30) the row carries
+            // structured cause-class attribution. Step 01-01 lands the
+            // type surface and the row write path; the structured
+            // failure-state switch (Terminated → Failed for cause-class
+            // failures) and the classifier promoting
+            // `DriverError::StartRejected.reason` text to a more
+            // specific cause-class variant land in step 02-01. For now
+            // the failure path keeps the existing `Terminated` lifecycle
+            // bucket the reconciler's restart-budget logic depends on,
+            // and uses `DriverInternalError { detail }` as the
+            // placeholder cause-class.
+            let (state, reason, detail): (AllocState, Option<TransitionReason>, Option<String>) =
+                match driver.start(&spec).await {
+                    Ok(_handle) => (AllocState::Running, Some(TransitionReason::Started), None),
+                    Err(DriverError::StartRejected { reason: reason_text, .. }) => (
+                        AllocState::Terminated,
+                        Some(TransitionReason::DriverInternalError { detail: reason_text.clone() }),
+                        Some(reason_text),
+                    ),
+                    Err(other) => return Err(ShimError::Driver(other)),
+                };
+            let row =
+                build_alloc_status_row(alloc_id, job_id, node_id, state, tick, reason, detail);
             obs.write(ObservationRow::AllocStatus(row)).await?;
             Ok(())
         }
@@ -142,14 +178,29 @@ async fn dispatch_single(
 
             // Failed restart — record as Terminated so the next tick's
             // hydrate sees the prior failure and can decide whether to
-            // back off or exhaust.
-            let state = match driver.start(&spec).await {
-                Ok(_handle) => AllocState::Running,
-                Err(DriverError::StartRejected { .. }) => AllocState::Terminated,
-                Err(other) => return Err(ShimError::Driver(other)),
-            };
-            let row =
-                build_alloc_status_row(alloc_id, prior_row.job_id, prior_row.node_id, state, tick);
+            // back off or exhaust. Per ADR-0032 §3 the row carries the
+            // structured cause attribution; step 02-01 promotes the
+            // `Terminated` → `Failed` switch and refines the cause
+            // classifier on `StartRejected.reason` text.
+            let (state, reason, detail): (AllocState, Option<TransitionReason>, Option<String>) =
+                match driver.start(&spec).await {
+                    Ok(_handle) => (AllocState::Running, Some(TransitionReason::Started), None),
+                    Err(DriverError::StartRejected { reason: reason_text, .. }) => (
+                        AllocState::Terminated,
+                        Some(TransitionReason::DriverInternalError { detail: reason_text.clone() }),
+                        Some(reason_text),
+                    ),
+                    Err(other) => return Err(ShimError::Driver(other)),
+                };
+            let row = build_alloc_status_row(
+                alloc_id,
+                prior_row.job_id,
+                prior_row.node_id,
+                state,
+                tick,
+                reason,
+                detail,
+            );
             obs.write(ObservationRow::AllocStatus(row)).await?;
             Ok(())
         }
@@ -175,12 +226,21 @@ async fn dispatch_single(
             // outcome regardless. This mirrors the Restart variant's
             // stop-half pattern.
             let _ = driver.stop(&handle).await;
+            // The reconciler emits `StopAllocation` from explicit
+            // operator stop intent (per US-04 / `IntentKey::for_job_stop`).
+            // Phase 1 surfaces this as a `Stopped { by: Reconciler }`
+            // progress marker — operator vs reconciler attribution
+            // refinement lands in step 02-01 alongside the classifier.
             let row = build_alloc_status_row(
                 alloc_id,
                 prior_row.job_id,
                 prior_row.node_id,
                 AllocState::Terminated,
                 tick,
+                Some(TransitionReason::Stopped {
+                    by: overdrive_core::transition_reason::StoppedBy::Reconciler,
+                }),
+                None,
             );
             obs.write(ObservationRow::AllocStatus(row)).await?;
             Ok(())

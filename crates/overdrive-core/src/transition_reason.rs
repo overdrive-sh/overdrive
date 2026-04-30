@@ -1,10 +1,3 @@
-// SCAFFOLD: true
-//
-// RED scaffold per nw-distill / .claude/rules/testing.md §"RED scaffolds and
-// intentionally-failing commits". Created during the DISTILL wave for feature
-// `cli-submit-vs-deploy-and-alloc-status`; the crafter replaces this stub
-// with the real implementation as part of slice 01 in DELIVER.
-//
 // `TransitionReason` is the load-bearing single-source-of-truth enum from
 // ADR-0032 §3 / ADR-0033 §1. Both the streaming `SubmitEvent::LifecycleTransition`
 // surface and the snapshot `AllocStatusRowBody.last_transition.reason`
@@ -275,8 +268,6 @@ impl TransitionReason {
     /// /usr/local/bin/payments"`); progress markers return owned copies
     /// of static strings to keep the return type uniform.
     ///
-    /// The body MUST remain panicking under this scaffold. The crafter
-    /// replaces the panic with the real mapping in slice 01 GREEN.
     /// Reference rendering shapes (per ADR-0033 §4 amendment 2026-04-30):
     ///
     /// | Variant | Rendering |
@@ -300,11 +291,54 @@ impl TransitionReason {
     /// | `WorkloadCrashedImmediately { exit_code, signal, .. }` | `format!("crashed (exit {exit_code:?}, signal {signal:?})")` |
     #[must_use]
     pub fn human_readable(&self) -> String {
-        // RED scaffold — replaced by the real mapping during DELIVER
-        // slice 01. The crafter wires per-variant rendering from the
-        // table above.
-        let _ = self;
-        panic!("Not yet implemented -- RED scaffold")
+        match self {
+            // Progress markers
+            Self::Scheduling => "scheduling".to_owned(),
+            Self::Starting => "starting".to_owned(),
+            Self::Started => "driver started".to_owned(),
+            Self::BackoffPending { attempt } => {
+                format!("backoff (attempt {attempt})")
+            }
+            Self::Stopped { by: StoppedBy::Operator } => "stopped (by operator)".to_owned(),
+            Self::Stopped { by: StoppedBy::Reconciler } => "stopped".to_owned(),
+
+            // Cause-class failures (Phase 1 emit)
+            Self::ExecBinaryNotFound { path } => format!("binary not found: {path}"),
+            Self::ExecPermissionDenied { path } => format!("permission denied: {path}"),
+            Self::ExecBinaryInvalid { path, kind } => {
+                format!("binary invalid ({kind}): {path}")
+            }
+            Self::CgroupSetupFailed { kind, source } => {
+                format!("cgroup {kind} failed: {source}")
+            }
+            Self::DriverInternalError { detail } => {
+                format!("driver internal error: {detail}")
+            }
+            Self::RestartBudgetExhausted { attempts, last_cause_summary } => {
+                format!(
+                    "restart budget exhausted after {attempts} attempts (last: {last_cause_summary})",
+                )
+            }
+            Self::Cancelled { by: CancelledBy::Operator } => "cancelled (by operator)".to_owned(),
+            Self::Cancelled { by: CancelledBy::Cluster } => "cancelled (by cluster)".to_owned(),
+            Self::NoCapacity { requested, free } => {
+                format!(
+                    "no capacity (requested cpu={req_cpu}m mem={req_mem}b / free cpu={free_cpu}m mem={free_mem}b)",
+                    req_cpu = requested.cpu_milli,
+                    req_mem = requested.memory_bytes,
+                    free_cpu = free.cpu_milli,
+                    free_mem = free.memory_bytes,
+                )
+            }
+
+            // Cause-class failures (Phase 2 emit-deferred forward-compat)
+            Self::OutOfMemory { peak_bytes, limit_bytes } => {
+                format!("OOM-killed (peak {peak_bytes} / limit {limit_bytes})")
+            }
+            Self::WorkloadCrashedImmediately { exit_code, signal, .. } => {
+                format!("crashed (exit {exit_code:?}, signal {signal:?})")
+            }
+        }
     }
 
     /// Returns `true` for cause-class variants (failure transitions);
@@ -316,15 +350,26 @@ impl TransitionReason {
     /// renders both with the same `human_readable()` output but the
     /// CLI's `Error:` block in `submit` only fires on cause-class
     /// terminal events.
-    ///
-    /// The body MUST remain panicking under this scaffold.
     #[must_use]
-    pub fn is_failure(&self) -> bool {
-        // RED scaffold — replaced by the real mapping during DELIVER
-        // slice 01. Match arms: progress markers (Scheduling, Starting,
-        // Started, BackoffPending, Stopped) return false; everything
-        // else returns true.
-        let _ = self;
-        panic!("Not yet implemented -- RED scaffold")
+    pub const fn is_failure(&self) -> bool {
+        match self {
+            // Progress markers — healthy lifecycle progress.
+            Self::Scheduling
+            | Self::Starting
+            | Self::Started
+            | Self::BackoffPending { .. }
+            | Self::Stopped { .. } => false,
+            // Cause-class failures.
+            Self::ExecBinaryNotFound { .. }
+            | Self::ExecPermissionDenied { .. }
+            | Self::ExecBinaryInvalid { .. }
+            | Self::CgroupSetupFailed { .. }
+            | Self::DriverInternalError { .. }
+            | Self::RestartBudgetExhausted { .. }
+            | Self::Cancelled { .. }
+            | Self::NoCapacity { .. }
+            | Self::OutOfMemory { .. }
+            | Self::WorkloadCrashedImmediately { .. } => true,
+        }
     }
 }

@@ -101,6 +101,8 @@ fn alloc_row(scope: &str, idx: usize, state: AllocState, ts: LogicalTimestamp) -
         node_id: node_id("control-plane-0"),
         state,
         updated_at: ts,
+        reason: None,
+        detail: None,
     }
 }
 

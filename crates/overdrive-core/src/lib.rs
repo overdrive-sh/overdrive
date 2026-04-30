@@ -29,11 +29,12 @@ pub mod error;
 pub mod id;
 pub mod reconciler;
 pub mod traits;
-// RED scaffold (DISTILL wave, feature cli-submit-vs-deploy-and-alloc-status).
-// Per `.claude/rules/testing.md` § "RED scaffolds and intentionally-failing
-// commits": this module exists so acceptance tests written ahead of the
-// crafter's DELIVER work can import the type. Methods panic with the RED
-// marker; the type declaration itself compiles cleanly. See
+// `TransitionReason` is the SSOT enum carried on streaming
+// `SubmitEvent::LifecycleTransition` and snapshot
+// `AllocStatusRow.reason`. Locked under ADR-0032 §3 (Amendment
+// 2026-04-30, cause-class refactor): 5 progress markers + 9 Phase 1
+// cause-class failure variants + 2 Phase 2 emit-deferred forward-compat
+// variants (16 total). See
 // `docs/feature/cli-submit-vs-deploy-and-alloc-status/distill/wave-decisions.md`
 // DWD-03.
 pub mod transition_reason;
@@ -59,9 +60,7 @@ pub use id::{
 pub use traits::{
     Clock, Dataplane, Driver, DriverType, Entropy, IntentStore, Llm, ObservationStore, Transport,
 };
-// RED scaffold export (DISTILL wave, feature
-// cli-submit-vs-deploy-and-alloc-status). Re-exported from
-// `transition_reason` for convenience; the snapshot wire surface in
-// `overdrive-control-plane::api` will further re-export with a
-// `ToSchema` derive in slice 01 GREEN.
+// Re-exported from `transition_reason` for convenience; the snapshot
+// wire surface in `overdrive-control-plane::api` further re-exports
+// with a `ToSchema` derive (locked in ADR-0032 §3 Amendment).
 pub use transition_reason::TransitionReason;

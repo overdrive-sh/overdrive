@@ -512,6 +512,8 @@ pub async fn evaluate_sim_observation_lww(cluster: &SimObservationCluster) -> In
                 node_id: writer.clone(),
                 state,
                 updated_at: LogicalTimestamp { counter, writer: writer.clone() },
+                reason: None,
+                detail: None,
             };
             let peer = cluster.peer(writer);
             if let Err(err) = peer.write(ObservationRow::AllocStatus(row)).await {
@@ -1634,6 +1636,8 @@ mod tests {
                 counter: 1,
                 writer: NodeId::new(node).expect("valid node id"),
             },
+            reason: None,
+            detail: None,
         }
     }
 
