@@ -70,6 +70,16 @@ pub enum Invariant {
     /// evaluator body panics until DELIVER wires the noop-heartbeat
     /// reconciler into the harness.
     ReconcilerIsPure,
+    /// phase-1-control-plane-core / fix-eval-reconciler-discarded follow-up.
+    /// For any drained `Evaluation { reconciler: R, target: T }`, exactly
+    /// one reconciler — R — runs through the dispatch path against T per
+    /// tick. The DST-tier peer of the unit/acceptance pin at
+    /// `crates/overdrive-control-plane/tests/acceptance/runtime_convergence_loop.rs::eval_dispatch_runs_only_the_named_reconciler`
+    /// (commit `e6f5e5e`). Closes the §8 storm-proofing dispatch-routing
+    /// contract end-to-end. Sibling to `DuplicateEvaluationsCollapse`:
+    /// that invariant pins broker-side entry collapse, this one pins
+    /// dispatcher-side routing.
+    DispatchRoutingIsNameRestricted,
     /// `IntentStore::put(k, v)` followed by `IntentStore::get(k)`
     /// returns `Some(v)` byte-for-byte — no framing, no prefix, no
     /// transformation. Closes ADR-0020 §Enforcement: the structural-
@@ -116,6 +126,7 @@ impl Invariant {
         Self::DuplicateEvaluationsCollapse,
         Self::BrokerDrainOrderIsDeterministic,
         Self::ReconcilerIsPure,
+        Self::DispatchRoutingIsNameRestricted,
         Self::IntentStoreReturnsCallerBytes,
         // SCAFFOLD: false — phase-1-first-workload slice 3 (US-03).
         Self::JobScheduledAfterSubmission,
@@ -140,6 +151,7 @@ impl Invariant {
             Self::DuplicateEvaluationsCollapse => "duplicate-evaluations-collapse",
             Self::BrokerDrainOrderIsDeterministic => "broker-drain-order-is-deterministic",
             Self::ReconcilerIsPure => "reconciler-is-pure",
+            Self::DispatchRoutingIsNameRestricted => "dispatch-routing-is-name-restricted",
             Self::IntentStoreReturnsCallerBytes => "intent-store-returns-caller-bytes",
             // phase-1-first-workload slice 3 (US-03).
             Self::JobScheduledAfterSubmission => "job-scheduled-after-submission",

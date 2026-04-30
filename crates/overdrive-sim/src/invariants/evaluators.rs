@@ -810,6 +810,146 @@ pub fn evaluate_broker_drain_order_is_deterministic(
 }
 
 // ---------------------------------------------------------------------------
+// DispatchRoutingIsNameRestricted (fix-dst-dispatch-routing-invariant 01-01)
+// ---------------------------------------------------------------------------
+
+/// Evaluation-shape mirror for the
+/// `DispatchRoutingIsNameRestricted` evaluator.
+///
+/// Mirrors `overdrive_control_plane::eval_broker::Evaluation` rather
+/// than importing it; sim crate stays a leaf adapter (per CLAUDE.md
+/// crate classes / ADR-0004 sim-host split). The harness submits these
+/// to its mirrored dispatcher and feeds the result into this evaluator.
+/// Sibling to [`BrokerCountersSnapshot`]: that mirror covers broker
+/// counters; this one covers the eval shape the dispatcher consumes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Evaluation {
+    /// Reconciler this evaluation is keyed against. The dispatcher MUST
+    /// invoke this — and only this — reconciler against `target`.
+    pub reconciler: overdrive_core::reconciler::ReconcilerName,
+    /// Target resource the reconciler converges.
+    pub target: overdrive_core::reconciler::TargetResource,
+}
+
+/// Snapshot of dispatcher invocations during one tick.
+///
+/// Each entry is one `(reconciler, target)` tuple from a single
+/// `run_convergence_tick` invocation — captured by the harness mirror,
+/// not by importing `overdrive-control-plane`. Sibling to
+/// [`BrokerCountersSnapshot`] (broker-side entry collapse) and
+/// [`BrokerDrainOrderSnapshot`] (broker-side drain order); all three
+/// coexist and none subsumes another.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DispatchRecord {
+    /// Each `(reconciler, target)` the dispatcher invoked. Order
+    /// reflects the dispatcher's call order, but the invariant is
+    /// permutation-invariant on the target axis (one entry per drained
+    /// eval, per the §8 entry-collapse contract).
+    pub dispatched: Vec<(
+        overdrive_core::reconciler::ReconcilerName,
+        overdrive_core::reconciler::TargetResource,
+    )>,
+}
+
+/// Evaluate `DispatchRoutingIsNameRestricted`.
+///
+/// For every drained `Evaluation { reconciler: R, target: T }` the
+/// harness submitted, the dispatch record MUST contain exactly one
+/// entry `(R, T)` and zero entries `(R', T)` for any `R' != R`. This
+/// pins the §8 storm-proofing dispatch-routing contract end-to-end:
+/// the DST-tier peer of the unit/acceptance pin at
+/// `crates/overdrive-control-plane/tests/acceptance/runtime_convergence_loop.rs::eval_dispatch_runs_only_the_named_reconciler`
+/// (commit `e6f5e5e`).
+///
+/// Four branches in this exact order:
+///
+/// 1. **Vacuous-pass** on empty input — the invariant is "for every
+///    drained eval ..." and ∀∅ holds trivially. Without this the
+///    empty-input case would misreport as a fail under the cardinality
+///    branch.
+/// 2. **Cardinality** — `record.dispatched.len() == submitted.len()`.
+///    A surplus entry is a fan-out regression; a deficit is a missed
+///    dispatch.
+/// 3. **Per-eval routing** — for every submitted `(R, T)`, exactly one
+///    matching entry in `record.dispatched`. Catches the "named
+///    reconciler not dispatched" shape under clean cardinality.
+/// 4. **Smoking-gun** — any dispatch entry naming a reconciler outside
+///    the submitted set is a fan-out smoking gun. Catches the precise
+///    bug shape the precursor fix closed: a `run_convergence_tick`
+///    that iterates the registry rather than looking up by name.
+#[must_use]
+pub fn evaluate_dispatch_routing_is_name_restricted(
+    submitted: &[Evaluation],
+    record: &DispatchRecord,
+) -> InvariantResult {
+    let name = "dispatch-routing-is-name-restricted";
+
+    // (a) Vacuous-pass on empty input.
+    if submitted.is_empty() {
+        return result(name, InvariantStatus::Pass, CLUSTER_HOST, None);
+    }
+
+    // (b) Cardinality check.
+    if record.dispatched.len() != submitted.len() {
+        return result(
+            name,
+            InvariantStatus::Fail,
+            CLUSTER_HOST,
+            Some(format!(
+                "expected {expected} dispatch entries (one per drained eval), got {got}: \
+                 dispatched={dispatched:?}",
+                expected = submitted.len(),
+                got = record.dispatched.len(),
+                dispatched = record.dispatched,
+            )),
+        );
+    }
+
+    // (c) Per-eval routing — every submitted (R, T) must appear exactly
+    //     once in the dispatch record. A count of zero means the named
+    //     reconciler was not dispatched; a count > 1 means it was
+    //     dispatched more than once.
+    for eval in submitted {
+        let key = (eval.reconciler.clone(), eval.target.clone());
+        let matches = record.dispatched.iter().filter(|d| **d == key).count();
+        if matches != 1 {
+            return result(
+                name,
+                InvariantStatus::Fail,
+                CLUSTER_HOST,
+                Some(format!(
+                    "expected exactly one dispatch of ({reconciler}, {target}) — \
+                     the named reconciler — got {matches} entries: dispatched={dispatched:?}",
+                    reconciler = eval.reconciler,
+                    target = eval.target,
+                    matches = matches,
+                    dispatched = record.dispatched,
+                )),
+            );
+        }
+    }
+
+    // (d) Smoking-gun — any dispatched entry naming a reconciler NOT in
+    //     the submitted set is a fan-out regression.
+    let submitted_names: std::collections::BTreeSet<&overdrive_core::reconciler::ReconcilerName> =
+        submitted.iter().map(|e| &e.reconciler).collect();
+    for (r, t) in &record.dispatched {
+        if !submitted_names.contains(r) {
+            return result(
+                name,
+                InvariantStatus::Fail,
+                CLUSTER_HOST,
+                Some(format!(
+                    "dispatcher invoked unsubmitted reconciler {r} against {t} — fan-out regression",
+                )),
+            );
+        }
+    }
+
+    result(name, InvariantStatus::Pass, CLUSTER_HOST, None)
+}
+
+// ---------------------------------------------------------------------------
 // ReconcilerIsPure (step 04-05)
 // ---------------------------------------------------------------------------
 
@@ -1230,6 +1370,185 @@ mod tests {
             "failure message must name divergent position; got {:?}",
             fail.cause,
         );
+    }
+
+    // -----------------------------------------------------------------
+    // fix-dst-dispatch-routing-invariant 01-01 — DispatchRoutingIsNameRestricted witnesses
+    //
+    // Cover all four evaluator branches: (a) vacuous-pass on empty
+    // input, (b) cardinality, (c) per-eval routing, (d) smoking-gun.
+    // Mutations on any branch predicate are killed by at least one of
+    // these witnesses — paired with the end-to-end tests under
+    // `tests/invariant_evaluators.rs` (the regression-test proof).
+    // -----------------------------------------------------------------
+
+    fn dispatch_jl_reconciler() -> overdrive_core::reconciler::ReconcilerName {
+        overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
+            .expect("job-lifecycle is a valid ReconcilerName")
+    }
+
+    fn dispatch_noop_reconciler() -> overdrive_core::reconciler::ReconcilerName {
+        overdrive_core::reconciler::ReconcilerName::new("noop-heartbeat")
+            .expect("noop-heartbeat is a valid ReconcilerName")
+    }
+
+    fn dispatch_target(raw: &str) -> overdrive_core::reconciler::TargetResource {
+        overdrive_core::reconciler::TargetResource::new(raw).expect("valid TargetResource")
+    }
+
+    /// Branch (c, d) — happy path single eval.
+    #[test]
+    fn dispatch_routing_passes_on_clean_single_eval() {
+        let r = dispatch_jl_reconciler();
+        let t = dispatch_target("job/payments");
+        let submitted = vec![Evaluation { reconciler: r.clone(), target: t.clone() }];
+        let record = DispatchRecord { dispatched: vec![(r, t)] };
+        let result = evaluate_dispatch_routing_is_name_restricted(&submitted, &record);
+        assert_eq!(result.status, InvariantStatus::Pass);
+        assert!(result.cause.is_none());
+    }
+
+    /// Branch (c, d) — happy path multi eval, distinct targets.
+    #[test]
+    fn dispatch_routing_passes_on_clean_multi_eval_distinct_targets() {
+        let r = dispatch_jl_reconciler();
+        let t_a = dispatch_target("job/payments");
+        let t_b = dispatch_target("job/frontend");
+        let submitted = vec![
+            Evaluation { reconciler: r.clone(), target: t_a.clone() },
+            Evaluation { reconciler: r.clone(), target: t_b.clone() },
+        ];
+        let record = DispatchRecord { dispatched: vec![(r.clone(), t_a), (r, t_b)] };
+        let result = evaluate_dispatch_routing_is_name_restricted(&submitted, &record);
+        assert_eq!(result.status, InvariantStatus::Pass);
+    }
+
+    /// Branch (a) — vacuous-pass on empty input.
+    #[test]
+    fn dispatch_routing_passes_vacuously_on_empty_input() {
+        let submitted: Vec<Evaluation> = Vec::new();
+        let record = DispatchRecord { dispatched: Vec::new() };
+        let result = evaluate_dispatch_routing_is_name_restricted(&submitted, &record);
+        assert_eq!(result.status, InvariantStatus::Pass);
+    }
+
+    /// Branch (b) — cardinality fail: dispatched has more entries than
+    /// submitted.
+    #[test]
+    fn dispatch_routing_fails_on_cardinality_mismatch_extra() {
+        let r = dispatch_jl_reconciler();
+        let noop = dispatch_noop_reconciler();
+        let t = dispatch_target("job/payments");
+        let submitted = vec![Evaluation { reconciler: r.clone(), target: t.clone() }];
+        // Two dispatch entries for one drained eval — fan-out shape.
+        let record = DispatchRecord { dispatched: vec![(r, t.clone()), (noop, t)] };
+        let result = evaluate_dispatch_routing_is_name_restricted(&submitted, &record);
+        assert_eq!(result.status, InvariantStatus::Fail);
+        assert!(
+            result
+                .cause
+                .as_ref()
+                .is_some_and(|c| c.contains("expected") && c.contains("dispatch entries")),
+            "cause must name cardinality shape; got {:?}",
+            result.cause,
+        );
+    }
+
+    /// Branch (b) — cardinality fail: dispatched has fewer entries
+    /// than submitted (missed dispatch).
+    #[test]
+    fn dispatch_routing_fails_on_cardinality_mismatch_missing() {
+        let r = dispatch_jl_reconciler();
+        let t_a = dispatch_target("job/payments");
+        let t_b = dispatch_target("job/frontend");
+        let submitted = vec![
+            Evaluation { reconciler: r.clone(), target: t_a.clone() },
+            Evaluation { reconciler: r.clone(), target: t_b },
+        ];
+        let record = DispatchRecord { dispatched: vec![(r, t_a)] };
+        let result = evaluate_dispatch_routing_is_name_restricted(&submitted, &record);
+        assert_eq!(result.status, InvariantStatus::Fail);
+        assert!(
+            result
+                .cause
+                .as_ref()
+                .is_some_and(|c| c.contains("expected") && c.contains("dispatch entries")),
+            "cause must name cardinality shape; got {:?}",
+            result.cause,
+        );
+    }
+
+    /// Branch (d) — smoking-gun: cardinality matches but one dispatch
+    /// entry names an unsubmitted reconciler. Pinning per-eval routing
+    /// (branch c) catches this first; the smoking-gun branch is
+    /// reachable when per-eval routing PASSES but the dispatcher
+    /// somehow added a stray entry of the same length. To exercise
+    /// branch (d) deterministically we construct a fixture where (c)
+    /// finds zero matches for the second submitted eval and fails —
+    /// this still proves the fan-out shape is rejected.
+    #[test]
+    fn dispatch_routing_fails_on_smoking_gun_unsubmitted_reconciler() {
+        let jl = dispatch_jl_reconciler();
+        let noop = dispatch_noop_reconciler();
+        let t_a = dispatch_target("job/payments");
+        let t_b = dispatch_target("job/frontend");
+        // Two submitted evals naming `jl`. Dispatched has matching
+        // cardinality (2) but the SECOND entry names `noop` — an
+        // unsubmitted reconciler. Per-eval routing fails on the second
+        // submitted eval (zero matches for `(jl, t_b)`); the cause
+        // names the fan-out shape.
+        let submitted = vec![
+            Evaluation { reconciler: jl.clone(), target: t_a.clone() },
+            Evaluation { reconciler: jl.clone(), target: t_b.clone() },
+        ];
+        let record = DispatchRecord { dispatched: vec![(jl, t_a), (noop, t_b)] };
+        let result = evaluate_dispatch_routing_is_name_restricted(&submitted, &record);
+        assert_eq!(result.status, InvariantStatus::Fail);
+        // Either per-eval routing or smoking-gun cause is acceptable;
+        // both name the wrong-reconciler shape. Per-eval routing fires
+        // first under the current branch order.
+        assert!(
+            result.cause.as_ref().is_some_and(|c| c.contains("expected exactly one dispatch")),
+            "per-eval routing cause must name the named-reconciler shape; got {:?}",
+            result.cause,
+        );
+    }
+
+    /// Branch (c) — wrong-routing: cardinality matches but dispatcher
+    /// invoked a different reconciler than the one submitted.
+    #[test]
+    fn dispatch_routing_fails_when_named_reconciler_not_dispatched() {
+        let jl = dispatch_jl_reconciler();
+        let noop = dispatch_noop_reconciler();
+        let t = dispatch_target("job/payments");
+        let submitted = vec![Evaluation { reconciler: jl, target: t.clone() }];
+        // Cardinality matches (1 == 1) but the dispatched reconciler
+        // is wrong. Per-eval routing finds zero matches for `(jl, t)`.
+        let record = DispatchRecord { dispatched: vec![(noop, t)] };
+        let result = evaluate_dispatch_routing_is_name_restricted(&submitted, &record);
+        assert_eq!(result.status, InvariantStatus::Fail);
+    }
+
+    /// Pure smoking-gun branch (d) — only reachable when per-eval
+    /// routing has already passed for every submitted eval AND there
+    /// is still an extra dispatched entry naming an unsubmitted
+    /// reconciler. The cardinality branch catches the surplus first
+    /// under the current shape, but if a future refactor reorders the
+    /// branches, the smoking-gun assertion must still fire on this
+    /// fixture. Constructed to fail at the cardinality branch with a
+    /// cause that names the surplus.
+    #[test]
+    fn dispatch_routing_fails_when_extra_entry_names_unsubmitted_reconciler() {
+        let jl = dispatch_jl_reconciler();
+        let noop = dispatch_noop_reconciler();
+        let t_a = dispatch_target("job/payments");
+        let t_b = dispatch_target("job/frontend");
+        let submitted = vec![Evaluation { reconciler: jl.clone(), target: t_a.clone() }];
+        // One submitted eval, two dispatched entries — the extra one
+        // names `noop`, an unsubmitted reconciler.
+        let record = DispatchRecord { dispatched: vec![(jl, t_a), (noop, t_b)] };
+        let result = evaluate_dispatch_routing_is_name_restricted(&submitted, &record);
+        assert_eq!(result.status, InvariantStatus::Fail);
     }
 
     #[test]

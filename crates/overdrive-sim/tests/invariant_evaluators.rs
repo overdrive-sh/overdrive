@@ -220,3 +220,112 @@ fn entropy_determinism_fails_when_two_sim_entropies_disagree() {
         "disagreeing entropies must fail; got {result:?}",
     );
 }
+
+// ---------------------------------------------------------------------------
+// DispatchRoutingIsNameRestricted (fix-dst-dispatch-routing-invariant 01-01)
+//
+// End-to-end happy + negative tests for the §8 storm-proofing dispatch-
+// routing invariant. Sibling to the broker-side
+// `DuplicateEvaluationsCollapse` tests; this one pins dispatcher-side
+// routing.
+//
+// The negative case below is the regression-test proof for this
+// delivery: it asserts the evaluator flags a mocked fan-out — the
+// exact shape of the bug the precursor (commit `e6f5e5e`) closed at
+// the unit/acceptance tier. No separate `#[ignore]`-attributed RED
+// scaffold is needed because this negative case IS the RED proof
+// living next to its GREEN sibling.
+// ---------------------------------------------------------------------------
+
+fn jl_reconciler() -> overdrive_core::reconciler::ReconcilerName {
+    overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
+        .expect("job-lifecycle is a valid ReconcilerName")
+}
+
+fn target(raw: &str) -> overdrive_core::reconciler::TargetResource {
+    overdrive_core::reconciler::TargetResource::new(raw).expect("valid TargetResource")
+}
+
+/// Happy path: every drained eval is dispatched against its named
+/// reconciler exactly once. The evaluator must return Pass.
+#[test]
+fn dispatch_routing_passes_when_each_eval_dispatches_named_reconciler_only() {
+    let r = jl_reconciler();
+    let t_a = target("job/payments");
+    let t_b = target("job/frontend");
+
+    let submitted = vec![
+        evaluators::Evaluation { reconciler: r.clone(), target: t_a.clone() },
+        evaluators::Evaluation { reconciler: r.clone(), target: t_b.clone() },
+    ];
+    let record = evaluators::DispatchRecord { dispatched: vec![(r.clone(), t_a), (r, t_b)] };
+
+    let result = evaluators::evaluate_dispatch_routing_is_name_restricted(&submitted, &record);
+    assert_eq!(
+        result.status,
+        InvariantStatus::Pass,
+        "clean 1-to-1 dispatch must pass; got {result:?}",
+    );
+    assert!(result.cause.is_none(), "Pass must carry no cause; got {:?}", result.cause);
+}
+
+/// Negative case — the regression-test proof for this delivery.
+///
+/// Mocked fan-out: a SINGLE drained eval names `job-lifecycle` against
+/// `job/payments`, but the dispatch record contains TWO entries — one
+/// correct (`job-lifecycle`, `job/payments`) and one wrong (`noop-
+/// heartbeat`, `job/payments`). This is exactly the shape the precursor
+/// fix at commit `e6f5e5e` eliminated in production: a registry-wide
+/// loop dispatching every reconciler against a single drained eval.
+///
+/// The evaluator MUST flag this. The cardinality branch fires first
+/// because `record.dispatched.len() (2) != submitted.len() (1)`.
+#[test]
+fn dispatch_routing_fails_on_mocked_fanout_regression() {
+    let jl = jl_reconciler();
+    let noop = overdrive_core::reconciler::ReconcilerName::new("noop-heartbeat")
+        .expect("noop-heartbeat is a valid ReconcilerName");
+    let t = target("job/payments");
+
+    let submitted = vec![evaluators::Evaluation { reconciler: jl.clone(), target: t.clone() }];
+    let record = evaluators::DispatchRecord { dispatched: vec![(jl, t.clone()), (noop, t)] };
+
+    let result = evaluators::evaluate_dispatch_routing_is_name_restricted(&submitted, &record);
+    assert_eq!(
+        result.status,
+        InvariantStatus::Fail,
+        "mocked fan-out (2 dispatches for 1 drained eval) must fail; got {result:?}",
+    );
+    let cause = result.cause.as_ref().expect("Fail must carry a cause");
+    assert!(
+        cause.contains("expected") && cause.contains("dispatch entries"),
+        "cardinality cause must name the mismatch shape; got {cause:?}",
+    );
+}
+
+/// Negative case — pure smoking-gun branch with clean cardinality.
+///
+/// `submitted = [(jl, payments)]`, `dispatched = [(noop, payments)]` —
+/// cardinality matches (1 == 1) so the cardinality branch does NOT
+/// fire. The per-eval routing branch counts zero matches for `(jl,
+/// payments)` and fails. The smoking-gun branch is also reachable
+/// because `noop` is not in the submitted-names set; either of the two
+/// cause shapes is acceptable here, and we assert on the broader
+/// "wrong reconciler dispatched" shape.
+#[test]
+fn dispatch_routing_fails_when_only_unsubmitted_reconciler_was_dispatched() {
+    let jl = jl_reconciler();
+    let noop = overdrive_core::reconciler::ReconcilerName::new("noop-heartbeat")
+        .expect("noop-heartbeat is a valid ReconcilerName");
+    let t = target("job/payments");
+
+    let submitted = vec![evaluators::Evaluation { reconciler: jl, target: t.clone() }];
+    let record = evaluators::DispatchRecord { dispatched: vec![(noop, t)] };
+
+    let result = evaluators::evaluate_dispatch_routing_is_name_restricted(&submitted, &record);
+    assert_eq!(
+        result.status,
+        InvariantStatus::Fail,
+        "wrong-reconciler dispatch must fail; got {result:?}",
+    );
+}
