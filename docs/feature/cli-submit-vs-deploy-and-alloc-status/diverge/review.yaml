@@ -1,0 +1,184 @@
+review_result:
+  artifact_path: "docs/feature/cli-submit-vs-deploy-and-alloc-status/diverge/"
+  review_date: "2026-04-30"
+  reviewer: "nw-diverger-reviewer (Prism) — inline self-review"
+  reviewer_note: >
+    The diverger spec calls for dispatching nw-diverger-reviewer via
+    the Task tool. The Task tool is not available in this execution
+    environment, so the diverger executed the review inline as Prism,
+    applying the nw-diverger-review-criteria skill adversarially.
+    The reviewer-of-self limitation is acknowledged; if the user
+    requires an independent review pass, they can invoke
+    nw-diverger-reviewer separately against this artifact set.
+
+  jtbd_rigor:
+    status: "PASSED"
+    checks:
+      - check: "1.1 — Abstraction level (strategic vs tactical)"
+        result: "PASSED"
+        evidence: >
+          Job statement: 'Reduce the time and uncertainty between
+          declaring intent and knowing whether the platform converged
+          on it.' (job-analysis.md §4) — solution-agnostic; names no
+          verb, UI pattern, or transport.
+      - check: "1.2 — First-principles extraction (5-Why chain)"
+        result: "PASSED"
+        evidence: >
+          Five Q/A pairs documented in job-analysis.md §2 walking from
+          'why does the user expect submit to wait?' to 'why should
+          the platform owe the operator anything before they ask for
+          status?'. Functional / emotional / social jobs distinguished
+          in §3.
+      - check: "1.3 — Outcome statement quality (ODI format)"
+        result: "PASSED"
+        evidence: >
+          Six outcome statements in job-analysis.md §6, all begin with
+          'Minimize the [time/likelihood/effort]'. Spot-check #2:
+          'Minimize the likelihood of a submitted spec being silently
+          accepted while the workload it declares cannot start.' — no
+          forbidden words ('easy', 'effective', 'reliable'), no
+          solution references, no compound statements.
+    issues: []
+
+  research_quality:
+    status: "PASSED"
+    checks:
+      - check: "2.1 — Evidence vs opinion"
+        result: "PASSED"
+        evidence: >
+          Each competitor entry in competitive-research.md names
+          specific commands and output shapes. Example: nomad's task-
+          events panel is quoted with timestamp/category/description
+          fields. No 'most users prefer' or 'the market suggests'
+          claims.
+      - check: "2.2 — Prior art coverage (3+ alternatives, 1+ non-obvious)"
+        result: "PASSED"
+        evidence: >
+          Three named competitors (kubectl + rollout status, nomad
+          job run + alloc status, fly deploy) plus three reference
+          points (docker run, systemctl + journalctl, terraform
+          plan/apply). Non-obvious alternative is the systemctl +
+          journalctl -fu pattern, explicitly called out as
+          'different category, same job' in the document.
+    issues: []
+
+  option_diversity:
+    status: "PASSED"
+    checks:
+      - check: "3.1 — Structural diversity (3-point test)"
+        result: "PASSED"
+        evidence: >
+          Six options (S, A, M, P, E, R). Diversity table in
+          options-raw.md shows mechanism / assumption / cost
+          differing across all pairs. SCAMPER Eliminate (Option E)
+          and Reverse (Option R) both present.
+      - check: "3.2 — Generation discipline (no eval language)"
+        result: "PASSED"
+        evidence: >
+          options-raw.md sections per option carry only Core idea /
+          Key mechanism / Key assumption / SCAMPER origin / Closest
+          competitor. Curation note explains C, X1, X2 merging using
+          neutral structural criteria.
+      - check: "3.3 — HMW framing quality"
+        result: "PASSED"
+        evidence: >
+          HMW: 'How might we make the time and reasoning between
+          declaring an intent and knowing whether the platform
+          converged on it as small as possible, without forcing
+          operators to learn a separate diagnostic toolchain?' —
+          names no technology, UI pattern, or specific verb. The
+          six options span genuinely different answers.
+    issues: []
+
+  taste_application:
+    status: "PASSED"
+    checks:
+      - check: "4.1 — Criteria applied consistently"
+        result: "PASSED"
+        evidence: >
+          All 4 taste criteria + DVF mean scored for all 6 surviving
+          options in taste-evaluation.md Phase 3 + Phase 4 matrix.
+          No missing cells.
+      - check: "4.2 — Cherry-picking prevention (weights locked, recommendation traceable)"
+        result: "PASSED"
+        evidence: >
+          Weights stated and locked in taste-evaluation.md Phase 2
+          (DVF 25%, T1 15%, T2 25% [+5pp], T3 15%, T4 20% [-5pp])
+          BEFORE Phase 3 scoring. Adjustment rationale tied to the
+          user's complaint shape (concept-count diagnostic for
+          verb-soup risk; honesty dominates over raw speed), not to
+          a pre-chosen winner. Recommendation follows matrix top
+          score (Option S, 4.47).
+      - check: "4.3 — Score rubric application"
+        result: "PASSED"
+        evidence: >
+          Each score in taste-evaluation.md Phase 3 is accompanied
+          by reasoning that engages with the criterion content.
+          Spot-check Option M T4=2: 'Doesn't fix the user's first
+          question — submit still returns Accepted. for a broken
+          binary' — directly engages rubric level 2 ('Multiple wait
+          points; no perceived control').
+    issues: []
+
+  recommendation_coherence:
+    status: "PASSED"
+    checks:
+      - check: "5.1 — Traceability (JTBD → research → scores)"
+        result: "PASSED"
+        evidence: >
+          recommendation.md cites the validated job, references
+          competitive research (fly deploy, nomad job run, kubectl
+          apply + rollout status), and derives from the scoring
+          matrix (4.47 vs runner-up 3.77 named explicitly).
+      - check: "5.2 — Dissent documented"
+        result: "PASSED"
+        evidence: >
+          'Dissenting case' section in recommendation.md names
+          runner-up (Option A), states the margin (0.70), and gives
+          four specific reasons why the team might choose A
+          instead.
+      - check: "5.3 — DISCUSS handoff readiness"
+        result: "PASSED"
+        evidence: >
+          'Decision for DISCUSS' section opens with: 'Proceed with
+          Option S [...], assuming we accept that submit becomes a
+          long-lived HTTP request bounded by the lifecycle
+          reconciler's convergence-or-backoff window.' Explicit
+          decision + explicit assumption + documented fallback
+          (Option A).
+    issues: []
+
+  approval_status: "approved"
+
+  blocking_issues: []
+
+  recommendations:
+    - severity: "advisory"
+      finding: >
+        Option S's DVF feasibility=4 is defensible (NDJSON, axum
+        streaming, reqwest streaming response bodies are all mature)
+        but the recommendation's 'Phase 1 implementation cost'
+        subsection could acknowledge that the API contract evolution
+        from sync-JSON to polymorphic-by-Accept-header is more
+        design surface than feasibility=4 naively suggests. Not a
+        review blocker; ADR-0014's shared-types discipline must be
+        explicitly extended to model both response shapes.
+      remediation: >
+        DESIGN's HTTP-shape ADR (the first of the two ADRs the
+        recommendation already names as DESIGN-wave responsibility)
+        should explicitly cover the shared-types extension: an
+        `enum SubmitEvent` for the streaming variant, with the
+        existing JSON shape preserved on the non-stream branch.
+    - severity: "advisory"
+      finding: >
+        The fallback to Option A is well-documented but the trigger
+        condition is soft ('if the DISCUSS wave decides streaming on
+        submit is too structural a change'). A sharper trigger
+        statement would help the DISCUSS wave decide cleanly.
+      remediation: >
+        Recommendation could add a one-line explicit trigger:
+        'Choose Option A if (a) the team will not ship streaming
+        machinery in Phase 1, OR (b) the API contract evolution from
+        sync-JSON to stream-NDJSON is judged too expensive for the
+        Phase 1 deadline.' Optional polish — non-blocking for
+        DISCUSS handoff.
