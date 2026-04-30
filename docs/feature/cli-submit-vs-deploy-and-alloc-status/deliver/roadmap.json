@@ -108,8 +108,10 @@
     ]
   },
   "validation": {
-    "status": "pending",
+    "status": "approved",
     "reviewer": "nw-software-crafter-reviewer",
-    "approved_at": "TODO"
+    "approved_at": "2026-04-30T13:35:00Z",
+    "review_artifact": "deliver/roadmap-review.yaml",
+    "review_verdict": "approved_with_nits"
   }
 }

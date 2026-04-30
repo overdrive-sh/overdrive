@@ -93,28 +93,87 @@ fn openapi_schema_drops_flat_cpu_milli_field_from_jobspec_input_top_level() {
     // they live inside the nested `ResourcesInput` only — the
     // `JobSpecInput` schema MUST NOT expose them at top level any more.
     //
-    // This test asserts the negative: the YAML contains `cpu_milli`
-    // exactly inside the ResourcesInput section, NOT as a top-level
-    // JobSpecInput field. We approximate by counting occurrences and
-    // asserting the count matches "one schema only" — utoipa renders
-    // each field once per schema in which it appears.
+    // The original count-based proxy ("appears exactly once") held when
+    // `cpu_milli` could only legitimately surface on `ResourcesInput`.
+    // Step 01-01 of the cause-class refactor added
+    // `TransitionReason::NoCapacity { requested: ResourceEnvelope, free:
+    // ResourceEnvelope }` — `ResourceEnvelope` carries `cpu_milli`. Step
+    // 01-02 added `ResourcesBody` — also carries `cpu_milli`. Both are
+    // legitimate post-refactor surfaces, so the count of `cpu_milli:`
+    // tokens is no longer a stable proxy for the invariant.
+    //
+    // The honest assertion: extract the `JobSpecInput` schema block
+    // from the YAML and assert `cpu_milli` does not appear inside
+    // *that* block's properties. Other schemas may legitimately carry
+    // it.
     let yaml = render_yaml();
 
-    // Count occurrences of `cpu_milli:` (the YAML key form). Pre-reshape
-    // it would appear twice: once on `JobSpecInput` and once on
-    // `ResourcesInput` (if such a type existed). Post-reshape it
-    // appears exactly once — on `ResourcesInput`.
-    let count = yaml.matches("cpu_milli:").count();
-    assert_eq!(
-        count, 1,
-        "cpu_milli must appear exactly once in the OpenAPI schema (inside ResourcesInput); \
-         got {count} occurrences in:\n{yaml}",
+    let jobspec_block = extract_schema_block(&yaml, "JobSpecInput")
+        .expect("OpenAPI YAML must contain a `JobSpecInput:` schema block");
+    assert!(
+        !jobspec_block.contains("cpu_milli:"),
+        "JobSpecInput must not carry `cpu_milli:` at top level after the ADR-0031 reshape; \
+         the field belongs inside the nested `ResourcesInput` only. JobSpecInput block was:\n\
+         {jobspec_block}",
+    );
+    assert!(
+        !jobspec_block.contains("memory_bytes:"),
+        "JobSpecInput must not carry `memory_bytes:` at top level after the ADR-0031 reshape; \
+         the field belongs inside the nested `ResourcesInput` only. JobSpecInput block was:\n\
+         {jobspec_block}",
     );
 
-    let count_mem = yaml.matches("memory_bytes:").count();
-    assert_eq!(
-        count_mem, 1,
-        "memory_bytes must appear exactly once in the OpenAPI schema (inside ResourcesInput); \
-         got {count_mem} occurrences in:\n{yaml}",
+    // The fields still must surface inside `ResourcesInput` exactly —
+    // the reshape moved them, it didn't drop them.
+    let resources_input_block = extract_schema_block(&yaml, "ResourcesInput")
+        .expect("OpenAPI YAML must contain a `ResourcesInput:` schema block");
+    assert!(
+        resources_input_block.contains("cpu_milli:"),
+        "ResourcesInput must carry `cpu_milli:` (the field moved here in the reshape); \
+         block was:\n{resources_input_block}",
     );
+    assert!(
+        resources_input_block.contains("memory_bytes:"),
+        "ResourcesInput must carry `memory_bytes:` (the field moved here in the reshape); \
+         block was:\n{resources_input_block}",
+    );
+}
+
+/// Extract the YAML block for a single `components.schemas.<name>:`
+/// entry from the rendered `OpenAPI` document. Returns the substring
+/// from the schema header line through (but not including) the next
+/// sibling schema header at the same indent.
+///
+/// utoipa 5.x renders component schemas under `components: schemas:`
+/// at four-space indent; each schema header is `    <Name>:`. This
+/// helper finds the named header and slices to the next four-space
+/// header that is not deeper.
+fn extract_schema_block<'yaml>(yaml: &'yaml str, schema_name: &str) -> Option<&'yaml str> {
+    // utoipa renders schema headers as `    <Name>:` (four spaces, then
+    // name, then colon). Find the start of that line.
+    let needle = format!("\n    {schema_name}:\n");
+    let start = yaml.find(&needle)? + 1; // skip the leading newline
+    let after_header = &yaml[start..];
+
+    // The block ends at the next sibling schema header — a line that
+    // begins with exactly four spaces, a non-space character, and ends
+    // with a colon. Walk lines until we hit one that fits.
+    let mut consumed = 0_usize;
+    let mut iter = after_header.lines();
+    // Always consume the header line itself.
+    if let Some(header_line) = iter.next() {
+        consumed += header_line.len() + 1; // +1 for the newline
+    }
+    for line in iter {
+        let is_sibling_header = line.len() >= 5
+            && line.starts_with("    ")
+            && !line.starts_with("     ")
+            && line.as_bytes().get(4).is_some_and(|b| *b != b' ')
+            && line.trim_end().ends_with(':');
+        if is_sibling_header {
+            break;
+        }
+        consumed += line.len() + 1; // +1 for the newline
+    }
+    Some(&after_header[..consumed.min(after_header.len())])
 }

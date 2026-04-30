@@ -25,6 +25,11 @@ mod acceptance {
 
     mod api_type_shapes;
     mod cluster_status_lists_both_reconcilers;
+
+    // S-AS-02 (Slice 01 step 02) — `TransitionRecord.reason` is the
+    // `TransitionReason` enum from `overdrive-core`. Compile-time
+    // type-identity witness; the snapshot/streaming surfaces share the
+    // SAME type so byte-equality is structural.
     mod default_lane_no_cgroup_dependency;
     mod error_mapping_exhaustive;
     mod eval_broker_collapse;
@@ -37,6 +42,7 @@ mod acceptance {
     mod runtime_convergence_loop;
     mod runtime_registers_noop_heartbeat;
     mod submit_job_idempotency;
+    mod transition_reason_type_identity;
     mod trust_triple_getters;
 
     // wire-exec-spec-end-to-end — operator-facing job spec carries

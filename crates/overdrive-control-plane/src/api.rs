@@ -24,7 +24,10 @@
 // allow to this module, which contains exactly one `utoipa` derive.
 #![allow(clippy::needless_for_each)]
 
+use overdrive_core::TransitionReason;
 use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
+use overdrive_core::traits::driver::DriverType;
+use overdrive_core::traits::observation_store::AllocState;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -277,6 +280,22 @@ pub struct ErrorBody {
         ResourcesInput,
         ExecInput,
         DriverInput,
+        // Slice 01 step 01-02 — wire types per DWD-03.
+        TerminalReason,
+        AllocStateWire,
+        RestartBudget,
+        ResourcesBody,
+        TransitionSource,
+        TransitionRecord,
+        // Cause-class enum re-exported from `overdrive-core` per
+        // ADR-0032 §3 Amendment so its `ToSchema` derive registers in
+        // the OpenAPI document. The streaming surface (slice 02) and
+        // the snapshot surface (slice 01 step 01-03) both reference it.
+        TransitionReason,
+        // `DriverType` carries the new `ToSchema` derive (DWD-03 cross-
+        // cutting derive change); the `TransitionSource::Driver`
+        // variant references it inline so the schema must register.
+        DriverType,
     )),
     tags(
         (name = "jobs", description = "Job lifecycle endpoints"),
@@ -287,29 +306,22 @@ pub struct ErrorBody {
 pub struct OverdriveApi;
 
 // ---------------------------------------------------------------------------
-// SCAFFOLD: true
+// Wire types — Slice 01 GREEN promotions per DWD-03
 //
-// RED scaffolds (DISTILL wave, feature cli-submit-vs-deploy-and-alloc-status).
-// Per `.claude/rules/testing.md` § "RED scaffolds and intentionally-failing
-// commits": the type declarations below compile cleanly so tests written
-// ahead of the crafter's DELIVER work can import them. Where a method or
-// constructor needs to exist for a test to type-check, its body panics
-// with the RED marker. Methods that DON'T exist yet remain absent — the
-// test that calls them will fail with a name-resolution error, which is
-// also a valid RED signal under the project's discipline.
+// The four scaffold types from DISTILL — `TerminalReason`, `AllocStateWire`,
+// `RestartBudget`, `ResourcesBody` — are promoted to GREEN with full
+// `Serialize`/`Deserialize`/`ToSchema`/`Debug`/`Clone`/`PartialEq` derives.
+// `TransitionSource` and `TransitionRecord` are the deferred net-new types
+// from DWD-03 — they require `ToSchema` on `DriverType` (a cross-cutting
+// derive change in `overdrive-core::traits::driver`), which lands in this
+// same step.
 //
-// The crafter replaces these scaffolds with the real implementations
-// during DELIVER:
-//   - slice 01: `TerminalReason`, `AllocStateWire`, `RestartBudget`,
-//     `ResourcesBody`, plus the `TransitionRecord`/`TransitionSource`/
-//     `SubmitEvent` declarations once their dependencies (`ToSchema` on
-//     `DriverType`) land.
-//   - slice 02: `SubmitEvent`, the broadcast channel wiring on `AppState`,
-//     and the streaming handler.
-//
-// See `docs/feature/cli-submit-vs-deploy-and-alloc-status/distill/wave-decisions.md`
-// DWD-03 for the rationale on which net-new types are scaffolded here vs.
-// deferred to the crafter.
+// The streaming `SubmitEvent` declaration (which carries the same
+// `TransitionSource` chain) is deferred to slice 02 step 02-02 so it can
+// land in lockstep with the broadcast-channel wiring in `AppState` and
+// the NDJSON streaming handler. Both surfaces share the SAME
+// `TransitionReason` enum re-exported from `overdrive-core` —
+// byte-equality across surfaces is structural, not discipline.
 // ---------------------------------------------------------------------------
 
 /// Streaming `SubmitEvent::ConvergedFailed` terminal-cause discriminator.
@@ -337,14 +349,11 @@ pub struct OverdriveApi;
 /// not exit code (ADR-0032 §9).
 ///
 /// Wire shape via `#[serde(tag = "kind", content = "data", rename_all =
-/// "snake_case")]` — same shape as `TransitionReason`.
-///
-/// SCAFFOLD note: the `cause: overdrive_core::TransitionReason` field
-/// references the cause-class enum from `overdrive-core`. The crafter
-/// promotes this scaffold to GREEN in slice 02-02 alongside the
-/// `SubmitEvent` declaration; importing `TransitionReason` here is
-/// already valid because the type is re-exported from
-/// `overdrive_core::transition_reason`.
+/// "snake_case")]` — same shape as `TransitionReason`. The variants are
+/// no longer `Copy`: `BackoffExhausted` and `DriverError` carry an inner
+/// `cause: TransitionReason`, which is itself non-`Copy` (cause-class
+/// variants own `String` payloads). Consumers either clone (cheap for
+/// progress markers, owned-data for cause variants) or take by reference.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 #[non_exhaustive]
@@ -352,12 +361,12 @@ pub enum TerminalReason {
     /// Streaming handler observed an unrecoverable driver error on a
     /// path the reconciler will not retry. `cause` is the cause-class
     /// `TransitionReason` that originated the terminal failure.
-    DriverError { cause: overdrive_core::TransitionReason },
+    DriverError { cause: TransitionReason },
     /// Streaming handler observed `restart_count == max` and the latest
     /// row state is `Failed`. `attempts` is the number of attempts made
     /// (= `RESTART_BUDGET_MAX` in Phase 1, hard-coded to 5); `cause` is
     /// the cause-class `TransitionReason` of the final failed attempt.
-    BackoffExhausted { attempts: u32, cause: overdrive_core::TransitionReason },
+    BackoffExhausted { attempts: u32, cause: TransitionReason },
     /// Streaming handler's wall-clock cap fired before any terminal
     /// event arrived. `after_seconds` is the configured cap so the CLI
     /// can render `"did not converge in {after_seconds}s"` without
@@ -374,11 +383,12 @@ pub enum TerminalReason {
 /// and wire concerns, so this mirror enum exists for the wire surface
 /// (ADR-0032 §3, reuse-analysis CREATE NEW rationale).
 ///
-/// `Failed` is the new variant per ADR-0032 §5 — the action shim, when
-/// handling `DriverError::StartRejected`, writes `state: Failed` (instead
-/// of `Terminated`). The internal `AllocState::Failed` variant addition
-/// is deferred to the crafter (slice 01 GREEN); this wire type already
-/// names the variant so tests can reference it.
+/// `Failed` per ADR-0032 §5 — the action shim, when handling
+/// `DriverError::StartRejected`, writes `state: Failed` (instead of
+/// `Terminated`). The internal `AllocState::Failed` variant landed in
+/// step 01-01; this wire type's `Failed` variant projects it.
+///
+/// Conversion is mechanical via [`From<AllocState>`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
 #[non_exhaustive]
@@ -388,9 +398,22 @@ pub enum AllocStateWire {
     Draining,
     Suspended,
     Terminated,
-    /// NEW per ADR-0032 §5 — distinguishes "operator stopped" from
+    /// Per ADR-0032 §5 — distinguishes "operator stopped" from
     /// "driver could not start".
     Failed,
+}
+
+impl From<AllocState> for AllocStateWire {
+    fn from(state: AllocState) -> Self {
+        match state {
+            AllocState::Pending => Self::Pending,
+            AllocState::Running => Self::Running,
+            AllocState::Draining => Self::Draining,
+            AllocState::Suspended => Self::Suspended,
+            AllocState::Terminated => Self::Terminated,
+            AllocState::Failed => Self::Failed,
+        }
+    }
 }
 
 /// Snapshot's restart-budget block per ADR-0033 §1.
@@ -412,9 +435,79 @@ pub struct RestartBudget {
 /// Snapshot's per-row `resources` block per ADR-0033 §1.
 ///
 /// Mirrors the internal `overdrive_core::traits::driver::Resources` shape
-/// for the wire. Conversion is mechanical (slice 01 GREEN wires it).
+/// for the wire. Conversion is mechanical (call site at step 01-03 wires
+/// the `From<&Resources>` projection).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 pub struct ResourcesBody {
     pub cpu_milli: u32,
     pub memory_bytes: u64,
+}
+
+/// Source of a lifecycle transition — who/what produced the row write.
+///
+/// Phase 1 has two variants:
+///
+/// | Variant | When emitted |
+/// |---|---|
+/// | `Reconciler` | the `JobLifecycle` reconciler converged a state and emitted an `Action::*` that the action shim materialised into an `AllocStatusRow` write |
+/// | `Driver(DriverType)` | the action shim observed a driver `start`/`stop`/`status` result and wrote the row directly (post-spawn settle, immediate failure, etc.) |
+///
+/// The `Driver(DriverType)` carries the driver kind so a CLI rendering
+/// the snapshot can say `from driver=exec` without round-tripping
+/// through cluster-info to look up the active drivers. Phase 2+ may add
+/// more variants (operator action, gateway redirect, sidecar) — the
+/// enum is `#[non_exhaustive]` to make additions additive.
+///
+/// Wire shape via `#[serde(tag = "kind", content = "data", rename_all =
+/// "snake_case")]` — `{"kind": "reconciler"}` for the unit variant,
+/// `{"kind": "driver", "data": "exec"}` for the typed variant
+/// (`DriverType` itself serialises as a kebab-case string per its own
+/// `#[serde(rename_all = "kebab-case")]`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "kind", content = "data", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum TransitionSource {
+    /// Reconciler emitted the action that produced this row.
+    Reconciler,
+    /// Driver (named) produced this row directly.
+    Driver(DriverType),
+}
+
+/// Lifecycle-transition record carried inside the snapshot's
+/// `last_transition` block per ADR-0033 §1 and on the streaming
+/// `SubmitEvent::LifecycleTransition` event per ADR-0032 §3.
+///
+/// Both surfaces share the SAME `TransitionRecord` shape — the
+/// type-identity assertion in
+/// `tests/acceptance/transition_reason_type_identity.rs` (S-AS-02)
+/// pins this at compile time so byte-equality across surfaces is
+/// structural rather than discipline.
+///
+/// `from` is `None` for the very first transition emitted for an
+/// allocation (there is no prior state); subsequent transitions carry
+/// the previous wire-state. `to` is always populated.
+///
+/// `at` is the logical-timestamp string from `LogicalTimestamp::Display`
+/// (Phase 1: `(counter, writer)` rendered via the existing observation
+/// timestamp shape). The wire keeps it stringly-typed because the CLI
+/// renders it verbatim and never round-trips it through arithmetic; a
+/// future phase that needs structured wall-clock can split into
+/// `at_logical` + `at_wallclock` fields additively.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct TransitionRecord {
+    /// Wire-state the allocation was in before this transition.
+    /// `None` for the first transition emitted for an alloc id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<AllocStateWire>,
+    /// Wire-state the allocation moved to.
+    pub to: AllocStateWire,
+    /// Structured cause for this transition. SAME enum as the streaming
+    /// `SubmitEvent::LifecycleTransition.reason` — pinned by
+    /// S-AS-02's compile-time witness.
+    pub reason: TransitionReason,
+    /// Who/what produced this row write.
+    pub source: TransitionSource,
+    /// Logical-timestamp string for this transition. Stringly-typed on
+    /// the wire — see struct-level docs.
+    pub at: String,
 }

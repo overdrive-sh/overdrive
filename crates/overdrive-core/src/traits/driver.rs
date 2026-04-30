@@ -13,6 +13,7 @@ use std::str::FromStr;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use utoipa::ToSchema;
 
 use crate::{AllocationId, SpiffeId};
 
@@ -23,7 +24,14 @@ use crate::{AllocationId, SpiffeId};
 /// `unikernel`, `wasm` — matching `docs/whitepaper.md` §6 exactly. The
 /// `exec` vocabulary aligns with Nomad's `exec` task driver and Talos's
 /// terminology (see ADR-0029 amendment 2026-04-28).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+///
+/// Carries `utoipa::ToSchema` so the wire-typed `TransitionSource::Driver`
+/// variant in `overdrive-control-plane::api` can register the schema
+/// transitively (DWD-03). `utoipa` is a declarative-derive crate with no
+/// runtime I/O — the dst-lint banned-API list does not enumerate it.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, ToSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum DriverType {
     /// Native binary under cgroups v2 (`tokio::process`).
