@@ -127,8 +127,14 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
     let now = Instant::now();
     let tick = TickContext { now, tick: 0, deadline: now + Duration::from_secs(1) };
 
+    // Broadcast channel for `LifecycleEvent` — required by `dispatch`
+    // per slice 02 step 02-01 (architecture.md §10). This test does
+    // not assert on the broadcast surface; the channel is constructed
+    // but its receiver is dropped with the binding.
+    let (lifecycle_tx, _lifecycle_rx) = tokio::sync::broadcast::channel(16);
+
     // Dispatch the action through the shim.
-    dispatch(vec![action], driver_dyn.as_ref(), obs.as_ref(), &tick)
+    dispatch(vec![action], driver_dyn.as_ref(), obs.as_ref(), &lifecycle_tx, &tick)
         .await
         .expect("dispatch must succeed");
 

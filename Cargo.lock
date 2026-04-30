@@ -1526,6 +1526,7 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
+ "trybuild",
  "utoipa",
  "utoipa-axum",
  "x509-parser",

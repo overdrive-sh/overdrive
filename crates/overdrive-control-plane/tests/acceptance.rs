@@ -61,4 +61,8 @@ mod acceptance {
     mod action_shim_restart_uses_spec_from_action;
     mod openapi_exec_block;
     mod submit_job_handler_rejects_empty_exec_command_with_400;
+
+    // cli-submit-vs-deploy-and-alloc-status — Slice 02 step 02-01.
+    // S-CP-04 broadcast property test + S-CP-05 classifier scenarios.
+    mod lifecycle_broadcast;
 }

@@ -1151,9 +1151,20 @@ impl Reconciler for JobLifecycle {
                 // RestartAllocation once `RESTART_BACKOFF_CEILING` is
                 // reached. The alloc then stays Terminated indefinitely
                 // (backoff exhausted).
-                let failed_alloc = allocs_vec
-                    .iter()
-                    .find(|r| matches!(r.state, AllocState::Terminated | AllocState::Draining));
+                // Per ADR-0032 §5 + slice 02 step 02-01: the action
+                // shim now writes `AllocState::Failed` on driver
+                // `StartRejected` (instead of `Terminated`) to
+                // distinguish operator-stop from driver-could-not-
+                // start. The restart-budget logic treats both states
+                // identically — both are "this alloc is not Running
+                // and the reconciler should consider restarting it"
+                // — so the matcher includes both.
+                let failed_alloc = allocs_vec.iter().find(|r| {
+                    matches!(
+                        r.state,
+                        AllocState::Terminated | AllocState::Draining | AllocState::Failed
+                    )
+                });
                 if let Some(failed) = failed_alloc {
                     // Backoff exhaustion check — emit no further
                     // RestartAllocation past the ceiling. Pure check

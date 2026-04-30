@@ -131,6 +131,10 @@ base64.workspace         = true
 # `waitpid()` test-spawned `/bin/sleep` workloads after `cgroup.kill`
 # delivers SIGKILL — without reaping, nextest flags the test as LEAK.
 libc.workspace           = true
+# Trybuild for compile-fail fixtures (e.g. architecture.md §8: a
+# `LifecycleEvent` field MUST NOT be `AllocStatusRow`). Pinned exact
+# version per `.claude/rules/testing.md` § "Compile-fail testing".
+trybuild.workspace       = true
 
 [lints]
 workspace = true

@@ -99,6 +99,41 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-04-30T14:58:49Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-30T15:03:39Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-30T15:08:56Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-30T15:11:57Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: S-CP-05 covers the classifier unit-level invariant as 5 acceptance scenarios; S-CP-04 covers the broadcast wiring as a property test",
+      "t": "2026-04-30T15:12:03Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-30T15:24:55Z"
     }
   ]
 }

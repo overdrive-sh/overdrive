@@ -168,12 +168,16 @@ async fn repeatedly_crashing_workload_exhausts_backoff_and_stops_retrying() {
     );
     assert!(final_count >= 1, "Driver::start must be invoked at least once; got {final_count}");
 
-    // Every alloc row for this job must be Terminated (no Running).
+    // Every alloc row for this job must be Failed (no Running). Per
+    // ADR-0032 §5 + slice 02 step 02-01 the action shim writes
+    // `AllocState::Failed` (not `Terminated`) on driver
+    // `StartRejected` — distinguishes operator-stop from driver-
+    // could-not-start.
     for row in &payments_rows {
         assert_eq!(
             row.state,
-            AllocState::Terminated,
-            "all-failed allocs must converge to Terminated; got {row:?}"
+            AllocState::Failed,
+            "all-failed allocs must converge to Failed; got {row:?}"
         );
     }
 }

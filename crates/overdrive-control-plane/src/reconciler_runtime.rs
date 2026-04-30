@@ -289,9 +289,17 @@ pub async fn run_convergence_tick(
 
     // Dispatch through the action shim — this is where `.await`
     // is permitted. Per-action error isolation lives in the shim.
-    action_shim::dispatch(actions, state.driver.as_ref(), state.obs.as_ref(), &tick)
-        .await
-        .map_err(ConvergenceError::Shim)?;
+    // The shim emits a `LifecycleEvent` on `state.lifecycle_events`
+    // after every successful `obs.write` per architecture.md §10.
+    action_shim::dispatch(
+        actions,
+        state.driver.as_ref(),
+        state.obs.as_ref(),
+        state.lifecycle_events.as_ref(),
+        &tick,
+    )
+    .await
+    .map_err(ConvergenceError::Shim)?;
 
     // Self-re-enqueue per whitepaper §18 *Level-triggered inside
     // the reconciler*: if `reconcile` emitted at least one action,

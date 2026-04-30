@@ -69,17 +69,12 @@ fn preflight_surfaces_procfs_io_error_not_no_cgroup_v2() {
     // signature.
     let proc_self_cgroup = tmp.path().join("proc-self-cgroup");
 
-    let err = run_preflight_at(
-        cgroup_root,
-        /* uid = */ 1000,
-        &proc_fs_dir,
-        &proc_self_cgroup,
-    )
-    .expect_err(
-        "preflight must refuse: /proc/filesystems is unreadable (it is a \
+    let err = run_preflight_at(cgroup_root, /* uid = */ 1000, &proc_fs_dir, &proc_self_cgroup)
+        .expect_err(
+            "preflight must refuse: /proc/filesystems is unreadable (it is a \
          directory, not a regular file). The I/O error must surface as \
          ProcFilesystemsUnreadable, NOT be silently absorbed into NoCgroupV2.",
-    );
+        );
 
     let msg = err.to_string();
     match &err {
@@ -111,14 +106,8 @@ fn preflight_surfaces_procfs_io_error_not_no_cgroup_v2() {
 
     // The rendered message must surface the dev escape hatch and the
     // docs URL, matching every other variant per nw-ux-tui-patterns.
-    assert!(
-        msg.contains("--allow-no-cgroups"),
-        "must mention --allow-no-cgroups: {msg}",
-    );
-    assert!(
-        msg.contains("docs.overdrive.sh"),
-        "must mention docs URL: {msg}",
-    );
+    assert!(msg.contains("--allow-no-cgroups"), "must mention --allow-no-cgroups: {msg}",);
+    assert!(msg.contains("docs.overdrive.sh"), "must mention docs URL: {msg}",);
 
     // Critically, the message must NOT prescribe "boot a newer kernel"
     // — that is the specific misdiagnosis the fix corrects. Those

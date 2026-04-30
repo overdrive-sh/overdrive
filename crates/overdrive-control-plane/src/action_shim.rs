@@ -21,14 +21,141 @@
 use overdrive_core::TransitionReason;
 use overdrive_core::id::{AllocationId, JobId, NodeId};
 use overdrive_core::reconciler::{Action, TickContext};
-use overdrive_core::traits::driver::{AllocationHandle, Driver, DriverError};
+use overdrive_core::traits::driver::{AllocationHandle, Driver, DriverError, DriverType};
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
     ObservationStoreError,
 };
+use tokio::sync::broadcast;
+
+use crate::api::{AllocStateWire, TransitionSource};
 
 /// SCAFFOLD marker.
 pub const SCAFFOLD: bool = false;
+
+// ---------------------------------------------------------------------------
+// LifecycleEvent — broadcast-channel payload for slice 02 streaming
+// ---------------------------------------------------------------------------
+
+/// Internal broadcast-channel payload emitted by the action shim after
+/// every successful `AllocStatusRow` write.
+///
+/// Per architecture.md §10 (cli-submit-vs-deploy-and-alloc-status DESIGN):
+/// `LifecycleEvent` is a wire-shape projection of the row write event.
+/// It does NOT carry the raw `AllocStatusRow` directly — a trybuild
+/// compile-fail fixture (architecture.md §8) pins this invariant. The
+/// fields are typed projections (`AllocStateWire` for from/to,
+/// `TransitionReason` for the cause-class, `TransitionSource` for who
+/// produced the row).
+///
+/// `LifecycleEvent` is the broadcast payload, NOT the wire type. The
+/// streaming `SubmitEvent::LifecycleTransition` is constructed FROM a
+/// `LifecycleEvent` in slice 02 step 02-02 / 02-03. For that reason
+/// `LifecycleEvent` derives only `Debug + Clone` — NOT
+/// `Serialize`/`Deserialize`/`ToSchema`. That property is what the
+/// trybuild fixture defends.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LifecycleEvent {
+    /// Allocation this transition concerns.
+    pub alloc_id: AllocationId,
+    /// Job the allocation belongs to.
+    pub job_id: JobId,
+    /// Wire-shape state the alloc was in before this transition. The
+    /// shim does not currently track this on every write (it's the
+    /// downstream consumer's job to compute `from` from prior state);
+    /// in step 02-01 this carries the row's *new* state in both `from`
+    /// and `to` for the row-write events the shim emits without prior
+    /// context. Step 02-03's streaming handler refines this against
+    /// per-alloc prior-state tracking when it lands.
+    pub from: AllocStateWire,
+    /// Wire-shape state the alloc moved to.
+    pub to: AllocStateWire,
+    /// Structured cause-class for this transition.
+    pub reason: TransitionReason,
+    /// Verbatim driver text the cause-class payload does not capture
+    /// (e.g. raw `errno`-decorated message). Audit trail per
+    /// architecture.md §10.
+    pub detail: Option<String>,
+    /// Who/what produced the row write — `Reconciler` or
+    /// `Driver(DriverType)` per ADR-0033 §1.
+    pub source: TransitionSource,
+    /// Logical-timestamp string (counter@writer) for this transition.
+    pub at: String,
+}
+
+// ---------------------------------------------------------------------------
+// Classifier — DriverError::StartRejected.reason text → TransitionReason
+// ---------------------------------------------------------------------------
+
+/// Classify a `DriverError::StartRejected.reason` text into a typed
+/// cause-class `TransitionReason` variant per ADR-0032 §4 Amendment
+/// 2026-04-30.
+///
+/// Prefix-match table (order matters — specific before generic):
+///
+/// | Prefix shape | Variant |
+/// |---|---|
+/// | `spawn <path>: No such file or directory (os error 2)` | `ExecBinaryNotFound { path }` |
+/// | `spawn <path>: Permission denied (os error 13)`        | `ExecPermissionDenied { path }` |
+/// | `spawn <path>: Exec format error (os error 8)`         | `ExecBinaryInvalid { path, kind: "exec_format_error" }` |
+/// | `cgroup setup failed: <kind>: <source>`                | `CgroupSetupFailed { kind, source }` |
+/// | (anything else)                                        | `DriverInternalError { detail }` |
+///
+/// `_driver` and `_command` are accepted for forward-compatibility —
+/// future phases may use the driver kind or the configured command to
+/// disambiguate ambiguous prefix matches. Phase 1's prefix table is
+/// `ExecDriver`-shaped only and the parameters are unused.
+#[must_use]
+pub(crate) fn classify_driver_failure(
+    text: &str,
+    _driver: DriverType,
+    _command: &str,
+) -> TransitionReason {
+    // `spawn <path>: No such file or directory (os error 2)`
+    if let Some(rest) = text.strip_prefix("spawn ") {
+        if let Some((path, tail)) = split_once_after_path(rest) {
+            if tail.starts_with("No such file or directory") {
+                return TransitionReason::ExecBinaryNotFound { path: path.to_owned() };
+            }
+            if tail.starts_with("Permission denied") {
+                return TransitionReason::ExecPermissionDenied { path: path.to_owned() };
+            }
+            if tail.starts_with("Exec format error") {
+                return TransitionReason::ExecBinaryInvalid {
+                    path: path.to_owned(),
+                    kind: "exec_format_error".to_owned(),
+                };
+            }
+        }
+    }
+
+    // `cgroup setup failed: <kind>: <source>`
+    if let Some(rest) = text.strip_prefix("cgroup setup failed: ") {
+        if let Some(idx) = rest.find(": ") {
+            let kind = &rest[..idx];
+            let source = &rest[idx + 2..];
+            return TransitionReason::CgroupSetupFailed {
+                kind: kind.to_owned(),
+                source: source.to_owned(),
+            };
+        }
+    }
+
+    // Unclassified — fall through to internal error with the verbatim text.
+    TransitionReason::DriverInternalError { detail: text.to_owned() }
+}
+
+/// Helper: given a string of the form `<path>: <tail>`, split into
+/// `(path, tail)` on the first `: `. Returns `None` if no separator is
+/// found.
+fn split_once_after_path(s: &str) -> Option<(&str, &str)> {
+    let idx = s.find(": ")?;
+    Some((&s[..idx], &s[idx + 2..]))
+}
+
+// ---------------------------------------------------------------------------
+// dispatch — single async I/O boundary, with broadcast emit
+// ---------------------------------------------------------------------------
 
 /// Build an `AllocStatusRow` for a state transition driven by the shim.
 /// Used by every variant that writes observation: `StartAllocation`,
@@ -38,11 +165,7 @@ pub const SCAFFOLD: bool = false;
 ///
 /// Per ADR-0032 §3 (Amendment 2026-04-30) the row carries
 /// `reason: Option<TransitionReason>` and `detail: Option<String>`
-/// for cause-class attribution. Phase 1 callers populate `reason`
-/// only on `StartAllocation` failure (placeholder
-/// `DriverInternalError { detail: reason_text }` until step 02-01
-/// lands the structured classifier); other call sites pass `None` /
-/// `None` for now and grow per their respective steps.
+/// for cause-class attribution.
 fn build_alloc_status_row(
     alloc_id: AllocationId,
     job_id: JobId,
@@ -64,6 +187,56 @@ fn build_alloc_status_row(
     }
 }
 
+/// Build a `LifecycleEvent` for the broadcast channel from a freshly
+/// written `AllocStatusRow`. The wire-shape projection is mechanical —
+/// `state → AllocStateWire`, `LogicalTimestamp → String`. The `from`
+/// and `to` fields carry the row's *new* state in both slots; per
+/// `LifecycleEvent` doc, computing `from` against prior state is the
+/// downstream streaming handler's job (slice 02 step 02-03), not the
+/// shim's.
+fn build_lifecycle_event(row: &AllocStatusRow, source: TransitionSource) -> LifecycleEvent {
+    let to_wire: AllocStateWire = row.state.into();
+    LifecycleEvent {
+        alloc_id: row.alloc_id.clone(),
+        job_id: row.job_id.clone(),
+        from: to_wire,
+        to: to_wire,
+        reason: row
+            .reason
+            .clone()
+            .unwrap_or(TransitionReason::DriverInternalError { detail: String::new() }),
+        detail: row.detail.clone(),
+        source,
+        at: format_logical_timestamp(&row.updated_at),
+    }
+}
+
+/// Render a `LogicalTimestamp` as `counter@writer` for the wire/event
+/// surface. Phase 1 keeps it stringly-typed because the CLI renders it
+/// verbatim and never round-trips through arithmetic.
+fn format_logical_timestamp(ts: &LogicalTimestamp) -> String {
+    format!("{}@{}", ts.counter, ts.writer.as_str())
+}
+
+/// Emit a `LifecycleEvent` on the broadcast channel. Per
+/// architecture.md §10: broadcast-send error is logged and discarded —
+/// the row was already committed, the snapshot will see it, and a
+/// missing event signals a missing subscriber (not a missed write).
+/// Per-variant error isolation is preserved: a broadcast send failure
+/// does not abort subsequent action dispatch.
+fn emit_event(bus: &broadcast::Sender<LifecycleEvent>, event: LifecycleEvent) {
+    if let Err(err) = bus.send(event) {
+        // No subscribers is the normal Phase 1 case (the streaming
+        // handler in 02-03 may not be active yet); demote to debug so
+        // the no-subscriber path does not spam the log.
+        tracing::debug!(
+            target: "overdrive::action_shim",
+            err = %err,
+            "lifecycle event broadcast send returned error (no subscribers?); ignored",
+        );
+    }
+}
+
 /// Dispatch a reconciler's emitted `Vec<Action>` against the active
 /// driver and observation store. Called by the runtime's tick loop
 /// after every `reconcile` call.
@@ -73,16 +246,17 @@ fn build_alloc_status_row(
 ///   caller holds the Arcs).
 /// - Each [`Action`] variant gets its own match arm; the compiler
 ///   enforces exhaustiveness across the [`Action`] enum.
-/// - A driver `StartRejected` writes a `Failed` (Terminated)
-///   [`AllocStatusRow`] and returns `Ok(())` — the failure is *recorded*,
-///   not surfaced as [`ShimError`].
+/// - A driver `StartRejected` writes a `Failed` [`AllocStatusRow`]
+///   (ADR-0032 §5: distinguishes "operator stopped" from "driver
+///   could not start") and returns `Ok(())` — the failure is
+///   *recorded*, not surfaced as [`ShimError`].
 /// - [`ShimError`] is reserved for failures the shim cannot resolve
 ///   into an observation row (e.g. observation store itself broken).
 ///
-/// Per-variant error isolation: a failed `StartAllocation` does NOT
-/// abort dispatch of subsequent actions. Each variant is processed
-/// independently; if multiple actions fail, the first [`ShimError`]
-/// surfaces.
+/// Per architecture.md §10: every successful `obs.write(row)` is
+/// followed by `bus.send(event)` against the broadcast channel. The
+/// send error is logged and discarded; a failed send does not abort
+/// subsequent action dispatch (per-variant error isolation).
 ///
 /// # Errors
 ///
@@ -94,12 +268,13 @@ pub async fn dispatch(
     actions: Vec<Action>,
     driver: &dyn Driver,
     obs: &dyn ObservationStore,
+    bus: &broadcast::Sender<LifecycleEvent>,
     tick: &TickContext,
 ) -> Result<(), ShimError> {
     let mut first_error: Option<ShimError> = None;
 
     for action in actions {
-        let result = dispatch_single(action, driver, obs, tick).await;
+        let result = dispatch_single(action, driver, obs, bus, tick).await;
         if let Err(err) = result {
             // Per-variant error isolation: record only the first error
             // and continue draining the rest of the actions.
@@ -118,6 +293,7 @@ async fn dispatch_single(
     action: Action,
     driver: &dyn Driver,
     obs: &dyn ObservationStore,
+    bus: &broadcast::Sender<LifecycleEvent>,
     tick: &TickContext,
 ) -> Result<(), ShimError> {
     match action {
@@ -127,34 +303,42 @@ async fn dispatch_single(
         Action::Noop | Action::StartWorkflow { .. } | Action::HttpCall { .. } => Ok(()),
         // Start: spawn the allocation via the driver and write a
         // Running AllocStatusRow on success. On StartRejected, write
-        // a Terminated row recording the failure (per ADR-0023 §2).
-        // Phase 1 does not yet model a `Failed` AllocState variant —
-        // Terminated is the closest match.
+        // a `Failed` row recording the typed cause-class
+        // (ADR-0032 §5 + §4 Amendment).
         Action::StartAllocation { alloc_id, job_id, node_id, spec } => {
-            // Per ADR-0032 §3 (Amendment 2026-04-30) the row carries
-            // structured cause-class attribution. Step 01-01 lands the
-            // type surface and the row write path; the structured
-            // failure-state switch (Terminated → Failed for cause-class
-            // failures) and the classifier promoting
-            // `DriverError::StartRejected.reason` text to a more
-            // specific cause-class variant land in step 02-01. For now
-            // the failure path keeps the existing `Terminated` lifecycle
-            // bucket the reconciler's restart-budget logic depends on,
-            // and uses `DriverInternalError { detail }` as the
-            // placeholder cause-class.
-            let (state, reason, detail): (AllocState, Option<TransitionReason>, Option<String>) =
-                match driver.start(&spec).await {
-                    Ok(_handle) => (AllocState::Running, Some(TransitionReason::Started), None),
-                    Err(DriverError::StartRejected { reason: reason_text, .. }) => (
-                        AllocState::Terminated,
-                        Some(TransitionReason::DriverInternalError { detail: reason_text.clone() }),
+            let driver_kind = driver.r#type();
+            // Per ADR-0032 §4 Amendment 2026-04-30: classify the
+            // driver's `StartRejected.reason` text into a typed
+            // cause-class `TransitionReason` variant. State on
+            // failure is `Failed` (not `Terminated`) — distinguishes
+            // operator-stop from driver-could-not-start.
+            let (state, reason, detail, source): (
+                AllocState,
+                Option<TransitionReason>,
+                Option<String>,
+                TransitionSource,
+            ) = match driver.start(&spec).await {
+                Ok(_handle) => (
+                    AllocState::Running,
+                    Some(TransitionReason::Started),
+                    None,
+                    TransitionSource::Driver(driver_kind),
+                ),
+                Err(DriverError::StartRejected { reason: reason_text, driver: drv }) => {
+                    let cause = classify_driver_failure(&reason_text, drv, &spec.command);
+                    (
+                        AllocState::Failed,
+                        Some(cause),
                         Some(reason_text),
-                    ),
-                    Err(other) => return Err(ShimError::Driver(other)),
-                };
+                        TransitionSource::Driver(drv),
+                    )
+                }
+                Err(other) => return Err(ShimError::Driver(other)),
+            };
             let row =
                 build_alloc_status_row(alloc_id, job_id, node_id, state, tick, reason, detail);
-            obs.write(ObservationRow::AllocStatus(row)).await?;
+            obs.write(ObservationRow::AllocStatus(row.clone())).await?;
+            emit_event(bus, build_lifecycle_event(&row, source));
             Ok(())
         }
         // Restart: stop-then-start, reusing the same alloc id. Per
@@ -176,22 +360,33 @@ async fn dispatch_single(
                 return Err(ShimError::HandleMissing { alloc_id });
             };
 
-            // Failed restart — record as Terminated so the next tick's
-            // hydrate sees the prior failure and can decide whether to
-            // back off or exhaust. Per ADR-0032 §3 the row carries the
-            // structured cause attribution; step 02-01 promotes the
-            // `Terminated` → `Failed` switch and refines the cause
-            // classifier on `StartRejected.reason` text.
-            let (state, reason, detail): (AllocState, Option<TransitionReason>, Option<String>) =
-                match driver.start(&spec).await {
-                    Ok(_handle) => (AllocState::Running, Some(TransitionReason::Started), None),
-                    Err(DriverError::StartRejected { reason: reason_text, .. }) => (
-                        AllocState::Terminated,
-                        Some(TransitionReason::DriverInternalError { detail: reason_text.clone() }),
+            let driver_kind = driver.r#type();
+            // Failed restart — same cause-class classification path
+            // as StartAllocation. Per ADR-0032 §5: state is `Failed`
+            // on driver `StartRejected`.
+            let (state, reason, detail, source): (
+                AllocState,
+                Option<TransitionReason>,
+                Option<String>,
+                TransitionSource,
+            ) = match driver.start(&spec).await {
+                Ok(_handle) => (
+                    AllocState::Running,
+                    Some(TransitionReason::Started),
+                    None,
+                    TransitionSource::Driver(driver_kind),
+                ),
+                Err(DriverError::StartRejected { reason: reason_text, driver: drv }) => {
+                    let cause = classify_driver_failure(&reason_text, drv, &spec.command);
+                    (
+                        AllocState::Failed,
+                        Some(cause),
                         Some(reason_text),
-                    ),
-                    Err(other) => return Err(ShimError::Driver(other)),
-                };
+                        TransitionSource::Driver(drv),
+                    )
+                }
+                Err(other) => return Err(ShimError::Driver(other)),
+            };
             let row = build_alloc_status_row(
                 alloc_id,
                 prior_row.job_id,
@@ -201,7 +396,8 @@ async fn dispatch_single(
                 reason,
                 detail,
             );
-            obs.write(ObservationRow::AllocStatus(row)).await?;
+            obs.write(ObservationRow::AllocStatus(row.clone())).await?;
+            emit_event(bus, build_lifecycle_event(&row, source));
             Ok(())
         }
         // Stop: best-effort driver stop, then write a Terminated row
@@ -230,7 +426,7 @@ async fn dispatch_single(
             // operator stop intent (per US-04 / `IntentKey::for_job_stop`).
             // Phase 1 surfaces this as a `Stopped { by: Reconciler }`
             // progress marker — operator vs reconciler attribution
-            // refinement lands in step 02-01 alongside the classifier.
+            // refinement lands later in slice 02.
             let row = build_alloc_status_row(
                 alloc_id,
                 prior_row.job_id,
@@ -242,7 +438,8 @@ async fn dispatch_single(
                 }),
                 None,
             );
-            obs.write(ObservationRow::AllocStatus(row)).await?;
+            obs.write(ObservationRow::AllocStatus(row.clone())).await?;
+            emit_event(bus, build_lifecycle_event(&row, TransitionSource::Reconciler));
             Ok(())
         }
     }

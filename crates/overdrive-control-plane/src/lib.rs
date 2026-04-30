@@ -105,6 +105,19 @@ pub struct AppState {
     /// Phase 2+: replaced by per-primitive libSQL diff-and-persist
     /// per ADR-0013 §2b.
     pub view_cache: Arc<Mutex<BTreeMap<(String, String), CachedView>>>,
+    /// Broadcast channel for `LifecycleEvent`s emitted by the action
+    /// shim after every successful `obs.write()`. Per architecture.md
+    /// §10 (cli-submit-vs-deploy-and-alloc-status DESIGN): this is
+    /// the bus the slice 02 NDJSON streaming handler subscribes to;
+    /// the channel is `tokio::sync::broadcast` so multiple
+    /// concurrent `submit --watch` requests share a single emit.
+    pub lifecycle_events: Arc<tokio::sync::broadcast::Sender<crate::action_shim::LifecycleEvent>>,
+    /// Wall-clock cap on streaming `submit --watch` connections —
+    /// after this duration, the streaming handler emits a
+    /// `Timeout { after_seconds }` terminal event and closes the
+    /// stream. Default 60s; configurable via
+    /// `[server] streaming_submit_cap_seconds` per architecture.md §10.
+    pub streaming_cap: Duration,
 }
 
 /// A View persisted across ticks in [`AppState::view_cache`].
@@ -121,9 +134,26 @@ pub enum CachedView {
     JobLifecycle(overdrive_core::reconciler::JobLifecycleView),
 }
 
+/// Default capacity for the lifecycle-event broadcast channel.
+///
+/// Phase 1 has at most one streaming subscriber per request, so 256
+/// gives comfortable headroom for transient burstiness without OOM.
+/// Lag handling (S-CP-10) is not in scope for this step.
+pub const DEFAULT_LIFECYCLE_BROADCAST_CAPACITY: usize = 256;
+
+/// Default wall-clock cap on streaming `submit --watch` connections.
+/// Per architecture.md §10. Operators can override via
+/// `[server] streaming_submit_cap_seconds`.
+pub const DEFAULT_STREAMING_CAP: Duration = Duration::from_secs(60);
+
 impl AppState {
-    /// Build an `AppState` with a fresh empty view cache. Used by
+    /// Build an `AppState` with a fresh empty view cache and a fresh
+    /// `LifecycleEvent` broadcast channel of default capacity. Used by
     /// every test fixture and the production boot path.
+    ///
+    /// The default `streaming_cap` is 60s per architecture.md §10.
+    /// Test fixtures that want a different cap construct `AppState`
+    /// directly with the field set.
     #[must_use]
     pub fn new(
         store: Arc<LocalIntentStore>,
@@ -131,7 +161,16 @@ impl AppState {
         runtime: Arc<reconciler_runtime::ReconcilerRuntime>,
         driver: Arc<dyn Driver>,
     ) -> Self {
-        Self { store, obs, runtime, driver, view_cache: Arc::new(Mutex::new(BTreeMap::new())) }
+        let (tx, _rx) = tokio::sync::broadcast::channel(DEFAULT_LIFECYCLE_BROADCAST_CAPACITY);
+        Self {
+            store,
+            obs,
+            runtime,
+            driver,
+            view_cache: Arc::new(Mutex::new(BTreeMap::new())),
+            lifecycle_events: Arc::new(tx),
+            streaming_cap: DEFAULT_STREAMING_CAP,
+        }
     }
 }
 
