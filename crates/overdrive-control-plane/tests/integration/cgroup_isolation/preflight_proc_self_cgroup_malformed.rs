@@ -52,11 +52,11 @@ fn preflight_rejects_v1_only_proc_self_cgroup() {
     match err {
         CgroupPreflightError::CgroupPathDiscoveryFailed { .. } => {}
         other => {
-            panic!("expected CgroupPathDiscoveryFailed (v1-only /proc/self/cgroup); got {other:?}",)
+            panic!("expected CgroupPathDiscoveryFailed (v1-only /proc/self/cgroup); got {other:?}")
         }
     }
 
-    assert!(msg.contains("--allow-no-cgroups"), "must mention --allow-no-cgroups: {msg}",);
+    assert!(msg.contains("--allow-no-cgroups"), "must mention --allow-no-cgroups: {msg}");
     assert!(msg.contains("docs.overdrive.sh"), "must mention docs URL: {msg}");
 }
 
@@ -83,7 +83,7 @@ fn preflight_rejects_empty_proc_self_cgroup() {
     match err {
         CgroupPreflightError::CgroupPathDiscoveryFailed { .. } => {}
         other => {
-            panic!("expected CgroupPathDiscoveryFailed (empty /proc/self/cgroup); got {other:?}",)
+            panic!("expected CgroupPathDiscoveryFailed (empty /proc/self/cgroup); got {other:?}")
         }
     }
 }

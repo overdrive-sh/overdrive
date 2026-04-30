@@ -5,7 +5,7 @@
 //! `docs/feature/fix-cgroup-preflight-procfs-unreadable/bugfix-rca.md`,
 //! the previous step-1 read of `/proc/filesystems`
 //! (`cgroup_preflight.rs:189`) used `unwrap_or_default()`, which
-//! collapsed every `io::Error` (PermissionDenied, EIO, broken procfs,
+//! collapsed every `io::Error` (`PermissionDenied`, EIO, broken procfs,
 //! /proc not mounted, …) into the empty string. The empty string then
 //! tripped `cgroup_v2_available = false` and the function returned
 //! `NoCgroupV2` — naming the wrong cause and prescribing "boot a
@@ -34,7 +34,7 @@
 //!      are precisely the misdiagnosis this fix corrects.
 //!
 //! On the buggy code (line 189 still `unwrap_or_default()`) this test
-//! panics with "expected ProcFilesystemsUnreadable, got NoCgroupV2".
+//! panics with "expected `ProcFilesystemsUnreadable`, got `NoCgroupV2`".
 //! That is the correct shape for a RED scaffold commit per
 //! `.claude/rules/testing.md` § "RED scaffolds and intentionally-
 //! failing commits".
@@ -106,8 +106,8 @@ fn preflight_surfaces_procfs_io_error_not_no_cgroup_v2() {
 
     // The rendered message must surface the dev escape hatch and the
     // docs URL, matching every other variant per nw-ux-tui-patterns.
-    assert!(msg.contains("--allow-no-cgroups"), "must mention --allow-no-cgroups: {msg}",);
-    assert!(msg.contains("docs.overdrive.sh"), "must mention docs URL: {msg}",);
+    assert!(msg.contains("--allow-no-cgroups"), "must mention --allow-no-cgroups: {msg}");
+    assert!(msg.contains("docs.overdrive.sh"), "must mention docs URL: {msg}");
 
     // Critically, the message must NOT prescribe "boot a newer kernel"
     // — that is the specific misdiagnosis the fix corrects. Those

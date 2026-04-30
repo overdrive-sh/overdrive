@@ -5,7 +5,7 @@
 //! `docs/feature/fix-cgroup-preflight-subtree-unreadable/bugfix-rca.md`,
 //! the step-4 read of `<enclosing_slice>/cgroup.subtree_control`
 //! (`cgroup_preflight.rs:273`) used `unwrap_or_default()`, which
-//! collapsed every `io::Error` (PermissionDenied, EIO, IsADirectory,
+//! collapsed every `io::Error` (`PermissionDenied`, EIO, `IsADirectory`,
 //! Other, …) into the empty string. The empty string then tripped the
 //! token-scan to push both `cpu` and `memory` onto the missing list,
 //! and the function returned `DelegationMissing` with the
@@ -43,8 +43,8 @@
 //!      the misdiagnosis this fix corrects.
 //!
 //! On the buggy code (line 273 still `unwrap_or_default()`) this test
-//! panics with "expected SubtreeControlUnreadable, got
-//! DelegationMissing". That is the correct shape for a RED scaffold
+//! panics with "expected `SubtreeControlUnreadable`, got
+//! `DelegationMissing`". That is the correct shape for a RED scaffold
 //! commit per `.claude/rules/testing.md` § "RED scaffolds and
 //! intentionally-failing commits".
 
@@ -135,8 +135,8 @@ fn preflight_surfaces_subtree_control_io_error_not_delegation_missing() {
 
     // The rendered message must surface the dev escape hatch and the
     // docs URL, matching every other variant per nw-ux-tui-patterns.
-    assert!(msg.contains("--allow-no-cgroups"), "must mention --allow-no-cgroups: {msg}",);
-    assert!(msg.contains("docs.overdrive.sh"), "must mention docs URL: {msg}",);
+    assert!(msg.contains("--allow-no-cgroups"), "must mention --allow-no-cgroups: {msg}");
+    assert!(msg.contains("docs.overdrive.sh"), "must mention docs URL: {msg}");
 
     // Critically, the message must NOT prescribe `Delegate=yes` or
     // "delegation required" — those phrases are reserved for

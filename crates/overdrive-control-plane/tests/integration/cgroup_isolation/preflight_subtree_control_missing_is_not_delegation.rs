@@ -23,7 +23,7 @@
 //!     `Documentation/admin-guide/cgroup-v2.rst`. Its absence
 //!     therefore indicates the enclosing-slice path is not a cgroup
 //!     directory at all (race against unmount, misconfigured
-//!     cgroup_root, parsed `/proc/self/cgroup` line points at a
+//!     `cgroup_root`, parsed `/proc/self/cgroup` line points at a
 //!     non-cgroup path, …) — none of which are "delegation missing"
 //!     and none of which are fixed by `Delegate=yes`. The new
 //!     `development.md` rule's escape clause does NOT authorise
@@ -37,8 +37,8 @@
 //! this regression test exists to prevent.
 //!
 //! On the buggy code (line 273 still `unwrap_or_default()`) this test
-//! panics with "expected SubtreeControlUnreadable, got
-//! DelegationMissing". That is the correct shape for a RED scaffold
+//! panics with "expected `SubtreeControlUnreadable`, got
+//! `DelegationMissing`". That is the correct shape for a RED scaffold
 //! commit per `.claude/rules/testing.md` § "RED scaffolds and
 //! intentionally-failing commits".
 
@@ -129,8 +129,8 @@ fn preflight_treats_missing_subtree_control_as_io_error() {
 
     // The rendered message must surface the dev escape hatch and the
     // docs URL, matching every other variant per nw-ux-tui-patterns.
-    assert!(msg.contains("--allow-no-cgroups"), "must mention --allow-no-cgroups: {msg}",);
-    assert!(msg.contains("docs.overdrive.sh"), "must mention docs URL: {msg}",);
+    assert!(msg.contains("--allow-no-cgroups"), "must mention --allow-no-cgroups: {msg}");
+    assert!(msg.contains("docs.overdrive.sh"), "must mention docs URL: {msg}");
 
     // Critically, the message must NOT prescribe `Delegate=yes` or
     // "delegation required" — those phrases are reserved for
