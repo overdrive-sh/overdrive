@@ -165,6 +165,15 @@ impl Job {
     /// ADR-0031 §4) empty / whitespace-only `exec.command`. Wraps
     /// [`JobId`]'s `FromStr` error through `AggregateError::Id(..)` via
     /// `#[from]`.
+    //
+    // The `todo!()` below is the documented RED scaffold for step 01-02
+    // per `.claude/rules/testing.md` § "RED scaffolds and intentionally-
+    // failing commits". Step 01-02 replaces the panic with the real
+    // `AggregateError::Validation { field: "exec.command", ... }`
+    // return — until then the panic IS the specification of work not
+    // yet done. The matching acceptance scenarios in
+    // `tests/acceptance/exec_validation.rs` are intentionally RED.
+    #[allow(clippy::todo)]
     pub fn from_spec(spec: JobSpecInput) -> Result<Self, AggregateError> {
         let JobSpecInput { id, replicas, resources, driver } = spec;
         let id = JobId::new(&id)?;
@@ -232,12 +241,13 @@ pub struct JobSpecInput {
     pub driver: DriverInput,
 }
 
-/// Wire-shape twin of [`Resources`]. Per ADR-0031 §2 / `.claude/rules/development.md`
-/// § State-layer hygiene: the rkyv-archived intent-side `Resources` is
-/// kept clean of serde-only / utoipa-only concerns; this twin carries
-/// the wire-side derives. `From<ResourcesInput> for Resources` is
-/// non-fallible — the validation rules (`memory_bytes != 0`) live in
-/// `Job::from_spec`.
+/// Wire-shape twin of [`Resources`].
+///
+/// Per ADR-0031 §2 / `.claude/rules/development.md` § State-layer
+/// hygiene: the rkyv-archived intent-side `Resources` is kept clean of
+/// serde-only / utoipa-only concerns; this twin carries the wire-side
+/// derives. `From<ResourcesInput> for Resources` is non-fallible — the
+/// validation rules (`memory_bytes != 0`) live in `Job::from_spec`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ResourcesInput {
@@ -245,15 +255,17 @@ pub struct ResourcesInput {
     pub memory_bytes: u64,
 }
 
-/// Driver dispatch on a [`JobSpecInput`]. Per ADR-0031 §2 a tagged enum
-/// with `#[serde(flatten)]` on the field surfaces the table name as the
-/// discriminator in TOML / JSON: `[exec]` → `DriverInput::Exec(...)`.
-/// `deny_unknown_fields` on the enum rejects unknown driver tables.
+/// Driver dispatch on a [`JobSpecInput`].
+///
+/// Per ADR-0031 §2 a tagged enum with `#[serde(flatten)]` on the field
+/// surfaces the table name as the discriminator in TOML / JSON: `[exec]`
+/// → `DriverInput::Exec(...)`. `deny_unknown_fields` on the enum rejects
+/// unknown driver tables.
 ///
 /// Today: one variant (`Exec`). Future drivers (`microvm`, `wasm`) add
 /// new variants additively; no shape change to surrounding code.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
-#[serde(deny_unknown_fields, rename_all = "kebab-case")]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub enum DriverInput {
     /// Native binary under cgroups v2 — the `[exec]` table in TOML.
     Exec(ExecInput),
