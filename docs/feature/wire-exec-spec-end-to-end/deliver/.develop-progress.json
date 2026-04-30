@@ -1,7 +1,7 @@
 {
-  "project_id": "",
+  "project_id": "wire-exec-spec-end-to-end",
   "total_steps": 8,
-  "completed_steps": 7,
+  "completed_steps": 8,
   "completed_step_ids": [
     "01-01",
     "01-02",
@@ -9,11 +9,37 @@
     "03-01",
     "04-01",
     "04-02",
-    "05-01"
-  ],
-  "pending_step_ids": [
+    "05-01",
     "05-02"
   ],
-  "all_steps_done": false,
-  "phases_completed": {}
+  "pending_step_ids": [],
+  "all_steps_done": true,
+  "phases_completed": {
+    "phase-1-roadmap": {
+      "status": "approved",
+      "reviewer": "nw-acceptance-designer-reviewer",
+      "approved_at": "2026-04-30T05:30:00Z"
+    },
+    "phase-3-execute": {
+      "status": "completed",
+      "all_steps_pass": true,
+      "completed_at": "2026-04-30T07:30:00Z"
+    },
+    "phase-3.5-post-merge-integration-gate": {
+      "status": "PASS",
+      "environments_tested": [
+        "macos-host (default-lane)",
+        "linux-lima (integration-tests feature)"
+      ],
+      "verification": {
+        "default_lane_tests": "532 tests passed (cargo nextest run --workspace)",
+        "integration_lane_tests": "681 tests passed (Lima; reported by 05-02 crafter)",
+        "doctests": "pass (cargo test --doc --workspace)",
+        "dst_lint": "exit 0 (cargo run -p xtask -- dst-lint)",
+        "openapi_check": "exit 0 (cargo run -p xtask -- openapi-check)",
+        "compile_clean_workspace": "cargo nextest run --workspace --features integration-tests --no-run exits 0"
+      },
+      "completed_at": "2026-04-30T07:35:00Z"
+    }
+  }
 }
