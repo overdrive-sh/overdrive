@@ -109,61 +109,47 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
     }
     assert!(first_running, "alloc must reach Running before crash");
 
-    // Phase 2: simulate crash by writing a Terminated row directly
-    // into the observation store. This stands in for an external
-    // SIGKILL detection path (kernel signal → node agent → obs
-    // write). Phase 1 has no real crash detector wired yet — the
-    // direct-write models the post-detection state the reconciler
-    // would observe.
+    // Phase 2: simulate crash by SIGKILLing the workload PID
+    // externally. Step 01-02's worker exit-observer subsystem reads
+    // the natural `child.wait()` resolution and writes
+    // `AllocState::Failed` to obs — the synthetic-write workaround
+    // that previously stood in here is gone.
     //
-    // The crash-row counter is `prior + 1` — just enough to win LWW
-    // against the Phase-1 Running row. The action shim's
-    // `timestamp_for(tick)` writes counter = `tick.tick + 1`, so for
-    // the Phase-3 restart write to dominate the crash row we must also
-    // skip `tick_n` forward by 1 below — otherwise the next shim write
-    // would tie or lose. An earlier draft used `+100` which deadlocked
-    // the test: subsequent shim writes (counter ≤ 60) all lost LWW
-    // against a counter=~103 Terminated row, so Running was never
-    // re-observable.
+    // Read the workload PID from `cgroup.procs`. The action shim has
+    // already written a `Running` row at this point, and `ExecDriver`
+    // has placed the spawned `/bin/sleep` PID into the workload scope
+    // (same pattern `AllocCleanup` uses for cleanup). The PID is the
+    // SIGKILL target.
     let rows = state.obs.alloc_status_rows().await.expect("read rows");
     let prior = rows.into_iter().find(|r| r.state == AllocState::Running).expect("running row");
-    let crashed_counter = prior.updated_at.counter.saturating_add(1);
-    let crashed = overdrive_core::traits::observation_store::AllocStatusRow {
-        alloc_id: prior.alloc_id.clone(),
-        job_id: prior.job_id.clone(),
-        node_id: prior.node_id.clone(),
-        state: AllocState::Terminated,
-        updated_at: overdrive_core::traits::observation_store::LogicalTimestamp {
-            counter: crashed_counter,
-            writer: prior.node_id.clone(),
-        },
-        // Synthetic crash row — no cause-class transition was emitted
-        // (the test directly writes the Terminated row to simulate a
-        // crash recovery scenario), so `reason` / `detail` are empty.
-        reason: None,
-        detail: None,
-    };
-    state
-        .obs
-        .write(overdrive_core::traits::observation_store::ObservationRow::AllocStatus(crashed))
-        .await
-        .expect("write crash");
+    let scope = std::path::PathBuf::from("/sys/fs/cgroup")
+        .join("overdrive.slice/workloads.slice")
+        .join(format!("{}.scope", prior.alloc_id));
+    let procs_text =
+        std::fs::read_to_string(scope.join("cgroup.procs")).expect("read cgroup.procs");
+    let pid: libc::pid_t = procs_text
+        .lines()
+        .filter_map(|line| line.trim().parse::<i32>().ok())
+        .next()
+        .expect("workload PID present in cgroup.procs");
+    // SAFETY: SIGKILL on a child PID owned by this test. The PID was
+    // minted by `ExecDriver::start` in this same test and resides in
+    // the workload's cgroup scope; it is alive at the moment we read
+    // it from `cgroup.procs`. `libc::kill` returns 0 on success and
+    // -1 on error (with `errno` set); we ignore the return because
+    // the assertion downstream is on the obs row the watcher writes,
+    // not on the syscall result.
+    let _ = unsafe { libc::kill(pid, libc::SIGKILL) };
 
-    // Skip `tick_n` past the crash counter so the next shim write
-    // (counter = `tick.tick + 1`) strictly dominates the crash row
-    // under LWW. Without this, a tied (counter, writer) pair is a
-    // no-op per the §4 LWW idempotency rule and the Running row is
-    // silently dropped on every restart attempt.
-    if tick_n < crashed_counter {
-        tick_n = crashed_counter;
-    }
-
-    // Phase 3: drive the convergence loop forward and observe
-    // Terminated → Running. The reconciler emits RestartAllocation
-    // for the Failed alloc (within ceiling); the action shim
-    // performs stop+start and writes a fresh Running row.
-    let mut recovered = false;
-    while tick_n < 60 && !recovered {
+    // Phase 3: drive the convergence loop forward. The exit-observer
+    // subsystem must (i) classify the SIGKILL as a crash (no
+    // `intentional_stop` flag was set — RCA §Approved fix item 4),
+    // writing `AllocState::Failed`, and (ii) the reconciler must
+    // re-enqueue and bring up a fresh Running row whose counter
+    // strictly dominates the Failed row.
+    let mut saw_failed = false;
+    let mut failed_counter: u64 = 0;
+    while tick_n < 90 && !saw_failed {
         run_convergence_tick(
             &state,
             &job_lifecycle_name,
@@ -175,12 +161,37 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
         .await
         .expect("tick");
         let rows = state.obs.alloc_status_rows().await.expect("read rows");
-        recovered = rows.iter().any(|r| r.state == AllocState::Running);
+        if let Some(row) = rows.iter().find(|r| matches!(r.state, AllocState::Failed { .. })) {
+            saw_failed = true;
+            failed_counter = row.updated_at.counter;
+        }
+        tick_n += 1;
+    }
+    assert!(saw_failed, "watcher must classify SIGKILL as Failed");
+
+    let mut recovered = false;
+    while tick_n < 150 && !recovered {
+        run_convergence_tick(
+            &state,
+            &job_lifecycle_name,
+            &target,
+            start + Duration::from_millis(tick_n.saturating_mul(100)),
+            tick_n,
+            deadline,
+        )
+        .await
+        .expect("tick");
+        let rows = state.obs.alloc_status_rows().await.expect("read rows");
+        if let Some(row) = rows.iter().find(|r| r.state == AllocState::Running)
+            && row.updated_at.counter > failed_counter
+        {
+            recovered = true;
+        }
         tick_n += 1;
     }
     assert!(
         recovered,
-        "alloc must reach Running again after crash within the Phase-3 tick budget \
-         (final tick_n={tick_n})"
+        "alloc must reach a fresh Running (counter > Failed counter) after SIGKILL \
+         within the Phase-3 tick budget (final tick_n={tick_n})"
     );
 }
