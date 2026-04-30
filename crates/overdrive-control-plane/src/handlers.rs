@@ -15,7 +15,7 @@
 
 use axum::Json;
 use axum::extract::{Path, State};
-use overdrive_core::aggregate::{IntentKey, Job, JobSpecInput};
+use overdrive_core::aggregate::{AggregateError, IntentKey, Job, JobSpecInput};
 use overdrive_core::id::{ContentHash, JobId};
 use overdrive_core::reconciler::{ReconcilerName, TargetResource};
 use overdrive_core::traits::intent_store::{IntentStore, PutOutcome};
@@ -125,9 +125,31 @@ pub async fn submit_job(
     State(state): State<AppState>,
     Json(request): Json<api::SubmitJobRequest>,
 ) -> Result<Json<api::SubmitJobResponse>, ControlPlaneError> {
-    // 1. Validate via the single aggregate constructor. Failures map
-    //    to HTTP 400 via `ControlPlaneError::Aggregate` + `IntoResponse`.
-    let job = Job::from_spec(request.spec)?;
+    // 1. Validate via the single aggregate constructor (ADR-0011 —
+    //    THE-single-validating-constructor). The `Job::from_spec` call
+    //    is the server-side defence-in-depth complement to the CLI's
+    //    fast-fail (ADR-0014); both lanes route through the same
+    //    constructor, so the new ADR-0031 §4 `exec.command` non-empty
+    //    rule fires on both by construction.
+    //
+    //    Field-name preservation per ADR-0015: scalar-field validation
+    //    failures (`AggregateError::Validation { field, message }`)
+    //    flatten into the top-level `ControlPlaneError::Validation`
+    //    variant with `field: Some(field.to_string())`. This keeps the
+    //    typed Rust contract aligned with the wire shape — clients
+    //    matching on the typed error see the same `field` token the
+    //    HTTP layer renders into the RFC 7807 body.
+    //
+    //    Non-validation `AggregateError` shapes (`Id`, `Resources`)
+    //    fall through the `#[from]` blanket conversion to
+    //    `ControlPlaneError::Aggregate(_)` — `to_response` still maps
+    //    them to HTTP 400 with `error: "validation"`.
+    let job = Job::from_spec(request.spec).map_err(|e| match e {
+        AggregateError::Validation { field, message } => {
+            ControlPlaneError::Validation { field: Some(field.to_owned()), message }
+        }
+        other => ControlPlaneError::Aggregate(other),
+    })?;
 
     // 2. Archive canonically via rkyv. Two archivals of the same
     //    logical Job produce byte-identical bytes — this is what makes
