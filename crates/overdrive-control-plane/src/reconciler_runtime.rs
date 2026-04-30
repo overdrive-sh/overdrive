@@ -155,6 +155,16 @@ impl ReconcilerRuntime {
     pub fn reconcilers_iter(&self) -> impl Iterator<Item = &AnyReconciler> {
         self.reconcilers.values()
     }
+
+    /// Look up a reconciler by canonical name. O(log N) keyed lookup
+    /// over the underlying `BTreeMap`. Used by the per-tick dispatch
+    /// path in [`run_convergence_tick`] — each drained Evaluation
+    /// names exactly one reconciler (ADR-0013 §8 / whitepaper §18),
+    /// so dispatch is a keyed lookup, not a registry scan.
+    #[must_use]
+    pub fn get(&self, name: &ReconcilerName) -> Option<&AnyReconciler> {
+        self.reconcilers.get(name)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -173,7 +183,8 @@ pub const DEFAULT_TICK_CADENCE: Duration = Duration::from_millis(100);
 /// Drive ONE convergence tick against `target` for the reconciler
 /// named in `reconciler_name`.
 ///
-/// The reconciler is looked up via `reconcilers_iter().find(...)`; if
+/// The reconciler is looked up via [`ReconcilerRuntime::get`] (O(log N)
+/// keyed lookup over the `BTreeMap` registry); if
 /// not registered, the function logs a structured warning and returns
 /// Ok cleanly (the reconciler may have been deregistered between
 /// submit and drain — Phase 2+ concern, defensively handled).
@@ -221,9 +232,9 @@ pub async fn run_convergence_tick(
     // Look up the named reconciler from the registered set. The
     // Evaluation's `reconciler` field is the broker's key half and
     // is now the dispatch target. Each drained Evaluation runs
-    // exactly one reconciler — the one it names.
-    let Some(reconciler) = state.runtime.reconcilers_iter().find(|r| r.name() == reconciler_name)
-    else {
+    // exactly one reconciler — the one it names. O(log N) keyed
+    // lookup over the BTreeMap registry — not a linear scan.
+    let Some(reconciler) = state.runtime.get(reconciler_name) else {
         tracing::warn!(
             target: "overdrive::reconciler",
             reconciler = %reconciler_name,
