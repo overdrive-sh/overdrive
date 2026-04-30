@@ -122,3 +122,19 @@ pub async fn status(args: StatusArgs) -> Result<AllocStatusOutput, CliError> {
         snapshot,
     })
 }
+
+/// Return the raw [`AllocStatusResponse`] envelope.
+///
+/// Variant of [`status`] used by tests (notably S-WS-02) that need to
+/// assert on the cause-class typed payload byte-equality across
+/// streaming + snapshot surfaces. Bypasses the operator-facing
+/// derivation step (`empty_state_message`, etc.) so the assertion target
+/// is the raw wire shape.
+///
+/// # Errors
+///
+/// Same shapes as [`status`].
+pub async fn status_snapshot(args: StatusArgs) -> Result<AllocStatusResponse, CliError> {
+    let client = ApiClient::from_config(&args.config_path)?;
+    client.alloc_status_for_job(&args.job).await
+}

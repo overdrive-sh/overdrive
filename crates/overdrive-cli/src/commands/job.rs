@@ -23,7 +23,12 @@
 
 use std::path::PathBuf;
 
-use overdrive_control_plane::api::{IdempotencyOutcome, StopOutcome, SubmitJobRequest};
+use bytes::BytesMut;
+use futures::StreamExt as _;
+use overdrive_control_plane::api::{
+    IdempotencyOutcome, StopOutcome, SubmitEvent, SubmitJobRequest, TerminalReason,
+};
+use overdrive_core::TransitionReason;
 use overdrive_core::aggregate::{AggregateError, IntentKey, Job, JobSpecInput};
 use overdrive_core::id::JobId;
 use url::Url;
@@ -200,6 +205,299 @@ pub async fn stop(args: StopArgs) -> Result<StopOutput, CliError> {
     let resp = client.stop_job(&args.id).await?;
 
     Ok(StopOutput { job_id: resp.job_id, outcome: resp.outcome, endpoint })
+}
+
+// ---------------------------------------------------------------------------
+// `overdrive job submit` — streaming NDJSON consumer (Slice 02 step 02-04).
+// ---------------------------------------------------------------------------
+
+/// Typed output of a successful streaming `job submit`.
+///
+/// Per slice 02 step 02-04 acceptance criteria, `submit_streaming`
+/// consumes the `application/x-ndjson` stream until a terminal
+/// `ConvergedRunning` or `ConvergedFailed` event arrives. The handler
+/// returns this typed shape carrying:
+///
+///  * `Accepted`-event-derived fields (`job_id`, `intent_key`,
+///    `spec_digest`, `outcome`) — same shape as the one-shot ack lane
+///    so existing renderer/tests keep their assertion shapes.
+///  * `exit_code` — 0 on `ConvergedRunning`, 1 on `ConvergedFailed`. The
+///    binary wrapper at `main.rs` surfaces this as the process exit
+///    code, satisfying ADR-0032 §9.
+///  * `summary` — operator-facing rendered text written to stdout (the
+///    success summary line for `Running`, the structured `Error:` block
+///    for `Failed`).
+///  * `terminal_reason` / `streaming_reason` / `streaming_error` —
+///    typed projections of the terminal `SubmitEvent` payloads, used
+///    by the S-WS-02 KPI-02 byte-equality assertions.
+///
+/// Pre-Accepted failures (4xx/5xx, transport errors, malformed spec)
+/// short-circuit BEFORE this struct is constructed and surface as
+/// `Err(CliError)` per [`crate::http_client::CliError`].
+#[derive(Debug, Clone)]
+pub struct SubmitStreamingOutput {
+    /// Job ID echoed by the server's `Accepted` event.
+    pub job_id: String,
+    /// Derived intent-store key — `jobs/<job_id>` per ADR-0011.
+    pub intent_key: String,
+    /// 64-char lowercase-hex SHA-256 of the canonical rkyv-archived
+    /// `Job` bytes per ADR-0002.
+    pub spec_digest: String,
+    /// Idempotency outcome echoed by the control plane.
+    pub outcome: IdempotencyOutcome,
+    /// Endpoint the POST was issued to.
+    pub endpoint: Url,
+    /// Next-command hint — `overdrive alloc status --job <job_id>`.
+    pub next_command: String,
+    /// CLI exit code per ADR-0032 §9: 0 for `ConvergedRunning`, 1 for
+    /// `ConvergedFailed`. Mapping of pre-Accepted errors → 2 lives in
+    /// [`crate::render::cli_error_to_exit_code`].
+    pub exit_code: i32,
+    /// Operator-facing rendered text written to stdout — the success
+    /// summary for `Running`, or the structured `Error:` block for
+    /// `Failed`.
+    pub summary: String,
+    /// Terminal-reason payload from `ConvergedFailed`. `None` on the
+    /// happy path (`ConvergedRunning`).
+    pub terminal_reason: Option<TerminalReason>,
+    /// Last cause-class `TransitionReason` observed on the broadcast
+    /// bus before terminal — typically the most recent
+    /// `LifecycleTransition.reason` carrying a failure variant. `None`
+    /// when no failure transitions were observed.
+    pub streaming_reason: Option<TransitionReason>,
+    /// Verbatim driver error text from the `ConvergedFailed.error`
+    /// field. `None` on the happy path.
+    pub streaming_error: Option<String>,
+}
+
+/// Submit a job spec via the streaming NDJSON lane and consume to
+/// terminal.
+///
+/// Per slice 02 step 02-04 acceptance criteria, this handler:
+///
+/// 1. Reads + validates the spec client-side via
+///    [`Job::from_spec`] (ADR-0011) — fast-fail BEFORE any HTTP call.
+/// 2. POSTs `application/x-ndjson` via
+///    [`crate::http_client::ApiClient::submit_job_streaming`].
+/// 3. Consumes the response body line-by-line via
+///    `reqwest::Response::bytes_stream()` + a `BytesMut`-backed line
+///    splitter that tolerates partial chunks crossing recv boundaries.
+/// 4. Deserialises each line into [`SubmitEvent`] and matches on the
+///    event kind — `Accepted` populates the output prefix; lifecycle
+///    transitions accumulate the latest cause-class reason; terminal
+///    events compute the rendered summary + exit code and return.
+///
+/// # Errors
+///
+/// Same shapes as [`submit`] — pre-Accepted failures bubble up as
+/// [`CliError`] variants. Once `Accepted` arrives this function does
+/// not return `Err` for terminal failures: a `ConvergedFailed` event
+/// is a successful termination of the stream that maps to exit code 1
+/// via [`SubmitStreamingOutput::exit_code`].
+///
+/// # Panics
+///
+/// Does not panic on its own. The internal `expect("ApiClient::base_url")`
+/// is unreachable — `from_config` returns `Err(CliError::ConfigLoad)`
+/// on URL-parse failure, never returning a client whose base URL is
+/// absent.
+pub async fn submit_streaming(args: SubmitArgs) -> Result<SubmitStreamingOutput, CliError> {
+    // 1. Read TOML from disk — same as the one-shot lane.
+    let toml_str = std::fs::read_to_string(&args.spec).map_err(|e| CliError::InvalidSpec {
+        field: "spec".to_string(),
+        message: format!("failed to read `{}`: {e}", args.spec.display()),
+    })?;
+
+    // 2. Parse TOML into the shared wire shape.
+    let spec_input: JobSpecInput =
+        toml::from_str(&toml_str).map_err(|e| CliError::InvalidSpec {
+            field: "toml".to_string(),
+            message: format!("failed to parse TOML: {e}"),
+        })?;
+
+    // 3. Client-side validation (ADR-0011 SSOT). Capture the validated
+    //    `JobId` so the streaming consumer can carry the canonical
+    //    job_id without re-parsing the server's `intent_key` (which
+    //    would force the CLI crate to mention the canonical `jobs/`
+    //    prefix literal — a violation of the
+    //    `intent_key_canonical::jobs_prefix_appears_in_exactly_one_production_file`
+    //    gate).
+    let validated: Job = Job::from_spec(spec_input.clone()).map_err(aggregate_to_cli_error)?;
+    let validated_job_id = validated.id.to_string();
+
+    // 4. Build the typed API client and POST with `Accept: application/x-ndjson`.
+    let client = ApiClient::from_config(&args.config_path)?;
+    let endpoint = client.base_url().clone();
+    let response = client.submit_job_streaming(SubmitJobRequest { spec: spec_input }).await?;
+
+    // 5. Consume the stream line-by-line.
+    consume_stream(response, endpoint, validated_job_id).await
+}
+
+/// Drive the NDJSON stream from `response` to a terminal event and
+/// produce the typed [`SubmitStreamingOutput`].
+///
+/// The line splitter accumulates bytes into a `BytesMut` and yields
+/// each newline-terminated line into `serde_json::from_slice` —
+/// tolerating partial chunks that cross `recv` boundaries.
+// The streaming consumer's body is naturally long — one event matcher
+// per `SubmitEvent` variant plus the terminal-event projection logic.
+// Splitting helpers per-arm would obscure the linear "for each line,
+// match the variant" shape that makes the loop comprehensible. The
+// 108-line function compares to the 100-line clippy default.
+#[allow(clippy::too_many_lines)]
+async fn consume_stream(
+    response: reqwest::Response,
+    endpoint: Url,
+    validated_job_id: String,
+) -> Result<SubmitStreamingOutput, CliError> {
+    let mut stream = response.bytes_stream();
+    let mut buf = BytesMut::new();
+
+    // State accumulated as the stream proceeds. Populated by the
+    // `Accepted` event (first) and by intermediate `LifecycleTransition`
+    // events; consulted at terminal time to build the typed output.
+    let mut accepted: Option<AcceptedFields> = None;
+    let mut latest_cause_class_reason: Option<TransitionReason> = None;
+
+    while let Some(chunk_result) = stream.next().await {
+        let chunk = chunk_result.map_err(|e| CliError::Transport {
+            endpoint: endpoint.to_string(),
+            cause: format!("stream chunk error: {e}"),
+        })?;
+        buf.extend_from_slice(&chunk);
+
+        // Drain every complete line currently in the buffer.
+        while let Some(newline_pos) = buf.iter().position(|&b| b == b'\n') {
+            let line = buf.split_to(newline_pos + 1);
+            // Drop the trailing newline before deserialisation.
+            let line_bytes = &line[..line.len() - 1];
+            // Skip blank keep-alive lines if any.
+            if line_bytes.is_empty() {
+                continue;
+            }
+            let event: SubmitEvent =
+                serde_json::from_slice(line_bytes).map_err(|e| CliError::BodyDecode {
+                    cause: format!(
+                        "failed to deserialise NDJSON line as SubmitEvent: {e}; \
+                         line bytes: {}",
+                        String::from_utf8_lossy(line_bytes)
+                    ),
+                })?;
+
+            match event {
+                SubmitEvent::Accepted { spec_digest, intent_key, outcome } => {
+                    // The server-derived `intent_key` carries the
+                    // canonical `IntentKey` shape; the CLI uses the
+                    // already-validated client-side `JobId` (captured
+                    // before the POST) as the operator-facing `job_id`
+                    // so the SSOT for the `jobs/` prefix literal stays
+                    // in `overdrive_core::aggregate::IntentKey::for_job`
+                    // (the `intent_key_canonical` gate enforces this).
+                    accepted = Some(AcceptedFields {
+                        job_id: validated_job_id.clone(),
+                        intent_key,
+                        spec_digest,
+                        outcome,
+                    });
+                }
+                SubmitEvent::LifecycleTransition { reason, .. } => {
+                    // Accumulate the latest cause-class reason so we have
+                    // it on terminal time for byte-equality assertions
+                    // (S-WS-02 KPI-02).
+                    if reason.is_failure() {
+                        latest_cause_class_reason = Some(reason);
+                    }
+                }
+                SubmitEvent::ConvergedRunning { alloc_id: _, started_at: _ } => {
+                    let acc = accepted.ok_or_else(|| CliError::BodyDecode {
+                        cause: "ConvergedRunning before Accepted on the streaming bus".to_string(),
+                    })?;
+                    let summary = crate::render::format_running_summary(
+                        &acc.job_id,
+                        // Phase-1 single-replica streaming witness — the
+                        // first `Running` row terminates the stream per
+                        // architecture.md §10. Replica counts are an
+                        // observation-side concern (alloc status); the
+                        // streaming surface signals "the job has reached
+                        // running" via the terminal event.
+                        1,
+                        1,
+                        "live",
+                    );
+                    let next_command = format!("overdrive alloc status --job {}", acc.job_id);
+                    return Ok(SubmitStreamingOutput {
+                        job_id: acc.job_id,
+                        intent_key: acc.intent_key,
+                        spec_digest: acc.spec_digest,
+                        outcome: acc.outcome,
+                        endpoint,
+                        next_command,
+                        exit_code: 0,
+                        summary,
+                        terminal_reason: None,
+                        streaming_reason: None,
+                        streaming_error: None,
+                    });
+                }
+                SubmitEvent::ConvergedFailed { alloc_id: _, terminal_reason, reason, error } => {
+                    let acc = accepted.ok_or_else(|| CliError::BodyDecode {
+                        cause: "ConvergedFailed before Accepted on the streaming bus".to_string(),
+                    })?;
+                    // Prefer standalone reason; fall back to the latest
+                    // cause-class transition seen on the bus so the
+                    // KPI-02 byte-equality assertion has a stable
+                    // source. `or_else` defers the fallback `Option`
+                    // construction so the `latest_cause_class_reason`
+                    // clone fires only when `reason` is `None`.
+                    let stream_reason = reason.or_else(|| latest_cause_class_reason.clone());
+                    let summary = crate::render::format_failed_block(
+                        &acc.job_id,
+                        stream_reason.as_ref(),
+                        error.as_deref(),
+                        &terminal_reason,
+                    );
+                    let next_command = format!("overdrive alloc status --job {}", acc.job_id);
+                    return Ok(SubmitStreamingOutput {
+                        job_id: acc.job_id,
+                        intent_key: acc.intent_key,
+                        spec_digest: acc.spec_digest,
+                        outcome: acc.outcome,
+                        endpoint,
+                        next_command,
+                        exit_code: 1,
+                        summary,
+                        terminal_reason: Some(terminal_reason),
+                        streaming_reason: stream_reason,
+                        streaming_error: error,
+                    });
+                }
+                // `SubmitEvent` is `#[non_exhaustive]` — future variants
+                // are observed and ignored until the consumer grows
+                // explicit handling. Logged via tracing so an operator
+                // running with `RUST_LOG=info` sees the unfamiliar
+                // event without the stream stalling.
+                _ => {
+                    tracing::debug!("ignoring unrecognised SubmitEvent variant on stream");
+                }
+            }
+        }
+    }
+
+    // Stream closed without a terminal event — protocol violation.
+    Err(CliError::BodyDecode {
+        cause: "streaming submit response closed without ConvergedRunning or ConvergedFailed"
+            .to_string(),
+    })
+}
+
+/// Internal accumulator for the `SubmitEvent::Accepted` fields, used to
+/// build [`SubmitStreamingOutput`] when the terminal event arrives.
+struct AcceptedFields {
+    job_id: String,
+    intent_key: String,
+    spec_digest: String,
+    outcome: IdempotencyOutcome,
 }
 
 /// Map [`AggregateError`] (from `overdrive_core`) into a

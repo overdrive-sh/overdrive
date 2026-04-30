@@ -40,7 +40,17 @@ clap.workspace                     = true
 tokio.workspace                    = true
 tracing.workspace                  = true
 tracing-subscriber.workspace       = true
-reqwest.workspace                  = true
+# Slice 02 step 02-04: `submit_streaming` calls `Response::bytes_stream()`
+# which requires the `stream` feature. Workspace `reqwest` has only
+# `rustls-tls`, `json`, `http2` enabled by default — `stream` is added
+# here as an additive feature on top of the workspace base.
+reqwest                            = { workspace = true, features = ["stream"] }
+# Slice 02 step 02-04 — `submit_streaming` consumes a streaming NDJSON
+# response via `reqwest::Response::bytes_stream()`. `futures::StreamExt`
+# drives `.next().await` on the stream; `bytes::BytesMut` accumulates
+# partial chunks across `recv` boundaries before splitting on `b'\n'`.
+futures.workspace                  = true
+bytes.workspace                    = true
 # Used in `http_client::stringify_reqwest_error` to walk a
 # `reqwest::Error` source chain looking for
 # `rustls::Error::InvalidCertificate(...)` so the operator-facing

@@ -52,19 +52,35 @@ async fn run(cli: Cli) -> Result<()> {
             Ok(())
         }
         Command::Job(JobCommand::Submit { spec }) => {
+            // Slice 02 step 02-04: the CLI defaults to the streaming
+            // NDJSON lane. Slice 03 will reintroduce a `--detach` /
+            // `IsTerminal`-based JSON branch for pipe / non-TTY use; in
+            // the meantime every submit consumes the stream to terminal
+            // and exits 0 / 1 / 2 per the criteria.
             let config_path = default_config_path();
             let args = overdrive_cli::commands::job::SubmitArgs { spec, config_path };
-            match overdrive_cli::commands::job::submit(args).await {
+            match overdrive_cli::commands::job::submit_streaming(args).await {
                 Ok(out) => {
-                    print!("{}", overdrive_cli::render::job_submit_accepted(&out));
-                    Ok(())
+                    // The streaming summary already includes the
+                    // operator-facing block — print it verbatim.
+                    print!("{}", out.summary);
+                    if out.exit_code == 0 {
+                        Ok(())
+                    } else {
+                        // Convergence failed — exit with the typed code
+                        // (1 for `ConvergedFailed`). Emit a discrete
+                        // exit so the `eyre::Report` path does not
+                        // collapse 1 and 2 into the same shell signal.
+                        std::process::exit(out.exit_code);
+                    }
                 }
                 Err(err) => {
                     // Render through the CLI-side error formatter so
                     // operators see actionable next steps on
                     // `CliError::Transport`, not the raw Display form.
                     eprint!("{}", overdrive_cli::render::cli_error(&err));
-                    Err(color_eyre::eyre::eyre!("job submit failed"))
+                    let code = overdrive_cli::render::cli_error_to_exit_code(&err);
+                    std::process::exit(code);
                 }
             }
         }

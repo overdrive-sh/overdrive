@@ -144,6 +144,45 @@ impl ApiClient {
         self.post_typed("v1/jobs", &req).await
     }
 
+    /// `POST /v1/jobs` with `Accept: application/x-ndjson` — drives the
+    /// streaming-submit lane per ADR-0032 §3 / architecture.md §10.
+    ///
+    /// Returns the raw `reqwest::Response` so the caller can iterate
+    /// `bytes_stream()` line-by-line without re-buffering. The response
+    /// status is checked here BEFORE the body is consumed: 4xx / 5xx
+    /// responses parse `ErrorBody` and return [`CliError::HttpStatus`];
+    /// transport failures map to [`CliError::Transport`]. The success
+    /// path leaves body parsing to the caller (one NDJSON line at a
+    /// time).
+    ///
+    /// # Errors
+    ///
+    /// * [`CliError::Transport`] — control plane unreachable.
+    /// * [`CliError::HttpStatus`] — server returned non-2xx.
+    pub async fn submit_job_streaming(
+        &self,
+        req: SubmitJobRequest,
+    ) -> Result<reqwest::Response, CliError> {
+        let url = self.build_url("v1/jobs")?;
+        let resp = self
+            .inner
+            .post(url)
+            .header(reqwest::header::ACCEPT, "application/x-ndjson")
+            .json(&req)
+            .send()
+            .await
+            .map_err(|e| self.transport_err(&e))?;
+
+        let status = resp.status();
+        if status.is_success() {
+            return Ok(resp);
+        }
+
+        let status_u16 = status.as_u16();
+        let body = resp.json::<ErrorBody>().await.unwrap_or_else(|_| synthesize_error_body(status));
+        Err(CliError::HttpStatus { status: status_u16, body })
+    }
+
     /// `POST /v1/jobs/{id}/stop` — record a stop intent for a
     /// previously-submitted job. Per ADR-0027.
     ///
