@@ -94,3 +94,61 @@ strengths:
 
 next_gate: "DELIVER (nw-software-crafter, OOP paradigm per CLAUDE.md)"
 reviewer_confidence: high
+
+---
+# Iteration 2 — Back-prop review (cause-class TransitionReason refactor)
+review_id: accept_rev_20260430_cli_submit_distill_amendment
+reviewer: nw-acceptance-designer-reviewer
+reviewer_persona: Sentinel
+wave: DISTILL
+feature: cli-submit-vs-deploy-and-alloc-status
+review_date: "2026-04-30"
+iteration: 2
+
+approval_status: APPROVED
+blockers_count: 0
+concerns_count: 0
+
+executive_summary: |
+  Back-prop iteration 2: DESIGN amendment applying cause-class refactor of
+  TransitionReason to test-scenarios.md. All 11 edits verified against six
+  hard gates. Zero blockers; zero concerns. S-WS-02 byte-equality STRENGTHENED
+  (now asserts structured data: { path } payload, catches drift in path
+  separately from variant tag). S-CP-05 retargeted to a Scenario Outline with
+  5 cause-class branches (action-shim classifier as SUT). Property-shape
+  generator domains updated for S-CP-07 / S-CP-09 / S-AS-07. Changelog and
+  footnote additions are load-bearing. Catalogue ready for DELIVER handoff.
+
+mandate_compliance:
+  CM_A_hexagonal_boundary: PASS
+  CM_B_business_language: PASS
+  CM_C_user_journey_completeness: PASS
+  CM_D_pure_function_extraction: PASS
+
+hard_gates_iteration_2:
+  gate_1_adapter_coverage: PASS
+  gate_2_driving_adapter_verification: PASS
+  gate_3_kpi_scenario_presence: PASS
+  gate_4_port_to_port_traceability: PASS
+  gate_5_tier_1_tier_3_split_sanity: PASS
+  gate_6_property_test_cardinality: PASS
+
+scenario_count_unchanged: 26
+tier_split_unchanged: "23 Tier 1, 3 Tier 3"
+kpi_to_scenario_map_unchanged: true
+
+back_prop_edits:
+  edit_1_coverage_map_footnote: { gate: PASS, location: "§ 1" }
+  edit_2_s_ws_02_typed_payload_strengthening: { gate: PASS, strength: STRENGTHENING }
+  edit_3_s_cp_05_scenario_outline_retarget: { gate: PASS, branches: 5, sut: "action_shim::dispatch_single" }
+  edit_4_s_cp_06_structured_timeout: { gate: PASS }
+  edit_5_s_cp_07_generator_14_variants_with_payloads: { gate: PASS }
+  edit_6_s_cp_09_generator_with_arbitrary: { gate: PASS }
+  edit_7_s_as_02_typed_payload_note: { gate: PASS }
+  edit_8_s_as_05_cause_class_render: { gate: PASS }
+  edit_9_s_as_07_generator_with_arbitrary: { gate: PASS }
+  edit_10_section_5_cardinality_table: { gate: PASS }
+  edit_11_changelog_section: { gate: PASS }
+
+next_gate: "DELIVER (nw-software-crafter)"
+reviewer_confidence: high

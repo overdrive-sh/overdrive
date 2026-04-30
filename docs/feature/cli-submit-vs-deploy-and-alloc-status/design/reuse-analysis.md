@@ -67,6 +67,7 @@ Searched for prior art on:
 | `submit_job_post` CLI command in `overdrive-cli` | **EXTEND** (gain `--detach`, gain NDJSON consumption logic, gain `IsTerminal` branch) | The command already exists; it does the JSON ack today. Streaming consumption + `--detach` are the new branches. | Slices 02, 03 |
 | `alloc_status` CLI renderer | **REPLACE in place** ([D2]) | The current renderer literally prints `Allocations: N`. The journey TUI mockup specifies the target. Replace is the right shape for "the existing surface tells the operator nothing." | Slice 01 |
 | `AppState` struct (axum router state) | **EXTEND** (gain `lifecycle_events: Arc<broadcast::Sender<LifecycleEvent>>`; promote `clock: Arc<dyn Clock>` to a direct field if not already) | One additional `Arc<...>` field; `Clone` impl is preserved (every field is `Arc<...>`). | Slice 02 |
+| `action_shim` module (`overdrive-control-plane/src/action_shim.rs`) | **EXTEND** (add `classify_driver_failure(reason_text, driver, command) -> TransitionReason` prefix-matcher) | The action shim is already the sole writer of `AllocStatusRow.reason` / `detail` (it owns `build_alloc_status_row` and `dispatch_single`). Mapping `DriverError::StartRejected.reason` text into the cause-class `TransitionReason` variants (per ADR-0032 Amendment 2026-04-30) is a natural extension of that responsibility — the shim is the seam where unstructured driver text becomes structured wire reason. Lifting the helper to a separate module would split a single concern across two files. | Slice 01 |
 
 ---
 
@@ -83,12 +84,16 @@ Searched for prior art on:
 | `struct RestartBudget { used: u32, max: u32, exhausted: bool }` | Tuple `(u32, u32, bool)` is the alternative; the named struct is the better wire shape (the JSON renders `{used, max, exhausted}` instead of `[3, 5, false]` which is unreadable). | Three-field struct. |
 | `struct ResourcesBody { cpu_milli: u32, memory_bytes: u64 }` | The internal `Resources` derives `rkyv::*` for storage; rationale identical to `AllocStateWire`. The conversion from `Resources → ResourcesBody` is mechanical. | Two-field struct mirror. |
 | `struct LifecycleEvent { … }` (broadcast channel payload, NOT on wire) | The broadcast subscriber needs the join keys (`alloc_id`, `job_id`) plus the from/to states plus the reason and source. Could pass `AllocStatusRow` directly, but the row does not carry `from` (only `to` is the post-transition state) — the action shim is the only site that knows `from` (via `find_prior_alloc_row`). The event captures both. | Eight-field struct, internal-only, lives in `overdrive-core` next to the trait surface. |
+| `enum StoppedBy` (in `crates/overdrive-core/src/transition_reason.rs`) | Carried by `TransitionReason::Stopped { by: StoppedBy }` to close the set of stop initiators (`Operator`, `Reconciler`, future `Cluster`). A free-text `String` initiator field would invite divergence as new initiators land in Phase 2; the typed enum is the only way to keep the wire shape stable across versions. Must be its own type rather than a field on `TransitionReason::Stopped` because the `CancelledBy` mirror requires the same shape and a duplicated free-text pair would diverge silently. | One `#[non_exhaustive]` enum, additive going forward; lives next to `TransitionReason`. |
+| `enum CancelledBy` (in `crates/overdrive-core/src/transition_reason.rs`) | Same shape as `StoppedBy` but for `TransitionReason::Cancelled { by: CancelledBy }`. Type-system separation is load-bearing: `Stopped` is graceful operator-/reconciler-initiated termination; `Cancelled` is operator-initiated abort. Collapsing the two onto a single `By` enum would let a `Stopped` transition legally carry a `Cancelled`-only initiator, which is a category error the type system should refuse. Phase 2 cluster-driven cancellation reuses this wire shape. | One `#[non_exhaustive]` enum, mirror of `StoppedBy`. |
+| `struct ResourceEnvelope` (in `crates/overdrive-core/src/transition_reason.rs`) | Carried by `TransitionReason::NoCapacity { requested, free }`. Mirrors `traits::driver::Resources` in field shape (`cpu_milli`, `memory_bytes`) but lives alongside `TransitionReason` to avoid coupling the wire-typed reason enum to the driver trait surface. Depending on `traits::driver::Resources` from inside `TransitionReason` would propagate the driver trait into every `TransitionReason` consumer (CLI renderer, observation row, NDJSON wire) — the action shim would import it transitively into modules that have no business knowing about driver capabilities. The mirror struct is the seam. | Two-field struct, additive. |
 
-**Total CREATE NEW**: 5 enums + 3 structs (1 internal, 2 wire). Every
-one carries a justification that names what was searched for and why
+**Total CREATE NEW**: 5 enums + 3 structs (Phase 1) + 2 enums + 1 struct
+(cause-class amendment 2026-04-30) = 8 enums + 4 structs. Every one
+carries a justification that names what was searched for and why
 extending was structurally wrong (intent/observation boundary,
-error-vs-wire conflation, derive-set divergence) — not just
-inconvenient.
+error-vs-wire conflation, derive-set divergence, trait-surface
+propagation) — not just inconvenient.
 
 ---
 
@@ -120,12 +125,20 @@ inconvenient.
 
 | Category | Count |
 |---|---|
-| EXTEND | 14 |
+| EXTEND | 15 |
 | REUSE unchanged | 8 |
 | REPLACE in place | 1 (`alloc_status` CLI renderer) |
-| CREATE NEW (with justification) | 8 |
-| **Total** | **31** |
+| CREATE NEW (with justification) | 11 |
+| **Total** | **35** |
 
 EXTEND is the dominant disposition. Every CREATE NEW carries a
 single-paragraph rationale; reviewers can challenge any of them
 in-line. The new surfaces are minimal and additive.
+
+---
+
+## Changelog
+
+| Date | Change |
+|---|---|
+| 2026-04-30 | Cause-class `TransitionReason` refactor (per ADR-0032 §3 Amendment 2026-04-30 + ADR-0033 §4 Amendment 2026-04-30): CREATE NEW bumped 8 → 11 with three new types (`StoppedBy`, `CancelledBy`, `ResourceEnvelope`); EXTEND bumped 14 → 15 with the `action_shim::classify_driver_failure` prefix-matcher entry. |

@@ -1,0 +1,124 @@
+review_id: arch_rev_20260430_cli_submit_roadmap
+reviewer: nw-solution-architect-reviewer
+reviewer_persona: Echo
+artifact: cli-submit-vs-deploy-and-alloc-status DELIVER roadmap
+review_date: "2026-04-30"
+iteration: 1
+location: docs/feature/cli-submit-vs-deploy-and-alloc-status/deliver
+
+approval_status: approved_with_nits
+approval_recommendation: APPROVED_WITH_NITS
+critical_issues_count: 0
+high_issues_count: 0
+medium_issues_count: 0
+low_issues_count: 2
+
+executive_summary: |
+  The roadmap is structurally sound after the cause-class TransitionReason
+  back-prop. The 9-step structure holds (3 phases: Slice 01 / 02 / 03);
+  decomposition ratio is 1.8 (well under the 2.5 threshold); dependency
+  invariants preserved; DISCUSS coherence maintained across all 6 user
+  stories and 5 KPIs. All 27 scenarios named in roadmap step ACs are
+  defined in `distill/test-scenarios.md` (verified by exhaustive grep
+  diff post-review).
+
+  Two cosmetic nits captured below; neither blocks DELIVER execution.
+
+gating_checks:
+  gate_1_structure_unchanged: PASS
+  gate_2_decomposition_ratio: PASS (1.8 / 2.5)
+  gate_3_dependency_invariants: PASS
+  gate_4_discuss_coherence: PASS
+  gate_5_distill_scenario_references: PASS (27 / 27 scenarios resolved post-review)
+  gate_6_action_shim_classifier_placement: PASS
+
+dependency_invariants_preserved:
+  - "01-01 (TransitionReason cause-class enum + AllocState::Failed) lands BEFORE 01-02 (api.rs scaffolds → GREEN)"
+  - "01-02 (TerminalReason / TransitionRecord) lands BEFORE 02-02 (SubmitEvent depends on TransitionRecord shape)"
+  - "02-01 (broadcast channel + action-shim classifier) lands BEFORE 02-03 (streaming endpoint subscribes; constructs terminal events from shim-classified row)"
+  - "02-03 (streaming handler) lands BEFORE 02-04 (CLI consumer maps wire to exit codes)"
+  - "02-04 lands BEFORE 03-01 / 03-02 (--detach + auto-detach are CLI extensions to 02-04 logic)"
+
+discuss_to_step_mapping:
+  US-01_streaming_submit_happy_path: ["02-03", "02-04"]
+  US-02_broken_binary_regression: ["02-01 (classifier)", "02-04 (S-WS-02 Tier 3)"]
+  US-03_detach_for_ci: ["03-01"]
+  US-04_pipe_auto_detach: ["03-02"]
+  US-05_alloc_status_enrichment: ["01-03"]
+  US-06_cross_surface_coherence: "covered structurally by [D7] same-Rust-enum across surfaces — no per-step AC change required"
+  KPI-01_first_event_lt_200ms: "02-03 (Accepted synchronous, before subscription loop)"
+  KPI-02_broken_binary_inline: "02-04 (S-WS-02 structured payload regression)"
+  KPI-03_snapshot_field_count: "01-03 (extended response)"
+  KPI-04_byte_equality: ["02-04 (integration)", "02-03 (S-CP-07 property)"]
+  KPI-05_detach_exit_time: "03-01"
+
+scenario_reference_audit:
+  total_scenarios_referenced: 27
+  total_scenarios_defined_in_distill: 27
+  missing_references: 0
+  audit_method: "grep -oE 'S-(WS|CP|CLI|AS)-[0-9]+' on roadmap.json + test-scenarios.md; comm -23 sorted-uniq sets"
+
+issues:
+  low:
+    - id: hint_mapping_neutral_text_unspecified
+      location: "step 02-04 criteria"
+      issue: |
+        The criteria says "the existing `fix the spec's exec.command path
+        and re-run` hint maps to ExecBinaryNotFound and ExecPermissionDenied,
+        while other cause variants get neutral hints (added to the CLI
+        rendering crate per the same step)." The phrase "neutral hints" is
+        vague — the crafter implementing 02-04 will need a concrete mapping.
+      recommendation: |
+        Crafter (slice 02-04 GREEN): treat ADR-0033 §4 amended mapping table
+        as the single source of truth for all variant-to-hint bindings, not
+        just ExecBinaryNotFound / ExecPermissionDenied. The "neutral hints"
+        text is a forward reference to the same table — the phrase is
+        adequate for planning but the implementation must cite the table
+        explicitly.
+      blocking: false
+      severity_rationale: |
+        Low because the mapping table exists in ADR-0033 §4 and the crafter
+        will resolve the lookup during implementation. Surfacing here so
+        the GREEN-phase code review catches any drift.
+
+    - id: classify_driver_failure_function_classification
+      location: "step 02-01 criteria + design/reuse-analysis.md"
+      issue: |
+        The architect's reuse-analysis update bumps CREATE NEW from 8 to 11
+        (StoppedBy, CancelledBy, ResourceEnvelope). The new
+        `classify_driver_failure(reason_text, driver, command) -> TransitionReason`
+        function lives inside the existing `action_shim` module — it should
+        likely count as EXTEND (extending action_shim's responsibility), not
+        CREATE NEW. The reuse-analysis count interpretation is borderline.
+      recommendation: |
+        Architect (when updating design/reuse-analysis.md to reflect the
+        amendment): clarify whether classify_driver_failure is a new
+        component (CREATE NEW with rationale) or an extension to action_shim
+        (EXTEND). Either choice is defensible; just pick one and document
+        it consistently.
+      blocking: false
+      severity_rationale: |
+        Low because the actual gate (every CREATE NEW has justification) is
+        satisfied either way; only the count is at issue. Doesn't block
+        DELIVER.
+
+time_estimate_review:
+  step_01_01: "~2h — additive within one step (cause-class enum body is bounded; supporting types are small enums/structs)"
+  step_02_01: "~3h — classifier is a small prefix matcher; absorbed in original budget"
+  step_02_02: "~2h — schema serialisation work unchanged in scope"
+  step_02_03: "~5h — terminal-event detection + cap timer + lagged-fallback; largest step, justified"
+  conclusion: "no time-estimate revisions required by the back-prop"
+
+length_limit_warnings:
+  status: "expected and ignored per CLAUDE.md"
+  reason: "Overdrive roadmap ACs deliberately carry scenario-level specificity (S-CP-NN names, ADR cross-references, file paths). Trimming would lose traceability. The validator emits length-limit warnings but exits 0; the gate is structural validity, not prose density."
+
+next_steps: |
+  - DELIVER ready: dispatch nw-software-crafter via /nw-execute or /nw-deliver
+    starting at step 01-01.
+  - Optional pre-DELIVER cleanup: architect dispatch to update
+    design/reuse-analysis.md with the cause-class amendment (StoppedBy /
+    CancelledBy / ResourceEnvelope justifications + classify_driver_failure
+    classification per nit #2). Single edit pass.
+
+reviewer_confidence: high

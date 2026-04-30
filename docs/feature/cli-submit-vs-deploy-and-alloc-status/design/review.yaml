@@ -124,3 +124,109 @@ next_steps: |
   - Optional pre-DELIVER cleanup: fold the two nits above into a single
     architect-dispatched edit pass; also adds ADR-0032 / ADR-0033 to brief.md
     ADR index per the always-dispatch-architect convention.
+
+---
+# Iteration 2 — Amendment review (cause-class TransitionReason refactor)
+review_id: arch_rev_20260430_cli_submit_amendment
+reviewer: nw-solution-architect-reviewer
+reviewer_persona: Echo
+iteration: 2
+review_date: "2026-04-30"
+amendment_trigger: |
+  Post-APPROVED-iteration-1, user surfaced that cause-specific data was
+  living in opaque `detail: Option<String>` rather than in the type system.
+  Re-opened DESIGN to refactor TransitionReason from state-class to
+  cause-class. Original Alternative D rejection rationale was structurally
+  incorrect (CLI exit-code dispatch never branches on cause; cause is a
+  rendering concern only).
+
+approval_status: approved
+critical_issues_count: 0
+high_issues_count: 0
+medium_issues_count: 0
+low_issues_count: 1
+
+gating_checks:
+  alternative_d_inversion_rationale: PASS
+  variant_set_completeness: PASS
+  terminal_reason_structured_payloads: PASS
+  create_new_reuse_analysis: PASS
+  d1_d3_d5_d7_coherence_preserved: PASS
+  openapi_implementability: PASS
+  dst_tier1_testability: PASS
+  cross_reference_adr_0033_section_2: PASS
+  prior_iteration_1_medium_nit_lagged_fallback: RESOLVED
+
+issues:
+  low:
+    - id: cap_justification_rationale_still_misframed
+      location: ADR-0032 §6 (carried from iteration 1; amendment did not address)
+      issue: |
+        Prose still cites "ProcessDriver cold-start budget" but Phase 1 uses
+        ExecDriver (tokio::process, sub-second start). The 60 s VALUE is
+        correct; only the rationale text is misframed.
+      recommendation: |
+        Cosmetic fix for crafter: revise to "ExecDriver Phase 1 cold-starts
+        are sub-second; 60 s preserves headroom for reconciler restart
+        attempts (5 attempts at 5 s backoff = 25 s) plus operator-patience
+        headroom before 'is this hung?' sets in."
+      blocking: false
+
+traceability_notes:
+  - id: action_shim_classifier_path_extraction
+    concern: |
+      ADR-0032 §4 classification table assumes ExecDriver formats error text
+      as `"spawn <path>: <errno>"`. Path parsing is crude text-prefix matching.
+      If ExecDriver's format ever drifts, the path extraction will fail
+      silently.
+    recommendation: |
+      Crafter (slice 02-01): add a unit test verifying the classifier parse
+      against ExecDriver's actual format for each ENOENT/EACCES/ENOEXEC case.
+      Not blocking the amendment.
+    severity: low
+  - id: rkyv_recursion_workaround
+    concern: |
+      Amendment replaces potential `Box<TransitionReason>` recursion with
+      `last_cause_summary: String`. rkyv v0.15+ may support `Box<T>`
+      recursion for sized types — worth re-verifying as a Phase 2
+      simplification opportunity.
+    recommendation: |
+      Document as post-Phase-1 TODO: if rkyv recursion works, replace String
+      summary with `Box<TransitionReason>` to restore type-level
+      single-source-of-truth for the inner cause. Current String workaround
+      is sound and correct.
+    severity: low
+
+delta_from_iteration_1:
+  prior_medium_nit_resolved: |
+    Iteration 1 flagged a cross-reference gap: ADR-0032 §7 lagged-fallback
+    depends on ADR-0033 §2 prior-state hydrator. Amendment adds the
+    cross-reference explicitly. RESOLVED.
+
+coherence_with_discuss:
+  d1_ndjson_over_sse: PRESERVED
+  d3_exit_codes_0_1_2: PRESERVED (amendment clarifies — exit code never branches on cause; cause is rendering-only)
+  d5_60s_cap: PRESERVED (TerminalReason::Timeout carries after_seconds on the wire)
+  d7_single_source_of_truth: PRESERVED (same TransitionReason enum across streaming + snapshot; same serde shape)
+  c6_reason_field_on_row: PRESERVED
+
+reuse_analysis_updated:
+  prior_count: "14 EXTEND / 8 REUSE / 1 REPLACE / 8 CREATE NEW"
+  amendment_count: "14 EXTEND / 8 REUSE / 1 REPLACE / 11 CREATE NEW"
+  additions_justified:
+    - { type: StoppedBy, justification: "closes set of stop initiators; prevents string drift in `Stopped { by }`" }
+    - { type: CancelledBy, justification: "same shape as StoppedBy; Phase 2 cluster-driven cancellation reuses the wire shape" }
+    - { type: ResourceEnvelope, justification: "self-contained wire shape for `NoCapacity { requested, free }`; avoids coupling TransitionReason to the driver trait surface" }
+  gate: PASS (all three justified per hard-gate: EXTEND impossible)
+
+next_steps: |
+  - DISTILL (nw-acceptance-designer-reviewer): scenarios S-CP-05/06/07/09 +
+    S-AS-02/05/07 + S-WS-02 retargets per upstream-changes.md; property-test
+    cardinality grows from 8 unit variants to 14 Phase 1 variants with
+    proptest payload generation (budget unchanged).
+  - Roadmap (nw-solution-architect-reviewer, separate review): Slice 02-01
+    lands the action-shim classifier. 9-step structure unchanged.
+  - Optional cleanup: fold the cap-justification prose nit into a single
+    architect edit pass.
+
+reviewer_confidence: high
