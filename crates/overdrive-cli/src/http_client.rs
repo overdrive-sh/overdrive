@@ -135,13 +135,30 @@ impl ApiClient {
         &self.base
     }
 
-    /// `POST /v1/jobs` — submit a job spec to the control plane.
+    /// `POST /v1/jobs` with `Accept: application/json` — submit a job
+    /// spec to the control plane via the one-shot JSON-ack lane.
+    ///
+    /// Slice 03 step 03-01 wires this to the `--detach` flag. Setting
+    /// the explicit `Accept: application/json` header pins the JSON
+    /// shape on the wire even when the server's content negotiation
+    /// is updated in a future phase — the criteria require the
+    /// detach lane to be *explicitly* JSON, not implicitly so via
+    /// missing-header default routing.
     ///
     /// # Errors
     ///
     /// See [`CliError`] variants.
     pub async fn submit_job(&self, req: SubmitJobRequest) -> Result<SubmitJobResponse, CliError> {
-        self.post_typed("v1/jobs", &req).await
+        let url = self.build_url("v1/jobs")?;
+        let resp = self
+            .inner
+            .post(url)
+            .header(reqwest::header::ACCEPT, "application/json")
+            .json(&req)
+            .send()
+            .await
+            .map_err(|e| self.transport_err(&e))?;
+        self.decode_typed(resp).await
     }
 
     /// `POST /v1/jobs` with `Accept: application/x-ndjson` — drives the

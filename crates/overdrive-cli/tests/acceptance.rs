@@ -32,4 +32,7 @@ mod acceptance {
     // S-CLI-05 (exit-code 2 across HTTP error variants).
     mod streaming_submit_cli_render;
     mod streaming_submit_http_error_exit_2;
+
+    // Slice 03 step 03-01 — S-CLI-01 `--detach` flag argv surface.
+    mod submit_detach_flag;
 }

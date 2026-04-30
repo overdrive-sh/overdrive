@@ -204,6 +204,76 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-04-30T16:15:26Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-30T16:25:25Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-30T16:29:58Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-30T16:32:28Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: acceptance tests cover the pure functions directly; format_failed_block and cli_error_to_exit_code are exercised via 12 acceptance test cases. No additional unit-test decomposition needed.",
+      "t": "2026-04-30T16:36:30Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-30T16:50:16Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-30T16:54:14Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-30T16:59:07Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-30T17:00:02Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: S-CLI-01 covers the unit-level behavior \u2014 flag flips Accept header, exit code mapping unchanged from existing JSON path",
+      "t": "2026-04-30T17:00:05Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-30T17:07:59Z"
     }
   ]
 }

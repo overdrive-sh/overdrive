@@ -40,6 +40,14 @@ fn main() -> Result<()> {
     runtime.block_on(run(cli))
 }
 
+// The `run` function is a clap-style dispatch table: one match arm per
+// subcommand, each arm dispatching to a library handler and rendering
+// its typed output. The arms are intentionally inlined rather than
+// extracted into per-command helpers — splitting them would obscure the
+// 1-1 correspondence between argv shape and handler call. Slice 03 step
+// 03-01 added the `--detach` branch to `Job::Submit`, taking the body
+// past the 100-line clippy default.
+#[allow(clippy::too_many_lines)]
 async fn run(cli: Cli) -> Result<()> {
     use overdrive_cli::cli::{AllocCommand, ClusterCommand, Command, JobCommand, NodeCommand};
 
@@ -51,36 +59,61 @@ async fn run(cli: Cli) -> Result<()> {
             print!("{}", overdrive_cli::render::cluster_status(&out));
             Ok(())
         }
-        Command::Job(JobCommand::Submit { spec }) => {
-            // Slice 02 step 02-04: the CLI defaults to the streaming
-            // NDJSON lane. Slice 03 will reintroduce a `--detach` /
-            // `IsTerminal`-based JSON branch for pipe / non-TTY use; in
-            // the meantime every submit consumes the stream to terminal
-            // and exits 0 / 1 / 2 per the criteria.
+        Command::Job(JobCommand::Submit { spec, detach }) => {
+            // Slice 03 step 03-01: `--detach` is the explicit operator
+            // escape valve to the JSON-ack lane. When set, the CLI
+            // sends `Accept: application/json` and consumes the
+            // single-shot JSON ack — the pre-feature shape that has
+            // shipped since slice 01. When unset, the streaming-NDJSON
+            // default from slice 02 step 02-04 takes over. The
+            // companion `IsTerminal` auto-detect is step 03-02; this
+            // step lands the explicit flag only.
             let config_path = default_config_path();
             let args = overdrive_cli::commands::job::SubmitArgs { spec, config_path };
-            match overdrive_cli::commands::job::submit_streaming(args).await {
-                Ok(out) => {
-                    // The streaming summary already includes the
-                    // operator-facing block — print it verbatim.
-                    print!("{}", out.summary);
-                    if out.exit_code == 0 {
+            if detach {
+                // Detached lane — JSON ack only, no NDJSON consumer
+                // engaged regardless of stdout being a TTY.
+                match overdrive_cli::commands::job::submit(args).await {
+                    Ok(out) => {
+                        print!("{}", overdrive_cli::render::job_submit_accepted(&out));
+                        // Exit code 0 on `Inserted`/`Unchanged` per the
+                        // criteria. The renderer prints the typed
+                        // outcome verbatim so operators see which
+                        // branch fired.
                         Ok(())
-                    } else {
-                        // Convergence failed — exit with the typed code
-                        // (1 for `ConvergedFailed`). Emit a discrete
-                        // exit so the `eyre::Report` path does not
-                        // collapse 1 and 2 into the same shell signal.
-                        std::process::exit(out.exit_code);
+                    }
+                    Err(err) => {
+                        eprint!("{}", overdrive_cli::render::cli_error(&err));
+                        let code = overdrive_cli::render::cli_error_to_exit_code(&err);
+                        std::process::exit(code);
                     }
                 }
-                Err(err) => {
-                    // Render through the CLI-side error formatter so
-                    // operators see actionable next steps on
-                    // `CliError::Transport`, not the raw Display form.
-                    eprint!("{}", overdrive_cli::render::cli_error(&err));
-                    let code = overdrive_cli::render::cli_error_to_exit_code(&err);
-                    std::process::exit(code);
+            } else {
+                // Streaming-default lane — slice 02 step 02-04 shape.
+                match overdrive_cli::commands::job::submit_streaming(args).await {
+                    Ok(out) => {
+                        // The streaming summary already includes the
+                        // operator-facing block — print it verbatim.
+                        print!("{}", out.summary);
+                        if out.exit_code == 0 {
+                            Ok(())
+                        } else {
+                            // Convergence failed — exit with the typed
+                            // code (1 for `ConvergedFailed`). Emit a
+                            // discrete exit so the `eyre::Report` path
+                            // does not collapse 1 and 2 into the same
+                            // shell signal.
+                            std::process::exit(out.exit_code);
+                        }
+                    }
+                    Err(err) => {
+                        // Render through the CLI-side error formatter
+                        // so operators see actionable next steps on
+                        // `CliError::Transport`, not the raw Display form.
+                        eprint!("{}", overdrive_cli::render::cli_error(&err));
+                        let code = overdrive_cli::render::cli_error_to_exit_code(&err);
+                        std::process::exit(code);
+                    }
                 }
             }
         }
