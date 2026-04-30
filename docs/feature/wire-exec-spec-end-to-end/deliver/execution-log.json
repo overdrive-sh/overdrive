@@ -113,6 +113,34 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-04-30T06:02:55Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-30T06:07:05Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-30T06:07:38Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: acceptance test covers dispatcher boundary; no further unit decomposition needed",
+      "t": "2026-04-30T06:07:50Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-30T06:09:00Z"
     }
   ]
 }

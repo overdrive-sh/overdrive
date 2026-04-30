@@ -126,11 +126,8 @@ async fn dispatch_single(
         // the prior alloc. Per ADR-0031 §5 the action carries a
         // fully-populated `AllocationSpec` constructed in the
         // reconciler from the live `Job`; the shim reads it straight
-        // off the action. `find_prior_alloc_row` survives — it is
-        // still needed to recover `(job_id, node_id)` for the
-        // `AllocStatusRow` write — but the spec-rebuild path
-        // (`build_phase1_restart_spec`, `build_identity`,
-        // `default_restart_resources`) is deleted.
+        // off the action. `find_prior_alloc_row` is still needed to
+        // recover `(job_id, node_id)` for the `AllocStatusRow` write.
         Action::RestartAllocation { alloc_id, spec } => {
             // Stop half — Phase 1 uses an empty AllocationHandle (no
             // pid tracking yet); the driver's `stop` is best-effort
@@ -210,13 +207,6 @@ async fn find_prior_alloc_row(
     Ok(obs.alloc_status_rows().await?.into_iter().find(|r| &r.alloc_id == alloc_id))
 }
 
-// Per ADR-0031 §6 the helpers `build_phase1_restart_spec`,
-// `build_identity`, and `default_restart_resources` are DELETED.
-// The `Action::RestartAllocation` variant now carries a fully-populated
-// `AllocationSpec` constructed in the reconciler from the live `Job`;
-// the shim reads it straight off the action. The deletion is pinned
-// by `crates/overdrive-control-plane/tests/compile_fail/build_phase1_restart_spec_deleted.rs`.
-
 /// Errors from [`dispatch`] that cannot be resolved into an
 /// observation row. Per ADR-0023 §3.
 #[derive(Debug, thiserror::Error)]
@@ -237,8 +227,3 @@ pub enum ShimError {
         alloc_id: overdrive_core::id::AllocationId,
     },
 }
-
-// Per ADR-0031 §6 / `feedback_delete_dont_gate`: the
-// `default_restart_resources_pins_exact_values` test is DELETED in
-// the same PR as `default_restart_resources` itself. A test cannot
-// defend a function that no longer exists.
