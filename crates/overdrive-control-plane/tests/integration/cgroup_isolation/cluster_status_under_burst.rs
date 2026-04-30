@@ -101,6 +101,10 @@ async fn cluster_status_responsive_under_workload_cpu_burst() {
         node_id: local_node.clone(),
         state: AllocState::Running,
         updated_at: LogicalTimestamp { counter: 1, writer: local_node.clone() },
+        // Synthetic Running row written directly into the observation
+        // store — no cause-class transition fired through the shim.
+        reason: None,
+        detail: None,
     };
     obs.write(ObservationRow::AllocStatus(row)).await.expect("write alloc row");
 

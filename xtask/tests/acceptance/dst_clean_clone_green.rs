@@ -74,6 +74,13 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     "duplicate-evaluations-collapse",
     "broker-drain-order-is-deterministic",
     "reconciler-is-pure",
+    // `dispatch-routing-is-name-restricted` was added by
+    // `fix-eval-reconciler-discarded` (commit `e6f5e5e`) — the
+    // out-of-scope follow-up at the bottom of that RCA promised this
+    // invariant and the catalogue grew accordingly. The xtask test
+    // tracks `Invariant::ALL` exactly; missing entries surface as
+    // `catalogue length` mismatches.
+    "dispatch-routing-is-name-restricted",
     "intent-store-returns-caller-bytes",
     "job-scheduled-after-submission",
     "desired-replica-count-converges",

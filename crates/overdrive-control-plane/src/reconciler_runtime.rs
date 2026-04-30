@@ -266,10 +266,6 @@ pub async fn run_convergence_tick(
     // Pure reconcile.
     let (actions, next_view) = reconciler.reconcile(&desired, &actual, &view, &tick);
 
-    // Persist the next-view back into the cache. Phase 2+ wires
-    // this through libSQL diff-and-persist per ADR-0013 §2b.
-    store_cached_view(reconciler, target, state, next_view);
-
     // Capture `has_work` BEFORE dispatch — `action_shim::dispatch`
     // consumes `actions: Vec<Action>` by value, so checking
     // `actions.is_empty()` after the call would not compile. The
@@ -285,7 +281,24 @@ pub async fn run_convergence_tick(
     // semantically empty, so it must NOT trip a self-re-enqueue
     // (otherwise a converged target with a heartbeat reconciler
     // self-re-enqueues forever).
-    let has_work = actions.iter().any(|a| !matches!(a, Action::Noop));
+    //
+    // Backoff-pending fix (§18 level-triggered, S-WS-02 path):
+    // when `reconcile` returns no actions because a Failed alloc
+    // is mid-backoff (`tick.now < view.next_attempt_at[alloc]` and
+    // `restart_counts[alloc] < RESTART_BACKOFF_CEILING`), the cluster
+    // has NOT converged — actual still has a Failed alloc that the
+    // reconciler intends to restart once the deadline elapses. Without
+    // re-enqueueing, the broker drains empty, the convergence loop
+    // sleeps forever, and the deadline never gets re-evaluated. The
+    // `view_has_backoff_pending` predicate inspects `next_view` to
+    // detect this transitional state and treats it as has_work=true,
+    // preserving the level-triggered semantics whitepaper §18 promises.
+    let backoff_pending = view_has_backoff_pending(&next_view);
+    let has_work = actions.iter().any(|a| !matches!(a, Action::Noop)) || backoff_pending;
+
+    // Persist the next-view back into the cache. Phase 2+ wires
+    // this through libSQL diff-and-persist per ADR-0013 §2b.
+    store_cached_view(reconciler, target, state, next_view);
 
     // Dispatch through the action shim — this is where `.await`
     // is permitted. Per-action error isolation lives in the shim.
@@ -369,6 +382,39 @@ fn store_cached_view(
         AnyReconcilerView::JobLifecycle(v) => crate::CachedView::JobLifecycle(v),
     };
     cache.insert(key, cached);
+}
+
+/// Pure predicate over `next_view`: does the `JobLifecycle` reconciler
+/// have transitional state still to converge?
+///
+/// "Transitional" = the view records a `next_attempt_at` deadline for
+/// at least one alloc whose `restart_counts` is below
+/// `RESTART_BACKOFF_CEILING`. A non-empty `next_attempt_at` AFTER the
+/// reconciler has already declined to emit further actions on this
+/// tick means the reconciler is mid-backoff — the next tick (after
+/// the per-alloc deadline elapses) WILL emit a Restart action, so the
+/// runtime MUST re-enqueue or the broker drains empty and the
+/// convergence loop sleeps without ever re-evaluating the deadline.
+///
+/// Returns `false` for `Unit` views and for `JobLifecycle` views whose
+/// allocs have all reached the backoff ceiling (terminal-failed) or
+/// whose `next_attempt_at` is empty (no pending restart). The latter
+/// covers the converged-Running case (no Failed alloc → no deadline
+/// recorded) and the never-failed case alike.
+///
+/// This is the §18 *Level-triggered inside the reconciler* counterpart
+/// to the action-emitted gate above: actions emitted is one signal of
+/// "actual ≠ desired"; an outstanding backoff deadline is the other.
+/// Without this predicate, `reconcile` returning empty actions during
+/// backoff would silently drop the eval and leave the runtime stuck.
+fn view_has_backoff_pending(next_view: &AnyReconcilerView) -> bool {
+    match next_view {
+        AnyReconcilerView::Unit => false,
+        AnyReconcilerView::JobLifecycle(view) => view.next_attempt_at.iter().any(|(alloc, _)| {
+            view.restart_counts.get(alloc).copied().unwrap_or(0)
+                < overdrive_core::reconciler::RESTART_BACKOFF_CEILING
+        }),
+    }
 }
 
 /// Hydrate the `desired` cluster-state projection for `reconciler`

@@ -34,4 +34,12 @@ mod integration {
     // via `cargo xtask lima run --` per `crates/overdrive-cli/CLAUDE.md`.
     mod streaming_submit_broken_binary;
     mod streaming_submit_happy_path;
+
+    // Slice 03 step 03-02 — S-CLI-03 Tier 3 jq-pipeline-equivalent:
+    // a pipe-redirected stdout (non-TTY) without --detach MUST
+    // auto-select the JSON-ack lane and emit a single parseable JSON
+    // object whose `spec_digest` is 64 lowercase-hex chars. CLAUDE.md
+    // forbids `Command::spawn`, so this is the in-process equivalent
+    // of the shell pipeline; see file rustdoc for the full mapping.
+    mod submit_jq_pipeline;
 }

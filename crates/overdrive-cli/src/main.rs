@@ -60,35 +60,33 @@ async fn run(cli: Cli) -> Result<()> {
             Ok(())
         }
         Command::Job(JobCommand::Submit { spec, detach }) => {
-            // Slice 03 step 03-01: `--detach` is the explicit operator
-            // escape valve to the JSON-ack lane. When set, the CLI
-            // sends `Accept: application/json` and consumes the
-            // single-shot JSON ack — the pre-feature shape that has
-            // shipped since slice 01. When unset, the streaming-NDJSON
-            // default from slice 02 step 02-04 takes over. The
-            // companion `IsTerminal` auto-detect is step 03-02; this
-            // step lands the explicit flag only.
+            // Slice 03 step 03-02 — IsTerminal auto-detach lane
+            // selection per architecture.md §6 + DESIGN [D5]:
+            //
+            //   stream = !detach && stdout_is_terminal
+            //
+            // | --detach | TTY?  | Accept                 | Lane     |
+            // |----------|-------|------------------------|----------|
+            // | set      | any   | application/json      | Detached |
+            // | unset    | true  | application/x-ndjson  | Streaming|
+            // | unset    | false | application/json      | Detached |
+            //
+            // Reference class: `docker run`, `nomad job run`, every
+            // Unix-tradition CLI tool. The `RealStdoutTerminal` probe
+            // is the production source of the IsTerminal bit — it
+            // defers to `std::io::IsTerminal::is_terminal(&stdout())`.
+            // The `should_stream` pure function is the SSOT for the
+            // dispatch decision; the Tier-1 acceptance test at
+            // `tests/acceptance/submit_pipe_autodetect.rs` exercises
+            // it directly with fake probes.
             let config_path = default_config_path();
             let args = overdrive_cli::commands::job::SubmitArgs { spec, config_path };
-            if detach {
-                // Detached lane — JSON ack only, no NDJSON consumer
-                // engaged regardless of stdout being a TTY.
-                match overdrive_cli::commands::job::submit(args).await {
-                    Ok(out) => {
-                        print!("{}", overdrive_cli::render::job_submit_accepted(&out));
-                        // Exit code 0 on `Inserted`/`Unchanged` per the
-                        // criteria. The renderer prints the typed
-                        // outcome verbatim so operators see which
-                        // branch fired.
-                        Ok(())
-                    }
-                    Err(err) => {
-                        eprint!("{}", overdrive_cli::render::cli_error(&err));
-                        let code = overdrive_cli::render::cli_error_to_exit_code(&err);
-                        std::process::exit(code);
-                    }
-                }
-            } else {
+            let probe = overdrive_cli::commands::job::RealStdoutTerminal;
+            let stream = overdrive_cli::commands::job::should_stream(
+                detach,
+                overdrive_cli::commands::job::StdoutTerminalProbe::is_terminal(&probe),
+            );
+            if stream {
                 // Streaming-default lane — slice 02 step 02-04 shape.
                 match overdrive_cli::commands::job::submit_streaming(args).await {
                     Ok(out) => {
@@ -110,6 +108,25 @@ async fn run(cli: Cli) -> Result<()> {
                         // Render through the CLI-side error formatter
                         // so operators see actionable next steps on
                         // `CliError::Transport`, not the raw Display form.
+                        eprint!("{}", overdrive_cli::render::cli_error(&err));
+                        let code = overdrive_cli::render::cli_error_to_exit_code(&err);
+                        std::process::exit(code);
+                    }
+                }
+            } else {
+                // Detached / non-TTY lane — JSON ack only, no NDJSON
+                // consumer engaged. Fires when `--detach` is set OR
+                // stdout is redirected (pipe / file / non-TTY).
+                match overdrive_cli::commands::job::submit(args).await {
+                    Ok(out) => {
+                        print!("{}", overdrive_cli::render::job_submit_accepted(&out));
+                        // Exit code 0 on `Inserted`/`Unchanged` per the
+                        // criteria. The renderer prints the typed
+                        // outcome verbatim so operators see which
+                        // branch fired.
+                        Ok(())
+                    }
+                    Err(err) => {
                         eprint!("{}", overdrive_cli::render::cli_error(&err));
                         let code = overdrive_cli::render::cli_error_to_exit_code(&err);
                         std::process::exit(code);

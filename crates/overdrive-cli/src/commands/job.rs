@@ -35,6 +35,84 @@ use url::Url;
 
 use crate::http_client::{ApiClient, CliError};
 
+// ---------------------------------------------------------------------------
+// IsTerminal auto-detach — Slice 03 step 03-02.
+// ---------------------------------------------------------------------------
+//
+// architecture.md §6 + DESIGN [D5]: the CLI's lane decision is
+//
+//   stream = !args.detach && std::io::IsTerminal::is_terminal(&std::io::stdout())
+//
+// `stream == true` engages the NDJSON streaming consumer
+// (`Accept: application/x-ndjson`); `stream == false` engages the
+// JSON-ack lane (`Accept: application/json`). Reference class:
+// `docker run`, `nomad job run`, every Unix-tradition CLI tool.
+//
+// The `IsTerminal` probe is hidden behind a small trait seam so the
+// dispatch decision is testable in-process — `crates/overdrive-cli/CLAUDE.md`
+// forbids `Command::spawn` in tests, and reading the real `stdout`
+// inside a test process is non-deterministic (cargo nextest captures
+// output by default, returning `false` from `IsTerminal::is_terminal`).
+// Production wires `RealStdoutTerminal` (which calls the std lib);
+// tests wire fakes returning a fixed boolean.
+
+/// Probe for whether the binary's stdout is currently attached to a TTY.
+///
+/// Production wires [`RealStdoutTerminal`]; Tier 1 acceptance tests
+/// wire fakes with deterministic return values to drive the truth
+/// table at `tests/acceptance/submit_pipe_autodetect.rs`.
+///
+/// The trait is `Send + Sync` so an instance can be shared across
+/// `tokio` task boundaries inside `main.rs`'s clap dispatch — even
+/// though Phase 1's `run` is single-threaded once the runtime is up,
+/// keeping the bound makes future call-site refactors painless.
+pub trait StdoutTerminalProbe: Send + Sync {
+    /// Returns `true` iff the binary's stdout is attached to a TTY.
+    /// Implementations MUST be deterministic for the duration of a
+    /// single CLI invocation — flipping mid-run would yield a different
+    /// dispatch decision than the auto-detach truth table promises.
+    fn is_terminal(&self) -> bool;
+}
+
+/// Production [`StdoutTerminalProbe`] — defers to
+/// [`std::io::IsTerminal::is_terminal`] on `std::io::stdout()`.
+///
+/// Wired into `main.rs`'s clap dispatch as the only production source
+/// of the `IsTerminal` bit. Construction is zero-allocation; the type is
+/// a unit struct.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct RealStdoutTerminal;
+
+impl StdoutTerminalProbe for RealStdoutTerminal {
+    fn is_terminal(&self) -> bool {
+        std::io::IsTerminal::is_terminal(&std::io::stdout())
+    }
+}
+
+/// Compute the auto-detach lane decision from the `--detach` flag and
+/// the `IsTerminal` probe result.
+///
+/// Truth table (architecture.md §6, DESIGN [D5]):
+///
+/// | `detach` | `is_terminal` | result | lane                     |
+/// |----------|---------------|--------|--------------------------|
+/// | `true`   | any           | `false`| JSON-ack (Detached)      |
+/// | `false`  | `true`        | `true` | NDJSON streaming         |
+/// | `false`  | `false`       | `false`| JSON-ack (Detached)      |
+///
+/// Returns `true` iff the streaming-NDJSON consumer should be engaged.
+///
+/// This is the SSOT for the dispatch decision — `main.rs` calls
+/// `should_stream(detach, probe.is_terminal())` and branches between
+/// `submit_streaming` (true) and `submit` (false). Acceptance tests
+/// at `tests/acceptance/submit_pipe_autodetect.rs` exercise this
+/// pure function directly; the wire-level Accept-header pinning is
+/// covered by the existing JSON-ack and streaming integration suites.
+#[must_use]
+pub const fn should_stream(detach: bool, is_terminal: bool) -> bool {
+    !detach && is_terminal
+}
+
 /// Arguments to [`submit`].
 ///
 /// `spec` is the path to a TOML file containing a `JobSpecInput`-shaped

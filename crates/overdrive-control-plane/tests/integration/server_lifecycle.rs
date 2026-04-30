@@ -234,15 +234,24 @@ async fn all_adr_0008_paths_return_200_on_stub_router() {
     //     serde shape is pinned by `acceptance::api_type_shapes`.
     // Per-endpoint happy-path coverage lives in the dedicated scenario
     // modules; this test only pins that the routes remain mounted.
-    let observation_gets = ["/v1/allocs", "/v1/nodes"];
-    for path in observation_gets {
+    // Per slice 01 step 01-03 (`AllocStatusResponse` envelope reshape),
+    // `/v1/allocs` now returns the extended shape with replica-count
+    // fields alongside `rows`; `/v1/nodes` (`NodeList`) was NOT
+    // reshaped and keeps the bare `{"rows":[]}` shape. Encoding the
+    // expected body per-path keeps this routing-check honest as
+    // observation envelopes evolve independently per resource.
+    let observation_gets = [
+        ("/v1/allocs", r#"{"replicas_desired":0,"replicas_running":0,"rows":[]}"#),
+        ("/v1/nodes", r#"{"rows":[]}"#),
+    ];
+    for (path, expected_body) in observation_gets {
         let url = format!("https://localhost:{}{path}", bound.port());
         let resp = client.get(&url).send().await.expect(&format!("GET {path}"));
         assert_eq!(resp.status(), reqwest::StatusCode::OK, "GET {path} expected 200");
         let body = resp.text().await.expect("body");
         assert_eq!(
-            body, r#"{"rows":[]}"#,
-            "fresh-store observation read must surface explicit empty rows array"
+            body, expected_body,
+            "fresh-store observation read at {path} must surface its canonical empty envelope"
         );
     }
 

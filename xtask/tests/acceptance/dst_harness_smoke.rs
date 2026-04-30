@@ -75,6 +75,11 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     "duplicate-evaluations-collapse",
     "broker-drain-order-is-deterministic",
     "reconciler-is-pure",
+    // `dispatch-routing-is-name-restricted` was added by
+    // `fix-eval-reconciler-discarded` (commit `e6f5e5e`); both blessed
+    // catalogues (here and in `dst_clean_clone_green.rs`) track
+    // `Invariant::ALL` exactly.
+    "dispatch-routing-is-name-restricted",
     "intent-store-returns-caller-bytes",
     "job-scheduled-after-submission",
     "desired-replica-count-converges",

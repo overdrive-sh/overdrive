@@ -35,4 +35,10 @@ mod acceptance {
 
     // Slice 03 step 03-01 — S-CLI-01 `--detach` flag argv surface.
     mod submit_detach_flag;
+
+    // Slice 03 step 03-02 — S-CLI-02 + S-CLI-06 IsTerminal auto-detach
+    // truth table (the dispatch decision: JSON-ack lane vs NDJSON
+    // streaming lane). The wire-level Accept-header pinning is covered
+    // by the existing JSON-ack and streaming integration suites.
+    mod submit_pipe_autodetect;
 }

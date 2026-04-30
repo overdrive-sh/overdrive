@@ -137,6 +137,11 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
             counter: crashed_counter,
             writer: prior.node_id.clone(),
         },
+        // Synthetic crash row — no cause-class transition was emitted
+        // (the test directly writes the Terminated row to simulate a
+        // crash recovery scenario), so `reason` / `detail` are empty.
+        reason: None,
+        detail: None,
     };
     state
         .obs
