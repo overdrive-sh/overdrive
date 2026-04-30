@@ -38,12 +38,15 @@
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
 use overdrive_cli::commands::job::SubmitArgs;
 use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
 use overdrive_control_plane::api::IdempotencyOutcome;
-use overdrive_core::aggregate::{Job, JobSpecInput};
-use overdrive_core::id::ContentHash;
+use overdrive_core::aggregate::{IntentKey, Job, JobSpecInput, WorkloadDriver};
+use overdrive_core::id::{ContentHash, JobId};
+use overdrive_core::traits::intent_store::IntentStore;
+use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
 
 async fn spawn_server() -> (ServeHandle, TempDir) {
@@ -56,6 +59,16 @@ async fn spawn_server() -> (ServeHandle, TempDir) {
     let args = ServeArgs { bind, data_dir, config_dir, allow_no_cgroups: true };
     let handle = overdrive_cli::commands::serve::run(args).await.expect("serve::run");
     (handle, tmp)
+}
+
+/// Path of the on-disk `LocalIntentStore` redb file the in-process
+/// server writes through. Mirrors the literal in
+/// `crates/overdrive-control-plane/src/lib.rs` (`<data_dir>/intent.redb`).
+/// Used by the WS back-door read AFTER `ServeHandle::shutdown` releases
+/// the redb file lock — the DISTILL-review BLOCK fix per
+/// `docs/feature/wire-exec-spec-end-to-end/distill/test-scenarios.md` §1.
+fn intent_redb_path(tmp: &Path) -> PathBuf {
+    tmp.join("data").join("intent.redb")
 }
 
 fn config_path(tmp: &Path) -> PathBuf {
@@ -133,10 +146,72 @@ async fn walking_skeleton_submit_with_exec_block_returns_inserted_and_persists_c
          archive consistently across client and server lanes",
     );
 
-    // Phase 4 — clean shutdown. The trust-triple persists; the
-    // handler's job is done. The convergence-loop / driver assertions
-    // are deliberately deferred to integration tests under
-    // --features integration-tests (see walking-skeleton.md § What the
-    // WS does NOT assert).
+    // Phase 4 — clean shutdown. Drop the server's redb handle BEFORE
+    // we open a second one for the back-door read; redb takes an
+    // exclusive lock on the database file at `Database::create` time,
+    // so a concurrent open from the same process would fail.
     handle.shutdown().await.expect("clean shutdown");
+
+    // Phase 5 — back-door IntentStore read (DISTILL-review BLOCK fix).
+    // The `spec_digest` assertion above pins client/server canonical-
+    // bytes parity, but proves nothing about end-to-end *persistence* —
+    // a regression that dropped the `state.store.put(...)` call in the
+    // submit handler would still let the digest match (the server
+    // computes it from the request bytes, not from a re-read). This
+    // back-door read closes that gap by deserialising the row at
+    // `jobs/payments` from the redb file the handler wrote through, and
+    // asserting the operator's TOML input is carried verbatim through
+    // the `WorkloadDriver::Exec(Exec { command, args })` projection.
+    //
+    // Pattern mirrors
+    // `crates/overdrive-control-plane/tests/acceptance/submit_job_idempotency.rs`
+    // — the canonical reference for IntentStore back-door reads in
+    // this project. Per ADR-0031 Amendment 1 the `Job` carries
+    // `driver: WorkloadDriver`, NOT flat `command` / `args`, so the
+    // destructure goes through `WorkloadDriver::Exec(_)` first.
+    let store = LocalIntentStore::open(intent_redb_path(server_tmp.path()))
+        .expect("re-open intent.redb for back-door read");
+    let job_id = JobId::from_str("payments").expect("JobId::from_str(\"payments\")");
+    let key = IntentKey::for_job(&job_id);
+    let stored = store
+        .get(key.as_bytes())
+        .await
+        .expect("back-door IntentStore::get must succeed");
+    let bytes = stored.expect(
+        "after a successful submit the intent key `jobs/payments` MUST be \
+         populated; an empty key here means the server skipped \
+         `state.store.put(...)` — end-to-end persistence is broken",
+    );
+
+    // rkyv access + deserialise — same lane the server uses on read
+    // (see `handlers::describe_job` for the canonical pattern).
+    let archived = rkyv::access::<rkyv::Archived<Job>, rkyv::rancor::Error>(&bytes)
+        .expect("rkyv access of ArchivedJob from back-door read bytes");
+    let job: Job = rkyv::deserialize::<Job, rkyv::rancor::Error>(archived)
+        .expect("rkyv deserialise of Job from back-door read bytes");
+
+    // Destructure WorkloadDriver::Exec — irrefutable for Phase 1 (single
+    // variant). Future Phase 2+ variants (`MicroVm`, `Wasm`) make this
+    // a `match`, but the new arms project to their own
+    // `assert_eq!(exec.command, ...)` body — the WS structure carries
+    // forward.
+    let WorkloadDriver::Exec(exec) = &job.driver;
+    assert_eq!(
+        exec.command, "/opt/payments/bin/payments-server",
+        "stored Job.driver.exec.command must equal the operator's TOML \
+         input verbatim — a divergence here means the wire shape was \
+         lossy along the persistence lane (TOML → JobSpecInput → \
+         Job::from_spec → rkyv::to_bytes → redb → rkyv::access → Job)",
+    );
+    assert_eq!(
+        exec.args,
+        vec!["--port".to_string(), "8080".to_string()],
+        "stored Job.driver.exec.args must equal the operator's TOML \
+         input verbatim — argv is opaque per ADR-0031 §4 but its \
+         persisted shape must match what the operator declared",
+    );
+
+    // The convergence-loop / driver assertions are deliberately deferred
+    // to integration tests under --features integration-tests (see
+    // walking-skeleton.md § What the WS does NOT assert).
 }
