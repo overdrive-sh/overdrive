@@ -165,15 +165,6 @@ impl Job {
     /// ADR-0031 §4) empty / whitespace-only `exec.command`. Wraps
     /// [`JobId`]'s `FromStr` error through `AggregateError::Id(..)` via
     /// `#[from]`.
-    //
-    // The `todo!()` below is the documented RED scaffold for step 01-02
-    // per `.claude/rules/testing.md` § "RED scaffolds and intentionally-
-    // failing commits". Step 01-02 replaces the panic with the real
-    // `AggregateError::Validation { field: "exec.command", ... }`
-    // return — until then the panic IS the specification of work not
-    // yet done. The matching acceptance scenarios in
-    // `tests/acceptance/exec_validation.rs` are intentionally RED.
-    #[allow(clippy::todo)]
     pub fn from_spec(spec: JobSpecInput) -> Result<Self, AggregateError> {
         let JobSpecInput { id, replicas, resources, driver } = spec;
         let id = JobId::new(&id)?;
@@ -189,26 +180,22 @@ impl Job {
         }
         let resources_struct =
             Resources { cpu_milli: resources.cpu_milli, memory_bytes: resources.memory_bytes };
-        // RED scaffold — project the wire-shape `DriverInput` into the
-        // intent-shape `WorkloadDriver` per ADR-0031 Amendment 1, applying
-        // the ADR-0031 §4 non-empty-after-trim rule on the way. The match
-        // arm that destructures `DriverInput::Exec` is in place; the
-        // validation body that fires `AggregateError::Validation
-        // { field: "exec.command", message: "command must be non-empty" }`
-        // is the RED scaffold the DELIVER crafter replaces with the real
-        // predicate.
+        // Project the wire-shape `DriverInput` into the intent-shape
+        // `WorkloadDriver` per ADR-0031 Amendment 1, applying the
+        // ADR-0031 §4 non-empty-after-trim rule on the way. The trim
+        // predicate covers `""`, `"   "`, `"\t\n\r"`, and mixed Unicode
+        // whitespace via `str::trim` (Unicode whitespace class). NO
+        // NUL-byte rejection (kernel `execve(2)` handles); NO length
+        // cap (kernel `PATH_MAX` handles); NO per-element `args` rule
+        // — argv is opaque to the platform per ADR-0031 §4. Casing is
+        // preserved verbatim — the validator is a predicate, not a
+        // normaliser.
         let DriverInput::Exec(exec_input) = driver;
-        // The trim check is the load-bearing predicate. Until the
-        // crafter lands the real body, the panic IS the specification
-        // of work not yet done — the matching acceptance scenarios in
-        // `tests/acceptance/aggregate_validation.rs` will hit this
-        // arm at RED time.
         if exec_input.command.trim().is_empty() {
-            todo!(
-                "RED scaffold: ADR-0031 §4 — Job::from_spec must reject empty / \
-                 whitespace-only `exec.command` with AggregateError::Validation \
-                 {{ field: \"exec.command\", message: \"command must be non-empty\" }}"
-            );
+            return Err(AggregateError::Validation {
+                field: "exec.command",
+                message: "command must be non-empty".to_string(),
+            });
         }
         let driver =
             WorkloadDriver::Exec(Exec { command: exec_input.command, args: exec_input.args });
