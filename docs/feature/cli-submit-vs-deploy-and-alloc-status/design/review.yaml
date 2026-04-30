@@ -1,0 +1,126 @@
+review_id: arch_rev_20260430_cli_submit_streaming
+reviewer: nw-solution-architect-reviewer
+reviewer_persona: Echo
+artifact: cli-submit-vs-deploy-and-alloc-status DESIGN wave
+iteration: 1
+review_date: "2026-04-30"
+location: docs/feature/cli-submit-vs-deploy-and-alloc-status/design
+
+approval_status: approved
+approval_recommendation: APPROVED
+critical_issues_count: 0
+high_issues_count: 0
+medium_issues_count: 1
+low_issues_count: 1
+
+executive_summary: |
+  Morgan's DESIGN artifacts are coherent, evidence-rich, and structurally sound.
+  All upstream constraints from DISCUSS ([D1]/[D3]/[D4]/[D5]/[D7]) are honoured.
+  Both ADRs carry sufficient depth for the crafter. Reuse analysis is exemplary
+  (31 surfaces surveyed: 14 EXTEND, 8 REUSE, 1 REPLACE, 8 CREATE NEW each with
+  paragraph-level justification). Two non-blocking notes captured below; neither
+  blocks the DESIGN -> DISTILL handoff.
+
+gating_checks:
+  reuse_analysis_hard_gate: PASS
+  d1_d3_d5_d7_coherence: PASS
+  c4_component_diagram: PASS
+  openapi_implementability: PASS
+  conway_law_phase1_fit: PASS
+  dst_tier1_testability: PASS
+
+lower_order_calls_resolved:
+  call_a_event_enum_granularity:
+    decision: A1 (flat enum + structured TransitionReason)
+    verdict: PASS
+    note: |
+      8 of 10 DISCUSS-named cause variants map to TransitionReason; the 2
+      remaining (ConvergenceTimeout, Cancelled) are TerminalReason variants
+      because they are server-side-cap concerns, not per-transition causes.
+      Correct factoring.
+  call_b_snapshot_enrichment:
+    decision: B1 (extend AllocStatusResponse in place)
+    verdict: PASS
+    note: |
+      Every journey-extended field present (state, resources, started_at,
+      exit_code, restart_budget, last_transition). Single-cut greenfield
+      discipline preserved.
+  call_c_cap_value:
+    decision: 60 s, handler-local select! with injected Clock
+    verdict: PASS_WITH_NIT
+    nit: see issues.low.adr_0032_section_6_justification
+  call_d_subscription_mechanism:
+    decision: D1 (broadcast channel from action shim)
+    verdict: PASS
+    note: |
+      Shim is the single writer of AllocStatusRow; broadcast send is a one-line
+      addition at the obs.write site. Preserves reconciler purity. Sub-tick
+      latency satisfies KPI-01 (< 200 ms first-event p95).
+  call_e_tty_autodetect:
+    decision: E2 (CLI-side IsTerminal + explicit --detach)
+    verdict: PASS
+
+issues:
+  medium:
+    - id: lagged_fallback_cross_reference
+      location: ADR-0032 section 7 (Subscription mechanism)
+      issue: |
+        The lagging-subscriber fallback path synthesizes transitions from a
+        prior-state snapshot. This relies on the JobLifecycleView extension
+        defined in ADR-0033 section 2 (the prior-state hydrator that landed
+        last_transition.from). ADR-0032 does not call out this coupling, so
+        the crafter could implement Slice 02 (streaming) before Slice 01
+        (snapshot enrichment) and find the Lagged fallback non-functional.
+      recommendation: |
+        Add a one-line cross-reference in ADR-0032 section 7 after the Lagged
+        pseudocode: "Lagged-recovery depends on the JobLifecycleView extension
+        in ADR-0033 section 2; ADR-0033 (Slice 01) lands first."
+      blocking: false
+      severity_rationale: |
+        Medium because it affects implementation sequencing; the slice graph in
+        story-map.md already orders Slice 01 before Slice 02, so the actual
+        risk is low. Calling it out explicitly removes any ambiguity.
+
+  low:
+    - id: adr_0032_section_6_justification
+      location: ADR-0032 section 6, wave-decisions.md [D3]
+      issue: |
+        The 60 s cap rationale cites "ProcessDriver cold-start budget 5-10 s"
+        but Phase 1 uses ExecDriver (tokio::process on localhost; sub-second
+        cold start). The justification conflates Phase 2+ VM/container launch
+        time with Phase 1 process fork time.
+      recommendation: |
+        Revise to: "60 s aligns with the journey emotional arc (US-02 Example 3).
+        ExecDriver Phase 1 cold-starts are sub-second; 60 s preserves headroom
+        for reconciler restart attempts (5 attempts at 5 s backoff = 25 s) plus
+        operator-patience headroom before 'is this hung?' sets in. Operators
+        whose workloads need longer convergence use --detach or configure
+        [server].streaming_submit_cap."
+      blocking: false
+      severity_rationale: |
+        Low because the value (60 s) is correct and well-bounded; only the
+        prose rationale is misframed. Crafter can still implement against the
+        spec correctly.
+
+priority_validation:
+  q1_largest_bottleneck: YES
+  q2_simple_alternatives_evaluated: ADEQUATE
+  q3_constraint_prioritization: CORRECT
+  q4_data_justified: JUSTIFIED
+
+enforcement_checks_present:
+  - cargo xtask openapi-check (drift detection on api/openapi.yaml)
+  - trybuild compile-fail (LifecycleEvent must NOT derive Serialize)
+  - unit test (every SubmitEvent variant has `kind` discriminator)
+  - integration test Tier 3 (broken-binary; streaming vs snapshot reason byte-equality)
+  - dst-lint (cap timer uses clock.sleep, not tokio::time::sleep)
+
+next_steps: |
+  - DISTILL: receives wave-decisions.md, architecture.md, both ADRs, journey YAML.
+    Tier 1 (DST) covers reconciler purity + new
+    StreamingSubmitTerminalEventBoundedByCap invariant.
+    Tier 3 (real-kernel) covers broken-binary regression (US-02 target).
+  - DEVOPS: receives outcome-kpis.md only; no new telemetry surface required.
+  - Optional pre-DELIVER cleanup: fold the two nits above into a single
+    architect-dispatched edit pass; also adds ADR-0032 / ADR-0033 to brief.md
+    ADR index per the always-dispatch-architect convention.
