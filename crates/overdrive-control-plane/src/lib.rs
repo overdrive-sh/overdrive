@@ -707,7 +707,6 @@ fn spawn_convergence_loop(
                 () = clock.sleep(cadence) => {},
                 () = shutdown.cancelled() => break,
             }
-            tokio::task::yield_now().await;
         }
     })
 }
