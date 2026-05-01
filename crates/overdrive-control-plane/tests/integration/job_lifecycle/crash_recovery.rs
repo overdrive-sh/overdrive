@@ -23,6 +23,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
+use overdrive_control_plane::worker::exit_observer;
 use overdrive_control_plane::{AppState, job_lifecycle, noop_heartbeat};
 use overdrive_core::aggregate::{
     DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
@@ -54,6 +55,19 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
         Arc::new(ExecDriver::new(std::path::PathBuf::from("/sys/fs/cgroup")));
 
     let state = AppState::new(store, obs, Arc::new(runtime), driver);
+
+    // Spawn the exit-observer subsystem. In production this is wired
+    // by `run_server_with_obs_and_driver`; tests construct it directly
+    // so the watcher's `ExitEvent`s are consumed and classified into
+    // `AllocStatusRow`s on the obs store. Without this spawn, the
+    // production `ExecDriver`'s per-alloc watcher task fires (sending
+    // events on its mpsc channel) but nothing reads the receiver, so
+    // no `Failed`/`Terminated` row ever appears in obs.
+    let _exit_observer = exit_observer::spawn(
+        state.obs.clone(),
+        state.driver.clone(),
+        state.lifecycle_events.clone(),
+    );
 
     // Cleanup guard — fires when the test exits (panic or success) and
     // mass-kills every workload cgroup the test created via

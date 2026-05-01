@@ -1144,6 +1144,27 @@ impl Reconciler for JobLifecycle {
                     return (Vec::new(), view.clone());
                 }
 
+                // Per `fix-exec-driver-exit-watcher` Step 01-02 RCA
+                // §Bug 3: an Operator-stopped Terminated alloc is a
+                // terminal intentional stop. The reconciler MUST NOT
+                // schedule a fresh replacement allocation for the
+                // job — operator stop intent is the load-bearing
+                // discriminator and a fresh schedule would undo the
+                // operator's stop. The alloc record remains in obs
+                // as the terminal state until the operator explicitly
+                // re-submits the job intent.
+                //
+                // (Distinct from `desired.desired_to_stop`, which is
+                // a separate signal carried by `IntentKey::for_job_stop`
+                // and handled at the Stop branch above. The
+                // Operator-stopped row arrives via the watcher's
+                // `intentional_stop` flag — set by `Driver::stop`
+                // even when no `for_job_stop` intent exists, e.g.
+                // by direct CLI / API operator action.)
+                if allocs_vec.iter().any(|r| is_operator_stopped(r)) {
+                    return (Vec::new(), view.clone());
+                }
+
                 // Failed alloc with attempt budget remaining and
                 // backoff elapsed → emit RestartAllocation. Per US-03
                 // the reconciler tracks restart attempts in
@@ -1159,12 +1180,23 @@ impl Reconciler for JobLifecycle {
                 // identically — both are "this alloc is not Running
                 // and the reconciler should consider restarting it"
                 // — so the matcher includes both.
-                let failed_alloc = allocs_vec.iter().find(|r| {
-                    matches!(
-                        r.state,
-                        AllocState::Terminated | AllocState::Draining | AllocState::Failed
-                    )
-                });
+                //
+                // Per `fix-exec-driver-exit-watcher` Step 01-02 RCA
+                // §Bug 3: an alloc whose obs row carries
+                // `reason: Some(Stopped { by: Operator })` is a
+                // terminal intentional stop. The reconciler MUST NOT
+                // restart it — operator stop intent is observed via
+                // the watcher's `intentional_stop` flag (mapped to
+                // `StoppedBy::Operator` by the worker `exit_observer`
+                // subsystem) and is the load-bearing discriminator
+                // distinguishing operator-driven termination from
+                // crash. A reconciler that restarts an Operator-
+                // stopped alloc would over-write the observer's
+                // `Terminated` row with a fresh `Running`, masking
+                // the operator's stop in obs and contradicting the
+                // §intentional_stop ordering invariant on
+                // `Driver::take_exit_receiver`.
+                let failed_alloc = allocs_vec.iter().find(|r| is_restartable(r));
                 if let Some(failed) = failed_alloc {
                     // Backoff exhaustion check — emit no further
                     // RestartAllocation past the ceiling. Pure check
@@ -1321,6 +1353,34 @@ fn mint_identity(job_id: &JobId, alloc_id: &AllocationId) -> SpiffeId {
         format!("spiffe://overdrive.local/job/{}/alloc/{}", job_id.as_str(), alloc_id.as_str());
     #[allow(clippy::expect_used)]
     SpiffeId::new(&raw).expect("derived SpiffeId is valid")
+}
+
+/// True iff the alloc row carries a terminal Operator-stop record.
+///
+/// Per `fix-exec-driver-exit-watcher` Step 01-02 RCA §Bug 3: a row
+/// whose `reason` carries `Stopped { by: Operator }` is the terminal
+/// record of an intentional stop. The reconciler MUST NOT restart it
+/// or schedule a fresh allocation for the job — operator stop intent
+/// is the load-bearing discriminator and a fresh schedule would undo
+/// the operator's stop.
+fn is_operator_stopped(row: &AllocStatusRow) -> bool {
+    row.state == AllocState::Terminated
+        && matches!(
+            row.reason,
+            Some(crate::transition_reason::TransitionReason::Stopped {
+                by: crate::transition_reason::StoppedBy::Operator
+            })
+        )
+}
+
+/// True iff the alloc row is a candidate for a `RestartAllocation`
+/// action — i.e. it sits in a restartable terminal state AND was NOT
+/// stopped by the operator. Operator-stopped rows are explicitly
+/// excluded; see `is_operator_stopped`.
+fn is_restartable(row: &AllocStatusRow) -> bool {
+    let restartable_state =
+        matches!(row.state, AllocState::Terminated | AllocState::Draining | AllocState::Failed);
+    restartable_state && !is_operator_stopped(row)
 }
 
 /// `JobLifecycle` reconciler's typed view — the libSQL-hydrated

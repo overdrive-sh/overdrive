@@ -21,6 +21,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use overdrive_control_plane::api::AllocStateWire;
 use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
 use overdrive_control_plane::{AppState, job_lifecycle, noop_heartbeat};
 use overdrive_core::aggregate::{
@@ -28,9 +29,7 @@ use overdrive_core::aggregate::{
 };
 use overdrive_core::id::{AllocationId, NodeId};
 use overdrive_core::reconciler::TargetResource;
-use overdrive_core::traits::driver::{
-    AllocationHandle, Driver, DriverType, ExitEvent, ExitKind,
-};
+use overdrive_core::traits::driver::{AllocationHandle, Driver, DriverType, ExitEvent, ExitKind};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, ObservationStore};
 use overdrive_sim::adapters::driver::SimDriver;
@@ -83,7 +82,7 @@ async fn build_harness(tmp: &TempDir) -> Harness {
     // exact parameter list may evolve, but the test author's view is:
     // "give me the obs sink and the driver's exit-event source, and
     // you'll write classified rows for me."
-    exit_observer::spawn(state.obs.clone(), state.driver.clone());
+    exit_observer::spawn(state.obs.clone(), state.driver.clone(), state.lifecycle_events.clone());
 
     let job = Job::from_spec(JobSpecInput {
         id: "exitobs".to_string(),
@@ -158,6 +157,25 @@ async fn simulated_crash_writes_failed_to_obs_within_budget() {
     let start = Instant::now();
     let prior_running_row = drive_to_first_running(&h, start).await;
 
+    // Subscribe to the lifecycle event bus BEFORE injecting the
+    // exit. The `Failed` row is transient under LWW: once the
+    // observer writes it, the next tick's reconciler emits
+    // `RestartAllocation` and the action shim writes a fresh
+    // `Running` row at a higher counter, dominating the observer's
+    // `Failed` and erasing it from the snapshot. The bus is the
+    // permanent record of the transition — every consumer
+    // (streaming `submit --watch`, metrics, audit) reads it instead
+    // of the snapshot for transient state.
+    //
+    // The harness wires `exit_observer::spawn` against the same bus
+    // the action shim emits on, so subscribers see ordered emissions
+    // from both writers.
+    let mut events = h.state.lifecycle_events.subscribe();
+
+    // Drain any startup events emitted during `drive_to_first_running`
+    // so the test only inspects post-injection emissions.
+    while events.try_recv().is_ok() {}
+
     // Inject a non-zero exit (signal=None means it's a clean wait()
     // result, exit_code=Some(1) ⇒ Crashed classification).
     h.sim_driver.inject_exit_after(
@@ -166,23 +184,54 @@ async fn simulated_crash_writes_failed_to_obs_within_budget() {
         ExitKind::Crashed { exit_code: Some(1), signal: None },
     );
 
-    // Advance simulated time by 2 s (20 ticks at 100 ms cadence) — the
-    // watcher must have read the exit, classified it, and written
-    // `Failed` to obs.
-    drive_ticks(&h, start, 30_u64..50).await;
-
-    let rows = h.state.obs.alloc_status_rows().await.expect("read rows");
-    let post = rows
-        .iter()
-        .find(|r| matches!(r.state, AllocState::Failed { .. }))
-        .expect("watcher must write Failed within 2s budget");
-    assert!(matches!(post.state, AllocState::Failed { .. }));
-    // Strict LWW dominance: the Failed row's counter must strictly
-    // exceed the prior Running row's counter so observers converge.
+    // Drive ticks ONE AT A TIME and drain bus events between each.
+    // The spawned `inject_exit_after` task fires during the tick's
+    // awaits; the observer receives the event and broadcasts a
+    // `LifecycleEvent { to: Failed }` after the obs write. The test
+    // breaks as soon as that event arrives, BEFORE the next tick's
+    // reconciler emits `RestartAllocation`.
+    let job_lifecycle_name = overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
+        .expect("job-lifecycle reconciler name");
+    let deadline = start + Duration::from_secs(120);
+    let mut found_failed_at: Option<String> = None;
+    'outer: for tick_n in 30_u64..50 {
+        run_convergence_tick(
+            &h.state,
+            &job_lifecycle_name,
+            &h.target,
+            start + Duration::from_millis(tick_n.saturating_mul(100)),
+            tick_n,
+            deadline,
+        )
+        .await
+        .expect("tick");
+        // Yield so the spawned `inject_exit_after` task and the
+        // observer task both get a chance to run before we drain
+        // the bus. Under single-threaded tokio the inject task
+        // double-yields (`SimClock::sleep` → `yield_now`, then
+        // `mpsc::send`); the observer needs another scheduling
+        // turn to drain the receiver, write obs, and broadcast.
+        for _ in 0..4 {
+            tokio::task::yield_now().await;
+        }
+        while let Ok(ev) = events.try_recv() {
+            if ev.alloc_id == h.alloc_id && ev.to == AllocStateWire::Failed {
+                found_failed_at = Some(ev.at);
+                break 'outer;
+            }
+        }
+    }
+    let at = found_failed_at.expect("watcher must emit Failed transition within 2s budget");
+    // Strict LWW dominance: the Failed transition's counter must
+    // strictly exceed the prior Running row's counter so observers
+    // converge. The `at` field carries `counter@writer`.
+    let counter: u64 = at
+        .split_once('@')
+        .and_then(|(c, _)| c.parse().ok())
+        .expect("LifecycleEvent.at carries `counter@writer`");
     assert!(
-        post.updated_at.counter > prior_running_row.updated_at.counter,
-        "Failed row counter ({}) must strictly dominate prior Running counter ({})",
-        post.updated_at.counter,
+        counter > prior_running_row.updated_at.counter,
+        "Failed event counter ({counter}) must strictly dominate prior Running counter ({})",
         prior_running_row.updated_at.counter
     );
 }
@@ -206,8 +255,7 @@ async fn simulated_intentional_stop_writes_terminated_to_obs() {
 
     // Inject natural exit immediately AFTER stop — the watcher must
     // honour intentional_stop=true and classify as Terminated.
-    h.sim_driver
-        .inject_exit_after(&h.alloc_id, Duration::ZERO, ExitKind::CleanExit);
+    h.sim_driver.inject_exit_after(&h.alloc_id, Duration::ZERO, ExitKind::CleanExit);
 
     drive_ticks(&h, start, 30_u64..50).await;
 
@@ -220,7 +268,7 @@ async fn simulated_intentional_stop_writes_terminated_to_obs() {
     // No Failed row should ever appear for this alloc — the
     // intentional_stop flag is the entire defense.
     assert!(
-        !rows.iter().any(|r| matches!(r.state, AllocState::Failed { .. })),
+        !rows.iter().any(|r| matches!(r.state, AllocState::Failed)),
         "no Failed row may appear after operator-stop; intentional_stop discriminator failed"
     );
 }
@@ -267,8 +315,7 @@ async fn crashed_alloc_eventually_reaches_non_running() {
         let post = rows.iter().find(|r| r.alloc_id == h.alloc_id);
         if let Some(row) = post
             && row.updated_at.counter > prior_counter
-            && (matches!(row.state, AllocState::Failed { .. })
-                || row.state == AllocState::Running)
+            && (matches!(row.state, AllocState::Failed) || row.state == AllocState::Running)
         {
             left_running = true;
             break;
@@ -311,7 +358,7 @@ async fn intentional_stop_flag_serialises_with_natural_exit_race() {
             "operator-stop wins the race when stop precedes exit"
         );
         assert!(
-            !rows.iter().any(|r| matches!(r.state, AllocState::Failed { .. })),
+            !rows.iter().any(|r| matches!(r.state, AllocState::Failed)),
             "no Failed row should appear when intentional_stop was set first"
         );
     }
@@ -325,24 +372,53 @@ async fn intentional_stop_flag_serialises_with_natural_exit_race() {
         let start = Instant::now();
         let _prior = drive_to_first_running(&h, start).await;
 
+        // Subscribe BEFORE injection so we capture every transition
+        // the observer broadcasts. Same rationale as test 1: under
+        // LWW, the reconciler's restart immediately after Failed
+        // erases the Failed row from the snapshot, so the lifecycle
+        // bus is the only stable observation surface for transient
+        // transitions.
+        let mut events = h.state.lifecycle_events.subscribe();
+        while events.try_recv().is_ok() {}
+
         h.sim_driver.inject_exit_after(
             &h.alloc_id,
             Duration::ZERO,
             ExitKind::Crashed { exit_code: Some(1), signal: None },
         );
 
-        // Drain a couple of ticks so the watcher classifies BEFORE
-        // stop runs — pins the "exit first" order deterministically.
-        drive_ticks(&h, start, 30_u64..35).await;
+        let job_lifecycle_name = overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
+            .expect("job-lifecycle reconciler name");
+        let deadline = start + Duration::from_secs(120);
+        let mut saw_failed = false;
+        'outer: for tick_n in 30_u64..50 {
+            run_convergence_tick(
+                &h.state,
+                &job_lifecycle_name,
+                &h.target,
+                start + Duration::from_millis(tick_n.saturating_mul(100)),
+                tick_n,
+                deadline,
+            )
+            .await
+            .expect("tick");
+            // Yield so the spawned inject task and the observer
+            // both get a chance to run before draining the bus
+            // (see `simulated_crash_writes_failed_to_obs_within_budget`).
+            for _ in 0..4 {
+                tokio::task::yield_now().await;
+            }
+            while let Ok(ev) = events.try_recv() {
+                if ev.alloc_id == h.alloc_id && ev.to == AllocStateWire::Failed {
+                    saw_failed = true;
+                    break 'outer;
+                }
+            }
+        }
+        assert!(saw_failed, "natural exit before stop must classify as Failed (Crashed)");
 
         let handle = AllocationHandle { alloc: h.alloc_id.clone(), pid: None };
         let _ = h.state.driver.stop(&handle).await; // idempotent
-
-        let rows = h.state.obs.alloc_status_rows().await.expect("read rows");
-        assert!(
-            rows.iter().any(|r| matches!(r.state, AllocState::Failed { .. })),
-            "natural exit before stop must classify as Failed (Crashed)"
-        );
     }
 
     // Pin the ExitEvent type symbol — Step 01-02 lands the concrete

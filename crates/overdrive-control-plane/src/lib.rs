@@ -42,6 +42,7 @@ pub mod observation_wiring;
 pub mod reconciler_runtime;
 pub mod streaming;
 pub mod tls_bootstrap;
+pub mod worker;
 
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
@@ -301,11 +302,35 @@ pub struct ServerHandle {
     /// action shim. See [`run_server_with_obs_and_driver`] for the
     /// spawn site. Per `fix-convergence-loop-not-spawned` Step 01-02.
     convergence_task: tokio::task::JoinHandle<()>,
+    /// `JoinHandle` for the `worker::exit_observer` task — consumes
+    /// `ExitEvent`s from the `Driver`'s watcher and writes
+    /// `AllocStatusRow`s to the `ObservationStore`. Per
+    /// `fix-exec-driver-exit-watcher` Step 01-02.
+    ///
+    /// Shutdown ordering: per RCA §Approved fix item 5 the convergence
+    /// task is signalled to drain FIRST, then axum drains, THEN the
+    /// observer's `exit_observer_shutdown` token is cancelled so the
+    /// observer's `tokio::select!` resolves and the task exits.
+    ///
+    /// The token-driven shutdown is the fallback path for the case
+    /// where a watcher task is still alive at shutdown time (e.g. a
+    /// `/bin/sleep` workload that did not reap before convergence was
+    /// cancelled, or a `SimDriver`-backed test where `exit_tx` is held
+    /// by the test's `Arc<dyn Driver>` until the test fn returns).
+    /// Without this, `await exit_observer_task` would block
+    /// indefinitely on `rx.recv()`. With it, shutdown is bounded.
+    exit_observer_task: tokio::task::JoinHandle<()>,
     /// Token observed by the convergence-tick spawn loop. Cancelled
     /// in [`Self::shutdown`] BEFORE axum graceful so reconciler tasks
     /// holding `Arc<dyn Driver>` references stop driving the driver
     /// before axum begins to tear down `AppState`.
     convergence_shutdown: CancellationToken,
+    /// Token observed by the `exit_observer` task's `tokio::select!`
+    /// loop. Cancelled in [`Self::shutdown`] AFTER the convergence
+    /// task and axum task have drained, so any in-flight `ExitEvent`
+    /// driven by an in-flight `Driver::stop` lands in obs before the
+    /// observer is told to exit.
+    exit_observer_shutdown: CancellationToken,
 }
 
 impl ServerHandle {
@@ -323,10 +348,14 @@ impl ServerHandle {
     /// Awaits the server task to completion.
     ///
     /// Ordering — convergence task FIRST, then axum graceful, then
-    /// `server_task` join. The convergence task holds `Arc<dyn Driver>`
-    /// references; reversing this ordering risks reconciler tasks
-    /// driving the driver while axum is tearing down `AppState`. Per
-    /// `fix-convergence-loop-not-spawned` Step 01-02 (RCA Option B2).
+    /// `server_task` join, then exit-observer task last. The
+    /// convergence task holds `Arc<dyn Driver>` references; reversing
+    /// this ordering risks reconciler tasks driving the driver while
+    /// axum is tearing down `AppState`. Per
+    /// `fix-convergence-loop-not-spawned` Step 01-02 (RCA Option B2)
+    /// and `fix-exec-driver-exit-watcher` Step 01-02 RCA §Approved
+    /// fix item 5 (exit observer drains LAST so any in-flight
+    /// `ExitEvent` lands in obs).
     pub async fn shutdown(self, drain_deadline: Duration) {
         // 1. Cancel the convergence loop and await its completion.
         //    The loop's `tokio::select!` resolves the cancellation
@@ -346,6 +375,20 @@ impl ServerHandle {
         //    test-level assertions on server outcome happen before
         //    shutdown is called.
         let _ = self.server_task.await;
+
+        // 4. Cancel the observer's shutdown token, then await the
+        //    observer task. The observer's `tokio::select!`
+        //    biased-resolves the cancellation branch and exits
+        //    cleanly even when watcher tasks (production
+        //    `ExecDriver` watchers awaiting `child.wait()`) or test
+        //    harness `Arc<dyn Driver>` refs still hold `exit_tx`
+        //    clones. Without this token, a workload that did not
+        //    reap before convergence was cancelled — or a SimDriver
+        //    held by the test fn until its scope ends — would keep
+        //    `rx.recv()` blocked indefinitely, deadlocking shutdown.
+        //    Per `fix-exec-driver-exit-watcher` Step 01-02 follow-up.
+        self.exit_observer_shutdown.cancel();
+        let _ = self.exit_observer_task.await;
     }
 }
 
@@ -487,6 +530,25 @@ pub async fn run_server_with_obs_and_driver(
     // and replace this field as needed.
     state.clock = config.clock.clone();
 
+    // Spawn the exit-observer subsystem BEFORE the convergence loop so
+    // the observer is already draining the driver's `ExitEvent`
+    // channel when the first action-shim write happens. The observer
+    // shares `state.obs` (so its writes appear in the same row stream
+    // every reader consumes) and shares `state.runtime` (so the
+    // observer can re-enqueue the job-lifecycle reconciler after
+    // each obs write — closes the latency between exit classification
+    // and reconciler-driven recovery). Per
+    // `fix-exec-driver-exit-watcher` Step 01-02 RCA §Approved fix
+    // item 5.
+    let exit_observer_shutdown = CancellationToken::new();
+    let exit_observer_task = worker::exit_observer::spawn_with_runtime(
+        state.obs.clone(),
+        state.driver.clone(),
+        state.lifecycle_events.clone(),
+        Some(state.runtime.clone()),
+        exit_observer_shutdown.clone(),
+    );
+
     // Spawn the convergence-tick loop per `fix-convergence-loop-not-
     // spawned` Step 01-02 (RCA Option B2 broker-driven §18 wiring).
     // Each iteration drains the EvaluationBroker, dispatches one
@@ -502,73 +564,12 @@ pub async fn run_server_with_obs_and_driver(
     // See `docs/feature/fix-convergence-loop-not-spawned/bugfix-rca.md`
     // for the full root-cause chain.
     let convergence_shutdown = CancellationToken::new();
-    let convergence_task = {
-        let state = state.clone();
-        let clock = config.clock.clone();
-        let cadence = config.tick_cadence;
-        let token = convergence_shutdown.clone();
-        tokio::spawn(async move {
-            let mut tick_n: u64 = 0;
-            loop {
-                let now = clock.now();
-                let deadline = now + cadence;
-
-                // Drain the broker into a local Vec — the
-                // parking_lot::MutexGuard MUST be dropped before any
-                // `.await` per `.claude/rules/development.md`
-                // § Concurrency & async (no locks across `.await`).
-                // The broker is sync; capture the pending list, drop
-                // the guard, then iterate.
-                let pending = {
-                    let mut broker = state.runtime.broker();
-                    broker.drain_pending()
-                };
-
-                for eval in pending {
-                    if let Err(e) = run_convergence_tick(
-                        &state,
-                        &eval.reconciler,
-                        &eval.target,
-                        now,
-                        tick_n,
-                        deadline,
-                    )
-                    .await
-                    {
-                        tracing::warn!(
-                            target: "overdrive::reconciler",
-                            ?e,
-                            reconciler = %eval.reconciler,
-                            target_name = %eval.target.as_str(),
-                            "convergence tick error"
-                        );
-                    }
-                }
-
-                tick_n = tick_n.saturating_add(1);
-
-                // Cooperative shutdown: the cancellation branch wins
-                // immediately when the token is cancelled; otherwise
-                // we sleep one cadence and re-drain.
-                //
-                // The explicit `yield_now` after the select is what
-                // makes this loop play nicely with `SimClock` under
-                // tests: `SimClock::sleep` advances logical time and
-                // returns immediately (no `tokio::time` integration),
-                // so without an explicit yield this would be a tight
-                // CPU loop that starves the test thread, the HTTP
-                // handler tasks, and the cancellation observer. Under
-                // `SystemClock` the `clock.sleep(cadence)` itself
-                // yields via `tokio::time::sleep`, making the
-                // `yield_now` redundant but harmless.
-                tokio::select! {
-                    () = clock.sleep(cadence) => {},
-                    () = token.cancelled()    => break,
-                }
-                tokio::task::yield_now().await;
-            }
-        })
-    };
+    let convergence_task = spawn_convergence_loop(
+        state.clone(),
+        config.clock.clone(),
+        config.tick_cadence,
+        convergence_shutdown.clone(),
+    );
 
     // Assemble the router. Step 03-03 wires the real `alloc_status` and
     // `node_list` observation-read handlers; step 03-05 aligned the
@@ -616,7 +617,14 @@ pub async fn run_server_with_obs_and_driver(
 
     let server_task = tokio::spawn(async move { server.serve(router.into_make_service()).await });
 
-    Ok(ServerHandle { inner: axum_handle, server_task, convergence_task, convergence_shutdown })
+    Ok(ServerHandle {
+        inner: axum_handle,
+        server_task,
+        convergence_task,
+        exit_observer_task,
+        convergence_shutdown,
+        exit_observer_shutdown,
+    })
 }
 
 /// Construct the `noop-heartbeat` reconciler. Exposed as a public
@@ -627,6 +635,83 @@ pub async fn run_server_with_obs_and_driver(
 /// reconciler: its `reconcile` returns `vec![Action::Noop]`
 /// deterministically, serving as the fixture against which the
 /// `ReconcilerIsPure` invariant's twin-invocation check runs and as
+/// Spawn the broker-driven convergence-tick loop.
+///
+/// Per `fix-convergence-loop-not-spawned` Step 01-02 (RCA Option B2 §18
+/// wiring), each iteration drains the `EvaluationBroker`, dispatches one
+/// `run_convergence_tick` per pending `Evaluation`, then sleeps
+/// `tick_cadence` before re-draining. Cancellation via `shutdown` is
+/// observed in `tokio::select!` between ticks so an in-flight dispatch
+/// always completes before exit.
+///
+/// Without this spawn, `submit_job` and `stop_job` would only write to
+/// the `IntentStore` — the broker would never be drained, no allocations
+/// would ever be scheduled, and `cluster_status.broker.dispatched` would
+/// permanently read 0. See
+/// `docs/feature/fix-convergence-loop-not-spawned/bugfix-rca.md` for
+/// the full root-cause chain.
+///
+/// The explicit `yield_now` after the select is what makes this loop
+/// play nicely with `SimClock` under tests: `SimClock::sleep` advances
+/// logical time and returns immediately (no `tokio::time` integration),
+/// so without an explicit yield this would be a tight CPU loop that
+/// starves the test thread, the HTTP handler tasks, and the cancellation
+/// observer. Under `SystemClock` the `clock.sleep(cadence)` itself
+/// yields via `tokio::time::sleep`, making the `yield_now` redundant
+/// but harmless.
+fn spawn_convergence_loop(
+    state: AppState,
+    clock: Arc<dyn overdrive_core::traits::clock::Clock>,
+    cadence: Duration,
+    shutdown: CancellationToken,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut tick_n: u64 = 0;
+        loop {
+            let now = clock.now();
+            let deadline = now + cadence;
+
+            // Drain the broker into a local Vec — the
+            // parking_lot::MutexGuard MUST be dropped before any
+            // `.await` per `.claude/rules/development.md`
+            // § Concurrency & async (no locks across `.await`).
+            let pending = {
+                let mut broker = state.runtime.broker();
+                broker.drain_pending()
+            };
+
+            for eval in pending {
+                if let Err(e) = run_convergence_tick(
+                    &state,
+                    &eval.reconciler,
+                    &eval.target,
+                    now,
+                    tick_n,
+                    deadline,
+                )
+                .await
+                {
+                    tracing::warn!(
+                        target: "overdrive::reconciler",
+                        ?e,
+                        reconciler = %eval.reconciler,
+                        target_name = %eval.target.as_str(),
+                        "convergence tick error"
+                    );
+                }
+            }
+
+            tick_n = tick_n.saturating_add(1);
+
+            tokio::select! {
+                () = clock.sleep(cadence) => {},
+                () = shutdown.cancelled() => break,
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+}
+
 /// the seed entry for the `AtLeastOneReconcilerRegistered` invariant.
 ///
 /// Returns `AnyReconciler::NoopHeartbeat(NoopHeartbeat)` per the 04-07

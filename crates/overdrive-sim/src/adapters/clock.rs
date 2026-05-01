@@ -94,5 +94,15 @@ impl Clock for SimClock {
     async fn sleep(&self, duration: Duration) {
         // Advance logical time in place; do not yield to `tokio::time`.
         self.tick(duration);
+        // Cooperative yield — under single-threaded tokio runtimes the
+        // tick alone returns a Ready future, which keeps the current
+        // task on-CPU and starves any peer task that was queued by
+        // `tokio::spawn` between two awaits. The yield here ensures
+        // that callers using `clock.sleep` as a delay primitive (e.g.
+        // `SimDriver::inject_exit_after`'s emit-delay task) actually
+        // give the scheduler a chance to run the receiving task on
+        // the other side of an mpsc channel. Without this, observers
+        // would never see emitted events under DST.
+        tokio::task::yield_now().await;
     }
 }

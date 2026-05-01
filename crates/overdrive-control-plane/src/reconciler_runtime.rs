@@ -314,6 +314,23 @@ pub async fn run_convergence_tick(
     .await
     .map_err(ConvergenceError::Shim)?;
 
+    // Cooperative yield — every action_shim::dispatch path on the
+    // single-node SimObservationStore returns Ready synchronously
+    // (in-memory writes, no real I/O). Without an explicit yield
+    // here, a tight `for tick in 0..N { run_convergence_tick(...).await }`
+    // test loop never lets peer `tokio::spawn` tasks (e.g. the
+    // `SimDriver` exit-event emit task and the `exit_observer`
+    // subsystem reading from the driver's mpsc receiver) progress
+    // between ticks. Per `fix-exec-driver-exit-watcher` Step 01-02
+    // RCA §Bug 1: the exit-observer DST must observe events between
+    // convergence ticks, which requires the test thread to actually
+    // yield control once per tick. The production convergence loop
+    // (`lib.rs::run_server_with_obs_and_driver`) already calls
+    // `yield_now` between ticks for the same reason; this preserves
+    // the same semantics for callers that drive `run_convergence_tick`
+    // synchronously.
+    tokio::task::yield_now().await;
+
     // Self-re-enqueue per whitepaper §18 *Level-triggered inside
     // the reconciler*: if `reconcile` emitted at least one action,
     // desired ≠ actual on this tick — re-submit so the next drain

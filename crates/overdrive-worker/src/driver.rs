@@ -15,16 +15,19 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use tokio::process::{Child, Command};
+use tokio::sync::mpsc;
 use tracing::warn;
 
 use overdrive_core::id::AllocationId;
 use overdrive_core::traits::driver::{
-    AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverType, Resources,
+    AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverType, ExitEvent,
+    ExitKind, Resources,
 };
 
 use crate::cgroup_manager::{
@@ -35,6 +38,11 @@ use crate::cgroup_manager::{
 /// Default grace window between SIGTERM and SIGKILL during stop.
 const DEFAULT_STOP_GRACE: Duration = Duration::from_secs(5);
 
+/// Capacity of the per-driver `ExitEvent` channel. Sized for burst
+/// load — every running alloc emits exactly one event in its
+/// lifetime, so a small constant is plenty.
+const EXIT_CHANNEL_CAPACITY: usize = 256;
+
 /// Construct a `DriverError::StartRejected` for the exec driver. The
 /// `driver: DriverType::Exec` discriminator is fixed by construction,
 /// so the call sites only need to supply the human-readable reason. Used
@@ -43,11 +51,80 @@ fn start_rejected(reason: impl Into<String>) -> DriverError {
     DriverError::StartRejected { driver: DriverType::Exec, reason: reason.into() }
 }
 
-/// Tracking state for an allocation owned by the driver.
+/// Classify a child's `wait()` resolution into the typed `ExitKind`
+/// the worker subsystem consumes. The `intentional_stop` flag is the
+/// load-bearing discriminator: when `true`, every exit shape collapses
+/// to `CleanExit` so the worker subsystem writes `AllocState::Terminated`
+/// regardless of the OS-level exit cause (per RCA §Approved fix item 4).
+///
+/// Mapping when `intentional_stop == false`:
+/// - `ExitStatus::code() == Some(0)` → `CleanExit`
+/// - `ExitStatus::code() == Some(c)` (c != 0) → `Crashed { exit_code: Some(c), signal: None }`
+/// - `ExitStatus::signal() == Some(s)` (Linux) → `Crashed { exit_code: None, signal: Some(s) }`
+/// - Otherwise (no code, no signal) → `Crashed { exit_code: None, signal: None }`
+///
+/// This is the highest-mutation-density surface in the diff per
+/// `.claude/rules/testing.md` § "What it's NOT for" — keep it small
+/// and exhaustively covered by the inline tests below.
+#[cfg(target_os = "linux")]
+fn classify_exit(status: &std::process::ExitStatus, intentional_stop: bool) -> ExitKind {
+    use std::os::unix::process::ExitStatusExt;
+
+    if intentional_stop {
+        // Operator-driven termination: any exit shape (clean code,
+        // SIGTERM, SIGKILL) classifies as a clean Terminated upstream.
+        return ExitKind::CleanExit;
+    }
+
+    if let Some(code) = status.code() {
+        if code == 0 {
+            ExitKind::CleanExit
+        } else {
+            ExitKind::Crashed { exit_code: Some(code), signal: None }
+        }
+    } else if let Some(sig) = status.signal() {
+        ExitKind::Crashed { exit_code: None, signal: Some(sig) }
+    } else {
+        ExitKind::Crashed { exit_code: None, signal: None }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn classify_exit(status: &std::process::ExitStatus, intentional_stop: bool) -> ExitKind {
+    if intentional_stop {
+        return ExitKind::CleanExit;
+    }
+    match status.code() {
+        Some(0) => ExitKind::CleanExit,
+        Some(code) => ExitKind::Crashed { exit_code: Some(code), signal: None },
+        None => ExitKind::Crashed { exit_code: None, signal: None },
+    }
+}
+
+/// Tracking state for an allocation owned by the driver. The watcher
+/// task — spawned by `Driver::start` — owns the `Child`; this enum
+/// records only the side-channel state the driver itself needs to
+/// inspect (the `intentional_stop` flag, the cgroup scope, and the
+/// watcher's `JoinHandle` for cleanup).
 enum LiveAllocation {
-    /// Process is running; the driver owns the `Child`.
-    Running { child: Child, scope: CgroupPath },
-    /// Process was stopped; we keep the slot so `status()` can
+    /// Process is running; the watcher task owns the `Child` and
+    /// will emit an `ExitEvent` when `child.wait()` resolves.
+    Running {
+        scope: CgroupPath,
+        /// Set to `true` by `Driver::stop` BEFORE delivering SIGTERM.
+        /// The watcher reads this when classifying the exit so a
+        /// SIGTERM/SIGKILL induced by operator stop is `Terminated`,
+        /// not `Failed`. Per RCA §Approved fix item 3.
+        intentional_stop: Arc<AtomicBool>,
+        /// Handle to the per-alloc watcher task that calls
+        /// `child.wait().await`. Awaited in `Driver::stop` after the
+        /// signal is delivered so the driver does not leak a zombie
+        /// task, but the path is best-effort — the `JoinHandle` may
+        /// already have completed naturally before stop runs.
+        watcher: tokio::task::JoinHandle<()>,
+    },
+    /// Process was stopped or exited; we keep the slot so `status()` can
     /// return `Terminated` rather than `NotFound`.
     Terminated,
 }
@@ -75,6 +152,15 @@ pub struct ExecDriver {
     /// iteration per `.claude/rules/development.md` § Ordered
     /// collections.
     live: Arc<Mutex<BTreeMap<AllocationId, LiveAllocation>>>,
+    /// Sender half of the `ExitEvent` channel. The per-alloc watcher
+    /// tasks spawned by `Driver::start` clone this sender and emit
+    /// one event when `child.wait()` resolves. The matching receiver
+    /// is handed out exactly once via the `ExitWatcher` trait.
+    exit_tx: mpsc::Sender<ExitEvent>,
+    /// Receiver half of the `ExitEvent` channel. Stored in a `Mutex`
+    /// so `take_receiver()` can move it out behind a shared reference.
+    /// `None` once consumed.
+    exit_rx: Arc<Mutex<Option<mpsc::Receiver<ExitEvent>>>>,
 }
 
 impl std::fmt::Debug for ExecDriver {
@@ -93,12 +179,15 @@ impl ExecDriver {
     /// Production wires `/sys/fs/cgroup`; tests pass a tempdir.
     #[must_use]
     pub fn new(cgroup_root: PathBuf) -> Self {
+        let (exit_tx, exit_rx) = mpsc::channel(EXIT_CHANNEL_CAPACITY);
         Self {
             cgroup_root,
             stop_grace: DEFAULT_STOP_GRACE,
             force_limit_write_failure: false,
             allow_no_cgroups: false,
             live: Arc::new(Mutex::new(BTreeMap::new())),
+            exit_tx,
+            exit_rx: Arc::new(Mutex::new(Some(exit_rx))),
         }
     }
 
@@ -195,7 +284,17 @@ impl Driver for ExecDriver {
                 .spawn()
                 .map_err(|err| start_rejected(format!("spawn {}: {err}", spec.command)))?;
             let pid = child.id();
-            self.live.lock().insert(spec.alloc.clone(), LiveAllocation::Running { child, scope });
+            let intentional_stop = Arc::new(AtomicBool::new(false));
+            let watcher = spawn_exit_watcher(
+                spec.alloc.clone(),
+                child,
+                intentional_stop.clone(),
+                self.exit_tx.clone(),
+            );
+            self.live.lock().insert(
+                spec.alloc.clone(),
+                LiveAllocation::Running { scope, intentional_stop, watcher },
+            );
             return Ok(AllocationHandle { alloc: spec.alloc.clone(), pid });
         }
 
@@ -266,21 +365,39 @@ impl Driver for ExecDriver {
             return Err(start_rejected(format!("place pid in scope: {err}")));
         }
 
-        // 5. Record the allocation as live.
-        self.live.lock().insert(spec.alloc.clone(), LiveAllocation::Running { child, scope });
+        // 5. Record the allocation as live and spawn the per-alloc
+        //    exit watcher. The watcher takes ownership of the `Child`
+        //    and emits an `ExitEvent` on the driver's mpsc channel
+        //    when `child.wait()` resolves; the `exit_observer`
+        //    subsystem (see `crates/overdrive-worker/src/
+        //    exit_observer.rs`) consumes that event and writes the
+        //    classified `AllocStatusRow` to the ObservationStore.
+        let intentional_stop = Arc::new(AtomicBool::new(false));
+        let watcher = spawn_exit_watcher(
+            spec.alloc.clone(),
+            child,
+            intentional_stop.clone(),
+            self.exit_tx.clone(),
+        );
+        self.live.lock().insert(
+            spec.alloc.clone(),
+            LiveAllocation::Running { scope, intentional_stop, watcher },
+        );
 
         Ok(AllocationHandle { alloc: spec.alloc.clone(), pid: Some(pid) })
     }
 
     async fn stop(&self, handle: &AllocationHandle) -> Result<(), DriverError> {
         // Take ownership of the live state so we can await on the
-        // child without holding the lock.
+        // watcher without holding the lock.
         let entry = {
             let mut live = self.live.lock();
             live.remove(&handle.alloc)
         };
-        let (mut child, scope) = match entry {
-            Some(LiveAllocation::Running { child, scope }) => (child, scope),
+        let (scope, intentional_stop, watcher) = match entry {
+            Some(LiveAllocation::Running { scope, intentional_stop, watcher }) => {
+                (scope, intentional_stop, watcher)
+            }
             Some(LiveAllocation::Terminated) => {
                 // Already stopped — record terminal again, idempotent.
                 self.live.lock().insert(handle.alloc.clone(), LiveAllocation::Terminated);
@@ -289,34 +406,60 @@ impl Driver for ExecDriver {
             None => return Err(DriverError::NotFound { alloc: handle.alloc.clone() }),
         };
 
-        // Capture the PID before any wait — `Child::id()` returns
-        // `None` once the child is reaped, but we still need it to
-        // address the process group at cleanup time.
-        let pid_for_pgrp_kill = child.id();
+        // 0. Set `intentional_stop = true` BEFORE delivering any
+        //    signal. The watcher reads this flag at exit-classification
+        //    time (the `ExitEvent::intentional_stop` field), so a
+        //    SIGTERM/SIGKILL induced by this stop call must NOT race
+        //    the flag-set to a `false` read. `SeqCst` is the strongest
+        //    available ordering and pairs with the watcher's `SeqCst`
+        //    load. Per RCA §Approved fix item 3.
+        intentional_stop.store(true, Ordering::SeqCst);
+
+        // The watcher owns the `Child`. We address the workload by
+        // PID for the SIGTERM/SIGKILL signals; the PID lives in the
+        // `AllocationHandle` (populated at start time) on the
+        // `allow_no_cgroups` and cgroup paths alike. Tests that built
+        // the handle by hand (Phase 1 reconciler shim) carry `pid:
+        // None`; those code paths cannot deliver a process-targeted
+        // signal but can still enrich obs via the `cgroup.kill`
+        // fallback below.
+        let pid_for_pgrp_kill = handle.pid;
 
         // 1. Send SIGTERM via libc::kill.
         if let Some(pid) = pid_for_pgrp_kill {
             send_sigterm(pid);
         }
 
-        // 2. Wait up to the grace window for the child to exit.
-        let waited = tokio::time::timeout(self.stop_grace, child.wait()).await;
-        match waited {
-            Ok(Ok(_status)) => {}
-            Ok(Err(err)) => {
-                return Err(DriverError::Io(err));
+        // 2. Wait up to the grace window for the watcher task (which
+        //    owns the `Child`) to complete naturally — the watcher's
+        //    `child.wait()` resolves once the SIGTERM-driven exit
+        //    happens. Joining the watcher is best-effort: a panicked
+        //    watcher surfaces as `Err`, and we treat it the same as a
+        //    grace-window timeout (escalate to SIGKILL).
+        let waited = tokio::time::timeout(self.stop_grace, watcher).await;
+        let watcher = match waited {
+            Ok(Ok(())) => {
+                // Watcher already completed — child exited within
+                // grace; nothing more to await.
+                None
+            }
+            Ok(Err(_join_err)) => {
+                // Watcher panicked or was cancelled. Treat as grace
+                // expiry — fall through to the SIGKILL escalation
+                // path. There is no live JoinHandle to await.
+                None
             }
             Err(_elapsed) => {
-                // 3. Grace window elapsed — escalate to SIGKILL via
-                //    the tokio handle.
-                let _ = child.start_kill();
-                let _ = child.wait().await;
+                // 3. Grace window elapsed — escalate via process-group
+                //    SIGKILL below; the watcher will resolve once the
+                //    child is reaped by the kernel.
+                Some(())
             }
-        }
+        };
 
         // 4. Mass-kill any reparented grandchildren. /bin/sh-class
         //    workloads fork helpers (e.g. `/bin/sleep`) that reparent
-        //    to init when the shell dies; the tokio `Child` only
+        //    to init when the shell dies; the watcher's `Child` only
         //    tracks the parent. Two complementary mechanisms:
         //
         //    a) `cgroup.kill` (real cgroupfs) — atomic SIGKILL of every
@@ -335,6 +478,13 @@ impl Driver for ExecDriver {
             // 5. Tear down the cgroup scope. NotFound is benign.
             let _ = remove_workload_scope(&self.cgroup_root, &scope).await;
         }
+
+        // If the grace window elapsed, the watcher is still running;
+        // it will resolve once SIGKILL finishes reaping the child.
+        // We do not block waiting for it — the obs row gets written
+        // when the watcher's emitted ExitEvent reaches the observer.
+        // The detached watcher cleans up its own `Child` on drop.
+        let _ = watcher;
 
         // 6. Record terminal state so subsequent status() calls
         //    return `Terminated` rather than `NotFound`.
@@ -374,6 +524,53 @@ impl Driver for ExecDriver {
             .await;
         Ok(())
     }
+
+    fn take_exit_receiver(&self) -> Option<mpsc::Receiver<ExitEvent>> {
+        self.exit_rx.lock().take()
+    }
+}
+
+/// Spawn a per-allocation watcher task that owns the `Child`, awaits
+/// `child.wait()`, classifies the exit, and emits an `ExitEvent` to
+/// the driver's mpsc channel.
+///
+/// Returns the `JoinHandle` so `Driver::stop` can opt to await it
+/// during the grace window. The task is `'static` over its captured
+/// state — the `Child`, the `intentional_stop` flag, the `Sender`,
+/// and the `AllocationId`.
+fn spawn_exit_watcher(
+    alloc: AllocationId,
+    mut child: Child,
+    intentional_stop: Arc<AtomicBool>,
+    exit_tx: mpsc::Sender<ExitEvent>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let status_result = child.wait().await;
+        // `Ordering::SeqCst` pairs with the `store` in `Driver::stop`.
+        let intentional = intentional_stop.load(Ordering::SeqCst);
+        let kind = match status_result {
+            Ok(status) => classify_exit(&status, intentional),
+            Err(_io_err) => {
+                // `Child::wait` failure is exotic — the kernel did not
+                // give us a status. Treat as a crash with no payload
+                // unless `intentional_stop` was set. The watcher is
+                // best-effort: even if the channel send fails (the
+                // observer subsystem already shut down), there is
+                // nowhere else to record the event.
+                if intentional {
+                    ExitKind::CleanExit
+                } else {
+                    ExitKind::Crashed { exit_code: None, signal: None }
+                }
+            }
+        };
+        let event = ExitEvent { alloc, kind, intentional_stop: intentional };
+        // Send is best-effort: if the observer has shut down, the
+        // event is dropped — the obs store already reflects a
+        // shutdown-time terminal state, and there is no recovery
+        // here.
+        let _ = exit_tx.send(event).await;
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -421,4 +618,79 @@ fn send_sigkill_pgrp(pid: u32) {
 #[cfg(not(target_os = "linux"))]
 const fn send_sigkill_pgrp(_pid: u32) {
     // Non-Linux builds compile but do not run real-process tests.
+}
+
+// ---------------------------------------------------------------------------
+// Exit-classification unit tests (mutation-gate target)
+// ---------------------------------------------------------------------------
+//
+// `classify_exit` is the highest-mutation-density surface in the Step
+// 01-02 diff per `.claude/rules/testing.md` §Mandatory targets. The
+// table below pins the (ExitStatus, intentional_stop) → ExitKind
+// mapping exhaustively. Linux-only — `ExitStatus` does not expose
+// `from_raw` cross-platform, and signal handling is Linux-specific.
+#[cfg(all(test, target_os = "linux"))]
+mod classify_exit_tests {
+    use super::*;
+    use std::os::unix::process::ExitStatusExt;
+
+    /// Construct an `ExitStatus` from a normal exit code.
+    fn from_code(code: i32) -> std::process::ExitStatus {
+        // `from_raw(code << 8)` mimics how the kernel encodes a
+        // normal exit: low 8 bits 0, next 8 bits = exit code.
+        std::process::ExitStatus::from_raw(code << 8)
+    }
+
+    /// Construct an `ExitStatus` from a terminating signal.
+    fn from_signal(signal: i32) -> std::process::ExitStatus {
+        // Low 7 bits encode the signal; bit 7 (0x80) signals coredump,
+        // which we omit. `from_raw(signal)` produces an `ExitStatus`
+        // whose `signal()` returns `Some(signal)`.
+        std::process::ExitStatus::from_raw(signal)
+    }
+
+    #[test]
+    fn clean_exit_zero_intentional_false_classifies_as_clean_exit() {
+        let kind = classify_exit(&from_code(0), false);
+        assert_eq!(kind, ExitKind::CleanExit);
+    }
+
+    #[test]
+    fn clean_exit_zero_intentional_true_classifies_as_clean_exit() {
+        // intentional_stop wins — operator stop with code-0 exit.
+        let kind = classify_exit(&from_code(0), true);
+        assert_eq!(kind, ExitKind::CleanExit);
+    }
+
+    #[test]
+    fn nonzero_exit_intentional_false_classifies_as_crashed_with_code() {
+        let kind = classify_exit(&from_code(1), false);
+        assert_eq!(kind, ExitKind::Crashed { exit_code: Some(1), signal: None });
+    }
+
+    #[test]
+    fn nonzero_exit_intentional_true_classifies_as_clean_exit() {
+        // operator stop wins — even if the workload exited non-zero,
+        // the intentional flag declares it terminated.
+        let kind = classify_exit(&from_code(137), true);
+        assert_eq!(kind, ExitKind::CleanExit);
+    }
+
+    #[test]
+    fn signal_killed_intentional_false_classifies_as_crashed_with_signal() {
+        // SIGKILL = 9 — external kill on a running workload, no
+        // operator stop in flight. Crashed.
+        let kind = classify_exit(&from_signal(9), false);
+        assert_eq!(kind, ExitKind::Crashed { exit_code: None, signal: Some(9) });
+    }
+
+    #[test]
+    fn signal_killed_intentional_true_classifies_as_clean_exit() {
+        // SIGTERM = 15 — operator stop delivered SIGTERM before
+        // setting intentional_stop=true and waiting for the watcher;
+        // the watcher reads intentional_stop=true and classifies as
+        // Terminated upstream.
+        let kind = classify_exit(&from_signal(15), true);
+        assert_eq!(kind, ExitKind::CleanExit);
+    }
 }
