@@ -1,0 +1,433 @@
+schema_version: 1
+
+# Journey extension for cli-submit-vs-deploy-and-alloc-status.
+#
+# This is NOT a new journey. It EXTENDS:
+#   - docs/product/journeys/submit-a-job.yaml (canonical product journey)
+#   - docs/feature/phase-1-first-workload/discuss/journey-submit-a-job-extended.yaml
+#     (which already extended step 4 with real Running rows)
+#
+# This wave splits step 1 (Submit) into 1 + 1a + 1b + 1c (intent ack +
+# convergence stream + terminal) and rewrites step 4 (Inspect) into a
+# dense snapshot. Steps 2, 3, 5, 6, 7 are inherited unchanged from the
+# prior extension.
+#
+# Phase 1 is SINGLE-NODE — no multi-node placement, no taints. The
+# local node is implicit; this extension does not introduce any new
+# operator-facing node concepts.
+
+journey:
+  name: "Submit streams convergence by default; alloc status is a dense snapshot"
+  goal: >
+    Ana submits a workload spec via `overdrive job submit` and either
+    (a) sees the platform converge to Running inline within seconds
+    and exits zero, or (b) sees the platform fail to converge inline
+    with a structured reason and exits non-zero. After the deployment
+    is finished, `overdrive alloc status` is a dense snapshot useful
+    for second-day inspection ("what is it doing right now?") rather
+    than as a polling target for the deploy itself.
+  persona: >
+    Ana, Overdrive platform engineer. Senior SRE muscle memory
+    (kubectl rollout status, nomad job run, fly deploy, systemctl
+    start && journalctl -fu). Inner-loop edit-submit-observe-fix
+    cycle. CI is the secondary case, served by --detach and TTY-
+    auto-detection.
+
+  emotional_arc:
+    start: "Curious — 'did I fix the binary path this time?'"
+    middle: >
+      Focused — first NDJSON line lands within 200ms (operator knows
+      the platform got the request). Then confidence builds (or
+      failure surfaces) line-by-line as the lifecycle reconciler
+      converges. No fabricated rows, no abandoned terminal.
+    end: >
+      Trusting (success) — 'one verb, told the truth, exited cleanly.'
+      OR informed (failure) — 'one verb, named the cause, gave me a
+      reproducer, exited 1. I edit the spec and re-run.'
+
+  preconditions:
+    - >
+      Phase 1 single-node topology (inherited). Exactly one row in
+      node_health, implicit.
+    - >
+      Lifecycle reconciler from phase-1-first-workload is running and
+      writing AllocStatusRow transitions to ObservationStore.
+    - >
+      ProcessDriver is wired through the action shim per ADR-0023.
+      No new I/O surface in the reconciler.
+
+  inheritance:
+    base_journey: "docs/product/journeys/submit-a-job.yaml"
+    intermediate_extension: "docs/feature/phase-1-first-workload/discuss/journey-submit-a-job-extended.yaml"
+    inherited_steps_unchanged:
+      - { id: 2, name: "Commit to intent" }
+      - { id: 3, name: "Reconciler primitive alive — now with job-lifecycle" }
+      - { id: 5, name: "Recover from a process crash" }
+      - { id: 6, name: "Control-plane stays responsive under workload pressure" }
+      - { id: 7, name: "Stop the job and watch the allocation drain" }
+    modified_steps:
+      - { id: 1, name: "Submit a job", change: "Split into 1 + 1a + 1b + 1c. Streaming default." }
+      - { id: 4, name: "Inspect allocations via CLI", change: "Snapshot enriched with state, last transition, source, error, restart budget, exit code." }
+
+steps:
+
+  - id: 1
+    name: "Submit a job (CLI side)"
+    command: "overdrive job submit ./payments.toml"
+    summary: >
+      CLI reads TOML, constructs typed Job aggregate, detects whether
+      stdout is a TTY. TTY → Accept: application/x-ndjson (stream).
+      Piped → Accept: application/json (auto-detach). --detach →
+      Accept: application/json (explicit detach). POST to /v1/jobs.
+    emotional_state:
+      entry: "Curious — 'did I fix the binary path?'"
+      exit: "Focused — request is in flight; waiting for the first response line."
+    gherkin: |
+      Scenario: CLI selects NDJSON when stdout is a TTY
+        Given Ana runs `overdrive job submit ./payments.toml` from an interactive terminal
+        When the CLI builds the request
+        Then the Accept header is `application/x-ndjson`
+        And the --detach flag is not present
+
+      Scenario: CLI auto-detaches when stdout is piped
+        Given Ana runs `overdrive job submit ./payments.toml | jq -r .spec_digest`
+        When the CLI detects that stdout is not a TTY
+        Then the Accept header is `application/json`
+        And the response is a single JSON object equivalent to today's shape
+
+      Scenario: --detach explicitly opts out of streaming on a TTY
+        Given Ana runs `overdrive job submit ./payments.toml --detach` interactively
+        When the CLI builds the request
+        Then the Accept header is `application/json`
+        And the convergence stream is not consumed
+
+  - id: 1a
+    name: "Intent commit acknowledged (NEW — first NDJSON line)"
+    summary: >
+      Server commits the spec via IntentStore::put_if_absent (per
+      ADR-0020). The first NDJSON line carries the same fields the
+      existing non-streaming response would have returned:
+      spec_digest, intent_key, outcome (Inserted | Unchanged). This
+      is the trust floor — the operator now knows the platform got
+      the request.
+    shared_artifacts:
+      - name: "spec_digest"
+        source: "ContentHash::of(rkyv_archived_job_bytes) — inherited"
+        displayed_as: "${spec_digest}"
+        consumers:
+          - "First NDJSON line of streaming submit"
+          - "Single JSON of detached submit"
+          - "alloc status snapshot"
+      - name: "intent_key"
+        source: "overdrive-core canonical form — inherited"
+        displayed_as: "${intent_key}"
+        consumers:
+          - "First NDJSON line of streaming submit"
+      - name: "convergence_event"
+        source: >
+          Typed enum in overdrive-control-plane::api per ADR-0014. Variants
+          (DESIGN owns the precise shape):
+            Accepted { spec_digest, intent_key, outcome }
+            LifecycleTransition { alloc_id, from, to, reason, source, at }
+            ConvergedRunning { alloc_id, started_at }
+            ConvergedFailed { alloc_id, terminal_reason, error }
+        displayed_as: "(NDJSON line on the wire)"
+        consumers:
+          - "Server emits at the streaming endpoint"
+          - "CLI consumes via line-delimited reqwest reader"
+    emotional_state:
+      entry: "Focused — 'did the request land?'"
+      exit: "Reassured — 'platform got the request and committed the spec.'"
+    integration_checkpoint: >
+      AC: first NDJSON line lands within 200 ms of POST commit (p95).
+      Not a hard SLO; an emotional contract. If this slips, the
+      streaming submit feels like a hang.
+    gherkin: |
+      Scenario: First NDJSON line carries the intent commit acknowledgement
+        Given Ana submits a valid spec via streaming submit
+        When the server commits the spec to the IntentStore
+        Then the first line of the NDJSON response is an `Accepted` event
+        And the event carries `spec_digest`, `intent_key`, and `outcome`
+
+      Scenario: First NDJSON line lands within 200ms (emotional contract)
+        Given Ana submits a valid spec via streaming submit on a healthy local control plane
+        When the server has committed the spec
+        Then the first NDJSON line is delivered within 200 ms p95
+
+  - id: 1b
+    name: "Convergence stream (NEW — lifecycle events as NDJSON lines)"
+    summary: >
+      Server subscribes to the ObservationStore for the just-committed
+      JobId and emits one NDJSON line per AllocStatusRow transition.
+      Each `LifecycleTransition` event carries: alloc_id, from_state,
+      to_state, reason, source (`reconciler` | `driver(process)`),
+      timestamp. CLI renders each line as it arrives.
+    shared_artifacts:
+      - name: "alloc_id"
+        source: "Inherited — emitted by scheduler, written into AllocStatusRow"
+        displayed_as: "${alloc_id}"
+      - name: "alloc_state"
+        source: "Inherited — overdrive-core::traits::driver::AllocationState"
+        displayed_as: "${alloc_state}"
+      - name: "transition_reason"
+        source: >
+          Already produced by the lifecycle reconciler when emitting
+          Action variants and by the ProcessDriver on failure. This
+          extension does not invent a new field; it commits to a
+          structured shape on the wire.
+        displayed_as: "${transition_reason}"
+        consumers:
+          - "LifecycleTransition NDJSON event"
+          - "AllocStatusSnapshot.last_transition.reason"
+    emotional_state:
+      entry: "Focused — 'is it scheduling? starting? failing?'"
+      exit: "Confidence builds (success) OR failure surfaces honestly (failure path)"
+    integration_checkpoint: >
+      Reconciler purity (§18, ADR-0023) MUST be preserved. The streaming
+      endpoint is a CONSUMER of observation rows, not a producer that
+      blocks the reconciler tick. No new I/O surface inside reconcile().
+    failure_modes:
+      - >
+        Reconciler ticks slowly (e.g. backoff window during repeated
+        binary-not-found). Stream emits `pending starting (attempt N;
+        backoff 5s)` lines but does not hang.
+      - >
+        Server wall-clock cap hit before terminal state. Server emits
+        a `ConvergedFailed` event with `terminal_reason: timeout` and
+        closes the stream. CLI exits 1.
+    gherkin: |
+      Scenario: Each lifecycle transition produces one NDJSON line
+        Given a streaming submit is in progress
+        When the lifecycle reconciler causes the allocation to transition
+        Then one NDJSON `LifecycleTransition` line is emitted with from, to, reason, source, and at
+
+      Scenario: Reconciler purity is preserved
+        Given the streaming endpoint is consuming observation events
+        When the lifecycle reconciler ticks
+        Then no I/O is performed inside `reconcile()`
+        And the streaming endpoint reads from the ObservationStore, not from the reconciler directly
+
+  - id: 1c
+    name: "Terminal (NEW — stream closes; CLI exits)"
+    summary: >
+      Stream closes when convergence reaches one of three outcomes.
+      ConvergedRunning → CLI prints `Job 'X' is running with N/N
+      replicas (took D)` and exits 0. ConvergedFailed → CLI prints
+      structured `Error: ...` block including reason, last-event,
+      reproducer command, and exits 1. Server wall-clock cap →
+      ConvergedFailed with terminal_reason=timeout; CLI prints `did
+      not converge in N s` and exits 1.
+    shared_artifacts:
+      - name: "exit_code"
+        source: >
+          CLI maps terminal NDJSON event to exit code per the table in
+          AC. 0 on Running. 1 on Failed (any cause: driver, backoff
+          exhaustion, server timeout). 2 on client-side / transport /
+          server-validation errors per ADR-0015.
+        displayed_as: "$?"
+      - name: "failure_reason"
+        source: >
+          Lifecycle reconciler view + driver error pass-through. Same
+          source feeding step 4's snapshot.
+        displayed_as: "Error block in CLI output"
+        consumers:
+          - "CLI streaming submit terminal block"
+          - "alloc status snapshot Last transition + error: line"
+    emotional_state:
+      entry: "Tense — 'will it run, or fail?'"
+      exit: >
+        Trusting (success) — 'one verb, told the truth.'
+        Informed (failure) — 'I know exactly what to fix and where.'
+    failure_modes:
+      - "ConvergedRunning → exit 0, summary line."
+      - "ConvergedFailed (driver error) → exit 1, structured error block."
+      - "ConvergedFailed (backoff exhausted) → exit 1, structured error block including 'restart budget exhausted'."
+      - "ConvergedFailed (server wall-clock cap) → exit 1, structured 'did not converge in N s' block."
+      - "Stream interrupted (server crash, network drop) → CLI prints transport error, exits 2."
+    gherkin: |
+      Scenario: Convergence to Running exits zero with a summary
+        Given a streaming submit reaches a `ConvergedRunning` terminal event
+        When the stream closes
+        Then the CLI prints `Job '<name>' is running with N/N replicas (took D)`
+        And the CLI exits with code 0
+
+      Scenario: Convergence to Failed exits non-zero with a structured error
+        Given a streaming submit reaches a `ConvergedFailed` terminal event
+        When the stream closes
+        Then the CLI prints an `Error:` block naming reason, last-event, and a reproducer command
+        And the CLI exits with code 1
+
+      Scenario: Server wall-clock cap surfaces as a Failed terminal event
+        Given a streaming submit whose convergence does not complete within the server-side wall-clock budget
+        When the budget is exceeded
+        Then the server emits `ConvergedFailed` with `terminal_reason: timeout`
+        And the CLI prints `did not converge in N s` and exits with code 1
+
+      Scenario: Transport errors during streaming exit with code 2
+        Given a streaming submit is in progress
+        When the connection to the control plane drops mid-stream
+        Then the CLI prints a transport error
+        And the CLI exits with code 2
+
+  # Step 4 from the prior extension is REWRITTEN — the snapshot becomes
+  # dense and useful for second-day inspection. The streaming submit
+  # is now the inner-loop happy path; alloc status is no longer the
+  # polling target for the deploy itself.
+  - id: 4
+    name: "Inspect allocations via CLI — dense snapshot (REWRITTEN)"
+    command: "overdrive alloc status --job payments-v2"
+    summary: >
+      DescribeJob still returns spec_digest byte-identical (inherited).
+      The Allocations rendering becomes dense: state, resources,
+      started timestamp, exit code (when terminal), and a Last
+      transition block carrying from→to, reason, source. Restart
+      budget is exposed (used / max) so an operator inspecting a
+      Failed allocation knows whether the lifecycle reconciler is
+      still trying or has given up.
+    tui_mockup: |
+      $ overdrive alloc status --job payments-v2
+      Job:         payments-v2
+      Spec digest: sha256:7f3a9b12...
+      Replicas:    1 desired / 1 running
+
+      ALLOC ID   STATE      RESOURCES        STARTED               EXIT
+      a1b2c3     Running    2000mCPU/4 GiB   2026-04-30T10:15:32Z  -
+
+      Last transition: 2026-04-30T10:15:35Z
+        Pending → Running   reason: driver started (pid 12345)
+        source:  driver(process)
+      Restart budget: 0 / 5 used
+    shared_artifacts:
+      - name: "alloc_status_snapshot"
+        source: >
+          Typed struct in overdrive-control-plane::api per ADR-0014
+          (DESIGN owns the precise shape). Fields:
+            job_id, spec_digest, replicas_desired, replicas_running,
+            allocations: Vec<AllocSummary>,
+            last_transition: Option<TransitionRecord>,
+            restart_budget: Option<RestartBudget>.
+        displayed_as: "(JSON over the wire; rendered into the table above)"
+        consumers:
+          - "Server: GET /v1/alloc/status?job=... handler"
+          - "CLI: alloc status renderer"
+      - name: "alloc_id"
+        source: "Inherited — same source as in steps 1b/4 of prior extension."
+        displayed_as: "${alloc_id}"
+      - name: "alloc_state"
+        source: "Inherited — AllocationState enum."
+        displayed_as: "${alloc_state}"
+      - name: "transition_reason"
+        source: "Same as step 1b — one source of truth for both streaming and snapshot consumers."
+        displayed_as: "Last transition: ... reason: ..."
+      - name: "restart_budget"
+        source: >
+          Lifecycle reconciler private libSQL (NextView). Already
+          exists internally per phase-1-first-workload step 5; this
+          extension exposes it on the snapshot wire shape.
+        displayed_as: "Restart budget: N / M used"
+    emotional_state:
+      entry: "Curious — 'what's it doing right now?'"
+      exit: "Informed — 'I know the state, last transition, error if any, and whether the platform is still trying.'"
+    integration_checkpoint: >
+      The same `failure_reason` string that surfaces in the streaming
+      submit's terminal `ConvergedFailed` event MUST appear verbatim
+      in the snapshot's Last transition block. One source of truth,
+      two consumption surfaces. Drift is a defect.
+    failure_modes:
+      - >
+        Snapshot rendered while a deploy is in flight: shows current
+        state (Pending or whatever the reconciler last observed). The
+        operator who wants live observation uses the streaming submit;
+        snapshot is a point-in-time read.
+      - >
+        Snapshot rendered for a Failed allocation: state=Failed, the
+        Last transition block carries the error, restart budget shows
+        whether backoff is still being attempted or is exhausted.
+      - >
+        Job has zero allocations (e.g. Pending: capacity exceeded):
+        the Allocations table renders no rows; an explicit single-row
+        Pending entry is emitted instead with a reason naming
+        requested-vs-free.
+    gherkin: |
+      Scenario: alloc status renders a Running allocation with all snapshot fields
+        Given a job `payments-v2` has one allocation in `Running`
+        When Ana runs `overdrive alloc status --job payments-v2`
+        Then the output includes: state, resources, started timestamp, exit code field, last-transition block (from→to, reason, source), restart budget
+
+      Scenario: alloc status renders a Failed allocation with the error message
+        Given a job `payments-v2` has one allocation in `Failed` because the binary is missing
+        When Ana runs `overdrive alloc status --job payments-v2`
+        Then the output includes the verbatim driver error (`stat /usr/local/bin/payments: no such file or directory`)
+        And the output includes `Restart budget: N / M used (backoff exhausted)` when applicable
+
+      Scenario: failure reason in snapshot matches failure reason in streaming submit terminal event
+        Given a streaming submit emitted a `ConvergedFailed` event with reason R for allocation A
+        When Ana subsequently runs `overdrive alloc status` against the same job
+        Then the snapshot's last-transition reason for allocation A equals R verbatim
+
+      Scenario: empty-state honesty for a Pending-with-no-capacity allocation
+        Given a job whose resource request exceeds the local node capacity
+        When Ana runs `overdrive alloc status`
+        Then the output includes a single explicit row stating `Pending: no node has capacity (...)` naming requested-vs-free
+        And the output does NOT silently render zero allocations
+
+integration_validation:
+
+  shared_artifact_consistency:
+    - artifact: "spec_digest"
+      must_match_across: ["1a", "1c", 4]
+      failure_message: >
+        spec_digest is the byte-identical content hash inherited from
+        phase-1-control-plane-core. The streaming submit's first event
+        carries it; the terminal summary references it; the snapshot
+        echoes it. All three MUST equal what Ana computes locally
+        from the same TOML under the same rkyv canonical path.
+    - artifact: "alloc_id"
+      must_match_across: ["1b", "1c", 4, 5, 7]
+      failure_message: >
+        alloc_id flows from scheduler → action shim → cgroup scope
+        name → AllocStatusRow → both streaming events and snapshot
+        rendering. Drift means the operator's CLI display does not
+        correspond to a real cgroup scope or process — multi-hop
+        debugging nightmare. Inherited concern from phase-1-first-
+        workload step 4; extends to streaming.
+    - artifact: "alloc_state"
+      must_match_across: ["1b", 4, 5, 7]
+      failure_message: >
+        AllocationState is the join term across Driver::status, action
+        shim writes, lifecycle reconciler reads, streaming events,
+        and snapshot rendering. One enum, one source of truth.
+    - artifact: "transition_reason"
+      must_match_across: ["1b", "1c", 4]
+      failure_message: >
+        The same `reason` string MUST appear verbatim in the streaming
+        LifecycleTransition event, the streaming ConvergedFailed
+        terminal event (when applicable), and the snapshot's
+        last-transition block. Two consumption surfaces, one source
+        of truth. Drift is a defect.
+
+  schema_evolution_notes: >
+    This feature ADDS one typed enum (`SubmitEvent` or equivalent —
+    DESIGN names it) and one typed struct (`AllocStatusSnapshot` or
+    equivalent extension of the existing AllocStatusResponse) to
+    `overdrive-control-plane::api`. The existing `SubmitJobResponse`
+    JSON shape is RETAINED for `Accept: application/json` clients
+    (back-compat). No fields are removed from existing types.
+
+related_features:
+  - id: phase-1-control-plane-core
+    role: "Provides the inherited base journey, spec_digest contract, IntentStore commit, REST/OpenAPI transport, and shared-types pattern."
+  - id: phase-1-first-workload
+    role: "Provides the lifecycle reconciler, ProcessDriver, action shim, and the AllocStatusRow lineage this extension consumes."
+  - id: cli-submit-vs-deploy-and-alloc-status
+    role: "This feature. Splits step 1 into streaming sub-steps; rewrites step 4 as a dense snapshot."
+
+changelog:
+  - date: 2026-04-30
+    feature: cli-submit-vs-deploy-and-alloc-status
+    change: >
+      Initial DISCUSS-wave journey extension. Splits step 1 (Submit)
+      into 1 + 1a + 1b + 1c (TTY/pipe/--detach branching, NDJSON
+      first-line acknowledgement, lifecycle stream, terminal exit-
+      code mapping). Rewrites step 4 (Inspect) as a dense snapshot
+      surface. Steps 2, 3, 5, 6, 7 inherited unchanged.
