@@ -17,6 +17,7 @@ mod integration {
     mod exec_driver {
         mod cgroup_procs;
         mod limit_write_failure_warns;
+        mod live_map_bounded;
         mod missing_binary;
         mod resize_updates_limits;
         mod resource_enforcement;

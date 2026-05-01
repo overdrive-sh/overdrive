@@ -233,6 +233,27 @@ impl ExecDriver {
         self
     }
 
+    /// Test-only inspection hook — number of entries currently in the
+    /// internal `live` map.
+    ///
+    /// The `Driver` trait does not (and should not) expose live-map
+    /// cardinality. This accessor is the regression hook for
+    /// `fix-terminated-slot-accumulation` Step 01-01: a long-running
+    /// node session must not accumulate one `BTreeMap` entry per
+    /// finally-terminated allocation. The GREEN fix (Step 01-02)
+    /// drops `LiveAllocation::Terminated` and evicts the slot in
+    /// `stop()`; this accessor lets the regression test assert the
+    /// post-stop cardinality is zero.
+    ///
+    /// Gated behind the `integration-tests` feature so production
+    /// callers (and the public Driver trait surface) cannot reach
+    /// it. The slow-lane `tests/integration/exec_driver/
+    /// live_map_bounded.rs` regression test is the sole consumer.
+    #[cfg(feature = "integration-tests")]
+    pub fn live_count(&self) -> usize {
+        self.live.lock().len()
+    }
+
     /// Build the [`Command`] that this driver will exec for `spec`.
     ///
     /// `ExecDriver` invokes the binary at `spec.command` verbatim against

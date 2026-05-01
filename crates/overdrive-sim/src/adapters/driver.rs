@@ -118,6 +118,25 @@ impl SimDriver {
         self
     }
 
+    /// Test-only inspection hook — number of entries currently in the
+    /// internal `allocations` map.
+    ///
+    /// The `Driver` trait does not (and should not) expose live-map
+    /// cardinality. This accessor is the regression hook for
+    /// `fix-terminated-slot-accumulation` Step 01-01: the sim adapter
+    /// must mirror `ExecDriver`'s cardinality contract so the shared
+    /// trait does not diverge across host/sim. The GREEN fix (Step
+    /// 01-02) evicts the slot in `stop()` so `live_count()` returns 0
+    /// after each round-trip; this accessor lets the regression test
+    /// assert the post-stop cardinality is zero.
+    ///
+    /// `overdrive-sim` is `adapter-sim` class — only consumed by
+    /// tests — so this accessor is plain `pub` rather than feature-gated.
+    /// It is not on the `Driver` trait.
+    pub fn live_count(&self) -> usize {
+        self.allocations.lock().len()
+    }
+
     /// DST hook — schedule an `ExitEvent` to be emitted on the
     /// driver's channel after `after` real-time wall-clock duration.
     ///
