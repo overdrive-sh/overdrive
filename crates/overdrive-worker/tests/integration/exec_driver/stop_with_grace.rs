@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use overdrive_core::id::{AllocationId, SpiffeId};
 use overdrive_core::traits::driver::{AllocationSpec, AllocationState, Driver, Resources};
+use overdrive_sim::adapters::clock::SimClock;
 use overdrive_worker::ExecDriver;
 use tempfile::TempDir;
 use tokio::time::Instant;
@@ -28,8 +29,10 @@ async fn stop_with_grace_drives_to_terminated_and_removes_scope() {
     // without the time bound, the test passes either way because
     // the SIGKILL fallback eventually reaps the workload.
     let stop_grace = Duration::from_secs(5);
-    let driver: Arc<dyn Driver> =
-        Arc::new(ExecDriver::new(cgroup_root.path().to_path_buf()).with_stop_grace(stop_grace));
+    let driver: Arc<dyn Driver> = Arc::new(
+        ExecDriver::new(cgroup_root.path().to_path_buf(), Arc::new(SimClock::new()))
+            .with_stop_grace(stop_grace),
+    );
 
     let alloc = AllocationId::new("alloc-stop-grace").expect("valid alloc id");
     let spec = AllocationSpec {

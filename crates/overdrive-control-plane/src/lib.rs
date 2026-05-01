@@ -429,8 +429,11 @@ pub async fn run_server(config: ServerConfig) -> Result<ServerHandle, error::Con
     // limit writes; workloads run as ordinary child processes under
     // the running UID.
     let driver: Arc<dyn Driver> = Arc::new(
-        overdrive_worker::ExecDriver::new(std::path::PathBuf::from("/sys/fs/cgroup"))
-            .with_allow_no_cgroups(config.allow_no_cgroups),
+        overdrive_worker::ExecDriver::new(
+            std::path::PathBuf::from("/sys/fs/cgroup"),
+            Arc::new(overdrive_host::SystemClock),
+        )
+        .with_allow_no_cgroups(config.allow_no_cgroups),
     );
 
     run_server_with_obs_and_driver(config, obs, driver).await

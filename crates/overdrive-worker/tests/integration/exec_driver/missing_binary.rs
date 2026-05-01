@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use overdrive_core::id::{AllocationId, SpiffeId};
 use overdrive_core::traits::driver::{AllocationSpec, Driver, Resources};
+use overdrive_sim::adapters::clock::SimClock;
 use overdrive_worker::ExecDriver;
 use tempfile::TempDir;
 
@@ -18,7 +19,8 @@ async fn missing_binary_does_not_create_cgroup_scope() {
     std::fs::create_dir_all(cgroup_root.path().join("overdrive.slice/workloads.slice"))
         .expect("workloads.slice created");
 
-    let driver: Arc<dyn Driver> = Arc::new(ExecDriver::new(cgroup_root.path().to_path_buf()));
+    let driver: Arc<dyn Driver> =
+        Arc::new(ExecDriver::new(cgroup_root.path().to_path_buf(), Arc::new(SimClock::new())));
 
     let alloc = AllocationId::new("alloc-missing-binary").expect("valid alloc id");
     let spec = AllocationSpec {

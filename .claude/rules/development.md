@@ -151,6 +151,54 @@ surface that lets the wrong call go to the wrong place.
 
 ---
 
+## Port-trait dependencies — `overdrive-host` is production, `overdrive-sim` is tests
+
+`overdrive-core` declares the port traits (`Clock`, `Transport`, `Entropy`,
+`Dataplane`, `Driver`, `IntentStore`, `ObservationStore`, `Llm`); two
+sibling crates implement them.
+
+| Crate | Class | Use | Cargo.toml placement |
+|---|---|---|---|
+| `overdrive-host` | `adapter-host` | Production bindings (`SystemClock`, `OsEntropy`, `TcpTransport`, …) | `[dependencies]` of crates that ship a production wiring |
+| `overdrive-sim` | `adapter-sim` | Simulation bindings (`SimClock`, `SimTransport`, `SimEntropy`, `SimDriver`, `SimObservationStore`, `SimLlm`) | `[dev-dependencies]` of any crate whose tests need DST controllability |
+
+**Rules:**
+
+- **Never put `overdrive-host` in `[dev-dependencies]`** — it is the
+  production binding crate. Tests do not run production wiring; they
+  inject sim adapters. If a test reaches for `SystemClock` /
+  `OsEntropy` / `TcpTransport`, the test is wrong, not the dep
+  placement: replace the production binding with its sim counterpart.
+- **Never put `overdrive-sim` in `[dependencies]`** — it carries
+  `turmoil`, `StdRng`, and other DST machinery that must not be
+  reachable from production binaries. The dst-lint gate scans for
+  this.
+- **Required, not defaulted, at the call site.** Types that depend on
+  a port trait take the implementation as an explicit constructor
+  parameter (`fn new(clock: Arc<dyn Clock>, ...)` or similar). Never
+  default the field to a production binding inside the constructor —
+  that silently inherits wall-clock / OS-entropy / real-network
+  behaviour into tests that forgot to override, which is the exact
+  failure mode the trait surface exists to prevent.
+- **Builder-pattern overrides (`with_clock`, `with_transport`) are an
+  anti-pattern for these traits.** A builder makes the dependency
+  optional — and "optional" means "tests can forget." Make the
+  dependency mandatory in `new()`; tests pass `Arc::new(SimClock::new())`,
+  production passes `Arc::new(SystemClock)`, the compiler enforces
+  every call site is explicit.
+- **Production wiring is composed at the binary boundary.** A library
+  crate's tests compose sim adapters; the CLI / control-plane binary
+  composes host adapters. The library crate itself does not pick
+  sides — it depends only on the trait surface in `overdrive-core`.
+
+The compile-time consequence is the load-bearing one: a test that
+forgets to inject a clock fails to compile rather than silently
+running on `SystemClock`. The dst-lint gate catches the residual
+"clock leaked into a `core` compile path" cases; this rule is the
+upstream prevention.
+
+---
+
 ## Ordered-collection choice
 
 `core` and control-plane hot paths default to `BTreeMap` for keyed maps

@@ -51,8 +51,10 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
         Arc::new(LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open store"));
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
-    let driver: Arc<dyn Driver> =
-        Arc::new(ExecDriver::new(std::path::PathBuf::from("/sys/fs/cgroup")));
+    let driver: Arc<dyn Driver> = Arc::new(ExecDriver::new(
+        std::path::PathBuf::from("/sys/fs/cgroup"),
+        Arc::new(overdrive_sim::adapters::clock::SimClock::new()),
+    ));
 
     let state = AppState::new(store, obs, Arc::new(runtime), driver);
 

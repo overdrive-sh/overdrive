@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use overdrive_core::id::{AllocationId, SpiffeId};
 use overdrive_core::traits::driver::{AllocationSpec, AllocationState, Driver, Resources};
+use overdrive_sim::adapters::clock::SimClock;
 use overdrive_worker::ExecDriver;
 use tempfile::TempDir;
 
@@ -22,7 +23,8 @@ async fn limit_write_failure_warns_and_continues() {
         .expect("workloads.slice created");
 
     let driver: Arc<dyn Driver> = Arc::new(
-        ExecDriver::new(cgroup_root.path().to_path_buf()).with_force_limit_write_failure(true),
+        ExecDriver::new(cgroup_root.path().to_path_buf(), Arc::new(SimClock::new()))
+            .with_force_limit_write_failure(true),
     );
 
     let alloc = AllocationId::new("alloc-limit-write-fail").expect("valid alloc id");

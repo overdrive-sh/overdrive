@@ -64,7 +64,10 @@ async fn cluster_status_responsive_under_workload_cpu_burst() {
     let local_node = NodeId::new("local").expect("node id");
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(local_node.clone(), 0));
-    let driver = Arc::new(ExecDriver::new(std::path::PathBuf::from("/sys/fs/cgroup")));
+    let driver = Arc::new(ExecDriver::new(
+        std::path::PathBuf::from("/sys/fs/cgroup"),
+        Arc::new(overdrive_sim::adapters::clock::SimClock::new()),
+    ));
 
     // Cleanup guard — see job_lifecycle/cleanup.rs.
     let _cleanup =

@@ -25,6 +25,7 @@ use tokio::sync::mpsc;
 use tracing::warn;
 
 use overdrive_core::id::AllocationId;
+use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverType, ExitEvent,
     ExitKind, Resources,
@@ -161,6 +162,13 @@ pub struct ExecDriver {
     /// so `take_receiver()` can move it out behind a shared reference.
     /// `None` once consumed.
     exit_rx: Arc<Mutex<Option<mpsc::Receiver<ExitEvent>>>>,
+    /// Injected clock — production wires `SystemClock` (host),
+    /// simulation wires `SimClock`. The driver's grace window in
+    /// `Driver::stop` goes through `Clock::sleep` so the timeout is
+    /// DST-controllable; bare `tokio::time::*` is banned in
+    /// production code per `.claude/rules/testing.md` § Sources of
+    /// Nondeterminism.
+    clock: Arc<dyn Clock>,
 }
 
 impl std::fmt::Debug for ExecDriver {
@@ -175,10 +183,16 @@ impl std::fmt::Debug for ExecDriver {
 }
 
 impl ExecDriver {
-    /// Construct a fresh `ExecDriver` rooted at `cgroup_root`.
-    /// Production wires `/sys/fs/cgroup`; tests pass a tempdir.
+    /// Construct a fresh `ExecDriver` rooted at `cgroup_root` with an
+    /// explicit `Clock` dependency. Production wires `/sys/fs/cgroup`
+    /// and `Arc::new(overdrive_host::SystemClock)`; simulation / DST
+    /// tests wire a tempdir and `Arc::new(SimClock::new())` so the
+    /// SIGTERM/SIGKILL grace window in `Driver::stop` advances on
+    /// logical time. The clock is a required parameter, never
+    /// defaulted, so tests cannot accidentally inherit wall-clock
+    /// behaviour by omission.
     #[must_use]
-    pub fn new(cgroup_root: PathBuf) -> Self {
+    pub fn new(cgroup_root: PathBuf, clock: Arc<dyn Clock>) -> Self {
         let (exit_tx, exit_rx) = mpsc::channel(EXIT_CHANNEL_CAPACITY);
         Self {
             cgroup_root,
@@ -188,6 +202,7 @@ impl ExecDriver {
             live: Arc::new(Mutex::new(BTreeMap::new())),
             exit_tx,
             exit_rx: Arc::new(Mutex::new(Some(exit_rx))),
+            clock,
         }
     }
 
@@ -433,26 +448,27 @@ impl Driver for ExecDriver {
         // 2. Wait up to the grace window for the watcher task (which
         //    owns the `Child`) to complete naturally — the watcher's
         //    `child.wait()` resolves once the SIGTERM-driven exit
-        //    happens. Joining the watcher is best-effort: a panicked
-        //    watcher surfaces as `Err`, and we treat it the same as a
-        //    grace-window timeout (escalate to SIGKILL).
-        let waited = tokio::time::timeout(self.stop_grace, watcher).await;
-        let watcher = match waited {
-            Ok(Ok(())) => {
-                // Watcher already completed — child exited within
-                // grace; nothing more to await.
+        //    happens. The grace future goes through `Clock::sleep` so
+        //    simulation advances logical time deterministically;
+        //    production wires `SystemClock` whose `sleep` resolves on
+        //    the tokio timer. Joining the watcher is best-effort: a
+        //    panicked watcher surfaces as a `JoinError`, and we treat
+        //    it the same as a clean completion (no SIGKILL escalation
+        //    is required because there is no live task to escalate
+        //    against — the `Child` is dropped with the watcher's
+        //    frame).
+        let watcher = tokio::select! {
+            _join_result = watcher => {
+                // Watcher resolved within grace — child exited or
+                // task panicked. Either way, no escalation path.
                 None
             }
-            Ok(Err(_join_err)) => {
-                // Watcher panicked or was cancelled. Treat as grace
-                // expiry — fall through to the SIGKILL escalation
-                // path. There is no live JoinHandle to await.
-                None
-            }
-            Err(_elapsed) => {
+            () = self.clock.sleep(self.stop_grace) => {
                 // 3. Grace window elapsed — escalate via process-group
-                //    SIGKILL below; the watcher will resolve once the
-                //    child is reaped by the kernel.
+                //    SIGKILL below; the watcher is still running and
+                //    will resolve once the child is reaped by the
+                //    kernel. Dropping the `JoinHandle` here only
+                //    detaches it; the task continues to run.
                 Some(())
             }
         };

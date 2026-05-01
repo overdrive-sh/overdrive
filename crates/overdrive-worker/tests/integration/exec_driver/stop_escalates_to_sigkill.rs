@@ -16,6 +16,7 @@ use std::time::Duration;
 
 use overdrive_core::id::{AllocationId, SpiffeId};
 use overdrive_core::traits::driver::{AllocationSpec, AllocationState, Driver, Resources};
+use overdrive_sim::adapters::clock::SimClock;
 use overdrive_worker::ExecDriver;
 use tempfile::TempDir;
 use tokio::time::Instant;
@@ -124,7 +125,7 @@ async fn stop_escalates_to_sigkill_when_sigterm_ignored() {
 
     // Custom stop-grace duration to keep the test fast — 250ms.
     let driver: Arc<dyn Driver> = Arc::new(
-        ExecDriver::new(cgroup_root.path().to_path_buf())
+        ExecDriver::new(cgroup_root.path().to_path_buf(), Arc::new(SimClock::new()))
             .with_stop_grace(Duration::from_millis(250)),
     );
 
