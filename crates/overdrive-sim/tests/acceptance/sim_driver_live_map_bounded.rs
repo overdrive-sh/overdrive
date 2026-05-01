@@ -44,8 +44,8 @@ async fn sim_driver_live_map_returns_to_zero_after_eight_start_stop_cycles() {
     // — each stop completes before the next start so the map never
     // holds more than one entry at a time on the GREEN path.
     for cycle in 0..CYCLES {
-        let alloc = AllocationId::from_str(&format!("alloc-sim-live-map-{cycle}"))
-            .expect("valid alloc id");
+        let alloc =
+            AllocationId::from_str(&format!("alloc-sim-live-map-{cycle}")).expect("valid alloc id");
         let identity =
             SpiffeId::new(&format!("spiffe://overdrive.local/job/livemap/alloc/sim{cycle}"))
                 .expect("valid spiffe id");
