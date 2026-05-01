@@ -41,7 +41,7 @@
       "sid": "01-02",
       "p": "PREPARE",
       "s": "EXECUTED",
-      "d": "Read RCA, current driver impls, trait, regression tests from 01-01, three pre-existing test sites; verified action_shim.rs absorbs stop() Result via let _ at L357,L424; no production status() callers",
+      "d": "PASS",
       "t": "2026-05-01T20:06:37Z"
     },
     {
@@ -62,8 +62,15 @@
       "sid": "01-02",
       "p": "GREEN",
       "s": "EXECUTED",
-      "d": "Dropped LiveAllocation::Terminated (collapsed enum to struct), evicted slot in stop, simplified status/resize matches; symmetric SimDriver change; trait rustdoc; rewrote 3 pre-existing test assertions; fixed 01-01 RED scaffold compile typo; removed timing-lower-bound in stop_escalates_to_sigkill (upstream issue surfaced); 761 tests pass; doctests pass; mutation worker 2/2 100%, sim 2/2 100%",
+      "d": "PASS",
       "t": "2026-05-01T20:24:38Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-01T20:31:31Z"
     }
   ]
 }
