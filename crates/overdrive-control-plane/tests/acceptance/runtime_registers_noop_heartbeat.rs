@@ -293,16 +293,12 @@ fn reconciler_is_pure_invariant_holds_for_noop_heartbeat() {
 //     registry holds ≥2 distinct names; with the fix (BTreeMap), the
 //     order is canonical (Ord) by construction.
 //
-//     CAVEAT: at Phase 1, the only reachable production registerable
-//     variant is `NoopHeartbeat`. The canary-bug variant
-//     `HarnessNoopHeartbeat` (gated behind the `canary-bug` feature)
-//     uses the SAME canonical name (`"noop-heartbeat"`), so the two
-//     cannot coexist in one registry — the second register returns
-//     `ControlPlaneError::Conflict`. As a consequence this test
-//     exercises only the trivial single-key case, which passes on
-//     `HashMap` too. It is authored now to lock the contract before
-//     Phase 2 lands a second built-in reconciler — once that arrives
-//     the property becomes a real (non-trivial) regression gate.
+//     CAVEAT: at Phase 1, the only reachable registerable variant is
+//     `NoopHeartbeat`. As a consequence this test exercises only the
+//     trivial single-key case, which passes on `HashMap` too. It is
+//     authored now to lock the contract before Phase 2 lands a second
+//     built-in reconciler — once that arrives the property becomes a
+//     real (non-trivial) regression gate.
 //
 //     FIXME: extend with ≥2 distinct reconciler names once a second
 //     built-in reconciler ships in Phase 2.

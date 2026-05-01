@@ -1190,12 +1190,12 @@ mod tests {
         // wrapper-side rewriting. Replaces the prior auto-add tests.
         let mode = Mode::Workspace { baseline_path: PathBuf::from("/ignored") };
         let scope = Scope {
-            features: vec!["integration-tests".into(), "canary-bug".into()],
+            features: vec!["integration-tests".into(), "extra-feature".into()],
             ..Scope::default()
         };
         let args = build_cargo_mutants_args(&mode, &scope, Path::new("/tmp/xtask"), None);
         let joined = argv_str(&args);
-        assert!(joined.contains("--features integration-tests,canary-bug"), "got: {joined}");
+        assert!(joined.contains("--features integration-tests,extra-feature"), "got: {joined}");
     }
 
     #[test]

@@ -11,9 +11,8 @@
 //! NDJSON lines that axum wraps via `Body::from_stream(...)`.
 //!
 //! The first line (`SubmitEvent::Accepted`) is emitted SYNCHRONOUSLY
-//! after `IntentStore::put_if_absent` returns — this is the
-//! load-bearing wiring property for KPI-01 (200ms p95 first-line).
-//! No broadcast wait, no observation read.
+//! after `IntentStore::put_if_absent` returns. No broadcast wait,
+//! no observation read.
 //!
 //! After `Accepted` the loop subscribes to
 //! `app_state.lifecycle_events` and enters a `tokio::select!` between:
@@ -118,8 +117,9 @@ impl std::io::Write for BytesMutW<'_> {
 /// Build the streaming response body for the NDJSON lane.
 ///
 /// `accepted` carries the `Accepted` event prepared synchronously by
-/// the handler after the `IntentStore::put_if_absent` returned — this
-/// is what makes KPI-01 (200ms p95 first-line) achievable.
+/// the handler after the `IntentStore::put_if_absent` returned, so
+/// the first line is structurally guaranteed to land before the
+/// reconcile path is entered.
 ///
 /// The returned stream yields `Result<Bytes, std::io::Error>` items
 /// that axum's `Body::from_stream(...)` wraps into the response body.

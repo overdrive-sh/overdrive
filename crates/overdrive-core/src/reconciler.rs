@@ -787,79 +787,6 @@ impl Reconciler for NoopHeartbeat {
 }
 
 // ---------------------------------------------------------------------------
-// HarnessNoopHeartbeat — DST canary-bug fixture (test-only)
-// ---------------------------------------------------------------------------
-
-/// Canary-bug reconciler used by the `overdrive-sim` DST harness to
-/// prove the `ReconcilerIsPure` invariant actually catches divergences.
-///
-/// When compiled without the `canary-bug` feature, behaves exactly
-/// like `NoopHeartbeat` — returns `vec![Action::Noop]`. When the
-/// feature is enabled, the reconciler flips its output on every call
-/// (even calls return one `Noop`, odd calls return two), which the
-/// twin-invocation check MUST flag as a purity violation.
-///
-/// The type lives here — not in `overdrive-sim` — so `AnyReconciler`
-/// can hold it in a conditionally-compiled variant. The mutants-skip
-/// entry for `harness_purity_reconciler` (in `.cargo/mutants.toml`) is
-/// updated to reference the new path below.
-#[cfg(feature = "canary-bug")]
-pub struct HarnessNoopHeartbeat {
-    name: ReconcilerName,
-}
-
-#[cfg(feature = "canary-bug")]
-impl HarnessNoopHeartbeat {
-    /// Construct the canary-bug `noop-heartbeat` harness fixture.
-    ///
-    /// # Panics
-    ///
-    /// Never — see [`NoopHeartbeat::canonical`].
-    #[must_use]
-    pub fn canonical() -> Self {
-        #[allow(clippy::expect_used)]
-        let name = ReconcilerName::new("noop-heartbeat")
-            .expect("'noop-heartbeat' is a valid ReconcilerName by construction");
-        Self { name }
-    }
-}
-
-#[cfg(feature = "canary-bug")]
-impl Reconciler for HarnessNoopHeartbeat {
-    // Per ADR-0021, reconcilers with no meaningful projection pick
-    // `type State = ()`. `HarnessNoopHeartbeat` mirrors `NoopHeartbeat`'s
-    // shape; the deliberate non-determinism lives in `reconcile`'s body,
-    // not in its signature.
-    type State = ();
-    type View = ();
-
-    fn name(&self) -> &ReconcilerName {
-        &self.name
-    }
-
-    async fn hydrate(
-        &self,
-        _target: &TargetResource,
-        _db: &LibsqlHandle,
-    ) -> Result<Self::View, HydrateError> {
-        Ok(())
-    }
-
-    fn reconcile(
-        &self,
-        _desired: &Self::State,
-        _actual: &Self::State,
-        _view: &Self::View,
-        _tick: &TickContext,
-    ) -> (Vec<Action>, Self::View) {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static CALL: AtomicU64 = AtomicU64::new(0);
-        let n = CALL.fetch_add(1, Ordering::SeqCst);
-        if n % 2 == 0 { (vec![Action::Noop], ()) } else { (vec![Action::Noop, Action::Noop], ()) }
-    }
-}
-
-// ---------------------------------------------------------------------------
 // AnyReconciler — enum-dispatch replacement for Box<dyn Reconciler>
 // ---------------------------------------------------------------------------
 
@@ -871,19 +798,12 @@ impl Reconciler for HarnessNoopHeartbeat {
 /// variant here and a match arm in each of `name`, `hydrate`, and
 /// `reconcile`.
 ///
-/// Phase 1 ships exactly one production variant: `NoopHeartbeat`. The
-/// canary-bug feature adds `HarnessNoopHeartbeat` — available only
-/// when the crate is compiled with the `canary-bug` feature enabled.
+/// Phase 1 ships exactly one proof-of-life variant: `NoopHeartbeat`.
 /// The `phase-1-first-workload` DISTILL adds `JobLifecycle` as the
 /// first real (non-proof-of-life) reconciler.
 pub enum AnyReconciler {
     /// The Phase 1 proof-of-life reconciler. See [`NoopHeartbeat`].
     NoopHeartbeat(NoopHeartbeat),
-    /// DST canary-bug fixture — deliberately non-deterministic when
-    /// the `canary-bug` feature is enabled. See
-    /// [`HarnessNoopHeartbeat`].
-    #[cfg(feature = "canary-bug")]
-    HarnessNoopHeartbeat(HarnessNoopHeartbeat),
     /// First real (non-proof-of-life) reconciler. Converges declared
     /// replica count for a `Job` — see [`JobLifecycle`].
     JobLifecycle(JobLifecycle),
@@ -895,8 +815,6 @@ impl AnyReconciler {
     pub fn name(&self) -> &ReconcilerName {
         match self {
             Self::NoopHeartbeat(r) => r.name(),
-            #[cfg(feature = "canary-bug")]
-            Self::HarnessNoopHeartbeat(r) => r.name(),
             Self::JobLifecycle(r) => r.name(),
         }
     }
@@ -915,10 +833,6 @@ impl AnyReconciler {
     ) -> Result<AnyReconcilerView, HydrateError> {
         match self {
             Self::NoopHeartbeat(r) => r.hydrate(target, db).await.map(|()| AnyReconcilerView::Unit),
-            #[cfg(feature = "canary-bug")]
-            Self::HarnessNoopHeartbeat(r) => {
-                r.hydrate(target, db).await.map(|()| AnyReconcilerView::Unit)
-            }
             Self::JobLifecycle(r) => {
                 r.hydrate(target, db).await.map(AnyReconcilerView::JobLifecycle)
             }
@@ -965,16 +879,6 @@ impl AnyReconciler {
     ) -> (Vec<Action>, AnyReconcilerView) {
         match (self, desired, actual, view) {
             (Self::NoopHeartbeat(r), AnyState::Unit, AnyState::Unit, AnyReconcilerView::Unit) => {
-                let (actions, ()) = r.reconcile(&(), &(), &(), tick);
-                (actions, AnyReconcilerView::Unit)
-            }
-            #[cfg(feature = "canary-bug")]
-            (
-                Self::HarnessNoopHeartbeat(r),
-                AnyState::Unit,
-                AnyState::Unit,
-                AnyReconcilerView::Unit,
-            ) => {
                 let (actions, ()) = r.reconcile(&(), &(), &(), tick);
                 (actions, AnyReconcilerView::Unit)
             }

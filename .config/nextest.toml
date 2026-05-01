@@ -43,18 +43,6 @@ final-status-level = "fail"
 # test past the 60s mark on the runner.
 slow-timeout = { period = "60s", terminate-after = 2 }
 
-# DST canary tests boot a `cargo run -p xtask --features
-# overdrive-sim/canary-bug,...` subprocess that compiles xtask and the
-# control-plane crate under a fresh per-test-process target dir
-# (`shared_canary_target` — see `xtask/tests/acceptance/dst_canary_red_run.rs`).
-# The cold-cache compile alone is ~90-100s on a Lima VM; stack the
-# subprocess setup, the deliberate canary failure trigger, and the
-# JSON+stderr reads on top and the wall clock pushes past the default
-# 120s budget. Bumping `terminate-after` for these two tests gives them
-# a 240s budget — still bounded, still surfaces a real deadlock as a
-# TIMEOUT, just absorbs the cold-cargo-run cost. The second test in
-# the binary reuses the first's compile cache (~5s), so the budget
-# never has to absorb two cold compiles.
 # The store-local snapshot proptest opens a real redb file per case
 # at the default `PROPTEST_CASES=1024` budget. Solo wall-clock on Lima
 # is ~55s; under parallel load (workspace integration runs schedule
@@ -67,30 +55,6 @@ slow-timeout = { period = "60s", terminate-after = 2 }
 [[profile.default.overrides]]
 filter = 'package(overdrive-store-local) & binary(integration) & test(snapshot_roundtrip_is_byte_identical_for_arbitrary_store_contents)'
 slow-timeout = { period = "60s", terminate-after = 4 }
-
-[[profile.default.overrides]]
-filter = 'package(xtask) & binary(acceptance) & test(/dst_canary_red_run/)'
-# Both canary tests serialise on `canary_guard()` (a `Mutex<()>` shared
-# across the test process) so the second test spends most of its
-# nextest-tracked wall-clock blocked on the mutex while the first test
-# runs its `cargo run -p xtask --features
-# overdrive-sim/canary-bug,...` subprocess. nextest's per-test timer
-# starts when nextest picks up the test, NOT when the test acquires
-# its mutex — so the waiter's clock includes the leader's full
-# subprocess-compile-and-run window. Six 60s intervals = 360s budget
-# absorbs the leader's ~175s cold compile plus the waiter's own
-# ~5-10s warm-cache run plus a comfortable margin.
-slow-timeout = { period = "60s", terminate-after = 6 }
-test-group = "dst-canary"
-
-[test-groups]
-# `dst-canary` runs at most one test concurrently. The two
-# `dst_canary_red_run::*` tests share a `cargo run` target dir
-# (`shared_canary_target`) and serialise on `canary_guard()` — running
-# them at concurrency 1 keeps nextest's per-test timer in sync with
-# the actual work each test is doing, instead of charging the waiter
-# for the leader's subprocess.
-dst-canary = { max-threads = 1 }
 
 [profile.ci]
 # CI runs the same suite with structured output. Retries stay at zero:

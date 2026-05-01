@@ -54,15 +54,6 @@ tokio.workspace       = true
 libsql.workspace = true
 
 [features]
-# `canary-bug` — TEST-ONLY feature. Enables the `HarnessNoopHeartbeat`
-# reconciler variant (and its corresponding `AnyReconciler` variant)
-# whose `reconcile` body is deliberately non-deterministic — used by
-# the `overdrive-sim` DST harness to prove the `ReconcilerIsPure`
-# invariant actually catches divergences. Production builds MUST NEVER
-# enable this feature. The sim crate's `canary-bug` feature toggles
-# this via `overdrive-core/canary-bug`.
-canary-bug = []
-
 # `test-utils` — TEST-ONLY feature. Exposes
 # `overdrive_core::testing::observation_store::run_lww_conformance`, the
 # trait-generic LWW conformance harness exercised by every

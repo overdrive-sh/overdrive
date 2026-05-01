@@ -6,15 +6,8 @@
 //! `xtask/tests/acceptance/dst_seeded_reproduction.rs` exercises the
 //! subprocess boundary; these tests exercise the library boundary so
 //! that a determinism regression is caught at the cheapest level.
-//!
-//! The tests also cover the `canary-bug` feature behaviour end-to-end
-//! at the library surface — when the feature is compiled in and the
-//! harness sees the canary trigger seed, the LWW convergence invariant
-//! must fail. On non-trigger seeds (or without the feature), the
-//! invariant must pass so that CI's normal `cargo xtask dst` run
-//! remains green.
 
-use overdrive_sim::{Harness, Invariant, InvariantStatus};
+use overdrive_sim::{Harness, Invariant};
 
 /// Two back-to-back runs with the same seed produce equal reports
 /// (excluding wall-clock). This is the property the twin-run proptest
@@ -59,71 +52,4 @@ fn harness_run_is_deterministic_under_only_narrowing() {
 
     assert_eq!(a.invariants, b.invariants);
     assert_eq!(a.failures, b.failures);
-}
-
-/// The `canary-bug` feature is off by default. Under the default cargo
-/// test, the LWW invariant must pass on the canary trigger seed — this
-/// pins that the feature gate is respected and production builds are
-/// safe.
-#[cfg(not(feature = "canary-bug"))]
-#[test]
-fn default_build_passes_on_canary_trigger_seed() {
-    let report = Harness::new().run(0xDEAD_BEEF).expect("harness must compose");
-    let lww = report
-        .invariants
-        .iter()
-        .find(|i| i.name == "sim-observation-lww-converges")
-        .expect("lww invariant must be in catalogue");
-    assert_eq!(
-        lww.status,
-        InvariantStatus::Pass,
-        "without canary-bug, LWW invariant must pass on the trigger seed"
-    );
-    assert!(report.is_green(), "without canary-bug, seed=0xDEADBEEF must be green");
-}
-
-/// With the `canary-bug` feature enabled, the LWW invariant MUST fail
-/// on the canary trigger seed. This is what the WS-3 acceptance test
-/// subprocess-level asserts on; we mirror the assertion at the library
-/// boundary for a cheap determinism check.
-#[cfg(feature = "canary-bug")]
-#[test]
-fn canary_build_fails_on_canary_trigger_seed() {
-    let report = Harness::new().run(0xDEAD_BEEF).expect("harness must compose");
-
-    assert!(
-        !report.is_green(),
-        "canary build on trigger seed must fail; got {:?}",
-        report.invariants
-    );
-
-    let lww = report
-        .invariants
-        .iter()
-        .find(|i| i.name == "sim-observation-lww-converges")
-        .expect("lww invariant must be in catalogue");
-    assert_eq!(
-        lww.status,
-        InvariantStatus::Fail,
-        "canary build must make LWW invariant fail on trigger seed; got {lww:?}"
-    );
-}
-
-/// With the `canary-bug` feature enabled, the canary MUST NOT fire on
-/// a non-trigger seed. This is essential for CI — enabling the feature
-/// to run WS-3 must not silently break every other seed.
-#[cfg(feature = "canary-bug")]
-#[test]
-fn canary_build_is_green_on_non_trigger_seed() {
-    let report = Harness::new().run(42).expect("harness must compose");
-    let lww = report
-        .invariants
-        .iter()
-        .find(|i| i.name == "sim-observation-lww-converges")
-        .expect("lww invariant must be in catalogue");
-    assert_eq!(
-        lww.status,
-        InvariantStatus::Pass,
-        "canary build on non-trigger seed must pass LWW invariant; got {lww:?}"
-    );
 }

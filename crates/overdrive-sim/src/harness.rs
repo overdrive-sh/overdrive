@@ -700,31 +700,9 @@ fn drive_dispatch_routing() -> (Vec<evaluators::Evaluation>, evaluators::Dispatc
 
 /// Construct the reconciler the harness twin-invokes for the
 /// `ReconcilerIsPure` invariant.
-///
-/// When compiled without `canary-bug`, returns
-/// `AnyReconciler::NoopHeartbeat(NoopHeartbeat::canonical())` — the
-/// deterministic Phase 1 proof-of-life reconciler. Under
-/// `--features canary-bug`, returns
-/// `AnyReconciler::HarnessNoopHeartbeat(HarnessNoopHeartbeat::canonical())`
-/// whose `reconcile` flips on every call, so the twin-invocation
-/// check goes red.
-///
-/// The mutants-skip entry for `harness_purity_reconciler` in
-/// `.cargo/mutants.toml` still matches by function name; the canary
-/// logic itself now lives in `overdrive-core::reconciler` so mutation
-/// testing sees the same byte surface regardless of which crate the
-/// function is declared in.
 fn harness_purity_reconciler() -> overdrive_core::reconciler::AnyReconciler {
-    #[cfg(feature = "canary-bug")]
-    {
-        use overdrive_core::reconciler::{AnyReconciler, HarnessNoopHeartbeat};
-        AnyReconciler::HarnessNoopHeartbeat(HarnessNoopHeartbeat::canonical())
-    }
-    #[cfg(not(feature = "canary-bug"))]
-    {
-        use overdrive_core::reconciler::{AnyReconciler, NoopHeartbeat};
-        AnyReconciler::NoopHeartbeat(NoopHeartbeat::canonical())
-    }
+    use overdrive_core::reconciler::{AnyReconciler, NoopHeartbeat};
+    AnyReconciler::NoopHeartbeat(NoopHeartbeat::canonical())
 }
 
 /// Build a `SimObservationCluster` mirroring the harness's host set.

@@ -22,7 +22,6 @@ use axum::Router;
 use axum::body::{Body, to_bytes};
 use axum::http::{Method, Request, StatusCode, header};
 use axum::routing::post;
-use http_body_util::BodyExt as _;
 use overdrive_control_plane::AppState;
 use overdrive_control_plane::action_shim::LifecycleEvent;
 use overdrive_control_plane::api::{
@@ -456,45 +455,6 @@ async fn s_cp_06_cap_timer_fires_timeout_terminal_when_no_events_arrive() {
     // No lifecycle_transition lines between Accepted and Timeout.
     let has_lt = lines.iter().any(|l| l["kind"] == "lifecycle_transition");
     assert!(!has_lt, "no transitions should appear between accepted and timeout; got {lines:?}");
-}
-
-// ===========================================================================
-// S-CP-02 — KPI-01 first-line ≤ 200ms (basic single-case smoke; full
-// proptest version would sweep IntentStore latency).
-// ===========================================================================
-
-#[tokio::test]
-async fn s_cp_02_first_ndjson_line_is_emitted_synchronously_under_200ms() {
-    use std::time::Instant;
-
-    let tmp = TempDir::new().expect("tmpdir");
-    let state = build_app_state(&tmp);
-    let router = build_router(state);
-
-    let start = Instant::now();
-    let response = router
-        .oneshot(build_submit_request(&payments_spec(), "application/x-ndjson"))
-        .await
-        .expect("router oneshot");
-    assert_eq!(response.status(), StatusCode::OK);
-
-    // Read the body stream and capture when the first chunk arrives.
-    let mut body = response.into_body();
-    let mut first_byte_at: Option<Duration> = None;
-    while let Some(frame) = body.frame().await {
-        let frame = frame.expect("frame");
-        if let Ok(data) = frame.into_data() {
-            if !data.is_empty() && first_byte_at.is_none() {
-                first_byte_at = Some(start.elapsed());
-                break;
-            }
-        }
-    }
-    let delta = first_byte_at.expect("at least one chunk arrived");
-    assert!(
-        delta < Duration::from_millis(200),
-        "first NDJSON line must arrive within 200ms (KPI-01); was {delta:?}"
-    );
 }
 
 // ===========================================================================

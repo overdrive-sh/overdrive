@@ -964,9 +964,7 @@ pub fn evaluate_dispatch_routing_is_name_restricted(
 /// `rand::thread_rng`, internal `RefCell` counter, ...) fails here.
 /// Phase 1 runs this against the `noop-heartbeat` reconciler, which
 /// always returns `vec![Action::Noop]` — a deterministic baseline that
-/// proves the machinery is live. The optional `canary-bug` gate in
-/// this crate exposes a deliberately non-deterministic reconciler to
-/// prove this evaluator actually catches divergences.
+/// proves the machinery is live.
 ///
 /// # Time injection
 ///
@@ -995,11 +993,10 @@ pub fn evaluate_reconciler_is_pure(
     //
     // Per ADR-0021 (step 02-01), `desired`/`actual` are now typed
     // `&AnyState` rather than the prior `&State, &State` placeholder
-    // pair. Phase 1 reconcilers (`NoopHeartbeat`,
-    // `HarnessNoopHeartbeat`) use `AnyState::Unit` because their
-    // `Reconciler::State = ()`; the `JobLifecycle` reconciler's
-    // `AnyState::JobLifecycle(...)` arm becomes reachable in step
-    // 02-03 when the runtime tick loop ships.
+    // pair. Phase 1 reconcilers (`NoopHeartbeat`) use `AnyState::Unit`
+    // because their `Reconciler::State = ()`; the `JobLifecycle`
+    // reconciler's `AnyState::JobLifecycle(...)` arm becomes reachable
+    // in step 02-03 when the runtime tick loop ships.
     let desired = AnyState::Unit;
     let actual = AnyState::Unit;
     let view = AnyReconcilerView::Unit;
@@ -1030,12 +1027,12 @@ pub fn evaluate_reconciler_is_pure(
 ///
 /// Extracted from the evaluator body so the `now + BUDGET` arithmetic
 /// can be unit-tested. With the `TickContext` construction inlined,
-/// the `+` mutation survived — the Phase 1 reconciler fixtures
-/// (`NoopHeartbeat`, `HarnessNoopHeartbeat` under default features)
-/// ignore `tick.deadline` entirely, so a deadline-in-the-past produced
-/// no observable divergence. The helper form gives mutation testing a
-/// direct target: a unit test asserts `tick.deadline > tick.now` and
-/// `+ -> -` flips the sign on that difference.
+/// the `+` mutation survived — the Phase 1 reconciler fixture
+/// (`NoopHeartbeat`) ignores `tick.deadline` entirely, so a
+/// deadline-in-the-past produced no observable divergence. The
+/// helper form gives mutation testing a direct target: a unit test
+/// asserts `tick.deadline > tick.now` and `+ -> -` flips the sign
+/// on that difference.
 ///
 /// The `tick` counter stays zero (the evaluator runs once per harness
 /// pass, not inside a real reconcile loop) and the budget is a
@@ -1559,11 +1556,10 @@ mod tests {
         // `build_tick_context`: with `-`, `now - BUDGET` would produce
         // a deadline in the past (before `now`), failing this
         // assertion. With the original `+`, deadline is exactly
-        // `BUDGET` ahead of `now`. The Phase 1 reconcilers
-        // (`NoopHeartbeat`, `HarnessNoopHeartbeat`) ignore
-        // `tick.deadline`, so without a direct test on the helper the
-        // mutation survives — the evaluator returns a deterministic
-        // Pass either way.
+        // `BUDGET` ahead of `now`. The Phase 1 reconciler
+        // (`NoopHeartbeat`) ignores `tick.deadline`, so without a
+        // direct test on the helper the mutation survives — the
+        // evaluator returns a deterministic Pass either way.
         let clock = SimClock::new();
         let tick = build_tick_context(&clock);
         assert!(
@@ -1585,36 +1581,6 @@ mod tests {
         let r = AnyReconciler::NoopHeartbeat(NoopHeartbeat::canonical());
         let clock = SimClock::new();
         assert_eq!(evaluate_reconciler_is_pure(&r, &clock).status, InvariantStatus::Pass);
-    }
-
-    /// The non-deterministic witness requires the `canary-bug` feature.
-    ///
-    /// Under the `AnyReconciler` enum-dispatch model (04-07), inhabiting
-    /// the enum is restricted to first-party variants — a one-off
-    /// `Flappy` struct from a test module cannot be dispatched through
-    /// `AnyReconciler` without modifying the enum. The `canary-bug`
-    /// feature exists precisely to ship a flip-on-call variant in-tree:
-    /// `HarnessNoopHeartbeat` under `#[cfg(feature = "canary-bug")]`
-    /// alternates one/two `Noop`s per call, which the twin-invocation
-    /// check must flag.
-    ///
-    /// The default unit lane does NOT exercise this branch (the feature
-    /// is off). End-to-end coverage that this evaluator actually flags
-    /// a real divergence is provided by
-    /// `xtask/tests/acceptance/dst_canary_red_run.rs` and the sim
-    /// acceptance suite run under `--features
-    /// overdrive-sim/canary-bug`, both of which drive a full harness
-    /// run with the canary variant in the registry.
-    #[cfg(feature = "canary-bug")]
-    #[test]
-    fn reconciler_is_pure_fails_for_non_deterministic_reconciler() {
-        use overdrive_core::reconciler::{AnyReconciler, HarnessNoopHeartbeat};
-
-        let r = AnyReconciler::HarnessNoopHeartbeat(HarnessNoopHeartbeat::canonical());
-        let clock = SimClock::new();
-        let result = evaluate_reconciler_is_pure(&r, &clock);
-        assert_eq!(result.status, InvariantStatus::Fail);
-        assert!(result.cause.as_ref().is_some_and(|c| c.contains("diverged")));
     }
 
     // -----------------------------------------------------------------

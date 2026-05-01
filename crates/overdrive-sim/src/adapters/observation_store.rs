@@ -56,8 +56,8 @@ use tokio_stream::wrappers::BroadcastStream;
 
 use overdrive_core::id::{AllocationId, NodeId};
 use overdrive_core::traits::observation_store::{
-    AllocStatusRow, LogicalTimestamp, NodeHealthRow, ObservationRow, ObservationStore,
-    ObservationStoreError, ObservationSubscription,
+    AllocStatusRow, NodeHealthRow, ObservationRow, ObservationStore, ObservationStoreError,
+    ObservationSubscription,
 };
 
 /// Default capacity for the fan-out broadcast channel. Writes beyond
@@ -75,21 +75,6 @@ const DEFAULT_FANOUT_CAPACITY: usize = 1024;
 /// Construct with [`SimObservationStore::single_peer`] for a lone peer,
 /// or via [`SimObservationStore::cluster_builder`] for a multi-peer
 /// cluster with injectable gossip delay and partitions.
-///
-/// # `canary-bug` feature — TEST-ONLY
-///
-/// When compiled with the `canary-bug` Cargo feature AND constructed
-/// with the canary trigger seed (`0xDEAD_BEEF`), this peer deliberately
-/// inverts the LWW domination check. Losing rows win, cross-peer views
-/// diverge, and the `SimObservationLwwConverges` invariant in the DST
-/// harness goes red. This is used by the WS-3 acceptance test
-/// (`xtask/tests/acceptance/dst_canary_red_run.rs`) to prove the
-/// invariant suite can catch a real bug.
-///
-/// **Production builds must never enable this feature.** The
-/// `.github/workflows/ci.yml` `dst` job deliberately does NOT pass
-/// `--features canary-bug`; the WS-3 test enables it through a
-/// per-test `cargo run --features overdrive-sim/canary-bug` subprocess.
 pub struct SimObservationStore {
     node_id: NodeId,
     #[allow(dead_code)]
@@ -112,37 +97,25 @@ struct PeerState {
     by_alloc: Mutex<HashMap<AllocationId, AllocStatusRow>>,
     by_node: Mutex<HashMap<NodeId, NodeHealthRow>>,
     fan_out: broadcast::Sender<ObservationRow>,
-    /// Seed this peer was built under. Only observed by the
-    /// `canary-bug` feature; in non-canary builds the field is unused
-    /// but held so the type is identical across feature states (no
-    /// conditional compilation of struct shape).
-    #[allow(dead_code)]
-    seed: u64,
 }
 
 impl PeerState {
-    fn new(seed: u64) -> Arc<Self> {
+    fn new(_seed: u64) -> Arc<Self> {
         let (fan_out, _rx) = broadcast::channel(DEFAULT_FANOUT_CAPACITY);
         Arc::new(Self {
             rows: Mutex::new(Vec::new()),
             by_alloc: Mutex::new(HashMap::new()),
             by_node: Mutex::new(HashMap::new()),
             fan_out,
-            seed,
         })
     }
 
     /// Apply an incoming row (whether a local write or a gossip
-    /// delivery) under LWW semantics. `owner` is the node id of the
-    /// peer owning this state — the `canary-bug` feature observes it
-    /// so the planted bug can fire on only ONE peer in the cluster
-    /// (breaking LWW symmetrically on every peer leaves them
-    /// convergent; the canary must break exactly one peer). Every
-    /// non-canary code path ignores `owner`.
-    fn apply(&self, row: ObservationRow, owner: &NodeId) -> bool {
+    /// delivery) under LWW semantics.
+    fn apply(&self, row: ObservationRow) -> bool {
         let accepted = match &row {
-            ObservationRow::AllocStatus(incoming) => self.apply_alloc_status(incoming, owner),
-            ObservationRow::NodeHealth(incoming) => self.apply_node_health(incoming, owner),
+            ObservationRow::AllocStatus(incoming) => self.apply_alloc_status(incoming),
+            ObservationRow::NodeHealth(incoming) => self.apply_node_health(incoming),
         };
 
         if accepted {
@@ -158,22 +131,14 @@ impl PeerState {
     /// LWW merge for `alloc_status`. Returns `true` when the incoming
     /// row dominates or is new; `false` when it loses to an existing
     /// entry.
-    ///
-    /// The `canary-bug` feature deliberately inverts the domination
-    /// check on the trigger seed (`0xDEAD_BEEF`) — a losing row wins,
-    /// producing cross-peer disagreement that the `SimObservationLwwConverges`
-    /// invariant catches. See the Cargo `[features]` table in
-    /// `crates/overdrive-sim/Cargo.toml` for the full rationale.
-    fn apply_alloc_status(&self, incoming: &AllocStatusRow, owner: &NodeId) -> bool {
+    fn apply_alloc_status(&self, incoming: &AllocStatusRow) -> bool {
         let mut by_alloc = self.by_alloc.lock();
         match by_alloc.get(&incoming.alloc_id) {
             None => {
                 by_alloc.insert(incoming.alloc_id.clone(), incoming.clone());
                 true
             }
-            Some(existing)
-                if self.dominates_for_merge(&incoming.updated_at, &existing.updated_at, owner) =>
-            {
+            Some(existing) if incoming.updated_at.dominates(&existing.updated_at) => {
                 by_alloc.insert(incoming.alloc_id.clone(), incoming.clone());
                 true
             }
@@ -183,58 +148,20 @@ impl PeerState {
 
     /// LWW merge for `node_health`. Mirrors [`apply_alloc_status`] —
     /// keyed by [`NodeHealthRow::node_id`], compares
-    /// [`NodeHealthRow::last_heartbeat`] via the shared comparator
-    /// (`canary-bug` planted bug honoured identically).
-    fn apply_node_health(&self, incoming: &NodeHealthRow, owner: &NodeId) -> bool {
+    /// [`NodeHealthRow::last_heartbeat`].
+    fn apply_node_health(&self, incoming: &NodeHealthRow) -> bool {
         let mut by_node = self.by_node.lock();
         match by_node.get(&incoming.node_id) {
             None => {
                 by_node.insert(incoming.node_id.clone(), incoming.clone());
                 true
             }
-            Some(existing)
-                if self.dominates_for_merge(
-                    &incoming.last_heartbeat,
-                    &existing.last_heartbeat,
-                    owner,
-                ) =>
-            {
+            Some(existing) if incoming.last_heartbeat.dominates(&existing.last_heartbeat) => {
                 by_node.insert(incoming.node_id.clone(), incoming.clone());
                 true
             }
             Some(_) => false,
         }
-    }
-
-    /// Wrapper around [`LogicalTimestamp::dominates`] that honours the
-    /// `canary-bug` feature. Without the feature this delegates
-    /// unchanged. With the feature AND the canary trigger seed AND the
-    /// owning peer is `host-0`, the comparison is flipped — losers win
-    /// on that peer only, the LWW total order is broken
-    /// asymmetrically, and cross-peer views disagree. Every other peer
-    /// in the cluster continues to use the standard LWW comparison, so
-    /// the disagreement is observable in `ConvergenceReport`. Every
-    /// seed other than the trigger passes through unchanged even when
-    /// the feature is enabled so that enabling the feature does not
-    /// break unrelated tests sharing the binary.
-    // `self` is unused in non-canary builds (the feature gate reads
-    // `self.seed`); clippy's `unused_self` lint fires in that branch.
-    #[cfg_attr(not(feature = "canary-bug"), allow(clippy::unused_self))]
-    fn dominates_for_merge(
-        &self,
-        a: &LogicalTimestamp,
-        b: &LogicalTimestamp,
-        owner: &NodeId,
-    ) -> bool {
-        #[cfg(feature = "canary-bug")]
-        if self.seed == 0xDEAD_BEEF && owner.to_string() == "host-0" {
-            // Planted bug: on host-0 only, losing rows win the merge.
-            // Other peers still apply normal LWW; the asymmetry is
-            // what produces cross-peer divergence.
-            return !a.dominates(b);
-        }
-        let _ = owner; // silence unused-variable warning in non-canary builds
-        a.dominates(b)
     }
 
     fn latest_alloc_status(&self, alloc_id: &AllocationId) -> Option<AllocStatusRow> {
@@ -304,7 +231,7 @@ impl ObservationStore for SimObservationStore {
         // Full-row writes only — §4 guardrail. Apply locally first so
         // the writing peer's own subscribers see the write immediately;
         // the LWW check at `apply` drops a losing local write wholesale.
-        let accepted = self.inner.apply(row.clone(), &self.node_id);
+        let accepted = self.inner.apply(row.clone());
 
         // If we belong to a cluster, enqueue the row for gossip to every
         // non-partitioned peer. Losers are also enqueued: a peer that
@@ -805,7 +732,7 @@ impl GossipRouter {
         // Apply each eligible delivery to its recipient.
         for (recipient_id, row) in eligible {
             if let Some(recipient) = peers.get(&recipient_id) {
-                recipient.inner.apply(row, &recipient.node_id);
+                recipient.inner.apply(row);
             }
         }
     }
