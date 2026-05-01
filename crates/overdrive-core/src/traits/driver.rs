@@ -215,6 +215,23 @@ pub trait Driver: Send + Sync + 'static {
     /// the watcher-emitted `ExitEvent` consumed by the
     /// `exit_observer` worker subsystem; production callers do not
     /// poll `status()` to detect crashes.
+    ///
+    /// # Post-stop contract
+    ///
+    /// After [`Driver::stop`] returns `Ok(())`, a subsequent
+    /// `status()` against the same handle returns
+    /// `Err(DriverError::NotFound)`. Drivers do not retain
+    /// terminal-state memory for stopped allocations — durable
+    /// terminal-state truth lives in the `ObservationStore`
+    /// (`AllocStatusRow`), per the §18 three-layer state taxonomy
+    /// and `.claude/rules/development.md` § State-layer hygiene.
+    /// A driver that retained a `Terminated` slot would duplicate
+    /// observation's job and accumulate one entry per finally-stopped
+    /// allocation across a long-running node session.
+    ///
+    /// Tests that assert on the post-stop state must therefore expect
+    /// `Err(DriverError::NotFound { alloc })`, not
+    /// `Ok(AllocationState::Terminated)`.
     async fn status(&self, handle: &AllocationHandle) -> Result<AllocationState, DriverError>;
 
     async fn resize(

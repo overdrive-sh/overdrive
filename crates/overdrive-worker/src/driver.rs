@@ -103,31 +103,31 @@ fn classify_exit(status: &std::process::ExitStatus, intentional_stop: bool) -> E
     }
 }
 
-/// Tracking state for an allocation owned by the driver. The watcher
-/// task — spawned by `Driver::start` — owns the `Child`; this enum
-/// records only the side-channel state the driver itself needs to
-/// inspect (the `intentional_stop` flag, the cgroup scope, and the
-/// watcher's `JoinHandle` for cleanup).
-enum LiveAllocation {
-    /// Process is running; the watcher task owns the `Child` and
-    /// will emit an `ExitEvent` when `child.wait()` resolves.
-    Running {
-        scope: CgroupPath,
-        /// Set to `true` by `Driver::stop` BEFORE delivering SIGTERM.
-        /// The watcher reads this when classifying the exit so a
-        /// SIGTERM/SIGKILL induced by operator stop is `Terminated`,
-        /// not `Failed`. Per RCA §Approved fix item 3.
-        intentional_stop: Arc<AtomicBool>,
-        /// Handle to the per-alloc watcher task that calls
-        /// `child.wait().await`. Awaited in `Driver::stop` after the
-        /// signal is delivered so the driver does not leak a zombie
-        /// task, but the path is best-effort — the `JoinHandle` may
-        /// already have completed naturally before stop runs.
-        watcher: tokio::task::JoinHandle<()>,
-    },
-    /// Process was stopped or exited; we keep the slot so `status()` can
-    /// return `Terminated` rather than `NotFound`.
-    Terminated,
+/// Tracking state for a running allocation owned by the driver. The
+/// watcher task — spawned by `Driver::start` — owns the `Child`;
+/// this struct records only the side-channel state the driver itself
+/// needs to inspect (the `intentional_stop` flag, the cgroup scope,
+/// and the watcher's `JoinHandle` for cleanup).
+///
+/// Slot lifecycle: inserted by `Driver::start`, removed by
+/// `Driver::stop`. The driver does NOT retain a terminal-state slot
+/// after stop — durable terminal-state truth lives in the
+/// `ObservationStore` (`AllocStatusRow`) per the §18 three-layer
+/// state taxonomy. See `Driver::status` rustdoc in `overdrive-core`
+/// for the post-stop contract.
+struct LiveAllocation {
+    scope: CgroupPath,
+    /// Set to `true` by `Driver::stop` BEFORE delivering SIGTERM.
+    /// The watcher reads this when classifying the exit so a
+    /// SIGTERM/SIGKILL induced by operator stop is `Terminated`,
+    /// not `Failed`. Per RCA §Approved fix item 3.
+    intentional_stop: Arc<AtomicBool>,
+    /// Handle to the per-alloc watcher task that calls
+    /// `child.wait().await`. Awaited in `Driver::stop` after the
+    /// signal is delivered so the driver does not leak a zombie
+    /// task, but the path is best-effort — the `JoinHandle` may
+    /// already have completed naturally before stop runs.
+    watcher: tokio::task::JoinHandle<()>,
 }
 
 /// Production `Driver` impl for native processes under cgroup v2
@@ -327,10 +327,9 @@ impl Driver for ExecDriver {
                 intentional_stop.clone(),
                 self.exit_tx.clone(),
             );
-            self.live.lock().insert(
-                spec.alloc.clone(),
-                LiveAllocation::Running { scope, intentional_stop, watcher },
-            );
+            self.live
+                .lock()
+                .insert(spec.alloc.clone(), LiveAllocation { scope, intentional_stop, watcher });
             return Ok(AllocationHandle { alloc: spec.alloc.clone(), pid });
         }
 
@@ -415,10 +414,9 @@ impl Driver for ExecDriver {
             intentional_stop.clone(),
             self.exit_tx.clone(),
         );
-        self.live.lock().insert(
-            spec.alloc.clone(),
-            LiveAllocation::Running { scope, intentional_stop, watcher },
-        );
+        self.live
+            .lock()
+            .insert(spec.alloc.clone(), LiveAllocation { scope, intentional_stop, watcher });
 
         Ok(AllocationHandle { alloc: spec.alloc.clone(), pid: Some(pid) })
     }
@@ -430,16 +428,8 @@ impl Driver for ExecDriver {
             let mut live = self.live.lock();
             live.remove(&handle.alloc)
         };
-        let (scope, intentional_stop, watcher) = match entry {
-            Some(LiveAllocation::Running { scope, intentional_stop, watcher }) => {
-                (scope, intentional_stop, watcher)
-            }
-            Some(LiveAllocation::Terminated) => {
-                // Already stopped — record terminal again, idempotent.
-                self.live.lock().insert(handle.alloc.clone(), LiveAllocation::Terminated);
-                return Ok(());
-            }
-            None => return Err(DriverError::NotFound { alloc: handle.alloc.clone() }),
+        let Some(LiveAllocation { scope, intentional_stop, watcher }) = entry else {
+            return Err(DriverError::NotFound { alloc: handle.alloc.clone() });
         };
 
         // 0. Set `intentional_stop = true` BEFORE delivering any
@@ -523,18 +513,19 @@ impl Driver for ExecDriver {
         // The detached watcher cleans up its own `Child` on drop.
         let _ = watcher;
 
-        // 6. Record terminal state so subsequent status() calls
-        //    return `Terminated` rather than `NotFound`.
-        self.live.lock().insert(handle.alloc.clone(), LiveAllocation::Terminated);
-
+        // The slot was removed at the top of stop(); we deliberately
+        // do NOT re-insert a terminal marker. Subsequent status()
+        // calls return `Err(NotFound)`; durable terminal-state truth
+        // lives in the `ObservationStore` (`AllocStatusRow`). See the
+        // `Driver::status` rustdoc in `overdrive-core` for the
+        // post-stop contract.
         Ok(())
     }
 
     async fn status(&self, handle: &AllocationHandle) -> Result<AllocationState, DriverError> {
         let live = self.live.lock();
         match live.get(&handle.alloc) {
-            Some(LiveAllocation::Running { .. }) => Ok(AllocationState::Running),
-            Some(LiveAllocation::Terminated) => Ok(AllocationState::Terminated),
+            Some(_) => Ok(AllocationState::Running),
             None => Err(DriverError::NotFound { alloc: handle.alloc.clone() }),
         }
     }
@@ -551,10 +542,8 @@ impl Driver for ExecDriver {
         let scope = {
             let live = self.live.lock();
             match live.get(&handle.alloc) {
-                Some(LiveAllocation::Running { scope, .. }) => scope.clone(),
-                Some(LiveAllocation::Terminated) | None => {
-                    return Err(DriverError::NotFound { alloc: handle.alloc.clone() });
-                }
+                Some(running) => running.scope.clone(),
+                None => return Err(DriverError::NotFound { alloc: handle.alloc.clone() }),
             }
         };
         cgroup_manager::write_resource_limits_warn_on_error(&self.cgroup_root, &scope, &resources)

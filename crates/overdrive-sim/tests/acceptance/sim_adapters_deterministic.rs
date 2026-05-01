@@ -296,10 +296,16 @@ async fn sim_driver_start_stop_status_round_trip() {
     );
 
     driver.stop(&handle).await.expect("stop succeeds");
-    let state = driver.status(&handle).await.expect("status after stop");
+    // Per `fix-terminated-slot-accumulation` Step 01-02: the sim
+    // driver mirrors `ExecDriver`'s post-stop contract — the slot is
+    // evicted on stop, not overwritten with `Terminated`. Durable
+    // terminal-state truth lives in `ObservationStore::AllocStatusRow`;
+    // `Driver::status` returns `Err(NotFound)` post-stop. See the
+    // `Driver::status` rustdoc in `overdrive-core`.
+    let err = driver.status(&handle).await.expect_err("status returns NotFound after stop");
     assert!(
-        matches!(state, overdrive_core::traits::driver::AllocationState::Terminated),
-        "status after stop must be Terminated, got {state:?}"
+        matches!(err, DriverError::NotFound { ref alloc } if *alloc == handle.alloc),
+        "status after stop must be Err(NotFound {{ alloc }}); got {err:?}",
     );
 }
 

@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use overdrive_core::id::{AllocationId, SpiffeId};
-use overdrive_core::traits::driver::{AllocationSpec, AllocationState, Driver, Resources};
+use overdrive_core::traits::driver::{AllocationSpec, Driver, DriverError, Resources};
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_worker::ExecDriver;
 use tempfile::TempDir;
@@ -179,16 +179,30 @@ async fn stop_escalates_to_sigkill_when_sigterm_ignored() {
     driver.stop(&handle).await.expect("stop eventually succeeds via SIGKILL");
     let elapsed = started.elapsed();
 
-    // The stop must have waited at least the grace window before
-    // escalating, but not by orders of magnitude.
-    assert!(
-        elapsed >= Duration::from_millis(250),
-        "stop returned faster than the configured grace ({elapsed:?})"
-    );
+    // Wall-clock upper bound — escalation must complete within budget.
+    // The lower bound that previously asserted `elapsed >= grace` was
+    // removed when `dd6437` migrated the grace window from
+    // `tokio::time::timeout` to `Clock::sleep` (DST-controllable). Under
+    // `SimClock::sleep`, logical time advances cooperatively without
+    // consuming wall-clock; the lower bound was no longer observable
+    // through `Instant::now()`. The SIGKILL-escalation behaviour itself
+    // is pinned by `await_sleep_grandchild_reaped` below — the grandchild
+    // reaper proves the post-grace SIGKILL path actually fired, which is
+    // the test's purpose. See
+    // `docs/feature/fix-terminated-slot-accumulation/deliver/upstream-issues.md`
+    // §1 for the full RCA.
     assert!(elapsed < Duration::from_secs(10), "stop did not escalate within budget ({elapsed:?})");
 
-    let state = driver.status(&handle).await.expect("status succeeds");
-    assert_eq!(state, AllocationState::Terminated);
+    // Per `fix-terminated-slot-accumulation` Step 01-02: the driver
+    // does not retain a terminal-state slot after stop. Durable
+    // terminal-state truth lives in `ObservationStore::AllocStatusRow`;
+    // `Driver::status` returns `Err(NotFound)` post-stop. See the
+    // `Driver::status` rustdoc in `overdrive-core`.
+    let err = driver.status(&handle).await.expect_err("status returns NotFound after stop");
+    assert!(
+        matches!(err, DriverError::NotFound { ref alloc } if *alloc == handle.alloc),
+        "status after stop must be Err(NotFound {{ alloc }}); got {err:?}",
+    );
 
     // Crucially: the reparented `sleep` grandchild MUST also be reaped.
     //

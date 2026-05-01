@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use overdrive_core::id::{AllocationId, SpiffeId};
-use overdrive_core::traits::driver::{AllocationSpec, AllocationState, Driver, Resources};
+use overdrive_core::traits::driver::{AllocationSpec, Driver, DriverError, Resources};
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_worker::ExecDriver;
 use tempfile::TempDir;
@@ -64,8 +64,16 @@ async fn stop_with_grace_drives_to_terminated_and_removes_scope() {
          fell through to SIGKILL escalation",
     );
 
-    let state = driver.status(&handle).await.expect("status succeeds after stop");
-    assert_eq!(state, AllocationState::Terminated);
+    // Per `fix-terminated-slot-accumulation` Step 01-02: the driver
+    // does not retain a terminal-state slot after stop. Durable
+    // terminal-state truth lives in `ObservationStore::AllocStatusRow`;
+    // `Driver::status` returns `Err(NotFound)` post-stop. See the
+    // `Driver::status` rustdoc in `overdrive-core`.
+    let err = driver.status(&handle).await.expect_err("status returns NotFound after stop");
+    assert!(
+        matches!(err, DriverError::NotFound { ref alloc } if *alloc == handle.alloc),
+        "status after stop must be Err(NotFound {{ alloc }}); got {err:?}",
+    );
 
     let scope_dir =
         cgroup_root.path().join(format!("overdrive.slice/workloads.slice/{alloc}.scope"));

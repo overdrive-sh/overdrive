@@ -1,0 +1,69 @@
+{
+  "schema_version": "3.0",
+  "feature_id": "fix-terminated-slot-accumulation",
+  "events": [
+    {
+      "sid": "01-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-01T20:02:39Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-01T20:02:43Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: regression scaffold; integration test exercises smallest reachable surface",
+      "t": "2026-05-01T20:02:47Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: GREEN is step 01-02 per testing.md RED-scaffold pattern",
+      "t": "2026-05-01T20:02:51Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-01T20:02:55Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "Read RCA, current driver impls, trait, regression tests from 01-01, three pre-existing test sites; verified action_shim.rs absorbs stop() Result via let _ at L357,L424; no production status() callers",
+      "t": "2026-05-01T20:06:37Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: RED scaffold landed in step 01-01 (commit a3606fb); this step is the GREEN that turns those tests passing",
+      "t": "2026-05-01T20:06:44Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: regression test from 01-01 covers the smallest reachable surface; no separate unit test required for this deletion",
+      "t": "2026-05-01T20:06:48Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "Dropped LiveAllocation::Terminated (collapsed enum to struct), evicted slot in stop, simplified status/resize matches; symmetric SimDriver change; trait rustdoc; rewrote 3 pre-existing test assertions; fixed 01-01 RED scaffold compile typo; removed timing-lower-bound in stop_escalates_to_sigkill (upstream issue surfaced); 761 tests pass; doctests pass; mutation worker 2/2 100%, sim 2/2 100%",
+      "t": "2026-05-01T20:24:38Z"
+    }
+  ]
+}

@@ -216,17 +216,26 @@ impl Driver for SimDriver {
     }
 
     async fn stop(&self, handle: &AllocationHandle) -> Result<(), DriverError> {
+        // Symmetric with `ExecDriver::stop` per
+        // `fix-terminated-slot-accumulation` Step 01-02: the slot is
+        // removed on stop, NOT overwritten with `Terminated`. Durable
+        // terminal-state truth lives in the `ObservationStore`
+        // (`AllocStatusRow`); the driver retains no terminal-state
+        // memory. See the `Driver::status` rustdoc in `overdrive-core`
+        // for the post-stop contract.
         {
             let mut allocations = self.allocations.lock();
-            if !allocations.contains_key(&handle.alloc) {
+            if allocations.remove(&handle.alloc).is_none() {
                 return Err(DriverError::NotFound { alloc: handle.alloc.clone() });
             }
-            allocations.insert(handle.alloc.clone(), AllocationState::Terminated);
         }
         // Per `fix-exec-driver-exit-watcher` RCA §Approved fix item
         // 3: set `intentional_stop = true` BEFORE any further side
         // effect. The flag is shared with any in-flight scheduled
-        // exit-event task; the next emission honours it.
+        // exit-event task; the next emission honours it. The flag is
+        // intentionally NOT removed alongside the alloc slot — a
+        // scheduled exit-event task may still fire after stop()
+        // returns and must read `true` from the shared flag.
         let flag = self
             .intentional_stops
             .lock()
@@ -238,11 +247,10 @@ impl Driver for SimDriver {
     }
 
     async fn status(&self, handle: &AllocationHandle) -> Result<AllocationState, DriverError> {
-        self.allocations
-            .lock()
-            .get(&handle.alloc)
-            .cloned()
-            .ok_or_else(|| DriverError::NotFound { alloc: handle.alloc.clone() })
+        match self.allocations.lock().get(&handle.alloc) {
+            Some(_) => Ok(AllocationState::Running),
+            None => Err(DriverError::NotFound { alloc: handle.alloc.clone() }),
+        }
     }
 
     async fn resize(
