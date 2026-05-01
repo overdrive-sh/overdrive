@@ -1,0 +1,90 @@
+{
+  "roadmap": {
+    "project_id": "fix-terminated-slot-accumulation",
+    "created_at": "2026-05-02",
+    "total_steps": 2,
+    "phases": 1,
+    "feature_type": "bug-fix",
+    "rca_path": "docs/feature/fix-terminated-slot-accumulation/deliver/rca.md",
+    "summary": "Evict LiveAllocation::Terminated in ExecDriver::stop and SimDriver to remove unbounded BTreeMap growth across job lifecycles. Drop the variant outright; relax Driver::status post-stop contract to Err(NotFound). Single-cut greenfield discipline.",
+    "validation": {
+      "status": "approved",
+      "validated_by": "user-supplied-spec",
+      "validated_at": "2026-05-02"
+    }
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Bug fix — evict terminated slot",
+      "default_agent": "nw-software-crafter",
+      "default_deps_strategy": "sequential",
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "Regression test for bounded live-map cardinality",
+          "agent": "nw-software-crafter",
+          "deps": "sequential",
+          "criteria": [
+            "New worker integration test runs 8 start+stop cycles against distinct AllocationIds and asserts driver live-map cardinality is zero after stops complete.",
+            "Symmetric test added for SimDriver in the sim acceptance suite asserting the same cardinality invariant.",
+            "Both new tests FAIL against current code (Terminated slot retained), proving RED.",
+            "Cardinality accessor exposed via cfg(test) or pub(crate) — never on the public Driver trait surface.",
+            "New tests wire through the existing tests/integration entrypoint (worker) and tests/acceptance entrypoint (sim)."
+          ],
+          "test_file": "crates/overdrive-worker/tests/integration/exec_driver/live_map_bounded.rs",
+          "scenario_name": "live_map_returns_to_zero_after_eight_start_stop_cycles",
+          "files_to_modify": [
+            "crates/overdrive-worker/src/driver.rs",
+            "crates/overdrive-worker/tests/integration.rs",
+            "crates/overdrive-worker/tests/integration/exec_driver/mod.rs",
+            "crates/overdrive-worker/tests/integration/exec_driver/live_map_bounded.rs",
+            "crates/overdrive-sim/src/adapters/driver.rs",
+            "crates/overdrive-sim/tests/acceptance.rs",
+            "crates/overdrive-sim/tests/acceptance/sim_driver_live_map_bounded.rs"
+          ],
+          "implementation_notes": [
+            "Use the with_allow_no_cgroups(true) + TempDir fixture from existing exec_driver tests; do not invent a new fixture.",
+            "Cardinality accessor: prefer a #[cfg(test)] impl block on the same source file as the type; pub(crate) fn live_count(&self) -> usize { self.live.lock().len() }.",
+            "Stop is async — await each stop() in the loop; do not parallelize.",
+            "Mac dev loop: cargo nextest run --features integration-tests --no-run for compile-check; full runs via cargo xtask lima run -- cargo nextest run --features integration-tests per testing.md § Lima.",
+            "RED-phase commit may use --no-verify per testing.md § RED scaffolds; reference this step in the commit body.",
+            "Bug-fix scope: do NOT refactor unrelated test fixtures or extract helpers. Inline the loop."
+          ]
+        },
+        {
+          "id": "01-02",
+          "name": "Drop Terminated variant; evict slot in stop",
+          "agent": "nw-software-crafter",
+          "deps": "sequential",
+          "criteria": [
+            "LiveAllocation::Terminated removed from ExecDriver; status/stop/resize matches collapse to two arms with None returning Err(NotFound).",
+            "Symmetric change applied to SimDriver so the two adapters stay aligned with the shared trait contract.",
+            "Driver::status rustdoc documents post-stop returns Err(NotFound); durable terminal state lives in ObservationStore AllocStatusRow.",
+            "Three pre-existing acceptance assertions at the cited lines rewritten to expect Err(DriverError::NotFound) instead of Ok(Terminated).",
+            "Both regression tests from step 01-01 PASS; full workspace tests pass; mutation kill rate is at least eighty percent on diff scope."
+          ],
+          "test_file": "crates/overdrive-worker/tests/integration/exec_driver/live_map_bounded.rs",
+          "scenario_name": "live_map_returns_to_zero_after_eight_start_stop_cycles",
+          "files_to_modify": [
+            "crates/overdrive-core/src/traits/driver.rs",
+            "crates/overdrive-worker/src/driver.rs",
+            "crates/overdrive-sim/src/adapters/driver.rs",
+            "crates/overdrive-worker/tests/integration/exec_driver/stop_with_grace.rs",
+            "crates/overdrive-worker/tests/integration/exec_driver/stop_escalates_to_sigkill.rs",
+            "crates/overdrive-sim/tests/acceptance/sim_adapters_deterministic.rs"
+          ],
+          "implementation_notes": [
+            "Single-cut greenfield (memory: feedback_single_cut_greenfield_migrations.md, feedback_delete_dont_gate.md): delete the variant outright. NO #[deprecated], NO compat shim, NO commented-out arms.",
+            "Bug-fix scope (CLAUDE.md): no features, no unrelated refactors, no abstractions. Just the deletion + trait rustdoc + test rewrites.",
+            "If LiveAllocation collapses to a struct, pick whichever shape gives the smaller diff; mention the choice in the commit body.",
+            "Trait rustdoc location: read crates/overdrive-core/src/traits/driver.rs to find the existing fn status declaration; do not invent a line range.",
+            "Double-stop now returns Err(NotFound) instead of Ok(()). Verify production caller crates/overdrive-control-plane/src/action_shim.rs absorbs this with `let _ = driver.stop(...)`; if any other caller branches on Ok vs Err, surface as upstream-issues.md before proceeding.",
+            "Mutation gate: cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-worker --file crates/overdrive-worker/src/driver.rs (>=80%); same for overdrive-sim if its driver.rs is in the diff.",
+            "Conventional commit: `fix(worker): evict terminated slot in ExecDriver::stop` with body summarising the contract change and citing the trait rustdoc location."
+          ]
+        }
+      ]
+    }
+  ]
+}
