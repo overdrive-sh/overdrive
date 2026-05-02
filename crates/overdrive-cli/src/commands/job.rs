@@ -550,6 +550,33 @@ async fn consume_stream(
                         streaming_error: error,
                     });
                 }
+                // Terminal — workload reached a clean stop (operator
+                // intent, reconciler convergence, or natural process
+                // exit). Maps to exit code 0 across all `StoppedBy`
+                // variants per RCA + ADR-0032 §9: clean stop is a
+                // successful terminal outcome from the operator's
+                // perspective. RCA:
+                // `docs/feature/fix-converged-stopped-cli-arm/deliver/rca.md`.
+                SubmitEvent::ConvergedStopped { alloc_id: _, by } => {
+                    let acc = accepted.ok_or_else(|| CliError::BodyDecode {
+                        cause: "ConvergedStopped before Accepted on the streaming bus".to_string(),
+                    })?;
+                    let summary = crate::render::format_stopped_summary(&acc.job_id, by);
+                    let next_command = format!("overdrive alloc status --job {}", acc.job_id);
+                    return Ok(SubmitStreamingOutput {
+                        job_id: acc.job_id,
+                        intent_key: acc.intent_key,
+                        spec_digest: acc.spec_digest,
+                        outcome: acc.outcome,
+                        endpoint,
+                        next_command,
+                        exit_code: 0,
+                        summary,
+                        terminal_reason: None,
+                        streaming_reason: None,
+                        streaming_error: None,
+                    });
+                }
                 // `SubmitEvent` is `#[non_exhaustive]` — future variants
                 // are observed and ignored until the consumer grows
                 // explicit handling. Logged via tracing so an operator

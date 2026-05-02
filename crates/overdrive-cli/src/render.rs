@@ -486,3 +486,35 @@ pub fn format_running_summary(
 ) -> String {
     format!("Job '{job_name}' is running with {running}/{desired} replicas (took {took_human})\n")
 }
+
+/// Render the streaming `ConvergedStopped` summary line — the
+/// operator-facing exit-0 success render fired when a workload
+/// reaches a clean terminal stop. Pure function.
+///
+/// Mirrors `format_running_summary`'s shape (single line, trailing
+/// newline). The `by` argument names the initiator: operator-driven
+/// stop intent, reconciler-driven convergence to terminal, or natural
+/// process exit. `StoppedBy` is `#[non_exhaustive]` per
+/// `overdrive_core::transition_reason`; the catch-all arm carries
+/// neutral phrasing so a future variant does not silently render an
+/// empty initiator.
+///
+/// Operator-facing form:
+/// `Job '<name>' was stopped by <operator|reconciler|process>.`
+///
+/// RCA: `docs/feature/fix-converged-stopped-cli-arm/deliver/rca.md`.
+#[must_use]
+pub fn format_stopped_summary(
+    job_name: &str,
+    by: overdrive_core::transition_reason::StoppedBy,
+) -> String {
+    let initiator = match by {
+        overdrive_core::transition_reason::StoppedBy::Operator => "operator",
+        overdrive_core::transition_reason::StoppedBy::Reconciler => "reconciler",
+        overdrive_core::transition_reason::StoppedBy::Process => "process",
+        // `StoppedBy` is `#[non_exhaustive]` — neutral phrasing for
+        // any Phase-2+ variant added without updating this mapping.
+        _ => "an unrecognised initiator",
+    };
+    format!("Job '{job_name}' was stopped by {initiator}.\n")
+}

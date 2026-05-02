@@ -31,6 +31,11 @@ mod acceptance {
     // Slice 02 step 02-04 — S-CLI-04 (Failed-block render) and
     // S-CLI-05 (exit-code 2 across HTTP error variants).
     mod streaming_submit_cli_render;
+    // fix-converged-stopped-cli-arm — render-fn tests for
+    // `format_stopped_summary` (one per `StoppedBy` variant). Pairs
+    // with the integration-test regression in
+    // `tests/integration/streaming_submit_converged_stopped.rs`.
+    mod streaming_submit_cli_render_stopped;
     mod streaming_submit_http_error_exit_2;
 
     // Slice 03 step 03-01 — S-CLI-01 `--detach` flag argv surface.

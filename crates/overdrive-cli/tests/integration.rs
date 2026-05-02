@@ -33,6 +33,11 @@ mod integration {
     // requires real `tokio::process::Command::spawn`. macOS dev runs
     // via `cargo xtask lima run --` per `crates/overdrive-cli/CLAUDE.md`.
     mod streaming_submit_broken_binary;
+    // fix-converged-stopped-cli-arm — regression: ConvergedStopped
+    // must terminate the streaming consumer with exit code 0; current
+    // code falls through to the `_ =>` catch-all and returns
+    // Err(BodyDecode).
+    mod streaming_submit_converged_stopped;
     mod streaming_submit_happy_path;
 
     // Slice 03 step 03-02 — S-CLI-03 Tier 3 jq-pipeline-equivalent:
