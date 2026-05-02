@@ -211,8 +211,8 @@ async fn closed_lifecycle_channel_emits_stream_interrupted_terminal() {
     // RED-test cap-fallback path, `{"kind":"timeout","data":{"after_seconds":1}}`).
     // The post-fix code emits `{"kind":"stream_interrupted"}`.
     let terminal_reason_json = &last["data"]["terminal_reason"];
-    let terminal_reason: TerminalReason =
-        serde_json::from_value(terminal_reason_json.clone()).expect(&format!(
+    let terminal_reason: TerminalReason = serde_json::from_value(terminal_reason_json.clone())
+        .expect(&format!(
             "terminal_reason must deserialise to TerminalReason; got {terminal_reason_json:?}",
         ));
 

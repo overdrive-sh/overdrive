@@ -17,7 +17,7 @@
 //!   <tmp>/cgroup.controllers                                   = "cpu memory io"
 //!   <tmp>/user.slice/user-1000.slice/cgroup.subtree_control    = "cpu memory io"
 //!   <tmp>/user.slice/.../session-3.scope/cgroup.subtree_control = ""   (leaf)
-//!   <tmp>/proc-self-cgroup                                     = "0::/user.slice/user-1000.slice/session-3.scope\n"
+//!   <tmp>/proc-self-cgroup                                     = "`0::/user.slice/user-1000.slice/session-3.scope\n`"
 //!
 //! Under the buggy code path this test FAILS with
 //! `DelegationMissing` because the scope's empty `subtree_control` is

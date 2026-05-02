@@ -25,7 +25,7 @@
 //!   <tmp>/cgroup.controllers                                   = "cpu memory io"
 //!   <tmp>/user.slice/user-1000.slice/cgroup.subtree_control    = "io pids"  ← no cpu, no memory
 //!   <tmp>/user.slice/.../session-3.scope/cgroup.subtree_control = ""        (leaf, falls back)
-//!   <tmp>/proc-self-cgroup                                     = "0::/user.slice/user-1000.slice/session-3.scope\n"
+//!   <tmp>/proc-self-cgroup                                     = "`0::/user.slice/user-1000.slice/session-3.scope\n`"
 //!
 //! Under the buggy code (no fallback) this test panics in two ways:
 //!   - `slice` field would be the SCOPE path, not the parent slice
