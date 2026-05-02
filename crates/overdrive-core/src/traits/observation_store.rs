@@ -38,6 +38,119 @@ pub enum ObservationStoreError {
     Io(#[from] std::io::Error),
 }
 
+impl ObservationStoreError {
+    /// Classify whether this error is a transient condition the caller
+    /// should retry, or a terminal failure that must be surfaced via a
+    /// louder failure mode.
+    ///
+    /// Used by `worker::exit_observer` to gate a bounded retry loop on
+    /// the obs-write path: transient errors (e.g. a transiently
+    /// unreachable peer, or genuinely retryable I/O kinds) re-attempt
+    /// the write; terminal errors short-circuit to a degraded
+    /// `LifecycleEvent` so subscribers see the failure surface rather
+    /// than an alloc silently stuck `Running`.
+    ///
+    /// # Classification policy
+    ///
+    /// - [`Self::Unreachable`] — always retryable. The peer may be
+    ///   transiently down (gossip in flight, network blip); a bounded
+    ///   retry window is the right shape.
+    /// - [`Self::Io`] — retryable only for genuinely transient
+    ///   `io::ErrorKind` values: `Interrupted` (syscall interrupted by
+    ///   signal), `WouldBlock` (non-blocking I/O hit back-pressure),
+    ///   `TimedOut` (operation deadline elapsed), `ResourceBusy`
+    ///   (kernel/backend held a lock). Every other `io::ErrorKind`
+    ///   (`PermissionDenied`, `AlreadyExists`, `NotFound` on a write
+    ///   path, `OutOfMemory`, `Other`, `Unsupported`, …) is a terminal
+    ///   condition where retrying cannot succeed — return `false` so
+    ///   the caller escalates immediately.
+    #[must_use]
+    pub fn is_retryable(&self) -> bool {
+        match self {
+            Self::Unreachable { .. } => true,
+            Self::Io(err) => matches!(
+                err.kind(),
+                std::io::ErrorKind::Interrupted
+                    | std::io::ErrorKind::WouldBlock
+                    | std::io::ErrorKind::TimedOut
+                    | std::io::ErrorKind::ResourceBusy
+            ),
+        }
+    }
+}
+
+#[cfg(test)]
+mod is_retryable_tests {
+    use super::ObservationStoreError;
+    use std::io;
+
+    #[test]
+    fn unreachable_is_retryable() {
+        let err = ObservationStoreError::Unreachable { peer: "node-2".to_owned() };
+        assert!(err.is_retryable(), "Unreachable variant must be classified retryable");
+    }
+
+    #[test]
+    fn io_interrupted_is_retryable() {
+        let err = ObservationStoreError::Io(io::Error::from(io::ErrorKind::Interrupted));
+        assert!(err.is_retryable(), "Io(Interrupted) must be classified retryable");
+    }
+
+    #[test]
+    fn io_would_block_is_retryable() {
+        let err = ObservationStoreError::Io(io::Error::from(io::ErrorKind::WouldBlock));
+        assert!(err.is_retryable(), "Io(WouldBlock) must be classified retryable");
+    }
+
+    #[test]
+    fn io_timed_out_is_retryable() {
+        let err = ObservationStoreError::Io(io::Error::from(io::ErrorKind::TimedOut));
+        assert!(err.is_retryable(), "Io(TimedOut) must be classified retryable");
+    }
+
+    #[test]
+    fn io_resource_busy_is_retryable() {
+        let err = ObservationStoreError::Io(io::Error::from(io::ErrorKind::ResourceBusy));
+        assert!(err.is_retryable(), "Io(ResourceBusy) must be classified retryable");
+    }
+
+    #[test]
+    fn io_permission_denied_is_terminal() {
+        let err = ObservationStoreError::Io(io::Error::from(io::ErrorKind::PermissionDenied));
+        assert!(!err.is_retryable(), "Io(PermissionDenied) must be terminal");
+    }
+
+    #[test]
+    fn io_already_exists_is_terminal() {
+        let err = ObservationStoreError::Io(io::Error::from(io::ErrorKind::AlreadyExists));
+        assert!(!err.is_retryable(), "Io(AlreadyExists) must be terminal");
+    }
+
+    #[test]
+    fn io_not_found_is_terminal() {
+        let err = ObservationStoreError::Io(io::Error::from(io::ErrorKind::NotFound));
+        assert!(!err.is_retryable(), "Io(NotFound) must be terminal on a write path");
+    }
+
+    #[test]
+    fn io_out_of_memory_is_terminal() {
+        let err = ObservationStoreError::Io(io::Error::from(io::ErrorKind::OutOfMemory));
+        assert!(!err.is_retryable(), "Io(OutOfMemory) must be terminal");
+    }
+
+    #[test]
+    fn io_other_is_terminal() {
+        let err = ObservationStoreError::Io(io::Error::from(io::ErrorKind::Other));
+        assert!(!err.is_retryable(), "Io(Other) must be terminal — unknown kinds are not retried");
+    }
+
+    #[test]
+    fn io_unsupported_is_terminal() {
+        let err = ObservationStoreError::Io(io::Error::from(io::ErrorKind::Unsupported));
+        assert!(!err.is_retryable(), "Io(Unsupported) must be terminal");
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Row types — observation class
 // ---------------------------------------------------------------------------

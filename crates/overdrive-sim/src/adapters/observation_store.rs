@@ -97,6 +97,12 @@ struct PeerState {
     by_alloc: Mutex<HashMap<AllocationId, AllocStatusRow>>,
     by_node: Mutex<HashMap<NodeId, NodeHealthRow>>,
     fan_out: broadcast::Sender<ObservationRow>,
+    /// Test-only FIFO of write failures to inject. Each call to
+    /// [`SimObservationStore::write`] pops the front entry; when the
+    /// queue is empty, writes proceed normally. See
+    /// [`SimObservationStore::inject_write_failure`] for the public
+    /// surface and queue semantics.
+    pending_write_failures: Mutex<VecDeque<ObservationStoreError>>,
 }
 
 impl PeerState {
@@ -107,6 +113,7 @@ impl PeerState {
             by_alloc: Mutex::new(HashMap::new()),
             by_node: Mutex::new(HashMap::new()),
             fan_out,
+            pending_write_failures: Mutex::new(VecDeque::new()),
         })
     }
 
@@ -223,11 +230,47 @@ impl SimObservationStore {
     pub fn alloc_status_snapshot(&self) -> BTreeMap<AllocationId, AllocStatusRow> {
         self.inner.alloc_status_snapshot()
     }
+
+    /// Test-only helper: queue a write failure for the next call to
+    /// [`ObservationStore::write`].
+    ///
+    /// # Queue semantics
+    ///
+    /// Failures are consumed in FIFO order — each call to `write(...)`
+    /// pops the front of the queue and returns it as `Err(...)` BEFORE
+    /// applying the row to the LWW index or fan-out channel. The row
+    /// is dropped wholesale: a write that returns an injected error
+    /// has no effect on observed state.
+    ///
+    /// Once the queue is drained, subsequent writes proceed normally.
+    /// Callers can stack multiple failures (e.g. inject one transient
+    /// to model retry-then-success, or N consecutive failures to model
+    /// retry exhaustion) by calling this method repeatedly before
+    /// driving the system under test.
+    ///
+    /// Used by `crate worker::exit_observer` integration tests to
+    /// exercise the bounded retry path without wiring a real fault
+    /// injection layer into the observation store. See
+    /// `crates/overdrive-control-plane/tests/integration/job_lifecycle/
+    /// crash_recovery_obs_write_rejected.rs` for the canonical
+    /// consumer.
+    pub fn inject_write_failure(&self, error: ObservationStoreError) {
+        self.inner.pending_write_failures.lock().push_back(error);
+    }
 }
 
 #[async_trait]
 impl ObservationStore for SimObservationStore {
     async fn write(&self, row: ObservationRow) -> Result<(), ObservationStoreError> {
+        // Test-only injection: if a failure has been queued via
+        // `inject_write_failure`, consume the front entry and return
+        // it WITHOUT mutating any observed state. Production writes
+        // are unaffected — the queue is empty in non-test paths.
+        let injected = self.inner.pending_write_failures.lock().pop_front();
+        if let Some(injected) = injected {
+            return Err(injected);
+        }
+
         // Full-row writes only — §4 guardrail. Apply locally first so
         // the writing peer's own subscribers see the write immediately;
         // the LWW check at `apply` drops a losing local write wholesale.
