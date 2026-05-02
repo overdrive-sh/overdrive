@@ -750,3 +750,95 @@ async fn s_lt_01_lifecycle_transition_from_reflects_prior_alloc_state() {
         event.from, event.to
     );
 }
+
+// ===========================================================================
+// S-CP-12 — Pre-subscribe race: terminal already in obs store before subscribe
+//
+// RED scaffold (step 01-01): build_stream subscribes to lifecycle_events
+// AFTER the upstream put_if_absent has already triggered the convergence
+// loop. With the obs row pre-seeded and no LifecycleEvent broadcast
+// (subscribe happens too late), the streaming loop hangs until the 60s
+// cap timer fires, emitting a false ConvergedFailed { Timeout }.
+//
+// GREEN lands in step 01-02 when build_stream gains a lagged_recover
+// snapshot call between bus.subscribe() and the loop, projecting the
+// pre-existing Running row to ConvergedRunning synchronously.
+//
+// Carries #[ignore] so lefthook nextest-affected pre-commit pass stays
+// green between this commit and the GREEN commit. The GREEN step un-
+// ignores it in the same commit as the fix. Mirror of the
+// fix-stop-branch-backoff-pending precedent.
+// ===========================================================================
+
+#[tokio::test]
+#[ignore = "RED scaffold for fix-streaming-pre-subscribe-race — un-ignore in the GREEN step"]
+async fn s_cp_12_pre_subscribe_terminal_does_not_hang_until_cap() {
+    let tmp = TempDir::new().expect("tmpdir");
+    let mut state = build_app_state(&tmp);
+
+    // Inject SimClock + 60s cap per the s_cp_06 pattern.
+    let sim_clock = Arc::new(SimClock::new());
+    state.clock = sim_clock.clone() as Arc<dyn Clock>;
+    state.streaming_cap = Duration::from_secs(60);
+
+    let alloc_id = AllocationId::from_str("alloc-payments-0").expect("alloc id");
+    let job_id = JobId::from_str("payments-v0").expect("job id");
+
+    // Pre-seed a Running AllocStatusRow BEFORE issuing the streaming
+    // request — simulates the production race outcome where the
+    // convergence loop has already written the obs row by the time
+    // build_stream reaches bus.subscribe().
+    write_row(
+        state.obs.as_ref(),
+        &alloc_id,
+        &job_id,
+        AllocState::Running,
+        1,
+        Some(TransitionReason::Started),
+    )
+    .await;
+
+    let router = build_router(state.clone());
+
+    // Spawn the request. Do NOT poll receiver_count(). Do NOT call
+    // emit_lifecycle. Do NOT tick the SimClock. The bus stays silent
+    // for the entire test.
+    let request_task = tokio::spawn(async move {
+        let response = router
+            .oneshot(build_submit_request(&payments_spec(), "application/x-ndjson"))
+            .await
+            .expect("router oneshot");
+        assert_eq!(response.status(), StatusCode::OK);
+        body_ndjson_lines(response.into_body()).await
+    });
+
+    // Wall-clock timeout (NOT SimClock) — fires before the 60s SimClock
+    // cap could possibly be advanced. With the fix in place the request
+    // completes synchronously within microseconds via the post-subscribe
+    // snapshot path. Without the fix the request hangs (no events on
+    // bus, SimClock cap never advances) and this timeout fires.
+    let lines = tokio::time::timeout(Duration::from_millis(500), request_task)
+        .await
+        .expect("request must complete within 500ms wall-clock — bug: hangs until 60s cap")
+        .expect("task ok");
+
+    // Assertions: exactly two lines, accepted then converged_running.
+    assert_eq!(lines.len(), 2, "expected exactly 2 NDJSON lines; got {lines:?}");
+    assert_eq!(lines[0]["kind"], "accepted", "first line must be `accepted`");
+    assert_eq!(
+        lines[1]["kind"], "converged_running",
+        "second line must be `converged_running` (NOT `converged_failed`); got {lines:?}"
+    );
+    assert_ne!(
+        lines[1]["kind"], "converged_failed",
+        "must NOT emit converged_failed — bug symptom is false-positive timeout"
+    );
+    assert_ne!(
+        lines[1]["data"]["terminal_reason"]["kind"], "timeout",
+        "must NOT emit timeout terminal_reason — bug symptom is cap-fired Timeout"
+    );
+    assert_eq!(
+        lines[1]["data"]["alloc_id"], "alloc-payments-0",
+        "converged_running must reference the pre-seeded alloc"
+    );
+}
