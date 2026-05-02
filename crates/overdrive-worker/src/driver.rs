@@ -79,11 +79,9 @@ fn classify_exit(status: std::process::ExitStatus, intentional_stop: bool) -> Ex
 
     status.code().map_or_else(
         || {
-            if let Some(sig) = status.signal() {
+            status.signal().map_or(ExitKind::Crashed { exit_code: None, signal: None }, |sig| {
                 ExitKind::Crashed { exit_code: None, signal: Some(sig) }
-            } else {
-                ExitKind::Crashed { exit_code: None, signal: None }
-            }
+            })
         },
         |code| {
             if code == 0 {

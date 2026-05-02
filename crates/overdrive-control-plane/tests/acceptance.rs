@@ -42,6 +42,7 @@ mod acceptance {
     mod job_stop_idempotent;
     #[cfg(feature = "integration-tests")]
     mod job_stop_intent_key;
+    #[cfg(feature = "integration-tests")]
     mod job_stop_unknown;
     // `pending_no_capacity_renders_reason` was retired in slice 01 step
     // 01-03: the legacy `AllocStatusRowBody.reason: Option<String>`
