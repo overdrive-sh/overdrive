@@ -6,6 +6,10 @@ Accepted. 2026-04-30. Decision-makers: Morgan (proposing), DISCUSS-wave
 ratification of [D1] / [D5] / [D7] (carried into DESIGN as constraints
 [C2] / [C5] / [C6]).
 
+> **§8 amended 2026-05-02** — channel-closed mid-stream maps to
+> `TerminalReason::StreamInterrupted` (new payload-free variant), not
+> `DriverError`. See **Amendment 2026-05-02** section below.
+
 Tags: phase-1, cli-submit-vs-deploy-and-alloc-status, application-arch,
 http-shape.
 
@@ -505,7 +509,8 @@ depends on the hydrator already being present.
 | Validation error (bad TOML, bad spec) — caught by `Job::from_spec` BEFORE any line emitted | `ErrorBody` per ADR-0015 | 400 Bad Request |
 | Conflict (different spec at occupied key) — caught by `put_if_absent` BEFORE any line emitted | `ErrorBody` | 409 Conflict |
 | IntentStore I/O failure BEFORE any line emitted | `ErrorBody` | 500 Internal Server Error |
-| Streaming-side internal failure AFTER `Accepted` line (broadcast channel closed unexpectedly, serialiser panic) | `SubmitEvent::ConvergedFailed { terminal_reason: DriverError, ... }` followed by stream close | n/a (200 already on wire) |
+| Streaming-side internal failure AFTER `Accepted` line: lifecycle broadcast channel closed unexpectedly (typical: server shutdown mid-stream) | `SubmitEvent::ConvergedFailed { terminal_reason: StreamInterrupted, error: Some("lifecycle channel closed"), ... }` followed by stream close | n/a (200 already on wire) |
+| Streaming-side internal failure AFTER `Accepted` line: serialiser panic (post-`Accepted`) | `SubmitEvent::ConvergedFailed { terminal_reason: DriverError { cause: ... }, ... }` followed by stream close. **NOTE**: `DriverError` requires a `cause: TransitionReason` payload; this path is currently theoretical and may need its own payload-free variant when made reachable in production, on the same reasoning as the channel-closed case above. | n/a (200 already on wire) |
 | Server wall-clock cap fires | `SubmitEvent::ConvergedFailed { terminal_reason: Timeout, ... }` | n/a (200 already on wire) |
 | Convergence to Failed (BackoffExhausted) | `SubmitEvent::ConvergedFailed { terminal_reason: BackoffExhausted, ... }` | n/a (200 already on wire) |
 
@@ -514,6 +519,24 @@ event mode" is **the moment the first byte is written to the response
 body**. Up to that moment, the JSON-ack `ErrorBody` path applies. After
 that moment, every error becomes a `ConvergedFailed` event. This is the
 same shape `nomad job run` follows for streaming RPCs.
+
+The channel-closed row above maps to `TerminalReason::StreamInterrupted`,
+not `DriverError`, by deliberate design. The original ADR text routed
+channel-closed → `DriverError`, but `DriverError` requires a
+`cause: TransitionReason` payload (see §3) which the call site cannot
+construct: the broadcast bus that would have carried the cause is
+exactly what just closed. The implementation drifted from the ADR by
+emitting `Timeout { after_seconds: 0 }` as a sentinel — forbidden by
+`.claude/rules/development.md` § "Sum types over sentinels" and
+authoritative for downstream discriminant-based rendering (the CLI's
+`derive_reason_from_terminal` / `derive_hint`), so it produced the
+wrong operator-facing text and the wrong remediation hint. The fix
+introduced `TerminalReason::StreamInterrupted` as the dedicated
+payload-free wire variant for stream-transport failures with no
+observable cause; the row above reflects what ships. See the evolution
+doc at `docs/evolution/2026-05-02-fix-terminal-reason-channel-closed.md`
+and the full RCA preserved in commit `b71579e`'s tree at
+`docs/feature/fix-terminal-reason-channel-closed/deliver/rca.md`.
 
 ADR-0015's `ControlPlaneError → (StatusCode, ErrorBody)` exhaustive
 mapping is **unchanged**. The streaming lane's pre-`Accepted` errors
@@ -881,9 +904,86 @@ declaration itself is fully typed — downstream consumers
 TransitionReason`) reference it by name and compile against the new
 shape immediately.
 
+## Amendment 2026-05-02 — channel-closed maps to `StreamInterrupted`, not `DriverError`
+
+**Trigger**: a code-review comment on
+`crates/overdrive-control-plane/src/streaming.rs` flagged that the
+`Err(broadcast::error::RecvError::Closed)` arm of the streaming-submit
+`tokio::select!` synthesised a terminal `ConvergedFailed` carrying
+`terminal_reason: TerminalReason::Timeout { after_seconds: 0 }` — a
+sentinel for "stream-transport failure with no observable cause". The
+CLI's `derive_reason_from_terminal` / `derive_hint` are
+discriminant-driven (`render.rs`), so the wrong discriminant produced
+"workload did not converge within 0s" with a `--detach` hint, which is
+the wrong remediation for what is actually a server-side stream
+interruption.
+
+**Why the original §8 routing was unimplementable**: the original ADR
+text in §8 routed channel-closed → `DriverError`. `DriverError`
+requires a `cause: TransitionReason` payload (see §3); the `Closed`
+arm cannot construct one — the broadcast bus that would have carried
+the cause is exactly what just closed. The implementation drifted to
+the `Timeout { after_seconds: 0 }` sentinel because it was the only
+payload-free `TerminalReason` variant available, in direct violation
+of `.claude/rules/development.md` § "Sum types over sentinels".
+
+**What changed**:
+
+- A new payload-free variant `TerminalReason::StreamInterrupted` was
+  added to `crates/overdrive-control-plane/src/api.rs`. The
+  `#[non_exhaustive]` enum gains the variant additively; no existing
+  variant changed.
+- The streaming handler's `Closed` arm at
+  `crates/overdrive-control-plane/src/streaming.rs:281-297` now emits
+  `TerminalReason::StreamInterrupted` (with
+  `error: Some("lifecycle channel closed")`) instead of the
+  `Timeout { after_seconds: 0 }` sentinel.
+- The CLI's `derive_reason_from_terminal` and `derive_hint`
+  (`crates/overdrive-cli/src/render.rs`) gained explicit match arms
+  for the new variant, producing
+  `"server-side stream interrupted before convergence"` for the
+  `Reason:` line and a re-run / `alloc status` hint instead of the
+  `--detach` hint.
+- `api/openapi.yaml` regenerated atomically via
+  `cargo xtask openapi-gen`; the schema gains
+  `kind: stream_interrupted` as a fourth `oneOf` member through
+  `utoipa::ToSchema`.
+- §8 above is corrected: the channel-closed row maps to
+  `StreamInterrupted`, and a separate row preserves the
+  serialiser-panic case (still nominally `DriverError`, flagged as
+  theoretical pending a payload-free successor when reachable).
+
+**What did not change**:
+
+- DISCUSS [D1]–[D8] all stay locked. The amendment refines §8's wire
+  shape; it does not touch the streaming/non-streaming negotiation,
+  the wall-clock cap, the subscription mechanism, or the OpenAPI
+  declaration.
+- The flat 4-variant `SubmitEvent` enum (§4) is unchanged. Only
+  `TerminalReason`'s variant set grows — additive, behind
+  `#[non_exhaustive]`.
+- CLI exit-code dispatch (§9) still does NOT branch on
+  `terminal_reason`. `ConvergedFailed → 1` regardless of inner
+  reason. Only the `Reason:` text and the `Hint:` text branch on
+  the discriminant.
+- The single-source-of-truth pin on `TransitionReason` ([C6]) is
+  unaffected — the new variant is a `TerminalReason` shape, not a
+  `TransitionReason` shape.
+
+**References**:
+
+- Evolution doc:
+  `docs/evolution/2026-05-02-fix-terminal-reason-channel-closed.md`.
+- Full RCA (preserved in commit `b71579e`'s tree):
+  `docs/feature/fix-terminal-reason-channel-closed/deliver/rca.md`.
+- Commits: `b71579e` (RED — `TerminalReason::StreamInterrupted`
+  regression), `95b34a3` (GREEN — emit-site swap + CLI render arms +
+  `drop(bus);` reachability fix).
+
 ## Changelog
 
 | Date | Change |
 |---|---|
 | 2026-04-30 | Initial ADR. Decisions D1 / D3 / D4 / D5 / D6 / D8 from the DESIGN wave; constraints carried from DISCUSS wave-decisions. Slice 02 back-prop completed. Echo peer review pending. |
 | 2026-04-30 | **Amendment** — `TransitionReason` refactored from state-class to cause-class. `TerminalReason` extended with structured payloads. Original variant set retired and captured under Alternative D as the rejected predecessor. See `Amendment 2026-04-30` section above. Slice 02 back-prop list (in `docs/feature/cli-submit-vs-deploy-and-alloc-status/design/upstream-changes.md`) catalogues the consequent updates needed in DISCUSS / DISTILL / roadmap. |
+| 2026-05-02 | **Amendment** — §8 channel-closed row now maps to `TerminalReason::StreamInterrupted` (new payload-free variant), not `DriverError`. The original routing was unimplementable: `DriverError` requires a `cause: TransitionReason` the closed-bus call site cannot construct. Implementation had drifted to a `Timeout { after_seconds: 0 }` sentinel; the new variant is the dedicated payload-free wire shape for stream-transport failures with no observable cause. See `Amendment 2026-05-02` section above. |
