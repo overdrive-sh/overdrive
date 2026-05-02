@@ -29,6 +29,34 @@
       "s": "SKIPPED",
       "d": "NOT_APPLICABLE: bugfix RED step \u2014 fix lands in next dispatch",
       "t": "2026-05-02T13:19:13Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-02T13:21:46Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-02T13:24:07Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: subsumed by RED_ACCEPTANCE \u2014 port-to-port test is the only level at which the cap-deadline behaviour is observable; no internal helper to test in isolation",
+      "t": "2026-05-02T13:24:09Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-02T13:26:19Z"
     }
   ]
 }

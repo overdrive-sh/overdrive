@@ -208,6 +208,9 @@ pub fn build_stream(
             }
         }
 
+        let cap_future = clock.sleep(cap);
+        tokio::pin!(cap_future);
+
         loop {
             tokio::select! {
                 biased;
@@ -301,7 +304,7 @@ pub fn build_stream(
                 // parks on a real timer; DST (`SimClock`) parks until
                 // the harness calls `sim_clock.tick(cap + ε)`. On
                 // expiry, emit the timeout terminal and end the stream.
-                () = clock.sleep(cap) => {
+                () = &mut cap_future => {
                     let after_seconds = u32::try_from(cap.as_secs()).unwrap_or(u32::MAX);
                     let terminal = SubmitEvent::ConvergedFailed {
                         alloc_id: None,
