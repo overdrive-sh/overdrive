@@ -104,7 +104,12 @@ async fn build_harness(tmp: &TempDir) -> Harness {
     // exact parameter list may evolve, but the test author's view is:
     // "give me the obs sink and the driver's exit-event source, and
     // you'll write classified rows for me."
-    exit_observer::spawn(state.obs.clone(), state.driver.clone(), state.lifecycle_events.clone());
+    exit_observer::spawn(
+        state.obs.clone(),
+        state.driver.clone(),
+        state.lifecycle_events.clone(),
+        sim_clock.clone(),
+    );
 
     let job = Job::from_spec(JobSpecInput {
         id: "exitobs".to_string(),

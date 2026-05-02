@@ -44,7 +44,9 @@ use overdrive_core::id::{AllocationId, NodeId};
 use overdrive_core::reconciler::TargetResource;
 use overdrive_core::traits::driver::{Driver, DriverType, ExitKind};
 use overdrive_core::traits::intent_store::IntentStore;
-use overdrive_core::traits::observation_store::{AllocState, ObservationStore, ObservationStoreError};
+use overdrive_core::traits::observation_store::{
+    AllocState, ObservationStore, ObservationStoreError,
+};
 use overdrive_core::transition_reason::TransitionReason;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::driver::SimDriver;
@@ -87,7 +89,12 @@ async fn build_harness(tmp: &TempDir) -> Harness {
 
     let state = AppState::new(store, obs, Arc::new(runtime), driver);
 
-    exit_observer::spawn(state.obs.clone(), state.driver.clone(), state.lifecycle_events.clone());
+    exit_observer::spawn(
+        state.obs.clone(),
+        state.driver.clone(),
+        state.lifecycle_events.clone(),
+        sim_clock.clone(),
+    );
 
     let job = Job::from_spec(JobSpecInput {
         id: "obswrite".to_string(),
@@ -167,8 +174,9 @@ async fn transient_obs_write_recovers_on_retry() {
     // attempt (after handle_exit_event classifies the crash) gets the
     // injected error; on retry the queue is empty, the write succeeds,
     // and the alloc reaches Failed.
-    h.sim_obs
-        .inject_write_failure(ObservationStoreError::Io(io::Error::from(io::ErrorKind::Interrupted)));
+    h.sim_obs.inject_write_failure(ObservationStoreError::Io(io::Error::from(
+        io::ErrorKind::Interrupted,
+    )));
 
     h.sim_driver.inject_exit_after(
         &h.alloc_id,
@@ -240,9 +248,9 @@ async fn terminal_obs_write_escalates_via_lifecycle_event() {
     // suffice — but stacking covers the case where the observer's
     // retry policy attempts a small number of writes regardless.
     for _ in 0..16 {
-        h.sim_obs.inject_write_failure(ObservationStoreError::Io(
-            io::Error::from(io::ErrorKind::PermissionDenied),
-        ));
+        h.sim_obs.inject_write_failure(ObservationStoreError::Io(io::Error::from(
+            io::ErrorKind::PermissionDenied,
+        )));
     }
 
     h.sim_driver.inject_exit_after(

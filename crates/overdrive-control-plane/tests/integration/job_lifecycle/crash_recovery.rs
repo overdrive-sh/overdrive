@@ -70,6 +70,7 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
         state.obs.clone(),
         state.driver.clone(),
         state.lifecycle_events.clone(),
+        state.clock.clone(),
     );
 
     // Cleanup guard — fires when the test exits (panic or success) and

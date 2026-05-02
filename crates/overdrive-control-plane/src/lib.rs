@@ -520,6 +520,7 @@ pub async fn run_server_with_obs_and_driver(
         state.obs.clone(),
         state.driver.clone(),
         state.lifecycle_events.clone(),
+        config.clock.clone(),
         Some(state.runtime.clone()),
         exit_observer_shutdown.clone(),
     );

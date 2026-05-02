@@ -44,12 +44,15 @@
 //! `ExitKind::Crashed` ⇒ `Failed`.
 
 use std::sync::Arc;
+use std::time::Duration;
 
-use overdrive_core::id::AllocationId;
+use overdrive_core::id::{AllocationId, JobId};
 use overdrive_core::reconciler::{ReconcilerName, TargetResource};
-use overdrive_core::traits::driver::{Driver, ExitEvent, ExitKind};
+use overdrive_core::traits::clock::Clock;
+use overdrive_core::traits::driver::{Driver, DriverType, ExitEvent, ExitKind};
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
+    ObservationStoreError,
 };
 use overdrive_core::transition_reason::TransitionReason;
 use tokio::sync::broadcast;
@@ -59,6 +62,17 @@ use crate::action_shim::LifecycleEvent;
 use crate::api::{AllocStateWire, TransitionSource};
 use crate::eval_broker::Evaluation;
 use crate::reconciler_runtime::ReconcilerRuntime;
+
+/// Bounded retry budget for transient `ObservationStore::write` failures
+/// in `handle_exit_event`. The first attempt is unbudgeted; on a
+/// retryable error the loop backs off for the corresponding entry in
+/// [`RETRY_BACKOFFS`], retries the whole `handle_exit_event` (so
+/// `find_prior_row` re-reads under any concurrent writer), and gives up
+/// once every entry is consumed. Total of 4 attempts (1 initial + 3
+/// retries). Per RCA `docs/feature/fix-exit-observer-write-retry/
+/// deliver/rca.md` §"Approved fix — Option A".
+const RETRY_BACKOFFS: [Duration; 3] =
+    [Duration::from_millis(50), Duration::from_millis(100), Duration::from_millis(200)];
 
 /// Spawn the `exit_observer` subsystem. The returned task consumes
 /// `ExitEvent`s from `driver.take_exit_receiver()`, writes
@@ -96,8 +110,9 @@ pub fn spawn(
     obs: Arc<dyn ObservationStore>,
     driver: Arc<dyn Driver>,
     events: Arc<broadcast::Sender<LifecycleEvent>>,
+    clock: Arc<dyn Clock>,
 ) -> tokio::task::JoinHandle<()> {
-    spawn_with_runtime(obs, driver, events, None, CancellationToken::new())
+    spawn_with_runtime(obs, driver, events, clock, None, CancellationToken::new())
 }
 
 /// Production entry-point.
@@ -135,6 +150,7 @@ pub fn spawn_with_runtime(
     obs: Arc<dyn ObservationStore>,
     driver: Arc<dyn Driver>,
     events: Arc<broadcast::Sender<LifecycleEvent>>,
+    clock: Arc<dyn Clock>,
     runtime: Option<Arc<ReconcilerRuntime>>,
     shutdown_token: CancellationToken,
 ) -> tokio::task::JoinHandle<()> {
@@ -163,8 +179,9 @@ pub fn spawn_with_runtime(
                     None => break,
                 },
             };
-            match handle_exit_event(obs.as_ref(), &event).await {
-                Ok(Some((row, prior_state))) => {
+            let outcome = run_with_retry(obs.as_ref(), &event, clock.as_ref()).await;
+            match outcome {
+                RetryOutcome::Wrote { row, prior_state } => {
                     let lifecycle = build_lifecycle_event(
                         &row,
                         prior_state,
@@ -180,31 +197,179 @@ pub fn spawn_with_runtime(
                             "lifecycle event broadcast send returned error (no subscribers?); ignored",
                         );
                     }
+                    // The reconciler reads `actual` exclusively from the obs store. On a
+                    // write failure the obs row is still `Running`, so re-enqueueing the
+                    // reconciler produces no actions — the broker would churn an empty
+                    // reconcile cycle (busy-loop trap). The terminal-escalation
+                    // `LifecycleEvent` below is the operator-visible signal; the
+                    // reconciler is intentionally NOT nudged when the obs row did not
+                    // change. Per RCA `docs/evolution/2026-05-02-fix-exit-observer-
+                    // write-retry.md` (or `docs/feature/fix-exit-observer-write-retry/
+                    // deliver/rca.md` pre-archive).
+                    if let Some(runtime) = runtime.as_ref() {
+                        if let Some(target) = target_for_event(obs.as_ref(), &event.alloc).await {
+                            runtime
+                                .broker()
+                                .submit(Evaluation { reconciler: job_lifecycle_name(), target });
+                        }
+                    }
                 }
-                Ok(None) => {
+                RetryOutcome::NoPriorRow => {
                     // No prior row — event dropped (alloc never
                     // reached Running per the observer's vantage point).
                 }
-                Err(err) => {
-                    tracing::warn!(
+                RetryOutcome::Failed { error, attempts, prior_state } => {
+                    tracing::error!(
                         target: "overdrive::exit_observer",
                         alloc = %event.alloc,
-                        err = ?err,
-                        "exit_observer obs write failed; row dropped",
+                        attempts = attempts,
+                        err = ?error,
+                        "exit_observer obs write failed after bounded retry; \
+                         escalating via degraded LifecycleEvent",
                     );
-                    continue;
-                }
-            }
-            // Re-enqueue the job's reconciler so the next drain cycle
-            // sees the new Failed/Terminated row and reacts.
-            if let Some(runtime) = runtime.as_ref() {
-                if let Some(target) = target_for_event(obs.as_ref(), &event.alloc).await {
-                    runtime
-                        .broker()
-                        .submit(Evaluation { reconciler: job_lifecycle_name(), target });
+                    let lifecycle =
+                        build_escalation_event(&event, prior_state, &error, attempts, driver_kind);
+                    if let Err(err) = events.send(lifecycle) {
+                        tracing::debug!(
+                            target: "overdrive::exit_observer",
+                            err = %err,
+                            "degraded lifecycle event broadcast send returned error (no subscribers?); ignored",
+                        );
+                    }
                 }
             }
         }
+    })
+}
+
+/// Outcome of [`run_with_retry`]: the observer either wrote a successor
+/// row (`Wrote`), found no prior row to write a successor against
+/// (`NoPriorRow`), or exhausted its retry budget against a terminal /
+/// repeatedly-retryable error (`Failed`).
+enum RetryOutcome {
+    Wrote {
+        row: AllocStatusRow,
+        prior_state: AllocStateWire,
+    },
+    NoPriorRow,
+    Failed {
+        error: ObservationStoreError,
+        attempts: u32,
+        /// Best-effort prior wire state read from `find_prior_row`
+        /// before the failed write. Used to set `from` on the degraded
+        /// `LifecycleEvent`. `Pending` is the defensive default if the
+        /// prior-row read itself failed.
+        prior_state: AllocStateWire,
+    },
+}
+
+/// Drive `handle_exit_event` through the bounded retry budget. Per RCA
+/// the retry granularity is the WHOLE `handle_exit_event` (not just the
+/// inner `obs.write`) so `find_prior_row` re-reads its `LogicalTimestamp`
+/// counter on every attempt — keeping the LWW counter monotonic against
+/// any concurrent writer that landed a new row between attempts.
+///
+/// Backoff uses the injected [`Clock::sleep`] (NOT `tokio::time::sleep`)
+/// so DST stays deterministic. Per RCA §"Approved fix — Option A".
+async fn run_with_retry(
+    obs: &dyn ObservationStore,
+    event: &ExitEvent,
+    clock: &dyn Clock,
+) -> RetryOutcome {
+    let mut attempts: u32 = 0;
+    loop {
+        attempts = attempts.saturating_add(1);
+        match handle_exit_event(obs, event).await {
+            Ok(Some((row, prior_state))) => {
+                return RetryOutcome::Wrote { row, prior_state };
+            }
+            Ok(None) => {
+                return RetryOutcome::NoPriorRow;
+            }
+            Err(HandleError::Observation(err)) => {
+                let retryable = err.is_retryable();
+                let backoff = RETRY_BACKOFFS.get((attempts - 1) as usize).copied();
+                let prior_state = read_prior_state(obs, &event.alloc).await;
+                if let (true, Some(backoff)) = (retryable, backoff) {
+                    tracing::warn!(
+                        target: "overdrive::exit_observer",
+                        alloc = %event.alloc,
+                        attempt = attempts,
+                        backoff_ms = u64::try_from(backoff.as_millis()).unwrap_or(u64::MAX),
+                        err = ?err,
+                        "exit_observer obs write failed (retryable); backing off",
+                    );
+                    clock.sleep(backoff).await;
+                    continue;
+                }
+                return RetryOutcome::Failed { error: err, attempts, prior_state };
+            }
+        }
+    }
+}
+
+/// Best-effort prior-state read for the degraded `LifecycleEvent`'s
+/// `from` field. Failures are absorbed to `Pending` (defensive default
+/// per RCA: if even the read failed, the observer cannot establish a
+/// prior state, but the escalation event must still surface).
+async fn read_prior_state(obs: &dyn ObservationStore, alloc: &AllocationId) -> AllocStateWire {
+    match obs.alloc_status_row(alloc).await {
+        Ok(Some(row)) => row.state.into(),
+        Ok(None) | Err(_) => AllocStateWire::Pending,
+    }
+}
+
+/// Synthesize a degraded `LifecycleEvent` for the terminal-escalation
+/// path (RCA §"Approved fix — Option A" item 3). Carries
+/// `TransitionReason::DriverInternalError { detail }` where `detail`
+/// names the underlying obs-store error and the attempt count, so
+/// `submit --watch` subscribers see the failure surface rather than an
+/// alloc silently stuck `Running`.
+fn build_escalation_event(
+    event: &ExitEvent,
+    prior_state: AllocStateWire,
+    error: &ObservationStoreError,
+    attempts: u32,
+    driver_kind: DriverType,
+) -> LifecycleEvent {
+    let detail = format!("obs write failed after {attempts} attempts: {error}");
+    LifecycleEvent {
+        alloc_id: event.alloc.clone(),
+        // Best-effort job_id: the observer did not successfully read a
+        // prior row (or the read pre-empted the write failure path), so
+        // the wire-format `JobId` is the same defensive fallback the
+        // alloc_id naming convention encodes (`alloc-<jobid>-N`). Phase
+        // 1 wires job_id from the AllocationId by stripping the
+        // `alloc-` prefix and trailing `-N`; if that parse fails (alloc
+        // id was not built by the action shim's standard pattern), use
+        // an "unknown" sentinel so the event still broadcasts.
+        job_id: extract_job_id_or_unknown(&event.alloc),
+        from: prior_state,
+        to: AllocStateWire::Failed,
+        reason: TransitionReason::DriverInternalError { detail },
+        detail: None,
+        source: TransitionSource::Driver(driver_kind),
+        // Synthesized timestamp — the observer never landed a writer-
+        // owned `LogicalTimestamp` for this transition because the
+        // write itself failed. Mirror the `format_logical_timestamp`
+        // shape with an "escalation" sentinel writer so downstream
+        // parsers tolerate it.
+        at: format!("escalation@{}", event.alloc),
+    }
+}
+
+/// Best-effort `JobId` extraction from an [`AllocationId`] when the
+/// observer's prior-row read failed. The action shim's allocation IDs
+/// follow `alloc-<jobid>-<index>` (e.g. `alloc-payments-0`); strip the
+/// known prefix and the trailing `-N` to recover `<jobid>`. Falls back
+/// to `unknown-job` if the parse fails.
+fn extract_job_id_or_unknown(alloc: &AllocationId) -> JobId {
+    let raw = alloc.as_str();
+    let stripped = raw.strip_prefix("alloc-").unwrap_or(raw);
+    let trimmed = stripped.rsplit_once('-').map_or(stripped, |(prefix, _suffix)| prefix);
+    JobId::new(trimmed).unwrap_or_else(|_| {
+        #[allow(clippy::expect_used)]
+        JobId::new("unknown-job").expect("constant valid job id")
     })
 }
 
