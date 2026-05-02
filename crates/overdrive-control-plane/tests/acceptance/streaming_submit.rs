@@ -16,14 +16,14 @@
 
 use std::str::FromStr;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use axum::Router;
 use axum::body::{Body, to_bytes};
 use axum::http::{Method, Request, StatusCode, header};
 use axum::routing::post;
 use overdrive_control_plane::AppState;
-use overdrive_control_plane::action_shim::LifecycleEvent;
+use overdrive_control_plane::action_shim::{LifecycleEvent, dispatch};
 use overdrive_control_plane::api::{
     AllocStateWire, IdempotencyOutcome, SubmitJobRequest, SubmitJobResponse, TransitionSource,
 };
@@ -31,6 +31,7 @@ use overdrive_control_plane::handlers::submit_job;
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_core::TransitionReason;
 use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
+use overdrive_core::reconciler::{Action, TickContext};
 use overdrive_core::id::{AllocationId, JobId, NodeId};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{Driver, DriverType};
@@ -560,4 +561,88 @@ async fn s_cp_10_lagged_subscriber_recovers_via_observation_snapshot() {
     // observes the handler taking the Lagged(_) branch, falling back
     // to the obs snapshot, and resuming the broadcast subscription
     // until terminal.
+}
+
+// ===========================================================================
+// S-LT-01 — LifecycleEvent.from reflects prior alloc state (regression)
+//
+// Exercises action_shim::dispatch() directly — NOT emit_lifecycle().
+// This is the only test path that reaches build_lifecycle_event, where
+// the bug lives: `from` is set to `to_wire` (the new state) instead of
+// the prior state read from observation.
+//
+// RED phase: fails because build_lifecycle_event sets from: to_wire, so
+// both from and to carry Terminated after StopAllocation.
+// GREEN phase (step 01-02): passes after the fix reads prior obs state.
+// ===========================================================================
+
+#[tokio::test]
+async fn s_lt_01_lifecycle_transition_from_reflects_prior_alloc_state() {
+    let tmp = TempDir::new().expect("tmpdir");
+    let state = build_app_state(&tmp);
+
+    let alloc_id = AllocationId::from_str("alloc-payments-0").expect("alloc id");
+    let job_id = JobId::from_str("payments-v0").expect("job id");
+
+    // AC-3: Pre-seed a Running AllocStatusRow so dispatch() can find the
+    // prior state when it calls find_prior_alloc_row().
+    write_row(
+        state.obs.as_ref(),
+        &alloc_id,
+        &job_id,
+        AllocState::Running,
+        1,
+        Some(TransitionReason::Started),
+    )
+    .await;
+
+    // AC-4: Subscribe BEFORE calling dispatch so the broadcast event
+    // is not missed.
+    let mut rx = state.lifecycle_events.subscribe();
+
+    // AC-5: Construct a minimal TickContext and dispatch StopAllocation.
+    let now = Instant::now();
+    let tick = TickContext { now, tick: 1, deadline: now + Duration::from_secs(5) };
+
+    dispatch(
+        vec![Action::StopAllocation { alloc_id: alloc_id.clone() }],
+        state.driver.as_ref(),
+        state.obs.as_ref(),
+        &state.lifecycle_events,
+        &tick,
+    )
+    .await
+    .expect("dispatch succeeds");
+
+    // Receive the broadcast event within 1 second — a missed event is a
+    // test bug (subscribe-before-dispatch ordering was violated).
+    let event = tokio::time::timeout(Duration::from_secs(1), rx.recv())
+        .await
+        .expect("event received within 1s")
+        .expect("channel not closed");
+
+    // AC-6: from must reflect the prior (Running) state.
+    assert_eq!(
+        event.from,
+        AllocStateWire::Running,
+        "event.from must be Running (the prior state), got {:?}",
+        event.from
+    );
+
+    // AC-7: to must reflect the new (Terminated) state.
+    assert_eq!(
+        event.to,
+        AllocStateWire::Terminated,
+        "event.to must be Terminated (the new state), got {:?}",
+        event.to
+    );
+
+    // AC-8: The invariant the bug violates — from and to must differ.
+    assert_ne!(
+        event.from,
+        event.to,
+        "event.from ({:?}) must not equal event.to ({:?}): transition must carry prior state",
+        event.from,
+        event.to
+    );
 }
