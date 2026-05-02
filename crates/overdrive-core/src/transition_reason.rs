@@ -200,8 +200,26 @@ pub enum TransitionReason {
 pub enum StoppedBy {
     /// Operator submitted explicit stop intent.
     Operator,
-    /// Reconciler observed terminal convergence (e.g. clean exit).
+    /// Reconciler converged the allocation to a terminal state (the
+    /// reconciler actioned a stop, not the process itself).
     Reconciler,
+    /// The workload process exited naturally (clean exit with no stop
+    /// intent from the operator or reconciler).
+    ///
+    /// MUST remain the last variant to preserve rkyv discriminant
+    /// compatibility: `Operator=0`, `Reconciler=1`, `Process=2`.
+    Process,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stopped_by_process_human_readable() {
+        let reason = TransitionReason::Stopped { by: StoppedBy::Process };
+        assert_eq!(reason.human_readable(), "stopped (by process)");
+    }
 }
 
 /// Initiator of a `Cancelled` transition.
@@ -278,6 +296,7 @@ impl TransitionReason {
     /// | `BackoffPending { attempt }` | `format!("backoff (attempt {attempt})")` |
     /// | `Stopped { by: Operator }` | `"stopped (by operator)"` |
     /// | `Stopped { by: Reconciler }` | `"stopped"` |
+    /// | `Stopped { by: Process }` | `"stopped (by process)"` |
     /// | `ExecBinaryNotFound { path }` | `format!("binary not found: {path}")` |
     /// | `ExecPermissionDenied { path }` | `format!("permission denied: {path}")` |
     /// | `ExecBinaryInvalid { path, kind }` | `format!("binary invalid ({kind}): {path}")` |
@@ -301,6 +320,7 @@ impl TransitionReason {
             }
             Self::Stopped { by: StoppedBy::Operator } => "stopped (by operator)".to_owned(),
             Self::Stopped { by: StoppedBy::Reconciler } => "stopped".to_owned(),
+            Self::Stopped { by: StoppedBy::Process } => "stopped (by process)".to_owned(),
 
             // Cause-class failures (Phase 1 emit)
             Self::ExecBinaryNotFound { path } => format!("binary not found: {path}"),
