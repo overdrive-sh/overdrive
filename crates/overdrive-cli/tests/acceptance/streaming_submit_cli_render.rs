@@ -126,6 +126,68 @@ fn failed_block_for_timeout_cites_streaming_cap_and_neutral_hint() {
     assert!(lower.contains("hint:"), "rendered must contain a `Hint:` line; got:\n{rendered}");
 }
 
+// ===========================================================================
+// `fix-terminal-reason-channel-closed` Slice 01 step 01-01 (RED).
+//
+// `renders_stream_interrupted_terminal_with_correct_reason_and_hint` —
+// asserts that the renderer maps `TerminalReason::StreamInterrupted`
+// to the operator-facing strings the RCA prescribes:
+//
+//   * `Reason:` line contains "server-side stream interrupted before
+//     convergence" — the StreamInterrupted-specific cause text.
+//   * `Hint:` line does NOT mention `--detach` (that hint is the
+//     Timeout-specific guidance and is misleading here) — it should
+//     reference `overdrive alloc status` / re-running
+//     `overdrive job submit`.
+//
+// FAILS on current code: `derive_reason_from_terminal` falls through
+// `_ => None` for StreamInterrupted (no `Reason:` line printed) and
+// `derive_hint` falls through `_ => "see alloc status for full
+// context".to_owned()` (no `overdrive alloc status` reference, no
+// `--detach`-rejection guarantee). Step 01-02 lands the explicit
+// match arms in `crates/overdrive-cli/src/render.rs`.
+// ===========================================================================
+
+#[test]
+fn renders_stream_interrupted_terminal_with_correct_reason_and_hint() {
+    let terminal_reason = TerminalReason::StreamInterrupted;
+
+    let rendered = overdrive_cli::render::format_failed_block(
+        "payments",
+        None,
+        Some("lifecycle channel closed"),
+        &terminal_reason,
+    );
+
+    // `Reason:` line — must carry the StreamInterrupted-specific
+    // cause text the RCA prescribes. The renderer's
+    // `derive_reason_from_terminal` falls through to `_ => None` on
+    // current code, so no `Reason:` line is emitted at all.
+    assert!(
+        rendered.contains("server-side stream interrupted before convergence"),
+        "RED scaffold (step 01-01): rendered must contain the StreamInterrupted-specific \
+         `Reason:` text per docs/feature/fix-terminal-reason-channel-closed/deliver/rca.md \
+         §3 (CLI rendering). GREEN lands in step 01-02 with explicit match arms in \
+         render.rs::derive_reason_from_terminal and render.rs::derive_hint; got:\n{rendered}",
+    );
+
+    // `Hint:` line — must NOT reference `--detach`. That guidance is
+    // Timeout-specific (server cap fired) and is misleading for a
+    // server-shutdown scenario.
+    let lower = rendered.to_lowercase();
+    assert!(lower.contains("hint:"), "rendered must contain a `Hint:` line; got:\n{rendered}");
+    assert!(
+        !rendered.contains("--detach"),
+        "Hint line must NOT mention `--detach` for StreamInterrupted (that is \
+         Timeout-specific guidance); got:\n{rendered}",
+    );
+    assert!(
+        rendered.contains("overdrive alloc status") || rendered.contains("overdrive job submit"),
+        "Hint line must reference `overdrive alloc status` or re-running \
+         `overdrive job submit` for the StreamInterrupted variant; got:\n{rendered}",
+    );
+}
+
 #[test]
 fn failed_block_renders_without_reason_falls_back_to_terminal_reason_cause() {
     // `reason` is None — only `terminal_reason` carries a cause.

@@ -79,4 +79,12 @@ mod acceptance {
     // Scenarios: S-CP-01, S-CP-02, S-CP-03, S-CP-06, S-CP-07,
     // S-CP-08, S-CP-10 (#[ignore]'d per wave-decisions.md).
     mod streaming_submit;
+
+    // fix-terminal-reason-channel-closed — Slice 01 step 01-01 (RED).
+    // `closed_lifecycle_channel_emits_stream_interrupted_terminal` —
+    // asserts that the streaming handler emits
+    // `TerminalReason::StreamInterrupted` (not `Timeout { after_seconds: 0 }`)
+    // when the lifecycle broadcast channel is dropped mid-stream.
+    // FAILS on current code; GREEN lands in step 01-02.
+    mod streaming_channel_closed;
 }

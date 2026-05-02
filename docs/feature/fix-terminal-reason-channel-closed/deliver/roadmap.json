@@ -1,0 +1,169 @@
+{
+  "roadmap": {
+    "project_id": "fix-terminal-reason-channel-closed",
+    "feature_id": "fix-terminal-reason-channel-closed",
+    "created_at": "2026-05-02T14:50:00Z",
+    "filled_at": "2026-05-02T14:50:00Z",
+    "total_steps": 2,
+    "phases": 1,
+    "walking_skeleton_gate": "01-02",
+    "validation": {
+      "status": "approved",
+      "approved_at": "2026-05-02T14:55:00Z",
+      "approver": "user",
+      "rationale": "User reviewed and approved the RCA + Option A fix shape (additive `TerminalReason::StreamInterrupted` variant) in /nw-bugfix Phase 2. Roadmap drafted by orchestrator and approved verbally in /nw-deliver Phase 1. Mirrors the canonical bug-fix shape from sibling fix-exit-observer-write-retry/deliver/roadmap.json: two-step Outside-In TDD, single-cut additive change, no fallback or feature-flag retention."
+    },
+    "notes": [
+      "Bug fix via /nw-bugfix → /nw-deliver. Authoritative spec is the RCA at `docs/feature/fix-terminal-reason-channel-closed/deliver/rca.md` (user-reviewed and APPROVED 2026-05-02 in /nw-bugfix Phase 2).",
+      "The fix is purely additive on the `#[non_exhaustive]` `TerminalReason` enum. No existing test asserts the buggy `Timeout { after_seconds: 0 }` shape against the channel-closed arm (verified by grep across both control-plane and CLI test crates). No wire-format regression risk in Phase 1 (intra-workspace lock-step; no external NDJSON consumers).",
+      "Two-step Outside-In TDD shape per `docs/feature/fix-exit-observer-write-retry/deliver/roadmap.json`. Step 01-01 lands the new `TerminalReason::StreamInterrupted` variant declaration (so tests can reference it) + extends `arb_terminal_reason` proptest generator + adds new acceptance test asserting the closed-arm emits the new variant + adds CLI render unit test asserting the new variant produces the right Reason/Hint text. Production behaviour is unchanged in 01-01 (emit site at streaming.rs:281-297 still produces `Timeout { after_seconds: 0 }`; render fallthrough still emits generic text). Both new assertions FAIL → RED. Step 01-02 switches the emit site to `StreamInterrupted`, adds the explicit match arms in `derive_reason_from_terminal` and `derive_hint`, and regenerates `api/openapi.yaml`. Tests transition RED → GREEN.",
+      "Per `.claude/rules/development.md` 'Sum types over sentinels': the `Timeout { after_seconds: 0 }` placeholder IS the rule-violation shape. The fix replaces a sentinel with a dedicated variant, which is exactly what the rule mandates.",
+      "Variant naming `StreamInterrupted` (not `ChannelClosed`): the wire concept is the NDJSON stream; `channel` is a tokio::sync implementation detail. The variant carries no payload — the human-readable cause stays in the existing `error: Option<String>` field on `SubmitEvent::ConvergedFailed`.",
+      "Per `.claude/rules/testing.md` mutation-testing rules, step 01-02 runs `cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-control-plane --package overdrive-cli`. Kill-rate gate ≥80%. Mutation surface is small: one variant addition, one emit-site swap, two render match arms.",
+      "Out of scope for the crafter (architect agent owns these — to be dispatched after deliver finalize, NOT inline per the global feedback rule on architecture artifacts):",
+      "  • `docs/product/architecture/adr-0032-ndjson-streaming-submit.md` §8: replace the row mapping channel-closed-unexpectedly to `DriverError` with a row mapping it to `StreamInterrupted`. The original ADR mapping was unimplementable (DriverError requires a `cause: TransitionReason` payload the Closed arm cannot produce).",
+      "Out of scope for this feature (do not address): the legitimate timeout path at streaming.rs:304-317 (correct as-is); the broker re-enqueue gating (untouched); any other `TerminalReason` variant (untouched). The fix is bounded to the broadcast-channel-closure code path and its observable surface."
+    ]
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Bug fix — TerminalReason::StreamInterrupted distinguishes channel closure from timeout",
+      "slice": "single-vertical",
+      "user_stories": [
+        "As an operator running `overdrive job submit --watch` against a control-plane that goes through a planned shutdown mid-stream, when the lifecycle broadcast channel closes I see a structured terminal event whose `terminal_reason` discriminant is `StreamInterrupted` — NOT `Timeout { after_seconds: 0 }`. The CLI renders 'server-side stream interrupted before convergence' with a hint to consult `overdrive alloc status` for the current state — NOT 'workload did not converge within 0s' with a `--detach` hint that does not apply. Programmatic consumers branching on the structured discriminant route to the correct error path."
+      ],
+      "description": "Add a dedicated `TerminalReason::StreamInterrupted` variant (payload-free) to the `#[non_exhaustive]` enum. Switch the broadcast-channel-closed arm at `streaming.rs:281-297` to emit it. Extend the CLI's `derive_reason_from_terminal` and `derive_hint` to render the new variant correctly. Regenerate `api/openapi.yaml`. The fix is additive: no existing variant changes, no existing test fails, no wire contract is broken.",
+      "estimated_hours": 1.5,
+      "depends_on": [],
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "RED — declare TerminalReason::StreamInterrupted; extend proptest generator; add channel-closed acceptance test + CLI render test",
+          "description": "Land four things and DO NOT change the streaming emit site or the CLI render arms: (1) Add the `StreamInterrupted` variant to `TerminalReason` at `crates/overdrive-control-plane/src/api.rs:403-418`. Variant is payload-free. Rustdoc explains: 'The streaming handler''s lifecycle-events broadcast channel was closed before a terminal event arrived (typical: server shutdown while a stream is in-flight). Distinct from `Timeout` (no wall-clock cap fired) and from `DriverError` (no `TransitionReason` is available — the bus that would carry one is gone). Operators should re-issue the submit; the underlying job state is still recoverable from `overdrive alloc status`.' (2) Extend `arb_terminal_reason` at `crates/overdrive-control-plane/tests/acceptance/submit_event_serialization.rs:129-135` with `Just(TerminalReason::StreamInterrupted).boxed()` so the existing round-trip property covers the new variant. (3) Add a new acceptance test under `crates/overdrive-control-plane/tests/acceptance/` (new file `streaming_channel_closed.rs`) that wires through `tests/acceptance.rs` and asserts: kicks off a streaming submit, drops the lifecycle broadcast `Sender` mid-stream, collects NDJSON output, parses the terminal `SubmitEvent::ConvergedFailed`, and asserts `terminal_reason == TerminalReason::StreamInterrupted`. Currently FAILS because emit site at streaming.rs:286 still produces `Timeout { after_seconds: 0 }`. (4) Extend `crates/overdrive-cli/tests/acceptance/streaming_submit_cli_render.rs` with a render case constructing a `SubmitEvent::ConvergedFailed { terminal_reason: TerminalReason::StreamInterrupted, .. }` and asserting the rendered `Reason:` line is 'server-side stream interrupted before convergence' AND the `Hint:` line guides re-running `overdrive job submit` / consulting `overdrive alloc status` (NOT the `--detach` timeout hint). Currently FAILS because `derive_reason_from_terminal` falls through `_ => None` and `derive_hint` falls through `_ => \"see alloc status for full context\".to_owned()`. Commit with `git commit --no-verify` per testing.md §RED scaffolds, message marker `test(control-plane,cli): RED — TerminalReason::StreamInterrupted regression`. Default lane unaffected: the variant addition is non-breaking (enum is `#[non_exhaustive]`; both renderer match expressions already have `_ =>` arms).",
+          "criteria": [
+            "AC1: `TerminalReason::StreamInterrupted` variant exists at `crates/overdrive-control-plane/src/api.rs:403-418`. Variant is payload-free (unit variant). Rustdoc states the variant represents broadcast-channel closure mid-stream, distinct from `Timeout` and `DriverError`, and points operators at `overdrive alloc status`.",
+            "AC2: The serde tag-and-content shape (`#[serde(tag = \"kind\", content = \"data\", rename_all = \"snake_case\")]`) emits `{\"kind\":\"stream_interrupted\"}` for the new variant. A round-trip property in `submit_event_serialization.rs` (the existing `arb_terminal_reason` proptest, extended) proves this.",
+            "AC3: `arb_terminal_reason` at `crates/overdrive-control-plane/tests/acceptance/submit_event_serialization.rs:129-135` includes `Just(TerminalReason::StreamInterrupted).boxed()` (or equivalent flatten via `.boxed()`). Existing proptest cases continue to pass; new variant exercises the round-trip.",
+            "AC4: New acceptance test at `crates/overdrive-control-plane/tests/acceptance/streaming_channel_closed.rs` wired through `tests/acceptance.rs`. Test scenario `closed_lifecycle_channel_emits_stream_interrupted_terminal`: constructs `AppState` with sim adapters (LocalStore intent, SimObservationStore observation, SimClock), kicks off a streaming submit, drops the lifecycle broadcast `Sender`, collects NDJSON terminal line, asserts `SubmitEvent::ConvergedFailed { terminal_reason: TerminalReason::StreamInterrupted, .. }`. Test FAILS on current code with documented panic message (e.g., 'expected TerminalReason::StreamInterrupted; got Timeout { after_seconds: 0 }').",
+            "AC5: Extended CLI render test at `crates/overdrive-cli/tests/acceptance/streaming_submit_cli_render.rs`. New scenario `renders_stream_interrupted_terminal_with_correct_reason_and_hint`: constructs `SubmitEvent::ConvergedFailed { terminal_reason: TerminalReason::StreamInterrupted, alloc_id: None, reason: None, error: Some(\"lifecycle channel closed\".into()) }`, runs the renderer, asserts the printed `Reason:` line contains 'server-side stream interrupted before convergence' AND the `Hint:` line does NOT contain `--detach` (it should reference `overdrive alloc status` / re-running `overdrive job submit`). Test FAILS on current code (renderer falls through to generic `_ =>` arms).",
+            "AC6: Default lane: `cargo nextest run -p overdrive-control-plane` and `cargo nextest run -p overdrive-cli` continue to pass. The new acceptance tests are the only failures, and they fail with the documented panic messages from AC4 and AC5.",
+            "AC7: macOS compile-only gate: `cargo nextest run --workspace --features integration-tests --no-run` succeeds (the new variant addition does not break any cfg-gated surface).",
+            "AC8: `cargo xtask openapi-check` will FAIL (the regenerated schema is not yet committed; this is expected for a RED scaffold). Do NOT run `cargo xtask openapi-gen` in this step — that lands in 01-02 alongside the production fix as a single atomic commit.",
+            "AC9: Commit shape: `git commit --no-verify` with explicit RED-scaffold marker in the message. Hooks may fail on the failing acceptance tests; the `--no-verify` is the documented escape per testing.md §'RED scaffolds and intentionally-failing commits'."
+          ],
+          "acceptance_criteria": [
+            "AC1: `TerminalReason::StreamInterrupted` variant exists at `crates/overdrive-control-plane/src/api.rs:403-418`. Variant is payload-free (unit variant). Rustdoc states the variant represents broadcast-channel closure mid-stream, distinct from `Timeout` and `DriverError`, and points operators at `overdrive alloc status`.",
+            "AC2: The serde tag-and-content shape (`#[serde(tag = \"kind\", content = \"data\", rename_all = \"snake_case\")]`) emits `{\"kind\":\"stream_interrupted\"}` for the new variant. A round-trip property in `submit_event_serialization.rs` (the existing `arb_terminal_reason` proptest, extended) proves this.",
+            "AC3: `arb_terminal_reason` at `crates/overdrive-control-plane/tests/acceptance/submit_event_serialization.rs:129-135` includes `Just(TerminalReason::StreamInterrupted).boxed()` (or equivalent flatten via `.boxed()`). Existing proptest cases continue to pass; new variant exercises the round-trip.",
+            "AC4: New acceptance test at `crates/overdrive-control-plane/tests/acceptance/streaming_channel_closed.rs` wired through `tests/acceptance.rs`. Test scenario `closed_lifecycle_channel_emits_stream_interrupted_terminal`: constructs `AppState` with sim adapters (LocalStore intent, SimObservationStore observation, SimClock), kicks off a streaming submit, drops the lifecycle broadcast `Sender`, collects NDJSON terminal line, asserts `SubmitEvent::ConvergedFailed { terminal_reason: TerminalReason::StreamInterrupted, .. }`. Test FAILS on current code with documented panic message (e.g., 'expected TerminalReason::StreamInterrupted; got Timeout { after_seconds: 0 }').",
+            "AC5: Extended CLI render test at `crates/overdrive-cli/tests/acceptance/streaming_submit_cli_render.rs`. New scenario `renders_stream_interrupted_terminal_with_correct_reason_and_hint`: constructs `SubmitEvent::ConvergedFailed { terminal_reason: TerminalReason::StreamInterrupted, alloc_id: None, reason: None, error: Some(\"lifecycle channel closed\".into()) }`, runs the renderer, asserts the printed `Reason:` line contains 'server-side stream interrupted before convergence' AND the `Hint:` line does NOT contain `--detach` (it should reference `overdrive alloc status` / re-running `overdrive job submit`). Test FAILS on current code (renderer falls through to generic `_ =>` arms).",
+            "AC6: Default lane: `cargo nextest run -p overdrive-control-plane` and `cargo nextest run -p overdrive-cli` continue to pass. The new acceptance tests are the only failures, and they fail with the documented panic messages from AC4 and AC5.",
+            "AC7: macOS compile-only gate: `cargo nextest run --workspace --features integration-tests --no-run` succeeds (the new variant addition does not break any cfg-gated surface).",
+            "AC8: `cargo xtask openapi-check` will FAIL (the regenerated schema is not yet committed; this is expected for a RED scaffold). Do NOT run `cargo xtask openapi-gen` in this step — that lands in 01-02 alongside the production fix as a single atomic commit.",
+            "AC9: Commit shape: `git commit --no-verify` with explicit RED-scaffold marker in the message. Hooks may fail on the failing acceptance tests; the `--no-verify` is the documented escape per testing.md §'RED scaffolds and intentionally-failing commits'."
+          ],
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/api.rs",
+            "crates/overdrive-control-plane/tests/acceptance.rs",
+            "crates/overdrive-control-plane/tests/acceptance/submit_event_serialization.rs",
+            "crates/overdrive-control-plane/tests/acceptance/streaming_channel_closed.rs",
+            "crates/overdrive-cli/tests/acceptance/streaming_submit_cli_render.rs"
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/streaming_channel_closed.rs",
+          "scenario_name": "closed_lifecycle_channel_emits_stream_interrupted_terminal",
+          "tier": "structural",
+          "time_estimate_hours": 0.75,
+          "estimated_hours": 0.75,
+          "dependencies": [],
+          "quality_gates": [
+            "Default lane: `cargo nextest run -p overdrive-control-plane` and `cargo nextest run -p overdrive-cli` — only the two new RED scenarios fail, with documented panic messages.",
+            "macOS compile-only: `cargo nextest run --workspace --features integration-tests --no-run` succeeds.",
+            "Doctests: `cargo test --doc -p overdrive-control-plane` continues to pass (new rustdoc on the variant is well-formed).",
+            "Commit shape: `git commit --no-verify` with explicit RED-scaffold marker in the message."
+          ],
+          "deliverables": [
+            "One commit landing the variant declaration + extended proptest generator + two new RED acceptance tests."
+          ],
+          "implementation_scope": {
+            "production": [
+              "crates/overdrive-control-plane/src/api.rs (add `TerminalReason::StreamInterrupted` variant + rustdoc)"
+            ],
+            "tests": [
+              "crates/overdrive-control-plane/tests/acceptance.rs (mod declaration for new file)",
+              "crates/overdrive-control-plane/tests/acceptance/submit_event_serialization.rs (extend `arb_terminal_reason`)",
+              "crates/overdrive-control-plane/tests/acceptance/streaming_channel_closed.rs (new oracle, 1 scenario)",
+              "crates/overdrive-cli/tests/acceptance/streaming_submit_cli_render.rs (new render scenario)"
+            ]
+          }
+        },
+        {
+          "id": "01-02",
+          "name": "GREEN — switch emit site to StreamInterrupted; add explicit render arms; regenerate openapi.yaml",
+          "description": "Three production changes that flip the failing tests from step 01-01 to GREEN: (1) Switch the emit site at `crates/overdrive-control-plane/src/streaming.rs:281-297` (the `Err(broadcast::error::RecvError::Closed)` arm of the `tokio::select!`) to emit `TerminalReason::StreamInterrupted` instead of `TerminalReason::Timeout { after_seconds: 0 }`. The synthesised `SubmitEvent::ConvergedFailed` keeps `alloc_id: None`, `reason: None`, and `error: Some(\"lifecycle channel closed\".to_string())` — only `terminal_reason` changes. Update the leading comment to point at the new variant rather than 'no specific cause'. (2) Add an explicit match arm to `derive_reason_from_terminal` at `crates/overdrive-cli/src/render.rs:390-403`: `TerminalReason::StreamInterrupted => Some(\"server-side stream interrupted before convergence\".to_owned())`. (3) Add an explicit match arm to `derive_hint` at `crates/overdrive-cli/src/render.rs:428-435`: `TerminalReason::StreamInterrupted => \"server-side stream was interrupted; re-run `overdrive job submit` or consult `overdrive alloc status --job <id>` for the current state\".to_owned()`. (4) Regenerate `api/openapi.yaml` via `cargo xtask openapi-gen` — the schema picks up the new variant automatically through `utoipa::ToSchema`. Commit the regenerated yaml in the same atomic commit as the Rust changes. (5) Run mutation testing on the diff. The previously-RED tests transition GREEN. Standard commit (no `--no-verify`). Commit message marker `fix(streaming): TerminalReason::StreamInterrupted distinguishes channel closure from timeout`.",
+          "criteria": [
+            "AC1: `crates/overdrive-control-plane/src/streaming.rs:281-297` (the `Err(broadcast::error::RecvError::Closed)` arm) constructs `SubmitEvent::ConvergedFailed` with `terminal_reason: TerminalReason::StreamInterrupted`. The other fields (`alloc_id`, `reason`, `error`) are unchanged. Comment above the arm references the new variant by name.",
+            "AC2: `crates/overdrive-cli/src/render.rs::derive_reason_from_terminal` has an explicit match arm `TerminalReason::StreamInterrupted => Some(\"server-side stream interrupted before convergence\".to_owned())`, placed BEFORE the `_ =>` fallback so it is reached.",
+            "AC3: `crates/overdrive-cli/src/render.rs::derive_hint` has an explicit match arm `TerminalReason::StreamInterrupted => \"server-side stream was interrupted; re-run `overdrive job submit` or consult `overdrive alloc status --job <id>` for the current state\".to_owned()`, placed BEFORE the `_ =>` fallback so it is reached.",
+            "AC4: `api/openapi.yaml` regenerated via `cargo xtask openapi-gen`. The `TerminalReason` `oneOf` in the schema gains a fourth member with `kind: stream_interrupted`. The regeneration is committed atomically in the same commit as the Rust changes.",
+            "AC5: `cargo xtask openapi-check` passes (regenerated yaml matches the type's ToSchema output).",
+            "AC6: `streaming_channel_closed.rs::closed_lifecycle_channel_emits_stream_interrupted_terminal` transitions RED → GREEN. The dropped broadcast Sender now produces the correct `TerminalReason::StreamInterrupted` discriminant.",
+            "AC7: `streaming_submit_cli_render.rs::renders_stream_interrupted_terminal_with_correct_reason_and_hint` transitions RED → GREEN. Renderer produces the new Reason and Hint text.",
+            "AC8: Existing acceptance tests pass unchanged: `submit_event_serialization.rs` (round-trip including the new variant), `lifecycle_broadcast.rs`, `streaming_submit.rs`, `streaming_submit_broken_binary.rs` (CLI side), `streaming_submit_cli_render.rs` (existing scenarios).",
+            "AC9: Default lane: `cargo nextest run -p overdrive-control-plane`, `cargo nextest run -p overdrive-cli`, and `cargo nextest run --workspace` all PASS.",
+            "AC10: Doctests: `cargo test --doc -p overdrive-control-plane` and `cargo test --doc -p overdrive-cli` pass.",
+            "AC11: macOS compile-only: `cargo nextest run --workspace --features integration-tests --no-run` succeeds.",
+            "AC12: Mutation testing kill rate ≥80% on the diff via `cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-control-plane --package overdrive-cli`. The mutation surface is small: one variant declaration (already landed in 01-01), one emit-site swap, two new render match arms — kill rate should be high. If kill rate falls below 80%, surface the missed mutations and either add tests or document why the mutation is unreachable per testing.md.",
+            "AC13: Commit shape: standard `git commit` (no `--no-verify`). Commit message marker `fix(streaming): TerminalReason::StreamInterrupted distinguishes channel closure from timeout`. Body cites the RCA path and the originating bug report."
+          ],
+          "acceptance_criteria": [
+            "AC1: `crates/overdrive-control-plane/src/streaming.rs:281-297` (the `Err(broadcast::error::RecvError::Closed)` arm) constructs `SubmitEvent::ConvergedFailed` with `terminal_reason: TerminalReason::StreamInterrupted`. The other fields (`alloc_id`, `reason`, `error`) are unchanged. Comment above the arm references the new variant by name.",
+            "AC2: `crates/overdrive-cli/src/render.rs::derive_reason_from_terminal` has an explicit match arm `TerminalReason::StreamInterrupted => Some(\"server-side stream interrupted before convergence\".to_owned())`, placed BEFORE the `_ =>` fallback so it is reached.",
+            "AC3: `crates/overdrive-cli/src/render.rs::derive_hint` has an explicit match arm `TerminalReason::StreamInterrupted => \"server-side stream was interrupted; re-run `overdrive job submit` or consult `overdrive alloc status --job <id>` for the current state\".to_owned()`, placed BEFORE the `_ =>` fallback so it is reached.",
+            "AC4: `api/openapi.yaml` regenerated via `cargo xtask openapi-gen`. The `TerminalReason` `oneOf` in the schema gains a fourth member with `kind: stream_interrupted`. The regeneration is committed atomically in the same commit as the Rust changes.",
+            "AC5: `cargo xtask openapi-check` passes (regenerated yaml matches the type's ToSchema output).",
+            "AC6: `streaming_channel_closed.rs::closed_lifecycle_channel_emits_stream_interrupted_terminal` transitions RED → GREEN. The dropped broadcast Sender now produces the correct `TerminalReason::StreamInterrupted` discriminant.",
+            "AC7: `streaming_submit_cli_render.rs::renders_stream_interrupted_terminal_with_correct_reason_and_hint` transitions RED → GREEN. Renderer produces the new Reason and Hint text.",
+            "AC8: Existing acceptance tests pass unchanged: `submit_event_serialization.rs` (round-trip including the new variant), `lifecycle_broadcast.rs`, `streaming_submit.rs`, `streaming_submit_broken_binary.rs` (CLI side), `streaming_submit_cli_render.rs` (existing scenarios).",
+            "AC9: Default lane: `cargo nextest run -p overdrive-control-plane`, `cargo nextest run -p overdrive-cli`, and `cargo nextest run --workspace` all PASS.",
+            "AC10: Doctests: `cargo test --doc -p overdrive-control-plane` and `cargo test --doc -p overdrive-cli` pass.",
+            "AC11: macOS compile-only: `cargo nextest run --workspace --features integration-tests --no-run` succeeds.",
+            "AC12: Mutation testing kill rate ≥80% on the diff via `cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-control-plane --package overdrive-cli`. The mutation surface is small: one variant declaration (already landed in 01-01), one emit-site swap, two new render match arms — kill rate should be high. If kill rate falls below 80%, surface the missed mutations and either add tests or document why the mutation is unreachable per testing.md.",
+            "AC13: Commit shape: standard `git commit` (no `--no-verify`). Commit message marker `fix(streaming): TerminalReason::StreamInterrupted distinguishes channel closure from timeout`. Body cites the RCA path and the originating bug report."
+          ],
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/streaming.rs",
+            "crates/overdrive-cli/src/render.rs",
+            "api/openapi.yaml"
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/streaming_channel_closed.rs",
+          "scenario_name": "closed_lifecycle_channel_emits_stream_interrupted_terminal",
+          "tier": "structural",
+          "time_estimate_hours": 0.75,
+          "estimated_hours": 0.75,
+          "dependencies": ["01-01"],
+          "quality_gates": [
+            "Default lane: `cargo nextest run -p overdrive-control-plane` and `cargo nextest run -p overdrive-cli` PASS (both step-01-01 RED scenarios now GREEN).",
+            "Workspace lane: `cargo nextest run --workspace` PASSES.",
+            "Doctests: `cargo test --doc --workspace` PASSES.",
+            "OpenAPI gate: `cargo xtask openapi-check` PASSES.",
+            "macOS compile-only: `cargo nextest run --workspace --features integration-tests --no-run` PASSES.",
+            "Mutation testing: kill rate ≥80% on the diff via `cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-control-plane --package overdrive-cli`.",
+            "Commit shape: standard `git commit` (no `--no-verify`); explicit `fix(streaming):` conventional-commit prefix."
+          ],
+          "deliverables": [
+            "One atomic commit landing the emit-site swap, the two render match arms, and the regenerated openapi.yaml. Acceptance tests transition RED → GREEN. Mutation kill rate ≥80%."
+          ],
+          "implementation_scope": {
+            "production": [
+              "crates/overdrive-control-plane/src/streaming.rs (lines 281-297: switch emit site)",
+              "crates/overdrive-cli/src/render.rs (lines 390-403 and 428-435: add explicit match arms)",
+              "api/openapi.yaml (regenerated)"
+            ],
+            "tests": []
+          }
+        }
+      ]
+    }
+  ]
+}

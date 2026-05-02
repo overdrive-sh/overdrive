@@ -128,10 +128,20 @@ fn arb_transition_source() -> impl Strategy<Value = TransitionSource> {
 
 fn arb_terminal_reason() -> impl Strategy<Value = TerminalReason> {
     prop_oneof![
-        arb_transition_reason().prop_map(|cause| TerminalReason::DriverError { cause }),
+        arb_transition_reason()
+            .prop_map(|cause| TerminalReason::DriverError { cause })
+            .boxed(),
         (any::<u32>(), arb_transition_reason())
-            .prop_map(|(attempts, cause)| { TerminalReason::BackoffExhausted { attempts, cause } }),
-        any::<u32>().prop_map(|after_seconds| TerminalReason::Timeout { after_seconds }),
+            .prop_map(|(attempts, cause)| { TerminalReason::BackoffExhausted { attempts, cause } })
+            .boxed(),
+        any::<u32>()
+            .prop_map(|after_seconds| TerminalReason::Timeout { after_seconds })
+            .boxed(),
+        // Step 01-01 (RED-scaffold companion): exercise the new
+        // `TerminalReason::StreamInterrupted` variant through the
+        // existing serde round-trip property. Payload-free unit
+        // variant per `crates/overdrive-control-plane/src/api.rs`.
+        Just(TerminalReason::StreamInterrupted).boxed(),
     ]
 }
 

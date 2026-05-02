@@ -415,6 +415,18 @@ pub enum TerminalReason {
     /// can render `"did not converge in {after_seconds}s"` without
     /// reading server config.
     Timeout { after_seconds: u32 },
+    /// The streaming handler's lifecycle-events broadcast channel was
+    /// closed before a terminal event arrived (typical: server
+    /// shutdown while a stream is in-flight). Distinct from `Timeout`
+    /// (no wall-clock cap fired) and from `DriverError` (no
+    /// `TransitionReason` is available — the bus that would carry one
+    /// is gone). Operators should re-issue the submit; the underlying
+    /// job state is still recoverable from `overdrive alloc status`.
+    ///
+    /// Payload-free: there is no further structured information to
+    /// surface; the human-readable cause stays in the sibling
+    /// `error: Option<String>` field on `SubmitEvent::ConvergedFailed`.
+    StreamInterrupted,
 }
 
 /// Wire-shaped projection of the internal `AllocState` enum.
