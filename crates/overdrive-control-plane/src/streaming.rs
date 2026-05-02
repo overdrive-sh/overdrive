@@ -182,6 +182,18 @@ pub fn build_stream(
         //    state.
         let mut sub = bus.subscribe();
 
+        // Drop the local `Arc<Sender>` clone immediately after
+        // subscribing. The `Receiver` we just created keeps the
+        // channel alive for our reads; retaining the `Sender` clone
+        // here would keep the channel open even when every external
+        // sender has dropped, making the `Err(RecvError::Closed)` arm
+        // below unreachable in normal operation. Dropping `bus` lets
+        // external senders (the action shim, exit observer) be the
+        // sole owners of the channel's send-side — when they all drop,
+        // our `sub.recv()` produces `Err(RecvError::Closed)` and we
+        // emit `TerminalReason::StreamInterrupted`.
+        drop(bus);
+
         // 3. Bridge the pre-subscribe window: the upstream
         //    `put_if_absent` + broker enqueue may have already
         //    triggered a reconcile tick that wrote a terminal
@@ -282,13 +294,18 @@ pub fn build_stream(
                             }
                         }
                         Err(broadcast::error::RecvError::Closed) => {
-                            // Channel closed — fall through to terminal
-                            // failure with no specific cause.
+                            // Channel closed — every `Sender` clone has
+                            // dropped (server shutdown, action shim
+                            // teardown, etc.) and no further events can
+                            // arrive. Emit `TerminalReason::StreamInterrupted`
+                            // to distinguish this server-side
+                            // interruption from a wall-clock cap timeout
+                            // (`TerminalReason::Timeout`) and from a
+                            // driver-error terminal
+                            // (`TerminalReason::DriverError`).
                             let terminal = SubmitEvent::ConvergedFailed {
                                 alloc_id: None,
-                                terminal_reason: TerminalReason::Timeout {
-                                    after_seconds: 0,
-                                },
+                                terminal_reason: TerminalReason::StreamInterrupted,
                                 reason: None,
                                 error: Some("lifecycle channel closed".to_string()),
                             };

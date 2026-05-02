@@ -395,6 +395,9 @@ fn derive_reason_from_terminal(terminal: &TerminalReason) -> Option<String> {
         TerminalReason::Timeout { after_seconds } => {
             Some(format!("workload did not converge within {after_seconds}s"))
         }
+        TerminalReason::StreamInterrupted => {
+            Some("server-side stream interrupted before convergence".to_owned())
+        }
         // `TerminalReason` is `#[non_exhaustive]` for forward-compat.
         // Future variants get a generic rendering until the renderer
         // grows a specific arm.
@@ -429,6 +432,11 @@ fn derive_hint(reason: Option<&TransitionReason>, terminal_reason: &TerminalReas
         TerminalReason::Timeout { .. } => {
             "workload did not converge within the server cap; consider --detach for \
              long-running submits"
+                .to_owned()
+        }
+        TerminalReason::StreamInterrupted => {
+            "server-side stream was interrupted; re-run `overdrive job submit` or \
+             consult `overdrive alloc status --job <id>` for the current state"
                 .to_owned()
         }
         _ => "see alloc status for full context".to_owned(),
