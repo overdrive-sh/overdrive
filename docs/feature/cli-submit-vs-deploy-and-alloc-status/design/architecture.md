@@ -312,6 +312,29 @@ error isolation is preserved (an error broadcasting does not abort
 subsequent action dispatch — the broadcast send error is logged and
 discarded; the row was written, the snapshot will see it).
 
+### Subscribe-race as a missed-events class
+
+`tokio::sync::broadcast::Sender::send` only delivers to receivers
+`subscribe()`-d at send-time. The streaming submit handler
+synchronously emits `Accepted` after `IntentStore::put_if_absent`
+returns, then calls `bus.subscribe()`. Between the upstream
+`put_if_absent` (which enqueues an evaluation through the broker) and
+the `bus.subscribe()` call, the convergence loop — running on a
+separate `tokio::spawn`-ed task — may already have reconciled the job,
+written a terminal `AllocStatusRow` to the obs store, and broadcast
+its `LifecycleEvent`. Events broadcast in that pre-subscribe window
+have no receiver and are permanently lost; the streaming select loop
+then has no event to project and parks on the cap timer until it
+fires — the same shape of missed-events failure as `RecvError::Lagged(_)`,
+but bound to subscribe-time rather than buffer-overflow time. The
+mitigation is a one-shot `obs.alloc_status_rows()` snapshot taken
+immediately after `bus.subscribe()` (and before the select loop is
+entered): if the latest row for the job is already terminal, the
+snapshot projects it to a terminal `SubmitEvent` and the stream ends
+without entering the loop. The same `lagged_recover` primitive serves
+both call sites — one bridges the buffer-overflow class, one bridges
+the subscribe-race class — keeping the projection logic in one place.
+
 ## 11. Out of scope (do not let scope creep)
 
 - `alloc status --follow` — explicitly [C4]-out.

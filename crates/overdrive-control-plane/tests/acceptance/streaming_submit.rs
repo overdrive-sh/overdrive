@@ -481,17 +481,6 @@ async fn s_cp_07_streaming_reason_byte_equals_snapshot_reason() {
     let reason =
         TransitionReason::ExecBinaryNotFound { path: "/usr/local/bin/payments".to_string() };
 
-    // Pre-seed a Running row so the stream terminates on its own.
-    write_row(
-        state.obs.as_ref(),
-        &alloc_id,
-        &job_id,
-        AllocState::Running,
-        1,
-        Some(TransitionReason::Started),
-    )
-    .await;
-
     let req_state = state.clone();
     let req_reason = reason.clone();
     let req_alloc_id = alloc_id.clone();
@@ -511,6 +500,14 @@ async fn s_cp_07_streaming_reason_byte_equals_snapshot_reason() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 
+    // Emit the lifecycle event AFTER the subscriber is live, then write
+    // the Running row that drives terminal classification. Mirrors the
+    // s_cp_01 ordering — required so the post-subscribe snapshot does
+    // not short-circuit the loop before the live event arrives. (The
+    // test asserts on the wire shape of the projected
+    // `LifecycleTransition`; that line only exists when the loop sees
+    // a live event, which requires the subscriber to be live and the
+    // obs row to not yet be terminal at subscribe-time.)
     emit_lifecycle(
         &state,
         make_lifecycle_event(
@@ -521,6 +518,18 @@ async fn s_cp_07_streaming_reason_byte_equals_snapshot_reason() {
             req_reason.clone(),
         ),
     );
+
+    // Write a Running row matching the desired replica count → handler
+    // detects ConvergedRunning. Job has replicas=1, one Running row meets the bar.
+    write_row(
+        state.obs.as_ref(),
+        &alloc_id,
+        &job_id,
+        AllocState::Running,
+        1,
+        Some(TransitionReason::Started),
+    )
+    .await;
 
     let lines = tokio::time::timeout(Duration::from_secs(5), request_task)
         .await
@@ -771,7 +780,6 @@ async fn s_lt_01_lifecycle_transition_from_reflects_prior_alloc_state() {
 // ===========================================================================
 
 #[tokio::test]
-#[ignore = "RED scaffold for fix-streaming-pre-subscribe-race — un-ignore in the GREEN step"]
 async fn s_cp_12_pre_subscribe_terminal_does_not_hang_until_cap() {
     let tmp = TempDir::new().expect("tmpdir");
     let mut state = build_app_state(&tmp);

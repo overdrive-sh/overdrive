@@ -41,6 +41,33 @@
 //! broadcast. The resubscription happens implicitly because
 //! `tokio::sync::broadcast::Receiver` skips ahead on `Lagged` and the
 //! next `recv()` is the new front.
+//!
+//! # Missed-events classes
+//!
+//! Five classes of missed-events failure are bridged or surfaced by
+//! the loop:
+//!
+//! 1. Live event delivery — the `bus.recv()` arm projects each
+//!    `LifecycleEvent` and runs `check_terminal` against the obs store.
+//! 2. `RecvError::Lagged(_)` — buffer-overflow: a slow subscriber fell
+//!    behind and the broadcast channel evicted older messages. Bridged
+//!    by the `lagged_recover` snapshot in the `Lagged` arm.
+//! 3. `RecvError::Closed` — the `lifecycle_events` sender was dropped;
+//!    the loop emits a `ConvergedFailed` terminal and ends.
+//! 4. Cap timer — `clock.sleep(cap)` fires; the loop emits
+//!    `ConvergedFailed { Timeout }` and ends.
+//! 5. **Pre-subscription event window** — the upstream `put_if_absent`
+//!    write may trigger the convergence loop *before* `bus.subscribe()`
+//!    runs in this stream. `tokio::sync::broadcast::Sender::send` only
+//!    delivers to receivers `subscribe()`-d at send-time, so events
+//!    broadcast in the pre-subscribe window have no receiver and are
+//!    dropped — the same kind of missed-events class as `Lagged`, but
+//!    at subscribe-time rather than at buffer-overflow time. Bridged
+//!    by a one-shot `lagged_recover` snapshot taken immediately after
+//!    `bus.subscribe()` and before the select loop is entered: if the
+//!    latest row for the job is already terminal, the snapshot
+//!    projects it to a terminal `SubmitEvent` and the stream ends
+//!    without entering the loop.
 
 // `async_stream::stream!` macro expansions trigger several pedantic
 // lints on code we do not author directly. Suppressing here keeps
@@ -154,6 +181,32 @@ pub fn build_stream(
         //    emitted. The `Accepted` line does not depend on broadcast
         //    state.
         let mut sub = bus.subscribe();
+
+        // 3. Bridge the pre-subscribe window: the upstream
+        //    `put_if_absent` + broker enqueue may have already
+        //    triggered a reconcile tick that wrote a terminal
+        //    `AllocStatusRow` and broadcast its `LifecycleEvent`
+        //    BEFORE the subscriber above existed. Such events are
+        //    permanently lost (`tokio::sync::broadcast::Sender::send`
+        //    only delivers to receivers `subscribe()`-d at send-time).
+        //    Reuse the same snapshot-and-classify primitive used for
+        //    `Lagged` recovery: read `obs.alloc_status_rows()` once and,
+        //    if the latest row for this job is already terminal, emit
+        //    the terminal event and end the stream — analogous to
+        //    ADR-0032 §7 lagged-recovery, applied to the subscribe-race
+        //    rather than the buffer-overflow class.
+        if let Some(terminal) = lagged_recover(&*obs, &job_id, &view_cache).await {
+            match emit_line(&terminal) {
+                Ok(line) => {
+                    yield Ok(line);
+                    return;
+                }
+                Err(err) => {
+                    yield Err(err);
+                    return;
+                }
+            }
+        }
 
         loop {
             tokio::select! {
