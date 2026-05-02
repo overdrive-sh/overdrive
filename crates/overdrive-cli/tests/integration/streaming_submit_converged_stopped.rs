@@ -4,7 +4,7 @@
 //! RCA: `docs/feature/fix-converged-stopped-cli-arm/deliver/rca.md`.
 //! Operator-visible bug: `overdrive job submit --stream` exited 2 with
 //! `BodyDecode` ("streaming submit response closed without
-//! ConvergedRunning or ConvergedFailed") when a concurrent
+//! `ConvergedRunning` or `ConvergedFailed`) when a concurrent
 //! `overdrive job stop` reached the workload before `Running`. Root
 //! cause: the streaming consumer's match fell through to `_ =>` for
 //! `SubmitEvent::ConvergedStopped`, treating a *present-day terminal
