@@ -470,7 +470,7 @@ const fn timestamp_for(tick: &TickContext, writer: NodeId) -> LogicalTimestamp {
     LogicalTimestamp { counter: tick.tick.saturating_add(1), writer }
 }
 
-/// Look up the most recent observation row for `alloc_id`, used by the
+/// Look up the LWW-winner observation row for `alloc_id`, used by the
 /// Restart and Stop variants to recover `(job_id, node_id)` for the
 /// Terminated row they write. Returns `Ok(None)` when no row exists —
 /// callers decide whether that is an error (Restart) or a no-op (Stop).
@@ -478,7 +478,7 @@ async fn find_prior_alloc_row(
     obs: &dyn ObservationStore,
     alloc_id: &AllocationId,
 ) -> Result<Option<AllocStatusRow>, ShimError> {
-    Ok(obs.alloc_status_rows().await?.into_iter().find(|r| &r.alloc_id == alloc_id))
+    Ok(obs.alloc_status_row(alloc_id).await?)
 }
 
 /// Errors from [`dispatch`] that cannot be resolved into an

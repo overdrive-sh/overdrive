@@ -262,6 +262,16 @@ impl ObservationStore for SimObservationStore {
         Ok(self.inner.alloc_status_snapshot().into_values().collect())
     }
 
+    async fn alloc_status_row(
+        &self,
+        alloc_id: &AllocationId,
+    ) -> Result<Option<AllocStatusRow>, ObservationStoreError> {
+        // Direct point lookup against the per-alloc LWW index — never
+        // a scan over `alloc_status_snapshot()`. The §4 LWW invariant
+        // guarantees at most one winner per key.
+        Ok(self.inner.latest_alloc_status(alloc_id))
+    }
+
     async fn node_health_rows(&self) -> Result<Vec<NodeHealthRow>, ObservationStoreError> {
         // LWW winners only — keyed by `NodeId` under `BTreeMap` for
         // deterministic iteration. The `ObservationStore::write` LWW

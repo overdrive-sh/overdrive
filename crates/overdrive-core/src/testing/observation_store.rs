@@ -152,6 +152,13 @@ pub async fn run_lww_conformance<T: ObservationStore + ?Sized>(store: &T) {
     case_writer_tiebreak_alloc_status(store).await;
     case_writer_tiebreak_node_health(store).await;
 
+    // (v) Point lookup — `alloc_status_row(id)` returns the same
+    //     LWW-winner as the equivalent filter over `alloc_status_rows`,
+    //     and `None` for an absent id. Future adapters MUST implement
+    //     this as a direct point lookup; this case rejects regressions
+    //     that route the call back through a scan-and-filter.
+    case_alloc_status_row_point_lookup(store).await;
+
     // (vii) Comparator property sweep — deterministic tuples that
     //       cover every comparator branch in
     //       [`LogicalTimestamp::dominates`].
@@ -317,6 +324,44 @@ async fn case_writer_tiebreak_alloc_status<T: ObservationStore + ?Sized>(store: 
         *observed[0], higher_writer,
         "(iv) higher-writer row must remain after losing tiebreak"
     );
+}
+
+async fn case_alloc_status_row_point_lookup<T: ObservationStore + ?Sized>(store: &T) {
+    let scope = "point-lookup";
+    let initial = alloc_row(scope, 0, AllocState::Pending, ts(1, "control-plane-0"));
+    let updated = alloc_row(scope, 0, AllocState::Running, ts(4, "control-plane-0"));
+
+    store.write(ObservationRow::AllocStatus(initial.clone())).await.expect("write initial");
+    let after_initial =
+        store.alloc_status_row(&initial.alloc_id).await.expect("point lookup initial");
+    assert_eq!(
+        after_initial.as_ref(),
+        Some(&initial),
+        "(v) point lookup must return the LWW-winner; got {after_initial:?}"
+    );
+
+    store.write(ObservationRow::AllocStatus(updated.clone())).await.expect("write updated");
+    let after_updated =
+        store.alloc_status_row(&updated.alloc_id).await.expect("point lookup updated");
+    assert_eq!(
+        after_updated.as_ref(),
+        Some(&updated),
+        "(v) point lookup must return the new LWW-winner after a dominating write; got \
+         {after_updated:?}"
+    );
+
+    let snapshot = store.alloc_status_rows().await.expect("snapshot");
+    let from_snapshot: Option<AllocStatusRow> =
+        snapshot.into_iter().find(|r| r.alloc_id == updated.alloc_id);
+    assert_eq!(
+        after_updated, from_snapshot,
+        "(v) point lookup and snapshot-filter must agree on the winner"
+    );
+
+    let absent = format!("{scope}-absent");
+    let absent_alloc = AllocationId::new(&absent).expect("absent id");
+    let none = store.alloc_status_row(&absent_alloc).await.expect("point lookup absent");
+    assert_eq!(none, None, "(v) absent id must return None; got {none:?}");
 }
 
 // ---------------------------------------------------------------------------

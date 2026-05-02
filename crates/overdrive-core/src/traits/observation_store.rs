@@ -287,6 +287,24 @@ pub trait ObservationStore: Send + Sync + 'static {
     /// primitive for request/response handlers.
     async fn alloc_status_rows(&self) -> Result<Vec<AllocStatusRow>, ObservationStoreError>;
 
+    /// Read the LWW-winner `alloc_status` row for a single
+    /// [`AllocationId`], if any. Adapters MUST implement this as a
+    /// direct point lookup against the per-alloc index — never as a
+    /// scan-and-filter over [`Self::alloc_status_rows`]. The §4 LWW
+    /// invariant guarantees at most one winner per key; this method
+    /// makes that invariant load-bearing at the type level.
+    ///
+    /// Used by the worker subsystems (`exit_observer`, `action_shim`)
+    /// to recover the prior `(job_id, node_id, updated_at)` tuple
+    /// when writing a successor row. The previous shape — calling
+    /// `alloc_status_rows()` and then `find`/`max_by_key` over the
+    /// result — encoded a false suggestion that the contract permits
+    /// duplicates and added an unjustified `O(n)` scan to a hot path.
+    async fn alloc_status_row(
+        &self,
+        alloc_id: &AllocationId,
+    ) -> Result<Option<AllocStatusRow>, ObservationStoreError>;
+
     /// Read a deterministic snapshot of every `node_health` row this
     /// peer has observed. Phase 1 has no LWW current-row index for
     /// `node_health` (see `SimObservationStore::apply`) — callers see

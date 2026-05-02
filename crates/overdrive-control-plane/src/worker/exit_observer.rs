@@ -279,14 +279,13 @@ fn format_crash_detail(exit_code: Option<i32>, signal: Option<i32>) -> String {
     }
 }
 
-/// Find the most recent row for this alloc — used to recover the
+/// Find the LWW-winner row for this alloc — used to recover the
 /// (`job_id`, `node_id`) tuple and the prior `LogicalTimestamp` counter.
 async fn find_prior_row(
     obs: &dyn ObservationStore,
     alloc: &AllocationId,
 ) -> Result<Option<AllocStatusRow>, HandleError> {
-    let rows = obs.alloc_status_rows().await?;
-    Ok(rows.into_iter().find(|r| &r.alloc_id == alloc))
+    Ok(obs.alloc_status_row(alloc).await?)
 }
 
 /// Best-effort target derivation from the alloc's prior obs row's
@@ -296,8 +295,7 @@ async fn target_for_event(
     obs: &dyn ObservationStore,
     alloc: &AllocationId,
 ) -> Option<TargetResource> {
-    let rows = obs.alloc_status_rows().await.ok()?;
-    let row = rows.into_iter().find(|r| &r.alloc_id == alloc)?;
+    let row = obs.alloc_status_row(alloc).await.ok()??;
     TargetResource::new(&format!("job/{}", row.job_id)).ok()
 }
 
