@@ -17,10 +17,10 @@
 //! `git commit --no-verify` so the GREEN-next-commit loop in Step
 //! 01-02 has a target to flip.
 //!
-//! Fixture: a TempDir cgroup-root. Same shape as the other
+//! Fixture: a `TempDir` cgroup-root. Same shape as the other
 //! exec-driver integration tests (`start_and_running.rs`,
 //! `cgroup_procs.rs`): the cgroup operations succeed against plain
-//! file writes under TempDir without requiring delegated
+//! file writes under `TempDir` without requiring delegated
 //! `/sys/fs/cgroup` access.
 
 use std::sync::Arc;
