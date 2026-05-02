@@ -11,10 +11,12 @@
 //!      exists).
 //!   3. Running as root (skip step 4 — root has implicit access), OR
 //!   4. Required controllers (`cpu` AND `memory`) are present in the
-//!      `cgroup.subtree_control` of the *enclosing* slice. The
-//!      enclosing slice is discovered by reading `/proc/self/cgroup`
-//!      and parsing the cgroup-v2 (`0::/...`) line — see ADR-0028 §4
-//!      step 4.
+//!      `cgroup.subtree_control` of the *enclosing* slice (or its
+//!      parent slice when the enclosing path is a leaf scope with
+//!      empty `subtree_control` — see ADR-0028 §4 step 4 fallback).
+//!      The enclosing slice is discovered by reading
+//!      `/proc/self/cgroup` and parsing the cgroup-v2 (`0::/...`)
+//!      line — see ADR-0028 §4 step 4.
 //!
 //! Each error message answers "what / why / how to fix" per the
 //! `nw-ux-tui-patterns` shape.
@@ -112,9 +114,14 @@ pub enum CgroupPreflightError {
     DelegationMissing {
         /// UID of the running process (`geteuid()`).
         uid: u32,
-        /// Enclosing slice directory (per `/proc/self/cgroup`); the
-        /// missing controllers are absent from
-        /// `<this directory>/cgroup.subtree_control`.
+        /// The slice whose `cgroup.subtree_control` was actually
+        /// inspected — typically the enclosing slice from
+        /// `/proc/self/cgroup`, but when that file is empty (leaf
+        /// scopes under cgroup v2's no-internal-processes rule) this
+        /// carries the parent slice path discovered via the ADR-0028
+        /// §4 step 4 fallback. Either way, this is the path the
+        /// operator must `Delegate=yes` on — the missing controllers
+        /// are absent from `<this directory>/cgroup.subtree_control`.
         slice: PathBuf,
         /// Missing controllers (`cpu` and/or `memory`).
         missing: Vec<String>,
@@ -269,7 +276,10 @@ pub enum CgroupPreflightError {
 /// `/proc/self/cgroup`; tests: a tempdir-fabricated file). Step 4
 /// reads this file, parses the cgroup-v2 (`0::/...`) line, joins the
 /// parsed path to `cgroup_root`, and inspects the resulting
-/// directory's `cgroup.subtree_control`.
+/// directory's `cgroup.subtree_control`. When the discovered path's
+/// `cgroup.subtree_control` is empty (typical for leaf scopes), step
+/// 4 falls back to inspecting the parent slice's `subtree_control`
+/// per ADR-0028 §4 step 4.
 ///
 /// # Errors
 ///
@@ -305,11 +315,29 @@ pub fn run_preflight_at(
         return Ok(());
     }
 
-    // Step 4 — required controllers in subtree_control of the
-    // *enclosing* slice. Per ADR-0028 §4 step 4 the enclosing slice is
-    // discovered by reading /proc/self/cgroup (a single line of the
-    // form "0::/user.slice/user-1000.slice/session-3.scope" on cgroup
-    // v2). The parsed path is relative to the cgroupfs mount root.
+    // Step 4 — see `check_subtree_delegation` for the full ADR-0028
+    // §4 step 4 logic (discovery + parent-slice fallback).
+    check_subtree_delegation(cgroup_root, uid, proc_self_cgroup)
+}
+
+/// Step 4 of the pre-flight: required controllers (`cpu` AND
+/// `memory`) are present in the enclosing slice's
+/// `cgroup.subtree_control`, with the ADR-0028 §4 step 4 fallback to
+/// the parent slice when the enclosing path's file is empty.
+///
+/// Discovers the enclosing slice by reading `proc_self_cgroup` and
+/// parsing the cgroup-v2 (`0::/...`) line. Reads the discovered
+/// path's `subtree_control`. If the contents are empty (typical for
+/// leaf scopes under cgroup v2's no-internal-processes rule), falls
+/// back to the parent slice's `subtree_control` instead. The path
+/// that ends up in error variants is always the path actually
+/// inspected, so the rendered remediation names the slice the
+/// operator must `Delegate=yes` on.
+fn check_subtree_delegation(
+    cgroup_root: &Path,
+    uid: u32,
+    proc_self_cgroup: &Path,
+) -> Result<(), CgroupPreflightError> {
     let proc_self = std::fs::read_to_string(proc_self_cgroup)
         .map_err(|err| CgroupPreflightError::CgroupPathDiscoveryFailed { source: err })?;
     let enclosing_rel = parse_cgroup_v2_path(&proc_self).ok_or_else(|| {
@@ -328,21 +356,13 @@ pub fn run_preflight_at(
     // absolute argument discards the prefix).
     let enclosing_rel = enclosing_rel.trim();
     let enclosing_abs = cgroup_root.join(enclosing_rel.trim_start_matches('/'));
-    let subtree_control = enclosing_abs.join("cgroup.subtree_control");
 
-    // Every io::Error (NotFound included) surfaces as
-    // SubtreeControlUnreadable per Option B of the RCA at
-    // docs/feature/fix-cgroup-preflight-subtree-unreadable/bugfix-rca.md.
-    // The kernel guarantees cgroup.subtree_control exists under every
-    // cgroup-v2 directory, so its absence is structurally distinct
-    // from "no controllers delegated" — it indicates the enclosing
-    // slice path is not a cgroup directory at all. Absorbing any kind
-    // here would misdiagnose the failure as DelegationMissing and
-    // prescribe `Delegate=yes`, which doesn't fix any of the actual
-    // causes (PermissionDenied, EIO, IsADirectory, NotFound, …).
-    let contents = std::fs::read_to_string(&subtree_control).map_err(|err| {
-        CgroupPreflightError::SubtreeControlUnreadable { slice: enclosing_abs.clone(), source: err }
-    })?;
+    // Read the discovered path, then fall back to its parent's
+    // subtree_control if the discovered file is empty. The returned
+    // `inspected_slice` is the path that error variants must report.
+    let (contents, inspected_slice) =
+        read_subtree_with_parent_fallback(cgroup_root, &enclosing_abs)?;
+
     let mut missing = Vec::new();
     if !contents.split_ascii_whitespace().any(|t| t == "cpu") {
         missing.push("cpu".to_owned());
@@ -358,7 +378,7 @@ pub fn run_preflight_at(
         };
         return Err(CgroupPreflightError::DelegationMissing {
             uid,
-            slice: enclosing_abs,
+            slice: inspected_slice,
             missing,
             missing_human,
             plural,
@@ -367,6 +387,79 @@ pub fn run_preflight_at(
     }
 
     Ok(())
+}
+
+/// Read `<enclosing_abs>/cgroup.subtree_control`; if the contents are
+/// empty (whitespace-only included), re-read
+/// `<enclosing_abs.parent()>/cgroup.subtree_control` instead per
+/// ADR-0028 §4 step 4 fallback. Returns the contents to scan plus the
+/// path actually inspected (which the caller threads through to
+/// error variants).
+///
+/// Edge cases that surface as `SubtreeControlUnreadable` with a
+/// synthetic `InvalidData` error rather than panicking:
+///   - `enclosing_abs == cgroup_root` — discovered path is the
+///     cgroupfs root; `parent()` would escape the hierarchy.
+///   - `enclosing_abs.parent()` returns `None` — should not happen on
+///     well-formed paths, but covered defensively.
+///
+/// Every other `io::Error` from either read flows through
+/// `SubtreeControlUnreadable` per the prior `subtree-unreadable` fix
+/// (Option B of its RCA): the kernel guarantees
+/// `cgroup.subtree_control` exists under every cgroup-v2 directory,
+/// so an I/O failure here points at a cgroupfs configuration issue,
+/// not at missing controllers.
+fn read_subtree_with_parent_fallback(
+    cgroup_root: &Path,
+    enclosing_abs: &Path,
+) -> Result<(String, PathBuf), CgroupPreflightError> {
+    let subtree_control = enclosing_abs.join("cgroup.subtree_control");
+    let primary_contents = std::fs::read_to_string(&subtree_control).map_err(|err| {
+        CgroupPreflightError::SubtreeControlUnreadable {
+            slice: enclosing_abs.to_path_buf(),
+            source: err,
+        }
+    })?;
+
+    // Empty-detection uses the same shape as the missing-controller
+    // token scan (split_ascii_whitespace) so empty / whitespace-only
+    // contents trigger the fallback uniformly.
+    if primary_contents.split_ascii_whitespace().next().is_some() {
+        return Ok((primary_contents, enclosing_abs.to_path_buf()));
+    }
+
+    // Kernel-root edge — no parent inside the cgroup hierarchy.
+    if enclosing_abs == cgroup_root {
+        return Err(CgroupPreflightError::SubtreeControlUnreadable {
+            slice: enclosing_abs.to_path_buf(),
+            source: std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "discovered cgroup path {} is the cgroupfs root with \
+                     empty subtree_control; cannot fall back to a parent slice",
+                    subtree_control.display(),
+                ),
+            ),
+        });
+    }
+    let parent_abs =
+        enclosing_abs.parent().ok_or_else(|| CgroupPreflightError::SubtreeControlUnreadable {
+            slice: enclosing_abs.to_path_buf(),
+            source: std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "discovered cgroup path {} has no parent in the cgroup \
+                     hierarchy; cannot fall back",
+                    subtree_control.display(),
+                ),
+            ),
+        })?;
+    let parent_path = parent_abs.to_path_buf();
+    let parent_subtree_control = parent_path.join("cgroup.subtree_control");
+    let parent_contents = std::fs::read_to_string(&parent_subtree_control).map_err(|err| {
+        CgroupPreflightError::SubtreeControlUnreadable { slice: parent_path.clone(), source: err }
+    })?;
+    Ok((parent_contents, parent_path))
 }
 
 /// Parse the cgroup v2 line (`"0::/path/to/slice"`) out of

@@ -78,6 +78,7 @@ mod integration {
         mod preflight_proc_filesystems_unreadable;
         mod preflight_proc_self_cgroup_malformed;
         mod preflight_reads_enclosing_slice;
+        mod preflight_refuses_when_both_scope_and_parent_slice_lack_delegation;
         mod preflight_subtree_control_missing_is_not_delegation;
         mod preflight_subtree_control_unreadable;
         mod preflight_v1_host;

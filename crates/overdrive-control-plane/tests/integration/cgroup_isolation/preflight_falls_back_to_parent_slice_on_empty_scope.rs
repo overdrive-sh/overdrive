@@ -70,14 +70,10 @@ fn preflight_falls_back_to_parent_slice_on_empty_scope() {
     // an interactive `overdrive serve` from a TTY in
     // `session-3.scope` actually sees.
     let proc_self_cgroup = tmp.path().join("proc-self-cgroup");
-    std::fs::write(
-        &proc_self_cgroup,
-        "0::/user.slice/user-1000.slice/session-3.scope\n",
-    )
-    .expect("write proc/self/cgroup");
+    std::fs::write(&proc_self_cgroup, "0::/user.slice/user-1000.slice/session-3.scope\n")
+        .expect("write proc/self/cgroup");
 
-    let result =
-        run_preflight_at(cgroup_root, /* uid = */ 1000, &proc_fs, &proc_self_cgroup);
+    let result = run_preflight_at(cgroup_root, /* uid = */ 1000, &proc_fs, &proc_self_cgroup);
 
     assert!(
         result.is_ok(),
