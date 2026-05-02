@@ -591,7 +591,8 @@ async fn consume_stream(
 
     // Stream closed without a terminal event — protocol violation.
     Err(CliError::BodyDecode {
-        cause: "streaming submit response closed without ConvergedRunning or ConvergedFailed"
+        cause: "streaming submit response closed without a terminal event \
+                (ConvergedRunning, ConvergedFailed, or ConvergedStopped)"
             .to_string(),
     })
 }
