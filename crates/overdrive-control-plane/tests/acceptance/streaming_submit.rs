@@ -461,6 +461,118 @@ async fn s_cp_06_cap_timer_fires_timeout_terminal_when_no_events_arrive() {
 }
 
 // ===========================================================================
+// S-CP-06b — RED regression: the streaming cap is documented (streaming.rs
+// lines 22-25) as a wall-clock deadline from stream entry. The implementation
+// recreates `clock.sleep(cap)` on every loop iteration, so any intervening
+// `LifecycleEvent` resets the deadline — turning the cap into an inactivity
+// timeout. SimClock semantics make this observable in pure DST: SimClock::sleep
+// computes `deadline = elapsed + duration` AT CALL TIME. After tick(30s) and
+// one event-induced loop iteration, the new clock.sleep(60s) registers
+// deadline=90s. tick(31s) totalling 61s does NOT fire it; under the bug the
+// stream hangs.
+//
+// This test injects exactly ONE non-terminal LifecycleEvent at sim_t=30s,
+// then advances to sim_t=61s. Bug path: cap deadline=90s; stream hangs;
+// outer wall-clock tokio::time::timeout(2s) fires. Future-fix path: pinned
+// cap_future at deadline=60s; cap fires; stream emits Timeout terminal.
+// ===========================================================================
+
+#[tokio::test]
+async fn s_cp_06b_cap_is_absolute_deadline_not_inactivity_timeout() {
+    let tmp = TempDir::new().expect("tmpdir");
+    let mut state = build_app_state(&tmp);
+    // Same SimClock + 60s cap setup as s_cp_06.
+    let sim_clock = Arc::new(SimClock::new());
+    state.clock = sim_clock.clone() as Arc<dyn Clock>;
+    state.streaming_cap = Duration::from_secs(60);
+    let router = build_router(state.clone());
+
+    let alloc_id = AllocationId::from_str("alloc-payments-0").expect("alloc id");
+    let job_id = JobId::from_str("payments-v0").expect("job id");
+
+    let request_task = tokio::spawn(async move {
+        let response = router
+            .oneshot(build_submit_request(&payments_spec(), "application/x-ndjson"))
+            .await
+            .expect("router oneshot");
+        body_ndjson_lines(response.into_body()).await
+    });
+
+    // Wait for the handler to subscribe (cap_future registered at
+    // SimClock-deadline=60s under the future fix; under the bug the
+    // deadline is recomputed each loop iteration).
+    for _ in 0..100 {
+        if state.lifecycle_events.receiver_count() >= 1 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    // Advance to sim_t=30s. cap_future at 60s does NOT fire.
+    sim_clock.tick(Duration::from_secs(30));
+
+    // Inject ONE non-terminal LifecycleEvent. We do NOT call write_row,
+    // so the obs store stays empty and check_terminal returns None — the
+    // loop iterates without emitting a terminal line. Under the bug,
+    // this iteration recreates clock.sleep(60s) at sim_t=30s, registering
+    // a NEW deadline at 30s+60s=90s.
+    emit_lifecycle(
+        &state,
+        make_lifecycle_event(
+            alloc_id.clone(),
+            job_id.clone(),
+            AllocStateWire::Pending,
+            AllocStateWire::Running,
+            TransitionReason::Started,
+        ),
+    );
+
+    // Yield enough times for the handler to process the event, emit the
+    // LifecycleTransition line, run check_terminal → None, and re-enter
+    // the select! arm.
+    for _ in 0..50 {
+        tokio::task::yield_now().await;
+    }
+
+    // Advance to sim_t=61s total. Bug path: deadline=90s > 61s, cap
+    // does not fire; stream hangs. Future-fix path: deadline=60s ≤ 61s,
+    // cap fires; stream emits Timeout terminal.
+    sim_clock.tick(Duration::from_secs(31));
+    for _ in 0..50 {
+        tokio::task::yield_now().await;
+    }
+
+    // Wall-clock timeout (NOT SimClock). Under the bug, request_task
+    // hangs forever waiting for a cap that was reset.
+    let lines = tokio::time::timeout(Duration::from_secs(2), request_task)
+        .await
+        .expect(
+            "stream must terminate within 2s after SimClock advances past cap (61s total) — \
+             bug: cap deadline reset by intervening LifecycleEvent at 30s, never fires",
+        )
+        .expect("task ok");
+
+    let last = lines.last().expect("at least one line");
+    assert_eq!(
+        last["kind"], "converged_failed",
+        "cap must produce converged_failed terminal at absolute 60s deadline"
+    );
+    let terminal_reason = &last["data"]["terminal_reason"];
+    assert_eq!(terminal_reason["kind"], "timeout", "cap must produce Timeout variant");
+    assert_eq!(
+        terminal_reason["data"]["after_seconds"], 60,
+        "Timeout must carry the configured cap (60s), not the inactivity interval"
+    );
+    // The injected event must have been projected before the timeout fired.
+    let has_lt = lines.iter().any(|l| l["kind"] == "lifecycle_transition");
+    assert!(
+        has_lt,
+        "injected LifecycleEvent at sim_t=30s must appear as a lifecycle_transition \
+         line before the cap-deadline timeout terminal; got {lines:?}"
+    );
+}
+
+// ===========================================================================
 // S-CP-07 — Streaming reason byte-equals snapshot reason for every
 // TransitionReason variant. Smoke version uses one representative variant
 // (full proptest sweeping all variants would test the same wire shape).
