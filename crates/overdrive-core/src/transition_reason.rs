@@ -220,6 +220,25 @@ mod tests {
         let reason = TransitionReason::Stopped { by: StoppedBy::Process };
         assert_eq!(reason.human_readable(), "stopped (by process)");
     }
+
+    #[test]
+    fn is_failure_false_for_stopped_variants() {
+        assert!(!TransitionReason::Stopped { by: StoppedBy::Operator }.is_failure());
+        assert!(!TransitionReason::Stopped { by: StoppedBy::Reconciler }.is_failure());
+        assert!(!TransitionReason::Stopped { by: StoppedBy::Process }.is_failure());
+    }
+
+    #[test]
+    fn is_failure_true_for_cause_class_variants() {
+        assert!(TransitionReason::DriverInternalError { detail: "test".into() }.is_failure());
+        assert!(
+            TransitionReason::RestartBudgetExhausted {
+                attempts: 3,
+                last_cause_summary: "signal 9".into(),
+            }
+            .is_failure()
+        );
+    }
 }
 
 /// Initiator of a `Cancelled` transition.
