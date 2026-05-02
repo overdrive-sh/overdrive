@@ -72,6 +72,7 @@ mod integration {
     mod cgroup_isolation {
         mod cluster_status_under_burst;
         mod idempotent_slice_creation;
+        mod preflight_falls_back_to_parent_slice_on_empty_scope;
         mod preflight_missing_cpu;
         mod preflight_no_delegation;
         mod preflight_proc_filesystems_unreadable;
