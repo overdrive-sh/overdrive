@@ -311,3 +311,245 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
         only_entry.0
     );
 }
+
+// ---------------------------------------------------------------------------
+// fix-stop-branch-backoff-pending — RED regression scaffold (Step 01-01).
+//
+// Pins the §18 *Level-triggered inside the reconciler* contract for the
+// Stop branch of `JobLifecycle::reconcile`: when a stop intent arrives
+// while the only alloc is `Failed` mid-restart-backoff
+// (`view.next_attempt_at` populated, `view.restart_counts < CEILING`),
+// the reconciler must clear the transitional view state — otherwise
+// `view_has_backoff_pending` keeps `has_work = true` and the broker
+// self-re-enqueues every tick until the ceiling is reached
+// (~5 s hot spin per the RCA at
+// `docs/feature/fix-stop-branch-backoff-pending/deliver/rca.md`).
+//
+// Pre-fix (current `main`):
+//   - Stop branch returns `(stop_actions, view.clone())`. With no
+//     Running allocs, `stop_actions` is empty BUT `view.next_attempt_at`
+//     still names the Failed alloc and `restart_counts < CEILING` ⇒
+//     `view_has_backoff_pending` returns `true` ⇒ `has_work = true` ⇒
+//     re-enqueue. Every subsequent tick repeats — the eval is in the
+//     pending set every time the broker is drained.
+//   - Observable symptom on this fixture: across 10 ticks after the
+//     stop intent is written, `dispatched` advances by ≥5 (the per-alloc
+//     `RESTART_BACKOFF_CEILING` budget — see memory note 38682) and
+//     `queued` stays at 1.
+//
+// Post-fix (the GREEN edit at step 01-02 in
+// `crates/overdrive-core/src/reconciler.rs:1019-1027`):
+//   - Stop branch clears `next_attempt_at` when `stop_actions.is_empty()`,
+//     so the first post-stop tick sees `view_has_backoff_pending = false`,
+//     `has_work = false`, no re-enqueue. The broker drains and stays
+//     empty.
+//
+// This test is `#[ignore]`d in this commit so the lefthook
+// pre-commit gate (`nextest-affected`) stays green between the RED
+// scaffold commit and the GREEN fix commit. Step 01-02 lands the
+// reconciler edit and removes the `#[ignore]` in the same commit; the
+// test transitions skipped → executed-and-passing as the proof of the
+// RED → GREEN flip.
+//
+// Tier classification: **Tier 1 DST** per `.claude/rules/testing.md`.
+// Default unit lane (in-process sim adapters only).
+// ---------------------------------------------------------------------------
+
+/// RED — drives the runtime convergence loop through the
+/// Failed-mid-backoff → Stop sequence and asserts the broker drains
+/// after the stop intent lands.
+///
+/// Sequence:
+///   1. Build sim AppState. `SimDriver` is configured to reject every
+///      `start()` with `DriverError::StartRejected` so the alloc
+///      transitions to `AllocState::Failed` on the first tick.
+///   2. Submit the job intent and one `Evaluation { reconciler:
+///      "job-lifecycle", target: "job/payments" }`.
+///   3. Drive ticks until the cached view records the alloc's
+///      `next_attempt_at` deadline and `restart_counts == 1` — proof
+///      that the reconciler emitted exactly one Restart action and
+///      then sat back on the backoff. (We do NOT advance logical time
+///      far enough to elapse the 1-second per-attempt backoff window;
+///      this is the load-bearing precondition — the alloc is Failed
+///      AND mid-backoff when the stop arrives.)
+///   4. Submit the stop intent (`IntentKey::for_job_stop(<id>)`) and
+///      capture `dispatched` at this moment.
+///   5. Drive 10 more convergence ticks.
+///   6. Assert: `queued == 0` (broker drained); `dispatched -
+///      dispatched_at_stop_submit <= 2` (the stop converges in 1-2
+///      ticks; pre-fix this hits ≥5 from the `RESTART_BACKOFF_CEILING`
+///      hot spin).
+#[tokio::test]
+#[ignore = "RED scaffold for fix-stop-branch-backoff-pending — un-ignore in the GREEN step"]
+async fn stop_after_failed_alloc_drains_broker() {
+    let tmp = TempDir::new().expect("tempdir");
+    let clock = SimClock::new();
+
+    // --- Build AppState. Reject starts so the action shim writes
+    //     `AllocState::Failed` and the reconciler enters the
+    //     restart-with-backoff branch.
+    let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime::new");
+    runtime.register(noop_heartbeat()).expect("register noop-heartbeat");
+    runtime.register(job_lifecycle()).expect("register job-lifecycle");
+    let store_path = tmp.path().join("intent.redb");
+    let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
+    let obs: Arc<dyn ObservationStore> =
+        Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("NodeId"), 0));
+    let driver: Arc<dyn Driver> = Arc::new(
+        SimDriver::new(DriverType::Exec).fail_on_start_with("binary not found".to_string()),
+    );
+    let _ = clock.now(); // explicit logical-time anchor; clock is held below.
+    let state = AppState::new(store, obs, Arc::new(runtime), driver);
+
+    // --- Preload IntentStore: one Job. The driver will reject its
+    //     start, the action shim writes `AllocState::Failed`, the
+    //     reconciler emits one `RestartAllocation` then sits on the
+    //     1-second backoff (`RESTART_BACKOFF_DURATION`).
+    let job = Job::from_spec(JobSpecInput {
+        id: "payments".to_string(),
+        replicas: 1,
+        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
+        driver: DriverInput::Exec(ExecInput { command: "/does/not/exist".to_string(), args: vec![] }),
+    })
+    .expect("valid job spec");
+    let archived = rkyv::to_bytes::<rkyv::rancor::Error>(&job).expect("rkyv archive");
+    let job_key = IntentKey::for_job(&job.id);
+    state.store.put(job_key.as_bytes(), archived.as_ref()).await.expect("put job");
+
+    // --- Submit the seed evaluation.
+    let target = TargetResource::new("job/payments").expect("valid target");
+    state.runtime.broker().submit(Evaluation {
+        reconciler: ReconcilerName::new("job-lifecycle").expect("valid reconciler name"),
+        target: target.clone(),
+    });
+
+    // --- Drive convergence until the view records the alloc's
+    //     backoff deadline AND `restart_counts == 1`. We bound the
+    //     loop at 30 ticks (>> than the 2-3 we expect — first tick
+    //     emits StartAllocation, action shim writes Failed; second
+    //     tick emits RestartAllocation, restart_counts becomes 1,
+    //     deadline written; third tick sits on the backoff and
+    //     re-enqueues).
+    //
+    //     Logical time advances by 100 ms per tick — well below
+    //     `RESTART_BACKOFF_DURATION = 1 s`, so the alloc stays
+    //     mid-backoff for the rest of the test.
+    let setup_target = target.clone();
+    let job_id = job.id.clone();
+    let mut warm_up_ticks = 0_u64;
+    while warm_up_ticks < 30 {
+        let now = clock.now();
+        let deadline = now + Duration::from_millis(100);
+        let pending = {
+            let mut broker = state.runtime.broker();
+            broker.drain_pending()
+        };
+        for eval in pending {
+            run_convergence_tick(&state, &eval.reconciler, &eval.target, now, warm_up_ticks, deadline)
+                .await
+                .expect("convergence tick succeeds");
+        }
+        clock.tick(Duration::from_millis(100));
+        warm_up_ticks += 1;
+
+        // Check whether the cached view shows the desired
+        // Failed-mid-backoff state.
+        let cache_key = ("job-lifecycle".to_string(), setup_target.to_string());
+        let observed = {
+            let cache = state.view_cache.lock().expect("view_cache mutex");
+            cache.get(&cache_key).cloned()
+        };
+        if let Some(overdrive_control_plane::CachedView::JobLifecycle(view)) = observed {
+            let alloc_id = AllocationId::new(&format!("alloc-{}-0", job_id.as_str()))
+                .expect("derived alloc id");
+            let count = view.restart_counts.get(&alloc_id).copied().unwrap_or(0);
+            let has_deadline = view.next_attempt_at.contains_key(&alloc_id);
+            if count >= 1 && has_deadline {
+                break;
+            }
+        }
+    }
+    assert!(
+        warm_up_ticks < 30,
+        "warm-up failed to reach Failed-mid-backoff state within 30 ticks; \
+         test fixture is misconfigured (broker should self-re-enqueue \
+         under both pre-fix and post-fix code while restart_counts \
+         < CEILING and now < deadline)",
+    );
+
+    // --- Snapshot dispatched counter at the moment the stop intent
+    //     is submitted. This isolates the stop-branch behaviour from
+    //     the warm-up dispatch traffic.
+    let dispatched_at_stop_submit = state.runtime.broker().counters().dispatched;
+
+    // --- Submit the stop intent. Per ADR-0027, presence of the key
+    //     is the signal — value is opaque (the runtime probes
+    //     `state.store.get(stop_key.as_bytes())` and treats `Some(_)`
+    //     as "stop intended"). A single zero byte is sufficient.
+    let stop_key = IntentKey::for_job_stop(&job_id);
+    state.store.put(stop_key.as_bytes(), &[0u8]).await.expect("put stop intent");
+
+    // --- Re-submit the evaluation so the next tick re-evaluates the
+    //     target with the new stop signal in scope. This mirrors what
+    //     the production handler does on a stop submission.
+    state.runtime.broker().submit(Evaluation {
+        reconciler: ReconcilerName::new("job-lifecycle").expect("valid reconciler name"),
+        target: target.clone(),
+    });
+
+    // --- Drive 10 convergence ticks. Logical time still advances by
+    //     100 ms per tick — well under `RESTART_BACKOFF_DURATION`. The
+    //     Failed alloc is still mid-backoff for every one of these
+    //     ticks; the only thing that changed is the stop intent.
+    for tick_n in 0..10_u64 {
+        let now = clock.now();
+        let deadline = now + Duration::from_millis(100);
+        let pending = {
+            let mut broker = state.runtime.broker();
+            broker.drain_pending()
+        };
+        for eval in pending {
+            run_convergence_tick(
+                &state,
+                &eval.reconciler,
+                &eval.target,
+                now,
+                warm_up_ticks + tick_n,
+                deadline,
+            )
+            .await
+            .expect("convergence tick succeeds");
+        }
+        clock.tick(Duration::from_millis(100));
+    }
+
+    // --- Assertion 1 (kills the bugged behaviour): the broker drained
+    //     after the stop converged. Pre-fix:
+    //     `view_has_backoff_pending` keeps re-enqueueing every tick →
+    //     queued stays at 1. Post-fix: the Stop branch clears
+    //     `next_attempt_at` so the predicate returns false on the
+    //     first tick after the stop, no re-enqueue, queued == 0.
+    let counters = state.runtime.broker().counters();
+    assert_eq!(
+        counters.queued, 0,
+        "convergence must complete with no pending evaluations after stop; \
+         got {} (pre-fix value: 1 — view_has_backoff_pending kept the \
+         eval in the queue)",
+        counters.queued
+    );
+
+    // --- Assertion 2 (kills the inverted-predicate / always-true
+    //     mutation): dispatch traffic is bounded after stop. Post-fix
+    //     the stop converges in 1-2 ticks; pre-fix the broker
+    //     self-re-enqueues until `restart_counts` reaches the
+    //     ceiling — observable as ≥5 extra dispatches.
+    let dispatched_during_stop = counters.dispatched - dispatched_at_stop_submit;
+    assert!(
+        dispatched_during_stop <= 2,
+        "post-stop dispatch traffic must be bounded; expected <= 2 \
+         dispatches between stop submit and broker drain, got {} \
+         (pre-fix value: ≥5 — the broker self-re-enqueues until \
+         restart_counts reaches RESTART_BACKOFF_CEILING)",
+        dispatched_during_stop
+    );
+}

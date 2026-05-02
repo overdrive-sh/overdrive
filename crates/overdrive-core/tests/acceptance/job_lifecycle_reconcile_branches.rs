@@ -730,3 +730,115 @@ fn tick_after_backoff_elapsed_emits_restart_and_advances_deadline() {
         "deadline must roll forward to new tick.now + RESTART_BACKOFF_DURATION",
     );
 }
+
+// -------------------------------------------------------------------
+// fix-stop-branch-backoff-pending — Stop branch must clear
+// `next_attempt_at` when there are no Running allocs to stop
+// -------------------------------------------------------------------
+//
+// Companion to the DST acceptance test at
+// `crates/overdrive-control-plane/tests/acceptance/runtime_convergence_loop.rs`
+// — that test pins the user-visible symptom (broker drains after stop);
+// THIS test pins the pure-function contract that the symptom flows
+// from. See `docs/feature/fix-stop-branch-backoff-pending/deliver/rca.md`
+// §"Root cause" for the architectural argument: the §18 *Level-triggered
+// inside the reconciler* contract says "actual ≠ desired" is signalled
+// by EITHER non-empty actions OR transitional view state (a backoff
+// deadline pending). The Stop branch's `view.clone()` pass-through
+// violates the second clause for the Failed-mid-backoff intersection.
+//
+// Pre-fix (current `main`): `reconciler.rs:1019-1027` returns
+// `(stop_actions, view.clone())`. With no Running allocs, `stop_actions`
+// is empty BUT `view.next_attempt_at` is unchanged — still names the
+// Failed alloc — so `view_has_backoff_pending` returns true and the
+// runtime self-re-enqueues every tick.
+//
+// Post-fix (the GREEN edit at step 01-02): the Stop branch clears
+// `next_attempt_at` when `stop_actions.is_empty()`. This test pins the
+// expected post-fix `next_view`.
+//
+// The `#[ignore]` attribute keeps this test out of the lefthook
+// nextest-affected pre-commit pass between the RED scaffold commit
+// and the GREEN fix commit. Step 01-02 removes the `#[ignore]` in the
+// same commit as the production edit; the test transitions skipped →
+// executed-and-passing.
+
+/// RED — a Stop branch with `desired_to_stop = true`, a Failed
+/// alloc (no Running allocs to stop), and a populated
+/// `view.next_attempt_at` must return `(actions: empty,
+/// next_view: next_attempt_at cleared)`. The cleared deadline is the
+/// load-bearing assertion: it is what `view_has_backoff_pending`
+/// reads in the runtime to decide whether to self-re-enqueue.
+///
+/// Pre-fix: `next_view.next_attempt_at` still contains the alloc
+/// entry, the runtime treats this as "transitional state" and
+/// re-enqueues every tick until `restart_counts` reaches the
+/// `RESTART_BACKOFF_CEILING`.
+#[test]
+#[ignore = "RED scaffold for fix-stop-branch-backoff-pending — un-ignore in the GREEN step"]
+fn stop_branch_clears_next_attempt_at_when_no_running_allocs() {
+    // desired_to_stop = true, job is present, the only alloc is
+    // Failed (NOT Running). The Stop branch fires but `stop_actions`
+    // is empty — there is nothing to stop. The view carries a
+    // populated `next_attempt_at` from a prior restart-with-backoff
+    // tick (this is the Failed-mid-backoff intersection from the RCA).
+    let nodes = one_node_map("local");
+    let allocations = one_alloc_map(
+        "alloc-payments-0",
+        alloc_with_state("alloc-payments-0", "payments", "local", AllocState::Failed),
+    );
+    let desired = JobLifecycleState {
+        job: Some(make_job("payments")),
+        desired_to_stop: true,
+        nodes: nodes.clone(),
+        allocations: BTreeMap::new(),
+    };
+    let actual = JobLifecycleState {
+        job: Some(make_job("payments")),
+        desired_to_stop: false,
+        nodes,
+        allocations,
+    };
+
+    // Seed the view: restart_counts < CEILING (so
+    // view_has_backoff_pending would return true pre-fix);
+    // next_attempt_at carries a non-empty deadline for the alloc.
+    let now = Instant::now();
+    let mut restart_counts = BTreeMap::new();
+    restart_counts.insert(aid("alloc-payments-0"), 1);
+    let mut next_attempt_at = BTreeMap::new();
+    next_attempt_at.insert(aid("alloc-payments-0"), now + RESTART_BACKOFF_DURATION);
+    let view = JobLifecycleView { restart_counts, next_attempt_at };
+    let tick = fresh_tick(now);
+
+    let r = JobLifecycle::canonical();
+    let (actions, next_view) = r.reconcile(&desired, &actual, &view, &tick);
+
+    // Sanity: no actions emitted (no Running allocs to stop).
+    assert!(
+        actions.is_empty(),
+        "stop intent + no Running allocs must emit no actions; got {actions:?}",
+    );
+
+    // The load-bearing assertion: the Stop branch must clear
+    // `next_attempt_at` to signal "stop is complete; no pending
+    // work" to the runtime's `view_has_backoff_pending` predicate.
+    //
+    // Pre-fix (`view.clone()` pass-through): `next_attempt_at`
+    // still contains the alloc → predicate returns true →
+    // self-re-enqueue every tick → broker spins for ~5 s until
+    // `restart_counts` reaches the ceiling.
+    //
+    // Post-fix (clear `next_attempt_at` when `stop_actions.is_empty()`):
+    // predicate returns false on the first post-stop tick → broker
+    // drains and stays empty.
+    assert!(
+        next_view.next_attempt_at.is_empty(),
+        "Stop branch must clear `next_attempt_at` when there are no \
+         Running allocs to stop, otherwise `view_has_backoff_pending` \
+         keeps `has_work = true` and the broker self-re-enqueues every \
+         tick until `restart_counts` reaches RESTART_BACKOFF_CEILING. \
+         Got next_attempt_at = {:?} (expected empty)",
+        next_view.next_attempt_at,
+    );
+}
