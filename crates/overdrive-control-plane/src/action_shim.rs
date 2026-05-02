@@ -189,17 +189,21 @@ fn build_alloc_status_row(
 
 /// Build a `LifecycleEvent` for the broadcast channel from a freshly
 /// written `AllocStatusRow`. The wire-shape projection is mechanical —
-/// `state → AllocStateWire`, `LogicalTimestamp → String`. The `from`
-/// and `to` fields carry the row's *new* state in both slots; per
-/// `LifecycleEvent` doc, computing `from` against prior state is the
-/// downstream streaming handler's job (slice 02 step 02-03), not the
-/// shim's.
-fn build_lifecycle_event(row: &AllocStatusRow, source: TransitionSource) -> LifecycleEvent {
+/// `state → AllocStateWire`, `LogicalTimestamp → String`. `prior_state`
+/// carries the actual allocation state before this transition; `from` is
+/// set to `prior_state` so the event correctly reflects the transition
+/// direction. Each call site reads the prior obs row and passes it here;
+/// `StartAllocation` defaults to `Pending` for first-seen allocs.
+fn build_lifecycle_event(
+    row: &AllocStatusRow,
+    prior_state: AllocStateWire,
+    source: TransitionSource,
+) -> LifecycleEvent {
     let to_wire: AllocStateWire = row.state.into();
     LifecycleEvent {
         alloc_id: row.alloc_id.clone(),
         job_id: row.job_id.clone(),
-        from: to_wire,
+        from: prior_state,
         to: to_wire,
         reason: row
             .reason
@@ -289,6 +293,7 @@ pub async fn dispatch(
 
 /// Dispatch a single action. Each variant is independent; the caller
 /// loops over a `Vec<Action>` and aggregates errors.
+#[allow(clippy::too_many_lines)]
 async fn dispatch_single(
     action: Action,
     driver: &dyn Driver,
@@ -306,6 +311,14 @@ async fn dispatch_single(
         // a `Failed` row recording the typed cause-class
         // (ADR-0032 §5 + §4 Amendment).
         Action::StartAllocation { alloc_id, job_id, node_id, spec } => {
+            // Read prior obs row before the driver call so we capture
+            // the allocation's state before this transition. For first-
+            // seen allocs (no prior row) default to Pending — consistent
+            // with how existing tests model the initial transition.
+            let prior_state: AllocStateWire = find_prior_alloc_row(obs, &alloc_id)
+                .await?
+                .map_or(AllocStateWire::Pending, |r| r.state.into());
+
             let driver_kind = driver.r#type();
             // Per ADR-0032 §4 Amendment 2026-04-30: classify the
             // driver's `StartRejected.reason` text into a typed
@@ -338,7 +351,7 @@ async fn dispatch_single(
             let row =
                 build_alloc_status_row(alloc_id, job_id, node_id, state, tick, reason, detail);
             obs.write(ObservationRow::AllocStatus(row.clone())).await?;
-            emit_event(bus, build_lifecycle_event(&row, source));
+            emit_event(bus, build_lifecycle_event(&row, prior_state, source));
             Ok(())
         }
         // Restart: stop-then-start, reusing the same alloc id. Per
@@ -359,6 +372,8 @@ async fn dispatch_single(
             let Some(prior_row) = find_prior_alloc_row(obs, &alloc_id).await? else {
                 return Err(ShimError::HandleMissing { alloc_id });
             };
+            // Extract prior_state before prior_row moves into build_alloc_status_row.
+            let prior_state: AllocStateWire = prior_row.state.into();
 
             let driver_kind = driver.r#type();
             // Failed restart — same cause-class classification path
@@ -397,7 +412,7 @@ async fn dispatch_single(
                 detail,
             );
             obs.write(ObservationRow::AllocStatus(row.clone())).await?;
-            emit_event(bus, build_lifecycle_event(&row, source));
+            emit_event(bus, build_lifecycle_event(&row, prior_state, source));
             Ok(())
         }
         // Stop: best-effort driver stop, then write a Terminated row
@@ -415,6 +430,8 @@ async fn dispatch_single(
             let Some(prior_row) = find_prior_alloc_row(obs, &alloc_id).await? else {
                 return Ok(());
             };
+            // Extract prior_state before prior_row moves into build_alloc_status_row.
+            let prior_state: AllocStateWire = prior_row.state.into();
 
             let handle = AllocationHandle { alloc: alloc_id.clone(), pid: None };
             // Driver stop is best-effort — NotFound and other
@@ -439,7 +456,7 @@ async fn dispatch_single(
                 None,
             );
             obs.write(ObservationRow::AllocStatus(row.clone())).await?;
-            emit_event(bus, build_lifecycle_event(&row, TransitionSource::Reconciler));
+            emit_event(bus, build_lifecycle_event(&row, prior_state, TransitionSource::Reconciler));
             Ok(())
         }
     }
