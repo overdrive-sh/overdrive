@@ -360,7 +360,7 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
 /// after the stop intent lands.
 ///
 /// Sequence:
-///   1. Build sim AppState. `SimDriver` is configured to reject every
+///   1. Build sim `AppState`. `SimDriver` is configured to reject every
 ///      `start()` with `DriverError::StartRejected` so the alloc
 ///      transitions to `AllocState::Failed` on the first tick.
 ///   2. Submit the job intent and one `Evaluation { reconciler:
@@ -380,7 +380,11 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
 ///      ticks; pre-fix this hits ≥5 from the `RESTART_BACKOFF_CEILING`
 ///      hot spin).
 #[tokio::test]
-#[ignore = "RED scaffold for fix-stop-branch-backoff-pending — un-ignore in the GREEN step"]
+// DST harness setup (build sim AppState, preload IntentStore, drive warm-up
+// ticks until Failed-mid-backoff state, submit stop intent, drive post-stop
+// ticks, assert) is necessarily long; splitting would obscure the scenario
+// shape and force shared-mutable-fixture indirection.
+#[allow(clippy::too_many_lines)]
 async fn stop_after_failed_alloc_drains_broker() {
     let tmp = TempDir::new().expect("tempdir");
     let clock = SimClock::new();
@@ -409,7 +413,10 @@ async fn stop_after_failed_alloc_drains_broker() {
         id: "payments".to_string(),
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
-        driver: DriverInput::Exec(ExecInput { command: "/does/not/exist".to_string(), args: vec![] }),
+        driver: DriverInput::Exec(ExecInput {
+            command: "/does/not/exist".to_string(),
+            args: vec![],
+        }),
     })
     .expect("valid job spec");
     let archived = rkyv::to_bytes::<rkyv::rancor::Error>(&job).expect("rkyv archive");
@@ -445,9 +452,16 @@ async fn stop_after_failed_alloc_drains_broker() {
             broker.drain_pending()
         };
         for eval in pending {
-            run_convergence_tick(&state, &eval.reconciler, &eval.target, now, warm_up_ticks, deadline)
-                .await
-                .expect("convergence tick succeeds");
+            run_convergence_tick(
+                &state,
+                &eval.reconciler,
+                &eval.target,
+                now,
+                warm_up_ticks,
+                deadline,
+            )
+            .await
+            .expect("convergence tick succeeds");
         }
         clock.tick(Duration::from_millis(100));
         warm_up_ticks += 1;
@@ -547,9 +561,9 @@ async fn stop_after_failed_alloc_drains_broker() {
     assert!(
         dispatched_during_stop <= 2,
         "post-stop dispatch traffic must be bounded; expected <= 2 \
-         dispatches between stop submit and broker drain, got {} \
-         (pre-fix value: ≥5 — the broker self-re-enqueues until \
-         restart_counts reaches RESTART_BACKOFF_CEILING)",
-        dispatched_during_stop
+         dispatches between stop submit and broker drain, got \
+         {dispatched_during_stop} (pre-fix value: ≥5 — the broker \
+         self-re-enqueues until restart_counts reaches \
+         RESTART_BACKOFF_CEILING)",
     );
 }

@@ -1016,6 +1016,20 @@ impl Reconciler for JobLifecycle {
         // Terminated) require no action; the next tick's hydrate
         // re-evaluates. A stop intent against an absent job is a no-op
         // (the second `desired.job.is_some()` clause).
+        //
+        // Transitional-view-state contract (whitepaper §18 *Level-triggered
+        // inside the reconciler* + `fix-stop-branch-backoff-pending` RCA):
+        // when `stop_actions.is_empty()` the stop is complete — there is
+        // nothing left for the runtime to do. Clearing `next_attempt_at`
+        // is what tells the runtime's `view_has_backoff_pending`
+        // predicate to stop re-enqueueing; without it, a Failed-mid-
+        // backoff alloc keeps the predicate `true` and the broker spins
+        // for ~5 s until `restart_counts` reaches the ceiling.
+        // `restart_counts` is intentionally left intact: the predicate
+        // (`reconciler_runtime.rs:425-428`) only checks counts for
+        // entries that exist in `next_attempt_at`, so clearing the
+        // deadline map is sufficient — and the historical record is
+        // preserved.
         if desired.desired_to_stop && desired.job.is_some() {
             let stop_actions: Vec<Action> = actual
                 .allocations
@@ -1023,7 +1037,13 @@ impl Reconciler for JobLifecycle {
                 .filter(|r| r.state == AllocState::Running)
                 .map(|r| Action::StopAllocation { alloc_id: r.alloc_id.clone() })
                 .collect();
-            return (stop_actions, view.clone());
+            // When nothing is Running, the stop is complete.
+            // Clear backoff state so view_has_backoff_pending does not re-enqueue.
+            let mut next_view = view.clone();
+            if stop_actions.is_empty() {
+                next_view.next_attempt_at.clear();
+            }
+            return (stop_actions, next_view);
         }
         match desired.job.as_ref() {
             // Absent: no desired job. The Stop branch above handles

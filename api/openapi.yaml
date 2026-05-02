@@ -798,6 +798,7 @@ components:
       enum:
       - operator
       - reconciler
+      - process
     SubmitEvent:
       oneOf:
       - type: object

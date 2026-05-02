@@ -775,7 +775,6 @@ fn tick_after_backoff_elapsed_emits_restart_and_advances_deadline() {
 /// re-enqueues every tick until `restart_counts` reaches the
 /// `RESTART_BACKOFF_CEILING`.
 #[test]
-#[ignore = "RED scaffold for fix-stop-branch-backoff-pending — un-ignore in the GREEN step"]
 fn stop_branch_clears_next_attempt_at_when_no_running_allocs() {
     // desired_to_stop = true, job is present, the only alloc is
     // Failed (NOT Running). The Stop branch fires but `stop_actions`
