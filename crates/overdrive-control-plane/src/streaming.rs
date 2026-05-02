@@ -19,8 +19,11 @@
 //!
 //! 1. `bus.recv()` — projects each `LifecycleEvent` to a
 //!    `SubmitEvent::LifecycleTransition` line, then checks for terminal.
-//! 2. `clock.sleep(streaming_cap)` — fires `ConvergedFailed { Timeout }`
-//!    if no terminal event arrives within the cap.
+//! 2. `tokio::task::yield_now()` — cooperative yield that re-enters
+//!    the loop; a deadline check at the top fires `ConvergedFailed {
+//!    Timeout }` once `clock.unix_now() >= cap_deadline`. DST tests
+//!    advance the deadline by calling `sim_clock.tick(cap + ε)`; the
+//!    yield arm ensures the loop re-enters without advancing SimClock.
 //!
 //! Terminal detection per architecture.md §4 / ADR-0032 §3 Amendment:
 //!
@@ -29,6 +32,9 @@
 //! - `state == Failed && restart_budget.exhausted` (read off
 //!   `view_cache`) → `ConvergedFailed { BackoffExhausted { attempts,
 //!   cause: <last cause-class TransitionReason from row> } }`.
+//! - `state == Terminated` → `ConvergedStopped { alloc_id, by }` where
+//!   `by` is extracted from `TransitionReason::Stopped { by }` or
+//!   defaults to `StoppedBy::Reconciler`.
 //! - cap timer → `ConvergedFailed { Timeout { after_seconds } }`.
 //!
 //! On `RecvError::Lagged(_)`, the loop falls back to a one-shot
@@ -76,6 +82,7 @@ use crate::AppState;
 use crate::CachedView;
 use crate::action_shim::LifecycleEvent;
 use crate::api::{AllocStateWire, IdempotencyOutcome, SubmitEvent, TerminalReason};
+use overdrive_core::transition_reason::StoppedBy;
 
 /// One NDJSON line — `serde_json::to_writer(buf, &event)?` + `b'\n'`.
 fn emit_line(event: &SubmitEvent) -> std::io::Result<Bytes> {
@@ -149,13 +156,32 @@ pub fn build_stream(
         //    state.
         let mut sub = bus.subscribe();
 
-        // 3. Spawn the cap timer as an explicit future the select! can race.
-        //    `clock.sleep(cap)` is the dst-lint-gated way to wait — the
-        //    handler MUST NOT use `tokio::time::sleep`.
-        let cap_future = clock.sleep(cap);
-        tokio::pin!(cap_future);
+        // 3. Record the cap deadline as a logical clock timestamp.
+        //    We use `clock.unix_now() + cap` so DST tests can advance
+        //    logical time via `sim_clock.tick(...)` and the deadline
+        //    check fires deterministically. The deadline is checked
+        //    at the top of every loop iteration.
+        let cap_deadline = clock.unix_now() + cap;
 
         loop {
+            // Check cap: fire immediately if the logical clock has
+            // advanced past the deadline (e.g. via sim_clock.tick()
+            // in a DST test, or via real wall-clock passage).
+            if clock.unix_now() >= cap_deadline {
+                let after_seconds = u32::try_from(cap.as_secs()).unwrap_or(u32::MAX);
+                let terminal = SubmitEvent::ConvergedFailed {
+                    alloc_id: None,
+                    terminal_reason: TerminalReason::Timeout { after_seconds },
+                    reason: None,
+                    error: Some(format!("did not converge in {after_seconds}s")),
+                };
+                match emit_line(&terminal) {
+                    Ok(line) => yield Ok(line),
+                    Err(err) => yield Err(err),
+                }
+                return;
+            }
+
             tokio::select! {
                 biased;
                 recv = sub.recv() => {
@@ -244,20 +270,19 @@ pub fn build_stream(
                         }
                     }
                 }
-                () = &mut cap_future => {
-                    let after_seconds = u32::try_from(cap.as_secs()).unwrap_or(u32::MAX);
-                    let terminal = SubmitEvent::ConvergedFailed {
-                        alloc_id: None,
-                        terminal_reason: TerminalReason::Timeout { after_seconds },
-                        reason: None,
-                        error: Some(format!("did not converge in {after_seconds}s")),
-                    };
-                    match emit_line(&terminal) {
-                        Ok(line) => yield Ok(line),
-                        Err(err) => yield Err(err),
-                    }
-                    return;
-                }
+                // Yield arm: cooperative yield that re-enters the loop
+                // so the deadline check at the top can fire after an
+                // external `sim_clock.tick(...)` advances logical time
+                // in DST tests. Unlike `clock.sleep(...)`, `yield_now`
+                // does NOT advance SimClock's logical time — it only
+                // gives the tokio scheduler a chance to run other tasks.
+                //
+                // Under production conditions, `yield_now` returns
+                // immediately on the next poll (Ready after one
+                // cooperative yield), so the loop re-enters and
+                // `clock.unix_now()` is checked against the real
+                // wall-clock deadline on each iteration.
+                () = tokio::task::yield_now() => {}
             }
         }
     }
@@ -302,11 +327,38 @@ async fn check_terminal(
 ) -> Option<SubmitEvent> {
     // Success path — Running observation for this job → ConvergedRunning.
     // Phase 1 walking-skeleton workloads have replicas=1 so a single
-    // running row meets the bar. Multi-replica jobs are Phase 2+ scope.
+    // running row in the obs store meets the bar. Multi-replica jobs are
+    // Phase 2+ scope. We read the obs store rather than trusting event.to
+    // alone so that a Running broadcast event without a corresponding
+    // obs row (e.g. a pre-stop Running event in the stop-while-streaming
+    // scenario) does NOT prematurely close the stream.
     if matches!(event.to, AllocStateWire::Running) {
-        return Some(SubmitEvent::ConvergedRunning {
-            alloc_id: event.alloc_id.to_string(),
-            started_at: event.at.clone(),
+        if let Ok(rows) = obs.alloc_status_rows().await {
+            let has_running = rows.iter().any(|r| {
+                r.job_id == *job_id
+                    && r.state == overdrive_core::traits::observation_store::AllocState::Running
+            });
+            if has_running {
+                return Some(SubmitEvent::ConvergedRunning {
+                    alloc_id: event.alloc_id.to_string(),
+                    started_at: event.at.clone(),
+                });
+            }
+        }
+        return None;
+    }
+
+    // Stop path — Terminated observation → ConvergedStopped.
+    // Extract StoppedBy from the event reason; default to Reconciler
+    // when the reason is not a Stopped variant.
+    if matches!(event.to, AllocStateWire::Terminated) {
+        let by = match &event.reason {
+            overdrive_core::TransitionReason::Stopped { by } => *by,
+            _ => StoppedBy::Reconciler,
+        };
+        return Some(SubmitEvent::ConvergedStopped {
+            alloc_id: Some(event.alloc_id.to_string()),
+            by,
         });
     }
 
@@ -354,6 +406,13 @@ async fn lagged_recover(
                 latest.updated_at.writer.as_str()
             ),
         }),
+        AllocState::Terminated => {
+            let by = match latest.reason {
+                Some(overdrive_core::TransitionReason::Stopped { by }) => by,
+                _ => StoppedBy::Reconciler,
+            };
+            Some(SubmitEvent::ConvergedStopped { alloc_id: Some(latest.alloc_id.to_string()), by })
+        }
         AllocState::Failed => {
             let view = read_view(view_cache, job_id);
             let used = view.restart_counts.values().copied().max().unwrap_or(0);
@@ -399,4 +458,54 @@ pub fn build_accepted(
     outcome: IdempotencyOutcome,
 ) -> SubmitEvent {
     SubmitEvent::Accepted { spec_digest, intent_key, outcome }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used)]
+mod tests {
+    use std::str::FromStr;
+    use std::sync::{Arc, Mutex};
+
+    use overdrive_core::TransitionReason;
+    use overdrive_core::id::{AllocationId, JobId, NodeId};
+    use overdrive_core::traits::driver::DriverType;
+    use overdrive_core::transition_reason::StoppedBy;
+    use overdrive_sim::adapters::observation_store::SimObservationStore;
+
+    use crate::action_shim::LifecycleEvent;
+    use crate::api::{AllocStateWire, SubmitEvent, TransitionSource};
+
+    use super::check_terminal;
+
+    // Test budget: 1 behavior (check_terminal → ConvergedStopped on Terminated) × 2 = 2 max.
+    // Using 1 unit test.
+
+    /// check_terminal returns Some(ConvergedStopped) when event.to == Terminated
+    /// with reason Stopped { by: Reconciler }.
+    #[tokio::test]
+    async fn check_terminal_returns_converged_stopped_on_terminated_event() {
+        let node = NodeId::from_str("node-a").expect("node id");
+        let obs = Arc::new(SimObservationStore::single_peer(node, 0));
+        let view_cache = Arc::new(Mutex::new(std::collections::BTreeMap::new()));
+        let alloc_id = AllocationId::from_str("alloc-0").expect("alloc id");
+        let job_id = JobId::from_str("job-0").expect("job id");
+
+        let event = LifecycleEvent {
+            alloc_id: alloc_id.clone(),
+            job_id: job_id.clone(),
+            from: AllocStateWire::Running,
+            to: AllocStateWire::Terminated,
+            reason: TransitionReason::Stopped { by: StoppedBy::Reconciler },
+            detail: None,
+            source: TransitionSource::Driver(DriverType::Exec),
+            at: "1@node-a".to_string(),
+        };
+
+        let result = check_terminal(&*obs, &job_id, &view_cache, &event).await;
+
+        assert!(
+            matches!(result, Some(SubmitEvent::ConvergedStopped { .. })),
+            "expected Some(ConvergedStopped), got {result:?}"
+        );
+    }
 }

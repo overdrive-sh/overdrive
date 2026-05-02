@@ -958,6 +958,42 @@ components:
             type: string
             enum:
             - converged_failed
+      - type: object
+        description: |-
+          Terminal — workload was stopped (operator or reconciler-driven
+          clean exit). Serialises as `kind == "converged_stopped"`.
+
+          `alloc_id` is `Option` for forward-compat (edge case: Terminated
+          broadcast arrives before any alloc row is observable). `by`
+          identifies whether the stop was operator-initiated or
+          reconciler-driven (e.g. clean process exit).
+        required:
+        - data
+        - kind
+        properties:
+          data:
+            type: object
+            description: |-
+              Terminal — workload was stopped (operator or reconciler-driven
+              clean exit). Serialises as `kind == "converged_stopped"`.
+
+              `alloc_id` is `Option` for forward-compat (edge case: Terminated
+              broadcast arrives before any alloc row is observable). `by`
+              identifies whether the stop was operator-initiated or
+              reconciler-driven (e.g. clean process exit).
+            required:
+            - by
+            properties:
+              alloc_id:
+                type:
+                - string
+                - 'null'
+              by:
+                $ref: '#/components/schemas/StoppedBy'
+          kind:
+            type: string
+            enum:
+            - converged_stopped
       description: |-
         Streaming-submit event emitted on the `Accept: application/x-ndjson`
         lane of `POST /v1/jobs` per ADR-0032 §3 (cause-class amendment

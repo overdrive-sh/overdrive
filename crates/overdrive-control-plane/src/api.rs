@@ -28,6 +28,7 @@ use overdrive_core::TransitionReason;
 use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
 use overdrive_core::traits::driver::DriverType;
 use overdrive_core::traits::observation_store::AllocState;
+use overdrive_core::transition_reason::StoppedBy;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -335,6 +336,9 @@ pub struct ErrorBody {
         // though the path's `#[utoipa::path(...)]` macro declares the
         // multi-content-type response shape.
         SubmitEvent,
+        // `StoppedBy` is carried by `SubmitEvent::ConvergedStopped.by`
+        // and must be registered so the schema reference resolves.
+        StoppedBy,
     )),
     tags(
         (name = "jobs", description = "Job lifecycle endpoints"),
@@ -600,6 +604,18 @@ pub enum SubmitEvent {
         reason: Option<TransitionReason>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
+    },
+    /// Terminal — workload was stopped (operator or reconciler-driven
+    /// clean exit). Serialises as `kind == "converged_stopped"`.
+    ///
+    /// `alloc_id` is `Option` for forward-compat (edge case: Terminated
+    /// broadcast arrives before any alloc row is observable). `by`
+    /// identifies whether the stop was operator-initiated or
+    /// reconciler-driven (e.g. clean process exit).
+    ConvergedStopped {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        alloc_id: Option<String>,
+        by: StoppedBy,
     },
 }
 
