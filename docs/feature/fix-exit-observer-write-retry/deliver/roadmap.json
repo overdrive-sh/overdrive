@@ -1,0 +1,154 @@
+{
+  "roadmap": {
+    "project_id": "fix-exit-observer-write-retry",
+    "feature_id": "fix-exit-observer-write-retry",
+    "created_at": "2026-05-02T20:30:00Z",
+    "filled_at": "2026-05-02T20:30:00Z",
+    "total_steps": 2,
+    "phases": 1,
+    "walking_skeleton_gate": "01-02",
+    "validation": {
+      "status": "approved",
+      "approved_at": "2026-05-02T20:30:00Z",
+      "approver": "user",
+      "rationale": "User reviewed and approved the RCA + Option A fix shape (bounded retry + classification + escalation) in /nw-bugfix Phase 2. Roadmap mirrors the canonical bugfix shape from the sibling fix-cgroup-preflight-procfs-unreadable/deliver/roadmap.json."
+    },
+    "notes": [
+      "Bug fix via /nw-bugfix → /nw-deliver. Authoritative spec is the RCA at `docs/feature/fix-exit-observer-write-retry/deliver/rca.md` (user-reviewed and APPROVED 2026-05-02 in Phase 2).",
+      "CRITICAL — DO NOT land the reporter's surface fix (move re-enqueue outside the Err arm). The RCA proves it does not unstick the alloc: re-enqueueing a reconciler that reads stale obs is a no-op (reconciler reads Running, compares against desired Running, returns Vec::new(), broker drains empty). The Ok-gated re-enqueue stays as-is; step 01-02 adds an explanatory doc-comment naming the busy-loop trap so future reviewers don't mis-flag it.",
+      "Approved fix is Option A: bounded retry with exponential backoff (using injected Clock for DST determinism) + classify ObservationStoreError into retryable-transient vs terminal via a new `is_retryable()` method + on terminal-or-exhausted, emit `tracing::error!` AND synthesize a degraded `LifecycleEvent` so `submit --watch` subscribers see the failure surface.",
+      "Single-cut migration per `feedback_single_cut_greenfield_migrations`: no deprecated log-and-drop path retained; no feature-flag fallback. The fix lands as one cohesive change. Step 01-01 introduces the new types + scaffolds the test in RED state (no production behaviour change yet → test panics RED). Step 01-02 lands the retry loop and the test transitions RED → GREEN.",
+      "Two-step Outside-In TDD shape per the canonical bugfix template at `docs/feature/fix-cgroup-preflight-procfs-unreadable/deliver/roadmap.json`. Step 01-01 lands `is_retryable()` on `ObservationStoreError` + the `SimObservationStore::inject_write_failure(error)` test helper + the new RED regression test. exit_observer.rs is unchanged in 01-01, so the test fails. Step 01-02 wraps `handle_exit_event` in a bounded retry loop, threads `Clock` through `spawn_with_runtime`'s signature (rippling to `lib.rs::run_server_with_obs_and_driver`), implements terminal escalation via a synthesized degraded `LifecycleEvent`, and adds the explanatory doc-comment on the Ok-gated re-enqueue. Test transitions RED → GREEN.",
+      "Per `.claude/rules/testing.md` mutation-testing rules, step 01-02 runs `cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-control-plane --file crates/overdrive-control-plane/src/worker/exit_observer.rs --package overdrive-core --file crates/overdrive-core/src/traits/observation_store.rs`. Kill-rate gate ≥80%. The mutation surface is bounded: one retry loop, one classification predicate, one escalation event constructor.",
+      "Clock injection: `spawn_with_runtime` gains a `clock: Arc<dyn Clock>` parameter. The plain `spawn` test entrypoint also gains it (or wraps `spawn_with_runtime` with a `SystemClock` default — TBD by crafter, per project pattern). The DST harness (turmoil-driven tests in `tests/integration/job_lifecycle/`) passes the injected `SimClock` so retry timing is deterministic.",
+      "Out of scope (do NOT touch): the `Driver::status()` trait method (still has zero callers per Phase 1 design); the broker re-enqueue gate (intentional Ok(_)-only; DO NOT move outside the Err arm); the action-shim's lifecycle-event broadcast path (the observer-side terminal-escalation event reuses the same `Arc<broadcast::Sender<LifecycleEvent>>` already in spawn_with_runtime's signature)."
+    ]
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Bug fix — exit_observer survives obs-write failure via bounded retry + terminal escalation",
+      "slice": "single-vertical",
+      "user_stories": [
+        "As an operator running `overdrive serve`, when the ObservationStore transiently rejects an exit-row write (lock contention, EAGAIN, momentary I/O hiccup), the exit_observer retries with bounded backoff and the alloc still transitions out of Running. As an operator, when an obs write fails terminally (permission denied, disk full, schema error) and retries are exhausted, I see a `LifecycleEvent` carrying a `DriverInternalError` reason on the same broadcast bus my `submit --watch` subscribes to — instead of the alloc silently sticking as Running with no live process behind it."
+      ],
+      "description": "Replace the buggy `Err(err) => { warn!; continue }` arm at exit_observer.rs:188-196 with a classification + bounded retry + terminal escalation flow. The RCA proves the reporter's surface fix (move re-enqueue outside Err) does not unstick the alloc — re-enqueueing a reconciler that reads obs (which still says Running) is a no-op. The actual fix retries retryable kinds with `Clock::sleep`-backed backoff, escalates terminal failures via a synthesized degraded `LifecycleEvent`, and keeps the Ok-gated re-enqueue with an explanatory doc-comment naming the busy-loop trap.",
+      "estimated_hours": 2.0,
+      "depends_on": [],
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "RED — add ObservationStoreError::is_retryable() + SimObservationStore failure injection + new regression test",
+          "description": "Land three things and DO NOT change `exit_observer.rs`: (1) `ObservationStoreError::is_retryable(&self) -> bool` method that returns true for `Unreachable { .. }` and for `Io(err)` whose `err.kind()` is one of `Interrupted`, `WouldBlock`, `TimedOut`, `ResourceBusy` (the genuinely transient `io::ErrorKind`s); returns false for everything else (PermissionDenied, AlreadyExists, NotFound on a write path, OutOfMemory, Other, Unsupported). Pure method on the existing enum — no variant restructuring. (2) `SimObservationStore::inject_write_failure(error: ObservationStoreError)` test-only helper that queues an error to be returned from the next `write(...)` call, then dequeues so subsequent writes succeed. Document the queue semantics inline. (3) New regression test file `crates/overdrive-control-plane/tests/integration/job_lifecycle/crash_recovery_obs_write_rejected.rs` with two `#[tokio::test]` scenarios: (a) `transient_obs_write_recovers_on_retry` — inject one transient `Io(ErrorKind::Interrupted)` failure, assert the alloc still reaches `Failed`/`Terminated` in obs and a `LifecycleEvent` with the correct `to` state is broadcast; (b) `terminal_obs_write_escalates_via_lifecycle_event` — inject a `Io(ErrorKind::PermissionDenied)` failure (and keep injecting it on retry attempts to model exhaustion), assert a degraded `LifecycleEvent` is broadcast carrying `TransitionReason::DriverInternalError` with a detail string naming the underlying obs-store error and the alloc count of retry attempts. Both scenarios FAIL on current `exit_observer.rs` (which logs and `continue`s) — (a) panics because the row never reaches Failed; (b) panics because no degraded event is ever broadcast. Wire the new file through `tests/integration.rs` under `mod job_lifecycle { … }`. Commit with `git commit --no-verify` per testing.md §RED scaffolds. Default lane unaffected (the new method + helper + test compile clean; only the integration-tests feature exposes the test).",
+          "criteria": [
+            "AC1: `ObservationStoreError::is_retryable(&self) -> bool` exists; rustdoc explains the classification policy; the method matches `Unreachable { .. } => true` and `Io(err)` => true iff `err.kind()` is one of `{Interrupted, WouldBlock, TimedOut, ResourceBusy}`. Inline `#[cfg(test)] mod is_retryable_tests { … }` covers each `io::ErrorKind` arm with a discrete `#[test]`.",
+            "AC2: `SimObservationStore::inject_write_failure(error: ObservationStoreError)` test-only helper exists (gated `#[cfg(any(test, feature = \"integration-tests\"))]` if needed). Subsequent calls to `write(...)` consume the queued error in FIFO order; once drained, writes proceed normally. Rustdoc states the queue semantics.",
+            "AC3: New file `crates/overdrive-control-plane/tests/integration/job_lifecycle/crash_recovery_obs_write_rejected.rs` exists with two `#[tokio::test]` scenarios named `transient_obs_write_recovers_on_retry` and `terminal_obs_write_escalates_via_lifecycle_event`. Both scenarios use `SimClock` for deterministic timing.",
+            "AC4: The new test is wired through `crates/overdrive-control-plane/tests/integration.rs` under `mod job_lifecycle { … }` adjacent to the existing `crash_recovery` and `exit_observer` modules.",
+            "AC5: Both scenarios FAIL on the current `exit_observer.rs` with documented panic messages (a: 'expected alloc to reach Failed/Terminated; got Running'; b: 'expected degraded LifecycleEvent on terminal failure; got none').",
+            "AC6: `cargo nextest run -p overdrive-control-plane --features integration-tests --no-run` succeeds on macOS (compile-only gate); commit message clearly marks the RED scaffold state (e.g., `test(control-plane): RED — exit_observer obs-write failure regression`).",
+            "AC7: Default lane: `cargo nextest run -p overdrive-core` and `cargo nextest run -p overdrive-control-plane` continue to pass. The `is_retryable()` addition + the gated `inject_write_failure` helper are non-breaking."
+          ],
+          "acceptance_criteria": [
+            "AC1: `ObservationStoreError::is_retryable(&self) -> bool` exists; rustdoc explains the classification policy; the method matches `Unreachable { .. } => true` and `Io(err)` => true iff `err.kind()` is one of `{Interrupted, WouldBlock, TimedOut, ResourceBusy}`. Inline `#[cfg(test)] mod is_retryable_tests { … }` covers each `io::ErrorKind` arm with a discrete `#[test]`.",
+            "AC2: `SimObservationStore::inject_write_failure(error: ObservationStoreError)` test-only helper exists (gated `#[cfg(any(test, feature = \"integration-tests\"))]` if needed). Subsequent calls to `write(...)` consume the queued error in FIFO order; once drained, writes proceed normally. Rustdoc states the queue semantics.",
+            "AC3: New file `crates/overdrive-control-plane/tests/integration/job_lifecycle/crash_recovery_obs_write_rejected.rs` exists with two `#[tokio::test]` scenarios named `transient_obs_write_recovers_on_retry` and `terminal_obs_write_escalates_via_lifecycle_event`. Both scenarios use `SimClock` for deterministic timing.",
+            "AC4: The new test is wired through `crates/overdrive-control-plane/tests/integration.rs` under `mod job_lifecycle { … }` adjacent to the existing `crash_recovery` and `exit_observer` modules.",
+            "AC5: Both scenarios FAIL on the current `exit_observer.rs` with documented panic messages (a: 'expected alloc to reach Failed/Terminated; got Running'; b: 'expected degraded LifecycleEvent on terminal failure; got none').",
+            "AC6: `cargo nextest run -p overdrive-control-plane --features integration-tests --no-run` succeeds on macOS (compile-only gate); commit message clearly marks the RED scaffold state (e.g., `test(control-plane): RED — exit_observer obs-write failure regression`).",
+            "AC7: Default lane: `cargo nextest run -p overdrive-core` and `cargo nextest run -p overdrive-control-plane` continue to pass. The `is_retryable()` addition + the gated `inject_write_failure` helper are non-breaking."
+          ],
+          "files_to_modify": [
+            "crates/overdrive-core/src/traits/observation_store.rs",
+            "crates/overdrive-sim/src/adapters/observation_store.rs",
+            "crates/overdrive-control-plane/tests/integration.rs",
+            "crates/overdrive-control-plane/tests/integration/job_lifecycle/crash_recovery_obs_write_rejected.rs"
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/job_lifecycle/crash_recovery_obs_write_rejected.rs",
+          "scenario_name": "exit_observer_survives_obs_write_failure",
+          "tier": "structural",
+          "time_estimate_hours": 1.0,
+          "estimated_hours": 1.0,
+          "dependencies": [],
+          "quality_gates": [
+            "Compile-only on macOS via `cargo nextest run -p overdrive-control-plane --features integration-tests --no-run`.",
+            "Default lane: `cargo nextest run -p overdrive-core` and `cargo nextest run -p overdrive-control-plane` continue to pass.",
+            "Linux runtime via `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests` (the two new scenarios FAIL as expected with documented panic messages; remaining tests PASS).",
+            "Commit shape: `--no-verify` with explicit RED-scaffold marker in the message."
+          ],
+          "deliverables": [
+            "One commit landing `is_retryable()` + `inject_write_failure` helper + new regression test in RED state."
+          ],
+          "implementation_scope": {
+            "production": [
+              "crates/overdrive-core/src/traits/observation_store.rs (add `is_retryable` method on `ObservationStoreError`; inline unit tests for the predicate)",
+              "crates/overdrive-sim/src/adapters/observation_store.rs (add `inject_write_failure` test-only helper; queue semantics)"
+            ],
+            "tests": [
+              "crates/overdrive-control-plane/tests/integration.rs (mod declaration)",
+              "crates/overdrive-control-plane/tests/integration/job_lifecycle/crash_recovery_obs_write_rejected.rs (new oracle, 2 scenarios)"
+            ]
+          }
+        },
+        {
+          "id": "01-02",
+          "name": "GREEN — bounded retry + terminal escalation in exit_observer; thread Clock through spawn_with_runtime; explanatory doc-comment on Ok-gated re-enqueue",
+          "description": "Replace the `Err(err) => { warn!; continue }` arm at exit_observer.rs:188-196 with a bounded retry + escalation flow. (1) Add `clock: Arc<dyn Clock>` parameter to `spawn_with_runtime` (and `spawn`, defaulting to a `SystemClock` if appropriate per the project's clock-injection convention). Update `lib.rs::run_server_with_obs_and_driver` (line 519) to pass `config.clock.clone()`. (2) Wrap `handle_exit_event(obs.as_ref(), &event)` in a bounded retry loop: on `Err(e) where e.is_retryable()`, sleep `clock.sleep(backoff)` with exponential backoff (e.g., 50ms, 100ms, 200ms — 3 attempts total) and retry. The whole `handle_exit_event` is the retry granularity (re-reads `find_prior_row` per retry so the LWW counter stays monotonic against any successful concurrent write that landed between attempts). (3) On `Err(e) where !e.is_retryable()` OR exhausted retries: emit `tracing::error!` with the alloc id, the underlying error, and the attempt count; synthesize a degraded `LifecycleEvent` with `from = AllocStateWire::Running` (best-effort prior state from `find_prior_row`; if even that read failed, use `AllocStateWire::Pending` as a defensive default), `to = AllocStateWire::Failed`, `reason = TransitionReason::DriverInternalError { detail }` (where `detail` names the obs-store error and the attempt count), `source = TransitionSource::Driver(driver_kind)`, `at = format!(\"observer-escalation@{node_id}\")` or similar — broadcast on the same `events` sender the success path uses. (4) Keep the re-enqueue at exit_observer.rs:200-205 gated on `Ok(_)` and add a doc-comment naming the busy-loop trap: 'The reconciler reads `actual` exclusively from the obs store. On a write failure, the obs row is still Running, so re-enqueueing the reconciler produces no actions — the broker would churn an empty reconcile cycle. The terminal-escalation `LifecycleEvent` above is the operator-visible signal; the reconciler is intentionally not nudged when the row did not change.' The new regression test from step 01-01 transitions RED → GREEN. Run mutation testing on the diff. Standard commit (no `--no-verify`).",
+          "criteria": [
+            "AC1: `spawn_with_runtime` signature gains `clock: Arc<dyn Clock>`; `spawn` either gains the parameter or wraps `spawn_with_runtime(...)` with a default `SystemClock`. `lib.rs::run_server_with_obs_and_driver` passes `config.clock.clone()` at line 519. No build break.",
+            "AC2: The Err arm at exit_observer.rs:188-196 is replaced by a bounded retry loop that uses `clock.sleep(backoff)` (NOT `tokio::time::sleep`). Retry policy: max 3 attempts; exponential backoff (50ms, 100ms, 200ms — values may be tuned but must be deterministic under SimClock). On retryable error, retry; on non-retryable error or exhaustion, escalate.",
+            "AC3: Terminal escalation broadcasts a `LifecycleEvent` on the existing `events` sender with `to = AllocStateWire::Failed`, `reason = TransitionReason::DriverInternalError { detail: <error+attempts> }`, and `source = TransitionSource::Driver(driver_kind)`. The escalation path also emits `tracing::error!`.",
+            "AC4: The re-enqueue at exit_observer.rs:200-205 stays gated on `Ok(_)` (intentional). A doc-comment immediately above the `if let Some(runtime) = runtime.as_ref()` block names the busy-loop trap: re-enqueueing on a stale Running row produces a no-op reconcile cycle.",
+            "AC5: `crash_recovery_obs_write_rejected.rs::transient_obs_write_recovers_on_retry` transitions RED → GREEN. The injected transient failure is consumed; the second write succeeds; the alloc reaches Failed/Terminated; the LifecycleEvent broadcast path fires.",
+            "AC6: `crash_recovery_obs_write_rejected.rs::terminal_obs_write_escalates_via_lifecycle_event` transitions RED → GREEN. The injected non-retryable failure exhausts retries; a degraded `LifecycleEvent` carrying `DriverInternalError` is broadcast.",
+            "AC7: Existing tests `tests/integration/job_lifecycle/crash_recovery.rs`, `exit_observer.rs`, `submit_to_running.rs`, `stop_to_terminated.rs`, `convergence_loop_spawned_in_production_boot.rs`, `cleanup.rs` all pass unchanged.",
+            "AC8: `cargo nextest run -p overdrive-control-plane --features integration-tests --no-run` succeeds on macOS.",
+            "AC9: Linux runtime via `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests` — all tests PASS.",
+            "AC10: Mutation testing kill rate ≥80% on the diff via `cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-control-plane --file crates/overdrive-control-plane/src/worker/exit_observer.rs --package overdrive-core --file crates/overdrive-core/src/traits/observation_store.rs`."
+          ],
+          "acceptance_criteria": [
+            "AC1: `spawn_with_runtime` signature gains `clock: Arc<dyn Clock>`; `spawn` either gains the parameter or wraps `spawn_with_runtime(...)` with a default `SystemClock`. `lib.rs::run_server_with_obs_and_driver` passes `config.clock.clone()` at line 519. No build break.",
+            "AC2: The Err arm at exit_observer.rs:188-196 is replaced by a bounded retry loop that uses `clock.sleep(backoff)` (NOT `tokio::time::sleep`). Retry policy: max 3 attempts; exponential backoff (50ms, 100ms, 200ms — values may be tuned but must be deterministic under SimClock). On retryable error, retry; on non-retryable error or exhaustion, escalate.",
+            "AC3: Terminal escalation broadcasts a `LifecycleEvent` on the existing `events` sender with `to = AllocStateWire::Failed`, `reason = TransitionReason::DriverInternalError { detail: <error+attempts> }`, and `source = TransitionSource::Driver(driver_kind)`. The escalation path also emits `tracing::error!`.",
+            "AC4: The re-enqueue at exit_observer.rs:200-205 stays gated on `Ok(_)` (intentional). A doc-comment immediately above the `if let Some(runtime) = runtime.as_ref()` block names the busy-loop trap: re-enqueueing on a stale Running row produces a no-op reconcile cycle.",
+            "AC5: `crash_recovery_obs_write_rejected.rs::transient_obs_write_recovers_on_retry` transitions RED → GREEN. The injected transient failure is consumed; the second write succeeds; the alloc reaches Failed/Terminated; the LifecycleEvent broadcast path fires.",
+            "AC6: `crash_recovery_obs_write_rejected.rs::terminal_obs_write_escalates_via_lifecycle_event` transitions RED → GREEN. The injected non-retryable failure exhausts retries; a degraded `LifecycleEvent` carrying `DriverInternalError` is broadcast.",
+            "AC7: Existing tests `tests/integration/job_lifecycle/crash_recovery.rs`, `exit_observer.rs`, `submit_to_running.rs`, `stop_to_terminated.rs`, `convergence_loop_spawned_in_production_boot.rs`, `cleanup.rs` all pass unchanged.",
+            "AC8: `cargo nextest run -p overdrive-control-plane --features integration-tests --no-run` succeeds on macOS.",
+            "AC9: Linux runtime via `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests` — all tests PASS.",
+            "AC10: Mutation testing kill rate ≥80% on the diff via `cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-control-plane --file crates/overdrive-control-plane/src/worker/exit_observer.rs --package overdrive-core --file crates/overdrive-core/src/traits/observation_store.rs`."
+          ],
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/worker/exit_observer.rs",
+            "crates/overdrive-control-plane/src/lib.rs"
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/job_lifecycle/crash_recovery_obs_write_rejected.rs",
+          "scenario_name": "exit_observer_survives_obs_write_failure",
+          "tier": "behavioural",
+          "time_estimate_hours": 1.0,
+          "estimated_hours": 1.0,
+          "dependencies": ["01-01"],
+          "quality_gates": [
+            "Compile-only on macOS via `cargo nextest run -p overdrive-control-plane --features integration-tests --no-run`.",
+            "Linux runtime via `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests` — all tests PASS including the two RED scenarios from 01-01 now GREEN.",
+            "Mutation testing kill rate ≥80% on the diff (file-scoped to `exit_observer.rs` and `observation_store.rs`).",
+            "Standard commit shape (no `--no-verify`) — pre-commit hook must pass."
+          ],
+          "deliverables": [
+            "One commit landing the retry loop + Clock plumbing + terminal escalation + explanatory doc-comment, transitioning the 01-01 scenarios RED → GREEN.",
+            "One mutation-testing run with documented kill rate."
+          ],
+          "implementation_scope": {
+            "production": [
+              "crates/overdrive-control-plane/src/worker/exit_observer.rs (retry loop replacing the Err continue arm; Clock parameter on spawn_with_runtime/spawn; terminal-escalation LifecycleEvent path; explanatory doc-comment on Ok-gated re-enqueue)",
+              "crates/overdrive-control-plane/src/lib.rs (pass config.clock to spawn_with_runtime at line 519; no other changes)"
+            ],
+            "tests": [
+              "crates/overdrive-control-plane/tests/integration/job_lifecycle/crash_recovery_obs_write_rejected.rs (transitions RED → GREEN; no source modification needed beyond what 01-01 wrote)"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc f6558a895031e5e9d89b6438cffa651afa5d4c304b300a5473e21dfb268163a1 # shrinks to (nodes, job, allocs) = ({NodeId("zla0jtkg"): Node { id: NodeId("zla0jtkg"), region: Region("local"), capacity: Resources { cpu_milli: 1, memory_bytes: 24149724648 } }}, Job { id: JobId("a"), replicas: 1, resources: Resources { cpu_milli: 0, memory_bytes: 1 } }, [AllocStatusRow { alloc_id: AllocationId("f"), job_id: JobId("x"), node_id: NodeId("zla0jtkg"), state: Terminated, updated_at: LogicalTimestamp { counter: 1, writer: NodeId("zla0jtkg") } }])
+cc 92dda9c1b0975d746cee04d0f2ed0be647e9305367bd1db5f0bb88a012dcdad5 # shrinks to (nodes_orig, job, allocs) = ({NodeId("d"): Node { id: NodeId("d"), region: Region("local"), capacity: Resources { cpu_milli: 0, memory_bytes: 34297428910 } }}, Job { id: JobId("c"), replicas: 29, resources: Resources { cpu_milli: 13821, memory_bytes: 56569427363 } }, [])

@@ -32,7 +32,8 @@
 #![allow(clippy::expect_fun_call)]
 
 use overdrive_core::aggregate::{
-    AggregateError, Allocation, AllocationSpecInput, Job, JobSpecInput, Node, NodeSpecInput,
+    AggregateError, Allocation, AllocationSpecInput, DriverInput, ExecInput, Job, JobSpecInput,
+    Node, NodeSpecInput, ResourcesInput,
 };
 use overdrive_core::id::IdParseError;
 
@@ -47,8 +48,8 @@ fn job_from_spec_rejects_zero_replicas_with_validation_variant_naming_replicas_f
     let spec = JobSpecInput {
         id: "payments".to_string(),
         replicas: 0,
-        cpu_milli: 2000,
-        memory_bytes: 4 * 1024 * 1024 * 1024,
+        resources: ResourcesInput { cpu_milli: 2000, memory_bytes: 4 * 1024 * 1024 * 1024 },
+        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     };
 
     // When Ana calls the validating constructor.
@@ -82,8 +83,8 @@ fn job_from_spec_rejects_forbidden_space_in_id_via_id_parse_error_passthrough_wi
     let spec = JobSpecInput {
         id: "PAY MENTS".to_string(),
         replicas: 1,
-        cpu_milli: 2000,
-        memory_bytes: 4 * 1024 * 1024 * 1024,
+        resources: ResourcesInput { cpu_milli: 2000, memory_bytes: 4 * 1024 * 1024 * 1024 },
+        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     };
 
     // When Ana calls the validating constructor.
@@ -123,8 +124,12 @@ fn job_from_spec_rejects_forbidden_space_in_id_via_id_parse_error_passthrough_wi
 #[test]
 fn job_from_spec_rejects_zero_memory_with_validation_variant_naming_memory_bytes_field() {
     // Given a Job spec with zero memory_bytes and every other field valid.
-    let spec =
-        JobSpecInput { id: "payments".to_string(), replicas: 1, cpu_milli: 2000, memory_bytes: 0 };
+    let spec = JobSpecInput {
+        id: "payments".to_string(),
+        replicas: 1,
+        resources: ResourcesInput { cpu_milli: 2000, memory_bytes: 0 },
+        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+    };
 
     // When Ana calls the validating constructor.
     let err = Job::from_spec(spec).expect_err("zero memory must be rejected");
@@ -285,8 +290,8 @@ fn err_branch_of_from_spec_carries_no_job_value_by_construction() {
     let spec = JobSpecInput {
         id: "PAY MENTS".to_string(),
         replicas: 0, // triply-invalid, picks up whichever fails first
-        cpu_milli: 2000,
-        memory_bytes: 0,
+        resources: ResourcesInput { cpu_milli: 2000, memory_bytes: 0 },
+        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     };
 
     // When Ana calls from_spec.
@@ -332,8 +337,11 @@ mod property {
             let spec = JobSpecInput {
                 id: "payments".to_string(),
                 replicas: 0,
-                cpu_milli: cpu,
-                memory_bytes: mem,
+                resources: ResourcesInput { cpu_milli: cpu, memory_bytes: mem },
+                driver: DriverInput::Exec(ExecInput {
+                    command: "/bin/true".to_string(),
+                    args: vec![],
+                }),
             };
             match Job::from_spec(spec) {
                 Err(AggregateError::Validation { field, .. }) => {
@@ -358,8 +366,11 @@ mod property {
             let spec = JobSpecInput {
                 id: "payments".to_string(),
                 replicas,
-                cpu_milli: cpu,
-                memory_bytes: 0,
+                resources: ResourcesInput { cpu_milli: cpu, memory_bytes: 0 },
+                driver: DriverInput::Exec(ExecInput {
+                    command: "/bin/true".to_string(),
+                    args: vec![],
+                }),
             };
             match Job::from_spec(spec) {
                 Err(AggregateError::Validation { field, .. }) => {

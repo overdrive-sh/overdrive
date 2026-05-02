@@ -26,7 +26,7 @@ do not rewrite prior sections without a corresponding ADR marked
 |---|---|---|
 | System Architecture | Titan (future) | placeholder |
 | Domain Model | Hera (future) | placeholder |
-| Application Architecture | Morgan (this doc) | **extended — Phase 1 control-plane-core** |
+| Application Architecture | Morgan (this doc) | **extended — Phase 1 first-workload (2026-04-27)** |
 
 ---
 
@@ -114,8 +114,18 @@ workspace/
 ├── crates/
 │   ├── overdrive-core/          # ports + newtypes + Result alias + Error
 │   │                            # (class: core, lint-scanned, no I/O primitives)
+│   ├── overdrive-scheduler/     # pure-fn placement (ADR-0024 — first-workload)
+│   │                            # (class: core, lint-scanned)
 │   ├── overdrive-store-local/   # LocalStore (redb) adapter
 │   │                            # (class: adapter-host, uses redb directly)
+│   ├── overdrive-host/          # production adapters: SystemClock, OsEntropy,
+│   │                            # TcpTransport (host-OS primitives — ADR-0016)
+│   │                            # (class: adapter-host)
+│   ├── overdrive-worker/        # ExecDriver + workload-cgroup management
+│   │                            # + node_health writer (ADR-0029 — first-workload)
+│   │                            # (class: adapter-host)
+│   ├── overdrive-control-plane/ # axum + rustls + reconciler runtime
+│   │                            # (class: adapter-host)
 │   ├── overdrive-sim/           # Sim* adapters + invariants + turmoil harness
 │   │                            # (class: adapter-sim, dev-profile only)
 │   ├── overdrive-cli/           # bin: `overdrive` (binary boundary, eyre)
@@ -149,18 +159,63 @@ extends `xtask` with `dst`/`dst-lint`. `overdrive-cli` already exists;
   document, derived from the Rust request/response types; drift caught
   by `cargo xtask openapi-check` in CI.
 
+**Phase 1 first-workload extension** (ADR-0021 — ADR-0029):
+
+- **`crates/overdrive-scheduler/`** — NEW, class = `core` (ADR-0024 user
+  override of the originally-proposed module-inside-control-plane
+  placement). Hosts the pure synchronous `schedule(...)` function
+  consumed by the `JobLifecycle` reconciler. Depends only on
+  `overdrive-core`. `dst-lint` mechanically enforces the BTreeMap-only
+  iteration discipline + banned-API contract.
+- **`crates/overdrive-worker/`** — NEW, class = `adapter-host`
+  (ADR-0029, amended 2026-04-28 — `ProcessDriver` renamed to
+  `ExecDriver`; `DriverType::Process` renamed to `DriverType::Exec`;
+  `AllocationSpec.image` renamed to `AllocationSpec.command` and
+  `args: Vec<String>` field added). Hosts `ExecDriver` (ADR-0026,
+  formerly slated for `overdrive-host`), workload-cgroup management
+  (`overdrive.slice/workloads.slice/<alloc_id>.scope` create / limit
+  writes / teardown), and the boot-time `node_health` row writer
+  (relocated from control-plane bootstrap per ADR-0025 amendment).
+  The crate exposes a worker subsystem entrypoint the binary calls
+  during startup; `overdrive-control-plane` does NOT depend on this
+  crate — the action shim calls `Driver::*` against an injected
+  `&dyn Driver` whose impl the binary plugs in.
+- **`crates/overdrive-host/`** — UNCHANGED at the application-architecture
+  level. Per ADR-0029, `overdrive-host` retains its ADR-0016 intent
+  (host-OS primitive bindings: `SystemClock`, `OsEntropy`,
+  `TcpTransport`); workload drivers were never landed there.
+- **`crates/overdrive-control-plane/`** — EXTENDED. Gains
+  `reconciler_runtime::action_shim` submodule (ADR-0023), `AppState::driver:
+  Arc<dyn Driver>` field (ADR-0022), `JobLifecycle` reconciler
+  body, control-plane-cgroup management + pre-flight (ADR-0028 +
+  ADR-0026 amendment — workload-cgroup half moves to
+  `overdrive-worker`), and `POST /v1/jobs/{id}:stop` handler
+  (ADR-0027).
+- **`crates/overdrive-core/`** — EXTENDED. Gains `AnyState` enum
+  (ADR-0021), `JobLifecycleState` struct, `AnyReconciler::JobLifecycle`
+  variant, `IntentKey::for_job_stop` constructor (ADR-0027),
+  `NodeId::from_hostname` (ADR-0025), three new `Action` variants
+  (`StartAllocation`, `StopAllocation`, `RestartAllocation`).
+- **`crates/overdrive-cli/`** — EXTENDED. Gains `overdrive job stop <id>`
+  subcommand. The `serve` subcommand becomes the binary-composition
+  root: hard-depends on both `overdrive-control-plane` and
+  `overdrive-worker`; runtime `[node] role` config selects which
+  subsystems boot (ADR-0029).
+
 New crate-class assignments:
 
 | Crate | Class | Notes |
 |---|---|---|
 | `overdrive-control-plane` | `adapter-host` | Uses rustls, hyper, axum; not DST-pure. Reconciler bodies inside this crate that want DST coverage must be in separate `core`-class sub-crates when they appear in Phase 2+. |
+| `overdrive-scheduler` | `core` | NEW (ADR-0024). Pure synchronous placement function; `dst-lint`-scanned; depends only on `overdrive-core`. |
+| `overdrive-worker` | `adapter-host` | NEW (ADR-0029; amended 2026-04-28 — type renamed `ProcessDriver` → `ExecDriver`, `AllocationSpec.image` → `AllocationSpec.command`, `args` field added). ExecDriver + workload-cgroup management + node_health writer. Composed alongside `overdrive-control-plane` by the binary; control-plane crate does NOT depend on it. |
 
 **Crate classes** (`package.metadata.overdrive.crate_class`):
 
 | Class | Meaning | Banned-API lint | Examples |
 |---|---|---|---|
 | `core` | ports + pure logic | **yes** — lint scans for `Instant::now`, `rand::*`, `tokio::net::*`, `std::thread::sleep` | `overdrive-core` |
-| `adapter-host` | host adapter | no — allowed to use banned APIs to *implement* ports against the host OS / kernel / network | `overdrive-host`, `overdrive-store-local`, future `overdrive-node` |
+| `adapter-host` | host adapter | no — allowed to use banned APIs to *implement* ports against the host OS / kernel / network | `overdrive-host`, `overdrive-store-local`, `overdrive-control-plane`, `overdrive-worker` (ADR-0029) |
 | `adapter-sim` | sim adapter + harness | no — legitimately uses `turmoil`, `StdRng`, etc. | `overdrive-sim` |
 | `binary` | binary boundary | no | `overdrive-cli`, `xtask` |
 | *(unset)* | legacy / not classified | no | — |
@@ -635,6 +690,388 @@ the first external boundary is Phase 3+ ACME / Phase 5+ OIDC).
 
 ---
 
+## Phase 1 first-workload extension
+
+This section extends §1–§23 with the application-architecture decisions
+landed by feature `phase-1-first-workload` (2026-04-27). Nothing in
+§1–§23 is rewritten. New ADRs are ADR-0021 through ADR-0028.
+
+### 24. State shape — per-reconciler `AnyState` enum
+
+Per ADR-0021. The `Reconciler` trait gains an associated type
+`type State`, and a sister `enum AnyState` mirrors the existing
+`AnyReconciler` and `AnyReconcilerView` enum-dispatch shape:
+
+```rust
+pub enum AnyState {
+    Unit,                              // NoopHeartbeat
+    JobLifecycle(JobLifecycleState),   // first-workload reconciler
+}
+
+pub struct JobLifecycleState {
+    pub job:         Option<Job>,
+    pub nodes:       BTreeMap<NodeId, Node>,
+    pub allocations: BTreeMap<AllocationId, AllocStatusRow>,
+}
+```
+
+`desired` and `actual` collapse into the same `JobLifecycleState`
+struct — the reconciler interprets `desired.job` as the spec and
+`actual.allocations` as the running set. Future variants may diverge
+internally if a different shape is genuinely required.
+
+The runtime — not the reconciler — populates `desired` and `actual`
+via two new async surfaces (`hydrate_desired`, `hydrate_actual`)
+match-dispatched on `AnyReconciler`. The reconciler's existing
+`hydrate(target, db)` retains its narrow remit (the libSQL private-
+memory read). Per-tick I/O cost is proportional to the running
+reconciler, not the registered set.
+
+### 25. `AppState::driver: Arc<dyn Driver>` extension
+
+Per ADR-0022 (amended 2026-04-27 by ADR-0029). `AppState` gains a
+`driver: Arc<dyn Driver>` field; production wiring threads an
+`Arc<ExecDriver>` from the worker subsystem (`overdrive-worker`,
+per ADR-0029, type renamed from `ProcessDriver` 2026-04-28); test
+fixtures thread `SimDriver`. The renamed entry
+point `run_server_with_obs_and_driver(config, obs, driver)` is the
+test-fixture seam; the binary's `serve` subcommand instantiates the
+worker subsystem and threads its `Arc<dyn Driver>` into the
+control-plane's `AppState`.
+
+`AppState: Clone` is preserved (every field is `Arc<…>`). Phase 2+
+multi-driver dispatch (Process / MicroVm / Wasm) replaces
+`Arc<dyn Driver>` with `Arc<DriverRegistry>` at one field declaration
+plus the action shim's call site — no handler or test signature
+churn outside the field's immediate consumers.
+
+### 26. Action shim placement and tick cadence
+
+Per ADR-0023. The action shim lives at
+`overdrive-control-plane::reconciler_runtime::action_shim`,
+alongside `EvaluationBroker` and `ReconcilerRegistry`. The shim's
+signature:
+
+```rust
+pub async fn dispatch(
+    actions: Vec<Action>,
+    driver:  &dyn Driver,
+    obs:     &dyn ObservationStore,
+    tick:    &TickContext,
+) -> Result<(), ShimError>;
+```
+
+The reconciler-runtime tick loop drains the broker every **100 ms**
+in production (configurable via `ServerConfig`); each drained
+evaluation runs hydrate-then-reconcile-then-dispatch synchronously
+within its tick. Under DST the tick task runs against `SimClock`
+and the harness advances simulated time explicitly. The
+`clock.sleep(...)` indirection through the injected `Clock` trait
+is the seam: the same shim code runs in production and under DST,
+no conditional compilation.
+
+Action match is exhaustive. New variants (Phase 3+ `HttpCall`
+runtime, workflow runtime, etc.) produce non-exhaustive-match
+compile errors at extension time.
+
+### 27. `overdrive-scheduler` crate (D4 user override)
+
+Per ADR-0024. The originally-proposed `overdrive-control-plane::scheduler`
+module placement was overridden by the user in favour of a dedicated
+`overdrive-scheduler` crate, class `core`. The crate depends only on
+`overdrive-core` and exposes:
+
+```rust
+pub fn schedule(
+    nodes:          &BTreeMap<NodeId, Node>,
+    job:            &Job,
+    current_allocs: &[AllocStatusRow],
+) -> Result<NodeId, PlacementError>;
+```
+
+The dependency graph:
+`overdrive-core ← overdrive-scheduler ← overdrive-control-plane`.
+Acyclic — the new edge is consistent with ADR-0003 (crate-class
+labelling) and ADR-0016 (overdrive-host extraction).
+
+**The override is the load-bearing decision.** Putting the
+scheduler in a `core`-class crate means `dst-lint` mechanically
+enforces the `BTreeMap`-only iteration discipline and the banned-API
+contract (no `Instant::now`, no `rand::*`, no `tokio::net::*`). The
+determinism property becomes a structural property of the crate,
+not a review concern. The xtask self-test that the core-class set
+is non-empty (ADR-0003) continues to pass — set size grows from
+one (`overdrive-core`) to two.
+
+### 28. Single-node startup wiring
+
+Per ADR-0025 (amended 2026-04-27 by ADR-0029). `NodeId` is
+hostname-derived by default, with optional `[node].id` config
+override. `Region("local")` is the default, overridable via
+`[node].region`. Capacity defaults to a deliberately-conservative
+`Resources` sentinel (1000 cores / 1 TiB), overridable via
+`[node].cpu_milli` + `[node].memory_bytes`.
+
+Per ADR-0029, the `node_health` row writer is a **worker-subsystem
+responsibility**, not a control-plane bootstrap responsibility. The
+write happens during worker startup, before the worker is considered
+"started" and before the control plane binds its listener — the
+fail-fast property of the original ADR-0025 ordering is preserved,
+the relocation just routes the row write through the worker
+subsystem that owns the node's runtime presence:
+
+```
+1. Run cgroup pre-flight check                    (ADR-0028; control plane)
+2. Mint ephemeral CA + leaf certs                 (ADR-0010; control plane)
+3. Open LocalIntentStore                          (control plane)
+4. Worker subsystem startup                       (ADR-0029):
+     a. Resolve NodeId, Region, Capacity from config   (ADR-0025)
+     b. Write node_health row to ObservationStore      (ADR-0025 amended)
+     c. Construct ExecDriver                           (ADR-0026 amended 2026-04-28; formerly ProcessDriver)
+5. Construct ReconcilerRuntime; thread Arc<dyn Driver> (ADR-0022)
+6. Build AppState, Router                         (existing)
+7. Bind TCP listener                              (existing)
+8. Write trust triple                             (ADR-0010)
+9. Spawn axum_server task                         (existing)
+```
+
+The `[node]` config block is operator-owned; servers READ it and
+NEVER write it. The trust triple stays server-managed at
+`[ca]` / `[client]` blocks per ADR-0010.
+
+### 29. cgroup v2 direct writes; resource enforcement
+
+Per ADR-0026 (amended 2026-04-27 by ADR-0029; amended 2026-04-28 —
+`ProcessDriver` renamed to `ExecDriver`, `DriverType::Process` to
+`DriverType::Exec`, `AllocationSpec.image` to `AllocationSpec.command`,
+`args: Vec<String>` field added; magic image-name dispatch in
+`build_command` removed in favour of
+`Command::new(&spec.command).args(&spec.args)`). `ExecDriver`
+(hosted in `overdrive-worker`) writes cgroup files directly via
+`std::fs::write` / `std::fs::create_dir_all` — no `cgroups-rs` dep.
+Five filesystem operations per workload lifecycle:
+
+```
+mkdir overdrive.slice/workloads.slice/<alloc_id>.scope    (create)
+echo <pid> > .../cgroup.procs                             (place)
+echo <weight> > .../cpu.weight                            (limit)
+echo <bytes>  > .../memory.max                            (limit)
+rmdir overdrive.slice/workloads.slice/<alloc_id>.scope    (remove)
+```
+
+`cpu.weight` derivation: `clamp(cpu_milli / 10, 1, 10000)`.
+`memory.max` derivation: direct byte count. Limits are written
+*before* the PID is placed in the scope — the moment the PID lands
+in the scope it is already under the declared bounds.
+
+Failure dispositions:
+
+- Scope creation / `cgroup.procs` write fails → fatal,
+  `DriverError::SpawnFailed`, alloc row written `state: Failed`.
+- Limit write fails → warn-and-continue, alloc row written
+  `state: Running`. Phase 1 prioritises isolation (the scope) over
+  bounding (the limits); the limit failure is recoverable in
+  operator-actionable ways and the workload itself is correctly
+  placed.
+
+cgroup v1 is NOT supported (operator confirmed). The pre-flight
+check refuses to start on v1 hosts.
+
+**Cgroup hierarchy ownership** (ADR-0029 amendment to ADR-0026):
+the worker subsystem (`overdrive-worker`) owns
+`overdrive.slice/workloads.slice/<alloc_id>.scope` create / limit
+write / teardown — the *workload* half. The control plane subsystem
+(`overdrive-control-plane`) owns `overdrive.slice/control-plane.slice/`
+create + own-PID enrolment + ADR-0028 pre-flight check — the
+*control-plane* half. Each subsystem manages its own slice; the
+two never cross. The boundary mirrors whitepaper §4 *Workload
+Isolation on Co-located Nodes* exactly.
+
+### 30. `POST /v1/jobs/{id}:stop` HTTP shape; separate stop intent key
+
+Per ADR-0027. The job-stop endpoint follows AIP-136 verb-suffix
+convention:
+
+```
+POST /v1/jobs/{id}:stop
+```
+
+Empty request body. Response body:
+
+```json
+{ "job_id": "payments", "outcome": "stopped" }
+```
+
+`outcome ∈ { "stopped", "already_stopped" }`. 404 fires on unknown
+job id; 409 is reserved for future Phase 2+ start/stop conflicts.
+
+The stop intent is recorded as a separate
+`IntentKey::for_job_stop(&JobId)` key (canonical form
+`jobs/<JobId::display>/stop`). The reconciler's `hydrate_desired`
+path reads BOTH the job spec and the stop key:
+
+```
+(Some(spec), None)        => DesiredState::Run { spec }
+(Some(_),    Some(_))     => DesiredState::Stop
+(None,       _)           => DesiredState::Absent
+```
+
+The lifecycle reconciler emits `Action::StopAllocation` for each
+running allocation when `desired_state == DesiredState::Stop`. The
+shim calls `Driver::stop`, which sends SIGTERM, waits the grace
+period, escalates to SIGKILL, removes the cgroup scope.
+
+Future companion verbs (`:start`, `:restart`, `:cancel`,
+`:checkpoint`) compose with the same path-suffix shape. The
+`Job` aggregate is **not** mutated on stop — the spec stays
+readable via `GET /v1/jobs/{id}` for audit / rollback / debugging.
+
+### 31. cgroup v2 delegation pre-flight: hard refusal (no escape hatch)
+
+Per ADR-0028 (hard refusal) as superseded in part by ADR-0034
+(escape hatch removed). `overdrive serve` runs a four-step
+pre-flight check at boot (kernel exposes cgroup v2; cgroup v2 is
+mounted; UID is root OR has delegation; `cpu` and `memory`
+controllers are in `subtree_control`). On failure, the server logs
+an actionable error naming the failed step + remediation, exits
+non-zero, does NOT bind the listener.
+
+```
+Try one of:
+  1. systemctl --user start overdrive            (production)
+  2. sudo systemctl set-property user-1000.slice Delegate=yes
+  3. sudo overdrive serve                        (root, dev only)
+  4. cargo xtask lima run -- overdrive serve     (canonical dev
+                                                  path on macOS /
+                                                  non-delegated
+                                                  Linux)
+```
+
+There is no in-binary escape hatch. ADR-0034 deletes the
+`--allow-no-cgroups` flag introduced by ADR-0028: in code review
+the flag was found to silently leak workloads in the
+`StopAllocation` path (handle had `pid: None`, cgroup-kill branch
+gated off, stop returned `Ok(())` while the process kept running),
+producing a `state: Terminated`-while-process-alive convergence
+mismatch. The canonical dev path is `cargo xtask lima run --`
+(documented in `.claude/rules/testing.md`), which runs as root
+inside the bundled Lima VM with full cgroup v2 delegation.
+
+Hard refusal at boot is the disposition that respects the §4
+"control plane runs in dedicated cgroups with kernel-enforced
+resource reservations" architectural commitment. With the escape
+hatch deleted, the commitment is structurally guaranteed rather
+than defaulted-with-bypass.
+
+### 32. Updated quality-attribute scenarios — Phase 1 first-workload
+
+| Attribute | Phase 1 first-workload target | How it is addressed |
+|---|---|---|
+| Performance — convergence latency | submit → Running within 1-3 reconciler ticks (≤300 ms on default cadence) | 100 ms tick + level-triggered drain; ADR-0023 |
+| Performance — `cluster status` under workload pressure | < 100 ms during 100% CPU workload burst | cgroup `overdrive.slice/control-plane.slice/`; ADR-0026 + ADR-0028 |
+| Reliability — fault tolerance | Driver failure surfaces as `state: Failed` row, not stalled tick | per-action error isolation in shim; ADR-0023 |
+| Reliability — recoverability | Killed workload restarts within N+M ticks (M = backoff delay) | `JobLifecycleView::restart_counts` libSQL state; US-03 AC |
+| Reliability — backoff exhaustion | Repeatedly-crashing workload stops at M attempts (no infinite restart) | per-alloc backoff counter in `JobLifecycleView`; US-03 AC |
+| Reliability — boot-time integrity | Pre-flight detects misconfiguration; node_health write surfaces store breakage | ADR-0025 + ADR-0028 |
+| Maintainability — testability (scheduler determinism) | proptest: identical inputs → identical results, BTreeMap-order invariance | `overdrive-scheduler/tests/`; ADR-0024 |
+| Maintainability — testability (reconciler purity) | Twin invocation produces bit-identical outputs (`ReconcilerIsPure`) | DST invariant catalogue; ADR-0017 |
+| Maintainability — schema drift | OpenAPI gate covers new `:stop` endpoint | ADR-0009 + ADR-0027 |
+| Security — workload isolation | Workload kernel-isolated from control plane via cgroup hierarchy | ADR-0026 + ADR-0028 |
+| Compatibility — single-mode → multi-mode migration path | NodeId derivation works at N=1 and N>1; node_health row pattern is additive | ADR-0025 |
+
+### 33. External integrations — Phase 1 first-workload
+
+**None.** The first-workload feature talks only to:
+
+- The local `LocalStore` (redb file on disk) — not external.
+- The local `LocalObservationStore` (redb file on disk) — not external.
+- The local CLI over localhost rustls — not external.
+- Per-primitive libSQL files on disk — not external.
+- The Linux kernel's cgroup v2 unified hierarchy at `/sys/fs/cgroup/`
+  — host filesystem; not a network external.
+- The Linux kernel's process API (`fork`, `execve`, `kill`, `waitpid`
+  via `tokio::process`) — host kernel; not a network external.
+
+No external APIs, no webhooks, no OAuth, no third-party services.
+The platform-architect handoff annotation remains empty (no contract
+tests recommended). Phase 2+ may add the first external surface
+worth contract-testing.
+
+---
+
+### 34. Job spec — exec block wiring
+
+The Phase 1 operator-facing TOML now nests `[resources]` and `[exec]`
+tables; driver dispatch is implicit by table name. Top-level scalars
+(`id`, `replicas`) carry identity and scale; `[resources]` carries the
+resource envelope; `[exec]` carries the driver invocation. Future
+drivers (`[microvm]`, `[wasm]`) slot in additively as new sibling
+tables — exactly one driver table per spec is enforced by serde
+(`deny_unknown_fields` + tagged-enum dispatch with `#[serde(flatten)]`)
+at parse time.
+
+```toml
+id = "payments"
+replicas = 1
+
+[resources]
+cpu_milli    = 500
+memory_bytes = 134217728
+
+[exec]
+command = "/opt/payments/bin/payments-server"
+args    = ["--port", "8080"]
+```
+
+The validated `Job` aggregate carries a tagged-enum `driver:
+WorkloadDriver` field (mirroring the wire-shape `JobSpecInput.driver:
+DriverInput`). Today the enum has one variant — `WorkloadDriver::Exec(Exec
+{ command, args })` — that holds the operator's exec-driver invocation.
+Future drivers add variants (`WorkloadDriver::MicroVm(MicroVm)`,
+`WorkloadDriver::Wasm(Wasm)`) additively; the compiler enforces match
+exhaustiveness at every reconciler/shim site, making driver-class
+exclusivity structurally enforced at the intent layer (`make invalid
+states unrepresentable` per development.md). `Job::from_spec` remains
+THE single validating constructor (per ADR-0011) on both CLI and server
+lanes, and projects `DriverInput → WorkloadDriver` as part of the
+construction; the new `exec.command` non-empty rule slots in alongside
+the existing replicas/memory rules and surfaces as
+`AggregateError::Validation { field: "exec.command", message: "command
+must be non-empty" }`. The validation field name is the operator-facing
+path through the spec (matches the TOML the operator typed), not the
+internal Rust nesting. Argv carries no per-element validation — it is
+opaque to the driver, and the kernel's `execve(2)` enforces NUL-byte
+and `PATH_MAX` posture at exec time.
+
+The `Action::RestartAllocation` variant grows `spec: AllocationSpec`,
+mirroring `StartAllocation { spec }`. `AllocationSpec` itself stays
+flat per ADR-0030 §6 — at the driver-trait input boundary the
+implementing driver knows its own class (`impl Driver for ExecDriver`
+IS the discriminator), and ADR-0030's predicted Phase 2+ shape is
+**per-driver-class spec types** (a future `Spec` enum with
+`Spec::Exec(ExecSpec) | Spec::MicroVm(MicroVmSpec) | Spec::Wasm(WasmSpec)`),
+NOT a discriminator on a shared `AllocationSpec`. The reconciler
+projects `&job.driver` (today an irrefutable destructure of
+`WorkloadDriver::Exec(Exec { command, args })`; tomorrow a `match`)
+into the flat `AllocationSpec` at action-emit time. The shim's
+`build_phase1_restart_spec`, `build_identity`, and
+`default_restart_resources` placeholders delete in the same PR — the
+Restart arm reads `spec` straight off the action.
+
+See [ADR-0031](./adr-0031-job-spec-exec-block.md) for the full decision
+record (TOML wire shape, Rust types, `Action` enum revision, action-shim
+deletions, single-cut migration scope, C4 component diagram, and
+Alternatives A-E). ADR-0031 was amended 2026-04-30 (Amendment 1) to
+introduce the `WorkloadDriver` tagged-enum on `Job` for type-shape
+consistency across the wire (`JobSpecInput.driver`) and intent
+(`Job.driver`) layers; AllocationSpec was deliberately preserved flat
+per ADR-0030 §6. [ADR-0030](./adr-0030-exec-driver-and-allocation-spec-args.md)
+is the upstream type-shape decision that ratified `AllocationSpec
+{ command, args }` on the internal driver surface; ADR-0030 is
+unaffected by Amendment 1.
+
+---
+
 ### C4 Level 1 — System Context
 
 ```mermaid
@@ -652,44 +1089,79 @@ C4Context
   Rel(overdrive, fs, "Persists intent to")
 ```
 
-### C4 Level 2 — Container diagram (Phase 1 control-plane-core)
+### C4 Level 2 — Container diagram (Phase 1 first-workload)
+
+This diagram extends the prior phase's container view with four new
+containers: the dedicated `overdrive-scheduler` crate (ADR-0024
+override), the dedicated `overdrive-worker` crate (ADR-0029) hosting
+`ExecDriver` (renamed from `ProcessDriver` 2026-04-28 per ADR-0029
+amendment) and workload-cgroup management and the
+`node_health` writer, the binary-composition pattern in
+`overdrive-cli` (which hard-depends on both `overdrive-control-plane`
+and `overdrive-worker`), and the on-host kernel cgroup hierarchy that
+both subsystems manage at boot (each owning its own slice per
+ADR-0028 + ADR-0029).
 
 ```mermaid
 C4Container
-  title Container Diagram — Overdrive (Phase 1 control-plane-core)
+  title Container Diagram — Overdrive (Phase 1 first-workload)
 
   Person(engineer, "Platform Engineer (Ana)")
 
   Container_Boundary(workspace, "Overdrive workspace") {
-    Container(core, "overdrive-core", "Rust crate (class: core)", "Ports + newtypes + aggregates (Job/Node/Allocation) + Reconciler trait + Action enum + IntentKey")
+    Container(core, "overdrive-core", "Rust crate (class: core)", "Ports + newtypes + aggregates (Job/Node/Allocation) + Reconciler trait + AnyState/View enums + Action enum + IntentKey (incl. for_job_stop)")
+    Container(scheduler, "overdrive-scheduler", "Rust crate (class: core, NEW per ADR-0024)", "Pure-fn first-fit `schedule(nodes, job, allocs)` over BTreeMap inputs; dst-lint-scanned; depends only on overdrive-core")
     Container(store_local, "overdrive-store-local", "Rust crate (class: adapter-host)", "LocalStore (redb-backed IntentStore with put_if_absent semantics per ADR-0020) + LocalObservationStore (redb-backed single-writer ObservationStore)")
-    Container(sim, "overdrive-sim", "Rust crate (class: adapter-sim)", "Sim* adapters + turmoil harness + invariant catalogue; SimObservationStore is used by DST only — not a runtime dep of the control plane")
-    Container(ctrl, "overdrive-control-plane", "Rust crate (class: adapter-host)", "Axum router + rustls TLS + ReconcilerRuntime + EvaluationBroker + handler error mapping")
+    Container(host, "overdrive-host", "Rust crate (class: adapter-host)", "Host-OS primitive bindings: SystemClock, OsEntropy, TcpTransport (ADR-0016 intent preserved per ADR-0029)")
+    Container(worker, "overdrive-worker", "Rust crate (class: adapter-host, NEW per ADR-0029; amended 2026-04-28)", "ExecDriver (Linux-only; renamed from ProcessDriver) + workload-cgroup management (overdrive.slice/workloads.slice/<alloc>.scope per ADR-0026) + boot-time node_health row writer (per ADR-0025 amendment)")
+    Container(sim, "overdrive-sim", "Rust crate (class: adapter-sim)", "Sim* adapters + turmoil harness + invariant catalogue; SimDriver / SimObservationStore are used by DST only — not runtime deps of the control plane or worker")
+    Container(ctrl, "overdrive-control-plane", "Rust crate (class: adapter-host)", "Axum router + rustls TLS + ReconcilerRuntime + EvaluationBroker + ActionShim + JobLifecycle reconciler + control-plane cgroup management + pre-flight (ADR-0028)")
     Container(xtask, "xtask", "Rust binary (class: binary)", "cargo xtask dst / dst-lint / openapi-gen / openapi-check")
-    Container(cli, "overdrive-cli", "Rust binary (class: binary)", "overdrive CLI — reqwest HTTP client against /v1 REST API")
+    Container(cli, "overdrive-cli", "Rust binary (class: binary)", "overdrive CLI — reqwest HTTP client against /v1 REST API; gains `job stop` subcommand (ADR-0027). `serve` subcommand is the binary-composition root: hard-depends on both overdrive-control-plane and overdrive-worker; runtime [node] role config selects which subsystems boot (ADR-0029)")
   }
 
-  ContainerDb(redb_file, "redb file", "On-disk ACID KV", "Backs LocalStore; one file per IntentStore instance")
+  ContainerDb(redb_file, "redb file", "On-disk ACID KV", "Backs LocalStore + LocalObservationStore; one file per store instance")
   ContainerDb(libsql_files, "libSQL files", "On-disk SQLite", "One per reconciler; <data_dir>/reconcilers/<name>/memory.db")
-  ContainerDb(config_file, "~/.overdrive/config", "YAML file", "Operator endpoint + base64 CA/crt/key trust triple (ADR-0010)")
+  ContainerDb(config_file, "~/.overdrive/config", "TOML file", "Operator endpoint + trust triple (ADR-0010) + optional [node] block (ADR-0025)")
   ContainerDb(openapi_yaml, "api/openapi.yaml", "YAML file", "Checked-in OpenAPI 3.1 schema; derived from Rust types via utoipa (ADR-0009)")
+  System_Ext(kernel, "Linux kernel cgroup v2", "Unified hierarchy at /sys/fs/cgroup/", "overdrive.slice/{control-plane.slice (ctrl-owned), workloads.slice/<alloc>.scope (worker-owned)}")
+  System_Ext(workload, "Workload process", "tokio::process child", "fork/exec child placed in cgroup scope by ExecDriver")
   System_Ext(ci, "CI pipeline")
 
   Rel(engineer, xtask, "Runs `cargo xtask ...`")
-  Rel(engineer, cli, "Runs `overdrive job submit ...`")
+  Rel(engineer, cli, "Runs `overdrive job submit/stop/...`")
   Rel(ci, xtask, "Invokes on every PR (dst / dst-lint / openapi-check)")
 
   Rel(cli, config_file, "Reads endpoint + trust triple from")
+  Rel(cli, ctrl, "Composition root: instantiates control-plane subsystem when [node] role includes control-plane (ADR-0029)")
+  Rel(cli, worker, "Composition root: instantiates worker subsystem when [node] role includes worker; threads Arc<dyn Driver> from worker into control-plane AppState (ADR-0029)")
   Rel(cli, ctrl, "POSTs / GETs JSON over rustls HTTP/2 on /v1/...")
   Rel(cli, core, "Imports aggregate types, newtypes, IntentKey from")
 
-  Rel(ctrl, core, "Implements handlers against ports in; uses aggregates from")
-  Rel(ctrl, store_local, "Writes intent via IntentStore::put + reads via IntentStore::get; writes observation via ObservationStore::write + reads via alloc_status_rows/node_health_rows (ADR-0012, revised 2026-04-24)")
+  Rel(ctrl, core, "Implements handlers against ports in; uses aggregates and AnyState/AnyReconciler enums from")
+  Rel(ctrl, scheduler, "Calls `schedule(...)` from inside JobLifecycle::reconcile (pure helper from pure reconciler, ADR-0024)")
+  Rel(ctrl, store_local, "Writes intent via IntentStore::put + reads via IntentStore::get; writes observation via ObservationStore::write + reads alloc_status_rows / node_health_rows")
   Rel(ctrl, libsql_files, "Provisions one libSQL DB per registered reconciler")
+  Rel(ctrl, kernel, "Pre-flight reads /proc/filesystems, /sys/fs/cgroup/.../subtree_control; mkdirs control-plane.slice; writes own PID into cgroup.procs (ADR-0028)")
+  Rel(ctrl, config_file, "Reads optional [node] block; writes trust triple after bind")
+
+  Rel(worker, core, "Implements Driver port against; reads NodeId / Region / Resources newtypes; writes AllocStatusRow + NodeHealthRow shapes from")
+  Rel(worker, store_local, "Writes node_health row at startup via ObservationStore::write (per ADR-0025 amended)")
+  Rel(worker, kernel, "ExecDriver mkdirs workload scope; writes cpu.weight + memory.max + cgroup.procs; rmdirs scope on stop (ADR-0026 + ADR-0029)")
+  Rel(worker, workload, "tokio::process spawns child; SIGTERM/SIGKILL on stop")
+  Rel(worker, config_file, "Reads optional [node] block at worker startup")
+
+  Rel(ctrl, worker, "Action shim calls Driver::start/stop/status against &dyn Driver; impl crate is overdrive-worker but ctrl does NOT depend on it directly — Arc<dyn Driver> is plugged in by the binary at AppState construction (ADR-0029)", "via &dyn Driver")
+
+  Rel(scheduler, core, "Imports Resources, NodeId, Node, Job, AllocStatusRow from")
+
+  Rel(host, core, "Implements Clock, Entropy, Transport ports against")
+
   Rel(store_local, redb_file, "ACID transactions to")
 
   Rel(xtask, sim, "Runs DST harness via `cargo test --features dst`")
   Rel(xtask, core, "Scans source for banned APIs (dst-lint)")
+  Rel(xtask, scheduler, "Scans source for banned APIs (dst-lint) — NEW core-class crate")
   Rel(xtask, ctrl, "openapi-gen regenerates schema from; openapi-check diffs against")
   Rel(xtask, openapi_yaml, "Writes (openapi-gen) / reads (openapi-check)")
 
@@ -745,6 +1217,76 @@ C4Component
 
   Rel(libsql_prov, libsql_files, "Creates + opens")
 ```
+
+### C4 Level 3 — Convergence-loop closure (Phase 1 first-workload)
+
+The convergence loop is the central architectural feature of the
+first-workload feature: it is the path from `overdrive job submit`
+through the JobLifecycle reconciler + scheduler + action shim +
+ExecDriver and back into ObservationStore, where the next tick
+sees the new state. The diagram below shows the components and
+their async / sync boundaries explicitly.
+
+```mermaid
+C4Component
+  title Component Diagram — Convergence-loop closure (Phase 1 first-workload)
+
+  Container_Boundary(ctrl, "overdrive-control-plane") {
+    Component(handler_submit, "submit_job handler", "axum::Handler", "POST /v1/jobs — validates spec, archives via rkyv, commits to IntentStore (ADR-0008)")
+    Component(handler_stop, "job_stop handler", "axum::Handler (NEW — ADR-0027)", "POST /v1/jobs/{id}:stop — writes IntentKey::for_job_stop to IntentStore")
+    Component(broker, "EvaluationBroker", "Rust struct", "Keyed on (ReconcilerName, TargetResource); cancelable-eval-set; queued/cancelled/dispatched counters")
+    Component(runtime, "ReconcilerRuntime tick loop", "tokio::task", "Drains broker every 100 ms (ADR-0023); orchestrates hydrate-then-reconcile-then-dispatch pipeline")
+    Component(hydrate, "AnyReconciler::hydrate_desired/_actual", "async fn (NEW — ADR-0021)", "Match-dispatches on AnyReconciler variant; reads IntentStore + ObservationStore; emits AnyState variant")
+    Component(reconciler, "JobLifecycle::reconcile", "sync pure fn (NEW — US-03)", "Reads desired Job, current allocations, view (libSQL); calls scheduler; emits Vec<Action>")
+    Component(shim, "action_shim::dispatch", "async fn (NEW — ADR-0023)", "Match on Action variant; calls Driver::start/stop; writes AllocStatusRow to ObservationStore")
+  }
+
+  Container_Boundary(scheduler_crate, "overdrive-scheduler (class: core, NEW per ADR-0024)") {
+    Component(schedule_fn, "schedule(nodes, job, allocs)", "pure sync fn", "First-fit placement over BTreeMap<NodeId, Node>; returns Result<NodeId, PlacementError>")
+  }
+
+  Container_Boundary(worker_crate, "overdrive-worker (class: adapter-host, NEW per ADR-0029)") {
+    Component(process_driver, "ExecDriver", "Driver impl (NEW — ADR-0026 hosted here per ADR-0029; renamed from ProcessDriver 2026-04-28)", "tokio::process spawn (binary + args directly from AllocationSpec) + cgroup v2 direct cgroupfs writes; cpu.weight + memory.max from AllocationSpec::resources")
+    Component(node_health_writer, "node_health writer", "worker-startup helper (NEW — ADR-0025 amended by ADR-0029)", "Resolves NodeId/Region/Capacity from config; writes one node_health row at worker startup before listener bind")
+  }
+
+  Container(intent, "IntentStore (LocalIntentStore)", "redb-backed; for_job + for_job_stop keys")
+  Container(obs, "ObservationStore (LocalObservationStore)", "redb-backed; alloc_status_rows + node_health_rows")
+  Container(libsql_db, "JobLifecycleView libSQL DB", "<data_dir>/reconcilers/job-lifecycle/memory.db; restart_counts + next_attempt_at")
+  System_Ext(kernel, "Linux kernel cgroup v2 + process API")
+
+  Rel(handler_submit, intent, "IntentStore::put_if_absent (sync) — for_job key")
+  Rel(handler_submit, broker, "Enqueues Evaluation((JobLifecycle, jobs/<id>))")
+  Rel(handler_stop, intent, "IntentStore::put — for_job_stop key (ADR-0027)")
+  Rel(handler_stop, broker, "Enqueues Evaluation((JobLifecycle, jobs/<id>))")
+
+  Rel(runtime, broker, "drain() every tick (100 ms cadence; SimClock under DST)")
+  Rel(runtime, hydrate, "Awaits hydrate_desired + hydrate_actual + reconciler.hydrate")
+  Rel(hydrate, intent, "Reads for_job + for_job_stop keys (async)")
+  Rel(hydrate, obs, "Reads alloc_status_rows + node_health_rows (async)")
+  Rel(hydrate, libsql_db, "Reads JobLifecycleView (async)")
+
+  Rel(runtime, reconciler, "Calls reconcile(&desired, &actual, &view, &tick) — SYNC, no .await")
+  Rel(reconciler, schedule_fn, "Calls schedule(nodes, job, allocs) — SYNC, pure helper from pure reconciler (Anvil pattern)")
+  Rel(reconciler, runtime, "Returns (Vec<Action>, NextView)")
+
+  Rel(runtime, libsql_db, "Persists diff(view, NextView) (async)")
+  Rel(runtime, shim, "Awaits dispatch(actions, &driver, &obs, &tick)")
+  Rel(shim, process_driver, "Driver::start(&AllocationSpec { command, args, .. }) / Driver::stop(&AllocationHandle) (async)")
+  Rel(shim, obs, "Writes AllocStatusRow {Running | Failed | Terminated} (async)")
+  Rel(process_driver, kernel, "mkdir scope; cpu.weight; memory.max; cgroup.procs; SIGTERM/SIGKILL on stop")
+  Rel(node_health_writer, obs, "Writes node_health row at worker startup, before listener bind (ADR-0025 amended by ADR-0029)")
+
+  Rel(obs, hydrate, "Next tick reads back the row the shim just wrote — convergence-loop closes")
+```
+
+The diagram makes one architectural property visually explicit: the
+**only async boundary inside the convergence loop is the action
+shim**. `JobLifecycle::reconcile` is sync; `schedule(…)` is sync;
+`hydrate_desired` / `hydrate_actual` / `reconciler.hydrate` /
+`shim::dispatch` are async. The reconciler's purity contract —
+ADR-0013, `ReconcilerIsPure` invariant in ADR-0017 — is preserved
+by construction.
 
 ### C4 Level 3 — `overdrive-sim` component diagram
 
@@ -839,6 +1381,18 @@ Rules to enforce:
 | 0013 | Reconciler primitive: trait in `overdrive-core`, runtime in `overdrive-control-plane`, libSQL private memory | Accepted |
 | 0014 | CLI HTTP client is hand-rolled `reqwest`; CLI and server share Rust request/response types | Accepted |
 | 0015 | HTTP error mapping: `ControlPlaneError` with `#[from]`, bespoke 7807-compatible JSON body | Accepted |
+| 0021 | Reconciler `State` shape: per-reconciler typed `AnyState` enum mirroring `AnyReconcilerView` | Accepted |
+| 0022 | `AppState::driver: Arc<dyn Driver>` extension | Accepted |
+| 0023 | Action shim placement: `reconciler_runtime::action_shim` submodule; 100 ms tick cadence | Accepted |
+| 0024 | Dedicated `overdrive-scheduler` crate (class `core`); D4 user override | Accepted |
+| 0025 | Single-node startup wiring: hostname-derived NodeId; one-shot node_health write at boot | Accepted |
+| 0026 | cgroup v2 direct cgroupfs writes (no `cgroups-rs` dep); `cpu.weight` + `memory.max` from spec | Accepted |
+| 0027 | Job-stop HTTP shape: `POST /v1/jobs/{id}:stop`; separate `IntentKey::for_job_stop` | Accepted |
+| 0028 | cgroup v2 delegation pre-flight: hard refusal (escape-hatch portion superseded by ADR-0034) | Superseded in part by 0034 |
+| 0034 | Remove `--allow-no-cgroups` escape hatch; canonical dev path is `cargo xtask lima run --` | Accepted |
+| 0029 | Dedicated `overdrive-worker` crate (class `adapter-host`); ExecDriver (formerly ProcessDriver, renamed 2026-04-28) + workload-cgroup management + node_health writer extracted from `overdrive-host` | Accepted (amended 2026-04-28) |
+| 0032 | NDJSON streaming submit: `overdrive job submit` streams convergence as NDJSON when `Accept: application/x-ndjson` is sent; back-compat single-JSON ack otherwise. CLI exits non-zero on convergence failure. 60 s server-side cap. | Accepted |
+| 0033 | `alloc status` snapshot enrichment: `AllocStatusResponse` extended in place with state, last-transition reason, restart budget, exit code, started_at; `TransitionReason` shared with ADR-0032 streaming events. | Accepted |
 
 ---
 
@@ -859,33 +1413,56 @@ Rules to enforce:
 
 - Architecture document + ADRs in `docs/product/architecture/`.
 - Paradigm: OOP (Rust trait-based).
-- External integrations in Phase 1 (foundation + control-plane-core):
-  **none**. No contract tests recommended. Starting Phase 2 the
-  node-agent `tarpc` / `postcard-rpc` streams will be the first
-  internal contract worth testing; Phase 3+ ACME and Phase 5+ OIDC
-  land the first truly external surfaces.
+- External integrations in Phase 1 (foundation + control-plane-core +
+  first-workload): **none**. No contract tests recommended. Starting
+  Phase 2 the node-agent `tarpc` / `postcard-rpc` streams will be the
+  first internal contract worth testing; Phase 3+ ACME and Phase 5+
+  OIDC land the first truly external surfaces.
 - CI integration — the required checks are now:
   - `cargo xtask dst` (DST harness, phase-1-foundation ADR-0006)
-  - `cargo xtask dst-lint` (banned-API scan, phase-1-foundation ADR-0006)
-  - `cargo xtask openapi-check` (NEW — ADR-0009; diffs regenerated
-    OpenAPI against checked-in `api/openapi.yaml`)
+  - `cargo xtask dst-lint` (banned-API scan; first-workload extension:
+    `overdrive-scheduler` is now in scope per ADR-0024 — set size
+    grows from one core-class crate to two)
+  - `cargo xtask openapi-check` (ADR-0009; first-workload extension
+    adds the `POST /v1/jobs/{id}:stop` endpoint per ADR-0027)
   - `cargo nextest run --workspace` with `cargo test --doc --workspace`
     paired per `.claude/rules/testing.md`
   - Mutation-testing kill-rate gate ≥80% on Phase 1 applicable targets
     (newtype `FromStr`, aggregate validators, `IntentStore::{export,bootstrap}`,
-    rkyv canonicalisation paths); reconciler `reconcile(...)` bodies
-    added to the gate as their authors land them in Phase 2+.
+    rkyv canonicalisation paths). First-workload extension adds:
+    `overdrive-scheduler::schedule` (pure function — proptest +
+    mutants), `JobLifecycle::reconcile` body, action shim Action
+    match arms, ExecDriver cgroup operations.
+  - Workspace-feature self-test (`every_workspace_member_declares_integration_tests_feature`)
+    continues to pass — `overdrive-scheduler/Cargo.toml` declares the
+    `integration-tests = []` no-op feature per the workspace
+    convention.
+  - Linux-only `integration-tests`-gated suites: ExecDriver real-
+    cgroup tests (US-02), control-plane cgroup-isolation burst test
+    (US-04). Run on the Linux Tier 3 matrix per
+    `.claude/rules/testing.md`.
 - Quality-attribute thresholds to alert on:
   - DST wall-clock > 60s on main (K1)
   - Lint-gate false-positive rate > 0 (K2)
-  - OpenAPI schema drift between regeneration and checked-in copy (new)
-  - CLI round-trip (submit → describe) > 100 ms on localhost (Slice 5
-    first-output target)
+  - OpenAPI schema drift between regeneration and checked-in copy
+  - CLI round-trip (submit → describe) > 100 ms on localhost
+  - First-workload extensions:
+    - submit → Running convergence > 3 reconciler ticks (~300 ms)
+    - `cluster status` > 100 ms during 100% CPU workload burst
+    - reconciler-purity twin-invocation divergence count > 0
 - K4 (LocalStore cold start / RSS) remains a Phase 2+ commercial
   guardrail, not a Phase 1 CI gate (see
   `docs/feature/phase-1-foundation/design/upstream-changes.md`).
 - `rcgen`-based ephemeral CA is process-memory only; no CI secret
   management, no disk persistence in Phase 1.
+- **Linux-only requirements (first-workload)**: cgroup v2 unified
+  hierarchy + delegation of `cpu` and `memory` controllers to the
+  running UID. Bundled systemd unit (DEVOPS / packaging) should
+  include `Delegate=yes` so the production install path passes the
+  ADR-0028 pre-flight without operator intervention. Per ADR-0034
+  there is no in-binary escape hatch; macOS / Windows / non-
+  delegated Linux dev boxes use `cargo xtask lima run --` (the
+  canonical Lima wrapper documented in `.claude/rules/testing.md`).
 
 ---
 
@@ -898,3 +1475,6 @@ Rules to enforce:
 | 2026-04-23 | Phase 1 control-plane-core extension (§14–§23). Added ADR-0008 (REST + OpenAPI transport), ADR-0009 (OpenAPI via utoipa + CI gate), ADR-0010 (Phase 1 TLS bootstrap via R1–R5), ADR-0011 (aggregates / JobSpec collision), ADR-0012 (SimObservationStore for Phase 1 server), ADR-0013 (reconciler primitive + runtime), ADR-0014 (CLI HTTP client + shared types), ADR-0015 (HTTP error mapping). New crate `overdrive-control-plane`; new workspace deps `axum`, `utoipa`, `utoipa-axum`, `libsql`. C4 container diagram extended; new component diagram for `overdrive-control-plane` (Phase 1). — Morgan. |
 | 2026-04-23 | Remediation pass (Atlas peer review, APPROVED-WITH-NOTES): §1 replace "dataplane substrate" with "dataplane layer" per user-memory `feedback_no_substrate.md` (phrase was inherited from prior phase placeholder). No scope change. — Morgan. |
 | 2026-04-26 | §16 Phase 1 TLS bootstrap: `serve` is the sole cert-minting site (ADR-0010 *Amendment 2026-04-26*; #81 tracks Phase 5 reintroduction of `cluster init`). — Morgan. |
+| 2026-04-27 | Phase 1 first-workload extension (§24–§33). Added ADR-0021 (reconciler `State` shape via `AnyState` enum mirroring `AnyReconcilerView`), ADR-0022 (`AppState::driver: Arc<dyn Driver>` extension), ADR-0023 (action shim placement + 100 ms tick cadence + DST-driven ticks under simulation), ADR-0024 (dedicated `overdrive-scheduler` crate, class `core` — D4 user override of the originally-proposed module-inside-control-plane placement; dst-lint scope expansion), ADR-0025 (single-node startup wiring: hostname-derived NodeId + one-shot node_health row at boot), ADR-0026 (cgroup v2 direct cgroupfs writes, no `cgroups-rs` dep; `cpu.weight` + `memory.max` from `AllocationSpec::resources`), ADR-0027 (job-stop HTTP shape: `POST /v1/jobs/{id}:stop` + separate `IntentKey::for_job_stop` intent key), ADR-0028 (cgroup v2 delegation pre-flight: hard refusal + explicit `--allow-no-cgroups` dev flag). New crate `overdrive-scheduler` (class `core`, depends only on `overdrive-core`); `overdrive-host` gains `ProcessDriver`. C4 Container diagram extended (new scheduler container + ProcessDriver row + kernel cgroup external system); new C4 Component diagram for the convergence-loop closure (submit → reconciler → scheduler → action shim → ProcessDriver → ObservationStore). No assumptions changed from prior phases. — Morgan. |
+| 2026-04-27 | Post-ratification amendment: ADR-0029 (dedicated `overdrive-worker` crate, class `adapter-host`). User-proposed and ratified 2026-04-27 same day as the original first-workload DESIGN pass. The new crate hosts `ProcessDriver` (formerly slated for `overdrive-host`), workload-cgroup management (`overdrive.slice/workloads.slice/<alloc>.scope`; the workload half of ADR-0026), and the boot-time `node_health` row writer (relocated from control-plane bootstrap per ADR-0025 amendment). `overdrive-host` shrinks back to ADR-0016's original host-OS-primitives intent (`SystemClock`, `OsEntropy`, `TcpTransport`). Composition pattern: binary-composition — `overdrive-cli`'s `serve` subcommand hard-depends on both `overdrive-control-plane` and `overdrive-worker`; runtime `[node] role` config selects which subsystems boot. `overdrive-control-plane` does NOT depend on `overdrive-worker` — the action shim calls `Driver::*` against an injected `&dyn Driver`, impl plugged in by the binary at AppState construction. ADRs 0022, 0023, 0025, 0026 amended in-place (Amendment subsections at the end); structural shape unchanged in each. C4 Container diagram updated (new `overdrive-worker` container + binary-composition arrows from `overdrive-cli`); C4 Component (convergence-loop) diagram updated (ProcessDriver moves from `overdrive-host` boundary to `overdrive-worker` boundary; node_health writer added). Crate inventory grows from seven Rust crates to eight (excluding xtask). — Morgan. |
+| 2026-05-02 | ADR-0028 superseded in part by ADR-0034: the `--allow-no-cgroups` escape hatch is removed. Reasons: (a) structural leak in the `StopAllocation` action path (handle had `pid: None`, cgroup-kill branch gated off, `stop` returned `Ok(())` while the process kept running, producing `state: Terminated`-while-process-alive on the next reconciler tick); (b) redundancy — the canonical dev path is now `cargo xtask lima run --` (documented in `.claude/rules/testing.md`), which absorbs the dev-ergonomics objection ADR-0028 § Alternative A documented. Hard-refusal pre-flight from ADR-0028 stays. §31 rewritten; ADR index entry for 0028 marked Superseded; ADR-0034 added to index; Linux-only requirements bullet replaces flag reference with the Lima wrapper. Single-cut migration per greenfield convention — code/test deletions land in the crafter PR, not in this changelog entry. — Morgan. |

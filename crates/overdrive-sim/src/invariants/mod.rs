@@ -70,12 +70,43 @@ pub enum Invariant {
     /// evaluator body panics until DELIVER wires the noop-heartbeat
     /// reconciler into the harness.
     ReconcilerIsPure,
+    /// phase-1-control-plane-core / fix-eval-reconciler-discarded follow-up.
+    /// For any drained `Evaluation { reconciler: R, target: T }`, exactly
+    /// one reconciler — R — runs through the dispatch path against T per
+    /// tick. The DST-tier peer of the unit/acceptance pin at
+    /// `crates/overdrive-control-plane/tests/acceptance/runtime_convergence_loop.rs::eval_dispatch_runs_only_the_named_reconciler`
+    /// (commit `e6f5e5e`). Closes the §8 storm-proofing dispatch-routing
+    /// contract end-to-end. Sibling to `DuplicateEvaluationsCollapse`:
+    /// that invariant pins broker-side entry collapse, this one pins
+    /// dispatcher-side routing.
+    DispatchRoutingIsNameRestricted,
     /// `IntentStore::put(k, v)` followed by `IntentStore::get(k)`
     /// returns `Some(v)` byte-for-byte — no framing, no prefix, no
     /// transformation. Closes ADR-0020 §Enforcement: the structural-
     /// regression guard against re-introducing inline row encoding
     /// in `LocalIntentStore`.
     IntentStoreReturnsCallerBytes,
+    /// phase-1-first-workload (slice 3, US-03) — eventually invariant.
+    /// For every submitted Job, an `AllocStatusRow{state: Running}`
+    /// exists within budget N ticks. The harness drives the
+    /// convergence loop forward N ticks and inspects the
+    /// `ObservationStore` for at least one `Running` row per
+    /// submitted job. Lives in
+    /// `crates/overdrive-sim/src/invariants/evaluators.rs` per the
+    /// existing single-file evaluator pattern.
+    JobScheduledAfterSubmission,
+    /// phase-1-first-workload (slice 3, US-03) — eventually invariant.
+    /// `count(state == Running) == job.replicas` per submitted job.
+    /// Vacuous-pass at N=1 (a 1-replica job has at most one Running
+    /// row), but the evaluator still has to walk the rows and tally
+    /// per job to catch the failure mode where a Running row leaks
+    /// across jobs.
+    DesiredReplicaCountConverges,
+    /// phase-1-first-workload (slice 3, US-03) — always invariant.
+    /// Each `alloc_id` agrees on a single `node_id` across the
+    /// `alloc_status` snapshot. Two rows for the same `alloc_id`
+    /// pinned to different nodes is a double-scheduling violation.
+    NoDoubleScheduling,
 }
 
 impl Invariant {
@@ -95,7 +126,12 @@ impl Invariant {
         Self::DuplicateEvaluationsCollapse,
         Self::BrokerDrainOrderIsDeterministic,
         Self::ReconcilerIsPure,
+        Self::DispatchRoutingIsNameRestricted,
         Self::IntentStoreReturnsCallerBytes,
+        // SCAFFOLD: false — phase-1-first-workload slice 3 (US-03).
+        Self::JobScheduledAfterSubmission,
+        Self::DesiredReplicaCountConverges,
+        Self::NoDoubleScheduling,
     ];
 
     /// The canonical kebab-case spelling of this invariant, as a static
@@ -115,7 +151,12 @@ impl Invariant {
             Self::DuplicateEvaluationsCollapse => "duplicate-evaluations-collapse",
             Self::BrokerDrainOrderIsDeterministic => "broker-drain-order-is-deterministic",
             Self::ReconcilerIsPure => "reconciler-is-pure",
+            Self::DispatchRoutingIsNameRestricted => "dispatch-routing-is-name-restricted",
             Self::IntentStoreReturnsCallerBytes => "intent-store-returns-caller-bytes",
+            // phase-1-first-workload slice 3 (US-03).
+            Self::JobScheduledAfterSubmission => "job-scheduled-after-submission",
+            Self::DesiredReplicaCountConverges => "desired-replica-count-converges",
+            Self::NoDoubleScheduling => "no-double-scheduling",
         }
     }
 }

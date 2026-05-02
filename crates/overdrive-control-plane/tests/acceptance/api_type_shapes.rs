@@ -25,15 +25,15 @@ use overdrive_control_plane::api::{
     AllocStatusResponse, AllocStatusRowBody, BrokerCountersBody, ClusterStatus, ErrorBody,
     IdempotencyOutcome, JobDescription, NodeList, NodeRowBody, SubmitJobRequest, SubmitJobResponse,
 };
-use overdrive_core::aggregate::JobSpecInput;
+use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
 use utoipa::ToSchema;
 
 fn sample_job_spec() -> JobSpecInput {
     JobSpecInput {
         id: "payments".to_string(),
         replicas: 3,
-        cpu_milli: 500,
-        memory_bytes: 256 * 1024 * 1024,
+        resources: ResourcesInput { cpu_milli: 500, memory_bytes: 256 * 1024 * 1024 },
+        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     }
 }
 
@@ -174,23 +174,43 @@ fn broker_counters_body_round_trips_through_serde_json() {
 #[test]
 fn alloc_status_response_round_trips_with_empty_and_populated_rows() {
     // Phase 1 ships the empty-array case — US-03 AC pins this.
-    let empty = AllocStatusResponse { rows: Vec::new() };
+    let empty = AllocStatusResponse::default();
     let wire = serde_json::to_string(&empty).expect("serialise empty AllocStatusResponse");
-    assert_eq!(wire, r#"{"rows":[]}"#);
+    // Empty default — defaulted u32 fields render as 0; rows is [].
+    assert!(wire.contains(r#""rows":[]"#), "empty wire must include rows: []; got {wire}");
     let round_tripped: AllocStatusResponse =
         serde_json::from_str(&wire).expect("deserialise empty AllocStatusResponse");
     assert!(round_tripped.rows.is_empty());
 
-    // Step 03-03 populated `AllocStatusRowBody` with the minimal Phase 1
-    // shape — alloc_id, job_id, node_id, state. The round-trip still
-    // has to work — forward compatibility cuts in both directions.
+    // Slice 01 step 01-03 — the populated shape carries the typed
+    // `AllocStateWire` state, structured `resources`, optional
+    // `last_transition` and `error` fields, plus the envelope's
+    // identity + replica counts + restart_budget block.
     let populated = AllocStatusResponse {
+        job_id: Some("payments".to_owned()),
+        spec_digest: Some("0".repeat(64)),
+        replicas_desired: 1,
+        replicas_running: 1,
         rows: vec![AllocStatusRowBody {
             alloc_id: "alloc-1".to_owned(),
             job_id: "payments".to_owned(),
             node_id: "node-a".to_owned(),
-            state: "running".to_owned(),
+            state: overdrive_control_plane::api::AllocStateWire::Running,
+            reason: None,
+            resources: overdrive_control_plane::api::ResourcesBody {
+                cpu_milli: 500,
+                memory_bytes: 134_217_728,
+            },
+            started_at: None,
+            exit_code: None,
+            last_transition: None,
+            error: None,
         }],
+        restart_budget: Some(overdrive_control_plane::api::RestartBudget {
+            used: 0,
+            max: 5,
+            exhausted: false,
+        }),
     };
     let wire = serde_json::to_string(&populated).expect("serialise populated AllocStatusResponse");
     let round_tripped: AllocStatusResponse =
@@ -261,4 +281,12 @@ fn every_api_type_implements_utoipa_to_schema() {
     assert_to_schema::<NodeRowBody>();
     assert_to_schema::<ErrorBody>();
     assert_to_schema::<IdempotencyOutcome>();
+    // Step 04-02 — wire-shape input twins per ADR-0031 §8 / DWD-8.
+    // `JobSpecInput` already carried `ToSchema` (Step 02-03); the 3
+    // supporting types land here now that they are registered in
+    // `OverdriveApi`'s `components(schemas(...))`.
+    assert_to_schema::<JobSpecInput>();
+    assert_to_schema::<ResourcesInput>();
+    assert_to_schema::<ExecInput>();
+    assert_to_schema::<DriverInput>();
 }

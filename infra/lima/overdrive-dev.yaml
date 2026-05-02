@@ -202,7 +202,7 @@ provision:
       fi
       . "${HOME}/.cargo/env"
       rustup component add rustfmt clippy rust-src || true
-      cargo install --locked cargo-deny cargo-nextest || true
+      cargo install --locked cargo-deny cargo-nextest cargo-mutants || true
 
       # little-vm-helper (Tier 3 kernel-matrix harness).
       if ! command -v lvh >/dev/null 2>&1; then

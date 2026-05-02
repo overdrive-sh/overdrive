@@ -23,11 +23,8 @@ workspace = true
 
 [features]
 # Opt-in gate for xtask's integration-test binaries
-# (`tests/acceptance.rs` and `tests/dst_lint_self_test.rs`). The DST
-# canary suite spawns `cargo run -p xtask --features
-# overdrive-sim/canary-bug` as a subprocess with a fresh
-# `CARGO_TARGET_DIR` per test (full workspace recompile per run), and
-# the twin-run proptest boots a 3-host harness 32 times. Off by default
+# (`tests/acceptance.rs` and `tests/dst_lint_self_test.rs`). The
+# twin-run proptest boots a 3-host harness 32 times. Off by default
 # so `cargo nextest run --workspace` stays fast; enable with
 # `--features xtask/integration-tests` (or `-p xtask --features
 # integration-tests`) when you want to exercise them.

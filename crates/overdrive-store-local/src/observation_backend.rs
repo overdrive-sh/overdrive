@@ -58,6 +58,7 @@ use std::task::{Context, Poll};
 
 use async_trait::async_trait;
 use futures::Stream;
+use overdrive_core::id::AllocationId;
 use overdrive_core::traits::observation_store::{
     AllocStatusRow, NodeHealthRow, ObservationRow, ObservationStore, ObservationStoreError,
     ObservationSubscription,
@@ -209,6 +210,29 @@ impl ObservationStore for LocalObservationStore {
                 out.push(row);
             }
             Ok::<_, ObservationStoreError>(out)
+        })
+        .await
+        .map_err(map_to_io)?
+    }
+
+    async fn alloc_status_row(
+        &self,
+        alloc_id: &AllocationId,
+    ) -> Result<Option<AllocStatusRow>, ObservationStoreError> {
+        let inner = Arc::clone(&self.inner);
+        let key: Vec<u8> = alloc_id.as_str().as_bytes().to_vec();
+        tokio::task::spawn_blocking(move || {
+            let read = inner.db.begin_read().map_err(map_to_io)?;
+            let table = read.open_table(ALLOC_STATUS_TABLE).map_err(map_to_io)?;
+            let Some(value) = table.get(key.as_slice()).map_err(map_to_io)? else {
+                return Ok::<_, ObservationStoreError>(None);
+            };
+            let mut aligned = rkyv::util::AlignedVec::<8>::new();
+            aligned.extend_from_slice(value.value());
+            let row: AllocStatusRow =
+                rkyv::from_bytes::<AllocStatusRow, rkyv::rancor::Error>(&aligned)
+                    .map_err(map_to_io)?;
+            Ok(Some(row))
         })
         .await
         .map_err(map_to_io)?

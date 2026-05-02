@@ -36,7 +36,9 @@ use overdrive_control_plane::api::{
     ErrorBody, IdempotencyOutcome, JobDescription, SubmitJobRequest, SubmitJobResponse,
 };
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
-use overdrive_core::aggregate::{IntentKey, Job, JobSpecInput};
+use overdrive_core::aggregate::{
+    DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
+};
 use overdrive_core::id::JobId;
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_store_local::LocalIntentStore;
@@ -92,6 +94,13 @@ async fn spawn_server() -> (ServerHandle, SocketAddr, TempDir, String) {
         bind: "127.0.0.1:0".parse().expect("parse bind addr"),
         data_dir,
         operator_config_dir: operator_config_dir.clone(),
+        // `tick_cadence` + `clock` default per
+        // `fix-convergence-loop-not-spawned` Step 01-02. Per ADR-0034
+        // the in-binary cgroup escape hatch is gone; on macOS the
+        // pre-flight is a `#[cfg(target_os = "linux")]` no-op, and on
+        // Linux this test runs via `cargo xtask lima run --` against
+        // the bundled VM (root + delegated cgroups).
+        ..Default::default()
     };
     let handle = run_server(config).await.expect("run_server");
     let bound = handle.local_addr().await.expect("bound addr");
@@ -119,7 +128,12 @@ async fn read_intent_key_from_store(data_dir: &std::path::Path, key: &[u8]) -> O
 }
 
 fn spec_with_replicas(replicas: u32) -> JobSpecInput {
-    JobSpecInput { id: "payments".to_owned(), replicas, cpu_milli: 500, memory_bytes: 536_870_912 }
+    JobSpecInput {
+        id: "payments".to_owned(),
+        replicas,
+        resources: ResourcesInput { cpu_milli: 500, memory_bytes: 536_870_912 },
+        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+    }
 }
 
 // -----------------------------------------------------------------------

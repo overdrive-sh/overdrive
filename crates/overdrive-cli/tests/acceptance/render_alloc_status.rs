@@ -14,6 +14,7 @@
 //!       witness).
 
 use overdrive_cli::commands::alloc::AllocStatusOutput;
+use overdrive_control_plane::api::AllocStatusResponse;
 
 fn fixture_empty_state() -> AllocStatusOutput {
     AllocStatusOutput {
@@ -23,6 +24,7 @@ fn fixture_empty_state() -> AllocStatusOutput {
         empty_state_message: "0 allocations for job payments — the scheduler + driver land in \
              phase-1-first-workload"
             .to_string(),
+        snapshot: AllocStatusResponse::default(),
     }
 }
 
@@ -32,6 +34,7 @@ fn fixture_with_allocations() -> AllocStatusOutput {
         spec_digest: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string(),
         allocations_total: 3,
         empty_state_message: String::new(),
+        snapshot: AllocStatusResponse::default(),
     }
 }
 
@@ -111,6 +114,7 @@ fn render_alloc_status_suppresses_hint_when_allocations_exist_even_with_message_
         empty_state_message: "0 allocations for job payments — the scheduler + driver land in \
              phase-1-first-workload"
             .to_string(),
+        snapshot: AllocStatusResponse::default(),
     };
     let rendered = overdrive_cli::render::alloc_status(&out);
 
@@ -141,6 +145,7 @@ fn render_alloc_status_suppresses_hint_when_message_is_empty_even_with_zero_allo
         spec_digest: "cafebabe".repeat(8),
         allocations_total: 0,
         empty_state_message: String::new(),
+        snapshot: AllocStatusResponse::default(),
     };
     let rendered = overdrive_cli::render::alloc_status(&out);
 

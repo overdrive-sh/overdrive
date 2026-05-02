@@ -1,0 +1,73 @@
+{
+  "roadmap": {
+    "project_id": "fix-terminated-stream-closure",
+    "created_at": "2026-05-02T06:28:39Z",
+    "total_steps": 2,
+    "phases": 1
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Fix Terminated stream closure",
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "s_cp_11 regression test (RED)",
+          "description": "Write acceptance test s_cp_11_stop_while_streaming_closes_stream_with_stopped_result in crates/overdrive-control-plane/tests/acceptance/streaming_submit.rs. The test submits a job on the NDJSON streaming lane, emits a Running transition to keep the stream open, then emits a Terminated transition with reason Stopped { by: Reconciler }. It asserts the stream closes via a converged_stopped line within 5 seconds — not via the 60s cap timer — and that no converged_failed/timeout line appears. This test must be RED before step 01-02 lands.",
+          "criteria": [
+            "Stream stays open after LifecycleEvent { to: Running } is emitted",
+            "Stream closes within 5 seconds after LifecycleEvent { to: Terminated, reason: Stopped { by: Reconciler } } is emitted",
+            "The final NDJSON line has kind == \"converged_stopped\"",
+            "No line with kind == \"converged_failed\" appears in the stream",
+            "No line with terminal_reason.kind == \"timeout\" appears in the stream"
+          ],
+          "time_estimate_minutes": 20,
+          "dependencies": [],
+          "files_to_modify": [
+            "crates/overdrive-control-plane/tests/acceptance/streaming_submit.rs"
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/streaming_submit.rs",
+          "scenario_name": "s_cp_11_stop_while_streaming_closes_stream_with_stopped_result"
+        },
+        {
+          "id": "01-02",
+          "name": "Add ConvergedStopped and handle Terminated in check_terminal + lagged_recover (GREEN)",
+          "description": "Make s_cp_11 pass. (1) Add ConvergedStopped { alloc_id: Option<String>, by: StoppedBy } as a new top-level variant to SubmitEvent in api.rs alongside ConvergedRunning and ConvergedFailed; wire serde tag to \"converged_stopped\"; register it in the OpenAPI components block. (2) In streaming.rs check_terminal add an arm for AllocStateWire::Terminated that returns Some(SubmitEvent::ConvergedStopped { ... }) carrying the alloc_id and the StoppedBy extracted from the event reason (defaulting to StoppedBy::Reconciler). (3) In streaming.rs lagged_recover add an arm for AllocState::Terminated that returns Some(SubmitEvent::ConvergedStopped { ... }). (4) Update the streaming.rs module docstring to list ConvergedStopped as the third terminal condition alongside ConvergedRunning and ConvergedFailed.",
+          "criteria": [
+            "SubmitEvent gains a ConvergedStopped variant with fields alloc_id: Option<String> and by: StoppedBy; it serialises as kind == \"converged_stopped\"",
+            "check_terminal returns Some(ConvergedStopped) when event.to == AllocStateWire::Terminated",
+            "lagged_recover returns Some(ConvergedStopped) when the latest obs row state == AllocState::Terminated",
+            "s_cp_11 passes: stream closes with converged_stopped within 5s of the Terminated broadcast event",
+            "s_cp_01, s_cp_03, s_cp_06, s_cp_07, s_lt_01 continue to pass without modification",
+            "streaming.rs module docstring lists ConvergedStopped as a third terminal condition"
+          ],
+          "time_estimate_minutes": 30,
+          "dependencies": ["01-01"],
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/api.rs",
+            "crates/overdrive-control-plane/src/streaming.rs"
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/streaming_submit.rs",
+          "scenario_name": "s_cp_11_stop_while_streaming_closes_stream_with_stopped_result"
+        }
+      ]
+    }
+  ],
+  "implementation_scope": {
+    "source_directories": [
+      "crates/overdrive-control-plane/src/"
+    ],
+    "test_directories": [
+      "crates/overdrive-control-plane/tests/acceptance/"
+    ],
+    "excluded_patterns": [
+      "__init__.py",
+      "__pycache__/**"
+    ]
+  },
+  "validation": {
+    "status": "pending",
+    "reviewer": "TODO",
+    "approved_at": "TODO"
+  }
+}

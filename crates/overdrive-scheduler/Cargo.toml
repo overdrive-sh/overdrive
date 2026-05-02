@@ -1,0 +1,41 @@
+# `overdrive-scheduler` — pure-function placement scheduler per ADR-0024
+# (D4 OVERRIDE). Class `core` so `dst-lint` mechanically enforces the
+# BTreeMap-only iteration discipline + banned-API contract. Depends only
+# on `overdrive-core` + `thiserror`; `proptest` is dev-only.
+#
+# SCAFFOLD: true — phase-1-first-workload DISTILL wave landed the
+# crate with panic-bodied `schedule` per `.claude/rules/testing.md`
+# § "RED scaffolds and intentionally-failing commits". The DELIVER
+# crafter implements the body.
+
+[package]
+name         = "overdrive-scheduler"
+version      = "0.0.0"
+description  = "Pure-function placement scheduler. First-fit Phase 1; deterministic by construction."
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+publish                = false
+
+[package.metadata.overdrive]
+crate_class = "core"
+
+[features]
+# Workspace-wide convention. Every member declares this feature so
+# `cargo {check,test,mutants} --features integration-tests` resolves
+# uniformly under per-package scoping. This crate has no integration-
+# shaped tests of its own — the declaration is a deliberate no-op.
+# See `.claude/rules/testing.md` § Workspace convention.
+integration-tests = []
+
+[dependencies]
+overdrive-core.workspace = true
+thiserror.workspace      = true
+
+[dev-dependencies]
+proptest.workspace = true
+
+[lints]
+workspace = true

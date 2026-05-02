@@ -45,6 +45,8 @@ fn sample_alloc_status() -> AllocStatusRow {
         node_id: peer_node(),
         state: AllocState::Running,
         updated_at: LogicalTimestamp { counter: 1, writer: peer_node() },
+        reason: None,
+        detail: None,
     }
 }
 

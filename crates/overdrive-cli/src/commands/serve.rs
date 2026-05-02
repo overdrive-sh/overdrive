@@ -94,10 +94,18 @@ impl ServeHandle {
 pub async fn run(args: ServeArgs) -> Result<ServeHandle, CliError> {
     let requested_endpoint = format!("https://{}", args.bind);
 
+    // `..Default::default()` populates `tick_cadence`
+    // (`reconciler_runtime::DEFAULT_TICK_CADENCE`, 100ms) and `clock`
+    // (`Arc::new(SystemClock)` from `overdrive-host`). Per CLAUDE.md
+    // "Repository structure" `overdrive-host` is the only crate
+    // permitted to instantiate `SystemClock`, so the binding lives in
+    // the `Default` impl of `ServerConfig` rather than this call site.
+    // Per `fix-convergence-loop-not-spawned` Step 01-02 (RCA Option B2).
     let config = ServerConfig {
         bind: args.bind,
         data_dir: args.data_dir,
         operator_config_dir: args.config_dir,
+        ..Default::default()
     };
     let inner = run_server(config).await.map_err(|e| CliError::Transport {
         endpoint: requested_endpoint.clone(),

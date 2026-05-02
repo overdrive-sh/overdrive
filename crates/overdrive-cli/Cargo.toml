@@ -40,7 +40,17 @@ clap.workspace                     = true
 tokio.workspace                    = true
 tracing.workspace                  = true
 tracing-subscriber.workspace       = true
-reqwest.workspace                  = true
+# Slice 02 step 02-04: `submit_streaming` calls `Response::bytes_stream()`
+# which requires the `stream` feature. Workspace `reqwest` has only
+# `rustls-tls`, `json`, `http2` enabled by default — `stream` is added
+# here as an additive feature on top of the workspace base.
+reqwest                            = { workspace = true, features = ["stream"] }
+# Slice 02 step 02-04 — `submit_streaming` consumes a streaming NDJSON
+# response via `reqwest::Response::bytes_stream()`. `futures::StreamExt`
+# drives `.next().await` on the stream; `bytes::BytesMut` accumulates
+# partial chunks across `recv` boundaries before splitting on `b'\n'`.
+futures.workspace                  = true
+bytes.workspace                    = true
 # Used in `http_client::stringify_reqwest_error` to walk a
 # `reqwest::Error` source chain looking for
 # `rustls::Error::InvalidCertificate(...)` so the operator-facing
@@ -73,6 +83,13 @@ base64.workspace             = true
 # rkyv-archived Job bytes, per ADR-0002) so the test can assert
 # byte-identity with the server's response.
 rkyv.workspace               = true
+# `overdrive-store-local` is used ONLY by the walking-skeleton test
+# to back-door read the `LocalIntentStore` after `serve::run` shuts
+# down. The DISTILL review's BLOCK verdict required this back-door
+# read so the WS proves end-to-end persistence (not just the
+# client-visible `spec_digest`). The pattern mirrors
+# `crates/overdrive-control-plane/tests/acceptance/submit_job_idempotency.rs`.
+overdrive-store-local.path   = "../overdrive-store-local"
 # `serial_test` serialises tests that mutate process-wide environment
 # variables. Rust edition 2024 + `unsafe_op_in_unsafe_fn = deny` makes
 # `std::env::set_var` / `std::env::remove_var` explicit unsafe, but

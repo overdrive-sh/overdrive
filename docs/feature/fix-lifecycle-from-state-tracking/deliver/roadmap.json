@@ -1,0 +1,91 @@
+{
+  "roadmap": {
+    "project_id": "fix-lifecycle-from-state-tracking",
+    "created_at": "2026-05-02",
+    "total_steps": 2,
+    "phases": 1,
+    "feature_type": "bug-fix",
+    "summary": "LifecycleTransition.from always equals .to in NDJSON streaming output. build_lifecycle_event sets from: to_wire (the new state) because dispatch_single never reads the prior observation row before writing. Fix: add prior_state param to build_lifecycle_event; read prior row in all three dispatch arms; regression test that flows through dispatch() directly.",
+    "validation": {
+      "status": "approved",
+      "validated_by": "rca-nw-troubleshooter",
+      "validated_at": "2026-05-02"
+    }
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Bug fix — prior-state tracking in action shim",
+      "default_agent": "nw-software-crafter",
+      "default_deps_strategy": "sequential",
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "Regression test: dispatch() produces from != to",
+          "agent": "nw-software-crafter",
+          "deps": "sequential",
+          "criteria": [
+            "New test s_lt_01_lifecycle_transition_from_reflects_prior_alloc_state added to streaming_submit.rs.",
+            "Test calls action_shim::dispatch() directly — NOT emit_lifecycle(). This is the path that exercises build_lifecycle_event.",
+            "Test pre-seeds a Running AllocStatusRow for the alloc via write_row() before calling dispatch.",
+            "Test subscribes to state.lifecycle_events BEFORE calling dispatch, so the event is not missed.",
+            "Test dispatches StopAllocation { alloc_id } via dispatch(vec![Action::StopAllocation { alloc_id }], driver, obs, bus, tick).",
+            "Test asserts event.from == AllocStateWire::Running (the prior seeded state).",
+            "Test asserts event.to == AllocStateWire::Terminated (the new state after stop).",
+            "Test asserts event.from != event.to (the invariant the bug violates).",
+            "Test FAILS against current code — both from and to will be Terminated because build_lifecycle_event sets from: to_wire.",
+            "RED-phase commit uses --no-verify per testing.md RED scaffolds section; cite this step in commit body."
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/streaming_submit.rs",
+          "scenario_name": "s_lt_01_lifecycle_transition_from_reflects_prior_alloc_state",
+          "files_to_modify": [
+            "crates/overdrive-control-plane/tests/acceptance/streaming_submit.rs"
+          ],
+          "implementation_notes": [
+            "Import: use overdrive_control_plane::action_shim::dispatch; — it is pub.",
+            "Import: use overdrive_core::reconciler::{Action, TickContext};",
+            "TickContext construction — look at TickContext's fields in overdrive_core::reconciler; construct a minimal one with tick: 0 and now: std::time::Instant::now().",
+            "The StopAllocation variant is the cleanest choice: it takes only alloc_id (no AllocationSpec), prior_row is already fetched in dispatch_single, and the from=Running → to=Terminated transition is unambiguous.",
+            "subscribe() must be called BEFORE dispatch(); otherwise the broadcast event is missed.",
+            "Use tokio::sync::broadcast::Sender::subscribe() on state.lifecycle_events, then call recv() on the returned Receiver after dispatch.",
+            "Wrap the recv() in tokio::time::timeout(Duration::from_secs(1), ...) so a missed event fails fast.",
+            "Do NOT modify the existing tests or helpers — add only the new test function.",
+            "This test lives in the default (non-integration-gated) lane — it is in-process with SimDriver and SimObservationStore, no real I/O."
+          ]
+        },
+        {
+          "id": "01-02",
+          "name": "Fix: pass prior_state through build_lifecycle_event",
+          "agent": "nw-software-crafter",
+          "deps": "sequential",
+          "criteria": [
+            "build_lifecycle_event signature changed to fn build_lifecycle_event(row: &AllocStatusRow, prior_state: AllocStateWire, source: TransitionSource) -> LifecycleEvent.",
+            "build_lifecycle_event body uses prior_state as the from: field instead of to_wire.",
+            "FIXME(slice-02-03) comment removed entirely. The doc comment on build_lifecycle_event updated to describe that from carries the actual prior state.",
+            "StartAllocation arm: calls find_prior_alloc_row(obs, &alloc_id).await? before obs.write(). Extracts prior_state = result.map(|r| r.state.into()).unwrap_or(AllocStateWire::Pending). Passes prior_state to build_lifecycle_event.",
+            "RestartAllocation arm: extracts let prior_state: AllocStateWire = prior_row.state.into(); before prior_row moves into build_alloc_status_row. Passes prior_state to build_lifecycle_event.",
+            "StopAllocation arm: extracts let prior_state: AllocStateWire = prior_row.state.into(); before prior_row moves into build_alloc_status_row. Passes prior_state to build_lifecycle_event.",
+            "Regression test s_lt_01_lifecycle_transition_from_reflects_prior_alloc_state from step 01-01 now PASSES.",
+            "Full workspace tests pass (cargo nextest run --workspace on macOS --no-run; Lima run for integration-gated tests).",
+            "No changes to streaming.rs — the streaming consumer is correct and requires no modification.",
+            "Mutation kill rate at least eighty percent on diff scope for action_shim.rs."
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/streaming_submit.rs",
+          "scenario_name": "s_lt_01_lifecycle_transition_from_reflects_prior_alloc_state",
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/action_shim.rs"
+          ],
+          "implementation_notes": [
+            "AllocState (the obs-store enum) is distinct from AllocStateWire (the wire enum). Use .into() to convert — the From impl already exists; verify by reading the existing code in dispatch_single where to_wire: AllocStateWire = row.state.into().",
+            "find_prior_alloc_row is already defined in the same file and used by RestartAllocation and StopAllocation. Reuse it exactly as the other arms do.",
+            "For StartAllocation the alloc may not exist in obs yet (first start). None → AllocStateWire::Pending is the correct sentinel: the allocation conceptually starts in Pending before being started, matching how existing tests model it (make_lifecycle_event passes from: AllocStateWire::Pending).",
+            "RestartAllocation already reads prior_row early in the arm. Extract prior_state BEFORE passing prior_row.job_id / prior_row.node_id into build_alloc_status_row to avoid a partial-move compile error.",
+            "StopAllocation already reads prior_row. Same extraction pattern as RestartAllocation.",
+            "Conventional commit: fix(control-plane): carry prior alloc state in LifecycleEvent.from",
+            "Mutation gate: cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-control-plane --file crates/overdrive-control-plane/src/action_shim.rs"
+          ]
+        }
+      ]
+    }
+  ]
+}

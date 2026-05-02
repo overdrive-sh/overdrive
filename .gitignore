@@ -33,3 +33,5 @@ lefthook-local.yml
 
 # Bun / TS tooling for scripts/
 /node_modules/
+
+.claude/scheduled_tasks.lock

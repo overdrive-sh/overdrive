@@ -81,6 +81,8 @@ fn row(
         node_id: writer.clone(),
         state,
         updated_at: LogicalTimestamp { counter, writer: writer.clone() },
+        reason: None,
+        detail: None,
     }
 }
 

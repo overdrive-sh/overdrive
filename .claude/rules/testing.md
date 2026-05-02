@@ -203,6 +203,27 @@ Do not let a slow test sit in the default lane "until it gets fixed."
 > examples. Nothing else. If you think you need `cargo test` elsewhere,
 > you are wrong — reach for `cargo nextest run` instead.
 
+> **On macOS, every `cargo nextest run` must go through Lima.**
+>
+> `cargo nextest run` is **blocked on macOS** by a pre-tool hook
+> (`.claude/hooks/block-nextest-on-macos.ts`) unless it is already
+> wrapped in `cargo xtask lima run --` or uses `--no-run`.
+>
+> **Rewrite your command before submitting it on macOS:**
+>
+> | ❌ don't | ✅ do |
+> |---|---|
+> | `cargo nextest run` | `cargo xtask lima run -- cargo nextest run` |
+> | `cargo nextest run -p CRATE` | `cargo xtask lima run -- cargo nextest run -p CRATE` |
+> | `cargo nextest run -E 'test(X)'` | `cargo xtask lima run -- cargo nextest run -E 'test(X)'` |
+> | `cargo nextest run --workspace` | `cargo xtask lima run -- cargo nextest run --workspace` |
+>
+> **Allowed on macOS without Lima:**
+> - `cargo nextest run ... --no-run` — compile-check only; no Linux surface involved.
+> - `cargo xtask lima run -- cargo nextest run ...` — already routed.
+>
+> See § "Running tests on macOS — Lima VM" below for the rationale.
+
 **Run test commands directly. Do not background them.**
 `cargo nextest run`, `cargo test --doc`, `cargo xtask dst`,
 `cargo xtask bpf-unit`, `cargo xtask integration-test`, and every other
@@ -433,6 +454,92 @@ async fn honours_home_env_var_fallback() {
 
 ---
 
+## Leaked workload cgroups across runs (Lima / Linux integration tests)
+
+Integration tests that exercise `ExecDriver` against real
+`/sys/fs/cgroup` (anything under `tests/integration/job_lifecycle/`
+running on Linux through `cargo xtask lima run --`) create
+per-allocation scope directories under
+`/sys/fs/cgroup/overdrive.slice/workloads.slice/alloc-<job>-<n>.scope`.
+
+When a test crashes mid-run, gets cancelled by nextest's slow-test
+killer, gets SIGKILL'd by the Bash tool's wall-clock cap, or is
+interrupted by the user, the `AllocCleanup` `Drop` guard does NOT
+run — the cgroup scope and any workload PIDs inside it stay
+behind in the Lima VM until something explicitly removes them.
+
+### Why this matters
+
+`ExecDriver::start` `mkdir`s a fresh scope directory per allocation.
+When a stale `alloc-<job>-0.scope` already exists from a prior run,
+the next test in that file (Phase 1 `submit_to_running`,
+`crash_recovery`, `stop_to_terminated`) hits `EEXIST` on the mkdir
+and fails — typically as a fast assertion failure ("alloc must reach
+Running before crash"), but sometimes as a 120 s timeout when the
+already-running stale `/bin/sleep 3600` still owns the PID the test
+expects to control.
+
+The failure looks like a regression in the test under audit; it
+isn't. It's leftover state from whatever ran (or crashed) before.
+
+### Detection — the canonical one-liner
+
+```bash
+cargo xtask lima run -- bash -lc \
+  'pgrep -af "/bin/sleep" | grep -v sudo; echo ---; \
+   ls /sys/fs/cgroup/overdrive.slice/workloads.slice/ 2>/dev/null \
+   | grep "^alloc-"'
+```
+
+Output `alloc-recovery-0.scope`, `alloc-stopper-0.scope`,
+`alloc-payments-0.scope`, `alloc-exitobs-0.scope`, etc. is the
+smoking gun. A live `/bin/sleep 3600` matching one of those
+allocations is the same signal — the workload survived the parent
+test process and is still consuming a slot in its stale scope.
+
+### Cleanup — before re-running the affected suite
+
+```bash
+cargo xtask lima run -- bash -lc '
+  cd /sys/fs/cgroup/overdrive.slice/workloads.slice 2>/dev/null && \
+  for d in alloc-*.scope; do
+    [ -d "$d" ] && (echo 1 > "$d/cgroup.kill" 2>/dev/null; \
+                    rmdir "$d" 2>/dev/null);
+  done
+  pgrep -af "/bin/sleep 3600" | grep -v sudo | \
+    awk "{print \$1}" | xargs -r kill -KILL
+'
+```
+
+`echo 1 > <scope>/cgroup.kill` is the cgroup v2 mass-kill primitive
+— it sends SIGKILL to every PID currently in the scope. The
+subsequent `rmdir` reclaims the directory once the scope is empty.
+The `pgrep | xargs kill` line catches any `/bin/sleep` that was
+already reparented out of the cgroup before the kill landed.
+
+### Prevention — what `AllocCleanup` already does, when it runs
+
+`tests/integration/job_lifecycle/cleanup.rs::AllocCleanup` is a
+`Drop` guard. As long as the test process exits via the normal
+unwind path (panic OR clean return), the guard fires `cgroup.kill`
+on every scope the test created. That handles the common case.
+
+The guard does NOT fire when the test process itself dies
+abnormally — SIGKILL from nextest's `slow-timeout` (default 60 s
+test, 120 s leak), SIGKILL from the Bash tool's wall-clock cap,
+SIGINT from the user. After any such event, expect leftover state.
+
+### Don't paper over it
+
+If a previously-passing integration test starts failing or timing
+out, **run the detection one-liner before assuming the recent
+changes broke the test**. The fix is to clean the VM, not to add
+defensive `mkdir -p`-style retries to `ExecDriver` (production must
+NOT silently reuse a pre-existing scope — that would cross
+allocation boundaries).
+
+---
+
 ## Tier 1 — Deterministic Simulation Testing
 
 ### Nondeterminism must be injectable
@@ -646,6 +753,24 @@ Mutation testing goes through the `cargo xtask mutants` wrapper, not
 cargo-mutants expects, pins `--test-tool=nextest` to match the project
 runner, writes `target/xtask/mutants-summary.json`, and implements the
 kill-rate gate. Invoking `cargo mutants` directly skips all of that.
+
+**On macOS: every mutation invocation that includes `--features
+integration-tests` MUST be prefixed with `cargo xtask lima run --`** —
+same Lima requirement that governs `cargo nextest run --features
+integration-tests` (see § "Running tests on macOS — Lima VM" below).
+The integration-tests-gated test surface is
+`#[cfg(target_os = "linux")]`; on macOS those tests compile (with
+`--no-run`) but the runtime surface is unreachable, so a mutation run
+that supposedly uses these tests has a degraded signal that catches
+almost nothing — kill rate becomes meaningless. Every example in this
+section that shows a `cargo xtask mutants ... --features
+integration-tests` invocation runs on macOS as `cargo xtask lima run
+-- cargo xtask mutants ... --features integration-tests`. Mutation
+runs without `--features integration-tests` (rare; the
+"deliberately measuring kill rate without acceptance tests"
+escape-hatch example below) MAY run directly on macOS — Lima is only
+required when integration tests are participating. CI runs on Linux
+and does not need the prefix.
 
 Two modes, mutually exclusive (clap rejects both-or-neither):
 
@@ -922,6 +1047,107 @@ kernel requires an ADR.
   <KERNEL>...` — reuses aya's existing flow, do not fork.
 - GitHub Actions runners work with `--qemu-disable-kvm`; self-hosted
   KVM-capable runners optional for latency budget.
+
+### Running tests on macOS — Lima VM
+
+`cargo nextest run` does not work on macOS. ProcessDriver, control-plane
+cgroup management, eBPF programs, and every `#[cfg(target_os = "linux")]`
+test surface require a real Linux kernel plus cgroup v2. macOS-side
+`--no-run` catches type and wiring errors but not runtime or permission
+issues — every shipped test must be exercised on Linux at least once before
+merge, and the Lima VM is the canonical inner-loop path.
+
+A pre-tool hook (`.claude/hooks/block-nextest-on-macos.ts`) enforces this
+mechanically: bare `cargo nextest run` on macOS is blocked at the
+tool-call boundary. The hook allows only `cargo xtask lima run -- cargo
+nextest run ...` and the `--no-run` compile-check form.
+
+**Where the VM is defined.** `infra/lima/overdrive-dev.yaml` describes
+the project's standard dev VM (Ubuntu 24.04, kernel 6.8, cgroup v2,
+KVM, full eBPF + BPF LSM toolchain, `cargo-nextest`, `cargo-mutants`).
+The repo is virtiofs-mounted into the guest at the same path; no rsync,
+no `git clone` inside the VM.
+
+**Default invocation:**
+
+```bash
+limactl shell overdrive bash -lc \
+  'cargo nextest run --workspace --features integration-tests'
+```
+
+The path inherits from `pwd` on the host because the working tree is
+mounted at the same absolute path in the guest. `--features
+integration-tests` is mandatory; without it, the Linux-gated tests are
+skipped and the run signal is meaningless.
+
+**Cgroup writes need root or delegation.** Tests that exercise the
+workload-cgroup path (`overdrive-worker::ProcessDriver`, the
+JobLifecycle convergence loop) `mkdir`
+`/sys/fs/cgroup/overdrive.slice/...`. The Lima default user is
+unprivileged and lacks delegation for that subtree, so the production
+path returns `EACCES` and Pending allocs never reach Running. The
+canonical inner-loop shape is:
+
+- **`cargo xtask lima run` (canonical, 1:1 with CI)** — the wrapper
+  defaults to running the test process as root inside the VM, the same
+  permission surface CI's LVH harness uses. It re-injects `PATH` and
+  `CARGO_TARGET_DIR` so cargo and its target dir continue to resolve
+  under the `lima` user's home (where rustup is installed):
+
+  ```bash
+  cargo xtask lima run -- cargo nextest run --workspace --features integration-tests
+  ```
+
+  Equivalent under the hood to:
+
+  ```bash
+  limactl shell overdrive bash -lc \
+    'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
+     cargo nextest run --workspace --features integration-tests'
+  ```
+
+  Pass `--no-sudo` (`cargo xtask lima run --no-sudo -- <cmd>`) to run
+  as the unprivileged `lima` user — for non-test commands or when you
+  specifically want to observe the EACCES surface without privileged
+  delegation. `cargo xtask lima shell` still drops you in as the
+  `lima` user; use `sudo -i` inside if you want an interactive root
+  shell.
+
+There is no in-binary escape hatch. ADR-0034 removed the
+`--allow-no-cgroups` flag (was structurally broken — leaked workloads
+in the StopAllocation path — and rendered redundant by the Lima
+wrapper above). Tests that exercise the `state: Terminated` shape
+against a real workload run via `cargo xtask lima run --`; tests that
+want to assert on the control-plane convergence shape with no real
+process at all use `SimDriver` per the standard DST convention.
+
+Do not paper over `EACCES` failures by removing the cgroup writes — the
+production code path IS the cgroup writes.
+
+**The `--no-run` macOS gate is necessary, not sufficient.** Every step's
+quality gate includes `cargo nextest run --workspace --features
+integration-tests --no-run` on macOS to catch compile errors before
+shipping. That gate cannot detect convergence-loop bugs, race
+conditions, missing match arms behind `#[cfg(target_os = "linux")]`,
+permission shape issues, or any runtime invariant. A green `--no-run`
+on macOS plus a green Lima run is the honest signal; either alone is
+not.
+
+**Tier 3 / Tier 4 stays on `cargo xtask integration-test vm` and
+`cargo xtask xdp-perf`.** The Lima VM is the macOS dev convenience for
+running the per-step integration suite during the inner loop. The
+kernel-matrix tier 3 harness still runs on CI via LVH; do not collapse
+the two.
+
+**Mutation testing falls under the same rule.** Any `cargo xtask
+mutants` invocation that includes `--features integration-tests` runs
+through `cargo xtask lima run --` on macOS — see § "Mutation testing
+(cargo-mutants)" → "Usage" for the full rationale. Without the prefix
+the mutation run uses a degraded test signal (the `#[cfg(target_os =
+"linux")]` surface is unreachable) and the kill-rate gate becomes
+meaningless. The check is mechanical: does this command pass
+`--features integration-tests`? If yes, prefix with `cargo xtask lima
+run --`.
 
 ### Assertion rules
 

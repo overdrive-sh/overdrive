@@ -40,6 +40,14 @@ fn main() -> Result<()> {
     runtime.block_on(run(cli))
 }
 
+// The `run` function is a clap-style dispatch table: one match arm per
+// subcommand, each arm dispatching to a library handler and rendering
+// its typed output. The arms are intentionally inlined rather than
+// extracted into per-command helpers — splitting them would obscure the
+// 1-1 correspondence between argv shape and handler call. Slice 03 step
+// 03-01 added the `--detach` branch to `Job::Submit`, taking the body
+// past the 100-line clippy default.
+#[allow(clippy::too_many_lines)]
 async fn run(cli: Cli) -> Result<()> {
     use overdrive_cli::cli::{AllocCommand, ClusterCommand, Command, JobCommand, NodeCommand};
 
@@ -51,20 +59,92 @@ async fn run(cli: Cli) -> Result<()> {
             print!("{}", overdrive_cli::render::cluster_status(&out));
             Ok(())
         }
-        Command::Job(JobCommand::Submit { spec }) => {
+        Command::Job(JobCommand::Submit { spec, detach }) => {
+            // Slice 03 step 03-02 — IsTerminal auto-detach lane
+            // selection per architecture.md §6 + DESIGN [D5]:
+            //
+            //   stream = !detach && stdout_is_terminal
+            //
+            // | --detach | TTY?  | Accept                 | Lane     |
+            // |----------|-------|------------------------|----------|
+            // | set      | any   | application/json      | Detached |
+            // | unset    | true  | application/x-ndjson  | Streaming|
+            // | unset    | false | application/json      | Detached |
+            //
+            // Reference class: `docker run`, `nomad job run`, every
+            // Unix-tradition CLI tool. The `RealStdoutTerminal` probe
+            // is the production source of the IsTerminal bit — it
+            // defers to `std::io::IsTerminal::is_terminal(&stdout())`.
+            // The `should_stream` pure function is the SSOT for the
+            // dispatch decision; the Tier-1 acceptance test at
+            // `tests/acceptance/submit_pipe_autodetect.rs` exercises
+            // it directly with fake probes.
             let config_path = default_config_path();
             let args = overdrive_cli::commands::job::SubmitArgs { spec, config_path };
-            match overdrive_cli::commands::job::submit(args).await {
+            let probe = overdrive_cli::commands::job::RealStdoutTerminal;
+            let stream = overdrive_cli::commands::job::should_stream(
+                detach,
+                overdrive_cli::commands::job::StdoutTerminalProbe::is_terminal(&probe),
+            );
+            if stream {
+                // Streaming-default lane — slice 02 step 02-04 shape.
+                match overdrive_cli::commands::job::submit_streaming(args).await {
+                    Ok(out) => {
+                        // The streaming summary already includes the
+                        // operator-facing block — print it verbatim.
+                        print!("{}", out.summary);
+                        if out.exit_code == 0 {
+                            Ok(())
+                        } else {
+                            // Convergence failed — exit with the typed
+                            // code (1 for `ConvergedFailed`). Emit a
+                            // discrete exit so the `eyre::Report` path
+                            // does not collapse 1 and 2 into the same
+                            // shell signal.
+                            std::process::exit(out.exit_code);
+                        }
+                    }
+                    Err(err) => {
+                        // Render through the CLI-side error formatter
+                        // so operators see actionable next steps on
+                        // `CliError::Transport`, not the raw Display form.
+                        eprint!("{}", overdrive_cli::render::cli_error(&err));
+                        let code = overdrive_cli::render::cli_error_to_exit_code(&err);
+                        std::process::exit(code);
+                    }
+                }
+            } else {
+                // Detached / non-TTY lane — JSON ack only, no NDJSON
+                // consumer engaged. Fires when `--detach` is set OR
+                // stdout is redirected (pipe / file / non-TTY).
+                match overdrive_cli::commands::job::submit(args).await {
+                    Ok(out) => {
+                        print!("{}", overdrive_cli::render::job_submit_accepted(&out));
+                        // Exit code 0 on `Inserted`/`Unchanged` per the
+                        // criteria. The renderer prints the typed
+                        // outcome verbatim so operators see which
+                        // branch fired.
+                        Ok(())
+                    }
+                    Err(err) => {
+                        eprint!("{}", overdrive_cli::render::cli_error(&err));
+                        let code = overdrive_cli::render::cli_error_to_exit_code(&err);
+                        std::process::exit(code);
+                    }
+                }
+            }
+        }
+        Command::Job(JobCommand::Stop { id }) => {
+            let config_path = default_config_path();
+            let args = overdrive_cli::commands::job::StopArgs { id, config_path };
+            match overdrive_cli::commands::job::stop(args).await {
                 Ok(out) => {
-                    print!("{}", overdrive_cli::render::job_submit_accepted(&out));
+                    print!("{}", overdrive_cli::render::job_stop_accepted(&out));
                     Ok(())
                 }
                 Err(err) => {
-                    // Render through the CLI-side error formatter so
-                    // operators see actionable next steps on
-                    // `CliError::Transport`, not the raw Display form.
                     eprint!("{}", overdrive_cli::render::cli_error(&err));
-                    Err(color_eyre::eyre::eyre!("job submit failed"))
+                    Err(color_eyre::eyre::eyre!("job stop failed"))
                 }
             }
         }

@@ -30,11 +30,13 @@ use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_control_plane::{AppState, noop_heartbeat};
 use overdrive_core::id::NodeId;
 use overdrive_core::reconciler::{
-    Action, AnyReconcilerView, ReconcilerName, State as ReconState, TickContext,
+    Action, AnyReconcilerView, AnyState, ReconcilerName, TickContext,
 };
+use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::dataplane::SimDataplane;
+use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::entropy::SimEntropy;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::transport::SimTransport;
@@ -71,7 +73,8 @@ fn build_app_state(tmp: &TempDir) -> AppState {
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("NodeId"), 0));
-    AppState { store, obs, runtime: Arc::new(runtime) }
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    AppState::new(store, obs, Arc::new(runtime), driver)
 }
 
 // ---------------------------------------------------------------------------
@@ -160,8 +163,11 @@ fn noop_heartbeat_factory_produces_reconciler_returning_noop() {
     let r = noop_heartbeat();
     assert_eq!(r.name(), &rname("noop-heartbeat"), "factory name is noop-heartbeat");
 
-    let desired = ReconState;
-    let actual = ReconState;
+    // Per ADR-0021 (step 02-01), `desired`/`actual` are typed
+    // `&AnyState` rather than two `&State` placeholders. NoopHeartbeat
+    // uses `AnyState::Unit` because its `Reconciler::State = ()`.
+    let desired = AnyState::Unit;
+    let actual = AnyState::Unit;
     let view = AnyReconcilerView::Unit;
     let tick = fresh_tick();
 
@@ -258,8 +264,11 @@ fn reconciler_is_pure_invariant_holds_for_noop_heartbeat() {
     let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime::new");
     runtime.register(noop_heartbeat()).expect("register");
 
-    let desired = ReconState;
-    let actual = ReconState;
+    // Per ADR-0021 (step 02-01), `desired`/`actual` are typed
+    // `&AnyState`. NoopHeartbeat uses `AnyState::Unit` because its
+    // `Reconciler::State = ()`.
+    let desired = AnyState::Unit;
+    let actual = AnyState::Unit;
     let view = AnyReconcilerView::Unit;
     let tick = fresh_tick();
 
@@ -284,16 +293,12 @@ fn reconciler_is_pure_invariant_holds_for_noop_heartbeat() {
 //     registry holds ≥2 distinct names; with the fix (BTreeMap), the
 //     order is canonical (Ord) by construction.
 //
-//     CAVEAT: at Phase 1, the only reachable production registerable
-//     variant is `NoopHeartbeat`. The canary-bug variant
-//     `HarnessNoopHeartbeat` (gated behind the `canary-bug` feature)
-//     uses the SAME canonical name (`"noop-heartbeat"`), so the two
-//     cannot coexist in one registry — the second register returns
-//     `ControlPlaneError::Conflict`. As a consequence this test
-//     exercises only the trivial single-key case, which passes on
-//     `HashMap` too. It is authored now to lock the contract before
-//     Phase 2 lands a second built-in reconciler — once that arrives
-//     the property becomes a real (non-trivial) regression gate.
+//     CAVEAT: at Phase 1, the only reachable registerable variant is
+//     `NoopHeartbeat`. As a consequence this test exercises only the
+//     trivial single-key case, which passes on `HashMap` too. It is
+//     authored now to lock the contract before Phase 2 lands a second
+//     built-in reconciler — once that arrives the property becomes a
+//     real (non-trivial) regression gate.
 //
 //     FIXME: extend with ≥2 distinct reconciler names once a second
 //     built-in reconciler ships in Phase 2.

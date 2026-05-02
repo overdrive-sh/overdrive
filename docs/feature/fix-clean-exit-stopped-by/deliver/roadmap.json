@@ -1,0 +1,56 @@
+{
+  "roadmap": {
+    "project_id": "fix-clean-exit-stopped-by",
+    "created_at": "2026-05-02T08:46:35Z",
+    "total_steps": 2,
+    "phases": 1
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Fix CleanExit StoppedBy misclassification",
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "Add StoppedBy::Process variant to overdrive-core",
+          "criteria": "StoppedBy enum in crates/overdrive-core/src/transition_reason.rs has a Process variant appended after Reconciler (discriminants: Operator=0, Reconciler=1, Process=2); StoppedBy::Process is derived with the same traits as the existing variants (Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize); human_readable() on TransitionReason::Stopped { by: StoppedBy::Process } returns \"stopped (by process)\"; the Reconciler variant docstring no longer mentions \"e.g. clean exit\"",
+          "test_file": "",
+          "scenario_name": "",
+          "files_to_modify": [
+            "crates/overdrive-core/src/transition_reason.rs"
+          ]
+        },
+        {
+          "id": "01-02",
+          "name": "Fix classify() and update all StoppedBy generators",
+          "criteria": "classify(&ExitKind::CleanExit, false) in crates/overdrive-control-plane/src/worker/exit_observer.rs returns (AllocState::Terminated, TransitionReason::Stopped { by: StoppedBy::Process }); the unit test previously named clean_exit_intentional_false_terminates_with_reconciler_stop is renamed and asserts StoppedBy::Process instead of StoppedBy::Reconciler; arb_transition_reason() in crates/overdrive-control-plane/tests/acceptance/alloc_status_row_archive_roundtrip.rs includes Just(StoppedBy::Process) in the StoppedBy prop_oneof alongside Operator and Reconciler; arb_transition_reason() in crates/overdrive-control-plane/tests/acceptance/submit_event_serialization.rs includes Just(StoppedBy::Process) in the same way; arb_transition_reason() in crates/overdrive-control-plane/tests/acceptance/alloc_status_snapshot.rs includes Just(StoppedBy::Process) in the same way",
+          "test_file": "",
+          "scenario_name": "",
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/worker/exit_observer.rs",
+            "crates/overdrive-control-plane/tests/acceptance/alloc_status_row_archive_roundtrip.rs",
+            "crates/overdrive-control-plane/tests/acceptance/submit_event_serialization.rs",
+            "crates/overdrive-control-plane/tests/acceptance/alloc_status_snapshot.rs"
+          ]
+        }
+      ]
+    }
+  ],
+  "implementation_scope": {
+    "source_directories": [
+      "crates/overdrive-core/src/",
+      "crates/overdrive-control-plane/src/"
+    ],
+    "test_directories": [
+      "crates/overdrive-control-plane/tests/acceptance/"
+    ],
+    "excluded_patterns": [
+      "crates/overdrive-control-plane/src/worker/streaming.rs"
+    ]
+  },
+  "validation": {
+    "status": "approved",
+    "reviewer": "nw-acceptance-designer-reviewer",
+    "approved_at": "2026-05-02T00:00:00Z"
+  }
+}

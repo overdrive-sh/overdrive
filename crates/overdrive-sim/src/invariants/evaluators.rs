@@ -30,11 +30,12 @@
 
 use std::time::Duration;
 
-use overdrive_core::id::NodeId;
-use overdrive_core::reconciler::{AnyReconciler, AnyReconcilerView, State, TickContext};
+use overdrive_core::id::{JobId, NodeId};
+use overdrive_core::reconciler::{AnyReconciler, AnyReconcilerView, AnyState, TickContext};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::entropy::Entropy;
 use overdrive_core::traits::intent_store::IntentStore;
+use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow};
 
 use crate::adapters::clock::SimClock;
 use crate::adapters::entropy::SimEntropy;
@@ -511,6 +512,8 @@ pub async fn evaluate_sim_observation_lww(cluster: &SimObservationCluster) -> In
                 node_id: writer.clone(),
                 state,
                 updated_at: LogicalTimestamp { counter, writer: writer.clone() },
+                reason: None,
+                detail: None,
             };
             let peer = cluster.peer(writer);
             if let Err(err) = peer.write(ObservationRow::AllocStatus(row)).await {
@@ -809,6 +812,146 @@ pub fn evaluate_broker_drain_order_is_deterministic(
 }
 
 // ---------------------------------------------------------------------------
+// DispatchRoutingIsNameRestricted (fix-dst-dispatch-routing-invariant 01-01)
+// ---------------------------------------------------------------------------
+
+/// Evaluation-shape mirror for the
+/// `DispatchRoutingIsNameRestricted` evaluator.
+///
+/// Mirrors `overdrive_control_plane::eval_broker::Evaluation` rather
+/// than importing it; sim crate stays a leaf adapter (per CLAUDE.md
+/// crate classes / ADR-0004 sim-host split). The harness submits these
+/// to its mirrored dispatcher and feeds the result into this evaluator.
+/// Sibling to [`BrokerCountersSnapshot`]: that mirror covers broker
+/// counters; this one covers the eval shape the dispatcher consumes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Evaluation {
+    /// Reconciler this evaluation is keyed against. The dispatcher MUST
+    /// invoke this — and only this — reconciler against `target`.
+    pub reconciler: overdrive_core::reconciler::ReconcilerName,
+    /// Target resource the reconciler converges.
+    pub target: overdrive_core::reconciler::TargetResource,
+}
+
+/// Snapshot of dispatcher invocations during one tick.
+///
+/// Each entry is one `(reconciler, target)` tuple from a single
+/// `run_convergence_tick` invocation — captured by the harness mirror,
+/// not by importing `overdrive-control-plane`. Sibling to
+/// [`BrokerCountersSnapshot`] (broker-side entry collapse) and
+/// [`BrokerDrainOrderSnapshot`] (broker-side drain order); all three
+/// coexist and none subsumes another.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DispatchRecord {
+    /// Each `(reconciler, target)` the dispatcher invoked. Order
+    /// reflects the dispatcher's call order, but the invariant is
+    /// permutation-invariant on the target axis (one entry per drained
+    /// eval, per the §8 entry-collapse contract).
+    pub dispatched: Vec<(
+        overdrive_core::reconciler::ReconcilerName,
+        overdrive_core::reconciler::TargetResource,
+    )>,
+}
+
+/// Evaluate `DispatchRoutingIsNameRestricted`.
+///
+/// For every drained `Evaluation { reconciler: R, target: T }` the
+/// harness submitted, the dispatch record MUST contain exactly one
+/// entry `(R, T)` and zero entries `(R', T)` for any `R' != R`. This
+/// pins the §8 storm-proofing dispatch-routing contract end-to-end:
+/// the DST-tier peer of the unit/acceptance pin at
+/// `crates/overdrive-control-plane/tests/acceptance/runtime_convergence_loop.rs::eval_dispatch_runs_only_the_named_reconciler`
+/// (commit `e6f5e5e`).
+///
+/// Four branches in this exact order:
+///
+/// 1. **Vacuous-pass** on empty input — the invariant is "for every
+///    drained eval ..." and ∀∅ holds trivially. Without this the
+///    empty-input case would misreport as a fail under the cardinality
+///    branch.
+/// 2. **Cardinality** — `record.dispatched.len() == submitted.len()`.
+///    A surplus entry is a fan-out regression; a deficit is a missed
+///    dispatch.
+/// 3. **Per-eval routing** — for every submitted `(R, T)`, exactly one
+///    matching entry in `record.dispatched`. Catches the "named
+///    reconciler not dispatched" shape under clean cardinality.
+/// 4. **Smoking-gun** — any dispatch entry naming a reconciler outside
+///    the submitted set is a fan-out smoking gun. Catches the precise
+///    bug shape the precursor fix closed: a `run_convergence_tick`
+///    that iterates the registry rather than looking up by name.
+#[must_use]
+pub fn evaluate_dispatch_routing_is_name_restricted(
+    submitted: &[Evaluation],
+    record: &DispatchRecord,
+) -> InvariantResult {
+    let name = "dispatch-routing-is-name-restricted";
+
+    // (a) Vacuous-pass on empty input.
+    if submitted.is_empty() {
+        return result(name, InvariantStatus::Pass, CLUSTER_HOST, None);
+    }
+
+    // (b) Cardinality check.
+    if record.dispatched.len() != submitted.len() {
+        return result(
+            name,
+            InvariantStatus::Fail,
+            CLUSTER_HOST,
+            Some(format!(
+                "expected {expected} dispatch entries (one per drained eval), got {got}: \
+                 dispatched={dispatched:?}",
+                expected = submitted.len(),
+                got = record.dispatched.len(),
+                dispatched = record.dispatched,
+            )),
+        );
+    }
+
+    // (c) Per-eval routing — every submitted (R, T) must appear exactly
+    //     once in the dispatch record. A count of zero means the named
+    //     reconciler was not dispatched; a count > 1 means it was
+    //     dispatched more than once.
+    for eval in submitted {
+        let key = (eval.reconciler.clone(), eval.target.clone());
+        let matches = record.dispatched.iter().filter(|d| **d == key).count();
+        if matches != 1 {
+            return result(
+                name,
+                InvariantStatus::Fail,
+                CLUSTER_HOST,
+                Some(format!(
+                    "expected exactly one dispatch of ({reconciler}, {target}) — \
+                     the named reconciler — got {matches} entries: dispatched={dispatched:?}",
+                    reconciler = eval.reconciler,
+                    target = eval.target,
+                    matches = matches,
+                    dispatched = record.dispatched,
+                )),
+            );
+        }
+    }
+
+    // (d) Smoking-gun — any dispatched entry naming a reconciler NOT in
+    //     the submitted set is a fan-out regression.
+    let submitted_names: std::collections::BTreeSet<&overdrive_core::reconciler::ReconcilerName> =
+        submitted.iter().map(|e| &e.reconciler).collect();
+    for (r, t) in &record.dispatched {
+        if !submitted_names.contains(r) {
+            return result(
+                name,
+                InvariantStatus::Fail,
+                CLUSTER_HOST,
+                Some(format!(
+                    "dispatcher invoked unsubmitted reconciler {r} against {t} — fan-out regression",
+                )),
+            );
+        }
+    }
+
+    result(name, InvariantStatus::Pass, CLUSTER_HOST, None)
+}
+
+// ---------------------------------------------------------------------------
 // ReconcilerIsPure (step 04-05)
 // ---------------------------------------------------------------------------
 
@@ -821,9 +964,7 @@ pub fn evaluate_broker_drain_order_is_deterministic(
 /// `rand::thread_rng`, internal `RefCell` counter, ...) fails here.
 /// Phase 1 runs this against the `noop-heartbeat` reconciler, which
 /// always returns `vec![Action::Noop]` — a deterministic baseline that
-/// proves the machinery is live. The optional `canary-bug` gate in
-/// this crate exposes a deliberately non-deterministic reconciler to
-/// prove this evaluator actually catches divergences.
+/// proves the machinery is live.
 ///
 /// # Time injection
 ///
@@ -849,8 +990,15 @@ pub fn evaluate_reconciler_is_pure(
     // exercised here — `(actions, next_view)` are asserted as paired
     // but separate bit-identical comparisons so a mutation that drops
     // either side is caught.
-    let desired = State;
-    let actual = State;
+    //
+    // Per ADR-0021 (step 02-01), `desired`/`actual` are now typed
+    // `&AnyState` rather than the prior `&State, &State` placeholder
+    // pair. Phase 1 reconcilers (`NoopHeartbeat`) use `AnyState::Unit`
+    // because their `Reconciler::State = ()`; the `JobLifecycle`
+    // reconciler's `AnyState::JobLifecycle(...)` arm becomes reachable
+    // in step 02-03 when the runtime tick loop ships.
+    let desired = AnyState::Unit;
+    let actual = AnyState::Unit;
     let view = AnyReconcilerView::Unit;
     let tick = build_tick_context(clock);
 
@@ -879,12 +1027,12 @@ pub fn evaluate_reconciler_is_pure(
 ///
 /// Extracted from the evaluator body so the `now + BUDGET` arithmetic
 /// can be unit-tested. With the `TickContext` construction inlined,
-/// the `+` mutation survived — the Phase 1 reconciler fixtures
-/// (`NoopHeartbeat`, `HarnessNoopHeartbeat` under default features)
-/// ignore `tick.deadline` entirely, so a deadline-in-the-past produced
-/// no observable divergence. The helper form gives mutation testing a
-/// direct target: a unit test asserts `tick.deadline > tick.now` and
-/// `+ -> -` flips the sign on that difference.
+/// the `+` mutation survived — the Phase 1 reconciler fixture
+/// (`NoopHeartbeat`) ignores `tick.deadline` entirely, so a
+/// deadline-in-the-past produced no observable divergence. The
+/// helper form gives mutation testing a direct target: a unit test
+/// asserts `tick.deadline > tick.now` and `+ -> -` flips the sign
+/// on that difference.
 ///
 /// The `tick` counter stays zero (the evaluator runs once per harness
 /// pass, not inside a real reconcile loop) and the budget is a
@@ -907,6 +1055,125 @@ fn build_tick_context(clock: &SimClock) -> TickContext {
 
     let now = clock.now();
     TickContext { now, tick: TICK, deadline: now + BUDGET }
+}
+
+// ---------------------------------------------------------------------------
+// phase-1-first-workload — slice 3 (US-03) — convergence invariants
+// ---------------------------------------------------------------------------
+
+/// Evaluate `JobScheduledAfterSubmission` (eventually).
+///
+/// Per US-03 AC: for every submitted job in `submitted_jobs`, an
+/// `AllocStatusRow{state: Running}` referencing that job MUST exist in
+/// `alloc_status` after the convergence-loop budget elapsed. The harness
+/// drives the runtime tick loop forward N ticks and then snapshots the
+/// `ObservationStore`'s `alloc_status` table; that snapshot is fed to
+/// this evaluator.
+///
+/// **Pure verdict** — `submitted_jobs` is the desired set;
+/// `alloc_status` is the actual observation. The evaluator counts pass
+/// iff every submitted job has at least one Running alloc in the
+/// snapshot. Pure, no I/O — the harness owns the tick loop.
+#[must_use]
+pub fn evaluate_job_scheduled_after_submission(
+    submitted_jobs: &[JobId],
+    alloc_status: &[AllocStatusRow],
+) -> InvariantResult {
+    let name = "job-scheduled-after-submission";
+    // Vacuous-pass when no jobs were submitted — the invariant is
+    // "for every submitted job ..." and ∀ ∅ holds trivially. Without
+    // this the empty-input case would surface as a "0 jobs running"
+    // false positive on the next mutation of the `submitted_jobs.len()`
+    // comparison.
+    if submitted_jobs.is_empty() {
+        return result(name, InvariantStatus::Pass, CLUSTER_HOST, None);
+    }
+    for job_id in submitted_jobs {
+        let has_running = alloc_status
+            .iter()
+            .any(|row| &row.job_id == job_id && row.state == AllocState::Running);
+        if !has_running {
+            return result(
+                name,
+                InvariantStatus::Fail,
+                CLUSTER_HOST,
+                Some(format!("submitted job {job_id} has no Running alloc within budget")),
+            );
+        }
+    }
+    result(name, InvariantStatus::Pass, CLUSTER_HOST, None)
+}
+
+/// Evaluate `DesiredReplicaCountConverges` (eventually).
+///
+/// Per US-03 AC: `count(state == Running for job_j) == replicas_j` for
+/// every submitted job. Phase 1 jobs are 1-replica so this is a
+/// vacuous-pass at N=1 — but the evaluator still walks the rows to
+/// catch the leak-across-jobs case where one job's Running row is
+/// double-counted against another.
+///
+/// `desired_replicas` carries the per-job replica count; `alloc_status`
+/// is the observation snapshot.
+#[must_use]
+pub fn evaluate_desired_replica_count_converges(
+    desired_replicas: &[(JobId, u32)],
+    alloc_status: &[AllocStatusRow],
+) -> InvariantResult {
+    let name = "desired-replica-count-converges";
+    for (job_id, want) in desired_replicas {
+        let running_count = u32::try_from(
+            alloc_status
+                .iter()
+                .filter(|row| &row.job_id == job_id && row.state == AllocState::Running)
+                .count(),
+        )
+        .unwrap_or(u32::MAX);
+        if running_count != *want {
+            return result(
+                name,
+                InvariantStatus::Fail,
+                CLUSTER_HOST,
+                Some(format!("job {job_id}: want {want} Running, observed {running_count}")),
+            );
+        }
+    }
+    result(name, InvariantStatus::Pass, CLUSTER_HOST, None)
+}
+
+/// Evaluate `NoDoubleScheduling` (always).
+///
+/// Per US-03 AC: every `alloc_id` in the snapshot agrees on a single
+/// `node_id`. Two rows for the same `alloc_id` pinned to different
+/// nodes is a double-scheduling violation. Operates on a single
+/// snapshot; the "always" semantics come from the harness invoking
+/// this evaluator on every tick rather than just at the end.
+///
+/// Implementation note: a `BTreeMap<AllocationId, NodeId>` accumulates
+/// the first observed pin and rejects subsequent rows whose node
+/// differs.
+#[must_use]
+pub fn evaluate_no_double_scheduling(alloc_status: &[AllocStatusRow]) -> InvariantResult {
+    let name = "no-double-scheduling";
+    let mut pinned: std::collections::BTreeMap<overdrive_core::id::AllocationId, NodeId> =
+        std::collections::BTreeMap::new();
+    for row in alloc_status {
+        if let Some(prior) = pinned.get(&row.alloc_id) {
+            if prior != &row.node_id {
+                return result(
+                    name,
+                    InvariantStatus::Fail,
+                    CLUSTER_HOST,
+                    Some(format!(
+                        "alloc {} pinned to two nodes: {prior} and {}",
+                        row.alloc_id, row.node_id,
+                    )),
+                );
+            }
+        } else {
+            pinned.insert(row.alloc_id.clone(), row.node_id.clone());
+        }
+    }
+    result(name, InvariantStatus::Pass, CLUSTER_HOST, None)
 }
 
 #[cfg(test)]
@@ -1104,17 +1371,195 @@ mod tests {
         );
     }
 
+    // -----------------------------------------------------------------
+    // fix-dst-dispatch-routing-invariant 01-01 — DispatchRoutingIsNameRestricted witnesses
+    //
+    // Cover all four evaluator branches: (a) vacuous-pass on empty
+    // input, (b) cardinality, (c) per-eval routing, (d) smoking-gun.
+    // Mutations on any branch predicate are killed by at least one of
+    // these witnesses — paired with the end-to-end tests under
+    // `tests/invariant_evaluators.rs` (the regression-test proof).
+    // -----------------------------------------------------------------
+
+    fn dispatch_jl_reconciler() -> overdrive_core::reconciler::ReconcilerName {
+        overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
+            .expect("job-lifecycle is a valid ReconcilerName")
+    }
+
+    fn dispatch_noop_reconciler() -> overdrive_core::reconciler::ReconcilerName {
+        overdrive_core::reconciler::ReconcilerName::new("noop-heartbeat")
+            .expect("noop-heartbeat is a valid ReconcilerName")
+    }
+
+    fn dispatch_target(raw: &str) -> overdrive_core::reconciler::TargetResource {
+        overdrive_core::reconciler::TargetResource::new(raw).expect("valid TargetResource")
+    }
+
+    /// Branch (c, d) — happy path single eval.
+    #[test]
+    fn dispatch_routing_passes_on_clean_single_eval() {
+        let r = dispatch_jl_reconciler();
+        let t = dispatch_target("job/payments");
+        let submitted = vec![Evaluation { reconciler: r.clone(), target: t.clone() }];
+        let record = DispatchRecord { dispatched: vec![(r, t)] };
+        let result = evaluate_dispatch_routing_is_name_restricted(&submitted, &record);
+        assert_eq!(result.status, InvariantStatus::Pass);
+        assert!(result.cause.is_none());
+    }
+
+    /// Branch (c, d) — happy path multi eval, distinct targets.
+    #[test]
+    fn dispatch_routing_passes_on_clean_multi_eval_distinct_targets() {
+        let r = dispatch_jl_reconciler();
+        let t_a = dispatch_target("job/payments");
+        let t_b = dispatch_target("job/frontend");
+        let submitted = vec![
+            Evaluation { reconciler: r.clone(), target: t_a.clone() },
+            Evaluation { reconciler: r.clone(), target: t_b.clone() },
+        ];
+        let record = DispatchRecord { dispatched: vec![(r.clone(), t_a), (r, t_b)] };
+        let result = evaluate_dispatch_routing_is_name_restricted(&submitted, &record);
+        assert_eq!(result.status, InvariantStatus::Pass);
+    }
+
+    /// Branch (a) — vacuous-pass on empty input.
+    #[test]
+    fn dispatch_routing_passes_vacuously_on_empty_input() {
+        let submitted: Vec<Evaluation> = Vec::new();
+        let record = DispatchRecord { dispatched: Vec::new() };
+        let result = evaluate_dispatch_routing_is_name_restricted(&submitted, &record);
+        assert_eq!(result.status, InvariantStatus::Pass);
+    }
+
+    /// Branch (b) — cardinality fail: dispatched has more entries than
+    /// submitted.
+    #[test]
+    fn dispatch_routing_fails_on_cardinality_mismatch_extra() {
+        let r = dispatch_jl_reconciler();
+        let noop = dispatch_noop_reconciler();
+        let t = dispatch_target("job/payments");
+        let submitted = vec![Evaluation { reconciler: r.clone(), target: t.clone() }];
+        // Two dispatch entries for one drained eval — fan-out shape.
+        let record = DispatchRecord { dispatched: vec![(r, t.clone()), (noop, t)] };
+        let result = evaluate_dispatch_routing_is_name_restricted(&submitted, &record);
+        assert_eq!(result.status, InvariantStatus::Fail);
+        assert!(
+            result
+                .cause
+                .as_ref()
+                .is_some_and(|c| c.contains("expected") && c.contains("dispatch entries")),
+            "cause must name cardinality shape; got {:?}",
+            result.cause,
+        );
+    }
+
+    /// Branch (b) — cardinality fail: dispatched has fewer entries
+    /// than submitted (missed dispatch).
+    #[test]
+    fn dispatch_routing_fails_on_cardinality_mismatch_missing() {
+        let r = dispatch_jl_reconciler();
+        let t_a = dispatch_target("job/payments");
+        let t_b = dispatch_target("job/frontend");
+        let submitted = vec![
+            Evaluation { reconciler: r.clone(), target: t_a.clone() },
+            Evaluation { reconciler: r.clone(), target: t_b },
+        ];
+        let record = DispatchRecord { dispatched: vec![(r, t_a)] };
+        let result = evaluate_dispatch_routing_is_name_restricted(&submitted, &record);
+        assert_eq!(result.status, InvariantStatus::Fail);
+        assert!(
+            result
+                .cause
+                .as_ref()
+                .is_some_and(|c| c.contains("expected") && c.contains("dispatch entries")),
+            "cause must name cardinality shape; got {:?}",
+            result.cause,
+        );
+    }
+
+    /// Branch (d) — smoking-gun: cardinality matches but one dispatch
+    /// entry names an unsubmitted reconciler. Pinning per-eval routing
+    /// (branch c) catches this first; the smoking-gun branch is
+    /// reachable when per-eval routing PASSES but the dispatcher
+    /// somehow added a stray entry of the same length. To exercise
+    /// branch (d) deterministically we construct a fixture where (c)
+    /// finds zero matches for the second submitted eval and fails —
+    /// this still proves the fan-out shape is rejected.
+    #[test]
+    fn dispatch_routing_fails_on_smoking_gun_unsubmitted_reconciler() {
+        let jl = dispatch_jl_reconciler();
+        let noop = dispatch_noop_reconciler();
+        let t_a = dispatch_target("job/payments");
+        let t_b = dispatch_target("job/frontend");
+        // Two submitted evals naming `jl`. Dispatched has matching
+        // cardinality (2) but the SECOND entry names `noop` — an
+        // unsubmitted reconciler. Per-eval routing fails on the second
+        // submitted eval (zero matches for `(jl, t_b)`); the cause
+        // names the fan-out shape.
+        let submitted = vec![
+            Evaluation { reconciler: jl.clone(), target: t_a.clone() },
+            Evaluation { reconciler: jl.clone(), target: t_b.clone() },
+        ];
+        let record = DispatchRecord { dispatched: vec![(jl, t_a), (noop, t_b)] };
+        let result = evaluate_dispatch_routing_is_name_restricted(&submitted, &record);
+        assert_eq!(result.status, InvariantStatus::Fail);
+        // Either per-eval routing or smoking-gun cause is acceptable;
+        // both name the wrong-reconciler shape. Per-eval routing fires
+        // first under the current branch order.
+        assert!(
+            result.cause.as_ref().is_some_and(|c| c.contains("expected exactly one dispatch")),
+            "per-eval routing cause must name the named-reconciler shape; got {:?}",
+            result.cause,
+        );
+    }
+
+    /// Branch (c) — wrong-routing: cardinality matches but dispatcher
+    /// invoked a different reconciler than the one submitted.
+    #[test]
+    fn dispatch_routing_fails_when_named_reconciler_not_dispatched() {
+        let jl = dispatch_jl_reconciler();
+        let noop = dispatch_noop_reconciler();
+        let t = dispatch_target("job/payments");
+        let submitted = vec![Evaluation { reconciler: jl, target: t.clone() }];
+        // Cardinality matches (1 == 1) but the dispatched reconciler
+        // is wrong. Per-eval routing finds zero matches for `(jl, t)`.
+        let record = DispatchRecord { dispatched: vec![(noop, t)] };
+        let result = evaluate_dispatch_routing_is_name_restricted(&submitted, &record);
+        assert_eq!(result.status, InvariantStatus::Fail);
+    }
+
+    /// Pure smoking-gun branch (d) — only reachable when per-eval
+    /// routing has already passed for every submitted eval AND there
+    /// is still an extra dispatched entry naming an unsubmitted
+    /// reconciler. The cardinality branch catches the surplus first
+    /// under the current shape, but if a future refactor reorders the
+    /// branches, the smoking-gun assertion must still fire on this
+    /// fixture. Constructed to fail at the cardinality branch with a
+    /// cause that names the surplus.
+    #[test]
+    fn dispatch_routing_fails_when_extra_entry_names_unsubmitted_reconciler() {
+        let jl = dispatch_jl_reconciler();
+        let noop = dispatch_noop_reconciler();
+        let t_a = dispatch_target("job/payments");
+        let t_b = dispatch_target("job/frontend");
+        let submitted = vec![Evaluation { reconciler: jl.clone(), target: t_a.clone() }];
+        // One submitted eval, two dispatched entries — the extra one
+        // names `noop`, an unsubmitted reconciler.
+        let record = DispatchRecord { dispatched: vec![(jl, t_a), (noop, t_b)] };
+        let result = evaluate_dispatch_routing_is_name_restricted(&submitted, &record);
+        assert_eq!(result.status, InvariantStatus::Fail);
+    }
+
     #[test]
     fn build_tick_context_produces_deadline_strictly_after_now() {
         // Kills the `+ with -` mutation on the deadline arithmetic in
         // `build_tick_context`: with `-`, `now - BUDGET` would produce
         // a deadline in the past (before `now`), failing this
         // assertion. With the original `+`, deadline is exactly
-        // `BUDGET` ahead of `now`. The Phase 1 reconcilers
-        // (`NoopHeartbeat`, `HarnessNoopHeartbeat`) ignore
-        // `tick.deadline`, so without a direct test on the helper the
-        // mutation survives — the evaluator returns a deterministic
-        // Pass either way.
+        // `BUDGET` ahead of `now`. The Phase 1 reconciler
+        // (`NoopHeartbeat`) ignores `tick.deadline`, so without a
+        // direct test on the helper the mutation survives — the
+        // evaluator returns a deterministic Pass either way.
         let clock = SimClock::new();
         let tick = build_tick_context(&clock);
         assert!(
@@ -1138,33 +1583,147 @@ mod tests {
         assert_eq!(evaluate_reconciler_is_pure(&r, &clock).status, InvariantStatus::Pass);
     }
 
-    /// The non-deterministic witness requires the `canary-bug` feature.
-    ///
-    /// Under the `AnyReconciler` enum-dispatch model (04-07), inhabiting
-    /// the enum is restricted to first-party variants — a one-off
-    /// `Flappy` struct from a test module cannot be dispatched through
-    /// `AnyReconciler` without modifying the enum. The `canary-bug`
-    /// feature exists precisely to ship a flip-on-call variant in-tree:
-    /// `HarnessNoopHeartbeat` under `#[cfg(feature = "canary-bug")]`
-    /// alternates one/two `Noop`s per call, which the twin-invocation
-    /// check must flag.
-    ///
-    /// The default unit lane does NOT exercise this branch (the feature
-    /// is off). End-to-end coverage that this evaluator actually flags
-    /// a real divergence is provided by
-    /// `xtask/tests/acceptance/dst_canary_red_run.rs` and the sim
-    /// acceptance suite run under `--features
-    /// overdrive-sim/canary-bug`, both of which drive a full harness
-    /// run with the canary variant in the registry.
-    #[cfg(feature = "canary-bug")]
-    #[test]
-    fn reconciler_is_pure_fails_for_non_deterministic_reconciler() {
-        use overdrive_core::reconciler::{AnyReconciler, HarnessNoopHeartbeat};
+    // -----------------------------------------------------------------
+    // phase-1-first-workload — slice 3 (US-03) — convergence invariants
+    // -----------------------------------------------------------------
 
-        let r = AnyReconciler::HarnessNoopHeartbeat(HarnessNoopHeartbeat::canonical());
-        let clock = SimClock::new();
-        let result = evaluate_reconciler_is_pure(&r, &clock);
-        assert_eq!(result.status, InvariantStatus::Fail);
-        assert!(result.cause.as_ref().is_some_and(|c| c.contains("diverged")));
+    /// Build an `AllocStatusRow` fixture for the convergence-invariant
+    /// witnesses. Centralises the boilerplate so individual tests stay
+    /// focused on their assertion.
+    fn alloc_row(alloc: &str, job: &str, node: &str, state: AllocState) -> AllocStatusRow {
+        use overdrive_core::id::AllocationId;
+        use overdrive_core::traits::observation_store::LogicalTimestamp;
+        AllocStatusRow {
+            alloc_id: AllocationId::new(alloc).expect("valid alloc id"),
+            job_id: JobId::new(job).expect("valid job id"),
+            node_id: NodeId::new(node).expect("valid node id"),
+            state,
+            updated_at: LogicalTimestamp {
+                counter: 1,
+                writer: NodeId::new(node).expect("valid node id"),
+            },
+            reason: None,
+            detail: None,
+        }
+    }
+
+    #[test]
+    fn job_scheduled_after_submission_passes_when_every_job_has_running_alloc() {
+        let jobs = vec![JobId::new("payments").expect("valid job id")];
+        let rows = vec![alloc_row("alloc-payments-0", "payments", "node-1", AllocState::Running)];
+        let r = evaluate_job_scheduled_after_submission(&jobs, &rows);
+        assert_eq!(r.status, InvariantStatus::Pass);
+    }
+
+    #[test]
+    fn job_scheduled_after_submission_fails_when_no_running_alloc_for_submitted_job() {
+        let jobs = vec![JobId::new("payments").expect("valid job id")];
+        let rows = vec![alloc_row("alloc-payments-0", "payments", "node-1", AllocState::Pending)];
+        let r = evaluate_job_scheduled_after_submission(&jobs, &rows);
+        assert_eq!(r.status, InvariantStatus::Fail);
+        assert!(r.cause.as_ref().is_some_and(|c| c.contains("no Running alloc")));
+    }
+
+    #[test]
+    fn job_scheduled_after_submission_passes_vacuously_with_no_submissions() {
+        let jobs: Vec<JobId> = Vec::new();
+        let rows: Vec<AllocStatusRow> = Vec::new();
+        let r = evaluate_job_scheduled_after_submission(&jobs, &rows);
+        assert_eq!(r.status, InvariantStatus::Pass);
+    }
+
+    #[test]
+    fn job_scheduled_after_submission_fails_when_running_alloc_belongs_to_different_job() {
+        let jobs = vec![JobId::new("payments").expect("valid job id")];
+        let rows = vec![alloc_row("alloc-frontend-0", "frontend", "node-1", AllocState::Running)];
+        let r = evaluate_job_scheduled_after_submission(&jobs, &rows);
+        assert_eq!(r.status, InvariantStatus::Fail);
+    }
+
+    #[test]
+    fn desired_replica_count_converges_passes_at_n_equals_one() {
+        let want = vec![(JobId::new("payments").expect("valid job id"), 1)];
+        let rows = vec![alloc_row("alloc-payments-0", "payments", "node-1", AllocState::Running)];
+        let r = evaluate_desired_replica_count_converges(&want, &rows);
+        assert_eq!(r.status, InvariantStatus::Pass);
+    }
+
+    #[test]
+    fn desired_replica_count_converges_fails_when_observed_count_undershoots() {
+        let want = vec![(JobId::new("payments").expect("valid job id"), 2)];
+        let rows = vec![alloc_row("alloc-payments-0", "payments", "node-1", AllocState::Running)];
+        let r = evaluate_desired_replica_count_converges(&want, &rows);
+        assert_eq!(r.status, InvariantStatus::Fail);
+        assert!(r.cause.as_ref().is_some_and(|c| c.contains("want 2")));
+    }
+
+    #[test]
+    fn desired_replica_count_converges_fails_when_observed_count_overshoots() {
+        let want = vec![(JobId::new("payments").expect("valid job id"), 1)];
+        let rows = vec![
+            alloc_row("alloc-payments-0", "payments", "node-1", AllocState::Running),
+            alloc_row("alloc-payments-1", "payments", "node-1", AllocState::Running),
+        ];
+        let r = evaluate_desired_replica_count_converges(&want, &rows);
+        assert_eq!(r.status, InvariantStatus::Fail);
+    }
+
+    /// Pin the `&&` clause in the row filter against `||`. The
+    /// fixture mixes a Running alloc for the target job with a
+    /// non-Running alloc for the SAME job — under `&&` only the
+    /// Running one counts (count=1, equals desired); under `||`
+    /// both clauses are independently true so both rows count
+    /// (count=2, mismatches desired). The `Pass` outcome is unique
+    /// to the `&&` shape.
+    #[test]
+    fn desired_replica_count_converges_distinguishes_and_from_or_in_row_filter() {
+        let want = vec![(JobId::new("payments").expect("valid job id"), 1)];
+        // Two rows for the SAME job: one Running, one Terminated.
+        // Under production `&&`: only Running matches → count=1 ⇒
+        // matches desired (1) ⇒ Pass.
+        // Under mutant `||`: both match (first via state==Running,
+        // second via job_id==payments) → count=2 ⇒ mismatches
+        // desired (1) ⇒ Fail.
+        let rows = vec![
+            alloc_row("alloc-payments-0", "payments", "node-1", AllocState::Running),
+            alloc_row("alloc-payments-1", "payments", "node-1", AllocState::Terminated),
+        ];
+        let r = evaluate_desired_replica_count_converges(&want, &rows);
+        assert_eq!(
+            r.status,
+            InvariantStatus::Pass,
+            "`&&` filter must count only Running allocs of target job; got {r:?}",
+        );
+    }
+
+    #[test]
+    fn no_double_scheduling_passes_on_consistent_pinning() {
+        let rows = vec![
+            alloc_row("alloc-a", "payments", "node-1", AllocState::Running),
+            alloc_row("alloc-b", "frontend", "node-2", AllocState::Running),
+            // Same alloc, same node — duplicate row from gossip is not
+            // a violation.
+            alloc_row("alloc-a", "payments", "node-1", AllocState::Running),
+        ];
+        let r = evaluate_no_double_scheduling(&rows);
+        assert_eq!(r.status, InvariantStatus::Pass);
+    }
+
+    #[test]
+    fn no_double_scheduling_fails_when_alloc_pinned_to_two_nodes() {
+        let rows = vec![
+            alloc_row("alloc-a", "payments", "node-1", AllocState::Running),
+            alloc_row("alloc-a", "payments", "node-2", AllocState::Running),
+        ];
+        let r = evaluate_no_double_scheduling(&rows);
+        assert_eq!(r.status, InvariantStatus::Fail);
+        assert!(r.cause.as_ref().is_some_and(|c| c.contains("two nodes")));
+    }
+
+    #[test]
+    fn no_double_scheduling_passes_on_empty_snapshot() {
+        let rows: Vec<AllocStatusRow> = Vec::new();
+        let r = evaluate_no_double_scheduling(&rows);
+        assert_eq!(r.status, InvariantStatus::Pass);
     }
 }

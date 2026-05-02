@@ -35,11 +35,33 @@ overdrive-core.workspace           = true
 # crate; it remains available as a dev-dep if needed for DST-style
 # tests.
 overdrive-store-local.path         = "../overdrive-store-local"
+# Per ADR-0029, `run_server` instantiates the production `ExecDriver`
+# from `overdrive-worker` and threads it into the AppState. This makes
+# `overdrive-worker` a runtime dep of `overdrive-control-plane`.
+overdrive-worker.path              = "../overdrive-worker"
+# Per `fix-convergence-loop-not-spawned` Step 01-02 (RCA Option B2):
+# `ServerConfig.clock` defaults to `Arc::new(SystemClock)`. Per CLAUDE.md
+# repository structure, `overdrive-host` is the only crate permitted to
+# instantiate `SystemClock`, so the `Default` impl on `ServerConfig`
+# imports it from here.
+overdrive-host.path                = "../overdrive-host"
 
 # Errors / async / serde
 thiserror.workspace   = true
 async-trait.workspace = true
 tokio.workspace       = true
+# Per `fix-convergence-loop-not-spawned` Step 01-02 (RCA Option B2):
+# `ServerHandle` carries a `tokio_util::sync::CancellationToken` that
+# the convergence-loop spawn observes for ordered shutdown.
+tokio-util.workspace  = true
+# Per `fix-convergence-loop-not-spawned` Step 01-02: the broker-mutability
+# adapter wraps `EvaluationBroker` in a `parking_lot::Mutex` so handlers
+# (`submit_job`, `stop_job`) and the spawn loop can call `submit` /
+# `drain_pending` (both `&mut`) through `Arc<ReconcilerRuntime>`. Per
+# `.claude/rules/development.md` § Concurrency & async — no `.await`
+# is held across the lock; broker methods are sync and the spawn loop
+# drops the guard before per-eval `.await`.
+parking_lot.workspace = true
 bytes.workspace       = true
 serde.workspace       = true
 serde_json.workspace  = true
@@ -73,12 +95,25 @@ hostname.workspace   = true
 utoipa       = { workspace = true }
 utoipa-axum  = { workspace = true }
 
+# `async-stream` is used by the streaming submit handler (slice 02
+# step 02-03) to build the NDJSON Body::from_stream(...) future via
+# the `stream! { ... }` macro. Pure-Rust, no FFI; pinned to workspace.
+async-stream.workspace = true
+# `futures` provides the `Stream` trait re-exports used by the
+# stream returned to `Body::from_stream`.
+futures.workspace = true
+
 # Per-primitive libSQL memory
 libsql = { workspace = true }
 
 # Observability
 tracing.workspace            = true
 tracing-subscriber.workspace = true
+
+# Linux-only — `geteuid` for the cgroup pre-flight (ADR-0028) and
+# `getpid` for control-plane slice enrolment.
+[target.'cfg(target_os = "linux")'.dependencies]
+libc.workspace = true
 
 [dev-dependencies]
 # `overdrive-sim` is used by tests only (`tests/acceptance/*.rs`) for
@@ -92,6 +127,19 @@ proptest.workspace       = true
 # `toml` crate pulled in at runtime (listed in [dependencies] above).
 x509-parser.workspace    = true
 base64.workspace         = true
+# Used by the crash_recovery integration test's cleanup guard to
+# `waitpid()` test-spawned `/bin/sleep` workloads after `cgroup.kill`
+# delivers SIGKILL — without reaping, nextest flags the test as LEAK.
+libc.workspace           = true
+# Trybuild for compile-fail fixtures (e.g. architecture.md §8: a
+# `LifecycleEvent` field MUST NOT be `AllocStatusRow`). Pinned exact
+# version per `.claude/rules/testing.md` § "Compile-fail testing".
+trybuild.workspace       = true
+# Acceptance tests for the streaming submit handler (slice 02 step
+# 02-03) drive the production Router via `ServiceExt::oneshot` and
+# read NDJSON response bodies via `BodyExt::frame()`.
+tower.workspace             = true
+http-body-util.workspace    = true
 
 [lints]
 workspace = true

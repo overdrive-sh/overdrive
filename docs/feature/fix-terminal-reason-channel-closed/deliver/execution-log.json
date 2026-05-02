@@ -1,0 +1,104 @@
+{
+  "schema_version": "3.0",
+  "feature_id": "fix-terminal-reason-channel-closed",
+  "events": [
+    {
+      "sid": "01-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-02T15:13:47Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-02T15:37:47Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: integration-shaped acceptance test asserts the bug through the streaming handler entrypoint and the renderer entrypoint; both already exercise port-to-port through the public API. The proptest generator extension is a structural variant addition (passing post-add), not a failing-then-passing unit-level RED. The variant declaration on api.rs is the production code that compiles cleanly; observable wire behaviour is unchanged.",
+      "t": "2026-05-02T15:37:47Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-02T15:37:47Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-02T15:39:06Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-02T15:41:37Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-02T15:42:04Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: production changes are an emit-site swap, two render match arms, and a Sender-clone drop; the failing acceptance tests from step 01-01 cover all observable behaviour through the port-to-port handler/renderer surface",
+      "t": "2026-05-02T15:42:07Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-02T15:58:27Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-02T16:19:18Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: failing acceptance scenarios were authored in step 01-01 (closed_lifecycle_channel_emits_stream_interrupted_terminal and renders_stream_interrupted_terminal_with_correct_reason_and_hint). Step 01-02 transitions both RED -> GREEN via the emit-site swap and the explicit render arms; no new acceptance test was authored.",
+      "t": "2026-05-02T16:19:19Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: bug surfaces through the streaming handler entrypoint and the renderer entrypoint; both are exercised by the port-to-port acceptance scenarios authored in 01-01. The proptest generator round-trip extension was the only unit-shaped change and was already covered (and passing) at the end of 01-01.",
+      "t": "2026-05-02T16:19:19Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-02T16:19:19Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-02T16:19:19Z"
+    }
+  ]
+}

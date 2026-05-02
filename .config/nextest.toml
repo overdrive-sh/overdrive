@@ -32,6 +32,49 @@ retries = 0
 # reporting N failed, so exit-code loss cannot silently mask a failure.
 status-level = "fail"
 final-status-level = "fail"
+# Per-test wall-clock cap for the inner dev loop. A test running longer
+# than 60s emits a SLOW marker; a test still running after 120s
+# (60s × 2) is killed and the run reports it as TIMEOUT. Without this,
+# a deadlocked or runaway-loop test silently consumes the harness
+# until the outer 10-minute Bash cap fires — far too coarse for a tight
+# TDD cycle. Matches the CI profile's K1 Tier 1 wall-clock budget; CI
+# allows one extra interval (terminate-after = 3) because compile +
+# scheduler overhead under cold caches can legitimately push a slow
+# test past the 60s mark on the runner.
+slow-timeout = { period = "60s", terminate-after = 2 }
+
+# The store-local snapshot proptest opens a real redb file per case
+# at the default `PROPTEST_CASES=1024` budget. Solo wall-clock on Lima
+# is ~55s; under parallel load (workspace integration runs schedule
+# ~30 tests concurrently and the proptest competes for I/O bandwidth
+# against every other tempdir-touching test) it crosses 120s. The
+# default budget is correct for "this test runs alone" (the inner
+# loop) and incorrect for "this test runs alongside the full
+# workspace" (CI / lima full-suite). A 4× budget absorbs the parallel
+# slow-down without weakening the per-test deadline.
+[[profile.default.overrides]]
+filter = 'package(overdrive-store-local) & binary(integration) & test(snapshot_roundtrip_is_byte_identical_for_arbitrary_store_contents)'
+slow-timeout = { period = "60s", terminate-after = 4 }
+
+# describe_round_trip's submit-then-describe proptest spawns a real
+# axum server (rustls handshake, redb file, ephemeral CA) per case and
+# runs `PROPTEST_CASES=256`. The integration CI job (profile.ci, 180s
+# budget) passes; the cargo-mutants baseline runs nextest under the
+# `default` profile in a /tmp scratch tree with cold caches and
+# crosses the 120s default budget. A 4× budget (240s) tracks the
+# snapshot-proptest precedent above and absorbs the cold-cache slow
+# down without weakening the deadline for any other test.
+[[profile.default.overrides]]
+filter = 'package(overdrive-control-plane) & binary(integration) & test(submit_then_describe_round_trips_spec_and_digest)'
+slow-timeout = { period = "60s", terminate-after = 4 }
+
+# trybuild compiles every compile_fail fixture from scratch on each
+# run. Under cargo-mutants the tree is reproduced in /tmp with a
+# cold target dir and the per-fixture compile time stacks past the
+# default 120s budget. Same 4× budget rationale as above.
+[[profile.default.overrides]]
+filter = 'package(overdrive-control-plane) & binary(compile_fail) & test(compile_fail_cases)'
+slow-timeout = { period = "60s", terminate-after = 4 }
 
 [profile.ci]
 # CI runs the same suite with structured output. Retries stay at zero:

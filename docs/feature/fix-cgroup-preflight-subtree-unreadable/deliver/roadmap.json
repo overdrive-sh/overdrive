@@ -1,0 +1,137 @@
+{
+  "roadmap": {
+    "project_id": "fix-cgroup-preflight-subtree-unreadable",
+    "feature_id": "fix-cgroup-preflight-subtree-unreadable",
+    "created_at": "2026-04-29T17:30:00Z",
+    "filled_at": "2026-04-29T17:30:00Z",
+    "total_steps": 2,
+    "phases": 1,
+    "walking_skeleton_gate": "01-02",
+    "validation": {
+      "status": "approved",
+      "approved_at": "2026-04-29T17:30:00Z",
+      "approver": "user",
+      "rationale": "User reviewed and approved the RCA + fix shape (Option B — NotFound surfaces as the new variant) in nw-bugfix Phase 2 prior to invoking /nw-deliver. Roadmap mirrors the canonical bugfix shape from the sibling fix-cgroup-preflight-procfs-unreadable/deliver/roadmap.json."
+    },
+    "notes": [
+      "Bug fix via /nw-bugfix → /nw-deliver. The authoritative specification is the RCA at `docs/feature/fix-cgroup-preflight-subtree-unreadable/bugfix-rca.md` (user-reviewed and APPROVED 2026-04-29 in Phase 2 before roadmap creation). Approved fix shape: **Option B** — new `SubtreeControlUnreadable { slice: PathBuf, source: io::Error }` variant; replace the `unwrap_or_default()` at the step-4 read with `.map_err(...)?` routing every `io::Error` (INCLUDING NotFound) to the new variant. The asymmetry with the step-1 fix (where NotFound flows to NoCgroupV2) is justified per the new development.md rule's escape clause: NotFound on `cgroup.subtree_control` does NOT have the same application semantics as an empty `cgroup.subtree_control` (the kernel guarantees the file exists for every cgroup directory; absence indicates the path is not a cgroup directory at all, which is structurally different from 'no controllers delegated').",
+      "Single-cut migration per `feedback_single_cut_greenfield_migrations`: no deprecated `unwrap_or_default()` path retained. The fix lands as one cohesive commit (step 01-02).",
+      "Two-step Outside-In TDD shape per the canonical bugfix template at `docs/feature/fix-cgroup-preflight-procfs-unreadable/deliver/roadmap.json`. Step 01-01 lands the new error variant + the two new regression tests in RED state — the variant exists so the tests compile, but the step-4 read is unchanged, so I/O errors and NotFound still flow to `DelegationMissing` and the tests' `match err { SubtreeControlUnreadable { .. } => …, other => panic!(…) }` panics. Commit via `git commit --no-verify` per `.claude/rules/testing.md` §RED scaffolds. Step 01-02 replaces the step-4 read with the `.map_err(...)?` shape; both RED tests transition RED → GREEN within the same commit.",
+      "Per `.claude/rules/testing.md` mutation-testing rules, step 01-02 runs `cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-control-plane --file crates/overdrive-control-plane/src/cgroup_preflight.rs`. Kill-rate gate ≥80%.",
+      "The unreadable-procfs regression test uses a directory-path fixture (mkdir `cgroup.subtree_control` instead of write) — same shape as the step-1 sibling. The NotFound regression test fabricates a fixture where the enclosing-slice directory exists but `cgroup.subtree_control` does NOT — this is the test that pins Option B. Both fixtures are portable across nextest's UID surface (Lima root, CI non-root, macOS dev `--no-run`).",
+      "Out of scope (do NOT touch): step-1 read (already fixed in `941fb3e`), step-2 `cgroup.controllers` existence check, step-3 root short-circuit, step-4 `proc_self_cgroup` read (already correct via `.map_err(CgroupPathDiscoveryFailed)?`), the `cgroup_manager` slice creation path, the `--allow-no-cgroups` flag.",
+      "ADR-0028 is unchanged. This fix improves diagnostic accuracy of step 4 without changing its §4 step-4 semantics (controllers-missing → `DelegationMissing`)."
+    ]
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Bug fix — surface step-4 cgroup.subtree_control I/O errors discretely",
+      "slice": "single-vertical",
+      "user_stories": [
+        "As an operator running `overdrive serve` whose enclosing slice has `cgroup.subtree_control` unreadable for any reason (PermissionDenied because of restrictive permissions on the file itself, EIO from the cgroupfs, transient cgroupfs failure, or NotFound because the discovered slice path is not a real cgroup directory), the preflight refuses startup with an actionable `SubtreeControlUnreadable` message naming the slice and the actual I/O cause — not a misleading `DelegationMissing` message that prescribes `systemctl set-property … Delegate=yes`."
+      ],
+      "description": "Replace the buggy step-4 read of `<enclosing_slice>/cgroup.subtree_control` via `unwrap_or_default()` (which collapses every io::Error into the empty string and routes the failure to `DelegationMissing` with a 'grant Delegate=yes' remediation) with `.map_err(...)?` routing every Err to a new `SubtreeControlUnreadable { slice: PathBuf, source: io::Error }` variant. Asymmetric with the step-1 fix: NotFound is NOT preserved as a `DelegationMissing` fallthrough — the kernel guarantees `cgroup.subtree_control` exists under every cgroup-v2 directory, so its absence indicates a misconfigured enclosing slice path, not zero controllers delegated.",
+      "estimated_hours": 1.0,
+      "depends_on": [],
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "RED — add SubtreeControlUnreadable variant + two new regression tests",
+          "description": "Land the new error variant `CgroupPreflightError::SubtreeControlUnreadable { slice: PathBuf, source: std::io::Error }` (parallel shape to the existing `CgroupPathDiscoveryFailed` and the just-landed `ProcFilesystemsUnreadable`) AND two new regression tests, but DO NOT change the step-4 read at line 273 yet. The variant must exist for the tests to compile (they pattern-match on the new variant). The Display message names the failure ('could not read `<slice>/cgroup.subtree_control`'), embeds the wrapped I/O error via `{source}`, surfaces `--allow-no-cgroups` as the dev escape hatch, and explicitly does NOT prescribe `systemctl set-property … Delegate=yes` or use the phrase 'delegation required' — those phrases are reserved for `DelegationMissing` and are exactly the misdiagnosis we are correcting. The first new regression test fabricates an unreadable `cgroup.subtree_control` analogue by `mkdir`-ing a directory at that path inside `tempfile::TempDir` (so `read_to_string` returns `IsADirectory`/`Other` deterministically). The second fabricates a fixture where the enclosing-slice directory exists but `cgroup.subtree_control` does NOT (so `read_to_string` returns `NotFound`). Both call `run_preflight_at` with non-zero `uid` and assert (a) the error matches `SubtreeControlUnreadable { slice, source }`, (b) `slice` equals the expected enclosing-slice path, (c) the I/O kind matches expectations (non-NotFound for the directory-path test; NotFound for the missing-file test), (d) the rendered message contains `--allow-no-cgroups` and `docs.overdrive.sh` and does NOT contain `Delegate=yes` or 'delegation required'. Wire both new tests through `tests/integration.rs` under `mod cgroup_isolation { … }`. Commit with `git commit --no-verify` per testing.md §RED scaffolds — the step-4 read still routes I/O errors and NotFound to `DelegationMissing`, so both new tests panic with 'expected SubtreeControlUnreadable, got DelegationMissing'.",
+          "criteria": [
+            "AC1: New variant `CgroupPreflightError::SubtreeControlUnreadable { slice: PathBuf, source: std::io::Error }` exists with a `#[error(\"…\")]` attribute that names the failure cause, embeds the source via `{source}`, embeds the slice via `{slice:?}` or `{}`, surfaces `--allow-no-cgroups`, and explicitly does NOT mention `Delegate=yes` or 'delegation required'.",
+            "AC2: New file `crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_subtree_control_unreadable.rs` exists; uses a directory-path fixture (`std::fs::create_dir(&subtree_control_path)`); fails on the buggy code by panicking with 'expected SubtreeControlUnreadable, got DelegationMissing'.",
+            "AC3: New file `crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_subtree_control_missing_is_not_delegation.rs` exists; fixture creates the enclosing-slice DIRECTORY but NOT `cgroup.subtree_control`; fails on the buggy code by panicking with 'expected SubtreeControlUnreadable, got DelegationMissing'. This test pins Option B (NotFound → SubtreeControlUnreadable, not DelegationMissing).",
+            "AC4: Both new tests are wired through `crates/overdrive-control-plane/tests/integration.rs` under `mod cgroup_isolation { … }` adjacent to the existing `preflight_*` modules.",
+            "AC5: `cargo nextest run -p overdrive-control-plane --features integration-tests --no-run` succeeds on macOS (compile-only gate); commit message marks the RED scaffold state explicitly.",
+            "AC6: `cargo nextest run -p overdrive-control-plane` (default lane, no integration feature) continues to pass — the variant addition does not break unit tests."
+          ],
+          "acceptance_criteria": [
+            "AC1: New variant `CgroupPreflightError::SubtreeControlUnreadable { slice: PathBuf, source: std::io::Error }` exists with a `#[error(\"…\")]` attribute that names the failure cause, embeds the source via `{source}`, embeds the slice via `{slice:?}` or `{}`, surfaces `--allow-no-cgroups`, and explicitly does NOT mention `Delegate=yes` or 'delegation required'.",
+            "AC2: New file `crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_subtree_control_unreadable.rs` exists; uses a directory-path fixture (`std::fs::create_dir(&subtree_control_path)`); fails on the buggy code by panicking with 'expected SubtreeControlUnreadable, got DelegationMissing'.",
+            "AC3: New file `crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_subtree_control_missing_is_not_delegation.rs` exists; fixture creates the enclosing-slice DIRECTORY but NOT `cgroup.subtree_control`; fails on the buggy code by panicking with 'expected SubtreeControlUnreadable, got DelegationMissing'. This test pins Option B (NotFound → SubtreeControlUnreadable, not DelegationMissing).",
+            "AC4: Both new tests are wired through `crates/overdrive-control-plane/tests/integration.rs` under `mod cgroup_isolation { … }` adjacent to the existing `preflight_*` modules.",
+            "AC5: `cargo nextest run -p overdrive-control-plane --features integration-tests --no-run` succeeds on macOS (compile-only gate); commit message marks the RED scaffold state explicitly.",
+            "AC6: `cargo nextest run -p overdrive-control-plane` (default lane, no integration feature) continues to pass — the variant addition does not break unit tests."
+          ],
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/cgroup_preflight.rs",
+            "crates/overdrive-control-plane/tests/integration.rs",
+            "crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_subtree_control_unreadable.rs",
+            "crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_subtree_control_missing_is_not_delegation.rs"
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_subtree_control_unreadable.rs",
+          "scenario_name": "preflight_surfaces_subtree_control_io_error_not_delegation_missing",
+          "tier": "structural",
+          "time_estimate_hours": 0.5,
+          "estimated_hours": 0.5,
+          "dependencies": [],
+          "quality_gates": [
+            "Compile-only on macOS via `cargo nextest run -p overdrive-control-plane --features integration-tests --no-run`.",
+            "Default lane: `cargo nextest run -p overdrive-control-plane` continues to pass (variant addition is non-breaking).",
+            "Linux runtime via `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests` (both new oracles FAIL as expected with the documented panic message; remaining tests PASS).",
+            "Commit shape: `--no-verify` with explicit RED-scaffold marker in the message."
+          ],
+          "deliverables": [
+            "One commit landing the new variant + two new regression tests in RED state."
+          ],
+          "implementation_scope": {
+            "production": [
+              "crates/overdrive-control-plane/src/cgroup_preflight.rs (add `SubtreeControlUnreadable` variant; line 273 unchanged)"
+            ],
+            "tests": [
+              "crates/overdrive-control-plane/tests/integration.rs (mod declarations)",
+              "crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_subtree_control_unreadable.rs (new)",
+              "crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_subtree_control_missing_is_not_delegation.rs (new)"
+            ]
+          }
+        },
+        {
+          "id": "01-02",
+          "name": "GREEN — replace step-4 read with .map_err()? routing every Err to SubtreeControlUnreadable",
+          "description": "Replace `let contents = std::fs::read_to_string(&subtree_control).unwrap_or_default();` at line 273 with `let contents = std::fs::read_to_string(&subtree_control).map_err(|err| CgroupPreflightError::SubtreeControlUnreadable { slice: enclosing_abs.clone(), source: err })?;`. The downstream missing-controllers check is unchanged. Standard commit (no `--no-verify`) — both RED regression tests from step 01-01 transition to GREEN within this commit. Run mutation testing on the file.",
+          "criteria": [
+            "AC1: Line 273 is replaced with `std::fs::read_to_string(&subtree_control).map_err(...)?` routing every `Err(io::Error)` (NotFound included) to `SubtreeControlUnreadable { slice: enclosing_abs.clone(), source: err }`.",
+            "AC2: Both regression tests `preflight_subtree_control_unreadable.rs` and `preflight_subtree_control_missing_is_not_delegation.rs` from step 01-01 transition RED → GREEN.",
+            "AC3: `cargo nextest run -p overdrive-control-plane --features integration-tests --no-run` succeeds on macOS.",
+            "AC4: Existing tests `preflight_no_delegation.rs`, `preflight_missing_cpu.rs`, `preflight_reads_enclosing_slice.rs`, `preflight_v1_host.rs`, `preflight_proc_self_cgroup_malformed.rs`, `preflight_proc_filesystems_unreadable.rs` all pass unchanged.",
+            "AC5: Mutation testing kill rate ≥80% on the diff via `cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-control-plane --file crates/overdrive-control-plane/src/cgroup_preflight.rs`."
+          ],
+          "acceptance_criteria": [
+            "AC1: Line 273 is replaced with `std::fs::read_to_string(&subtree_control).map_err(...)?` routing every `Err(io::Error)` (NotFound included) to `SubtreeControlUnreadable { slice: enclosing_abs.clone(), source: err }`.",
+            "AC2: Both regression tests `preflight_subtree_control_unreadable.rs` and `preflight_subtree_control_missing_is_not_delegation.rs` from step 01-01 transition RED → GREEN.",
+            "AC3: `cargo nextest run -p overdrive-control-plane --features integration-tests --no-run` succeeds on macOS.",
+            "AC4: Existing tests `preflight_no_delegation.rs`, `preflight_missing_cpu.rs`, `preflight_reads_enclosing_slice.rs`, `preflight_v1_host.rs`, `preflight_proc_self_cgroup_malformed.rs`, `preflight_proc_filesystems_unreadable.rs` all pass unchanged.",
+            "AC5: Mutation testing kill rate ≥80% on the diff via `cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-control-plane --file crates/overdrive-control-plane/src/cgroup_preflight.rs`."
+          ],
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/cgroup_preflight.rs"
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_subtree_control_unreadable.rs",
+          "scenario_name": "preflight_surfaces_subtree_control_io_error_not_delegation_missing",
+          "tier": "behavioural",
+          "time_estimate_hours": 0.5,
+          "estimated_hours": 0.5,
+          "dependencies": ["01-01"],
+          "quality_gates": [
+            "Compile-only on macOS via `cargo nextest run -p overdrive-control-plane --features integration-tests --no-run`.",
+            "Linux runtime via `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests` — all tests PASS.",
+            "Mutation testing kill rate ≥80% on the diff (file-scoped to `cgroup_preflight.rs`).",
+            "Standard commit shape (no `--no-verify`) — pre-commit hook must pass."
+          ],
+          "deliverables": [
+            "One commit landing the line-273 fix, transitioning both RED tests to GREEN.",
+            "One mutation-testing run with documented kill rate."
+          ],
+          "implementation_scope": {
+            "production": [
+              "crates/overdrive-control-plane/src/cgroup_preflight.rs (line 273 .map_err()? replacement; rest of function unchanged)"
+            ],
+            "tests": []
+          }
+        }
+      ]
+    }
+  ]
+}

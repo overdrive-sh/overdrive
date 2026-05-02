@@ -1,0 +1,76 @@
+{
+  "schema_version": "3.0",
+  "feature_id": "fix-convergence-loop-not-spawned",
+  "events": [
+    {
+      "sid": "01-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-28T15:24:50Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-28T15:24:55Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: no internal helpers introduced; the test entry is the driving port (run_server_with_obs_and_driver)",
+      "t": "2026-04-28T15:25:01Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: GREEN deferred to Step 01-02 per RED-via-compile-failure two-step pattern (.claude/rules/testing.md \u00a7RED scaffolds)",
+      "t": "2026-04-28T15:25:06Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-28T15:25:43Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-04-28T15:37:11Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS: Step 01-01 RED test confirmed compile-fails on missing ServerConfig fields clock and tick_cadence; cargo check -p overdrive-control-plane --tests --features integration-tests reports E0560 unknown field tick_cadence and unknown field clock",
+      "t": "2026-04-28T15:37:14Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: Step 01-02 is a cohesive 7-edit production wiring change spanning ServerConfig fields, ServerHandle shutdown, spawn loop, handler enqueue, runtime self-re-enqueue, docstring fix, CLI wiring, and broker-mutability adapter; the Step 01-01 acceptance test pins the cohesive end-to-end behavior through the production server; no additional internal helper unit tests are needed beyond what Edit 5 self-re-enqueue and Edits 1-4 cover via the acceptance gate",
+      "t": "2026-04-28T15:37:19Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS: All 7 production edits + broker-mutability adapter + Cargo.toml updates + 10 test fixture updates landed; cargo check workspace all-targets clean; cargo nextest run workspace --features integration-tests 626 passed (4 slow, 3 leaky), 1 skipped; cargo xtask dst 14 invariants passed; cargo xtask dst-lint clean; cargo clippy workspace all-targets -D warnings clean; cargo test --doc passed; Step 01-01 regression test submitted_job_reaches_running_via_real_server_boot passes (Assertion 1 broker.dispatched advanced; Assertion 2 alloc reaches running). Test fixture state value case-fix from 'Running' to 'running' is a test-bug correction matching AllocState::Display canonical lowercase form, not an assertion weakening.",
+      "t": "2026-04-28T16:06:28Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: Commit 7b02bc6 landed; 21 files changed, 443 insertions, 31 deletions; pre-commit lefthook passed (fmt, nextest-affected 154/154, clippy clean, doctest); message includes Step-ID: 01-02 trailer; no --no-verify",
+      "t": "2026-04-28T16:13:22Z"
+    }
+  ]
+}

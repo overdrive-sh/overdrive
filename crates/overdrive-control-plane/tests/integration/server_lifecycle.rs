@@ -86,6 +86,13 @@ async fn spawn_server() -> (ServerHandle, SocketAddr, TempDir, String) {
         bind: "127.0.0.1:0".parse().expect("parse bind addr"),
         data_dir,
         operator_config_dir: operator_config_dir.clone(),
+        // `tick_cadence` + `clock` default per
+        // `fix-convergence-loop-not-spawned` Step 01-02. Per ADR-0034
+        // the in-binary cgroup escape hatch is gone; on macOS the
+        // pre-flight is a `#[cfg(target_os = "linux")]` no-op, and on
+        // Linux this test runs via `cargo xtask lima run --` against
+        // the bundled VM (root + delegated cgroups).
+        ..Default::default()
     };
     let handle: ServerHandle = run_server(config).await.expect("run_server");
     let bound: SocketAddr = handle.local_addr().await.expect("bound addr");
@@ -219,25 +226,37 @@ async fn all_adr_0008_paths_return_200_on_stub_router() {
     // Per ADR-0008 §Endpoints — Phase 1 endpoint coverage:
     //   - `POST /v1/jobs` real handler (step 03-01)
     //   - `GET /v1/jobs/:id` real handler (step 03-02)
-    //   - `GET /v1/allocs` + `GET /v1/nodes` real observation-read
-    //     handlers returning `{"rows":[]}` on a fresh store (step 03-03)
+    //   - `GET /v1/allocs?job=<id>` + `GET /v1/nodes` real observation-read
+    //     handlers (step 03-03 + slice 01 step 01-03).
     //   - `GET /v1/cluster/info` real handler returning a
     //     `ClusterStatus` body (step 03-05). Per-field content coverage
     //     lives in `acceptance::runtime_registers_noop_heartbeat` and
     //     serde shape is pinned by `acceptance::api_type_shapes`.
     // Per-endpoint happy-path coverage lives in the dedicated scenario
     // modules; this test only pins that the routes remain mounted.
-    let observation_gets = ["/v1/allocs", "/v1/nodes"];
-    for path in observation_gets {
-        let url = format!("https://localhost:{}{path}", bound.port());
-        let resp = client.get(&url).send().await.expect(&format!("GET {path}"));
-        assert_eq!(resp.status(), reqwest::StatusCode::OK, "GET {path} expected 200");
-        let body = resp.text().await.expect("body");
-        assert_eq!(
-            body, r#"{"rows":[]}"#,
-            "fresh-store observation read must surface explicit empty rows array"
-        );
-    }
+    //
+    // `/v1/allocs` requires `?job=<id>` (S-AS-09 / single-cut greenfield);
+    // a query against an unknown job returns HTTP 404 with
+    // `body.error == "not_found"`. That shape proves both the route is
+    // mounted AND the handler is the real one (a stub returning 200
+    // would not produce 404). `/v1/nodes` keeps the bare `{"rows":[]}`
+    // shape (no query, no envelope reshape).
+    let nodes_url = format!("https://localhost:{}/v1/nodes", bound.port());
+    let nodes_resp = client.get(&nodes_url).send().await.expect("GET /v1/nodes");
+    assert_eq!(nodes_resp.status(), reqwest::StatusCode::OK, "GET /v1/nodes expected 200");
+    let nodes_body = nodes_resp.text().await.expect("body");
+    assert_eq!(
+        nodes_body, r#"{"rows":[]}"#,
+        "fresh-store observation read at /v1/nodes must surface canonical empty envelope"
+    );
+
+    let allocs_url = format!("https://localhost:{}/v1/allocs?job=ghost-v0", bound.port());
+    let allocs_resp = client.get(&allocs_url).send().await.expect("GET /v1/allocs?job=ghost-v0");
+    assert_eq!(
+        allocs_resp.status(),
+        reqwest::StatusCode::NOT_FOUND,
+        "GET /v1/allocs?job=<unknown> must surface 404 from the real alloc_status handler",
+    );
 
     // `GET /v1/cluster/info` is a routing check: the body must
     // deserialise into the `ClusterStatus` shape, proving the real
@@ -263,8 +282,14 @@ async fn all_adr_0008_paths_return_200_on_stub_router() {
         "spec": {
             "id": "routing-check",
             "replicas": 1,
-            "cpu_milli": 100,
-            "memory_bytes": 67_108_864_u64,
+            "resources": {
+                "cpu_milli": 100,
+                "memory_bytes": 67_108_864_u64,
+            },
+            "exec": {
+                "command": "/bin/true",
+                "args": [],
+            },
         },
     });
     let resp = client.post(&url).json(&body).send().await.expect("POST /v1/jobs");

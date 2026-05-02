@@ -21,8 +21,8 @@ use std::path::Path;
 use std::time::Duration;
 
 use overdrive_control_plane::api::{
-    AllocStatusResponse, ClusterStatus, ErrorBody, JobDescription, NodeList, SubmitJobRequest,
-    SubmitJobResponse,
+    AllocStatusResponse, ClusterStatus, ErrorBody, JobDescription, NodeList, StopJobResponse,
+    SubmitJobRequest, SubmitJobResponse,
 };
 use overdrive_control_plane::tls_bootstrap::{TrustTriple, load_trust_triple};
 use reqwest::StatusCode;
@@ -135,13 +135,96 @@ impl ApiClient {
         &self.base
     }
 
-    /// `POST /v1/jobs` — submit a job spec to the control plane.
+    /// `POST /v1/jobs` with `Accept: application/json` — submit a job
+    /// spec to the control plane via the one-shot JSON-ack lane.
+    ///
+    /// Slice 03 step 03-01 wires this to the `--detach` flag. Setting
+    /// the explicit `Accept: application/json` header pins the JSON
+    /// shape on the wire even when the server's content negotiation
+    /// is updated in a future phase — the criteria require the
+    /// detach lane to be *explicitly* JSON, not implicitly so via
+    /// missing-header default routing.
     ///
     /// # Errors
     ///
     /// See [`CliError`] variants.
     pub async fn submit_job(&self, req: SubmitJobRequest) -> Result<SubmitJobResponse, CliError> {
-        self.post_typed("v1/jobs", &req).await
+        let url = self.build_url("v1/jobs")?;
+        let resp = self
+            .inner
+            .post(url)
+            .header(reqwest::header::ACCEPT, "application/json")
+            .json(&req)
+            .send()
+            .await
+            .map_err(|e| self.transport_err(&e))?;
+        self.decode_typed(resp).await
+    }
+
+    /// `POST /v1/jobs` with `Accept: application/x-ndjson` — drives the
+    /// streaming-submit lane per ADR-0032 §3 / architecture.md §10.
+    ///
+    /// Returns the raw `reqwest::Response` so the caller can iterate
+    /// `bytes_stream()` line-by-line without re-buffering. The response
+    /// status is checked here BEFORE the body is consumed: 4xx / 5xx
+    /// responses parse `ErrorBody` and return [`CliError::HttpStatus`];
+    /// transport failures map to [`CliError::Transport`]. The success
+    /// path leaves body parsing to the caller (one NDJSON line at a
+    /// time).
+    ///
+    /// # Errors
+    ///
+    /// * [`CliError::Transport`] — control plane unreachable.
+    /// * [`CliError::HttpStatus`] — server returned non-2xx.
+    pub async fn submit_job_streaming(
+        &self,
+        req: SubmitJobRequest,
+    ) -> Result<reqwest::Response, CliError> {
+        let url = self.build_url("v1/jobs")?;
+        // Override the client-wide 30s `.timeout(...)` for the streaming
+        // lane. The server-side `streaming_cap` (60s default per
+        // `lib.rs::DEFAULT_STREAMING_CAP`) is the authoritative wall-
+        // clock guarantee — it always fires `ConvergedFailed { Timeout }`
+        // before the connection stalls. A client-side timeout shorter
+        // than the cap aborts the body read mid-stream, surfaces as
+        // `CliError::Transport { cause: "request timed out" }`, and
+        // hides the typed terminal event the server WAS about to emit.
+        // 90 s == streaming_cap (60 s) + a 30 s envelope for round-trip
+        // + reconciler tick latency. Pre-Accepted failures still surface
+        // through `is_connect()` / `is_decode()` paths, which are
+        // bounded by the connect_timeout (10 s).
+        let resp = self
+            .inner
+            .post(url)
+            .header(reqwest::header::ACCEPT, "application/x-ndjson")
+            .timeout(Duration::from_secs(90))
+            .json(&req)
+            .send()
+            .await
+            .map_err(|e| self.transport_err(&e))?;
+
+        let status = resp.status();
+        if status.is_success() {
+            return Ok(resp);
+        }
+
+        let status_u16 = status.as_u16();
+        let body = resp.json::<ErrorBody>().await.unwrap_or_else(|_| synthesize_error_body(status));
+        Err(CliError::HttpStatus { status: status_u16, body })
+    }
+
+    /// `POST /v1/jobs/{id}/stop` — record a stop intent for a
+    /// previously-submitted job. Per ADR-0027.
+    ///
+    /// Empty request body. Returns `StopJobResponse` on 200 OK with
+    /// `outcome ∈ { Stopped, AlreadyStopped }`. A 404 maps to
+    /// [`CliError::HttpStatus`] with `body.error == "not_found"`.
+    ///
+    /// # Errors
+    ///
+    /// See [`CliError`] variants.
+    pub async fn stop_job(&self, id: &str) -> Result<StopJobResponse, CliError> {
+        self.post_typed(&format!("v1/jobs/{id}/stop"), &serde_json::json!({})).await
     }
 
     /// `GET /v1/jobs/{id}` — describe a previously-submitted job.
@@ -163,14 +246,23 @@ impl ApiClient {
         self.get_typed("v1/cluster/info").await
     }
 
-    /// `GET /v1/allocs` — read allocation-status rows from the
-    /// observation store.
+    /// `GET /v1/allocs?job=<id>` — full allocation snapshot for a
+    /// specific job. Slice 01 step 01-03. 404 on unknown job carries
+    /// `body.error == "not_found"` per ADR-0015.
     ///
     /// # Errors
     ///
     /// See [`CliError`] variants.
-    pub async fn alloc_status(&self) -> Result<AllocStatusResponse, CliError> {
-        self.get_typed("v1/allocs").await
+    pub async fn alloc_status_for_job(
+        &self,
+        job_id: &str,
+    ) -> Result<AllocStatusResponse, CliError> {
+        // URL-encode the job_id query parameter via the std url crate
+        // (`Url::query_pairs_mut`), avoiding manual escaping.
+        let mut url = self.build_url("v1/allocs")?;
+        url.query_pairs_mut().append_pair("job", job_id);
+        let resp = self.inner.get(url).send().await.map_err(|e| self.transport_err(&e))?;
+        self.decode_typed(resp).await
     }
 
     /// `GET /v1/nodes` — read node-health rows from the observation

@@ -1,0 +1,79 @@
+{
+  "feature_id": "fix-streaming-cap-timer-reset",
+  "scope": "bugfix",
+  "description": "Fix wall-clock cap timer in streaming submit loop being reset on every received LifecycleEvent.",
+  "rca_path": "docs/feature/fix-streaming-cap-timer-reset/deliver/rca.md",
+  "validation": {
+    "status": "approved",
+    "approved_by": "main-orchestrator",
+    "rationale": "Single-file 4-line mechanical fix with clear RCA and reviewer-confirmed root cause. Two-step minimal roadmap matches /nw-bugfix discipline."
+  },
+  "steps": [
+    {
+      "step_id": "01-01",
+      "name": "RED — cap-deadline regression test",
+      "description": "Add a Tier 1 DST regression test in tests/acceptance/streaming_submit.rs proving the cap is supposed to be a wall-clock deadline from stream entry, not an inactivity timeout. The test injects a non-terminal LifecycleEvent at sim_t=30s, advances SimClock to 61s total, and asserts the stream emits Timeout { after_seconds: 60 }. Test MUST fail against current code (cap deadline reset to 90s by the intervening event; bounded wall-clock timeout fires before SimClock reaches 90s).",
+      "acceptance_criteria": [
+        "New test function s_cp_06b_cap_is_absolute_deadline_not_inactivity_timeout exists in tests/acceptance/streaming_submit.rs.",
+        "Test follows the s_cp_06 fixture pattern (SimClock injection, streaming_cap=60s, request_task spawn, body_ndjson_lines).",
+        "Test injects exactly one non-terminal LifecycleEvent (Pending → Running with no obs row written) between two SimClock ticks (30s + 31s).",
+        "Test wraps request_task in a wall-clock tokio::time::timeout(2s) and the .expect message names the bug.",
+        "Test asserts last NDJSON line has kind == converged_failed, terminal_reason.kind == timeout, terminal_reason.data.after_seconds == 60.",
+        "Test asserts at least one lifecycle_transition line appeared (the injected event was projected before the timeout).",
+        "Running the test against current code via `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --test acceptance -E 'test(s_cp_06b_cap_is_absolute_deadline_not_inactivity_timeout)'` FAILS with the wall-clock-timeout expect message.",
+        "Running the rest of the streaming_submit module via the same harness leaves all other tests in their pre-existing pass/ignore state — no disturbance to neighbouring tests.",
+        "Commit message: `test(control-plane): RED — cap-deadline regression for streaming submit loop` with `Step-ID: 01-01` trailer.",
+        "If lefthook pre-commit fails because of the intentionally-RED test, commit with `git commit --no-verify` and call it out explicitly."
+      ],
+      "test_file": "crates/overdrive-control-plane/tests/acceptance/streaming_submit.rs",
+      "scenario_name": "s_cp_06b_cap_is_absolute_deadline_not_inactivity_timeout",
+      "files_to_modify": [
+        "crates/overdrive-control-plane/tests/acceptance/streaming_submit.rs"
+      ],
+      "implementation_notes": "Place the new test immediately after s_cp_06 (lines 409-461). Reuse existing helpers (build_app_state, build_router, build_submit_request, body_ndjson_lines, make_lifecycle_event, emit_lifecycle). Do NOT call write_row — the obs store stays empty so check_terminal returns None and the loop iterates without emitting a terminal line. Bug mechanic: SimClock::sleep computes deadline=elapsed+duration at call time; after the event-induced loop iteration at sim_t=30s, the new clock.sleep(60s) registers deadline=90s, so tick(31s) totalling 61s does not fire it.",
+      "deliverables": [
+        "Failing test in tests/acceptance/streaming_submit.rs",
+        "Commit with Step-ID: 01-01 trailer"
+      ],
+      "quality_gates": [
+        "Test fails against current code (RED).",
+        "Other tests in streaming_submit module unchanged.",
+        "No production source files modified."
+      ],
+      "dependencies": []
+    },
+    {
+      "step_id": "01-02",
+      "name": "GREEN — pinned cap_future fix",
+      "description": "Apply the pinned-Sleep fix to crates/overdrive-control-plane/src/streaming.rs. Construct cap_future once before the loop, tokio::pin! it, drive via &mut cap_future inside the select! arm. Regression test from step 01-01 turns GREEN. Full overdrive-control-plane test suite remains GREEN.",
+      "acceptance_criteria": [
+        "Single-file edit to crates/overdrive-control-plane/src/streaming.rs in the build_stream function (lines ~211-318).",
+        "let cap_future = clock.sleep(cap); tokio::pin!(cap_future); placed immediately before `loop {`.",
+        "Cap arm in select! changed to `() = &mut cap_future => { ... }` — body unchanged.",
+        "biased; preserved; recv arm still first; all other arms unchanged.",
+        "Doc block (lines 22-25, 57) unchanged — already describes the intended behaviour correctly.",
+        "Test s_cp_06b_cap_is_absolute_deadline_not_inactivity_timeout from step 01-01 PASSES.",
+        "Full `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests` is GREEN — no regressions.",
+        "Clippy clean.",
+        "Commit message: `fix(control-plane): cap timer no longer resets on each lifecycle event` with `Step-ID: 01-02` trailer."
+      ],
+      "test_file": "crates/overdrive-control-plane/tests/acceptance/streaming_submit.rs",
+      "scenario_name": "s_cp_06b_cap_is_absolute_deadline_not_inactivity_timeout",
+      "files_to_modify": [
+        "crates/overdrive-control-plane/src/streaming.rs"
+      ],
+      "implementation_notes": "The fix is mechanical and minimal. Do NOT refactor anything else. Do NOT touch the lagged_recover, check_terminal, pre-subscribe-race snapshot, or doc block. Keep the diff to roughly 4 lines (let + tokio::pin! before loop; arm change inside select).",
+      "deliverables": [
+        "Modified crates/overdrive-control-plane/src/streaming.rs",
+        "Commit with Step-ID: 01-02 trailer"
+      ],
+      "quality_gates": [
+        "Step 01-01 regression test passes.",
+        "Full overdrive-control-plane nextest suite passes (Lima for macOS).",
+        "Clippy clean for affected crate.",
+        "Diff confined to the four lines specified."
+      ],
+      "dependencies": ["01-01"]
+    }
+  ]
+}

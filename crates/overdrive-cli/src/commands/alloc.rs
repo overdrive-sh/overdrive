@@ -26,6 +26,8 @@
 
 use std::path::PathBuf;
 
+use overdrive_control_plane::api::AllocStatusResponse;
+
 use crate::http_client::{ApiClient, CliError};
 
 /// Arguments to [`status`].
@@ -44,11 +46,12 @@ pub struct StatusArgs {
 
 /// Typed output of a successful `alloc status`.
 ///
-/// Carries the canonical `spec_digest` (byte-identical to a local
-/// `ContentHash::of(rkyv::to_bytes(&Job::from_spec(parsed)))` compute
-/// — that's the walking-skeleton guarantee), the number of live
-/// allocations for the job, and an operator-facing empty-state message
-/// referencing `phase-1-first-workload` when `allocations_total == 0`.
+/// Slice 01 step 01-03 — the handler now returns the full
+/// [`AllocStatusResponse`] envelope so the renderer can produce the
+/// journey TUI mockup (per ADR-0033 §4 amended 2026-04-30). Legacy
+/// fields (`job_id`, `spec_digest`, `allocations_total`,
+/// `empty_state_message`) are derived from the envelope at construction
+/// time so existing renderers (`render::alloc_status`) keep working.
 ///
 /// Per ADR-0020 the Raft `commit_index` field is dropped.
 #[derive(Debug, Clone)]
@@ -60,14 +63,17 @@ pub struct AllocStatusOutput {
     /// client-side, because a second canonicalisation would drift.
     pub spec_digest: String,
     /// Number of allocation rows in the observation store whose
-    /// `job_id` matches [`Self::job_id`]. Phase 1 is always zero — the
-    /// scheduler + driver land in `phase-1-first-workload`.
+    /// `job_id` matches [`Self::job_id`].
     pub allocations_total: usize,
     /// Operator-facing empty-state message rendered when
     /// `allocations_total == 0`. Carries a `phase-1-first-workload`
     /// reference so the operator has a pointer to the onboarding step
     /// without consulting docs. Empty string when allocations exist.
     pub empty_state_message: String,
+    /// Full envelope from the server — slice 01 step 01-03 lets the
+    /// renderer surface restart budget, last transition, cause-class
+    /// reason text per ADR-0033 §4.
+    pub snapshot: AllocStatusResponse,
 }
 
 /// Read the canonical `JobDescription` for `args.job` + the allocation
@@ -89,17 +95,13 @@ pub struct AllocStatusOutput {
 pub async fn status(args: StatusArgs) -> Result<AllocStatusOutput, CliError> {
     let client = ApiClient::from_config(&args.config_path)?;
 
-    // 1. Establish the job exists (and pull the authoritative
-    //    spec_digest). Unknown job → HttpStatus 404.
-    let description = client.describe_job(&args.job).await?;
+    // Slice 01 step 01-03 — single round-trip through the snapshot
+    // surface. The handler reads IntentStore + Observation rows +
+    // JobLifecycle view-cache and returns the full envelope; 404 on
+    // missing job carries `body.error == "not_found"`.
+    let snapshot = client.alloc_status_for_job(&args.job).await?;
 
-    // 2. Count the allocations for this job. Phase 1 reads an empty
-    //    observation store; the count is always zero, but reading it
-    //    IS the walking-skeleton proof that the observation path
-    //    round-trips (observation rows ship in `phase-1-first-workload`).
-    let allocs = client.alloc_status().await?;
-    let allocations_total = allocs.rows.iter().filter(|r| r.job_id == args.job).count();
-
+    let allocations_total = snapshot.rows.len();
     let empty_state_message = if allocations_total == 0 {
         format!(
             "0 allocations for job {job} — the scheduler + driver land in \
@@ -110,10 +112,29 @@ pub async fn status(args: StatusArgs) -> Result<AllocStatusOutput, CliError> {
         String::new()
     };
 
+    let spec_digest = snapshot.spec_digest.clone().unwrap_or_default();
+
     Ok(AllocStatusOutput {
         job_id: args.job,
-        spec_digest: description.spec_digest,
+        spec_digest,
         allocations_total,
         empty_state_message,
+        snapshot,
     })
+}
+
+/// Return the raw [`AllocStatusResponse`] envelope.
+///
+/// Variant of [`status`] used by tests (notably S-WS-02) that need to
+/// assert on the cause-class typed payload byte-equality across
+/// streaming + snapshot surfaces. Bypasses the operator-facing
+/// derivation step (`empty_state_message`, etc.) so the assertion target
+/// is the raw wire shape.
+///
+/// # Errors
+///
+/// Same shapes as [`status`].
+pub async fn status_snapshot(args: StatusArgs) -> Result<AllocStatusResponse, CliError> {
+    let client = ApiClient::from_config(&args.config_path)?;
+    client.alloc_status_for_job(&args.job).await
 }

@@ -121,6 +121,64 @@ fn dst_lint_exits_zero_on_the_real_overdrive_workspace() {
 }
 
 // -----------------------------------------------------------------------------
+// US-01 §1.8 — `overdrive-scheduler` is class `core` and dst-lint clean
+// -----------------------------------------------------------------------------
+//
+// This is the explicit slice-1 assertion required by
+// `docs/feature/phase-1-first-workload/distill/test-scenarios.md`
+// scenario 1.8. The clean-workspace test above already passes against
+// every class-core crate including `overdrive-scheduler` — but a
+// dedicated assertion pins the scheduler's scope membership and the
+// zero-violation contract together, so a future refactor that
+// accidentally drops the `crate_class = "core"` declaration on
+// `overdrive-scheduler` (or smuggles a banned API into the crate)
+// fails this test by name rather than mysteriously turning the
+// clean-workspace test green for the wrong reason.
+
+#[test]
+fn overdrive_scheduler_passes_dst_lint() {
+    // Given the real Overdrive workspace.
+    let manifest = real_workspace_manifest();
+
+    // And `overdrive-scheduler` is declared `crate_class = "core"` per
+    // ADR-0024 (D4 OVERRIDE).
+    let scheduler_manifest = manifest
+        .parent()
+        .expect("workspace Cargo.toml lives at the workspace root")
+        .join("crates/overdrive-scheduler/Cargo.toml");
+    let scheduler_toml =
+        std::fs::read_to_string(&scheduler_manifest).expect("read overdrive-scheduler Cargo.toml");
+    assert!(
+        scheduler_toml.contains("crate_class = \"core\""),
+        "overdrive-scheduler MUST declare crate_class = \"core\" so dst-lint scans it; \
+         see docs/product/architecture/adr-0024-*.md"
+    );
+
+    // When Ana runs `cargo xtask dst-lint` against the workspace.
+    let out = run_dst_lint(&manifest);
+
+    // Then the subprocess exits with status zero — covers
+    // `overdrive-scheduler` alongside every other class-core crate.
+    assert!(
+        out.status.success(),
+        "dst-lint must report zero violations against overdrive-scheduler; stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    // And the stderr is empty of any reference to the scheduler crate
+    // — if dst-lint were to flag a violation in scheduler, the file
+    // path would name the crate. Empty stderr (modulo subprocess noise)
+    // is the strongest assertion this test can make without introducing
+    // structured-output coupling.
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        !stderr.contains("crates/overdrive-scheduler/src/"),
+        "dst-lint stderr must NOT reference any overdrive-scheduler source file; \
+         got:\n{stderr}"
+    );
+}
+
+// -----------------------------------------------------------------------------
 // §6.1 scenario 3 — "permits wiring crates to use real implementations"
 // -----------------------------------------------------------------------------
 

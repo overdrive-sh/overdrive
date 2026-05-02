@@ -64,6 +64,10 @@ async fn spawn_server() -> (ServeHandle, TempDir) {
     let config_dir = tmp.path().join("conf");
     std::fs::create_dir_all(&data_dir).expect("create data dir");
     std::fs::create_dir_all(&config_dir).expect("create operator config dir");
+    // Per ADR-0034 the in-binary cgroup escape hatch is gone; on
+    // macOS the pre-flight is a `#[cfg(target_os = "linux")]` no-op,
+    // and on Linux this test runs via `cargo xtask lima run --`
+    // against the bundled VM (root + delegated cgroups).
     let args = ServeArgs { bind, data_dir, config_dir };
     let handle = overdrive_cli::commands::serve::run(args).await.expect("serve::run");
     (handle, tmp)
@@ -80,8 +84,14 @@ const fn payments_toml_spec_str() -> &'static str {
     r#"
 id = "payments"
 replicas = 3
+
+[resources]
 cpu_milli = 500
 memory_bytes = 536870912
+
+[exec]
+command = "/bin/true"
+args = []
 "#
 }
 
@@ -92,8 +102,14 @@ const fn payments_altered_toml_spec_str() -> &'static str {
     r#"
 id = "payments"
 replicas = 5
+
+[resources]
 cpu_milli = 500
 memory_bytes = 536870912
+
+[exec]
+command = "/bin/true"
+args = []
 "#
 }
 

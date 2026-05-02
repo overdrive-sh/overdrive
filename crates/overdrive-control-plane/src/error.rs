@@ -45,6 +45,14 @@ pub enum ControlPlaneError {
     #[error(transparent)]
     Tls(#[from] crate::tls_bootstrap::TlsBootstrapError),
 
+    /// Pre-flight cgroup v2 delegation refusal per ADR-0028.
+    /// Surfaced from the boot-path pre-flight as `From` conversion;
+    /// rendered to the operator via `Display` (multi-line "what / why /
+    /// how to fix" shape per nw-ux-tui-patterns) and never reaches an
+    /// HTTP response — the listener doesn't bind on this error.
+    #[error(transparent)]
+    Cgroup(#[from] crate::cgroup_preflight::CgroupPreflightError),
+
     #[error("internal: {0}")]
     Internal(String),
 }
@@ -117,6 +125,14 @@ pub fn to_response(err: ControlPlaneError) -> (StatusCode, ErrorBody) {
             )
         }
         ControlPlaneError::Tls(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
+        ),
+        ControlPlaneError::Cgroup(e) => (
+            // Pre-flight refusal happens BEFORE any listener binds; this
+            // arm exists for completeness so the enum match stays
+            // exhaustive. In practice a Cgroup error never reaches an
+            // HTTP response — the operator sees it on stderr at boot.
             StatusCode::INTERNAL_SERVER_ERROR,
             ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
         ),

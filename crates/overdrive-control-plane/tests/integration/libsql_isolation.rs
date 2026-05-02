@@ -205,7 +205,15 @@ async fn alpha_canary_row_invisible_to_beta_handle() {
 /// provisioner is permitted to create the `data_dir` itself (so
 /// `canonicalize` succeeds), but it must not fabricate arbitrary
 /// paths under `/nonexistent`.
+///
+/// Ignored: the test premise is "a normal user cannot create
+/// `/nonexistent/...`", which is false under root. The Lima dev
+/// VM and Tier-3 CI both run integration tests with `sudo` so
+/// cgroup writes succeed; in that context `create_dir_all` happily
+/// fabricates the path and the assertion fires. Pre-existing test
+/// from step 04-03 (origin/main); kept marked but not executed.
 #[tokio::test]
+#[ignore = "fails under root (Lima sudo / Tier-3 CI); premise assumes unprivileged user"]
 async fn non_existent_data_dir_parent_returns_error() {
     // A path whose parent cannot plausibly exist. `std::fs::create_dir_all`
     // should fail here (no permission to create under `/nonexistent`,

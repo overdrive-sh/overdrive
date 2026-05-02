@@ -24,7 +24,11 @@
 // allow to this module, which contains exactly one `utoipa` derive.
 #![allow(clippy::needless_for_each)]
 
-use overdrive_core::aggregate::JobSpecInput;
+use overdrive_core::TransitionReason;
+use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
+use overdrive_core::traits::driver::DriverType;
+use overdrive_core::traits::observation_store::AllocState;
+use overdrive_core::transition_reason::StoppedBy;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -60,6 +64,29 @@ pub struct SubmitJobResponse {
     pub job_id: String,
     pub spec_digest: String,
     pub outcome: IdempotencyOutcome,
+}
+
+/// Response for `POST /v1/jobs/{id}/stop`. Per ADR-0027 the body shape
+/// is `{ job_id, outcome }` where `outcome ∈ { "stopped",
+/// "already_stopped" }`. 404 on unknown job (separate path).
+///
+/// `outcome` is wire-stringly-typed (lowercase JSON via
+/// `#[serde(rename_all = "snake_case")]`) so future verbs (start,
+/// restart, cancel) can extend the enum additively.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct StopJobResponse {
+    pub job_id: String,
+    pub outcome: StopOutcome,
+}
+
+/// Outcome of `POST /v1/jobs/{id}/stop` per ADR-0027.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum StopOutcome {
+    /// First successful stop — the stop intent was newly recorded.
+    Stopped,
+    /// A stop intent was already on file for this job — no-op.
+    AlreadyStopped,
 }
 
 /// Outcome of an idempotent `POST /v1/jobs` submission.
@@ -131,27 +158,86 @@ pub struct BrokerCountersBody {
 
 /// Response for `GET /v1/allocs`.
 ///
-/// Phase 1 always renders an empty `rows` array per US-03 AC — the
-/// allocation-status path is owned by Phase 2. The typed `rows` field
-/// is present so the CLI and external clients can parse the response
-/// into a concrete shape rather than `serde_json::Value`.
+/// Per ADR-0033 §1 amended 2026-04-30 / Slice 01 step 01-03 — the
+/// envelope carries top-level identity (`job_id`, `spec_digest`),
+/// replica counts (`replicas_desired` / `replicas_running`) projected
+/// from the `IntentStore` + observation rows, and a `restart_budget`
+/// block hydrated from the `JobLifecycle` reconciler view cache.
+///
+/// On the empty / 200 path with no rows the envelope still carries
+/// `replicas_desired` (from the spec) so the CLI can render an
+/// honest empty state — see step 01-03 task description and
+/// `wave-decisions.md` [D2].
 #[derive(Debug, Clone, Serialize, Deserialize, Default, ToSchema)]
 pub struct AllocStatusResponse {
+    /// Canonical job id this snapshot describes. `None` is reserved
+    /// for forward-compat (Phase 2 may add cluster-wide reads); Phase 1
+    /// always populates it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub job_id: Option<String>,
+    /// SHA-256 (hex, 64 chars) of the canonical rkyv-archived `Job`
+    /// bytes — see `JobDescription::spec_digest`. Pinned per ADR-0002.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spec_digest: Option<String>,
+    /// Desired replica count from `Job.spec.replicas`.
+    #[serde(default)]
+    pub replicas_desired: u32,
+    /// Number of `rows` whose state is `Running`.
+    #[serde(default)]
+    pub replicas_running: u32,
     pub rows: Vec<AllocStatusRowBody>,
+    /// Aggregate restart-budget block for the job — derived from the
+    /// `JobLifecycle` reconciler view cache. `max` is hard-coded to
+    /// `RESTART_BACKOFF_CEILING` (5) in Phase 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restart_budget: Option<RestartBudget>,
 }
 
-/// Allocation-status row body.
+/// Allocation-status row body — extended per ADR-0033 §1 / Slice 01
+/// step 01-03.
 ///
-/// Phase 1 shape mirrors the observation `AllocStatusRow` projected to
-/// the wire — minimal fields matching the whitepaper §4 schema
-/// (`alloc_id`, `job_id`, `node_id`, `state`). Phase 2+ adds columns
-/// additively.
-#[derive(Debug, Clone, Serialize, Deserialize, Default, ToSchema, PartialEq, Eq)]
+/// `state` is the typed `AllocStateWire` (promoted from `String` per
+/// [C9] greenfield single-cut — no parallel legacy field). `reason`
+/// remains the typed `Option<TransitionReason>` from ADR-0032 §3
+/// Amendment; the renderer calls `TransitionReason::human_readable()`
+/// for display. New cause-class payloads carry their structured data
+/// directly on the wire, and the row's `error` field carries the
+/// verbatim driver detail string (mirrors `AllocStatusRow.detail`).
+///
+/// `last_transition` is `Option<TransitionRecord>` — populated when
+/// the row's `reason` is set; the renderer reads it to produce the
+/// `from → to reason: ... source: ... at: ...` block.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 pub struct AllocStatusRowBody {
     pub alloc_id: String,
     pub job_id: String,
     pub node_id: String,
-    pub state: String,
+    pub state: AllocStateWire,
+    /// Structured cause for this row's most recent transition.
+    /// Source-of-truth pin: this enum is identical to the streaming
+    /// `LifecycleTransition.reason` surface; byte-equality across
+    /// surfaces is structural ([C6]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<overdrive_core::TransitionReason>,
+    /// Resource envelope this allocation requested.
+    pub resources: ResourcesBody,
+    /// Logical-timestamp string of the row's first observed transition
+    /// to a non-Pending state. `None` for never-started Pending rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started_at: Option<String>,
+    /// Phase 2+ — exit code observation. `None` in Phase 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    /// Last-transition structured record. `None` for never-transitioned
+    /// rows (e.g. the very first Pending observation).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_transition: Option<TransitionRecord>,
+    /// Verbatim driver / OS detail text — mirrors the underlying row's
+    /// `detail: Option<String>`. This is the audit-preserving sidecar
+    /// the typed `reason` payload cannot capture (e.g. raw `errno`
+    /// strings).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 /// Response for `GET /v1/nodes`. Phase 1 always renders an empty
@@ -205,6 +291,7 @@ pub struct ErrorBody {
     paths(
         crate::handlers::submit_job,
         crate::handlers::describe_job,
+        crate::handlers::stop_job,
         crate::handlers::cluster_status,
         crate::handlers::alloc_status,
         crate::handlers::node_list,
@@ -213,6 +300,8 @@ pub struct ErrorBody {
         SubmitJobRequest,
         SubmitJobResponse,
         IdempotencyOutcome,
+        StopJobResponse,
+        StopOutcome,
         JobDescription,
         ClusterStatus,
         BrokerCountersBody,
@@ -222,6 +311,34 @@ pub struct ErrorBody {
         NodeRowBody,
         ErrorBody,
         JobSpecInput,
+        ResourcesInput,
+        ExecInput,
+        DriverInput,
+        // Slice 01 step 01-02 — wire types per DWD-03.
+        TerminalReason,
+        AllocStateWire,
+        RestartBudget,
+        ResourcesBody,
+        TransitionSource,
+        TransitionRecord,
+        // Cause-class enum re-exported from `overdrive-core` per
+        // ADR-0032 §3 Amendment so its `ToSchema` derive registers in
+        // the OpenAPI document. The streaming surface (slice 02) and
+        // the snapshot surface (slice 01 step 01-03) both reference it.
+        TransitionReason,
+        // `DriverType` carries the new `ToSchema` derive (DWD-03 cross-
+        // cutting derive change); the `TransitionSource::Driver`
+        // variant references it inline so the schema must register.
+        DriverType,
+        // Slice 02 step 02-02 — `SubmitEvent` is the streaming
+        // `application/x-ndjson` line shape on `POST /v1/jobs`. Registered
+        // here so the OpenAPI document carries the schema reference even
+        // though the path's `#[utoipa::path(...)]` macro declares the
+        // multi-content-type response shape.
+        SubmitEvent,
+        // `StoppedBy` is carried by `SubmitEvent::ConvergedStopped.by`
+        // and must be registered so the schema reference resolves.
+        StoppedBy,
     )),
     tags(
         (name = "jobs", description = "Job lifecycle endpoints"),
@@ -230,3 +347,325 @@ pub struct ErrorBody {
     ),
 )]
 pub struct OverdriveApi;
+
+// ---------------------------------------------------------------------------
+// Wire types — Slice 01 GREEN promotions per DWD-03
+//
+// The four scaffold types from DISTILL — `TerminalReason`, `AllocStateWire`,
+// `RestartBudget`, `ResourcesBody` — are promoted to GREEN with full
+// `Serialize`/`Deserialize`/`ToSchema`/`Debug`/`Clone`/`PartialEq` derives.
+// `TransitionSource` and `TransitionRecord` are the deferred net-new types
+// from DWD-03 — they require `ToSchema` on `DriverType` (a cross-cutting
+// derive change in `overdrive-core::traits::driver`), which lands in this
+// same step.
+//
+// The streaming `SubmitEvent` declaration (which carries the same
+// `TransitionSource` chain) is deferred to slice 02 step 02-02 so it can
+// land in lockstep with the broadcast-channel wiring in `AppState` and
+// the NDJSON streaming handler. Both surfaces share the SAME
+// `TransitionReason` enum re-exported from `overdrive-core` —
+// byte-equality across surfaces is structural, not discipline.
+// ---------------------------------------------------------------------------
+
+/// Streaming `SubmitEvent::ConvergedFailed` terminal-cause discriminator.
+///
+/// Phase 1 variants per ADR-0032 §3 (additive going forward —
+/// `#[non_exhaustive]`).
+///
+/// **Amended 2026-04-30 in lockstep with `TransitionReason`'s cause-
+/// class refactor**: the variants now carry structured payloads. The
+/// inner `cause: TransitionReason` on `BackoffExhausted` and
+/// `DriverError` duplicates the most recent cause-class
+/// `LifecycleTransition.reason` so a CLI rendering only the terminal
+/// line still has structured cause data; the `Timeout` variant carries
+/// the configured cap so renderers can say "did not converge in 60s"
+/// without reading server config.
+///
+/// | Variant | When emitted by the streaming handler |
+/// |---|---|
+/// | `DriverError { cause }` | unrecoverable driver error on a path the reconciler will not retry |
+/// | `BackoffExhausted { attempts, cause }` | restart budget hit (5 attempts in Phase 1) |
+/// | `Timeout { after_seconds }` | server wall-clock cap fired |
+///
+/// The CLI maps `ConvergedRunning → 0` and `ConvergedFailed → 1` regardless
+/// of the inner `terminal_reason`; the terminal reason controls *rendering*,
+/// not exit code (ADR-0032 §9).
+///
+/// Wire shape via `#[serde(tag = "kind", content = "data", rename_all =
+/// "snake_case")]` — same shape as `TransitionReason`. The variants are
+/// no longer `Copy`: `BackoffExhausted` and `DriverError` carry an inner
+/// `cause: TransitionReason`, which is itself non-`Copy` (cause-class
+/// variants own `String` payloads). Consumers either clone (cheap for
+/// progress markers, owned-data for cause variants) or take by reference.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "kind", content = "data", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum TerminalReason {
+    /// Streaming handler observed an unrecoverable driver error on a
+    /// path the reconciler will not retry. `cause` is the cause-class
+    /// `TransitionReason` that originated the terminal failure.
+    DriverError { cause: TransitionReason },
+    /// Streaming handler observed `restart_count == max` and the latest
+    /// row state is `Failed`. `attempts` is the number of attempts made
+    /// (= `RESTART_BUDGET_MAX` in Phase 1, hard-coded to 5); `cause` is
+    /// the cause-class `TransitionReason` of the final failed attempt.
+    BackoffExhausted { attempts: u32, cause: TransitionReason },
+    /// Streaming handler's wall-clock cap fired before any terminal
+    /// event arrived. `after_seconds` is the configured cap so the CLI
+    /// can render `"did not converge in {after_seconds}s"` without
+    /// reading server config.
+    Timeout { after_seconds: u32 },
+    /// The streaming handler's lifecycle-events broadcast channel was
+    /// closed before a terminal event arrived (typical: server
+    /// shutdown while a stream is in-flight). Distinct from `Timeout`
+    /// (no wall-clock cap fired) and from `DriverError` (no
+    /// `TransitionReason` is available — the bus that would carry one
+    /// is gone). Operators should re-issue the submit; the underlying
+    /// job state is still recoverable from `overdrive alloc status`.
+    ///
+    /// Payload-free: there is no further structured information to
+    /// surface; the human-readable cause stays in the sibling
+    /// `error: Option<String>` field on `SubmitEvent::ConvergedFailed`.
+    StreamInterrupted,
+}
+
+/// Wire-shaped projection of the internal `AllocState` enum.
+///
+/// The internal `AllocState` (in `overdrive-core::traits::observation_store`)
+/// derives `rkyv::*` for the observation store. The wire shape needs
+/// `Serialize`/`Deserialize`/`ToSchema` and a stable lowercase string repr.
+/// Adding all those derives to the internal type would entangle storage
+/// and wire concerns, so this mirror enum exists for the wire surface
+/// (ADR-0032 §3, reuse-analysis CREATE NEW rationale).
+///
+/// `Failed` per ADR-0032 §5 — the action shim, when handling
+/// `DriverError::StartRejected`, writes `state: Failed` (instead of
+/// `Terminated`). The internal `AllocState::Failed` variant landed in
+/// step 01-01; this wire type's `Failed` variant projects it.
+///
+/// Conversion is mechanical via [`From<AllocState>`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+#[non_exhaustive]
+pub enum AllocStateWire {
+    Pending,
+    Running,
+    Draining,
+    Suspended,
+    Terminated,
+    /// Per ADR-0032 §5 — distinguishes "operator stopped" from
+    /// "driver could not start".
+    Failed,
+}
+
+impl From<AllocState> for AllocStateWire {
+    fn from(state: AllocState) -> Self {
+        match state {
+            AllocState::Pending => Self::Pending,
+            AllocState::Running => Self::Running,
+            AllocState::Draining => Self::Draining,
+            AllocState::Suspended => Self::Suspended,
+            AllocState::Terminated => Self::Terminated,
+            AllocState::Failed => Self::Failed,
+        }
+    }
+}
+
+/// Snapshot's restart-budget block per ADR-0033 §1.
+///
+/// `exhausted` is redundant with `used >= max`; carried explicitly on the
+/// wire so a CLI that wants to render the `(backoff exhausted)` annotation
+/// does not have to compare two integers each time.
+///
+/// Phase 1: `max` is hard-coded to 5 (matching the existing
+/// `RESTART_BUDGET_MAX` constant in `JobLifecycle::reconcile`); Phase 2+
+/// makes it per-job-config (DESIGN [D7]).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+pub struct RestartBudget {
+    pub used: u32,
+    pub max: u32,
+    pub exhausted: bool,
+}
+
+/// Snapshot's per-row `resources` block per ADR-0033 §1.
+///
+/// Mirrors the internal `overdrive_core::traits::driver::Resources` shape
+/// for the wire. Conversion is mechanical via [`From<&Resources>`].
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+pub struct ResourcesBody {
+    pub cpu_milli: u32,
+    pub memory_bytes: u64,
+}
+
+impl From<&overdrive_core::traits::driver::Resources> for ResourcesBody {
+    fn from(r: &overdrive_core::traits::driver::Resources) -> Self {
+        Self { cpu_milli: r.cpu_milli, memory_bytes: r.memory_bytes }
+    }
+}
+
+/// Source of a lifecycle transition — who/what produced the row write.
+///
+/// Phase 1 has two variants:
+///
+/// | Variant | When emitted |
+/// |---|---|
+/// | `Reconciler` | the `JobLifecycle` reconciler converged a state and emitted an `Action::*` that the action shim materialised into an `AllocStatusRow` write |
+/// | `Driver(DriverType)` | the action shim observed a driver `start`/`stop`/`status` result and wrote the row directly (post-spawn settle, immediate failure, etc.) |
+///
+/// The `Driver(DriverType)` carries the driver kind so a CLI rendering
+/// the snapshot can say `from driver=exec` without round-tripping
+/// through cluster-info to look up the active drivers. Phase 2+ may add
+/// more variants (operator action, gateway redirect, sidecar) — the
+/// enum is `#[non_exhaustive]` to make additions additive.
+///
+/// Wire shape via `#[serde(tag = "kind", content = "data", rename_all =
+/// "snake_case")]` — `{"kind": "reconciler"}` for the unit variant,
+/// `{"kind": "driver", "data": "exec"}` for the typed variant
+/// (`DriverType` itself serialises as a kebab-case string per its own
+/// `#[serde(rename_all = "kebab-case")]`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "kind", content = "data", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum TransitionSource {
+    /// Reconciler emitted the action that produced this row.
+    Reconciler,
+    /// Driver (named) produced this row directly.
+    Driver(DriverType),
+}
+
+/// Streaming-submit event emitted on the `Accept: application/x-ndjson`
+/// lane of `POST /v1/jobs` per ADR-0032 §3 (cause-class amendment
+/// 2026-04-30).
+///
+/// Each event renders as one NDJSON line. The wire shape is
+/// `#[serde(tag = "kind", content = "data", rename_all = "snake_case")]`
+/// — `Accepted`, `LifecycleTransition`, `ConvergedRunning`,
+/// `ConvergedFailed`. Cause-class payloads (`TransitionReason`,
+/// `TerminalReason`) carry the same tag/content shape, producing
+/// nested structures like:
+///
+/// ```text
+/// kind=accepted             data={spec_digest, intent_key, outcome}
+/// kind=lifecycle_transition data={alloc_id, from, to, reason, detail?, source, at}
+/// kind=converged_running    data={alloc_id, started_at}
+/// kind=converged_failed     data={alloc_id?, terminal_reason, reason?, error?}
+/// ```
+///
+/// `reason` and `terminal_reason` carry their own `{kind, data}`
+/// structures (the cause-class amendment): a Phase-1 `ExecDriver`
+/// `spawn(2)` ENOENT renders as `reason = {kind=exec_binary_not_found,
+/// data={path}}`. A `BackoffExhausted` terminal carries the nested
+/// cause: `terminal_reason = {kind=backoff_exhausted, data={attempts,
+/// cause}}` where `cause` is itself a typed `TransitionReason`.
+///
+/// `LifecycleTransition` is a wire projection of (a subset of)
+/// [`crate::action_shim::LifecycleEvent`]'s fields. The streaming
+/// handler (slice 02 step 02-03) subscribes to the broadcast channel
+/// on `AppState`, projects each `LifecycleEvent` onto a
+/// `SubmitEvent::LifecycleTransition`, and writes one NDJSON line via
+/// `serde_json::to_writer` + `b'\n'`.
+///
+/// **Source-of-truth pin**: `LifecycleTransition.reason` is the SAME
+/// `TransitionReason` enum as the snapshot's
+/// `AllocStatusRowBody.reason` and `TransitionRecord.reason` — byte-
+/// equality across surfaces is structural, not discipline ([C6]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "kind", content = "data", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum SubmitEvent {
+    /// First line of every streaming response — confirms the
+    /// `IntentStore` commit. `outcome` carries the idempotency verdict
+    /// (Inserted / Unchanged) per ADR-0020.
+    Accepted { spec_digest: String, intent_key: String, outcome: IdempotencyOutcome },
+    /// Lifecycle transition observed on the broadcast channel.
+    /// Mirrors the snapshot's `TransitionRecord` shape with the alloc
+    /// id added so a stream consumer can disambiguate concurrent
+    /// allocations. `from` is the wire-state the alloc was in before
+    /// the transition; `to` is the new wire-state. `detail` carries
+    /// the verbatim driver / OS text the typed cause-class payload
+    /// does not encode.
+    LifecycleTransition {
+        alloc_id: String,
+        from: AllocStateWire,
+        to: AllocStateWire,
+        reason: TransitionReason,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+        source: TransitionSource,
+        at: String,
+    },
+    /// Terminal — convergence reached `Running`. The CLI maps this to
+    /// exit code 0 per ADR-0032 §9.
+    ConvergedRunning { alloc_id: String, started_at: String },
+    /// Terminal — convergence failed. The CLI maps this to exit code 1
+    /// per ADR-0032 §9 regardless of the inner `terminal_reason`; the
+    /// terminal reason controls *rendering*, not exit code.
+    ///
+    /// `alloc_id` is `Option` because some terminal failures fire
+    /// before any allocation has been written (e.g. a wall-clock
+    /// timeout that observes no broadcast events). `reason` carries
+    /// the most recent cause-class `TransitionReason` for renderers
+    /// that want the structured cause without re-parsing the
+    /// `terminal_reason`'s inner payload. `error` carries the verbatim
+    /// driver text the typed payloads do not capture.
+    ConvergedFailed {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        alloc_id: Option<String>,
+        terminal_reason: TerminalReason,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<TransitionReason>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        error: Option<String>,
+    },
+    /// Terminal — workload was stopped (operator or reconciler-driven
+    /// clean exit). Serialises as `kind == "converged_stopped"`.
+    ///
+    /// `alloc_id` is `Option` for forward-compat (edge case: Terminated
+    /// broadcast arrives before any alloc row is observable). `by`
+    /// identifies whether the stop was operator-initiated or
+    /// reconciler-driven (e.g. clean process exit).
+    ConvergedStopped {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        alloc_id: Option<String>,
+        by: StoppedBy,
+    },
+}
+
+/// Lifecycle-transition record carried inside the snapshot's
+/// `last_transition` block per ADR-0033 §1 and on the streaming
+/// `SubmitEvent::LifecycleTransition` event per ADR-0032 §3.
+///
+/// Both surfaces share the SAME `TransitionRecord` shape — the
+/// type-identity assertion in
+/// `tests/acceptance/transition_reason_type_identity.rs` (S-AS-02)
+/// pins this at compile time so byte-equality across surfaces is
+/// structural rather than discipline.
+///
+/// `from` is `None` for the very first transition emitted for an
+/// allocation (there is no prior state); subsequent transitions carry
+/// the previous wire-state. `to` is always populated.
+///
+/// `at` is the logical-timestamp string from `LogicalTimestamp::Display`
+/// (Phase 1: `(counter, writer)` rendered via the existing observation
+/// timestamp shape). The wire keeps it stringly-typed because the CLI
+/// renders it verbatim and never round-trips it through arithmetic; a
+/// future phase that needs structured wall-clock can split into
+/// `at_logical` + `at_wallclock` fields additively.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct TransitionRecord {
+    /// Wire-state the allocation was in before this transition.
+    /// `None` for the first transition emitted for an alloc id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from: Option<AllocStateWire>,
+    /// Wire-state the allocation moved to.
+    pub to: AllocStateWire,
+    /// Structured cause for this transition. SAME enum as the streaming
+    /// `SubmitEvent::LifecycleTransition.reason` — pinned by
+    /// S-AS-02's compile-time witness.
+    pub reason: TransitionReason,
+    /// Who/what produced this row write.
+    pub source: TransitionSource,
+    /// Logical-timestamp string for this transition. Stringly-typed on
+    /// the wire — see struct-level docs.
+    pub at: String,
+}

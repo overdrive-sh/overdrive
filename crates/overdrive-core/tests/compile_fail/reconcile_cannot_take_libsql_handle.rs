@@ -3,12 +3,13 @@
 //! `hydrate`; substituting it for the trait's `&TickContext`
 //! parameter in a `reconcile` impl must fail to compile.
 //!
-//! The `Reconciler` trait fixes the `reconcile` signature as
-//! `fn(&Self, &State, &State, &Self::View, &TickContext) ->
-//! (Vec<Action>, Self::View)`. A synthetic impl that replaces
-//! `&TickContext` with `&LibsqlHandle` triggers E0053 ("method has
-//! an incompatible type for trait"), naming the expected
-//! `&TickContext` and the supplied `&LibsqlHandle`.
+//! Per ADR-0021, the `Reconciler` trait fixes the `reconcile`
+//! signature as `fn(&Self, &Self::State, &Self::State, &Self::View,
+//! &TickContext) -> (Vec<Action>, Self::View)` — `State` is now a
+//! typed associated type rather than a single shared placeholder. A
+//! synthetic impl that replaces `&TickContext` with `&LibsqlHandle`
+//! triggers E0053 ("method has an incompatible type for trait"),
+//! naming the expected `&TickContext` and the supplied `&LibsqlHandle`.
 //!
 //! This defends against a future refactor that accidentally relaxes
 //! the trait method signature to accept `&LibsqlHandle` in
@@ -16,7 +17,7 @@
 //! pre-hydration pattern was designed to close.
 
 use overdrive_core::reconciler::{
-    Action, HydrateError, LibsqlHandle, Reconciler, ReconcilerName, State, TargetResource,
+    Action, HydrateError, LibsqlHandle, Reconciler, ReconcilerName, TargetResource,
 };
 
 struct BadReconciler {
@@ -24,6 +25,7 @@ struct BadReconciler {
 }
 
 impl Reconciler for BadReconciler {
+    type State = ();
     type View = ();
 
     fn name(&self) -> &ReconcilerName {
@@ -43,8 +45,8 @@ impl Reconciler for BadReconciler {
     // catches via E0053.
     fn reconcile(
         &self,
-        _desired: &State,
-        _actual: &State,
+        _desired: &Self::State,
+        _actual: &Self::State,
         _view: &Self::View,
         _db: &LibsqlHandle,
     ) -> (Vec<Action>, Self::View) {

@@ -24,7 +24,7 @@ use proptest::prelude::*;
 
 use overdrive_core::id::{ContentHash, CorrelationKey};
 use overdrive_core::reconciler::{
-    Action, HydrateError, LibsqlHandle, Reconciler, ReconcilerName, ReconcilerNameError, State,
+    Action, HydrateError, LibsqlHandle, Reconciler, ReconcilerName, ReconcilerNameError,
     TargetResource, TargetResourceError, TickContext,
 };
 
@@ -432,13 +432,14 @@ fn action_noop_is_constructable() {
 /// typecheck.
 // Factored into a type alias so the 5-parameter assertion stays readable
 // and clippy::type_complexity does not fire. The alias IS the assertion
-// — a regression that makes `reconcile` `async fn` or drops the
-// `(Vec<Action>, R::View)` tuple return fails to typecheck at the
-// binding site below.
+// — a regression that makes `reconcile` `async fn`, drops the
+// `(Vec<Action>, R::View)` tuple return, or reverts the typed
+// `Reconciler::State` associated type (ADR-0021) to a single placeholder
+// `&State` parameter fails to typecheck at the binding site below.
 type ReconcileFn<R> = fn(
     &R,
-    &State,
-    &State,
+    &<R as Reconciler>::State,
+    &<R as Reconciler>::State,
     &<R as Reconciler>::View,
     &TickContext,
 ) -> (Vec<Action>, <R as Reconciler>::View);
@@ -451,12 +452,16 @@ fn enforce_pure_sync_signature<R: Reconciler>() {
 }
 
 /// Minimal implementor used to prove the trait is inhabited with
-/// `View = ()` and that `reconcile` returns `(Vec<Action>, ())` directly.
+/// `State = ()`, `View = ()`, and that `reconcile` returns
+/// `(Vec<Action>, ())` directly. Per ADR-0021, `State` is now a typed
+/// associated type rather than a single shared placeholder; a
+/// reconciler with no `desired`/`actual` projection picks `State = ()`.
 struct NoopReconciler {
     name: ReconcilerName,
 }
 
 impl Reconciler for NoopReconciler {
+    type State = ();
     type View = ();
 
     fn name(&self) -> &ReconcilerName {
@@ -473,8 +478,8 @@ impl Reconciler for NoopReconciler {
 
     fn reconcile(
         &self,
-        _desired: &State,
-        _actual: &State,
+        _desired: &Self::State,
+        _actual: &Self::State,
         _view: &Self::View,
         _tick: &TickContext,
     ) -> (Vec<Action>, Self::View) {
@@ -490,8 +495,10 @@ fn reconciler_trait_signature_is_synchronous_no_async_no_clock_param() {
 
     let reconciler = NoopReconciler { name: ReconcilerName::new("noop-heartbeat").expect("valid") };
 
-    let desired = State;
-    let actual = State;
+    // Per ADR-0021, `State` is per-reconciler; `NoopReconciler::State =
+    // ()` so `desired`/`actual` are the unit value.
+    let desired: () = ();
+    let actual: () = ();
     let view: () = ();
     // Construct one `TickContext`. Test code is exempt from the
     // `Instant::now()` dst-lint ban (dst-lint only scans `src/**/*.rs`).
@@ -514,8 +521,9 @@ fn reconciler_twin_invocation_produces_identical_output() {
     // across the twin invocation.
     let reconciler = NoopReconciler { name: ReconcilerName::new("noop-heartbeat").expect("valid") };
 
-    let desired = State;
-    let actual = State;
+    // Per ADR-0021, `State` is per-reconciler; `NoopReconciler::State = ()`.
+    let desired: () = ();
+    let actual: () = ();
     let view: () = ();
     let now = Instant::now();
     let tick = TickContext { now, tick: 0, deadline: now + Duration::from_secs(1) };

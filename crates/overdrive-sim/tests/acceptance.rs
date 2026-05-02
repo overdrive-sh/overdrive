@@ -27,6 +27,16 @@ mod acceptance {
     // US-06 §6.1 — Sim adapters for every nondeterminism port.
     mod sim_adapters_deterministic;
 
+    // fix-terminated-slot-accumulation Step 01-01 — RED scaffold:
+    // SimDriver allocations map cardinality must return to zero after
+    // start+stop cycles. Mirror of the host-side regression in
+    // `crates/overdrive-worker/tests/integration/exec_driver/
+    // live_map_bounded.rs`.
+    mod sim_driver_live_map_bounded;
+
     // Step 04-05 — Reconciler-primitive DST invariants.
     mod reconciler_invariants_pass;
+
+    // Step 02-02 — `ReconcilerIsPure` holds for `JobLifecycle` (scenario 3.2).
+    mod reconciler_is_pure_with_job_lifecycle;
 }

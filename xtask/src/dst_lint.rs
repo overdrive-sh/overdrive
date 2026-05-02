@@ -43,6 +43,44 @@ pub const BANNED_APIS: &[(&str, &str)] = &[
     ("tokio::net::UdpSocket", "Transport"),
 ];
 
+/// Path prefixes whose use inside an `async fn` body in an
+/// `adapter-host`-class crate is forbidden because they perform
+/// blocking I/O on the tokio executor. Production code must use
+/// `tokio::fs::*` (preferred — same syscall, async API) or
+/// `tokio::task::spawn_blocking` (escape hatch — sync closure runs on
+/// the blocking pool). Mirrors `.claude/rules/development.md` §
+/// Concurrency & async.
+///
+/// The set is matched as a *path prefix*: any source path that, after
+/// segment alignment, starts with `std::fs::` is flagged. This catches
+/// `std::fs::write`, `std::fs::create_dir_all`, `std::fs::read_to_string`,
+/// `std::fs::File::create`, etc., without enumerating each leaf.
+///
+/// # Escape hatch
+///
+/// `tokio::task::spawn_blocking(|| { … })` runs its sync closure on the
+/// blocking pool. The visitor does not flag `std::fs::*` references
+/// inside a sync closure body, regardless of whether the closure is
+/// lexically nested inside an `async fn` — see [`AsyncBlockingIoCollector`].
+///
+/// `#[cfg(test)]` items (modules and individual fns) are exempt — test
+/// fixture setup may use sync `std::fs` without penalty per the rule.
+///
+/// # Why prefix instead of leaf
+///
+/// A prefix match keeps the rule honest as the standard library grows.
+/// New blocking entry points appear (`std::fs::soft_link`,
+/// `std::fs::try_exists`, …) without us updating an enum. The cost is
+/// a possible false positive on a path like `my_crate::std::fs::*` —
+/// acceptable since that is not a shape any sane code uses.
+const BANNED_BLOCKING_IO_PREFIX: &str = "std::fs";
+
+/// Replacement-trait label rendered in the help text for the
+/// `std::fs`-in-async-fn lint clause. Conceptually paired with
+/// `tokio::fs::*` and `tokio::task::spawn_blocking`, but the existing
+/// `Violation` struct expects a single string.
+const BANNED_BLOCKING_IO_REPLACEMENT: &str = "tokio::fs / tokio::task::spawn_blocking";
+
 /// Type names whose iteration order is a per-process nondeterminism
 /// source — banned in `crate_class = "core"` crates per
 /// `.claude/rules/development.md` § "Ordered-collection choice".
@@ -86,6 +124,10 @@ pub enum BannedKind {
     Api,
     /// Ordered-collection type listed in [`BANNED_TYPES`].
     OrderedCollection,
+    /// Sync `std::fs::*` inside an `async fn` body — banned in
+    /// `adapter-host`-class crates per
+    /// `.claude/rules/development.md` § Concurrency & async.
+    BlockingIoInAsync,
 }
 
 /// A single banned-API usage found in a core-class crate source file.
@@ -282,6 +324,229 @@ impl<'ast> Visit<'ast> for Collector<'_> {
 }
 
 // -----------------------------------------------------------------------------
+// std::fs-in-async-fn lint clause (adapter-host crates)
+// -----------------------------------------------------------------------------
+
+/// Visitor that flags `std::fs::*` references inside an `async fn` body
+/// in an `adapter-host`-class crate.
+///
+/// Tracks two pieces of context as it walks the AST:
+///
+/// - `inside_async`: the closest enclosing fn / closure / `async {}` block
+///   is async. `std::fs::*` references are flagged only when this is
+///   `true` AND `cfg_test_depth == 0`.
+/// - `cfg_test_depth`: depth counter for `#[cfg(test)]` items currently
+///   open. Tests use `std::fs` for fixture setup and the rule explicitly
+///   exempts them.
+///
+/// The visitor relies on `syn` parsing the file pre-macro-expansion, so
+/// `#[async_trait]` impls and `async fn` in trait impls (Rust 1.75+) both
+/// look like a regular `async fn` to the syntactic walk.
+struct AsyncBlockingIoCollector<'a> {
+    file: &'a Path,
+    violations: Vec<Violation>,
+    /// Whether the closest enclosing fn / closure / `async {}` block is
+    /// an async context.
+    inside_async: bool,
+    /// Number of `#[cfg(test)]`-attributed items currently open. When
+    /// non-zero, suppress flagging — the rule exempts tests.
+    cfg_test_depth: usize,
+}
+
+impl<'a> AsyncBlockingIoCollector<'a> {
+    const fn new(file: &'a Path) -> Self {
+        Self { file, violations: Vec::new(), inside_async: false, cfg_test_depth: 0 }
+    }
+
+    /// Does `attrs` carry a `#[cfg(test)]` attribute? Recognises the
+    /// canonical form only — `#[cfg(test)]`. More elaborate predicates
+    /// (`#[cfg(any(test, …))]`, `#[cfg(not(…))]`) intentionally are not
+    /// matched, because they may evaluate to false at compile time and
+    /// would silently exempt production code from the rule.
+    fn has_cfg_test_attr(attrs: &[syn::Attribute]) -> bool {
+        attrs.iter().any(|a| {
+            if !a.path().is_ident("cfg") {
+                return false;
+            }
+            // `#[cfg(test)]` parses as a path metadata where the parens
+            // contain a single identifier `test`.
+            let mut found = false;
+            let _ = a.parse_nested_meta(|meta| {
+                if meta.path.is_ident("test") {
+                    found = true;
+                }
+                Ok(())
+            });
+            found
+        })
+    }
+}
+
+impl<'ast> Visit<'ast> for AsyncBlockingIoCollector<'_> {
+    fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
+        if Self::has_cfg_test_attr(&node.attrs) {
+            self.cfg_test_depth += 1;
+            visit::visit_item_fn(self, node);
+            self.cfg_test_depth -= 1;
+            return;
+        }
+        let was = self.inside_async;
+        self.inside_async = node.sig.asyncness.is_some();
+        visit::visit_item_fn(self, node);
+        self.inside_async = was;
+    }
+
+    fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
+        if Self::has_cfg_test_attr(&node.attrs) {
+            self.cfg_test_depth += 1;
+            visit::visit_impl_item_fn(self, node);
+            self.cfg_test_depth -= 1;
+            return;
+        }
+        let was = self.inside_async;
+        self.inside_async = node.sig.asyncness.is_some();
+        visit::visit_impl_item_fn(self, node);
+        self.inside_async = was;
+    }
+
+    fn visit_item_mod(&mut self, node: &'ast syn::ItemMod) {
+        if Self::has_cfg_test_attr(&node.attrs) {
+            self.cfg_test_depth += 1;
+            visit::visit_item_mod(self, node);
+            self.cfg_test_depth -= 1;
+            return;
+        }
+        visit::visit_item_mod(self, node);
+    }
+
+    fn visit_expr_async(&mut self, node: &'ast syn::ExprAsync) {
+        let was = self.inside_async;
+        self.inside_async = true;
+        visit::visit_expr_async(self, node);
+        self.inside_async = was;
+    }
+
+    fn visit_expr_closure(&mut self, node: &'ast syn::ExprClosure) {
+        // A closure resets the async context to whatever the closure
+        // *itself* declares. A sync closure inside `async fn`, e.g.
+        // `tokio::task::spawn_blocking(|| { … })`, must NOT inherit the
+        // surrounding async context — that closure body runs on the
+        // blocking pool, which is the documented escape hatch.
+        let was = self.inside_async;
+        self.inside_async = node.asyncness.is_some();
+        visit::visit_expr_closure(self, node);
+        self.inside_async = was;
+    }
+
+    fn visit_expr_path(&mut self, node: &'ast syn::ExprPath) {
+        if self.inside_async && self.cfg_test_depth == 0 {
+            let segments: Vec<String> =
+                node.path.segments.iter().map(|s| s.ident.to_string()).collect();
+            if let Some(first) = node.path.segments.first() {
+                let start = first.ident.span().start();
+                self.check_blocking_io(&segments, start.line, start.column + 1);
+            }
+        }
+        visit::visit_expr_path(self, node);
+    }
+
+    fn visit_type_path(&mut self, node: &'ast syn::TypePath) {
+        if self.inside_async && self.cfg_test_depth == 0 {
+            let segments: Vec<String> =
+                node.path.segments.iter().map(|s| s.ident.to_string()).collect();
+            if let Some(first) = node.path.segments.first() {
+                let start = first.ident.span().start();
+                self.check_blocking_io(&segments, start.line, start.column + 1);
+            }
+        }
+        visit::visit_type_path(self, node);
+    }
+}
+
+impl AsyncBlockingIoCollector<'_> {
+    /// Match `segments` (joined by `::`) as a *prefix* against
+    /// [`BANNED_BLOCKING_IO_PREFIX`]. A prefix match catches every
+    /// blocking entry point under `std::fs` — present and future —
+    /// without enumerating each.
+    ///
+    /// Segment-aligned: `std::fs::write` matches `std::fs`; `std::fsx`
+    /// (no such thing today, but) does not. The `use std::fs;`-shortened
+    /// form `fs::write` also matches via the same suffix-of-banned-path
+    /// rule used by [`path_matches`] — the source path `fs::write` ends
+    /// with the suffix `fs::write` of the prefix `std::fs`, and segment
+    /// alignment passes.
+    fn check_blocking_io(&mut self, segments: &[String], line: usize, column: usize) {
+        let joined = segments.join("::");
+        if blocking_io_path_matches(&joined, BANNED_BLOCKING_IO_PREFIX) {
+            self.violations.push(Violation {
+                file: self.file.to_path_buf(),
+                line,
+                column,
+                banned_path: joined,
+                replacement_trait: BANNED_BLOCKING_IO_REPLACEMENT.to_owned(),
+                kind: BannedKind::BlockingIoInAsync,
+            });
+        }
+    }
+}
+
+/// Does a source path overlap the blocking-io prefix?
+///
+/// The check is two-direction:
+///
+/// 1. The source path ends with `prefix` (e.g. source `std::fs` matches
+///    prefix `std::fs`; source `fs` after `use std::fs;` also matches
+///    via the suffix-alignment rule used by [`path_matches`]).
+/// 2. The source path *starts with* `prefix` followed by `::` (e.g.
+///    source `std::fs::write` starts with `std::fs::`).
+///
+/// Either match flags the path. Single-segment leaves like `fs` alone
+/// are NOT flagged — too easy to alias-clash with a local `fs` module.
+fn blocking_io_path_matches(source: &str, prefix: &str) -> bool {
+    if path_matches(source, prefix) {
+        return true;
+    }
+    // Prefix match — `std::fs::write` starts with `std::fs::`.
+    let with_sep = format!("{prefix}::");
+    if source.starts_with(&with_sep) {
+        return true;
+    }
+    // Suffix-of-prefix form: `use std::fs; … fs::write(…)` — source
+    // path `fs::write` whose head segment `fs` is the trailing segment
+    // of the banned prefix.
+    let prefix_segs: Vec<&str> = prefix.split("::").collect();
+    let source_segs: Vec<&str> = source.split("::").collect();
+    if let Some(last_prefix_seg) = prefix_segs.last() {
+        if source_segs.len() >= 2 && source_segs.first() == Some(last_prefix_seg) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Scan a single source file for the `std::fs::*` inside `async fn`
+/// rule. Returns every violation found.
+///
+/// Used in two places:
+///
+/// 1. [`scan_workspace`] applies this to every `.rs` file under each
+///    `adapter-host`-class crate's `src/` directory.
+/// 2. The xtask self-test (`xtask/tests/dst_lint_async_fs_self_test.rs`)
+///    drives synthetic source through this entry point directly.
+///
+/// # Errors
+///
+/// Propagates `syn::parse_file` failures so callers can distinguish
+/// parse errors from "file was clean".
+pub fn scan_source_async_fs(source: &str, file: impl AsRef<Path>) -> Result<Vec<Violation>> {
+    let file = file.as_ref().to_path_buf();
+    let parsed = syn::parse_file(source).with_context(|| format!("parse {}", file.display()))?;
+    let mut collector = AsyncBlockingIoCollector::new(&file);
+    collector.visit_file(&parsed);
+    Ok(collector.violations)
+}
+
+// -----------------------------------------------------------------------------
 // Workspace scan
 // -----------------------------------------------------------------------------
 
@@ -358,6 +623,29 @@ pub fn scan_workspace(manifest_path: &Path) -> Result<Vec<Violation>> {
         }
     }
 
+    // Scan adapter-host crates with the std::fs-in-async-fn rule. The
+    // banned-API table is for `core` only; this clause applies to
+    // `adapter-host` exclusively because that is where async fn impls
+    // of the port traits live and where the tokio executor would be
+    // blocked by sync std::fs calls. See
+    // `.claude/rules/development.md` § Concurrency & async.
+    let adapter_host_crates: Vec<_> =
+        classes.iter().filter(|(_, _, c)| c.as_deref() == Some("adapter-host")).collect();
+    for (_name, root, _class) in adapter_host_crates {
+        let src = root.join("src");
+        if !src.exists() {
+            continue;
+        }
+        for rs in collect_rs_files(&src)? {
+            let rel = rs.strip_prefix(root).unwrap_or(&rs).to_path_buf();
+            let source =
+                std::fs::read_to_string(&rs).with_context(|| format!("read {}", rs.display()))?;
+            if let Ok(found) = scan_source_async_fs(&source, &rel) {
+                violations.extend(found);
+            }
+        }
+    }
+
     Ok(violations)
 }
 
@@ -395,6 +683,15 @@ pub fn render_violation(v: &Violation) -> String {
             ),
             "see .claude/rules/development.md (\"Ordered-collection choice\")",
         ),
+        BannedKind::BlockingIoInAsync => (
+            "error: blocking std::fs::* inside async fn (adapter-host crate)",
+            format!(
+                "use {} — sync std::fs::* blocks the tokio executor and is forbidden \
+                 inside async fn in adapter-host crates",
+                v.replacement_trait,
+            ),
+            "see .claude/rules/development.md (\"Concurrency & async\")",
+        ),
     };
     format!(
         "{header}\n  \
@@ -424,6 +721,171 @@ pub fn run(manifest_path: &Path) -> Result<()> {
     }
     eprintln!("dst-lint: {} banned-API violation(s) found in core crates", violations.len());
     bail!("banned-API violations in core crates");
+}
+
+// -----------------------------------------------------------------------------
+// Structural inspector — JobLifecycle::reconcile body
+// -----------------------------------------------------------------------------
+//
+// Scenario 3.3 of phase-1-first-workload Slice 3A.2: the `JobLifecycle`
+// reconciler's `reconcile` body must contain no banned API call,
+// including `.await` (which dst-lint's project-wide scanner does NOT
+// catch — the rule is "no `.await` inside `reconcile`" per ADR-0013 §2,
+// not a banned-symbol rule). This inspector walks the impl block, finds
+// the `fn reconcile` body, and asserts the absence of:
+//
+//   - `Instant::now` / `SystemTime::now`
+//   - `tokio::time::sleep` / `std::thread::sleep`
+//   - `rand::*`
+//   - `.await` expressions
+//
+// Run as a `#[cfg(test)]` unit test in this crate; fails with a
+// non-zero exit code if any banned construct appears in the body.
+
+/// Banned constructs inside a `reconcile` body. Mirrors the
+/// `BANNED_APIS` shape but adds `.await` (an expression form, not a
+/// path) and `rand::*` (any segment-suffix match against `rand`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReconcileBodyViolation {
+    /// The kind of forbidden construct.
+    pub kind: ReconcileBodyViolationKind,
+    /// 1-based line within the source file.
+    pub line: usize,
+    /// 1-based column within the source line.
+    pub column: usize,
+}
+
+/// Categorical kinds of forbidden constructs in `reconcile` bodies.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReconcileBodyViolationKind {
+    /// `.await` expression.
+    Await,
+    /// Banned API path (e.g. `Instant::now`).
+    BannedApi {
+        /// The banned path.
+        path: String,
+    },
+    /// `rand::*` reference.
+    Rand,
+}
+
+/// Inspector visitor — walks an impl-block body looking for forbidden
+/// constructs.
+struct ReconcileBodyInspector {
+    violations: Vec<ReconcileBodyViolation>,
+}
+
+impl<'ast> Visit<'ast> for ReconcileBodyInspector {
+    fn visit_expr_await(&mut self, node: &'ast syn::ExprAwait) {
+        let span = node.await_token.span;
+        let start = span.start();
+        self.violations.push(ReconcileBodyViolation {
+            kind: ReconcileBodyViolationKind::Await,
+            line: start.line,
+            column: start.column + 1,
+        });
+        // Continue walking inner expressions.
+        visit::visit_expr_await(self, node);
+    }
+
+    fn visit_expr_path(&mut self, node: &'ast syn::ExprPath) {
+        let segments: Vec<String> =
+            node.path.segments.iter().map(|s| s.ident.to_string()).collect();
+        self.check_segments(&segments, &node.path.segments[0].ident.span());
+        visit::visit_expr_path(self, node);
+    }
+
+    fn visit_type_path(&mut self, node: &'ast syn::TypePath) {
+        let segments: Vec<String> =
+            node.path.segments.iter().map(|s| s.ident.to_string()).collect();
+        self.check_segments(&segments, &node.path.segments[0].ident.span());
+        visit::visit_type_path(self, node);
+    }
+}
+
+impl ReconcileBodyInspector {
+    fn check_segments(&mut self, segments: &[String], span: &proc_macro2::Span) {
+        let joined = segments.join("::");
+        let start = span.start();
+        let line = start.line;
+        let column = start.column + 1;
+
+        // `rand::*` — any path with `rand` as the leading or sole
+        // segment (`rand::random`, `rand::thread_rng`, `rand::Rng`, ...)
+        if segments.first().map(String::as_str) == Some("rand") {
+            self.violations.push(ReconcileBodyViolation {
+                kind: ReconcileBodyViolationKind::Rand,
+                line,
+                column,
+            });
+            return;
+        }
+
+        for (banned, _replacement) in BANNED_APIS {
+            if path_matches(&joined, banned) {
+                self.violations.push(ReconcileBodyViolation {
+                    kind: ReconcileBodyViolationKind::BannedApi { path: (*banned).to_string() },
+                    line,
+                    column,
+                });
+                return;
+            }
+        }
+    }
+}
+
+/// Inspect a Rust source file for any `JobLifecycle::reconcile` body
+/// that contains a banned construct.
+///
+/// Returns a list of every forbidden construct found inside the
+/// `fn reconcile` body of the `impl Reconciler for JobLifecycle`
+/// block. An empty Vec means the body is clean.
+///
+/// # Errors
+///
+/// Propagates any `syn::parse_file` failure as `Err`.
+pub fn inspect_job_lifecycle_reconcile_body(source: &str) -> Result<Vec<ReconcileBodyViolation>> {
+    let parsed = syn::parse_file(source).context("parse source")?;
+    let mut found_impl = false;
+    let mut violations = Vec::new();
+
+    for item in &parsed.items {
+        let syn::Item::Impl(item_impl) = item else { continue };
+
+        // Match `impl Reconciler for JobLifecycle`.
+        let Some((_, trait_path, _)) = &item_impl.trait_ else { continue };
+        let trait_name =
+            trait_path.segments.last().map(|s| s.ident.to_string()).unwrap_or_default();
+        if trait_name != "Reconciler" {
+            continue;
+        }
+
+        let syn::Type::Path(type_path) = &*item_impl.self_ty else { continue };
+        let self_name =
+            type_path.path.segments.last().map(|s| s.ident.to_string()).unwrap_or_default();
+        if self_name != "JobLifecycle" {
+            continue;
+        }
+
+        found_impl = true;
+
+        // Walk every fn item for `reconcile`.
+        for impl_item in &item_impl.items {
+            let syn::ImplItem::Fn(fn_item) = impl_item else { continue };
+            if fn_item.sig.ident != "reconcile" {
+                continue;
+            }
+            let mut inspector = ReconcileBodyInspector { violations: Vec::new() };
+            inspector.visit_block(&fn_item.block);
+            violations.extend(inspector.violations);
+        }
+    }
+
+    if !found_impl {
+        bail!("could not locate `impl Reconciler for JobLifecycle` in source");
+    }
+
+    Ok(violations)
 }
 
 // -----------------------------------------------------------------------------
@@ -468,5 +930,115 @@ mod tests {
         // off-by-one in the length guard would silently flip this
         // into a match.
         assert!(!path_matches("a::b::c::d::e", "std::time::Instant::now"));
+    }
+
+    // -------------------------------------------------------------
+    // Reconcile-body inspector tests (scenario 3.3)
+    // -------------------------------------------------------------
+
+    /// Path to the real `overdrive-core` reconciler source — relative
+    /// to `xtask/Cargo.toml`'s manifest dir, which is `xtask/`.
+    fn real_core_reconciler_source_path() -> std::path::PathBuf {
+        let crate_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        crate_dir
+            .parent()
+            .expect("xtask crate lives directly under workspace root")
+            .join("crates/overdrive-core/src/reconciler.rs")
+    }
+
+    #[test]
+    fn inspector_flags_await_inside_reconcile_body() {
+        let source = r"
+            pub trait Reconciler {}
+            pub struct JobLifecycle;
+            impl Reconciler for JobLifecycle {
+                fn reconcile(&self) {
+                    let _x = some_future().await;
+                }
+            }
+        ";
+        let violations = inspect_job_lifecycle_reconcile_body(source).expect("source must parse");
+        assert!(
+            violations.iter().any(|v| matches!(v.kind, ReconcileBodyViolationKind::Await)),
+            ".await must be flagged; got {violations:?}"
+        );
+    }
+
+    #[test]
+    fn inspector_flags_instant_now_inside_reconcile_body() {
+        let source = r"
+            pub trait Reconciler {}
+            pub struct JobLifecycle;
+            impl Reconciler for JobLifecycle {
+                fn reconcile(&self) {
+                    let _ = std::time::Instant::now();
+                }
+            }
+        ";
+        let violations = inspect_job_lifecycle_reconcile_body(source).expect("source must parse");
+        assert!(
+            violations.iter().any(|v| matches!(
+                &v.kind,
+                ReconcileBodyViolationKind::BannedApi { path } if path.contains("Instant::now")
+            )),
+            "Instant::now must be flagged; got {violations:?}"
+        );
+    }
+
+    #[test]
+    fn inspector_flags_rand_inside_reconcile_body() {
+        let source = r"
+            pub trait Reconciler {}
+            pub struct JobLifecycle;
+            impl Reconciler for JobLifecycle {
+                fn reconcile(&self) {
+                    let _x = rand::random::<u64>();
+                }
+            }
+        ";
+        let violations = inspect_job_lifecycle_reconcile_body(source).expect("source must parse");
+        assert!(
+            violations.iter().any(|v| matches!(v.kind, ReconcileBodyViolationKind::Rand)),
+            "rand::* must be flagged; got {violations:?}"
+        );
+    }
+
+    #[test]
+    fn inspector_passes_clean_body() {
+        let source = r"
+            pub trait Reconciler {}
+            pub struct JobLifecycle;
+            impl Reconciler for JobLifecycle {
+                fn reconcile(&self, tick: &TickContext) -> Vec<u8> {
+                    let _now = tick.now;
+                    vec![]
+                }
+            }
+        ";
+        let violations = inspect_job_lifecycle_reconcile_body(source).expect("source must parse");
+        assert!(
+            violations.is_empty(),
+            "clean body must produce zero violations; got {violations:?}"
+        );
+    }
+
+    /// Scenario 3.3 — the real `JobLifecycle::reconcile` body inside
+    /// `crates/overdrive-core/src/reconciler.rs` must contain no
+    /// banned construct.
+    #[test]
+    fn job_lifecycle_reconcile_body_passes_dst_lint() {
+        let path = real_core_reconciler_source_path();
+        let source = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        let violations = inspect_job_lifecycle_reconcile_body(&source)
+            .expect("overdrive-core reconciler.rs must parse");
+        assert!(
+            violations.is_empty(),
+            "JobLifecycle::reconcile body must contain no banned construct \
+             (.await, Instant::now, SystemTime::now, rand::*, tokio::time::sleep, \
+             std::thread::sleep); found {} violation(s): {:#?}",
+            violations.len(),
+            violations
+        );
     }
 }

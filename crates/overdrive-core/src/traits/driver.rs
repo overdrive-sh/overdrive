@@ -1,7 +1,7 @@
-//! [`Driver`] — a workload backend (process, microVM, VM, unikernel, WASM).
+//! [`Driver`] — a workload backend (exec, microVM, VM, unikernel, WASM).
 //!
 //! Each driver is a thin trait object owned by the node agent. Production
-//! wires concrete drivers (`CloudHypervisorDriver`, `ProcessDriver`,
+//! wires concrete drivers (`CloudHypervisorDriver`, `ExecDriver`,
 //! `WasmDriver`); simulation wires `SimDriver` with configurable failure
 //! modes for scheduler and reconciler tests.
 //!
@@ -13,19 +13,29 @@ use std::str::FromStr;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use utoipa::ToSchema;
 
 use crate::{AllocationId, SpiffeId};
 
 /// Driver class — the `driver` field in a job spec maps 1:1 to a variant.
 ///
 /// Stable: new drivers are appended; existing variants never change their
-/// wire form. [`Display`] and [`FromStr`] emit `process`, `microvm`, `vm`,
-/// `unikernel`, `wasm` — matching `docs/whitepaper.md` §6 exactly.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+/// wire form. [`Display`] and [`FromStr`] emit `exec`, `microvm`, `vm`,
+/// `unikernel`, `wasm` — matching `docs/whitepaper.md` §6 exactly. The
+/// `exec` vocabulary aligns with Nomad's `exec` task driver and Talos's
+/// terminology (see ADR-0029 amendment 2026-04-28).
+///
+/// Carries `utoipa::ToSchema` so the wire-typed `TransitionSource::Driver`
+/// variant in `overdrive-control-plane::api` can register the schema
+/// transitively (DWD-03). `utoipa` is a declarative-derive crate with no
+/// runtime I/O — the dst-lint banned-API list does not enumerate it.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, ToSchema,
+)]
 #[serde(rename_all = "kebab-case")]
 pub enum DriverType {
     /// Native binary under cgroups v2 (`tokio::process`).
-    Process,
+    Exec,
     /// Fast-boot Cloud Hypervisor microVM.
     MicroVm,
     /// Full Cloud Hypervisor VM (hotplug, virtiofs, any OS).
@@ -41,7 +51,7 @@ impl DriverType {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
-            Self::Process => "process",
+            Self::Exec => "exec",
             Self::MicroVm => "microvm",
             Self::Vm => "vm",
             Self::Unikernel => "unikernel",
@@ -61,7 +71,7 @@ impl FromStr for DriverType {
 
     fn from_str(raw: &str) -> Result<Self, Self::Err> {
         match raw {
-            "process" => Ok(Self::Process),
+            "exec" => Ok(Self::Exec),
             "microvm" => Ok(Self::MicroVm),
             "vm" => Ok(Self::Vm),
             "unikernel" => Ok(Self::Unikernel),
@@ -109,7 +119,13 @@ pub struct Resources {
 pub struct AllocationSpec {
     pub alloc: AllocationId,
     pub identity: SpiffeId,
-    pub image: String,
+    /// Host filesystem path to the binary the driver execs (e.g. `/bin/sleep`).
+    /// Container drivers (Phase 2+ MicroVm/Wasm) carry their own
+    /// `ContentHash`-typed image field on per-driver-type spec types.
+    pub command: String,
+    /// Argv passed verbatim to the binary; the driver invokes
+    /// `Command::new(&self.command).args(&self.args)`.
+    pub args: Vec<String>,
     pub resources: Resources,
 }
 
@@ -130,6 +146,59 @@ pub enum AllocationState {
     Failed { reason: String },
 }
 
+/// Classified exit observed by the driver-internal watcher when the
+/// underlying workload process exits naturally (the watcher's
+/// `child.wait()` resolves) or under a stop signal.
+///
+/// `CleanExit` covers `wait()` returning `ExitStatus::success()` (exit
+/// code 0). `Crashed` carries either an `exit_code` (non-zero `wait()`
+/// result) or a `signal` (the kernel killed the process); never both
+/// populated, never both `None`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExitKind {
+    /// Process exited with status 0 — successful natural completion.
+    CleanExit,
+    /// Process exited non-zero, was signalled by the kernel, or both.
+    /// Watcher constructs from `ExitStatus::code()` /
+    /// `ExitStatus::signal()`.
+    Crashed { exit_code: Option<i32>, signal: Option<i32> },
+}
+
+/// Exit observation for a driver-owned allocation.
+///
+/// Emitted by the driver's per-alloc watcher task on `child.wait()`
+/// resolution and consumed by the worker-side `exit_observer`
+/// subsystem, which classifies the event into an `AllocStatusRow` and
+/// writes it to the `ObservationStore`.
+///
+/// `intentional_stop` is the load-bearing discriminator that
+/// distinguishes operator-driven termination (`Driver::stop` was
+/// called — the workload's exit, even if it was via SIGTERM/SIGKILL,
+/// is `Terminated`) from natural crashes (the watcher saw
+/// `child.wait()` resolve without a prior `stop` call —
+/// classified as `Failed`). Per RCA §Approved fix item 4.
+///
+/// # Invariants
+///
+/// - **LWW dominance.** When the worker subsystem writes an obs row
+///   in response to this event, it MUST source the row's
+///   `LogicalTimestamp` from the same `Clock` instance the action
+///   shim uses for its `Running` writes. A watcher that mints
+///   timestamps from a divergent clock loses LWW races against
+///   stale shim writes (see RCA §Risk).
+/// - **`intentional_stop` ordering.** `Driver::stop` MUST set the
+///   shared `intentional_stop` flag to `true` BEFORE delivering
+///   SIGTERM. Otherwise the watcher reads the flag while it is
+///   still `false`, classifies the SIGTERM-induced `wait()`
+///   resolution as `Crashed`, and writes a `Failed` row for an
+///   operator-stop. Per RCA §Risk "`stop` vs natural exit race".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExitEvent {
+    pub alloc: AllocationId,
+    pub kind: ExitKind,
+    pub intentional_stop: bool,
+}
+
 #[async_trait]
 pub trait Driver: Send + Sync + 'static {
     /// Which driver this is. Stable — the `driver` field of a job spec
@@ -140,6 +209,29 @@ pub trait Driver: Send + Sync + 'static {
 
     async fn stop(&self, handle: &AllocationHandle) -> Result<(), DriverError>;
 
+    /// Pre-existing observation surface — retained for tests and
+    /// status queries that prefer point lookup over the obs row
+    /// stream. The supported observation seam for crash detection is
+    /// the watcher-emitted `ExitEvent` consumed by the
+    /// `exit_observer` worker subsystem; production callers do not
+    /// poll `status()` to detect crashes.
+    ///
+    /// # Post-stop contract
+    ///
+    /// After [`Driver::stop`] returns `Ok(())`, a subsequent
+    /// `status()` against the same handle returns
+    /// `Err(DriverError::NotFound)`. Drivers do not retain
+    /// terminal-state memory for stopped allocations — durable
+    /// terminal-state truth lives in the `ObservationStore`
+    /// (`AllocStatusRow`), per the §18 three-layer state taxonomy
+    /// and `.claude/rules/development.md` § State-layer hygiene.
+    /// A driver that retained a `Terminated` slot would duplicate
+    /// observation's job and accumulate one entry per finally-stopped
+    /// allocation across a long-running node session.
+    ///
+    /// Tests that assert on the post-stop state must therefore expect
+    /// `Err(DriverError::NotFound { alloc })`, not
+    /// `Ok(AllocationState::Terminated)`.
     async fn status(&self, handle: &AllocationHandle) -> Result<AllocationState, DriverError>;
 
     async fn resize(
@@ -147,4 +239,34 @@ pub trait Driver: Send + Sync + 'static {
         handle: &AllocationHandle,
         resources: Resources,
     ) -> Result<(), DriverError>;
+
+    /// Take the single `Receiver<ExitEvent>` this driver emits to.
+    /// Returns `Some` on first call, `None` on every subsequent call.
+    ///
+    /// The `exit_observer` subsystem (in
+    /// `overdrive-control-plane::worker::exit_observer`) consumes this
+    /// receiver at startup. Drivers that emit exit events
+    /// (`ExecDriver`, `SimDriver`) override this to return their
+    /// internal receiver exactly once.
+    ///
+    /// Default: `None` — drivers that have no watcher (e.g.
+    /// future implementations that do not buffer events) continue to
+    /// compile with no extra surface to override.
+    ///
+    /// # Invariants
+    ///
+    /// - **LWW dominance.** When the worker subsystem writes an obs
+    ///   row in response to an event from this receiver, it MUST
+    ///   source the row's `LogicalTimestamp` from the same `Clock`
+    ///   instance the action shim uses for its `Running` writes —
+    ///   otherwise a watcher write may lose to a stale shim write
+    ///   under last-write-wins (RCA §Risk).
+    /// - **`intentional_stop` ordering.** `Driver::stop` MUST set the
+    ///   shared `intentional_stop` flag to `true` BEFORE delivering
+    ///   any termination signal. The watcher reads this when
+    ///   classifying the exit so an operator-stop is not
+    ///   misclassified as a crash.
+    fn take_exit_receiver(&self) -> Option<tokio::sync::mpsc::Receiver<ExitEvent>> {
+        None
+    }
 }

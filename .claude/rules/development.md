@@ -151,6 +151,130 @@ surface that lets the wrong call go to the wrong place.
 
 ---
 
+## Port-trait dependencies — `overdrive-host` is production, `overdrive-sim` is tests
+
+`overdrive-core` declares the port traits (`Clock`, `Transport`, `Entropy`,
+`Dataplane`, `Driver`, `IntentStore`, `ObservationStore`, `Llm`); two
+sibling crates implement them.
+
+| Crate | Class | Use | Cargo.toml placement |
+|---|---|---|---|
+| `overdrive-host` | `adapter-host` | Production bindings (`SystemClock`, `OsEntropy`, `TcpTransport`, …) | `[dependencies]` of crates that ship a production wiring |
+| `overdrive-sim` | `adapter-sim` | Simulation bindings (`SimClock`, `SimTransport`, `SimEntropy`, `SimDriver`, `SimObservationStore`, `SimLlm`) | `[dev-dependencies]` of any crate whose tests need DST controllability |
+
+**Rules:**
+
+- **Never put `overdrive-host` in `[dev-dependencies]`** — it is the
+  production binding crate. Tests do not run production wiring; they
+  inject sim adapters. If a test reaches for `SystemClock` /
+  `OsEntropy` / `TcpTransport`, the test is wrong, not the dep
+  placement: replace the production binding with its sim counterpart.
+- **Never put `overdrive-sim` in `[dependencies]`** — it carries
+  `turmoil`, `StdRng`, and other DST machinery that must not be
+  reachable from production binaries. The dst-lint gate scans for
+  this.
+- **Required, not defaulted, at the call site.** Types that depend on
+  a port trait take the implementation as an explicit constructor
+  parameter (`fn new(clock: Arc<dyn Clock>, ...)` or similar). Never
+  default the field to a production binding inside the constructor —
+  that silently inherits wall-clock / OS-entropy / real-network
+  behaviour into tests that forgot to override, which is the exact
+  failure mode the trait surface exists to prevent.
+- **Builder-pattern overrides (`with_clock`, `with_transport`) are an
+  anti-pattern for these traits.** A builder makes the dependency
+  optional — and "optional" means "tests can forget." Make the
+  dependency mandatory in `new()`; tests pass `Arc::new(SimClock::new())`,
+  production passes `Arc::new(SystemClock)`, the compiler enforces
+  every call site is explicit.
+- **Production wiring is composed at the binary boundary.** A library
+  crate's tests compose sim adapters; the CLI / control-plane binary
+  composes host adapters. The library crate itself does not pick
+  sides — it depends only on the trait surface in `overdrive-core`.
+
+The compile-time consequence is the load-bearing one: a test that
+forgets to inject a clock fails to compile rather than silently
+running on `SystemClock`. The dst-lint gate catches the residual
+"clock leaked into a `core` compile path" cases; this rule is the
+upstream prevention.
+
+---
+
+## Production code is not shaped by simulation
+
+**Production code MUST NOT carry extra logic, extra arms, extra yields,
+extra polling, or extra structural concessions whose only purpose is to
+make a `Sim*` adapter behave correctly under DST.** The port-trait
+contract is the boundary: production wires `Host*`, tests wire `Sim*`,
+and production code is written to the contract, not to the test
+double's quirks. If a production call site needs a workaround to make
+`Sim*` work, the bug is in the `Sim*` adapter, not in the production
+code.
+
+This is the rule that the `Clock` / `Transport` / `Entropy` / `Driver`
+trait surface exists to enforce. A production `tokio::select!` arm that
+exists "so DST can advance time" is the canonical violation — it
+means the sim adapter has imposed a shape on the production hot path
+that the production hot path would not otherwise need. The cost is
+real (busy-loop CPU, redundant polls, defensive yields, wasted resource
+budget) and it compounds: every future call site copies the workaround
+because "that's how we use the trait here."
+
+### Symptoms
+
+- A `tokio::select!` in production whose only resolving arm is
+  `tokio::task::yield_now()` or `clock.sleep(Duration::from_millis(1))`
+  with a comment explaining "so the deadline check at the top can fire
+  under SimClock."
+- A production loop with a `clock.unix_now() >= deadline` check at the
+  top *and* a separate timer arm in the select, where the comment
+  explains the deadline check is for DST and the timer arm is for
+  production.
+- A production function that takes a `_dst_yield_hook: Option<...>`
+  parameter, or any other signature contortion whose only caller is a
+  test.
+- A docstring that says some piece of production code is "redundant
+  but harmless" in production and exists "to play nicely with SimClock."
+- A `// dst:` or `// sim:` comment on a production line of code
+  explaining behavior that would not be there absent the test double.
+
+If you find yourself writing the comment, stop. The comment is the
+admission that the rule is being broken.
+
+### What to do instead
+
+Fix the `Sim*` adapter to model the real-world primitive faithfully,
+then write production against the trait shape that production
+genuinely needs. Concretely, if a `Sim*` `sleep` / `recv` / `connect`
+forces a workaround in production, the adapter is doing the wrong
+thing — usually conflating two concerns (e.g. "yield" and "advance
+time"), or auto-progressing state that the harness should drive
+explicitly.
+
+Reference shape: `SimClock::sleep` should *park on a deadline* (register
+a waker; the harness's `tick()` wakes timers whose deadline has passed),
+not auto-advance time as a side effect of being polled. Every credible
+DST framework (turmoil, madsim, FoundationDB flow sim) implements
+`sleep` this way; only the harness drives logical time.
+
+### Audit checklist for any sim-adapter change
+
+Before landing a `Sim*` change that requires modifying a production
+call site, answer:
+
+1. Could the sim adapter be reshaped so the production call site stays
+   unchanged? If yes — do that instead.
+2. Does the production change degrade production behavior in any way
+   (extra CPU, extra latency, extra polls, defensive resource use)? If
+   yes — the change is rejected; the sim adapter must be reshaped.
+3. Would a future engineer reading the production code, with no
+   knowledge of the sim adapter, understand why the code is shaped this
+   way? If no — the shape is wrong, even if a comment papers over it.
+
+The boundary between production and simulation is load-bearing. Erode
+it once and every future call site inherits the erosion.
+
+---
+
 ## Ordered-collection choice
 
 `core` and control-plane hot paths default to `BTreeMap` for keyed maps
@@ -693,6 +817,55 @@ you actually deleted what you set out to delete.
   logic); use pass-through for errors from lower layers that need no
   transformation.
 
+- **Distinct failure modes get distinct error variants. Never silently
+  absorb a `Result<_, io::Error>` (or any other fallible boundary read)
+  into a default value.** Using `.unwrap_or_default()`, `.ok()`, or
+  `.unwrap_or(_)` on a boundary I/O / parse / env read collapses every
+  distinguishable failure (PermissionDenied, EIO, broken procfs, missing
+  mount, malformed input, ...) into the same neutral value. The next
+  downstream check then misdiagnoses the cause and prescribes the wrong
+  remediation — and the cost is paid by the operator, who follows
+  guidance that does not fix the actual problem. "Boot a newer kernel"
+  does not repair a permissions error on `/proc/filesystems`; "the JSON
+  field is missing" is not the same diagnosis as "the JSON file is
+  unparseable." **Default to propagation**: `.map_err(...)?` into a
+  discrete typed variant whose `Display` form names the actual cause
+  and the actual fix. Absorbing a specific `ErrorKind` into a default
+  is allowed only when the application semantics legitimately treat
+  that kind the same as the default — `NotFound` on `/proc/filesystems`
+  IS the cgroup-v1-host signal, but `PermissionDenied` is not, even
+  when the downstream check happens to fire in both cases.
+
+  ```rust
+  // Bad — every io::Error becomes the empty string, which then
+  // triggers NoCgroupV2 with a "boot a newer kernel" remediation
+  // regardless of the actual cause (permission denied, EIO, broken
+  // procfs, /proc unmounted).
+  let proc_fs = std::fs::read_to_string(proc_filesystems).unwrap_or_default();
+  if !proc_fs.lines().any(|l| l.contains("cgroup2")) {
+      return Err(NoCgroupV2 { kernel: uname_release() });
+  }
+
+  // Good — NotFound flows to the v1-host signal because that IS the
+  // application semantics; every other ErrorKind surfaces as its own
+  // discrete variant with its own Display message and its own
+  // remediation.
+  let proc_fs = match std::fs::read_to_string(proc_filesystems) {
+      Ok(s) => s,
+      Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
+      Err(err) => return Err(ProcFilesystemsUnreadable { source: err }),
+  };
+  ```
+
+  Symptom to watch for during review: an error variant whose docstring
+  describes one failure mode but whose *triggering code path* fires for
+  several unrelated reasons. That is the smell — a variant has become a
+  catch-all for everything not explicitly handled, and operators
+  downstream receive the wrong remediation. The structural fix is
+  always the same: split the catch-all into discrete variants, propagate
+  the originating error via `.map_err(...)?`, and let `Display` carry
+  the cause-specific guidance.
+
 ### Concurrency & async
 
 - **Tokio is the standard runtime.** Do not reach for `async-std`,
@@ -718,6 +891,28 @@ you actually deleted what you set out to delete.
   + `process::exit()` patterns. `expect` already prints and panics;
   wrapping `process::exit` around fallible constructors adds noise with
   no benefit.
+- **No blocking `std::fs::*` inside `async fn`.** Filesystem I/O inside
+  an `async fn` body in an `adapter-host`-class crate goes through
+  `tokio::fs::*` (preferred — same syscall surface, async API) or
+  `tokio::task::spawn_blocking` (escape hatch — the sync closure runs
+  on the blocking pool). Sync `std::fs::*` blocks the tokio worker
+  thread and stalls every other future scheduled on it until the
+  syscall returns. The dst-lint gate enforces this at PR time:
+  `xtask/src/dst_lint.rs::scan_source_async_fs` walks every `async fn`
+  body (plus `async {}` blocks and `async fn` inside `#[async_trait]`
+  impls) in `adapter-host` crate `src/` and flags any path under
+  `std::fs::*`. Two exemptions:
+  - **Sync helper fns** are allowed to use `std::fs::*` directly. The
+    lint only fires when the *enclosing* fn / closure / async block
+    is async — sync helpers called from an `async fn` are still a
+    smell, but if you genuinely cannot make the helper async, wrap
+    its call site in `tokio::task::spawn_blocking`.
+  - **`#[cfg(test)]` items.** Tests may use sync `std::fs` for fixture
+    setup without penalty. The lint detects `#[cfg(test)]` on modules
+    and on individual fns and skips both.
+  Note: `tokio::fs::*` itself dispatches each call onto the blocking
+  pool internally — the *kernel* still does blocking I/O. The
+  difference is that the `async fn` body is never the one blocked.
 
 ### Hashing requires deterministic serialization
 

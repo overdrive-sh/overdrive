@@ -509,7 +509,7 @@ trait Driver: Send + Sync {
 
 | Driver | Backend | Use Case |
 |---|---|---|
-| `process` | tokio::process + cgroups v2 | Native binaries, daemons |
+| `exec` | tokio::process + cgroups v2 | Native binaries, daemons |
 | `microvm` | Cloud Hypervisor | Fast-boot (~200ms), strong isolation |
 | `vm` | Cloud Hypervisor | Full OS, hotplug, virtiofs, AArch64 |
 | `unikernel` | Cloud Hypervisor + Unikraft | Extreme density, virtiofs-capable |

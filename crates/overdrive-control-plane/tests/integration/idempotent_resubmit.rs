@@ -41,7 +41,9 @@ use overdrive_control_plane::api::{
     ErrorBody, IdempotencyOutcome, JobDescription, SubmitJobRequest, SubmitJobResponse,
 };
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
-use overdrive_core::aggregate::{IntentKey, Job, JobSpecInput};
+use overdrive_core::aggregate::{
+    DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
+};
 use overdrive_core::id::JobId;
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_store_local::LocalIntentStore;
@@ -103,6 +105,13 @@ async fn spawn_server() -> (ServerHandle, SocketAddr, TempDir, String) {
         bind: "127.0.0.1:0".parse().expect("parse bind addr"),
         data_dir,
         operator_config_dir: operator_config_dir.clone(),
+        // `tick_cadence` + `clock` default per
+        // `fix-convergence-loop-not-spawned` Step 01-02. Per ADR-0034
+        // the in-binary cgroup escape hatch is gone; on macOS the
+        // pre-flight is a `#[cfg(target_os = "linux")]` no-op, and on
+        // Linux this test runs via `cargo xtask lima run --` against
+        // the bundled VM (root + delegated cgroups).
+        ..Default::default()
     };
     let handle = run_server(config).await.expect("run_server");
     let bound = handle.local_addr().await.expect("bound addr");
@@ -137,8 +146,8 @@ fn payments_spec() -> JobSpecInput {
     JobSpecInput {
         id: "payments".to_owned(),
         replicas: 3,
-        cpu_milli: 500,
-        memory_bytes: 536_870_912, // 512 MiB
+        resources: ResourcesInput { cpu_milli: 500, memory_bytes: 536_870_912 }, // 512 MiB
+        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     }
 }
 
@@ -148,8 +157,8 @@ fn payments_spec_alt_replicas() -> JobSpecInput {
     JobSpecInput {
         id: "payments".to_owned(),
         replicas: 7,
-        cpu_milli: 500,
-        memory_bytes: 536_870_912,
+        resources: ResourcesInput { cpu_milli: 500, memory_bytes: 536_870_912 },
+        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     }
 }
 

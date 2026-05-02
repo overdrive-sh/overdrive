@@ -26,7 +26,8 @@ use std::any::{TypeId, type_name};
 use std::num::NonZeroU32;
 
 use overdrive_core::aggregate::{
-    Allocation, AllocationSpecInput, Job, JobSpecInput, Node, NodeSpecInput,
+    Allocation, AllocationSpecInput, DriverInput, ExecInput, Job, JobSpecInput, Node,
+    NodeSpecInput, ResourcesInput,
 };
 use overdrive_core::id::{AllocationId, JobId, NodeId, Region};
 use overdrive_core::traits::driver::Resources;
@@ -41,8 +42,8 @@ fn job_from_spec_accepts_canonical_input() {
     let spec = JobSpecInput {
         id: "payments".to_string(),
         replicas: 1,
-        cpu_milli: 2000,
-        memory_bytes: 4 * 1024 * 1024 * 1024,
+        resources: ResourcesInput { cpu_milli: 2000, memory_bytes: 4 * 1024 * 1024 * 1024 },
+        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     };
 
     // When Ana calls the validating constructor.
@@ -110,14 +111,26 @@ fn allocation_new_accepts_canonical_input() {
 /// to satisfy `clippy::items_after_statements`.
 const fn assert_is_driver_resources(_: &Resources) {}
 
+/// Count exact `pub struct Resources` declarations — matches the
+/// canonical type only, NOT `pub struct ResourcesInput` (the wire-
+/// shape twin per ADR-0031 §2). Three acceptable forms:
+///   `pub struct Resources {`
+///   `pub struct Resources<` (generic) — none today, future-proof
+///   `pub struct Resources;` (unit) — none today, future-proof
+fn count_resources_decls(body: &str) -> usize {
+    body.matches("pub struct Resources {").count()
+        + body.matches("pub struct Resources<").count()
+        + body.matches("pub struct Resources;").count()
+}
+
 #[test]
 fn job_resources_and_node_capacity_resolve_to_the_same_resources_type() {
     // Given a Job and a Node constructed through the public constructors.
     let job = Job::from_spec(JobSpecInput {
         id: "payments".to_string(),
         replicas: 1,
-        cpu_milli: 1000,
-        memory_bytes: 1_073_741_824,
+        resources: ResourcesInput { cpu_milli: 1000, memory_bytes: 1_073_741_824 },
+        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     })
     .expect("canonical Job input");
     let node = Node::new(NodeSpecInput {
@@ -169,7 +182,7 @@ fn no_second_resources_type_exists_in_overdrive_core_sources() {
     let error_rs = include_str!("../../src/error.rs");
     let reconciler_rs = include_str!("../../src/reconciler.rs");
 
-    let authoritative_decls = traits_driver.matches("pub struct Resources").count();
+    let authoritative_decls = count_resources_decls(traits_driver);
     assert_eq!(
         authoritative_decls, 1,
         "authoritative Resources must be declared exactly once in traits/driver.rs"
@@ -183,7 +196,7 @@ fn no_second_resources_type_exists_in_overdrive_core_sources() {
         ("reconciler.rs", reconciler_rs),
     ] {
         assert_eq!(
-            body.matches("pub struct Resources").count(),
+            count_resources_decls(body),
             0,
             "no second Resources struct may exist in {label}"
         );
@@ -238,8 +251,8 @@ fn job_public_fields_are_typed_newtypes_not_raw_primitives() {
     let job = Job::from_spec(JobSpecInput {
         id: "payments".to_string(),
         replicas: 1,
-        cpu_milli: 1000,
-        memory_bytes: 1_073_741_824,
+        resources: ResourcesInput { cpu_milli: 1000, memory_bytes: 1_073_741_824 },
+        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     })
     .expect("canonical input");
 

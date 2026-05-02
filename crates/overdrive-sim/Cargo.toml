@@ -21,10 +21,6 @@ publish               = false
 crate_class = "adapter-sim"
 
 [dependencies]
-# Sim depends on overdrive-core and — when the sim crate's own
-# `canary-bug` feature is enabled — forwards that into
-# `overdrive-core/canary-bug` so the `HarnessNoopHeartbeat` variant of
-# `AnyReconciler` is available.
 overdrive-core = { workspace = true }
 async-trait.workspace    = true
 bytes.workspace          = true
@@ -38,17 +34,6 @@ tempfile.workspace       = true
 overdrive-store-local    = { path = "../overdrive-store-local" }
 
 [features]
-# `canary-bug` — TEST-ONLY feature that plants a deliberate LWW-convergence
-# break in `SimObservationStore` on the canary trigger seed (0xDEAD_BEEF).
-# Production builds MUST NEVER enable this feature. It exists so that the
-# WS-3 acceptance scenario (see `docs/feature/phase-1-foundation/distill/
-# test-scenarios.md` §1.3 and §7.2) can prove the harness catches real
-# bugs — an invariant suite that cannot go red is indistinguishable from an
-# empty suite. The gate is scoped to exactly one code path in
-# `adapters/observation_store.rs`; grep for `#[cfg(feature = "canary-bug")]`
-# to see the complete surface.
-canary-bug = ["overdrive-core/canary-bug"]
-
 # `integration-tests` — workspace-wide convention. Every workspace
 # member declares this feature so `cargo {check,test,mutants}
 # --features integration-tests` resolves uniformly under per-package

@@ -74,6 +74,23 @@ pub enum JobCommand {
     Submit {
         /// Path to a TOML job-spec file.
         spec: std::path::PathBuf,
+        /// Wait only for the `IntentStore` commit; do not stream
+        /// lifecycle events.
+        ///
+        /// When set, the CLI sends `Accept: application/json` and
+        /// consumes the JSON ack only — the same wire shape Phase 1
+        /// has shipped since slice 01. Exit code 0 on
+        /// `Inserted`/`Unchanged`; exit code 2 on transport or
+        /// server-validation error per ADR-0015. The NDJSON
+        /// streaming consumer is bypassed regardless of stdout
+        /// being a TTY.
+        ///
+        /// Reference class: `docker run -d`, `nomad job run --detach`.
+        /// The companion auto-detect (`std::io::IsTerminal`) lands
+        /// in slice 03 step 03-02; this is the explicit operator
+        /// escape valve.
+        #[arg(long)]
+        detach: bool,
     },
     List,
     Stop {

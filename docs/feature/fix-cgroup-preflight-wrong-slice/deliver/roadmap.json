@@ -1,0 +1,163 @@
+{
+  "roadmap": {
+    "project_id": "fix-cgroup-preflight-wrong-slice",
+    "feature_id": "fix-cgroup-preflight-wrong-slice",
+    "created_at": "2026-04-29T13:00:00Z",
+    "filled_at": "2026-04-29T13:00:00Z",
+    "total_steps": 2,
+    "phases": 1,
+    "walking_skeleton_gate": "01-02",
+    "notes": [
+      "Bug fix via /nw-bugfix → /nw-deliver. The authoritative specification is the RCA at `docs/feature/fix-cgroup-preflight-wrong-slice/bugfix-rca.md` (user-reviewed and APPROVED 2026-04-29 in Phase 2 before roadmap creation). Approved fix shape: **Option B + injected `proc_self_cgroup` parameter** — read `/proc/self/cgroup` to discover the enclosing slice; inject the path for testability. NOT (a) hardcoded `user.slice/user-{uid}.slice/` derivation; NOT (c) caller-computed slice path.",
+      "Single-cut migration per `feedback_single_cut_greenfield_migrations`: the buggy step-4 body is replaced in step 01-02; no deprecated old code path, no shadow read, no feature-flagged fallback. The fix lands as one cohesive commit.",
+      "Two-step Outside-In TDD shape per the canonical bugfix template at `docs/feature/fix-convergence-loop-not-spawned/deliver/roadmap.json`. Step 01-01 lands the structural changes that make the bug visible: signature change (new `proc_self_cgroup` parameter), fixture updates for the three existing step-4 tests, plus the new oracle test `preflight_reads_enclosing_slice.rs`. The buggy step-4 body is unchanged in 01-01 — the new oracle test FAILS because the buggy code reads the tempdir root which the fixture seeds with all controllers (kernel-root simulation). RED commit via `--no-verify` per `.claude/rules/testing.md` §RED scaffolds. Step 01-02 rewrites the step-4 body, adds the `parse_cgroup_v2_path` helper, adds the `CgroupPathDiscoveryFailed` variant, adds the malformed-file test; the RED oracle test transitions RED → GREEN within the same commit.",
+      "Per `.claude/rules/testing.md` mutation-testing rules, both steps run `cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-control-plane --file crates/overdrive-control-plane/src/cgroup_preflight.rs` via `cargo xtask lima run --` (mutation runs that include `--features integration-tests` REQUIRE Lima on macOS). Kill-rate gate ≥80%. The pre-existing missed mutation flagged at `docs/evolution/2026-04-29-fix-convergence-loop-not-spawned.md:236-241` (`replace run_preflight -> Result<(), CgroupPreflightError> with Ok(())`) is closed by the new oracle test exercising the production-shaped step-4 path with non-zero UID.",
+      "Out of scope (flagged for follow-up, do NOT touch): `cgroup_manager::create_and_enrol_control_plane_slice` writes `overdrive.slice/...` directly at the cgroupfs root, which non-root operators cannot do even with `Delegate=yes` on their `user-<uid>.slice/`. This is a deeper Phase 1 question (where does the control plane's slice live for unprivileged single-node?) that ADR-0028 implicitly assumes is solved.",
+      "ADR-0028 is correct; the implementation drifted. No ADR change required."
+    ]
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Bug fix — enclosing slice discovery",
+      "slice": "single-vertical",
+      "user_stories": [
+        "As a non-root operator running `overdrive serve` on a host without `Delegate=yes` on my user slice, the preflight refuses startup with an actionable DelegationMissing message naming my user slice — not the kernel-root cgroup — so I am not surprised by `Driver::start` failures later."
+      ],
+      "description": "Replace the buggy step-4 read of `<cgroup_root>/cgroup.subtree_control` (the kernel-root cgroup, which always lists every controller on modern kernels) with the ADR-0028 §4 step-4 spec: discover the enclosing slice by reading `/proc/self/cgroup`, parse the cgroup-v2 line, then read `<enclosing_slice>/cgroup.subtree_control`. Inject `/proc/self/cgroup` as a path parameter so tests can fabricate the discovery shape without touching real `/proc`.",
+      "estimated_hours": 1.5,
+      "depends_on": [],
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "RED — signature change + fixture updates + new oracle test",
+          "description": "Land the structural changes that make the bug visible without yet rewriting the buggy step-4 body. Add `proc_self_cgroup: &Path` as the fourth parameter of `run_preflight_at`. Update the three existing step-4-touching integration tests to write fixtures under `user.slice/user-1000.slice/` and pass a fake `/proc/self/cgroup` containing `0::/user.slice/user-1000.slice`. Add the new oracle test `preflight_reads_enclosing_slice.rs` that seeds `<tmp>/cgroup.subtree_control` with `cpu memory io` (kernel-root state) AND `<tmp>/user.slice/user-1000.slice/cgroup.subtree_control` with only `io pids`. Wire the new test through `tests/integration.rs`. The buggy step-4 body remains unchanged at this commit, so the new oracle test FAILS (the buggy code reads the tempdir root which has all controllers → preflight passes → test asserts DelegationMissing). The three existing tests continue to pass through their default-empty fallback because the buggy code reads a non-existent file at the tempdir root → `unwrap_or_default()` → empty → both controllers missing → DelegationMissing returned. Commit with `git commit --no-verify` per testing.md §RED scaffolds.",
+          "criteria": [
+            "AC1: `run_preflight_at` signature has fourth parameter `proc_self_cgroup: &Path`.",
+            "AC2: `run_preflight()` production wrapper passes `Path::new(\"/proc/self/cgroup\")` as the fourth argument.",
+            "AC3: New file `crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_reads_enclosing_slice.rs` exists; the test fails on the buggy code (returns Ok where DelegationMissing is expected) and is wired through `tests/integration.rs`.",
+            "AC4: Three existing tests (`preflight_no_delegation.rs`, `preflight_missing_cpu.rs`, `preflight_v1_host.rs`) compile and continue to pass under the buggy code.",
+            "AC5: `cargo nextest run -p overdrive-control-plane --features integration-tests --no-run` succeeds on macOS (compile-only gate); commit message clearly marks the RED scaffold state."
+          ],
+          "acceptance_criteria": [
+            "AC1: `run_preflight_at` signature has fourth parameter `proc_self_cgroup: &Path`.",
+            "AC2: `run_preflight()` production wrapper passes `Path::new(\"/proc/self/cgroup\")` as the fourth argument.",
+            "AC3: New file `crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_reads_enclosing_slice.rs` exists; the test fails on the buggy code (returns Ok where DelegationMissing is expected) and is wired through `tests/integration.rs`.",
+            "AC4: Three existing tests (`preflight_no_delegation.rs`, `preflight_missing_cpu.rs`, `preflight_v1_host.rs`) compile and continue to pass under the buggy code.",
+            "AC5: `cargo nextest run -p overdrive-control-plane --features integration-tests --no-run` succeeds on macOS (compile-only gate); commit message clearly marks the RED scaffold state."
+          ],
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/cgroup_preflight.rs",
+            "crates/overdrive-control-plane/tests/integration.rs",
+            "crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_no_delegation.rs",
+            "crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_missing_cpu.rs",
+            "crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_v1_host.rs",
+            "crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_reads_enclosing_slice.rs"
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_reads_enclosing_slice.rs",
+          "scenario_name": "preflight_reads_enclosing_slice_via_proc_self_cgroup",
+          "tier": "structural",
+          "time_estimate_hours": 0.75,
+          "estimated_hours": 0.75,
+          "dependencies": [],
+          "quality_gates": [
+            "Compile-only on macOS via `cargo nextest run -p overdrive-control-plane --features integration-tests --no-run`.",
+            "Linux runtime via `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests` (oracle test FAILS as expected; remaining tests PASS).",
+            "Commit shape: `--no-verify` with explicit RED-scaffold marker in the message."
+          ],
+          "deliverables": [
+            "One commit landing the parameter change + fixture updates + new oracle test in RED state."
+          ],
+          "implementation_scope": {
+            "production": ["crates/overdrive-control-plane/src/cgroup_preflight.rs (signature only; step-4 body unchanged)"],
+            "tests": [
+              "crates/overdrive-control-plane/tests/integration.rs (mod declaration)",
+              "crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_reads_enclosing_slice.rs (new oracle)",
+              "crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_no_delegation.rs (fixture + call-site update)",
+              "crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_missing_cpu.rs (fixture + call-site update — both tests in file)",
+              "crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_v1_host.rs (call-site update only — step 1 fails before step 4)"
+            ]
+          },
+          "implementation_notes": [
+            "The new oracle test fixture: write `<tmp>/cgroup.subtree_control` containing `cpu memory io` (simulates kernel-root). Write `<tmp>/user.slice/user-1000.slice/cgroup.subtree_control` containing `io pids` (simulates user slice without Delegate=yes). Write `<tmp>/proc-self-cgroup` containing `0::/user.slice/user-1000.slice\\n`. Pass uid=1000 and proc_self_cgroup=`<tmp>/proc-self-cgroup`. Assert `DelegationMissing` with `missing` containing both `cpu` and `memory`.",
+            "On the buggy code: `read_to_string(<tmp>/cgroup.subtree_control)` returns `cpu memory io` → both controllers found → preflight returns `Ok(())` → test FAILS (asserted DelegationMissing).",
+            "On the fix (step 01-02): code reads `<tmp>/proc-self-cgroup`, parses `0::/user.slice/user-1000.slice`, joins to `<tmp>` → `<tmp>/user.slice/user-1000.slice/cgroup.subtree_control`, reads `io pids` → both controllers missing → DelegationMissing returned → test PASSES.",
+            "For the existing `preflight_no_delegation.rs`: update fixture to write empty `<tmp>/user.slice/user-1000.slice/cgroup.subtree_control` AND `<tmp>/proc-self-cgroup` containing `0::/user.slice/user-1000.slice`. Buggy code reads non-existent `<tmp>/cgroup.subtree_control` → empty default → both missing → DelegationMissing → test PASSES under buggy code by chance. Same for `preflight_missing_cpu.rs` BUT with the specific controller content the test asserts on (cpu missing only / memory missing only) — this means under the buggy code the test would NOT pass because the buggy read of empty default doesn't yield 'only cpu missing'. SOLUTION for step 01-01: also write `<tmp>/cgroup.subtree_control` with the SAME content the test expects to find at the user slice. Both files exist; buggy code reads the root file with the right content; test passes under bug. Fix in 01-02: code reads user slice with the same content; test still passes.",
+            "`preflight_v1_host.rs` only needs the new fourth argument; its `/proc/filesystems` content lacks `cgroup2` so step 1 fails before step 4 — the proc_self_cgroup contents don't matter; pass any path (a tempdir-rooted nonexistent file is fine).",
+            "Wire the new test by adding `mod preflight_reads_enclosing_slice;` inside the inline `mod integration { … }` wrapper in `tests/integration.rs` per `.claude/rules/testing.md` § Layout.",
+            "DO NOT add `parse_cgroup_v2_path` or the new error variant in this step. DO NOT rewrite the step-4 body. DO NOT add `CgroupPathDiscoveryFailed`."
+          ]
+        },
+        {
+          "id": "01-02",
+          "name": "GREEN — replace step-4 body with /proc/self/cgroup discovery + new error variant + malformed-file test",
+          "description": "Make the RED oracle from 01-01 transition GREEN by rewriting the step-4 body. Read the `proc_self_cgroup` parameter, parse its cgroup-v2 line via a new internal helper `parse_cgroup_v2_path(contents: &str) -> Option<&str>` (finds the line beginning with `0::` and returns its tail), strip the leading `/`, join to `cgroup_root` to form the enclosing slice directory, then read `<enclosing_slice>/cgroup.subtree_control` and apply the existing cpu/memory missing-controller logic. Add a new error variant `CgroupPathDiscoveryFailed { #[source] source: std::io::Error }` for the cgroup-v1-only / malformed-file shape. Add the new variant test `preflight_proc_self_cgroup_malformed.rs` (two cases: v1-only file, empty file). Update the doc comment at the old lines 164-167 to describe the new behaviour. Update the `pub fn run_preflight_at` rustdoc to mention the new parameter and ADR-0028 §4 step 4. Update the `DelegationMissing.slice` field doc to reflect that it now carries the enclosing slice DIRECTORY (not the file path). Conventional commit `fix(control-plane):`.",
+          "criteria": [
+            "AC1: Step-4 body reads `proc_self_cgroup`, parses via `parse_cgroup_v2_path`, joins parsed-path-stripped-of-leading-slash to `cgroup_root`, reads `<enclosing_slice>/cgroup.subtree_control`.",
+            "AC2: New helper `parse_cgroup_v2_path(contents: &str) -> Option<&str>` returns the tail of the line beginning with `0::`, or None.",
+            "AC3: New error variant `CgroupPathDiscoveryFailed { #[source] source: std::io::Error }` exists with a Display form following the same shape as existing variants (what / why / how to fix; mentions `--allow-no-cgroups`; cites docs URL).",
+            "AC4: New test file `preflight_proc_self_cgroup_malformed.rs` covers both cases (v1-only file, empty file) and is wired through `tests/integration.rs`.",
+            "AC5: All four step-4-touching tests pass on Linux via Lima: `preflight_reads_enclosing_slice` (the RED→GREEN oracle), `preflight_no_delegation`, `preflight_missing_cpu`'s two tests, plus the new `preflight_proc_self_cgroup_malformed` cases. `preflight_v1_host` continues to pass.",
+            "AC6: Mutation gate via `cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-control-plane --file crates/overdrive-control-plane/src/cgroup_preflight.rs` ≥80% kill rate.",
+            "AC7: Doc comments updated: step-4 body comment describes new behaviour; `run_preflight_at` rustdoc names the new parameter and cites ADR-0028 §4 step 4; `DelegationMissing.slice` field doc reflects directory semantics."
+          ],
+          "acceptance_criteria": [
+            "AC1: Step-4 body reads `proc_self_cgroup`, parses via `parse_cgroup_v2_path`, joins parsed-path-stripped-of-leading-slash to `cgroup_root`, reads `<enclosing_slice>/cgroup.subtree_control`.",
+            "AC2: New helper `parse_cgroup_v2_path(contents: &str) -> Option<&str>` returns the tail of the line beginning with `0::`, or None.",
+            "AC3: New error variant `CgroupPathDiscoveryFailed { #[source] source: std::io::Error }` exists with a Display form following the same shape as existing variants (what / why / how to fix; mentions `--allow-no-cgroups`; cites docs URL).",
+            "AC4: New test file `preflight_proc_self_cgroup_malformed.rs` covers both cases (v1-only file, empty file) and is wired through `tests/integration.rs`.",
+            "AC5: All four step-4-touching tests pass on Linux via Lima: `preflight_reads_enclosing_slice` (the RED→GREEN oracle), `preflight_no_delegation`, `preflight_missing_cpu`'s two tests, plus the new `preflight_proc_self_cgroup_malformed` cases. `preflight_v1_host` continues to pass.",
+            "AC6: Mutation gate via `cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-control-plane --file crates/overdrive-control-plane/src/cgroup_preflight.rs` ≥80% kill rate.",
+            "AC7: Doc comments updated: step-4 body comment describes new behaviour; `run_preflight_at` rustdoc names the new parameter and cites ADR-0028 §4 step 4; `DelegationMissing.slice` field doc reflects directory semantics."
+          ],
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/cgroup_preflight.rs",
+            "crates/overdrive-control-plane/tests/integration.rs",
+            "crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_proc_self_cgroup_malformed.rs"
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_proc_self_cgroup_malformed.rs",
+          "scenario_name": "preflight_rejects_malformed_proc_self_cgroup",
+          "tier": "behavioural",
+          "time_estimate_hours": 0.75,
+          "estimated_hours": 0.75,
+          "dependencies": ["01-01"],
+          "quality_gates": [
+            "Linux runtime via `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests`: all step-4 tests PASS.",
+            "Whole-workspace gate via `cargo xtask lima run -- cargo nextest run --workspace --features integration-tests`: green.",
+            "Mutation gate via `cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-control-plane --file crates/overdrive-control-plane/src/cgroup_preflight.rs`: kill rate ≥80%, summary file `target/xtask/mutants-summary.json` records `status=\"pass\"`.",
+            "Post-mutation cleanup: `git checkout -- crates/`.",
+            "Conventional commit message: `fix(control-plane): cgroup preflight reads enclosing slice via /proc/self/cgroup`."
+          ],
+          "deliverables": [
+            "One commit completing the bug fix; mutation gate pass artefact at `target/xtask/mutants-summary.json`."
+          ],
+          "implementation_scope": {
+            "production": [
+              "crates/overdrive-control-plane/src/cgroup_preflight.rs (rewrite step-4 body; add parse_cgroup_v2_path helper; add CgroupPathDiscoveryFailed variant; update doc comments)"
+            ],
+            "tests": [
+              "crates/overdrive-control-plane/tests/integration.rs (mod declaration for new variant test)",
+              "crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_proc_self_cgroup_malformed.rs (new variant test)"
+            ]
+          },
+          "implementation_notes": [
+            "The parse helper signature: `fn parse_cgroup_v2_path(contents: &str) -> Option<&str> { contents.lines().find_map(|line| line.strip_prefix(\"0::\")) }`.",
+            "The leading-slash strip is essential: the parsed path begins with `/` (e.g. `/user.slice/user-1000.slice`) but `Path::join` on an absolute path discards the prefix. Use `.trim_start_matches('/')` before the join.",
+            "The new error variant Display form should follow the existing pattern: name the failure, name the cause (the embedded io::Error), name the fix (run with `--allow-no-cgroups` for development; check `/proc/self/cgroup` exists and is readable; note that v1-only hosts will hit `NoCgroupV2` first under normal flow). Cite the docs URL `https://docs.overdrive.sh/operations/cgroup-delegation`.",
+            "The `DelegationMissing.slice` field changes meaning: in 01-01 it still holds whatever the buggy code computed (a file path); in 01-02 it holds the enclosing slice DIRECTORY (not the file). Update the field's doc comment and the variant rustdoc accordingly.",
+            "After the fix lands, the existing `preflight_no_delegation.rs` and `preflight_missing_cpu.rs` tests should continue to pass — their fixtures (updated in 01-01) write to `user.slice/user-1000.slice/cgroup.subtree_control`, which is exactly what the fixed code now reads. They become the FIRST tests that exercise the production-shaped path correctly.",
+            "Mutation gate: run via `cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-control-plane --file crates/overdrive-control-plane/src/cgroup_preflight.rs` because `--features integration-tests` is the canonical Linux-gated test surface (per `.claude/rules/testing.md` § Mutation testing → Usage). Inner-loop scope: only this file. If kill-rate drops below 80%, add tests until it doesn't. Common mutants for this file: flipping comparison operators in the missing-controller match, replacing the parse-helper return with `None`, replacing the `unwrap_or_default()` with the explicit error path. Existing skip annotations stay in place.",
+            "Post-mutation: `git checkout -- crates/` to clean any mutated source the wrapper didn't restore. This is belt-and-braces per `.claude/rules/testing.md`.",
+            "Final commit body: explain what changed (read `/proc/self/cgroup` for enclosing slice discovery), reference the user-approved fix shape (Option B + injected parameter), link to `docs/feature/fix-cgroup-preflight-wrong-slice/bugfix-rca.md`, link to ADR-0028 §4 step 4."
+          ]
+        }
+      ]
+    }
+  ],
+  "validation": {
+    "status": "approved",
+    "checked_at": "2026-04-29T13:00:00Z",
+    "checked_by": "orchestrator (/nw-bugfix Phase 3 — main instance, RCA-driven)",
+    "notes": "Roadmap quality gate (6 checks) PASS: (1) AC coupling — all ACs reference `pub fn run_preflight_at` signature, public error variants `CgroupPreflightError::DelegationMissing`/`CgroupPathDiscoveryFailed`, and observable file-system fixtures; no private-method coupling. (2) Decomposition ratio — 2 steps over 6 production+test files (counting 01-01 only as 6, since 01-02 reuses files): 0.33, well under 2.5. (3) Distinct shapes — 01-01 is RED scaffold (structural change + intentionally-failing oracle); 01-02 is GREEN cohesive fix; no batchable repetition. (4) Both steps have non-empty `files_to_modify` populated with concrete paths. (5) Step IDs match `^\\d{2}-\\d{2}$`: 01-01, 01-02. (6) DISTILL linkage — no `distill/` directory exists for this bugfix (per the bugfix template at `fix-convergence-loop-not-spawned`); the RCA at `docs/feature/fix-cgroup-preflight-wrong-slice/bugfix-rca.md` plays that role. Both steps name a `test_file` and `scenario_name` referencing the new oracle (01-01) and the new variant test (01-02). User-approved 2026-04-29 in /nw-bugfix Phase 2."
+  }
+}

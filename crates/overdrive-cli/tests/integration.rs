@@ -19,8 +19,32 @@ mod integration {
     mod cluster_and_node_commands;
     mod cluster_init_removed;
     mod endpoint_from_config;
+    mod exec_spec_walking_skeleton;
     mod http_client;
     mod job_submit;
     mod post_http_invalid_job_id;
     mod walking_skeleton;
+
+    // Slice 02 step 02-04 — Tier 3 streaming submit:
+    //   * S-WS-01 (happy path: real `/bin/sleep` → ConvergedRunning → exit 0)
+    //   * S-WS-02 (REGRESSION TARGET KPI-02: real ENOENT → ConvergedFailed
+    //     with byte-equal cause-class payload across streaming + snapshot)
+    // Both #[cfg(target_os = "linux")] — production `ExecDriver`
+    // requires real `tokio::process::Command::spawn`. macOS dev runs
+    // via `cargo xtask lima run --` per `crates/overdrive-cli/CLAUDE.md`.
+    mod streaming_submit_broken_binary;
+    // fix-converged-stopped-cli-arm — regression: ConvergedStopped
+    // must terminate the streaming consumer with exit code 0; current
+    // code falls through to the `_ =>` catch-all and returns
+    // Err(BodyDecode).
+    mod streaming_submit_converged_stopped;
+    mod streaming_submit_happy_path;
+
+    // Slice 03 step 03-02 — S-CLI-03 Tier 3 jq-pipeline-equivalent:
+    // a pipe-redirected stdout (non-TTY) without --detach MUST
+    // auto-select the JSON-ack lane and emit a single parseable JSON
+    // object whose `spec_digest` is 64 lowercase-hex chars. CLAUDE.md
+    // forbids `Command::spawn`, so this is the in-process equivalent
+    // of the shell pipeline; see file rustdoc for the full mapping.
+    mod submit_jq_pipeline;
 }

@@ -60,7 +60,10 @@ fn read_summary(target_dir: &Path) -> serde_json::Value {
 /// skeleton catalogue; the next three landed in slice 4 alongside the
 /// reconciler-primitive runtime (ADR-0013 §9); `broker-drain-order-is-
 /// deterministic` landed with the eval-broker drain-determinism fix
-/// (commit `bc95506`).
+/// (commit `bc95506`); the final three convergence invariants
+/// (`job-scheduled-after-submission`, `desired-replica-count-converges`,
+/// `no-double-scheduling`) landed in step 02-03 of phase-1-first-workload
+/// (slice 3, US-03).
 const EXPECTED_INVARIANTS: &[&str] = &[
     "single-leader",
     "intent-never-crosses-into-observation",
@@ -72,7 +75,15 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     "duplicate-evaluations-collapse",
     "broker-drain-order-is-deterministic",
     "reconciler-is-pure",
+    // `dispatch-routing-is-name-restricted` was added by
+    // `fix-eval-reconciler-discarded` (commit `e6f5e5e`); both blessed
+    // catalogues (here and in `dst_clean_clone_green.rs`) track
+    // `Invariant::ALL` exactly.
+    "dispatch-routing-is-name-restricted",
     "intent-store-returns-caller-bytes",
+    "job-scheduled-after-submission",
+    "desired-replica-count-converges",
+    "no-double-scheduling",
 ];
 
 // -----------------------------------------------------------------------------

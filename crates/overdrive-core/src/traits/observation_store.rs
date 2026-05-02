@@ -28,6 +28,7 @@ use futures::Stream;
 use thiserror::Error;
 
 use crate::id::{AllocationId, JobId, NodeId, Region};
+use crate::transition_reason::TransitionReason;
 
 #[derive(Debug, Error)]
 pub enum ObservationStoreError {
@@ -35,6 +36,119 @@ pub enum ObservationStoreError {
     Unreachable { peer: String },
     #[error("observation store I/O: {0}")]
     Io(#[from] std::io::Error),
+}
+
+impl ObservationStoreError {
+    /// Classify whether this error is a transient condition the caller
+    /// should retry, or a terminal failure that must be surfaced via a
+    /// louder failure mode.
+    ///
+    /// Used by `worker::exit_observer` to gate a bounded retry loop on
+    /// the obs-write path: transient errors (e.g. a transiently
+    /// unreachable peer, or genuinely retryable I/O kinds) re-attempt
+    /// the write; terminal errors short-circuit to a degraded
+    /// `LifecycleEvent` so subscribers see the failure surface rather
+    /// than an alloc silently stuck `Running`.
+    ///
+    /// # Classification policy
+    ///
+    /// - [`Self::Unreachable`] — always retryable. The peer may be
+    ///   transiently down (gossip in flight, network blip); a bounded
+    ///   retry window is the right shape.
+    /// - [`Self::Io`] — retryable only for genuinely transient
+    ///   `io::ErrorKind` values: `Interrupted` (syscall interrupted by
+    ///   signal), `WouldBlock` (non-blocking I/O hit back-pressure),
+    ///   `TimedOut` (operation deadline elapsed), `ResourceBusy`
+    ///   (kernel/backend held a lock). Every other `io::ErrorKind`
+    ///   (`PermissionDenied`, `AlreadyExists`, `NotFound` on a write
+    ///   path, `OutOfMemory`, `Other`, `Unsupported`, …) is a terminal
+    ///   condition where retrying cannot succeed — return `false` so
+    ///   the caller escalates immediately.
+    #[must_use]
+    pub fn is_retryable(&self) -> bool {
+        match self {
+            Self::Unreachable { .. } => true,
+            Self::Io(err) => matches!(
+                err.kind(),
+                std::io::ErrorKind::Interrupted
+                    | std::io::ErrorKind::WouldBlock
+                    | std::io::ErrorKind::TimedOut
+                    | std::io::ErrorKind::ResourceBusy
+            ),
+        }
+    }
+}
+
+#[cfg(test)]
+mod is_retryable_tests {
+    use super::ObservationStoreError;
+    use std::io;
+
+    #[test]
+    fn unreachable_is_retryable() {
+        let err = ObservationStoreError::Unreachable { peer: "node-2".to_owned() };
+        assert!(err.is_retryable(), "Unreachable variant must be classified retryable");
+    }
+
+    #[test]
+    fn io_interrupted_is_retryable() {
+        let err = ObservationStoreError::Io(io::Error::from(io::ErrorKind::Interrupted));
+        assert!(err.is_retryable(), "Io(Interrupted) must be classified retryable");
+    }
+
+    #[test]
+    fn io_would_block_is_retryable() {
+        let err = ObservationStoreError::Io(io::Error::from(io::ErrorKind::WouldBlock));
+        assert!(err.is_retryable(), "Io(WouldBlock) must be classified retryable");
+    }
+
+    #[test]
+    fn io_timed_out_is_retryable() {
+        let err = ObservationStoreError::Io(io::Error::from(io::ErrorKind::TimedOut));
+        assert!(err.is_retryable(), "Io(TimedOut) must be classified retryable");
+    }
+
+    #[test]
+    fn io_resource_busy_is_retryable() {
+        let err = ObservationStoreError::Io(io::Error::from(io::ErrorKind::ResourceBusy));
+        assert!(err.is_retryable(), "Io(ResourceBusy) must be classified retryable");
+    }
+
+    #[test]
+    fn io_permission_denied_is_terminal() {
+        let err = ObservationStoreError::Io(io::Error::from(io::ErrorKind::PermissionDenied));
+        assert!(!err.is_retryable(), "Io(PermissionDenied) must be terminal");
+    }
+
+    #[test]
+    fn io_already_exists_is_terminal() {
+        let err = ObservationStoreError::Io(io::Error::from(io::ErrorKind::AlreadyExists));
+        assert!(!err.is_retryable(), "Io(AlreadyExists) must be terminal");
+    }
+
+    #[test]
+    fn io_not_found_is_terminal() {
+        let err = ObservationStoreError::Io(io::Error::from(io::ErrorKind::NotFound));
+        assert!(!err.is_retryable(), "Io(NotFound) must be terminal on a write path");
+    }
+
+    #[test]
+    fn io_out_of_memory_is_terminal() {
+        let err = ObservationStoreError::Io(io::Error::from(io::ErrorKind::OutOfMemory));
+        assert!(!err.is_retryable(), "Io(OutOfMemory) must be terminal");
+    }
+
+    #[test]
+    fn io_other_is_terminal() {
+        let err = ObservationStoreError::Io(io::Error::from(io::ErrorKind::Other));
+        assert!(!err.is_retryable(), "Io(Other) must be terminal — unknown kinds are not retried");
+    }
+
+    #[test]
+    fn io_unsupported_is_terminal() {
+        let err = ObservationStoreError::Io(io::Error::from(io::ErrorKind::Unsupported));
+        assert!(!err.is_retryable(), "Io(Unsupported) must be terminal");
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -46,6 +160,12 @@ pub enum ObservationStoreError {
 /// Matches the lifecycle documented in whitepaper §4 and §14 —
 /// `pending → running ⇄ suspended → terminated`, plus `draining` as the
 /// transient state a node reports while migrating an allocation away.
+///
+/// `Failed` is the explicit terminal state a driver-rejected start
+/// (or any cause-class failure transition) lands in. Per ADR-0032 §3
+/// (Amendment 2026-04-30) the failure cause is structurally captured
+/// on the `AllocStatusRow` via `reason: Option<TransitionReason>`; the
+/// `Failed` state is the lifecycle bucket those rows live in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum AllocState {
     Pending,
@@ -53,6 +173,10 @@ pub enum AllocState {
     Draining,
     Suspended,
     Terminated,
+    /// Driver-rejected start, restart-budget exhaustion, cancellation,
+    /// no-capacity, or any other cause-class failure. Mirrors
+    /// `TransitionReason::is_failure() == true`. Per ADR-0032 §3.
+    Failed,
 }
 
 impl std::fmt::Display for AllocState {
@@ -65,6 +189,7 @@ impl std::fmt::Display for AllocState {
             Self::Draining => "draining",
             Self::Suspended => "suspended",
             Self::Terminated => "terminated",
+            Self::Failed => "failed",
         };
         f.write_str(s)
     }
@@ -117,10 +242,37 @@ impl LogicalTimestamp {
     }
 }
 
-/// `alloc_status` row — Phase 1 minimal shape per brief §6.
+/// `alloc_status` row — Phase 1 minimal shape per brief §6, extended
+/// per ADR-0032 §3 (Amendment 2026-04-30) and §4 with cause-class
+/// attribution.
 ///
 /// Written by the node that owns the allocation; gossiped to every peer.
 /// Full-row writes only (no field-diff merges) per the §4 guardrail.
+///
+/// # Cause-class attribution
+///
+/// `reason` carries the structured `TransitionReason` for the most
+/// recent transition that produced this row. Progress markers
+/// (`Scheduling`, `Starting`, `Started`, `BackoffPending`, `Stopped`)
+/// describe healthy lifecycle progress; cause-class variants
+/// (`ExecBinaryNotFound`, `CgroupSetupFailed`, `RestartBudgetExhausted`,
+/// `Cancelled`, `NoCapacity`, …) describe failure transitions and
+/// pair with `state == AllocState::Failed`.
+///
+/// `detail` carries verbatim driver text the typed `reason` payload
+/// does not capture — most commonly the raw `errno`-decorated message
+/// from `std::io::Error::Display` for cgroup / spawn failures. The
+/// typed payload is the load-bearing artifact; `detail` is the human-
+/// readable fallback for cases the cause-class taxonomy has not yet
+/// grown a variant for.
+///
+/// # Forward compatibility
+///
+/// Both `reason` and `detail` are `Option<…>` and additive on the rkyv
+/// archive shape — pre-feature redb files (where neither field exists)
+/// continue to deserialise (rkyv treats `Option<T>` such that omitted
+/// data deserialises to `None`). New writers populate both fields per
+/// the action-shim contract (ADR-0023); old readers tolerate them.
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct AllocStatusRow {
     pub alloc_id: AllocationId,
@@ -128,6 +280,17 @@ pub struct AllocStatusRow {
     pub node_id: NodeId,
     pub state: AllocState,
     pub updated_at: LogicalTimestamp,
+    /// Structured cause for this transition. `None` when the writer
+    /// (Phase 1: action shim) has not yet been wired to populate it,
+    /// or when the row predates the schema extension.
+    pub reason: Option<TransitionReason>,
+    /// Verbatim driver / OS text the `reason` payload does not capture.
+    /// Used for diagnostic fidelity on cause variants whose typed
+    /// payload is incomplete (e.g. `DriverInternalError { detail }`
+    /// duplicates this for self-containment, but other cause variants
+    /// may carry only structured fields and rely on `detail` for the
+    /// raw `errno` text).
+    pub detail: Option<String>,
 }
 
 /// `node_health` row — Phase 1 minimal shape per brief §6.
@@ -236,6 +399,24 @@ pub trait ObservationStore: Send + Sync + 'static {
     /// not one-shot HTTP handlers. A typed snapshot is the honest read
     /// primitive for request/response handlers.
     async fn alloc_status_rows(&self) -> Result<Vec<AllocStatusRow>, ObservationStoreError>;
+
+    /// Read the LWW-winner `alloc_status` row for a single
+    /// [`AllocationId`], if any. Adapters MUST implement this as a
+    /// direct point lookup against the per-alloc index — never as a
+    /// scan-and-filter over [`Self::alloc_status_rows`]. The §4 LWW
+    /// invariant guarantees at most one winner per key; this method
+    /// makes that invariant load-bearing at the type level.
+    ///
+    /// Used by the worker subsystems (`exit_observer`, `action_shim`)
+    /// to recover the prior `(job_id, node_id, updated_at)` tuple
+    /// when writing a successor row. The previous shape — calling
+    /// `alloc_status_rows()` and then `find`/`max_by_key` over the
+    /// result — encoded a false suggestion that the contract permits
+    /// duplicates and added an unjustified `O(n)` scan to a hot path.
+    async fn alloc_status_row(
+        &self,
+        alloc_id: &AllocationId,
+    ) -> Result<Option<AllocStatusRow>, ObservationStoreError>;
 
     /// Read a deterministic snapshot of every `node_health` row this
     /// peer has observed. Phase 1 has no LWW current-row index for

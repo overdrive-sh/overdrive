@@ -16,7 +16,7 @@
 
 use std::str::FromStr;
 
-use overdrive_control_plane::api::{AllocStatusRowBody, NodeRowBody};
+use overdrive_control_plane::api::{AllocStateWire, AllocStatusRowBody, NodeRowBody};
 use overdrive_core::id::{AllocationId, JobId, NodeId, Region};
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, NodeHealthRow,
@@ -32,6 +32,8 @@ fn sample_alloc_status_row() -> AllocStatusRow {
             counter: 1,
             writer: NodeId::from_str("node-a").expect("valid node id"),
         },
+        reason: None,
+        detail: None,
     }
 }
 
@@ -75,8 +77,8 @@ fn alloc_status_row_body_carries_all_four_fields_verbatim() {
     );
     assert_eq!(
         body.state,
-        row.state.to_string(),
-        "state must carry the source AllocState's canonical rendering (lowercase per whitepaper §4)",
+        AllocStateWire::from(row.state),
+        "state must carry the typed AllocStateWire projection of the source AllocState",
     );
 
     // Belt-and-braces — a mutation that substitutes
@@ -84,7 +86,9 @@ fn alloc_status_row_body_carries_all_four_fields_verbatim() {
     assert!(!body.alloc_id.is_empty(), "alloc_id must not be empty");
     assert!(!body.job_id.is_empty(), "job_id must not be empty");
     assert!(!body.node_id.is_empty(), "node_id must not be empty");
-    assert!(!body.state.is_empty(), "state must not be empty");
+    // body.state is now typed (AllocStateWire), not String — variant
+    // distinctness is asserted in the next test
+    // (`alloc_status_row_body_distinguishes_state_variants`).
 }
 
 #[test]
@@ -100,22 +104,31 @@ fn alloc_status_row_body_distinguishes_state_variants() {
         AllocState::Draining,
         AllocState::Suspended,
         AllocState::Terminated,
+        AllocState::Failed,
     ];
-    let mut rendered: Vec<String> = Vec::new();
+    let mut rendered: Vec<AllocStateWire> = Vec::new();
     for s in states {
         let mut row = sample_alloc_status_row();
         row.state = s;
         let body: AllocStatusRowBody = row.into();
         rendered.push(body.state);
     }
-    let mut sorted = rendered.clone();
+    // AllocStateWire is Copy + PartialEq + Eq; collect the discriminants
+    // by projecting through serde_json so the comparison key is the
+    // wire-level lowercase string. Two distinct variants must produce
+    // distinct wire keys.
+    let keys: Vec<String> = rendered
+        .iter()
+        .map(|s| serde_json::to_string(s).expect("serialise AllocStateWire"))
+        .collect();
+    let mut sorted = keys.clone();
     sorted.sort();
     sorted.dedup();
     assert_eq!(
-        rendered.len(),
+        keys.len(),
         sorted.len(),
-        "every AllocState variant must produce a distinct wire rendering; \
-         got {rendered:?} — either the projection collapsed or Display is broken",
+        "every AllocState variant must produce a distinct AllocStateWire projection; \
+         got {keys:?} — either the projection collapsed or the From impl is broken",
     );
 }
 

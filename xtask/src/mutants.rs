@@ -154,10 +154,21 @@ pub fn run(mode: &Mode, scope: &Scope) -> Result<()> {
         return finalise_zero_mutant_run(&summary_path, mode);
     };
 
-    // 3. Evaluate the mode-specific gate.
+    // 3. Evaluate the mode-specific gate. The subprocess exit status
+    //    is a load-bearing input: cargo-mutants exits non-zero in
+    //    *two* failure modes — missed mutants (the gate handles it)
+    //    and "unmutated baseline failed before any mutation ran" (the
+    //    gate must NOT silently pass it). The discriminator is
+    //    `total_mutants == 0 && !status.success()` — if mutants were
+    //    generated, the gate covers missed-mutant exits; if zero
+    //    mutants ran AND the subprocess crashed, the only explanation
+    //    is a baseline failure, so refuse to pass.
+    let baseline_succeeded = status.success();
     let gate = match mode {
-        Mode::Diff { .. } => evaluate_diff_gate(&report),
-        Mode::Workspace { baseline_path } => evaluate_workspace_gate(&report, baseline_path)?,
+        Mode::Diff { .. } => evaluate_diff_gate(&report, baseline_succeeded),
+        Mode::Workspace { baseline_path } => {
+            evaluate_workspace_gate(&report, baseline_path, baseline_succeeded)?
+        }
     };
 
     // 4. Write the structured summary and human-readable lines.
@@ -413,9 +424,13 @@ fn finalise_zero_mutant_run(summary_path: &Path, mode: &Mode) -> Result<()> {
     // Workspace mode never short-circuits to zero mutants in
     // practice (no --in-diff filter), but model it consistently:
     // the diff-gate logic already returns Pass on total_mutants=0,
-    // so both arms collapse to the same call.
+    // so both arms collapse to the same call. This branch is only
+    // reachable when cargo-mutants exited 0 (the "INFO No mutants
+    // to filter" path), so `baseline_succeeded = true` is correct
+    // by construction — the new baseline-failure guard is a no-op
+    // here and the vacuous-pass arm fires.
     let gate = match mode {
-        Mode::Diff { .. } | Mode::Workspace { .. } => evaluate_diff_gate(&synthetic),
+        Mode::Diff { .. } | Mode::Workspace { .. } => evaluate_diff_gate(&synthetic, true),
     };
     write_summary(summary_path, &synthetic, &gate, mode)
         .wrap_err_with(|| format!("write {}", summary_path.display()))?;
@@ -465,11 +480,29 @@ enum GateStatus {
     Fail { reason: String },
 }
 
-fn evaluate_diff_gate(report: &RawReport) -> Gate {
+fn evaluate_diff_gate(report: &RawReport, baseline_succeeded: bool) -> Gate {
     let kill_rate_pct = kill_rate_percent(report.caught, report.missed);
-    let status = if report.total_mutants == 0 {
-        // No mutants generated from the diff — e.g. the PR only
-        // touched excluded paths or comments. Truly vacuous: pass.
+    let status = if report.total_mutants == 0 && !baseline_succeeded {
+        // cargo-mutants exited non-zero AND zero mutants were
+        // generated — the unmutated baseline failed before any
+        // mutation could run (`ERROR cargo test failed in an
+        // unmutated tree, so no mutants were tested`). cargo-mutants
+        // still writes outcomes.json with all counters zeroed; the
+        // earlier `total_mutants == 0` arm would otherwise read that
+        // as "vacuous pass" and the wrapper would exit 0 against a
+        // failing test suite. Refuse to pass: there is no quality
+        // signal, and a falsely-green run masks the underlying
+        // breakage.
+        GateStatus::Fail {
+            reason: "unmutated baseline failed: cargo-mutants exited non-zero \
+                     with zero mutants tested — see target/xtask/mutants.out/log/* \
+                     for the failing test names"
+                .to_owned(),
+        }
+    } else if report.total_mutants == 0 {
+        // No mutants generated from the diff AND the subprocess
+        // exited cleanly — e.g. the PR only touched excluded paths
+        // or comments. Truly vacuous: pass.
         GateStatus::Pass
     } else if report.caught == 0 && report.missed == 0 {
         // Mutants WERE generated but none were evaluated — every one
@@ -509,8 +542,33 @@ fn evaluate_diff_gate(report: &RawReport) -> Gate {
     }
 }
 
-fn evaluate_workspace_gate(report: &RawReport, baseline_path: &Path) -> Result<Gate> {
+fn evaluate_workspace_gate(
+    report: &RawReport,
+    baseline_path: &Path,
+    baseline_succeeded: bool,
+) -> Result<Gate> {
     let kill_rate_pct = kill_rate_percent(report.caught, report.missed);
+
+    // Mirror the diff-gate baseline-failure guard: cargo-mutants
+    // exited non-zero with zero mutants tested ⇒ the unmutated
+    // baseline failed and there is no quality signal to gate on.
+    // Refuse to pass before consulting the stored baseline (otherwise
+    // we'd seed `mutants-baseline/main/kill_rate.txt` with a fake
+    // 100% from a broken run).
+    if report.total_mutants == 0 && !baseline_succeeded {
+        return Ok(Gate {
+            mode_label: "workspace".to_owned(),
+            kill_rate_pct,
+            baseline_pct: None,
+            drift_pp: None,
+            status: GateStatus::Fail {
+                reason: "unmutated baseline failed: cargo-mutants exited non-zero \
+                         with zero mutants tested — see target/xtask/mutants.out/log/* \
+                         for the failing test names"
+                    .to_owned(),
+            },
+        });
+    }
 
     // Symmetric guard with `evaluate_diff_gate`: mutants WERE
     // generated but none were evaluated — every one unviable or
@@ -801,7 +859,7 @@ mod tests {
     #[test]
     fn diff_gate_passes_at_exact_floor() {
         // 8 / (8 + 2) = 80.0% — exactly at the floor. Must pass.
-        let gate = evaluate_diff_gate(&report(8, 2, 0, 0));
+        let gate = evaluate_diff_gate(&report(8, 2, 0, 0), true);
         assert!(matches!(gate.status, GateStatus::Pass));
     }
 
@@ -810,7 +868,7 @@ mod tests {
         // 7 / (7 + 2) = 77.7…% — below 80%. Must fail, and the reason
         // must mention the actual numerator/denominator so the
         // developer can find the missed mutations.
-        let gate = evaluate_diff_gate(&report(7, 2, 0, 0));
+        let gate = evaluate_diff_gate(&report(7, 2, 0, 0), true);
         let reason = match gate.status {
             GateStatus::Fail { reason } => reason,
             other => panic!("expected Fail, got {other:?}"),
@@ -818,6 +876,70 @@ mod tests {
         assert!(reason.contains("77.8%") || reason.contains("77.7%"), "got: {reason}");
         assert!(reason.contains("caught=7"), "got: {reason}");
         assert!(reason.contains("missed=2"), "got: {reason}");
+    }
+
+    #[test]
+    fn diff_gate_fails_when_unmutated_baseline_failed() {
+        // Reproduction of the GHA passing-on-test-failures bug:
+        // cargo-mutants runs the unmutated baseline first, the
+        // baseline test suite fails, no mutants are tested, and
+        // outcomes.json lands with all counters at zero. Before the
+        // fix this fell through to the `total_mutants == 0 ⇒ Pass`
+        // arm and the wrapper exited 0 against a broken test suite.
+        // The non-zero subprocess exit is the discriminator: if the
+        // baseline had succeeded we would have reached `mutants tested
+        // = 0` because the diff genuinely had no mutable lines, in
+        // which case cargo-mutants exits 0 and the
+        // `read_outcomes_or_short_circuit` short-circuit fires —
+        // that path goes through `finalise_zero_mutant_run`, not
+        // here.
+        let zero_mutants = RawReport {
+            total_mutants: 0,
+            caught: 0,
+            missed: 0,
+            timeout: 0,
+            unviable: 0,
+            success: 0,
+            cargo_mutants_version: "27.0.0".to_owned(),
+        };
+        let gate = evaluate_diff_gate(&zero_mutants, false);
+        let reason = match gate.status {
+            GateStatus::Fail { reason } => reason,
+            other => panic!("expected Fail on baseline failure, got {other:?}"),
+        };
+        assert!(reason.contains("unmutated baseline failed"), "got: {reason}");
+        assert!(reason.contains("mutants.out/log"), "got: {reason}");
+    }
+
+    #[test]
+    fn workspace_gate_fails_when_unmutated_baseline_failed() {
+        // Same shape as the diff variant: a workspace nightly whose
+        // baseline test suite fails must NOT seed the stored
+        // baseline file with a fake 100% — that would silently
+        // ratchet the next run's bar to "anything passes" until
+        // someone manually corrects the file.
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let baseline = tmp.path().join("kill_rate.txt");
+        // No prior baseline on disk — this is the scenario where
+        // the bug would seed a bogus 100.0%.
+        let zero_mutants = RawReport {
+            total_mutants: 0,
+            caught: 0,
+            missed: 0,
+            timeout: 0,
+            unviable: 0,
+            success: 0,
+            cargo_mutants_version: "27.0.0".to_owned(),
+        };
+        let gate = evaluate_workspace_gate(&zero_mutants, &baseline, false).unwrap();
+        let reason = match gate.status {
+            GateStatus::Fail { reason } => reason,
+            other => panic!("expected Fail on baseline failure, got {other:?}"),
+        };
+        assert!(reason.contains("unmutated baseline failed"), "got: {reason}");
+        // Baseline file MUST NOT have been seeded — a failed run
+        // cannot be allowed to write a fake kill-rate floor.
+        assert!(!baseline.exists(), "baseline file must not be seeded on baseline failure");
     }
 
     #[test]
@@ -833,7 +955,7 @@ mod tests {
             success: 0,
             cargo_mutants_version: "27.0.0".to_owned(),
         };
-        let gate = evaluate_diff_gate(&no_mutants);
+        let gate = evaluate_diff_gate(&no_mutants, true);
         assert!(matches!(gate.status, GateStatus::Pass));
     }
 
@@ -847,7 +969,7 @@ mod tests {
         // would mask any future cause of all-unviable runs (broken
         // workspace lints, scratch-dir issue, build.rs path bug,
         // mutation operator producing rustc-rejected code).
-        let gate = evaluate_diff_gate(&report(0, 0, 250, 0));
+        let gate = evaluate_diff_gate(&report(0, 0, 250, 0), true);
         let reason = match gate.status {
             GateStatus::Fail { reason } => reason,
             other => panic!("expected Fail on all-unviable, got {other:?}"),
@@ -862,7 +984,7 @@ mod tests {
         // Symmetric to all-unviable: every mutant exceeded the test
         // budget. Same loss of quality signal; must FAIL with the
         // same reason shape.
-        let gate = evaluate_diff_gate(&report(0, 0, 0, 250));
+        let gate = evaluate_diff_gate(&report(0, 0, 0, 250), true);
         let reason = match gate.status {
             GateStatus::Fail { reason } => reason,
             other => panic!("expected Fail on all-timeout, got {other:?}"),
@@ -879,7 +1001,7 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let baseline = tmp.path().join("kill_rate.txt");
         std::fs::write(&baseline, "85.0\n").unwrap();
-        let gate = evaluate_workspace_gate(&report(0, 0, 250, 0), &baseline).unwrap();
+        let gate = evaluate_workspace_gate(&report(0, 0, 250, 0), &baseline, true).unwrap();
         let reason = match gate.status {
             GateStatus::Fail { reason } => reason,
             other => panic!("expected Fail on all-unviable, got {other:?}"),
@@ -894,7 +1016,7 @@ mod tests {
         let baseline = tmp.path().join("kill_rate.txt");
         std::fs::write(&baseline, "50.0\n").unwrap();
         // 5 / (5 + 6) ≈ 45.5% — below the 60% absolute floor.
-        let gate = evaluate_workspace_gate(&report(5, 6, 0, 0), &baseline).unwrap();
+        let gate = evaluate_workspace_gate(&report(5, 6, 0, 0), &baseline, true).unwrap();
         assert!(matches!(gate.status, GateStatus::Fail { .. }));
     }
 
@@ -905,7 +1027,7 @@ mod tests {
         // Baseline 85%; current 80% (10 caught / 12.5 denom? Use 8/10
         // exactly for determinism). Drift = 80 - 85 = -5pp ≤ -2pp.
         std::fs::write(&baseline, "85.0\n").unwrap();
-        let gate = evaluate_workspace_gate(&report(8, 2, 0, 0), &baseline).unwrap();
+        let gate = evaluate_workspace_gate(&report(8, 2, 0, 0), &baseline, true).unwrap();
         assert!(matches!(gate.status, GateStatus::Warn { .. }));
     }
 
@@ -915,7 +1037,7 @@ mod tests {
         let baseline = tmp.path().join("kill_rate.txt");
         std::fs::write(&baseline, "70.0\n").unwrap();
         // 8/(8+2) = 80% — up from 70%.
-        let gate = evaluate_workspace_gate(&report(8, 2, 0, 0), &baseline).unwrap();
+        let gate = evaluate_workspace_gate(&report(8, 2, 0, 0), &baseline, true).unwrap();
         assert!(matches!(gate.status, GateStatus::Pass));
     }
 
@@ -924,7 +1046,7 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let baseline = tmp.path().join("nested").join("kill_rate.txt");
         assert!(!baseline.exists());
-        let gate = evaluate_workspace_gate(&report(8, 2, 0, 0), &baseline).unwrap();
+        let gate = evaluate_workspace_gate(&report(8, 2, 0, 0), &baseline, true).unwrap();
         assert!(matches!(gate.status, GateStatus::Pass));
         let seeded = std::fs::read_to_string(&baseline).unwrap();
         assert_eq!(seeded.trim(), "80.0", "seeded baseline must be rounded");
@@ -935,7 +1057,7 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let path = tmp.path().join("summary.json");
         let report = report(8, 2, 3, 0);
-        let gate = evaluate_diff_gate(&report);
+        let gate = evaluate_diff_gate(&report, true);
         write_summary(&path, &report, &gate, &Mode::Diff { base: "origin/main".into() })
             .expect("write_summary");
 
@@ -957,7 +1079,7 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let path = tmp.path().join("summary.json");
         let report = report(7, 3, 0, 0); // 70% — below the 80% floor
-        let gate = evaluate_diff_gate(&report);
+        let gate = evaluate_diff_gate(&report, true);
         write_summary(&path, &report, &gate, &Mode::Diff { base: "origin/main".into() })
             .expect("write_summary");
 
@@ -1190,12 +1312,12 @@ mod tests {
         // wrapper-side rewriting. Replaces the prior auto-add tests.
         let mode = Mode::Workspace { baseline_path: PathBuf::from("/ignored") };
         let scope = Scope {
-            features: vec!["integration-tests".into(), "canary-bug".into()],
+            features: vec!["integration-tests".into(), "extra-feature".into()],
             ..Scope::default()
         };
         let args = build_cargo_mutants_args(&mode, &scope, Path::new("/tmp/xtask"), None);
         let joined = argv_str(&args);
-        assert!(joined.contains("--features integration-tests,canary-bug"), "got: {joined}");
+        assert!(joined.contains("--features integration-tests,extra-feature"), "got: {joined}");
     }
 
     #[test]

@@ -24,7 +24,7 @@ use overdrive_control_plane::api::{
     ErrorBody, JobDescription, SubmitJobRequest, SubmitJobResponse,
 };
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
-use overdrive_core::aggregate::{Job, JobSpecInput};
+use overdrive_core::aggregate::{DriverInput, ExecInput, Job, JobSpecInput, ResourcesInput};
 use proptest::prelude::*;
 use tempfile::TempDir;
 
@@ -82,6 +82,13 @@ async fn spawn_server() -> (ServerHandle, SocketAddr, TempDir, String) {
         bind: "127.0.0.1:0".parse().expect("parse bind addr"),
         data_dir,
         operator_config_dir: operator_config_dir.clone(),
+        // `tick_cadence` + `clock` default per
+        // `fix-convergence-loop-not-spawned` Step 01-02. Per ADR-0034
+        // the in-binary cgroup escape hatch is gone; on macOS the
+        // pre-flight is a `#[cfg(target_os = "linux")]` no-op, and on
+        // Linux this test runs via `cargo xtask lima run --` against
+        // the bundled VM (root + delegated cgroups).
+        ..Default::default()
     };
     let handle = run_server(config).await.expect("run_server");
     let bound = handle.local_addr().await.expect("bound addr");
@@ -93,8 +100,8 @@ fn payments_spec() -> JobSpecInput {
     JobSpecInput {
         id: "payments".to_owned(),
         replicas: 3,
-        cpu_milli: 500,
-        memory_bytes: 536_870_912, // 512 MiB
+        resources: ResourcesInput { cpu_milli: 500, memory_bytes: 536_870_912 }, // 512 MiB
+        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     }
 }
 
@@ -348,8 +355,8 @@ fn arb_valid_job_spec() -> impl Strategy<Value = JobSpecInput> {
         |(id, replicas, cpu_milli, memory_bytes)| JobSpecInput {
             id,
             replicas,
-            cpu_milli,
-            memory_bytes,
+            resources: ResourcesInput { cpu_milli, memory_bytes },
+            driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
         },
     )
 }

@@ -42,4 +42,47 @@ mod integration {
     mod server_lifecycle;
     mod submit_round_trip;
     mod tls_bootstrap;
+    /// phase-1-first-workload — slice 3 (US-03) — Linux-only walking
+    /// skeletons. Each scenario file gates itself with
+    /// `#[cfg(target_os = "linux")]` so the module declarations
+    /// compile cleanly on macOS/Windows even when no test bodies
+    /// exist there.
+    pub mod job_lifecycle {
+        // Shared cleanup helper — reaps real `/bin/sleep` workloads
+        // spawned by the action shim so nextest does not flag the
+        // tests as `LEAK`. Used by `crash_recovery` and
+        // `submit_to_running`; `stop_to_terminated` cleans up via the
+        // production stop path under test. `pub` so the slice-4
+        // `cgroup_isolation::cluster_status_under_burst` test can
+        // reuse the same `AllocCleanup` guard via `super::super::`.
+        #[cfg(target_os = "linux")]
+        pub mod cleanup;
+        mod convergence_loop_spawned_in_production_boot;
+        mod crash_recovery;
+        mod crash_recovery_obs_write_rejected;
+        mod exit_observer;
+        mod stop_to_terminated;
+        mod submit_to_running;
+    }
+    /// phase-1-first-workload — slice 4 (US-03 final) — Linux-only
+    /// cgroup-isolation harness. Per ADR-0028 the control-plane
+    /// boots through a 4-step pre-flight check + creates its own
+    /// slice. The scenario files gate themselves with
+    /// `#[cfg(target_os = "linux")]` so the module declarations
+    /// compile cleanly on macOS/Windows.
+    mod cgroup_isolation {
+        mod cluster_status_under_burst;
+        mod idempotent_slice_creation;
+        mod preflight_falls_back_to_parent_slice_on_empty_scope;
+        mod preflight_missing_cpu;
+        mod preflight_no_delegation;
+        mod preflight_proc_filesystems_unreadable;
+        mod preflight_proc_self_cgroup_malformed;
+        mod preflight_reads_enclosing_slice;
+        mod preflight_refuses_when_both_scope_and_parent_slice_lack_delegation;
+        mod preflight_subtree_control_missing_is_not_delegation;
+        mod preflight_subtree_control_unreadable;
+        mod preflight_v1_host;
+        mod server_enrols_in_slice;
+    }
 }

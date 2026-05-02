@@ -52,6 +52,10 @@ async fn spawn_server() -> (ServeHandle, TempDir) {
     let config_dir = tmp.path().join("conf");
     std::fs::create_dir_all(&data_dir).expect("create data dir");
     std::fs::create_dir_all(&config_dir).expect("create operator config dir");
+    // Per ADR-0034 the in-binary cgroup escape hatch is gone; on
+    // macOS the pre-flight is a `#[cfg(target_os = "linux")]` no-op,
+    // and on Linux this test runs via `cargo xtask lima run --`
+    // against the bundled VM (root + delegated cgroups).
     let args = ServeArgs { bind, data_dir, config_dir };
     let handle = overdrive_cli::commands::serve::run(args).await.expect("serve::run");
     (handle, tmp)
@@ -99,8 +103,14 @@ fn write_valid_payments_toml(dir: &Path) -> PathBuf {
     let spec = r#"
 id = "payments"
 replicas = 3
+
+[resources]
 cpu_milli = 500
 memory_bytes = 536870912
+
+[exec]
+command = "/bin/true"
+args = []
 "#;
     let path = dir.join("payments.toml");
     std::fs::write(&path, spec).expect("write payments.toml");
@@ -175,8 +185,14 @@ async fn submit_with_zero_replicas_returns_invalid_spec_before_any_http_call() {
     let broken_spec = r#"
 id = "payments"
 replicas = 0
+
+[resources]
 cpu_milli = 500
 memory_bytes = 536870912
+
+[exec]
+command = "/bin/true"
+args = []
 "#;
     let spec_path = tmp.path().join("broken.toml");
     std::fs::write(&spec_path, broken_spec).expect("write broken.toml");
@@ -323,4 +339,121 @@ async fn submit_transport_error_display_does_not_contain_raw_reqwest_token() {
         !rendered.contains("reqwest"),
         "render::cli_error must not leak `reqwest` token; got:\n{rendered}",
     );
+}
+
+// -------------------------------------------------------------------
+// `wire-exec-spec-end-to-end` — CLI defence-in-depth: the new
+// `exec.command` validation rule (ADR-0031 §4) must surface client-side
+// before any HTTP request hits the wire (per ADR-0014 fast-fail
+// posture). Covers `distill/test-scenarios.md` §9.
+// -------------------------------------------------------------------
+
+const EMPTY_COMMAND_TOML: &str = r#"
+id = "payments"
+replicas = 1
+
+[resources]
+cpu_milli = 500
+memory_bytes = 134217728
+
+[exec]
+command = ""
+args    = ["--port", "8080"]
+"#;
+
+const MISSING_EXEC_TABLE_TOML: &str = r#"
+id = "payments"
+replicas = 1
+
+[resources]
+cpu_milli = 500
+memory_bytes = 134217728
+"#;
+
+#[tokio::test]
+async fn cli_submit_rejects_empty_exec_command_before_any_http_call() {
+    // The handler must run `Job::from_spec` client-side and fail with
+    // `CliError::InvalidSpec { field: "exec.command", .. }` BEFORE
+    // contacting the server. We verify the "no HTTP call" property by
+    // pointing the trust-triple at an unreachable endpoint — if the
+    // CLI tried to issue the POST it would surface
+    // `CliError::Transport`, not `CliError::InvalidSpec`. The fact
+    // that we get InvalidSpec is what proves the client-side gate
+    // fired first.
+    let tmp = TempDir::new().expect("tempdir");
+    let (handle, server_tmp) = spawn_server().await;
+    handle.shutdown().await.expect("clean shutdown of dummy server");
+    // Point at an unreachable endpoint — if the CLI made it past the
+    // local validation gate, the error would be Transport, not
+    // InvalidSpec.
+    let cfg = point_config_at(server_tmp.path(), "https://127.0.0.1:1");
+
+    let spec_path = tmp.path().join("empty-cmd.toml");
+    std::fs::write(&spec_path, EMPTY_COMMAND_TOML).expect("write toml");
+
+    let args = SubmitArgs { spec: spec_path, config_path: cfg };
+    let err = overdrive_cli::commands::job::submit(args)
+        .await
+        .expect_err("empty exec.command must be rejected client-side");
+
+    match &err {
+        CliError::InvalidSpec { field, message } => {
+            assert_eq!(
+                field, "exec.command",
+                "CLI must surface the constructor's structured field name; got {field:?}",
+            );
+            assert!(
+                message.contains("non-empty") || message.contains("command must"),
+                "CLI message must explain the rule; got {message:?}",
+            );
+        }
+        CliError::Transport { .. } => panic!(
+            "CLI made the HTTP call BEFORE running client-side validation — \
+             ADR-0014 fast-fail is broken. Empty exec.command must surface as \
+             InvalidSpec, not Transport.",
+        ),
+        other => panic!(
+            "expected CliError::InvalidSpec {{ field: \"exec.command\", .. }}; got {other:?}",
+        ),
+    }
+}
+
+#[tokio::test]
+async fn cli_submit_surfaces_missing_exec_table_as_toml_field_error() {
+    // A TOML missing the `[exec]` table fails at `toml::from_str` —
+    // before `Job::from_spec` runs. The CLI's existing mapping wraps
+    // this as `CliError::InvalidSpec { field: "toml", .. }` (per
+    // `commands/job.rs:104-108`). Pin that the new tagged-enum
+    // dispatch participates correctly: the absence of the driver
+    // table is a parse-time rejection, not a runtime "missing field"
+    // panic.
+    let tmp = TempDir::new().expect("tempdir");
+    let (handle, server_tmp) = spawn_server().await;
+    let cfg = config_path(server_tmp.path());
+
+    let spec_path = tmp.path().join("no-exec.toml");
+    std::fs::write(&spec_path, MISSING_EXEC_TABLE_TOML).expect("write toml");
+
+    let args = SubmitArgs { spec: spec_path, config_path: cfg };
+    let err = overdrive_cli::commands::job::submit(args)
+        .await
+        .expect_err("TOML missing [exec] must be rejected at parse time");
+
+    match &err {
+        CliError::InvalidSpec { field, message } => {
+            assert_eq!(
+                field, "toml",
+                "TOML parse failures map to field=\"toml\" per commands/job.rs; got {field:?}",
+            );
+            assert!(
+                message.contains("exec")
+                    || message.contains("missing field")
+                    || message.contains("variant"),
+                "message must explain the missing exec table; got {message:?}",
+            );
+        }
+        other => panic!("expected CliError::InvalidSpec {{ field: \"toml\", .. }}; got {other:?}"),
+    }
+
+    handle.shutdown().await.expect("clean shutdown");
 }

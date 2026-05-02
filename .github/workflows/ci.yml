@@ -241,8 +241,15 @@ jobs:
         # `.claude/rules/testing.md` §"Integration vs unit gating") so
         # the unit/proptest suite that already ran in the `test` job
         # above is not re-executed here.
+        #
+        # `sudo -E` preserves the runner user's environment (PATH,
+        # CARGO_HOME, RUSTUP_HOME, RUSTC_WRAPPER) so cargo/nextest/
+        # sccache resolve correctly while running as root. Root access
+        # is required for ProcessDriver: creating cgroup scope directories
+        # and writing child PIDs to cgroup.procs both fail with EACCES
+        # for the unprivileged runner user.
         run: |
-          cargo nextest run --workspace --locked --profile ci \
+          sudo -E env "PATH=$PATH" cargo nextest run --workspace --locked --profile ci \
             --features integration-tests \
             -E 'binary(integration)'
 
@@ -506,7 +513,14 @@ jobs:
         # member to declare the feature, so the bare flag resolves
         # uniformly under cargo-mutants v27's per-package scoping —
         # the wrapper does not auto-add anything.
-        run: cargo xtask mutants --diff origin/main --features integration-tests
+        #
+        # `sudo -E env "PATH=$PATH"` matches the `integration` job
+        # (lines 251-254): cargo-mutants reruns the unmutated baseline
+        # under nextest, which spins up the in-process control-plane
+        # server, which writes /sys/fs/cgroup/overdrive.slice/...
+        # That requires root on the unprivileged GHA runner per
+        # ADR-0034 (no in-binary cgroup escape hatch).
+        run: sudo -E env "PATH=$PATH" cargo xtask mutants --diff origin/main --features integration-tests
 
       - name: Upload mutants report
         if: always()

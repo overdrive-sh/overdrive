@@ -26,7 +26,9 @@ use overdrive_control_plane::api::{
     ErrorBody, IdempotencyOutcome, SubmitJobRequest, SubmitJobResponse,
 };
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
-use overdrive_core::aggregate::{IntentKey, Job, JobSpecInput};
+use overdrive_core::aggregate::{
+    DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
+};
 use overdrive_core::id::JobId;
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_store_local::LocalIntentStore;
@@ -90,6 +92,20 @@ async fn spawn_server() -> (ServerHandle, SocketAddr, TempDir, String) {
         bind: "127.0.0.1:0".parse().expect("parse bind addr"),
         data_dir,
         operator_config_dir: operator_config_dir.clone(),
+        // `tick_cadence` and `clock` default to
+        // `DEFAULT_TICK_CADENCE` (100ms) and `Arc::new(SystemClock)`.
+        // Per ADR-0034 the in-binary cgroup escape hatch is gone; on
+        // macOS the pre-flight is a `#[cfg(target_os = "linux")]` no-op,
+        // and on Linux this test runs via `cargo xtask lima run --`
+        // against the bundled VM (root + delegated cgroups).
+        // Per `fix-convergence-loop-not-spawned` Step 01-02: the
+        // production server now spawns a convergence-tick loop. This
+        // test does not assert on convergence outcomes — its
+        // assertions ride on the IntentStore round-trip through the
+        // submit_job handler — and shutdown ordering in
+        // `ServerHandle::shutdown` cancels the convergence task
+        // before axum graceful so any in-flight ticks land cleanly.
+        ..Default::default()
     };
     let handle = run_server(config).await.expect("run_server");
     let bound = handle.local_addr().await.expect("bound addr");
@@ -133,8 +149,8 @@ fn payments_spec() -> JobSpecInput {
     JobSpecInput {
         id: "payments".to_owned(),
         replicas: 3,
-        cpu_milli: 500,
-        memory_bytes: 536_870_912, // 512 MiB
+        resources: ResourcesInput { cpu_milli: 500, memory_bytes: 536_870_912 }, // 512 MiB
+        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     }
 }
 
@@ -143,8 +159,8 @@ fn payments_spec_alt() -> JobSpecInput {
     JobSpecInput {
         id: "payments".to_owned(),
         replicas: 7,
-        cpu_milli: 500,
-        memory_bytes: 536_870_912,
+        resources: ResourcesInput { cpu_milli: 500, memory_bytes: 536_870_912 },
+        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     }
 }
 
@@ -258,8 +274,8 @@ async fn post_v1_jobs_with_invalid_spec_returns_400_with_error_body_naming_field
     let bad = JobSpecInput {
         id: "payments".to_owned(),
         replicas: 0,
-        cpu_milli: 500,
-        memory_bytes: 536_870_912,
+        resources: ResourcesInput { cpu_milli: 500, memory_bytes: 536_870_912 },
+        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     };
 
     let resp = client
@@ -273,8 +289,8 @@ async fn post_v1_jobs_with_invalid_spec_returns_400_with_error_body_naming_field
     let body: ErrorBody = resp.json().await.expect("decode ErrorBody");
     assert_eq!(body.error, "validation", "error kind must be 'validation'");
     assert!(
-        body.message.contains("replicas"),
-        "message must name the offending field; got {:?}",
+        body.message.contains("replica"),
+        "message must name the offending field (substring `replica`); got {:?}",
         body.message
     );
 
