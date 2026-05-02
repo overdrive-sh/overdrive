@@ -167,15 +167,15 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
     // re-enqueue and bring up a fresh Running row whose counter
     // strictly dominates the Failed row.
     //
-    // Yield between every tick so the production `ExecDriver`'s
-    // per-alloc watcher task and the `exit_observer` task both get
-    // scheduled. Under `#[tokio::test]` (current_thread) when the
-    // workspace test load saturates wall-clock, every await in
-    // `run_convergence_tick` and `alloc_status_rows` returns Ready
-    // (in-memory obs, no new actions to dispatch once the alloc is
-    // already at its desired state), so the runtime never yields to
-    // the SIGCHLD-driven watcher unless we force it. Same pattern as
-    // `exit_observer.rs::simulated_crash_writes_failed_to_obs_within_budget`.
+    // Real wall-clock sleep (not just yield) between ticks so the OS
+    // can deliver SIGCHLD, ExecDriver's per-alloc watcher (`child.wait()`)
+    // can resolve, the watcher can write to its mpsc, and the
+    // exit_observer can drain it and write the Failed row to obs.
+    // Under heavy parallel test load `yield_now` alone has been
+    // observed to complete the 90-tick budget before the OS reaper has
+    // had a chance to deliver the signal — `tokio::time::sleep`
+    // releases the current task to the runtime AND advances real
+    // wall-clock during which the kernel can do its work.
     let mut saw_failed = false;
     let mut failed_counter: u64 = 0;
     while tick_n < 90 && !saw_failed {
@@ -189,9 +189,7 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
         )
         .await
         .expect("tick");
-        for _ in 0..4 {
-            tokio::task::yield_now().await;
-        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
         let rows = state.obs.alloc_status_rows().await.expect("read rows");
         if let Some(row) = rows.iter().find(|r| matches!(r.state, AllocState::Failed)) {
             saw_failed = true;
@@ -213,9 +211,7 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
         )
         .await
         .expect("tick");
-        for _ in 0..4 {
-            tokio::task::yield_now().await;
-        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
         let rows = state.obs.alloc_status_rows().await.expect("read rows");
         if let Some(row) = rows.iter().find(|r| r.state == AllocState::Running)
             && row.updated_at.counter > failed_counter

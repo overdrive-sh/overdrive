@@ -41,12 +41,29 @@ async fn job_stop_drives_running_to_terminated() {
         Arc::new(LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open store"));
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
-    let driver: Arc<dyn Driver> = Arc::new(ExecDriver::new(
-        std::path::PathBuf::from("/sys/fs/cgroup"),
-        Arc::new(overdrive_sim::adapters::clock::SimClock::new()),
-    ));
+    // Share the SimClock between the driver and the test so the test
+    // can `tick(...)` to advance logical time past `ExecDriver`'s
+    // SIGTERM→SIGKILL grace window. Under the deterministic-park
+    // `SimClock::sleep` contract (`.claude/rules/development.md`
+    // § "Production code is not shaped by simulation"), the harness —
+    // never the SUT — drives logical time.
+    let sim_clock = Arc::new(overdrive_sim::adapters::clock::SimClock::new());
+    let driver: Arc<dyn Driver> =
+        Arc::new(ExecDriver::new(std::path::PathBuf::from("/sys/fs/cgroup"), sim_clock.clone()));
 
     let state = AppState::new(store, obs, Arc::new(runtime), driver);
+
+    // Background ticker: advances logical time continuously so any
+    // `clock.sleep(...)` parked inside the driver (notably the
+    // SIGTERM→SIGKILL grace timer) wakes promptly. Cancelled at end of
+    // test by the JoinHandle being dropped.
+    let ticker_clock = sim_clock.clone();
+    let _ticker = tokio::spawn(async move {
+        loop {
+            ticker_clock.tick(Duration::from_millis(100));
+            tokio::task::yield_now().await;
+        }
+    });
 
     // Use a distinct job_id so the derived cgroup scope
     // (`alloc-stopper-0.scope`) does not collide with submit_to_running

@@ -19,11 +19,10 @@
 //!
 //! 1. `bus.recv()` — projects each `LifecycleEvent` to a
 //!    `SubmitEvent::LifecycleTransition` line, then checks for terminal.
-//! 2. `tokio::task::yield_now()` — cooperative yield that re-enters
-//!    the loop; a deadline check at the top fires `ConvergedFailed {
-//!    Timeout }` once `clock.unix_now() >= cap_deadline`. DST tests
-//!    advance the deadline by calling `sim_clock.tick(cap + ε)`; the
-//!    yield arm ensures the loop re-enters without advancing SimClock.
+//! 2. `clock.sleep(cap)` — wall-clock cap timer. Production
+//!    (`SystemClock`) parks on a real timer; DST (`SimClock`) parks
+//!    until the harness calls `sim_clock.tick(cap + ε)`. On expiry,
+//!    emits `ConvergedFailed { Timeout }` and ends the stream.
 //!
 //! Terminal detection per architecture.md §4 / ADR-0032 §3 Amendment:
 //!
@@ -156,32 +155,7 @@ pub fn build_stream(
         //    state.
         let mut sub = bus.subscribe();
 
-        // 3. Record the cap deadline as a logical clock timestamp.
-        //    We use `clock.unix_now() + cap` so DST tests can advance
-        //    logical time via `sim_clock.tick(...)` and the deadline
-        //    check fires deterministically. The deadline is checked
-        //    at the top of every loop iteration.
-        let cap_deadline = clock.unix_now() + cap;
-
         loop {
-            // Check cap: fire immediately if the logical clock has
-            // advanced past the deadline (e.g. via sim_clock.tick()
-            // in a DST test, or via real wall-clock passage).
-            if clock.unix_now() >= cap_deadline {
-                let after_seconds = u32::try_from(cap.as_secs()).unwrap_or(u32::MAX);
-                let terminal = SubmitEvent::ConvergedFailed {
-                    alloc_id: None,
-                    terminal_reason: TerminalReason::Timeout { after_seconds },
-                    reason: None,
-                    error: Some(format!("did not converge in {after_seconds}s")),
-                };
-                match emit_line(&terminal) {
-                    Ok(line) => yield Ok(line),
-                    Err(err) => yield Err(err),
-                }
-                return;
-            }
-
             tokio::select! {
                 biased;
                 recv = sub.recv() => {
@@ -270,19 +244,24 @@ pub fn build_stream(
                         }
                     }
                 }
-                // Yield arm: cooperative yield that re-enters the loop
-                // so the deadline check at the top can fire after an
-                // external `sim_clock.tick(...)` advances logical time
-                // in DST tests. Unlike `clock.sleep(...)`, `yield_now`
-                // does NOT advance SimClock's logical time — it only
-                // gives the tokio scheduler a chance to run other tasks.
-                //
-                // Under production conditions, `yield_now` returns
-                // immediately on the next poll (Ready after one
-                // cooperative yield), so the loop re-enters and
-                // `clock.unix_now()` is checked against the real
-                // wall-clock deadline on each iteration.
-                () = tokio::task::yield_now() => {}
+                // Wall-clock cap timer. Production (`SystemClock`)
+                // parks on a real timer; DST (`SimClock`) parks until
+                // the harness calls `sim_clock.tick(cap + ε)`. On
+                // expiry, emit the timeout terminal and end the stream.
+                () = clock.sleep(cap) => {
+                    let after_seconds = u32::try_from(cap.as_secs()).unwrap_or(u32::MAX);
+                    let terminal = SubmitEvent::ConvergedFailed {
+                        alloc_id: None,
+                        terminal_reason: TerminalReason::Timeout { after_seconds },
+                        reason: None,
+                        error: Some(format!("did not converge in {after_seconds}s")),
+                    };
+                    match emit_line(&terminal) {
+                        Ok(line) => yield Ok(line),
+                        Err(err) => yield Err(err),
+                    }
+                    return;
+                }
             }
         }
     }

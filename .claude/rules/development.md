@@ -199,6 +199,82 @@ upstream prevention.
 
 ---
 
+## Production code is not shaped by simulation
+
+**Production code MUST NOT carry extra logic, extra arms, extra yields,
+extra polling, or extra structural concessions whose only purpose is to
+make a `Sim*` adapter behave correctly under DST.** The port-trait
+contract is the boundary: production wires `Host*`, tests wire `Sim*`,
+and production code is written to the contract, not to the test
+double's quirks. If a production call site needs a workaround to make
+`Sim*` work, the bug is in the `Sim*` adapter, not in the production
+code.
+
+This is the rule that the `Clock` / `Transport` / `Entropy` / `Driver`
+trait surface exists to enforce. A production `tokio::select!` arm that
+exists "so DST can advance time" is the canonical violation — it
+means the sim adapter has imposed a shape on the production hot path
+that the production hot path would not otherwise need. The cost is
+real (busy-loop CPU, redundant polls, defensive yields, wasted resource
+budget) and it compounds: every future call site copies the workaround
+because "that's how we use the trait here."
+
+### Symptoms
+
+- A `tokio::select!` in production whose only resolving arm is
+  `tokio::task::yield_now()` or `clock.sleep(Duration::from_millis(1))`
+  with a comment explaining "so the deadline check at the top can fire
+  under SimClock."
+- A production loop with a `clock.unix_now() >= deadline` check at the
+  top *and* a separate timer arm in the select, where the comment
+  explains the deadline check is for DST and the timer arm is for
+  production.
+- A production function that takes a `_dst_yield_hook: Option<...>`
+  parameter, or any other signature contortion whose only caller is a
+  test.
+- A docstring that says some piece of production code is "redundant
+  but harmless" in production and exists "to play nicely with SimClock."
+- A `// dst:` or `// sim:` comment on a production line of code
+  explaining behavior that would not be there absent the test double.
+
+If you find yourself writing the comment, stop. The comment is the
+admission that the rule is being broken.
+
+### What to do instead
+
+Fix the `Sim*` adapter to model the real-world primitive faithfully,
+then write production against the trait shape that production
+genuinely needs. Concretely, if a `Sim*` `sleep` / `recv` / `connect`
+forces a workaround in production, the adapter is doing the wrong
+thing — usually conflating two concerns (e.g. "yield" and "advance
+time"), or auto-progressing state that the harness should drive
+explicitly.
+
+Reference shape: `SimClock::sleep` should *park on a deadline* (register
+a waker; the harness's `tick()` wakes timers whose deadline has passed),
+not auto-advance time as a side effect of being polled. Every credible
+DST framework (turmoil, madsim, FoundationDB flow sim) implements
+`sleep` this way; only the harness drives logical time.
+
+### Audit checklist for any sim-adapter change
+
+Before landing a `Sim*` change that requires modifying a production
+call site, answer:
+
+1. Could the sim adapter be reshaped so the production call site stays
+   unchanged? If yes — do that instead.
+2. Does the production change degrade production behavior in any way
+   (extra CPU, extra latency, extra polls, defensive resource use)? If
+   yes — the change is rejected; the sim adapter must be reshaped.
+3. Would a future engineer reading the production code, with no
+   knowledge of the sim adapter, understand why the code is shaped this
+   way? If no — the shape is wrong, even if a comment papers over it.
+
+The boundary between production and simulation is load-bearing. Erode
+it once and every future call site inherits the erosion.
+
+---
+
 ## Ordered-collection choice
 
 `core` and control-plane hot paths default to `BTreeMap` for keyed maps

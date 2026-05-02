@@ -32,6 +32,7 @@ use overdrive_core::reconciler::TargetResource;
 use overdrive_core::traits::driver::{AllocationHandle, Driver, DriverType, ExitEvent, ExitKind};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, ObservationStore};
+use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
@@ -55,6 +56,24 @@ struct Harness {
     sim_driver: Arc<SimDriver>,
     target: TargetResource,
     alloc_id: AllocationId,
+    /// Shared with `sim_driver` so the background `_ticker` task
+    /// advances logical time past `inject_exit_after`'s deadline.
+    /// Per `.claude/rules/development.md` § "Production code is not
+    /// shaped by simulation": `SimClock::sleep` parks until the
+    /// harness ticks; `inject_exit_after`'s spawned task is no
+    /// exception. Held on the harness so a future test that wants
+    /// fine-grained tick control can read it; not currently consumed
+    /// by any test body.
+    #[allow(dead_code)]
+    sim_clock: Arc<SimClock>,
+    /// Background ticker task that advances `sim_clock` continuously
+    /// so `inject_exit_after` deadlines fire promptly. Held in the
+    /// harness so it lives for the duration of the test; dropped at
+    /// test exit. Held by binding (not `_`-prefixed) so clippy's
+    /// `used_underscore_binding` is satisfied while we keep the
+    /// `JoinHandle` alive — dropping it cancels the spawned task.
+    #[allow(dead_code)]
+    ticker_handle: tokio::task::JoinHandle<()>,
 }
 
 async fn build_harness(tmp: &TempDir) -> Harness {
@@ -70,7 +89,10 @@ async fn build_harness(tmp: &TempDir) -> Harness {
     // SimDriver is the deterministic exit-event source under DST. The
     // production `ExecDriver` has its own watcher per RCA §Approved fix
     // items 1-3; the SimDriver injection API mirrors it for test code.
-    let sim_driver = Arc::new(SimDriver::new(DriverType::Exec));
+    // Share the SimClock with the harness so the test can drive
+    // logical time past `inject_exit_after`'s deadline.
+    let sim_clock = Arc::new(SimClock::new());
+    let sim_driver = Arc::new(SimDriver::with_clock(DriverType::Exec, sim_clock.clone()));
     let driver: Arc<dyn Driver> = sim_driver.clone();
 
     let state = AppState::new(store, obs, Arc::new(runtime), driver);
@@ -101,7 +123,20 @@ async fn build_harness(tmp: &TempDir) -> Harness {
     let target = TargetResource::new("job/exitobs").expect("valid target");
     // Phase 1 alloc id derivation per ADR-0023 — `alloc-{job_id}-0`.
     let alloc_id = AllocationId::new("alloc-exitobs-0").expect("alloc id");
-    Harness { state, sim_driver, target, alloc_id }
+
+    // Background ticker: advances logical time so any
+    // `clock.sleep(...)` parked inside `SimDriver::inject_exit_after`
+    // wakes promptly. The test never drops this handle until the
+    // harness itself is dropped at end-of-test.
+    let ticker_clock = sim_clock.clone();
+    let ticker_handle = tokio::spawn(async move {
+        loop {
+            ticker_clock.tick(Duration::from_millis(50));
+            tokio::task::yield_now().await;
+        }
+    });
+
+    Harness { state, sim_driver, target, alloc_id, sim_clock, ticker_handle }
 }
 
 async fn drive_to_first_running(h: &Harness, start: Instant) -> AllocStatusRow {

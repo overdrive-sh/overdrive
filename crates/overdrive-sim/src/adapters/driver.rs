@@ -167,22 +167,25 @@ impl SimDriver {
             .or_insert_with(|| Arc::new(AtomicBool::new(false)))
             .clone();
         tokio::spawn(async move {
-            // Per RCA §Bug 1: route the simulated emit-delay through
-            // the injected `Clock` so DST runs deterministic —
-            // `SimClock::sleep` advances logical time in place and
-            // yields once cooperatively before returning.
-            // `tokio::time::sleep` would block on a real wall-clock
-            // timer, breaking the test harness's single-threaded
-            // ordering invariants and stalling the observer task
-            // indefinitely under SimClock.
-            //
-            // Even when `after.is_zero()`, the spawn task must yield
-            // at least once so a peer task awaiting on the mpsc
-            // receiver actually gets scheduled — without this, under
-            // a single-threaded `#[tokio::test]` runtime the test
-            // thread stays on-CPU through the convergence loop and
-            // the observer never receives the event.
+            // Route the simulated emit-delay through the injected
+            // `Clock`. Under DST (`SimClock::sleep` is a deterministic
+            // park), the spawned task suspends until the test harness
+            // calls `sim_clock.tick(after)` to advance logical time
+            // past the deadline — at which point the timer wakes and
+            // the body runs.
             clock.sleep(after).await;
+            // Sim-internal: cooperative yield so a peer task awaiting
+            // on the mpsc receiver actually gets scheduled before this
+            // task continues. Required because the spawned task and
+            // the observer task may share a single-threaded
+            // `#[tokio::test]` runtime; without this yield, the
+            // observer never gets a chance to drain the channel between
+            // the timer wake and the `exit_tx.send()` below. This
+            // belongs in the SimDriver — not in production code that
+            // reads exit events — per
+            // `.claude/rules/development.md` § "Production code is
+            // not shaped by simulation".
+            tokio::task::yield_now().await;
             let intentional = intentional_stop.load(Ordering::SeqCst);
             // When `intentional_stop` is true, the event collapses to
             // `CleanExit` so the observer writes Terminated (mirrors

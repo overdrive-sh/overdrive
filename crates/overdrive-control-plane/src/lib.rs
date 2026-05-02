@@ -626,14 +626,11 @@ pub async fn run_server_with_obs_and_driver(
 /// `docs/feature/fix-convergence-loop-not-spawned/bugfix-rca.md` for
 /// the full root-cause chain.
 ///
-/// The explicit `yield_now` after the select is what makes this loop
-/// play nicely with `SimClock` under tests: `SimClock::sleep` advances
-/// logical time and returns immediately (no `tokio::time` integration),
-/// so without an explicit yield this would be a tight CPU loop that
-/// starves the test thread, the HTTP handler tasks, and the cancellation
-/// observer. Under `SystemClock` the `clock.sleep(cadence)` itself
-/// yields via `tokio::time::sleep`, making the `yield_now` redundant
-/// but harmless.
+/// The cadence sleep goes through the injected `Clock`: production
+/// (`SystemClock`) parks on a real timer; DST (`SimClock`) parks until
+/// the harness calls `sim_clock.tick(cadence)` to advance logical time
+/// past the deadline. Either way the loop suspends between ticks
+/// rather than busy-polling.
 fn spawn_convergence_loop(
     state: AppState,
     clock: Arc<dyn overdrive_core::traits::clock::Clock>,

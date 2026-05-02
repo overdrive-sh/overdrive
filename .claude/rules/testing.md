@@ -454,6 +454,92 @@ async fn honours_home_env_var_fallback() {
 
 ---
 
+## Leaked workload cgroups across runs (Lima / Linux integration tests)
+
+Integration tests that exercise `ExecDriver` against real
+`/sys/fs/cgroup` (anything under `tests/integration/job_lifecycle/`
+running on Linux through `cargo xtask lima run --`) create
+per-allocation scope directories under
+`/sys/fs/cgroup/overdrive.slice/workloads.slice/alloc-<job>-<n>.scope`.
+
+When a test crashes mid-run, gets cancelled by nextest's slow-test
+killer, gets SIGKILL'd by the Bash tool's wall-clock cap, or is
+interrupted by the user, the `AllocCleanup` `Drop` guard does NOT
+run — the cgroup scope and any workload PIDs inside it stay
+behind in the Lima VM until something explicitly removes them.
+
+### Why this matters
+
+`ExecDriver::start` `mkdir`s a fresh scope directory per allocation.
+When a stale `alloc-<job>-0.scope` already exists from a prior run,
+the next test in that file (Phase 1 `submit_to_running`,
+`crash_recovery`, `stop_to_terminated`) hits `EEXIST` on the mkdir
+and fails — typically as a fast assertion failure ("alloc must reach
+Running before crash"), but sometimes as a 120 s timeout when the
+already-running stale `/bin/sleep 3600` still owns the PID the test
+expects to control.
+
+The failure looks like a regression in the test under audit; it
+isn't. It's leftover state from whatever ran (or crashed) before.
+
+### Detection — the canonical one-liner
+
+```bash
+cargo xtask lima run -- bash -lc \
+  'pgrep -af "/bin/sleep" | grep -v sudo; echo ---; \
+   ls /sys/fs/cgroup/overdrive.slice/workloads.slice/ 2>/dev/null \
+   | grep "^alloc-"'
+```
+
+Output `alloc-recovery-0.scope`, `alloc-stopper-0.scope`,
+`alloc-payments-0.scope`, `alloc-exitobs-0.scope`, etc. is the
+smoking gun. A live `/bin/sleep 3600` matching one of those
+allocations is the same signal — the workload survived the parent
+test process and is still consuming a slot in its stale scope.
+
+### Cleanup — before re-running the affected suite
+
+```bash
+cargo xtask lima run -- bash -lc '
+  cd /sys/fs/cgroup/overdrive.slice/workloads.slice 2>/dev/null && \
+  for d in alloc-*.scope; do
+    [ -d "$d" ] && (echo 1 > "$d/cgroup.kill" 2>/dev/null; \
+                    rmdir "$d" 2>/dev/null);
+  done
+  pgrep -af "/bin/sleep 3600" | grep -v sudo | \
+    awk "{print \$1}" | xargs -r kill -KILL
+'
+```
+
+`echo 1 > <scope>/cgroup.kill` is the cgroup v2 mass-kill primitive
+— it sends SIGKILL to every PID currently in the scope. The
+subsequent `rmdir` reclaims the directory once the scope is empty.
+The `pgrep | xargs kill` line catches any `/bin/sleep` that was
+already reparented out of the cgroup before the kill landed.
+
+### Prevention — what `AllocCleanup` already does, when it runs
+
+`tests/integration/job_lifecycle/cleanup.rs::AllocCleanup` is a
+`Drop` guard. As long as the test process exits via the normal
+unwind path (panic OR clean return), the guard fires `cgroup.kill`
+on every scope the test created. That handles the common case.
+
+The guard does NOT fire when the test process itself dies
+abnormally — SIGKILL from nextest's `slow-timeout` (default 60 s
+test, 120 s leak), SIGKILL from the Bash tool's wall-clock cap,
+SIGINT from the user. After any such event, expect leftover state.
+
+### Don't paper over it
+
+If a previously-passing integration test starts failing or timing
+out, **run the detection one-liner before assuming the recent
+changes broke the test**. The fix is to clean the VM, not to add
+defensive `mkdir -p`-style retries to `ExecDriver` (production must
+NOT silently reuse a pre-existing scope — that would cross
+allocation boundaries).
+
+---
+
 ## Tier 1 — Deterministic Simulation Testing
 
 ### Nondeterminism must be injectable

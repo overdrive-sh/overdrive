@@ -77,19 +77,50 @@ async fn sim_clock_now_reflects_cumulative_harness_ticks() {
 }
 
 #[tokio::test]
-async fn sim_clock_sleep_advances_logical_time() {
+async fn sim_clock_sleep_parks_until_tick_advances_time() {
+    // Per `.claude/rules/development.md` § "Production code is not
+    // shaped by simulation": `SimClock::sleep` MUST park on a deadline
+    // — only the harness's `tick()` advances logical time. Auto-
+    // advancing inside `sleep` (the prior contract) defeats tests
+    // whose entire purpose is to control time externally to verify a
+    // deadline-bound behavior in the SUT.
     let clock = SimClock::new();
     let t0 = clock.now();
 
-    // `sleep` on a SimClock advances the logical clock in-place; no wall-
-    // clock time passes. `tokio::time::sleep` is banned in core logic.
-    clock.sleep(Duration::from_millis(750)).await;
+    // Spawn a task that sleeps for 750ms of logical time. With no
+    // harness `tick`, this future never resolves on its own.
+    let clock_for_sleeper = clock.clone();
+    let sleeper = tokio::spawn(async move {
+        clock_for_sleeper.sleep(Duration::from_millis(750)).await;
+    });
 
-    let t1 = clock.now();
+    // Yield a few times; without a tick, the sleep MUST still be
+    // pending (this is the correctness assertion: sleep does not
+    // self-advance).
+    for _ in 0..8 {
+        tokio::task::yield_now().await;
+    }
+    assert!(!sleeper.is_finished(), "sleep MUST NOT resolve without harness tick");
     assert_eq!(
-        t1.saturating_duration_since(t0),
+        clock.now().saturating_duration_since(t0),
+        Duration::ZERO,
+        "logical time MUST NOT advance from a Pending sleep"
+    );
+
+    // Insufficient tick: 500ms of 750ms — still pending.
+    clock.tick(Duration::from_millis(500));
+    for _ in 0..8 {
+        tokio::task::yield_now().await;
+    }
+    assert!(!sleeper.is_finished(), "sleep must remain Pending until tick reaches deadline");
+
+    // Sufficient tick: deadline reached → wakes.
+    clock.tick(Duration::from_millis(250));
+    sleeper.await.expect("sleeper joined");
+    assert_eq!(
+        clock.now().saturating_duration_since(t0),
         Duration::from_millis(750),
-        "sim sleep must advance logical time deterministically"
+        "logical time advanced exactly by harness ticks (500 + 250 = 750)"
     );
 }
 
