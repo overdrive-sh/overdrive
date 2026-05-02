@@ -1,0 +1,165 @@
+{
+  "roadmap": {
+    "project_id": "fix-cgroup-preflight-scope-vs-slice",
+    "feature_id": "fix-cgroup-preflight-scope-vs-slice",
+    "created_at": "2026-05-02T11:30:00Z",
+    "filled_at": "2026-05-02T11:30:00Z",
+    "total_steps": 2,
+    "phases": 1,
+    "walking_skeleton_gate": "01-02",
+    "notes": [
+      "Bug fix via /nw-bugfix → /nw-deliver. Authoritative spec is the RCA at `docs/feature/fix-cgroup-preflight-scope-vs-slice/bugfix-rca.md` (user-reviewed and APPROVED 2026-05-02 in Phase 2 before roadmap creation). Approved fix shape: **Option A** — implement the ADR-0028 §4 step 4 fallback verbatim ('or the parent's if the file is empty'). NOT Option B (always read parent) — Option B was explicitly rejected because it breaks the production systemd-unit case where the unit's own `subtree_control` is authoritative and the parent slice typically lacks the same delegation.",
+      "Single-cut migration per `feedback_single_cut_greenfield_migrations`: the buggy single-read step-4 body is replaced with the read-then-fallback shape in step 01-02; no shadow read, no feature-flagged old path, no dual code paths. The fix lands as one cohesive commit.",
+      "Two-step Outside-In TDD per the canonical bugfix template at `docs/feature/fix-cgroup-preflight-wrong-slice/deliver/roadmap.json`. Step 01-01 lands the new RED oracle test that demonstrates the bug — fixture seeds a scope path with empty `subtree_control` AND a parent slice with full `cpu memory io` content. Buggy code reads the empty scope file → `DelegationMissing` → oracle (asserting `Ok(())`) FAILS. RED commit via `git commit --no-verify` per `.claude/rules/testing.md` §RED scaffolds. Step 01-02 implements the empty-fallback in `run_preflight_at`, adds a paired locking test for the negative case (scope empty AND parent empty → `DelegationMissing` against parent), and updates doc comments. The RED oracle transitions RED → GREEN within the same commit.",
+      "No signature change required. The fix is local to step-4 body of `run_preflight_at`. The `proc_self_cgroup` parameter introduced by the prior `wrong-slice` fix already carries the discovered path; the fallback only changes which `cgroup.subtree_control` is read when the discovered path's file is empty.",
+      "`DelegationMissing.slice` field semantics evolve: when the fallback fires and the parent ALSO lacks delegation, the field carries the *parent*'s path (the slice whose `subtree_control` was actually inspected, i.e. the path the operator must `Delegate=yes` on). Grep audit confirms the only consumer of this field is the same file's `Display` template — no programmatic consumer exists. The field rustdoc updates to reflect this; no breaking-change concern.",
+      "Edge case — discovered path is `/` (kernel-root cgroup): `Path::parent()` returns `None`. The fix surfaces this via `SubtreeControlUnreadable` with a synthetic `io::Error` rather than panicking. Unreachable under any documented production shape but defends against future surprise. Per RCA Risk Assessment §Low-risk: parent of `/`.",
+      "Per `.claude/rules/testing.md` mutation-testing rules, step 01-02 runs `cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-control-plane --file crates/overdrive-control-plane/src/cgroup_preflight.rs` via `cargo xtask lima run --` (mutation runs that include `--features integration-tests` REQUIRE Lima on macOS per `.claude/rules/testing.md` § Mutation testing → Usage). Kill-rate gate ≥80%. The new conditional `if subtree_control.is_empty()` adds a branch that mutation testing will exercise via the new oracle (forces empty branch) and the existing slice-with-content tests (forces non-empty branch). The prior `wrong-slice` fix landed at 93.8%; expect similar kill-rate post-fix.",
+      "Out of scope (flagged for follow-up, do NOT touch): (a) ADR↔code traceability tooling — same recurring follow-up flagged in the prior `wrong-slice` evolution doc, now with elevated urgency given two ADR-implementation drift incidents within four days against the same ADR clause. (b) `cgroup_manager::create_and_enrol_control_plane_slice` writes `overdrive.slice/...` directly at the cgroupfs root — non-root operators cannot do this even with proper delegation. Deeper Phase 1 question; out of scope for this fix.",
+      "ADR-0028 is correct; the implementation drifted on the parenthesised fallback clause. No ADR change required."
+    ]
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Bug fix — empty-scope fallback to parent slice",
+      "slice": "single-vertical",
+      "user_stories": [
+        "As a non-root operator running `overdrive serve` interactively from a TTY in `session-3.scope` on a host where `user-1000.slice` has `Delegate=yes` correctly set, the preflight succeeds (Ok) instead of returning a misdiagnosed DelegationMissing pointing at a leaf scope I cannot fix with `Delegate=yes`."
+      ],
+      "description": "Implement the ADR-0028 §4 step 4 parenthesised fallback ('or the parent's if the file is empty'). The current step-4 body reads `<discovered>/cgroup.subtree_control` and treats empty content as 'no controllers delegated'. Under cgroup v2's 'no internal processes' rule, leaf scopes have empty `subtree_control` because they cannot host child cgroups; the controllers live in the parent slice's `subtree_control`. Add a single conditional re-read of the parent when the discovered file is empty, and update `DelegationMissing.slice` to reflect which path was actually inspected.",
+      "estimated_hours": 1.0,
+      "depends_on": [],
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "RED — new oracle test for empty-scope fallback shape",
+          "description": "Land the new RED oracle test `preflight_falls_back_to_parent_slice_on_empty_scope.rs`. Fixture seeds `<tmp>/cgroup.controllers` (step 2 pass), `<tmp>/user.slice/user-1000.slice/cgroup.subtree_control` with `cpu memory io` (parent slice carries delegation), `<tmp>/user.slice/user-1000.slice/session-3.scope/cgroup.subtree_control` with empty content (leaf scope, no controllers in subtree_control), and `<tmp>/proc-self-cgroup` containing `0::/user.slice/user-1000.slice/session-3.scope\\n`. Calls `run_preflight_at(<tmp>, uid=1000, /proc/filesystems-mock-with-cgroup2, <tmp>/proc-self-cgroup)` and asserts `Ok(())`. Wire the new test through `tests/integration.rs` inside the inline `mod cgroup_isolation { ... }` block. Production code is UNCHANGED in this commit. Under the buggy code path, the test FAILS (buggy code reads `<tmp>/user.slice/user-1000.slice/session-3.scope/cgroup.subtree_control`, finds empty content, both controllers missing, returns `DelegationMissing` — but the test asserts `Ok(())`). Commit with `git commit --no-verify` per `.claude/rules/testing.md` §RED scaffolds. Mark commit message clearly with `test(control-plane): RED — ...`.",
+          "criteria": [
+            "AC1: New file `crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_falls_back_to_parent_slice_on_empty_scope.rs` exists with the fixture shape described in the RCA Files Affected section.",
+            "AC2: New test is wired through `crates/overdrive-control-plane/tests/integration.rs` via `mod preflight_falls_back_to_parent_slice_on_empty_scope;` inside the existing inline `mod cgroup_isolation { ... }` block.",
+            "AC3: Compile-only gate `cargo nextest run -p overdrive-control-plane --features integration-tests --no-run` succeeds on macOS.",
+            "AC4: Production source `crates/overdrive-control-plane/src/cgroup_preflight.rs` is UNMODIFIED (verify via `git diff --stat HEAD`).",
+            "AC5: Commit message explicitly marks the RED scaffold state per `.claude/rules/testing.md` §RED scaffolds; `--no-verify` used per the same rule."
+          ],
+          "acceptance_criteria": [
+            "AC1: New file `crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_falls_back_to_parent_slice_on_empty_scope.rs` exists with the fixture shape described in the RCA Files Affected section.",
+            "AC2: New test is wired through `crates/overdrive-control-plane/tests/integration.rs` via `mod preflight_falls_back_to_parent_slice_on_empty_scope;` inside the existing inline `mod cgroup_isolation { ... }` block.",
+            "AC3: Compile-only gate `cargo nextest run -p overdrive-control-plane --features integration-tests --no-run` succeeds on macOS.",
+            "AC4: Production source `crates/overdrive-control-plane/src/cgroup_preflight.rs` is UNMODIFIED (verify via `git diff --stat HEAD`).",
+            "AC5: Commit message explicitly marks the RED scaffold state per `.claude/rules/testing.md` §RED scaffolds; `--no-verify` used per the same rule."
+          ],
+          "files_to_modify": [
+            "crates/overdrive-control-plane/tests/integration.rs",
+            "crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_falls_back_to_parent_slice_on_empty_scope.rs"
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_falls_back_to_parent_slice_on_empty_scope.rs",
+          "scenario_name": "preflight_falls_back_to_parent_slice_on_empty_scope",
+          "tier": "structural",
+          "time_estimate_hours": 0.4,
+          "estimated_hours": 0.4,
+          "dependencies": [],
+          "quality_gates": [
+            "Compile-only on macOS via `cargo nextest run -p overdrive-control-plane --features integration-tests --no-run`.",
+            "Linux runtime via `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests` — new oracle test FAILS as expected (RED); all other tests continue to pass.",
+            "Commit shape: `--no-verify` with explicit RED-scaffold marker in the message (`test(control-plane): RED — preflight oracle for empty-scope parent-slice fallback`)."
+          ],
+          "deliverables": [
+            "One commit landing the new RED oracle test in failing state."
+          ],
+          "implementation_scope": {
+            "production": [],
+            "tests": [
+              "crates/overdrive-control-plane/tests/integration.rs (add `mod preflight_falls_back_to_parent_slice_on_empty_scope;` inside the inline `mod cgroup_isolation { ... }` block)",
+              "crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_falls_back_to_parent_slice_on_empty_scope.rs (new oracle, ~80 lines)"
+            ]
+          },
+          "implementation_notes": [
+            "Look at `crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_reads_enclosing_slice.rs` as the closest precedent for fixture shape — it uses `tempfile::TempDir`, writes `cgroup.controllers` to satisfy step 2, writes `subtree_control` content at the slice path, and writes a `0::/...` line to a `proc-self-cgroup` file. The new test follows the same shape but adds a third level: scope under user slice.",
+            "The fixture must create three nested directories under tmp: `user.slice/`, `user.slice/user-1000.slice/`, `user.slice/user-1000.slice/session-3.scope/`. Use `std::fs::create_dir_all` with the full path; `std::fs::write` for each `cgroup.subtree_control`. The scope's `subtree_control` MUST exist as an empty file (not absent — `std::fs::write(path, \"\")` creates an empty file).",
+            "The /proc/filesystems mock must contain a `cgroup2` line so step 1 passes. Look at `preflight_reads_enclosing_slice.rs` for the exact shape — typically `nodev\\ttmpfs\\nnodev\\tcgroup2\\n` or similar.",
+            "Use `uid = 1000` (matches the slice path); root would short-circuit at step 3 and never enter step 4.",
+            "Assert `result.is_ok()`. If you want a stronger assertion, also pattern-match `Ok(())` explicitly. Do NOT assert on a specific error variant — under the fix the function returns Ok.",
+            "DO NOT modify `crates/overdrive-control-plane/src/cgroup_preflight.rs` in this step. The whole point of the RED phase is that production code stays buggy and the new test demonstrates the bug. Verify with `git diff --stat HEAD` before commit.",
+            "DO NOT add the locking test (`preflight_refuses_when_both_scope_and_parent_slice_lack_delegation.rs`) in this step — it ships in 01-02 alongside the GREEN fix.",
+            "Commit with `git commit --no-verify -m 'test(control-plane): RED — preflight oracle for empty-scope parent-slice fallback'` and a body explaining the RED-scaffold state per the `.claude/rules/testing.md` §RED scaffolds template."
+          ]
+        },
+        {
+          "id": "01-02",
+          "name": "GREEN — implement empty-scope fallback + locking test + doc updates",
+          "description": "Make the RED oracle from 01-01 transition GREEN by implementing the ADR-0028 §4 step 4 fallback in `run_preflight_at`. Replace the single `read_to_string(&subtree_control)?` at lines 343-345 with: read; if the contents (after `trim_ascii` whitespace) are empty, compute `enclosing_abs.parent()`; if `Some(parent)`, re-read `<parent>/cgroup.subtree_control` and use those contents (also updating the path that will be reported in `DelegationMissing.slice` if the check fails); if `None` (kernel-root edge), surface `SubtreeControlUnreadable` with a synthetic `io::Error` of kind `InvalidData` rather than panicking. Add the paired locking test `preflight_refuses_when_both_scope_and_parent_slice_lack_delegation.rs` (scope empty, parent slice has only `io pids` → `DelegationMissing` against the PARENT slice path). Update doc comments: module-level (lines 13-17) to name the fallback; `run_preflight_at` rustdoc (lines 308-312) to describe step-4 fallback shape; `DelegationMissing.slice` field rustdoc (lines 115-117) to reflect 'the slice whose `subtree_control` was actually inspected — when the discovered path's file was empty, this is the parent slice'. Conventional commit `fix(control-plane): cgroup preflight falls back to parent slice on empty scope subtree_control`.",
+          "criteria": [
+            "AC1: Step-4 body reads `<discovered>/cgroup.subtree_control`; if its contents (after `split_ascii_whitespace().next().is_none()` check) are empty, computes `enclosing_abs.parent()` and re-reads `<parent>/cgroup.subtree_control` instead. The path used for `DelegationMissing.slice` reflects whichever path was actually inspected (discovered path if non-empty content was found; parent path if fallback fired).",
+            "AC2: When `enclosing_abs.parent()` returns `None` (kernel-root cgroup edge), the function returns `SubtreeControlUnreadable` with a synthetic `io::Error` of kind `InvalidData` describing the unexpected enclosing-path shape rather than panicking.",
+            "AC3: New test file `crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_refuses_when_both_scope_and_parent_slice_lack_delegation.rs` exists; fixture seeds scope `subtree_control` empty AND parent `subtree_control` with only `io pids`; asserts `DelegationMissing` with `slice` == parent slice path AND `missing` containing both `cpu` and `memory`.",
+            "AC4: New test from AC3 is wired through `crates/overdrive-control-plane/tests/integration.rs` inside the existing `mod cgroup_isolation { ... }` block.",
+            "AC5: All cgroup-isolation tests pass on Linux via Lima: `preflight_falls_back_to_parent_slice_on_empty_scope` (the RED→GREEN oracle from 01-01), `preflight_refuses_when_both_scope_and_parent_slice_lack_delegation` (new locking test), `preflight_reads_enclosing_slice`, `preflight_no_delegation`, both `preflight_missing_cpu` tests, `preflight_proc_self_cgroup_malformed` cases, `preflight_subtree_control_unreadable`, `preflight_proc_filesystems_unreadable`, `preflight_v1_host`. No existing fixture is modified — the slice-shaped tests still exercise the primary read (non-empty content found at discovered path) and continue to pass unchanged.",
+            "AC6: Workspace nextest gate via `cargo xtask lima run -- cargo nextest run --workspace --features integration-tests`: green.",
+            "AC7: Mutation gate via `cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-control-plane --file crates/overdrive-control-plane/src/cgroup_preflight.rs` ≥80% kill rate; `target/xtask/mutants-summary.json` records `status=\"pass\"`.",
+            "AC8: Doc comments updated: module header (lines 13-17) names the fallback; `run_preflight_at` rustdoc (lines 308-312) describes the step-4 fallback shape and references ADR-0028 §4 step 4; `DelegationMissing.slice` field rustdoc (lines 115-117) reflects 'the slice whose `subtree_control` was actually inspected'."
+          ],
+          "acceptance_criteria": [
+            "AC1: Step-4 body reads `<discovered>/cgroup.subtree_control`; if its contents (after `split_ascii_whitespace().next().is_none()` check) are empty, computes `enclosing_abs.parent()` and re-reads `<parent>/cgroup.subtree_control` instead. The path used for `DelegationMissing.slice` reflects whichever path was actually inspected (discovered path if non-empty content was found; parent path if fallback fired).",
+            "AC2: When `enclosing_abs.parent()` returns `None` (kernel-root cgroup edge), the function returns `SubtreeControlUnreadable` with a synthetic `io::Error` of kind `InvalidData` describing the unexpected enclosing-path shape rather than panicking.",
+            "AC3: New test file `crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_refuses_when_both_scope_and_parent_slice_lack_delegation.rs` exists; fixture seeds scope `subtree_control` empty AND parent `subtree_control` with only `io pids`; asserts `DelegationMissing` with `slice` == parent slice path AND `missing` containing both `cpu` and `memory`.",
+            "AC4: New test from AC3 is wired through `crates/overdrive-control-plane/tests/integration.rs` inside the existing `mod cgroup_isolation { ... }` block.",
+            "AC5: All cgroup-isolation tests pass on Linux via Lima: `preflight_falls_back_to_parent_slice_on_empty_scope` (the RED→GREEN oracle from 01-01), `preflight_refuses_when_both_scope_and_parent_slice_lack_delegation` (new locking test), `preflight_reads_enclosing_slice`, `preflight_no_delegation`, both `preflight_missing_cpu` tests, `preflight_proc_self_cgroup_malformed` cases, `preflight_subtree_control_unreadable`, `preflight_proc_filesystems_unreadable`, `preflight_v1_host`. No existing fixture is modified — the slice-shaped tests still exercise the primary read (non-empty content found at discovered path) and continue to pass unchanged.",
+            "AC6: Workspace nextest gate via `cargo xtask lima run -- cargo nextest run --workspace --features integration-tests`: green.",
+            "AC7: Mutation gate via `cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-control-plane --file crates/overdrive-control-plane/src/cgroup_preflight.rs` ≥80% kill rate; `target/xtask/mutants-summary.json` records `status=\"pass\"`.",
+            "AC8: Doc comments updated: module header (lines 13-17) names the fallback; `run_preflight_at` rustdoc (lines 308-312) describes the step-4 fallback shape and references ADR-0028 §4 step 4; `DelegationMissing.slice` field rustdoc (lines 115-117) reflects 'the slice whose `subtree_control` was actually inspected'."
+          ],
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/cgroup_preflight.rs",
+            "crates/overdrive-control-plane/tests/integration.rs",
+            "crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_refuses_when_both_scope_and_parent_slice_lack_delegation.rs"
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_refuses_when_both_scope_and_parent_slice_lack_delegation.rs",
+          "scenario_name": "preflight_refuses_when_both_scope_and_parent_slice_lack_delegation",
+          "tier": "behavioural",
+          "time_estimate_hours": 0.6,
+          "estimated_hours": 0.6,
+          "dependencies": ["01-01"],
+          "quality_gates": [
+            "Linux runtime via `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests`: all step-4 tests PASS.",
+            "Whole-workspace gate via `cargo xtask lima run -- cargo nextest run --workspace --features integration-tests`: green.",
+            "Mutation gate via `cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-control-plane --file crates/overdrive-control-plane/src/cgroup_preflight.rs`: kill rate ≥80%, summary file `target/xtask/mutants-summary.json` records `status=\"pass\"`.",
+            "Post-mutation cleanup: `git checkout -- crates/`.",
+            "Conventional commit message: `fix(control-plane): cgroup preflight falls back to parent slice on empty scope subtree_control`."
+          ],
+          "deliverables": [
+            "One commit completing the bug fix; mutation gate pass artefact at `target/xtask/mutants-summary.json`."
+          ],
+          "implementation_scope": {
+            "production": [
+              "crates/overdrive-control-plane/src/cgroup_preflight.rs (rewrite step-4 read site at lines 343-345 to read-then-fallback; thread the actually-inspected slice path through to `DelegationMissing.slice`; handle `parent() == None` via `SubtreeControlUnreadable`; update module header, `run_preflight_at` rustdoc, and `DelegationMissing.slice` field rustdoc)"
+            ],
+            "tests": [
+              "crates/overdrive-control-plane/tests/integration.rs (add `mod preflight_refuses_when_both_scope_and_parent_slice_lack_delegation;` inside the inline `mod cgroup_isolation { ... }` block)",
+              "crates/overdrive-control-plane/tests/integration/cgroup_isolation/preflight_refuses_when_both_scope_and_parent_slice_lack_delegation.rs (new locking test for negative case)"
+            ]
+          },
+          "implementation_notes": [
+            "Empty-detection: use `contents.split_ascii_whitespace().next().is_none()` rather than `contents.trim().is_empty()` — matches the existing missing-controller logic at lines 347-352 which uses `split_ascii_whitespace`. Consistent shape; avoids subtle whitespace differences.",
+            "Path bookkeeping: keep `enclosing_abs` as the discovered path. Add a local `let inspected_slice = if fallback_fired { parent_path } else { enclosing_abs.clone() };`. Pass `inspected_slice` (not `enclosing_abs`) to both the `SubtreeControlUnreadable.slice` field (when the second read fails) and the `DelegationMissing.slice` field (when controllers are missing). The `DelegationMissing` rendered message will then correctly tell the operator to `Delegate=yes` on the slice they actually need to fix.",
+            "`Path::parent()` on a `PathBuf` like `<tmp>/user.slice/user-1000.slice/session-3.scope` returns `Some(<tmp>/user.slice/user-1000.slice)` — exactly what we want. On the kernel-root edge where `enclosing_abs == cgroup_root`, `parent()` returns `Some(cgroup_root.parent())` which on a tempdir is the tempdir parent — useless. Better edge handling: if `enclosing_abs == cgroup_root` (i.e. discovered path was `/`), return `SubtreeControlUnreadable` with a synthetic `io::Error::new(InvalidData, ...)` describing the unexpected kernel-root enclosing path. Use `enclosing_abs.parent() == Some(cgroup_root.parent().unwrap_or(cgroup_root))` is wrong — instead compare `enclosing_abs == cgroup_root` directly via `Path::eq`.",
+            "Doc comment for `DelegationMissing.slice` field — current text (lines 115-117): 'Enclosing slice directory (per `/proc/self/cgroup`); the missing controllers are absent from `<this directory>/cgroup.subtree_control`.' Updated text should say something like: 'The slice whose `cgroup.subtree_control` was inspected. When the discovered path's `subtree_control` was empty (typical for leaf scopes under cgroup v2), this carries the parent slice path — the path the operator must `Delegate=yes` on.' Keep the existing role of being the operator-facing path.",
+            "Module header doc (lines 13-17) currently lists step 4 as 'Required controllers (`cpu` AND `memory`) are present in the `cgroup.subtree_control` of the *enclosing* slice.' Update to add a parenthesised note: 'or its parent slice when the enclosing path is a leaf scope with empty subtree_control — see ADR-0028 §4 step 4 fallback'.",
+            "`run_preflight_at` rustdoc (lines 308-312) currently describes step 4 in terms of the discovered path. Add one sentence: 'When the discovered path's `cgroup.subtree_control` is empty (typical for leaf scopes), step 4 falls back to inspecting the parent slice's `subtree_control` per ADR-0028 §4 step 4.'",
+            "Locking test fixture (`preflight_refuses_when_both_scope_and_parent_slice_lack_delegation.rs`): same shape as the 01-01 oracle but write `<tmp>/user.slice/user-1000.slice/cgroup.subtree_control` with `io pids` only (NO cpu, NO memory). Assertions: `result` matches `Err(CgroupPreflightError::DelegationMissing { slice, missing, .. })` where `slice == <tmp>/user.slice/user-1000.slice` (the PARENT, not the scope) AND `missing` contains both `\"cpu\"` and `\"memory\"`.",
+            "Existing tests verification: `preflight_no_delegation.rs`, `preflight_missing_cpu.rs` (both tests), `preflight_reads_enclosing_slice.rs` all point `proc_self_cgroup` at a slice path and write controllers DIRECTLY at that slice. The fix's primary read finds non-empty content at those paths → fallback never fires → behaviour unchanged. No fixture updates needed.",
+            "Mutation gate: typical mutants the new conditional creates: `if subtree_control.is_empty()` → `if true` (fallback always fires — caught by slice-shaped tests that should not fall back); `if subtree_control.is_empty()` → `if false` (fallback never fires — caught by the new oracle); `Path::parent()` → `Some(...)` constant (caught by kernel-root edge handling if testable; if not, document as untestable). Existing skip annotations stay in place.",
+            "Post-mutation: `git checkout -- crates/` to clean any mutated source the wrapper didn't restore. Belt-and-braces per `.claude/rules/testing.md`.",
+            "Final commit body: explain what changed (read-then-fallback semantics on empty discovered-path subtree_control); cite the user-approved fix shape (Option A); link to `docs/feature/fix-cgroup-preflight-scope-vs-slice/bugfix-rca.md`; link to ADR-0028 §4 step 4 'or the parent's if the file is empty' clause; reference the prior `wrong-slice` fix and note that this fix completes the second half of the same ADR clause."
+          ]
+        }
+      ]
+    }
+  ],
+  "validation": {
+    "status": "approved",
+    "checked_at": "2026-05-02T11:30:00Z",
+    "checked_by": "orchestrator (/nw-bugfix Phase 3 — main instance, RCA-driven)",
+    "notes": "Roadmap quality gate (6 checks) PASS: (1) AC coupling — all ACs reference `pub fn run_preflight_at`, public error variants `CgroupPreflightError::{DelegationMissing,SubtreeControlUnreadable}`, observable file-system fixtures, and the public `slice` field on `DelegationMissing`. No private-method coupling. (2) Decomposition ratio — 2 steps over 4 production+test files: 0.5, well under 2.5. (3) Distinct shapes — 01-01 is RED scaffold (new oracle test, production unchanged); 01-02 is GREEN cohesive fix (read-then-fallback + locking test + doc updates); no batchable repetition. (4) Both steps have non-empty `files_to_modify` populated with concrete paths. (5) Step IDs match `^\\d{2}-\\d{2}$`: 01-01, 01-02. (6) DISTILL linkage — no `distill/` directory exists for this bugfix (per the bugfix template at `fix-cgroup-preflight-wrong-slice`); the RCA at `docs/feature/fix-cgroup-preflight-scope-vs-slice/bugfix-rca.md` plays that role. Both steps name a `test_file` and `scenario_name` referencing the new oracle (01-01) and the new locking test (01-02). User-approved 2026-05-02 in /nw-bugfix Phase 2 (Option A explicitly chosen over Option B)."
+  }
+}
