@@ -1,8 +1,9 @@
 //! Acceptance — Slice 02 step 02-03.
 //!
 //! `S-CP-01` / `S-CP-02` / `S-CP-03` / `S-CP-06` / `S-CP-07` / `S-CP-08` /
-//! `S-CP-10` — content-negotiated `submit_job` + `streaming_submit_loop`
-//! with `select!` cap timer + lagged-recovery fallback.
+//! `S-CP-10` / `S-CP-11` — content-negotiated `submit_job` +
+//! `streaming_submit_loop` with `select!` cap timer + lagged-recovery
+//! fallback + stop-while-streaming closure.
 //!
 //! Driver: `axum::Router::oneshot(...)` against the production router
 //! shape, with `Accept: application/x-ndjson` (streaming) or
@@ -38,6 +39,7 @@ use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
 };
+use overdrive_core::transition_reason::StoppedBy;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
@@ -561,6 +563,110 @@ async fn s_cp_10_lagged_subscriber_recovers_via_observation_snapshot() {
     // observes the handler taking the Lagged(_) branch, falling back
     // to the obs snapshot, and resuming the broadcast subscription
     // until terminal.
+}
+
+// ===========================================================================
+// S-CP-11 — Stop-while-streaming closes the stream with converged_stopped
+//
+// RED scaffold (step 01-01): streaming.rs has no Terminated-path in
+// check_terminal(), so `converged_stopped` is never emitted. The test
+// times out (or hits the 10s cap) and the final-line assertion fails.
+// GREEN lands in step 01-02 when check_terminal() gains a Terminated
+// arm that emits ConvergedStopped.
+// ===========================================================================
+
+#[tokio::test]
+async fn s_cp_11_stop_while_streaming_closes_stream_with_stopped_result() {
+    let tmp = TempDir::new().expect("tmpdir");
+    let mut state = build_app_state(&tmp);
+
+    // Use a SimClock with a short cap so the test fails quickly rather
+    // than waiting 60 s when converged_stopped is not yet implemented.
+    let sim_clock = Arc::new(SimClock::new());
+    state.clock = sim_clock.clone() as Arc<dyn Clock>;
+    state.streaming_cap = Duration::from_secs(10);
+
+    let router = build_router(state.clone());
+
+    let alloc_id = AllocationId::from_str("alloc-payments-0").expect("alloc id");
+    let job_id = JobId::from_str("payments-v0").expect("job id");
+
+    let request_task = tokio::spawn(async move {
+        let response = router
+            .oneshot(build_submit_request(&payments_spec(), "application/x-ndjson"))
+            .await
+            .expect("router oneshot");
+        assert_eq!(response.status(), StatusCode::OK);
+        body_ndjson_lines(response.into_body()).await
+    });
+
+    // Wait until the handler has subscribed to the broadcast channel
+    // (it has emitted `accepted` by this point).
+    for _ in 0..100 {
+        if state.lifecycle_events.receiver_count() >= 1 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    // AC: Stream stays open after Running transition.
+    emit_lifecycle(
+        &state,
+        make_lifecycle_event(
+            alloc_id.clone(),
+            job_id.clone(),
+            AllocStateWire::Pending,
+            AllocStateWire::Running,
+            TransitionReason::Started,
+        ),
+    );
+
+    // Give the handler a moment to process the Running event (it should
+    // NOT close the stream here — we haven't seeded a Running obs row so
+    // the converged_running path only fires if the handler observes one
+    // via the broadcast event directly; we need it to stay open for the
+    // next Terminated event).
+    //
+    // NOTE: s_cp_01 uses write_row(Running) + emit Running to close the
+    // stream. Here we intentionally omit the write_row so the stream
+    // remains open after the Running event, allowing us to confirm it
+    // only closes on the subsequent Terminated event.
+    for _ in 0..20 {
+        tokio::task::yield_now().await;
+    }
+
+    // AC: Stream closes after Terminated { Stopped { by: Reconciler } }.
+    emit_lifecycle(
+        &state,
+        make_lifecycle_event(
+            alloc_id.clone(),
+            job_id.clone(),
+            AllocStateWire::Running,
+            AllocStateWire::Terminated,
+            TransitionReason::Stopped { by: StoppedBy::Reconciler },
+        ),
+    );
+
+    // The stream must close within 5 s — not by hitting the 10 s cap.
+    let lines = tokio::time::timeout(Duration::from_secs(5), request_task)
+        .await
+        .expect("stream closes within 5 s after Terminated event, not via cap timer")
+        .expect("task ok");
+
+    // AC: final line has kind == "converged_stopped".
+    let last = lines.last().expect("at least one line");
+    assert_eq!(
+        last["kind"], "converged_stopped",
+        "last line must be `converged_stopped` after Stopped-by-Reconciler transition; got {lines:?}"
+    );
+
+    // AC: no converged_failed line anywhere in the stream.
+    let has_failed = lines.iter().any(|l| l["kind"] == "converged_failed");
+    assert!(!has_failed, "stream must not contain `converged_failed`; got {lines:?}");
+
+    // AC: no timeout terminal_reason anywhere in the stream.
+    let has_timeout = lines.iter().any(|l| l["data"]["terminal_reason"]["kind"] == "timeout");
+    assert!(!has_timeout, "stream must not close via cap timer; got {lines:?}");
 }
 
 // ===========================================================================
