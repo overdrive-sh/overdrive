@@ -12,14 +12,40 @@
 //! reaches the kernel here).
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant as StdInstant};
 
+use async_trait::async_trait;
 use overdrive_core::id::{AllocationId, SpiffeId};
+use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{AllocationSpec, Driver, DriverError, Resources};
-use overdrive_sim::adapters::clock::SimClock;
 use overdrive_worker::ExecDriver;
 use tempfile::TempDir;
 use tokio::time::Instant;
+
+/// Test-local [`Clock`] impl that delegates `sleep` to the tokio
+/// timer and reads `now` / `unix_now` from real wall-clock. Used in
+/// place of `SimClock` for real-IO tests where the SUT runs real
+/// processes — `SimClock::sleep` parks until an external `tick()`,
+/// which has no caller in real-IO scenarios. This intentionally lives
+/// in the test crate rather than `overdrive-sim` (DST-only) or
+/// `overdrive-host` (forbidden as a dev-dep per
+/// `.claude/rules/development.md`).
+struct TokioWallClock;
+
+#[async_trait]
+impl Clock for TokioWallClock {
+    fn now(&self) -> StdInstant {
+        StdInstant::now()
+    }
+
+    fn unix_now(&self) -> Duration {
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default()
+    }
+
+    async fn sleep(&self, duration: Duration) {
+        tokio::time::sleep(duration).await;
+    }
+}
 
 /// Bit mask for SIGTERM (signal 15) in the `SigIgn` mask reported by
 /// `/proc/<pid>/status`. Bit `n-1` corresponds to signal `n`.
@@ -123,9 +149,12 @@ async fn stop_escalates_to_sigkill_when_sigterm_ignored() {
     std::fs::create_dir_all(cgroup_root.path().join("overdrive.slice/workloads.slice"))
         .expect("workloads.slice created");
 
-    // Custom stop-grace duration to keep the test fast — 250ms.
+    // Real-IO test: the SUT runs a real `/bin/sh` and the grace window
+    // in `Driver::stop` must elapse against actual wall-clock for the
+    // SIGKILL escalation path to fire. `SimClock` would park
+    // indefinitely waiting for `tick()`. See `TokioWallClock` above.
     let driver: Arc<dyn Driver> = Arc::new(
-        ExecDriver::new(cgroup_root.path().to_path_buf(), Arc::new(SimClock::new()))
+        ExecDriver::new(cgroup_root.path().to_path_buf(), Arc::new(TokioWallClock))
             .with_stop_grace(Duration::from_millis(250)),
     );
 
