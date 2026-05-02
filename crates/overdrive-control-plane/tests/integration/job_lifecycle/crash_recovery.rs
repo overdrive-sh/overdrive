@@ -41,6 +41,7 @@ use tempfile::TempDir;
 use super::cleanup::AllocCleanup;
 
 #[tokio::test]
+#[allow(clippy::too_many_lines)]
 async fn killed_workload_is_restarted_with_fresh_alloc_id() {
     let tmp = TempDir::new().expect("tempdir");
     let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime");
@@ -148,8 +149,7 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
         std::fs::read_to_string(scope.join("cgroup.procs")).expect("read cgroup.procs");
     let pid: libc::pid_t = procs_text
         .lines()
-        .filter_map(|line| line.trim().parse::<i32>().ok())
-        .next()
+        .find_map(|line| line.trim().parse::<i32>().ok())
         .expect("workload PID present in cgroup.procs");
     // SAFETY: SIGKILL on a child PID owned by this test. The PID was
     // minted by `ExecDriver::start` in this same test and resides in
@@ -193,7 +193,7 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
             tokio::task::yield_now().await;
         }
         let rows = state.obs.alloc_status_rows().await.expect("read rows");
-        if let Some(row) = rows.iter().find(|r| matches!(r.state, AllocState::Failed { .. })) {
+        if let Some(row) = rows.iter().find(|r| matches!(r.state, AllocState::Failed)) {
             saw_failed = true;
             failed_counter = row.updated_at.counter;
         }
