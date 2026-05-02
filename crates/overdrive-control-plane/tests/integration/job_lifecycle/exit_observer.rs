@@ -460,3 +460,71 @@ async fn intentional_stop_flag_serialises_with_natural_exit_race() {
     // shape; the import alone is enough to make this a RED reference.
     let _ = std::any::type_name::<ExitEvent>();
 }
+
+// -----------------------------------------------------------------------
+// Regression — exit-observer lifecycle `from` must reflect the prior
+// state, not the new state.
+//
+// Defect: `build_lifecycle_event` set `from: to_wire` (new state) for
+// both `from` and `to`, so every exit-observer transition arrived on
+// the bus as `from == to` (e.g. `from: "failed", to: "failed"`).
+// Operators streaming `submit` saw no state change information.
+//
+// Fix: read the prior row's state inside `handle_exit_event` and pass
+// it to `build_lifecycle_event` as the `from` value, mirroring the
+// `action_shim::build_lifecycle_event` pattern.
+// -----------------------------------------------------------------------
+
+#[tokio::test]
+async fn exit_observer_lifecycle_from_reflects_prior_running_state() {
+    let tmp = TempDir::new().expect("tempdir");
+    let h = build_harness(&tmp).await;
+    let start = Instant::now();
+    // Drive to Running so the prior row exists before the crash.
+    let _prior = drive_to_first_running(&h, start).await;
+
+    let mut events = h.state.lifecycle_events.subscribe();
+    // Drain any startup events so only post-injection emissions are inspected.
+    while events.try_recv().is_ok() {}
+
+    // Inject a crash — the observer must emit from: Running, to: Failed.
+    h.sim_driver.inject_exit_after(
+        &h.alloc_id,
+        Duration::from_millis(500),
+        ExitKind::Crashed { exit_code: Some(1), signal: None },
+    );
+
+    let job_lifecycle_name = overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
+        .expect("job-lifecycle reconciler name");
+    let deadline = start + Duration::from_secs(120);
+    let mut found_ev = None;
+    'outer: for tick_n in 30_u64..50 {
+        run_convergence_tick(
+            &h.state,
+            &job_lifecycle_name,
+            &h.target,
+            start + Duration::from_millis(tick_n.saturating_mul(100)),
+            tick_n,
+            deadline,
+        )
+        .await
+        .expect("tick");
+        for _ in 0..4 {
+            tokio::task::yield_now().await;
+        }
+        while let Ok(ev) = events.try_recv() {
+            if ev.alloc_id == h.alloc_id && ev.to == AllocStateWire::Failed {
+                found_ev = Some(ev);
+                break 'outer;
+            }
+        }
+    }
+    let ev = found_ev.expect("must observe Failed transition within budget");
+    assert_eq!(
+        ev.from,
+        AllocStateWire::Running,
+        "exit-observer from must reflect prior Running state, not the new Failed state \
+         (regression guard for build_lifecycle_event from==to bug)"
+    );
+    assert_eq!(ev.to, AllocStateWire::Failed);
+}

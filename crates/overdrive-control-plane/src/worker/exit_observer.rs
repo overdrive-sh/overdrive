@@ -164,9 +164,12 @@ pub fn spawn_with_runtime(
                 },
             };
             match handle_exit_event(obs.as_ref(), &event).await {
-                Ok(Some(row)) => {
-                    let lifecycle =
-                        build_lifecycle_event(&row, TransitionSource::Driver(driver_kind));
+                Ok(Some((row, prior_state))) => {
+                    let lifecycle = build_lifecycle_event(
+                        &row,
+                        prior_state,
+                        TransitionSource::Driver(driver_kind),
+                    );
                     if let Err(err) = events.send(lifecycle) {
                         // No subscribers is the normal Phase 1 case;
                         // demote to debug so the no-subscriber path
@@ -206,8 +209,9 @@ pub fn spawn_with_runtime(
 }
 
 /// Map an `ExitEvent` to an `AllocStatusRow` and write it to `obs`.
-/// Returns the written row on success so the caller can construct a
-/// matching `LifecycleEvent`. Returns `Ok(None)` when no prior row
+/// Returns the written row and the prior state as `AllocStateWire` on
+/// success, so the caller can set the correct `from` field on the
+/// resulting `LifecycleEvent`. Returns `Ok(None)` when no prior row
 /// exists for the alloc (the alloc never reached Running per the
 /// observer's vantage point — only possible under racy injection in
 /// tests; production drivers always emit Running through the action
@@ -215,11 +219,12 @@ pub fn spawn_with_runtime(
 async fn handle_exit_event(
     obs: &dyn ObservationStore,
     event: &ExitEvent,
-) -> Result<Option<AllocStatusRow>, HandleError> {
+) -> Result<Option<(AllocStatusRow, AllocStateWire)>, HandleError> {
     let prior = find_prior_row(obs, &event.alloc).await?;
     let Some(prior) = prior else {
         return Ok(None);
     };
+    let prior_state: AllocStateWire = prior.state.into();
 
     let (state, reason) = classify(&event.kind, event.intentional_stop);
     let updated_at = LogicalTimestamp {
@@ -236,7 +241,7 @@ async fn handle_exit_event(
         detail: None,
     };
     obs.write(ObservationRow::AllocStatus(row.clone())).await?;
-    Ok(Some(row))
+    Ok(Some((row, prior_state)))
 }
 
 /// Map `(ExitKind, intentional_stop)` to the typed obs row state +
@@ -308,17 +313,20 @@ fn job_lifecycle_name() -> ReconcilerName {
 }
 
 /// Build a `LifecycleEvent` from an observer-written `AllocStatusRow`.
-/// Mirrors `action_shim::build_lifecycle_event` — the wire-shape
-/// projection is identical regardless of who wrote the row. The
-/// `from` and `to` fields both carry the row's new state per the
-/// `LifecycleEvent` doc; computing `from` against prior state is the
-/// downstream streaming handler's job.
-fn build_lifecycle_event(row: &AllocStatusRow, source: TransitionSource) -> LifecycleEvent {
+/// `prior_state` carries the actual allocation state before this
+/// transition; `from` is set to `prior_state` so the event correctly
+/// reflects the transition direction. Mirrors
+/// `action_shim::build_lifecycle_event`.
+fn build_lifecycle_event(
+    row: &AllocStatusRow,
+    prior_state: AllocStateWire,
+    source: TransitionSource,
+) -> LifecycleEvent {
     let to_wire: AllocStateWire = row.state.into();
     LifecycleEvent {
         alloc_id: row.alloc_id.clone(),
         job_id: row.job_id.clone(),
-        from: to_wire,
+        from: prior_state,
         to: to_wire,
         reason: row
             .reason
