@@ -23,6 +23,7 @@ mod integration {
         mod resource_enforcement;
         mod start_and_running;
         mod stop_escalates_to_sigkill;
+        mod stop_pid_none_handle_delivers_sigterm;
         mod stop_with_grace;
     }
 }

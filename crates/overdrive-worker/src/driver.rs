@@ -119,6 +119,11 @@ fn classify_exit(status: std::process::ExitStatus, intentional_stop: bool) -> Ex
 /// for the post-stop contract.
 struct LiveAllocation {
     scope: CgroupPath,
+    /// PID of the spawned child, copied from `Child::id()` at start time.
+    /// Stored here so `Driver::stop` can deliver SIGTERM using the driver's
+    /// own tracking state rather than relying on `AllocationHandle::pid`,
+    /// which callers (e.g. the action shim) may construct as `pid: None`.
+    pid: u32,
     /// Set to `true` by `Driver::stop` BEFORE delivering SIGTERM.
     /// The watcher reads this when classifying the exit so a
     /// SIGTERM/SIGKILL induced by operator stop is `Terminated`,
@@ -374,7 +379,7 @@ impl Driver for ExecDriver {
         );
         self.live
             .lock()
-            .insert(spec.alloc.clone(), LiveAllocation { scope, intentional_stop, watcher });
+            .insert(spec.alloc.clone(), LiveAllocation { scope, pid, intentional_stop, watcher });
 
         Ok(AllocationHandle { alloc: spec.alloc.clone(), pid: Some(pid) })
     }
@@ -386,7 +391,7 @@ impl Driver for ExecDriver {
             let mut live = self.live.lock();
             live.remove(&handle.alloc)
         };
-        let Some(LiveAllocation { scope, intentional_stop, watcher }) = entry else {
+        let Some(LiveAllocation { scope, pid, intentional_stop, watcher }) = entry else {
             return Err(DriverError::NotFound { alloc: handle.alloc.clone() });
         };
 
@@ -400,18 +405,15 @@ impl Driver for ExecDriver {
         intentional_stop.store(true, Ordering::SeqCst);
 
         // The watcher owns the `Child`. We address the workload by
-        // PID for the SIGTERM/SIGKILL signals; the PID lives in the
-        // `AllocationHandle` (populated at start time). Tests and
-        // action-shim call sites that build the handle by hand carry
-        // `pid: None`; those code paths cannot deliver a process-
-        // targeted signal but still tear down the workload via the
-        // unconditional `cgroup.kill` write below.
-        let pid_for_pgrp_kill = handle.pid;
+        // PID for the SIGTERM/SIGKILL signals; the PID comes from
+        // `LiveAllocation::pid` (stored at start time) so that callers
+        // who construct a `pid: None` handle — e.g. the action shim's
+        // StopAllocation path — still receive a graceful SIGTERM.
+        // `handle.pid` is intentionally ignored here.
+        let pid_for_pgrp_kill = pid;
 
         // 1. Send SIGTERM via libc::kill.
-        if let Some(pid) = pid_for_pgrp_kill {
-            send_sigterm(pid);
-        }
+        send_sigterm(pid_for_pgrp_kill);
 
         // 2. Wait up to the grace window for the watcher task (which
         //    owns the `Child`) to complete naturally — the watcher's
@@ -454,9 +456,7 @@ impl Driver for ExecDriver {
         //       so its PGID = its PID; `kill(-pid, SIGKILL)` reaches
         //       every member of that group regardless of what the
         //       fake-cgroupfs root happens to be.
-        if let Some(pid) = pid_for_pgrp_kill {
-            send_sigkill_pgrp(pid);
-        }
+        send_sigkill_pgrp(pid_for_pgrp_kill);
         let _ = cgroup_kill(&self.cgroup_root, &scope).await;
         // 5. Tear down the cgroup scope. NotFound is benign.
         let _ = remove_workload_scope(&self.cgroup_root, &scope).await;
