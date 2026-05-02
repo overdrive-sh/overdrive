@@ -96,15 +96,15 @@ pub struct AppState {
     /// `Arc<SimDriver>` value.
     pub driver: Arc<dyn Driver>,
     /// Per-`(ReconcilerName, TargetResource)` View cache. Phase 1
-    /// reconcilers carry no libSQL memory yet (per-primitive libSQL
-    /// is Phase 2+), but `JobLifecycle`'s `restart_counts` /
-    /// `next_attempt_at` MUST persist across ticks for backoff
-    /// exhaustion to be observable. The runtime tick loop reads the
-    /// hydrated view from this cache before each `reconcile` call
-    /// and writes back the returned `next_view`. Boxed-Any so a
-    /// single map handles every reconciler kind's `View` type.
+    /// reconcilers have no libSQL connection wired yet, but
+    /// `JobLifecycle`'s `restart_counts` / `next_attempt_at` MUST
+    /// persist across ticks for backoff exhaustion to be observable.
+    /// The runtime tick loop reads the hydrated view from this cache
+    /// before each `reconcile` call and writes back the returned
+    /// `next_view`. Boxed-Any so a single map handles every reconciler
+    /// kind's `View` type.
     ///
-    /// Phase 2+: replaced by per-primitive libSQL diff-and-persist
+    /// TODO(#139): replaced by per-primitive libSQL diff-and-persist
     /// per ADR-0013 §2b.
     pub view_cache: Arc<Mutex<BTreeMap<(String, String), CachedView>>>,
     /// Broadcast channel for `LifecycleEvent`s emitted by the action
@@ -132,9 +132,12 @@ pub struct AppState {
 
 /// A View persisted across ticks in [`AppState::view_cache`].
 ///
-/// Phase 1 only stores the `JobLifecycle` view because no other
+/// Currently only stores the `JobLifecycle` view because no other
 /// reconciler carries non-`()` memory. Adding a new reconciler with
 /// non-trivial memory means adding a variant here.
+///
+/// TODO(#139): replaced by per-primitive libSQL diff-and-persist
+/// per ADR-0013 §2b — this enum goes away with the cache.
 #[derive(Debug, Clone)]
 pub enum CachedView {
     /// Unit view — no actual memory. Stored for completeness so the

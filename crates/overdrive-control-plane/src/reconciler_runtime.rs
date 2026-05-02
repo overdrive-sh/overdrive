@@ -251,14 +251,17 @@ pub async fn run_convergence_tick(
     let desired = hydrate_desired(reconciler, target, state).await?;
     let actual = hydrate_actual(reconciler, target, state).await?;
 
-    // Hydrate the typed View — Phase 1 carries the View in
-    // `AppState::view_cache` rather than libSQL (per-primitive
-    // libSQL is Phase 2+). On first tick the cache is empty;
-    // `cached_view_or_default` returns a fresh `default()` view.
-    // We still call `reconciler.hydrate` to stay on-contract with
-    // ADR-0013 §2 (hydrate is the ONLY async read seam) — Phase
-    // 1 reconcilers' hydrate impls return a default view that
-    // we discard in favour of the cached value.
+    // Hydrate the typed View — currently carried in
+    // `AppState::view_cache` rather than libSQL. On first tick the
+    // cache is empty; `cached_view_or_default` returns a fresh
+    // `default()` view. We still call `reconciler.hydrate` to stay
+    // on-contract with ADR-0013 §2 (hydrate is the ONLY async read
+    // seam) — today's `hydrate` impls return a default view that we
+    // discard in favour of the cached value.
+    //
+    // TODO(#139): wire `LibsqlHandle` for real per ADR-0013 §2b and
+    // use the returned view directly; drop the discard-and-cache
+    // shape below.
     let db = LibsqlHandle::default_phase1();
     let _ = reconciler.hydrate(target, &db).await.map_err(ConvergenceError::Hydrate)?;
     let view = cached_view_or_default(reconciler, target, state);
@@ -296,8 +299,8 @@ pub async fn run_convergence_tick(
     let backoff_pending = view_has_backoff_pending(&next_view);
     let has_work = actions.iter().any(|a| !matches!(a, Action::Noop)) || backoff_pending;
 
-    // Persist the next-view back into the cache. Phase 2+ wires
-    // this through libSQL diff-and-persist per ADR-0013 §2b.
+    // Persist the next-view back into the in-memory cache.
+    // TODO(#139): replace with libSQL diff-and-persist per ADR-0013 §2b.
     store_cached_view(reconciler, target, state, next_view);
 
     // Dispatch through the action shim — this is where `.await`

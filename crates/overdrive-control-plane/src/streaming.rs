@@ -357,20 +357,17 @@ fn read_view(
     }
 }
 
-/// Read replicas-desired from the IntentStore for `job_id`. We delegate
-/// this read to the snapshot path indirectly: the streaming handler
-/// terminates on `Running` rows existing for the job — Phase 1 first
-/// reaches Running via replica count == 1 because that is the
-/// walking-skeleton workload shape. To avoid an additional IntentStore
-/// read on the broadcast hot-path, we take a simpler approach: any
-/// `state == Running` row for the job triggers `ConvergedRunning`. The
-/// JobLifecycle reconciler is the source-of-truth for the actual
-/// replica-desired check; our streaming surface is observation-shaped
-/// and treats the first Running observation for the job as terminal.
+/// Phase 1 walking-skeleton workloads have `replicas == 1`, so any
+/// single `state == Running` row for the job triggers `ConvergedRunning`.
+/// The reconciler is the gate that decides when to emit
+/// `Action::StartAllocation` per the desired replica count, so a row
+/// only gets written if the reconciler says go — which is what makes
+/// the single-row shortcut safe at `replicas == 1`.
 ///
-/// This is acceptable because the reconciler is the gate that decides
-/// when to emit `Action::StartAllocation` per the desired replica
-/// count; the row only gets written if the reconciler says go.
+/// TODO(#140): gate `ConvergedRunning` on `running_count >=
+/// replicas_desired` once a multi-replica workload lands. Hydrate
+/// `replicas_desired` once at stream start rather than reading the
+/// IntentStore per broadcast event.
 async fn check_terminal(
     obs: &dyn ObservationStore,
     job_id: &JobId,
@@ -379,11 +376,12 @@ async fn check_terminal(
 ) -> Option<SubmitEvent> {
     // Success path — Running observation for this job → ConvergedRunning.
     // Phase 1 walking-skeleton workloads have replicas=1 so a single
-    // running row in the obs store meets the bar. Multi-replica jobs are
-    // Phase 2+ scope. We read the obs store rather than trusting event.to
-    // alone so that a Running broadcast event without a corresponding
-    // obs row (e.g. a pre-stop Running event in the stop-while-streaming
-    // scenario) does NOT prematurely close the stream.
+    // running row in the obs store meets the bar; see TODO(#140) on the
+    // function docstring for the multi-replica gate. We read the obs
+    // store rather than trusting event.to alone so that a Running
+    // broadcast event without a corresponding obs row (e.g. a pre-stop
+    // Running event in the stop-while-streaming scenario) does NOT
+    // prematurely close the stream.
     if matches!(event.to, AllocStateWire::Running) {
         if let Ok(rows) = obs.alloc_status_rows().await {
             let has_running = rows.iter().any(|r| {
@@ -450,6 +448,9 @@ async fn lagged_recover(
         rows.into_iter().filter(|r| r.job_id == *job_id).max_by_key(|r| r.updated_at.counter)?;
 
     match latest.state {
+        // TODO(#140): gate on `running_count >= replicas_desired` for
+        // multi-replica jobs; same single-Running-row shortcut as
+        // `check_terminal`, safe at `replicas == 1`.
         AllocState::Running => Some(SubmitEvent::ConvergedRunning {
             alloc_id: latest.alloc_id.to_string(),
             started_at: format!(
