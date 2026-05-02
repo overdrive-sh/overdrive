@@ -1,0 +1,188 @@
+{
+  "roadmap": {
+    "project_id": "fix-stop-branch-backoff-pending",
+    "feature_id": "fix-stop-branch-backoff-pending",
+    "feature_title": "Stop branch must clear backoff-pending view when no Running allocs remain",
+    "wave": "deliver",
+    "methodology": "outside_in_tdd",
+    "scope": "bugfix",
+    "created_at": "2026-05-02T17:08:00Z",
+    "filled_at": "2026-05-02T17:08:00Z",
+    "total_steps": 2,
+    "phases": 1,
+    "walking_skeleton_gate": "01-02",
+    "rca_reference": "docs/feature/fix-stop-branch-backoff-pending/deliver/rca.md",
+    "notes": [
+      "RCA at docs/feature/fix-stop-branch-backoff-pending/deliver/rca.md is the authoritative spec for this fix. The user approved Candidate A verbatim (clear next_attempt_at when stop is complete and no Running allocs remain). No other candidates were considered or compared in /nw-bugfix Phase 2.",
+      "Single-cut migration per feedback_single_cut_greenfield_migrations: the fix lands directly with no deprecation, no shadow predicate, no feature-flagged old path, no salvaged transitional code. The Stop branch is rewritten in place; the pre-existing view.clone() return is deleted in the same commit it is replaced.",
+      "Two-step Outside-In TDD shape mirrors docs/feature/fix-noop-self-reenqueue/deliver/roadmap.json verbatim: 01-01 lands #[ignore]-gated regression tests (both compile, both skipped, lefthook stays green); 01-02 applies the production fix and removes the #[ignore] markers in the same commit. The #[ignore]-then-uncomment pattern is the project's standard RED-scaffold-for-runtime-assertion shape — distinct from the panic!(\"RED scaffold\") pattern used for compile-fail / exhaustive-match scaffolds in testing.md, because here the production code already compiles and the RED signal is a runtime invariant violation, not an absent type.",
+      "RED is a runtime-assertion failure, not a compile failure. The production code at reconciler.rs:1019-1027 already compiles and runs; the regression tests assert on a post-condition the current code violates (empty next_view.next_attempt_at when stop_actions is empty). Without the #[ignore] gate, lefthook's nextest-affected pre-commit pass would fail between the RED commit and the GREEN commit; the gate is the standard mechanism for separating a regression test commit from its fix commit.",
+      "Test scope is both per the user's confirmation in /nw-bugfix Phase 2: a unit test on reconcile() to pin the pure-function contract (cheap, fast, prevents drift in the §18 reconciler purity contract) AND a DST acceptance test on the broker convergence loop to pin the user-visible symptom (broker drains and stays empty after stop with a Failed-mid-backoff alloc).",
+      "Mutation testing scope per CLAUDE.md's per-feature strategy: the GREEN step's mutation invocation is scoped to the modified file via --package overdrive-core --file crates/overdrive-core/src/reconciler.rs, which mutates only the Stop branch lines that changed and reruns the overdrive-core test suite per mutation. Per-PR CI uses cargo xtask mutants --diff origin/main --features integration-tests with the project-wide ≥80% kill rate gate; the local per-step invocation matches that shape minus the additional --package/--file scoping for inner-loop speed.",
+      "All test invocations on macOS go through cargo xtask lima run -- per .claude/rules/testing.md § \"Running tests on macOS — Lima VM\". This applies to both cargo nextest run --features integration-tests and cargo xtask mutants ... --features integration-tests. CI runs on Linux and does not need the prefix.",
+      "No new architecture, no new ADR. This is a level-triggered convergence-contract bugfix in an existing reconciler; the §18 reconciler primitive contract is the architecture, and the fix restores conformance to that contract rather than introducing a new one. No quality-attribute trade-off, no new technology selection, no new external integration."
+    ],
+    "reviews": [
+      {
+        "reviewer": "user",
+        "date": "2026-05-02",
+        "channel": "/nw-bugfix Phase 2 (RCA validation + fix approval)",
+        "decision": "approved",
+        "notes": "User validated the RCA (5 Whys converging on the Stop branch view-pass-through ignoring transitional backoff state at crates/overdrive-core/src/reconciler.rs:1019-1027) and approved Candidate A verbatim: clear next_attempt_at when stop_actions is empty. Test scope confirmed as both: unit test on reconcile() pinning the pure-function contract AND DST acceptance test on the convergence loop pinning the user-visible symptom (broker drains and stays empty after stop with a Failed-mid-backoff alloc). Two-step Outside-In TDD shape (RED scaffold via #[ignore], then GREEN with fix + un-ignore in the same commit) approved as a verbatim mirror of the fix-noop-self-reenqueue precedent."
+      }
+    ]
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Stop branch must clear next_attempt_at when no Running allocs remain so view_has_backoff_pending stops re-enqueueing forever",
+      "slice": "bugfix",
+      "user_stories": [],
+      "description": "Two-step Outside-In TDD bugfix. Step 01-01 lands two regression tests in a single commit, both gated with #[ignore = \"RED scaffold for fix-stop-branch-backoff-pending — un-ignore in the GREEN step\"] so the pre-commit lefthook gate (nextest-affected) stays green without --no-verify. (1) Unit test in crates/overdrive-core (existing reconciler.rs #[cfg(test)] module) constructs a JobLifecycleState with desired.desired_to_stop = true, desired.job = Some(...), no Running allocs in actual.allocations, and a JobLifecycleView whose next_attempt_at is non-empty for an alloc id whose restart_counts < RESTART_BACKOFF_CEILING. Calls reconcile(&desired, &actual, &view, &tick); asserts returned actions is empty AND returned next_view.next_attempt_at is empty. Pre-fix the assertion on the empty next_attempt_at fails (current code returns view.clone()). (2) DST acceptance test in crates/overdrive-control-plane/tests/acceptance/runtime_convergence_loop.rs (or sibling, with acceptance.rs entrypoint updated). Mirrors the existing convergence-loop harness shape: SimDriver configured to reject start (StartRejected) so the alloc enters Failed mid-backoff, submits the job, allows the reconciler to record next_attempt_at + restart_counts = 1 in the view, then submits a stop intent. Runs N=10 broker ticks under SimClock. Asserts (a) the broker is empty after the stop converges and (b) total dispatched count is bounded (<= 2 ticks for the stop convergence; pre-fix this hits >= 5 from the ~5-second hot spin per RCA reproduction). Step 01-02 applies the Candidate A fix in crates/overdrive-core/src/reconciler.rs:1019-1027 verbatim: bind next_view = view.clone(); if stop_actions.is_empty() { next_view.next_attempt_at.clear(); }; return (stop_actions, next_view). restart_counts left intact (the runtime predicate at reconciler_runtime.rs:425-428 only checks counts for entries that exist in next_attempt_at, so clearing only next_attempt_at suffices). The same step ALSO removes the #[ignore] markers from both regression tests added in 01-01. Single-cut migration: the production edit + test un-ignore land in one cohesive commit. Both regression tests transition ignored → executed-and-passing within 01-02's commit. All existing acceptance and DST tests remain GREEN. cargo nextest run --workspace, cargo test --doc -p overdrive-core -p overdrive-control-plane, lefthook pre-commit, and cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-core --file crates/overdrive-core/src/reconciler.rs (≥80% kill rate gate) all pass.",
+      "estimated_hours": 1,
+      "depends_on": [],
+      "steps": [
+        {
+          "id": "01-01",
+          "phase": "RED",
+          "name": "Add ignored regression tests pinning the Stop branch view contract and the convergence-loop symptom",
+          "description": "Land two regression tests in a single commit, both gated with #[ignore] so the lefthook nextest-affected pre-commit pass stays green between commits. Both tests fail at runtime (not compile time) without the fix; the GREEN step un-ignores them in the same commit as the fix. (1) Unit test on JobLifecycleReconciler::reconcile in crates/overdrive-core (existing reconciler.rs #[cfg(test)] module is the natural home; if it grows unwieldy, a sibling tests/ file is acceptable per the testing.md layout). Construct a JobLifecycleState with desired.desired_to_stop = true, desired.job = Some(...), no Running allocs in actual.allocations, and a JobLifecycleView whose next_attempt_at is non-empty for an alloc id whose restart_counts < RESTART_BACKOFF_CEILING. Call reconcile(&desired, &actual, &view, &tick); assert returned actions is empty AND returned next_view.next_attempt_at is empty. Pre-fix the assertion on the empty next_attempt_at fails (current code returns view.clone()). (2) DST acceptance test in crates/overdrive-control-plane/tests/acceptance/runtime_convergence_loop.rs (or a sibling acceptance/*.rs with the entrypoint updated). Mirror the existing convergence-loop harness shape: SimDriver configured to reject start (StartRejected) so the alloc enters Failed mid-backoff, submit the job, allow the reconciler to record next_attempt_at + restart_counts = 1 in the view, then submit a stop intent. Run N=10 broker ticks under SimClock. Assert (a) the broker is empty after the stop converges and (b) total dispatched count is bounded (<= 2 ticks for the stop convergence; pre-fix this hits >= 5 from the ~5-second hot spin per RCA reproduction). Both tests carry #[ignore = \"RED scaffold for fix-stop-branch-backoff-pending — un-ignore in the GREEN step\"]. Commit clean. NO production change in this step.",
+          "criteria": [
+            "Unit test in crates/overdrive-core asserts on the cleared next_attempt_at contract",
+            "DST acceptance test asserts broker drains and dispatched count is bounded after stop with a Failed-mid-backoff alloc",
+            "Both tests carry #[ignore] markers and compile cleanly",
+            "Lefthook pre-commit pipeline passes",
+            "No production code touched in this commit"
+          ],
+          "acceptance_criteria": [
+            "Unit test in crates/overdrive-core asserts on the cleared next_attempt_at contract; carries #[ignore = \"RED scaffold for fix-stop-branch-backoff-pending — un-ignore in the GREEN step\"]; compiles and is skipped by nextest.",
+            "DST acceptance test in crates/overdrive-control-plane/tests/acceptance/runtime_convergence_loop.rs (or sibling) asserts broker drains and dispatched count is bounded after stop with a Failed-mid-backoff alloc; carries the same #[ignore] marker; compiles and is skipped.",
+            "If a new acceptance test file is added rather than extending runtime_convergence_loop.rs, crates/overdrive-control-plane/tests/acceptance.rs is updated to declare the new module inside the existing inline mod acceptance { ... } block.",
+            "Both tests use existing test fixtures and helpers from the surrounding module — no new generic harness scaffolding, no new shared util crate.",
+            "cargo xtask lima run -- cargo nextest run --workspace --features integration-tests passes (the #[ignore] markers keep them out of the run; no other test is touched).",
+            "cargo xtask lima run -- cargo nextest run --workspace --features integration-tests --no-run succeeds (compile-clean across the workspace).",
+            "cargo test --doc -p overdrive-core -p overdrive-control-plane succeeds.",
+            "Lefthook pre-commit pipeline (cargo fmt, clippy, nextest-affected) passes.",
+            "Commit message references the RCA path and the bugfix scope; body explains the #[ignore]-then-uncomment shape and points at the fix-noop-self-reenqueue precedent."
+          ],
+          "files_to_modify": [
+            "/Users/marcus/conductor/workspaces/helios/stockholm-v1/crates/overdrive-core/src/reconciler.rs",
+            "/Users/marcus/conductor/workspaces/helios/stockholm-v1/crates/overdrive-control-plane/tests/acceptance/runtime_convergence_loop.rs",
+            "/Users/marcus/conductor/workspaces/helios/stockholm-v1/crates/overdrive-control-plane/tests/acceptance.rs"
+          ],
+          "tier": "regression-test",
+          "time_estimate_hours": 0.5,
+          "estimated_hours": 0.5,
+          "dependencies": [],
+          "quality_gates": [
+            "cargo xtask lima run -- cargo nextest run --workspace --features integration-tests",
+            "cargo xtask lima run -- cargo nextest run --workspace --features integration-tests --no-run",
+            "cargo test --doc -p overdrive-core",
+            "cargo test --doc -p overdrive-control-plane",
+            "lefthook pre-commit pipeline (cargo fmt, clippy, nextest-affected)"
+          ],
+          "deliverables": [
+            "Unit regression test in crates/overdrive-core (#[ignore]-gated) asserting Stop branch clears next_attempt_at",
+            "DST acceptance regression test in crates/overdrive-control-plane (#[ignore]-gated) asserting broker drains after stop"
+          ],
+          "implementation_scope": "regression-test only; zero production code touched",
+          "implementation_notes": "RED is a runtime-assertion failure, not a compile failure: the production code already compiles, the new tests assert on behaviour the production code currently violates. The #[ignore] gate keeps lefthook's nextest-affected pre-commit run green between this commit and the next; the GREEN step un-ignores them in the same commit as the fix. This is the verbatim shape used by docs/feature/fix-noop-self-reenqueue/deliver/roadmap.json. Do NOT swap the eventual #[ignore] removal for a neutral stub on production code (the testing.md RED-scaffold guidance forbids that pattern); the production change happens entirely in the GREEN step.",
+          "discipline_notes": "RED is a runtime-assertion failure, not a compile failure: the production code already compiles, the new tests assert on behaviour the production code currently violates. The #[ignore] gate keeps lefthook's nextest-affected pre-commit run green between this commit and the next; the GREEN step un-ignores them in the same commit as the fix. This is the verbatim shape used by docs/feature/fix-noop-self-reenqueue/deliver/roadmap.json. Do NOT swap the eventual #[ignore] removal for a neutral stub on production code (the testing.md RED-scaffold guidance forbids that pattern); the production change happens entirely in the GREEN step.",
+          "risk_register": [
+            "Test placement: the unit test naturally lives in the existing crates/overdrive-core/src/reconciler.rs #[cfg(test)] module per the existing convention. If reconciler.rs's test module is already large, a sibling crates/overdrive-core/tests/<file>.rs is acceptable — both shapes are valid per testing.md.",
+            "DST test placement: extending the existing runtime_convergence_loop.rs is preferred (the stop-after-failure scenario is a natural sibling to existing scenarios). A new sibling file is acceptable but requires updating the acceptance.rs entrypoint's inline mod block per testing.md's tests/integration/<scenario>.rs convention adapted for the acceptance lane.",
+            "Lima requirement on macOS: cargo nextest run --features integration-tests is blocked on macOS by .claude/hooks/block-nextest-on-macos.ts; every test invocation goes through cargo xtask lima run --. CI runs on Linux and does not need the prefix.",
+            "The unit test must construct a complete JobLifecycleState — desired/actual/view/tick fields per the current reconciler signature. Mirror an existing reconciler unit test in the same file as the template; do not invent fixture builders."
+          ]
+        },
+        {
+          "id": "01-02",
+          "phase": "GREEN",
+          "name": "Apply Stop branch fix and un-ignore both regression tests",
+          "description": "Apply the user-approved 5-LOC fix at the Stop branch in crates/overdrive-core/src/reconciler.rs:1019-1027, replacing the unconditional view.clone() return with the verbatim approved form: bind next_view = view.clone(); if stop_actions.is_empty() { next_view.next_attempt_at.clear(); }; return (stop_actions, next_view). Restart_counts are left intact (the runtime predicate at reconciler_runtime.rs:425-428 only checks counts for entries that exist in next_attempt_at, so clearing only next_attempt_at is sufficient to break the re-enqueue loop). In the same commit, remove the #[ignore = \"RED scaffold ...\"] markers from both regression tests added in step 01-01. Run the full workspace test suite via Lima; both regression tests now pass; no other test changes behaviour. Run mutation testing per the per-feature scope rule from CLAUDE.md, scoped to the modified file: cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-core --file crates/overdrive-core/src/reconciler.rs. Kill rate must clear the ≥80% gate on the Stop branch lines. Mutation invocation runs through cargo xtask lima run -- on macOS per testing.md § Usage.",
+          "criteria": [
+            "Stop branch in reconciler.rs matches the user-approved patch verbatim",
+            "restart_counts NOT cleared (only next_attempt_at)",
+            "#[ignore] markers removed from both regression tests in the same commit",
+            "Both regression tests pass post-fix",
+            "Mutation kill rate ≥80% on the modified Stop branch",
+            "No pre-existing test changed behaviour"
+          ],
+          "acceptance_criteria": [
+            "crates/overdrive-core/src/reconciler.rs Stop branch matches the user-approved form verbatim: collect stop_actions from Running allocs, bind next_view = view.clone(), if stop_actions.is_empty() { next_view.next_attempt_at.clear(); }, return (stop_actions, next_view).",
+            "restart_counts is NOT cleared in the Stop branch (left intact per RCA out-of-scope guidance).",
+            "Both regression tests added in 01-01 have their #[ignore] markers removed in the same commit as the production fix.",
+            "Both regression tests pass: the unit test sees an empty next_view.next_attempt_at; the DST acceptance test sees the broker drain within <= 2 ticks after the stop intent (vs >= 5 pre-fix).",
+            "cargo xtask lima run -- cargo nextest run --workspace --features integration-tests passes; no pre-existing test changed behaviour.",
+            "cargo test --doc -p overdrive-core -p overdrive-control-plane succeeds.",
+            "Lefthook pre-commit pipeline passes.",
+            "cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-core --file crates/overdrive-core/src/reconciler.rs reports kill rate ≥80% with the gate satisfied per target/xtask/mutants-summary.json. Missed mutations on the Stop branch lines are either caught by additional test assertions in this step or carry an in-line // mutants: skip <reason> per CLAUDE.md mutation policy.",
+            "git checkout -- crates/ run after the mutation pass per testing.md's post-mutation safety step.",
+            "Commit message references the RCA path, names the user as approver of Candidate A on 2026-05-02, and references the fix-noop-self-reenqueue precedent."
+          ],
+          "files_to_modify": [
+            "/Users/marcus/conductor/workspaces/helios/stockholm-v1/crates/overdrive-core/src/reconciler.rs",
+            "/Users/marcus/conductor/workspaces/helios/stockholm-v1/crates/overdrive-control-plane/tests/acceptance/runtime_convergence_loop.rs"
+          ],
+          "tier": "production-fix",
+          "time_estimate_hours": 0.5,
+          "estimated_hours": 0.5,
+          "dependencies": ["01-01"],
+          "quality_gates": [
+            "cargo xtask lima run -- cargo nextest run --workspace --features integration-tests",
+            "cargo test --doc -p overdrive-core",
+            "cargo test --doc -p overdrive-control-plane",
+            "lefthook pre-commit pipeline (cargo fmt, clippy, nextest-affected)",
+            "cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-core --file crates/overdrive-core/src/reconciler.rs (kill rate ≥80%)",
+            "git checkout -- crates/ post-mutation safety step"
+          ],
+          "deliverables": [
+            "Stop branch fix in crates/overdrive-core/src/reconciler.rs",
+            "#[ignore] removed from both regression tests in the same commit",
+            "Mutation summary with ≥80% kill rate on the modified Stop branch"
+          ],
+          "implementation_scope": "5-LOC production fix + 2 #[ignore] removals + mutation gate",
+          "implementation_notes": "Single-cut migration per feedback_single_cut_greenfield_migrations: the fix lands directly with no deprecation, no shadow predicate, no feature flag, no parallel old path. The Stop branch's view-pass-through pattern is replaced verbatim with the approved form; nothing else in the reconciler or runtime is touched. Mutation testing scoped to the modified file per CLAUDE.md's per-feature mutation strategy (mutants are targeted to the Stop branch lines via --file scoping; the per-PR diff gate at CI uses --diff origin/main, this step's local invocation does the same). Mutation runs use run_in_background: true per testing.md's mutation-is-the-exception rule.",
+          "discipline_notes": "Single-cut migration per feedback_single_cut_greenfield_migrations: the fix lands directly with no deprecation, no shadow predicate, no feature flag, no parallel old path. The Stop branch's view-pass-through pattern is replaced verbatim with the approved form; nothing else in the reconciler or runtime is touched. Mutation testing scoped to the modified file per CLAUDE.md's per-feature mutation strategy (mutants are targeted to the Stop branch lines via --file scoping; the per-PR diff gate at CI uses --diff origin/main, this step's local invocation does the same). Mutation runs use run_in_background: true per testing.md's mutation-is-the-exception rule.",
+          "risk_register": [
+            "Mutation testing kill rate: the Stop branch is small (5 LOC) and the unit test asserts on the exact post-condition (cleared next_attempt_at when stop_actions is empty). Mutations to flip the if-empty guard or skip the clear() should both be caught by the unit test. If a missed mutation surfaces (e.g., a no-op mutation on the dead-store path), add a discrete assertion or apply // mutants: skip with justification per CLAUDE.md.",
+            "Lima requirement: every nextest run AND every mutation run that includes --features integration-tests goes through cargo xtask lima run -- on macOS per .claude/rules/testing.md § \"Running tests on macOS — Lima VM\" and § \"Mutation testing → Usage\". CI runs on Linux and does not need the prefix.",
+            "Post-mutation safety: cargo-mutants writes mutated source on disk during the run; even on a clean exit, run git checkout -- crates/ after the mutation pass to belt-and-braces the cleanup per testing.md.",
+            "Doctest coverage: cargo-mutants under --test-tool=nextest does NOT run doctests; the paired cargo test --doc step is what verifies rustdoc examples did not regress. Run it explicitly per the quality gates above."
+          ]
+        }
+      ]
+    }
+  ],
+  "validation": {
+    "status": "approved",
+    "checked_at": "2026-05-02T17:08:00Z",
+    "checked_by": "orchestrator (/nw-bugfix Phase 3 — solution-architect)",
+    "notes": "Roadmap quality gate (6 checks) PASS: (1) AC coupling — refs only public reconcile signature, JobLifecycleView fields (next_attempt_at, restart_counts), broker counters, and the published RESTART_BACKOFF_CEILING constant; (2) decomposition ratio 2 steps / 1 production file = 2.0, under 2.5; (3) only 2 steps, distinct shapes (RED scaffold / GREEN minimal fix); (4) both steps have files_to_modify with absolute paths; (5) step IDs match ^\\d{2}-\\d{2}$; (6) RCA linkage — both steps trace to RCA §Defect, §5 Whys, §Root cause, §Proposed fix, §Risk, §Test scope. Phase 1d reviewer (nw-acceptance-designer-reviewer) skipped: this is a /nw-bugfix flow with no DISTILL artifact to verify scenario coverage against. The user-APPROVED RCA at docs/feature/fix-stop-branch-backoff-pending/deliver/rca.md is the load-bearing specification. Scope-discipline guardrail: this is a focused bugfix; NO surrounding refactors, NO additional tests beyond the regression tests, NO touching files outside the listed set. Proceeding to Phase 2 execution.",
+    "reviews": [
+      {
+        "reviewer": "user",
+        "date": "2026-05-02",
+        "channel": "/nw-bugfix Phase 2 (RCA validation + fix approval)",
+        "decision": "approved",
+        "notes": "User validated the RCA and approved Candidate A verbatim: clear next_attempt_at when stop_actions is empty. Test scope confirmed as both unit + DST acceptance. Two-step Outside-In TDD shape approved as a verbatim mirror of the fix-noop-self-reenqueue precedent."
+      }
+    ]
+  },
+  "handoff": {
+    "to": "software-crafter",
+    "command": "/nw-deliver",
+    "preconditions": [
+      "RCA approved (validation.status = approved; user approval recorded above)",
+      "Working tree clean on the target branch",
+      "cargo xtask lima run -- cargo nextest run --workspace --features integration-tests --no-run succeeds (compile-clean baseline)",
+      "Lima VM available and reachable for the macOS dev path; CI Linux runner available for the merged-PR gate"
+    ],
+    "execution_order": ["01-01", "01-02"],
+    "stop_conditions": [
+      "Any quality gate in 01-01 fails — fix the gate before proceeding to 01-02 (do NOT proceed to GREEN with a red baseline)",
+      "01-02 mutation gate reports kill rate <80% on the modified Stop branch and the missed mutations cannot be killed by an in-scope test addition or justified // mutants: skip — escalate to the architect rather than landing under-tested production code",
+      "Either regression test in 01-02 fails post-fix — the fix is wrong; do NOT massage the test, re-derive the fix from the RCA"
+    ]
+  }
+}
