@@ -38,7 +38,9 @@ mod acceptance {
     mod error_mapping_exhaustive;
     mod eval_broker_collapse;
     mod job_lifecycle_backoff;
+    #[cfg(feature = "integration-tests")]
     mod job_stop_idempotent;
+    #[cfg(feature = "integration-tests")]
     mod job_stop_intent_key;
     mod job_stop_unknown;
     // `pending_no_capacity_renders_reason` was retired in slice 01 step
