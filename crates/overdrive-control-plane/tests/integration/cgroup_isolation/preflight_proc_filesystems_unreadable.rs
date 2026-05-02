@@ -28,10 +28,11 @@
 //!      reserved for the legitimate v1-host fallthrough; every other
 //!      kind exits early via the new variant.
 //!   3. The rendered `Display` message names the I/O cause, surfaces
-//!      `--allow-no-cgroups`, and explicitly does NOT contain "boot a
-//!      newer kernel" or "cgroup v2 not available on this kernel" —
-//!      those phrases are reserved for the `NoCgroupV2` variant and
-//!      are precisely the misdiagnosis this fix corrects.
+//!      the canonical Lima dev path (per ADR-0034), and explicitly
+//!      does NOT contain "boot a newer kernel" or "cgroup v2 not
+//!      available on this kernel" — those phrases are reserved for
+//!      the `NoCgroupV2` variant and are precisely the misdiagnosis
+//!      this fix corrects.
 //!
 //! On the buggy code (line 189 still `unwrap_or_default()`) this test
 //! panics with "expected `ProcFilesystemsUnreadable`, got `NoCgroupV2`".
@@ -106,7 +107,10 @@ fn preflight_surfaces_procfs_io_error_not_no_cgroup_v2() {
 
     // The rendered message must surface the dev escape hatch and the
     // docs URL, matching every other variant per nw-ux-tui-patterns.
-    assert!(msg.contains("--allow-no-cgroups"), "must mention --allow-no-cgroups: {msg}");
+    assert!(
+        msg.contains("cargo xtask lima run"),
+        "must mention canonical Lima dev path (ADR-0034): {msg}"
+    );
     assert!(msg.contains("docs.overdrive.sh"), "must mention docs URL: {msg}");
 
     // Critically, the message must NOT prescribe "boot a newer kernel"

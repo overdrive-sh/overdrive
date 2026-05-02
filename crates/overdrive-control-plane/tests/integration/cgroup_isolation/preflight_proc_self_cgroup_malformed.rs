@@ -15,8 +15,8 @@
 //!
 //! Both cases must produce the actionable
 //! `CgroupPathDiscoveryFailed` rendering: it names the failure, the
-//! detected condition, the `--allow-no-cgroups` escape hatch, and the
-//! docs URL.
+//! detected condition, the canonical Lima dev path (per ADR-0034),
+//! and the docs URL.
 
 #![cfg(target_os = "linux")]
 
@@ -56,7 +56,10 @@ fn preflight_rejects_v1_only_proc_self_cgroup() {
         }
     }
 
-    assert!(msg.contains("--allow-no-cgroups"), "must mention --allow-no-cgroups: {msg}");
+    assert!(
+        msg.contains("cargo xtask lima run"),
+        "must mention canonical Lima dev path (ADR-0034): {msg}"
+    );
     assert!(msg.contains("docs.overdrive.sh"), "must mention docs URL: {msg}");
 }
 

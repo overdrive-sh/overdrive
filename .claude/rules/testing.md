@@ -974,8 +974,8 @@ workload-cgroup path (`overdrive-worker::ProcessDriver`, the
 JobLifecycle convergence loop) `mkdir`
 `/sys/fs/cgroup/overdrive.slice/...`. The Lima default user is
 unprivileged and lacks delegation for that subtree, so the production
-path returns `EACCES` and Pending allocs never reach Running. Two
-acceptable shapes for the inner loop:
+path returns `EACCES` and Pending allocs never reach Running. The
+canonical inner-loop shape is:
 
 - **`cargo xtask lima run` (canonical, 1:1 with CI)** — the wrapper
   defaults to running the test process as root inside the VM, the same
@@ -1001,11 +1001,14 @@ acceptable shapes for the inner loop:
   delegation. `cargo xtask lima shell` still drops you in as the
   `lima` user; use `sudo -i` inside if you want an interactive root
   shell.
-- **`--allow-no-cgroups`** (ADR-0028) — the dev escape hatch for tests
-  that want to skip cgroup ops entirely. Production refuses to start on
-  delegation gaps; this flag bypasses the pre-flight and the driver
-  skips scope creation. Use only when the test is asserting on the
-  control-plane convergence shape, not on cgroup side effects.
+
+There is no in-binary escape hatch. ADR-0034 removed the
+`--allow-no-cgroups` flag (was structurally broken — leaked workloads
+in the StopAllocation path — and rendered redundant by the Lima
+wrapper above). Tests that exercise the `state: Terminated` shape
+against a real workload run via `cargo xtask lima run --`; tests that
+want to assert on the control-plane convergence shape with no real
+process at all use `SimDriver` per the standard DST convention.
 
 Do not paper over `EACCES` failures by removing the cgroup writes — the
 production code path IS the cgroup writes.

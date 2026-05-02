@@ -31,8 +31,8 @@ pub const DEFAULT_CGROUP_ROOT: &str = "/sys/fs/cgroup";
 /// Pre-flight failure modes per ADR-0028 §4.
 ///
 /// Each variant's `Display` form names the failed check, the cause,
-/// and the actionable fix — including the `--allow-no-cgroups` dev
-/// escape hatch and a documentation URL.
+/// and the actionable fix — including the `cargo xtask lima run --`
+/// canonical dev path (per ADR-0034) and a documentation URL.
 #[derive(Debug, Error)]
 pub enum CgroupPreflightError {
     /// Step 1 — kernel does not expose cgroup v2 (no `cgroup2` line in
@@ -48,9 +48,9 @@ pub enum CgroupPreflightError {
           1. Boot a kernel with cgroup v2 unified hierarchy enabled\n\
              (Linux 4.5+; the default on every distribution shipped\n\
              after 2022).\n\
-          2. Run without cgroup isolation (development only — workloads\n\
-             are unbounded; control plane is not protected):\n\
-               overdrive serve --allow-no-cgroups\n\
+          2. On macOS / Windows / non-cgroup-v2 Linux dev box, use the\n\
+             bundled Lima VM (canonical inner-loop path):\n\
+               cargo xtask lima run -- overdrive serve\n\
         \n\
         Documentation: https://docs.overdrive.sh/operations/cgroup-delegation"
     )]
@@ -71,8 +71,9 @@ pub enum CgroupPreflightError {
         \n\
           1. systemd-managed boots auto-mount the unified hierarchy;\n\
              check `mount | grep cgroup2`.\n\
-          2. Run without cgroup isolation (development only):\n\
-               overdrive serve --allow-no-cgroups\n\
+          2. On macOS / Windows / non-delegated Linux dev box, use the\n\
+             bundled Lima VM (canonical inner-loop path):\n\
+               cargo xtask lima run -- overdrive serve\n\
         \n\
         Documentation: https://docs.overdrive.sh/operations/cgroup-delegation"
     )]
@@ -102,9 +103,9 @@ pub enum CgroupPreflightError {
           3. Run as root (development only — no isolation guarantees):\n\
                sudo overdrive serve\n\
         \n\
-          4. Run without cgroup isolation (development only — workloads\n\
-             are unbounded; control plane is not protected):\n\
-               overdrive serve --allow-no-cgroups\n\
+          4. On macOS / Windows / non-delegated Linux dev box, use the\n\
+             bundled Lima VM (canonical inner-loop path):\n\
+               cargo xtask lima run -- overdrive serve\n\
         \n\
         Documentation: https://docs.overdrive.sh/operations/cgroup-delegation"
     )]
@@ -141,9 +142,9 @@ pub enum CgroupPreflightError {
           1. Verify /proc/self/cgroup is readable and contains a cgroup v2\n\
              (`0::`) line. On a healthy systemd-managed host this is\n\
              automatic.\n\
-          2. Run without cgroup isolation (development only — workloads\n\
-             are unbounded; control plane is not protected):\n\
-               overdrive serve --allow-no-cgroups\n\
+          2. On macOS / Windows / non-delegated Linux dev box, use the\n\
+             bundled Lima VM (canonical inner-loop path):\n\
+               cargo xtask lima run -- overdrive serve\n\
         \n\
         Documentation: https://docs.overdrive.sh/operations/cgroup-delegation"
     )]
@@ -161,10 +162,10 @@ pub enum CgroupPreflightError {
     /// does NOT trigger this variant — a missing `/proc/filesystems`
     /// is the v1-host signal and falls through to `NoCgroupV2`.
     ///
-    /// The Display message names the failure cause and the
-    /// `--allow-no-cgroups` dev escape hatch — and deliberately does
-    /// NOT prescribe "boot a newer kernel", because that is the
-    /// specific misdiagnosis this variant exists to correct.
+    /// The Display message names the failure cause and the canonical
+    /// Lima dev path — and deliberately does NOT prescribe "boot a
+    /// newer kernel", because that is the specific misdiagnosis this
+    /// variant exists to correct.
     #[error(
         "could not read /proc/filesystems: {source}.\n\
         \n\
@@ -177,9 +178,9 @@ pub enum CgroupPreflightError {
           1. Verify /proc is mounted and /proc/filesystems is readable\n\
              by the running UID (a missing /proc mount in a container\n\
              sandbox is the most common cause).\n\
-          2. Run without cgroup isolation (development only — workloads\n\
-             are unbounded; control plane is not protected):\n\
-               overdrive serve --allow-no-cgroups\n\
+          2. On macOS / Windows / non-delegated Linux dev box, use the\n\
+             bundled Lima VM (canonical inner-loop path):\n\
+               cargo xtask lima run -- overdrive serve\n\
         \n\
         Documentation: https://docs.overdrive.sh/operations/cgroup-delegation"
     )]
@@ -202,11 +203,11 @@ pub enum CgroupPreflightError {
     /// surfaces via this variant — see Option B of the RCA at
     /// `docs/feature/fix-cgroup-preflight-subtree-unreadable/bugfix-rca.md`.
     ///
-    /// The Display message names the failure cause and the
-    /// `--allow-no-cgroups` dev escape hatch — and deliberately does
-    /// NOT mention `Delegate=yes` or "delegation required", because
-    /// those phrases are reserved for `DelegationMissing` and are
-    /// exactly the misdiagnosis this variant exists to correct.
+    /// The Display message names the failure cause and the canonical
+    /// Lima dev path — and deliberately does NOT mention
+    /// `Delegate=yes` or "delegation required", because those phrases
+    /// are reserved for `DelegationMissing` and are exactly the
+    /// misdiagnosis this variant exists to correct.
     #[error(
         "could not read cgroup.subtree_control of enclosing slice {slice}: {source}.\n\
         \n\
@@ -227,9 +228,9 @@ pub enum CgroupPreflightError {
              is kernel-created for every cgroup directory).\n\
           3. Run as root (development only — no isolation guarantees):\n\
                sudo overdrive serve\n\
-          4. Run without cgroup isolation (development only — workloads\n\
-             are unbounded; control plane is not protected):\n\
-               overdrive serve --allow-no-cgroups\n\
+          4. On macOS / Windows / non-delegated Linux dev box, use the\n\
+             bundled Lima VM (canonical inner-loop path):\n\
+               cargo xtask lima run -- overdrive serve\n\
         \n\
         Documentation: https://docs.overdrive.sh/operations/cgroup-delegation",
         slice = slice.display(),

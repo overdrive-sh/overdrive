@@ -70,7 +70,6 @@ mod integration {
     /// `#[cfg(target_os = "linux")]` so the module declarations
     /// compile cleanly on macOS/Windows.
     mod cgroup_isolation {
-        mod allow_no_cgroups_flag;
         mod cluster_status_under_burst;
         mod idempotent_slice_creation;
         mod preflight_missing_cpu;

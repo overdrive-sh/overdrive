@@ -41,13 +41,6 @@ pub struct ServeArgs {
     /// `commands::cluster::default_operator_config_dir()`; tests pass
     /// an explicit subdirectory of their `TempDir`.
     pub config_dir: PathBuf,
-    /// Per ADR-0028 dev escape hatch — set via the
-    /// `--allow-no-cgroups` CLI flag. When `true`, the control plane
-    /// bypasses the cgroup v2 delegation pre-flight, does not enrol
-    /// itself in `overdrive.slice/control-plane.slice/`, and the
-    /// process driver runs workloads outside any cgroup scope.
-    /// Production deployments leave this `false`.
-    pub allow_no_cgroups: bool,
 }
 
 /// Handle to a running control-plane server, owned by the CLI layer.
@@ -112,7 +105,6 @@ pub async fn run(args: ServeArgs) -> Result<ServeHandle, CliError> {
         bind: args.bind,
         data_dir: args.data_dir,
         operator_config_dir: args.config_dir,
-        allow_no_cgroups: args.allow_no_cgroups,
         ..Default::default()
     };
     let inner = run_server(config).await.map_err(|e| CliError::Transport {

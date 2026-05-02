@@ -17,12 +17,11 @@
 //! `git commit --no-verify` so the GREEN-next-commit loop in Step
 //! 01-02 has a target to flip.
 //!
-//! Fixture: `with_allow_no_cgroups(true)` plus a TempDir cgroup-root.
-//! The cgroup path is allowed-no-cgroups so this test does not require
-//! delegated `/sys/fs/cgroup` write access; lifecycle still flows
-//! through `LiveAllocation` (see `driver.rs:294-314`), which is the
-//! state surface this test asserts on. Same shape as the other
-//! exec-driver integration tests.
+//! Fixture: a TempDir cgroup-root. Same shape as the other
+//! exec-driver integration tests (`start_and_running.rs`,
+//! `cgroup_procs.rs`): the cgroup operations succeed against plain
+//! file writes under TempDir without requiring delegated
+//! `/sys/fs/cgroup` access.
 
 use std::sync::Arc;
 
@@ -36,12 +35,14 @@ const CYCLES: usize = 8;
 
 #[tokio::test]
 async fn live_map_returns_to_zero_after_eight_start_stop_cycles() {
-    // Tempdir cgroup-root is required by `ExecDriver::new`; with
-    // `allow_no_cgroups = true`, `Driver::start` skips every cgroup
-    // operation, so the directory contents do not matter.
+    // Tempdir cgroup-root — same pattern as the other exec_driver
+    // integration tests. Pre-create the workloads slice so
+    // `create_workload_scope` finds its parent directory when
+    // `Driver::start` runs.
     let cgroup_root = TempDir::new().expect("tempdir created");
-    let driver = ExecDriver::new(cgroup_root.path().to_path_buf(), Arc::new(SimClock::new()))
-        .with_allow_no_cgroups(true);
+    std::fs::create_dir_all(cgroup_root.path().join("overdrive.slice/workloads.slice"))
+        .expect("workloads.slice created");
+    let driver = ExecDriver::new(cgroup_root.path().to_path_buf(), Arc::new(SimClock::new()));
 
     // Pre-condition: the live map starts empty.
     assert_eq!(

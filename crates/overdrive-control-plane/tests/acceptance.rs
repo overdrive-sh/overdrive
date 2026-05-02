@@ -35,7 +35,6 @@ mod acceptance {
     // `TransitionReason` enum from `overdrive-core`. Compile-time
     // type-identity witness; the snapshot/streaming surfaces share the
     // SAME type so byte-equality is structural.
-    mod default_lane_no_cgroup_dependency;
     mod error_mapping_exhaustive;
     mod eval_broker_collapse;
     mod job_lifecycle_backoff;

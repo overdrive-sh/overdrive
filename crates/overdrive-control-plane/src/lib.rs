@@ -213,13 +213,6 @@ pub struct ServerConfig {
     /// identity-artefact root, and conflating the two left the CLI
     /// pinning a stale CA on the production-default path.
     pub operator_config_dir: PathBuf,
-    /// Per ADR-0028: when `true`, the server skips the cgroup v2
-    /// delegation pre-flight, does NOT enrol its own PID into
-    /// `overdrive.slice/control-plane.slice/`, and downstream
-    /// drivers skip workload-cgroup operations. Logs a WARNING
-    /// banner on boot. Default: `false` (production safe default).
-    /// Set via `overdrive serve --allow-no-cgroups` (dev only).
-    pub allow_no_cgroups: bool,
     /// Cadence between drains of the [`crate::eval_broker::EvaluationBroker`]
     /// in the convergence-loop spawn (see
     /// [`run_server_with_obs_and_driver`]). Default
@@ -249,7 +242,6 @@ impl std::fmt::Debug for ServerConfig {
             .field("bind", &self.bind)
             .field("data_dir", &self.data_dir)
             .field("operator_config_dir", &self.operator_config_dir)
-            .field("allow_no_cgroups", &self.allow_no_cgroups)
             .field("tick_cadence", &self.tick_cadence)
             .field("clock", &"<dyn Clock>")
             .finish()
@@ -257,13 +249,11 @@ impl std::fmt::Debug for ServerConfig {
 }
 
 impl Default for ServerConfig {
-    /// Production-safe default — `allow_no_cgroups: false` so a caller
-    /// who builds a `ServerConfig` via `..Default::default()` does not
-    /// accidentally bypass the pre-flight. `bind`, `data_dir`, and
-    /// `operator_config_dir` get sentinel values that callers MUST
-    /// override; the `Default` impl exists exclusively to make
-    /// `..Default::default()` rest-pattern construction ergonomic for
-    /// test fixtures that override the three required fields.
+    /// `bind`, `data_dir`, and `operator_config_dir` get sentinel
+    /// values that callers MUST override; the `Default` impl exists
+    /// exclusively to make `..Default::default()` rest-pattern
+    /// construction ergonomic for test fixtures that override the
+    /// three required fields.
     ///
     /// `tick_cadence` defaults to [`reconciler_runtime::DEFAULT_TICK_CADENCE`]
     /// (100ms) and `clock` defaults to `Arc::new(SystemClock)` from
@@ -280,7 +270,6 @@ impl Default for ServerConfig {
             bind: loopback,
             data_dir: PathBuf::new(),
             operator_config_dir: PathBuf::new(),
-            allow_no_cgroups: false,
             tick_cadence: DEFAULT_TICK_CADENCE,
             clock: Arc::new(overdrive_host::SystemClock),
         }
@@ -423,18 +412,10 @@ pub async fn run_server(config: ServerConfig) -> Result<ServerHandle, error::Con
         Arc::from(observation_wiring::wire_single_node_observation(&config.data_dir)?);
 
     // Production default — `ExecDriver` rooted at `/sys/fs/cgroup`.
-    // Per ADR-0028, when `--allow-no-cgroups` is set we still construct
-    // an ExecDriver but flip its `allow_no_cgroups` flag so
-    // `Driver::start` skips cgroup scope creation / PID placement /
-    // limit writes; workloads run as ordinary child processes under
-    // the running UID.
-    let driver: Arc<dyn Driver> = Arc::new(
-        overdrive_worker::ExecDriver::new(
-            std::path::PathBuf::from("/sys/fs/cgroup"),
-            Arc::new(overdrive_host::SystemClock),
-        )
-        .with_allow_no_cgroups(config.allow_no_cgroups),
-    );
+    let driver: Arc<dyn Driver> = Arc::new(overdrive_worker::ExecDriver::new(
+        std::path::PathBuf::from("/sys/fs/cgroup"),
+        Arc::new(overdrive_host::SystemClock),
+    ));
 
     run_server_with_obs_and_driver(config, obs, driver).await
 }
@@ -461,31 +442,22 @@ pub async fn run_server_with_obs_and_driver(
     obs: Arc<dyn ObservationStore>,
     driver: Arc<dyn Driver>,
 ) -> Result<ServerHandle, error::ControlPlaneError> {
-    // Per ADR-0028, run the cgroup v2 delegation pre-flight at the
-    // start of the boot path — BEFORE any on-disk side effects (no CA
-    // mint, no IntentStore open, no listener bind). On failure, the
-    // server refuses to start and produces no on-disk artefacts.
+    // Per ADR-0028 (as superseded in part by ADR-0034), run the cgroup
+    // v2 delegation pre-flight at the start of the boot path — BEFORE
+    // any on-disk side effects (no CA mint, no IntentStore open, no
+    // listener bind). On failure, the server refuses to start and
+    // produces no on-disk artefacts.
     //
-    // Skip when:
-    //   - `--allow-no-cgroups` was set (dev escape hatch); a WARNING
-    //     banner names the disposition.
-    //   - The host is not Linux (cgroup v2 is Linux-only by design;
-    //     macOS / Windows dev hosts get a no-op).
-    if config.allow_no_cgroups {
-        tracing::warn!(
-            target: "overdrive::cgroup",
-            "!!! WARNING: --allow-no-cgroups set. Workloads run without cgroup \
-             isolation; the control plane is not protected from workload CPU \
-             bursts. Development use only — production deployments require \
-             cgroup v2 delegation. !!!"
-        );
-    } else {
-        #[cfg(target_os = "linux")]
-        {
-            cgroup_preflight::run_preflight().map_err(error::ControlPlaneError::from)?;
-            cgroup_manager::create_and_enrol_control_plane_slice()
-                .map_err(|e| error::ControlPlaneError::internal("create control-plane slice", e))?;
-        }
+    // The host is not Linux on macOS / Windows dev hosts; cgroup v2 is
+    // Linux-only by design, so the pre-flight is a no-op there. There
+    // is no in-binary escape hatch (ADR-0034 deleted it); operators
+    // running on macOS / Windows / non-delegated Linux dev boxes use
+    // `cargo xtask lima run --` per `.claude/rules/testing.md`.
+    #[cfg(target_os = "linux")]
+    {
+        cgroup_preflight::run_preflight().map_err(error::ControlPlaneError::from)?;
+        cgroup_manager::create_and_enrol_control_plane_slice()
+            .map_err(|e| error::ControlPlaneError::internal("create control-plane slice", e))?;
     }
 
     // Install the rustls process-wide CryptoProvider (ring) exactly

@@ -926,35 +926,42 @@ Future companion verbs (`:start`, `:restart`, `:cancel`,
 `Job` aggregate is **not** mutated on stop — the spec stays
 readable via `GET /v1/jobs/{id}` for audit / rollback / debugging.
 
-### 31. cgroup v2 delegation pre-flight: hard refusal + `--allow-no-cgroups`
+### 31. cgroup v2 delegation pre-flight: hard refusal (no escape hatch)
 
-Per ADR-0028. `overdrive serve` runs a four-step pre-flight check
-at boot (kernel exposes cgroup v2; cgroup v2 is mounted; UID is
-root OR has delegation; `cpu` and `memory` controllers are in
-`subtree_control`). On failure, the server logs an actionable
-error naming the failed step + remediation, exits non-zero, does
-NOT bind the listener.
+Per ADR-0028 (hard refusal) as superseded in part by ADR-0034
+(escape hatch removed). `overdrive serve` runs a four-step
+pre-flight check at boot (kernel exposes cgroup v2; cgroup v2 is
+mounted; UID is root OR has delegation; `cpu` and `memory`
+controllers are in `subtree_control`). On failure, the server logs
+an actionable error naming the failed step + remediation, exits
+non-zero, does NOT bind the listener.
 
 ```
 Try one of:
   1. systemctl --user start overdrive            (production)
   2. sudo systemctl set-property user-1000.slice Delegate=yes
   3. sudo overdrive serve                        (root, dev only)
-  4. overdrive serve --allow-no-cgroups          (dev escape hatch)
+  4. cargo xtask lima run -- overdrive serve     (canonical dev
+                                                  path on macOS /
+                                                  non-delegated
+                                                  Linux)
 ```
 
-`--allow-no-cgroups` is the explicit dev escape hatch. When set:
-the pre-flight is skipped; `Driver::start` operations skip cgroup
-operations entirely (workloads run as ordinary child processes
-under the running UID); the control plane runs without enrolling
-itself in `overdrive.slice/control-plane.slice/`. A loud startup
-banner names the disposition.
+There is no in-binary escape hatch. ADR-0034 deletes the
+`--allow-no-cgroups` flag introduced by ADR-0028: in code review
+the flag was found to silently leak workloads in the
+`StopAllocation` path (handle had `pid: None`, cgroup-kill branch
+gated off, stop returned `Ok(())` while the process kept running),
+producing a `state: Terminated`-while-process-alive convergence
+mismatch. The canonical dev path is `cargo xtask lima run --`
+(documented in `.claude/rules/testing.md`), which runs as root
+inside the bundled Lima VM with full cgroup v2 delegation.
 
 Hard refusal at boot is the disposition that respects the §4
 "control plane runs in dedicated cgroups with kernel-enforced
-resource reservations" architectural commitment. The escape hatch
-absorbs the dev-ergonomics objection without weakening the
-production safety floor.
+resource reservations" architectural commitment. With the escape
+hatch deleted, the commitment is structurally guaranteed rather
+than defaulted-with-bypass.
 
 ### 32. Updated quality-attribute scenarios — Phase 1 first-workload
 
@@ -1381,7 +1388,8 @@ Rules to enforce:
 | 0025 | Single-node startup wiring: hostname-derived NodeId; one-shot node_health write at boot | Accepted |
 | 0026 | cgroup v2 direct cgroupfs writes (no `cgroups-rs` dep); `cpu.weight` + `memory.max` from spec | Accepted |
 | 0027 | Job-stop HTTP shape: `POST /v1/jobs/{id}:stop`; separate `IntentKey::for_job_stop` | Accepted |
-| 0028 | cgroup v2 delegation pre-flight: hard refusal + explicit `--allow-no-cgroups` dev flag | Accepted |
+| 0028 | cgroup v2 delegation pre-flight: hard refusal (escape-hatch portion superseded by ADR-0034) | Superseded in part by 0034 |
+| 0034 | Remove `--allow-no-cgroups` escape hatch; canonical dev path is `cargo xtask lima run --` | Accepted |
 | 0029 | Dedicated `overdrive-worker` crate (class `adapter-host`); ExecDriver (formerly ProcessDriver, renamed 2026-04-28) + workload-cgroup management + node_health writer extracted from `overdrive-host` | Accepted (amended 2026-04-28) |
 | 0032 | NDJSON streaming submit: `overdrive job submit` streams convergence as NDJSON when `Accept: application/x-ndjson` is sent; back-compat single-JSON ack otherwise. CLI exits non-zero on convergence failure. 60 s server-side cap. | Accepted |
 | 0033 | `alloc status` snapshot enrichment: `AllocStatusResponse` extended in place with state, last-transition reason, restart budget, exit code, started_at; `TransitionReason` shared with ADR-0032 streaming events. | Accepted |
@@ -1451,9 +1459,10 @@ Rules to enforce:
   hierarchy + delegation of `cpu` and `memory` controllers to the
   running UID. Bundled systemd unit (DEVOPS / packaging) should
   include `Delegate=yes` so the production install path passes the
-  ADR-0028 pre-flight without operator intervention. Dev-time
-  `--allow-no-cgroups` flag exists; the production unit should NOT
-  set it.
+  ADR-0028 pre-flight without operator intervention. Per ADR-0034
+  there is no in-binary escape hatch; macOS / Windows / non-
+  delegated Linux dev boxes use `cargo xtask lima run --` (the
+  canonical Lima wrapper documented in `.claude/rules/testing.md`).
 
 ---
 
@@ -1468,3 +1477,4 @@ Rules to enforce:
 | 2026-04-26 | §16 Phase 1 TLS bootstrap: `serve` is the sole cert-minting site (ADR-0010 *Amendment 2026-04-26*; #81 tracks Phase 5 reintroduction of `cluster init`). — Morgan. |
 | 2026-04-27 | Phase 1 first-workload extension (§24–§33). Added ADR-0021 (reconciler `State` shape via `AnyState` enum mirroring `AnyReconcilerView`), ADR-0022 (`AppState::driver: Arc<dyn Driver>` extension), ADR-0023 (action shim placement + 100 ms tick cadence + DST-driven ticks under simulation), ADR-0024 (dedicated `overdrive-scheduler` crate, class `core` — D4 user override of the originally-proposed module-inside-control-plane placement; dst-lint scope expansion), ADR-0025 (single-node startup wiring: hostname-derived NodeId + one-shot node_health row at boot), ADR-0026 (cgroup v2 direct cgroupfs writes, no `cgroups-rs` dep; `cpu.weight` + `memory.max` from `AllocationSpec::resources`), ADR-0027 (job-stop HTTP shape: `POST /v1/jobs/{id}:stop` + separate `IntentKey::for_job_stop` intent key), ADR-0028 (cgroup v2 delegation pre-flight: hard refusal + explicit `--allow-no-cgroups` dev flag). New crate `overdrive-scheduler` (class `core`, depends only on `overdrive-core`); `overdrive-host` gains `ProcessDriver`. C4 Container diagram extended (new scheduler container + ProcessDriver row + kernel cgroup external system); new C4 Component diagram for the convergence-loop closure (submit → reconciler → scheduler → action shim → ProcessDriver → ObservationStore). No assumptions changed from prior phases. — Morgan. |
 | 2026-04-27 | Post-ratification amendment: ADR-0029 (dedicated `overdrive-worker` crate, class `adapter-host`). User-proposed and ratified 2026-04-27 same day as the original first-workload DESIGN pass. The new crate hosts `ProcessDriver` (formerly slated for `overdrive-host`), workload-cgroup management (`overdrive.slice/workloads.slice/<alloc>.scope`; the workload half of ADR-0026), and the boot-time `node_health` row writer (relocated from control-plane bootstrap per ADR-0025 amendment). `overdrive-host` shrinks back to ADR-0016's original host-OS-primitives intent (`SystemClock`, `OsEntropy`, `TcpTransport`). Composition pattern: binary-composition — `overdrive-cli`'s `serve` subcommand hard-depends on both `overdrive-control-plane` and `overdrive-worker`; runtime `[node] role` config selects which subsystems boot. `overdrive-control-plane` does NOT depend on `overdrive-worker` — the action shim calls `Driver::*` against an injected `&dyn Driver`, impl plugged in by the binary at AppState construction. ADRs 0022, 0023, 0025, 0026 amended in-place (Amendment subsections at the end); structural shape unchanged in each. C4 Container diagram updated (new `overdrive-worker` container + binary-composition arrows from `overdrive-cli`); C4 Component (convergence-loop) diagram updated (ProcessDriver moves from `overdrive-host` boundary to `overdrive-worker` boundary; node_health writer added). Crate inventory grows from seven Rust crates to eight (excluding xtask). — Morgan. |
+| 2026-05-02 | ADR-0028 superseded in part by ADR-0034: the `--allow-no-cgroups` escape hatch is removed. Reasons: (a) structural leak in the `StopAllocation` action path (handle had `pid: None`, cgroup-kill branch gated off, `stop` returned `Ok(())` while the process kept running, producing `state: Terminated`-while-process-alive on the next reconciler tick); (b) redundancy — the canonical dev path is now `cargo xtask lima run --` (documented in `.claude/rules/testing.md`), which absorbs the dev-ergonomics objection ADR-0028 § Alternative A documented. Hard-refusal pre-flight from ADR-0028 stays. §31 rewritten; ADR index entry for 0028 marked Superseded; ADR-0034 added to index; Linux-only requirements bullet replaces flag reference with the Lima wrapper. Single-cut migration per greenfield convention — code/test deletions land in the crafter PR, not in this changelog entry. — Morgan. |

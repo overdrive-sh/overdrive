@@ -37,7 +37,8 @@
 //!      `/proc/self/cgroup` (operator triage: which slice was
 //!      unreadable?).
 //!   4. The rendered `Display` message names the I/O cause, surfaces
-//!      `--allow-no-cgroups` and the docs URL, and explicitly does NOT
+//!      the canonical Lima dev path (per ADR-0034) and the docs URL,
+//!      and explicitly does NOT
 //!      contain "Delegate=yes" or "delegation required" — those
 //!      phrases are reserved for `DelegationMissing` and are precisely
 //!      the misdiagnosis this fix corrects.
@@ -135,7 +136,10 @@ fn preflight_surfaces_subtree_control_io_error_not_delegation_missing() {
 
     // The rendered message must surface the dev escape hatch and the
     // docs URL, matching every other variant per nw-ux-tui-patterns.
-    assert!(msg.contains("--allow-no-cgroups"), "must mention --allow-no-cgroups: {msg}");
+    assert!(
+        msg.contains("cargo xtask lima run"),
+        "must mention canonical Lima dev path (ADR-0034): {msg}"
+    );
     assert!(msg.contains("docs.overdrive.sh"), "must mention docs URL: {msg}");
 
     // Critically, the message must NOT prescribe `Delegate=yes` or

@@ -127,9 +127,13 @@ fn preflight_treats_missing_subtree_control_as_io_error() {
         ),
     }
 
-    // The rendered message must surface the dev escape hatch and the
-    // docs URL, matching every other variant per nw-ux-tui-patterns.
-    assert!(msg.contains("--allow-no-cgroups"), "must mention --allow-no-cgroups: {msg}");
+    // The rendered message must surface the canonical Lima dev path
+    // (per ADR-0034) and the docs URL, matching every other variant per
+    // nw-ux-tui-patterns.
+    assert!(
+        msg.contains("cargo xtask lima run"),
+        "must mention canonical Lima dev path (ADR-0034): {msg}"
+    );
     assert!(msg.contains("docs.overdrive.sh"), "must mention docs URL: {msg}");
 
     // Critically, the message must NOT prescribe `Delegate=yes` or

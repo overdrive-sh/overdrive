@@ -57,12 +57,12 @@ async fn spawn_server() -> (ServerHandle, SocketAddr, TempDir, String) {
         bind: "127.0.0.1:0".parse().expect("parse bind addr"),
         data_dir,
         operator_config_dir: operator_config_dir.clone(),
-        // Default-lane acceptance tests don't start real workloads;
-        // bypass the cgroup pre-flight so this test runs uniformly
-        // on macOS and Linux without delegation.
-        allow_no_cgroups: true,
         // `tick_cadence` + `clock` default per
-        // `fix-convergence-loop-not-spawned` Step 01-02.
+        // `fix-convergence-loop-not-spawned` Step 01-02. Per ADR-0034
+        // the in-binary cgroup escape hatch is gone; on macOS the
+        // pre-flight is a `#[cfg(target_os = "linux")]` no-op, and on
+        // Linux this test runs via `cargo xtask lima run --` against
+        // the bundled VM (root + delegated cgroups).
         ..Default::default()
     };
     let handle = run_server(config).await.expect("run_server");

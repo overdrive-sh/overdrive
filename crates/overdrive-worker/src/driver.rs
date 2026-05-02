@@ -68,7 +68,7 @@ fn start_rejected(reason: impl Into<String>) -> DriverError {
 /// `.claude/rules/testing.md` § "What it's NOT for" — keep it small
 /// and exhaustively covered by the inline tests below.
 #[cfg(target_os = "linux")]
-fn classify_exit(status: &std::process::ExitStatus, intentional_stop: bool) -> ExitKind {
+fn classify_exit(status: std::process::ExitStatus, intentional_stop: bool) -> ExitKind {
     use std::os::unix::process::ExitStatusExt;
 
     if intentional_stop {
@@ -77,22 +77,26 @@ fn classify_exit(status: &std::process::ExitStatus, intentional_stop: bool) -> E
         return ExitKind::CleanExit;
     }
 
-    if let Some(code) = status.code() {
-        if code == 0 {
-            ExitKind::CleanExit
-        } else {
-            ExitKind::Crashed { exit_code: Some(code), signal: None }
-        }
-    } else if let Some(sig) = status.signal() {
-        ExitKind::Crashed { exit_code: None, signal: Some(sig) }
-    } else {
-        ExitKind::Crashed { exit_code: None, signal: None }
-    }
+    status.code().map_or_else(
+        || {
+            if let Some(sig) = status.signal() {
+                ExitKind::Crashed { exit_code: None, signal: Some(sig) }
+            } else {
+                ExitKind::Crashed { exit_code: None, signal: None }
+            }
+        },
+        |code| {
+            if code == 0 {
+                ExitKind::CleanExit
+            } else {
+                ExitKind::Crashed { exit_code: Some(code), signal: None }
+            }
+        },
+    )
 }
 
 #[cfg(not(target_os = "linux"))]
-#[allow(clippy::trivially_copy_pass_by_ref)]
-fn classify_exit(status: &std::process::ExitStatus, intentional_stop: bool) -> ExitKind {
+fn classify_exit(status: std::process::ExitStatus, intentional_stop: bool) -> ExitKind {
     if intentional_stop {
         return ExitKind::CleanExit;
     }
@@ -142,13 +146,6 @@ pub struct ExecDriver {
     /// Validates ADR-0026 D9 warn-and-continue under controlled
     /// failure.
     force_limit_write_failure: bool,
-    /// Per ADR-0028: when `true`, `Driver::start` SKIPS workload
-    /// cgroup operations (scope creation, PID placement, limit
-    /// writes, scope removal). Workloads run as ordinary child
-    /// processes under the running UID with no cgroup isolation.
-    /// Plumbed from `--allow-no-cgroups` at the CLI boundary.
-    /// Production deployments leave this `false`.
-    allow_no_cgroups: bool,
     /// Live allocations indexed by ID. `BTreeMap` for deterministic
     /// iteration per `.claude/rules/development.md` § Ordered
     /// collections.
@@ -177,7 +174,6 @@ impl std::fmt::Debug for ExecDriver {
             .field("cgroup_root", &self.cgroup_root)
             .field("stop_grace", &self.stop_grace)
             .field("force_limit_write_failure", &self.force_limit_write_failure)
-            .field("allow_no_cgroups", &self.allow_no_cgroups)
             .finish_non_exhaustive()
     }
 }
@@ -198,7 +194,6 @@ impl ExecDriver {
             cgroup_root,
             stop_grace: DEFAULT_STOP_GRACE,
             force_limit_write_failure: false,
-            allow_no_cgroups: false,
             live: Arc::new(Mutex::new(BTreeMap::new())),
             exit_tx,
             exit_rx: Arc::new(Mutex::new(Some(exit_rx))),
@@ -219,17 +214,6 @@ impl ExecDriver {
     #[must_use]
     pub const fn with_force_limit_write_failure(mut self, force: bool) -> Self {
         self.force_limit_write_failure = force;
-        self
-    }
-
-    /// Per ADR-0028: when `allow` is `true`, subsequent `Driver::start`
-    /// calls SKIP workload-cgroup operations (scope creation, PID
-    /// placement, limit writes, scope removal). The control-plane
-    /// `--allow-no-cgroups` flag plumbs into this constructor knob.
-    /// Production deployments leave this `false`.
-    #[must_use]
-    pub const fn with_allow_no_cgroups(mut self, allow: bool) -> Self {
-        self.allow_no_cgroups = allow;
         self
     }
 
@@ -308,30 +292,6 @@ impl Driver for ExecDriver {
 
     async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
         let scope = CgroupPath::for_alloc(&spec.alloc);
-
-        // Per ADR-0028 dev escape hatch: when `--allow-no-cgroups` is
-        // set, skip every cgroup operation. The workload runs as an
-        // ordinary child process with no cgroup scope of its own.
-        // Lifecycle tracking still flows through `LiveAllocation` so
-        // status/stop work correctly.
-        if self.allow_no_cgroups {
-            let mut cmd = Self::build_command(spec);
-            let child = cmd
-                .spawn()
-                .map_err(|err| start_rejected(format!("spawn {}: {err}", spec.command)))?;
-            let pid = child.id();
-            let intentional_stop = Arc::new(AtomicBool::new(false));
-            let watcher = spawn_exit_watcher(
-                spec.alloc.clone(),
-                child,
-                intentional_stop.clone(),
-                self.exit_tx.clone(),
-            );
-            self.live
-                .lock()
-                .insert(spec.alloc.clone(), LiveAllocation { scope, intentional_stop, watcher });
-            return Ok(AllocationHandle { alloc: spec.alloc.clone(), pid });
-        }
 
         // 1. Create the scope directory. Failure here is fatal — we
         //    never have a PID to clean up.
@@ -443,12 +403,11 @@ impl Driver for ExecDriver {
 
         // The watcher owns the `Child`. We address the workload by
         // PID for the SIGTERM/SIGKILL signals; the PID lives in the
-        // `AllocationHandle` (populated at start time) on the
-        // `allow_no_cgroups` and cgroup paths alike. Tests that built
-        // the handle by hand (Phase 1 reconciler shim) carry `pid:
-        // None`; those code paths cannot deliver a process-targeted
-        // signal but can still enrich obs via the `cgroup.kill`
-        // fallback below.
+        // `AllocationHandle` (populated at start time). Tests and
+        // action-shim call sites that build the handle by hand carry
+        // `pid: None`; those code paths cannot deliver a process-
+        // targeted signal but still tear down the workload via the
+        // unconditional `cgroup.kill` write below.
         let pid_for_pgrp_kill = handle.pid;
 
         // 1. Send SIGTERM via libc::kill.
@@ -500,11 +459,9 @@ impl Driver for ExecDriver {
         if let Some(pid) = pid_for_pgrp_kill {
             send_sigkill_pgrp(pid);
         }
-        if !self.allow_no_cgroups {
-            let _ = cgroup_kill(&self.cgroup_root, &scope).await;
-            // 5. Tear down the cgroup scope. NotFound is benign.
-            let _ = remove_workload_scope(&self.cgroup_root, &scope).await;
-        }
+        let _ = cgroup_kill(&self.cgroup_root, &scope).await;
+        // 5. Tear down the cgroup scope. NotFound is benign.
+        let _ = remove_workload_scope(&self.cgroup_root, &scope).await;
 
         // If the grace window elapsed, the watcher is still running;
         // it will resolve once SIGKILL finishes reaping the child.
@@ -575,7 +532,7 @@ fn spawn_exit_watcher(
         // `Ordering::SeqCst` pairs with the `store` in `Driver::stop`.
         let intentional = intentional_stop.load(Ordering::SeqCst);
         let kind = match status_result {
-            Ok(status) => classify_exit(&status, intentional),
+            Ok(status) => classify_exit(status, intentional),
             Err(_io_err) => {
                 // `Child::wait` failure is exotic — the kernel did not
                 // give us a status. Treat as a crash with no payload
@@ -677,20 +634,20 @@ mod classify_exit_tests {
 
     #[test]
     fn clean_exit_zero_intentional_false_classifies_as_clean_exit() {
-        let kind = classify_exit(&from_code(0), false);
+        let kind = classify_exit(from_code(0), false);
         assert_eq!(kind, ExitKind::CleanExit);
     }
 
     #[test]
     fn clean_exit_zero_intentional_true_classifies_as_clean_exit() {
         // intentional_stop wins — operator stop with code-0 exit.
-        let kind = classify_exit(&from_code(0), true);
+        let kind = classify_exit(from_code(0), true);
         assert_eq!(kind, ExitKind::CleanExit);
     }
 
     #[test]
     fn nonzero_exit_intentional_false_classifies_as_crashed_with_code() {
-        let kind = classify_exit(&from_code(1), false);
+        let kind = classify_exit(from_code(1), false);
         assert_eq!(kind, ExitKind::Crashed { exit_code: Some(1), signal: None });
     }
 
@@ -698,7 +655,7 @@ mod classify_exit_tests {
     fn nonzero_exit_intentional_true_classifies_as_clean_exit() {
         // operator stop wins — even if the workload exited non-zero,
         // the intentional flag declares it terminated.
-        let kind = classify_exit(&from_code(137), true);
+        let kind = classify_exit(from_code(137), true);
         assert_eq!(kind, ExitKind::CleanExit);
     }
 
@@ -706,7 +663,7 @@ mod classify_exit_tests {
     fn signal_killed_intentional_false_classifies_as_crashed_with_signal() {
         // SIGKILL = 9 — external kill on a running workload, no
         // operator stop in flight. Crashed.
-        let kind = classify_exit(&from_signal(9), false);
+        let kind = classify_exit(from_signal(9), false);
         assert_eq!(kind, ExitKind::Crashed { exit_code: None, signal: Some(9) });
     }
 
@@ -716,7 +673,7 @@ mod classify_exit_tests {
         // setting intentional_stop=true and waiting for the watcher;
         // the watcher reads intentional_stop=true and classifies as
         // Terminated upstream.
-        let kind = classify_exit(&from_signal(15), true);
+        let kind = classify_exit(from_signal(15), true);
         assert_eq!(kind, ExitKind::CleanExit);
     }
 }

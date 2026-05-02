@@ -89,6 +89,9 @@ fn preflight_reads_enclosing_slice_via_proc_self_cgroup() {
         ),
     }
 
-    assert!(msg.contains("--allow-no-cgroups"), "must mention --allow-no-cgroups: {msg}");
+    assert!(
+        msg.contains("cargo xtask lima run"),
+        "must mention canonical Lima dev path (ADR-0034): {msg}"
+    );
     assert!(msg.contains("docs.overdrive.sh"), "must mention docs URL: {msg}");
 }

@@ -4,8 +4,9 @@
 //! Per ADR-0028 §4 step 1: a kernel without cgroup v2 in
 //! `/proc/filesystems` (cgroup v1-only host, or a stripped kernel)
 //! must be rejected with `NoCgroupV2`. The rendered message must
-//! mention the `--allow-no-cgroups` escape hatch and the docs URL —
-//! Phase 1 of Overdrive does not support cgroup v1.
+//! mention the canonical `cargo xtask lima run --` Lima dev path
+//! (per ADR-0034) and the docs URL — Phase 1 of Overdrive does not
+//! support cgroup v1.
 
 #![cfg(target_os = "linux")]
 
@@ -50,7 +51,10 @@ fn preflight_refuses_on_cgroup_v1_host() {
 
     let msg = err.to_string();
     assert!(msg.contains("cgroup v2"), "must mention cgroup v2: {msg}");
-    assert!(msg.contains("--allow-no-cgroups"), "must mention --allow-no-cgroups: {msg}");
+    assert!(
+        msg.contains("cargo xtask lima run"),
+        "must mention canonical Lima dev path (ADR-0034): {msg}"
+    );
     assert!(msg.contains("docs.overdrive.sh"), "must mention docs URL: {msg}");
 }
 

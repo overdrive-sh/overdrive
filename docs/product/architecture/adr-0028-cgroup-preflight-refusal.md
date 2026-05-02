@@ -2,9 +2,19 @@
 
 ## Status
 
-Accepted. 2026-04-27. Decision-makers: Morgan (proposing), user
-ratification 2026-04-27. Tags: phase-1, first-workload,
-application-arch.
+Superseded by ADR-0034. 2026-05-02. The hard-refusal pre-flight
+disposition recorded here remains in force; the
+`--allow-no-cgroups` escape hatch is removed by ADR-0034 (escape
+hatch was structurally broken — it produced
+`state: Terminated`-while-process-alive in the StopAllocation path
+— and rendered redundant by the canonical
+`cargo xtask lima run --` dev path now documented in
+`.claude/rules/testing.md`). Read this ADR alongside ADR-0034 for
+the current disposition.
+
+Original status: Accepted. 2026-04-27. Decision-makers: Morgan
+(proposing), user ratification 2026-04-27. Tags: phase-1,
+first-workload, application-arch.
 
 ## Context
 

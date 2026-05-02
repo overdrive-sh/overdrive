@@ -4,8 +4,8 @@
 //! Per ADR-0028 §4 step 4: when running as a non-root UID and the
 //! parent slice's `subtree_control` lacks one or both of `cpu` /
 //! `memory`, the pre-flight refuses with `DelegationMissing`. The
-//! rendered message must name `Delegate=yes`, the `--allow-no-cgroups`
-//! escape hatch, and the docs URL — operators without cgroup
+//! rendered message must name `Delegate=yes`, the canonical Lima dev
+//! path (per ADR-0034), and the docs URL — operators without cgroup
 //! delegation see actionable next steps, not a silent panic.
 
 #![cfg(target_os = "linux")]
@@ -63,6 +63,9 @@ fn preflight_refuses_without_delegation() {
     }
 
     assert!(msg.contains("Delegate=yes"), "must mention `Delegate=yes`: {msg}");
-    assert!(msg.contains("--allow-no-cgroups"), "must mention --allow-no-cgroups: {msg}");
+    assert!(
+        msg.contains("cargo xtask lima run"),
+        "must mention canonical Lima dev path (ADR-0034): {msg}"
+    );
     assert!(msg.contains("docs.overdrive.sh"), "must mention docs URL: {msg}");
 }

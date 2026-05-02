@@ -169,7 +169,7 @@ async fn run(cli: Cli) -> Result<()> {
             print!("{}", overdrive_cli::render::node_list(&out));
             Ok(())
         }
-        Command::Serve { bind, data_dir, allow_no_cgroups } => {
+        Command::Serve { bind, data_dir } => {
             let bind_addr = bind
                 .parse()
                 .map_err(|e| color_eyre::eyre::eyre!("invalid --bind address `{bind}`: {e}"))?;
@@ -179,25 +179,8 @@ async fn run(cli: Cli) -> Result<()> {
             // resolves to on the read side, so `serve` and `job submit`
             // share the same file (`fix-cli-cannot-reach-control-plane`).
             let config_dir = overdrive_cli::commands::cluster::default_operator_config_dir();
-            // Per ADR-0028: when `--allow-no-cgroups` is set, emit a
-            // boot-time WARNING banner directly to stderr so dev
-            // operators see it even with `RUST_LOG=off`. The
-            // server-side `tracing::warn!` is the structured-log
-            // counterpart picked up by audit pipelines.
-            if allow_no_cgroups {
-                eprintln!(
-                    "WARNING: --allow-no-cgroups set. Workloads run without cgroup \
-                     isolation; the control plane is not protected from workload CPU \
-                     bursts. Development use only — production deployments require \
-                     cgroup v2 delegation."
-                );
-            }
-            let args = overdrive_cli::commands::serve::ServeArgs {
-                bind: bind_addr,
-                data_dir,
-                config_dir,
-                allow_no_cgroups,
-            };
+            let args =
+                overdrive_cli::commands::serve::ServeArgs { bind: bind_addr, data_dir, config_dir };
             let handle = overdrive_cli::commands::serve::run(args).await?;
             tracing::info!(endpoint = %handle.endpoint(), "control plane listening");
 
