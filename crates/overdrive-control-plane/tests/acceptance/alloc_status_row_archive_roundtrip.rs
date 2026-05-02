@@ -57,8 +57,12 @@ fn arb_transition_reason() -> impl Strategy<Value = TransitionReason> {
         Just(TransitionReason::Starting),
         Just(TransitionReason::Started),
         any::<u32>().prop_map(|attempt| TransitionReason::BackoffPending { attempt }),
-        prop_oneof![Just(StoppedBy::Operator), Just(StoppedBy::Reconciler)]
-            .prop_map(|by| TransitionReason::Stopped { by }),
+        prop_oneof![
+            Just(StoppedBy::Operator),
+            Just(StoppedBy::Reconciler),
+            Just(StoppedBy::Process)
+        ]
+        .prop_map(|by| TransitionReason::Stopped { by }),
         // ---- cause-class failures, Phase-1 emit (9) ----
         arb_label().prop_map(|path| TransitionReason::ExecBinaryNotFound { path }),
         arb_label().prop_map(|path| TransitionReason::ExecPermissionDenied { path }),

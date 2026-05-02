@@ -260,9 +260,7 @@ fn classify(kind: &ExitKind, intentional_stop: bool) -> (AllocState, TransitionR
     match kind {
         ExitKind::CleanExit => (
             AllocState::Terminated,
-            TransitionReason::Stopped {
-                by: overdrive_core::transition_reason::StoppedBy::Reconciler,
-            },
+            TransitionReason::Stopped { by: overdrive_core::transition_reason::StoppedBy::Process },
         ),
         ExitKind::Crashed { exit_code, signal } => (
             AllocState::Failed,
@@ -363,10 +361,10 @@ mod classify_tests {
     use overdrive_core::transition_reason::StoppedBy;
 
     #[test]
-    fn clean_exit_intentional_false_terminates_with_reconciler_stop() {
+    fn clean_exit_intentional_false_terminates_with_process_stop() {
         let (state, reason) = classify(&ExitKind::CleanExit, false);
         assert_eq!(state, AllocState::Terminated);
-        assert!(matches!(reason, TransitionReason::Stopped { by: StoppedBy::Reconciler }));
+        assert!(matches!(reason, TransitionReason::Stopped { by: StoppedBy::Process }));
     }
 
     #[test]
