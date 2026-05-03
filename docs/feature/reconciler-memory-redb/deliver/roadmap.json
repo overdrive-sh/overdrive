@@ -1,0 +1,361 @@
+{
+  "roadmap": {
+    "project_id": "reconciler-memory-redb",
+    "created_at": "2026-05-03T14:34:29Z",
+    "total_steps": 9,
+    "phases": 2,
+    "notes": "Lands ADR-0035 (collapsed Reconciler trait + runtime-owned ViewStore + redb backing) and ADR-0037 (typed TerminalCondition on Action/row/event) in one coherent DELIVER pass. Per upstream-changes.md §D3, terminal MUST be wired from day one — Phase 02 is not optional follow-up. Deferred follow-up (NOT in this roadmap, per wave-decisions.md §O3): 10k-row View RAM cost spike against RedbViewStore (cheap to measure in-tree once the adapter exists; gates only Phase-N reconciler sizing, not Phase 1).",
+    "reviews": [
+      {
+        "reviewed_at": "2026-05-03",
+        "reviewer": "solution-architect-reviewer",
+        "scope": "DELIVER-wave roadmap critique against ADR-0035, ADR-0036, ADR-0037, design/wave-decisions.md, design/upstream-changes.md, and .claude/rules/development.md / testing.md.",
+        "verdict": "NEEDS_REVISION (initial); RESOLVED 2026-05-03 — all 2 blocking + 3 advisory issues addressed editorially.",
+        "issues": [
+          {
+            "id": "blocking-1",
+            "severity": "high",
+            "location": "Step 02-01 acceptance_criteria #5 (Property test JobLifecycleTerminalIsPureFunctionOfInputs)",
+            "summary": "AC treated RESTART_BACKOFF_CEILING as a property-test input; per ADR-0037 the constant is JobLifecycle-internal and not exported.",
+            "status": "resolved",
+            "resolution": "Reworded the AC: terminal is a pure function of view inputs (restart_counts, last_failure_seen_at) and the desired-state stop signal, against the FIXED internal ceiling — not an arbitrary one. Renamed property to JobLifecycleTerminalIsPureFunctionOfViewInputs and made the not-exported claim explicit alongside the existing rg-verifiable AC."
+          },
+          {
+            "id": "blocking-2",
+            "severity": "high",
+            "location": "Step 02-02 acceptance_criteria — restart_budget_from_view deletion",
+            "summary": "Existing AC said 'handlers.rs no longer calls restart_budget_from_view' (passive); per § Deletion discipline the function and its tests must be deleted in the same commit with verifiable rg-zero shape.",
+            "status": "resolved",
+            "resolution": "Strengthened the existing deletion AC to enforce the rg-zero shape against both crates/overdrive-control-plane/src/ and crates/overdrive-control-plane/tests/. Function and tests must be DELETED, not commented or gated."
+          },
+          {
+            "id": "advisory-3",
+            "severity": "medium",
+            "location": "Step 01-06 implementation_scope",
+            "summary": "Scope listed libsql_provisioner.rs but didn't enumerate other libsql_provisioner unit tests that would be orphaned.",
+            "status": "resolved",
+            "resolution": "Annotated deletions with [DELETE] markers; added explicit verification AC `rg -l 'libsql_provisioner' crates/overdrive-control-plane returns zero matches` + `rg -l 'LibsqlHandle' crates/ returns zero matches`."
+          },
+          {
+            "id": "advisory-4",
+            "severity": "medium",
+            "location": "Step 01-03 acceptance_criteria #1 (ViewStore trait surface)",
+            "summary": "AC named delete and probe but didn't describe their semantics or the Earned-Trust contract.",
+            "status": "resolved",
+            "resolution": "Expanded AC to enumerate all four methods per ADR-0035 §2 with their full signatures, the 1PC+C durability contract, the Phase 1 deferral notes for delete, and the explicit ProbeError variants (WriteFailed, CommitFailed) + the 'never leaves probe-row state behind' invariant. Cross-checked against ADR-0035 §2 trait shape — matches."
+          },
+          {
+            "id": "advisory-5",
+            "severity": "medium",
+            "location": "Steps 01-05 / 01-06 dependency clarity",
+            "summary": "01-05's trybuild gate (LibsqlHandle is gone) could fire before 01-06 wires the replacement runtime, leaving a non-compiling intermediate state if the steps merged separately.",
+            "status": "resolved",
+            "resolution": "Chose option (a): added co-landing constraint to BOTH steps' criteria + a verifiable AC on 01-05 requiring that the merge commit's diff includes edits to both reconciler.rs (01-05) and reconciler_runtime.rs (01-06), with `cargo check --workspace --all-features` succeeding at the merge commit. Steps remain separate units for review and mutation-run granularity; the constraint is on merge atomicity. Per ADR-0035 § Single-cut migration."
+          }
+        ]
+      }
+    ]
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Engine swap — collapsed Reconciler trait + runtime-owned ViewStore + redb adapter",
+      "description": "Replace the four-method Reconciler trait (migrate/hydrate/persist/reconcile) with a single sync reconcile + typed View. Introduce ViewStore port in overdrive-control-plane, RedbViewStore adapter (host class — lives IN overdrive-control-plane per ADR-0035 §2, NOT in overdrive-host because it's a control-plane-internal concern), and SimViewStore in overdrive-sim. Migrate JobLifecycle to the collapsed shape. Delete LibsqlHandle + libsql_provisioner + every reconciler-author SQL string. Single-cut migration per project posture; no parallel paths.",
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "Add ciborium workspace dep; rewrite .claude/rules/development.md § Reconciler I/O for the collapsed trait shape",
+          "description": "Single non-code-touching prep step. Adds ciborium = '0.2' to [workspace.dependencies] (MIT/Apache-2.0, pure Rust, serde-compatible — per ADR-0035 §3). Rewrites .claude/rules/development.md § Reconciler I/O end-to-end to describe the new trait surface (sync reconcile, runtime-owned persistence, derive Serialize+Deserialize+Default+Clone on View, no DB handle, no migrate/hydrate/persist methods on the trait). Whitepaper §17 + §18 are already updated by the DESIGN wave; only the rule file is stale.",
+          "criteria": "ciborium declared in workspace.dependencies with stable major; cargo check --workspace passes; .claude/rules/development.md § Reconciler I/O describes sync-only reconcile, no migrate/hydrate/persist on trait, runtime-owned ViewStore, derive bounds on View, with at least one worked example matching the new shape; no remaining prose references to LibsqlHandle, Reconciler::migrate, or per-tick libSQL roundtrip in the rule file.",
+          "test_file": "",
+          "scenario_name": "",
+          "acceptance_criteria": [
+            "cargo tree -p ciborium resolves to a single workspace-pinned version",
+            "cargo check --workspace --all-features completes with no errors",
+            "rg 'LibsqlHandle|Reconciler::migrate|migrate\\(.*db' .claude/rules/development.md returns zero matches",
+            "rule example shows the canonical View struct with #[derive(Serialize, Deserialize, Default, Clone)] and a sync reconcile body"
+          ],
+          "implementation_scope": [
+            "Cargo.toml",
+            ".claude/rules/development.md"
+          ],
+          "dependencies": [],
+          "time_estimate_hours": 1.5
+        },
+        {
+          "id": "01-02",
+          "name": "Define TerminalCondition enum + extend AllocStatusRow with terminal field (ADR-0037 prerequisite)",
+          "description": "Lands the typed TerminalCondition enum (BackoffExhausted{attempts}, Stopped{by:StoppedBy}, Custom{type_name, detail}) in overdrive-core next to LifecycleEvent/TransitionReason. Adds terminal: Option<TerminalCondition> column to AllocStatusRow (additive, decodes as None for existing archives). #[non_exhaustive] on the enum per ADR-0037 §1. Pulled forward of the runtime swap so the action-shim wiring in Phase 02 has the type to thread. Reuses existing StoppedBy from transition_reason.rs.",
+          "criteria": "TerminalCondition enum defined in overdrive-core with three variants (BackoffExhausted, Stopped, Custom), #[non_exhaustive], Debug+Clone+PartialEq+Eq derives; AllocStatusRow gains terminal: Option<TerminalCondition>; existing tests still pass; round-trip property test for AllocStatusRow with each TerminalCondition variant + None.",
+          "test_file": "crates/overdrive-core/tests/acceptance/terminal_condition_roundtrip.rs",
+          "scenario_name": "terminal_condition_serializes_and_deserializes_for_every_variant",
+          "acceptance_criteria": [
+            "TerminalCondition is #[non_exhaustive] and exposes BackoffExhausted{attempts:u32}, Stopped{by:StoppedBy}, Custom{type_name:String, detail:Option<Vec<u8>>}",
+            "AllocStatusRow.terminal is Option<TerminalCondition> with #[serde(default, skip_serializing_if = \"Option::is_none\")] equivalent for the on-disk codec",
+            "proptest TerminalConditionRoundtrip — for every Arbitrary TerminalCondition value v, encode(v) → decode → equal-to-v (covers all three variants + None at the AllocStatusRow level)",
+            "cargo nextest run -p overdrive-core --features integration-tests --no-run on macOS; cargo xtask lima run -- cargo nextest run -p overdrive-core --features integration-tests on Linux",
+            "every existing AllocStatusRow construction site compiles unchanged (terminal defaults to None at construction sites that pre-date this step)"
+          ],
+          "implementation_scope": [
+            "crates/overdrive-core/src/lib.rs",
+            "crates/overdrive-core/src/transition_reason.rs",
+            "crates/overdrive-core/src/traits/observation_store.rs",
+            "crates/overdrive-core/src/testing/observation_store.rs",
+            "crates/overdrive-core/tests/acceptance/terminal_condition_roundtrip.rs"
+          ],
+          "dependencies": [
+            "01-01"
+          ],
+          "time_estimate_hours": 2.5
+        },
+        {
+          "id": "01-03",
+          "name": "Define ViewStore port in overdrive-control-plane; SimViewStore adapter in overdrive-sim",
+          "description": "Adds the ViewStore async trait (bulk_load, write_through, delete, probe) in a new crates/overdrive-control-plane/src/view_store/mod.rs module per ADR-0035 §2. Adds ProbeError + ViewStoreError typed-thiserror enums. SimViewStore in overdrive-sim::adapters::view_store: in-memory BTreeMap<(ReconcilerName, TargetResource), Vec<u8>> keyed on CBOR bytes; supports inject_fsync_failure() / clear_fsync_failure() handles for the WriteThroughOrdering DST invariant in step 01-08. Constructor-required, no builder default. Both behind #[allow(dead_code)] until step 01-05 wires them in.",
+          "criteria": "ViewStore trait defined; SimViewStore implements it against an in-memory BTreeMap keyed deterministically; SimViewStore exposes inject_fsync_failure() handle; trybuild compile-fail fixture asserts ViewStore is dyn-compatible (Arc<dyn ViewStore> compiles); proptest covers SimViewStore round-trip (write_through then bulk_load returns byte-equal).",
+          "test_file": "crates/overdrive-sim/tests/acceptance/sim_view_store.rs",
+          "scenario_name": "sim_view_store_roundtrip_is_lossless_under_proptest",
+          "acceptance_criteria": [
+            "ViewStore trait (async, Send+Sync) has exactly four methods per ADR-0035 §2: (1) bulk_load<V: DeserializeOwned+Send>(&self, reconciler: &ReconcilerName) -> Result<BTreeMap<TargetResource, V>, ViewStoreError> — called once per reconciler at register, materialises the in-memory steady-state read SSOT; (2) write_through<V: Serialize+Sync>(&self, reconciler: &ReconcilerName, target: &TargetResource, view: &V) -> Result<(), ViewStoreError> — durable (fsync) before return; called after every successful reconcile; (3) delete(&self, reconciler: &ReconcilerName, target: &TargetResource) -> Result<(), ViewStoreError> — Phase 1 basic impl OK (leaked rows bounded by reconciler-kind cardinality, not tick count); no advanced GC needed; (4) probe(&self) -> Result<(), ProbeError> — Earned-Trust gate per ADR-0035 §Earned Trust: writes probe row → fsync → reads back byte-equal → deletes; ProbeError variants include WriteFailed (e.g. read-only fs) and CommitFailed (e.g. disk full), both with structured cause; never leaves probe-row state behind on success",
+            "SimViewStore stores serialized CBOR bytes (NOT typed values) so its store can hold heterogeneous View types per (ReconcilerName, TargetResource) key",
+            "proptest SimViewStoreRoundtrip — for arbitrary serializable View values, write_through(name,t,&v) then bulk_load(name).get(&t) returns Some(v) byte-equal under CBOR roundtrip",
+            "trybuild compile-pass fixture asserts let _: Arc<dyn ViewStore> = Arc::new(SimViewStore::new()); compiles (dyn-compatibility pinned at compile time)",
+            "SimViewStore::inject_fsync_failure() configures the next write_through (or probe, when applicable) to return ViewStoreError::FsyncFailed WITHOUT persisting the row to the in-memory CBOR store — used by the WriteThroughOrdering invariant in step 01-07 to assert the runtime's in-memory BTreeMap is unchanged when the underlying durable write fails; SimViewStore::clear_fsync_failure() resets to default success behaviour",
+            "SimViewStore::new() returns an empty store (all hashmaps used internally are documented per dst-lint hashmap-ok or use BTreeMap)"
+          ],
+          "implementation_scope": [
+            "crates/overdrive-control-plane/src/view_store/mod.rs",
+            "crates/overdrive-control-plane/src/lib.rs",
+            "crates/overdrive-sim/src/adapters/view_store.rs",
+            "crates/overdrive-sim/src/adapters/mod.rs",
+            "crates/overdrive-sim/src/lib.rs",
+            "crates/overdrive-sim/tests/acceptance/sim_view_store.rs"
+          ],
+          "dependencies": [
+            "01-01"
+          ],
+          "time_estimate_hours": 3
+        },
+        {
+          "id": "01-04",
+          "name": "RedbViewStore adapter in overdrive-control-plane (one redb file per node, per-reconciler tables)",
+          "description": "Adds RedbViewStore in crates/overdrive-control-plane/src/view_store/redb.rs. One redb file at <data_dir>/reconcilers/memory.redb (SEPARATE from the IntentStore redb file per wave-decisions.md §O4). Per-reconciler tables keyed on TargetResource::display() per wave-decisions.md §O2; table name = ReconcilerName::display() (already validated by ^[a-z][a-z0-9-]{0,62}$ regex). Table is opened-or-created lazily on first write_through for that reconciler. CBOR encoding via ciborium. Implements probe() per ADR-0035 §Earned Trust: open file → write probe row in dedicated __probe table → fsync → read back byte-equal → delete → on any failure ProbeError with structured cause. Lima-required for integration tests (real fsync, real fs).",
+          "criteria": "RedbViewStore::open(path) creates parent dir if missing; bulk_load returns a deterministic BTreeMap; write_through is durable (one redb commit, fsync); probe survives the documented fault-injection scenarios; integration tests under tests/integration/ behind integration-tests feature exercise real fsync.",
+          "test_file": "crates/overdrive-control-plane/tests/integration/redb_view_store.rs",
+          "scenario_name": "redb_view_store_roundtrips_views_across_reopens_with_durable_fsync",
+          "acceptance_criteria": [
+            "RedbViewStore::open(path) creates the parent dir and opens or creates the redb file; refuses concurrent opens (redb's file lock)",
+            "Per-reconciler tables — one TableDefinition<&str, &[u8]> per ReconcilerName, lazily created on first write_through",
+            "write_through(name, target, &view) executes ONE redb write transaction with an explicit fsync (default redb durability + commit) per ADR-0035 §4",
+            "bulk_load(name) returns a BTreeMap<TargetResource, V> in TargetResource::Ord iteration order (deterministic across reopens)",
+            "probe() succeeds on a healthy fs; returns ProbeError::WriteFailed on read-only fs; returns ProbeError::CommitFailed on disk-full simulation; never leaves probe-row state behind on success",
+            "integration test redb_view_store_persists_across_reopen — write a view, drop the store, reopen, bulk_load returns the written view byte-equal",
+            "integration test redb_view_store_per_reconciler_table_isolation — writing to reconciler A's view does not surface in bulk_load(B)",
+            "integration test runs via cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests on macOS; on Linux bare nextest with the feature is fine",
+            "dst-lint passes (no banned APIs leaked into core; this adapter sits in adapter-host control-plane crate, not overdrive-core)",
+            "cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-control-plane --file crates/overdrive-control-plane/src/view_store/redb.rs achieves kill rate ≥ 80%"
+          ],
+          "implementation_scope": [
+            "crates/overdrive-control-plane/src/view_store/redb.rs",
+            "crates/overdrive-control-plane/src/view_store/mod.rs",
+            "crates/overdrive-control-plane/Cargo.toml",
+            "crates/overdrive-control-plane/tests/integration/redb_view_store.rs",
+            "crates/overdrive-control-plane/tests/integration.rs"
+          ],
+          "dependencies": [
+            "01-03"
+          ],
+          "time_estimate_hours": 4
+        },
+        {
+          "id": "01-05",
+          "name": "Collapse Reconciler trait to single sync reconcile + typed View; delete migrate/hydrate/persist; AnyState/AnyReconciler dispatch keeps typed State per ADR-0036",
+          "description": "Single-cut replacement of crates/overdrive-core/src/reconciler.rs's Reconciler trait. New surface: type State, type View: Serialize+DeserializeOwned+Default+Clone+Send+Sync, fn name, fn reconcile(desired, actual, view, tick) -> (Vec<Action>, View). Deletes async fn migrate, async fn hydrate, async fn persist from the trait. Keeps AnyReconciler enum dispatch (still needed for typed-View associated-type erasure per ADR-0035 §1) but removes the migrate/hydrate/persist arms; keeps hydrate_desired and hydrate_actual on AnyReconciler (these belong to the runtime per ADR-0036 — they hydrate intent + observation, NOT the per-reconciler View). Updates JobLifecycle::reconcile to read view by reference and return (actions, next_view) — no internal libSQL access. Updates NoopHeartbeat similarly (type View = ()). Migrates the doc-comment example at the top of reconciler.rs to the new shape. Single commit; old paths gone in the same diff. Adds trybuild compile-fail fixture asserting LibsqlHandle is gone everywhere (extends the existing reconcile_cannot_take_libsql_handle.rs to check the broader namespace).",
+          "criteria": "Reconciler trait has exactly two methods (name, reconcile); JobLifecycle::reconcile is sync, returns (Vec<Action>, JobLifecycleView), reads view by reference; doc example matches; trybuild compile-fail proves LibsqlHandle is unreferenceable; AnyReconciler::hydrate is renamed/replaced with hydrate_desired+hydrate_actual on the runtime side per ADR-0036; ReconcilerIsPure DST invariant continues to fire. CO-LANDING REQUIREMENT: this step MUST land in the same PR as step 01-06. The trybuild compile-fail fixture asserting `LibsqlHandle is gone` removes the type from the public surface; if 01-06 (which wires the new ViewStore-backed runtime path and deletes libsql_provisioner) lands in a separate PR, the workspace is left in a non-compiling intermediate state between the two merges. Reviewers and mutation runs may still treat 01-05 and 01-06 as separate units within the PR; the constraint is on merge atomicity, not on review granularity.",
+          "test_file": "crates/overdrive-core/tests/acceptance/collapsed_reconciler_trait.rs",
+          "scenario_name": "reconciler_trait_has_single_sync_reconcile_method_and_typed_view",
+          "acceptance_criteria": [
+            "trait Reconciler in overdrive-core has exactly: type State, type View (with Serialize+DeserializeOwned+Default+Clone+Send+Sync bounds), fn name(&self) -> &ReconcilerName, fn reconcile(&self, desired, actual, view, tick) -> (Vec<Action>, Self::View)",
+            "trait Reconciler has NO async fn migrate, NO async fn hydrate, NO async fn persist — verified by grep on the trait definition",
+            "JobLifecycle::reconcile produces (actions, next_view) where next_view contains updated restart_counts and last_failure_seen_at (NEVER a precomputed deadline — per § Persist inputs, not derived state)",
+            "NoopHeartbeat uses type View = () and returns ((), ()) at the right shape",
+            "AnyReconciler enum survives; arms for migrate/hydrate/persist are removed; hydrate_desired and hydrate_actual remain (they are runtime-owned, not reconciler-author concerns)",
+            "trybuild compile-fail fixture libsql_handle_is_gone.rs proves LibsqlHandle does not resolve anywhere in the workspace",
+            "trybuild compile-pass fixture reconciler_trait_is_dyn_compatible.rs proves Box<dyn Reconciler> compiles (the async-fn-driver of dyn-incompatibility is gone)",
+            "every existing ReconcilerIsPure invariant assertion continues to fire under sim",
+            "cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-core --file crates/overdrive-core/src/reconciler.rs kill rate ≥ 80%",
+            "Co-landing constraint with 01-06: both steps must land in the SAME PR. Verifiable by: (a) the merge commit's diff includes edits to both crates/overdrive-core/src/reconciler.rs (this step) AND crates/overdrive-control-plane/src/reconciler_runtime.rs (step 01-06); (b) `cargo check --workspace --all-features` succeeds at the merge commit (no non-compiling intermediate state). Per ADR-0035 § Single-cut migration."
+          ],
+          "implementation_scope": [
+            "crates/overdrive-core/src/reconciler.rs",
+            "crates/overdrive-core/tests/compile_fail/reconcile_cannot_take_libsql_handle.rs",
+            "crates/overdrive-core/tests/compile_fail/libsql_handle_is_gone.rs",
+            "crates/overdrive-core/tests/compile_pass/reconciler_trait_is_dyn_compatible.rs",
+            "crates/overdrive-core/tests/acceptance/collapsed_reconciler_trait.rs",
+            "crates/overdrive-core/tests/acceptance/reconciler_trait_surface.rs"
+          ],
+          "dependencies": [
+            "01-03"
+          ],
+          "time_estimate_hours": 4
+        },
+        {
+          "id": "01-06",
+          "name": "ReconcilerRuntime wires probe → bulk_load → in-memory BTreeMap; tick reads from BTreeMap, writes through ViewStore; delete LibsqlHandle + libsql_provisioner",
+          "description": "Replaces the per-tick libSQL hydrate/persist machinery with the new pattern from ADR-0035 §5. ReconcilerRuntime::new takes Arc<dyn ViewStore> as a mandatory constructor parameter (per development.md § Port-trait dependencies — never a builder default). register(reconciler) calls view_store.probe().await? then view_store.bulk_load::<R::View>(name).await?, stashes the resulting BTreeMap<TargetResource, View> alongside the AnyReconciler. Tick loop: lookup → snapshot tick → hydrate desired+actual → BTreeMap::get(target).cloned().unwrap_or_default() → reconcile → write_through (fsync) → BTreeMap::insert (after fsync OK). Step ordering 7→8 is load-bearing per ADR-0035 §5. Probe failure surfaces as ControlPlaneError::Internal; runtime refuses to start with health.startup.refused logging + non-zero exit at the composition root (binary entry point). Single-cut deletion of LibsqlHandle newtype, libsql_provisioner module, and the per-reconciler libSQL files from the data_dir layout. Old tests that exercised libsql_isolation get deleted in the same commit per § Deletion discipline.",
+          "criteria": "ReconcilerRuntime::new takes Arc<dyn ViewStore> mandatorily; register calls probe then bulk_load; tick reads from in-memory BTreeMap; writes go through write_through THEN BTreeMap::insert; LibsqlHandle and libsql_provisioner.rs are deleted; integration test asserts probe failure refuses startup; existing eval-broker semantics unchanged. CO-LANDING REQUIREMENT: this step MUST land in the same PR as step 01-05 (the trait collapse). Splitting the merges leaves the workspace in a non-compiling intermediate state — 01-05 removes LibsqlHandle from the trait surface, and 01-06 removes the type's only remaining call sites. Reviewers and mutation runs may treat them as separate units within the same PR.",
+          "test_file": "crates/overdrive-control-plane/tests/integration/reconciler_runtime_view_store.rs",
+          "scenario_name": "runtime_bulk_loads_at_register_then_writes_through_redb_on_each_tick",
+          "acceptance_criteria": [
+            "ReconcilerRuntime::new signature requires Arc<dyn ViewStore> as a mandatory parameter (no builder default; matches development.md § Port-trait dependencies)",
+            "register(reconciler) calls view_store.probe().await BEFORE view_store.bulk_load — verifiable by injecting a SimViewStore that records call order",
+            "register stashes the bulk_load result as a BTreeMap<TargetResource, V> (NOT HashMap) — direct grep + dst-lint compliance",
+            "Tick loop persistence ordering: write_through completes (fsync OK) BEFORE BTreeMap::insert — verifiable via SimViewStore::inject_fsync_failure → assert in-memory BTreeMap is unchanged",
+            "Probe failure during register surfaces as ControlPlaneError::Internal with a structured cause; composition root in overdrive-cli logs health.startup.refused and exits non-zero",
+            "LibsqlHandle, libsql_provisioner module, libsql_isolation integration test, and any per-reconciler libSQL DDL strings are DELETED (not commented, not gated) — verifiable by `rg -l 'LibsqlHandle|libsql_provisioner|CREATE TABLE.*restart_counts'` on crates/ returning zero matches",
+            "Existing EvaluationBroker drain semantics unchanged (DuplicateEvaluationsCollapse DST invariant still fires)",
+            "Integration test runtime_refuses_to_start_when_probe_fails — inject a SimViewStore probe that returns ProbeError; assert ReconcilerRuntime::register returns Err and surfaces the structured cause",
+            "Integration test runtime_bulk_loads_views_at_register — pre-populate SimViewStore with two (target, view) entries; register a JobLifecycle reconciler; assert the runtime's in-memory BTreeMap contains both entries before the first tick",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests passes on macOS; bare nextest works on Linux",
+            "cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-control-plane --file crates/overdrive-control-plane/src/reconciler_runtime.rs kill rate ≥ 80%"
+          ],
+          "implementation_scope": [
+            "crates/overdrive-control-plane/src/reconciler_runtime.rs",
+            "crates/overdrive-control-plane/src/lib.rs",
+            "crates/overdrive-control-plane/src/error.rs",
+            "crates/overdrive-cli/src/main.rs",
+            "crates/overdrive-control-plane/tests/integration/reconciler_runtime_view_store.rs",
+            "crates/overdrive-control-plane/tests/integration.rs",
+            "crates/overdrive-core/src/reconciler.rs",
+            "crates/overdrive-control-plane/src/libsql_provisioner.rs [DELETE]",
+            "crates/overdrive-control-plane/tests/integration/libsql_isolation.rs [DELETE]",
+            "crates/overdrive-control-plane/src/libsql_handle.rs [DELETE if exists as standalone module]",
+            "Any per-reconciler libSQL DDL emitted by libsql_provisioner — deleted with the module",
+            "VERIFICATION AC: `rg -l 'libsql_provisioner' crates/overdrive-control-plane` returns zero matches; `rg -l 'LibsqlHandle' crates/` returns zero matches"
+          ],
+          "dependencies": [
+            "01-04",
+            "01-05"
+          ],
+          "time_estimate_hours": 5
+        },
+        {
+          "id": "01-07",
+          "name": "DST invariants: ViewStoreRoundtripIsLossless, BulkLoadIsDeterministic, WriteThroughOrdering",
+          "description": "Adds three new invariants to crates/overdrive-sim/src/invariants/. ViewStoreRoundtripIsLossless: proptest-driven; for arbitrary View values, write_through then bulk_load returns byte-equal (covers serde-derive regressions, ciborium-version skew, schema-evolution oversights — per ADR-0035 §6). BulkLoadIsDeterministic: two bulk_load calls against the same store produce PartialEq-equal BTreeMap (catches iteration-order regressions). WriteThroughOrdering: under SimViewStore with injected fsync failure, the in-memory BTreeMap visible through ReconcilerRuntime is NOT updated (catches the inverse durability ordering). Wires into cargo xtask dst gate.",
+          "criteria": "Three new invariant variants in overdrive-sim::invariants::Invariant; each is exercised by cargo xtask dst on every PR; existing ReconcilerIsPure, AtLeastOneReconcilerRegistered, DuplicateEvaluationsCollapse continue to fire.",
+          "test_file": "crates/overdrive-sim/src/invariants/evaluators.rs",
+          "scenario_name": "view_store_roundtrip_bulk_load_determinism_and_write_through_ordering_invariants",
+          "acceptance_criteria": [
+            "ViewStoreRoundtripIsLossless variant exists in overdrive-sim::invariants::Invariant; the evaluator is proptest-backed; covers JobLifecycleView and the unit-View case (NoopHeartbeat) at minimum",
+            "BulkLoadIsDeterministic variant exists; the evaluator runs bulk_load twice against the same backing store and asserts BTreeMap equality (not just len equality)",
+            "WriteThroughOrdering variant exists; the evaluator drives a write_through with SimViewStore::inject_fsync_failure → asserts the runtime's in-memory BTreeMap state did NOT advance for that target",
+            "cargo xtask dst executes all three new invariants in addition to the existing catalogue; failure of any one fails the gate",
+            "Each invariant prints its DST seed on failure; reproduction with cargo xtask dst --seed <N> is bit-identical",
+            "cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-sim --file crates/overdrive-sim/src/invariants/evaluators.rs kill rate ≥ 80%"
+          ],
+          "implementation_scope": [
+            "crates/overdrive-sim/src/invariants/mod.rs",
+            "crates/overdrive-sim/src/invariants/evaluators.rs",
+            "crates/overdrive-sim/src/harness.rs"
+          ],
+          "dependencies": [
+            "01-06"
+          ],
+          "time_estimate_hours": 3
+        }
+      ]
+    },
+    {
+      "id": "02",
+      "name": "Publication-boundary cleanup — TerminalCondition wired through Action shim, streaming, handlers, exit_observer",
+      "description": "Lands ADR-0037 atop the collapsed runtime. Reconciler computes terminal-or-not from inputs (restart_counts + last_failure_seen_at + RESTART_BACKOFF_CEILING — derived every tick, never persisted per § Persist inputs, not derived state). Action variants gain terminal: Option<TerminalCondition>. Action shim writes AllocStatusRow.terminal AND echoes onto LifecycleEvent.terminal — both consumer surfaces read row-derived state, never the View. Streaming check_terminal collapses to a single if-let. lagged_recover drops the restart_count_max_hint parameter. exit_observer emits terminal: None (structurally meaningful, not the structurally-meaningless 0 literal). Handlers' RestartBudget.exhausted derives from row.terminal rather than from restart_counts.values().max() against the ceiling. Single coherent step per upstream-changes.md §D3 — not split across PRs.",
+      "steps": [
+        {
+          "id": "02-01",
+          "name": "Action variants gain terminal field; JobLifecycle::reconcile computes terminal from inputs and stamps it",
+          "description": "Adds terminal: Option<TerminalCondition> to the Action variants that conclude an allocation lifecycle (Action::StopAllocation and the synthetic Failed-row action shape per ADR-0023 / ADR-0037 §4). JobLifecycle::reconcile body computes terminal at the deciding tick: when attempts >= RESTART_BACKOFF_CEILING, stamp terminal: Some(TerminalCondition::BackoffExhausted{attempts}) on the relevant Action; when an explicit operator stop has converged to Stopped, stamp terminal: Some(TerminalCondition::Stopped{by: StoppedBy::Operator}) (the by-source is already known to the reconciler from the desired state). Non-terminal transitions emit terminal: None on those same Action variants.",
+          "criteria": "Action enum carries terminal: Option<TerminalCondition> on the relevant variants; JobLifecycle::reconcile is the source of every terminal claim; new property test asserts terminal is a pure function of (attempts, operator-stop-flag, RESTART_BACKOFF_CEILING) and not of any latent state.",
+          "test_file": "crates/overdrive-core/tests/acceptance/job_lifecycle_terminal_decision.rs",
+          "scenario_name": "job_lifecycle_stamps_backoff_exhausted_terminal_when_attempts_reach_ceiling",
+          "acceptance_criteria": [
+            "Action::StopAllocation has terminal: Option<TerminalCondition>; the synthetic Failed-row action shape (per ADR-0023) carries the same field",
+            "JobLifecycle::reconcile stamps terminal: Some(TerminalCondition::BackoffExhausted{attempts: <observed>}) on the action when view.restart_counts max equals or exceeds RESTART_BACKOFF_CEILING — verified by direct unit test against the pure reconcile function",
+            "JobLifecycle::reconcile stamps terminal: Some(TerminalCondition::Stopped{by: StoppedBy::Operator}) when an operator-issued stop has converged to Stopped",
+            "JobLifecycle::reconcile emits terminal: None on every other transition (Pending → Running, Running → Failed with budget remaining, etc.)",
+            "Property test JobLifecycleTerminalIsPureFunctionOfViewInputs — the reconcile's terminal-decision logic depends ONLY on (a) view.restart_counts (max value consumed), (b) view.last_failure_seen_at, and (c) desired_state.stop_requested or equivalent operator signal. RESTART_BACKOFF_CEILING is hardcoded JobLifecycle-internal policy (NOT exported, NOT a property-test input); the test covers multiple (restart_counts, last_failure_seen_at) pairs against the fixed ceiling to verify terminal is deterministic for fixed inputs (subsumed by ReconcilerIsPure but asserted explicitly for the new field)",
+            "RESTART_BACKOFF_CEILING remains a JobLifecycle-internal constant; it is NOT exported from overdrive-core to streaming or handlers (verifiable by grep)",
+            "cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-core --file crates/overdrive-core/src/reconciler.rs kill rate ≥ 80% (includes the new terminal-decision branches)"
+          ],
+          "implementation_scope": [
+            "crates/overdrive-core/src/reconciler.rs",
+            "crates/overdrive-core/tests/acceptance/job_lifecycle_terminal_decision.rs"
+          ],
+          "dependencies": [
+            "01-02",
+            "01-05"
+          ],
+          "time_estimate_hours": 3
+        },
+        {
+          "id": "02-02",
+          "name": "Action shim writes AllocStatusRow.terminal AND emits LifecycleEvent.terminal; delete LifecycleEvent.restart_count_max + restart_count_max_hint; streaming/handlers/exit_observer cleanup",
+          "description": "Single coherent commit per upstream-changes.md §D3 (no parallel-fields transitional period). Action shim's dispatch path threads terminal from the Action onto BOTH AllocStatusRow.terminal (durable home, written via ObservationStore) AND LifecycleEvent.terminal (broadcast). Both surfaces carry the same value from the same call site — drift is structurally impossible per ADR-0037 §4. LifecycleEvent.restart_count_max field is deleted (never existed in this branch's current state on main — confirmed by grep — but the ADR-0037 design assumed it; if any introduced-but-not-yet-on-main work re-adds it, the deletion happens here). streaming.rs::check_terminal collapses to `if let Some(cond) = &event.terminal`. streaming.rs::lagged_recover drops its restart_count_max_hint parameter and reads latest.terminal off the AllocStatusRow. handlers.rs::restart_budget_from_view becomes restart_budget_from_row: derives RestartBudget.exhausted from row.terminal.is_some_and(|t| matches!(t, TerminalCondition::BackoffExhausted{..})) rather than from restart_counts.values().max() against RESTART_BACKOFF_CEILING. The JobLifecycleView is no longer consulted by the snapshot handler at all under this step. exit_observer.rs emits terminal: None (no restart_count_max literal needs deleting if it doesn't exist; otherwise removed in same commit).",
+          "criteria": "Action shim populates AllocStatusRow.terminal and LifecycleEvent.terminal from the same Action.terminal value at the same dispatch site; streaming check_terminal is a single if-let; lagged_recover signature has no restart_count_max_hint; handlers.rs derives RestartBudget.exhausted from row.terminal not from restart_counts; exit_observer emits terminal: None; streaming/handlers stop importing RESTART_BACKOFF_CEILING.",
+          "test_file": "crates/overdrive-control-plane/tests/integration/terminal_propagation.rs",
+          "scenario_name": "terminal_condition_flows_from_reconciler_through_action_shim_to_row_and_event",
+          "acceptance_criteria": [
+            "action_shim::dispatch writes AllocStatusRow.terminal from Action.terminal AND constructs LifecycleEvent { terminal: Action.terminal, .. } in the SAME call frame; assertion: read both surfaces, byte-equal terminal",
+            "streaming.rs::check_terminal collapses to ≤ 5 lines: `if let Some(cond) = &event.terminal { Some(SubmitEvent::ConvergedFailed { terminal: cond.clone(), .. }) } else { None }` (or equivalent for the actual SubmitEvent shape)",
+            "streaming.rs::lagged_recover signature drops the restart_count_max_hint parameter; the body reads latest_row.terminal directly off the ObservationStore snapshot",
+            "handlers.rs no longer calls restart_budget_from_view; restart_budget_from_row reads RestartBudget.exhausted from row.terminal.is_some_and(|t| matches!(t, TerminalCondition::BackoffExhausted{..}))",
+            "RESTART_BACKOFF_CEILING is referenced only inside crates/overdrive-core/src/reconciler.rs (verifiable by `rg -l RESTART_BACKOFF_CEILING crates/`)",
+            "exit_observer.rs emits terminal: None — verifiable by direct grep on the emission site",
+            "Integration test terminal_backoff_exhausted_appears_on_alloc_status_and_streaming — drive a JobLifecycle through the restart budget; assert AllocStatusRow.terminal == LifecycleEvent.terminal == Some(BackoffExhausted{attempts: ceiling}) at the deciding tick",
+            "Integration test terminal_stopped_appears_on_both_surfaces — issue a stop; assert both surfaces carry Some(Stopped{by: Operator}) once converged",
+            "Integration test non_terminal_transitions_emit_none — Pending → Running → Failed with budget remaining: every event/row carries terminal: None",
+            "Per § Deletion discipline: the old restart_budget_from_view function is DELETED from handlers.rs (not commented, not gated, not repurposed); its unit tests are deleted in the same commit. Verifiable by `rg 'restart_budget_from_view' crates/overdrive-control-plane/src/` returning zero matches AND `rg 'restart_budget_from_view' crates/overdrive-control-plane/tests/` returning zero matches",
+            "cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests on macOS; cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-control-plane --file crates/overdrive-control-plane/src/action_shim.rs --file crates/overdrive-control-plane/src/streaming.rs --file crates/overdrive-control-plane/src/handlers.rs --file crates/overdrive-control-plane/src/worker/exit_observer.rs kill rate ≥ 80%"
+          ],
+          "implementation_scope": [
+            "crates/overdrive-control-plane/src/action_shim.rs",
+            "crates/overdrive-control-plane/src/streaming.rs",
+            "crates/overdrive-control-plane/src/handlers.rs",
+            "crates/overdrive-control-plane/src/worker/exit_observer.rs",
+            "crates/overdrive-control-plane/src/api.rs",
+            "crates/overdrive-control-plane/tests/integration/terminal_propagation.rs",
+            "crates/overdrive-control-plane/tests/integration.rs"
+          ],
+          "dependencies": [
+            "02-01",
+            "01-06"
+          ],
+          "time_estimate_hours": 4
+        }
+      ]
+    }
+  ],
+  "implementation_scope": {
+    "source_directories": [
+      "crates/overdrive-core/src/",
+      "crates/overdrive-control-plane/src/",
+      "crates/overdrive-sim/src/",
+      "crates/overdrive-cli/src/"
+    ],
+    "test_directories": [
+      "crates/overdrive-core/tests/",
+      "crates/overdrive-control-plane/tests/integration/",
+      "crates/overdrive-sim/tests/"
+    ],
+    "excluded_patterns": [
+      "target/**",
+      "**/target/**",
+      "docs/**"
+    ]
+  },
+  "validation": {
+    "status": "pending",
+    "reviewer": "user",
+    "approved_at": "TODO"
+  }
+}

@@ -39,6 +39,12 @@ serde           = { version = "1", features = ["derive"] }
 serde_json      = "1"
 rkyv            = { version = "0.8", features = ["bytecheck"] }
 bytecheck       = "0.8"
+# `ciborium` is the CBOR codec for runtime-owned reconciler View persistence
+# per ADR-0035 §3 — pure Rust, MIT/Apache-2.0, serde-compatible, no codegen.
+# Used by `RedbViewStore` to encode/decode `View` blobs into the per-reconciler
+# redb table. `#[serde(default)]` on additive View fields handles schema
+# evolution; breaking changes use a versioned `enum` envelope.
+ciborium        = "0.2"
 
 # --- CLI ------------------------------------------------------------------
 clap            = { version = "4", features = ["derive", "env"] }
