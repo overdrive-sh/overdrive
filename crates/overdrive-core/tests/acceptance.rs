@@ -49,4 +49,10 @@ mod acceptance {
     mod exec_reconciler_purity;
     mod exec_roundtrip;
     mod exec_validation;
+
+    // issue-141-persist-backoff-inputs — `UnixInstant` newtype for
+    // portable wall-clock deadlines. Step 01-01 covers arithmetic +
+    // constructor surface; subsequent steps wire it through
+    // `TickContext` and `JobLifecycleView`.
+    mod unix_instant_arithmetic;
 }

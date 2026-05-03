@@ -29,6 +29,11 @@ pub mod error;
 pub mod id;
 pub mod reconciler;
 pub mod traits;
+// `UnixInstant` — portable wall-clock instant for persistable
+// deadlines. See `docs/research/control-plane/issue-139-followup-portable-deadline-representation-research.md`
+// for the design rationale; subsequent steps under issue #141 wire it
+// through `TickContext` and `JobLifecycleView`.
+pub mod wall_clock;
 // `TransitionReason` is the SSOT enum carried on streaming
 // `SubmitEvent::LifecycleTransition` and snapshot
 // `AllocStatusRow.reason`. Locked under ADR-0032 §3 (Amendment
@@ -60,6 +65,7 @@ pub use id::{
 pub use traits::{
     Clock, Dataplane, Driver, DriverType, Entropy, IntentStore, Llm, ObservationStore, Transport,
 };
+pub use wall_clock::UnixInstant;
 // Re-exported from `transition_reason` for convenience; the snapshot
 // wire surface in `overdrive-control-plane::api` further re-exports
 // with a `ToSchema` derive (locked in ADR-0032 §3 Amendment).
