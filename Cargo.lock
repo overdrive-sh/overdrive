@@ -1585,6 +1585,7 @@ dependencies = [
  "parking_lot",
  "proptest",
  "rcgen",
+ "redb",
  "reqwest",
  "rkyv",
  "rustls",

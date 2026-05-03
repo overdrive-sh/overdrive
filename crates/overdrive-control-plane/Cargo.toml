@@ -76,6 +76,13 @@ rkyv.workspace        = true
 # operates on raw `Vec<u8>` for dyn-compatibility; the typed
 # `ViewStoreExt` blanket impl encodes/decodes via ciborium.
 ciborium.workspace    = true
+# `redb` — single-file embedded KV used by `RedbViewStore` (step 01-04
+# of `reconciler-memory-redb`) for the runtime-owned reconciler `View`
+# persistence per ADR-0035 §4. Separate from the IntentStore redb file
+# (wave-decisions §O4) — this crate already pulls redb transitively
+# through `overdrive-store-local`, but we declare it explicitly here
+# because we open it directly under `view_store::redb`.
+redb.workspace        = true
 
 # HTTP / TLS
 # NOTE — `axum`, `axum-server`, `utoipa`, `utoipa-axum`, and `libsql`

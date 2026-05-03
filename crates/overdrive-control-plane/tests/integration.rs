@@ -39,6 +39,10 @@ mod integration {
     mod idempotent_resubmit;
     mod libsql_isolation;
     mod observation_empty_rows;
+    /// `RedbViewStore` adapter (step 01-04 of `reconciler-memory-redb`).
+    /// Real-fs round-trip + per-reconciler table isolation + Earned-Trust
+    /// probe coverage per ADR-0035 § Earned Trust + §4.
+    mod redb_view_store;
     mod server_lifecycle;
     mod submit_round_trip;
     mod tls_bootstrap;

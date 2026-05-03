@@ -44,6 +44,8 @@
 
 #![allow(dead_code)]
 
+pub mod redb;
+
 use std::collections::BTreeMap;
 
 use async_trait::async_trait;
