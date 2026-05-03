@@ -609,7 +609,10 @@ async fn reconcile(&self, /* ... */) -> Vec<Action> {
 // reconciler author touches libsql); reconcile is sync + pure, emits
 // an HttpCall action, and returns a NextView the runtime persists.
 // The response arrives as observation on the next tick via `actual`.
-// Wall-clock comes from `tick.now`, never `Instant::now()`.
+// Wall-clock comes from `tick.now_unix` (persistable UnixInstant),
+// never `Instant::now()`. The View persists *inputs* — `attempts`
+// and `last_failure_seen_at` — not the derived `next_attempt_at`
+// deadline (see § "Persist inputs, not derived state" above).
 impl Reconciler for RegisterReconciler {
     type View = RetryMemory;
 
@@ -624,7 +627,7 @@ impl Reconciler for RegisterReconciler {
         // (CREATE TABLE IF NOT EXISTS, ALTER TABLE ADD COLUMN) lives
         // here too — no framework migrations Phase 1.
         let row = db.query_one(
-            "SELECT attempts, last_correlation, next_attempt_at \
+            "SELECT attempts, last_correlation, last_failure_seen_at \
              FROM register_memory WHERE target = ?",
             &[target.as_str()],
         ).await?;
@@ -651,11 +654,16 @@ impl Reconciler for RegisterReconciler {
             Some(Status::Pending) | Some(Status::InFlight) => vec![],
             Some(Status::Completed { response }) => converge_from_response(actual, response),
             // Retry-budget gate: only re-dispatch once the backoff
-            // window has elapsed. `tick.now` is the runtime's
+            // window has elapsed. The deadline is RECOMPUTED on
+            // every tick from the persisted inputs (`attempts` +
+            // `last_failure_seen_at`) and the live backoff policy —
+            // never persisted. `tick.now_unix` is the runtime's
             // single-snapshot of wall-clock for this evaluation —
-            // pure input, DST-controllable.
+            // pure input, DST-controllable, persistable.
             Some(Status::Failed { .. } | Status::TimedOut { .. })
-                if tick.now >= view.next_attempt_at =>
+                if tick.now_unix
+                    >= view.last_failure_seen_at
+                        + backoff_for_attempt(view.attempts) =>
             {
                 handle_failure(view)
             }
@@ -663,9 +671,11 @@ impl Reconciler for RegisterReconciler {
         };
         // NextView carries the updated retry memory; the runtime
         // diffs (view → next_view) and persists the delta to libsql.
-        // Reconcile never writes libsql directly. Compute the next
-        // backoff deadline from `tick.now`, not from `Instant::now()`.
-        let next_view = view.bump_if_dispatched(&actions, tick.now);
+        // Reconcile never writes libsql directly. On a fresh
+        // dispatch, stamp `last_failure_seen_at = tick.now_unix`
+        // and bump `attempts` — both are inputs to the next tick's
+        // deadline computation, never a precomputed deadline.
+        let next_view = view.bump_if_dispatched(&actions, tick.now_unix);
         (actions, next_view)
     }
 }
@@ -713,7 +723,9 @@ The reference case: a Restate-operator-equivalent in Overdrive is a
 reconciler whose `hydrate` reads retry memory, whose `reconcile` emits
 `HttpCall { target: restate_admin_url, method: POST, body:
 deployment_spec, idempotency_key: Some(...) }` on registration when
-`tick.now >= view.next_attempt_at`, and which reads
+`tick.now_unix >= view.last_failure_seen_at +
+backoff_for_attempt(view.attempts)` (deadline recomputed every tick
+from persisted inputs, never persisted itself), and which reads
 `external_call_results` on the next tick to advance its state
 machine. No `async fn` in `reconcile`; no direct HTTP client; no
 direct wall-clock read; fully DST-replayable.
