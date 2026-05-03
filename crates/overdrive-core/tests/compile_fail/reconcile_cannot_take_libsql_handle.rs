@@ -1,24 +1,19 @@
-//! ADR-0013 §2c — `&LibsqlHandle` cannot leak into `reconcile`'s
-//! parameter list. The only visibility path for `LibsqlHandle` is
-//! `hydrate`; substituting it for the trait's `&TickContext`
-//! parameter in a `reconcile` impl must fail to compile.
+//! ADR-0035 §1 + ADR-0036 — `&LibsqlHandle` cannot leak into
+//! `reconcile`'s parameter list. The trait's `reconcile` signature is
+//! pinned at `fn(&Self, &Self::State, &Self::State, &Self::View,
+//! &TickContext) -> (Vec<Action>, Self::View)`. A synthetic impl that
+//! replaces the fifth-parameter `&TickContext` with `&LibsqlHandle`
+//! triggers E0053 ("method has an incompatible type for trait"), naming
+//! the expected `&TickContext` and the supplied `&LibsqlHandle`.
 //!
-//! Per ADR-0021, the `Reconciler` trait fixes the `reconcile`
-//! signature as `fn(&Self, &Self::State, &Self::State, &Self::View,
-//! &TickContext) -> (Vec<Action>, Self::View)` — `State` is now a
-//! typed associated type rather than a single shared placeholder. A
-//! synthetic impl that replaces `&TickContext` with `&LibsqlHandle`
-//! triggers E0053 ("method has an incompatible type for trait"),
-//! naming the expected `&TickContext` and the supplied `&LibsqlHandle`.
-//!
-//! This defends against a future refactor that accidentally relaxes
-//! the trait method signature to accept `&LibsqlHandle` in
-//! `reconcile`, which would re-open the async I/O surface the
-//! pre-hydration pattern was designed to close.
+//! Per the ADR-0035 collapse, the trait carries NO async surface at
+//! all — `migrate`, `hydrate`, and `persist` are removed. The runtime
+//! owns all hydration (intent + observation + view memory). This
+//! fixture defends against a future refactor that re-opens the
+//! reconciler-author async surface by attempting to plumb a libSQL
+//! handle through `reconcile`.
 
-use overdrive_core::reconciler::{
-    Action, HydrateError, LibsqlHandle, Reconciler, ReconcilerName, TargetResource,
-};
+use overdrive_core::reconciler::{Action, LibsqlHandle, Reconciler, ReconcilerName, TickContext};
 
 struct BadReconciler {
     name: ReconcilerName,
@@ -32,17 +27,11 @@ impl Reconciler for BadReconciler {
         &self.name
     }
 
-    async fn hydrate(
-        &self,
-        _target: &TargetResource,
-        _db: &LibsqlHandle,
-    ) -> Result<Self::View, HydrateError> {
-        Ok(())
-    }
-
     // The trait requires `&TickContext` in the fifth parameter slot;
     // substituting `&LibsqlHandle` is a type mismatch the compiler
-    // catches via E0053.
+    // catches via E0053. The trait NO LONGER has any async hydrate /
+    // migrate / persist surface — those are removed by ADR-0035 §1
+    // and the runtime owns hydration via `ViewStore`.
     fn reconcile(
         &self,
         _desired: &Self::State,

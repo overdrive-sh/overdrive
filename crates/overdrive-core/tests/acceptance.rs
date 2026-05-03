@@ -79,4 +79,11 @@ mod acceptance {
     // Phase 02 action-shim wiring). Property: every variant + None
     // survives the rkyv roundtrip at the row level.
     mod terminal_condition_roundtrip;
+
+    // reconciler-memory-redb step 01-05 — collapsed `Reconciler` trait
+    // surface (single sync `reconcile`, typed `View` with
+    // `Serialize + DeserializeOwned + Default + Clone + Send + Sync`
+    // bounds, no `migrate` / `hydrate` / `persist`). Per ADR-0035 §1
+    // and ADR-0036.
+    mod collapsed_reconciler_trait;
 }

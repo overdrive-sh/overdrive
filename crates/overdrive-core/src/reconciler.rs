@@ -1,31 +1,36 @@
 //! Reconciler primitive — the §18 pure-function contract with
-//! pre-hydration + `TickContext` time injection per ADR-0013 (amended
-//! 2026-04-24).
+//! `TickContext` time injection per ADR-0035 (supersedes ADR-0013 §2 /
+//! §2a partial / §2b).
 //!
 //! A reconciler is a pure function over `(desired, actual, view, tick)`
 //! that emits a list of [`Action`]s to converge the system toward the
-//! desired state. Four patterns govern how an author writes one; each
+//! desired state. Three patterns govern how an author writes one; each
 //! is load-bearing for DST replay (whitepaper §21) and ESR verification
 //! (whitepaper §18 / research §1.1, §10.5).
 //!
-//! # The pre-hydration pattern — ADR-0013 §2, §2b
+//! # The single-method, sync-only trait — ADR-0035 §1
 //!
-//! The trait splits into two methods with distinct purity contracts:
+//! The trait carries exactly one author-written method:
 //!
-//! * [`Reconciler::hydrate`] is `async` — the ONLY place a reconciler
-//!   author touches libSQL. It reads the reconciler's private memory
-//!   into an author-declared [`Reconciler::View`]. Free-form SQL lives
-//!   here; so does schema management (CREATE TABLE IF NOT EXISTS, ALTER
-//!   TABLE ADD COLUMN). No framework migrations in Phase 1.
 //! * [`Reconciler::reconcile`] is sync and pure — no `.await`, no I/O,
-//!   no direct store write. It operates only on its arguments. Two
-//!   invocations with the same inputs MUST produce byte-identical
-//!   output tuples.
+//!   no direct store write, no wall-clock read except via `tick.now` /
+//!   `tick.now_unix`. It operates only on its arguments.
 //!
-//! The runtime owns the `.await` on `hydrate`, the diff-and-persist of
-//! the returned view, and the commit of emitted actions through Raft.
+//! Two invocations with the same inputs MUST produce byte-identical
+//! output tuples. Storage is the runtime's responsibility — there is
+//! no `migrate`, no `hydrate`, and no `persist` on the trait. The
+//! runtime owns:
 //!
-//! # The time-injection pattern — ADR-0013 §2c
+//! * Intent hydration via `IntentStore` (driven by the runtime's
+//!   `hydrate_desired` path; the `AnyReconciler` enum projects to the
+//!   matching `AnyState` variant).
+//! * Observation hydration via `ObservationStore` (driven by the
+//!   runtime's `hydrate_actual` path; same projection shape).
+//! * Per-reconciler `View` persistence via `ViewStore` — bulk-loaded
+//!   into an in-memory `BTreeMap<TargetResource, View>` at boot,
+//!   write-through on every successful `reconcile`. See ADR-0035 §2.
+//!
+//! # The time-injection pattern — survives from ADR-0013 §2c
 //!
 //! [`TickContext::now`] is the only legitimate source of "now" inside
 //! `reconcile`. The runtime snapshots the injected `Clock` trait once
@@ -37,28 +42,29 @@
 //! body breaks DST replay and ESR verification; dst-lint catches it at
 //! PR time (see `.claude/rules/development.md` §Reconciler I/O).
 //!
-//! # The `AnyReconciler` enum-dispatch convention — ADR-0013 §2a
+//! # The `AnyReconciler` enum-dispatch convention — ADR-0035 §1
 //!
-//! `async fn` in traits is not dyn-compatible, and
-//! [`Reconciler::View`] is an associated type — together they make
-//! `Box<dyn Reconciler>` impossible. [`AnyReconciler`] is a hand-rolled
-//! enum that dispatches each trait method via a match arm per variant.
-//! Static dispatch, zero heap allocation on the hot path, compile-time
-//! exhaustiveness across every registered reconciler kind. **Adding a
-//! new first-party reconciler means adding one variant and one match
-//! arm** in each of `name`, `hydrate`, and `reconcile`. Third-party
-//! reconcilers land through the WASM extension path (whitepaper §18
-//! "Extension Model") and do not go through `AnyReconciler`.
+//! `Reconciler` carries associated types (`State`, `View`) so erased
+//! dispatch *across heterogeneous reconciler kinds* requires either
+//! a concrete `(State, View)` pair on the dyn-trait reference or an
+//! enum-dispatched wrapper. Overdrive uses [`AnyReconciler`] for the
+//! latter — a hand-rolled enum that dispatches each trait method via
+//! a match arm per variant. Static dispatch, zero heap allocation on
+//! the hot path, compile-time exhaustiveness across every registered
+//! reconciler kind. **Adding a new first-party reconciler means adding
+//! one variant and one match arm** in each of `name` and `reconcile`.
+//! Third-party reconcilers land through the WASM extension path
+//! (whitepaper §18 "Extension Model") and do not go through
+//! `AnyReconciler`.
 //!
-//! # The `NextView` return convention — ADR-0013 §2b
+//! # The `NextView` return convention — ADR-0035 §1
 //!
 //! Reconcilers express writes as **data**, not side effects. The
 //! [`Reconciler::reconcile`] signature returns `(Vec<Action>,
 //! Self::View)`; the second element is the *next* view. The runtime
-//! diffs it against the hydrated view and persists the delta back to
-//! libSQL. Reconcilers never write libSQL directly — the
-//! `&LibsqlHandle` is not passed to `reconcile` at all. Phase 1
-//! convention is full-View replacement (`NextView = Self::View`); a
+//! diffs it against the in-memory view and persists the delta through
+//! `ViewStore`. Reconcilers never write storage directly. Phase 1
+//! convention is full-`View` replacement (`NextView = Self::View`); a
 //! typed-diff shape is an additive future extension.
 //!
 //! # Example
@@ -71,8 +77,7 @@
 //!
 //! ```
 //! use overdrive_core::reconciler::{
-//!     Action, HydrateError, LibsqlHandle, Reconciler, ReconcilerName,
-//!     TargetResource, TickContext,
+//!     Action, Reconciler, ReconcilerName, TickContext,
 //! };
 //!
 //! struct HelloReconciler {
@@ -94,23 +99,14 @@
 //!     // shape picks `()`; the first real reconciler (`JobLifecycle`)
 //!     // picks `JobLifecycleState`.
 //!     type State = ();
-//!     // Phase 1 reconcilers carry no private memory — View is ().
-//!     // Phase 2+ authors declare a struct decoded from libSQL rows
-//!     // inside `hydrate`.
+//!     // Per ADR-0035 §1, `View` carries the four serde + Default +
+//!     // Clone bounds; `()` satisfies them trivially. Phase 2+
+//!     // authors declare a struct that derives the four bounds; the
+//!     // runtime owns persistence end-to-end.
 //!     type View = ();
 //!
 //!     fn name(&self) -> &ReconcilerName {
 //!         &self.name
-//!     }
-//!
-//!     // The ONLY place a reconciler author touches libSQL. Phase 1
-//!     // reconcilers hold no memory, so this is trivially Ok(()).
-//!     async fn hydrate(
-//!         &self,
-//!         _target: &TargetResource,
-//!         _db: &LibsqlHandle,
-//!     ) -> Result<Self::View, HydrateError> {
-//!         Ok(())
 //!     }
 //!
 //!     // Pure, synchronous. No `.await`, no I/O, no direct store
@@ -129,10 +125,11 @@
 //!         // will reject the PR.
 //!         let _now = tick.now;
 //!
-//!         // `view` carries the hydrated private memory. The returned
-//!         // next-view (second element of the tuple) is diffed by the
-//!         // runtime against this value and persisted back to libSQL.
-//!         // Reconcilers never write libSQL directly.
+//!         // `view` carries the in-memory per-target view the runtime
+//!         // bulk-loaded at boot. The returned next-view (second
+//!         // element of the tuple) is diffed by the runtime against
+//!         // this value and persisted via `ViewStore::write_through`.
+//!         // Reconcilers never write storage directly.
 //!         let next_view: Self::View = *view;
 //!
 //!         (vec![Action::Noop], next_view)
@@ -150,6 +147,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 
 use std::collections::BTreeMap;
 
@@ -299,26 +298,31 @@ pub enum HydrateError {
 // Reconciler trait
 // ---------------------------------------------------------------------------
 
-/// The §18 reconciler trait, pre-hydration + time-injected shape.
+/// The §18 reconciler trait, single-method sync shape.
 ///
-/// Per ADR-0013 §2 and §2c:
+/// Per ADR-0035 §1 (which supersedes ADR-0013 §2 / §2a partial / §2b):
 ///
-/// * `hydrate` is async — the ONLY place a reconciler author touches
-///   libSQL. Returns the author-declared `View` type (typically a
-///   struct decoded from a row set).
 /// * `reconcile` is pure and synchronous — no `.await`, no I/O, no
 ///   wall-clock read (only via `tick.now`), no direct store write. The
 ///   returned `(Vec<Action>, Self::View)` tuple carries actions the
 ///   runtime commits through Raft and the next-view the runtime diffs
-///   against `view` and persists back to libSQL.
+///   against the in-memory cache and persists via `ViewStore`.
+///
+/// Per ADR-0036 the trait carries NO async hydrate / migrate / persist
+/// surface. The runtime owns all hydration: intent + observation are
+/// hydrated into [`AnyState`] variants by the runtime; per-reconciler
+/// `View` memory is bulk-loaded at boot via `ViewStore::bulk_load` and
+/// served from an in-memory `BTreeMap` thereafter, with write-through
+/// after each `reconcile`.
 ///
 /// Compile-time enforcement: the acceptance test
 /// `reconciler_trait_signature_is_synchronous_no_async_no_clock_param`
 /// pins the signature via an
 /// `fn(&R, &R::State, &R::State, &R::View, &TickContext) -> (Vec<Action>, R::View)`
 /// type assertion. A regression that makes `reconcile` `async fn`,
-/// adds a `&dyn Clock` parameter, or reverts the per-reconciler typed
-/// `State` associated type (ADR-0021) fails that test at compile time.
+/// adds a `&dyn Clock` parameter, re-introduces a `&LibsqlHandle`
+/// parameter, or reverts the per-reconciler typed `State` associated
+/// type (ADR-0021) fails that test at compile time.
 pub trait Reconciler: Send + Sync {
     /// Author-declared projection of the reconciler's `desired` /
     /// `actual` cluster state. Per ADR-0021, every reconciler picks
@@ -332,51 +336,39 @@ pub trait Reconciler: Send + Sync {
     type State: Send + Sync;
 
     /// Author-declared projection of the reconciler's private memory.
-    /// The runtime diffs the returned `NextView` against this view and
-    /// persists the delta — reconcilers never write libSQL directly.
-    type View: Send + Sync;
+    /// Per ADR-0035 §1 the runtime owns persistence end-to-end: the
+    /// `View` is bulk-loaded into an in-memory `BTreeMap` at boot via
+    /// `ViewStore::bulk_load`, served from RAM on every tick, and
+    /// written through to redb on every successful `reconcile`. The
+    /// four bounds — `Serialize + DeserializeOwned + Default + Clone`
+    /// plus the `Send + Sync` shared with the rest of the trait —
+    /// give the runtime everything it needs to (a) persist on
+    /// write-through, (b) materialise on bulk-load, (c) construct a
+    /// fresh entry when a target has no persisted row, and (d) hand
+    /// the same value to multiple readers.
+    type View: Serialize + DeserializeOwned + Default + Clone + Send + Sync;
 
-    /// Canonical name. Used for libSQL path derivation and evaluation
-    /// broker keying.
+    /// Canonical name. Used for `ViewStore` table keying and
+    /// evaluation broker lookup.
     ///
-    /// Per ADR-0013 §2 and §2a, the name is the [`AnyReconciler`]
-    /// registry key; match arms in [`AnyReconciler::name`],
-    /// [`AnyReconciler::hydrate`], and [`AnyReconciler::reconcile`]
-    /// dispatch on the variant that holds this name.
+    /// Per ADR-0035 §1 + ADR-0036 the name is the [`AnyReconciler`]
+    /// registry key; match arms in [`AnyReconciler::name`] and
+    /// [`AnyReconciler::reconcile`] dispatch on the variant that
+    /// holds this name.
     fn name(&self) -> &ReconcilerName;
 
-    /// Async read phase. The ONLY place a reconciler author touches
-    /// libSQL. Free-form SQL lives here; schema management (CREATE
-    /// TABLE IF NOT EXISTS, ALTER TABLE ADD COLUMN) lives here too —
-    /// no framework migrations in Phase 1.
-    ///
-    /// Per ADR-0013 §2 and §2b, the runtime's tick loop is
-    /// hydrate-then-reconcile: the runtime owns the `.await` on this
-    /// method, hands the resulting [`Reconciler::View`] to
-    /// [`Reconciler::reconcile`] as a pure input, and never exposes
-    /// the `&LibsqlHandle` to `reconcile`.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`HydrateError::Libsql`] on underlying libsql failure,
-    /// or [`HydrateError::Schema`] on schema-level mismatch.
-    fn hydrate(
-        &self,
-        target: &TargetResource,
-        db: &LibsqlHandle,
-    ) -> impl std::future::Future<Output = Result<Self::View, HydrateError>> + Send;
-
     /// Pure function over `(desired, actual, view, tick) ->
-    /// (Vec<Action>, NextView)`. See whitepaper §18, ADR-0013 §2 / §2b
-    /// / §2c, and `.claude/rules/development.md` §Reconciler I/O.
+    /// (Vec<Action>, NextView)`. See whitepaper §18, ADR-0035 §1, and
+    /// `.claude/rules/development.md` §Reconciler I/O.
     ///
-    /// Per ADR-0013 §2b, `view` is the hydrated [`Reconciler::View`]
-    /// and the second element of the returned tuple is the next-view
-    /// — the runtime diffs it against `view` and persists the delta
-    /// back to libSQL. Per ADR-0013 §2c, `tick` is the single pure
-    /// time input constructed by the runtime once per evaluation;
-    /// reading `Instant::now()` / `SystemTime::now()` inside this body
-    /// is banned.
+    /// `view` is the in-memory `View` value the runtime bulk-loaded at
+    /// boot (or `Self::View::default()` when no persisted row exists
+    /// for `target`). The second element of the returned tuple is the
+    /// next-view — the runtime diffs it against `view` and persists
+    /// the delta via `ViewStore::write_through`. Per the `TickContext`
+    /// shape, `tick` is the single pure time input constructed by the
+    /// runtime once per evaluation; reading `Instant::now()` /
+    /// `SystemTime::now()` inside this body is banned.
     ///
     /// Purity contract: two invocations with the same inputs MUST
     /// produce byte-identical `(actions, next_view)` tuples. The
@@ -781,18 +773,12 @@ impl Reconciler for NoopHeartbeat {
     // `type State = ()`. `NoopHeartbeat` ignores `desired`/`actual`
     // entirely and always emits `Action::Noop`.
     type State = ();
+    // Per ADR-0035 §1, `View` carries `Serialize + DeserializeOwned +
+    // Default + Clone + Send + Sync`. `()` satisfies them trivially.
     type View = ();
 
     fn name(&self) -> &ReconcilerName {
         &self.name
-    }
-
-    async fn hydrate(
-        &self,
-        _target: &TargetResource,
-        _db: &LibsqlHandle,
-    ) -> Result<Self::View, HydrateError> {
-        Ok(())
     }
 
     fn reconcile(
@@ -812,15 +798,15 @@ impl Reconciler for NoopHeartbeat {
 
 /// Enum-dispatched wrapper over every first-party reconciler kind.
 ///
-/// Replaces `Box<dyn Reconciler>` because the trait now carries an
-/// associated type (`type View`) and an `async fn` in trait — both of
-/// which break object safety. Adding a reconciler means adding a
-/// variant here and a match arm in each of `name`, `hydrate`, and
-/// `reconcile`.
+/// Erases the per-reconciler `(State, View)` associated-type pair so
+/// the runtime can hold a heterogeneous registry. Per ADR-0035 §1 the
+/// trait itself is dyn-compatible for any *fixed* `(State, View)`
+/// pair, but a registry with multiple kinds needs the enum dispatch.
+/// Adding a reconciler means adding a variant here and a match arm in
+/// each of `name` and `reconcile`.
 ///
-/// Phase 1 ships exactly one proof-of-life variant: `NoopHeartbeat`.
-/// The `phase-1-first-workload` DISTILL adds `JobLifecycle` as the
-/// first real (non-proof-of-life) reconciler.
+/// Phase 1 ships two variants: `NoopHeartbeat` (proof-of-life) and
+/// `JobLifecycle` (the first real reconciler).
 pub enum AnyReconciler {
     /// The Phase 1 proof-of-life reconciler. See [`NoopHeartbeat`].
     NoopHeartbeat(NoopHeartbeat),
@@ -836,26 +822,6 @@ impl AnyReconciler {
         match self {
             Self::NoopHeartbeat(r) => r.name(),
             Self::JobLifecycle(r) => r.name(),
-        }
-    }
-
-    /// Async read phase — dispatches to the inner reconciler's
-    /// `hydrate`. Because every variant's `View` can differ, the
-    /// caller receives a typed `AnyReconcilerView` sum.
-    ///
-    /// # Errors
-    ///
-    /// Propagates [`HydrateError`] from the inner reconciler.
-    pub async fn hydrate(
-        &self,
-        target: &TargetResource,
-        db: &LibsqlHandle,
-    ) -> Result<AnyReconcilerView, HydrateError> {
-        match self {
-            Self::NoopHeartbeat(r) => r.hydrate(target, db).await.map(|()| AnyReconcilerView::Unit),
-            Self::JobLifecycle(r) => {
-                r.hydrate(target, db).await.map(AnyReconcilerView::JobLifecycle)
-            }
         }
     }
 
@@ -932,9 +898,13 @@ impl AnyReconciler {
     }
 }
 
-/// Sum of every view type produced by `AnyReconciler::hydrate`. Phase 1
-/// originally only had `View = ()` (the `Unit` variant); the
-/// phase-1-first-workload DISTILL adds the `JobLifecycle` arm.
+/// Sum of every per-reconciler `View` shape held by the runtime's
+/// in-memory view cache. Phase 1 originally only had `View = ()` (the
+/// `Unit` variant); the phase-1-first-workload DISTILL added the
+/// `JobLifecycle` arm. Per ADR-0035 §1 the runtime owns the cache
+/// (bulk-loaded at boot via `ViewStore::bulk_load`, written through
+/// after each `reconcile`); reconcilers see a typed `&Self::View`,
+/// never the erased `AnyReconcilerView`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AnyReconcilerView {
     /// The `View = ()` variant used by Phase 1 reconcilers
@@ -1036,19 +1006,6 @@ impl Reconciler for JobLifecycle {
 
     fn name(&self) -> &ReconcilerName {
         &self.name
-    }
-
-    async fn hydrate(
-        &self,
-        _target: &TargetResource,
-        _db: &LibsqlHandle,
-    ) -> Result<Self::View, HydrateError> {
-        // Phase 1 02-02 carries the View shape; the libSQL hydrate
-        // path itself (CREATE TABLE IF NOT EXISTS, SELECT decode)
-        // lands in 02-03 alongside the runtime tick loop. For 02-02
-        // a fresh empty View is sufficient — the convergence loop is
-        // not yet driven, so the View has no rows to materialise.
-        Ok(JobLifecycleView::default())
     }
 
     fn reconcile(
@@ -1405,16 +1362,18 @@ fn is_restartable(row: &AllocStatusRow) -> bool {
 /// wall-clock representation chosen specifically so libSQL can store
 /// and rehydrate the value across process restarts (cf.
 /// `docs/research/control-plane/issue-139-followup-portable-deadline-representation-research.md`).
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 pub struct JobLifecycleView {
     /// How many times each alloc has been started under this
     /// reconciler's lifecycle. Reset by `alloc_id` when a new
     /// `alloc_id` is minted (per US-03 Domain Example 2).
+    #[serde(default)]
     pub restart_counts: BTreeMap<AllocationId, u32>,
     /// Wall-clock observation timestamp of the last failure per alloc.
     /// The reconcile read site recomputes the backoff deadline as
     /// `seen_at + backoff_for_attempt(restart_count)` against
     /// `tick.now_unix` on every tick — the persisted *input*, not the
     /// derived deadline.
+    #[serde(default)]
     pub last_failure_seen_at: BTreeMap<AllocationId, UnixInstant>,
 }

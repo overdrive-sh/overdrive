@@ -25,8 +25,8 @@ use proptest::prelude::*;
 use overdrive_core::UnixInstant;
 use overdrive_core::id::{ContentHash, CorrelationKey};
 use overdrive_core::reconciler::{
-    Action, HydrateError, LibsqlHandle, Reconciler, ReconcilerName, ReconcilerNameError,
-    TargetResource, TargetResourceError, TickContext,
+    Action, Reconciler, ReconcilerName, ReconcilerNameError, TargetResource, TargetResourceError,
+    TickContext,
 };
 
 // ---------------------------------------------------------------------------
@@ -467,14 +467,6 @@ impl Reconciler for NoopReconciler {
 
     fn name(&self) -> &ReconcilerName {
         &self.name
-    }
-
-    async fn hydrate(
-        &self,
-        _target: &overdrive_core::reconciler::TargetResource,
-        _db: &LibsqlHandle,
-    ) -> Result<Self::View, HydrateError> {
-        Ok(())
     }
 
     fn reconcile(
