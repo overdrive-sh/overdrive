@@ -36,8 +36,8 @@ use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{IntentKey, Job, Node};
 use overdrive_core::id::{JobId, NodeId};
 use overdrive_core::reconciler::{
-    Action, AnyReconciler, AnyReconcilerView, AnyState, JobLifecycleState, JobLifecycleView,
-    LibsqlHandle, ReconcilerName, TargetResource, TickContext,
+    Action, AnyReconciler, AnyReconcilerView, AnyState, JobLifecycleState, LibsqlHandle,
+    ReconcilerName, TargetResource, TickContext,
 };
 use overdrive_core::traits::intent_store::IntentStore;
 
@@ -364,24 +364,27 @@ pub async fn run_convergence_tick(
     let desired = hydrate_desired(reconciler, target, state).await?;
     let actual = hydrate_actual(reconciler, target, state).await?;
 
-    // Hydrate the typed View — currently carried in
-    // `AppState::view_cache` rather than libSQL. On first tick the
-    // cache is empty; `cached_view_or_default` returns a fresh
-    // `default()` view. We still call `reconciler.hydrate` to stay
-    // on-contract with ADR-0013 §2 (hydrate is the ONLY async read
-    // seam) — today's `hydrate` impls return a default view that we
-    // discard in favour of the cached value.
+    // Issue #139 step 02-03 — gold cutover. The runtime tick loop now
+    // implements the ADR-0013 §2b 7-step contract end-to-end against
+    // libSQL: open/reuse the registry's `LibsqlHandle` (opened eagerly
+    // at register time per step 01-02), call `hydrate` to read the
+    // persisted view, run the pure `reconcile`, then call `persist` to
+    // flush `next_view` back to libSQL. The discard-and-cache shape is
+    // gone; the in-memory `view_cache` field on `AppState` remains
+    // until step 02-05 because `streaming.rs` and `handlers.rs` still
+    // write to it (step 02-04 migrates those readers off the cache).
     //
-    // Issue #139 step 01-02: `LibsqlHandle` is now opened eagerly at
-    // register time and stashed in the registry; we fetch the handle
-    // by name rather than constructing one per tick. If the
-    // reconciler was deregistered between get + libsql_handle (Phase
-    // 2+ concern), fall through cleanly — the same level-triggered
-    // §18 shape that protects the `get` lookup above.
+    // Schema is current by lifecycle invariant — `Reconciler::migrate`
+    // ran once at register time per step 02-02 (see
+    // `ReconcilerRuntime::register`), so `hydrate` is SELECT-only and
+    // `persist` is DELETE-then-INSERT-only. Neither carries the
+    // CREATE TABLE IF NOT EXISTS hot-path overhead the discard-and-
+    // cache shape used to mask.
     //
-    // TODO(#139 step 02-01+): use the returned view directly once
-    // `JobLifecycle::hydrate` decodes real reconciler memory; drop
-    // the discard-and-cache shape below at step 02-04.
+    // If the reconciler was deregistered between `get` and
+    // `libsql_handle` (Phase 2+ concern), fall through cleanly — the
+    // same level-triggered §18 shape that protects the `get` lookup
+    // above.
     let Some(db) = state.runtime.libsql_handle(reconciler_name) else {
         tracing::warn!(
             target: "overdrive::reconciler",
@@ -391,11 +394,18 @@ pub async fn run_convergence_tick(
         );
         return Ok(());
     };
-    let _ = reconciler.hydrate(target, db.as_ref()).await.map_err(ConvergenceError::Hydrate)?;
-    let view = cached_view_or_default(reconciler, target, state);
+    let view = reconciler.hydrate(target, db.as_ref()).await.map_err(ConvergenceError::Hydrate)?;
 
     // Pure reconcile.
     let (actions, next_view) = reconciler.reconcile(&desired, &actual, &view, &tick);
+
+    // Persist `next_view` back to libSQL via the per-reconciler
+    // `persist` impl (DELETE-then-INSERT inside a single transaction
+    // for `JobLifecycle`; `Ok(())` for `View = ()` reconcilers). A
+    // failure surfaces as `ConvergenceError::Persist` — same shape as
+    // the `Hydrate` arm above so the runtime caller can distinguish
+    // read failures from write failures in operator-facing logs.
+    reconciler.persist(&next_view, db.as_ref()).await.map_err(ConvergenceError::Persist)?;
 
     // Capture `has_work` BEFORE dispatch — `action_shim::dispatch`
     // consumes `actions: Vec<Action>` by value, so checking
@@ -427,10 +437,6 @@ pub async fn run_convergence_tick(
     // preserving the level-triggered semantics whitepaper §18 promises.
     let backoff_pending = view_has_backoff_pending(&next_view);
     let has_work = actions.iter().any(|a| !matches!(a, Action::Noop)) || backoff_pending;
-
-    // Persist the next-view back into the in-memory cache.
-    // TODO(#139): replace with libSQL diff-and-persist per ADR-0013 §2b.
-    store_cached_view(reconciler, target, state, next_view);
 
     // Dispatch through the action shim — this is where `.await`
     // is permitted. Per-action error isolation lives in the shim.
@@ -476,63 +482,6 @@ pub async fn run_convergence_tick(
             .submit(Evaluation { reconciler: reconciler_name.clone(), target: target.clone() });
     }
     Ok(())
-}
-
-/// Cache key string form for the per-target view cache. The cache map
-/// is keyed on `(reconciler_name_string, target_string)` so it can
-/// be type-erased across reconciler kinds.
-fn cache_key(reconciler: &AnyReconciler, target: &TargetResource) -> (String, String) {
-    (reconciler.name().to_string(), target.to_string())
-}
-
-/// Return the cached `AnyReconcilerView` for `(reconciler, target)`,
-/// or a fresh default if the cache is empty.
-fn cached_view_or_default(
-    reconciler: &AnyReconciler,
-    target: &TargetResource,
-    state: &AppState,
-) -> AnyReconcilerView {
-    let key = cache_key(reconciler, target);
-    // Mutex poisoning is unreachable: every critical section in this
-    // module is straight-line and panic-free under the workspace's
-    // `expect_used` discipline. `allow` rather than reach for
-    // `parking_lot` for one call site.
-    #[allow(clippy::expect_used)]
-    let cache = state.view_cache.lock().expect("view_cache mutex");
-    match (reconciler, cache.get(&key)) {
-        (AnyReconciler::JobLifecycle(_), Some(crate::CachedView::JobLifecycle(v))) => {
-            AnyReconcilerView::JobLifecycle(v.clone())
-        }
-        (AnyReconciler::JobLifecycle(_), _) => {
-            AnyReconcilerView::JobLifecycle(JobLifecycleView::default())
-        }
-        // `View = ()` reconcilers — `NoopHeartbeat` (production) and
-        // `TestStub` (test infrastructure, kept out of public rustdoc
-        // via `#[doc(hidden)]` on `overdrive_core::reconciler::
-        // TestStubReconciler`). The production runtime never sees a
-        // `TestStub` instance — only integration tests construct one.
-        (AnyReconciler::NoopHeartbeat(_) | AnyReconciler::TestStub(_), _) => {
-            AnyReconcilerView::Unit
-        }
-    }
-}
-
-/// Persist the returned `next_view` back to the per-target cache.
-fn store_cached_view(
-    reconciler: &AnyReconciler,
-    target: &TargetResource,
-    state: &AppState,
-    next_view: AnyReconcilerView,
-) {
-    let key = cache_key(reconciler, target);
-    // See `cached_view_or_default` — same Mutex, same rationale.
-    #[allow(clippy::expect_used)]
-    let mut cache = state.view_cache.lock().expect("view_cache mutex");
-    let cached = match next_view {
-        AnyReconcilerView::Unit => crate::CachedView::Unit,
-        AnyReconcilerView::JobLifecycle(v) => crate::CachedView::JobLifecycle(v),
-    };
-    cache.insert(key, cached);
 }
 
 /// Pure predicate over `next_view`: does the `JobLifecycle` reconciler
@@ -701,6 +650,12 @@ pub enum ConvergenceError {
     /// Hydrate (libSQL read) failed.
     #[error("hydrate failed: {0}")]
     Hydrate(overdrive_core::reconciler::HydrateError),
+    /// Persist (libSQL write) failed. Issue #139 step 02-03 — paired
+    /// with [`Self::Hydrate`] so the runtime tick loop can surface
+    /// read failures and write failures distinguishably in
+    /// operator-facing logs.
+    #[error("persist failed: {0}")]
+    Persist(overdrive_core::reconciler::HydrateError),
     /// `IntentStore` read failed.
     #[error("intent read failed: {0}")]
     IntentRead(String),
@@ -723,6 +678,34 @@ pub enum ConvergenceError {
 #[allow(clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     use super::*;
+
+    /// Issue #139 step 02-03 `RED_UNIT` — pin the new `ConvergenceError::Persist`
+    /// variant: it carries a `HydrateError` (same payload shape as
+    /// `Hydrate`, since `AnyReconciler::persist` returns
+    /// `Result<(), HydrateError>`) and its `Display` form names "persist
+    /// failed" so the runtime tick loop's surfaced error is
+    /// distinguishable from a hydrate failure in operator-facing logs.
+    ///
+    /// Pre-GREEN this test will not compile — `Persist` does not exist
+    /// on `ConvergenceError` yet — which is the proof-of-RED.
+    #[test]
+    fn convergence_error_persist_variant_carries_hydrate_error_payload() {
+        let err = ConvergenceError::Persist(overdrive_core::reconciler::HydrateError::Schema {
+            message: "synthetic persist failure".to_string(),
+        });
+        let rendered = format!("{err}");
+        assert!(
+            rendered.contains("persist failed"),
+            "ConvergenceError::Persist Display must name 'persist failed' so \
+             operators can distinguish a persist failure from a hydrate \
+             failure in tick-loop logs; got: {rendered}",
+        );
+        assert!(
+            rendered.contains("synthetic persist failure"),
+            "ConvergenceError::Persist Display must propagate the underlying \
+             HydrateError text; got: {rendered}",
+        );
+    }
 
     /// Pin every numeric field of `baseline_nodes_phase1`'s
     /// hardcoded local node. Kills the `*` mutation on

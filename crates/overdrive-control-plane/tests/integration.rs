@@ -40,6 +40,11 @@ mod integration {
     mod job_lifecycle_libsql_persistence;
     mod libsql_isolation;
     mod observation_empty_rows;
+    /// Issue #139 step 02-03 — runtime convergence loop now closes
+    /// through the real libSQL handle path. Real filesystem I/O makes
+    /// this an integration-class test per
+    /// `.claude/rules/testing.md` § "Integration vs unit gating".
+    mod runtime_convergence_loop;
     mod server_lifecycle;
     mod submit_round_trip;
     mod tls_bootstrap;

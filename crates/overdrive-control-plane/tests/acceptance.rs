@@ -52,7 +52,6 @@ mod acceptance {
     // Pending-no-capacity renders an explicit reason row, never
     // `Allocations: 0`.
     mod row_body_conversions;
-    mod runtime_convergence_loop;
     mod runtime_registers_noop_heartbeat;
     mod submit_job_idempotency;
     mod transition_reason_type_identity;

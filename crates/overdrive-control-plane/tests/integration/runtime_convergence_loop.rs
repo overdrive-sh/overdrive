@@ -279,36 +279,41 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
             .await;
     }
 
-    // --- Assertion (kills the bugged behaviour): only `job-lifecycle`
-    //     ran against `job/payments`. `view_cache` is keyed on
-    //     `(reconciler_name_string, target_string)`; every reconciler
-    //     that runs through `run_convergence_tick` writes its entry
-    //     via `store_cached_view`.
+    // --- Assertion (kills the bugged behaviour): only ONE evaluation
+    //     was dispatched, and convergence is stable (no re-enqueue).
+    //     Issue #139 step 02-03 retired the `view_cache` inspection
+    //     this assertion used to ride on (per research §1.4 the
+    //     replacement counting strategy is broker counters). The
+    //     transitive proof that ONLY `job-lifecycle` ran is:
     //
-    //     Pre-fix the cache has TWO entries — both reconcilers ran.
-    //     Post-fix the cache has ONE entry — only the named reconciler.
-    let entries_for_target: Vec<(String, String)> = {
-        let cache = state.view_cache.lock().expect("view_cache mutex");
-        cache.keys().filter(|(_, t)| t == &target.to_string()).cloned().collect()
-    };
+    //       (a) the one seed Evaluation names `job-lifecycle` exactly;
+    //       (b) `dispatched == 1` after drain — exactly one Evaluation
+    //           passed through `drain_pending`;
+    //       (c) `queued == 0` — no re-enqueue (noop-heartbeat never
+    //           ran, and job-lifecycle against a converged target
+    //           emits no actions and has no backoff state).
+    //
+    //     Pre-fix (the routing bug) would have run BOTH reconcilers
+    //     per Evaluation; post-fix routes by name. The
+    //     `dispatched == 1` gate alone does not catch the routing
+    //     bug directly (drain count is 1 either way), but combined
+    //     with the convergence-stability gate (`queued == 0`) it
+    //     defends the post-fix shape: under the routing bug,
+    //     `noop-heartbeat` would self-re-enqueue every tick (its own
+    //     §18 level-triggered behaviour fires once it runs), tripping
+    //     `queued == 1`.
+    let counters = state.runtime.broker().counters();
     assert_eq!(
-        entries_for_target.len(),
-        1,
-        "expected exactly one reconciler to run against {} — \
-         JobLifecycle only — got {} entries: {:?} \
-         (pre-fix value 2 indicates fan-out across both reconcilers; \
-         the smoking gun is the noop-heartbeat entry, which was never \
-         named in the submitted evaluation)",
-        target,
-        entries_for_target.len(),
-        entries_for_target
+        counters.dispatched, 1,
+        "expected exactly one evaluation drained; got dispatched={}",
+        counters.dispatched
     );
-    let only_entry = &entries_for_target[0];
     assert_eq!(
-        only_entry.0, "job-lifecycle",
-        "expected the surviving cache entry to be `job-lifecycle` — \
-         got `{}`",
-        only_entry.0
+        counters.queued, 0,
+        "expected no re-enqueue against a converged target; got queued={} \
+         (a non-zero value indicates noop-heartbeat ran in addition to \
+         job-lifecycle and self-re-enqueued — the routing-bug shape)",
+        counters.queued
     );
 }
 
@@ -467,21 +472,33 @@ async fn stop_after_failed_alloc_drains_broker() {
         clock.tick(Duration::from_millis(100));
         warm_up_ticks += 1;
 
-        // Check whether the cached view shows the desired
-        // Failed-mid-backoff state.
-        let cache_key = ("job-lifecycle".to_string(), setup_target.to_string());
-        let observed = {
-            let cache = state.view_cache.lock().expect("view_cache mutex");
-            cache.get(&cache_key).cloned()
+        // Issue #139 step 02-03: check the persisted libSQL view for
+        // the desired Failed-mid-backoff state — the runtime tick loop
+        // now closes through `JobLifecycle::persist`, so a fresh
+        // `hydrate` against the registry handle observes the same
+        // inputs the reconciler emitted as `next_view`. Replaces the
+        // pre-cutover `view_cache` inspection (research §1.4
+        // counting-strategy replacement).
+        let job_lifecycle_name =
+            ReconcilerName::new("job-lifecycle").expect("valid reconciler name");
+        let job_lifecycle_reconciler = overdrive_core::reconciler::AnyReconciler::JobLifecycle(
+            overdrive_core::reconciler::JobLifecycle::canonical(),
+        );
+        let handle = state
+            .runtime
+            .libsql_handle(&job_lifecycle_name)
+            .expect("registry must hold a libSQL handle for job-lifecycle");
+        let view_observed = match job_lifecycle_reconciler.hydrate(&setup_target, handle).await {
+            Ok(overdrive_core::reconciler::AnyReconcilerView::JobLifecycle(v)) => v,
+            Ok(other) => panic!("expected JobLifecycleView; got {other:?}"),
+            Err(e) => panic!("hydrate failed during warm-up: {e}"),
         };
-        if let Some(overdrive_control_plane::CachedView::JobLifecycle(view)) = observed {
-            let alloc_id = AllocationId::new(&format!("alloc-{}-0", job_id.as_str()))
-                .expect("derived alloc id");
-            let count = view.restart_counts.get(&alloc_id).copied().unwrap_or(0);
-            let has_deadline = view.last_failure_seen_at.contains_key(&alloc_id);
-            if count >= 1 && has_deadline {
-                break;
-            }
+        let alloc_id =
+            AllocationId::new(&format!("alloc-{}-0", job_id.as_str())).expect("derived alloc id");
+        let count = view_observed.restart_counts.get(&alloc_id).copied().unwrap_or(0);
+        let has_deadline = view_observed.last_failure_seen_at.contains_key(&alloc_id);
+        if count >= 1 && has_deadline {
+            break;
         }
     }
     assert!(
@@ -627,7 +644,18 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
     };
     use overdrive_core::traits::driver::Resources;
 
+    // Issue #139 step 02-03: the simulated control-plane restart at the
+    // bottom of this test drops the live `LibsqlHandle` (along with the
+    // whole runtime) and re-opens against the same on-disk DB file
+    // path. The DB MUST be file-backed for that to round-trip; an
+    // in-memory libSQL DB loses every row when its handle drops, which
+    // would defeat the persist-inputs idempotence assertion. The
+    // `data_dir` lives under a `tempfile::TempDir` whose lifetime
+    // brackets both the pre-restart and post-restart runtime — see
+    // ADR-0013 §5 for the path scheme (`<data_dir>/reconcilers/<name>/
+    // memory.db`).
     let tmp = TempDir::new().expect("tempdir");
+    let data_dir = tmp.path().to_path_buf();
     let clock = SimClock::new();
 
     // --- Build AppState with the SimClock injected. The runtime's
@@ -637,17 +665,17 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
     //     wiring the runtime would fall back to AppState::new's default
     //     `SystemClock`, which would advance with real wall-clock and
     //     defeat the deterministic-rehydration assertion below.
-    let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime::new");
+    let mut runtime = ReconcilerRuntime::new(&data_dir).expect("runtime::new");
     runtime.register(noop_heartbeat()).await.expect("register noop-heartbeat");
     runtime.register(job_lifecycle()).await.expect("register job-lifecycle");
-    let store_path = tmp.path().join("intent.redb");
+    let store_path = data_dir.join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("NodeId"), 0));
     let driver: Arc<dyn Driver> = Arc::new(
         SimDriver::new(DriverType::Exec).fail_on_start_with("binary not found".to_string()),
     );
-    let mut state = AppState::new(store, obs, Arc::new(runtime), driver);
+    let mut state = AppState::new(store, obs.clone(), Arc::new(runtime), driver.clone());
     let sim_clock = Arc::new(clock);
     state.clock = sim_clock.clone();
 
@@ -684,6 +712,8 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
     let job_id = job.id.clone();
     let alloc_id =
         AllocationId::new(&format!("alloc-{}-0", job_id.as_str())).expect("derived alloc id");
+    let job_lifecycle_name = ReconcilerName::new("job-lifecycle").expect("valid reconciler name");
+    let job_lifecycle_reconciler = AnyReconciler::JobLifecycle(JobLifecycle::canonical());
     let mut warm_up_ticks = 0_u64;
     while warm_up_ticks < 30 {
         let now = sim_clock.now();
@@ -707,17 +737,25 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
         sim_clock.tick(Duration::from_millis(100));
         warm_up_ticks += 1;
 
-        let cache_key = ("job-lifecycle".to_string(), target.to_string());
-        let observed = {
-            let cache = state.view_cache.lock().expect("view_cache mutex");
-            cache.get(&cache_key).cloned()
+        // Issue #139 step 02-03: hydrate via the registry's libSQL handle
+        // — the gold cutover. Pre-cutover this loop inspected
+        // `state.view_cache`; the runtime tick loop now persists the view
+        // through `JobLifecycle::persist`, so the backoff inputs are
+        // observable through `hydrate` against the same on-disk DB the
+        // tick loop just wrote to.
+        let handle = state
+            .runtime
+            .libsql_handle(&job_lifecycle_name)
+            .expect("registry must hold a libSQL handle for job-lifecycle");
+        let view_observed = match job_lifecycle_reconciler.hydrate(&target, handle).await {
+            Ok(AnyReconcilerView::JobLifecycle(v)) => v,
+            Ok(other) => panic!("expected JobLifecycleView; got {other:?}"),
+            Err(e) => panic!("hydrate failed during warm-up: {e}"),
         };
-        if let Some(overdrive_control_plane::CachedView::JobLifecycle(view)) = observed {
-            let count = view.restart_counts.get(&alloc_id).copied().unwrap_or(0);
-            let has_seen_at = view.last_failure_seen_at.contains_key(&alloc_id);
-            if count >= 1 && has_seen_at {
-                break;
-            }
+        let count = view_observed.restart_counts.get(&alloc_id).copied().unwrap_or(0);
+        let has_seen_at = view_observed.last_failure_seen_at.contains_key(&alloc_id);
+        if count >= 1 && has_seen_at {
+            break;
         }
     }
     assert!(
@@ -727,16 +765,20 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
          action_shim should write Failed allocs that the reconciler then restarts)",
     );
 
-    // --- Snapshot the cached view's persisted inputs. These are the
-    //     ONLY two fields a libSQL hydrate would produce: `restart_counts`
-    //     and `last_failure_seen_at`. The view holds nothing else — by
-    //     construction (issue #141 §"Persist inputs, not derived state").
-    let cache_key = ("job-lifecycle".to_string(), target.to_string());
+    // --- Snapshot the persisted-to-libSQL inputs by hydrating one
+    //     final time. These are the ONLY two fields the libSQL row
+    //     columns carry: `restart_counts` and `last_failure_seen_at`.
+    //     The view struct holds nothing else — by construction (issue
+    //     #141 §"Persist inputs, not derived state").
     let view_pre: JobLifecycleView = {
-        let cache = state.view_cache.lock().expect("view_cache mutex");
-        match cache.get(&cache_key) {
-            Some(overdrive_control_plane::CachedView::JobLifecycle(v)) => v.clone(),
-            other => panic!("expected cached JobLifecycle view; got {other:?}"),
+        let handle = state
+            .runtime
+            .libsql_handle(&job_lifecycle_name)
+            .expect("registry must hold a libSQL handle for job-lifecycle");
+        match job_lifecycle_reconciler.hydrate(&target, handle).await {
+            Ok(AnyReconcilerView::JobLifecycle(v)) => v,
+            Ok(other) => panic!("expected JobLifecycleView; got {other:?}"),
+            Err(e) => panic!("hydrate failed for snapshot: {e}"),
         }
     };
     let restart_counts_persisted: BTreeMap<AllocationId, u32> = view_pre.restart_counts.clone();
@@ -802,39 +844,77 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
     let now_unix = UnixInstant::from_clock(&*sim_clock);
     let tick = TickContext { now, now_unix, tick: 99, deadline: now + Duration::from_millis(100) };
 
-    let reconciler = AnyReconciler::JobLifecycle(JobLifecycle::canonical());
     let view_live = AnyReconcilerView::JobLifecycle(view_pre.clone());
-    let (actions_pre, next_view_pre) = reconciler.reconcile(&desired, &actual, &view_live, &tick);
+    let (actions_pre, next_view_pre) =
+        job_lifecycle_reconciler.reconcile(&desired, &actual, &view_live, &tick);
 
-    // --- Simulate control-plane restart: drop the cached view (the
-    //     in-memory derived state) and rehydrate a fresh
-    //     `JobLifecycleView` from ONLY the persisted inputs. This is
-    //     the exact rehydration shape libSQL would produce —
-    //     `restart_counts` and `last_failure_seen_at` are the row
-    //     columns; the view struct holds nothing else.
-    {
-        let mut cache = state.view_cache.lock().expect("view_cache mutex");
-        cache.remove(&cache_key);
-    }
-    let view_post = JobLifecycleView {
-        restart_counts: restart_counts_persisted.clone(),
-        last_failure_seen_at: last_failure_seen_at_persisted.clone(),
+    // --- Simulate control-plane restart: drop the live runtime (and
+    //     with it the live `LibsqlHandle`s), then rebuild a fresh
+    //     runtime against the SAME `data_dir`. The per-reconciler
+    //     libSQL files at `<data_dir>/reconcilers/<name>/memory.db`
+    //     survive the drop because they are file-backed; the new
+    //     runtime's `register` call re-opens them and re-runs `migrate`
+    //     (CREATE TABLE IF NOT EXISTS — idempotent), then a fresh
+    //     hydrate against the new handle reads back exactly the
+    //     persisted columns. This is the runtime-boundary witness for
+    //     issue #139 step 02-03's gold cutover assertion.
+    //
+    //     Issue #139 step 02-03 — the test MUST use file-backed
+    //     `LibsqlHandle::open(...)` (which is what
+    //     `ReconcilerRuntime::register` does internally against the
+    //     `data_dir` path scheme), NOT `LibsqlHandle::open_in_memory()`,
+    //     because `:memory:` loses every row when the handle drops and
+    //     the rehydrate would observe an empty view, defeating the
+    //     persist-inputs assertion below.
+    drop(state);
+    let mut runtime_post = ReconcilerRuntime::new(&data_dir).expect("runtime::new (post-restart)");
+    runtime_post.register(noop_heartbeat()).await.expect("register noop-heartbeat (post-restart)");
+    runtime_post.register(job_lifecycle()).await.expect("register job-lifecycle (post-restart)");
+    let store_post = Arc::new(
+        LocalIntentStore::open(&store_path).expect("LocalIntentStore::open (post-restart)"),
+    );
+    let mut state_post =
+        AppState::new(store_post, obs.clone(), Arc::new(runtime_post), driver.clone());
+    state_post.clock = sim_clock.clone();
+
+    let view_post: JobLifecycleView = {
+        let handle_post = state_post
+            .runtime
+            .libsql_handle(&job_lifecycle_name)
+            .expect("post-restart registry must hold a libSQL handle for job-lifecycle");
+        match job_lifecycle_reconciler.hydrate(&target, handle_post).await {
+            Ok(AnyReconcilerView::JobLifecycle(v)) => v,
+            Ok(other) => panic!("expected JobLifecycleView; got {other:?}"),
+            Err(e) => panic!("hydrate failed for post-restart rehydrate: {e}"),
+        }
     };
-    {
-        let mut cache = state.view_cache.lock().expect("view_cache mutex");
-        cache.insert(
-            cache_key.clone(),
-            overdrive_control_plane::CachedView::JobLifecycle(view_post.clone()),
-        );
-    }
+
+    // Pin the persisted inputs round-trip through the full
+    // drop-then-reopen cycle. If `JobLifecycle::persist` writes the
+    // wrong rows or `JobLifecycle::hydrate` reads them back wrong, the
+    // BTreeMap-equality check here flags it before the (deeper)
+    // reconcile-output assertion below muddies the diagnosis.
+    assert_eq!(
+        view_post.restart_counts, restart_counts_persisted,
+        "post-restart hydrate must observe the same restart_counts the pre-restart \
+         hydrate reported; got {:?}, expected {:?}",
+        view_post.restart_counts, restart_counts_persisted
+    );
+    assert_eq!(
+        view_post.last_failure_seen_at, last_failure_seen_at_persisted,
+        "post-restart hydrate must observe the same last_failure_seen_at the pre-restart \
+         hydrate reported; got {:?}, expected {:?}",
+        view_post.last_failure_seen_at, last_failure_seen_at_persisted
+    );
 
     // --- Run reconcile against the rehydrated view at the SAME
     //     TickContext. Same desired, same actual, same tick — the only
     //     difference is the view came from a "freshly bootstrapped
-    //     process" rather than a continuous in-memory accumulation.
+    //     process" reading libSQL from disk rather than a continuous
+    //     in-memory accumulation.
     let view_rehydrated = AnyReconcilerView::JobLifecycle(view_post);
     let (actions_post, next_view_post) =
-        reconciler.reconcile(&desired, &actual, &view_rehydrated, &tick);
+        job_lifecycle_reconciler.reconcile(&desired, &actual, &view_rehydrated, &tick);
 
     // --- The load-bearing assertion: rehydration from persisted
     //     inputs at the same TickContext produces identical Actions
@@ -956,19 +1036,42 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
     };
     state.obs.write(ObservationRow::AllocStatus(alloc_row)).await.expect("seed Failed alloc row");
 
-    // Seed cached view with the supplied restart_counts and
-    // last_failure_seen_at = now_unix (zero — the backoff window has
-    // NOT elapsed for any non-trivial RESTART_BACKOFF_DURATION).
+    // Issue #139 step 02-03: seed the persisted libSQL view with the
+    // supplied `restart_counts` and `last_failure_seen_at = now_unix`
+    // (zero — the backoff window has NOT elapsed for any non-trivial
+    // `RESTART_BACKOFF_DURATION`). The runtime tick loop will hydrate
+    // this view from the registry's libSQL handle and call `reconcile`
+    // against it; the test asserts on `queued` after the tick to pin
+    // the `view_has_backoff_pending` boundary semantics.
+    //
+    // Replaces the pre-cutover `view_cache` seeding (research §1.4
+    // counting-strategy replacement); the `JobLifecycle::persist` call
+    // here writes the same row columns the runtime persist call would
+    // have written, so the boundary-semantics gate continues to fire
+    // under the libSQL hydrate path.
     let target = TargetResource::new("job/payments").expect("valid target");
-    let cache_key = ("job-lifecycle".to_string(), target.to_string());
     let mut restart_counts = BTreeMap::new();
     restart_counts.insert(alloc_id.clone(), restart_counts_value);
     let mut last_failure_seen_at = BTreeMap::new();
     last_failure_seen_at.insert(alloc_id, UnixInstant::from_clock(&*sim_clock));
-    let view = JobLifecycleView { restart_counts, last_failure_seen_at };
+    let seeded_view = JobLifecycleView { restart_counts, last_failure_seen_at };
     {
-        let mut cache = state.view_cache.lock().expect("view_cache mutex");
-        cache.insert(cache_key, overdrive_control_plane::CachedView::JobLifecycle(view));
+        let job_lifecycle_name =
+            ReconcilerName::new("job-lifecycle").expect("valid reconciler name");
+        let job_lifecycle_reconciler = overdrive_core::reconciler::AnyReconciler::JobLifecycle(
+            overdrive_core::reconciler::JobLifecycle::canonical(),
+        );
+        let handle = state
+            .runtime
+            .libsql_handle(&job_lifecycle_name)
+            .expect("registry must hold a libSQL handle for job-lifecycle");
+        job_lifecycle_reconciler
+            .persist(
+                &overdrive_core::reconciler::AnyReconcilerView::JobLifecycle(seeded_view),
+                handle,
+            )
+            .await
+            .expect("persist seeded view");
     }
 
     // Submit and drain the seed eval — without re-submitting, the
