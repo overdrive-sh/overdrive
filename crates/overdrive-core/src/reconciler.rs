@@ -211,54 +211,86 @@ pub struct TickContext {
 
 /// Opaque handle to a reconciler's private libSQL memory.
 ///
-/// Per ADR-0013, one `&LibsqlHandle` per reconciler, exclusive to that
-/// reconciler, provisioned by the runtime from the per-primitive libSQL
-/// path. Phase 1 reconcilers use `type View = ()` and do not touch the
-/// handle; Phase 2+ reconcilers will gain public query/exec methods on
-/// `LibsqlHandle` when a first concrete author needs them.
+/// Per ADR-0013 §2b, one `&LibsqlHandle` per reconciler, exclusive to
+/// that reconciler, provisioned by the runtime from the per-primitive
+/// libSQL path. The handle wraps `Arc<libsql::Connection>` so cloning
+/// is cheap and the underlying connection is shared safely across the
+/// async hydrate path.
 ///
-/// The type is real (not a unit-like empty placeholder) so the trait
-/// signature is stable: `hydrate`'s async surface already takes a real
-/// handle type, and downstream authors can implement against it today.
-#[derive(Debug, Clone)]
+/// Two constructors:
+///
+/// * [`LibsqlHandle::open`] — file-backed, used by the production
+///   runtime to open the per-reconciler libSQL file.
+/// * [`LibsqlHandle::open_in_memory`] — `:memory:`-backed, used by
+///   in-process tests that need a real connection without filesystem
+///   I/O.
+///
+/// Both go through `libsql::Builder::new_local(...).build().await`
+/// followed by `Database::connect()`; construction failure surfaces as
+/// [`libsql::Error`].
+///
+/// The [`LibsqlHandle::connection`] accessor returns `&libsql::Connection`
+/// so reconciler authors run free-form SQL through the underlying
+/// primitive — `db.connection().execute(...)` / `db.connection()
+/// .query(...)` — rather than through a constrained method surface on
+/// the handle itself. Per `.claude/rules/development.md` § "Reconciler
+/// I/O", `hydrate` is the ONLY place this access is permitted.
+#[derive(Clone)]
 pub struct LibsqlHandle {
-    // Phase 1: the connection handle is `Option::None` because no
-    // current reconciler opens its DB. The field exists so the newtype
-    // is genuinely a wrapper around the eventual `Arc<libsql::Connection>`
-    // shape — the crate-private constructor produces `None`; Phase 2+
-    // wires the real connection.
-    //
-    // Typed as `Arc<()>` for now rather than `Arc<libsql::Connection>`
-    // so the core crate does not pull libsql onto its compile graph
-    // until a reconciler author actually needs a connection. The
-    // architectural intent — one `Arc`-shared handle, cheap to clone,
-    // opaque from the caller's perspective — is preserved.
-    _handle: Option<Arc<()>>,
+    conn: Arc<libsql::Connection>,
+}
+
+impl fmt::Debug for LibsqlHandle {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // `libsql::Connection` is not `Debug`. We expose only the type
+        // name — the connection's internals carry no information that
+        // would be useful in a debug print and the surrounding handle
+        // is intentionally opaque.
+        f.debug_struct("LibsqlHandle").finish_non_exhaustive()
+    }
 }
 
 impl LibsqlHandle {
-    /// Crate-private constructor. The runtime in
-    /// `overdrive-control-plane::reconciler_runtime` is the intended
-    /// caller; Phase 1 does not yet open any DB so the method is not
-    /// reached from within this crate.
+    /// Open a file-backed libSQL database at `path` and return a
+    /// handle wrapping the connection. The intended caller is the
+    /// reconciler runtime in `overdrive-control-plane`, which derives
+    /// `path` from the per-primitive libSQL provisioner.
     ///
-    /// Phase 1 produces an empty handle; Phase 2+ wires the real
-    /// libsql connection.
-    #[must_use]
-    #[allow(dead_code)] // Reserved for the 04-09+ reconciler-runtime wiring.
-    pub(crate) const fn empty() -> Self {
-        Self { _handle: None }
+    /// # Errors
+    ///
+    /// Returns [`libsql::Error`] if the libSQL builder rejects the
+    /// path (filesystem permissions, malformed path, etc.) or if the
+    /// subsequent `Database::connect()` call fails.
+    pub async fn open(path: impl AsRef<std::path::Path>) -> Result<Self, libsql::Error> {
+        let db = libsql::Builder::new_local(path.as_ref()).build().await?;
+        let conn = db.connect()?;
+        Ok(Self { conn: Arc::new(conn) })
     }
 
-    /// Phase 1 default handle — no underlying libSQL connection. The
-    /// runtime tick loop hands this to every `Reconciler::hydrate`
-    /// call until Phase 2+ wires per-primitive libSQL files.
-    /// Reconcilers that touch the handle in Phase 1 are a bug — every
-    /// Phase 1 reconciler's `View = ()` (or carries no row data) and
-    /// returns `Ok(default)` without using the handle.
+    /// Open an in-memory libSQL database and return a handle wrapping
+    /// the connection. Used by in-process tests that need a real
+    /// connection without filesystem I/O — production wiring uses
+    /// [`LibsqlHandle::open`] with a real file path.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`libsql::Error`] if the libSQL builder fails to
+    /// construct the in-memory database or the subsequent
+    /// `Database::connect()` call fails.
+    pub async fn open_in_memory() -> Result<Self, libsql::Error> {
+        let db = libsql::Builder::new_local(":memory:").build().await?;
+        let conn = db.connect()?;
+        Ok(Self { conn: Arc::new(conn) })
+    }
+
+    /// Borrow the underlying libSQL connection. Reconciler authors
+    /// run free-form SQL through this — `handle.connection().execute(...)`,
+    /// `handle.connection().query(...)`. Per ADR-0013 §2b and
+    /// `.claude/rules/development.md` § "Reconciler I/O", this access
+    /// is only permitted inside a `Reconciler::hydrate` body.
     #[must_use]
-    pub const fn default_phase1() -> Self {
-        Self { _handle: None }
+    pub fn connection(&self) -> &libsql::Connection {
+        &self.conn
     }
 }
 
@@ -1417,4 +1449,57 @@ pub struct JobLifecycleView {
     /// `tick.now_unix` on every tick — the persisted *input*, not the
     /// derived deadline.
     pub last_failure_seen_at: BTreeMap<AllocationId, UnixInstant>,
+}
+
+// ---------------------------------------------------------------------------
+// LibsqlHandle constructor / accessor tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::LibsqlHandle;
+
+    /// `open_in_memory()` produces a handle whose underlying connection
+    /// can run a CREATE/INSERT/SELECT roundtrip. The accessor returns
+    /// `&libsql::Connection` so reconciler authors can run free-form
+    /// SQL without wrapping every call in a method on `LibsqlHandle`.
+    #[tokio::test]
+    async fn open_in_memory_returns_usable_connection() {
+        let handle = LibsqlHandle::open_in_memory().await.expect("open in-memory");
+        let conn = handle.connection();
+
+        conn.execute("CREATE TABLE t (x INTEGER)", ()).await.expect("create table");
+        conn.execute("INSERT INTO t (x) VALUES (1)", ()).await.expect("insert row");
+
+        let mut rows = conn.query("SELECT x FROM t", ()).await.expect("select");
+        let row = rows.next().await.expect("next row").expect("row present");
+        let got: i64 = row.get(0).expect("x column");
+        assert_eq!(got, 1);
+    }
+
+    /// `open(path)` writes to a file on disk. Re-opening the same path
+    /// after dropping the handle observes the previously-inserted row,
+    /// proving the constructor went through `Builder::new_local(path)`
+    /// rather than an in-memory shortcut.
+    #[tokio::test]
+    async fn open_file_backed_round_trips_across_handles() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("memory.db");
+
+        // First handle: create table, insert row, drop.
+        {
+            let handle = LibsqlHandle::open(&path).await.expect("first open");
+            let conn = handle.connection();
+            conn.execute("CREATE TABLE t (x INTEGER)", ()).await.expect("create");
+            conn.execute("INSERT INTO t (x) VALUES (42)", ()).await.expect("insert");
+        }
+
+        // Second handle against the same path: the row must persist.
+        let handle = LibsqlHandle::open(&path).await.expect("second open");
+        let conn = handle.connection();
+        let mut rows = conn.query("SELECT x FROM t", ()).await.expect("select");
+        let row = rows.next().await.expect("next row").expect("row present");
+        let got: i64 = row.get(0).expect("x column");
+        assert_eq!(got, 42);
+    }
 }
