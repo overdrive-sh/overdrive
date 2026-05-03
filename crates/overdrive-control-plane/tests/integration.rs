@@ -48,6 +48,12 @@ mod integration {
     mod redb_view_store;
     mod server_lifecycle;
     mod submit_round_trip;
+    /// `TerminalCondition` propagation — step 02-02 of
+    /// `reconciler-memory-redb`. Action shim threads `Action.terminal`
+    /// onto BOTH `AllocStatusRow.terminal` AND `LifecycleEvent.terminal`
+    /// in the same call frame; per ADR-0037 §4 drift between the two
+    /// surfaces is structurally impossible.
+    mod terminal_propagation;
     mod tls_bootstrap;
     /// phase-1-first-workload — slice 3 (US-03) — Linux-only walking
     /// skeletons. Each scenario file gates itself with

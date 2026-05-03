@@ -20,11 +20,11 @@ use axum::http::{HeaderMap, header};
 use axum::response::{IntoResponse, Response};
 use overdrive_core::aggregate::{AggregateError, IntentKey, Job, JobSpecInput};
 use overdrive_core::id::{ContentHash, JobId};
-use overdrive_core::reconciler::{
-    JobLifecycleView, RESTART_BACKOFF_CEILING, ReconcilerName, TargetResource,
-};
+use overdrive_core::reconciler::{ReconcilerName, TargetResource};
 use overdrive_core::traits::intent_store::{IntentStore, PutOutcome};
 use overdrive_core::traits::observation_store::AllocState;
+use overdrive_core::traits::observation_store::AllocStatusRow;
+use overdrive_core::transition_reason::TerminalCondition;
 use serde::Deserialize;
 
 use crate::api::{
@@ -566,12 +566,6 @@ pub async fn alloc_status(
         .map_err(|e| ControlPlaneError::internal("rkyv deserialize of Job", e))?;
     let spec_digest = ContentHash::of(&bytes).to_string();
 
-    // Pull the JobLifecycle view from AppState's view cache. A fresh
-    // job (never reconciled) yields the default empty view, which
-    // converts to a `RestartBudget { used: 0, max: 5, exhausted: false }`.
-    let view = read_job_lifecycle_view(&state, &job_id);
-    let restart_budget = restart_budget_from_view(&view);
-
     // Filter rows to this job, project them, and stamp the requested
     // resource envelope from the JobSpec onto each row body (the bare
     // conversion zeroes resources; the handler is the only call site
@@ -580,13 +574,24 @@ pub async fn alloc_status(
         cpu_milli: job.resources.cpu_milli,
         memory_bytes: job.resources.memory_bytes,
     };
-    let rows: Vec<api::AllocStatusRowBody> = state
+    let raw_rows = state
         .obs
         .alloc_status_rows()
         .await
-        .map_err(|e| ControlPlaneError::internal("alloc_status_rows", e))?
+        .map_err(|e| ControlPlaneError::internal("alloc_status_rows", e))?;
+    let job_rows: Vec<AllocStatusRow> =
+        raw_rows.into_iter().filter(|row| row.job_id == job_id).collect();
+
+    // Per ADR-0037 §4: derive the RestartBudget from the durable
+    // `AllocStatusRow.terminal` field rather than from a recomputed
+    // projection over `view.restart_counts`. The reconciler is the
+    // single writer of terminal claims; the durable row is the
+    // single source of truth for "is this job's replica budget
+    // exhausted?".
+    let restart_budget = restart_budget_from_rows(&job_rows);
+
+    let rows: Vec<api::AllocStatusRowBody> = job_rows
         .into_iter()
-        .filter(|row| row.job_id == job_id)
         .map(|row| {
             let mut body = api::AllocStatusRowBody::from(row);
             body.resources = resources_body;
@@ -607,27 +612,31 @@ pub async fn alloc_status(
     }))
 }
 
-/// Read the in-memory `JobLifecycleView` for `(job-lifecycle, job/<id>)`
-/// from the runtime's view map (per ADR-0035 §5 — the runtime-owned
-/// `BTreeMap` is the steady-state read SSOT, populated at register via
-/// `ViewStore::bulk_load` and updated after every successful tick via
-/// `ViewStore::write_through`). Returns the default empty view if the
-/// job has never been reconciled (the canonical fresh-job case).
-fn read_job_lifecycle_view(state: &AppState, job_id: &JobId) -> JobLifecycleView {
-    #[allow(clippy::expect_used)]
-    let target = overdrive_core::reconciler::TargetResource::new(&format!("job/{job_id}"))
-        .expect("job_id renders to a valid TargetResource");
-    state.runtime.view_for_job_lifecycle(&target)
-}
+/// Phase 1 maximum restart attempts before a `JobLifecycle` reconciler
+/// emits `Action::FinalizeFailed { terminal: BackoffExhausted }`.
+/// Surfaced on the `RestartBudget.max` wire field so operators see the
+/// configured budget alongside the durable `exhausted` derivation.
+const RESTART_BUDGET_MAX_FOR_WIRE: u32 = 5;
 
-/// Derive a `RestartBudget` from the reconciler's per-allocation
-/// `restart_counts`. Phase 1: `max` is hard-coded to
-/// `RESTART_BACKOFF_CEILING` (5); the budget is exhausted when any
-/// allocation has used `>= max` restarts. The aggregate `used` is the
-/// max across allocations — operators see the highest-pressure replica.
-fn restart_budget_from_view(view: &JobLifecycleView) -> RestartBudget {
-    let used = view.restart_counts.values().copied().max().unwrap_or(0);
-    RestartBudget { used, max: RESTART_BACKOFF_CEILING, exhausted: used >= RESTART_BACKOFF_CEILING }
+/// Derive a [`RestartBudget`] from the durable
+/// [`AllocStatusRow.terminal`] field per ADR-0037 §4. The budget is
+/// exhausted iff any of the job's rows carries
+/// `Some(TerminalCondition::BackoffExhausted { .. })` — the
+/// reconciler-emitted terminal claim. Per § Persist inputs, not
+/// derived state: `exhausted` is recomputed on every read from the
+/// durable inputs (`row.terminal`) so a future per-job budget policy
+/// change does not require a row migration.
+///
+/// `used` reflects the attempts count from the `BackoffExhausted`
+/// variant when terminal, else 0; `max` is the Phase 1 wire constant.
+fn restart_budget_from_rows(rows: &[AllocStatusRow]) -> RestartBudget {
+    let exhausted_attempts = rows.iter().find_map(|row| match &row.terminal {
+        Some(TerminalCondition::BackoffExhausted { attempts }) => Some(*attempts),
+        _ => None,
+    });
+    let used = exhausted_attempts.unwrap_or(0);
+    let exhausted = exhausted_attempts.is_some();
+    RestartBudget { used, max: RESTART_BUDGET_MAX_FOR_WIRE, exhausted }
 }
 
 /// `GET /v1/nodes` — observation read on `node_health`.

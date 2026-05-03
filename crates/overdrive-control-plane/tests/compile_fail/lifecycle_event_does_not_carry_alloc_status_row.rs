@@ -49,5 +49,6 @@ fn main() {
         detail: None,
         source: overdrive_control_plane::api::TransitionSource::Reconciler,
         at: "1@local".to_owned(),
+        terminal: None,
     };
 }

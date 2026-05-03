@@ -26,6 +26,7 @@ use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
     ObservationStoreError,
 };
+use overdrive_core::transition_reason::TerminalCondition;
 use tokio::sync::broadcast;
 
 use crate::api::{AllocStateWire, TransitionSource};
@@ -81,6 +82,16 @@ pub struct LifecycleEvent {
     pub source: TransitionSource,
     /// Logical-timestamp string (counter@writer) for this transition.
     pub at: String,
+    /// Reconciler-decided terminal claim per ADR-0037 §4. Carries the
+    /// SAME value the action shim wrote onto `AllocStatusRow.terminal`
+    /// in the same dispatch call frame. Drift between the two surfaces
+    /// is structurally impossible — both are populated from the
+    /// originating `Action.terminal` field at one source site.
+    /// `None` means "this transition is not terminal" (e.g. a
+    /// Pending → Running success, a mid-budget Failed transition, an
+    /// exit-observer-emitted exit event whose terminal classification
+    /// is the reconciler's job to make on a subsequent tick).
+    pub terminal: Option<TerminalCondition>,
 }
 
 // ---------------------------------------------------------------------------
@@ -159,13 +170,26 @@ fn split_once_after_path(s: &str) -> Option<(&str, &str)> {
 
 /// Build an `AllocStatusRow` for a state transition driven by the shim.
 /// Used by every variant that writes observation: `StartAllocation`,
-/// `RestartAllocation`, and `StopAllocation` all funnel through this
-/// helper so the row shape is constructed in exactly one place. Pure
-/// over its inputs — does not touch the observation store.
+/// `RestartAllocation`, `StopAllocation`, and `FinalizeFailed` all funnel
+/// through this helper so the row shape is constructed in exactly one
+/// place. Pure over its inputs — does not touch the observation store.
 ///
 /// Per ADR-0032 §3 (Amendment 2026-04-30) the row carries
 /// `reason: Option<TransitionReason>` and `detail: Option<String>`
 /// for cause-class attribution.
+///
+/// Per ADR-0037 §4 the row carries `terminal: Option<TerminalCondition>`
+/// — the reconciler-emitted classification of *why* an allocation
+/// reached a terminal lifecycle state. The dispatch arm passes the
+/// `Action.terminal` value through here so the row's durable surface
+/// and the broadcasted `LifecycleEvent.terminal` derived in
+/// `build_lifecycle_event` BOTH come from the same Action-derived value
+/// — drift between the two surfaces is structurally impossible.
+//
+// 8 row fields are intentional — the row is the durable wire shape and
+// adding indirection would add noise without simplifying the call sites;
+// ADR-0032 §3 + ADR-0037 §4 both grew this list deliberately.
+#[allow(clippy::too_many_arguments)]
 fn build_alloc_status_row(
     alloc_id: AllocationId,
     job_id: JobId,
@@ -174,6 +198,7 @@ fn build_alloc_status_row(
     tick: &TickContext,
     reason: Option<TransitionReason>,
     detail: Option<String>,
+    terminal: Option<TerminalCondition>,
 ) -> AllocStatusRow {
     let writer = node_id.clone();
     AllocStatusRow {
@@ -184,14 +209,7 @@ fn build_alloc_status_row(
         updated_at: timestamp_for(tick, writer),
         reason,
         detail,
-        // ADR-0037: `terminal` is the durable home for the
-        // reconciler-emitted classification of *why* an allocation
-        // reached a terminal lifecycle state. Phase 02 of the
-        // reconciler-memory-redb feature threads the
-        // `Action::*.terminal: Option<TerminalCondition>` through
-        // this builder; until then every row this shim writes
-        // structurally carries `terminal: None`.
-        terminal: None,
+        terminal,
     }
 }
 
@@ -202,6 +220,11 @@ fn build_alloc_status_row(
 /// set to `prior_state` so the event correctly reflects the transition
 /// direction. Each call site reads the prior obs row and passes it here;
 /// `StartAllocation` defaults to `Pending` for first-seen allocs.
+///
+/// Per ADR-0037 §4: the event's `terminal` field is byte-equal to the
+/// row's `terminal` field — both are populated from the originating
+/// `Action.terminal` value in the same dispatch call frame, so drift is
+/// structurally impossible.
 fn build_lifecycle_event(
     row: &AllocStatusRow,
     prior_state: AllocStateWire,
@@ -220,6 +243,7 @@ fn build_lifecycle_event(
         detail: row.detail.clone(),
         source,
         at: format_logical_timestamp(&row.updated_at),
+        terminal: row.terminal.clone(),
     }
 }
 
@@ -311,21 +335,69 @@ async fn dispatch_single(
 ) -> Result<(), ShimError> {
     match action {
         // No-op (Action::Noop), Phase 3 workflow start, and the Phase 3
-        // HttpCall placeholder are all "no dispatch needed at 02-02"
-        // — the action is observation-only or deferred.
-        // FinalizeFailed is a Phase 02-01 plumbing-only addition —
-        // the action variant exists so `JobLifecycle::reconcile` can
-        // emit its terminal claim per ADR-0037 §4. Step 02-02 wires
-        // this dispatch arm to write `AllocStatusRow { state: Failed,
-        // terminal: Some(BackoffExhausted), .. }` and to broadcast a
-        // matching `LifecycleEvent`. Until then the variant lands as
-        // a no-op so the downstream Phase-1 contracts (the existing
-        // backoff-exhausted obs row written by the StartRejected path)
-        // continue to fire.
-        Action::Noop
-        | Action::StartWorkflow { .. }
-        | Action::HttpCall { .. }
-        | Action::FinalizeFailed { .. } => Ok(()),
+        // HttpCall placeholder are all "no dispatch needed" — the
+        // action is observation-only or deferred.
+        Action::Noop | Action::StartWorkflow { .. } | Action::HttpCall { .. } => Ok(()),
+        // FinalizeFailed: the reconciler has decided this allocation
+        // has reached a terminal failure (e.g. restart budget
+        // exhausted). Per ADR-0037 §4 the shim threads the
+        // `Action.terminal` value onto BOTH `AllocStatusRow.terminal`
+        // (durable surface, written via `obs.write`) AND
+        // `LifecycleEvent.terminal` (broadcast surface, emitted via
+        // `bus.send`) in the same call frame — both surfaces come
+        // from the same source value, so drift is structurally
+        // impossible.
+        //
+        // The row is written with `state: Failed` (per ADR-0032 §5
+        // distinguishes "operator stopped" → Terminated from
+        // "driver could not start / budget exhausted" → Failed). The
+        // reason carries the `RestartBudgetExhausted` summary so
+        // existing wire consumers (snapshot's `last_transition.reason`)
+        // see a coherent cause-class explanation alongside the
+        // structured `terminal` field.
+        Action::FinalizeFailed { alloc_id, terminal } => {
+            let Some(prior_row) = find_prior_alloc_row(obs, &alloc_id).await? else {
+                // No prior row — nothing to finalize against. This is
+                // structurally rare (the JobLifecycle only emits
+                // FinalizeFailed against a known-failed alloc) but
+                // we tolerate it as a no-op so a level-triggered
+                // re-enqueue against a torn-down alloc does not
+                // surface as a ShimError.
+                return Ok(());
+            };
+            let prior_state: AllocStateWire = prior_row.state.into();
+            // Surface the terminal reason on the row's cause-class
+            // field for wire compatibility. `RestartBudgetExhausted`
+            // attaches the attempts count and a brief cause summary;
+            // when `terminal` is something else (forward-compat for
+            // future variants) we fall back to a generic
+            // DriverInternalError detail derived from the prior row.
+            let reason = match &terminal {
+                Some(TerminalCondition::BackoffExhausted { attempts }) => {
+                    Some(TransitionReason::RestartBudgetExhausted {
+                        attempts: *attempts,
+                        last_cause_summary: prior_row
+                            .reason
+                            .as_ref()
+                            .map_or_else(|| "unknown".to_owned(), |r| format!("{r:?}")),
+                    })
+                }
+                _ => prior_row.reason.clone(),
+            };
+            let row = build_alloc_status_row(
+                alloc_id,
+                prior_row.job_id,
+                prior_row.node_id,
+                AllocState::Failed,
+                tick,
+                reason,
+                None,
+                terminal,
+            );
+            obs.write(ObservationRow::AllocStatus(row.clone())).await?;
+            emit_event(bus, build_lifecycle_event(&row, prior_state, TransitionSource::Reconciler));
+            Ok(())
+        }
         // Start: spawn the allocation via the driver and write a
         // Running AllocStatusRow on success. On StartRejected, write
         // a `Failed` row recording the typed cause-class
@@ -368,8 +440,15 @@ async fn dispatch_single(
                 }
                 Err(other) => return Err(ShimError::Driver(other)),
             };
-            let row =
-                build_alloc_status_row(alloc_id, job_id, node_id, state, tick, reason, detail);
+            // Per ADR-0037 §4: StartAllocation is never a terminal
+            // claim — JobLifecycle emits FinalizeFailed on a separate
+            // tick when restart budget is exhausted, and the row that
+            // gets the BackoffExhausted terminal is written by that
+            // arm. A successful start or a single mid-budget failed
+            // start carries `terminal: None`.
+            let row = build_alloc_status_row(
+                alloc_id, job_id, node_id, state, tick, reason, detail, None,
+            );
             obs.write(ObservationRow::AllocStatus(row.clone())).await?;
             emit_event(bus, build_lifecycle_event(&row, prior_state, source));
             Ok(())
@@ -422,6 +501,10 @@ async fn dispatch_single(
                 }
                 Err(other) => return Err(ShimError::Driver(other)),
             };
+            // Per ADR-0037 §4: RestartAllocation is never a terminal
+            // claim. Same rationale as StartAllocation — restart is a
+            // mid-budget recovery attempt; only `FinalizeFailed`
+            // carries the BackoffExhausted terminal.
             let row = build_alloc_status_row(
                 alloc_id,
                 prior_row.job_id,
@@ -430,6 +513,7 @@ async fn dispatch_single(
                 tick,
                 reason,
                 detail,
+                None,
             );
             obs.write(ObservationRow::AllocStatus(row.clone())).await?;
             emit_event(bus, build_lifecycle_event(&row, prior_state, source));
@@ -441,13 +525,14 @@ async fn dispatch_single(
         // shim still records Terminated so the next tick's hydrate
         // sees the alloc gone. Per-variant error isolation: a Stop
         // failure does NOT abort dispatch of subsequent actions.
-        // The `terminal` field carries the reconciler's typed
-        // terminal claim per ADR-0037 §4. Step 02-02 wires it onto
-        // `AllocStatusRow.terminal` and `LifecycleEvent.terminal`;
-        // this dispatch site ignores it for now but the bind keeps
-        // the pattern exhaustive and lets 02-02 swap `_` for the
-        // actual field reference without re-grepping.
-        Action::StopAllocation { alloc_id, terminal: _ } => {
+        // Per ADR-0037 §4: the `terminal` field on the action carries
+        // the reconciler's typed terminal claim. The shim threads it
+        // onto BOTH `AllocStatusRow.terminal` (durable surface) AND
+        // `LifecycleEvent.terminal` (broadcast surface) from the SAME
+        // dispatch call frame — drift between the two is structurally
+        // impossible because both are populated from the same
+        // `terminal` value at the same source site.
+        Action::StopAllocation { alloc_id, terminal } => {
             // Look up prior obs row to recover (job_id, node_id) for
             // the Terminated row we will write. If the alloc has no
             // obs row at all (e.g. the reconciler emitted Stop
@@ -465,11 +550,14 @@ async fn dispatch_single(
             // outcome regardless. This mirrors the Restart variant's
             // stop-half pattern.
             let _ = driver.stop(&handle).await;
-            // The reconciler emits `StopAllocation` from explicit
-            // operator stop intent (per US-04 / `IntentKey::for_job_stop`).
-            // Phase 1 surfaces this as a `Stopped { by: Reconciler }`
-            // progress marker — operator vs reconciler attribution
-            // refinement lands later in slice 02.
+            // The `reason` field carries the cause-class summary on
+            // the row; the `terminal` field is the reconciler's
+            // typed terminal claim and is the source of truth for
+            // *who* initiated the stop (Operator vs Reconciler).
+            // Phase 1 surfaces the legacy `Stopped { by: Reconciler }`
+            // reason here for backwards compatibility on the wire-side
+            // `last_transition.reason`; the operator-attribution lands
+            // exclusively on `terminal`.
             let row = build_alloc_status_row(
                 alloc_id,
                 prior_row.job_id,
@@ -480,6 +568,7 @@ async fn dispatch_single(
                     by: overdrive_core::transition_reason::StoppedBy::Reconciler,
                 }),
                 None,
+                terminal,
             );
             obs.write(ObservationRow::AllocStatus(row.clone())).await?;
             emit_event(bus, build_lifecycle_event(&row, prior_state, TransitionSource::Reconciler));

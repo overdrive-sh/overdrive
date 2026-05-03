@@ -159,6 +159,11 @@ fn make_lifecycle_event(
         detail: None,
         source: TransitionSource::Driver(DriverType::Exec),
         at: "1@node-a".to_string(),
+        // Per ADR-0037 §4: synthetic test fixtures default to `None`
+        // unless the scenario specifically exercises the terminal-
+        // surface projection (those scenarios construct LifecycleEvent
+        // directly with their desired `Some(TerminalCondition::...)`).
+        terminal: None,
     }
 }
 
@@ -760,16 +765,24 @@ async fn s_cp_11_stop_while_streaming_closes_stream_with_stopped_result() {
     }
 
     // AC: Stream closes after Terminated { Stopped { by: Reconciler } }.
-    emit_lifecycle(
-        &state,
-        make_lifecycle_event(
-            alloc_id.clone(),
-            job_id.clone(),
-            AllocStateWire::Running,
-            AllocStateWire::Terminated,
-            TransitionReason::Stopped { by: StoppedBy::Reconciler },
-        ),
+    // Per ADR-0037 §4: terminal classification is the reconciler's
+    // decision, threaded onto LifecycleEvent.terminal by the action
+    // shim. The streaming handler reads `event.terminal` (not
+    // `event.reason`) for terminal projection — to drive the
+    // converged_stopped close, the synthesised event must carry the
+    // typed terminal claim, not just the legacy `reason` field.
+    let mut terminated_event = make_lifecycle_event(
+        alloc_id.clone(),
+        job_id.clone(),
+        AllocStateWire::Running,
+        AllocStateWire::Terminated,
+        TransitionReason::Stopped { by: StoppedBy::Reconciler },
     );
+    terminated_event.terminal =
+        Some(overdrive_core::transition_reason::TerminalCondition::Stopped {
+            by: StoppedBy::Reconciler,
+        });
+    emit_lifecycle(&state, terminated_event);
 
     // The stream must close within 5 s — not by hitting the 10 s cap.
     let lines = tokio::time::timeout(Duration::from_secs(5), request_task)

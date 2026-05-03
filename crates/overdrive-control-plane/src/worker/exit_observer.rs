@@ -363,6 +363,13 @@ fn build_escalation_event(
         // shape with an "escalation" sentinel writer so downstream
         // parsers tolerate it.
         at: format!("escalation@{}", event.alloc),
+        // Per ADR-0037 §4 the exit observer is NOT a reconciler tick
+        // — it runs in a per-allocation watcher task and emits
+        // `terminal: None` to express "I am not making a terminal
+        // claim." The reconciler is the single writer for terminal
+        // decisions; it will see this row on the next tick and emit
+        // `Action::FinalizeFailed` if appropriate.
+        terminal: None,
     }
 }
 
@@ -492,6 +499,13 @@ fn job_lifecycle_name() -> ReconcilerName {
 /// transition; `from` is set to `prior_state` so the event correctly
 /// reflects the transition direction. Mirrors
 /// `action_shim::build_lifecycle_event`.
+///
+/// Per ADR-0037 §4: the event's `terminal` field mirrors the row's
+/// `terminal` field (which the exit observer always sets to `None`,
+/// see `handle_exit_event`). The reconciler is the single writer for
+/// terminal claims; the exit observer's job is to record what the
+/// kernel observed (clean exit / crash) and let the reconciler decide
+/// terminal classification on the next tick.
 fn build_lifecycle_event(
     row: &AllocStatusRow,
     prior_state: AllocStateWire,
@@ -510,6 +524,7 @@ fn build_lifecycle_event(
         detail: row.detail.clone(),
         source,
         at: format_logical_timestamp(&row.updated_at),
+        terminal: row.terminal.clone(),
     }
 }
 
