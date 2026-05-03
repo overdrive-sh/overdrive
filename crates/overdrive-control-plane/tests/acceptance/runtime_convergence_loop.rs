@@ -318,7 +318,7 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
 // Pins the §18 *Level-triggered inside the reconciler* contract for the
 // Stop branch of `JobLifecycle::reconcile`: when a stop intent arrives
 // while the only alloc is `Failed` mid-restart-backoff
-// (`view.next_attempt_at` populated, `view.restart_counts < CEILING`),
+// (`view.last_failure_seen_at` populated, `view.restart_counts < CEILING`),
 // the reconciler must clear the transitional view state — otherwise
 // `view_has_backoff_pending` keeps `has_work = true` and the broker
 // self-re-enqueues every tick until the ceiling is reached
@@ -327,11 +327,12 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
 //
 // Pre-fix (current `main`):
 //   - Stop branch returns `(stop_actions, view.clone())`. With no
-//     Running allocs, `stop_actions` is empty BUT `view.next_attempt_at`
-//     still names the Failed alloc and `restart_counts < CEILING` ⇒
-//     `view_has_backoff_pending` returns `true` ⇒ `has_work = true` ⇒
-//     re-enqueue. Every subsequent tick repeats — the eval is in the
-//     pending set every time the broker is drained.
+//     Running allocs, `stop_actions` is empty BUT
+//     `view.last_failure_seen_at` still names the Failed alloc and
+//     `restart_counts < CEILING` ⇒ `view_has_backoff_pending` returns
+//     `true` ⇒ `has_work = true` ⇒ re-enqueue. Every subsequent tick
+//     repeats — the eval is in the pending set every time the broker
+//     is drained.
 //   - Observable symptom on this fixture: across 10 ticks after the
 //     stop intent is written, `dispatched` advances by ≥5 (the per-alloc
 //     `RESTART_BACKOFF_CEILING` budget — see memory note 38682) and
@@ -339,10 +340,10 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
 //
 // Post-fix (the GREEN edit at step 01-02 in
 // `crates/overdrive-core/src/reconciler.rs:1019-1027`):
-//   - Stop branch clears `next_attempt_at` when `stop_actions.is_empty()`,
-//     so the first post-stop tick sees `view_has_backoff_pending = false`,
-//     `has_work = false`, no re-enqueue. The broker drains and stays
-//     empty.
+//   - Stop branch clears `last_failure_seen_at` when
+//     `stop_actions.is_empty()`, so the first post-stop tick sees
+//     `view_has_backoff_pending = false`, `has_work = false`, no
+//     re-enqueue. The broker drains and stays empty.
 //
 // This test is `#[ignore]`d in this commit so the lefthook
 // pre-commit gate (`nextest-affected`) stays green between the RED
@@ -366,8 +367,8 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
 ///   2. Submit the job intent and one `Evaluation { reconciler:
 ///      "job-lifecycle", target: "job/payments" }`.
 ///   3. Drive ticks until the cached view records the alloc's
-///      `next_attempt_at` deadline and `restart_counts == 1` — proof
-///      that the reconciler emitted exactly one Restart action and
+///      `last_failure_seen_at` observation and `restart_counts == 1` —
+///      proof that the reconciler emitted exactly one Restart action and
 ///      then sat back on the backoff. (We do NOT advance logical time
 ///      far enough to elapse the 1-second per-attempt backoff window;
 ///      this is the load-bearing precondition — the alloc is Failed
@@ -541,7 +542,7 @@ async fn stop_after_failed_alloc_drains_broker() {
     //     after the stop converged. Pre-fix:
     //     `view_has_backoff_pending` keeps re-enqueueing every tick →
     //     queued stays at 1. Post-fix: the Stop branch clears
-    //     `next_attempt_at` so the predicate returns false on the
+    //     `last_failure_seen_at` so the predicate returns false on the
     //     first tick after the stop, no re-enqueue, queued == 0.
     let counters = state.runtime.broker().counters();
     assert_eq!(

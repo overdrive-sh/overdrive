@@ -240,11 +240,12 @@ fn recomputes_deadline_at_window_boundary() {
 /// same tick is indistinguishable from the live view.
 ///
 /// Under the rejected alternative (persisting a precomputed deadline
-/// `next_attempt_at`), this property would still pass *today* — but the
-/// view shape would lock in the policy-at-write-time, and a future
-/// `backoff_for_attempt` policy change would silently no-op against
-/// in-flight rows. The persist-inputs shape makes the property
-/// *structural* rather than coincidental.
+/// instead of the observation timestamp), this property would still
+/// pass *today* — but the view shape would lock in the
+/// policy-at-write-time, and a future `backoff_for_attempt` policy
+/// change would silently no-op against in-flight rows. The
+/// persist-inputs shape makes the property *structural* rather than
+/// coincidental.
 #[test]
 fn restart_survival_idempotence() {
     // Seed inputs as in scenario 1 — restart_counts > 0,

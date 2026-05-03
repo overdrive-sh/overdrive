@@ -66,8 +66,9 @@ mod acceptance {
     mod tick_context_now_unix;
 
     // Step 02-02 — `JobLifecycleView` persists inputs
-    // (`last_failure_seen_at: UnixInstant` replaces `next_attempt_at:
-    // Instant`); deadline recomputed each tick from
+    // (`last_failure_seen_at: UnixInstant` is the canonical input;
+    // a precomputed `Instant` deadline would have been a derived
+    // value); deadline recomputed each tick from
     // `seen_at + backoff_for_attempt(restart_count)`. Restart-survival
     // idempotence is structural rather than coincidental — see
     // `.claude/rules/development.md` § "Persist inputs, not derived state".

@@ -123,18 +123,21 @@ const fn empty_alloc_map() -> BTreeMap<AllocationId, AllocStatusRow> {
     BTreeMap::new()
 }
 
-fn fresh_tick(now: Instant) -> TickContext {
-    TickContext {
-        now,
-        now_unix: UnixInstant::from_unix_duration(Duration::from_secs(0)),
-        tick: 0,
-        deadline: now + Duration::from_secs(1),
-    }
+/// Canonical `fresh_tick` signature (uniform across every acceptance
+/// suite per step 03-01): callers pass both `now` (monotonic) and
+/// `now_unix` (wall-clock) explicitly. Tests that do not exercise the
+/// wall-clock domain pass
+/// `UnixInstant::from_unix_duration(Duration::from_secs(0))`.
+fn fresh_tick(now: Instant, now_unix: UnixInstant) -> TickContext {
+    TickContext { now, now_unix, tick: 0, deadline: now + Duration::from_secs(1) }
 }
 
-/// Build a `TickContext` at `(now, now_unix)`. Both fields advance in
-/// lockstep across two-tick test chains so backoff arithmetic is
-/// consistent across the monotonic and wall-clock domains.
+/// Build a `TickContext` at `(now, now_unix)` with an explicit tick
+/// counter. Both `now` and `now_unix` advance in lockstep across
+/// two-tick test chains so backoff arithmetic is consistent across the
+/// monotonic and wall-clock domains. Same argument shape as
+/// `fresh_tick`; `tick_at_unix` adds the explicit `tick` counter for
+/// multi-tick test chains where the counter must advance.
 fn tick_at_unix(now: Instant, now_unix: UnixInstant, tick: u64) -> TickContext {
     TickContext { now, now_unix, tick, deadline: now + Duration::from_secs(1) }
 }
@@ -176,7 +179,7 @@ fn stop_branch_skipped_when_stop_intent_set_but_no_job() {
     };
     let actual = JobLifecycleState { job: None, desired_to_stop: false, nodes, allocations };
     let view = JobLifecycleView::default();
-    let tick = fresh_tick(Instant::now());
+    let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
     let r = JobLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
@@ -212,7 +215,7 @@ fn stop_branch_skipped_when_job_present_but_no_stop_intent() {
         allocations,
     };
     let view = JobLifecycleView::default();
-    let tick = fresh_tick(Instant::now());
+    let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
     let r = JobLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
@@ -261,7 +264,7 @@ fn stop_branch_emits_one_stop_per_running_alloc_only() {
         allocations: allocs,
     };
     let view = JobLifecycleView::default();
-    let tick = fresh_tick(Instant::now());
+    let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
     let r = JobLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
@@ -316,7 +319,7 @@ fn run_branch_emits_nothing_when_an_alloc_is_already_running() {
         allocations,
     };
     let view = JobLifecycleView::default();
-    let tick = fresh_tick(Instant::now());
+    let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
     let r = JobLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
@@ -347,7 +350,7 @@ fn run_branch_starts_fresh_alloc_when_no_running_no_failed() {
         allocations: empty_alloc_map(),
     };
     let view = JobLifecycleView::default();
-    let tick = fresh_tick(Instant::now());
+    let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
     let r = JobLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
@@ -432,7 +435,7 @@ fn run_with_failed_alloc_and_attempts(attempts: u32) -> Vec<Action> {
     let mut restart_counts = BTreeMap::new();
     restart_counts.insert(aid("alloc-payments-0"), attempts);
     let view = JobLifecycleView { restart_counts, last_failure_seen_at: BTreeMap::new() };
-    let tick = fresh_tick(Instant::now());
+    let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
     let r = JobLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
@@ -535,8 +538,7 @@ fn run_with_failed_alloc_and_seen_at(now_unix: UnixInstant, seen_at: UnixInstant
     // = RESTART_BACKOFF_DURATION; backoff window is the gating
     // decision under test.
     let view = JobLifecycleView { restart_counts: BTreeMap::new(), last_failure_seen_at };
-    let now = Instant::now();
-    let tick = TickContext { now, now_unix, tick: 0, deadline: now + Duration::from_secs(1) };
+    let tick = fresh_tick(Instant::now(), now_unix);
 
     let r = JobLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
@@ -765,7 +767,7 @@ fn tick_after_backoff_elapsed_emits_restart_and_advances_seen_at() {
 
 // -------------------------------------------------------------------
 // fix-stop-branch-backoff-pending — Stop branch must clear
-// `next_attempt_at` when there are no Running allocs to stop
+// `last_failure_seen_at` when there are no Running allocs to stop
 // -------------------------------------------------------------------
 //
 // Companion to the DST acceptance test at

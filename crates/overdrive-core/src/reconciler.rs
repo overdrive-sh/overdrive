@@ -1392,8 +1392,8 @@ fn is_restartable(row: &AllocStatusRow) -> bool {
 /// derived state" shape: a future operator-configurable per-job
 /// `backoff_for_attempt` policy lands without a schema migration —
 /// every persisted row picks up the new policy on the next reconcile
-/// tick. The earlier shape (`next_attempt_at: Instant`) was a stale
-/// cache of `Instant::now() + RESTART_BACKOFF_DURATION`; rotating the
+/// tick. Persisting a precomputed deadline would have been a stale
+/// cache of `tick.now_unix + RESTART_BACKOFF_DURATION`; rotating the
 /// policy would have silently no-op'd against in-flight rows until
 /// they aged out.
 ///

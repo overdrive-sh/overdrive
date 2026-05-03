@@ -93,13 +93,13 @@ fn alloc_with_state_on(
     }
 }
 
-fn fresh_tick(now: Instant) -> TickContext {
-    TickContext {
-        now,
-        now_unix: UnixInstant::from_unix_duration(Duration::from_secs(0)),
-        tick: 0,
-        deadline: now + Duration::from_secs(1),
-    }
+/// Canonical `fresh_tick` signature (uniform across every acceptance
+/// suite per step 03-01): callers pass both `now` (monotonic) and
+/// `now_unix` (wall-clock) explicitly. Tests that do not exercise the
+/// wall-clock domain pass
+/// `UnixInstant::from_unix_duration(Duration::from_secs(0))`.
+fn fresh_tick(now: Instant, now_unix: UnixInstant) -> TickContext {
+    TickContext { now, now_unix, tick: 0, deadline: now + Duration::from_secs(1) }
 }
 
 /// Drive the reconciler's placement path with the given `nodes`,
@@ -124,7 +124,7 @@ fn placement_actions(
         allocations: current_allocs,
     };
     let view = JobLifecycleView::default();
-    let tick = fresh_tick(Instant::now());
+    let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
     let r = JobLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);

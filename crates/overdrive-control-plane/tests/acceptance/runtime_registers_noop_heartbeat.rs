@@ -55,14 +55,14 @@ fn rname(raw: &str) -> ReconcilerName {
 /// Construct a fresh `TickContext` for twin-invocation checks. Test
 /// code is exempt from the `Instant::now()` dst-lint ban (dst-lint
 /// scans `src/**/*.rs` only).
-fn fresh_tick() -> TickContext {
-    let now = Instant::now();
-    TickContext {
-        now,
-        now_unix: UnixInstant::from_unix_duration(Duration::from_secs(0)),
-        tick: 0,
-        deadline: now + Duration::from_secs(1),
-    }
+///
+/// Canonical `fresh_tick` signature (uniform across every acceptance
+/// suite per step 03-01): callers pass both `now` (monotonic) and
+/// `now_unix` (wall-clock) explicitly. Tests that do not exercise the
+/// wall-clock domain pass
+/// `UnixInstant::from_unix_duration(Duration::from_secs(0))`.
+fn fresh_tick(now: Instant, now_unix: UnixInstant) -> TickContext {
+    TickContext { now, now_unix, tick: 0, deadline: now + Duration::from_secs(1) }
 }
 
 /// Construct the Sim adapters declared in the 04-04 harness spec. The
@@ -175,7 +175,7 @@ fn noop_heartbeat_factory_produces_reconciler_returning_noop() {
     let desired = AnyState::Unit;
     let actual = AnyState::Unit;
     let view = AnyReconcilerView::Unit;
-    let tick = fresh_tick();
+    let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
     let first = r.reconcile(&desired, &actual, &view, &tick);
     let second = r.reconcile(&desired, &actual, &view, &tick);
@@ -276,7 +276,7 @@ fn reconciler_is_pure_invariant_holds_for_noop_heartbeat() {
     let desired = AnyState::Unit;
     let actual = AnyState::Unit;
     let view = AnyReconcilerView::Unit;
-    let tick = fresh_tick();
+    let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
     for r in runtime.reconcilers_iter() {
         let a = r.reconcile(&desired, &actual, &view, &tick);
