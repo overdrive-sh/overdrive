@@ -869,3 +869,176 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
          pre-restart={next_view_pre:?}, post-restart={next_view_post:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Step 03-02 mutation-gate kill targets — `view_has_backoff_pending`
+// boundary semantics at the runtime level.
+//
+// `view_has_backoff_pending` (private to `reconciler_runtime`) gates the
+// runtime's self-re-enqueue when `reconcile` returns no actions but the
+// view carries a Failed alloc still mid-backoff (`restart_counts < CEILING
+// AND last_failure_seen_at populated`). Without this, the broker drains
+// empty during the backoff window and the deadline never fires.
+//
+// The two scenarios below probe the function's boundary semantics
+// indirectly through observable broker re-enqueue behaviour, killing
+// the four mutants the diff-scoped mutation gate flagged on
+// `reconciler_runtime.rs:436` (whole function → false) and
+// `reconciler_runtime.rs:441` (`<` → `==`, `>`, `<=`):
+//
+//   * `view_below_ceiling_with_seen_at_re_enqueues` — count=1 is strictly
+//     below CEILING (5); correct semantics return true → broker
+//     re-enqueues → queued == 1. Kills `false`, `==`, `>`.
+//   * `view_at_ceiling_with_seen_at_does_not_re_enqueue` — count=CEILING
+//     means exhausted; correct semantics return false → broker stays
+//     empty → queued == 0. Kills `<=` (which would still re-enqueue
+//     at-ceiling and is the only mutant the first scenario does not
+//     distinguish from `<`).
+//
+// Together the pair pins `<` strictly: any of `false`, `==`, `>`, or
+// `<=` substituted for `<` flips at least one assertion.
+// ---------------------------------------------------------------------------
+
+/// Prepare a converged-shaped runtime + Failed alloc + cached
+/// `JobLifecycleView` with the supplied `restart_counts` for the
+/// alloc, and `last_failure_seen_at` very close to "now" (so the
+/// backoff window has NOT elapsed regardless of attempt count). Drives
+/// the broker to empty, then runs ONE convergence tick. Returns
+/// `queued` after the tick — the load-bearing observable.
+async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
+    use std::collections::BTreeMap;
+
+    use overdrive_core::UnixInstant;
+    use overdrive_core::reconciler::JobLifecycleView;
+
+    let tmp = TempDir::new().expect("tempdir");
+    let clock = SimClock::new();
+
+    let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime::new");
+    runtime.register(noop_heartbeat()).expect("register noop-heartbeat");
+    runtime.register(job_lifecycle()).expect("register job-lifecycle");
+    let store_path = tmp.path().join("intent.redb");
+    let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
+    let obs: Arc<dyn ObservationStore> =
+        Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("NodeId"), 0));
+    // SimDriver doesn't matter — no Start/Restart action will be
+    // dispatched in this test (we seed Failed directly + restart_counts
+    // via the cached view to keep the reconcile output empty).
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let mut state = AppState::new(store, obs, Arc::new(runtime), driver);
+    let sim_clock = Arc::new(clock);
+    state.clock = sim_clock.clone();
+
+    // Seed Job (intent) so hydrate_desired returns Some(job).
+    let job = Job::from_spec(JobSpecInput {
+        id: "payments".to_string(),
+        replicas: 1,
+        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
+        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+    })
+    .expect("valid job spec");
+    let archived = rkyv::to_bytes::<rkyv::rancor::Error>(&job).expect("rkyv archive");
+    let key = IntentKey::for_job(&job.id);
+    state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
+
+    // Seed Failed alloc (observation) so hydrate_actual sees a Failed
+    // alloc that needs restarting.
+    let writer = NodeId::new("local").expect("writer node id");
+    let alloc_id = AllocationId::new("alloc-payments-0").expect("valid alloc id");
+    let alloc_row = AllocStatusRow {
+        alloc_id: alloc_id.clone(),
+        job_id: job.id.clone(),
+        node_id: writer.clone(),
+        state: AllocState::Failed,
+        updated_at: LogicalTimestamp { counter: 1, writer: writer.clone() },
+        reason: None,
+        detail: None,
+    };
+    state.obs.write(ObservationRow::AllocStatus(alloc_row)).await.expect("seed Failed alloc row");
+
+    // Seed cached view with the supplied restart_counts and
+    // last_failure_seen_at = now_unix (zero — the backoff window has
+    // NOT elapsed for any non-trivial RESTART_BACKOFF_DURATION).
+    let target = TargetResource::new("job/payments").expect("valid target");
+    let cache_key = ("job-lifecycle".to_string(), target.to_string());
+    let mut restart_counts = BTreeMap::new();
+    restart_counts.insert(alloc_id.clone(), restart_counts_value);
+    let mut last_failure_seen_at = BTreeMap::new();
+    last_failure_seen_at.insert(alloc_id, UnixInstant::from_clock(&*sim_clock));
+    let view = JobLifecycleView { restart_counts, last_failure_seen_at };
+    {
+        let mut cache = state.view_cache.lock().expect("view_cache mutex");
+        cache.insert(cache_key, overdrive_control_plane::CachedView::JobLifecycle(view));
+    }
+
+    // Submit and drain the seed eval — without re-submitting, the
+    // broker is empty going into the tick. After the tick, queued
+    // reflects ONLY whether `has_work` re-enqueued.
+    state.runtime.broker().submit(Evaluation {
+        reconciler: ReconcilerName::new("job-lifecycle").expect("valid reconciler name"),
+        target: target.clone(),
+    });
+    let now = sim_clock.now();
+    let deadline = now + Duration::from_millis(100);
+    let pending = {
+        let mut broker = state.runtime.broker();
+        broker.drain_pending()
+    };
+    for eval in pending {
+        run_convergence_tick(&state, &eval.reconciler, &eval.target, now, 0, deadline)
+            .await
+            .expect("convergence tick succeeds");
+    }
+
+    state.runtime.broker().counters().queued
+}
+
+/// GIVEN a `JobLifecycleView` with `restart_counts={alloc→1}` (strictly
+/// below the CEILING of 5) and `last_failure_seen_at` populated within
+/// the unelapsed backoff window —
+/// WHEN one convergence tick runs against a Failed alloc whose
+/// `reconcile` output is empty (mid-backoff) —
+/// THEN the broker is re-enqueued (queued == 1) because
+/// `view_has_backoff_pending` returned true under the strict-`<`
+/// boundary semantics.
+///
+/// Kills three of the four diff-scoped mutants on `view_has_backoff_pending`:
+///   * the whole function → `false` (would make queued == 0)
+///   * `<` → `==` (`1 == 5` is false → queued == 0)
+///   * `<` → `>` (`1 > 5` is false → queued == 0)
+#[tokio::test]
+async fn view_below_ceiling_with_seen_at_re_enqueues() {
+    let queued = run_one_tick_with_seeded_view(1).await;
+    assert_eq!(
+        queued, 1,
+        "restart_counts=1 (below CEILING=5) with last_failure_seen_at populated \
+         must keep the eval queued via view_has_backoff_pending; got queued={queued}"
+    );
+}
+
+/// GIVEN a `JobLifecycleView` with `restart_counts={alloc→CEILING}`
+/// (exactly the ceiling — backoff budget exhausted) and
+/// `last_failure_seen_at` populated —
+/// WHEN one convergence tick runs against a Failed alloc whose
+/// `reconcile` output is empty —
+/// THEN the broker is NOT re-enqueued (queued == 0) because
+/// `view_has_backoff_pending` returned false under the strict-`<`
+/// boundary semantics (the alloc is terminal-failed, no further
+/// restart will fire, so the level-triggered re-enqueue is correctly
+/// withheld).
+///
+/// Kills the fourth diff-scoped mutant on `view_has_backoff_pending`:
+///   * `<` → `<=` (`5 <= 5` is true → would re-enqueue → queued == 1)
+///
+/// Together with `view_below_ceiling_with_seen_at_re_enqueues` above,
+/// this pins the `<` semantics strictly at the boundary.
+#[tokio::test]
+async fn view_at_ceiling_with_seen_at_does_not_re_enqueue() {
+    let queued =
+        run_one_tick_with_seeded_view(overdrive_core::reconciler::RESTART_BACKOFF_CEILING).await;
+    assert_eq!(
+        queued, 0,
+        "restart_counts=CEILING (terminal-failed) must NOT re-enqueue via \
+         view_has_backoff_pending; got queued={queued}"
+    );
+}
