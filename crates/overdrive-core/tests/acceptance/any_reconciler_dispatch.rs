@@ -29,6 +29,7 @@
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
+use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::Node;
 use overdrive_core::id::{JobId, NodeId, Region};
 use overdrive_core::reconciler::{
@@ -50,7 +51,12 @@ fn dispatch_routes_noop_heartbeat_unit_triple_to_noop_action() {
     // wildcard `panic!`.
     let any = AnyReconciler::NoopHeartbeat(NoopHeartbeat::canonical());
     let now = Instant::now();
-    let tick = TickContext { now, tick: 0, deadline: now + Duration::from_secs(1) };
+    let tick = TickContext {
+        now,
+        now_unix: UnixInstant::from_unix_duration(Duration::from_secs(0)),
+        tick: 0,
+        deadline: now + Duration::from_secs(1),
+    };
 
     let (actions, view) =
         any.reconcile(&AnyState::Unit, &AnyState::Unit, &AnyReconcilerView::Unit, &tick);
@@ -75,7 +81,12 @@ fn dispatch_routes_job_lifecycle_triple_to_job_lifecycle_view() {
     // JobLifecycle(_)`. Mutant (delete arm): wildcard panic.
     let any = AnyReconciler::JobLifecycle(JobLifecycle::canonical());
     let now = Instant::now();
-    let tick = TickContext { now, tick: 0, deadline: now + Duration::from_secs(1) };
+    let tick = TickContext {
+        now,
+        now_unix: UnixInstant::from_unix_duration(Duration::from_secs(0)),
+        tick: 0,
+        deadline: now + Duration::from_secs(1),
+    };
 
     // Empty desired/actual JobLifecycle states — no allocs, no nodes,
     // no job. The reconciler emits no actions, returns its default

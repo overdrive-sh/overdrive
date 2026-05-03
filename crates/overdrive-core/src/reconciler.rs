@@ -158,6 +158,7 @@ use crate::aggregate::{Exec, Job, Node, WorkloadDriver};
 use crate::id::{AllocationId, CorrelationKey, JobId, NodeId};
 use crate::traits::driver::{AllocationSpec, Resources};
 use crate::traits::observation_store::{AllocState, AllocStatusRow};
+use crate::wall_clock::UnixInstant;
 
 // ---------------------------------------------------------------------------
 // TickContext — time as injected input state
@@ -167,18 +168,37 @@ use crate::traits::observation_store::{AllocState, AllocStatusRow};
 ///
 /// The runtime constructs exactly one `TickContext` per evaluation by
 /// snapshotting the injected `Clock` trait once — reconcilers must
-/// read wall-clock via `tick.now` rather than calling `Instant::now()`
-/// directly (dst-lint enforces this at PR time).
+/// read time via `tick.now` / `tick.now_unix` rather than calling
+/// `Instant::now()` / `SystemTime::now()` directly (dst-lint enforces
+/// this at PR time).
 ///
-/// * `now` — the wall-clock instant the evaluation started.
+/// * `now` — the **monotonic, process-local** instant the evaluation
+///   started. Use for in-process deadline arithmetic
+///   (`tick.now < tick.deadline`) and for any comparison against
+///   another `Instant` taken on the same process. Cannot be
+///   persisted to libSQL, gossiped to a peer, or compared across
+///   process restart — `Instant` is opaque.
+/// * `now_unix` — the **wall-clock, persistable** snapshot. Use for
+///   any deadline that must survive process restart or be persisted
+///   to libSQL (per `.claude/rules/development.md` § "Reconciler
+///   I/O" and `.claude/rules/development.md` § "Persist inputs, not
+///   derived state"). Advances under DST alongside `now` per
+///   `SimClock` discipline (both fields are snapshotted from the same
+///   underlying logical-time counter).
 /// * `tick` — a monotonic counter useful as a deterministic
 ///   tie-breaker across evaluations.
 /// * `deadline` — the runtime's per-tick budget. Reconcilers that need
 ///   to checkpoint bounded work into their `NextView` consult this.
 #[derive(Debug, Clone)]
 pub struct TickContext {
-    /// Wall-clock snapshot taken by the runtime at evaluation start.
+    /// Monotonic, process-local wall-clock snapshot at evaluation
+    /// start. Use for in-process deadline arithmetic; cannot be
+    /// persisted.
     pub now: Instant,
+    /// Wall-clock, persistable snapshot at evaluation start. Use for
+    /// deadlines that must survive process restart or be persisted to
+    /// libSQL.
+    pub now_unix: UnixInstant,
     /// Monotonic tick counter.
     pub tick: u64,
     /// Per-tick deadline (`now + reconcile_budget`).
@@ -959,6 +979,33 @@ pub const RESTART_BACKOFF_CEILING: u32 = 5;
 /// single-node envelope: 1 s × `RESTART_BACKOFF_CEILING` = ~5 s
 /// wall-clock to "Failed (backoff exhausted)".
 pub const RESTART_BACKOFF_DURATION: Duration = Duration::from_secs(1);
+
+/// Per-attempt restart backoff policy lookup.
+///
+/// **Phase 1 is degenerate-constant**: every `attempt` value yields
+/// the same [`RESTART_BACKOFF_DURATION`]. The function exists as a
+/// stability anchor so call sites stay unchanged when
+/// operator-configurable per-job policy lands in Phase 2+ (per issue
+/// #141 'Out' section). The leading underscore on `_attempt` is
+/// deliberate: the parameter is currently unused (degenerate policy
+/// ignores attempt count) but lives in the signature so a future
+/// progressive-backoff schedule (e.g. `RESTART_BACKOFF_DURATION *
+/// 2_u32.pow(attempt)`) does not require a breaking API change.
+///
+/// Operator-configurable per-job policy is Phase 2+ scope and will
+/// thread a `&JobBackoffPolicy` (or similar) through this signature
+/// rather than relying on the workspace-global constant.
+///
+/// Persist-inputs discipline: callers MUST persist the *attempt
+/// count* (and a `last_failure_seen_at` timestamp), not the deadline
+/// this function computes from them — see
+/// `.claude/rules/development.md` § "Persist inputs, not derived
+/// state". Recomputing on every read picks up future policy changes
+/// without a schema migration.
+#[must_use]
+pub const fn backoff_for_attempt(_attempt: u32) -> Duration {
+    RESTART_BACKOFF_DURATION
+}
 
 pub struct JobLifecycle {
     name: ReconcilerName,

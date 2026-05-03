@@ -28,6 +28,7 @@ use overdrive_control_plane::error::ControlPlaneError;
 use overdrive_control_plane::handlers::cluster_status;
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_control_plane::{AppState, noop_heartbeat};
+use overdrive_core::UnixInstant;
 use overdrive_core::id::NodeId;
 use overdrive_core::reconciler::{
     Action, AnyReconcilerView, AnyState, ReconcilerName, TickContext,
@@ -56,7 +57,12 @@ fn rname(raw: &str) -> ReconcilerName {
 /// scans `src/**/*.rs` only).
 fn fresh_tick() -> TickContext {
     let now = Instant::now();
-    TickContext { now, tick: 0, deadline: now + Duration::from_secs(1) }
+    TickContext {
+        now,
+        now_unix: UnixInstant::from_unix_duration(Duration::from_secs(0)),
+        tick: 0,
+        deadline: now + Duration::from_secs(1),
+    }
 }
 
 /// Construct the Sim adapters declared in the 04-04 harness spec. The

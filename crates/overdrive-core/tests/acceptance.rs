@@ -53,8 +53,15 @@ mod acceptance {
     // issue-141-persist-backoff-inputs — `UnixInstant` newtype for
     // portable wall-clock deadlines. Step 01-01 covers arithmetic +
     // constructor surface; step 01-02 covers Display/FromStr/Serde
-    // completeness + proptest roundtrips; subsequent steps wire it
-    // through `TickContext` and `JobLifecycleView`.
+    // completeness + proptest roundtrips; step 02-01 wires it through
+    // `TickContext.now_unix` + introduces the `backoff_for_attempt`
+    // const fn; subsequent steps wire it through `JobLifecycleView`.
     mod unix_instant_arithmetic;
     mod unix_instant_completeness;
+
+    // Step 02-01 — `TickContext.now_unix` field surface +
+    // `backoff_for_attempt` const fn. The runtime construction-site
+    // verification lives in the control-plane acceptance suite (the
+    // core crate cannot build an `AppState` without circular deps).
+    mod tick_context_now_unix;
 }

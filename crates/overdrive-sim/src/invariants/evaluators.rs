@@ -30,6 +30,7 @@
 
 use std::time::Duration;
 
+use overdrive_core::UnixInstant;
 use overdrive_core::id::{JobId, NodeId};
 use overdrive_core::reconciler::{AnyReconciler, AnyReconcilerView, AnyState, TickContext};
 use overdrive_core::traits::clock::Clock;
@@ -1054,7 +1055,8 @@ fn build_tick_context(clock: &SimClock) -> TickContext {
     const BUDGET: Duration = Duration::from_secs(1);
 
     let now = clock.now();
-    TickContext { now, tick: TICK, deadline: now + BUDGET }
+    let now_unix = UnixInstant::from_clock(clock);
+    TickContext { now, now_unix, tick: TICK, deadline: now + BUDGET }
 }
 
 // ---------------------------------------------------------------------------

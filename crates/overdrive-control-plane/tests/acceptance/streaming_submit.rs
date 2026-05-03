@@ -31,6 +31,7 @@ use overdrive_control_plane::api::{
 use overdrive_control_plane::handlers::submit_job;
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_core::TransitionReason;
+use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
 use overdrive_core::id::{AllocationId, JobId, NodeId};
 use overdrive_core::reconciler::{Action, TickContext};
@@ -829,7 +830,12 @@ async fn s_lt_01_lifecycle_transition_from_reflects_prior_alloc_state() {
 
     // AC-5: Construct a minimal TickContext and dispatch StopAllocation.
     let now = Instant::now();
-    let tick = TickContext { now, tick: 1, deadline: now + Duration::from_secs(5) };
+    let tick = TickContext {
+        now,
+        now_unix: UnixInstant::from_unix_duration(Duration::from_secs(0)),
+        tick: 1,
+        deadline: now + Duration::from_secs(5),
+    };
 
     dispatch(
         vec![Action::StopAllocation { alloc_id: alloc_id.clone() }],

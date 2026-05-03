@@ -18,6 +18,7 @@
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
+use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{
     DriverInput, ExecInput, Job, JobSpecInput, Node, NodeSpecInput, ResourcesInput,
 };
@@ -28,7 +29,12 @@ use overdrive_core::reconciler::{
 
 fn fresh_tick() -> TickContext {
     let now = Instant::now();
-    TickContext { now, tick: 0, deadline: now + Duration::from_secs(1) }
+    TickContext {
+        now,
+        now_unix: UnixInstant::from_unix_duration(Duration::from_secs(0)),
+        tick: 0,
+        deadline: now + Duration::from_secs(1),
+    }
 }
 
 fn payments_job() -> Job {

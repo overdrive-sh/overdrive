@@ -41,6 +41,7 @@ use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 use std::time::{Duration, Instant};
 
+use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver};
 use overdrive_core::id::{AllocationId, JobId, NodeId, Region};
 use overdrive_core::reconciler::{
@@ -119,7 +120,12 @@ const fn empty_alloc_map() -> BTreeMap<AllocationId, AllocStatusRow> {
 }
 
 fn fresh_tick(now: Instant) -> TickContext {
-    TickContext { now, tick: 0, deadline: now + Duration::from_secs(1) }
+    TickContext {
+        now,
+        now_unix: UnixInstant::from_unix_duration(Duration::from_secs(0)),
+        tick: 0,
+        deadline: now + Duration::from_secs(1),
+    }
 }
 
 // -------------------------------------------------------------------
@@ -506,7 +512,12 @@ fn run_with_failed_alloc_and_deadline(now: Instant, deadline: Instant) -> Vec<Ac
     // attempts=0 → ceiling check passes; backoff window is the
     // gating decision under test.
     let view = JobLifecycleView { restart_counts: BTreeMap::new(), next_attempt_at };
-    let tick = TickContext { now, tick: 0, deadline: now + Duration::from_secs(1) };
+    let tick = TickContext {
+        now,
+        now_unix: UnixInstant::from_unix_duration(Duration::from_secs(0)),
+        tick: 0,
+        deadline: now + Duration::from_secs(1),
+    };
 
     let r = JobLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
@@ -700,7 +711,12 @@ fn tick_after_backoff_elapsed_emits_restart_and_advances_deadline() {
     // Gate elapsed → another restart must fire, deadline rolls
     // forward to the new tick's now + window.
     let now_2 = now_1 + RESTART_BACKOFF_DURATION + Duration::from_millis(1);
-    let tick_2 = TickContext { now: now_2, tick: 1, deadline: now_2 + Duration::from_secs(1) };
+    let tick_2 = TickContext {
+        now: now_2,
+        now_unix: UnixInstant::from_unix_duration(Duration::from_secs(0)),
+        tick: 1,
+        deadline: now_2 + Duration::from_secs(1),
+    };
 
     let (actions_2, next_view_2) = r.reconcile(&desired, &actual, &next_view_1, &tick_2);
 

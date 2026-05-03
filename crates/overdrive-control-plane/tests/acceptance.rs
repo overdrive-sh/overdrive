@@ -87,4 +87,10 @@ mod acceptance {
     // when the lifecycle broadcast channel is dropped mid-stream.
     // FAILS on current code; GREEN lands in step 01-02.
     mod streaming_channel_closed;
+
+    // issue-141-persist-backoff-inputs step 02-01 — runtime
+    // construction-site verification: `run_convergence_tick`
+    // populates `TickContext.now_unix` from the injected `Clock`
+    // (`state.clock`), exactly once per tick.
+    mod tick_context_now_unix_runtime;
 }

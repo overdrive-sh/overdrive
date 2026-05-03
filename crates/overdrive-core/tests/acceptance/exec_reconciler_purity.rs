@@ -26,6 +26,7 @@ use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 use std::time::{Duration, Instant};
 
+use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver};
 use overdrive_core::id::{AllocationId, JobId, NodeId, Region};
 use overdrive_core::reconciler::{
@@ -117,7 +118,12 @@ const fn empty_alloc_map() -> BTreeMap<AllocationId, AllocStatusRow> {
 }
 
 fn fresh_tick(now: Instant) -> TickContext {
-    TickContext { now, tick: 0, deadline: now + Duration::from_secs(1) }
+    TickContext {
+        now,
+        now_unix: UnixInstant::from_unix_duration(Duration::from_secs(0)),
+        tick: 0,
+        deadline: now + Duration::from_secs(1),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -276,7 +282,12 @@ fn reconcile_with_exec_spec_is_deterministic_across_twin_invocations() {
     // function over its inputs; with the SAME tick the SAME output
     // must come out.
     let now = Instant::now();
-    let tick = TickContext { now, tick: 0, deadline: now + Duration::from_secs(1) };
+    let tick = TickContext {
+        now,
+        now_unix: UnixInstant::from_unix_duration(Duration::from_secs(0)),
+        tick: 0,
+        deadline: now + Duration::from_secs(1),
+    };
 
     let r = JobLifecycle::canonical();
     let (actions_a, view_a) = r.reconcile(&desired, &actual, &view, &tick);

@@ -31,6 +31,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{IntentKey, Job, Node};
 use overdrive_core::id::{JobId, NodeId};
 use overdrive_core::reconciler::{
@@ -244,8 +245,15 @@ pub async fn run_convergence_tick(
         return Ok(());
     };
 
-    // Construct the per-tick TickContext.
-    let tick = TickContext { now, tick: tick_n, deadline };
+    // Construct the per-tick TickContext. The wall-clock `now_unix`
+    // snapshot is taken from the SAME injected `Clock` the spawn loop
+    // sourced `now` from (`state.clock`), once per tick — never
+    // `SystemTime::now()` (dst-lint enforces). Reconcilers that need a
+    // persistable deadline (e.g. JobLifecycleView's
+    // `last_failure_seen_at` per issue #141) read `tick.now_unix`;
+    // in-process deadline arithmetic continues to use `tick.now`.
+    let now_unix = UnixInstant::from_clock(&*state.clock);
+    let tick = TickContext { now, now_unix, tick: tick_n, deadline };
 
     // Hydrate desired (intent-side) and actual (observation-side).
     let desired = hydrate_desired(reconciler, target, state).await?;

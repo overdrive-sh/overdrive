@@ -38,6 +38,7 @@ use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 use std::time::{Duration, Instant};
 
+use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver};
 use overdrive_core::id::{AllocationId, JobId, NodeId, Region};
 use overdrive_core::reconciler::{
@@ -93,7 +94,12 @@ fn alloc_with_state_on(
 }
 
 fn fresh_tick(now: Instant) -> TickContext {
-    TickContext { now, tick: 0, deadline: now + Duration::from_secs(1) }
+    TickContext {
+        now,
+        now_unix: UnixInstant::from_unix_duration(Duration::from_secs(0)),
+        tick: 0,
+        deadline: now + Duration::from_secs(1),
+    }
 }
 
 /// Drive the reconciler's placement path with the given `nodes`,

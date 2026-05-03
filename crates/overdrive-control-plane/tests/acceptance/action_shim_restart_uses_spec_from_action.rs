@@ -26,6 +26,7 @@ use async_trait::async_trait;
 
 use overdrive_control_plane::action_shim::dispatch;
 use overdrive_core::SpiffeId;
+use overdrive_core::UnixInstant;
 use overdrive_core::id::{AllocationId, JobId, NodeId};
 use overdrive_core::reconciler::{Action, TickContext};
 use overdrive_core::traits::driver::{
@@ -125,7 +126,12 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
     let action = Action::RestartAllocation { alloc_id, spec: restart_spec.clone() };
 
     let now = Instant::now();
-    let tick = TickContext { now, tick: 0, deadline: now + Duration::from_secs(1) };
+    let tick = TickContext {
+        now,
+        now_unix: UnixInstant::from_unix_duration(Duration::from_secs(0)),
+        tick: 0,
+        deadline: now + Duration::from_secs(1),
+    };
 
     // Broadcast channel for `LifecycleEvent` — required by `dispatch`
     // per slice 02 step 02-01 (architecture.md §10). This test does
