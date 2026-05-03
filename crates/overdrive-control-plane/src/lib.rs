@@ -497,8 +497,8 @@ pub async fn run_server_with_obs_and_driver(
     // US-03). Step 04-04 wired noop-heartbeat; step 02-02 adds
     // job-lifecycle alongside.
     let mut runtime = reconciler_runtime::ReconcilerRuntime::new(&config.data_dir)?;
-    runtime.register(noop_heartbeat())?;
-    runtime.register(job_lifecycle())?;
+    runtime.register(noop_heartbeat()).await?;
+    runtime.register(job_lifecycle()).await?;
     let runtime = Arc::new(runtime);
 
     let mut state: AppState = AppState::new(store, obs, runtime, driver);

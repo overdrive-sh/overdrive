@@ -30,10 +30,10 @@ use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
 
-fn build_app_state(tmp: &TempDir) -> AppState {
+async fn build_app_state(tmp: &TempDir) -> AppState {
     let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime::new");
-    runtime.register(noop_heartbeat()).expect("register noop-heartbeat");
-    runtime.register(job_lifecycle()).expect("register job-lifecycle");
+    runtime.register(noop_heartbeat()).await.expect("register noop-heartbeat");
+    runtime.register(job_lifecycle()).await.expect("register job-lifecycle");
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
@@ -46,7 +46,7 @@ fn build_app_state(tmp: &TempDir) -> AppState {
 #[tokio::test]
 async fn cluster_status_renders_job_lifecycle_alongside_noop_heartbeat() {
     let tmp = TempDir::new().expect("tmpdir");
-    let state = build_app_state(&tmp);
+    let state = build_app_state(&tmp).await;
 
     let Json(body): Json<ClusterStatus> =
         cluster_status(State(state)).await.expect("cluster_status handler ok");

@@ -86,10 +86,10 @@ impl Driver for AlwaysFailDriver {
     }
 }
 
-fn build_state_with_driver(tmp: &TempDir, driver: Arc<dyn Driver>) -> AppState {
+async fn build_state_with_driver(tmp: &TempDir, driver: Arc<dyn Driver>) -> AppState {
     let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime::new");
-    runtime.register(noop_heartbeat()).expect("register noop-heartbeat");
-    runtime.register(job_lifecycle()).expect("register job-lifecycle");
+    runtime.register(noop_heartbeat()).await.expect("register noop-heartbeat");
+    runtime.register(job_lifecycle()).await.expect("register job-lifecycle");
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("open store"));
     let obs: Arc<dyn ObservationStore> =
@@ -111,7 +111,7 @@ async fn repeatedly_crashing_workload_exhausts_backoff_and_stops_retrying() {
     let driver = Arc::new(AlwaysFailDriver::new());
     let count_handle = driver.count_handle();
     let driver_dyn: Arc<dyn Driver> = driver.clone();
-    let state = build_state_with_driver(&tmp, driver_dyn);
+    let state = build_state_with_driver(&tmp, driver_dyn).await;
 
     // Submit a 1-replica job. The submit goes through the IntentStore
     // directly (the test does not need the HTTP boundary here).

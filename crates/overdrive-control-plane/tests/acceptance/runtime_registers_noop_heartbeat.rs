@@ -109,13 +109,13 @@ fn runtime_new_returns_empty_registry_with_canonicalised_data_dir() {
 //     parent directory exists) of `provision_db_path`.
 // ---------------------------------------------------------------------------
 
-#[test]
-fn register_adds_reconciler_and_provisions_libsql_path() {
+#[tokio::test]
+async fn register_adds_reconciler_and_provisions_libsql_path() {
     let _sims = sim_adapters();
     let tmp = TempDir::new().expect("tmpdir");
 
     let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime::new");
-    runtime.register(noop_heartbeat()).expect("register noop-heartbeat");
+    runtime.register(noop_heartbeat()).await.expect("register noop-heartbeat");
 
     // Registry contains exactly the one name.
     let names = runtime.registered();
@@ -135,14 +135,14 @@ fn register_adds_reconciler_and_provisions_libsql_path() {
 // (c) Duplicate registration returns Conflict.
 // ---------------------------------------------------------------------------
 
-#[test]
-fn register_duplicate_name_returns_conflict() {
+#[tokio::test]
+async fn register_duplicate_name_returns_conflict() {
     let tmp = TempDir::new().expect("tmpdir");
     let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime::new");
 
-    runtime.register(noop_heartbeat()).expect("first register succeeds");
+    runtime.register(noop_heartbeat()).await.expect("first register succeeds");
 
-    let second = runtime.register(noop_heartbeat());
+    let second = runtime.register(noop_heartbeat()).await;
     match second {
         Err(ControlPlaneError::Conflict { message }) => {
             assert!(
@@ -204,6 +204,7 @@ async fn cluster_status_handler_renders_registry_and_broker_counters_via_axum_st
     Arc::get_mut(&mut state.runtime)
         .expect("unique Arc")
         .register(noop_heartbeat())
+        .await
         .expect("register");
 
     let Json(body): Json<ClusterStatus> =
@@ -231,15 +232,15 @@ async fn cluster_status_handler_renders_registry_and_broker_counters_via_axum_st
 //     `ReconcilerRuntime::new` + `register(noop_heartbeat())`.
 // ---------------------------------------------------------------------------
 
-#[test]
-fn at_least_one_reconciler_registered_invariant_holds_after_boot() {
+#[tokio::test]
+async fn at_least_one_reconciler_registered_invariant_holds_after_boot() {
     let _sims = sim_adapters();
     let tmp = TempDir::new().expect("tmpdir");
 
     // Boot 1 — initial register at construction.
     {
         let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime::new");
-        runtime.register(noop_heartbeat()).expect("register");
+        runtime.register(noop_heartbeat()).await.expect("register");
         assert!(
             !runtime.registered().is_empty(),
             "invariant: at_least_one_reconciler_registered holds post-boot"
@@ -249,7 +250,7 @@ fn at_least_one_reconciler_registered_invariant_holds_after_boot() {
     // Boot 2 — rebuild through the same path.
     {
         let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime::new");
-        runtime.register(noop_heartbeat()).expect("register");
+        runtime.register(noop_heartbeat()).await.expect("register");
         assert!(
             !runtime.registered().is_empty(),
             "invariant: at_least_one_reconciler_registered holds across restart"
@@ -264,11 +265,11 @@ fn at_least_one_reconciler_registered_invariant_holds_after_boot() {
 //     to both calls per ADR-0013 §2c.
 // ---------------------------------------------------------------------------
 
-#[test]
-fn reconciler_is_pure_invariant_holds_for_noop_heartbeat() {
+#[tokio::test]
+async fn reconciler_is_pure_invariant_holds_for_noop_heartbeat() {
     let tmp = TempDir::new().expect("tmpdir");
     let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime::new");
-    runtime.register(noop_heartbeat()).expect("register");
+    runtime.register(noop_heartbeat()).await.expect("register");
 
     // Per ADR-0021 (step 02-01), `desired`/`actual` are typed
     // `&AnyState`. NoopHeartbeat uses `AnyState::Unit` because its
@@ -310,8 +311,8 @@ fn reconciler_is_pure_invariant_holds_for_noop_heartbeat() {
 //     built-in reconciler ships in Phase 2.
 // ---------------------------------------------------------------------------
 
-#[test]
-fn registered_returns_deterministic_order_across_two_runtimes() {
+#[tokio::test]
+async fn registered_returns_deterministic_order_across_two_runtimes() {
     // 16 iterations — well above HashMap RandomState's
     // single-process-stable bias, so a HashMap-backed registry would
     // (in the multi-key case Phase 2 will introduce) fail this gate
@@ -326,8 +327,8 @@ fn registered_returns_deterministic_order_across_two_runtimes() {
         let mut runtime_b = ReconcilerRuntime::new(tmp_b.path()).expect("runtime_b::new");
 
         // Same registration sequence into each runtime.
-        runtime_a.register(noop_heartbeat()).expect("register a");
-        runtime_b.register(noop_heartbeat()).expect("register b");
+        runtime_a.register(noop_heartbeat()).await.expect("register a");
+        runtime_b.register(noop_heartbeat()).await.expect("register b");
 
         let names_a = runtime_a.registered();
         let names_b = runtime_b.registered();

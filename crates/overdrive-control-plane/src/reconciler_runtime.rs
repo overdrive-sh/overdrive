@@ -29,6 +29,7 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
@@ -46,6 +47,16 @@ use crate::error::ControlPlaneError;
 use crate::eval_broker::{Evaluation, EvaluationBroker};
 use crate::libsql_provisioner::provision_db_path;
 
+/// Registry slot — pairs an `AnyReconciler` with its eagerly-opened
+/// libSQL handle. The handle is wrapped in `Arc` so the accessor can
+/// hand out cheap clones across `.await` suspension points (e.g. the
+/// convergence tick loop holds a clone across `hydrate.await` while
+/// the registry remains accessible to other handlers).
+struct RegisteredReconciler {
+    reconciler: AnyReconciler,
+    handle: Arc<LibsqlHandle>,
+}
+
 /// Registry + broker + libSQL path owner.
 pub struct ReconcilerRuntime {
     /// Canonicalised data directory under which per-reconciler libSQL
@@ -53,7 +64,10 @@ pub struct ReconcilerRuntime {
     data_dir: PathBuf,
     /// Registry keyed on canonical reconciler name. Duplicate
     /// registration is rejected with `ControlPlaneError::Conflict`.
-    reconcilers: BTreeMap<ReconcilerName, AnyReconciler>,
+    /// Each entry stashes both the reconciler and its eagerly-opened
+    /// `LibsqlHandle` (issue #139 step 01-02) — the registry is the
+    /// single source of `LibsqlHandle` in the runtime.
+    reconcilers: BTreeMap<ReconcilerName, RegisteredReconciler>,
     /// Cancelable-eval-set evaluation broker per ADR-0013 §8.
     ///
     /// Wrapped in [`parking_lot::Mutex`] per
@@ -113,17 +127,56 @@ impl ReconcilerRuntime {
     ///   rejected cleanly — the registry is left unchanged.
     /// * [`ControlPlaneError::Internal`] if path provisioning fails
     ///   (permission denied, traversal rejected, etc.).
-    pub fn register(&mut self, reconciler: AnyReconciler) -> Result<(), ControlPlaneError> {
+    pub async fn register(&mut self, reconciler: AnyReconciler) -> Result<(), ControlPlaneError> {
         let name = reconciler.name().clone();
         if self.reconcilers.contains_key(&name) {
             return Err(ControlPlaneError::Conflict {
                 message: format!("reconciler {name} already registered"),
             });
         }
-        // Path derivation only — surfaces permission / traversal errors
-        // at register time rather than deferring to first DB open.
-        let _path = provision_db_path(&self.data_dir, &name)?;
-        self.reconcilers.insert(name, reconciler);
+        // Path derivation surfaces permission / traversal errors at
+        // register time. The libsql_provisioner stays in this crate
+        // (adapter-host class) and continues to return a path; the
+        // `LibsqlHandle::open` call lives at the registry boundary.
+        let path = provision_db_path(&self.data_dir, &name)?;
+
+        // Eager open per issue #139 step 01-02: open the libSQL DB at
+        // register time so any failure (filesystem rejection, libsql
+        // build error) surfaces synchronously here rather than at
+        // first-tick hydrate. Per research §9.2 failure modes this is
+        // the preferred shape — fail-fast at boot, never carry a
+        // broken handle into the convergence loop.
+        //
+        // `LibsqlHandle::open` itself does NOT create parent
+        // directories (`Builder::new_local(path).build()` opens the
+        // file directly), so we ensure the per-reconciler `<name>/`
+        // subdirectory exists before opening. This mirrors the
+        // existing `libsql_provisioner::open_db` shape.
+        if let Some(parent) = path.parent() {
+            tokio::fs::create_dir_all(parent).await.map_err(|e| {
+                ControlPlaneError::internal(
+                    format!(
+                        "ReconcilerRuntime::register: create parent {} for reconciler {} failed",
+                        parent.display(),
+                        name,
+                    ),
+                    e,
+                )
+            })?;
+        }
+        let handle = LibsqlHandle::open(&path).await.map_err(|e| {
+            ControlPlaneError::internal(
+                format!(
+                    "ReconcilerRuntime::register: open libSQL at {} for reconciler {} failed",
+                    path.display(),
+                    name,
+                ),
+                e,
+            )
+        })?;
+
+        self.reconcilers
+            .insert(name, RegisteredReconciler { reconciler, handle: Arc::new(handle) });
         Ok(())
     }
 
@@ -154,7 +207,7 @@ impl ReconcilerRuntime {
     /// `reconciler_is_pure` invariant to twin-invocation-check every
     /// reconciler in the registry from a single harness entry point.
     pub fn reconcilers_iter(&self) -> impl Iterator<Item = &AnyReconciler> {
-        self.reconcilers.values()
+        self.reconcilers.values().map(|slot| &slot.reconciler)
     }
 
     /// Look up a reconciler by canonical name. O(log N) keyed lookup
@@ -164,7 +217,29 @@ impl ReconcilerRuntime {
     /// so dispatch is a keyed lookup, not a registry scan.
     #[must_use]
     pub fn get(&self, name: &ReconcilerName) -> Option<&AnyReconciler> {
-        self.reconcilers.get(name)
+        self.reconcilers.get(name).map(|slot| &slot.reconciler)
+    }
+
+    /// Look up the per-reconciler `LibsqlHandle` opened eagerly at
+    /// register time (issue #139 step 01-02). The registry is the
+    /// SINGLE source of `LibsqlHandle` in the runtime — downstream
+    /// callers (the convergence tick loop, future handlers.rs view
+    /// reads, `streaming.rs` `check_terminal`) MUST fetch handles via
+    /// this accessor rather than constructing one themselves.
+    ///
+    /// Returns `None` for unregistered names — the same defensive
+    /// shape as `get`, since a reconciler may be deregistered between
+    /// submit and drain (Phase 2+ concern). The tick loop reaches for
+    /// the cached default view in that case rather than panicking.
+    ///
+    /// Returns `&Arc<LibsqlHandle>` so callers can either deref to
+    /// `&LibsqlHandle` for the common synchronous path (the registered
+    /// `Arc` outlives any single tick) or clone the `Arc` cheaply when
+    /// they need ownership across an `.await` suspension that outlasts
+    /// the registry borrow.
+    #[must_use]
+    pub fn libsql_handle(&self, name: &ReconcilerName) -> Option<&Arc<LibsqlHandle>> {
+        self.reconcilers.get(name).map(|slot| &slot.handle)
     }
 }
 
@@ -267,11 +342,26 @@ pub async fn run_convergence_tick(
     // seam) — today's `hydrate` impls return a default view that we
     // discard in favour of the cached value.
     //
-    // TODO(#139): wire `LibsqlHandle` for real per ADR-0013 §2b and
-    // use the returned view directly; drop the discard-and-cache
-    // shape below.
-    let db = LibsqlHandle::default_phase1();
-    let _ = reconciler.hydrate(target, &db).await.map_err(ConvergenceError::Hydrate)?;
+    // Issue #139 step 01-02: `LibsqlHandle` is now opened eagerly at
+    // register time and stashed in the registry; we fetch the handle
+    // by name rather than constructing one per tick. If the
+    // reconciler was deregistered between get + libsql_handle (Phase
+    // 2+ concern), fall through cleanly — the same level-triggered
+    // §18 shape that protects the `get` lookup above.
+    //
+    // TODO(#139 step 02-01+): use the returned view directly once
+    // `JobLifecycle::hydrate` decodes real reconciler memory; drop
+    // the discard-and-cache shape below at step 02-04.
+    let Some(db) = state.runtime.libsql_handle(reconciler_name) else {
+        tracing::warn!(
+            target: "overdrive::reconciler",
+            reconciler = %reconciler_name,
+            target = %target.as_str(),
+            "convergence tick: libSQL handle missing for registered reconciler; skipping"
+        );
+        return Ok(());
+    };
+    let _ = reconciler.hydrate(target, db.as_ref()).await.map_err(ConvergenceError::Hydrate)?;
     let view = cached_view_or_default(reconciler, target, state);
 
     // Pure reconcile.

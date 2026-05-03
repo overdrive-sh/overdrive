@@ -57,8 +57,8 @@ async fn cluster_status_responsive_under_workload_cpu_burst() {
 
     let tmp = TempDir::new().expect("tempdir");
     let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime");
-    runtime.register(noop_heartbeat()).expect("register noop");
-    runtime.register(job_lifecycle()).expect("register job-lifecycle");
+    runtime.register(noop_heartbeat()).await.expect("register noop");
+    runtime.register(job_lifecycle()).await.expect("register job-lifecycle");
     let runtime = Arc::new(runtime);
 
     let local_node = NodeId::new("local").expect("node id");

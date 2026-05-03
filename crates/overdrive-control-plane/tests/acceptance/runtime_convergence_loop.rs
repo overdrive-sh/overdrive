@@ -48,10 +48,10 @@ use tempfile::TempDir;
 /// (`noop-heartbeat` and `job-lifecycle`) — matching the `run_server`
 /// boot path. The `SimClock` is held by the caller so the test can
 /// advance logical time between ticks.
-fn build_converged_state(tmp: &TempDir, clock: &SimClock) -> AppState {
+async fn build_converged_state(tmp: &TempDir, clock: &SimClock) -> AppState {
     let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime::new");
-    runtime.register(noop_heartbeat()).expect("register noop-heartbeat");
-    runtime.register(job_lifecycle()).expect("register job-lifecycle");
+    runtime.register(noop_heartbeat()).await.expect("register noop-heartbeat");
+    runtime.register(job_lifecycle()).await.expect("register job-lifecycle");
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
@@ -76,7 +76,7 @@ fn build_converged_state(tmp: &TempDir, clock: &SimClock) -> AppState {
 async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
     let tmp = TempDir::new().expect("tempdir");
     let clock = SimClock::new();
-    let state = build_converged_state(&tmp, &clock);
+    let state = build_converged_state(&tmp, &clock).await;
 
     // --- Preload IntentStore: one Job, replicas=1 (the converged
     //     desired state for `JobLifecycle` against `job/payments`).
@@ -216,8 +216,8 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
     // --- Build a converged AppState (same fixture shape as the test
     //     above; both reconcilers registered).
     let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime::new");
-    runtime.register(noop_heartbeat()).expect("register noop-heartbeat");
-    runtime.register(job_lifecycle()).expect("register job-lifecycle");
+    runtime.register(noop_heartbeat()).await.expect("register noop-heartbeat");
+    runtime.register(job_lifecycle()).await.expect("register job-lifecycle");
 
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
@@ -394,8 +394,8 @@ async fn stop_after_failed_alloc_drains_broker() {
     //     `AllocState::Failed` and the reconciler enters the
     //     restart-with-backoff branch.
     let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime::new");
-    runtime.register(noop_heartbeat()).expect("register noop-heartbeat");
-    runtime.register(job_lifecycle()).expect("register job-lifecycle");
+    runtime.register(noop_heartbeat()).await.expect("register noop-heartbeat");
+    runtime.register(job_lifecycle()).await.expect("register job-lifecycle");
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
@@ -638,8 +638,8 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
     //     `SystemClock`, which would advance with real wall-clock and
     //     defeat the deterministic-rehydration assertion below.
     let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime::new");
-    runtime.register(noop_heartbeat()).expect("register noop-heartbeat");
-    runtime.register(job_lifecycle()).expect("register job-lifecycle");
+    runtime.register(noop_heartbeat()).await.expect("register noop-heartbeat");
+    runtime.register(job_lifecycle()).await.expect("register job-lifecycle");
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
@@ -915,8 +915,8 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
     let clock = SimClock::new();
 
     let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime::new");
-    runtime.register(noop_heartbeat()).expect("register noop-heartbeat");
-    runtime.register(job_lifecycle()).expect("register job-lifecycle");
+    runtime.register(noop_heartbeat()).await.expect("register noop-heartbeat");
+    runtime.register(job_lifecycle()).await.expect("register job-lifecycle");
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
