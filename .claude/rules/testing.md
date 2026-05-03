@@ -289,10 +289,7 @@ exempt from the foreground-only rule. A mutation run does a full
 build + nextest rerun per mutant; even diff-scoped
 (`--in-diff origin/main`) the wall clock exceeds the 10 min Bash tool
 cap on this workspace. Running it foreground means it gets SIGKILLed
-at the cap, which is both misleading (the run wasn't actually
-failing) and destructive (`pkill -f "cargo mutants"` then leaves
-mutated source on disk — see the Post-Mutation Safety step in
-`nw-mutation-test`).
+at the cap, which is misleading (the run wasn't actually failing).
 
 Rules for mutation specifically:
 
@@ -306,10 +303,15 @@ Rules for mutation specifically:
   that's information — either the diff scope is wrong, the
   `.cargo/mutants.toml` skip list is incomplete, or the test suite is
   slower than budgeted. Investigate; do not `pkill`.
-- **Always run the post-mutation safety step** (`git checkout --
-  <src>`) whether the run succeeded, failed, was cancelled by the
-  user, or errored. Mutated source on disk is the failure mode that
-  makes this exception load-bearing.
+- **Do NOT run `git checkout -- <path>` after a mutation run.**
+  `cargo-mutants` mutates source inside its own scratch copy of the
+  workspace under `target/mutants/`, never the live working tree. The
+  files in `crates/` are untouched throughout the run, so there is
+  nothing to restore. Running `git checkout -- crates/` (or any
+  variant) discards real uncommitted work for no benefit, and the
+  destructive-git pre-tool hook blocks it anyway. If you genuinely
+  see mutated content in `crates/` after a run, that is a bug in the
+  wrapper — file it, do not paper over it with a checkout.
 
 This exception is narrow. Nextest, `cargo test --doc`, `cargo xtask
 dst`, `cargo xtask bpf-unit`, `cargo xtask integration-test vm`,
@@ -904,12 +906,13 @@ at the top of "Running tests"):
   will SIGKILL mid-run.
 - Let it finish. The wrapper exits 0 on pass, non-zero on gate
   failure. Do NOT `pkill -f "cargo mutants"` when it seems slow —
-  that leaves mutated source on disk and skips
-  `target/xtask/mutants-summary.json` generation.
-- After every run (pass, fail, cancel), run `git checkout -- crates/`
-  to restore any mutated source the wrapper didn't clean up itself.
-  This is a belt-and-braces step, not a substitute for letting the
-  run finish.
+  that skips `target/xtask/mutants-summary.json` generation.
+- **Do NOT run `git checkout -- <path>` afterwards.** `cargo-mutants`
+  works against its own scratch copy under `target/mutants/`; the
+  live `crates/` tree is never mutated and there is nothing to
+  restore. The destructive-git pre-tool hook blocks the command
+  anyway. See the rule above under "Mutation testing is the
+  exception" for the full rationale.
 
 **Reading the output.** The summary file at
 `target/xtask/mutants-summary.json` is the structured gate record —
