@@ -115,13 +115,23 @@ pub enum ParseError {
     #[error("UnixInstant input is not a well-formed `<seconds>.<nanos>` decimal")]
     MalformedDecimal,
 
-    /// The seconds component overflowed `u64` or the fractional
-    /// component, after zero-padding to 9 digits, overflowed `u32`.
-    /// Reserved for arithmetic-overflow paths even though, in
-    /// practice, a 9-digit fractional cannot exceed `999_999_999 <
-    /// u32::MAX`; the variant exists to keep the failure-mode
-    /// taxonomy total.
-    #[error("UnixInstant numeric component overflowed its primitive width")]
+    /// The seconds component overflowed `u64` (a digit-only string
+    /// longer than ~20 digits, or any 20-digit value above
+    /// `u64::MAX`). Reserved for the integer-component overflow path;
+    /// in practice an input long enough to trip this is also long
+    /// enough to look implausible, but the variant exists so the
+    /// failure-mode taxonomy is total and a caller `match`-ing on it
+    /// can phrase a diagnostic that names the integer part rather
+    /// than the fractional part.
+    #[error("UnixInstant seconds component overflowed `u64`")]
+    SecsOverflow,
+
+    /// The fractional component, after zero-padding to 9 digits,
+    /// overflowed `u32`. Reserved for arithmetic-overflow paths even
+    /// though, in practice, a 9-digit fractional cannot exceed
+    /// `999_999_999 < u32::MAX`; the variant exists to keep the
+    /// failure-mode taxonomy total.
+    #[error("UnixInstant nanos component overflowed `u32`")]
     NanosOverflow,
 }
 
@@ -183,7 +193,7 @@ impl FromStr for UnixInstant {
             return Err(ParseError::MalformedDecimal);
         }
 
-        let secs: u64 = secs_str.parse().map_err(|_| ParseError::NanosOverflow)?;
+        let secs: u64 = secs_str.parse().map_err(|_| ParseError::SecsOverflow)?;
 
         let nanos: u32 = match frac_str {
             None => 0,
