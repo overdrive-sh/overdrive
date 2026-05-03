@@ -3,6 +3,159 @@
 Implementer's reference for replacing `AppState::view_cache` with the
 ADR-0013 §2b hydrate-then-reconcile contract using per-primitive libSQL.
 
+---
+
+## 0. Freshness Update — 2026-05-03
+
+This section was appended after the original research (commit `de36b89`) was
+written. Sections 1–N below are still the implementer's reference for everything
+except the items called out here. Read this section first; trust the body of
+the document for everything not flagged.
+
+### 0.1 What has LANDED since `de36b89`
+
+The follow-up research file
+(`issue-139-followup-portable-deadline-representation-research.md`) recommended
+a portable wall-clock representation, a `TickContext.now_unix` field, and
+collapsing `JobLifecycleView` to persisted *inputs* rather than a derived
+deadline. **All three recommendations have shipped on `main`** (commits
+`5d76498`, `89256af`, `5736caf`, `282c0a3`, `bad18b0`, `ed5975d` (#143)). The
+follow-up file is now historical record, not future guidance.
+
+Concretely:
+
+- **`UnixInstant` newtype** — defined in `crates/overdrive-core/src/wall_clock.rs`
+  (imported at `crates/overdrive-core/src/reconciler.rs:161`). Display / FromStr /
+  Serde / proptest roundtrips all in place. `ParseError` carries split
+  `NanosOverflow{Secs,Nanos}` variants per `bad18b0`.
+- **`TickContext.now_unix`** — `crates/overdrive-core/src/reconciler.rs:201` adds
+  the persistable wall-clock snapshot alongside `now: Instant`. The runtime
+  populates it via `UnixInstant::from_clock(&*state.clock)` at
+  `crates/overdrive-control-plane/src/reconciler_runtime.rs:255`.
+- **`JobLifecycleView` shape** — `crates/overdrive-core/src/reconciler.rs:1408-1420`
+  now carries exactly two `BTreeMap` fields, both inputs:
+  - `restart_counts: BTreeMap<AllocationId, u32>` (1413)
+  - `last_failure_seen_at: BTreeMap<AllocationId, UnixInstant>` (1419)
+  
+  `next_attempt_at` (the derived deadline the original research's §7 used as a
+  worked example) is **gone from production source** — recomputed at the read
+  site as `seen_at + backoff_for_attempt(restart_count)`
+  (`reconciler.rs:1196-1200`).
+- **`backoff_for_attempt(_attempt: u32) -> Duration`** — pinned at
+  `crates/overdrive-core/src/reconciler.rs:993`. Phase 1 is degenerate-constant;
+  signature is stable for Phase 2+ operator-configurable per-job policy.
+
+Implication for sections that reference `next_attempt_at`:
+
+- §7 of this research (and any §1.x / §3.x worked example using
+  `next_attempt_at`) was written against the pre-#141 view shape. Read those
+  sections as describing the *general* full-View-replacement convention; the
+  specific `JobLifecycleView` schema example is now `(restart_counts,
+  last_failure_seen_at)` — both `BTreeMap` columns. The persist-and-rehydrate
+  contract is unchanged; only the field names differ.
+
+### 0.2 What has DRIFTED in citations
+
+Verified every file:line citation in §1.1 against current `marcus-sa/auckland`
+HEAD (same as `origin/main`). Drift summary:
+
+| Cited as | Now at | Status |
+|---|---|---|
+| `lib.rs:109` `view_cache` field | `lib.rs:109` | ✅ unchanged |
+| `lib.rs:142-148` `enum CachedView` | `lib.rs:141-148` | ✅ same body, comment block expanded by one line |
+| `lib.rs:183` field init | `lib.rs:183` | ✅ unchanged |
+| `reconciler_runtime.rs:355-357` `cache_key` | `reconciler_runtime.rs:364-366` | ⚠ shifted +9 lines |
+| `reconciler_runtime.rs:361-382` `cached_view_or_default` | `reconciler_runtime.rs:370-391` | ⚠ shifted +9 lines |
+| `reconciler_runtime.rs:385-400` `store_cached_view` | `reconciler_runtime.rs:394-409` | ⚠ shifted +9 lines |
+| `reconciler_runtime.rs:254-267` discard-and-cache | `reconciler_runtime.rs:262-275` | ⚠ shifted +8 lines; the `LibsqlHandle::default_phase1()` call is now at `:273` (was `:265`) |
+| `reconciler_runtime.rs:299-304` write path | `reconciler_runtime.rs:311-313` | ⚠ shifted +12 lines; comment + `store_cached_view` call only — the prior block has expanded with the `view_has_backoff_pending` predicate |
+| `streaming.rs:108` `use crate::CachedView;` | `streaming.rs:108` | ✅ unchanged |
+| `streaming.rs:345-358` `read_view` | `streaming.rs:345-358` | ✅ unchanged |
+| `handlers.rs:30` import | `handlers.rs:30` | ✅ unchanged |
+| `handlers.rs:614-622` `read_job_lifecycle_view` | `handlers.rs:614-622` | ✅ unchanged |
+| `core/reconciler.rs:233-242` `default_phase1` | `core/reconciler.rs:253-262` | ⚠ shifted +20 lines (`UnixInstant` import + `TickContext.now_unix` field added above) |
+| `core/reconciler.rs:204-217` `LibsqlHandle` body | `core/reconciler.rs:223-237` | ⚠ shifted +19 lines |
+| `core/reconciler.rs:269` `HydrateError::Libsql` `#[from] libsql::Error` | `core/reconciler.rs:289` | ⚠ shifted +20 lines |
+| `core/reconciler.rs:227-231` `empty()` constructor | `core/reconciler.rs:247-251` | ⚠ shifted +20 lines |
+
+The shifts in `reconciler_runtime.rs` (+8 to +12) come from the `view_has_backoff_pending`
+predicate added by `fix-stop-branch-backoff-pending` (commit `c4ddafa`-era) plus
+the `now_unix` snapshot at `:255`. The shifts in `core/reconciler.rs` (+20)
+come from the `TickContext` body growing the `now_unix` field and the new
+`UnixInstant` import.
+
+The "doesn't pull libsql onto its compile graph" stale-comment observation in
+the original research §1.3 (`reconciler.rs:82-100`) is still accurate — the
+comment at `crates/overdrive-core/src/reconciler.rs:231-235` still describes
+the `Arc<()>` placeholder as an "until libsql is on the compile graph"
+deferral, but `libsql.workspace = true` is already in
+`crates/overdrive-core/Cargo.toml` (verified). Worth deleting the stale comment
+in the implementation PR.
+
+### 0.3 What has NOT drifted
+
+- ADR-0013 contract (§2.x of this research) — verbatim quotes still match.
+- `libsql_provisioner.rs` — provisioner is still fully implemented and ready;
+  research §1.5 / §2.2 are accurate.
+- The two acceptance tests in §1.4 that reference `view_cache` directly still
+  do so (verified at `runtime_convergence_loop.rs` lines 712, 716, 736, 738,
+  815-816, 824-828). Their counting strategy still needs migration per §1.4.
+- The `streaming.rs` inline test at `:520, :542, :557` still constructs a
+  literal `view_cache = Arc::new(Mutex::new(BTreeMap::new()))`.
+- `handlers.rs:614-622` `read_job_lifecycle_view` shape unchanged.
+
+### 0.4 New code on main that affects implementation strategy
+
+**Simulated-restart idempotence test landed in
+`crates/overdrive-control-plane/tests/acceptance/runtime_convergence_loop.rs:619-871`**
+(`runtime_reconcile_is_idempotent_across_simulated_control_plane_restart`).
+
+This test is the runtime-boundary witness for the persist-inputs design: it
+warms up the cached view to a non-trivial backoff state, snapshots
+`(restart_counts, last_failure_seen_at)`, *clears the cache and reseeds from
+the snapshot only* (lines 815-829), then asserts that `reconcile` against the
+rehydrated view produces bit-identical `(actions, next_view)` tuples
+(lines 861-870).
+
+**Implication for the libSQL contract**: this test is the golden-path
+regression gate for #139 itself. The libSQL hydrate→reconcile→persist
+loop MUST preserve the same property. Specifically:
+
+1. The libSQL row schema for `JobLifecycle` MUST contain exactly the two
+   columns `(restart_counts → u32 per alloc, last_failure_seen_at →
+   UnixInstant per alloc)`. Adding any derived column (e.g. caching a
+   `next_attempt_at`) would silently break the policy-evolution guarantee
+   the test pins.
+2. `UnixInstant`'s libSQL serialization must round-trip bit-equivalent
+   (the proptest in `89256af` covers Display/FromStr/Serde — verify
+   the libSQL column type chosen does not lossily downcast nanoseconds).
+3. The hydrate path MUST construct an empty `JobLifecycleView::default()`
+   when no rows exist for the target — the warm-up loop relies on this
+   ("first tick the cache is empty" path at the existing
+   `reconciler_runtime.rs:262-263` comment).
+
+The test currently exercises the `view_cache` path; once #139 lands, this
+test should be updated to drop the cache manipulation at lines 815-829 and
+instead re-open the libSQL handle (simulating fresh process state). The
+assertion (lines 861-870) stays.
+
+**Companion core-level test**:
+`crates/overdrive-core/tests/acceptance/job_lifecycle_recompute_deadline.rs::restart_survival_idempotence`
+(line 250) pins the same property at the `JobLifecycle::reconcile` boundary
+(no runtime, no cache, just the pure function). Independent — keep both.
+
+### 0.5 No-action items
+
+- The follow-up research file
+  (`issue-139-followup-portable-deadline-representation-research.md`) is
+  historical record — do not edit. Its recommendations are all in production
+  source.
+- §7 of this document (full-View-replacement convention) is still correct as
+  general guidance; only its `next_attempt_at` example field is stale. A
+  reader who understands §0.1 will not be confused.
+
+End of freshness update. Sections 1–N below are unchanged from `de36b89`.
+
 Branch state at research time: `marcus-sa/reconciler-view-cache-comment`,
 3 modified files (`lib.rs`, `reconciler_runtime.rs`, `streaming.rs`),
 **comments only** — no implementation has begun. 0 commits ahead of
