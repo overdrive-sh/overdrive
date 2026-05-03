@@ -33,6 +33,7 @@ fn main() {
         updated_at: LogicalTimestamp { counter: 1, writer: node_id.clone() },
         reason: None,
         detail: None,
+        terminal: None,
     };
 
     // This line MUST fail to compile: `LifecycleEvent.from` is typed

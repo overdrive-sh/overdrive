@@ -90,6 +90,7 @@ fn alloc_with_state_on(
         updated_at: LogicalTimestamp { counter: 1, writer: nid(node_id) },
         reason: None,
         detail: None,
+        terminal: None,
     }
 }
 

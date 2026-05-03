@@ -83,6 +83,7 @@ fn row(
         updated_at: LogicalTimestamp { counter, writer: writer.clone() },
         reason: None,
         detail: None,
+        terminal: None,
     }
 }
 

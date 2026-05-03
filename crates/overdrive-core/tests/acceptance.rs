@@ -73,4 +73,10 @@ mod acceptance {
     // idempotence is structural rather than coincidental — see
     // `.claude/rules/development.md` § "Persist inputs, not derived state".
     mod job_lifecycle_recompute_deadline;
+
+    // reconciler-memory-redb step 01-02 — `TerminalCondition` enum +
+    // `AllocStatusRow.terminal` field (ADR-0037 prerequisite for the
+    // Phase 02 action-shim wiring). Property: every variant + None
+    // survives the rkyv roundtrip at the row level.
+    mod terminal_condition_roundtrip;
 }

@@ -132,6 +132,7 @@ async fn write_row(
         updated_at: LogicalTimestamp { counter, writer: sample_node() },
         reason,
         detail: None,
+        terminal: None,
     };
     obs.write(ObservationRow::AllocStatus(row)).await.expect("obs write");
 }

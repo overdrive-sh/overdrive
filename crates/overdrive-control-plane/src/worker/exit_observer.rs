@@ -247,8 +247,16 @@ pub fn spawn_with_runtime(
 /// (`NoPriorRow`), or exhausted its retry budget against a terminal /
 /// repeatedly-retryable error (`Failed`).
 enum RetryOutcome {
+    /// `row` is `Box<AllocStatusRow>` (not bare) to keep the enum's
+    /// largest-variant size from drifting upward as `AllocStatusRow`
+    /// grows additive fields (`reason`, `detail`, `terminal` per
+    /// ADR-0032 / ADR-0037). The variant is constructed once per
+    /// successful retry and consumed immediately at the call site, so
+    /// the boxing cost is a single heap allocation per write — the
+    /// alternative is the whole enum carrying ~250+ bytes for every
+    /// `NoPriorRow` and `Failed` case as well.
     Wrote {
-        row: AllocStatusRow,
+        row: Box<AllocStatusRow>,
         prior_state: AllocStateWire,
     },
     NoPriorRow,
@@ -281,7 +289,7 @@ async fn run_with_retry(
         attempts = attempts.saturating_add(1);
         match handle_exit_event(obs, event).await {
             Ok(Some((row, prior_state))) => {
-                return RetryOutcome::Wrote { row, prior_state };
+                return RetryOutcome::Wrote { row: Box::new(row), prior_state };
             }
             Ok(None) => {
                 return RetryOutcome::NoPriorRow;
@@ -404,6 +412,12 @@ async fn handle_exit_event(
         updated_at,
         reason: Some(reason),
         detail: None,
+        // ADR-0037 §4: emission sites outside a reconciler tick (the
+        // exit observer is one — it runs in a per-allocation watcher
+        // task, not a reconcile loop) MUST emit `terminal: None`.
+        // Structurally meaningful: "I am not making a terminal claim";
+        // the reconciler is the single writer for terminal decisions.
+        terminal: None,
     };
     obs.write(ObservationRow::AllocStatus(row.clone())).await?;
     Ok(Some((row, prior_state)))

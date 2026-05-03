@@ -64,6 +64,7 @@ fn alloc_status(state: AllocState, writer: &NodeId, counter: u64) -> AllocStatus
         updated_at: LogicalTimestamp { counter, writer: writer.clone() },
         reason: None,
         detail: None,
+        terminal: None,
     }
 }
 
@@ -225,6 +226,7 @@ async fn full_row_writes_take_precedence_with_no_partial_merge() {
         updated_at: LogicalTimestamp { counter: 2, writer: node("node-c") },
         reason: None,
         detail: None,
+        terminal: None,
     };
     peer_c
         .write(ObservationRow::AllocStatus(t1_row.clone()))

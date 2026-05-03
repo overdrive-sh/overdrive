@@ -34,6 +34,7 @@ fn sample_alloc_status_row() -> AllocStatusRow {
         },
         reason: None,
         detail: None,
+        terminal: None,
     }
 }
 

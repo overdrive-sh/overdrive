@@ -28,7 +28,7 @@ use futures::Stream;
 use thiserror::Error;
 
 use crate::id::{AllocationId, JobId, NodeId, Region};
-use crate::transition_reason::TransitionReason;
+use crate::transition_reason::{TerminalCondition, TransitionReason};
 
 #[derive(Debug, Error)]
 pub enum ObservationStoreError {
@@ -291,6 +291,20 @@ pub struct AllocStatusRow {
     /// may carry only structured fields and rely on `detail` for the
     /// raw `errno` text).
     pub detail: Option<String>,
+    /// Reconciler-emitted classification of *why* this allocation
+    /// reached a terminal lifecycle state. Per ADR-0037 §3 the row is
+    /// the *durable* home for the terminal decision; the streaming
+    /// `LifecycleEvent.terminal` field (Phase 02 of this feature)
+    /// carries the same value.
+    ///
+    /// `None` when the writer (Phase 1: action shim) has not yet been
+    /// wired to populate it, when the row predates the schema
+    /// extension, or when the transition is non-terminal (most rows
+    /// — `Pending → Running`, `Running → Failed` with budget remaining,
+    /// etc. all carry `terminal: None`). Additive on the rkyv archive
+    /// shape so pre-feature redb files continue to deserialise (rkyv
+    /// treats `Option<T>` such that omitted data deserialises to `None`).
+    pub terminal: Option<TerminalCondition>,
 }
 
 /// `node_health` row — Phase 1 minimal shape per brief §6.

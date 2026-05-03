@@ -133,6 +133,7 @@ fn build_row(
         updated_at: LogicalTimestamp { counter: 1, writer: sample_node_id() },
         reason,
         detail,
+        terminal: None,
     }
 }
 

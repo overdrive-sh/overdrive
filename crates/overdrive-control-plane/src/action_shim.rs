@@ -184,6 +184,14 @@ fn build_alloc_status_row(
         updated_at: timestamp_for(tick, writer),
         reason,
         detail,
+        // ADR-0037: `terminal` is the durable home for the
+        // reconciler-emitted classification of *why* an allocation
+        // reached a terminal lifecycle state. Phase 02 of the
+        // reconciler-memory-redb feature threads the
+        // `Action::*.terminal: Option<TerminalCondition>` through
+        // this builder; until then every row this shim writes
+        // structurally carries `terminal: None`.
+        terminal: None,
     }
 }
 

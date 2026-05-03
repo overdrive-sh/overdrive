@@ -172,6 +172,7 @@ async fn sim_observation_lww_converges_passes_after_writes_and_convergence() {
             updated_at: LogicalTimestamp { counter: 1, writer: node("node-a") },
             reason: None,
             detail: None,
+            terminal: None,
         }))
         .await
         .expect("write");

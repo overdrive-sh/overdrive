@@ -113,6 +113,7 @@ async fn write_row(
         updated_at: LogicalTimestamp { counter, writer: sample_node() },
         reason,
         detail,
+        terminal: None,
     };
     state.obs.write(ObservationRow::AllocStatus(row)).await.expect("obs write");
 }

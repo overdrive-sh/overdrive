@@ -108,6 +108,7 @@ async fn cluster_status_responsive_under_workload_cpu_burst() {
         // store — no cause-class transition fired through the shim.
         reason: None,
         detail: None,
+        terminal: None,
     };
     obs.write(ObservationRow::AllocStatus(row)).await.expect("write alloc row");
 
