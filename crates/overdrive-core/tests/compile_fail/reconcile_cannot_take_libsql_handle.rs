@@ -40,6 +40,10 @@ impl Reconciler for BadReconciler {
         Ok(())
     }
 
+    async fn persist(&self, _view: &Self::View, _db: &LibsqlHandle) -> Result<(), HydrateError> {
+        Ok(())
+    }
+
     // The trait requires `&TickContext` in the fifth parameter slot;
     // substituting `&LibsqlHandle` is a type mismatch the compiler
     // catches via E0053.

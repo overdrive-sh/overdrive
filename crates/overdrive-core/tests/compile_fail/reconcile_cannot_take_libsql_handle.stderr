@@ -1,13 +1,13 @@
 error[E0053]: method `reconcile` has an incompatible type for trait
-  --> tests/compile_fail/reconcile_cannot_take_libsql_handle.rs:51:14
+  --> tests/compile_fail/reconcile_cannot_take_libsql_handle.rs:55:14
    |
-51 |         _db: &LibsqlHandle,
+55 |         _db: &LibsqlHandle,
    |              ^^^^^^^^^^^^^ expected `TickContext`, found `LibsqlHandle`
    |
    = note: expected signature `fn(&BadReconciler, &(), &(), &(), &TickContext) -> (Vec<Action>, ())`
               found signature `fn(&BadReconciler, &(), &(), &(), &LibsqlHandle) -> (Vec<Action>, ())`
 help: change the parameter type to match the trait
    |
-51 -         _db: &LibsqlHandle,
-51 +         _db: &TickContext,
+55 -         _db: &LibsqlHandle,
+55 +         _db: &TickContext,
    |

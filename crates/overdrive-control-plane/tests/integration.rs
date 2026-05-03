@@ -37,6 +37,7 @@ mod integration {
     mod concurrent_submit_toctou;
     mod describe_round_trip;
     mod idempotent_resubmit;
+    mod job_lifecycle_libsql_persistence;
     mod libsql_isolation;
     mod observation_empty_rows;
     mod server_lifecycle;

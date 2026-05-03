@@ -113,6 +113,17 @@
 //!         Ok(())
 //!     }
 //!
+//!     // Symmetric write side — Phase 1 convention `NextView =
+//!     // Self::View` (full replacement). With `View = ()` there is
+//!     // nothing to persist.
+//!     async fn persist(
+//!         &self,
+//!         _view: &Self::View,
+//!         _db: &LibsqlHandle,
+//!     ) -> Result<(), HydrateError> {
+//!         Ok(())
+//!     }
+//!
 //!     // Pure, synchronous. No `.await`, no I/O, no direct store
 //!     // write. The signature IS the contract.
 //!     fn reconcile(
@@ -397,6 +408,28 @@ pub trait Reconciler: Send + Sync {
         target: &TargetResource,
         db: &LibsqlHandle,
     ) -> impl std::future::Future<Output = Result<Self::View, HydrateError>> + Send;
+
+    /// Async write phase — symmetric counterpart to [`Reconciler::hydrate`].
+    ///
+    /// Per ADR-0013 §2b Phase 1 convention `NextView = Self::View` (full
+    /// replacement). The reconciler author owns the SQL on both the
+    /// read side ([`hydrate`]) and the write side (this method); the
+    /// runtime's tick loop calls `persist(next_view)` after `reconcile`
+    /// returns.
+    ///
+    /// Phase 1 ships no default impl: every reconciler MUST implement
+    /// `persist`. Reconcilers whose `View = ()` (e.g. `NoopHeartbeat`)
+    /// implement it as `Ok(())`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`HydrateError::Libsql`] on underlying libsql failure,
+    /// or [`HydrateError::Schema`] on schema-level mismatch.
+    fn persist(
+        &self,
+        view: &Self::View,
+        db: &LibsqlHandle,
+    ) -> impl std::future::Future<Output = Result<(), HydrateError>> + Send;
 
     /// Pure function over `(desired, actual, view, tick) ->
     /// (Vec<Action>, NextView)`. See whitepaper §18, ADR-0013 §2 / §2b
@@ -827,6 +860,12 @@ impl Reconciler for NoopHeartbeat {
         Ok(())
     }
 
+    async fn persist(&self, _view: &Self::View, _db: &LibsqlHandle) -> Result<(), HydrateError> {
+        // `View = ()` carries no rows; the proof-of-life reconciler
+        // has nothing to persist.
+        Ok(())
+    }
+
     fn reconcile(
         &self,
         _desired: &Self::State,
@@ -888,6 +927,41 @@ impl AnyReconciler {
             Self::JobLifecycle(r) => {
                 r.hydrate(target, db).await.map(AnyReconcilerView::JobLifecycle)
             }
+        }
+    }
+
+    /// Async write phase — dispatches to the inner reconciler's
+    /// `persist`. The caller supplies the matching view variant.
+    ///
+    /// Variant alignment is a compile-time invariant: the dispatch
+    /// `match` is exhaustive, and every arm pairs an `AnyReconciler`
+    /// variant with its declared [`AnyReconcilerView`] counterpart.
+    /// Adding a new reconciler variant whose `View` does not line up
+    /// with a matching arm produces a non-exhaustive-match compile
+    /// error, forcing the developer to extend the dispatch.
+    ///
+    /// # Errors
+    ///
+    /// Propagates [`HydrateError`] from the inner reconciler.
+    pub async fn persist(
+        &self,
+        view: &AnyReconcilerView,
+        db: &LibsqlHandle,
+    ) -> Result<(), HydrateError> {
+        match (self, view) {
+            (Self::NoopHeartbeat(r), AnyReconcilerView::Unit) => r.persist(&(), db).await,
+            (Self::JobLifecycle(r), AnyReconcilerView::JobLifecycle(view)) => {
+                r.persist(view, db).await
+            }
+            // Cross-variant — the runtime tick loop only ever pairs a
+            // reconciler with the View shape its own `hydrate`
+            // produced, so this arm cannot be reached from a
+            // correctly-wired caller. The match must remain exhaustive
+            // so a future variant addition becomes a compile error.
+            _ => panic!(
+                "AnyReconciler::persist dispatch mismatch — \
+                runtime supplied incompatible (reconciler, view) pair"
+            ),
         }
     }
 
@@ -1073,14 +1147,134 @@ impl Reconciler for JobLifecycle {
     async fn hydrate(
         &self,
         _target: &TargetResource,
-        _db: &LibsqlHandle,
+        db: &LibsqlHandle,
     ) -> Result<Self::View, HydrateError> {
-        // Phase 1 02-02 carries the View shape; the libSQL hydrate
-        // path itself (CREATE TABLE IF NOT EXISTS, SELECT decode)
-        // lands in 02-03 alongside the runtime tick loop. For 02-02
-        // a fresh empty View is sufficient — the convergence loop is
-        // not yet driven, so the View has no rows to materialise.
-        Ok(JobLifecycleView::default())
+        // Per ADR-0013 §6 (schema-author clause): the reconciler owns
+        // CREATE TABLE / SELECT inline. Two tables, one column of
+        // identity + one column of payload each — exactly the
+        // persist-inputs shape the View carries. NO derived
+        // `next_attempt_at` column: the deadline is recomputed every
+        // tick from `last_failure_seen_at + backoff_for_attempt(...)`
+        // per `.claude/rules/development.md` § "Persist inputs, not
+        // derived state".
+        //
+        // `last_failure_seen_at` stores `UnixInstant` as a TEXT column
+        // carrying the canonical `<seconds>.<nanos>` Display form
+        // (9-digit zero-padded nanos, see `wall_clock.rs`). TEXT was
+        // chosen over INTEGER nanos so the full 64-bit seconds range
+        // round-trips losslessly — INTEGER (i64) would refuse the
+        // upper-half u64 seconds the proptest exercises.
+        let conn = db.connection();
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS restart_counts (\
+                alloc_id TEXT PRIMARY KEY NOT NULL, \
+                count INTEGER NOT NULL\
+            )",
+            (),
+        )
+        .await?;
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS last_failure_seen_at (\
+                alloc_id TEXT PRIMARY KEY NOT NULL, \
+                ts TEXT NOT NULL\
+            )",
+            (),
+        )
+        .await?;
+
+        let mut view = JobLifecycleView::default();
+
+        let mut rows = conn.query("SELECT alloc_id, count FROM restart_counts", ()).await?;
+        while let Some(row) = rows.next().await? {
+            let alloc_id_raw: String = row.get(0)?;
+            let count_raw: i64 = row.get(1)?;
+            let alloc_id = AllocationId::new(&alloc_id_raw).map_err(|e| HydrateError::Schema {
+                message: format!(
+                    "restart_counts.alloc_id {alloc_id_raw:?} is not a valid AllocationId: {e}"
+                ),
+            })?;
+            let count = u32::try_from(count_raw).map_err(|_| HydrateError::Schema {
+                message: format!(
+                    "restart_counts.count for {alloc_id_raw} ({count_raw}) does not fit in u32"
+                ),
+            })?;
+            view.restart_counts.insert(alloc_id, count);
+        }
+
+        let mut rows = conn.query("SELECT alloc_id, ts FROM last_failure_seen_at", ()).await?;
+        while let Some(row) = rows.next().await? {
+            let alloc_id_raw: String = row.get(0)?;
+            let ts_raw: String = row.get(1)?;
+            let alloc_id = AllocationId::new(&alloc_id_raw).map_err(|e| {
+                HydrateError::Schema {
+                    message: format!(
+                        "last_failure_seen_at.alloc_id {alloc_id_raw:?} is not a valid AllocationId: {e}"
+                    ),
+                }
+            })?;
+            let ts: UnixInstant = ts_raw.parse().map_err(|e| HydrateError::Schema {
+                message: format!(
+                    "last_failure_seen_at.ts {ts_raw:?} for {alloc_id_raw} does not parse as UnixInstant: {e}"
+                ),
+            })?;
+            view.last_failure_seen_at.insert(alloc_id, ts);
+        }
+
+        Ok(view)
+    }
+
+    async fn persist(&self, view: &Self::View, db: &LibsqlHandle) -> Result<(), HydrateError> {
+        // Per ADR-0013 §2b Phase 1 convention `NextView = Self::View`
+        // — full replacement via DELETE-then-INSERT. Quadratic in view
+        // size; fine for Phase 1 (single-node, single-job, view rows
+        // bounded by the alloc cardinality of one job). Later phases
+        // may optimise to true diffs.
+        //
+        // Schema management lives in `hydrate` per the §6 schema-author
+        // clause, but we re-issue `CREATE TABLE IF NOT EXISTS` here too:
+        // the runtime tick loop calls `hydrate` before `persist` on
+        // every tick, but a defensive create-if-not-exists keeps
+        // `persist` callable in isolation (e.g. tests that bootstrap
+        // state without a prior hydrate).
+        let conn = db.connection();
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS restart_counts (\
+                alloc_id TEXT PRIMARY KEY NOT NULL, \
+                count INTEGER NOT NULL\
+            )",
+            (),
+        )
+        .await?;
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS last_failure_seen_at (\
+                alloc_id TEXT PRIMARY KEY NOT NULL, \
+                ts TEXT NOT NULL\
+            )",
+            (),
+        )
+        .await?;
+
+        let txn = conn.transaction().await?;
+        txn.execute("DELETE FROM restart_counts", ()).await?;
+        txn.execute("DELETE FROM last_failure_seen_at", ()).await?;
+
+        for (alloc_id, count) in &view.restart_counts {
+            txn.execute(
+                "INSERT INTO restart_counts (alloc_id, count) VALUES (?1, ?2)",
+                (alloc_id.as_str().to_owned(), i64::from(*count)),
+            )
+            .await?;
+        }
+        for (alloc_id, ts) in &view.last_failure_seen_at {
+            txn.execute(
+                "INSERT INTO last_failure_seen_at (alloc_id, ts) VALUES (?1, ?2)",
+                (alloc_id.as_str().to_owned(), ts.to_string()),
+            )
+            .await?;
+        }
+
+        txn.commit().await?;
+        Ok(())
     }
 
     fn reconcile(
@@ -1457,7 +1651,125 @@ pub struct JobLifecycleView {
 
 #[cfg(test)]
 mod tests {
-    use super::LibsqlHandle;
+    use std::time::Duration;
+
+    use super::{
+        AnyReconciler, AnyReconcilerView, JobLifecycle, JobLifecycleView, LibsqlHandle,
+        NoopHeartbeat, Reconciler, TargetResource,
+    };
+    use crate::id::AllocationId;
+    use crate::wall_clock::UnixInstant;
+
+    fn alloc(raw: &str) -> AllocationId {
+        AllocationId::new(raw).expect("valid alloc id")
+    }
+
+    fn target() -> TargetResource {
+        TargetResource::new("job/payments").expect("valid target resource")
+    }
+
+    /// AC 4 (negative case) — hydrating an empty in-memory DB must
+    /// return the default `JobLifecycleView` and create the schema as
+    /// a side effect (so a subsequent `persist` does not need to
+    /// re-create it).
+    #[tokio::test]
+    async fn job_lifecycle_hydrate_empty_db_returns_default() {
+        let handle = LibsqlHandle::open_in_memory().await.expect("open in-memory");
+        let view = JobLifecycle::canonical().hydrate(&target(), &handle).await.expect("hydrate");
+        assert_eq!(view, JobLifecycleView::default());
+    }
+
+    /// AC 5 — within-handle persist→hydrate round-trip. Complements
+    /// the cross-handle integration test by exercising the same code
+    /// path under in-process isolation.
+    #[tokio::test]
+    async fn job_lifecycle_persist_then_hydrate_roundtrip_in_memory() {
+        let handle = LibsqlHandle::open_in_memory().await.expect("open in-memory");
+        let reconciler = JobLifecycle::canonical();
+
+        let mut view = JobLifecycleView::default();
+        view.restart_counts.insert(alloc("alloc-x"), 2);
+        view.restart_counts.insert(alloc("alloc-y"), 0);
+        view.last_failure_seen_at.insert(
+            alloc("alloc-x"),
+            UnixInstant::from_unix_duration(Duration::new(1_700_000_000, 999_999_999)),
+        );
+
+        reconciler.persist(&view, &handle).await.expect("persist");
+        let hydrated = reconciler.hydrate(&target(), &handle).await.expect("hydrate");
+        assert_eq!(hydrated, view);
+    }
+
+    /// AC 4 — second persist replaces (not unions with) first. The
+    /// in-memory variant of the integration test, so the kill-rate
+    /// gate scopes to default-lane mutants too.
+    #[tokio::test]
+    async fn job_lifecycle_persist_replaces_prior_state_in_memory() {
+        let handle = LibsqlHandle::open_in_memory().await.expect("open in-memory");
+        let reconciler = JobLifecycle::canonical();
+
+        let mut first = JobLifecycleView::default();
+        first.restart_counts.insert(alloc("first-only"), 5);
+        first
+            .last_failure_seen_at
+            .insert(alloc("first-only"), UnixInstant::from_unix_duration(Duration::new(100, 0)));
+        reconciler.persist(&first, &handle).await.expect("persist 1");
+
+        let second = JobLifecycleView::default();
+        reconciler.persist(&second, &handle).await.expect("persist 2");
+
+        let hydrated = reconciler.hydrate(&target(), &handle).await.expect("hydrate");
+        assert_eq!(hydrated, JobLifecycleView::default());
+        assert!(hydrated.restart_counts.is_empty());
+        assert!(hydrated.last_failure_seen_at.is_empty());
+    }
+
+    /// AC 2 — `NoopHeartbeat::persist` is `Ok(())` regardless of the
+    /// underlying DB state.
+    #[tokio::test]
+    async fn noop_heartbeat_persist_is_ok() {
+        let handle = LibsqlHandle::open_in_memory().await.expect("open in-memory");
+        NoopHeartbeat::canonical().persist(&(), &handle).await.expect("persist ok");
+    }
+
+    /// AC 3 — `AnyReconciler::persist` dispatches to the inner
+    /// reconciler's `persist`. Verified by:
+    ///
+    /// * `NoopHeartbeat`-arm dispatch must succeed against an empty
+    ///   DB (write nothing).
+    /// * `JobLifecycle`-arm dispatch with a non-trivial view must
+    ///   produce rows observable by a follow-up `hydrate` against the
+    ///   same handle.
+    #[tokio::test]
+    async fn any_reconciler_persist_dispatches_correctly() {
+        // NoopHeartbeat arm.
+        {
+            let handle = LibsqlHandle::open_in_memory().await.expect("open in-memory");
+            let any = AnyReconciler::NoopHeartbeat(NoopHeartbeat::canonical());
+            any.persist(&AnyReconcilerView::Unit, &handle).await.expect("noop persist");
+        }
+        // JobLifecycle arm — write through Any, read back through the
+        // concrete reconciler to prove the dispatch reached the right
+        // impl.
+        {
+            let handle = LibsqlHandle::open_in_memory().await.expect("open in-memory");
+            let any = AnyReconciler::JobLifecycle(JobLifecycle::canonical());
+
+            let mut view = JobLifecycleView::default();
+            view.restart_counts.insert(alloc("dispatch-check"), 3);
+            view.last_failure_seen_at.insert(
+                alloc("dispatch-check"),
+                UnixInstant::from_unix_duration(Duration::new(42, 0)),
+            );
+            any.persist(&AnyReconcilerView::JobLifecycle(view.clone()), &handle)
+                .await
+                .expect("any persist");
+
+            let hydrated =
+                JobLifecycle::canonical().hydrate(&target(), &handle).await.expect("hydrate");
+            assert_eq!(hydrated, view);
+        }
+    }
 
     /// `open_in_memory()` produces a handle whose underlying connection
     /// can run a CREATE/INSERT/SELECT roundtrip. The accessor returns

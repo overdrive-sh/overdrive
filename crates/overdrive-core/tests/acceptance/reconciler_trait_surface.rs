@@ -477,6 +477,10 @@ impl Reconciler for NoopReconciler {
         Ok(())
     }
 
+    async fn persist(&self, _view: &Self::View, _db: &LibsqlHandle) -> Result<(), HydrateError> {
+        Ok(())
+    }
+
     fn reconcile(
         &self,
         _desired: &Self::State,
