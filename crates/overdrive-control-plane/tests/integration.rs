@@ -37,8 +37,11 @@ mod integration {
     mod concurrent_submit_toctou;
     mod describe_round_trip;
     mod idempotent_resubmit;
-    mod libsql_isolation;
     mod observation_empty_rows;
+    /// `ReconcilerRuntime` ↔ `ViewStore` wiring (step 01-06 of
+    /// `reconciler-memory-redb`). Probe-failure refusal + bulk-load at
+    /// register + `WriteThroughOrdering` per ADR-0035 §5/§6.
+    mod reconciler_runtime_view_store;
     /// `RedbViewStore` adapter (step 01-04 of `reconciler-memory-redb`).
     /// Real-fs round-trip + per-reconciler table isolation + Earned-Trust
     /// probe coverage per ADR-0035 § Earned Trust + §4.

@@ -27,7 +27,6 @@ use overdrive_core::traits::intent_store::{IntentStore, PutOutcome};
 use overdrive_core::traits::observation_store::AllocState;
 use serde::Deserialize;
 
-use crate::CachedView;
 use crate::api::{
     AllocStateWire, RestartBudget, StopJobResponse, StopOutcome, TransitionRecord, TransitionSource,
 };
@@ -608,17 +607,17 @@ pub async fn alloc_status(
     }))
 }
 
-/// Read the cached `JobLifecycleView` for `(job-lifecycle, job/<id>)`
-/// from the runtime view cache. Returns the default empty view if the
+/// Read the in-memory `JobLifecycleView` for `(job-lifecycle, job/<id>)`
+/// from the runtime's view map (per ADR-0035 §5 — the runtime-owned
+/// `BTreeMap` is the steady-state read SSOT, populated at register via
+/// `ViewStore::bulk_load` and updated after every successful tick via
+/// `ViewStore::write_through`). Returns the default empty view if the
 /// job has never been reconciled (the canonical fresh-job case).
 fn read_job_lifecycle_view(state: &AppState, job_id: &JobId) -> JobLifecycleView {
-    let key = ("job-lifecycle".to_owned(), format!("job/{job_id}"));
     #[allow(clippy::expect_used)]
-    let cache = state.view_cache.lock().expect("view_cache mutex");
-    match cache.get(&key) {
-        Some(CachedView::JobLifecycle(view)) => view.clone(),
-        Some(CachedView::Unit) | None => JobLifecycleView::default(),
-    }
+    let target = overdrive_core::reconciler::TargetResource::new(&format!("job/{job_id}"))
+        .expect("job_id renders to a valid TargetResource");
+    state.runtime.view_for_job_lifecycle(&target)
 }
 
 /// Derive a `RestartBudget` from the reconciler's per-allocation

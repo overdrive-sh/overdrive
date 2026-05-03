@@ -31,8 +31,6 @@
 //! it. This matches the `WriteThroughOrdering` invariant body which
 //! injects, asserts non-mutation, then clears and continues.
 
-#![allow(dead_code)]
-
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};

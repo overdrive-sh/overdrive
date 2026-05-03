@@ -48,10 +48,11 @@ use tempfile::TempDir;
 /// (`noop-heartbeat` and `job-lifecycle`) — matching the `run_server`
 /// boot path. The `SimClock` is held by the caller so the test can
 /// advance logical time between ticks.
-fn build_converged_state(tmp: &TempDir, clock: &SimClock) -> AppState {
-    let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime::new");
-    runtime.register(noop_heartbeat()).expect("register noop-heartbeat");
-    runtime.register(job_lifecycle()).expect("register job-lifecycle");
+async fn build_converged_state(tmp: &TempDir, clock: &SimClock) -> AppState {
+    let mut runtime =
+        ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
+    runtime.register(noop_heartbeat()).await.expect("register noop-heartbeat");
+    runtime.register(job_lifecycle()).await.expect("register job-lifecycle");
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
@@ -76,7 +77,7 @@ fn build_converged_state(tmp: &TempDir, clock: &SimClock) -> AppState {
 async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
     let tmp = TempDir::new().expect("tempdir");
     let clock = SimClock::new();
-    let state = build_converged_state(&tmp, &clock);
+    let state = build_converged_state(&tmp, &clock).await;
 
     // --- Preload IntentStore: one Job, replicas=1 (the converged
     //     desired state for `JobLifecycle` against `job/payments`).
@@ -216,9 +217,10 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
 
     // --- Build a converged AppState (same fixture shape as the test
     //     above; both reconcilers registered).
-    let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime::new");
-    runtime.register(noop_heartbeat()).expect("register noop-heartbeat");
-    runtime.register(job_lifecycle()).expect("register job-lifecycle");
+    let mut runtime =
+        ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
+    runtime.register(noop_heartbeat()).await.expect("register noop-heartbeat");
+    runtime.register(job_lifecycle()).await.expect("register job-lifecycle");
 
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
@@ -282,35 +284,34 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
     }
 
     // --- Assertion (kills the bugged behaviour): only `job-lifecycle`
-    //     ran against `job/payments`. `view_cache` is keyed on
-    //     `(reconciler_name_string, target_string)`; every reconciler
-    //     that runs through `run_convergence_tick` writes its entry
-    //     via `store_cached_view`.
-    //
-    //     Pre-fix the cache has TWO entries — both reconcilers ran.
-    //     Post-fix the cache has ONE entry — only the named reconciler.
-    let entries_for_target: Vec<(String, String)> = {
-        let cache = state.view_cache.lock().expect("view_cache mutex");
-        cache.keys().filter(|(_, t)| t == &target.to_string()).cloned().collect()
-    };
-    assert_eq!(
-        entries_for_target.len(),
-        1,
-        "expected exactly one reconciler to run against {} — \
-         JobLifecycle only — got {} entries: {:?} \
-         (pre-fix value 2 indicates fan-out across both reconcilers; \
-         the smoking gun is the noop-heartbeat entry, which was never \
-         named in the submitted evaluation)",
-        target,
-        entries_for_target.len(),
-        entries_for_target
+    //     ran against `job/payments`. Per ADR-0035 §5, the runtime now
+    //     stashes per-reconciler-kind in-memory `BTreeMap<TargetResource,
+    //     View>` maps; the JobLifecycle map gets an entry for `target`
+    //     IFF the JobLifecycle reconciler ran against it. The
+    //     NoopHeartbeat variant carries `View = ()` and never
+    //     materialises a per-target row, so the cross-reconciler fan-out
+    //     bug class manifests differently here: pre-fix the JobLifecycle
+    //     map has an entry for `target` AND the NoopHeartbeat reconciler
+    //     ALSO ran (broker dispatch fan-out), bumping the dispatched
+    //     counter past one. Post-fix only the named reconciler runs and
+    //     the dispatched counter is exactly one.
+    let job_lifecycle_name = ReconcilerName::new("job-lifecycle").expect("name");
+    let jl_views = state
+        .runtime
+        .loaded_job_lifecycle_views_for_test(&job_lifecycle_name)
+        .expect("job-lifecycle map present");
+    assert!(
+        jl_views.contains_key(&target),
+        "expected job-lifecycle to have run against {target} — got map keys {:?}",
+        jl_views.keys().collect::<Vec<_>>()
     );
-    let only_entry = &entries_for_target[0];
+    // Broker dispatched counter: pre-fix would be ≥ 2 (both reconcilers
+    // ran); post-fix is exactly 1 (the named reconciler only).
     assert_eq!(
-        only_entry.0, "job-lifecycle",
-        "expected the surviving cache entry to be `job-lifecycle` — \
-         got `{}`",
-        only_entry.0
+        state.runtime.broker().counters().dispatched,
+        1,
+        "expected exactly one dispatch per submitted evaluation — \
+         pre-fix value ≥ 2 indicates fan-out across both reconcilers"
     );
 }
 
@@ -395,9 +396,10 @@ async fn stop_after_failed_alloc_drains_broker() {
     // --- Build AppState. Reject starts so the action shim writes
     //     `AllocState::Failed` and the reconciler enters the
     //     restart-with-backoff branch.
-    let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime::new");
-    runtime.register(noop_heartbeat()).expect("register noop-heartbeat");
-    runtime.register(job_lifecycle()).expect("register job-lifecycle");
+    let mut runtime =
+        ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
+    runtime.register(noop_heartbeat()).await.expect("register noop-heartbeat");
+    runtime.register(job_lifecycle()).await.expect("register job-lifecycle");
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
@@ -471,19 +473,13 @@ async fn stop_after_failed_alloc_drains_broker() {
 
         // Check whether the cached view shows the desired
         // Failed-mid-backoff state.
-        let cache_key = ("job-lifecycle".to_string(), setup_target.to_string());
-        let observed = {
-            let cache = state.view_cache.lock().expect("view_cache mutex");
-            cache.get(&cache_key).cloned()
-        };
-        if let Some(overdrive_control_plane::CachedView::JobLifecycle(view)) = observed {
-            let alloc_id = AllocationId::new(&format!("alloc-{}-0", job_id.as_str()))
-                .expect("derived alloc id");
-            let count = view.restart_counts.get(&alloc_id).copied().unwrap_or(0);
-            let has_deadline = view.last_failure_seen_at.contains_key(&alloc_id);
-            if count >= 1 && has_deadline {
-                break;
-            }
+        let view = state.runtime.view_for_job_lifecycle(&setup_target);
+        let alloc_id =
+            AllocationId::new(&format!("alloc-{}-0", job_id.as_str())).expect("derived alloc id");
+        let count = view.restart_counts.get(&alloc_id).copied().unwrap_or(0);
+        let has_deadline = view.last_failure_seen_at.contains_key(&alloc_id);
+        if count >= 1 && has_deadline {
+            break;
         }
     }
     assert!(
@@ -639,9 +635,10 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
     //     wiring the runtime would fall back to AppState::new's default
     //     `SystemClock`, which would advance with real wall-clock and
     //     defeat the deterministic-rehydration assertion below.
-    let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime::new");
-    runtime.register(noop_heartbeat()).expect("register noop-heartbeat");
-    runtime.register(job_lifecycle()).expect("register job-lifecycle");
+    let mut runtime =
+        ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
+    runtime.register(noop_heartbeat()).await.expect("register noop-heartbeat");
+    runtime.register(job_lifecycle()).await.expect("register job-lifecycle");
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
@@ -709,17 +706,11 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
         sim_clock.tick(Duration::from_millis(100));
         warm_up_ticks += 1;
 
-        let cache_key = ("job-lifecycle".to_string(), target.to_string());
-        let observed = {
-            let cache = state.view_cache.lock().expect("view_cache mutex");
-            cache.get(&cache_key).cloned()
-        };
-        if let Some(overdrive_control_plane::CachedView::JobLifecycle(view)) = observed {
-            let count = view.restart_counts.get(&alloc_id).copied().unwrap_or(0);
-            let has_seen_at = view.last_failure_seen_at.contains_key(&alloc_id);
-            if count >= 1 && has_seen_at {
-                break;
-            }
+        let view = state.runtime.view_for_job_lifecycle(&target);
+        let count = view.restart_counts.get(&alloc_id).copied().unwrap_or(0);
+        let has_seen_at = view.last_failure_seen_at.contains_key(&alloc_id);
+        if count >= 1 && has_seen_at {
+            break;
         }
     }
     assert!(
@@ -733,14 +724,11 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
     //     ONLY two fields a libSQL hydrate would produce: `restart_counts`
     //     and `last_failure_seen_at`. The view holds nothing else — by
     //     construction (issue #141 §"Persist inputs, not derived state").
-    let cache_key = ("job-lifecycle".to_string(), target.to_string());
-    let view_pre: JobLifecycleView = {
-        let cache = state.view_cache.lock().expect("view_cache mutex");
-        match cache.get(&cache_key) {
-            Some(overdrive_control_plane::CachedView::JobLifecycle(v)) => v.clone(),
-            other => panic!("expected cached JobLifecycle view; got {other:?}"),
-        }
-    };
+    let view_pre: JobLifecycleView = state.runtime.view_for_job_lifecycle(&target);
+    assert!(
+        !view_pre.restart_counts.is_empty() || !view_pre.last_failure_seen_at.is_empty(),
+        "expected non-default JobLifecycle view after warm-up; got default"
+    );
     let restart_counts_persisted: BTreeMap<AllocationId, u32> = view_pre.restart_counts.clone();
     let last_failure_seen_at_persisted: BTreeMap<AllocationId, UnixInstant> =
         view_pre.last_failure_seen_at.clone();
@@ -814,21 +802,12 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
     //     the exact rehydration shape libSQL would produce —
     //     `restart_counts` and `last_failure_seen_at` are the row
     //     columns; the view struct holds nothing else.
-    {
-        let mut cache = state.view_cache.lock().expect("view_cache mutex");
-        cache.remove(&cache_key);
-    }
+    state.runtime.drop_job_lifecycle_view_for_test(&target);
     let view_post = JobLifecycleView {
         restart_counts: restart_counts_persisted.clone(),
         last_failure_seen_at: last_failure_seen_at_persisted.clone(),
     };
-    {
-        let mut cache = state.view_cache.lock().expect("view_cache mutex");
-        cache.insert(
-            cache_key.clone(),
-            overdrive_control_plane::CachedView::JobLifecycle(view_post.clone()),
-        );
-    }
+    state.runtime.seed_job_lifecycle_view_for_test(&target, view_post.clone());
 
     // --- Run reconcile against the rehydrated view at the SAME
     //     TickContext. Same desired, same actual, same tick — the only
@@ -916,9 +895,10 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
     let tmp = TempDir::new().expect("tempdir");
     let clock = SimClock::new();
 
-    let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime::new");
-    runtime.register(noop_heartbeat()).expect("register noop-heartbeat");
-    runtime.register(job_lifecycle()).expect("register job-lifecycle");
+    let mut runtime =
+        ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
+    runtime.register(noop_heartbeat()).await.expect("register noop-heartbeat");
+    runtime.register(job_lifecycle()).await.expect("register job-lifecycle");
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
@@ -963,16 +943,12 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
     // last_failure_seen_at = now_unix (zero — the backoff window has
     // NOT elapsed for any non-trivial RESTART_BACKOFF_DURATION).
     let target = TargetResource::new("job/payments").expect("valid target");
-    let cache_key = ("job-lifecycle".to_string(), target.to_string());
     let mut restart_counts = BTreeMap::new();
     restart_counts.insert(alloc_id.clone(), restart_counts_value);
     let mut last_failure_seen_at = BTreeMap::new();
     last_failure_seen_at.insert(alloc_id, UnixInstant::from_clock(&*sim_clock));
     let view = JobLifecycleView { restart_counts, last_failure_seen_at };
-    {
-        let mut cache = state.view_cache.lock().expect("view_cache mutex");
-        cache.insert(cache_key, overdrive_control_plane::CachedView::JobLifecycle(view));
-    }
+    state.runtime.seed_job_lifecycle_view_for_test(&target, view);
 
     // Submit and drain the seed eval — without re-submitting, the
     // broker is empty going into the tick. After the tick, queued

@@ -31,6 +31,14 @@
 //! `reconciler_trait_surface.rs`).
 
 #![allow(clippy::expect_used)]
+// The fixture's docstrings deliberately use prose with embedded type
+// signatures spanning multiple lines (`Serialize + DeserializeOwned +
+// Default + Clone + Send + Sync`); clippy's doc-markdown / doc-lazy-
+// continuation lints flag the wrapped backticks and the indented
+// continuation lines as bugs, but the text is human-readable as-is.
+#![allow(clippy::doc_markdown)]
+#![allow(clippy::doc_lazy_continuation)]
+#![allow(clippy::missing_const_for_fn)]
 
 use std::time::{Duration, Instant};
 
@@ -110,7 +118,9 @@ where
 /// The post-collapse `reconcile` signature, factored into an alias so
 /// the binding below stays readable. Adding `async`, dropping the
 /// `Vec<Action>` return, dropping the `R::View` return, or threading
-/// in a `&LibsqlHandle` parameter all break this binding.
+/// in a `&LibsqlHandle` parameter all break this binding (the type is
+/// itself deleted as of step 01-06; the `compile_fail/libsql_handle_is_gone.rs`
+/// fixture pins the absence at compile time).
 type ReconcileFn<R> = fn(
     &R,
     &<R as Reconciler>::State,

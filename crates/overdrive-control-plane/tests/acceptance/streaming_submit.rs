@@ -70,7 +70,8 @@ fn payments_spec() -> JobSpecInput {
 }
 
 fn build_app_state(tmp: &TempDir) -> AppState {
-    let runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime");
+    let runtime =
+        ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime");
     let store = Arc::new(
         LocalIntentStore::open(tmp.path().join("intent.redb")).expect("LocalIntentStore::open"),
     );

@@ -143,7 +143,6 @@
 
 use std::fmt;
 use std::str::FromStr;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
@@ -202,96 +201,6 @@ pub struct TickContext {
     pub tick: u64,
     /// Per-tick deadline (`now + reconcile_budget`).
     pub deadline: Instant,
-}
-
-// ---------------------------------------------------------------------------
-// LibsqlHandle — opaque reconciler-memory handle
-// ---------------------------------------------------------------------------
-
-/// Opaque handle to a reconciler's private libSQL memory.
-///
-/// Per ADR-0013, one `&LibsqlHandle` per reconciler, exclusive to that
-/// reconciler, provisioned by the runtime from the per-primitive libSQL
-/// path. Phase 1 reconcilers use `type View = ()` and do not touch the
-/// handle; Phase 2+ reconcilers will gain public query/exec methods on
-/// `LibsqlHandle` when a first concrete author needs them.
-///
-/// The type is real (not a unit-like empty placeholder) so the trait
-/// signature is stable: `hydrate`'s async surface already takes a real
-/// handle type, and downstream authors can implement against it today.
-#[derive(Debug, Clone)]
-pub struct LibsqlHandle {
-    // Phase 1: the connection handle is `Option::None` because no
-    // current reconciler opens its DB. The field exists so the newtype
-    // is genuinely a wrapper around the eventual `Arc<libsql::Connection>`
-    // shape — the crate-private constructor produces `None`; Phase 2+
-    // wires the real connection.
-    //
-    // Typed as `Arc<()>` for now rather than `Arc<libsql::Connection>`
-    // so the core crate does not pull libsql onto its compile graph
-    // until a reconciler author actually needs a connection. The
-    // architectural intent — one `Arc`-shared handle, cheap to clone,
-    // opaque from the caller's perspective — is preserved.
-    _handle: Option<Arc<()>>,
-}
-
-impl LibsqlHandle {
-    /// Crate-private constructor. The runtime in
-    /// `overdrive-control-plane::reconciler_runtime` is the intended
-    /// caller; Phase 1 does not yet open any DB so the method is not
-    /// reached from within this crate.
-    ///
-    /// Phase 1 produces an empty handle; Phase 2+ wires the real
-    /// libsql connection.
-    #[must_use]
-    #[allow(dead_code)] // Reserved for the 04-09+ reconciler-runtime wiring.
-    pub(crate) const fn empty() -> Self {
-        Self { _handle: None }
-    }
-
-    /// Phase 1 default handle — no underlying libSQL connection. The
-    /// runtime tick loop hands this to every `Reconciler::hydrate`
-    /// call until Phase 2+ wires per-primitive libSQL files.
-    /// Reconcilers that touch the handle in Phase 1 are a bug — every
-    /// Phase 1 reconciler's `View = ()` (or carries no row data) and
-    /// returns `Ok(default)` without using the handle.
-    #[must_use]
-    pub const fn default_phase1() -> Self {
-        Self { _handle: None }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// HydrateError — async read failure shape
-// ---------------------------------------------------------------------------
-
-/// Failure modes for `Reconciler::hydrate`.
-///
-/// Phase 1 ships exactly two variants:
-///
-/// * `Libsql` — underlying libsql error, wrapped via `#[from]` so
-///   reconciler authors write `db.query(...)?` without per-call
-///   `map_err`.
-/// * `Schema` — the schema the reconciler expected is not present, or
-///   does not match. Phase 1 schema management (CREATE TABLE IF NOT
-///   EXISTS, ALTER TABLE ADD COLUMN) lives inline in `hydrate` per
-///   development.md §Reconciler I/O; if the inline migration fails,
-///   this is the error.
-///
-/// NO `Validation` variant — Phase 1 reconcilers do not validate
-/// intra-DB invariants during hydrate. That arrives with the first
-/// Phase 2+ reconciler author that needs it.
-#[derive(Debug, thiserror::Error)]
-pub enum HydrateError {
-    /// Underlying libsql error.
-    #[error("libsql error during hydrate: {0}")]
-    Libsql(#[from] libsql::Error),
-    /// Schema mismatch or migration failure.
-    #[error("schema error: {message}")]
-    Schema {
-        /// Human-readable schema failure description.
-        message: String,
-    },
 }
 
 // ---------------------------------------------------------------------------
@@ -898,13 +807,14 @@ impl AnyReconciler {
     }
 }
 
-/// Sum of every per-reconciler `View` shape held by the runtime's
-/// in-memory view cache. Phase 1 originally only had `View = ()` (the
-/// `Unit` variant); the phase-1-first-workload DISTILL added the
-/// `JobLifecycle` arm. Per ADR-0035 §1 the runtime owns the cache
-/// (bulk-loaded at boot via `ViewStore::bulk_load`, written through
-/// after each `reconcile`); reconcilers see a typed `&Self::View`,
-/// never the erased `AnyReconcilerView`.
+/// Sum of every per-reconciler `View` shape held by the runtime.
+///
+/// Phase 1 originally only had `View = ()` (the `Unit` variant); the
+/// phase-1-first-workload DISTILL added the `JobLifecycle` arm. Per
+/// ADR-0035 §1 the runtime owns the cache (bulk-loaded at boot via
+/// `ViewStore::bulk_load`, written through after each `reconcile`);
+/// reconcilers see a typed `&Self::View`, never the erased
+/// `AnyReconcilerView`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AnyReconcilerView {
     /// The `View = ()` variant used by Phase 1 reconcilers

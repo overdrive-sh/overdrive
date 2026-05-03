@@ -107,9 +107,28 @@ pub async fn run(args: ServeArgs) -> Result<ServeHandle, CliError> {
         operator_config_dir: args.config_dir,
         ..Default::default()
     };
-    let inner = run_server(config).await.map_err(|e| CliError::Transport {
-        endpoint: requested_endpoint.clone(),
-        cause: stripped_server_error(&e.to_string()),
+    let inner = run_server(config).await.map_err(|e| {
+        // ADR-0035 §5 + reconciler-memory-redb step 01-06: a probe
+        // failure (or any other ViewStore boot-time error) surfaces
+        // as `ControlPlaneError::Internal` whose message names
+        // "probe failed" or "open RedbViewStore failed". Emit a
+        // structured `health.startup.refused` event before mapping
+        // to `CliError::Transport` so operators see the failure on
+        // both stderr (Display) and on the structured tracing
+        // pipeline (audit / log forwarders).
+        let rendered = e.to_string();
+        if rendered.contains("probe failed") || rendered.contains("open RedbViewStore") {
+            tracing::error!(
+                target: "overdrive::health",
+                event = "health.startup.refused",
+                cause = %rendered,
+                "ViewStore boot probe failed; refusing to start"
+            );
+        }
+        CliError::Transport {
+            endpoint: requested_endpoint.clone(),
+            cause: stripped_server_error(&rendered),
+        }
     })?;
 
     let bound = inner.local_addr().await.ok_or_else(|| CliError::Transport {

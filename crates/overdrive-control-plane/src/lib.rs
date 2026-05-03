@@ -15,9 +15,9 @@
 //! | `handlers` | axum route handlers — submit_job, describe_job, cluster_status, alloc_status, node_list |
 //! | `error` | `ControlPlaneError` enum + `to_response` mapping (ADR-0015) |
 //! | `tls_bootstrap` | Ephemeral CA + trust triple + rustls config (ADR-0010) |
-//! | `reconciler_runtime` | `ReconcilerRuntime` + registry (ADR-0013) |
+//! | `reconciler_runtime` | `ReconcilerRuntime` + registry (ADR-0013/ADR-0035) |
 //! | `eval_broker` | `EvaluationBroker` + cancelable-eval-set (ADR-0013) |
-//! | `libsql_provisioner` | Per-primitive libSQL path derivation (ADR-0013) |
+//! | `view_store` | Runtime-owned `ViewStore` port + `RedbViewStore` (ADR-0035) |
 //! | `observation_wiring` | `LocalObservationStore` single-node wiring (ADR-0012, revised 2026-04-24) |
 
 // Per ADR-0028, this crate's `cgroup_preflight` and `cgroup_manager`
@@ -37,21 +37,18 @@ pub mod cgroup_preflight;
 pub mod error;
 pub mod eval_broker;
 pub mod handlers;
-pub mod libsql_provisioner;
 pub mod observation_wiring;
 pub mod reconciler_runtime;
 pub mod streaming;
 pub mod tls_bootstrap;
 // reconciler-memory-redb step 01-03 — `ViewStore` port + error types
-// per ADR-0035 §2. Wired into `ReconcilerRuntime` in step 01-06; until
-// then the module is intentional dead code.
+// per ADR-0035 §2. Wired into `ReconcilerRuntime` in step 01-06.
 pub mod view_store;
 pub mod worker;
 
-use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
@@ -99,18 +96,6 @@ pub struct AppState {
     /// is mechanically migrated by DELIVER to pass an
     /// `Arc<SimDriver>` value.
     pub driver: Arc<dyn Driver>,
-    /// Per-`(ReconcilerName, TargetResource)` View cache. Phase 1
-    /// reconcilers have no libSQL connection wired yet, but
-    /// `JobLifecycle`'s `restart_counts` / `last_failure_seen_at` MUST
-    /// persist across ticks for backoff exhaustion to be observable.
-    /// The runtime tick loop reads the hydrated view from this cache
-    /// before each `reconcile` call and writes back the returned
-    /// `next_view`. Boxed-Any so a single map handles every reconciler
-    /// kind's `View` type.
-    ///
-    /// TODO(#139): replaced by per-primitive libSQL diff-and-persist
-    /// per ADR-0013 §2b.
-    pub view_cache: Arc<Mutex<BTreeMap<(String, String), CachedView>>>,
     /// Broadcast channel for `LifecycleEvent`s emitted by the action
     /// shim after every successful `obs.write()`. Per architecture.md
     /// §10 (cli-submit-vs-deploy-and-alloc-status DESIGN): this is
@@ -134,23 +119,6 @@ pub struct AppState {
     pub clock: Arc<dyn Clock>,
 }
 
-/// A View persisted across ticks in [`AppState::view_cache`].
-///
-/// Currently only stores the `JobLifecycle` view because no other
-/// reconciler carries non-`()` memory. Adding a new reconciler with
-/// non-trivial memory means adding a variant here.
-///
-/// TODO(#139): replaced by per-primitive libSQL diff-and-persist
-/// per ADR-0013 §2b — this enum goes away with the cache.
-#[derive(Debug, Clone)]
-pub enum CachedView {
-    /// Unit view — no actual memory. Stored for completeness so the
-    /// cache is queried uniformly by reconciler.
-    Unit,
-    /// `JobLifecycle::View`.
-    JobLifecycle(overdrive_core::reconciler::JobLifecycleView),
-}
-
 /// Default capacity for the lifecycle-event broadcast channel.
 ///
 /// Phase 1 has at most one streaming subscriber per request, so 256
@@ -164,9 +132,9 @@ pub const DEFAULT_LIFECYCLE_BROADCAST_CAPACITY: usize = 256;
 pub const DEFAULT_STREAMING_CAP: Duration = Duration::from_secs(60);
 
 impl AppState {
-    /// Build an `AppState` with a fresh empty view cache and a fresh
-    /// `LifecycleEvent` broadcast channel of default capacity. Used by
-    /// every test fixture and the production boot path.
+    /// Build an `AppState` with a fresh `LifecycleEvent` broadcast
+    /// channel of default capacity. Used by every test fixture and
+    /// the production boot path.
     ///
     /// The default `streaming_cap` is 60s per architecture.md §10.
     /// Test fixtures that want a different cap construct `AppState`
@@ -184,7 +152,6 @@ impl AppState {
             obs,
             runtime,
             driver,
-            view_cache: Arc::new(Mutex::new(BTreeMap::new())),
             lifecycle_events: Arc::new(tx),
             streaming_cap: DEFAULT_STREAMING_CAP,
             // Default to `SystemClock` from the host crate. Tests that
@@ -495,14 +462,27 @@ pub async fn run_server_with_obs_and_driver(
             .map_err(|e| error::ControlPlaneError::internal("open LocalIntentStore", e))?,
     );
 
-    // Construct the reconciler runtime and register both Phase 1
+    // Construct the reconciler runtime against the production
+    // `RedbViewStore` (ADR-0035 §4 — one redb file per node at
+    // `<data_dir>/reconcilers/memory.redb`) and register both Phase 1
     // reconcilers at boot: `noop-heartbeat` (proof-of-life,
     // ADR-0013 §9) and `job-lifecycle` (the first real reconciler,
-    // US-03). Step 04-04 wired noop-heartbeat; step 02-02 adds
-    // job-lifecycle alongside.
-    let mut runtime = reconciler_runtime::ReconcilerRuntime::new(&config.data_dir)?;
-    runtime.register(noop_heartbeat())?;
-    runtime.register(job_lifecycle())?;
+    // US-03).
+    //
+    // Per ADR-0035 §5 each `register` call probes the view store
+    // (Earned-Trust handshake) and bulk-loads any persisted
+    // `(target, view)` rows into the runtime's in-memory map before
+    // the first tick fires. A probe failure short-circuits register
+    // with `ControlPlaneError::Internal`; the surrounding `?` surfaces
+    // it to the operator via the binary-layer error formatter
+    // (`overdrive-cli` logs `health.startup.refused` and exits non-zero).
+    let view_store: Arc<dyn view_store::ViewStore> = Arc::new(
+        view_store::redb::RedbViewStore::open(&config.data_dir)
+            .map_err(|e| error::ControlPlaneError::internal("open RedbViewStore", e))?,
+    );
+    let mut runtime = reconciler_runtime::ReconcilerRuntime::new(&config.data_dir, view_store)?;
+    runtime.register(noop_heartbeat()).await?;
+    runtime.register(job_lifecycle()).await?;
     let runtime = Arc::new(runtime);
 
     let mut state: AppState = AppState::new(store, obs, runtime, driver);

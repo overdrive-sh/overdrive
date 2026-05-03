@@ -33,9 +33,10 @@ use tempfile::TempDir;
 #[tokio::test]
 async fn job_stop_drives_running_to_terminated() {
     let tmp = TempDir::new().expect("tempdir");
-    let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime");
-    runtime.register(noop_heartbeat()).expect("register noop");
-    runtime.register(job_lifecycle()).expect("register job-lifecycle");
+    let mut runtime =
+        ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime");
+    runtime.register(noop_heartbeat()).await.expect("register noop");
+    runtime.register(job_lifecycle()).await.expect("register job-lifecycle");
 
     let store =
         Arc::new(LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open store"));

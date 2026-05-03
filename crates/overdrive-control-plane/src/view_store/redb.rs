@@ -117,35 +117,30 @@ impl ViewStore for RedbViewStore {
         &self,
         reconciler: &ReconcilerName,
     ) -> VsResult<BTreeMap<TargetResource, Vec<u8>>> {
-        let db = Arc::clone(&self.db);
-        let def = table_def(reconciler);
-
-        tokio::task::spawn_blocking(move || {
-            let read = db.begin_read().map_err(map_transaction_error)?;
-            let table = match read.open_table(def) {
-                Ok(t) => t,
-                // A reconciler with no persisted rows simply has no
-                // table yet — return an empty map per the trait
-                // contract. Other table errors propagate.
-                Err(redb::TableError::TableDoesNotExist(_)) => return Ok(BTreeMap::new()),
-                Err(e) => return Err(map_table_error(e)),
-            };
-            let mut out = BTreeMap::new();
-            let iter = table.iter().map_err(map_storage_error)?;
-            for entry in iter {
-                let (k, v) = entry.map_err(map_storage_error)?;
-                let key_str = k.value();
-                let target = TargetResource::new(key_str).map_err(|e| {
-                    ViewStoreError::Io(std::io::Error::other(format!(
-                        "stored target key {key_str:?} failed validation: {e}"
-                    )))
-                })?;
-                out.insert(target, v.value().to_vec());
-            }
-            Ok(out)
-        })
-        .await
-        .map_err(map_join_error)?
+        // Synchronous redb call inside an async fn — see
+        // `write_through_bytes` for the rationale.
+        let read = self.db.begin_read().map_err(map_transaction_error)?;
+        let table = match read.open_table(table_def(reconciler)) {
+            Ok(t) => t,
+            // A reconciler with no persisted rows simply has no
+            // table yet — return an empty map per the trait
+            // contract. Other table errors propagate.
+            Err(redb::TableError::TableDoesNotExist(_)) => return Ok(BTreeMap::new()),
+            Err(e) => return Err(map_table_error(e)),
+        };
+        let mut out = BTreeMap::new();
+        let iter = table.iter().map_err(map_storage_error)?;
+        for entry in iter {
+            let (k, v) = entry.map_err(map_storage_error)?;
+            let key_str = k.value();
+            let target = TargetResource::new(key_str).map_err(|e| {
+                ViewStoreError::Io(std::io::Error::other(format!(
+                    "stored target key {key_str:?} failed validation: {e}"
+                )))
+            })?;
+            out.insert(target, v.value().to_vec());
+        }
+        Ok(out)
     }
 
     async fn write_through_bytes(
@@ -154,53 +149,46 @@ impl ViewStore for RedbViewStore {
         target: &TargetResource,
         cbor: &[u8],
     ) -> VsResult<()> {
-        let db = Arc::clone(&self.db);
-        let def = table_def(reconciler);
-        let key = target.as_str().to_string();
-        let value = cbor.to_vec();
-
-        tokio::task::spawn_blocking(move || {
-            let mut write = db.begin_write().map_err(map_transaction_error)?;
-            // `Durability::Immediate` forces fsync on commit per
-            // ADR-0035 §4 — the runtime's in-memory map update relies
-            // on the row being on disk before this call returns Ok.
-            write.set_durability(Durability::Immediate);
-            {
-                let mut table = write.open_table(def).map_err(map_table_error)?;
-                table.insert(key.as_str(), value.as_slice()).map_err(map_storage_error)?;
-            }
-            write.commit().map_err(map_commit_error)?;
-            Ok(())
-        })
-        .await
-        .map_err(map_join_error)?
+        // Synchronous redb call inside an async fn. redb's
+        // `begin_write` + `commit` are ~ms operations on a single-node
+        // store; the cost of NOT routing through `spawn_blocking` is
+        // a brief block on the current tokio worker, which is the
+        // right tradeoff for Phase 1 single-node single-tenant
+        // control planes. The cost of routing through
+        // `spawn_blocking` is an additional `.await` round-trip per
+        // tick, which throws off DST-style tests that count yields.
+        let mut write = self.db.begin_write().map_err(map_transaction_error)?;
+        // `Durability::Immediate` forces fsync on commit per
+        // ADR-0035 §4 — the runtime's in-memory map update relies
+        // on the row being on disk before this call returns Ok.
+        write.set_durability(Durability::Immediate);
+        {
+            let mut table = write.open_table(table_def(reconciler)).map_err(map_table_error)?;
+            table.insert(target.as_str(), cbor).map_err(map_storage_error)?;
+        }
+        write.commit().map_err(map_commit_error)?;
+        Ok(())
     }
 
     async fn delete(&self, reconciler: &ReconcilerName, target: &TargetResource) -> VsResult<()> {
-        let db = Arc::clone(&self.db);
-        let def = table_def(reconciler);
-        let key = target.as_str().to_string();
-
-        tokio::task::spawn_blocking(move || {
-            let mut write = db.begin_write().map_err(map_transaction_error)?;
-            write.set_durability(Durability::Immediate);
-            // Idempotent — a table that doesn't exist yet means the
-            // row doesn't exist; succeed without creating the table.
-            match write.open_table(def) {
-                Ok(mut table) => {
-                    let _ = table.remove(key.as_str()).map_err(map_storage_error)?;
-                }
-                Err(redb::TableError::TableDoesNotExist(_)) => {
-                    // Nothing to remove; commit a no-op txn so the
-                    // call shape stays uniform.
-                }
-                Err(e) => return Err(map_table_error(e)),
+        // Synchronous redb call inside an async fn — see
+        // `write_through_bytes` for the rationale.
+        let mut write = self.db.begin_write().map_err(map_transaction_error)?;
+        write.set_durability(Durability::Immediate);
+        // Idempotent — a table that doesn't exist yet means the
+        // row doesn't exist; succeed without creating the table.
+        match write.open_table(table_def(reconciler)) {
+            Ok(mut table) => {
+                let _ = table.remove(target.as_str()).map_err(map_storage_error)?;
             }
-            write.commit().map_err(map_commit_error)?;
-            Ok(())
-        })
-        .await
-        .map_err(map_join_error)?
+            Err(redb::TableError::TableDoesNotExist(_)) => {
+                // Nothing to remove; commit a no-op txn so the
+                // call shape stays uniform.
+            }
+            Err(e) => return Err(map_table_error(e)),
+        }
+        write.commit().map_err(map_commit_error)?;
+        Ok(())
     }
 
     async fn probe(&self) -> std::result::Result<(), ProbeError> {

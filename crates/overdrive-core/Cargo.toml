@@ -44,15 +44,6 @@ futures.workspace     = true
 bytes.workspace       = true
 tokio.workspace       = true
 
-# Reconciler trait's `HydrateError` wraps `libsql::Error` via `#[from]`
-# per ADR-0013 pre-hydration shape. `libsql` with `default-features =
-# false, features = ["core"]` is a type-dep only — no runtime I/O is
-# initiated from core-class code paths. Not on the dst-lint banned-API
-# list (the list covers `Instant::now`, `rand::random`, `tokio::net::*` —
-# libsql is not enumerated). Real connections are opened by the
-# reconciler runtime in `overdrive-control-plane`.
-libsql.workspace = true
-
 [features]
 # `test-utils` — TEST-ONLY feature. Exposes
 # `overdrive_core::testing::observation_store::run_lww_conformance`, the

@@ -33,16 +33,12 @@
 //!   with injectable fsync-failure for the
 //!   `WriteThroughOrdering` invariant in step 01-07.
 //!
-//! # Behind `#[allow(dead_code)]` until step 01-05/01-06
+//! # Wired into the runtime
 //!
-//! Step 01-05 (collapsed `Reconciler` trait) and step 01-06 (runtime
-//! wiring) close the loop by making `ReconcilerRuntime` take an
-//! `Arc<dyn ViewStore>` constructor argument and call `probe()` →
-//! `bulk_load()` at register, then `write_through()` after each
-//! successful reconcile. Until then this module is dead code by
-//! design.
-
-#![allow(dead_code)]
+//! Step 01-06 closed the loop by making `ReconcilerRuntime::new` take
+//! `Arc<dyn ViewStore>` as a mandatory constructor parameter and call
+//! `probe()` → `bulk_load()` at register, then `write_through()` after
+//! each successful reconcile per ADR-0035 §5.
 
 pub mod redb;
 

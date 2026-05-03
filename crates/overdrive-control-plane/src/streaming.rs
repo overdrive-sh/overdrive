@@ -94,8 +94,6 @@
 // `rust_2024_compatibility = warn` does not block commits.
 #![allow(tail_expr_drop_order)]
 
-use std::sync::Arc;
-
 use axum::body::Bytes;
 use bytes::BytesMut;
 use futures::Stream;
@@ -105,9 +103,9 @@ use overdrive_core::traits::observation_store::{AllocState, ObservationStore};
 use tokio::sync::broadcast;
 
 use crate::AppState;
-use crate::CachedView;
 use crate::action_shim::LifecycleEvent;
 use crate::api::{AllocStateWire, IdempotencyOutcome, SubmitEvent, TerminalReason};
+use crate::reconciler_runtime::ReconcilerRuntime;
 use overdrive_core::transition_reason::StoppedBy;
 
 /// One NDJSON line — `serde_json::to_writer(buf, &event)?` + `b'\n'`.
@@ -165,7 +163,7 @@ pub fn build_stream(
     let clock = state.clock.clone();
     let obs = state.obs.clone();
     let cap = state.streaming_cap;
-    let view_cache = state.view_cache.clone();
+    let runtime = state.runtime.clone();
 
     async_stream::stream! {
         // 1. Emit Accepted SYNCHRONOUSLY — first byte on the wire.
@@ -207,7 +205,7 @@ pub fn build_stream(
         //    the terminal event and end the stream — analogous to
         //    ADR-0032 §7 lagged-recovery, applied to the subscribe-race
         //    rather than the buffer-overflow class.
-        if let Some(terminal) = lagged_recover(&*obs, &job_id, &view_cache).await {
+        if let Some(terminal) = lagged_recover(&*obs, &job_id, &runtime).await {
             match emit_line(&terminal) {
                 Ok(line) => {
                     yield Ok(line);
@@ -256,7 +254,7 @@ pub fn build_stream(
                             if let Some(terminal) = check_terminal(
                                 &*obs,
                                 &job_id,
-                                &view_cache,
+                                &runtime,
                                 &event,
                             ).await {
                                 match emit_line(&terminal) {
@@ -279,7 +277,7 @@ pub fn build_stream(
                             if let Some(terminal) = lagged_recover(
                                 &*obs,
                                 &job_id,
-                                &view_cache,
+                                &runtime,
                             ).await {
                                 match emit_line(&terminal) {
                                     Ok(line) => {
@@ -340,21 +338,19 @@ pub fn build_stream(
     }
 }
 
-/// Read the `JobLifecycleView` from the AppState view cache. Returns
-/// the default empty view when no entry exists yet.
+/// Read the `JobLifecycleView` from the runtime's in-memory view map
+/// (per ADR-0035 §5 — the runtime-owned `BTreeMap` is the steady-state
+/// read SSOT, populated at register via `ViewStore::bulk_load` and
+/// updated after every successful tick via `ViewStore::write_through`).
+/// Returns the default empty view when no entry exists yet.
 fn read_view(
-    view_cache: &Arc<std::sync::Mutex<std::collections::BTreeMap<(String, String), CachedView>>>,
+    runtime: &ReconcilerRuntime,
     job_id: &JobId,
 ) -> overdrive_core::reconciler::JobLifecycleView {
-    let key = ("job-lifecycle".to_owned(), format!("job/{job_id}"));
-    let cache = match view_cache.lock() {
-        Ok(g) => g,
-        Err(p) => p.into_inner(),
-    };
-    match cache.get(&key) {
-        Some(CachedView::JobLifecycle(v)) => v.clone(),
-        _ => overdrive_core::reconciler::JobLifecycleView::default(),
-    }
+    #[allow(clippy::expect_used)]
+    let target = overdrive_core::reconciler::TargetResource::new(&format!("job/{job_id}"))
+        .expect("job_id renders to a valid TargetResource");
+    runtime.view_for_job_lifecycle(&target)
 }
 
 /// Phase 1 walking-skeleton workloads have `replicas == 1`, so any
@@ -371,7 +367,7 @@ fn read_view(
 async fn check_terminal(
     obs: &dyn ObservationStore,
     job_id: &JobId,
-    view_cache: &Arc<std::sync::Mutex<std::collections::BTreeMap<(String, String), CachedView>>>,
+    runtime: &ReconcilerRuntime,
     event: &LifecycleEvent,
 ) -> Option<SubmitEvent> {
     // Success path — Running observation for this job → ConvergedRunning.
@@ -415,7 +411,7 @@ async fn check_terminal(
     // Failure path — Failed row + restart budget exhausted →
     // ConvergedFailed { BackoffExhausted }.
     if matches!(event.to, AllocStateWire::Failed) {
-        let view = read_view(view_cache, job_id);
+        let view = read_view(runtime, job_id);
         let used = view.restart_counts.values().copied().max().unwrap_or(0);
         if used >= RESTART_BACKOFF_CEILING {
             // Read the latest cause-class reason from the obs store —
@@ -441,7 +437,7 @@ async fn check_terminal(
 async fn lagged_recover(
     obs: &dyn ObservationStore,
     job_id: &JobId,
-    view_cache: &Arc<std::sync::Mutex<std::collections::BTreeMap<(String, String), CachedView>>>,
+    runtime: &ReconcilerRuntime,
 ) -> Option<SubmitEvent> {
     let rows = obs.alloc_status_rows().await.ok()?;
     let latest =
@@ -467,7 +463,7 @@ async fn lagged_recover(
             Some(SubmitEvent::ConvergedStopped { alloc_id: Some(latest.alloc_id.to_string()), by })
         }
         AllocState::Failed => {
-            let view = read_view(view_cache, job_id);
+            let view = read_view(runtime, job_id);
             let used = view.restart_counts.values().copied().max().unwrap_or(0);
             if used >= RESTART_BACKOFF_CEILING {
                 let cause = latest.reason.clone().unwrap_or(
@@ -517,7 +513,7 @@ pub fn build_accepted(
 #[allow(clippy::expect_used)]
 mod tests {
     use std::str::FromStr;
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
 
     use overdrive_core::TransitionReason;
     use overdrive_core::id::{AllocationId, JobId, NodeId};
@@ -527,6 +523,7 @@ mod tests {
 
     use crate::action_shim::LifecycleEvent;
     use crate::api::{AllocStateWire, SubmitEvent, TransitionSource};
+    use crate::reconciler_runtime::ReconcilerRuntime;
 
     use super::check_terminal;
 
@@ -539,7 +536,9 @@ mod tests {
     async fn check_terminal_returns_converged_stopped_on_terminated_event() {
         let node = NodeId::from_str("node-a").expect("node id");
         let obs = Arc::new(SimObservationStore::single_peer(node, 0));
-        let view_cache = Arc::new(Mutex::new(std::collections::BTreeMap::new()));
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let runtime =
+            ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime");
         let alloc_id = AllocationId::from_str("alloc-0").expect("alloc id");
         let job_id = JobId::from_str("job-0").expect("job id");
 
@@ -554,7 +553,7 @@ mod tests {
             at: "1@node-a".to_string(),
         };
 
-        let result = check_terminal(&*obs, &job_id, &view_cache, &event).await;
+        let result = check_terminal(&*obs, &job_id, &runtime, &event).await;
 
         assert!(
             matches!(result, Some(SubmitEvent::ConvergedStopped { .. })),
