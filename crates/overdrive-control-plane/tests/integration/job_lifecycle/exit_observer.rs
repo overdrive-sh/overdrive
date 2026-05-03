@@ -96,7 +96,7 @@ async fn build_harness(tmp: &TempDir) -> Harness {
     let sim_driver = Arc::new(SimDriver::with_clock(DriverType::Exec, sim_clock.clone()));
     let driver: Arc<dyn Driver> = sim_driver.clone();
 
-    let state = AppState::new(store, obs, Arc::new(runtime), driver);
+    let state = AppState::new(store, obs, Arc::new(runtime), driver, sim_clock.clone());
 
     // Spawn the worker-side exit observer. Step 01-02 wires this into
     // `run_server_with_obs_and_driver`; tests construct it directly so

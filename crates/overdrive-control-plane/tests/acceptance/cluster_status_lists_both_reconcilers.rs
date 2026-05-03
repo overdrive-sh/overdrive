@@ -25,6 +25,7 @@ use overdrive_control_plane::{AppState, job_lifecycle, noop_heartbeat};
 use overdrive_core::id::NodeId;
 use overdrive_core::traits::driver::DriverType;
 use overdrive_core::traits::observation_store::ObservationStore;
+use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
@@ -41,7 +42,7 @@ async fn build_app_state(tmp: &TempDir) -> AppState {
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("NodeId"), 0));
     let driver: Arc<dyn overdrive_core::traits::driver::Driver> =
         Arc::new(SimDriver::new(DriverType::Exec));
-    AppState::new(store, obs, Arc::new(runtime), driver)
+    AppState::new(store, obs, Arc::new(runtime), driver, Arc::new(SimClock::new()))
 }
 
 #[tokio::test]

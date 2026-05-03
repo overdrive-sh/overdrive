@@ -85,8 +85,10 @@ impl Clock for ProbeClock {
 /// Build an `AppState` whose `clock` field is the caller-provided
 /// `Arc<dyn Clock>`, registering both production reconcilers so the
 /// runtime dispatch path is realistic. Mirrors the pattern in
-/// `runtime_convergence_loop.rs::build_converged_state` but plumbs
-/// `clock` into `state.clock` (overriding the default `SystemClock`).
+/// `runtime_convergence_loop.rs::build_converged_state` — `clock` is
+/// passed at construction (required parameter per
+/// `.claude/rules/development.md` § "Port-trait dependencies"), so the
+/// production `SystemClock` cannot silently leak into the test path.
 async fn build_state_with_clock(tmp: &TempDir, clock: Arc<dyn Clock>) -> AppState {
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
@@ -97,9 +99,7 @@ async fn build_state_with_clock(tmp: &TempDir, clock: Arc<dyn Clock>) -> AppStat
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("NodeId"), 0));
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
-    let mut state = AppState::new(store, obs, Arc::new(runtime), driver);
-    state.clock = clock;
-    state
+    AppState::new(store, obs, Arc::new(runtime), driver, clock)
 }
 
 /// The runtime construction site populates `TickContext.now_unix` from

@@ -139,12 +139,21 @@ impl AppState {
     /// The default `streaming_cap` is 60s per architecture.md §10.
     /// Test fixtures that want a different cap construct `AppState`
     /// directly with the field set.
+    ///
+    /// The `clock` parameter is required at construction per
+    /// `.claude/rules/development.md` § "Port-trait dependencies":
+    /// types depending on a port trait take the implementation as an
+    /// explicit constructor parameter so tests cannot silently inherit
+    /// production wall-clock behaviour by forgetting to override.
+    /// Production passes `Arc::new(overdrive_host::SystemClock)`; tests
+    /// pass `Arc::new(overdrive_sim::adapters::clock::SimClock::new())`.
     #[must_use]
     pub fn new(
         store: Arc<LocalIntentStore>,
         obs: Arc<dyn ObservationStore>,
         runtime: Arc<reconciler_runtime::ReconcilerRuntime>,
         driver: Arc<dyn Driver>,
+        clock: Arc<dyn Clock>,
     ) -> Self {
         let (tx, _rx) = tokio::sync::broadcast::channel(DEFAULT_LIFECYCLE_BROADCAST_CAPACITY);
         Self {
@@ -154,10 +163,7 @@ impl AppState {
             driver,
             lifecycle_events: Arc::new(tx),
             streaming_cap: DEFAULT_STREAMING_CAP,
-            // Default to `SystemClock` from the host crate. Tests that
-            // need controllable time replace this field directly with
-            // `Arc::new(SimClock::new())`.
-            clock: Arc::new(overdrive_host::SystemClock),
+            clock,
         }
     }
 }
@@ -485,12 +491,12 @@ pub async fn run_server_with_obs_and_driver(
     runtime.register(job_lifecycle()).await?;
     let runtime = Arc::new(runtime);
 
-    let mut state: AppState = AppState::new(store, obs, runtime, driver);
     // Production boot threads the `ServerConfig.clock` into AppState
     // so the streaming submit handler's cap timer uses the same clock
-    // as the convergence-loop spawn. Tests construct AppState directly
-    // and replace this field as needed.
-    state.clock = config.clock.clone();
+    // as the convergence-loop spawn. The clock is required at
+    // construction per `.claude/rules/development.md` § "Port-trait
+    // dependencies"; there is no post-construction injection path.
+    let state: AppState = AppState::new(store, obs, runtime, driver, config.clock.clone());
 
     // Spawn the exit-observer subsystem BEFORE the convergence loop so
     // the observer is already draining the driver's `ExitEvent`

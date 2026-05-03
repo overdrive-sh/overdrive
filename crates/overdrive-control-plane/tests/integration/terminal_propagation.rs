@@ -67,8 +67,7 @@ async fn bootstrap_async(
     let driver: Arc<dyn Driver> =
         Arc::new(ExecDriver::new(std::path::PathBuf::from("/sys/fs/cgroup"), sim_clock.clone()));
 
-    let mut state = AppState::new(store, obs, Arc::new(runtime), driver);
-    // Inject SimClock as state.clock so the convergence-tick's
+    // SimClock is passed at construction so the convergence-tick's
     // `tick.now_unix` snapshot advances with simulation time. The
     // JobLifecycle backoff predicate compares `tick.now_unix <
     // last_failure_seen_at + backoff_for_attempt(attempts)`; under
@@ -77,7 +76,7 @@ async fn bootstrap_async(
     // never reaches CEILING. SimClock advances when the background
     // ticker calls `clock.tick(...)` so the backoff window crosses
     // and the reconciler emits FinalizeFailed within the test budget.
-    state.clock = sim_clock.clone();
+    let state = AppState::new(store, obs, Arc::new(runtime), driver, sim_clock.clone());
     let receiver = state.lifecycle_events.subscribe();
     (state, receiver, sim_clock)
 }

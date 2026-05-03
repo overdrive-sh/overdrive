@@ -48,7 +48,7 @@ use tempfile::TempDir;
 /// (`noop-heartbeat` and `job-lifecycle`) — matching the `run_server`
 /// boot path. The `SimClock` is held by the caller so the test can
 /// advance logical time between ticks.
-async fn build_converged_state(tmp: &TempDir, clock: &SimClock) -> AppState {
+async fn build_converged_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState {
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
     runtime.register(noop_heartbeat()).await.expect("register noop-heartbeat");
@@ -58,8 +58,7 @@ async fn build_converged_state(tmp: &TempDir, clock: &SimClock) -> AppState {
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("NodeId"), 0));
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
-    let _ = clock; // explicit `clock` retained as the test's logical-time source
-    AppState::new(store, obs, Arc::new(runtime), driver)
+    AppState::new(store, obs, Arc::new(runtime), driver, clock)
 }
 
 /// RED — drive the runtime convergence loop end-to-end against a fully
@@ -76,8 +75,8 @@ async fn build_converged_state(tmp: &TempDir, clock: &SimClock) -> AppState {
 #[tokio::test]
 async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
     let tmp = TempDir::new().expect("tempdir");
-    let clock = SimClock::new();
-    let state = build_converged_state(&tmp, &clock).await;
+    let clock = Arc::new(SimClock::new());
+    let state = build_converged_state(&tmp, clock.clone()).await;
 
     // --- Preload IntentStore: one Job, replicas=1 (the converged
     //     desired state for `JobLifecycle` against `job/payments`).
@@ -213,7 +212,7 @@ async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
 #[tokio::test]
 async fn eval_dispatch_runs_only_the_named_reconciler() {
     let tmp = TempDir::new().expect("tempdir");
-    let clock = SimClock::new();
+    let clock = Arc::new(SimClock::new());
 
     // --- Build a converged AppState (same fixture shape as the test
     //     above; both reconcilers registered).
@@ -227,7 +226,7 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("NodeId"), 0));
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
-    let state = AppState::new(store, obs, Arc::new(runtime), driver);
+    let state = AppState::new(store, obs, Arc::new(runtime), driver, clock.clone());
 
     // --- Preload IntentStore with one converged Job (replicas=1).
     let job = Job::from_spec(JobSpecInput {
@@ -391,7 +390,7 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
 #[allow(clippy::too_many_lines)]
 async fn stop_after_failed_alloc_drains_broker() {
     let tmp = TempDir::new().expect("tempdir");
-    let clock = SimClock::new();
+    let clock = Arc::new(SimClock::new());
 
     // --- Build AppState. Reject starts so the action shim writes
     //     `AllocState::Failed` and the reconciler enters the
@@ -407,8 +406,7 @@ async fn stop_after_failed_alloc_drains_broker() {
     let driver: Arc<dyn Driver> = Arc::new(
         SimDriver::new(DriverType::Exec).fail_on_start_with("binary not found".to_string()),
     );
-    let _ = clock.now(); // explicit logical-time anchor; clock is held below.
-    let state = AppState::new(store, obs, Arc::new(runtime), driver);
+    let state = AppState::new(store, obs, Arc::new(runtime), driver, clock.clone());
 
     // --- Preload IntentStore: one Job. The driver will reject its
     //     start, the action shim writes `AllocState::Failed`, the
@@ -626,15 +624,15 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
     use overdrive_core::traits::driver::Resources;
 
     let tmp = TempDir::new().expect("tempdir");
-    let clock = SimClock::new();
+    let sim_clock = Arc::new(SimClock::new());
 
     // --- Build AppState with the SimClock injected. The runtime's
     //     `run_convergence_tick` reads `state.clock.unix_now()` to
     //     populate `tick.now_unix`, so the sim clock must be the
-    //     authoritative wall-clock source for this test. Without this
-    //     wiring the runtime would fall back to AppState::new's default
-    //     `SystemClock`, which would advance with real wall-clock and
-    //     defeat the deterministic-rehydration assertion below.
+    //     authoritative wall-clock source for this test — passed in at
+    //     construction so the test fails to compile if a future refactor
+    //     forgets to thread it through (per `.claude/rules/development.md`
+    //     § "Port-trait dependencies").
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
     runtime.register(noop_heartbeat()).await.expect("register noop-heartbeat");
@@ -646,9 +644,7 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
     let driver: Arc<dyn Driver> = Arc::new(
         SimDriver::new(DriverType::Exec).fail_on_start_with("binary not found".to_string()),
     );
-    let mut state = AppState::new(store, obs, Arc::new(runtime), driver);
-    let sim_clock = Arc::new(clock);
-    state.clock = sim_clock.clone();
+    let state = AppState::new(store, obs, Arc::new(runtime), driver, sim_clock.clone());
 
     // --- Preload a Job that the SimDriver will reject — this drives
     //     the alloc into Failed and exercises the restart-with-backoff
@@ -893,7 +889,7 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
     use overdrive_core::reconciler::JobLifecycleView;
 
     let tmp = TempDir::new().expect("tempdir");
-    let clock = SimClock::new();
+    let sim_clock = Arc::new(SimClock::new());
 
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
@@ -907,9 +903,7 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
     // dispatched in this test (we seed Failed directly + restart_counts
     // via the cached view to keep the reconcile output empty).
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
-    let mut state = AppState::new(store, obs, Arc::new(runtime), driver);
-    let sim_clock = Arc::new(clock);
-    state.clock = sim_clock.clone();
+    let state = AppState::new(store, obs, Arc::new(runtime), driver, sim_clock.clone());
 
     // Seed Job (intent) so hydrate_desired returns Some(job).
     let job = Job::from_spec(JobSpecInput {

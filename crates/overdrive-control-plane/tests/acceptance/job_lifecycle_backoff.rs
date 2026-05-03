@@ -30,6 +30,7 @@ use overdrive_core::traits::driver::{
 };
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{AllocState, ObservationStore};
+use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
@@ -101,7 +102,7 @@ async fn build_state_with_driver(tmp: &TempDir, driver: Arc<dyn Driver>) -> AppS
     // Tests do not seed node-registration intent — that would invert
     // the dependency direction.
 
-    AppState::new(store, obs, Arc::new(runtime), driver)
+    AppState::new(store, obs, Arc::new(runtime), driver, Arc::new(SimClock::new()))
 }
 
 #[tokio::test]

@@ -34,6 +34,7 @@ use overdrive_core::id::NodeId;
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::ObservationStore;
+use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
@@ -48,7 +49,7 @@ fn build_app_state(tmp: &TempDir) -> AppState {
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::from_str("local").expect("NodeId"), 0));
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
-    AppState::new(store, obs, Arc::new(runtime), driver)
+    AppState::new(store, obs, Arc::new(runtime), driver, Arc::new(SimClock::new()))
 }
 
 fn spec_with_command(command: &str) -> JobSpecInput {
