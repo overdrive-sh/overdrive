@@ -49,4 +49,28 @@ mod acceptance {
     mod exec_reconciler_purity;
     mod exec_roundtrip;
     mod exec_validation;
+
+    // issue-141-persist-backoff-inputs — `UnixInstant` newtype for
+    // portable wall-clock deadlines. Step 01-01 covers arithmetic +
+    // constructor surface; step 01-02 covers Display/FromStr/Serde
+    // completeness + proptest roundtrips; step 02-01 wires it through
+    // `TickContext.now_unix` + introduces the `backoff_for_attempt`
+    // const fn; subsequent steps wire it through `JobLifecycleView`.
+    mod unix_instant_arithmetic;
+    mod unix_instant_completeness;
+
+    // Step 02-01 — `TickContext.now_unix` field surface +
+    // `backoff_for_attempt` const fn. The runtime construction-site
+    // verification lives in the control-plane acceptance suite (the
+    // core crate cannot build an `AppState` without circular deps).
+    mod tick_context_now_unix;
+
+    // Step 02-02 — `JobLifecycleView` persists inputs
+    // (`last_failure_seen_at: UnixInstant` is the canonical input;
+    // a precomputed `Instant` deadline would have been a derived
+    // value); deadline recomputed each tick from
+    // `seen_at + backoff_for_attempt(restart_count)`. Restart-survival
+    // idempotence is structural rather than coincidental — see
+    // `.claude/rules/development.md` § "Persist inputs, not derived state".
+    mod job_lifecycle_recompute_deadline;
 }

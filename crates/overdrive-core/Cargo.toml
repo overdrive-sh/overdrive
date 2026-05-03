@@ -90,6 +90,12 @@ trybuild.workspace = true
 # constructs a real `LocalStore` via `LocalStore::open`, so the harness
 # needs the store crate on its compile graph.
 overdrive-store-local.path = "../overdrive-store-local"
+# `tests/acceptance/unix_instant_arithmetic.rs` exercises
+# `UnixInstant::from_clock` against the project's standard `Clock`
+# fixture (`SimClock`). Dev-dep only — `overdrive-sim` itself depends
+# on `overdrive-core`, which Cargo permits in dev-deps because dev-deps
+# do not propagate to downstream consumers.
+overdrive-sim.path = "../overdrive-sim"
 tempfile.workspace = true
 tokio              = { workspace = true }
 # Used by `tests/acceptance/exec_validation.rs` to exercise the

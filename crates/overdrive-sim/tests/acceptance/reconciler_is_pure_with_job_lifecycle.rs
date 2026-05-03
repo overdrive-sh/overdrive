@@ -18,6 +18,7 @@
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
+use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{
     DriverInput, ExecInput, Job, JobSpecInput, Node, NodeSpecInput, ResourcesInput,
 };
@@ -26,9 +27,13 @@ use overdrive_core::reconciler::{
     TickContext,
 };
 
-fn fresh_tick() -> TickContext {
-    let now = Instant::now();
-    TickContext { now, tick: 0, deadline: now + Duration::from_secs(1) }
+/// Canonical `fresh_tick` signature (uniform across every acceptance
+/// suite per step 03-01): callers pass both `now` (monotonic) and
+/// `now_unix` (wall-clock) explicitly. Tests that do not exercise the
+/// wall-clock domain pass
+/// `UnixInstant::from_unix_duration(Duration::from_secs(0))`.
+fn fresh_tick(now: Instant, now_unix: UnixInstant) -> TickContext {
+    TickContext { now, now_unix, tick: 0, deadline: now + Duration::from_secs(1) }
 }
 
 fn payments_job() -> Job {
@@ -64,7 +69,7 @@ fn happy_path_state() -> JobLifecycleState {
 }
 
 const fn empty_view() -> JobLifecycleView {
-    JobLifecycleView { restart_counts: BTreeMap::new(), next_attempt_at: BTreeMap::new() }
+    JobLifecycleView { restart_counts: BTreeMap::new(), last_failure_seen_at: BTreeMap::new() }
 }
 
 #[test]
@@ -82,7 +87,7 @@ fn job_lifecycle_satisfies_reconciler_is_pure_invariant() {
     let desired = AnyState::JobLifecycle(desired_inner);
     let actual = AnyState::JobLifecycle(actual_inner);
     let view = AnyReconcilerView::JobLifecycle(empty_view());
-    let tick = fresh_tick();
+    let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
     // Twin invocation per ADR-0013 §2 / §2c — single TickContext shared
     // across both calls.
@@ -120,7 +125,7 @@ fn job_lifecycle_run_emits_start_allocation_when_no_running_alloc() {
     let desired = AnyState::JobLifecycle(desired_inner);
     let actual = AnyState::JobLifecycle(actual_inner);
     let view = AnyReconcilerView::JobLifecycle(empty_view());
-    let tick = fresh_tick();
+    let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
     let (actions, _next_view) = reconciler.reconcile(&desired, &actual, &view, &tick);
 

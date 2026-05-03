@@ -36,11 +36,16 @@
 //! state is peeked.
 
 #![allow(clippy::expect_used)]
+// Test-doc references mention symbol-shaped tokens (`pre-issue-141`,
+// `tick_2.now_unix`, action / state names) in plain prose where
+// backticking every occurrence costs more readability than it buys.
+#![allow(clippy::doc_markdown)]
 
 use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 use std::time::{Duration, Instant};
 
+use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver};
 use overdrive_core::id::{AllocationId, JobId, NodeId, Region};
 use overdrive_core::reconciler::{
@@ -118,8 +123,23 @@ const fn empty_alloc_map() -> BTreeMap<AllocationId, AllocStatusRow> {
     BTreeMap::new()
 }
 
-fn fresh_tick(now: Instant) -> TickContext {
-    TickContext { now, tick: 0, deadline: now + Duration::from_secs(1) }
+/// Canonical `fresh_tick` signature (uniform across every acceptance
+/// suite per step 03-01): callers pass both `now` (monotonic) and
+/// `now_unix` (wall-clock) explicitly. Tests that do not exercise the
+/// wall-clock domain pass
+/// `UnixInstant::from_unix_duration(Duration::from_secs(0))`.
+fn fresh_tick(now: Instant, now_unix: UnixInstant) -> TickContext {
+    TickContext { now, now_unix, tick: 0, deadline: now + Duration::from_secs(1) }
+}
+
+/// Build a `TickContext` at `(now, now_unix)` with an explicit tick
+/// counter. Both `now` and `now_unix` advance in lockstep across
+/// two-tick test chains so backoff arithmetic is consistent across the
+/// monotonic and wall-clock domains. Same argument shape as
+/// `fresh_tick`; `tick_at_unix` adds the explicit `tick` counter for
+/// multi-tick test chains where the counter must advance.
+fn tick_at_unix(now: Instant, now_unix: UnixInstant, tick: u64) -> TickContext {
+    TickContext { now, now_unix, tick, deadline: now + Duration::from_secs(1) }
 }
 
 // -------------------------------------------------------------------
@@ -159,7 +179,7 @@ fn stop_branch_skipped_when_stop_intent_set_but_no_job() {
     };
     let actual = JobLifecycleState { job: None, desired_to_stop: false, nodes, allocations };
     let view = JobLifecycleView::default();
-    let tick = fresh_tick(Instant::now());
+    let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
     let r = JobLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
@@ -195,7 +215,7 @@ fn stop_branch_skipped_when_job_present_but_no_stop_intent() {
         allocations,
     };
     let view = JobLifecycleView::default();
-    let tick = fresh_tick(Instant::now());
+    let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
     let r = JobLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
@@ -244,7 +264,7 @@ fn stop_branch_emits_one_stop_per_running_alloc_only() {
         allocations: allocs,
     };
     let view = JobLifecycleView::default();
-    let tick = fresh_tick(Instant::now());
+    let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
     let r = JobLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
@@ -299,7 +319,7 @@ fn run_branch_emits_nothing_when_an_alloc_is_already_running() {
         allocations,
     };
     let view = JobLifecycleView::default();
-    let tick = fresh_tick(Instant::now());
+    let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
     let r = JobLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
@@ -330,7 +350,7 @@ fn run_branch_starts_fresh_alloc_when_no_running_no_failed() {
         allocations: empty_alloc_map(),
     };
     let view = JobLifecycleView::default();
-    let tick = fresh_tick(Instant::now());
+    let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
     let r = JobLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
@@ -414,8 +434,8 @@ fn run_with_failed_alloc_and_attempts(attempts: u32) -> Vec<Action> {
     };
     let mut restart_counts = BTreeMap::new();
     restart_counts.insert(aid("alloc-payments-0"), attempts);
-    let view = JobLifecycleView { restart_counts, next_attempt_at: BTreeMap::new() };
-    let tick = fresh_tick(Instant::now());
+    let view = JobLifecycleView { restart_counts, last_failure_seen_at: BTreeMap::new() };
+    let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
     let r = JobLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
@@ -423,43 +443,52 @@ fn run_with_failed_alloc_and_attempts(attempts: u32) -> Vec<Action> {
 }
 
 // -------------------------------------------------------------------
-// L1146 — `tick.now < *deadline` (backoff window check)
+// Read-site: `tick.now_unix < seen_at + backoff_for_attempt(attempts)`
+// (backoff window check, recomputed from persisted inputs)
 // -------------------------------------------------------------------
 //
 // Mutations: `<` -> `==`, `<` -> `>`, `<` -> `<=`.
 //
-// Three samples at `now < deadline`, `now == deadline`, `now >
-// deadline`. Each sample distinguishes a different mutant.
+// Three samples at `now_unix < deadline`, `now_unix == deadline`,
+// `now_unix > deadline` (where `deadline = seen_at +
+// backoff_for_attempt(attempts)`). Each sample distinguishes a
+// different mutant. Per issue #141 the deadline is recomputed on every
+// tick from the persisted inputs (`last_failure_seen_at`,
+// `restart_counts`) — the helper drives this by seeding seen_at and
+// letting `backoff_for_attempt(0)` produce the backoff span.
 
 #[test]
 fn restart_suppressed_when_now_strictly_before_deadline() {
-    // now < deadline: under `<` (production), backoff active →
-    // suppressed. Under `>`: false → restart emitted. Under `==`:
-    // false (now != deadline) → restart emitted. Under `<=`: true
-    // (same as `<`) → suppressed (NOT distinguishable here).
-    let now = Instant::now();
-    let deadline = now + Duration::from_secs(60);
-    let actions = run_with_failed_alloc_and_deadline(now, deadline);
+    // now_unix < seen_at + backoff: under `<` (production), backoff
+    // active → suppressed. Under `>`: false → restart emitted. Under
+    // `==`: false → restart emitted. Under `<=`: true → suppressed
+    // (NOT distinguishable here).
+    let seen_at = UnixInstant::from_unix_duration(Duration::from_secs(1_000));
+    let now_unix = seen_at;
+    let actions = run_with_failed_alloc_and_seen_at(now_unix, seen_at);
     assert!(
         actions.is_empty(),
-        "now < deadline must suppress RestartAllocation (backoff active); got {actions:?}",
+        "now_unix < seen_at + backoff must suppress RestartAllocation \
+         (backoff active); got {actions:?}",
     );
 }
 
 #[test]
 fn restart_emitted_when_now_equals_deadline() {
-    // now == deadline: under `<` (production), false → restart
-    // emitted. Under `==` (mutant): true → suppressed. Under `<=`:
-    // true → suppressed. Under `>`: false → emitted (same as
-    // production for this sample). Distinguishes `<` from `==` and
-    // `<=`.
-    let now = Instant::now();
-    let deadline = now;
-    let actions = run_with_failed_alloc_and_deadline(now, deadline);
+    // now_unix == seen_at + backoff: under `<` (production), false →
+    // restart emitted. Under `==` (mutant): true → suppressed. Under
+    // `<=`: true → suppressed. Under `>`: false → emitted.
+    // Distinguishes `<` from `==` and `<=`.
+    let seen_at = UnixInstant::from_unix_duration(Duration::from_secs(1_000));
+    // attempts=0 in the helper, so backoff = backoff_for_attempt(0) =
+    // RESTART_BACKOFF_DURATION.
+    let now_unix = seen_at + RESTART_BACKOFF_DURATION;
+    let actions = run_with_failed_alloc_and_seen_at(now_unix, seen_at);
     assert_eq!(
         actions.len(),
         1,
-        "now == deadline must emit RestartAllocation (backoff elapsed); got {actions:?}",
+        "now_unix == seen_at + backoff must emit RestartAllocation \
+         (backoff elapsed); got {actions:?}",
     );
     assert!(
         matches!(actions[0], Action::RestartAllocation { .. }),
@@ -470,20 +499,22 @@ fn restart_emitted_when_now_equals_deadline() {
 
 #[test]
 fn restart_emitted_when_now_strictly_after_deadline() {
-    // now > deadline: under `<` (production), false → emitted.
-    // Under `==`: false → emitted. Under `>`: true → suppressed —
-    // distinguishes `<` from `>`. Under `<=`: false → emitted.
-    let deadline = Instant::now();
-    let now = deadline + Duration::from_secs(60);
-    let actions = run_with_failed_alloc_and_deadline(now, deadline);
+    // now_unix > seen_at + backoff: under `<` (production), false →
+    // emitted. Under `==`: false → emitted. Under `>`: true →
+    // suppressed — distinguishes `<` from `>`. Under `<=`: false →
+    // emitted.
+    let seen_at = UnixInstant::from_unix_duration(Duration::from_secs(1_000));
+    let now_unix = seen_at + RESTART_BACKOFF_DURATION + Duration::from_secs(60);
+    let actions = run_with_failed_alloc_and_seen_at(now_unix, seen_at);
     assert_eq!(
         actions.len(),
         1,
-        "now > deadline must emit RestartAllocation (backoff elapsed); got {actions:?}",
+        "now_unix > seen_at + backoff must emit RestartAllocation \
+         (backoff elapsed); got {actions:?}",
     );
 }
 
-fn run_with_failed_alloc_and_deadline(now: Instant, deadline: Instant) -> Vec<Action> {
+fn run_with_failed_alloc_and_seen_at(now_unix: UnixInstant, seen_at: UnixInstant) -> Vec<Action> {
     let nodes = one_node_map("local");
     let allocations = one_alloc_map(
         "alloc-payments-0",
@@ -501,12 +532,13 @@ fn run_with_failed_alloc_and_deadline(now: Instant, deadline: Instant) -> Vec<Ac
         nodes,
         allocations,
     };
-    let mut next_attempt_at = BTreeMap::new();
-    next_attempt_at.insert(aid("alloc-payments-0"), deadline);
-    // attempts=0 → ceiling check passes; backoff window is the
-    // gating decision under test.
-    let view = JobLifecycleView { restart_counts: BTreeMap::new(), next_attempt_at };
-    let tick = TickContext { now, tick: 0, deadline: now + Duration::from_secs(1) };
+    let mut last_failure_seen_at = BTreeMap::new();
+    last_failure_seen_at.insert(aid("alloc-payments-0"), seen_at);
+    // attempts=0 → ceiling check passes AND backoff_for_attempt(0)
+    // = RESTART_BACKOFF_DURATION; backoff window is the gating
+    // decision under test.
+    let view = JobLifecycleView { restart_counts: BTreeMap::new(), last_failure_seen_at };
+    let tick = fresh_tick(Instant::now(), now_unix);
 
     let r = JobLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
@@ -515,36 +547,30 @@ fn run_with_failed_alloc_and_deadline(now: Instant, deadline: Instant) -> Vec<Ac
 
 // -------------------------------------------------------------------
 // Write-side regression — RestartAllocation branch must materialise
-// `next_view.next_attempt_at`
+// `next_view.last_failure_seen_at`
 // -------------------------------------------------------------------
 //
-// Companion to the L1146 read-side gate tests above. The existing
-// tests hand-seed `view.next_attempt_at` and assert the gate fires
-// correctly given a populated deadline; they cannot detect that
-// `reconcile`'s emission branch never *writes* a deadline back into
-// `next_view`. Without these write-side assertions the field is
-// inert from one tick to the next, every Terminated alloc re-emits
-// `RestartAllocation` immediately, and `RESTART_BACKOFF_CEILING = 5`
-// is exhausted in ~500 ms instead of the spec'd
-// `5 × RESTART_BACKOFF_DURATION` window.
+// Companion to the read-site gate tests above. The existing
+// tests hand-seed `view.last_failure_seen_at` and assert the gate fires
+// correctly given a populated observation timestamp; they cannot
+// detect that `reconcile`'s emission branch never *writes* a
+// timestamp back into `next_view`. Without these write-side
+// assertions the field is inert from one tick to the next, every
+// Terminated alloc re-emits `RestartAllocation` immediately, and
+// `RESTART_BACKOFF_CEILING = 5` is exhausted in ~500 ms instead of
+// the spec'd `5 × RESTART_BACKOFF_DURATION` window.
 //
 // See `docs/feature/fix-restart-backoff-deadline-not-written/deliver/rca.md`.
-//
-// These three tests reference `RESTART_BACKOFF_DURATION` directly.
-// The constant lands in step 01-02; until then the import is
-// unresolved and the file fails to compile. The compile failure IS
-// the RED state per `.claude/rules/testing.md` § "RED scaffolds and
-// intentionally-failing commits".
+// Per issue #141: the persisted value is the failure observation
+// timestamp (`tick.now_unix`) — NOT a precomputed deadline.
 
 /// Single-tick: a fresh Terminated alloc with no prior view entries
 /// must emit `RestartAllocation` AND populate
-/// `next_view.next_attempt_at[<alloc_id>]` with `tick.now +
-/// RESTART_BACKOFF_DURATION`. Restart count goes from 0 to 1.
-///
-/// This is the load-bearing assertion. Against current `main` the
-/// `next_attempt_at` map remains empty after the call — the bug.
+/// `next_view.last_failure_seen_at[<alloc_id>]` with `tick.now_unix`
+/// (the observation timestamp, NOT `tick.now_unix +
+/// RESTART_BACKOFF_DURATION`). Restart count goes from 0 to 1.
 #[test]
-fn fresh_failure_writes_deadline_into_next_view() {
+fn fresh_failure_writes_seen_at_into_next_view() {
     let nodes = one_node_map("local");
     let allocations = one_alloc_map(
         "alloc-payments-0",
@@ -565,7 +591,8 @@ fn fresh_failure_writes_deadline_into_next_view() {
     // view is empty — fresh failure, no prior restart bookkeeping.
     let view = JobLifecycleView::default();
     let now = Instant::now();
-    let tick = fresh_tick(now);
+    let now_unix = UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000));
+    let tick = tick_at_unix(now, now_unix, 0);
 
     let r = JobLifecycle::canonical();
     let (actions, next_view) = r.reconcile(&desired, &actual, &view, &tick);
@@ -586,22 +613,24 @@ fn fresh_failure_writes_deadline_into_next_view() {
         "restart count must be incremented to 1 on first failure",
     );
 
-    // Deadline written: tick.now + RESTART_BACKOFF_DURATION. This is
-    // the assertion that catches the dead-code bug.
+    // Observation timestamp written: tick.now_unix (the *input*, NOT a
+    // precomputed deadline). Per issue #141 — persist inputs, recompute
+    // deadlines on read.
     assert_eq!(
-        next_view.next_attempt_at.get(&aid("alloc-payments-0")).copied(),
-        Some(now + RESTART_BACKOFF_DURATION),
-        "next_attempt_at must be populated with tick.now + RESTART_BACKOFF_DURATION; \
-         empty map indicates the deadline was never written",
+        next_view.last_failure_seen_at.get(&aid("alloc-payments-0")).copied(),
+        Some(now_unix),
+        "last_failure_seen_at must be populated with tick.now_unix \
+         (the observation timestamp, NOT a precomputed deadline)",
     );
 }
 
-/// Two-tick chain: tick 1 emits a restart and writes a deadline;
-/// tick 2 advances `tick.now` by less than `RESTART_BACKOFF_DURATION`
-/// and asserts the gate fires — empty actions, count NOT bumped,
-/// deadline NOT advanced. This is the regression evidence: against
-/// current `main`, tick 2 re-emits `RestartAllocation` because
-/// `view.next_attempt_at` was never populated by tick 1.
+/// Two-tick chain: tick 1 emits a restart and writes a seen_at;
+/// tick 2 advances `tick.now_unix` by less than
+/// `RESTART_BACKOFF_DURATION` and asserts the gate fires — empty
+/// actions, count NOT bumped, seen_at NOT advanced. This is the
+/// regression evidence: against the pre-issue-141 `main`, tick 2
+/// re-emits `RestartAllocation` because `view.last_failure_seen_at`
+/// was never populated by tick 1.
 #[test]
 fn subsequent_tick_within_backoff_window_emits_nothing() {
     let nodes = one_node_map("local");
@@ -625,23 +654,25 @@ fn subsequent_tick_within_backoff_window_emits_nothing() {
     // Tick 1: fresh failure. Capture next_view as the input to tick 2.
     let view_1 = JobLifecycleView::default();
     let now_1 = Instant::now();
-    let tick_1 = fresh_tick(now_1);
+    let now_unix_1 = UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000));
+    let tick_1 = tick_at_unix(now_1, now_unix_1, 0);
 
     let r = JobLifecycle::canonical();
     let (_actions_1, next_view_1) = r.reconcile(&desired, &actual, &view_1, &tick_1);
 
-    // Tick 2: advance now by less than RESTART_BACKOFF_DURATION. The
-    // gate must fire (now < deadline) and emit nothing. The view fed
-    // in IS the next_view from tick 1 — this is what makes the test
-    // a true regression for the "deadline never written" bug.
+    // Tick 2: advance now_unix by less than RESTART_BACKOFF_DURATION.
+    // The gate must fire (`now_unix < seen_at + backoff`) and emit
+    // nothing. The view fed in IS the next_view from tick 1.
     let now_2 = now_1 + Duration::from_millis(500);
-    let tick_2 = fresh_tick(now_2);
+    let now_unix_2 = now_unix_1 + Duration::from_millis(500);
+    let tick_2 = tick_at_unix(now_2, now_unix_2, 1);
 
     let (actions_2, next_view_2) = r.reconcile(&desired, &actual, &next_view_1, &tick_2);
 
     assert!(
         actions_2.is_empty(),
-        "tick 2 within backoff window (now < deadline) must emit nothing; got {actions_2:?}",
+        "tick 2 within backoff window (now_unix < seen_at + backoff) must emit nothing; \
+         got {actions_2:?}",
     );
 
     // Count NOT bumped during a gated tick — the alloc was never
@@ -652,24 +683,25 @@ fn subsequent_tick_within_backoff_window_emits_nothing() {
         "restart count must not advance on a gated tick",
     );
 
-    // Deadline NOT advanced — the same deadline survives a gated
-    // tick. (Advancing the deadline on a gated tick would let
-    // failures slip past the ceiling indefinitely.)
+    // seen_at NOT advanced — the same observation timestamp survives a
+    // gated tick. (Advancing it on a gated tick would let failures
+    // slip past the ceiling indefinitely.)
     assert_eq!(
-        next_view_2.next_attempt_at.get(&aid("alloc-payments-0")).copied(),
-        next_view_1.next_attempt_at.get(&aid("alloc-payments-0")).copied(),
-        "next_attempt_at must not advance on a gated tick",
+        next_view_2.last_failure_seen_at.get(&aid("alloc-payments-0")).copied(),
+        next_view_1.last_failure_seen_at.get(&aid("alloc-payments-0")).copied(),
+        "last_failure_seen_at must not advance on a gated tick",
     );
 }
 
-/// Two-tick chain: tick 1 emits a restart and writes a deadline;
-/// tick 2 advances `tick.now` past `RESTART_BACKOFF_DURATION` and
-/// asserts another restart fires, count is bumped, AND the deadline
-/// rolls forward to `new tick.now + RESTART_BACKOFF_DURATION` (NOT
-/// the previous deadline + `RESTART_BACKOFF_DURATION` — the spec
-/// pins the new window to the current tick).
+/// Two-tick chain: tick 1 emits a restart and writes a seen_at; tick
+/// 2 advances `tick.now_unix` past `RESTART_BACKOFF_DURATION` and
+/// asserts another restart fires, count is bumped, AND the seen_at
+/// rolls forward to `tick_2.now_unix` (the new observation
+/// timestamp, NOT the previous seen_at + window). This pins the spec
+/// semantics: each restart attempt records a fresh failure
+/// observation.
 #[test]
-fn tick_after_backoff_elapsed_emits_restart_and_advances_deadline() {
+fn tick_after_backoff_elapsed_emits_restart_and_advances_seen_at() {
     let nodes = one_node_map("local");
     let allocations = one_alloc_map(
         "alloc-payments-0",
@@ -691,16 +723,18 @@ fn tick_after_backoff_elapsed_emits_restart_and_advances_deadline() {
     // Tick 1: fresh failure.
     let view_1 = JobLifecycleView::default();
     let now_1 = Instant::now();
-    let tick_1 = fresh_tick(now_1);
+    let now_unix_1 = UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000));
+    let tick_1 = tick_at_unix(now_1, now_unix_1, 0);
 
     let r = JobLifecycle::canonical();
     let (_actions_1, next_view_1) = r.reconcile(&desired, &actual, &view_1, &tick_1);
 
-    // Tick 2: advance now strictly past RESTART_BACKOFF_DURATION.
-    // Gate elapsed → another restart must fire, deadline rolls
-    // forward to the new tick's now + window.
+    // Tick 2: advance now_unix strictly past RESTART_BACKOFF_DURATION.
+    // Gate elapsed → another restart must fire, seen_at rolls forward
+    // to the new tick's now_unix.
     let now_2 = now_1 + RESTART_BACKOFF_DURATION + Duration::from_millis(1);
-    let tick_2 = TickContext { now: now_2, tick: 1, deadline: now_2 + Duration::from_secs(1) };
+    let now_unix_2 = now_unix_1 + RESTART_BACKOFF_DURATION + Duration::from_millis(1);
+    let tick_2 = tick_at_unix(now_2, now_unix_2, 1);
 
     let (actions_2, next_view_2) = r.reconcile(&desired, &actual, &next_view_1, &tick_2);
 
@@ -720,20 +754,20 @@ fn tick_after_backoff_elapsed_emits_restart_and_advances_deadline() {
     let count_2 = next_view_2.restart_counts.get(&aid("alloc-payments-0")).copied().unwrap_or(0);
     assert_eq!(count_2, count_1 + 1, "restart count must advance by exactly 1 on a non-gated tick");
 
-    // Deadline rolls forward to the *new* tick's now + window — NOT
-    // the old deadline + window. This pins the spec semantics:
-    // backoff window resets relative to the current tick on each
-    // restart attempt.
+    // seen_at rolls forward to tick_2.now_unix — NOT the old seen_at +
+    // window. This pins the spec semantics: each restart attempt
+    // records a fresh failure observation, and the deadline is
+    // recomputed from it on subsequent reads.
     assert_eq!(
-        next_view_2.next_attempt_at.get(&aid("alloc-payments-0")).copied(),
-        Some(now_2 + RESTART_BACKOFF_DURATION),
+        next_view_2.last_failure_seen_at.get(&aid("alloc-payments-0")).copied(),
+        Some(now_unix_2),
         "deadline must roll forward to new tick.now + RESTART_BACKOFF_DURATION",
     );
 }
 
 // -------------------------------------------------------------------
 // fix-stop-branch-backoff-pending — Stop branch must clear
-// `next_attempt_at` when there are no Running allocs to stop
+// `last_failure_seen_at` when there are no Running allocs to stop
 // -------------------------------------------------------------------
 //
 // Companion to the DST acceptance test at
@@ -747,40 +781,29 @@ fn tick_after_backoff_elapsed_emits_restart_and_advances_deadline() {
 // deadline pending). The Stop branch's `view.clone()` pass-through
 // violates the second clause for the Failed-mid-backoff intersection.
 //
-// Pre-fix (current `main`): `reconciler.rs:1019-1027` returns
+// Pre-fix (pre-stop-branch-backoff-pending): the Stop branch returned
 // `(stop_actions, view.clone())`. With no Running allocs, `stop_actions`
-// is empty BUT `view.next_attempt_at` is unchanged — still names the
-// Failed alloc — so `view_has_backoff_pending` returns true and the
-// runtime self-re-enqueues every tick.
+// is empty BUT `view.last_failure_seen_at` is unchanged — still names
+// the Failed alloc — so `view_has_backoff_pending` returns true and
+// the runtime self-re-enqueues every tick.
 //
-// Post-fix (the GREEN edit at step 01-02): the Stop branch clears
-// `next_attempt_at` when `stop_actions.is_empty()`. This test pins the
-// expected post-fix `next_view`.
-//
-// The `#[ignore]` attribute keeps this test out of the lefthook
-// nextest-affected pre-commit pass between the RED scaffold commit
-// and the GREEN fix commit. Step 01-02 removes the `#[ignore]` in the
-// same commit as the production edit; the test transitions skipped →
-// executed-and-passing.
+// Post-fix (the Stop branch clears `last_failure_seen_at` when
+// `stop_actions.is_empty()`): predicate returns false on the first
+// post-stop tick → broker drains and stays empty.
 
-/// RED — a Stop branch with `desired_to_stop = true`, a Failed
-/// alloc (no Running allocs to stop), and a populated
-/// `view.next_attempt_at` must return `(actions: empty,
-/// next_view: next_attempt_at cleared)`. The cleared deadline is the
-/// load-bearing assertion: it is what `view_has_backoff_pending`
-/// reads in the runtime to decide whether to self-re-enqueue.
-///
-/// Pre-fix: `next_view.next_attempt_at` still contains the alloc
-/// entry, the runtime treats this as "transitional state" and
-/// re-enqueues every tick until `restart_counts` reaches the
-/// `RESTART_BACKOFF_CEILING`.
+/// A Stop branch with `desired_to_stop = true`, a Failed alloc (no
+/// Running allocs to stop), and a populated `view.last_failure_seen_at`
+/// must return `(actions: empty, next_view: last_failure_seen_at
+/// cleared)`. The cleared map is the load-bearing assertion: it is
+/// what `view_has_backoff_pending` reads in the runtime to decide
+/// whether to self-re-enqueue.
 #[test]
-fn stop_branch_clears_next_attempt_at_when_no_running_allocs() {
+fn stop_branch_clears_last_failure_seen_at_when_no_running_allocs() {
     // desired_to_stop = true, job is present, the only alloc is
     // Failed (NOT Running). The Stop branch fires but `stop_actions`
     // is empty — there is nothing to stop. The view carries a
-    // populated `next_attempt_at` from a prior restart-with-backoff
-    // tick (this is the Failed-mid-backoff intersection from the RCA).
+    // populated `last_failure_seen_at` from a prior restart-with-backoff
+    // tick (the Failed-mid-backoff intersection).
     let nodes = one_node_map("local");
     let allocations = one_alloc_map(
         "alloc-payments-0",
@@ -801,14 +824,15 @@ fn stop_branch_clears_next_attempt_at_when_no_running_allocs() {
 
     // Seed the view: restart_counts < CEILING (so
     // view_has_backoff_pending would return true pre-fix);
-    // next_attempt_at carries a non-empty deadline for the alloc.
+    // last_failure_seen_at carries a non-empty seen_at for the alloc.
     let now = Instant::now();
+    let now_unix = UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000));
     let mut restart_counts = BTreeMap::new();
     restart_counts.insert(aid("alloc-payments-0"), 1);
-    let mut next_attempt_at = BTreeMap::new();
-    next_attempt_at.insert(aid("alloc-payments-0"), now + RESTART_BACKOFF_DURATION);
-    let view = JobLifecycleView { restart_counts, next_attempt_at };
-    let tick = fresh_tick(now);
+    let mut last_failure_seen_at = BTreeMap::new();
+    last_failure_seen_at.insert(aid("alloc-payments-0"), now_unix);
+    let view = JobLifecycleView { restart_counts, last_failure_seen_at };
+    let tick = tick_at_unix(now, now_unix, 0);
 
     let r = JobLifecycle::canonical();
     let (actions, next_view) = r.reconcile(&desired, &actual, &view, &tick);
@@ -820,24 +844,15 @@ fn stop_branch_clears_next_attempt_at_when_no_running_allocs() {
     );
 
     // The load-bearing assertion: the Stop branch must clear
-    // `next_attempt_at` to signal "stop is complete; no pending
+    // `last_failure_seen_at` to signal "stop is complete; no pending
     // work" to the runtime's `view_has_backoff_pending` predicate.
-    //
-    // Pre-fix (`view.clone()` pass-through): `next_attempt_at`
-    // still contains the alloc → predicate returns true →
-    // self-re-enqueue every tick → broker spins for ~5 s until
-    // `restart_counts` reaches the ceiling.
-    //
-    // Post-fix (clear `next_attempt_at` when `stop_actions.is_empty()`):
-    // predicate returns false on the first post-stop tick → broker
-    // drains and stays empty.
     assert!(
-        next_view.next_attempt_at.is_empty(),
-        "Stop branch must clear `next_attempt_at` when there are no \
+        next_view.last_failure_seen_at.is_empty(),
+        "Stop branch must clear `last_failure_seen_at` when there are no \
          Running allocs to stop, otherwise `view_has_backoff_pending` \
          keeps `has_work = true` and the broker self-re-enqueues every \
          tick until `restart_counts` reaches RESTART_BACKOFF_CEILING. \
-         Got next_attempt_at = {:?} (expected empty)",
-        next_view.next_attempt_at,
+         Got last_failure_seen_at = {:?} (expected empty)",
+        next_view.last_failure_seen_at,
     );
 }

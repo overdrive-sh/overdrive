@@ -1570,6 +1570,7 @@ dependencies = [
  "futures",
  "hex",
  "libsql",
+ "overdrive-sim",
  "overdrive-store-local",
  "proptest",
  "rkyv",

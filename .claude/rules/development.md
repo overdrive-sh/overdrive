@@ -151,6 +151,173 @@ surface that lets the wrong call go to the wrong place.
 
 ---
 
+## Persist inputs, not derived state
+
+**Anywhere a value will be read back later — libSQL row, redb entry,
+Corrosion table, on-disk artifact, JSON config, audit row, cache —
+persist the *inputs* to whatever logic consumes the value, not the
+*output* of that logic.** Derived values get recomputed on every read
+from the persisted inputs and the live policy / function / lookup
+table. This is the rule that makes policy evolution, schema stability,
+and audit replay all work; violating it ships a stale cache of your
+own logic.
+
+The State-layer hygiene table above governs *where* state lives
+(IntentStore, ObservationStore, libSQL memory, scratch). This rule
+governs *what shape* the value takes regardless of which layer it sits
+in.
+
+### What counts as "derived"
+
+A value is derived if it would change when one of these changes,
+without the *inputs to it* changing:
+
+- A constant elsewhere in the codebase (timeout, threshold, weight,
+  schedule entry).
+- A function or lookup table consulted at compute time (a backoff
+  schedule, a scoring weighting, a Regorus policy, a routing table).
+- An operator-configurable knob (today often a constant; tomorrow a
+  per-tenant / per-job override).
+- A cross-version migration of the logic itself (the v1 algorithm
+  produced X; the v2 algorithm produces Y from the same inputs).
+
+If the answer to "would editing this constant / table / policy change
+the persisted value's correctness?" is yes, the value is derived. The
+field that should be persisted is the input that feeds the constant /
+table / policy, not the output it produces.
+
+### Why
+
+A persisted derived value is a stale cache of the logic that produced
+it. Three failure modes follow, in order of how often they bite in
+practice:
+
+1. **Policy / configuration evolution silently no-ops.** Today's
+   constant becomes tomorrow's operator-configurable knob (Kubernetes
+   `restartPolicy` / Nomad `restart` shape; per-tenant timeout
+   overrides; per-region weighting; a schedule swap). When the change
+   lands, every persisted derived value is still bound to the OLD
+   logic until it ages out. The change appears to apply at the
+   configuration boundary but is silently ignored at the read site —
+   exactly the inverse of what the operator expects. Recovery requires
+   a column migration (re-deriving the missing inputs from a value
+   that has already lost them) or an explicit drain (waiting until
+   every persisted derived value expires).
+2. **Schema migrations multiply.** Every change to the producing
+   function becomes a change to the persisted schema, because the
+   persisted value embedded the old function's output. Persisting
+   inputs decouples the schema from the function — `(attempts,
+   last_failure)` is stable across every backoff schedule that
+   consumes those two fields.
+3. **Audit and replay degrade.** Persisted inputs let an investigation
+   re-derive a past decision against any candidate policy. Persisted
+   outputs collapse the input → output trajectory into the output
+   alone; the original decision cannot be re-explained without
+   reconstructing the lost inputs.
+
+### Examples
+
+**Reconciler memory (libSQL).** A reconciler View field carries a
+recompute-on-read deadline by storing the inputs the deadline depends
+on, not the deadline itself:
+
+```rust
+// Bad — persists the deadline (a derived value bound to today's policy)
+pub struct JobLifecycleView {
+    pub restart_counts:   BTreeMap<AllocationId, u32>,
+    pub next_attempt_at:  BTreeMap<AllocationId, UnixInstant>,  // derived
+}
+
+// Good — persists the inputs; deadline recomputed on every read
+pub struct JobLifecycleView {
+    pub restart_counts:        BTreeMap<AllocationId, u32>,         // input
+    pub last_failure_seen_at:  BTreeMap<AllocationId, UnixInstant>, // input
+}
+// reconcile() body computes `*seen_at + backoff_for_attempt(*count)`
+// every tick — picks up backoff-policy changes for free.
+```
+
+**Observation rows.** An observation row carries the field the
+authoritative writer observed, not a derived classification of it.
+`alloc_status.state` is an observed input; a `health_grade ∈ {green,
+amber, red}` column would be derived from `state` + a threshold table
+and must not be persisted — compute it at read time.
+
+**Cache rows.** When a value is genuinely expensive to recompute (the
+narrow exception below), the cache row carries an *invalidation key*
+derived from the inputs and the policy identity, so a policy change
+automatically invalidates the cache. A cache without such a key
+violates this rule and must not be persisted.
+
+**Audit / forensic rows.** Audit rows record the *observed inputs and
+the decision that was made*, not a re-derived view of why. The
+decision is the input ("we restarted alloc X at time T after attempt
+N"); a "would have been retried again at T+5s" prediction is a
+derived value and belongs in a viewer that recomputes from the audit
+row, not in the audit row itself.
+
+**Operator-facing config files / UI state.** A schematic file
+(§Image Factory, whitepaper §23) is hashed by content. The hash is the
+ID of the schematic. Persisting `schematic_id_v1: "abc..."` AND the
+canonicalised schematic body is fine because the ID is *defined as* a
+function of the body — they are the same datum, encoded twice for
+different purposes. But persisting "this schematic produces a 247 MB
+image" alongside the schematic is a derived cache; the next change to
+the build system makes the number a lie.
+
+### Codebase precedent
+
+`crates/overdrive-control-plane/src/worker/exit_observer.rs:291`:
+
+```rust
+let backoff = RETRY_BACKOFFS.get((attempts - 1) as usize).copied();
+```
+
+The persisted input is `attempts: u32`. The policy is the indexed
+`RETRY_BACKOFFS` table. Swap the table — the next attempt picks up the
+new schedule with no migration, no drain, no inconsistency window.
+
+### When NOT to apply
+
+The rule has one narrow exception: when recomputing the derived value
+is genuinely intractable on the read hot path (an expensive ML
+inference, a cross-cluster correlation that costs a network
+round-trip, a cryptographic operation measured in seconds). That is a
+*cache*, not the primary value — and it MUST carry an invalidation
+key derived from the inputs and the policy identity. If the cache
+cannot carry such a key (because the policy is opaque), it must not
+be persisted; recompute on every read or move the work into a workflow
+that produces the value as observable state.
+
+If you find yourself reaching for this exception for an in-process
+arithmetic computation (a duration addition, a comparison, a small
+table lookup, a string format), you are mistaken about the cost —
+the recomputation is free. Persist the inputs.
+
+### Symptoms during review
+
+- A persisted field whose name describes a *future event*
+  (`next_attempt_at`, `expires_at`, `scheduled_for`, `valid_until`,
+  `next_run_after`, `eligible_at`). These are almost always derived
+  from a "last X" timestamp + a policy.
+- A persisted field whose value would change if a constant elsewhere
+  in the codebase were edited. The constant IS the policy; the field
+  is the cached output of applying it.
+- A read site that uses a persisted field directly in a comparison or
+  branch without consulting a policy table or function. The
+  silhouette `if now < persisted.deadline` is the canonical smell —
+  the deadline IS the cache; replace with `if now < persisted.seen_at
+  + policy.backoff()`.
+- A persisted field whose docstring contains the word "computed"
+  or "derived" or "calculated."
+
+If the field genuinely does NOT depend on a policy (a remote system's
+externally-assigned identifier, a user-supplied free-text comment, a
+fingerprint of immutable content), it is an input by construction and
+the rule does not apply.
+
+---
+
 ## Port-trait dependencies — `overdrive-host` is production, `overdrive-sim` is tests
 
 `overdrive-core` declares the port traits (`Clock`, `Transport`, `Entropy`,
@@ -442,7 +609,10 @@ async fn reconcile(&self, /* ... */) -> Vec<Action> {
 // reconciler author touches libsql); reconcile is sync + pure, emits
 // an HttpCall action, and returns a NextView the runtime persists.
 // The response arrives as observation on the next tick via `actual`.
-// Wall-clock comes from `tick.now`, never `Instant::now()`.
+// Wall-clock comes from `tick.now_unix` (persistable UnixInstant),
+// never `Instant::now()`. The View persists *inputs* — `attempts`
+// and `last_failure_seen_at` — not the derived `next_attempt_at`
+// deadline (see § "Persist inputs, not derived state" above).
 impl Reconciler for RegisterReconciler {
     type View = RetryMemory;
 
@@ -457,7 +627,7 @@ impl Reconciler for RegisterReconciler {
         // (CREATE TABLE IF NOT EXISTS, ALTER TABLE ADD COLUMN) lives
         // here too — no framework migrations Phase 1.
         let row = db.query_one(
-            "SELECT attempts, last_correlation, next_attempt_at \
+            "SELECT attempts, last_correlation, last_failure_seen_at \
              FROM register_memory WHERE target = ?",
             &[target.as_str()],
         ).await?;
@@ -484,11 +654,16 @@ impl Reconciler for RegisterReconciler {
             Some(Status::Pending) | Some(Status::InFlight) => vec![],
             Some(Status::Completed { response }) => converge_from_response(actual, response),
             // Retry-budget gate: only re-dispatch once the backoff
-            // window has elapsed. `tick.now` is the runtime's
+            // window has elapsed. The deadline is RECOMPUTED on
+            // every tick from the persisted inputs (`attempts` +
+            // `last_failure_seen_at`) and the live backoff policy —
+            // never persisted. `tick.now_unix` is the runtime's
             // single-snapshot of wall-clock for this evaluation —
-            // pure input, DST-controllable.
+            // pure input, DST-controllable, persistable.
             Some(Status::Failed { .. } | Status::TimedOut { .. })
-                if tick.now >= view.next_attempt_at =>
+                if tick.now_unix
+                    >= view.last_failure_seen_at
+                        + backoff_for_attempt(view.attempts) =>
             {
                 handle_failure(view)
             }
@@ -496,9 +671,11 @@ impl Reconciler for RegisterReconciler {
         };
         // NextView carries the updated retry memory; the runtime
         // diffs (view → next_view) and persists the delta to libsql.
-        // Reconcile never writes libsql directly. Compute the next
-        // backoff deadline from `tick.now`, not from `Instant::now()`.
-        let next_view = view.bump_if_dispatched(&actions, tick.now);
+        // Reconcile never writes libsql directly. On a fresh
+        // dispatch, stamp `last_failure_seen_at = tick.now_unix`
+        // and bump `attempts` — both are inputs to the next tick's
+        // deadline computation, never a precomputed deadline.
+        let next_view = view.bump_if_dispatched(&actions, tick.now_unix);
         (actions, next_view)
     }
 }
@@ -546,7 +723,9 @@ The reference case: a Restate-operator-equivalent in Overdrive is a
 reconciler whose `hydrate` reads retry memory, whose `reconcile` emits
 `HttpCall { target: restate_admin_url, method: POST, body:
 deployment_spec, idempotency_key: Some(...) }` on registration when
-`tick.now >= view.next_attempt_at`, and which reads
+`tick.now_unix >= view.last_failure_seen_at +
+backoff_for_attempt(view.attempts)` (deadline recomputed every tick
+from persisted inputs, never persisted itself), and which reads
 `external_call_results` on the next tick to advance its state
 machine. No `async fn` in `reconcile`; no direct HTTP client; no
 direct wall-clock read; fully DST-replayable.

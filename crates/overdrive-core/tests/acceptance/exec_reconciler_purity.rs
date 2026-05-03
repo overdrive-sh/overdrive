@@ -26,6 +26,7 @@ use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 use std::time::{Duration, Instant};
 
+use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver};
 use overdrive_core::id::{AllocationId, JobId, NodeId, Region};
 use overdrive_core::reconciler::{
@@ -116,8 +117,13 @@ const fn empty_alloc_map() -> BTreeMap<AllocationId, AllocStatusRow> {
     BTreeMap::new()
 }
 
-fn fresh_tick(now: Instant) -> TickContext {
-    TickContext { now, tick: 0, deadline: now + Duration::from_secs(1) }
+/// Canonical `fresh_tick` signature (uniform across every acceptance
+/// suite per step 03-01): callers pass both `now` (monotonic) and
+/// `now_unix` (wall-clock) explicitly. Tests that do not exercise the
+/// wall-clock domain pass
+/// `UnixInstant::from_unix_duration(Duration::from_secs(0))`.
+fn fresh_tick(now: Instant, now_unix: UnixInstant) -> TickContext {
+    TickContext { now, now_unix, tick: 0, deadline: now + Duration::from_secs(1) }
 }
 
 // ---------------------------------------------------------------------------
@@ -152,7 +158,7 @@ fn start_action_carries_full_alloc_spec_from_live_job_command_and_args() {
         allocations: empty_alloc_map(),
     };
     let view = JobLifecycleView::default();
-    let tick = fresh_tick(Instant::now());
+    let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
     let r = JobLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
@@ -210,7 +216,7 @@ fn restart_action_carries_full_alloc_spec_from_live_job() {
     let actual = JobLifecycleState { job: Some(job), desired_to_stop: false, nodes, allocations };
     // attempts=0, no deadline → restart fires immediately.
     let view = JobLifecycleView::default();
-    let tick = fresh_tick(Instant::now());
+    let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
     let r = JobLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
@@ -275,8 +281,7 @@ fn reconcile_with_exec_spec_is_deterministic_across_twin_invocations() {
     // Pin a fixed `tick.now` — purity says reconcile is a pure
     // function over its inputs; with the SAME tick the SAME output
     // must come out.
-    let now = Instant::now();
-    let tick = TickContext { now, tick: 0, deadline: now + Duration::from_secs(1) };
+    let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
     let r = JobLifecycle::canonical();
     let (actions_a, view_a) = r.reconcile(&desired, &actual, &view, &tick);

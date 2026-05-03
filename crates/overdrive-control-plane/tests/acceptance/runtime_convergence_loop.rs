@@ -318,7 +318,7 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
 // Pins the §18 *Level-triggered inside the reconciler* contract for the
 // Stop branch of `JobLifecycle::reconcile`: when a stop intent arrives
 // while the only alloc is `Failed` mid-restart-backoff
-// (`view.next_attempt_at` populated, `view.restart_counts < CEILING`),
+// (`view.last_failure_seen_at` populated, `view.restart_counts < CEILING`),
 // the reconciler must clear the transitional view state — otherwise
 // `view_has_backoff_pending` keeps `has_work = true` and the broker
 // self-re-enqueues every tick until the ceiling is reached
@@ -327,11 +327,12 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
 //
 // Pre-fix (current `main`):
 //   - Stop branch returns `(stop_actions, view.clone())`. With no
-//     Running allocs, `stop_actions` is empty BUT `view.next_attempt_at`
-//     still names the Failed alloc and `restart_counts < CEILING` ⇒
-//     `view_has_backoff_pending` returns `true` ⇒ `has_work = true` ⇒
-//     re-enqueue. Every subsequent tick repeats — the eval is in the
-//     pending set every time the broker is drained.
+//     Running allocs, `stop_actions` is empty BUT
+//     `view.last_failure_seen_at` still names the Failed alloc and
+//     `restart_counts < CEILING` ⇒ `view_has_backoff_pending` returns
+//     `true` ⇒ `has_work = true` ⇒ re-enqueue. Every subsequent tick
+//     repeats — the eval is in the pending set every time the broker
+//     is drained.
 //   - Observable symptom on this fixture: across 10 ticks after the
 //     stop intent is written, `dispatched` advances by ≥5 (the per-alloc
 //     `RESTART_BACKOFF_CEILING` budget — see memory note 38682) and
@@ -339,10 +340,10 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
 //
 // Post-fix (the GREEN edit at step 01-02 in
 // `crates/overdrive-core/src/reconciler.rs:1019-1027`):
-//   - Stop branch clears `next_attempt_at` when `stop_actions.is_empty()`,
-//     so the first post-stop tick sees `view_has_backoff_pending = false`,
-//     `has_work = false`, no re-enqueue. The broker drains and stays
-//     empty.
+//   - Stop branch clears `last_failure_seen_at` when
+//     `stop_actions.is_empty()`, so the first post-stop tick sees
+//     `view_has_backoff_pending = false`, `has_work = false`, no
+//     re-enqueue. The broker drains and stays empty.
 //
 // This test is `#[ignore]`d in this commit so the lefthook
 // pre-commit gate (`nextest-affected`) stays green between the RED
@@ -366,8 +367,8 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
 ///   2. Submit the job intent and one `Evaluation { reconciler:
 ///      "job-lifecycle", target: "job/payments" }`.
 ///   3. Drive ticks until the cached view records the alloc's
-///      `next_attempt_at` deadline and `restart_counts == 1` — proof
-///      that the reconciler emitted exactly one Restart action and
+///      `last_failure_seen_at` observation and `restart_counts == 1` —
+///      proof that the reconciler emitted exactly one Restart action and
 ///      then sat back on the backoff. (We do NOT advance logical time
 ///      far enough to elapse the 1-second per-attempt backoff window;
 ///      this is the load-bearing precondition — the alloc is Failed
@@ -477,7 +478,7 @@ async fn stop_after_failed_alloc_drains_broker() {
             let alloc_id = AllocationId::new(&format!("alloc-{}-0", job_id.as_str()))
                 .expect("derived alloc id");
             let count = view.restart_counts.get(&alloc_id).copied().unwrap_or(0);
-            let has_deadline = view.next_attempt_at.contains_key(&alloc_id);
+            let has_deadline = view.last_failure_seen_at.contains_key(&alloc_id);
             if count >= 1 && has_deadline {
                 break;
             }
@@ -541,7 +542,7 @@ async fn stop_after_failed_alloc_drains_broker() {
     //     after the stop converged. Pre-fix:
     //     `view_has_backoff_pending` keeps re-enqueueing every tick →
     //     queued stays at 1. Post-fix: the Stop branch clears
-    //     `next_attempt_at` so the predicate returns false on the
+    //     `last_failure_seen_at` so the predicate returns false on the
     //     first tick after the stop, no re-enqueue, queued == 0.
     let counters = state.runtime.broker().counters();
     assert_eq!(
@@ -565,5 +566,479 @@ async fn stop_after_failed_alloc_drains_broker() {
          {dispatched_during_stop} (pre-fix value: ≥5 — the broker \
          self-re-enqueues until restart_counts reaches \
          RESTART_BACKOFF_CEILING)",
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Step 03-02 — issue #141 final gate: runtime convergence loop is idempotent
+// across simulated control-plane restart.
+//
+// Pins the load-bearing property of "persist inputs, not derived state" at
+// the runtime boundary: a freshly-rehydrated `JobLifecycleView` constructed
+// from only the persisted *inputs* `(restart_counts, last_failure_seen_at)`
+// produces a reconcile output bit-equivalent to the live in-memory view at
+// the same `TickContext`, when `backoff_for_attempt` is unchanged.
+//
+// Step 02-02 pinned the same property at the `JobLifecycle::reconcile`
+// boundary (`crates/overdrive-core/tests/acceptance/job_lifecycle_recompute_deadline.rs`
+// `restart_survival_idempotence`). 03-02 is the runtime-boundary
+// counterpart: drive the runtime convergence loop until the cached view
+// has accumulated non-trivial backoff state, then prove that wiping the
+// cache and reseeding from `(restart_counts, last_failure_seen_at)` —
+// exactly the persist-inputs shape that libSQL hydrate would produce —
+// yields an identical reconcile trajectory at the same TickContext.
+//
+// Why this matters: under the rejected alternative where
+// `JobLifecycleView` persisted a precomputed `next_attempt_at` deadline,
+// this property would still pass *today* but would silently no-op when
+// `backoff_for_attempt` evolves (a future per-tenant backoff override,
+// a tier-based schedule swap, a deferred attempt-count adjustment).
+// The persist-inputs shape makes the property structural: same inputs +
+// same policy + same tick → same output by purity, regardless of how
+// the policy evolves between persistence and rehydration.
+// ---------------------------------------------------------------------------
+
+/// GIVEN the runtime has driven `JobLifecycle` into a Failed-mid-backoff
+/// state where the cached `JobLifecycleView` carries
+/// `restart_counts > 0` and `last_failure_seen_at` populated —
+/// WHEN the cached view is replaced with a freshly-constructed
+/// `JobLifecycleView` containing ONLY the persisted inputs from the
+/// snapshot (simulating a control-plane restart that rehydrates view
+/// state from libSQL columns) AND reconcile is invoked at an identical
+/// `TickContext` —
+/// THEN the resulting `Vec<Action>` and `NextView` are bit-equivalent
+/// to the pre-restart pair.
+///
+/// This proves the persist-inputs design is structurally idempotent
+/// across restart at the runtime boundary: the rehydration ceremony
+/// (libSQL → fresh view → reconcile) is indistinguishable from a
+/// continuous in-memory tick when the underlying inputs and policy
+/// are unchanged.
+#[tokio::test]
+#[allow(clippy::too_many_lines)]
+async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart() {
+    use std::collections::BTreeMap;
+    use std::time::Instant;
+
+    use overdrive_core::UnixInstant;
+    use overdrive_core::reconciler::{
+        AnyReconciler, AnyReconcilerView, AnyState, JobLifecycle, JobLifecycleState,
+        JobLifecycleView, TickContext,
+    };
+    use overdrive_core::traits::driver::Resources;
+
+    let tmp = TempDir::new().expect("tempdir");
+    let clock = SimClock::new();
+
+    // --- Build AppState with the SimClock injected. The runtime's
+    //     `run_convergence_tick` reads `state.clock.unix_now()` to
+    //     populate `tick.now_unix`, so the sim clock must be the
+    //     authoritative wall-clock source for this test. Without this
+    //     wiring the runtime would fall back to AppState::new's default
+    //     `SystemClock`, which would advance with real wall-clock and
+    //     defeat the deterministic-rehydration assertion below.
+    let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime::new");
+    runtime.register(noop_heartbeat()).expect("register noop-heartbeat");
+    runtime.register(job_lifecycle()).expect("register job-lifecycle");
+    let store_path = tmp.path().join("intent.redb");
+    let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
+    let obs: Arc<dyn ObservationStore> =
+        Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("NodeId"), 0));
+    let driver: Arc<dyn Driver> = Arc::new(
+        SimDriver::new(DriverType::Exec).fail_on_start_with("binary not found".to_string()),
+    );
+    let mut state = AppState::new(store, obs, Arc::new(runtime), driver);
+    let sim_clock = Arc::new(clock);
+    state.clock = sim_clock.clone();
+
+    // --- Preload a Job that the SimDriver will reject — this drives
+    //     the alloc into Failed and exercises the restart-with-backoff
+    //     branch where `JobLifecycleView` accumulates state.
+    let job = Job::from_spec(JobSpecInput {
+        id: "payments".to_string(),
+        replicas: 1,
+        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
+        driver: DriverInput::Exec(ExecInput {
+            command: "/does/not/exist".to_string(),
+            args: vec![],
+        }),
+    })
+    .expect("valid job spec");
+    let archived = rkyv::to_bytes::<rkyv::rancor::Error>(&job).expect("rkyv archive");
+    let job_key = IntentKey::for_job(&job.id);
+    state.store.put(job_key.as_bytes(), archived.as_ref()).await.expect("put job");
+
+    // --- Submit the seed evaluation.
+    let target = TargetResource::new("job/payments").expect("valid target");
+    state.runtime.broker().submit(Evaluation {
+        reconciler: ReconcilerName::new("job-lifecycle").expect("valid reconciler name"),
+        target: target.clone(),
+    });
+
+    // --- Warm up: drive ticks until the cached view has non-trivial
+    //     state (restart_counts > 0 AND last_failure_seen_at populated).
+    //     Mirror the warm-up loop from `stop_after_failed_alloc_drains_broker`
+    //     above. Logical time advances by 100 ms per tick — well below
+    //     `RESTART_BACKOFF_DURATION = 1 s`, so the alloc stays mid-backoff
+    //     across the warm-up.
+    let job_id = job.id.clone();
+    let alloc_id =
+        AllocationId::new(&format!("alloc-{}-0", job_id.as_str())).expect("derived alloc id");
+    let mut warm_up_ticks = 0_u64;
+    while warm_up_ticks < 30 {
+        let now = sim_clock.now();
+        let deadline = now + Duration::from_millis(100);
+        let pending = {
+            let mut broker = state.runtime.broker();
+            broker.drain_pending()
+        };
+        for eval in pending {
+            run_convergence_tick(
+                &state,
+                &eval.reconciler,
+                &eval.target,
+                now,
+                warm_up_ticks,
+                deadline,
+            )
+            .await
+            .expect("convergence tick succeeds");
+        }
+        sim_clock.tick(Duration::from_millis(100));
+        warm_up_ticks += 1;
+
+        let cache_key = ("job-lifecycle".to_string(), target.to_string());
+        let observed = {
+            let cache = state.view_cache.lock().expect("view_cache mutex");
+            cache.get(&cache_key).cloned()
+        };
+        if let Some(overdrive_control_plane::CachedView::JobLifecycle(view)) = observed {
+            let count = view.restart_counts.get(&alloc_id).copied().unwrap_or(0);
+            let has_seen_at = view.last_failure_seen_at.contains_key(&alloc_id);
+            if count >= 1 && has_seen_at {
+                break;
+            }
+        }
+    }
+    assert!(
+        warm_up_ticks < 30,
+        "warm-up failed to populate JobLifecycleView with backoff inputs in 30 ticks; \
+         test fixture is misconfigured (SimDriver should reject starts and the \
+         action_shim should write Failed allocs that the reconciler then restarts)",
+    );
+
+    // --- Snapshot the cached view's persisted inputs. These are the
+    //     ONLY two fields a libSQL hydrate would produce: `restart_counts`
+    //     and `last_failure_seen_at`. The view holds nothing else — by
+    //     construction (issue #141 §"Persist inputs, not derived state").
+    let cache_key = ("job-lifecycle".to_string(), target.to_string());
+    let view_pre: JobLifecycleView = {
+        let cache = state.view_cache.lock().expect("view_cache mutex");
+        match cache.get(&cache_key) {
+            Some(overdrive_control_plane::CachedView::JobLifecycle(v)) => v.clone(),
+            other => panic!("expected cached JobLifecycle view; got {other:?}"),
+        }
+    };
+    let restart_counts_persisted: BTreeMap<AllocationId, u32> = view_pre.restart_counts.clone();
+    let last_failure_seen_at_persisted: BTreeMap<AllocationId, UnixInstant> =
+        view_pre.last_failure_seen_at.clone();
+
+    // Sanity: the test fixture actually exercises the non-trivial path.
+    // If the warm-up missed the backoff state we want to know loudly,
+    // not silently pass on a vacuous BTreeMap-equality assertion.
+    assert!(
+        !restart_counts_persisted.is_empty(),
+        "snapshot must carry at least one restart_counts entry; got empty map"
+    );
+    assert!(
+        !last_failure_seen_at_persisted.is_empty(),
+        "snapshot must carry at least one last_failure_seen_at entry; got empty map"
+    );
+
+    // --- Capture pre-restart Actions and NextView. We rebuild the
+    //     desired/actual states inline (mirroring what
+    //     `run_convergence_tick`'s private `hydrate_desired` /
+    //     `hydrate_actual` helpers produce against the seeded
+    //     IntentStore + ObservationStore) and call `reconcile` through
+    //     the same `AnyReconciler` dispatch the runtime uses. This
+    //     pins the runtime-boundary contract without dispatching
+    //     actions through `action_shim` (which would mutate the
+    //     ObservationStore and invalidate the post-restart comparison).
+    let alloc_rows = state.obs.alloc_status_rows().await.expect("read alloc rows");
+    let mut allocations = BTreeMap::new();
+    for row in alloc_rows.into_iter().filter(|r| r.job_id == job_id) {
+        allocations.insert(row.alloc_id.clone(), row);
+    }
+    let mut nodes = BTreeMap::new();
+    let local_node =
+        overdrive_core::aggregate::Node::new(overdrive_core::aggregate::NodeSpecInput {
+            id: "local".to_string(),
+            region: "local".to_string(),
+            cpu_milli: 4_000,
+            memory_bytes: 8 * 1024 * 1024 * 1024,
+        })
+        .expect("baseline node spec");
+    let _ = Resources { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 }; // type used by job spec
+    nodes.insert(local_node.id.clone(), local_node);
+
+    let desired = AnyState::JobLifecycle(JobLifecycleState {
+        job: Some(job.clone()),
+        desired_to_stop: false,
+        nodes: nodes.clone(),
+        allocations: BTreeMap::new(),
+    });
+    let actual = AnyState::JobLifecycle(JobLifecycleState {
+        job: None,
+        desired_to_stop: false,
+        nodes,
+        allocations,
+    });
+
+    // Single TickContext shared across both reconcile calls — same
+    // monotonic `now`, same wall-clock `now_unix`, same `tick`, same
+    // `deadline`. The wall-clock comes from the SimClock so it is
+    // deterministic across the test.
+    let now: Instant = sim_clock.now();
+    let now_unix = UnixInstant::from_clock(&*sim_clock);
+    let tick = TickContext { now, now_unix, tick: 99, deadline: now + Duration::from_millis(100) };
+
+    let reconciler = AnyReconciler::JobLifecycle(JobLifecycle::canonical());
+    let view_live = AnyReconcilerView::JobLifecycle(view_pre.clone());
+    let (actions_pre, next_view_pre) = reconciler.reconcile(&desired, &actual, &view_live, &tick);
+
+    // --- Simulate control-plane restart: drop the cached view (the
+    //     in-memory derived state) and rehydrate a fresh
+    //     `JobLifecycleView` from ONLY the persisted inputs. This is
+    //     the exact rehydration shape libSQL would produce —
+    //     `restart_counts` and `last_failure_seen_at` are the row
+    //     columns; the view struct holds nothing else.
+    {
+        let mut cache = state.view_cache.lock().expect("view_cache mutex");
+        cache.remove(&cache_key);
+    }
+    let view_post = JobLifecycleView {
+        restart_counts: restart_counts_persisted.clone(),
+        last_failure_seen_at: last_failure_seen_at_persisted.clone(),
+    };
+    {
+        let mut cache = state.view_cache.lock().expect("view_cache mutex");
+        cache.insert(
+            cache_key.clone(),
+            overdrive_control_plane::CachedView::JobLifecycle(view_post.clone()),
+        );
+    }
+
+    // --- Run reconcile against the rehydrated view at the SAME
+    //     TickContext. Same desired, same actual, same tick — the only
+    //     difference is the view came from a "freshly bootstrapped
+    //     process" rather than a continuous in-memory accumulation.
+    let view_rehydrated = AnyReconcilerView::JobLifecycle(view_post);
+    let (actions_post, next_view_post) =
+        reconciler.reconcile(&desired, &actual, &view_rehydrated, &tick);
+
+    // --- The load-bearing assertion: rehydration from persisted
+    //     inputs at the same TickContext produces identical Actions
+    //     and identical NextView. This is the runtime-boundary witness
+    //     for issue #141's "no-op policy change in code produces
+    //     identical reconcile output across restart" acceptance bullet.
+    //
+    //     Under the persist-inputs shape this is structural:
+    //       same `(restart_counts, last_failure_seen_at)` inputs
+    //       + same `backoff_for_attempt` policy
+    //       + same TickContext (notably same `tick.now_unix`)
+    //       → same recomputed deadline
+    //       → same gate decision
+    //       → same Actions and NextView by purity.
+    //
+    //     Under the rejected alternative (persisting a precomputed
+    //     `next_attempt_at` deadline) the property would still hold
+    //     today, but a future change to `backoff_for_attempt` between
+    //     persistence and rehydration would make it fail — the
+    //     persisted deadline would lock in stale policy, while the
+    //     freshly-rehydrated view would recompute against the new
+    //     policy. The persist-inputs design eliminates that failure
+    //     mode by construction.
+    assert_eq!(
+        actions_pre, actions_post,
+        "runtime reconcile against rehydrated view must produce identical Actions; \
+         pre-restart={actions_pre:?}, post-restart={actions_post:?}"
+    );
+    assert_eq!(
+        next_view_pre, next_view_post,
+        "runtime reconcile against rehydrated view must produce identical NextView; \
+         pre-restart={next_view_pre:?}, post-restart={next_view_post:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Step 03-02 mutation-gate kill targets — `view_has_backoff_pending`
+// boundary semantics at the runtime level.
+//
+// `view_has_backoff_pending` (private to `reconciler_runtime`) gates the
+// runtime's self-re-enqueue when `reconcile` returns no actions but the
+// view carries a Failed alloc still mid-backoff (`restart_counts < CEILING
+// AND last_failure_seen_at populated`). Without this, the broker drains
+// empty during the backoff window and the deadline never fires.
+//
+// The two scenarios below probe the function's boundary semantics
+// indirectly through observable broker re-enqueue behaviour, killing
+// the four mutants the diff-scoped mutation gate flagged on
+// `reconciler_runtime.rs:436` (whole function → false) and
+// `reconciler_runtime.rs:441` (`<` → `==`, `>`, `<=`):
+//
+//   * `view_below_ceiling_with_seen_at_re_enqueues` — count=1 is strictly
+//     below CEILING (5); correct semantics return true → broker
+//     re-enqueues → queued == 1. Kills `false`, `==`, `>`.
+//   * `view_at_ceiling_with_seen_at_does_not_re_enqueue` — count=CEILING
+//     means exhausted; correct semantics return false → broker stays
+//     empty → queued == 0. Kills `<=` (which would still re-enqueue
+//     at-ceiling and is the only mutant the first scenario does not
+//     distinguish from `<`).
+//
+// Together the pair pins `<` strictly: any of `false`, `==`, `>`, or
+// `<=` substituted for `<` flips at least one assertion.
+// ---------------------------------------------------------------------------
+
+/// Prepare a converged-shaped runtime + Failed alloc + cached
+/// `JobLifecycleView` with the supplied `restart_counts` for the
+/// alloc, and `last_failure_seen_at` very close to "now" (so the
+/// backoff window has NOT elapsed regardless of attempt count). Drives
+/// the broker to empty, then runs ONE convergence tick. Returns
+/// `queued` after the tick — the load-bearing observable.
+async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
+    use std::collections::BTreeMap;
+
+    use overdrive_core::UnixInstant;
+    use overdrive_core::reconciler::JobLifecycleView;
+
+    let tmp = TempDir::new().expect("tempdir");
+    let clock = SimClock::new();
+
+    let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime::new");
+    runtime.register(noop_heartbeat()).expect("register noop-heartbeat");
+    runtime.register(job_lifecycle()).expect("register job-lifecycle");
+    let store_path = tmp.path().join("intent.redb");
+    let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
+    let obs: Arc<dyn ObservationStore> =
+        Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("NodeId"), 0));
+    // SimDriver doesn't matter — no Start/Restart action will be
+    // dispatched in this test (we seed Failed directly + restart_counts
+    // via the cached view to keep the reconcile output empty).
+    let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
+    let mut state = AppState::new(store, obs, Arc::new(runtime), driver);
+    let sim_clock = Arc::new(clock);
+    state.clock = sim_clock.clone();
+
+    // Seed Job (intent) so hydrate_desired returns Some(job).
+    let job = Job::from_spec(JobSpecInput {
+        id: "payments".to_string(),
+        replicas: 1,
+        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
+        driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
+    })
+    .expect("valid job spec");
+    let archived = rkyv::to_bytes::<rkyv::rancor::Error>(&job).expect("rkyv archive");
+    let key = IntentKey::for_job(&job.id);
+    state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
+
+    // Seed Failed alloc (observation) so hydrate_actual sees a Failed
+    // alloc that needs restarting.
+    let writer = NodeId::new("local").expect("writer node id");
+    let alloc_id = AllocationId::new("alloc-payments-0").expect("valid alloc id");
+    let alloc_row = AllocStatusRow {
+        alloc_id: alloc_id.clone(),
+        job_id: job.id.clone(),
+        node_id: writer.clone(),
+        state: AllocState::Failed,
+        updated_at: LogicalTimestamp { counter: 1, writer: writer.clone() },
+        reason: None,
+        detail: None,
+    };
+    state.obs.write(ObservationRow::AllocStatus(alloc_row)).await.expect("seed Failed alloc row");
+
+    // Seed cached view with the supplied restart_counts and
+    // last_failure_seen_at = now_unix (zero — the backoff window has
+    // NOT elapsed for any non-trivial RESTART_BACKOFF_DURATION).
+    let target = TargetResource::new("job/payments").expect("valid target");
+    let cache_key = ("job-lifecycle".to_string(), target.to_string());
+    let mut restart_counts = BTreeMap::new();
+    restart_counts.insert(alloc_id.clone(), restart_counts_value);
+    let mut last_failure_seen_at = BTreeMap::new();
+    last_failure_seen_at.insert(alloc_id, UnixInstant::from_clock(&*sim_clock));
+    let view = JobLifecycleView { restart_counts, last_failure_seen_at };
+    {
+        let mut cache = state.view_cache.lock().expect("view_cache mutex");
+        cache.insert(cache_key, overdrive_control_plane::CachedView::JobLifecycle(view));
+    }
+
+    // Submit and drain the seed eval — without re-submitting, the
+    // broker is empty going into the tick. After the tick, queued
+    // reflects ONLY whether `has_work` re-enqueued.
+    state.runtime.broker().submit(Evaluation {
+        reconciler: ReconcilerName::new("job-lifecycle").expect("valid reconciler name"),
+        target: target.clone(),
+    });
+    let now = sim_clock.now();
+    let deadline = now + Duration::from_millis(100);
+    let pending = {
+        let mut broker = state.runtime.broker();
+        broker.drain_pending()
+    };
+    for eval in pending {
+        run_convergence_tick(&state, &eval.reconciler, &eval.target, now, 0, deadline)
+            .await
+            .expect("convergence tick succeeds");
+    }
+
+    state.runtime.broker().counters().queued
+}
+
+/// GIVEN a `JobLifecycleView` with `restart_counts={alloc→1}` (strictly
+/// below the CEILING of 5) and `last_failure_seen_at` populated within
+/// the unelapsed backoff window —
+/// WHEN one convergence tick runs against a Failed alloc whose
+/// `reconcile` output is empty (mid-backoff) —
+/// THEN the broker is re-enqueued (queued == 1) because
+/// `view_has_backoff_pending` returned true under the strict-`<`
+/// boundary semantics.
+///
+/// Kills three of the four diff-scoped mutants on `view_has_backoff_pending`:
+///   * the whole function → `false` (would make queued == 0)
+///   * `<` → `==` (`1 == 5` is false → queued == 0)
+///   * `<` → `>` (`1 > 5` is false → queued == 0)
+#[tokio::test]
+async fn view_below_ceiling_with_seen_at_re_enqueues() {
+    let queued = run_one_tick_with_seeded_view(1).await;
+    assert_eq!(
+        queued, 1,
+        "restart_counts=1 (below CEILING=5) with last_failure_seen_at populated \
+         must keep the eval queued via view_has_backoff_pending; got queued={queued}"
+    );
+}
+
+/// GIVEN a `JobLifecycleView` with `restart_counts={alloc→CEILING}`
+/// (exactly the ceiling — backoff budget exhausted) and
+/// `last_failure_seen_at` populated —
+/// WHEN one convergence tick runs against a Failed alloc whose
+/// `reconcile` output is empty —
+/// THEN the broker is NOT re-enqueued (queued == 0) because
+/// `view_has_backoff_pending` returned false under the strict-`<`
+/// boundary semantics (the alloc is terminal-failed, no further
+/// restart will fire, so the level-triggered re-enqueue is correctly
+/// withheld).
+///
+/// Kills the fourth diff-scoped mutant on `view_has_backoff_pending`:
+///   * `<` → `<=` (`5 <= 5` is true → would re-enqueue → queued == 1)
+///
+/// Together with `view_below_ceiling_with_seen_at_re_enqueues` above,
+/// this pins the `<` semantics strictly at the boundary.
+#[tokio::test]
+async fn view_at_ceiling_with_seen_at_does_not_re_enqueue() {
+    let queued =
+        run_one_tick_with_seeded_view(overdrive_core::reconciler::RESTART_BACKOFF_CEILING).await;
+    assert_eq!(
+        queued, 0,
+        "restart_counts=CEILING (terminal-failed) must NOT re-enqueue via \
+         view_has_backoff_pending; got queued={queued}"
     );
 }

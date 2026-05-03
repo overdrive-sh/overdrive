@@ -22,6 +22,7 @@ use std::time::{Duration, Instant};
 use bytes::Bytes;
 use proptest::prelude::*;
 
+use overdrive_core::UnixInstant;
 use overdrive_core::id::{ContentHash, CorrelationKey};
 use overdrive_core::reconciler::{
     Action, HydrateError, LibsqlHandle, Reconciler, ReconcilerName, ReconcilerNameError,
@@ -503,7 +504,12 @@ fn reconciler_trait_signature_is_synchronous_no_async_no_clock_param() {
     // Construct one `TickContext`. Test code is exempt from the
     // `Instant::now()` dst-lint ban (dst-lint only scans `src/**/*.rs`).
     let now = Instant::now();
-    let tick = TickContext { now, tick: 0, deadline: now + Duration::from_secs(1) };
+    let tick = TickContext {
+        now,
+        now_unix: UnixInstant::from_unix_duration(Duration::from_secs(0)),
+        tick: 0,
+        deadline: now + Duration::from_secs(1),
+    };
 
     // `reconcile` returns `(Vec<Action>, Self::View)` directly — no `.await` needed.
     let (actions, _next_view) = reconciler.reconcile(&desired, &actual, &view, &tick);
@@ -526,7 +532,12 @@ fn reconciler_twin_invocation_produces_identical_output() {
     let actual: () = ();
     let view: () = ();
     let now = Instant::now();
-    let tick = TickContext { now, tick: 0, deadline: now + Duration::from_secs(1) };
+    let tick = TickContext {
+        now,
+        now_unix: UnixInstant::from_unix_duration(Duration::from_secs(0)),
+        tick: 0,
+        deadline: now + Duration::from_secs(1),
+    };
 
     let (actions_a, next_view_a) = reconciler.reconcile(&desired, &actual, &view, &tick);
     let (actions_b, next_view_b) = reconciler.reconcile(&desired, &actual, &view, &tick);

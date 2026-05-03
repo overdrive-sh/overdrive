@@ -53,6 +53,7 @@ use proptest::prelude::*;
 use overdrive_control_plane::action_shim::{LifecycleEvent, dispatch};
 use overdrive_core::SpiffeId;
 use overdrive_core::TransitionReason;
+use overdrive_core::UnixInstant;
 use overdrive_core::id::{AllocationId, JobId, NodeId};
 use overdrive_core::reconciler::{Action, TickContext};
 use overdrive_core::traits::driver::{
@@ -165,7 +166,12 @@ fn fresh_node() -> NodeId {
 
 fn make_tick(tick_n: u64) -> TickContext {
     let now = Instant::now();
-    TickContext { now, tick: tick_n, deadline: now + Duration::from_secs(1) }
+    TickContext {
+        now,
+        now_unix: UnixInstant::from_unix_duration(Duration::from_secs(0)),
+        tick: tick_n,
+        deadline: now + Duration::from_secs(1),
+    }
 }
 
 // ---------------------------------------------------------------------------

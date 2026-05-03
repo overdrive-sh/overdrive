@@ -31,6 +31,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{IntentKey, Job, Node};
 use overdrive_core::id::{JobId, NodeId};
 use overdrive_core::reconciler::{
@@ -244,21 +245,31 @@ pub async fn run_convergence_tick(
         return Ok(());
     };
 
-    // Construct the per-tick TickContext.
-    let tick = TickContext { now, tick: tick_n, deadline };
+    // Construct the per-tick TickContext. The wall-clock `now_unix`
+    // snapshot is taken from the SAME injected `Clock` the spawn loop
+    // sourced `now` from (`state.clock`), once per tick — never
+    // `SystemTime::now()` (dst-lint enforces). Reconcilers that need a
+    // persistable deadline (e.g. JobLifecycleView's
+    // `last_failure_seen_at` per issue #141) read `tick.now_unix`;
+    // in-process deadline arithmetic continues to use `tick.now`.
+    let now_unix = UnixInstant::from_clock(&*state.clock);
+    let tick = TickContext { now, now_unix, tick: tick_n, deadline };
 
     // Hydrate desired (intent-side) and actual (observation-side).
     let desired = hydrate_desired(reconciler, target, state).await?;
     let actual = hydrate_actual(reconciler, target, state).await?;
 
-    // Hydrate the typed View — Phase 1 carries the View in
-    // `AppState::view_cache` rather than libSQL (per-primitive
-    // libSQL is Phase 2+). On first tick the cache is empty;
-    // `cached_view_or_default` returns a fresh `default()` view.
-    // We still call `reconciler.hydrate` to stay on-contract with
-    // ADR-0013 §2 (hydrate is the ONLY async read seam) — Phase
-    // 1 reconcilers' hydrate impls return a default view that
-    // we discard in favour of the cached value.
+    // Hydrate the typed View — currently carried in
+    // `AppState::view_cache` rather than libSQL. On first tick the
+    // cache is empty; `cached_view_or_default` returns a fresh
+    // `default()` view. We still call `reconciler.hydrate` to stay
+    // on-contract with ADR-0013 §2 (hydrate is the ONLY async read
+    // seam) — today's `hydrate` impls return a default view that we
+    // discard in favour of the cached value.
+    //
+    // TODO(#139): wire `LibsqlHandle` for real per ADR-0013 §2b and
+    // use the returned view directly; drop the discard-and-cache
+    // shape below.
     let db = LibsqlHandle::default_phase1();
     let _ = reconciler.hydrate(target, &db).await.map_err(ConvergenceError::Hydrate)?;
     let view = cached_view_or_default(reconciler, target, state);
@@ -284,7 +295,8 @@ pub async fn run_convergence_tick(
     //
     // Backoff-pending fix (§18 level-triggered, S-WS-02 path):
     // when `reconcile` returns no actions because a Failed alloc
-    // is mid-backoff (`tick.now < view.next_attempt_at[alloc]` and
+    // is mid-backoff (`tick.now_unix < view.last_failure_seen_at[alloc]
+    // + backoff_for_attempt(restart_counts[alloc])` and
     // `restart_counts[alloc] < RESTART_BACKOFF_CEILING`), the cluster
     // has NOT converged — actual still has a Failed alloc that the
     // reconciler intends to restart once the deadline elapses. Without
@@ -296,8 +308,8 @@ pub async fn run_convergence_tick(
     let backoff_pending = view_has_backoff_pending(&next_view);
     let has_work = actions.iter().any(|a| !matches!(a, Action::Noop)) || backoff_pending;
 
-    // Persist the next-view back into the cache. Phase 2+ wires
-    // this through libSQL diff-and-persist per ADR-0013 §2b.
+    // Persist the next-view back into the in-memory cache.
+    // TODO(#139): replace with libSQL diff-and-persist per ADR-0013 §2b.
     store_cached_view(reconciler, target, state, next_view);
 
     // Dispatch through the action shim — this is where `.await`
@@ -399,33 +411,36 @@ fn store_cached_view(
 /// Pure predicate over `next_view`: does the `JobLifecycle` reconciler
 /// have transitional state still to converge?
 ///
-/// "Transitional" = the view records a `next_attempt_at` deadline for
-/// at least one alloc whose `restart_counts` is below
-/// `RESTART_BACKOFF_CEILING`. A non-empty `next_attempt_at` AFTER the
-/// reconciler has already declined to emit further actions on this
-/// tick means the reconciler is mid-backoff — the next tick (after
-/// the per-alloc deadline elapses) WILL emit a Restart action, so the
-/// runtime MUST re-enqueue or the broker drains empty and the
-/// convergence loop sleeps without ever re-evaluating the deadline.
+/// "Transitional" = the view records a `last_failure_seen_at`
+/// observation timestamp for at least one alloc whose `restart_counts`
+/// is below `RESTART_BACKOFF_CEILING`. A non-empty
+/// `last_failure_seen_at` AFTER the reconciler has already declined to
+/// emit further actions on this tick means the reconciler is
+/// mid-backoff — the next tick (after the per-alloc backoff window
+/// elapses) WILL emit a Restart action, so the runtime MUST re-enqueue
+/// or the broker drains empty and the convergence loop sleeps without
+/// ever re-evaluating the deadline.
 ///
 /// Returns `false` for `Unit` views and for `JobLifecycle` views whose
 /// allocs have all reached the backoff ceiling (terminal-failed) or
-/// whose `next_attempt_at` is empty (no pending restart). The latter
-/// covers the converged-Running case (no Failed alloc → no deadline
-/// recorded) and the never-failed case alike.
+/// whose `last_failure_seen_at` is empty (no pending restart). The
+/// latter covers the converged-Running case (no Failed alloc → no
+/// observation timestamp recorded) and the never-failed case alike.
 ///
 /// This is the §18 *Level-triggered inside the reconciler* counterpart
 /// to the action-emitted gate above: actions emitted is one signal of
-/// "actual ≠ desired"; an outstanding backoff deadline is the other.
+/// "actual ≠ desired"; an outstanding backoff observation is the other.
 /// Without this predicate, `reconcile` returning empty actions during
 /// backoff would silently drop the eval and leave the runtime stuck.
 fn view_has_backoff_pending(next_view: &AnyReconcilerView) -> bool {
     match next_view {
         AnyReconcilerView::Unit => false,
-        AnyReconcilerView::JobLifecycle(view) => view.next_attempt_at.iter().any(|(alloc, _)| {
-            view.restart_counts.get(alloc).copied().unwrap_or(0)
-                < overdrive_core::reconciler::RESTART_BACKOFF_CEILING
-        }),
+        AnyReconcilerView::JobLifecycle(view) => {
+            view.last_failure_seen_at.iter().any(|(alloc, _)| {
+                view.restart_counts.get(alloc).copied().unwrap_or(0)
+                    < overdrive_core::reconciler::RESTART_BACKOFF_CEILING
+            })
+        }
     }
 }
 
