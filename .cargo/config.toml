@@ -15,3 +15,14 @@ hooks-install = "run --package xtask -- hooks install"
 
 [build]
 # Keep incremental compilation on by default; CI overrides via CARGO_INCREMENTAL=0.
+
+# Linker — mold on Linux. Cuts incremental test rebuild ~3× and clean test
+# build ~33% on this workspace; see scripts/benchmark-linker/RESULTS.md.
+# Requires mold on PATH: Lima yaml installs it; CI installs it per-job;
+# bare Linux dev hosts need `apt-get install -y mold` (or distro equiv).
+# macOS targets use Mach-O / ld64 — no mold port for Mach-O.
+[target.aarch64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+
+[target.x86_64-unknown-linux-gnu]
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]
