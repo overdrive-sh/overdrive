@@ -52,7 +52,9 @@ mod acceptance {
 
     // issue-141-persist-backoff-inputs — `UnixInstant` newtype for
     // portable wall-clock deadlines. Step 01-01 covers arithmetic +
-    // constructor surface; subsequent steps wire it through
-    // `TickContext` and `JobLifecycleView`.
+    // constructor surface; step 01-02 covers Display/FromStr/Serde
+    // completeness + proptest roundtrips; subsequent steps wire it
+    // through `TickContext` and `JobLifecycleView`.
     mod unix_instant_arithmetic;
+    mod unix_instant_completeness;
 }
