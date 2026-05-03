@@ -97,7 +97,7 @@ provision:
       apt-get install -y --no-install-recommends \
           build-essential pkg-config ca-certificates curl git jq \
           unzip xz-utils cpio bzip2 zstd file \
-          clang lld llvm libclang-dev \
+          clang lld mold llvm libclang-dev \
           libelf-dev libbpf-dev linux-libc-dev \
           linux-tools-common linux-tools-generic \
           zlib1g-dev libssl-dev libzstd-dev libudev-dev \

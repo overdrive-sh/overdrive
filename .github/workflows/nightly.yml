@@ -50,6 +50,11 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
+      # mold is the linker per .cargo/config.toml; ubuntu-latest does
+      # not ship it.
+      - name: Install mold linker
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends mold
+
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "nightly-mutants"
