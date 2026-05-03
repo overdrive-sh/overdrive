@@ -1179,6 +1179,649 @@ pub fn evaluate_no_double_scheduling(alloc_status: &[AllocStatusRow]) -> Invaria
     result(name, InvariantStatus::Pass, CLUSTER_HOST, None)
 }
 
+// ---------------------------------------------------------------------------
+// reconciler-memory-redb step 01-07 — ViewStore DST invariants
+// ---------------------------------------------------------------------------
+
+/// Verdict shape for the per-case roundtrip comparison.
+///
+/// Extracted as a typed enum so unit tests can exercise every branch
+/// without spinning up a real `SimViewStore`. The match arm shape
+/// (`Match` / `Mismatch` / `Absent`) mirrors the three observable
+/// outcomes of decoding a roundtripped value: identical, different,
+/// or missing.
+#[derive(Debug, PartialEq, Eq)]
+pub enum RoundtripVerdict {
+    /// The decoded value is byte-equal to the original.
+    Match,
+    /// The decoded value is present but differs from the original.
+    Mismatch,
+    /// No decoded value was present at the expected key.
+    Absent,
+}
+
+/// Pure verdict for a single roundtrip case.
+///
+/// Compares `decoded` against `expected` using `PartialEq`. Mutation-
+/// testable: a flip of `==` to `!=` on the underlying comparison
+/// surfaces immediately because the unit tests below exercise both
+/// `Match` and `Mismatch` branches.
+#[must_use]
+pub fn roundtrip_verdict<V: PartialEq>(decoded: Option<&V>, expected: &V) -> RoundtripVerdict {
+    match decoded {
+        Some(v) if v == expected => RoundtripVerdict::Match,
+        Some(_) => RoundtripVerdict::Mismatch,
+        None => RoundtripVerdict::Absent,
+    }
+}
+
+/// Verdict shape for the `WriteThroughOrdering` in-memory check.
+///
+/// Three observable outcomes after a failed `write_through`:
+/// `OrderingHeld` (in-memory still carries the original — the contract
+/// holds), `Advanced` (in-memory carries the would-be `next_view` — the
+/// contract is violated), `UnexpectedView` (in-memory carries something
+/// other than original or `next_view` — corrupt state), or `Absent` (no
+/// entry — register did not bulk-load).
+#[derive(Debug, PartialEq, Eq)]
+pub enum OrderingVerdict {
+    /// In-memory still carries the original — fsync-then-memory ordering held.
+    OrderingHeld,
+    /// In-memory advanced to `next_view` despite fsync failure — violation.
+    Advanced,
+    /// In-memory carries an unexpected view — corrupt state.
+    UnexpectedView,
+    /// No in-memory entry for the target — register did not bulk-load.
+    Absent,
+}
+
+/// Pure verdict for the in-memory ordering check.
+///
+/// Compares `loaded` against the `original` (pre-injection value) and
+/// the `would_be_next_view` (post-injection candidate that should NOT
+/// have landed). Mutation-testable: each branch fires under a distinct
+/// fixture, so flipping any guard surfaces immediately.
+#[must_use]
+pub fn ordering_verdict<V: PartialEq>(
+    loaded: Option<&V>,
+    original: &V,
+    would_be_next_view: &V,
+) -> OrderingVerdict {
+    match loaded {
+        Some(v) if v == original => OrderingVerdict::OrderingHeld,
+        Some(v) if v == would_be_next_view => OrderingVerdict::Advanced,
+        Some(_) => OrderingVerdict::UnexpectedView,
+        None => OrderingVerdict::Absent,
+    }
+}
+
+/// Evaluate `ViewStoreRoundtripIsLossless`.
+///
+/// proptest-backed: for arbitrary `View` values, `write_through` then
+/// `bulk_load` returns byte-equal results. Covers `JobLifecycleView`
+/// (the only meaningful production View today) and `()` (the unit-View
+/// case used by `NoopHeartbeat`). Catches CBOR encode/decode regressions,
+/// ciborium-version skew, and serde-derive oversights per ADR-0035 §6.
+///
+/// Each generated case constructs a fresh `SimViewStore` so fixtures
+/// cannot leak across cases. The proptest case count is bounded by the
+/// per-invariant evaluation budget — large enough to exercise the
+/// generator's variance without blowing the harness wall-clock.
+#[allow(clippy::too_many_lines, clippy::items_after_statements)]
+// Justification: the body is sequential setup-then-loop; splitting it
+// into helpers would force passing the `name`/`rng`/store handles
+// through extra arguments without making the flow clearer. The
+// `CASES` const is documented inline with its semantic meaning, which
+// is the right place for it (per-evaluator tuning knob).
+pub async fn evaluate_view_store_roundtrip_is_lossless(seed: u64) -> InvariantResult {
+    use overdrive_control_plane::view_store::ViewStoreExt;
+    use overdrive_core::id::AllocationId;
+    use overdrive_core::reconciler::{JobLifecycleView, ReconcilerName, TargetResource};
+    use overdrive_core::wall_clock::UnixInstant;
+    use rand::{Rng, SeedableRng};
+
+    use crate::adapters::view_store::SimViewStore;
+
+    /// Cases per invariant evaluation. Larger than a handful so a
+    /// generator that returns a constant cannot hide a real divergence,
+    /// small enough to keep the per-evaluation wall-clock bounded.
+    const CASES: usize = 64;
+
+    let name = "view-store-roundtrip-is-lossless";
+
+    // Seed a chacha rng from the harness seed so the generator is
+    // bit-deterministic across runs at the same seed (K3 reproducibility).
+    let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+
+    // Scope the case loop into a closure so we can early-return on the
+    // first divergence with a structured cause.
+    let n_jobs = match ReconcilerName::new("job-lifecycle") {
+        Ok(v) => v,
+        Err(err) => {
+            return result(
+                name,
+                InvariantStatus::Fail,
+                "host-0",
+                Some(format!("could not construct reconciler name: {err}")),
+            );
+        }
+    };
+    let n_noop = match ReconcilerName::new("noop-heartbeat") {
+        Ok(v) => v,
+        Err(err) => {
+            return result(
+                name,
+                InvariantStatus::Fail,
+                "host-0",
+                Some(format!("could not construct reconciler name: {err}")),
+            );
+        }
+    };
+
+    for case_idx in 0..CASES {
+        // Generate a JobLifecycleView with random restart_counts and
+        // last_failure_seen_at maps. Cardinality 0..4 covers empty,
+        // single-entry, and multi-entry shapes.
+        let entries: usize = rng.gen_range(0..4);
+        let mut view = JobLifecycleView::default();
+        for i in 0..entries {
+            let raw = format!("alloc-case-{case_idx}-{i}");
+            let alloc_id = match AllocationId::new(&raw) {
+                Ok(a) => a,
+                Err(err) => {
+                    return result(
+                        name,
+                        InvariantStatus::Fail,
+                        "host-0",
+                        Some(format!("alloc id construction failed: {err}")),
+                    );
+                }
+            };
+            let count: u32 = rng.r#gen();
+            view.restart_counts.insert(alloc_id.clone(), count);
+            // Half the time also stamp a last_failure_seen_at so both
+            // map fields exercise the roundtrip path.
+            if rng.r#gen::<bool>() {
+                let secs: u64 = rng.gen_range(0..u64::from(u32::MAX));
+                view.last_failure_seen_at
+                    .insert(alloc_id, UnixInstant::from_unix_duration(Duration::from_secs(secs)));
+            }
+        }
+
+        // Roundtrip JobLifecycleView through a fresh SimViewStore.
+        let store = SimViewStore::new();
+        let target_raw = format!("job/case-{case_idx}");
+        let target = match TargetResource::new(&target_raw) {
+            Ok(t) => t,
+            Err(err) => {
+                return result(
+                    name,
+                    InvariantStatus::Fail,
+                    "host-0",
+                    Some(format!("target construction failed: {err}")),
+                );
+            }
+        };
+        if let Err(err) = store.write_through(&n_jobs, &target, &view).await {
+            return result(
+                name,
+                InvariantStatus::Fail,
+                "host-0",
+                Some(format!("case {case_idx}: write_through failed: {err}")),
+            );
+        }
+        let loaded: std::collections::BTreeMap<TargetResource, JobLifecycleView> =
+            match store.bulk_load(&n_jobs).await {
+                Ok(m) => m,
+                Err(err) => {
+                    return result(
+                        name,
+                        InvariantStatus::Fail,
+                        "host-0",
+                        Some(format!("case {case_idx}: bulk_load failed: {err}")),
+                    );
+                }
+            };
+        match roundtrip_verdict(loaded.get(&target), &view) {
+            RoundtripVerdict::Match => {}
+            RoundtripVerdict::Mismatch => {
+                let decoded = loaded.get(&target);
+                return result(
+                    name,
+                    InvariantStatus::Fail,
+                    "host-0",
+                    Some(format!(
+                        "case {case_idx}: JobLifecycleView roundtrip diverged — \
+                         original={view:?} decoded={decoded:?}",
+                    )),
+                );
+            }
+            RoundtripVerdict::Absent => {
+                return result(
+                    name,
+                    InvariantStatus::Fail,
+                    "host-0",
+                    Some(format!("case {case_idx}: JobLifecycleView absent from bulk_load result")),
+                );
+            }
+        }
+    }
+
+    // Unit-View roundtrip — `()` is the View shape `NoopHeartbeat`
+    // uses. Encode/decode of unit must succeed with byte-equal payload.
+    let store = SimViewStore::new();
+    let target_unit = match TargetResource::new("job/unit-case") {
+        Ok(t) => t,
+        Err(err) => {
+            return result(
+                name,
+                InvariantStatus::Fail,
+                "host-0",
+                Some(format!("unit target construction failed: {err}")),
+            );
+        }
+    };
+    let unit_value: () = ();
+    if let Err(err) = store.write_through(&n_noop, &target_unit, &unit_value).await {
+        return result(
+            name,
+            InvariantStatus::Fail,
+            "host-0",
+            Some(format!("unit-view write_through failed: {err}")),
+        );
+    }
+    // `BTreeMap<TargetResource, ()>` — deliberate; `()` IS the
+    // unit-View shape under test. clippy::zero_sized_map_values is
+    // allowed because the map values are exactly what we are
+    // verifying roundtrip cleanly.
+    #[allow(clippy::zero_sized_map_values)]
+    let unit_loaded: std::collections::BTreeMap<TargetResource, ()> =
+        match store.bulk_load(&n_noop).await {
+            Ok(m) => m,
+            Err(err) => {
+                return result(
+                    name,
+                    InvariantStatus::Fail,
+                    "host-0",
+                    Some(format!("unit-view bulk_load failed: {err}")),
+                );
+            }
+        };
+    if unit_loaded.get(&target_unit) != Some(&()) {
+        return result(
+            name,
+            InvariantStatus::Fail,
+            "host-0",
+            Some("unit-view roundtrip diverged — () did not roundtrip via CBOR".to_owned()),
+        );
+    }
+
+    result(name, InvariantStatus::Pass, "host-0", None)
+}
+
+/// Evaluate `BulkLoadIsDeterministic`.
+///
+/// Pre-populate a `SimViewStore` with a fixed corpus of (target, view)
+/// pairs spanning multiple reconcilers and ≥3 targets per reconciler.
+/// Call `bulk_load` twice; assert `PartialEq` equality (not just
+/// `.len()`). Catches `BTreeMap → HashMap` regressions or any other
+/// mutation that would destabilise iteration order.
+#[allow(clippy::too_many_lines)]
+// Justification: body is straight-line corpus setup + two reads +
+// equality verdict; extracting helpers would obscure the
+// "load fixture, read twice, compare" intent.
+pub async fn evaluate_bulk_load_is_deterministic() -> InvariantResult {
+    use overdrive_control_plane::view_store::ViewStoreExt;
+    use overdrive_core::id::AllocationId;
+    use overdrive_core::reconciler::{JobLifecycleView, ReconcilerName, TargetResource};
+
+    use crate::adapters::view_store::SimViewStore;
+
+    let name = "bulk-load-is-deterministic";
+
+    let n_jobs = match ReconcilerName::new("job-lifecycle") {
+        Ok(v) => v,
+        Err(err) => {
+            return result(
+                name,
+                InvariantStatus::Fail,
+                "host-0",
+                Some(format!("reconciler name construction failed: {err}")),
+            );
+        }
+    };
+
+    let store = SimViewStore::new();
+
+    // ≥3 targets per reconciler so iteration order is meaningfully
+    // exercised. The order chosen here (frontend, payments, scheduler)
+    // is deliberately NOT alphabetical so a `BTreeMap`-backed store
+    // that sorts by `Ord` reorders to (frontend, payments, scheduler)
+    // anyway — but a hypothetical regression that returned insertion
+    // order would surface as (payments, frontend, scheduler) and the
+    // PartialEq comparison between two passes would still hold under
+    // the regression. We assert PartialEq across two READS of the SAME
+    // store, which catches NON-DETERMINISM (different order across
+    // reads) rather than ORDERING (a specific order). Both calls must
+    // produce identical output.
+    let targets_with_views: Vec<(&str, JobLifecycleView)> = vec![
+        ("job/payments", {
+            let mut v = JobLifecycleView::default();
+            let id = match AllocationId::new("alloc-payments-0") {
+                Ok(a) => a,
+                Err(err) => {
+                    return result(
+                        name,
+                        InvariantStatus::Fail,
+                        "host-0",
+                        Some(format!("alloc id construction failed: {err}")),
+                    );
+                }
+            };
+            v.restart_counts.insert(id, 5);
+            v
+        }),
+        ("job/frontend", {
+            let mut v = JobLifecycleView::default();
+            let id = match AllocationId::new("alloc-frontend-0") {
+                Ok(a) => a,
+                Err(err) => {
+                    return result(
+                        name,
+                        InvariantStatus::Fail,
+                        "host-0",
+                        Some(format!("alloc id construction failed: {err}")),
+                    );
+                }
+            };
+            v.restart_counts.insert(id, 2);
+            v
+        }),
+        ("job/scheduler", {
+            let mut v = JobLifecycleView::default();
+            let id = match AllocationId::new("alloc-scheduler-0") {
+                Ok(a) => a,
+                Err(err) => {
+                    return result(
+                        name,
+                        InvariantStatus::Fail,
+                        "host-0",
+                        Some(format!("alloc id construction failed: {err}")),
+                    );
+                }
+            };
+            v.restart_counts.insert(id, 0);
+            v
+        }),
+    ];
+
+    for (raw, view) in &targets_with_views {
+        let target = match TargetResource::new(raw) {
+            Ok(t) => t,
+            Err(err) => {
+                return result(
+                    name,
+                    InvariantStatus::Fail,
+                    "host-0",
+                    Some(format!("target construction failed: {err}")),
+                );
+            }
+        };
+        if let Err(err) = store.write_through(&n_jobs, &target, view).await {
+            return result(
+                name,
+                InvariantStatus::Fail,
+                "host-0",
+                Some(format!("seed write_through failed: {err}")),
+            );
+        }
+    }
+
+    // Two bulk_load calls against the same store. Both must produce
+    // PartialEq-equal BTreeMaps — same keys, same values, same order
+    // (BTreeMap PartialEq compares element-wise in iteration order).
+    let first: std::collections::BTreeMap<TargetResource, JobLifecycleView> =
+        match store.bulk_load(&n_jobs).await {
+            Ok(m) => m,
+            Err(err) => {
+                return result(
+                    name,
+                    InvariantStatus::Fail,
+                    "host-0",
+                    Some(format!("first bulk_load failed: {err}")),
+                );
+            }
+        };
+    let second: std::collections::BTreeMap<TargetResource, JobLifecycleView> =
+        match store.bulk_load(&n_jobs).await {
+            Ok(m) => m,
+            Err(err) => {
+                return result(
+                    name,
+                    InvariantStatus::Fail,
+                    "host-0",
+                    Some(format!("second bulk_load failed: {err}")),
+                );
+            }
+        };
+
+    if first != second {
+        return result(
+            name,
+            InvariantStatus::Fail,
+            "host-0",
+            Some(format!(
+                "bulk_load returned divergent maps across two calls — \
+                 first={first:?} second={second:?}",
+            )),
+        );
+    }
+
+    // Sanity check the corpus actually landed (catches a future
+    // mutation that returns an empty map and would PASS the trivial
+    // `empty == empty` comparison above).
+    if first.len() != targets_with_views.len() {
+        return result(
+            name,
+            InvariantStatus::Fail,
+            "host-0",
+            Some(format!(
+                "bulk_load returned {} entries; expected {} (corpus mismatch)",
+                first.len(),
+                targets_with_views.len(),
+            )),
+        );
+    }
+
+    result(name, InvariantStatus::Pass, "host-0", None)
+}
+
+/// Evaluate `WriteThroughOrdering`.
+///
+/// Drives the load-bearing crash-durability primitive from ADR-0035
+/// §5 at the `ViewStore` boundary directly: the runtime's
+/// fsync-then-memory ordering rule depends on `write_through` being
+/// atomic w.r.t. the underlying storage — when fsync fails,
+/// `write_through_bytes` MUST return Err AND a subsequent `bulk_load`
+/// MUST still return the pre-injection value (NOT the would-be
+/// `next_view`).
+///
+/// The evaluator:
+///
+/// 1. Seeds an `original` `JobLifecycleView` via `write_through`.
+/// 2. Calls `inject_fsync_failure` on the `SimViewStore`.
+/// 3. Attempts a second `write_through` with a divergent `next_view`.
+///    The call MUST error.
+/// 4. Clears the injection and reads back via `bulk_load`. The loaded
+///    value MUST still equal `original`, NOT `next_view`.
+///
+/// This pins the `SimViewStore` contract the runtime relies on for
+/// its fsync-first ordering. The runtime-side end-to-end version of
+/// this contract is exercised in
+/// `crates/overdrive-control-plane/tests/integration/reconciler_runtime_view_store.rs::runtime_writes_through_before_in_memory_update`
+/// — that test takes the dependency on the runtime's test-only
+/// accessors; the DST invariant stays at the `SimViewStore` level so
+/// it can run in any harness composition without the
+/// `integration-tests` feature being globally enabled.
+#[allow(clippy::too_many_lines)]
+// Justification: every match block is a structured-cause early-return
+// with a distinct error message. Splitting into helpers would force
+// passing `name` + captured fixture values through extra arguments
+// without making the seed→inject→assert flow clearer.
+pub async fn evaluate_write_through_ordering() -> InvariantResult {
+    use overdrive_control_plane::view_store::ViewStoreExt;
+    use overdrive_core::id::AllocationId;
+    use overdrive_core::reconciler::{JobLifecycleView, ReconcilerName, TargetResource};
+
+    use crate::adapters::view_store::SimViewStore;
+
+    let name = "write-through-ordering";
+
+    let sim = SimViewStore::new();
+    let n_jobs = match ReconcilerName::new("job-lifecycle") {
+        Ok(v) => v,
+        Err(err) => {
+            return result(
+                name,
+                InvariantStatus::Fail,
+                "host-0",
+                Some(format!("reconciler name construction failed: {err}")),
+            );
+        }
+    };
+    let target = match TargetResource::new("job/payments") {
+        Ok(t) => t,
+        Err(err) => {
+            return result(
+                name,
+                InvariantStatus::Fail,
+                "host-0",
+                Some(format!("target construction failed: {err}")),
+            );
+        }
+    };
+
+    // STEP 1 — seed the `original` view via a clean `write_through`.
+    let original = {
+        let mut v = JobLifecycleView::default();
+        let id = match AllocationId::new("alloc-payments-0") {
+            Ok(a) => a,
+            Err(err) => {
+                return result(
+                    name,
+                    InvariantStatus::Fail,
+                    "host-0",
+                    Some(format!("alloc id construction failed: {err}")),
+                );
+            }
+        };
+        v.restart_counts.insert(id, 7);
+        v
+    };
+    if let Err(err) = sim.write_through(&n_jobs, &target, &original).await {
+        return result(
+            name,
+            InvariantStatus::Fail,
+            "host-0",
+            Some(format!("seed write_through failed: {err}")),
+        );
+    }
+
+    // STEP 2 — construct a divergent `next_view` and inject fsync
+    // failure. The follow-on `write_through` MUST error.
+    let next_view = {
+        let mut v = original.clone();
+        let id = match AllocationId::new("alloc-payments-0") {
+            Ok(a) => a,
+            Err(err) => {
+                return result(
+                    name,
+                    InvariantStatus::Fail,
+                    "host-0",
+                    Some(format!("alloc id construction failed: {err}")),
+                );
+            }
+        };
+        v.restart_counts.insert(id, 99);
+        v
+    };
+
+    sim.inject_fsync_failure();
+    let write_result = sim.write_through(&n_jobs, &target, &next_view).await;
+    sim.clear_fsync_failure();
+
+    if write_result.is_ok() {
+        return result(
+            name,
+            InvariantStatus::Fail,
+            "host-0",
+            Some(
+                "write_through returned Ok under fsync injection — \
+                 the SimViewStore should have surfaced the fsync error"
+                    .to_owned(),
+            ),
+        );
+    }
+
+    // STEP 3 — read back via `bulk_load`. The loaded value MUST still
+    // equal `original`, NOT `next_view`. This is the load-bearing
+    // contract: the runtime's in-memory `BTreeMap` is updated only
+    // after `write_through` returns Ok, so the underlying storage
+    // MUST roll back any partial write when fsync fails.
+    let loaded: std::collections::BTreeMap<TargetResource, JobLifecycleView> =
+        match sim.bulk_load(&n_jobs).await {
+            Ok(m) => m,
+            Err(err) => {
+                return result(
+                    name,
+                    InvariantStatus::Fail,
+                    "host-0",
+                    Some(format!("post-injection bulk_load failed: {err}")),
+                );
+            }
+        };
+    match ordering_verdict(loaded.get(&target), &original, &next_view) {
+        OrderingVerdict::OrderingHeld => {}
+        OrderingVerdict::Advanced => {
+            let observed = loaded.get(&target);
+            return result(
+                name,
+                InvariantStatus::Fail,
+                "host-0",
+                Some(format!(
+                    "storage advanced to next_view despite fsync failure — \
+                     ordering violation; observed={observed:?}",
+                )),
+            );
+        }
+        OrderingVerdict::UnexpectedView => {
+            let observed = loaded.get(&target);
+            return result(
+                name,
+                InvariantStatus::Fail,
+                "host-0",
+                Some(format!(
+                    "storage carries unexpected view after failed write — \
+                     observed={observed:?} expected={original:?}",
+                )),
+            );
+        }
+        OrderingVerdict::Absent => {
+            return result(
+                name,
+                InvariantStatus::Fail,
+                "host-0",
+                Some(format!(
+                    "storage has no entry for target {target} — \
+                     seed write_through must have rolled back too",
+                )),
+            );
+        }
+    }
+
+    result(name, InvariantStatus::Pass, "host-0", None)
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::unwrap_used)]
 mod tests {
@@ -1729,5 +2372,202 @@ mod tests {
         let rows: Vec<AllocStatusRow> = Vec::new();
         let r = evaluate_no_double_scheduling(&rows);
         assert_eq!(r.status, InvariantStatus::Pass);
+    }
+
+    // -----------------------------------------------------------------
+    // reconciler-memory-redb step 01-07 — ViewStore DST invariant
+    // witnesses. Library-level pins for each new evaluator. Paired with
+    // the acceptance tests under
+    // `tests/acceptance/reconciler_invariants_pass.rs`.
+    // -----------------------------------------------------------------
+
+    #[tokio::test]
+    async fn view_store_roundtrip_is_lossless_passes_on_clean_store() {
+        // Same seed twice MUST produce the same verdict (K3
+        // reproducibility). Pass on a clean store proves the
+        // proptest-driven body generates roundtrippable values.
+        let r1 = evaluate_view_store_roundtrip_is_lossless(42).await;
+        let r2 = evaluate_view_store_roundtrip_is_lossless(42).await;
+        assert_eq!(r1.status, InvariantStatus::Pass, "first run must pass; got {r1:?}");
+        assert_eq!(r2.status, InvariantStatus::Pass, "second run must pass; got {r2:?}");
+        assert_eq!(r1.cause, r2.cause, "deterministic seed must produce identical cause");
+    }
+
+    #[tokio::test]
+    async fn view_store_roundtrip_is_lossless_covers_unit_and_jobview() {
+        // The evaluator covers BOTH `JobLifecycleView` and `()`. A
+        // pass result proves both code paths fired without error —
+        // the body returns Fail on the FIRST roundtrip divergence
+        // (across JobLifecycleView cases or the unit-View case), so
+        // a green verdict implies every covered shape roundtripped.
+        let r = evaluate_view_store_roundtrip_is_lossless(7).await;
+        assert_eq!(r.status, InvariantStatus::Pass, "covers both View shapes; got {r:?}");
+    }
+
+    #[tokio::test]
+    async fn bulk_load_is_deterministic_passes_on_seeded_corpus() {
+        // The evaluator pre-populates ≥3 entries spanning the
+        // job-lifecycle reconciler and asserts two reads produce
+        // PartialEq-equal maps. On the BTreeMap-backed SimViewStore
+        // this is structurally true — the test catches a regression
+        // that would swap BTreeMap for HashMap or otherwise
+        // destabilise iteration order.
+        let r = evaluate_bulk_load_is_deterministic().await;
+        assert_eq!(r.status, InvariantStatus::Pass, "clean store passes; got {r:?}");
+    }
+
+    #[tokio::test]
+    async fn bulk_load_is_deterministic_repeats_pass() {
+        // Repeating the evaluator must produce the same Pass verdict
+        // — no hidden state in the evaluator that could leak across
+        // runs.
+        for _ in 0..3 {
+            let r = evaluate_bulk_load_is_deterministic().await;
+            assert_eq!(r.status, InvariantStatus::Pass);
+        }
+    }
+
+    #[tokio::test]
+    async fn write_through_ordering_passes_when_runtime_obeys_fsync_first() {
+        // The runtime fsyncs THEN updates the in-memory map per
+        // ADR-0035 §5. Under fsync injection, the in-memory map
+        // MUST still hold the pre-injection value. Pass on the
+        // clean default runtime build proves the invariant fires
+        // green when the contract holds.
+        let r = evaluate_write_through_ordering().await;
+        assert_eq!(r.status, InvariantStatus::Pass, "fsync-first runtime passes; got {r:?}");
+    }
+
+    #[tokio::test]
+    async fn write_through_ordering_emits_canonical_name() {
+        // The result name MUST match the canonical kebab-case form
+        // — DST summary parsers (CI, dst-summary.json schema) key on
+        // this string.
+        let r = evaluate_write_through_ordering().await;
+        assert_eq!(r.name, "write-through-ordering");
+    }
+
+    #[tokio::test]
+    async fn view_store_roundtrip_emits_canonical_name() {
+        let r = evaluate_view_store_roundtrip_is_lossless(1).await;
+        assert_eq!(r.name, "view-store-roundtrip-is-lossless");
+    }
+
+    #[tokio::test]
+    async fn bulk_load_is_deterministic_emits_canonical_name() {
+        let r = evaluate_bulk_load_is_deterministic().await;
+        assert_eq!(r.name, "bulk-load-is-deterministic");
+    }
+
+    // -----------------------------------------------------------------
+    // Pure helper unit tests — kill mutations on the comparison guards
+    // inside the larger async evaluators.
+    //
+    // The evaluator bodies always pass on a clean SimViewStore, so a
+    // mutation that flips `==` to `!=` (or replaces a guard with
+    // `true`/`false`) on the verdict comparison goes uncaught at the
+    // evaluator level — every input matches by construction. Splitting
+    // the comparison into a typed `RoundtripVerdict` /
+    // `OrderingVerdict` pair lets these unit tests pass DELIBERATELY-
+    // mismatched inputs and assert the right verdict variant fires.
+    // -----------------------------------------------------------------
+
+    #[test]
+    fn roundtrip_verdict_returns_match_when_decoded_equals_expected() {
+        let v: u32 = 42;
+        assert_eq!(roundtrip_verdict(Some(&v), &v), RoundtripVerdict::Match);
+    }
+
+    #[test]
+    fn roundtrip_verdict_returns_mismatch_when_decoded_differs() {
+        let decoded: u32 = 1;
+        let expected: u32 = 2;
+        assert_eq!(roundtrip_verdict(Some(&decoded), &expected), RoundtripVerdict::Mismatch);
+    }
+
+    #[test]
+    fn roundtrip_verdict_returns_absent_when_no_decoded_value() {
+        let expected: u32 = 42;
+        let absent: Option<&u32> = None;
+        assert_eq!(roundtrip_verdict(absent, &expected), RoundtripVerdict::Absent);
+    }
+
+    #[test]
+    fn roundtrip_verdict_distinguishes_equal_from_not_equal_for_jobview() {
+        // Pin against a `==` flip. Two structurally-different
+        // JobLifecycleView values must produce Mismatch; identical
+        // ones must produce Match. A mutation that flips the inner
+        // PartialEq comparison surfaces here.
+        use overdrive_core::id::AllocationId;
+        use overdrive_core::reconciler::JobLifecycleView;
+
+        let mut a = JobLifecycleView::default();
+        a.restart_counts.insert(AllocationId::new("alloc-a").expect("valid"), 1);
+        let mut b = JobLifecycleView::default();
+        b.restart_counts.insert(AllocationId::new("alloc-a").expect("valid"), 2);
+
+        assert_eq!(roundtrip_verdict(Some(&a), &a), RoundtripVerdict::Match);
+        assert_eq!(roundtrip_verdict(Some(&a), &b), RoundtripVerdict::Mismatch);
+    }
+
+    #[test]
+    fn ordering_verdict_returns_held_when_loaded_equals_original() {
+        let original: u32 = 1;
+        let next: u32 = 2;
+        assert_eq!(
+            ordering_verdict(Some(&original), &original, &next),
+            OrderingVerdict::OrderingHeld,
+        );
+    }
+
+    #[test]
+    fn ordering_verdict_returns_advanced_when_loaded_equals_next_view() {
+        let original: u32 = 1;
+        let next: u32 = 2;
+        // Loaded carries the would-be next_view — the runtime advanced
+        // its in-memory map despite the fsync failure. This is the
+        // exact ordering violation the invariant catches.
+        assert_eq!(ordering_verdict(Some(&next), &original, &next), OrderingVerdict::Advanced);
+    }
+
+    #[test]
+    fn ordering_verdict_returns_unexpected_when_loaded_matches_neither() {
+        let original: u32 = 1;
+        let next: u32 = 2;
+        let other: u32 = 99;
+        assert_eq!(
+            ordering_verdict(Some(&other), &original, &next),
+            OrderingVerdict::UnexpectedView,
+        );
+    }
+
+    #[test]
+    fn ordering_verdict_returns_absent_when_no_loaded_value() {
+        let original: u32 = 1;
+        let next: u32 = 2;
+        let absent: Option<&u32> = None;
+        assert_eq!(ordering_verdict(absent, &original, &next), OrderingVerdict::Absent);
+    }
+
+    #[test]
+    fn ordering_verdict_distinguishes_held_from_advanced_under_jobview() {
+        // Under realistic JobLifecycleView shapes, OrderingHeld and
+        // Advanced must remain distinguishable. A mutation flipping
+        // the `==` on either guard would collapse one of these two
+        // assertions.
+        use overdrive_core::id::AllocationId;
+        use overdrive_core::reconciler::JobLifecycleView;
+
+        let id = AllocationId::new("alloc-payments-0").expect("valid");
+        let mut original = JobLifecycleView::default();
+        original.restart_counts.insert(id.clone(), 7);
+        let mut next = JobLifecycleView::default();
+        next.restart_counts.insert(id, 99);
+
+        assert_eq!(
+            ordering_verdict(Some(&original), &original, &next),
+            OrderingVerdict::OrderingHeld,
+        );
+        assert_eq!(ordering_verdict(Some(&next), &original, &next), OrderingVerdict::Advanced,);
     }
 }

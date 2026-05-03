@@ -52,6 +52,14 @@ mod acceptance {
     // Pending-no-capacity renders an explicit reason row, never
     // `Allocations: 0`.
     mod row_body_conversions;
+    // `runtime_convergence_loop.rs` consumes the `*_for_test`
+    // accessors on `ReconcilerRuntime` that are gated behind
+    // `#[cfg(any(test, feature = "integration-tests"))]`. The
+    // accessors are visible inside the crate's own `cfg(test)` build
+    // but NOT inside the integration-test binary's view of the lib
+    // crate (cfg(test) does not propagate to dependencies). Gate the
+    // module to match.
+    #[cfg(feature = "integration-tests")]
     mod runtime_convergence_loop;
     mod runtime_registers_noop_heartbeat;
     mod submit_job_idempotency;
