@@ -156,6 +156,7 @@ use crate::aggregate::{Exec, Job, Node, WorkloadDriver};
 use crate::id::{AllocationId, CorrelationKey, JobId, NodeId};
 use crate::traits::driver::{AllocationSpec, Resources};
 use crate::traits::observation_store::{AllocState, AllocStatusRow};
+use crate::transition_reason::{StoppedBy, TerminalCondition};
 use crate::wall_clock::UnixInstant;
 
 // ---------------------------------------------------------------------------
@@ -432,10 +433,27 @@ pub enum Action {
     /// Stop a Running allocation. Emitted by the `JobLifecycle`
     /// reconciler when desired state is "stopped" (set by
     /// `IntentKey::for_job_stop`).
+    ///
+    /// Per ADR-0037 §4 the variant carries a typed
+    /// [`TerminalCondition`] flag the action shim writes onto
+    /// `AllocStatusRow.terminal` AND echoes onto `LifecycleEvent`.
+    /// The reconciler is the *single source* of every terminal claim;
+    /// emission sites outside a reconciler tick (the action-shim
+    /// heartbeat, the exit observer) emit `terminal: None`. When a
+    /// stop is operator-initiated (`desired.desired_to_stop` set
+    /// by `IntentKey::for_job_stop`), the reconciler stamps
+    /// `Some(TerminalCondition::Stopped { by: StoppedBy::Operator })`
+    /// here — the by-source is already known from the desired state,
+    /// so the action shim never re-derives it.
     StopAllocation {
         /// Target allocation. The action shim looks up the
         /// `AllocationHandle` via observation store.
         alloc_id: AllocationId,
+        /// Reconciler-decided terminal claim per ADR-0037 §4. `None`
+        /// when the stop is non-terminal (Phase 2+ cluster-driven
+        /// drains may end up here); `Some(Stopped { by: Operator })`
+        /// when the stop is operator-initiated.
+        terminal: Option<TerminalCondition>,
     },
     /// Restart an allocation — semantically a `StopAllocation`
     /// followed by a fresh `StartAllocation` with the same `alloc_id`.
@@ -456,6 +474,36 @@ pub enum Action {
         /// mirrors [`Action::StartAllocation::spec`]. The action shim
         /// passes this directly to `Driver::start`.
         spec: AllocationSpec,
+    },
+
+    /// Finalize a failed allocation as terminal — the synthetic
+    /// Failed-row action per ADR-0023 / ADR-0037 §4.
+    ///
+    /// Emitted by the `JobLifecycle` reconciler at the deciding tick
+    /// when `attempts >= RESTART_BACKOFF_CEILING`: the reconciler has
+    /// concluded the allocation will not be restarted and the row
+    /// should be flipped to terminal-Failed. The action shim consumes
+    /// this in step 02-02 to write `AllocStatusRow { state: Failed,
+    /// terminal: Some(BackoffExhausted { attempts }), .. }` and to
+    /// emit the matching `LifecycleEvent.terminal` broadcast — both
+    /// surfaces carry the same value from the same dispatch site,
+    /// per ADR-0037 §4.
+    ///
+    /// `terminal` is always `Some(...)` on this variant by
+    /// construction (a `None` here would mean "finalize as failed
+    /// but make no terminal claim", which is structurally
+    /// nonsensical). The `Option` type is preserved for
+    /// shape-uniformity with `StopAllocation` and to leave the door
+    /// open for future non-`BackoffExhausted` finalisation paths
+    /// (e.g. a Phase-2 right-sizing cap).
+    FinalizeFailed {
+        /// Allocation to finalize. The action shim writes the
+        /// terminal Failed row against this id.
+        alloc_id: AllocationId,
+        /// Reconciler-decided terminal claim. Always `Some(...)` on
+        /// emission today; the `Option` shape mirrors
+        /// [`Action::StopAllocation::terminal`].
+        terminal: Option<TerminalCondition>,
     },
 }
 
@@ -948,11 +996,22 @@ impl Reconciler for JobLifecycle {
         // observation-timestamp map is sufficient — and the historical
         // record is preserved.
         if desired.desired_to_stop && desired.job.is_some() {
+            // Per ADR-0037 §4: an operator-initiated stop is a
+            // terminal moment. The reconciler stamps the
+            // by-source onto every emitted StopAllocation — the
+            // action shim writes the same value onto
+            // AllocStatusRow.terminal AND echoes onto
+            // LifecycleEvent.terminal in step 02-02.
+            let operator_stop_terminal =
+                Some(TerminalCondition::Stopped { by: StoppedBy::Operator });
             let stop_actions: Vec<Action> = actual
                 .allocations
                 .values()
                 .filter(|r| r.state == AllocState::Running)
-                .map(|r| Action::StopAllocation { alloc_id: r.alloc_id.clone() })
+                .map(|r| Action::StopAllocation {
+                    alloc_id: r.alloc_id.clone(),
+                    terminal: operator_stop_terminal.clone(),
+                })
                 .collect();
             // When nothing is Running, the stop is complete.
             // Clear backoff state so view_has_backoff_pending does not re-enqueue.
@@ -1044,9 +1103,34 @@ impl Reconciler for JobLifecycle {
                     // against `view.restart_counts`.
                     let attempts = view.restart_counts.get(&failed.alloc_id).copied().unwrap_or(0);
                     if attempts >= RESTART_BACKOFF_CEILING {
-                        // Backoff exhausted — alloc stays Terminated,
-                        // no further actions emitted.
-                        return (Vec::new(), view.clone());
+                        // Idempotency guard: if the row already carries
+                        // a BackoffExhausted terminal claim the
+                        // reconciler has already finalised this alloc on
+                        // a prior tick — do not re-emit. Without this
+                        // guard the action shim's level-triggered
+                        // re-enqueue would emit FinalizeFailed every
+                        // tick forever once the alloc reached ceiling.
+                        if matches!(
+                            failed.terminal,
+                            Some(TerminalCondition::BackoffExhausted { .. })
+                        ) {
+                            return (Vec::new(), view.clone());
+                        }
+                        // Backoff exhausted — emit the synthetic
+                        // FinalizeFailed action carrying the typed
+                        // terminal claim per ADR-0037 §4. The action
+                        // shim consumes this in step 02-02 to write
+                        // AllocStatusRow.terminal AND echo onto
+                        // LifecycleEvent.terminal — both surfaces
+                        // populated from the same value at the same
+                        // dispatch site (drift is structurally
+                        // impossible). The reconciler is the single
+                        // source of every terminal claim.
+                        let action = Action::FinalizeFailed {
+                            alloc_id: failed.alloc_id.clone(),
+                            terminal: Some(TerminalCondition::BackoffExhausted { attempts }),
+                        };
+                        return (vec![action], view.clone());
                     }
                     // Persist-inputs read site (issue #141): recompute
                     // the backoff deadline on every tick from the

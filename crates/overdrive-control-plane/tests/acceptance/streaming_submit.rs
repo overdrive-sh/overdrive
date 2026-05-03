@@ -840,7 +840,10 @@ async fn s_lt_01_lifecycle_transition_from_reflects_prior_alloc_state() {
     };
 
     dispatch(
-        vec![Action::StopAllocation { alloc_id: alloc_id.clone() }],
+        // ADR-0037 §4: emission sites outside a reconciler tick (here, a
+        // direct test-bench dispatch) emit `terminal: None` — the
+        // reconciler is the single source of every terminal claim.
+        vec![Action::StopAllocation { alloc_id: alloc_id.clone(), terminal: None }],
         state.driver.as_ref(),
         state.obs.as_ref(),
         &state.lifecycle_events,

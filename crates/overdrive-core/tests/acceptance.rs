@@ -86,4 +86,13 @@ mod acceptance {
     // bounds, no `migrate` / `hydrate` / `persist`). Per ADR-0035 §1
     // and ADR-0036.
     mod collapsed_reconciler_trait;
+
+    // reconciler-memory-redb step 02-01 — `JobLifecycle::reconcile`
+    // stamps `TerminalCondition` on the lifecycle-concluding `Action`
+    // variants (`StopAllocation`, `FinalizeFailed`). Per ADR-0037 §4.
+    // Property test asserts the terminal-decision logic is a pure
+    // function of `(view.restart_counts, view.last_failure_seen_at,
+    // desired.desired_to_stop)` against the fixed JobLifecycle-internal
+    // ceiling.
+    mod job_lifecycle_terminal_decision;
 }

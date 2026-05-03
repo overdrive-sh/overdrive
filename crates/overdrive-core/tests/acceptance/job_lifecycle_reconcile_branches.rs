@@ -273,7 +273,7 @@ fn stop_branch_emits_one_stop_per_running_alloc_only() {
     // Under `==`: exactly one StopAllocation, naming the Running alloc.
     assert_eq!(actions.len(), 1, "must emit exactly one StopAllocation; got {actions:?}");
     match &actions[0] {
-        Action::StopAllocation { alloc_id } => {
+        Action::StopAllocation { alloc_id, .. } => {
             assert_eq!(
                 alloc_id.as_str(),
                 "alloc-payments-0",
@@ -391,27 +391,44 @@ fn restart_emitted_when_attempts_below_ceiling() {
 
 #[test]
 fn restart_suppressed_at_exact_ceiling() {
-    // attempts == ceiling: under `>=`, true → suppressed (no
-    // actions). Under `<`, false → restart emitted. The two are
-    // observable.
+    // attempts == ceiling: under `>=`, true → restart suppressed and
+    // a `FinalizeFailed` synthetic action carrying the typed
+    // `BackoffExhausted` terminal claim is emitted (per ADR-0037 §4
+    // — the reconciler is the single source of every terminal claim;
+    // this is the "synthetic Failed-row action shape" reference).
+    // Under `<`, false → RestartAllocation emitted instead. The two
+    // are observable.
     let actions = run_with_failed_alloc_and_attempts(RESTART_BACKOFF_CEILING);
+    assert_eq!(
+        actions.len(),
+        1,
+        "attempts == ceiling must emit one FinalizeFailed; got {actions:?}",
+    );
     assert!(
-        actions.is_empty(),
-        "attempts == ceiling must suppress RestartAllocation; got {actions:?}",
+        matches!(actions[0], Action::FinalizeFailed { .. }),
+        "first action must be FinalizeFailed; got {:?}",
+        actions[0],
     );
 }
 
 #[test]
 fn restart_suppressed_above_ceiling() {
-    // attempts == ceiling + 1: under `>=`, true → suppressed. Under
-    // `<`, false → restart emitted. (This third sample is redundant
+    // attempts == ceiling + 1: under `>=`, true → restart suppressed
+    // and FinalizeFailed emitted (mirrors `==ceiling`). Under `<`,
+    // false → RestartAllocation. (This third sample is redundant
     // with the at-ceiling test for distinguishing `>=` vs `<` — it
     // is included as the explicit `=ceiling+1` boundary called out
     // in the agenda.)
     let actions = run_with_failed_alloc_and_attempts(RESTART_BACKOFF_CEILING + 1);
+    assert_eq!(
+        actions.len(),
+        1,
+        "attempts > ceiling must emit one FinalizeFailed; got {actions:?}",
+    );
     assert!(
-        actions.is_empty(),
-        "attempts > ceiling must suppress RestartAllocation; got {actions:?}",
+        matches!(actions[0], Action::FinalizeFailed { .. }),
+        "first action must be FinalizeFailed; got {:?}",
+        actions[0],
     );
 }
 

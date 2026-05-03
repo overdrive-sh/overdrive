@@ -925,8 +925,26 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
 
     // Seed Failed alloc (observation) so hydrate_actual sees a Failed
     // alloc that needs restarting.
+    //
+    // Per ADR-0037 §4 the reconciler is idempotent on the row's
+    // `terminal` field: an at-ceiling Failed row that already
+    // carries `Some(BackoffExhausted)` is treated as already-finalised
+    // — `reconcile` returns `(Vec::new(), view.clone())`, and the
+    // ONLY remaining re-enqueue path is the `view_has_backoff_pending`
+    // predicate this test pins. Seeding the terminal field ensures the
+    // mutation-killing power of the test holds: the FinalizeFailed
+    // path is short-circuited so the predicate's strict-`<` boundary
+    // semantics are the load-bearing observable.
     let writer = NodeId::new("local").expect("writer node id");
     let alloc_id = AllocationId::new("alloc-payments-0").expect("valid alloc id");
+    let seeded_terminal =
+        if restart_counts_value >= overdrive_core::reconciler::RESTART_BACKOFF_CEILING {
+            Some(overdrive_core::transition_reason::TerminalCondition::BackoffExhausted {
+                attempts: restart_counts_value,
+            })
+        } else {
+            None
+        };
     let alloc_row = AllocStatusRow {
         alloc_id: alloc_id.clone(),
         job_id: job.id.clone(),
@@ -935,7 +953,7 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
         updated_at: LogicalTimestamp { counter: 1, writer: writer.clone() },
         reason: None,
         detail: None,
-        terminal: None,
+        terminal: seeded_terminal,
     };
     state.obs.write(ObservationRow::AllocStatus(alloc_row)).await.expect("seed Failed alloc row");
 

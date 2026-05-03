@@ -313,7 +313,19 @@ async fn dispatch_single(
         // No-op (Action::Noop), Phase 3 workflow start, and the Phase 3
         // HttpCall placeholder are all "no dispatch needed at 02-02"
         // — the action is observation-only or deferred.
-        Action::Noop | Action::StartWorkflow { .. } | Action::HttpCall { .. } => Ok(()),
+        // FinalizeFailed is a Phase 02-01 plumbing-only addition —
+        // the action variant exists so `JobLifecycle::reconcile` can
+        // emit its terminal claim per ADR-0037 §4. Step 02-02 wires
+        // this dispatch arm to write `AllocStatusRow { state: Failed,
+        // terminal: Some(BackoffExhausted), .. }` and to broadcast a
+        // matching `LifecycleEvent`. Until then the variant lands as
+        // a no-op so the downstream Phase-1 contracts (the existing
+        // backoff-exhausted obs row written by the StartRejected path)
+        // continue to fire.
+        Action::Noop
+        | Action::StartWorkflow { .. }
+        | Action::HttpCall { .. }
+        | Action::FinalizeFailed { .. } => Ok(()),
         // Start: spawn the allocation via the driver and write a
         // Running AllocStatusRow on success. On StartRejected, write
         // a `Failed` row recording the typed cause-class
@@ -429,7 +441,13 @@ async fn dispatch_single(
         // shim still records Terminated so the next tick's hydrate
         // sees the alloc gone. Per-variant error isolation: a Stop
         // failure does NOT abort dispatch of subsequent actions.
-        Action::StopAllocation { alloc_id } => {
+        // The `terminal` field carries the reconciler's typed
+        // terminal claim per ADR-0037 §4. Step 02-02 wires it onto
+        // `AllocStatusRow.terminal` and `LifecycleEvent.terminal`;
+        // this dispatch site ignores it for now but the bind keeps
+        // the pattern exhaustive and lets 02-02 swap `_` for the
+        // actual field reference without re-grepping.
+        Action::StopAllocation { alloc_id, terminal: _ } => {
             // Look up prior obs row to recover (job_id, node_id) for
             // the Terminated row we will write. If the alloc has no
             // obs row at all (e.g. the reconciler emitted Stop
