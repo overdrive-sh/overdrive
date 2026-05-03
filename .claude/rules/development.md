@@ -584,16 +584,34 @@ stream must be deterministic across seeds.
 ## Reconciler I/O
 
 **`reconcile` does not perform I/O.** The §18 contract splits the
-reconciler into two methods: async `hydrate(target, &LibsqlHandle) ->
-Result<Self::View, HydrateError>` and sync pure
+reconciler into three lifecycle methods: async `migrate(&LibsqlHandle)
+-> Result<(), HydrateError>` (DDL only, runs once at register time),
+async `hydrate(target, &LibsqlHandle) -> Result<Self::View,
+HydrateError>` (SELECT only, runs every tick), and sync pure
 `reconcile(desired, actual, &view, &tick) -> (Vec<Action>, NextView)`.
-All libSQL access lives exclusively in `hydrate`. No `.await` inside
-`reconcile`; no network, no subprocess spawn, no direct libSQL /
-IntentStore / ObservationStore write anywhere in `reconcile`.
-Wall-clock reads come from `tick.now` (a field on the
-`TickContext` parameter the runtime constructs once per evaluation),
-never `Instant::now()` / `SystemTime::now()`. This is what makes DST
-(§21) and ESR verification (§18) possible; it is not optional.
+All libSQL access lives exclusively in `migrate` (DDL) and `hydrate`
+(reads) — never in `reconcile`. No `.await` inside `reconcile`; no
+network, no subprocess spawn, no direct libSQL / IntentStore /
+ObservationStore write anywhere in `reconcile`. Wall-clock reads come
+from `tick.now` (a field on the `TickContext` parameter the runtime
+constructs once per evaluation), never `Instant::now()` /
+`SystemTime::now()`. This is what makes DST (§21) and ESR verification
+(§18) possible; it is not optional.
+
+**Schema management lives in `migrate`, never in `hydrate`.** `CREATE
+TABLE IF NOT EXISTS` and `ALTER TABLE ADD COLUMN` go in the `migrate`
+body, which the `ReconcilerRuntime` calls exactly once per reconciler
+instance at register time — before any `hydrate` or `persist` call.
+Pulling DDL off the per-tick `hydrate` hot path gives three
+properties: (1) `hydrate` stops re-parsing idempotent CREATE TABLE
+statements every tick; (2) WASM-loaded third-party reconcilers
+(whitepaper §18) get a clean module-load hook the runtime invokes
+without inspecting reconciler internals; (3) broken migrations
+surface at register time as `ControlPlaneError::Internal`, not on
+first reconcile — extends the boot-fast posture. Migrations follow
+the project's additive-only schema discipline (CLAUDE.md). There is
+no default impl: every reconciler implements `migrate` explicitly,
+including `View = ()` reconcilers that return `Ok(())`.
 
 When a reconciler needs to talk to an external service (a Restate admin
 API, an AWS account, a webhook, a custom internal service), the shape is:
@@ -605,27 +623,44 @@ async fn reconcile(&self, /* ... */) -> Vec<Action> {
     // ...
 }
 
-// Good — hydrate reads retry memory from libsql (the ONLY place this
-// reconciler author touches libsql); reconcile is sync + pure, emits
-// an HttpCall action, and returns a NextView the runtime persists.
-// The response arrives as observation on the next tick via `actual`.
-// Wall-clock comes from `tick.now_unix` (persistable UnixInstant),
-// never `Instant::now()`. The View persists *inputs* — `attempts`
-// and `last_failure_seen_at` — not the derived `next_attempt_at`
-// deadline (see § "Persist inputs, not derived state" above).
+// Good — migrate owns DDL (runs once at register); hydrate owns
+// SELECT (runs every tick — schema is already current); reconcile
+// is sync + pure, emits an HttpCall action, returns a NextView the
+// runtime persists. The response arrives as observation on the next
+// tick via `actual`. Wall-clock comes from `tick.now_unix`
+// (persistable UnixInstant), never `Instant::now()`. The View
+// persists *inputs* — `attempts` and `last_failure_seen_at` — not
+// the derived `next_attempt_at` deadline (see § "Persist inputs, not
+// derived state" above).
 impl Reconciler for RegisterReconciler {
     type View = RetryMemory;
 
     fn name(&self) -> &ReconcilerName { &self.name }
+
+    async fn migrate(&self, db: &LibsqlHandle) -> Result<(), HydrateError> {
+        // DDL only. Runs once per reconciler instance at register
+        // time, before any hydrate. Additive-only ALTER TABLE clauses
+        // land in this body as the schema evolves.
+        db.execute(
+            "CREATE TABLE IF NOT EXISTS register_memory ( \
+                 target               TEXT PRIMARY KEY, \
+                 attempts             INTEGER NOT NULL, \
+                 last_correlation     TEXT, \
+                 last_failure_seen_at INTEGER NOT NULL \
+             )",
+            &[],
+        ).await?;
+        Ok(())
+    }
 
     async fn hydrate(
         &self,
         target: &TargetResource,
         db:     &LibsqlHandle,
     ) -> Result<Self::View, HydrateError> {
-        // Free-form SQL in hydrate. Schema management
-        // (CREATE TABLE IF NOT EXISTS, ALTER TABLE ADD COLUMN) lives
-        // here too — no framework migrations Phase 1.
+        // SELECT only. Schema is current — migrate already ran at
+        // register time, so this code never branches on schema
+        // version and never issues DDL.
         let row = db.query_one(
             "SELECT attempts, last_correlation, last_failure_seen_at \
              FROM register_memory WHERE target = ?",
