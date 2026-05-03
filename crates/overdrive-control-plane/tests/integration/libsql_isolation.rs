@@ -18,7 +18,9 @@ use overdrive_control_plane::error::ControlPlaneError;
 use overdrive_control_plane::libsql_provisioner::{open_db, provision_db_path};
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_control_plane::{job_lifecycle, noop_heartbeat};
-use overdrive_core::reconciler::ReconcilerName;
+use overdrive_core::reconciler::{
+    AnyReconciler, MigrateBehavior, ReconcilerName, TestStubReconciler,
+};
 use tempfile::TempDir;
 
 fn name(raw: &str) -> ReconcilerName {
@@ -356,5 +358,86 @@ async fn register_fails_internally_when_libsql_open_rejects_path() {
     assert!(
         !runtime.registered().contains(&name("noop-heartbeat")),
         "failed register must not list the reconciler in registered()",
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Step 02-02 — `Reconciler::migrate` runs once per reconciler at register
+// time; broken migrations fail fast with `ControlPlaneError::Internal`
+// and leave no partial registry slot.
+// ---------------------------------------------------------------------------
+
+/// `ReconcilerRuntime::register` invokes `Reconciler::migrate(&handle)`
+/// IMMEDIATELY AFTER `LibsqlHandle::open` succeeds and BEFORE the
+/// registry slot is finalised. A reconciler whose `migrate` returns Err
+/// causes the register call to surface `ControlPlaneError::Internal`
+/// (same shape as eager-open failure per research §9.2 failure modes)
+/// and the registry MUST contain no partial entry — `libsql_handle`
+/// returns `None` and `registered()` does not list the failed
+/// reconciler. This is the lifecycle invariant that makes
+/// `hydrate`/`persist` safe to assume the schema is current.
+///
+/// The test injects a tiny test-local stub reconciler (not a feature
+/// flag on `JobLifecycle` / `NoopHeartbeat`) whose `migrate` returns
+/// `HydrateError::Libsql`. The stub's `hydrate` and `persist` are
+/// trivially `Ok(())` — they would never be reached anyway because the
+/// failed migrate aborts the register flow.
+#[tokio::test]
+async fn register_runs_migrate_once_per_reconciler_and_fails_fast_on_broken_migration() {
+    let tmp = TempDir::new().expect("tempdir");
+    let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("new runtime");
+
+    let stub_name = name("broken-migrate-stub");
+    let stub = AnyReconciler::TestStub(TestStubReconciler::new(
+        stub_name.clone(),
+        MigrateBehavior::FailOnce,
+    ));
+
+    let result = runtime.register(stub).await;
+
+    assert!(
+        matches!(result, Err(ControlPlaneError::Internal(_))),
+        "broken migrate must surface as ControlPlaneError::Internal, got {result:?}",
+    );
+
+    // Lifecycle invariant: a failed migrate must NOT leave a partial
+    // registry slot. The same fail-fast guarantee that `register_fails_
+    // internally_when_libsql_open_rejects_path` pins for eager-open
+    // failure must hold for eager-migrate failure.
+    assert!(
+        runtime.libsql_handle(&stub_name).is_none(),
+        "failed migrate must not insert a handle into the registry",
+    );
+    assert!(
+        !runtime.registered().contains(&stub_name),
+        "failed migrate must not list the reconciler in registered()",
+    );
+}
+
+/// Sibling positive test: a reconciler whose `migrate` returns `Ok(())`
+/// registers successfully, the registry slot is present, and
+/// `libsql_handle(&name)` returns `Some`. Pins the success path of the
+/// eager-migrate flow so a regression that swaps the success/error
+/// arms of the dispatch is caught alongside the failure path above.
+#[tokio::test]
+async fn register_with_successful_migrate_finalises_the_registry_slot() {
+    let tmp = TempDir::new().expect("tempdir");
+    let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("new runtime");
+
+    let stub_name = name("ok-migrate-stub");
+    let stub = AnyReconciler::TestStub(TestStubReconciler::new(
+        stub_name.clone(),
+        MigrateBehavior::Succeed,
+    ));
+
+    runtime.register(stub).await.expect("register stub with Ok(()) migrate");
+
+    assert!(
+        runtime.libsql_handle(&stub_name).is_some(),
+        "successful migrate must finalise the registry slot",
+    );
+    assert!(
+        runtime.registered().contains(&stub_name),
+        "successful migrate must list the reconciler in registered()",
     );
 }

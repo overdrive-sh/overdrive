@@ -32,6 +32,20 @@ fn target() -> TargetResource {
     TargetResource::new("job/payments").expect("valid target resource string")
 }
 
+/// Open a file-backed `LibsqlHandle` and run `JobLifecycle::migrate`
+/// against it — the canonical test-side ceremony that mirrors what
+/// `ReconcilerRuntime::register` does in production (issue #139 step
+/// 02-02). Tests that touch `JobLifecycle::hydrate`/`persist` directly
+/// (without going through the runtime) MUST run this first or they
+/// hit the lifecycle invariant: hydrate/persist assume `migrate`
+/// already created the schema, and a SELECT against an unmigrated DB
+/// surfaces `HydrateError::Libsql("no such table: ...")`.
+async fn open_and_migrate(path: &std::path::Path) -> LibsqlHandle {
+    let handle = LibsqlHandle::open(path).await.expect("open libsql handle");
+    JobLifecycle::canonical().migrate(&handle).await.expect("migrate job-lifecycle schema");
+    handle
+}
+
 /// AC 4 — cross-handle restart idempotence.
 ///
 /// Persist a non-trivial `JobLifecycleView` to a file-backed libSQL DB,
@@ -66,14 +80,21 @@ async fn hydrate_after_persist_returns_bit_equivalent_view() {
     let reconciler = JobLifecycle::canonical();
     let target = target();
 
-    // Persist via a first handle, then drop it.
+    // Persist via a first handle, then drop it. `open_and_migrate`
+    // runs `JobLifecycle::migrate` first to materialise the schema —
+    // the lifecycle invariant `persist` assumes (issue #139 step
+    // 02-02).
     {
-        let handle = LibsqlHandle::open(&path).await.expect("first open");
+        let handle = open_and_migrate(&path).await;
         reconciler.persist(&view, &handle).await.expect("persist");
     }
 
     // Re-open against the same file in a second handle and hydrate.
-    let handle = LibsqlHandle::open(&path).await.expect("second open");
+    // Migrate again — `CREATE TABLE IF NOT EXISTS` is idempotent, and
+    // the runtime calls migrate on every register (which is what a
+    // re-open across handles simulates: a control-plane restart that
+    // re-registers the reconciler against the same file).
+    let handle = open_and_migrate(&path).await;
     let hydrated = reconciler.hydrate(&target, &handle).await.expect("hydrate");
 
     assert_eq!(
@@ -91,7 +112,7 @@ async fn hydrate_against_fresh_file_returns_default_view() {
     let tmp = TempDir::new().expect("tempdir");
     let path = tmp.path().join("jl.db");
 
-    let handle = LibsqlHandle::open(&path).await.expect("open");
+    let handle = open_and_migrate(&path).await;
     let hydrated = JobLifecycle::canonical().hydrate(&target(), &handle).await.expect("hydrate");
 
     assert_eq!(hydrated, JobLifecycleView::default());
@@ -108,7 +129,7 @@ async fn second_persist_replaces_first_persists_state() {
 
     let reconciler = JobLifecycle::canonical();
     let target = target();
-    let handle = LibsqlHandle::open(&path).await.expect("open");
+    let handle = open_and_migrate(&path).await;
 
     // First persist — three allocs.
     let mut first = JobLifecycleView::default();
@@ -171,11 +192,11 @@ proptest! {
             let reconciler = JobLifecycle::canonical();
 
             {
-                let handle = LibsqlHandle::open(&path).await.expect("first open");
+                let handle = open_and_migrate(&path).await;
                 reconciler.persist(&view, &handle).await.expect("persist");
             }
 
-            let handle = LibsqlHandle::open(&path).await.expect("second open");
+            let handle = open_and_migrate(&path).await;
             let hydrated = reconciler.hydrate(&target(), &handle).await.expect("hydrate");
 
             let got = hydrated

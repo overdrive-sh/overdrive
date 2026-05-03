@@ -126,7 +126,11 @@ impl ReconcilerRuntime {
     ///   name is already registered. The second registration is
     ///   rejected cleanly — the registry is left unchanged.
     /// * [`ControlPlaneError::Internal`] if path provisioning fails
-    ///   (permission denied, traversal rejected, etc.).
+    ///   (permission denied, traversal rejected, etc.), if eager
+    ///   `LibsqlHandle::open` fails, or if the reconciler's eager
+    ///   `Reconciler::migrate(&handle)` returns Err (issue #139 step
+    ///   02-02). On any of these the registry is left unchanged — no
+    ///   partial slot is inserted.
     pub async fn register(&mut self, reconciler: AnyReconciler) -> Result<(), ControlPlaneError> {
         let name = reconciler.name().clone();
         if self.reconcilers.contains_key(&name) {
@@ -168,6 +172,32 @@ impl ReconcilerRuntime {
             ControlPlaneError::internal(
                 format!(
                     "ReconcilerRuntime::register: open libSQL at {} for reconciler {} failed",
+                    path.display(),
+                    name,
+                ),
+                e,
+            )
+        })?;
+
+        // Issue #139 step 02-02: run the reconciler's schema-author
+        // migration ONCE per instance at register time, immediately
+        // after `LibsqlHandle::open` succeeds and BEFORE the registry
+        // slot is finalised. A broken migrate surfaces as
+        // `ControlPlaneError::Internal` (same shape as eager-open
+        // failure per research §9.2) and the registry contains no
+        // partial entry — the early return below skips the
+        // `self.reconcilers.insert` call entirely.
+        //
+        // This is the runtime side of the lifecycle invariant the
+        // `Reconciler` trait documents: by the time `hydrate`/`persist`
+        // run, `migrate` has already returned `Ok(())` for this
+        // reconciler on this handle. Reconciler authors rely on the
+        // invariant to keep `hydrate` SELECT-only and `persist`
+        // DELETE-then-INSERT-only, off the per-tick CREATE TABLE path.
+        reconciler.migrate(&handle).await.map_err(|e| {
+            ControlPlaneError::internal(
+                format!(
+                    "ReconcilerRuntime::register: migrate libSQL at {} for reconciler {} failed",
                     path.display(),
                     name,
                 ),
@@ -470,12 +500,19 @@ fn cached_view_or_default(
     #[allow(clippy::expect_used)]
     let cache = state.view_cache.lock().expect("view_cache mutex");
     match (reconciler, cache.get(&key)) {
-        (AnyReconciler::NoopHeartbeat(_), _) => AnyReconcilerView::Unit,
         (AnyReconciler::JobLifecycle(_), Some(crate::CachedView::JobLifecycle(v))) => {
             AnyReconcilerView::JobLifecycle(v.clone())
         }
         (AnyReconciler::JobLifecycle(_), _) => {
             AnyReconcilerView::JobLifecycle(JobLifecycleView::default())
+        }
+        // `View = ()` reconcilers — `NoopHeartbeat` (production) and
+        // `TestStub` (test infrastructure, kept out of public rustdoc
+        // via `#[doc(hidden)]` on `overdrive_core::reconciler::
+        // TestStubReconciler`). The production runtime never sees a
+        // `TestStub` instance — only integration tests construct one.
+        (AnyReconciler::NoopHeartbeat(_) | AnyReconciler::TestStub(_), _) => {
+            AnyReconcilerView::Unit
         }
     }
 }
@@ -546,7 +583,11 @@ async fn hydrate_desired(
     state: &AppState,
 ) -> Result<AnyState, ConvergenceError> {
     match reconciler {
-        AnyReconciler::NoopHeartbeat(_) => Ok(AnyState::Unit),
+        // `State = ()` reconcilers — `NoopHeartbeat` (production) and
+        // `TestStub` (test infrastructure). The production runtime
+        // never sees a `TestStub` instance — only integration tests
+        // construct one.
+        AnyReconciler::NoopHeartbeat(_) | AnyReconciler::TestStub(_) => Ok(AnyState::Unit),
         AnyReconciler::JobLifecycle(_) => {
             let job_id = job_id_from_target(target)?;
             let job = read_job(state, &job_id).await?;
@@ -602,7 +643,11 @@ async fn hydrate_actual(
     state: &AppState,
 ) -> Result<AnyState, ConvergenceError> {
     match reconciler {
-        AnyReconciler::NoopHeartbeat(_) => Ok(AnyState::Unit),
+        // `State = ()` reconcilers — `NoopHeartbeat` (production) and
+        // `TestStub` (test infrastructure). The production runtime
+        // never sees a `TestStub` instance — only integration tests
+        // construct one.
+        AnyReconciler::NoopHeartbeat(_) | AnyReconciler::TestStub(_) => Ok(AnyState::Unit),
         AnyReconciler::JobLifecycle(_) => {
             let job_id = job_id_from_target(target)?;
             let rows = state

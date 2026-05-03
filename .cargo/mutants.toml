@@ -109,6 +109,22 @@ exclude_re = [
     # tautological test.
     "for NoopHeartbeat>::hydrate",
 
+    # `TestStubReconciler` is test infrastructure (kept out of public
+    # rustdoc via `#[doc(hidden)]` per issue #139 step 02-02). Its
+    # `migrate`, `hydrate`, `persist`, and `reconcile` impls — plus the
+    # `AnyReconciler::TestStub(...)` dispatch arms in `migrate`,
+    # `persist`, and `reconcile` — exist exclusively to support
+    # integration tests in `overdrive-control-plane`. The runtime
+    # never constructs a `TestStub` triple; the only assertion that
+    # exercises the dispatch path is the `register_runs_migrate_*`
+    # integration test, and it asserts on `ControlPlaneError::Internal`
+    # rather than on the inner `HydrateError` variant. Production code
+    # cannot regress against test-infra dispatch arms; mutating them
+    # produces missed mutants by design. Skip rather than write
+    # tautological tests on infrastructure that has no production use.
+    "for TestStubReconciler>",
+    "Self::TestStub",
+
     # Semantically-equivalent mutant on the paired tuple compare in
     # `evaluate_reconciler_is_pure`: `actions_a == actions_b &&
     # next_view_a == next_view_b` → `... || ...`. The right-hand

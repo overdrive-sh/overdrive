@@ -469,6 +469,10 @@ impl Reconciler for NoopReconciler {
         &self.name
     }
 
+    async fn migrate(&self, _db: &LibsqlHandle) -> Result<(), HydrateError> {
+        Ok(())
+    }
+
     async fn hydrate(
         &self,
         _target: &overdrive_core::reconciler::TargetResource,

@@ -32,6 +32,10 @@ impl Reconciler for BadReconciler {
         &self.name
     }
 
+    async fn migrate(&self, _db: &LibsqlHandle) -> Result<(), HydrateError> {
+        Ok(())
+    }
+
     async fn hydrate(
         &self,
         _target: &TargetResource,

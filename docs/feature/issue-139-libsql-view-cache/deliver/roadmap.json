@@ -1,0 +1,353 @@
+{
+  "roadmap": {
+    "project_id": "issue-139-libsql-view-cache",
+    "created_at": "2026-05-03T09:29:21Z",
+    "revised_at": "2026-05-03T17:35:00Z",
+    "revision_history_extra": "v3 (2026-05-03T17:35:00Z): inserted new step 02-02 (Reconciler::migrate lifecycle hook) per user direction — DDL belongs in a once-per-instance migrate hook, not on the hydrate hot path. Renumbered prior 02-02 → 02-03 (runtime tick loop wiring now also calls migrate at register time), 02-03 → 02-04, 02-04 → 02-05. total_steps 6 → 7.",
+    "total_steps": 7,
+    "phases": 2
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Promote LibsqlHandle to a concrete newtype with constructor split, wire the registry",
+      "description": "Reshape LibsqlHandle from the Phase 1 Arc<()> placeholder into a concrete newtype wrapping Arc<libsql::Connection> in overdrive-core. The newtype carries TWO constructors that capture the full production / test surface without introducing a port trait: LibsqlHandle::open(path) for production (file-backed via libsql::Builder::new_local(path)) and LibsqlHandle::open_in_memory() for tests (libsql :memory: mode). A single accessor connection(&self) -> &libsql::Connection lets reconciler authors run free-form SQL through the wrapped libsql primitive. No port trait — sibling traits in this codebase (Clock, Transport, Entropy, Driver, Llm) all justify themselves with behavioural divergence between sim and host bindings (controllable time, partition injection, seeded RNG, configurable failure modes, transcript replay); a LibsqlHandle 'sim' binding would differ from the production binding only in the connection string passed to libsql, which is not behavioural divergence — it is a constructor argument rename. Per .claude/rules/development.md § 'Port-trait dependencies', a trait exists where the sim implementation captures something the production implementation cannot; that condition is not met here. Open per-reconciler libSQL connections eagerly at ReconcilerRuntime::register time using the existing libsql_provisioner (which stays in overdrive-control-plane — adapter-host class per its Cargo.toml — and continues to return the path); ReconcilerRuntime::register calls LibsqlHandle::open(path) and stashes the resulting LibsqlHandle (or Arc<LibsqlHandle> if shared across handler/streaming) alongside the AnyReconciler in the registry. Expose the registry handle via libsql_handle(&ReconcilerName) -> Option<&LibsqlHandle>. JobLifecycle::hydrate still returns the default View at the end of this phase so every test that exists today continues to pass; the cutover lands in phase 02. Tests reach for LibsqlHandle::open(tempdir.path()) when they need real persistence semantics across simulated restart; tests reach for LibsqlHandle::open_in_memory() when they want fast in-process isolation without filesystem touch.",
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "Promote LibsqlHandle to a concrete newtype with open() and open_in_memory() constructors",
+          "description": "Replace the LibsqlHandle struct at crates/overdrive-core/src/reconciler.rs:223-237 (Arc<()> placeholder) with a concrete newtype wrapping Arc<libsql::Connection>, in the same file (keep its current home — there's no strong reason to move it, and the compile-fail purity fixture references its location through the prelude re-export). Shape: pub struct LibsqlHandle { conn: Arc<libsql::Connection> }. Add two constructors — pub async fn open(path: impl AsRef<Path>) -> Result<Self, libsql::Error> for production (file-backed via libsql::Builder::new_local(path).build() then connect()) and pub async fn open_in_memory() -> Result<Self, libsql::Error> for tests (libsql::Builder::new_local(\":memory:\").build() then connect()). Add accessor pub fn connection(&self) -> &libsql::Connection that returns &self.conn so reconciler authors run free-form SQL (CREATE TABLE / SELECT / INSERT) through the underlying libsql primitive. Delete LibsqlHandle::default_phase1() at reconciler.rs:253-262 and the #[allow(dead_code)] empty() constructor at reconciler.rs:247-251 — both are sole-purpose stubs and the new constructor split makes them obsolete. Delete the stale comment at reconciler.rs:223-237 that claims libsql is not on core's compile graph (it has been since libsql.workspace = true landed in overdrive-core/Cargo.toml:54). The HydrateError::Libsql(#[from] libsql::Error) variant at reconciler.rs:289 stays. The Reconciler::hydrate signature stays as &LibsqlHandle (concrete) — no trait, no &dyn, no &impl. The compile-fail fixture at crates/overdrive-core/tests/compile_fail/reconcile_cannot_take_libsql_handle.rs asserts the purity boundary (reconcile cannot take a handle), not the constructor shape — it survives the refactor unchanged. The single production caller at crates/overdrive-control-plane/src/reconciler_runtime.rs:273 (default_phase1 call site) is intentionally left broken at this step — step 01-02 wires the real handle source.",
+          "criteria": "LibsqlHandle is a concrete struct in crates/overdrive-core/src/reconciler.rs wrapping Arc<libsql::Connection>. Two constructors exist: open(path) for file-backed production use and open_in_memory() for in-process tests, both returning Result<Self, libsql::Error>. The connection() accessor returns &libsql::Connection. default_phase1 and empty constructors are removed. The Reconciler::hydrate signature remains &LibsqlHandle (concrete). The compile-fail fixture continues to reject reconcile() taking the handle (asserts the purity boundary, not the shape, so it survives the refactor unchanged). cargo check for overdrive-core succeeds; cargo check for overdrive-control-plane fails at the default_phase1 call site (intentional; resolved in 01-02). Mutation testing kill rate ≥ 80% on the new constructors and accessor.",
+          "test_file": "crates/overdrive-core/tests/compile_fail/reconcile_cannot_take_libsql_handle.rs",
+          "scenario_name": "reconcile_cannot_take_libsql_handle",
+          "acceptance_criteria": [
+            "LibsqlHandle is pub struct LibsqlHandle { conn: Arc<libsql::Connection> } in crates/overdrive-core/src/reconciler.rs (NOT a trait, NOT in a separate traits/ module — concrete newtype, same file as the rest of the reconciler primitives)",
+            "Two constructors exist: pub async fn open(path: impl AsRef<Path>) -> Result<Self, libsql::Error> (file-backed for production) and pub async fn open_in_memory() -> Result<Self, libsql::Error> (libsql :memory: for tests). Both go through libsql::Builder::new_local(...).build() then connect(); construction failure surfaces as libsql::Error",
+            "Accessor pub fn connection(&self) -> &libsql::Connection returns &self.conn so reconciler authors run free-form SQL through the wrapped primitive",
+            "Reconciler::hydrate signature remains &LibsqlHandle (concrete reference) — no trait object, no impl trait",
+            "LibsqlHandle::default_phase1() and LibsqlHandle::empty() no longer exist in the public or private surface",
+            "The stale comment at reconciler.rs:223-237 about libsql not being on core's compile path is deleted",
+            "Compile-fail fixture reconcile_cannot_take_libsql_handle.rs continues to reject reconcile() taking the handle. The fixture asserts the purity boundary, not the constructor shape, so it survives the refactor unchanged — verified via the existing .stderr file (regenerated only if the diagnostic line numbers shift; the rejection itself is unchanged)",
+            "cargo check -p overdrive-core --features integration-tests succeeds; cargo check -p overdrive-control-plane intentionally fails at reconciler_runtime.rs:273 — handed to step 01-02",
+            "Mutation testing kill rate ≥ 80% on the open and open_in_memory constructors and the connection accessor: cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-core --file crates/overdrive-core/src/reconciler.rs"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-core/src/reconciler.rs",
+            "crates/overdrive-core/tests/compile_fail/reconcile_cannot_take_libsql_handle.stderr"
+          ],
+          "dependencies": [],
+          "estimated_hours": 3,
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-core/src/"
+            ],
+            "test_directories": [
+              "crates/overdrive-core/tests/compile_fail/"
+            ]
+          }
+        },
+        {
+          "id": "01-02",
+          "name": "Open per-reconciler libSQL connections eagerly at ReconcilerRuntime::register and expose &LibsqlHandle via a registry accessor",
+          "description": "Extend ReconcilerRuntime::register at crates/overdrive-control-plane/src/reconciler_runtime.rs:115-127 to call LibsqlHandle::open(path) eagerly using the path returned by the existing libsql_provisioner (which stays in overdrive-control-plane — adapter-host class per Cargo.toml:21 — and continues to return the on-disk path). Today the provisioned path at line 124 is bound to _path and discarded — replace with eager LibsqlHandle::open(path).await. Stash the LibsqlHandle (or Arc<LibsqlHandle> if shared across handler.rs and streaming.rs read sites) alongside the AnyReconciler in the registry. The registry currently uses a BTreeMap keyed on ReconcilerName per the workspace ordered-collection rule; extend the value type to carry (AnyReconciler, LibsqlHandle) — or a small struct wrapping both — choose whichever keeps the existing iteration sites cleanest. Add a public method libsql_handle(&self, name: &ReconcilerName) -> Option<&LibsqlHandle> on ReconcilerRuntime so step 02-04 (handlers.rs view reads) and the run_convergence_tick rewrite (step 02-03) can fetch the handle without re-opening. If callers need to clone across an .await suspension or share between tick loop and HTTP handler, the registry can hold Arc<LibsqlHandle> internally and the accessor returns &LibsqlHandle by deref — final shape at the architect's discretion based on lifetime ergonomics. Replace the LibsqlHandle::default_phase1() call at reconciler_runtime.rs:273 with a self.libsql_handle(reconciler.name()) lookup. Failure to open at register time bubbles as ControlPlaneError::Internal so boot surfaces libSQL provisioning failures synchronously (per research §9.2 failure modes). No new wiring crate dependency — overdrive-control-plane already depends on overdrive-core (where LibsqlHandle now lives), and the libsql_provisioner is already in this crate.",
+          "description_long_note": "JobLifecycle::hydrate still returns JobLifecycleView::default() at the end of this step — only the handle plumbing changes. The view_cache lookup pattern (cached_view_or_default + store_cached_view) stays in place at reconciler_runtime.rs:370-409. The acceptance test runtime_reconcile_is_idempotent_across_simulated_control_plane_restart at runtime_convergence_loop.rs:619-871 still passes because it operates on the cache, not on libSQL.",
+          "criteria": "ReconcilerRuntime::register opens a real LibsqlHandle via LibsqlHandle::open(path) at registration time using the path from libsql_provisioner, and stores the handle alongside the AnyReconciler. ReconcilerRuntime exposes libsql_handle(&self, name: &ReconcilerName) -> Option<&LibsqlHandle>. The reconciler_runtime.rs:273 default_phase1() call site is replaced with the registry lookup. Boot fails fast with ControlPlaneError::Internal when LibsqlHandle::open fails (verified by an integration test that points data_dir at a read-only path). Existing acceptance test runtime_reconcile_is_idempotent_across_simulated_control_plane_restart still passes (cache shape unchanged in this step). Existing libsql_isolation.rs integration tests still pass (the provisioner contract is untouched). Mutation testing kill rate ≥ 80% on the new register and libsql_handle methods.",
+          "test_file": "crates/overdrive-control-plane/tests/integration/libsql_isolation.rs",
+          "scenario_name": "register_eagerly_opens_libsql_for_each_reconciler",
+          "acceptance_criteria": [
+            "ReconcilerRuntime::register at crates/overdrive-control-plane/src/reconciler_runtime.rs calls LibsqlHandle::open(path).await using the path returned by the existing libsql_provisioner; the registry stores the resulting LibsqlHandle alongside the AnyReconciler (Arc<LibsqlHandle> if lifetime ergonomics across handler.rs / streaming.rs / tick loop demand it — architect's call)",
+            "ReconcilerRuntime exposes libsql_handle(&ReconcilerName) -> Option<&LibsqlHandle>; the accessor returns a reference (or Arc clone via deref), not a re-opened handle",
+            "reconciler_runtime.rs:273 (default_phase1 call site) is replaced with the registry accessor; no production call site constructs a LibsqlHandle anywhere except the registry — the registry is the single source of LibsqlHandle in the runtime",
+            "The libsql_provisioner module STAYS in overdrive-control-plane (adapter-host class per Cargo.toml:21 — no class violation, no relocation); it continues to return a path; the LibsqlHandle::open call lives at the registry boundary",
+            "Eager-open failure surfaces as ControlPlaneError::Internal at register time, not at first tick — verified by a new integration test in tests/integration/libsql_isolation.rs that registers a reconciler against a read-only data_dir and asserts the register error",
+            "Existing test runtime_reconcile_is_idempotent_across_simulated_control_plane_restart at tests/acceptance/runtime_convergence_loop.rs:619-871 still passes (cache shape unchanged this step)",
+            "Existing libsql_isolation.rs tests (provisioner contract) still pass",
+            "Registry uses BTreeMap (or HashMap with // dst-lint: hashmap-ok marker) per the ordered-collection rule",
+            "Mutation testing kill rate ≥ 80% on the new register and libsql_handle accessor: cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-control-plane --file crates/overdrive-control-plane/src/reconciler_runtime.rs"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/reconciler_runtime.rs",
+            "crates/overdrive-control-plane/tests/integration/libsql_isolation.rs"
+          ],
+          "dependencies": [
+            "01-01"
+          ],
+          "estimated_hours": 4,
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-control-plane/src/"
+            ],
+            "test_directories": [
+              "crates/overdrive-control-plane/tests/integration/"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "02",
+      "name": "Cut over to libSQL diff-and-persist and delete the in-memory view_cache",
+      "description": "Single-cut greenfield migration per CLAUDE.md: implement the real JobLifecycle::hydrate body (CREATE TABLE IF NOT EXISTS + SELECT into the persisted-inputs JobLifecycleView shape per the freshness update §0.1) against &LibsqlHandle, wire the runtime tick loop to use the returned view directly, implement diff-and-persist for the write path (Phase 1 convention NextView = Self::View, full replacement, per ADR-0013 §2b) also against &LibsqlHandle, migrate streaming.rs and handlers.rs view reads off the cache, then delete AppState::view_cache, the CachedView enum, the cache helpers (cache_key, cached_view_or_default, store_cached_view), and the test-side cache manipulation in the same PR. No deprecation, no rename stub, no feature-flagged old path. The runtime-restart idempotence test runtime_reconcile_is_idempotent_across_simulated_control_plane_restart is the gold regression gate: after this phase it MUST close the loop through the libSQL handle path, and because :memory: would lose state when the handle drops, the test MUST use a file-backed temp DB (LibsqlHandle::open(tempdir.path())) to actually exercise persistence across simulated restart. Default-lane unit tests that need fast in-process isolation reach for LibsqlHandle::open_in_memory(); integration-scoped tests that exercise restart semantics reach for LibsqlHandle::open(tempdir.path()).",
+      "steps": [
+        {
+          "id": "02-01",
+          "name": "Implement real JobLifecycle::hydrate and a diff-and-persist write path against &LibsqlHandle, matching the persist-inputs View shape",
+          "description": "Two coupled changes that ship together. (a) JobLifecycle::hydrate at crates/overdrive-core/src/reconciler.rs:1184-1206 (currently Ok(JobLifecycleView::default())) gains real CREATE TABLE IF NOT EXISTS + SELECT logic against &LibsqlHandle (concrete, signature unchanged from step 01-01); the body fetches the underlying &libsql::Connection via the handle's connection() accessor and runs SQL through it. The View shape per freshness update §0.1 is exactly two BTreeMap fields: restart_counts: BTreeMap<AllocationId, u32> and last_failure_seen_at: BTreeMap<AllocationId, UnixInstant>. Schema MUST contain these two columns and only these two — adding a derived next_attempt_at column would silently break the persist-inputs guarantee the regression test at runtime_convergence_loop.rs:619-871 pins (per freshness update §0.4 implication 1). UnixInstant serialisation MUST round-trip bit-equivalent (verify the libSQL column type does not lossily downcast nanoseconds; the proptest at commit 89256af covers Display/FromStr/Serde — leverage that). Empty result set returns JobLifecycleView::default() per freshness update §0.4 implication 3. (b) The diff-and-persist write path. Per ADR-0013 §2b Phase 1 convention NextView = Self::View (full replacement). Add a Reconciler::persist(&self, view: &Self::View, db: &LibsqlHandle) -> impl Future<Output = Result<(), HydrateError>> + Send method to the trait at reconciler.rs:302-372 (research §7.3 Approach 1 — author owns SQL on both read and write sides, symmetric with hydrate's schema-author clause per ADR-0013 §6). Implement persist for JobLifecycle as a single transaction: DELETE FROM both tables, INSERT all rows from the new view (Shape 1 from research §7.2 — simplest, quadratic in view size, fine for Phase 1). Implement persist for NoopHeartbeat as Ok(()) (no rows). AnyReconciler dispatch enum at reconciler.rs:804-913 grows a persist arm matching its existing hydrate arm at reconciler.rs:829-840. Both code paths (hydrate and persist) are exercised by integration tests (LibsqlHandle::open against tempfile) and may also be exercised by default-lane tests using LibsqlHandle::open_in_memory() where in-process isolation is sufficient.",
+          "criteria": "JobLifecycle::hydrate runs CREATE TABLE IF NOT EXISTS for the two persisted-inputs columns and a SELECT to materialise the JobLifecycleView, against &LibsqlHandle. UnixInstant round-trips through libSQL bit-equivalent (verified by a proptest in the integration lane). Empty DB returns JobLifecycleView::default(). Reconciler trait gains a persist method paired with hydrate, also against &LibsqlHandle; JobLifecycle::persist replaces all rows in a single transaction; NoopHeartbeat::persist is Ok(()). AnyReconciler dispatches persist correctly. Companion core-level test job_lifecycle_recompute_deadline.rs::restart_survival_idempotence at line 250 still passes unchanged (it operates on the pure reconcile boundary). Mutation testing kill rate ≥ 80% on hydrate, persist, and the AnyReconciler::persist dispatch arm.",
+          "test_file": "crates/overdrive-control-plane/tests/integration/job_lifecycle_libsql_persistence.rs",
+          "scenario_name": "hydrate_after_persist_returns_bit_equivalent_view",
+          "acceptance_criteria": [
+            "JobLifecycle::hydrate at crates/overdrive-core/src/reconciler.rs takes &LibsqlHandle (concrete reference per step 01-01) and implements CREATE TABLE IF NOT EXISTS for restart_counts and last_failure_seen_at and SELECT into the JobLifecycleView shape; the only fields persisted are inputs (restart_counts: u32 per AllocationId, last_failure_seen_at: UnixInstant per AllocationId); no derived next_attempt_at column appears anywhere",
+            "Reconciler trait gains async persist(&self, view: &Self::View, db: &LibsqlHandle) -> Result<(), HydrateError> method; JobLifecycle::persist replaces both tables in a single transaction; NoopHeartbeat::persist is Ok(())",
+            "AnyReconciler::persist dispatch arm exists and routes correctly per the existing AnyReconciler enum dispatch shape",
+            "New integration test crates/overdrive-control-plane/tests/integration/job_lifecycle_libsql_persistence.rs hydrate_after_persist_returns_bit_equivalent_view: open a tempfile-backed LibsqlHandle via LibsqlHandle::open(tempdir.path().join(\"jl.db\")), persist a non-trivial JobLifecycleView, drop the handle, re-open against the same file, hydrate, assert the result equals the persisted view (proves cross-handle restart idempotence — file-backed because :memory: would lose state when the handle drops)",
+            "Optional default-lane unit test (architect's discretion) using LibsqlHandle::open_in_memory() exercises the same persist → hydrate roundtrip within a single handle lifetime; included only if it adds coverage beyond what the integration test already provides (typical case: a fast smoke test for a non-trivial schema migration; the integration test is the load-bearing one)",
+            "New proptest in the integration lane asserts UnixInstant round-trips through libSQL bit-equivalent (no nanosecond downcast)",
+            "Companion core-level test crates/overdrive-core/tests/acceptance/job_lifecycle_recompute_deadline.rs::restart_survival_idempotence still passes (pure-function boundary unchanged)",
+            "Mutation testing kill rate ≥ 80% on the new hydrate body, persist body, and AnyReconciler::persist dispatch arm: cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-core --file crates/overdrive-core/src/reconciler.rs"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-core/src/reconciler.rs",
+            "crates/overdrive-control-plane/tests/integration/job_lifecycle_libsql_persistence.rs",
+            "crates/overdrive-control-plane/tests/integration.rs"
+          ],
+          "dependencies": [
+            "01-02"
+          ],
+          "estimated_hours": 5,
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-core/src/"
+            ],
+            "test_directories": [
+              "crates/overdrive-control-plane/tests/integration/",
+              "crates/overdrive-core/tests/acceptance/"
+            ]
+          }
+        },
+        {
+          "id": "02-02",
+          "name": "Extract DDL from hydrate/persist into a separate Reconciler::migrate lifecycle hook called once per reconciler at register time",
+          "description": "Refactor the schema-management responsibility off the hydrate hot path into a dedicated Reconciler::migrate(&self, db: &LibsqlHandle) -> impl Future<Output = Result<(), HydrateError>> + Send trait method. Today (post-step-02-01) JobLifecycle::hydrate carries CREATE TABLE IF NOT EXISTS for restart_counts and last_failure_seen_at, and JobLifecycle::persist defensively repeats them. Moving those statements into migrate gives three properties: (1) hydrate runs every tick on the reconcile hot path; DDL parsing/idempotence checks should not pay per-tick cost. (2) WASM-loaded third-party reconcilers (whitepaper §18) get a clean module-load hook the runtime can invoke without inspecting reconciler internals. (3) The runtime fails fast on a broken migration at register time, not on first reconcile (extends the boot-fast posture from step 01-02 — research §9.2). Trait shape: pub async fn migrate(&self, db: &LibsqlHandle) -> Result<(), HydrateError>, no default impl (Phase 1: every reconciler MUST implement it explicitly; NoopHeartbeat::migrate returns Ok(())). AnyReconciler enum dispatch grows a migrate arm matching its hydrate arm shape. Runtime wiring: ReconcilerRuntime::register (post-step-01-02) must call any_reconciler.migrate(&handle).await IMMEDIATELY AFTER LibsqlHandle::open(path).await succeeds and BEFORE the registry slot is finalised; if migrate returns Err, the register call returns ControlPlaneError::Internal (same shape as eager-open failure) and the registry does NOT contain a partial entry. JobLifecycle::hydrate is reduced to read-only SELECT against a known-current schema (delete the CREATE TABLE IF NOT EXISTS lines from hydrate); JobLifecycle::persist is reduced to DELETE-then-INSERT against a known-current schema (delete the defensive CREATE TABLE IF NOT EXISTS lines from persist). The persist transaction shape stays unchanged. Migration idempotence: CREATE TABLE IF NOT EXISTS is naturally idempotent so re-running migrate on every register is safe; future ALTER TABLE-style migrations land in the same migrate body and follow the project's additive-only schema migration discipline (CLAUDE.md / development.md). Lifecycle invariant: by the time hydrate or persist is called, migrate has already run successfully on this LibsqlHandle for this reconciler. The runtime enforces this structurally — there is no path that reaches hydrate/persist without migrate having succeeded at register time. Document this contract on the Reconciler trait alongside the existing hydrate purity contract.",
+          "criteria": "Reconciler trait gains async migrate(&self, db: &LibsqlHandle) -> Result<(), HydrateError> method with no default impl. JobLifecycle::migrate runs CREATE TABLE IF NOT EXISTS for restart_counts and last_failure_seen_at; NoopHeartbeat::migrate returns Ok(()). AnyReconciler::migrate dispatch arm exists and routes correctly. ReconcilerRuntime::register calls any_reconciler.migrate(&handle).await immediately after LibsqlHandle::open succeeds and before the registry slot is finalised; on migrate Err the register call returns ControlPlaneError::Internal and the registry contains no partial entry (verified by extending or adding to libsql_isolation.rs). JobLifecycle::hydrate no longer contains CREATE TABLE IF NOT EXISTS (purely SELECT against a known-current schema). JobLifecycle::persist no longer contains CREATE TABLE IF NOT EXISTS (purely DELETE-then-INSERT against a known-current schema). The Reconciler trait docstring documents the lifecycle invariant: migrate runs once per reconciler instance at register time before any hydrate/persist call. All step 02-01 integration tests still pass (hydrate_after_persist_returns_bit_equivalent_view, the unix_instant proptest) — the migrate runs as part of LibsqlHandle::open call paths these tests already exercise (the test setup must call migrate explicitly OR use a small helper that opens-and-migrates; pick the shape that keeps the test ergonomics cleanest while matching the runtime's lifecycle). All step 01-02 integration tests still pass (libsql_isolation.rs). Pre-existing convergence-loop regression test (still in tests/acceptance/runtime_convergence_loop.rs at this point — step 02-03 moves it) still passes. Mutation testing kill rate ≥ 80% on the diff vs origin/main (this run sweeps both step 02-01's hydrate/persist additions AND step 02-02's migrate additions/refactor — the deferred 02-01 mutation gate is satisfied by this run): cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-core --file crates/overdrive-core/src/reconciler.rs AND cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-control-plane --file crates/overdrive-control-plane/src/reconciler_runtime.rs.",
+          "test_file": "crates/overdrive-control-plane/tests/integration/libsql_isolation.rs",
+          "scenario_name": "register_runs_migrate_once_per_reconciler_and_fails_fast_on_broken_migration",
+          "acceptance_criteria": [
+            "Reconciler trait at crates/overdrive-core/src/reconciler.rs gains async migrate(&self, db: &LibsqlHandle) -> Result<(), HydrateError> with no default impl. The trait docstring documents the lifecycle invariant: migrate runs once per reconciler instance at register time, before any hydrate or persist call; hydrate may assume the schema is current and read-only-safe; persist may assume the schema is current and write-safe.",
+            "JobLifecycle::migrate runs CREATE TABLE IF NOT EXISTS for restart_counts and last_failure_seen_at against db.connection(); failure surfaces as HydrateError::Libsql.",
+            "NoopHeartbeat::migrate returns Ok(()) (no schema).",
+            "AnyReconciler::migrate dispatch arm exists and routes correctly per the existing hydrate dispatch shape at reconciler.rs:804-913.",
+            "JobLifecycle::hydrate no longer contains any CREATE TABLE statement — purely SELECT against a known-current schema.",
+            "JobLifecycle::persist no longer contains any CREATE TABLE statement — purely DELETE-then-INSERT against a known-current schema.",
+            "ReconcilerRuntime::register at crates/overdrive-control-plane/src/reconciler_runtime.rs calls any_reconciler.migrate(&handle).await immediately after LibsqlHandle::open(path).await succeeds and BEFORE the registry slot is finalised. On migrate Err the register call returns ControlPlaneError::Internal and the registry contains no partial entry — extend libsql_isolation.rs with a register_runs_migrate_once_per_reconciler_and_fails_fast_on_broken_migration test that injects a reconciler whose migrate returns Err (use a tiny test-local Reconciler impl, NOT a feature flag on production reconcilers) and asserts both the error surface and the absence of the registry slot.",
+            "Existing step 02-01 integration tests (hydrate_after_persist_returns_bit_equivalent_view, the UnixInstant proptest, the persist-replaces-not-unions test) still pass — adjust their setup to call migrate explicitly (or use a small open-and-migrate helper) so they match the new lifecycle. The architectural shape they assert (cross-handle restart idempotence, bit-equivalent UnixInstant round-trip, full-replacement persist) is unchanged.",
+            "Existing step 01-02 integration tests in libsql_isolation.rs (positive accessor, distinct handles, eager-open failure) still pass.",
+            "Pre-existing acceptance test runtime_reconcile_is_idempotent_across_simulated_control_plane_restart at tests/acceptance/runtime_convergence_loop.rs still passes (cache shape unchanged this step — step 02-03 cuts it over).",
+            "Mutation testing kill rate ≥ 80% on the diff vs origin/main, scoped to the changed files. This run intentionally absorbs step 02-01's deferred mutation gate (same file, same diff scope): cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-core --file crates/overdrive-core/src/reconciler.rs AND cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-control-plane --file crates/overdrive-control-plane/src/reconciler_runtime.rs."
+          ],
+          "files_to_modify": [
+            "crates/overdrive-core/src/reconciler.rs",
+            "crates/overdrive-control-plane/src/reconciler_runtime.rs",
+            "crates/overdrive-control-plane/tests/integration/libsql_isolation.rs",
+            "crates/overdrive-control-plane/tests/integration/job_lifecycle_libsql_persistence.rs"
+          ],
+          "dependencies": [
+            "02-01"
+          ],
+          "estimated_hours": 4,
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-core/src/",
+              "crates/overdrive-control-plane/src/"
+            ],
+            "test_directories": [
+              "crates/overdrive-control-plane/tests/integration/"
+            ]
+          }
+        },
+        {
+          "id": "02-03",
+          "name": "Wire the runtime tick loop to libSQL hydrate-then-reconcile-then-persist and migrate the convergence-loop regression test",
+          "description": "Cut over crates/overdrive-control-plane/src/reconciler_runtime.rs:262-275 (the discard-and-cache shape) to the ADR-0013 §2b 7-step contract using the registry handle from step 01-02 (and the schema established once at register time by step 02-02's migrate hook). Open (or reuse) the registry's LibsqlHandle for the named reconciler via self.libsql_handle(reconciler.name()), call reconciler.hydrate(target, handle).await, use the returned view directly (no cached_view_or_default lookup, no fallback default). After reconcile returns (actions, next_view), call AnyReconciler::persist(&next_view, handle).await to flush the diff-and-persist write path from step 02-01 — note that hydrate and persist no longer carry CREATE TABLE IF NOT EXISTS as of step 02-02 (DDL ran once at register time via Reconciler::migrate). Replace the store_cached_view call at reconciler_runtime.rs:311-313 with the persist call. Surface persist errors as a new ConvergenceError::Persist variant alongside the existing ConvergenceError::Hydrate handling. The regression test runtime_reconcile_is_idempotent_across_simulated_control_plane_restart at crates/overdrive-control-plane/tests/acceptance/runtime_convergence_loop.rs:619-871 is the golden gate: it currently warms the in-memory cache then manipulates state.view_cache directly at lines 815-829 to simulate restart. Per the explicit instruction, swap those lines to the libSQL handle path: drop the live LibsqlHandle (and the runtime's reference to it) and re-open against the same on-disk DB file path. CRITICAL: this test MUST use file-backed LibsqlHandle::open(tempdir.path()) — NOT LibsqlHandle::open_in_memory() — because :memory: loses state when the handle drops, and the test's whole point is to assert persistence across the simulated restart. Use tempfile::TempDir for the data_dir; the runtime's libsql_provisioner will create per-reconciler files under it. The (actions, next_view) bit-equivalence assertion at lines 861-870 stays unchanged. Two adjacent tests in the same file — eval_dispatch_runs_only_the_named_reconciler and stop_after_failed_alloc_drains_broker (research §1.4) — count distinct reconciler dispatches by inspecting the cache; rewrite their counting strategy to count broker dispatched deltas or distinct emitted lifecycle events (research §1.4 already enumerates these alternatives). Because real libSQL files now flow through the runtime tick loop, runtime_convergence_loop.rs moves from tests/acceptance/ to tests/integration/runtime_convergence_loop.rs per testing.md § Integration vs unit gating (real filesystem I/O is integration-class).",
+          "criteria": "run_convergence_tick implements the ADR-0013 §2b 7-step contract (open/reuse &LibsqlHandle from registry, snapshot TickContext, hydrate, reconcile, persist) without any in-memory view cache lookups. ConvergenceError::Persist surfaces persist failures with structured context. runtime_reconcile_is_idempotent_across_simulated_control_plane_restart passes with the cache manipulation replaced by handle drop-and-reopen against the same DB file (lines 815-829 swap to the libSQL path; assertion at 861-870 unchanged and bit-equivalent), wired through file-backed LibsqlHandle::open against a tempfile::TempDir-managed data_dir. eval_dispatch_runs_only_the_named_reconciler and stop_after_failed_alloc_drains_broker pass with rewritten counting strategies. runtime_convergence_loop.rs lives under tests/integration/ behind --features integration-tests. Mutation testing kill rate ≥ 80% on the run_convergence_tick rewrite. On macOS the test runs via cargo xtask lima run -- cargo nextest run --features integration-tests per testing.md.",
+          "test_file": "crates/overdrive-control-plane/tests/integration/runtime_convergence_loop.rs",
+          "scenario_name": "runtime_reconcile_is_idempotent_across_simulated_control_plane_restart",
+          "acceptance_criteria": [
+            "run_convergence_tick at crates/overdrive-control-plane/src/reconciler_runtime.rs implements the ADR-0013 §2b 7-step contract: open/reuse &LibsqlHandle from the registry (step 01-02 accessor), snapshot TickContext, call reconciler.hydrate(target, handle).await, call reconciler.reconcile(...) on the returned view (no cached_view_or_default fallback), call AnyReconciler::persist(&next_view, handle).await",
+            "ConvergenceError gains a Persist variant that carries the underlying HydrateError or libsql::Error and is surfaced by the tick loop with the same shape as the existing Hydrate variant",
+            "The cache helpers cache_key, cached_view_or_default, and store_cached_view at reconciler_runtime.rs:364-409 are deleted (their last call sites disappear in this step)",
+            "Integration-scoped test runtime_reconcile_is_idempotent_across_simulated_control_plane_restart at the new path tests/integration/runtime_convergence_loop.rs:619-871 closes its loop through the real libSQL handle path: lines 815-829 drop the live LibsqlHandle (or rebuild the runtime against the same data_dir tempdir) and re-open via LibsqlHandle::open(...) against the SAME on-disk DB file. CRITICAL: the test MUST use file-backed LibsqlHandle::open(tempdir.path().join(...)) and NOT LibsqlHandle::open_in_memory(), because :memory: loses state when the handle drops — the test's whole purpose is to assert persistence across simulated restart, which file-backed semantics provide and in-memory semantics do not. tempfile::TempDir manages the data_dir lifetime. The bit-equivalence assertion at 861-870 stays and passes",
+            "eval_dispatch_runs_only_the_named_reconciler and stop_after_failed_alloc_drains_broker count dispatches via broker counters or distinct lifecycle event observation rather than view_cache inspection (per research §1.4)",
+            "runtime_convergence_loop.rs is moved from crates/overdrive-control-plane/tests/acceptance/ to crates/overdrive-control-plane/tests/integration/ and is wired through tests/integration.rs behind #![cfg(feature = \"integration-tests\")] per testing.md § Integration vs unit gating",
+            "On macOS contributors run cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests per the Lima rule",
+            "Mutation testing kill rate ≥ 80% on run_convergence_tick: cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-control-plane --file crates/overdrive-control-plane/src/reconciler_runtime.rs"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/reconciler_runtime.rs",
+            "crates/overdrive-control-plane/tests/acceptance/runtime_convergence_loop.rs",
+            "crates/overdrive-control-plane/tests/integration/runtime_convergence_loop.rs",
+            "crates/overdrive-control-plane/tests/acceptance.rs",
+            "crates/overdrive-control-plane/tests/integration.rs"
+          ],
+          "dependencies": [
+            "02-02"
+          ],
+          "estimated_hours": 6,
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-control-plane/src/"
+            ],
+            "test_directories": [
+              "crates/overdrive-control-plane/tests/integration/",
+              "crates/overdrive-control-plane/tests/acceptance/"
+            ]
+          }
+        },
+        {
+          "id": "02-04",
+          "name": "Migrate streaming.rs and handlers.rs view reads off the cache and rewrite their inline tests",
+          "description": "Two read-side call sites depend on the JobLifecycleView today via the cache: crates/overdrive-control-plane/src/streaming.rs (read_view at :345-358, plus call sites in check_terminal at :282/:418 and lagged_recover at :210/:469-470) and crates/overdrive-control-plane/src/handlers.rs (read_job_lifecycle_view at :614-622, called from the alloc_status handler to populate RestartBudget per ADR-0033). Per the issue body and research §6.3 recommendation: keep view reads on the runtime's own async path and pass results down rather than scatter LibsqlHandle ownership across the crate. Concrete plumbing — Option A from research §6.3 for streaming.rs: extend crate::action_shim::LifecycleEvent to carry a small projection (restart_count_max: u32, derived from the reconcile next_view computed in step 02-03 inside run_convergence_tick) so check_terminal and lagged_recover no longer need a libSQL read at all; the broadcast event already carries the data they need. For handlers.rs::alloc_status (one read per HTTP request, low frequency, async fn already): call state.runtime.libsql_handle(&ReconcilerName::JOB_LIFECYCLE) → returns Option<&LibsqlHandle>, then JobLifecycle::hydrate(target, handle).await → project to RestartBudget. Delete read_view (streaming.rs:345-358), read_job_lifecycle_view (handlers.rs:614-622), the use crate::CachedView import at streaming.rs:108, the use crate::CachedView import at handlers.rs:30, and the restart_budget_from_view helper if it becomes unused. Rewrite the inline streaming.rs test check_terminal_returns_converged_stopped_on_terminated_event at streaming.rs:520, 542, 557 — it currently constructs view_cache as a literal Arc<Mutex<BTreeMap>>; reshape to the new check_terminal signature (which now takes the LifecycleEvent's restart_count_max projection directly). Update tests/acceptance/alloc_status_snapshot.rs as needed to match the new handler internal shape (the on-the-wire RestartBudget contract is unchanged; only the source changes).",
+          "criteria": "streaming.rs no longer reads from view_cache; check_terminal and lagged_recover get restart-count information from the LifecycleEvent projection populated by run_convergence_tick. handlers.rs::alloc_status reads restart_counts via runtime.libsql_handle (returning Option<&LibsqlHandle>) + JobLifecycle::hydrate, async path. read_view, read_job_lifecycle_view, and unused helpers are deleted. The use crate::CachedView imports at streaming.rs:108 and handlers.rs:30 are deleted. The streaming.rs inline test check_terminal_returns_converged_stopped_on_terminated_event passes against the new check_terminal signature. The on-the-wire RestartBudget shape exposed by alloc_status_snapshot.rs is unchanged (operator/CLI contract preserved). Mutation testing kill rate ≥ 80% on the new alloc_status read path and the LifecycleEvent projection construction.",
+          "test_file": "crates/overdrive-control-plane/src/streaming.rs",
+          "scenario_name": "check_terminal_returns_converged_stopped_on_terminated_event",
+          "acceptance_criteria": [
+            "crate::action_shim::LifecycleEvent grows a restart_count_max: u32 (or equivalent small projection) field; run_convergence_tick at reconciler_runtime.rs populates it from the post-reconcile next_view before broadcasting",
+            "streaming.rs::check_terminal and streaming.rs::lagged_recover take the projection from the LifecycleEvent rather than reading view_cache; no LibsqlHandle is opened or accessed inside streaming.rs",
+            "handlers.rs::alloc_status reads restart_counts via state.runtime.libsql_handle(&ReconcilerName::JOB_LIFECYCLE) which returns Option<&LibsqlHandle>, then JobLifecycle::hydrate(target, handle).await, then projects to RestartBudget; on-the-wire RestartBudget shape is unchanged from ADR-0033",
+            "read_view at streaming.rs:345-358, read_job_lifecycle_view at handlers.rs:614-622, use crate::CachedView at streaming.rs:108, and use crate::CachedView at handlers.rs:30 are deleted",
+            "Inline test check_terminal_returns_converged_stopped_on_terminated_event at streaming.rs:520/:542/:557 is rewritten against the new check_terminal signature; the literal view_cache = Arc::new(Mutex::new(BTreeMap::new())) construction is gone",
+            "tests/acceptance/alloc_status_snapshot.rs continues to pass (wire contract preserved) — adjusted only as needed for handler-internal restructuring",
+            "Mutation testing kill rate ≥ 80% on the new alloc_status read path: cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-control-plane --file crates/overdrive-control-plane/src/handlers.rs --file crates/overdrive-control-plane/src/streaming.rs"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/streaming.rs",
+            "crates/overdrive-control-plane/src/handlers.rs",
+            "crates/overdrive-control-plane/src/action_shim.rs",
+            "crates/overdrive-control-plane/src/reconciler_runtime.rs",
+            "crates/overdrive-control-plane/tests/acceptance/alloc_status_snapshot.rs"
+          ],
+          "dependencies": [
+            "02-03"
+          ],
+          "estimated_hours": 4,
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-control-plane/src/"
+            ],
+            "test_directories": [
+              "crates/overdrive-control-plane/tests/acceptance/"
+            ]
+          }
+        },
+        {
+          "id": "02-05",
+          "name": "Delete AppState::view_cache, the CachedView enum, and refresh stale comments and docs",
+          "description": "Single-cut deletion. With every reader migrated to the libSQL path (steps 02-03 and 02-04), AppState::view_cache and the CachedView enum have no remaining call sites. Delete: AppState::view_cache field at crates/overdrive-control-plane/src/lib.rs:109, the pub enum CachedView at lib.rs:141-148 (note: line range 142-148 from the original research; freshness update §0.2 confirms 141-148 in current source), the field initialization at lib.rs:183 in AppState::new, and any remaining use crate::CachedView imports anywhere in the crate. Update the JobLifecycleView doc-comment at crates/overdrive-core/src/reconciler.rs:1320-1322 (still references the cache as the Phase 1 source) to describe the libSQL hydrate path. Per CLAUDE.md and the project's single-cut-greenfield-migrations rule: no #[deprecated] attribute, no rename stub, no feature-flagged old path. Run cargo check --workspace --all-targets and cargo clippy --workspace --all-targets to confirm zero dead-code warnings result from the deletion (per development.md § Deletion discipline — a dead_code warning after a deletion pass is the signal that more code needs deleting, not that the existing code needs a gate). Update the architecture diagrams at docs/architecture/cli-submit-vs-deploy-and-alloc-status/c4-component.md and architecture.md and ADR-0033 references to view_cache — flag these for the architect agent in the PR description; the implementer SHOULD NOT edit ADR/brief artifacts inline (per global instruction: always dispatch architectural doc edits to the architect agent).",
+          "criteria": "AppState::view_cache, the CachedView enum, the field init in AppState::new, and every use crate::CachedView import are deleted. The JobLifecycleView doc-comment at reconciler.rs:1320-1322 reflects the post-#139 libSQL source. cargo check --workspace --all-targets and cargo clippy --workspace --all-targets emit zero dead_code or unused_import warnings attributable to this PR. The full integration test suite passes via cargo xtask lima run -- cargo nextest run --workspace --features integration-tests on macOS, cargo nextest run --workspace --features integration-tests on Linux. The architecture-diagram updates and ADR-0033 cross-references to view_cache are flagged in the PR description for follow-up via the architect agent (not edited inline by the implementer). Mutation testing kill rate ≥ 80% on the per-PR diff: cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests.",
+          "test_file": "crates/overdrive-control-plane/tests/integration/runtime_convergence_loop.rs",
+          "scenario_name": "runtime_reconcile_is_idempotent_across_simulated_control_plane_restart",
+          "acceptance_criteria": [
+            "AppState::view_cache field at crates/overdrive-control-plane/src/lib.rs:109 is deleted",
+            "pub enum CachedView at crates/overdrive-control-plane/src/lib.rs:141-148 is deleted",
+            "Field initialization view_cache: Arc::new(Mutex::new(BTreeMap::new())) at lib.rs:183 in AppState::new is deleted",
+            "Every use crate::CachedView import across the crate is deleted (verified by grep returning zero hits)",
+            "JobLifecycleView doc-comment at crates/overdrive-core/src/reconciler.rs:1320-1322 is updated to describe the libSQL hydrate path post-#139",
+            "cargo check --workspace --all-targets and cargo clippy --workspace --all-targets --features integration-tests emit zero dead_code or unused_import warnings introduced by this PR",
+            "Full integration suite passes: on macOS via cargo xtask lima run -- cargo nextest run --workspace --features integration-tests; on Linux via cargo nextest run --workspace --features integration-tests; doctests pass via cargo test --doc --workspace",
+            "The architecture diagrams at docs/architecture/cli-submit-vs-deploy-and-alloc-status/c4-component.md and architecture.md, plus the ADR-0033 reference to view_cache, are flagged in the PR description for follow-up by the architect agent — implementer does NOT edit these docs inline",
+            "Per-PR mutation testing kill rate ≥ 80%: cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/lib.rs",
+            "crates/overdrive-core/src/reconciler.rs"
+          ],
+          "dependencies": [
+            "02-04"
+          ],
+          "estimated_hours": 2,
+          "implementation_scope": {
+            "source_directories": [
+              "crates/overdrive-control-plane/src/",
+              "crates/overdrive-core/src/"
+            ],
+            "test_directories": [
+              "crates/overdrive-control-plane/tests/integration/"
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "implementation_scope": {
+    "source_directories": [
+      "crates/overdrive-core/src/",
+      "crates/overdrive-control-plane/src/"
+    ],
+    "test_directories": [
+      "crates/overdrive-core/tests/acceptance/",
+      "crates/overdrive-core/tests/compile_fail/",
+      "crates/overdrive-control-plane/tests/integration/",
+      "crates/overdrive-control-plane/tests/acceptance/"
+    ],
+    "excluded_patterns": [
+      "target/**",
+      "**/*.bk"
+    ]
+  },
+  "validation": {
+    "status": "approved",
+    "reviewer": "nw-acceptance-designer-reviewer",
+    "reviewed_at": "2026-05-03T17:25:00Z",
+    "verdict": "APPROVED",
+    "approval_notes": "Final reviewer pass after revision_response_v2. The concrete-newtype shape with constructor split satisfies .claude/rules/development.md § 'Port-trait dependencies' (no behavioural divergence between :memory: and file backends; both expose &libsql::Connection identically). Acceptance traceability solid; persist-inputs/single-cut/Lima/integration-gating discipline all correctly applied. Non-blocking: step 02-02 couples four concerns (tick-loop rewire + test migration + file move + counting-strategy rewrite) — the crafter MAY defer the two counting-strategy rewrites to a follow-up step if implementation hits unexpected interactions; AC permit that sequencing.",
+    "prior_revision_history": "Original verdict NEEDS_REVISION at 2026-05-03T16:00:00Z (1 blocking, 4 suggestions). v1 revision shipped port-trait shape; v2 revision reverted to concrete-newtype per user direction.",
+    "blocking_issues": 0,
+    "suggestions": 0,
+    "findings": [
+      {
+        "type": "issue (blocking)",
+        "severity": "critical",
+        "title": "Port-trait constraint contradicts current concrete-newtype design",
+        "location": "Phase 01 description + steps 01-01 through 02-04",
+        "issue": "User has overruled the architect's no-port-trait choice. Current roadmap explicitly states 'LibsqlHandle is a concrete newtype, not a port trait' (Phase 01 description) and every step assumes that shape. Mandatory: LibsqlHandle MUST be a port trait per .claude/rules/development.md § 'Port-trait dependencies', with real-libsql binding in overdrive-host and sim binding in overdrive-sim. Integration tests still use real libsql (via host binding); only DST/unit tests use sim binding.",
+        "recommendation": "Architect must revise: (1) drop 'not a port trait' from Phase 01 description; (2) reshape step 01-01 to define LibsqlHandle as a trait in overdrive-core; (3) add steps for the real-libsql binding (overdrive-host) and sim binding (overdrive-sim); (4) step 01-02 routes through Arc<dyn LibsqlHandle> in registry; (5) hydrate signature becomes &dyn LibsqlHandle (or &impl LibsqlHandle). Structural change, not line-edit."
+      },
+      {
+        "type": "suggestion (blocking)",
+        "severity": "high",
+        "title": "Step 01-01 AC inadvertently locks Arc<libsql::Connection> as the only representation",
+        "location": "phases[0].steps[0].criteria",
+        "recommendation": "Reword: 'LibsqlHandle trait in overdrive-core defines a method contract that both real and sim bindings implement. Real binding in overdrive-host wraps Arc<libsql::Connection>; sim binding in overdrive-sim uses an in-memory or :memory:-backed shape. Implementations are independent.'"
+      },
+      {
+        "type": "suggestion (non-blocking)",
+        "severity": "medium",
+        "title": "Compile-fail fixture purity contract unaffected by trait refactor",
+        "location": "phases[0].steps[0]",
+        "recommendation": "Add to AC: 'Compile-fail fixture reconcile_cannot_take_libsql_handle.rs continues to reject reconcile() taking the handle. The fixture asserts the purity boundary, not the concrete shape, so it survives the trait refactor unchanged.'"
+      },
+      {
+        "type": "suggestion (blocking)",
+        "severity": "medium",
+        "title": "Step 01-02 must use Arc<dyn LibsqlHandle> in registry storage",
+        "location": "phases[0].steps[1]",
+        "recommendation": "Revise: 'ReconcilerRuntime::register stores Arc<dyn LibsqlHandle> alongside AnyReconciler. The libsql_provisioner returns a libsql::Database; node-wiring code (overdrive-host) constructs RealLibsqlHandle and wraps in Arc. Tests use overdrive-sim::SimLibsqlHandle. The libsql_handle(name) accessor returns Option<Arc<dyn LibsqlHandle>>.'"
+      },
+      {
+        "type": "suggestion (non-blocking)",
+        "severity": "medium",
+        "title": "Integration vs unit-test scoping under trait model",
+        "location": "phases[1].steps[1]",
+        "recommendation": "Add to AC: 'Integration-scoped tests (under tests/integration/) use real RealLibsqlHandle from overdrive-host. Unit-scoped DST tests use SimLibsqlHandle from overdrive-sim, enabling SimClock control. The runtime_reconcile_is_idempotent_across_simulated_control_plane_restart test moves to tests/integration/ with the real binding; DST harness variants (if needed) use the sim binding.'"
+      }
+    ],
+    "revision_response": {
+      "revised_at": "2026-05-03T18:00:00Z",
+      "summary": "Reshaped Phase 01 from 2 steps to 3 to accommodate trait + dual bindings as separately testable concerns. Step 01-01 now defines LibsqlHandle as a port trait under crates/overdrive-core/src/traits/libsql_handle.rs in the same shape as Clock/IntentStore/etc. (Send + Sync + 'static, single method exposing &libsql::Connection). Step 01-02 ships the production binding (overdrive_host::RealLibsqlHandle wrapping Arc<libsql::Connection>) and the simulation binding (overdrive_sim::SimLibsqlHandle wrapping Arc<libsql::Connection> over libsql :memory:) as two independent crates with independent tests — real binding test under host/tests/integration/ behind --features integration-tests, sim binding test default-lane in-process. Step 01-03 wires Arc<dyn LibsqlHandle> through the ReconcilerRuntime registry; the libsql_provisioner stays in overdrive-control-plane (already adapter-host class per Cargo.toml:21, no class violation, no relocation needed) and continues to return raw libsql::Database — the host-binding wrap happens at the registry call site, the wiring boundary. All Phase 02 steps updated to take &dyn LibsqlHandle (trait object) instead of the concrete struct; Reconciler::hydrate and the new Reconciler::persist methods both take &dyn LibsqlHandle. Step 02-01 adds a default-lane DST test exercising the same hydrate/persist code path against SimLibsqlHandle to prove the trait abstraction is honoured by both bindings and that production code carries no sim-specific workarounds (per development.md § 'Production code is not shaped by simulation'). Step 02-02 keeps the integration-scoped convergence-loop regression test wiring RealLibsqlHandle; a parallel DST variant is at the architect's discretion since step 02-01 already covers both bindings of the underlying code path. Sim binding shape decision: real libsql against :memory: rather than a hand-rolled in-memory map. Rationale: (a) trait surface stays narrow because both bindings expose &libsql::Connection naturally; (b) zero divergence in SQL semantics between bindings means production hydrate bodies cannot accidentally branch on sim vs real; (c) directly satisfies the development.md rule that production code MUST NOT carry workarounds for sim quirks. Total step count went from 6 to 7. Phase 01 description rewritten to drop the contradicted 'not a port trait' language and explain the new layered shape. Acceptance criteria across all steps updated to reflect Arc<dyn LibsqlHandle> and the dual-binding test scoping the reviewer requested."
+    },
+    "revision_response_v2": {
+      "revised_at": "2026-05-03T20:00:00Z",
+      "summary": "Reverted the port-trait shape and restored the original concrete-newtype design with one refinement: the constructor split. User reasoning (which the architect's original instinct already matched): a port trait whose only divergence between sim and host bindings is ':memory:' vs '/path/to/file' for the libsql connection string is a trait without behavioural divergence — a rename of a constructor argument, not a port abstraction. Sibling port traits in this codebase (Clock, Transport, Entropy, Driver, Llm) all justify themselves with behavioural divergence between sim and host (controllable time, partition injection, seeded RNG, configurable failure modes, transcript replay); a LibsqlHandle 'sim' binding would differ from production only in which path string it passes to libsql::Builder::new_local. Per .claude/rules/development.md § 'Port-trait dependencies', a trait exists where the sim implementation captures something the production implementation cannot; that condition isn't met here. Concrete changes vs the v1 revision: (a) Phase 01 collapsed from 3 steps to 2; total step count returned from 7 to 6. (b) Step 01-01 promotes LibsqlHandle to a concrete newtype (pub struct LibsqlHandle { conn: Arc<libsql::Connection> }) in its current home (crates/overdrive-core/src/reconciler.rs) with two constructors — open(path) for production (file-backed) and open_in_memory() for tests (libsql :memory:) — plus a connection() accessor. (c) Step 01-02 (formerly 01-03) wires &LibsqlHandle through the ReconcilerRuntime registry; libsql_provisioner stays in overdrive-control-plane and continues to return the path; ReconcilerRuntime::register calls LibsqlHandle::open(path) at registration time and stashes the handle. (d) The previous step 01-02 (dual sim/host bindings in overdrive-host and overdrive-sim) is dropped entirely — no new wiring crate dependencies, no separate adapter modules, no parallel test trees. (e) All Phase 02 steps reverted to &LibsqlHandle (concrete reference); Reconciler::hydrate and the new Reconciler::persist both take &LibsqlHandle. (f) Step 02-02's runtime_reconcile_is_idempotent_across_simulated_control_plane_restart test now explicitly mandates file-backed LibsqlHandle::open(tempdir.path()) — NOT open_in_memory() — because :memory: loses state when the handle drops, and the test's whole point is to assert persistence across simulated restart. Default-lane unit tests reach for open_in_memory() when fast in-process isolation is sufficient; integration-scoped tests reach for open(tempdir.path()) when restart semantics must be exercised. (g) The implementation_scope source_directories are pruned back to overdrive-core and overdrive-control-plane only; overdrive-host and overdrive-sim no longer participate. Quote from user: 'port trait with no behavioural divergence between bindings is unjustified ceremony — concrete newtype with constructor split is the right shape'."
+    }
+  }
+}

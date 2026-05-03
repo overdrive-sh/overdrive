@@ -103,8 +103,21 @@
 //!         &self.name
 //!     }
 //!
-//!     // The ONLY place a reconciler author touches libSQL. Phase 1
-//!     // reconcilers hold no memory, so this is trivially Ok(()).
+//!     // Schema-author hook (issue #139 step 02-02). Runs ONCE per
+//!     // reconciler instance at register time, before any `hydrate` /
+//!     // `persist` call. CREATE TABLE / ALTER TABLE lives here; failure
+//!     // surfaces as `ControlPlaneError::Internal` at register time —
+//!     // the runtime never carries a half-migrated handle into the
+//!     // tick loop. Phase 1 `View = ()` reconcilers have no schema and
+//!     // return `Ok(())`.
+//!     async fn migrate(&self, _db: &LibsqlHandle) -> Result<(), HydrateError> {
+//!         Ok(())
+//!     }
+//!
+//!     // The ONLY place a reconciler author touches libSQL during a
+//!     // tick. SELECT-only against the schema `migrate` materialised.
+//!     // Phase 1 reconcilers hold no memory, so this is trivially
+//!     // `Ok(())`.
 //!     async fn hydrate(
 //!         &self,
 //!         _target: &TargetResource,
@@ -346,14 +359,36 @@ pub enum HydrateError {
 ///
 /// Per ADR-0013 §2 and §2c:
 ///
-/// * `hydrate` is async — the ONLY place a reconciler author touches
-///   libSQL. Returns the author-declared `View` type (typically a
-///   struct decoded from a row set).
+/// * `migrate` is async — runs ONCE per reconciler instance at register
+///   time. Owns CREATE TABLE / ALTER TABLE; the runtime fails fast on
+///   Err with `ControlPlaneError::Internal` and the registry contains
+///   no partial slot for that reconciler. Issue #139 step 02-02.
+/// * `hydrate` is async — runs every reconcile tick on the hot path.
+///   The ONLY place a reconciler author runs SELECT against libSQL.
+///   Assumes the schema is current (`migrate` already succeeded).
+///   Returns the author-declared `View` type (typically a struct
+///   decoded from a row set).
+/// * `persist` is async — runs every reconcile tick after `reconcile`.
+///   Reconciler-author-owned write phase (DELETE-then-INSERT under
+///   Phase 1's `NextView = Self::View` convention). Assumes the schema
+///   is current (`migrate` already succeeded).
 /// * `reconcile` is pure and synchronous — no `.await`, no I/O, no
 ///   wall-clock read (only via `tick.now`), no direct store write. The
 ///   returned `(Vec<Action>, Self::View)` tuple carries actions the
 ///   runtime commits through Raft and the next-view the runtime diffs
 ///   against `view` and persists back to libSQL.
+///
+/// **Lifecycle invariant** (issue #139 step 02-02): by the time
+/// `hydrate` or `persist` runs on a `LibsqlHandle`, `migrate` has
+/// already returned `Ok(())` on that handle for this reconciler.
+/// The runtime enforces this structurally — `ReconcilerRuntime::register`
+/// calls `migrate` immediately after `LibsqlHandle::open` succeeds and
+/// BEFORE the registry slot is finalised; there is no path that
+/// reaches `hydrate`/`persist` without `migrate` having succeeded
+/// at register time. Reconciler authors MAY rely on this invariant
+/// to keep `hydrate` SELECT-only and `persist` DELETE-then-INSERT-only,
+/// avoiding the per-tick CREATE TABLE IF NOT EXISTS overhead and
+/// keeping the schema-author concern in exactly one place.
 ///
 /// Compile-time enforcement: the acceptance test
 /// `reconciler_trait_signature_is_synchronous_no_async_no_clock_param`
@@ -388,10 +423,45 @@ pub trait Reconciler: Send + Sync {
     /// dispatch on the variant that holds this name.
     fn name(&self) -> &ReconcilerName;
 
-    /// Async read phase. The ONLY place a reconciler author touches
-    /// libSQL. Free-form SQL lives here; schema management (CREATE
-    /// TABLE IF NOT EXISTS, ALTER TABLE ADD COLUMN) lives here too —
-    /// no framework migrations in Phase 1.
+    /// Schema-author lifecycle hook (issue #139 step 02-02). Runs ONCE
+    /// per reconciler instance at register time, BEFORE any
+    /// [`hydrate`](Self::hydrate) or [`persist`](Self::persist) call.
+    ///
+    /// CREATE TABLE / ALTER TABLE lives here. Future ALTER TABLE
+    /// migrations land in the same body and follow the project's
+    /// additive-only schema migration discipline (CLAUDE.md).
+    /// `CREATE TABLE IF NOT EXISTS` is naturally idempotent so
+    /// re-running migrate on a refreshed handle is safe.
+    ///
+    /// Pulling DDL off the per-tick `hydrate` hot path gives three
+    /// properties: (1) `hydrate` stops re-parsing CREATE TABLE IF NOT
+    /// EXISTS every tick; (2) WASM-loaded third-party reconcilers
+    /// (whitepaper §18) get a clean module-load hook the runtime
+    /// invokes without inspecting reconciler internals; (3) broken
+    /// migrations surface at register time as
+    /// `ControlPlaneError::Internal`, not on first reconcile — extends
+    /// the boot-fast posture from step 01-02.
+    ///
+    /// Phase 1 ships no default impl: every reconciler MUST implement
+    /// `migrate` explicitly. Reconcilers whose `View = ()` (e.g.
+    /// `NoopHeartbeat`) implement it as `Ok(())`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`HydrateError::Libsql`] on underlying libsql failure
+    /// (typically a malformed CREATE TABLE statement or a libsql build
+    /// error against the underlying file). The `ReconcilerRuntime`
+    /// maps this to `ControlPlaneError::Internal` and refuses to
+    /// finalise the registry slot.
+    fn migrate(
+        &self,
+        db: &LibsqlHandle,
+    ) -> impl std::future::Future<Output = Result<(), HydrateError>> + Send;
+
+    /// Async read phase. The ONLY place a reconciler author runs
+    /// SELECT against libSQL. SELECT-only against the schema
+    /// [`migrate`](Self::migrate) materialised — the lifecycle
+    /// invariant guarantees the schema is current.
     ///
     /// Per ADR-0013 §2 and §2b, the runtime's tick loop is
     /// hydrate-then-reconcile: the runtime owns the `.await` on this
@@ -402,7 +472,9 @@ pub trait Reconciler: Send + Sync {
     /// # Errors
     ///
     /// Returns [`HydrateError::Libsql`] on underlying libsql failure,
-    /// or [`HydrateError::Schema`] on schema-level mismatch.
+    /// or [`HydrateError::Schema`] on schema-level mismatch (e.g. a
+    /// row whose textual content does not parse into the typed
+    /// `View` field — newtype rejection, malformed `UnixInstant`).
     fn hydrate(
         &self,
         target: &TargetResource,
@@ -852,6 +924,12 @@ impl Reconciler for NoopHeartbeat {
         &self.name
     }
 
+    async fn migrate(&self, _db: &LibsqlHandle) -> Result<(), HydrateError> {
+        // `View = ()` carries no schema; the proof-of-life reconciler
+        // has nothing to migrate.
+        Ok(())
+    }
+
     async fn hydrate(
         &self,
         _target: &TargetResource,
@@ -863,6 +941,127 @@ impl Reconciler for NoopHeartbeat {
     async fn persist(&self, _view: &Self::View, _db: &LibsqlHandle) -> Result<(), HydrateError> {
         // `View = ()` carries no rows; the proof-of-life reconciler
         // has nothing to persist.
+        Ok(())
+    }
+
+    fn reconcile(
+        &self,
+        _desired: &Self::State,
+        _actual: &Self::State,
+        _view: &Self::View,
+        _tick: &TickContext,
+    ) -> (Vec<Action>, Self::View) {
+        (vec![Action::Noop], ())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// TestStubReconciler — test-only reconciler with parameterised behaviour
+// ---------------------------------------------------------------------------
+
+/// Behaviour parameter for [`TestStubReconciler::migrate`].
+///
+/// **Test infrastructure**, kept hidden from rustdoc via `#[doc(hidden)]`.
+/// Used to inject a controlled migrate outcome into tests that exercise
+/// the runtime's eager-migrate-at-register path without modifying
+/// production reconcilers. Constructible only via
+/// [`TestStubReconciler::new`]; the only consumer is the
+/// `register_runs_migrate_once_per_reconciler_and_fails_fast_on_broken_migration`
+/// integration test in `overdrive-control-plane`.
+///
+/// The variant lives in the public surface (rather than feature-gated)
+/// because resolver-v3 workspace builds compile the lib once with the
+/// union of features any target requires; gating the variant produces
+/// non-exhaustive-match errors in `cargo test --doc --workspace`. The
+/// variant is harmless in production builds — `TestStubReconciler` does
+/// no I/O outside of its `migrate` body, which production code never
+/// constructs.
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MigrateBehavior {
+    /// `migrate` returns `Ok(())`. Pinpoints the success path of the
+    /// runtime's eager-migrate dispatch.
+    Succeed,
+    /// `migrate` returns `Err(HydrateError::Libsql(...))` once. The
+    /// underlying error is a synthetic libsql failure produced by
+    /// running an intentionally-malformed SQL statement against the
+    /// supplied handle. Pinpoints the fail-fast path of the runtime's
+    /// eager-migrate dispatch.
+    FailOnce,
+}
+
+/// Test-only reconciler whose `migrate` outcome is parameterised by
+/// [`MigrateBehavior`]. `hydrate`, `persist`, and `reconcile` are
+/// trivial — `View = ()` and reconcile is a no-op — because the only
+/// behaviour exercised by current tests is the migrate-at-register
+/// fail-fast contract.
+///
+/// **Test infrastructure**, kept hidden from rustdoc via `#[doc(hidden)]`.
+/// See [`MigrateBehavior`] for the cfg-gating rationale.
+///
+/// Use via the [`AnyReconciler::TestStub`] variant — the `TestStub`
+/// variant is what `ReconcilerRuntime::register` accepts.
+#[doc(hidden)]
+pub struct TestStubReconciler {
+    name: ReconcilerName,
+    migrate_behavior: MigrateBehavior,
+}
+
+impl TestStubReconciler {
+    /// Construct a `TestStubReconciler` with the given canonical name
+    /// and migrate behaviour.
+    #[must_use]
+    pub const fn new(name: ReconcilerName, migrate_behavior: MigrateBehavior) -> Self {
+        Self { name, migrate_behavior }
+    }
+}
+
+impl Reconciler for TestStubReconciler {
+    type State = ();
+    type View = ();
+
+    fn name(&self) -> &ReconcilerName {
+        &self.name
+    }
+
+    // mutants: skip — `TestStubReconciler` is test infrastructure
+    // (kept out of public rustdoc via `#[doc(hidden)]`); replacing
+    // `migrate` with `Ok(())` would land a `MigrateBehavior::FailOnce`
+    // → `Ok(())` mutant the runtime test cannot catch by design,
+    // because the test exercises exactly the FailOnce → Err path. The
+    // value being defended is the `MigrateBehavior::FailOnce` arm
+    // emitting `HydrateError::Libsql`, which is asserted in
+    // `register_runs_migrate_once_per_reconciler_and_fails_fast_on_broken_migration`
+    // in `overdrive-control-plane` integration tests — but that
+    // assertion is on `ControlPlaneError::Internal`, not on the inner
+    // error variant, so the cargo-mutants kill-rate tracker scoped to
+    // this file does not see the catch.
+    async fn migrate(&self, db: &LibsqlHandle) -> Result<(), HydrateError> {
+        match self.migrate_behavior {
+            MigrateBehavior::Succeed => Ok(()),
+            MigrateBehavior::FailOnce => {
+                // Run an intentionally-malformed statement against the
+                // real handle so the surfaced `HydrateError::Libsql`
+                // carries a real libsql diagnostic, not a fabricated
+                // one. This exercises the same `#[from] libsql::Error`
+                // conversion path the production reconciler authors
+                // rely on, so the test catches regressions in error
+                // mapping as well as registry-flow control.
+                let _ = db.connection().execute("THIS IS NOT VALID SQL", ()).await?;
+                Ok(())
+            }
+        }
+    }
+
+    async fn hydrate(
+        &self,
+        _target: &TargetResource,
+        _db: &LibsqlHandle,
+    ) -> Result<Self::View, HydrateError> {
+        Ok(())
+    }
+
+    async fn persist(&self, _view: &Self::View, _db: &LibsqlHandle) -> Result<(), HydrateError> {
         Ok(())
     }
 
@@ -898,6 +1097,18 @@ pub enum AnyReconciler {
     /// First real (non-proof-of-life) reconciler. Converges declared
     /// replica count for a `Job` — see [`JobLifecycle`].
     JobLifecycle(JobLifecycle),
+    /// **Test infrastructure variant**, kept out of public rustdoc via
+    /// `#[doc(hidden)]`. Carries a [`TestStubReconciler`] whose
+    /// `migrate`, `hydrate`, and `persist` behaviour is parameterised
+    /// at construction time. Used by the
+    /// `register_runs_migrate_once_per_reconciler_and_fails_fast_on_broken_migration`
+    /// integration test to inject a reconciler whose `migrate` returns
+    /// Err WITHOUT adding a feature flag to a production reconciler
+    /// (per issue #139 step 02-02 AC). Production code never
+    /// constructs this variant. See [`TestStubReconciler`] for the
+    /// gating rationale.
+    #[doc(hidden)]
+    TestStub(TestStubReconciler),
 }
 
 impl AnyReconciler {
@@ -907,6 +1118,26 @@ impl AnyReconciler {
         match self {
             Self::NoopHeartbeat(r) => r.name(),
             Self::JobLifecycle(r) => r.name(),
+            Self::TestStub(r) => r.name(),
+        }
+    }
+
+    /// Schema-author lifecycle hook — dispatches to the inner
+    /// reconciler's [`Reconciler::migrate`]. The runtime invokes this
+    /// once at register time, immediately after `LibsqlHandle::open`
+    /// and BEFORE the registry slot is finalised.
+    ///
+    /// # Errors
+    ///
+    /// Propagates [`HydrateError`] from the inner reconciler. The
+    /// `ReconcilerRuntime::register` caller maps this to
+    /// `ControlPlaneError::Internal` and refuses to insert a partial
+    /// registry entry.
+    pub async fn migrate(&self, db: &LibsqlHandle) -> Result<(), HydrateError> {
+        match self {
+            Self::NoopHeartbeat(r) => r.migrate(db).await,
+            Self::JobLifecycle(r) => r.migrate(db).await,
+            Self::TestStub(r) => r.migrate(db).await,
         }
     }
 
@@ -927,6 +1158,7 @@ impl AnyReconciler {
             Self::JobLifecycle(r) => {
                 r.hydrate(target, db).await.map(AnyReconcilerView::JobLifecycle)
             }
+            Self::TestStub(r) => r.hydrate(target, db).await.map(|()| AnyReconcilerView::Unit),
         }
     }
 
@@ -953,6 +1185,12 @@ impl AnyReconciler {
             (Self::JobLifecycle(r), AnyReconcilerView::JobLifecycle(view)) => {
                 r.persist(view, db).await
             }
+            // mutants: skip — test-infra dispatch arm; `TestStubReconciler::persist`
+            // is `Ok(())`, so deleting the arm only changes behaviour when a test
+            // explicitly asserts on the dispatch path's persist outcome — none does
+            // (the integration test asserts on the runtime register flow, not on
+            // post-register persist).
+            (Self::TestStub(r), AnyReconcilerView::Unit) => r.persist(&(), db).await,
             // Cross-variant — the runtime tick loop only ever pairs a
             // reconciler with the View shape its own `hydrate`
             // produced, so this arm cannot be reached from a
@@ -1021,6 +1259,15 @@ impl AnyReconciler {
             ) => {
                 let (actions, next_view) = r.reconcile(desired, actual, view, tick);
                 (actions, AnyReconcilerView::JobLifecycle(next_view))
+            }
+            // mutants: skip — test-infra dispatch arm; `TestStubReconciler::reconcile`
+            // is a no-op returning `vec![Action::Noop]`. Deleting the arm only
+            // changes behaviour when a test explicitly asserts on this dispatch
+            // path's actions — none does. The runtime never constructs a
+            // `TestStub` triple in production.
+            (Self::TestStub(r), AnyState::Unit, AnyState::Unit, AnyReconcilerView::Unit) => {
+                let (actions, ()) = r.reconcile(&(), &(), &(), tick);
+                (actions, AnyReconcilerView::Unit)
             }
             // Cross-variant branches — statically impossible once the
             // runtime correctly hydrates matching state and view kinds.
@@ -1144,17 +1391,17 @@ impl Reconciler for JobLifecycle {
         &self.name
     }
 
-    async fn hydrate(
-        &self,
-        _target: &TargetResource,
-        db: &LibsqlHandle,
-    ) -> Result<Self::View, HydrateError> {
-        // Per ADR-0013 §6 (schema-author clause): the reconciler owns
-        // CREATE TABLE / SELECT inline. Two tables, one column of
-        // identity + one column of payload each — exactly the
-        // persist-inputs shape the View carries. NO derived
-        // `next_attempt_at` column: the deadline is recomputed every
-        // tick from `last_failure_seen_at + backoff_for_attempt(...)`
+    async fn migrate(&self, db: &LibsqlHandle) -> Result<(), HydrateError> {
+        // Per ADR-0013 §6 (schema-author clause), as refactored in
+        // issue #139 step 02-02: the reconciler owns CREATE TABLE in
+        // the dedicated `migrate` lifecycle hook called once per
+        // reconciler instance at register time, NOT inline in
+        // `hydrate`/`persist` on the per-tick hot path.
+        //
+        // Two tables, one column of identity + one column of payload
+        // each — exactly the persist-inputs shape the View carries. NO
+        // derived `next_attempt_at` column: the deadline is recomputed
+        // every tick from `last_failure_seen_at + backoff_for_attempt(...)`
         // per `.claude/rules/development.md` § "Persist inputs, not
         // derived state".
         //
@@ -1164,6 +1411,10 @@ impl Reconciler for JobLifecycle {
         // chosen over INTEGER nanos so the full 64-bit seconds range
         // round-trips losslessly — INTEGER (i64) would refuse the
         // upper-half u64 seconds the proptest exercises.
+        //
+        // `CREATE TABLE IF NOT EXISTS` is naturally idempotent; future
+        // ALTER TABLE migrations append here following the project's
+        // additive-only schema migration discipline.
         let conn = db.connection();
         conn.execute(
             "CREATE TABLE IF NOT EXISTS restart_counts (\
@@ -1181,6 +1432,20 @@ impl Reconciler for JobLifecycle {
             (),
         )
         .await?;
+        Ok(())
+    }
+
+    async fn hydrate(
+        &self,
+        _target: &TargetResource,
+        db: &LibsqlHandle,
+    ) -> Result<Self::View, HydrateError> {
+        // Schema is current by lifecycle invariant — `migrate` ran at
+        // register time per the runtime contract (see
+        // `ReconcilerRuntime::register`). This body is SELECT-only;
+        // CREATE TABLE moved to `migrate` in issue #139 step 02-02 to
+        // keep the per-tick hot path off the schema-management path.
+        let conn = db.connection();
 
         let mut view = JobLifecycleView::default();
 
@@ -1230,30 +1495,13 @@ impl Reconciler for JobLifecycle {
         // bounded by the alloc cardinality of one job). Later phases
         // may optimise to true diffs.
         //
-        // Schema management lives in `hydrate` per the §6 schema-author
-        // clause, but we re-issue `CREATE TABLE IF NOT EXISTS` here too:
-        // the runtime tick loop calls `hydrate` before `persist` on
-        // every tick, but a defensive create-if-not-exists keeps
-        // `persist` callable in isolation (e.g. tests that bootstrap
-        // state without a prior hydrate).
+        // Schema is current by lifecycle invariant — `migrate` ran at
+        // register time per the runtime contract (see
+        // `ReconcilerRuntime::register`). This body is
+        // DELETE-then-INSERT-only; CREATE TABLE moved to `migrate` in
+        // issue #139 step 02-02 to keep the per-tick hot path off the
+        // schema-management path.
         let conn = db.connection();
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS restart_counts (\
-                alloc_id TEXT PRIMARY KEY NOT NULL, \
-                count INTEGER NOT NULL\
-            )",
-            (),
-        )
-        .await?;
-        conn.execute(
-            "CREATE TABLE IF NOT EXISTS last_failure_seen_at (\
-                alloc_id TEXT PRIMARY KEY NOT NULL, \
-                ts TEXT NOT NULL\
-            )",
-            (),
-        )
-        .await?;
-
         let txn = conn.transaction().await?;
         txn.execute("DELETE FROM restart_counts", ()).await?;
         txn.execute("DELETE FROM last_failure_seen_at", ()).await?;
@@ -1626,10 +1874,11 @@ fn is_restartable(row: &AllocStatusRow) -> bool {
 ///
 /// Phase 1 hydrates this from the runtime's view cache
 /// (`AppState::view_cache`); Phase 2+ migrates the cache to
-/// per-primitive libSQL via `CREATE TABLE IF NOT EXISTS` inside
-/// `hydrate` per ADR-0013 §2b. The `UnixInstant` type is the portable
-/// wall-clock representation chosen specifically so libSQL can store
-/// and rehydrate the value across process restarts (cf.
+/// per-primitive libSQL via the dedicated [`Reconciler::migrate`]
+/// hook (issue #139 step 02-02) — schema is materialised at register
+/// time, NOT inline in `hydrate`. The `UnixInstant` type is the
+/// portable wall-clock representation chosen specifically so libSQL
+/// can store and rehydrate the value across process restarts (cf.
 /// `docs/research/control-plane/issue-139-followup-portable-deadline-representation-research.md`).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct JobLifecycleView {
@@ -1668,13 +1917,21 @@ mod tests {
         TargetResource::new("job/payments").expect("valid target resource")
     }
 
-    /// AC 4 (negative case) — hydrating an empty in-memory DB must
-    /// return the default `JobLifecycleView` and create the schema as
-    /// a side effect (so a subsequent `persist` does not need to
-    /// re-create it).
+    /// In-memory open + migrate ceremony. Mirrors the
+    /// `ReconcilerRuntime::register` lifecycle — open the handle, then
+    /// run `JobLifecycle::migrate` to materialise the schema before
+    /// any `hydrate`/`persist` is invoked. Issue #139 step 02-02.
+    async fn open_and_migrate_in_memory() -> LibsqlHandle {
+        let handle = LibsqlHandle::open_in_memory().await.expect("open in-memory");
+        JobLifecycle::canonical().migrate(&handle).await.expect("migrate job-lifecycle schema");
+        handle
+    }
+
+    /// AC 4 (negative case) — hydrating an empty (post-migrate)
+    /// in-memory DB returns the default `JobLifecycleView`.
     #[tokio::test]
     async fn job_lifecycle_hydrate_empty_db_returns_default() {
-        let handle = LibsqlHandle::open_in_memory().await.expect("open in-memory");
+        let handle = open_and_migrate_in_memory().await;
         let view = JobLifecycle::canonical().hydrate(&target(), &handle).await.expect("hydrate");
         assert_eq!(view, JobLifecycleView::default());
     }
@@ -1684,7 +1941,7 @@ mod tests {
     /// path under in-process isolation.
     #[tokio::test]
     async fn job_lifecycle_persist_then_hydrate_roundtrip_in_memory() {
-        let handle = LibsqlHandle::open_in_memory().await.expect("open in-memory");
+        let handle = open_and_migrate_in_memory().await;
         let reconciler = JobLifecycle::canonical();
 
         let mut view = JobLifecycleView::default();
@@ -1705,7 +1962,7 @@ mod tests {
     /// gate scopes to default-lane mutants too.
     #[tokio::test]
     async fn job_lifecycle_persist_replaces_prior_state_in_memory() {
-        let handle = LibsqlHandle::open_in_memory().await.expect("open in-memory");
+        let handle = open_and_migrate_in_memory().await;
         let reconciler = JobLifecycle::canonical();
 
         let mut first = JobLifecycleView::default();
@@ -1742,7 +1999,9 @@ mod tests {
     ///   same handle.
     #[tokio::test]
     async fn any_reconciler_persist_dispatches_correctly() {
-        // NoopHeartbeat arm.
+        // NoopHeartbeat arm — no schema, so a bare in-memory handle is
+        // sufficient (NoopHeartbeat::migrate is Ok(()) and its persist
+        // writes nothing).
         {
             let handle = LibsqlHandle::open_in_memory().await.expect("open in-memory");
             let any = AnyReconciler::NoopHeartbeat(NoopHeartbeat::canonical());
@@ -1750,10 +2009,12 @@ mod tests {
         }
         // JobLifecycle arm — write through Any, read back through the
         // concrete reconciler to prove the dispatch reached the right
-        // impl.
+        // impl. Schema must be materialised first via the Any-level
+        // `migrate` dispatch so persist sees a current schema.
         {
             let handle = LibsqlHandle::open_in_memory().await.expect("open in-memory");
             let any = AnyReconciler::JobLifecycle(JobLifecycle::canonical());
+            any.migrate(&handle).await.expect("any migrate");
 
             let mut view = JobLifecycleView::default();
             view.restart_counts.insert(alloc("dispatch-check"), 3);
@@ -1787,6 +2048,109 @@ mod tests {
         let row = rows.next().await.expect("next row").expect("row present");
         let got: i64 = row.get(0).expect("x column");
         assert_eq!(got, 1);
+    }
+
+    // ---------------------------------------------------------------------------
+    // Step 02-02 — `Reconciler::migrate` lifecycle hook
+    // ---------------------------------------------------------------------------
+
+    /// AC 2 — `JobLifecycle::migrate` materialises the reconciler's
+    /// schema (`restart_counts` and `last_failure_seen_at`) on a fresh
+    /// libSQL handle. Verified by issuing a `SELECT` against each
+    /// table after `migrate` returns; an empty result set proves the
+    /// table exists.
+    #[tokio::test]
+    async fn job_lifecycle_migrate_creates_schema_tables() {
+        let handle = LibsqlHandle::open_in_memory().await.expect("open in-memory");
+        JobLifecycle::canonical().migrate(&handle).await.expect("migrate ok");
+
+        let conn = handle.connection();
+        let mut rc =
+            conn.query("SELECT alloc_id, count FROM restart_counts", ()).await.expect("select rc");
+        assert!(rc.next().await.expect("rc next").is_none(), "fresh restart_counts is empty");
+
+        let mut lf = conn
+            .query("SELECT alloc_id, ts FROM last_failure_seen_at", ())
+            .await
+            .expect("select lf");
+        assert!(lf.next().await.expect("lf next").is_none(), "fresh last_failure_seen_at is empty");
+    }
+
+    /// AC 2 (idempotence) — `JobLifecycle::migrate` is safe to re-run
+    /// against the same handle. The runtime calls migrate once at
+    /// register time, but the `CREATE TABLE IF NOT EXISTS` shape means
+    /// re-running on a refreshed handle (e.g. tests that bootstrap and
+    /// re-open) MUST also succeed without error.
+    #[tokio::test]
+    async fn job_lifecycle_migrate_is_idempotent() {
+        let handle = LibsqlHandle::open_in_memory().await.expect("open in-memory");
+        let reconciler = JobLifecycle::canonical();
+        reconciler.migrate(&handle).await.expect("first migrate");
+        reconciler.migrate(&handle).await.expect("second migrate");
+
+        // Tables still queryable after re-migration.
+        let conn = handle.connection();
+        conn.query("SELECT alloc_id FROM restart_counts", ()).await.expect("rc still queryable");
+        conn.query("SELECT alloc_id FROM last_failure_seen_at", ())
+            .await
+            .expect("lf still queryable");
+    }
+
+    /// AC 3 — `NoopHeartbeat::migrate` is `Ok(())` (no schema).
+    #[tokio::test]
+    async fn noop_heartbeat_migrate_is_ok() {
+        let handle = LibsqlHandle::open_in_memory().await.expect("open in-memory");
+        NoopHeartbeat::canonical().migrate(&handle).await.expect("migrate ok");
+    }
+
+    /// AC 4 — `AnyReconciler::migrate` dispatches to the inner
+    /// reconciler's `migrate` per the existing `hydrate`/`persist`
+    /// dispatch shape.
+    ///
+    /// * `NoopHeartbeat`-arm dispatch must succeed against an empty DB.
+    /// * `JobLifecycle`-arm dispatch must produce a queryable schema —
+    ///   a follow-up `SELECT` against `restart_counts` succeeds.
+    #[tokio::test]
+    async fn any_reconciler_migrate_dispatches_correctly() {
+        // NoopHeartbeat arm.
+        {
+            let handle = LibsqlHandle::open_in_memory().await.expect("open in-memory");
+            let any = AnyReconciler::NoopHeartbeat(NoopHeartbeat::canonical());
+            any.migrate(&handle).await.expect("noop migrate");
+        }
+        // JobLifecycle arm.
+        {
+            let handle = LibsqlHandle::open_in_memory().await.expect("open in-memory");
+            let any = AnyReconciler::JobLifecycle(JobLifecycle::canonical());
+            any.migrate(&handle).await.expect("job-lifecycle migrate");
+
+            // Prove the dispatch reached the right impl: the schema is
+            // present.
+            let conn = handle.connection();
+            conn.query("SELECT alloc_id, count FROM restart_counts", ())
+                .await
+                .expect("schema present after dispatch");
+        }
+    }
+
+    /// Lifecycle invariant — `JobLifecycle::hydrate` against an
+    /// un-migrated DB returns `HydrateError::Libsql` because the
+    /// `SELECT` against the missing `restart_counts` table fails. This
+    /// pins the contract: hydrate assumes a current schema; migrate is
+    /// the only place that materialises it. A regression that quietly
+    /// re-introduced `CREATE TABLE IF NOT EXISTS` into hydrate would
+    /// flip this test from passing to failing.
+    #[tokio::test]
+    async fn job_lifecycle_hydrate_against_unmigrated_db_returns_libsql_error() {
+        let handle = LibsqlHandle::open_in_memory().await.expect("open in-memory");
+        // Note: NO migrate() call.
+        let result = JobLifecycle::canonical().hydrate(&target(), &handle).await;
+        match result {
+            Err(crate::reconciler::HydrateError::Libsql(_)) => {} // expected
+            other => panic!(
+                "hydrate against un-migrated DB must return HydrateError::Libsql, got {other:?}"
+            ),
+        }
     }
 
     /// `open(path)` writes to a file on disk. Re-opening the same path
