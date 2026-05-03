@@ -959,9 +959,11 @@ pub enum AnyReconcilerView {
 /// `overdrive_scheduler::schedule(...)` on `desired.nodes` +
 /// `desired.job`, and emits `Action::StartAllocation` /
 /// `Action::StopAllocation` to converge. Restart counts are tracked
-/// in `view.restart_counts`; backoff is gated against
-/// `view.next_attempt_at` (read from `tick.now`, NEVER
-/// `Instant::now()`).
+/// in `view.restart_counts`; backoff is gated by recomputing the
+/// deadline as `view.last_failure_seen_at + backoff_for_attempt(...)`
+/// against `tick.now_unix` (NEVER `Instant::now()` /
+/// `SystemTime::now()`). Per `.claude/rules/development.md` §
+/// "Persist inputs, not derived state".
 /// Maximum number of restart attempts before the `JobLifecycle`
 /// reconciler stops emitting `RestartAllocation` for a persistently
 /// failing alloc. Per US-03 step 02-03 — the ceiling exists to keep a
@@ -1067,16 +1069,16 @@ impl Reconciler for JobLifecycle {
         // Transitional-view-state contract (whitepaper §18 *Level-triggered
         // inside the reconciler* + `fix-stop-branch-backoff-pending` RCA):
         // when `stop_actions.is_empty()` the stop is complete — there is
-        // nothing left for the runtime to do. Clearing `next_attempt_at`
-        // is what tells the runtime's `view_has_backoff_pending`
-        // predicate to stop re-enqueueing; without it, a Failed-mid-
-        // backoff alloc keeps the predicate `true` and the broker spins
-        // for ~5 s until `restart_counts` reaches the ceiling.
-        // `restart_counts` is intentionally left intact: the predicate
-        // (`reconciler_runtime.rs:425-428`) only checks counts for
-        // entries that exist in `next_attempt_at`, so clearing the
-        // deadline map is sufficient — and the historical record is
-        // preserved.
+        // nothing left for the runtime to do. Clearing
+        // `last_failure_seen_at` is what tells the runtime's
+        // `view_has_backoff_pending` predicate to stop re-enqueueing;
+        // without it, a Failed-mid-backoff alloc keeps the predicate
+        // `true` and the broker spins for ~5 s until `restart_counts`
+        // reaches the ceiling. `restart_counts` is intentionally left
+        // intact: the predicate only checks counts for entries that
+        // exist in `last_failure_seen_at`, so clearing the
+        // observation-timestamp map is sufficient — and the historical
+        // record is preserved.
         if desired.desired_to_stop && desired.job.is_some() {
             let stop_actions: Vec<Action> = actual
                 .allocations
@@ -1088,7 +1090,7 @@ impl Reconciler for JobLifecycle {
             // Clear backoff state so view_has_backoff_pending does not re-enqueue.
             let mut next_view = view.clone();
             if stop_actions.is_empty() {
-                next_view.next_attempt_at.clear();
+                next_view.last_failure_seen_at.clear();
             }
             return (stop_actions, next_view);
         }
@@ -1178,8 +1180,20 @@ impl Reconciler for JobLifecycle {
                         // no further actions emitted.
                         return (Vec::new(), view.clone());
                     }
-                    if let Some(deadline) = view.next_attempt_at.get(&failed.alloc_id) {
-                        if tick.now < *deadline {
+                    // Persist-inputs read site (issue #141): recompute
+                    // the backoff deadline on every tick from the
+                    // persisted *inputs* (`last_failure_seen_at`,
+                    // `restart_counts`) against the current policy
+                    // (`backoff_for_attempt`). Mirrors the precedent at
+                    // `crates/overdrive-control-plane/src/worker/exit_observer.rs:291`
+                    // (`RETRY_BACKOFFS.get((attempts - 1) as usize)`).
+                    // A future operator-configurable per-job
+                    // `backoff_for_attempt` policy lands without a
+                    // schema migration — every persisted row picks up
+                    // the new policy on the next reconcile tick.
+                    if let Some(seen_at) = view.last_failure_seen_at.get(&failed.alloc_id) {
+                        let backoff = backoff_for_attempt(attempts);
+                        if tick.now_unix < *seen_at + backoff {
                             // Backoff window not yet elapsed.
                             return (Vec::new(), view.clone());
                         }
@@ -1214,9 +1228,16 @@ impl Reconciler for JobLifecycle {
                     let count =
                         next_view.restart_counts.entry(failed.alloc_id.clone()).or_insert(0);
                     *count = count.saturating_add(1);
-                    next_view
-                        .next_attempt_at
-                        .insert(failed.alloc_id.clone(), tick.now + RESTART_BACKOFF_DURATION);
+                    // Persist-inputs write site (issue #141): record
+                    // the wall-clock observation timestamp of this
+                    // failure (`tick.now_unix`) — NOT the precomputed
+                    // deadline `tick.now + RESTART_BACKOFF_DURATION`,
+                    // which would lock in the policy-at-write-time and
+                    // break the "policy evolution is a no-op for the
+                    // schema" guarantee. The deadline is recomputed at
+                    // the read site on every tick from this seen_at +
+                    // `backoff_for_attempt(restart_count)`.
+                    next_view.last_failure_seen_at.insert(failed.alloc_id.clone(), tick.now_unix);
                     return (vec![action], next_view);
                 }
 
@@ -1357,22 +1378,42 @@ fn is_restartable(row: &AllocStatusRow) -> bool {
 /// `JobLifecycle` reconciler's typed view — the libSQL-hydrated
 /// private memory.
 ///
-/// Per US-03 AC, the view carries:
+/// Per US-03 AC and issue #141 (persist inputs, not derived state):
 /// - `restart_counts: BTreeMap<AllocationId, u32>` — how many times
-///   each alloc has been started in this incarnation.
-/// - `next_attempt_at: BTreeMap<AllocationId, Instant>` — backoff
-///   deadline, computed from `tick.now + RESTART_BACKOFF_DURATION`.
+///   each alloc has been started in this incarnation. **Input.**
+/// - `last_failure_seen_at: BTreeMap<AllocationId, UnixInstant>` —
+///   the wall-clock observation timestamp of the last failure
+///   (`tick.now_unix` at the moment a Failed/Terminated alloc was
+///   seen). **Input.** The backoff *deadline* is recomputed on every
+///   read as `seen_at + backoff_for_attempt(restart_count)`; never
+///   persisted as a derived value.
 ///
-/// Field shapes are pinned by US-03 AC. Phase 1 hydrates this from
-/// the runtime's view cache (`AppState::view_cache`); Phase 2+
-/// migrates the cache to per-primitive libSQL via `CREATE TABLE IF
-/// NOT EXISTS` inside `hydrate` per ADR-0013 §2b.
+/// This is the `.claude/rules/development.md` § "Persist inputs, not
+/// derived state" shape: a future operator-configurable per-job
+/// `backoff_for_attempt` policy lands without a schema migration —
+/// every persisted row picks up the new policy on the next reconcile
+/// tick. The earlier shape (`next_attempt_at: Instant`) was a stale
+/// cache of `Instant::now() + RESTART_BACKOFF_DURATION`; rotating the
+/// policy would have silently no-op'd against in-flight rows until
+/// they aged out.
+///
+/// Phase 1 hydrates this from the runtime's view cache
+/// (`AppState::view_cache`); Phase 2+ migrates the cache to
+/// per-primitive libSQL via `CREATE TABLE IF NOT EXISTS` inside
+/// `hydrate` per ADR-0013 §2b. The `UnixInstant` type is the portable
+/// wall-clock representation chosen specifically so libSQL can store
+/// and rehydrate the value across process restarts (cf.
+/// `docs/research/control-plane/issue-139-followup-portable-deadline-representation-research.md`).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct JobLifecycleView {
     /// How many times each alloc has been started under this
     /// reconciler's lifecycle. Reset by `alloc_id` when a new
     /// `alloc_id` is minted (per US-03 Domain Example 2).
     pub restart_counts: BTreeMap<AllocationId, u32>,
-    /// Backoff deadline per alloc — read against `tick.now`.
-    pub next_attempt_at: BTreeMap<AllocationId, Instant>,
+    /// Wall-clock observation timestamp of the last failure per alloc.
+    /// The reconcile read site recomputes the backoff deadline as
+    /// `seen_at + backoff_for_attempt(restart_count)` against
+    /// `tick.now_unix` on every tick — the persisted *input*, not the
+    /// derived deadline.
+    pub last_failure_seen_at: BTreeMap<AllocationId, UnixInstant>,
 }

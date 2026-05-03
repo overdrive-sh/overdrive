@@ -477,7 +477,7 @@ async fn stop_after_failed_alloc_drains_broker() {
             let alloc_id = AllocationId::new(&format!("alloc-{}-0", job_id.as_str()))
                 .expect("derived alloc id");
             let count = view.restart_counts.get(&alloc_id).copied().unwrap_or(0);
-            let has_deadline = view.next_attempt_at.contains_key(&alloc_id);
+            let has_deadline = view.last_failure_seen_at.contains_key(&alloc_id);
             if count >= 1 && has_deadline {
                 break;
             }

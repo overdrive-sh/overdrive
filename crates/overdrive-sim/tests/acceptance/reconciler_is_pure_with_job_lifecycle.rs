@@ -70,7 +70,7 @@ fn happy_path_state() -> JobLifecycleState {
 }
 
 const fn empty_view() -> JobLifecycleView {
-    JobLifecycleView { restart_counts: BTreeMap::new(), next_attempt_at: BTreeMap::new() }
+    JobLifecycleView { restart_counts: BTreeMap::new(), last_failure_seen_at: BTreeMap::new() }
 }
 
 #[test]

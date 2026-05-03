@@ -295,7 +295,8 @@ pub async fn run_convergence_tick(
     //
     // Backoff-pending fix (§18 level-triggered, S-WS-02 path):
     // when `reconcile` returns no actions because a Failed alloc
-    // is mid-backoff (`tick.now < view.next_attempt_at[alloc]` and
+    // is mid-backoff (`tick.now_unix < view.last_failure_seen_at[alloc]
+    // + backoff_for_attempt(restart_counts[alloc])` and
     // `restart_counts[alloc] < RESTART_BACKOFF_CEILING`), the cluster
     // has NOT converged — actual still has a Failed alloc that the
     // reconciler intends to restart once the deadline elapses. Without
@@ -410,33 +411,36 @@ fn store_cached_view(
 /// Pure predicate over `next_view`: does the `JobLifecycle` reconciler
 /// have transitional state still to converge?
 ///
-/// "Transitional" = the view records a `next_attempt_at` deadline for
-/// at least one alloc whose `restart_counts` is below
-/// `RESTART_BACKOFF_CEILING`. A non-empty `next_attempt_at` AFTER the
-/// reconciler has already declined to emit further actions on this
-/// tick means the reconciler is mid-backoff — the next tick (after
-/// the per-alloc deadline elapses) WILL emit a Restart action, so the
-/// runtime MUST re-enqueue or the broker drains empty and the
-/// convergence loop sleeps without ever re-evaluating the deadline.
+/// "Transitional" = the view records a `last_failure_seen_at`
+/// observation timestamp for at least one alloc whose `restart_counts`
+/// is below `RESTART_BACKOFF_CEILING`. A non-empty
+/// `last_failure_seen_at` AFTER the reconciler has already declined to
+/// emit further actions on this tick means the reconciler is
+/// mid-backoff — the next tick (after the per-alloc backoff window
+/// elapses) WILL emit a Restart action, so the runtime MUST re-enqueue
+/// or the broker drains empty and the convergence loop sleeps without
+/// ever re-evaluating the deadline.
 ///
 /// Returns `false` for `Unit` views and for `JobLifecycle` views whose
 /// allocs have all reached the backoff ceiling (terminal-failed) or
-/// whose `next_attempt_at` is empty (no pending restart). The latter
-/// covers the converged-Running case (no Failed alloc → no deadline
-/// recorded) and the never-failed case alike.
+/// whose `last_failure_seen_at` is empty (no pending restart). The
+/// latter covers the converged-Running case (no Failed alloc → no
+/// observation timestamp recorded) and the never-failed case alike.
 ///
 /// This is the §18 *Level-triggered inside the reconciler* counterpart
 /// to the action-emitted gate above: actions emitted is one signal of
-/// "actual ≠ desired"; an outstanding backoff deadline is the other.
+/// "actual ≠ desired"; an outstanding backoff observation is the other.
 /// Without this predicate, `reconcile` returning empty actions during
 /// backoff would silently drop the eval and leave the runtime stuck.
 fn view_has_backoff_pending(next_view: &AnyReconcilerView) -> bool {
     match next_view {
         AnyReconcilerView::Unit => false,
-        AnyReconcilerView::JobLifecycle(view) => view.next_attempt_at.iter().any(|(alloc, _)| {
-            view.restart_counts.get(alloc).copied().unwrap_or(0)
-                < overdrive_core::reconciler::RESTART_BACKOFF_CEILING
-        }),
+        AnyReconcilerView::JobLifecycle(view) => {
+            view.last_failure_seen_at.iter().any(|(alloc, _)| {
+                view.restart_counts.get(alloc).copied().unwrap_or(0)
+                    < overdrive_core::reconciler::RESTART_BACKOFF_CEILING
+            })
+        }
     }
 }
 

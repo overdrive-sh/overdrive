@@ -64,4 +64,12 @@ mod acceptance {
     // verification lives in the control-plane acceptance suite (the
     // core crate cannot build an `AppState` without circular deps).
     mod tick_context_now_unix;
+
+    // Step 02-02 — `JobLifecycleView` persists inputs
+    // (`last_failure_seen_at: UnixInstant` replaces `next_attempt_at:
+    // Instant`); deadline recomputed each tick from
+    // `seen_at + backoff_for_attempt(restart_count)`. Restart-survival
+    // idempotence is structural rather than coincidental — see
+    // `.claude/rules/development.md` § "Persist inputs, not derived state".
+    mod job_lifecycle_recompute_deadline;
 }

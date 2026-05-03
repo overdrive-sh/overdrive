@@ -97,7 +97,7 @@ pub struct AppState {
     pub driver: Arc<dyn Driver>,
     /// Per-`(ReconcilerName, TargetResource)` View cache. Phase 1
     /// reconcilers have no libSQL connection wired yet, but
-    /// `JobLifecycle`'s `restart_counts` / `next_attempt_at` MUST
+    /// `JobLifecycle`'s `restart_counts` / `last_failure_seen_at` MUST
     /// persist across ticks for backoff exhaustion to be observable.
     /// The runtime tick loop reads the hydrated view from this cache
     /// before each `reconcile` call and writes back the returned
