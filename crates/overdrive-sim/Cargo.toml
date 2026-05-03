@@ -32,6 +32,13 @@ rand.workspace           = true
 thiserror.workspace      = true
 tempfile.workspace       = true
 overdrive-store-local    = { path = "../overdrive-store-local" }
+# `SimViewStore` (reconciler-memory-redb step 01-03) implements
+# `overdrive_control_plane::view_store::ViewStore` and serialises `View`
+# values to CBOR via `ciborium` for storage parity with the production
+# `RedbViewStore`. Per ADR-0035 §3.
+overdrive-control-plane.path = "../overdrive-control-plane"
+ciborium.workspace       = true
+serde.workspace          = true
 
 [features]
 # `integration-tests` — workspace-wide convention. Every workspace

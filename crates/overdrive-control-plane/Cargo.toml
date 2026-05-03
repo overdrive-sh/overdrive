@@ -71,6 +71,11 @@ serde_json.workspace  = true
 # IntentStore, so rkyv is a runtime dep of this crate, not just a test
 # dep.
 rkyv.workspace        = true
+# `ciborium` — CBOR codec for the runtime-owned `ViewStore` port per
+# ADR-0035 §3 (reconciler-memory-redb step 01-03). The trait surface
+# operates on raw `Vec<u8>` for dyn-compatibility; the typed
+# `ViewStoreExt` blanket impl encodes/decodes via ciborium.
+ciborium.workspace    = true
 
 # HTTP / TLS
 # NOTE — `axum`, `axum-server`, `utoipa`, `utoipa-axum`, and `libsql`

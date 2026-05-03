@@ -23,3 +23,6 @@ pub mod entropy;
 pub mod llm;
 pub mod observation_store;
 pub mod transport;
+// reconciler-memory-redb step 01-03 — `SimViewStore` impl of
+// `overdrive_control_plane::view_store::ViewStore` per ADR-0035 §2.
+pub mod view_store;

@@ -42,6 +42,10 @@ pub mod observation_wiring;
 pub mod reconciler_runtime;
 pub mod streaming;
 pub mod tls_bootstrap;
+// reconciler-memory-redb step 01-03 — `ViewStore` port + error types
+// per ADR-0035 §2. Wired into `ReconcilerRuntime` in step 01-06; until
+// then the module is intentional dead code.
+pub mod view_store;
 pub mod worker;
 
 use std::collections::BTreeMap;
