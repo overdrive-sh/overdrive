@@ -948,27 +948,12 @@ pub enum AnyReconcilerView {
 // JobLifecycle reconciler — first real reconciler (US-03)
 // ---------------------------------------------------------------------------
 
-/// The Phase 1 first real reconciler. Converges declared replica
-/// count for a `Job` against the running `AllocStatusRow` set.
+/// Maximum restart attempts before `JobLifecycle` gives up on an alloc.
 ///
-/// Trait shape pinned by ADR-0021; convergence + backoff logic per
-/// US-03 (phase-1-first-workload, slice 3).
-///
-/// The reconciler reads `desired.job` (the target job) and
-/// `actual.allocations` (running set), calls
-/// `overdrive_scheduler::schedule(...)` on `desired.nodes` +
-/// `desired.job`, and emits `Action::StartAllocation` /
-/// `Action::StopAllocation` to converge. Restart counts are tracked
-/// in `view.restart_counts`; backoff is gated by recomputing the
-/// deadline as `view.last_failure_seen_at + backoff_for_attempt(...)`
-/// against `tick.now_unix` (NEVER `Instant::now()` /
-/// `SystemTime::now()`). Per `.claude/rules/development.md` §
-/// "Persist inputs, not derived state".
-/// Maximum number of restart attempts before the `JobLifecycle`
-/// reconciler stops emitting `RestartAllocation` for a persistently
-/// failing alloc. Per US-03 step 02-03 — the ceiling exists to keep a
-/// repeatedly-crashing workload from consuming infinite driver
-/// resources.
+/// Past this count the reconciler stops emitting `RestartAllocation`
+/// for a persistently failing alloc. Per US-03 step 02-03 — the
+/// ceiling exists to keep a repeatedly-crashing workload from
+/// consuming infinite driver resources.
 pub const RESTART_BACKOFF_CEILING: u32 = 5;
 
 /// Backoff window between successive `RestartAllocation` emissions
@@ -1009,6 +994,22 @@ pub const fn backoff_for_attempt(_attempt: u32) -> Duration {
     RESTART_BACKOFF_DURATION
 }
 
+/// The Phase 1 first real reconciler. Converges declared replica
+/// count for a `Job` against the running `AllocStatusRow` set.
+///
+/// Trait shape pinned by ADR-0021; convergence + backoff logic per
+/// US-03 (phase-1-first-workload, slice 3).
+///
+/// The reconciler reads `desired.job` (the target job) and
+/// `actual.allocations` (running set), calls
+/// `overdrive_scheduler::schedule(...)` on `desired.nodes` +
+/// `desired.job`, and emits `Action::StartAllocation` /
+/// `Action::StopAllocation` to converge. Restart counts are tracked
+/// in `view.restart_counts`; backoff is gated by recomputing the
+/// deadline as `view.last_failure_seen_at + backoff_for_attempt(...)`
+/// against `tick.now_unix` (NEVER `Instant::now()` /
+/// `SystemTime::now()`). Per `.claude/rules/development.md` §
+/// "Persist inputs, not derived state".
 pub struct JobLifecycle {
     name: ReconcilerName,
 }
