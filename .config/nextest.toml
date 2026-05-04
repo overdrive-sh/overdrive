@@ -72,6 +72,13 @@ slow-timeout = { period = "60s", terminate-after = 4 }
 # run. Under cargo-mutants the tree is reproduced in /tmp with a
 # cold target dir and the per-fixture compile time stacks past the
 # default 120s budget. Same 4× budget rationale as above.
+#
+# NOTE: the `mutants` profile below excludes trybuild binaries
+# entirely from the cargo-mutants test run (they don't contribute to
+# kill-rate signal — function-body mutations don't change whether
+# trybuild fixtures compile). This override is retained for the
+# default profile so a developer running these tests directly via
+# `cargo nextest run` still gets a sensible budget.
 [[profile.default.overrides]]
 filter = 'package(overdrive-control-plane) & binary(compile_fail) & test(compile_fail_cases)'
 slow-timeout = { period = "60s", terminate-after = 4 }
@@ -91,3 +98,26 @@ slow-timeout = { period = "60s", terminate-after = 3 }
 [profile.ci.junit]
 # Parsed by the GitHub Actions summary step in `.github/workflows/ci.yml`.
 path = "junit.xml"
+
+# Profile selected by `cargo xtask mutants` (via NEXTEST_PROFILE=mutants).
+# Inherits from `default` and adds a default-filter that excludes
+# trybuild binaries from the test run.
+#
+# Why exclude them: cargo-mutants reruns the whole test suite per
+# mutation (and once for the unmutated baseline). trybuild fixtures
+# compile every fixture from scratch in a cold scratch tree — they
+# dominate per-mutation wall-clock and contribute zero kill-rate
+# signal: `**/tests/**` is already excluded from mutation generation
+# in `.cargo/mutants.toml` (Rule 5), so a function-body mutation
+# elsewhere in the workspace cannot change whether a trybuild fixture
+# compiles. Running them per mutation pays compile cost for no
+# information.
+#
+# Structural-property mutations (e.g. breaking `ViewStore`
+# dyn-compatibility, which the `compile_pass/view_store_dyn_compatible.rs`
+# fixture pins) would in principle be caught by these binaries — but
+# such mutations also fail the rest of the workspace's build under
+# the per-mutant cargo invocation and are reported as `unviable` by
+# cargo-mutants regardless. The signal is not lost; only the wait is.
+[profile.mutants]
+default-filter = '!(binary(compile_pass) | binary(compile_fail))'

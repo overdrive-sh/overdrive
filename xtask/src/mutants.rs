@@ -248,7 +248,14 @@ fn invoke_cargo_mutants(
 
     let mut cmd = Command::new(cargo());
     cmd.args(&args);
-    eprintln!("xtask mutants: running {}", format_cmd(&cmd));
+    // Select the `mutants` nextest profile (`.config/nextest.toml`) so
+    // the per-mutant test run drops trybuild binaries — they don't
+    // contribute to kill-rate signal and dominate wall-clock. nextest
+    // reads NEXTEST_PROFILE as the equivalent of `--profile`; passing
+    // it via env is the only way that works with cargo-mutants, which
+    // does not forward arbitrary nextest flags.
+    cmd.env("NEXTEST_PROFILE", "mutants");
+    eprintln!("xtask mutants: running {} (NEXTEST_PROFILE=mutants)", format_cmd(&cmd));
     let status = cmd.status().wrap_err("spawn cargo-mutants")?;
     // Don't bail on non-zero — cargo-mutants returns non-zero for any
     // missed mutant, which is exactly the signal we want to measure

@@ -88,9 +88,10 @@ fn drain(rx: &mut broadcast::Receiver<LifecycleEvent>) -> Vec<LifecycleEvent> {
     loop {
         match rx.try_recv() {
             Ok(ev) => out.push(ev),
-            Err(broadcast::error::TryRecvError::Empty) => break,
-            Err(broadcast::error::TryRecvError::Closed) => break,
-            Err(broadcast::error::TryRecvError::Lagged(_)) => continue,
+            Err(broadcast::error::TryRecvError::Empty | broadcast::error::TryRecvError::Closed) => {
+                break;
+            }
+            Err(broadcast::error::TryRecvError::Lagged(_)) => {}
         }
     }
     out
