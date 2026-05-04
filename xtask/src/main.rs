@@ -876,13 +876,22 @@ fn mutants(args: MutantsArgs) -> Result<()> {
 
 fn ci() -> Result<()> {
     sh("cargo fmt --check", Command::new(cargo()).args(["fmt", "--all", "--", "--check"]))?;
+    // `--features integration-tests` (NOT `--all-features`) on the host:
+    // `overdrive-bpf` declares `build-bpf-target` to gate its
+    // `#![no_std] #![no_main]` kernel-side bin (see ADR-0038 §3.1 /
+    // `cargo xtask bpf-build`). Enabling that feature on the host target
+    // makes rustc reject the bin with "unwinding panics are not supported
+    // without std". The dedicated `bpf-build` job exercises the kernel-side
+    // compile path with the right toolchain. Mirrors the `fmt-clippy` job
+    // in `.github/workflows/ci.yml`.
     sh(
         "cargo clippy",
         Command::new(cargo()).args([
             "clippy",
             "--workspace",
             "--all-targets",
-            "--all-features",
+            "--features",
+            "integration-tests",
             "--",
             "-D",
             "warnings",
