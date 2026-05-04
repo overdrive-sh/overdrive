@@ -99,7 +99,7 @@ fn synthesise_eth_ipv4_tcp() -> Vec<u8> {
 /// program's `retval` (the XDP action for an XDP program).
 ///
 /// Mirrors the syscall path in libbpf's `bpf_prog_test_run_opts`
-/// and aya's own internal `sys_bpf` calls, scoped to the test_run
+/// and aya's own internal `sys_bpf` calls, scoped to the `test_run`
 /// command. We zero the `bpf_attr` union, populate the
 /// `attr.test` arm (`bpf_attr__bindgen_ty_7`), and invoke the
 /// `bpf(2)` syscall directly.
@@ -128,13 +128,12 @@ fn bpf_prog_test_run(prog_fd: &ProgramFd, data_in: &[u8]) -> Result<u32, std::io
     // a properly-sized `bpf_attr` is the standard kernel ABI for
     // BPF operations. The size argument is `size_of::<bpf_attr>()`,
     // matching the kernel's expected layout.
+    // `bpf_attr` is a fixed-layout repr(C) union; its size is in
+    // the low hundreds of bytes and trivially fits in `c_uint`.
+    #[allow(clippy::cast_possible_truncation)]
+    let attr_size = std::mem::size_of::<bpf_attr>() as libc::c_uint;
     let ret = unsafe {
-        libc::syscall(
-            libc::SYS_bpf,
-            BPF_PROG_TEST_RUN as libc::c_int,
-            &mut attr as *mut bpf_attr,
-            std::mem::size_of::<bpf_attr>() as libc::c_uint,
-        )
+        libc::syscall(libc::SYS_bpf, BPF_PROG_TEST_RUN as libc::c_int, &raw mut attr, attr_size)
     };
     if ret < 0 {
         return Err(std::io::Error::last_os_error());
@@ -154,7 +153,11 @@ trait AsRawFdU32 {
 impl AsRawFdU32 for std::os::fd::BorrowedFd<'_> {
     fn as_raw_fd_u32(&self) -> u32 {
         use std::os::fd::AsRawFd;
-        self.as_raw_fd() as u32
+        // A live BorrowedFd holds a non-negative kernel fd by
+        // construction; the `as u32` cannot lose sign here.
+        #[allow(clippy::cast_sign_loss)]
+        let fd = self.as_raw_fd() as u32;
+        fd
     }
 }
 
@@ -223,7 +226,7 @@ fn bpf_unit_runs_xdp_pass_triptych_via_bpf_prog_test_run() {
     let action = bpf_prog_test_run(&prog_fd, &pkt).expect("BPF_PROG_TEST_RUN syscall");
 
     // (a) verdict assertion — the program returns XDP_PASS.
-    assert_eq!(action, XDP_PASS, "expected XDP_PASS verdict (=2), got action={action}",);
+    assert_eq!(action, XDP_PASS, "expected XDP_PASS verdict (=2), got action={action}");
 
     // (b) state assertion — PKTS[0] transitioned 0 -> 1.
     let pkts: HashMap<_, u32, u64> =
