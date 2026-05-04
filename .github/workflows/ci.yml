@@ -81,6 +81,11 @@ jobs:
   fmt-clippy:
     name: fmt + clippy
     runs-on: ubuntu-latest
+    # Workspace clippy compiles overdrive-dataplane, whose build.rs
+    # requires target/xtask/bpf-objects/overdrive_bpf.o on Linux per
+    # ADR-0038 §3.2. Pull the artifact from bpf-build rather than
+    # rebuilding it here.
+    needs: bpf-build
     steps:
       - uses: actions/checkout@v4
 
@@ -94,6 +99,13 @@ jobs:
       # not ship it.
       - name: Install mold linker
         run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends mold
+
+      - name: Download BPF object artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bpf-object
+          path: target/xtask/bpf-objects/
+          if-no-files-found: error
 
       - name: Cache cargo target
         uses: Swatinem/rust-cache@v2
@@ -148,6 +160,10 @@ jobs:
   test:
     name: nextest + doctests
     runs-on: ubuntu-latest
+    # Workspace nextest + `cargo test --doc --workspace` compile
+    # overdrive-dataplane, whose build.rs requires the BPF artifact on
+    # Linux per ADR-0038 §3.2.
+    needs: bpf-build
     steps:
       - uses: actions/checkout@v4
 
@@ -157,6 +173,13 @@ jobs:
       # not ship it.
       - name: Install mold linker
         run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends mold
+
+      - name: Download BPF object artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bpf-object
+          path: target/xtask/bpf-objects/
+          if-no-files-found: error
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -221,6 +244,10 @@ jobs:
   integration:
     name: nextest (integration-tests)
     runs-on: ubuntu-latest
+    # Workspace nextest with --features integration-tests compiles
+    # overdrive-dataplane, whose build.rs requires the BPF artifact on
+    # Linux per ADR-0038 §3.2.
+    needs: bpf-build
     steps:
       - uses: actions/checkout@v4
 
@@ -230,6 +257,13 @@ jobs:
       # not ship it.
       - name: Install mold linker
         run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends mold
+
+      - name: Download BPF object artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bpf-object
+          path: target/xtask/bpf-objects/
+          if-no-files-found: error
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -506,6 +540,10 @@ jobs:
     # push to main (the diff is the merge commit itself).
     if: github.event_name == 'pull_request'
     timeout-minutes: 30
+    # cargo-mutants reruns the workspace nextest baseline per mutation,
+    # which compiles overdrive-dataplane and thus requires the BPF
+    # artifact on Linux per ADR-0038 §3.2.
+    needs: bpf-build
     steps:
       - uses: actions/checkout@v4
         with:
@@ -520,6 +558,13 @@ jobs:
       # not ship it.
       - name: Install mold linker
         run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends mold
+
+      - name: Download BPF object artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bpf-object
+          path: target/xtask/bpf-objects/
+          if-no-files-found: error
 
       - uses: Swatinem/rust-cache@v2
         with:

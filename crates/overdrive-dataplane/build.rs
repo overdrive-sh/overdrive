@@ -69,10 +69,16 @@ fn main() {
     {
         let artifact = workspace_root.join("target/xtask/bpf-objects/overdrive_bpf.o");
         if !artifact.exists() {
-            eprintln!(
-                "error: BPF object not found at {}; run `cargo xtask bpf-build` first",
-                artifact.display()
-            );
+            // Build scripts surface diagnostics via stderr; cargo
+            // captures and renders the `--- stderr` block on failure.
+            // `clippy::print_stderr` is not the right gate for build.rs.
+            #[allow(clippy::print_stderr)]
+            {
+                eprintln!(
+                    "error: BPF object not found at {}; run `cargo xtask bpf-build` first",
+                    artifact.display()
+                );
+            }
             std::process::exit(1);
         }
         println!("cargo:rerun-if-changed={}", artifact.display());
