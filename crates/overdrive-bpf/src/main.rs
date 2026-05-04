@@ -6,7 +6,7 @@
 //! `LruHashMap<u32, u64>` packet counter (`PKTS`) to exercise the
 //! build → load → attach → observe → detach pipeline end-to-end.
 //!
-//! Real dataplane work (SERVICE_MAP, sockops+kTLS, BPF LSM,
+//! Real dataplane work (`SERVICE_MAP`, sockops+kTLS, BPF LSM,
 //! telemetry ringbuf) lands in subsequent Phase 2 slices.
 //!
 //! See `docs/product/architecture/adr-0038-ebpf-crate-layout-and-build-pipeline.md`
@@ -14,6 +14,28 @@
 
 #![no_std]
 #![no_main]
+// Kernel-side eBPF programs follow conventions the host-side clippy
+// lints would flag as smells, but each is the canonical aya pattern:
+//
+// - `needless_pass_by_value`: aya's `#[xdp]` macro requires the
+//   handler signature `fn(XdpContext) -> u32` — by value, not by
+//   reference. The macro generates the kernel ABI shim around it.
+// - `inline_always`: the BPF verifier rejects calls across most
+//   non-inlined function boundaries; aya examples mark hot helpers
+//   `#[inline(always)]` to guarantee the verifier sees one body.
+// - `unnecessary_wraps`: the `try_*` helper pattern returns
+//   `Result<u32, ()>` so the handler can use `?` against aya's
+//   memory-bounds helpers (`ptr_at`, `bpf_probe_read_kernel`, …)
+//   that DO return `Result`. Even when the current body has no
+//   fallible step, the shape stays uniform across programs.
+// - `missing_const_for_fn`: `#[panic_handler]` cannot be `const fn`
+//   in stable Rust — the attribute requires a non-const signature.
+#![allow(
+    clippy::needless_pass_by_value,
+    clippy::inline_always,
+    clippy::unnecessary_wraps,
+    clippy::missing_const_for_fn
+)]
 
 use aya_ebpf::{
     bindings::xdp_action,

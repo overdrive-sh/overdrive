@@ -67,6 +67,15 @@ enum Task {
     /// conflict on the host triple — see crates/overdrive-bpf/Cargo.toml).
     BpfBuild,
 
+    /// Run clippy against the kernel-side `overdrive-bpf` bin under
+    /// the same toolchain `bpf-build` uses (`+nightly`,
+    /// `--target bpfel-unknown-none`, `-Z build-std=core`,
+    /// `--features build-bpf-target`). The host workspace clippy
+    /// run cannot lint this bin: it is `#![no_std] #![no_main]`
+    /// and rustc rejects it on the host triple with "unwinding
+    /// panics are not supported without std".
+    BpfClippy,
+
     /// Tier 2 — BPF unit tests via `BPF_PROG_TEST_RUN`.
     BpfUnit,
 
@@ -309,6 +318,7 @@ fn run() -> Result<()> {
         Task::DstLint { manifest_path } => xtask::dst_lint::run(&manifest_path),
         Task::YamlFreeCli { manifest_path } => xtask::yaml_free_cli::run(&manifest_path),
         Task::BpfBuild => bpf_build(),
+        Task::BpfClippy => bpf_clippy(),
         Task::BpfUnit => bpf_unit(),
         Task::IntegrationTest { scope } => match scope {
             IntegrationScope::Vm { cache_dir, kernels } => integration_vm(&cache_dir, &kernels),
@@ -682,6 +692,46 @@ fn bpf_build() -> Result<()> {
     })?;
 
     eprintln!("xtask: bpf-build wrote {}", dst.display());
+    Ok(())
+}
+
+/// Run clippy against `crates/overdrive-bpf` under the same toolchain
+/// triple `bpf_build` uses (`+nightly`, `--target bpfel-unknown-none`,
+/// `-Z build-std=core`, `--features build-bpf-target`). The kernel-side
+/// `[[bin]]` is `#![no_std] #![no_main]`; the host workspace clippy
+/// run cannot lint it (rustc rejects it on the host triple with
+/// "unwinding panics are not supported without std"), so this is the
+/// dedicated path.
+///
+/// `bpf-linker` is not strictly required for `cargo clippy` (no link
+/// step), but the rest of the toolchain (nightly + rust-src) is — same
+/// failure mode as `bpf_build` if missing.
+fn bpf_clippy() -> Result<()> {
+    let workspace_root = workspace_root_dir()?;
+    let manifest = workspace_root.join("crates/overdrive-bpf/Cargo.toml");
+
+    sh(
+        "rustup run nightly cargo clippy (overdrive-bpf, bpfel-unknown-none)",
+        Command::new("rustup")
+            .args([
+                "run",
+                "nightly",
+                "cargo",
+                "clippy",
+                "--release",
+                "--target",
+                "bpfel-unknown-none",
+                "-Z",
+                "build-std=core",
+                "--features",
+                "build-bpf-target",
+                "--manifest-path",
+            ])
+            .arg(&manifest)
+            .args(["--", "-D", "warnings"])
+            .current_dir(&workspace_root),
+    )?;
+
     Ok(())
 }
 

@@ -141,7 +141,16 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: cargo clippy -D warnings
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        # `--features integration-tests` (NOT `--all-features`) on the
+        # host: `overdrive-bpf` declares `build-bpf-target` to gate its
+        # `#![no_std] #![no_main]` kernel-side bin (see ADR-0038 §3.1 /
+        # `cargo xtask bpf-build`). Enabling that feature on the host
+        # target makes rustc reject the bin with "unwinding panics are
+        # not supported without std". The dedicated `bpf-build` job
+        # exercises the kernel-side compile path with the right
+        # toolchain (`cargo +nightly build --target bpfel-unknown-none
+        # -Z build-std=core`).
+        run: cargo clippy --workspace --all-targets --features integration-tests -- -D warnings
 
   # -------------------------------------------------------------------
   # Unit + proptest — `cargo nextest run` for the main suite,
@@ -742,6 +751,21 @@ jobs:
         # Cached by Swatinem/rust-cache via `~/.cargo/bin` after the
         # first run.
         run: cargo install --locked bpf-linker
+
+      - name: Install clippy on nightly
+        # `cargo xtask bpf-clippy` runs `rustup run nightly cargo
+        # clippy …`; the dtolnay nightly toolchain step above does
+        # not include clippy by default.
+        run: rustup component add --toolchain nightly clippy
+
+      - name: cargo xtask bpf-clippy
+        # Lint the kernel-side bin under `+nightly --target
+        # bpfel-unknown-none -Z build-std=core --features
+        # build-bpf-target`. The host workspace clippy job cannot
+        # cover this bin: it is `#![no_std] #![no_main]` and rustc
+        # rejects it on the host triple. Running here keeps the
+        # nightly toolchain + cache shared with bpf-build.
+        run: cargo xtask bpf-clippy
 
       - name: cargo xtask bpf-build
         # The xtask wrapper invokes `cargo build --release --target

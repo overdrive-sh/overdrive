@@ -1,6 +1,6 @@
 //! Asserts `cargo xtask dev-setup` plans the correct install argv for
 //! the bpf-linker + nightly toolchain + rust-src dependency triple,
-//! across the four ProbeContext shapes that arise in practice.
+//! across the four `ProbeContext` shapes that arise in practice.
 //!
 //! Per ADR-0038 §4 (and upstream-issue A1) the dev-setup task is the
 //! non-Lima Linux developer surface for installing exactly the same
@@ -67,7 +67,7 @@ fn dev_setup_plans_bpf_linker_install_with_locked_when_missing() {
 }
 
 /// AC2 — when bpf-linker is already on PATH, no install command for
-/// it is planned. (The handler will print a tracing::info noop and
+/// it is planned. (The handler will print a `tracing::info` noop and
 /// the argv simply does not appear.)
 #[test]
 fn dev_setup_plans_no_install_when_bpf_linker_already_on_path() {
