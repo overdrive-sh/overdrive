@@ -1,0 +1,59 @@
+# `overdrive-dataplane` — userspace BPF loader per ADR-0038.
+#
+# Owns the `EbpfDataplane` impl of the `Dataplane` port trait from
+# `overdrive-core`. The kernel object produced by `overdrive-bpf` is
+# embedded at compile time via `include_bytes!` (architecture.md §3.3),
+# attached to the host via aya-rs userspace API.
+#
+# Class `adapter-host` per ADR-0003 — same class as `overdrive-host`,
+# `overdrive-store-local`, `overdrive-worker`. dst-lint scans only
+# `core`-class crates and skips this one.
+#
+# Phase 2.1 step 01-02 ships the loader skeleton: real `new()` body
+# wired on Linux (gated by `#[cfg(target_os = "linux")]`); non-Linux
+# fallthrough returns `DataplaneError::LoadFailed("non-Linux build
+# target")`. The three `Dataplane` trait methods are stubbed
+# (`Ok(())` / `Ok(vec![])`) with `/// see #N` doc anchors per
+# architecture.md §7.
+
+[package]
+name         = "overdrive-dataplane"
+version      = "0.0.0"
+description  = "Userspace BPF loader: EbpfDataplane impl of the Dataplane port."
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+publish                = false
+
+[package.metadata.overdrive]
+crate_class = "adapter-host"
+
+[features]
+# Workspace-wide convention. Every member declares this feature so
+# `cargo {check,test,mutants} --features integration-tests` resolves
+# uniformly under per-package scoping. Phase 2 Tier 3 smoke for
+# `EbpfDataplane` lives in `cargo xtask integration-test vm` (step
+# 03-02), not in this crate's `tests/` directory — the `tests/
+# integration.rs` entrypoint is the gate per `.claude/rules/testing.md`
+# § Layout convention. See `.claude/rules/testing.md` § Workspace
+# convention.
+integration-tests = []
+
+[dependencies]
+overdrive-core.workspace = true
+async-trait.workspace    = true
+thiserror.workspace      = true
+tokio                    = { workspace = true, features = ["macros", "rt"] }
+tracing.workspace        = true
+
+# `aya` is the userspace BPF loader and pulls in libbpf-sys etc. —
+# Linux-only. macOS builds compile this crate via the
+# `#[cfg(not(target_os = "linux"))]` stub branches in `src/lib.rs`
+# without aya in the dep graph (architecture.md §5.2).
+[target.'cfg(target_os = "linux")'.dependencies]
+aya.workspace = true
+
+[lints]
+workspace = true
