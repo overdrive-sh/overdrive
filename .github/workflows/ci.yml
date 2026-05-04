@@ -639,12 +639,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
+      - name: Install Rust toolchain (stable, pinned via rust-toolchain.toml)
         uses: dtolnay/rust-toolchain@stable
+
+      # `cargo xtask bpf-build` invokes `rustup run nightly cargo build
+      # ... -Z build-std=core` (see xtask/src/main.rs). The
+      # `bpfel-unknown-none` target ships no prebuilt core, so nightly +
+      # rust-src on nightly is required — stable + rust-src does not
+      # satisfy `-Z build-std=core`.
+      - name: Install nightly toolchain (required for -Z build-std=core)
+        uses: dtolnay/rust-toolchain@nightly
         with:
-          # rust-src is required for `-Z build-std=core` against the
-          # `bpfel-unknown-none` target (no prebuilt std/core for that
-          # target).
           components: rust-src
 
       # mold is the linker per .cargo/config.toml; ubuntu-latest does
