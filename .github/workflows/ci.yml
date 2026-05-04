@@ -327,9 +327,22 @@ jobs:
         # is required for ProcessDriver: creating cgroup scope directories
         # and writing child PIDs to cgroup.procs both fail with EACCES
         # for the unprivileged runner user.
+        #
+        # `--exclude overdrive-bpf` avoids a cross-process artifact race:
+        # `overdrive-dataplane::integration::build_rs_artifact_check`
+        # transiently removes `target/xtask/bpf-objects/overdrive_bpf.o`
+        # for the duration of a `cargo check` subprocess, and nextest
+        # runs each integration binary as a separate OS process — so
+        # `#[serial(env)]` (per-process) cannot gate
+        # `overdrive-bpf::integration::xdp_pass_test_run`'s
+        # `Ebpf::load_file` against that window. The `bpf-unit` job
+        # already owns `overdrive-bpf`'s integration tests via
+        # `cargo xtask bpf-unit` under the same CAP_BPF `sudo` guard,
+        # so excluding it here is loss-free.
         run: |
           sudo -E env "PATH=$PATH" cargo nextest run --workspace --locked --profile ci \
             --features integration-tests \
+            --exclude overdrive-bpf \
             -E 'binary(integration)'
 
       - name: Upload nextest JUnit report

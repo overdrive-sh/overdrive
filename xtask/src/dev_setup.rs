@@ -35,9 +35,10 @@
 //! ## macOS short-circuit
 //!
 //! Per AC7 the dev-setup task short-circuits on macOS with a
-//! `tracing::warn` — `bpf-linker` is Linux-only (architecture.md §5)
-//! and the macOS dev path is `cargo nextest run --no-run` /
-//! `cargo xtask lima run --` for the integration suite.
+//! best-effort stderr notice (`eprintln!`) — `bpf-linker` is
+//! Linux-only (architecture.md §5) and the macOS dev path is
+//! `cargo nextest run --no-run` / `cargo xtask lima run --` for the
+//! integration suite.
 
 #![allow(clippy::expect_used)]
 
@@ -209,9 +210,11 @@ fn execute_one(cmd: &PlannedCommand) -> Result<()> {
     Ok(())
 }
 
-/// Top-level entry point — composes probe + plan + execute. Per AC2
-/// prints a noop trace and exits 0 when every dependency is already
-/// satisfied. Per AC7 short-circuits on non-Linux with a warn.
+/// Top-level entry point — composes probe + plan + execute.
+///
+/// Per AC2 prints a noop trace and exits 0 when every dependency is
+/// already satisfied. Per AC7 short-circuits on non-Linux with a
+/// best-effort stderr notice (`eprintln!`).
 ///
 /// # Errors
 ///

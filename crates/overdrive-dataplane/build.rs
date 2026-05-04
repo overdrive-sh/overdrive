@@ -40,6 +40,13 @@ fn main() {
     };
     let manifest_dir = PathBuf::from(manifest_dir);
 
+    // Without any `cargo:rerun-if-changed` directive, Cargo falls back
+    // to its default heuristic and re-runs this script on every change
+    // to any file in the package. On non-Linux the artifact-check
+    // block below is cfg'd out and emits nothing, so anchor the
+    // dependency set to `build.rs` itself unconditionally.
+    println!("cargo:rerun-if-changed=build.rs");
+
     // `crates/overdrive-dataplane` → workspace root: pop twice (once
     // for the crate name, once for `crates/`). `None` here means the
     // crate has been moved outside `crates/<name>/`, which is itself
