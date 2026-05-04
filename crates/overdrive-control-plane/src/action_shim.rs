@@ -351,10 +351,16 @@ async fn dispatch_single(
         // The row is written with `state: Failed` (per ADR-0032 §5
         // distinguishes "operator stopped" → Terminated from
         // "driver could not start / budget exhausted" → Failed). The
-        // reason carries the `RestartBudgetExhausted` summary so
-        // existing wire consumers (snapshot's `last_transition.reason`)
-        // see a coherent cause-class explanation alongside the
-        // structured `terminal` field.
+        // `reason` field propagates the prior row's typed leaf cause
+        // unchanged (e.g. `ExecBinaryNotFound { path }`); the typed
+        // terminal claim lives on the orthogonal `terminal` field per
+        // ADR-0037 §4. Synthesising a `RestartBudgetExhausted { attempts,
+        // last_cause_summary }` reason here would duplicate `attempts`
+        // (already on `terminal`) and stringify the typed leaf cause
+        // into `last_cause_summary` — both violations of `.claude/rules/
+        // development.md` § "Persist inputs, not derived state". Wire
+        // consumers wanting the "we gave up after N" framing render it
+        // from `terminal` directly.
         Action::FinalizeFailed { alloc_id, terminal } => {
             let Some(prior_row) = find_prior_alloc_row(obs, &alloc_id).await? else {
                 // No prior row — nothing to finalize against. This is
@@ -366,32 +372,23 @@ async fn dispatch_single(
                 return Ok(());
             };
             let prior_state: AllocStateWire = prior_row.state.into();
-            // Surface the terminal reason on the row's cause-class
-            // field for wire compatibility. `RestartBudgetExhausted`
-            // attaches the attempts count and a brief cause summary;
-            // when `terminal` is something else (forward-compat for
-            // future variants) we fall back to a generic
-            // DriverInternalError detail derived from the prior row.
-            let reason = match &terminal {
-                Some(TerminalCondition::BackoffExhausted { attempts }) => {
-                    Some(TransitionReason::RestartBudgetExhausted {
-                        attempts: *attempts,
-                        last_cause_summary: prior_row
-                            .reason
-                            .as_ref()
-                            .map_or_else(|| "unknown".to_owned(), |r| format!("{r:?}")),
-                    })
-                }
-                _ => prior_row.reason.clone(),
-            };
             let row = build_alloc_status_row(
                 alloc_id,
                 prior_row.job_id,
                 prior_row.node_id,
                 AllocState::Failed,
                 tick,
-                reason,
-                None,
+                prior_row.reason.clone(),
+                // Propagate the prior row's verbatim driver text. The
+                // last failed Start/RestartAllocation populates `detail`
+                // with the `DriverError::StartRejected.reason_text`
+                // (per the StartAllocation arm above); the streaming
+                // surface's `ConvergedFailed.error` field reads this
+                // through `event.detail`. Hardcoding `None` here would
+                // drop the operator-visible cause text on the
+                // budget-exhausted terminal, even though the prior
+                // attempt rows carry it.
+                prior_row.detail.clone(),
                 terminal,
             );
             obs.write(ObservationRow::AllocStatus(row.clone())).await?;
