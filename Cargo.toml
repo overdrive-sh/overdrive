@@ -1,9 +1,29 @@
 [workspace]
 resolver = "3"
 members = [
+    "crates/overdrive-bpf",
     "crates/overdrive-core",
     "crates/overdrive-cli",
     "crates/overdrive-control-plane",
+    "crates/overdrive-dataplane",
+    "crates/overdrive-host",
+    "crates/overdrive-scheduler",
+    "crates/overdrive-sim",
+    "crates/overdrive-store-local",
+    "crates/overdrive-worker",
+    "xtask",
+]
+# `default-members` excludes `overdrive-bpf` because it targets
+# `bpfel-unknown-none` (`#![no_std]`, kernel-side eBPF programs) and
+# cannot compile on the host. `cargo check --workspace` uses
+# default-members and skips it on macOS / non-Linux developer surfaces.
+# The kernel-side crate is built explicitly via `cargo xtask bpf-build`
+# (Phase 2.1 step 02-01). See architecture.md §5.1 and ADR-0038.
+default-members = [
+    "crates/overdrive-core",
+    "crates/overdrive-cli",
+    "crates/overdrive-control-plane",
+    "crates/overdrive-dataplane",
     "crates/overdrive-host",
     "crates/overdrive-scheduler",
     "crates/overdrive-sim",
@@ -83,6 +103,11 @@ bumpalo         = { version = "3", features = ["collections", "allocator-api2"] 
 
 # --- Runtime / eBPF / WASM / policy ---------------------------------------
 aya             = "0.13"
+# `aya-ebpf` is the kernel-side counterpart of `aya`. Used only by the
+# `overdrive-bpf` crate (target `bpfel-unknown-none`, `#![no_std]`).
+# Pinned to the latest 0.1.x patch — must remain compatible with the
+# `aya` 0.13 userspace pin per the aya workspace. See ADR-0038.
+aya-ebpf        = "0.1.1"
 wasmtime        = "26"
 regorus         = "0.2"
 

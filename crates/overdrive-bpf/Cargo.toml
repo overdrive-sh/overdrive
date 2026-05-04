@@ -1,0 +1,98 @@
+# `overdrive-bpf` — kernel-side eBPF programs per ADR-0038. Compiles
+# to a single ELF object on `bpfel-unknown-none`; never loaded as a
+# Rust dependency by other crates. Consumed by `overdrive-dataplane`
+# at compile time via `include_bytes!` (see architecture.md §3.3).
+#
+# Class `binary` per ADR-0003 — the crate is functionally a code-
+# generation step, same shape as `xtask`. dst-lint scans only
+# `core`-class crates and skips this one.
+#
+# Phase 2.1 step 01-01 ships exactly one no-op XDP program
+# (`xdp_pass`) plus an `LruHashMap<u32, u64>` packet counter. The
+# real dataplane work (SERVICE_MAP, sockops+kTLS, BPF LSM, telemetry
+# ringbuf) lands in subsequent Phase 2 slices (#24..#37).
+
+[package]
+name         = "overdrive-bpf"
+version      = "0.0.0"
+description  = "Kernel-side eBPF programs (target bpfel-unknown-none, #![no_std])."
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+publish                = false
+
+[package.metadata.overdrive]
+crate_class = "binary"
+
+[features]
+# Workspace-wide convention. Every member declares this feature so
+# `cargo {check,test,mutants} --features integration-tests` resolves
+# uniformly under per-package scoping. This crate is kernel-side
+# (`#![no_std]`, target `bpfel-unknown-none`) and has no integration
+# tests possible — the declaration is a deliberate no-op. See
+# `.claude/rules/testing.md` § Workspace convention.
+integration-tests = []
+
+# Gate for compiling the kernel-side bin target. Only enabled by
+# `cargo xtask bpf-build` (ADR-0038 §3.1) which invokes
+# `cargo +nightly build --target bpfel-unknown-none --features
+# build-bpf-target -Z build-std=core --manifest-path …`. On host
+# workflows (`cargo check --workspace`, `cargo nextest run --workspace
+# --no-run`) the feature is NOT enabled, so the bin is skipped via
+# `required-features` and cargo treats the package as having no host
+# targets to compile — preventing the host-target `unwinding panics
+# not supported without std` failure.
+build-bpf-target = []
+
+[dependencies]
+aya-ebpf.workspace = true
+
+# Host-side dev-deps for the Tier 2 BPF unit triptych under
+# `tests/integration/`. The triptych is compiled against the HOST
+# target (not `bpfel-unknown-none`) — it loads the pre-built BPF ELF
+# at `target/xtask/bpf-objects/overdrive_bpf.o` via aya's userspace
+# loader and drives `BPF_PROG_TEST_RUN`. Linux-only because:
+#   1. `BPF_PROG_TEST_RUN` is a Linux syscall;
+#   2. `aya` (userspace) pulls in libbpf-sys etc. that don't build on
+#      macOS — same gating as `overdrive-dataplane`'s aya dependency
+#      (architecture.md §5.2).
+# The kernel-side `[dependencies]` block above (with `aya-ebpf`) is
+# unchanged; the bin target stays gated behind `build-bpf-target`
+# (see `[[bin]] required-features` below) so host workflows skip it.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+aya.workspace         = true
+# `aya_obj` is the shared crate that owns the `bpf_attr` union and
+# `BPF_PROG_TEST_RUN` constant. aya 0.13.1 uses it internally
+# (`use aya_obj as obj;`) but does not re-export `aya_obj::generated`,
+# so the test target lists it directly. Pinned to the exact transitive
+# version aya 0.13.1 depends on (= 0.2.1) to keep the dep graph
+# reproducible — bumping aya is the migration trigger.
+aya-obj               = "=0.2.1"
+libc.workspace        = true
+serial_test.workspace = true
+
+[[bin]]
+name = "overdrive-bpf"
+path = "src/main.rs"
+# Skip the bin entirely on host workflows. `cargo check --workspace`
+# / `cargo nextest run --workspace --no-run` do NOT enable
+# `build-bpf-target`, so cargo skips this target and the package
+# becomes "no host targets to compile" — silently passed over. Only
+# `cargo xtask bpf-build` enables the feature (against the
+# `bpfel-unknown-none` target with `-Z build-std=core`).
+required-features = ["build-bpf-target"]
+
+# Disable host-target test/bench auto-targets even when the bin IS
+# selected. The crate is `#![no_std] #![no_main]` and ships its own
+# `panic_handler`; building it as a host-target test binary causes
+# E0152 ("the lang item is first defined in crate `std`") because
+# `libtest` depends on `std`. Tier 2 BPF unit tests run via
+# `BPF_PROG_TEST_RUN` (aya `Program::test_run`) in
+# `crates/overdrive-bpf/tests/`, not the bin's auto-test target.
+test  = false
+bench = false
+
+[lints]
+workspace = true

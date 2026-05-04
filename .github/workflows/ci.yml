@@ -1,12 +1,21 @@
-# Overdrive CI — Phase 1 foundation.
+# Overdrive CI — Phase 1 foundation + Phase 2.1 eBPF scaffolding.
 #
-# Scope: Tier 1 of the four-tier model in `.claude/rules/testing.md`.
-# Phase 1 has no eBPF code, so Tiers 2 (BPF unit), 3 (integration-test vm
-# kernel matrix), and 4 (veristat / xdp-perf / PREVAIL) are deliberately
-# out of scope and will be introduced when the corresponding code lands.
+# Scope: Tier 1 of the four-tier model in `.claude/rules/testing.md`,
+# plus Tier 2 (BPF unit tests) added by #23 (Phase 2.1 aya-rs
+# scaffolding) per ADR-0038. The single-kernel slice of Tier 3
+# (`integration-test-vm-latest`) is deferred to #152 per
+# upstream-issues.md §A3 (the LVH `images pull` step requires Docker,
+# which the Lima dev VM does not provision; resolved by deferring the
+# nested-VM harness wholesale). The full Tier 3 kernel matrix
+# (integration-test vm against [5.10, 5.15, 6.1, 6.6, latest LTS,
+# bpf-next]) and all of Tier 4 (veristat / xdp-perf / PREVAIL) remain
+# deferred to #29 — wiring those against a no-op program would produce
+# meaningless baselines.
 #
 # Required status checks for branch protection on `main` (configure on
-# GitHub under Settings > Branches > Branch protection rules):
+# GitHub under Settings > Branches > Branch protection rules; operators
+# mirror this list in the GitHub branch-protection UI after the first
+# observed pass per `branching-strategy.md` §2):
 #
 #   - fmt-clippy
 #   - test
@@ -14,6 +23,8 @@
 #   - dst-lint
 #   - yaml-free-cli
 #   - mutants-diff
+#   - bpf-build       (added in #23 — Phase 2.1)
+#   - bpf-unit        (added in #23 — Phase 2.1)
 #
 # Rationale references:
 #   - ADR-0006  (`cargo xtask dst` + `dst-lint` are the required CI checks;
@@ -70,6 +81,11 @@ jobs:
   fmt-clippy:
     name: fmt + clippy
     runs-on: ubuntu-latest
+    # Workspace clippy compiles overdrive-dataplane, whose build.rs
+    # requires target/xtask/bpf-objects/overdrive_bpf.o on Linux per
+    # ADR-0038 §3.2. Pull the artifact from bpf-build rather than
+    # rebuilding it here.
+    needs: bpf-build
     steps:
       - uses: actions/checkout@v4
 
@@ -88,6 +104,19 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           shared-key: "phase-1-fmt-clippy"
+
+      # MUST run AFTER Swatinem/rust-cache@v2: the cached tarball is the
+      # entire workspace `target/` directory and its restore step
+      # extracts over `target/xtask/bpf-objects/`, clobbering anything
+      # written there by an earlier `download-artifact` invocation.
+      # Downloading after the cache restore guarantees the BPF object is
+      # the file present when build.rs runs.
+      - name: Download BPF object artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bpf-object
+          path: target/xtask/bpf-objects/
+          if-no-files-found: error
 
       # sccache setup is soft-fail: if the GHA cache backend is unreachable
       # (as happened on 2026-04-23), RUSTC_WRAPPER is left unset and cargo
@@ -112,7 +141,16 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: cargo clippy -D warnings
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        # `--features integration-tests` (NOT `--all-features`) on the
+        # host: `overdrive-bpf` declares `build-bpf-target` to gate its
+        # `#![no_std] #![no_main]` kernel-side bin (see ADR-0038 §3.1 /
+        # `cargo xtask bpf-build`). Enabling that feature on the host
+        # target makes rustc reject the bin with "unwinding panics are
+        # not supported without std". The dedicated `bpf-build` job
+        # exercises the kernel-side compile path with the right
+        # toolchain (`cargo +nightly build --target bpfel-unknown-none
+        # -Z build-std=core`).
+        run: cargo clippy --workspace --all-targets --features integration-tests -- -D warnings
 
   # -------------------------------------------------------------------
   # Unit + proptest — `cargo nextest run` for the main suite,
@@ -137,6 +175,10 @@ jobs:
   test:
     name: nextest + doctests
     runs-on: ubuntu-latest
+    # Workspace nextest + `cargo test --doc --workspace` compile
+    # overdrive-dataplane, whose build.rs requires the BPF artifact on
+    # Linux per ADR-0038 §3.2.
+    needs: bpf-build
     steps:
       - uses: actions/checkout@v4
 
@@ -150,6 +192,15 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "phase-1-test"
+
+      # MUST run AFTER Swatinem/rust-cache@v2 — see fmt-clippy job above
+      # for rationale (cache tarball restore clobbers the BPF artifact).
+      - name: Download BPF object artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bpf-object
+          path: target/xtask/bpf-objects/
+          if-no-files-found: error
 
       # See fmt-clippy job above for rationale.
       - id: sccache-setup
@@ -210,6 +261,10 @@ jobs:
   integration:
     name: nextest (integration-tests)
     runs-on: ubuntu-latest
+    # Workspace nextest with --features integration-tests compiles
+    # overdrive-dataplane, whose build.rs requires the BPF artifact on
+    # Linux per ADR-0038 §3.2.
+    needs: bpf-build
     steps:
       - uses: actions/checkout@v4
 
@@ -223,6 +278,15 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "phase-1-integration"
+
+      # MUST run AFTER Swatinem/rust-cache@v2 — see fmt-clippy job above
+      # for rationale (cache tarball restore clobbers the BPF artifact).
+      - name: Download BPF object artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bpf-object
+          path: target/xtask/bpf-objects/
+          if-no-files-found: error
 
       - id: sccache-setup
         name: Setup sccache (soft-fail on cache backend outage)
@@ -263,9 +327,22 @@ jobs:
         # is required for ProcessDriver: creating cgroup scope directories
         # and writing child PIDs to cgroup.procs both fail with EACCES
         # for the unprivileged runner user.
+        #
+        # `--exclude overdrive-bpf` avoids a cross-process artifact race:
+        # `overdrive-dataplane::integration::build_rs_artifact_check`
+        # transiently removes `target/xtask/bpf-objects/overdrive_bpf.o`
+        # for the duration of a `cargo check` subprocess, and nextest
+        # runs each integration binary as a separate OS process — so
+        # `#[serial(env)]` (per-process) cannot gate
+        # `overdrive-bpf::integration::xdp_pass_test_run`'s
+        # `Ebpf::load_file` against that window. The `bpf-unit` job
+        # already owns `overdrive-bpf`'s integration tests via
+        # `cargo xtask bpf-unit` under the same CAP_BPF `sudo` guard,
+        # so excluding it here is loss-free.
         run: |
           sudo -E env "PATH=$PATH" cargo nextest run --workspace --locked --profile ci \
             --features integration-tests \
+            --exclude overdrive-bpf \
             -E 'binary(integration)'
 
       - name: Upload nextest JUnit report
@@ -495,6 +572,10 @@ jobs:
     # push to main (the diff is the merge commit itself).
     if: github.event_name == 'pull_request'
     timeout-minutes: 30
+    # cargo-mutants reruns the workspace nextest baseline per mutation,
+    # which compiles overdrive-dataplane and thus requires the BPF
+    # artifact on Linux per ADR-0038 §3.2.
+    needs: bpf-build
     steps:
       - uses: actions/checkout@v4
         with:
@@ -513,6 +594,15 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: "phase-1-mutants"
+
+      # MUST run AFTER Swatinem/rust-cache@v2 — see fmt-clippy job above
+      # for rationale (cache tarball restore clobbers the BPF artifact).
+      - name: Download BPF object artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bpf-object
+          path: target/xtask/bpf-objects/
+          if-no-files-found: error
 
       # See fmt-clippy job above for rationale.
       - id: sccache-setup
@@ -604,3 +694,199 @@ jobs:
           else
             echo "::error title=mutants failed::no mutants-summary.json produced; check artifact"
           fi
+
+  # -------------------------------------------------------------------
+  # bpf-build — Phase 2.1 kernel-side ELF compilation.
+  #
+  # Per devops/ci-cd-pipeline.md §2.1 + ADR-0038 §3, §4. Runs
+  # `cargo xtask bpf-build` to produce
+  # `target/xtask/bpf-objects/overdrive_bpf.o`, the artifact every
+  # downstream BPF test job consumes.
+  #
+  # Provisions bpf-linker via `cargo install --locked bpf-linker`
+  # (--locked is mandatory per ADR-0038 §4 for reproducibility — same
+  # primitive Lima uses, no CI-specific install path).
+  #
+  # `rust-src` component is required because the bpf-target build runs
+  # `cargo build ... -Z build-std=core` which rebuilds `core` from
+  # source.
+  # -------------------------------------------------------------------
+  bpf-build:
+    name: bpf-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain (stable, pinned via rust-toolchain.toml)
+        uses: dtolnay/rust-toolchain@stable
+
+      # `cargo xtask bpf-build` invokes `rustup run nightly cargo build
+      # ... -Z build-std=core` (see xtask/src/main.rs). The
+      # `bpfel-unknown-none` target ships no prebuilt core, so nightly +
+      # rust-src on nightly is required — stable + rust-src does not
+      # satisfy `-Z build-std=core`.
+      - name: Install nightly toolchain (required for -Z build-std=core)
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+
+      # mold is the linker per .cargo/config.toml; ubuntu-latest does
+      # not ship it.
+      - name: Install mold linker
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends mold
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Independent cache from the existing `phase-1-*` keys so
+          # phase-1 cache invalidation does not cascade. Also caches
+          # `~/.cargo/bin/bpf-linker` after the first install.
+          shared-key: "phase-2-bpf-build"
+
+      # See fmt-clippy job above for rationale.
+      - id: sccache-setup
+        name: Setup sccache (soft-fail on cache backend outage)
+        continue-on-error: true
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Enable sccache when setup succeeded
+        if: steps.sccache-setup.outcome == 'success'
+        run: |
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+
+      - name: Warn when sccache unavailable
+        if: steps.sccache-setup.outcome != 'success'
+        run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
+
+      - name: Install bpf-linker
+        # --locked is mandatory per ADR-0038 §4 for reproducibility.
+        # Cached by Swatinem/rust-cache via `~/.cargo/bin` after the
+        # first run.
+        run: cargo install --locked bpf-linker
+
+      - name: Install clippy on nightly
+        # `cargo xtask bpf-clippy` runs `rustup run nightly cargo
+        # clippy …`; the dtolnay nightly toolchain step above does
+        # not include clippy by default.
+        run: rustup component add --toolchain nightly clippy
+
+      - name: cargo xtask bpf-clippy
+        # Lint the kernel-side bin under `+nightly --target
+        # bpfel-unknown-none -Z build-std=core --features
+        # build-bpf-target`. The host workspace clippy job cannot
+        # cover this bin: it is `#![no_std] #![no_main]` and rustc
+        # rejects it on the host triple. Running here keeps the
+        # nightly toolchain + cache shared with bpf-build.
+        run: cargo xtask bpf-clippy
+
+      - name: cargo xtask bpf-build
+        # The xtask wrapper invokes `cargo build --release --target
+        # bpfel-unknown-none -Z build-std=core` against
+        # crates/overdrive-bpf and copies the resulting ELF to
+        # target/xtask/bpf-objects/overdrive_bpf.o (the stable path
+        # mandated by ADR-0038 §3).
+        run: cargo xtask bpf-build
+
+      - name: Upload BPF object artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bpf-object
+          path: target/xtask/bpf-objects/overdrive_bpf.o
+          retention-days: 14
+          # if-no-files-found: error is load-bearing — without it a
+          # missing artifact silently no-ops and the downstream job
+          # fails with a confusing surface.
+          if-no-files-found: error
+
+  # -------------------------------------------------------------------
+  # bpf-unit — Phase 2.1 Tier 2 BPF unit tests.
+  #
+  # Per devops/ci-cd-pipeline.md §2.2 + .claude/rules/testing.md §Tier 2.
+  # Runs `cargo xtask bpf-unit` (which invokes `cargo nextest run -p
+  # overdrive-bpf --features integration-tests --test '*'`) against the
+  # PKTGEN/SETUP/CHECK triptych. Asserts via `BPF_PROG_TEST_RUN` that
+  # the no-op xdp_pass program returns XDP_PASS and the LruHashMap
+  # counter increments 0 → 1.
+  #
+  # Capability requirement (per upstream-issues.md §A2): Ubuntu 22.04+
+  # ships `kernel.unprivileged_bpf_disabled = 2`, which makes
+  # `BPF_PROG_LOAD` (called before `BPF_PROG_TEST_RUN`) fail with EPERM
+  # for unprivileged users. The cargo xtask bpf-unit step runs under
+  # `sudo` to provide CAP_BPF. Locally, `cargo xtask lima run -- cargo
+  # xtask bpf-unit` does the same via the canonical Lima wrapper.
+  # Earlier docs at ci-cd-pipeline.md §2.2 claimed otherwise; see
+  # upstream-issues.md §A2 for the empirical correction.
+  # -------------------------------------------------------------------
+  bpf-unit:
+    name: bpf-unit
+    runs-on: ubuntu-latest
+    needs: bpf-build
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # mold is the linker per .cargo/config.toml; ubuntu-latest does
+      # not ship it.
+      - name: Install mold linker
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends mold
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "phase-2-bpf-unit"
+
+      # See fmt-clippy job above for rationale.
+      - id: sccache-setup
+        name: Setup sccache (soft-fail on cache backend outage)
+        continue-on-error: true
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Enable sccache when setup succeeded
+        if: steps.sccache-setup.outcome == 'success'
+        run: |
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+
+      - name: Warn when sccache unavailable
+        if: steps.sccache-setup.outcome != 'success'
+        run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+
+      # MUST run AFTER Swatinem/rust-cache@v2 — see fmt-clippy job above
+      # for rationale (cache tarball restore clobbers the BPF artifact).
+      - name: Download BPF object artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bpf-object
+          # Materialises overdrive_bpf.o at the path the loader's
+          # `include_bytes!` and the build.rs shim both reference (the
+          # stable path mandated by ADR-0038 §3).
+          path: target/xtask/bpf-objects/
+          # Fail fast at the boundary — without this a missing-artifact
+          # case (e.g. bpf-build panicked but emitted nothing) silently
+          # no-ops and the downstream failure surfaces as a confusing
+          # build.rs shim error.
+          if-no-files-found: error
+
+      - name: cargo xtask bpf-unit
+        # `sudo -E env "PATH=$PATH"` matches the `integration` and
+        # `mutants-diff` jobs above. CAP_BPF is required because Ubuntu
+        # 22.04+ ships `kernel.unprivileged_bpf_disabled = 2` — see
+        # upstream-issues.md §A2 for the empirical correction to
+        # ci-cd-pipeline.md §2.2's earlier "no CAP_BPF needed" claim.
+        run: sudo -E env "PATH=$PATH" cargo xtask bpf-unit
+
+      - name: Upload nextest JUnit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bpf-unit-junit
+          path: target/nextest/ci/junit.xml
+          retention-days: 14
+          if-no-files-found: warn

@@ -1,0 +1,4 @@
+# Local target dir if a contributor runs `cargo build` against the
+# bpfel-unknown-none target with a non-default `CARGO_TARGET_DIR`.
+# The workspace `target/` is already gitignored at the root.
+target/

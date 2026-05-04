@@ -56,3 +56,4 @@ cargo_metadata       = "0.18"
 [dev-dependencies]
 proptest.workspace = true
 tempfile.workspace = true
+serial_test.workspace = true

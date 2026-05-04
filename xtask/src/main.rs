@@ -52,6 +52,30 @@ enum Task {
         manifest_path: std::path::PathBuf,
     },
 
+    /// Compile `crates/overdrive-bpf` against `bpfel-unknown-none` and
+    /// copy the produced ELF to the load-bearing stable path
+    /// `target/xtask/bpf-objects/overdrive_bpf.o` that the loader's
+    /// `include_bytes!` references.
+    ///
+    /// Per ADR-0038 §3.1 the build is a child-process invocation of
+    /// `cargo +nightly build --release --target bpfel-unknown-none -Z
+    /// build-std=core --features build-bpf-target --manifest-path
+    /// crates/overdrive-bpf/Cargo.toml` — no recursive cargo from
+    /// `build.rs`. The `--features build-bpf-target` flag is required
+    /// to gate-in the kernel-side `[[bin]]` (host workflows skip it
+    /// via `required-features` to avoid the `#![no_std]` lang-item
+    /// conflict on the host triple — see crates/overdrive-bpf/Cargo.toml).
+    BpfBuild,
+
+    /// Run clippy against the kernel-side `overdrive-bpf` bin under
+    /// the same toolchain `bpf-build` uses (`+nightly`,
+    /// `--target bpfel-unknown-none`, `-Z build-std=core`,
+    /// `--features build-bpf-target`). The host workspace clippy
+    /// run cannot lint this bin: it is `#![no_std] #![no_main]`
+    /// and rustc rejects it on the host triple with "unwinding
+    /// panics are not supported without std".
+    BpfClippy,
+
     /// Tier 2 — BPF unit tests via `BPF_PROG_TEST_RUN`.
     BpfUnit,
 
@@ -293,6 +317,8 @@ fn run() -> Result<()> {
         Task::Dst { seed, only } => xtask::dst::run(seed, only.as_deref()),
         Task::DstLint { manifest_path } => xtask::dst_lint::run(&manifest_path),
         Task::YamlFreeCli { manifest_path } => xtask::yaml_free_cli::run(&manifest_path),
+        Task::BpfBuild => bpf_build(),
+        Task::BpfClippy => bpf_clippy(),
         Task::BpfUnit => bpf_unit(),
         Task::IntegrationTest { scope } => match scope {
             IntegrationScope::Vm { cache_dir, kernels } => integration_vm(&cache_dir, &kernels),
@@ -313,6 +339,17 @@ fn run() -> Result<()> {
 /// One-shot developer bootstrap — installs the tools this workspace
 /// depends on. Keep the list here in sync with `.config/nextest.toml`
 /// and the install hints in `xtask::mutants` / `lefthook.yml`.
+///
+/// Phase coverage:
+///
+/// 1. `cargo-nextest` — workspace test runner.
+/// 2. lefthook — git hook manager (probed; skipped if absent because
+///    it cannot be installed via cargo).
+/// 3. **bpf-build toolchain** (`bpf-linker`, `nightly` rustup
+///    toolchain, `rust-src` component on nightly) — delegated to
+///    [`xtask::dev_setup::run`] which is itself test-covered against
+///    the four `ProbeContext` permutations. macOS short-circuits with a
+///    warn per AC7 of step 02-03; Linux installs whatever is missing.
 fn dev_setup() -> Result<()> {
     // 1. cargo-nextest — the project-wide test runner per
     //    `.claude/rules/testing.md` §"Running tests — foreground, always".
@@ -346,6 +383,12 @@ fn dev_setup() -> Result<()> {
              Then re-run `cargo xtask dev-setup` to wire the git hooks."
         );
     }
+
+    // 3. bpf-build toolchain — bpf-linker, nightly rustup toolchain,
+    //    rust-src component on nightly. Per ADR-0038 §4 / step 02-03 /
+    //    upstream-issue A1; planning + execution split lives in
+    //    `xtask::dev_setup` so the argv shapes are unit-testable.
+    xtask::dev_setup::run()?;
 
     eprintln!("xtask dev-setup: done");
     Ok(())
@@ -557,28 +600,236 @@ fn which_or_hint(binary: &str, install_hint: &str) -> Result<()> {
         .status()
         .is_ok_and(|s| s.success());
     if !found {
+        // If the hint already starts with the canonical
+        // "`<binary>` not found on PATH." prefix, surface it verbatim
+        // so callers like `bpf_build` can supply a multi-line hint
+        // without the prefix being doubled. Otherwise fall back to the
+        // single-line shape used by every other call site.
+        let canonical_prefix = format!("`{binary}` not found on PATH");
+        if install_hint.starts_with(&canonical_prefix) {
+            bail!("{install_hint}");
+        }
         bail!("`{binary}` not found on PATH. Install it with: {install_hint}");
     }
     Ok(())
 }
 
+/// Compile `crates/overdrive-bpf` against `bpfel-unknown-none` and
+/// copy the resulting ELF to the load-bearing stable path
+/// `target/xtask/bpf-objects/overdrive_bpf.o` that the loader's
+/// `include_bytes!` references (see ADR-0038 §3.1, architecture.md
+/// §3.1, wave-decisions.md D3).
+///
+/// Three failure modes, all surface as a structured `eyre::Report`
+/// with non-zero exit:
+///
+/// 1. `bpf-linker` is not on PATH — caught by `which_or_hint` with a
+///    hint listing the three install paths (`cargo install --locked
+///    bpf-linker`, `cargo xtask dev-setup`, Lima re-provision).
+/// 2. The child `cargo +nightly build` exits non-zero — captured
+///    stderr is propagated.
+/// 3. File I/O on the copy step (parent dir creation, `fs::copy`) —
+///    propagated with the source/destination paths.
+///
+/// The copy is `fs::copy`, not move — keep the cargo-target ELF in
+/// place so subsequent rebuilds short-circuit on no-change.
+fn bpf_build() -> Result<()> {
+    which_or_hint("bpf-linker", &bpf_linker_install_hint())?;
+
+    let workspace_root = workspace_root_dir()?;
+    let manifest = workspace_root.join("crates/overdrive-bpf/Cargo.toml");
+
+    // Invoke through `rustup run nightly cargo …` rather than the
+    // bare `cargo +nightly` form. The `$CARGO` env var that
+    // `cargo()` resolves to is populated by cargo itself with the
+    // direct cargo binary (not rustup's shim), and the direct
+    // binary does not parse `+toolchain` directives. Going through
+    // rustup is the canonical way to pin a non-default toolchain
+    // when the parent process was launched by stable cargo (rustup
+    // book § "Channels and Toolchain Specifiers"). The
+    // `-Z build-std=core` flag requires nightly per
+    // `wave-decisions.md` D3 / ADR-0038 §3.1; nightly is provisioned
+    // alongside stable on the dev surfaces (Lima, dev-setup).
+    sh(
+        "rustup run nightly cargo build (overdrive-bpf, bpfel-unknown-none)",
+        Command::new("rustup")
+            .args([
+                "run",
+                "nightly",
+                "cargo",
+                "build",
+                "--release",
+                "--target",
+                "bpfel-unknown-none",
+                "-Z",
+                "build-std=core",
+                "--features",
+                "build-bpf-target",
+                "--manifest-path",
+            ])
+            .arg(&manifest)
+            .current_dir(&workspace_root),
+    )?;
+
+    // Copy the produced ELF to the stable path the loader's
+    // `include_bytes!` references. The `bpfel-unknown-none/release/`
+    // directory is cargo-target-dir-relative; respect $CARGO_TARGET_DIR
+    // when set so the copy still lands when the target dir is
+    // redirected (e.g. Lima's `/home/marcus.guest/.cargo-target-lima`).
+    let target_dir = cargo_target_dir(&workspace_root);
+    let src = target_dir.join("bpfel-unknown-none/release/overdrive-bpf");
+    let dst_dir = workspace_root.join("target/xtask/bpf-objects");
+    let dst = dst_dir.join("overdrive_bpf.o");
+
+    std::fs::create_dir_all(&dst_dir)
+        .map_err(|e| color_eyre::eyre::eyre!("failed to create {}: {e}", dst_dir.display()))?;
+    std::fs::copy(&src, &dst).map_err(|e| {
+        color_eyre::eyre::eyre!(
+            "failed to copy BPF ELF {} -> {}: {e}",
+            src.display(),
+            dst.display()
+        )
+    })?;
+
+    eprintln!("xtask: bpf-build wrote {}", dst.display());
+    Ok(())
+}
+
+/// Run clippy against `crates/overdrive-bpf` under the same toolchain
+/// triple `bpf_build` uses (`+nightly`, `--target bpfel-unknown-none`,
+/// `-Z build-std=core`, `--features build-bpf-target`). The kernel-side
+/// `[[bin]]` is `#![no_std] #![no_main]`; the host workspace clippy
+/// run cannot lint it (rustc rejects it on the host triple with
+/// "unwinding panics are not supported without std"), so this is the
+/// dedicated path.
+///
+/// `bpf-linker` is not strictly required for `cargo clippy` (no link
+/// step), but the rest of the toolchain (nightly + rust-src) is — same
+/// failure mode as `bpf_build` if missing.
+fn bpf_clippy() -> Result<()> {
+    let workspace_root = workspace_root_dir()?;
+    let manifest = workspace_root.join("crates/overdrive-bpf/Cargo.toml");
+
+    sh(
+        "rustup run nightly cargo clippy (overdrive-bpf, bpfel-unknown-none)",
+        Command::new("rustup")
+            .args([
+                "run",
+                "nightly",
+                "cargo",
+                "clippy",
+                "--release",
+                "--target",
+                "bpfel-unknown-none",
+                "-Z",
+                "build-std=core",
+                "--features",
+                "build-bpf-target",
+                "--manifest-path",
+            ])
+            .arg(&manifest)
+            .args(["--", "-D", "warnings"])
+            .current_dir(&workspace_root),
+    )?;
+
+    Ok(())
+}
+
+/// Hint string returned to the operator when `bpf-linker` is missing.
+/// Per ADR-0038 §4 / wave-decisions.md D4 the hint MUST name all three
+/// install paths so the operator picks the one matching their dev
+/// surface — Lima users re-provision; non-Lima Linux developers run
+/// `cargo xtask dev-setup` (step 02-03); anyone else uses the raw
+/// `cargo install --locked` form. `--locked` is mandatory across every
+/// install site for reproducibility (ADR-0038 §4).
+fn bpf_linker_install_hint() -> String {
+    "`bpf-linker` not found on PATH. Install with one of:\n  \
+     • `cargo install --locked bpf-linker`\n  \
+     • `cargo xtask dev-setup` (non-Lima Linux dev surface)\n  \
+     • re-provision the Lima VM (`cargo xtask lima delete && cargo xtask lima up`)\n\
+     See ADR-0038 §4 for toolchain provisioning."
+        .to_string()
+}
+
+/// Resolve the workspace root. Uses `cargo_metadata` (already a build
+/// dep) so the path is correct even when xtask is launched from a
+/// nested working directory.
+fn workspace_root_dir() -> Result<std::path::PathBuf> {
+    let metadata = cargo_metadata::MetadataCommand::new().no_deps().exec()?;
+    Ok(metadata.workspace_root.into_std_path_buf())
+}
+
+/// Resolve the cargo target dir, honouring `$CARGO_TARGET_DIR` when
+/// set. Lima dev sets this to `/home/marcus.guest/.cargo-target-lima`
+/// so the same workspace can be built from macOS host and Linux guest
+/// without colliding fingerprints.
+fn cargo_target_dir(workspace_root: &std::path::Path) -> std::path::PathBuf {
+    std::env::var_os("CARGO_TARGET_DIR")
+        .map_or_else(|| workspace_root.join("target"), std::path::PathBuf::from)
+}
+
+/// Tier 2 — invoke `cargo nextest run -p overdrive-bpf --features
+/// integration-tests --test integration` to drive the
+/// PKTGEN/SETUP/CHECK triptych under
+/// `crates/overdrive-bpf/tests/integration/`.
+///
+/// Per architecture.md §6.1 / `.claude/rules/testing.md` § "Tier 2 —
+/// BPF Unit Tests": each program ships a triptych that loads the BPF
+/// object, drives `BPF_PROG_TEST_RUN` via aya, and asserts on
+/// observable kernel side effects (verdict + map state).
+///
+/// The test target binary is named `integration` (the `tests/
+/// integration.rs` entrypoint per § Layout convention); we pass it
+/// explicitly via `--test integration` rather than the wildcard
+/// `--test '*'` because nextest's CLI does not glob — the wildcard
+/// would be passed verbatim and miss the binary. Architecture.md §6.1
+/// notes the `--test '*'` shape mirrors the stub's documented intent;
+/// the concrete invocation lands the binary name as the integration
+/// suite's single entrypoint per the testing.md Layout convention.
+///
+/// On non-Linux build hosts the triptych test functions are
+/// `#[cfg(target_os = "linux")]`-gated and silently skip — the
+/// command still exits 0 with "no tests run" output, which is the
+/// correct shape for macOS dev (the real gate is Lima / CI).
 fn bpf_unit() -> Result<()> {
-    // Placeholder — `crates/overdrive-bpf` lands in Phase 2. This will
-    // invoke `cargo nextest run -p overdrive-bpf --test '*'` against the
-    // BPF_PROG_TEST_RUN harness. Nextest is the project-wide runner
-    // (see `.config/nextest.toml`); this subcommand keeps the same
-    // invariant.
-    tracing_placeholder("bpf-unit: overdrive-bpf crate lands in Phase 2")
+    which_or_hint(
+        "cargo-nextest",
+        "cargo install cargo-nextest --locked  # or: brew install cargo-nextest",
+    )?;
+    let workspace_root = workspace_root_dir()?;
+    sh(
+        "cargo nextest run -p overdrive-bpf --features integration-tests --test integration",
+        Command::new(cargo())
+            .args([
+                "nextest",
+                "run",
+                "-p",
+                "overdrive-bpf",
+                "--features",
+                "integration-tests",
+                "--test",
+                "integration",
+            ])
+            .current_dir(&workspace_root),
+    )
 }
 
 fn integration_vm(cache_dir: &std::path::Path, kernels: &[String]) -> Result<()> {
     if kernels.is_empty() {
         bail!("specify at least one kernel (e.g. 5.15, 6.1, 6.6, latest, bpf-next)");
     }
-    // Placeholder — Tier 3 harness lands in Phase 2. Will reuse aya's
-    // `cargo xtask integration-test vm --cache-dir <dir> <KERNEL>...`.
+    // Placeholder — Tier 3 nested-VM kernel-matrix harness is queued
+    // for issue #152 (split out of #23 during DELIVER per
+    // `docs/feature/phase-2-aya-rs-scaffolding/deliver/upstream-issues.md`
+    // § A3). The original architecture (architecture.md §6.2) wired
+    // `cargo xtask integration-test vm latest` to LVH; that was
+    // dropped from #23 because (a) for a no-op `xdp_pass` the real-
+    // attach path adds zero coverage over Tier 2's
+    // `BPF_PROG_TEST_RUN`, and (b) nested-VM machinery only earns
+    // its keep when running against a kernel different from the
+    // host environment, which is the deferred kernel-matrix scope.
     let summary = format!(
-        "integration-test vm: Phase 2. cache={}, kernels={}",
+        "integration-test vm: nested-VM harness deferred to #152. cache={}, kernels={}",
         cache_dir.display(),
         kernels.join(",")
     );
@@ -586,11 +837,20 @@ fn integration_vm(cache_dir: &std::path::Path, kernels: &[String]) -> Result<()>
 }
 
 fn verifier_regress() -> Result<()> {
-    tracing_placeholder("verifier-regress: veristat harness lands in Phase 2")
+    // TODO(#29): wire when first real program lands. Per ADR-0038 §6 /
+    // architecture.md §6.3 there is no point baselining verifier
+    // complexity against a no-op `xdp_pass` — the gate would catch
+    // nothing and the baseline would be meaningless. The harness lands
+    // alongside the first real BPF program (POLICY_MAP / SERVICE_MAP /
+    // sockops+kTLS) in Phase 2 issues #24..#27.
+    tracing_placeholder("verifier-regress: veristat harness deferred to #29 (first real program)")
 }
 
 fn xdp_perf() -> Result<()> {
-    tracing_placeholder("xdp-perf: xdp-bench harness lands in Phase 2")
+    // TODO(#29): wire when first real program lands. xdp-bench
+    // throughput / p99 numbers against a no-op program are not a
+    // meaningful regression signal. See architecture.md §6.3.
+    tracing_placeholder("xdp-perf: xdp-bench harness deferred to #29 (first real program)")
 }
 
 fn mutants(args: MutantsArgs) -> Result<()> {
@@ -616,13 +876,22 @@ fn mutants(args: MutantsArgs) -> Result<()> {
 
 fn ci() -> Result<()> {
     sh("cargo fmt --check", Command::new(cargo()).args(["fmt", "--all", "--", "--check"]))?;
+    // `--features integration-tests` (NOT `--all-features`) on the host:
+    // `overdrive-bpf` declares `build-bpf-target` to gate its
+    // `#![no_std] #![no_main]` kernel-side bin (see ADR-0038 §3.1 /
+    // `cargo xtask bpf-build`). Enabling that feature on the host target
+    // makes rustc reject the bin with "unwinding panics are not supported
+    // without std". The dedicated `bpf-build` job exercises the kernel-side
+    // compile path with the right toolchain. Mirrors the `fmt-clippy` job
+    // in `.github/workflows/ci.yml`.
     sh(
         "cargo clippy",
         Command::new(cargo()).args([
             "clippy",
             "--workspace",
             "--all-targets",
-            "--all-features",
+            "--features",
+            "integration-tests",
             "--",
             "-D",
             "warnings",

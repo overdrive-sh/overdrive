@@ -46,12 +46,23 @@ pre-commit:
       # Clippy is crate-level (not file-level), so we walk up from each
       # staged file to its owning Cargo.toml, dedupe, and run clippy
       # once per affected package.
+      #
+      # Kernel-side eBPF crates (`aya-ebpf` dependency, target
+      # `bpfel-unknown-none`, `#![no_std]`) cannot be clippy-checked on
+      # the host — clippy compiles for the host target which fails on
+      # `error: unwinding panics are not supported without std`. They
+      # are skipped here; their clippy gate lives in the dedicated
+      # `cargo xtask bpf-build` and Tier 2/3 harness pipeline (per
+      # ADR-0038 and architecture.md §5).
       run: |
         set -euo pipefail
         pkgs=$(for f in {staged_files}; do
           d=$(dirname "$f")
           while [ "$d" != "." ] && [ "$d" != "/" ]; do
             if [ -f "$d/Cargo.toml" ] && grep -q '^\[package\]' "$d/Cargo.toml"; then
+              if grep -q '^aya-ebpf' "$d/Cargo.toml"; then
+                break
+              fi
               grep -m1 '^name[[:space:]]*=' "$d/Cargo.toml" | sed -E 's/.*"([^"]+)".*/\1/'
               break
             fi
@@ -72,12 +83,27 @@ pre-commit:
       # walk-up pattern as clippy) to keep the hook fast on focused
       # commits. Nextest does not run doctests, so this step is the
       # only place they get executed before CI.
+      #
+      # Kernel-side eBPF crates (`aya-ebpf` dependency) and binary-only
+      # crates with no library target are skipped — `cargo test --doc
+      # -p <crate>` errors with "no library targets found" on the
+      # latter and "unwinding panics not supported without std" on the
+      # former.
       run: |
         set -euo pipefail
         pkgs=$(for f in {staged_files}; do
           d=$(dirname "$f")
           while [ "$d" != "." ] && [ "$d" != "/" ]; do
             if [ -f "$d/Cargo.toml" ] && grep -q '^\[package\]' "$d/Cargo.toml"; then
+              # Skip kernel-side eBPF crates (host doctest cannot run them).
+              if grep -q '^aya-ebpf' "$d/Cargo.toml"; then
+                break
+              fi
+              # Skip crates with no library target — `cargo test --doc`
+              # errors with "no library targets found in package".
+              if [ ! -f "$d/src/lib.rs" ]; then
+                break
+              fi
               grep -m1 '^name[[:space:]]*=' "$d/Cargo.toml" | sed -E 's/.*"([^"]+)".*/\1/'
               break
             fi
@@ -109,12 +135,20 @@ pre-commit:
       #
       # Pre-push continues to run the full workspace suite as the
       # gate. This is the smoke check.
+      #
+      # Kernel-side eBPF crates (`aya-ebpf` dependency) are skipped —
+      # they have no Rust dependents (consumed only via include_bytes!)
+      # and cannot be compiled on the host, so `rdeps(...)` against
+      # them resolves to no tests and exits with code 4.
       run: |
         set -euo pipefail
         pkgs=$(for f in {staged_files}; do
           d=$(dirname "$f")
           while [ "$d" != "." ] && [ "$d" != "/" ]; do
             if [ -f "$d/Cargo.toml" ] && grep -q '^\[package\]' "$d/Cargo.toml"; then
+              if grep -q '^aya-ebpf' "$d/Cargo.toml"; then
+                break
+              fi
               grep -m1 '^name[[:space:]]*=' "$d/Cargo.toml" | sed -E 's/.*"([^"]+)".*/\1/'
               break
             fi

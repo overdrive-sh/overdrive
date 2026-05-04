@@ -1604,6 +1604,112 @@ ContainerDb element. The Container diagram is otherwise unchanged.
 
 ---
 
+## Phase 2.1 — eBPF dataplane scaffolding extension
+
+**Source:** `docs/feature/phase-2-aya-rs-scaffolding/design/architecture.md`
+**ADR:** ADR-0038 (eBPF crate layout + build pipeline).
+**Date:** 2026-05-04.
+
+### 40. Two new crates: `overdrive-bpf` (kernel) + `overdrive-dataplane` (loader)
+
+Phase 2.1 (issue #23) lands the eBPF dataplane scaffolding. Two crates
+ship together to honour the BPF-target compile contract:
+
+- **`crates/overdrive-bpf/`** — class `binary` (ADR-0003), target
+  `bpfel-unknown-none`, `#![no_std]`, deps `aya-ebpf` only. Hosts
+  kernel-side eBPF programs. Phase 2.1 ships one no-op XDP
+  `xdp_pass` plus an `LruHashMap<u32, u64>` packet counter, attached
+  to `lo` for the Tier 3 smoke test. Compiles to a single ELF object
+  copied to `target/xtask/bpf-objects/overdrive_bpf.o`. Excluded from
+  workspace `default-members` so `cargo check --workspace` on macOS
+  skips it; built explicitly via `cargo xtask bpf-build`.
+- **`crates/overdrive-dataplane/`** — class `adapter-host` (ADR-0003,
+  matching `overdrive-host`/`overdrive-store-local`/`overdrive-worker`).
+  Userspace BPF loader. Hosts `EbpfDataplane` — the production
+  binding of the `Dataplane` port trait from `overdrive-core`,
+  mirroring `SimDataplane`'s constructor shape at the seam. Embeds
+  the BPF object via `include_bytes!`; a small `build.rs` shim
+  fails fast with a single-line diagnostic if the artifact is
+  missing. Compiles on macOS with `#[cfg(target_os = "linux")]`
+  stub bodies that return `DataplaneError::LoadFailed("non-Linux
+  build target")`.
+
+**Build pipeline.** Hybrid `cargo xtask bpf-build` + `build.rs`
+artifact-check shim. The xtask subcommand is the primary mechanism
+(invokes `cargo build --target bpfel-unknown-none` against the
+kernel crate, copies the ELF to a stable path); the `build.rs`
+shim is purely diagnostic (no recursive cargo invocation, ever).
+`bpf-linker` is provisioned via the Lima image's `cargo install
+--locked` line plus a `cargo xtask dev-setup` for non-Lima Linux
+developers; `cargo xtask bpf-build` calls `which_or_hint` at the
+top to surface a missing-tool error with an actionable install
+hint.
+
+**xtask harness extension** — `cargo xtask bpf-build` is NEW;
+`cargo xtask bpf-unit` and `cargo xtask integration-test vm` are
+filled in (against the no-op program — Tier 2 PKTGEN/SETUP/CHECK
+triptych and Tier 3 LVH smoke); `cargo xtask verifier-regress` and
+`cargo xtask xdp-perf` remain stubbed with `// TODO(#29): wire when
+first real program lands`. Tier 4 gates are deferred to #29 — there
+is no point baselining a no-op program.
+
+**Method bodies in #23.** `EbpfDataplane::new(iface)` does real work
+(load + attach the no-op program). `update_policy`, `update_service`,
+`drain_flow_events` ship as no-op stubs (`Ok(())` / empty `Vec`)
+with doc comments naming the issue that fills them in (#24 / #25 /
+#27 respectively). `EbpfDataplane` is **not** wired into `AppState`
+in #23 — the binary-composition edge is added by the slice that
+needs it (probably #24's SERVICE_MAP).
+
+### 41. C4 — see `c4-diagrams.md` § Phase 2.1
+
+The Phase 2.1 C4 Level 1 (System Context) and Level 2 (Container)
+diagrams live in `docs/product/architecture/c4-diagrams.md`. The L2
+diagram shows the workspace at 10 crates + xtask, with the two new
+crates highlighted. L3 is intentionally skipped for Phase 2.1 — the
+loader is a single struct with three trait methods (two no-ops);
+component decomposition would not add information. L3 becomes
+warranted around #25 (SERVICE_MAP) when the loader gains
+map-update, flow-event-consumer, and attachment-state components.
+
+### 42. Crate-class table extension
+
+| Crate | Class | Notes |
+|---|---|---|
+| `overdrive-bpf` | `binary` | NEW (ADR-0038). Kernel-side eBPF programs; target `bpfel-unknown-none`; `#![no_std]`; deps `aya-ebpf` only. Excluded from `default-members`; built via `cargo xtask bpf-build`. dst-lint does not scan `binary` crates. |
+| `overdrive-dataplane` | `adapter-host` | NEW (ADR-0038). Userspace BPF loader; hosts `EbpfDataplane` impl of `Dataplane` port trait. Compiles on macOS via `#[cfg(target_os = "linux")]` stub bodies. dst-lint does not scan `adapter-host` crates by design. |
+
+Workspace `members` grows from 9 entries (8 crates + xtask) to 11
+entries (10 crates + xtask). New `default-members` declaration omits
+`overdrive-bpf` to keep `cargo check --workspace` building on
+macOS.
+
+### 43. Updated handoff annotations — Phase 2.1
+
+To DEVOPS — required CI checks gain:
+
+- `cargo xtask bpf-build` (compiles `overdrive-bpf` to
+  `target/xtask/bpf-objects/overdrive_bpf.o`; runs on every PR
+  before any job that compiles `overdrive-dataplane`).
+- `cargo xtask bpf-unit` (Tier 2; runs `cargo nextest run -p
+  overdrive-bpf --features integration-tests --test '*'` against
+  the no-op program's PKTGEN/SETUP/CHECK triptych).
+- `cargo xtask integration-test vm latest` (Tier 3; runs the
+  end-to-end load → attach → counter → detach smoke inside LVH on
+  the latest LTS kernel; PR critical path runs `latest` only,
+  nightly runs the full kernel matrix).
+
+To DEVOPS — Lima image change: `infra/lima/overdrive-dev.yaml` line
+205 extended with `bpf-linker` in the existing `cargo install
+--locked` line. Existing Lima users re-provision; new users get it
+on first boot.
+
+External integrations in Phase 2.1: **none**. The eBPF subsystem
+is kernel-bound, not external. Contract testing posture unchanged
+from the Phase 1 first-workload extension.
+
+---
+
 ## Handoff annotations
 
 **To acceptance-designer (DISTILL)**:
@@ -1688,3 +1794,4 @@ ContainerDb element. The Container diagram is otherwise unchanged.
 | 2026-05-03 | Added ADR-0037 (reconciler emits typed `TerminalCondition`; streaming forwards it; `LifecycleEvent` no longer projects reconciler-private View state). Codifies the recommendation in `docs/research/control-plane/issue-139-followup-streaming-restart-budget-research.md` candidate (c). Replaces step-02-04's `restart_count_max: u32` projection on `LifecycleEvent` with `terminal: Option<TerminalCondition>`; the deciding action carries `terminal` so the action shim writes both `AllocStatusRow.terminal` (durable home) and the broadcast event with the same value. `streaming.rs::check_terminal` collapses from ~30 LOC to ~5 LOC; `lagged_recover`'s `restart_count_max_hint` parameter is deleted; `exit_observer.rs`'s structurally-meaningless `restart_count_max: 0` literal becomes the structurally-meaningful `terminal: None`. ADR-0033's `RestartBudget.exhausted` source changes from a `restart_counts` recomputation to a `row.terminal` row-field read (the `RestartBudget` wire shape itself is unchanged). New variants: `TerminalCondition::{ BackoffExhausted { attempts }, Stopped { by: StoppedBy }, Custom { type_name, detail } }` — `Custom` is the WASM-third-party extension surface per whitepaper §18. K8s-`Condition.Reason`-shaped SemVer convention documented (well-known variants stable; renames are major; new variants additive minor). Lands alongside the ADR-0035 reset of the in-flight `marcus-sa/libsql-view-cache` branch; the new DELIVER roadmap must wire `terminal` from day one rather than ship ADR-0035 first and `terminal` second. — Morgan. |
 | 2026-04-27 | Post-ratification amendment: ADR-0029 (dedicated `overdrive-worker` crate, class `adapter-host`). User-proposed and ratified 2026-04-27 same day as the original first-workload DESIGN pass. The new crate hosts `ProcessDriver` (formerly slated for `overdrive-host`), workload-cgroup management (`overdrive.slice/workloads.slice/<alloc>.scope`; the workload half of ADR-0026), and the boot-time `node_health` row writer (relocated from control-plane bootstrap per ADR-0025 amendment). `overdrive-host` shrinks back to ADR-0016's original host-OS-primitives intent (`SystemClock`, `OsEntropy`, `TcpTransport`). Composition pattern: binary-composition — `overdrive-cli`'s `serve` subcommand hard-depends on both `overdrive-control-plane` and `overdrive-worker`; runtime `[node] role` config selects which subsystems boot. `overdrive-control-plane` does NOT depend on `overdrive-worker` — the action shim calls `Driver::*` against an injected `&dyn Driver`, impl plugged in by the binary at AppState construction. ADRs 0022, 0023, 0025, 0026 amended in-place (Amendment subsections at the end); structural shape unchanged in each. C4 Container diagram updated (new `overdrive-worker` container + binary-composition arrows from `overdrive-cli`); C4 Component (convergence-loop) diagram updated (ProcessDriver moves from `overdrive-host` boundary to `overdrive-worker` boundary; node_health writer added). Crate inventory grows from seven Rust crates to eight (excluding xtask). — Morgan. |
 | 2026-05-02 | ADR-0028 superseded in part by ADR-0034: the `--allow-no-cgroups` escape hatch is removed. Reasons: (a) structural leak in the `StopAllocation` action path (handle had `pid: None`, cgroup-kill branch gated off, `stop` returned `Ok(())` while the process kept running, producing `state: Terminated`-while-process-alive on the next reconciler tick); (b) redundancy — the canonical dev path is now `cargo xtask lima run --` (documented in `.claude/rules/testing.md`), which absorbs the dev-ergonomics objection ADR-0028 § Alternative A documented. Hard-refusal pre-flight from ADR-0028 stays. §31 rewritten; ADR index entry for 0028 marked Superseded; ADR-0034 added to index; Linux-only requirements bullet replaces flag reference with the Lima wrapper. Single-cut migration per greenfield convention — code/test deletions land in the crafter PR, not in this changelog entry. — Morgan. |
+| 2026-05-04 | Phase 2.1 eBPF dataplane scaffolding extension (§40–§43). Added ADR-0038 (eBPF crate layout `overdrive-bpf` + `overdrive-dataplane`; `xtask bpf-build` + `build.rs` artifact-check shim build pipeline; `bpf-linker` provisioning via Lima image + xtask dev-setup + which-or-hint; `default-members` exclusion for the kernel-side crate; `EbpfDataplane` mirroring `SimDataplane`'s constructor seam). Two new crates: `overdrive-bpf` (class `binary`, target `bpfel-unknown-none`, `#![no_std]`, `aya-ebpf`-only) and `overdrive-dataplane` (class `adapter-host`, hosts `EbpfDataplane` impl of `Dataplane` port). `cargo xtask bpf-build` is NEW; `cargo xtask bpf-unit` and `cargo xtask integration-test vm` filled in (against the no-op XDP `xdp_pass` + `LruHashMap<u32,u64>` packet counter); `verifier-regress` and `xdp-perf` remain stubbed for #29. Workspace `members` grows from 9 to 11 entries; new `default-members` declaration excludes `overdrive-bpf` so `cargo check --workspace` builds on macOS. Lima image `cargo install --locked` line extended with `bpf-linker`. C4 L1 (System Context) + L2 (Container) added at `c4-diagrams.md` § Phase 2.1; L3 deliberately skipped (loader is a single struct with two no-op methods). dst-lint scope unchanged — both new crates are non-`core`. ADR-0029 mirrored as the closest-precedent extraction ADR. — Morgan. |
