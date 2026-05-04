@@ -1033,3 +1033,56 @@ async fn view_at_ceiling_with_seen_at_does_not_re_enqueue() {
          view_has_backoff_pending; got queued={queued}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// drop_job_lifecycle_view_for_test — mutation-gate kill target
+//
+// Kills the `replace drop_job_lifecycle_view_for_test with ()` mutation
+// (reconciler_runtime.rs:499). Without this test, the mutation is invisible
+// because the only existing call site immediately re-seeds the view, so the
+// drop effect is fully masked.
+// ---------------------------------------------------------------------------
+
+/// Seeding a `JobLifecycleView` then dropping it via
+/// `drop_job_lifecycle_view_for_test` must leave `view_for_job_lifecycle`
+/// returning the default (empty) view. If `drop` is replaced with a no-op,
+/// `view_for_job_lifecycle` would still return the previously-seeded
+/// non-default view and the assertion below would fail.
+#[tokio::test]
+async fn drop_job_lifecycle_view_removes_seeded_view() {
+    use overdrive_core::reconciler::{JobLifecycleView, TargetResource};
+    use std::collections::BTreeMap;
+
+    let tmp = TempDir::new().expect("tmpdir");
+    let clock = Arc::new(SimClock::new());
+    let state = build_converged_state(&tmp, clock).await;
+
+    let target = TargetResource::new("job/payments").expect("valid target");
+    let alloc_id =
+        overdrive_core::id::AllocationId::new("alloc-payments-0").expect("valid alloc id");
+
+    // Seed a non-default view (restart_counts non-empty).
+    let mut counts = BTreeMap::new();
+    counts.insert(alloc_id.clone(), 2u32);
+    let seeded = JobLifecycleView { restart_counts: counts, last_failure_seen_at: BTreeMap::new() };
+    state.runtime.seed_job_lifecycle_view_for_test(&target, seeded);
+
+    // Verify the seed is visible before drop.
+    let before = state.runtime.view_for_job_lifecycle(&target);
+    assert_eq!(
+        before.restart_counts.get(&alloc_id).copied(),
+        Some(2),
+        "seeded view must be visible before drop"
+    );
+
+    // Drop the view — after this, view_for_job_lifecycle must return default().
+    state.runtime.drop_job_lifecycle_view_for_test(&target);
+
+    let after = state.runtime.view_for_job_lifecycle(&target);
+    assert_eq!(
+        after,
+        JobLifecycleView::default(),
+        "view_for_job_lifecycle must return default() after drop_job_lifecycle_view_for_test; \
+         got {after:?}"
+    );
+}

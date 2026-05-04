@@ -26,7 +26,8 @@ use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_control_plane::view_store::{ViewStore, ViewStoreExt};
 use overdrive_core::id::AllocationId;
 use overdrive_core::reconciler::{
-    AnyReconciler, JobLifecycle, JobLifecycleView, NoopHeartbeat, ReconcilerName, TargetResource,
+    AnyReconciler, JobLifecycle, JobLifecycleView, NoopHeartbeat, Reconciler, ReconcilerName,
+    TargetResource,
 };
 use overdrive_core::wall_clock::UnixInstant;
 use overdrive_sim::adapters::view_store::SimViewStore;
@@ -96,8 +97,12 @@ async fn runtime_bulk_loads_views_at_register() {
     let mut view_b = JobLifecycleView::default();
     view_b.restart_counts.insert(alloc("alloc-frontend-0"), 1);
 
-    sim.write_through(&n, &target_a, &view_a).await.expect("seed view_a");
-    sim.write_through(&n, &target_b, &view_b).await.expect("seed view_b");
+    sim.write_through(<JobLifecycle as Reconciler>::NAME, &target_a, &view_a)
+        .await
+        .expect("seed view_a");
+    sim.write_through(<JobLifecycle as Reconciler>::NAME, &target_b, &view_b)
+        .await
+        .expect("seed view_b");
 
     let mut runtime = ReconcilerRuntime::new(tmp.path(), sim.clone() as Arc<dyn ViewStore>)
         .expect("runtime constructor");
@@ -128,7 +133,7 @@ async fn runtime_writes_through_before_in_memory_update() {
 
     let mut original = JobLifecycleView::default();
     original.restart_counts.insert(alloc("alloc-payments-0"), 7);
-    sim.write_through(&n, &t, &original).await.expect("seed");
+    sim.write_through(<JobLifecycle as Reconciler>::NAME, &t, &original).await.expect("seed");
 
     let mut runtime =
         ReconcilerRuntime::new(tmp.path(), sim.clone() as Arc<dyn ViewStore>).expect("runtime");
@@ -159,7 +164,7 @@ async fn runtime_writes_through_before_in_memory_update() {
     // Sanity check — the underlying SimViewStore also still has the
     // original view (the write was rolled back).
     let from_store: BTreeMap<TargetResource, JobLifecycleView> =
-        sim.bulk_load(&n).await.expect("bulk_load");
+        sim.bulk_load(<JobLifecycle as Reconciler>::NAME).await.expect("bulk_load");
     assert_eq!(
         from_store.get(&t),
         Some(&original),

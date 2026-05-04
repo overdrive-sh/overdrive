@@ -20,8 +20,20 @@ use proptest::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use overdrive_control_plane::view_store::{ViewStore, ViewStoreExt};
-use overdrive_core::reconciler::{ReconcilerName, TargetResource};
+use overdrive_core::reconciler::TargetResource;
 use overdrive_sim::adapters::view_store::SimViewStore;
+
+/// Fixed `&'static str` reconciler name for the proptest. The
+/// `refactor-reconciler-static-name` RCA makes reconciler names a
+/// compile-time anchor; the round-trip property is over arbitrary
+/// `View` values under a fixed name (which mirrors how the production
+/// runtime calls `ViewStore` — every call site is anchored to a
+/// `Reconciler::NAME` const). A previous version of this proptest
+/// generated arbitrary `ReconcilerName` values, but the new
+/// `&'static str` signature on `ViewStore::write_through_bytes` makes
+/// that shape uncompilable by construction — exactly the type-system
+/// guarantee the refactor was meant to encode.
+const FIXED_RECONCILER_NAME: &str = "proptest-reconciler";
 
 /// Test-local View shape — small enough to keep proptest cases fast,
 /// rich enough to exercise CBOR encode/decode of nested data
@@ -49,12 +61,6 @@ prop_compose! {
 }
 
 prop_compose! {
-    fn arb_reconciler_name()(s in "[a-z][a-z0-9-]{0,16}") -> ReconcilerName {
-        ReconcilerName::new(&s).expect("valid by construction")
-    }
-}
-
-prop_compose! {
     fn arb_target()(s in "[a-zA-Z0-9_-]{1,16}") -> TargetResource {
         TargetResource::new(&format!("job/{s}")).expect("valid by construction")
     }
@@ -66,7 +72,6 @@ proptest! {
     /// original under CBOR roundtrip.
     #[test]
     fn sim_view_store_roundtrip_is_lossless_under_proptest(
-        name in arb_reconciler_name(),
         target in arb_target(),
         view in arb_test_view(),
     ) {
@@ -82,12 +87,12 @@ proptest! {
 
             // Write-through, then bulk-load, then assert byte-equal under
             // CBOR roundtrip.
-            ViewStoreExt::write_through(&*store, &name, &target, &view)
+            ViewStoreExt::write_through(&*store, FIXED_RECONCILER_NAME, &target, &view)
                 .await
                 .expect("write_through must succeed on healthy store");
 
             let loaded: BTreeMap<TargetResource, TestView> =
-                ViewStoreExt::bulk_load(&*store, &name)
+                ViewStoreExt::bulk_load(&*store, FIXED_RECONCILER_NAME)
                     .await
                     .expect("bulk_load must succeed on healthy store");
 
@@ -95,10 +100,10 @@ proptest! {
                 "bulk_load must return the value just written");
 
             // Delete removes the row from a subsequent bulk_load.
-            store.delete(&name, &target).await
+            store.delete(FIXED_RECONCILER_NAME, &target).await
                 .expect("delete must succeed");
             let loaded_after_delete: BTreeMap<TargetResource, TestView> =
-                ViewStoreExt::bulk_load(&*store, &name)
+                ViewStoreExt::bulk_load(&*store, FIXED_RECONCILER_NAME)
                     .await
                     .expect("bulk_load must succeed after delete");
             prop_assert!(!loaded_after_delete.contains_key(&target),
@@ -108,7 +113,7 @@ proptest! {
             // and leaves no residual rows under the same name.
             store.probe().await.expect("probe must still succeed");
             let after_probe: BTreeMap<TargetResource, TestView> =
-                ViewStoreExt::bulk_load(&*store, &name)
+                ViewStoreExt::bulk_load(&*store, FIXED_RECONCILER_NAME)
                     .await
                     .expect("bulk_load must succeed after probe");
             prop_assert!(after_probe.is_empty(),

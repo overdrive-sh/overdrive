@@ -47,7 +47,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use overdrive_core::id::{AllocationId, JobId};
-use overdrive_core::reconciler::{ReconcilerName, TargetResource};
+use overdrive_core::reconciler::{JobLifecycle, Reconciler, ReconcilerName, TargetResource};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{Driver, DriverType, ExitEvent, ExitKind};
 use overdrive_core::traits::observation_store::{
@@ -486,12 +486,17 @@ async fn target_for_event(
 }
 
 fn job_lifecycle_name() -> ReconcilerName {
-    // Static canonical name; constructed once per submit. Phase 1
-    // ships exactly one job-lifecycle reconciler; the name is
-    // hardcoded against `crate::job_lifecycle()`'s registration.
+    // Sourced from the trait const per the
+    // `refactor-reconciler-static-name` RCA: `JobLifecycle::NAME` is
+    // the single compile-time anchor for the kebab-case literal, so
+    // there is exactly one place to change if the canonical name ever
+    // moves. The `expect` is by-construction-safe — the validator's
+    // `^[a-z][a-z0-9-]{0,62}$` grammar accepts `"job-lifecycle"` and
+    // the per-call `ReconcilerName::new` invocation is the same shape
+    // `JobLifecycle::canonical()` itself uses.
     #[allow(clippy::expect_used)]
-    ReconcilerName::new("job-lifecycle")
-        .expect("job-lifecycle is a valid reconciler name (constant)")
+    ReconcilerName::new(<JobLifecycle as Reconciler>::NAME)
+        .expect("JobLifecycle::NAME is a valid ReconcilerName by construction")
 }
 
 /// Build a `LifecycleEvent` from an observer-written `AllocStatusRow`.

@@ -70,6 +70,11 @@ struct HelloRec {
 }
 
 impl Reconciler for HelloRec {
+    // Single compile-time anchor for the canonical name; the
+    // refactor-reconciler-static-name RCA threads this through the
+    // ViewStore byte-level surface.
+    const NAME: &'static str = "hello";
+
     // Per ADR-0021 (preserved by ADR-0036), every reconciler picks its
     // own typed `State`. A reconciler with no meaningful projection
     // picks `()`.

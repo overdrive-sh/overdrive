@@ -12,7 +12,7 @@ use std::collections::BTreeMap;
 
 use overdrive_control_plane::view_store::redb::RedbViewStore;
 use overdrive_control_plane::view_store::{ProbeError, ViewStore, ViewStoreExt};
-use overdrive_core::reconciler::{ReconcilerName, TargetResource};
+use overdrive_core::reconciler::TargetResource;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -21,9 +21,11 @@ struct DemoView {
     label: String,
 }
 
-fn name(s: &str) -> ReconcilerName {
-    ReconcilerName::new(s).expect("valid reconciler name")
-}
+/// Reconciler names as `&'static str` literals — the `ViewStore` byte
+/// surface requires `&'static` per the
+/// `refactor-reconciler-static-name` RCA.
+const N_JOB: &str = "job-lifecycle";
+const N_NODE: &str = "node-drainer";
 
 fn target(s: &str) -> TargetResource {
     TargetResource::new(s).expect("valid target resource")
@@ -35,20 +37,19 @@ fn target(s: &str) -> TargetResource {
 #[tokio::test]
 async fn redb_view_store_roundtrips_views_across_reopens_with_durable_fsync() {
     let tmp = tempfile::tempdir().expect("create tempdir");
-    let n = name("job-lifecycle");
     let t = target("job/payments");
     let v = DemoView { counter: 7, label: "first".into() };
 
     {
         let store = RedbViewStore::open(tmp.path()).expect("open store");
-        store.write_through(&n, &t, &v).await.expect("durable write");
+        store.write_through(N_JOB, &t, &v).await.expect("durable write");
         // Drop the store to release the redb file lock and ensure
         // commit fsync hit disk before reopen.
     }
 
     let store = RedbViewStore::open(tmp.path()).expect("reopen store");
     let loaded: BTreeMap<TargetResource, DemoView> =
-        store.bulk_load(&n).await.expect("bulk_load after reopen");
+        store.bulk_load(N_JOB).await.expect("bulk_load after reopen");
     assert_eq!(loaded.get(&t), Some(&v), "view must round-trip byte-equal across reopens");
 }
 
@@ -56,18 +57,17 @@ async fn redb_view_store_roundtrips_views_across_reopens_with_durable_fsync() {
 #[tokio::test]
 async fn redb_view_store_persists_across_reopen() {
     let tmp = tempfile::tempdir().expect("create tempdir");
-    let n = name("node-drainer");
     let t = target("node/n-1");
     let v = DemoView { counter: 99, label: "persist".into() };
 
     {
         let store = RedbViewStore::open(tmp.path()).expect("open store");
-        store.write_through(&n, &t, &v).await.expect("write ok");
+        store.write_through(N_NODE, &t, &v).await.expect("write ok");
     }
 
     let store = RedbViewStore::open(tmp.path()).expect("reopen store");
     let loaded: BTreeMap<TargetResource, DemoView> =
-        store.bulk_load(&n).await.expect("read after reopen");
+        store.bulk_load(N_NODE).await.expect("read after reopen");
     assert_eq!(loaded.get(&t), Some(&v));
 }
 
@@ -78,20 +78,20 @@ async fn redb_view_store_per_reconciler_table_isolation() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let store = RedbViewStore::open(tmp.path()).expect("open");
 
-    let a = name("job-lifecycle");
-    let b = name("node-drainer");
     let t = target("job/payments");
     let v_a = DemoView { counter: 1, label: "a".into() };
 
-    store.write_through(&a, &t, &v_a).await.expect("write a");
+    store.write_through(N_JOB, &t, &v_a).await.expect("write a");
 
-    let loaded_b: BTreeMap<TargetResource, DemoView> = store.bulk_load(&b).await.expect("read b");
+    let loaded_b: BTreeMap<TargetResource, DemoView> =
+        store.bulk_load(N_NODE).await.expect("read b");
     assert!(
         loaded_b.is_empty(),
         "reconciler B's table must not see reconciler A's rows: {loaded_b:?}"
     );
 
-    let loaded_a: BTreeMap<TargetResource, DemoView> = store.bulk_load(&a).await.expect("read a");
+    let loaded_a: BTreeMap<TargetResource, DemoView> =
+        store.bulk_load(N_JOB).await.expect("read a");
     assert_eq!(loaded_a.get(&t), Some(&v_a));
 }
 
@@ -106,9 +106,8 @@ async fn redb_view_store_probe_succeeds_on_healthy_fs() {
     // No reconciler should have residual rows after probe — probe
     // writes to a dedicated `__probe__` table that is invisible to
     // `bulk_load(name)` for any user reconciler name.
-    let n = name("job-lifecycle");
     let loaded: BTreeMap<TargetResource, Vec<u8>> =
-        store.bulk_load_bytes_for_test(&n).await.expect("bulk_load_bytes");
+        store.bulk_load_bytes_for_test(N_JOB).await.expect("bulk_load_bytes");
     assert!(loaded.is_empty(), "probe must leave no rows under user reconcilers");
 }
 

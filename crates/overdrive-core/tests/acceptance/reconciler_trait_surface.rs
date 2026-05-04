@@ -25,8 +25,8 @@ use proptest::prelude::*;
 use overdrive_core::UnixInstant;
 use overdrive_core::id::{ContentHash, CorrelationKey};
 use overdrive_core::reconciler::{
-    Action, Reconciler, ReconcilerName, ReconcilerNameError, TargetResource, TargetResourceError,
-    TickContext,
+    Action, AnyReconciler, JobLifecycle, NoopHeartbeat, Reconciler, ReconcilerName,
+    ReconcilerNameError, TargetResource, TargetResourceError, TickContext,
 };
 
 // ---------------------------------------------------------------------------
@@ -462,6 +462,8 @@ struct NoopReconciler {
 }
 
 impl Reconciler for NoopReconciler {
+    const NAME: &'static str = "noop-heartbeat";
+
     type State = ();
     type View = ();
 
@@ -535,4 +537,85 @@ fn reconciler_twin_invocation_produces_identical_output() {
     let (actions_b, next_view_b) = reconciler.reconcile(&desired, &actual, &view, &tick);
 
     assert_eq!((actions_a, next_view_a), (actions_b, next_view_b));
+}
+
+// ---------------------------------------------------------------------------
+// Reconciler::NAME — refactor-reconciler-static-name acceptance criteria
+//
+// The trait carries a `const NAME: &'static str` per the
+// `refactor-reconciler-static-name` RCA. Two assertions matter at the
+// trait-surface level:
+//
+// 1. Each first-party reconciler's `NAME` matches its declared kebab-case
+//    canonical string (the one its `canonical()` constructor passes to
+//    `ReconcilerName::new`).
+// 2. The `NAME` const satisfies `ReconcilerName::new`'s validator — a
+//    typo or invalid character would surface as a panic at construction
+//    time rather than a silent runtime error during the first
+//    `register` call.
+//
+// Pointer-identity of the static (the load-bearing leak-elimination
+// property) is asserted at the `ViewStore` integration boundary in
+// `crates/overdrive-control-plane/tests/integration/redb_view_store_no_leak.rs`.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn reconciler_name_const_for_noop_heartbeat_is_canonical_kebab_case() {
+    // Direct trait-const access — `const NAME` has the canonical
+    // kebab-case literal that `NoopHeartbeat::canonical()` feeds to
+    // `ReconcilerName::new`.
+    assert_eq!(<NoopHeartbeat as Reconciler>::NAME, "noop-heartbeat");
+
+    // Round-trip through the validator — confirms the const value is
+    // a valid `ReconcilerName` shape. A future typo in the const would
+    // fail this assertion before reaching production.
+    let parsed = ReconcilerName::new(<NoopHeartbeat as Reconciler>::NAME)
+        .expect("NoopHeartbeat::NAME must satisfy ReconcilerName::new");
+    assert_eq!(parsed.as_str(), "noop-heartbeat");
+}
+
+#[test]
+fn reconciler_name_const_for_job_lifecycle_is_canonical_kebab_case() {
+    assert_eq!(<JobLifecycle as Reconciler>::NAME, "job-lifecycle");
+
+    let parsed = ReconcilerName::new(<JobLifecycle as Reconciler>::NAME)
+        .expect("JobLifecycle::NAME must satisfy ReconcilerName::new");
+    assert_eq!(parsed.as_str(), "job-lifecycle");
+}
+
+#[test]
+fn reconciler_name_const_matches_runtime_name_for_noop_heartbeat() {
+    // The runtime-side `name(&self)` accessor MUST return a
+    // `ReconcilerName` whose canonical string equals the trait const.
+    // Drift between the two would let a reconciler register under one
+    // name and persist its View under a different name — exactly the
+    // misalignment the `&'static str` boundary exists to prevent.
+    let r = NoopHeartbeat::canonical();
+    assert_eq!(r.name().as_str(), <NoopHeartbeat as Reconciler>::NAME);
+}
+
+#[test]
+fn reconciler_name_const_matches_runtime_name_for_job_lifecycle() {
+    let r = JobLifecycle::canonical();
+    assert_eq!(r.name().as_str(), <JobLifecycle as Reconciler>::NAME);
+}
+
+#[test]
+fn any_reconciler_static_name_dispatches_to_inner_const_for_noop_heartbeat() {
+    // `AnyReconciler::static_name()` is the surface the runtime hands
+    // to `ViewStore::{bulk_load_bytes, write_through_bytes, delete}`
+    // (whose `reconciler` parameter is `&'static str` per the
+    // `refactor-reconciler-static-name` RCA). A drift between the
+    // dispatch and the inner reconciler's `NAME` const would persist
+    // a View under the wrong reconciler name.
+    let any = AnyReconciler::NoopHeartbeat(NoopHeartbeat::canonical());
+    assert_eq!(any.static_name(), <NoopHeartbeat as Reconciler>::NAME);
+    assert_eq!(any.static_name(), "noop-heartbeat");
+}
+
+#[test]
+fn any_reconciler_static_name_dispatches_to_inner_const_for_job_lifecycle() {
+    let any = AnyReconciler::JobLifecycle(JobLifecycle::canonical());
+    assert_eq!(any.static_name(), <JobLifecycle as Reconciler>::NAME);
+    assert_eq!(any.static_name(), "job-lifecycle");
 }

@@ -1,0 +1,17 @@
+error[E0038]: the trait `overdrive_core::reconciler::Reconciler` is not dyn compatible
+ --> tests/compile_fail/reconciler_trait_is_not_dyn_compatible.rs:35:27
+  |
+ 35 |     let _: Option<Box<dyn Reconciler<State = (), View = ()>>> = None;
+    |                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ `overdrive_core::reconciler::Reconciler` is not dyn compatible
+    |
+note: for a trait to be dyn compatible it needs to allow building a vtable
+      for more information, visit <https://doc.rust-lang.org/reference/items/traits.html#dyn-compatibility>
+   --> src/reconciler.rs
+    |
+    |     const NAME: &'static str;
+    |           ^^^^ the trait is not dyn compatible because it contains associated const `NAME`
+    = help: the following types implement `overdrive_core::reconciler::Reconciler`:
+              overdrive_core::reconciler::NoopHeartbeat
+              overdrive_core::reconciler::JobLifecycle
+            consider defining an enum where each variant holds one of these types,
+            implementing `overdrive_core::reconciler::Reconciler` for this new enum and using it instead

@@ -42,8 +42,8 @@ use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{IntentKey, Job, Node};
 use overdrive_core::id::{JobId, NodeId};
 use overdrive_core::reconciler::{
-    Action, AnyReconciler, AnyReconcilerView, AnyState, JobLifecycleState, JobLifecycleView,
-    ReconcilerName, TargetResource, TickContext,
+    Action, AnyReconciler, AnyReconcilerView, AnyState, JobLifecycle, JobLifecycleState,
+    JobLifecycleView, Reconciler, ReconcilerName, TargetResource, TickContext,
 };
 use overdrive_core::traits::intent_store::IntentStore;
 use parking_lot::Mutex;
@@ -210,11 +210,20 @@ impl ReconcilerRuntime {
         // Step 2 — typed bulk-load. The per-variant dispatch picks the
         // right `View` type and constructs the matching `AnyViewMap`
         // variant.
+        //
+        // `static_name()` projects the inner reconciler's
+        // `Self::NAME` const — a `&'static str` aliased to the
+        // binary's data segment — and is the only shape the
+        // post-`refactor-reconciler-static-name` `ViewStore` accepts.
+        // Going through `name.as_str()` would produce a `&str`
+        // borrowed from the `ReconcilerName`'s `String`, which is
+        // non-`'static` and rejected at compile time.
+        let static_name = reconciler.static_name();
         let views = match &reconciler {
             AnyReconciler::NoopHeartbeat(_) => AnyViewMap::Unit,
             AnyReconciler::JobLifecycle(_) => {
                 let loaded: BTreeMap<TargetResource, JobLifecycleView> =
-                    self.view_store.bulk_load(&name).await.map_err(|e| {
+                    self.view_store.bulk_load(static_name).await.map_err(|e| {
                         ControlPlaneError::from(crate::error::ViewStoreBootError::BulkLoad {
                             reconciler: name.clone(),
                             source: e,
@@ -279,20 +288,7 @@ impl ReconcilerRuntime {
     /// one.
     #[must_use]
     pub fn view_for_job_lifecycle(&self, target: &TargetResource) -> JobLifecycleView {
-        // Constant string is statically valid; the only failure mode
-        // would be a regression in `ReconcilerName::new`'s validator
-        // (e.g. someone narrowing the accepted character set). The
-        // `unwrap_or_else` arm hands back the closest equivalent
-        // canonical name we know is always valid — `noop-heartbeat`
-        // — which yields `None` from the registry lookup below and
-        // degrades gracefully to "no view available" rather than
-        // panicking the runtime in production.
-        let canonical = ReconcilerName::new("job-lifecycle").unwrap_or_else(|_| {
-            #[allow(clippy::expect_used)]
-            ReconcilerName::new("noop-heartbeat")
-                .expect("'noop-heartbeat' is a valid ReconcilerName by construction")
-        });
-        let Some(entry) = self.reconcilers.get(&canonical) else {
+        let Some(entry) = self.reconcilers.get(&job_lifecycle_canonical_name()) else {
             return JobLifecycleView::default();
         };
         match &*entry.views.lock() {
@@ -345,6 +341,11 @@ impl ReconcilerRuntime {
                 "no registry entry",
             ));
         };
+        // Recover the `&'static str` canonical name from the registry
+        // entry's inner `AnyReconciler`. Required for the post-
+        // `refactor-reconciler-static-name` `ViewStore` byte surface,
+        // whose `reconciler` parameter is typed `&'static str`.
+        let static_name = entry.reconciler.static_name();
         match next_view {
             AnyReconcilerView::Unit => {
                 // Unit views carry no data; nothing to persist or
@@ -356,7 +357,7 @@ impl ReconcilerRuntime {
             AnyReconcilerView::JobLifecycle(view) => {
                 // STEP 7 — durable write-through with fsync.
                 self.view_store
-                    .write_through(name, target, &view)
+                    .write_through(static_name, target, &view)
                     .await
                     .map_err(|e| {
                         ControlPlaneError::internal(
@@ -461,20 +462,7 @@ impl ReconcilerRuntime {
         target: &TargetResource,
         view: JobLifecycleView,
     ) {
-        // Constant string is statically valid; the only failure mode
-        // would be a regression in `ReconcilerName::new`'s validator
-        // (e.g. someone narrowing the accepted character set). The
-        // `unwrap_or_else` arm hands back the closest equivalent
-        // canonical name we know is always valid — `noop-heartbeat`
-        // — which yields `None` from the registry lookup below and
-        // degrades gracefully to "no view available" rather than
-        // panicking the runtime in production.
-        let canonical = ReconcilerName::new("job-lifecycle").unwrap_or_else(|_| {
-            #[allow(clippy::expect_used)]
-            ReconcilerName::new("noop-heartbeat")
-                .expect("'noop-heartbeat' is a valid ReconcilerName by construction")
-        });
-        let Some(entry) = self.reconcilers.get(&canonical) else { return };
+        let Some(entry) = self.reconcilers.get(&job_lifecycle_canonical_name()) else { return };
         let mut guard = entry.views.lock();
         if let AnyViewMap::JobLifecycle(map) = &mut *guard {
             map.insert(target.clone(), view);
@@ -488,25 +476,29 @@ impl ReconcilerRuntime {
     #[doc(hidden)]
     #[cfg(any(test, feature = "integration-tests"))]
     pub fn drop_job_lifecycle_view_for_test(&self, target: &TargetResource) {
-        // Constant string is statically valid; the only failure mode
-        // would be a regression in `ReconcilerName::new`'s validator
-        // (e.g. someone narrowing the accepted character set). The
-        // `unwrap_or_else` arm hands back the closest equivalent
-        // canonical name we know is always valid — `noop-heartbeat`
-        // — which yields `None` from the registry lookup below and
-        // degrades gracefully to "no view available" rather than
-        // panicking the runtime in production.
-        let canonical = ReconcilerName::new("job-lifecycle").unwrap_or_else(|_| {
-            #[allow(clippy::expect_used)]
-            ReconcilerName::new("noop-heartbeat")
-                .expect("'noop-heartbeat' is a valid ReconcilerName by construction")
-        });
-        let Some(entry) = self.reconcilers.get(&canonical) else { return };
+        let Some(entry) = self.reconcilers.get(&job_lifecycle_canonical_name()) else { return };
         let mut guard = entry.views.lock();
         if let AnyViewMap::JobLifecycle(map) = &mut *guard {
             map.remove(target);
         }
     }
+}
+
+/// Build the canonical [`ReconcilerName`] for the [`JobLifecycle`]
+/// reconciler from its trait const [`JobLifecycle::NAME`].
+///
+/// The const is the single compile-time anchor for the name string —
+/// see the `refactor-reconciler-static-name` RCA. `ReconcilerName::new`
+/// validates against `^[a-z][a-z0-9-]{0,62}$`; the literal
+/// `"job-lifecycle"` declared on `<JobLifecycle as Reconciler>::NAME`
+/// is verified-valid at construction time by every `JobLifecycle::canonical()`
+/// call site (`unwrap` or `expect` would be equivalent at runtime —
+/// the literal cannot fail validation as long as the trait const and
+/// the validator's grammar agree).
+#[allow(clippy::expect_used)]
+fn job_lifecycle_canonical_name() -> ReconcilerName {
+    ReconcilerName::new(<JobLifecycle as Reconciler>::NAME)
+        .expect("JobLifecycle::NAME is a valid ReconcilerName by construction")
 }
 
 // ---------------------------------------------------------------------------

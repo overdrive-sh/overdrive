@@ -20,7 +20,7 @@ use axum::http::{HeaderMap, header};
 use axum::response::{IntoResponse, Response};
 use overdrive_core::aggregate::{AggregateError, IntentKey, Job, JobSpecInput};
 use overdrive_core::id::{ContentHash, JobId};
-use overdrive_core::reconciler::{ReconcilerName, TargetResource};
+use overdrive_core::reconciler::{JobLifecycle, Reconciler, ReconcilerName, TargetResource};
 use overdrive_core::traits::intent_store::{IntentStore, PutOutcome};
 use overdrive_core::traits::observation_store::AllocState;
 use overdrive_core::traits::observation_store::AllocStatusRow;
@@ -50,8 +50,13 @@ use crate::eval_broker::Evaluation;
 /// convergence would ever run — `cluster_status.broker.dispatched`
 /// would permanently read 0.
 fn enqueue_job_lifecycle_eval(state: &AppState, job_id: &JobId) -> Result<(), ControlPlaneError> {
-    let reconciler = ReconcilerName::new("job-lifecycle")
-        .map_err(|e| ControlPlaneError::internal("ReconcilerName::new(\"job-lifecycle\")", e))?;
+    // Source from the trait const per the `refactor-reconciler-static-name`
+    // RCA — `JobLifecycle::NAME` is the single compile-time anchor for
+    // the kebab-case literal, and the `ReconcilerName::new` validator
+    // accepts it by construction.
+    let reconciler = ReconcilerName::new(<JobLifecycle as Reconciler>::NAME).map_err(|e| {
+        ControlPlaneError::internal("ReconcilerName::new(<JobLifecycle as Reconciler>::NAME)", e)
+    })?;
     let target_string = format!("job/{job_id}");
     let target = TargetResource::new(&target_string)
         .map_err(|e| ControlPlaneError::internal("TargetResource::new(job/<id>)", e))?;

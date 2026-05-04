@@ -49,7 +49,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use thiserror::Error;
 
-use overdrive_core::reconciler::{ReconcilerName, TargetResource};
+use overdrive_core::reconciler::TargetResource;
 
 /// Result alias for `ViewStore` operations — keeps call sites short
 /// without forcing the long error type on every signature.
@@ -154,6 +154,14 @@ pub trait ViewStore: Send + Sync {
     /// the first tick — the result becomes the runtime's in-memory
     /// `BTreeMap<TargetResource, View>` steady-state read SSOT.
     ///
+    /// `reconciler` is `&'static str` rather than `&ReconcilerName`
+    /// per the `refactor-reconciler-static-name` RCA: the static
+    /// lifetime that `redb::TableDefinition` requires is encoded in
+    /// the type system, not recovered at runtime via `Box::leak` or
+    /// an interner. Callers pass `Reconciler::NAME` directly (or, for
+    /// the runtime's `AnyReconciler` enum-dispatch path,
+    /// `AnyReconciler::static_name()`).
+    ///
     /// `BTreeMap` not `HashMap` — iteration order must be
     /// deterministic for DST replay
     /// (`.claude/rules/development.md` § "Ordered-collection choice").
@@ -162,13 +170,17 @@ pub trait ViewStore: Send + Sync {
     /// (fresh registration). This is the common case at first boot.
     async fn bulk_load_bytes(
         &self,
-        reconciler: &ReconcilerName,
+        reconciler: &'static str,
     ) -> Result<BTreeMap<TargetResource, Vec<u8>>>;
 
     /// Write a single `(target, blob)` pair under `reconciler` to
     /// durable storage. Durable (fsync) BEFORE return — per ADR-0035
     /// §5 step 7→8 the runtime's in-memory map update follows after
     /// this call returns `Ok(())`.
+    ///
+    /// `reconciler` is `&'static str` per the
+    /// `refactor-reconciler-static-name` RCA — see [`bulk_load_bytes`]
+    /// for the lifetime rationale.
     ///
     /// Failure modes:
     /// - `ViewStoreError::FsyncFailed` — sim injection or real fsync
@@ -177,7 +189,7 @@ pub trait ViewStore: Send + Sync {
     /// - `ViewStoreError::Io` — underlying engine I/O failure.
     async fn write_through_bytes(
         &self,
-        reconciler: &ReconcilerName,
+        reconciler: &'static str,
         target: &TargetResource,
         cbor: &[u8],
     ) -> Result<()>;
@@ -187,8 +199,12 @@ pub trait ViewStore: Send + Sync {
     /// etc.). Phase 1 deferral acceptable — leaked rows are bounded
     /// by reconciler-kind cardinality, not tick count.
     ///
+    /// `reconciler` is `&'static str` per the
+    /// `refactor-reconciler-static-name` RCA — see [`bulk_load_bytes`]
+    /// for the lifetime rationale.
+    ///
     /// Idempotent: deleting a non-existent row succeeds.
-    async fn delete(&self, reconciler: &ReconcilerName, target: &TargetResource) -> Result<()>;
+    async fn delete(&self, reconciler: &'static str, target: &TargetResource) -> Result<()>;
 
     /// Earned-Trust startup probe per ADR-0035 § Earned Trust.
     ///
@@ -218,10 +234,12 @@ pub trait ViewStoreExt: ViewStore {
     /// `ViewStoreError::Decode` — the runtime treats this as a hard
     /// boot failure (schema skew is unrecoverable without operator
     /// intervention).
-    async fn bulk_load<V>(
-        &self,
-        reconciler: &ReconcilerName,
-    ) -> Result<BTreeMap<TargetResource, V>>
+    ///
+    /// `reconciler` is `&'static str` — typically passed as
+    /// `R::NAME` for a concrete reconciler `R`, or
+    /// `AnyReconciler::static_name()` from the runtime's enum-dispatch
+    /// path.
+    async fn bulk_load<V>(&self, reconciler: &'static str) -> Result<BTreeMap<TargetResource, V>>
     where
         V: DeserializeOwned + Send;
 
@@ -229,9 +247,12 @@ pub trait ViewStoreExt: ViewStore {
     /// `view` then dispatches to the byte-level method. Encode
     /// failures surface as `ViewStoreError::Encode` (rare for
     /// straightforward `Serialize` derives).
+    ///
+    /// `reconciler` is `&'static str` — see [`bulk_load`] for the
+    /// lifetime rationale.
     async fn write_through<V>(
         &self,
-        reconciler: &ReconcilerName,
+        reconciler: &'static str,
         target: &TargetResource,
         view: &V,
     ) -> Result<()>
@@ -241,7 +262,7 @@ pub trait ViewStoreExt: ViewStore {
 
 #[async_trait]
 impl<T: ViewStore + ?Sized> ViewStoreExt for T {
-    async fn bulk_load<V>(&self, reconciler: &ReconcilerName) -> Result<BTreeMap<TargetResource, V>>
+    async fn bulk_load<V>(&self, reconciler: &'static str) -> Result<BTreeMap<TargetResource, V>>
     where
         V: DeserializeOwned + Send,
     {
@@ -257,7 +278,7 @@ impl<T: ViewStore + ?Sized> ViewStoreExt for T {
 
     async fn write_through<V>(
         &self,
-        reconciler: &ReconcilerName,
+        reconciler: &'static str,
         target: &TargetResource,
         view: &V,
     ) -> Result<()>

@@ -119,12 +119,41 @@ impl Default for SimViewStore {
     }
 }
 
+/// Convert a `&'static str` reconciler name (the byte-level trait's
+/// boundary type) into the typed `ReconcilerName` used as the
+/// internal storage map key. The contract is: callers pass
+/// `Reconciler::NAME` or `AnyReconciler::static_name()`, both of
+/// which are literals validated against `ReconcilerName::new`'s
+/// `^[a-z][a-z0-9-]{0,62}$` grammar by the trait's doc contract.
+/// A future caller passing arbitrary runtime bytes is structurally
+/// blocked by the `&'static str` type — the compile-fail fixture
+/// `view_store_rejects_owned_string.rs` is the load-bearing gate.
+#[allow(clippy::expect_used)]
+fn reconciler_name_from_static(name: &'static str) -> ReconcilerName {
+    ReconcilerName::new(name).expect(
+        "Reconciler::NAME / AnyReconciler::static_name() are validated by the trait contract; \
+         callers cannot pass arbitrary runtime bytes via the `&'static str` boundary",
+    )
+}
+
 #[async_trait]
 impl ViewStore for SimViewStore {
     async fn bulk_load_bytes(
         &self,
-        reconciler: &ReconcilerName,
+        reconciler: &'static str,
     ) -> VsResult<BTreeMap<TargetResource, Vec<u8>>> {
+        // Convert the `&'static str` boundary parameter to the
+        // typed `ReconcilerName` we use as the internal map key.
+        // The contract is: callers pass `Reconciler::NAME` (or
+        // `AnyReconciler::static_name()`), which by construction is
+        // a literal validated against `ReconcilerName::new` — see
+        // the `Reconciler::NAME` doc on `overdrive_core::reconciler`.
+        // The `expect` therefore can only fire if a caller violates
+        // the contract by passing arbitrary runtime bytes; the
+        // compile-fail fixture
+        // `tests/compile_fail/view_store_rejects_owned_string.rs`
+        // closes that hole at the type level.
+        let typed = reconciler_name_from_static(reconciler);
         // Filter the storage map by `reconciler` and drop the prefix
         // from the key — the returned map is keyed on
         // `TargetResource` only, matching the trait contract.
@@ -138,7 +167,7 @@ impl ViewStore for SimViewStore {
             .lock()
             .iter()
             .filter_map(|((name, target), bytes)| {
-                (name == reconciler).then(|| (target.clone(), bytes.clone()))
+                (name == &typed).then(|| (target.clone(), bytes.clone()))
             })
             .collect();
         Ok(out)
@@ -146,7 +175,7 @@ impl ViewStore for SimViewStore {
 
     async fn write_through_bytes(
         &self,
-        reconciler: &ReconcilerName,
+        reconciler: &'static str,
         target: &TargetResource,
         cbor: &[u8],
     ) -> VsResult<()> {
@@ -158,31 +187,26 @@ impl ViewStore for SimViewStore {
                 message: "sim injection: fsync failure".to_string(),
             });
         }
+        let typed = reconciler_name_from_static(reconciler);
         // Lock scope tightened per clippy::significant_drop_tightening
         // — single-statement insert, lock drops at end of expression.
-        self.storage.lock().insert((reconciler.clone(), target.clone()), cbor.to_vec());
+        self.storage.lock().insert((typed, target.clone()), cbor.to_vec());
         Ok(())
     }
 
-    async fn delete(&self, reconciler: &ReconcilerName, target: &TargetResource) -> VsResult<()> {
+    async fn delete(&self, reconciler: &'static str, target: &TargetResource) -> VsResult<()> {
+        let typed = reconciler_name_from_static(reconciler);
         // Idempotent — `BTreeMap::remove` returning `None` is fine.
         // Lock scope tightened per clippy::significant_drop_tightening.
-        let _ = self.storage.lock().remove(&(reconciler.clone(), target.clone()));
+        let _ = self.storage.lock().remove(&(typed, target.clone()));
         Ok(())
     }
 
     async fn probe(&self) -> std::result::Result<(), ProbeError> {
-        // Reserved sentinel coordinates. Construction failures here
-        // would indicate a bug in `ReconcilerName::new` /
-        // `TargetResource::new` against constants we control — surface
-        // as a `WriteFailed` with an `Io` cause for visibility, but
-        // this branch should never fire in practice.
-        let probe_name =
-            ReconcilerName::new(PROBE_RECONCILER).map_err(|e| ProbeError::WriteFailed {
-                source: ViewStoreError::Io(std::io::Error::other(format!(
-                    "probe reconciler name invalid: {e}"
-                ))),
-            })?;
+        // The probe reconciler name is a compile-time `&'static str`
+        // constant — passes through the byte-level surface directly.
+        // The probe target still needs constructor validation since
+        // it is keyed on the typed `TargetResource`.
         let probe_target =
             TargetResource::new(PROBE_TARGET).map_err(|e| ProbeError::WriteFailed {
                 source: ViewStoreError::Io(std::io::Error::other(format!(
@@ -203,12 +227,12 @@ impl ViewStore for SimViewStore {
         // Write → read-back → delete, all under sequential locks. The
         // probe path is short and serial; no need to interleave with
         // other ops.
-        self.write_through_bytes(&probe_name, &probe_target, PROBE_PAYLOAD)
+        self.write_through_bytes(PROBE_RECONCILER, &probe_target, PROBE_PAYLOAD)
             .await
             .map_err(|source| ProbeError::WriteFailed { source })?;
 
         let loaded = self
-            .bulk_load_bytes(&probe_name)
+            .bulk_load_bytes(PROBE_RECONCILER)
             .await
             .map_err(|source| ProbeError::CommitFailed { source })?;
 
@@ -217,7 +241,7 @@ impl ViewStore for SimViewStore {
             return Err(ProbeError::RoundTripMismatch { wrote: PROBE_PAYLOAD.to_vec(), got });
         }
 
-        self.delete(&probe_name, &probe_target)
+        self.delete(PROBE_RECONCILER, &probe_target)
             .await
             .map_err(|source| ProbeError::CleanupFailed { source })?;
 
@@ -241,9 +265,11 @@ mod tests {
         label: String,
     }
 
-    fn name(s: &str) -> ReconcilerName {
-        ReconcilerName::new(s).expect("valid reconciler name")
-    }
+    /// Reconciler name as `&'static str` literal — the byte-level
+    /// `ViewStore` surface requires `&'static` per the
+    /// `refactor-reconciler-static-name` RCA.
+    const N: &str = "job-lifecycle";
+    const N_OTHER: &str = "node-drainer";
 
     fn target(s: &str) -> TargetResource {
         TargetResource::new(s).expect("valid target resource")
@@ -252,38 +278,36 @@ mod tests {
     #[tokio::test]
     async fn bulk_load_returns_empty_on_fresh_store() {
         let store = SimViewStore::new();
-        let loaded: BTreeMap<TargetResource, Counter> =
-            store.bulk_load(&name("job-lifecycle")).await.expect("ok");
+        let loaded: BTreeMap<TargetResource, Counter> = store.bulk_load(N).await.expect("ok");
         assert!(loaded.is_empty());
     }
 
     #[tokio::test]
     async fn write_through_then_bulk_load_returns_value() {
         let store = SimViewStore::new();
-        let n = name("job-lifecycle");
         let t = target("job/payments");
         let v = Counter { n: 42, label: "x".into() };
 
-        store.write_through(&n, &t, &v).await.expect("write ok");
+        store.write_through(N, &t, &v).await.expect("write ok");
 
-        let loaded: BTreeMap<TargetResource, Counter> = store.bulk_load(&n).await.expect("read ok");
+        let loaded: BTreeMap<TargetResource, Counter> = store.bulk_load(N).await.expect("read ok");
         assert_eq!(loaded.get(&t), Some(&v));
     }
 
     #[tokio::test]
     async fn bulk_load_filters_by_reconciler_name() {
         let store = SimViewStore::new();
-        let a = name("job-lifecycle");
-        let b = name("node-drainer");
         let t = target("job/payments");
 
-        store.write_through(&a, &t, &Counter { n: 1, label: "a".into() }).await.expect("write a");
-        store.write_through(&b, &t, &Counter { n: 2, label: "b".into() }).await.expect("write b");
+        store.write_through(N, &t, &Counter { n: 1, label: "a".into() }).await.expect("write a");
+        store
+            .write_through(N_OTHER, &t, &Counter { n: 2, label: "b".into() })
+            .await
+            .expect("write b");
 
-        let loaded_a: BTreeMap<TargetResource, Counter> =
-            store.bulk_load(&a).await.expect("read a");
+        let loaded_a: BTreeMap<TargetResource, Counter> = store.bulk_load(N).await.expect("read a");
         let loaded_b: BTreeMap<TargetResource, Counter> =
-            store.bulk_load(&b).await.expect("read b");
+            store.bulk_load(N_OTHER).await.expect("read b");
 
         assert_eq!(loaded_a.get(&t).map(|c| c.n), Some(1));
         assert_eq!(loaded_b.get(&t).map(|c| c.n), Some(2));
@@ -292,25 +316,23 @@ mod tests {
     #[tokio::test]
     async fn delete_removes_from_subsequent_bulk_load() {
         let store = SimViewStore::new();
-        let n = name("job-lifecycle");
         let t = target("job/payments");
         let v = Counter::default();
 
-        store.write_through(&n, &t, &v).await.expect("write ok");
-        store.delete(&n, &t).await.expect("delete ok");
+        store.write_through(N, &t, &v).await.expect("write ok");
+        store.delete(N, &t).await.expect("delete ok");
 
-        let loaded: BTreeMap<TargetResource, Counter> = store.bulk_load(&n).await.expect("read ok");
+        let loaded: BTreeMap<TargetResource, Counter> = store.bulk_load(N).await.expect("read ok");
         assert!(!loaded.contains_key(&t));
     }
 
     #[tokio::test]
     async fn delete_is_idempotent() {
         let store = SimViewStore::new();
-        let n = name("job-lifecycle");
         let t = target("job/payments");
 
         // Delete on a never-written key succeeds.
-        store.delete(&n, &t).await.expect("idempotent delete ok");
+        store.delete(N, &t).await.expect("idempotent delete ok");
     }
 
     #[tokio::test]
@@ -318,9 +340,10 @@ mod tests {
         let store = SimViewStore::new();
         store.probe().await.expect("probe ok on fresh store");
 
-        // No rows visible under the probe sentinel name.
-        let probe_name = ReconcilerName::new(PROBE_RECONCILER).expect("valid");
-        let leftover = store.bulk_load_bytes(&probe_name).await.expect("bulk_load_bytes ok");
+        // No rows visible under the probe sentinel name. `PROBE_RECONCILER`
+        // is itself a `&'static str` constant — flows through the byte
+        // surface directly.
+        let leftover = store.bulk_load_bytes(PROBE_RECONCILER).await.expect("bulk_load_bytes ok");
         assert!(leftover.is_empty(), "probe must leave no residual rows under its sentinel name");
     }
 
@@ -335,13 +358,12 @@ mod tests {
     #[tokio::test]
     async fn inject_fsync_failure_makes_next_write_through_fail() {
         let store = SimViewStore::new();
-        let n = name("job-lifecycle");
         let t = target("job/payments");
         let v = Counter { n: 99, label: "should not persist".into() };
 
         store.inject_fsync_failure();
 
-        let result = store.write_through(&n, &t, &v).await;
+        let result = store.write_through(N, &t, &v).await;
         assert!(
             matches!(result, Err(ViewStoreError::FsyncFailed { .. })),
             "expected FsyncFailed, got {result:?}"
@@ -350,7 +372,7 @@ mod tests {
         // Critical: `WriteThroughOrdering` — storage map must NOT have
         // been mutated by the failed write.
         store.clear_fsync_failure();
-        let loaded: BTreeMap<TargetResource, Counter> = store.bulk_load(&n).await.expect("read ok");
+        let loaded: BTreeMap<TargetResource, Counter> = store.bulk_load(N).await.expect("read ok");
         assert!(!loaded.contains_key(&t), "fsync-failed write must NOT have persisted the row");
     }
 
@@ -369,17 +391,16 @@ mod tests {
     #[tokio::test]
     async fn clear_fsync_failure_restores_default_behaviour() {
         let store = SimViewStore::new();
-        let n = name("job-lifecycle");
         let t = target("job/payments");
         let v = Counter { n: 1, label: "ok".into() };
 
         store.inject_fsync_failure();
-        let _ = store.write_through(&n, &t, &v).await;
+        let _ = store.write_through(N, &t, &v).await;
         store.clear_fsync_failure();
 
-        store.write_through(&n, &t, &v).await.expect("write ok after clear");
+        store.write_through(N, &t, &v).await.expect("write ok after clear");
 
-        let loaded: BTreeMap<TargetResource, Counter> = store.bulk_load(&n).await.expect("read ok");
+        let loaded: BTreeMap<TargetResource, Counter> = store.bulk_load(N).await.expect("read ok");
         assert_eq!(loaded.get(&t), Some(&v));
     }
 }

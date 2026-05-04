@@ -32,7 +32,10 @@ use std::time::Duration;
 
 use overdrive_core::UnixInstant;
 use overdrive_core::id::{JobId, NodeId};
-use overdrive_core::reconciler::{AnyReconciler, AnyReconcilerView, AnyState, TickContext};
+use overdrive_core::reconciler::{
+    AnyReconciler, AnyReconcilerView, AnyState, JobLifecycle, NoopHeartbeat, Reconciler,
+    TickContext,
+};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::entropy::Entropy;
 use overdrive_core::traits::intent_store::IntentStore;
@@ -1276,7 +1279,7 @@ pub fn ordering_verdict<V: PartialEq>(
 pub async fn evaluate_view_store_roundtrip_is_lossless(seed: u64) -> InvariantResult {
     use overdrive_control_plane::view_store::ViewStoreExt;
     use overdrive_core::id::AllocationId;
-    use overdrive_core::reconciler::{JobLifecycleView, ReconcilerName, TargetResource};
+    use overdrive_core::reconciler::{JobLifecycleView, TargetResource};
     use overdrive_core::wall_clock::UnixInstant;
     use rand::{Rng, SeedableRng};
 
@@ -1295,29 +1298,10 @@ pub async fn evaluate_view_store_roundtrip_is_lossless(seed: u64) -> InvariantRe
 
     // Scope the case loop into a closure so we can early-return on the
     // first divergence with a structured cause.
-    let n_jobs = match ReconcilerName::new("job-lifecycle") {
-        Ok(v) => v,
-        Err(err) => {
-            return result(
-                name,
-                InvariantStatus::Fail,
-                "host-0",
-                Some(format!("could not construct reconciler name: {err}")),
-            );
-        }
-    };
-    let n_noop = match ReconcilerName::new("noop-heartbeat") {
-        Ok(v) => v,
-        Err(err) => {
-            return result(
-                name,
-                InvariantStatus::Fail,
-                "host-0",
-                Some(format!("could not construct reconciler name: {err}")),
-            );
-        }
-    };
-
+    // Reconciler names are passed to the ViewStore as
+    // `<Concrete as Reconciler>::NAME` consts directly — `&'static str`
+    // per the `refactor-reconciler-static-name` RCA — so no
+    // `ReconcilerName::new(...)` wrapping is needed at the call site.
     for case_idx in 0..CASES {
         // Generate a JobLifecycleView with random restart_counts and
         // last_failure_seen_at maps. Cardinality 0..4 covers empty,
@@ -1362,7 +1346,9 @@ pub async fn evaluate_view_store_roundtrip_is_lossless(seed: u64) -> InvariantRe
                 );
             }
         };
-        if let Err(err) = store.write_through(&n_jobs, &target, &view).await {
+        if let Err(err) =
+            store.write_through(<JobLifecycle as Reconciler>::NAME, &target, &view).await
+        {
             return result(
                 name,
                 InvariantStatus::Fail,
@@ -1371,7 +1357,7 @@ pub async fn evaluate_view_store_roundtrip_is_lossless(seed: u64) -> InvariantRe
             );
         }
         let loaded: std::collections::BTreeMap<TargetResource, JobLifecycleView> =
-            match store.bulk_load(&n_jobs).await {
+            match store.bulk_load(<JobLifecycle as Reconciler>::NAME).await {
                 Ok(m) => m,
                 Err(err) => {
                     return result(
@@ -1422,7 +1408,9 @@ pub async fn evaluate_view_store_roundtrip_is_lossless(seed: u64) -> InvariantRe
         }
     };
     let unit_value: () = ();
-    if let Err(err) = store.write_through(&n_noop, &target_unit, &unit_value).await {
+    if let Err(err) =
+        store.write_through(<NoopHeartbeat as Reconciler>::NAME, &target_unit, &unit_value).await
+    {
         return result(
             name,
             InvariantStatus::Fail,
@@ -1436,7 +1424,7 @@ pub async fn evaluate_view_store_roundtrip_is_lossless(seed: u64) -> InvariantRe
     // verifying roundtrip cleanly.
     #[allow(clippy::zero_sized_map_values)]
     let unit_loaded: std::collections::BTreeMap<TargetResource, ()> =
-        match store.bulk_load(&n_noop).await {
+        match store.bulk_load(<NoopHeartbeat as Reconciler>::NAME).await {
             Ok(m) => m,
             Err(err) => {
                 return result(
@@ -1473,23 +1461,16 @@ pub async fn evaluate_view_store_roundtrip_is_lossless(seed: u64) -> InvariantRe
 pub async fn evaluate_bulk_load_is_deterministic() -> InvariantResult {
     use overdrive_control_plane::view_store::ViewStoreExt;
     use overdrive_core::id::AllocationId;
-    use overdrive_core::reconciler::{JobLifecycleView, ReconcilerName, TargetResource};
+    use overdrive_core::reconciler::{JobLifecycleView, TargetResource};
 
     use crate::adapters::view_store::SimViewStore;
 
     let name = "bulk-load-is-deterministic";
 
-    let n_jobs = match ReconcilerName::new("job-lifecycle") {
-        Ok(v) => v,
-        Err(err) => {
-            return result(
-                name,
-                InvariantStatus::Fail,
-                "host-0",
-                Some(format!("reconciler name construction failed: {err}")),
-            );
-        }
-    };
+    // Reconciler name flows through the ViewStore byte surface as
+    // `<JobLifecycle as Reconciler>::NAME` directly per the
+    // `refactor-reconciler-static-name` RCA — no `ReconcilerName::new`
+    // wrapping needed.
 
     let store = SimViewStore::new();
 
@@ -1567,7 +1548,9 @@ pub async fn evaluate_bulk_load_is_deterministic() -> InvariantResult {
                 );
             }
         };
-        if let Err(err) = store.write_through(&n_jobs, &target, view).await {
+        if let Err(err) =
+            store.write_through(<JobLifecycle as Reconciler>::NAME, &target, view).await
+        {
             return result(
                 name,
                 InvariantStatus::Fail,
@@ -1581,7 +1564,7 @@ pub async fn evaluate_bulk_load_is_deterministic() -> InvariantResult {
     // PartialEq-equal BTreeMaps — same keys, same values, same order
     // (BTreeMap PartialEq compares element-wise in iteration order).
     let first: std::collections::BTreeMap<TargetResource, JobLifecycleView> =
-        match store.bulk_load(&n_jobs).await {
+        match store.bulk_load(<JobLifecycle as Reconciler>::NAME).await {
             Ok(m) => m,
             Err(err) => {
                 return result(
@@ -1593,7 +1576,7 @@ pub async fn evaluate_bulk_load_is_deterministic() -> InvariantResult {
             }
         };
     let second: std::collections::BTreeMap<TargetResource, JobLifecycleView> =
-        match store.bulk_load(&n_jobs).await {
+        match store.bulk_load(<JobLifecycle as Reconciler>::NAME).await {
             Ok(m) => m,
             Err(err) => {
                 return result(
@@ -1671,24 +1654,17 @@ pub async fn evaluate_bulk_load_is_deterministic() -> InvariantResult {
 pub async fn evaluate_write_through_ordering() -> InvariantResult {
     use overdrive_control_plane::view_store::ViewStoreExt;
     use overdrive_core::id::AllocationId;
-    use overdrive_core::reconciler::{JobLifecycleView, ReconcilerName, TargetResource};
+    use overdrive_core::reconciler::{JobLifecycleView, TargetResource};
 
     use crate::adapters::view_store::SimViewStore;
 
     let name = "write-through-ordering";
 
     let sim = SimViewStore::new();
-    let n_jobs = match ReconcilerName::new("job-lifecycle") {
-        Ok(v) => v,
-        Err(err) => {
-            return result(
-                name,
-                InvariantStatus::Fail,
-                "host-0",
-                Some(format!("reconciler name construction failed: {err}")),
-            );
-        }
-    };
+    // Reconciler name flows through the ViewStore byte surface as
+    // `<JobLifecycle as Reconciler>::NAME` directly per the
+    // `refactor-reconciler-static-name` RCA — no `ReconcilerName::new`
+    // wrapping needed.
     let target = match TargetResource::new("job/payments") {
         Ok(t) => t,
         Err(err) => {
@@ -1718,7 +1694,9 @@ pub async fn evaluate_write_through_ordering() -> InvariantResult {
         v.restart_counts.insert(id, 7);
         v
     };
-    if let Err(err) = sim.write_through(&n_jobs, &target, &original).await {
+    if let Err(err) =
+        sim.write_through(<JobLifecycle as Reconciler>::NAME, &target, &original).await
+    {
         return result(
             name,
             InvariantStatus::Fail,
@@ -1747,7 +1725,8 @@ pub async fn evaluate_write_through_ordering() -> InvariantResult {
     };
 
     sim.inject_fsync_failure();
-    let write_result = sim.write_through(&n_jobs, &target, &next_view).await;
+    let write_result =
+        sim.write_through(<JobLifecycle as Reconciler>::NAME, &target, &next_view).await;
     sim.clear_fsync_failure();
 
     if write_result.is_ok() {
@@ -1769,7 +1748,7 @@ pub async fn evaluate_write_through_ordering() -> InvariantResult {
     // after `write_through` returns Ok, so the underlying storage
     // MUST roll back any partial write when fsync fails.
     let loaded: std::collections::BTreeMap<TargetResource, JobLifecycleView> =
-        match sim.bulk_load(&n_jobs).await {
+        match sim.bulk_load(<JobLifecycle as Reconciler>::NAME).await {
             Ok(m) => m,
             Err(err) => {
                 return result(

@@ -286,7 +286,16 @@ async fn reconciler_is_pure_invariant_holds_for_noop_heartbeat() {
     let view = AnyReconcilerView::Unit;
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
-    for r in runtime.reconcilers_iter() {
+    // Kills the reconcilers_iter → empty() mutation: if the iterator
+    // yields nothing the loop body never executes and the purity check
+    // becomes vacuously true.
+    let reconciler_vec: Vec<_> = runtime.reconcilers_iter().collect();
+    assert_eq!(
+        reconciler_vec.len(),
+        1,
+        "runtime with one registered reconciler must yield exactly 1 entry from reconcilers_iter"
+    );
+    for r in &reconciler_vec {
         let a = r.reconcile(&desired, &actual, &view, &tick);
         let b = r.reconcile(&desired, &actual, &view, &tick);
         assert_eq!(

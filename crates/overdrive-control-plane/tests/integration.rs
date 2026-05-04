@@ -46,6 +46,12 @@ mod integration {
     /// Real-fs round-trip + per-reconciler table isolation + Earned-Trust
     /// probe coverage per ADR-0035 § Earned Trust + §4.
     mod redb_view_store;
+    /// Regression for the per-call `Box::leak` defect in
+    /// `RedbViewStore::table_def` — see
+    /// `docs/feature/refactor-reconciler-static-name/deliver/bugfix-rca.md`.
+    /// Asserts `Reconciler::NAME` is a compile-time anchor and that
+    /// `write_through_bytes` accepts `&'static str` directly.
+    mod redb_view_store_no_leak;
     mod server_lifecycle;
     mod submit_round_trip;
     /// `TerminalCondition` propagation — step 02-02 of

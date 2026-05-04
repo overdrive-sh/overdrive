@@ -33,7 +33,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use redb::{Database, Durability, ReadableTable, TableDefinition};
 
-use overdrive_core::reconciler::{ReconcilerName, TargetResource};
+use overdrive_core::reconciler::TargetResource;
 
 use super::{ProbeError, Result as VsResult, ViewStore, ViewStoreError};
 
@@ -91,21 +91,10 @@ impl RedbViewStore {
     #[doc(hidden)]
     pub async fn bulk_load_bytes_for_test(
         &self,
-        reconciler: &ReconcilerName,
+        reconciler: &'static str,
     ) -> VsResult<BTreeMap<TargetResource, Vec<u8>>> {
         self.bulk_load_bytes(reconciler).await
     }
-}
-
-/// Resolve the per-reconciler `TableDefinition`. The lifetime here is
-/// load-bearing — `redb::TableDefinition` is parameterised by the
-/// table name's `'static` lifetime, so we leak the kebab-case name
-/// string. Per-reconciler-kind cardinality is bounded (single-digit
-/// reconciler kinds across the platform's lifetime), so the leak is
-/// constant total memory, not unbounded.
-fn table_def(reconciler: &ReconcilerName) -> TableDefinition<'static, &'static str, &'static [u8]> {
-    let name: &'static str = Box::leak(reconciler.as_str().to_string().into_boxed_str());
-    TableDefinition::new(name)
 }
 
 /// Probe table definition — fixed `'static` literal, no leak.
@@ -115,12 +104,21 @@ const PROBE_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new(PROBE_TAB
 impl ViewStore for RedbViewStore {
     async fn bulk_load_bytes(
         &self,
-        reconciler: &ReconcilerName,
+        reconciler: &'static str,
     ) -> VsResult<BTreeMap<TargetResource, Vec<u8>>> {
         // Synchronous redb call inside an async fn — see
         // `write_through_bytes` for the rationale.
         let read = self.db.begin_read().map_err(map_transaction_error)?;
-        let table = match read.open_table(table_def(reconciler)) {
+        // `TableDefinition::new(reconciler)` is a free `const`
+        // constructor — `reconciler: &'static str` is the static
+        // lifetime `redb::TableDefinition` requires. Per the
+        // `refactor-reconciler-static-name` RCA, inlining at the call
+        // site is the load-bearing simplification: there is no helper,
+        // no leak, no interner. Doc / regression test:
+        // `tests/integration/redb_view_store_no_leak.rs`.
+        let table_def: TableDefinition<&'static str, &'static [u8]> =
+            TableDefinition::new(reconciler);
+        let table = match read.open_table(table_def) {
             Ok(t) => t,
             // A reconciler with no persisted rows simply has no
             // table yet — return an empty map per the trait
@@ -145,7 +143,7 @@ impl ViewStore for RedbViewStore {
 
     async fn write_through_bytes(
         &self,
-        reconciler: &ReconcilerName,
+        reconciler: &'static str,
         target: &TargetResource,
         cbor: &[u8],
     ) -> VsResult<()> {
@@ -163,21 +161,31 @@ impl ViewStore for RedbViewStore {
         // on the row being on disk before this call returns Ok.
         write.set_durability(Durability::Immediate);
         {
-            let mut table = write.open_table(table_def(reconciler)).map_err(map_table_error)?;
+            // See note on `bulk_load_bytes` — inlining the
+            // `TableDefinition::new` call closes the door on the
+            // `Box::leak`-per-call shape from before
+            // `refactor-reconciler-static-name`.
+            let table_def: TableDefinition<&'static str, &'static [u8]> =
+                TableDefinition::new(reconciler);
+            let mut table = write.open_table(table_def).map_err(map_table_error)?;
             table.insert(target.as_str(), cbor).map_err(map_storage_error)?;
         }
         write.commit().map_err(map_commit_error)?;
         Ok(())
     }
 
-    async fn delete(&self, reconciler: &ReconcilerName, target: &TargetResource) -> VsResult<()> {
+    async fn delete(&self, reconciler: &'static str, target: &TargetResource) -> VsResult<()> {
         // Synchronous redb call inside an async fn — see
         // `write_through_bytes` for the rationale.
         let mut write = self.db.begin_write().map_err(map_transaction_error)?;
         write.set_durability(Durability::Immediate);
         // Idempotent — a table that doesn't exist yet means the
         // row doesn't exist; succeed without creating the table.
-        match write.open_table(table_def(reconciler)) {
+        let table_def: TableDefinition<&'static str, &'static [u8]> =
+            TableDefinition::new(reconciler);
+        // See `bulk_load_bytes` for why this is inlined rather than
+        // routed through a helper post-`refactor-reconciler-static-name`.
+        match write.open_table(table_def) {
             Ok(mut table) => {
                 let _ = table.remove(target.as_str()).map_err(map_storage_error)?;
             }
@@ -192,77 +200,75 @@ impl ViewStore for RedbViewStore {
     }
 
     async fn probe(&self) -> std::result::Result<(), ProbeError> {
-        let db = Arc::clone(&self.db);
+        // Synchronous redb calls inside an async fn — see
+        // `write_through_bytes` for the rationale.
 
-        tokio::task::spawn_blocking(move || {
-            // Step 1: write the sentinel + commit (fsync). Failure
-            // surfaces as `WriteFailed`.
+        // Step 1: write the sentinel + commit (fsync). Failure
+        // surfaces as `WriteFailed`.
+        {
+            let mut write = self
+                .db
+                .begin_write()
+                .map_err(|e| ProbeError::WriteFailed { source: map_transaction_error(e) })?;
+            write.set_durability(Durability::Immediate);
             {
-                let mut write = db
-                    .begin_write()
-                    .map_err(|e| ProbeError::WriteFailed { source: map_transaction_error(e) })?;
-                write.set_durability(Durability::Immediate);
-                {
-                    let mut table = write
-                        .open_table(PROBE_TABLE)
-                        .map_err(|e| ProbeError::WriteFailed { source: map_table_error(e) })?;
-                    table
-                        .insert(PROBE_KEY, PROBE_PAYLOAD)
-                        .map_err(|e| ProbeError::WriteFailed { source: map_storage_error(e) })?;
-                }
-                write
-                    .commit()
-                    .map_err(|e| ProbeError::CommitFailed { source: map_commit_error(e) })?;
-            }
-
-            // Step 2: read back byte-equal. Mismatch = engine
-            // corruption — refuse boot.
-            let got = {
-                let read = db
-                    .begin_read()
-                    .map_err(|e| ProbeError::CommitFailed { source: map_transaction_error(e) })?;
-                let table = read
+                let mut table = write
                     .open_table(PROBE_TABLE)
-                    .map_err(|e| ProbeError::CommitFailed { source: map_table_error(e) })?;
-                let entry = table
-                    .get(PROBE_KEY)
-                    .map_err(|e| ProbeError::CommitFailed { source: map_storage_error(e) })?
-                    .ok_or_else(|| ProbeError::RoundTripMismatch {
-                        wrote: PROBE_PAYLOAD.to_vec(),
-                        got: Vec::new(),
-                    })?;
-                entry.value().to_vec()
-            };
-            if got.as_slice() != PROBE_PAYLOAD {
-                return Err(ProbeError::RoundTripMismatch { wrote: PROBE_PAYLOAD.to_vec(), got });
+                    .map_err(|e| ProbeError::WriteFailed { source: map_table_error(e) })?;
+                table
+                    .insert(PROBE_KEY, PROBE_PAYLOAD)
+                    .map_err(|e| ProbeError::WriteFailed { source: map_storage_error(e) })?;
             }
+            write.commit().map_err(|e| ProbeError::CommitFailed { source: map_commit_error(e) })?;
+        }
 
-            // Step 3: delete the sentinel + commit. Failure surfaces
-            // as `CleanupFailed` so a store that can write/read but
-            // not delete refuses boot rather than leaking sentinel
-            // rows.
+        // Step 2: read back byte-equal. Mismatch = engine
+        // corruption — refuse boot.
+        let got = {
+            let read = self
+                .db
+                .begin_read()
+                .map_err(|e| ProbeError::CommitFailed { source: map_transaction_error(e) })?;
+            let table = read
+                .open_table(PROBE_TABLE)
+                .map_err(|e| ProbeError::CommitFailed { source: map_table_error(e) })?;
+            let entry = table
+                .get(PROBE_KEY)
+                .map_err(|e| ProbeError::CommitFailed { source: map_storage_error(e) })?
+                .ok_or_else(|| ProbeError::RoundTripMismatch {
+                    wrote: PROBE_PAYLOAD.to_vec(),
+                    got: Vec::new(),
+                })?;
+            entry.value().to_vec()
+        };
+        if got.as_slice() != PROBE_PAYLOAD {
+            return Err(ProbeError::RoundTripMismatch { wrote: PROBE_PAYLOAD.to_vec(), got });
+        }
+
+        // Step 3: delete the sentinel + commit. Failure surfaces
+        // as `CleanupFailed` so a store that can write/read but
+        // not delete refuses boot rather than leaking sentinel
+        // rows.
+        {
+            let mut write = self
+                .db
+                .begin_write()
+                .map_err(|e| ProbeError::CleanupFailed { source: map_transaction_error(e) })?;
+            write.set_durability(Durability::Immediate);
             {
-                let mut write = db
-                    .begin_write()
-                    .map_err(|e| ProbeError::CleanupFailed { source: map_transaction_error(e) })?;
-                write.set_durability(Durability::Immediate);
-                {
-                    let mut table = write
-                        .open_table(PROBE_TABLE)
-                        .map_err(|e| ProbeError::CleanupFailed { source: map_table_error(e) })?;
-                    let _ = table
-                        .remove(PROBE_KEY)
-                        .map_err(|e| ProbeError::CleanupFailed { source: map_storage_error(e) })?;
-                }
-                write
-                    .commit()
-                    .map_err(|e| ProbeError::CleanupFailed { source: map_commit_error(e) })?;
+                let mut table = write
+                    .open_table(PROBE_TABLE)
+                    .map_err(|e| ProbeError::CleanupFailed { source: map_table_error(e) })?;
+                let _ = table
+                    .remove(PROBE_KEY)
+                    .map_err(|e| ProbeError::CleanupFailed { source: map_storage_error(e) })?;
             }
+            write
+                .commit()
+                .map_err(|e| ProbeError::CleanupFailed { source: map_commit_error(e) })?;
+        }
 
-            Ok(())
-        })
-        .await
-        .map_err(|e| ProbeError::WriteFailed { source: map_join_error(e) })?
+        Ok(())
     }
 }
 
@@ -293,10 +299,6 @@ fn map_commit_error(err: redb::CommitError) -> ViewStoreError {
     ViewStoreError::Io(std::io::Error::other(err))
 }
 
-fn map_join_error(err: tokio::task::JoinError) -> ViewStoreError {
-    ViewStoreError::Io(std::io::Error::other(err))
-}
-
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::unwrap_used)]
 mod tests {
@@ -310,9 +312,11 @@ mod tests {
         n: u64,
     }
 
-    fn name(s: &str) -> ReconcilerName {
-        ReconcilerName::new(s).expect("valid reconciler name")
-    }
+    /// Canonical kebab-case reconciler name as a `&'static str` literal.
+    /// The `ViewStore` byte-level surface requires `&'static str` per the
+    /// `refactor-reconciler-static-name` RCA; tests use the literal
+    /// directly rather than constructing a `ReconcilerName` wrapper.
+    const N: &str = "job-lifecycle";
 
     fn target(s: &str) -> TargetResource {
         TargetResource::new(s).expect("valid target resource")
@@ -341,9 +345,8 @@ mod tests {
     async fn bulk_load_returns_empty_when_table_missing() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let store = RedbViewStore::open(tmp.path()).expect("open");
-        let n = name("job-lifecycle");
         let loaded: BTreeMap<TargetResource, Counter> =
-            store.bulk_load(&n).await.expect("bulk_load empty");
+            store.bulk_load(N).await.expect("bulk_load empty");
         assert!(loaded.is_empty(), "fresh store has no rows for any reconciler");
     }
 
@@ -351,17 +354,16 @@ mod tests {
     async fn write_through_creates_table_lazily() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let store = RedbViewStore::open(tmp.path()).expect("open");
-        let n = name("job-lifecycle");
         let t = target("job/payments");
         let v = Counter { n: 1 };
 
         // Before write_through, bulk_load returns empty (table absent).
-        let pre: BTreeMap<TargetResource, Counter> = store.bulk_load(&n).await.expect("empty");
+        let pre: BTreeMap<TargetResource, Counter> = store.bulk_load(N).await.expect("empty");
         assert!(pre.is_empty());
 
-        store.write_through(&n, &t, &v).await.expect("write ok");
+        store.write_through(N, &t, &v).await.expect("write ok");
 
-        let post: BTreeMap<TargetResource, Counter> = store.bulk_load(&n).await.expect("read");
+        let post: BTreeMap<TargetResource, Counter> = store.bulk_load(N).await.expect("read");
         assert_eq!(post.get(&t), Some(&v));
     }
 
@@ -369,16 +371,15 @@ mod tests {
     async fn bulk_load_iterates_targets_in_ord_order() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let store = RedbViewStore::open(tmp.path()).expect("open");
-        let n = name("job-lifecycle");
 
         // Insert in a deliberately non-sorted order to prove
         // BTreeMap-driven iteration.
         let order = ["job/zeta", "job/alpha", "job/middle"];
         for (idx, k) in order.iter().enumerate() {
-            store.write_through(&n, &target(k), &Counter { n: idx as u64 }).await.expect("write");
+            store.write_through(N, &target(k), &Counter { n: idx as u64 }).await.expect("write");
         }
 
-        let loaded: BTreeMap<TargetResource, Counter> = store.bulk_load(&n).await.expect("read");
+        let loaded: BTreeMap<TargetResource, Counter> = store.bulk_load(N).await.expect("read");
         let keys: Vec<_> = loaded.keys().map(|t| t.as_str().to_string()).collect();
         // BTreeMap<TargetResource, _> iterates in TargetResource::Ord
         // order — String lexicographic given the inner type.
@@ -389,16 +390,15 @@ mod tests {
     async fn delete_removes_row_and_is_idempotent() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let store = RedbViewStore::open(tmp.path()).expect("open");
-        let n = name("job-lifecycle");
         let t = target("job/payments");
 
         // Idempotent on a never-written key (table doesn't exist yet).
-        store.delete(&n, &t).await.expect("idempotent delete on missing table");
+        store.delete(N, &t).await.expect("idempotent delete on missing table");
 
-        store.write_through(&n, &t, &Counter { n: 5 }).await.expect("write");
-        store.delete(&n, &t).await.expect("delete existing");
+        store.write_through(N, &t, &Counter { n: 5 }).await.expect("write");
+        store.delete(N, &t).await.expect("delete existing");
 
-        let loaded: BTreeMap<TargetResource, Counter> = store.bulk_load(&n).await.expect("read");
+        let loaded: BTreeMap<TargetResource, Counter> = store.bulk_load(N).await.expect("read");
         assert!(!loaded.contains_key(&t));
     }
 

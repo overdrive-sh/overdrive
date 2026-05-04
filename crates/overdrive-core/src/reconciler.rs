@@ -87,13 +87,16 @@
 //! impl HelloReconciler {
 //!     fn new() -> Self {
 //!         Self {
-//!             name: ReconcilerName::new("hello")
+//!             name: ReconcilerName::new(<Self as Reconciler>::NAME)
 //!                 .expect("'hello' is a valid ReconcilerName"),
 //!         }
 //!     }
 //! }
 //!
 //! impl Reconciler for HelloReconciler {
+//!     /// Canonical kebab-case name; single compile-time anchor.
+//!     const NAME: &'static str = "hello";
+//!
 //!     // Per ADR-0021, every reconciler picks its own `State`
 //!     // projection. A reconciler with no meaningful desired/actual
 //!     // shape picks `()`; the first real reconciler (`JobLifecycle`)
@@ -234,6 +237,30 @@ pub struct TickContext {
 /// parameter, or reverts the per-reconciler typed `State` associated
 /// type (ADR-0021) fails that test at compile time.
 pub trait Reconciler: Send + Sync {
+    /// Canonical kebab-case name as a single compile-time anchor.
+    ///
+    /// Per the `refactor-reconciler-static-name` RCA: the production
+    /// `RedbViewStore::table_def` previously called `Box::leak` on a
+    /// fresh `String` per invocation, leaking ~30 B per write-through
+    /// per active target every tick. Threading a `const NAME: &'static
+    /// str` through the `ViewStore` byte-level surface eliminates the
+    /// leak class structurally — the `&'static` lifetime
+    /// `redb::TableDefinition` requires is encoded in the type system,
+    /// not recovered at runtime via `Box::leak` or an interner.
+    ///
+    /// Implementors MUST declare a string literal (or a `const`-fn
+    /// derivation thereof) so `Self::NAME` aliases the binary's data
+    /// segment — the regression test
+    /// `tests/integration/redb_view_store_no_leak.rs` asserts the
+    /// pointer-identity property mechanically.
+    ///
+    /// The declared value MUST satisfy `ReconcilerName::new`'s
+    /// `^[a-z][a-z0-9-]{0,62}$` validator. A typo or invalid character
+    /// is caught the first time `name(&self)` is constructed via
+    /// `ReconcilerName::new(Self::NAME).expect(...)` — typically at
+    /// `canonical()` construction time, before any `register` call.
+    const NAME: &'static str;
+
     /// Author-declared projection of the reconciler's `desired` /
     /// `actual` cluster state. Per ADR-0021, every reconciler picks
     /// its own typed projection rather than sharing a single
@@ -713,19 +740,22 @@ impl NoopHeartbeat {
     ///
     /// # Panics
     ///
-    /// Never — `"noop-heartbeat"` is a compile-time string literal
+    /// Never — `Self::NAME` is a compile-time string literal
     /// satisfying every `ReconcilerName` validation rule. Failure
     /// would indicate a bug in the newtype constructor.
     #[must_use]
     pub fn canonical() -> Self {
         #[allow(clippy::expect_used)]
-        let name = ReconcilerName::new("noop-heartbeat")
+        let name = ReconcilerName::new(<Self as Reconciler>::NAME)
             .expect("'noop-heartbeat' is a valid ReconcilerName by construction");
         Self { name }
     }
 }
 
 impl Reconciler for NoopHeartbeat {
+    /// Canonical kebab-case name; single compile-time anchor.
+    const NAME: &'static str = "noop-heartbeat";
+
     // Per ADR-0021, reconcilers with no meaningful projection pick
     // `type State = ()`. `NoopHeartbeat` ignores `desired`/`actual`
     // entirely and always emits `Action::Noop`.
@@ -779,6 +809,28 @@ impl AnyReconciler {
         match self {
             Self::NoopHeartbeat(r) => r.name(),
             Self::JobLifecycle(r) => r.name(),
+        }
+    }
+
+    /// Canonical name as the inner reconciler's `Self::NAME` const —
+    /// a `&'static str` aliased to the binary's data segment.
+    ///
+    /// This is the surface the runtime hands to
+    /// `ViewStore::{bulk_load_bytes, write_through_bytes, delete}`,
+    /// whose `reconciler` parameter is typed `&'static str` per the
+    /// `refactor-reconciler-static-name` RCA. Going through
+    /// `name(&self).as_str()` instead would produce a `&str` borrowed
+    /// from the inner `ReconcilerName`'s `String` — non-`'static` —
+    /// and the redb `TableDefinition::new` call requires a static
+    /// lifetime on the table name. The match arms below are
+    /// exhaustive over `AnyReconciler` variants, so adding a new
+    /// reconciler kind without declaring its `NAME` const fails to
+    /// compile here, not silently at runtime.
+    #[must_use]
+    pub const fn static_name(&self) -> &'static str {
+        match self {
+            Self::NoopHeartbeat(_) => <NoopHeartbeat as Reconciler>::NAME,
+            Self::JobLifecycle(_) => <JobLifecycle as Reconciler>::NAME,
         }
     }
 
@@ -948,18 +1000,21 @@ impl JobLifecycle {
     ///
     /// # Panics
     ///
-    /// Never — `"job-lifecycle"` is a compile-time string literal
+    /// Never — `Self::NAME` is a compile-time string literal
     /// satisfying every `ReconcilerName` validation rule.
     #[must_use]
     pub fn canonical() -> Self {
         #[allow(clippy::expect_used)]
-        let name = ReconcilerName::new("job-lifecycle")
+        let name = ReconcilerName::new(<Self as Reconciler>::NAME)
             .expect("'job-lifecycle' is a valid ReconcilerName by construction");
         Self { name }
     }
 }
 
 impl Reconciler for JobLifecycle {
+    /// Canonical kebab-case name; single compile-time anchor.
+    const NAME: &'static str = "job-lifecycle";
+
     type State = JobLifecycleState;
     type View = JobLifecycleView;
 
