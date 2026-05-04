@@ -86,6 +86,7 @@ fn free_capacity_excludes_pending_allocs_on_same_node() {
         },
         reason: None,
         detail: None,
+        terminal: None,
     }];
 
     let result = schedule(&nodes, &job, &allocs);

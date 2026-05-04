@@ -73,4 +73,26 @@ mod acceptance {
     // idempotence is structural rather than coincidental — see
     // `.claude/rules/development.md` § "Persist inputs, not derived state".
     mod job_lifecycle_recompute_deadline;
+
+    // reconciler-memory-redb step 01-02 — `TerminalCondition` enum +
+    // `AllocStatusRow.terminal` field (ADR-0037 prerequisite for the
+    // Phase 02 action-shim wiring). Property: every variant + None
+    // survives the rkyv roundtrip at the row level.
+    mod terminal_condition_roundtrip;
+
+    // reconciler-memory-redb step 01-05 — collapsed `Reconciler` trait
+    // surface (single sync `reconcile`, typed `View` with
+    // `Serialize + DeserializeOwned + Default + Clone + Send + Sync`
+    // bounds, no `migrate` / `hydrate` / `persist`). Per ADR-0035 §1
+    // and ADR-0036.
+    mod collapsed_reconciler_trait;
+
+    // reconciler-memory-redb step 02-01 — `JobLifecycle::reconcile`
+    // stamps `TerminalCondition` on the lifecycle-concluding `Action`
+    // variants (`StopAllocation`, `FinalizeFailed`). Per ADR-0037 §4.
+    // Property test asserts the terminal-decision logic is a pure
+    // function of `(view.restart_counts, view.last_failure_seen_at,
+    // desired.desired_to_stop)` against the fixed JobLifecycle-internal
+    // ceiling.
+    mod job_lifecycle_terminal_decision;
 }

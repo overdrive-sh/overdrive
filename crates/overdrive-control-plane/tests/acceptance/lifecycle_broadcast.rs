@@ -407,11 +407,15 @@ async fn stop_action_also_broadcasts_lifecycle_event() {
         },
         reason: Some(TransitionReason::Started),
         detail: None,
+        terminal: None,
     };
     obs.write(ObservationRow::AllocStatus(prior_row)).await.expect("seed prior row");
 
     // Dispatch a Stop action — should write Terminated row AND emit broadcast.
-    let action = Action::StopAllocation { alloc_id: alloc_id.clone() };
+    // ADR-0037 §4: emission sites outside a reconciler tick (here, a
+    // direct test-bench dispatch) emit `terminal: None` — the
+    // reconciler is the single source of every terminal claim.
+    let action = Action::StopAllocation { alloc_id: alloc_id.clone(), terminal: None };
     let tick = make_tick(1);
     dispatch(vec![action], driver.as_ref(), obs.as_ref(), &tx, &tick)
         .await

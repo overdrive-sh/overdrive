@@ -970,8 +970,9 @@ than defaulted-with-bypass.
 | Performance — convergence latency | submit → Running within 1-3 reconciler ticks (≤300 ms on default cadence) | 100 ms tick + level-triggered drain; ADR-0023 |
 | Performance — `cluster status` under workload pressure | < 100 ms during 100% CPU workload burst | cgroup `overdrive.slice/control-plane.slice/`; ADR-0026 + ADR-0028 |
 | Reliability — fault tolerance | Driver failure surfaces as `state: Failed` row, not stalled tick | per-action error isolation in shim; ADR-0023 |
-| Reliability — recoverability | Killed workload restarts within N+M ticks (M = backoff delay) | `JobLifecycleView::restart_counts` libSQL state; US-03 AC |
-| Reliability — backoff exhaustion | Repeatedly-crashing workload stops at M attempts (no infinite restart) | per-alloc backoff counter in `JobLifecycleView`; US-03 AC |
+| Reliability — recoverability | Killed workload restarts within N+M ticks (M = backoff delay) | `JobLifecycleView::restart_counts` libSQL state; US-03 AC. Backoff schedule is workspace-global today — TODO(#137) threads a per-job `RestartPolicy`. |
+| Reliability — backoff exhaustion | Repeatedly-crashing workload stops at M attempts (no infinite restart) | per-alloc backoff counter in `JobLifecycleView`; US-03 AC. Ceiling is workspace-global today — TODO(#137) makes it operator-configurable. |
+| Reliability — stale-alloc cleanup | `JobSpec` deleted from intent with `Running` rows still present is acknowledged but not yet drained | TODO(#148) cleanup reconciler. Today's `JobLifecycle::reconcile` no-ops the absent-desired-job branch. |
 | Reliability — boot-time integrity | Pre-flight detects misconfiguration; node_health write surfaces store breakage | ADR-0025 + ADR-0028 |
 | Maintainability — testability (scheduler determinism) | proptest: identical inputs → identical results, BTreeMap-order invariance | `overdrive-scheduler/tests/`; ADR-0024 |
 | Maintainability — testability (reconciler purity) | Twin invocation produces bit-identical outputs (`ReconcilerIsPure`) | DST invariant catalogue; ADR-0017 |
@@ -1378,10 +1379,10 @@ Rules to enforce:
 | 0010 | Phase 1 TLS bootstrap: ephemeral in-process CA, embedded trust triple in `~/.overdrive/config` | Accepted |
 | 0011 | Intent-side `Job` aggregate and observation-side `AllocStatusRow` stay separate types | Accepted |
 | 0012 | Phase 1 server uses a real `LocalObservationStore` (redb-backed, single-writer) | Accepted (revised 2026-04-24) |
-| 0013 | Reconciler primitive: trait in `overdrive-core`, runtime in `overdrive-control-plane`, libSQL private memory | Accepted |
+| 0013 | Reconciler primitive: trait in `overdrive-core`, runtime in `overdrive-control-plane`, libSQL private memory | Superseded by 0035 |
 | 0014 | CLI HTTP client is hand-rolled `reqwest`; CLI and server share Rust request/response types | Accepted |
 | 0015 | HTTP error mapping: `ControlPlaneError` with `#[from]`, bespoke 7807-compatible JSON body | Accepted |
-| 0021 | Reconciler `State` shape: per-reconciler typed `AnyState` enum mirroring `AnyReconcilerView` | Accepted |
+| 0021 | Reconciler `State` shape: per-reconciler typed `AnyState` enum mirroring `AnyReconcilerView` | Accepted (amended by 0036) |
 | 0022 | `AppState::driver: Arc<dyn Driver>` extension | Accepted |
 | 0023 | Action shim placement: `reconciler_runtime::action_shim` submodule; 100 ms tick cadence | Accepted |
 | 0024 | Dedicated `overdrive-scheduler` crate (class `core`); D4 user override | Accepted |
@@ -1393,6 +1394,213 @@ Rules to enforce:
 | 0029 | Dedicated `overdrive-worker` crate (class `adapter-host`); ExecDriver (formerly ProcessDriver, renamed 2026-04-28) + workload-cgroup management + node_health writer extracted from `overdrive-host` | Accepted (amended 2026-04-28) |
 | 0032 | NDJSON streaming submit: `overdrive job submit` streams convergence as NDJSON when `Accept: application/x-ndjson` is sent; back-compat single-JSON ack otherwise. CLI exits non-zero on convergence failure. 60 s server-side cap. | Accepted |
 | 0033 | `alloc status` snapshot enrichment: `AllocStatusResponse` extended in place with state, last-transition reason, restart budget, exit code, started_at; `TransitionReason` shared with ADR-0032 streaming events. | Accepted |
+| 0035 | Reconciler memory: collapse trait to one method, typed-View blob auto-persisted, redb backend, in-memory hot copy as steady-state read SSOT (supersedes 0013) | Accepted |
+| 0036 | Amendment to ADR-0021: remove the per-reconciler `hydrate(target, db)` surface; runtime owns all hydration | Accepted |
+| 0037 | Reconciler emits typed `TerminalCondition`; streaming forwards it; `LifecycleEvent` no longer projects reconciler-private View state (replaces step-02-04's `restart_count_max: u32` with `terminal: Option<TerminalCondition>`; durable home on `AllocStatusRow.terminal`; K8s-Condition-shaped SemVer convention) | Accepted |
+
+---
+
+## Phase 1 reconciler-memory redesign extension (issue-139)
+
+This section extends §1–§33 with the application-architecture
+decisions landed by feature `reconciler-memory-redb`
+(2026-05-03). Nothing in §1–§33 is rewritten outside the explicit
+amendments noted below; §19 (Reconciler primitive) and §24 (State
+shape) are *amended in place* by reference to ADR-0035 and ADR-0036.
+
+### 34. Collapsed `Reconciler` trait + runtime-owned `ViewStore` (supersedes §19's trait shape)
+
+Per ADR-0035. The four-method `Reconciler` trait shape originally
+introduced by ADR-0013 (and extended to four methods by the
+in-flight issue-139 work — `migrate` / `hydrate` / `reconcile` /
+`persist`) collapses to a single synchronous method:
+
+```rust
+pub trait Reconciler: Send + Sync {
+    type State: Send + Sync;
+    type View:  Serialize + DeserializeOwned + Default + Clone + Send + Sync;
+    fn name(&self) -> &ReconcilerName;
+    fn reconcile(
+        &self,
+        desired: &Self::State,
+        actual:  &Self::State,
+        view:    &Self::View,
+        tick:    &TickContext,
+    ) -> (Vec<Action>, Self::View);
+}
+```
+
+No `async`. No `migrate`, `hydrate`, or `persist`. No `LibsqlHandle`
+parameter. The author derives `Serialize + Deserialize + Default +
+Clone` on the `View` struct and writes `reconcile` — nothing else.
+
+Storage moves to a runtime-owned port:
+
+```rust
+// in overdrive-control-plane::view_store
+pub trait ViewStore: Send + Sync {
+    async fn bulk_load<V>(&self, name: &ReconcilerName)
+        -> Result<BTreeMap<TargetResource, V>, ViewStoreError>
+        where V: DeserializeOwned + Send;
+    async fn write_through<V>(
+        &self, name: &ReconcilerName,
+        target: &TargetResource, view: &V,
+    ) -> Result<(), ViewStoreError>
+        where V: Serialize + Sync;
+    async fn delete(
+        &self, name: &ReconcilerName,
+        target: &TargetResource,
+    ) -> Result<(), ViewStoreError>;
+    async fn probe(&self) -> Result<(), ProbeError>;
+}
+```
+
+Production adapter: `RedbViewStore` (one redb file per node at
+`<data_dir>/reconcilers/memory.redb`; one redb table per reconciler
+kind; CBOR-encoded value blob via `ciborium`).
+
+Sim adapter: `SimViewStore` (in-memory `BTreeMap`; injected
+fsync-failure for the `WriteThroughOrdering` invariant).
+
+`LibsqlHandle` is deleted. `libsql_provisioner` is deleted. The
+per-reconciler libSQL files at `<data_dir>/reconcilers/<name>/
+memory.db` are replaced by the single per-node redb file.
+
+### 35. Runtime tick contract under ADR-0035 (supersedes §19's runtime contract)
+
+`ReconcilerRuntime` gains a boot-time bulk-load step and a write-
+through path on persist. The steady-state read SSOT is an
+in-memory `BTreeMap<TargetResource, View>` per reconciler held in
+RAM, populated once at register-time from `ViewStore::bulk_load`.
+
+Boot / register:
+
+```
+register(reconciler):
+  1. view_store.probe().await?                   (Earned Trust gate)
+  2. views = view_store.bulk_load(name).await?   (BTreeMap<TargetResource, View>)
+  3. registry.insert(name, (AnyReconciler, views))
+```
+
+Steady-state tick (every 100 ms per ADR-0023, unchanged):
+
+```
+for evaluation in broker.drain_pending():
+  1. (any_reconciler, views) = registry.lookup(name)
+  2. tick    = TickContext::snapshot(clock)        (ADR-0013 §2c — survives)
+  3. desired = AnyReconciler::hydrate_desired(...)  (ADR-0021 — survives)
+  4. actual  = AnyReconciler::hydrate_actual(...)   (ADR-0021 — survives)
+  5. view    = views.get(target).cloned()
+                .unwrap_or_else(R::View::default)
+  6. (actions, next_view) = reconciler.reconcile(
+       &desired, &actual, &view, &tick)
+  7. view_store.write_through(name, target, &next_view).await?
+                                                   (durable fsync)
+  8. views.insert(target.clone(), next_view)       (after fsync OK)
+  9. action_shim::dispatch(actions, ...)           (ADR-0023 — survives)
+```
+
+Step ordering 7 → 8 is load-bearing for crash durability. The
+`BTreeMap`-not-`HashMap` choice is mandated by development.md §
+"Ordered-collection choice" (the map is iterated on `bulk_load`,
+observed by DST invariants).
+
+### 36. Storage tier table — amendment to brief.md §6
+
+Per ADR-0035. The reconciler-memory tier in the State / Storage
+table changes from libSQL to redb:
+
+| Layer | Trait | Phase 1 adapter | Notes |
+|---|---|---|---|
+| Intent (should-be) | `IntentStore` | `LocalStore` (redb) | Distinct trait, distinct types; no shared `put(key, value)` surface |
+| Observation (is) | `ObservationStore` | `LocalObservationStore` (redb, single-writer) | Distinct trait, distinct types; compile-time test asserts non-substitutability |
+| **Reconciler memory (was)** | **`ViewStore`** | **`RedbViewStore` (separate redb file at `<data_dir>/reconcilers/memory.redb`)** | **One file per node, one table per reconciler kind, CBOR blob via `ciborium`. ADR-0035.** |
+| Scratch (this tick) | `bumpalo::Bump` | — | N/A in Phase 1 (reconcilers Phase 2+) |
+
+libSQL is retained as a workspace dep for incident memory and
+DuckLake catalog (whitepaper §12, §17), Phase 3+. It is no longer
+on the reconciler-memory hot path.
+
+### 37. Amendment to §24 — `AnyState` enum and ADR-0021 hydration surfaces
+
+Per ADR-0036. The §24 description of ADR-0021 stands. The single
+amendment: the third sentence in §24 ("The reconciler's existing
+`hydrate(target, db)` retains its narrow remit (the libSQL
+private-memory read)") is overturned. Per ADR-0035 the reconciler
+no longer has any async surface; the runtime owns all three
+hydration paths (`hydrate_desired`, `hydrate_actual` are
+runtime-side and stay async; the View hydration is a sync
+`BTreeMap::get` after the boot-time `ViewStore::bulk_load`).
+
+The `AnyState` enum, `JobLifecycleState` shape, per-reconciler
+typing, and compile-time exhaustiveness contracts in ADR-0021 are
+preserved.
+
+### 38. Updated quality-attribute scenarios (issue-139)
+
+| Attribute | Target | How addressed |
+|---|---|---|
+| Performance — time behaviour (steady-state hydrate) | `BTreeMap::get` (ns) — order-of-magnitude better than libSQL roundtrip | ADR-0035 §5: in-memory `BTreeMap` is the steady-state read SSOT |
+| Maintainability — modifiability (LOC per reconciler) | ~0 lines of plumbing | Author derives `Serialize + Deserialize + Default + Clone`; `reconcile` is the only required method |
+| Reliability — recoverability | Bounded crash recovery (no WAL replay) | redb 1PC+C with checksum + monotonic txn id; bulk_load is one read transaction |
+| Reliability — durability | Per-tick fsync; crash between fsync and BTreeMap update preserves convergence | Step ordering 7 → 8 in §35 (write-through then memory update) |
+| Maintainability — testability (View persistence) | Roundtrip is bit-identical for every reconciler's View | DST invariant `ViewStoreRoundtripIsLossless` (proptest-backed) |
+| Maintainability — testability (boot determinism) | Two `bulk_load` calls produce equal `BTreeMap`s | DST invariant `BulkLoadIsDeterministic` |
+| Maintainability — testability (write ordering) | Failed fsync does not update in-memory map | DST invariant `WriteThroughOrdering` (under `SimViewStore` injected fsync-failure) |
+| Reliability — fault tolerance (storage probe) | `RedbViewStore::probe` runs before first `bulk_load`; failure refuses startup | Earned Trust principle 12; `ControlPlaneError::Internal` + `health.startup.refused` event |
+
+### 39. C4 Component diagram — reconciler subsystem under ADR-0035
+
+The convergence-loop component diagram from §33 (existing
+brief.md) gets the `JobLifecycleView libSQL DB` container replaced
+by `JobLifecycleView redb table` and the `Reads JobLifecycleView
+(async)` arrow replaced by `Bulk-loads at register; reads in-memory
+BTreeMap on tick`. The full updated reconciler-subsystem Component
+diagram:
+
+```mermaid
+C4Component
+  title Component Diagram — Reconciler subsystem under ADR-0035
+
+  Container_Boundary(ctrl, "overdrive-control-plane (adapter-host)") {
+    Component(reg, "ReconcilerRegistry", "Rust struct", "Registers reconcilers at boot; stores (AnyReconciler, BTreeMap<TargetResource, View>) per name")
+    Component(broker, "EvaluationBroker", "Rust struct", "(reconciler_name, target) keyed; cancelable-eval-set; ADR-0013 §8 — survives")
+    Component(runtime, "ReconcilerRuntime tick loop", "tokio::task", "Drains broker every 100 ms; orchestrates hydrate-then-reconcile-then-write-through pipeline")
+    Component(hydrate, "AnyReconciler::hydrate_desired/_actual", "async fn (ADR-0021 — survives)", "Match-dispatches on AnyReconciler variant; reads IntentStore + ObservationStore; emits AnyState variant")
+    Component(reconciler, "JobLifecycle::reconcile", "sync pure fn (ADR-0035 collapsed shape)", "Reads desired/actual State + view (in-memory clone); calls scheduler; emits (Vec<Action>, NextView)")
+    Component(view_store, "ViewStore (RedbViewStore)", "async trait + adapter (NEW — ADR-0035)", "bulk_load at register; write_through(target, &next_view) per tick after reconcile; probe() at startup")
+    Component(probe, "ViewStore::probe()", "async fn (NEW — Earned Trust)", "Open file → write probe row → fsync → read back → assert byte-equal → delete; failure refuses startup")
+  }
+
+  Container(core, "overdrive-core::reconciler", "Reconciler trait (one method, sync, pure); AnyReconciler enum; AnyState; Action; TickContext; ReconcilerName")
+  Container(scheduler, "overdrive-scheduler::schedule", "sync pure fn (ADR-0024)")
+  Container(intent, "IntentStore (LocalIntentStore)", "redb-backed; for_job + for_job_stop keys")
+  Container(obs, "ObservationStore (LocalObservationStore)", "redb-backed; alloc_status_rows + node_health_rows")
+  Container(view_redb, "ViewStore redb file", "<data_dir>/reconcilers/memory.redb; one table per reconciler kind; CBOR blob via ciborium")
+  Container(in_memory, "in-memory BTreeMap<TargetResource, View>", "Per-reconciler; bulk-loaded at register; steady-state read SSOT")
+  Container(action_shim, "ActionShim", "tokio::task (ADR-0023 — survives); dispatches typed Actions to Driver + ObservationStore")
+
+  Rel(broker, runtime, "drain_pending() returns Evaluations to dispatch (ADR-0013 §8 — survives)")
+  Rel(runtime, view_store, "Calls bulk_load at register; write_through per tick")
+  Rel(runtime, probe, "Calls probe() before first bulk_load (Earned Trust composition-root invariant)")
+  Rel(view_store, view_redb, "redb transaction (one fsync per write_through)")
+  Rel(view_store, in_memory, "bulk_load populates; runtime updates after write_through fsync ok")
+  Rel(runtime, hydrate, "Awaits hydrate_desired + hydrate_actual (ADR-0021 — survives)")
+  Rel(hydrate, intent, "Reads Job + Node aggregates (async)")
+  Rel(hydrate, obs, "Reads alloc_status_rows + node_health_rows (async)")
+  Rel(runtime, in_memory, "view = in_memory.get(target).cloned() — sync, ns latency")
+  Rel(runtime, reconciler, "Calls reconcile(&desired, &actual, &view, &tick) — SYNC, no .await, pure")
+  Rel(reconciler, scheduler, "Calls schedule(nodes, job, allocs) — SYNC, pure helper from pure reconciler (ADR-0024 Anvil pattern)")
+  Rel(reconciler, runtime, "Returns (Vec<Action>, NextView)")
+  Rel(runtime, action_shim, "Dispatches Vec<Action> (async via shim — ADR-0023 — survives)")
+  Rel(action_shim, obs, "Writes alloc_status transitions (async)")
+  Rel(reg, core, "Holds AnyReconciler instances + per-instance in-memory BTreeMap")
+```
+
+The Container-level diagram from §32 also requires an amendment:
+the `libSQL files (per-reconciler)` ContainerDb element is replaced
+by a single `redb file (<data_dir>/reconcilers/memory.redb)`
+ContainerDb element. The Container diagram is otherwise unchanged.
 
 ---
 
@@ -1476,5 +1684,7 @@ Rules to enforce:
 | 2026-04-23 | Remediation pass (Atlas peer review, APPROVED-WITH-NOTES): §1 replace "dataplane substrate" with "dataplane layer" per user-memory `feedback_no_substrate.md` (phrase was inherited from prior phase placeholder). No scope change. — Morgan. |
 | 2026-04-26 | §16 Phase 1 TLS bootstrap: `serve` is the sole cert-minting site (ADR-0010 *Amendment 2026-04-26*; #81 tracks Phase 5 reintroduction of `cluster init`). — Morgan. |
 | 2026-04-27 | Phase 1 first-workload extension (§24–§33). Added ADR-0021 (reconciler `State` shape via `AnyState` enum mirroring `AnyReconcilerView`), ADR-0022 (`AppState::driver: Arc<dyn Driver>` extension), ADR-0023 (action shim placement + 100 ms tick cadence + DST-driven ticks under simulation), ADR-0024 (dedicated `overdrive-scheduler` crate, class `core` — D4 user override of the originally-proposed module-inside-control-plane placement; dst-lint scope expansion), ADR-0025 (single-node startup wiring: hostname-derived NodeId + one-shot node_health row at boot), ADR-0026 (cgroup v2 direct cgroupfs writes, no `cgroups-rs` dep; `cpu.weight` + `memory.max` from `AllocationSpec::resources`), ADR-0027 (job-stop HTTP shape: `POST /v1/jobs/{id}:stop` + separate `IntentKey::for_job_stop` intent key), ADR-0028 (cgroup v2 delegation pre-flight: hard refusal + explicit `--allow-no-cgroups` dev flag). New crate `overdrive-scheduler` (class `core`, depends only on `overdrive-core`); `overdrive-host` gains `ProcessDriver`. C4 Container diagram extended (new scheduler container + ProcessDriver row + kernel cgroup external system); new C4 Component diagram for the convergence-loop closure (submit → reconciler → scheduler → action shim → ProcessDriver → ObservationStore). No assumptions changed from prior phases. — Morgan. |
+| 2026-05-03 | Reconciler-memory redesign extension (§34–§39). Added ADR-0035 (collapse `Reconciler` trait to a single sync `reconcile` method; runtime owns persistence via `ViewStore` port + `RedbViewStore` adapter; one redb file per node at `<data_dir>/reconcilers/memory.redb` with one table per reconciler kind; CBOR via `ciborium` as wire format; in-memory `BTreeMap<TargetResource, View>` per reconciler bulk-loaded at register and used as steady-state read SSOT; write-through fsync-then-update ordering for crash durability) — supersedes ADR-0013. Added ADR-0036 (amends ADR-0021: per-reconciler `Reconciler::hydrate(target, db)` async surface removed; runtime owns all three hydration paths). New ports: `ViewStore` in `overdrive-control-plane`, `RedbViewStore` (host adapter), `SimViewStore` (sim adapter, in `overdrive-sim`). New workspace dep: `ciborium`. Deletions: `LibsqlHandle` newtype; `libsql_provisioner` module; per-reconciler libSQL files in `data_dir`. New DST invariants: `ViewStoreRoundtripIsLossless` (proptest-backed), `BulkLoadIsDeterministic`, `WriteThroughOrdering`. C4 Component diagram updated for reconciler subsystem; Container diagram amendment (per-reconciler libSQL files → single redb file). ADR-0013 marked Superseded by 0035; ADR-0021 marked Amended by 0036. Whitepaper §17 / §18 amendments + `.claude/rules/development.md` § Reconciler I/O rewrite flagged for DELIVER per `docs/feature/reconciler-memory-redb/design/upstream-changes.md`. — Morgan. |
+| 2026-05-03 | Added ADR-0037 (reconciler emits typed `TerminalCondition`; streaming forwards it; `LifecycleEvent` no longer projects reconciler-private View state). Codifies the recommendation in `docs/research/control-plane/issue-139-followup-streaming-restart-budget-research.md` candidate (c). Replaces step-02-04's `restart_count_max: u32` projection on `LifecycleEvent` with `terminal: Option<TerminalCondition>`; the deciding action carries `terminal` so the action shim writes both `AllocStatusRow.terminal` (durable home) and the broadcast event with the same value. `streaming.rs::check_terminal` collapses from ~30 LOC to ~5 LOC; `lagged_recover`'s `restart_count_max_hint` parameter is deleted; `exit_observer.rs`'s structurally-meaningless `restart_count_max: 0` literal becomes the structurally-meaningful `terminal: None`. ADR-0033's `RestartBudget.exhausted` source changes from a `restart_counts` recomputation to a `row.terminal` row-field read (the `RestartBudget` wire shape itself is unchanged). New variants: `TerminalCondition::{ BackoffExhausted { attempts }, Stopped { by: StoppedBy }, Custom { type_name, detail } }` — `Custom` is the WASM-third-party extension surface per whitepaper §18. K8s-`Condition.Reason`-shaped SemVer convention documented (well-known variants stable; renames are major; new variants additive minor). Lands alongside the ADR-0035 reset of the in-flight `marcus-sa/libsql-view-cache` branch; the new DELIVER roadmap must wire `terminal` from day one rather than ship ADR-0035 first and `terminal` second. — Morgan. |
 | 2026-04-27 | Post-ratification amendment: ADR-0029 (dedicated `overdrive-worker` crate, class `adapter-host`). User-proposed and ratified 2026-04-27 same day as the original first-workload DESIGN pass. The new crate hosts `ProcessDriver` (formerly slated for `overdrive-host`), workload-cgroup management (`overdrive.slice/workloads.slice/<alloc>.scope`; the workload half of ADR-0026), and the boot-time `node_health` row writer (relocated from control-plane bootstrap per ADR-0025 amendment). `overdrive-host` shrinks back to ADR-0016's original host-OS-primitives intent (`SystemClock`, `OsEntropy`, `TcpTransport`). Composition pattern: binary-composition — `overdrive-cli`'s `serve` subcommand hard-depends on both `overdrive-control-plane` and `overdrive-worker`; runtime `[node] role` config selects which subsystems boot. `overdrive-control-plane` does NOT depend on `overdrive-worker` — the action shim calls `Driver::*` against an injected `&dyn Driver`, impl plugged in by the binary at AppState construction. ADRs 0022, 0023, 0025, 0026 amended in-place (Amendment subsections at the end); structural shape unchanged in each. C4 Container diagram updated (new `overdrive-worker` container + binary-composition arrows from `overdrive-cli`); C4 Component (convergence-loop) diagram updated (ProcessDriver moves from `overdrive-host` boundary to `overdrive-worker` boundary; node_health writer added). Crate inventory grows from seven Rust crates to eight (excluding xtask). — Morgan. |
 | 2026-05-02 | ADR-0028 superseded in part by ADR-0034: the `--allow-no-cgroups` escape hatch is removed. Reasons: (a) structural leak in the `StopAllocation` action path (handle had `pid: None`, cgroup-kill branch gated off, `stop` returned `Ok(())` while the process kept running, producing `state: Terminated`-while-process-alive on the next reconciler tick); (b) redundancy — the canonical dev path is now `cargo xtask lima run --` (documented in `.claude/rules/testing.md`), which absorbs the dev-ergonomics objection ADR-0028 § Alternative A documented. Hard-refusal pre-flight from ADR-0028 stays. §31 rewritten; ADR index entry for 0028 marked Superseded; ADR-0034 added to index; Linux-only requirements bullet replaces flag reference with the Lima wrapper. Single-cut migration per greenfield convention — code/test deletions land in the crafter PR, not in this changelog entry. — Morgan. |

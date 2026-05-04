@@ -239,6 +239,141 @@ mod tests {
             .is_failure()
         );
     }
+
+    // ----------------------------------------------------------------
+    // ADR-0037 prerequisite — `TerminalCondition` enum surface tests.
+    // The variant equality cases below pin the closed first-party
+    // shape (`BackoffExhausted`, `Stopped`, `Custom`); the rkyv
+    // roundtrip property at the row level lives in
+    // `tests/acceptance/terminal_condition_roundtrip.rs`.
+    // ----------------------------------------------------------------
+
+    #[test]
+    fn terminal_condition_backoff_exhausted_carries_attempts() {
+        let a = TerminalCondition::BackoffExhausted { attempts: 5 };
+        let b = TerminalCondition::BackoffExhausted { attempts: 5 };
+        let c = TerminalCondition::BackoffExhausted { attempts: 6 };
+        assert_eq!(a, b, "equal-attempts BackoffExhausted variants must compare equal");
+        assert_ne!(a, c, "differing-attempts BackoffExhausted variants must compare unequal");
+    }
+
+    #[test]
+    fn terminal_condition_stopped_reuses_existing_stopped_by() {
+        let by_op = TerminalCondition::Stopped { by: StoppedBy::Operator };
+        let by_re = TerminalCondition::Stopped { by: StoppedBy::Reconciler };
+        let by_pr = TerminalCondition::Stopped { by: StoppedBy::Process };
+        assert_ne!(by_op, by_re, "Operator vs Reconciler must compare unequal");
+        assert_ne!(by_re, by_pr, "Reconciler vs Process must compare unequal");
+    }
+
+    #[test]
+    fn terminal_condition_custom_carries_type_name_and_optional_detail() {
+        let with_payload = TerminalCondition::Custom {
+            type_name: "vendor.io/quota.QuotaExhausted".to_owned(),
+            detail: Some(vec![1, 2, 3]),
+        };
+        let same = TerminalCondition::Custom {
+            type_name: "vendor.io/quota.QuotaExhausted".to_owned(),
+            detail: Some(vec![1, 2, 3]),
+        };
+        let no_detail = TerminalCondition::Custom {
+            type_name: "vendor.io/quota.QuotaExhausted".to_owned(),
+            detail: None,
+        };
+        assert_eq!(with_payload, same, "structurally identical Custom must compare equal");
+        assert_ne!(
+            with_payload, no_detail,
+            "Custom with vs without detail payload must compare unequal"
+        );
+    }
+}
+
+/// Reconciler-emitted classification of *why* an allocation reached a
+/// terminal lifecycle state.
+///
+/// Per ADR-0037 §1, this enum is the *publication boundary* between
+/// reconciler-private View state (`restart_counts`,
+/// `last_failure_seen_at`, the live backoff policy) and downstream
+/// consumers (the durable `AllocStatusRow.terminal` field, the
+/// streaming `LifecycleEvent.terminal` field, the HTTP
+/// `RestartBudget.exhausted` projection). The reconciler's *decision*
+/// rides on this type — it is not a derived value computed by
+/// downstream consumers from inputs they would otherwise need to read
+/// out of reconciler memory. See `.claude/rules/development.md`
+/// §"Persist inputs, not derived state" for the layering rule the
+/// ADR honours.
+///
+/// # Variants
+///
+/// - [`Self::BackoffExhausted`] — `JobLifecycle` reached its restart
+///   budget at the deciding tick. `attempts` is the count *consumed*
+///   at that moment (in Phase 1, the budget is hard-coded; in
+///   future phases the same variant carries the post-policy attempts).
+/// - [`Self::Stopped`] — explicit operator stop converged. The
+///   allocation reached `Stopped` because the operator (or the
+///   reconciler itself) requested it, not because of a failure. The
+///   inner [`StoppedBy`] reuses ADR-0032's existing initiator enum.
+/// - [`Self::Custom`] — forward-compat for WASM third-party
+///   reconcilers per whitepaper §18 (*Extension Model*). `type_name`
+///   is a CamelCase identifier scoped by the reconciler's canonical
+///   name (e.g. `"vendor.io/quota.QuotaExhausted"`); `detail` is
+///   opaque rkyv-encoded bytes the reconciler may attach. Streaming
+///   forwards `Custom` verbatim; well-known first-party variants stay
+///   in the closed set above and are compile-time-checked at every
+///   consumer.
+///
+/// # `SemVer` convention
+///
+/// Per ADR-0037 §3 (mirroring K8s `Condition.Reason` shape):
+///
+/// - **Adding a new well-known variant** — additive minor; existing
+///   consumers use [`Self::Custom`] / a wildcard arm + warn-and-skip
+///   shape until they explicitly handle the new variant.
+/// - **Renaming or removing a variant** — major-bump breaking change.
+///   The `#[non_exhaustive]` attribute on this enum is what makes the
+///   minor-bump path safe: external `match` sites are required to
+///   carry a wildcard arm, so adding a new variant cannot silently
+///   change their behaviour.
+///
+/// # Field-shape rationale
+///
+/// `String` (not `Box<TerminalCondition>` or a recursive enum) is
+/// chosen for `Custom.type_name` for the same reason
+/// `RestartBudgetExhausted.last_cause_summary` is `String` on
+/// [`TransitionReason`]: rkyv's `Archive` derive cannot resolve a
+/// recursive enum, and the type-name is meant to be opaque to the
+/// platform anyway — the reconciler emits a stable string id, the
+/// consumer renders it. `Option<Vec<u8>>` for `detail` mirrors
+/// rkyv-supported sum types and lets a reconciler attach a structured
+/// payload if it has one without forcing every emitter to.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    ToSchema,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[serde(tag = "kind", content = "data", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum TerminalCondition {
+    /// `JobLifecycle`: restart budget reached; no further attempts
+    /// will be scheduled. `attempts` is the count consumed at the
+    /// moment of the deciding tick.
+    BackoffExhausted { attempts: u32 },
+    /// `JobLifecycle`: explicit operator stop converged. The
+    /// allocation reached `Stopped` because the operator (or the
+    /// reconciler itself) requested it, not because of a failure.
+    Stopped { by: StoppedBy },
+    /// Forward-compat for WASM third-party reconcilers per
+    /// whitepaper §18. `type_name` is a CamelCase identifier scoped
+    /// by the reconciler (e.g. `"vendor.io/quota.QuotaExhausted"`);
+    /// `detail` is opaque bytes the reconciler may attach.
+    Custom { type_name: String, detail: Option<Vec<u8>> },
 }
 
 /// Initiator of a `Cancelled` transition.

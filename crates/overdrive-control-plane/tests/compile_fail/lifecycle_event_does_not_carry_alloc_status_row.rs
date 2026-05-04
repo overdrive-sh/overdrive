@@ -33,6 +33,7 @@ fn main() {
         updated_at: LogicalTimestamp { counter: 1, writer: node_id.clone() },
         reason: None,
         detail: None,
+        terminal: None,
     };
 
     // This line MUST fail to compile: `LifecycleEvent.from` is typed
@@ -48,5 +49,6 @@ fn main() {
         detail: None,
         source: overdrive_control_plane::api::TransitionSource::Reconciler,
         at: "1@local".to_owned(),
+        terminal: None,
     };
 }

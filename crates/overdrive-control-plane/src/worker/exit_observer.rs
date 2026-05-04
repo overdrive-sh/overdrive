@@ -47,7 +47,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use overdrive_core::id::{AllocationId, JobId};
-use overdrive_core::reconciler::{ReconcilerName, TargetResource};
+use overdrive_core::reconciler::{JobLifecycle, Reconciler, ReconcilerName, TargetResource};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{Driver, DriverType, ExitEvent, ExitKind};
 use overdrive_core::traits::observation_store::{
@@ -247,8 +247,16 @@ pub fn spawn_with_runtime(
 /// (`NoPriorRow`), or exhausted its retry budget against a terminal /
 /// repeatedly-retryable error (`Failed`).
 enum RetryOutcome {
+    /// `row` is `Box<AllocStatusRow>` (not bare) to keep the enum's
+    /// largest-variant size from drifting upward as `AllocStatusRow`
+    /// grows additive fields (`reason`, `detail`, `terminal` per
+    /// ADR-0032 / ADR-0037). The variant is constructed once per
+    /// successful retry and consumed immediately at the call site, so
+    /// the boxing cost is a single heap allocation per write — the
+    /// alternative is the whole enum carrying ~250+ bytes for every
+    /// `NoPriorRow` and `Failed` case as well.
     Wrote {
-        row: AllocStatusRow,
+        row: Box<AllocStatusRow>,
         prior_state: AllocStateWire,
     },
     NoPriorRow,
@@ -281,7 +289,7 @@ async fn run_with_retry(
         attempts = attempts.saturating_add(1);
         match handle_exit_event(obs, event).await {
             Ok(Some((row, prior_state))) => {
-                return RetryOutcome::Wrote { row, prior_state };
+                return RetryOutcome::Wrote { row: Box::new(row), prior_state };
             }
             Ok(None) => {
                 return RetryOutcome::NoPriorRow;
@@ -355,6 +363,13 @@ fn build_escalation_event(
         // shape with an "escalation" sentinel writer so downstream
         // parsers tolerate it.
         at: format!("escalation@{}", event.alloc),
+        // Per ADR-0037 §4 the exit observer is NOT a reconciler tick
+        // — it runs in a per-allocation watcher task and emits
+        // `terminal: None` to express "I am not making a terminal
+        // claim." The reconciler is the single writer for terminal
+        // decisions; it will see this row on the next tick and emit
+        // `Action::FinalizeFailed` if appropriate.
+        terminal: None,
     }
 }
 
@@ -404,6 +419,12 @@ async fn handle_exit_event(
         updated_at,
         reason: Some(reason),
         detail: None,
+        // ADR-0037 §4: emission sites outside a reconciler tick (the
+        // exit observer is one — it runs in a per-allocation watcher
+        // task, not a reconcile loop) MUST emit `terminal: None`.
+        // Structurally meaningful: "I am not making a terminal claim";
+        // the reconciler is the single writer for terminal decisions.
+        terminal: None,
     };
     obs.write(ObservationRow::AllocStatus(row.clone())).await?;
     Ok(Some((row, prior_state)))
@@ -465,12 +486,17 @@ async fn target_for_event(
 }
 
 fn job_lifecycle_name() -> ReconcilerName {
-    // Static canonical name; constructed once per submit. Phase 1
-    // ships exactly one job-lifecycle reconciler; the name is
-    // hardcoded against `crate::job_lifecycle()`'s registration.
+    // Sourced from the trait const per the
+    // `refactor-reconciler-static-name` RCA: `JobLifecycle::NAME` is
+    // the single compile-time anchor for the kebab-case literal, so
+    // there is exactly one place to change if the canonical name ever
+    // moves. The `expect` is by-construction-safe — the validator's
+    // `^[a-z][a-z0-9-]{0,62}$` grammar accepts `"job-lifecycle"` and
+    // the per-call `ReconcilerName::new` invocation is the same shape
+    // `JobLifecycle::canonical()` itself uses.
     #[allow(clippy::expect_used)]
-    ReconcilerName::new("job-lifecycle")
-        .expect("job-lifecycle is a valid reconciler name (constant)")
+    ReconcilerName::new(<JobLifecycle as Reconciler>::NAME)
+        .expect("JobLifecycle::NAME is a valid ReconcilerName by construction")
 }
 
 /// Build a `LifecycleEvent` from an observer-written `AllocStatusRow`.
@@ -478,6 +504,13 @@ fn job_lifecycle_name() -> ReconcilerName {
 /// transition; `from` is set to `prior_state` so the event correctly
 /// reflects the transition direction. Mirrors
 /// `action_shim::build_lifecycle_event`.
+///
+/// Per ADR-0037 §4: the event's `terminal` field mirrors the row's
+/// `terminal` field (which the exit observer always sets to `None`,
+/// see `handle_exit_event`). The reconciler is the single writer for
+/// terminal claims; the exit observer's job is to record what the
+/// kernel observed (clean exit / crash) and let the reconciler decide
+/// terminal classification on the next tick.
 fn build_lifecycle_event(
     row: &AllocStatusRow,
     prior_state: AllocStateWire,
@@ -496,6 +529,7 @@ fn build_lifecycle_event(
         detail: row.detail.clone(),
         source,
         at: format_logical_timestamp(&row.updated_at),
+        terminal: row.terminal.clone(),
     }
 }
 

@@ -105,6 +105,7 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
         updated_at: LogicalTimestamp { counter: 1, writer: node_id.clone() },
         reason: None,
         detail: None,
+        terminal: None,
     };
     obs.write(ObservationRow::AllocStatus(prior_row)).await.expect("seed prior alloc row");
 

@@ -35,20 +35,20 @@ use tempfile::TempDir;
 #[tokio::test]
 async fn submitted_job_reaches_running_via_real_exec_driver() {
     let tmp = TempDir::new().expect("tempdir");
-    let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime");
-    runtime.register(noop_heartbeat()).expect("register noop");
-    runtime.register(job_lifecycle()).expect("register job-lifecycle");
+    let mut runtime =
+        ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime");
+    runtime.register(noop_heartbeat()).await.expect("register noop");
+    runtime.register(job_lifecycle()).await.expect("register job-lifecycle");
 
     let store =
         Arc::new(LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open store"));
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
-    let driver: Arc<dyn Driver> = Arc::new(ExecDriver::new(
-        std::path::PathBuf::from("/sys/fs/cgroup"),
-        Arc::new(overdrive_sim::adapters::clock::SimClock::new()),
-    ));
+    let sim_clock = Arc::new(overdrive_sim::adapters::clock::SimClock::new());
+    let driver: Arc<dyn Driver> =
+        Arc::new(ExecDriver::new(std::path::PathBuf::from("/sys/fs/cgroup"), sim_clock.clone()));
 
-    let state = AppState::new(store, obs, Arc::new(runtime), driver);
+    let state = AppState::new(store, obs, Arc::new(runtime), driver, sim_clock);
 
     // Cleanup guard — fires on test exit (panic or success) and
     // mass-kills every workload cgroup the test created via

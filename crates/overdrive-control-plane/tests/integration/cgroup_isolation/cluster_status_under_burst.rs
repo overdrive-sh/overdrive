@@ -56,9 +56,10 @@ async fn cluster_status_responsive_under_workload_cpu_burst() {
     }
 
     let tmp = TempDir::new().expect("tempdir");
-    let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime");
-    runtime.register(noop_heartbeat()).expect("register noop");
-    runtime.register(job_lifecycle()).expect("register job-lifecycle");
+    let mut runtime =
+        ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime");
+    runtime.register(noop_heartbeat()).await.expect("register noop");
+    runtime.register(job_lifecycle()).await.expect("register job-lifecycle");
     let runtime = Arc::new(runtime);
 
     let local_node = NodeId::new("local").expect("node id");
@@ -108,6 +109,7 @@ async fn cluster_status_responsive_under_workload_cpu_burst() {
         // store — no cause-class transition fired through the shim.
         reason: None,
         detail: None,
+        terminal: None,
     };
     obs.write(ObservationRow::AllocStatus(row)).await.expect("write alloc row");
 

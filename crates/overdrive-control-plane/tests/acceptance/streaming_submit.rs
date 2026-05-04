@@ -69,15 +69,16 @@ fn payments_spec() -> JobSpecInput {
     }
 }
 
-fn build_app_state(tmp: &TempDir) -> AppState {
-    let runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime");
+fn build_app_state(tmp: &TempDir, clock: Arc<dyn Clock>) -> AppState {
+    let runtime =
+        ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime");
     let store = Arc::new(
         LocalIntentStore::open(tmp.path().join("intent.redb")).expect("LocalIntentStore::open"),
     );
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(sample_node(), 0));
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
-    AppState::new(store, obs, Arc::new(runtime), driver)
+    AppState::new(store, obs, Arc::new(runtime), driver, clock)
 }
 
 fn build_router(state: AppState) -> Router {
@@ -132,6 +133,7 @@ async fn write_row(
         updated_at: LogicalTimestamp { counter, writer: sample_node() },
         reason,
         detail: None,
+        terminal: None,
     };
     obs.write(ObservationRow::AllocStatus(row)).await.expect("obs write");
 }
@@ -157,6 +159,11 @@ fn make_lifecycle_event(
         detail: None,
         source: TransitionSource::Driver(DriverType::Exec),
         at: "1@node-a".to_string(),
+        // Per ADR-0037 §4: synthetic test fixtures default to `None`
+        // unless the scenario specifically exercises the terminal-
+        // surface projection (those scenarios construct LifecycleEvent
+        // directly with their desired `Some(TerminalCondition::...)`).
+        terminal: None,
     }
 }
 
@@ -168,7 +175,7 @@ fn make_lifecycle_event(
 #[tokio::test]
 async fn s_cp_08_application_json_returns_one_shot_response_with_back_compat_shape() {
     let tmp = TempDir::new().expect("tmpdir");
-    let state = build_app_state(&tmp);
+    let state = build_app_state(&tmp, Arc::new(SimClock::new()));
     let router = build_router(state);
 
     let response = router
@@ -204,7 +211,7 @@ async fn s_cp_08_application_json_returns_one_shot_response_with_back_compat_sha
 #[tokio::test]
 async fn s_cp_08b_no_accept_header_defaults_to_json_back_compat() {
     let tmp = TempDir::new().expect("tmpdir");
-    let state = build_app_state(&tmp);
+    let state = build_app_state(&tmp, Arc::new(SimClock::new()));
     let router = build_router(state);
 
     // Build request without Accept header — back-compat with reqwest
@@ -239,7 +246,7 @@ async fn s_cp_08b_no_accept_header_defaults_to_json_back_compat() {
 #[tokio::test]
 async fn s_cp_01_streaming_lane_emits_accepted_then_running_then_converged_running() {
     let tmp = TempDir::new().expect("tmpdir");
-    let state = build_app_state(&tmp);
+    let state = build_app_state(&tmp, Arc::new(SimClock::new()));
 
     // Spawn the request in a task so we can drive the broadcast
     // channel from the main test fixture concurrently.
@@ -335,7 +342,7 @@ async fn s_cp_01_streaming_lane_emits_accepted_then_running_then_converged_runni
 #[tokio::test]
 async fn s_cp_03_resubmit_unchanged_emits_accepted_with_unchanged_outcome() {
     let tmp = TempDir::new().expect("tmpdir");
-    let state = build_app_state(&tmp);
+    let state = build_app_state(&tmp, Arc::new(SimClock::new()));
     let router = build_router(state.clone());
 
     // First submit — JSON lane (no streaming) just to install the job.
@@ -410,11 +417,10 @@ async fn s_cp_03_resubmit_unchanged_emits_accepted_with_unchanged_outcome() {
 #[tokio::test]
 async fn s_cp_06_cap_timer_fires_timeout_terminal_when_no_events_arrive() {
     let tmp = TempDir::new().expect("tmpdir");
-    let mut state = build_app_state(&tmp);
-    // Inject a SimClock and a tiny cap so the test can advance through
-    // the cap deterministically.
     let sim_clock = Arc::new(SimClock::new());
-    state.clock = sim_clock.clone() as Arc<dyn Clock>;
+    let mut state = build_app_state(&tmp, sim_clock.clone());
+    // The SimClock instance above is shared with `state.clock` so the
+    // test can advance time through the streaming cap deterministically.
     state.streaming_cap = Duration::from_secs(60);
     let router = build_router(state.clone());
 
@@ -481,10 +487,9 @@ async fn s_cp_06_cap_timer_fires_timeout_terminal_when_no_events_arrive() {
 #[tokio::test]
 async fn s_cp_06b_cap_is_absolute_deadline_not_inactivity_timeout() {
     let tmp = TempDir::new().expect("tmpdir");
-    let mut state = build_app_state(&tmp);
-    // Same SimClock + 60s cap setup as s_cp_06.
     let sim_clock = Arc::new(SimClock::new());
-    state.clock = sim_clock.clone() as Arc<dyn Clock>;
+    let mut state = build_app_state(&tmp, sim_clock.clone());
+    // Same SimClock + 60s cap setup as s_cp_06.
     state.streaming_cap = Duration::from_secs(60);
     let router = build_router(state.clone());
 
@@ -582,7 +587,7 @@ async fn s_cp_06b_cap_is_absolute_deadline_not_inactivity_timeout() {
 #[tokio::test]
 async fn s_cp_07_streaming_reason_byte_equals_snapshot_reason() {
     let tmp = TempDir::new().expect("tmpdir");
-    let state = build_app_state(&tmp);
+    let state = build_app_state(&tmp, Arc::new(SimClock::new()));
     let router = build_router(state.clone());
 
     // Project a known TransitionReason variant onto both a row write
@@ -700,12 +705,13 @@ async fn s_cp_10_lagged_subscriber_recovers_via_observation_snapshot() {
 #[tokio::test]
 async fn s_cp_11_stop_while_streaming_closes_stream_with_stopped_result() {
     let tmp = TempDir::new().expect("tmpdir");
-    let mut state = build_app_state(&tmp);
-
-    // Use a SimClock with a short cap so the test fails quickly rather
-    // than waiting 60 s when converged_stopped is not yet implemented.
     let sim_clock = Arc::new(SimClock::new());
-    state.clock = sim_clock.clone() as Arc<dyn Clock>;
+    let mut state = build_app_state(&tmp, sim_clock.clone());
+
+    // Use a short cap so the test fails quickly rather than waiting
+    // 60 s when converged_stopped is not yet implemented. The SimClock
+    // above is shared with `state.clock` so the test can advance time
+    // through the cap deterministically.
     state.streaming_cap = Duration::from_secs(10);
 
     let router = build_router(state.clone());
@@ -758,16 +764,24 @@ async fn s_cp_11_stop_while_streaming_closes_stream_with_stopped_result() {
     }
 
     // AC: Stream closes after Terminated { Stopped { by: Reconciler } }.
-    emit_lifecycle(
-        &state,
-        make_lifecycle_event(
-            alloc_id.clone(),
-            job_id.clone(),
-            AllocStateWire::Running,
-            AllocStateWire::Terminated,
-            TransitionReason::Stopped { by: StoppedBy::Reconciler },
-        ),
+    // Per ADR-0037 §4: terminal classification is the reconciler's
+    // decision, threaded onto LifecycleEvent.terminal by the action
+    // shim. The streaming handler reads `event.terminal` (not
+    // `event.reason`) for terminal projection — to drive the
+    // converged_stopped close, the synthesised event must carry the
+    // typed terminal claim, not just the legacy `reason` field.
+    let mut terminated_event = make_lifecycle_event(
+        alloc_id.clone(),
+        job_id.clone(),
+        AllocStateWire::Running,
+        AllocStateWire::Terminated,
+        TransitionReason::Stopped { by: StoppedBy::Reconciler },
     );
+    terminated_event.terminal =
+        Some(overdrive_core::transition_reason::TerminalCondition::Stopped {
+            by: StoppedBy::Reconciler,
+        });
+    emit_lifecycle(&state, terminated_event);
 
     // The stream must close within 5 s — not by hitting the 10 s cap.
     let lines = tokio::time::timeout(Duration::from_secs(5), request_task)
@@ -807,7 +821,7 @@ async fn s_cp_11_stop_while_streaming_closes_stream_with_stopped_result() {
 #[tokio::test]
 async fn s_lt_01_lifecycle_transition_from_reflects_prior_alloc_state() {
     let tmp = TempDir::new().expect("tmpdir");
-    let state = build_app_state(&tmp);
+    let state = build_app_state(&tmp, Arc::new(SimClock::new()));
 
     let alloc_id = AllocationId::from_str("alloc-payments-0").expect("alloc id");
     let job_id = JobId::from_str("payments-v0").expect("job id");
@@ -838,7 +852,10 @@ async fn s_lt_01_lifecycle_transition_from_reflects_prior_alloc_state() {
     };
 
     dispatch(
-        vec![Action::StopAllocation { alloc_id: alloc_id.clone() }],
+        // ADR-0037 §4: emission sites outside a reconciler tick (here, a
+        // direct test-bench dispatch) emit `terminal: None` — the
+        // reconciler is the single source of every terminal claim.
+        vec![Action::StopAllocation { alloc_id: alloc_id.clone(), terminal: None }],
         state.driver.as_ref(),
         state.obs.as_ref(),
         &state.lifecycle_events,
@@ -900,11 +917,10 @@ async fn s_lt_01_lifecycle_transition_from_reflects_prior_alloc_state() {
 #[tokio::test]
 async fn s_cp_12_pre_subscribe_terminal_does_not_hang_until_cap() {
     let tmp = TempDir::new().expect("tmpdir");
-    let mut state = build_app_state(&tmp);
-
-    // Inject SimClock + 60s cap per the s_cp_06 pattern.
     let sim_clock = Arc::new(SimClock::new());
-    state.clock = sim_clock.clone() as Arc<dyn Clock>;
+    let mut state = build_app_state(&tmp, sim_clock.clone());
+
+    // SimClock + 60s cap per the s_cp_06 pattern.
     state.streaming_cap = Duration::from_secs(60);
 
     let alloc_id = AllocationId::from_str("alloc-payments-0").expect("alloc id");

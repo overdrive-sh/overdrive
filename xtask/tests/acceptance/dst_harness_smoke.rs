@@ -84,6 +84,12 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     "job-scheduled-after-submission",
     "desired-replica-count-converges",
     "no-double-scheduling",
+    // ViewStore DST invariants added by `reconciler-memory-redb` step 01-04
+    // (commit `b9d9ea0`). Mirrors the canonical kebab-case order in
+    // `Invariant::name`; kept in sync with `dst_clean_clone_green.rs`.
+    "view-store-roundtrip-is-lossless",
+    "bulk-load-is-deterministic",
+    "write-through-ordering",
 ];
 
 // -----------------------------------------------------------------------------

@@ -239,6 +239,9 @@ fn invoke_cargo_mutants(
                 path.display(),
                 bytes.len()
             );
+            if bytes.is_empty() {
+                assert_diff_not_silent_skip(base)?;
+            }
             Some(path)
         }
         Mode::Workspace { .. } => None,
@@ -248,7 +251,14 @@ fn invoke_cargo_mutants(
 
     let mut cmd = Command::new(cargo());
     cmd.args(&args);
-    eprintln!("xtask mutants: running {}", format_cmd(&cmd));
+    // Select the `mutants` nextest profile (`.config/nextest.toml`) so
+    // the per-mutant test run drops trybuild binaries — they don't
+    // contribute to kill-rate signal and dominate wall-clock. nextest
+    // reads NEXTEST_PROFILE as the equivalent of `--profile`; passing
+    // it via env is the only way that works with cargo-mutants, which
+    // does not forward arbitrary nextest flags.
+    cmd.env("NEXTEST_PROFILE", "mutants");
+    eprintln!("xtask mutants: running {} (NEXTEST_PROFILE=mutants)", format_cmd(&cmd));
     let status = cmd.status().wrap_err("spawn cargo-mutants")?;
     // Don't bail on non-zero — cargo-mutants returns non-zero for any
     // missed mutant, which is exactly the signal we want to measure
@@ -331,6 +341,83 @@ fn git_diff_against(base: &str) -> Result<Vec<u8>> {
         bail!("git diff {base} exited non-zero: {stderr}");
     }
     Ok(out.stdout)
+}
+
+/// Guardrail against the silent-skip failure mode discovered on PR #135.
+///
+/// `git_diff_against` uses `git diff <base>` (working-tree vs base). On
+/// `actions/checkout@v4` checkouts of `refs/pull/N/merge` against a
+/// freshly-fetched `origin/main`, that form has been observed to
+/// produce a 0-byte diff for a PR with thousands of additions — the
+/// run logged "wrote target/xtask/mutants.diff (0 bytes) for --in-diff"
+/// and exited the wrapper via the vacuous-pass path, so the gate never
+/// actually ran.
+///
+/// This guard cross-checks the empty diff against `git diff
+/// --name-only <base>...HEAD` (three-dot, merge-base form). When the
+/// secondary view shows any modified `crates/<name>/src/<...>` path
+/// while the primary diff is empty, the wrapper bails: cargo-mutants
+/// would otherwise vacuous-pass against a real source-touching PR. A
+/// genuinely empty diff (docs-only PR, comment-only changes outside
+/// `crates/**/src/**`) still passes — same shape as before.
+fn assert_diff_not_silent_skip(base: &str) -> Result<()> {
+    let names = git_diff_name_only_three_dot(base)?;
+    let modified_sources: Vec<&str> =
+        names.iter().map(String::as_str).filter(|p| is_workspace_source_path(p)).collect();
+    if modified_sources.is_empty() {
+        return Ok(());
+    }
+    let sample: Vec<&&str> = modified_sources.iter().take(5).collect();
+    bail!(
+        "xtask mutants: --diff produced 0 bytes against `{base}`, but `git diff \
+         --name-only {base}...HEAD` reports {n} modified `crates/<name>/src/<...>` \
+         path(s): {sample:?}{ellipsis}. \n\nThis is the silent-skip failure mode \
+         from PR #135 — `git diff <base>` (working-tree-vs-base) returned empty \
+         even though the merge-base view shows source changes. Letting the run \
+         vacuous-pass here would silently skip the mutation gate against a real \
+         source-touching PR. \n\nLikely cause: checkout shape (e.g. \
+         `actions/checkout@v4` fetching `refs/pull/N/merge` against a stale or \
+         already-merged `origin/main`). Reproduce with `git diff {base}` vs \
+         `git diff {base}...HEAD` in the failing environment.",
+        n = modified_sources.len(),
+        sample = sample,
+        ellipsis = if modified_sources.len() > sample.len() { ", ..." } else { "" },
+    );
+}
+
+fn git_diff_name_only_three_dot(base: &str) -> Result<Vec<String>> {
+    let spec = format!("{base}...HEAD");
+    let out = Command::new("git")
+        .args(["diff", "--name-only", &spec])
+        .output()
+        .wrap_err("spawn git diff --name-only")?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr).trim().to_owned();
+        bail!("git diff --name-only {spec} exited non-zero: {stderr}");
+    }
+    Ok(String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(|s| s.trim().to_owned())
+        .filter(|s| !s.is_empty())
+        .collect())
+}
+
+/// Path classifier for the silent-skip guardrail.
+///
+/// Matches `crates/<name>/src/<rest>` exactly — the workspace shape
+/// cargo-mutants would actually mutate. Excludes `crates/<name>/tests/`
+/// (cargo-mutants only mutates source), `crates/<name>/Cargo.toml`,
+/// `xtask/src/**`, and any path outside `crates/`. A diff that touches
+/// only those is a legitimate vacuous pass.
+///
+/// Pure function — git always emits forward slashes regardless of
+/// platform, so segment-splitting on `/` is correct on Windows too.
+fn is_workspace_source_path(path: &str) -> bool {
+    let mut segments = path.split('/');
+    matches!(
+        (segments.next(), segments.next(), segments.next(), segments.next()),
+        (Some("crates"), Some(name), Some("src"), Some(_)) if !name.is_empty()
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -940,6 +1027,49 @@ mod tests {
         // Baseline file MUST NOT have been seeded — a failed run
         // cannot be allowed to write a fake kill-rate floor.
         assert!(!baseline.exists(), "baseline file must not be seeded on baseline failure");
+    }
+
+    #[test]
+    fn workspace_source_path_matches_crate_src_files() {
+        // The shape cargo-mutants would actually mutate — a real Rust
+        // source file under a crate's src/. These must trip the
+        // silent-skip guardrail when the unified diff is empty.
+        assert!(is_workspace_source_path("crates/overdrive-core/src/lib.rs"));
+        assert!(is_workspace_source_path("crates/overdrive-core/src/foo/bar.rs"));
+        assert!(is_workspace_source_path("crates/overdrive-control-plane/src/handlers.rs"));
+    }
+
+    #[test]
+    fn workspace_source_path_rejects_non_mutated_paths() {
+        // Tests, manifests, READMEs, examples, benches — none of these
+        // are mutated by cargo-mutants, so a diff that touches only
+        // them is a legitimate vacuous pass. The guardrail must NOT
+        // fire for these.
+        assert!(!is_workspace_source_path("crates/overdrive-core/tests/integration.rs"));
+        assert!(!is_workspace_source_path("crates/overdrive-core/Cargo.toml"));
+        assert!(!is_workspace_source_path("crates/overdrive-core/README.md"));
+        assert!(!is_workspace_source_path("crates/overdrive-core/examples/demo.rs"));
+        assert!(!is_workspace_source_path("crates/overdrive-core/benches/perf.rs"));
+        // xtask is not under `crates/` and is mutation-excluded by
+        // project policy — must not match.
+        assert!(!is_workspace_source_path("xtask/src/mutants.rs"));
+        // Top-level files.
+        assert!(!is_workspace_source_path("Cargo.toml"));
+        assert!(!is_workspace_source_path("docs/whitepaper.md"));
+        assert!(!is_workspace_source_path(".github/workflows/ci.yml"));
+    }
+
+    #[test]
+    fn workspace_source_path_rejects_directory_only_or_short_paths() {
+        // Edge cases at the segment boundary — a path that stops at
+        // `src` with no file under it isn't a real source change. Must
+        // not match.
+        assert!(!is_workspace_source_path("crates/overdrive-core/src"));
+        assert!(!is_workspace_source_path("crates/overdrive-core"));
+        assert!(!is_workspace_source_path("crates"));
+        assert!(!is_workspace_source_path(""));
+        // Empty crate name (would imply `crates//src/...`) — refuse.
+        assert!(!is_workspace_source_path("crates//src/lib.rs"));
     }
 
     #[test]

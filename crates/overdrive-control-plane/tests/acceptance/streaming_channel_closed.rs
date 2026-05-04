@@ -95,15 +95,16 @@ fn payments_spec() -> JobSpecInput {
     }
 }
 
-fn build_app_state(tmp: &TempDir) -> AppState {
-    let runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime");
+fn build_app_state(tmp: &TempDir, clock: Arc<dyn Clock>) -> AppState {
+    let runtime =
+        ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime");
     let store = Arc::new(
         LocalIntentStore::open(tmp.path().join("intent.redb")).expect("LocalIntentStore::open"),
     );
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(sample_node(), 0));
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
-    AppState::new(store, obs, Arc::new(runtime), driver)
+    AppState::new(store, obs, Arc::new(runtime), driver, clock)
 }
 
 fn build_router(state: AppState) -> Router {
@@ -141,17 +142,16 @@ async fn body_ndjson_lines(body: Body) -> Vec<Value> {
 #[tokio::test]
 async fn closed_lifecycle_channel_emits_stream_interrupted_terminal() {
     let tmp = TempDir::new().expect("tmpdir");
-    let mut state = build_app_state(&tmp);
-
-    // Inject SimClock + a small streaming_cap so that, even on the
-    // legacy code path where the cap timer fires before Closed (the
-    // in-stream `bus` Arc keeps the channel open until the closure
-    // ends — see file docstring), the test still terminates promptly.
-    // The terminal_reason on the cap path is
-    // `Timeout { after_seconds: 1 }`, which the StreamInterrupted
-    // assertion will catch with the documented panic message.
     let sim_clock = Arc::new(SimClock::new());
-    state.clock = sim_clock.clone() as Arc<dyn Clock>;
+    let mut state = build_app_state(&tmp, sim_clock.clone());
+
+    // Small streaming_cap so that, even on the legacy code path where
+    // the cap timer fires before Closed (the in-stream `bus` Arc keeps
+    // the channel open until the closure ends — see file docstring),
+    // the test still terminates promptly. The terminal_reason on the
+    // cap path is `Timeout { after_seconds: 1 }`, which the
+    // StreamInterrupted assertion will catch with the documented panic
+    // message.
     state.streaming_cap = Duration::from_secs(1);
 
     // Hold a clone of the lifecycle_events Arc so we can drop it

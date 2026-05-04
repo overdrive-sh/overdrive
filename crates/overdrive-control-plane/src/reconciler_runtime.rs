@@ -1,17 +1,29 @@
-//! `ReconcilerRuntime` — composes `AnyReconciler` enum-dispatched
-//! reconcilers, the `EvaluationBroker`, and per-primitive libSQL path
-//! provisioning.
+//! `ReconcilerRuntime` — runtime-owned reconciler registry per ADR-0035 §5.
 //!
-//! Per ADR-0013 (amended 2026-04-24), the trait's pre-hydration +
-//! `TickContext` shape broke object safety, so the runtime registers
-//! `AnyReconciler` (enum-dispatched) rather than `Box<dyn Reconciler>`.
+//! Composes `AnyReconciler` enum-dispatched reconcilers, the
+//! `EvaluationBroker`, and the runtime-owned
+//! [`crate::view_store::ViewStore`] for per-reconciler `View` memory.
 //!
-//! Per ADR-0013, the runtime lives in this crate (NOT in `overdrive-core`),
-//! because it pulls in `libsql` and wiring-layer concerns. Core stays
-//! port-only.
+//! Per ADR-0035 §5 the runtime owns:
+//!
+//! 1. The `Arc<dyn ViewStore>` port (mandatory constructor parameter
+//!    per `.claude/rules/development.md` § Port-trait dependencies).
+//! 2. An in-memory `BTreeMap<TargetResource, View>` per reconciler
+//!    kind, bulk-loaded at register time and served from RAM on every
+//!    tick. The map IS the steady-state read SSOT.
+//! 3. The probe → `bulk_load` handshake at register: a probe failure
+//!    surfaces as `ControlPlaneError::Internal` and prevents the
+//!    reconciler from being added to the registry; the composition
+//!    root (`overdrive-cli::commands::serve`) translates the failure
+//!    into `health.startup.refused` + non-zero exit.
+//!
+//! Per ADR-0036 the runtime owns hydration of all three of intent,
+//! observation, and view. Reconcilers see a typed `&Self::View` per
+//! tick; they never see the `ViewStore` port.
 //!
 //! Phase 1 shape: the runtime owns a `BTreeMap<ReconcilerName,
-//! AnyReconciler>` keyed by the canonical name, plus an
+//! AnyReconciler>` keyed by the canonical name, plus per-kind in-memory
+//! view maps stashed alongside each registered reconciler, plus an
 //! `EvaluationBroker` behind `&self`. The `BTreeMap` choice — over
 //! `HashMap` — is deliberate: registry iteration must be deterministic
 //! across runtime constructions because [`Self::registered`] is
@@ -19,41 +31,74 @@
 //! `HashMap`'s `RandomState` hasher would put per-process-randomised
 //! key order on the wire (see ADR-0013 §8 storm-proofing rationale and
 //! the project-wide ordered-collection-as-nondeterminism rule in
-//! `.claude/rules/development.md`). Registration eagerly derives the
-//! per-reconciler libSQL path via
-//! [`crate::libsql_provisioner::provision_db_path`] — the DB itself is
-//! opened lazily by callers that need it (Phase 3+). Provisioning the
-//! path at register time surfaces invalid `data_dir`s (permission
-//! denied, traversal attempt) at registration rather than deferred
-//! until first use.
+//! `.claude/rules/development.md`).
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{IntentKey, Job, Node};
 use overdrive_core::id::{JobId, NodeId};
 use overdrive_core::reconciler::{
-    Action, AnyReconciler, AnyReconcilerView, AnyState, JobLifecycleState, JobLifecycleView,
-    LibsqlHandle, ReconcilerName, TargetResource, TickContext,
+    Action, AnyReconciler, AnyReconcilerView, AnyState, JobLifecycle, JobLifecycleState,
+    JobLifecycleView, Reconciler, ReconcilerName, TargetResource, TickContext,
 };
 use overdrive_core::traits::intent_store::IntentStore;
+use parking_lot::Mutex;
 
 use crate::AppState;
 use crate::action_shim;
 use crate::error::ControlPlaneError;
 use crate::eval_broker::{Evaluation, EvaluationBroker};
-use crate::libsql_provisioner::provision_db_path;
+use crate::view_store::{ViewStore, ViewStoreExt};
 
-/// Registry + broker + libSQL path owner.
+/// Per-reconciler-kind in-memory view map. Mirrors the `AnyReconciler`
+/// enum's variant set so the runtime can dispatch typed `View` reads
+/// and writes without an `Any`-shaped registry.
+///
+/// Per ADR-0035 §5 the map IS the steady-state read SSOT. The
+/// `BTreeMap<TargetResource, V>` choice over `HashMap` keeps DST
+/// replay deterministic
+/// (`.claude/rules/development.md` § "Ordered-collection choice").
+#[derive(Debug, Default)]
+enum AnyViewMap {
+    /// `NoopHeartbeat` carries `View = ()`; the per-target map exists
+    /// for shape symmetry but never holds anything beyond the implicit
+    /// `default()` when a target is read.
+    #[default]
+    Unit,
+    /// `JobLifecycle` carries `View = JobLifecycleView`; the map
+    /// holds per-target persisted views.
+    JobLifecycle(BTreeMap<TargetResource, JobLifecycleView>),
+}
+
+/// Registry entry — pairs an `AnyReconciler` with its typed in-memory
+/// view map. Stored under [`ReconcilerRuntime::reconcilers`].
+struct RegistryEntry {
+    reconciler: AnyReconciler,
+    /// In-memory view map. Wrapped in `Mutex` so per-tick reads/writes
+    /// can mutate it through the shared `&self` accessor pattern the
+    /// convergence-loop spawn uses (`Arc<ReconcilerRuntime>`). Per
+    /// `.claude/rules/development.md` § Concurrency & async — no
+    /// `.await` is held across this lock; the tick loop reads the
+    /// view by value (`.cloned()`), drops the guard, calls the sync
+    /// `reconcile` function, then re-acquires the lock to install the
+    /// `next_view` after the (`.await`'d) `write_through` returns Ok.
+    views: Mutex<AnyViewMap>,
+}
+
+/// Registry + broker + view-store owner.
 pub struct ReconcilerRuntime {
-    /// Canonicalised data directory under which per-reconciler libSQL
-    /// files live at `<data_dir>/reconcilers/<name>/memory.db`.
-    data_dir: PathBuf,
+    /// Runtime-owned `ViewStore` port. The mandatory constructor
+    /// parameter per `.claude/rules/development.md` § Port-trait
+    /// dependencies. Production wires `RedbViewStore` from the
+    /// composition root; DST tests wire `SimViewStore`.
+    view_store: Arc<dyn ViewStore>,
     /// Registry keyed on canonical reconciler name. Duplicate
     /// registration is rejected with `ControlPlaneError::Conflict`.
-    reconcilers: BTreeMap<ReconcilerName, AnyReconciler>,
+    reconcilers: BTreeMap<ReconcilerName, RegistryEntry>,
     /// Cancelable-eval-set evaluation broker per ADR-0013 §8.
     ///
     /// Wrapped in [`parking_lot::Mutex`] per
@@ -73,57 +118,123 @@ pub struct ReconcilerRuntime {
 }
 
 impl ReconcilerRuntime {
-    /// Construct a new runtime rooted at `data_dir`. Creates the
-    /// directory if absent (so `canonicalize` has a real target) and
-    /// canonicalises it once per ADR-0013 §5 so subsequent
-    /// `provision_db_path` calls operate on the fully-resolved path.
+    /// Construct a new runtime rooted at `data_dir` against the
+    /// supplied `view_store`. Creates the directory if absent (so
+    /// `canonicalize` has a real target) and canonicalises it once per
+    /// ADR-0035 §5.
+    ///
+    /// Per `.claude/rules/development.md` § Port-trait dependencies the
+    /// `view_store` parameter is mandatory — there is no builder
+    /// override or in-constructor default. Production wires
+    /// `RedbViewStore::open(data_dir)?`; DST tests wire `SimViewStore`.
     ///
     /// # Errors
     ///
     /// Returns [`ControlPlaneError::Internal`] if the directory cannot
-    /// be created or canonicalised.
-    pub fn new(data_dir: &Path) -> Result<Self, ControlPlaneError> {
+    /// be created or canonicalised. Probe failures are deferred to
+    /// [`Self::register`] — the constructor itself does no I/O against
+    /// the supplied `view_store`.
+    pub fn new(data_dir: &Path, view_store: Arc<dyn ViewStore>) -> Result<Self, ControlPlaneError> {
         std::fs::create_dir_all(data_dir).map_err(|e| {
             ControlPlaneError::internal(
                 format!("ReconcilerRuntime::new: create_dir_all {} failed", data_dir.display()),
                 e,
             )
         })?;
-        let canon = std::fs::canonicalize(data_dir).map_err(|e| {
+        // Canonicalise to surface bad data_dirs (permission denied,
+        // bad symlink) at construction time. The result is discarded:
+        // the `RedbViewStore` (production) and `SimViewStore` (tests)
+        // resolve their own paths against the supplied `view_store`,
+        // so the runtime no longer needs to hold a copy.
+        let _canon = std::fs::canonicalize(data_dir).map_err(|e| {
             ControlPlaneError::internal(
                 format!("ReconcilerRuntime::new: canonicalize {} failed", data_dir.display()),
                 e,
             )
         })?;
         Ok(Self {
-            data_dir: canon,
+            view_store,
             reconcilers: BTreeMap::new(),
             broker: parking_lot::Mutex::new(EvaluationBroker::new()),
         })
     }
 
-    /// Register a reconciler. Derives its libSQL path under
-    /// `<data_dir>/reconcilers/<name>/memory.db` (path derivation only —
-    /// the DB is not opened here) and inserts it into the registry.
+    /// Register a reconciler. Performs the ADR-0035 §5 boot handshake:
+    ///
+    /// 1. `view_store.probe().await` — Earned-Trust validation that
+    ///    the underlying store can write/fsync/read/delete. Probe
+    ///    failure short-circuits register; the composition root
+    ///    translates the resulting `Internal` error into
+    ///    `health.startup.refused` and exits non-zero.
+    /// 2. `view_store.bulk_load::<R::View>(name).await` — pre-load
+    ///    every persisted `(target, view)` row into the runtime's
+    ///    in-memory map. The map is the steady-state read SSOT
+    ///    thereafter; subsequent ticks consult it without an `.await`.
+    /// 3. Insert the registry entry alongside the typed view map.
+    ///
+    /// Per ADR-0036 the runtime owns hydration end-to-end — reconcilers
+    /// never see the `ViewStore` port.
     ///
     /// # Errors
     ///
     /// * [`ControlPlaneError::Conflict`] if a reconciler with the same
     ///   name is already registered. The second registration is
     ///   rejected cleanly — the registry is left unchanged.
-    /// * [`ControlPlaneError::Internal`] if path provisioning fails
-    ///   (permission denied, traversal rejected, etc.).
-    pub fn register(&mut self, reconciler: AnyReconciler) -> Result<(), ControlPlaneError> {
+    /// * [`ControlPlaneError::Internal`] if the probe fails or the
+    ///   bulk-load round-trip fails (CBOR decode error, underlying I/O
+    ///   error). Both are hard boot failures — the composition root
+    ///   refuses to come up.
+    pub async fn register(&mut self, reconciler: AnyReconciler) -> Result<(), ControlPlaneError> {
         let name = reconciler.name().clone();
         if self.reconcilers.contains_key(&name) {
             return Err(ControlPlaneError::Conflict {
                 message: format!("reconciler {name} already registered"),
             });
         }
-        // Path derivation only — surfaces permission / traversal errors
-        // at register time rather than deferring to first DB open.
-        let _path = provision_db_path(&self.data_dir, &name)?;
-        self.reconcilers.insert(name, reconciler);
+
+        // Step 1 — Earned-Trust probe. Composition-root invariant:
+        // every reconciler's `register` call probes before bulk-loading
+        // anything. Probe failure prevents this reconciler from
+        // entering the registry. The probe is per-call (not per-runtime)
+        // so a transient probe failure on the FIRST register call
+        // doesn't poison the runtime — the composition root retries by
+        // restarting the binary; mid-process probe failure during a
+        // late `register` still surfaces with the same shape.
+        self.view_store.probe().await.map_err(|e| {
+            ControlPlaneError::from(crate::error::ViewStoreBootError::Probe {
+                reconciler: name.clone(),
+                source: e,
+            })
+        })?;
+
+        // Step 2 — typed bulk-load. The per-variant dispatch picks the
+        // right `View` type and constructs the matching `AnyViewMap`
+        // variant.
+        //
+        // `static_name()` projects the inner reconciler's
+        // `Self::NAME` const — a `&'static str` aliased to the
+        // binary's data segment — and is the only shape the
+        // post-`refactor-reconciler-static-name` `ViewStore` accepts.
+        // Going through `name.as_str()` would produce a `&str`
+        // borrowed from the `ReconcilerName`'s `String`, which is
+        // non-`'static` and rejected at compile time.
+        let static_name = reconciler.static_name();
+        let views = match &reconciler {
+            AnyReconciler::NoopHeartbeat(_) => AnyViewMap::Unit,
+            AnyReconciler::JobLifecycle(_) => {
+                let loaded: BTreeMap<TargetResource, JobLifecycleView> =
+                    self.view_store.bulk_load(static_name).await.map_err(|e| {
+                        ControlPlaneError::from(crate::error::ViewStoreBootError::BulkLoad {
+                            reconciler: name.clone(),
+                            source: e,
+                        })
+                    })?;
+                AnyViewMap::JobLifecycle(loaded)
+            }
+        };
+
+        // Step 3 — install the registry entry.
+        self.reconcilers.insert(name, RegistryEntry { reconciler, views: Mutex::new(views) });
         Ok(())
     }
 
@@ -154,7 +265,7 @@ impl ReconcilerRuntime {
     /// `reconciler_is_pure` invariant to twin-invocation-check every
     /// reconciler in the registry from a single harness entry point.
     pub fn reconcilers_iter(&self) -> impl Iterator<Item = &AnyReconciler> {
-        self.reconcilers.values()
+        self.reconcilers.values().map(|e| &e.reconciler)
     }
 
     /// Look up a reconciler by canonical name. O(log N) keyed lookup
@@ -164,17 +275,282 @@ impl ReconcilerRuntime {
     /// so dispatch is a keyed lookup, not a registry scan.
     #[must_use]
     pub fn get(&self, name: &ReconcilerName) -> Option<&AnyReconciler> {
-        self.reconcilers.get(name)
+        self.reconcilers.get(name).map(|e| &e.reconciler)
     }
+
+    /// Read the current in-memory `JobLifecycleView` for `target`. Returns
+    /// `JobLifecycleView::default()` when the reconciler is not
+    /// registered, when the target has no persisted row, or when the
+    /// registered reconciler is not `JobLifecycle`. The default fall-back
+    /// matches the legacy `view_cache` accessor's contract — fresh-job
+    /// callers (`handlers::describe_job`, the streaming submit's
+    /// terminal-event detection) see an empty view rather than a missing
+    /// one.
+    #[must_use]
+    pub fn view_for_job_lifecycle(&self, target: &TargetResource) -> JobLifecycleView {
+        let Some(entry) = self.reconcilers.get(&job_lifecycle_canonical_name()) else {
+            return JobLifecycleView::default();
+        };
+        match &*entry.views.lock() {
+            AnyViewMap::JobLifecycle(map) => map.get(target).cloned().unwrap_or_default(),
+            AnyViewMap::Unit => JobLifecycleView::default(),
+        }
+    }
+
+    /// Look up the in-memory view for `(reconciler, target)` against
+    /// the runtime-owned map. Returns `None` when the reconciler is
+    /// not registered; otherwise returns the bulk-loaded view (or a
+    /// fresh `default()` when no persisted row exists for this
+    /// target). The returned `AnyReconcilerView` is a clone — callers
+    /// (the tick loop) drop the lock before invoking `reconcile`.
+    fn get_view(
+        &self,
+        name: &ReconcilerName,
+        target: &TargetResource,
+    ) -> Option<AnyReconcilerView> {
+        let entry = self.reconcilers.get(name)?;
+        let guard = entry.views.lock();
+        Some(match &*guard {
+            AnyViewMap::Unit => AnyReconcilerView::Unit,
+            AnyViewMap::JobLifecycle(map) => {
+                AnyReconcilerView::JobLifecycle(map.get(target).cloned().unwrap_or_default())
+            }
+        })
+    }
+
+    /// Persist `next_view` through the `ViewStore` and, on success,
+    /// install it into the in-memory map. The fsync-then-memory
+    /// ordering is load-bearing per ADR-0035 §5 step 7→8 — a crash
+    /// between the `.await` returning Ok and the in-memory insert
+    /// leaves the persisted view as the source of truth, which the
+    /// next boot's `bulk_load` recovers.
+    ///
+    /// **Eq-diff skip** (additive extension per ADR-0035 §1, May
+    /// 2026): when `next_view` is `Eq`-equal to the current
+    /// in-memory value, this function returns `Ok(())` WITHOUT
+    /// calling `write_through` and WITHOUT touching the in-memory
+    /// map. The motivation is to elide the per-tick fsync on no-op
+    /// ticks (a converged target whose reconciler emits `Noop` and
+    /// an unchanged view). Equality is defined by `PartialEq` /
+    /// `Eq` on `Self::View`, which the `Reconciler` trait now
+    /// requires; the comparison is against the same in-memory value
+    /// the runtime would have handed the reconciler as `view`, so a
+    /// reconciler returning its input unchanged trivially satisfies
+    /// the gate. The fsync-then-memory ordering for the non-equal
+    /// branch is independently pinned by the
+    /// `WriteThroughOrdering` invariant.
+    ///
+    /// Returns `Err(ControlPlaneError::Internal)` when the underlying
+    /// `write_through` fails (e.g. fsync injection in tests, real
+    /// fsync error in production). On error the in-memory map is
+    /// unchanged — verifiable via the `WriteThroughOrdering` invariant.
+    async fn persist_view(
+        &self,
+        name: &ReconcilerName,
+        target: &TargetResource,
+        next_view: AnyReconcilerView,
+    ) -> Result<(), ControlPlaneError> {
+        let Some(entry) = self.reconcilers.get(name) else {
+            return Err(ControlPlaneError::internal(
+                format!("ReconcilerRuntime::persist_view: unknown reconciler {name}"),
+                "no registry entry",
+            ));
+        };
+        // Recover the `&'static str` canonical name from the registry
+        // entry's inner `AnyReconciler`. Required for the post-
+        // `refactor-reconciler-static-name` `ViewStore` byte surface,
+        // whose `reconciler` parameter is typed `&'static str`.
+        let static_name = entry.reconciler.static_name();
+        match next_view {
+            AnyReconcilerView::Unit => {
+                // Unit views carry no data; nothing to persist or
+                // install in-memory. Returning Ok matches the
+                // ViewStore's semantic: there is no `(target, ())`
+                // row to round-trip. The Eq-diff skip would be a
+                // tautology here (`() == ()` always), so the dedicated
+                // arm acts as the skip already.
+                Ok(())
+            }
+            AnyReconcilerView::JobLifecycle(view) => {
+                // Eq-diff skip — compare `next_view` against the
+                // current in-memory value (or `default()` when no
+                // row exists for this target, matching the runtime's
+                // `view` hydration in `run_convergence_tick`). When
+                // equal: skip the fsync AND the in-memory insert,
+                // both no-ops by definition. The lock is held only
+                // for the duration of the `.cloned()` read; no
+                // `.await` is held across it per
+                // `.claude/rules/development.md` § Concurrency & async.
+                let current = {
+                    let guard = entry.views.lock();
+                    match &*guard {
+                        AnyViewMap::JobLifecycle(map) => {
+                            map.get(target).cloned().unwrap_or_default()
+                        }
+                        AnyViewMap::Unit => JobLifecycleView::default(),
+                    }
+                };
+                if current == view {
+                    // No-op tick: reconciler returned its input
+                    // unchanged. Elide the fsync and the in-memory
+                    // insert — both are by-definition no-ops.
+                    return Ok(());
+                }
+
+                // STEP 7 — durable write-through with fsync.
+                self.view_store
+                    .write_through(static_name, target, &view)
+                    .await
+                    .map_err(|e| {
+                        ControlPlaneError::internal(
+                            format!(
+                                "ReconcilerRuntime::persist_view({name}, {target}): write_through failed"
+                            ),
+                            e,
+                        )
+                    })?;
+                // STEP 8 — in-memory update AFTER fsync OK. The lock
+                // is taken here, not earlier — the `.await` above
+                // must NOT be held across the lock per
+                // `.claude/rules/development.md` § Concurrency & async.
+                {
+                    let mut guard = entry.views.lock();
+                    if let AnyViewMap::JobLifecycle(map) = &mut *guard {
+                        map.insert(target.clone(), view);
+                    }
+                }
+                Ok(())
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // Test-only accessors — exposed under `cfg(any(test, feature =
+    // "integration-tests"))` so the integration test in
+    // `tests/integration/reconciler_runtime_view_store.rs` can assert
+    // on the in-memory view map shape without going through a tick.
+    // ---------------------------------------------------------------
+
+    /// Test-only convenience: construct a runtime against an in-memory
+    /// `RedbViewStore` rooted at `data_dir`. Equivalent to
+    /// `ReconcilerRuntime::new(data_dir, Arc::new(RedbViewStore::open(
+    /// data_dir)))`. **Test-only.** Production code in
+    /// `overdrive-cli::commands::serve` calls [`Self::new`] with the
+    /// same wiring; this helper exists so existing acceptance /
+    /// integration tests that need a runtime+store pair don't have to
+    /// repeat the two-line construction at every call site.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::new`] — `data_dir` create / canonicalize. Also
+    /// returns `ControlPlaneError::Internal` when the redb file cannot
+    /// be opened (e.g. concurrent open in the same process).
+    #[doc(hidden)]
+    pub fn new_with_redb_view_store_for_test(data_dir: &Path) -> Result<Self, ControlPlaneError> {
+        let store: Arc<dyn ViewStore> =
+            Arc::new(crate::view_store::redb::RedbViewStore::open(data_dir).map_err(|e| {
+                ControlPlaneError::from(crate::error::ViewStoreBootError::Open {
+                    path: crate::view_store::redb::RedbViewStore::resolve_path(data_dir),
+                    source: e,
+                })
+            })?);
+        Self::new(data_dir, store)
+    }
+
+    /// Snapshot of the in-memory `JobLifecycleView` map for `name`.
+    /// Returns `None` when the reconciler is not registered or is not
+    /// the `JobLifecycle` variant. **Test-only.**
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "integration-tests"))]
+    pub fn loaded_job_lifecycle_views_for_test(
+        &self,
+        name: &ReconcilerName,
+    ) -> Option<BTreeMap<TargetResource, JobLifecycleView>> {
+        let entry = self.reconcilers.get(name)?;
+        match &*entry.views.lock() {
+            AnyViewMap::JobLifecycle(map) => Some(map.clone()),
+            AnyViewMap::Unit => None,
+        }
+    }
+
+    /// Drive the runtime's persist-view path directly with a typed
+    /// `JobLifecycleView`. Used by the `WriteThroughOrdering`
+    /// integration test to assert the runtime obeys the fsync-first
+    /// ordering without spinning up a full tick. **Test-only.**
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "integration-tests"))]
+    pub async fn apply_next_view_for_test(
+        &self,
+        name: &ReconcilerName,
+        target: &TargetResource,
+        next: JobLifecycleView,
+    ) -> Result<(), ControlPlaneError> {
+        self.persist_view(name, target, AnyReconcilerView::JobLifecycle(next)).await
+    }
+
+    /// Seed the in-memory view for `(job-lifecycle, target)` directly,
+    /// bypassing the `ViewStore`. Used by acceptance tests that need
+    /// to bootstrap a specific `JobLifecycleView` shape (e.g.
+    /// Failed-mid-backoff) without driving the full reconcile cycle to
+    /// produce it. **Test-only.**
+    ///
+    /// Returns silently when the reconciler is not registered or is
+    /// not the `JobLifecycle` variant — same fall-back contract as
+    /// [`Self::view_for_job_lifecycle`].
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "integration-tests"))]
+    pub fn seed_job_lifecycle_view_for_test(
+        &self,
+        target: &TargetResource,
+        view: JobLifecycleView,
+    ) {
+        let Some(entry) = self.reconcilers.get(&job_lifecycle_canonical_name()) else { return };
+        let mut guard = entry.views.lock();
+        if let AnyViewMap::JobLifecycle(map) = &mut *guard {
+            map.insert(target.clone(), view);
+        }
+    }
+
+    /// Drop the in-memory view for `(job-lifecycle, target)` directly.
+    /// Pairs with [`Self::seed_job_lifecycle_view_for_test`] for the
+    /// "simulate process restart" test pattern in
+    /// `runtime_convergence_loop.rs`. **Test-only.**
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "integration-tests"))]
+    pub fn drop_job_lifecycle_view_for_test(&self, target: &TargetResource) {
+        let Some(entry) = self.reconcilers.get(&job_lifecycle_canonical_name()) else { return };
+        let mut guard = entry.views.lock();
+        if let AnyViewMap::JobLifecycle(map) = &mut *guard {
+            map.remove(target);
+        }
+    }
+}
+
+/// Build the canonical [`ReconcilerName`] for the [`JobLifecycle`]
+/// reconciler from its trait const [`JobLifecycle::NAME`].
+///
+/// The const is the single compile-time anchor for the name string —
+/// see the `refactor-reconciler-static-name` RCA. `ReconcilerName::new`
+/// validates against `^[a-z][a-z0-9-]{0,62}$`; the literal
+/// `"job-lifecycle"` declared on `<JobLifecycle as Reconciler>::NAME`
+/// is verified-valid at construction time by every `JobLifecycle::canonical()`
+/// call site (`unwrap` or `expect` would be equivalent at runtime —
+/// the literal cannot fail validation as long as the trait const and
+/// the validator's grammar agree).
+#[allow(clippy::expect_used)]
+fn job_lifecycle_canonical_name() -> ReconcilerName {
+    ReconcilerName::new(<JobLifecycle as Reconciler>::NAME)
+        .expect("JobLifecycle::NAME is a valid ReconcilerName by construction")
 }
 
 // ---------------------------------------------------------------------------
 // phase-1-first-workload — slice 3 (US-03) — runtime convergence tick loop
 //
-// Per ADR-0023 + whitepaper §18: the runtime owns the `.await` on
-// hydrate, the diff-and-persist of returned views, and the dispatch
-// of emitted actions. Each tick: hydrate_desired → hydrate_actual →
-// reconcile → action_shim::dispatch.
+// Per ADR-0035 §5 + whitepaper §18: the runtime owns the `.await` on
+// hydrate (intent + observation), the diff-and-persist of returned
+// views via the ViewStore, and the dispatch of emitted actions. Each
+// tick: hydrate_desired → hydrate_actual → get_view → reconcile →
+// dispatch → persist_view (fsync first) → in-memory install.
 // ---------------------------------------------------------------------------
 
 /// Default tick cadence — how often the runtime ticks the broker in
@@ -190,11 +566,9 @@ pub const DEFAULT_TICK_CADENCE: Duration = Duration::from_millis(100);
 /// Ok cleanly (the reconciler may have been deregistered between
 /// submit and drain — Phase 2+ concern, defensively handled).
 ///
-/// Returns `Err(ShimError)` only when the action shim cannot resolve
-/// a dispatched action into an observation row (the shim itself is
-/// the boundary the runtime expects to keep healthy). Other errors
-/// (hydrate, libSQL) are surfaced through the same channel for now;
-/// Phase 2+ refines the error taxonomy.
+/// Returns `Err(ConvergenceError)` only when an action shim or
+/// view-persist call fails. The fsync-then-memory ordering on the
+/// view-persist path is load-bearing per ADR-0035 §5 step 7→8.
 ///
 /// Spawned by [`crate::run_server_with_obs_and_driver`] as a tokio
 /// task that drains the [`crate::eval_broker::EvaluationBroker`] each
@@ -212,16 +586,10 @@ pub const DEFAULT_TICK_CADENCE: Duration = Duration::from_millis(100);
 /// ADR-0013 §8 / whitepaper §18. Without this, the reconciler runs
 /// once after submit, the broker drains empty, and convergence stalls.
 ///
-/// Shutdown ordering: [`crate::ServerHandle::shutdown`] cancels the
-/// convergence task FIRST (via `convergence_shutdown` token), awaits
-/// its join, THEN triggers axum graceful shutdown. The reverse
-/// ordering risks reconciler tasks holding `Arc<dyn Driver>` while
-/// axum-shutting-down state is accessed.
-///
 /// # Errors
 ///
-/// Returns [`ConvergenceError`] when hydrate, reconcile, or dispatch
-/// fail in a way the runtime cannot represent as observation.
+/// Returns [`ConvergenceError`] when hydrate, reconcile-dispatch, or
+/// view-persist fail in a way the runtime cannot represent as observation.
 pub async fn run_convergence_tick(
     state: &AppState,
     reconciler_name: &ReconcilerName,
@@ -259,20 +627,11 @@ pub async fn run_convergence_tick(
     let desired = hydrate_desired(reconciler, target, state).await?;
     let actual = hydrate_actual(reconciler, target, state).await?;
 
-    // Hydrate the typed View — currently carried in
-    // `AppState::view_cache` rather than libSQL. On first tick the
-    // cache is empty; `cached_view_or_default` returns a fresh
-    // `default()` view. We still call `reconciler.hydrate` to stay
-    // on-contract with ADR-0013 §2 (hydrate is the ONLY async read
-    // seam) — today's `hydrate` impls return a default view that we
-    // discard in favour of the cached value.
-    //
-    // TODO(#139): wire `LibsqlHandle` for real per ADR-0013 §2b and
-    // use the returned view directly; drop the discard-and-cache
-    // shape below.
-    let db = LibsqlHandle::default_phase1();
-    let _ = reconciler.hydrate(target, &db).await.map_err(ConvergenceError::Hydrate)?;
-    let view = cached_view_or_default(reconciler, target, state);
+    // Hydrate the typed View from the runtime's in-memory map. Per
+    // ADR-0035 §5 the map IS the steady-state read SSOT; the
+    // `bulk_load` ran once at register time, every tick reads from
+    // RAM. A target with no persisted row reads as `default()`.
+    let view = state.runtime.get_view(reconciler_name, target).unwrap_or(AnyReconcilerView::Unit);
 
     // Pure reconcile.
     let (actions, next_view) = reconciler.reconcile(&desired, &actual, &view, &tick);
@@ -293,24 +652,31 @@ pub async fn run_convergence_tick(
     // (otherwise a converged target with a heartbeat reconciler
     // self-re-enqueues forever).
     //
-    // Backoff-pending fix (§18 level-triggered, S-WS-02 path):
-    // when `reconcile` returns no actions because a Failed alloc
-    // is mid-backoff (`tick.now_unix < view.last_failure_seen_at[alloc]
-    // + backoff_for_attempt(restart_counts[alloc])` and
-    // `restart_counts[alloc] < RESTART_BACKOFF_CEILING`), the cluster
-    // has NOT converged — actual still has a Failed alloc that the
-    // reconciler intends to restart once the deadline elapses. Without
-    // re-enqueueing, the broker drains empty, the convergence loop
-    // sleeps forever, and the deadline never gets re-evaluated. The
-    // `view_has_backoff_pending` predicate inspects `next_view` to
-    // detect this transitional state and treats it as has_work=true,
-    // preserving the level-triggered semantics whitepaper §18 promises.
+    // Backoff-pending fix (§18 level-triggered, S-WS-02 path): see
+    // `view_has_backoff_pending` for the predicate body — when a
+    // Failed alloc is mid-backoff the reconciler emits no actions
+    // BUT actual still has a Failed alloc, so the runtime must
+    // re-enqueue or the broker drains empty and the convergence
+    // loop sleeps forever.
     let backoff_pending = view_has_backoff_pending(&next_view);
     let has_work = actions.iter().any(|a| !matches!(a, Action::Noop)) || backoff_pending;
 
-    // Persist the next-view back into the in-memory cache.
-    // TODO(#139): replace with libSQL diff-and-persist per ADR-0013 §2b.
-    store_cached_view(reconciler, target, state, next_view);
+    // Persist next_view through the runtime-owned ViewStore BEFORE
+    // dispatching the action. ADR-0035 §5 step 7→8 ordering: fsync
+    // first via `write_through`, then install into the in-memory map.
+    // On crash between the two, the next boot's `bulk_load` recovers
+    // the persisted value (which is the intended source of truth).
+    //
+    // The streaming subscriber (`crate::streaming::check_terminal`)
+    // does NOT read the view — per ADR-0037 §4 it projects
+    // `event.terminal` directly from the `LifecycleEvent` the action
+    // shim broadcasts. View consistency is therefore not a constraint
+    // on this ordering; durability is the sole load-bearing reason.
+    state
+        .runtime
+        .persist_view(reconciler_name, target, next_view)
+        .await
+        .map_err(ConvergenceError::ViewPersist)?;
 
     // Dispatch through the action shim — this is where `.await`
     // is permitted. Per-action error isolation lives in the shim.
@@ -356,56 +722,6 @@ pub async fn run_convergence_tick(
             .submit(Evaluation { reconciler: reconciler_name.clone(), target: target.clone() });
     }
     Ok(())
-}
-
-/// Cache key string form for the per-target view cache. The cache map
-/// is keyed on `(reconciler_name_string, target_string)` so it can
-/// be type-erased across reconciler kinds.
-fn cache_key(reconciler: &AnyReconciler, target: &TargetResource) -> (String, String) {
-    (reconciler.name().to_string(), target.to_string())
-}
-
-/// Return the cached `AnyReconcilerView` for `(reconciler, target)`,
-/// or a fresh default if the cache is empty.
-fn cached_view_or_default(
-    reconciler: &AnyReconciler,
-    target: &TargetResource,
-    state: &AppState,
-) -> AnyReconcilerView {
-    let key = cache_key(reconciler, target);
-    // Mutex poisoning is unreachable: every critical section in this
-    // module is straight-line and panic-free under the workspace's
-    // `expect_used` discipline. `allow` rather than reach for
-    // `parking_lot` for one call site.
-    #[allow(clippy::expect_used)]
-    let cache = state.view_cache.lock().expect("view_cache mutex");
-    match (reconciler, cache.get(&key)) {
-        (AnyReconciler::NoopHeartbeat(_), _) => AnyReconcilerView::Unit,
-        (AnyReconciler::JobLifecycle(_), Some(crate::CachedView::JobLifecycle(v))) => {
-            AnyReconcilerView::JobLifecycle(v.clone())
-        }
-        (AnyReconciler::JobLifecycle(_), _) => {
-            AnyReconcilerView::JobLifecycle(JobLifecycleView::default())
-        }
-    }
-}
-
-/// Persist the returned `next_view` back to the per-target cache.
-fn store_cached_view(
-    reconciler: &AnyReconciler,
-    target: &TargetResource,
-    state: &AppState,
-    next_view: AnyReconcilerView,
-) {
-    let key = cache_key(reconciler, target);
-    // See `cached_view_or_default` — same Mutex, same rationale.
-    #[allow(clippy::expect_used)]
-    let mut cache = state.view_cache.lock().expect("view_cache mutex");
-    let cached = match next_view {
-        AnyReconcilerView::Unit => crate::CachedView::Unit,
-        AnyReconcilerView::JobLifecycle(v) => crate::CachedView::JobLifecycle(v),
-    };
-    cache.insert(key, cached);
 }
 
 /// Pure predicate over `next_view`: does the `JobLifecycle` reconciler
@@ -563,9 +879,6 @@ fn job_id_from_target(target: &TargetResource) -> Result<JobId, ConvergenceError
 /// Errors from [`run_convergence_tick`].
 #[derive(Debug, thiserror::Error)]
 pub enum ConvergenceError {
-    /// Hydrate (libSQL read) failed.
-    #[error("hydrate failed: {0}")]
-    Hydrate(overdrive_core::reconciler::HydrateError),
     /// `IntentStore` read failed.
     #[error("intent read failed: {0}")]
     IntentRead(String),
@@ -578,6 +891,11 @@ pub enum ConvergenceError {
     /// Action shim returned an error.
     #[error("shim failure: {0}")]
     Shim(crate::action_shim::ShimError),
+    /// `ViewStore::write_through` failed (fsync error, decode error,
+    /// underlying I/O error). Per ADR-0035 §5 step 7→8 the in-memory
+    /// map is unchanged when this fires.
+    #[error("view persist failed: {0}")]
+    ViewPersist(crate::error::ControlPlaneError),
 }
 
 // ---------------------------------------------------------------------------

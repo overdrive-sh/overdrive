@@ -77,9 +77,10 @@ struct Harness {
 }
 
 async fn build_harness(tmp: &TempDir) -> Harness {
-    let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime");
-    runtime.register(noop_heartbeat()).expect("register noop");
-    runtime.register(job_lifecycle()).expect("register job-lifecycle");
+    let mut runtime =
+        ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime");
+    runtime.register(noop_heartbeat()).await.expect("register noop");
+    runtime.register(job_lifecycle()).await.expect("register job-lifecycle");
 
     let store =
         Arc::new(LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open store"));
@@ -95,7 +96,7 @@ async fn build_harness(tmp: &TempDir) -> Harness {
     let sim_driver = Arc::new(SimDriver::with_clock(DriverType::Exec, sim_clock.clone()));
     let driver: Arc<dyn Driver> = sim_driver.clone();
 
-    let state = AppState::new(store, obs, Arc::new(runtime), driver);
+    let state = AppState::new(store, obs, Arc::new(runtime), driver, sim_clock.clone());
 
     // Spawn the worker-side exit observer. Step 01-02 wires this into
     // `run_server_with_obs_and_driver`; tests construct it directly so

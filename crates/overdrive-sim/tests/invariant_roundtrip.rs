@@ -33,6 +33,10 @@ const ALL_VARIANTS: &[Invariant] = &[
     Invariant::DuplicateEvaluationsCollapse,
     Invariant::BrokerDrainOrderIsDeterministic,
     Invariant::ReconcilerIsPure,
+    // reconciler-memory-redb step 01-07.
+    Invariant::ViewStoreRoundtripIsLossless,
+    Invariant::BulkLoadIsDeterministic,
+    Invariant::WriteThroughOrdering,
 ];
 
 fn variant_strategy() -> impl Strategy<Value = Invariant> {
@@ -50,6 +54,10 @@ fn variant_strategy() -> impl Strategy<Value = Invariant> {
         Just(Invariant::DuplicateEvaluationsCollapse),
         Just(Invariant::BrokerDrainOrderIsDeterministic),
         Just(Invariant::ReconcilerIsPure),
+        // reconciler-memory-redb step 01-07.
+        Just(Invariant::ViewStoreRoundtripIsLossless),
+        Just(Invariant::BulkLoadIsDeterministic),
+        Just(Invariant::WriteThroughOrdering),
     ]
 }
 

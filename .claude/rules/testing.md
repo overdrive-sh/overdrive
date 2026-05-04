@@ -306,10 +306,17 @@ Rules for mutation specifically:
   that's information — either the diff scope is wrong, the
   `.cargo/mutants.toml` skip list is incomplete, or the test suite is
   slower than budgeted. Investigate; do not `pkill`.
-- **Always run the post-mutation safety step** (`git checkout --
-  <src>`) whether the run succeeded, failed, was cancelled by the
-  user, or errored. Mutated source on disk is the failure mode that
-  makes this exception load-bearing.
+- **No routine post-run cleanup.** When a mutation run completes
+  normally — whether the gate passed, failed, or every mutant
+  errored — cargo-mutants restores the working tree itself; the
+  source files are unmodified relative to HEAD on exit. Do **not**
+  add a routine `git checkout -- crates/` step after the run. The
+  destructive-git-ops pre-tool hook blocks the command anyway.
+  Interruption (pkill, SIGKILL at the Bash 30-min cap, user cancel)
+  is the *only* case where the working tree may be left mutated; the
+  recovery procedure for that exceptional case is documented in the
+  `nw-mutation-test` skill. Don't preemptively recover from a
+  failure mode that hasn't happened.
 
 This exception is narrow. Nextest, `cargo test --doc`, `cargo xtask
 dst`, `cargo xtask bpf-unit`, `cargo xtask integration-test vm`,
@@ -906,10 +913,14 @@ at the top of "Running tests"):
   failure. Do NOT `pkill -f "cargo mutants"` when it seems slow —
   that leaves mutated source on disk and skips
   `target/xtask/mutants-summary.json` generation.
-- After every run (pass, fail, cancel), run `git checkout -- crates/`
-  to restore any mutated source the wrapper didn't clean up itself.
-  This is a belt-and-braces step, not a substitute for letting the
-  run finish.
+- **No routine post-run `git checkout`.** cargo-mutants restores the
+  working tree itself when the run completes (pass OR fail). Adding a
+  defensive `git checkout -- crates/` after the run is wrong on two
+  counts: it's redundant against the tool's own cleanup, and the
+  destructive-git-ops pre-tool hook blocks the command. Only an
+  *interrupted* run (pkill, wall-clock kill, user cancel) can leave
+  mutated source on disk; if that happens, see the recovery
+  procedure in the `nw-mutation-test` skill.
 
 **Reading the output.** The summary file at
 `target/xtask/mutants-summary.json` is the structured gate record —

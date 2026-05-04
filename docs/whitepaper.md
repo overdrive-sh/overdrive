@@ -971,7 +971,7 @@ enum SidecarAction {
 struct SidecarContext {
     workload_identity: SpiffeId,
     workload_policy:   Policy,
-    db:                Db,         // same libSQL interface as reconcilers
+    db:                Db,         // private libSQL — sidecar-scoped state
     secrets:           SecretStore,
 }
 ```
@@ -1526,7 +1526,7 @@ Rego policies can be statically analyzed — tools can prove properties about th
 
 ### WASM Policies — Stateful and Expressive
 
-WASM policies use the same execution model and sandbox as WASM reconcilers. They have access to the same libSQL private DB, the same host function interface, and the same content-addressed storage in Garage. This enables policy logic that is simply impossible in Rego:
+WASM policies use the same execution model and sandbox as WASM reconcilers. They have access to a private libSQL database for stateful reasoning, the same host function interface as WASM reconcilers, and the same content-addressed storage in Garage. (Reconcilers themselves carry their stateful memory as a typed `View` value the runtime persists in redb — see §17. WASM policies retain a SQL surface because policy logic is genuinely SQL-shaped: historical correlations, aggregate counts, time-windowed queries against an open-ended schema the policy author owns.) This enables policy logic that is simply impossible in Rego:
 
 ```rust
 // Placement policy with historical OOM memory
@@ -1947,9 +1947,15 @@ Garage is a Rust-native S3-compatible object store designed for small clusters. 
 
 In single mode, Garage can be replaced with local filesystem storage — the same content-addressed interface applies, just without replication.
 
-### Reconciler Memory — libSQL (per-reconciler)
+### Reconciler Memory — redb (runtime-owned, one file per node)
 
-Each reconciler gets a private libSQL database for stateful memory across reconciliation cycles — restart tracking, placement history, resource sample accumulation. Reconciler DB writes are strictly private; cluster mutations always route through a typed store — the IntentStore for intent, the ObservationStore for observation — never through the reconciler's private DB. The three consistency models (private libSQL, linearizable Raft, eventually-consistent CR-SQLite) never mix.
+Reconciler memory is a typed `View` value per `(reconciler, target)` — restart counters, placement history, resource sample accumulation, whatever the reconciler legitimately needs to carry across ticks. The runtime owns persistence end-to-end. Reconciler authors never write SQL, never declare a schema, never touch a database handle. They derive `Serialize + Deserialize + Default + Clone` on the `View` struct and write `reconcile`. Nothing else.
+
+The backing store is **redb** — one file per node at `<data_dir>/reconcilers/memory.redb`, one redb table per reconciler kind, value is a CBOR-encoded `View` blob. redb is pure Rust (preserving design principle 7), already in the dependency graph (the IntentStore single-mode and openraft log both run on it), and its COW B-tree with 1PC+C durability is the canonical fit for the workload shape (small blobs, point access, modest cardinality, fsync per write). Schema evolution is `#[serde(default)]` for additive fields; breaking changes use a versioned envelope.
+
+At process boot, the runtime bulk-loads every persisted view for each reconciler into an in-memory `BTreeMap<TargetResource, View>` held in RAM. That in-memory map is the steady-state read SSOT — every reconcile tick reads `view = views.get(target).cloned().unwrap_or_default()` from the map, never from disk. After `reconcile` returns `(actions, next_view)`, the runtime writes `next_view` to redb (one transaction, one fsync), then updates the in-memory map. Steady-state reconcile pays zero disk reads; redb is touched only on write-through and on cold boot. The fsync-then-memory ordering is load-bearing — a crash between the two leaves the persisted view as the source of truth, which is what the next boot's bulk-load sees.
+
+This collapses the previous per-reconciler libSQL design. libSQL is retained elsewhere — it remains the right tool where SQL queries are genuinely the workload (incident-memory similarity search; the DuckLake catalog) — but reconciler memory has no SQL access pattern, so paying SQL machinery for it was always overhead. See ADR-0035 for the full design.
 
 ---
 
@@ -1962,48 +1968,47 @@ Overdrive factors control-plane logic into two orthogonal primitives, both desce
 - **Reconcilers** — pure functions that converge cluster state toward a declared spec. Infinite lifecycle; no terminal state.
 - **Workflows** — durable async functions that orchestrate defined sequences to completion. Finite lifecycle; terminal result.
 
-Both are strongly typed Rust trait objects for first-party extensions, WASM modules for third-party. Both have access to private libSQL memory for stateful reasoning. Both honour the §4 Intent/Observation/Memory boundary. Neither runs with the cluster-admin privileges that Kubernetes operators do.
+Both are strongly typed Rust trait objects for first-party extensions, WASM modules for third-party. Both have private memory for stateful reasoning across cycles — reconcilers via a typed `View` blob the runtime persists in redb, workflows via their `await`-point journal in libSQL. Both honour the §4 Intent/Observation/Memory boundary. Neither runs with the cluster-admin privileges that Kubernetes operators do.
 
 This supersedes the "operator" pattern where Go binaries with arbitrary I/O and cluster-admin privileges drive reconciliation. Each primitive has its own contract; each contract is testable in the §21 simulation harness; each is a verification target. The platform's own durable sequences — certificate rotation, multi-stage deployment, cross-region migration, staged rollout — are themselves workflows, built on the same trait and the same runtime that will be exposed to application code through the WASM Workflow SDK. No "platform workflow" / "user workflow" divergence.
 
 ### The Reconciler Primitive
 
-Reconcilers converge. Authoring one is two methods — an async read phase and a sync pure compute phase — with the split chosen so `reconcile` remains pure over its inputs, while the libSQL backing store (which exposes only an async API) is accessed exclusively inside `hydrate`:
+Reconcilers converge. Authoring one is exactly one method:
 
 ```rust
 trait Reconciler: Send + Sync {
-    /// Author-declared projection of the reconciler's private memory.
-    type View: Send + Sync;
+    /// Per-reconciler typed projection of intent + observation.
+    type State: Send + Sync;
 
-    /// Async read phase. The ONLY place a reconciler author touches
-    /// libSQL. The runtime diffs the returned NextView against this
-    /// view and persists the delta — reconcilers never write libSQL
-    /// directly.
-    async fn hydrate(
-        &self,
-        target: &TargetResource,
-        db:     &LibsqlHandle,     // private libSQL — reconciler memory
-    ) -> Result<Self::View, HydrateError>;
+    /// Per-reconciler typed memory. Persisted as a CBOR blob in the
+    /// runtime-owned ViewStore. Author derives the four bounds; the
+    /// runtime owns persistence.
+    type View: Serialize + DeserializeOwned + Default + Clone + Send + Sync;
 
-    /// Pure compute phase. Sync. No .await. No I/O. All mutations
-    /// through Raft (via returned Actions) or through NextView (via
-    /// the runtime's diff-and-persist path), never direct. Wall-clock
-    /// only via `tick.now`, never `Instant::now()`.
+    /// Pure synchronous transition. No `.await`. No I/O. No DB
+    /// handle. Wall-clock only via `tick.now`. All mutations are
+    /// data: returned Actions cross the publication boundary; the
+    /// returned NextView is persisted by the runtime.
     fn reconcile(
         &self,
-        desired: &State,
-        actual:  &State,
+        desired: &Self::State,
+        actual:  &Self::State,
         view:    &Self::View,
         tick:    &TickContext,
     ) -> (Vec<Action>, Self::View);
 }
 ```
 
-How authors declare reads: the `async fn hydrate` body reads the reconciler's private libSQL and decodes rows into `Self::View` via free-form SQL. The runtime ensures `reconcile` sees an immutable view, never the live handle. The View is an input to the pure function; writes are expressed as the returned `NextView` (data), persisted by the runtime — not as side effects inside `reconcile`.
+One method. Sync. No `.await`. No I/O. No DB handle. Reconciler authors never write SQL, never declare a schema, never call `migrate` / `hydrate` / `persist`. They derive four serde bounds on the `View` struct and write `reconcile`. The runtime owns persistence end-to-end.
 
-Time is injected the same way storage is — as input state, not as a side channel. The runtime snapshots `Clock::now()` via the same injected trait DST controls (`SystemClock` in production, `SimClock` under simulation), packages it into a `TickContext { now, tick, deadline }` alongside a monotonic tick counter and a per-tick deadline, and passes it by reference to `reconcile` as a fourth parameter. Reading wall-clock from inside `reconcile` is banned for the same reason reading libsql is banned: it would break the pure-function contract that ESR verification and DST replay both rely on. Time has a different consistency model from observation (node-local snapshot at evaluation start vs CRDT-gossiped seconds-fresh peer state), and the type system reflects that — `actual: &State` carries observation, `tick: &TickContext` carries time, neither substitutes for the other. The `deadline` field is the natural home for the per-tick reconcile budget the evaluation broker imposes; the `tick` counter gives reconcilers a deterministic tie-breaker that does not depend on wall-clock granularity.
+The runtime's contract is symmetric across all three of `desired`, `actual`, and `view`: every input is pre-computed by the runtime before `reconcile` is called. At register time (once per reconciler at process boot) the runtime calls `ViewStore::bulk_load` against redb and materialises every persisted `(reconciler_name, target) → View` blob into a per-reconciler `BTreeMap<TargetResource, View>` held in RAM. From that moment on the in-memory map is the read SSOT. At each tick the runtime hydrates `desired` from the IntentStore, `actual` from the ObservationStore, looks up `view = views.get(target).cloned().unwrap_or_default()` from the in-memory map, snapshots `Clock::now()` into a `TickContext`, and calls `reconcile`. After `reconcile` returns `(actions, next_view)` the runtime writes `next_view` to redb with fsync, then updates the in-memory map; on crash between the two, the next boot's bulk-load sees the persisted view and convergence resumes. The runtime stores erased CBOR blobs and re-decodes on bulk-load against the per-reconciler `View` type — the schema is the `View` struct, owned by the reconciler, evolved via `#[serde(default)]` on additive fields. There is exactly one redb table layout in the entire system: a generic `(reconciler_name, target) → blob` key space the runtime owns. See ADR-0035 for the full mechanics.
 
-The purity is load-bearing. Neither the trigger reason nor wall-clock time are *implicit* inputs to `reconcile`. `reconcile` does not `.await`, does not spawn subprocesses, does not call `Instant::now()` / `SystemTime::now()` directly, does not write directly to the IntentStore or ObservationStore, and does not write directly to libSQL. This property is what makes `reconcile` testable under DST (§21) and tractable for *Eventually Stable Reconciliation* proofs (see *Correctness Guarantees* below; USENIX OSDI '24 *Anvil*). The pre-hydration pattern is the same architectural shape every mature precedent converges on: kube-rs `Store<K>`, controller-runtime's cache-backed Reader, Anvil's `reconcile_core` + shim, the Elm Architecture's `update : Msg -> Model -> (Model, Cmd Msg)`, and Redux's middleware + pure-reducer. The same precedents converge on time-as-injected-state: controller-runtime threads time through `ctx.Deadline()`, Anvil models time via `expires_at` observation fields, Elm exposes `Time.now` as a command rather than a synchronous function. `hydrate` is deliberately outside the purity contract — its explicit purpose is the async libSQL read.
+The per-reconciler `State` typing established by ADR-0021 survives across this collapse: `JobLifecycleState` and its peers remain typed, the `AnyState` enum-dispatch shape is unchanged, only the persistence surface is generic. ADR-0036 is the recordkeeping amendment that captures the consequence — under the collapsed trait the reconciler owns no async surface at all, so the runtime owns hydration of all three of intent, observation, and view.
+
+Time is injected the same way storage is — as input state, not as a side channel. The runtime snapshots `Clock::now()` via the same injected trait DST controls (`SystemClock` in production, `SimClock` under simulation), packages it into a `TickContext { now, tick, deadline }` alongside a monotonic tick counter and a per-tick deadline, and passes it by reference to `reconcile` as a fourth parameter. Reading wall-clock from inside `reconcile` is banned because it would break the pure-function contract that ESR verification and DST replay both rely on. Time has a different consistency model from observation (node-local snapshot at evaluation start vs CRDT-gossiped seconds-fresh peer state), and the type system reflects that — `actual: &Self::State` carries observation, `tick: &TickContext` carries time, neither substitutes for the other. The `deadline` field is the natural home for the per-tick reconcile budget the evaluation broker imposes; the `tick` counter gives reconcilers a deterministic tie-breaker that does not depend on wall-clock granularity.
+
+The purity is load-bearing. `reconcile` does not `.await`, does not spawn subprocesses, does not call `Instant::now()` / `SystemTime::now()` directly, does not hold any database handle, does not write directly to the IntentStore, ObservationStore, or its own memory. This property is what makes `reconcile` a genuine pure function over `(desired, actual, view, tick) → (actions, next_view)` — bit-identical DST replay (§21) and ESR verifiability (USENIX OSDI '24 *Anvil*) follow directly. The architectural shape every mature precedent converges on is preserved: kube-rs `Store<K>`, controller-runtime's cache-backed Reader, Anvil's `reconcile_core` + shim, the Elm Architecture's `update : Msg -> Model -> (Model, Cmd Msg)`, and Redux's middleware + pure-reducer all share this property. Overdrive's contribution is collapsing the trait surface to the single sync method that expresses it, with the runtime — not the author — owning the storage round-trips on either side.
 
 Reconcilers have infinite lifecycle. They re-evaluate whenever their inputs change, forever; there is no terminal state, only convergence to desired-vs-actual equality.
 
@@ -2032,7 +2037,7 @@ Reconcilers sometimes need to issue requests to systems outside Overdrive — a 
 - The runtime executes the call via the `Transport` trait and writes the result into an `external_call_results` table in the ObservationStore. The write is gossiped like any other observation row; every node reads responses locally.
 - The next reconcile iteration reads the row (a plain SQL query against local SQLite) and branches. `Pending`, `InFlight`, `Completed`, `Failed`, and `TimedOut` are all observable states.
 
-This is the same architecture USENIX OSDI '24 *Anvil* validates for verified Kubernetes controllers: a pure `reconcile_core` emitting request descriptors, a shim layer dispatching them, responses fed back as observable state. It inherits the same DST and ESR properties as cluster-state reconciliation — Actions are data, responses are observable rows, the reconciler remains pure. Retry policy, idempotency, and failure-to-status propagation live in reconciler memory (private libSQL), where they belong.
+This is the same architecture USENIX OSDI '24 *Anvil* validates for verified Kubernetes controllers: a pure `reconcile_core` emitting request descriptors, a shim layer dispatching them, responses fed back as observable state. It inherits the same DST and ESR properties as cluster-state reconciliation — Actions are data, responses are observable rows, the reconciler remains pure. Retry policy, idempotency, and failure-to-status propagation live in reconciler memory (the typed `View` value the runtime persists), where they belong.
 
 Chains of external calls that must complete as a unit compose upward to the workflow primitive rather than through chained `HttpCall` actions. See *Primitive Composition* below.
 
@@ -2065,6 +2070,8 @@ The two primitives compose through the Action channel and the ObservationStore:
 - **Workflow → Reconciler** — a workflow that needs to mutate cluster intent emits a typed Action descriptor through the same Action channel the reconciler runtime consumes. The action lands in Raft; the target reconciler picks it up on commit. Workflows do not bypass Raft.
 - **Workflow → external service** — direct `ctx.call(...).await` through injected `Transport`. Crash-safe via journal; replayable under DST.
 - **Workflow → workflow** — typed signals via ObservationStore. Parent workflows may `await` child results; sibling workflows may `await` signals from any other workflow.
+
+Actions are the publication boundary at which reconciler-private state crystallises into a stable contract. The reconciler's `View` is genuinely private — it lives in the runtime's redb store, never crosses any boundary, and carries inputs only (counters, last-seen timestamps, sample windows) per the *Persist inputs, not derived state* rule. *Decisions* the reconciler reaches from those inputs ride on the Action. The canonical case is termination: when a reconciler concludes that an allocation has reached a terminal state (restart budget exhausted, explicit stop converged), it sets `terminal: Option<TerminalCondition>` on the relevant Action variant. The action shim writes both the observation row (`AllocStatusRow.terminal`) and the streaming event (`LifecycleEvent.terminal`) from the same Action-derived value — both consumer surfaces read the reconciler's typed decision, neither re-derives it from upstream inputs. `TerminalCondition` follows the Kubernetes `Condition.Reason` SemVer convention (well-known first-party variants are stable contract; renames are major-bump; new variants are additive minor; a `Custom { type_name, detail }` variant is the WASM-third-party extensibility surface). See ADR-0037 for the enum surface and the layering rule.
 
 Reconcilers converge; workflows orchestrate. Neither is expressible as the other.
 
@@ -2110,9 +2117,9 @@ Overdrive draws a hard boundary between three state layers, each with different 
 |---|---|---|---|---|
 | Intent — what should be | yes | only via Raft actions | IntentStore (redb / openraft+redb) | Linearizable |
 | Observation — what is | yes | never directly | ObservationStore (Corrosion / CRDT) | Eventually consistent |
-| Memory — what happened | yes | yes, private | libSQL per primitive | Private to the primitive |
+| Memory — what happened | yes | yes, runtime-mediated | redb (reconciler views) / libSQL (workflow journals) | Private to the primitive |
 
-This boundary is load-bearing. Authoritative schedule decisions must go through Raft — CRDT state is correct for globe-spanning observation data but wrong for "this workload is definitely scheduled here." Private libSQL gives each primitive persistent memory for backoff counters, placement history, resource samples, and workflow journals without inflating the authoritative store. §4 and §17 specify the stores in detail; §18 specifies which primitive reads and writes each layer.
+This boundary is load-bearing. Authoritative schedule decisions must go through Raft — CRDT state is correct for globe-spanning observation data but wrong for "this workload is definitely scheduled here." Each primitive gets persistent memory matched to its access pattern: reconcilers persist a typed `View` value per target through the runtime-owned redb `ViewStore` (no SQL access pattern, so no SQL machinery — see §17); workflows persist their `await`-point journal in libSQL where the SQL surface is genuinely useful for replay queries. Reconciler authors never write to the memory layer directly; they return `NextView` and the runtime persists it. §4 and §17 specify the stores in detail; §18 specifies which primitive reads and writes each layer.
 
 ### Correctness Guarantees
 

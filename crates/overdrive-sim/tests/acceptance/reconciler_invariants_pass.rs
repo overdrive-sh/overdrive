@@ -105,3 +105,82 @@ fn reconciler_is_pure_passes_on_default_harness() {
     assert_eq!(report.invariants[0].name, "reconciler-is-pure");
     assert_eq!(report.invariants[0].status, InvariantStatus::Pass);
 }
+
+// ---------------------------------------------------------------------------
+// reconciler-memory-redb step 01-07 — ViewStore DST invariant acceptance.
+// ---------------------------------------------------------------------------
+
+/// `ViewStoreRoundtripIsLossless` runs in the default catalogue and
+/// passes on a clean harness build. proptest-backed; covers
+/// `JobLifecycleView` and the unit-View case (`NoopHeartbeat`).
+#[test]
+fn view_store_roundtrip_is_lossless_passes_on_default_harness() {
+    let report = Harness::new()
+        .only(Invariant::ViewStoreRoundtripIsLossless)
+        .run(7)
+        .expect("harness must compose");
+    assert_eq!(report.invariants.len(), 1);
+    assert_eq!(report.invariants[0].name, "view-store-roundtrip-is-lossless");
+    assert_eq!(
+        report.invariants[0].status,
+        InvariantStatus::Pass,
+        "ViewStoreRoundtripIsLossless must pass on default harness; got {:?}",
+        report.invariants[0],
+    );
+}
+
+/// `BulkLoadIsDeterministic` runs in the default catalogue and passes:
+/// two `bulk_load` calls against the same `SimViewStore` produce
+/// PartialEq-equal `BTreeMap` results.
+#[test]
+fn bulk_load_is_deterministic_passes_on_default_harness() {
+    let report = Harness::new()
+        .only(Invariant::BulkLoadIsDeterministic)
+        .run(7)
+        .expect("harness must compose");
+    assert_eq!(report.invariants.len(), 1);
+    assert_eq!(report.invariants[0].name, "bulk-load-is-deterministic");
+    assert_eq!(report.invariants[0].status, InvariantStatus::Pass);
+}
+
+/// `WriteThroughOrdering` runs in the default catalogue and passes:
+/// the runtime obeys the fsync-then-memory ordering rule per ADR-0035
+/// §5. Under `SimViewStore::inject_fsync_failure`, the runtime's
+/// in-memory map for the target whose write failed MUST still hold
+/// the pre-injection value.
+#[test]
+fn write_through_ordering_passes_on_default_harness() {
+    let report =
+        Harness::new().only(Invariant::WriteThroughOrdering).run(7).expect("harness must compose");
+    assert_eq!(report.invariants.len(), 1);
+    assert_eq!(report.invariants[0].name, "write-through-ordering");
+    assert_eq!(
+        report.invariants[0].status,
+        InvariantStatus::Pass,
+        "WriteThroughOrdering must pass on default harness; got {:?}",
+        report.invariants[0],
+    );
+}
+
+/// All three new invariants appear in the default catalogue and pass
+/// when run as part of the full set. K3 reproducibility: same seed
+/// twice produces identical verdicts.
+#[test]
+fn full_default_catalogue_includes_three_view_store_invariants_and_passes_them() {
+    let report = Harness::new().run(99).expect("harness must compose");
+
+    for canonical in
+        ["view-store-roundtrip-is-lossless", "bulk-load-is-deterministic", "write-through-ordering"]
+    {
+        let entry = report
+            .invariants
+            .iter()
+            .find(|r| r.name == canonical)
+            .unwrap_or_else(|| panic!("{canonical} must appear in default catalogue"));
+        assert_eq!(
+            entry.status,
+            InvariantStatus::Pass,
+            "{canonical} must pass on default harness; got {entry:?}",
+        );
+    }
+}

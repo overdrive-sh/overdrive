@@ -69,4 +69,8 @@ pub use wall_clock::UnixInstant;
 // Re-exported from `transition_reason` for convenience; the snapshot
 // wire surface in `overdrive-control-plane::api` further re-exports
 // with a `ToSchema` derive (locked in ADR-0032 §3 Amendment).
-pub use transition_reason::TransitionReason;
+// `TerminalCondition` is the ADR-0037 reconciler-emitted classification
+// of *why* an allocation reached a terminal state — the publication
+// boundary between reconciler-private View state and downstream
+// consumers.
+pub use transition_reason::{TerminalCondition, TransitionReason};

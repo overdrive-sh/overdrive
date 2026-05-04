@@ -13,6 +13,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use overdrive_control_plane::error::ControlPlaneError;
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
 use url::Url;
 
@@ -107,9 +108,28 @@ pub async fn run(args: ServeArgs) -> Result<ServeHandle, CliError> {
         operator_config_dir: args.config_dir,
         ..Default::default()
     };
-    let inner = run_server(config).await.map_err(|e| CliError::Transport {
-        endpoint: requested_endpoint.clone(),
-        cause: stripped_server_error(&e.to_string()),
+    let inner = run_server(config).await.map_err(|e| {
+        // ADR-0035 §5 + reconciler-memory-redb step 01-06: any
+        // `ViewStore` boot-time failure (open RedbViewStore, probe,
+        // bulk_load) surfaces as the typed
+        // `ControlPlaneError::ViewStoreBoot` variant. Emit a
+        // structured `health.startup.refused` event by branching on
+        // the variant before mapping to `CliError::Transport` —
+        // matches on the type, not on `Display` output, so a future
+        // rewording of the error message cannot silently break this
+        // observability hook.
+        if matches!(e, ControlPlaneError::ViewStoreBoot(_)) {
+            tracing::error!(
+                target: "overdrive::health",
+                event = "health.startup.refused",
+                cause = %e,
+                "ViewStore boot failed; refusing to start"
+            );
+        }
+        CliError::Transport {
+            endpoint: requested_endpoint.clone(),
+            cause: stripped_server_error(&e.to_string()),
+        }
     })?;
 
     let bound = inner.local_addr().await.ok_or_else(|| CliError::Transport {

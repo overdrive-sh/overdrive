@@ -486,6 +486,22 @@ impl Harness {
                 evaluators::evaluate_desired_replica_count_converges(&[], &[])
             }
             Invariant::NoDoubleScheduling => evaluators::evaluate_no_double_scheduling(&[]),
+            // -------------------------------------------------------------
+            // reconciler-memory-redb step 01-07 — ViewStore DST
+            // invariants per ADR-0035 §6. The evaluators construct
+            // their own `SimViewStore` (and a `ReconcilerRuntime` for
+            // the WriteThroughOrdering case) — the harness-owned
+            // `host` adapters carry no `ViewStore`, and `view_store`
+            // state is per-evaluator (each invariant builds a fresh
+            // store so fixtures cannot leak across runs).
+            // -------------------------------------------------------------
+            Invariant::ViewStoreRoundtripIsLossless => {
+                evaluators::evaluate_view_store_roundtrip_is_lossless(seed).await
+            }
+            Invariant::BulkLoadIsDeterministic => {
+                evaluators::evaluate_bulk_load_is_deterministic().await
+            }
+            Invariant::WriteThroughOrdering => evaluators::evaluate_write_through_ordering().await,
         }
     }
 }

@@ -74,13 +74,14 @@ fn sim_adapters() -> (SimClock, SimEntropy, SimTransport, SimDataplane) {
 }
 
 fn build_app_state(tmp: &TempDir) -> AppState {
-    let runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime::new");
+    let runtime =
+        ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("NodeId"), 0));
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
-    AppState::new(store, obs, Arc::new(runtime), driver)
+    AppState::new(store, obs, Arc::new(runtime), driver, Arc::new(SimClock::new()))
 }
 
 // ---------------------------------------------------------------------------
@@ -92,7 +93,8 @@ fn runtime_new_returns_empty_registry_with_canonicalised_data_dir() {
     let _sims = sim_adapters(); // DST-compat proof — constructed, unused.
     let tmp = TempDir::new().expect("tmpdir");
 
-    let runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime::new");
+    let runtime =
+        ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
 
     assert_eq!(runtime.registered(), Vec::<ReconcilerName>::new(), "fresh registry is empty");
 
@@ -109,13 +111,14 @@ fn runtime_new_returns_empty_registry_with_canonicalised_data_dir() {
 //     parent directory exists) of `provision_db_path`.
 // ---------------------------------------------------------------------------
 
-#[test]
-fn register_adds_reconciler_and_provisions_libsql_path() {
+#[tokio::test]
+async fn register_adds_reconciler_and_provisions_libsql_path() {
     let _sims = sim_adapters();
     let tmp = TempDir::new().expect("tmpdir");
 
-    let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime::new");
-    runtime.register(noop_heartbeat()).expect("register noop-heartbeat");
+    let mut runtime =
+        ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
+    runtime.register(noop_heartbeat()).await.expect("register noop-heartbeat");
 
     // Registry contains exactly the one name.
     let names = runtime.registered();
@@ -135,14 +138,15 @@ fn register_adds_reconciler_and_provisions_libsql_path() {
 // (c) Duplicate registration returns Conflict.
 // ---------------------------------------------------------------------------
 
-#[test]
-fn register_duplicate_name_returns_conflict() {
+#[tokio::test]
+async fn register_duplicate_name_returns_conflict() {
     let tmp = TempDir::new().expect("tmpdir");
-    let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime::new");
+    let mut runtime =
+        ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
 
-    runtime.register(noop_heartbeat()).expect("first register succeeds");
+    runtime.register(noop_heartbeat()).await.expect("first register succeeds");
 
-    let second = runtime.register(noop_heartbeat());
+    let second = runtime.register(noop_heartbeat()).await;
     match second {
         Err(ControlPlaneError::Conflict { message }) => {
             assert!(
@@ -204,6 +208,7 @@ async fn cluster_status_handler_renders_registry_and_broker_counters_via_axum_st
     Arc::get_mut(&mut state.runtime)
         .expect("unique Arc")
         .register(noop_heartbeat())
+        .await
         .expect("register");
 
     let Json(body): Json<ClusterStatus> =
@@ -231,15 +236,16 @@ async fn cluster_status_handler_renders_registry_and_broker_counters_via_axum_st
 //     `ReconcilerRuntime::new` + `register(noop_heartbeat())`.
 // ---------------------------------------------------------------------------
 
-#[test]
-fn at_least_one_reconciler_registered_invariant_holds_after_boot() {
+#[tokio::test]
+async fn at_least_one_reconciler_registered_invariant_holds_after_boot() {
     let _sims = sim_adapters();
     let tmp = TempDir::new().expect("tmpdir");
 
     // Boot 1 — initial register at construction.
     {
-        let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime::new");
-        runtime.register(noop_heartbeat()).expect("register");
+        let mut runtime =
+            ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
+        runtime.register(noop_heartbeat()).await.expect("register");
         assert!(
             !runtime.registered().is_empty(),
             "invariant: at_least_one_reconciler_registered holds post-boot"
@@ -248,8 +254,9 @@ fn at_least_one_reconciler_registered_invariant_holds_after_boot() {
 
     // Boot 2 — rebuild through the same path.
     {
-        let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime::new");
-        runtime.register(noop_heartbeat()).expect("register");
+        let mut runtime =
+            ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
+        runtime.register(noop_heartbeat()).await.expect("register");
         assert!(
             !runtime.registered().is_empty(),
             "invariant: at_least_one_reconciler_registered holds across restart"
@@ -264,11 +271,12 @@ fn at_least_one_reconciler_registered_invariant_holds_after_boot() {
 //     to both calls per ADR-0013 §2c.
 // ---------------------------------------------------------------------------
 
-#[test]
-fn reconciler_is_pure_invariant_holds_for_noop_heartbeat() {
+#[tokio::test]
+async fn reconciler_is_pure_invariant_holds_for_noop_heartbeat() {
     let tmp = TempDir::new().expect("tmpdir");
-    let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime::new");
-    runtime.register(noop_heartbeat()).expect("register");
+    let mut runtime =
+        ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
+    runtime.register(noop_heartbeat()).await.expect("register");
 
     // Per ADR-0021 (step 02-01), `desired`/`actual` are typed
     // `&AnyState`. NoopHeartbeat uses `AnyState::Unit` because its
@@ -278,7 +286,16 @@ fn reconciler_is_pure_invariant_holds_for_noop_heartbeat() {
     let view = AnyReconcilerView::Unit;
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
-    for r in runtime.reconcilers_iter() {
+    // Kills the reconcilers_iter → empty() mutation: if the iterator
+    // yields nothing the loop body never executes and the purity check
+    // becomes vacuously true.
+    let reconciler_vec: Vec<_> = runtime.reconcilers_iter().collect();
+    assert_eq!(
+        reconciler_vec.len(),
+        1,
+        "runtime with one registered reconciler must yield exactly 1 entry from reconcilers_iter"
+    );
+    for r in &reconciler_vec {
         let a = r.reconcile(&desired, &actual, &view, &tick);
         let b = r.reconcile(&desired, &actual, &view, &tick);
         assert_eq!(
@@ -310,8 +327,8 @@ fn reconciler_is_pure_invariant_holds_for_noop_heartbeat() {
 //     built-in reconciler ships in Phase 2.
 // ---------------------------------------------------------------------------
 
-#[test]
-fn registered_returns_deterministic_order_across_two_runtimes() {
+#[tokio::test]
+async fn registered_returns_deterministic_order_across_two_runtimes() {
     // 16 iterations — well above HashMap RandomState's
     // single-process-stable bias, so a HashMap-backed registry would
     // (in the multi-key case Phase 2 will introduce) fail this gate
@@ -322,12 +339,14 @@ fn registered_returns_deterministic_order_across_two_runtimes() {
         let tmp_a = TempDir::new().expect("tmpdir a");
         let tmp_b = TempDir::new().expect("tmpdir b");
 
-        let mut runtime_a = ReconcilerRuntime::new(tmp_a.path()).expect("runtime_a::new");
-        let mut runtime_b = ReconcilerRuntime::new(tmp_b.path()).expect("runtime_b::new");
+        let mut runtime_a = ReconcilerRuntime::new_with_redb_view_store_for_test(tmp_a.path())
+            .expect("runtime_a::new");
+        let mut runtime_b = ReconcilerRuntime::new_with_redb_view_store_for_test(tmp_b.path())
+            .expect("runtime_b::new");
 
         // Same registration sequence into each runtime.
-        runtime_a.register(noop_heartbeat()).expect("register a");
-        runtime_b.register(noop_heartbeat()).expect("register b");
+        runtime_a.register(noop_heartbeat()).await.expect("register a");
+        runtime_b.register(noop_heartbeat()).await.expect("register b");
 
         let names_a = runtime_a.registered();
         let names_b = runtime_b.registered();

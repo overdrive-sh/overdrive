@@ -30,6 +30,7 @@ use overdrive_core::traits::driver::{
 };
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{AllocState, ObservationStore};
+use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
@@ -86,10 +87,11 @@ impl Driver for AlwaysFailDriver {
     }
 }
 
-fn build_state_with_driver(tmp: &TempDir, driver: Arc<dyn Driver>) -> AppState {
-    let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime::new");
-    runtime.register(noop_heartbeat()).expect("register noop-heartbeat");
-    runtime.register(job_lifecycle()).expect("register job-lifecycle");
+async fn build_state_with_driver(tmp: &TempDir, driver: Arc<dyn Driver>) -> AppState {
+    let mut runtime =
+        ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
+    runtime.register(noop_heartbeat()).await.expect("register noop-heartbeat");
+    runtime.register(job_lifecycle()).await.expect("register job-lifecycle");
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("open store"));
     let obs: Arc<dyn ObservationStore> =
@@ -100,7 +102,7 @@ fn build_state_with_driver(tmp: &TempDir, driver: Arc<dyn Driver>) -> AppState {
     // Tests do not seed node-registration intent — that would invert
     // the dependency direction.
 
-    AppState::new(store, obs, Arc::new(runtime), driver)
+    AppState::new(store, obs, Arc::new(runtime), driver, Arc::new(SimClock::new()))
 }
 
 #[tokio::test]
@@ -111,7 +113,7 @@ async fn repeatedly_crashing_workload_exhausts_backoff_and_stops_retrying() {
     let driver = Arc::new(AlwaysFailDriver::new());
     let count_handle = driver.count_handle();
     let driver_dyn: Arc<dyn Driver> = driver.clone();
-    let state = build_state_with_driver(&tmp, driver_dyn);
+    let state = build_state_with_driver(&tmp, driver_dyn).await;
 
     // Submit a 1-replica job. The submit goes through the IntentStore
     // directly (the test does not need the HTTP boundary here).

@@ -44,20 +44,31 @@ use super::cleanup::AllocCleanup;
 #[allow(clippy::too_many_lines)]
 async fn killed_workload_is_restarted_with_fresh_alloc_id() {
     let tmp = TempDir::new().expect("tempdir");
-    let mut runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime");
-    runtime.register(noop_heartbeat()).expect("register noop");
-    runtime.register(job_lifecycle()).expect("register job-lifecycle");
+    let mut runtime =
+        ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime");
+    runtime.register(noop_heartbeat()).await.expect("register noop");
+    runtime.register(job_lifecycle()).await.expect("register job-lifecycle");
 
     let store =
         Arc::new(LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open store"));
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
+    // Driver-internal clock (SIGTERM grace timing) is SimClock; the
+    // convergence-tick's `tick.now_unix` snapshot needs real wall-clock
+    // advancement so the JobLifecycle backoff predicate
+    // `tick.now_unix < last_failure_seen_at + backoff(attempts)`
+    // crosses against the test's real-wall-clock pacing
+    // (`tokio::time::sleep(20ms)` between manual ticks). Explicit
+    // `SystemClock` at the call site per `.claude/rules/development.md`
+    // § "Port-trait dependencies" — the choice is visible, not
+    // silently inherited.
     let driver: Arc<dyn Driver> = Arc::new(ExecDriver::new(
         std::path::PathBuf::from("/sys/fs/cgroup"),
         Arc::new(overdrive_sim::adapters::clock::SimClock::new()),
     ));
 
-    let state = AppState::new(store, obs, Arc::new(runtime), driver);
+    let state =
+        AppState::new(store, obs, Arc::new(runtime), driver, Arc::new(overdrive_host::SystemClock));
 
     // Spawn the exit-observer subsystem. In production this is wired
     // by `run_server_with_obs_and_driver`; tests construct it directly

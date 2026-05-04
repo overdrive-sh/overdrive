@@ -53,6 +53,8 @@ use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use tempfile::TempDir;
 
+use super::wait::advance_and_settle;
+
 // -----------------------------------------------------------------------
 // Helpers — duplicated from `observation_empty_rows.rs` /
 // `submit_round_trip.rs` per the convention in
@@ -164,58 +166,82 @@ async fn submitted_job_reaches_running_via_real_server_boot() {
         body.outcome,
     );
 
-    // Drive the SimClock forward in 100ms steps, yielding to the tokio
-    // runtime between ticks so the spawned convergence task gets
-    // scheduling time. `SimClock::tick(&self, Duration)` is sync per
-    // `crates/overdrive-sim/src/adapters/clock.rs:55`.
-    for _ in 0..30 {
-        clock.tick(Duration::from_millis(100));
-        tokio::task::yield_now().await;
+    // Drive the SimClock forward in 100ms steps and poll the assertion
+    // conditions each iteration; break the moment both are observed.
+    // `advance_and_settle` ticks logical time AND wall-clock-sleeps
+    // the test task briefly so the spawned convergence loop has real
+    // scheduling room to complete a full drain (5+ awaits in
+    // `run_convergence_tick` plus 1 in `action_shim::dispatch_single`)
+    // before the next iteration. The 60-tick budget is well over the
+    // ~2 ticks the convergence loop needs on the happy path; the loop
+    // exists to absorb scheduler jitter under concurrent test load
+    // (Lima FS contention on the `redb` view-store), not to extend
+    // the *correctness* window. See `wait::SETTLE_AFTER_TICK`.
+    let info_url = format!("https://localhost:{}/v1/cluster/info", bound.port());
+    let allocs_url = format!("https://localhost:{}/v1/allocs?job=payments", bound.port());
+
+    let mut dispatched_seen = false;
+    let mut running_seen = false;
+
+    for _ in 0..60 {
+        advance_and_settle(&clock, Duration::from_millis(100)).await;
+
+        if !dispatched_seen {
+            let info: ClusterStatus = client
+                .get(&info_url)
+                .send()
+                .await
+                .expect("GET /v1/cluster/info")
+                .json()
+                .await
+                .expect("decode ClusterStatus");
+            if info.broker.dispatched >= 1 {
+                dispatched_seen = true;
+            }
+        }
+
+        if !running_seen {
+            let allocs: AllocStatusResponse = client
+                .get(&allocs_url)
+                .send()
+                .await
+                .expect("GET /v1/allocs?job=payments")
+                .json()
+                .await
+                .expect("decode AllocStatusResponse");
+            if allocs.rows.iter().any(|a| {
+                a.job_id == "payments"
+                    && matches!(a.state, overdrive_control_plane::api::AllocStateWire::Running)
+            }) {
+                running_seen = true;
+            }
+        }
+
+        if dispatched_seen && running_seen {
+            break;
+        }
     }
 
     // Assertion 1 — kills Root Cause C (no gate on broker.dispatched).
     // Under the fix, every drained evaluation increments the dispatched
     // counter; under current main, the counter is permanently 0.
-    let info_url = format!("https://localhost:{}/v1/cluster/info", bound.port());
-    let info: ClusterStatus = client
-        .get(&info_url)
-        .send()
-        .await
-        .expect("GET /v1/cluster/info")
-        .json()
-        .await
-        .expect("decode ClusterStatus");
     assert!(
-        info.broker.dispatched >= 1,
-        "broker.dispatched must advance under steady-state traffic; got {}",
-        info.broker.dispatched,
+        dispatched_seen,
+        "broker.dispatched must advance under steady-state traffic; \
+         never observed >= 1 within 60 logical ticks",
     );
 
     // Assertion 2 — kills Roots A + B together. Under the fix the
     // submit enqueues an evaluation, the spawned loop drains it, the
     // job-lifecycle reconciler runs, and the SimDriver advances the
     // alloc to Running. Under current main the alloc is never created.
-    let allocs_url = format!("https://localhost:{}/v1/allocs?job=payments", bound.port());
-    let allocs: AllocStatusResponse = client
-        .get(&allocs_url)
-        .send()
-        .await
-        .expect("GET /v1/allocs?job=payments")
-        .json()
-        .await
-        .expect("decode AllocStatusResponse");
     // `AllocState::Display` renders the canonical lowercase form
-    // (`"running"`) — see `overdrive-core::traits::observation_store::AllocState::fmt`.
-    // The Step 01-01 RED scaffold mistakenly asserted on the
-    // capitalised form; the case fix is a test-bug correction, not a
-    // weakening of the assertion (the assertion still pins
-    // `state.to_string() == "running"` AND `job_id == "payments"`).
+    // (`"running"`) — see
+    // `overdrive-core::traits::observation_store::AllocState::fmt`.
     assert!(
-        allocs.rows.iter().any(|a| a.job_id == "payments"
-            && matches!(a.state, overdrive_control_plane::api::AllocStateWire::Running)),
+        running_seen,
         "submitted job must reach Running via the production convergence loop; \
-         got {:?}",
-        allocs.rows,
+         never observed Running for job=payments within 60 logical ticks",
     );
 
     handle.shutdown(Duration::from_secs(1)).await;

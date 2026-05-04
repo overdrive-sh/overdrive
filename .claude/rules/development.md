@@ -583,130 +583,245 @@ stream must be deterministic across seeds.
 
 ## Reconciler I/O
 
-**`reconcile` does not perform I/O.** The §18 contract splits the
-reconciler into two methods: async `hydrate(target, &LibsqlHandle) ->
-Result<Self::View, HydrateError>` and sync pure
-`reconcile(desired, actual, &view, &tick) -> (Vec<Action>, NextView)`.
-All libSQL access lives exclusively in `hydrate`. No `.await` inside
-`reconcile`; no network, no subprocess spawn, no direct libSQL /
-IntentStore / ObservationStore write anywhere in `reconcile`.
-Wall-clock reads come from `tick.now` (a field on the
-`TickContext` parameter the runtime constructs once per evaluation),
-never `Instant::now()` / `SystemTime::now()`. This is what makes DST
-(§21) and ESR verification (§18) possible; it is not optional.
-
-When a reconciler needs to talk to an external service (a Restate admin
-API, an AWS account, a webhook, a custom internal service), the shape is:
+**The `Reconciler` trait collapses to a single sync method.** Per
+ADR-0035 (and its companion ADR-0036), the trait surface is exactly
+two associated types and one function:
 
 ```rust
-// Bad — violates §18 purity; no DST support; no ESR reasoning
-async fn reconcile(&self, /* ... */) -> Vec<Action> {
-    let resp = self.http.post("https://svc/register").await?;
-    // ...
+pub trait Reconciler: Send + Sync {
+    /// Per-reconciler typed projection of intent + observation.
+    /// Per ADR-0021 (amended by ADR-0036).
+    type State: Send + Sync;
+
+    /// Per-reconciler typed memory. Persisted as a CBOR blob in the
+    /// runtime-owned ViewStore. Author derives the four bounds; the
+    /// runtime owns persistence end-to-end.
+    type View: Serialize + DeserializeOwned + Default + Clone + Send + Sync;
+
+    fn name(&self) -> &ReconcilerName;
+
+    /// Pure synchronous transition. No `.await`. No I/O. No DB handle.
+    /// Wall-clock only via `tick.now`. All mutations are data: returned
+    /// Actions cross the publication boundary; the returned NextView
+    /// is persisted by the runtime.
+    fn reconcile(
+        &self,
+        desired: &Self::State,
+        actual:  &Self::State,
+        view:    &Self::View,
+        tick:    &TickContext,
+    ) -> (Vec<Action>, Self::View);
+}
+```
+
+**The runtime owns persistence end-to-end. Reconciler authors never
+write SQL, never call `migrate` / `hydrate` / `persist`, never declare
+a schema, never touch a database handle.** They derive
+`Serialize + Deserialize + Default + Clone` on the `View` struct and
+write `reconcile`. Nothing else.
+
+`reconcile` is a pure function over `(desired, actual, view, tick) →
+(actions, next_view)`. No `.await`; no network; no subprocess spawn;
+no direct IntentStore / ObservationStore / ViewStore write; no
+`Instant::now()` / `SystemTime::now()`. This is what makes DST
+(§21) replay and ESR verification (§18, USENIX OSDI '24 *Anvil*)
+possible; it is not optional.
+
+### Runtime mechanics — bulk-load + write-through
+
+The runtime persists views via a `ViewStore` port living in
+`overdrive-control-plane`, with a `RedbViewStore` host adapter
+(production) and a `SimViewStore` sim adapter (tests). The wire format
+is CBOR via `ciborium`; one redb file per node at
+`<data_dir>/reconcilers/memory.redb`, one redb table per reconciler
+kind, value is a CBOR-encoded `View` blob.
+
+The two phases:
+
+**Boot / register-time** (once per reconciler at process start):
+
+```
+register(reconciler):
+  1. view_store.probe()                          (Earned Trust gate)
+  2. views = view_store.bulk_load::<R::View>(name)  (BTreeMap<TR, V>)
+  3. registry.insert(name, (AnyReconciler, views))
+```
+
+The runtime calls `bulk_load` once per reconciler and materialises
+every persisted `(reconciler_name, target) → View` blob into a
+per-reconciler `BTreeMap<TargetResource, View>` held in RAM. From that
+moment on the in-memory map is the steady-state read SSOT.
+
+**Steady-state tick** (every `tick_period_ms`, default 100 ms):
+
+```
+for evaluation in broker.drain_pending():
+  1. (any_reconciler, views) = registry.lookup(name)
+  2. tick    = TickContext::snapshot(clock)
+  3. desired = AnyReconciler::hydrate_desired(...)
+  4. actual  = AnyReconciler::hydrate_actual(...)
+  5. view    = views.get(target).cloned()
+                .unwrap_or_else(R::View::default)
+  6. (actions, next_view) = reconciler.reconcile(
+       &desired, &actual, &view, &tick)
+  7. view_store.write_through(name, target, &next_view)   (fsync)
+  8. views.insert(target.clone(), next_view)              (after fsync OK)
+  9. action_shim::dispatch(actions, ...)
+```
+
+Steady-state reconcile pays **zero disk reads**. Every tick reads
+`view = views.get(target).cloned().unwrap_or_default()` from the
+in-memory map, never from disk; redb is touched only on write-through
+and on cold boot.
+
+**Step ordering 7 → 8 is load-bearing** (fsync-then-memory). On a
+crash between fsync and the `BTreeMap::insert`, the next boot's
+`bulk_load` sees the persisted view and convergence resumes. The
+inverse ordering would let an acknowledged tick disappear on crash,
+breaking durability. The `WriteThroughOrdering` DST invariant pins
+this.
+
+**`BTreeMap`, NOT `HashMap`**, per § "Ordered-collection choice"
+above — the map is drained / iterated on `bulk_load` and observed by
+DST invariants; iteration order must be deterministic across seeds.
+
+### Schema evolution
+
+Additive fields use `#[serde(default)]` — ignore-unknown-fields-by-
+default is serde's tolerant deserialization, the correct shape for
+additive evolution. Breaking changes use a versioned envelope:
+
+```rust
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "v")]
+enum JobLifecycleViewEnvelope {
+    #[serde(rename = "1")] V1(JobLifecycleViewV1),
+    #[serde(rename = "2")] V2(JobLifecycleViewV2),
+}
+```
+
+Phase 1 has no breaking-change history; the envelope shape lands when
+the first breaking change ships.
+
+### Worked example — retry memory + external call
+
+When a reconciler needs to talk to an external service (a Restate
+admin API, an AWS account, a webhook, a custom internal service), the
+View carries the *inputs* its retry policy depends on (per § "Persist
+inputs, not derived state" above) and the runtime owns the rest:
+
+```rust
+use serde::{Deserialize, Serialize};
+
+// View — the four derive bounds are mandatory; the runtime persists
+// this blob via `ViewStore::write_through` after every successful
+// reconcile. Persists *inputs* (attempts, last_failure_seen_at) — the
+// `next_attempt_at` deadline is recomputed on every tick from these
+// inputs + the live backoff policy, never persisted.
+#[derive(Serialize, Deserialize, Default, Clone)]
+pub struct RetryMemory {
+    pub attempts:              u32,
+    pub last_failure_seen_at:  UnixInstant,
 }
 
-// Good — hydrate reads retry memory from libsql (the ONLY place this
-// reconciler author touches libsql); reconcile is sync + pure, emits
-// an HttpCall action, and returns a NextView the runtime persists.
-// The response arrives as observation on the next tick via `actual`.
-// Wall-clock comes from `tick.now_unix` (persistable UnixInstant),
-// never `Instant::now()`. The View persists *inputs* — `attempts`
-// and `last_failure_seen_at` — not the derived `next_attempt_at`
-// deadline (see § "Persist inputs, not derived state" above).
+impl RetryMemory {
+    fn bump_if_dispatched(
+        mut self,
+        actions: &[Action],
+        now: UnixInstant,
+    ) -> Self {
+        if actions.iter().any(|a| matches!(a, Action::HttpCall { .. })) {
+            self.attempts            = self.attempts.saturating_add(1);
+            self.last_failure_seen_at = now;
+        }
+        self
+    }
+}
+
+// Reconciler — a single sync method. No async, no DB handle, no
+// migrate/hydrate/persist. `desired`, `actual`, and `view` are all
+// pre-computed by the runtime before `reconcile` is called.
 impl Reconciler for RegisterReconciler {
-    type View = RetryMemory;
+    type State = RegisterState;
+    type View  = RetryMemory;
 
     fn name(&self) -> &ReconcilerName { &self.name }
 
-    async fn hydrate(
-        &self,
-        target: &TargetResource,
-        db:     &LibsqlHandle,
-    ) -> Result<Self::View, HydrateError> {
-        // Free-form SQL in hydrate. Schema management
-        // (CREATE TABLE IF NOT EXISTS, ALTER TABLE ADD COLUMN) lives
-        // here too — no framework migrations Phase 1.
-        let row = db.query_one(
-            "SELECT attempts, last_correlation, last_failure_seen_at \
-             FROM register_memory WHERE target = ?",
-            &[target.as_str()],
-        ).await?;
-        Ok(RetryMemory::from_row(row))
-    }
-
     fn reconcile(
         &self,
-        desired: &State,
-        actual:  &State,
+        desired: &Self::State,
+        actual:  &Self::State,
         view:    &Self::View,
         tick:    &TickContext,
     ) -> (Vec<Action>, Self::View) {
-        let correlation = CorrelationKey::from((desired.id, desired.spec_hash, "register"));
+        let correlation = CorrelationKey::from((
+            desired.id, desired.spec_hash, "register",
+        ));
         let actions = match actual.external_call(&correlation).latest_status() {
             None => vec![Action::HttpCall {
-                correlation: correlation.clone(),
-                target: desired.endpoint.clone(),
-                method: Method::POST,
-                body: build_register_payload(desired),
-                timeout: Duration::from_secs(30),
+                correlation:     correlation.clone(),
+                target:          desired.endpoint.clone(),
+                method:          Method::POST,
+                body:            build_register_payload(desired),
+                timeout:         Duration::from_secs(30),
                 idempotency_key: Some(correlation.to_string()),
             }],
             Some(Status::Pending) | Some(Status::InFlight) => vec![],
-            Some(Status::Completed { response }) => converge_from_response(actual, response),
+            Some(Status::Completed { response }) => {
+                converge_from_response(actual, response)
+            }
             // Retry-budget gate: only re-dispatch once the backoff
-            // window has elapsed. The deadline is RECOMPUTED on
-            // every tick from the persisted inputs (`attempts` +
+            // window has elapsed. The deadline is RECOMPUTED every
+            // tick from the persisted inputs (`attempts` +
             // `last_failure_seen_at`) and the live backoff policy —
             // never persisted. `tick.now_unix` is the runtime's
-            // single-snapshot of wall-clock for this evaluation —
-            // pure input, DST-controllable, persistable.
+            // single-snapshot of wall-clock for this evaluation:
+            // pure input, DST-controllable.
             Some(Status::Failed { .. } | Status::TimedOut { .. })
                 if tick.now_unix
                     >= view.last_failure_seen_at
                         + backoff_for_attempt(view.attempts) =>
             {
-                handle_failure(view)
+                vec![/* re-dispatch */]
             }
             Some(Status::Failed { .. } | Status::TimedOut { .. }) => vec![],
         };
         // NextView carries the updated retry memory; the runtime
-        // diffs (view → next_view) and persists the delta to libsql.
-        // Reconcile never writes libsql directly. On a fresh
-        // dispatch, stamp `last_failure_seen_at = tick.now_unix`
-        // and bump `attempts` — both are inputs to the next tick's
-        // deadline computation, never a precomputed deadline.
-        let next_view = view.bump_if_dispatched(&actions, tick.now_unix);
+        // CBOR-encodes it and writes it to redb (one transaction,
+        // one fsync) before updating the in-memory BTreeMap. The
+        // reconciler never writes the ViewStore directly.
+        let next_view = view.clone().bump_if_dispatched(&actions, tick.now_unix);
         (actions, next_view)
     }
 }
 ```
 
-Rules:
+### Rules
 
-1. **Every external call carries an `idempotency_key`** when the remote
-   API supports one. The runtime executes `HttpCall` at-least-once;
-   idempotency on the remote side is what makes the effect
-   exactly-once.
+1. **Every external call carries an `idempotency_key`** when the
+   remote API supports one. The runtime executes `HttpCall`
+   at-least-once; idempotency on the remote side is what makes the
+   effect exactly-once.
 2. **Correlation, not request ID, links cause to response.** A
    `CorrelationKey` newtype derived from
-   `(reconciliation_target, spec_hash, purpose)` lets the next reconcile
-   find the prior response deterministically. Do not embed the
-   `request_id` in reconcile logic — it changes per attempt; the
-   correlation does not.
-3. **Retry budgets live in reconciler libSQL.** The runtime does not
+   `(reconciliation_target, spec_hash, purpose)` lets the next
+   reconcile find the prior response deterministically. Do not
+   embed the `request_id` in reconcile logic — it changes per
+   attempt; the correlation does not.
+3. **Retry budgets live in the View.** The runtime does not
    auto-retry a failed `HttpCall` — that policy belongs to the
-   reconciler. Track attempts in the private DB via `hydrate` reads
-   and `NextView` writes; emit a new `HttpCall` action until the
-   budget is exhausted; then surface the failure to status.
+   reconciler. Track attempts in the typed `View`, return an updated
+   `next_view`, and the runtime persists it via `write_through`.
 4. **Multi-step external sequences become workflows, not chains of
-   `HttpCall`s.** If the reconciler would need to coordinate three or
-   more external calls that must complete as a unit, emit
-   `Action::StartWorkflow` and read the workflow's result on completion.
-   Reconcilers converge; workflows orchestrate.
+   `HttpCall`s.** If the reconciler would need to coordinate three
+   or more external calls that must complete as a unit, emit
+   `Action::StartWorkflow` and read the workflow's result on
+   completion. Reconcilers converge; workflows orchestrate.
 5. **`HttpCall` responses are observation, not intent.** The
-   `external_call_results` table lives in the ObservationStore and is
-   gossiped like any other observation row. Reconcilers read it
-   locally, same as `alloc_status` or `service_backends`.
+   `external_call_results` table lives in the ObservationStore and
+   is gossiped like any other observation row. Reconcilers read it
+   locally via `actual`, same as `alloc_status` or
+   `service_backends`.
 6. **Reading wall-clock: use `tick.now` from the `TickContext`
    parameter.** Never call `Instant::now()` / `SystemTime::now()`
    inside `reconcile`. The dst-lint gate catches violations at PR
@@ -716,19 +831,26 @@ Rules:
    once per evaluation; every `reconcile` call sees one consistent
    "now," which is what makes the function pure over its inputs.
    `tick.deadline` is the per-tick budget (consult to checkpoint
-   bounded work into `NextView`); `tick.tick` is a monotonic counter
-   useful as a deterministic tie-breaker.
+   bounded work into the next View); `tick.tick` is a monotonic
+   counter useful as a deterministic tie-breaker.
+7. **Persist inputs, not derived state, in the View** (per §
+   "Persist inputs, not derived state" above). A `next_attempt_at`
+   deadline field is a smell — store the inputs that feed it
+   (`attempts` + `last_failure_seen_at`) and recompute the deadline
+   in `reconcile` against the live backoff policy. The View is
+   typed memory, not a cache of today's policy.
 
 The reference case: a Restate-operator-equivalent in Overdrive is a
-reconciler whose `hydrate` reads retry memory, whose `reconcile` emits
-`HttpCall { target: restate_admin_url, method: POST, body:
-deployment_spec, idempotency_key: Some(...) }` on registration when
-`tick.now_unix >= view.last_failure_seen_at +
-backoff_for_attempt(view.attempts)` (deadline recomputed every tick
-from persisted inputs, never persisted itself), and which reads
-`external_call_results` on the next tick to advance its state
-machine. No `async fn` in `reconcile`; no direct HTTP client; no
-direct wall-clock read; fully DST-replayable.
+reconciler whose `View` carries `RetryMemory { attempts,
+last_failure_seen_at }`, whose `reconcile` emits `HttpCall { target:
+restate_admin_url, method: POST, body: deployment_spec,
+idempotency_key: Some(...) }` on registration when `tick.now_unix >=
+view.last_failure_seen_at + backoff_for_attempt(view.attempts)`
+(deadline recomputed every tick from persisted inputs, never
+persisted itself), and which reads `external_call_results` on the
+next tick to advance its state machine. No async in `reconcile`; no
+direct HTTP client; no direct wall-clock read; no DB handle; fully
+DST-replayable. See ADR-0035 / ADR-0036 for the full design.
 
 ---
 

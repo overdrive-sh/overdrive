@@ -37,10 +37,29 @@ mod integration {
     mod concurrent_submit_toctou;
     mod describe_round_trip;
     mod idempotent_resubmit;
-    mod libsql_isolation;
     mod observation_empty_rows;
+    /// `ReconcilerRuntime` ↔ `ViewStore` wiring (step 01-06 of
+    /// `reconciler-memory-redb`). Probe-failure refusal + bulk-load at
+    /// register + `WriteThroughOrdering` per ADR-0035 §5/§6.
+    mod reconciler_runtime_view_store;
+    /// `RedbViewStore` adapter (step 01-04 of `reconciler-memory-redb`).
+    /// Real-fs round-trip + per-reconciler table isolation + Earned-Trust
+    /// probe coverage per ADR-0035 § Earned Trust + §4.
+    mod redb_view_store;
+    /// Regression for the per-call `Box::leak` defect in
+    /// `RedbViewStore::table_def` — see
+    /// `docs/feature/refactor-reconciler-static-name/deliver/bugfix-rca.md`.
+    /// Asserts `Reconciler::NAME` is a compile-time anchor and that
+    /// `write_through_bytes` accepts `&'static str` directly.
+    mod redb_view_store_no_leak;
     mod server_lifecycle;
     mod submit_round_trip;
+    /// `TerminalCondition` propagation — step 02-02 of
+    /// `reconciler-memory-redb`. Action shim threads `Action.terminal`
+    /// onto BOTH `AllocStatusRow.terminal` AND `LifecycleEvent.terminal`
+    /// in the same call frame; per ADR-0037 §4 drift between the two
+    /// surfaces is structurally impossible.
+    mod terminal_propagation;
     mod tls_bootstrap;
     /// phase-1-first-workload — slice 3 (US-03) — Linux-only walking
     /// skeletons. Each scenario file gates itself with
@@ -63,6 +82,9 @@ mod integration {
         mod exit_observer;
         mod stop_to_terminated;
         mod submit_to_running;
+        /// Wait helpers for Tier-3 integration tests that drive the
+        /// spawned convergence loop via `SimClock`. See module docs.
+        pub mod wait;
     }
     /// phase-1-first-workload — slice 4 (US-03 final) — Linux-only
     /// cgroup-isolation harness. Per ADR-0028 the control-plane

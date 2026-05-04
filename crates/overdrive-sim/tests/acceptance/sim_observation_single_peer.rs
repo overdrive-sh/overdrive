@@ -47,6 +47,7 @@ fn sample_alloc_status() -> AllocStatusRow {
         updated_at: LogicalTimestamp { counter: 1, writer: peer_node() },
         reason: None,
         detail: None,
+        terminal: None,
     }
 }
 

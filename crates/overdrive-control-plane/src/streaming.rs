@@ -94,21 +94,17 @@
 // `rust_2024_compatibility = warn` does not block commits.
 #![allow(tail_expr_drop_order)]
 
-use std::sync::Arc;
-
 use axum::body::Bytes;
 use bytes::BytesMut;
 use futures::Stream;
 use overdrive_core::id::JobId;
-use overdrive_core::reconciler::RESTART_BACKOFF_CEILING;
 use overdrive_core::traits::observation_store::{AllocState, ObservationStore};
 use tokio::sync::broadcast;
 
 use crate::AppState;
-use crate::CachedView;
 use crate::action_shim::LifecycleEvent;
 use crate::api::{AllocStateWire, IdempotencyOutcome, SubmitEvent, TerminalReason};
-use overdrive_core::transition_reason::StoppedBy;
+use overdrive_core::transition_reason::TerminalCondition;
 
 /// One NDJSON line — `serde_json::to_writer(buf, &event)?` + `b'\n'`.
 fn emit_line(event: &SubmitEvent) -> std::io::Result<Bytes> {
@@ -165,7 +161,6 @@ pub fn build_stream(
     let clock = state.clock.clone();
     let obs = state.obs.clone();
     let cap = state.streaming_cap;
-    let view_cache = state.view_cache.clone();
 
     async_stream::stream! {
         // 1. Emit Accepted SYNCHRONOUSLY — first byte on the wire.
@@ -207,7 +202,7 @@ pub fn build_stream(
         //    the terminal event and end the stream — analogous to
         //    ADR-0032 §7 lagged-recovery, applied to the subscribe-race
         //    rather than the buffer-overflow class.
-        if let Some(terminal) = lagged_recover(&*obs, &job_id, &view_cache).await {
+        if let Some(terminal) = lagged_recover(&*obs, &job_id).await {
             match emit_line(&terminal) {
                 Ok(line) => {
                     yield Ok(line);
@@ -251,12 +246,16 @@ pub fn build_stream(
                                 }
                             }
 
-                            // Terminal-detection: read fresh state from
-                            // ObservationStore + view_cache and check.
+                            // Terminal-detection: project the
+                            // event's reconciler-emitted terminal claim
+                            // into the wire-shape `SubmitEvent` per
+                            // ADR-0037 §4. The event's `terminal` field
+                            // is the single source of truth — no view
+                            // lookups, no `restart_counts >= CEILING`
+                            // recomputation.
                             if let Some(terminal) = check_terminal(
                                 &*obs,
                                 &job_id,
-                                &view_cache,
                                 &event,
                             ).await {
                                 match emit_line(&terminal) {
@@ -279,7 +278,6 @@ pub fn build_stream(
                             if let Some(terminal) = lagged_recover(
                                 &*obs,
                                 &job_id,
-                                &view_cache,
                             ).await {
                                 match emit_line(&terminal) {
                                     Ok(line) => {
@@ -340,29 +338,19 @@ pub fn build_stream(
     }
 }
 
-/// Read the `JobLifecycleView` from the AppState view cache. Returns
-/// the default empty view when no entry exists yet.
-fn read_view(
-    view_cache: &Arc<std::sync::Mutex<std::collections::BTreeMap<(String, String), CachedView>>>,
-    job_id: &JobId,
-) -> overdrive_core::reconciler::JobLifecycleView {
-    let key = ("job-lifecycle".to_owned(), format!("job/{job_id}"));
-    let cache = match view_cache.lock() {
-        Ok(g) => g,
-        Err(p) => p.into_inner(),
-    };
-    match cache.get(&key) {
-        Some(CachedView::JobLifecycle(v)) => v.clone(),
-        _ => overdrive_core::reconciler::JobLifecycleView::default(),
-    }
-}
-
 /// Phase 1 walking-skeleton workloads have `replicas == 1`, so any
 /// single `state == Running` row for the job triggers `ConvergedRunning`.
 /// The reconciler is the gate that decides when to emit
 /// `Action::StartAllocation` per the desired replica count, so a row
 /// only gets written if the reconciler says go — which is what makes
 /// the single-row shortcut safe at `replicas == 1`.
+///
+/// Per ADR-0037 §4: terminal classification is the reconciler's
+/// decision, durably stamped onto `Action.terminal` and threaded
+/// onto `LifecycleEvent.terminal` by the action shim. This function
+/// reads `event.terminal` as the single source of truth for the
+/// terminal projection — no view lookups, no `restart_counts >=
+/// CEILING` recomputation.
 ///
 /// TODO(#140): gate `ConvergedRunning` on `running_count >=
 /// replicas_desired` once a multi-replica workload lands. Hydrate
@@ -371,9 +359,17 @@ fn read_view(
 async fn check_terminal(
     obs: &dyn ObservationStore,
     job_id: &JobId,
-    view_cache: &Arc<std::sync::Mutex<std::collections::BTreeMap<(String, String), CachedView>>>,
     event: &LifecycleEvent,
 ) -> Option<SubmitEvent> {
+    // Terminal path — project the reconciler-emitted terminal claim
+    // (per ADR-0037 §4) into the wire-shape SubmitEvent. Both
+    // `AllocStatusRow.terminal` and `LifecycleEvent.terminal` carry
+    // the same value from the same dispatch frame — drift is
+    // structurally impossible.
+    if let Some(cond) = &event.terminal {
+        return Some(submit_event_from_terminal(cond, event));
+    }
+
     // Success path — Running observation for this job → ConvergedRunning.
     // Phase 1 walking-skeleton workloads have replicas=1 so a single
     // running row in the obs store meets the bar; see TODO(#140) on the
@@ -395,62 +391,82 @@ async fn check_terminal(
                 });
             }
         }
-        return None;
-    }
-
-    // Stop path — Terminated observation → ConvergedStopped.
-    // Extract StoppedBy from the event reason; default to Reconciler
-    // when the reason is not a Stopped variant.
-    if matches!(event.to, AllocStateWire::Terminated) {
-        let by = match &event.reason {
-            overdrive_core::TransitionReason::Stopped { by } => *by,
-            _ => StoppedBy::Reconciler,
-        };
-        return Some(SubmitEvent::ConvergedStopped {
-            alloc_id: Some(event.alloc_id.to_string()),
-            by,
-        });
-    }
-
-    // Failure path — Failed row + restart budget exhausted →
-    // ConvergedFailed { BackoffExhausted }.
-    if matches!(event.to, AllocStateWire::Failed) {
-        let view = read_view(view_cache, job_id);
-        let used = view.restart_counts.values().copied().max().unwrap_or(0);
-        if used >= RESTART_BACKOFF_CEILING {
-            // Read the latest cause-class reason from the obs store —
-            // single-source-of-truth per [D7].
-            let cause = latest_cause(obs, job_id).await.unwrap_or(event.reason.clone());
-            return Some(SubmitEvent::ConvergedFailed {
-                alloc_id: Some(event.alloc_id.to_string()),
-                terminal_reason: TerminalReason::BackoffExhausted {
-                    attempts: used,
-                    cause: cause.clone(),
-                },
-                reason: Some(event.reason.clone()),
-                error: event.detail.clone(),
-            });
-        }
     }
     None
 }
 
-/// On `Lagged(_)`, snapshot the obs store and synthesise a terminal
-/// only if the latest row state is already terminal. Otherwise the
-/// caller continues subscribing.
-async fn lagged_recover(
-    obs: &dyn ObservationStore,
-    job_id: &JobId,
-    view_cache: &Arc<std::sync::Mutex<std::collections::BTreeMap<(String, String), CachedView>>>,
-) -> Option<SubmitEvent> {
+/// Project a reconciler-emitted [`TerminalCondition`] into the wire-
+/// shape [`SubmitEvent`] terminal variant. Pure over its inputs;
+/// reused by both the live-event path (`check_terminal`) and the
+/// snapshot recovery path (`lagged_recover`) so the projection is in
+/// exactly one place.
+fn submit_event_from_terminal(cond: &TerminalCondition, event: &LifecycleEvent) -> SubmitEvent {
+    match cond {
+        TerminalCondition::Stopped { by } => {
+            SubmitEvent::ConvergedStopped { alloc_id: Some(event.alloc_id.to_string()), by: *by }
+        }
+        TerminalCondition::BackoffExhausted { attempts } => SubmitEvent::ConvergedFailed {
+            alloc_id: Some(event.alloc_id.to_string()),
+            terminal_reason: TerminalReason::BackoffExhausted {
+                attempts: *attempts,
+                cause: event.reason.clone(),
+            },
+            reason: Some(event.reason.clone()),
+            error: event.detail.clone(),
+        },
+        TerminalCondition::Custom { type_name, .. } => SubmitEvent::ConvergedFailed {
+            alloc_id: Some(event.alloc_id.to_string()),
+            terminal_reason: TerminalReason::DriverError { cause: event.reason.clone() },
+            reason: Some(event.reason.clone()),
+            error: Some(format!("custom terminal: {type_name}")),
+        },
+        // Forward-compat for future `#[non_exhaustive]` additions to
+        // `TerminalCondition`. Render unknown terminals as a generic
+        // ConvergedFailed{DriverError} carrying the event's existing
+        // cause so the stream still terminates rather than silently
+        // dropping the event.
+        _ => SubmitEvent::ConvergedFailed {
+            alloc_id: Some(event.alloc_id.to_string()),
+            terminal_reason: TerminalReason::DriverError { cause: event.reason.clone() },
+            reason: Some(event.reason.clone()),
+            error: event.detail.clone(),
+        },
+    }
+}
+
+/// On `Lagged(_)` (or the pre-subscribe snapshot), inspect the
+/// LWW-winner `AllocStatusRow`. Per ADR-0037 §4 the row's `terminal`
+/// field is the authoritative durable surface for terminal claims —
+/// no view consultation needed.
+async fn lagged_recover(obs: &dyn ObservationStore, job_id: &JobId) -> Option<SubmitEvent> {
     let rows = obs.alloc_status_rows().await.ok()?;
     let latest =
         rows.into_iter().filter(|r| r.job_id == *job_id).max_by_key(|r| r.updated_at.counter)?;
 
+    if let Some(cond) = &latest.terminal {
+        // Promote the row to a synthetic LifecycleEvent shape so the
+        // projection helper can be reused. `from` mirrors `to`
+        // because we have no prior-state context in the snapshot.
+        let to_wire: AllocStateWire = latest.state.into();
+        let event = LifecycleEvent {
+            alloc_id: latest.alloc_id.clone(),
+            job_id: latest.job_id.clone(),
+            from: to_wire,
+            to: to_wire,
+            reason: latest.reason.clone().unwrap_or(
+                overdrive_core::TransitionReason::DriverInternalError { detail: String::new() },
+            ),
+            detail: latest.detail.clone(),
+            source: crate::api::TransitionSource::Reconciler,
+            at: format!("{}@{}", latest.updated_at.counter, latest.updated_at.writer.as_str()),
+            terminal: Some(cond.clone()),
+        };
+        return Some(submit_event_from_terminal(cond, &event));
+    }
+
+    // Non-terminal — preserve the prior success-path semantics for
+    // Running rows (Phase 1 walking-skeleton single-replica gate).
     match latest.state {
-        // TODO(#140): gate on `running_count >= replicas_desired` for
-        // multi-replica jobs; same single-Running-row shortcut as
-        // `check_terminal`, safe at `replicas == 1`.
         AllocState::Running => Some(SubmitEvent::ConvergedRunning {
             alloc_id: latest.alloc_id.to_string(),
             started_at: format!(
@@ -459,47 +475,8 @@ async fn lagged_recover(
                 latest.updated_at.writer.as_str()
             ),
         }),
-        AllocState::Terminated => {
-            let by = match latest.reason {
-                Some(overdrive_core::TransitionReason::Stopped { by }) => by,
-                _ => StoppedBy::Reconciler,
-            };
-            Some(SubmitEvent::ConvergedStopped { alloc_id: Some(latest.alloc_id.to_string()), by })
-        }
-        AllocState::Failed => {
-            let view = read_view(view_cache, job_id);
-            let used = view.restart_counts.values().copied().max().unwrap_or(0);
-            if used >= RESTART_BACKOFF_CEILING {
-                let cause = latest.reason.clone().unwrap_or(
-                    overdrive_core::TransitionReason::DriverInternalError { detail: String::new() },
-                );
-                Some(SubmitEvent::ConvergedFailed {
-                    alloc_id: Some(latest.alloc_id.to_string()),
-                    terminal_reason: TerminalReason::BackoffExhausted {
-                        attempts: used,
-                        cause: cause.clone(),
-                    },
-                    reason: Some(cause),
-                    error: latest.detail.clone(),
-                })
-            } else {
-                None
-            }
-        }
         _ => None,
     }
-}
-
-/// Read the most recent row's cause-class reason for `job_id`.
-async fn latest_cause(
-    obs: &dyn ObservationStore,
-    job_id: &JobId,
-) -> Option<overdrive_core::TransitionReason> {
-    let rows = obs.alloc_status_rows().await.ok()?;
-    rows.into_iter()
-        .filter(|r| r.job_id == *job_id)
-        .max_by_key(|r| r.updated_at.counter)
-        .and_then(|r| r.reason)
 }
 
 /// Build the synchronous `Accepted` event the handler emits before
@@ -517,12 +494,12 @@ pub fn build_accepted(
 #[allow(clippy::expect_used)]
 mod tests {
     use std::str::FromStr;
-    use std::sync::{Arc, Mutex};
+    use std::sync::Arc;
 
     use overdrive_core::TransitionReason;
     use overdrive_core::id::{AllocationId, JobId, NodeId};
     use overdrive_core::traits::driver::DriverType;
-    use overdrive_core::transition_reason::StoppedBy;
+    use overdrive_core::transition_reason::{StoppedBy, TerminalCondition};
     use overdrive_sim::adapters::observation_store::SimObservationStore;
 
     use crate::action_shim::LifecycleEvent;
@@ -530,16 +507,18 @@ mod tests {
 
     use super::check_terminal;
 
-    // Test budget: 1 behavior (check_terminal → ConvergedStopped on Terminated) × 2 = 2 max.
-    // Using 1 unit test.
+    // Test budget: 1 behavior (check_terminal projects event.terminal
+    // to ConvergedStopped) × 2 = 2 max. Using 1 unit test.
 
-    /// check_terminal returns Some(ConvergedStopped) when event.to == Terminated
-    /// with reason Stopped { by: Reconciler }.
+    /// `check_terminal` returns `Some(ConvergedStopped)` when
+    /// `event.terminal` carries `TerminalCondition::Stopped { by:
+    /// Reconciler }`. Per ADR-0037 §4 the projection reads the
+    /// reconciler-emitted terminal claim, NOT a derived view-state
+    /// recomputation.
     #[tokio::test]
-    async fn check_terminal_returns_converged_stopped_on_terminated_event() {
+    async fn check_terminal_projects_event_terminal_to_converged_stopped() {
         let node = NodeId::from_str("node-a").expect("node id");
         let obs = Arc::new(SimObservationStore::single_peer(node, 0));
-        let view_cache = Arc::new(Mutex::new(std::collections::BTreeMap::new()));
         let alloc_id = AllocationId::from_str("alloc-0").expect("alloc id");
         let job_id = JobId::from_str("job-0").expect("job id");
 
@@ -552,9 +531,10 @@ mod tests {
             detail: None,
             source: TransitionSource::Driver(DriverType::Exec),
             at: "1@node-a".to_string(),
+            terminal: Some(TerminalCondition::Stopped { by: StoppedBy::Reconciler }),
         };
 
-        let result = check_terminal(&*obs, &job_id, &view_cache, &event).await;
+        let result = check_terminal(&*obs, &job_id, &event).await;
 
         assert!(
             matches!(result, Some(SubmitEvent::ConvergedStopped { .. })),

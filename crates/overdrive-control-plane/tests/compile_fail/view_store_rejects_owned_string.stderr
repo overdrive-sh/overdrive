@@ -1,0 +1,12 @@
+error[E0597]: `runtime` does not live long enough
+  --> tests/compile_fail/view_store_rejects_owned_string.rs:34:29
+   |
+33 |     let runtime: String = "job-lifecycle".to_string();
+   |         ------- binding `runtime` declared here
+34 |     let runtime_ref: &str = runtime.as_str();
+   |                             ^^^^^^^ borrowed value does not live long enough
+...
+39 |     let _ = store.write_through_bytes(runtime_ref, &target, &[]).await;
+   |             ---------------------------------------------------- argument requires that `runtime` is borrowed for `'static`
+40 | }
+   | - `runtime` dropped here while still borrowed

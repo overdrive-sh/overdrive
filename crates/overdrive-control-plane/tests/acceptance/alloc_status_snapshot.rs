@@ -28,6 +28,7 @@ use overdrive_control_plane::api::{AllocStateWire, AllocStatusResponse, Transiti
 use overdrive_control_plane::error::ControlPlaneError;
 use overdrive_control_plane::handlers::{AllocStatusQuery, alloc_status};
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
+use overdrive_core::TerminalCondition;
 use overdrive_core::TransitionReason;
 use overdrive_core::aggregate::{
     DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
@@ -39,6 +40,7 @@ use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
 };
 use overdrive_core::transition_reason::{CancelledBy, ResourceEnvelope, StoppedBy};
+use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_store_local::LocalIntentStore;
@@ -62,14 +64,15 @@ fn sample_alloc() -> AllocationId {
 }
 
 fn build_app_state(tmp: &TempDir) -> AppState {
-    let runtime = ReconcilerRuntime::new(tmp.path()).expect("runtime");
+    let runtime =
+        ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime");
     let store = Arc::new(
         LocalIntentStore::open(tmp.path().join("intent.redb")).expect("LocalIntentStore::open"),
     );
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(sample_node(), 0));
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
-    AppState::new(store, obs, Arc::new(runtime), driver)
+    AppState::new(store, obs, Arc::new(runtime), driver, Arc::new(SimClock::new()))
 }
 
 fn sample_spec() -> JobSpecInput {
@@ -113,6 +116,7 @@ async fn write_row(
         updated_at: LogicalTimestamp { counter, writer: sample_node() },
         reason,
         detail,
+        terminal: None,
     };
     state.obs.write(ObservationRow::AllocStatus(row)).await.expect("obs write");
 }
@@ -300,6 +304,73 @@ proptest! {
         };
         prop_assert_eq!(budget.exhausted, used >= max);
     }
+}
+
+// ---------------------------------------------------------------------------
+// S-AS-10 — restart_budget_from_rows derives exhausted=true from BackoffExhausted terminal
+// ---------------------------------------------------------------------------
+
+/// Write a row that carries a `TerminalCondition` — required to exercise
+/// the `BackoffExhausted` arm of `restart_budget_from_rows`.
+async fn write_terminal_row(
+    state: &AppState,
+    alloc: AllocationId,
+    job_id: JobId,
+    state_value: AllocState,
+    counter: u64,
+    terminal: Option<TerminalCondition>,
+) {
+    let row = AllocStatusRow {
+        alloc_id: alloc,
+        job_id,
+        node_id: sample_node(),
+        state: state_value,
+        updated_at: LogicalTimestamp { counter, writer: sample_node() },
+        reason: None,
+        detail: None,
+        terminal,
+    };
+    state.obs.write(ObservationRow::AllocStatus(row)).await.expect("obs write");
+}
+
+/// A row whose `terminal` is `BackoffExhausted { attempts: N }` must cause
+/// the `alloc_status` handler to return `restart_budget.exhausted == true`
+/// and `restart_budget.used == N`. Kills the mutation that deletes the
+/// `Some(TerminalCondition::BackoffExhausted { attempts })` match arm in
+/// `restart_budget_from_rows`.
+#[tokio::test]
+async fn s_as_10_backoff_exhausted_row_sets_restart_budget_exhausted() {
+    let tmp = TempDir::new().expect("tmpdir");
+    let state = build_app_state(&tmp);
+    let job = install_job(&state, sample_spec()).await;
+    let attempts: u32 = 4;
+
+    write_terminal_row(
+        &state,
+        sample_alloc(),
+        job.id.clone(),
+        AllocState::Failed,
+        3,
+        Some(TerminalCondition::BackoffExhausted { attempts }),
+    )
+    .await;
+
+    let resp = alloc_status(
+        State(state.clone()),
+        Query(AllocStatusQuery { job: Some(sample_job_id_str().to_owned()) }),
+    )
+    .await
+    .expect("alloc_status ok");
+
+    let budget = resp.0.restart_budget.expect("restart_budget must be populated");
+    assert!(
+        budget.exhausted,
+        "a BackoffExhausted terminal row must set restart_budget.exhausted = true"
+    );
+    assert_eq!(
+        budget.used, attempts,
+        "restart_budget.used must equal the attempts from the BackoffExhausted terminal"
+    );
 }
 
 // ---------------------------------------------------------------------------

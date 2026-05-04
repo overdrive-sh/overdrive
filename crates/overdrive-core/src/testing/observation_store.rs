@@ -103,6 +103,7 @@ fn alloc_row(scope: &str, idx: usize, state: AllocState, ts: LogicalTimestamp) -
         updated_at: ts,
         reason: None,
         detail: None,
+        terminal: None,
     }
 }
 

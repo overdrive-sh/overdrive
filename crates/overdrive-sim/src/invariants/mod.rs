@@ -107,6 +107,32 @@ pub enum Invariant {
     /// `alloc_status` snapshot. Two rows for the same `alloc_id`
     /// pinned to different nodes is a double-scheduling violation.
     NoDoubleScheduling,
+    /// reconciler-memory-redb step 01-07 — always invariant.
+    /// For arbitrary `View` values, `ViewStore::write_through` followed
+    /// by `ViewStore::bulk_load` returns byte-equal values. proptest-
+    /// backed; covers `JobLifecycleView` (the only meaningful production
+    /// View today) and `()` (the unit-View case used by `NoopHeartbeat`).
+    /// Catches CBOR encode/decode regressions, ciborium-version skew,
+    /// and serde-derive oversights per ADR-0035 §6.
+    ViewStoreRoundtripIsLossless,
+    /// reconciler-memory-redb step 01-07 — always invariant.
+    /// Two `bulk_load` calls against the same backing store produce
+    /// `PartialEq`-equal `BTreeMap` results. Catches iteration-order
+    /// regressions in the `BTreeMap`-backed `SimViewStore` storage —
+    /// any future mutation that swaps `BTreeMap` for `HashMap` or
+    /// otherwise destabilises iteration order would surface here.
+    BulkLoadIsDeterministic,
+    /// reconciler-memory-redb step 01-07 — always invariant.
+    /// Under `SimViewStore::inject_fsync_failure`, the runtime's
+    /// in-memory `BTreeMap` visible through
+    /// `ReconcilerRuntime::loaded_job_lifecycle_views_for_test` MUST
+    /// NOT be updated for the target whose `write_through` failed. The
+    /// load-bearing crash-durability invariant from ADR-0035 §5: the
+    /// fsync-then-memory ordering rule. A reconciler runtime that
+    /// updated the in-memory map before the fsync would surface stale
+    /// state to readers across crashes; this invariant catches the
+    /// inverse ordering at PR time.
+    WriteThroughOrdering,
 }
 
 impl Invariant {
@@ -132,6 +158,11 @@ impl Invariant {
         Self::JobScheduledAfterSubmission,
         Self::DesiredReplicaCountConverges,
         Self::NoDoubleScheduling,
+        // reconciler-memory-redb step 01-07 — ViewStore DST invariants
+        // per ADR-0035 §6.
+        Self::ViewStoreRoundtripIsLossless,
+        Self::BulkLoadIsDeterministic,
+        Self::WriteThroughOrdering,
     ];
 
     /// The canonical kebab-case spelling of this invariant, as a static
@@ -157,6 +188,10 @@ impl Invariant {
             Self::JobScheduledAfterSubmission => "job-scheduled-after-submission",
             Self::DesiredReplicaCountConverges => "desired-replica-count-converges",
             Self::NoDoubleScheduling => "no-double-scheduling",
+            // reconciler-memory-redb step 01-07.
+            Self::ViewStoreRoundtripIsLossless => "view-store-roundtrip-is-lossless",
+            Self::BulkLoadIsDeterministic => "bulk-load-is-deterministic",
+            Self::WriteThroughOrdering => "write-through-ordering",
         }
     }
 }
