@@ -2,15 +2,20 @@
 #
 # Scope: Tier 1 of the four-tier model in `.claude/rules/testing.md`,
 # plus Tier 2 (BPF unit tests) added by #23 (Phase 2.1 aya-rs
-# scaffolding) per ADR-0038. The full Tier 3 kernel matrix
+# scaffolding) per ADR-0038. The single-kernel slice of Tier 3
+# (`integration-test-vm-latest`) is deferred to #152 per
+# upstream-issues.md §A3 (the LVH `images pull` step requires Docker,
+# which the Lima dev VM does not provision; resolved by deferring the
+# nested-VM harness wholesale). The full Tier 3 kernel matrix
 # (integration-test vm against [5.10, 5.15, 6.1, 6.6, latest LTS,
-# bpf-next]) and Tier 4 (veristat / xdp-perf / PREVAIL) remain
-# deferred to #29 / #152 — wiring those against a no-op program would
-# produce meaningless baselines (see upstream-issues.md §A3 for the
-# nested-VM deferral rationale).
+# bpf-next]) and all of Tier 4 (veristat / xdp-perf / PREVAIL) remain
+# deferred to #29 — wiring those against a no-op program would produce
+# meaningless baselines.
 #
 # Required status checks for branch protection on `main` (configure on
-# GitHub under Settings > Branches > Branch protection rules):
+# GitHub under Settings > Branches > Branch protection rules; operators
+# mirror this list in the GitHub branch-protection UI after the first
+# observed pass per `branching-strategy.md` §2):
 #
 #   - fmt-clippy
 #   - test
