@@ -718,13 +718,50 @@ fn cargo_target_dir(workspace_root: &std::path::Path) -> std::path::PathBuf {
         .map_or_else(|| workspace_root.join("target"), std::path::PathBuf::from)
 }
 
+/// Tier 2 — invoke `cargo nextest run -p overdrive-bpf --features
+/// integration-tests --test integration` to drive the
+/// PKTGEN/SETUP/CHECK triptych under
+/// `crates/overdrive-bpf/tests/integration/`.
+///
+/// Per architecture.md §6.1 / `.claude/rules/testing.md` § "Tier 2 —
+/// BPF Unit Tests": each program ships a triptych that loads the BPF
+/// object, drives `BPF_PROG_TEST_RUN` via aya, and asserts on
+/// observable kernel side effects (verdict + map state).
+///
+/// The test target binary is named `integration` (the `tests/
+/// integration.rs` entrypoint per § Layout convention); we pass it
+/// explicitly via `--test integration` rather than the wildcard
+/// `--test '*'` because nextest's CLI does not glob — the wildcard
+/// would be passed verbatim and miss the binary. Architecture.md §6.1
+/// notes the `--test '*'` shape mirrors the stub's documented intent;
+/// the concrete invocation lands the binary name as the integration
+/// suite's single entrypoint per the testing.md Layout convention.
+///
+/// On non-Linux build hosts the triptych test functions are
+/// `#[cfg(target_os = "linux")]`-gated and silently skip — the
+/// command still exits 0 with "no tests run" output, which is the
+/// correct shape for macOS dev (the real gate is Lima / CI).
 fn bpf_unit() -> Result<()> {
-    // Placeholder — `crates/overdrive-bpf` lands in Phase 2. This will
-    // invoke `cargo nextest run -p overdrive-bpf --test '*'` against the
-    // BPF_PROG_TEST_RUN harness. Nextest is the project-wide runner
-    // (see `.config/nextest.toml`); this subcommand keeps the same
-    // invariant.
-    tracing_placeholder("bpf-unit: overdrive-bpf crate lands in Phase 2")
+    which_or_hint(
+        "cargo-nextest",
+        "cargo install cargo-nextest --locked  # or: brew install cargo-nextest",
+    )?;
+    let workspace_root = workspace_root_dir()?;
+    sh(
+        "cargo nextest run -p overdrive-bpf --features integration-tests --test integration",
+        Command::new(cargo())
+            .args([
+                "nextest",
+                "run",
+                "-p",
+                "overdrive-bpf",
+                "--features",
+                "integration-tests",
+                "--test",
+                "integration",
+            ])
+            .current_dir(&workspace_root),
+    )
 }
 
 fn integration_vm(cache_dir: &std::path::Path, kernels: &[String]) -> Result<()> {
@@ -742,11 +779,20 @@ fn integration_vm(cache_dir: &std::path::Path, kernels: &[String]) -> Result<()>
 }
 
 fn verifier_regress() -> Result<()> {
-    tracing_placeholder("verifier-regress: veristat harness lands in Phase 2")
+    // TODO(#29): wire when first real program lands. Per ADR-0038 §6 /
+    // architecture.md §6.3 there is no point baselining verifier
+    // complexity against a no-op `xdp_pass` — the gate would catch
+    // nothing and the baseline would be meaningless. The harness lands
+    // alongside the first real BPF program (POLICY_MAP / SERVICE_MAP /
+    // sockops+kTLS) in Phase 2 issues #24..#27.
+    tracing_placeholder("verifier-regress: veristat harness deferred to #29 (first real program)")
 }
 
 fn xdp_perf() -> Result<()> {
-    tracing_placeholder("xdp-perf: xdp-bench harness lands in Phase 2")
+    // TODO(#29): wire when first real program lands. xdp-bench
+    // throughput / p99 numbers against a no-op program are not a
+    // meaningful regression signal. See architecture.md §6.3.
+    tracing_placeholder("xdp-perf: xdp-bench harness deferred to #29 (first real program)")
 }
 
 fn mutants(args: MutantsArgs) -> Result<()> {

@@ -49,6 +49,30 @@ build-bpf-target = []
 [dependencies]
 aya-ebpf.workspace = true
 
+# Host-side dev-deps for the Tier 2 BPF unit triptych under
+# `tests/integration/`. The triptych is compiled against the HOST
+# target (not `bpfel-unknown-none`) — it loads the pre-built BPF ELF
+# at `target/xtask/bpf-objects/overdrive_bpf.o` via aya's userspace
+# loader and drives `BPF_PROG_TEST_RUN`. Linux-only because:
+#   1. `BPF_PROG_TEST_RUN` is a Linux syscall;
+#   2. `aya` (userspace) pulls in libbpf-sys etc. that don't build on
+#      macOS — same gating as `overdrive-dataplane`'s aya dependency
+#      (architecture.md §5.2).
+# The kernel-side `[dependencies]` block above (with `aya-ebpf`) is
+# unchanged; the bin target stays gated behind `build-bpf-target`
+# (see `[[bin]] required-features` below) so host workflows skip it.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+aya.workspace         = true
+# `aya_obj` is the shared crate that owns the `bpf_attr` union and
+# `BPF_PROG_TEST_RUN` constant. aya 0.13.1 uses it internally
+# (`use aya_obj as obj;`) but does not re-export `aya_obj::generated`,
+# so the test target lists it directly. Pinned to the exact transitive
+# version aya 0.13.1 depends on (= 0.2.1) to keep the dep graph
+# reproducible — bumping aya is the migration trigger.
+aya-obj               = "=0.2.1"
+libc.workspace        = true
+serial_test.workspace = true
+
 [[bin]]
 name = "overdrive-bpf"
 path = "src/main.rs"
