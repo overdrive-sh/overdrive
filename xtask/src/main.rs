@@ -329,6 +329,17 @@ fn run() -> Result<()> {
 /// One-shot developer bootstrap — installs the tools this workspace
 /// depends on. Keep the list here in sync with `.config/nextest.toml`
 /// and the install hints in `xtask::mutants` / `lefthook.yml`.
+///
+/// Phase coverage:
+///
+/// 1. `cargo-nextest` — workspace test runner.
+/// 2. lefthook — git hook manager (probed; skipped if absent because
+///    it cannot be installed via cargo).
+/// 3. **bpf-build toolchain** (`bpf-linker`, `nightly` rustup
+///    toolchain, `rust-src` component on nightly) — delegated to
+///    [`xtask::dev_setup::run`] which is itself test-covered against
+///    the four `ProbeContext` permutations. macOS short-circuits with a
+///    warn per AC7 of step 02-03; Linux installs whatever is missing.
 fn dev_setup() -> Result<()> {
     // 1. cargo-nextest — the project-wide test runner per
     //    `.claude/rules/testing.md` §"Running tests — foreground, always".
@@ -362,6 +373,12 @@ fn dev_setup() -> Result<()> {
              Then re-run `cargo xtask dev-setup` to wire the git hooks."
         );
     }
+
+    // 3. bpf-build toolchain — bpf-linker, nightly rustup toolchain,
+    //    rust-src component on nightly. Per ADR-0038 §4 / step 02-03 /
+    //    upstream-issue A1; planning + execution split lives in
+    //    `xtask::dev_setup` so the argv shapes are unit-testable.
+    xtask::dev_setup::run()?;
 
     eprintln!("xtask dev-setup: done");
     Ok(())

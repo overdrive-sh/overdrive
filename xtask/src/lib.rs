@@ -6,6 +6,7 @@
 
 #![allow(clippy::expect_used, clippy::print_stderr, clippy::unnecessary_wraps)]
 
+pub mod dev_setup;
 pub mod dst;
 pub mod dst_lint;
 pub mod mutants;
