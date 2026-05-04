@@ -129,6 +129,12 @@ mod tests {
     //! and silently absent — the Tier 3 LVH smoke (`cargo xtask
     //! integration-test vm latest`, step 03-02) is the corresponding
     //! Linux-side gate.
+
+    // Imports are only consumed by the `#[cfg(not(target_os =
+    // "linux"))]` test below, so they're dead on Linux. The cfg gate
+    // can't sit on `use` directly without complicating the macOS
+    // path; allowing here keeps both paths clean.
+    #[cfg(not(target_os = "linux"))]
     use super::{DataplaneError, EbpfDataplane};
 
     /// On non-Linux build targets the constructor returns

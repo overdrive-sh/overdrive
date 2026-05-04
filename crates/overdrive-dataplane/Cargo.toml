@@ -55,5 +55,12 @@ tracing.workspace        = true
 [target.'cfg(target_os = "linux")'.dependencies]
 aya.workspace = true
 
+# Integration-test dev-deps. `serial_test` serialises tests that
+# mutate process-global state — here, the on-disk BPF artifact path
+# under `target/xtask/bpf-objects/`. See `.claude/rules/testing.md`
+# § "Tests that mutate process-global state".
+[dev-dependencies]
+serial_test.workspace = true
+
 [lints]
 workspace = true
