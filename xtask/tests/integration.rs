@@ -16,7 +16,6 @@
 #![allow(clippy::expect_used)]
 
 mod integration {
-    mod bpf_build;
     mod crate_class_metadata;
     mod dev_setup_bpf_linker;
 }
