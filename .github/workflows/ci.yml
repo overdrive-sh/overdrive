@@ -100,17 +100,23 @@ jobs:
       - name: Install mold linker
         run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends mold
 
+      - name: Cache cargo target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "phase-1-fmt-clippy"
+
+      # MUST run AFTER Swatinem/rust-cache@v2: the cached tarball is the
+      # entire workspace `target/` directory and its restore step
+      # extracts over `target/xtask/bpf-objects/`, clobbering anything
+      # written there by an earlier `download-artifact` invocation.
+      # Downloading after the cache restore guarantees the BPF object is
+      # the file present when build.rs runs.
       - name: Download BPF object artifact
         uses: actions/download-artifact@v4
         with:
           name: bpf-object
           path: target/xtask/bpf-objects/
           if-no-files-found: error
-
-      - name: Cache cargo target
-        uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: "phase-1-fmt-clippy"
 
       # sccache setup is soft-fail: if the GHA cache backend is unreachable
       # (as happened on 2026-04-23), RUSTC_WRAPPER is left unset and cargo
@@ -174,16 +180,18 @@ jobs:
       - name: Install mold linker
         run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends mold
 
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "phase-1-test"
+
+      # MUST run AFTER Swatinem/rust-cache@v2 — see fmt-clippy job above
+      # for rationale (cache tarball restore clobbers the BPF artifact).
       - name: Download BPF object artifact
         uses: actions/download-artifact@v4
         with:
           name: bpf-object
           path: target/xtask/bpf-objects/
           if-no-files-found: error
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: "phase-1-test"
 
       # See fmt-clippy job above for rationale.
       - id: sccache-setup
@@ -258,16 +266,18 @@ jobs:
       - name: Install mold linker
         run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends mold
 
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "phase-1-integration"
+
+      # MUST run AFTER Swatinem/rust-cache@v2 — see fmt-clippy job above
+      # for rationale (cache tarball restore clobbers the BPF artifact).
       - name: Download BPF object artifact
         uses: actions/download-artifact@v4
         with:
           name: bpf-object
           path: target/xtask/bpf-objects/
           if-no-files-found: error
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: "phase-1-integration"
 
       - id: sccache-setup
         name: Setup sccache (soft-fail on cache backend outage)
@@ -559,16 +569,18 @@ jobs:
       - name: Install mold linker
         run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends mold
 
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "phase-1-mutants"
+
+      # MUST run AFTER Swatinem/rust-cache@v2 — see fmt-clippy job above
+      # for rationale (cache tarball restore clobbers the BPF artifact).
       - name: Download BPF object artifact
         uses: actions/download-artifact@v4
         with:
           name: bpf-object
           path: target/xtask/bpf-objects/
           if-no-files-found: error
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: "phase-1-mutants"
 
       # See fmt-clippy job above for rationale.
       - id: sccache-setup
@@ -809,6 +821,8 @@ jobs:
         with:
           tool: cargo-nextest
 
+      # MUST run AFTER Swatinem/rust-cache@v2 — see fmt-clippy job above
+      # for rationale (cache tarball restore clobbers the BPF artifact).
       - name: Download BPF object artifact
         uses: actions/download-artifact@v4
         with:
