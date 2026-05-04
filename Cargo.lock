@@ -3845,6 +3845,7 @@ dependencies = [
  "rand 0.8.6",
  "serde",
  "serde_json",
+ "serial_test",
  "syn",
  "tempfile",
  "utoipa",

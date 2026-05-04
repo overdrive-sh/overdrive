@@ -52,6 +52,21 @@ enum Task {
         manifest_path: std::path::PathBuf,
     },
 
+    /// Compile `crates/overdrive-bpf` against `bpfel-unknown-none` and
+    /// copy the produced ELF to the load-bearing stable path
+    /// `target/xtask/bpf-objects/overdrive_bpf.o` that the loader's
+    /// `include_bytes!` references.
+    ///
+    /// Per ADR-0038 §3.1 the build is a child-process invocation of
+    /// `cargo +nightly build --release --target bpfel-unknown-none -Z
+    /// build-std=core --features build-bpf-target --manifest-path
+    /// crates/overdrive-bpf/Cargo.toml` — no recursive cargo from
+    /// `build.rs`. The `--features build-bpf-target` flag is required
+    /// to gate-in the kernel-side `[[bin]]` (host workflows skip it
+    /// via `required-features` to avoid the `#![no_std]` lang-item
+    /// conflict on the host triple — see crates/overdrive-bpf/Cargo.toml).
+    BpfBuild,
+
     /// Tier 2 — BPF unit tests via `BPF_PROG_TEST_RUN`.
     BpfUnit,
 
@@ -293,6 +308,7 @@ fn run() -> Result<()> {
         Task::Dst { seed, only } => xtask::dst::run(seed, only.as_deref()),
         Task::DstLint { manifest_path } => xtask::dst_lint::run(&manifest_path),
         Task::YamlFreeCli { manifest_path } => xtask::yaml_free_cli::run(&manifest_path),
+        Task::BpfBuild => bpf_build(),
         Task::BpfUnit => bpf_unit(),
         Task::IntegrationTest { scope } => match scope {
             IntegrationScope::Vm { cache_dir, kernels } => integration_vm(&cache_dir, &kernels),
@@ -557,9 +573,132 @@ fn which_or_hint(binary: &str, install_hint: &str) -> Result<()> {
         .status()
         .is_ok_and(|s| s.success());
     if !found {
+        // If the hint already starts with the canonical
+        // "`<binary>` not found on PATH." prefix, surface it verbatim
+        // so callers like `bpf_build` can supply a multi-line hint
+        // without the prefix being doubled. Otherwise fall back to the
+        // single-line shape used by every other call site.
+        let canonical_prefix = format!("`{binary}` not found on PATH");
+        if install_hint.starts_with(&canonical_prefix) {
+            bail!("{install_hint}");
+        }
         bail!("`{binary}` not found on PATH. Install it with: {install_hint}");
     }
     Ok(())
+}
+
+/// Compile `crates/overdrive-bpf` against `bpfel-unknown-none` and
+/// copy the resulting ELF to the load-bearing stable path
+/// `target/xtask/bpf-objects/overdrive_bpf.o` that the loader's
+/// `include_bytes!` references (see ADR-0038 §3.1, architecture.md
+/// §3.1, wave-decisions.md D3).
+///
+/// Three failure modes, all surface as a structured `eyre::Report`
+/// with non-zero exit:
+///
+/// 1. `bpf-linker` is not on PATH — caught by `which_or_hint` with a
+///    hint listing the three install paths (`cargo install --locked
+///    bpf-linker`, `cargo xtask dev-setup`, Lima re-provision).
+/// 2. The child `cargo +nightly build` exits non-zero — captured
+///    stderr is propagated.
+/// 3. File I/O on the copy step (parent dir creation, `fs::copy`) —
+///    propagated with the source/destination paths.
+///
+/// The copy is `fs::copy`, not move — keep the cargo-target ELF in
+/// place so subsequent rebuilds short-circuit on no-change.
+fn bpf_build() -> Result<()> {
+    which_or_hint("bpf-linker", &bpf_linker_install_hint())?;
+
+    let workspace_root = workspace_root_dir()?;
+    let manifest = workspace_root.join("crates/overdrive-bpf/Cargo.toml");
+
+    // Invoke through `rustup run nightly cargo …` rather than the
+    // bare `cargo +nightly` form. The `$CARGO` env var that
+    // `cargo()` resolves to is populated by cargo itself with the
+    // direct cargo binary (not rustup's shim), and the direct
+    // binary does not parse `+toolchain` directives. Going through
+    // rustup is the canonical way to pin a non-default toolchain
+    // when the parent process was launched by stable cargo (rustup
+    // book § "Channels and Toolchain Specifiers"). The
+    // `-Z build-std=core` flag requires nightly per
+    // `wave-decisions.md` D3 / ADR-0038 §3.1; nightly is provisioned
+    // alongside stable on the dev surfaces (Lima, dev-setup).
+    sh(
+        "rustup run nightly cargo build (overdrive-bpf, bpfel-unknown-none)",
+        Command::new("rustup")
+            .args([
+                "run",
+                "nightly",
+                "cargo",
+                "build",
+                "--release",
+                "--target",
+                "bpfel-unknown-none",
+                "-Z",
+                "build-std=core",
+                "--features",
+                "build-bpf-target",
+                "--manifest-path",
+            ])
+            .arg(&manifest)
+            .current_dir(&workspace_root),
+    )?;
+
+    // Copy the produced ELF to the stable path the loader's
+    // `include_bytes!` references. The `bpfel-unknown-none/release/`
+    // directory is cargo-target-dir-relative; respect $CARGO_TARGET_DIR
+    // when set so the copy still lands when the target dir is
+    // redirected (e.g. Lima's `/home/marcus.guest/.cargo-target-lima`).
+    let target_dir = cargo_target_dir(&workspace_root);
+    let src = target_dir.join("bpfel-unknown-none/release/overdrive-bpf");
+    let dst_dir = workspace_root.join("target/xtask/bpf-objects");
+    let dst = dst_dir.join("overdrive_bpf.o");
+
+    std::fs::create_dir_all(&dst_dir)
+        .map_err(|e| color_eyre::eyre::eyre!("failed to create {}: {e}", dst_dir.display()))?;
+    std::fs::copy(&src, &dst).map_err(|e| {
+        color_eyre::eyre::eyre!(
+            "failed to copy BPF ELF {} -> {}: {e}",
+            src.display(),
+            dst.display()
+        )
+    })?;
+
+    eprintln!("xtask: bpf-build wrote {}", dst.display());
+    Ok(())
+}
+
+/// Hint string returned to the operator when `bpf-linker` is missing.
+/// Per ADR-0038 §4 / wave-decisions.md D4 the hint MUST name all three
+/// install paths so the operator picks the one matching their dev
+/// surface — Lima users re-provision; non-Lima Linux developers run
+/// `cargo xtask dev-setup` (step 02-03); anyone else uses the raw
+/// `cargo install --locked` form. `--locked` is mandatory across every
+/// install site for reproducibility (ADR-0038 §4).
+fn bpf_linker_install_hint() -> String {
+    "`bpf-linker` not found on PATH. Install with one of:\n  \
+     • `cargo install --locked bpf-linker`\n  \
+     • `cargo xtask dev-setup` (non-Lima Linux dev surface)\n  \
+     • re-provision the Lima VM (`cargo xtask lima delete && cargo xtask lima up`)\n\
+     See ADR-0038 §4 for toolchain provisioning."
+        .to_string()
+}
+
+/// Resolve the workspace root. Uses `cargo_metadata` (already a build
+/// dep) so the path is correct even when xtask is launched from a
+/// nested working directory.
+fn workspace_root_dir() -> Result<std::path::PathBuf> {
+    let metadata = cargo_metadata::MetadataCommand::new().no_deps().exec()?;
+    Ok(metadata.workspace_root.into_std_path_buf())
+}
+
+/// Resolve the cargo target dir, honouring `$CARGO_TARGET_DIR` when
+/// set. Lima dev sets this to `/home/marcus.guest/.cargo-target-lima`
+/// so the same workspace can be built from macOS host and Linux guest
+/// without colliding fingerprints.
+fn cargo_target_dir(workspace_root: &std::path::Path) -> std::path::PathBuf {
+    std::env::var_os("CARGO_TARGET_DIR")
+        .map_or_else(|| workspace_root.join("target"), std::path::PathBuf::from)
 }
 
 fn bpf_unit() -> Result<()> {
