@@ -625,18 +625,11 @@ pub async fn run_convergence_tick(
     // On crash between the two, the next boot's `bulk_load` recovers
     // the persisted value (which is the intended source of truth).
     //
-    // The persist-before-dispatch ordering also matters for the
-    // streaming submit handler (`crate::streaming`): the action shim's
-    // dispatch fires a `LifecycleEvent` on `state.lifecycle_events`,
-    // and the streaming subscriber's `check_terminal` reads
-    // `view_for_job_lifecycle` to decide whether the alloc has hit
-    // `BackoffExhausted` (`restart_counts >= RESTART_BACKOFF_CEILING`).
-    // The view MUST reflect the just-computed `next_view` before the
-    // event is broadcast, otherwise the subscriber sees stale
-    // `restart_counts` and the streaming cap fires before
-    // `BackoffExhausted` is detected. Pre-ADR-0035 the equivalent
-    // `store_cached_view` call sat in this same slot for the same
-    // reason.
+    // The streaming subscriber (`crate::streaming::check_terminal`)
+    // does NOT read the view — per ADR-0037 §4 it projects
+    // `event.terminal` directly from the `LifecycleEvent` the action
+    // shim broadcasts. View consistency is therefore not a constraint
+    // on this ordering; durability is the sole load-bearing reason.
     state
         .runtime
         .persist_view(reconciler_name, target, next_view)
