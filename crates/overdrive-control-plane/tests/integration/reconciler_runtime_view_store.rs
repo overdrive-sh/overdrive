@@ -59,11 +59,16 @@ async fn runtime_refuses_to_start_when_probe_fails() {
     let result = runtime.register(AnyReconciler::NoopHeartbeat(NoopHeartbeat::canonical())).await;
 
     let err = result.expect_err("register must propagate probe failure");
-    let rendered = err.to_string();
     assert!(
-        matches!(err, ControlPlaneError::Internal(_)),
-        "probe failure must map to ControlPlaneError::Internal, got {err:?}"
+        matches!(
+            err,
+            ControlPlaneError::ViewStoreBoot(
+                overdrive_control_plane::error::ViewStoreBootError::Probe { .. }
+            )
+        ),
+        "probe failure must map to ControlPlaneError::ViewStoreBoot(Probe), got {err:?}"
     );
+    let rendered = err.to_string();
     assert!(
         rendered.contains("probe") || rendered.contains("fsync"),
         "rendered cause must name the probe failure, got: {rendered}"

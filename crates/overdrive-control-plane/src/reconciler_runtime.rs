@@ -201,10 +201,10 @@ impl ReconcilerRuntime {
         // restarting the binary; mid-process probe failure during a
         // late `register` still surfaces with the same shape.
         self.view_store.probe().await.map_err(|e| {
-            ControlPlaneError::internal(
-                format!("ReconcilerRuntime::register({name}): probe failed"),
-                e,
-            )
+            ControlPlaneError::from(crate::error::ViewStoreBootError::Probe {
+                reconciler: name.clone(),
+                source: e,
+            })
         })?;
 
         // Step 2 — typed bulk-load. The per-variant dispatch picks the
@@ -215,10 +215,10 @@ impl ReconcilerRuntime {
             AnyReconciler::JobLifecycle(_) => {
                 let loaded: BTreeMap<TargetResource, JobLifecycleView> =
                     self.view_store.bulk_load(&name).await.map_err(|e| {
-                        ControlPlaneError::internal(
-                            format!("ReconcilerRuntime::register({name}): bulk_load failed"),
-                            e,
-                        )
+                        ControlPlaneError::from(crate::error::ViewStoreBootError::BulkLoad {
+                            reconciler: name.clone(),
+                            source: e,
+                        })
                     })?;
                 AnyViewMap::JobLifecycle(loaded)
             }
@@ -404,17 +404,13 @@ impl ReconcilerRuntime {
     /// be opened (e.g. concurrent open in the same process).
     #[doc(hidden)]
     pub fn new_with_redb_view_store_for_test(data_dir: &Path) -> Result<Self, ControlPlaneError> {
-        let store: Arc<dyn ViewStore> = Arc::new(
-            crate::view_store::redb::RedbViewStore::open(data_dir).map_err(|e| {
-                ControlPlaneError::internal(
-                    format!(
-                        "ReconcilerRuntime::new_with_redb_view_store_for_test: open RedbViewStore at {} failed",
-                        data_dir.display()
-                    ),
-                    e,
-                )
-            })?,
-        );
+        let store: Arc<dyn ViewStore> =
+            Arc::new(crate::view_store::redb::RedbViewStore::open(data_dir).map_err(|e| {
+                ControlPlaneError::from(crate::error::ViewStoreBootError::Open {
+                    path: crate::view_store::redb::RedbViewStore::resolve_path(data_dir),
+                    source: e,
+                })
+            })?);
         Self::new(data_dir, store)
     }
 

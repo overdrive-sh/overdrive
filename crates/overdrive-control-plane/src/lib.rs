@@ -482,10 +482,13 @@ pub async fn run_server_with_obs_and_driver(
     // with `ControlPlaneError::Internal`; the surrounding `?` surfaces
     // it to the operator via the binary-layer error formatter
     // (`overdrive-cli` logs `health.startup.refused` and exits non-zero).
-    let view_store: Arc<dyn view_store::ViewStore> = Arc::new(
-        view_store::redb::RedbViewStore::open(&config.data_dir)
-            .map_err(|e| error::ControlPlaneError::internal("open RedbViewStore", e))?,
-    );
+    let view_store: Arc<dyn view_store::ViewStore> =
+        Arc::new(view_store::redb::RedbViewStore::open(&config.data_dir).map_err(|e| {
+            error::ViewStoreBootError::Open {
+                path: view_store::redb::RedbViewStore::resolve_path(&config.data_dir),
+                source: e,
+            }
+        })?);
     let mut runtime = reconciler_runtime::ReconcilerRuntime::new(&config.data_dir, view_store)?;
     runtime.register(noop_heartbeat()).await?;
     runtime.register(job_lifecycle()).await?;
