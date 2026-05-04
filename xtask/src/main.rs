@@ -768,10 +768,18 @@ fn integration_vm(cache_dir: &std::path::Path, kernels: &[String]) -> Result<()>
     if kernels.is_empty() {
         bail!("specify at least one kernel (e.g. 5.15, 6.1, 6.6, latest, bpf-next)");
     }
-    // Placeholder — Tier 3 harness lands in Phase 2. Will reuse aya's
-    // `cargo xtask integration-test vm --cache-dir <dir> <KERNEL>...`.
+    // Placeholder — Tier 3 nested-VM kernel-matrix harness is queued
+    // for issue #152 (split out of #23 during DELIVER per
+    // `docs/feature/phase-2-aya-rs-scaffolding/deliver/upstream-issues.md`
+    // § A3). The original architecture (architecture.md §6.2) wired
+    // `cargo xtask integration-test vm latest` to LVH; that was
+    // dropped from #23 because (a) for a no-op `xdp_pass` the real-
+    // attach path adds zero coverage over Tier 2's
+    // `BPF_PROG_TEST_RUN`, and (b) nested-VM machinery only earns
+    // its keep when running against a kernel different from the
+    // host environment, which is the deferred kernel-matrix scope.
     let summary = format!(
-        "integration-test vm: Phase 2. cache={}, kernels={}",
+        "integration-test vm: nested-VM harness deferred to #152. cache={}, kernels={}",
         cache_dir.display(),
         kernels.join(",")
     );
