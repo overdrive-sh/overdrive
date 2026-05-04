@@ -1,9 +1,13 @@
-# Overdrive CI — Phase 1 foundation.
+# Overdrive CI — Phase 1 foundation + Phase 2.1 eBPF scaffolding.
 #
-# Scope: Tier 1 of the four-tier model in `.claude/rules/testing.md`.
-# Phase 1 has no eBPF code, so Tiers 2 (BPF unit), 3 (integration-test vm
-# kernel matrix), and 4 (veristat / xdp-perf / PREVAIL) are deliberately
-# out of scope and will be introduced when the corresponding code lands.
+# Scope: Tier 1 of the four-tier model in `.claude/rules/testing.md`,
+# plus Tier 2 (BPF unit tests) added by #23 (Phase 2.1 aya-rs
+# scaffolding) per ADR-0038. The full Tier 3 kernel matrix
+# (integration-test vm against [5.10, 5.15, 6.1, 6.6, latest LTS,
+# bpf-next]) and Tier 4 (veristat / xdp-perf / PREVAIL) remain
+# deferred to #29 / #152 — wiring those against a no-op program would
+# produce meaningless baselines (see upstream-issues.md §A3 for the
+# nested-VM deferral rationale).
 #
 # Required status checks for branch protection on `main` (configure on
 # GitHub under Settings > Branches > Branch protection rules):
@@ -14,6 +18,8 @@
 #   - dst-lint
 #   - yaml-free-cli
 #   - mutants-diff
+#   - bpf-build       (added in #23 — Phase 2.1)
+#   - bpf-unit        (added in #23 — Phase 2.1)
 #
 # Rationale references:
 #   - ADR-0006  (`cargo xtask dst` + `dst-lint` are the required CI checks;
@@ -604,3 +610,177 @@ jobs:
           else
             echo "::error title=mutants failed::no mutants-summary.json produced; check artifact"
           fi
+
+  # -------------------------------------------------------------------
+  # bpf-build — Phase 2.1 kernel-side ELF compilation.
+  #
+  # Per devops/ci-cd-pipeline.md §2.1 + ADR-0038 §3, §4. Runs
+  # `cargo xtask bpf-build` to produce
+  # `target/xtask/bpf-objects/overdrive_bpf.o`, the artifact every
+  # downstream BPF test job consumes.
+  #
+  # Provisions bpf-linker via `cargo install --locked bpf-linker`
+  # (--locked is mandatory per ADR-0038 §4 for reproducibility — same
+  # primitive Lima uses, no CI-specific install path).
+  #
+  # `rust-src` component is required because the bpf-target build runs
+  # `cargo build ... -Z build-std=core` which rebuilds `core` from
+  # source.
+  # -------------------------------------------------------------------
+  bpf-build:
+    name: bpf-build
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          # rust-src is required for `-Z build-std=core` against the
+          # `bpfel-unknown-none` target (no prebuilt std/core for that
+          # target).
+          components: rust-src
+
+      # mold is the linker per .cargo/config.toml; ubuntu-latest does
+      # not ship it.
+      - name: Install mold linker
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends mold
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Independent cache from the existing `phase-1-*` keys so
+          # phase-1 cache invalidation does not cascade. Also caches
+          # `~/.cargo/bin/bpf-linker` after the first install.
+          shared-key: "phase-2-bpf-build"
+
+      # See fmt-clippy job above for rationale.
+      - id: sccache-setup
+        name: Setup sccache (soft-fail on cache backend outage)
+        continue-on-error: true
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Enable sccache when setup succeeded
+        if: steps.sccache-setup.outcome == 'success'
+        run: |
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+
+      - name: Warn when sccache unavailable
+        if: steps.sccache-setup.outcome != 'success'
+        run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
+
+      - name: Install bpf-linker
+        # --locked is mandatory per ADR-0038 §4 for reproducibility.
+        # Cached by Swatinem/rust-cache via `~/.cargo/bin` after the
+        # first run.
+        run: cargo install --locked bpf-linker
+
+      - name: cargo xtask bpf-build
+        # The xtask wrapper invokes `cargo build --release --target
+        # bpfel-unknown-none -Z build-std=core` against
+        # crates/overdrive-bpf and copies the resulting ELF to
+        # target/xtask/bpf-objects/overdrive_bpf.o (the stable path
+        # mandated by ADR-0038 §3).
+        run: cargo xtask bpf-build
+
+      - name: Upload BPF object artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bpf-object
+          path: target/xtask/bpf-objects/overdrive_bpf.o
+          retention-days: 14
+          # if-no-files-found: error is load-bearing — without it a
+          # missing artifact silently no-ops and the downstream job
+          # fails with a confusing surface.
+          if-no-files-found: error
+
+  # -------------------------------------------------------------------
+  # bpf-unit — Phase 2.1 Tier 2 BPF unit tests.
+  #
+  # Per devops/ci-cd-pipeline.md §2.2 + .claude/rules/testing.md §Tier 2.
+  # Runs `cargo xtask bpf-unit` (which invokes `cargo nextest run -p
+  # overdrive-bpf --features integration-tests --test '*'`) against the
+  # PKTGEN/SETUP/CHECK triptych. Asserts via `BPF_PROG_TEST_RUN` that
+  # the no-op xdp_pass program returns XDP_PASS and the LruHashMap
+  # counter increments 0 → 1.
+  #
+  # Capability requirement (per upstream-issues.md §A2): Ubuntu 22.04+
+  # ships `kernel.unprivileged_bpf_disabled = 2`, which makes
+  # `BPF_PROG_LOAD` (called before `BPF_PROG_TEST_RUN`) fail with EPERM
+  # for unprivileged users. The cargo xtask bpf-unit step runs under
+  # `sudo` to provide CAP_BPF. Locally, `cargo xtask lima run -- cargo
+  # xtask bpf-unit` does the same via the canonical Lima wrapper.
+  # Earlier docs at ci-cd-pipeline.md §2.2 claimed otherwise; see
+  # upstream-issues.md §A2 for the empirical correction.
+  # -------------------------------------------------------------------
+  bpf-unit:
+    name: bpf-unit
+    runs-on: ubuntu-latest
+    needs: bpf-build
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # mold is the linker per .cargo/config.toml; ubuntu-latest does
+      # not ship it.
+      - name: Install mold linker
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends mold
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "phase-2-bpf-unit"
+
+      # See fmt-clippy job above for rationale.
+      - id: sccache-setup
+        name: Setup sccache (soft-fail on cache backend outage)
+        continue-on-error: true
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Enable sccache when setup succeeded
+        if: steps.sccache-setup.outcome == 'success'
+        run: |
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+
+      - name: Warn when sccache unavailable
+        if: steps.sccache-setup.outcome != 'success'
+        run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
+
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+
+      - name: Download BPF object artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bpf-object
+          # Materialises overdrive_bpf.o at the path the loader's
+          # `include_bytes!` and the build.rs shim both reference (the
+          # stable path mandated by ADR-0038 §3).
+          path: target/xtask/bpf-objects/
+          # Fail fast at the boundary — without this a missing-artifact
+          # case (e.g. bpf-build panicked but emitted nothing) silently
+          # no-ops and the downstream failure surfaces as a confusing
+          # build.rs shim error.
+          if-no-files-found: error
+
+      - name: cargo xtask bpf-unit
+        # `sudo -E env "PATH=$PATH"` matches the `integration` and
+        # `mutants-diff` jobs above. CAP_BPF is required because Ubuntu
+        # 22.04+ ships `kernel.unprivileged_bpf_disabled = 2` — see
+        # upstream-issues.md §A2 for the empirical correction to
+        # ci-cd-pipeline.md §2.2's earlier "no CAP_BPF needed" claim.
+        run: sudo -E env "PATH=$PATH" cargo xtask bpf-unit
+
+      - name: Upload nextest JUnit report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bpf-unit-junit
+          path: target/nextest/ci/junit.xml
+          retention-days: 14
+          if-no-files-found: warn
