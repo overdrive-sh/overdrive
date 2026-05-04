@@ -29,28 +29,23 @@ use serial_test::serial;
 
 #[test]
 #[serial(env)]
-fn build_rs_emits_diagnostic_when_artifact_missing() {
+fn build_rs_emits_diagnostic_when_artifact_missing() -> Result<(), Box<dyn std::error::Error>> {
     let workspace_root = workspace_root();
     let artifact = workspace_root.join("target/xtask/bpf-objects/overdrive_bpf.o");
 
     // Snapshot any existing artifact so the test is reversible: the
     // placeholder produced by the GREEN setup, or a real
     // `cargo xtask bpf-build` output, must survive this test.
-    let backup = if artifact.exists() {
-        Some(std::fs::read(&artifact).expect("snapshot existing artifact"))
-    } else {
-        None
-    };
+    let backup = if artifact.exists() { Some(std::fs::read(&artifact)?) } else { None };
 
     if artifact.exists() {
-        std::fs::remove_file(&artifact).expect("remove artifact for test");
+        std::fs::remove_file(&artifact)?;
     }
 
     let output = Command::new("cargo")
         .args(["check", "-p", "overdrive-dataplane"])
         .current_dir(&workspace_root)
-        .output()
-        .expect("spawn cargo check");
+        .output()?;
 
     // Restore the artifact (best-effort) BEFORE asserting so a panic
     // here does not leak a missing-artifact state to later tests.
@@ -75,6 +70,8 @@ fn build_rs_emits_diagnostic_when_artifact_missing() {
         stderr.contains("cargo xtask bpf-build"),
         "stderr should name the fix command `cargo xtask bpf-build`. Got:\n{stderr}"
     );
+
+    Ok(())
 }
 
 fn workspace_root() -> PathBuf {
