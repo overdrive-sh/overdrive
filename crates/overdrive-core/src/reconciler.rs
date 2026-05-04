@@ -897,19 +897,20 @@ pub const RESTART_BACKOFF_DURATION: Duration = Duration::from_secs(1);
 
 /// Per-attempt restart backoff policy lookup.
 ///
-/// **Phase 1 is degenerate-constant**: every `attempt` value yields
-/// the same [`RESTART_BACKOFF_DURATION`]. The function exists as a
-/// stability anchor so call sites stay unchanged when
-/// operator-configurable per-job policy lands in Phase 2+ (per issue
-/// #141 'Out' section). The leading underscore on `_attempt` is
-/// deliberate: the parameter is currently unused (degenerate policy
-/// ignores attempt count) but lives in the signature so a future
-/// progressive-backoff schedule (e.g. `RESTART_BACKOFF_DURATION *
-/// 2_u32.pow(attempt)`) does not require a breaking API change.
+/// **Today this is degenerate-constant**: every `attempt` value
+/// yields the same [`RESTART_BACKOFF_DURATION`]. The function exists
+/// as a stability anchor so call sites stay unchanged when
+/// operator-configurable per-job policy lands — TODO(#137), deferred
+/// from #141's 'Out' section. The leading underscore on `_attempt`
+/// is deliberate: the parameter is currently unused (degenerate
+/// policy ignores attempt count) but lives in the signature so a
+/// future progressive-backoff schedule (e.g.
+/// `RESTART_BACKOFF_DURATION * 2_u32.pow(attempt)`) does not require
+/// a breaking API change.
 ///
-/// Operator-configurable per-job policy is Phase 2+ scope and will
-/// thread a `&JobBackoffPolicy` (or similar) through this signature
-/// rather than relying on the workspace-global constant.
+/// TODO(#137): operator-configurable per-job policy will thread a
+/// `&RestartPolicy` through this signature rather than relying on
+/// the workspace-global constant.
 ///
 /// Persist-inputs discipline: callers MUST persist the *attempt
 /// count* (and a `last_failure_seen_at` timestamp), not the deadline
@@ -1024,8 +1025,8 @@ impl Reconciler for JobLifecycle {
         match desired.job.as_ref() {
             // Absent: no desired job. The Stop branch above handles
             // explicit stops; an absent job with stale Running allocs
-            // is a Phase 2+ concern (cleanup reconciler) — for now we
-            // emit nothing and pass the view through unchanged.
+            // is TODO(#148) (cleanup reconciler) — for now we emit
+            // nothing and pass the view through unchanged.
             None => (Vec::new(), view.clone()),
             // Run: a job is desired.
             Some(job) => {
