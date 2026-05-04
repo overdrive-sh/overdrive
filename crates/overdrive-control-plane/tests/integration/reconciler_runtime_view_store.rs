@@ -16,6 +16,13 @@
 //!    unchanged. Verified by injecting an fsync failure on tick N+1
 //!    and asserting the loaded view at tick N+2 still reflects the
 //!    original value.
+//! 4. `runtime_skips_write_through_when_next_view_equals_in_memory`
+//!    (Eq-diff additive extension per ADR-0035 §1, May 2026) — when
+//!    a reconciler returns a `next_view` that is `Eq`-equal to the
+//!    in-memory `view` it was given, the runtime MUST skip both
+//!    `ViewStore::write_through` and the in-memory map insert. The
+//!    fsync-then-memory ordering for the non-equal case is
+//!    independently pinned by scenario 3 above.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -171,4 +178,110 @@ async fn runtime_writes_through_before_in_memory_update() {
         "store must NOT have persisted the failed write"
     );
     let _ = (Instant::now(), Duration::from_millis(0));
+}
+
+/// Eq-diff additive extension per ADR-0035 §1: when a reconciler
+/// returns a `next_view` byte-equal (`PartialEq`) to the in-memory
+/// `view` it was given, the runtime MUST skip both `write_through`
+/// and the in-memory map insert. The fsync is the expensive operation
+/// — eliminating it on no-op ticks is the whole point of the
+/// extension.
+///
+/// Test shape:
+/// 1. Seed the runtime's in-memory map with a known view V (via the
+///    test-only `seed_job_lifecycle_view_for_test` helper, bypassing
+///    the store on purpose so the assertion below is unambiguous).
+/// 2. Reset the [`SimViewStore`]'s `write_through_count` to zero
+///    (clears the probe-internal write from `register`).
+/// 3. Call `apply_next_view_for_test` with V (i.e. `next_view == view`).
+/// 4. Assert: `write_through_count` is still zero (no fsync happened).
+/// 5. Assert: the in-memory map still carries V (unchanged).
+///
+/// Mutation testing: a missed `==` swap or dropped match arm in the
+/// runtime gate would let the fsync fire on equal views, which this
+/// test catches. The `WriteThroughOrdering` invariant (test 3 above)
+/// continues to assert the fsync-then-memory ordering for the
+/// not-equal case.
+#[tokio::test]
+async fn runtime_skips_write_through_when_next_view_equals_in_memory() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let sim = Arc::new(SimViewStore::new());
+    let n = name("job-lifecycle");
+    let t = target("job/payments");
+
+    let mut runtime =
+        ReconcilerRuntime::new(tmp.path(), sim.clone() as Arc<dyn ViewStore>).expect("runtime");
+    runtime
+        .register(AnyReconciler::JobLifecycle(JobLifecycle::canonical()))
+        .await
+        .expect("register");
+
+    // Seed an in-memory view directly. Using the test-only seeder
+    // (rather than `apply_next_view_for_test`) keeps this test
+    // independent of the very gate it's about to assert on — the
+    // seed path bypasses `persist_view` entirely.
+    let mut seeded = JobLifecycleView::default();
+    seeded.restart_counts.insert(alloc("alloc-payments-0"), 2);
+    seeded.last_failure_seen_at.insert(
+        alloc("alloc-payments-0"),
+        UnixInstant::from_unix_duration(Duration::from_secs(42)),
+    );
+    runtime.seed_job_lifecycle_view_for_test(&t, seeded.clone());
+
+    // Reset the counter — `register` calls `probe()` which itself
+    // performs a write_through against the probe sentinel name, and
+    // we don't want that bleeding into the assertion.
+    sim.reset_write_through_count();
+    assert_eq!(
+        sim.write_through_count(),
+        0,
+        "counter must be zero after explicit reset (test setup invariant)"
+    );
+
+    // Drive the runtime's persist path with a `next_view` byte-equal
+    // to the seeded in-memory view. The Eq-diff gate MUST elide the
+    // fsync; the call still returns Ok.
+    let result = runtime.apply_next_view_for_test(&n, &t, seeded.clone()).await;
+    assert!(result.is_ok(), "Eq-diff skip must return Ok without persisting, got {result:?}");
+
+    assert_eq!(
+        sim.write_through_count(),
+        0,
+        "runtime MUST skip write_through when next_view == in-memory view; \
+         observed {} fsync(s)",
+        sim.write_through_count(),
+    );
+
+    // The in-memory map must still carry the seeded view — the gate
+    // skips the in-memory insert too (when next_view == view, the
+    // insert is by definition a no-op, but the gate avoids even
+    // taking the lock).
+    let after = runtime
+        .loaded_job_lifecycle_views_for_test(&n)
+        .expect("job-lifecycle map must exist after register");
+    assert_eq!(
+        after.get(&t),
+        Some(&seeded),
+        "in-memory map must still carry the seeded view after the no-op tick"
+    );
+
+    // Belt-and-braces: a *different* next_view DOES write through.
+    // Pinning this in the same test prevents a regression where the
+    // gate accidentally short-circuits on every call (e.g. always
+    // returning Ok before the comparison fires).
+    let mut changed = seeded.clone();
+    changed.restart_counts.insert(alloc("alloc-payments-0"), 3);
+    runtime
+        .apply_next_view_for_test(&n, &t, changed.clone())
+        .await
+        .expect("changed view must persist");
+    assert_eq!(
+        sim.write_through_count(),
+        1,
+        "a non-equal next_view MUST write through exactly once; \
+         observed {} fsync(s)",
+        sim.write_through_count(),
+    );
+    let after2 = runtime.loaded_job_lifecycle_views_for_test(&n).expect("map present");
+    assert_eq!(after2.get(&t), Some(&changed), "in-memory map must reflect the changed view");
 }

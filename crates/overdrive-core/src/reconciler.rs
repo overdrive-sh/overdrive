@@ -62,10 +62,17 @@
 //! Reconcilers express writes as **data**, not side effects. The
 //! [`Reconciler::reconcile`] signature returns `(Vec<Action>,
 //! Self::View)`; the second element is the *next* view. The runtime
-//! diffs it against the in-memory view and persists the delta through
-//! `ViewStore`. Reconcilers never write storage directly. Phase 1
-//! convention is full-`View` replacement (`NextView = Self::View`); a
-//! typed-diff shape is an additive future extension.
+//! compares it against the in-memory view (`PartialEq` on
+//! `&Self::View`); when they are equal the runtime skips the
+//! `ViewStore::write_through` fsync and the in-memory map update
+//! both. When they differ the runtime persists the full `next_view`
+//! through `ViewStore` (write-through), then installs it into the
+//! in-memory map. Reconcilers never write storage directly. Phase 1
+//! convention is full-`View` replacement (`NextView = Self::View`)
+//! gated by runtime Eq-diff; a typed-delta shape (e.g. a
+//! `ViewAction::{Noop, Update(V)}` enum at the reconciler return
+//! site) is an additive future extension only if profiling later
+//! shows the equality check is a measurable cost.
 //!
 //! # Example
 //!
@@ -276,14 +283,17 @@ pub trait Reconciler: Send + Sync {
     /// Per ADR-0035 §1 the runtime owns persistence end-to-end: the
     /// `View` is bulk-loaded into an in-memory `BTreeMap` at boot via
     /// `ViewStore::bulk_load`, served from RAM on every tick, and
-    /// written through to redb on every successful `reconcile`. The
-    /// four bounds — `Serialize + DeserializeOwned + Default + Clone`
+    /// written through to redb on every successful `reconcile` whose
+    /// returned `next_view` differs from the in-memory value. The five
+    /// bounds — `Serialize + DeserializeOwned + Default + Clone + Eq`
     /// plus the `Send + Sync` shared with the rest of the trait —
     /// give the runtime everything it needs to (a) persist on
     /// write-through, (b) materialise on bulk-load, (c) construct a
-    /// fresh entry when a target has no persisted row, and (d) hand
-    /// the same value to multiple readers.
-    type View: Serialize + DeserializeOwned + Default + Clone + Send + Sync;
+    /// fresh entry when a target has no persisted row, (d) hand the
+    /// same value to multiple readers, and (e) skip the per-tick
+    /// fsync via runtime Eq-diff when a reconciler returns an
+    /// unchanged view (the additive future extension §1 anticipated).
+    type View: Serialize + DeserializeOwned + Default + Clone + Eq + Send + Sync;
 
     /// Canonical name. Used for `ViewStore` table keying and
     /// evaluation broker lookup.
@@ -301,8 +311,12 @@ pub trait Reconciler: Send + Sync {
     /// `view` is the in-memory `View` value the runtime bulk-loaded at
     /// boot (or `Self::View::default()` when no persisted row exists
     /// for `target`). The second element of the returned tuple is the
-    /// next-view — the runtime diffs it against `view` and persists
-    /// the delta via `ViewStore::write_through`. Per the `TickContext`
+    /// next-view — the runtime compares it against `view` for equality
+    /// (`PartialEq` on `&Self::View`); when equal, the runtime skips
+    /// both the `ViewStore::write_through` fsync and the in-memory
+    /// map update. When the next-view differs, the runtime persists
+    /// the full value via `ViewStore::write_through` and then
+    /// installs it into the in-memory map. Per the `TickContext`
     /// shape, `tick` is the single pure time input constructed by the
     /// runtime once per evaluation; reading `Instant::now()` /
     /// `SystemTime::now()` inside this body is banned.

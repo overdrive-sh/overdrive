@@ -325,6 +325,21 @@ impl ReconcilerRuntime {
     /// leaves the persisted view as the source of truth, which the
     /// next boot's `bulk_load` recovers.
     ///
+    /// **Eq-diff skip** (additive extension per ADR-0035 §1, May
+    /// 2026): when `next_view` is `Eq`-equal to the current
+    /// in-memory value, this function returns `Ok(())` WITHOUT
+    /// calling `write_through` and WITHOUT touching the in-memory
+    /// map. The motivation is to elide the per-tick fsync on no-op
+    /// ticks (a converged target whose reconciler emits `Noop` and
+    /// an unchanged view). Equality is defined by `PartialEq` /
+    /// `Eq` on `Self::View`, which the `Reconciler` trait now
+    /// requires; the comparison is against the same in-memory value
+    /// the runtime would have handed the reconciler as `view`, so a
+    /// reconciler returning its input unchanged trivially satisfies
+    /// the gate. The fsync-then-memory ordering for the non-equal
+    /// branch is independently pinned by the
+    /// `WriteThroughOrdering` invariant.
+    ///
     /// Returns `Err(ControlPlaneError::Internal)` when the underlying
     /// `write_through` fails (e.g. fsync injection in tests, real
     /// fsync error in production). On error the in-memory map is
@@ -351,10 +366,37 @@ impl ReconcilerRuntime {
                 // Unit views carry no data; nothing to persist or
                 // install in-memory. Returning Ok matches the
                 // ViewStore's semantic: there is no `(target, ())`
-                // row to round-trip.
+                // row to round-trip. The Eq-diff skip would be a
+                // tautology here (`() == ()` always), so the dedicated
+                // arm acts as the skip already.
                 Ok(())
             }
             AnyReconcilerView::JobLifecycle(view) => {
+                // Eq-diff skip — compare `next_view` against the
+                // current in-memory value (or `default()` when no
+                // row exists for this target, matching the runtime's
+                // `view` hydration in `run_convergence_tick`). When
+                // equal: skip the fsync AND the in-memory insert,
+                // both no-ops by definition. The lock is held only
+                // for the duration of the `.cloned()` read; no
+                // `.await` is held across it per
+                // `.claude/rules/development.md` § Concurrency & async.
+                let current = {
+                    let guard = entry.views.lock();
+                    match &*guard {
+                        AnyViewMap::JobLifecycle(map) => {
+                            map.get(target).cloned().unwrap_or_default()
+                        }
+                        AnyViewMap::Unit => JobLifecycleView::default(),
+                    }
+                };
+                if current == view {
+                    // No-op tick: reconciler returned its input
+                    // unchanged. Elide the fsync and the in-memory
+                    // insert — both are by-definition no-ops.
+                    return Ok(());
+                }
+
                 // STEP 7 — durable write-through with fsync.
                 self.view_store
                     .write_through(static_name, target, &view)

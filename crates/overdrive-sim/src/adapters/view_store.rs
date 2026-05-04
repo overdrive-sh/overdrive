@@ -33,7 +33,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use async_trait::async_trait;
 use parking_lot::Mutex;
@@ -75,6 +75,16 @@ pub struct SimViewStore {
     /// coherent across tasks (callers commonly hand the store to
     /// background test tasks).
     inject_fsync_failure_flag: Arc<AtomicBool>,
+
+    /// Counter incremented on every successful (non-injected,
+    /// non-error) `write_through_bytes` call. Exposed via
+    /// [`SimViewStore::write_through_count`] so tests can assert that
+    /// the runtime's Eq-diff gate actually elides the fsync on
+    /// no-op ticks (a reconciler returning `next_view == view`).
+    /// Probe-internal `write_through_bytes` calls also increment this;
+    /// tests that care reset before the assertion phase via
+    /// [`SimViewStore::reset_write_through_count`].
+    write_through_count: Arc<AtomicU64>,
 }
 
 impl SimViewStore {
@@ -85,7 +95,30 @@ impl SimViewStore {
         Self {
             storage: Mutex::new(BTreeMap::new()),
             inject_fsync_failure_flag: Arc::new(AtomicBool::new(false)),
+            write_through_count: Arc::new(AtomicU64::new(0)),
         }
+    }
+
+    /// Read the cumulative count of successful `write_through_bytes`
+    /// calls against this store. Tests that assert "the runtime did
+    /// not call `write_through`" read this; tests that assert "the
+    /// runtime called `write_through` exactly once" read it before
+    /// and after a tick.
+    ///
+    /// Probe-internal `write_through` calls (the Earned-Trust
+    /// handshake) also bump this counter. Tests that need to ignore
+    /// the probe call [`SimViewStore::reset_write_through_count`]
+    /// after register completes.
+    #[must_use]
+    pub fn write_through_count(&self) -> u64 {
+        self.write_through_count.load(Ordering::SeqCst)
+    }
+
+    /// Reset the cumulative `write_through` counter to zero. Pairs
+    /// with [`SimViewStore::write_through_count`] for tests that want
+    /// to ignore probe-internal writes during register.
+    pub fn reset_write_through_count(&self) {
+        self.write_through_count.store(0, Ordering::SeqCst);
     }
 
     /// Configure the next `write_through_bytes` (or `probe`) call to
@@ -191,6 +224,12 @@ impl ViewStore for SimViewStore {
         // Lock scope tightened per clippy::significant_drop_tightening
         // — single-statement insert, lock drops at end of expression.
         self.storage.lock().insert((typed, target.clone()), cbor.to_vec());
+        // Bump the counter only after the durable insert, AFTER the
+        // fsync-failure short-circuit above. This makes
+        // `write_through_count` a faithful witness to "how many times
+        // did the runtime cause a successful fsync against this
+        // store" — exactly what the Eq-diff regression test asserts.
+        self.write_through_count.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
 
@@ -402,5 +441,81 @@ mod tests {
 
         let loaded: BTreeMap<TargetResource, Counter> = store.bulk_load(N).await.expect("read ok");
         assert_eq!(loaded.get(&t), Some(&v));
+    }
+
+    /// Counter pinning — fresh store reports zero. The runtime
+    /// Eq-diff regression test in
+    /// `crates/overdrive-control-plane/tests/integration/
+    /// reconciler_runtime_view_store.rs` reads
+    /// [`SimViewStore::write_through_count`] to assert "the runtime
+    /// did not call `write_through`"; if the accessor were stubbed
+    /// out (e.g. `-> 0`), that test would silently pass with no
+    /// signal. This unit test pins the live behaviour: write through
+    /// → counter increments to exactly N, distinguishing a stubbed
+    /// `0` from a stubbed `1` from the real implementation.
+    #[tokio::test]
+    async fn write_through_count_starts_at_zero_and_increments_per_successful_write() {
+        let store = SimViewStore::new();
+        assert_eq!(store.write_through_count(), 0, "fresh store must report zero writes");
+
+        let t = target("job/payments");
+        let v = Counter { n: 1, label: "first".into() };
+
+        store.write_through(N, &t, &v).await.expect("write 1");
+        assert_eq!(store.write_through_count(), 1, "counter must be exactly 1 after one write");
+
+        store.write_through(N, &t, &v).await.expect("write 2");
+        assert_eq!(store.write_through_count(), 2, "counter must be exactly 2 after two writes");
+
+        store.write_through(N_OTHER, &t, &v).await.expect("write 3 (other reconciler)");
+        assert_eq!(
+            store.write_through_count(),
+            3,
+            "counter aggregates across reconciler names — per-reconciler scoping is the test's job"
+        );
+    }
+
+    /// `inject_fsync_failure` must NOT bump the counter — the counter
+    /// reflects successful writes only. A failed write that incremented
+    /// the counter would mislead the Eq-diff regression test.
+    #[tokio::test]
+    async fn write_through_count_unchanged_when_fsync_failure_injected() {
+        let store = SimViewStore::new();
+        let t = target("job/payments");
+        let v = Counter { n: 1, label: "x".into() };
+
+        store.inject_fsync_failure();
+        let result = store.write_through(N, &t, &v).await;
+        assert!(result.is_err(), "write must fail under injection");
+        assert_eq!(
+            store.write_through_count(),
+            0,
+            "failed write MUST NOT bump the counter — the counter is a witness to successful fsyncs only"
+        );
+    }
+
+    /// `reset_write_through_count` zeroes the counter; subsequent
+    /// writes increment from there. The runtime Eq-diff regression
+    /// test calls this after `register` (which probes, bumping the
+    /// counter once) so the post-reset assertion is unambiguous.
+    #[tokio::test]
+    async fn reset_write_through_count_zeroes_and_subsequent_writes_increment_from_zero() {
+        let store = SimViewStore::new();
+        let t = target("job/payments");
+        let v = Counter { n: 1, label: "x".into() };
+
+        store.write_through(N, &t, &v).await.expect("write 1");
+        store.write_through(N, &t, &v).await.expect("write 2");
+        assert_eq!(store.write_through_count(), 2, "two writes before reset");
+
+        store.reset_write_through_count();
+        assert_eq!(store.write_through_count(), 0, "reset must zero the counter");
+
+        store.write_through(N, &t, &v).await.expect("write 3");
+        assert_eq!(
+            store.write_through_count(),
+            1,
+            "post-reset writes increment from zero, not from prior count"
+        );
     }
 }

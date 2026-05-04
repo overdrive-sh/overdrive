@@ -591,3 +591,21 @@ The following ADR-0013 sections are **partially overturned**
 ## Changelog
 
 - 2026-05-03 — Initial accepted version. Supersedes ADR-0013.
+- 2026-05-04 — Additive extension: runtime Eq-diff skip on
+  `persist_view`. The runtime compares `next_view` against the
+  in-memory value (`PartialEq` on `&Self::View`) and skips both
+  `ViewStore::write_through` and the in-memory map insert when
+  equal. Motivation: elide the per-tick fsync on no-op ticks (a
+  converged target whose reconciler emits `Noop` and an unchanged
+  view). Trait surface change: `Reconciler::View` gains an `Eq`
+  bound (was `Serialize + DeserializeOwned + Default + Clone +
+  Send + Sync`; now adds `Eq`). The fsync-then-memory ordering
+  for the non-equal case is unchanged and remains pinned by the
+  `WriteThroughOrdering` invariant (§6); the equality check is
+  pinned by the `runtime_skips_write_through_when_next_view_equals_in_memory`
+  integration test in
+  `crates/overdrive-control-plane/tests/integration/reconciler_runtime_view_store.rs`.
+  An alternative `ViewAction::{Noop, Update(V)}` enum at the
+  reconciler return site was considered and rejected: runtime
+  Eq-diff pushes zero discipline onto reconciler authors and
+  cannot be silently miscoded.

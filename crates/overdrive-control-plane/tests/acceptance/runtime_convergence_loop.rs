@@ -188,23 +188,21 @@ async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
 /// `Evaluation { reconciler: job-lifecycle, target: job/payments }` and
 /// asserts that ONLY `JobLifecycle` is dispatched against the target.
 ///
-/// Counting strategy: every reconciler that runs through
-/// `run_convergence_tick` writes a `(reconciler_name, target_string)`
-/// entry into `AppState::view_cache` via `store_cached_view`
-/// (`reconciler_runtime.rs:248`). The cache is `pub` and observable from
-/// the test:
+/// Counting strategy: the broker's `dispatched` counter is bumped
+/// once per `run_convergence_tick` invocation. Submitting one
+/// evaluation and asserting `dispatched == 1` distinguishes the
+/// pre-fix fan-out (every registered reconciler runs against the
+/// target → `dispatched ≥ 2`) from the post-fix dispatch (only the
+/// named reconciler runs → `dispatched == 1`).
 ///
-/// * **Pre-fix**: the dispatch loop iterates every registered
-///   reconciler (`for name in &registered`) and runs both
-///   `JobLifecycle` and `NoopHeartbeat` against the `JobLifecycle`
-///   target, so `view_cache` ends up with TWO entries —
-///   `("job-lifecycle", "job/payments")` AND
-///   `("noop-heartbeat", "job/payments")`. The latter entry is the
-///   smoking gun: `NoopHeartbeat` was never named in the submitted
-///   evaluation, yet it executed.
-/// * **Post-fix**: the dispatch path looks up only the named
-///   reconciler, so `view_cache` contains exactly ONE entry —
-///   `("job-lifecycle", "job/payments")`.
+/// Note (May 2026, runtime Eq-diff additive extension per ADR-0035
+/// §1): an earlier version of this test additionally asserted on
+/// `loaded_job_lifecycle_views_for_test(...).contains_key(target)`
+/// as a secondary witness. Under Eq-diff that side-effect is no
+/// longer reliable: a converged-Running target produces a `next_view`
+/// equal to the in-memory `default()`, so the runtime correctly
+/// elides the in-memory insert. The dispatched counter remains the
+/// load-bearing assertion.
 ///
 /// Written against the post-fix `run_convergence_tick(state,
 /// reconciler_name, target, now, tick_n, deadline)` signature — the
@@ -283,27 +281,27 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
     }
 
     // --- Assertion (kills the bugged behaviour): only `job-lifecycle`
-    //     ran against `job/payments`. Per ADR-0035 §5, the runtime now
-    //     stashes per-reconciler-kind in-memory `BTreeMap<TargetResource,
-    //     View>` maps; the JobLifecycle map gets an entry for `target`
-    //     IFF the JobLifecycle reconciler ran against it. The
-    //     NoopHeartbeat variant carries `View = ()` and never
-    //     materialises a per-target row, so the cross-reconciler fan-out
-    //     bug class manifests differently here: pre-fix the JobLifecycle
-    //     map has an entry for `target` AND the NoopHeartbeat reconciler
-    //     ALSO ran (broker dispatch fan-out), bumping the dispatched
-    //     counter past one. Post-fix only the named reconciler runs and
-    //     the dispatched counter is exactly one.
+    //     ran against `job/payments`. The broker's `dispatched`
+    //     counter is bumped once per `run_convergence_tick`: pre-fix
+    //     the dispatch loop runs every registered reconciler against
+    //     the target, so for one submitted eval the counter would be
+    //     ≥ 2 (`JobLifecycle` AND `NoopHeartbeat`); post-fix only the
+    //     named reconciler runs and the counter is exactly one.
+    //
+    //     The runtime's `loaded_job_lifecycle_views_for_test` is no
+    //     longer a reliable side-effect witness here — see the
+    //     test's docstring "Note (May 2026, runtime Eq-diff additive
+    //     extension per ADR-0035 §1)" for the rationale. We still
+    //     check the JobLifecycle map exists (sanity: the reconciler
+    //     was registered), but do NOT check `contains_key(&target)`
+    //     because a converged-Running target yields
+    //     `next_view == default()` and the runtime elides the
+    //     in-memory insert.
     let job_lifecycle_name = ReconcilerName::new("job-lifecycle").expect("name");
-    let jl_views = state
+    let _jl_views = state
         .runtime
         .loaded_job_lifecycle_views_for_test(&job_lifecycle_name)
-        .expect("job-lifecycle map present");
-    assert!(
-        jl_views.contains_key(&target),
-        "expected job-lifecycle to have run against {target} — got map keys {:?}",
-        jl_views.keys().collect::<Vec<_>>()
-    );
+        .expect("job-lifecycle map present after register");
     // Broker dispatched counter: pre-fix would be ≥ 2 (both reconcilers
     // ran); post-fix is exactly 1 (the named reconciler only).
     assert_eq!(
