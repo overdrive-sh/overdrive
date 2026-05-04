@@ -1,0 +1,46 @@
+# `overdrive-bpf` — kernel-side eBPF programs per ADR-0038. Compiles
+# to a single ELF object on `bpfel-unknown-none`; never loaded as a
+# Rust dependency by other crates. Consumed by `overdrive-dataplane`
+# at compile time via `include_bytes!` (see architecture.md §3.3).
+#
+# Class `binary` per ADR-0003 — the crate is functionally a code-
+# generation step, same shape as `xtask`. dst-lint scans only
+# `core`-class crates and skips this one.
+#
+# Phase 2.1 step 01-01 ships exactly one no-op XDP program
+# (`xdp_pass`) plus an `LruHashMap<u32, u64>` packet counter. The
+# real dataplane work (SERVICE_MAP, sockops+kTLS, BPF LSM, telemetry
+# ringbuf) lands in subsequent Phase 2 slices (#24..#37).
+
+[package]
+name         = "overdrive-bpf"
+version      = "0.0.0"
+description  = "Kernel-side eBPF programs (target bpfel-unknown-none, #![no_std])."
+edition.workspace      = true
+rust-version.workspace = true
+license.workspace      = true
+authors.workspace      = true
+repository.workspace   = true
+publish                = false
+
+[package.metadata.overdrive]
+crate_class = "binary"
+
+[features]
+# Workspace-wide convention. Every member declares this feature so
+# `cargo {check,test,mutants} --features integration-tests` resolves
+# uniformly under per-package scoping. This crate is kernel-side
+# (`#![no_std]`, target `bpfel-unknown-none`) and has no integration
+# tests possible — the declaration is a deliberate no-op. See
+# `.claude/rules/testing.md` § Workspace convention.
+integration-tests = []
+
+[dependencies]
+aya-ebpf.workspace = true
+
+[[bin]]
+name = "overdrive-bpf"
+path = "src/main.rs"
+
+[lints]
+workspace = true
