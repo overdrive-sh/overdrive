@@ -228,13 +228,13 @@ impl ViewStore for RedbViewStore {
             let read = self
                 .db
                 .begin_read()
-                .map_err(|e| ProbeError::CommitFailed { source: map_transaction_error(e) })?;
+                .map_err(|e| ProbeError::ReadFailed { source: map_transaction_error(e) })?;
             let table = read
                 .open_table(PROBE_TABLE)
-                .map_err(|e| ProbeError::CommitFailed { source: map_table_error(e) })?;
+                .map_err(|e| ProbeError::ReadFailed { source: map_table_error(e) })?;
             let entry = table
                 .get(PROBE_KEY)
-                .map_err(|e| ProbeError::CommitFailed { source: map_storage_error(e) })?
+                .map_err(|e| ProbeError::ReadFailed { source: map_storage_error(e) })?
                 .ok_or_else(|| ProbeError::RoundTripMismatch {
                     wrote: PROBE_PAYLOAD.to_vec(),
                     got: Vec::new(),

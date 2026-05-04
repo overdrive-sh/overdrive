@@ -778,7 +778,7 @@ impl RedbViewStore {
 
 The fault-injection scenarios the probe must survive:
 
-- **Read-only filesystem** — fail at step 2 with
+- **Read-only filesystem** — fail at step 1 with
   `ProbeError::WriteFailed`. (The existing libsql_isolation test
   fixture already covers this shape; the reconciler-memory
   equivalent inherits it.)
@@ -787,7 +787,10 @@ The fault-injection scenarios the probe must survive:
   read sequence under the Image Factory's known-bad substrate
   catalog (whitepaper §23 deferred topic). Flagged in
   upstream-changes.md.
-- **Disk full** — fail at step 2 with `ProbeError::CommitFailed`.
+- **Disk full** — fail at step 1 with `ProbeError::CommitFailed`.
+- **Read-transaction failure** (e.g. corrupt header, lock contention
+  on a colocated reader) — fail at step 2 with
+  `ProbeError::ReadFailed`.
 
 Composition-root invariant: `ReconcilerRuntime::register` calls
 `view_store.probe()` once before the first `bulk_load`; probe

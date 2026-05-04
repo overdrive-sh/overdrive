@@ -273,7 +273,7 @@ impl ViewStore for SimViewStore {
         let loaded = self
             .bulk_load_bytes(PROBE_RECONCILER)
             .await
-            .map_err(|source| ProbeError::CommitFailed { source })?;
+            .map_err(|source| ProbeError::ReadFailed { source })?;
 
         let got = loaded.get(&probe_target).cloned().unwrap_or_default();
         if got.as_slice() != PROBE_PAYLOAD {

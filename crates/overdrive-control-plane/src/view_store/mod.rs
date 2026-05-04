@@ -114,6 +114,18 @@ pub enum ProbeError {
         source: ViewStoreError,
     },
 
+    /// The probe could not read back its sentinel row because the
+    /// underlying read transaction or table-open failed (e.g. redb
+    /// internal error, lock state, corrupt header). Distinct from
+    /// `RoundTripMismatch`, which fires only after a successful read
+    /// returns non-byte-equal bytes.
+    #[error("probe read-back failed: {source}")]
+    ReadFailed {
+        /// Underlying `ViewStoreError` cause.
+        #[source]
+        source: ViewStoreError,
+    },
+
     /// The probe wrote a sentinel row, fsynced, and read back a
     /// non-byte-equal value. Indicates engine corruption between
     /// write and read — reject startup rather than risk operating
