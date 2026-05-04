@@ -1,0 +1,315 @@
+{
+  "roadmap": {
+    "project_id": "phase-2-aya-rs-scaffolding",
+    "created_at": "2026-05-04T14:19:14Z",
+    "total_steps": 11,
+    "phases": 3,
+    "goal": "aya-rs eBPF scaffolding + build pipeline (GH #23, Phase 2 milestone, area/dataplane, type/primitive). Mint two new workspace crates (overdrive-bpf kernel-side and overdrive-dataplane userspace loader), a hybrid xtask+build.rs build pipeline, three-pronged bpf-linker provisioning, a no-op XDP program exercising the full build->load->attach->observe->detach lifecycle, and Tier 2/Tier 3 harness wiring with three new GitHub Actions jobs. Tier 4 (verifier-regress, xdp-perf) remains stubbed; downstream slices (#24+) extend the trait surface as their map shapes land.",
+    "feature_acceptance_criteria": [
+      "AC1 (smoke load) \u2014 A no-op XDP program in crates/overdrive-bpf builds via cargo xtask bpf-build, loads via the EbpfDataplane stub in crates/overdrive-dataplane, attaches to lo inside the Lima/LVH VM, increments its LruHashMap<u32,u64> packet counter when traffic flows, and detaches cleanly on drop. Verified by Tier 3 acceptance test cargo xtask integration-test vm latest asserting counter > 0 via bpftool map dump (assertion on observable kernel side effect per testing.md Assertion rules).",
+      "AC2 (cross-platform compile gate) \u2014 On macOS: cargo check --workspace --features integration-tests --no-run passes (overdrive-bpf excluded from default-members; overdrive-dataplane compiles with #[cfg(target_os=\"linux\")] aya call sites and #[cfg(not(target_os=\"linux\"))] stub bodies returning DataplaneError::LoadFailed). On Linux/Lima: cargo check --workspace --features integration-tests --all-targets passes including the kernel-side crate built via cargo xtask bpf-build.",
+      "AC3 (xtask wrappers wired) \u2014 cargo xtask bpf-build produces target/xtask/bpf-objects/overdrive_bpf.o; cargo xtask bpf-unit runs the no-op program PKTGEN/SETUP/CHECK triptych through BPF_PROG_TEST_RUN exiting 0; cargo xtask integration-test vm latest runs AC1 inside LVH exiting 0; cargo xtask verifier-regress and cargo xtask xdp-perf remain tracing_placeholder stubs with TODO(#29) markers."
+    ],
+    "out_of_scope": [
+      "AppState wiring of EbpfDataplane (deferred to #24 per ADR-0038 \u00a76 D9 and \u00a75 'EbpfDataplane is not wired into AppState in #23'). The EbpfDataplane::new constructor does real work in #23 (load + attach the no-op XDP program) and is exercised by standalone xtask test code (cargo xtask integration-test vm latest), but the type is NOT plugged into the control plane's AppState / binary composition root in this slice. Production wiring awaits #24, which is the first downstream slice with a concrete update_policy / update_service caller (SERVICE_MAP). overdrive-control-plane does not gain a dependency on overdrive-dataplane in #23.",
+      "Tier 4 gates (verifier-regress, xdp-perf, PREVAIL) deferred to #29 per ADR-0038 \u00a76 \u2014 no point baselining a no-op program; baselines would be meaningless. The xtask subcommands stay tracing_placeholder with // TODO(#29) markers.",
+      "Full Tier 3 kernel matrix [5.10, 5.15, 6.1, 6.6, latest LTS, bpf-next] deferred to #29 per devops/ci-cd-pipeline.md \u00a72.3 'Why single-kernel only for #23' \u2014 #23 ships a single-kernel (latest LTS) smoke slice; matrix expansion is its own slice."
+    ]
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Crate scaffolding \u2014 overdrive-bpf kernel-side + overdrive-dataplane userspace loader with EbpfDataplane stub and build.rs artifact-check shim",
+      "description": "Mint the two new workspace crates per ADR-0038 \u00a72 and architecture.md \u00a72. Kernel-side overdrive-bpf is binary class targeting bpfel-unknown-none with #![no_std] and aya-ebpf only; ships one no-op XDP program xdp_pass with an LruHashMap<u32,u64> packet counter. Userspace overdrive-dataplane is adapter-host class on host triple, owns the EbpfDataplane impl of the Dataplane port from overdrive-core, embeds the BPF object via include_bytes! at the stable path target/xtask/bpf-objects/overdrive_bpf.o, and ships a build.rs that fails fast with a structured diagnostic when the artifact is missing (no recursive cargo invocation per ADR-0038 \u00a73.2). Workspace Cargo.toml gains a default-members declaration that excludes overdrive-bpf so cargo check --workspace skips it on macOS automatically (architecture.md \u00a75.1). aya-ebpf is added to [workspace.dependencies]; aya is already declared at workspace level. Both crates declare integration-tests = [] per testing.md Workspace convention. Phase 01 establishes the entire crate topology and the include_bytes! seam; Phase 02 adds the build pipeline that produces the artifact; Phase 03 wires the test harnesses and CI.",
+      "dependencies": [],
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "Create overdrive-bpf crate (binary class, bpfel-unknown-none target, #![no_std]) with one no-op XDP program xdp_pass and LruHashMap<u32,u64> packet counter; declare in workspace members but exclude from default-members; add aya-ebpf to [workspace.dependencies]",
+          "criteria": "Given the workspace currently has 9 members and no default-members declaration, when crates/overdrive-bpf/{Cargo.toml,src/main.rs} land plus workspace Cargo.toml gains overdrive-bpf in members and a NEW default-members list that explicitly excludes overdrive-bpf (per architecture.md \u00a75.1), then: (1) crates/overdrive-bpf/Cargo.toml declares package.metadata.overdrive.crate_class = \"binary\" per ADR-0003; (2) declares features integration-tests = [] per testing.md Workspace convention even though kernel-side has no integration tests possible; (3) depends on aya-ebpf via aya-ebpf.workspace = true (workspace dep newly declared at latest 0.1.x patch); (4) src/main.rs is #![no_std] #![no_main] with one #[xdp] fn xdp_pass increment-and-pass body referencing a #[map] static PKTS: LruHashMap<u32,u64> with capacity 1024; (5) cargo check --workspace --features integration-tests --no-run on macOS passes (overdrive-bpf skipped via default-members exclusion); (6) the workspace test xtask::mutants::tests::every_workspace_member_declares_integration_tests_feature continues to pass; (7) on Linux cargo build --release --target bpfel-unknown-none -Z build-std=core --manifest-path crates/overdrive-bpf/Cargo.toml succeeds when bpf-linker is present (verified manually via Lima at this step; xtask wrapper lands in 02-01).",
+          "test_file": "Cargo.toml; crates/overdrive-bpf/Cargo.toml; crates/overdrive-bpf/src/main.rs; xtask/src/mutants.rs (workspace member feature declaration test)",
+          "scenario_name": "kernel_side_crate_compiles_and_workspace_default_members_excludes_it",
+          "implementation_scope": [
+            "Cargo.toml",
+            "crates/overdrive-bpf/Cargo.toml",
+            "crates/overdrive-bpf/src/main.rs",
+            "crates/overdrive-bpf/.gitignore"
+          ],
+          "time_estimate_hours": 3,
+          "dependencies": []
+        },
+        {
+          "id": "01-02",
+          "name": "Create overdrive-dataplane crate (adapter-host class) with EbpfDataplane struct, three-method Dataplane trait impl (real new(), stub method bodies for #24/#25/#27) and #[cfg(target_os=\"linux\")]/#[cfg(not(target_os=\"linux\"))] split mirroring SimDataplane constructor shape",
+          "criteria": "Given overdrive-bpf exists per 01-01 and the Dataplane trait surface in crates/overdrive-core/src/traits/dataplane.rs is fixed (three async methods: update_policy, update_service, drain_flow_events), when crates/overdrive-dataplane/{Cargo.toml,src/lib.rs} land then: (1) Cargo.toml declares crate_class = \"adapter-host\", integration-tests = [], depends on overdrive-core, aya.workspace = true (already in [workspace.dependencies] at 0.13), async-trait, thiserror, tokio, tracing all via workspace deps; (2) src/lib.rs exposes pub struct EbpfDataplane with #[cfg(target_os=\"linux\")] fields bpf: aya::Ebpf and _link: aya::programs::xdp::XdpLinkId; (3) impl block has #[cfg(target_os=\"linux\")] fn new(iface: &str) -> Result<Self, DataplaneError> body that loads OVERDRIVE_BPF_OBJ, attaches xdp_pass to iface, returns Self \u2014 but in 01-02 the include_bytes! reference points at a path that does not yet exist (a one-byte placeholder file checked in at target/xtask/bpf-objects/overdrive_bpf.o.placeholder so cargo check passes; the real path is produced by 02-01); (4) impl block has #[cfg(not(target_os=\"linux\"))] fn new(_iface: &str) returning Err(DataplaneError::LoadFailed(\"overdrive-dataplane: non-Linux build target\".into())); (5) #[async_trait] impl Dataplane for EbpfDataplane returns Ok(()) for update_policy/update_service and Ok(vec![]) for drain_flow_events with /// see #24 (POLICY_MAP), /// see #25 (SERVICE_MAP), /// see #27 (telemetry ringbuf) doc anchors per architecture.md \u00a77; (6) crates/overdrive-dataplane/tests/integration.rs entrypoint with #![cfg(feature = \"integration-tests\")] mod integration { mod constructor_smoke; } per testing.md Layout convention is created but contains no test scenarios in 01-02 (Tier 3 smoke lives in xtask, not in tests/); (7) cargo check --workspace --features integration-tests --no-run passes on macOS via the cfg(not(target_os=\"linux\")) stub branch; (8) the placeholder file path under target/xtask/bpf-objects/ is gitignored (target/ is already in the workspace .gitignore — no new entry needed); the placeholder exists only on dev machines that have not yet run cargo xtask bpf-build and is overwritten in place — not deleted-and-recreated — when 02-01's real artifact lands at the same path. No explicit cleanup step is needed; the path is never tracked by git on either side of the transition.",
+          "test_file": "crates/overdrive-dataplane/Cargo.toml; crates/overdrive-dataplane/src/lib.rs; crates/overdrive-dataplane/tests/integration.rs; Cargo.toml (members + default-members updated to add overdrive-dataplane to both)",
+          "scenario_name": "ebpf_dataplane_compiles_on_macos_via_cfg_stub_and_implements_dataplane_trait",
+          "implementation_scope": [
+            "Cargo.toml",
+            "crates/overdrive-dataplane/Cargo.toml",
+            "crates/overdrive-dataplane/src/lib.rs",
+            "crates/overdrive-dataplane/tests/integration.rs"
+          ],
+          "time_estimate_hours": 4,
+          "dependencies": [
+            "01-01"
+          ]
+        },
+        {
+          "id": "01-03",
+          "name": "Add overdrive-dataplane build.rs artifact-check shim that fails fast with structured diagnostic when target/xtask/bpf-objects/overdrive_bpf.o is missing; emit cargo:rerun-if-changed for the artifact path; do NOT recursively invoke cargo per ADR-0038 \u00a73.2",
+          "criteria": "Given EbpfDataplane references the BPF object via include_bytes!(concat!(env!(\"CARGO_WORKSPACE_DIR\"), \"target/xtask/bpf-objects/overdrive_bpf.o\")) per architecture.md \u00a73.3, when crates/overdrive-dataplane/build.rs lands then: (1) on Linux build hosts where the artifact is absent, the build.rs prints exactly the diagnostic 'error: BPF object not found at <path>; run `cargo xtask bpf-build` first' to stderr and exits with std::process::exit(1) per architecture.md \u00a73.2 \u2014 converting the otherwise opaque rustc 'file not found in include_bytes!' error into a single-line actionable diagnostic; (2) on macOS hosts the build.rs short-circuits via #[cfg(not(target_os=\"linux\"))] before any artifact check (the cfg(not(target_os=\"linux\")) stub of EbpfDataplane never reads the bytes, so the artifact need not exist); (3) when the artifact IS present (Linux post-bpf-build) the build.rs prints println!(\"cargo:rerun-if-changed=<path>\") and exits successfully; (4) the script makes ZERO recursive cargo invocations \u2014 does not call cargo build, does not call cargo run, does not spawn any subprocess (architecture.md \u00a73.4 documents the recursive-cargo anti-pattern); (5) verified by deleting the artifact on a Linux host and running cargo check -p overdrive-dataplane: stderr contains the exact diagnostic message and exit code is non-zero; (6) verified by writing the placeholder artifact then running cargo check -p overdrive-dataplane: succeeds with no diagnostic; (7) on macOS cargo check --workspace --no-run continues to pass since the cfg gate skips the artifact check.",
+          "test_file": "crates/overdrive-dataplane/build.rs; crates/overdrive-dataplane/tests/integration/build_rs_artifact_check.rs (Linux-only test asserting the diagnostic message shape via #[cfg(target_os=\"linux\")] proc-spawn cargo build with artifact removed)",
+          "scenario_name": "build_rs_emits_actionable_diagnostic_when_bpf_artifact_missing",
+          "implementation_scope": [
+            "crates/overdrive-dataplane/build.rs",
+            "crates/overdrive-dataplane/Cargo.toml",
+            "crates/overdrive-dataplane/tests/integration/build_rs_artifact_check.rs",
+            "crates/overdrive-dataplane/tests/integration.rs"
+          ],
+          "time_estimate_hours": 3,
+          "dependencies": [
+            "01-02"
+          ]
+        },
+        {
+          "id": "01-04",
+          "name": "Verify dst-lint impact (both new crates non-core, scanned out automatically) and confirm AC2 macOS compile gate passes for the workspace post-Phase-01",
+          "criteria": "Given Phase 01 has minted both new crates per 01-01/01-02/01-03, when cargo xtask dst-lint is run on the workspace then: (1) overdrive-bpf is skipped because crate_class = \"binary\"; (2) overdrive-dataplane is skipped because crate_class = \"adapter-host\"; (3) the existing dst-lint self-test asserting the core-class set is non-empty continues to pass with overdrive-core and overdrive-scheduler still detected as core; (4) dst-lint exits 0; (5) AC2 macOS compile gate passes: cargo check --workspace --features integration-tests --no-run on a macOS host succeeds with overdrive-bpf excluded via default-members and overdrive-dataplane compiling via the cfg(not(target_os=\"linux\")) stub branch; (6) cargo nextest run --workspace --features integration-tests --no-run on macOS also succeeds (compile-only, no execution per testing.md Running tests on macOS); (7) AC2 Linux compile gate passes via Lima: cargo xtask lima run -- cargo check --workspace --features integration-tests --all-targets succeeds \u2014 but only AFTER 02-01 produces the artifact; this step verifies the macOS half of AC2 only and a Linux dry-run that the cfg gate compiles the production branch syntactically (xtask wrapper lands in Phase 02). Phase 01 commit-ready check.",
+          "test_file": "xtask/src/dst_lint.rs (self-test asserting core-class set unchanged); macOS CI run via .github/workflows/ci.yml fmt-clippy and test jobs (already exercise macOS via no-run); a new xtask test asserting both new crates resolve to expected crate_class strings at the metadata level",
+          "scenario_name": "dst_lint_skips_new_crates_and_macos_compile_gate_passes_workspace_wide",
+          "implementation_scope": [
+            "xtask/src/dst_lint.rs",
+            "xtask/tests/integration/crate_class_metadata.rs",
+            "xtask/tests/integration.rs"
+          ],
+          "time_estimate_hours": 2,
+          "dependencies": [
+            "01-03"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "02",
+      "name": "Build pipeline \u2014 cargo xtask bpf-build subcommand + Lima/dev-setup bpf-linker provisioning + which_or_hint runtime check",
+      "description": "Wire the hybrid build pipeline per ADR-0038 \u00a73 and architecture.md \u00a73-\u00a74. The primary entry point is a new cargo xtask bpf-build subcommand that (a) runs which_or_hint(\"bpf-linker\", ...) at the top to fail fast with an actionable message, (b) invokes cargo build --release --target bpfel-unknown-none -Z build-std=core --manifest-path crates/overdrive-bpf/Cargo.toml, and (c) copies the produced ELF to the stable path target/xtask/bpf-objects/overdrive_bpf.o that the loader's include_bytes! references. bpf-linker is provisioned through three surfaces per ADR-0038 \u00a74: extending the cargo install --locked line in infra/lima/overdrive-dev.yaml so existing Lima users re-provision and new users get it on first boot; adding cargo xtask dev-setup (or extending an existing setup target) for non-Lima Linux developers; and the runtime which_or_hint check in cargo xtask bpf-build itself. The --locked flag is mandatory at every install site for reproducibility (ADR-0038 \u00a74). Phase 02 makes AC3's bpf-build half pass and unblocks Phase 03's test harnesses and CI jobs.",
+      "dependencies": [
+        "01"
+      ],
+      "steps": [
+        {
+          "id": "02-01",
+          "name": "Add cargo xtask bpf-build subcommand: which_or_hint(\"bpf-linker\") at top, invoke BPF-target cargo build per ADR-0038 \u00a73.1, copy ELF to stable path target/xtask/bpf-objects/overdrive_bpf.o; non-zero exit with eyre report on any failure",
+          "criteria": "Given xtask/src/main.rs at line 553 already exposes which_or_hint(tool, hint) and the workspace Cargo.toml has crates/overdrive-bpf as a member but excluded from default-members per 01-01, when xtask/src/main.rs gains a new BpfBuild variant in the Task enum and a corresponding handler then: (1) cargo xtask bpf-build calls which_or_hint(\"bpf-linker\", \"<install hint pointing at cargo install --locked bpf-linker / cargo xtask dev-setup / re-provision Lima>\") as its first action, returning a structured eyre::Report with non-zero exit if absent; (2) on success, invokes cargo +<rust-toolchain> build --release --target bpfel-unknown-none -Z build-std=core --manifest-path crates/overdrive-bpf/Cargo.toml as a child process per architecture.md \u00a73.1; (3) on success, copies target/bpfel-unknown-none/release/overdrive-bpf to target/xtask/bpf-objects/overdrive_bpf.o (creating parent dir if absent) \u2014 the stable path the loader's include_bytes! references; (4) any non-zero child exit propagates as eyre::Report with stderr captured; (5) any other failure (file not found, copy I/O error) returns a structured eyre::Report; (6) acceptance test: cargo xtask bpf-build on Lima with bpf-linker installed produces target/xtask/bpf-objects/overdrive_bpf.o and exits 0; cargo xtask bpf-build with PATH stripped of bpf-linker prints the install hint and exits non-zero; (7) AC3 first half satisfied \u2014 cargo xtask bpf-build produces the expected artifact; (8) the placeholder file from 01-02 is replaced by a real ELF on this codepath; (9) cargo xtask lima run -- cargo check --workspace --features integration-tests --all-targets passes after 02-01 (AC2 Linux half satisfied since the loader now compiles against a real ELF rather than the placeholder).",
+          "test_file": "xtask/src/main.rs; xtask/tests/integration/bpf_build.rs (asserts artifact path + exit code on success and missing-bpf-linker shape); xtask/tests/integration.rs",
+          "scenario_name": "bpf_build_invokes_target_compile_and_copies_artifact_to_stable_path",
+          "implementation_scope": [
+            "xtask/src/main.rs",
+            "xtask/tests/integration/bpf_build.rs",
+            "xtask/tests/integration.rs"
+          ],
+          "time_estimate_hours": 4,
+          "dependencies": [
+            "01-04"
+          ]
+        },
+        {
+          "id": "02-02",
+          "name": "Extend Lima image provisioning (infra/lima/overdrive-dev.yaml line 205) to install bpf-linker via cargo install --locked alongside cargo-deny/cargo-nextest/cargo-mutants",
+          "criteria": "Given infra/lima/overdrive-dev.yaml line 205 currently reads roughly cargo install --locked cargo-deny cargo-nextest cargo-mutants, when the line is extended to append bpf-linker then: (1) the resulting Lima image installs bpf-linker on first boot for new users; (2) existing Lima users who run limactl restart overdrive (or the project's documented re-provision command) pick up the new tool; (3) the YAML remains a single cargo install --locked invocation (no list expansion that would break existing users), with --locked mandatory per ADR-0038 \u00a74; (4) the only edit is to that one line per devops/infrastructure-integration.md (one-line change scope); (5) verified by booting a fresh Lima VM via cargo xtask lima reset (or equivalent) and confirming which bpf-linker resolves inside the VM; (6) cargo xtask lima run -- cargo xtask bpf-build succeeds end-to-end inside the freshly-provisioned VM, producing target/xtask/bpf-objects/overdrive_bpf.o; (7) NO docs are added telling the user to install bpf-linker manually on their host (per CLAUDE.md feedback_no_user_install_instructions) \u2014 the install is automated through Lima, dev-setup (02-03), or the bpf-build runtime check; (8) acknowledged risk: the YAML edit is unverified pre-merge by automated tooling \u2014 limactl will fail-loudly on syntax errors at the next limactl start (which the verification path in (5)-(6) exercises), and full-phase CI (Phase 03's GHA jobs) does not consume this YAML, so a malformed edit would surface as a Lima boot failure on the next developer re-provision rather than as a CI red. Mitigation: the edit is a one-token append to an existing cargo install --locked line at line 205; the edit shape is the smallest possible YAML diff. Future enhancement (out of scope for #23, candidate for follow-up): a cargo xtask lima provision-check subcommand that runs limactl --yaml-validate (or equivalent) against infra/lima/overdrive-dev.yaml as a pre-commit / CI gate; not created in this slice to preserve the one-line-edit scope.",
+          "test_file": "infra/lima/overdrive-dev.yaml; manual verification via cargo xtask lima reset + cargo xtask lima run -- which bpf-linker (no automated test \u2014 Lima provisioning is environmental)",
+          "scenario_name": "lima_image_provisions_bpf_linker_on_first_boot",
+          "implementation_scope": [
+            "infra/lima/overdrive-dev.yaml"
+          ],
+          "time_estimate_hours": 1,
+          "dependencies": [
+            "02-01"
+          ]
+        },
+        {
+          "id": "02-03",
+          "name": "Wire cargo xtask dev-setup to install bpf-linker via cargo install --locked bpf-linker after a which probe; covers non-Lima Linux developers; do NOT instruct the user to install manually",
+          "criteria": "Given non-Lima Linux developers exist (per ADR-0038 \u00a74 third provisioning surface), when xtask/src/main.rs gains (or extends an existing) DevSetup task handler then: (1) cargo xtask dev-setup runs a which probe for bpf-linker as its first action; (2) if bpf-linker is already on PATH, prints a tracing::info noop and exits 0; (3) if absent, invokes cargo install --locked bpf-linker as a child process \u2014 --locked mandatory per ADR-0038 \u00a74; (4) on cargo install failure, returns a structured eyre::Report; (5) does not call apt-get, brew, or any non-cargo package manager \u2014 the install is cargo install only (matching the Lima image's primitive per ADR-0038 \u00a74); (6) the dev-setup task is documented in xtask/src/main.rs with a /// doc comment naming its scope; (7) on macOS the dev-setup task short-circuits with a tracing::warn(\"bpf-linker is Linux-only; macOS dev path is cargo check --no-run\") \u2014 does NOT attempt the install since bpfel-unknown-none has no macOS cross-tooling per architecture.md \u00a75; (8) acceptance: a non-Lima Linux developer running cargo xtask dev-setup followed by cargo xtask bpf-build produces target/xtask/bpf-objects/overdrive_bpf.o; (9) hooks/messages/docs added by this step do NOT carry install hints for the user's host machine outside the dev-setup tool itself (per CLAUDE.md feedback_no_user_install_instructions \u2014 the dev-setup tool IS the install instruction); (10) the xtask integration test xtask/tests/integration/dev_setup_bpf_linker.rs explicitly asserts that the spawned cargo install command line contains the literal --locked substring \u2014 reproducibility constraint per ADR-0038 \u00a74 is load-bearing across all three provisioning surfaces (Lima YAML, dev-setup, CI install path), and the dev-setup test pins the assertion at the call-construction site (e.g. via a Command-shape helper that returns the assembled argv before spawn, or by intercepting the spawn through a test-injected runner) so a future refactor that drops --locked fails the test rather than silently shipping non-reproducible dev environments.",
+          "test_file": "xtask/src/main.rs; xtask/tests/integration/dev_setup_bpf_linker.rs (asserts the which-then-install codepath via a fake PATH containing/missing bpf-linker)",
+          "scenario_name": "dev_setup_installs_bpf_linker_when_absent_and_skips_when_present",
+          "implementation_scope": [
+            "xtask/src/main.rs",
+            "xtask/tests/integration/dev_setup_bpf_linker.rs",
+            "xtask/tests/integration.rs"
+          ],
+          "time_estimate_hours": 2,
+          "dependencies": [
+            "02-02"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "03",
+      "name": "Test harnesses + CI \u2014 cargo xtask bpf-unit (Tier 2) + cargo xtask integration-test vm latest (Tier 3 LVH smoke) + three new GitHub Actions jobs with required-status-checks",
+      "description": "Wire the existing tracing_placeholder stubs at xtask/src/main.rs:565-594 to real implementations per architecture.md \u00a76 and devops/ci-cd-pipeline.md \u00a72. Tier 2 (cargo xtask bpf-unit) invokes nextest on overdrive-bpf with --features integration-tests --test '*' to run a single PKTGEN/SETUP/CHECK triptych against the no-op xdp_pass program via aya's Program::test_run() driving BPF_PROG_TEST_RUN; the assertion is verdict == XDP_PASS and the LruHashMap counter increments 0->1. Tier 3 (cargo xtask integration-test vm latest) wires the LVH harness for a single-kernel smoke test (full kernel matrix is #29's scope) that loads the no-op program, attaches to lo, generates traffic, asserts counter > 0 via bpftool map dump, and detaches cleanly \u2014 assertions on observable kernel side effects per testing.md Assertion rules. Three new GitHub Actions jobs land in .github/workflows/ci.yml: bpf-build (compiles ELF, uploads artifact), bpf-unit (downloads artifact, runs Tier 2), integration-test-vm-latest (downloads artifact, runs Tier 3 LVH). Both downstream jobs MUST set if-no-files-found: error on actions/download-artifact@v4 (devops/ci-cd-pipeline.md \u00a72.2 step 7 / \u00a72.3 step 9 \u2014 the medium reviewer finding fixed inline). The CI header comment block and required-status-checks list are updated to add all three new job names. Tier 4 (verifier-regress, xdp-perf, PREVAIL) explicitly stays stubbed with TODO(#29) markers. Phase 03 satisfies AC1 in full and AC3's bpf-unit/integration-test halves.",
+      "dependencies": [
+        "02"
+      ],
+      "steps": [
+        {
+          "id": "03-01",
+          "name": "Wire cargo xtask bpf-unit to invoke cargo nextest run -p overdrive-bpf --features integration-tests --test '*'; ship one PKTGEN/SETUP/CHECK triptych for the no-op xdp_pass program asserting verdict==XDP_PASS and counter increments 0->1 via aya Program::test_run",
+          "criteria": "Given xtask/src/main.rs:565-572 currently holds a tracing_placeholder for the BpfUnit task variant per architecture.md \u00a76.1 and Reuse Analysis row 'xtask::bpf_unit stub', when the placeholder is replaced with a real implementation and crates/overdrive-bpf/tests/ ships the triptych then: (1) cargo xtask bpf-unit invokes a child process equivalent to cargo nextest run -p overdrive-bpf --features integration-tests --test '*' propagating exit code and stderr via eyre::Report on failure; (2) crates/overdrive-bpf/tests/integration.rs entrypoint is gated #![cfg(feature = \"integration-tests\")] with an inline mod integration { mod xdp_pass_test_run; } per testing.md Layout convention; (3) crates/overdrive-bpf/tests/integration/xdp_pass_test_run.rs implements the PKTGEN/SETUP/CHECK pattern: PKTGEN synthesises a minimal Ethernet+IPv4+TCP packet (per testing.md Tier 2 PKTGEN/SETUP/CHECK shape); SETUP clears the LruHashMap<u32,u64> packet counter; CHECK drives aya::programs::Xdp::test_run() against the loaded program and asserts (a) the returned action == aya_obj::generated::xdp_action::XDP_PASS (verdict assertion) and (b) the counter map's value at key 0 transitioned 0 -> 1 (state assertion); (4) test runs without CAP_BPF (BPF_PROG_TEST_RUN does not require it per devops/ci-cd-pipeline.md \u00a72.2 Capability requirements); (5) cargo xtask lima run -- cargo xtask bpf-unit exits 0 with the triptych passing; (6) AC3 second third satisfied \u2014 cargo xtask bpf-unit runs the no-op program through BPF_PROG_TEST_RUN and exits 0; (7) the verifier-regress and xdp-perf stubs at xtask/src/main.rs:588-594 stay tracing_placeholder with a // TODO(#29): wire when first real program lands comment per ADR-0038 \u00a76 and architecture.md \u00a76.3.",
+          "test_file": "xtask/src/main.rs; crates/overdrive-bpf/tests/integration.rs; crates/overdrive-bpf/tests/integration/xdp_pass_test_run.rs",
+          "scenario_name": "bpf_unit_runs_xdp_pass_triptych_via_bpf_prog_test_run",
+          "implementation_scope": [
+            "xtask/src/main.rs",
+            "crates/overdrive-bpf/Cargo.toml",
+            "crates/overdrive-bpf/tests/integration.rs",
+            "crates/overdrive-bpf/tests/integration/xdp_pass_test_run.rs"
+          ],
+          "time_estimate_hours": 4,
+          "dependencies": [
+            "02-03"
+          ]
+        },
+        {
+          "id": "03-02",
+          "name": "Wire cargo xtask integration-test vm latest LVH smoke test: boot LVH with latest LTS, load no-op XDP via EbpfDataplane, attach to lo, generate traffic, assert counter > 0 via bpftool map dump, detach cleanly; --qemu-disable-kvm for stock GHA runners",
+          "criteria": "Given xtask/src/main.rs:574-586 currently holds a tracing_placeholder for the integration-test vm subcommand per architecture.md \u00a76.2 and the LVH harness pattern is documented in testing.md Tier 3 + Harness, when the placeholder is replaced with a real implementation then: (1) cargo xtask integration-test vm latest provisions an LVH VM with the latest LTS kernel image (cached separately in CI per devops/ci-cd-pipeline.md \u00a72.3 step 7); (2) inside the VM the harness invokes a small test binary that constructs EbpfDataplane::new(\"lo\"), generates traffic over loopback (e.g. ping -c 5 127.0.0.1 or a tokio TCP self-connect), runs bpftool map dump as a child process to read the LruHashMap<u32,u64> counter, asserts the counter value at key 0 is > 0 (assertion on observable kernel side effect per testing.md Assertion rules \u2014 never on internal program reachability), and lets EbpfDataplane drop to detach; (3) the harness uses --qemu-disable-kvm when /dev/kvm is absent (the stock GHA runner case per testing.md Harness \u2014 same approach Tetragon and Cilium take); (4) on success the wrapper exits 0; on any failure (LVH boot, load+attach, counter assertion, detach) it emits a captured transcript log to target/xtask/integration-vm-latest.log and exits non-zero with an eyre::Report; (5) AC1 satisfied in full \u2014 the no-op XDP program builds, loads, attaches, increments its counter on traffic, and detaches cleanly, verified by the bpftool map dump assertion; (6) AC3 last third satisfied \u2014 cargo xtask integration-test vm latest exits 0; (7) the kernel matrix expansion to [5.10, 5.15, 6.1, 6.6, latest LTS, bpf-next] is explicitly out of scope per devops/ci-cd-pipeline.md \u00a72.3 'Why single-kernel only for #23' and stays as #29's scope.",
+          "test_file": "xtask/src/main.rs; xtask/src/integration_vm.rs (or wherever the LVH wrapper lands); xtask/tests/integration/integration_vm_latest_smoke.rs (xtask-level test that verifies the wrapper's argument construction; the actual Tier 3 run executes inside LVH and is the assertion path itself)",
+          "scenario_name": "integration_test_vm_latest_loads_xdp_pass_and_asserts_counter_gt_zero_via_bpftool",
+          "implementation_scope": [
+            "xtask/src/main.rs",
+            "xtask/src/integration_vm.rs",
+            "xtask/tests/integration/integration_vm_latest_smoke.rs",
+            "xtask/tests/integration.rs",
+            "xtask/test-bin/integration_vm_latest/main.rs"
+          ],
+          "time_estimate_hours": 5,
+          "dependencies": [
+            "03-01"
+          ]
+        },
+        {
+          "id": "03-03",
+          "name": "Add three new GitHub Actions jobs to .github/workflows/ci.yml: bpf-build (compiles ELF + uploads artifact), bpf-unit (downloads artifact + Tier 2), integration-test-vm-latest (downloads artifact + Tier 3 LVH); both downstream jobs set if-no-files-found: error per devops/ci-cd-pipeline.md \u00a72.2 step 7 / \u00a72.3 step 9",
+          "criteria": "Given the current .github/workflows/ci.yml has six jobs (fmt-clippy, test, dst, dst-lint, yaml-free-cli, mutants-diff, integration) and devops/ci-cd-pipeline.md \u00a72 specifies three new jobs in detail, when the workflow YAML is extended then: (1) bpf-build job runs on ubuntu-latest with the step graph from devops/ci-cd-pipeline.md \u00a72.1: actions/checkout@v4, dtolnay/rust-toolchain@stable with components: rust-src (required for -Z build-std=core), apt install mold, Swatinem/rust-cache@v2 with shared-key phase-2-bpf-build, sccache soft-fail prelude (verbatim copy of the existing four-step prelude at lines 96-109 of ci.yml), cargo install --locked bpf-linker (--locked mandatory per ADR-0038 \u00a74), cargo xtask bpf-build, actions/upload-artifact@v4 with name: bpf-object path: target/xtask/bpf-objects/overdrive_bpf.o retention-days: 14 if-no-files-found: error; budget <=8 min; (2) bpf-unit job needs: bpf-build runs on ubuntu-latest with step graph from \u00a72.2: checkout, toolchain, mold, Swatinem cache shared-key phase-2-bpf-unit, sccache prelude, taiki-e/install-action@v2 with tool: cargo-nextest, actions/download-artifact@v4 with name: bpf-object path: target/xtask/bpf-objects/ if-no-files-found: error (load-bearing \u2014 without it a missing artifact silently no-ops), cargo xtask bpf-unit, upload-artifact@v4 of nextest JUnit with if-no-files-found: warn; budget <=5 min; (3) integration-test-vm-latest job needs: bpf-build runs on ubuntu-latest with step graph from \u00a72.3: checkout, toolchain, mold, Swatinem cache shared-key phase-2-integration-vm-latest, sccache prelude, apt install qemu-system-x86 + qemu-utils, go install LVH, actions/cache@v4 keyed on LVH image tag for kernel images, cargo-nextest install, download-artifact with if-no-files-found: error, cargo xtask integration-test vm latest, on failure upload integration-vm-latest.log, on failure annotate $GITHUB_STEP_SUMMARY with reproduction command cargo xtask lima run -- cargo xtask integration-test vm latest; budget <=10 min; (4) all three jobs trigger on the same shape as existing jobs (pull_request to main, push to main, workflow_dispatch); (5) verifier-regress, xdp-perf, PREVAIL are explicitly NOT added per devops/ci-cd-pipeline.md \u00a75 Skip rationale \u2014 they stay stubbed for #29; (6) PR-time CI run on this branch (marcus-sa/phase2-ebpf-start) shows all three new jobs passing within budget on real GHA infrastructure; (7) each new GHA job declares an explicit timeout-minutes: setting matching its budget — bpf-build: timeout-minutes: 8, bpf-unit: timeout-minutes: 5, integration-test-vm-latest: timeout-minutes: 10 — so a runaway step is killed at the documented budget rather than at the GHA default 360-minute ceiling; (8) each new job is idempotent: re-running the same job against the same commit SHA produces the same artifact (bpf-build ELF is deterministic given the same Rust toolchain + bpf-linker pin) and the same exit code (Tier 2 BPF_PROG_TEST_RUN and Tier 3 LVH counter assertion are deterministic against the no-op program); no retry logic is added inside the workflow — GitHub Actions' built-in re-run-from-failure is sufficient and the right escalation path for transient infrastructure flakes.",
+          "test_file": ".github/workflows/ci.yml; .github/workflows/ci.yml.snapshot (optional snapshot test asserting the three jobs are present with correct needs: edges and if-no-files-found: error settings); manual verification via PR-time CI run on this branch",
+          "scenario_name": "ci_workflow_adds_three_new_jobs_with_correct_artifact_handoff_and_failure_diagnostics",
+          "implementation_scope": [
+            ".github/workflows/ci.yml"
+          ],
+          "time_estimate_hours": 4,
+          "dependencies": [
+            "03-02"
+          ]
+        },
+        {
+          "id": "03-04",
+          "name": "Update .github/workflows/ci.yml leading comment block (lines 3-6) to reflect Tier 2 + single-kernel Tier 3 are now in scope (Tier 4 + full kernel matrix deferred to #29) and update Required status checks comment block (lines 8-17) to list the three new jobs alongside existing six per devops/ci-cd-pipeline.md \u00a76",
+          "criteria": "Given devops/ci-cd-pipeline.md \u00a76 specifies one workflow file change with three sub-edits and \u00a74 lists the new required-status-checks alongside the existing six, when the comment-block edits land then: (1) the leading comment at .github/workflows/ci.yml lines 3-6 is updated from 'Tiers 2 (BPF unit), 3 (integration-test vm kernel matrix), and 4 (veristat / xdp-perf / PREVAIL) are deliberately out of scope' to a revised prose stating Tier 2 and the single-kernel slice of Tier 3 are now in scope as of #23 with a pointer to ADR-0038, and the full Tier 3 kernel matrix [5.10, 5.15, 6.1, 6.6, latest LTS, bpf-next] plus all of Tier 4 (veristat / xdp-perf / PREVAIL) remain deferred to #29; (2) the Required status checks comment at lines 8-17 is updated to list the three new jobs (bpf-build, bpf-unit, integration-test-vm-latest) alongside the existing six (fmt-clippy, test, dst, dst-lint, yaml-free-cli, mutants-diff) per devops/ci-cd-pipeline.md \u00a74 table; (3) operators are instructed (via the comment block, not via user-facing install hints) to mirror the change in the GitHub branch-protection UI after the first observed pass per branching-strategy.md \u00a72 sequencing constraint \u2014 the comment is informational, not a runnable instruction at the user; (4) AC3 fully satisfied \u2014 all three xtask wrappers wired (bpf-build, bpf-unit, integration-test vm latest) with verifier-regress and xdp-perf staying stubbed; (5) AC1 + AC2 + AC3 all green simultaneously verified by a final cargo xtask lima run -- cargo xtask {bpf-build,bpf-unit,integration-test vm latest} sequence on Lima exiting 0, plus a macOS cargo check --workspace --features integration-tests --no-run exiting 0; (6) Phase 2.1 / GH #23 ready for adversarial review per /nw-review at deliver-level Phase 4.",
+          "test_file": ".github/workflows/ci.yml (comment-block edits at lines 3-6 and 8-17)",
+          "scenario_name": "ci_yaml_comment_blocks_reflect_phase_2_1_scope_and_required_status_checks",
+          "implementation_scope": [
+            ".github/workflows/ci.yml"
+          ],
+          "time_estimate_hours": 1,
+          "dependencies": [
+            "03-03"
+          ]
+        }
+      ]
+    }
+  ],
+  "implementation_scope": {
+    "source_directories": [
+      "crates/overdrive-bpf/src/",
+      "crates/overdrive-dataplane/src/",
+      "xtask/src/",
+      ".github/workflows/",
+      "infra/lima/"
+    ],
+    "test_directories": [
+      "crates/overdrive-bpf/tests/",
+      "crates/overdrive-dataplane/tests/",
+      "xtask/tests/"
+    ],
+    "excluded_patterns": [
+      "target/**",
+      "Cargo.lock"
+    ]
+  },
+  "validation": {
+    "status": "pending",
+    "reviewer": "TBD \u2014 assigned at /nw-review (deliver Phase 4)",
+    "approved_at": "TBD"
+  },
+  "review": {
+    "reviewer": "nw-software-crafter-reviewer",
+    "verdict": "NEEDS_REVISION",
+    "iteration": 2,
+    "blocking_count": 5,
+    "suggestion_count": 1,
+    "praise_count": 3,
+    "reviewed_at": "2026-05-04T14:29:56+00:00",
+    "amendments_applied": ["F1-downgraded", "F2", "F3", "F4", "S1"],
+    "amendments_rejected": ["F5"],
+    "amendments_reasons": {
+      "F1-downgraded": "Orchestrator downgraded from blocking to non-blocking suggestion; AC bullet (8) on step 02-02 documents the unverified-pre-merge risk and the limactl fail-loud behavior at next start; flagged a future cargo xtask lima provision-check enhancement (not created in this slice).",
+      "F2": "Applied as-is. AC bullet (10) on step 02-03 added — xtask integration test asserts the spawned cargo install command line contains the literal --locked substring, pinning ADR-0038 §4 reproducibility constraint at the call-construction site.",
+      "F3": "Applied via .gitignore approach (cleaner than runtime cleanup). AC bullet (8) on step 01-02 added — placeholder lives under target/ which is already gitignored, and is overwritten in place by 02-01 rather than deleted-and-recreated; no explicit cleanup step needed.",
+      "F4": "Applied as-is. New top-level out_of_scope section added to roadmap root explicitly stating AppState wiring of EbpfDataplane is deferred to #24 per ADR-0038 §6 D9 and §5; also captures Tier 4 + full kernel matrix deferrals to #29.",
+      "F5": "REJECTED by orchestrator. Per project memory project_xtask_excluded_from_mutants.md: xtask is dev tooling, excluded from per-feature mutation testing; CI + subcommand acceptance tests are the gate, not cargo-mutants. Reviewer lacked this project context.",
+      "S1": "Applied. AC bullets (7)-(8) on step 03-03 added — each new GHA job declares timeout-minutes: matching its budget (8/5/10) and is idempotent; no retry logic added — GHA's built-in re-run-from-failure is the right escalation path."
+    },
+    "findings": [
+      {
+        "id": "F1",
+        "severity": "blocking",
+        "location": "phase-02 / lima-provisioning step",
+        "title": "Test surface gap for Lima provisioning step",
+        "description": "One-line YAML edit with only environmental verification creates merge-risk; YAML syntax corruption would not be caught until full phase CI run.",
+        "fix": "Add YAML linting gate to AC (yamllint or cargo xtask yaml-lint)."
+      },
+      {
+        "id": "F2",
+        "severity": "blocking",
+        "location": "phase-02 / dev-setup step",
+        "title": "Missing --locked flag verification in dev-setup test",
+        "description": "Reproducibility constraint from ADR-0038 \u00a74 is load-bearing but test scope does not verify it.",
+        "fix": "Add assertion in test that cargo install invocation includes '--locked' substring."
+      },
+      {
+        "id": "F3",
+        "severity": "blocking",
+        "location": "phase-01 / EbpfDataplane impl step",
+        "title": "Placeholder artifact cleanup scope undefined",
+        "description": "Placeholder created in early step, replaced in later step, but no explicit ownership of deletion stated.",
+        "fix": "Clarify in build step: 'Placeholder is deleted as cleanup step' OR move to .gitignore in scaffold step."
+      },
+      {
+        "id": "F4",
+        "severity": "blocking",
+        "location": "all-phases",
+        "title": "ADR-0038 D9 constraint (AppState wiring deferral) not reflected",
+        "description": "DESIGN wave locked D9 'EbpfDataplane NOT wired into AppState in #23' but roadmap does not call out this boundary.",
+        "fix": "Add constraint section to roadmap root or final step: 'Out of scope: AppState wiring deferred to #24'."
+      },
+      {
+        "id": "F5",
+        "severity": "blocking",
+        "location": "phase-02 / phase-03 xtask steps",
+        "title": "Mutation testing kill-rate gate missing for xtask + Tier 2 logic",
+        "description": "REVIEWER ERROR \u2014 finding is incorrect. Per project memory `project_xtask_excluded_from_mutants.md`, xtask is dev tooling and excluded from per-feature mutation testing. Subcommand acceptance tests are the gate. Finding REJECTED by orchestrator.",
+        "fix": "NO ACTION REQUIRED. Reviewer lacked project context; xtask is exempt from cargo-mutants per established project decision."
+      },
+      {
+        "id": "S1",
+        "severity": "suggestion",
+        "location": "phase-03 / CI jobs step",
+        "title": "CI job timeouts lack explicit retry / idempotence guidance",
+        "description": "Budget specified but not idempotency or retry logic.",
+        "fix": "Add explicit timeout-minutes setting; jobs idempotent; flag at 90% budget."
+      }
+    ]
+  }
+}
