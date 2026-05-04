@@ -1,0 +1,125 @@
+# Environment inventory — Phase 2.1 aya-rs eBPF scaffolding (#23)
+#
+# This feature does NOT install into user systems. It ships workspace
+# crates compiled by cargo and CI. The "target environments" are
+# therefore the surfaces the new code must successfully compile and
+# (where applicable) run on, plus the existing GitHub Actions surface
+# the new CI jobs must succeed on.
+
+target_environments:
+  - name: macos-dev
+    description: |
+      macOS developer machine. The kernel-side crate `overdrive-bpf`
+      is excluded from `default-members` per ADR-0038 §2 and is never
+      compiled on macOS. The userspace loader `overdrive-dataplane`
+      compiles on macOS via `#[cfg(target_os = "linux")]` stub bodies
+      that return `DataplaneError::LoadFailed` for any aya-touching
+      method. Pre-merge gate: `cargo check --workspace --features
+      integration-tests --no-run` (compile-only; runtime surface is
+      Linux-gated).
+    platform: [macos]
+    preconditions:
+      - "rustup installed (rust-toolchain.toml governs channel)"
+      - "cargo-nextest installed (compile-check uses `--no-run` form)"
+      - "no bpf-linker required on macOS — kernel crate is not built here"
+
+  - name: linux-lima-dev
+    description: |
+      Lima VM on macOS host. Canonical inner-loop path for full
+      build + load + attach via `cargo xtask lima run --`. The Lima
+      image after #23 carries bpf-linker alongside the existing
+      cargo-deny / cargo-nextest / cargo-mutants installs.
+    platform: [linux]
+    preconditions:
+      - "Lima VM `overdrive` provisioned via `cargo xtask lima up`"
+      - "bpf-linker installed in VM (one-line edit to overdrive-dev.yaml)"
+      - "kernel >= 5.10 with cgroup v2 and CONFIG_BPF_SYSCALL=y"
+      - "CAP_BPF + CAP_NET_ADMIN at runtime (the canonical `cargo xtask lima run --` wrapper runs the test process as root inside the VM, matching the Tier 3 testing.md flow)"
+      - "rust-src component installed via `rustup component add` (already in user-mode provisioning)"
+
+  - name: linux-native-dev
+    description: |
+      Linux developer machine without Lima — direct host development.
+      Used by contributors on Linux laptops; full build + load +
+      attach without a VM hop. Provisioning path is `cargo xtask
+      dev-setup`, which wraps `cargo install --locked bpf-linker`.
+    platform: [linux]
+    preconditions:
+      - "bpf-linker installed (`cargo xtask dev-setup`)"
+      - "kernel >= 5.10 with cgroup v2 and CONFIG_BPF_SYSCALL=y"
+      - "CAP_BPF + CAP_NET_ADMIN at runtime (run as root or via systemd-run with capabilities)"
+      - "rust-src component installed (`rustup component add rust-src`)"
+      - "clang/lld/llvm/libelf-dev/libbpf-dev/linux-libc-dev distribution packages installed (apt/dnf/pacman equivalent of the Lima system-mode list)"
+      - "bpftool installed (for Tier 3 assertions; usually packaged with linux-tools-* on Debian/Ubuntu)"
+
+  - name: github-actions-ci
+    description: |
+      GitHub Actions ubuntu-latest runner — the surface the new CI
+      jobs in `ci-cd-pipeline.md` §2 execute on. Three new jobs
+      (bpf-build, bpf-unit, integration-test-vm-latest) plus a
+      branch-protection delta. Existing six jobs continue to run
+      unchanged on this surface.
+    platform: [linux]
+    preconditions:
+      - "ubuntu-latest base image (Ubuntu 24.04 lineage at time of writing)"
+      - "qemu-disable-kvm flag for LVH (no nested virt on stock GHA runners; LVH harness sets the flag automatically when /dev/kvm is absent)"
+      - "bpf-linker installed via `cargo install --locked bpf-linker` step in the bpf-build job"
+      - "Swatinem/rust-cache for ~/.cargo and target/ caching"
+      - "sccache (soft-fail) per existing job pattern"
+      - "GITHUB_TOKEN with contents:read (already declared in workflow permissions block)"
+
+coexistence_matrix:
+  - tool: existing CI jobs (fmt-clippy, test, integration, dst, dst-lint, yaml-free-cli, mutants-diff)
+    must_not_break: true
+    notes: |
+      The new three jobs are appended to ci.yml; they share no
+      shared-key cache, no env vars, no concurrency group with the
+      existing jobs. Independent failure modes.
+  - tool: existing Lima toolchain (cargo-deny, cargo-nextest, cargo-mutants, kraft, lvh, virtme-ng, cloud-hypervisor, wasmtime)
+    must_not_break: true
+    notes: |
+      `cargo install --locked` is idempotent and adds bpf-linker
+      alongside the existing three cargo-installed binaries. No
+      apt-package conflicts; no port/socket reservations changed.
+  - tool: dst-lint gate (cargo xtask dst-lint)
+    must_not_break: true
+    notes: |
+      ADR-0038 §8: dst-lint scans only `crate_class = "core"` crates;
+      the two new crates declare `binary` and `adapter-host` and are
+      skipped. The existing self-test asserting the core-class set is
+      non-empty continues to pass.
+  - tool: workspace-member integration-tests feature self-test
+    must_not_break: true
+    notes: |
+      `xtask::mutants::tests::every_workspace_member_declares_integration_tests_feature`
+      catches a missing `integration-tests = []` declaration at PR
+      time. Both new crates declare it per ADR-0038 §1.
+  - tool: macOS `cargo check --workspace --no-run` quality gate
+    must_not_break: true
+    notes: |
+      Workspace gains a NEW `default-members` declaration that omits
+      `overdrive-bpf`. macOS users running `cargo check --workspace`
+      automatically skip the kernel-side crate; the loader compiles
+      via `#[cfg(target_os = "linux")]` stubs. No --exclude flag
+      needed.
+
+platform_coverage:
+  macOS: ["13.x", "14.x"]   # Lima requires macOS >= 13 per existing infra
+  Linux:
+    - "Ubuntu 24.04 (Lima VM and GitHub Actions ubuntu-latest)"
+    - "Ubuntu 22.04 (older GitHub Actions ubuntu-latest snapshot — supported by aya 0.13)"
+    - "Debian 12 (linux-native-dev — supported by aya, requires bpf-linker via cargo install)"
+  CI:
+    - "GitHub Actions ubuntu-latest"
+  kernels:
+    - "latest LTS (only kernel exercised by integration-test-vm-latest in #23)"
+    - "matrix [5.10, 5.15, 6.1, 6.6, latest LTS, bpf-next] is scope of #29 (separate harness-bootstrap issue)"
+
+deployment_assumptions:
+  - "Adding bpf-linker to Lima image MUST be idempotent (`cargo install --locked` is idempotent by default; existing users re-provision with `limactl stop && limactl start --reload`)"
+  - "Adding bpf-linker MUST NOT break existing Lima toolchain — `cargo install` does not conflict with cargo-deny / cargo-nextest / cargo-mutants because each is a separate binary in `~/.cargo/bin/`"
+  - "Adding 3 new CI jobs MUST NOT break existing 7 jobs — independent job graph; only branch-protection settings (operator action) need a delta"
+  - "Excluding overdrive-bpf from default-members MUST NOT break `cargo check --workspace` on macOS for unrelated crates (Cargo silently skips the omitted member)"
+  - "Single-kernel CI for #23 MUST NOT preempt the matrix expansion in #29 — the integration-test-vm-latest job is structured so #29 can wrap it in a `strategy: matrix:` block over the kernel set with no other refactor"
+  - "CAP_BPF + CAP_NET_ADMIN are required at runtime on Linux surfaces — Lima's `cargo xtask lima run --` wrapper handles this transparently by running the test process as root inside the VM; CI's LVH VM does the same; production deployment (Phase 7+) declares `AmbientCapabilities=CAP_BPF CAP_NET_ADMIN` on the systemd unit per ADR-0038 §9"
+  - "No deployable Overdrive artifact is produced or installed by #23 — the new crates are workspace members compiled by cargo on each developer/CI surface"
