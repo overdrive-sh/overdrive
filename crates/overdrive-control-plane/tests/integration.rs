@@ -76,6 +76,9 @@ mod integration {
         mod exit_observer;
         mod stop_to_terminated;
         mod submit_to_running;
+        /// Wait helpers for Tier-3 integration tests that drive the
+        /// spawned convergence loop via `SimClock`. See module docs.
+        pub mod wait;
     }
     /// phase-1-first-workload — slice 4 (US-03 final) — Linux-only
     /// cgroup-isolation harness. Per ADR-0028 the control-plane
