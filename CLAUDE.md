@@ -84,3 +84,7 @@ When dispatching `@nw-solution-architect` (or any DESIGN-wave agent) for a featu
 ## Roadmap validator warnings
 
 `des.cli.roadmap validate` flags length-limit warnings (`STEP_NAME_TOO_LONG`, `CRITERIA_TOO_LONG`, `DESCRIPTION_TOO_LONG`) that are cosmetic and non-blocking — the validator exits 0 anyway. Overdrive roadmap ACs deliberately carry scenario-level specificity (test names, invariant names, proptest targets, kill-rate thresholds), and tightening them to the defaults would lose traceability. Ignore these warnings; do not ask the crafter to trim them.
+
+## No effort/time budget cuts
+
+Roadmap `effort_hours` estimates are **advisory, not enforcement**. Do NOT defer scope mid-step on the basis "exceeds this slice's hour budget." Land the full work the step's acceptance criteria describe, however long it takes. If the work genuinely warrants a follow-up (e.g., a separate concern surfaces during implementation that's clearly out of the step's named scope), surface that to the user and ask — do not unilaterally ship a partial and log COMMIT EXECUTED PASS against an incomplete deliverable. The DES log is a contract; partial completions corrupt it.

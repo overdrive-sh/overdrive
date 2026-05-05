@@ -1499,6 +1499,13 @@ Rules:
   verifier-friendly. Bare null derefs are rejected.
 - The `with_max_entries` argument is the BPF map size; it must match
   the userspace handle's expected capacity.
+- **HASH_OF_MAPS chained lookup.** Outer-map `bpf_map_lookup_elem`
+  returns a `NonNull<c_void>` tagged `inner_map` by the verifier; chain
+  to a second `bpf_map_lookup_elem` against the inner FD only after a
+  NULL check. Single-level nesting only — the kernel rejects HoM-of-HoM
+  at outer-map create time. See
+  `docs/research/dataplane/aya-rs-usage-comprehensive-research.md`
+  § D.6 for the canonical chained-lookup shape.
 
 ### `no_std` / `no_main` constraints
 
@@ -1566,6 +1573,36 @@ host-order inputs, write host-order to the BPF map, and the kernel-side
 program does the conversion. Any drift in either direction is caught by
 S-2.2-17 (Tier 2 lockstep test).
 
+### `HASH_OF_MAPS` — hand-rolled until aya 0.14+
+
+aya 0.13.x ships no typed userspace `HashOfMaps<K, V>` wrapper and
+aya-ebpf 0.1.x ships no `#[map]` macro support for
+`BPF_MAP_TYPE_HASH_OF_MAPS`. The project provides a typed handle
+(`HashOfMapsHandle<K, V>`) on the userspace side and a
+`#[repr(transparent)]` `HashOfMaps<K, V, M>` struct on the kernel side
+— both built directly over the raw `bpf()` syscall + `bpf_helper_*`
+binding surface.
+
+Outer map and inner-map prototype both created via direct `bpf()`
+syscalls in `crates/overdrive-dataplane/src/sys/bpf.rs`; the typed
+`HashOfMapsHandle<K, V>` is the only entry point. **Atomic backend
+swap is `HashOfMapsHandle::set(&service_id, new_inner_fd)`** — kernel
+ref-counting handles in-flight readers, so the swap is observers-see-
+either-old-or-new with no torn states.
+
+Migration path when aya 1.0 / PR #1446 lands: `HashOfMapsHandle` has a
+deliberately PR-1446-compatible signature; replace
+`HashOfMapsHandle::new_with_hash_inner(...)` with
+`aya::maps::HashOfMaps::try_from(...)`, replace
+`HashOfMapsHandle::set(&key, inner_fd)` with the upstream typed
+equivalent, and remove the `sys/bpf.rs` HoM helpers. The
+`BackendId`/`ServiceKey`/lookup-chain logic stays as-is.
+
+See `docs/research/dataplane/aya-rs-usage-comprehensive-research.md`
+§ D.1–D.3 for the full hand-rolled shape (userspace construction +
+typed handle + kernel-side struct) and § F.1 for the migration
+plan.
+
 ### Verifier-friendly idioms — what to avoid
 
 - **No loops with non-bounded counters.** The verifier needs to know the
@@ -1589,7 +1626,14 @@ Each kernel-side program lands across all four tiers:
 
 - **Tier 2 (`BPF_PROG_TEST_RUN`)**: `crates/overdrive-bpf/tests/integration/<name>.rs`
   — PKTGEN/SETUP/CHECK triptych against curated input. Map state
-  cleared between sub-tests by default.
+  cleared between sub-tests by default. aya 0.13.x does NOT expose
+  `BPF_PROG_TEST_RUN` as a typed method; PKTGEN/SETUP/CHECK uses the
+  project's `prog_test_run()` helper at
+  `crates/overdrive-dataplane/src/sys/prog_test_run.rs` (or inline raw
+  `libc::syscall(SYS_bpf, BPF_PROG_TEST_RUN, ...)` until the helper
+  lands). See `docs/research/dataplane/aya-rs-usage-comprehensive-research.md`
+  § C.1 / F.2 — no upstream typed-wrapper effort visible, helper
+  expected to remain load-bearing across multiple aya releases.
 - **Tier 3 (real veth)**: `crates/overdrive-dataplane/tests/integration/<name>.rs`
   — real packet plumbing through veth pairs in Lima / ubuntu-latest.
 - **Tier 4 (`veristat`)**: `perf-baseline/main/verifier-budget/veristat-<name>.txt`
