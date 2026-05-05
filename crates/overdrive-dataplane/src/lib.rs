@@ -70,9 +70,31 @@ impl EbpfDataplane {
     /// attaching `xdp_pass` to `iface`. Mirrors the `SimDataplane::new`
     /// seam in `overdrive-sim` so production / sim wirings are
     /// substitutable behind the `Dataplane` port trait.
+    ///
+    /// Interface name is resolved via `nix::net::if_::if_nametoindex`
+    /// before any BPF program is loaded; missing interfaces produce
+    /// [`DataplaneError::IfaceNotFound`] (S-2.2-03) rather than a
+    /// generic `LoadFailed`. Other errno values from `if_nametoindex`
+    /// pass through as `LoadFailed` with the originating errno text —
+    /// per `.claude/rules/development.md` § Errors, distinct failure
+    /// modes get distinct variants; only `ENODEV` / `ENOENT` map to
+    /// `IfaceNotFound`.
     #[cfg(target_os = "linux")]
     pub fn new(iface: &str) -> Result<Self, DataplaneError> {
         use aya::programs::{Xdp, XdpFlags};
+        use nix::errno::Errno;
+        use nix::net::if_::if_nametoindex;
+
+        // Resolve iface name → ifindex first. ENODEV / ENOENT map to
+        // the typed IfaceNotFound variant; everything else surfaces
+        // as LoadFailed with the errno text.
+        if_nametoindex(iface).map_err(|errno| match errno {
+            Errno::ENODEV | Errno::ENOENT => {
+                DataplaneError::IfaceNotFound { iface: iface.to_string() }
+            }
+            other => DataplaneError::LoadFailed(format!("if_nametoindex({iface}): {other}")),
+        })?;
+
         let mut bpf = aya::Ebpf::load(OVERDRIVE_BPF_OBJ)
             .map_err(|e| DataplaneError::LoadFailed(format!("aya load: {e}")))?;
         let prog: &mut Xdp = bpf

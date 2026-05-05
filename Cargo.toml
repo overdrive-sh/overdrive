@@ -130,6 +130,11 @@ hex             = "0.4"
 url             = { version = "2", features = ["serde"] }
 hostname        = "0.4"
 libc            = "0.2"
+# `nix` provides safe Rust bindings to *nix syscalls. Used by
+# `overdrive-dataplane` for `if_nametoindex` (interface name → ifindex
+# resolution) per architecture.md §5 / S-2.2-03. Linux-only consumers
+# in the workspace; no portability shim needed here.
+nix             = { version = "0.29", default-features = false, features = ["net"] }
 rustls-pemfile  = "2"
 x509-parser     = "0.18"
 toml            = "0.8"

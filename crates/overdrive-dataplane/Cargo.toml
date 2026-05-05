@@ -52,8 +52,13 @@ tracing.workspace        = true
 # Linux-only. macOS builds compile this crate via the
 # `#[cfg(not(target_os = "linux"))]` stub branches in `src/lib.rs`
 # without aya in the dep graph (architecture.md §5.2).
+#
+# `nix` provides `if_nametoindex` (interface name → ifindex resolution)
+# per S-2.2-03; Linux-only because the call surface lives behind
+# `#[cfg(target_os = "linux")]` in the loader.
 [target.'cfg(target_os = "linux")'.dependencies]
 aya.workspace = true
+nix.workspace = true
 
 # Integration-test dev-deps. `serial_test` serialises tests that
 # mutate process-global state — here, the on-disk BPF artifact path

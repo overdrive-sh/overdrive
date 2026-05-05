@@ -22,6 +22,13 @@ pub enum DataplaneError {
     LoadFailed(String),
     #[error("dataplane I/O: {0}")]
     Io(#[from] std::io::Error),
+    /// Resolution of an interface name to a kernel ifindex failed —
+    /// the named interface does not exist on the host. Surfaces
+    /// `ENODEV` / `ENOENT` from `if_nametoindex(2)` per S-2.2-03.
+    /// The loader uses this BEFORE attempting to load any BPF
+    /// program; see `EbpfDataplane::new` in `overdrive-dataplane`.
+    #[error("interface not found: {iface}")]
+    IfaceNotFound { iface: String },
 }
 
 /// Policy decision compiled into the BPF `POLICY_MAP`.

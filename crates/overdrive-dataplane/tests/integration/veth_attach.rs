@@ -32,12 +32,32 @@ fn native_attach_failure_logs_fallback_warning() {
 }
 
 /// S-2.2-03 — Missing iface produces typed `IfaceNotFound` error.
+///
+/// Driving port: `EbpfDataplane::new(iface)`. Asserts that a deliberately
+/// non-existent interface name surfaces as the typed
+/// [`DataplaneError::IfaceNotFound`] variant — never as a generic
+/// `LoadFailed` string match. The loader resolves iface name to ifindex
+/// via `nix::if_nametoindex`; `ENODEV` / `ENOENT` from the kernel map
+/// to this variant before any aya BPF program is loaded.
+///
+/// Does not require root — name resolution fails before XDP attach.
 #[test]
-#[ignore = "RED scaffold S-2.2-03 — DELIVER fills the body per Slice 01"]
 fn missing_iface_returns_typed_iface_not_found_error() {
-    panic!(
-        "Not yet implemented -- RED scaffold: S-2.2-03 — \
-         loader returns DataplaneError::IfaceNotFound on missing \
-         interface; no XDP program is loaded"
-    );
+    use overdrive_core::traits::dataplane::DataplaneError;
+    use overdrive_dataplane::EbpfDataplane;
+
+    // Deliberately non-existent interface — the kernel will return
+    // ENODEV from if_nametoindex.
+    let iface = "overdrive-veth-not-here-9999";
+    let result = EbpfDataplane::new(iface);
+
+    match result {
+        Err(DataplaneError::IfaceNotFound { iface: returned }) => {
+            assert_eq!(returned, iface, "IfaceNotFound must echo the requested iface name");
+        }
+        Err(other) => {
+            panic!("expected DataplaneError::IfaceNotFound {{ iface: {iface:?} }}, got {other:?}")
+        }
+        Ok(_) => panic!("expected Err on missing iface, got Ok"),
+    }
 }
