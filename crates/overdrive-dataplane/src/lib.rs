@@ -29,6 +29,12 @@ pub mod maglev;
 pub mod maps;
 pub mod swap;
 
+// Direct `bpf(2)` syscall surface used where aya 0.13.x ships no
+// typed wrappers (HASH_OF_MAPS construction + `BPF_PROG_TEST_RUN`).
+// Linux-only — gated within the module.
+#[cfg(target_os = "linux")]
+pub mod sys;
+
 use std::net::Ipv4Addr;
 
 use async_trait::async_trait;

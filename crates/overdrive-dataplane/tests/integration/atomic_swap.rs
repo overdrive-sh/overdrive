@@ -9,6 +9,30 @@
 
 /// S-2.2-09 — Atomic backend swap drops zero packets under
 /// 50 kpps `xdp-trafficgen` traffic.
+///
+/// **Phase 2.2 step 03-02 status — GREEN path is partially landed.**
+///
+/// The full dataplane-traffic version of this test (50 kpps real
+/// packets through a real veth, parallel swap mid-flight, send-vs-
+/// sink accounting) requires the kernel-side SERVICE_MAP ELF to be
+/// declared as `HashOfMaps<ServiceKey, BackendId, Array<…>>` instead
+/// of the flat `HashMap<ServiceKey, BackendEntry>` that ships with
+/// Slice 02 (`crates/overdrive-bpf/src/maps/service_map.rs`). aya
+/// 0.13.x's ELF loader rejects HoM map types because it does not set
+/// `inner_map_fd` in the `BPF_MAP_CREATE` syscall — research § D.3
+/// (b). Bridging the kernel-side declaration to the userspace-
+/// created HoM via bpffs pinning is structurally a separate concern
+/// from the typed-wrapper landing in this step.
+///
+/// This step lands the load-bearing pieces — the typed
+/// [`overdrive_dataplane::maps::hash_of_maps::HashOfMapsHandle`] +
+/// the raw `bpf()` syscall surface in
+/// [`overdrive_dataplane::sys::bpf`] — and pins their behaviour via
+/// [`hash_of_maps_handle_create_swap_delete_round_trip`] (the
+/// userspace-only GREEN-path swap that runs against real kernel BPF
+/// maps but does not yet drive packet traffic through the kernel-
+/// side XDP path). The packet-traffic version flips GREEN once the
+/// kernel-side ELF migration lands in 03-03.
 #[test]
 #[should_panic(expected = "RED scaffold")]
 fn atomic_swap_under_50kpps_traffic_drops_zero_packets() {
@@ -16,8 +40,121 @@ fn atomic_swap_under_50kpps_traffic_drops_zero_packets() {
         "Not yet implemented -- RED scaffold: S-2.2-09 — \
          service S1 has one backend B1; xdp-trafficgen 50 kpps; \
          swap to {{B1, B2, B3}}; assert ZERO drops via send vs sink \
-         receive accounting"
+         receive accounting (blocked on kernel-side SERVICE_MAP \
+         HoM ELF migration; the userspace-only GREEN-path swap is \
+         covered by `hash_of_maps_handle_create_swap_delete_round_trip`)"
     );
+}
+
+/// GREEN-path companion to S-2.2-11 — exercises the typed
+/// [`HashOfMapsHandle`] full lifecycle against real kernel BPF
+/// maps:
+///
+/// 1. Construct an outer HoM with HASH inner-map prototype (the
+///    SERVICE_MAP shape per architecture.md § 5 / Q5=A — outer
+///    HASH_OF_MAPS keyed by ServiceKey, inner ARRAY of BackendId
+///    size 256).
+/// 2. Allocate a fresh inner map populated with backend slots.
+/// 3. `set(&service_id, inner_v1.as_fd())` — the load-bearing
+///    step-3 atomic outer-pointer update of ADR-0040 § 2.
+/// 4. Allocate a SECOND fresh inner map (`{B1, B2, B3}`).
+/// 5. `set(&service_id, inner_v2.as_fd())` — the swap.
+/// 6. Verify the post-swap state via direct `bpf_map_lookup_elem`
+///    against the outer map: the value bytes must equal the new
+///    inner FD's u32, not the prior FD's.
+/// 7. `delete(&service_id)` is idempotent.
+///
+/// This is the highest-fidelity GREEN-path assertion possible at
+/// this step's scope — the typed-handle surface is exercised
+/// end-to-end against real kernel BPF maps. The kernel-side
+/// SERVICE_MAP ELF migration (which would let 50 kpps real traffic
+/// flow through the XDP path) is sequenced into 03-03.
+#[test]
+fn hash_of_maps_handle_create_swap_delete_round_trip() {
+    use overdrive_dataplane::maps::hash_of_maps::HashOfMapsHandle;
+    use overdrive_dataplane::sys::bpf::bpf_map_lookup_elem;
+    use std::os::fd::AsFd;
+
+    // Same root-required gating as S-2.2-11 above. The bpf()
+    // syscall requires CAP_BPF (or root); Lima default-runs as root
+    // per the project's Lima wrapper convention.
+    //
+    // SAFETY: `geteuid` reads a kernel-managed numeric and cannot
+    // fail — the `unsafe` is the libc-binding family's, not a
+    // precondition violation surface.
+    let euid = unsafe { libc::geteuid() };
+    if euid != 0 {
+        eprintln!(
+            "[skip] GREEN-path swap requires root (CAP_BPF) for bpf(BPF_MAP_CREATE); \
+             euid={euid}"
+        );
+        return;
+    }
+
+    // (1) Outer HoM with ARRAY inner-map prototype, size 256
+    // (Q5=A). Outer holds 16 services for the test — production is
+    // 4096 per architecture.md § 10.
+    let hom = HashOfMapsHandle::<u32, u32>::new_with_array_inner("test_hom_swap_e2e", 16, 256)
+        .expect("HoM construction with valid params must succeed");
+
+    let service_key: u32 = 7;
+
+    // (2) First fresh inner map.
+    let inner_v1 = hom.create_inner(None).expect("inner v1 alloc must succeed");
+
+    // (3) Step-3 atomic update — outer-map slot now points at v1.
+    hom.set(&service_key, inner_v1.as_fd()).expect("v1 swap-in must succeed");
+
+    // Read back via direct bpf_map_lookup_elem against the outer
+    // map. The kernel stores its internal map *id* (a u32 ABI surface
+    // exposed at this level) — NOT the userspace FD value. We
+    // therefore cannot predict the exact value, but we CAN pin two
+    // properties:
+    //   (a) lookup against a populated key returns Some bytes
+    //       (the slot is non-empty post-set);
+    //   (b) the bytes change across the v1→v2 swap (step 3
+    //       observably updates the outer slot to a different inner
+    //       map's identity).
+    // This is the load-bearing assertion the kernel ABI permits at
+    // userspace from outside an XDP context — XDP-side chained
+    // lookup verifies the actual inner-map *contents*, not just that
+    // the slot was updated. The XDP-side traffic verification
+    // sequences into 03-03 once the kernel-side ELF migration lands.
+    let key_bytes = service_key.to_ne_bytes();
+    let v1_readback = bpf_map_lookup_elem(hom.as_fd(), &key_bytes, 4)
+        .expect("outer-map lookup must succeed")
+        .expect("just-set key must read back");
+    let v1_observed: u32 =
+        u32::from_ne_bytes(v1_readback.as_slice().try_into().expect("4-byte HoM value"));
+
+    // (4) Second fresh inner map ({B1, B2, B3} representative —
+    // the inner ARRAY itself is opaque from the outer's perspective).
+    let inner_v2 = hom.create_inner(None).expect("inner v2 alloc must succeed");
+
+    // (5) The swap — single atomic bpf_map_update_elem.
+    hom.set(&service_key, inner_v2.as_fd()).expect("v2 atomic swap must succeed");
+
+    // (6) Post-swap readback — outer-map slot's stored value has
+    // changed because we wrote a different inner-map FD. ADR-0040
+    // § 2 step 3 produces an observable update to the outer map.
+    let v2_readback = bpf_map_lookup_elem(hom.as_fd(), &key_bytes, 4)
+        .expect("post-swap outer-map lookup must succeed")
+        .expect("post-swap key must still resolve");
+    let v2_observed: u32 =
+        u32::from_ne_bytes(v2_readback.as_slice().try_into().expect("4-byte HoM value"));
+    assert_ne!(
+        v2_observed, v1_observed,
+        "post-swap readback must show outer-map slot has changed (step-3 atomic update of ADR-0040 § 2)"
+    );
+
+    // (7) Idempotent delete.
+    hom.delete(&service_key).expect("first delete must succeed");
+    hom.delete(&service_key).expect("second delete on absent key is idempotent");
+
+    // Post-delete readback is None — outer slot is gone.
+    let post_delete = bpf_map_lookup_elem(hom.as_fd(), &key_bytes, 4)
+        .expect("post-delete outer-map lookup must succeed");
+    assert!(post_delete.is_none(), "post-delete outer slot must be absent");
 }
 
 /// S-2.2-10 — Removing a backend leaves no orphans after GC.
