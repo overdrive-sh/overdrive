@@ -40,9 +40,13 @@
 
 #![allow(dead_code)]
 
-use aya_ebpf::{bindings::xdp_action, macros::xdp, programs::XdpContext};
+use aya_ebpf::{
+    bindings::xdp_action, cty::c_void, helpers::bpf_map_lookup_elem, macros::xdp,
+    programs::XdpContext,
+};
 
-use crate::maps::service_map::{BackendEntry, SERVICE_MAP, ServiceKey};
+use crate::maps::backend_map::{BACKEND_MAP, BackendEntry};
+use crate::maps::service_map::{INNER_TABLE_SIZE, SERVICE_MAP, ServiceKey};
 
 // Header offsets / constants.
 const ETH_HDR_LEN: usize = 14;
@@ -56,6 +60,7 @@ const IPV4_DST_IP_OFFSET: usize = 16;
 const IPV4_PROTO_TCP: u8 = 6;
 const IPV4_PROTO_UDP: u8 = 17;
 
+const L4_SRC_PORT_OFFSET: usize = 0; // same for TCP and UDP
 const L4_DST_PORT_OFFSET: usize = 2; // same for TCP and UDP
 const TCP_CSUM_OFFSET: usize = 16;
 const UDP_CSUM_OFFSET: usize = 6;
@@ -221,11 +226,12 @@ fn try_xdp_service_map_lookup(ctx: &XdpContext) -> Result<u32, ()> {
         return Ok(xdp_action::XDP_PASS);
     }
 
-    // (4) Bounds-check L4 header + read dest port + checksum.
+    // (4) Bounds-check L4 header + read source/dest ports + checksum.
     let l4_off = ETH_HDR_LEN + IPV4_HDR_LEN;
     let (l4_csum_off, l4_hdr_len) =
         if is_tcp { (TCP_CSUM_OFFSET, TCP_HDR_LEN) } else { (UDP_CSUM_OFFSET, UDP_HDR_LEN) };
     let _l4_bounds: *const u8 = unsafe { ptr_at(ctx, l4_off + l4_hdr_len - 1)? };
+    let src_port = unsafe { read_u16_be(ctx, l4_off + L4_SRC_PORT_OFFSET)? };
     let dst_port = unsafe { read_u16_be(ctx, l4_off + L4_DST_PORT_OFFSET)? };
     let l4_csum = unsafe { read_u16_be(ctx, l4_off + l4_csum_off)? };
 
@@ -235,8 +241,50 @@ fn try_xdp_service_map_lookup(ctx: &XdpContext) -> Result<u32, ()> {
     // — see architecture.md § 11.
     let key = ServiceKey { vip_host: dst_ip, port_host: dst_port, _pad: 0 };
 
-    // (6) Lookup. Miss ⇒ XDP_PASS (S-2.2-05).
-    let backend = match unsafe { SERVICE_MAP.get(&key) } {
+    // (6) Two-step HoM lookup per kernel.org map_of_maps doc + research
+    // § D.6:
+    //   step a: outer SERVICE_MAP[key] → inner ARRAY pointer
+    //   step b: inner ARRAY[slot] → BackendId (raw u32)
+    //   step c: BACKEND_MAP[BackendId] → BackendEntry
+    //
+    // NULL-check between step a and step b is verifier-mandatory —
+    // the outer-lookup return is type-tagged `inner_map`; the verifier
+    // rejects unconditional dereference. The Option representation
+    // makes the check load-bearing in the type system. Same shape for
+    // step b → step c.
+    let inner_ptr = match SERVICE_MAP.lookup_inner(&key) {
+        Some(p) => p,
+        None => return Ok(xdp_action::XDP_PASS),
+    };
+
+    // Slot index — pre-Slice-04 placeholder 2-tuple hash on
+    // (src_port, dst_port) mod 256. After Slice 04 the slot index
+    // is the Maglev-resolved value from MAGLEV_MAP, not this hash;
+    // the placeholder exists only for distributing test traffic
+    // across the inner ARRAY slots and does NOT need full 5-tuple
+    // dispersion (Slice 04 lands the proper hash). Keeping it
+    // minimal — `(src_port ^ dst_port)` against a u32 — controls
+    // verifier instruction-count growth (ASR-2.2-03 ≤ 20% delta).
+    let slot: u32 = u32::from(src_port ^ dst_port) & (INNER_TABLE_SIZE - 1);
+
+    // SAFETY: `inner_ptr` is verifier-tagged `inner_map` from the
+    // outer lookup above; the chained lookup is the canonical
+    // verifier-accepted shape. `slot` is bounded by
+    // `INNER_TABLE_SIZE - 1` so the inner ARRAY (size
+    // INNER_TABLE_SIZE) cannot reject as out-of-range.
+    let bid_ptr =
+        unsafe { bpf_map_lookup_elem(inner_ptr.as_ptr(), &slot as *const u32 as *const c_void) };
+    if bid_ptr.is_null() {
+        return Ok(xdp_action::XDP_PASS);
+    }
+    // SAFETY: `bid_ptr` non-null (NULL-checked above); the inner
+    // ARRAY's value is `BackendId` = raw `u32`, value_size matches.
+    let backend_id: u32 = unsafe { *(bid_ptr as *const u32) };
+
+    // step c: resolve BackendId → BackendEntry via BACKEND_MAP.
+    // SAFETY: `BACKEND_MAP.get` is unsafe per aya-ebpf API; the
+    // returned pointer is verifier-checked, NULL-check via Option.
+    let backend = match unsafe { BACKEND_MAP.get(&backend_id) } {
         Some(b) => *b,
         None => return Ok(xdp_action::XDP_PASS),
     };

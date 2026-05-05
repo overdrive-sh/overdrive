@@ -19,12 +19,31 @@
 //! userspace API requires libbpf-sys.
 
 #![cfg(target_os = "linux")]
-#![allow(clippy::missing_panics_doc)]
+// See `xdp_pass_test_run.rs` for the full rationale — Tier 2 BPF unit
+// tests work directly with the `bpf(2)` syscall surface (raw FD <-> u32
+// casts, raw pointer borrows for syscall arg buffers, kernel POD
+// structs). Pedantic lints flag these patterns; allow scoped to the
+// test crate.
+#![allow(
+    clippy::missing_panics_doc,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::ptr_as_ptr,
+    clippy::borrow_as_ptr,
+    clippy::ref_as_ptr,
+    clippy::items_after_statements,
+    clippy::doc_markdown,
+    clippy::explicit_counter_loop,
+    clippy::explicit_iter_loop
+)]
 
 use std::path::PathBuf;
 
+use std::os::fd::{AsRawFd, OwnedFd};
+
 use aya::{
-    Ebpf,
+    Ebpf, EbpfLoader,
     maps::HashMap,
     programs::{ProgramFd, Xdp},
 };
@@ -243,18 +262,56 @@ struct BackendEntry {
 }
 unsafe impl aya::Pod for BackendEntry {}
 
-/// Common load helper. Loads the BPF object, attaches the
-/// `xdp_service_map_lookup` program, returns an owned `ProgramFd`
-/// alongside the still-loaded `Ebpf` so the caller can manipulate
-/// `SERVICE_MAP`.
-fn load_service_map_program() -> (Ebpf, ProgramFd) {
+/// Loaded BPF object + handles for SERVICE_MAP HoM testing.
+///
+/// `outer_fd` owns the outer HoM FD (created + pinned by userspace
+/// per the pin-by-name workaround for aya 0.13.x — see
+/// `.claude/rules/development.md` § "Sharing the outer HoM between
+/// userspace and the kernel-side ELF — `pinning = ByName`"). The
+/// kernel-side declaration carries `pinning = ByName`; aya's loader
+/// recovers this same FD via `BPF_OBJ_GET` during `EbpfLoader::
+/// load_file`. `_pin_dir_guard` cleans the bpffs directory on drop.
+struct LoadedTestBpf {
+    bpf: Ebpf,
+    prog_fd: ProgramFd,
+    outer_fd: OwnedFd,
+    _pin_dir_guard: PinDirGuard,
+}
+
+struct PinDirGuard(PathBuf);
+impl Drop for PinDirGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+/// Common load helper. Pre-creates + pre-pins the SERVICE_MAP outer
+/// HoM, loads the BPF object via `EbpfLoader::map_pin_path`,
+/// attaches the `xdp_service_map_lookup` program, and returns the
+/// composed handle bag.
+fn load_service_map_program() -> LoadedTestBpf {
     let artifact = bpf_artifact_path();
     assert!(
         artifact.exists(),
         "BPF artifact missing at {} — run `cargo xtask bpf-build` first",
         artifact.display(),
     );
-    let mut bpf = Ebpf::load_file(&artifact)
+
+    let pin_dir = PathBuf::from(format!(
+        "/sys/fs/bpf/overdrive-test-svc-tier2-{}-{:?}",
+        std::process::id(),
+        std::thread::current().id()
+    ));
+    let _ = std::fs::remove_dir_all(&pin_dir);
+    std::fs::create_dir_all(&pin_dir).expect("create pin dir");
+    let pin_dir_guard = PinDirGuard(pin_dir.clone());
+
+    let outer_fd = pre_pin_service_map(&pin_dir);
+
+    let mut bpf = EbpfLoader::new()
+        .map_pin_path(&pin_dir)
+        .allow_unsupported_maps()
+        .load_file(&artifact)
         .unwrap_or_else(|e| panic!("aya load_file({}): {e}", artifact.display()));
 
     let prog_fd = {
@@ -266,38 +323,195 @@ fn load_service_map_program() -> (Ebpf, ProgramFd) {
         prog.load().expect("xdp_service_map_lookup.load");
         prog.fd().expect("fd()").try_clone().expect("ProgramFd::try_clone")
     };
-    (bpf, prog_fd)
+    LoadedTestBpf { bpf, prog_fd, outer_fd, _pin_dir_guard: pin_dir_guard }
 }
 
-fn clear_service_map(bpf: &mut Ebpf) {
-    let mut sm: HashMap<_, ServiceKey, BackendEntry> =
-        HashMap::try_from(bpf.map_mut("SERVICE_MAP").expect("SERVICE_MAP map not found"))
-            .expect("SERVICE_MAP HashMap::try_from");
-    // Remove every key by iterating snapshot keys then deleting.
-    let keys: Vec<ServiceKey> = sm.keys().filter_map(Result::ok).collect();
-    for k in keys {
-        let _ = sm.remove(&k);
+/// Allocate a fresh inner ARRAY (size 256) and populate every slot
+/// with `backend_id`. Returns the inner FD ready for the outer-map
+/// `set`. Pre-Slice-04 the XDP slot hash is a placeholder, so any
+/// uniformly-populated inner ARRAY makes every lookup resolve to
+/// `backend_id`.
+fn create_inner_array_filled(backend_id: u32) -> OwnedFd {
+    use std::mem;
+    use std::os::fd::FromRawFd;
+
+    use libc::{SYS_bpf, c_int, c_long, c_void, syscall};
+
+    const BPF_MAP_CREATE: c_long = 0;
+    const BPF_MAP_UPDATE_ELEM: c_long = 2;
+    const BPF_MAP_TYPE_ARRAY: u32 = 2;
+
+    #[repr(C)]
+    #[derive(Default)]
+    struct CreateAttr {
+        map_type: u32,
+        key_size: u32,
+        value_size: u32,
+        max_entries: u32,
+        map_flags: u32,
+        inner_map_fd: u32,
+        numa_node: u32,
+        map_name: [u8; 16],
+        map_ifindex: u32,
+        btf_fd: u32,
+        btf_key_type_id: u32,
+        btf_value_type_id: u32,
+        _pad: [u8; 32],
     }
+    #[repr(C)]
+    struct ElemAttr {
+        map_fd: u32,
+        _pad0: u32,
+        key: u64,
+        value: u64,
+        flags: u64,
+    }
+
+    let attr = CreateAttr {
+        map_type: BPF_MAP_TYPE_ARRAY,
+        key_size: mem::size_of::<u32>() as u32,
+        value_size: mem::size_of::<u32>() as u32,
+        max_entries: 256,
+        ..Default::default()
+    };
+    // SAFETY: bpf() syscall with a valid `bpf_attr` struct, fixed
+    // size; pointer not retained past the call.
+    let raw = unsafe {
+        syscall(
+            SYS_bpf,
+            BPF_MAP_CREATE,
+            &attr as *const _ as *const c_void,
+            mem::size_of::<CreateAttr>() as c_int,
+        )
+    };
+    assert!(raw >= 0, "inner ARRAY create: {}", std::io::Error::last_os_error());
+    // SAFETY: kernel-issued FD, transferred to OwnedFd.
+    let inner_fd = unsafe { OwnedFd::from_raw_fd(raw as c_int) };
+
+    for slot in 0..256u32 {
+        let key_bytes = slot.to_ne_bytes();
+        let value_bytes = backend_id.to_ne_bytes();
+        let elem = ElemAttr {
+            map_fd: inner_fd.as_raw_fd() as u32,
+            _pad0: 0,
+            key: key_bytes.as_ptr() as u64,
+            value: value_bytes.as_ptr() as u64,
+            flags: 0,
+        };
+        // SAFETY: bpf() syscall with a valid attr; key/value live
+        // for the call's duration via stack-locals above.
+        let rc = unsafe {
+            syscall(
+                SYS_bpf,
+                BPF_MAP_UPDATE_ELEM,
+                &elem as *const _ as *const c_void,
+                mem::size_of::<ElemAttr>() as c_int,
+            )
+        };
+        assert!(rc >= 0, "inner ARRAY slot {slot} populate: {}", std::io::Error::last_os_error());
+    }
+    inner_fd
+}
+
+/// Atomic outer-map slot update — `bpf_map_update_elem(outer_fd,
+/// &service_key, &inner_fd_u32, BPF_ANY)`. Mirrors
+/// `HashOfMapsHandle::set` from `overdrive-dataplane`; inlined here
+/// to keep this Tier 2 test self-contained.
+fn outer_map_set(outer_fd: &OwnedFd, key: &ServiceKey, inner_fd: &OwnedFd) {
+    use std::mem;
+
+    use libc::{SYS_bpf, c_int, c_long, c_void, syscall};
+
+    const BPF_MAP_UPDATE_ELEM: c_long = 2;
+
+    #[repr(C)]
+    struct ElemAttr {
+        map_fd: u32,
+        _pad0: u32,
+        key: u64,
+        value: u64,
+        flags: u64,
+    }
+
+    let inner_u32: u32 = inner_fd.as_raw_fd() as u32;
+    let attr = ElemAttr {
+        map_fd: outer_fd.as_raw_fd() as u32,
+        _pad0: 0,
+        key: key as *const ServiceKey as u64,
+        value: &inner_u32 as *const u32 as u64,
+        flags: 0,
+    };
+    // SAFETY: bpf() syscall with a valid attr.
+    let rc = unsafe {
+        syscall(
+            SYS_bpf,
+            BPF_MAP_UPDATE_ELEM,
+            &attr as *const _ as *const c_void,
+            mem::size_of::<ElemAttr>() as c_int,
+        )
+    };
+    assert!(rc >= 0, "outer HoM set: {}", std::io::Error::last_os_error());
+}
+
+/// Idempotent outer-map slot delete. Used to clear state between
+/// sub-tests (analogous to the prior `clear_service_map` helper).
+fn outer_map_delete(outer_fd: &OwnedFd, key: &ServiceKey) {
+    use std::mem;
+
+    use libc::{SYS_bpf, c_int, c_long, c_void, syscall};
+
+    const BPF_MAP_DELETE_ELEM: c_long = 3;
+
+    #[repr(C)]
+    struct ElemAttr {
+        map_fd: u32,
+        _pad0: u32,
+        key: u64,
+        value: u64,
+        flags: u64,
+    }
+
+    let attr = ElemAttr {
+        map_fd: outer_fd.as_raw_fd() as u32,
+        _pad0: 0,
+        key: key as *const ServiceKey as u64,
+        value: 0,
+        flags: 0,
+    };
+    // SAFETY: bpf() syscall with a valid attr.
+    let _ = unsafe {
+        syscall(
+            SYS_bpf,
+            BPF_MAP_DELETE_ELEM,
+            &attr as *const _ as *const c_void,
+            mem::size_of::<ElemAttr>() as c_int,
+        )
+    };
+    // ENOENT is fine — idempotent delete.
 }
 
 /// S-2.2-04 — `SERVICE_MAP` hit returns `XDP_TX` with rewritten
 /// headers.
+///
+/// Slice 03 restructure: the lookup chain is now SERVICE_MAP outer
+/// HoM → inner ARRAY[slot] → BACKEND_MAP[BackendId] → BackendEntry.
+/// SETUP populates BackendId 1 in BACKEND_MAP, fills every slot of
+/// a fresh inner ARRAY with BackendId 1, and atomically sets the
+/// outer HoM slot for `(VIP, VIP_PORT)` to that inner ARRAY.
+/// The XDP slot hash is uniform across slots in this scenario so
+/// the lookup deterministically resolves to backend 1.
 #[test]
 #[serial(env)]
 fn service_map_hit_returns_xdp_tx_with_rewritten_headers() {
-    let (mut bpf, prog_fd) = load_service_map_program();
+    let LoadedTestBpf { mut bpf, prog_fd, outer_fd, _pin_dir_guard } = load_service_map_program();
 
-    // SETUP: clear and populate SERVICE_MAP with VIP -> backend.
-    clear_service_map(&mut bpf);
+    const BID_ONE: u32 = 1;
+
+    // SETUP: BACKEND_MAP under BackendId 1 → backend record.
     {
-        let mut sm: HashMap<_, ServiceKey, BackendEntry> =
-            HashMap::try_from(bpf.map_mut("SERVICE_MAP").expect("SERVICE_MAP map not found"))
-                .expect("SERVICE_MAP HashMap::try_from");
-        let key = ServiceKey {
-            vip_host: u32::from(std::net::Ipv4Addr::from(VIP_OCTETS)),
-            port_host: VIP_PORT,
-            _pad: 0,
-        };
+        let mut bm: HashMap<_, u32, BackendEntry> =
+            HashMap::try_from(bpf.map_mut("BACKEND_MAP").expect("BACKEND_MAP not found"))
+                .expect("BACKEND_MAP HashMap::try_from");
         let value = BackendEntry {
             ipv4_host: u32::from(std::net::Ipv4Addr::from(BACKEND_OCTETS)),
             port_host: BACKEND_PORT,
@@ -305,8 +519,19 @@ fn service_map_hit_returns_xdp_tx_with_rewritten_headers() {
             healthy: 1,
             _pad: [0; 3],
         };
-        sm.insert(key, value, 0).expect("insert");
+        bm.insert(BID_ONE, value, 0).expect("BACKEND_MAP insert");
     }
+
+    // SETUP: fresh inner ARRAY, all 256 slots → BackendId 1.
+    let inner_fd = create_inner_array_filled(BID_ONE);
+
+    // SETUP: outer HoM slot for (VIP, VIP_PORT) → inner ARRAY.
+    let key = ServiceKey {
+        vip_host: u32::from(std::net::Ipv4Addr::from(VIP_OCTETS)),
+        port_host: VIP_PORT,
+        _pad: 0,
+    };
+    outer_map_set(&outer_fd, &key, &inner_fd);
 
     // PKTGEN: TCP SYN to VIP:VIP_PORT.
     let pkt = synthesise_tcp_syn(VIP_OCTETS, VIP_PORT);
@@ -345,13 +570,23 @@ fn service_map_hit_returns_xdp_tx_with_rewritten_headers() {
 }
 
 /// S-2.2-05 — `SERVICE_MAP` miss returns `XDP_PASS`, no rewrite.
+///
+/// Slice 03 restructure: SERVICE_MAP outer HoM has no entry for
+/// the test VIP — the outer-map `lookup_inner` returns NULL → the
+/// XDP wrapper short-circuits with `XDP_PASS` per ADR-0040 § 3.
 #[test]
 #[serial(env)]
 fn service_map_miss_returns_xdp_pass_no_rewrite() {
-    let (mut bpf, prog_fd) = load_service_map_program();
+    let LoadedTestBpf { bpf: _bpf, prog_fd, outer_fd, _pin_dir_guard } = load_service_map_program();
 
-    // SETUP: empty SERVICE_MAP.
-    clear_service_map(&mut bpf);
+    // SETUP: ensure no outer-map entry exists for our key. This
+    // is idempotent — fresh-pinned outer HoM is empty by default.
+    let key = ServiceKey {
+        vip_host: u32::from(std::net::Ipv4Addr::from(VIP_OCTETS)),
+        port_host: VIP_PORT,
+        _pad: 0,
+    };
+    outer_map_delete(&outer_fd, &key);
 
     // PKTGEN: TCP SYN to VIP:VIP_PORT (no entry exists).
     let pkt = synthesise_tcp_syn(VIP_OCTETS, VIP_PORT);
@@ -370,31 +605,26 @@ fn service_map_miss_returns_xdp_pass_no_rewrite() {
 
 /// S-2.2-08 — Truncated IPv4 frame returns `XDP_PASS`, no crash,
 /// no `SERVICE_MAP` lookup.
+///
+/// Slice 03 restructure: the test populates SERVICE_MAP outer HoM
+/// + inner ARRAY + BACKEND_MAP for `(VIP, VIP_PORT)`, so a
+/// successful lookup would route to backend 1 → `XDP_TX`. The
+/// truncated frame must short-circuit at the IPv4 bounds check
+/// BEFORE the outer-map lookup — observed as `XDP_PASS` rather
+/// than `XDP_TX`.
 #[test]
 #[serial(env)]
 fn truncated_ipv4_frame_returns_xdp_pass_no_lookup_no_crash() {
-    let (mut bpf, prog_fd) = load_service_map_program();
+    let LoadedTestBpf { mut bpf, prog_fd, outer_fd, _pin_dir_guard } = load_service_map_program();
 
-    // SETUP: populate SERVICE_MAP. The truncation must short-
-    // circuit BEFORE the lookup; if the program incorrectly
-    // performed the lookup against arbitrary memory, the test
-    // would still see XDP_PASS but might also exhibit verifier
-    // rejection on load. The point of populating the map is to
-    // ensure the test would catch a "lookup happened anyway, then
-    // returned PASS for some other reason" regression — by setting
-    // the map up so a successful lookup would route the (broken)
-    // packet to a valid backend, any divergent behaviour would
-    // surface as XDP_TX rather than XDP_PASS.
-    clear_service_map(&mut bpf);
+    const BID_ONE: u32 = 1;
+
+    // SETUP: full happy-path populate so a "lookup happened anyway"
+    // regression would surface as XDP_TX.
     {
-        let mut sm: HashMap<_, ServiceKey, BackendEntry> =
-            HashMap::try_from(bpf.map_mut("SERVICE_MAP").expect("SERVICE_MAP map not found"))
-                .expect("SERVICE_MAP HashMap::try_from");
-        let key = ServiceKey {
-            vip_host: u32::from(std::net::Ipv4Addr::from(VIP_OCTETS)),
-            port_host: VIP_PORT,
-            _pad: 0,
-        };
+        let mut bm: HashMap<_, u32, BackendEntry> =
+            HashMap::try_from(bpf.map_mut("BACKEND_MAP").expect("BACKEND_MAP not found"))
+                .expect("BACKEND_MAP HashMap::try_from");
         let value = BackendEntry {
             ipv4_host: u32::from(std::net::Ipv4Addr::from(BACKEND_OCTETS)),
             port_host: BACKEND_PORT,
@@ -402,8 +632,15 @@ fn truncated_ipv4_frame_returns_xdp_pass_no_lookup_no_crash() {
             healthy: 1,
             _pad: [0; 3],
         };
-        sm.insert(key, value, 0).expect("insert");
+        bm.insert(BID_ONE, value, 0).expect("BACKEND_MAP insert");
     }
+    let inner_fd = create_inner_array_filled(BID_ONE);
+    let key = ServiceKey {
+        vip_host: u32::from(std::net::Ipv4Addr::from(VIP_OCTETS)),
+        port_host: VIP_PORT,
+        _pad: 0,
+    };
+    outer_map_set(&outer_fd, &key, &inner_fd);
 
     // PKTGEN: Ethernet header + only 10 bytes of IPv4 (less than
     // IPV4_HDR_LEN = 20). The kernel's BPF_PROG_TEST_RUN minimum
@@ -435,4 +672,107 @@ fn truncated_ipv4_frame_returns_xdp_pass_no_lookup_no_crash() {
         action, XDP_PASS,
         "truncated frame must return XDP_PASS (no crash, no lookup); got {action}"
     );
+}
+
+/// Pre-create + pre-pin the SERVICE_MAP outer HoM at
+/// `<pin_dir>/SERVICE_MAP`. Returns the userspace-owned outer FD.
+/// aya 0.13.x's loader cannot create HoM directly; this is the
+/// pin-by-name workaround per `.claude/rules/development.md` §
+/// "Sharing the outer HoM between userspace and the kernel-side
+/// ELF — `pinning = ByName`".
+fn pre_pin_service_map(pin_dir: &std::path::Path) -> OwnedFd {
+    use std::ffi::CString;
+    use std::mem;
+    use std::os::fd::FromRawFd;
+
+    use libc::{SYS_bpf, c_int, c_long, c_void, syscall};
+
+    const BPF_MAP_CREATE: c_long = 0;
+    const BPF_OBJ_PIN: c_long = 6;
+    const BPF_MAP_TYPE_ARRAY: u32 = 2;
+    const BPF_MAP_TYPE_HASH_OF_MAPS: u32 = 13;
+
+    #[repr(C)]
+    #[derive(Default)]
+    struct CreateAttr {
+        map_type: u32,
+        key_size: u32,
+        value_size: u32,
+        max_entries: u32,
+        map_flags: u32,
+        inner_map_fd: u32,
+        numa_node: u32,
+        map_name: [u8; 16],
+        map_ifindex: u32,
+        btf_fd: u32,
+        btf_key_type_id: u32,
+        btf_value_type_id: u32,
+        _pad: [u8; 32],
+    }
+    #[repr(C)]
+    #[derive(Default)]
+    struct PinAttr {
+        pathname: u64,
+        bpf_fd: u32,
+        file_flags: u32,
+    }
+
+    fn raw_bpf(cmd: c_long, attr: *const c_void, size: c_int) -> i64 {
+        // SAFETY: `attr` valid `bpf_attr` of `size` bytes.
+        unsafe { syscall(SYS_bpf, cmd, attr, size) as i64 }
+    }
+
+    // Inner-map prototype — ARRAY of u32 (BackendId), size 256.
+    let inner_attr = CreateAttr {
+        map_type: BPF_MAP_TYPE_ARRAY,
+        key_size: mem::size_of::<u32>() as u32,
+        value_size: mem::size_of::<u32>() as u32,
+        max_entries: 256,
+        ..Default::default()
+    };
+    let inner_raw = raw_bpf(
+        BPF_MAP_CREATE,
+        &inner_attr as *const _ as *const c_void,
+        mem::size_of::<CreateAttr>() as c_int,
+    );
+    assert!(inner_raw >= 0, "inner ARRAY prototype create: {}", std::io::Error::last_os_error());
+    // SAFETY: inner_raw is a kernel-issued FD.
+    let inner_fd = unsafe { OwnedFd::from_raw_fd(inner_raw as c_int) };
+
+    // Outer HoM with inner_map_fd set.
+    let outer_attr = CreateAttr {
+        map_type: BPF_MAP_TYPE_HASH_OF_MAPS,
+        key_size: 8, // ServiceKey
+        value_size: mem::size_of::<u32>() as u32,
+        max_entries: 4096,
+        inner_map_fd: inner_fd.as_raw_fd() as u32,
+        ..Default::default()
+    };
+    let outer_raw = raw_bpf(
+        BPF_MAP_CREATE,
+        &outer_attr as *const _ as *const c_void,
+        mem::size_of::<CreateAttr>() as c_int,
+    );
+    assert!(outer_raw >= 0, "outer HoM create: {}", std::io::Error::last_os_error());
+    // SAFETY: outer_raw is a kernel-issued FD.
+    let outer_fd = unsafe { OwnedFd::from_raw_fd(outer_raw as c_int) };
+
+    // Pin outer to <pin_dir>/SERVICE_MAP so aya's loader picks it
+    // up via BPF_OBJ_GET (the `pinning = ByName` workaround).
+    let pin_path = pin_dir.join("SERVICE_MAP");
+    let cstr = CString::new(pin_path.as_os_str().to_string_lossy().as_bytes())
+        .expect("pin path must not contain NUL byte");
+    let pin_attr = PinAttr {
+        pathname: cstr.as_ptr() as u64,
+        bpf_fd: outer_fd.as_raw_fd() as u32,
+        file_flags: 0,
+    };
+    let rc = raw_bpf(
+        BPF_OBJ_PIN,
+        &pin_attr as *const _ as *const c_void,
+        mem::size_of::<PinAttr>() as c_int,
+    );
+    assert!(rc >= 0, "BPF_OBJ_PIN({}): {}", pin_path.display(), std::io::Error::last_os_error());
+
+    outer_fd
 }

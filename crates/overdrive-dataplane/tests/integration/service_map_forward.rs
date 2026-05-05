@@ -46,7 +46,22 @@
 // § Errors. This Tier 3 test surfaces RAII-fail-fast at the assertion
 // site, matching the convention in `veth_attach.rs` and
 // `crates/overdrive-worker/tests/integration/exec_driver/`.
-#![allow(clippy::expect_used, clippy::print_stderr)]
+//
+// Slice 03 restructure adds pin-dir bookkeeping + direct `bpf(2)`
+// syscalls for inner-ARRAY populate; pedantic lints flag the FD <-> u32
+// casts and items-after-statements RAII guards. Scoped allow.
+#![allow(
+    clippy::expect_used,
+    clippy::print_stderr,
+    clippy::items_after_statements,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::doc_markdown,
+    clippy::ptr_as_ptr,
+    clippy::borrow_as_ptr,
+    clippy::ref_as_ptr
+)]
 
 use std::ffi::CString;
 use std::io;
@@ -56,10 +71,12 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use aya::{
-    Ebpf,
+    Ebpf, EbpfLoader,
     maps::HashMap,
     programs::{Xdp, XdpFlags},
 };
+use overdrive_dataplane::maps::ServiceKey;
+use overdrive_dataplane::maps::hash_of_maps::HashOfMapsHandle;
 
 use super::helpers::packets::{
     ETH_HDR_LEN, IPV4_HDR_LEN, TCP_HDR_LEN, ipv4_header_checksum, synthesise_tcp_syn, tcp_checksum,
@@ -72,23 +89,10 @@ const BACKEND_OCTETS: [u8; 4] = [10, 1, 0, 5];
 const BACKEND_PORT: u16 = 9000;
 const FRAME_COUNT: u32 = 10;
 
-/// Outer-map key matching `ServiceKey` in
-/// `crates/overdrive-dataplane/src/maps/service_map_handle.rs`. 8-byte
-/// host-order POD: vip_host (u32) + port_host (u16) + _pad (u16). Same
-/// shape used by the Tier 2 triptych; userspace writes host-order
-/// bytes, the kernel-side compares against the wire-order packet bytes
-/// converted to host-order via `read_u32_be` / `read_u16_be`
-/// (architecture.md § 11).
-#[derive(Clone, Copy, Debug)]
-#[repr(C)]
-struct ServiceKey {
-    vip_host: u32,
-    port_host: u16,
-    _pad: u16,
-}
-// SAFETY: repr(C), no padding-uninit issues for our writes (we always
-// set _pad to 0); `aya::Pod` is the marker aya needs for raw map access.
-unsafe impl aya::Pod for ServiceKey {}
+// `ServiceKey` is now imported from
+// `overdrive_dataplane::maps::ServiceKey` (the shared wire-shape POD,
+// per Slice 03 restructure). Same byte layout, `unsafe impl aya::Pod`
+// included.
 
 /// Inner-map value matching `BackendEntry` — 12-byte host-order POD.
 #[derive(Clone, Copy, Debug)]
@@ -123,12 +127,16 @@ fn bpf_artifact_path() -> PathBuf {
 /// Retrying for ~10 s absorbs that transient gap without weakening
 /// the assertion that the artifact must exist by the time this test
 /// completes its setup.
-fn load_with_retry(artifact: &PathBuf, budget: Duration) -> Ebpf {
+fn load_with_retry(artifact: &PathBuf, pin_dir: &std::path::Path, budget: Duration) -> Ebpf {
     let deadline = Instant::now() + budget;
     let mut last_err: Option<String> = None;
     while Instant::now() < deadline {
         if artifact.exists() {
-            match Ebpf::load_file(artifact) {
+            match EbpfLoader::new()
+                .map_pin_path(pin_dir)
+                .allow_unsupported_maps()
+                .load_file(artifact)
+            {
                 Ok(bpf) => return bpf,
                 Err(e) => last_err = Some(format!("aya load_file({}): {e}", artifact.display())),
             }
@@ -187,7 +195,38 @@ fn ten_tcp_syns_to_vip_are_rewritten_and_forwarded_via_veth() {
     // only synchronises within one process). Retry briefly before
     // declaring the artifact missing.
     let artifact = bpf_artifact_path();
-    let mut bpf = load_with_retry(&artifact, Duration::from_secs(10));
+
+    // Pin path discipline (per `.claude/rules/development.md` §
+    // "Sharing the outer HoM between userspace and the kernel-side
+    // ELF — `pinning = ByName`"). Per-test tempdir under
+    // `/sys/fs/bpf/overdrive-test-svc-<pid>` to avoid cross-test
+    // collisions; cleaned on test exit (best-effort) plus pre-test.
+    let pin_dir =
+        std::path::PathBuf::from(format!("/sys/fs/bpf/overdrive-test-svc-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&pin_dir);
+    std::fs::create_dir_all(&pin_dir)
+        .unwrap_or_else(|e| panic!("create pin dir {}: {e}", pin_dir.display()));
+    // RAII cleanup at function exit.
+    struct PinDirGuard(std::path::PathBuf);
+    impl Drop for PinDirGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    let _pin_dir_guard = PinDirGuard(pin_dir.clone());
+
+    // Pre-create + pre-pin SERVICE_MAP outer HoM. aya's loader picks
+    // up the pinned FD via `BPF_OBJ_GET` (kernel-side declaration
+    // carries `pinning = ByName`).
+    let service_map_handle = HashOfMapsHandle::<ServiceKey, u32>::new_pinned_with_array_inner(
+        "SERVICE_MAP",
+        4096,
+        256,
+        &pin_dir,
+    )
+    .expect("pre-create + pre-pin SERVICE_MAP outer HoM");
+
+    let mut bpf = load_with_retry(&artifact, &pin_dir, Duration::from_secs(10));
 
     // Attach `xdp_service_map_lookup` to the host end (veth0). Native-
     // first attach mirrors `EbpfDataplane::new`'s production wiring;
@@ -223,24 +262,68 @@ fn ten_tcp_syns_to_vip_are_rewritten_and_forwarded_via_veth() {
             .unwrap_or_else(|e| panic!("xdp_pass.attach({}, fallback SKB): {e}", veth.peer))
     };
 
-    // Populate SERVICE_MAP with VIP -> backend.
+    // Populate the new HoM-shaped SERVICE_MAP per ADR-0040 § 2:
+    //
+    //   1. Insert backend record into BACKEND_MAP under a stable
+    //      BackendId (single backend → single ID = 1).
+    //   2. Allocate an inner ARRAY (size 256) and populate every
+    //      slot with that BackendId — pre-Slice-04 the XDP program's
+    //      slot index is a placeholder 5-tuple hash, so any incoming
+    //      packet resolves to slot N → BackendId 1 → backend.
+    //   3. `set(&service_key, inner.as_fd())` — single
+    //      bpf_map_update_elem against the outer HoM.
     {
-        let mut sm: HashMap<_, ServiceKey, BackendEntry> =
-            HashMap::try_from(bpf.map_mut("SERVICE_MAP").expect("SERVICE_MAP map not found"))
-                .expect("SERVICE_MAP HashMap::try_from");
-        let key = ServiceKey {
-            vip_host: u32::from(std::net::Ipv4Addr::from(VIP_OCTETS)),
-            port_host: VIP_PORT,
-            _pad: 0,
-        };
-        let value = BackendEntry {
+        use std::os::fd::AsFd;
+
+        const BID_ONE: u32 = 1;
+
+        // (1) BACKEND_MAP insert. aya supports HASH natively.
+        let mut backend_map: HashMap<_, u32, BackendEntry> =
+            HashMap::try_from(bpf.map_mut("BACKEND_MAP").expect("BACKEND_MAP map not found"))
+                .expect("BACKEND_MAP HashMap::try_from");
+        let backend_record = BackendEntry {
             ipv4_host: u32::from(std::net::Ipv4Addr::from(BACKEND_OCTETS)),
             port_host: BACKEND_PORT,
             weight: 1,
             healthy: 1,
             _pad: [0; 3],
         };
-        sm.insert(key, value, 0).expect("SERVICE_MAP insert");
+        backend_map.insert(BID_ONE, backend_record, 0).expect("BACKEND_MAP insert");
+
+        // (2) Allocate fresh inner ARRAY and fill every slot with
+        // BID_ONE. Direct `bpf()` syscalls — Slice 02's flat-HASH
+        // shape is gone; aya's typed surface does not yet expose the
+        // inner-ARRAY-of-HoM shape (PR #1446 migration target).
+        let inner_fd =
+            service_map_handle.create_inner(None).expect("inner ARRAY alloc must succeed");
+        for slot in 0..256u32 {
+            let key_bytes = slot.to_ne_bytes();
+            let value_bytes = BID_ONE.to_ne_bytes();
+            overdrive_dataplane::sys::bpf::bpf_map_update_elem(
+                inner_fd.as_fd(),
+                &key_bytes,
+                &value_bytes,
+                overdrive_dataplane::sys::bpf::BPF_ANY,
+            )
+            .unwrap_or_else(|e| panic!("inner ARRAY slot {slot} populate: {e}"));
+        }
+
+        // (3) Atomic outer-pointer update. Single bpf_map_update_elem
+        // against the SERVICE_MAP outer FD. Kernel ref-counts the
+        // inner map; this is the load-bearing step-3 of the 5-step
+        // swap.
+        let service_key = ServiceKey {
+            vip_host: u32::from(std::net::Ipv4Addr::from(VIP_OCTETS)),
+            port_host: VIP_PORT,
+            _pad: 0,
+        };
+        service_map_handle
+            .set(&service_key, inner_fd.as_fd())
+            .expect("SERVICE_MAP outer set must succeed");
+
+        // `inner_fd` drops at end of this block; kernel keeps the
+        // inner map alive while SERVICE_MAP outer references it
+        // (kernel ref-counted).
     }
 
     // Open a capture socket on veth1 BEFORE injecting frames. PF_PACKET

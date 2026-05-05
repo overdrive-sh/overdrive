@@ -29,7 +29,20 @@
 //! bytes — so the rule is enforced by the caller.
 
 #![cfg(target_os = "linux")]
-#![allow(dead_code)]
+// `bpf(2)` syscall surface — FD <-> u32 casts (kernel ABI), raw
+// pointer borrows for `bpf_attr` arg buffers, `repr(C)` POD struct
+// construction. Pedantic lints flag these; the patterns are
+// load-bearing and mirror the kernel ABI. Allow scoped to this
+// module — production code outside this file stays strict.
+#![allow(
+    dead_code,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::ptr_as_ptr,
+    clippy::borrow_as_ptr,
+    clippy::ref_as_ptr
+)]
 
 use std::ffi::CString;
 use std::mem;
@@ -111,9 +124,11 @@ fn raw_bpf(cmd: c_long, attr_ptr: *const c_void, attr_size: c_int) -> std::io::R
     if raw < 0 { Err(std::io::Error::last_os_error()) } else { Ok(raw) }
 }
 
-/// Create a BPF map of the given type. `inner_map_fd` is required for
-/// `BPF_MAP_TYPE_HASH_OF_MAPS` / `BPF_MAP_TYPE_ARRAY_OF_MAPS` — passing
-/// `None` for those types causes the kernel to reject with `EINVAL`.
+/// Create a BPF map of the given type.
+///
+/// `inner_map_fd` is required for `BPF_MAP_TYPE_HASH_OF_MAPS` /
+/// `BPF_MAP_TYPE_ARRAY_OF_MAPS` — passing `None` for those types
+/// causes the kernel to reject with `EINVAL`.
 ///
 /// `name` is truncated to 15 bytes (kernel limit, NUL-terminated to 16).
 /// Names exceeding this are silently truncated rather than rejected —

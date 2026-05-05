@@ -43,7 +43,18 @@
 //! `.claude/rules/development.md` § Errors — distinct failure modes
 //! get distinct variants.
 
-#![allow(dead_code)]
+// `bpf(2)` syscall surface — FD <-> u32 casts (kernel ABI), raw
+// pointer borrows for `bpf_attr` arg buffers. Same allow scope as
+// `crate::sys::bpf`.
+#![allow(
+    dead_code,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::ptr_as_ptr,
+    clippy::borrow_as_ptr,
+    clippy::ref_as_ptr
+)]
 
 use overdrive_core::traits::dataplane::DataplaneError;
 

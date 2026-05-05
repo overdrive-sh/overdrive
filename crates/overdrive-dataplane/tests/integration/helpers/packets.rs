@@ -14,7 +14,12 @@
 //! checksum bug fix lands once.
 
 #![cfg(target_os = "linux")]
-#![allow(clippy::missing_panics_doc)]
+// Helpers manipulate raw byte arrays for IPv4/TCP frames; pedantic
+// lints flag the cast-possible-truncation in shrinking int casts (the
+// values are statically bounded — TCP_HDR_LEN = 20 fits in u16) and
+// `doc_markdown` on identifiers in prose. Allow scoped to the helper
+// file.
+#![allow(clippy::missing_panics_doc, clippy::cast_possible_truncation, clippy::doc_markdown)]
 
 /// Ethernet header length (no VLAN).
 pub const ETH_HDR_LEN: usize = 14;
@@ -26,13 +31,28 @@ pub const TCP_HDR_LEN: usize = 20;
 pub const PKT_LEN: usize = ETH_HDR_LEN + IPV4_HDR_LEN + TCP_HDR_LEN;
 
 /// Synthesise a minimal Ethernet+IPv4+TCP-SYN frame addressed to
-/// `dst_octets:dst_port` with valid IPv4 and TCP checksums.
+/// `dst_octets:dst_port` with valid IPv4 and TCP checksums. Source
+/// port fixed at `12345`. Slice 03's swap test uses
+/// [`synthesise_tcp_syn_with_src_port`] when the kernel-side 5-tuple
+/// slot hash needs varied input.
 ///
 /// MAC addresses are fixed sentinels (locally-administered unicast on
 /// both ends) — they do not participate in the SERVICE_MAP key shape
 /// and the post-rewrite assertions ignore them. Source IP is fixed
-/// (`10.0.0.100`); source port is `12345`.
+/// (`10.0.0.100`).
 pub fn synthesise_tcp_syn(dst_octets: [u8; 4], dst_port: u16) -> Vec<u8> {
+    synthesise_tcp_syn_with_src_port(dst_octets, dst_port, 12345)
+}
+
+/// Same as [`synthesise_tcp_syn`] but with a caller-controlled TCP
+/// source port. Drives the placeholder 5-tuple slot hash in
+/// `xdp_service_map_lookup` to spread across different inner-ARRAY
+/// slots (Slice 03 swap test).
+pub fn synthesise_tcp_syn_with_src_port(
+    dst_octets: [u8; 4],
+    dst_port: u16,
+    src_port: u16,
+) -> Vec<u8> {
     let mut pkt = vec![0u8; PKT_LEN];
 
     // Ethernet (14B): dst MAC, src MAC, ethertype 0x0800 (IPv4).
@@ -60,7 +80,6 @@ pub fn synthesise_tcp_syn(dst_octets: [u8; 4], dst_port: u16) -> Vec<u8> {
 
     // TCP (20B):
     let tcp = ip + IPV4_HDR_LEN;
-    let src_port: u16 = 12345;
     pkt[tcp..tcp + 2].copy_from_slice(&src_port.to_be_bytes());
     pkt[tcp + 2..tcp + 4].copy_from_slice(&dst_port.to_be_bytes());
     pkt[tcp + 4..tcp + 8].copy_from_slice(&0u32.to_be_bytes()); // seq
@@ -104,7 +123,7 @@ pub fn ipv4_header_checksum(hdr: &[u8]) -> u16 {
 pub fn tcp_checksum(src_ip: &[u8], dst_ip: &[u8], tcp: &[u8]) -> u16 {
     let mut sum: u32 = 0;
     // Pseudo-header: src(4) + dst(4) + zero(1) + proto(1) + tcp_len(2)
-    for chunk in [src_ip, dst_ip].iter() {
+    for chunk in &[src_ip, dst_ip] {
         for w in chunk.chunks(2) {
             sum += u32::from(u16::from_be_bytes([w[0], w[1]]));
         }

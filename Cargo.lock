@@ -1827,6 +1827,7 @@ dependencies = [
  "libc",
  "nix",
  "overdrive-core",
+ "parking_lot",
  "proptest",
  "serde_json",
  "serial_test",

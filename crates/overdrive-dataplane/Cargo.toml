@@ -48,6 +48,14 @@ thiserror.workspace      = true
 tokio                    = { workspace = true, features = ["macros", "rt"] }
 tracing.workspace        = true
 
+# `parking_lot::Mutex` for interior mutability of aya's
+# `HashMap`-backed `BACKEND_MAP` handle — `Dataplane::update_service`
+# is `&self` per the trait surface, but aya's `HashMap::insert /
+# remove` take `&mut self`. The lock is held only for the duration
+# of the BPF syscalls — never across `.await` (per
+# `.claude/rules/development.md` § Concurrency).
+parking_lot.workspace = true
+
 # `aya` is the userspace BPF loader and pulls in libbpf-sys etc. —
 # Linux-only. macOS builds compile this crate via the
 # `#[cfg(not(target_os = "linux"))]` stub branches in `src/lib.rs`

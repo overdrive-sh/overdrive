@@ -27,7 +27,21 @@
 //! recipe is in research § F.1.
 
 #![cfg(target_os = "linux")]
-#![allow(dead_code)]
+// HoM userspace handle wraps the `bpf(2)` syscall surface in
+// `crate::sys::bpf`. Same FD <-> u32 / raw-pointer-borrow patterns
+// apply here. Allow scoped to this module — production code
+// outside this file stays strict.
+#![allow(
+    dead_code,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::ptr_as_ptr,
+    clippy::borrow_as_ptr,
+    clippy::ref_as_ptr,
+    clippy::expect_used,
+    clippy::unwrap_used
+)]
 
 use std::marker::PhantomData;
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
@@ -256,11 +270,49 @@ impl<K: Pod, V: Pod> HashOfMapsHandle<K, V> {
         )
         .map_err(|source| HashOfMapsError::MapAllocFailed { source })
     }
+
+    /// Create the outer HoM (with ARRAY inner-map prototype) and pin
+    /// it at `<pin_dir>/<name>` in one shot. Used by
+    /// [`crate::EbpfDataplane::new`] to share the FD with the
+    /// kernel-side ELF declaration via `pinning = ByName` — see
+    /// `.claude/rules/development.md` § "Sharing the outer HoM between
+    /// userspace and the kernel-side ELF — `pinning = ByName`".
+    ///
+    /// `pin_dir` MUST be a bpffs mount (production:
+    /// `/sys/fs/bpf/overdrive`; tests: a per-test tempdir under
+    /// `/sys/fs/bpf/overdrive-test-<rand>`). Caller is responsible
+    /// for ensuring the directory exists; `bpf(BPF_OBJ_PIN)` returns
+    /// `EINVAL` against a non-bpffs path. The pin SURVIVES process
+    /// exit unless the caller explicitly unlinks it.
+    ///
+    /// # Errors
+    ///
+    /// - [`HashOfMapsError::MapAllocFailed`] — `BPF_MAP_CREATE`
+    ///   rejected by the kernel.
+    /// - [`HashOfMapsError::Syscall`] — `BPF_OBJ_PIN` failed
+    ///   (e.g. the pin path's parent isn't a bpffs mount, or the
+    ///   path already exists from a prior unclean shutdown — caller
+    ///   should `unlink` stale pins before retrying).
+    pub fn new_pinned_with_array_inner<P: AsRef<Path>>(
+        name: &str,
+        max_outer_entries: u32,
+        max_inner_entries: u32,
+        pin_dir: P,
+    ) -> Result<Self> {
+        let handle = Self::new_with_array_inner(name, max_outer_entries, max_inner_entries)?;
+        let pin_path = pin_dir.as_ref().join(name);
+        bpf_obj_pin(handle.outer_fd.as_fd(), &pin_path)?;
+        Ok(handle)
+    }
 }
 
 // Helper trait to extract the raw fd as u32. Needed because
 // `BorrowedFd::as_raw_fd` returns `RawFd` (= `c_int`) and the
-// kernel's HoM ABI stores fds as u32.
+// kernel's HoM ABI stores fds as u32. `BorrowedFd<'_>` is `Copy`, so
+// `self` by value is correct here (clippy's `wrong_self_convention`
+// warns about `as_*` methods taking `self` by value but the
+// guidance specifically allows `Copy` types).
+#[allow(clippy::wrong_self_convention)]
 trait AsRawFdU32 {
     fn as_raw_fd_u32(self) -> u32;
 }
@@ -276,6 +328,7 @@ impl AsRawFdU32 for BorrowedFd<'_> {
 }
 
 #[cfg(test)]
+#[allow(clippy::print_stderr, clippy::significant_drop_tightening)]
 mod tests {
     //! Linux-only unit tests exercising the real `bpf()` syscall
     //! surface. Skipped on unprivileged invocations (the bpf()

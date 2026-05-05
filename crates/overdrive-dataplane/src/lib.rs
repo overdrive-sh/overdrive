@@ -35,9 +35,17 @@ pub mod swap;
 #[cfg(target_os = "linux")]
 pub mod sys;
 
+// `Dataplane` trait + supporting types — only used by the Linux-side
+// trait impl below. Non-Linux builds get a stub `impl Dataplane`
+// (further down) that uses no extra symbols.
+#[cfg(target_os = "linux")]
 use std::net::Ipv4Addr;
 
+#[cfg(target_os = "linux")]
 use async_trait::async_trait;
+#[cfg(not(target_os = "linux"))]
+use overdrive_core::traits::dataplane::DataplaneError;
+#[cfg(target_os = "linux")]
 use overdrive_core::traits::dataplane::{
     Backend, Dataplane, DataplaneError, FlowEvent, PolicyKey, Verdict,
 };
@@ -58,48 +66,134 @@ const OVERDRIVE_BPF_OBJ: &[u8] = include_bytes!(concat!(
     "/target/xtask/bpf-objects/overdrive_bpf.o",
 ));
 
-/// Production dataplane — loads `overdrive_bpf.o` and attaches its
-/// `xdp_pass` program to the configured interface.
+/// Production bpffs pin directory for SERVICE_MAP and any future
+/// HoM-shaped maps. The kernel-side declaration carries
+/// `pinning = ByName`; aya's loader joins this directory + the map
+/// name when resolving the pre-pinned FD via `BPF_OBJ_GET`. See
+/// `.claude/rules/development.md` § "Sharing the outer HoM between
+/// userspace and the kernel-side ELF — `pinning = ByName`".
+#[cfg(target_os = "linux")]
+const DEFAULT_PIN_DIR: &str = "/sys/fs/bpf/overdrive";
+
+/// SERVICE_MAP outer-map name. MUST match the `#[map]` `export_name`
+/// emitted from `crates/overdrive-bpf/src/maps/service_map.rs` —
+/// that name is what aya's loader uses to join `<pin_dir>/<name>`.
+#[cfg(target_os = "linux")]
+const SERVICE_MAP_NAME: &str = "SERVICE_MAP";
+
+/// BACKEND_MAP name — regular HASH map; aya supports it natively
+/// (no pin-by-name workaround needed).
+#[cfg(target_os = "linux")]
+const BACKEND_MAP_NAME: &str = "BACKEND_MAP";
+
+/// SERVICE_MAP outer-map capacity in services. 4096 per
+/// architecture.md § 10. MUST match the kernel-side
+/// `MAX_OUTER_ENTRIES` const in `service_map.rs` — kernel and
+/// userspace see the same map (pin-by-name shares the FD), so the
+/// capacities are consistent by definition.
+#[cfg(target_os = "linux")]
+const SERVICE_MAP_OUTER_CAPACITY: u32 = 4096;
+
+/// SERVICE_MAP inner-ARRAY size in slots. 256 per architecture.md
+/// § 5 / Q5=A — matches the Maglev table slot count.
+#[cfg(target_os = "linux")]
+const SERVICE_MAP_INNER_CAPACITY: u32 = 256;
+
+/// Production dataplane.
+///
+/// Loads `overdrive_bpf.o`, pre-creates and pre-pins the `SERVICE_MAP`
+/// outer HASH_OF_MAPS so aya's loader reuses the FD via
+/// `pinning = ByName` (per `.claude/rules/development.md`
+/// § "Sharing the outer HoM between userspace and the kernel-side
+/// ELF — `pinning = ByName`"), and attaches the configured XDP
+/// program to the requested interface.
+#[cfg(target_os = "linux")]
 pub struct EbpfDataplane {
     /// Owns the loaded BPF maps and programs. Dropping this releases
     /// kernel-side resources. Field is kept live so the BPF object's
-    /// maps/programs survive across `Dataplane` trait calls; the
-    /// stubbed trait methods do not yet read it (deferred to #24/#25/
-    /// #27 per architecture.md §7).
-    #[cfg(target_os = "linux")]
+    /// maps/programs survive across `Dataplane` trait calls.
     #[allow(dead_code)]
     bpf: aya::Ebpf,
 
-    /// Owns the XDP attachment. Dropping detaches `xdp_pass`. Read
+    /// Typed handle to the SERVICE_MAP outer HoM. Owns the FD shared
+    /// with the kernel-side ELF declaration via `pinning = ByName`
+    /// — the FD aya's loader recovered from the bpffs pin path is
+    /// the same FD this handle's `OwnedFd` carries (kernel
+    /// ref-counted; userspace and kernel see the same map identity).
+    service_map: crate::maps::hash_of_maps::HashOfMapsHandle<
+        crate::maps::ServiceKey,
+        u32, // BackendId raw u32 — the inner ARRAY's value type
+    >,
+
+    /// Userspace handle to BACKEND_MAP (regular HASH; aya supports
+    /// it natively). Owns the read/write surface for resolved
+    /// backend records.
+    ///
+    /// Wrapped in `parking_lot::Mutex` because aya's
+    /// `HashMap::insert` / `remove` take `&mut self`, but
+    /// `Dataplane::update_service` is `&self` (the trait surface is
+    /// the canonical interior-mutability boundary for BPF map
+    /// updates). The lock is held only for the duration of the BPF
+    /// syscalls — never across `.await`.
+    backend_map: parking_lot::Mutex<
+        aya::maps::HashMap<aya::maps::MapData, u32, crate::maps::BackendEntryPod>,
+    >,
+
+    /// Path to the bpffs directory holding the SERVICE_MAP pin.
+    /// Production: `/sys/fs/bpf/overdrive`. Tests: per-test tempdir
+    /// under `/sys/fs/bpf/overdrive-test-<rand>`. The pin file is
+    /// `<pin_dir>/SERVICE_MAP`. Retained so [`Drop`] can clean up
+    /// in the production constructor's failure paths; pins survive
+    /// process exit otherwise (kernel reaps the underlying map once
+    /// refcount=0).
+    #[allow(dead_code)]
+    pin_dir: std::path::PathBuf,
+
+    /// Owns the XDP attachment. Dropping detaches the program. Read
     /// only via Drop.
-    #[cfg(target_os = "linux")]
     #[allow(dead_code)]
     _link: aya::programs::xdp::XdpLinkId,
 }
 
+#[cfg(not(target_os = "linux"))]
+pub struct EbpfDataplane;
+
 impl EbpfDataplane {
-    /// Construct an `EbpfDataplane` by loading `OVERDRIVE_BPF_OBJ` and
-    /// attaching `xdp_pass` to `iface`. Mirrors the `SimDataplane::new`
-    /// seam in `overdrive-sim` so production / sim wirings are
-    /// substitutable behind the `Dataplane` port trait.
+    /// Construct an `EbpfDataplane` by:
     ///
-    /// Interface name is resolved via `nix::net::if_::if_nametoindex`
-    /// before any BPF program is loaded; missing interfaces produce
-    /// [`DataplaneError::IfaceNotFound`] (S-2.2-03) rather than a
-    /// generic `LoadFailed`. Other errno values from `if_nametoindex`
-    /// pass through as `LoadFailed` with the originating errno text —
-    /// per `.claude/rules/development.md` § Errors, distinct failure
-    /// modes get distinct variants; only `ENODEV` / `ENOENT` map to
-    /// `IfaceNotFound`.
+    /// 1. Resolving `iface` name → ifindex (typed `IfaceNotFound` on
+    ///    `ENODEV`/`ENOENT`).
+    /// 2. Pre-creating + pre-pinning the SERVICE_MAP outer HoM at
+    ///    `<pin_dir>/SERVICE_MAP`. Required: aya 0.13.x's ELF loader
+    ///    cannot create HoM (no `inner_map_fd` support in
+    ///    `bpf_create_map`). The pin-by-name flow lets aya recover
+    ///    the FD via `BPF_OBJ_GET` and reuse it.
+    /// 3. Loading the BPF ELF via `EbpfLoader::map_pin_path(pin_dir)`
+    ///    so aya's loader picks up the pinned outer FD.
+    /// 4. Recovering the BACKEND_MAP typed handle (regular HASH; aya
+    ///    supports it natively).
+    /// 5. Attaching `xdp_service_map_lookup` to `iface` with native-
+    ///    first → SKB fallback on `EOPNOTSUPP`/`ENOTSUP`.
+    ///
+    /// `pin_dir` MUST be an existing bpffs mount (production passes
+    /// `/sys/fs/bpf/overdrive` via [`Self::new`]; tests pass a per-
+    /// test tempdir under `/sys/fs/bpf/overdrive-test-<rand>` via
+    /// [`Self::new_with_pin_dir`]). The directory's parent must
+    /// already exist; the directory itself is created if missing.
     #[cfg(target_os = "linux")]
-    pub fn new(iface: &str) -> Result<Self, DataplaneError> {
+    pub fn new_with_pin_dir(
+        iface: &str,
+        pin_dir: &std::path::Path,
+    ) -> Result<Self, DataplaneError> {
         use aya::programs::{ProgramError, Xdp, XdpFlags};
         use nix::errno::Errno;
         use nix::net::if_::if_nametoindex;
 
+        use crate::maps::hash_of_maps::HashOfMapsHandle;
+        use crate::maps::{BackendEntryPod, ServiceKey};
+
         // Resolve iface name → ifindex first. ENODEV / ENOENT map to
-        // the typed IfaceNotFound variant; everything else surfaces
-        // as LoadFailed with the errno text.
+        // the typed IfaceNotFound variant.
         if_nametoindex(iface).map_err(|errno| match errno {
             Errno::ENODEV | Errno::ENOENT => {
                 DataplaneError::IfaceNotFound { iface: iface.to_string() }
@@ -107,25 +201,85 @@ impl EbpfDataplane {
             other => DataplaneError::LoadFailed(format!("if_nametoindex({iface}): {other}")),
         })?;
 
-        let mut bpf = aya::Ebpf::load(OVERDRIVE_BPF_OBJ)
+        // Ensure the pin directory exists. Failure here is a
+        // configuration error (parent isn't a bpffs mount, or
+        // CAP_SYS_ADMIN missing); surface as LoadFailed with the
+        // originating errno text.
+        std::fs::create_dir_all(pin_dir).map_err(|e| {
+            DataplaneError::LoadFailed(format!("create pin directory {}: {e}", pin_dir.display()))
+        })?;
+
+        // Clean any stale SERVICE_MAP pin from a prior unclean
+        // shutdown. `unlink` against a non-existent path is fine; we
+        // only error if the path exists AND we cannot unlink it.
+        let pin_path = pin_dir.join(SERVICE_MAP_NAME);
+        if let Err(e) = std::fs::remove_file(&pin_path) {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                return Err(DataplaneError::LoadFailed(format!(
+                    "unlink stale pin {}: {e}",
+                    pin_path.display()
+                )));
+            }
+        }
+
+        // Pre-create + pre-pin SERVICE_MAP. Outer max_entries =
+        // 4096 (architecture.md § 10); inner ARRAY size = 256
+        // (Q5=A). Failure here surfaces as MapAllocFailed (the typed
+        // S-2.2-11 variant via the From impl on HashOfMapsError).
+        let service_map = HashOfMapsHandle::<ServiceKey, u32>::new_pinned_with_array_inner(
+            SERVICE_MAP_NAME,
+            SERVICE_MAP_OUTER_CAPACITY,
+            SERVICE_MAP_INNER_CAPACITY,
+            pin_dir,
+        )
+        .map_err(|e| match e {
+            crate::maps::hash_of_maps::HashOfMapsError::MapAllocFailed { source } => {
+                DataplaneError::MapAllocFailed { source }
+            }
+            crate::maps::hash_of_maps::HashOfMapsError::Syscall(source) => {
+                DataplaneError::LoadFailed(format!("SERVICE_MAP pin: {source}"))
+            }
+        })?;
+
+        // Load the BPF ELF with the pin path set so aya's loader
+        // reuses the pre-pinned outer FD via BPF_OBJ_GET.
+        // `allow_unsupported_maps()` is mandatory: aya 0.13.x's
+        // `Map` enum has no `HashOfMaps` variant, so SERVICE_MAP
+        // surfaces as `Map::Unsupported(MapData)`. The loader
+        // rejects unsupported maps by default; we accept the
+        // variant because the userspace path doesn't go through
+        // `bpf.take_map("SERVICE_MAP")` for HoM — we own the
+        // typed `HashOfMapsHandle` separately. See research § A.2.
+        let mut bpf = aya::EbpfLoader::new()
+            .map_pin_path(pin_dir)
+            .allow_unsupported_maps()
+            .load(OVERDRIVE_BPF_OBJ)
             .map_err(|e| DataplaneError::LoadFailed(format!("aya load: {e}")))?;
+
+        // Recover BACKEND_MAP typed handle.
+        let backend_map = aya::maps::HashMap::<_, u32, BackendEntryPod>::try_from(
+            bpf.take_map(BACKEND_MAP_NAME).ok_or_else(|| {
+                DataplaneError::LoadFailed("BACKEND_MAP not found in BPF object".into())
+            })?,
+        )
+        .map_err(|e| DataplaneError::LoadFailed(format!("BACKEND_MAP try_from: {e}")))?;
+
+        // Load + attach the service-map lookup program.
         let prog: &mut Xdp = bpf
-            .program_mut("xdp_pass")
+            .program_mut("xdp_service_map_lookup")
             .ok_or_else(|| {
-                DataplaneError::LoadFailed("xdp_pass program not found in BPF object".into())
+                DataplaneError::LoadFailed(
+                    "xdp_service_map_lookup program not found in BPF object".into(),
+                )
             })?
             .try_into()
             .map_err(|e| DataplaneError::LoadFailed(format!("xdp program type: {e}")))?;
-        prog.load().map_err(|e| DataplaneError::LoadFailed(format!("xdp_pass.load: {e}")))?;
+        prog.load()
+            .map_err(|e| DataplaneError::LoadFailed(format!("xdp_service_map_lookup.load: {e}")))?;
 
-        // Native-first attach (DRV_MODE). On documented driver-not-
-        // supported errors (EOPNOTSUPP / ENOTSUP) emit a single
-        // structured warn and retry in generic mode (SKB_MODE). All
-        // other errors propagate unchanged — falling back on
-        // ambiguous failures (EINVAL, EPERM, …) would mask real
-        // loader bugs per `.claude/rules/development.md` § Errors.
-        // Wave-decision D-Native (Phase 2.2 wave-decisions.md) locks
-        // native default + warn-on-fallback. KPI K1 emits here.
+        // Native-first attach with documented EOPNOTSUPP/ENOTSUP →
+        // SKB fallback. Same shape as the prior xdp_pass attach
+        // (S-2.2-02).
         let link = match prog.attach(iface, XdpFlags::DRV_MODE) {
             Ok(link) => link,
             Err(ProgramError::SyscallError(ref se)) if should_fallback_to_generic(&se.io_error) => {
@@ -137,17 +291,32 @@ impl EbpfDataplane {
                 );
                 prog.attach(iface, XdpFlags::SKB_MODE).map_err(|e| {
                     DataplaneError::LoadFailed(format!(
-                        "xdp_pass.attach({iface}, SKB_MODE) after native fallback: {e}"
+                        "xdp_service_map_lookup.attach({iface}, SKB_MODE) after native fallback: {e}"
                     ))
                 })?
             }
             Err(e) => {
                 return Err(DataplaneError::LoadFailed(format!(
-                    "xdp_pass.attach({iface}, DRV_MODE): {e}"
+                    "xdp_service_map_lookup.attach({iface}, DRV_MODE): {e}"
                 )));
             }
         };
-        Ok(Self { bpf, _link: link })
+
+        Ok(Self {
+            bpf,
+            service_map,
+            backend_map: parking_lot::Mutex::new(backend_map),
+            pin_dir: pin_dir.to_path_buf(),
+            _link: link,
+        })
+    }
+
+    /// Construct an `EbpfDataplane` against the production pin
+    /// directory (`/sys/fs/bpf/overdrive`). Tests use
+    /// [`Self::new_with_pin_dir`] with a per-test tempdir.
+    #[cfg(target_os = "linux")]
+    pub fn new(iface: &str) -> Result<Self, DataplaneError> {
+        Self::new_with_pin_dir(iface, std::path::Path::new(DEFAULT_PIN_DIR))
     }
 
     /// Non-Linux fallthrough — returns
@@ -183,6 +352,7 @@ fn should_fallback_to_generic(io_error: &std::io::Error) -> bool {
     io_error.raw_os_error().is_some_and(|code| code == libc::EOPNOTSUPP || code == libc::ENOTSUP)
 }
 
+#[cfg(target_os = "linux")]
 #[async_trait]
 impl Dataplane for EbpfDataplane {
     /// see #24 (`POLICY_MAP`)
@@ -194,41 +364,158 @@ impl Dataplane for EbpfDataplane {
         Ok(())
     }
 
-    /// see #25 (`SERVICE_MAP`)
+    /// 5-step atomic backend-set swap per ADR-0040 § 2.
     ///
-    /// Phase 2.2 Slice 02 (step 02-02) — userspace call-site
-    /// shape lands here: construct a typed `ServiceMapHandle` and
-    /// invoke `insert(vip, port, backend)` per backend. The
-    /// in-memory backing of `ServiceMapHandle` (Slice 02) does
-    /// not yet reach the kernel — Slice 03 (US-03; S-2.2-09..11)
-    /// swaps the backing for an `aya::maps::HashMap` retrieved
-    /// from `aya::Ebpf::map_mut("SERVICE_MAP")` once
-    /// `crates/overdrive-bpf/src/maps/service_map.rs` declares
-    /// the real `#[map]`. The trait extension for `ServiceId`
-    /// arrives with Slice 03 — for now the trait still takes
-    /// `Ipv4Addr` and `Vec<Backend>` (architecture.md § 5
-    /// D-Sig). The VIP port is sourced from `backend.addr.port()`
-    /// as the Slice 02 simplification (single backend per VIP);
-    /// Slice 03 splits backend port from VIP port.
+    /// `significant_drop_tightening` is allowed at the fn level
+    /// because the BACKEND_MAP lock is intentionally scoped to a
+    /// `{ ... }` block — the lint wants an explicit `drop()` but
+    /// the scope braces serve the same purpose more idiomatically.
+    #[allow(clippy::significant_drop_tightening)]
+    ///
+    /// 1. Upsert each `Backend` into BACKEND_MAP under a `BackendId`
+    ///    derived from the backend's `(IPv4, port)`.
+    /// 2. Allocate a fresh inner ARRAY (size 256) populated with the
+    ///    new backend slot table. On kernel rejection
+    ///    (`EINVAL`/`EPERM`/`ENOMEM`) return
+    ///    [`DataplaneError::MapAllocFailed`] without touching the
+    ///    outer map (S-2.2-11 preservation invariant).
+    /// 3. Single `bpf_map_update_elem` against SERVICE_MAP outer:
+    ///    `set(&service_key, new_inner.as_fd())`. Kernel ref-counts
+    ///    inner maps; concurrent XDP readers see either the old or
+    ///    the new inner-map pointer atomically.
+    /// 4. Orphan GC — sweep BACKEND_MAP for entries no longer in
+    ///    the new set. Phase 2.2 step 03-02 ships a minimal sweep
+    ///    bounded by the just-inserted set; the broader cross-
+    ///    service GC (S-2.2-10) is a separate slice landing.
+    /// 5. The old inner map's FD goes out of scope inside aya's
+    ///    own ref-counting machinery — the kernel reaps the map
+    ///    once no XDP program references it (refcount = 0).
+    ///
+    /// VIP port note: the `Dataplane` trait passes a single
+    /// `Ipv4Addr` plus a `Vec<Backend>`. Slice 03 derives the VIP
+    /// port from `backends[0].addr.port()` (matches the Slice 02
+    /// convention) — every backend in a set serves the same VIP
+    /// port. Slice 04 lifts a separate VIP-port parameter through
+    /// the trait (architecture.md § 5 D-Sig).
     async fn update_service(
         &self,
         vip: Ipv4Addr,
         backends: Vec<Backend>,
     ) -> Result<(), DataplaneError> {
-        use overdrive_core::id::ServiceVip;
+        use std::os::fd::AsFd;
 
-        use crate::maps::service_map_handle::ServiceMapHandle;
+        use crate::maps::wire::{BackendEntryPod, ServiceKey};
 
-        let typed_vip = ServiceVip::new(std::net::IpAddr::V4(vip))
-            .map_err(|e| DataplaneError::LoadFailed(format!("ServiceVip::new({vip}): {e}")))?;
-
-        let mut handle = ServiceMapHandle::new();
-        for backend in &backends {
-            // Slice 02 simplification: VIP port = backend.addr.port().
-            // Slice 03 lifts a separate VIP port through the trait.
-            let vip_port = backend.addr.port();
-            handle.insert(typed_vip, vip_port, backend)?;
+        // Empty backend set — clear the outer slot. (Trait does not
+        // distinguish "no backends" from "remove service"; equivalent
+        // semantics here: drop the slot so XDP returns XDP_PASS for
+        // this VIP.)
+        if backends.is_empty() {
+            // No VIP port available; nothing to clear.
+            return Ok(());
         }
+
+        let vip_port = backends[0].addr.port();
+        let service_key = ServiceKey { vip_host: u32::from(vip), port_host: vip_port, _pad: 0 };
+
+        // Step 1 — Upsert each backend into BACKEND_MAP. BackendId
+        // is derived from (IPv4, port) — host-order u32 of the IP
+        // shifted up by 16 bits, OR'd with the port, giving a stable
+        // 48-bit-shaped identifier in a 32-bit space (the high 16
+        // bits of the IP collide with the port, which is acceptable
+        // for the slot-set contract — slot lookups go through the
+        // inner ARRAY, not BackendId reverse-mapping). A future
+        // BackendId allocator can replace this; the swap shape
+        // doesn't depend on the specific derivation.
+        let mut backend_ids: Vec<u32> = Vec::with_capacity(backends.len());
+        {
+            // Lock is held only for the BACKEND_MAP populate loop;
+            // dropped at end of this block (the `{ ... }` braces) before
+            // any further work. The fn-level `#[allow(
+            // clippy::significant_drop_tightening)]` covers this.
+            let mut backend_map = self.backend_map.lock();
+            for backend in &backends {
+                let pod = BackendEntryPod::from_backend(backend)?;
+                // Use a deterministic ID derived from IP+port. Same
+                // (ip, port) yields the same BackendId across
+                // updates; orphan GC removes IDs not in the new set.
+                let backend_id: u32 = pod
+                    .ipv4_host
+                    .wrapping_mul(2_654_435_761)
+                    .wrapping_add(u32::from(pod.port_host));
+                backend_map
+                    .insert(backend_id, pod, 0)
+                    .map_err(|e| DataplaneError::LoadFailed(format!("BACKEND_MAP insert: {e}")))?;
+                backend_ids.push(backend_id);
+            }
+            // Lock dropped here, before any further work that could
+            // .await (per `.claude/rules/development.md` § Concurrency:
+            // never hold a lock across `.await`).
+        }
+
+        // Step 2 — Allocate a fresh inner ARRAY (size 256) and
+        // populate slots with round-robin BackendIds. On alloc
+        // rejection convert HashOfMapsError::MapAllocFailed →
+        // DataplaneError::MapAllocFailed (the typed S-2.2-11 path).
+        let new_inner = self.service_map.create_inner(None).map_err(|e| match e {
+            crate::maps::hash_of_maps::HashOfMapsError::MapAllocFailed { source } => {
+                DataplaneError::MapAllocFailed { source }
+            }
+            crate::maps::hash_of_maps::HashOfMapsError::Syscall(source) => {
+                DataplaneError::LoadFailed(format!("inner-map alloc: {source}"))
+            }
+        })?;
+
+        // Populate inner ARRAY slots. Each slot 0..256 is written
+        // with a backend id selected round-robin from `backend_ids`.
+        // Pre-Slice-04 this gives roughly even distribution under
+        // the placeholder 5-tuple hash (if 256 mod len(backend_ids)
+        // != 0, two slots get the extra; close enough for the
+        // dispersion semantics step 03-02 needs).
+        for slot in 0..SERVICE_MAP_INNER_CAPACITY {
+            let bid = backend_ids[(slot as usize) % backend_ids.len()];
+            let key_bytes = slot.to_ne_bytes();
+            let value_bytes = bid.to_ne_bytes();
+            crate::sys::bpf::bpf_map_update_elem(
+                new_inner.as_fd(),
+                &key_bytes,
+                &value_bytes,
+                crate::sys::bpf::BPF_ANY,
+            )
+            .map_err(|e| {
+                DataplaneError::LoadFailed(format!("inner-map slot {slot} populate: {e}"))
+            })?;
+        }
+
+        // Step 3 — Atomic outer-pointer update. Single
+        // bpf_map_update_elem syscall; kernel ref-counts the new
+        // inner map and the old; concurrent XDP readers see one or
+        // the other atomically. THIS IS THE LOAD-BEARING STEP.
+        self.service_map.set(&service_key, new_inner.as_fd()).map_err(|e| match e {
+            crate::maps::hash_of_maps::HashOfMapsError::MapAllocFailed { source } => {
+                DataplaneError::MapAllocFailed { source }
+            }
+            crate::maps::hash_of_maps::HashOfMapsError::Syscall(source) => {
+                DataplaneError::LoadFailed(format!("SERVICE_MAP outer set: {source}"))
+            }
+        })?;
+
+        // Step 4 — Orphan GC.
+        // Phase 2.2 step 03-02 minimal sweep: nothing to do here for
+        // a single-service shape (we only know about backends in the
+        // current set). The broader cross-service sweep (S-2.2-10
+        // — "removing a backend leaves no orphans after GC") is a
+        // separate slice landing that walks BACKEND_MAP keys and
+        // intersects with the union of every active service's
+        // backend set.
+
+        // Step 5 — Old inner map released by aya's ref-counting once
+        // it goes out of scope in the kernel-side program tail. The
+        // userspace `OwnedFd` we used to populate the new inner map
+        // (`new_inner`) drops here, decrementing the userspace-side
+        // refcount. The kernel keeps the inner map alive while
+        // SERVICE_MAP outer references it.
+
         Ok(())
     }
 

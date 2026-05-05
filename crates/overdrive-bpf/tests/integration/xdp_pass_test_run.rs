@@ -26,11 +26,29 @@
 //! `aya::programs::Program::fd().as_fd()`.
 
 #![cfg(target_os = "linux")]
+// Tier 2 BPF unit tests work directly with the `bpf(2)` syscall surface
+// — `bpf_attr` POD struct construction, FD <-> u32 casts (kernel ABI),
+// raw pointer borrows for syscall arg buffers. The `pedantic` /
+// `nursery` lint groups (workspace-wide `warn`) flag these as
+// truncation/sign-loss/cast-constness/borrow-as-raw-pointer, but the
+// patterns are load-bearing — they mirror the kernel ABI and are
+// reviewed for safety inline. Allow scoped to the test crate so the
+// production code lanes stay strict.
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::ptr_as_ptr,
+    clippy::borrow_as_ptr,
+    clippy::ref_as_ptr,
+    clippy::items_after_statements,
+    clippy::doc_markdown
+)]
 
 use std::path::PathBuf;
 
 use aya::{
-    Ebpf,
+    EbpfLoader,
     maps::HashMap,
     programs::{ProgramFd, Xdp},
 };
@@ -184,10 +202,40 @@ fn bpf_unit_runs_xdp_pass_triptych_via_bpf_prog_test_run() {
     );
 
     // SETUP: load the BPF object and resolve the `xdp_pass` program
-    // and `PKTS` map. `Ebpf::load_file` reads the ELF and creates
-    // userspace handles; programs and maps are not yet loaded into
-    // the kernel.
-    let mut bpf = Ebpf::load_file(&artifact)
+    // and `PKTS` map. The ELF declares `SERVICE_MAP` as a HASH_OF_MAPS
+    // with `pinning = ByName` (Slice 03 restructure); aya 0.13.x's
+    // loader cannot create HoM directly because it doesn't set
+    // `inner_map_fd` in `BPF_MAP_CREATE`. The pin-by-name workaround
+    // (per `.claude/rules/development.md` § "Sharing the outer HoM
+    // between userspace and the kernel-side ELF — `pinning = ByName`")
+    // pre-creates + pre-pins the outer HoM in userspace so aya's
+    // loader picks up the pinned FD via `BPF_OBJ_GET`. This Tier 2
+    // test does not exercise SERVICE_MAP — it only loads `xdp_pass`
+    // — but the ELF carries the SERVICE_MAP declaration so the pin
+    // is mandatory.
+    //
+    // `allow_unsupported_maps()` is required because aya 0.13.x's
+    // `Map` enum has no HashOfMaps variant (research § A.2).
+    let pin_dir = std::path::PathBuf::from(format!(
+        "/sys/fs/bpf/overdrive-test-xdp-pass-{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&pin_dir);
+    std::fs::create_dir_all(&pin_dir).expect("create pin dir");
+    struct G(std::path::PathBuf);
+    impl Drop for G {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    let _g = G(pin_dir.clone());
+
+    pre_pin_service_map(&pin_dir);
+
+    let mut bpf = EbpfLoader::new()
+        .map_pin_path(&pin_dir)
+        .allow_unsupported_maps()
+        .load_file(&artifact)
         .unwrap_or_else(|e| panic!("aya load_file({}): {e}", artifact.display()));
 
     // Resolve & load the program kernel-side, then take an owned
@@ -237,4 +285,115 @@ fn bpf_unit_runs_xdp_pass_triptych_via_bpf_prog_test_run() {
         post, 1,
         "expected PKTS[0] to transition 0 -> 1 across one BPF_PROG_TEST_RUN; got {post}",
     );
+}
+
+/// Pre-create + pre-pin the SERVICE_MAP outer HoM at
+/// `<pin_dir>/SERVICE_MAP`. Required for aya 0.13.x to load the BPF
+/// ELF — see module-level docs.
+///
+/// Both maps (the inner ARRAY prototype and the outer HoM) are
+/// created via direct `bpf(BPF_MAP_CREATE)` syscalls because aya
+/// 0.13.x has no typed userspace surface for HoM (PR #1446 migration
+/// target). Capacities mirror the kernel-side declaration in
+/// `crates/overdrive-bpf/src/maps/service_map.rs`:
+///   outer max_entries = 4096
+///   inner ARRAY max_entries = 256, value = u32 (BackendId)
+///   outer key = ServiceKey (8 bytes); outer value = u32 (inner FD)
+fn pre_pin_service_map(pin_dir: &std::path::Path) {
+    use std::ffi::CString;
+    use std::mem;
+    use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+
+    use libc::{SYS_bpf, c_int, c_long, c_void, syscall};
+
+    const BPF_MAP_CREATE: c_long = 0;
+    const BPF_OBJ_PIN: c_long = 6;
+    const BPF_MAP_TYPE_ARRAY: u32 = 2;
+    const BPF_MAP_TYPE_HASH_OF_MAPS: u32 = 13;
+
+    #[repr(C)]
+    #[derive(Default)]
+    struct CreateAttr {
+        map_type: u32,
+        key_size: u32,
+        value_size: u32,
+        max_entries: u32,
+        map_flags: u32,
+        inner_map_fd: u32,
+        numa_node: u32,
+        map_name: [u8; 16],
+        map_ifindex: u32,
+        btf_fd: u32,
+        btf_key_type_id: u32,
+        btf_value_type_id: u32,
+        _pad: [u8; 32],
+    }
+    #[repr(C)]
+    #[derive(Default)]
+    struct PinAttr {
+        pathname: u64,
+        bpf_fd: u32,
+        file_flags: u32,
+    }
+
+    fn raw_bpf(cmd: c_long, attr: *const c_void, size: c_int) -> i64 {
+        // SAFETY: `attr` points at a valid `bpf_attr` of `size`
+        // bytes for the duration of the call.
+        unsafe { syscall(SYS_bpf, cmd, attr, size) as i64 }
+    }
+
+    // (1) Inner-map prototype — ARRAY of u32 (BackendId), size 256.
+    let inner_attr = CreateAttr {
+        map_type: BPF_MAP_TYPE_ARRAY,
+        key_size: mem::size_of::<u32>() as u32,
+        value_size: mem::size_of::<u32>() as u32,
+        max_entries: 256,
+        ..Default::default()
+    };
+    let inner_raw = raw_bpf(
+        BPF_MAP_CREATE,
+        &inner_attr as *const _ as *const c_void,
+        mem::size_of::<CreateAttr>() as c_int,
+    );
+    assert!(inner_raw >= 0, "inner ARRAY prototype create: {}", std::io::Error::last_os_error());
+    // SAFETY: `inner_raw >= 0` is a kernel-issued owned FD.
+    let inner_fd = unsafe { OwnedFd::from_raw_fd(inner_raw as c_int) };
+
+    // (2) Outer HoM with inner_map_fd set.
+    let outer_attr = CreateAttr {
+        map_type: BPF_MAP_TYPE_HASH_OF_MAPS,
+        key_size: 8, // ServiceKey
+        value_size: mem::size_of::<u32>() as u32,
+        max_entries: 4096,
+        inner_map_fd: inner_fd.as_raw_fd() as u32,
+        ..Default::default()
+    };
+    let outer_raw = raw_bpf(
+        BPF_MAP_CREATE,
+        &outer_attr as *const _ as *const c_void,
+        mem::size_of::<CreateAttr>() as c_int,
+    );
+    assert!(outer_raw >= 0, "outer HoM create: {}", std::io::Error::last_os_error());
+    // SAFETY: outer_raw is a kernel-issued FD; transferred to OwnedFd.
+    let outer_fd = unsafe { OwnedFd::from_raw_fd(outer_raw as c_int) };
+
+    // (3) Pin outer to <pin_dir>/SERVICE_MAP.
+    let pin_path = pin_dir.join("SERVICE_MAP");
+    let cstr = CString::new(pin_path.as_os_str().to_string_lossy().as_bytes())
+        .expect("pin path must not contain NUL byte");
+    let pin_attr = PinAttr {
+        pathname: cstr.as_ptr() as u64,
+        bpf_fd: outer_fd.as_raw_fd() as u32,
+        file_flags: 0,
+    };
+    let rc = raw_bpf(
+        BPF_OBJ_PIN,
+        &pin_attr as *const _ as *const c_void,
+        mem::size_of::<PinAttr>() as c_int,
+    );
+    assert!(rc >= 0, "BPF_OBJ_PIN({}): {}", pin_path.display(), std::io::Error::last_os_error());
+
+    // outer_fd / inner_fd drop here; the kernel keeps the outer map
+    // alive because of the bpffs pin. aya's loader recovers it via
+    // BPF_OBJ_GET on the pin path during `EbpfLoader::load_file`.
 }

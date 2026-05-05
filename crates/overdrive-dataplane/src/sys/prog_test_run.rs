@@ -17,7 +17,17 @@
 //! across multiple aya versions; signature is kept stable.
 
 #![cfg(target_os = "linux")]
-#![allow(dead_code)]
+// `BPF_PROG_TEST_RUN` userspace helper — same FD <-> u32 /
+// raw-pointer-borrow surface as the rest of `crate::sys::bpf`.
+#![allow(
+    dead_code,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_sign_loss,
+    clippy::ptr_as_ptr,
+    clippy::borrow_as_ptr,
+    clippy::ref_as_ptr
+)]
 
 use std::mem;
 use std::os::fd::{AsRawFd, BorrowedFd};
