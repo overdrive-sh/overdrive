@@ -1,0 +1,43 @@
+# Verifier-budget baseline — xdp_service_map_lookup
+#
+# Slice 02 / S-2.2-07 / KPI K7. The file IS the assertion: Slice 07's
+# `cargo xtask verifier-regress` gate (lands at step 07-01) parses
+# this baseline and fails the PR if the recorded program exceeds the
+# baseline by >5% or approaches the per-program complexity ceiling
+# (1,000,000 instructions for CAP_BPF programs) by >10%.
+#
+# Recorded against:
+#   kernel:   6.8.0-111-generic   (Ubuntu 24.04 LTS lineage; matrix row "6.6 LTS"
+#                                   per .claude/rules/testing.md § "Kernel matrix"
+#                                   with Lima's actual 6.8 kernel)
+#   commit:   8edf471a38d6cdef8f3f4fbed0d33108c038eb6c
+#   date:     2026-05-05T12:24:27Z
+#   tool:     aya 0.13.1 ProgramInfo::verified_instruction_count
+#             (veristat is not packaged in the Lima image; aya queries
+#             BPF_OBJ_GET_INFO_BY_FD which returns the same kernel-side
+#             counter veristat reads. The output format below is shaped
+#             to fit Slice 07's parser, which is itself shaped against
+#             this baseline — co-evolution in 07-01 is expected.)
+#   target:   target/xtask/bpf-objects/overdrive_bpf.o
+#             (built by `cargo xtask bpf-build` against
+#             rustup nightly + bpfel-unknown-none + -Z build-std=core,
+#             per ADR-0038 §3.1)
+#
+# Budget gates (ADR-0040 / architecture.md §7 D3):
+#   verified_insns ≤ 500,000   ← 50% of CAP_BPF ceiling, "L1-cache fits"
+#   verified_insns ≤ 1,000,000 ← absolute CAP_BPF ceiling (kernel 5.10+)
+#
+# Recorded value:
+#   verified_insns = 401
+#   xlated_prog_len_bytes = 1672  (= verified_insns * 4 with checksum/jump padding)
+#
+# 401 / 500,000 = 0.08% of the 50% budget. Comfortably within target.
+#
+# Format (one line per program, space-separated key=value pairs;
+# Slice 07's parser keys off `prog=` and `verified_insns=`):
+
+file=target/xtask/bpf-objects/overdrive_bpf.o prog=xdp_service_map_lookup verdict=success xlated_prog_len_bytes=1672 verified_insns=401
+
+# (`xdp_pass` baseline at 21 verified_insns is recorded under
+# perf-baseline/main/verifier-budget/veristat-xdp-pass.txt when
+# Slice 01 retroactively lands its baseline; out of scope for 02-05.)
