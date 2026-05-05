@@ -5,4 +5,5 @@
 //! shared helpers must hang off the inline `mod integration { … }`
 //! block in `tests/integration.rs`.
 
+pub mod packets;
 pub mod veth;

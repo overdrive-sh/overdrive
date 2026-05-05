@@ -40,19 +40,20 @@
 /// description (`PACKET_COUNTER`) is a working name for the
 /// underlying map; the test reads the actual exported symbol.
 ///
-/// **Currently `#[ignore]`** — exercising this end-to-end path
-/// requires a fully-formed BTF-equipped `overdrive_bpf.o` produced by
-/// `cargo xtask bpf-build` (step 02-01). The Phase 2.1 baseline
-/// pipeline emits a minimal ELF that lacks a `.BTF` section, which
-/// `aya::Ebpf::load` rejects with `"error parsing ELF data"` before
-/// the attach call is reached (verified at step 01-03 GREEN attempt
-/// — see commit body). Symmetric blocker to S-2.2-02 below; the
-/// veth/sendto/`bpftool` test scaffolding (helpers, raw-socket
-/// injection, `bpftool map dump -j` parser, `parse_pkts_dump` unit
-/// tests) is intentionally landed in this step so the GREEN flip at
-/// step 02-01 is `s/ignore/run/` plus a re-run.
+/// **Currently `#[ignore]`** — `EbpfDataplane::new` uses
+/// `aya::Ebpf::load(OVERDRIVE_BPF_OBJ)` against the compile-time
+/// embedded slice; `Ebpf::load(&[u8])` rejects the BTF-less ELF
+/// emitted by the current `cargo xtask bpf-build` pipeline with
+/// `error parsing ELF data` (the same blocker noted at step 01-03).
+/// The sibling `service_map_forward.rs` test uses `Ebpf::load_file(path)`
+/// and parses the same artifact successfully, which suggests aya's
+/// path-vs-slice loaders diverge on BTF tolerance — pursuing the fix
+/// is outside the 02-04 scope. Two clean unblock paths exist:
+/// (a) emit a `.BTF` section from `cargo xtask bpf-build` (BPF build
+/// pipeline change), or (b) reshape `EbpfDataplane::new` to use
+/// `load_file` instead of `load(slice)`. Either lands separately.
 #[test]
-#[ignore = "S-2.2-01 — needs real BTF-equipped overdrive_bpf.o from step 02-01; veth + sendto + bpftool scaffolding lands here at step 01-03"]
+#[ignore = "S-2.2-01 — `EbpfDataplane::new` uses `Ebpf::load(slice)` which rejects BTF-less ELF; sibling `service_map_forward.rs` succeeds via `load_file(path)`. Unblock via emitting BTF or reshaping `new()` to use `load_file`."]
 #[serial_test::serial(net_admin)]
 fn xdp_attaches_to_real_veth_and_packet_counter_increments() {
     use overdrive_dataplane::EbpfDataplane;
@@ -315,16 +316,14 @@ mod parse_tests {
 /// wrapper's default-root execution covers this; CI runs the test
 /// in a privileged container with `CAP_NET_ADMIN`.
 ///
-/// **Currently `#[ignore]`** — exercising this path requires a
-/// real `overdrive_bpf.o` produced by `cargo xtask bpf-build` (step
-/// 02-01). Phase 2.1 ships a 1.3 KB placeholder ELF; `aya::Ebpf::load`
-/// rejects it before reaching the attach call. The fallback
-/// classification logic itself is unit-tested in `lib.rs` (see
-/// `should_fallback_to_generic`); the end-to-end happy-fallback
-/// path is gated through the LVH Tier 3 smoke at step 03-02 once
-/// the real artifact exists.
+/// **Currently `#[ignore]`** — symmetric to S-2.2-01: this test also
+/// drives `EbpfDataplane::new`, which uses `Ebpf::load(slice)` and
+/// rejects the BTF-less ELF. The fallback classification logic
+/// itself is unit-tested in `lib.rs` (see `should_fallback_to_generic`);
+/// the end-to-end happy-fallback path unblocks once `EbpfDataplane::new`
+/// switches to `load_file(path)` or the build pipeline emits BTF.
 #[test]
-#[ignore = "S-2.2-02 — needs real overdrive_bpf.o from step 02-01; classification covered by unit test in lib.rs; end-to-end path covered by LVH smoke (step 03-02)"]
+#[ignore = "S-2.2-02 — `EbpfDataplane::new` uses `Ebpf::load(slice)` which rejects BTF-less ELF (same blocker as S-2.2-01). Classification covered by unit test in lib.rs; end-to-end unblock landing separately."]
 #[serial_test::serial(net_admin)]
 fn native_attach_failure_logs_fallback_warning() {
     use std::process::Command;
