@@ -29,6 +29,19 @@ pub enum DataplaneError {
     /// program; see `EbpfDataplane::new` in `overdrive-dataplane`.
     #[error("interface not found: {iface}")]
     IfaceNotFound { iface: String },
+    /// Kernel rejected an inner-map allocation during the 5-step
+    /// HASH_OF_MAPS atomic-swap primitive (ADR-0040 § 2 step 2 —
+    /// `bpf(BPF_MAP_CREATE)`). On this error the existing outer-map
+    /// pointer is **unchanged**: the swap aborts before step 3 (the
+    /// load-bearing single-syscall pointer update). Surfaced as a
+    /// distinct variant per `.claude/rules/development.md` § Errors
+    /// — collapsing this into `LoadFailed(String)` would lose the
+    /// preservation guarantee S-2.2-11 pins.
+    #[error("inner-map allocation rejected by kernel: {source}")]
+    MapAllocFailed {
+        #[source]
+        source: std::io::Error,
+    },
 }
 
 /// Policy decision compiled into the BPF `POLICY_MAP`.
