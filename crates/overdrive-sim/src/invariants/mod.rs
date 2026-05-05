@@ -20,6 +20,12 @@ use std::fmt::{self, Display};
 use std::str::FromStr;
 
 pub mod evaluators;
+// phase-2-xdp-service-map DISTILL — RED scaffolds per
+// `docs/feature/phase-2-xdp-service-map/distill/wave-decisions.md`
+// DWD-4. Hosts `assert_hydrator_eventually_converges` +
+// `assert_hydrator_idempotent_steady_state` (both panic until DELIVER
+// fills them per Slice 08).
+pub mod service_map_hydrator;
 
 /// Catalogue of invariants the DST harness evaluates.
 ///
@@ -133,6 +139,24 @@ pub enum Invariant {
     /// state to readers across crashes; this invariant catches the
     /// inverse ordering at PR time.
     WriteThroughOrdering,
+
+    /// SCAFFOLD: true — phase-2-xdp-service-map DISTILL per ADR-0042
+    /// + architecture.md § 8 *ESR pair*. Eventual: from any
+    /// combination of `service_backends` rows + starting BPF map
+    /// state, repeated reconcile ticks drive
+    /// `actual.fingerprint == desired.fingerprint` for every service.
+    /// The evaluator body panics with a `RED scaffold` message until
+    /// DELIVER ships the body per Slice 08 / S-2.2-26.
+    HydratorEventuallyConverges,
+
+    /// SCAFFOLD: true — phase-2-xdp-service-map DISTILL per ADR-0042
+    /// + architecture.md § 8 *ESR pair*. Always: once
+    /// `actual.fingerprint == desired.fingerprint` for all services,
+    /// the hydrator emits zero `Action::DataplaneUpdateService`
+    /// actions per tick. The evaluator body panics with a
+    /// `RED scaffold` message until DELIVER ships the body per
+    /// Slice 08 / S-2.2-27.
+    HydratorIdempotentSteadyState,
 }
 
 impl Invariant {
@@ -163,6 +187,11 @@ impl Invariant {
         Self::ViewStoreRoundtripIsLossless,
         Self::BulkLoadIsDeterministic,
         Self::WriteThroughOrdering,
+        // phase-2-xdp-service-map DISTILL — RED scaffolds per
+        // `docs/feature/phase-2-xdp-service-map/distill/wave-decisions.md`
+        // DWD-4. Evaluator bodies panic until DELIVER fills them.
+        Self::HydratorEventuallyConverges,
+        Self::HydratorIdempotentSteadyState,
     ];
 
     /// The canonical kebab-case spelling of this invariant, as a static
@@ -192,6 +221,8 @@ impl Invariant {
             Self::ViewStoreRoundtripIsLossless => "view-store-roundtrip-is-lossless",
             Self::BulkLoadIsDeterministic => "bulk-load-is-deterministic",
             Self::WriteThroughOrdering => "write-through-ordering",
+            Self::HydratorEventuallyConverges => "hydrator-eventually-converges",
+            Self::HydratorIdempotentSteadyState => "hydrator-idempotent-steady-state",
         }
     }
 }

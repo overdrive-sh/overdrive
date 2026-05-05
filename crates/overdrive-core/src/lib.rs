@@ -25,6 +25,13 @@
 #![cfg_attr(test, allow(clippy::expect_used, clippy::unwrap_used))]
 
 pub mod aggregate;
+// Phase 2.2 dataplane-internal types — `MaglevTableSize`, `DropClass`,
+// `BackendSetFingerprint` + computation helpers. Workload-identifier
+// newtypes (`ServiceVip`, `ServiceId`, `BackendId`) live in
+// [`id`] alongside the existing identifier catalogue.
+// RED scaffolds per `docs/feature/phase-2-xdp-service-map/distill/
+// wave-decisions.md` DWD-4. Bodies panic until DELIVER fills them.
+pub mod dataplane;
 pub mod error;
 pub mod id;
 pub mod reconciler;

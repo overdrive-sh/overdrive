@@ -571,6 +571,30 @@ async fn dispatch_single(
             emit_event(bus, build_lifecycle_event(&row, prior_state, TransitionSource::Reconciler));
             Ok(())
         }
+        // phase-2-xdp-service-map Slice 08 (US-08; ASR-2.2-04) —
+        // RED scaffold per `docs/feature/phase-2-xdp-service-map/
+        // distill/wave-decisions.md` DWD-5. DELIVER's Slice 08
+        // first GREEN commit replaces this `todo!()` with a call
+        // into the canonical
+        // `action_shim::service_hydration::dispatch(...)` (the
+        // `action_shim_service_hydration` sibling module is the
+        // pre-rename home; see DWD-3). The shim invokes
+        // `Dataplane::update_service(service_id, vip, backends)`
+        // and writes the outcome row to `service_hydration_results`
+        // per architecture.md § 7 *Failure surface*.
+        Action::DataplaneUpdateService {
+            service_id: _,
+            vip: _,
+            backends: _,
+            correlation: _,
+        } => {
+            todo!(
+                "RED scaffold S-2.2-28 — dispatch \
+                 Action::DataplaneUpdateService via \
+                 Dataplane::update_service and write \
+                 service_hydration_results row (Slice 08)"
+            )
+        }
     }
 }
 

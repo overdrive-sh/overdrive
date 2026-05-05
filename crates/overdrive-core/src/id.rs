@@ -594,6 +594,121 @@ impl From<CorrelationKey> for String {
 use std::fmt::Write as _;
 
 // -----------------------------------------------------------------------------
+// Phase 2.2 newtypes — `ServiceVip`, `ServiceId`, `BackendId`.
+// RED scaffolds per `docs/feature/phase-2-xdp-service-map/distill/
+// wave-decisions.md` DWD-4. Bodies panic until DELIVER fills them
+// per the carpaccio slice plan (Slice 02 / Slice 04).
+// -----------------------------------------------------------------------------
+
+/// Virtual IP a kernel-side XDP program matches incoming packets
+/// against. Stored host-order; converted at the kernel boundary
+/// per architecture.md § 11.
+///
+/// Userspace control-plane newtype only — `service_backends`
+/// observation rows continue to carry `vip: Ipv4Addr` as their
+/// wire-shape field; the hydrator wraps at the read boundary.
+///
+/// **RED scaffold** — DELIVER fills the body per Slice 02
+/// (S-2.2-04..08).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ServiceVip(std::net::IpAddr);
+
+impl ServiceVip {
+    /// Validating constructor.
+    pub fn new(_addr: std::net::IpAddr) -> Result<Self, IdParseError> {
+        todo!("RED scaffold: ServiceVip::new — see Slice 02 / S-2.2-04")
+    }
+
+    /// Inner [`std::net::IpAddr`].
+    pub fn get(&self) -> std::net::IpAddr {
+        self.0
+    }
+}
+
+impl std::fmt::Display for ServiceVip {
+    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        todo!("RED scaffold: ServiceVip::fmt — see Slice 02")
+    }
+}
+
+impl std::str::FromStr for ServiceVip {
+    type Err = IdParseError;
+
+    fn from_str(_s: &str) -> Result<Self, Self::Err> {
+        todo!("RED scaffold: ServiceVip::from_str — see Slice 02")
+    }
+}
+
+/// Identity of a service for control-plane addressing. Maps 1:1
+/// to a `MAGLEV_MAP` outer-map key; backed by `u64` content-hash
+/// per architecture.md § 6.
+///
+/// **RED scaffold** — DELIVER fills the body per Slice 02
+/// (S-2.2-04..08) / Slice 08 (S-2.2-26..30).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ServiceId(u64);
+
+impl ServiceId {
+    /// Validating constructor over the raw u64.
+    pub fn new(_value: u64) -> Result<Self, IdParseError> {
+        todo!("RED scaffold: ServiceId::new — see Slice 02 / Slice 08")
+    }
+
+    /// Inner `u64`.
+    pub fn get(self) -> u64 {
+        self.0
+    }
+}
+
+impl std::fmt::Display for ServiceId {
+    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        todo!("RED scaffold: ServiceId::fmt — see Slice 02")
+    }
+}
+
+impl std::str::FromStr for ServiceId {
+    type Err = IdParseError;
+
+    fn from_str(_s: &str) -> Result<Self, Self::Err> {
+        todo!("RED scaffold: ServiceId::from_str — see Slice 02")
+    }
+}
+
+/// `BACKEND_MAP` key — a stable monotonic backend identifier
+/// shared across services per architecture.md § 6.
+///
+/// **RED scaffold** — DELIVER fills the body per Slice 03
+/// (S-2.2-09..11).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct BackendId(u32);
+
+impl BackendId {
+    /// Validating constructor.
+    pub fn new(_value: u32) -> Result<Self, IdParseError> {
+        todo!("RED scaffold: BackendId::new — see Slice 03 / S-2.2-09")
+    }
+
+    /// Inner `u32`.
+    pub fn get(self) -> u32 {
+        self.0
+    }
+}
+
+impl std::fmt::Display for BackendId {
+    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        todo!("RED scaffold: BackendId::fmt — see Slice 03")
+    }
+}
+
+impl std::str::FromStr for BackendId {
+    type Err = IdParseError;
+
+    fn from_str(_s: &str) -> Result<Self, Self::Err> {
+        todo!("RED scaffold: BackendId::from_str — see Slice 03")
+    }
+}
+
+// -----------------------------------------------------------------------------
 // Tests
 // -----------------------------------------------------------------------------
 

@@ -18,4 +18,8 @@
 mod integration {
     mod crate_class_metadata;
     mod dev_setup_bpf_linker;
+    /// phase-2-xdp-service-map Slice 07 (US-07; S-2.2-24, S-2.2-25)
+    /// — perf-gate self-test. Synthetic input proves the gate logic
+    /// itself returns non-zero on >5% regression. RED scaffolds.
+    mod perf_gate_self_test;
 }

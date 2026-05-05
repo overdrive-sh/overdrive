@@ -14,6 +14,15 @@
 //! are stubbed pending #24 (`POLICY_MAP`), #25 (`SERVICE_MAP`), and
 //! #27 (telemetry ringbuf) per `architecture.md` §7.
 
+// Phase 2.2 module scaffolds per
+// `docs/feature/phase-2-xdp-service-map/distill/wave-decisions.md`
+// DWD-3 file-path inventory. Bodies panic via `todo!()` until
+// DELIVER fills them per the carpaccio slice plan.
+pub mod loader;
+pub mod maglev;
+pub mod maps;
+pub mod swap;
+
 use std::net::Ipv4Addr;
 
 use async_trait::async_trait;

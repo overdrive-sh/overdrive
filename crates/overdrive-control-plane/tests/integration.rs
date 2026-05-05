@@ -60,6 +60,11 @@ mod integration {
     /// in the same call frame; per ADR-0037 §4 drift between the two
     /// surfaces is structurally impossible.
     mod terminal_propagation;
+    /// phase-2-xdp-service-map Slice 08 (US-08) — service-map
+    /// hydrator dispatch RED scaffold per
+    /// `docs/feature/phase-2-xdp-service-map/distill/test-scenarios.md`
+    /// S-2.2-28. Body panics until DELIVER fills it.
+    mod service_map_hydrator_dispatch;
     mod tls_bootstrap;
     /// phase-1-first-workload — slice 3 (US-03) — Linux-only walking
     /// skeletons. Each scenario file gates itself with

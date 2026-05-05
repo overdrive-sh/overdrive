@@ -37,6 +37,11 @@ const ALL_VARIANTS: &[Invariant] = &[
     Invariant::ViewStoreRoundtripIsLossless,
     Invariant::BulkLoadIsDeterministic,
     Invariant::WriteThroughOrdering,
+    // phase-2-xdp-service-map DISTILL — RED scaffolds per DWD-4.
+    // Canonical-name roundtrip is well-formed; harness dispatch
+    // panics until DELIVER fills the evaluator bodies.
+    Invariant::HydratorEventuallyConverges,
+    Invariant::HydratorIdempotentSteadyState,
 ];
 
 fn variant_strategy() -> impl Strategy<Value = Invariant> {
@@ -58,6 +63,9 @@ fn variant_strategy() -> impl Strategy<Value = Invariant> {
         Just(Invariant::ViewStoreRoundtripIsLossless),
         Just(Invariant::BulkLoadIsDeterministic),
         Just(Invariant::WriteThroughOrdering),
+        // phase-2-xdp-service-map DISTILL — RED scaffolds per DWD-4.
+        Just(Invariant::HydratorEventuallyConverges),
+        Just(Invariant::HydratorIdempotentSteadyState),
     ]
 }
 

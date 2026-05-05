@@ -546,6 +546,52 @@ pub enum Action {
         /// [`Action::StopAllocation::terminal`].
         terminal: Option<TerminalCondition>,
     },
+
+    // -----------------------------------------------------------------
+    // phase-2-xdp-service-map (Slice 08, US-08, ASR-2.2-04) — emitted
+    // by the `service-map-hydrator` reconciler when the
+    // `service_backends` ObservationStore rows for a `ServiceId`
+    // produce a fingerprint distinct from the one persisted in the
+    // reconciler's `View`.
+    // -----------------------------------------------------------------
+    /// Replace the backend set for a service VIP in the kernel-side
+    /// `SERVICE_MAP` / `BACKEND_MAP` / `MAGLEV_MAP` tuple per
+    /// `docs/feature/phase-2-xdp-service-map/design/architecture.md`
+    /// § 7.
+    ///
+    /// The action shim consumes this variant, invokes
+    /// `Dataplane::update_service(service_id, vip, backends)`,
+    /// and writes the outcome into the `service_hydration_results`
+    /// observation row. The next reconcile tick reads that row via
+    /// `actual` and either advances (Completed) or retries on the
+    /// next backend-set change (Failed).
+    ///
+    /// `Vec<Backend>` carries weighted backends in deterministic
+    /// `BTreeMap<BackendId, Backend>::iter()` order — Maglev table
+    /// generation is byte-deterministic across nodes given identical
+    /// inputs (DISCUSS Decision 8 + architecture.md Constraint 6).
+    DataplaneUpdateService {
+        /// Identity of the service whose backend set is being
+        /// rewritten. Maps 1:1 to a `MAGLEV_MAP` outer-map key.
+        service_id: crate::id::ServiceId,
+        /// Virtual IP the kernel-side XDP program matches incoming
+        /// packets against. Carried explicitly (rather than re-derived
+        /// from `service_id`) so the shim never needs to look back at
+        /// `service_backends` to dispatch.
+        vip: crate::id::ServiceVip,
+        /// Backend set, in deterministic iteration order. The shim
+        /// passes this slice straight into
+        /// `Dataplane::update_service`; userspace Maglev permutation
+        /// generation reads it in this exact order.
+        backends: Vec<crate::traits::dataplane::Backend>,
+        /// Cause-to-response linkage per the existing `HttpCall`
+        /// pattern. Derived deterministically from
+        /// `(target = "service-map-hydrator/<service_id>",
+        ///   spec_hash = ContentHash::of(rkyv-archive of fingerprint),
+        ///   purpose = "update-service")` so the next tick can locate
+        /// the `service_hydration_results` row deterministically.
+        correlation: CorrelationKey,
+    },
 }
 
 /// Placeholder for the workflow spec. Phase 3 replaces with real shape.

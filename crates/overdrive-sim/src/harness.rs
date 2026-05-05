@@ -502,6 +502,26 @@ impl Harness {
                 evaluators::evaluate_bulk_load_is_deterministic().await
             }
             Invariant::WriteThroughOrdering => evaluators::evaluate_write_through_ordering().await,
+            // phase-2-xdp-service-map DISTILL — RED scaffolds per
+            // `docs/feature/phase-2-xdp-service-map/distill/wave-decisions.md`
+            // DWD-4. Bodies panic when invoked. DELIVER's Slice 08
+            // wires real evaluators via
+            // `crate::invariants::service_map_hydrator::*` and
+            // returns `InvariantResult` from real fixtures.
+            Invariant::HydratorEventuallyConverges => {
+                crate::invariants::service_map_hydrator::assert_hydrator_eventually_converges();
+                #[allow(unreachable_code)]
+                {
+                    unreachable!("RED scaffold panicked above")
+                }
+            }
+            Invariant::HydratorIdempotentSteadyState => {
+                crate::invariants::service_map_hydrator::assert_hydrator_idempotent_steady_state();
+                #[allow(unreachable_code)]
+                {
+                    unreachable!("RED scaffold panicked above")
+                }
+            }
         }
     }
 }

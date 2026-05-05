@@ -31,6 +31,15 @@
 #![deny(unsafe_code)]
 
 pub mod action_shim;
+// Phase 2.2 service-hydration shim scaffold per
+// `docs/feature/phase-2-xdp-service-map/distill/wave-decisions.md`
+// DWD-3 / DWD-5. DELIVER's Slice 08 first GREEN commit moves this
+// to the canonical path
+// `action_shim/service_hydration.rs` (architecture.md § 9). The
+// sibling shape here exists so the scaffold compiles before the
+// directory-module conversion; the rename is non-substantive
+// once DELIVER lands the dispatch body.
+pub mod action_shim_service_hydration;
 pub mod api;
 pub mod cgroup_manager;
 pub mod cgroup_preflight;
@@ -39,6 +48,10 @@ pub mod eval_broker;
 pub mod handlers;
 pub mod observation_wiring;
 pub mod reconciler_runtime;
+// Phase 2.2 reconcilers per DWD-3. Currently hosts only the
+// `service_map_hydrator`; future Phase 2+ reconcilers will land
+// alongside.
+pub mod reconcilers;
 pub mod streaming;
 pub mod tls_bootstrap;
 // reconciler-memory-redb step 01-03 — `ViewStore` port + error types
