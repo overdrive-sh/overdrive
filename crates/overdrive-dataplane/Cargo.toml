@@ -69,7 +69,12 @@ nix.workspace  = true
 # `tracing-subscriber` is dev-only — used by S-2.2-02 to capture the
 # `xdp.attach.fallback_generic` structured warn event via a custom
 # `tracing::Layer` (production code does NOT install a subscriber).
+# `proptest` powers the userspace endianness round-trip in
+# `crates/overdrive-dataplane/src/maps/service_map_handle.rs` per
+# Phase 2.2 step 02-02 (S-2.2-04 handle endianness). Pure-function
+# unit-level test, runs in the default lane.
 [dev-dependencies]
+proptest.workspace           = true
 serial_test.workspace        = true
 tracing-subscriber.workspace = true
 

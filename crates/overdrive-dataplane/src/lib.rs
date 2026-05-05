@@ -189,11 +189,40 @@ impl Dataplane for EbpfDataplane {
     }
 
     /// see #25 (`SERVICE_MAP`)
+    ///
+    /// Phase 2.2 Slice 02 (step 02-02) — userspace call-site
+    /// shape lands here: construct a typed `ServiceMapHandle` and
+    /// invoke `insert(vip, port, backend)` per backend. The
+    /// in-memory backing of `ServiceMapHandle` (Slice 02) does
+    /// not yet reach the kernel — Slice 03 (US-03; S-2.2-09..11)
+    /// swaps the backing for an `aya::maps::HashMap` retrieved
+    /// from `aya::Ebpf::map_mut("SERVICE_MAP")` once
+    /// `crates/overdrive-bpf/src/maps/service_map.rs` declares
+    /// the real `#[map]`. The trait extension for `ServiceId`
+    /// arrives with Slice 03 — for now the trait still takes
+    /// `Ipv4Addr` and `Vec<Backend>` (architecture.md § 5
+    /// D-Sig). The VIP port is sourced from `backend.addr.port()`
+    /// as the Slice 02 simplification (single backend per VIP);
+    /// Slice 03 splits backend port from VIP port.
     async fn update_service(
         &self,
-        _vip: Ipv4Addr,
-        _backends: Vec<Backend>,
+        vip: Ipv4Addr,
+        backends: Vec<Backend>,
     ) -> Result<(), DataplaneError> {
+        use overdrive_core::id::ServiceVip;
+
+        use crate::maps::service_map_handle::ServiceMapHandle;
+
+        let typed_vip = ServiceVip::new(std::net::IpAddr::V4(vip))
+            .map_err(|e| DataplaneError::LoadFailed(format!("ServiceVip::new({vip}): {e}")))?;
+
+        let mut handle = ServiceMapHandle::new();
+        for backend in &backends {
+            // Slice 02 simplification: VIP port = backend.addr.port().
+            // Slice 03 lifts a separate VIP port through the trait.
+            let vip_port = backend.addr.port();
+            handle.insert(typed_vip, vip_port, backend)?;
+        }
         Ok(())
     }
 
