@@ -1603,6 +1603,62 @@ See `docs/research/dataplane/aya-rs-usage-comprehensive-research.md`
 typed handle + kernel-side struct) and § F.1 for the migration
 plan.
 
+### Sharing the outer HoM between userspace and the kernel-side ELF — `pinning = ByName`
+
+aya 0.13.x's stock ELF loader cannot create a HASH_OF_MAPS map from
+the ELF alone — `MapData::create` doesn't know the inner-map
+prototype, so `BPF_MAP_CREATE` rejects (the `inner_map_fd` field is
+unset). The crafter for step 03-02's first attempts mistook this for
+a structural blocker; **it isn't**. aya 0.13.x at `bpf.rs:495–503`
+already supports the pin-by-name workaround — the same pattern
+libbpf uses, and the same pattern Cilium / Katran use to share HoMs
+between userspace and kernel-side BPF programs.
+
+The wiring:
+
+1. **Kernel-side declaration** — the project's hand-rolled
+   `HashOfMaps<K, V, M>` struct (over `bpf_map_def`) bakes
+   `pinning: PinningType::ByName as u32` into its const initializer.
+   Required field; not optional.
+2. **Userspace `EbpfDataplane::new`** runs in this order:
+   1. **Create the inner-map prototype** — `bpf(BPF_MAP_CREATE)` for
+      a single `Array<BackendId, 256>` (or whatever the inner shape
+      is). This is the template the kernel uses to type-check
+      subsequent inner FDs handed in via
+      `HashOfMapsHandle::set`.
+   2. **Create the outer HoM** —
+      `sys::bpf::bpf_create_map(BPF_MAP_TYPE_HASH_OF_MAPS, …,
+      inner_map_fd: prototype_fd)`. Returns `outer_fd`.
+   3. **Pin the outer map to bpffs** —
+      `sys::bpf::bpf_obj_pin(outer_fd,
+      "/sys/fs/bpf/overdrive/<MAP_NAME>")`.
+   4. **Load the ELF with the pin path set** —
+      `EbpfLoader::new().map_pin_path("/sys/fs/bpf/overdrive").load_file(…)`.
+      aya's loader sees the kernel-side `bpf_map_def.pinning ==
+      ByName`, finds the existing pinned FD by name, and **reuses
+      it** — no second `BPF_MAP_CREATE` is attempted. The kernel-side
+      program and the userspace `HashOfMapsHandle` now reference the
+      same FD.
+3. **Cleanup** — bpffs pins survive across process exits; remove on
+   shutdown via `unlink("/sys/fs/bpf/overdrive/<MAP_NAME>")` or
+   accept the persistence (it's how Cilium operates in production).
+
+**Pin-path discipline**: every Overdrive HoM pins under
+`/sys/fs/bpf/overdrive/`. Tests use a per-test tempdir to avoid
+cross-test collisions; production uses the literal path. Set this
+once in the loader's `EbpfDataplane::new` and never override per-map.
+
+**Why this is not "scope creep"**: the existing Slice 02 S-2.2-06
+GREEN test's userspace surface (`ServiceMapHandle::insert`) does
+NOT change shape — only the underlying handle implementation does.
+The kernel-side ELF declaration and the loader call site change;
+the test body stays the same.
+
+See `docs/research/dataplane/aya-rs-usage-comprehensive-research.md`
+§ D.3 (b) for the bare-create rejection mechanism, and the aya
+0.13.1 source at `aya/src/bpf.rs:495–503` for the pin-by-name reuse
+path. Resolves K-1 in the research doc.
+
 ### Verifier-friendly idioms — what to avoid
 
 - **No loops with non-bounded counters.** The verifier needs to know the
