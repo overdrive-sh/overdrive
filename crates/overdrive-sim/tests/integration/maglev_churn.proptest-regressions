@@ -1,0 +1,11 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc d542fbd7facf1946c919ac9f1a722e0e5a1c93c53de49309656a4aff2644b8e4 # shrinks to backend_count = 2, m = MaglevTableSize(251)
+cc 2617800173bf2991d3a6615fa549e7eba4818879b87038aa4dde4a768940808d # shrinks to m = MaglevTableSize(251)
+cc 991e88b765006794b9d66314a486c0cd4ee31ce9d154147c7a04c88632b1fd88 # shrinks to m = MaglevTableSize(251)
+cc fd08b64b86ac3fb8f002191a349fc6c08a71593ca7701c1dc5a79f0212861b3b # shrinks to backends = {BackendId(0): 1}, m = MaglevTableSize(251)
+cc b8246f0fc89036d335f1196f85f99ca37b8584bb24d048ea72a9c3e7afec3780 # shrinks to backends = {BackendId(0): 1}, m = MaglevTableSize(251)

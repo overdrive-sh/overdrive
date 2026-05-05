@@ -1867,6 +1867,7 @@ dependencies = [
  "futures",
  "overdrive-control-plane",
  "overdrive-core",
+ "overdrive-dataplane",
  "overdrive-store-local",
  "parking_lot",
  "proptest",

@@ -61,6 +61,13 @@ serde_json.workspace = true
 # every `ObservationStore` adapter exercises this harness from its
 # own test suite to enforce the LWW contract at trait level.
 overdrive-core = { workspace = true, features = ["test-utils"] }
+# `overdrive-dataplane` exposes the pure userspace
+# `maglev::permutation::generate` function used by Slice 04's S-2.2-12
+# / S-2.2-13 integration proptests. Dev-dep only — sim never wires the
+# real BPF loader. The dependency is acceptable per
+# `.claude/rules/development.md` § "Port-trait dependencies": the test
+# crate consumes a pure function, not a port-trait production binding.
+overdrive-dataplane = { path = "../overdrive-dataplane" }
 
 [lints]
 workspace = true

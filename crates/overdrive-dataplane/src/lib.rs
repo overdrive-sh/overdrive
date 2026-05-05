@@ -15,7 +15,6 @@
 //! #27 (telemetry ringbuf) per `architecture.md` §7.
 
 #![expect(
-    clippy::todo,
     clippy::doc_markdown,
     reason = "Phase 2.2 RED scaffolds in maglev/* and swap.rs; lints self-trip when scaffolds go GREEN. Strip when Slice 08 closes the last scaffold."
 )]
