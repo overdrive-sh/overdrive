@@ -61,7 +61,6 @@ jobs:
     served_by_phase: 1
     status: active
 
-  # Deferred to later features; tracked here for traceability.
   - id: J-PLAT-004
     title: "Run a reconciler I wrote against a simulated cluster and know it converges"
     situation: >
@@ -72,9 +71,9 @@ jobs:
     outcome: >
       so reconciler correctness is mechanically checked before I rely on
       it in production.
-    source: whitepaper §18
+    source: whitepaper §18, §7 (BPF Map Architecture — hydration as reconciler)
     served_by_phase: 2
-    status: deferred
+    status: active
 
   - id: J-OPS-001
     title: "Bill a tenant for exactly what they used, with kernel evidence"
@@ -153,3 +152,16 @@ changelog:
       co-located on the same machine); no operator-facing node
       registration verb. Multi-node, multi-region, and node
       registration are explicit non-goals for Phase 1.
+  - date: 2026-05-05
+    change: >
+      Activated J-PLAT-004 (status: deferred → active) tied to
+      phase-2-xdp-service-map (GH #24). Phase 2.2 is the first slice
+      where a non-trivial reconciler — the SERVICE_MAP / BACKEND_MAP /
+      MAGLEV_MAP hydrator — needs ESR-shaped invariants against
+      SimDataplane in DST. The hydrator's pure-reconcile +
+      action-shim shape is the §18 reference implementation that
+      every later dataplane reconciler (POLICY_MAP, IDENTITY_MAP,
+      FS_POLICY_MAP) will mirror, so J-PLAT-004 transitions from
+      "deferred placeholder" to "served by an active feature." Source
+      extended to whitepaper §7 (BPF Map Architecture — hydration as
+      reconciler) alongside §18.
