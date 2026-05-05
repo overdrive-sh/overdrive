@@ -1824,12 +1824,14 @@ version = "0.0.0"
 dependencies = [
  "async-trait",
  "aya",
+ "libc",
  "nix",
  "overdrive-core",
  "serial_test",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

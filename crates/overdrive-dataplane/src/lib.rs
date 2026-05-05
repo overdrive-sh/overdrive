@@ -81,7 +81,7 @@ impl EbpfDataplane {
     /// `IfaceNotFound`.
     #[cfg(target_os = "linux")]
     pub fn new(iface: &str) -> Result<Self, DataplaneError> {
-        use aya::programs::{Xdp, XdpFlags};
+        use aya::programs::{ProgramError, Xdp, XdpFlags};
         use nix::errno::Errno;
         use nix::net::if_::if_nametoindex;
 
@@ -105,9 +105,38 @@ impl EbpfDataplane {
             .try_into()
             .map_err(|e| DataplaneError::LoadFailed(format!("xdp program type: {e}")))?;
         prog.load().map_err(|e| DataplaneError::LoadFailed(format!("xdp_pass.load: {e}")))?;
-        let link = prog
-            .attach(iface, XdpFlags::default())
-            .map_err(|e| DataplaneError::LoadFailed(format!("xdp_pass.attach({iface}): {e}")))?;
+
+        // Native-first attach (DRV_MODE). On documented driver-not-
+        // supported errors (EOPNOTSUPP / ENOTSUP) emit a single
+        // structured warn and retry in generic mode (SKB_MODE). All
+        // other errors propagate unchanged — falling back on
+        // ambiguous failures (EINVAL, EPERM, …) would mask real
+        // loader bugs per `.claude/rules/development.md` § Errors.
+        // Wave-decision D-Native (Phase 2.2 wave-decisions.md) locks
+        // native default + warn-on-fallback. KPI K1 emits here.
+        let link = match prog.attach(iface, XdpFlags::DRV_MODE) {
+            Ok(link) => link,
+            Err(ProgramError::SyscallError(ref se))
+                if should_fallback_to_generic(&se.io_error) =>
+            {
+                tracing::warn!(
+                    name: "xdp.attach.fallback_generic",
+                    iface = %iface,
+                    syscall = %se.call,
+                    "native XDP attach not supported by driver; falling back to generic (SKB) mode"
+                );
+                prog.attach(iface, XdpFlags::SKB_MODE).map_err(|e| {
+                    DataplaneError::LoadFailed(format!(
+                        "xdp_pass.attach({iface}, SKB_MODE) after native fallback: {e}"
+                    ))
+                })?
+            }
+            Err(e) => {
+                return Err(DataplaneError::LoadFailed(format!(
+                    "xdp_pass.attach({iface}, DRV_MODE): {e}"
+                )));
+            }
+        };
         Ok(Self { bpf, _link: link })
     }
 
@@ -119,6 +148,31 @@ impl EbpfDataplane {
     pub fn new(_iface: &str) -> Result<Self, DataplaneError> {
         Err(DataplaneError::LoadFailed("overdrive-dataplane: non-Linux build target".into()))
     }
+}
+
+/// Classify an `io::Error` from `aya::programs::Xdp::attach` (which
+/// surfaces as `ProgramError::SyscallError { call: "bpf_link_create"
+/// | "netlink_set_xdp_fd", io_error }`) into either "fall back to
+/// generic" or "propagate as-is". The classification is deliberately
+/// narrow: only the documented driver-not-supported errno codes
+/// (`EOPNOTSUPP`, `ENOTSUP`) trigger fallback. Everything else —
+/// `EINVAL` (often genuinely-invalid attempts), `EPERM` (capability
+/// failure), `EBUSY` (already-attached), errors without an OS errno
+/// — propagates as `DataplaneError::LoadFailed`. Falling back on an
+/// ambiguous error would mask real loader bugs (per
+/// `.claude/rules/development.md` § Errors — distinct failure modes
+/// get distinct variants).
+///
+/// Lives at module scope rather than as an inherent method so the
+/// unit tests in `mod tests` below can exercise it without
+/// constructing a full `EbpfDataplane`. Keeps the fallback decision
+/// pure-function-shaped — same property the wider DST harness relies
+/// on for replay equivalence.
+#[cfg(target_os = "linux")]
+fn should_fallback_to_generic(io_error: &std::io::Error) -> bool {
+    io_error
+        .raw_os_error()
+        .is_some_and(|code| code == libc::EOPNOTSUPP || code == libc::ENOTSUP)
 }
 
 #[async_trait]
@@ -150,16 +204,21 @@ impl Dataplane for EbpfDataplane {
 #[cfg(test)]
 mod tests {
     //! macOS-side regression guards for the `#[cfg(not(target_os =
-    //! "linux"))]` stub branch. The branch is one line of code, but
-    //! the test exists to prevent silent erosion of the boundary —
-    //! a future refactor that drops the cfg gate, weakens the
-    //! diagnostic, or returns a different error variant trips this
-    //! assertion on macOS CI before the change reaches Linux.
+    //! "linux"))]` stub branch, plus Linux-side unit tests for the
+    //! native→generic fallback classification helper (S-2.2-02).
     //!
-    //! On Linux the test is `#[cfg(not(target_os = "linux"))]`-gated
-    //! and silently absent — the Tier 3 LVH smoke (`cargo xtask
+    //! The macOS branch is one line of code, but the test exists to
+    //! prevent silent erosion of the boundary — a future refactor
+    //! that drops the cfg gate, weakens the diagnostic, or returns
+    //! a different error variant trips this assertion on macOS CI
+    //! before the change reaches Linux.
+    //!
+    //! On Linux the macOS test is `#[cfg(not(target_os = "linux"))]`-
+    //! gated and silently absent — the Tier 3 LVH smoke (`cargo xtask
     //! integration-test vm latest`, step 03-02) is the corresponding
-    //! Linux-side gate.
+    //! Linux-side gate. The fallback-classification unit tests below
+    //! run on Linux only (the helper itself is `#[cfg(target_os =
+    //! "linux")]`).
 
     // Imports are only consumed by the `#[cfg(not(target_os =
     // "linux"))]` test below, so they're dead on Linux. The cfg gate
@@ -186,5 +245,68 @@ mod tests {
             Err(other) => panic!("expected DataplaneError::LoadFailed, got {other:?}"),
             Ok(_) => panic!("expected Err on non-Linux build target"),
         }
+    }
+
+    /// Classification — `EOPNOTSUPP` from `bpf_link_create` /
+    /// `netlink_set_xdp_fd` is the canonical "driver does not
+    /// support native XDP" signal. Trigger fallback to generic
+    /// (`SKB_MODE`).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn fallback_classification_eopnotsupp_yields_true() {
+        use std::io;
+        let err = io::Error::from_raw_os_error(libc::EOPNOTSUPP);
+        assert!(super::should_fallback_to_generic(&err));
+    }
+
+    /// `ENOTSUP` — on Linux this is the same numeric value as
+    /// `EOPNOTSUPP` (95) but POSIX names them distinctly; some
+    /// drivers / kernels surface one or the other, both must
+    /// trigger fallback. Pinned explicitly so a future kernel
+    /// header change cannot silently drift them apart.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn fallback_classification_enotsup_yields_true() {
+        use std::io;
+        let err = io::Error::from_raw_os_error(libc::ENOTSUP);
+        assert!(super::should_fallback_to_generic(&err));
+    }
+
+    /// `EINVAL` is ambiguous — drivers and the verifier both surface
+    /// it for genuinely-invalid attempts (bad flags, bad program
+    /// type, bad ifindex, etc). Falling back on `EINVAL` would mask
+    /// real loader bugs, per `.claude/rules/development.md` § Errors
+    /// (distinct failure modes get distinct variants). Must NOT
+    /// trigger fallback.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn fallback_classification_einval_yields_false() {
+        use std::io;
+        let err = io::Error::from_raw_os_error(libc::EINVAL);
+        assert!(!super::should_fallback_to_generic(&err));
+    }
+
+    /// `EPERM` is a permissions failure (`CAP_NET_ADMIN` missing,
+    /// LSM denial, sysctl lock). Falling back to generic does not
+    /// fix the underlying problem and would emit a misleading warn.
+    /// Must NOT trigger fallback.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn fallback_classification_eperm_yields_false() {
+        use std::io;
+        let err = io::Error::from_raw_os_error(libc::EPERM);
+        assert!(!super::should_fallback_to_generic(&err));
+    }
+
+    /// Errors that don't carry a `raw_os_error` (synthetic
+    /// `io::Error::other(...)` constructions, future error shapes)
+    /// must NOT trigger fallback — same conservative rule as
+    /// `EINVAL` / `EPERM`.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn fallback_classification_no_os_errno_yields_false() {
+        use std::io;
+        let err = io::Error::other("synthetic, no errno");
+        assert!(!super::should_fallback_to_generic(&err));
     }
 }

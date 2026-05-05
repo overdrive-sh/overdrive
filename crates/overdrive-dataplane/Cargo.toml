@@ -57,15 +57,21 @@ tracing.workspace        = true
 # per S-2.2-03; Linux-only because the call surface lives behind
 # `#[cfg(target_os = "linux")]` in the loader.
 [target.'cfg(target_os = "linux")'.dependencies]
-aya.workspace = true
-nix.workspace = true
+aya.workspace  = true
+libc.workspace = true
+nix.workspace  = true
 
 # Integration-test dev-deps. `serial_test` serialises tests that
 # mutate process-global state — here, the on-disk BPF artifact path
 # under `target/xtask/bpf-objects/`. See `.claude/rules/testing.md`
 # § "Tests that mutate process-global state".
+#
+# `tracing-subscriber` is dev-only — used by S-2.2-02 to capture the
+# `xdp.attach.fallback_generic` structured warn event via a custom
+# `tracing::Layer` (production code does NOT install a subscriber).
 [dev-dependencies]
-serial_test.workspace = true
+serial_test.workspace        = true
+tracing-subscriber.workspace = true
 
 [lints]
 workspace = true

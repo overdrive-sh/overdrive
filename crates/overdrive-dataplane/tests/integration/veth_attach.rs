@@ -21,13 +21,156 @@ fn xdp_attaches_to_real_veth_and_packet_counter_increments() {
 }
 
 /// S-2.2-02 — Native attach failure logs structured fallback warning.
+///
+/// Drives `EbpfDataplane::new(iface)` on a kernel `dummy` interface
+/// (the in-tree `dummy` driver does not implement the
+/// `ndo_bpf`/`ndo_xdp` op required for native XDP attach), so
+/// `bpf_link_create` / `netlink_set_xdp_fd` returns `EOPNOTSUPP`
+/// from the native (`DRV_MODE`) path. The loader retries in generic
+/// mode (`SKB_MODE`) and emits a single structured `tracing::warn!`
+/// event named `xdp.attach.fallback_generic` carrying the iface name.
+///
+/// Captured via a custom `tracing::Layer` rather than
+/// `tracing-test`, because we need to assert on the *event name*
+/// (the metadata `name` field used by `tracing::warn!(name: "...",
+/// ...)`) and not just the rendered message text.
+///
+/// Requires root for `ip link add dummy0 type dummy`. The Lima
+/// wrapper's default-root execution covers this; CI runs the test
+/// in a privileged container with `CAP_NET_ADMIN`.
+///
+/// **Currently `#[ignore]`** — exercising this path requires a
+/// real `overdrive_bpf.o` produced by `cargo xtask bpf-build` (step
+/// 02-01). Phase 2.1 ships a 1.3 KB placeholder ELF; `aya::Ebpf::load`
+/// rejects it before reaching the attach call. The fallback
+/// classification logic itself is unit-tested in `lib.rs` (see
+/// `should_fallback_to_generic`); the end-to-end happy-fallback
+/// path is gated through the LVH Tier 3 smoke at step 03-02 once
+/// the real artifact exists.
 #[test]
-#[ignore = "RED scaffold S-2.2-02 — DELIVER fills the body per Slice 01"]
+#[ignore = "S-2.2-02 — needs real overdrive_bpf.o from step 02-01; classification covered by unit test in lib.rs; end-to-end path covered by LVH smoke (step 03-02)"]
+#[serial_test::serial(net_admin)]
 fn native_attach_failure_logs_fallback_warning() {
-    panic!(
-        "Not yet implemented -- RED scaffold: S-2.2-02 — \
-         native attach failure on driver lacking native XDP support \
-         logs xdp.attach.fallback_generic and falls back to XDP_SKB"
+    use std::process::Command;
+    use std::sync::{Arc, Mutex};
+
+    use overdrive_dataplane::EbpfDataplane;
+    use tracing::Subscriber;
+    use tracing_subscriber::layer::{Context, SubscriberExt};
+    use tracing_subscriber::registry::LookupSpan;
+    use tracing_subscriber::Layer;
+
+    /// Records every event observed by the subscriber. Keeps the
+    /// metadata `name` and any `iface` field's `Display`-rendered
+    /// value — enough for the assertions below without taking a
+    /// dependency on `tracing-test`.
+    #[derive(Default)]
+    struct CapturedEvent {
+        name: &'static str,
+        iface: Option<String>,
+    }
+
+    #[derive(Default, Clone)]
+    struct CaptureLayer {
+        events: Arc<Mutex<Vec<CapturedEvent>>>,
+    }
+
+    impl<S> Layer<S> for CaptureLayer
+    where
+        S: Subscriber + for<'a> LookupSpan<'a>,
+    {
+        fn on_event(&self, event: &tracing::Event<'_>, _ctx: Context<'_, S>) {
+            struct IfaceVisitor {
+                iface: Option<String>,
+            }
+            impl tracing::field::Visit for IfaceVisitor {
+                fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+                    if field.name() == "iface" {
+                        self.iface = Some(value.to_string());
+                    }
+                }
+                fn record_debug(
+                    &mut self,
+                    field: &tracing::field::Field,
+                    value: &dyn std::fmt::Debug,
+                ) {
+                    if field.name() == "iface" {
+                        self.iface = Some(format!("{value:?}").trim_matches('"').to_string());
+                    }
+                }
+            }
+            let mut v = IfaceVisitor { iface: None };
+            event.record(&mut v);
+            self.events.lock().expect("events mutex").push(CapturedEvent {
+                name: event.metadata().name(),
+                iface: v.iface,
+            });
+        }
+    }
+
+    /// RAII guard — tears down the dummy interface on drop, even when
+    /// assertions panic mid-test.
+    struct DummyIface {
+        name: &'static str,
+    }
+    impl Drop for DummyIface {
+        fn drop(&mut self) {
+            let _ = Command::new("ip").args(["link", "del", self.name]).status();
+        }
+    }
+
+    let iface = "ovd-dummy0";
+
+    // Best-effort cleanup of any leftover from a prior aborted run.
+    let _ = Command::new("ip").args(["link", "del", iface]).status();
+
+    let add = Command::new("ip")
+        .args(["link", "add", iface, "type", "dummy"])
+        .status()
+        .expect("ip link add: spawn");
+    assert!(add.success(), "ip link add {iface} type dummy must succeed (need root + CAP_NET_ADMIN)");
+    let _guard = DummyIface { name: iface };
+
+    let up = Command::new("ip")
+        .args(["link", "set", iface, "up"])
+        .status()
+        .expect("ip link set up: spawn");
+    assert!(up.success(), "ip link set {iface} up must succeed");
+
+    // Capture-layer subscriber. Scoped to this test only — `with_default`
+    // installs and removes when the closure returns, so other tests in
+    // the same process keep their global subscriber.
+    let capture = CaptureLayer::default();
+    let events = capture.events.clone();
+
+    let subscriber = tracing_subscriber::registry().with(capture);
+    let result = tracing::subscriber::with_default(subscriber, || EbpfDataplane::new(iface));
+
+    assert!(
+        result.is_ok(),
+        "EbpfDataplane::new must succeed via generic fallback when native is rejected: {:?}",
+        result.err()
+    );
+
+    let captured = events.lock().expect("events mutex");
+    let fallback_events: Vec<&CapturedEvent> = captured
+        .iter()
+        .filter(|e| e.name == "xdp.attach.fallback_generic")
+        .collect();
+    assert_eq!(
+        fallback_events.len(),
+        1,
+        "expected exactly one xdp.attach.fallback_generic event, got {} (all events: {:?})",
+        fallback_events.len(),
+        captured
+            .iter()
+            .map(|e| (e.name, e.iface.clone()))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        fallback_events[0].iface.as_deref(),
+        Some(iface),
+        "fallback event must carry iface field equal to the requested name"
     );
 }
 
