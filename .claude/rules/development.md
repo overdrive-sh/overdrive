@@ -1351,6 +1351,256 @@ use legacy::JobId as LegacyJobId;
 
 ---
 
+## aya-rs XDP / TC kernel-side patterns
+
+These idioms govern every kernel-side eBPF program in `overdrive-bpf`. They
+are sourced from the upstream aya book (https://aya-rs.dev/book/programs/xdp.html)
+and adapted to project conventions. The verifier rejects programs that
+deviate from these shapes; treat them as load-bearing.
+
+### `ptr_at` — bounds-checked pointer access (canonical helper)
+
+Every kernel-side program MUST go through this helper to dereference packet
+data. Direct casting is rejected by the verifier and unsafe regardless.
+
+```rust
+#[inline(always)]
+unsafe fn ptr_at<T>(ctx: &XdpContext, offset: usize) -> Result<*const T, ()> {
+    let start = ctx.data();
+    let end = ctx.data_end();
+    let len = mem::size_of::<T>();
+
+    if start + offset + len > end {
+        return Err(());
+    }
+
+    let ptr = (start + offset) as *const T;
+    Ok(&*ptr)
+}
+```
+
+**When to use:** Every typed read out of an `XdpContext` / `TcContext` packet
+buffer — Ethernet header, IPv4 header, TCP/UDP header, payload byte
+ranges. Anywhere you'd otherwise write `*(ctx.data() as *const T)` or
+similar.
+
+**What it protects against:**
+
+- Verifier rejection on unbounded pointer arithmetic — the `start + offset
+  + len > end` check is the structural shape the verifier requires.
+- Buffer-overflow reads on truncated packets (the most common
+  malformed-input class).
+- Silent UB from dereferencing past `data_end`.
+
+**House-style adaptations:**
+
+- The helper lives once per program crate at
+  `crates/overdrive-bpf/src/shared/access.rs` (or similar) — do not
+  copy-paste it per program. Each `programs/<name>.rs` file imports it.
+- `#[inline(always)]` is required, not stylistic — the verifier needs the
+  bounds check at the call site, not behind a function call.
+- Use `mut_ptr_at<T>` (mirror, returning `*mut T`) for write paths
+  (header-rewrite hot path during NAT). Same shape, same bounds check.
+- Errors propagate via `?` to a top-level `match` that converts `Err(_)
+  → XDP_PASS` (or `TC_ACT_OK`) — see "Error Handling Pattern" below.
+
+### Packet header parsing — sequential offsets
+
+```rust
+let ethhdr: *const EthHdr = unsafe { ptr_at(&ctx, 0)? };
+match unsafe { (*ethhdr).ether_type() } {
+    Ok(EtherType::Ipv4) => {}
+    _ => return Ok(xdp_action::XDP_PASS),
+}
+
+let ipv4hdr: *const Ipv4Hdr = unsafe { ptr_at(&ctx, EthHdr::LEN)? };
+let source = u32::from_be_bytes(unsafe { (*ipv4hdr).src_addr });
+```
+
+Rules:
+
+- **Sequential offsets via `<HdrType>::LEN` constants**, never
+  hand-coded byte counts. The header crate (`network-types` or our own
+  `crates/overdrive-bpf/src/shared/headers.rs`) owns the canonical
+  layout.
+- **Early-return on non-matching protocols.** IPv6 / ARP / non-IPv4
+  EtherTypes return `XDP_PASS` so the host's other workloads keep
+  working — per § 7 of the whitepaper, the LB program is not a firewall.
+- **Wire-byte-order on read; convert at the boundary.** `u32::from_be_bytes`
+  on the read path; `to_be_bytes` on the write path. This is the
+  endianness lockstep boundary documented in
+  `docs/feature/phase-2-xdp-service-map/design/architecture.md` § 11.
+  Userspace map storage is host-order; kernel-side conversion happens at
+  this boundary, not in the userspace handle.
+
+### XDP return codes
+
+| Return | Meaning | When |
+|---|---|---|
+| `XDP_PASS` | Hand to kernel networking stack | Non-LB traffic, miss, edge protocols (IPv6, ICMP, ARP) |
+| `XDP_DROP` | Silent drop | Malformed input, sanity-prologue violations, blocked traffic |
+| `XDP_ABORTED` | Drop + tracepoint | Fallback for unhandled `Err(_)` in the top-level match |
+| `XDP_TX` | Bounce back same NIC | LB hit with rewritten dest; reverse-NAT egress |
+| `XDP_REDIRECT` | Forward to another NIC / `AF_XDP` | Cross-NIC LB (not used Phase 2.2) |
+
+**Project rule:** `XDP_DROP` requires a `DROP_COUNTER` increment with an
+explicit `DropClass` reason (per `crates/overdrive-core/src/dataplane/
+drop_class.rs`). Silent drops are forbidden — every drop is an
+observable event.
+
+### Error-handling pattern (top-level wrapper)
+
+```rust
+#[xdp]
+pub fn xdp_service_map_lookup(ctx: XdpContext) -> u32 {
+    match try_xdp_service_map_lookup(ctx) {
+        Ok(ret) => ret,
+        Err(_) => xdp_action::XDP_ABORTED,
+    }
+}
+
+fn try_xdp_service_map_lookup(ctx: XdpContext) -> Result<u32, ()> {
+    // bounds checks via `?`, header parsing, map lookup, header rewrite
+}
+```
+
+**Why two functions:** The `#[xdp]` entry point returns `u32` (kernel ABI).
+The inner `try_*` returns `Result<u32, ()>` so `?` works for bounds-check
+propagation. The wrapper converts unhandled `Err(_)` to `XDP_ABORTED` —
+verifier-clean and observable via the kernel's xdp tracepoint.
+
+**Project deviation:** `XDP_ABORTED` is acceptable as the catch-all but
+prefer `XDP_PASS` when the failure mode is "we can't classify; let the
+kernel handle it" (truncated frames per S-2.2-08; non-IPv4 per
+S-2.2-21). Reserve `XDP_ABORTED` for genuine "this should never happen"
+paths — e.g., a verifier-impossible bounds violation.
+
+### Map access from XDP context
+
+```rust
+#[map]
+static SERVICE_MAP: HashMap<ServiceKey, u32> = HashMap::with_max_entries(4096, 0);
+
+fn lookup_backend(key: &ServiceKey) -> Option<u32> {
+    unsafe { SERVICE_MAP.get(key).copied() }
+}
+```
+
+Rules:
+
+- `#[map]` declarations live in `crates/overdrive-bpf/src/maps/<name>.rs`,
+  one file per map, paired with a userspace handle in
+  `crates/overdrive-dataplane/src/maps/<name>_handle.rs` (per ADR-0040
+  three-map split).
+- `unsafe { MAP.get(...) }` is required — the verifier sees the unsafe
+  block and validates the bounded operation. Do NOT wrap further in
+  custom helpers; the call site IS the verifier-readable shape.
+- Return `Option<T>` — null-checking via `is_some()` / `match` is
+  verifier-friendly. Bare null derefs are rejected.
+- The `with_max_entries` argument is the BPF map size; it must match
+  the userspace handle's expected capacity.
+
+### `no_std` / `no_main` constraints
+
+```rust
+#![no_std]
+#![no_main]
+
+#[cfg(not(test))]
+#[panic_handler]
+fn panic(_info: &core::panic::PanicInfo) -> ! {
+    loop {}
+}
+```
+
+- Every kernel-side crate is `#![no_std]`. No `std::*`, no `alloc::*`
+  (no `Vec`, no `String`, no `Box`).
+- `no_main` because the `#[xdp]` / `#[classifier]` / `#[lsm]` macros
+  emit the entry point.
+- Panic handler is `loop {}` — the verifier rejects unwinding. The
+  `cfg(not(test))` gate keeps host-side mod-tests compilable.
+- The `panic_handler` lives once per crate, in the crate's `lib.rs` (not
+  per program file).
+
+### Attach mode — native vs generic (`SKB_MODE`)
+
+- **Default = native (`XdpFlags::DRV_MODE`).** Requires NIC driver
+  support; near-line-rate throughput. Lima virtio-net, ubuntu-latest
+  virtio-net, mlx5, ena, i40e all support native.
+- **`XdpFlags::SKB_MODE` (generic) is the documented fallback.** Slower
+  (full kernel networking stack traversal) but driver-agnostic; useful
+  for `dummy` interfaces and non-virtio kernels.
+- **Project rule (architecture.md § 2 constraint 9):** the loader tries
+  native first; on `EOPNOTSUPP` / `ENOTSUP` it emits a single structured
+  `tracing::warn!(name: "xdp.attach.fallback_generic", iface = %iface,
+  ...)` event and retries with `SKB_MODE`. Do NOT fall back on
+  `EINVAL` — that masks real loader bugs (the userspace classifier
+  `should_fallback_to_generic` in `crates/overdrive-dataplane/src/lib.rs`
+  enforces this).
+
+### Userspace map insertion (companion to kernel-side reads)
+
+```rust
+let mut blocklist: HashMap<_, u32, u32> =
+    HashMap::try_from(bpf.map_mut("BLOCKLIST").unwrap())?;
+
+let block_addr: u32 = Ipv4Addr::new(1, 1, 1, 1).into();
+blocklist.insert(block_addr, 0, 0)?;
+```
+
+**Endianness lockstep** (architecture.md § 11):
+
+- **Userspace stores host-order bytes** in the map. The host writes
+  `u32::from(Ipv4Addr)` — that produces host-order on every supported
+  arch.
+- **Kernel-side converts to network-order** at the read boundary via
+  `u32::from_be_bytes(packet_addr_bytes)` against the map key. No
+  endian flip in userspace.
+- Userspace proptests round-trip host-order writes against host-order
+  reads (per `.claude/rules/testing.md` § "Property-based testing
+  (proptest)" — newtype roundtrip is mandatory).
+
+This is the load-bearing rule the typed userspace handles
+(`ServiceMapHandle`, `BackendMapHandle`, etc.) enforce — they accept
+host-order inputs, write host-order to the BPF map, and the kernel-side
+program does the conversion. Any drift in either direction is caught by
+S-2.2-17 (Tier 2 lockstep test).
+
+### Verifier-friendly idioms — what to avoid
+
+- **No loops with non-bounded counters.** The verifier needs to know the
+  loop terminates. Use `for i in 0..N` with `N` a const, never a runtime
+  variable.
+- **No recursion.** Period.
+- **No floating-point math.** The kernel BPF JIT does not emit FP
+  instructions on most arches.
+- **No `panic!` / `todo!` / `unimplemented!` in production code paths.**
+  These are RED scaffolds; gate via `#[expect(clippy::todo)]` per
+  `.claude/rules/testing.md` § "Production-side scaffolds". The verifier
+  rejects programs that reach `panic_handler`.
+- **No `Vec`, no `Box`, no `Rc` / `Arc`.** `no_std` constraint; even if
+  it compiled, the verifier wouldn't accept dynamic allocation.
+- **No deep call chains.** Each `#[inline(always)]` helper expands at the
+  call site; deep call graphs explode the verifier's instruction budget.
+
+### Testing tier mapping (per `.claude/rules/testing.md`)
+
+Each kernel-side program lands across all four tiers:
+
+- **Tier 2 (`BPF_PROG_TEST_RUN`)**: `crates/overdrive-bpf/tests/integration/<name>.rs`
+  — PKTGEN/SETUP/CHECK triptych against curated input. Map state
+  cleared between sub-tests by default.
+- **Tier 3 (real veth)**: `crates/overdrive-dataplane/tests/integration/<name>.rs`
+  — real packet plumbing through veth pairs in Lima / ubuntu-latest.
+- **Tier 4 (`veristat`)**: `perf-baseline/main/verifier-budget/veristat-<name>.txt`
+  — instruction count baseline, ≤ 50 % of 1M-privileged ceiling.
+  Enforced by `cargo xtask verifier-regress`.
+- **Tier 1 (DST)**: not directly applicable to kernel-side code (DST
+  uses `SimDataplane`); the userspace handle that wraps the map IS
+  Tier 1-tested.
+
+---
+
 ## Why this matters
 
 The reconcile loop runs constantly, per object, across thousands of objects.
