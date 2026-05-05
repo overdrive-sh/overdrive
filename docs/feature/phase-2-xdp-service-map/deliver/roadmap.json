@@ -1,0 +1,1200 @@
+{
+  "roadmap": {
+    "project_id": "phase-2-xdp-service-map",
+    "created_at": "2026-05-05T07:46:21Z",
+    "total_steps": 30,
+    "phases": 8
+  },
+  "tier_field_semantics": "The `tier` field on each step reflects the step's own test harness (Tier 1 = pure-Rust unit/proptest; Tier 2 = BPF_PROG_TEST_RUN; Tier 3 = real-kernel via Lima/ubuntu-latest; Tier 4 = veristat/xdp-perf gates), not the tier of the first scenario it unblocks. Newtype/enum steps are Tier 1 even when they unblock Tier 2/3 scenarios in subsequent steps of the same phase.",
+  "phases": [
+    {
+      "id": "01",
+      "name": "Slice 01 — Real-iface XDP attach (veth, not lo)",
+      "description": "Lift Phase 2.1's xdp_pass from lo to a real veth0 pair inside Lima / ubuntu-latest. Lands S-2.2-01..03: real-veth attach + PACKET_COUNTER increment, structured generic-mode-fallback warning, typed IfaceNotFound error. No new BPF program or map; only iface-resolution + native-mode-default + structured-warning shape against a non-loopback driver. Implements ADR-0038 D8 (real-iface attach).",
+      "slice_ref": "docs/feature/phase-2-xdp-service-map/slices/slice-01-real-iface-attach.md",
+      "depends_on": [],
+      "parallel_with": [],
+      "effort_days": 1.0,
+      "acceptance": [
+        "S-2.2-01 Tier 3 — real veth pair attach + PACKET_COUNTER == 100 via bpftool map dump",
+        "S-2.2-02 Tier 3 — generic-mode fallback emits structured `xdp.attach.fallback_generic` warning",
+        "S-2.2-03 Tier 3 — missing iface returns DataplaneError::IfaceNotFound (no XDP loaded)"
+      ],
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "Land iface-name resolution + IfaceNotFound typed error",
+          "criteria": [
+            "Test compiles with #![cfg(feature = \"integration-tests\")] entrypoint, runs via cargo nextest run --features integration-tests (cargo xtask lima run -- on macOS) per .claude/rules/testing.md § Integration vs unit gating",
+            "DataplaneError::IfaceNotFound { iface } variant exists",
+            "nix::net::if_::if_nametoindex resolves names",
+            "integration test asserts typed error on non-existent iface"
+          ],
+          "description": "Replace the Phase 2.1 hardcoded-`lo` ifindex path with a name-based resolver in the EbpfDataplane loader. Adds the `IfaceNotFound { iface }` variant to `DataplaneError` (pass-through embedding rules) and routes resolution failures through it. Flips S-2.2-03 RED → GREEN.",
+          "scenario_ref": "S-2.2-03",
+          "scenario_name": "missing_iface_returns_typed_iface_not_found_error",
+          "test_file": "crates/overdrive-dataplane/tests/integration/veth_attach.rs",
+          "acceptance_criteria": [
+            "Test compiles with #![cfg(feature = \"integration-tests\")] entrypoint, runs via cargo nextest run --features integration-tests (cargo xtask lima run -- on macOS) per .claude/rules/testing.md § Integration vs unit gating",
+            "DataplaneError::IfaceNotFound { iface: String } variant exists in overdrive-dataplane errors",
+            "Loader uses if_nametoindex and converts ENODEV/ENOENT to IfaceNotFound",
+            "Integration test S-2.2-03 asserts the typed variant via matches!",
+            "No regression on Phase 2.1 lo-attach test"
+          ],
+          "implementation_scope": [
+            "crates/overdrive-dataplane/src/error.rs",
+            "crates/overdrive-dataplane/src/loader.rs",
+            "crates/overdrive-dataplane/tests/integration/veth_attach.rs"
+          ],
+          "effort_hours": 2,
+          "tier": 3,
+          "deps": [],
+          "risk": "low",
+          "mutation_target": "crates/overdrive-dataplane"
+        },
+        {
+          "id": "01-02",
+          "name": "Native-mode default + structured fallback warning",
+          "criteria": [
+            "Test compiles with #![cfg(feature = \"integration-tests\")] entrypoint, runs via cargo nextest run --features integration-tests (cargo xtask lima run -- on macOS) per .claude/rules/testing.md § Integration vs unit gating",
+            "Loader attempts native XdpFlags first",
+            "on failure logs tracing::warn! `xdp.attach.fallback_generic` with iface field",
+            "falls back to generic",
+            "integration test asserts log"
+          ],
+          "description": "Default `xdp.attach` to native flags. On EOPNOTSUPP / driver rejection emit a single structured `tracing::warn!` event named `xdp.attach.fallback_generic` carrying the iface name, then retry with generic flags. KPI K1 emission point. Flips S-2.2-02 RED → GREEN.",
+          "scenario_ref": "S-2.2-02",
+          "scenario_name": "native_attach_failure_logs_fallback_warning",
+          "test_file": "crates/overdrive-dataplane/tests/integration/veth_attach.rs",
+          "acceptance_criteria": [
+            "Test compiles with #![cfg(feature = \"integration-tests\")] entrypoint, runs via cargo nextest run --features integration-tests (cargo xtask lima run -- on macOS) per .claude/rules/testing.md § Integration vs unit gating",
+            "Loader tries native attach first, generic on documented fallback errors",
+            "Single structured warn event emitted with stable name + iface field",
+            "Test asserts warn captured via tracing-subscriber test layer",
+            "Zero silent fall-throughs (per Slice 01 KPI)"
+          ],
+          "implementation_scope": [
+            "crates/overdrive-dataplane/src/loader.rs",
+            "crates/overdrive-dataplane/tests/integration/veth_attach.rs"
+          ],
+          "effort_hours": 2,
+          "tier": 3,
+          "deps": [
+            "01-01"
+          ],
+          "risk": "low",
+          "mutation_target": "crates/overdrive-dataplane"
+        },
+        {
+          "id": "01-03",
+          "name": "Lift xdp_pass + PACKET_COUNTER to real veth pair",
+          "criteria": [
+            "Test compiles with #![cfg(feature = \"integration-tests\")] entrypoint, runs via cargo nextest run --features integration-tests (cargo xtask lima run -- on macOS) per .claude/rules/testing.md § Integration vs unit gating",
+            "Test creates veth0/veth1 via ip link, attaches xdp_pass to veth0, pushes 100 frames from veth1, asserts PACKET_COUNTER == 100 via bpftool map dump"
+          ],
+          "description": "Re-target Phase 2.1's xdp_pass + PACKET_COUNTER LruHashMap to a real veth pair. Adds veth-create/teardown helpers in `tests/integration/veth_attach.rs` (root-required; runs via `cargo xtask lima run --` on macOS). Flips starting scenario S-2.2-01 GREEN end-to-end and unblocks Slice 02.",
+          "scenario_ref": "S-2.2-01",
+          "scenario_name": "xdp_attaches_to_real_veth_and_packet_counter_increments",
+          "test_file": "crates/overdrive-dataplane/tests/integration/veth_attach.rs",
+          "acceptance_criteria": [
+            "Test compiles with #![cfg(feature = \"integration-tests\")] entrypoint, runs via cargo nextest run --features integration-tests (cargo xtask lima run -- on macOS) per .claude/rules/testing.md § Integration vs unit gating",
+            "veth pair helpers create/teardown idempotently with CAP_NET_ADMIN",
+            "100 ETH+IPv4 frames pushed from veth1 produce PACKET_COUNTER == 100",
+            "Counter read via real `bpftool map dump name PACKET_COUNTER`",
+            "Integration test gated `integration-tests` per .claude/rules/testing.md",
+            "Phase 2.1 lo-attach regression test still passes"
+          ],
+          "implementation_scope": [
+            "crates/overdrive-dataplane/tests/integration.rs",
+            "crates/overdrive-dataplane/tests/integration/veth_attach.rs",
+            "crates/overdrive-dataplane/tests/integration/helpers/veth.rs"
+          ],
+          "effort_hours": 4,
+          "tier": 3,
+          "deps": [
+            "01-01",
+            "01-02"
+          ],
+          "risk": "medium",
+          "risk_mitigation": "DISCUSS Risk #6 — lima-vs-CI parity; helpers bail on EPERM with skip-message; CI runs ubuntu-latest with sudo wrap",
+          "mutation_target": "crates/overdrive-dataplane"
+        }
+      ]
+    },
+    {
+      "id": "02",
+      "name": "Slice 02 — SERVICE_MAP forward path (single VIP)",
+      "description": "Land xdp_service_map_lookup with single-VIP BPF_MAP_TYPE_HASH lookup, DNAT rewrite, IP+L4 checksum recompute, XDP_TX. Graduate EbpfDataplane::update_service from Ok(()) stub to real single-entry insert/remove via typed ServiceMapHandle. Lands S-2.2-04..08. Migrate SimDataplane HashMap → BTreeMap (deterministic iteration prerequisite for slices 03–08). Implements ADR-0040 (three-map split foundation). Tier 3 phases (02–06) require cargo xtask bpf-build to produce target/xtask/bpf-objects/overdrive_bpf.o before integration tests link, per ADR-0038 § 4. The xtask infrastructure already triggers this, but contributors running --features integration-tests outside the xtask wrapper must invoke bpf-build first (cargo xtask lima run -- cargo xtask bpf-build on macOS).",
+      "slice_ref": "docs/feature/phase-2-xdp-service-map/slices/slice-02-service-map-single-vip.md",
+      "depends_on": [
+        "01"
+      ],
+      "parallel_with": [],
+      "effort_days": 1.0,
+      "acceptance": [
+        "S-2.2-04 Tier 2 — PROG_TEST_RUN: SERVICE_MAP hit returns XDP_TX with rewritten IP/port + valid checksums",
+        "S-2.2-05 Tier 2 — empty SERVICE_MAP returns XDP_PASS, no rewrite",
+        "S-2.2-06 Tier 3 — 10 TCP SYNs forwarded end-to-end across veth (tcpdump capture)",
+        "S-2.2-07 Tier 4 — veristat baseline recorded under perf-baseline/main/verifier-budget/, ≤ 50% of 1M ceiling",
+        "S-2.2-08 Tier 2 — truncated IPv4 (10-byte header) returns XDP_PASS, no crash, no SERVICE_MAP lookup"
+      ],
+      "steps": [
+        {
+          "id": "02-01",
+          "name": "ServiceVip + ServiceId newtypes; SimDataplane BTreeMap migration",
+          "criteria": [
+            "ServiceVip and ServiceId STRICT newtypes in overdrive-core (FromStr/Display/serde/rkyv/proptest)",
+            "SimDataplane internal HashMap → BTreeMap",
+            "deterministic-iteration property test passes"
+          ],
+          "description": "Add the two STRICT newtypes Slice 02 references (case-insensitive parse, structured ParseError, rkyv archive roundtrip proptest, FromStr/Display match, serde matches FromStr). Migrate SimDataplane's service-table HashMap to BTreeMap so iteration order is deterministic across DST seeds — prerequisite for every later slice's invariants. Per development.md § Ordered-collection choice.",
+          "scenario_ref": "S-2.2-04",
+          "scenario_name": "service_vip_and_service_id_newtype_completeness",
+          "test_file": "crates/overdrive-core/tests/newtype_roundtrip.rs",
+          "acceptance_criteria": [
+            "ServiceVip parses host:port:proto canonical form, lowercase Display",
+            "ServiceId parses opaque string ID, structured ParseError on invalid",
+            "Both pass FromStr/Display/serde/rkyv proptest roundtrips",
+            "SimDataplane services field is BTreeMap<ServiceId, ServiceEntry>",
+            "Deterministic iteration test holds across 1024 proptest seeds"
+          ],
+          "implementation_scope": [
+            "crates/overdrive-core/src/identity.rs",
+            "crates/overdrive-core/tests/newtype_roundtrip.rs",
+            "crates/overdrive-sim/src/adapters/dataplane.rs"
+          ],
+          "effort_hours": 3,
+          "tier": 1,
+          "deps": [],
+          "risk": "low",
+          "mutation_target": "crates/overdrive-core"
+        },
+        {
+          "id": "02-02",
+          "name": "ServiceMapHandle typed wrapper + EbpfDataplane::update_service body",
+          "criteria": [
+            "ServiceMapHandle wraps aya HashMap",
+            "exposes only insert(ServiceVip, Backend) / remove(ServiceVip)",
+            "update_service performs single-entry insert/remove for a single VIP",
+            "Tier 1 unit test covers handle round-trip"
+          ],
+          "description": "Replace the raw `aya::maps::HashMap` call site with a typed `ServiceMapHandle` newtype in overdrive-dataplane. Constructor accepts host-endian inputs, converts to network-endian on write (architecture.md §11 endianness lockstep). Graduate `EbpfDataplane::update_service` from `Ok(())` no-op to a real single-entry insert/remove against the handle. Sets up Slice 03's atomic-swap step.",
+          "scenario_ref": "S-2.2-04",
+          "scenario_name": "service_map_handle_endianness_roundtrip",
+          "test_file": "crates/overdrive-dataplane/src/maps/service_map_handle.rs",
+          "acceptance_criteria": [
+            "ServiceMapHandle exposes insert/remove only — raw HashMap not visible at call site",
+            "Userspace writes host-endian; bytes on the map are network-endian",
+            "Userspace proptest round-trips host-order writes against host-order reads",
+            "EbpfDataplane::update_service inserts/removes in real BPF map (Tier 3 confirms)"
+          ],
+          "implementation_scope": [
+            "crates/overdrive-dataplane/src/maps/mod.rs",
+            "crates/overdrive-dataplane/src/maps/service_map_handle.rs",
+            "crates/overdrive-dataplane/src/dataplane.rs"
+          ],
+          "effort_hours": 4,
+          "tier": 1,
+          "deps": [
+            "02-01"
+          ],
+          "risk": "medium",
+          "risk_mitigation": "DISCUSS Risk #4 — endianness mismatch caught by proptest at userspace boundary; Tier 2 + Tier 3 lockstep follows in steps 02-03 / 02-04",
+          "mutation_target": "crates/overdrive-dataplane"
+        },
+        {
+          "id": "02-03",
+          "name": "xdp_service_map_lookup program + PROG_TEST_RUN triptych",
+          "criteria": [
+            "Test compiles with #![cfg(feature = \"integration-tests\")] entrypoint, runs via cargo nextest run --features integration-tests (cargo xtask lima run -- on macOS) per .claude/rules/testing.md § Integration vs unit gating",
+            "xdp_service_map_lookup parses ETH/IPv4/TCP/UDP, looks up ServiceKey in SERVICE_MAP, rewrites dest IP+port on hit (XDP_TX) or returns XDP_PASS",
+            "PKTGEN/SETUP/CHECK Tier 2 covers hit + miss + truncated frame"
+          ],
+          "description": "Land the kernel-side XDP program in `crates/overdrive-bpf/src/programs/service_map.rs` per ADR-0040. Recompute IP and L4 checksums via `bpf_l3_csum_replace` / `bpf_l4_csum_replace`. Tier 2 triptych asserts hit returns XDP_TX with rewritten headers, miss returns XDP_PASS, truncated frame returns XDP_PASS without crash. Flips S-2.2-04, S-2.2-05, S-2.2-08 GREEN.",
+          "scenario_ref": "S-2.2-04",
+          "scenario_name": "service_map_hit_returns_xdp_tx_with_rewritten_headers",
+          "test_file": "crates/overdrive-bpf/tests/integration/xdp_service_map_lookup.rs",
+          "acceptance_criteria": [
+            "Test compiles with #![cfg(feature = \"integration-tests\")] entrypoint, runs via cargo nextest run --features integration-tests (cargo xtask lima run -- on macOS) per .claude/rules/testing.md § Integration vs unit gating",
+            "Hit case: action XDP_TX, dest IP/port rewritten, checksums valid",
+            "Miss case: action XDP_PASS, no rewrite",
+            "Truncated IPv4 case: action XDP_PASS, no crash, no SERVICE_MAP lookup",
+            "Tier 2 PROG_TEST_RUN map state cleared between sub-tests by default",
+            "verifier accepts the program on each kernel in the matrix"
+          ],
+          "implementation_scope": [
+            "crates/overdrive-bpf/src/programs/service_map.rs",
+            "crates/overdrive-bpf/src/maps.rs",
+            "crates/overdrive-bpf/tests/integration/xdp_service_map_lookup.rs"
+          ],
+          "effort_hours": 5,
+          "tier": 2,
+          "deps": [
+            "02-02"
+          ],
+          "risk": "medium",
+          "risk_mitigation": "DISCUSS Risk #1 — verifier complexity quantified in 02-05 baseline; ADR-0040 chooses bpf_*_csum_replace to keep verifier walks tight",
+          "mutation_target": "crates/overdrive-bpf"
+        },
+        {
+          "id": "02-04",
+          "name": "Tier 3 veth forwarding test (10 TCP SYNs)",
+          "criteria": [
+            "Test compiles with #![cfg(feature = \"integration-tests\")] entrypoint, runs via cargo nextest run --features integration-tests (cargo xtask lima run -- on macOS) per .claude/rules/testing.md § Integration vs unit gating",
+            "Tier 3 test attaches xdp_service_map_lookup to veth0, populates SERVICE_MAP via update_service, sends 10 TCP SYNs to VIP, captures via tcpdump, asserts every frame leaves veth1 with rewritten dest + valid checksums"
+          ],
+          "description": "End-to-end veth integration test that proves the kernel-loaded program forwards real packets. Uses pnet to craft TCP SYNs and tokio-tun to drive them. tcpdump capture validates wire-side rewrite. Flips S-2.2-06 GREEN.",
+          "scenario_ref": "S-2.2-06",
+          "scenario_name": "ten_tcp_syns_to_vip_are_rewritten_and_forwarded_via_veth",
+          "test_file": "crates/overdrive-dataplane/tests/integration/service_map_forward.rs",
+          "acceptance_criteria": [
+            "Test compiles with #![cfg(feature = \"integration-tests\")] entrypoint, runs via cargo nextest run --features integration-tests (cargo xtask lima run -- on macOS) per .claude/rules/testing.md § Integration vs unit gating",
+            "10/10 frames leave veth1 with dest 10.1.0.5:9000",
+            "IP and TCP checksums validate against scapy/pnet recomputation",
+            "All 10 returned actions are XDP_TX",
+            "Test runs via `cargo xtask lima run --` on macOS"
+          ],
+          "implementation_scope": [
+            "crates/overdrive-dataplane/tests/integration/service_map_forward.rs",
+            "crates/overdrive-dataplane/tests/integration/helpers/packets.rs"
+          ],
+          "effort_hours": 4,
+          "tier": 3,
+          "deps": [
+            "02-03"
+          ],
+          "risk": "low",
+          "mutation_target": "crates/overdrive-dataplane"
+        },
+        {
+          "id": "02-05",
+          "name": "Record veristat baseline for xdp_service_map_lookup",
+          "criteria": [
+            "perf-baseline/main/verifier-budget/veristat-service-map.txt records instruction count for compiled xdp_service_map_lookup.o",
+            "count ≤ 50% of 1M-privileged ceiling",
+            "checked into repo"
+          ],
+          "description": "Run veristat against the compiled program and persist the baseline file under `perf-baseline/main/verifier-budget/`. KPI K7 first emission point. Slice 07's gate enforces deltas against this; the file IS the assertion. No xtask wiring yet — that lands in Phase 7.",
+          "scenario_ref": "S-2.2-07",
+          "scenario_name": "verifier_accepts_service_map_program_baseline_recorded",
+          "test_file": "perf-baseline/main/verifier-budget/veristat-service-map.txt",
+          "acceptance_criteria": [
+            "Baseline file committed under perf-baseline/main/verifier-budget/",
+            "Recorded instruction count ≤ 500_000 (50% of ceiling)",
+            "veristat output format matches Slice 07 gate parser shape",
+            "Baseline-update commit message documents the kernel + commit SHA"
+          ],
+          "implementation_scope": [
+            "perf-baseline/main/verifier-budget/veristat-service-map.txt"
+          ],
+          "effort_hours": 2,
+          "tier": 4,
+          "deps": [
+            "02-03"
+          ],
+          "risk": "low",
+          "mutation_target": "skip-rationale: baseline file is a generated artifact with no operator sites; mutants empty-filter is a vacuous pass"
+        }
+      ]
+    },
+    {
+      "id": "03",
+      "name": "Slice 03 — HASH_OF_MAPS atomic per-service backend swap",
+      "description": "Restructure SERVICE_MAP from BPF_MAP_TYPE_HASH to BPF_MAP_TYPE_HASH_OF_MAPS (outer ServiceId, inner ARRAY of BackendId, inner size 256 per ADR-0040 Q5=A). Add flat BACKEND_MAP keyed by BackendId. Implement EbpfDataplane::update_service 5-step atomic swap with single 64-bit pointer update + orphan GC. Lands S-2.2-09..11. Random-slot lookup is intentional simplicity — Slice 04 replaces it with Maglev. Implements ADR-0040 (HASH_OF_MAPS atomic swap + checksum + DropClass split).",
+      "slice_ref": "docs/feature/phase-2-xdp-service-map/slices/slice-03-hash-of-maps-atomic-swap.md",
+      "depends_on": [
+        "02"
+      ],
+      "parallel_with": [],
+      "effort_days": 1.0,
+      "acceptance": [
+        "S-2.2-09 Tier 3 — atomic swap under 50 kpps (CI) / 100 kpps (Lima) drops zero packets; post-swap distribution within ±10% even",
+        "S-2.2-10 Tier 3 — removing a backend purges orphaned BACKEND_MAP entries after GC pass",
+        "S-2.2-11 Tier 3 — kernel-rejected inner-map allocation surfaces DataplaneError::MapAllocFailed; existing inner map preserved"
+      ],
+      "steps": [
+        {
+          "id": "03-01",
+          "name": "BackendId newtype + BACKEND_MAP + DST atomic-swap invariant",
+          "criteria": [
+            "BackendId STRICT newtype in overdrive-core",
+            "BACKEND_MAP declared as BPF_MAP_TYPE_HASH",
+            "SimDataplane mirrors atomic swap (single mutex, BTreeMap reassignment)",
+            "BackendSetSwapAtomic invariant in overdrive-sim::invariants always holds"
+          ],
+          "description": "Add BackendId newtype (FromStr/Display/serde/rkyv/proptest). Declare BACKEND_MAP in overdrive-bpf. Mirror the swap shape in SimDataplane as a single mutex acquisition wrapping a `BTreeMap` reassignment so DST replay matches production. Add the BackendSetSwapAtomic always-invariant to overdrive-sim::invariants and wire into Invariant::ALL.",
+          "scenario_ref": "S-2.2-09",
+          "scenario_name": "backend_set_swap_atomic_always_invariant",
+          "test_file": "crates/overdrive-sim/src/invariants/backend_set_swap_atomic.rs",
+          "acceptance_criteria": [
+            "BackendId newtype completeness covered by proptest",
+            "BACKEND_MAP declared with key BackendId, value Backend { ip, port, weight, flags }",
+            "SimDataplane::update_service performs one BTreeMap reassignment under one mutex",
+            "BackendSetSwapAtomic invariant: every observation sees pre- or post-swap, never mixed",
+            "Invariant added to overdrive-sim::invariants::Invariant::ALL"
+          ],
+          "implementation_scope": [
+            "crates/overdrive-core/src/identity.rs",
+            "crates/overdrive-bpf/src/maps.rs",
+            "crates/overdrive-sim/src/adapters/dataplane.rs",
+            "crates/overdrive-sim/src/invariants/backend_set_swap_atomic.rs",
+            "crates/overdrive-sim/src/invariants/mod.rs"
+          ],
+          "effort_hours": 4,
+          "tier": 1,
+          "deps": [],
+          "risk": "low",
+          "mutation_target": "crates/overdrive-sim"
+        },
+        {
+          "id": "03-02",
+          "name": "HASH_OF_MAPS restructure + EbpfDataplane 5-step atomic swap",
+          "criteria": [
+            "Test compiles with #![cfg(feature = \"integration-tests\")] entrypoint, runs via cargo nextest run --features integration-tests (cargo xtask lima run -- on macOS) per .claude/rules/testing.md § Integration vs unit gating",
+            "SERVICE_MAP restructured to BPF_MAP_TYPE_HASH_OF_MAPS (inner ARRAY size 256)",
+            "update_service implements 5-step swap (BACKEND_MAP upsert → fresh inner → outer pointer update → orphan GC → release)",
+            "MapAllocFailed surfaced on kernel rejection",
+            "existing inner map preserved on failure"
+          ],
+          "description": "Restructure SERVICE_MAP per Cilium reference (research §2.1, §3.3). Implement the 5-step atomic swap in EbpfDataplane::update_service. Step 3 is the load-bearing single 64-bit pointer update. On kernel rejection of inner-map alloc (ENOMEM/EPERM) return DataplaneError::MapAllocFailed and leave the existing inner map untouched. Flips S-2.2-11 GREEN.",
+          "scenario_ref": "S-2.2-11",
+          "scenario_name": "kernel_rejects_inner_map_alloc_existing_mapping_preserved",
+          "test_file": "crates/overdrive-dataplane/tests/integration/atomic_swap.rs",
+          "acceptance_criteria": [
+            "Test compiles with #![cfg(feature = \"integration-tests\")] entrypoint, runs via cargo nextest run --features integration-tests (cargo xtask lima run -- on macOS) per .claude/rules/testing.md § Integration vs unit gating",
+            "SERVICE_MAP outer = HASH_OF_MAPS keyed by ServiceId, inner = ARRAY of BackendId size 256",
+            "update_service performs 5 steps in order; step 3 is a single bpf_map_update_elem",
+            "Inner-map alloc failure returns DataplaneError::MapAllocFailed",
+            "Pre-existing inner map unchanged on failure",
+            "Tier 3 confirms via subsequent traffic still forwarding to old set"
+          ],
+          "implementation_scope": [
+            "crates/overdrive-bpf/src/maps.rs",
+            "crates/overdrive-bpf/src/programs/service_map.rs",
+            "crates/overdrive-dataplane/src/dataplane.rs",
+            "crates/overdrive-dataplane/src/maps/service_map_handle.rs",
+            "crates/overdrive-dataplane/tests/integration/atomic_swap.rs"
+          ],
+          "effort_hours": 5,
+          "tier": 3,
+          "deps": [
+            "03-01"
+          ],
+          "risk": "high",
+          "risk_mitigation": "DISCUSS Risk #1 / #5 — verifier complexity for HASH_OF_MAPS NULL-check; ADR-0040 mandates inner-pointer NULL-check after lookup; xtask verifier-regress at 02-05 catches regressions early",
+          "mutation_target": "crates/overdrive-dataplane"
+        },
+        {
+          "id": "03-03",
+          "name": "Zero-drop atomic-swap test + BACKEND_MAP orphan GC",
+          "criteria": [
+            "Test compiles with #![cfg(feature = \"integration-tests\")] entrypoint, runs via cargo nextest run --features integration-tests (cargo xtask lima run -- on macOS) per .claude/rules/testing.md § Integration vs unit gating",
+            "Tier 3 atomic_swap test: xdp-trafficgen at 50 kpps (CI) / 100 kpps (Lima) sustains 5s",
+            "trigger backend-set swap from {B1} to {B1,B2,B3}",
+            "assert send count == receive count (zero drops)",
+            "post-swap distribution ±10% even",
+            "subsequent test: removing B3 + GC pass leaves no orphan in BACKEND_MAP"
+          ],
+          "description": "Drives the slice's K3 KPI: zero-drop atomic swap. Measurement source is xdp-trafficgen send count vs sink receive count (DROP_COUNTER lands in Slice 06). Companion GC test asserts that BACKEND_MAP carries no IDs unreferenced by any service after a removal+GC pass. Flips S-2.2-09, S-2.2-10 GREEN.",
+          "scenario_ref": "S-2.2-09",
+          "scenario_name": "atomic_swap_under_50kpps_traffic_drops_zero_packets",
+          "test_file": "crates/overdrive-dataplane/tests/integration/atomic_swap.rs",
+          "acceptance_criteria": [
+            "Test compiles with #![cfg(feature = \"integration-tests\")] entrypoint, runs via cargo nextest run --features integration-tests (cargo xtask lima run -- on macOS) per .claude/rules/testing.md § Integration vs unit gating",
+            "Zero packet drops across the swap window at sustained kpps",
+            "Post-swap backend distribution within ±10% even (random-slot baseline; Slice 04 tightens with Maglev)",
+            "BACKEND_MAP orphan GC removes IDs with no service reference",
+            "Tier 3 test covers both swap and GC paths via fixture"
+          ],
+          "implementation_scope": [
+            "crates/overdrive-dataplane/src/dataplane.rs",
+            "crates/overdrive-dataplane/tests/integration/atomic_swap.rs"
+          ],
+          "effort_hours": 4,
+          "tier": 3,
+          "deps": [
+            "03-02"
+          ],
+          "risk": "medium",
+          "risk_mitigation": "DISCUSS Risk #3 — kpps ceiling on ubuntu-latest; gate at send-count==receive-count rather than absolute pps; Lima dev box runs higher rate as confirmation",
+          "mutation_target": "crates/overdrive-dataplane"
+        }
+      ]
+    },
+    {
+      "id": "04",
+      "name": "Slice 04 — Weighted Maglev consistent hashing",
+      "description": "Replace Slice 03's random slot selection with Maglev consistent hashing inside MAGLEV_MAP (HASH_OF_MAPS, inner ARRAY size M=16381 per ADR-0041 Q6=A). MaglevTableSize STRICT newtype constrained to Cilium prime list. Pure userspace `maglev::generate(BTreeMap<BackendId,Weight>, MaglevTableSize) → Vec<BackendId>` ships with weighted Eisenbud permutation (multiplicity ∝ weight). XDP lookup chain switches to MAGLEV_MAP-indexed. Lands S-2.2-12..16. Implements ADR-0041 (weighted Maglev + endianness lockstep).",
+      "slice_ref": "docs/feature/phase-2-xdp-service-map/slices/slice-04-maglev-consistent-hashing.md",
+      "depends_on": [
+        "03"
+      ],
+      "parallel_with": [],
+      "effort_days": 1.5,
+      "acceptance": [
+        "S-2.2-12 Tier 1 proptest — maglev::generate is deterministic across 1024 seeds (bit-identical)",
+        "S-2.2-13 Tier 1 proptest — single-backend removal among 100 shifts ≤ 2% of 100k flows (1% forced + ≤1% incidental)",
+        "S-2.2-14 Tier 4 — verifier accepts post-Maglev program; instruction count ≤ 50% of 1M ceiling; baseline updated",
+        "S-2.2-15 Tier 1 proptest — ±5% even distribution under equal weights",
+        "S-2.2-16 Tier 1 proptest — ±2% honoring of declared weights under skewed weights"
+      ],
+      "steps": [
+        {
+          "id": "04-01",
+          "name": "MaglevTableSize newtype constrained to Cilium prime list",
+          "criteria": [
+            "MaglevTableSize STRICT newtype in overdrive-core",
+            "FromStr accepts only {251,509,1021,2039,4093,8191,16381,32749,65521,131071}",
+            "structured ParseError on others",
+            "full Display/serde/rkyv/proptest roundtrip"
+          ],
+          "description": "STRICT newtype that makes invalid M values unrepresentable. FromStr/TryFrom<u32> reject any value not in the Cilium prime list with a structured `ParseError::InvalidMaglevTableSize { provided, allowed }` variant. Default constant `MaglevTableSize::DEFAULT_16381`. Per development.md § Newtypes — STRICT by default.",
+          "scenario_ref": "S-2.2-12",
+          "scenario_name": "maglev_table_size_newtype_completeness",
+          "test_file": "crates/overdrive-core/tests/newtype_roundtrip.rs",
+          "acceptance_criteria": [
+            "FromStr rejects 17 (composite) and 13 (not in list) with structured ParseError",
+            "FromStr accepts every prime in the Cilium list (case-insensitive)",
+            "Display/FromStr/serde/rkyv roundtrip proptest passes 1024 cases",
+            "DEFAULT_16381 constant exposed for the M=16381 default"
+          ],
+          "implementation_scope": [
+            "crates/overdrive-core/src/identity.rs",
+            "crates/overdrive-core/tests/newtype_roundtrip.rs"
+          ],
+          "effort_hours": 2,
+          "tier": 1,
+          "deps": [],
+          "risk": "low",
+          "mutation_target": "crates/overdrive-core"
+        },
+        {
+          "id": "04-02",
+          "name": "Pure maglev::generate (Eisenbud permutation, weighted multiplicity)",
+          "criteria": [
+            "Pure sync `maglev::generate(&BTreeMap<BackendId, Weight>, MaglevTableSize) -> Vec<BackendId>` ships in overdrive-dataplane",
+            "bit-identical across runs given same inputs",
+            "weighted variant expands per-backend slot multiplicity proportional to weight",
+            "saturating arithmetic on overflow"
+          ],
+          "description": "Userspace pure function implementing Eisenbud's NSDI 2016 Maglev permutation algorithm with weighted multiplicity expansion. BTreeMap input ordering keeps output deterministic across nodes (per development.md § Ordered-collection choice). Saturating arithmetic on weight × multiplicity. Flips S-2.2-12 GREEN as Tier 1 proptest.",
+          "scenario_ref": "S-2.2-12",
+          "scenario_name": "maglev_generate_is_deterministic_under_seeded_inputs",
+          "test_file": "crates/overdrive-sim/tests/integration/maglev_churn.rs",
+          "acceptance_criteria": [
+            "Two successive calls with identical inputs return bit-identical Vec<BackendId>",
+            "Equal weights produce ±5% even distribution across M slots",
+            "Skewed weights honored within ±2% of declared distribution",
+            "Saturating arithmetic on overflow boundary (proptest covers boundary)",
+            "Pure sync function: no I/O, no global state, no Instant::now"
+          ],
+          "implementation_scope": [
+            "crates/overdrive-dataplane/src/maglev.rs",
+            "crates/overdrive-sim/tests/integration/maglev_churn.rs"
+          ],
+          "effort_hours": 5,
+          "tier": 1,
+          "deps": [
+            "04-01"
+          ],
+          "risk": "medium",
+          "risk_mitigation": "DISCUSS Risk #2 — weighted-Maglev component count; ADR-0041 cites Eisenbud reference impl as the precedent",
+          "mutation_target": "crates/overdrive-dataplane"
+        },
+        {
+          "id": "04-03",
+          "name": "Disruption-bound proptest (≤2% on N=100, M=16381)",
+          "criteria": [
+            "Tier 1 proptest: any seeded set of 100 equally-weighted backends + 100k 5-tuple flows",
+            "remove one backend",
+            "assert ≤2% total flow shift (1% forced + ≤1% incidental per Maglev's published bound)"
+          ],
+          "description": "Property test asserting Maglev's disruption bound — the structural reason consistent hashing matters for canary deployments. Uses seeded Entropy per development.md § Port-trait dependencies. Flips S-2.2-13 GREEN.",
+          "scenario_ref": "S-2.2-13",
+          "scenario_name": "single_backend_removal_shifts_at_most_two_percent_of_flows",
+          "test_file": "crates/overdrive-sim/tests/integration/maglev_churn.rs",
+          "acceptance_criteria": [
+            "≤1% incidental shift on flows that were NOT on the evicted backend",
+            "1% forced shift on flows that WERE on the evicted backend",
+            "Total ≤2% across 100k-flow population",
+            "Property holds across 1024 proptest seeds",
+            "DST invariant MaglevDistributionEven added to Invariant::ALL"
+          ],
+          "implementation_scope": [
+            "crates/overdrive-sim/src/invariants/maglev_distribution.rs",
+            "crates/overdrive-sim/src/invariants/mod.rs",
+            "crates/overdrive-sim/tests/integration/maglev_churn.rs"
+          ],
+          "effort_hours": 3,
+          "tier": 1,
+          "deps": [
+            "04-02"
+          ],
+          "risk": "low",
+          "mutation_target": "crates/overdrive-sim"
+        },
+        {
+          "id": "04-04",
+          "name": "MAGLEV_MAP + XDP lookup switch to MAGLEV_MAP-indexed",
+          "criteria": [
+            "Test compiles with #![cfg(feature = \"integration-tests\")] entrypoint, runs via cargo nextest run --features integration-tests (cargo xtask lima run -- on macOS) per .claude/rules/testing.md § Integration vs unit gating",
+            "MAGLEV_MAP declared as BPF_MAP_TYPE_HASH_OF_MAPS (inner ARRAY size 16381)",
+            "XDP program lookup chain: hash 5-tuple → modulo M → MAGLEV_MAP lookup → BackendId → BACKEND_MAP → backend address → DNAT rewrite + XDP_TX",
+            "EbpfDataplane::update_service regenerates Maglev table on every backend-set change and swaps via Slice 03's 5-step shape"
+          ],
+          "description": "Replace Slice 03's random-slot lookup with MAGLEV_MAP-indexed lookup in the kernel program. Userspace regenerates the Maglev permutation on every backend-set change and writes the inner ARRAY before the atomic outer-pointer swap. Maglev table generation is a userspace concern; the kernel program does only the lookup.",
+          "scenario_ref": "S-2.2-15",
+          "scenario_name": "maglev_real_distribution_under_xdp_trafficgen",
+          "test_file": "crates/overdrive-dataplane/tests/integration/maglev_real.rs",
+          "acceptance_criteria": [
+            "Test compiles with #![cfg(feature = \"integration-tests\")] entrypoint, runs via cargo nextest run --features integration-tests (cargo xtask lima run -- on macOS) per .claude/rules/testing.md § Integration vs unit gating",
+            "MAGLEV_MAP declared with inner ARRAY size 16381 (default)",
+            "XDP program switches from random slot to MAGLEV_MAP indexing",
+            "update_service regenerates Maglev table; Slice 03 5-step swap unchanged",
+            "Tier 3 confirmation: real xdp-trafficgen distribution holds within ±5%"
+          ],
+          "implementation_scope": [
+            "crates/overdrive-bpf/src/maps.rs",
+            "crates/overdrive-bpf/src/programs/service_map.rs",
+            "crates/overdrive-dataplane/src/dataplane.rs",
+            "crates/overdrive-dataplane/src/maps/maglev_map_handle.rs",
+            "crates/overdrive-dataplane/tests/integration/maglev_real.rs"
+          ],
+          "effort_hours": 5,
+          "tier": 3,
+          "deps": [
+            "04-02",
+            "04-03"
+          ],
+          "risk": "high",
+          "risk_mitigation": "DISCUSS Risk #1 / #2 — verifier complexity for MAGLEV_MAP lookup; veristat baseline update in 04-05 quantifies it; rollback path is reverting to Slice 03's random-slot",
+          "mutation_target": "crates/overdrive-dataplane"
+        },
+        {
+          "id": "04-05",
+          "name": "Update veristat baseline for post-Maglev program",
+          "criteria": [
+            "perf-baseline/main/verifier-budget/veristat-service-map.txt updated post-Maglev",
+            "instruction count ≤ 50% of 1M ceiling",
+            "commit message documents kernel + commit SHA + delta vs Slice 02 baseline"
+          ],
+          "description": "Re-record the veristat baseline so Slice 07's gate enforces against the post-Maglev shape. Closes the slice's K7 KPI. Flips S-2.2-14 GREEN.",
+          "scenario_ref": "S-2.2-14",
+          "scenario_name": "verifier_accepts_maglev_program_baseline_updated",
+          "test_file": "perf-baseline/main/verifier-budget/veristat-service-map.txt",
+          "acceptance_criteria": [
+            "Updated baseline file committed",
+            "Instruction count ≤ 500_000 (50% of ceiling)",
+            "Commit message documents kernel version, commit SHA, delta vs Slice 02",
+            "Companion DST invariant MaglevDeterministic added to Invariant::ALL"
+          ],
+          "implementation_scope": [
+            "perf-baseline/main/verifier-budget/veristat-service-map.txt",
+            "crates/overdrive-sim/src/invariants/maglev_deterministic.rs",
+            "crates/overdrive-sim/src/invariants/mod.rs"
+          ],
+          "effort_hours": 2,
+          "tier": 4,
+          "deps": [
+            "04-04"
+          ],
+          "risk": "low",
+          "mutation_target": "crates/overdrive-sim"
+        }
+      ]
+    },
+    {
+      "id": "05",
+      "name": "Slice 05 — REVERSE_NAT (TC egress + endianness lockstep)",
+      "description": "Add REVERSE_NAT_MAP (HASH, key BackendKey {ip,port,proto}, value Vip) — third map of the Cilium three-map split. Land tc_reverse_nat TC-egress program (ADR-0041 Q2=A: TC egress over XDP egress) that rewrites source IP/port back to VIP on response packets. EbpfDataplane::update_service writes/removes REVERSE_NAT entries in lockstep with service-backend changes. Lands S-2.2-17..20. Parallel-able with Slice 06. Implements ADR-0041 (TC egress + endianness lockstep + REVERSE_NAT).",
+      "slice_ref": "docs/feature/phase-2-xdp-service-map/slices/slice-05-reverse-nat.md",
+      "depends_on": [
+        "02"
+      ],
+      "parallel_with": [
+        "06"
+      ],
+      "effort_days": 1.0,
+      "acceptance": [
+        "S-2.2-17 Tier 3 — real `nc -l 9000` ↔ `nc 10.0.0.1 8080` TCP connection completes 3-way handshake + payload echo",
+        "S-2.2-18 Tier 2 — PROG_TEST_RUN: tc_reverse_nat hit rewrites source to VIP with valid checksums",
+        "S-2.2-19 Tier 2 + Tier 1 proptest — wire-order packet produces host-order ReverseKey matching userspace seed",
+        "S-2.2-20 Tier 3 — removed backend's REVERSE_NAT entry purged; late response treated as non-LB (no rewrite)"
+      ],
+      "steps": [
+        {
+          "id": "05-01",
+          "name": "REVERSE_NAT_MAP + ReverseNatLockstep DST invariant",
+          "criteria": [
+            "REVERSE_NAT_MAP declared as BPF_MAP_TYPE_HASH (key BackendKey, value Vip)",
+            "SimDataplane mirrors map",
+            "ReverseNatLockstep always-invariant: every forward-path SERVICE_MAP entry has matching REVERSE_NAT entry",
+            "removing a backend purges both"
+          ],
+          "description": "Add the third map and the lockstep DST invariant. Lockstep rule: update_service writes/removes REVERSE_NAT entries atomically with SERVICE_MAP changes. Sim mirror is a BTreeMap keyed by BackendKey with the lockstep enforced inside the same mutex acquisition that wraps SERVICE_MAP updates.",
+          "scenario_ref": "S-2.2-20",
+          "scenario_name": "reverse_nat_lockstep_always_invariant",
+          "test_file": "crates/overdrive-sim/src/invariants/reverse_nat_lockstep.rs",
+          "acceptance_criteria": [
+            "REVERSE_NAT_MAP declared in overdrive-bpf",
+            "BackendKey newtype completeness (ip + port + proto, host-endian)",
+            "ReverseNatLockstep invariant always holds across DST seeds",
+            "Sim writes/removes REVERSE_NAT in lockstep with SERVICE_MAP under one mutex",
+            "Invariant added to Invariant::ALL"
+          ],
+          "implementation_scope": [
+            "crates/overdrive-core/src/identity.rs",
+            "crates/overdrive-bpf/src/maps.rs",
+            "crates/overdrive-sim/src/adapters/dataplane.rs",
+            "crates/overdrive-sim/src/invariants/reverse_nat_lockstep.rs",
+            "crates/overdrive-sim/src/invariants/mod.rs"
+          ],
+          "effort_hours": 3,
+          "tier": 1,
+          "deps": [],
+          "risk": "low",
+          "mutation_target": "crates/overdrive-sim"
+        },
+        {
+          "id": "05-02",
+          "name": "tc_reverse_nat TC-egress program + PROG_TEST_RUN triptych",
+          "criteria": [
+            "Test compiles with #![cfg(feature = \"integration-tests\")] entrypoint, runs via cargo nextest run --features integration-tests (cargo xtask lima run -- on macOS) per .claude/rules/testing.md § Integration vs unit gating",
+            "tc_reverse_nat program at crates/overdrive-bpf/src/programs/reverse_nat.rs",
+            "parses ETH/IPv4/TCP|UDP, looks up BackendKey in REVERSE_NAT_MAP, rewrites source IP/port to VIP on hit (TC_ACT_OK), passes on miss",
+            "PKTGEN/SETUP/CHECK Tier 2 covers hit case"
+          ],
+          "description": "TC-egress hook (ADR-0041 Q2=A) rather than XDP egress — BPF_PROG_TEST_RUN supports TC programs. Recompute IP/L4 checksums via bpf_l3/l4_csum_replace. Flips S-2.2-18 GREEN.",
+          "scenario_ref": "S-2.2-18",
+          "scenario_name": "reverse_nat_lookup_hit_rewrites_source_to_vip",
+          "test_file": "crates/overdrive-bpf/tests/integration/tc_reverse_nat.rs",
+          "acceptance_criteria": [
+            "Test compiles with #![cfg(feature = \"integration-tests\")] entrypoint, runs via cargo nextest run --features integration-tests (cargo xtask lima run -- on macOS) per .claude/rules/testing.md § Integration vs unit gating",
+            "TC egress program parses ETH+IPv4+TCP|UDP",
+            "Hit: TC_ACT_OK, source rewritten to VIP, checksums valid",
+            "Miss: TC_ACT_OK, no rewrite (non-LB pass-through)",
+            "Tier 2 PROG_TEST_RUN covers both branches"
+          ],
+          "implementation_scope": [
+            "crates/overdrive-bpf/src/programs/reverse_nat.rs",
+            "crates/overdrive-bpf/tests/integration/tc_reverse_nat.rs"
+          ],
+          "effort_hours": 5,
+          "tier": 2,
+          "deps": [
+            "05-01"
+          ],
+          "risk": "medium",
+          "risk_mitigation": "DISCUSS Risk #4 — endianness lockstep at TC boundary; addressed by 05-03's wire-order proptest",
+          "mutation_target": "crates/overdrive-bpf"
+        },
+        {
+          "id": "05-03",
+          "name": "Endianness-lockstep wire-order ↔ host-order ReverseKey proptest",
+          "criteria": [
+            "Test compiles with #![cfg(feature = \"integration-tests\")] entrypoint, runs via cargo nextest run --features integration-tests (cargo xtask lima run -- on macOS) per .claude/rules/testing.md § Integration vs unit gating",
+            "Tier 2 + userspace proptest: synthetic IPv4+TCP packet with known wire-order bytes through reverse_key_from_packet produces host-order ReverseKey matching userspace seed",
+            "userspace proptest round-trips host-order writes against host-order reads (no userspace endian flip)"
+          ],
+          "description": "Closes architecture.md §11 endianness lockstep guarantee. Two-sided test: kernel-side reverse_key_from_packet helper + userspace ReverseNatMapHandle that writes/reads host-endian. Flips S-2.2-19 GREEN.",
+          "scenario_ref": "S-2.2-19",
+          "scenario_name": "wire_order_packet_produces_host_order_reverse_key",
+          "test_file": "crates/overdrive-bpf/tests/integration/reverse_key_roundtrip.rs",
+          "acceptance_criteria": [
+            "Test compiles with #![cfg(feature = \"integration-tests\")] entrypoint, runs via cargo nextest run --features integration-tests (cargo xtask lima run -- on macOS) per .claude/rules/testing.md § Integration vs unit gating",
+            "reverse_key_from_packet at kernel boundary returns host-order ReverseKey",
+            "ReverseKey matches userspace-seeded host-order key bit-for-bit",
+            "Userspace proptest covers 1024 wire-order packet shapes",
+            "ReverseNatMapHandle write→read roundtrip is bit-identical"
+          ],
+          "implementation_scope": [
+            "crates/overdrive-bpf/src/programs/reverse_nat.rs",
+            "crates/overdrive-bpf/tests/integration/reverse_key_roundtrip.rs",
+            "crates/overdrive-dataplane/src/maps/reverse_nat_map_handle.rs"
+          ],
+          "effort_hours": 3,
+          "tier": 2,
+          "deps": [
+            "05-02"
+          ],
+          "risk": "medium",
+          "risk_mitigation": "DISCUSS Risk #4 — endianness mismatch at the wire boundary; lockstep proptest is the mechanical defence",
+          "mutation_target": "crates/overdrive-bpf"
+        },
+        {
+          "id": "05-04",
+          "name": "Real `nc` end-to-end TCP test + REVERSE_NAT purge on backend removal",
+          "criteria": [
+            "Test compiles with #![cfg(feature = \"integration-tests\")] entrypoint, runs via cargo nextest run --features integration-tests (cargo xtask lima run -- on macOS) per .claude/rules/testing.md § Integration vs unit gating",
+            "Tier 3 reverse_nat_e2e test: nc -l 9000 listener on veth1 ns + nc 10.0.0.1 8080 client on veth0 ns",
+            "3-way handshake completes",
+            "payload echoes",
+            "nc exits 0",
+            "companion test: removing backend purges REVERSE_NAT entry",
+            "late response from removed backend treated as non-LB (TC_ACT_OK no rewrite)"
+          ],
+          "description": "Real bidirectional TCP integration test — the slice's K5 demonstrable moment. Companion test confirms the lockstep purge invariant from 05-01 holds end-to-end. Flips S-2.2-17 and S-2.2-20 GREEN.",
+          "scenario_ref": "S-2.2-17",
+          "scenario_name": "real_tcp_connection_completes_through_vip_with_payload_echo",
+          "test_file": "crates/overdrive-dataplane/tests/integration/reverse_nat_e2e.rs",
+          "acceptance_criteria": [
+            "Test compiles with #![cfg(feature = \"integration-tests\")] entrypoint, runs via cargo nextest run --features integration-tests (cargo xtask lima run -- on macOS) per .claude/rules/testing.md § Integration vs unit gating",
+            "Real `nc` connection completes 3-way handshake + payload + clean close",
+            "nc exit code 0 in CI (Lima dev confirms locally)",
+            "REVERSE_NAT_MAP size matches live-backend count after removal",
+            "Late response from removed backend produces no rewrite"
+          ],
+          "implementation_scope": [
+            "crates/overdrive-dataplane/src/dataplane.rs",
+            "crates/overdrive-dataplane/tests/integration/reverse_nat_e2e.rs",
+            "crates/overdrive-dataplane/tests/integration/helpers/netns.rs"
+          ],
+          "effort_hours": 4,
+          "tier": 3,
+          "deps": [
+            "05-03"
+          ],
+          "risk": "medium",
+          "risk_mitigation": "DISCUSS Risk #6 — netns + sudo orchestration brittleness; helpers bail on EPERM with skip-message; CI uses ubuntu-latest sudo wrap",
+          "mutation_target": "crates/overdrive-dataplane"
+        }
+      ]
+    },
+    {
+      "id": "06",
+      "name": "Slice 06 — Pre-SERVICE_MAP packet-shape sanity prologue",
+      "description": "Prepend a 5-check Cloudflare-order sanity prologue (EtherType → IP version+IHL → IP total_length → protocol → TCP flags) to BOTH xdp_service_map_lookup and xdp_reverse_nat via a shared `#[inline(always)]` helper (ADR-0040 Q3=C). DROP_COUNTER (PERCPU_ARRAY, 6 slots per Q7) and typed DropClass enum in overdrive-core. Lands S-2.2-21..25. Parallel-able with Slice 05. Implements ADR-0040 (sanity prologue + 6 DropClass slots).",
+      "slice_ref": "docs/feature/phase-2-xdp-service-map/slices/slice-06-sanity-prologue.md",
+      "depends_on": [
+        "04"
+      ],
+      "parallel_with": [
+        "05"
+      ],
+      "effort_days": 1.0,
+      "acceptance": [
+        "S-2.2-21 Tier 2 — truncated IPv4 (IHL=4) drops with DROP_COUNTER[MalformedHeader] += 1; SERVICE_MAP NOT consulted",
+        "S-2.2-22 Tier 2 — pathological TCP flags (SYN+RST) drops with DROP_COUNTER[MalformedHeader] += 1",
+        "S-2.2-23 Tier 2 — IPv6 (EtherType 0x86DD) returns XDP_PASS, no DROP_COUNTER increment",
+        "S-2.2-24 Tier 3 — mixed batch increments per-class counters correctly (50 valid + 10 truncated + 10 SYN+RST + 10 IPv6)",
+        "S-2.2-25 Tier 4 — verifier-budget delta vs Slice 04 baseline ≤ 20%; absolute ≤ 60% of 1M ceiling"
+      ],
+      "steps": [
+        {
+          "id": "06-01",
+          "name": "DropClass enum + DROP_COUNTER PERCPU_ARRAY (6 slots)",
+          "criteria": [
+            "DropClass enum in overdrive-core (Reserved, MalformedHeader, UnknownVip, BackendUnreachable, PolicyDeny, RateLimit) maps 1:1 to slot indices 0..5",
+            "DROP_COUNTER declared as BPF_MAP_TYPE_PERCPU_ARRAY size 6",
+            "SimDataplane mirrors counter"
+          ],
+          "description": "Add the typed DropClass enum (6 slots per ADR-0040 Q7=A) and the PERCPU_ARRAY map. Slot 0 reserved (drift detection), slots 1–5 carry the named classes. Per-CPU avoids cross-CPU contention; userspace aggregator sums across CPUs. Per development.md § Newtypes — STRICT.",
+          "scenario_ref": "S-2.2-23",
+          "scenario_name": "drop_class_slot_mapping_completeness",
+          "test_file": "crates/overdrive-core/tests/newtype_roundtrip.rs",
+          "acceptance_criteria": [
+            "DropClass enum with explicit u32 discriminants (0..5)",
+            "Slot index drift compile-fail test in trybuild",
+            "DROP_COUNTER size 6 (Reserved + 5 classes)",
+            "Per-CPU aggregator sums correctly under proptest",
+            "DropClass added to overdrive-core public API"
+          ],
+          "implementation_scope": [
+            "crates/overdrive-core/src/identity.rs",
+            "crates/overdrive-core/tests/compile_fail/drop_class_slot_drift.rs",
+            "crates/overdrive-bpf/src/maps.rs",
+            "crates/overdrive-sim/src/adapters/dataplane.rs"
+          ],
+          "effort_hours": 3,
+          "tier": 1,
+          "deps": [],
+          "risk": "low",
+          "mutation_target": "crates/overdrive-core"
+        },
+        {
+          "id": "06-02",
+          "name": "Shared #[inline(always)] sanity prologue helper",
+          "criteria": [
+            "Test compiles with #![cfg(feature = \"integration-tests\")] entrypoint, runs via cargo nextest run --features integration-tests (cargo xtask lima run -- on macOS) per .claude/rules/testing.md § Integration vs unit gating",
+            "Sanity-prologue helper at crates/overdrive-bpf/src/programs/sanity.rs marked #[inline(always)]",
+            "5 Cloudflare checks (EtherType / IP version+IHL / IP total_length / proto / TCP flags)",
+            "returns Result<ContinueToServiceMap, XdpAction>",
+            "invoked from both xdp_service_map_lookup and tc_reverse_nat"
+          ],
+          "description": "ADR-0040 Q3=C decision: shared helper rather than duplicated inline code, with #[inline(always)] so the verifier sees the same instruction stream in both call sites. Five-check order matches Cloudflare's published order (research §7.2). Non-IPv4 / non-TCP-or-UDP returns XDP_PASS (LB is not a firewall).",
+          "scenario_ref": "S-2.2-21",
+          "scenario_name": "sanity_prologue_shared_helper",
+          "test_file": "crates/overdrive-bpf/tests/integration/sanity_prologue_drops.rs",
+          "acceptance_criteria": [
+            "Test compiles with #![cfg(feature = \"integration-tests\")] entrypoint, runs via cargo nextest run --features integration-tests (cargo xtask lima run -- on macOS) per .claude/rules/testing.md § Integration vs unit gating",
+            "Helper marked #[inline(always)]",
+            "Invoked from xdp_service_map_lookup and tc_reverse_nat",
+            "Five checks in Cloudflare order; first failure short-circuits",
+            "Non-IPv4 + non-TCP/UDP cases return XDP_PASS (Tier 2 confirms)"
+          ],
+          "implementation_scope": [
+            "crates/overdrive-bpf/src/programs/sanity.rs",
+            "crates/overdrive-bpf/src/programs/service_map.rs",
+            "crates/overdrive-bpf/src/programs/reverse_nat.rs"
+          ],
+          "effort_hours": 4,
+          "tier": 2,
+          "deps": [
+            "06-01"
+          ],
+          "risk": "medium",
+          "risk_mitigation": "DISCUSS Risk #1 / #5 — verifier delta budget; quantified by 06-05 baseline; rollback to inline duplication if budget breached",
+          "mutation_target": "crates/overdrive-bpf"
+        },
+        {
+          "id": "06-03",
+          "name": "Tier 2 PROG_TEST_RUN: malformed header + TCP flags + IPv6 pass",
+          "criteria": [
+            "Test compiles with #![cfg(feature = \"integration-tests\")] entrypoint, runs via cargo nextest run --features integration-tests (cargo xtask lima run -- on macOS) per .claude/rules/testing.md § Integration vs unit gating",
+            "Tier 2 sanity_prologue_drops covers truncated IPv4 (IHL=4) → XDP_DROP + MalformedHeader",
+            "SYN+RST → XDP_DROP + MalformedHeader",
+            "IPv6 → XDP_PASS + no counter",
+            "all asserted via bpftool map dump for DROP_COUNTER"
+          ],
+          "description": "PROG_TEST_RUN triptych for the three sanity classes. Map state cleared between sub-tests by default (per .claude/rules/testing.md § Tier 2). Asserts on observable side effects (counter values) rather than internal program reachability. Flips S-2.2-21, S-2.2-22, S-2.2-23 GREEN.",
+          "scenario_ref": "S-2.2-21",
+          "scenario_name": "truncated_ipv4_header_drops_with_malformed_header_counter",
+          "test_file": "crates/overdrive-bpf/tests/integration/sanity_prologue_drops.rs",
+          "acceptance_criteria": [
+            "Test compiles with #![cfg(feature = \"integration-tests\")] entrypoint, runs via cargo nextest run --features integration-tests (cargo xtask lima run -- on macOS) per .claude/rules/testing.md § Integration vs unit gating",
+            "Truncated IPv4 IHL=4: XDP_DROP, DROP_COUNTER[MalformedHeader] += 1, no SERVICE_MAP lookup",
+            "TCP SYN+RST: XDP_DROP, DROP_COUNTER[MalformedHeader] += 1",
+            "IPv6 (EtherType 0x86DD): XDP_PASS, DROP_COUNTER unchanged",
+            "Asserted via bpftool map dump observed kernel-side state"
+          ],
+          "implementation_scope": [
+            "crates/overdrive-bpf/tests/integration/sanity_prologue_drops.rs"
+          ],
+          "effort_hours": 3,
+          "tier": 2,
+          "deps": [
+            "06-02"
+          ],
+          "risk": "low",
+          "mutation_target": "crates/overdrive-bpf"
+        },
+        {
+          "id": "06-04",
+          "name": "Tier 3 mixed-batch: per-class DROP_COUNTER + SanityChecksFireBeforeServiceMap DST invariant",
+          "criteria": [
+            "Test compiles with #![cfg(feature = \"integration-tests\")] entrypoint, runs via cargo nextest run --features integration-tests (cargo xtask lima run -- on macOS) per .claude/rules/testing.md § Integration vs unit gating",
+            "Tier 3 sanity_mixed_batch sends 50 valid TCP SYNs + 10 truncated + 10 SYN+RST + 10 IPv6",
+            "asserts 50 forwarded + DROP_COUNTER[MalformedHeader] == 20 + DROP_COUNTER[UnknownVip] unchanged + 10 IPv6 pass through",
+            "SanityChecksFireBeforeServiceMap always-invariant added to Invariant::ALL"
+          ],
+          "description": "Real-veth integration test for the mixed batch + companion DST invariant: every observed packet that violates a sanity rule produces XDP_DROP AND no SERVICE_MAP lookup. Flips S-2.2-24 GREEN.",
+          "scenario_ref": "S-2.2-24",
+          "scenario_name": "mixed_batch_increments_per_class_counters_correctly",
+          "test_file": "crates/overdrive-dataplane/tests/integration/sanity_mixed_batch.rs",
+          "acceptance_criteria": [
+            "Test compiles with #![cfg(feature = \"integration-tests\")] entrypoint, runs via cargo nextest run --features integration-tests (cargo xtask lima run -- on macOS) per .claude/rules/testing.md § Integration vs unit gating",
+            "50/80 frames forwarded to backend (only the valid SYNs)",
+            "DROP_COUNTER[MalformedHeader] increments by exactly 20",
+            "DROP_COUNTER[UnknownVip] unchanged",
+            "10 IPv6 frames pass through to kernel networking stack",
+            "SanityChecksFireBeforeServiceMap invariant added to Invariant::ALL"
+          ],
+          "implementation_scope": [
+            "crates/overdrive-dataplane/tests/integration/sanity_mixed_batch.rs",
+            "crates/overdrive-sim/src/invariants/sanity_checks_fire.rs",
+            "crates/overdrive-sim/src/invariants/mod.rs"
+          ],
+          "effort_hours": 4,
+          "tier": 3,
+          "deps": [
+            "06-03"
+          ],
+          "risk": "low",
+          "mutation_target": "crates/overdrive-sim"
+        },
+        {
+          "id": "06-05",
+          "name": "Update veristat baseline: ≤ 20% delta vs Slice 04, ≤ 60% of ceiling",
+          "criteria": [
+            "perf-baseline/main/verifier-budget/veristat-service-map.txt updated post-Slice-06",
+            "instruction count delta vs Slice 04 baseline ≤ 20%",
+            "absolute count ≤ 60% of 1M ceiling",
+            "commit message documents delta"
+          ],
+          "description": "Re-record the veristat baseline so Slice 07's gate enforces against the post-Slice-06 shape. Closes the slice's K6/K7 KPIs. Flips S-2.2-25 GREEN.",
+          "scenario_ref": "S-2.2-25",
+          "scenario_name": "verifier_budget_delta_vs_slice4_baseline_under_twenty_percent",
+          "test_file": "perf-baseline/main/verifier-budget/veristat-service-map.txt",
+          "acceptance_criteria": [
+            "Updated baseline file committed",
+            "Instruction-count delta vs Slice 04 ≤ 20%",
+            "Absolute instruction count ≤ 600_000 (60% of ceiling)",
+            "Commit message documents delta + kernel + commit SHA"
+          ],
+          "implementation_scope": [
+            "perf-baseline/main/verifier-budget/veristat-service-map.txt",
+            "perf-baseline/main/verifier-budget/veristat-reverse-nat.txt"
+          ],
+          "effort_hours": 2,
+          "tier": 4,
+          "deps": [
+            "06-04"
+          ],
+          "risk": "low",
+          "mutation_target": "skip-rationale: baseline files are generated artifacts with no operator sites; mutants empty-filter is a vacuous pass"
+        }
+      ]
+    },
+    {
+      "id": "07",
+      "name": "Slice 07 — Tier 4 perf gates land on main",
+      "description": "Fill the Phase 2.1 stubs at xtask/src/main.rs:588-594 (`cargo xtask verifier-regress` + `cargo xtask xdp-perf`) with real implementations. Wire into per-PR CI Job E. xtask self-test invariant `PerfBaselineGatesEnforced` proves the gate logic itself works. Lands S-2.2-26..27. Implements ADR-0038 D8 (`// TODO(#29): wire when first real program lands`).",
+      "slice_ref": "docs/feature/phase-2-xdp-service-map/slices/slice-07-tier4-perf-gates.md",
+      "depends_on": [
+        "06"
+      ],
+      "parallel_with": [],
+      "effort_days": 1.0,
+      "acceptance": [
+        "S-2.2-26 Tier 4 — `cargo xtask verifier-regress` returns non-zero on synthetic 12% growth (5000 → 5600); structured output names program + counts + 5% threshold",
+        "S-2.2-27 Tier 4 — `cargo xtask xdp-perf` returns non-zero on synthetic 6% pps regression (5.0 → 4.7 Mpps); structured output names baseline + measured + 5% threshold"
+      ],
+      "steps": [
+        {
+          "id": "07-01",
+          "name": "Real `cargo xtask verifier-regress` body + self-test",
+          "criteria": [
+            "xtask verifier-regress runs veristat against compiled BPF programs, parses instruction counts, compares against perf-baseline/main/verifier-budget/*.txt, fails on >5% growth or >10% of ceiling",
+            "xtask self-test asserts non-zero exit on synthetic 12% growth and zero on synthetic 2% growth"
+          ],
+          "description": "Replace the stub at xtask/src/main.rs:588 with a real implementation that loads each compiled BPF program, runs veristat, parses the output, and compares against per-program baselines under perf-baseline/main/verifier-budget/. Self-test in xtask/tests/perf_gate_self_test.rs proves the gate logic. Flips S-2.2-26 GREEN.",
+          "scenario_ref": "S-2.2-26",
+          "scenario_name": "verifier_regress_returns_nonzero_on_synthetic_twelve_percent_growth",
+          "test_file": "xtask/tests/perf_gate_self_test.rs",
+          "acceptance_criteria": [
+            "Stub at xtask/src/main.rs:588 replaced with real impl",
+            "Walks every compiled program, runs veristat, parses output",
+            "Compares against perf-baseline/main/verifier-budget/*.txt",
+            "Fails on >5% growth or >10% of ceiling; structured exit message",
+            "Self-test fails on synthetic 12% growth, passes on synthetic 2% growth"
+          ],
+          "implementation_scope": [
+            "xtask/src/main.rs",
+            "xtask/src/perf_gate/verifier_regress.rs",
+            "xtask/tests/perf_gate_self_test.rs",
+            ".github/workflows/ci.yml"
+          ],
+          "effort_hours": 5,
+          "tier": 4,
+          "deps": [],
+          "risk": "medium",
+          "risk_mitigation": "DISCUSS Risk #5 — false-positives from kernel-version drift; gate is relative-delta only; first three follow-on PRs hand-validated per slice KPI",
+          "mutation_target": "xtask"
+        },
+        {
+          "id": "07-02",
+          "name": "Real `cargo xtask xdp-perf` body + baselines + CI wire-up",
+          "criteria": [
+            "xtask xdp-perf runs xdp-trafficgen + xdp-bench (DROP/TX/LB-forward modes) against the loaded program inside Lima/CI",
+            "parses pps + p99 latency",
+            "compares against perf-baseline/main/xdp-perf-*.txt",
+            "fails on >5% pps drop or >10% p99 rise",
+            "baselines for drop/tx/lb-forward modes committed",
+            "xdp-tools install added to infra/lima/overdrive-dev.yaml",
+            "CI workflow Job E gates on both subcommands"
+          ],
+          "description": "Replace the stub at xtask/src/main.rs:594 with a real implementation. Drives K7 KPI's pps half. Includes the supporting baselines under perf-baseline/main/ (xdp-perf-drop.txt, xdp-perf-tx.txt, xdp-perf-lb-forward.txt) and the xdp-tools install in the Lima image. CI workflow wired per .claude/rules/testing.md § CI topology Job E. Flips S-2.2-27 GREEN.",
+          "scenario_ref": "S-2.2-27",
+          "scenario_name": "xdp_perf_returns_nonzero_on_synthetic_six_percent_pps_regression",
+          "test_file": "xtask/tests/perf_gate_self_test.rs",
+          "acceptance_criteria": [
+            "Stub at xtask/src/main.rs:594 replaced with real impl",
+            "Three baselines committed under perf-baseline/main/",
+            "xdp-tools install added to infra/lima/overdrive-dev.yaml",
+            "CI workflow Job E runs both verifier-regress and xdp-perf on every PR",
+            "Self-test fails on synthetic 6% pps regression"
+          ],
+          "implementation_scope": [
+            "xtask/src/main.rs",
+            "xtask/src/perf_gate/xdp_perf.rs",
+            "xtask/tests/perf_gate_self_test.rs",
+            "infra/lima/overdrive-dev.yaml",
+            "perf-baseline/main/xdp-perf-drop.txt",
+            "perf-baseline/main/xdp-perf-tx.txt",
+            "perf-baseline/main/xdp-perf-lb-forward.txt",
+            ".github/workflows/ci.yml"
+          ],
+          "effort_hours": 6,
+          "tier": 4,
+          "deps": [
+            "07-01"
+          ],
+          "risk": "medium",
+          "risk_mitigation": "DISCUSS Risk #3 / #6 — runner-class variance; gate on relative delta only; baselines per-runner-class; PerfBaselineGatesEnforced self-test catches gate logic regressions",
+          "mutation_target": "xtask"
+        }
+      ]
+    },
+    {
+      "id": "08",
+      "name": "Slice 08 — SERVICE_MAP hydrator reconciler (J-PLAT-004 ESR closure)",
+      "description": "Add ServiceMapHydrator reconciler at crates/overdrive-control-plane/src/reconcilers/service_map_hydrator.rs per ADR-0042. Sync reconcile per ADR-0035/0036; runtime owns hydration of intent + observation + View. Adds Action::DataplaneUpdateService variant + service_hydration_results ObservationStore table (additive LWW). Two ESR DST invariants + dst-lint enforcement. Lands S-2.2-28..30. Parallel-able with Slices 03–07. Implements ADR-0042 (ServiceMapHydrator + Action::DataplaneUpdateService + service_hydration_results).",
+      "slice_ref": "docs/feature/phase-2-xdp-service-map/slices/slice-08-service-map-hydrator-reconciler.md",
+      "depends_on": [
+        "02"
+      ],
+      "parallel_with": [
+        "03",
+        "04",
+        "05",
+        "06"
+      ],
+      "effort_days": 1.0,
+      "acceptance": [
+        "S-2.2-28 Tier 1 — HydratorEventuallyConverges: actual.fingerprint == desired.fingerprint within bounded ticks across every DST seed",
+        "S-2.2-29 Tier 1 — Action shim writes service_hydration_results Completed row on dispatch; next tick observes convergence",
+        "S-2.2-30 Tier 1 — HydratorIdempotentSteadyState + retry-budget proptest + ReconcilerIsPure invariant + dst-lint clean (no .await / no Instant::now / no DB handle in reconcile)"
+      ],
+      "steps": [
+        {
+          "id": "08-01",
+          "name": "Action::DataplaneUpdateService + service_hydration_results table + action_shim modulisation",
+          "criteria": [
+            "Action::DataplaneUpdateService variant added in crates/overdrive-core/src/reconciler.rs",
+            "action shim arm flips from todo!() to real dispatch",
+            "service_hydration_results table added in overdrive-control-plane/src/observation_store/ via additive LWW migration",
+            "action_shim.rs converted from single file to directory module with action_shim_service_hydration.rs sibling promoted in"
+          ],
+          "description": "Cross-cutting plumbing for the hydrator. New typed Action variant, additive ObservationStore table for hydration results (status: Pending/InFlight/Completed{fingerprint,applied_at}/Failed), and the directory-modulisation of action_shim.rs that the DISTILL agent flagged. Action shim dispatches against Arc<dyn Dataplane> so production wires EbpfDataplane and DST wires SimDataplane. The `BackendSetFingerprint = u64` alias and `fingerprint(vip, backends) -> BackendSetFingerprint` rkyv-archived helper land here, consumed by the hydrator State construction in the next step.",
+          "scenario_ref": "S-2.2-29",
+          "scenario_name": "dispatch_writes_completed_row_on_dataplane_ok",
+          "test_file": "crates/overdrive-control-plane/tests/integration/service_map_hydrator_dispatch.rs",
+          "acceptance_criteria": [
+            "Action::DataplaneUpdateService { service_id, vip, backends, correlation } in reconciler.rs",
+            "Match arm in action shim flips from todo!() to real Dataplane::update_service dispatch",
+            "service_hydration_results LWW table added (additive migration; rejoin guard per §4)",
+            "action_shim.rs → action_shim/ directory module with sibling files moved in",
+            "Tier 1 dispatch test asserts Completed row written on Ok(())"
+          ],
+          "implementation_scope": [
+            "crates/overdrive-core/src/reconciler.rs",
+            "crates/overdrive-core/src/dataplane/fingerprint.rs",
+            "crates/overdrive-control-plane/src/action_shim/mod.rs",
+            "crates/overdrive-control-plane/src/action_shim/dataplane_update_service.rs",
+            "crates/overdrive-control-plane/src/observation_store/schema.rs",
+            "crates/overdrive-control-plane/src/observation_store/migrations/service_hydration_results.rs",
+            "crates/overdrive-control-plane/tests/integration/service_map_hydrator_dispatch.rs"
+          ],
+          "effort_hours": 5,
+          "tier": 1,
+          "deps": [],
+          "risk": "medium",
+          "risk_mitigation": "DISCUSS Risk #7 — additive-only schema migration discipline (§4 Consistency Guardrails); two-phase rollout codified by the migration helper; tombstone sweep covered by existing reconciler",
+          "mutation_target": "crates/overdrive-control-plane"
+        },
+        {
+          "id": "08-02",
+          "name": "ServiceMapHydrator reconciler (sync reconcile, ESR pair invariants)",
+          "criteria": [
+            "ServiceMapHydrator at crates/overdrive-control-plane/src/reconcilers/service_map_hydrator.rs",
+            "sync reconcile per ADR-0035/0036 (no .await, no Instant::now, no DB handle)",
+            "typed State (desired/actual per ServiceId) and View (attempts, last_failure_seen_at, last-seen service_backends generation per service)",
+            "HydratorEventuallyConverges + HydratorIdempotentSteadyState invariants in overdrive-sim::invariants always pass across DST seeds"
+          ],
+          "description": "The reconciler itself. State projects desired backends from IntentStore-derived projection and actual from service_backends ObservationStore rows. View carries inputs only — attempts, last_failure_seen_at, last-seen generation — never derived deadlines (per development.md § Persist inputs, not derived state). Reconcile is pure-sync: emits Action::DataplaneUpdateService when fingerprints diverge. Flips S-2.2-28 GREEN.",
+          "scenario_ref": "S-2.2-28",
+          "scenario_name": "hydrator_eventually_converges_to_desired_backend_set",
+          "test_file": "crates/overdrive-sim/src/invariants/service_map_hydrator.rs",
+          "acceptance_criteria": [
+            "Reconciler implements Reconciler trait per ADR-0035 (sync reconcile)",
+            "State and View are typed; View derives Serialize/Deserialize/Default/Clone",
+            "View carries inputs only — no next_attempt_at field",
+            "HydratorEventuallyConverges (eventual) holds across every DST seed",
+            "HydratorIdempotentSteadyState (always) holds across every DST seed",
+            "ReconcilerIsPure invariant continues to pass with hydrator added"
+          ],
+          "implementation_scope": [
+            "crates/overdrive-control-plane/src/reconcilers/service_map_hydrator.rs",
+            "crates/overdrive-control-plane/src/reconcilers/mod.rs",
+            "crates/overdrive-sim/src/invariants/service_map_hydrator.rs",
+            "crates/overdrive-sim/src/invariants/mod.rs"
+          ],
+          "effort_hours": 5,
+          "tier": 1,
+          "deps": [
+            "08-01"
+          ],
+          "risk": "medium",
+          "risk_mitigation": "DISCUSS Risk #8 — ESR convergence under transient gossip; View carries last-seen generation so the reconciler tolerates seconds of staleness; backoff via persisted inputs prevents thrash",
+          "mutation_target": "crates/overdrive-control-plane"
+        },
+        {
+          "id": "08-03",
+          "name": "Retry-budget proptest + dst-lint enforcement of reconciler purity",
+          "criteria": [
+            "Tier 1 proptest: hydrator emits Action iff tick.now_unix >= last_failure_seen_at + backoff_for_attempt(attempts)",
+            "deadline recomputed every tick from inputs (not persisted)",
+            "dst-lint scans service_map_hydrator.rs and rejects any .await / Instant::now / SystemTime::now / DB handle in reconcile body"
+          ],
+          "description": "Final closure. Property test asserts the retry-budget shape from development.md § Persist inputs, not derived state. dst-lint mechanical check enforces reconciler purity at PR time. Flips S-2.2-30 GREEN and closes US-08.",
+          "scenario_ref": "S-2.2-30",
+          "scenario_name": "reconciler_purity_preserved_dst_lint_and_reconciler_is_pure",
+          "test_file": "crates/overdrive-sim/src/invariants/service_map_hydrator.rs",
+          "acceptance_criteria": [
+            "Retry proptest: no Action within backoff window; Action re-emitted at window boundary",
+            "View RetryMemory unchanged within backoff window",
+            "dst-lint scanner walks reconcile body for forbidden constructs",
+            "PR fails if .await / Instant::now / SystemTime::now / DB handle appears in reconcile",
+            "ReconcilerIsPure DST invariant continues to pass"
+          ],
+          "implementation_scope": [
+            "crates/overdrive-sim/src/invariants/service_map_hydrator.rs",
+            "xtask/src/dst_lint.rs",
+            "crates/overdrive-control-plane/src/reconcilers/service_map_hydrator.rs"
+          ],
+          "effort_hours": 4,
+          "tier": 1,
+          "deps": [
+            "08-02"
+          ],
+          "risk": "low",
+          "mutation_target": "crates/overdrive-sim"
+        }
+      ]
+    }
+  ],
+  "implementation_scope": {
+    "source_directories": [
+      "crates/overdrive-core/src/",
+      "crates/overdrive-bpf/src/",
+      "crates/overdrive-dataplane/src/",
+      "crates/overdrive-control-plane/src/reconcilers/",
+      "crates/overdrive-control-plane/src/action_shim/",
+      "crates/overdrive-control-plane/src/observation_store/",
+      "crates/overdrive-sim/src/",
+      "xtask/src/perf_gate/",
+      "xtask/src/dst_lint.rs"
+    ],
+    "test_directories": [
+      "crates/overdrive-core/tests/",
+      "crates/overdrive-bpf/tests/integration/",
+      "crates/overdrive-dataplane/tests/integration/",
+      "crates/overdrive-control-plane/tests/integration/",
+      "crates/overdrive-sim/tests/integration/",
+      "crates/overdrive-sim/src/invariants/",
+      "xtask/tests/",
+      "perf-baseline/main/"
+    ],
+    "excluded_patterns": [
+      "__init__.py",
+      "__pycache__/**",
+      "target/**",
+      "**/*.bpf.o"
+    ]
+  },
+  "validation": {
+    "status": "pending",
+    "reviewer": "nw-software-crafter",
+    "approved_at": "TODO"
+  }
+}
