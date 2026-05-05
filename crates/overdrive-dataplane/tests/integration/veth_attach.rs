@@ -18,7 +18,7 @@
 // held across the assertion block — narrowing the lock scope here would
 // require cloning the captured-events vec out before assertions, which
 // trades clippy quiet for noisier test code.
-#![allow(clippy::expect_used, clippy::significant_drop_tightening)]
+#![allow(clippy::expect_used, clippy::significant_drop_tightening, clippy::print_stderr)]
 
 /// S-2.2-01 — Real veth pair attach with packet count assertion.
 ///
@@ -102,6 +102,12 @@ fn xdp_attaches_to_real_veth_and_packet_counter_increments() {
 /// Ethernet — pad with zeros). Destination MAC is broadcast so no ARP
 /// is needed.
 #[cfg(target_os = "linux")]
+#[allow(
+    clippy::items_after_statements,
+    clippy::cast_lossless,
+    clippy::cast_possible_truncation,
+    reason = "test-only PF_PACKET socket setup; const local to the syscall block, narrow integer casts on libc EtherType"
+)]
 fn inject_frames(iface: &str, n: u32) -> Result<(), std::io::Error> {
     use std::ffi::CString;
     use std::io;
@@ -252,6 +258,11 @@ fn parse_pkts_dump(json: &str) -> Result<u64, String> {
 mod parse_tests {
     //! Pure unit tests for the bpftool JSON parser — exercise the
     //! `parse_pkts_dump` helper without spawning a subprocess.
+
+    #![allow(
+        clippy::unwrap_used,
+        reason = "test-only — parse_pkts_dump returns Result; .unwrap() asserts the success path"
+    )]
 
     use super::parse_pkts_dump;
 

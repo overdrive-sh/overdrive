@@ -18,7 +18,7 @@
 //! for the full scenario specification.
 
 #[tokio::test]
-#[ignore = "RED scaffold S-2.2-28 — DELIVER fills the body per Slice 08"]
+#[should_panic(expected = "RED scaffold")]
 async fn dispatch_writes_completed_row_on_dataplane_ok() {
     panic!(
         "Not yet implemented -- RED scaffold: S-2.2-28 — \

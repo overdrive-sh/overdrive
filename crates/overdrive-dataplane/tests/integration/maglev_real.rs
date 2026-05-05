@@ -14,7 +14,7 @@
 /// `xdp-trafficgen` rate to confirm the bound holds against real
 /// kernel verifier + real packet flow.
 #[test]
-#[ignore = "RED scaffold ASR-2.2-02 Tier 3 — DELIVER fills the body per Slice 04"]
+#[should_panic(expected = "RED scaffold")]
 fn maglev_disruption_bound_holds_on_real_veth() {
     panic!(
         "Not yet implemented -- RED scaffold: ASR-2.2-02 Tier 3 confirm — \

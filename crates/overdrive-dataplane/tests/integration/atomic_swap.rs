@@ -10,7 +10,7 @@
 /// S-2.2-09 — Atomic backend swap drops zero packets under
 /// 50 kpps `xdp-trafficgen` traffic.
 #[test]
-#[ignore = "RED scaffold S-2.2-09 — DELIVER fills the body per Slice 03"]
+#[should_panic(expected = "RED scaffold")]
 fn atomic_swap_under_50kpps_traffic_drops_zero_packets() {
     panic!(
         "Not yet implemented -- RED scaffold: S-2.2-09 — \
@@ -22,7 +22,7 @@ fn atomic_swap_under_50kpps_traffic_drops_zero_packets() {
 
 /// S-2.2-10 — Removing a backend leaves no orphans after GC.
 #[test]
-#[ignore = "RED scaffold S-2.2-10 — DELIVER fills the body per Slice 03"]
+#[should_panic(expected = "RED scaffold")]
 fn removing_backend_purges_orphaned_backend_map_entries() {
     panic!(
         "Not yet implemented -- RED scaffold: S-2.2-10 — \
@@ -34,7 +34,7 @@ fn removing_backend_purges_orphaned_backend_map_entries() {
 /// S-2.2-11 — Inner-map allocation failure preserves the existing
 /// service mapping.
 #[test]
-#[ignore = "RED scaffold S-2.2-11 — DELIVER fills the body per Slice 03"]
+#[should_panic(expected = "RED scaffold")]
 fn kernel_rejects_inner_map_alloc_existing_mapping_preserved() {
     panic!(
         "Not yet implemented -- RED scaffold: S-2.2-11 — \

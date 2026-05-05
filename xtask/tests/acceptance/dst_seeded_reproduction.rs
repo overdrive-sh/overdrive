@@ -67,7 +67,14 @@ fn strip_nondeterministic(mut v: Value) -> Value {
 // §1.2 WS-2 — Same seed reproduces bit-identical trajectory across two runs.
 // -----------------------------------------------------------------------------
 
+/// Currently `#[should_panic(expected = "RED scaffold")]` per
+/// downstream-fallout policy — the harness panics on the
+/// `HydratorEventuallyConverges` RED scaffold (DISTILL commit
+/// `5e9ca73`). The assert message embeds subprocess stderr which
+/// contains "RED scaffold". Strip when Slice 08 closes the
+/// scaffolds.
 #[test]
+#[should_panic(expected = "RED scaffold")]
 fn two_subprocess_runs_with_same_seed_produce_bit_identical_trajectory() {
     let target_a = tempfile::tempdir().expect("tempdir a");
     let target_b = tempfile::tempdir().expect("tempdir b");
@@ -178,7 +185,12 @@ proptest! {
         .. ProptestConfig::default()
     })]
 
+    /// Currently `#[should_panic(expected = "RED scaffold")]` per
+    /// downstream-fallout policy — `Harness::run` panics on the
+    /// `HydratorEventuallyConverges` RED scaffold (DISTILL commit
+    /// `5e9ca73`). Strip when Slice 08 closes the scaffolds.
     #[test]
+    #[should_panic(expected = "RED scaffold")]
     fn twin_run_identity_holds_for_any_seed(seed in any::<u64>()) {
         // Two independent runs of the harness with the same seed.
         // Fresh `Harness::new()` instances — no shared state between them.

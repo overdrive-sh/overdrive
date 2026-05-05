@@ -8,10 +8,10 @@
 #![cfg(target_os = "linux")]
 #![allow(clippy::missing_panics_doc)]
 
-/// S-2.2-04 — SERVICE_MAP hit returns `XDP_TX` with rewritten
+/// S-2.2-04 — `SERVICE_MAP` hit returns `XDP_TX` with rewritten
 /// headers.
 #[test]
-#[ignore = "RED scaffold S-2.2-04 — DELIVER fills the body per Slice 02"]
+#[should_panic(expected = "RED scaffold")]
 fn service_map_hit_returns_xdp_tx_with_rewritten_headers() {
     panic!(
         "Not yet implemented -- RED scaffold: S-2.2-04 — \
@@ -22,9 +22,9 @@ fn service_map_hit_returns_xdp_tx_with_rewritten_headers() {
     );
 }
 
-/// S-2.2-05 — SERVICE_MAP miss returns `XDP_PASS`, no rewrite.
+/// S-2.2-05 — `SERVICE_MAP` miss returns `XDP_PASS`, no rewrite.
 #[test]
-#[ignore = "RED scaffold S-2.2-05 — DELIVER fills the body per Slice 02"]
+#[should_panic(expected = "RED scaffold")]
 fn service_map_miss_returns_xdp_pass_no_rewrite() {
     panic!(
         "Not yet implemented -- RED scaffold: S-2.2-05 — \
@@ -34,9 +34,9 @@ fn service_map_miss_returns_xdp_pass_no_rewrite() {
 }
 
 /// S-2.2-08 — Truncated frame returns `XDP_PASS`, no crash, no
-/// SERVICE_MAP lookup.
+/// `SERVICE_MAP` lookup.
 #[test]
-#[ignore = "RED scaffold S-2.2-08 — DELIVER fills the body per Slice 02"]
+#[should_panic(expected = "RED scaffold")]
 fn truncated_ipv4_frame_returns_xdp_pass_no_lookup_no_crash() {
     panic!(
         "Not yet implemented -- RED scaffold: S-2.2-08 — \

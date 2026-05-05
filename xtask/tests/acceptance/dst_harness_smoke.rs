@@ -97,7 +97,15 @@ const EXPECTED_INVARIANTS: &[&str] = &[
 // adapter" — end-to-end smoke: exits 0, artifacts exist, seed present.
 // -----------------------------------------------------------------------------
 
+/// Currently `#[should_panic(expected = "RED scaffold")]` per
+/// downstream-fallout policy — the harness panics on the
+/// `HydratorEventuallyConverges` RED scaffold added in DISTILL
+/// (commit `5e9ca73`). The assert message embeds subprocess stderr
+/// which contains "RED scaffold". Strip when Slice 08 closes the
+/// scaffolds. See `.claude/rules/testing.md` § "Downstream fallout
+/// on pre-existing tests".
 #[test]
+#[should_panic(expected = "RED scaffold")]
 fn dst_with_fixed_seed_exits_zero_and_writes_artifacts() {
     let target = tempfile::tempdir().expect("tempdir for CARGO_TARGET_DIR");
     let out = run_dst(target.path(), &["--seed", "42"]);
@@ -207,7 +215,12 @@ fn first_line_of_stdout_names_the_seed() {
 // still prints it on line 1. Covered here because the scenario phrasing
 // is "the first line of output names the seed used for THIS run" — a
 // default run must also satisfy it.
+/// Currently `#[should_panic(expected = "RED scaffold")]` per
+/// downstream-fallout policy — the harness panics on the
+/// `HydratorEventuallyConverges` RED scaffold (DISTILL commit
+/// `5e9ca73`). Strip when Slice 08 closes the scaffolds.
 #[test]
+#[should_panic(expected = "RED scaffold")]
 fn first_line_of_stdout_names_the_seed_when_random() {
     let target = tempfile::tempdir().expect("tempdir for CARGO_TARGET_DIR");
     let out = run_dst(target.path(), &[]);

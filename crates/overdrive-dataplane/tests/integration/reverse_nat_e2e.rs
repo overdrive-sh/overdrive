@@ -10,7 +10,7 @@
 /// S-2.2-15 — Real TCP connection completes through forward and
 /// reverse paths.
 #[test]
-#[ignore = "RED scaffold S-2.2-15 — DELIVER fills the body per Slice 05"]
+#[should_panic(expected = "RED scaffold")]
 fn real_tcp_connection_completes_through_vip_with_payload_echo() {
     panic!(
         "Not yet implemented -- RED scaffold: S-2.2-15 — \
@@ -20,10 +20,10 @@ fn real_tcp_connection_completes_through_vip_with_payload_echo() {
     );
 }
 
-/// S-2.2-18 — Removed backend's REVERSE_NAT entry purged on
+/// S-2.2-18 — Removed backend's `REVERSE_NAT` entry purged on
 /// service update; no stale rewrite leak.
 #[test]
-#[ignore = "RED scaffold S-2.2-18 — DELIVER fills the body per Slice 05"]
+#[should_panic(expected = "RED scaffold")]
 fn removing_backend_purges_reverse_nat_entry_no_stale_rewrite() {
     panic!(
         "Not yet implemented -- RED scaffold: S-2.2-18 — \

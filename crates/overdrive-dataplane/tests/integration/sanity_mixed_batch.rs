@@ -11,7 +11,7 @@
 /// S-2.2-22 — Mixed batch (50 valid + 10 truncated + 10 SYN+RST +
 /// 10 IPv6) increments per-class counters correctly.
 #[test]
-#[ignore = "RED scaffold S-2.2-22 — DELIVER fills the body per Slice 06"]
+#[should_panic(expected = "RED scaffold")]
 fn mixed_batch_increments_per_class_counters_correctly() {
     panic!(
         "Not yet implemented -- RED scaffold: S-2.2-22 — \

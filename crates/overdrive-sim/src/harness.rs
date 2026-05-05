@@ -817,7 +817,13 @@ mod tests {
         assert_eq!(cat, vec![Invariant::SingleLeader]);
     }
 
+    // Downstream fallout: `Harness::new().run(...)` walks the full invariant
+    // catalogue including the `HydratorEventuallyConverges` RED scaffold added
+    // by DISTILL wave (5e9ca73). `#[should_panic]` per `.claude/rules/testing.md`
+    // § "Downstream fallout on pre-existing tests" until step 08-NN lands the
+    // impl — at which point this attribute trips and flags the test for review.
     #[test]
+    #[should_panic(expected = "RED scaffold")]
     fn run_boots_the_default_number_of_hosts_and_reports_every_invariant() {
         let report = Harness::new().run(42).expect("harness must compose");
         // One result per invariant in the default catalogue.

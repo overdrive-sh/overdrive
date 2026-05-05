@@ -7,10 +7,10 @@
 #![cfg(target_os = "linux")]
 #![allow(clippy::missing_panics_doc)]
 
-/// S-2.2-16 — REVERSE_NAT_MAP lookup hit rewrites source IP/port
+/// S-2.2-16 — `REVERSE_NAT_MAP` lookup hit rewrites source IP/port
 /// back to VIP and returns `TC_ACT_OK` with valid checksums.
 #[test]
-#[ignore = "RED scaffold S-2.2-16 — DELIVER fills the body per Slice 05"]
+#[should_panic(expected = "RED scaffold")]
 fn reverse_nat_lookup_hit_rewrites_source_to_vip() {
     panic!(
         "Not yet implemented -- RED scaffold: S-2.2-16 — \

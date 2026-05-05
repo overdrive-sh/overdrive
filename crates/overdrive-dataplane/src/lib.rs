@@ -14,6 +14,12 @@
 //! are stubbed pending #24 (`POLICY_MAP`), #25 (`SERVICE_MAP`), and
 //! #27 (telemetry ringbuf) per `architecture.md` §7.
 
+#![expect(
+    clippy::todo,
+    clippy::doc_markdown,
+    reason = "Phase 2.2 RED scaffolds in maglev/* and swap.rs; lints self-trip when scaffolds go GREEN. Strip when Slice 08 closes the last scaffold."
+)]
+
 // Phase 2.2 module scaffolds per
 // `docs/feature/phase-2-xdp-service-map/distill/wave-decisions.md`
 // DWD-3 file-path inventory. Bodies panic via `todo!()` until
@@ -116,9 +122,7 @@ impl EbpfDataplane {
         // native default + warn-on-fallback. KPI K1 emits here.
         let link = match prog.attach(iface, XdpFlags::DRV_MODE) {
             Ok(link) => link,
-            Err(ProgramError::SyscallError(ref se))
-                if should_fallback_to_generic(&se.io_error) =>
-            {
+            Err(ProgramError::SyscallError(ref se)) if should_fallback_to_generic(&se.io_error) => {
                 tracing::warn!(
                     name: "xdp.attach.fallback_generic",
                     iface = %iface,
@@ -170,9 +174,7 @@ impl EbpfDataplane {
 /// on for replay equivalence.
 #[cfg(target_os = "linux")]
 fn should_fallback_to_generic(io_error: &std::io::Error) -> bool {
-    io_error
-        .raw_os_error()
-        .is_some_and(|code| code == libc::EOPNOTSUPP || code == libc::ENOTSUP)
+    io_error.raw_os_error().is_some_and(|code| code == libc::EOPNOTSUPP || code == libc::ENOTSUP)
 }
 
 #[async_trait]

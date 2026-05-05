@@ -23,7 +23,18 @@ use overdrive_sim::{Harness, Invariant, InvariantStatus};
 
 /// The default harness run includes all three new invariants and they
 /// all pass — the clean-run green-bar assertion.
+///
+/// Downstream fallout on pre-existing test: DISTILL wave (5e9ca73)
+/// added the `HydratorEventuallyConverges` invariant scaffold to the
+/// default catalogue, which `Harness::new().run(...)` walks. The
+/// scaffold's `evaluate()` panics with "RED scaffold: ..." until
+/// step 08-NN lands the impl. Per `.claude/rules/testing.md` §
+/// "Downstream fallout on pre-existing tests", give this test
+/// `#[should_panic(expected = "RED scaffold")]` until its dependency
+/// goes GREEN — `#[should_panic]` flags this test for review at the
+/// moment the scaffold transitions.
 #[test]
+#[should_panic(expected = "RED scaffold")]
 fn default_harness_run_passes_all_three_reconciler_invariants() {
     let report = Harness::new().run(42).expect("harness must compose");
 
@@ -165,7 +176,14 @@ fn write_through_ordering_passes_on_default_harness() {
 /// All three new invariants appear in the default catalogue and pass
 /// when run as part of the full set. K3 reproducibility: same seed
 /// twice produces identical verdicts.
+///
+/// Downstream fallout: same as `default_harness_run_passes_*` above —
+/// the harness walks every invariant including the
+/// `HydratorEventuallyConverges` RED scaffold. `#[should_panic]`
+/// keeps the bar green until step 08-NN lands the impl, then trips
+/// to flag this test for review at the GREEN moment.
 #[test]
+#[should_panic(expected = "RED scaffold")]
 fn full_default_catalogue_includes_three_view_store_invariants_and_passes_them() {
     let report = Harness::new().run(99).expect("harness must compose");
 

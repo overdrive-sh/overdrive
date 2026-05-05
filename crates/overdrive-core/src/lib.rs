@@ -23,6 +23,20 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(not(test), warn(clippy::expect_used, clippy::unwrap_used))]
 #![cfg_attr(test, allow(clippy::expect_used, clippy::unwrap_used))]
+// Phase 2.2 RED scaffolds in `dataplane/*` (DropClass, MaglevTableSize,
+// BackendSetFingerprint) and `id::BackendId` carry `todo!()` bodies and
+// short docstrings on draft type definitions. Per `.claude/rules/testing.md`
+// § "Production-side scaffolds", crates with many concurrent scaffolds
+// gate the relevant lints crate-level via `expect` (NOT `allow`) so the
+// gate self-removes the moment every scaffold goes GREEN. Strip this
+// block once Slice 08 closes the last scaffold.
+#![expect(
+    clippy::todo,
+    clippy::doc_markdown,
+    clippy::missing_const_for_fn,
+    clippy::too_long_first_doc_paragraph,
+    reason = "Phase 2.2 RED scaffolds; lints will self-trip when scaffolds go GREEN"
+)]
 
 pub mod aggregate;
 // Phase 2.2 dataplane-internal types — `MaglevTableSize`, `DropClass`,

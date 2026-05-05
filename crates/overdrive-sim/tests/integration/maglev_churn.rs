@@ -28,7 +28,7 @@
 //! for the full scenario specifications.
 
 #[test]
-#[ignore = "RED scaffold S-2.2-12 — DELIVER fills the body per Slice 04"]
+#[should_panic(expected = "RED scaffold")]
 fn maglev_generate_is_deterministic_under_seeded_inputs() {
     panic!(
         "Not yet implemented -- RED scaffold: S-2.2-12 — \
@@ -38,7 +38,7 @@ fn maglev_generate_is_deterministic_under_seeded_inputs() {
 }
 
 #[test]
-#[ignore = "RED scaffold S-2.2-13 — DELIVER fills the body per Slice 04"]
+#[should_panic(expected = "RED scaffold")]
 fn single_backend_removal_shifts_at_most_two_percent_of_flows() {
     panic!(
         "Not yet implemented -- RED scaffold: S-2.2-13 — \

@@ -17,7 +17,7 @@
 /// through `reverse_key_from_packet` produces the host-order
 /// `ReverseKey` that the userspace test seeded into the map.
 #[test]
-#[ignore = "RED scaffold S-2.2-17 — DELIVER fills the body per Slice 05"]
+#[should_panic(expected = "RED scaffold")]
 fn wire_order_packet_produces_host_order_reverse_key() {
     panic!(
         "Not yet implemented -- RED scaffold: S-2.2-17 — \

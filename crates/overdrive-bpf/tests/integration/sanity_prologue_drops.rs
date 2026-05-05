@@ -11,7 +11,7 @@
 /// S-2.2-19 — Truncated IPv4 (IHL=4) drops with
 /// `MalformedHeader` counter increment.
 #[test]
-#[ignore = "RED scaffold S-2.2-19 — DELIVER fills the body per Slice 06"]
+#[should_panic(expected = "RED scaffold")]
 fn truncated_ipv4_header_drops_with_malformed_header_counter() {
     panic!(
         "Not yet implemented -- RED scaffold: S-2.2-19 — \
@@ -24,7 +24,7 @@ fn truncated_ipv4_header_drops_with_malformed_header_counter() {
 
 /// S-2.2-20 — Pathological TCP flag combination (SYN+RST) drops.
 #[test]
-#[ignore = "RED scaffold S-2.2-20 — DELIVER fills the body per Slice 06"]
+#[should_panic(expected = "RED scaffold")]
 fn tcp_syn_plus_rst_flags_drops_with_malformed_header_counter() {
     panic!(
         "Not yet implemented -- RED scaffold: S-2.2-20 — \
@@ -36,7 +36,7 @@ fn tcp_syn_plus_rst_flags_drops_with_malformed_header_counter() {
 /// S-2.2-21 — IPv6 frame falls through (NOT dropped, no counter
 /// increment).
 #[test]
-#[ignore = "RED scaffold S-2.2-21 — DELIVER fills the body per Slice 06"]
+#[should_panic(expected = "RED scaffold")]
 fn ipv6_ethertype_returns_xdp_pass_no_drop_counter_increment() {
     panic!(
         "Not yet implemented -- RED scaffold: S-2.2-21 — \

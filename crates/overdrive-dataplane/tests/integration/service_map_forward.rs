@@ -10,7 +10,7 @@
 /// S-2.2-06 — Ten TCP SYNs to a registered VIP all rewrite and
 /// forward via veth.
 #[test]
-#[ignore = "RED scaffold S-2.2-06 — DELIVER fills the body per Slice 02"]
+#[should_panic(expected = "RED scaffold")]
 fn ten_tcp_syns_to_vip_are_rewritten_and_forwarded_via_veth() {
     panic!(
         "Not yet implemented -- RED scaffold: S-2.2-06 — \

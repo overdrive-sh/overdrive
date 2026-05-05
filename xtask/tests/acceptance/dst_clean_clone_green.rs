@@ -99,7 +99,18 @@ const EXPECTED_INVARIANTS: &[&str] = &[
 
 /// The whole default catalogue runs, every invariant passes, and the
 /// wall-clock budget (<60 s per KPI K1) is met.
+///
+/// Currently `#[should_panic(expected = "RED scaffold")]` because the
+/// `Invariant::ALL` catalogue includes `HydratorEventuallyConverges`
+/// and `HydratorIdempotentSteadyState` RED scaffolds (DISTILL wave
+/// commit `5e9ca73`). The subprocess panics on those scaffolds, the
+/// `assert!(out.status.success(), ...)` fires with the subprocess
+/// stderr embedded — which contains "RED scaffold". Strip the
+/// attribute when Slice 08 closes the scaffolds. See
+/// `.claude/rules/testing.md` § "Downstream fallout on pre-existing
+/// tests".
 #[test]
+#[should_panic(expected = "RED scaffold")]
 fn default_catalogue_is_green_within_wall_clock_budget() {
     let target = tempfile::tempdir().expect("tempdir for CARGO_TARGET_DIR");
     let out = run_dst(target.path(), &["--seed", "42"]);
@@ -159,11 +170,21 @@ fn default_catalogue_is_green_within_wall_clock_budget() {
 // -----------------------------------------------------------------------------
 
 /// Every named invariant in §7.1 scenario 2 appears in the summary.
+///
+/// Currently `#[should_panic(expected = "RED scaffold")]` per
+/// downstream-fallout policy — the harness panics on the
+/// `HydratorEventuallyConverges` RED scaffold added in DISTILL
+/// (commit `5e9ca73`). Strip when Slice 08 closes the scaffolds.
 #[test]
+#[should_panic(expected = "RED scaffold")]
 fn summary_names_every_expected_invariant() {
     let target = tempfile::tempdir().expect("tempdir");
     let out = run_dst(target.path(), &["--seed", "42"]);
-    assert!(out.status.success(), "dst must succeed");
+    assert!(
+        out.status.success(),
+        "dst must succeed; stderr:\n{}",
+        String::from_utf8_lossy(&out.stderr),
+    );
 
     let summary = read_summary(target.path());
     let names: Vec<&str> = summary["invariants"]
