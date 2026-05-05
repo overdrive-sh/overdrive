@@ -606,71 +606,172 @@ use std::fmt::Write as _;
 ///
 /// Userspace control-plane newtype only — `service_backends`
 /// observation rows continue to carry `vip: Ipv4Addr` as their
-/// wire-shape field; the hydrator wraps at the read boundary.
+/// wire-shape field; the hydrator wraps at the read boundary
+/// (architecture.md § 5).
 ///
-/// **RED scaffold** — DELIVER fills the body per Slice 02
-/// (S-2.2-04..08).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+/// # Wire form
+///
+/// `Display` emits the canonical `IpAddr` string form (e.g.
+/// `10.0.0.1`, `::1`). `FromStr` parses any [`std::net::IpAddr`]-
+/// compatible string. Empty input and non-IP strings surface as
+/// structured [`IdParseError`] variants.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[serde(try_from = "String", into = "String")]
 pub struct ServiceVip(std::net::IpAddr);
 
 impl ServiceVip {
-    /// Validating constructor.
-    pub fn new(_addr: std::net::IpAddr) -> Result<Self, IdParseError> {
-        todo!("RED scaffold: ServiceVip::new — see Slice 02 / S-2.2-04")
+    /// Validating constructor over a [`std::net::IpAddr`].
+    ///
+    /// IPv4 is always accepted today; IPv6 is also accepted at
+    /// the type level (per architecture.md § 6 the IPv6 *kernel-
+    /// side* path is GH #155 deferral, not a userspace newtype
+    /// concern).
+    ///
+    /// The `Result` return is the project's newtype-completeness
+    /// shape (`development.md` § Newtype completeness — *No
+    /// infallible `new()` that silently accepts garbage*); even
+    /// where every input is currently valid, the return shape is
+    /// stable so future range-checks (e.g. rejecting multicast
+    /// or unspecified addresses) land additively.
+    #[allow(clippy::unnecessary_wraps, clippy::missing_const_for_fn)]
+    pub fn new(addr: std::net::IpAddr) -> Result<Self, IdParseError> {
+        Ok(Self(addr))
     }
 
     /// Inner [`std::net::IpAddr`].
-    pub fn get(&self) -> std::net::IpAddr {
+    #[must_use]
+    pub const fn get(&self) -> std::net::IpAddr {
         self.0
     }
 }
 
-impl std::fmt::Display for ServiceVip {
-    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!("RED scaffold: ServiceVip::fmt — see Slice 02")
+impl Display for ServiceVip {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        Display::fmt(&self.0, f)
     }
 }
 
-impl std::str::FromStr for ServiceVip {
+impl FromStr for ServiceVip {
     type Err = IdParseError;
 
-    fn from_str(_s: &str) -> Result<Self, Self::Err> {
-        todo!("RED scaffold: ServiceVip::from_str — see Slice 02")
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.is_empty() {
+            return Err(IdParseError::Empty { kind: "ServiceVip" });
+        }
+        // Accept upper- / lower-case hex digits in IPv6 inputs and
+        // delegate to `IpAddr::from_str`. The canonical Display form
+        // emitted by `IpAddr` is already lowercase.
+        let canonical = s.to_ascii_lowercase();
+        let addr =
+            std::net::IpAddr::from_str(&canonical).map_err(|_| IdParseError::InvalidFormat {
+                kind: "ServiceVip",
+                expected: "an IPv4 or IPv6 address (e.g. 10.0.0.1)",
+            })?;
+        Ok(Self(addr))
+    }
+}
+
+impl TryFrom<String> for ServiceVip {
+    type Error = IdParseError;
+
+    fn try_from(raw: String) -> Result<Self, Self::Error> {
+        Self::from_str(&raw)
+    }
+}
+
+impl TryFrom<&str> for ServiceVip {
+    type Error = IdParseError;
+
+    fn try_from(raw: &str) -> Result<Self, Self::Error> {
+        Self::from_str(raw)
+    }
+}
+
+impl From<ServiceVip> for String {
+    fn from(v: ServiceVip) -> Self {
+        v.to_string()
     }
 }
 
 /// Identity of a service for control-plane addressing. Maps 1:1
 /// to a `MAGLEV_MAP` outer-map key; backed by `u64` content-hash
-/// per architecture.md § 6.
+/// per architecture.md § 6 (the `(VIP, port, scope)` content-hash
+/// is computed upstream — the newtype itself is opaque).
 ///
-/// **RED scaffold** — DELIVER fills the body per Slice 02
-/// (S-2.2-04..08) / Slice 08 (S-2.2-26..30).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+/// # Wire form
+///
+/// `Display` emits the decimal `u64` representation. `FromStr`
+/// parses decimal `u64`. There is no case axis; the
+/// case-insensitivity rule from `development.md` § Newtype
+/// completeness applies only to human-typed string identifiers
+/// (matches the `BackendId` / `MaglevTableSize` precedent).
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[serde(transparent)]
 pub struct ServiceId(u64);
 
 impl ServiceId {
-    /// Validating constructor over the raw u64.
-    pub fn new(_value: u64) -> Result<Self, IdParseError> {
-        todo!("RED scaffold: ServiceId::new — see Slice 02 / Slice 08")
+    /// Validating constructor over the raw `u64`. Every `u64` is a
+    /// valid `ServiceId` — the newtype's role is type-system
+    /// distinctness, not runtime range-check. The `Result` return
+    /// is the project's newtype-completeness shape — see
+    /// [`ServiceVip::new`] for the same rationale.
+    #[allow(clippy::unnecessary_wraps, clippy::missing_const_for_fn)]
+    pub fn new(value: u64) -> Result<Self, IdParseError> {
+        Ok(Self(value))
     }
 
     /// Inner `u64`.
-    pub fn get(self) -> u64 {
+    #[must_use]
+    pub const fn get(self) -> u64 {
         self.0
     }
 }
 
-impl std::fmt::Display for ServiceId {
-    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!("RED scaffold: ServiceId::fmt — see Slice 02")
+impl Display for ServiceId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        Display::fmt(&self.0, f)
     }
 }
 
-impl std::str::FromStr for ServiceId {
+impl FromStr for ServiceId {
     type Err = IdParseError;
 
-    fn from_str(_s: &str) -> Result<Self, Self::Err> {
-        todo!("RED scaffold: ServiceId::from_str — see Slice 02")
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.is_empty() {
+            return Err(IdParseError::Empty { kind: "ServiceId" });
+        }
+        s.parse::<u64>().map(Self).map_err(|_| IdParseError::InvalidFormat {
+            kind: "ServiceId",
+            expected: "decimal u64 (0..=18446744073709551615)",
+        })
     }
 }
 

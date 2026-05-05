@@ -6,8 +6,25 @@
 //! reflects the change" without loading a kernel. Flow events are
 //! pre-seeded by the test author; `drain_flow_events` returns them in
 //! FIFO order and empties the queue.
+//!
+//! # Iteration determinism
+//!
+//! `services` is a [`BTreeMap`], not a [`HashMap`], per
+//! `.claude/rules/development.md` § Ordered-collection choice. DST
+//! harnesses observe iteration order via invariant evaluators (and
+//! later, via map-iteration callsites in the slice-08 hydrator) — a
+//! `HashMap`'s `RandomState`-driven order would violate the K3
+//! *seed → bit-identical trajectory* property that whitepaper § 21
+//! pins.
+//!
+//! `policy` retains its [`HashMap`] storage because `PolicyKey` (a
+//! `(SpiffeId, SpiffeId)` pair) is point-accessed only — DST
+//! invariants read it via `policy_verdict(&key)`, never iterate
+//! over it. Promoting it to `BTreeMap` would require adding `Ord`
+//! to `PolicyKey` solely for storage convenience, which is wider
+//! than the dst-lint clause asks for.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::net::Ipv4Addr;
 
 use async_trait::async_trait;
@@ -17,12 +34,13 @@ use overdrive_core::traits::dataplane::{
     Backend, Dataplane, DataplaneError, FlowEvent, PolicyKey, Verdict,
 };
 
-/// Sim dataplane state. Each field is a plain `HashMap` / `Vec` behind
-/// a mutex — DST workloads are synchronous-in-tick, so lock contention
-/// is irrelevant.
+/// Sim dataplane state. The `services` map is a `BTreeMap` keyed by
+/// `Ord` on `Ipv4Addr` (load-bearing for DST seed reproducibility —
+/// see module docs); `policy` stays a point-accessed `HashMap`.
 pub struct SimDataplane {
+    // dst-lint: hashmap-ok point-accessed only via `policy_verdict`; never iterated
     policy: Mutex<HashMap<PolicyKey, Verdict>>,
-    services: Mutex<HashMap<Ipv4Addr, Vec<Backend>>>,
+    services: Mutex<BTreeMap<Ipv4Addr, Vec<Backend>>>,
     flow_events: Mutex<Vec<FlowEvent>>,
 }
 
@@ -32,7 +50,7 @@ impl SimDataplane {
     pub fn new() -> Self {
         Self {
             policy: Mutex::new(HashMap::new()),
-            services: Mutex::new(HashMap::new()),
+            services: Mutex::new(BTreeMap::new()),
             flow_events: Mutex::new(Vec::new()),
         }
     }
@@ -57,6 +75,19 @@ impl SimDataplane {
     #[must_use]
     pub fn service_backends(&self, vip: Ipv4Addr) -> Option<Vec<Backend>> {
         self.services.lock().get(&vip).cloned()
+    }
+
+    /// Enumerate every VIP currently registered, in `Ord` order on
+    /// [`Ipv4Addr`]. Iteration order is a function of the keys (the
+    /// `BTreeMap` invariant), never of insertion history — this is
+    /// the property DST seed reproducibility relies on.
+    ///
+    /// Not part of the `Dataplane` trait — this accessor is for
+    /// tests and DST invariant evaluators that need to assert on
+    /// the stored map's iteration order directly.
+    #[must_use]
+    pub fn service_vip_keys(&self) -> Vec<Ipv4Addr> {
+        self.services.lock().keys().copied().collect()
     }
 }
 
