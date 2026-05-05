@@ -73,5 +73,14 @@ nix.workspace  = true
 serial_test.workspace        = true
 tracing-subscriber.workspace = true
 
+# Linux-only dev-deps for S-2.2-01. `serde_json` parses
+# `bpftool map dump -j` output to read the `PKTS` LruHashMap counter
+# value (8 bytes, little-endian u64). The test uses `libc` directly
+# (already a Linux runtime dep above) to open an `AF_PACKET` raw
+# socket and `sendto` 100 minimal Ethernet+IPv4+UDP frames into the
+# peer end of the veth pair.
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+serde_json.workspace = true
+
 [lints]
 workspace = true

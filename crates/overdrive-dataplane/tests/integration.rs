@@ -15,17 +15,16 @@
 #![cfg(feature = "integration-tests")]
 
 mod integration {
-    mod build_rs_artifact_check;
-    /// phase-2-xdp-service-map Slice 01 (US-01; S-2.2-01..03) —
-    /// real-iface XDP attach. RED scaffolds.
-    mod veth_attach;
-    /// phase-2-xdp-service-map Slice 02 (US-02; S-2.2-06) —
-    /// SERVICE_MAP forward path through real veth. RED scaffold.
-    mod service_map_forward;
     /// phase-2-xdp-service-map Slice 03 (US-03; S-2.2-09..11;
     /// ASR-2.2-01) — atomic HASH_OF_MAPS swap zero-drop test.
     /// RED scaffold.
     mod atomic_swap;
+    mod build_rs_artifact_check;
+    /// Shared fixtures (RAII veth-pair, capability gating). Linux-only
+    /// — declared at module scope so siblings reach it via
+    /// `super::helpers::…`.
+    #[cfg(target_os = "linux")]
+    mod helpers;
     /// phase-2-xdp-service-map Slice 04 (US-04; ASR-2.2-02 confirm)
     /// — Maglev disruption bound on real veth. RED scaffold.
     mod maglev_real;
@@ -35,4 +34,10 @@ mod integration {
     /// phase-2-xdp-service-map Slice 06 (US-06; S-2.2-22) —
     /// sanity prologue mixed-batch counter assertions. RED scaffold.
     mod sanity_mixed_batch;
+    /// phase-2-xdp-service-map Slice 02 (US-02; S-2.2-06) —
+    /// SERVICE_MAP forward path through real veth. RED scaffold.
+    mod service_map_forward;
+    /// phase-2-xdp-service-map Slice 01 (US-01; S-2.2-01..03) —
+    /// real-iface XDP attach. RED scaffolds.
+    mod veth_attach;
 }

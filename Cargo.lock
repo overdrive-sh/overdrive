@@ -1827,6 +1827,7 @@ dependencies = [
  "libc",
  "nix",
  "overdrive-core",
+ "serde_json",
  "serial_test",
  "thiserror 2.0.18",
  "tokio",
