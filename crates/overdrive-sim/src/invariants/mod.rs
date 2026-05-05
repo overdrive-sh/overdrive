@@ -20,6 +20,13 @@ use std::fmt::{self, Display};
 use std::str::FromStr;
 
 pub mod evaluators;
+// phase-2-xdp-service-map Slice 03 (US-03; S-2.2-09). The
+// `BackendSetSwapAtomic` invariant pins the SimDataplane's
+// `update_service` to a single mutex-guarded reassignment so
+// observers see either the pre- or post-swap backend set,
+// never a torn state. Mirrors the production `EbpfDataplane`'s
+// atomic HASH_OF_MAPS outer-map swap.
+pub mod backend_set_swap_atomic;
 // phase-2-xdp-service-map DISTILL — RED scaffolds per
 // `docs/feature/phase-2-xdp-service-map/distill/wave-decisions.md`
 // DWD-4. Hosts `assert_hydrator_eventually_converges` +
@@ -140,6 +147,16 @@ pub enum Invariant {
     /// inverse ordering at PR time.
     WriteThroughOrdering,
 
+    /// phase-2-xdp-service-map Slice 03 (US-03; S-2.2-09) — always
+    /// invariant. Every observation of
+    /// `SimDataplane.services[service]` made concurrent with an
+    /// `update_service` call sees either the pre-swap backend set or
+    /// the post-swap backend set — never a torn / mixed state. DST
+    /// mirror of the production `EbpfDataplane`'s atomic outer-map
+    /// swap (`HASH_OF_MAPS`). The evaluator body lives in
+    /// `crate::invariants::backend_set_swap_atomic`.
+    BackendSetSwapAtomic,
+
     /// SCAFFOLD: true — phase-2-xdp-service-map DISTILL per ADR-0042
     /// + architecture.md § 8 *ESR pair*. Eventual: from any
     /// combination of `service_backends` rows + starting BPF map
@@ -187,6 +204,11 @@ impl Invariant {
         Self::ViewStoreRoundtripIsLossless,
         Self::BulkLoadIsDeterministic,
         Self::WriteThroughOrdering,
+        // phase-2-xdp-service-map Slice 03 (US-03; S-2.2-09). The
+        // `BackendSetSwapAtomic` invariant body lands in GREEN of
+        // step 03-01; the variant is registered up front so the
+        // canonical name is stable.
+        Self::BackendSetSwapAtomic,
         // phase-2-xdp-service-map DISTILL — RED scaffolds per
         // `docs/feature/phase-2-xdp-service-map/distill/wave-decisions.md`
         // DWD-4. Evaluator bodies panic until DELIVER fills them.
@@ -221,6 +243,7 @@ impl Invariant {
             Self::ViewStoreRoundtripIsLossless => "view-store-roundtrip-is-lossless",
             Self::BulkLoadIsDeterministic => "bulk-load-is-deterministic",
             Self::WriteThroughOrdering => "write-through-ordering",
+            Self::BackendSetSwapAtomic => "backend-set-swap-atomic",
             Self::HydratorEventuallyConverges => "hydrator-eventually-converges",
             Self::HydratorIdempotentSteadyState => "hydrator-idempotent-steady-state",
         }

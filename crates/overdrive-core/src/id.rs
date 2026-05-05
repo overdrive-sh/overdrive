@@ -778,34 +778,71 @@ impl FromStr for ServiceId {
 /// `BACKEND_MAP` key — a stable monotonic backend identifier
 /// shared across services per architecture.md § 6.
 ///
-/// **RED scaffold** — DELIVER fills the body per Slice 03
-/// (S-2.2-09..11).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+/// `u32` per architecture.md § 6 / § 10. Display emits the decimal
+/// `u32`; `FromStr` parses decimal `u32`. There is no case axis
+/// for a numeric identifier — the case-insensitivity rule from
+/// `development.md` § Newtype completeness applies only to
+/// human-typed string identifiers (matches the `ServiceId` /
+/// `MaglevTableSize` precedent).
+///
+/// # Wire form
+///
+/// `Serialize` / `Deserialize` use the transparent `u32`
+/// representation: JSON form is the bare integer, matching the
+/// `ServiceId` precedent for content-derived numeric IDs.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[serde(transparent)]
 pub struct BackendId(u32);
 
 impl BackendId {
-    /// Validating constructor.
-    pub fn new(_value: u32) -> Result<Self, IdParseError> {
-        todo!("RED scaffold: BackendId::new — see Slice 03 / S-2.2-09")
+    /// Validating constructor over the raw `u32`. Every `u32` is a
+    /// valid `BackendId` — the newtype's role is type-system
+    /// distinctness, not runtime range-check. The `Result` return
+    /// is the project's newtype-completeness shape — see
+    /// [`ServiceVip::new`] for the same rationale.
+    #[allow(clippy::unnecessary_wraps, clippy::missing_const_for_fn)]
+    pub fn new(value: u32) -> Result<Self, IdParseError> {
+        Ok(Self(value))
     }
 
     /// Inner `u32`.
-    pub fn get(self) -> u32 {
+    #[must_use]
+    pub const fn get(self) -> u32 {
         self.0
     }
 }
 
-impl std::fmt::Display for BackendId {
-    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        todo!("RED scaffold: BackendId::fmt — see Slice 03")
+impl Display for BackendId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        Display::fmt(&self.0, f)
     }
 }
 
-impl std::str::FromStr for BackendId {
+impl FromStr for BackendId {
     type Err = IdParseError;
 
-    fn from_str(_s: &str) -> Result<Self, Self::Err> {
-        todo!("RED scaffold: BackendId::from_str — see Slice 03")
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.is_empty() {
+            return Err(IdParseError::Empty { kind: "BackendId" });
+        }
+        s.parse::<u32>().map(Self).map_err(|_| IdParseError::InvalidFormat {
+            kind: "BackendId",
+            expected: "decimal u32 (0..=4294967295)",
+        })
     }
 }
 

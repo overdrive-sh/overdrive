@@ -502,6 +502,13 @@ impl Harness {
                 evaluators::evaluate_bulk_load_is_deterministic().await
             }
             Invariant::WriteThroughOrdering => evaluators::evaluate_write_through_ordering().await,
+            // phase-2-xdp-service-map Slice 03 (US-03; S-2.2-09).
+            // GREEN of step 03-01 lands the real evaluator body
+            // in `crate::invariants::backend_set_swap_atomic`. The
+            // RED-scaffold body panics when invoked.
+            Invariant::BackendSetSwapAtomic => {
+                crate::invariants::backend_set_swap_atomic::evaluate_backend_set_swap_atomic().await
+            }
             // phase-2-xdp-service-map DISTILL — RED scaffolds per
             // `docs/feature/phase-2-xdp-service-map/distill/wave-decisions.md`
             // DWD-4. Bodies panic when invoked. DELIVER's Slice 08
