@@ -29,6 +29,12 @@ pub mod maglev;
 pub mod maps;
 pub mod swap;
 
+// Orphan-GC sweep over `BACKEND_MAP` (step 4 of ADR-0040 § 2's
+// 5-step swap orchestration). Linux-only — the module's
+// `#![cfg(target_os = "linux")]` elides the body on macOS without
+// dragging the cfg gate up here.
+pub mod gc;
+
 // Direct `bpf(2)` syscall surface used where aya 0.13.x ships no
 // typed wrappers (HASH_OF_MAPS construction + `BPF_PROG_TEST_RUN`).
 // Linux-only — gated within the module.
@@ -137,6 +143,25 @@ pub struct EbpfDataplane {
     /// syscalls — never across `.await`.
     backend_map: parking_lot::Mutex<
         aya::maps::HashMap<aya::maps::MapData, u32, crate::maps::BackendEntryPod>,
+    >,
+
+    /// Per-service `BackendId` set tracker. Used by step 4 of the
+    /// 5-step atomic swap (orphan GC) to compute the union of every
+    /// active service's BackendIds — the "live set" against which
+    /// BACKEND_MAP is swept. `BTreeMap` / `BTreeSet` per
+    /// `.claude/rules/development.md` § "Ordered-collection choice"
+    /// — both structures are iterated by the GC sweep (the union
+    /// computation), and deterministic order is the right default
+    /// even though the maps' point-access shape would technically
+    /// permit `HashMap`.
+    ///
+    /// Lifecycle: `update_service` overwrites the entry for the
+    /// active service-key with the new BackendId set BEFORE the GC
+    /// sweep runs, so the GC sees the post-update live set.
+    /// "Remove service" semantics (empty backend list) clear the
+    /// entry.
+    service_backends: parking_lot::Mutex<
+        std::collections::BTreeMap<crate::maps::ServiceKey, std::collections::BTreeSet<u32>>,
     >,
 
     /// Path to the bpffs directory holding the SERVICE_MAP pin.
@@ -306,6 +331,7 @@ impl EbpfDataplane {
             bpf,
             service_map,
             backend_map: parking_lot::Mutex::new(backend_map),
+            service_backends: parking_lot::Mutex::new(std::collections::BTreeMap::new()),
             pin_dir: pin_dir.to_path_buf(),
             _link: link,
         })
@@ -317,6 +343,32 @@ impl EbpfDataplane {
     #[cfg(target_os = "linux")]
     pub fn new(iface: &str) -> Result<Self, DataplaneError> {
         Self::new_with_pin_dir(iface, std::path::Path::new(DEFAULT_PIN_DIR))
+    }
+
+    /// Snapshot of the keys (BackendIds) currently present in
+    /// `BACKEND_MAP`. Returned in arbitrary order — callers that
+    /// depend on stability should collect into a `BTreeSet`.
+    ///
+    /// Observability surface — used by Tier 3 integration tests
+    /// (S-2.2-10 orphan-GC verification) and intended for production
+    /// debug tooling. Does not violate the trait surface boundary
+    /// because the `Dataplane` trait does not need this — it is an
+    /// auxiliary read-side accessor on the concrete type, parallel
+    /// to `drain_flow_events` (which IS on the trait because every
+    /// implementation must surface telemetry).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DataplaneError::LoadFailed`] if the kernel rejects
+    /// a `keys()` iteration step (mid-iteration map mutation, kernel
+    /// out-of-memory, etc).
+    #[cfg(target_os = "linux")]
+    pub fn backend_map_keys(&self) -> Result<Vec<u32>, DataplaneError> {
+        let backend_map = self.backend_map.lock();
+        backend_map
+            .keys()
+            .collect::<Result<Vec<u32>, _>>()
+            .map_err(|e| DataplaneError::LoadFailed(format!("BACKEND_MAP keys(): {e}")))
     }
 
     /// Non-Linux fallthrough — returns
@@ -500,14 +552,32 @@ impl Dataplane for EbpfDataplane {
             }
         })?;
 
-        // Step 4 — Orphan GC.
-        // Phase 2.2 step 03-02 minimal sweep: nothing to do here for
-        // a single-service shape (we only know about backends in the
-        // current set). The broader cross-service sweep (S-2.2-10
-        // — "removing a backend leaves no orphans after GC") is a
-        // separate slice landing that walks BACKEND_MAP keys and
-        // intersects with the union of every active service's
-        // backend set.
+        // Step 4 — Orphan GC (S-2.2-10).
+        //
+        // Update the per-service tracker with this update's BackendId
+        // set, compute the live-set union across every active service,
+        // and sweep BACKEND_MAP for entries no longer referenced.
+        // Without this, BACKEND_MAP fills monotonically as services
+        // shrink — see `crate::gc` module docs for the full rationale.
+        //
+        // Two locks held briefly back-to-back: `service_backends` for
+        // the tracker update + union, `backend_map` for the sweep.
+        // Both critical sections are pure-syscall — no `.await`
+        // between acquire and release.
+        let live_ids: std::collections::BTreeSet<u32> = {
+            let mut tracker = self.service_backends.lock();
+            tracker.insert(service_key, backend_ids.iter().copied().collect());
+            tracker
+                .values()
+                .flat_map(|s| s.iter().copied())
+                .collect::<std::collections::BTreeSet<u32>>()
+        };
+        {
+            let mut backend_map = self.backend_map.lock();
+            crate::gc::sweep_orphan_backends(&mut backend_map, &live_ids).map_err(|e| {
+                DataplaneError::LoadFailed(format!("BACKEND_MAP orphan-GC sweep: {e}"))
+            })?;
+        }
 
         // Step 5 — Old inner map released by aya's ref-counting once
         // it goes out of scope in the kernel-side program tail. The

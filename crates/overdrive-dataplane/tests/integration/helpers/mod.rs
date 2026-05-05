@@ -6,4 +6,5 @@
 //! block in `tests/integration.rs`.
 
 pub mod packets;
+pub mod traffic;
 pub mod veth;
