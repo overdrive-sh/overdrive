@@ -37,6 +37,15 @@
     clippy::missing_const_for_fn
 )]
 
+// Submodules. Each declares its `#[map]` statics and `#[xdp]` /
+// `#[classifier]` programs; aya's `#[xdp]` macro emits the
+// kernel-visible entry point at the function definition site, so
+// pulling these modules in here is what makes the SERVICE_MAP map
+// and `xdp_service_map_lookup` program land in the compiled ELF.
+mod maps;
+mod programs;
+mod shared;
+
 use aya_ebpf::{
     bindings::xdp_action,
     macros::{map, xdp},
