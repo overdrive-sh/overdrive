@@ -43,6 +43,7 @@
 use aya_ebpf::{bindings::BPF_F_PSEUDO_HDR, macros::classifier, programs::TcContext};
 
 use crate::maps::reverse_nat_map::{BackendKey, REVERSE_NAT_MAP, Vip};
+use crate::shared::sanity::{ReverseKey, reverse_key_from_packet};
 
 // TC verdict constants (kernel ABI; <linux/pkt_cls.h>).
 const TC_ACT_OK: i32 = 0;
@@ -124,7 +125,6 @@ fn try_tc_reverse_nat(ctx: &mut TcContext) -> Result<i32, ()> {
     // (2) Bounds-check full IPv4 header + read fields.
     let _ipv4_bounds: *const u8 = unsafe { ptr_at(ctx, ETH_HDR_LEN + IPV4_HDR_LEN - 1)? };
     let proto = unsafe { read_u8(ctx, ETH_HDR_LEN + IPV4_PROTO_OFFSET)? };
-    let src_ip = unsafe { read_u32_be(ctx, ETH_HDR_LEN + IPV4_SRC_IP_OFFSET)? };
 
     // (3) Filter to TCP / UDP.
     let is_tcp = proto == IPV4_PROTO_TCP;
@@ -133,17 +133,39 @@ fn try_tc_reverse_nat(ctx: &mut TcContext) -> Result<i32, ()> {
         return Ok(TC_ACT_OK);
     }
 
-    // (4) Bounds-check L4 header + read source port.
+    // (4) Bounds-check L4 header + grab the bounds-checked source-IP
+    // and source-port pointers ready to feed into
+    // `reverse_key_from_packet`. The IPv4 src-IP cursor is 4 bytes
+    // at `ETH_HDR_LEN + IPV4_SRC_IP_OFFSET`; the L4 src-port cursor
+    // is 2 bytes at `l4_off + L4_SRC_PORT_OFFSET`.
     let l4_off = ETH_HDR_LEN + IPV4_HDR_LEN;
     let (l4_csum_off, l4_hdr_len) =
         if is_tcp { (TCP_CSUM_OFFSET, TCP_HDR_LEN) } else { (UDP_CSUM_OFFSET, UDP_HDR_LEN) };
     let _l4_bounds: *const u8 = unsafe { ptr_at(ctx, l4_off + l4_hdr_len - 1)? };
-    let src_port = unsafe { read_u16_be(ctx, l4_off + L4_SRC_PORT_OFFSET)? };
+    let src_ip_ptr: *const [u8; 4] = unsafe { ptr_at(ctx, ETH_HDR_LEN + IPV4_SRC_IP_OFFSET)? };
+    let src_port_ptr: *const [u8; 2] = unsafe { ptr_at(ctx, l4_off + L4_SRC_PORT_OFFSET)? };
 
-    // (5) Build REVERSE_NAT_MAP key in host order. Backend = source
-    // of the egress response. The userspace handle stores the same
-    // host-order shape — see architecture.md § 11.
-    let key = BackendKey { ip_host: src_ip, port_host: src_port, proto, _pad: 0 };
+    // (5) Build REVERSE_NAT_MAP key in host order. The
+    // `reverse_key_from_packet` helper is the architecture.md § 11
+    // wire→host conversion site — wire bytes in, host-order numeric
+    // out. Userspace seeds REVERSE_NAT_MAP with the same host-order
+    // numeric, no flip on either side. Backend = source of the
+    // egress response.
+    //
+    // SAFETY: `src_ip_ptr` points to 4 valid bytes (bounds checked by
+    // `ptr_at` above); `src_port_ptr` points to 2 valid bytes (the
+    // L4 bounds check covers the source port).
+    let rkey: ReverseKey = unsafe {
+        reverse_key_from_packet(src_ip_ptr as *const u8, src_port_ptr as *const u8, proto)
+    };
+    let src_ip = rkey.ip_host;
+    let src_port = rkey.port_host;
+    let key = BackendKey {
+        ip_host: rkey.ip_host,
+        port_host: rkey.port_host,
+        proto: rkey.proto,
+        _pad: rkey._pad,
+    };
 
     // (6) REVERSE_NAT_MAP lookup. Miss ⇒ TC_ACT_OK pass-through.
     // SAFETY: `REVERSE_NAT_MAP.get` is `unsafe` per aya-ebpf API; the
