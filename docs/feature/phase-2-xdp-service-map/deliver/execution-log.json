@@ -743,6 +743,62 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-05-06T09:26:52Z"
+    },
+    {
+      "sid": "05-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-06T09:29:55Z"
+    },
+    {
+      "sid": "05-04",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-06T09:39:49Z"
+    },
+    {
+      "sid": "05-04",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-06T10:00:14Z"
+    },
+    {
+      "sid": "05-04",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: Tier 3 integration test exercises the full reverse-NAT path through the public Dataplane port",
+      "t": "2026-05-06T10:00:16Z"
+    },
+    {
+      "sid": "05-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-05-06T10:00:22Z"
+    },
+    {
+      "sid": "05-04",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-05-06T10:05:00Z"
+    },
+    {
+      "sid": "05-04",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "CHECKPOINT_PENDING: Option A 3-iface topology attempt empirically surfaced two structural walls (stub-load conflict + XDP_TX-on-veth-peer mechanic) requiring kernel-side architectural change explicitly out of step 05-04 scope per dispatch boundary rules; escalating to orchestrator with concrete failure analysis",
+      "t": "2026-05-06T10:53:04Z"
+    },
+    {
+      "sid": "05-04",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "CHECKPOINT_PENDING: S-2.2-17 real-nc end-to-end blocked by kernel-side architectural change (XDP_REDIRECT-with-L2-rewrite OR XDP_PASS-after-rewrite OR bpf_fib_lookup-then-XDP_TX); per CLAUDE.md No effort/time budget cuts the DES log is a contract \u2014 not committing partial; sibling S-2.2-20 GREEN preserved; escalating to orchestrator",
+      "t": "2026-05-06T10:53:11Z"
     }
   ]
 }

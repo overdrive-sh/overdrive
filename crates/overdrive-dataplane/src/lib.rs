@@ -91,6 +91,14 @@ const SERVICE_MAP_NAME: &str = "SERVICE_MAP";
 #[cfg(target_os = "linux")]
 const BACKEND_MAP_NAME: &str = "BACKEND_MAP";
 
+/// REVERSE_NAT_MAP name — regular HASH map keyed on
+/// `BackendKeyPod { ip_host, port_host, proto, _pad }` →
+/// `VipPod { ip_host, port_host, _pad }`. aya supports HASH natively
+/// (Slice 05-04: promoted from in-memory placeholder per
+/// `crates/overdrive-bpf/src/maps/reverse_nat_map.rs`).
+#[cfg(target_os = "linux")]
+const REVERSE_NAT_MAP_NAME: &str = "REVERSE_NAT_MAP";
+
 /// SERVICE_MAP outer-map capacity in services. 4096 per
 /// architecture.md § 10. MUST match the kernel-side
 /// `MAX_OUTER_ENTRIES` const in `service_map.rs` — kernel and
@@ -150,6 +158,22 @@ pub struct EbpfDataplane {
         aya::maps::HashMap<aya::maps::MapData, u32, crate::maps::BackendEntryPod>,
     >,
 
+    /// Userspace handle to REVERSE_NAT_MAP (regular HASH; aya
+    /// supports it natively). Keys = `BackendKeyPod { backend_ip,
+    /// backend_port, proto, _pad }` host-order; values = `VipPod {
+    /// vip_ip, vip_port, _pad }` host-order. Populated by
+    /// `update_service` so the egress `tc_reverse_nat` program can
+    /// rewrite source 5-tuple back to the VIP on response packets.
+    ///
+    /// Slice 05-04: promotion from the in-memory `BTreeMap`
+    /// placeholder in `maps/reverse_nat_map_handle.rs` to the real
+    /// BPF map. Same `parking_lot::Mutex` rationale as
+    /// `backend_map` — interior mutability across the `&self` trait
+    /// surface, lock dropped before any `.await`.
+    reverse_nat_map: parking_lot::Mutex<
+        aya::maps::HashMap<aya::maps::MapData, crate::maps::BackendKeyPod, crate::maps::VipPod>,
+    >,
+
     /// Per-service `BackendId` set tracker. Used by step 4 of the
     /// 5-step atomic swap (orphan GC) to compute the union of every
     /// active service's BackendIds — the "live set" against which
@@ -169,6 +193,25 @@ pub struct EbpfDataplane {
         std::collections::BTreeMap<crate::maps::ServiceKey, std::collections::BTreeSet<u32>>,
     >,
 
+    /// Per-service `BackendKeyPod` set tracker for REVERSE_NAT_MAP
+    /// purge (Slice 05-04 / S-2.2-18). Records the
+    /// `(backend_ip, backend_port, proto)` keys this service
+    /// installed into REVERSE_NAT_MAP on the previous update; the
+    /// diff against the new set drives the lockstep delete on
+    /// backends that are no longer in the service.
+    ///
+    /// Without this tracker, removed backends would leave stale
+    /// REVERSE_NAT_MAP entries (architecture.md § 11 + S-2.2-18
+    /// purge invariant). Tracking per-service prevents accidental
+    /// cross-service deletion when two services briefly share a
+    /// backend address.
+    service_reverse_nat_keys: parking_lot::Mutex<
+        std::collections::BTreeMap<
+            crate::maps::ServiceKey,
+            std::collections::BTreeSet<crate::maps::BackendKeyPod>,
+        >,
+    >,
+
     /// Path to the bpffs directory holding the SERVICE_MAP pin.
     /// Production: `/sys/fs/bpf/overdrive`. Tests: per-test tempdir
     /// under `/sys/fs/bpf/overdrive-test-<rand>`. The pin file is
@@ -183,6 +226,12 @@ pub struct EbpfDataplane {
     /// only via Drop.
     #[allow(dead_code)]
     _link: aya::programs::xdp::XdpLinkId,
+
+    /// Owns the TC egress attachment for `tc_reverse_nat`. Dropping
+    /// detaches the program; the `clsact` qdisc itself stays on the
+    /// iface (idempotent).
+    #[allow(dead_code)]
+    _tc_link: aya::programs::tc::SchedClassifierLinkId,
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -220,7 +269,7 @@ impl EbpfDataplane {
         use nix::net::if_::if_nametoindex;
 
         use crate::maps::hash_of_maps::HashOfMapsHandle;
-        use crate::maps::{BackendEntryPod, ServiceKey};
+        use crate::maps::{BackendEntryPod, BackendKeyPod, ServiceKey, VipPod};
 
         // Resolve iface name → ifindex first. ENODEV / ENOENT map to
         // the typed IfaceNotFound variant.
@@ -280,11 +329,34 @@ impl EbpfDataplane {
         // variant because the userspace path doesn't go through
         // `bpf.take_map("SERVICE_MAP")` for HoM — we own the
         // typed `HashOfMapsHandle` separately. See research § A.2.
-        let mut bpf = aya::EbpfLoader::new()
+        //
+        // The slice path of aya 0.13 (`EbpfLoader::load(&[u8])`)
+        // rejects BTF-less ELFs in some configurations; `load_file`
+        // is more tolerant. We materialise the embedded slice to a
+        // temp file under `/tmp` (NOT under `pin_dir`, which is a
+        // bpffs mount that rejects regular file writes) and load
+        // from there. The file is removed on success — its bytes
+        // are mmap'd by the kernel via the BPF program file
+        // descriptors, which are kept alive by the `aya::Ebpf`
+        // value.
+        let bpf_temp_path =
+            std::env::temp_dir().join(format!("overdrive_bpf-{}.o", std::process::id()));
+        std::fs::write(&bpf_temp_path, OVERDRIVE_BPF_OBJ).map_err(|e| {
+            DataplaneError::LoadFailed(format!(
+                "write embedded BPF object to {}: {e}",
+                bpf_temp_path.display()
+            ))
+        })?;
+        let bpf = aya::EbpfLoader::new()
             .map_pin_path(pin_dir)
             .allow_unsupported_maps()
-            .load(OVERDRIVE_BPF_OBJ)
-            .map_err(|e| DataplaneError::LoadFailed(format!("aya load: {e}")))?;
+            .load_file(&bpf_temp_path)
+            .map_err(|e| DataplaneError::LoadFailed(format!("aya load: {e}")));
+        // Best-effort cleanup of the temp file — even on load
+        // failure we want to remove it so /tmp does not
+        // accumulate stale bytes.
+        let _ = std::fs::remove_file(&bpf_temp_path);
+        let mut bpf = bpf?;
 
         // Recover BACKEND_MAP typed handle.
         let backend_map = aya::maps::HashMap::<_, u32, BackendEntryPod>::try_from(
@@ -293,6 +365,20 @@ impl EbpfDataplane {
             })?,
         )
         .map_err(|e| DataplaneError::LoadFailed(format!("BACKEND_MAP try_from: {e}")))?;
+
+        // Recover REVERSE_NAT_MAP typed handle. Slice 05-04
+        // promotion: this is the production map the egress
+        // `tc_reverse_nat` program reads on every backend-response
+        // packet. Userspace populates entries in `update_service`;
+        // missing entries cause TC_ACT_OK pass-through (the
+        // architectural intent — late responses from removed
+        // backends are non-LB traffic, see S-2.2-18).
+        let reverse_nat_map = aya::maps::HashMap::<_, BackendKeyPod, VipPod>::try_from(
+            bpf.take_map(REVERSE_NAT_MAP_NAME).ok_or_else(|| {
+                DataplaneError::LoadFailed("REVERSE_NAT_MAP not found in BPF object".into())
+            })?,
+        )
+        .map_err(|e| DataplaneError::LoadFailed(format!("REVERSE_NAT_MAP try_from: {e}")))?;
 
         // Load + attach the service-map lookup program.
         let prog: &mut Xdp = bpf
@@ -332,13 +418,50 @@ impl EbpfDataplane {
             }
         };
 
+        // Attach `tc_reverse_nat` to the iface egress hook.
+        //
+        // Slice 05-04: TC egress is the architecture.md § 5 Q2=A
+        // locked path for source-rewrite of backend response
+        // packets. On kernel < 6.6 (project floor 5.10 LTS) the
+        // legacy netlink TC attach requires a `clsact` qdisc on the
+        // iface first; aya ships `qdisc_add_clsact` for that. On
+        // kernel ≥ 6.6 TCX is used and the `clsact` add is a no-op
+        // cost — calling it is harmless either way (idempotent at
+        // the netlink layer; aya returns Ok or `EEXIST` which we
+        // tolerate).
+        if let Err(e) = aya::programs::tc::qdisc_add_clsact(iface) {
+            // `EEXIST` means the qdisc is already there (re-run
+            // without prior cleanup; TCX-capable kernels). Treat
+            // as success; any other error is a real setup failure.
+            if e.raw_os_error() != Some(libc::EEXIST) {
+                return Err(DataplaneError::LoadFailed(format!("qdisc_add_clsact({iface}): {e}")));
+            }
+        }
+        let tc_prog: &mut aya::programs::SchedClassifier = bpf
+            .program_mut("tc_reverse_nat")
+            .ok_or_else(|| {
+                DataplaneError::LoadFailed("tc_reverse_nat program not found in BPF object".into())
+            })?
+            .try_into()
+            .map_err(|e| DataplaneError::LoadFailed(format!("tc_reverse_nat program type: {e}")))?;
+        tc_prog
+            .load()
+            .map_err(|e| DataplaneError::LoadFailed(format!("tc_reverse_nat.load: {e}")))?;
+        let tc_link =
+            tc_prog.attach(iface, aya::programs::tc::TcAttachType::Egress).map_err(|e| {
+                DataplaneError::LoadFailed(format!("tc_reverse_nat.attach({iface}, Egress): {e}"))
+            })?;
+
         Ok(Self {
             bpf,
             service_map,
             backend_map: parking_lot::Mutex::new(backend_map),
+            reverse_nat_map: parking_lot::Mutex::new(reverse_nat_map),
             service_backends: parking_lot::Mutex::new(std::collections::BTreeMap::new()),
+            service_reverse_nat_keys: parking_lot::Mutex::new(std::collections::BTreeMap::new()),
             pin_dir: pin_dir.to_path_buf(),
             _link: link,
+            _tc_link: tc_link,
         })
     }
 
@@ -348,6 +471,61 @@ impl EbpfDataplane {
     #[cfg(target_os = "linux")]
     pub fn new(iface: &str) -> Result<Self, DataplaneError> {
         Self::new_with_pin_dir(iface, std::path::Path::new(DEFAULT_PIN_DIR))
+    }
+
+    /// Number of entries currently in REVERSE_NAT_MAP.
+    ///
+    /// Observability surface — used by Tier 3 integration tests
+    /// (S-2.2-18 purge invariant verification). Iterates the BPF
+    /// map's `keys()` generator and counts; returns the count plus
+    /// any iteration error from the kernel.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DataplaneError::LoadFailed`] if the kernel rejects
+    /// a `keys()` iteration step.
+    #[cfg(target_os = "linux")]
+    pub fn reverse_nat_map_size(&self) -> Result<usize, DataplaneError> {
+        let map = self.reverse_nat_map.lock();
+        map.keys()
+            .collect::<Result<Vec<_>, _>>()
+            .map(|v| v.len())
+            .map_err(|e| DataplaneError::LoadFailed(format!("REVERSE_NAT_MAP keys(): {e}")))
+    }
+
+    /// Returns `true` if REVERSE_NAT_MAP contains an entry for the
+    /// given `(backend_ip, backend_port)` keyed under TCP.
+    ///
+    /// Observability surface — companion to [`Self::reverse_nat_map_size`].
+    /// Phase 2.2 hardcodes proto = TCP; UDP support follows in a
+    /// future slice when the trait surface gains the field.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DataplaneError::LoadFailed`] if the kernel rejects
+    /// the lookup with anything other than `KeyNotFound` (which is
+    /// the `Ok(false)` path).
+    #[cfg(target_os = "linux")]
+    pub fn reverse_nat_map_has_backend(
+        &self,
+        ip: Ipv4Addr,
+        port: u16,
+    ) -> Result<bool, DataplaneError> {
+        use crate::maps::BackendKeyPod;
+        use overdrive_core::dataplane::backend_key::Proto;
+
+        let key = BackendKeyPod {
+            ip_host: u32::from(ip),
+            port_host: port,
+            proto: Proto::Tcp.as_u8(),
+            _pad: 0,
+        };
+        let map = self.reverse_nat_map.lock();
+        match map.get(&key, 0) {
+            Ok(_) => Ok(true),
+            Err(aya::maps::MapError::KeyNotFound) => Ok(false),
+            Err(e) => Err(DataplaneError::LoadFailed(format!("REVERSE_NAT_MAP get: {e}"))),
+        }
     }
 
     /// Snapshot of the keys (BackendIds) currently present in
@@ -471,6 +649,9 @@ impl Dataplane for EbpfDataplane {
             // No VIP port available; nothing to clear.
             return Ok(());
         }
+
+        use crate::maps::{BackendKeyPod, VipPod};
+        use overdrive_core::dataplane::backend_key::Proto;
 
         let vip_port = backends[0].addr.port();
         let service_key = ServiceKey { vip_host: u32::from(vip), port_host: vip_port, _pad: 0 };
@@ -632,6 +813,75 @@ impl Dataplane for EbpfDataplane {
             crate::gc::sweep_orphan_backends(&mut backend_map, &live_ids).map_err(|e| {
                 DataplaneError::LoadFailed(format!("BACKEND_MAP orphan-GC sweep: {e}"))
             })?;
+        }
+
+        // Step 4b — REVERSE_NAT_MAP lockstep populate + purge
+        // (Slice 05-04, S-2.2-18).
+        //
+        // For every backend in the new set, install
+        // `(backend_ip, backend_port, proto=TCP)` → `(vip_ip, vip_port)`
+        // so the egress `tc_reverse_nat` program can rewrite the
+        // source 5-tuple of response packets back to the VIP.
+        //
+        // For backends that were in the PRIOR set but are not in
+        // the new set, delete the corresponding REVERSE_NAT_MAP
+        // entry — without this, a late response from a removed
+        // backend would still be rewritten to the VIP, leaking
+        // service identity across removals (the architectural
+        // invariant S-2.2-18 pins).
+        //
+        // Phase 2.2 hardcodes `proto = TCP` because the trait
+        // surface does not yet carry per-backend protocol; UDP
+        // services would lift this once the trait gains the field.
+        // Per `.claude/rules/development.md` § "Persist inputs, not
+        // derived state" — the per-service tracker carries the
+        // BackendKeyPods themselves (the authoritative inputs), not
+        // a derived "should-be-deleted" flag.
+        let new_keys: std::collections::BTreeSet<BackendKeyPod> = backends
+            .iter()
+            .filter_map(|backend| match backend.addr.ip() {
+                std::net::IpAddr::V4(v4) => Some(BackendKeyPod {
+                    ip_host: u32::from(v4),
+                    port_host: backend.addr.port(),
+                    proto: Proto::Tcp.as_u8(),
+                    _pad: 0,
+                }),
+                std::net::IpAddr::V6(_) => None,
+            })
+            .collect();
+        let vip_value = VipPod { ip_host: u32::from(vip), port_host: vip_port, _pad: 0 };
+        let prior_keys: std::collections::BTreeSet<BackendKeyPod> = {
+            let mut tracker = self.service_reverse_nat_keys.lock();
+            // Snapshot the prior set BEFORE overwriting; the diff
+            // (`prior - new`) drives the purge below.
+            let prior = tracker.get(&service_key).cloned().unwrap_or_default();
+            tracker.insert(service_key, new_keys.clone());
+            prior
+        };
+        {
+            let mut reverse_nat_map = self.reverse_nat_map.lock();
+            // Insert / update every key in the new set. `insert`
+            // with flags=0 (BPF_ANY) accepts both "new" and
+            // "existing" — idempotent.
+            for key in &new_keys {
+                reverse_nat_map.insert(key, vip_value, 0).map_err(|e| {
+                    DataplaneError::LoadFailed(format!("REVERSE_NAT_MAP insert: {e}"))
+                })?;
+            }
+            // Purge keys that were in the prior set but are not in
+            // the new set. `remove` returns `Err(KeyNotFound)` for
+            // entries already gone — fold into Ok().
+            for stale in prior_keys.difference(&new_keys) {
+                match reverse_nat_map.remove(stale) {
+                    Ok(()) => {}
+                    Err(aya::maps::MapError::KeyNotFound) => {}
+                    Err(e) => {
+                        return Err(DataplaneError::LoadFailed(format!(
+                            "REVERSE_NAT_MAP purge: {e}"
+                        )));
+                    }
+                }
+            }
         }
 
         // Step 5 — Old inner map released by aya's ref-counting once

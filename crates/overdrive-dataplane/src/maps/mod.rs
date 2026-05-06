@@ -37,6 +37,7 @@ pub mod hash_of_maps;
 #[cfg(target_os = "linux")]
 #[allow(clippy::pub_underscore_fields)]
 pub mod wire {
+    use overdrive_core::dataplane::backend_key::BackendKey;
     use overdrive_core::id::ServiceVip;
     use overdrive_core::traits::dataplane::{Backend, DataplaneError};
 
@@ -121,9 +122,74 @@ pub mod wire {
             }
         }
     }
+
+    /// `REVERSE_NAT_MAP` outer-key POD. 8-byte host-order tuple
+    /// `(backend_ip, backend_port, proto, _pad)`. Matches
+    /// `crates/overdrive-bpf/src/maps/reverse_nat_map.rs`'s kernel
+    /// `BackendKey` byte-for-byte. Used by the egress reverse-NAT
+    /// program to look up `(backend_ip, backend_port, proto)` →
+    /// `Vip` for source-rewrite on response packets.
+    ///
+    /// Slice 05-04 promotion: `BackendKeyPod` lives in the public
+    /// `wire` module so `EbpfDataplane` can name it as a struct
+    /// field type (the typed BPF map handle). The earlier
+    /// `pub(crate)` POD in `reverse_nat_map_handle.rs` is the same
+    /// shape, distinct only because that module ships an in-memory
+    /// proptest stand-in.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+    #[repr(C)]
+    pub struct BackendKeyPod {
+        /// Backend IPv4 address. Host-order.
+        pub ip_host: u32,
+        /// Backend port. Host-order.
+        pub port_host: u16,
+        /// L4 protocol — IANA proto number (TCP=6, UDP=17).
+        pub proto: u8,
+        /// Padding for 8-byte alignment in BPF map storage. Always 0.
+        pub _pad: u8,
+    }
+
+    // SAFETY: repr(C), all fields fully byte-addressable, `_pad`
+    // always set to 0. aya needs the marker for raw map access.
+    unsafe impl aya::Pod for BackendKeyPod {}
+
+    impl BackendKeyPod {
+        /// Encode a typed `BackendKey` newtype to the host-order POD.
+        /// Infallible for IPv4 — every `(Ipv4Addr, u16, Proto)` triple
+        /// is a valid POD shape; the newtype already validates the
+        /// inputs at construction.
+        #[must_use]
+        pub fn from_typed(key: BackendKey) -> Self {
+            Self {
+                ip_host: u32::from(key.ip),
+                port_host: key.port,
+                proto: key.proto.as_u8(),
+                _pad: 0,
+            }
+        }
+    }
+
+    /// `REVERSE_NAT_MAP` value POD. 8-byte host-order
+    /// `(vip_ip, vip_port)` tuple. Matches
+    /// `crates/overdrive-bpf/src/maps/reverse_nat_map.rs`'s kernel
+    /// `Vip` byte-for-byte.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    #[repr(C)]
+    pub struct VipPod {
+        /// VIP IPv4 address. Host-order.
+        pub ip_host: u32,
+        /// VIP port. Host-order.
+        pub port_host: u16,
+        /// Padding for 8-byte alignment. Always 0.
+        pub _pad: u16,
+    }
+
+    // SAFETY: repr(C), no padding-uninit issues (we always zero
+    // `_pad`); aya needs the marker for raw map access.
+    unsafe impl aya::Pod for VipPod {}
 }
 
 // Re-export at the crate-public level for `EbpfDataplane` field
 // naming and the integration tests.
 #[cfg(target_os = "linux")]
-pub use wire::{BackendEntryPod, ServiceKey};
+pub use wire::{BackendEntryPod, BackendKeyPod, ServiceKey, VipPod};

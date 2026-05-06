@@ -582,12 +582,7 @@ async fn dispatch_single(
         // `Dataplane::update_service(service_id, vip, backends)`
         // and writes the outcome row to `service_hydration_results`
         // per architecture.md § 7 *Failure surface*.
-        Action::DataplaneUpdateService {
-            service_id: _,
-            vip: _,
-            backends: _,
-            correlation: _,
-        } => {
+        Action::DataplaneUpdateService { service_id: _, vip: _, backends: _, correlation: _ } => {
             todo!(
                 "RED scaffold S-2.2-28 — dispatch \
                  Action::DataplaneUpdateService via \
