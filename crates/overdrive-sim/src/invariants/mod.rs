@@ -35,6 +35,13 @@ pub mod backend_set_swap_atomic;
 // pins the churn property; this invariant pins the distribution
 // property, both ride on the same pure function.
 pub mod maglev_distribution;
+// phase-2-xdp-service-map Slice 04 (US-04; S-2.2-14 sibling).
+// The `MaglevDeterministic` invariant pins the K3 twin-run identity
+// property of `maglev::generate` — two calls with identical inputs
+// return bit-identical `Vec<BackendId>` outputs. Sibling to
+// `MaglevDistributionEven`: that invariant pins the steady-state
+// distribution property, this one pins the determinism property.
+pub mod maglev_deterministic;
 // phase-2-xdp-service-map DISTILL — RED scaffolds per
 // `docs/feature/phase-2-xdp-service-map/distill/wave-decisions.md`
 // DWD-4. Hosts `assert_hydrator_eventually_converges` +
@@ -177,6 +184,18 @@ pub enum Invariant {
     /// `crate::invariants::maglev_distribution`.
     MaglevDistributionEven,
 
+    /// phase-2-xdp-service-map Slice 04 (US-04; S-2.2-14 sibling) —
+    /// always invariant. Two successive `maglev::generate` calls with
+    /// identical inputs return bit-identical `Vec<BackendId>` outputs.
+    /// The K3 reproducibility property (whitepaper §21) projected onto
+    /// the Maglev permutation: any seeded fixture's BPF inner-map
+    /// contents must be byte-equal across twin runs. Sibling to
+    /// `MaglevDistributionEven`: that invariant pins the steady-state
+    /// distribution property, this one pins the determinism property.
+    /// The evaluator body lives in
+    /// `crate::invariants::maglev_deterministic`.
+    MaglevDeterministic,
+
     /// SCAFFOLD: true — phase-2-xdp-service-map DISTILL per ADR-0042
     /// + architecture.md § 8 *ESR pair*. Eventual: from any
     /// combination of `service_backends` rows + starting BPF map
@@ -235,6 +254,12 @@ impl Invariant {
         // disruption-bound proptest at
         // `tests/integration/maglev_churn.rs`.
         Self::MaglevDistributionEven,
+        // phase-2-xdp-service-map Slice 04 (US-04; S-2.2-14 sibling).
+        // The `MaglevDeterministic` invariant body lives in
+        // `crate::invariants::maglev_deterministic`. Sibling to
+        // `MaglevDistributionEven` — both ride on the same pure
+        // `maglev::generate` function.
+        Self::MaglevDeterministic,
         // phase-2-xdp-service-map DISTILL — RED scaffolds per
         // `docs/feature/phase-2-xdp-service-map/distill/wave-decisions.md`
         // DWD-4. Evaluator bodies panic until DELIVER fills them.
@@ -271,6 +296,7 @@ impl Invariant {
             Self::WriteThroughOrdering => "write-through-ordering",
             Self::BackendSetSwapAtomic => "backend-set-swap-atomic",
             Self::MaglevDistributionEven => "maglev-distribution-even",
+            Self::MaglevDeterministic => "maglev-deterministic",
             Self::HydratorEventuallyConverges => "hydrator-eventually-converges",
             Self::HydratorIdempotentSteadyState => "hydrator-idempotent-steady-state",
         }

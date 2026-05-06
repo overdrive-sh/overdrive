@@ -349,6 +349,15 @@ impl Harness {
     /// [`crate::invariants::evaluators`]. Every invariant in the
     /// catalogue maps to exactly one evaluator; unknown variants cannot
     /// compile because the enum is exhaustive.
+    ///
+    /// `#[allow(clippy::too_many_lines)]`: the body is a pure
+    /// `match` over `Invariant::ALL` — one arm per variant, with each
+    /// arm's body being a single delegating call. Extracting the arms
+    /// to a per-invariant helper would split the exhaustive match
+    /// across two files without removing any logic. Documentation
+    /// comments per arm push the line count over the 100-line lint
+    /// threshold; the dispatch shape is the right one.
+    #[allow(clippy::too_many_lines)]
     async fn evaluate(
         invariant: Invariant,
         seed: u64,
@@ -516,6 +525,14 @@ impl Harness {
             // `crates/overdrive-sim/tests/integration/maglev_churn.rs`.
             Invariant::MaglevDistributionEven => {
                 crate::invariants::maglev_distribution::evaluate_maglev_distribution_even()
+            }
+            // phase-2-xdp-service-map Slice 04 (US-04; S-2.2-14 sibling).
+            // GREEN of step 04-05 lands the real evaluator body in
+            // `crate::invariants::maglev_deterministic`. Sibling to
+            // `MaglevDistributionEven` — both ride on the same pure
+            // `maglev::generate` function.
+            Invariant::MaglevDeterministic => {
+                crate::invariants::maglev_deterministic::evaluate_maglev_deterministic()
             }
             // phase-2-xdp-service-map DISTILL — RED scaffolds per
             // `docs/feature/phase-2-xdp-service-map/distill/wave-decisions.md`
