@@ -43,12 +43,10 @@
 use aya_ebpf::{bindings::BPF_F_PSEUDO_HDR, macros::classifier, programs::TcContext};
 
 use crate::maps::reverse_nat_map::{BackendKey, REVERSE_NAT_MAP, Vip};
-use crate::programs::sanity::{Verdict as SanityVerdict, sanity_check};
 use crate::shared::sanity::{ReverseKey, reverse_key_from_packet};
 
 // TC verdict constants (kernel ABI; <linux/pkt_cls.h>).
 const TC_ACT_OK: i32 = 0;
-const TC_ACT_SHOT: i32 = 2;
 
 // Header offsets / constants — same shape as `xdp_service_map.rs`.
 const ETH_HDR_LEN: usize = 14;
@@ -92,20 +90,6 @@ unsafe fn read_u8(ctx: &TcContext, offset: usize) -> Result<u8, ()> {
     Ok(unsafe { *p })
 }
 
-#[inline(always)]
-unsafe fn read_u16_be(ctx: &TcContext, offset: usize) -> Result<u16, ()> {
-    // SAFETY: bounds-checked by `ptr_at`.
-    let p: *const [u8; 2] = unsafe { ptr_at(ctx, offset) }?;
-    Ok(u16::from_be_bytes(unsafe { *p }))
-}
-
-#[inline(always)]
-unsafe fn read_u32_be(ctx: &TcContext, offset: usize) -> Result<u32, ()> {
-    // SAFETY: bounds-checked by `ptr_at`.
-    let p: *const [u8; 4] = unsafe { ptr_at(ctx, offset) }?;
-    Ok(u32::from_be_bytes(unsafe { *p }))
-}
-
 // ---------- main program ----------
 
 #[classifier]
@@ -118,32 +102,16 @@ pub fn tc_reverse_nat(mut ctx: TcContext) -> i32 {
 
 #[inline(always)]
 fn try_tc_reverse_nat(ctx: &mut TcContext) -> Result<i32, ()> {
-    // (0) Sanity prologue per Slice 06 / ADR-0040 Q3=C — five
-    //     Cloudflare-order checks, first failure short-circuits.
-    //     The helper's `Verdict::Drop` arm has already incremented
-    //     `DROP_COUNTER[MalformedHeader]`; we translate the
-    //     three-way decision into the TC verdict (Drop → TC_ACT_SHOT,
-    //     PassToKernel → TC_ACT_OK).
-    let _ipv4_bounds_pre: *const u8 = unsafe { ptr_at(ctx, ETH_HDR_LEN + IPV4_HDR_LEN - 1)? };
-    let _l4_bounds_pre: *const u8 =
-        unsafe { ptr_at(ctx, ETH_HDR_LEN + IPV4_HDR_LEN + TCP_HDR_LEN - 1)? };
-    let packet_len: usize = ctx.data_end().saturating_sub(ctx.data());
-    let sanity = sanity_check(
-        ETH_HDR_LEN,
-        ETH_HDR_LEN + IPV4_HDR_LEN,
-        packet_len,
-        |off| unsafe { read_u8(ctx, off) },
-        |off| unsafe { read_u16_be(ctx, off) },
-    );
-    match sanity {
-        SanityVerdict::Continue => {}
-        SanityVerdict::Drop => return Ok(TC_ACT_SHOT),
-        SanityVerdict::PassToKernel => return Ok(TC_ACT_OK),
-    }
-
-    // (1) Read protocol — sanity prologue has already validated
-    //     EtherType, IPv4 header bounds, version+IHL, total_length,
-    //     and that proto ∈ {TCP, UDP}.
+    // (0) Sanity prologue is XDP-ingress-only per ADR-0040 Q3 amendment
+    //     (commit d6fb506). At TC egress the skb's linear region can be
+    //     shorter than the IPv4 `total_length` field (GSO / re-linearisation),
+    //     so the prologue's `claimed_pkt_len > packet_len` check fires on
+    //     forwarded skbs and silently drops them. The check is correct at
+    //     XDP ingress (where the full frame is in the linear region) but
+    //     wrong here.
+    //
+    // (1) Read protocol. The IPv4+L4 bounds are checked below where they
+    //     are first dereferenced.
     let proto = unsafe { read_u8(ctx, ETH_HDR_LEN + IPV4_PROTO_OFFSET)? };
     let is_tcp = proto == IPV4_PROTO_TCP;
     let is_udp = proto == IPV4_PROTO_UDP;

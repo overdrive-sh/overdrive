@@ -541,6 +541,14 @@ impl Harness {
             Invariant::ReverseNatLockstep => {
                 crate::invariants::reverse_nat_lockstep::evaluate_reverse_nat_lockstep().await
             }
+            // phase-2-xdp-service-map Slice 06 (US-06; S-2.2-22
+            // sibling). GREEN of step 06-04 lands the real evaluator
+            // body in `crate::invariants::sanity_checks_fire`. Sibling
+            // to the Tier 3 mixed-batch test at
+            // `crates/overdrive-dataplane/tests/integration/sanity_mixed_batch.rs`.
+            Invariant::SanityChecksFireBeforeServiceMap => {
+                crate::invariants::sanity_checks_fire::evaluate_sanity_checks_fire_before_service_map().await
+            }
             // phase-2-xdp-service-map DISTILL — RED scaffolds per
             // `docs/feature/phase-2-xdp-service-map/distill/wave-decisions.md`
             // DWD-4. Bodies panic when invoked. DELIVER's Slice 08

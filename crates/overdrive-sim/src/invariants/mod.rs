@@ -50,6 +50,13 @@ pub mod maglev_deterministic;
 // mutex acquisition. Mirrors the production `EbpfDataplane`'s
 // `REVERSE_NAT_MAP` lockstep contract.
 pub mod reverse_nat_lockstep;
+// phase-2-xdp-service-map Slice 06 (US-06; S-2.2-22 sibling). The
+// `SanityChecksFireBeforeServiceMap` invariant pins the kernel-side
+// contract that every sanity-rule-violating packet produces
+// `XDP_DROP` (slot `MalformedHeader` increments) AND short-circuits
+// before SERVICE_MAP lookup. Sibling to the Tier 3 mixed-batch test
+// at `crates/overdrive-dataplane/tests/integration/sanity_mixed_batch.rs`.
+pub mod sanity_checks_fire;
 // phase-2-xdp-service-map DISTILL — RED scaffolds per
 // `docs/feature/phase-2-xdp-service-map/distill/wave-decisions.md`
 // DWD-4. Hosts `assert_hydrator_eventually_converges` +
@@ -214,6 +221,20 @@ pub enum Invariant {
     /// in `crate::invariants::reverse_nat_lockstep`.
     ReverseNatLockstep,
 
+    /// phase-2-xdp-service-map Slice 06 (US-06; S-2.2-22 sibling) —
+    /// always invariant. Every packet whose classification violates
+    /// a sanity-prologue rule (truncated IPv4 header, pathological
+    /// TCP flags, IPv6 `EtherType` when the LB is IPv4-only, ...)
+    /// MUST cause the kernel-side dataplane to drop the frame and
+    /// MUST short-circuit BEFORE `SERVICE_MAP` lookup. Mirror of the
+    /// production XDP / TC sanity prologue: `MalformedHeader` slot
+    /// increments and the program returns `XDP_DROP` / `TC_ACT_SHOT`
+    /// before any `HoM` lookup. The evaluator body lives in
+    /// `crate::invariants::sanity_checks_fire`. Sibling to the Tier 3
+    /// mixed-batch test at
+    /// `crates/overdrive-dataplane/tests/integration/sanity_mixed_batch.rs`.
+    SanityChecksFireBeforeServiceMap,
+
     /// SCAFFOLD: true — phase-2-xdp-service-map DISTILL per ADR-0042
     /// + architecture.md § 8 *ESR pair*. Eventual: from any
     /// combination of `service_backends` rows + starting BPF map
@@ -282,6 +303,12 @@ impl Invariant {
         // `ReverseNatLockstep` invariant body lives in
         // `crate::invariants::reverse_nat_lockstep`.
         Self::ReverseNatLockstep,
+        // phase-2-xdp-service-map Slice 06 (US-06; S-2.2-22 sibling).
+        // The `SanityChecksFireBeforeServiceMap` invariant body lives
+        // in `crate::invariants::sanity_checks_fire`. Sibling to the
+        // Tier 3 mixed-batch test at
+        // `crates/overdrive-dataplane/tests/integration/sanity_mixed_batch.rs`.
+        Self::SanityChecksFireBeforeServiceMap,
         // phase-2-xdp-service-map DISTILL — RED scaffolds per
         // `docs/feature/phase-2-xdp-service-map/distill/wave-decisions.md`
         // DWD-4. Evaluator bodies panic until DELIVER fills them.
@@ -320,6 +347,7 @@ impl Invariant {
             Self::MaglevDistributionEven => "maglev-distribution-even",
             Self::MaglevDeterministic => "maglev-deterministic",
             Self::ReverseNatLockstep => "reverse-nat-lockstep",
+            Self::SanityChecksFireBeforeServiceMap => "sanity-checks-fire-before-service-map",
             Self::HydratorEventuallyConverges => "hydrator-eventually-converges",
             Self::HydratorIdempotentSteadyState => "hydrator-idempotent-steady-state",
         }

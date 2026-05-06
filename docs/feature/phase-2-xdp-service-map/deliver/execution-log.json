@@ -939,6 +939,69 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-05-06T14:41:44Z"
+    },
+    {
+      "sid": "06-04",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-06T14:49:52Z"
+    },
+    {
+      "sid": "06-04",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-06T14:51:41Z"
+    },
+    {
+      "sid": "06-04",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: step 06-04 ships only Tier 3 + Tier 1 invariant + helper bridge; unit-level sanity tests landed at 06-02 (Tier 2 PKTGEN/SETUP/CHECK)",
+      "t": "2026-05-06T14:51:49Z"
+    },
+    {
+      "sid": "06-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "FAIL: S-2.2-17 (real_tcp_connection_completes_through_vip_with_payload_echo) still RED on Lima despite NOTRACK bridge install per ADR-0044 Decision 6. Bridge installs correctly (verified manually via iptables -t raw -L PREROUTING -nv inside lb-ns) but data-bearing TCP segments are still dropped between lb_veth_b ingress and lb_veth_a egress while length-0 segments (SYN+ACK, ACK, FIN+ACK) traverse correctly. Pcap evidence at /tmp/ovd-rnat3-1761788 shows 6 retransmits of [P.] seq 1:21 length 20 at lb_b but zero at lb_a. Implementation in working tree is structurally correct (5 files: netns.rs NOTRACK + IptablesInstall variant, sanity_mixed_batch.rs Tier 3 test passing in isolation, sanity_checks_fire.rs DST invariant 167/167 sim tests passing, mod.rs registration, harness.rs 8-line dispatch arm). Workspace check + clippy clean. mixed_batch_increments_per_class_counters_correctly passes alone but flakes when concurrent with build_rs_artifact_check sibling (pre-existing). Bridge as specified in ADR-0044 Decision 6 is necessary but not sufficient to resolve S-2.2-17 \u2014 needs architect review for completeness.",
+      "t": "2026-05-06T15:44:59Z"
+    },
+    {
+      "sid": "06-04",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: GREEN failed on S-2.2-17 (the load-bearing acceptance gate per dispatch instructions and ADR-0044 Decision 6). Per crafter dispatch boundary rules (\"Do NOT log COMMIT EXECUTED PASS unless S-2.2-17 actually GREENs on Lima\") and Test Integrity \u00a7 Cardinal Rule (NEVER modify a failing test to make it pass), the implementation is not committable as-is. The 5-file working tree (NOTRACK bridge in helpers/netns.rs, Tier 3 sanity_mixed_batch.rs, DST sanity_checks_fire.rs invariant, mod.rs registration, harness.rs dispatch arm) is structurally correct and consistent with ADR-0044 Decision 6 spec, but the bridge does not fully resolve S-2.2-17 data-segment drop. Recommend architect review of ADR-0044 Decision 6 completeness before re-dispatch. Pcap evidence preserved at /tmp/ovd-rnat3-1761788 in Lima.",
+      "t": "2026-05-06T15:45:12Z"
+    },
+    {
+      "sid": "06-04",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-06T18:13:40Z"
+    },
+    {
+      "sid": "06-04",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: prior 06-04 partial work already landed sanity_mixed_batch.rs",
+      "t": "2026-05-06T18:13:50Z"
+    },
+    {
+      "sid": "06-04",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: prior 06-04 partial work already landed sanity_checks_fire.rs DST invariant",
+      "t": "2026-05-06T18:13:51Z"
+    },
+    {
+      "sid": "06-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-05-06T18:16:35Z"
     }
   ]
 }
