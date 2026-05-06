@@ -904,6 +904,41 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-05-06T13:33:38Z"
+    },
+    {
+      "sid": "06-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-06T14:41:22Z"
+    },
+    {
+      "sid": "06-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: scope covered by 06-02 commit c601eda; existing tests in sanity_prologue_drops.rs satisfy all 06-03 acceptance criteria (verified)",
+      "t": "2026-05-06T14:41:27Z"
+    },
+    {
+      "sid": "06-03",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: scope covered by 06-02 commit c601eda",
+      "t": "2026-05-06T14:41:31Z"
+    },
+    {
+      "sid": "06-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-06T14:41:38Z"
+    },
+    {
+      "sid": "06-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-06T14:41:44Z"
     }
   ]
 }
