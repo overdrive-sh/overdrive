@@ -42,6 +42,14 @@ pub mod maglev_distribution;
 // `MaglevDistributionEven`: that invariant pins the steady-state
 // distribution property, this one pins the determinism property.
 pub mod maglev_deterministic;
+// phase-2-xdp-service-map Slice 05 (US-05; S-2.2-20). The
+// `ReverseNatLockstep` invariant pins the lockstep contract between
+// `SimDataplane.services` and `SimDataplane.reverse_nat`: every
+// forward-path service backend has a matching `REVERSE_NAT` entry
+// pointing back to the original VIP, written/removed under one
+// mutex acquisition. Mirrors the production `EbpfDataplane`'s
+// `REVERSE_NAT_MAP` lockstep contract.
+pub mod reverse_nat_lockstep;
 // phase-2-xdp-service-map DISTILL — RED scaffolds per
 // `docs/feature/phase-2-xdp-service-map/distill/wave-decisions.md`
 // DWD-4. Hosts `assert_hydrator_eventually_converges` +
@@ -196,6 +204,16 @@ pub enum Invariant {
     /// `crate::invariants::maglev_deterministic`.
     MaglevDeterministic,
 
+    /// phase-2-xdp-service-map Slice 05 (US-05; S-2.2-20) — always
+    /// invariant. Every forward-path `SimDataplane.services[vip]`
+    /// entry has a matching `reverse_nat[BackendKey::from(backend)]`
+    /// entry mapping back to the original VIP; removing a backend
+    /// purges both in lockstep. DST mirror of the production
+    /// `EbpfDataplane`'s `REVERSE_NAT_MAP` lockstep contract — one
+    /// mutex acquisition guards both maps. The evaluator body lives
+    /// in `crate::invariants::reverse_nat_lockstep`.
+    ReverseNatLockstep,
+
     /// SCAFFOLD: true — phase-2-xdp-service-map DISTILL per ADR-0042
     /// + architecture.md § 8 *ESR pair*. Eventual: from any
     /// combination of `service_backends` rows + starting BPF map
@@ -260,6 +278,10 @@ impl Invariant {
         // `MaglevDistributionEven` — both ride on the same pure
         // `maglev::generate` function.
         Self::MaglevDeterministic,
+        // phase-2-xdp-service-map Slice 05 (US-05; S-2.2-20). The
+        // `ReverseNatLockstep` invariant body lives in
+        // `crate::invariants::reverse_nat_lockstep`.
+        Self::ReverseNatLockstep,
         // phase-2-xdp-service-map DISTILL — RED scaffolds per
         // `docs/feature/phase-2-xdp-service-map/distill/wave-decisions.md`
         // DWD-4. Evaluator bodies panic until DELIVER fills them.
@@ -297,6 +319,7 @@ impl Invariant {
             Self::BackendSetSwapAtomic => "backend-set-swap-atomic",
             Self::MaglevDistributionEven => "maglev-distribution-even",
             Self::MaglevDeterministic => "maglev-deterministic",
+            Self::ReverseNatLockstep => "reverse-nat-lockstep",
             Self::HydratorEventuallyConverges => "hydrator-eventually-converges",
             Self::HydratorIdempotentSteadyState => "hydrator-idempotent-steady-state",
         }

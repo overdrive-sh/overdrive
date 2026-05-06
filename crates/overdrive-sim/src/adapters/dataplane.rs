@@ -23,6 +23,17 @@
 //! over it. Promoting it to `BTreeMap` would require adding `Ord`
 //! to `PolicyKey` solely for storage convenience, which is wider
 //! than the dst-lint clause asks for.
+//!
+//! # `REVERSE_NAT` lockstep (Slice 05 / S-2.2-20)
+//!
+//! `services` and `reverse_nat` live inside a single
+//! [`Mutex<ServiceState>`] so that every `update_service` call writes
+//! both maps under one mutex acquisition. Mirrors the production
+//! `EbpfDataplane`'s `REVERSE_NAT_MAP` lockstep contract: the
+//! userspace-side update writes / removes `REVERSE_NAT_MAP` entries in
+//! the same critical section that swaps the `SERVICE_MAP` outer-map
+//! slot. Observers cannot witness a partial update — the
+//! `ReverseNatLockstep` invariant pins this at PR time.
 
 use std::collections::{BTreeMap, HashMap};
 use std::net::Ipv4Addr;
@@ -30,17 +41,44 @@ use std::net::Ipv4Addr;
 use async_trait::async_trait;
 use parking_lot::Mutex;
 
+use overdrive_core::dataplane::backend_key::{BackendKey, Proto};
 use overdrive_core::traits::dataplane::{
     Backend, Dataplane, DataplaneError, FlowEvent, PolicyKey, Verdict,
 };
 
-/// Sim dataplane state. The `services` map is a `BTreeMap` keyed by
-/// `Ord` on `Ipv4Addr` (load-bearing for DST seed reproducibility —
-/// see module docs); `policy` stays a point-accessed `HashMap`.
+/// Forward-path + reverse-NAT state guarded by a single mutex so the
+/// two maps stay in lockstep. Per `.claude/rules/development.md`
+/// § *Production code is not shaped by simulation*, this mirrors the
+/// production atomicity property — observers see either the
+/// pre-update or the post-update view of BOTH maps, never a mixed
+/// state.
+struct ServiceState {
+    /// Forward-path: VIP → backend set.
+    services: BTreeMap<Ipv4Addr, Vec<Backend>>,
+    /// Reverse-path: `(backend_ip, backend_port, proto) → original
+    /// VIP`. The egress reverse-NAT path uses this to rewrite the
+    /// source 5-tuple of a backend response packet back to the VIP
+    /// the client connected to.
+    reverse_nat: BTreeMap<BackendKey, Ipv4Addr>,
+}
+
+impl ServiceState {
+    const fn new() -> Self {
+        Self { services: BTreeMap::new(), reverse_nat: BTreeMap::new() }
+    }
+}
+
+/// Sim dataplane state.
+///
+/// The forward-path `services` map and the `reverse_nat` map share
+/// a single [`Mutex`] so every `update_service` write touches both
+/// under one acquisition (Slice 05 lockstep contract). `policy`
+/// stays a point-accessed `HashMap` guarded by a separate mutex —
+/// orthogonal to service routing.
 pub struct SimDataplane {
     // dst-lint: hashmap-ok point-accessed only via `policy_verdict`; never iterated
     policy: Mutex<HashMap<PolicyKey, Verdict>>,
-    services: Mutex<BTreeMap<Ipv4Addr, Vec<Backend>>>,
+    state: Mutex<ServiceState>,
     flow_events: Mutex<Vec<FlowEvent>>,
 }
 
@@ -50,7 +88,7 @@ impl SimDataplane {
     pub fn new() -> Self {
         Self {
             policy: Mutex::new(HashMap::new()),
-            services: Mutex::new(BTreeMap::new()),
+            state: Mutex::new(ServiceState::new()),
             flow_events: Mutex::new(Vec::new()),
         }
     }
@@ -74,7 +112,7 @@ impl SimDataplane {
     /// Read the backend set currently stored for a service VIP.
     #[must_use]
     pub fn service_backends(&self, vip: Ipv4Addr) -> Option<Vec<Backend>> {
-        self.services.lock().get(&vip).cloned()
+        self.state.lock().services.get(&vip).cloned()
     }
 
     /// Enumerate every VIP currently registered, in `Ord` order on
@@ -87,7 +125,26 @@ impl SimDataplane {
     /// the stored map's iteration order directly.
     #[must_use]
     pub fn service_vip_keys(&self) -> Vec<Ipv4Addr> {
-        self.services.lock().keys().copied().collect()
+        self.state.lock().services.keys().copied().collect()
+    }
+
+    /// Read the original VIP recorded in the reverse-NAT map for the
+    /// given `(backend_ip, backend_port, proto)` triple. Not part of
+    /// the `Dataplane` trait — this accessor is for tests and DST
+    /// invariant evaluators (Slice 05 / `ReverseNatLockstep`).
+    #[must_use]
+    pub fn reverse_nat_lookup(&self, key: BackendKey) -> Option<Ipv4Addr> {
+        self.state.lock().reverse_nat.get(&key).copied()
+    }
+
+    /// Snapshot every reverse-NAT entry, in `Ord` order on
+    /// `BackendKey`. Returned `Vec` is a clone of the live map at the
+    /// moment of acquisition. Not part of the `Dataplane` trait —
+    /// this accessor is for DST invariant evaluators (Slice 05 /
+    /// `ReverseNatLockstep`) that need to walk the entire map.
+    #[must_use]
+    pub fn reverse_nat_entries(&self) -> Vec<(BackendKey, Ipv4Addr)> {
+        self.state.lock().reverse_nat.iter().map(|(k, v)| (*k, *v)).collect()
     }
 }
 
@@ -95,6 +152,29 @@ impl Default for SimDataplane {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Derive every reverse-NAT key the lockstep contract installs for a
+/// backend, given its forward-path VIP. Phase 2.2 supports two L4
+/// protocols (TCP / UDP, architecture.md § 6); the lockstep set is
+/// one entry per backend per supported proto. The forward-path
+/// `Backend` does not carry proto today — it is a property of the
+/// listener, not the backend address — so the sim installs entries
+/// for every supported proto in lockstep with the backend record.
+fn reverse_nat_keys_for(backend: &Backend) -> impl Iterator<Item = BackendKey> + '_ {
+    // Only IPv4 backends are routable through the Phase 2.2 LB —
+    // IPv6 / ICMP / SCTP are GH #155 / future-phase deferrals
+    // (architecture.md § 6). Non-IPv4 backends are silently skipped
+    // here; the production EbpfDataplane will surface this as a
+    // typed error variant in the slice that adds the egress program.
+    let ipv4 = match backend.addr.ip() {
+        std::net::IpAddr::V4(v4) => Some(v4),
+        std::net::IpAddr::V6(_) => None,
+    };
+    let port = backend.addr.port();
+    [Proto::Tcp, Proto::Udp]
+        .into_iter()
+        .filter_map(move |proto| ipv4.map(|ip| BackendKey::new(ip, port, proto)))
 }
 
 #[async_trait]
@@ -109,7 +189,46 @@ impl Dataplane for SimDataplane {
         vip: Ipv4Addr,
         backends: Vec<Backend>,
     ) -> Result<(), DataplaneError> {
-        self.services.lock().insert(vip, backends);
+        // Single mutex acquisition guards both maps — observers
+        // cannot witness a partial update. Mirrors the production
+        // `EbpfDataplane`'s `REVERSE_NAT_MAP` lockstep contract:
+        // `SERVICE_MAP` and `REVERSE_NAT_MAP` updates land in the same
+        // critical section.
+        let mut state = self.state.lock();
+
+        // Purge any reverse-NAT entries for the prior backend set
+        // that are NOT carried over by the new set. Without this,
+        // a backend removed by `update_service` would leak its
+        // reverse-NAT entry — exactly the failure mode US-05's
+        // "Removed backend's `REVERSE_NAT` entry is purged on
+        // service update" scenario pins.
+        let prior_keys: Vec<BackendKey> = state
+            .services
+            .get(&vip)
+            .map(|prior| prior.iter().flat_map(reverse_nat_keys_for).collect())
+            .unwrap_or_default();
+        for key in prior_keys {
+            state.reverse_nat.remove(&key);
+        }
+
+        // Install the new reverse-NAT entries for the incoming
+        // backend set. Each `(backend_ip, backend_port, proto)` →
+        // `vip` mapping lets the egress reverse-NAT path rewrite
+        // the source 5-tuple of a response packet back to the VIP
+        // the client connected to.
+        for backend in &backends {
+            for key in reverse_nat_keys_for(backend) {
+                state.reverse_nat.insert(key, vip);
+            }
+        }
+
+        // Atomic forward-path replacement.
+        state.services.insert(vip, backends);
+        // Drop the guard before returning so the mutex is released
+        // before any caller `.await` resumes — minimises contention
+        // for concurrent observers and silences
+        // `clippy::significant_drop_tightening`.
+        drop(state);
         Ok(())
     }
 

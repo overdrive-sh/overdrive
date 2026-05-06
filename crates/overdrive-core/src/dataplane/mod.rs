@@ -17,10 +17,12 @@
 //! See `docs/feature/phase-2-xdp-service-map/distill/test-scenarios.md`
 //! for the scenarios these types support.
 
+pub mod backend_key;
 pub mod drop_class;
 pub mod fingerprint;
 pub mod maglev_table_size;
 
+pub use backend_key::{BackendKey, Proto};
 pub use drop_class::DropClass;
 pub use fingerprint::{BackendSetFingerprint, fingerprint};
 pub use maglev_table_size::MaglevTableSize;

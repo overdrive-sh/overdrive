@@ -534,6 +534,13 @@ impl Harness {
             Invariant::MaglevDeterministic => {
                 crate::invariants::maglev_deterministic::evaluate_maglev_deterministic()
             }
+            // phase-2-xdp-service-map Slice 05 (US-05; S-2.2-20).
+            // GREEN of step 05-01 lands the real evaluator body in
+            // `crate::invariants::reverse_nat_lockstep`. The
+            // RED-scaffold body panics when invoked.
+            Invariant::ReverseNatLockstep => {
+                crate::invariants::reverse_nat_lockstep::evaluate_reverse_nat_lockstep().await
+            }
             // phase-2-xdp-service-map DISTILL — RED scaffolds per
             // `docs/feature/phase-2-xdp-service-map/distill/wave-decisions.md`
             // DWD-4. Bodies panic when invoked. DELIVER's Slice 08
