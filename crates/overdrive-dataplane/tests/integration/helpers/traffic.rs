@@ -29,12 +29,19 @@
 #![allow(
     clippy::missing_panics_doc,
     clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
     clippy::cast_sign_loss,
     clippy::cast_lossless,
+    clippy::cast_precision_loss,
     clippy::ptr_as_ptr,
     clippy::ref_as_ptr,
+    clippy::borrow_as_ptr,
     clippy::unnecessary_cast,
-    clippy::print_stderr
+    clippy::unnested_or_patterns,
+    clippy::unchecked_time_subtraction,
+    clippy::print_stderr,
+    clippy::doc_markdown,
+    clippy::expect_used
 )]
 
 use std::os::fd::RawFd;

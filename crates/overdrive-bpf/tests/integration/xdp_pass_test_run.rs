@@ -297,7 +297,8 @@ fn bpf_unit_runs_xdp_pass_triptych_via_bpf_prog_test_run() {
 /// target). Capacities mirror the kernel-side declaration in
 /// `crates/overdrive-bpf/src/maps/service_map.rs`:
 ///   outer max_entries = 4096
-///   inner ARRAY max_entries = 256, value = u32 (BackendId)
+///   inner ARRAY max_entries = MaglevTableSize::DEFAULT (16_381),
+///     value = u32 (BackendId)
 ///   outer key = ServiceKey (8 bytes); outer value = u32 (inner FD)
 fn pre_pin_service_map(pin_dir: &std::path::Path) {
     use std::ffi::CString;
@@ -342,12 +343,13 @@ fn pre_pin_service_map(pin_dir: &std::path::Path) {
         unsafe { syscall(SYS_bpf, cmd, attr, size) as i64 }
     }
 
-    // (1) Inner-map prototype — ARRAY of u32 (BackendId), size 256.
+    // (1) Inner-map prototype — ARRAY of u32 (BackendId), size =
+    // MaglevTableSize::DEFAULT (16_381). Slice 04 lockstep.
     let inner_attr = CreateAttr {
         map_type: BPF_MAP_TYPE_ARRAY,
         key_size: mem::size_of::<u32>() as u32,
         value_size: mem::size_of::<u32>() as u32,
-        max_entries: 256,
+        max_entries: overdrive_core::dataplane::MaglevTableSize::DEFAULT.get(),
         ..Default::default()
     };
     let inner_raw = raw_bpf(

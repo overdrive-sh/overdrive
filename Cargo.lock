@@ -1713,6 +1713,7 @@ dependencies = [
  "aya-ebpf",
  "aya-obj",
  "libc",
+ "overdrive-core",
  "serial_test",
 ]
 

@@ -221,7 +221,7 @@ fn ten_tcp_syns_to_vip_are_rewritten_and_forwarded_via_veth() {
     let service_map_handle = HashOfMapsHandle::<ServiceKey, u32>::new_pinned_with_array_inner(
         "SERVICE_MAP",
         4096,
-        256,
+        overdrive_core::dataplane::MaglevTableSize::DEFAULT.get(),
         &pin_dir,
     )
     .expect("pre-create + pre-pin SERVICE_MAP outer HoM");
@@ -294,9 +294,14 @@ fn ten_tcp_syns_to_vip_are_rewritten_and_forwarded_via_veth() {
         // BID_ONE. Direct `bpf()` syscalls — Slice 02's flat-HASH
         // shape is gone; aya's typed surface does not yet expose the
         // inner-ARRAY-of-HoM shape (PR #1446 migration target).
+        // Slice 04 — inner ARRAY size = MaglevTableSize::DEFAULT
+        // (16_381). Populating every slot with BID_ONE means every
+        // FNV-1a(5-tuple) % M lookup hits BID_ONE; the test asserts
+        // the kernel rewrites all 10 SYNs to backend B1.
         let inner_fd =
             service_map_handle.create_inner(None).expect("inner ARRAY alloc must succeed");
-        for slot in 0..256u32 {
+        let m: u32 = overdrive_core::dataplane::MaglevTableSize::DEFAULT.get();
+        for slot in 0..m {
             let key_bytes = slot.to_ne_bytes();
             let value_bytes = BID_ONE.to_ne_bytes();
             overdrive_dataplane::sys::bpf::bpf_map_update_elem(

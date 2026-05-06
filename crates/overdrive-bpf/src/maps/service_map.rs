@@ -33,14 +33,29 @@
 //! over unchanged across this restructure — only the underlying
 //! kernel map type changes, not the key shape).
 //!
-//! # Inner ARRAY shape
+//! # Inner ARRAY shape (Slice 04 — Maglev-sized)
 //!
-//! Inner key = `u32` (slot index 0..255), value = `BackendId` (raw
-//! `u32`). Slot index in the XDP fast path is a placeholder 5-tuple
-//! hash mod 256 pending Slice 04 Maglev landing — see
-//! `crates/overdrive-bpf/src/programs/xdp_service_map.rs`. After
-//! Slice 04 the slot index is the Maglev-resolved value from
-//! MAGLEV_MAP, not the placeholder hash.
+//! Inner key = `u32` (slot index `0..M`), value = `BackendId` (raw
+//! `u32`). Slot count `M` is the Maglev table size — `MaglevTableSize::DEFAULT.get()`
+//! = 16_381 — per architecture.md § 5 Q-Sig D2 / D6 and ADR-0041.
+//!
+//! Pre-Slice-04 (Slice 03 lay) used `M = 256` with a placeholder
+//! `(src_port ^ dst_port) & 0xff` slot hash; Slice 04 replaces both
+//! with the proper Maglev-permuted slot table populated from userspace
+//! by `crate::maglev::permutation::generate(...)`, indexed in the
+//! XDP fast path by FNV-1a over the 5-tuple `mod M`. The kernel-side
+//! map declaration here is the single source of `M` shared by the
+//! XDP program (`programs/xdp_service_map.rs`) and the userspace
+//! handle (`crates/overdrive-dataplane/src/lib.rs::SERVICE_MAP_INNER_CAPACITY`).
+//!
+//! # Naming
+//!
+//! The map is named `SERVICE_MAP` for ELF-export stability across
+//! Slice 03 / 04. Architecturally Slice 04 reframes it as the
+//! Maglev permutation table — see `crate::maps::maglev_map` for the
+//! conceptual relabeling and migration notes. The kernel-side type
+//! and pin path are unchanged; userspace populates Maglev-permuted
+//! slots instead of round-robin slots.
 
 #![allow(dead_code)]
 
@@ -67,11 +82,19 @@ pub struct ServiceKey {
 /// node will route in Phase 2.
 pub const MAX_OUTER_ENTRIES: u32 = 4096;
 
-/// Inner-ARRAY size in slots. 256 per architecture.md § 5 / Q5=A —
-/// matches the Maglev table slot count (Slice 04). Pre-Slice-04 the
-/// XDP fast path uses a placeholder 5-tuple hash mod 256 that ranges
-/// over the same slot space.
-pub const INNER_TABLE_SIZE: u32 = 256;
+/// Inner-ARRAY size in slots. Equals `MaglevTableSize::DEFAULT.get()`
+/// = 16_381 per architecture.md § 5 Q-Sig D6 (Cilium's prime list,
+/// largest ≤ 2¹⁴). The XDP fast path indexes this map by FNV-1a over
+/// the 5-tuple `mod 16_381`; userspace populates each slot via
+/// `crate::maglev::permutation::generate(...)`.
+///
+/// **MUST stay in lockstep** with
+/// `overdrive_core::dataplane::MaglevTableSize::DEFAULT.get()` (the
+/// userspace SSOT) and `SERVICE_MAP_INNER_CAPACITY` in
+/// `crates/overdrive-dataplane/src/lib.rs`. The userspace handle
+/// allocates inner ARRAYs of this size; kernel-side bounds checks
+/// and verifier complexity assume this exact value.
+pub const INNER_TABLE_SIZE: u32 = 16_381;
 
 /// `SERVICE_MAP` — outer `BPF_MAP_TYPE_HASH_OF_MAPS` keyed by
 /// `ServiceKey`, inner `BPF_MAP_TYPE_ARRAY` of `BackendId` (raw `u32`)

@@ -71,6 +71,10 @@ aya.workspace         = true
 # reproducible — bumping aya is the migration trigger.
 aya-obj               = "=0.2.1"
 libc.workspace        = true
+# Host-side dev dep — used by Tier 2 BPF unit tests for
+# `MaglevTableSize::DEFAULT.get()` to keep the inner-ARRAY size
+# in lockstep with kernel-side `INNER_TABLE_SIZE`.
+overdrive-core.workspace = true
 serial_test.workspace = true
 
 [[bin]]

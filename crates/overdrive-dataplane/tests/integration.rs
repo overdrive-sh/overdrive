@@ -25,8 +25,8 @@ mod integration {
     /// `super::helpers::…`.
     #[cfg(target_os = "linux")]
     mod helpers;
-    /// phase-2-xdp-service-map Slice 04 (US-04; ASR-2.2-02 confirm)
-    /// — Maglev disruption bound on real veth. RED scaffold.
+    /// phase-2-xdp-service-map Slice 04 (US-04; S-2.2-15) —
+    /// Maglev real-distribution under XDP traffic on real veth.
     mod maglev_real;
     /// phase-2-xdp-service-map Slice 05 (US-05; S-2.2-15, S-2.2-18) —
     /// REVERSE_NAT_MAP real-TCP `nc` end-to-end. RED scaffolds.

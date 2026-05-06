@@ -50,10 +50,11 @@ use std::collections::BTreeSet;
 
 use crate::maps::BackendEntryPod;
 
-/// Errors from the orphan-GC sweep. Distinct from the other
-/// dataplane variants because the partial-progress shape on `keys()`
-/// or `remove()` failure is the operationally-distinct surface
-/// callers branch on.
+/// Errors from the orphan-GC sweep.
+///
+/// Distinct from the other dataplane variants because the partial-
+/// progress shape on `keys()` or `remove()` failure is the
+/// operationally-distinct surface callers branch on.
 #[derive(Debug, thiserror::Error)]
 pub enum GcError {
     /// A `keys()` iteration step failed. The map is in an unknown

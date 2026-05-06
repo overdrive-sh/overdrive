@@ -99,10 +99,16 @@ const BACKEND_MAP_NAME: &str = "BACKEND_MAP";
 #[cfg(target_os = "linux")]
 const SERVICE_MAP_OUTER_CAPACITY: u32 = 4096;
 
-/// SERVICE_MAP inner-ARRAY size in slots. 256 per architecture.md
-/// § 5 / Q5=A — matches the Maglev table slot count.
+/// SERVICE_MAP inner-ARRAY size in slots. Equals
+/// [`overdrive_core::dataplane::MaglevTableSize::DEFAULT`].get() = 16_381
+/// per architecture.md § 5 Q-Sig D6 / ADR-0041 — the Maglev table
+/// size. **MUST** stay in lockstep with `INNER_TABLE_SIZE` in
+/// `crates/overdrive-bpf/src/maps/service_map.rs` (kernel-side); a
+/// drift between the two would silently misroute packets via slot
+/// out-of-bounds reads (the kernel ARRAY map clamps to its declared
+/// size; userspace populating slots beyond it is a no-op).
 #[cfg(target_os = "linux")]
-const SERVICE_MAP_INNER_CAPACITY: u32 = 256;
+const SERVICE_MAP_INNER_CAPACITY: u32 = overdrive_core::dataplane::MaglevTableSize::DEFAULT.get();
 
 /// Production dataplane.
 ///
@@ -517,16 +523,66 @@ impl Dataplane for EbpfDataplane {
             }
         })?;
 
-        // Populate inner ARRAY slots. Each slot 0..256 is written
-        // with a backend id selected round-robin from `backend_ids`.
-        // Pre-Slice-04 this gives roughly even distribution under
-        // the placeholder 5-tuple hash (if 256 mod len(backend_ids)
-        // != 0, two slots get the extra; close enough for the
-        // dispersion semantics step 03-02 needs).
-        for slot in 0..SERVICE_MAP_INNER_CAPACITY {
-            let bid = backend_ids[(slot as usize) % backend_ids.len()];
-            let key_bytes = slot.to_ne_bytes();
-            let value_bytes = bid.to_ne_bytes();
+        // Populate inner ARRAY slots via the Maglev permutation
+        // (Slice 04 — replaces Slice 03's round-robin populate). The
+        // permutation is a deterministic function of the weighted
+        // backend set, ordered canonically by `BTreeMap<BackendId,
+        // Weight>` per `.claude/rules/development.md` § Ordered-
+        // collection choice; the same backend set produces the same
+        // permutation byte-for-byte across runs and across nodes
+        // (DST invariant `MaglevDeterministic`; S-2.2-12).
+        //
+        // Two structural properties matter at this seam:
+        //
+        // 1. **Distribution evenness** — each backend appears in
+        //    ≈ M / N_backends slots; under uniformly hashed traffic
+        //    each backend receives ≈ 1/N of the load (S-2.2-15
+        //    bound: ±5 %).
+        // 2. **Disruption bound** — adding or removing one backend
+        //    shifts ≤ 1 / N_backends ≈ 1 % of slots (ASR-2.2-02).
+        //    This is the consistent-hashing guarantee that makes
+        //    backend-set churn cheap; without Maglev a flat hash
+        //    would re-shuffle ~all slots on any change.
+        //
+        // The XDP fast path indexes this populated ARRAY by
+        // FNV-1a(5-tuple) mod M — see
+        // `crates/overdrive-bpf/src/programs/xdp_service_map.rs`.
+        let weighted: std::collections::BTreeMap<overdrive_core::id::BackendId, u16> = backends
+            .iter()
+            .filter_map(|backend| {
+                BackendEntryPod::from_backend(backend).ok().and_then(|pod| {
+                    let bid_raw: u32 = pod
+                        .ipv4_host
+                        .wrapping_mul(2_654_435_761)
+                        .wrapping_add(u32::from(pod.port_host));
+                    overdrive_core::id::BackendId::new(bid_raw)
+                        .ok()
+                        .map(|bid| (bid, backend.weight.max(1)))
+                })
+            })
+            .collect();
+        let permutation = crate::maglev::permutation::generate(
+            &weighted,
+            overdrive_core::dataplane::MaglevTableSize::DEFAULT,
+        );
+        // Defensive: if `generate` returns a table with the wrong size
+        // (only possible on empty inputs, which we short-circuited at
+        // the top of this fn), fall back to LoadFailed rather than
+        // silently mispopulating.
+        if permutation.len() != SERVICE_MAP_INNER_CAPACITY as usize {
+            return Err(DataplaneError::LoadFailed(format!(
+                "maglev::generate returned {} slots; expected {}",
+                permutation.len(),
+                SERVICE_MAP_INNER_CAPACITY
+            )));
+        }
+        for (slot, bid) in permutation.iter().enumerate() {
+            // Slot is bounded by the permutation length check above
+            // (SERVICE_MAP_INNER_CAPACITY = 16_381, well within u32);
+            // the cast is provably lossless.
+            #[allow(clippy::cast_possible_truncation)]
+            let key_bytes = (slot as u32).to_ne_bytes();
+            let value_bytes = bid.get().to_ne_bytes();
             crate::sys::bpf::bpf_map_update_elem(
                 new_inner.as_fd(),
                 &key_bytes,

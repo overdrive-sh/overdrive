@@ -326,11 +326,15 @@ fn load_service_map_program() -> LoadedTestBpf {
     LoadedTestBpf { bpf, prog_fd, outer_fd, _pin_dir_guard: pin_dir_guard }
 }
 
-/// Allocate a fresh inner ARRAY (size 256) and populate every slot
-/// with `backend_id`. Returns the inner FD ready for the outer-map
-/// `set`. Pre-Slice-04 the XDP slot hash is a placeholder, so any
-/// uniformly-populated inner ARRAY makes every lookup resolve to
-/// `backend_id`.
+/// Allocate a fresh inner ARRAY (size = `MaglevTableSize::DEFAULT`
+/// = 16_381) and populate every slot with `backend_id`. Returns the
+/// inner FD ready for the outer-map `set`.
+///
+/// Slice 04 — the XDP slot hash is FNV-1a(5-tuple) `% INNER_TABLE_SIZE`
+/// (= 16_381). Filling every slot with `backend_id` means every lookup
+/// resolves to the same backend regardless of which slot the hash
+/// picks. The Tier 3 `maglev_real_distribution_under_xdp_trafficgen`
+/// test exercises the multi-backend distribution path.
 fn create_inner_array_filled(backend_id: u32) -> OwnedFd {
     use std::mem;
     use std::os::fd::FromRawFd;
@@ -367,11 +371,16 @@ fn create_inner_array_filled(backend_id: u32) -> OwnedFd {
         flags: u64,
     }
 
+    // Slice 04 — inner ARRAY size = MaglevTableSize::DEFAULT.get()
+    // = 16_381 per architecture.md § 5 Q-Sig D6. Lockstep with
+    // crate::maps::service_map::INNER_TABLE_SIZE; a drift would
+    // silently misroute packets via slot out-of-bounds reads.
+    let inner_size: u32 = overdrive_core::dataplane::MaglevTableSize::DEFAULT.get();
     let attr = CreateAttr {
         map_type: BPF_MAP_TYPE_ARRAY,
         key_size: mem::size_of::<u32>() as u32,
         value_size: mem::size_of::<u32>() as u32,
-        max_entries: 256,
+        max_entries: inner_size,
         ..Default::default()
     };
     // SAFETY: bpf() syscall with a valid `bpf_attr` struct, fixed
@@ -388,7 +397,7 @@ fn create_inner_array_filled(backend_id: u32) -> OwnedFd {
     // SAFETY: kernel-issued FD, transferred to OwnedFd.
     let inner_fd = unsafe { OwnedFd::from_raw_fd(raw as c_int) };
 
-    for slot in 0..256u32 {
+    for slot in 0..inner_size {
         let key_bytes = slot.to_ne_bytes();
         let value_bytes = backend_id.to_ne_bytes();
         let elem = ElemAttr {
@@ -522,7 +531,8 @@ fn service_map_hit_returns_xdp_tx_with_rewritten_headers() {
         bm.insert(BID_ONE, value, 0).expect("BACKEND_MAP insert");
     }
 
-    // SETUP: fresh inner ARRAY, all 256 slots → BackendId 1.
+    // SETUP: fresh inner ARRAY, every slot → BackendId 1
+    // (`create_inner_array_filled` sizes the ARRAY at MaglevTableSize::DEFAULT).
     let inner_fd = create_inner_array_filled(BID_ONE);
 
     // SETUP: outer HoM slot for (VIP, VIP_PORT) → inner ARRAY.
@@ -722,12 +732,13 @@ fn pre_pin_service_map(pin_dir: &std::path::Path) -> OwnedFd {
         unsafe { syscall(SYS_bpf, cmd, attr, size) as i64 }
     }
 
-    // Inner-map prototype — ARRAY of u32 (BackendId), size 256.
+    // Inner-map prototype — ARRAY of u32 (BackendId), size =
+    // MaglevTableSize::DEFAULT (16_381). Slice 04 lockstep.
     let inner_attr = CreateAttr {
         map_type: BPF_MAP_TYPE_ARRAY,
         key_size: mem::size_of::<u32>() as u32,
         value_size: mem::size_of::<u32>() as u32,
-        max_entries: 256,
+        max_entries: overdrive_core::dataplane::MaglevTableSize::DEFAULT.get(),
         ..Default::default()
     };
     let inner_raw = raw_bpf(

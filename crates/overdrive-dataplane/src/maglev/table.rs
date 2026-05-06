@@ -1,14 +1,21 @@
-//! Maglev weighted-multiplicity expansion: take
-//! `&BTreeMap<BackendId, Weight>` and produce the per-backend
-//! offset / skip pairs that the [`super::permutation::generate`]
-//! function consumes.
+//! Maglev weighted-multiplicity expansion — re-export of
+//! [`super::permutation::generate`] for callers that prefer the
+//! "table" name.
 //!
-//! Pure synchronous function. `BTreeMap` order is canonical input
-//! per `.claude/rules/development.md` § Ordered-collection choice.
+//! Phase 2 collapses the table-shaping concern into
+//! [`super::permutation::generate`]: the function takes
+//! `&BTreeMap<BackendId, Weight>` and produces a complete
+//! `Vec<BackendId>` of length `M` ready to write into the inner
+//! ARRAY. The intermediate `(offset, skip)` per-entry permutation
+//! the original Eisenbud paper formulates is private to that
+//! module — exposing it as a separate "table" surface would
+//! invite consumers to skip the population step and pre-compute
+//! state that doesn't need to outlive a single `update_service`
+//! call.
 //!
-//! **RED scaffold** — body panics via `todo!()` until DELIVER
-//! fills it per Slice 04.
+//! This module exists to keep the public namespace pinned for
+//! future expansion (e.g. a Tier 4 perf-mode that pre-computes
+//! permutations into an arena). For now the API is the single
+//! `generate(...)` re-export.
 
-#![allow(dead_code)]
-
-pub const SCAFFOLD: bool = true;
+pub use super::permutation::{Weight, generate};

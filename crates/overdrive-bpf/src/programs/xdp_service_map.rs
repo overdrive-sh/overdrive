@@ -56,6 +56,7 @@ const ETH_TYPE_IPV4: u16 = 0x0800;
 const IPV4_HDR_LEN: usize = 20;
 const IPV4_PROTO_OFFSET: usize = 9;
 const IPV4_CSUM_OFFSET: usize = 10;
+const IPV4_SRC_IP_OFFSET: usize = 12;
 const IPV4_DST_IP_OFFSET: usize = 16;
 const IPV4_PROTO_TCP: u8 = 6;
 const IPV4_PROTO_UDP: u8 = 17;
@@ -193,6 +194,52 @@ fn csum_incremental_3_3(
     !fold32(s)
 }
 
+// ---------- FNV-1a 32-bit over the 5-tuple ----------
+//
+// FNV-1a is the canonical Maglev hash choice (Cilium / Katran use
+// the same family). 32-bit width is sufficient: we reduce mod M ≤
+// 131_071 (largest ALLOWED_PRIMES entry). The constants are the
+// IETF FNV spec values.
+//
+// Why 32-bit, not 64-bit: the verifier's instruction-count budget
+// is tighter for u64 multiplies on some kernels; 32-bit FNV-1a
+// gives us identical dispersion at lower complexity. The userspace
+// counterpart in `crate::maglev::permutation` uses 64-bit FNV-1a
+// for table-generation seeding only — that path is not on the
+// per-packet hot path, so the bigger hash is free there.
+
+const FNV32_OFFSET: u32 = 0x811c_9dc5;
+const FNV32_PRIME: u32 = 0x0100_0193;
+
+#[inline(always)]
+fn fnv1a_5tuple_slot(src_ip: u32, dst_ip: u32, src_port: u16, dst_port: u16, proto: u8) -> u32 {
+    // Unrolled FNV-1a over the canonical 5-tuple byte order:
+    //   src_ip[0..4], dst_ip[0..4], src_port[0..2], dst_port[0..2], proto[0]
+    // All "host-order" — we feed the same in-register representation
+    // userspace would compute. The XOR-multiply pair is the FNV-1a
+    // step; doing it inline (rather than in a loop) keeps the
+    // verifier's complexity walk bounded.
+    let mut h: u32 = FNV32_OFFSET;
+    let src_b = src_ip.to_ne_bytes();
+    let dst_b = dst_ip.to_ne_bytes();
+    let sp_b = src_port.to_ne_bytes();
+    let dp_b = dst_port.to_ne_bytes();
+    h = (h ^ u32::from(src_b[0])).wrapping_mul(FNV32_PRIME);
+    h = (h ^ u32::from(src_b[1])).wrapping_mul(FNV32_PRIME);
+    h = (h ^ u32::from(src_b[2])).wrapping_mul(FNV32_PRIME);
+    h = (h ^ u32::from(src_b[3])).wrapping_mul(FNV32_PRIME);
+    h = (h ^ u32::from(dst_b[0])).wrapping_mul(FNV32_PRIME);
+    h = (h ^ u32::from(dst_b[1])).wrapping_mul(FNV32_PRIME);
+    h = (h ^ u32::from(dst_b[2])).wrapping_mul(FNV32_PRIME);
+    h = (h ^ u32::from(dst_b[3])).wrapping_mul(FNV32_PRIME);
+    h = (h ^ u32::from(sp_b[0])).wrapping_mul(FNV32_PRIME);
+    h = (h ^ u32::from(sp_b[1])).wrapping_mul(FNV32_PRIME);
+    h = (h ^ u32::from(dp_b[0])).wrapping_mul(FNV32_PRIME);
+    h = (h ^ u32::from(dp_b[1])).wrapping_mul(FNV32_PRIME);
+    h = (h ^ u32::from(proto)).wrapping_mul(FNV32_PRIME);
+    h % INNER_TABLE_SIZE
+}
+
 // ---------- main program ----------
 
 #[xdp]
@@ -257,15 +304,22 @@ fn try_xdp_service_map_lookup(ctx: &XdpContext) -> Result<u32, ()> {
         None => return Ok(xdp_action::XDP_PASS),
     };
 
-    // Slot index — pre-Slice-04 placeholder 2-tuple hash on
-    // (src_port, dst_port) mod 256. After Slice 04 the slot index
-    // is the Maglev-resolved value from MAGLEV_MAP, not this hash;
-    // the placeholder exists only for distributing test traffic
-    // across the inner ARRAY slots and does NOT need full 5-tuple
-    // dispersion (Slice 04 lands the proper hash). Keeping it
-    // minimal — `(src_port ^ dst_port)` against a u32 — controls
-    // verifier instruction-count growth (ASR-2.2-03 ≤ 20% delta).
-    let slot: u32 = u32::from(src_port ^ dst_port) & (INNER_TABLE_SIZE - 1);
+    // Slot index — Slice 04 Maglev-table indexing. Hash the 5-tuple
+    // (src_ip, dst_ip, src_port, dst_port, proto) via FNV-1a 32-bit
+    // and reduce modulo `INNER_TABLE_SIZE` (= MaglevTableSize::DEFAULT
+    // = 16_381). The Maglev permutation populated from userspace into
+    // the inner ARRAY guarantees ±5 % distribution evenness across
+    // backends and ≤ 1 % flow-shift on backend-set churn (ASR-2.2-02).
+    //
+    // Source ip is read host-order (we already converted dst_ip
+    // above); src_port / dst_port are host-order from `read_u16_be`.
+    // FNV-1a treats them as raw bytes — the host-order representation
+    // is canonical for our slot-keying purpose because BOTH endpoints
+    // of a connection see the same 5-tuple bytes regardless of
+    // endianness, AND the FNV-1a hash is deterministic over any
+    // consistent byte stream.
+    let src_ip = unsafe { read_u32_be(ctx, ETH_HDR_LEN + IPV4_SRC_IP_OFFSET)? };
+    let slot: u32 = fnv1a_5tuple_slot(src_ip, dst_ip, src_port, dst_port, proto);
 
     // SAFETY: `inner_ptr` is verifier-tagged `inner_map` from the
     // outer lookup above; the chained lookup is the canonical
