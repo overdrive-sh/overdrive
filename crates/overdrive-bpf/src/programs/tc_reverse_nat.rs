@@ -43,10 +43,12 @@
 use aya_ebpf::{bindings::BPF_F_PSEUDO_HDR, macros::classifier, programs::TcContext};
 
 use crate::maps::reverse_nat_map::{BackendKey, REVERSE_NAT_MAP, Vip};
+use crate::programs::sanity::{Verdict as SanityVerdict, sanity_check};
 use crate::shared::sanity::{ReverseKey, reverse_key_from_packet};
 
 // TC verdict constants (kernel ABI; <linux/pkt_cls.h>).
 const TC_ACT_OK: i32 = 0;
+const TC_ACT_SHOT: i32 = 2;
 
 // Header offsets / constants — same shape as `xdp_service_map.rs`.
 const ETH_HDR_LEN: usize = 14;
@@ -116,22 +118,35 @@ pub fn tc_reverse_nat(mut ctx: TcContext) -> i32 {
 
 #[inline(always)]
 fn try_tc_reverse_nat(ctx: &mut TcContext) -> Result<i32, ()> {
-    // (1) Bounds-check Eth header + read EtherType.
-    let eth_type = unsafe { read_u16_be(ctx, ETH_TYPE_OFFSET)? };
-    if eth_type != ETH_TYPE_IPV4 {
-        return Ok(TC_ACT_OK);
+    // (0) Sanity prologue per Slice 06 / ADR-0040 Q3=C — five
+    //     Cloudflare-order checks, first failure short-circuits.
+    //     The helper's `Verdict::Drop` arm has already incremented
+    //     `DROP_COUNTER[MalformedHeader]`; we translate the
+    //     three-way decision into the TC verdict (Drop → TC_ACT_SHOT,
+    //     PassToKernel → TC_ACT_OK).
+    let _ipv4_bounds_pre: *const u8 = unsafe { ptr_at(ctx, ETH_HDR_LEN + IPV4_HDR_LEN - 1)? };
+    let _l4_bounds_pre: *const u8 =
+        unsafe { ptr_at(ctx, ETH_HDR_LEN + IPV4_HDR_LEN + TCP_HDR_LEN - 1)? };
+    let packet_len: usize = ctx.data_end().saturating_sub(ctx.data());
+    let sanity = sanity_check(
+        ETH_HDR_LEN,
+        ETH_HDR_LEN + IPV4_HDR_LEN,
+        packet_len,
+        |off| unsafe { read_u8(ctx, off) },
+        |off| unsafe { read_u16_be(ctx, off) },
+    );
+    match sanity {
+        SanityVerdict::Continue => {}
+        SanityVerdict::Drop => return Ok(TC_ACT_SHOT),
+        SanityVerdict::PassToKernel => return Ok(TC_ACT_OK),
     }
 
-    // (2) Bounds-check full IPv4 header + read fields.
-    let _ipv4_bounds: *const u8 = unsafe { ptr_at(ctx, ETH_HDR_LEN + IPV4_HDR_LEN - 1)? };
+    // (1) Read protocol — sanity prologue has already validated
+    //     EtherType, IPv4 header bounds, version+IHL, total_length,
+    //     and that proto ∈ {TCP, UDP}.
     let proto = unsafe { read_u8(ctx, ETH_HDR_LEN + IPV4_PROTO_OFFSET)? };
-
-    // (3) Filter to TCP / UDP.
     let is_tcp = proto == IPV4_PROTO_TCP;
     let is_udp = proto == IPV4_PROTO_UDP;
-    if !is_tcp && !is_udp {
-        return Ok(TC_ACT_OK);
-    }
 
     // (4) Bounds-check L4 header + grab the bounds-checked source-IP
     // and source-port pointers ready to feed into

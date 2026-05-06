@@ -51,6 +51,7 @@ use aya_ebpf::{
 
 use crate::maps::backend_map::{BACKEND_MAP, BackendEntry};
 use crate::maps::service_map::{INNER_TABLE_SIZE, SERVICE_MAP, ServiceKey};
+use crate::programs::sanity::{Verdict as SanityVerdict, sanity_check};
 
 // Header offsets / constants.
 const ETH_HDR_LEN: usize = 14;
@@ -267,26 +268,47 @@ pub fn xdp_service_map_lookup(ctx: XdpContext) -> u32 {
 
 #[inline(always)]
 fn try_xdp_service_map_lookup(ctx: &XdpContext) -> Result<u32, ()> {
-    // (1) Bounds-check Eth header + read EtherType.
-    let eth_type = unsafe { read_u16_be(ctx, ETH_TYPE_OFFSET)? };
-    if eth_type != ETH_TYPE_IPV4 {
-        return Ok(xdp_action::XDP_PASS);
+    // (0) Sanity prologue per Slice 06 / ADR-0040 Q3=C — five
+    //     Cloudflare-order checks, first failure short-circuits.
+    //     The helper's `Verdict::Drop` arm has already incremented
+    //     `DROP_COUNTER[MalformedHeader]`; we just translate the
+    //     three-way decision into the XDP verdict.
+    //
+    //     Sanity bounds-check for the full IPv4 header (offsets
+    //     0..IPV4_HDR_LEN-1 from `ETH_HDR_LEN`) is the IP version
+    //     check's prerequisite; for the L4 flag-byte read we need
+    //     at least the L4 flags byte (offset 13 from L4 start) to
+    //     be in-range. We bounds-check the FULL fixed-min L4 header
+    //     here (TCP_HDR_LEN; UDP is shorter so it'd be a tighter
+    //     bound but the read of TCP_FLAGS_OFFSET=13 only fires for
+    //     TCP frames — a UDP frame's flag-byte read is gated by the
+    //     proto check inside `sanity_check`).
+    let _ipv4_bounds_pre: *const u8 = unsafe { ptr_at(ctx, ETH_HDR_LEN + IPV4_HDR_LEN - 1)? };
+    let _l4_bounds_pre: *const u8 =
+        unsafe { ptr_at(ctx, ETH_HDR_LEN + IPV4_HDR_LEN + TCP_HDR_LEN - 1)? };
+    let packet_len: usize = ctx.data_end().saturating_sub(ctx.data());
+    let sanity = sanity_check(
+        ETH_HDR_LEN,
+        ETH_HDR_LEN + IPV4_HDR_LEN,
+        packet_len,
+        |off| unsafe { read_u8(ctx, off) },
+        |off| unsafe { read_u16_be(ctx, off) },
+    );
+    match sanity {
+        SanityVerdict::Continue => {}
+        SanityVerdict::Drop => return Ok(xdp_action::XDP_DROP),
+        SanityVerdict::PassToKernel => return Ok(xdp_action::XDP_PASS),
     }
 
-    // (2) Bounds-check full IPv4 header + read fields. A truncated
-    // frame (S-2.2-08) fails here; `?` propagates Err(()) and the
-    // wrapper returns XDP_PASS.
-    let _ipv4_bounds: *const u8 = unsafe { ptr_at(ctx, ETH_HDR_LEN + IPV4_HDR_LEN - 1)? };
+    // (1) Read fields needed for the SERVICE_MAP forward path. The
+    //     sanity prologue has already validated EtherType, IPv4
+    //     header bounds, version+IHL, total_length, and proto.
     let proto = unsafe { read_u8(ctx, ETH_HDR_LEN + IPV4_PROTO_OFFSET)? };
     let dst_ip = unsafe { read_u32_be(ctx, ETH_HDR_LEN + IPV4_DST_IP_OFFSET)? };
     let ip_csum = unsafe { read_u16_be(ctx, ETH_HDR_LEN + IPV4_CSUM_OFFSET)? };
 
-    // (3) Filter to TCP / UDP.
     let is_tcp = proto == IPV4_PROTO_TCP;
     let is_udp = proto == IPV4_PROTO_UDP;
-    if !is_tcp && !is_udp {
-        return Ok(xdp_action::XDP_PASS);
-    }
 
     // (4) Bounds-check L4 header + read source/dest ports + checksum.
     let l4_off = ETH_HDR_LEN + IPV4_HDR_LEN;
