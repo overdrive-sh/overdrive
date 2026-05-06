@@ -11,8 +11,8 @@
 //!
 //! Phase 2.1 step 01-02 ships the loader skeleton. The three trait
 //! methods (`update_policy`, `update_service`, `drain_flow_events`)
-//! are stubbed pending #24 (`POLICY_MAP`), #25 (`SERVICE_MAP`), and
-//! #27 (telemetry ringbuf) per `architecture.md` §7.
+//! are stubbed pending #158 (`POLICY_MAP`), #24 (`SERVICE_MAP`), and
+//! #31 (telemetry ringbuf) per `architecture.md` §7.
 
 #![expect(
     clippy::doc_markdown,

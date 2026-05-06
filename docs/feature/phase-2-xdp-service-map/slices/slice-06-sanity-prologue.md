@@ -40,7 +40,7 @@ prologue logic in its packet-shape simulator.
 
 *If* the static sanity checks don't quantify their verifier cost
 (delta vs Slice 04 baseline), we don't know whether to budget for
-them in future slices or fold them into POLICY_MAP / #25's compile-on-
+them in future slices or fold them into POLICY_MAP / #158's compile-on-
 rule-change shape. *Conversely*, if delta < 20% and absolute remains
 comfortable, the Phase 2 verifier-budget plan stays on track and
 operator-tunable POLICY_MAP rules can land later without revisiting
@@ -51,7 +51,7 @@ the static prologue.
 - **"Sanity checks are free (verifier-wise)."** No — every check
   costs branches the verifier walks; the slice quantifies how much.
 - **"Operator-tunable rules belong in this slice."** No — that's
-  POLICY_MAP / #25, with materially different mechanics.
+  POLICY_MAP / #158, with materially different mechanics.
 
 ## Scope (in)
 
@@ -66,7 +66,7 @@ the static prologue.
 
 ## Scope (out)
 
-- Operator-tunable DDoS rules (POLICY_MAP / #25 — different mechanics).
+- Operator-tunable DDoS rules (POLICY_MAP / #158 — different mechanics).
 - Perf gates (Slice 07).
 - Conntrack (#154).
 - IPv6 sanity rules (future Phase 2 slice).
@@ -100,7 +100,7 @@ budget; lockstep insertion in both forward and reverse XDP programs.
 | Test | Status |
 |---|---|
 | ≤ 4 new components | PASS — sanity prologue + DROP_COUNTER + DropClass enum + sanity DST invariant (4) |
-| No hypothetical abstractions landing later | PASS — ships static prologue both XDP programs invoke; operator-tunable layer is explicitly OUT (POLICY_MAP / #25) |
+| No hypothetical abstractions landing later | PASS — ships static prologue both XDP programs invoke; operator-tunable layer is explicitly OUT (POLICY_MAP / #158) |
 | Disproves a named pre-commitment | PASS — see above |
 | Production-data-shaped AC | PASS — Tier 2 per drop class + Tier 3 mixed-batch + Tier 4 veristat delta budget |
 | Demonstrable in single session | PASS — Tier 2 + Tier 3 + veristat run on developer's Lima VM in single session |

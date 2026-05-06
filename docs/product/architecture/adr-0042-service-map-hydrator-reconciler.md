@@ -391,8 +391,8 @@ exhaustive-match property.
 A single Action variant covers every future Dataplane port method
 via an inner enum `DataplaneOp::UpdateService { ... } | UpdatePolicy { ... } | ...`. **Rejected**: over-engineering for
 Phase 2.2's single-method scope. Future Dataplane port methods
-(SERVICE_MAP delete, POLICY_MAP update at #25, flow-event drain at
-#27) compose better as their own typed Action variants — each
+(SERVICE_MAP delete, POLICY_MAP update at #158, flow-event drain at
+#31) compose better as their own typed Action variants — each
 carries its own typed payload, each lands its own `action_shim`
 wrapper, the action-shim match stays exhaustive per-feature
 without an internal `DataplaneOp` match nested inside. The
@@ -434,7 +434,7 @@ linearizable Raft path that intent flows through.
   emits a typed Action against a real Dataplane port body; ESR
   invariants run in DST.
 - Precedent established for follow-on Dataplane-port reconcilers:
-  POLICY_MAP hydrator (#25), flow-event drain reconciler (#27),
+  POLICY_MAP hydrator (#158), flow-event drain reconciler (#31),
   future BPF LSM policy hydrator (#26) all follow the same shape
   (typed Action variant + observation-row failure surface +
   ESR pair).

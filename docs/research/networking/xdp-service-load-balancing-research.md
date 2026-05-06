@@ -700,7 +700,7 @@ implement a fixed sequence of cheap pre-SERVICE_MAP checks:
 5. Then SERVICE_MAP lookup.
 
 Operator-tunable DDoS rules are out of scope for Phase 2.2 and
-land with the broader POLICY_MAP slice (issue #25, per the Phase 2
+land with the broader POLICY_MAP slice (issue #158, per the Phase 2
 roadmap).
 
 ### 8. Verifier complexity and performance budgets
@@ -1082,7 +1082,7 @@ match logic is fixed. The whitepaper does not specify which.
 **Attempted**: Cloudflare blog posts, the L4Drop architecture
 write-up.
 **Recommendation**: Defer to a separate research document /
-design wave for issue #25 (POLICY_MAP). Phase 2.2 should NOT take
+design wave for issue #158 (POLICY_MAP). Phase 2.2 should NOT take
 a position; only ship the static pre-SERVICE_MAP packet-shape
 checks recommended in Finding 7.4.
 
@@ -1177,7 +1177,7 @@ map per swap is structural overhead not behavioural overhead.
 
 8. **Pre-SERVICE_MAP packet-shape checks** in the XDP entry point:
    EtherType match, IP version+IHL valid, protocol valid, TCP flag
-   sanity. Defer operator-tunable DDoS rules to POLICY_MAP (#25).
+   sanity. Defer operator-tunable DDoS rules to POLICY_MAP (#158).
 
 9. **Native XDP only; warn on generic fallback.** Both production
    targets (mlx5, ena, virtio-net) and the Lima/CI testing

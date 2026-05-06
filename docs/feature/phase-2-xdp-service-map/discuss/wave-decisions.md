@@ -102,9 +102,9 @@ Scope-deferral cross-references:
   Tier 3 / Tier 4 run single-kernel in-host (developer Lima VM, CI
   `ubuntu-latest`). The `cargo xtask integration-test vm` LVH harness
   wired in #23 stays in place but is not exercised by Phase 2.2.
-- **GH #25 [POLICY_MAP]** — Operator-tunable DDoS rules. The static
+- **GH #158 [POLICY_MAP]** — Operator-tunable DDoS rules. The static
   packet-shape sanity prologue lands here (Slice 06); operator-tunable
-  rules belong to #25 with materially different mechanics (compile-on-
+  rules belong to #158 with materially different mechanics (compile-on-
   rule-change vs hardcoded prologue).
 - **GH #23 [2.1]** — Phase 2.1 scaffolding, finalized and merged. The
   dependency this feature builds on. ADR-0038 captures the substrate
@@ -329,7 +329,7 @@ ship weighted directly in Slice 04, fulfil § 15's "weighted backends
 ### 9. Sanity prologue (Slice 06) ships static checks only
 
 Operator-tunable DDoS rules are explicitly OUT of Slice 06 — they
-belong to #25 POLICY_MAP, with materially different mechanics
+belong to #158 POLICY_MAP, with materially different mechanics
 (compile-on-rule-change). Slice 06 ships the five static
 Cloudflare-shape checks (research § 7.2) at the top of both XDP
 programs. The verifier-budget delta is explicitly bounded (< 20% vs

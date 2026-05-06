@@ -275,9 +275,9 @@ to virtio-net / mlx5 is a different code path.)
 
 **Target KPI**: 100% of synthetic pathological frames are dropped at the prologue (Tier 3); per-class counter is correct on every Tier 2 test; verifier instruction-count delta vs Slice 04 baseline < 20% (Tier 4).
 
-**Hypothesis**: "If the static sanity checks don't quantify their verifier cost (delta vs the Slice 04 baseline), we don't know whether to budget for them in future slices or fold them into POLICY_MAP / #25's compile-on-rule-change shape. Conversely, if delta < 20% and absolute remains comfortable, the Phase 2 verifier-budget plan stays on track and operator-tunable POLICY_MAP rules can land later without revisiting the static prologue."
+**Hypothesis**: "If the static sanity checks don't quantify their verifier cost (delta vs the Slice 04 baseline), we don't know whether to budget for them in future slices or fold them into POLICY_MAP / #158's compile-on-rule-change shape. Conversely, if delta < 20% and absolute remains comfortable, the Phase 2 verifier-budget plan stays on track and operator-tunable POLICY_MAP rules can land later without revisiting the static prologue."
 
-**Disproves**: "Sanity checks are free (verifier-wise)." (No — every check costs branches the verifier walks; the slice quantifies how much.) "Operator-tunable rules belong in this slice." (No — that's POLICY_MAP / #25, with materially different mechanics.)
+**Disproves**: "Sanity checks are free (verifier-wise)." (No — every check costs branches the verifier walks; the slice quantifies how much.) "Operator-tunable rules belong in this slice." (No — that's POLICY_MAP / #158, with materially different mechanics.)
 
 **Delivers (story)**: US-06.
 
@@ -286,7 +286,7 @@ to virtio-net / mlx5 is a different code path.)
 - No hypothetical abstractions: ships the static prologue both XDP programs invoke; the operator-tunable layer is explicitly OUT (POLICY_MAP).
 - Production-shaped AC: Tier 2 per drop class + Tier 3 mixed-batch + Tier 4 veristat delta budget.
 - IN scope: 5-check prologue, per-class DROP_COUNTER, DropClass enum, lockstep insertion in both forward and reverse XDP programs, DST invariant.
-- OUT of scope: operator-tunable DDoS rules (POLICY_MAP / #25), perf gates (Slice 07), conntrack (#154), kernel matrix (#152).
+- OUT of scope: operator-tunable DDoS rules (POLICY_MAP / #158), perf gates (Slice 07), conntrack (#154), kernel matrix (#152).
 
 ---
 

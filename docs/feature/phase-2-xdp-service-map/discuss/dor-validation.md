@@ -104,7 +104,7 @@ DESIGN wave does not start until every item passes with evidence.
 
 | DoR Item | Status | Evidence/Issue |
 |---|---|---|
-| 1. Problem statement clear, domain language | PASS | Opens with § 7 / § 19 defense-in-depth + verifier-budget concern. Explicit positioning: static checks here, operator-tunable rules in #25 POLICY_MAP. |
+| 1. Problem statement clear, domain language | PASS | Opens with § 7 / § 19 defense-in-depth + verifier-budget concern. Explicit positioning: static checks here, operator-tunable rules in #158 POLICY_MAP. |
 | 2. User/persona with specific characteristics | PASS | Ana + future operator; motivations explicit. |
 | 3. 3+ domain examples with real data | PASS | Three examples: (a) valid frame passes; (b) IPv6 falls through (not dropped); (c) truncated IPv4 dropped with counter increment. Real EtherType / IHL / TCP-flag values. |
 | 4. UAT in Given/When/Then (3-7 scenarios) | PASS | 5 scenarios: valid passes, IPv6 fall-through, truncated drop with counter, pathological TCP flags drop, verifier delta budget. Within band. |

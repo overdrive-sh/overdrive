@@ -89,10 +89,10 @@ Scope explicitly held back to downstream Phase-2 issues:
 - **#24 [2.2]** — SERVICE_MAP and the first non-trivial XDP program;
   closes the binary-composition edge by wiring `Arc<dyn Dataplane>` into
   `AppState`.
-- **#25 [2.3]** — POLICY_MAP and the BPF map hydration path from
+- **#158 [3.14]** — POLICY_MAP and the BPF map hydration path from
   `policy_verdicts` Corrosion rows.
 - **#26+** — sockops + kTLS (whitepaper §8).
-- **#27** — telemetry ringbuf consumer (whitepaper §12).
+- **#31** — telemetry ringbuf consumer (whitepaper §12).
 - **#28+** — BPF LSM mandatory access control (whitepaper §19).
 - **#29** — full Tier 3 kernel matrix `[5.10, 5.15, 6.1, 6.6, latest LTS,
   bpf-next]` + Tier 4 (veristat verifier-regress + xdp-bench perf gates +
@@ -342,7 +342,7 @@ Cross-cutting artifacts that already lived outside the feature workspace:
   `Arc<dyn Dataplane>` into `AppState`, closing the binary-composition
   edge that #23 deliberately deferred. First slice where `update_service`
   has a concrete caller.
-- **#25 [2.3]** — POLICY_MAP: the first wire-format struct crossing the
+- **#158 [3.14]** — POLICY_MAP: the first wire-format struct crossing the
   kernel/user boundary. Anchor for the deferred decision on a third
   shared-types crate (`overdrive-bpf-types`) versus a `cfg`-gated module
   inside `overdrive-bpf`.

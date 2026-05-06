@@ -59,7 +59,7 @@
 //! `docs/feature/phase-2-xdp-service-map/distill/test-scenarios.md`
 //! S-2.2-19 / S-2.2-20 — both the truncated-IPv4 and the SYN+RST
 //! drops attribute to the same slot. The `SanityPrologue` slot is
-//! reserved for future operator-tunable rules (POLICY_MAP / #25);
+//! reserved for future operator-tunable rules (POLICY_MAP / #158);
 //! Slice 06's static checks are all "this header is structurally
 //! malformed" and bucket together.
 

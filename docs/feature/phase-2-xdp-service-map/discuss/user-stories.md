@@ -834,7 +834,7 @@ version+IHL, transport protocol, TCP flag sanity.
 
 The whitepaper §7's stronger DDoS posture (operator-tunable rules
 compiled into BPF bytecode) is OUT of this slice — that is
-POLICY_MAP territory (#25). This slice ships the cheap, static,
+POLICY_MAP territory (#158). This slice ships the cheap, static,
 hardcoded checks that every reasonable XDP LB has.
 
 This is also the slice that establishes the **drop-rate baseline**
@@ -957,7 +957,7 @@ And the absolute count remains ≤ 60% of the 1M-privileged ceiling
 
 ### Technical Notes
 
-- The "non-IPv4 / non-TCP-or-UDP returns XDP_PASS" decision is intentional — it preserves IPv6 / ICMP / ARP semantics for the host's other workloads. The program is an LB, not a firewall; the firewall layer is #25 POLICY_MAP.
+- The "non-IPv4 / non-TCP-or-UDP returns XDP_PASS" decision is intentional — it preserves IPv6 / ICMP / ARP semantics for the host's other workloads. The program is an LB, not a firewall; the firewall layer is #158 POLICY_MAP.
 - TCP flag sanity rules are intentionally narrow (SYN+RST, SYN+FIN, all-zero). Aggressive flag-based filtering is operator-tunable and belongs in POLICY_MAP.
 - `DROP_COUNTER` per-CPU semantics: aggregate by summing across CPUs in userspace. Per-CPU avoids the cross-CPU contention that a global counter would face under DDoS load (research §2.3).
 - DESIGN may decide to fold the sanity prologue into a shared parsing helper that both `xdp_service_map_lookup` and `xdp_reverse_nat` invoke, OR duplicate the prologue inline in each program. Both are verifier-clean; the trade-off is between a `bpf_tail_call` or shared-include vs duplication. Either is acceptable for this slice.
