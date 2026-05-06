@@ -27,6 +27,14 @@ pub mod evaluators;
 // never a torn state. Mirrors the production `EbpfDataplane`'s
 // atomic HASH_OF_MAPS outer-map swap.
 pub mod backend_set_swap_atomic;
+// phase-2-xdp-service-map Slice 04 (US-04; S-2.2-13 sibling).
+// The `MaglevDistributionEven` invariant pins the steady-state
+// distribution property of `maglev::generate` — under equal
+// weights, every backend occupies its expected share ±5 %. The
+// disruption-bound proptest at `tests/integration/maglev_churn.rs`
+// pins the churn property; this invariant pins the distribution
+// property, both ride on the same pure function.
+pub mod maglev_distribution;
 // phase-2-xdp-service-map DISTILL — RED scaffolds per
 // `docs/feature/phase-2-xdp-service-map/distill/wave-decisions.md`
 // DWD-4. Hosts `assert_hydrator_eventually_converges` +
@@ -157,6 +165,18 @@ pub enum Invariant {
     /// `crate::invariants::backend_set_swap_atomic`.
     BackendSetSwapAtomic,
 
+    /// phase-2-xdp-service-map Slice 04 (US-04; S-2.2-13 sibling) —
+    /// always invariant. Under equal weights, the Maglev permutation
+    /// distributes slots within ±5 % of the per-backend expectation
+    /// (`M / N`). Sibling to the `single_backend_removal_shifts_at_
+    /// most_two_percent_of_flows` proptest in
+    /// `crates/overdrive-sim/tests/integration/maglev_churn.rs`: the
+    /// proptest pins the churn property, this invariant pins the
+    /// steady-state distribution property. Both ride on the same
+    /// `maglev::generate` pure function. The evaluator body lives in
+    /// `crate::invariants::maglev_distribution`.
+    MaglevDistributionEven,
+
     /// SCAFFOLD: true — phase-2-xdp-service-map DISTILL per ADR-0042
     /// + architecture.md § 8 *ESR pair*. Eventual: from any
     /// combination of `service_backends` rows + starting BPF map
@@ -209,6 +229,12 @@ impl Invariant {
         // step 03-01; the variant is registered up front so the
         // canonical name is stable.
         Self::BackendSetSwapAtomic,
+        // phase-2-xdp-service-map Slice 04 (US-04; S-2.2-13 sibling).
+        // The `MaglevDistributionEven` invariant body lives in
+        // `crate::invariants::maglev_distribution`. Sibling to the
+        // disruption-bound proptest at
+        // `tests/integration/maglev_churn.rs`.
+        Self::MaglevDistributionEven,
         // phase-2-xdp-service-map DISTILL — RED scaffolds per
         // `docs/feature/phase-2-xdp-service-map/distill/wave-decisions.md`
         // DWD-4. Evaluator bodies panic until DELIVER fills them.
@@ -244,6 +270,7 @@ impl Invariant {
             Self::BulkLoadIsDeterministic => "bulk-load-is-deterministic",
             Self::WriteThroughOrdering => "write-through-ordering",
             Self::BackendSetSwapAtomic => "backend-set-swap-atomic",
+            Self::MaglevDistributionEven => "maglev-distribution-even",
             Self::HydratorEventuallyConverges => "hydrator-eventually-converges",
             Self::HydratorIdempotentSteadyState => "hydrator-idempotent-steady-state",
         }

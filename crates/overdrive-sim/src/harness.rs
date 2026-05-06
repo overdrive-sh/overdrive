@@ -509,6 +509,14 @@ impl Harness {
             Invariant::BackendSetSwapAtomic => {
                 crate::invariants::backend_set_swap_atomic::evaluate_backend_set_swap_atomic().await
             }
+            // phase-2-xdp-service-map Slice 04 (US-04; S-2.2-13 sibling).
+            // GREEN of step 04-03 lands the real evaluator body in
+            // `crate::invariants::maglev_distribution`. Sibling to the
+            // disruption-bound proptest at
+            // `crates/overdrive-sim/tests/integration/maglev_churn.rs`.
+            Invariant::MaglevDistributionEven => {
+                crate::invariants::maglev_distribution::evaluate_maglev_distribution_even()
+            }
             // phase-2-xdp-service-map DISTILL — RED scaffolds per
             // `docs/feature/phase-2-xdp-service-map/distill/wave-decisions.md`
             // DWD-4. Bodies panic when invoked. DELIVER's Slice 08

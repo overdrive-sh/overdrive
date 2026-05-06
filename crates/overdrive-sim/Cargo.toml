@@ -39,6 +39,20 @@ overdrive-store-local    = { path = "../overdrive-store-local" }
 overdrive-control-plane.path = "../overdrive-control-plane"
 ciborium.workspace       = true
 serde.workspace          = true
+# `overdrive-dataplane` is `adapter-host`-class (it ships the production
+# `EbpfDataplane` BPF loader). The dependency here is on the pure-Rust
+# `maglev::permutation::generate` function — used by the
+# `MaglevDistributionEven` DST invariant in
+# `src/invariants/maglev_distribution.rs`. The Linux-only `aya` /
+# `libc` / `nix` machinery is gated `#[cfg(target_os = "linux")]` in the
+# dataplane crate, so cross-compiling the sim crate on macOS picks up
+# only the pure-function surface. Per `.claude/rules/development.md`
+# § "Port-trait dependencies": the dependency consumes a pure function,
+# not a port-trait production binding (no `EbpfDataplane` impl is
+# instantiated by sim code). Sibling dev-dep on the same crate (used by
+# `tests/integration/maglev_churn.rs`) remains for the integration
+# proptest layer.
+overdrive-dataplane.path = "../overdrive-dataplane"
 
 [features]
 # `integration-tests` — workspace-wide convention. Every workspace
@@ -61,13 +75,11 @@ serde_json.workspace = true
 # every `ObservationStore` adapter exercises this harness from its
 # own test suite to enforce the LWW contract at trait level.
 overdrive-core = { workspace = true, features = ["test-utils"] }
-# `overdrive-dataplane` exposes the pure userspace
-# `maglev::permutation::generate` function used by Slice 04's S-2.2-12
-# / S-2.2-13 integration proptests. Dev-dep only — sim never wires the
-# real BPF loader. The dependency is acceptable per
-# `.claude/rules/development.md` § "Port-trait dependencies": the test
-# crate consumes a pure function, not a port-trait production binding.
-overdrive-dataplane = { path = "../overdrive-dataplane" }
+# `overdrive-dataplane` is consumed at the regular `[dependencies]`
+# level above (for the `MaglevDistributionEven` DST invariant body in
+# `src/invariants/maglev_distribution.rs`); the test layer reuses the
+# same pure `maglev::permutation::generate` function via the unified
+# dependency graph, so no separate dev-dep entry is needed.
 
 [lints]
 workspace = true
