@@ -58,7 +58,12 @@ DISTILL and DELIVER.
    is not exercised; activates when GH #152 lands.
 2. **Conntrack is OUT** — stateless Maglev forwarder, ≤ 1% disruption
    per single-backend removal is the flow-affinity bound; conntrack
-   is GH #154.
+   is GH #154. **AMENDED 2026-05-06**: GH #154 was pulled forward to
+   feature `phase-2.16-xdp-conntrack` (ADR-0044) and lands
+   immediately after Phase 2.2 Slice 08. Phase 2.2's own boundary is
+   unchanged — Phase 2.2 still ships the stateless forwarder; the
+   conntrack layer is a sibling-feature additive extension. See
+   `docs/feature/phase-2.16-xdp-conntrack/design/architecture.md`.
 3. **`#![no_std]`, `aya-ebpf`-only kernel side** — kernel programs
    live in `overdrive-bpf` (class `binary`, target
    `bpfel-unknown-none`); userspace lives in `overdrive-dataplane`
