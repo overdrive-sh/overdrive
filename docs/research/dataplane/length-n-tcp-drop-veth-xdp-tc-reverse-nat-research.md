@@ -1,5 +1,76 @@
 # Research: Length-N TCP Segment Drop in veth + XDP forward + TC reverse-NAT
 
+## Update 2026-05-07 — RECOMMENDATION FALSIFIED
+
+**The Option α `csum_diff` form recommended below is empirically
+falsified.** A Lima-side bpftrace + netstat + pcap diagnostic on
+2026-05-07 isolated the actual root cause to Slice 06-02's sanity
+prologue, NOT to any checksum-helper interaction.
+
+**Falsification evidence:**
+
+- `bpftrace` shows the drop reason is `SKB_DROP_REASON_TC_EGRESS = 51`
+  from `dev_queue_xmit` on `lb_a`. The drop is at TC egress, not in
+  any checksum-validation path.
+- `Tcp.InCsumErrors` = 0 → 0 across the test run. No checksum errors
+  at the receiver.
+- The `[P.]` data segment never reaches `lb_a.pcap`. The drop is
+  upstream of any post-rewrite checksum validation — it is *before*
+  `dev_queue_xmit` ever serialises the skb to the wire.
+- A/B removing `BPF_F_PSEUDO_HDR` from the `bpf_l4_csum_replace` call
+  does not change the symptom. The helper-flag interaction this
+  research's recommendation hinges on is not load-bearing.
+
+**Actual root cause:** Slice 06-02's sanity prologue helper,
+specifically the `claimed_pkt_len > packet_len` check at
+`crates/overdrive-bpf/src/programs/sanity.rs:259`. When the kernel
+forwards an skb to TC egress, the IPv4 `total_length` field includes
+the full L4 payload but the skb's linear-buffer length (`data_end -
+data` in BPF context) may not — skb linearisation, GSO, and
+forwarded-packet metadata can leave the linear region shorter than
+what `total_length` advertises. Length-0 segments pass because
+`total_length == header_bytes`. Length-N segments fail check (3)
+because `claimed_pkt_len = ipv4_offset + total_len` exceeds
+`packet_len` for forwarded skbs.
+
+**Fix:** scope the sanity prologue helper to **XDP ingress only** per
+the ADR-0040 Revision 2026-05-07 amendment. The TC egress program
+(`tc_reverse_nat`) MUST NOT call the prologue. The egress program
+does not need its own packet-shape validation: any packet reaching
+TC egress on `lb_a` has already passed XDP ingress sanity checks on
+`lb_veth_a`.
+
+**NOT the fix:** switching `tc_reverse_nat` to the diff-encoded
+`bpf_csum_diff` form. The recommendation below is unnecessary.
+
+**Lessons for future research:** the failure-mode signature was
+content-specific (length-0 vs length-N segments), but the inferred
+root cause did not match the empirical drop-reason. Future
+hypotheses about length-content-specific drops in BPF-rewritten
+packets should run the diagnostic checklist (bpftrace
+`SKB_DROP_REASON_*`, `Tcp.InCsumErrors`, A/B helper-flag removal,
+pcap on both veth ends) BEFORE locking the design recommendation —
+this research's own § Q3 named this as Knowledge Gap K-2 ("empirical
+pcap analysis was out-of-scope per the research-only constraint"),
+and that constraint led directly to the mis-recommendation. A
+20-minute diagnostic on Lima would have caught this at research-
+time; instead it was caught after a full ADR-0044 + Phase 2.16
+feature were stood up on the falsified premise.
+
+**Cross-references for the falsification trail:**
+
+- `docs/product/architecture/adr-0040-service-map-three-map-split-and-hash-of-maps.md`
+  § Revision 2026-05-07 — the actual fix (Q3 amendment).
+- `docs/product/architecture/adr-0044-xdp-conntrack-percpu-lru.md`
+  § Falsification — the parallel falsification of the
+  conntrack-INVALID-drop hypothesis that the original S-2.2-17
+  framing rested on.
+
+The body below is preserved as a historical record of the
+investigation. Treat every prescription in it as falsified.
+
+---
+
 **Date**: 2026-05-06 | **Researcher**: nw-researcher (Nova) | **Confidence**: Medium-High (root-cause hypothesis is anchored in two independent authoritative sources — kernel source + Cilium production code + LKML thread — but the empirical falsification of NOTRACK alone leaves residual ambiguity that only a Lima reproduction can resolve. See Knowledge Gaps.) | **Sources**: 14 authoritative citations, 8 distinct domains.
 
 ## TL;DR / Recommendation

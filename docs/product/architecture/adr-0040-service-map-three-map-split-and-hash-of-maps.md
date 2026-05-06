@@ -289,3 +289,125 @@ syscall with no per-packet cost.
 - ADR-0038 (eBPF crate layout + build pipeline) — substrate.
 - ADR-0041 (weighted Maglev + REVERSE_NAT) — companion.
 - ADR-0042 (`ServiceMapHydrator`) — companion.
+
+---
+
+## Revision 2026-05-07 — Q3 amendment (sanity prologue is ingress-only)
+
+### Status
+
+Amendment. 2026-05-07. Decision-maker: Morgan. Tags: phase-2,
+dataplane, sanity-prologue, tc-egress, xdp-ingress, skb-linearisation,
+falsification-followup.
+
+### Why this amendment
+
+Decision 4 (Q3=C) above scoped the sanity prologue as a shared
+`#[inline(always)]` Rust helper invoked from BOTH `xdp_service_map_lookup`
+(ingress) AND `tc_reverse_nat` (egress). That decision was correct
+for ingress and wrong for egress. The empirical evidence trail is
+captured in ADR-0044 § Falsification (2026-05-07); the short summary:
+
+S-2.2-17 (`real_tcp_connection_completes_through_vip_with_payload_echo`)
+shows length-0 TCP segments passing through the dataplane and
+length-N segments dropping. A Lima-side bpftrace + netstat + pcap
+diagnostic on 2026-05-07 isolated the drop to
+`SKB_DROP_REASON_TC_EGRESS = 51` from `dev_queue_xmit` on `lb_a`.
+The only path in `tc_reverse_nat` that returns `TC_ACT_SHOT` is
+`Verdict::Drop` from the sanity prologue — specifically the
+`claimed_pkt_len > packet_len` check at
+`crates/overdrive-bpf/src/programs/sanity.rs:259`.
+
+The kernel-side rationale: when the kernel forwards an skb to TC
+egress, the IPv4 `total_length` field includes the full L4 payload,
+but the skb's linear-buffer length (`data_end - data` in BPF
+context) may not. skb linearisation, GSO segmentation, and
+forwarded-packet metadata can leave the linear region shorter than
+what `total_length` advertises. Length-0 segments pass because
+`total_length == header_bytes`. Length-N segments fail check (3)
+because `claimed_pkt_len = ipv4_offset + total_len` exceeds
+`packet_len` for forwarded skbs.
+
+### Amendment
+
+Q3 is amended to scope the sanity prologue helper to **XDP ingress
+only** (`xdp_service_map_lookup`). The TC egress program
+(`tc_reverse_nat`) MUST NOT call the prologue.
+
+The egress program does not need its own packet-shape validation:
+the ingress program is the enforcement point, and any packet
+reaching TC egress on `lb_a` has already passed XDP ingress sanity
+checks on `lb_veth_a`. Re-running the prologue at egress is not
+defence-in-depth — it is a check whose preconditions (linear-buffer
+length matches IPv4 `total_length`) the kernel does not preserve
+through forwarding, so the check fires spuriously on every length-N
+forwarded segment.
+
+### Concretely
+
+The decision the original Q3=C locked has TWO components:
+
+1. **Helper shape — shared `#[inline(always)]` Rust function.** This
+   component stands. Ingress callers continue to import the helper
+   from `crates/overdrive-bpf/src/shared/sanity.rs`.
+2. **Call sites — ingress AND egress.** This component is amended.
+   The egress call site is removed.
+
+The actual code change (removing the call from `tc_reverse_nat`) is
+the crafter's responsibility in a follow-up dispatch; this ADR
+captures the DECISION, not the implementation.
+
+### Consequences of the amendment
+
+**Positive:**
+
+- S-2.2-17 closes structurally without a conntrack table, without
+  NOTRACK, without changing the Phase 2.2 architecture envelope.
+  The prologue remains a load-bearing ingress check; the egress
+  path stays as it was before Slice 06-02 landed.
+- Phase 2.16 (the proposed dataplane-owned conntrack feature) is
+  retracted. ADR-0044 is marked SUPERSEDED.
+- The Tier 4 verifier-budget envelope improves: removing one helper
+  invocation from `tc_reverse_nat` is a small but measurable
+  reduction.
+
+**Negative:**
+
+- The egress program no longer carries a structural sanity check.
+  Acceptable: XDP ingress is the enforcement point, and forwarded
+  skbs at TC egress are kernel-vouched for in a way the prologue's
+  `claimed_pkt_len > packet_len` check is not equipped to validate.
+
+**Operational:**
+
+- Slice 06-02's existing scope (the prologue helper itself) stays
+  intact. Only the Slice 06-04 attempt to reuse the prologue at TC
+  egress is undone.
+- The in-flight 06-04 working-tree files (NOTRACK bridge variant,
+  IptablesInstall action, etc.) become moot in their conntrack-
+  framed shape. The crafter handling 06-04 in the follow-up
+  dispatch decides whether to land the prologue-removal-from-egress
+  fix as 06-04 or as a renumbered slice.
+
+### Cross-references
+
+- ADR-0044 (`adr-0044-xdp-conntrack-percpu-lru.md`) — SUPERSEDED;
+  carries the falsification record at top of file.
+- `docs/research/dataplane/length-n-tcp-drop-veth-xdp-tc-reverse-nat-research.md`
+  § Update 2026-05-07 — RECOMMENDATION FALSIFIED.
+- `docs/research/dataplane/cilium-bpf-fib-lookup-l2-mac-rewrite-comprehensive-research.md`
+  § Update 2026-05-07 — primary findings stand; downstream
+  conntrack inference falsified.
+- `crates/overdrive-bpf/src/programs/sanity.rs:259` — the
+  `claimed_pkt_len > packet_len` check that fires spuriously on
+  forwarded skbs.
+- CLAUDE.md § "Documentation" / `.claude/rules/development.md`
+  § "No aspirational docs" — this amendment captures the decision;
+  the code change is the crafter's responsibility, not this
+  ADR's.
+
+### Changelog (Revision 2026-05-07)
+
+| Date | Change |
+|---|---|
+| 2026-05-07 | Q3 amendment: sanity prologue scope narrowed from {ingress, egress} to {ingress only}. Empirical falsification trail in ADR-0044. — Morgan. |

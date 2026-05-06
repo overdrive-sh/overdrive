@@ -1,5 +1,56 @@
 # Research: Cilium `bpf_fib_lookup` + L2 MAC Rewrite for XDP_TX L4LB across veth peers
 
+## Update 2026-05-07 — primary findings stand; downstream conntrack inference falsified
+
+This research's **primary findings (Option α `bpf_fib_lookup` + L2
+MAC rewrite) are correct and load-bearing.** Those landed in commit
+`c9f80c7` and remain valid; nothing about the FIB-lookup or MAC-
+rewrite mechanic in this document is being retracted.
+
+What IS being retracted is the **downstream conntrack inference**
+that this research's § Q3 prediction about veth-peer XDP_TX delivery
+seeded — namely, the framing in ADR-0044 that S-2.2-17's
+content-specific drop pattern (length-0 segments pass, length-N
+segments drop) is caused by kernel netfilter conntrack mid-stream
+flagging payload-bearing TCP segments as INVALID. That inference was
+empirically falsified on 2026-05-07:
+
+- An iptables `-t raw -j NOTRACK` A/B test left S-2.2-17's symptom
+  unchanged. Conntrack is not in the drop path.
+- A subsequent Lima-side bpftrace + netstat + pcap diagnostic
+  isolated the drop to `SKB_DROP_REASON_TC_EGRESS = 51` from
+  `dev_queue_xmit` on `lb_a`, with `Tcp.InCsumErrors` = 0 and the
+  `[P.]` data segment never reaching `lb_a.pcap`.
+- The actual root cause is Slice 06-02's sanity prologue helper at
+  `crates/overdrive-bpf/src/programs/sanity.rs:259`. The
+  `claimed_pkt_len > packet_len` check fires spuriously on forwarded
+  skbs at TC egress because the kernel does not preserve the
+  invariant "linear-buffer length matches IPv4 `total_length`"
+  through forwarding (skb linearisation, GSO, forwarded-packet
+  metadata).
+
+The fix lives in ADR-0040 § Revision 2026-05-07 (Q3 amendment —
+sanity prologue is ingress-only). Phase 2.16 and ADR-0044 are
+retracted. See:
+
+- `docs/product/architecture/adr-0040-service-map-three-map-split-and-hash-of-maps.md`
+  § Revision 2026-05-07 — the actual fix.
+- `docs/product/architecture/adr-0044-xdp-conntrack-percpu-lru.md`
+  § Falsification — the falsification record.
+- `docs/research/dataplane/length-n-tcp-drop-veth-xdp-tc-reverse-nat-research.md`
+  § Update 2026-05-07 — the research that proposed the
+  `csum_diff`-form fix is also empirically falsified (independent
+  failure mode, same root cause).
+
+**Use this document for:** the FIB-lookup mechanic, the L2 MAC
+rewrite contract, the veth-peer-XDP_TX delivery model. **Do not use
+it for:** any inference about what happens to forwarded skbs at TC
+egress with respect to kernel netfilter, conntrack tracking, or
+checksum helpers — those inferences seeded a falsified hypothesis
+and should be re-validated empirically before being trusted again.
+
+---
+
 **Date**: 2026-05-06 | **Researcher**: nw-researcher (Nova) | **Confidence**: High (Q1, Q2, Q3) / High (Q4 — recommendation is structurally clear) | **Sources**: 17 cited, 14 high-reputation (82%)
 
 ## Scope and predecessor
