@@ -180,6 +180,15 @@ fn ten_tcp_syns_to_vip_are_rewritten_and_forwarded_via_veth() {
         Err(e) => panic!("veth setup failed: {e}"),
     };
 
+    // Set up FIB context for the post-Slice-05-04 `bpf_fib_lookup` call
+    // in `xdp_service_map_lookup`. Assigns `10.1.0.1/16` to the host
+    // veth (creates an on-link route covering BACKEND_IP=10.1.0.5) and
+    // adds a permanent ARP entry for BACKEND_IP → peer's MAC so the
+    // first SYN's FIB lookup returns `RET_SUCCESS` (with `fib.ifindex
+    // == host's ifindex`, giving XDP_TX as the optimal egress).
+    veth.configure_for_xdp_tx_to_backend("10.1.0.1/16", std::net::Ipv4Addr::from(BACKEND_OCTETS))
+        .expect("configure FIB+ARP for backend reachability");
+
     // Resolve veth1 ifindex (needed for raw-socket bind on the peer end).
     let peer_ifindex = match if_nametoindex(&veth.peer) {
         Ok(idx) => idx,

@@ -41,7 +41,11 @@
 #![allow(dead_code)]
 
 use aya_ebpf::{
-    bindings::xdp_action, cty::c_void, helpers::bpf_map_lookup_elem, macros::xdp,
+    EbpfContext,
+    bindings::{BPF_FIB_LKUP_RET_SUCCESS, bpf_fib_lookup as bpf_fib_lookup_params, xdp_action},
+    cty::c_void,
+    helpers::{bpf_fib_lookup, bpf_map_lookup_elem, bpf_redirect},
+    macros::xdp,
     programs::XdpContext,
 };
 
@@ -50,10 +54,21 @@ use crate::maps::service_map::{INNER_TABLE_SIZE, SERVICE_MAP, ServiceKey};
 
 // Header offsets / constants.
 const ETH_HDR_LEN: usize = 14;
+const ETH_DST_OFFSET: usize = 0;
+const ETH_SRC_OFFSET: usize = 6;
 const ETH_TYPE_OFFSET: usize = 12;
 const ETH_TYPE_IPV4: u16 = 0x0800;
+const ETH_ALEN: usize = 6;
+
+// AF_INET — kernel-stable address-family constant (sys/socket.h). Not
+// re-exported by aya-ebpf-bindings; declared here as a local constant
+// since it is part of the in-kernel `bpf_fib_lookup` UAPI contract and
+// will not change.
+const AF_INET: u8 = 2;
 
 const IPV4_HDR_LEN: usize = 20;
+const IPV4_TOS_OFFSET: usize = 1;
+const IPV4_TOT_LEN_OFFSET: usize = 2;
 const IPV4_PROTO_OFFSET: usize = 9;
 const IPV4_CSUM_OFFSET: usize = 10;
 const IPV4_SRC_IP_OFFSET: usize = 12;
@@ -343,21 +358,51 @@ fn try_xdp_service_map_lookup(ctx: &XdpContext) -> Result<u32, ()> {
         None => return Ok(xdp_action::XDP_PASS),
     };
 
-    // Hit ⇒ rewrite + XDP_TX (S-2.2-04).
-    rewrite_and_tx(ctx, dst_ip, ip_csum, l4_off, l4_csum_off, dst_port, l4_csum, &backend, is_udp)
+    // Hit ⇒ rewrite + (FIB-resolved L2 MAC rewrite) + XDP_TX
+    // (S-2.2-04 / S-2.2-17). The L2 MAC rewrite via `bpf_fib_lookup`
+    // is required for `XDP_TX` delivery into a non-local backend
+    // veth peer — without it, the receiving veth's `eth_type_trans`
+    // sets `pkt_type = PACKET_OTHERHOST` and `ip_rcv` drops the
+    // packet before it reaches the backend's listener. See
+    // `docs/research/dataplane/cilium-bpf-fib-lookup-l2-mac-rewrite-comprehensive-research.md`
+    // (Option α — kernel-tree `samples/bpf/xdp_fwd_kern.c` shape).
+    rewrite_and_tx(
+        ctx,
+        src_ip,
+        dst_ip,
+        ip_csum,
+        l4_off,
+        l4_csum_off,
+        dst_port,
+        l4_csum,
+        proto,
+        &backend,
+        is_udp,
+    )
 }
 
 /// Rewrite IPv4 dst IP + L4 dst port; incrementally update IP +
-/// L4 checksums; return `XDP_TX`.
+/// L4 checksums; resolve next-hop L2 MAC via `bpf_fib_lookup`;
+/// rewrite `eth->h_dest` / `eth->h_source`; return `XDP_TX` on
+/// success or `XDP_PASS` on FIB-lookup failure (so the kernel
+/// stack can do ARP / handle the edge case gracefully).
+///
+/// The ordering is load-bearing per
+/// `docs/research/dataplane/cilium-bpf-fib-lookup-l2-mac-rewrite-comprehensive-research.md`
+/// Finding 2.3: rewrite L3 + L4 + checksums first; THEN call
+/// `bpf_fib_lookup` against the post-rewrite IPv4 header — the FIB
+/// lookup must resolve the *backend's* next-hop, not the VIP's.
 #[inline(always)]
 fn rewrite_and_tx(
     ctx: &XdpContext,
+    src_ip_host: u32,
     old_dst_ip: u32,
     old_ip_csum: u16,
     l4_off: usize,
     l4_csum_off: usize,
     old_dst_port: u16,
     old_l4_csum: u16,
+    proto: u8,
     backend: &BackendEntry,
     is_udp: bool,
 ) -> Result<u32, ()> {
@@ -405,5 +450,141 @@ fn rewrite_and_tx(
         write_u16_be(ctx, l4_off + L4_DST_PORT_OFFSET, new_dst_port)?;
     }
 
-    Ok(xdp_action::XDP_TX)
+    // L2 MAC rewrite via `bpf_fib_lookup` — see
+    // `docs/research/dataplane/cilium-bpf-fib-lookup-l2-mac-rewrite-comprehensive-research.md`
+    // (Option α). Without this, `XDP_TX` into a non-local backend's
+    // veth peer is dropped at `ip_rcv` due to `PACKET_OTHERHOST`
+    // classification — the symptom that blocked Slice 05-04's
+    // first GREEN attempt.
+    fib_resolve_and_rewrite_mac(ctx, src_ip_host, new_dst_ip, proto, l4_off)
+}
+
+/// Build a `bpf_fib_lookup` parameter block from the post-rewrite
+/// IPv4 + L4 header, call the helper, and on success rewrite the
+/// Ethernet src/dst MAC. Returns `XDP_TX` on success and `XDP_PASS`
+/// on any FIB-lookup non-success (most commonly
+/// `BPF_FIB_LKUP_RET_NO_NEIGH` — the kernel stack will then resolve
+/// ARP and the next packet hits the populated neighbour table). See
+/// the kernel-tree reference `samples/bpf/xdp_fwd_kern.c` for the
+/// canonical shape.
+#[inline(always)]
+fn fib_resolve_and_rewrite_mac(
+    ctx: &XdpContext,
+    src_ip_host: u32,
+    new_dst_ip_host: u32,
+    proto: u8,
+    l4_off: usize,
+) -> Result<u32, ()> {
+    // Read the post-rewrite IPv4 tot_len and tos. tot_len is
+    // network-order on the wire; the FIB UAPI declares tot_len as
+    // `__u16` (host-order in the bpf_fib_lookup struct, despite
+    // sitting alongside `__be*` neighbours — the kernel reads it
+    // as a host-order length). `read_u16_be` returns host-order
+    // already, which is what the helper wants.
+    //
+    // SAFETY: bounds-checked by `read_u16_be` / `read_u8`.
+    let tot_len = unsafe { read_u16_be(ctx, ETH_HDR_LEN + IPV4_TOT_LEN_OFFSET)? };
+    let tos = unsafe { read_u8(ctx, ETH_HDR_LEN + IPV4_TOS_OFFSET)? };
+
+    // Read the post-rewrite L4 dst_port. The FIB struct's `dport`
+    // field is `__be16` — pass network-order bytes. `read_u16_be`
+    // returns host-order; we re-byte-swap via `to_be()` (a no-op
+    // re-roundtrip via raw bytes).
+    //
+    // SAFETY: bounds-checked.
+    let dst_port_host = unsafe { read_u16_be(ctx, l4_off + L4_DST_PORT_OFFSET)? };
+    let src_port_host = unsafe { read_u16_be(ctx, l4_off + L4_SRC_PORT_OFFSET)? };
+
+    // Read the xdp_md ingress_ifindex. This is the iface the SYN
+    // arrived on; for `XDP_TX` (same-iface bounce) it is also the
+    // egress iface — but a real production network may route the
+    // backend out a *different* iface, in which case `bpf_redirect`
+    // is the correct return. Phase 2.2 sticks with `XDP_TX` because
+    // the production deployment shape is single-iface; the FIB
+    // lookup remains correct because it resolves the next-hop MAC
+    // regardless of which iface ends up being the egress.
+    //
+    // SAFETY: `xdp_md` is a kernel-managed pointer; `ingress_ifindex`
+    // is a plain `__u32` field at a stable offset.
+    let ingress_ifindex = unsafe { (*ctx.ctx).ingress_ifindex };
+
+    // Build the parameter block. Every field is initialised to 0
+    // first (zeroed struct), then the inputs are written. The FIB
+    // helper ignores fields it does not consume on input and
+    // overwrites the smac/dmac/ifindex on output.
+    //
+    // SAFETY: zeroed struct is a valid initial state for
+    // `bpf_fib_lookup` per the kernel UAPI — every union variant
+    // accepts zero as a placeholder.
+    let mut fib: bpf_fib_lookup_params = unsafe { core::mem::zeroed() };
+    fib.family = AF_INET;
+    fib.l4_protocol = proto;
+    fib.sport = src_port_host.to_be();
+    fib.dport = dst_port_host.to_be();
+    fib.__bindgen_anon_1.tot_len = tot_len;
+    fib.ifindex = ingress_ifindex;
+    fib.__bindgen_anon_2.tos = tos;
+    // ipv4_src / ipv4_dst are `__be32` per UAPI. The kernel-side host
+    // representation of the post-rewrite dst is `new_dst_ip_host`
+    // (e.g. `0x0a010005` for 10.1.0.5 per architecture.md § 11);
+    // `to_be()` flips it to network-order for the helper.
+    fib.__bindgen_anon_3.ipv4_src = src_ip_host.to_be();
+    fib.__bindgen_anon_4.ipv4_dst = new_dst_ip_host.to_be();
+
+    // SAFETY: `bpf_fib_lookup` helper takes the XDP ctx pointer +
+    // `bpf_fib_lookup` parameter block. The verifier validates the
+    // call. Returns 0 on success, > 0 for `BPF_FIB_LKUP_RET_*`
+    // non-success codes, < 0 for invalid input. The helper
+    // overwrites `fib.smac`/`fib.dmac` (and `fib.ifindex`) on
+    // success.
+    let rc = unsafe {
+        bpf_fib_lookup(
+            ctx.as_ptr(),
+            &mut fib as *mut _,
+            core::mem::size_of::<bpf_fib_lookup_params>() as i32,
+            0u32,
+        )
+    };
+
+    if rc as u32 != BPF_FIB_LKUP_RET_SUCCESS {
+        // Non-success: `RET_NO_NEIGH` (ARP not yet resolved — let
+        // the kernel do ARP), `RET_NOT_FWDED` (no route — let the
+        // kernel handle it), `RET_FRAG_NEEDED`, etc. The L3+L4
+        // rewrite already happened to the packet buffer — `XDP_PASS`
+        // hands the now-rewritten packet to the kernel stack, which
+        // will route it normally and ARP for the new dst IP. This
+        // is the canonical pattern from `xdp_fwd_kern.c`.
+        return Ok(xdp_action::XDP_PASS);
+    }
+
+    // Success: write the resolved smac/dmac into the eth header.
+    //
+    // SAFETY: `mut_ptr_at` performs the bounds check; the
+    // ETH_DST/ETH_SRC offsets are within the validated eth header
+    // (offset 0..14 was already bounds-checked at program entry via
+    // `read_u16_be(ETH_TYPE_OFFSET)`).
+    unsafe {
+        let dst_mac: *mut [u8; ETH_ALEN] = mut_ptr_at(ctx, ETH_DST_OFFSET)?;
+        let src_mac: *mut [u8; ETH_ALEN] = mut_ptr_at(ctx, ETH_SRC_OFFSET)?;
+        *dst_mac = fib.dmac;
+        *src_mac = fib.smac;
+    }
+
+    // Egress decision: when the FIB-resolved egress iface matches
+    // the ingress iface, `XDP_TX` is the optimal same-iface bounce.
+    // When the egress iface differs (e.g. a 3-iface transit topology
+    // where `lb_veth_a` is ingress and `lb_veth_b` egresses to the
+    // backend), use `bpf_redirect` to route to the resolved iface.
+    // This matches `samples/bpf/xdp_fwd_kern.c`'s shape, which always
+    // uses redirect (XDP_TX is the degenerate same-iface case).
+    if fib.ifindex == ingress_ifindex {
+        Ok(xdp_action::XDP_TX)
+    } else {
+        // SAFETY: `bpf_redirect` is the standard XDP redirect helper.
+        // Returns the action code the program should return; on
+        // success this is `XDP_REDIRECT` (= 4). The verifier accepts
+        // this pattern as the canonical XDP-redirect shape.
+        let action = unsafe { bpf_redirect(fib.ifindex, 0) };
+        Ok(action as u32)
+    }
 }

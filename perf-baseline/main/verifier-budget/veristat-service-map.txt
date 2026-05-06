@@ -39,11 +39,45 @@
 #     (DROP_COUNTER PerCpuArray, TC egress, sockops mTLS) live in
 #     separate programs with their own baselines.
 #
+#   Slice 05-04 (this commit): verified_insns = 1211 with
+#     `bpf_fib_lookup` + L2 MAC rewrite + cross-iface `bpf_redirect`
+#     appended after the existing L3+L4 rewrite + checksum fold
+#     (Option α per
+#     docs/research/dataplane/cilium-bpf-fib-lookup-l2-mac-rewrite-comprehensive-research.md).
+#     The added instructions: ~80 bytes of `bpf_fib_lookup` parameter
+#     init from packet fields (tot_len, tos, sport, dport, src_ip,
+#     dst_ip, ifindex, family, proto), one helper call (`bpf_fib_lookup`,
+#     helper id 69), the success-path conditional branching on
+#     `BPF_FIB_LKUP_RET_SUCCESS`, two 6-byte MAC writes via `mut_ptr_at`
+#     bounds checks, an `ingress_ifindex == fib.ifindex` comparison,
+#     and the `bpf_redirect` helper call in the cross-iface path.
+#
+#     Delta vs Slice 04 baseline: 660 → 1211 (+551 instructions,
+#     +83%). This exceeds the 20% relative-delta gate against Slice
+#     04's baseline, so the gate is being re-baselined here per
+#     ADR-0040 / architecture.md § 7 D3 — Option α is the load-bearing
+#     L2 MAC rewrite + redirect mechanic that unblocks S-2.2-17 (real
+#     `nc` end-to-end through 3-iface topology). Without it, every
+#     `XDP_TX` into a non-local backend's veth peer is dropped at
+#     `ip_rcv` due to `PACKET_OTHERHOST` classification — see Findings
+#     2.4 / 3.3 of the cited research.
+#
+#     1211 instructions remains comfortably within every absolute
+#     ceiling: 0.24% of the 500K L1-cache-fits target, 0.20% of the
+#     600K ASR-2.2-03 ceiling, 0.12% of the 1M CAP_BPF kernel ceiling.
+#     The +20% gate now enforces against THIS new baseline (1211),
+#     i.e. `verified_insns ≤ 1453` for future changes.
+#
+#     The pps cost of the added helper call is predicted by the
+#     research at ≤ 2% (Finding 4.2); empirical measurement lands in
+#     Slice 07's xdp-perf baseline. If the regression exceeds 5%, an
+#     ADR amendment names the budget renegotiation.
+#
 # Recorded against:
 #   kernel:   6.8.0-111-generic   (Ubuntu 24.04 LTS lineage; matrix row "6.6 LTS"
 #                                   per .claude/rules/testing.md § "Kernel matrix"
 #                                   with Lima's actual 6.8 kernel)
-#   commit:   post-Maglev (commit f2b4210; step 04-04)
+#   commit:   post-Option-α (Slice 05-04)
 #   date:     2026-05-06
 #   tool:     aya 0.13.1 ProgramInfo::verified_instruction_count
 #             (veristat is not packaged in the Lima image; aya queries
@@ -55,7 +89,7 @@
 #             per ADR-0038 §3.1)
 #
 # Budget gates (ADR-0040 / architecture.md §7 D3 / ASR-2.2-03):
-#   verified_insns ≤ 792        ← +20% delta vs Slice 04 baseline (660)
+#   verified_insns ≤ 1453       ← +20% delta vs Slice 05-04 baseline (1211)
 #                                 — pinned by the integration test
 #                                 `verifier_budget_xdp_service_map_lookup_within_20pct_of_baseline`
 #                                 in `crates/overdrive-dataplane/tests/integration/atomic_swap.rs`.
@@ -63,9 +97,9 @@
 #   verified_insns ≤ 600,000    ← 60% absolute ceiling per ASR-2.2-03
 #   verified_insns ≤ 1,000,000  ← absolute CAP_BPF ceiling (kernel 5.10+)
 #
-# Recorded value (Slice 04):
-#   verified_insns = 660
-#   660 / 500,000 = 0.13% of the L1-cache-fits target. Comfortably within budget.
+# Recorded value (Slice 05-04):
+#   verified_insns = 1211
+#   1211 / 500,000 = 0.24% of the L1-cache-fits target. Comfortably within budget.
 #
 # DST companion:
 #   `MaglevDeterministic` invariant
@@ -82,7 +116,7 @@
 # Format (one line per program, space-separated key=value pairs;
 # Slice 07's parser keys off `prog=` and `verified_insns=`):
 
-file=target/xtask/bpf-objects/overdrive_bpf.o prog=xdp_service_map_lookup verdict=success verified_insns=660
+file=target/xtask/bpf-objects/overdrive_bpf.o prog=xdp_service_map_lookup verdict=success verified_insns=1211
 
 # (`xdp_pass` baseline at 21 verified_insns is recorded under
 # perf-baseline/main/verifier-budget/veristat-xdp-pass.txt when

@@ -97,6 +97,17 @@ fn maglev_real_distribution_under_xdp_trafficgen() {
         Err(e) => panic!("veth setup failed: {e}"),
     };
 
+    // FIB+ARP setup for the post-Slice-05-04 `bpf_fib_lookup` in
+    // `xdp_service_map_lookup`. Maglev uses 10 backends at IPs
+    // 10.1.0.1..10.1.0.10 (see backend-inventory loop below); each
+    // needs an ARP entry mapping to peer's MAC for the FIB lookup
+    // to return `RET_SUCCESS` and the program to take the XDP_TX
+    // round-trip path the distribution check depends on.
+    let backend_ips: Vec<std::net::Ipv4Addr> =
+        (1..=10).map(|i| std::net::Ipv4Addr::new(10, 1, 0, i)).collect();
+    veth.configure_for_xdp_tx_to_backends("10.1.0.254/16", &backend_ips)
+        .expect("configure FIB+ARP for backend IPs");
+
     let pin_dir = PathBuf::from(format!("/sys/fs/bpf/overdrive-test-mglv-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&pin_dir);
     std::fs::create_dir_all(&pin_dir)

@@ -54,6 +54,8 @@ use std::time::{Duration, Instant};
 use overdrive_core::SpiffeId;
 use overdrive_core::traits::dataplane::{Backend, Dataplane};
 use overdrive_dataplane::EbpfDataplane;
+use overdrive_dataplane::maps::ServiceKey;
+use overdrive_dataplane::maps::hash_of_maps::HashOfMapsHandle;
 
 use super::helpers::netns::{NetNs, NetNsError, ThreeIfaceTopology, threeiface_ips};
 use super::helpers::veth::{VethError, VethPair};
@@ -70,7 +72,16 @@ const VIP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1);
 const VIP_PORT: u16 = 8080;
 const CLIENT_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 100);
 const BACKEND_IP: Ipv4Addr = Ipv4Addr::new(10, 1, 0, 5);
-const BACKEND_PORT: u16 = 9000;
+// `VIP_PORT == BACKEND_PORT` is REQUIRED for the S-2.2-17 forward
+// path: the production `Dataplane::update_service(vip, backends)`
+// trait derives the SERVICE_MAP key's port from `backends[0].addr.port()`
+// (no separate `vip_port` argument). The kernel-side XDP key is built
+// from the IPv4 packet's dst_port. For the lookup to hit, the SYN's
+// dst_port (= VIP_PORT) must equal the backend's addr port (=
+// BACKEND_PORT). Setting them equal models the most common L4LB
+// deployment (VIP:8080 → backend:8080); per-port translation is a
+// later phase if/when needed.
+const BACKEND_PORT: u16 = VIP_PORT;
 
 /// Two-namespace topology. Owns the lifecycle of both netns + the
 /// veth pair connecting them. Drop teardown order matters: the veth
@@ -84,6 +95,11 @@ const BACKEND_PORT: u16 = 9000;
 /// correctness.
 struct E2eTopology {
     client_ns: NetNs,
+    /// Held for `Drop`-ordering: the backend netns must outlive the
+    /// veth peer that lives inside it. The `Drop` impl on `NetNs`
+    /// reaps the namespace and any in-namespace ifaces; this field
+    /// is the lifecycle anchor and is otherwise not read.
+    #[allow(dead_code)]
     backend_ns: NetNs,
     host_veth: String,
     /// Peer veth name. Currently only consumed inside `create()`
@@ -301,65 +317,52 @@ fn require_root_or_skip(test_name: &str) -> bool {
 /// S-2.2-17 — Real TCP connection completes through forward and
 /// reverse paths.
 ///
-/// **STATUS — escalated (Slice 05-04 RE-DO).** Option A 3-iface
-/// transit topology was attempted per
-/// `docs/research/dataplane/xdp-l4lb-test-topology-comprehensive-research.md`
-/// Recommendation 1. The attempt surfaced two distinct walls:
+/// **Slice 05-04 GREEN** — Option α (`bpf_fib_lookup` + L2 MAC
+/// rewrite + cross-iface `bpf_redirect` when egress != ingress)
+/// landed in the production XDP program. See
+/// `docs/research/dataplane/cilium-bpf-fib-lookup-l2-mac-rewrite-comprehensive-research.md`.
 ///
-/// 1. **Stub-load conflict.** Loading the embedded BPF ELF a
-///    second time in `backend-ns` (to attach the `xdp_pass` stub
-///    per research Finding 4.2 / Recommendation 2) fails with
-///    `failed to create map \`SERVICE_MAP\` with code -1` because
-///    the SERVICE_MAP pin-by-name pre-create dance in
-///    [`EbpfDataplane::new_with_pin_dir`] is single-shot — it
-///    cannot be replayed by a second loader against a fresh
-///    pin path. A `xdp_pass`-only stub object is needed (a
-///    kernel-side scope change explicitly out of step 05-04
-///    bounds: "Do NOT unilaterally change kernel-side code").
+/// Topology (per `ThreeIfaceTopology` in helpers/netns.rs):
 ///
-/// 2. **XDP_TX semantics on veth.** Independent of (1), the
-///    deeper structural wall is XDP_TX bouncing back to the iface
-///    the SYN arrived on. With XDP attached on `lb_veth_a` (where
-///    SYNs ingress from `client-ns`), the rewritten packet's L2
-///    dst MAC is `lb_veth_a`'s MAC unchanged — XDP_TX delivers it
-///    to `client_veth`'s peer (`client-ns`'s kernel), which drops
-///    it as foreign. The `lb_veth_b ↔ backend_veth` link is
-///    irrelevant to where XDP_TX'd frames go. To reach
-///    `backend-ns` the packet would need either:
-///      * L2 dst MAC rewritten to `backend_veth`'s MAC AND
-///        XDP_REDIRECT to `lb_veth_b`'s ifindex (`bpf_redirect`,
-///        kernel-side change), OR
-///      * XDP_PASS-after-rewrite + IP forwarding in `lb-ns`
-///        routing the rewritten dst via `lb_veth_b` (kernel-side
-///        change), OR
-///      * `bpf_fib_lookup` helper to resolve next-hop MAC inside
-///        the XDP program, then XDP_TX (kernel-side change).
+/// ```text
+///   client-ns                       lb-ns                          backend-ns
+///     ┌──────────────┐                ┌──────────────────┐           ┌──────────────┐
+///     │ client_veth  │ <──── pair ──> │ lb_veth_a        │           │              │
+///     │ 10.0.0.10/24 │                │ 10.0.0.1/24      │           │              │
+///     │              │                │                  │           │              │
+///     │              │                │      lb_veth_b   │ <─pair─>  │ backend_veth │
+///     │              │                │      10.1.0.1/24 │           │ 10.1.0.5/24  │
+///     │              │                │  XDP+TC programs │           │  XDP_PASS    │
+///     │              │                │  attach here     │           │  stub        │
+///     └──────────────┘                └──────────────────┘           └──────────────┘
+/// ```
 ///
-/// All three resolutions are kernel-side architectural changes
-/// the dispatch boundary rules explicitly forbid for this step.
-/// The companion test below proves the production wiring works —
-/// REVERSE_NAT_MAP populate + diff-shaped purge run end-to-end.
+/// Test flow:
+///
+/// 1. Build the 3-iface topology + per-test bpffs pin dir.
+/// 2. Attach the `xdp_pass` stub in `backend-ns` on `backend_veth`
+///    so XDP_REDIRECT delivery into the veth peer works (per
+///    kernel patch v7 09/10 — XDP_TX/REDIRECT into a veth peer
+///    requires the receiving veth to also have an XDP program).
+/// 3. Spawn `nc -l <BACKEND_PORT>` in `backend-ns` with a known
+///    payload pre-piped to its stdin.
+/// 4. Construct `EbpfDataplane` in `lb-ns` attached to `lb_veth_a`.
+/// 5. Pre-populate ARP in `lb-ns` for the backend's MAC against
+///    `lb_veth_b` so the first SYN's `bpf_fib_lookup` returns
+///    `RET_SUCCESS` deterministically (without ARP, the helper
+///    returns `RET_NO_NEIGH` and the program falls back to
+///    `XDP_PASS`, taking the slow path; pre-populating eliminates
+///    the flake risk).
+/// 6. `update_service(VIP, [backend])` populates SERVICE_MAP +
+///    BACKEND_MAP + REVERSE_NAT_MAP.
+/// 7. Spawn `nc <VIP> <VIP_PORT>` in `client-ns`.
+/// 8. Assert `nc` exits 0 and the client's stdout contains the
+///    backend's payload — proves the full forward + reverse path.
 #[test]
-#[should_panic(expected = "RED scaffold")]
 fn real_tcp_connection_completes_through_vip_with_payload_echo() {
-    panic!(
-        "Not yet implemented -- RED scaffold: S-2.2-17 — \
-         real `nc` requires kernel-side architectural change \
-         (XDP_REDIRECT-with-L2-rewrite OR XDP_PASS-after-rewrite \
-         OR bpf_fib_lookup-then-XDP_TX). Step 05-04 RE-DO \
-         attempted Option A 3-iface transit per research \
-         Recommendation 1; surfaced two walls — stub-load conflict \
-         (a xdp_pass-only BPF object is needed; full ELF reload \
-         hits SERVICE_MAP pin-by-name single-shot constraint) AND \
-         the structural XDP_TX-on-veth-peer mechanic that the \
-         research did not fully trace through. See sibling \
-         `removing_backend_purges_reverse_nat_entry_no_stale_rewrite` \
-         for production wiring proof."
-    );
-}
-
-#[allow(dead_code)]
-fn _real_tcp_3iface_body_attempt() {
+    if !require_root_or_skip("S-2.2-17") {
+        return;
+    }
     use threeiface_ips::{BACKEND_IP as A_BACKEND_IP, VIP as A_VIP};
 
     let topo = match ThreeIfaceTopology::create("a") {
@@ -383,19 +386,22 @@ fn _real_tcp_3iface_body_attempt() {
     }
     let _pin_guard = PinDirGuard(pin_dir.clone());
 
-    // Diagnostics dir for tcpdump pcaps — debug-only, written into
-    // /tmp so the test caller can inspect after a failure. The
-    // working directory inside the host vs Lima may differ; /tmp
-    // is universally writable.
+    // Diagnostics dir for tcpdump pcaps. Best-effort.
     let pcap_dir = PathBuf::from(format!("/tmp/ovd-rnat3-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&pcap_dir);
     std::fs::create_dir_all(&pcap_dir).expect("create pcap dir");
 
+    // Read backend's MAC for ARP pre-population. The `ThreeIfaceTopology`
+    // exposes the iface name; we read /sys/class/net/<iface>/address
+    // inside backend-ns via `ip netns exec`.
+    let backend_mac =
+        read_iface_mac(&topo.backend_ns.name, &topo.backend_veth).expect("read backend_veth MAC");
+    eprintln!("[diag] backend_veth MAC = {backend_mac}");
+
     // Step 1 — Attach the no-op `xdp_pass` stub to `backend_veth` in
-    // backend-ns. Per research § Finding 4.2, veth XDP_TX requires
-    // a peer-side XDP program for delivery. The stub is the same
-    // BPF object we use elsewhere; we just attach the `xdp_pass`
-    // program inside backend-ns.
+    // backend-ns. Per research § Finding 4.2 / kernel patch v7 09/10,
+    // XDP_TX/REDIRECT into a veth peer requires the receiving veth to
+    // have an XDP program attached.
     let stub_holder = {
         let _g = enter_netns(&topo.backend_ns.name).expect("setns backend-ns for stub");
         let stub_pin = pin_dir.join("backend-stub");
@@ -456,7 +462,38 @@ fn _real_tcp_3iface_body_attempt() {
     }
     std::thread::sleep(Duration::from_millis(200));
 
-    // Step 4 — Construct EbpfDataplane in lb-ns and attach to
+    // Step 4 — Pre-populate ARP for the backend on `lb_veth_b` in
+    // lb-ns. Without this, the first SYN's `bpf_fib_lookup` returns
+    // `RET_NO_NEIGH` (the kernel ARP table is empty) and the program
+    // falls back to `XDP_PASS`, taking the slow path through the
+    // kernel networking stack. Pre-populating eliminates that flake.
+    // See research § Finding 4.4 — "ip neigh add <backend_ip> lladdr
+    // <backend_mac> dev <egress_iface> nud permanent".
+    let neigh_add = Command::new("ip")
+        .args([
+            "netns",
+            "exec",
+            &topo.lb_ns.name,
+            "ip",
+            "neigh",
+            "replace",
+            &A_BACKEND_IP.to_string(),
+            "lladdr",
+            &backend_mac,
+            "dev",
+            &topo.lb_veth_b,
+            "nud",
+            "permanent",
+        ])
+        .output()
+        .expect("ip neigh add for backend");
+    assert!(
+        neigh_add.status.success(),
+        "ip neigh replace failed: stderr={:?}",
+        String::from_utf8_lossy(&neigh_add.stderr)
+    );
+
+    // Step 5 — Construct EbpfDataplane in lb-ns and attach to
     // `lb_veth_a`. The XDP+TC programs live there per the helper
     // docstring's intent and per research Recommendation 1.
     let _ns_guard = enter_netns(&topo.lb_ns.name).expect("setns lb-ns");
@@ -481,7 +518,7 @@ fn _real_tcp_3iface_body_attempt() {
         .expect("update_service");
     drop(_ns_guard);
 
-    // Step 5 — Spawn client `nc <vip> 8080` in client-ns.
+    // Step 6 — Spawn client `nc <vip> 8080` in client-ns.
     let mut client_nc = topo
         .client_ns
         .command("nc", [&A_VIP.to_string(), &VIP_PORT.to_string(), "-q", "1", "-w", "5"])
@@ -533,9 +570,31 @@ fn _real_tcp_3iface_body_attempt() {
     );
 }
 
-/// RAII handle owning the loaded BPF object that has the
+/// Read `/sys/class/net/<iface>/address` inside a netns. Used by
+/// the S-2.2-17 test to pre-populate the LB's ARP table for the
+/// backend before the first SYN arrives — eliminates the
+/// `RET_NO_NEIGH` first-packet slow-path flake.
+fn read_iface_mac(ns_name: &str, iface: &str) -> std::io::Result<String> {
+    let out = Command::new("ip")
+        .args(["netns", "exec", ns_name, "cat", &format!("/sys/class/net/{iface}/address")])
+        .output()?;
+    if !out.status.success() {
+        return Err(std::io::Error::other(format!(
+            "ip netns exec read MAC failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        )));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
 /// `xdp_pass` stub attached to a backend-side veth iface.
+///
+/// `_service_map` keeps the pre-pinned outer SERVICE_MAP HoM (and
+/// its inner-map prototype FD) alive for the stub's lifetime — if
+/// it drops first, the kernel reclaims the outer map and the next
+/// load against the bpffs pin would fail.
 struct StubXdpHolder {
+    _service_map: HashOfMapsHandle<ServiceKey, u32>,
     _bpf: aya::Ebpf,
     _link: aya::programs::xdp::XdpLinkId,
 }
@@ -551,6 +610,28 @@ struct StubXdpHolder {
 /// thread's netns.
 fn load_xdp_pass_stub(iface: &str, pin_dir: &std::path::Path) -> Result<StubXdpHolder, String> {
     use aya::programs::{Xdp, XdpFlags};
+
+    // Pre-create + pin SERVICE_MAP first. The shared BPF ELF declares
+    // SERVICE_MAP as a `HASH_OF_MAPS` with `pinning = ByName`; aya
+    // 0.13.x's loader cannot create HoM directly (it falls back to
+    // bare `BPF_MAP_CREATE` which the kernel rejects without an
+    // `inner_map_fd`), so we replicate the production
+    // `EbpfDataplane::new_with_pin_dir` pin-by-name dance here. Once
+    // pinned, aya's loader sees the existing pin and reuses it via
+    // `BPF_OBJ_GET`. Capacities mirror the production constants in
+    // `crates/overdrive-dataplane/src/lib.rs` (architecture.md § 10):
+    // outer = 4096, inner = MaglevTableSize::DEFAULT (16_381).
+    const SERVICE_MAP_NAME: &str = "SERVICE_MAP";
+    const SERVICE_MAP_OUTER_CAPACITY: u32 = 4096;
+    const SERVICE_MAP_INNER_CAPACITY: u32 =
+        overdrive_core::dataplane::MaglevTableSize::DEFAULT.get();
+    let service_map = HashOfMapsHandle::<ServiceKey, u32>::new_pinned_with_array_inner(
+        SERVICE_MAP_NAME,
+        SERVICE_MAP_OUTER_CAPACITY,
+        SERVICE_MAP_INNER_CAPACITY,
+        pin_dir,
+    )
+    .map_err(|e| format!("pre-pin SERVICE_MAP for stub: {e}"))?;
 
     // Re-use the embedded BPF artifact from the dataplane crate.
     // We need to materialise it to a temp file because aya's
@@ -583,7 +664,7 @@ fn load_xdp_pass_stub(iface: &str, pin_dir: &std::path::Path) -> Result<StubXdpH
             .attach(iface, XdpFlags::SKB_MODE)
             .map_err(|e| format!("xdp_pass.attach({iface}, SKB_MODE): {e}"))?,
     };
-    Ok(StubXdpHolder { _bpf: bpf, _link: link })
+    Ok(StubXdpHolder { _service_map: service_map, _bpf: bpf, _link: link })
 }
 
 /// S-2.2-18 — Removed backend's REVERSE_NAT entry purged on service

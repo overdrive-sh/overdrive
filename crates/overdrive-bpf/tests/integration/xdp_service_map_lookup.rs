@@ -54,9 +54,6 @@ use serial_test::serial;
 /// the same reasoning in `xdp_pass_test_run.rs` — the value is
 /// kernel ABI and will not change.
 const XDP_PASS: u32 = 2;
-/// `XDP_TX` from `<bpf.h>` — bounce the (possibly-rewritten) frame
-/// back out the same NIC.
-const XDP_TX: u32 = 3;
 
 // ----- workspace plumbing (same shape as xdp_pass_test_run.rs) -----
 
@@ -499,8 +496,7 @@ fn outer_map_delete(outer_fd: &OwnedFd, key: &ServiceKey) {
     // ENOENT is fine — idempotent delete.
 }
 
-/// S-2.2-04 — `SERVICE_MAP` hit returns `XDP_TX` with rewritten
-/// headers.
+/// S-2.2-04 — `SERVICE_MAP` hit rewrites IPv4 dst/port + checksums.
 ///
 /// Slice 03 restructure: the lookup chain is now SERVICE_MAP outer
 /// HoM → inner ARRAY[slot] → BACKEND_MAP[BackendId] → BackendEntry.
@@ -509,9 +505,27 @@ fn outer_map_delete(outer_fd: &OwnedFd, key: &ServiceKey) {
 /// outer HoM slot for `(VIP, VIP_PORT)` to that inner ARRAY.
 /// The XDP slot hash is uniform across slots in this scenario so
 /// the lookup deterministically resolves to backend 1.
+///
+/// Slice 05-04 amendment: Option α (`bpf_fib_lookup` + L2 MAC
+/// rewrite) is now a permanent feature of the production program
+/// — see
+/// `docs/research/dataplane/cilium-bpf-fib-lookup-l2-mac-rewrite-comprehensive-research.md`.
+/// Under `BPF_PROG_TEST_RUN`'s synthetic packet context the FIB
+/// lookup has no neighbour information (the test's calling
+/// netns has no route or ARP entry for the synthesized backend
+/// IP), so the helper returns `BPF_FIB_LKUP_RET_NO_NEIGH` (or
+/// `RET_NOT_FWDED`) and the program returns `XDP_PASS` — see
+/// the program's `fib_resolve_and_rewrite_mac` branch.
+/// Critically, the L3 + L4 + checksum rewrite already happened
+/// to the packet buffer BEFORE the FIB lookup, so the rewrite
+/// assertions still hold against `data_out`. The XDP_TX-vs-FIB-
+/// resolved-egress action is exercised end-to-end in Tier 3
+/// (S-2.2-17 in `crates/overdrive-dataplane/tests/integration/
+/// reverse_nat_e2e.rs`), where a real netns provides the FIB
+/// context the helper needs.
 #[test]
 #[serial(env)]
-fn service_map_hit_returns_xdp_tx_with_rewritten_headers() {
+fn service_map_hit_rewrites_dst_ip_port_and_checksums() {
     let LoadedTestBpf { mut bpf, prog_fd, outer_fd, _pin_dir_guard } = load_service_map_program();
 
     const BID_ONE: u32 = 1;
@@ -550,7 +564,13 @@ fn service_map_hit_returns_xdp_tx_with_rewritten_headers() {
     // CHECK: drive BPF_PROG_TEST_RUN.
     let (action, out_len) =
         bpf_prog_test_run(&prog_fd, &pkt, &mut out).expect("BPF_PROG_TEST_RUN syscall");
-    assert_eq!(action, XDP_TX, "expected XDP_TX (=3), got {action}");
+    // FIB lookup fails on the synthetic packet (no neighbour info in
+    // the calling netns for the synthesised BACKEND_OCTETS) — the
+    // program returns XDP_PASS per Option α's `RET_NO_NEIGH` →
+    // `XDP_PASS` fallback. The L3+L4 rewrite is committed before the
+    // FIB lookup runs, so the rewrite assertions below still hold
+    // against `data_out`.
+    assert_eq!(action, XDP_PASS, "expected XDP_PASS (=2) from FIB-NO_NEIGH fallback, got {action}");
     assert_eq!(out_len, pkt.len(), "output frame length mismatch");
 
     // (a) Dest IP rewritten.
@@ -614,14 +634,18 @@ fn service_map_miss_returns_xdp_pass_no_rewrite() {
 }
 
 /// S-2.2-08 — Truncated IPv4 frame returns `XDP_PASS`, no crash,
-/// no `SERVICE_MAP` lookup.
+/// no `SERVICE_MAP` lookup, no rewrite.
 ///
 /// Slice 03 restructure: the test populates SERVICE_MAP outer HoM
-/// + inner ARRAY + BACKEND_MAP for `(VIP, VIP_PORT)`, so a
-/// successful lookup would route to backend 1 → `XDP_TX`. The
-/// truncated frame must short-circuit at the IPv4 bounds check
-/// BEFORE the outer-map lookup — observed as `XDP_PASS` rather
-/// than `XDP_TX`.
+/// + inner ARRAY + BACKEND_MAP for `(VIP, VIP_PORT)` so the lookup
+/// path is fully wired. The truncated frame must short-circuit at
+/// the IPv4 bounds check BEFORE the outer-map lookup. The
+/// dispositive observation is that `data_out` matches `data_in`
+/// (no rewrite) AND the action is `XDP_PASS` — both conditions
+/// distinguish "bounds check fired" from "lookup succeeded then
+/// FIB-fallback hit `XDP_PASS`" (the post-Slice 05-04 hit path's
+/// PROG_TEST_RUN signature, which DOES rewrite the frame). See the
+/// dst-IP-unchanged assertion below.
 #[test]
 #[serial(env)]
 fn truncated_ipv4_frame_returns_xdp_pass_no_lookup_no_crash() {
@@ -629,8 +653,12 @@ fn truncated_ipv4_frame_returns_xdp_pass_no_lookup_no_crash() {
 
     const BID_ONE: u32 = 1;
 
-    // SETUP: full happy-path populate so a "lookup happened anyway"
-    // regression would surface as XDP_TX.
+    // SETUP: full happy-path populate. A "lookup happened anyway"
+    // regression would surface as a rewritten dst IP in `data_out`
+    // (the post-Slice-05-04 hit path commits the rewrite before its
+    // FIB-fallback `XDP_PASS`). The bounds-check short-circuit must
+    // observably leave `data_out` unmodified; see the assertion at
+    // the end of this test.
     {
         let mut bm: HashMap<_, u32, BackendEntry> =
             HashMap::try_from(bpf.map_mut("BACKEND_MAP").expect("BACKEND_MAP not found"))

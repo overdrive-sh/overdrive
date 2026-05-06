@@ -126,6 +126,23 @@ fn swap_inner_map_distributes_traffic_across_new_backend_set() {
         Err(e) => panic!("veth setup failed: {e}"),
     };
 
+    // Set up FIB context for the post-Slice-05-04 `bpf_fib_lookup` in
+    // `xdp_service_map_lookup`: assign `10.1.0.254/16` to host (covers
+    // the v1+v2 backend IPs on-link) and pre-populate ARP for every
+    // backend IP → peer's MAC. Without this, the FIB call returns
+    // `RET_NO_NEIGH` / `RET_NOT_FWDED` and the program returns
+    // `XDP_PASS`, breaking the swap-test's XDP_TX-round-trip
+    // assertion.
+    veth.configure_for_xdp_tx_to_backends(
+        "10.1.0.254/16",
+        &[
+            std::net::Ipv4Addr::new(10, 1, 0, 1),
+            std::net::Ipv4Addr::new(10, 1, 0, 2),
+            std::net::Ipv4Addr::new(10, 1, 0, 3),
+        ],
+    )
+    .expect("configure FIB+ARP for backend IPs");
+
     // Per-test pin dir to isolate from sibling service_map_forward.
     let pin_dir = PathBuf::from(format!("/sys/fs/bpf/overdrive-test-swap-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&pin_dir);
@@ -420,16 +437,21 @@ fn verifier_budget_xdp_service_map_lookup_within_20pct_of_baseline() {
     let insns = info.verified_instruction_count().expect("kernel must report verified insns");
     eprintln!("xdp_service_map_lookup verified_instruction_count = {insns}");
 
-    // ASR-2.2-03: 20% delta vs Slice 04 baseline of 660 (post-Maglev
-    // migration). The Slice 03 baseline was 401 with the Slice 02
-    // chained lookup + placeholder XOR slot hash; Slice 04 adds the
-    // FNV-1a 5-tuple hash unrolled across the 13-byte input plus
-    // `% INNER_TABLE_SIZE` (Maglev table size = 16_381). One-time
-    // architectural bump documented in
-    // `docs/feature/phase-2-xdp-service-map/deliver/.develop-progress.json`
-    // for step 04-04; Slice 07 (`cargo xtask verifier-regress`) will
-    // freeze this baseline against further drift.
-    const BASELINE: u32 = 660;
+    // ASR-2.2-03: 20% delta vs Slice 05-04 baseline of 1211. The
+    // baseline history (recorded in
+    // `perf-baseline/main/verifier-budget/veristat-service-map.txt`):
+    //   Slice 02: 401   — flat HashMap lookup
+    //   Slice 03: 460   — HASH_OF_MAPS chained lookup
+    //   Slice 04: 660   — FNV-1a 5-tuple slot hash
+    //   Slice 05-04: 1211 — `bpf_fib_lookup` + L2 MAC rewrite +
+    //                       cross-iface `bpf_redirect` (Option α per
+    //                       docs/research/dataplane/cilium-bpf-fib-lookup-
+    //                       l2-mac-rewrite-comprehensive-research.md;
+    //                       unblocks S-2.2-17 real-`nc` end-to-end).
+    // 1211 instructions remains 0.24% of the 500K L1-cache-fits
+    // target. Slice 07 (`cargo xtask verifier-regress`) freezes this
+    // baseline against further drift.
+    const BASELINE: u32 = 1211;
     let upper_bound = BASELINE + (BASELINE / 5); // +20% per ASR-2.2-03
     assert!(
         insns <= upper_bound,
@@ -930,6 +952,19 @@ fn atomic_swap_under_50kpps_traffic_drops_zero_packets() {
         }
         Err(e) => panic!("veth setup failed: {e}"),
     };
+
+    // FIB+ARP setup for the post-Slice-05-04 `bpf_fib_lookup`. See
+    // `swap_inner_map_distributes_traffic_across_new_backend_set`'s
+    // sibling block above for the full rationale.
+    veth.configure_for_xdp_tx_to_backends(
+        "10.1.0.254/16",
+        &[
+            std::net::Ipv4Addr::new(10, 1, 0, 1),
+            std::net::Ipv4Addr::new(10, 1, 0, 2),
+            std::net::Ipv4Addr::new(10, 1, 0, 3),
+        ],
+    )
+    .expect("configure FIB+ARP for backend IPs");
 
     let pin_dir = PathBuf::from(format!("/sys/fs/bpf/overdrive-test-zerod-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&pin_dir);

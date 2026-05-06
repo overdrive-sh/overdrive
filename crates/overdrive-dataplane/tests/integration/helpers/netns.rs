@@ -201,13 +201,18 @@ impl Drop for NetNs {
 ///
 /// IP forwarding is enabled in `lb-ns` so packets routed by the kernel
 /// from `lb_veth_a` to `lb_veth_b` work for non-XDP paths (return
-/// traffic from the backend, ARP resolution, ICMP). XDP_TX itself
-/// runs before routing, so its semantics are governed by the L2 link
-/// rather than the routing table — the `lb_veth_b ↔ backend_veth`
-/// veth peer link is a point-to-point L2 segment, so an XDP_TX'd
-/// frame whose L3 dst is `10.1.0.5` reaches `backend_veth` over that
-/// link regardless of L2 dst MAC (veth peers accept frames addressed
-/// to either endpoint's MAC).
+/// traffic from the backend, ARP resolution, ICMP, and the
+/// `RET_NO_NEIGH` / `RET_NOT_FWDED` slow-path fallbacks where the
+/// XDP program returns `XDP_PASS`).
+///
+/// **Cross-iface XDP semantics** — `XDP_TX` bounces a frame out the
+/// SAME iface it arrived on, so cannot deliver from `lb_veth_a` to
+/// `lb_veth_b`. Cross-iface delivery uses `bpf_redirect(fib.ifindex,
+/// 0)` after `bpf_fib_lookup` resolves the egress iface and the
+/// next-hop MAC; the program's MAC rewrite + redirect path is what
+/// makes the 3-iface topology work. See
+/// `docs/research/dataplane/cilium-bpf-fib-lookup-l2-mac-rewrite-comprehensive-research.md`
+/// for the full mechanic.
 ///
 /// `Drop` reaps the namespaces (kernel auto-reaps in-namespace
 /// ifaces). The veth pairs are forgotten after `move_iface` because
@@ -307,8 +312,10 @@ impl ThreeIfaceTopology {
 
         // Enable IP forwarding in lb-ns so the kernel routes frames
         // arriving on lb_veth_a out of lb_veth_b for non-XDP paths
-        // (return traffic, ICMP, ARP resolution against the backend).
-        // XDP_TX itself runs before routing.
+        // (return traffic, ICMP, ARP resolution against the backend,
+        // FIB-fallback `XDP_PASS`-after-rewrite paths). The XDP
+        // forward-path uses `bpf_fib_lookup` + `bpf_redirect` to
+        // resolve the egress iface and the next-hop MAC directly.
         let _ = lb_ns.sysctl("net.ipv4.ip_forward", "1");
 
         // Disable rp_filter cluster-wide in lb-ns. The rewritten frame's
@@ -324,6 +331,33 @@ impl ThreeIfaceTopology {
         let _ = client_ns.add_route("default", Some(&VIP.to_string()), None);
         // Default route in backend-ns via lb-ns's backend-side iface.
         let _ = backend_ns.add_route("default", Some(&LB_BACKEND_IP.to_string()), None);
+
+        // Disable TX checksum offload + GSO/TSO on every veth. The
+        // kernel's TCP socket layer emits SYNs with ip_summed =
+        // CHECKSUM_PARTIAL and a partial-cksum value on the wire;
+        // XDP_REDIRECT resets ip_summed to CHECKSUM_NONE on the
+        // destination peer, forcing full validation against the wire
+        // bytes. XDP's incremental update over a partial input
+        // produces a partial output that fails validation and the
+        // SYN is silently dropped. Disabling tx-checksumming forces
+        // every emitting stack in the path to compute a full valid
+        // cksum on the wire — XDP's incremental update over that
+        // produces another full valid cksum the receiver accepts.
+        // Standard Cilium testbed setup for veth-based L4LB tests.
+        // Best-effort: older ethtool may reject some keys but
+        // tx-checksum-ip-generic off is the load-bearing one.
+        for (ns_name, iface) in [
+            (client_ns.name.as_str(), client_veth.as_str()),
+            (lb_ns.name.as_str(), lb_veth_a.as_str()),
+            (lb_ns.name.as_str(), lb_veth_b.as_str()),
+            (backend_ns.name.as_str(), backend_veth.as_str()),
+        ] {
+            for feature in ["tx-checksum-ip-generic", "tx", "rx", "tso", "gso", "gro"] {
+                let _ = Command::new("ip")
+                    .args(["netns", "exec", ns_name, "ethtool", "-K", iface, feature, "off"])
+                    .output();
+            }
+        }
 
         Ok(Self { client_ns, lb_ns, backend_ns, client_veth, lb_veth_a, lb_veth_b, backend_veth })
     }
