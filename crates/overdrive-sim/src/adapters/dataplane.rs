@@ -41,6 +41,7 @@ use std::net::Ipv4Addr;
 use async_trait::async_trait;
 use parking_lot::Mutex;
 
+use overdrive_core::dataplane::DropClass;
 use overdrive_core::dataplane::backend_key::{BackendKey, Proto};
 use overdrive_core::traits::dataplane::{
     Backend, Dataplane, DataplaneError, FlowEvent, PolicyKey, Verdict,
@@ -80,6 +81,18 @@ pub struct SimDataplane {
     policy: Mutex<HashMap<PolicyKey, Verdict>>,
     state: Mutex<ServiceState>,
     flow_events: Mutex<Vec<FlowEvent>>,
+    /// Per-class drop counter — mirrors the kernel-side `DROP_COUNTER`
+    /// `BPF_MAP_TYPE_PERCPU_ARRAY` slot layout so DST tests can assert
+    /// on per-class increments without loading a kernel. One slot per
+    /// `DropClass` variant; index = `DropClass::as_index()`. Slot 0 is
+    /// `MalformedHeader`, slot 5 is `OversizePacket`.
+    ///
+    /// In production the per-CPU shape spreads contention across CPUs;
+    /// the sim collapses to a single counter array because the harness
+    /// runs single-threaded per evaluation. The `aggregate_per_cpu`
+    /// helper in `overdrive_core::dataplane` handles the production
+    /// userspace sum.
+    drop_counter: Mutex<[u64; DropClass::VARIANT_COUNT as usize]>,
 }
 
 impl SimDataplane {
@@ -90,7 +103,47 @@ impl SimDataplane {
             policy: Mutex::new(HashMap::new()),
             state: Mutex::new(ServiceState::new()),
             flow_events: Mutex::new(Vec::new()),
+            drop_counter: Mutex::new([0_u64; DropClass::VARIANT_COUNT as usize]),
         }
+    }
+
+    /// Record a kernel-side drop event for `class`. Increments the
+    /// matching slot in the in-memory counter mirror. Saturates at
+    /// `u64::MAX` — counter rollover within a single observation
+    /// window is not a real failure mode (the per-class slot is the
+    /// kernel-side guard against this).
+    ///
+    /// Mirrors the production kernel-side
+    /// `DROP_COUNTER.get_ptr_mut(class.as_index())` + atomic-add
+    /// path; the sim collapses both writers to a single mutex-guarded
+    /// array because DST runs single-threaded per evaluation.
+    pub fn record_drop(&self, class: DropClass) {
+        let mut counter = self.drop_counter.lock();
+        let slot = class.as_index() as usize;
+        counter[slot] = counter[slot].saturating_add(1);
+    }
+
+    /// Read the recorded drop count for `class`. Mirrors the
+    /// production userspace path
+    /// `aggregate_per_cpu(percpu_array.get(class.as_index()))` —
+    /// the sim collapses the per-CPU sum because it stores a single
+    /// scalar per slot, but the surface shape is identical.
+    ///
+    /// Not part of the `Dataplane` trait — this accessor is for tests
+    /// and DST invariant evaluators (Slice 06).
+    #[must_use]
+    pub fn read_drop_counter(&self, class: DropClass) -> u64 {
+        let counter = self.drop_counter.lock();
+        counter[class.as_index() as usize]
+    }
+
+    /// Snapshot the entire drop counter array, indexed by
+    /// `DropClass::as_index()`. Length is `DropClass::VARIANT_COUNT`.
+    /// Useful for DST invariants that need to walk every slot in
+    /// canonical order.
+    #[must_use]
+    pub fn snapshot_drop_counter(&self) -> [u64; DropClass::VARIANT_COUNT as usize] {
+        *self.drop_counter.lock()
     }
 
     /// Queue a flow event for the next `drain_flow_events` call.

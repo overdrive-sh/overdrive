@@ -23,6 +23,6 @@ pub mod fingerprint;
 pub mod maglev_table_size;
 
 pub use backend_key::{BackendKey, Proto};
-pub use drop_class::DropClass;
+pub use drop_class::{DropClass, aggregate_per_cpu};
 pub use fingerprint::{BackendSetFingerprint, fingerprint};
 pub use maglev_table_size::MaglevTableSize;

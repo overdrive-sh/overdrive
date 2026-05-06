@@ -1,0 +1,9 @@
+error[E0080]: evaluation panicked: drop_class slot drift: VARIANT_COUNT diverged from variant count
+  --> tests/compile_fail/drop_class_slot_drift.rs:23:15
+   |
+23 |   const _: () = assert!(
+   |  _______________^
+24 | |     DropClass::VARIANT_COUNT == 5,
+25 | |     "drop_class slot drift: VARIANT_COUNT diverged from variant count",
+26 | | );
+   | |_^ evaluation of `_` failed here

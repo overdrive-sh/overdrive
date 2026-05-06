@@ -33,7 +33,6 @@
 #![expect(
     clippy::todo,
     clippy::doc_markdown,
-    clippy::missing_const_for_fn,
     clippy::too_long_first_doc_paragraph,
     reason = "Phase 2.2 RED scaffolds; lints will self-trip when scaffolds go GREEN"
 )]
