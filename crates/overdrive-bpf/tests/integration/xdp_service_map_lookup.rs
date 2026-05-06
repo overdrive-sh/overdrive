@@ -510,19 +510,22 @@ fn outer_map_delete(outer_fd: &OwnedFd, key: &ServiceKey) {
 /// rewrite) is now a permanent feature of the production program
 /// — see
 /// `docs/research/dataplane/cilium-bpf-fib-lookup-l2-mac-rewrite-comprehensive-research.md`.
-/// Under `BPF_PROG_TEST_RUN`'s synthetic packet context the FIB
-/// lookup has no neighbour information (the test's calling
-/// netns has no route or ARP entry for the synthesized backend
-/// IP), so the helper returns `BPF_FIB_LKUP_RET_NO_NEIGH` (or
-/// `RET_NOT_FWDED`) and the program returns `XDP_PASS` — see
-/// the program's `fib_resolve_and_rewrite_mac` branch.
-/// Critically, the L3 + L4 + checksum rewrite already happened
-/// to the packet buffer BEFORE the FIB lookup, so the rewrite
-/// assertions still hold against `data_out`. The XDP_TX-vs-FIB-
-/// resolved-egress action is exercised end-to-end in Tier 3
-/// (S-2.2-17 in `crates/overdrive-dataplane/tests/integration/
-/// reverse_nat_e2e.rs`), where a real netns provides the FIB
-/// context the helper needs.
+/// Critically, the L3 + L4 + checksum rewrite happens to the
+/// packet buffer BEFORE the FIB lookup, so the rewrite assertions
+/// below hold against `data_out` regardless of FIB outcome. That
+/// makes Tier 2 the right home for the rewrite-byte assertions —
+/// they are deterministic against curated synthetic input.
+///
+/// The XDP verdict (`XDP_PASS` vs `XDP_TX` vs `XDP_REDIRECT`),
+/// however, depends on what `bpf_fib_lookup` returns, and that
+/// helper consults the calling process's netns. PROG_TEST_RUN
+/// runs against the test binary's netns — typically the default
+/// netns, which on Lima carries a default route via `eth0` and
+/// will resolve `BACKEND_OCTETS` successfully. The verdict is
+/// therefore environment-dependent at Tier 2 and is asserted only
+/// at Tier 3 (S-2.2-17 in `crates/overdrive-dataplane/tests/
+/// integration/reverse_nat_e2e.rs`), where a deterministic 3-iface
+/// topology owns the FIB context.
 #[test]
 #[serial(env)]
 fn service_map_hit_rewrites_dst_ip_port_and_checksums() {
@@ -564,13 +567,22 @@ fn service_map_hit_rewrites_dst_ip_port_and_checksums() {
     // CHECK: drive BPF_PROG_TEST_RUN.
     let (action, out_len) =
         bpf_prog_test_run(&prog_fd, &pkt, &mut out).expect("BPF_PROG_TEST_RUN syscall");
-    // FIB lookup fails on the synthetic packet (no neighbour info in
-    // the calling netns for the synthesised BACKEND_OCTETS) — the
-    // program returns XDP_PASS per Option α's `RET_NO_NEIGH` →
-    // `XDP_PASS` fallback. The L3+L4 rewrite is committed before the
-    // FIB lookup runs, so the rewrite assertions below still hold
-    // against `data_out`.
-    assert_eq!(action, XDP_PASS, "expected XDP_PASS (=2) from FIB-NO_NEIGH fallback, got {action}");
+    // Verdict assertion intentionally commented out — see test docstring.
+    // PROG_TEST_RUN runs against the calling process's netns, so the FIB
+    // lookup outcome (and thus the verdict — XDP_PASS on RET_NO_NEIGH,
+    // XDP_TX on same-iface RET_SUCCESS, XDP_REDIRECT on cross-iface
+    // RET_SUCCESS) depends on routing state outside this test's control.
+    // The original 05-04 form asserted XDP_PASS on the theory that
+    // PROG_TEST_RUN's synthetic context has no FIB neighbour information;
+    // empirically false on Lima, where the default route catches the
+    // synthesised BACKEND_OCTETS and FIB returns RET_SUCCESS with a
+    // non-zero egress ifindex → bpf_redirect → XDP_REDIRECT (=4).
+    // Verdict-level coverage lives in Tier 3 (S-2.2-17, reverse_nat_e2e.rs)
+    // where the 3-iface topology gives a deterministic FIB context.
+    // The rewrite-byte assertions below are environment-independent and
+    // are the genuine Tier 2 value of this test.
+    // assert_eq!(action, XDP_PASS, "expected XDP_PASS (=2) from FIB-NO_NEIGH fallback, got {action}");
+    let _ = action;
     assert_eq!(out_len, pkt.len(), "output frame length mismatch");
 
     // (a) Dest IP rewritten.
