@@ -799,6 +799,41 @@
       "s": "SKIPPED",
       "d": "CHECKPOINT_PENDING: S-2.2-17 real-nc end-to-end blocked by kernel-side architectural change (XDP_REDIRECT-with-L2-rewrite OR XDP_PASS-after-rewrite OR bpf_fib_lookup-then-XDP_TX); per CLAUDE.md No effort/time budget cuts the DES log is a contract \u2014 not committing partial; sibling S-2.2-20 GREEN preserved; escalating to orchestrator",
       "t": "2026-05-06T10:53:11Z"
+    },
+    {
+      "sid": "05-04",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-06T11:19:51Z"
+    },
+    {
+      "sid": "05-04",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: pre-existing acceptance test #[should_panic(expected = \"RED scaffold\")] from prior dispatch is the RED \u2014 promoted to live in this dispatch's GREEN",
+      "t": "2026-05-06T11:19:56Z"
+    },
+    {
+      "sid": "05-04",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: Tier 3 integration test exercises the full reverse-NAT path through the public Dataplane port; Tier 2 PROG_TEST_RUN existing tests already cover unit-level kernel-side behaviour",
+      "t": "2026-05-06T11:19:59Z"
+    },
+    {
+      "sid": "05-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-06T12:05:22Z"
+    },
+    {
+      "sid": "05-04",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-06T12:08:04Z"
     }
   ]
 }
