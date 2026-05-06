@@ -88,3 +88,17 @@ When dispatching `@nw-solution-architect` (or any DESIGN-wave agent) for a featu
 ## No effort/time budget cuts
 
 Roadmap `effort_hours` estimates are **advisory, not enforcement**. Do NOT defer scope mid-step on the basis "exceeds this slice's hour budget." Land the full work the step's acceptance criteria describe, however long it takes. If the work genuinely warrants a follow-up (e.g., a separate concern surfaces during implementation that's clearly out of the step's named scope), surface that to the user and ask — do not unilaterally ship a partial and log COMMIT EXECUTED PASS against an incomplete deliverable. The DES log is a contract; partial completions corrupt it.
+
+## Deferrals require GitHub issues
+
+Every deferral surfaced during a wave dispatch — operator-tunable knobs, future-phase scope, follow-up cleanup, "we'll wire this later" — MUST be (1) surfaced to the user explicitly at the point it's introduced, (2) if approved, captured as a GitHub issue (`gh issue create`) before the artifact lands, and (3) cited by issue number at every reference site. Hand-wavy forward pointers ("future ticket," "Phase 3+ slice," "future operator config surface") without a real issue number are forbidden — they compound across dispatches as the next reader treats the deferral as planned work and propagates the false reference.
+
+The valid moves when tempted to write "deferred to a future X":
+
+- **Drop the deferral language.** Unstated knobs are "not in scope" by default; the reader doesn't need a promise of a future slot.
+- **Surface and create inline.** Ask the user; on approval run `gh issue create`. Two minutes is the price of an honest forward pointer.
+- **Cite an existing issue** verified by `gh issue view <N>` whose scope actually covers the deferred work — never invent, guess, or copy-paste an issue number.
+
+Architects, crafters, and reviewers all enforce this: any of them spotting a deferral without an issue number must flag it in handoff and refuse to land the artifact until either the issue is created or the deferral language is dropped. The same applies to existing artifacts touched during a dispatch — fix the reference rather than propagate it.
+
+This extends `.claude/rules/development.md` § "Documentation" (*No aspirational docs. Never document behaviour that is not implemented.*) to forward pointers as well as backward claims.
