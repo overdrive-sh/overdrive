@@ -36,4 +36,8 @@ mod integration {
     // Slice 09 (ADR-0045 — bpf_redirect_neigh datapath pivot).
     // Step 09-01: forward-path FIB+L2-rewrite+redirect_neigh contract.
     mod xdp_service_map_redirect_neigh;
+    // Step 09-02: reverse-path xdp_reverse_nat_lookup at backend-veth
+    // ingress (REVERSE_NAT lookup + L3+L4 rewrite + FIB + L2 +
+    // bpf_redirect).
+    mod xdp_reverse_nat_redirect_neigh;
 }

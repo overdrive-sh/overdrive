@@ -20,4 +20,5 @@
 
 pub mod sanity;
 pub mod tc_reverse_nat;
+pub mod xdp_reverse_nat;
 pub mod xdp_service_map;

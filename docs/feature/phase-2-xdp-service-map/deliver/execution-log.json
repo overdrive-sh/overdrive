@@ -1058,6 +1058,34 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-05-07T06:54:25Z"
+    },
+    {
+      "sid": "09-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-07T07:09:00Z"
+    },
+    {
+      "sid": "09-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-07T07:12:13Z"
+    },
+    {
+      "sid": "09-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: Tier 2 BPF unit test IS the unit-level test for kernel-side BPF programs; PROG_TEST_RUN sub-tests cover the three behavioural branches (REVERSE_NAT-hit + FIB-hit, REVERSE_NAT-hit + FIB-miss, REVERSE_NAT-miss). No separate unit layer exists below PROG_TEST_RUN per .claude/rules/testing.md \u00a7 Tier 2.",
+      "t": "2026-05-07T07:12:20Z"
+    },
+    {
+      "sid": "09-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-07T07:18:50Z"
     }
   ]
 }
