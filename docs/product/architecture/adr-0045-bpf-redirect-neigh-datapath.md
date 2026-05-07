@@ -1,12 +1,23 @@
-# ADR-0045 — `bpf_redirect_neigh` datapath replaces kernel IP-forward + TCX-egress reverse-NAT
+# ADR-0045 — `bpf_redirect` datapath replaces kernel IP-forward + TCX-egress reverse-NAT
 
 ## Status
 
 Accepted. 2026-05-07. Decision-makers: Morgan (proposing); user
 ratified the pivot in dispatch (2026-05-07) following the empirical
 falsification trail in `docs/analysis/e1-bpftrace-results.md` probes
-1–7. Tags: phase-2, dataplane, xdp, bpf-redirect-neigh,
-bpf-fib-lookup, supersedes-tc-egress.
+1–7. Tags: phase-2, dataplane, xdp, bpf-redirect, bpf-fib-lookup,
+supersedes-tc-egress.
+
+**Amendment 2026-05-07**: Decision §§ 1.6 and 2.6 corrected —
+`bpf_redirect_neigh` replaced with `bpf_redirect`. Research evidence:
+`docs/research/dataplane/bpf-redirect-xdp-forward-path-research.md`.
+`bpf_redirect_neigh` is TC-only (kernel verifier rejects on XDP;
+kernel commit `b4ab31414970`, Daniel Borkmann, Sep 2020; never
+extended to XDP). The correct XDP pattern is `bpf_fib_lookup` +
+manual L2 MAC rewrite + `bpf_redirect(ifindex, 0)`, matching
+Cilium's `fib_do_redirect` fallback path (`bpf/lib/fib.h:122-151`)
+and the kernel's `samples/bpf/xdp_fwd_kern.c`. `bpf_redirect_peer`
+is also TC-only. Title updated accordingly.
 
 **GitHub tracking issue**: #159 — *[2.x] Replace IP-forward +
 TCX-egress with bpf_redirect_neigh datapath*. Every artifact in this
@@ -139,13 +150,14 @@ the IP-forwarder out of the path, `pskb_expand_head` and
 `skb_checksum_help` never fire, the stale-csum-on-paged-skb
 condition never arises, and the TCX-egress dispatcher's
 pre-classifier sanity rejection cannot trigger. This is precisely
-what `bpf_redirect_neigh` does — it is Cilium's structural answer to
-the same class of problem and the foundation of their L4LB
+what `bpf_fib_lookup` + L2 MAC rewrite + `bpf_redirect` does — it is
+the XDP forwarding pattern Cilium uses (`fib_do_redirect` in
+`bpf/lib/fib.h:122-151`) and the foundation of their L4LB
 dataplane.
 
 ## Decision
 
-### 1. Replace the request path: XDP ingress L3+L2 rewrite + `bpf_redirect_neigh`
+### 1. Replace the request path: XDP ingress L3+L2 rewrite + `bpf_redirect`
 
 The `xdp_service_map_lookup` program on the client-facing veth
 ingress is extended to perform the full forward-path rewrite
@@ -166,20 +178,36 @@ in-program, with no kernel IP-forwarding involvement:
    the egress iface's source MAC into `eth_hdr->h_source`. Both
    inside the same XDP program; the program never returns to the
    kernel networking stack between L3 and L2 rewrite.
-6. **NEW**: Return `XDP_REDIRECT` via `bpf_redirect_neigh(ifindex,
-   NULL, 0, 0)`. The kernel's XDP fast path delivers the rewritten
-   frame directly to the resolved egress iface's tx queue, bypassing
-   the IP-forwarder, bypassing `pskb_expand_head`, bypassing
-   `skb_checksum_help` on the receive-side skb.
+6. **NEW**: Return `XDP_REDIRECT` via `bpf_redirect(fib.ifindex, 0)`.
+   The FIB-resolved L2 MACs have already been written in step 5; no
+   further neighbor resolution is needed. The kernel's XDP fast path
+   delivers the rewritten frame directly to the resolved egress
+   iface's tx queue, bypassing the IP-forwarder, bypassing
+   `pskb_expand_head`, bypassing `skb_checksum_help` on the
+   receive-side skb.
+
+   **Note**: `bpf_redirect_neigh` and `bpf_redirect_peer` are TC-only
+   helpers (restricted to `sched_cls`, `sched_act`, and `lwt_xmit` by
+   the kernel verifier; kernel commit `b4ab31414970`, never extended
+   to XDP). Cilium's abstraction layer makes both a compile-time error
+   on XDP programs (`overloadable_xdp.h:44-52` throws
+   `__throw_build_bug()`). When `bpf_fib_lookup` has already resolved
+   L2 MACs and the caller has written them into the Ethernet header
+   (step 5), `bpf_redirect` is functionally equivalent to
+   `bpf_redirect_neigh` — the latter just automates the L2 resolution
+   step that FIB already performed.
 
 The kernel IP-forwarder never sees these packets. The TCX-egress
 dispatcher on the backend-facing veth is uninvolved on the request
 path.
 
-This matches Cilium's `bpf_lxc.c` shape (research § Q2 / Q4) and is
-the structural pattern every production XDP L4LB deployed on stable
-6.x kernels uses. It is not novel for Overdrive; it is novel only
-relative to the ADR-0040 Q2=A locked shape.
+This matches Cilium's `fib_do_redirect` fallback path
+(`bpf/lib/fib.h:122-151`) and the kernel's `samples/bpf/
+xdp_fwd_kern.c` — both use `bpf_fib_lookup` + manual L2 MAC rewrite
++ `bpf_redirect`, not `bpf_redirect_neigh`. This is the structural
+pattern every production XDP L4LB deployed on stable 6.x kernels
+uses. It is not novel for Overdrive; it is novel only relative to the
+ADR-0040 Q2=A locked shape.
 
 ### 2. Replace the response path: XDP ingress on the backend-facing veth
 
@@ -205,12 +233,14 @@ hook on that ingress:
    resolve the client-facing egress iface and next-hop MAC.
 5. L2 rewrite — destination MAC = client-facing-veth-peer MAC;
    source MAC = client-facing-veth source MAC.
-6. Return `XDP_REDIRECT` via `bpf_redirect_neigh(ifindex, NULL, 0,
-   0)` to the client-facing veth.
+6. Return `XDP_REDIRECT` via `bpf_redirect(fib.ifindex, 0)` to the
+   client-facing veth. As in § 1 step 6, the FIB-resolved L2 MACs
+   have already been written in step 5; `bpf_redirect` is the correct
+   XDP helper.
 
 The response path is structurally symmetric to the request path:
-both are XDP-ingress L3+L2 rewrite + `bpf_redirect_neigh`. The
-kernel IP-forwarder is bypassed in both directions.
+both are XDP-ingress L3+L2 rewrite + `bpf_redirect`. The kernel
+IP-forwarder is bypassed in both directions.
 
 ### 3. Single program or two? — two programs
 
@@ -238,7 +268,7 @@ The two programs are:
 
 | Program | Attach | File | Maps consumed |
 |---|---|---|---|
-| `xdp_service_map_lookup` | XDP ingress, client-facing veth | `crates/overdrive-bpf/src/programs/xdp_service_map.rs` (preserved name; body extended with FIB+L2-rewrite+redirect_neigh) | SERVICE_MAP, MAGLEV_MAP, BACKEND_MAP, REVERSE_NAT_MAP (write-side: insert per new flow), DROP_COUNTER |
+| `xdp_service_map_lookup` | XDP ingress, client-facing veth | `crates/overdrive-bpf/src/programs/xdp_service_map.rs` (preserved name; body extended with FIB+L2-rewrite+redirect) | SERVICE_MAP, MAGLEV_MAP, BACKEND_MAP, REVERSE_NAT_MAP (write-side: insert per new flow), DROP_COUNTER |
 | `xdp_reverse_nat_lookup` | XDP ingress, backend-facing veth | `crates/overdrive-bpf/src/programs/xdp_reverse_nat.rs` (NEW; replaces `tc_reverse_nat.rs`) | REVERSE_NAT_MAP (read-side), DROP_COUNTER |
 
 `tc_reverse_nat.rs` is **deleted** when the new program lands —
@@ -358,7 +388,7 @@ forward as follows:
 | Slice | Status | Rationale |
 |---|---|---|
 | 01 (real-iface attach) | Preserved as-is | Iface resolution, native/SKB fallback, typed errors — all post-pivot-valid. |
-| 02 (SERVICE_MAP forward path single-VIP) | Preserved; extended | The Slice 04 SERVICE_MAP lookup logic stays. The post-pivot program adds `bpf_fib_lookup` + `bpf_redirect_neigh` as Slice-after-04 work. |
+| 02 (SERVICE_MAP forward path single-VIP) | Preserved; extended | The Slice 04 SERVICE_MAP lookup logic stays. The post-pivot program adds `bpf_fib_lookup` + L2 MAC rewrite + `bpf_redirect` as Slice-after-04 work. |
 | 03 (HASH_OF_MAPS atomic swap) | Preserved as-is | The atomic-swap primitive is kernel-side-direction-agnostic; it works identically on the post-pivot SERVICE_MAP. |
 | 04 (Weighted Maglev) | Preserved as-is | MAGLEV_MAP and the Eisenbud permutation are unchanged. The post-pivot program reads MAGLEV_MAP exactly as before. |
 | 05 (REVERSE_NAT — TC egress) | **Partially superseded.** | The REVERSE_NAT_MAP shape, key structure, and endianness lockstep contract (ADR-0041) are preserved. The TC-egress *attach layer* is retired; reverse-NAT logic moves to the new `xdp_reverse_nat_lookup` program on the backend-facing veth ingress. The Slice 05 endianness-lockstep proptest (S-2.2-17 was its end-to-end gate) is preserved. |
@@ -374,8 +404,8 @@ dispatch:
   reverse-NAT XDP program at backend-facing veth ingress (replaces
   retired `tc_reverse_nat.rs`).
 - Extended `crates/overdrive-bpf/src/programs/xdp_service_map.rs` —
-  add `bpf_fib_lookup` + `bpf_redirect_neigh` after the existing
-  SERVICE_MAP / MAGLEV_MAP / BACKEND_MAP lookup chain.
+  add `bpf_fib_lookup` + L2 MAC rewrite + `bpf_redirect` after the
+  existing SERVICE_MAP / MAGLEV_MAP / BACKEND_MAP lookup chain.
 - Loader changes in `crates/overdrive-dataplane/src/lib.rs` /
   `loader.rs` — attach `xdp_reverse_nat_lookup` on the
   backend-facing veth ingress; retire the
@@ -404,17 +434,19 @@ pre-classifier runs. **Rejected**:
   shape the kernel does not promise to preserve through forwarding.
 - Adds a third TCX program to the dataplane for a workaround. The
   verifier-budget envelope would tighten.
-- Cilium does not work this way. They use `bpf_redirect_neigh`. If
-  there were a credible TCX-side workaround, Cilium would already
-  be using it (they have spent more eng-years than this project on
-  XDP/TC dataplane shape).
+- Cilium does not work this way. Their XDP path uses
+  `bpf_fib_lookup` + L2 MAC rewrite + `bpf_redirect` (the TC path
+  uses `bpf_redirect_neigh` where available, but that helper is
+  TC-only). If there were a credible TCX-side workaround, Cilium
+  would already be using it (they have spent more eng-years than
+  this project on XDP/TC dataplane shape).
 - The same kernel mechanism may shift across LTS releases — ADR-0040
   Q2=A's evidence chain *is* a kernel-version-specific signal (6.8
   paged-skb interaction with `qdisc_pkt_len_init`). A workaround
   that worked on 6.8 may break on 6.6 or 5.10. The pivot removes
   the dependency on this mechanism entirely.
 
-### B — Adopt `bpf_redirect_neigh` (chosen)
+### B — Adopt `bpf_fib_lookup` + L2 MAC rewrite + `bpf_redirect` (chosen)
 
 The structural answer this ADR locks. See § Decision above.
 
@@ -475,8 +507,8 @@ the pre-pivot architecture for length-0 control-segment paths only.
   failure mode is sensitive to kernel-version-specific
   `pskb_expand_head` + `skb_checksum_help` interactions on paged
   skbs. The post-pivot path has no such dependency; `bpf_fib_lookup`
-  + `bpf_redirect_neigh` semantics are stable from kernel 5.10
-  onwards (the project's floor).
+  + `bpf_redirect` semantics are stable from kernel 4.18 / 4.8
+  respectively (well below the project's 5.10 floor).
 - **Aligns with the published reference.** Cilium's L4LB shape is
   the canonical XDP load-balancer shape on stable kernels. Following
   it reduces the project's exposure to "we are the only ones doing
@@ -546,9 +578,13 @@ the pre-pivot architecture for length-0 control-segment paths only.
   (TCX attach is no longer load-bearing, but the loader
   discipline carries over to the dual-XDP-attach shape).
 - `docs/research/dataplane/aya-rs-usage-comprehensive-research.md`
-  § A.1 (`bpf_fib_lookup` and `bpf_redirect_neigh` are exposed in
+  § A.1 (`bpf_fib_lookup` and `bpf_redirect` are exposed in
   aya-ebpf 0.1.x via `aya_ebpf::helpers`; no hand-rolled syscall
   surface needed for the pivot).
+- `docs/research/dataplane/bpf-redirect-xdp-forward-path-research.md`
+  — research confirming `bpf_redirect_neigh` is TC-only; 6
+  independent sources with zero contradictions. Basis for this
+  amendment.
 - ADR-0040 Q2 (reopened by this ADR — see § "Supersession"); ADR-0040
   Q3 amendment (sanity prologue ingress-only — preserved).
 - ADR-0041 (REVERSE_NAT_MAP shape + endianness lockstep) — preserved
