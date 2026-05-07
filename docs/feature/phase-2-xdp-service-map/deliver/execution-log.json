@@ -1002,6 +1002,41 @@
       "s": "EXECUTED",
       "d": "FAIL",
       "t": "2026-05-06T18:16:35Z"
+    },
+    {
+      "sid": "06-04",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-06T18:21:50Z"
+    },
+    {
+      "sid": "09-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-07T06:06:58Z"
+    },
+    {
+      "sid": "09-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-07T06:08:33Z"
+    },
+    {
+      "sid": "09-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: BPF program correctness validated via PROG_TEST_RUN; no unit-test layer below kernel-side ABI per .claude/rules/development.md \u00a7 Testing tier mapping",
+      "t": "2026-05-07T06:21:32Z"
+    },
+    {
+      "sid": "09-01",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: kernel verifier rejects bpf_redirect_neigh#152 on XDP (Lima 6.8 + bpftool feature probe full confirms allowed for sched_cls/sched_act/lwt_xmit ONLY, NOT XDP). ADR-0045 \u00a7 Decision \u00a7 1 step 6 conflates bpf_redirect (xdp_fwd_kern.c) with bpf_redirect_neigh; cited research doc cilium-bpf-fib-lookup-l2-mac-rewrite-comprehensive-research.md describes Option \u03b1 via xdp_fwd_kern.c which uses bpf_redirect, not _neigh. Pre-pivot bpf_redirect after FIB+L2 rewrite already achieves the structural intent (IP-forwarder bypass; XDP fast path tx queue never enters ip_forward). Requires architect agent revision of ADR-0045 before GREEN can land. Pre-existing test failure tc_truncated_ipv4_header_drops_with_malformed_header_counter on HEAD 7a07983 noted but unrelated.",
+      "t": "2026-05-07T06:25:30Z"
     }
   ]
 }

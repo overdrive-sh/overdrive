@@ -33,4 +33,7 @@ mod integration {
     mod sanity_prologue_drops;
     mod tc_reverse_nat;
     mod xdp_service_map_lookup;
+    // Slice 09 (ADR-0045 — bpf_redirect_neigh datapath pivot).
+    // Step 09-01: forward-path FIB+L2-rewrite+redirect_neigh contract.
+    mod xdp_service_map_redirect_neigh;
 }
