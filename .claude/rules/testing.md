@@ -1343,6 +1343,16 @@ Every new eBPF program lands with the coverage below or it does not merge:
 
 ---
 
+## Debugging real-kernel failures
+
+Inner-loop kernel debugging (pwru, per-skb tracing, drop-reason
+capture) and the reasoning discipline around it live in
+`.claude/rules/debugging.md`. The four-tier test stack here is the
+gate; debugging is what happens when a test fails and the gate
+did not predict where to look.
+
+---
+
 ## Fault injection catalogue
 
 Every release exercises the fault classes below. The DST fault and its
