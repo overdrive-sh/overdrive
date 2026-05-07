@@ -24,7 +24,6 @@
 // DWD-3 file-path inventory. Bodies panic via `todo!()` until
 // DELIVER fills them per the carpaccio slice plan.
 pub mod loader;
-pub mod maglev;
 pub mod maps;
 pub mod swap;
 
@@ -57,7 +56,7 @@ use overdrive_core::traits::dataplane::{
 
 /// Embedded kernel-side BPF object. Produced by
 /// `cargo xtask bpf-build` (step 02-01) and copied to the stable path
-/// `target/xtask/bpf-objects/overdrive_bpf.o`. The `build.rs` shim
+/// `target/bpf/overdrive_bpf.o`. The `build.rs` shim
 /// (step 01-03) converts a missing artifact into a single-line
 /// actionable error.
 ///
@@ -871,7 +870,7 @@ impl Dataplane for EbpfDataplane {
                 })
             })
             .collect();
-        let permutation = crate::maglev::permutation::generate(
+        let permutation = overdrive_core::maglev::permutation::generate(
             &weighted,
             overdrive_core::dataplane::MaglevTableSize::DEFAULT,
         );

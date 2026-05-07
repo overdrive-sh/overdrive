@@ -417,7 +417,7 @@ the pilot from a hypothesis test into a confirmation exercise.
   lands on the `Reconciler` trait surface ADR-0013 defined. Verus
   verifies a concrete impl of that trait, not the trait itself.
 - **Relates to ADR-0006** — the `cargo xtask verify` subcommand
-  follows the same shape as `cargo xtask dst` / `dst-lint`,
+  follows the same shape as `cargo dst` / `dst-lint`,
   including seed surfacing (for Verus's solver-randomness paths)
   and structured failure artifacts.
 - **Informs a future whitepaper §18 amendment** — either "pilot

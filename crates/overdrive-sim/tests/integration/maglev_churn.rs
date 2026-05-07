@@ -53,7 +53,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use overdrive_core::dataplane::MaglevTableSize;
 use overdrive_core::id::BackendId;
-use overdrive_dataplane::maglev::permutation::{Weight, generate};
+use overdrive_core::maglev::permutation::{Weight, generate};
 use proptest::prelude::*;
 
 /// Strategy: small primes-only `MaglevTableSize`. The full prime list
@@ -242,8 +242,8 @@ const N_BACKENDS: u32 = 100;
 const N_FLOWS: u32 = 100_000;
 
 /// FNV-1a 64-bit offset basis (FNV-1a spec). Same constant as
-/// `overdrive-dataplane::maglev::permutation`; inlined to keep this
-/// test independent of any internal-only export from the dataplane
+/// `overdrive-core::maglev::permutation`; inlined to keep this
+/// test independent of any internal-only export from the core
 /// crate.
 const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
 /// FNV-1a 64-bit prime (FNV-1a spec).

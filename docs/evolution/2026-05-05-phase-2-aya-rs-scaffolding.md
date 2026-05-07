@@ -22,7 +22,7 @@ on Linux/Lima and degrades cleanly on macOS:
   `#![no_std]`) — kernel-side eBPF programs. Phase 2.1 ships one no-op XDP
   program `xdp_pass` plus an `LruHashMap<u32, u64>` packet counter. Compiles
   to a single ELF object at the stable path
-  `target/xtask/bpf-objects/overdrive_bpf.o`. Excluded from `default-members`
+  `target/bpf/overdrive_bpf.o`. Excluded from `default-members`
   so `cargo check --workspace` skips it on macOS automatically.
 - **`overdrive-dataplane`** (class `adapter-host`) — userspace BPF loader.
   Hosts the `EbpfDataplane` impl of the `Dataplane` port trait from
@@ -194,7 +194,7 @@ ongoing implications beyond #23.
 - **D3: Hybrid build pipeline.** `cargo xtask bpf-build` is primary;
   `build.rs` is a defensive shim that converts a cryptic
   `include_bytes!` failure into a one-line diagnostic. Stable artifact
-  path `target/xtask/bpf-objects/overdrive_bpf.o` is load-bearing —
+  path `target/bpf/overdrive_bpf.o` is load-bearing —
   every later xtask refactor must preserve it or the loader breaks.
 - **D5: macOS dev story.** Workspace gains a NEW `default-members`
   declaration that omits `overdrive-bpf`; the loader compiles via

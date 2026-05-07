@@ -263,7 +263,7 @@ fn invoke_cargo_mutants(
     // the full rationale. cargo-mutants copies the source tree but not
     // `target/`; without an absolute-path override, every mutant of
     // `overdrive-dataplane` (or any future crate whose `build.rs`
-    // depends on `target/xtask/bpf-objects/overdrive_bpf.o`) is marked
+    // depends on `target/bpf/overdrive_bpf.o`) is marked
     // unviable, collapsing kill rate to zero. The wrapper computes the
     // absolute path against the original tree's workspace root and
     // threads it through `OVERDRIVE_BPF_OBJECT`; the build script
@@ -913,14 +913,14 @@ fn xtask_target_dir() -> PathBuf {
 
 /// Compute the `(env-var-name, absolute-path)` pair the wrapper sets on
 /// every `cargo-mutants` invocation so per-mutant builds of crates whose
-/// `build.rs` depends on `target/xtask/bpf-objects/overdrive_bpf.o`
+/// `build.rs` depends on `target/bpf/overdrive_bpf.o`
 /// resolve the artifact correctly.
 ///
 /// **Background.** cargo-mutants creates a per-mutant copy of the source
 /// tree under `/tmp/cargo-mutants-*/` and runs `cargo {check,test}` from
 /// there. It does NOT copy `target/`. `crates/overdrive-dataplane/build.rs`
 /// fails fast when the workspace-relative artifact path
-/// `<workspace_root>/target/xtask/bpf-objects/overdrive_bpf.o` is absent
+/// `<workspace_root>/target/bpf/overdrive_bpf.o` is absent
 /// — and inside the mutant copy that path is always absent. Without an
 /// override, every mutant for `overdrive-dataplane` (or any future crate
 /// with the same shape) is marked unviable, collapsing the kill-rate
@@ -954,10 +954,10 @@ fn xtask_target_dir() -> PathBuf {
 /// `xtask::workspace_root_dir()` in `main.rs`).
 ///
 /// The path is workspace-rooted at
-/// `<workspace_root>/target/xtask/bpf-objects/overdrive_bpf.o` —
+/// `<workspace_root>/target/bpf/overdrive_bpf.o` —
 /// `CARGO_TARGET_DIR` is **not** consulted here. This matches
 /// `cargo xtask bpf-build`'s actual write path (see `xtask::bpf_build`
-/// in `main.rs` — `workspace_root.join("target/xtask/bpf-objects")`)
+/// in `main.rs` — `workspace_root.join("target/bpf")`)
 /// and `crates/overdrive-dataplane/build.rs`'s fallback path. A
 /// `CARGO_TARGET_DIR`-aware path would diverge from both: in Lima dev
 /// (`CARGO_TARGET_DIR=/home/marcus.guest/.cargo-target-lima`), the
@@ -966,7 +966,7 @@ fn xtask_target_dir() -> PathBuf {
 /// build script would still fail. The single source of truth is the
 /// workspace-relative path.
 fn bpf_object_env_override(workspace_root: &Path) -> (std::ffi::OsString, std::ffi::OsString) {
-    let path = workspace_root.join("target/xtask/bpf-objects/overdrive_bpf.o");
+    let path = workspace_root.join("target/bpf/overdrive_bpf.o");
     ("OVERDRIVE_BPF_OBJECT".into(), path.into_os_string())
 }
 
@@ -1569,7 +1569,7 @@ mod tests {
     // ---- bpf_object_env_override ------------------------------------------
     //
     // Per-mutant env override that lets cargo-mutants build crates whose
-    // `build.rs` depends on `target/xtask/bpf-objects/overdrive_bpf.o`.
+    // `build.rs` depends on `target/bpf/overdrive_bpf.o`.
     // cargo-mutants copies the source tree but NOT `target/`, so a
     // mutated `overdrive-dataplane` build script panics with the
     // "BPF object not found … run cargo xtask bpf-build first" message
@@ -1655,8 +1655,8 @@ mod tests {
         let path = PathBuf::from(path);
         assert!(path.is_absolute(), "path must be absolute, got: {}", path.display());
         assert!(
-            path.ends_with("target/xtask/bpf-objects/overdrive_bpf.o"),
-            "path must end with target/xtask/bpf-objects/overdrive_bpf.o, got: {}",
+            path.ends_with("target/bpf/overdrive_bpf.o"),
+            "path must end with target/bpf/overdrive_bpf.o, got: {}",
             path.display()
         );
         assert!(
@@ -1672,9 +1672,9 @@ mod tests {
     fn bpf_object_env_override_ignores_cargo_target_dir() {
         // The wrapper's BPF override is workspace-rooted, NOT
         // `CARGO_TARGET_DIR`-rooted. `cargo xtask bpf-build` writes to
-        // `<workspace_root>/target/xtask/bpf-objects/overdrive_bpf.o`
+        // `<workspace_root>/target/bpf/overdrive_bpf.o`
         // unconditionally (see `xtask::bpf_build` — `dst_dir =
-        // workspace_root.join("target/xtask/bpf-objects")`); honouring
+        // workspace_root.join("target/bpf")`); honouring
         // `CARGO_TARGET_DIR` here would point the override at a
         // non-existent path under e.g. Lima's `.cargo-target-lima`
         // while the actual artifact still lives at the workspace path.
@@ -1689,9 +1689,9 @@ mod tests {
         let path = PathBuf::from(path);
         assert_eq!(
             path,
-            workspace.join("target/xtask/bpf-objects/overdrive_bpf.o"),
+            workspace.join("target/bpf/overdrive_bpf.o"),
             "override must be workspace-rooted regardless of CARGO_TARGET_DIR; \
-             `cargo xtask bpf-build` writes to <workspace>/target/xtask/bpf-objects/, \
+             `cargo xtask bpf-build` writes to <workspace>/target/bpf/, \
              so honouring CARGO_TARGET_DIR would diverge from the actual artifact path"
         );
         assert!(

@@ -72,7 +72,7 @@ plus two "verify the existing jobs already cover it" items.
 **Detail** (see ci-cd-pipeline.md for the full delta):
 
 1. **`openapi-check` (NEW REQUIRED CHECK)**. Runs
-   `cargo xtask openapi-check` per ADR-0009. Fails the PR if
+   `cargo openapi-check` per ADR-0009. Fails the PR if
    `api/openapi.yaml` diverges from the derived schema off the Rust
    `overdrive-control-plane::api` types. The xtask subcommand stub
    lands in this DEVOPS wave; DELIVER populates the body.
@@ -100,7 +100,7 @@ shape.
 (`at_least_one_reconciler_registered`, `duplicate_evaluations_collapse`,
 `reconciler_is_pure`) need a new CI job?
 
-**Answer**: No. The existing `dst` job runs `cargo xtask dst`, which
+**Answer**: No. The existing `dst` job runs `cargo dst`, which
 iterates over the `ALL_VARIANTS` invariant list. DISTILL scaffold
 inventory (§DWD-06) lands the three new variants into
 `xtask/src/dst.rs` as panic-bodied stubs; the DELIVER crafter fills
@@ -204,7 +204,7 @@ The crafter needs the following from this wave before DELIVER begins:
 
 1. **`.github/workflows/ci.yml` gains exactly one new job — `openapi-check`.**
    See ci-cd-pipeline.md for the exact YAML shape. The job invokes
-   `cargo xtask openapi-check` and fails on non-empty diff.
+   `cargo openapi-check` and fails on non-empty diff.
 2. **`xtask/src/main.rs` gains two new subcommands — `openapi-gen`
    and `openapi-check`.** DEVOPS scaffolds the subcommand enum
    entries; DELIVER populates the bodies per ADR-0009. Until

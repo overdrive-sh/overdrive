@@ -1,12 +1,12 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
-//! Acceptance scenarios for US-06 §7.1 — `cargo xtask dst` harness
+//! Acceptance scenarios for US-06 §7.1 — `cargo dst` harness
 //! smoke tests.
 //!
-//! Each scenario invokes the compiled `xtask` binary as a subprocess
+//! Each scenario invokes the compiled `dst` binary as a subprocess
 //! (driving-port discipline per DWD-04 / ADR-0005). The test asserts on
 //! the observable outputs specified by ADR-0006: first-line seed,
-//! `target/xtask/dst-output.log`, `target/xtask/dst-summary.json`, and
-//! the `--only` filter.
+//! `target/dst/output.log`, `target/dst/summary.json`, and the `--only`
+//! filter.
 //!
 //! Covers scenarios 1, 4, 6 from §7.1 (the invariant-enum round-trip
 //! from scenario 3 is in `crates/overdrive-sim/tests/invariant_roundtrip.rs`
@@ -15,43 +15,47 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-/// Absolute path to the compiled `xtask` binary for the current cargo
-/// test invocation. `CARGO_BIN_EXE_xtask` is injected by Cargo when the
+/// Absolute path to the compiled `dst` binary for the current cargo
+/// test invocation. `CARGO_BIN_EXE_dst` is injected by Cargo when the
 /// crate declares a `[[bin]]` of that name.
-fn xtask_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_xtask"))
+fn dst_bin() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_dst"))
 }
 
-/// The workspace root — needed so `cargo xtask dst` writes its artifacts
-/// to a predictable location under the per-run Cargo target dir.
+/// The workspace root — needed so `cargo dst` writes its artifacts to
+/// a predictable location under the per-run Cargo target dir.
 fn workspace_root() -> PathBuf {
     let crate_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    crate_dir.parent().expect("xtask crate lives directly under the workspace root").to_path_buf()
+    crate_dir
+        .parent()
+        .expect("overdrive-sim crate dir must have a parent")
+        .parent()
+        .expect("crates/ must have a parent (the workspace root)")
+        .to_path_buf()
 }
 
-/// Run `xtask dst <args>` from the workspace root and capture the output.
+/// Run `dst <args>` from the workspace root and capture the output.
 ///
 /// `CARGO_TARGET_DIR` is overridden to a per-test tempdir so scenarios
 /// cannot accidentally see artifacts from each other — each subprocess
-/// writes to its own `dst-output.log` / `dst-summary.json`.
+/// writes to its own `output.log` / `summary.json`.
 fn run_dst(target_dir: &Path, extra_args: &[&str]) -> Output {
-    let mut cmd = Command::new(xtask_bin());
-    cmd.arg("dst");
+    let mut cmd = Command::new(dst_bin());
     for arg in extra_args {
         cmd.arg(arg);
     }
     cmd.current_dir(workspace_root());
     cmd.env("CARGO_TARGET_DIR", target_dir);
-    cmd.output().expect("xtask binary must be invokable")
+    cmd.output().expect("dst binary must be invokable")
 }
 
-/// Parse the `dst-summary.json` produced by an `xtask dst` run. Returns
-/// the parsed `serde_json::Value` for assertion-friendly access.
+/// Parse the `summary.json` produced by a `dst` run. Returns the
+/// parsed `serde_json::Value` for assertion-friendly access.
 fn read_summary(target_dir: &Path) -> serde_json::Value {
-    let path = target_dir.join("xtask").join("dst-summary.json");
+    let path = target_dir.join("dst").join("summary.json");
     let raw = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("dst-summary.json must exist at {}: {e}", path.display()));
-    serde_json::from_str(&raw).expect("dst-summary.json must be valid JSON")
+        .unwrap_or_else(|e| panic!("summary.json must exist at {}: {e}", path.display()));
+    serde_json::from_str(&raw).expect("summary.json must be valid JSON")
 }
 
 /// The blessed invariant catalogue for DST runs. Keep in sync with
@@ -125,11 +129,11 @@ fn dst_with_fixed_seed_exits_zero_and_writes_artifacts() {
         String::from_utf8_lossy(&out.stderr),
     );
 
-    // Artifact 1: dst-output.log exists under target/xtask/.
-    let log_path = target.path().join("xtask").join("dst-output.log");
-    assert!(log_path.is_file(), "dst-output.log must be written at {}", log_path.display());
+    // Artifact 1: output.log exists under target/dst/.
+    let log_path = target.path().join("dst").join("output.log");
+    assert!(log_path.is_file(), "output.log must be written at {}", log_path.display());
 
-    // Artifact 2: dst-summary.json exists and is well-formed.
+    // Artifact 2: summary.json exists and is well-formed.
     let summary = read_summary(target.path());
 
     // The summary carries the seed we passed in.

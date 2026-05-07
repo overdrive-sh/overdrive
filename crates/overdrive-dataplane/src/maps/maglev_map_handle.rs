@@ -10,7 +10,7 @@
 //!
 //! `crate::EbpfDataplane::update_service` regenerates the Maglev
 //! permutation on every backend-set change via
-//! [`crate::maglev::permutation::generate`] and writes the resulting
+//! [`overdrive_core::maglev::permutation::generate`] and writes the resulting
 //! `Vec<BackendId>` into a freshly-allocated inner ARRAY before the
 //! atomic outer-pointer swap (step 3 of ADR-0040 § 2's 5-step swap
 //! orchestration). The `HashOfMapsHandle` is the only typed handle

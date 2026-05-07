@@ -9,7 +9,7 @@
 //!
 //! 2. On Linux build hosts, fail fast with a single-line actionable
 //!    diagnostic when the BPF artifact at the stable path
-//!    `target/xtask/bpf-objects/overdrive_bpf.o` is missing —
+//!    `target/bpf/overdrive_bpf.o` is missing —
 //!    converting the otherwise opaque rustc `file not found in
 //!    include_bytes!` failure into a clear "run cargo xtask bpf-build
 //!    first" hint. Also emits `cargo:rerun-if-changed=` on the
@@ -111,11 +111,9 @@ fn main() {
         // plumbing is `None`, but a user-supplied empty value goes
         // through as `Some("")`, which would then resolve `path.exists()`
         // against `""` and fail every time. Treat both as "not set".
-        let artifact =
-            std::env::var_os("OVERDRIVE_BPF_OBJECT").filter(|v| !v.is_empty()).map_or_else(
-                || workspace_root.join("target/xtask/bpf-objects/overdrive_bpf.o"),
-                PathBuf::from,
-            );
+        let artifact = std::env::var_os("OVERDRIVE_BPF_OBJECT")
+            .filter(|v| !v.is_empty())
+            .map_or_else(|| workspace_root.join("target/bpf/overdrive_bpf.o"), PathBuf::from);
         if !artifact.exists() {
             // Build scripts surface diagnostics via stderr; cargo
             // captures and renders the `--- stderr` block on failure.

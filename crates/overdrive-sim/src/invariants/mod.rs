@@ -1,8 +1,8 @@
 //! DST invariant catalogue.
 //!
 //! The [`Invariant`] enum is the canonical name source for `--only <NAME>`
-//! on `cargo xtask dst` and for every invariant entry in
-//! `target/xtask/dst-summary.json`. `Display` emits kebab-case, lowercase;
+//! on `cargo dst` and for every invariant entry in
+//! `target/dst/summary.json`. `Display` emits kebab-case, lowercase;
 //! [`FromStr`] accepts any ASCII-case spelling of a canonical name. A name
 //! printed by the harness MUST round-trip losslessly through
 //! `FromStr → Display` — the proptest in
@@ -11,7 +11,7 @@
 //! Phase 1 ships the catalogue definition and canonical-name machinery.
 //! The invariant *evaluators* — the code that decides whether an
 //! invariant holds in a given run — land in step 06-02. Every name in
-//! this enum is already known to `cargo xtask dst`, so CI wiring and
+//! this enum is already known to `cargo dst`, so CI wiring and
 //! artifact shape are stable even before the evaluators exist.
 
 #![allow(clippy::missing_errors_doc)]

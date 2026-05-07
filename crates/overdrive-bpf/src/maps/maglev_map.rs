@@ -16,7 +16,7 @@
 //! Inner ARRAY size `M` = `MaglevTableSize::DEFAULT.get()` = 16_381
 //! per architecture.md § 5 Q-Sig D6 / ADR-0041 (Cilium's prime list).
 //! Slot population is the deterministic Maglev permutation produced
-//! by `crates/overdrive-dataplane/src/maglev/permutation.rs::generate`.
+//! by `crates/overdrive-core/src/maglev/permutation.rs::generate`.
 //!
 //! # Why no separate map declaration here
 //!

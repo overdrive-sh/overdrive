@@ -111,5 +111,5 @@ sync-`reconcile` discipline.
 | No hypothetical abstractions landing later | PASS — depends on Slice 02's `Dataplane::update_service` body; uses the existing §18 reconciler runtime and ADR-0035 ViewStore. The §18 reference shape is published; this is the first non-trivial use of it against a real dataplane port |
 | Disproves a named pre-commitment | PASS — see "Disproves" above |
 | Production-data-shaped AC | PASS — DST invariants on every PR; Tier 2 / Tier 3 exercised end-to-end by Slice 02-04's existing integration tests against `EbpfDataplane::update_service` |
-| Demonstrable in single session | PASS — `cargo xtask dst` against the new invariant pair runs in single-digit minutes on the developer's Lima VM |
+| Demonstrable in single session | PASS — `cargo dst` against the new invariant pair runs in single-digit minutes on the developer's Lima VM |
 | Same-day dogfood moment | PASS — Linux developer iterates the reconciler against `SimDataplane` + DST seeds; replays seeded counter-examples bit-identically |

@@ -347,7 +347,7 @@ Scenario: The server binds over TLS and shuts down cleanly on SIGINT
 @us-02 @library_port
 Scenario: The OpenAPI schema derived from the Rust types matches the checked-in document
   Given the overdrive-control-plane crate exports typed request and response structs with utoipa annotations
-  When Ana runs cargo xtask openapi-check
+  When Ana runs cargo openapi-check
   Then the subprocess exits with status zero
     And no diff is printed
 ```
@@ -356,10 +356,10 @@ Scenario: The OpenAPI schema derived from the Rust types matches the checked-in 
 @us-02 @library_port @error-path
 Scenario: Handler drift from the schema fails the openapi-check gate
   Given a handler whose request type has been modified without regenerating the schema
-  When Ana runs cargo xtask openapi-check
+  When Ana runs cargo openapi-check
   Then the subprocess exits with non-zero status
     And the output names the schema field that drifted
-    And the output suggests running cargo xtask openapi-gen to regenerate
+    And the output suggests running cargo openapi-gen to regenerate
 ```
 
 ### 3.4 Error-path — connection refused is actionable

@@ -79,7 +79,7 @@ Internal RPC (tarpc / postcard-rpc) deferred to `phase-1-first-workload`.
 ### D2 — OpenAPI schema derivation (ADR-0009)
 
 **Recommendation**: `utoipa` + `utoipa-axum`; checked-in at `api/openapi.yaml`;
-`cargo xtask openapi-check` CI gate; diffs regenerated vs checked-in.
+`cargo openapi-check` CI gate; diffs regenerated vs checked-in.
 
 Alternatives considered: `aide` (smaller, churnier API surface);
 hand-maintained YAML (rejected as defeating the purpose).
@@ -215,7 +215,7 @@ phase-1-foundation's:
 
 - **`axum` / `utoipa` major-version upgrade**: new workspace deps whose
   churn could break the router-derivation pipeline. Mitigation: pin both
-  to exact versions in workspace `Cargo.toml`; `cargo xtask openapi-check`
+  to exact versions in workspace `Cargo.toml`; `cargo openapi-check`
   CI gate catches schema drift immediately on any version bump.
 
 The phase-1-foundation residual stressor (turmoil upstream drift)
@@ -242,7 +242,7 @@ Before handoff, all must pass:
 - [x] External integrations annotated: **NONE in Phase 1** — no contract
       tests recommended
 - [x] Architectural enforcement tooling: `cargo xtask dst-lint` (existing),
-      `cargo xtask openapi-check` (new), exhaustive `to_response` (Rust
+      `cargo openapi-check` (new), exhaustive `to_response` (Rust
       compiler), crate-class labelling (existing)
 - [ ] Peer review completed and approved — pending separate `nw-solution-architect-reviewer` dispatch
 
@@ -281,9 +281,9 @@ None of these require crafter consultation.
 - Paradigm: OOP (Rust trait-based).
 - Architecture style: hexagonal (ports and adapters), single-process.
 - New CI required checks:
-  - `cargo xtask dst` (unchanged)
+  - `cargo dst` (unchanged)
   - `cargo xtask dst-lint` (unchanged)
-  - `cargo xtask openapi-check` (new — fails on schema drift)
+  - `cargo openapi-check` (new — fails on schema drift)
   - `cargo nextest run --workspace` + `cargo test --doc --workspace`
   - Mutation-testing kill-rate gate ≥80% on Phase 1 applicable targets
 - External integrations: **none**. No contract tests recommended at this

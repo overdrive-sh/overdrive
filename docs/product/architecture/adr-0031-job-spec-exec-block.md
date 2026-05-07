@@ -933,7 +933,7 @@ home for executing the materialised decision.
   RFC 7807 is unchanged.
 - **ADR-0009 (OpenAPI schema derivation)**: `utoipa::ToSchema` on the
   reshaped types regenerates `api/openapi.yaml`; the existing
-  `cargo xtask openapi-check` CI gate catches drift.
+  `cargo openapi-check` CI gate catches drift.
 - **ADR-0023 (Action shim placement)**: the shim's
   `(driver, obs, tick)` signature is unchanged. The Restart arm reads
   `spec` off the action; `build_phase1_restart_spec` deletes. The

@@ -49,7 +49,7 @@ fn build_rs_emits_diagnostic_when_artifact_missing() -> Result<(), Box<dyn std::
     }
 
     let workspace_root = workspace_root();
-    let artifact = workspace_root.join("target/xtask/bpf-objects/overdrive_bpf.o");
+    let artifact = workspace_root.join("target/bpf/overdrive_bpf.o");
 
     // Snapshot any existing artifact so the test is reversible: the
     // placeholder produced by the GREEN setup, or a real

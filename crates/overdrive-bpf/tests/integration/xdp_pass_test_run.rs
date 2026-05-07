@@ -67,7 +67,7 @@ const XDP_PASS: u32 = 2;
 
 /// Walk up from `crates/overdrive-bpf`'s manifest dir to the
 /// workspace root. The BPF artifact at
-/// `target/xtask/bpf-objects/overdrive_bpf.o` is workspace-relative.
+/// `target/bpf/overdrive_bpf.o` is workspace-relative.
 ///
 /// `crates/overdrive-bpf/` -> pop twice (crate name + `crates/`).
 fn workspace_root() -> PathBuf {
@@ -79,7 +79,7 @@ fn workspace_root() -> PathBuf {
 }
 
 fn bpf_artifact_path() -> PathBuf {
-    workspace_root().join("target/xtask/bpf-objects/overdrive_bpf.o")
+    workspace_root().join("target/bpf/overdrive_bpf.o")
 }
 
 /// PKTGEN — synthesise a minimal Ethernet (14B) + IPv4 (20B) +

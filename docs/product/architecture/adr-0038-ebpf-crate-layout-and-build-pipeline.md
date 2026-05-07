@@ -187,7 +187,7 @@ target and copies the produced ELF to a stable path:
        -Z build-std=core
        --manifest-path crates/overdrive-bpf/Cargo.toml
 3. cp target/bpfel-unknown-none/release/overdrive-bpf
-      target/xtask/bpf-objects/overdrive_bpf.o
+      target/bpf/overdrive_bpf.o
 ```
 
 Stable output path decouples the loader's `include_bytes!` from
@@ -199,7 +199,7 @@ cargo's nested target layout.
 // crates/overdrive-dataplane/build.rs
 fn main() {
     let path = format!(
-        "{}/target/xtask/bpf-objects/overdrive_bpf.o",
+        "{}/target/bpf/overdrive_bpf.o",
         env!("CARGO_WORKSPACE_DIR")
     );
     if !std::path::Path::new(&path).exists() {
@@ -224,7 +224,7 @@ diagnostic that names the fix.
 // crates/overdrive-dataplane/src/embed.rs
 pub(crate) const OVERDRIVE_BPF_OBJ: &[u8] = include_bytes!(concat!(
     env!("CARGO_WORKSPACE_DIR"),
-    "target/xtask/bpf-objects/overdrive_bpf.o",
+    "target/bpf/overdrive_bpf.o",
 ));
 ```
 

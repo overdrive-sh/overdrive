@@ -1,5 +1,5 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
-//! Acceptance scenarios for US-06 §1.2 (WS-2) — `cargo xtask dst --seed S`
+//! Acceptance scenarios for US-06 §1.2 (WS-2) — `cargo dst --seed S`
 //! produces a bit-identical trajectory across two runs.
 //!
 //! Also covers §7.3 — the twin-run self-test proptest that exercises the
@@ -22,35 +22,39 @@ use std::process::{Command, Output};
 use proptest::prelude::*;
 use serde_json::Value;
 
-/// Absolute path to the compiled `xtask` binary.
-fn xtask_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_xtask"))
+/// Absolute path to the compiled `dst` binary.
+fn dst_bin() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_dst"))
 }
 
 /// Workspace root — needed so subprocess `current_dir` is stable.
 fn workspace_root() -> PathBuf {
     let crate_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    crate_dir.parent().expect("xtask crate lives directly under the workspace root").to_path_buf()
+    crate_dir
+        .parent()
+        .expect("overdrive-sim crate dir must have a parent")
+        .parent()
+        .expect("crates/ must have a parent (the workspace root)")
+        .to_path_buf()
 }
 
-/// Run `xtask dst <args>` with a fresh tempdir for `CARGO_TARGET_DIR` so
-/// two back-to-back runs do not see each other's artifacts.
+/// Run `dst <args>` with a fresh tempdir for `CARGO_TARGET_DIR` so two
+/// back-to-back runs do not see each other's artifacts.
 fn run_dst(target_dir: &Path, extra_args: &[&str]) -> Output {
-    let mut cmd = Command::new(xtask_bin());
-    cmd.arg("dst");
+    let mut cmd = Command::new(dst_bin());
     for arg in extra_args {
         cmd.arg(arg);
     }
     cmd.current_dir(workspace_root());
     cmd.env("CARGO_TARGET_DIR", target_dir);
-    cmd.output().expect("xtask binary must be invokable")
+    cmd.output().expect("dst binary must be invokable")
 }
 
 fn read_summary(target_dir: &Path) -> Value {
-    let path = target_dir.join("xtask").join("dst-summary.json");
+    let path = target_dir.join("dst").join("summary.json");
     let raw = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("dst-summary.json must exist at {}: {e}", path.display()));
-    serde_json::from_str(&raw).expect("dst-summary.json must be valid JSON")
+        .unwrap_or_else(|e| panic!("summary.json must exist at {}: {e}", path.display()));
+    serde_json::from_str(&raw).expect("summary.json must be valid JSON")
 }
 
 /// Remove non-deterministic fields from a summary so two runs with the
@@ -104,7 +108,7 @@ fn two_subprocess_runs_with_same_seed_produce_bit_identical_trajectory() {
     let summary_b = strip_nondeterministic(read_summary(target_b.path()));
     assert_eq!(
         summary_a, summary_b,
-        "dst-summary.json (minus wall_clock_ms) must match across two same-seed runs"
+        "summary.json (minus wall_clock_ms) must match across two same-seed runs"
     );
 
     // Double-check the two pieces of the AC in isolation so a
@@ -133,7 +137,7 @@ fn two_subprocess_runs_with_same_seed_produce_bit_identical_trajectory() {
 // This proptest runs the harness *in-process* (via the library surface)
 // rather than via subprocess — 16 seeds × two subprocess spawns would
 // dominate wall-clock on laptops. The in-process path proves the same
-// determinism claim at the library boundary where `cargo xtask dst`
+// determinism claim at the library boundary where `cargo dst`
 // consumes it.
 // -----------------------------------------------------------------------------
 

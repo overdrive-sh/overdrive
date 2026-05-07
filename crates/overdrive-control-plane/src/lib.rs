@@ -53,6 +53,12 @@ pub mod error;
 pub mod eval_broker;
 pub mod handlers;
 pub mod observation_wiring;
+// `cargo openapi-{gen,check}` library — pure deterministic YAML render
+// + drift detection. Paired with the `openapi` binary in `src/bin/`.
+// Lives here (not in xtask) per § "xtask is build / test / dev
+// orchestration, NOT a runtime entry point" in
+// `.claude/rules/development.md`.
+pub mod openapi;
 pub mod reconciler_runtime;
 // Phase 2.2 reconcilers per DWD-3. Currently hosts only the
 // `service_map_hydrator`; future Phase 2+ reconcilers will land

@@ -48,7 +48,7 @@ Per the Architecture SSOT (brief.md §24-§33) and the ADR set:
 1. **CLI subprocess** — `overdrive job submit`, `overdrive job stop <id>`, `overdrive cluster status`, `overdrive alloc status --job <id>`, `overdrive serve` (boot path).
 2. **HTTP endpoint** — `POST /v1/jobs/{id}:stop` (ADR-0027), in addition to the inherited `/v1/jobs`, `/v1/jobs/{id}`, `/v1/allocs`, `/v1/cluster/info` from the prior feature.
 3. **Pure function call** — `overdrive_scheduler::schedule(...)` (ADR-0024). The reconciler is reached *through* its registration in `run_server_with_obs_and_driver`; tests call into it via the runtime, not by handcrafting `JobLifecycle::reconcile(...)` directly.
-4. **DST harness** — `overdrive-sim::invariants::evaluators` is the entry point for the three new invariants (`JobScheduledAfterSubmission`, `DesiredReplicaCountConverges`, `NoDoubleScheduling`). The harness invokes `AnyReconciler::reconcile` exhaustively via `cargo xtask dst`.
+4. **DST harness** — `overdrive-sim::invariants::evaluators` is the entry point for the three new invariants (`JobScheduledAfterSubmission`, `DesiredReplicaCountConverges`, `NoDoubleScheduling`). The harness invokes `AnyReconciler::reconcile` exhaustively via `cargo dst`.
 
 Internal types (`JobLifecycleState`, `JobLifecycleView`, `CgroupPath`, the action-shim `dispatch` function) are NEVER tested directly in acceptance scenarios — they are exercised through the driving ports above.
 
@@ -322,7 +322,7 @@ target_test: `crates/overdrive-worker/tests/acceptance/cgroup_path_validation.rs
 
 ## Scenario Set: US-03 — JobLifecycle reconciler + action shim + `overdrive job stop`
 
-**Slice 3.** **Crates**: `overdrive-core` (Action variants, AnyState/AnyReconciler/AnyReconcilerView extensions), `overdrive-control-plane` (JobLifecycle reconciler, action shim, `:stop` handler), `overdrive-cli` (subcommand), `overdrive-sim` (3 new DST invariants). **Driving ports**: CLI subprocess (`overdrive job submit`, `overdrive job stop`, `overdrive alloc status`), HTTP (`POST /v1/jobs/{id}:stop`), DST harness (`cargo xtask dst`).
+**Slice 3.** **Crates**: `overdrive-core` (Action variants, AnyState/AnyReconciler/AnyReconcilerView extensions), `overdrive-control-plane` (JobLifecycle reconciler, action shim, `:stop` handler), `overdrive-cli` (subcommand), `overdrive-sim` (3 new DST invariants). **Driving ports**: CLI subprocess (`overdrive job submit`, `overdrive job stop`, `overdrive alloc status`), HTTP (`POST /v1/jobs/{id}:stop`), DST harness (`cargo dst`).
 
 ### Scenario 3.1: A submitted 1-replica job converges to Running (Walking Skeleton — extends prior WS)
 
@@ -380,7 +380,7 @@ Scenario: A submitted job becomes Running within N reconciler ticks (eventually 
 ```
 
 target_test: `crates/overdrive-sim/src/invariants/evaluators/job_scheduled_after_submission.rs::evaluate`
-_Plus DST harness coverage in `cargo xtask dst`._
+_Plus DST harness coverage in `cargo dst`._
 
 ### Scenario 3.5: DST invariant `DesiredReplicaCountConverges`
 

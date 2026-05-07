@@ -457,7 +457,7 @@ linearizable Raft path that intent flows through.
 
 **Operational implications:**
 
-- DST harness (`cargo xtask dst`) gains the two new ESR
+- DST harness (`cargo dst`) gains the two new ESR
   invariants; Tier 1 wall-clock budget delta is small (the
   hydrator's `reconcile` is a thin loop over `desired.desired`).
 - `service_hydration_results` row writes are observable in

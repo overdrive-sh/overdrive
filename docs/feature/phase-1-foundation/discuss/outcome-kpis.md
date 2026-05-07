@@ -4,13 +4,13 @@
 
 ### Objective
 
-Overdrive platform engineers can run `cargo xtask dst` on a clean clone in under a minute, trust that every named invariant actually catches real bugs, and reproduce any failure bit-for-bit from the printed seed — by the end of the first walking-skeleton release.
+Overdrive platform engineers can run `cargo dst` on a clean clone in under a minute, trust that every named invariant actually catches real bugs, and reproduce any failure bit-for-bit from the printed seed — by the end of the first walking-skeleton release.
 
 ### Outcome KPIs (feature level)
 
 | # | Who | Does What | By How Much | Baseline | Measured By | Type |
 |---|---|---|---|---|---|---|
-| K1 | Overdrive platform engineer | Runs `cargo xtask dst` on a clean clone and sees green invariants | 100% of clean-clone runs green within 60s wall-clock on an M-class laptop | N/A (greenfield) | xtask reports wall-clock per run; CI job duration for the DST step | Leading — secondary |
+| K1 | Overdrive platform engineer | Runs `cargo dst` on a clean clone and sees green invariants | 100% of clean-clone runs green within 60s wall-clock on an M-class laptop | N/A (greenfield) | xtask reports wall-clock per run; CI job duration for the DST step | Leading — secondary |
 | K2 | CI | Blocks any PR that introduces `Instant::now()` / `rand::random()` / `tokio::net::*` in a core crate | 100% of smuggling attempts blocked; 0% false positives on wiring crates | N/A (greenfield) | Deliberate regression PR seeded weekly; inspection of CI run results | Leading — secondary |
 | K3 | Overdrive platform engineer | Reproduces a red run bit-for-bit from the printed seed | 100% of red runs reproduce on the same git SHA and toolchain; same invariant, same tick | N/A (greenfield) | DST self-test runs the harness twice per seed and diff-compares | Leading — secondary |
 | K4 | Operator running LocalStore (future) | Observes a control plane starting within the whitepaper-claimed envelope | Cold start < 50ms; RSS < 30MB under empty-store conditions | Whitepaper claim "~30MB RAM" | Micro-benchmark in the LocalStore crate; values asserted in a test | Leading — primary |
@@ -19,7 +19,7 @@ Overdrive platform engineers can run `cargo xtask dst` on a clean clone in under
 
 ### Metric Hierarchy
 
-- **North Star**: a clean-clone `cargo xtask dst` run is green, under 60s, with a printed seed that reproduces (K1 ∧ K3).
+- **North Star**: a clean-clone `cargo dst` run is green, under 60s, with a printed seed that reproduces (K1 ∧ K3).
 - **Leading Indicators**: K2 (lint gate effectiveness), K5 (newtype completeness), K6 (snapshot round-trip).
 - **Guardrail Metrics**: K4 (LocalStore density — must not regress; the commercial density argument depends on it). DST harness wall-clock — must not exceed 60s without explicit scope change. Lint gate false-positive rate — must stay at 0 (false positives train engineers to bypass the gate).
 
@@ -38,7 +38,7 @@ Overdrive platform engineers can run `cargo xtask dst` on a clean clone in under
 
 We believe that shipping `IntentStore` + `ObservationStore` + the six nondeterminism traits + a turmoil-based DST harness + a CI lint gate as a single walking-skeleton release will achieve a foundation that every subsequent Overdrive feature can build on with confidence.
 
-We will know this is true when **a Overdrive platform engineer can run `cargo xtask dst` on a clean clone, see green invariants within 60s, and — on the first red run — reproduce the failure bit-for-bit from the printed seed**. If any of those three properties fails, the whitepaper §21 claim is not real, and every later phase is shipping on sand.
+We will know this is true when **a Overdrive platform engineer can run `cargo dst` on a clean clone, see green invariants within 60s, and — on the first red run — reproduce the failure bit-for-bit from the printed seed**. If any of those three properties fails, the whitepaper §21 claim is not real, and every later phase is shipping on sand.
 
 ### Smell Tests
 

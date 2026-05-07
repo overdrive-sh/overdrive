@@ -94,7 +94,7 @@ fn workspace_root() -> PathBuf {
 }
 
 fn bpf_artifact_path() -> PathBuf {
-    workspace_root().join("target/xtask/bpf-objects/overdrive_bpf.o")
+    workspace_root().join("target/bpf/overdrive_bpf.o")
 }
 
 // ----- syscall helper -----

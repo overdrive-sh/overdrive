@@ -204,7 +204,7 @@ that the tests pin the invariant.
 |---|---|---|---|---|
 | 01-01 | RED scaffold | PASS | `4fc5b51` | Three new failing tests pin the per-entry contract: store-layer (`per_entry_commit_index.rs` won't compile pre-fix), control-plane (`per_entry_commit_index.rs` lifts user-stories.md:234 verbatim, fails at runtime pre-fix), tightened `concurrent_submit_toctou.rs::concurrent_byte_identical_submits_return_single_commit_index` with follow-on describe assertion. Committed `--no-verify` per testing.md §RED scaffolds. |
 | 01-02 | GREEN cohesive cut | PASS | `ba72297` | Trait additive change (`PutOutcome::Inserted/KeyExists` carry `commit_index`; `IntentStore::get → Option<(Bytes, u64)>`); per-entry index packed into entries table as `[u64-LE-prefix \|\| value]`; bump-and-capture moved inside `spawn_blocking`; snapshot frame v2 with v1 decode-only forward-compat; handler swap (submit + describe consume from variants/tuple, cluster_status keeps global cursor); 530/530 nextest pass; doctests green; clippy clean. |
-| 01-02 (follow-up) | Reviewer-driven docstring tightening | PASS | `c33027d` | Adversarial review APPROVED Step 01-02 with one HIGH note: `ClusterStatus.commit_index` rustdoc did not explicitly distinguish store-wide-cursor semantics from the per-entry pair. `api.rs` rustdocs gain explicit per-entry / store-wide semantics sections with intra-doc cross-references; `api/openapi.yaml` regenerated via `cargo xtask openapi-gen` so the wire descriptions match one-to-one. No code or wire-shape change. |
+| 01-02 (follow-up) | Reviewer-driven docstring tightening | PASS | `c33027d` | Adversarial review APPROVED Step 01-02 with one HIGH note: `ClusterStatus.commit_index` rustdoc did not explicitly distinguish store-wide-cursor semantics from the per-entry pair. `api.rs` rustdocs gain explicit per-entry / store-wide semantics sections with intra-doc cross-references; `api/openapi.yaml` regenerated via `cargo openapi-gen` so the wire descriptions match one-to-one. No code or wire-shape change. |
 
 DES execution log: `docs/feature/fix-commit-index-per-entry/deliver/execution-log.json`
 — integrity verifier `All 2 steps have complete DES traces` at finalize time.
@@ -214,7 +214,7 @@ DES execution log: `docs/feature/fix-commit-index-per-entry/deliver/execution-lo
 - **Full workspace tests**: `cargo nextest run --workspace --features integration-tests` exits 0; **530/530** pass.
 - **Doctests**: `cargo test --doc --workspace` exits 0.
 - **Clippy**: `cargo clippy --all-targets --features integration-tests -- -D warnings` clean.
-- **OpenAPI drift gate**: `cargo xtask openapi-gen` regenerated `api/openapi.yaml` after `c33027d`; `openapi-check` CI gate green.
+- **OpenAPI drift gate**: `cargo openapi-gen` regenerated `api/openapi.yaml` after `c33027d`; `openapi-check` CI gate green.
 - **Single-cut sweep**: `git grep -E '(InsertedV2|get_with_index|#\[deprecated\])' crates/overdrive-{core,store-local,control-plane}` empty.
 - **Bump-inside-spawn-blocking**: grep on `redb_backend.rs` confirms no `bump_commit*` outside a `spawn_blocking` body for write paths.
 
@@ -237,7 +237,7 @@ regression for this scope:
   assertions) flipped GREEN inside the cohesive Step 01-02 commit. Any
   mutation that breaks per-entry semantics fails the user-story test by
   construction.
-- **OpenAPI gate covers the wire shape** — `cargo xtask openapi-gen` +
+- **OpenAPI gate covers the wire shape** — `cargo openapi-gen` +
   `openapi-check` CI catch any rustdoc drift that would propagate into
   the wire schema.
 
@@ -298,7 +298,7 @@ trait did not provide.
 A docstring-only change in commit `c33027d` would have been a no-op in a
 codebase where rustdoc and OpenAPI are independent. In this codebase
 they are not — utoipa derives JSON-Schema descriptions from rustdoc
-(per ADR-0009), and `cargo xtask openapi-gen` regenerates
+(per ADR-0009), and `cargo openapi-gen` regenerates
 `api/openapi.yaml` from the rustdoc. A rustdoc tightening without
 regeneration drifts the yaml, which the `openapi-check` CI gate catches
 post-hoc. The reviewer-driven docstring follow-up (`c33027d`) ran
@@ -362,7 +362,7 @@ attributed to pre-existing code rather than the bugfix diff.
 | `overdrive-store-local` (tests) | 6 | NEW `acceptance/per_entry_commit_index.rs`; MOD `acceptance/{put_if_absent, commit_index_monotonic, snapshot_roundtrip, local_store_basic_ops, local_store_error_paths}.rs`; MOD `tests/local_store_edges.rs`; MOD `integration/snapshot_proptest.rs`. |
 | `overdrive-control-plane` (src) | 2 | `handlers.rs` — `submit_job` consumes `commit_index` from `PutOutcome` variants; `describe_job` consumes from `get` tuple; `cluster_status` keeps global cursor. `api.rs` (commit `c33027d`) — per-entry vs store-wide rustdoc with intra-doc links. |
 | `overdrive-control-plane` (tests) | 5 | NEW `integration/per_entry_commit_index.rs`; MOD `integration/{concurrent_submit_toctou, idempotent_resubmit, submit_round_trip}.rs`; MOD `acceptance/submit_job_idempotency.rs`. |
-| `api/openapi.yaml` | 1 | Regenerated via `cargo xtask openapi-gen` after `c33027d`'s rustdoc tightening. |
+| `api/openapi.yaml` | 1 | Regenerated via `cargo openapi-gen` after `c33027d`'s rustdoc tightening. |
 | `docs/feature/...` | (preserved) | `deliver/{rca.md, roadmap.json, execution-log.json}` — preserved per nw-finalize. |
 
 ---

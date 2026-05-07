@@ -35,7 +35,7 @@ as a trend-tracking soak (not PR-blocking).
 |---|---|---|---|---|
 | 1 | `fmt-clippy` | `cargo fmt --all -- --check` + `cargo clippy --workspace --all-targets -- -D warnings` | Blocking | brief §9, testing.md CI topology Job A/B |
 | 2 | `test` | `cargo test --workspace --locked` with `PROPTEST_CASES=1024` | Blocking | testing.md proptest rules, K5/K6 |
-| 3 | `dst` | `cargo xtask dst` | Blocking | ADR-0006, testing.md Tier 1, K1/K3 |
+| 3 | `dst` | `cargo dst` | Blocking | ADR-0006, testing.md Tier 1, K1/K3 |
 | 4 | `dst-lint` | `cargo xtask dst-lint` | Blocking | ADR-0003, ADR-0006, K2 |
 | 5 | `mutants-diff` | `cargo mutants --in-diff origin/main` (gate ≥ 80% kill rate) | Blocking (PR only) | testing.md mutation testing mandate |
 
@@ -139,8 +139,8 @@ Three surfaces carry the seed, in descending order of click cost:
    block to `$GITHUB_STEP_SUMMARY` with a table of seed/invariant/tick/
    host and a fenced code block containing the exact reproduction
    command. Copy-pasteable without leaving the browser tab.
-3. **Uploaded artifacts** — `target/xtask/dst-output.log` and
-   `target/xtask/dst-summary.json` are uploaded via
+3. **Uploaded artifacts** — `target/dst/output.log` and
+   `target/dst/summary.json` are uploaded via
    `actions/upload-artifact@v4` regardless of job outcome (`if:
    always()`). Retention: 30 days. For post-mortem analysis of past
    failures.
@@ -148,7 +148,7 @@ Three surfaces carry the seed, in descending order of click cost:
 The reproduction command format per ADR-0006 is:
 
 ```
-cargo xtask dst --seed <N> --only <invariant-name>
+cargo dst --seed <N> --only <invariant-name>
 ```
 
 This string is paste-to-terminal runnable — no environment variables,
@@ -251,7 +251,7 @@ Enable "Require status checks to pass before merging" and select:
 
 - `fmt + clippy`
 - `cargo test (unit + proptest)`
-- `cargo xtask dst`
+- `cargo dst`
 - `cargo xtask dst-lint`
 - `cargo mutants (diff)`
 
@@ -300,7 +300,7 @@ REPO=overdrive
 # Five required status checks — match `name:` in ci.yml jobs:
 #   1. fmt + clippy                   (job `fmt-clippy`)
 #   2. cargo test (unit + proptest)   (job `test`)
-#   3. cargo xtask dst                (job `dst`)
+#   3. cargo dst                (job `dst`)
 #   4. cargo xtask dst-lint           (job `dst-lint`)
 #   5. cargo mutants (diff)           (job `mutants-diff`)
 
@@ -313,7 +313,7 @@ gh api "repos/${OWNER}/${REPO}/branches/main/protection" \
     "contexts": [
       "fmt + clippy",
       "cargo test (unit + proptest)",
-      "cargo xtask dst",
+      "cargo dst",
       "cargo xtask dst-lint",
       "cargo mutants (diff)"
     ]
@@ -350,7 +350,7 @@ Expected output:
 [
   "fmt + clippy",
   "cargo test (unit + proptest)",
-  "cargo xtask dst",
+  "cargo dst",
   "cargo xtask dst-lint",
   "cargo mutants (diff)"
 ]
@@ -391,7 +391,7 @@ deferred. KPIs are enforced in CI directly:
 | K6 (snapshot round-trip) | `test` job runs snapshot roundtrip proptest | Proptest failure blocks PR |
 
 `kpi-instrumentation.md` is explicitly skipped for Phase 1 — these six
-KPIs are enforced by `cargo xtask dst`, `cargo xtask dst-lint`, and
+KPIs are enforced by `cargo dst`, `cargo xtask dst-lint`, and
 `cargo test`, not by dashboards. Phase 2+ will introduce instrumentation
 surfaces when real control-plane metrics exist to measure.
 

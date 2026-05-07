@@ -273,9 +273,9 @@ pub struct ErrorBody {
 ///
 /// Every ADR-0008 handler path is listed in `paths(...)` and every
 /// request/response DTO in `components(schemas(...))`. The schema is
-/// derived by `utoipa` at compile time; `cargo xtask openapi-gen`
+/// derived by `utoipa` at compile time; `cargo openapi-gen`
 /// writes the YAML rendering of `OverdriveApi::openapi()` to
-/// `api/openapi.yaml`; `cargo xtask openapi-check` diffs the live
+/// `api/openapi.yaml`; `cargo openapi-check` diffs the live
 /// render against the checked-in copy and fails on drift.
 ///
 /// Adding a handler requires adding its path here; adding a DTO

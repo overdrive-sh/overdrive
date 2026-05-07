@@ -20,6 +20,13 @@ publish               = false
 [package.metadata.overdrive]
 crate_class = "adapter-sim"
 
+[[bin]]
+# `cargo dst` runtime entry point — DST harness binary. See
+# `src/bin/dst.rs` and § "xtask is build / test / dev orchestration,
+# NOT a runtime entry point" in `.claude/rules/development.md`.
+name = "dst"
+path = "src/bin/dst.rs"
+
 [dependencies]
 overdrive-core = { workspace = true }
 async-trait.workspace    = true
@@ -39,20 +46,14 @@ overdrive-store-local    = { path = "../overdrive-store-local" }
 overdrive-control-plane.path = "../overdrive-control-plane"
 ciborium.workspace       = true
 serde.workspace          = true
-# `overdrive-dataplane` is `adapter-host`-class (it ships the production
-# `EbpfDataplane` BPF loader). The dependency here is on the pure-Rust
-# `maglev::permutation::generate` function — used by the
-# `MaglevDistributionEven` DST invariant in
-# `src/invariants/maglev_distribution.rs`. The Linux-only `aya` /
-# `libc` / `nix` machinery is gated `#[cfg(target_os = "linux")]` in the
-# dataplane crate, so cross-compiling the sim crate on macOS picks up
-# only the pure-function surface. Per `.claude/rules/development.md`
-# § "Port-trait dependencies": the dependency consumes a pure function,
-# not a port-trait production binding (no `EbpfDataplane` impl is
-# instantiated by sim code). Sibling dev-dep on the same crate (used by
-# `tests/integration/maglev_churn.rs`) remains for the integration
-# proptest layer.
-overdrive-dataplane.path = "../overdrive-dataplane"
+serde_json.workspace     = true
+# `cargo dst` binary deps — the `[[bin]] name = "dst"` entry below
+# ships the DST harness as a runtime tool. See § "xtask is build /
+# test / dev orchestration, NOT a runtime entry point" in
+# `.claude/rules/development.md` for the layering rationale.
+clap.workspace           = true
+eyre.workspace           = true
+color-eyre.workspace     = true
 
 [features]
 # `integration-tests` — workspace-wide convention. Every workspace
@@ -68,18 +69,12 @@ integration-tests = []
 tokio    = { workspace = true }
 futures.workspace = true
 proptest.workspace = true
-serde_json.workspace = true
 # `test-utils` exposes the trait-conformance harness at
 # `overdrive_core::testing::observation_store::run_lww_conformance`.
 # Per `docs/feature/fix-observation-lww-merge/deliver/rca.md` Cause B,
 # every `ObservationStore` adapter exercises this harness from its
 # own test suite to enforce the LWW contract at trait level.
 overdrive-core = { workspace = true, features = ["test-utils"] }
-# `overdrive-dataplane` is consumed at the regular `[dependencies]`
-# level above (for the `MaglevDistributionEven` DST invariant body in
-# `src/invariants/maglev_distribution.rs`); the test layer reuses the
-# same pure `maglev::permutation::generate` function via the unified
-# dependency graph, so no separate dev-dep entry is needed.
 
 [lints]
 workspace = true

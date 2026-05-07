@@ -310,7 +310,7 @@ See Decision above.
 
 Per `.claude/rules/testing.md`:
 
-**Tier 1 (DST, `cargo xtask dst`).** Three named scenarios under
+**Tier 1 (DST, `cargo dst`).** Three named scenarios under
 `crates/overdrive-sim/tests/dst/`:
 
 - `tombstone_resurrection_refused.rs` — delete row, partition a node

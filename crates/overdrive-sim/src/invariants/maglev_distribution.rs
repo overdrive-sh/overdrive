@@ -8,7 +8,7 @@
 //! backend_removal_shifts_at_most_two_percent_of_flows`: the proptest
 //! pins the *churn* property under removal, this invariant pins the
 //! *distribution* property under steady state. Both ride on the same
-//! `maglev::generate` function from `overdrive-dataplane`.
+//! `maglev::generate` function from `overdrive-core`.
 //!
 //! The evaluator runs a small synthetic generation (N = 10, M = 251)
 //! and asserts that no backend deviates from its even-share
@@ -31,7 +31,7 @@ use std::collections::BTreeMap;
 
 use overdrive_core::dataplane::MaglevTableSize;
 use overdrive_core::id::{BackendId, NodeId};
-use overdrive_dataplane::maglev::permutation::{Weight, generate};
+use overdrive_core::maglev::permutation::{Weight, generate};
 
 use crate::harness::{InvariantResult, InvariantStatus};
 

@@ -195,7 +195,7 @@ scaffolding. Grep confirmed before any new scaffold:
   - Actual DST invariant bodies for the three new invariants
     (`AtLeastOneReconcilerRegistered`, `DuplicateEvaluationsCollapse`,
     `ReconcilerIsPure`). The invariant enum variants ARE scaffolded so
-    `cargo xtask dst --only <name>` resolves, but the evaluators panic
+    `cargo dst --only <name>` resolves, but the evaluators panic
     until the crafter translates DST scenarios in §5.
 
 **Scaffold inventory** (every `// SCAFFOLD: true` marker DELIVER will
@@ -314,7 +314,7 @@ scenarios here.
 | Phase 1 ObservationStore impl | DISCUSS Key Decision 8 + ADR-0012 | §4.7 / §4.8 scenarios read via the `SimObservationStore`-wired server; empty-row assertions are about the wiring, not the sim |
 | Slice 4 ships whole | DISCUSS Key Decision 7 + ADR-0013 §7 | US-04 scenarios cover trait + broker + libSQL + DST invariants in one story; no §5.X is split-4A-only |
 | Byte-identical re-submit idempotent | ADR-0015 | §4.9 asserts 200 OK on re-submit of same spec; §4.10 asserts 409 on different spec at same key |
-| `utoipa` over `aide` | ADR-0009 | §3.6/§3.7 scenarios reference `cargo xtask openapi-check`, not `aide` machinery |
+| `utoipa` over `aide` | ADR-0009 | §3.6/§3.7 scenarios reference `cargo openapi-check`, not `aide` machinery |
 | Hand-rolled reqwest client over Progenitor | ADR-0014 | US-05 scenarios reference CLI behaviours, never a generated client artifact |
 | Ephemeral in-process CA, no `--insecure` | ADR-0010 | §2.X scenarios cover CA bootstrap, trust-triple write, multi-SAN, re-init; grep-gate for `--insecure` in §2.5 |
 

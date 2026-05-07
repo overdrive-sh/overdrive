@@ -9,7 +9,7 @@
 
 ## Wizard decisions honoured
 
-- **Feature type**: Infrastructure. Consumer = Overdrive platform engineers running `cargo xtask dst`. No end-user UX.
+- **Feature type**: Infrastructure. Consumer = Overdrive platform engineers running `cargo dst`. No end-user UX.
 - **Walking skeleton**: yes — this feature IS the project walking skeleton.
 - **UX research depth**: lightweight. Engineer → CLI → CI gate. No web/desktop UX skills loaded beyond baseline; TUI patterns applied to lint-gate and DST output design.
 - **JTBD analysis**: skipped. Motivation is explicit in whitepaper §21 and distilled into `docs/product/jobs.yaml` entries J-PLAT-001, J-PLAT-002, J-PLAT-003.
@@ -91,7 +91,7 @@ Every scenario title describes what the user observes (e.g. "LocalStore snapshot
 3. **Core-crate labelling mechanism**: `package.metadata.overdrive.crate_class = "core"` is suggested; DESIGN picks and documents.
 4. **`overdrive-sim` crate layout**: whether Sim* traits live in `overdrive-sim` or in a sibling crate; whether the harness and invariants are separate crates.
 5. **Test distribution**: per-crate integration tests vs top-level `crates/*/tests/acceptance/*.rs` style.
-6. **CI wiring**: `cargo xtask dst` + `cargo xtask dst-lint` as required checks; artifact upload on failure.
+6. **CI wiring**: `cargo dst` + `cargo xtask dst-lint` as required checks; artifact upload on failure.
 
 ## What is NOT being decided in this wave (deferred to DESIGN)
 

@@ -138,7 +138,7 @@ The amendment-in-place pattern matches the precedent that ADR-0026 and ADR-0029 
 
 - `cargo nextest run --workspace` (default lane): 507/507 passing
 - `cargo test --doc --workspace`: passing
-- `cargo xtask dst`: passing
+- `cargo dst`: passing
 - `cargo xtask dst-lint`: passing
 - `cargo clippy --workspace --all-targets --no-deps -- -D warnings`: passing
 - Mutation gate: 83.3% (gate >= 80% cleared)

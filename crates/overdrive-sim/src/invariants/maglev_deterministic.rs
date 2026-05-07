@@ -25,7 +25,7 @@ use std::collections::BTreeMap;
 
 use overdrive_core::dataplane::MaglevTableSize;
 use overdrive_core::id::{BackendId, NodeId};
-use overdrive_dataplane::maglev::permutation::{Weight, generate};
+use overdrive_core::maglev::permutation::{Weight, generate};
 
 use crate::harness::{InvariantResult, InvariantStatus};
 

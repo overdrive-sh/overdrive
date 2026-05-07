@@ -70,7 +70,7 @@ fn maglev_real_distribution_under_xdp_trafficgen() {
     };
     use overdrive_core::dataplane::MaglevTableSize;
     use overdrive_core::id::BackendId;
-    use overdrive_dataplane::maglev::permutation::generate as maglev_generate;
+    use overdrive_core::maglev::permutation::generate as maglev_generate;
     use overdrive_dataplane::maps::ServiceKey;
     use overdrive_dataplane::maps::hash_of_maps::HashOfMapsHandle;
     use overdrive_dataplane::sys::bpf::{BPF_ANY, bpf_map_update_elem};

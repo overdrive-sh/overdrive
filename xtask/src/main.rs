@@ -20,17 +20,6 @@ struct Args {
 
 #[derive(Debug, Subcommand)]
 enum Task {
-    /// Tier 1 — deterministic simulation tests (`turmoil` + `Sim*` traits).
-    Dst {
-        /// Seed for reproducible runs. Defaults to a fresh random seed.
-        #[arg(long)]
-        seed: Option<u64>,
-        /// Run exactly one invariant by its canonical kebab-case name.
-        /// Unknown names fail fast before the harness is built.
-        #[arg(long)]
-        only: Option<String>,
-    },
-
     /// Tier 1 — banned-API lint gate over `crate_class = "core"` crates.
     /// See `docs/product/architecture/adr-0003-core-crate-labelling.md`
     /// and `.claude/rules/development.md`.
@@ -54,7 +43,7 @@ enum Task {
 
     /// Compile `crates/overdrive-bpf` against `bpfel-unknown-none` and
     /// copy the produced ELF to the load-bearing stable path
-    /// `target/xtask/bpf-objects/overdrive_bpf.o` that the loader's
+    /// `target/bpf/overdrive_bpf.o` that the loader's
     /// `include_bytes!` references.
     ///
     /// Per ADR-0038 §3.1 the build is a child-process invocation of
@@ -146,18 +135,6 @@ enum Task {
         #[command(subcommand)]
         action: McpAction,
     },
-
-    /// Regenerate `api/openapi.yaml` from the live `OverdriveApi`
-    /// schema. Invoked by developers after adding or changing a DTO or
-    /// handler path. Per ADR-0009, the checked-in YAML is the contract;
-    /// drift is caught by `openapi-check` in CI.
-    OpenapiGen,
-
-    /// Verify `api/openapi.yaml` matches the live `OverdriveApi`
-    /// schema. Exits 0 on match; non-zero with a message naming the
-    /// first drifted schema/path and suggesting `cargo xtask
-    /// openapi-gen` to regenerate. CI gate per ADR-0009.
-    OpenapiCheck,
 }
 
 #[derive(Debug, Parser)]
@@ -314,7 +291,6 @@ fn main() -> ExitCode {
 
 fn run() -> Result<()> {
     match Args::parse().cmd {
-        Task::Dst { seed, only } => xtask::dst::run(seed, only.as_deref()),
         Task::DstLint { manifest_path } => xtask::dst_lint::run(&manifest_path),
         Task::YamlFreeCli { manifest_path } => xtask::yaml_free_cli::run(&manifest_path),
         Task::BpfBuild => bpf_build(),
@@ -331,8 +307,6 @@ fn run() -> Result<()> {
         Task::Hooks { action } => hooks(action),
         Task::Mcp { action } => mcp(action),
         Task::DevSetup => dev_setup(),
-        Task::OpenapiGen => xtask::openapi::openapi_gen(),
-        Task::OpenapiCheck => xtask::openapi::openapi_check(),
     }
 }
 
@@ -541,7 +515,7 @@ fn lima(action: LimaAction) -> Result<()> {
         }
         LimaAction::Run { no_sudo, args } => {
             if args.is_empty() {
-                bail!("no command given; use `cargo xtask lima run -- cargo xtask dst` etc.");
+                bail!("no command given; use `cargo xtask lima run -- cargo dst` etc.");
             }
             let mut cmd = Command::new("limactl");
             if no_sudo {
@@ -616,7 +590,7 @@ fn which_or_hint(binary: &str, install_hint: &str) -> Result<()> {
 
 /// Compile `crates/overdrive-bpf` against `bpfel-unknown-none` and
 /// copy the resulting ELF to the load-bearing stable path
-/// `target/xtask/bpf-objects/overdrive_bpf.o` that the loader's
+/// `target/bpf/overdrive_bpf.o` that the loader's
 /// `include_bytes!` references (see ADR-0038 §3.1, architecture.md
 /// §3.1, wave-decisions.md D3).
 ///
@@ -678,7 +652,7 @@ fn bpf_build() -> Result<()> {
     // redirected (e.g. Lima's `/home/marcus.guest/.cargo-target-lima`).
     let target_dir = cargo_target_dir(&workspace_root);
     let src = target_dir.join("bpfel-unknown-none/release/overdrive-bpf");
-    let dst_dir = workspace_root.join("target/xtask/bpf-objects");
+    let dst_dir = workspace_root.join("target/bpf");
     let dst = dst_dir.join("overdrive_bpf.o");
 
     std::fs::create_dir_all(&dst_dir)
@@ -855,7 +829,7 @@ fn integration_vm(cache_dir: &std::path::Path, kernels: &[String]) -> Result<()>
 ///
 /// 1. `veristat` not on PATH (operator surface — same `which_or_hint`
 ///    shape as `bpf-build` / `bpf-unit`).
-/// 2. `target/xtask/bpf-objects/overdrive_bpf.o` missing — caller
+/// 2. `target/bpf/overdrive_bpf.o` missing — caller
 ///    must run `cargo xtask bpf-build` first; the error names that
 ///    fix.
 /// 3. Subprocess invocation fails (per `sh` contract).
@@ -880,7 +854,7 @@ fn verifier_regress() -> Result<()> {
 
     let workspace_root = workspace_root_dir()?;
     let baseline_dir = workspace_root.join("perf-baseline/main/verifier-budget");
-    let bpf_object = workspace_root.join("target/xtask/bpf-objects/overdrive_bpf.o");
+    let bpf_object = workspace_root.join("target/bpf/overdrive_bpf.o");
 
     if !bpf_object.exists() {
         bail!("BPF object {} not found. Run `cargo xtask bpf-build` first.", bpf_object.display());

@@ -77,7 +77,7 @@ introduce cucumber-rs, pytest-bdd, or any `.feature` consumer.
 Per the architecture brief §7 (DST harness) and §12 (Integration
 patterns — *none* external), the driving ports of phase-1-foundation are:
 
-1. **`cargo xtask dst` subprocess** — the primary engineer entry point.
+1. **`cargo dst` subprocess** — the primary engineer entry point.
    Scenarios tagged `@driving_port` for this port invoke the subprocess,
    assert on exit code, stdout format (seed on first line per ADR-0006),
    and artifact file presence. They do NOT call the Rust `dst()` function
@@ -143,7 +143,7 @@ engineer observes or what cannot happen. Bad shapes rejected:
 
 Good shapes accepted:
 
-- "Clean-clone `cargo xtask dst` is green within wall-clock budget".
+- "Clean-clone `cargo dst` is green within wall-clock budget".
 - "Lint gate blocks a core crate that uses `Instant::now()`".
 - "Snapshot round-trip is bit-identical across LocalStore instances".
 

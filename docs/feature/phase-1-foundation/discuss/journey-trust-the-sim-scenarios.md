@@ -12,7 +12,7 @@ Gherkin scenarios collected from `journey-trust-the-sim.yaml` for easier reading
 Scenario: Clean-clone DST run is fast and green
   Given Ana has cloned the overdrive repository to a clean workspace
   And no environment variables override DST defaults
-  When Ana runs "cargo xtask dst"
+  When Ana runs "cargo dst"
   Then the harness boots a 3-node simulated cluster using LocalStore
     (real redb) and SimObservationStore plus SimClock, SimTransport,
     SimEntropy, SimDataplane, SimDriver, and SimLlm
@@ -23,7 +23,7 @@ Scenario: Clean-clone DST run is fast and green
 
 Scenario: The same seed produces the same trajectory
   Given Ana has just seen a green run with seed S
-  When Ana runs "cargo xtask dst --seed S" again
+  When Ana runs "cargo dst --seed S" again
   Then the harness produces the same ordered invariant results
   And the same summary line
   And no tick number changes between the two runs
@@ -101,7 +101,7 @@ Scenario: Non-core crates may still use real implementations
 Scenario: A failing invariant prints the seed and an exact reproduction command
   Given a bug has been introduced that allows two leaders to be elected
     after a partition heal
-  When Ana runs "cargo xtask dst"
+  When Ana runs "cargo dst"
   Then the harness reports the failing invariant by name
   And the failure output contains the seed used for that run
   And the failure output contains a reproduction command that embeds
@@ -117,7 +117,7 @@ Scenario: The reproduction command reproduces the failure bit-for-bit
 
 Scenario: A DST failure fails the CI job
   Given the DST harness has failed at least one invariant
-  When the "cargo xtask dst" step completes in CI
+  When the "cargo dst" step completes in CI
   Then the step exits with a non-zero status
   And the CI pipeline is marked failed
 ```

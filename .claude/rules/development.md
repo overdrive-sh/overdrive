@@ -366,6 +366,151 @@ upstream prevention.
 
 ---
 
+## xtask is build / test / dev orchestration, NOT a runtime entry point
+
+**Build/test/dev orchestration → xtask; runtime tools → their owning
+crate.** xtask exists to drive cargo / rustc / kernel build artifacts
+on behalf of the workspace; it does not exist to host binaries that
+import the platform's crates to exercise them.
+
+### Why this matters
+
+xtask's `[dependencies]` graph is a build-time compile chain. Every
+crate listed there is compiled (and its `build.rs` executed) before
+any xtask subcommand can run. When a runtime crate is added to that
+list, its `build.rs` is dragged into xtask's compile chain — and if
+that `build.rs` fails fast on a missing artifact whose *only*
+producer is itself an xtask subcommand, the build pipeline deadlocks
+on a clean tree:
+
+> `xtask` depends on `overdrive-sim` (for an in-process `Harness`).
+> `overdrive-sim` depends on `overdrive-dataplane` (for one pure
+> function). `overdrive-dataplane`'s `build.rs` is
+> `#[cfg(target_os = "linux")]` and hard-fails when
+> `target/bpf/overdrive_bpf.o` is missing. Compiling `xtask` inside
+> Lima therefore requires the BPF object — and `cargo xtask
+> bpf-build` is what produces it. Chicken, egg, exit 1.
+
+This section exists because the failure mode is silent until somebody
+nukes their `target/` dir on a clean tree. The next contributor wires
+the same shape and the chicken-and-egg returns. The rule prevents the
+recurrence. See the commit history of `xtask/Cargo.toml` for the
+landed fix (relocations of `dst` and `openapi` binaries out of
+xtask, plus the move of pure `maglev` modules from
+`overdrive-dataplane` to `overdrive-core` to break the
+`overdrive-sim → overdrive-dataplane` edge).
+
+### What stays in xtask
+
+Build / test / dev orchestration subcommands — tasks *about* the
+codebase, consuming source / producing build artifacts. The canonical
+list as of this PR:
+
+`bpf-build`, `bpf-clippy`, `bpf-unit`, `integration-test vm`,
+`verifier-regress`, `xdp-perf`, `mutants`, `dst-lint`,
+`yaml-free-cli`, `ci`, `lima`, `hooks`, `mcp`, `dev-setup`.
+
+These are allowed to depend on cargo / rustc / kernel toolchain
+machinery. They MUST NOT depend on `overdrive-*` crates.
+
+### What moves out of xtask
+
+Runtime tools that import the platform's crates to *exercise* them.
+Today:
+
+- `dst` — the DST harness binary. Lives at
+  `crates/overdrive-sim/src/bin/dst.rs`; subprocess tests live at
+  `crates/overdrive-sim/tests/integration/`.
+- `openapi` — the OpenAPI generator/gate. Library at
+  `crates/overdrive-control-plane/src/openapi.rs` (typed
+  `OpenApiError`); binary at
+  `crates/overdrive-control-plane/src/bin/openapi.rs`; acceptance
+  test at
+  `crates/overdrive-control-plane/tests/integration/openapi_gate.rs`.
+
+Future runtime tools (scenario runners, simulation snapshots,
+debug-shell variants) ship as binaries in their owning crate — never
+as xtask subcommands.
+
+### User-facing surface
+
+Cargo aliases in `.cargo/config.toml`, never xtask wrappers. Pattern:
+
+```
+<tool> = "run -p <crate> --bin <bin> --"
+```
+
+Worked example, post-move:
+
+```
+dst         = "run -p overdrive-sim --bin dst --"
+openapi-gen = "run -p overdrive-control-plane --bin openapi -- generate"
+openapi-check = "run -p overdrive-control-plane --bin openapi -- check"
+```
+
+Direct invocation always works too —
+`cargo run -p overdrive-sim --bin dst -- --seed 1234`. The alias is
+for ergonomics; the binary is the SSOT.
+
+### Decision test for new tools
+
+Two questions, in order:
+
+1. Does it consume cargo / rustc / kernel build artifacts to
+   produce a build / test / lint result? → **xtask subcommand.**
+2. Does it import `overdrive-{core,sim,control-plane,dataplane,host,
+   worker,…}` to *exercise* the platform? → **a binary in that
+   crate's `src/bin/`, fronted by a cargo alias.**
+
+If both answers are yes, the tool has two concerns and should be
+split into two binaries.
+
+### What xtask's `[dependencies]` MUST NOT contain
+
+Any `overdrive-*` crate. Adding such a dep is exactly the failure
+mode this rule prevents. The xtask `Cargo.toml` carries an inline
+comment naming this rule above its `[dependencies]` block; the
+comment is the active enforcement surface, and the lint of last
+resort is:
+
+```bash
+cargo tree -p xtask | rg overdrive-
+```
+
+This must return empty. If it doesn't, the dep graph has regressed
+and the bootstrap chain is at risk.
+
+The artifact-path rename that landed alongside this rule
+(`target/xtask/dst-*` → `target/dst/*`,
+`target/xtask/bpf-objects/overdrive_bpf.o` → `target/bpf/overdrive_bpf.o`)
+reflects the same separation: artifacts produced by runtime tools
+live under their own top-level path, not under `target/xtask/`.
+Mutants outputs (`target/xtask/mutants*`) stay — `mutants` is a
+genuine xtask subcommand and owns that path.
+
+### Symptom signals during review
+
+- A new `Task::*` variant in `xtask/src/main.rs` whose dispatch arm
+  destructures runtime-crate types (`SimHarness`, `OpenApiSpec`,
+  reconciler `View` shapes, etc.).
+- A `pub mod foo` in `xtask/src/lib.rs` whose body imports an
+  `overdrive-*` crate.
+- An `overdrive-*` line in `xtask/Cargo.toml [dependencies]`. The
+  comment block above the deps says "MUST NOT contain"; honor it.
+- A `.cargo/config.toml` alias of the form
+  `foo = "run --package xtask -- foo"` for a runtime-shaped tool.
+  Compare against the post-move shape:
+  `dst = "run -p overdrive-sim --bin dst --"`. The first form drags
+  the entire xtask compile chain into the runtime tool's startup
+  path; the second resolves directly to the owning crate.
+
+This rule is a complement to ADR-0003 (crate-class taxonomy), not a
+replacement. ADR-0003 governs what kind of crate something is; this
+rule governs which crate a given binary lives in once that taxonomy
+is fixed.
+
+---
+
 ## Production code is not shaped by simulation
 
 **Production code MUST NOT carry extra logic, extra arms, extra yields,
@@ -1265,6 +1410,12 @@ let digest = sha256(&archived);
   "Workspace convention" for the full story; an xtask `#[test]`
   enforces the rule mechanically (`xtask::mutants::tests::every_
   workspace_member_declares_integration_tests_feature`).
+- **`xtask/Cargo.toml [dependencies]` MUST NOT contain any
+  `overdrive-*` crate.** xtask is build / test / dev orchestration;
+  runtime tools live in their owning crate's `src/bin/` and are
+  fronted by cargo aliases. See § "xtask is build / test / dev
+  orchestration, NOT a runtime entry point" above for the bootstrap
+  RCA and the decision test for new tools.
 
 ### Newtypes — STRICT by default
 

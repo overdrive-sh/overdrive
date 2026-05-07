@@ -1,60 +1,86 @@
-//! `cargo xtask openapi-gen` / `openapi-check` — `OpenAPI` schema CI
+//! `cargo openapi-gen` / `openapi-check` library — `OpenAPI` schema CI
 //! gate per ADR-0009.
 //!
-//! `generate_yaml` renders the live `utoipa::OpenApi`-derived schema
-//! from `overdrive-control-plane` to YAML. `check_against_disk` compares
-//! the live render against `api/openapi.yaml` at the workspace root and
-//! fails with an actionable message when they diverge, naming the first
-//! drifted schema and suggesting `cargo xtask openapi-gen` to
-//! regenerate. `openapi_gen` / `openapi_check` are the subcommand-level
-//! wrappers invoked from `src/main.rs`.
+//! [`generate_yaml`] renders the live `utoipa::OpenApi`-derived schema
+//! from this crate's [`crate::api::OverdriveApi`] to YAML.
+//! [`check_against_disk`] compares the live render against
+//! `api/openapi.yaml` at the workspace root and fails with an actionable
+//! [`OpenApiError::Drift`] when they diverge, naming the first drifted
+//! schema and suggesting `cargo openapi-gen` to regenerate.
+//!
+//! The [`crate::bin::openapi`] binary (`crates/overdrive-control-plane/
+//! src/bin/openapi.rs`) is the CLI plumbing that calls these functions
+//! from the workspace cargo alias.
 //!
 //! Determinism: utoipa 5.x sorts paths and component schemas, so the
 //! YAML output is byte-identical across repeat invocations. The
-//! acceptance tests assert this.
+//! integration tests in `tests/openapi_gate.rs` assert this.
 
 use std::path::{Path, PathBuf};
 
-use color_eyre::eyre::{Result, WrapErr, bail};
 use utoipa::OpenApi as _;
 
 /// Checked-in `OpenAPI` document path, relative to the workspace root.
 /// Per ADR-0009 this lives at the top-level `api/` directory.
 pub const OPENAPI_YAML_PATH: &str = "api/openapi.yaml";
 
+/// Typed error for OpenAPI gate operations. Library boundary —
+/// callers branch on variant; the binary in `bin/openapi.rs` converts
+/// to `eyre::Report` via `?`.
+#[derive(Debug, thiserror::Error)]
+pub enum OpenApiError {
+    /// `utoipa::OpenApi::to_yaml` rejected the schema (should not happen
+    /// in practice — utoipa's serialisation surface is closed) but
+    /// surface as a typed variant rather than a panic. Carries the
+    /// upstream serialiser's error as `String` to avoid binding this
+    /// crate's public error surface to whichever YAML serialiser
+    /// `utoipa` happens to use internally (currently `serde_norway`).
+    #[error("render OverdriveApi::openapi() to YAML: {0}")]
+    Render(String),
+
+    /// The on-disk `api/openapi.yaml` file could not be read.
+    #[error("read on-disk OpenAPI YAML at {path}: {source}")]
+    ReadOnDisk { path: PathBuf, source: std::io::Error },
+
+    /// The on-disk YAML differs from the live render. The `anchor`
+    /// names the closest preceding schema-or-path header and the
+    /// raw diverging line on each side, so the operator can locate
+    /// the drift without diffing the whole file.
+    #[error(
+        "OpenAPI schema drift detected at {path}: first divergence near {anchor}. \
+         Run `cargo openapi-gen` to regenerate the checked-in YAML."
+    )]
+    Drift { path: PathBuf, anchor: String },
+}
+
+/// Result alias matching the workspace convention.
+pub type Result<T, E = OpenApiError> = std::result::Result<T, E>;
+
 /// Render the live `OpenAPI` schema to YAML.
 ///
-/// The schema is sourced from
-/// [`overdrive_control_plane::api::OverdriveApi`]. Output is
+/// The schema is sourced from [`crate::api::OverdriveApi`]. Output is
 /// byte-identical across repeat invocations because utoipa 5.x sorts
 /// paths and schemas.
 pub fn generate_yaml() -> Result<String> {
-    overdrive_control_plane::api::OverdriveApi::openapi()
-        .to_yaml()
-        .wrap_err("render OverdriveApi::openapi() to YAML")
+    crate::api::OverdriveApi::openapi().to_yaml().map_err(|e| OpenApiError::Render(e.to_string()))
 }
 
 /// Compare the live `OpenAPI` YAML against a checked-in reference file.
 ///
 /// Returns `Ok(())` iff the live render matches the file byte-for-byte.
-/// On drift, returns an error whose `Display` names the first divergent
-/// schema / path and suggests `cargo xtask openapi-gen` to regenerate.
+/// On drift, returns [`OpenApiError::Drift`] whose `Display` names the
+/// first divergent schema / path and suggests `cargo openapi-gen` to
+/// regenerate.
 pub fn check_against_disk(path: &Path) -> Result<()> {
     let live = generate_yaml()?;
     let on_disk = std::fs::read_to_string(path)
-        .wrap_err_with(|| format!("read on-disk OpenAPI YAML at {}", path.display()))?;
+        .map_err(|source| OpenApiError::ReadOnDisk { path: path.to_path_buf(), source })?;
 
     if live == on_disk {
         return Ok(());
     }
 
-    let drifted = first_drift(&live, &on_disk);
-    bail!(
-        "OpenAPI schema drift detected at {}: first divergence near {}. \
-         Run `cargo xtask openapi-gen` to regenerate the checked-in YAML.",
-        path.display(),
-        drifted,
-    );
+    Err(OpenApiError::Drift { path: path.to_path_buf(), anchor: first_drift(&live, &on_disk) })
 }
 
 /// Find the first line-level difference between `live` and `on_disk`
@@ -131,35 +157,4 @@ fn schema_or_path_name(line: &str) -> Option<String> {
         return None;
     }
     Some(without_colon.to_string())
-}
-
-/// `cargo xtask openapi-gen` — regenerate `api/openapi.yaml` at the
-/// workspace root.
-pub fn openapi_gen() -> Result<()> {
-    let yaml = generate_yaml()?;
-    let path = workspace_root()?.join(OPENAPI_YAML_PATH);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .wrap_err_with(|| format!("create parent directory {}", parent.display()))?;
-    }
-    std::fs::write(&path, yaml)
-        .wrap_err_with(|| format!("write OpenAPI YAML to {}", path.display()))?;
-    eprintln!("xtask: wrote {}", path.display());
-    Ok(())
-}
-
-/// `cargo xtask openapi-check` — verify `api/openapi.yaml` matches the
-/// live schema.
-pub fn openapi_check() -> Result<()> {
-    let path = workspace_root()?.join(OPENAPI_YAML_PATH);
-    check_against_disk(&path)
-}
-
-/// Resolve the workspace root from the current working directory. The
-/// subcommand is invoked from the workspace root (both via
-/// `cargo xtask` and via the subprocess smoke test); the helper exists
-/// so downstream error messages name the discovered root rather than
-/// the opaque `.` form of the path.
-fn workspace_root() -> Result<PathBuf> {
-    std::env::current_dir().wrap_err("determine workspace root from current_dir")
 }

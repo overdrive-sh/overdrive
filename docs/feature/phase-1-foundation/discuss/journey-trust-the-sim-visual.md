@@ -2,7 +2,7 @@
 
 **Feature**: `phase-1-foundation`
 **Persona**: Ana, Overdrive platform engineer (distributed systems SRE background, primary author of control-plane logic).
-**Goal**: run `cargo xtask dst` on a clean clone and trust that a red run is reproducible from the printed seed.
+**Goal**: run `cargo dst` on a clean clone and trust that a red run is reproducible from the printed seed.
 
 ---
 
@@ -12,7 +12,7 @@
   [Fresh clone]                                                     [Trust]
        |                                                               ^
        v                                                               |
-  Step 1:  cargo xtask dst                                             |
+  Step 1:  cargo dst                                             |
            Green invariants in <3s                                     |
            SKEPTICAL --> CAUTIOUSLY OPTIMISTIC                         |
               |                                                        |
@@ -27,7 +27,7 @@
            CURIOUS --> REASSURED                                       |
               |                                                        |
               v                                                        |
-  Step 4:  cargo xtask dst (real invariant failure)                    |
+  Step 4:  cargo dst (real invariant failure)                    |
            Seed printed, reproduction command inline, same seed --> same
            ANXIOUS --> TRUSTING ---------------------------------------+
 ```
@@ -53,7 +53,7 @@ The arc is a **Confidence Building** pattern (whitepaper-mapped; see `nw-ux-emot
 ## Step 1 — Fresh clone, first DST run
 
 ```
-$ cargo xtask dst
+$ cargo dst
     Compiling overdrive-core v0.0.0
     Compiling overdrive-sim  v0.0.0
     Finished `dev` profile [optimized + debuginfo]
@@ -133,7 +133,7 @@ Error-message design (from `nw-ux-tui-patterns` "Error Message Design"):
 ## Step 4 — Real failure reproduces from the seed
 
 ```
-$ cargo xtask dst
+$ cargo dst
     ...
     [ 37/100] leader_election_under_partition  FAILED
 
@@ -144,13 +144,13 @@ invariant violated: single_leader
   cause:  2 leaders elected after partition heal
 
 reproduce:
-  cargo xtask dst --seed ${dst_seed} --only leader_election_under_partition
+  cargo dst --seed ${dst_seed} --only leader_election_under_partition
 ```
 
 Running the reproduction command:
 
 ```
-$ cargo xtask dst --seed ${dst_seed} --only leader_election_under_partition
+$ cargo dst --seed ${dst_seed} --only leader_election_under_partition
     Same seed. Same trajectory.
     [ 1/1] leader_election_under_partition     FAILED (tick 8743)
 ```

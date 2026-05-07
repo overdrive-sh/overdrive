@@ -750,7 +750,7 @@ on the runtime adapter.
 - **DST invariants**: D6's three new invariants
   (`ViewStoreRoundtripIsLossless`, `BulkLoadIsDeterministic`,
   `WriteThroughOrdering`) execute against `SimViewStore` on every
-  `cargo xtask dst` run.
+  `cargo dst` run.
 
 ---
 
@@ -813,7 +813,7 @@ discretion. If a DISTILL pass is invoked later:
 - AC are observable through the new DST invariants
   (`ViewStoreRoundtripIsLossless`, `BulkLoadIsDeterministic`,
   `WriteThroughOrdering`), the trybuild fixtures, and the
-  `cargo xtask dst` output.
+  `cargo dst` output.
 
 ## Handoff to platform-architect (DEVOPS)
 
@@ -822,9 +822,9 @@ discretion. If a DISTILL pass is invoked later:
   format library with no platform-build requirements. No contract
   tests recommended.
 - CI integration: existing gates continue to apply
-  (`cargo xtask dst`, `cargo xtask dst-lint`, `cargo nextest run`,
+  (`cargo dst`, `cargo xtask dst-lint`, `cargo nextest run`,
   mutation-testing kill rate). New DST invariants in §D6 are
-  additive on `cargo xtask dst`.
+  additive on `cargo dst`.
 - New workspace dep: `ciborium` (MIT/Apache-2.0; pure Rust; serde-
   compatible; no codegen). Add via `[workspace.dependencies]` per
   development.md § "Dependencies" rule.

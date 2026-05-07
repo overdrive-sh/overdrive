@@ -57,7 +57,7 @@ Per `ci-cd-pipeline.md` §Branch-protection config:
 
 - `fmt + clippy`
 - `cargo test (unit + proptest)`
-- `cargo xtask dst`
+- `cargo dst`
 - `cargo xtask dst-lint`
 - `cargo mutants (diff)`
 

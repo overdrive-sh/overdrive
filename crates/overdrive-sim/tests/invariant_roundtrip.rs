@@ -8,7 +8,7 @@
 //! > case-insensitive.
 //!
 //! The enum is also the single source of truth for the `--only <NAME>`
-//! filter on `cargo xtask dst`. An invariant name accepted by the
+//! filter on `cargo dst`. An invariant name accepted by the
 //! harness that the enum refused to parse would decouple the CLI from
 //! its own summary format — this test closes that loop.
 

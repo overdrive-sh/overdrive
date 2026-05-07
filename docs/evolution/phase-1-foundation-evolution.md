@@ -4,7 +4,7 @@
 **Branch**: marcus-sa/phase-1-foundation
 **Duration**: 2026-04-21 — 2026-04-22 (DISCUSS opened 2026-04-21; DELIVER closed 2026-04-22)
 **Status**: Delivered
-**Walking-skeleton gate**: step 06-03 (`cargo xtask dst` green + canary red-run with usable reproduction command)
+**Walking-skeleton gate**: step 06-03 (`cargo dst` green + canary red-run with usable reproduction command)
 
 > **Nomenclature note (2026-04-23).** This archived evolution doc describes
 > crates with `crate_class = "adapter-real"`. That class value was renamed
@@ -19,7 +19,7 @@ The project's walking skeleton: the type universe (11 identifier newtypes),
 the state-store split (`IntentStore` + `ObservationStore` traits), the six
 nondeterminism ports (`Clock`, `Transport`, `Entropy`, `Dataplane`,
 `Driver`, `Llm`) plus `ObservationStore` as the seventh, every Sim adapter
-backing those ports, a turmoil-based DST harness, the `cargo xtask dst`
+backing those ports, a turmoil-based DST harness, the `cargo dst`
 and `cargo xtask dst-lint` CLIs, and the CI lint gate that forbids banned
 APIs in `crate_class = "core"` crates. This scaffold is the foundation
 every subsequent Overdrive feature will build against: typed identifiers,
@@ -78,7 +78,7 @@ core logic.
   `SimTransport`, `SimEntropy`, `SimDataplane`, `SimDriver`, `SimLlm`,
   `SimObservationStore`), turmoil-based `Harness`, `Invariant` enum
   with six variants, invariant evaluators. `crate_class = "adapter-sim"`.
-- `xtask` — `cargo xtask dst` (seed printing, text-log + JSON summary
+- `xtask` — `cargo dst` (seed printing, text-log + JSON summary
   artifacts per ADR-0006), `cargo xtask dst-lint` (syn-based banned-API
   walker across core-class crates). Pre-existing `ci` / `mcp` / `lima`
   / `hooks` subcommands untouched. `crate_class = "binary"`.
@@ -123,7 +123,7 @@ core logic.
 | Every workspace crate declares `package.metadata.overdrive.crate_class` | [ADR-0003](../product/architecture/adr-0003-core-crate-labelling.md) | Locality + "every crate must declare" assertion closes the silent-skip blind spot in the lint gate. |
 | Single `overdrive-sim` crate hosts every Sim adapter, the harness, and the invariant catalogue | [ADR-0004](../product/architecture/adr-0004-overdrive-sim-single-crate.md) | Minimal compile cost for turmoil; one-sentence dep-boundary rule; no consumer wants one adapter in isolation. |
 | Plumbing tests in `tests/*.rs`; DISTILL acceptance scenarios in `tests/acceptance/*.rs` | [ADR-0005](../product/architecture/adr-0005-test-distribution.md) | Clear DISTILL-scenario → test-file mapping; plumbing stays visibly separate. |
-| `cargo xtask dst` is the canonical DST entry point; seed on line 1; text + JSON artifacts always written | [ADR-0006](../product/architecture/adr-0006-ci-wiring-dst-gates.md) | Dev/CI path unity; seed preserved on killed runs; dashboard-parseable JSON. |
+| `cargo dst` is the canonical DST entry point; seed on line 1; text + JSON artifacts always written | [ADR-0006](../product/architecture/adr-0006-ci-wiring-dst-gates.md) | Dev/CI path unity; seed preserved on killed runs; dashboard-parseable JSON. |
 | Complete existing scaffolding in place; do not refactor | [ADR-0001](../product/architecture/adr-0001-complete-scaffolding-in-place.md) | Structural shape was correct; all work is additive (proptests, adapter crates, DST harness). |
 | K4 (LocalStore cold start / RSS) deferred from Phase 1 acceptance gate to Phase 2+ guardrail | [`design/upstream-changes.md`](../feature/phase-1-foundation/design/upstream-changes.md) | Benchmarking LocalStore in isolation measures the wrong thing; commercial claim applies to a control-plane process Phase 1 does not ship. |
 | Walking Skeleton Strategy C — real redb against `tempfile::TempDir` | DWD-01 in [`distill/wave-decisions.md`](../feature/phase-1-foundation/distill/wave-decisions.md) | Only posture compatible with "DST tests compose LocalStore with sim traits, but the store itself is real." |
@@ -137,7 +137,7 @@ core logic.
 From
 [`discuss/outcome-kpis.md`](../feature/phase-1-foundation/discuss/outcome-kpis.md):
 
-- **K1** — `cargo xtask dst` green in <60s wall-clock on a clean clone.
+- **K1** — `cargo dst` green in <60s wall-clock on a clean clone.
   ✅ Step 06-02 enforces; CI `test`/`dst` jobs gate on this.
 - **K2** — CI blocks banned-API smuggling in core crates with 0% false
   positives on wiring crates. ✅ Step 05-02 ships; `dst-lint` job gates

@@ -91,7 +91,7 @@ scenario:
 
 | WS scenario | Title = user goal? | Then = observable outcome? | Stakeholder-confirmable? |
 |---|---|---|---|
-| §1.1 | "Clean-clone cargo xtask dst is green within the wall-clock budget" — engineer-facing outcome | Exit code, stdout seed, summary-zero-failures, wall-clock < 60s, artifact written | Yes — "engineer runs one command, it works fast" |
+| §1.1 | "Clean-clone cargo dst is green within the wall-clock budget" — engineer-facing outcome | Exit code, stdout seed, summary-zero-failures, wall-clock < 60s, artifact written | Yes — "engineer runs one command, it works fast" |
 | §1.2 | "The same seed produces the same trajectory across two runs" — engineer-facing outcome | Ordered results match, per-invariant ticks match, same seed printed | Yes — "reproducible" |
 | §1.3 | "A red invariant prints the seed, tick, host, and reproduction command" — engineer-facing outcome | Non-zero exit, failure block contains reproduction command | Yes — "when it breaks, I can debug it" |
 
@@ -178,7 +178,7 @@ foundational walking skeleton.
 - Strategy C declared; WS scenarios §1.1 and §1.3 both carry
   `@real-io @adapter-integration` and exercise real redb. ✅
 - §1.2 ("same seed produces the same trajectory") does NOT carry
-  `@real-io`. Intentional — this scenario runs the `cargo xtask dst`
+  `@real-io`. Intentional — this scenario runs the `cargo dst`
   subprocess twice and compares outputs; it exercises the CLI
   surface, not the redb adapter specifically. The redb adapter is
   still present (the subprocess boots the full harness), but the
@@ -209,7 +209,7 @@ walking-skeleton scenario. ✅
 
 ### CM-A — Hexagonal boundary enforcement
 
-All `@driving_port` scenarios enter through `cargo xtask dst` or
+All `@driving_port` scenarios enter through `cargo dst` or
 `cargo xtask dst-lint` subprocesses — the CLI is the user-facing
 driving port. `@library_port` scenarios enter through public trait
 surfaces in `overdrive-core` — `IntentStore`, `ObservationStore`,

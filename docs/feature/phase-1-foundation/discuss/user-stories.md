@@ -484,7 +484,7 @@ And the output confirms zero violations
 
 ### Problem
 
-This is the acceptance gate for the entire Phase 1 feature. The whitepaper's §21 claim — "DST is a first-class constraint from day one" — is either real (engineers run `cargo xtask dst` and see green invariants on a simulated distributed cluster) or it is performance. Ana needs the turmoil-based harness wired up, composing the real `LocalStore` with all `Sim*` traits from US-04 and US-05, running a catalogue of invariants, reproducible from seed, and failing CI on red.
+This is the acceptance gate for the entire Phase 1 feature. The whitepaper's §21 claim — "DST is a first-class constraint from day one" — is either real (engineers run `cargo dst` and see green invariants on a simulated distributed cluster) or it is performance. Ana needs the turmoil-based harness wired up, composing the real `LocalStore` with all `Sim*` traits from US-04 and US-05, running a catalogue of invariants, reproducible from seed, and failing CI on red.
 
 ### Who
 
@@ -492,13 +492,13 @@ This is the acceptance gate for the entire Phase 1 feature. The whitepaper's §2
 
 ### Solution
 
-Build `overdrive-sim` crate with the Sim* trait implementations, the turmoil harness, and an invariant catalogue. Build `cargo xtask dst` as the entry point. Wire it into CI. Cover at minimum: `single_leader` (against a stubbed leader-election test topology), `intent_never_crosses_into_observation`, `snapshot_roundtrip_bit_identical`, `sim_observation_lww_converges`, `replay_equivalent_empty_workflow`, `entropy_determinism_under_reseed`.
+Build `overdrive-sim` crate with the Sim* trait implementations, the turmoil harness, and an invariant catalogue. Build `cargo dst` as the entry point. Wire it into CI. Cover at minimum: `single_leader` (against a stubbed leader-election test topology), `intent_never_crosses_into_observation`, `snapshot_roundtrip_bit_identical`, `sim_observation_lww_converges`, `replay_equivalent_empty_workflow`, `entropy_determinism_under_reseed`.
 
 ### Domain Examples
 
-#### 1: Happy Path — Ana runs `cargo xtask dst` on a clean clone
+#### 1: Happy Path — Ana runs `cargo dst` on a clean clone
 
-Ana clones the repo and runs `cargo xtask dst`. Cargo compiles. The harness boots a 3-node simulated cluster using real `LocalStore` + `SimObservationStore` + the five other Sim* traits. Invariants run to completion. Summary: `100 scenarios · 0 failures · 2.3s wall-clock`. The seed is printed on the summary line.
+Ana clones the repo and runs `cargo dst`. Cargo compiles. The harness boots a 3-node simulated cluster using real `LocalStore` + `SimObservationStore` + the five other Sim* traits. Invariants run to completion. Summary: `100 scenarios · 0 failures · 2.3s wall-clock`. The seed is printed on the summary line.
 
 #### 2: Edge Case — Ana forces a partition scenario and watches invariants hold
 
@@ -510,10 +510,10 @@ Ana introduces a subtle bug: under certain timing, two leaders can be briefly el
 
 ### UAT Scenarios (BDD)
 
-#### Scenario: Clean-clone `cargo xtask dst` is green within wall-clock budget
+#### Scenario: Clean-clone `cargo dst` is green within wall-clock budget
 
 Given a clean clone of the repository
-When Ana runs `cargo xtask dst`
+When Ana runs `cargo dst`
 Then every invariant in the default catalogue runs to completion
 And the summary reports zero failures
 And wall-clock time stays under 60 seconds on an M-class laptop
@@ -522,14 +522,14 @@ And the seed is printed in the summary
 #### Scenario: Same-seed reproduction is bit-identical
 
 Given Ana has captured seed S from a previous run on git SHA G and toolchain T
-When Ana runs `cargo xtask dst --seed S` on the same G and T
+When Ana runs `cargo dst --seed S` on the same G and T
 Then the harness produces the same ordered invariant results
 And every per-invariant tick number matches the previous run
 
 #### Scenario: A failing invariant prints seed, tick, and reproduction command
 
 Given a bug exists that will cause `single_leader` to fail at some tick
-When Ana runs `cargo xtask dst`
+When Ana runs `cargo dst`
 Then the failure output includes the invariant name, the seed, the simulated tick, and the turmoil host
 And the output contains a reproduction command with the seed embedded and `--only <invariant_name>`
 And the `--only` flag value matches an enum variant exported from `overdrive-sim`
@@ -544,7 +544,7 @@ And the failure happens at the same tick as the original run
 #### Scenario: CI fails on DST red
 
 Given the DST harness has failed at least one invariant
-When the `cargo xtask dst` step completes in CI
+When the `cargo dst` step completes in CI
 Then the step exits with non-zero status
 And the CI pipeline marks the PR as failed
 
@@ -565,7 +565,7 @@ Then it holds for the entirety of the scenario
 ### Acceptance Criteria
 
 - [ ] `overdrive-sim` crate exists with `Sim{Clock, Transport, Entropy, Dataplane, Driver, Llm, ObservationStore}` impls
-- [ ] `cargo xtask dst` entry point exists and runs to completion green on a clean clone
+- [ ] `cargo dst` entry point exists and runs to completion green on a clean clone
 - [ ] The harness composes real `LocalStore` (not a mock) with `SimObservationStore` plus every other Sim* trait
 - [ ] The default invariant catalogue includes: `single_leader`, `intent_never_crosses_into_observation`, `snapshot_roundtrip_bit_identical`, `sim_observation_lww_converges`, `replay_equivalent_empty_workflow`, `entropy_determinism_under_reseed`
 - [ ] Each invariant name is an enum variant in `overdrive-sim::invariants`; no inline strings in test output
@@ -573,7 +573,7 @@ Then it holds for the entirety of the scenario
 - [ ] `--seed <N>` reproduces bit-for-bit on the same git SHA and toolchain
 - [ ] `--only <INVARIANT>` narrows the run to one invariant
 - [ ] A failure prints: invariant name, seed, tick, host, cause, reproduction command
-- [ ] The CI pipeline runs `cargo xtask dst` and blocks merges on non-zero exit
+- [ ] The CI pipeline runs `cargo dst` and blocks merges on non-zero exit
 - [ ] Default wall-clock stays under 60s on a reference M-class laptop for the default invariant count
 - [ ] A self-test (the harness's own test) runs the default suite twice on the same seed and asserts identical trajectories
 

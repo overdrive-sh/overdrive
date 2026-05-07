@@ -43,7 +43,7 @@ walking-skeleton-extension release for this feature.
 |---|---|---|---|---|
 | K1 | Proptest in the scheduler module | `proptest!` block over arbitrary `(BTreeMap<NodeId, NodeView>, JobView, Vec<AllocStatusRow>)` inputs; assert determinism | Every PR touching the scheduler | CI |
 | K2 | Linux integration test in `overdrive-host/tests/integration/process_driver.rs` (gated `integration-tests`) | Real process spawn against `/bin/sleep`; read `/proc/<pid>/cgroup`; stop; assert scope removed | Every PR touching `overdrive-host` driver code; on the Linux Tier 3 matrix per `.claude/rules/testing.md` | CI |
-| K3 | DST invariant catalogue — three new evaluators in `overdrive-sim::invariants::evaluators`; `job stop` integration test | `cargo xtask dst` runs the invariants on every PR; integration test exercises stop-and-drain end-to-end | Every PR | CI |
+| K3 | DST invariant catalogue — three new evaluators in `overdrive-sim::invariants::evaluators`; `job stop` integration test | `cargo dst` runs the invariants on every PR; integration test exercises stop-and-drain end-to-end | Every PR | CI |
 | K4 | Linux integration test in `overdrive-control-plane/tests/integration/cgroup_isolation.rs` (gated `integration-tests`) | Submit CPU-burst job; measure `cluster status` round-trip during burst | Every PR touching slice-creation / pre-flight code | CI |
 
 ### Hypothesis

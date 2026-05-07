@@ -311,7 +311,7 @@ The matrix is LVH `image-version` inputs; adding a new kernel is one line of YAM
 ```
 On every PR:
   Job A (seconds):   cargo test                        -- pure-Rust, no BPF
-  Job B (minutes):   cargo xtask dst                   -- turmoil DST (§21)
+  Job B (minutes):   cargo dst                   -- turmoil DST (§21)
   Job C (minutes):   cargo xtask bpf-unit              -- Tier 2, BPF_PROG_TEST_RUN
   Job D (10 minutes, matrix over kernels 5.10/5.15/6.1/6.6/6.12):
                      cargo xtask integration-test vm <KERNEL>   -- Tier 3

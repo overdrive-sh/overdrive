@@ -155,7 +155,7 @@ fn load_with_retry(artifact: &PathBuf, pin_dir: &std::path::Path, budget: Durati
 ///
 /// `serial_test::serial(env)` — `tests/integration/build_rs_artifact_check.rs`
 /// removes and restores the on-disk BPF artifact at
-/// `target/xtask/bpf-objects/overdrive_bpf.o` to exercise the
+/// `target/bpf/overdrive_bpf.o` to exercise the
 /// build-script diagnostic. This test reads that same artifact via
 /// `Ebpf::load_file`, so the two MUST NOT race — sharing the `env`
 /// group puts both tests in the same serial sequence. Veth-state

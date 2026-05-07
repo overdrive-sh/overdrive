@@ -217,7 +217,7 @@ hydrator).
   feature, and "verifier accepts" is unavoidable phrasing because
   the kernel verifier's accept/reject is THE structural contract.
   This is convention, not a smell; reference `wave-decisions.md`
-  Decision 11. Scenarios that name `dst-lint` or `cargo xtask dst`
+  Decision 11. Scenarios that name `dst-lint` or `cargo dst`
   fall under the same convention — the gate IS the contract.
 - No banned anti-pattern detected: no "Implement X" titles, no
   generic data, no technical AC beyond what is structurally required
@@ -235,4 +235,4 @@ hydrator).
 | Date | Change |
 |---|---|
 | 2026-05-05 | Initial DoR validation for `phase-2-xdp-service-map`. 7/7 stories PASS; no HARD DESIGN dependencies; Phase 2.1's ADR-0038 substrate is complete. |
-| 2026-05-05 | Eclipse-review remediation: added US-08 (SERVICE_MAP hydrator reconciler) DoR row passing 9/9; net status 8/8. New cross-cutting items: hydrator-reconciler dimension (the J-PLAT-004 reference reconciler with paired DST invariants `HydratorEventuallyConverges` + `HydratorIdempotentSteadyState`); story–slice 1:1 mapping documented; verifier-acceptance scenario convention captured (verifier IS the structural contract — `dst-lint` and `cargo xtask dst` follow the same convention). |
+| 2026-05-05 | Eclipse-review remediation: added US-08 (SERVICE_MAP hydrator reconciler) DoR row passing 9/9; net status 8/8. New cross-cutting items: hydrator-reconciler dimension (the J-PLAT-004 reference reconciler with paired DST invariants `HydratorEventuallyConverges` + `HydratorIdempotentSteadyState`); story–slice 1:1 mapping documented; verifier-acceptance scenario convention captured (verifier IS the structural contract — `dst-lint` and `cargo dst` follow the same convention). |

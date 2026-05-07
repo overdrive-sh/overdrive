@@ -90,7 +90,7 @@ fn parse_baseline_file_extracts_prog_and_insns_from_real_baseline_shape() {
 # History: ...
 #
 
-file=target/xtask/bpf-objects/overdrive_bpf.o prog=xdp_service_map_lookup verdict=success verified_insns=151379
+file=target/bpf/overdrive_bpf.o prog=xdp_service_map_lookup verdict=success verified_insns=151379
 ";
 
     let records = parse_baseline_file(text).expect("parse_baseline_file must succeed");
@@ -108,8 +108,8 @@ file=target/xtask/bpf-objects/overdrive_bpf.o prog=xdp_service_map_lookup verdic
 #[test]
 fn parse_veristat_output_extracts_one_record_per_program() {
     let text = "\
-file=target/xtask/bpf-objects/overdrive_bpf.o prog=xdp_service_map_lookup verdict=success verified_insns=151400
-file=target/xtask/bpf-objects/overdrive_bpf.o prog=xdp_reverse_nat_lookup verdict=success verified_insns=148166
+file=target/bpf/overdrive_bpf.o prog=xdp_service_map_lookup verdict=success verified_insns=151400
+file=target/bpf/overdrive_bpf.o prog=xdp_reverse_nat_lookup verdict=success verified_insns=148166
 ";
     let records = parse_veristat_output(text).expect("parse_veristat_output must succeed");
     assert_eq!(records.len(), 2);

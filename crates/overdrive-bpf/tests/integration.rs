@@ -14,7 +14,7 @@
 //!
 //! These tests are Tier 2 BPF unit tests per `.claude/rules/testing.md`
 //! § "Tier 2 — BPF Unit Tests". Each test loads the BPF object from
-//! `target/xtask/bpf-objects/overdrive_bpf.o` (produced by
+//! `target/bpf/overdrive_bpf.o` (produced by
 //! `cargo xtask bpf-build`), drives `BPF_PROG_TEST_RUN` via aya's
 //! userspace API, and asserts on the returned verdict and observable
 //! BPF map state.

@@ -19,7 +19,7 @@ remain for traceability.
 C4Context
   title System Context — Overdrive (Phase 2.1 — eBPF dataplane scaffolding)
 
-  Person(engineer, "Platform Engineer (Ana)", "Writes core-plane logic; runs `cargo xtask dst` and `cargo xtask bpf-build`")
+  Person(engineer, "Platform Engineer (Ana)", "Writes core-plane logic; runs `cargo dst` and `cargo xtask bpf-build`")
   System(overdrive, "Overdrive node", "Single binary — control plane + worker + dataplane (Phase 2.1: dataplane crate scaffolded with no-op XDP)")
   System_Ext(kernel, "Linux kernel", "BPF subsystem — XDP/TC hooks, BPF maps, BPF_PROG_TEST_RUN syscall (kernels 5.10+ supported)")
   System_Ext(ci, "CI", "GitHub Actions — runs xtask gates incl. `bpf-build` + `bpf-unit` + `integration-test vm`")
@@ -51,12 +51,12 @@ C4Container
     Container(cli, "overdrive-cli", "Rust binary (class: binary)", "`overdrive` CLI + `serve` composition root")
     Container(xtask, "xtask", "Rust binary (class: binary)", "cargo xtask — incl. NEW `bpf-build`, filled-in `bpf-unit` + `integration-test vm`")
 
-    Container(bpf, "overdrive-bpf  [NEW]", "Rust crate (class: binary, target: bpfel-unknown-none, #![no_std])", "Kernel-side eBPF programs. Phase 2.1: one no-op XDP `xdp_pass` + `LruHashMap<u32,u64>` packet counter. Compiles to ELF object at `target/xtask/bpf-objects/overdrive_bpf.o`.")
+    Container(bpf, "overdrive-bpf  [NEW]", "Rust crate (class: binary, target: bpfel-unknown-none, #![no_std])", "Kernel-side eBPF programs. Phase 2.1: one no-op XDP `xdp_pass` + `LruHashMap<u32,u64>` packet counter. Compiles to ELF object at `target/bpf/overdrive_bpf.o`.")
     Container(dataplane, "overdrive-dataplane  [NEW]", "Rust crate (class: adapter-host)", "Userspace BPF loader. EbpfDataplane impl of Dataplane trait. Embeds BPF object via include_bytes!. Stub method bodies (Ok(())/empty Vec) deferred to #24/#25/#27.")
   }
 
   ContainerDb(redb_file, "redb file", "On-disk ACID KV")
-  ContainerDb(bpf_obj, "BPF object", "ELF at target/xtask/bpf-objects/overdrive_bpf.o")
+  ContainerDb(bpf_obj, "BPF object", "ELF at target/bpf/overdrive_bpf.o")
   System_Ext(kernel, "Linux kernel BPF subsystem", "/sys/fs/bpf, bpf(2) syscalls, XDP hook on `lo`")
   System_Ext(ci, "CI pipeline")
 

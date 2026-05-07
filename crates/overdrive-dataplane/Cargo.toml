@@ -71,7 +71,7 @@ nix.workspace  = true
 
 # Integration-test dev-deps. `serial_test` serialises tests that
 # mutate process-global state — here, the on-disk BPF artifact path
-# under `target/xtask/bpf-objects/`. See `.claude/rules/testing.md`
+# under `target/bpf/`. See `.claude/rules/testing.md`
 # § "Tests that mutate process-global state".
 #
 # `tracing-subscriber` is dev-only — used by S-2.2-02 to capture the

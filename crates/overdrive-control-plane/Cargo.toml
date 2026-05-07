@@ -20,6 +20,13 @@ publish                = false
 [package.metadata.overdrive]
 crate_class = "adapter-host"
 
+[[bin]]
+# `cargo openapi-{gen,check}` runtime entry point. See
+# `src/bin/openapi.rs` and § "xtask is build / test / dev orchestration,
+# NOT a runtime entry point" in `.claude/rules/development.md`.
+name = "openapi"
+path = "src/bin/openapi.rs"
+
 [features]
 # Opt-in gate for slow / real-infra tests in this crate. Off by default
 # so `cargo nextest run --workspace` stays under the 60s slow-test
@@ -50,6 +57,10 @@ overdrive-host.path                = "../overdrive-host"
 thiserror.workspace   = true
 async-trait.workspace = true
 tokio.workspace       = true
+# `cargo openapi-{gen,check}` binary deps (see `src/bin/openapi.rs`).
+clap.workspace        = true
+eyre.workspace        = true
+color-eyre.workspace  = true
 # Per `fix-convergence-loop-not-spawned` Step 01-02 (RCA Option B2):
 # `ServerHandle` carries a `tokio_util::sync::CancellationToken` that
 # the convergence-loop spawn observes for ordered shutdown.

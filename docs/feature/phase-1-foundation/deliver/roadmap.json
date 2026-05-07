@@ -7,12 +7,12 @@
     "phases": 6,
     "walking_skeleton_gate": "06-03",
     "notes": [
-      "The whole feature is ONE walking skeleton per DWD-03 — there is no Release 2. The skeleton is green when `cargo xtask dst` on a clean clone passes the default invariant catalogue (step 06-03).",
+      "The whole feature is ONE walking skeleton per DWD-03 — there is no Release 2. The skeleton is green when `cargo dst` on a clean clone passes the default invariant catalogue (step 06-03).",
       "Step decomposition ratio target: <= 2.5 (steps / production files). Final count = 16 steps against roughly 10 production files (id tests, error, store-local/{lib,snapshot,redb_keys}, overdrive-sim/{adapters/*, invariants, harness, lib}, xtask/{dst, dst_lint}) — ratio ~1.6.",
       "Slice-to-phase mapping (6 slices, 6 phases): slice-1 -> phase 01 (core newtypes), slice-2 -> phase 02 (extended newtypes + SchematicId canonicalisation), slice-3 -> phase 03 (IntentStore + LocalStore on real redb), slice-4 -> phase 04 (ObservationStore + SimObservationStore), slice-5 -> phase 05 (remaining Sim adapters + xtask dst-lint), slice-6 -> phase 06 (xtask dst + turmoil harness + invariant catalogue).",
       "ADR-0001 applies across every step that touches overdrive-core: complete scaffolding in place, do not refactor.",
       "ADR-0005 applies to test layout: plumbing tests in `tests/*.rs`, acceptance scenarios in `tests/acceptance/*.rs`. No `.feature` files anywhere (testing.md + DWD-03).",
-      "ADR-0006 applies to xtask CI contract: seed on the first line of stdout; `target/xtask/dst-output.log` (text) and `target/xtask/dst-summary.json` (structured) written on every invocation; non-zero exit on any invariant failure.",
+      "ADR-0006 applies to xtask CI contract: seed on the first line of stdout; `target/dst/output.log` (text) and `target/dst/summary.json` (structured) written on every invocation; non-zero exit on any invariant failure.",
       "Every step follows the Outside-In TDD rhythm: RED (acceptance test from DISTILL scenario) -> RED (unit test if GREEN is complex) -> GREEN (minimal impl) -> REFACTOR (apply project rules) -> PROPTEST (where mandated) -> MUTATION (>=80% kill rate on diff-scoped cargo-mutants)."
     ]
   },
@@ -343,17 +343,17 @@
     },
     {
       "id": "06",
-      "name": "Slice 6 — `cargo xtask dst` turmoil harness runs the invariant catalogue green on a clean clone",
+      "name": "Slice 6 — `cargo dst` turmoil harness runs the invariant catalogue green on a clean clone",
       "slice": "slice-6",
       "user_stories": ["US-06"],
-      "description": "Pull everything together: the turmoil harness composes real LocalStore (from overdrive-store-local) with every Sim adapter (from overdrive-sim); `cargo xtask dst` prints the seed on the first line, runs the default Invariant catalogue, writes `target/xtask/dst-output.log` (text) and `target/xtask/dst-summary.json` (structured) per ADR-0006, and exits non-zero on any invariant failure with a reproduction block naming invariant/seed/tick/host and the reproduction command. Twin-run identity under the same seed is the acceptance gate for the whole feature.",
+      "description": "Pull everything together: the turmoil harness composes real LocalStore (from overdrive-store-local) with every Sim adapter (from overdrive-sim); `cargo dst` prints the seed on the first line, runs the default Invariant catalogue, writes `target/dst/output.log` (text) and `target/dst/summary.json` (structured) per ADR-0006, and exits non-zero on any invariant failure with a reproduction block naming invariant/seed/tick/host and the reproduction command. Twin-run identity under the same seed is the acceptance gate for the whole feature.",
       "estimated_hours": 9,
       "depends_on": ["03", "04", "05"],
       "steps": [
         {
           "id": "06-01",
           "name": "Invariant enum, harness skeleton, and xtask dst wiring boot a 3-node sim and print a summary",
-          "criteria": "`Invariant` enum (already scaffolded with variants SingleLeader / IntentNeverCrossesIntoObservation / SnapshotRoundtripBitIdentical / SimObservationLwwConverges / ReplayEquivalentEmptyWorkflow / EntropyDeterminismUnderReseed) implements Display (kebab-case) and FromStr (case-insensitive) with lossless round-trip (proptest). `overdrive-sim::harness::Harness::run(seed)` boots three turmoil hosts; each host constructs a real LocalStore on a per-host TempDir plus every Sim* adapter; the harness returns a `RunReport { seed, invariants, wall_clock, failures }`. `cargo xtask dst` takes an optional `--seed N` flag (random u64 if absent), calls the harness, prints the seed on the first line of stdout, writes `target/xtask/dst-output.log` and `target/xtask/dst-summary.json`. `--only <INVARIANT>` narrows to one invariant via `Invariant::from_str`. Covers test-scenarios.md §7.1 scenarios 1, 3, 4, 6 (harness composition, invariant enum round-trip, --only filter, first-line seed).",
+          "criteria": "`Invariant` enum (already scaffolded with variants SingleLeader / IntentNeverCrossesIntoObservation / SnapshotRoundtripBitIdentical / SimObservationLwwConverges / ReplayEquivalentEmptyWorkflow / EntropyDeterminismUnderReseed) implements Display (kebab-case) and FromStr (case-insensitive) with lossless round-trip (proptest). `overdrive-sim::harness::Harness::run(seed)` boots three turmoil hosts; each host constructs a real LocalStore on a per-host TempDir plus every Sim* adapter; the harness returns a `RunReport { seed, invariants, wall_clock, failures }`. `cargo dst` takes an optional `--seed N` flag (random u64 if absent), calls the harness, prints the seed on the first line of stdout, writes `target/dst/output.log` and `target/dst/summary.json`. `--only <INVARIANT>` narrows to one invariant via `Invariant::from_str`. Covers test-scenarios.md §7.1 scenarios 1, 3, 4, 6 (harness composition, invariant enum round-trip, --only filter, first-line seed).",
           "test_file": "xtask/tests/acceptance/dst_harness_smoke.rs",
           "scenario_name": "The DST harness composes real LocalStore with every Sim adapter; every invariant name round-trips through the invariant enum FromStr; --only narrows to a single invariant; seed is printed on the first line of every run",
           "tier": "Tier 1 (harness integration, driving-port subprocess)",
@@ -377,9 +377,9 @@
         {
           "id": "06-02",
           "name": "Default invariant catalogue evaluates and green-passes on a clean clone within the wall-clock budget",
-          "criteria": "Running `cargo xtask dst` on a freshly cloned workspace exits 0; the default catalogue reports SingleLeader (against a stubbed leader topology per US-06 Technical Note 3 — document the stub), IntentNeverCrossesIntoObservation (assert_always: no intent-class row in any SimObservationStore, no observation-prefix key in LocalStore), SnapshotRoundtripBitIdentical (drives step 03-02 logic from within the harness), SimObservationLwwConverges (drives step 04-03 logic from within the harness), ReplayEquivalentEmptyWorkflow (trivial: no-op workflow replays bit-identically — proves the machinery works, full workflow runtime is Phase 2+), EntropyDeterminismUnderReseed (StdRng output is identical across two harness boots on the same seed). Wall-clock stays under 60s on an M-class laptop per KPI K1. Covers test-scenarios.md §1.1 (WS-1), §7.1 scenarios 1-2, the `intent_never_crosses_into_observation` invariant from §5.2.",
+          "criteria": "Running `cargo dst` on a freshly cloned workspace exits 0; the default catalogue reports SingleLeader (against a stubbed leader topology per US-06 Technical Note 3 — document the stub), IntentNeverCrossesIntoObservation (assert_always: no intent-class row in any SimObservationStore, no observation-prefix key in LocalStore), SnapshotRoundtripBitIdentical (drives step 03-02 logic from within the harness), SimObservationLwwConverges (drives step 04-03 logic from within the harness), ReplayEquivalentEmptyWorkflow (trivial: no-op workflow replays bit-identically — proves the machinery works, full workflow runtime is Phase 2+), EntropyDeterminismUnderReseed (StdRng output is identical across two harness boots on the same seed). Wall-clock stays under 60s on an M-class laptop per KPI K1. Covers test-scenarios.md §1.1 (WS-1), §7.1 scenarios 1-2, the `intent_never_crosses_into_observation` invariant from §5.2.",
           "test_file": "xtask/tests/acceptance/dst_clean_clone_green.rs",
-          "scenario_name": "Clean-clone cargo xtask dst is green within the wall-clock budget; the default invariant catalogue runs to completion; intent never crosses into observation throughout any DST run",
+          "scenario_name": "Clean-clone cargo dst is green within the wall-clock budget; the default invariant catalogue runs to completion; intent never crosses into observation throughout any DST run",
           "tier": "Tier 1 (walking-skeleton scenario WS-1)",
           "time_estimate_hours": 3,
           "dependencies": ["06-01"],
@@ -397,7 +397,7 @@
         {
           "id": "06-03",
           "name": "Same seed reproduces bit-identical trajectory; red runs print a reproduction command; CI artifacts are written on red",
-          "criteria": "Running `cargo xtask dst --seed S` twice produces bit-identical output: ordered invariant results match, per-invariant tick numbers match, seed on the first line of both runs is S. A planted bug in SimObservationStore that breaks LWW convergence on a specific seed causes `cargo xtask dst` to exit non-zero with a failure block naming the failing invariant, seed, tick, turmoil host, cause, and a reproduction command embedding the same seed with `--only <invariant>`. Running the printed reproduction command fails at the same tick. On red, `target/xtask/dst-output.log` and `target/xtask/dst-summary.json` are both written; the JSON contains {failing_invariant, seed, tick, host, cause}. Twin-run identity holds for any seed drawn from the DST seed generator (proptest over 16 seeds). Covers test-scenarios.md §1.2 (WS-2), §1.3 (WS-3), §7.2 both error scenarios, §7.3 twin-run self-test.",
+          "criteria": "Running `cargo dst --seed S` twice produces bit-identical output: ordered invariant results match, per-invariant tick numbers match, seed on the first line of both runs is S. A planted bug in SimObservationStore that breaks LWW convergence on a specific seed causes `cargo dst` to exit non-zero with a failure block naming the failing invariant, seed, tick, turmoil host, cause, and a reproduction command embedding the same seed with `--only <invariant>`. Running the printed reproduction command fails at the same tick. On red, `target/dst/output.log` and `target/dst/summary.json` are both written; the JSON contains {failing_invariant, seed, tick, host, cause}. Twin-run identity holds for any seed drawn from the DST seed generator (proptest over 16 seeds). Covers test-scenarios.md §1.2 (WS-2), §1.3 (WS-3), §7.2 both error scenarios, §7.3 twin-run self-test.",
           "test_file": "xtask/tests/acceptance/dst_seeded_reproduction.rs",
           "scenario_name": "Same seed produces the same trajectory across two runs; a red invariant prints seed/tick/host/reproduction command; the reproduction command reproduces the failure at the same tick; twin-run identity holds for every seed",
           "tier": "Tier 1 (walking-skeleton scenarios WS-2, WS-3; feature-level acceptance gate)",
@@ -441,12 +441,12 @@
   "walking_skeleton": {
     "gate_step": "06-03",
     "scenarios": [
-      "WS-1 (test-scenarios.md §1.1) — clean-clone cargo xtask dst is green within 60s",
+      "WS-1 (test-scenarios.md §1.1) — clean-clone cargo dst is green within 60s",
       "WS-2 (test-scenarios.md §1.2) — same seed reproduces trajectory bit-for-bit",
       "WS-3 (test-scenarios.md §1.3) — red run prints a usable reproduction command"
     ],
     "strategy": "C (real local) per DWD-01 — LocalStore wraps real redb against tempfile::TempDir in every @walking_skeleton scenario",
-    "definition_of_done": "`cargo xtask dst` on a clean clone: seed printed on line 1, default invariant catalogue green, wall-clock < 60s, target/xtask/{dst-output.log,dst-summary.json} both written, `--seed N` reproduces bit-for-bit."
+    "definition_of_done": "`cargo dst` on a clean clone: seed printed on line 1, default invariant catalogue green, wall-clock < 60s, target/xtask/{dst-output.log,dst-summary.json} both written, `--seed N` reproduces bit-for-bit."
   },
   "quality_gates": {
     "per_step": [
@@ -461,7 +461,7 @@
     ],
     "feature_level": [
       "All 65 scenarios from distill/test-scenarios.md have a corresponding Rust test",
-      "cargo xtask dst is green on a clean clone",
+      "cargo dst is green on a clean clone",
       "cargo xtask dst-lint is green on a clean workspace",
       "All three walking-skeleton scenarios (WS-1, WS-2, WS-3) pass",
       "Required CI checks fmt-clippy / test / dst / dst-lint / mutants-diff all green"

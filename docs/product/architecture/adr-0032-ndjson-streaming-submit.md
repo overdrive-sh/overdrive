@@ -605,7 +605,7 @@ External tooling that ignores the vendor extension treats the response
 as "a single SubmitEvent JSON object," which is a safe over-
 approximation (NDJSON IS line-delimited single objects).
 
-`cargo xtask openapi-check` (ADR-0009) catches any drift in the
+`cargo openapi-check` (ADR-0009) catches any drift in the
 checked-in `api/openapi.yaml` mechanically. No new gate.
 
 ## Considered alternatives
@@ -773,7 +773,7 @@ Under-development branches that touch the action shim or the
 
 ### Enforcement
 
-- `cargo xtask openapi-check` catches any drift in
+- `cargo openapi-check` catches any drift in
   `api/openapi.yaml`.
 - A `trybuild` compile-fail fixture asserts `LifecycleEvent` cannot
   derive `Serialize` (it is internal only — leaking it onto the wire
@@ -813,7 +813,7 @@ supported by the row-schema single-source-of-truth.
 - DESIGN-wave decisions D1 / D3 / D4 / D5 / D6 / D8 in
   `docs/feature/cli-submit-vs-deploy-and-alloc-status/design/wave-decisions.md`.
 - ADR-0008 — REST + OpenAPI transport.
-- ADR-0009 — OpenAPI schema derivation; `cargo xtask openapi-check`
+- ADR-0009 — OpenAPI schema derivation; `cargo openapi-check`
   CI gate.
 - ADR-0013 — Reconciler primitive runtime; `Arc<dyn Clock>` injection
   seam.
@@ -945,7 +945,7 @@ of `.claude/rules/development.md` § "Sum types over sentinels".
   `Reason:` line and a re-run / `alloc status` hint instead of the
   `--detach` hint.
 - `api/openapi.yaml` regenerated atomically via
-  `cargo xtask openapi-gen`; the schema gains
+  `cargo openapi-gen`; the schema gains
   `kind: stream_interrupted` as a fourth `oneOf` member through
   `utoipa::ToSchema`.
 - §8 above is corrected: the channel-closed row maps to

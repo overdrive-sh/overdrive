@@ -201,7 +201,7 @@ Re-running the elephant-carpaccio taste tests against the 4-slice plan:
 | Disproves a named pre-commitment | PASS | PASS | PASS | PASS | OK |
 | Production-data-shaped AC | PASS (proptest) | PASS (Linux integration) | PASS (DST + Linux integration) | PASS (Linux integration) | OK |
 | Demonstrable in single session | PASS | PASS | BORDERLINE (dense; demo is "submit → Running → stop → Terminated") | PASS | OK |
-| Same-day dogfood moment | PASS (proptest output) | PASS (Linux dev workstation) | PASS (`cargo xtask dst` + Linux integration) | PASS (Linux dev workstation) | OK |
+| Same-day dogfood moment | PASS (proptest output) | PASS (Linux dev workstation) | PASS (`cargo dst` + Linux integration) | PASS (Linux dev workstation) | OK |
 
 The 4-slice plan is **right-sized**: each slice is independently shippable, the borderlines on Slice 3 are acknowledged in its slice brief, and no slice cross-cuts more than 2 crates.
 

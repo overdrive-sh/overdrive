@@ -1,5 +1,5 @@
-#![allow(clippy::print_stdout, clippy::print_stderr)]
-//! `cargo xtask dst` command logic.
+#![allow(clippy::print_stdout, clippy::print_stderr, clippy::expect_used)]
+//! `cargo dst` — DST harness binary.
 //!
 //! ADR-0006 specifies the contract:
 //!
@@ -7,29 +7,61 @@
 //! * Optional `--only <NAME>` — narrow to one invariant.
 //! * Seed is printed on **line 1** of stdout (survives a killed run).
 //! * On completion, writes:
-//!   * `target/xtask/dst-output.log` — human-readable mirror of stdout.
-//!   * `target/xtask/dst-summary.json` — structured summary (schema in
+//!   * `target/dst/output.log` — human-readable mirror of stdout.
+//!   * `target/dst/summary.json` — structured summary (schema in
 //!     the `Summary` struct below).
 //! * Exit status mirrors the harness — zero iff every invariant passed.
 //!
-//! The xtask crate is a binary boundary per ADR-0003; `rand::random` is
-//! permitted here (the lint gate only scans `crate_class = "core"`
-//! crates). Using OS entropy for the seed is deliberate per ADR-0006 —
-//! the seed is the *one* place real entropy enters the DST stack.
+//! `overdrive-sim` is a binary boundary for this entry point per
+//! ADR-0003; `rand::random` is permitted here (the dst-lint gate only
+//! scans `crate_class = "core"` crates). Using OS entropy for the seed
+//! is deliberate per ADR-0006 — the seed is the *one* place real
+//! entropy enters the DST stack.
+//!
+//! User-facing invocation: `cargo dst [--seed N] [--only INV]` via the
+//! workspace cargo alias in `.cargo/config.toml`. Direct invocation:
+//! `cargo run -p overdrive-sim --bin dst -- [--seed N] [--only INV]`.
 
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, ExitCode};
 use std::str::FromStr as _;
 
+use clap::Parser;
 use color_eyre::eyre::{Result, WrapErr, bail};
 use serde::Serialize;
 
 use overdrive_sim::{Harness, Invariant, InvariantStatus, RunReport};
 
+#[derive(Parser, Debug)]
+#[command(about = "Run the Overdrive DST harness", version)]
+struct Args {
+    /// Seed for the harness. Defaults to fresh OS entropy.
+    #[arg(long)]
+    seed: Option<u64>,
+    /// Run only the named invariant (e.g. `single-leader`).
+    #[arg(long)]
+    only: Option<String>,
+}
+
+fn main() -> ExitCode {
+    if let Err(err) = color_eyre::install() {
+        eprintln!("failed to install color-eyre: {err}");
+        return ExitCode::FAILURE;
+    }
+    let args = Args::parse();
+    match run(args.seed, args.only.as_deref()) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            eprintln!("dst failed: {err:?}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 /// Run the DST harness with the given `--seed` / `--only` args. Returns
 /// `Ok(())` when every invariant passes; `Err` with a detailed message
 /// when any invariant fails (so the binary exits non-zero).
-pub fn run(seed: Option<u64>, only: Option<&str>) -> Result<()> {
+fn run(seed: Option<u64>, only: Option<&str>) -> Result<()> {
     // Resolve `--only` via the canonical Invariant enum — unknown names
     // surface as a friendly error *before* we emit the seed line, so
     // callers do not see a seed for a run that never executed.
@@ -98,32 +130,31 @@ pub fn run(seed: Option<u64>, only: Option<&str>) -> Result<()> {
         eprintln!("  tick       = {}", first.tick);
         eprintln!("  host       = {}", first.host);
         eprintln!("  cause      = {}", first.cause);
-        eprintln!("  reproduce  = cargo xtask dst --seed {}{only_arg}", report.seed);
+        eprintln!("  reproduce  = cargo dst --seed {}{only_arg}", report.seed);
 
-        bail!(
-            "{n} invariant failure(s); see target/xtask/dst-summary.json",
-            n = report.failures.len()
-        )
+        bail!("{n} invariant failure(s); see target/dst/summary.json", n = report.failures.len())
     }
 }
 
-/// Generate a fresh u64 seed from OS entropy. The xtask binary is a
+/// Generate a fresh u64 seed from OS entropy. The `dst` binary is a
 /// boundary crate per ADR-0003, so `rand::random` is permitted here —
 /// the dst-lint gate only scans `crate_class = "core"` crates.
 fn fresh_seed() -> u64 {
     rand::random()
 }
 
-/// Directory artifacts land in: `$CARGO_TARGET_DIR/xtask/` per ADR-0006.
-/// We respect `CARGO_TARGET_DIR` when set (so per-test tempdirs work);
-/// otherwise fall back to `target/`.
-fn xtask_target_dir() -> PathBuf {
+/// Directory artifacts land in: `$CARGO_TARGET_DIR/dst/` per ADR-0006
+/// (post-rename — the artifact directory follows the producer rather
+/// than the historical xtask wrapper). Respects `CARGO_TARGET_DIR`
+/// when set (so per-test tempdirs work); otherwise falls back to
+/// `target/`.
+fn dst_artifact_dir() -> PathBuf {
     let target =
         std::env::var_os("CARGO_TARGET_DIR").map_or_else(|| PathBuf::from("target"), PathBuf::from);
-    target.join("xtask")
+    target.join("dst")
 }
 
-/// Structured summary written to `dst-summary.json`.
+/// Structured summary written to `summary.json`.
 ///
 /// The top-level failure fields (`invariant`, `failing_invariant`,
 /// `tick`, `host`, `cause`, `reproduce`) are populated from the first
@@ -183,13 +214,13 @@ struct FailureEntry {
 fn write_artifacts(report: &RunReport) -> Result<()> {
     use std::fmt::Write as _;
 
-    let dir = xtask_target_dir();
+    let dir = dst_artifact_dir();
     std::fs::create_dir_all(&dir).wrap_err_with(|| format!("create_dir_all({})", dir.display()))?;
 
     // Human-readable log — mirrors stdout shape so a developer who
     // downloaded the artifact sees exactly what they would have seen
     // on the console.
-    let log_path = dir.join("dst-output.log");
+    let log_path = dir.join("output.log");
     let mut log = String::new();
     writeln!(log, "seed: {}", report.seed).ok();
     for result in &report.invariants {
@@ -231,8 +262,8 @@ fn write_artifacts(report: &RunReport) -> Result<()> {
     // CI dashboards + the WS-3 AC can read the failure detail without
     // descending into `failures[0]`.
     let first_failure = report.failures.first();
-    let reproduce = first_failure
-        .map(|f| format!("cargo xtask dst --seed {} --only {}", report.seed, f.invariant));
+    let reproduce =
+        first_failure.map(|f| format!("cargo dst --seed {} --only {}", report.seed, f.invariant));
 
     // Structured summary — CI dashboards parse this.
     let summary = Summary {
@@ -268,9 +299,8 @@ fn write_artifacts(report: &RunReport) -> Result<()> {
         cause: first_failure.map(|f| f.cause.clone()),
         reproduce,
     };
-    let summary_path = dir.join("dst-summary.json");
-    let serialised =
-        serde_json::to_string_pretty(&summary).wrap_err("serialise dst-summary.json")?;
+    let summary_path = dir.join("summary.json");
+    let serialised = serde_json::to_string_pretty(&summary).wrap_err("serialise summary.json")?;
     std::fs::write(&summary_path, serialised)
         .wrap_err_with(|| format!("write {}", summary_path.display()))?;
 
@@ -314,9 +344,7 @@ const fn _status_enum_used() -> InvariantStatus {
 #[allow(clippy::expect_used, clippy::unwrap_used)]
 mod tests {
     //! Library-level unit tests — these are what cargo-mutants uses to
-    //! kill mutations in this file (integration-level subprocess tests
-    //! live under `xtask/tests/acceptance/` and are excluded from
-    //! mutation runs by `.mutants.toml`).
+    //! kill mutations in this file.
 
     use super::*;
 
@@ -354,12 +382,12 @@ mod tests {
     }
 
     #[test]
-    fn xtask_target_dir_ends_in_xtask() {
-        let dir = xtask_target_dir();
+    fn dst_artifact_dir_ends_in_dst() {
+        let dir = dst_artifact_dir();
         assert_eq!(
             dir.file_name().and_then(|s| s.to_str()),
-            Some("xtask"),
-            "artifact directory must end in 'xtask' per ADR-0006; got {dir:?}"
+            Some("dst"),
+            "artifact directory must end in 'dst' per ADR-0006; got {dir:?}"
         );
     }
 
@@ -367,10 +395,7 @@ mod tests {
     fn write_artifacts_writes_log_and_summary_on_green_run() {
         let tmp = tempfile::tempdir().expect("tempdir");
         // Point CARGO_TARGET_DIR at our tempdir so the artifacts land
-        // under tmp/xtask/.
-        // SAFETY: this test crate is single-threaded via `#[cfg(test)]`
-        // in cargo's default; setting an env var in-process is fine.
-        // We restore nothing — the env vanishes with the process.
+        // under tmp/dst/.
         let guard = EnvGuard::set("CARGO_TARGET_DIR", tmp.path().to_str().unwrap());
 
         let report = RunReport {
@@ -388,8 +413,8 @@ mod tests {
         write_artifacts(&report).expect("write_artifacts");
         drop(guard);
 
-        let log_path = tmp.path().join("xtask").join("dst-output.log");
-        let summary_path = tmp.path().join("xtask").join("dst-summary.json");
+        let log_path = tmp.path().join("dst").join("output.log");
+        let summary_path = tmp.path().join("dst").join("summary.json");
         assert!(log_path.is_file());
         assert!(summary_path.is_file());
 
@@ -431,7 +456,7 @@ mod tests {
         write_artifacts(&report).expect("write_artifacts");
         drop(guard);
 
-        let log_path = tmp.path().join("xtask").join("dst-output.log");
+        let log_path = tmp.path().join("dst").join("output.log");
         let log = std::fs::read_to_string(&log_path).unwrap();
         assert!(
             log.contains("FAILED") && log.contains("two leaders"),
@@ -439,7 +464,7 @@ mod tests {
         );
 
         let summary: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(tmp.path().join("xtask").join("dst-summary.json")).unwrap(),
+            &std::fs::read_to_string(tmp.path().join("dst").join("summary.json")).unwrap(),
         )
         .unwrap();
         assert_eq!(summary["failures"].as_array().map(Vec::len), Some(1));

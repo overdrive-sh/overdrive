@@ -15,8 +15,13 @@
 //! inputs, deterministic output, no I/O. proptest-shaped (see
 //! S-2.2-12, S-2.2-13).
 //!
-//! **RED scaffold** — bodies panic via `todo!()` until DELIVER
-//! fills them per Slice 04.
+//! Lives in `overdrive-core` because the algorithm is pure
+//! arithmetic over `BackendId` and `MaglevTableSize` — both
+//! already core types — and is consumed by both the production
+//! `overdrive-dataplane` userspace BPF map handle (writes the
+//! table into the kernel-side `MAGLEV_MAP` inner array) and the
+//! `overdrive-sim` DST invariants `MaglevDistributionEven` /
+//! `MaglevDeterministic`.
 
 pub mod permutation;
 pub mod table;

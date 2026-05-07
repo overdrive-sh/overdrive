@@ -1,0 +1,10 @@
+id = "doomed"
+replicas = 1
+
+[resources]
+cpu_milli = 100
+memory_bytes = 67108864
+
+[exec]
+command = "/usr/local/bin/no-such-binary"
+args = []

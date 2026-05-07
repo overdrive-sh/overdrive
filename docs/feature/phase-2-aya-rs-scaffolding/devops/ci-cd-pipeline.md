@@ -39,7 +39,7 @@ runners (the Tier 3 LVH harness uses `--qemu-disable-kvm` per
 ### 2.1 `bpf-build` — compile the kernel-side ELF
 
 **Purpose.** Run `cargo xtask bpf-build` to produce
-`target/xtask/bpf-objects/overdrive_bpf.o`. This is the artifact every
+`target/bpf/overdrive_bpf.o`. This is the artifact every
 later test job consumes.
 
 **Triggers.** `pull_request` to `main`; `push` to `main`;
@@ -62,8 +62,8 @@ deps beyond `aya-ebpf`).
 | 4 | `Swatinem/rust-cache@v2` | `shared-key: "phase-2-bpf-build"`. Independent cache from the existing five `phase-1-*` keys so phase-1 cache invalidation does not cascade. |
 | 5 | sccache setup (soft-fail prelude) | Verbatim copy of the four-step prelude from existing jobs (lines 96–109 of `ci.yml`). Same rationale: GHA cache-backend outage degrades to direct rustc, never fails the job. |
 | 6 | `Install bpf-linker` | `cargo install --locked bpf-linker`. Cached by `Swatinem/rust-cache`'s `~/.cargo/bin` cache after the first run. The `--locked` flag is mandatory per ADR-0038 §4. |
-| 7 | `cargo xtask bpf-build` | Primary command. The xtask wrapper (a) calls `which_or_hint("bpf-linker", ...)`, (b) invokes `cargo build --release --target bpfel-unknown-none -Z build-std=core --manifest-path crates/overdrive-bpf/Cargo.toml`, (c) copies the ELF to `target/xtask/bpf-objects/overdrive_bpf.o`. |
-| 8 | `Upload BPF object artifact` | `actions/upload-artifact@v4` with `name: bpf-object`, `path: target/xtask/bpf-objects/overdrive_bpf.o`, `retention-days: 14`, `if-no-files-found: error`. Downstream jobs (`bpf-unit`, `integration-test-vm-latest`) consume this artifact instead of re-running `bpf-build`. |
+| 7 | `cargo xtask bpf-build` | Primary command. The xtask wrapper (a) calls `which_or_hint("bpf-linker", ...)`, (b) invokes `cargo build --release --target bpfel-unknown-none -Z build-std=core --manifest-path crates/overdrive-bpf/Cargo.toml`, (c) copies the ELF to `target/bpf/overdrive_bpf.o`. |
+| 8 | `Upload BPF object artifact` | `actions/upload-artifact@v4` with `name: bpf-object`, `path: target/bpf/overdrive_bpf.o`, `retention-days: 14`, `if-no-files-found: error`. Downstream jobs (`bpf-unit`, `integration-test-vm-latest`) consume this artifact instead of re-running `bpf-build`. |
 
 **Caching strategy.** Two complementary caches:
 
@@ -94,7 +94,7 @@ primitive without the indirection.
 artifact store. Both downstream jobs (`bpf-unit`,
 `integration-test-vm-latest`) declare `needs: bpf-build` and use
 `actions/download-artifact@v4` with `name: bpf-object` to materialise
-the same ELF at `target/xtask/bpf-objects/overdrive_bpf.o` — the
+the same ELF at `target/bpf/overdrive_bpf.o` — the
 stable path mandated by ADR-0038 §3 that the loader's `include_bytes!`
 references.
 
@@ -131,7 +131,7 @@ test binary plus aya's dependency graph.
 | 4 | `Swatinem/rust-cache@v2` | `shared-key: "phase-2-bpf-unit"`. |
 | 5 | sccache prelude | Verbatim copy of the four-step prelude. |
 | 6 | `Install cargo-nextest` | `taiki-e/install-action@v2` with `tool: cargo-nextest`. Match the existing `test` and `integration` jobs. |
-| 7 | `Download BPF object artifact` | `actions/download-artifact@v4` with `name: bpf-object`, `path: target/xtask/bpf-objects/`, `if-no-files-found: error`. Materialises `overdrive_bpf.o` at the path the loader's `include_bytes!` and the `build.rs` shim both reference. The `if-no-files-found: error` setting is load-bearing — without it a missing-artifact case (e.g. `bpf-build` panicked but emitted nothing) silently no-ops and the downstream failure surfaces as a confusing `build.rs` shim error. Fail fast at the boundary. |
+| 7 | `Download BPF object artifact` | `actions/download-artifact@v4` with `name: bpf-object`, `path: target/bpf/`, `if-no-files-found: error`. Materialises `overdrive_bpf.o` at the path the loader's `include_bytes!` and the `build.rs` shim both reference. The `if-no-files-found: error` setting is load-bearing — without it a missing-artifact case (e.g. `bpf-build` panicked but emitted nothing) silently no-ops and the downstream failure surfaces as a confusing `build.rs` shim error. Fail fast at the boundary. |
 | 8 | `cargo xtask bpf-unit` | Primary command. The xtask wrapper invokes nextest scoped to `-p overdrive-bpf --features integration-tests --test '*'` per ADR-0038 §6. |
 | 9 | `Upload nextest JUnit report` | `actions/upload-artifact@v4` with `name: bpf-unit-junit`, `path: target/nextest/ci/junit.xml`, `retention-days: 14`, `if-no-files-found: warn`. Match the existing `test` job's artifact upload pattern. |
 

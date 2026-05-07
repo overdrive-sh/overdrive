@@ -27,7 +27,7 @@
 #   - bpf-unit        (added in #23 — Phase 2.1)
 #
 # Rationale references:
-#   - ADR-0006  (`cargo xtask dst` + `dst-lint` are the required CI checks;
+#   - ADR-0006  (`cargo dst` + `dst-lint` are the required CI checks;
 #                seed surfaced on failure; text + JSON artifacts uploaded)
 #   - ADR-0005  (test distribution — drives `cargo test` targets)
 #   - ADR-0003  (`package.metadata.overdrive.crate_class` labels; `dst-lint`
@@ -82,7 +82,7 @@ jobs:
     name: fmt + clippy
     runs-on: ubuntu-latest
     # Workspace clippy compiles overdrive-dataplane, whose build.rs
-    # requires target/xtask/bpf-objects/overdrive_bpf.o on Linux per
+    # requires target/bpf/overdrive_bpf.o on Linux per
     # ADR-0038 §3.2. Pull the artifact from bpf-build rather than
     # rebuilding it here.
     needs: bpf-build
@@ -107,7 +107,7 @@ jobs:
 
       # MUST run AFTER Swatinem/rust-cache@v2: the cached tarball is the
       # entire workspace `target/` directory and its restore step
-      # extracts over `target/xtask/bpf-objects/`, clobbering anything
+      # extracts over `target/bpf/`, clobbering anything
       # written there by an earlier `download-artifact` invocation.
       # Downloading after the cache restore guarantees the BPF object is
       # the file present when build.rs runs.
@@ -115,7 +115,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: bpf-object
-          path: target/xtask/bpf-objects/
+          path: target/bpf/
           if-no-files-found: error
 
       # sccache setup is soft-fail: if the GHA cache backend is unreachable
@@ -199,7 +199,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: bpf-object
-          path: target/xtask/bpf-objects/
+          path: target/bpf/
           if-no-files-found: error
 
       # See fmt-clippy job above for rationale.
@@ -285,7 +285,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: bpf-object
-          path: target/xtask/bpf-objects/
+          path: target/bpf/
           if-no-files-found: error
 
       - id: sccache-setup
@@ -330,7 +330,7 @@ jobs:
         #
         # `--exclude overdrive-bpf` avoids a cross-process artifact race:
         # `overdrive-dataplane::integration::build_rs_artifact_check`
-        # transiently removes `target/xtask/bpf-objects/overdrive_bpf.o`
+        # transiently removes `target/bpf/overdrive_bpf.o`
         # for the duration of a `cargo check` subprocess, and nextest
         # runs each integration binary as a separate OS process — so
         # `#[serial(env)]` (per-process) cannot gate
@@ -364,7 +364,7 @@ jobs:
   # runs that exceed the guardrail.
   # -------------------------------------------------------------------
   dst:
-    name: cargo xtask dst
+    name: cargo dst
     runs-on: ubuntu-latest
     # 10 min ceiling — K1 targets <60s; anything close to the ceiling
     # means the guardrail is broken and the build should fail loudly.
@@ -399,12 +399,12 @@ jobs:
         if: steps.sccache-setup.outcome != 'success'
         run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
 
-      - name: cargo xtask dst
+      - name: cargo dst
         # The xtask wrapper writes:
-        #   target/xtask/dst-output.log   — full stdout/stderr
-        #   target/xtask/dst-summary.json — structured summary
+        #   target/dst/output.log   — full stdout/stderr
+        #   target/dst/summary.json — structured summary
         # per ADR-0006 Decision § "Failure-artifact schema".
-        run: cargo xtask dst
+        run: cargo dst
 
       - name: Upload DST artifacts
         # Always upload — a killed or OOM-killed run still contains the
@@ -415,8 +415,8 @@ jobs:
         with:
           name: dst-output
           path: |
-            target/xtask/dst-output.log
-            target/xtask/dst-summary.json
+            target/dst/output.log
+            target/dst/summary.json
           retention-days: 30
           if-no-files-found: warn
 
@@ -427,12 +427,12 @@ jobs:
         # needed to get the first-line seed.
         if: failure()
         run: |
-          if [ -f target/xtask/dst-summary.json ]; then
-            SEED=$(jq -r '.seed // "unknown"' target/xtask/dst-summary.json)
-            INV=$(jq -r '.invariant // "unknown"' target/xtask/dst-summary.json)
-            TICK=$(jq -r '.tick // "unknown"' target/xtask/dst-summary.json)
-            HOST=$(jq -r '.host // "unknown"' target/xtask/dst-summary.json)
-            REPRO=$(jq -r '.reproduce // "cargo xtask dst --seed <N>"' target/xtask/dst-summary.json)
+          if [ -f target/dst/summary.json ]; then
+            SEED=$(jq -r '.seed // "unknown"' target/dst/summary.json)
+            INV=$(jq -r '.invariant // "unknown"' target/dst/summary.json)
+            TICK=$(jq -r '.tick // "unknown"' target/dst/summary.json)
+            HOST=$(jq -r '.host // "unknown"' target/dst/summary.json)
+            REPRO=$(jq -r '.reproduce // "cargo dst --seed <N>"' target/dst/summary.json)
             {
               echo "## DST failure"
               echo ""
@@ -601,7 +601,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: bpf-object
-          path: target/xtask/bpf-objects/
+          path: target/bpf/
           if-no-files-found: error
 
       # See fmt-clippy job above for rationale.
@@ -700,7 +700,7 @@ jobs:
   #
   # Per devops/ci-cd-pipeline.md §2.1 + ADR-0038 §3, §4. Runs
   # `cargo xtask bpf-build` to produce
-  # `target/xtask/bpf-objects/overdrive_bpf.o`, the artifact every
+  # `target/bpf/overdrive_bpf.o`, the artifact every
   # downstream BPF test job consumes.
   #
   # Provisions bpf-linker via `cargo install --locked bpf-linker`
@@ -784,7 +784,7 @@ jobs:
         # The xtask wrapper invokes `cargo build --release --target
         # bpfel-unknown-none -Z build-std=core` against
         # crates/overdrive-bpf and copies the resulting ELF to
-        # target/xtask/bpf-objects/overdrive_bpf.o (the stable path
+        # target/bpf/overdrive_bpf.o (the stable path
         # mandated by ADR-0038 §3).
         run: cargo xtask bpf-build
 
@@ -792,7 +792,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bpf-object
-          path: target/xtask/bpf-objects/overdrive_bpf.o
+          path: target/bpf/overdrive_bpf.o
           retention-days: 14
           # if-no-files-found: error is load-bearing — without it a
           # missing artifact silently no-ops and the downstream job
@@ -867,7 +867,7 @@ jobs:
           # Materialises overdrive_bpf.o at the path the loader's
           # `include_bytes!` and the build.rs shim both reference (the
           # stable path mandated by ADR-0038 §3).
-          path: target/xtask/bpf-objects/
+          path: target/bpf/
           # Fail fast at the boundary — without this a missing-artifact
           # case (e.g. bpf-build panicked but emitted nothing) silently
           # no-ops and the downstream failure surfaces as a confusing
@@ -952,7 +952,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: bpf-object
-          path: target/xtask/bpf-objects/
+          path: target/bpf/
           if-no-files-found: error
 
       - name: cargo xtask verifier-regress
@@ -1017,7 +1017,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: bpf-object
-          path: target/xtask/bpf-objects/
+          path: target/bpf/
           if-no-files-found: error
 
       # The interface used by `xdp-bench`; `lo` is the safe default

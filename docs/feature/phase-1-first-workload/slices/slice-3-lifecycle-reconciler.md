@@ -74,4 +74,4 @@ See US-03 scenarios. Focus: end-to-end submit→Running under DST (using SimDriv
 | Disproves a named pre-commitment | PASS — see above |
 | Production-data-shaped AC | PASS — DST end-to-end + integration test against ProcessDriver under integration-tests gate |
 | Demonstrable in single session | BORDERLINE — the slice is dense; an explicit demo is "submit a job under DST seeded run; observe converged Running state; run `overdrive job stop`; observe Terminated" |
-| Same-day dogfood moment | PASS — `cargo xtask dst` green, AND a Linux integration test showing real Running → Terminated on `job stop` |
+| Same-day dogfood moment | PASS — `cargo dst` green, AND a Linux integration test showing real Running → Terminated on `job stop` |

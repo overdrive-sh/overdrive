@@ -157,7 +157,7 @@ extends `xtask` with `dst`/`dst-lint`. `overdrive-cli` already exists;
   (ADR-0009).
 - **`api/openapi.yaml`** — NEW at workspace root. Checked-in OpenAPI 3.1
   document, derived from the Rust request/response types; drift caught
-  by `cargo xtask openapi-check` in CI.
+  by `cargo openapi-check` in CI.
 
 **Phase 1 first-workload extension** (ADR-0021 — ADR-0029):
 
@@ -482,8 +482,8 @@ via `tarpc` or `postcard-rpc` — pure Rust, no `protoc` in toolchain.
 Per ADR-0009. The OpenAPI 3.1 schema is derived from the Rust
 request/response types in `overdrive-control-plane::api` via `utoipa`
 + `utoipa-axum`. The generated document lives at `api/openapi.yaml`
-(workspace root) as a checked-in artifact. `cargo xtask openapi-gen`
-regenerates it; `cargo xtask openapi-check` regenerates to a temp file
+(workspace root) as a checked-in artifact. `cargo openapi-gen`
+regenerates it; `cargo openapi-check` regenerates to a temp file
 and diffs against the checked-in version — non-empty diff fails CI.
 
 The Rust types are the contract; the OpenAPI document is their report.
@@ -664,7 +664,7 @@ can be added additively in a future v1.1.
 
 | Attribute | Phase 1 control-plane-core target | How it is addressed |
 |---|---|---|
-| Performance efficiency — time behaviour (REST round-trip) | CLI → server → LocalStore → response < 100 ms on localhost | Axum + rustls over localhost; no proxy, no schedule jitter. `cargo xtask openapi-check` stays under 10 s. |
+| Performance efficiency — time behaviour (REST round-trip) | CLI → server → LocalStore → response < 100 ms on localhost | Axum + rustls over localhost; no proxy, no schedule jitter. `cargo openapi-check` stays under 10 s. |
 | Reliability — fault tolerance (submit) | Validation failures reject before any IntentStore write | Handler gate per Slice 3 AC; unit test asserts no-write on malformed input |
 | Reliability — storm-proofing | Evaluation broker collapses N concurrent duplicate evaluations | DST `DuplicateEvaluationsCollapse` invariant |
 | Maintainability — testability (reconciler purity) | Twin invocation produces bit-identical outputs | DST `ReconcilerIsPure` + `dst-lint` banned-API gate |
@@ -1079,14 +1079,14 @@ unaffected by Amendment 1.
 C4Context
   title System Context — Overdrive (Phase 1 scope)
 
-  Person(engineer, "Platform Engineer (Ana)", "Writes core-plane logic; runs cargo xtask dst")
+  Person(engineer, "Platform Engineer (Ana)", "Writes core-plane logic; runs cargo dst")
   System(overdrive, "Overdrive", "One-binary orchestration platform — Phase 1: walking skeleton (ports + LocalStore + DST harness)")
   System_Ext(ci, "CI", "GitHub Actions or similar — runs xtask gates on every PR")
   System_Ext(fs, "Local filesystem (redb)", "Backs LocalStore — ACID embedded KV on disk")
 
-  Rel(engineer, overdrive, "Runs `cargo xtask dst` against")
+  Rel(engineer, overdrive, "Runs `cargo dst` against")
   Rel(engineer, ci, "Pushes PRs to")
-  Rel(ci, overdrive, "Runs `cargo xtask dst` + `dst-lint` + `cargo test`")
+  Rel(ci, overdrive, "Runs `cargo dst` + `dst-lint` + `cargo test`")
   Rel(overdrive, fs, "Persists intent to")
 ```
 
@@ -1117,7 +1117,7 @@ C4Container
     Container(worker, "overdrive-worker", "Rust crate (class: adapter-host, NEW per ADR-0029; amended 2026-04-28)", "ExecDriver (Linux-only; renamed from ProcessDriver) + workload-cgroup management (overdrive.slice/workloads.slice/<alloc>.scope per ADR-0026) + boot-time node_health row writer (per ADR-0025 amendment)")
     Container(sim, "overdrive-sim", "Rust crate (class: adapter-sim)", "Sim* adapters + turmoil harness + invariant catalogue; SimDriver / SimObservationStore are used by DST only — not runtime deps of the control plane or worker")
     Container(ctrl, "overdrive-control-plane", "Rust crate (class: adapter-host)", "Axum router + rustls TLS + ReconcilerRuntime + EvaluationBroker + ActionShim + JobLifecycle reconciler + control-plane cgroup management + pre-flight (ADR-0028)")
-    Container(xtask, "xtask", "Rust binary (class: binary)", "cargo xtask dst / dst-lint / openapi-gen / openapi-check")
+    Container(xtask, "xtask", "Rust binary (class: binary)", "cargo dst / dst-lint / openapi-gen / openapi-check")
     Container(cli, "overdrive-cli", "Rust binary (class: binary)", "overdrive CLI — reqwest HTTP client against /v1 REST API; gains `job stop` subcommand (ADR-0027). `serve` subcommand is the binary-composition root: hard-depends on both overdrive-control-plane and overdrive-worker; runtime [node] role config selects which subsystems boot (ADR-0029)")
   }
 
@@ -1372,7 +1372,7 @@ Rules to enforce:
 | 0003 | Core-crate labelling via `package.metadata.overdrive.crate_class` | Accepted |
 | 0004 | Single `overdrive-sim` crate, not split | Accepted |
 | 0005 | Test distribution: per-crate `tests/`, top-level `tests/acceptance/` for acceptance only | Accepted |
-| 0006 | `cargo xtask dst` + `dst-lint` are the required CI checks; seeds surfaced on failure | Accepted |
+| 0006 | `cargo dst` + `dst-lint` are the required CI checks; seeds surfaced on failure | Accepted |
 | 0007 | cr-sqlite deletion discipline (tombstones + bounded sweep) | Accepted |
 | 0008 | Control-plane external API is REST + OpenAPI over axum/rustls | Accepted |
 | 0009 | OpenAPI schema is derived from Rust types via `utoipa`, checked-in, CI-gated | Accepted |
@@ -1626,7 +1626,7 @@ ship together to honour the BPF-target compile contract:
   kernel-side eBPF programs. Phase 2.1 ships one no-op XDP
   `xdp_pass` plus an `LruHashMap<u32, u64>` packet counter, attached
   to `lo` for the Tier 3 smoke test. Compiles to a single ELF object
-  copied to `target/xtask/bpf-objects/overdrive_bpf.o`. Excluded from
+  copied to `target/bpf/overdrive_bpf.o`. Excluded from
   workspace `default-members` so `cargo check --workspace` on macOS
   skips it; built explicitly via `cargo xtask bpf-build`.
 - **`crates/overdrive-dataplane/`** — class `adapter-host` (ADR-0003,
@@ -1695,7 +1695,7 @@ macOS.
 To DEVOPS — required CI checks gain:
 
 - `cargo xtask bpf-build` (compiles `overdrive-bpf` to
-  `target/xtask/bpf-objects/overdrive_bpf.o`; runs on every PR
+  `target/bpf/overdrive_bpf.o`; runs on every PR
   before any job that compiles `overdrive-dataplane`).
 - `cargo xtask bpf-unit` (Tier 2; runs `cargo nextest run -p
   overdrive-bpf --features integration-tests --test '*'` against
@@ -2015,11 +2015,11 @@ dataplane *crate / map / handoff structure*, with the references in
   first internal contract worth testing; Phase 3+ ACME and Phase 5+
   OIDC land the first truly external surfaces.
 - CI integration — the required checks are now:
-  - `cargo xtask dst` (DST harness, phase-1-foundation ADR-0006)
+  - `cargo dst` (DST harness, phase-1-foundation ADR-0006)
   - `cargo xtask dst-lint` (banned-API scan; first-workload extension:
     `overdrive-scheduler` is now in scope per ADR-0024 — set size
     grows from one core-class crate to two)
-  - `cargo xtask openapi-check` (ADR-0009; first-workload extension
+  - `cargo openapi-check` (ADR-0009; first-workload extension
     adds the `POST /v1/jobs/{id}:stop` endpoint per ADR-0027)
   - `cargo nextest run --workspace` with `cargo test --doc --workspace`
     paired per `.claude/rules/testing.md`

@@ -78,7 +78,7 @@ use super::helpers::packets::{ETH_HDR_LEN, IPV4_HDR_LEN, synthesise_tcp_syn_with
 ///
 /// `serial_test::serial(env)` — the sibling `build_rs_artifact_check`
 /// test removes-and-restores the on-disk BPF artifact at
-/// `target/xtask/bpf-objects/overdrive_bpf.o`. This test reads the
+/// `target/bpf/overdrive_bpf.o`. This test reads the
 /// same artifact via `EbpfLoader::load_file`, so the two MUST NOT
 /// race — sharing the `env` group puts both tests in the same
 /// serial sequence (per `service_map_forward.rs`'s precedent).

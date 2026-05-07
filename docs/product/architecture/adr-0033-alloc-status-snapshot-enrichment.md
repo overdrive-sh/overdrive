@@ -423,7 +423,7 @@ existing redb files.
 
 ### Enforcement
 
-- `cargo xtask openapi-check` catches drift between Rust types and
+- `cargo openapi-check` catches drift between Rust types and
   `api/openapi.yaml`.
 - A unit test asserts `TransitionRecord.reason` and
   `SubmitEvent::LifecycleTransition.reason` resolve to the same

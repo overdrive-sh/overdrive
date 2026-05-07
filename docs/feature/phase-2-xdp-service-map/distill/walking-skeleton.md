@@ -105,7 +105,7 @@ Phase 1's WS is regression-tested by Phase 2.2 by virtue of:
   table — the new table is observation-class per architecture.md
   § 12, so it cannot cross into intent.
 
-DELIVER's gate: the Tier 1 DST suite (`cargo xtask dst`) must remain
+DELIVER's gate: the Tier 1 DST suite (`cargo dst`) must remain
 green at every commit; a regression in any of the existing
 invariants signals a Phase 1 WS regression and blocks merge.
 

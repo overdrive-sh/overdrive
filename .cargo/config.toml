@@ -1,16 +1,30 @@
 [alias]
-# Developer conveniences — the real CI entry points live in xtask.
-xtask        = "run --package xtask --"
-xt           = "run --package xtask --"
-dst          = "run --package xtask -- dst"
-bpf-unit     = "run --package xtask -- bpf-unit"
-verifier     = "run --package xtask -- verifier-regress"
-xdp-perf     = "run --package xtask -- xdp-perf"
-it-vm        = "run --package xtask -- integration-test vm"
-lint         = "clippy --workspace --all-targets --all-features -- -D warnings"
-fmt-check    = "fmt --all -- --check"
-lima-up      = "run --package xtask -- lima up"
-lima-shell   = "run --package xtask -- lima shell"
+# Developer conveniences. xtask hosts build / test / dev orchestration
+# subcommands (`bpf-build`, `verifier-regress`, `xdp-perf`,
+# `integration-test vm`, `mutants`, `dst-lint`, `lima`, `hooks`, …);
+# runtime tools (`dst`, `openapi`, `overdrive`) ship as binaries in
+# their owning crate and are invoked through `cargo run -p <crate>
+# --bin <bin> --` directly. See § "xtask is build / test / dev
+# orchestration, NOT a runtime entry point" in
+# `.claude/rules/development.md` for the layering rule.
+xtask         = "run --package xtask --"
+xt            = "run --package xtask --"
+
+# Runtime tools — direct cargo invocations, no xtask wrapper.
+dst           = "run -p overdrive-sim --bin dst --"
+openapi-gen   = "run -p overdrive-control-plane --bin openapi -- gen"
+openapi-check = "run -p overdrive-control-plane --bin openapi -- check"
+overdrive     = "run -p overdrive-cli --bin overdrive --"
+
+# Build / test orchestration shortcuts — wrappers over xtask subcommands.
+bpf-unit      = "run --package xtask -- bpf-unit"
+verifier      = "run --package xtask -- verifier-regress"
+xdp-perf      = "run --package xtask -- xdp-perf"
+it-vm         = "run --package xtask -- integration-test vm"
+lint          = "clippy --workspace --all-targets --all-features -- -D warnings"
+fmt-check     = "fmt --all -- --check"
+lima-up       = "run --package xtask -- lima up"
+lima-shell    = "run --package xtask -- lima shell"
 hooks-install = "run --package xtask -- hooks install"
 
 [build]

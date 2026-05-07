@@ -104,7 +104,7 @@ than discretionary.
 |---|---|
 | Phase 3.5 post-merge integration: `cargo nextest run --workspace` | PASS — 565 / 565 |
 | Phase 3.5 doctests: `cargo test --doc --workspace` | PASS — 7 / 7 |
-| Phase 3.5 DST: `cargo xtask dst` | PASS — 10 / 10 invariants, seed `7011461192756685183` |
+| Phase 3.5 DST: `cargo dst` | PASS — 10 / 10 invariants, seed `7011461192756685183` |
 | Phase 3.5 lint: `cargo clippy --workspace --all-targets -- -D warnings` | PASS — clean |
 | Phase 3.5 dst-lint: `cargo xtask dst-lint` against real workspace | PASS — clean |
 | Phase 4 adversarial review | APPROVED — no actionable issues |

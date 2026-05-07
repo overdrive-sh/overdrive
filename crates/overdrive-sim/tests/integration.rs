@@ -27,4 +27,12 @@ mod integration {
     /// `docs/feature/phase-2-xdp-service-map/distill/test-scenarios.md`
     /// S-2.2-12, S-2.2-13. RED scaffolds; DELIVER fills the bodies.
     mod maglev_churn;
+
+    /// `cargo dst` subprocess scenarios — relocated from xtask when the
+    /// DST harness binary moved into overdrive-sim. See § "xtask is
+    /// build / test / dev orchestration, NOT a runtime entry point" in
+    /// `.claude/rules/development.md` for the layering rationale.
+    mod dst_clean_clone_green;
+    mod dst_harness_smoke;
+    mod dst_seeded_reproduction;
 }

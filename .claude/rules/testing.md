@@ -225,7 +225,7 @@ Do not let a slow test sit in the default lane "until it gets fixed."
 > See § "Running tests on macOS — Lima VM" below for the rationale.
 
 **Run test commands directly. Do not background them.**
-`cargo nextest run`, `cargo test --doc`, `cargo xtask dst`,
+`cargo nextest run`, `cargo test --doc`, `cargo dst`,
 `cargo xtask bpf-unit`, `cargo xtask integration-test`, and every other
 test invocation goes through the `Bash` tool with
 `run_in_background: false` (the default). Wait for the command to finish;
@@ -727,7 +727,7 @@ Rules:
 ### Seeding and reproducibility
 
 - Every DST test takes a seed. On failure, the harness prints the seed.
-- `cargo xtask dst --seed <N>` reproduces bit-for-bit.
+- `cargo dst --seed <N>` reproduces bit-for-bit.
 - Flaky DST is a bug in the sim layer, never a "just rerun it." Fix or
   file.
 
@@ -1109,7 +1109,7 @@ reviewed per-PR, not aggregated across releases.
 - **Performance assertions.** A mutation that removes an optimisation
   may still pass correctness tests. Performance regressions are Tier 4's
   job.
-- **`cargo xtask dst` / Tier 3 integration.** `cargo-mutants` reruns
+- **`cargo dst` / Tier 3 integration.** `cargo-mutants` reruns
   the unit suite per mutation under `--test-tool=nextest` (matches the
   project runner); DST and real-kernel tests are too slow for the
   per-mutation budget and are excluded from the mutants run. Doctests
@@ -1397,7 +1397,7 @@ Tests and chaos share the fault definitions; a fault is specified once.
 Per-PR (critical path ≈ 15 minutes):
   A1 cargo nextest run --workspace       unit + proptest, no BPF       (s)
   A2 cargo test --doc --workspace        rustdoc examples              (s)
-  B  cargo xtask dst                     Tier 1                        (min)
+  B  cargo dst                     Tier 1                        (min)
   C  cargo xtask bpf-unit                Tier 2                        (min)
   D  cargo xtask integration-test vm     Tier 3, kernel matrix         (10 min)
   E  cargo xtask verifier-regress        Tier 4 — veristat             (min)

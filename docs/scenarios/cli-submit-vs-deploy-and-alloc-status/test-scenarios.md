@@ -751,7 +751,7 @@ Scenario: utoipa schema declares both content types and new snapshot fields
   And `AllocStatusRowBody` declares fields resources, started_at, exit_code, last_transition, error in addition to the existing alloc_id/job_id/node_id/state/reason
 ```
 
-**Driving port**: the existing `cargo xtask openapi-check` gate plus
+**Driving port**: the existing `cargo openapi-check` gate plus
 a new `#[test]` that diffs the live `utoipa` derivation against the
 expected shape.
 

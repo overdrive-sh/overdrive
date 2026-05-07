@@ -141,7 +141,7 @@ class `adapter-host` and not scanned. Workspace Rust crate count
 | AppState struct | `overdrive-control-plane::AppState` | EXTEND | New `driver: Arc<dyn Driver>` field (ADR-0022). Existing fields preserved. |
 | `run_server_with_obs` entry point | `overdrive-control-plane::run_server_with_obs` | EXTEND (rename) | Becomes `run_server_with_obs_and_driver`; every test caller migrated mechanically. |
 | TLS bootstrap | `overdrive-control-plane::tls_bootstrap` | REUSE AS-IS | The boot sequence's TLS step is unchanged; cgroup pre-flight prepends. |
-| OpenAPI schema generation | `cargo xtask openapi-gen/openapi-check` | EXTEND | New `:stop` endpoint surfaces in regenerated schema; CI gate catches drift. |
+| OpenAPI schema generation | `cargo openapi-gen/openapi-check` | EXTEND | New `:stop` endpoint surfaces in regenerated schema; CI gate catches drift. |
 | CLI HTTP client | `overdrive-cli::client` | EXTEND | New `JobStopRequest`/`Response` types imported from `overdrive-control-plane::api`; new client method. |
 | ControlPlaneError | `overdrive-control-plane::error::ControlPlaneError` | EXTEND | New `Driver(#[from] DriverError)` and `Cgroup(#[from] CgroupPreflightError)` variants (additive). |
 | **Scheduler (placement function)** | NONE | **CREATE NEW (D4 OVERRIDE)** | **Dedicated `overdrive-scheduler` crate, class `core`. Originally proposed as a module inside `overdrive-control-plane`; user override chose option (b) for `dst-lint` mechanical enforcement of BTreeMap-only iteration + banned-API discipline. ADR-0024.** |

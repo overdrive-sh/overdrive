@@ -50,8 +50,8 @@
 
 use std::collections::BTreeMap;
 
-use overdrive_core::dataplane::MaglevTableSize;
-use overdrive_core::id::BackendId;
+use crate::dataplane::MaglevTableSize;
+use crate::id::BackendId;
 
 /// Per-backend weight. `u16` matches the `BACKEND_MAP` value-shape
 /// `weight: u16` per architecture.md § 10.
@@ -64,8 +64,8 @@ const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 
 /// Deterministic 64-bit FNV-1a hash over a sequence of byte slices.
 /// Inlined rather than pulled in as a dep — the algorithm is ~5 LoC
-/// and avoiding a transitive dep keeps the dataplane crate's graph
-/// trim. The hash is used only for permutation seeding; not a
+/// and avoiding a transitive dep keeps the core crate's graph trim.
+/// The hash is used only for permutation seeding; not a
 /// security-sensitive primitive.
 #[inline]
 fn fnv1a_64(parts: &[&[u8]]) -> u64 {

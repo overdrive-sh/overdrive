@@ -1293,7 +1293,7 @@ And `tick.now` is the only wall-clock source used inside `reconcile`
 - **Who**: Overdrive platform engineer + DST harness (§18 / J-PLAT-004 reference implementation that every later dataplane reconciler will mirror)
 - **Does what**: trusts the reconciler runtime to converge `Dataplane::update_service` against `service_backends` ObservationStore rows under ESR — the first non-trivial use of the `Reconciler` trait against a real dataplane port
 - **By how much**: 100% pass rate of `HydratorEventuallyConverges` and `HydratorIdempotentSteadyState` invariants across every DST seed on every PR; `ReconcilerIsPure` continues to pass with the hydrator added; 0 `.await` / wall-clock / DB-handle violations in `reconcile` (`dst-lint` clean)
-- **Measured by**: DST invariant pass rate per PR (`cargo xtask dst`); `dst-lint` gate on `crates/overdrive-control-plane/src/reconcilers/service_map_hydrator.rs`
+- **Measured by**: DST invariant pass rate per PR (`cargo dst`); `dst-lint` gate on `crates/overdrive-control-plane/src/reconcilers/service_map_hydrator.rs`
 - **Baseline**: greenfield — no prior dataplane reconciler exists; this is the §18 reference implementation J-PLAT-004 activates on
 
 ### Technical Notes

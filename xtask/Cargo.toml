@@ -34,6 +34,14 @@ integration-tests = []
 crate_class = "binary"
 
 [dependencies]
+# xtask is the build / test / dev orchestrator only; runtime tools
+# (`dst`, `openapi`, `cli`, …) live in their owning crate's `src/bin/`.
+# See § "xtask is build / test / dev orchestration, NOT a runtime entry
+# point" in `.claude/rules/development.md`. xtask MUST NOT depend on
+# `overdrive-{core,sim,control-plane,dataplane,host,worker,…}` —
+# adding such a dep drags the runtime crate's `build.rs` into xtask's
+# compile chain and re-creates the bootstrap chicken-and-egg this
+# reorg fixed.
 eyre.workspace       = true
 color-eyre.workspace = true
 clap.workspace       = true
@@ -42,12 +50,6 @@ serde_json.workspace = true
 dotenvy.workspace    = true
 syn.workspace        = true
 rand.workspace       = true
-overdrive-sim        = { path = "../crates/overdrive-sim" }
-# `openapi-gen` / `openapi-check` call
-# `overdrive_control_plane::api::OverdriveApi::openapi()` to render the
-# live schema — ADR-0009.
-overdrive-control-plane = { path = "../crates/overdrive-control-plane" }
-utoipa.workspace     = true
 # `span-locations` enables `Span::start()`/`end()` — required so
 # dst-lint can report `file:line:col` for each violation.
 proc-macro2          = { version = "1", features = ["span-locations"] }

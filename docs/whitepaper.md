@@ -2536,7 +2536,7 @@ LSM assertions go against the BPF ringbuf event stream and audit metadata, **not
 ```
 Per-PR (critical path ≈ 15 minutes):
   Job A   cargo nextest run + cargo test --doc      pure Rust, no BPF      (s)
-  Job B   cargo xtask dst                           turmoil DST (§21)      (min)
+  Job B   cargo dst                           turmoil DST (§21)      (min)
   Job C   cargo xtask bpf-unit                      Tier 2                 (min)
   Job D   cargo xtask integration-test vm <K>       Tier 3, kernel matrix  (10 min)
             matrix: 5.10, 5.15, 6.1, 6.6, latest LTS

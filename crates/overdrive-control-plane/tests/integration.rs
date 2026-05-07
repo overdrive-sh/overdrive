@@ -112,4 +112,11 @@ mod integration {
         mod preflight_v1_host;
         mod server_enrols_in_slice;
     }
+
+    /// `cargo openapi-{gen,check}` library + binary scenarios — relocated
+    /// from xtask when the OpenAPI gate moved into overdrive-control-plane.
+    /// Covers test-scenarios.md §3.3. See § "xtask is build / test / dev
+    /// orchestration, NOT a runtime entry point" in
+    /// `.claude/rules/development.md` for the layering rationale.
+    mod openapi_gate;
 }

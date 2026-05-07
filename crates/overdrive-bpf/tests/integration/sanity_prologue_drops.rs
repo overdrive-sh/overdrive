@@ -5,7 +5,7 @@
 //! Tier: Tier 2 (`BPF_PROG_TEST_RUN`).
 //!
 //! Each sub-test follows the same shape as `xdp_service_map_lookup.rs`:
-//! load `target/xtask/bpf-objects/overdrive_bpf.o` via `aya::Ebpf`,
+//! load `target/bpf/overdrive_bpf.o` via `aya::Ebpf`,
 //! resolve the `xdp_service_map_lookup` (or `xdp_reverse_nat_lookup`) program
 //! and `DROP_COUNTER` / `SERVICE_MAP` maps, drive `BPF_PROG_TEST_RUN`
 //! directly via the `bpf(2)` syscall, assert on the returned verdict
@@ -62,7 +62,7 @@ fn workspace_root() -> PathBuf {
 }
 
 fn bpf_artifact_path() -> PathBuf {
-    workspace_root().join("target/xtask/bpf-objects/overdrive_bpf.o")
+    workspace_root().join("target/bpf/overdrive_bpf.o")
 }
 
 // ---------- bpf(2) syscall helper ----------

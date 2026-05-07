@@ -52,7 +52,7 @@ aya-ebpf.workspace = true
 # Host-side dev-deps for the Tier 2 BPF unit triptych under
 # `tests/integration/`. The triptych is compiled against the HOST
 # target (not `bpfel-unknown-none`) — it loads the pre-built BPF ELF
-# at `target/xtask/bpf-objects/overdrive_bpf.o` via aya's userspace
+# at `target/bpf/overdrive_bpf.o` via aya's userspace
 # loader and drives `BPF_PROG_TEST_RUN`. Linux-only because:
 #   1. `BPF_PROG_TEST_RUN` is a Linux syscall;
 #   2. `aya` (userspace) pulls in libbpf-sys etc. that don't build on

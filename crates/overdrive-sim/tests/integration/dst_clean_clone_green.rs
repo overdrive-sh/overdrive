@@ -4,7 +4,7 @@
 //!
 //! Covers:
 //!
-//! * §1.1 WS-1 — clean-clone `cargo xtask dst` is green within <60 s.
+//! * §1.1 WS-1 — clean-clone `cargo dst` is green within <60 s.
 //! * §7.1 scenario 1 — harness reports every Sim adapter and a real
 //!   `LocalIntentStore` backing the run.
 //! * §7.1 scenario 2 — the default-catalogue invariants all ran (the
@@ -13,41 +13,45 @@
 //! * §5.2 — `intent_never_crosses_into_observation` invariant runs on
 //!   every tick and reports pass.
 //!
-//! Each scenario invokes the compiled `xtask` binary as a subprocess,
+//! Each scenario invokes the compiled `dst` binary as a subprocess,
 //! following the DWD-04 / ADR-0005 driving-port discipline. Artifact
-//! assertions read `dst-summary.json` — the single source of truth on
-//! what actually ran.
+//! assertions read `summary.json` — the single source of truth on what
+//! actually ran.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-/// Absolute path to the compiled `xtask` binary for the current cargo
-/// test invocation. `CARGO_BIN_EXE_xtask` is injected by Cargo.
-fn xtask_bin() -> PathBuf {
-    PathBuf::from(env!("CARGO_BIN_EXE_xtask"))
+/// Absolute path to the compiled `dst` binary for the current cargo
+/// test invocation. `CARGO_BIN_EXE_dst` is injected by Cargo.
+fn dst_bin() -> PathBuf {
+    PathBuf::from(env!("CARGO_BIN_EXE_dst"))
 }
 
 fn workspace_root() -> PathBuf {
     let crate_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    crate_dir.parent().expect("xtask crate lives directly under the workspace root").to_path_buf()
+    crate_dir
+        .parent()
+        .expect("overdrive-sim crate dir must have a parent")
+        .parent()
+        .expect("crates/ must have a parent (the workspace root)")
+        .to_path_buf()
 }
 
 fn run_dst(target_dir: &Path, extra_args: &[&str]) -> Output {
-    let mut cmd = Command::new(xtask_bin());
-    cmd.arg("dst");
+    let mut cmd = Command::new(dst_bin());
     for arg in extra_args {
         cmd.arg(arg);
     }
     cmd.current_dir(workspace_root());
     cmd.env("CARGO_TARGET_DIR", target_dir);
-    cmd.output().expect("xtask binary must be invokable")
+    cmd.output().expect("dst binary must be invokable")
 }
 
 fn read_summary(target_dir: &Path) -> serde_json::Value {
-    let path = target_dir.join("xtask").join("dst-summary.json");
+    let path = target_dir.join("dst").join("summary.json");
     let raw = std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("dst-summary.json must exist at {}: {e}", path.display()));
-    serde_json::from_str(&raw).expect("dst-summary.json must be valid JSON")
+        .unwrap_or_else(|e| panic!("summary.json must exist at {}: {e}", path.display()));
+    serde_json::from_str(&raw).expect("summary.json must be valid JSON")
 }
 
 /// The invariants in the Phase 1 default catalogue — in canonical
@@ -77,9 +81,9 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     // `dispatch-routing-is-name-restricted` was added by
     // `fix-eval-reconciler-discarded` (commit `e6f5e5e`) — the
     // out-of-scope follow-up at the bottom of that RCA promised this
-    // invariant and the catalogue grew accordingly. The xtask test
-    // tracks `Invariant::ALL` exactly; missing entries surface as
-    // `catalogue length` mismatches.
+    // invariant and the catalogue grew accordingly. This test tracks
+    // `Invariant::ALL` exactly; missing entries surface as `catalogue
+    // length` mismatches.
     "dispatch-routing-is-name-restricted",
     "intent-store-returns-caller-bytes",
     "job-scheduled-after-submission",
@@ -107,7 +111,7 @@ const EXPECTED_INVARIANTS: &[&str] = &[
 ];
 
 // -----------------------------------------------------------------------------
-// §1.1 WS-1 — Clean-clone cargo xtask dst is green within the wall-clock budget
+// §1.1 WS-1 — Clean-clone cargo dst is green within the wall-clock budget
 // -----------------------------------------------------------------------------
 
 /// The whole default catalogue runs, every invariant passes, and the
