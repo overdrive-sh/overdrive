@@ -29,7 +29,7 @@ use aya_ebpf::{macros::map, maps::HashMap};
 /// Outer-map value — the resolved backend. 12 bytes, host-order.
 /// Mirrors the `BackendEntry` shape in
 /// `crates/overdrive-bpf/src/maps/service_map.rs` so kernel-side
-/// SERVICE_MAP and BACKEND_MAP carry identical layout for a
+/// `SERVICE_MAP` and `BACKEND_MAP` carry identical layout for a
 /// resolved backend record.
 #[derive(Clone, Copy)]
 #[repr(C)]
@@ -48,7 +48,7 @@ pub const MAX_ENTRIES: u32 = 65_536;
 /// `BACKEND_MAP` — `BPF_MAP_TYPE_HASH` keyed on `BackendId`
 /// (raw `u32`) → `BackendEntry`. Single global; backends shared
 /// across services. The XDP fast path resolves a `(ServiceId,
-/// MaglevSlot)` lookup against MAGLEV_MAP into a `BackendId`,
+/// MaglevSlot)` lookup against `MAGLEV_MAP` into a `BackendId`,
 /// then resolves the `BackendId` against this map to obtain
 /// the per-backend `BackendEntry`.
 #[map]

@@ -166,6 +166,21 @@ pre-commit:
       fail_text: |
         Affected tests failed. Pre-push runs the full suite — this
         smoke check caught it earlier.
+    bpf-clippy:
+      tags: [rust, bpf]
+      glob: "crates/overdrive-bpf/**/*"
+      # The kernel-side eBPF crate is skipped by the host `clippy` step
+      # above (rustc rejects `#![no_std] #![no_main]` on the host triple
+      # with "unwinding panics are not supported without std"). Cover
+      # that gap here: when any file under `crates/overdrive-bpf/` is
+      # staged, run `cargo xtask bpf-clippy`, which invokes clippy under
+      # the dedicated nightly + `bpfel-unknown-none` toolchain.
+      #
+      # `bpf-clippy` self-routes through Lima on macOS (the toolchain
+      # only lives in the VM there) and runs directly on Linux.
+      run: cargo xtask bpf-clippy
+      fail_text: |
+        bpf-clippy failed. Fix or `#[allow]` with justification.
     toml-check:
       tags: [toml, fast]
       glob:

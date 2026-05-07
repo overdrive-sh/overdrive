@@ -11,7 +11,9 @@ fn csum_fold(mut csum: u32) -> u16 {
     csum = (csum & 0xffff) + (csum >> 16);
     csum = (csum & 0xffff) + (csum >> 16);
     csum = (csum & 0xffff) + (csum >> 16);
-    csum as u16
+    #[allow(clippy::cast_possible_truncation)] // intentional checksum fold to u16
+    let result = csum as u16;
+    result
 }
 
 /// Read one byte from the packet with a bounds check.
@@ -20,8 +22,8 @@ fn csum_fold(mut csum: u32) -> u16 {
 /// (which would cause the verifier to see stale `r` values).
 #[inline(always)]
 unsafe fn pkt_read_u8(ctx: &XdpContext, off: usize) -> Result<u8, ()> {
-    let s = unsafe { core::ptr::read_volatile(&(*ctx.ctx).data) } as usize;
-    let e = unsafe { core::ptr::read_volatile(&(*ctx.ctx).data_end) } as usize;
+    let s = unsafe { core::ptr::read_volatile(&raw const (*ctx.ctx).data) } as usize;
+    let e = unsafe { core::ptr::read_volatile(&raw const (*ctx.ctx).data_end) } as usize;
     if s + off + 1 > e {
         return Err(());
     }
@@ -32,8 +34,8 @@ unsafe fn pkt_read_u8(ctx: &XdpContext, off: usize) -> Result<u8, ()> {
 /// Volatile reads prevent CSE of the packet pointer.
 #[inline(always)]
 unsafe fn pkt_read_u16(ctx: &XdpContext, off: usize) -> Result<u16, ()> {
-    let s = unsafe { core::ptr::read_volatile(&(*ctx.ctx).data) } as usize;
-    let e = unsafe { core::ptr::read_volatile(&(*ctx.ctx).data_end) } as usize;
+    let s = unsafe { core::ptr::read_volatile(&raw const (*ctx.ctx).data) } as usize;
+    let e = unsafe { core::ptr::read_volatile(&raw const (*ctx.ctx).data_end) } as usize;
     if s + off + 2 > e {
         return Err(());
     }
@@ -46,7 +48,7 @@ unsafe fn pkt_read_u16(ctx: &XdpContext, off: usize) -> Result<u16, ()> {
 ///
 /// Each u16 read re-derives the packet pointer from `ctx.data()`
 /// with a fresh bounds check, satisfying the verifier without
-/// requiring `bpf_csum_diff`'s pkt_access (which has
+/// requiring `bpf_csum_diff`'s `pkt_access` (which has
 /// operand-ordering issues with the Rust BPF backend).
 ///
 /// # Caller contract
@@ -54,8 +56,8 @@ unsafe fn pkt_read_u16(ctx: &XdpContext, off: usize) -> Result<u16, ()> {
 /// 1. Zero the L4 checksum field in the packet BEFORE calling this.
 /// 2. Write the rewritten IP/port values BEFORE calling this.
 /// 3. Pass **host-order** IP addresses (`u32::from(Ipv4Addr)` —
-///    the same encoding stored in SERVICE_MAP / BACKEND_MAP /
-///    REVERSE_NAT_MAP and returned by `read_u32_be`). The `>> 16`
+///    the same encoding stored in `SERVICE_MAP` / `BACKEND_MAP` /
+///    `REVERSE_NAT_MAP` and returned by `read_u32_be`). The `>> 16`
 ///    / `& 0xffff` extraction produces pseudo-header u16 words in
 ///    the same host-order-of-network-order encoding as
 ///    `pkt_read_u16`.
@@ -98,8 +100,10 @@ pub fn recompute_l4_csum(
     sum += u32::from(src_lo);
     sum += u32::from(dst_hi);
     sum += u32::from(dst_lo);
-    sum += u32::from(proto as u16);
-    sum += u32::from(l4_len as u16);
+    sum += u32::from(u16::from(proto));
+    #[allow(clippy::cast_possible_truncation)] // intentional: BPF packet length fits u16
+    let l4_len_u16 = l4_len as u16;
+    sum += u32::from(l4_len_u16);
 
     // Sum the L4 segment word-by-word. Each `pkt_read_u16` call
     // re-reads ctx.data()/ctx.data_end() and performs a fresh
@@ -123,11 +127,9 @@ pub fn recompute_l4_csum(
     // after the loop body's state merge. Re-cap `num_words` with
     // a redundant bound so the verifier re-establishes the range
     // for the pointer arithmetic in `pkt_read_u8`.
-    if l4_len & 1 != 0 {
-        if num_words < MAX_L4_LEN / 2 {
-            let b = unsafe { pkt_read_u8(ctx, l4_off + num_words * 2)? };
-            sum += u32::from(b) << 8;
-        }
+    if l4_len & 1 != 0 && num_words < MAX_L4_LEN / 2 {
+        let b = unsafe { pkt_read_u8(ctx, l4_off + num_words * 2)? };
+        sum += u32::from(b) << 8;
     }
 
     let folded = csum_fold(sum);

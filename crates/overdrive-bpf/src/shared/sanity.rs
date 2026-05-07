@@ -7,7 +7,7 @@
 //! 1. **Sanity prologue** — five static Cloudflare-shape checks
 //!    (research § 7.2):
 //!
-//!    1. EtherType is IPv4 (`0x0800`) — non-IPv4 returns `XDP_PASS`.
+//!    1. `EtherType` is IPv4 (`0x0800`) — non-IPv4 returns `XDP_PASS`.
 //!    2. IP version is 4 and IHL ≥ 5 (20 bytes) — invalid returns
 //!       `XDP_DROP`.
 //!    3. IP `total_length` sanity (≥ IHL·4, ≤ packet length).
@@ -65,7 +65,7 @@ pub struct ReverseKey {
 /// `l4_src_port_ptr` as **network byte order** (the wire), and
 /// converts each via `from_be_bytes` to a host-order numeric. The
 /// resulting `ReverseKey` has the same byte layout the userspace
-/// handle writes into REVERSE_NAT_MAP — the `BPF_MAP_TYPE_HASH`
+/// handle writes into `REVERSE_NAT_MAP` — the `BPF_MAP_TYPE_HASH`
 /// lookup keys on the raw bytes, so userspace-host-order +
 /// kernel-from_be_bytes(wire) must produce the same numeric for the
 /// lookup to hit. This is the architecture.md § 11 lockstep.
@@ -95,10 +95,10 @@ pub unsafe fn reverse_key_from_packet(
 ) -> ReverseKey {
     // SAFETY: caller guarantees `ipv4_src_ip_ptr` points to ≥ 4
     // bytes of valid packet data (IPv4 src-IP field).
-    let ip_bytes: [u8; 4] = unsafe { *(ipv4_src_ip_ptr as *const [u8; 4]) };
+    let ip_bytes: [u8; 4] = unsafe { *ipv4_src_ip_ptr.cast::<[u8; 4]>() };
     // SAFETY: caller guarantees `l4_src_port_ptr` points to ≥ 2
     // bytes of valid packet data (L4 src-port field).
-    let port_bytes: [u8; 2] = unsafe { *(l4_src_port_ptr as *const [u8; 2]) };
+    let port_bytes: [u8; 2] = unsafe { *l4_src_port_ptr.cast::<[u8; 2]>() };
 
     ReverseKey {
         ip_host: u32::from_be_bytes(ip_bytes),

@@ -681,6 +681,20 @@ fn bpf_build() -> Result<()> {
 /// step), but the rest of the toolchain (nightly + rust-src) is — same
 /// failure mode as `bpf_build` if missing.
 fn bpf_clippy() -> Result<()> {
+    // The kernel-side toolchain (nightly + `rust-src` + `bpf-linker` +
+    // `bpfel-unknown-none` target) is only provisioned in the Lima VM
+    // on macOS dev surfaces. Re-dispatch through `lima run --no-sudo`
+    // so callers (lefthook, devs) can invoke `cargo xtask bpf-clippy`
+    // unconditionally — the inner xtask sees Linux and falls through
+    // to the direct path below. `--no-sudo` because clippy is a build,
+    // not a privileged op.
+    if cfg!(target_os = "macos") {
+        return lima(LimaAction::Run {
+            no_sudo: true,
+            args: vec!["cargo".into(), "xtask".into(), "bpf-clippy".into()],
+        });
+    }
+
     let workspace_root = workspace_root_dir()?;
     let manifest = workspace_root.join("crates/overdrive-bpf/Cargo.toml");
 

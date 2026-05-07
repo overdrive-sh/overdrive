@@ -1,19 +1,19 @@
 //! `xdp_service_map_lookup` — kernel-side XDP program for Phase 2.2
-//! SERVICE_MAP forward path (US-02; S-2.2-04 / S-2.2-05 / S-2.2-08
+//! `SERVICE_MAP` forward path (US-02; S-2.2-04 / S-2.2-05 / S-2.2-08
 //! flip GREEN here).
 //!
 //! Lookup pipeline per
 //! `docs/feature/phase-2-xdp-service-map/design/architecture.md`
 //! § 10:
 //!
-//! 1. Bounds-check + parse Eth header. Non-IPv4 EtherType ⇒
+//! 1. Bounds-check + parse Eth header. Non-IPv4 `EtherType` ⇒
 //!    `XDP_PASS`.
 //! 2. Bounds-check + parse IPv4 header. Truncated frames ⇒
 //!    `XDP_PASS` via the wrapper's `Err(_)` branch (S-2.2-08).
 //! 3. Non-{TCP,UDP} ⇒ `XDP_PASS`.
 //! 4. Bounds-check + parse L4 header (only dest port + csum
 //!    matter for Slice 02).
-//! 5. Build host-order `(VIP, port)` key, look up SERVICE_MAP.
+//! 5. Build host-order `(VIP, port)` key, look up `SERVICE_MAP`.
 //! 6. Miss ⇒ `XDP_PASS` (S-2.2-05). Hit ⇒ rewrite dest IP +
 //!    dest port, incrementally update IPv4 + L4 checksums per
 //!    RFC 1624, return `XDP_TX` (S-2.2-04).
@@ -34,7 +34,7 @@
 //! mirrors the wire bytes — i.e. the IP address `10.0.0.1` on the
 //! wire as `[10, 0, 0, 1]` reads back as `0x0a000001` in host
 //! order, which is `u32::from(Ipv4Addr::new(10, 0, 0, 1))`. This
-//! is the userspace handle's host-order convention; SERVICE_MAP
+//! is the userspace handle's host-order convention; `SERVICE_MAP`
 //! is keyed identically. Writing `value.to_be_bytes()` puts the
 //! same 4 bytes back on the wire. No `htonl` / `ntohl` needed.
 
@@ -171,11 +171,13 @@ fn fold32(s: u32) -> u16 {
     let s = (s & 0xffff) + (s >> 16);
     let s = (s & 0xffff) + (s >> 16);
     let s = (s & 0xffff) + (s >> 16);
-    s as u16
+    #[allow(clippy::cast_possible_truncation)]
+    let result = s as u16;
+    result
 }
 
 /// RFC 1624 incremental update:
-///   new_csum = ~( ~old_csum + sum(~old_words) + sum(new_words) )
+///   `new_csum = ~( ~old_csum + sum(~old_words) + sum(new_words) )`
 /// All u16 inputs/outputs are big-endian (network order).
 ///
 /// Inputs use fixed-size arrays rather than slices so the verifier
@@ -317,9 +319,8 @@ fn try_xdp_service_map_lookup(ctx: &XdpContext) -> Result<u32, ()> {
     // rejects unconditional dereference. The Option representation
     // makes the check load-bearing in the type system. Same shape for
     // step b → step c.
-    let inner_ptr = match SERVICE_MAP.lookup_inner(&key) {
-        Some(p) => p,
-        None => return Ok(xdp_action::XDP_PASS),
+    let Some(inner_ptr) = SERVICE_MAP.lookup_inner(&key) else {
+        return Ok(xdp_action::XDP_PASS);
     };
 
     // Slot index — Slice 04 Maglev-table indexing. Hash the 5-tuple
@@ -345,7 +346,7 @@ fn try_xdp_service_map_lookup(ctx: &XdpContext) -> Result<u32, ()> {
     // `INNER_TABLE_SIZE - 1` so the inner ARRAY (size
     // INNER_TABLE_SIZE) cannot reject as out-of-range.
     let bid_ptr =
-        unsafe { bpf_map_lookup_elem(inner_ptr.as_ptr(), &slot as *const u32 as *const c_void) };
+        unsafe { bpf_map_lookup_elem(inner_ptr.as_ptr(), (&raw const slot).cast::<c_void>()) };
     if bid_ptr.is_null() {
         return Ok(xdp_action::XDP_PASS);
     }
@@ -396,6 +397,7 @@ fn try_xdp_service_map_lookup(ctx: &XdpContext) -> Result<u32, ()> {
 /// `bpf_fib_lookup` against the post-rewrite IPv4 header — the FIB
 /// lookup must resolve the *backend's* next-hop, not the VIP's.
 #[inline(always)]
+#[allow(clippy::too_many_arguments)]
 fn rewrite_and_tx(
     ctx: &XdpContext,
     src_ip_host: u32,
@@ -553,12 +555,16 @@ fn fib_resolve_and_rewrite_mac(
     let rc = unsafe {
         bpf_fib_lookup(
             ctx.as_ptr(),
-            &mut fib as *mut _,
-            core::mem::size_of::<bpf_fib_lookup_params>() as i32,
+            &raw mut fib,
+            #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+            {
+                core::mem::size_of::<bpf_fib_lookup_params>() as i32
+            },
             0u32,
         )
     };
 
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     if rc as u32 != BPF_FIB_LKUP_RET_SUCCESS {
         // Non-success: `RET_NO_NEIGH` (ARP not yet resolved — let
         // the kernel do ARP), `RET_NOT_FWDED` (no route — let the
@@ -598,6 +604,7 @@ fn fib_resolve_and_rewrite_mac(
         // success this is `XDP_REDIRECT` (= 4). The verifier accepts
         // this pattern as the canonical XDP-redirect shape.
         let action = unsafe { bpf_redirect(fib.ifindex, 0) };
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         Ok(action as u32)
     }
 }

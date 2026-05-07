@@ -1,5 +1,5 @@
 //! Kernel-side eBPF program modules for Phase 2.2 (XDP service map
-//! + Maglev + REVERSE_NAT).
+//! + Maglev + `REVERSE_NAT`).
 //!
 //! Each program is a `#[xdp]` or `#[classifier]` function compiled
 //! into the same `overdrive_bpf.o` ELF artifact. The userspace
@@ -9,7 +9,7 @@
 //! **RED scaffolds** — bodies panic via `core::hint::black_box`-
 //! shaped placeholder until DELIVER fills them per the carpaccio
 //! slice plan. Note: `panic!` cannot expand cleanly inside
-//! `#[xdp]` handlers (the panic_handler is `loop {}`); the RED
+//! `#[xdp]` handlers (the `panic_handler` is `loop {}`); the RED
 //! signal in the kernel-side scaffolds is the absence of the
 //! `#[xdp]` / `#[classifier]` attribute itself — adding the
 //! attribute is part of DELIVER's GREEN pass per Slice 02 / 04 /

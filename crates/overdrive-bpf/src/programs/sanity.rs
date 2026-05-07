@@ -9,7 +9,7 @@
 //! Performed in sequence; first failure short-circuits per
 //! `docs/feature/phase-2-xdp-service-map/slices/slice-06-sanity-prologue.md`:
 //!
-//! 1. **EtherType** — must be IPv4 (`0x0800`). Non-IPv4 (IPv6, ARP,
+//! 1. **`EtherType`** — must be IPv4 (`0x0800`). Non-IPv4 (IPv6, ARP,
 //!    VLAN-tagged, …) returns `Verdict::PassToKernel` because the LB
 //!    is not a firewall: edge protocols belong to the host's other
 //!    workloads.
@@ -47,21 +47,21 @@
 //! # Why a sum type return, not `Result<(), Verdict>`
 //!
 //! Every code path the call site cares about is one of three
-//! mutually-exclusive outcomes — `Continue`, `Drop` (XDP_DROP /
-//! TC_ACT_SHOT), `PassToKernel` (XDP_PASS / TC_ACT_OK) — and the
+//! mutually-exclusive outcomes — `Continue`, `Drop` (`XDP_DROP` /
+//! `TC_ACT_SHOT`), `PassToKernel` (`XDP_PASS` / `TC_ACT_OK`) — and the
 //! caller has to translate the latter two into the program-specific
 //! verdict constant anyway. A `Result<(), Verdict>` would conflate
 //! "drop" and "pass" under a single `Err` variant; the sum-type
 //! return makes the three-way distinction structural.
 //!
-//! # DROP_COUNTER attribution
+//! # `DROP_COUNTER` attribution
 //!
 //! The helper increments `DROP_COUNTER[MalformedHeader]` on every
 //! drop arm. The `MalformedHeader` slot is the right home per
 //! `docs/feature/phase-2-xdp-service-map/distill/test-scenarios.md`
 //! S-2.2-19 / S-2.2-20 — both the truncated-IPv4 and the SYN+RST
 //! drops attribute to the same slot. The `SanityPrologue` slot is
-//! reserved for future operator-tunable rules (POLICY_MAP / #158);
+//! reserved for future operator-tunable rules (`POLICY_MAP` / #158);
 //! Slice 06's static checks are all "this header is structurally
 //! malformed" and bucket together.
 
@@ -97,7 +97,7 @@ pub enum Verdict {
     Drop,
     /// Frame is well-formed but is not LB traffic (non-IPv4,
     /// non-TCP/UDP). Caller hands to the kernel stack
-    /// (`XDP_PASS` or `TC_ACT_OK`). DROP_COUNTER untouched.
+    /// (`XDP_PASS` or `TC_ACT_OK`). `DROP_COUNTER` untouched.
     PassToKernel,
 }
 
@@ -220,9 +220,8 @@ where
     R16: Fn(usize) -> Result<u16, ()>,
 {
     // (1) EtherType — must be IPv4. Non-IPv4 → PassToKernel.
-    let eth_type = match read_u16_be(ETH_TYPE_OFFSET) {
-        Ok(v) => v,
-        Err(()) => return Verdict::PassToKernel,
+    let Ok(eth_type) = read_u16_be(ETH_TYPE_OFFSET) else {
+        return Verdict::PassToKernel;
     };
     if eth_type != ETH_TYPE_IPV4 {
         return Verdict::PassToKernel;
@@ -230,9 +229,8 @@ where
 
     // (2) IP version + IHL. The first byte of the IPv4 header packs
     //     `version<<4 | ihl`. Version must be 4; IHL must be ≥ 5.
-    let ver_ihl = match read_u8(ipv4_offset + IPV4_VER_IHL_OFFSET) {
-        Ok(v) => v,
-        Err(()) => return Verdict::PassToKernel,
+    let Ok(ver_ihl) = read_u8(ipv4_offset + IPV4_VER_IHL_OFFSET) else {
+        return Verdict::PassToKernel;
     };
     let version = (ver_ihl >> 4) & 0x0F;
     let ihl = ver_ihl & 0x0F;
@@ -246,11 +244,10 @@ where
     //     fit inside the actual packet (after the Ethernet
     //     header) AND be at least `IHL*4` bytes (the header
     //     itself).
-    let total_len = match read_u16_be(ipv4_offset + IPV4_TOT_LEN_OFFSET) {
-        Ok(v) => v,
-        Err(()) => return Verdict::PassToKernel,
+    let Ok(total_len) = read_u16_be(ipv4_offset + IPV4_TOT_LEN_OFFSET) else {
+        return Verdict::PassToKernel;
     };
-    let header_bytes = (ihl as u16).wrapping_mul(4);
+    let header_bytes = u16::from(ihl).wrapping_mul(4);
     if total_len < header_bytes {
         record_malformed_header_drop();
         return Verdict::Drop;
@@ -264,9 +261,8 @@ where
     }
 
     // (4) Protocol — only TCP / UDP go through the LB.
-    let proto = match read_u8(ipv4_offset + IPV4_PROTO_OFFSET) {
-        Ok(v) => v,
-        Err(()) => return Verdict::PassToKernel,
+    let Ok(proto) = read_u8(ipv4_offset + IPV4_PROTO_OFFSET) else {
+        return Verdict::PassToKernel;
     };
     if proto != IPV4_PROTO_TCP && proto != IPV4_PROTO_UDP {
         return Verdict::PassToKernel;
@@ -274,9 +270,8 @@ where
 
     // (5) TCP flags — only relevant for TCP. UDP gates this trivially.
     if proto == IPV4_PROTO_TCP {
-        let flags = match read_u8(l4_offset + TCP_FLAGS_OFFSET) {
-            Ok(v) => v,
-            Err(()) => return Verdict::PassToKernel,
+        let Ok(flags) = read_u8(l4_offset + TCP_FLAGS_OFFSET) else {
+            return Verdict::PassToKernel;
         };
         if tcp_flags_pathological(flags) {
             record_malformed_header_drop();

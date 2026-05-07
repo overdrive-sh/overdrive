@@ -1,5 +1,5 @@
 //! `xdp_reverse_nat_lookup` — kernel-side XDP program for the
-//! Phase 2.2 REVERSE_NAT response path (US-05; S-2.2-32 / ADR-0045
+//! Phase 2.2 `REVERSE_NAT` response path (US-05; S-2.2-32 / ADR-0045
 //! § Decision § 2 — replaces `tc_reverse_nat` at TCX-egress).
 //!
 //! Per ADR-0045 § 2, the response path moves from TCX-egress on the
@@ -10,10 +10,10 @@
 //!
 //! 1. Sanity prologue (Slice 06-02 shared helper; XDP-ingress scope
 //!    per ADR-0040 Q3 amendment + ADR-0045 § 4).
-//! 2. REVERSE_NAT_MAP lookup keyed on
+//! 2. `REVERSE_NAT_MAP` lookup keyed on
 //!    `(backend_ip, backend_port, proto)` — the response's source
 //!    3-tuple. Miss ⇒ `XDP_PASS` (the kernel networking stack
-//!    handles non-LB traffic; no DROP_COUNTER slot).
+//!    handles non-LB traffic; no `DROP_COUNTER` slot).
 //! 3. L3 rewrite — source `(backend_ip, backend_port)` →
 //!    `(VIP, vip_port)`; incremental IPv4 + L4 checksum update
 //!    via the same RFC 1624 fold the forward path uses. Note: the
@@ -23,7 +23,7 @@
 //!    pattern (research § 4.1 / § 4.2; identical reasoning as
 //!    `xdp_service_map.rs`).
 //! 4. `bpf_fib_lookup` against the post-rewrite `(src_ip, dst_ip)` —
-//!    src=VIP (just rewritten), dst=client_ip. Resolves the egress
+//!    src=VIP (just rewritten), `dst=client_ip`. Resolves the egress
 //!    iface index + next-hop MAC for the response's path back to
 //!    the client.
 //! 5. L2 rewrite — `eth_hdr->h_dest` ← FIB-resolved `dmac`,
@@ -35,13 +35,13 @@
 //!    amendment 2026-05-07). Since L2 MACs are written by step 5,
 //!    `bpf_redirect` is functionally equivalent.
 //!
-//! On `bpf_fib_lookup` non-success (RET_NO_NEIGH, RET_NOT_FWDED,
-//! RET_BLACKHOLE, …) the program returns `XDP_PASS` after the L3+L4
+//! On `bpf_fib_lookup` non-success (`RET_NO_NEIGH`, `RET_NOT_FWDED`,
+//! `RET_BLACKHOLE`, …) the program returns `XDP_PASS` after the L3+L4
 //! rewrite has committed; the kernel networking stack handles the
-//! packet through ARP / its own routing table. No DROP_COUNTER slot
+//! packet through ARP / its own routing table. No `DROP_COUNTER` slot
 //! is consumed (ADR-0040 Q7 preserved).
 //!
-//! # Why a separate program (not folded into xdp_service_map)
+//! # Why a separate program (not folded into `xdp_service_map`)
 //!
 //! Per ADR-0045 § Decision § 3: the forward path attaches to the
 //! client-facing veth ingress; the reverse path attaches to the
@@ -58,7 +58,7 @@
 //! mirrors the wire bytes — i.e. the IP address `10.1.0.5` on the
 //! wire as `[10, 1, 0, 5]` reads back as `0x0a010005` in host
 //! order, which is `u32::from(Ipv4Addr::new(10, 1, 0, 5))`. This is
-//! the userspace handle's host-order convention; REVERSE_NAT_MAP is
+//! the userspace handle's host-order convention; `REVERSE_NAT_MAP` is
 //! keyed identically. The Slice 05-03 lockstep proptest still
 //! applies — the read-side conversion is preserved verbatim from
 //! `tc_reverse_nat.rs`.
@@ -176,6 +176,7 @@ unsafe fn write_u32_be(ctx: &XdpContext, offset: usize, val: u32) -> Result<(), 
 // unrolled folds is the verifier-accepted minimum).
 
 #[inline(always)]
+#[allow(clippy::cast_possible_truncation)] // Intentional: three folds guarantee s fits in u16.
 fn fold32(s: u32) -> u16 {
     let s = (s & 0xffff) + (s >> 16);
     let s = (s & 0xffff) + (s >> 16);
@@ -418,15 +419,13 @@ fn fib_resolve_and_rewrite_mac(
     // SAFETY: `bpf_fib_lookup` helper takes the XDP ctx pointer +
     // `bpf_fib_lookup` parameter block. The verifier validates
     // the call.
-    let rc = unsafe {
-        bpf_fib_lookup(
-            ctx.as_ptr(),
-            &mut fib as *mut _,
-            core::mem::size_of::<bpf_fib_lookup_params>() as i32,
-            0u32,
-        )
-    };
+    // BPF kernel ABI: bpf_fib_lookup takes *mut params, i32 size, u32 flags;
+    // returns i64. All casts below are intentional kernel-ABI conversions.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
+    let param_size = core::mem::size_of::<bpf_fib_lookup_params>() as i32;
+    let rc = unsafe { bpf_fib_lookup(ctx.as_ptr(), &raw mut fib, param_size, 0u32) };
 
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     if rc as u32 != BPF_FIB_LKUP_RET_SUCCESS {
         // Non-success: the L3+L4 rewrite already happened; hand
         // the now-rewritten packet to the kernel stack via
@@ -458,5 +457,7 @@ fn fib_resolve_and_rewrite_mac(
     // Returns the action code the program should return; on
     // success this is `XDP_REDIRECT` (= 4).
     let action = unsafe { bpf_redirect(fib.ifindex, 0) };
+    // BPF helper returns i64; XDP actions are u32 constants — intentional ABI cast.
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
     Ok(action as u32)
 }

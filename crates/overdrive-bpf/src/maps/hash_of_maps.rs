@@ -4,7 +4,7 @@
 //!
 //! aya-ebpf 0.1.x does NOT ship a `HashOfMaps<K, V, M>` typed surface
 //! (the upstream `#[map]` macro is type-agnostic, but no struct
-//! exists for HoM). This module provides a `#[repr(transparent)]`
+//! exists for `HoM`). This module provides a `#[repr(transparent)]`
 //! struct over `bpf_map_def` that works with `aya_ebpf::macros::map`
 //! natively — the macro is a `link_section` annotator and does not
 //! gate on a type whitelist (research § D.1).
@@ -22,7 +22,7 @@
 //!
 //! # Verifier discipline (chained inner-map lookup)
 //!
-//! Per kernel.org BPF map_of_maps doc + research § D.6:
+//! Per kernel.org BPF `map_of_maps` doc + research § D.6:
 //!
 //! 1. `lookup_inner(&key)` returns `Option<NonNull<c_void>>` — the
 //!    pointer is verifier-tagged `inner_map`.
@@ -55,15 +55,15 @@ const BPF_MAP_TYPE_HASH_OF_MAPS: u32 = 13;
 /// `bpf_map_def.pinning` field values mirroring aya-ebpf's
 /// `pub(crate) PinningType` enum (`maps/mod.rs:81`). The field is
 /// load-bearing for the pin-by-name workaround that lets aya 0.13.x
-/// share an outer HoM map between userspace and the kernel-side ELF
-/// (per `.claude/rules/development.md` § "Sharing the outer HoM
+/// share an outer `HoM` map between userspace and the kernel-side ELF
+/// (per `.claude/rules/development.md` § "Sharing the outer `HoM`
 /// between userspace and the kernel-side ELF — `pinning = ByName`").
 ///
 /// `PINNING_NONE`: aya creates the map fresh via `MapData::create`.
 /// `PINNING_BY_NAME`: aya tries `BPF_OBJ_GET("/sys/fs/bpf/<dir>/<name>")`
 /// first; on success it reuses the pre-pinned FD (the userspace-
-/// owned outer HoM); on failure it falls back to `MapData::create`
-/// (which fails for HoM because aya's bpf_create_map does not set
+/// owned outer `HoM`); on failure it falls back to `MapData::create`
+/// (which fails for `HoM` because aya's `bpf_create_map` does not set
 /// `inner_map_fd` — see research § D.3 (b)).
 pub const PINNING_NONE: u32 = 0;
 pub const PINNING_BY_NAME: u32 = 1;
@@ -127,22 +127,23 @@ pub struct HashOfMaps<K, V, M: InnerMap> {
 unsafe impl<K: Sync, V: Sync, M: InnerMap> Sync for HashOfMaps<K, V, M> {}
 
 impl<K, V, M: InnerMap> HashOfMaps<K, V, M> {
-    /// Construct an outer HoM. `flags` is passed through to
+    /// Construct an outer `HoM`. `flags` is passed through to
     /// `bpf_map_def::map_flags`; the canonical value is 0.
     ///
     /// `pinning` selects between `PINNING_NONE` (aya creates the map
-    /// fresh; fails on HoM in aya 0.13.x because `bpf_create_map`
+    /// fresh; fails on `HoM` in aya 0.13.x because `bpf_create_map`
     /// does not set `inner_map_fd`) and `PINNING_BY_NAME` (aya tries
     /// `BPF_OBJ_GET` against `<map_pin_path>/<MAP_NAME>` first, reusing
     /// a pre-pinned userspace-owned outer FD — the only working path
-    /// for HoM in aya 0.13.x per
-    /// `.claude/rules/development.md` § "Sharing the outer HoM between
+    /// for `HoM` in aya 0.13.x per
+    /// `.claude/rules/development.md` § "Sharing the outer `HoM` between
     /// userspace and the kernel-side ELF — `pinning = ByName`").
     ///
     /// # `value_size = sizeof(u32)`
     ///
-    /// HoM stores inner-map FDs as `u32` regardless of the host's
+    /// `HoM` stores inner-map FDs as `u32` regardless of the host's
     /// pointer width — kernel ABI invariant.
+    #[allow(clippy::cast_possible_truncation)]
     pub const fn with_max_entries_pinned(max_entries: u32, flags: u32, pinning: u32) -> Self {
         Self {
             def: UnsafeCell::new(bpf_map_def {
@@ -160,10 +161,10 @@ impl<K, V, M: InnerMap> HashOfMaps<K, V, M> {
         }
     }
 
-    /// Convenience: construct an outer HoM with `PINNING_NONE`. Kept
+    /// Convenience: construct an outer `HoM` with `PINNING_NONE`. Kept
     /// for use sites that genuinely do not need pin-by-name (e.g.
     /// hypothetical future map types whose ELF declarations aya can
-    /// create directly). Phase 2.2 SERVICE_MAP uses
+    /// create directly). Phase 2.2 `SERVICE_MAP` uses
     /// [`Self::with_max_entries_pinned`] with `PINNING_BY_NAME`.
     pub const fn with_max_entries(max_entries: u32, flags: u32) -> Self {
         Self::with_max_entries_pinned(max_entries, flags, PINNING_NONE)
@@ -187,7 +188,10 @@ impl<K, V, M: InnerMap> HashOfMaps<K, V, M> {
         // bytes — if `K` has padding it must be zeroed by the caller
         // (this is the standard map-key contract).
         unsafe {
-            let p = bpf_map_lookup_elem(self.def.get() as *mut _, key as *const _ as *const c_void);
+            let p = bpf_map_lookup_elem(
+                self.def.get().cast(),
+                core::ptr::from_ref(key).cast::<c_void>(),
+            );
             NonNull::new(p)
         }
     }

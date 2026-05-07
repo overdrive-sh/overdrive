@@ -960,8 +960,13 @@ impl Dataplane for EbpfDataplane {
         // invariant S-2.2-18 pins).
         //
         // Phase 2.2 hardcodes `proto = TCP` because the trait
-        // surface does not yet carry per-backend protocol; UDP
-        // services would lift this once the trait gains the field.
+        // surface does not yet carry per-service protocol. UDP
+        // services route forward-path correctly today (SERVICE_MAP
+        // keys carry `proto`) but their responses miss this map
+        // and leak the backend IP back to the client. The fix is
+        // a `Dataplane::update_service` trait-surface change to
+        // thread the per-service `Proto` through; tracked in
+        // GH #163.
         // Per `.claude/rules/development.md` § "Persist inputs, not
         // derived state" — the per-service tracker carries the
         // BackendKeyPods themselves (the authoritative inputs), not

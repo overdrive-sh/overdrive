@@ -2,8 +2,8 @@
 //! `BackendKey { ip: u32, port: u16, proto: u8, _pad: u8 }` →
 //! `Vip { ip: u32, port: u16, _pad: u16 }`.
 //!
-//! The third map of the Cilium three-map split (SERVICE_MAP +
-//! BACKEND_MAP + REVERSE_NAT_MAP) per architecture.md § 10. The
+//! The third map of the Cilium three-map split (`SERVICE_MAP` +
+//! `BACKEND_MAP` + `REVERSE_NAT_MAP`) per architecture.md § 10. The
 //! egress reverse-NAT path uses this map to rewrite the source
 //! address of backend response packets back to the original VIP
 //! the client connected to: when a backend responds, the kernel

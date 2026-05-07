@@ -1,5 +1,5 @@
 //! Kernel-side BPF map declarations for Phase 2.2 (XDP service map
-//! + Maglev + REVERSE_NAT + drop counter).
+//! + Maglev + `REVERSE_NAT` + drop counter).
 //!
 //! Each map module declares a `#[map]` static of the appropriate
 //! `BPF_MAP_TYPE_*` per
