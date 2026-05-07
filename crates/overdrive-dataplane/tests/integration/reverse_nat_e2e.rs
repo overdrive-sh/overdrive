@@ -57,20 +57,14 @@ use overdrive_dataplane::EbpfDataplane;
 use overdrive_dataplane::maps::ServiceKey;
 use overdrive_dataplane::maps::hash_of_maps::HashOfMapsHandle;
 
-use super::helpers::netns::{NetNs, NetNsError, ThreeIfaceTopology, threeiface_ips};
-use super::helpers::veth::{VethError, VethPair};
+use super::helpers::netns::{NetNsError, ThreeIfaceTopology, threeiface_ips};
 
-// Per-test iface name pair. Both tests share E2eTopology, so we
-// parameterise the name pair through `create_with_names` to give
-// each test a distinct pair (avoids the `RTNETLINK answers: File
-// exists` collision when nextest runs them in parallel processes
-// against the same host-side namespace).
-//
-// Linux `IFNAMSIZ = 16` (15 chars + NUL) — keep both names under
-// 15 chars.
+// Stable IP / port plan shared across tests in this file. Both
+// scenarios (S-2.2-17, S-2.2-18) build a `ThreeIfaceTopology` (per
+// helpers/netns.rs) and use these constants to address the VIP
+// and the backend.
 const VIP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 1);
 const VIP_PORT: u16 = 8080;
-const CLIENT_IP: Ipv4Addr = Ipv4Addr::new(10, 0, 0, 100);
 const BACKEND_IP: Ipv4Addr = Ipv4Addr::new(10, 1, 0, 5);
 // `VIP_PORT == BACKEND_PORT` is REQUIRED for the S-2.2-17 forward
 // path: the production `Dataplane::update_service(vip, backends)`
@@ -82,168 +76,6 @@ const BACKEND_IP: Ipv4Addr = Ipv4Addr::new(10, 1, 0, 5);
 // deployment (VIP:8080 → backend:8080); per-port translation is a
 // later phase if/when needed.
 const BACKEND_PORT: u16 = VIP_PORT;
-
-/// Two-namespace topology. Owns the lifecycle of both netns + the
-/// veth pair connecting them. Drop teardown order matters: the veth
-/// pair must drop first (its `Drop` issues `ip link del`), THEN the
-/// namespaces. Rust drops fields in declaration order, so put `_veth`
-/// before the namespaces.
-///
-/// In practice `ip netns del` reaps in-namespace ifaces too, so the
-/// teardown is robust to either order — but the explicit ordering
-/// matches the intent and avoids relying on kernel reaping for
-/// correctness.
-struct E2eTopology {
-    client_ns: NetNs,
-    /// Held for `Drop`-ordering: the backend netns must outlive the
-    /// veth peer that lives inside it. The `Drop` impl on `NetNs`
-    /// reaps the namespace and any in-namespace ifaces; this field
-    /// is the lifecycle anchor and is otherwise not read.
-    #[allow(dead_code)]
-    backend_ns: NetNs,
-    host_veth: String,
-    /// Peer veth name. Currently only consumed inside `create()`
-    /// for IP assignment + iface bring-up; retained as a struct
-    /// field so future callers (the S-2.2-15 architectural
-    /// follow-up; raw-socket inject tests on the backend side)
-    /// can name it without re-deriving from the per-test tag.
-    #[allow(dead_code)]
-    peer_veth: String,
-}
-
-impl E2eTopology {
-    /// Build the full topology:
-    /// 1. Create both netns.
-    /// 2. Create veth pair in host netns.
-    /// 3. Move client end into client_ns; peer end into backend_ns.
-    /// 4. Bring both ends up + assign IPs inside the respective ns.
-    ///
-    /// `tag` is a short (≤ 4 char) discriminator that namespaces
-    /// the iface and netns names so two tests running in parallel
-    /// processes don't collide on the global iface namespace.
-    fn create(tag: &str) -> Result<Self, TopologyError> {
-        let suffix = std::process::id();
-        let client_name = format!("rnt-clt-{tag}-{suffix}");
-        let backend_name = format!("rnt-bck-{tag}-{suffix}");
-        // IFNAMSIZ = 16 (15 chars + NUL). Tag ≤ 4 + suffix u32
-        // up to 5 hex chars + "ov-" 3 chars = 12 chars worst-case;
-        // truncate the suffix to its low 16 bits to stay safe.
-        let host_veth = format!("ov{tag}h{:04x}", suffix & 0xffff);
-        let peer_veth = format!("ov{tag}p{:04x}", suffix & 0xffff);
-
-        let client_ns = NetNs::create(&client_name).map_err(TopologyError::NetNs)?;
-        let backend_ns = NetNs::create(&backend_name).map_err(TopologyError::NetNs)?;
-
-        // Create veth in host netns first; subsequent `ip link set
-        // ... netns ...` moves the ends into their target namespaces.
-        // VethPair drops on error in `?`-shape, leaving netns also
-        // dropped (clean teardown).
-        let veth = VethPair::create(&host_veth, &peer_veth).map_err(TopologyError::Veth)?;
-
-        // Move client end → client_ns; peer end → backend_ns. Once
-        // moved, the iface name remains the same but it lives inside
-        // that netns. The `VethPair::Drop` `ip link del <host>` would
-        // fail because the iface no longer exists in the host netns
-        // — but that's harmless (best-effort) and the netns drops
-        // reap the ifaces anyway. Forget the VethPair to suppress
-        // its Drop.
-        client_ns.move_iface(&veth.host).map_err(TopologyError::NetNs)?;
-        backend_ns.move_iface(&veth.peer).map_err(TopologyError::NetNs)?;
-        std::mem::forget(veth);
-
-        // Configure addresses in their respective namespaces with
-        // /8 prefix so each ns has an on-link route covering BOTH
-        // the local IP (10.0.0.100 in client; 10.1.0.5 in backend)
-        // AND the peer's IP (10.1.0.5 from client's POV;
-        // 10.0.0.100 from backend's POV) AND the VIP (10.0.0.1).
-        // /16 only covers a single second-octet space so the kernel
-        // refuses to route 10.1.x.x out a /16 iface configured on
-        // 10.0.x.x. /8 covers 10.0.0.0/8 entirely.
-        client_ns
-            .assign_ip_and_up(&host_veth, &format!("{CLIENT_IP}/8"))
-            .map_err(TopologyError::NetNs)?;
-        backend_ns
-            .assign_ip_and_up(&peer_veth, &format!("{BACKEND_IP}/8"))
-            .map_err(TopologyError::NetNs)?;
-
-        // Add a route in client_ns for the VIP. /16 already covers
-        // 10.0.0.1 via the on-link route, so this is redundant —
-        // kept best-effort + ignored for documentation.
-        let _ = Command::new("ip")
-            .args([
-                "netns",
-                "exec",
-                &client_name,
-                "ip",
-                "route",
-                "add",
-                &VIP.to_string(),
-                "dev",
-                &host_veth,
-            ])
-            .output();
-
-        // Backend ns needs to accept ARP for the VIP (10.0.0.1)
-        // when the client first resolves it — without an answer,
-        // the kernel never transmits the SYN. The simplest fix is
-        // to teach the backend's veth to respond to ARP for the
-        // VIP via a static neighbour entry on the client side
-        // pointing at the peer's MAC.
-        //
-        // Actually simpler: disable rp_filter on both ifaces (the
-        // packet's source IP is in a different subnet from the
-        // backend's own /24, which strict rp_filter would drop).
-        // /16 covers both addresses though, so rp_filter shouldn't
-        // fire.
-        for ns_name in [&client_name, &backend_name] {
-            let _ = Command::new("ip")
-                .args(["netns", "exec", ns_name, "sysctl", "-w", "net.ipv4.conf.all.rp_filter=0"])
-                .output();
-            let _ = Command::new("ip")
-                .args([
-                    "netns",
-                    "exec",
-                    ns_name,
-                    "sysctl",
-                    "-w",
-                    "net.ipv4.conf.default.rp_filter=0",
-                ])
-                .output();
-        }
-
-        Ok(Self { client_ns, backend_ns, host_veth, peer_veth })
-    }
-}
-
-#[derive(Debug)]
-enum TopologyError {
-    Veth(VethError),
-    NetNs(NetNsError),
-}
-
-impl std::fmt::Display for TopologyError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Veth(e) => write!(f, "veth: {e}"),
-            Self::NetNs(e) => write!(f, "netns: {e}"),
-        }
-    }
-}
-impl std::error::Error for TopologyError {}
-
-/// Tells the test caller whether to skip vs propagate-as-failure.
-fn classify_topology_setup(err: &TopologyError) -> SetupOutcome {
-    match err {
-        TopologyError::Veth(VethError::CapNetAdminRequired) => SetupOutcome::SkipNoCap,
-        TopologyError::NetNs(NetNsError::CapNetAdminRequired) => SetupOutcome::SkipNoCap,
-        _ => SetupOutcome::Failed,
-    }
-}
-
-enum SetupOutcome {
-    SkipNoCap,
-    Failed,
-}
 
 /// Enter `target_ns` via `setns(2)` against the netns FD opened from
 /// `/var/run/netns/<name>`. Returns the prior netns FD so the caller
@@ -498,8 +330,8 @@ fn real_tcp_connection_completes_through_vip_with_payload_echo() {
     // `lb_veth_a`. The XDP+TC programs live there per the helper
     // docstring's intent and per research Recommendation 1.
     let _ns_guard = enter_netns(&topo.lb_ns.name).expect("setns lb-ns");
-    let dataplane = EbpfDataplane::new_with_pin_dir(&topo.lb_veth_a, &pin_dir)
-        .expect("EbpfDataplane::new_with_pin_dir on lb_veth_a");
+    let dataplane = EbpfDataplane::new_with_pin_dir(&topo.lb_veth_a, &topo.lb_veth_b, &pin_dir)
+        .expect("EbpfDataplane::new_with_pin_dir on lb_veth_a + lb_veth_b");
 
     let backend_alloc =
         SpiffeId::new("spiffe://overdrive.local/job/e2e/alloc/B1").expect("backend SpiffeId");
@@ -701,15 +533,21 @@ fn removing_backend_purges_reverse_nat_entry_no_stale_rewrite() {
         return;
     }
 
-    let topo = match E2eTopology::create("b") {
+    // Per ADR-0045 the loader requires two distinct ifaces:
+    // client-facing (forward path; `xdp_service_map_lookup`
+    // ingress) and backend-facing (reverse path;
+    // `xdp_reverse_nat_lookup` ingress). The 3-iface topology is
+    // the canonical fixture; S-2.2-18 exercises only map
+    // observation (`update_service` purge invariant) but the
+    // loader itself attaches both XDP programs at construction
+    // time, so two real ifaces are required.
+    let topo = match ThreeIfaceTopology::create("b") {
         Ok(t) => t,
-        Err(e) => match classify_topology_setup(&e) {
-            SetupOutcome::SkipNoCap => {
-                eprintln!("[skip] S-2.2-18 needs CAP_NET_ADMIN: {e}");
-                return;
-            }
-            SetupOutcome::Failed => panic!("topology setup failed: {e}"),
-        },
+        Err(NetNsError::CapNetAdminRequired) => {
+            eprintln!("[skip] S-2.2-18 needs CAP_NET_ADMIN");
+            return;
+        }
+        Err(e) => panic!("3-iface topology setup failed: {e}"),
     };
 
     let pin_dir =
@@ -724,9 +562,12 @@ fn removing_backend_purges_reverse_nat_entry_no_stale_rewrite() {
     }
     let _pin_guard = PinDirGuard(pin_dir.clone());
 
-    let _ns_guard = enter_netns(&topo.client_ns.name).expect("setns into client ns");
+    // Enter `lb-ns` — the LB owns both `lb_veth_a` (client-facing)
+    // and `lb_veth_b` (backend-facing). XDP attach + bpftool /
+    // map-state queries resolve against the calling thread's netns.
+    let _ns_guard = enter_netns(&topo.lb_ns.name).expect("setns into lb-ns");
 
-    let dataplane = EbpfDataplane::new_with_pin_dir(&topo.host_veth, &pin_dir)
+    let dataplane = EbpfDataplane::new_with_pin_dir(&topo.lb_veth_a, &topo.lb_veth_b, &pin_dir)
         .expect("EbpfDataplane::new_with_pin_dir");
 
     let runtime =

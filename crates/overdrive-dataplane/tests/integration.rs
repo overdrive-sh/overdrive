@@ -28,6 +28,12 @@ mod integration {
     /// phase-2-xdp-service-map Slice 04 (US-04; S-2.2-15) —
     /// Maglev real-distribution under XDP traffic on real veth.
     mod maglev_real;
+    /// phase-2-xdp-service-map Slice 09 step 09-03 (S-2.2-33;
+    /// ADR-0045 § Operational) — loader attach topology under
+    /// `bpf_redirect`-on-XDP datapath. Verifies dual-XDP attach
+    /// on `lb_veth_a` (forward) + `lb_veth_b` (reverse) and
+    /// retirement of TC-egress reverse-NAT.
+    mod redirect_neigh_attach;
     /// phase-2-xdp-service-map Slice 05 (US-05; S-2.2-15, S-2.2-18) —
     /// REVERSE_NAT_MAP real-TCP `nc` end-to-end. RED scaffolds.
     mod reverse_nat_e2e;

@@ -315,9 +315,9 @@ unsafe impl aya::Pod for Vip {}
 // ----- loader plumbing -----
 //
 // The same `overdrive_bpf.o` ELF carries every Phase 2.2 program
-// (xdp_service_map_lookup, tc_reverse_nat, xdp_reverse_nat_lookup),
-// which means the SERVICE_MAP HoM declaration is present in the ELF
-// even though the reverse-NAT XDP program does not consume it.
+// (xdp_service_map_lookup, xdp_reverse_nat_lookup), which means
+// the SERVICE_MAP HoM declaration is present in the ELF even
+// though the reverse-NAT XDP program does not consume it.
 // Aya's loader still tries to instantiate every `#[map]` it finds —
 // and BPF_MAP_TYPE_HASH_OF_MAPS creation rejects without an
 // `inner_map_fd` from the loader's side. The pin-by-name workaround
@@ -412,10 +412,10 @@ fn load_reverse_nat_xdp_program() -> LoadedTestBpf {
 
 /// Pre-create + pre-pin the SERVICE_MAP outer HoM at
 /// `<pin_dir>/SERVICE_MAP`. Returns the userspace-owned outer FD.
-/// Mirrors the helpers in the sibling forward-path
-/// (`xdp_service_map_redirect_neigh.rs::pre_pin_service_map`) and
-/// `tc_reverse_nat.rs::pre_pin_service_map` tests verbatim — the
-/// shape is shared across every test that loads `overdrive_bpf.o`.
+/// Mirrors the helper in the sibling forward-path
+/// (`xdp_service_map_redirect_neigh.rs::pre_pin_service_map`)
+/// verbatim — the shape is shared across every test that loads
+/// `overdrive_bpf.o`.
 fn pre_pin_service_map(pin_dir: &std::path::Path) -> OwnedFd {
     use std::ffi::CString;
     use std::mem;

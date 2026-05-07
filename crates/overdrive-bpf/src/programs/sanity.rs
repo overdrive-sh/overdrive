@@ -1,6 +1,8 @@
 //! Shared sanity prologue helper for `xdp_service_map_lookup` and
-//! `tc_reverse_nat`. Per Slice 06 / ADR-0040 Q3=C — single
-//! `#[inline(always)]` helper, two call sites, one source of truth.
+//! `xdp_reverse_nat_lookup` (per ADR-0045 § Decision — replaces
+//! the pre-pivot `tc_reverse_nat` call site). Per Slice 06 /
+//! ADR-0040 Q3=C — single `#[inline(always)]` helper, two call
+//! sites, one source of truth.
 //!
 //! # Five Cloudflare-order checks
 //!
@@ -102,7 +104,7 @@ pub enum Verdict {
 // ---------- Header layout constants ----------
 //
 // Mirrors the constants in `xdp_service_map.rs` and
-// `tc_reverse_nat.rs`. These are kernel ABI / wire ABI; never
+// `xdp_reverse_nat.rs`. These are kernel ABI / wire ABI; never
 // change.
 
 const ETH_TYPE_OFFSET: usize = 12;

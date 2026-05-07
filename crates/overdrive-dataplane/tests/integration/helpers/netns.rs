@@ -92,13 +92,6 @@ impl NetNs {
     }
 
     /// Move an existing iface into this namespace.
-    /// `ip link set <iface> netns <ns>` — the iface MUST currently
-    /// live in the caller's (host) namespace.
-    pub fn move_iface(&self, iface: &str) -> Result<(), NetNsError> {
-        run_ip(["link", "set", iface, "netns", &self.name])?;
-        Ok(())
-    }
-
     /// Configure an IPv4 address on an iface that already lives in
     /// this namespace, then bring the iface up.
     pub fn assign_ip_and_up(&self, iface: &str, cidr: &str) -> Result<(), NetNsError> {

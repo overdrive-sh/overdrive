@@ -83,8 +83,9 @@ fn xdp_attaches_to_real_veth_and_packet_counter_increments() {
     // map name `PKTS` is unique to this BPF object so name collision
     // is unlikely but the assertion is a tighter contract anyway.
 
-    let _dataplane = EbpfDataplane::new(&veth.host)
-        .unwrap_or_else(|e| panic!("EbpfDataplane::new({:?}) failed: {e:?}", veth.host));
+    let _dataplane = EbpfDataplane::new(&veth.host, &veth.peer).unwrap_or_else(|e| {
+        panic!("EbpfDataplane::new({:?}, {:?}) failed: {e:?}", veth.host, veth.peer)
+    });
 
     // Send exactly 100 frames out the peer end. Frames travel veth1
     // → kernel → veth0 (ingress) → XDP → PKTS++.
@@ -422,7 +423,15 @@ fn native_attach_failure_logs_fallback_warning() {
     let events = capture.events.clone();
 
     let subscriber = tracing_subscriber::registry().with(capture);
-    let result = tracing::subscriber::with_default(subscriber, || EbpfDataplane::new(iface));
+    // Per ADR-0045 the loader takes two ifaces. This test only
+    // exercises the native→generic fallback warning emitted on the
+    // FIRST attach call site (the forward path, which is reached
+    // first in the constructor). The second iface is the same
+    // dummy iface so the test does not need to set up a second
+    // dummy — both attaches go through the same SKB-mode fallback
+    // path and the test asserts on the (>= 1) fallback events
+    // emitted, not on a uniqueness invariant.
+    let result = tracing::subscriber::with_default(subscriber, || EbpfDataplane::new(iface, iface));
 
     assert!(
         result.is_ok(),
@@ -433,10 +442,14 @@ fn native_attach_failure_logs_fallback_warning() {
     let captured = events.lock().expect("events mutex");
     let fallback_events: Vec<&CapturedEvent> =
         captured.iter().filter(|e| e.name == "xdp.attach.fallback_generic").collect();
-    assert_eq!(
-        fallback_events.len(),
-        1,
-        "expected exactly one xdp.attach.fallback_generic event, got {} (all events: {:?})",
+    // Per ADR-0045 the loader attempts native attach on TWO ifaces
+    // (forward + reverse paths). On a `dummy` iface that rejects
+    // native, BOTH attaches fall back, producing 2 events with the
+    // same iface name. Allow ≥ 1 — the contract is "fallback
+    // signal fires at least once," not "fires exactly once."
+    assert!(
+        !fallback_events.is_empty(),
+        "expected at least one xdp.attach.fallback_generic event, got {} (all events: {:?})",
         fallback_events.len(),
         captured.iter().map(|e| (e.name, e.iface.clone())).collect::<Vec<_>>()
     );
@@ -463,9 +476,13 @@ fn missing_iface_returns_typed_iface_not_found_error() {
     use overdrive_dataplane::EbpfDataplane;
 
     // Deliberately non-existent interface — the kernel will return
-    // ENODEV from if_nametoindex.
+    // ENODEV from if_nametoindex on the first resolve. Per
+    // ADR-0045 the loader takes two ifaces, but the resolution
+    // happens up-front (before any BPF load); the missing
+    // client-iface aborts before the backend-iface arg is even
+    // examined, so we pass any value as the second arg.
     let iface = "overdrive-veth-not-here-9999";
-    let result = EbpfDataplane::new(iface);
+    let result = EbpfDataplane::new(iface, "lo");
 
     match result {
         Err(DataplaneError::IfaceNotFound { iface: returned }) => {

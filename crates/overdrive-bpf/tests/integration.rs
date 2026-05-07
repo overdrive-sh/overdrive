@@ -29,9 +29,7 @@ mod integration {
     // S-2.2-04, S-2.2-05, S-2.2-08, S-2.2-16, S-2.2-17, S-2.2-19,
     // S-2.2-20, S-2.2-21. Bodies panic until DELIVER fills them
     // per the carpaccio slice plan.
-    mod reverse_key_roundtrip;
     mod sanity_prologue_drops;
-    mod tc_reverse_nat;
     mod xdp_service_map_lookup;
     // Slice 09 (ADR-0045 — bpf_redirect_neigh datapath pivot).
     // Step 09-01: forward-path FIB+L2-rewrite+redirect_neigh contract.

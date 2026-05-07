@@ -162,8 +162,10 @@ pub struct EbpfDataplane {
     /// supports it natively). Keys = `BackendKeyPod { backend_ip,
     /// backend_port, proto, _pad }` host-order; values = `VipPod {
     /// vip_ip, vip_port, _pad }` host-order. Populated by
-    /// `update_service` so the egress `tc_reverse_nat` program can
-    /// rewrite source 5-tuple back to the VIP on response packets.
+    /// `update_service` so the `xdp_reverse_nat_lookup` program
+    /// (attached on the backend-facing veth ingress per ADR-0045)
+    /// can rewrite source 5-tuple back to the VIP on response
+    /// packets.
     ///
     /// Slice 05-04: promotion from the in-memory `BTreeMap`
     /// placeholder in `maps/reverse_nat_map_handle.rs` to the real
@@ -222,16 +224,20 @@ pub struct EbpfDataplane {
     #[allow(dead_code)]
     pin_dir: std::path::PathBuf,
 
-    /// Owns the XDP attachment. Dropping detaches the program. Read
-    /// only via Drop.
+    /// Owns the forward-path XDP attachment (`xdp_service_map_lookup`
+    /// on the client-facing iface ingress). Dropping detaches the
+    /// program. Read only via Drop.
     #[allow(dead_code)]
-    _link: aya::programs::xdp::XdpLinkId,
+    _xdp_forward_link: aya::programs::xdp::XdpLinkId,
 
-    /// Owns the TC egress attachment for `tc_reverse_nat`. Dropping
-    /// detaches the program; the `clsact` qdisc itself stays on the
-    /// iface (idempotent).
+    /// Owns the reverse-path XDP attachment
+    /// (`xdp_reverse_nat_lookup` on the backend-facing iface
+    /// ingress). Per ADR-0045 § Decision: reverse-NAT is performed in
+    /// XDP at the backend-facing veth ingress (replacing the
+    /// pre-pivot `tc_reverse_nat` egress attach). Dropping detaches
+    /// the program.
     #[allow(dead_code)]
-    _tc_link: aya::programs::tc::SchedClassifierLinkId,
+    _xdp_reverse_link: aya::programs::xdp::XdpLinkId,
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -240,8 +246,8 @@ pub struct EbpfDataplane;
 impl EbpfDataplane {
     /// Construct an `EbpfDataplane` by:
     ///
-    /// 1. Resolving `iface` name → ifindex (typed `IfaceNotFound` on
-    ///    `ENODEV`/`ENOENT`).
+    /// 1. Resolving `client_iface` and `backend_iface` names →
+    ///    ifindexes (typed `IfaceNotFound` on `ENODEV`/`ENOENT`).
     /// 2. Pre-creating + pre-pinning the SERVICE_MAP outer HoM at
     ///    `<pin_dir>/SERVICE_MAP`. Required: aya 0.13.x's ELF loader
     ///    cannot create HoM (no `inner_map_fd` support in
@@ -249,10 +255,16 @@ impl EbpfDataplane {
     ///    the FD via `BPF_OBJ_GET` and reuse it.
     /// 3. Loading the BPF ELF via `EbpfLoader::map_pin_path(pin_dir)`
     ///    so aya's loader picks up the pinned outer FD.
-    /// 4. Recovering the BACKEND_MAP typed handle (regular HASH; aya
-    ///    supports it natively).
-    /// 5. Attaching `xdp_service_map_lookup` to `iface` with native-
-    ///    first → SKB fallback on `EOPNOTSUPP`/`ENOTSUP`.
+    /// 4. Recovering the BACKEND_MAP and REVERSE_NAT_MAP typed
+    ///    handles (regular HASH; aya supports them natively).
+    /// 5. Attaching `xdp_service_map_lookup` to `client_iface` (the
+    ///    forward-path ingress) with native-first → SKB fallback on
+    ///    `EOPNOTSUPP`/`ENOTSUP`.
+    /// 6. Attaching `xdp_reverse_nat_lookup` to `backend_iface` (the
+    ///    reverse-path ingress) with the same fallback shape. Per
+    ///    ADR-0045 § Decision: reverse-NAT is performed in XDP at
+    ///    the backend-facing veth ingress (replacing the pre-pivot
+    ///    `tc_reverse_nat` egress attach).
     ///
     /// `pin_dir` MUST be an existing bpffs mount (production passes
     /// `/sys/fs/bpf/overdrive` via [`Self::new`]; tests pass a per-
@@ -261,7 +273,8 @@ impl EbpfDataplane {
     /// already exist; the directory itself is created if missing.
     #[cfg(target_os = "linux")]
     pub fn new_with_pin_dir(
-        iface: &str,
+        client_iface: &str,
+        backend_iface: &str,
         pin_dir: &std::path::Path,
     ) -> Result<Self, DataplaneError> {
         use aya::programs::{ProgramError, Xdp, XdpFlags};
@@ -271,13 +284,24 @@ impl EbpfDataplane {
         use crate::maps::hash_of_maps::HashOfMapsHandle;
         use crate::maps::{BackendEntryPod, BackendKeyPod, ServiceKey, VipPod};
 
-        // Resolve iface name → ifindex first. ENODEV / ENOENT map to
-        // the typed IfaceNotFound variant.
-        if_nametoindex(iface).map_err(|errno| match errno {
+        // Resolve both iface names → ifindexes. ENODEV / ENOENT map
+        // to the typed IfaceNotFound variant. Both ifaces are
+        // resolved up-front so a missing backend-facing iface does
+        // not surface only after the forward-path attach has
+        // partially succeeded.
+        if_nametoindex(client_iface).map_err(|errno| match errno {
             Errno::ENODEV | Errno::ENOENT => {
-                DataplaneError::IfaceNotFound { iface: iface.to_string() }
+                DataplaneError::IfaceNotFound { iface: client_iface.to_string() }
             }
-            other => DataplaneError::LoadFailed(format!("if_nametoindex({iface}): {other}")),
+            other => DataplaneError::LoadFailed(format!("if_nametoindex({client_iface}): {other}")),
+        })?;
+        if_nametoindex(backend_iface).map_err(|errno| match errno {
+            Errno::ENODEV | Errno::ENOENT => {
+                DataplaneError::IfaceNotFound { iface: backend_iface.to_string() }
+            }
+            other => {
+                DataplaneError::LoadFailed(format!("if_nametoindex({backend_iface}): {other}"))
+            }
         })?;
 
         // Ensure the pin directory exists. Failure here is a
@@ -367,12 +391,15 @@ impl EbpfDataplane {
         .map_err(|e| DataplaneError::LoadFailed(format!("BACKEND_MAP try_from: {e}")))?;
 
         // Recover REVERSE_NAT_MAP typed handle. Slice 05-04
-        // promotion: this is the production map the egress
-        // `tc_reverse_nat` program reads on every backend-response
-        // packet. Userspace populates entries in `update_service`;
-        // missing entries cause TC_ACT_OK pass-through (the
-        // architectural intent — late responses from removed
-        // backends are non-LB traffic, see S-2.2-18).
+        // promotion: this is the production map the
+        // `xdp_reverse_nat_lookup` program reads on every
+        // backend-response packet (per ADR-0045 — XDP at the
+        // backend-facing veth ingress, replacing the pre-pivot
+        // TC-egress attach). Userspace populates entries in
+        // `update_service`; missing entries cause `XDP_PASS` and
+        // the kernel routes the unrewritten packet through the
+        // normal stack (the architectural intent — late responses
+        // from removed backends are non-LB traffic, see S-2.2-18).
         let reverse_nat_map = aya::maps::HashMap::<_, BackendKeyPod, VipPod>::try_from(
             bpf.take_map(REVERSE_NAT_MAP_NAME).ok_or_else(|| {
                 DataplaneError::LoadFailed("REVERSE_NAT_MAP not found in BPF object".into())
@@ -395,62 +422,72 @@ impl EbpfDataplane {
 
         // Native-first attach with documented EOPNOTSUPP/ENOTSUP →
         // SKB fallback. Same shape as the prior xdp_pass attach
-        // (S-2.2-02).
-        let link = match prog.attach(iface, XdpFlags::DRV_MODE) {
+        // (S-2.2-02). Forward path attaches on the client-facing
+        // iface ingress.
+        let xdp_forward_link = match prog.attach(client_iface, XdpFlags::DRV_MODE) {
             Ok(link) => link,
             Err(ProgramError::SyscallError(ref se)) if should_fallback_to_generic(&se.io_error) => {
                 tracing::warn!(
                     name: "xdp.attach.fallback_generic",
-                    iface = %iface,
+                    iface = %client_iface,
                     syscall = %se.call,
                     "native XDP attach not supported by driver; falling back to generic (SKB) mode"
                 );
-                prog.attach(iface, XdpFlags::SKB_MODE).map_err(|e| {
+                prog.attach(client_iface, XdpFlags::SKB_MODE).map_err(|e| {
                     DataplaneError::LoadFailed(format!(
-                        "xdp_service_map_lookup.attach({iface}, SKB_MODE) after native fallback: {e}"
+                        "xdp_service_map_lookup.attach({client_iface}, SKB_MODE) after native fallback: {e}"
                     ))
                 })?
             }
             Err(e) => {
                 return Err(DataplaneError::LoadFailed(format!(
-                    "xdp_service_map_lookup.attach({iface}, DRV_MODE): {e}"
+                    "xdp_service_map_lookup.attach({client_iface}, DRV_MODE): {e}"
                 )));
             }
         };
 
-        // Attach `tc_reverse_nat` to the iface egress hook.
+        // Attach `xdp_reverse_nat_lookup` to `backend_iface` ingress.
         //
-        // Slice 05-04: TC egress is the architecture.md § 5 Q2=A
-        // locked path for source-rewrite of backend response
-        // packets. On kernel < 6.6 (project floor 5.10 LTS) the
-        // legacy netlink TC attach requires a `clsact` qdisc on the
-        // iface first; aya ships `qdisc_add_clsact` for that. On
-        // kernel ≥ 6.6 TCX is used and the `clsact` add is a no-op
-        // cost — calling it is harmless either way (idempotent at
-        // the netlink layer; aya returns Ok or `EEXIST` which we
-        // tolerate).
-        if let Err(e) = aya::programs::tc::qdisc_add_clsact(iface) {
-            // `EEXIST` means the qdisc is already there (re-run
-            // without prior cleanup; TCX-capable kernels). Treat
-            // as success; any other error is a real setup failure.
-            if e.raw_os_error() != Some(libc::EEXIST) {
-                return Err(DataplaneError::LoadFailed(format!("qdisc_add_clsact({iface}): {e}")));
-            }
-        }
-        let tc_prog: &mut aya::programs::SchedClassifier = bpf
-            .program_mut("tc_reverse_nat")
+        // Per ADR-0045 § Decision: reverse-NAT moves from
+        // TC-egress (pre-pivot) to XDP at the backend-facing veth
+        // ingress. Same native-first → SKB fallback shape as the
+        // forward-path attach above; the fallback contract pinned
+        // by Slice 01 unit tests in `lib.rs` covers both call sites.
+        let reverse_prog: &mut Xdp = bpf
+            .program_mut("xdp_reverse_nat_lookup")
             .ok_or_else(|| {
-                DataplaneError::LoadFailed("tc_reverse_nat program not found in BPF object".into())
+                DataplaneError::LoadFailed(
+                    "xdp_reverse_nat_lookup program not found in BPF object".into(),
+                )
             })?
             .try_into()
-            .map_err(|e| DataplaneError::LoadFailed(format!("tc_reverse_nat program type: {e}")))?;
-        tc_prog
-            .load()
-            .map_err(|e| DataplaneError::LoadFailed(format!("tc_reverse_nat.load: {e}")))?;
-        let tc_link =
-            tc_prog.attach(iface, aya::programs::tc::TcAttachType::Egress).map_err(|e| {
-                DataplaneError::LoadFailed(format!("tc_reverse_nat.attach({iface}, Egress): {e}"))
+            .map_err(|e| {
+                DataplaneError::LoadFailed(format!("xdp_reverse_nat_lookup program type: {e}"))
             })?;
+        reverse_prog
+            .load()
+            .map_err(|e| DataplaneError::LoadFailed(format!("xdp_reverse_nat_lookup.load: {e}")))?;
+        let xdp_reverse_link = match reverse_prog.attach(backend_iface, XdpFlags::DRV_MODE) {
+            Ok(link) => link,
+            Err(ProgramError::SyscallError(ref se)) if should_fallback_to_generic(&se.io_error) => {
+                tracing::warn!(
+                    name: "xdp.attach.fallback_generic",
+                    iface = %backend_iface,
+                    syscall = %se.call,
+                    "native XDP attach not supported by driver; falling back to generic (SKB) mode"
+                );
+                reverse_prog.attach(backend_iface, XdpFlags::SKB_MODE).map_err(|e| {
+                    DataplaneError::LoadFailed(format!(
+                        "xdp_reverse_nat_lookup.attach({backend_iface}, SKB_MODE) after native fallback: {e}"
+                    ))
+                })?
+            }
+            Err(e) => {
+                return Err(DataplaneError::LoadFailed(format!(
+                    "xdp_reverse_nat_lookup.attach({backend_iface}, DRV_MODE): {e}"
+                )));
+            }
+        };
 
         Ok(Self {
             bpf,
@@ -460,17 +497,22 @@ impl EbpfDataplane {
             service_backends: parking_lot::Mutex::new(std::collections::BTreeMap::new()),
             service_reverse_nat_keys: parking_lot::Mutex::new(std::collections::BTreeMap::new()),
             pin_dir: pin_dir.to_path_buf(),
-            _link: link,
-            _tc_link: tc_link,
+            _xdp_forward_link: xdp_forward_link,
+            _xdp_reverse_link: xdp_reverse_link,
         })
     }
 
     /// Construct an `EbpfDataplane` against the production pin
     /// directory (`/sys/fs/bpf/overdrive`). Tests use
     /// [`Self::new_with_pin_dir`] with a per-test tempdir.
+    ///
+    /// Per ADR-0045 § Operational the loader takes two ifaces:
+    /// `client_iface` (forward-path; `xdp_service_map_lookup`
+    /// ingress) and `backend_iface` (reverse-path;
+    /// `xdp_reverse_nat_lookup` ingress).
     #[cfg(target_os = "linux")]
-    pub fn new(iface: &str) -> Result<Self, DataplaneError> {
-        Self::new_with_pin_dir(iface, std::path::Path::new(DEFAULT_PIN_DIR))
+    pub fn new(client_iface: &str, backend_iface: &str) -> Result<Self, DataplaneError> {
+        Self::new_with_pin_dir(client_iface, backend_iface, std::path::Path::new(DEFAULT_PIN_DIR))
     }
 
     /// Number of entries currently in REVERSE_NAT_MAP.
@@ -559,7 +601,7 @@ impl EbpfDataplane {
     /// target"` diagnostic. Lets the rest of the workspace compile on
     /// macOS without aya in the dep graph (architecture.md §5.2).
     #[cfg(not(target_os = "linux"))]
-    pub fn new(_iface: &str) -> Result<Self, DataplaneError> {
+    pub fn new(_client_iface: &str, _backend_iface: &str) -> Result<Self, DataplaneError> {
         Err(DataplaneError::LoadFailed("overdrive-dataplane: non-Linux build target".into()))
     }
 }
@@ -820,8 +862,9 @@ impl Dataplane for EbpfDataplane {
         //
         // For every backend in the new set, install
         // `(backend_ip, backend_port, proto=TCP)` → `(vip_ip, vip_port)`
-        // so the egress `tc_reverse_nat` program can rewrite the
-        // source 5-tuple of response packets back to the VIP.
+        // so the `xdp_reverse_nat_lookup` program (attached on the
+        // backend-facing veth ingress per ADR-0045) can rewrite
+        // the source 5-tuple of response packets back to the VIP.
         //
         // For backends that were in the PRIOR set but are not in
         // the new set, delete the corresponding REVERSE_NAT_MAP
@@ -937,7 +980,7 @@ mod tests {
         // types do not, and adding a manual impl is noise for a stub
         // that lives only on Linux). Unwrap the `Result` via match
         // rather than `expect_err`, which would require `T: Debug`.
-        match EbpfDataplane::new("lo") {
+        match EbpfDataplane::new("lo", "lo") {
             Err(DataplaneError::LoadFailed(msg)) => {
                 assert!(msg.contains("non-Linux build target"), "unexpected diagnostic: {msg}");
             }

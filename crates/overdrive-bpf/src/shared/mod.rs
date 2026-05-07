@@ -1,5 +1,6 @@
 //! Shared kernel-side helpers used by `xdp_service_map` and
-//! `tc_reverse_nat`.
+//! `xdp_reverse_nat` (per ADR-0045 § Decision; replaces the
+//! pre-pivot `tc_reverse_nat` consumer).
 //!
 //! Per architecture.md § 11 (endianness lockstep) + Q3=C (sanity
 //! prologue strategy = shared `#[inline(always)]` Rust helper):
