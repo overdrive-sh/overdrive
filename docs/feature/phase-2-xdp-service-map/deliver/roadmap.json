@@ -2,8 +2,8 @@
   "roadmap": {
     "project_id": "phase-2-xdp-service-map",
     "created_at": "2026-05-05T07:46:21Z",
-    "total_steps": 30,
-    "phases": 8
+    "total_steps": 34,
+    "phases": 9
   },
   "tier_field_semantics": "The `tier` field on each step reflects the step's own test harness (Tier 1 = pure-Rust unit/proptest; Tier 2 = BPF_PROG_TEST_RUN; Tier 3 = real-kernel via Lima/ubuntu-latest; Tier 4 = veristat/xdp-perf gates), not the tier of the first scenario it unblocks. Newtype/enum steps are Tier 1 even when they unblock Tier 2/3 scenarios in subsequent steps of the same phase.",
   "phases": [
@@ -916,32 +916,209 @@
           "id": "06-05",
           "name": "Update veristat baseline: ≤ 20% delta vs Slice 04, ≤ 60% of ceiling",
           "criteria": [
-            "perf-baseline/main/verifier-budget/veristat-service-map.txt updated post-Slice-06",
-            "instruction count delta vs Slice 04 baseline ≤ 20%",
-            "absolute count ≤ 60% of 1M ceiling",
-            "commit message documents delta"
+            "perf-baseline/main/verifier-budget/veristat-service-map.txt updated against post-pivot xdp_service_map_lookup body",
+            "perf-baseline/main/verifier-budget/veristat-reverse-nat.txt records xdp_reverse_nat_lookup baseline (NEW program; no historical baseline)",
+            "perf-baseline/main/verifier-budget/tc_reverse_nat.txt removed in the same commit (single-cut deletion)",
+            "instruction count delta vs prior post-pivot baseline ≤ 20% (the first baseline-of-record under the new shape resets the trend)",
+            "absolute count ≤ 60% of 1M ceiling per program",
+            "commit message documents delta + kernel + commit SHA + ADR-0045 reference"
           ],
-          "description": "Re-record the veristat baseline so Slice 07's gate enforces against the post-Slice-06 shape. Closes the slice's K6/K7 KPIs. Flips S-2.2-25 GREEN.",
+          "description": "Re-record veristat baselines so Slice 07's gate enforces against the post-pivot program shape. Per ADR-0045 § 6 the baselines target both `xdp_service_map_lookup` (extended with bpf_fib_lookup + L2 MAC rewrite + bpf_redirect_neigh) and the new `xdp_reverse_nat_lookup` program; the retired `tc_reverse_nat` baseline file is deleted in the same commit (single-cut greenfield migration per CLAUDE.md). The Tier 4 gate threshold (≤ 20% delta per PR; ≤ 60% of 1M ceiling absolute) is preserved. Flips S-2.2-25 GREEN against the post-pivot shape. Tracked under #159.",
           "scenario_ref": "S-2.2-25",
           "scenario_name": "verifier_budget_delta_vs_slice4_baseline_under_twenty_percent",
           "test_file": "perf-baseline/main/verifier-budget/veristat-service-map.txt",
           "acceptance_criteria": [
-            "Updated baseline file committed",
-            "Instruction-count delta vs Slice 04 ≤ 20%",
-            "Absolute instruction count ≤ 600_000 (60% of ceiling)",
-            "Commit message documents delta + kernel + commit SHA"
+            "Updated baseline files committed for both xdp_service_map_lookup and xdp_reverse_nat_lookup",
+            "tc_reverse_nat veristat baseline deleted (no parallel paths per CLAUDE.md greenfield rule)",
+            "Per-program absolute instruction count ≤ 600_000 (60% of 1M ceiling)",
+            "Per-program delta vs prior post-pivot baseline ≤ 20% (first-baseline run resets trend; subsequent runs gate on delta)",
+            "Commit message documents kernel version + commit SHA + ADR-0045 reference",
+            "Slice 07 gate (`cargo xtask verifier-regress`) enforces against the new baselines once landed"
           ],
           "implementation_scope": [
             "perf-baseline/main/verifier-budget/veristat-service-map.txt",
-            "perf-baseline/main/verifier-budget/veristat-reverse-nat.txt"
+            "perf-baseline/main/verifier-budget/veristat-reverse-nat.txt",
+            "perf-baseline/main/verifier-budget/tc_reverse_nat.txt"
           ],
           "effort_hours": 2,
           "tier": 4,
           "deps": [
-            "06-04"
+            "06-04",
+            "09-03"
           ],
           "risk": "low",
           "mutation_target": "skip-rationale: baseline files are generated artifacts with no operator sites; mutants empty-filter is a vacuous pass"
+        }
+      ]
+    },
+    {
+      "id": "09",
+      "name": "Slice 09 — bpf_redirect_neigh datapath pivot (#159)",
+      "description": "Replace the IP-forward + TCX-egress reverse-NAT shape (locked by ADR-0040 Q2=A, empirically falsified by docs/analysis/e1-bpftrace-results.md probes 1–7) with the Cilium-shape bpf_redirect_neigh datapath locked in ADR-0045. Forward path: extend `xdp_service_map_lookup` with bpf_fib_lookup + L2 MAC rewrite + bpf_redirect_neigh on the client-facing veth ingress (kernel IP-forwarder no longer in path). Reverse path: new `xdp_reverse_nat_lookup` XDP program at backend-facing veth ingress, with the same FIB-lookup + L2-rewrite + bpf_redirect_neigh shape; `tc_reverse_nat.rs` deleted in the same commit (single-cut greenfield migration). Falsification gate: S-2.2-17 (real_tcp_connection_completes_through_vip_with_payload_echo) GREENs naturally without the test-fixture `ethtool -K` offload-disable that would otherwise be required against the pre-pivot shape — production-realistic veth defaults must work end-to-end. Tracked under #159; supersedes ADR-0040 Q2 only (ADR-0040 Q1/Q3/Q5/Q7 preserved; ADR-0041/0042/0043 unaffected).",
+      "slice_ref": "docs/product/architecture/adr-0045-bpf-redirect-neigh-datapath.md",
+      "depends_on": [
+        "06"
+      ],
+      "parallel_with": [],
+      "effort_days": 3.5,
+      "acceptance": [
+        "S-2.2-31 Tier 2 — extended xdp_service_map_lookup performs bpf_fib_lookup + L2 rewrite + bpf_redirect_neigh on SERVICE_MAP hit; FIB miss returns XDP_PASS",
+        "S-2.2-32 Tier 2 — new xdp_reverse_nat_lookup performs sanity prologue + REVERSE_NAT_MAP lookup + L3+L4 rewrite + bpf_fib_lookup + L2 rewrite + bpf_redirect_neigh; FIB miss returns XDP_PASS",
+        "S-2.2-33 Tier 3 — loader attaches xdp_reverse_nat_lookup on backend-facing veth ingress; TC-egress attach retired; tc_reverse_nat.rs and its perf-baseline file deleted in the same commit",
+        "S-2.2-17 Tier 3 — real `nc -l 9000` ↔ `nc 10.0.0.1 8080` TCP connection with payload echo GREENs against production-realistic veth defaults (no `ethtool -K` offload-disable in test fixture)"
+      ],
+      "steps": [
+        {
+          "id": "09-01",
+          "name": "Extend xdp_service_map_lookup with bpf_fib_lookup + L2 rewrite + bpf_redirect_neigh (forward path)",
+          "criteria": [
+            "Test compiles with #![cfg(feature = \"integration-tests\")] entrypoint, runs via cargo nextest run --features integration-tests (cargo xtask lima run -- on macOS) per .claude/rules/testing.md § Integration vs unit gating",
+            "After existing SERVICE_MAP / MAGLEV_MAP / BACKEND_MAP lookup chain (preserved verbatim from Slice 04), program calls bpf_fib_lookup against post-DNAT (src_ip, dst_ip) to resolve egress ifindex + next-hop MAC",
+            "L2 rewrite: eth_hdr->h_dest = FIB-resolved next-hop MAC; eth_hdr->h_source = egress iface MAC",
+            "Returns XDP_REDIRECT via bpf_redirect_neigh(ifindex, NULL, 0, 0) on FIB hit",
+            "FIB miss (any non-zero BPF_FIB_LKUP_RET_*) returns XDP_PASS (kernel handles ARP; per ADR-0045 § 5)",
+            "Tier 2 PROG_TEST_RUN exercises both FIB-hit and FIB-miss branches"
+          ],
+          "description": "Per ADR-0045 § Decision § 1, the request path performs the full forward-path rewrite in-program with no kernel IP-forwarding involvement. Adds `bpf_fib_lookup` (one helper call, ~10 verifier instructions per § 6) plus a 12-byte L2-MAC memcpy unrolled loop after the existing lookup chain. FIB-miss handling per § 5: XDP_PASS so kernel ARP machinery populates the neighbour cache (Cilium's canonical choice; first packet of a new flow may pay one slow-path round-trip; warm cache hits fast-path on subsequent packets). The DROP_COUNTER discipline is preserved — XDP_PASS on FIB miss does not consume a DropClass slot (per ADR-0040 Q7, no new variant required). Flips S-2.2-31 GREEN.",
+          "scenario_ref": "S-2.2-31",
+          "scenario_name": "xdp_service_map_lookup_forward_path_redirects_via_neigh_with_fib_resolution",
+          "test_file": "crates/overdrive-bpf/tests/integration/xdp_service_map_redirect_neigh.rs",
+          "acceptance_criteria": [
+            "Test compiles with #![cfg(feature = \"integration-tests\")] entrypoint, runs via cargo nextest run --features integration-tests (cargo xtask lima run -- on macOS) per .claude/rules/testing.md § Integration vs unit gating",
+            "SERVICE_MAP / MAGLEV_MAP / BACKEND_MAP chained lookup logic preserved verbatim from Slice 04 (no behavioural change on the lookup path)",
+            "On hit: bpf_fib_lookup invoked against post-DNAT (src_ip, dst_ip); on success eth_hdr h_dest/h_source rewritten and bpf_redirect_neigh(ifindex, NULL, 0, 0) returned",
+            "On bpf_fib_lookup non-zero return: program returns XDP_PASS without consuming a DROP_COUNTER slot",
+            "Tier 2 PROG_TEST_RUN covers FIB-hit (rewritten Eth header + XDP_REDIRECT verdict) and FIB-miss (XDP_PASS verdict) branches",
+            "Sanity prologue (Slice 06) call site preserved at top of program — ingress-only scope unchanged per ADR-0045 § 4"
+          ],
+          "implementation_scope": [
+            "crates/overdrive-bpf/src/programs/xdp_service_map.rs",
+            "crates/overdrive-bpf/tests/integration/xdp_service_map_redirect_neigh.rs"
+          ],
+          "effort_hours": 6,
+          "tier": 2,
+          "deps": [
+            "06-04"
+          ],
+          "risk": "medium",
+          "risk_mitigation": "ADR-0045 § 6 quantifies verifier-budget delta at ~20–30 instructions vs prior baseline (well below ≤ 20% delta envelope); aya-ebpf 0.1.x exposes bpf_fib_lookup + bpf_redirect_neigh natively (no hand-rolled syscall surface required per aya-rs research § A.1)",
+          "mutation_target": "crates/overdrive-bpf"
+        },
+        {
+          "id": "09-02",
+          "name": "Create xdp_reverse_nat_lookup XDP program at backend-facing veth ingress (reverse path)",
+          "criteria": [
+            "Test compiles with #![cfg(feature = \"integration-tests\")] entrypoint, runs via cargo nextest run --features integration-tests (cargo xtask lima run -- on macOS) per .claude/rules/testing.md § Integration vs unit gating",
+            "New program at crates/overdrive-bpf/src/programs/xdp_reverse_nat.rs (separate file from xdp_service_map.rs per ADR-0045 § Decision § 3 — single-purpose programs, per-program verifier budget envelope)",
+            "Sanity prologue call site at top of program (ADR-0040 Q3 amendment ingress-only scope preserved per ADR-0045 § 4)",
+            "REVERSE_NAT_MAP lookup keyed on (client_ip, client_port, backend_ip, backend_port, proto) (read-side only — write-side stays in update_service path, ADR-0041 lockstep contract preserved)",
+            "L3 rewrite: (backend_ip, backend_port) → (VIP, vip_port) with bpf_l3_csum_replace + bpf_l4_csum_replace incremental update (preserved from ADR-0040 Q1=A)",
+            "bpf_fib_lookup against post-rewrite (src_ip, dst_ip) for client-facing egress iface + next-hop MAC",
+            "L2 rewrite + bpf_redirect_neigh(ifindex, NULL, 0, 0) on hit; XDP_PASS on REVERSE_NAT miss or FIB miss",
+            "Tier 2 PROG_TEST_RUN exercises hit + miss + FIB-miss branches"
+          ],
+          "description": "Per ADR-0045 § Decision § 2, the response path moves from TCX-egress on the client-facing veth to XDP-ingress on the backend-facing veth. The reverse-NAT *logic* — REVERSE_NAT_MAP lookup, L3+L4 rewrite, checksum update — is preserved verbatim from `tc_reverse_nat.rs`; only the *attach layer* and surrounding control flow change (L2 rewrite + bpf_redirect_neigh replace the kernel-stack egress path that fell over on paged skbs in S-2.2-17). Splitting into a second XDP program rather than folding into xdp_service_map_lookup matches Cilium's bpf_lxc.c shape and keeps each program well below the per-program ≤ 60% of 1M ceiling. ADR-0045 § 4 confirms the sanity prologue applies (this is XDP ingress; ingress-only scope from ADR-0040 Q3 amendment is structurally satisfied). Flips S-2.2-32 GREEN.",
+          "scenario_ref": "S-2.2-32",
+          "scenario_name": "xdp_reverse_nat_lookup_reverse_path_redirects_via_neigh_with_fib_resolution",
+          "test_file": "crates/overdrive-bpf/tests/integration/xdp_reverse_nat_redirect_neigh.rs",
+          "acceptance_criteria": [
+            "Test compiles with #![cfg(feature = \"integration-tests\")] entrypoint, runs via cargo nextest run --features integration-tests (cargo xtask lima run -- on macOS) per .claude/rules/testing.md § Integration vs unit gating",
+            "New program file crates/overdrive-bpf/src/programs/xdp_reverse_nat.rs exists; xdp_reverse_nat program annotated for XDP-ingress attach",
+            "Sanity prologue call site at top of program (shared helper from Slice 06-02 invoked; no duplication)",
+            "REVERSE_NAT_MAP lookup keyed on (client_ip, client_port, backend_ip, backend_port, proto); L3+L4 rewrite via bpf_l3_csum_replace / bpf_l4_csum_replace on hit",
+            "On hit: bpf_fib_lookup invoked against post-rewrite (src_ip, dst_ip); success path rewrites Eth header + returns bpf_redirect_neigh(ifindex, NULL, 0, 0)",
+            "Miss path (REVERSE_NAT miss OR FIB miss): XDP_PASS, no DROP_COUNTER slot consumed",
+            "Tier 2 PROG_TEST_RUN covers REVERSE_NAT-hit-FIB-hit (rewrite + XDP_REDIRECT), REVERSE_NAT-hit-FIB-miss (XDP_PASS), and REVERSE_NAT-miss (XDP_PASS) branches"
+          ],
+          "implementation_scope": [
+            "crates/overdrive-bpf/src/programs/xdp_reverse_nat.rs",
+            "crates/overdrive-bpf/src/programs/mod.rs",
+            "crates/overdrive-bpf/tests/integration/xdp_reverse_nat_redirect_neigh.rs"
+          ],
+          "effort_hours": 8,
+          "tier": 2,
+          "deps": [
+            "09-01"
+          ],
+          "risk": "medium",
+          "risk_mitigation": "ADR-0045 § Decision § 3 documents the per-program structural choice; verifier budget per ADR-0045 § 6 well below the ≤ 60% absolute ceiling (combined ≈ 20–30 instructions over the prior tc_reverse_nat shape, distributed across two programs); REVERSE_NAT_MAP shape, key structure, and endianness lockstep contract from ADR-0041 preserved verbatim — the lockstep proptest from Slice 05-03 still applies",
+          "mutation_target": "crates/overdrive-bpf"
+        },
+        {
+          "id": "09-03",
+          "name": "Loader: attach xdp_reverse_nat_lookup on backend-facing veth ingress; retire TC-egress + delete tc_reverse_nat.rs",
+          "criteria": [
+            "Test compiles with #![cfg(feature = \"integration-tests\")] entrypoint, runs via cargo nextest run --features integration-tests (cargo xtask lima run -- on macOS) per .claude/rules/testing.md § Integration vs unit gating",
+            "EbpfDataplane loader attaches xdp_reverse_nat_lookup on backend-facing veth (lb_veth_b) XDP ingress",
+            "Existing SchedClassifier::attach(..., TcAttachType::Egress) call for tc_reverse_nat REMOVED in the same commit",
+            "crates/overdrive-bpf/src/programs/tc_reverse_nat.rs deleted (no stub, no #[deprecated], no parallel path — per CLAUDE.md greenfield single-cut migration discipline)",
+            "perf-baseline/main/verifier-budget/tc_reverse_nat.txt deleted if present",
+            "Loader native/SKB fallback (ADR-0038 D8 / Slice 01) preserved for the new XDP attach call (try DRV_MODE first; fall back to SKB_MODE on EOPNOTSUPP/ENOTSUP only — never on EINVAL per development.md § XDP attach mode)",
+            "Tier 3 attach test asserts both XDP programs are loaded (one per direction) and TC-egress program is absent"
+          ],
+          "description": "Per ADR-0045 § Decision § Phasing/Slice-impact, the loader gains a second XDP attach call on the backend-facing veth ingress while the TC-egress attach call is removed. Single-cut greenfield migration per CLAUDE.md and feedback_single_cut_greenfield_migrations.md: tc_reverse_nat.rs and its perf-baseline file are deleted in the same commit that lands the new XDP attach. No stub, no deprecation marker, no feature-flagged old path. The 3-iface test topology from ADR-0043 accommodates the new attach point without change — `&topo.lb_veth_a` continues to be the public loader handle; the loader internally derives `lb_veth_b` from the same topology handle per ADR-0045 § Operational. This bundles the user dispatch's items (3) loader changes and (4) single-cut deletion into one commit per CLAUDE.md greenfield discipline. Flips S-2.2-33 GREEN.",
+          "scenario_ref": "S-2.2-33",
+          "scenario_name": "loader_attaches_xdp_reverse_nat_on_backend_veth_and_retires_tc_egress",
+          "test_file": "crates/overdrive-dataplane/tests/integration/redirect_neigh_attach.rs",
+          "acceptance_criteria": [
+            "Test compiles with #![cfg(feature = \"integration-tests\")] entrypoint, runs via cargo nextest run --features integration-tests (cargo xtask lima run -- on macOS) per .claude/rules/testing.md § Integration vs unit gating",
+            "EbpfDataplane::new attaches xdp_service_map_lookup on lb_veth_a ingress AND xdp_reverse_nat_lookup on lb_veth_b ingress",
+            "SchedClassifier::attach(..., TcAttachType::Egress) call removed from loader; bpftool net show on lb_veth_a reports zero TC-egress programs after loader init",
+            "tc_reverse_nat.rs source file does not exist after the commit (verified by file presence assertion in test or git log of the same commit)",
+            "perf-baseline/main/verifier-budget/tc_reverse_nat.txt does not exist after the commit",
+            "Native-mode XDP attach attempted first on both veths; structured tracing::warn! `xdp.attach.fallback_generic` event emitted on EOPNOTSUPP fallback (per Slice 01 contract); EINVAL is NOT a fallback trigger",
+            "Tier 3 attach test asserts both XDP programs loaded (bpftool prog show by name) and TC-egress program absent"
+          ],
+          "implementation_scope": [
+            "crates/overdrive-dataplane/src/lib.rs",
+            "crates/overdrive-dataplane/src/loader.rs",
+            "crates/overdrive-dataplane/tests/integration/redirect_neigh_attach.rs",
+            "crates/overdrive-bpf/src/programs/tc_reverse_nat.rs",
+            "crates/overdrive-bpf/src/programs/mod.rs",
+            "perf-baseline/main/verifier-budget/tc_reverse_nat.txt"
+          ],
+          "effort_hours": 5,
+          "tier": 3,
+          "deps": [
+            "09-02"
+          ],
+          "risk": "medium",
+          "risk_mitigation": "Single-cut migration risk mitigated by deletion-discipline rule (CLAUDE.md): production code AND its tests are deleted in the same commit, no salvage; loader native/generic fallback shape from Slice 01 is reused unchanged for the new XDP attach call; ADR-0045 § Operational confirms EbpfDataplane public surface is unchanged (no Dataplane trait change)",
+          "mutation_target": "crates/overdrive-dataplane"
+        },
+        {
+          "id": "09-04",
+          "name": "Lift #[ignore] on S-2.2-17 and verify GREEN against production-realistic veth defaults",
+          "criteria": [
+            "Test compiles with #![cfg(feature = \"integration-tests\")] entrypoint, runs via cargo nextest run --features integration-tests (cargo xtask lima run -- on macOS) per .claude/rules/testing.md § Integration vs unit gating",
+            "#[ignore = \"blocked on #159 ...\"] attribute removed from real_tcp_connection_completes_through_vip_with_payload_echo in crates/overdrive-dataplane/tests/integration/reverse_nat_e2e.rs",
+            "Test fixture (helpers/netns.rs and reverse_nat_e2e.rs) does NOT call `ethtool -K $iface tso off gso off gro off` — production-realistic veth defaults must work end-to-end per ADR-0045 § 7 and GH #159 acceptance",
+            "Test GREENs naturally: nc -l 9000 ↔ nc 10.0.0.1 8080 completes 3-way handshake + payload echo + clean close; nc client exits 0",
+            "ARP pre-population via `ip neigh replace ... nud permanent` (existing line in reverse_nat_e2e.rs:472-489) preserved per ADR-0045 § 5 (eliminates first-packet ARP flake)"
+          ],
+          "description": "Per ADR-0045 § 7, S-2.2-17 is the load-bearing falsification probe for the pivot. Under the post-pivot architecture the kernel IP-forwarder is no longer in the path, `pskb_expand_head` + `skb_checksum_help` never run on the receive-side skb, the stale-csum-on-paged-skb condition never arises, and the pre-classifier sanity rejection that produced SKB_DROP_REASON_TC_EGRESS=51 (probe 1) cannot trigger. The test should GREEN naturally — no test-body change required (the assertion shape is post-pivot-correct as written). The empirical record (working tree edit to helpers/netns.rs) showed offloads were already off pre-pivot; the post-pivot architecture must work against production-realistic defaults, so any `ethtool -K` offload-disable in the test fixture is explicitly REJECTED at this step (matches GH #159 acceptance criterion). If S-2.2-17 still fails after the pivot lands, ADR-0045 § 7 directs a fresh probe sequence — this is a *new* bug, not a recurrence of the pre-pivot failure mode. Flips S-2.2-17 GREEN.",
+          "scenario_ref": "S-2.2-17",
+          "scenario_name": "real_tcp_connection_completes_through_vip_with_payload_echo",
+          "test_file": "crates/overdrive-dataplane/tests/integration/reverse_nat_e2e.rs",
+          "acceptance_criteria": [
+            "Test compiles with #![cfg(feature = \"integration-tests\")] entrypoint, runs via cargo nextest run --features integration-tests (cargo xtask lima run -- on macOS) per .claude/rules/testing.md § Integration vs unit gating",
+            "#[ignore] attribute removed from real_tcp_connection_completes_through_vip_with_payload_echo",
+            "No `ethtool -K` invocation in helpers/netns.rs OR reverse_nat_e2e.rs (production-realistic veth defaults)",
+            "Test GREENs in Lima dev VM and ubuntu-latest CI; nc client exit code 0",
+            "Companion test (REVERSE_NAT purge on backend removal — Slice 05-04's second AC) preserved as-is and continues to pass"
+          ],
+          "implementation_scope": [
+            "crates/overdrive-dataplane/tests/integration/reverse_nat_e2e.rs",
+            "crates/overdrive-dataplane/tests/integration/helpers/netns.rs"
+          ],
+          "effort_hours": 3,
+          "tier": 3,
+          "deps": [
+            "09-03"
+          ],
+          "risk": "medium",
+          "risk_mitigation": "Falsification gate is structural: ADR-0045 § 7 documents that the pre-pivot kernel mechanism is removed from the path; if S-2.2-17 fails post-pivot, diagnosis is a new bug in the post-pivot programs and triggers a fresh probe sequence (not a patch attempt against the pre-pivot shape); the existing ARP pre-population line eliminates first-packet flake per ADR-0045 § 5",
+          "mutation_target": "crates/overdrive-dataplane"
         }
       ]
     },
