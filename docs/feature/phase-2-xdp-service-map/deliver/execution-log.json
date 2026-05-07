@@ -1093,6 +1093,83 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-05-07T07:19:24Z"
+    },
+    {
+      "sid": "09-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-07T07:26:08Z"
+    },
+    {
+      "sid": "09-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-07T07:33:40Z"
+    },
+    {
+      "sid": "09-03",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: loader is adapter-class real-infra; Tier 3 integration test in step 1 is the correct gate per .claude/rules/testing.md",
+      "t": "2026-05-07T07:33:46Z"
+    },
+    {
+      "sid": "09-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-07T07:51:31Z"
+    },
+    {
+      "sid": "09-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-07T07:52:02Z"
+    },
+    {
+      "sid": "09-04",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-07T09:01:23Z"
+    },
+    {
+      "sid": "09-04",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "FAIL_FALSIFICATION_NEEDS_PROBE",
+      "t": "2026-05-07T09:02:50Z"
+    },
+    {
+      "sid": "09-04",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: S-2.2-17 Tier 3 IS the falsification probe per ADR-0045 \u00a7 7; no narrower unit assertion exists for post-pivot end-to-end TCP completion",
+      "t": "2026-05-07T09:03:24Z"
+    },
+    {
+      "sid": "09-04",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-05-07T09:06:03Z"
+    },
+    {
+      "sid": "09-04",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: RED_ACCEPTANCE failed; ADR-0045 \u00a7 7 directs fresh probe sequence (a failing post-pivot S-2.2-17 is a NEW bug, not pre-pivot recurrence) before any production change. No GREEN implementation work performed. See assistant message for probe-1 pcap evidence and probe-2 candidates.",
+      "t": "2026-05-07T09:06:10Z"
+    },
+    {
+      "sid": "09-04",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: GREEN skipped (RED_ACCEPTANCE FAIL pending fresh probe sequence per ADR-0045 \u00a7 7). No commit produced; working-tree edits to reverse_nat_e2e.rs (ignore lift) and helpers/netns.rs (ethtool removal) preserved uncommitted as the falsification-probe input.",
+      "t": "2026-05-07T09:06:18Z"
     }
   ]
 }
