@@ -16,13 +16,11 @@
 //! By construction this module contains no clock / transport / entropy
 //! access; the acceptance test
 //! `eval_broker_does_not_import_clock_transport_entropy` enforces that
-//! structurally. The reaper *cadence* (N = 16 ticks per ADR-0013 §8)
-//! lives in the runtime assembly at step 04-04 — this module delivers
-//! only the `reap_cancelable()` primitive the cadence will drive.
+//! structurally.
 
 use std::collections::BTreeMap;
 
-use overdrive_core::reconciler::{ReconcilerName, TargetResource};
+use crate::reconciler::{ReconcilerName, TargetResource};
 
 /// Per-broker counter snapshot rendered by `cluster status` and the
 /// ADR-0017 storm-proofing invariant.

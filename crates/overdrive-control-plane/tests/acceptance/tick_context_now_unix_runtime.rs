@@ -29,12 +29,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use overdrive_control_plane::eval_broker::Evaluation;
 use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
 use overdrive_control_plane::{AppState, job_lifecycle, noop_heartbeat};
 use overdrive_core::aggregate::{
     DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
 };
+use overdrive_core::eval_broker::Evaluation;
 use overdrive_core::id::NodeId;
 use overdrive_core::reconciler::{ReconcilerName, TargetResource};
 use overdrive_core::traits::clock::Clock;

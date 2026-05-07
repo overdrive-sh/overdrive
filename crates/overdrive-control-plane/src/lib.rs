@@ -16,7 +16,6 @@
 //! | `error` | `ControlPlaneError` enum + `to_response` mapping (ADR-0015) |
 //! | `tls_bootstrap` | Ephemeral CA + trust triple + rustls config (ADR-0010) |
 //! | `reconciler_runtime` | `ReconcilerRuntime` + registry (ADR-0013/ADR-0035) |
-//! | `eval_broker` | `EvaluationBroker` + cancelable-eval-set (ADR-0013) |
 //! | `view_store` | Runtime-owned `ViewStore` port + `RedbViewStore` (ADR-0035) |
 //! | `observation_wiring` | `LocalObservationStore` single-node wiring (ADR-0012, revised 2026-04-24) |
 
@@ -50,7 +49,6 @@ pub mod api;
 pub mod cgroup_manager;
 pub mod cgroup_preflight;
 pub mod error;
-pub mod eval_broker;
 pub mod handlers;
 pub mod observation_wiring;
 // `cargo openapi-{gen,check}` library — pure deterministic YAML render
@@ -238,7 +236,7 @@ pub struct ServerConfig {
     /// identity-artefact root, and conflating the two left the CLI
     /// pinning a stale CA on the production-default path.
     pub operator_config_dir: PathBuf,
-    /// Cadence between drains of the [`crate::eval_broker::EvaluationBroker`]
+    /// Cadence between drains of the [`overdrive_core::eval_broker::EvaluationBroker`]
     /// in the convergence-loop spawn (see
     /// [`run_server_with_obs_and_driver`]). Default
     /// [`reconciler_runtime::DEFAULT_TICK_CADENCE`] (100ms) per

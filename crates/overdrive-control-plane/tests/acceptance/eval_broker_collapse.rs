@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use overdrive_control_plane::eval_broker::{Evaluation, EvaluationBroker};
+use overdrive_core::eval_broker::{Evaluation, EvaluationBroker};
 use overdrive_core::reconciler::{ReconcilerName, TargetResource};
 use proptest::prelude::*;
 
@@ -299,7 +299,7 @@ proptest! {
 
 #[test]
 fn eval_broker_does_not_import_clock_transport_entropy() {
-    let src = include_str!("../../src/eval_broker.rs");
+    let src = include_str!("../../../overdrive-core/src/eval_broker.rs");
     assert!(!src.contains("std::time::"), "eval_broker must not import std::time");
     assert!(!src.contains("SystemTime"), "eval_broker must not use SystemTime");
     assert!(!src.contains("Instant::now"), "eval_broker must not call Instant::now");

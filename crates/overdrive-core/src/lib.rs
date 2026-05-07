@@ -39,6 +39,7 @@
 )]
 
 pub mod aggregate;
+pub mod eval_broker;
 // Phase 2.2 dataplane-internal types — `MaglevTableSize`, `DropClass`,
 // `BackendSetFingerprint` + computation helpers. Workload-identifier
 // newtypes (`ServiceVip`, `ServiceId`, `BackendId`) live in

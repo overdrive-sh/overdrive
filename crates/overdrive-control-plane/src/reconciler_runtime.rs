@@ -53,8 +53,8 @@ use parking_lot::Mutex;
 use crate::AppState;
 use crate::action_shim;
 use crate::error::ControlPlaneError;
-use crate::eval_broker::{Evaluation, EvaluationBroker};
 use crate::view_store::{ViewStore, ViewStoreExt};
+use overdrive_core::eval_broker::{Evaluation, EvaluationBroker};
 
 /// Per-reconciler-kind in-memory view map. Mirrors the `AnyReconciler`
 /// enum's variant set so the runtime can dispatch typed `View` reads
@@ -630,9 +630,9 @@ pub const DEFAULT_TICK_CADENCE: Duration = Duration::from_millis(100);
 /// view-persist path is load-bearing per ADR-0035 §5 step 7→8.
 ///
 /// Spawned by [`crate::run_server_with_obs_and_driver`] as a tokio
-/// task that drains the [`crate::eval_broker::EvaluationBroker`] each
+/// task that drains the [`overdrive_core::eval_broker::EvaluationBroker`] each
 /// tick (`config.tick_cadence`, default [`DEFAULT_TICK_CADENCE`]) and
-/// dispatches one call per pending [`crate::eval_broker::Evaluation`].
+/// dispatches one call per pending [`overdrive_core::eval_broker::Evaluation`].
 /// Each drained Evaluation runs exactly one reconciler — the one it
 /// names. Tests call this directly per-tick to drive the tick loop
 /// deterministically without booting the full server.
