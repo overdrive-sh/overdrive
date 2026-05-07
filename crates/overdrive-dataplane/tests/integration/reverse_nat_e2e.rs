@@ -359,6 +359,7 @@ fn require_root_or_skip(test_name: &str) -> bool {
 /// 8. Assert `nc` exits 0 and the client's stdout contains the
 ///    backend's payload — proves the full forward + reverse path.
 #[test]
+#[ignore = "blocked on #159 — kernel IP-forward + paged-skb interaction (pskb_expand_head + skb_checksum_help leaving stale CHECKSUM_PARTIAL on non-linear skbs); resolves with bpf_redirect_neigh datapath. Empirical chain: docs/analysis/e1-bpftrace-results.md probes 1–7. Decision: ADR-0045 (and ADR-0040 § Revision 2026-05-07 (later) — Q2 reopened). Lifts when the new XDP-ingress reverse-NAT program lands."]
 fn real_tcp_connection_completes_through_vip_with_payload_echo() {
     if !require_root_or_skip("S-2.2-17") {
         return;

@@ -411,3 +411,163 @@ captures the DECISION, not the implementation.
 | Date | Change |
 |---|---|
 | 2026-05-07 | Q3 amendment: sanity prologue scope narrowed from {ingress, egress} to {ingress only}. Empirical falsification trail in ADR-0044. — Morgan. |
+
+---
+
+## Revision 2026-05-07 (later) — Q2 reopened (kernel IP-forward + TCX-egress retired)
+
+### Status
+
+Amendment. 2026-05-07. Decision-maker: Morgan. Tags: phase-2,
+dataplane, q2-reopen, bpf-redirect-neigh, supersession-pointer,
+falsification-followup-2.
+
+**GitHub tracking issue**: #159 — *[2.x] Replace IP-forward +
+TCX-egress with bpf_redirect_neigh datapath*. Production work for
+this amendment lives under that issue.
+
+### Why this amendment
+
+The Q3 amendment earlier today scoped the sanity prologue to XDP
+ingress only after probes 1–4 falsified the egress-side prologue
+invocation. Continued investigation through probes 5–7 (recorded in
+`docs/analysis/e1-bpftrace-results.md`) extended the falsification
+to the *entire TCX-egress reverse-NAT shape* locked by Q2=A above.
+
+The short summary (full causal chain in ADR-0045 § "The empirical
+chain that falsified the locked datapath"):
+
+S-2.2-17 still drops length-N TCP segments at
+`__dev_queue_xmit → qdisc_pkt_len_init →
+kfree_skb_reason(SKB_DROP_REASON_TC_EGRESS = 51)` on the
+client-facing veth egress, *before* the TCX dispatcher invokes
+`tc_reverse_nat`. Probe 5's `kernel.bpf_stats_enabled` polling
+shows the loaded program has `run_cnt = 16` during the test window;
+probe 6's `pwru` per-skb trace shows the *dropped* skb hits zero
+TC-classifier dispatchers — the program's invocations are firing on
+ARP frames and other unrelated traffic, not on the data segments.
+Probe 7's drop-site skb metadata identifies the unique signature:
+`data_len=20, nr_frags=1` paged skbs with stale CHECKSUM_PARTIAL
+metadata (`csum_start=288, csum_offset=16, ip_summed=0`) left over
+from the kernel's `pskb_expand_head + skb_checksum_help` sequence
+during IP-forwarding. The kernel's egress pre-classifier rejects
+these skbs before TCX runs.
+
+This is a structural defect of the *locked architecture* (kernel
+IP-forwarder in the request data path, TCX-egress reverse-NAT on
+the response path), not of `tc_reverse_nat`'s body. Test-fixture
+mitigations (`ethtool -K $iface tso off gso off gro off`) were
+falsified during the probe chain — the helper already disabled
+offloads; the paged-skb shape comes from veth-peer delivery
+semantics, not iface offload settings.
+
+There is no in-program fix. The kernel mechanism that produces the
+bug must be removed from the path entirely.
+
+### Amendment
+
+**Q2 is reopened.** The TC-egress reverse-NAT shape locked by Q2=A
+is empirically falsified for the data-bearing skb path under
+Linux 6.8 (and structurally on any kernel where `pskb_expand_head`
++ `skb_checksum_help` interact with paged skbs the same way — the
+mechanism is not specific to one LTS).
+
+**The resolution moves to a new ADR**: ADR-0045 (`adr-0045-bpf-
+redirect-neigh-datapath.md`) locks the post-pivot architecture
+— XDP-ingress L3+L2 rewrite + `bpf_fib_lookup` +
+`bpf_redirect_neigh`, on both the client-facing veth (request path)
+and the backend-facing veth (response path). The kernel IP-forwarder
+is removed from both directions; `tc_reverse_nat` is retired as a
+TC program; its reverse-NAT logic moves to a new XDP program
+(`xdp_reverse_nat_lookup`) attached on the backend-facing veth
+ingress. See ADR-0045 for the full decision and alternatives.
+
+### What this amendment supersedes vs preserves in Q1–Q7 above
+
+| Original decision | Status |
+|---|---|
+| Q1=A (kernel-helper checksum choice — `bpf_l3_csum_replace`, `bpf_l4_csum_replace`) | **Preserved.** The L3/L4 incremental checksum update runs on both post-pivot XDP programs identically. |
+| Q2=A (TC-egress reverse-NAT, kernel IP-forward in the data path) | **Superseded by ADR-0045.** |
+| Q3=C (sanity prologue helper, ingress-only after the earlier 2026-05-07 amendment) | **Preserved.** Both post-pivot programs are XDP-ingress, so the ingress-only scope is structurally satisfied. |
+| Decision 1 (three-map split: SERVICE_MAP / BACKEND_MAP / MAGLEV_MAP) | **Preserved in full.** Map shapes, key types, and inner-map structure are direction-agnostic. |
+| Decision 2 (atomic swap via HASH_OF_MAPS outer-map fd replacement) | **Preserved in full.** The atomic-swap primitive is independent of how packets traverse the dataplane. |
+| Q5=A (HASH_OF_MAPS inner-map size 256) | **Preserved.** |
+| Q7=B (DROP_COUNTER 6 slots) | **Preserved.** No new `DropClass` variant required by the pivot. |
+
+The original Q2=A reasoning above is **not deleted** — it remains
+historically accurate as the decision made on the evidence
+available at the time. The supersession is recorded by this
+amendment, not by rewriting the original decision body.
+
+### Concretely
+
+The architectural decisions that were made under Q2=A's evidence
+chain — TC-egress attach for `tc_reverse_nat`, kernel IP-forwarder
+in the request data path, `tc_reverse_nat` body reading and
+rewriting REVERSE_NAT_MAP entries on response — see ADR-0045 § 1–3
+for the post-pivot shape. The reverse-NAT *logic* is preserved
+verbatim; only the *attach layer* moves from TCX-egress on the
+client-facing veth to XDP-ingress on the backend-facing veth.
+
+The actual code changes (deleting `tc_reverse_nat.rs`, adding
+`xdp_reverse_nat.rs`, extending `xdp_service_map.rs` with FIB +
+`bpf_redirect_neigh`, retiring the loader's TC-link plumbing) are
+the crafter's responsibility under GH #159 — this amendment
+captures the DECISION that the change is needed; the new ADR
+captures the SHAPE; the crafter implements.
+
+### Consequences of the Q2 reopen
+
+**Positive:**
+
+- S-2.2-17 closes structurally without further test-fixture
+  experimentation. The kernel mechanism that produces the bug is
+  removed from the path entirely.
+- The dataplane aligns with the published reference (Cilium L4LB
+  shape) on stable kernels, removing the project's exposure to
+  "we are the only ones doing it this way."
+- Future kernel-version sensitivity is reduced — `bpf_fib_lookup` +
+  `bpf_redirect_neigh` semantics are stable from 5.10 onwards (the
+  project's floor); the pre-pivot path's failure mode was sensitive
+  to kernel-version-specific paged-skb handling.
+
+**Negative:**
+
+- Slice 05's TC-egress reverse-NAT work is partially obsoleted (the
+  REVERSE_NAT_MAP shape and endianness lockstep contract from
+  ADR-0041 are preserved; the TC-egress attach + `tc_reverse_nat`
+  body are retired).
+- Slice 06-05's veristat baseline is reset to the new program
+  shape; trend tracking restarts. A single-PR cost.
+- One-time engineering cost for the new XDP program, the extension
+  of `xdp_service_map_lookup`, and loader changes. Bounded; tracked
+  under #159.
+
+**Operational:**
+
+- ADR-0040 stays the SSOT for the SERVICE_MAP / BACKEND_MAP /
+  MAGLEV_MAP / HASH_OF_MAPS shape decisions (Decisions 1, 2, Q5, Q7).
+- ADR-0045 is the SSOT for the post-pivot dataplane shape
+  (request-path forwarding, response-path reverse-NAT, FIB lookup,
+  `bpf_redirect_neigh` semantics).
+- ADR-0041 (REVERSE_NAT_MAP shape, endianness lockstep) is
+  unaffected.
+- ADR-0042 (`ServiceMapHydrator`) is unaffected.
+- ADR-0043 (3-iface test topology) is unaffected.
+
+### Cross-references
+
+- ADR-0045 (`adr-0045-bpf-redirect-neigh-datapath.md`) — the
+  resolution ADR for the reopened Q2.
+- `docs/analysis/e1-bpftrace-results.md` probes 1–7 — empirical
+  evidence trail.
+- GH #159 — production work under this amendment.
+- ADR-0044 (`adr-0044-xdp-conntrack-percpu-lru.md`) — already
+  marked SUPERSEDED by the earlier 2026-05-07 amendment; this
+  Q2 reopen is independent and consistent.
+
+### Changelog (Revision 2026-05-07, later)
+
+| Date | Change |
+|---|---|
+| 2026-05-07 (later) | Q2 reopened: TC-egress reverse-NAT + kernel IP-forward in the data path superseded by ADR-0045's `bpf_redirect_neigh` datapath. Empirical falsification chain in `docs/analysis/e1-bpftrace-results.md` probes 1–7. Tracked under GH #159. — Morgan. |

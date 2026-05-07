@@ -26,7 +26,7 @@ do not rewrite prior sections without a corresponding ADR marked
 |---|---|---|
 | System Architecture | Titan (future) | placeholder |
 | Domain Model | Hera (future) | placeholder |
-| Application Architecture | Morgan (this doc) | **extended — Phase 2.2 XDP service map (2026-05-05)** |
+| Application Architecture | Morgan (this doc) | **extended — Phase 2.2 XDP service map (2026-05-05); pivot to `bpf_redirect_neigh` datapath (2026-05-07, GH #159, ADR-0045)** |
 
 ---
 
@@ -1921,6 +1921,74 @@ External integrations in Phase 2.2: **none**. The eBPF subsystem is
 kernel-bound, not external. The new `service_hydration_results`
 ObservationStore table is internal. Contract testing posture
 unchanged.
+
+### 53. Phase 2.2 dataplane shape — pivot to `bpf_redirect_neigh` (2026-05-07)
+
+**Supersession source**: ADR-0045 (`adr-0045-bpf-redirect-neigh-
+datapath.md`); ADR-0040 § Revision 2026-05-07 (later) — Q2 reopened.
+**Tracking**: GH #159 — *[2.x] Replace IP-forward + TCX-egress with
+bpf_redirect_neigh datapath*. **Empirical evidence**:
+`docs/analysis/e1-bpftrace-results.md` probes 1–7.
+
+The Phase 2.2 dataplane shape recorded in §§ 45–52 above (TC-egress
+reverse-NAT via `tc_reverse_nat`, kernel IP-forwarder in the request
+data path) is **partially superseded** by ADR-0045. The change is
+additive at the architecture-brief layer:
+
+- **§ 45 — `overdrive-bpf` program structure.** `programs/tc_reverse_nat.rs`
+  is retired. A new `programs/xdp_reverse_nat.rs` lands in its place,
+  attached at XDP ingress on the backend-facing veth. The
+  `programs/xdp_service_map.rs` body is extended with `bpf_fib_lookup`
+  + L2 MAC rewrite + `bpf_redirect_neigh`; its file path is unchanged.
+  The crate-internal `maps/` and `shared/` modules are unaffected.
+- **§ 46 — `overdrive-dataplane` extension.** `loader.rs` retires
+  the `SchedClassifier` + TcLink attach for `tc_reverse_nat` and
+  gains a second `Xdp::attach` for `xdp_reverse_nat_lookup` on the
+  backend-facing veth. The `Dataplane::update_service` trait surface
+  is unchanged; the typed map handles in `maps/` are unchanged. The
+  `swap.rs` HASH_OF_MAPS atomic-swap primitive is unchanged
+  (direction-agnostic).
+- **§ 47 — BPF map shapes.** Unchanged. SERVICE_MAP, BACKEND_MAP,
+  MAGLEV_MAP, REVERSE_NAT_MAP, DROP_COUNTER all preserve their key
+  shapes, value shapes, and atomic-swap semantics across the pivot.
+  REVERSE_NAT_MAP is now read by an XDP-ingress program rather than
+  a TCX-egress program; the row contents and lookup key are
+  identical.
+- **§ 47.1 — endianness lockstep contract.** Preserved verbatim.
+  Wire = network-order; map storage = host-order; conversion site
+  is the single `#[inline(always)]` helper in
+  `crates/overdrive-bpf/src/shared/sanity.rs`. Both XDP programs go
+  through the same helper.
+- **§§ 48–49 — `service_hydration_results` table + `ServiceMapHydrator`
+  reconciler.** Unchanged. The reconciler writes into the same
+  three SERVICE-class maps via the same typed handles; the dataplane
+  shape pivot is below the `Dataplane::update_service` trait
+  surface.
+- **§ 50 — quality-attribute scenarios (ASR-2.2-01..04).** Preserved
+  in shape; ASR-2.2-03's verifier-budget envelope (≤ 20% delta per
+  PR; ≤ 60% of 1M ceiling) is reset to the post-pivot baseline. The
+  Slice 06-05 baseline-update step records the new baseline against
+  both `xdp_service_map_lookup` (extended body) and
+  `xdp_reverse_nat_lookup` (new program). The retired
+  `tc_reverse_nat` baseline file is deleted in the same commit.
+- **§ 51 — C4.** The C4 Component diagram in `c4-diagrams.md` § Phase
+  2.2 references `tc_reverse_nat` as a TC egress program. That
+  diagram is updated as part of the GH #159 production work to
+  reflect the new shape (two XDP programs, no TC programs in the
+  Phase 2.2 dataplane). The C4 Container (L2) diagram is unchanged
+  — `overdrive-bpf` and `overdrive-dataplane` remain the
+  dataplane crates.
+- **§ 52 — handoff annotations.** Unchanged in shape. The CI checks
+  (`cargo xtask verifier-regress`, `cargo xtask xdp-perf`, the two
+  ESR invariants) all apply to the post-pivot programs identically.
+  External-integrations posture: still **none**.
+
+**ADR-0045 deletes nothing in this brief**; it adds § 53 as a
+supersession pointer and amends the file paths in § 45 / § 46 via
+this section. Future readers should treat ADR-0045 as the SSOT for
+the dataplane *shape* and §§ 45–52 above as the SSOT for the
+dataplane *crate / map / handoff structure*, with the references in
+§ 45 / § 46 read through the lens of this section.
 
 ---
 
