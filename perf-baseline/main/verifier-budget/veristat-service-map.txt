@@ -88,8 +88,31 @@
 #             rustup nightly + bpfel-unknown-none + -Z build-std=core,
 #             per ADR-0038 §3.1)
 #
+#   Step 09-04 (this commit): verified_insns = 151379 with full L4
+#     checksum recomputation via word-by-word bounded loop replacing
+#     the broken `bpf_csum_diff`-with-variable-length-pkt-data approach
+#     (which the verifier rejected — aya-rs/aya#1562). The loop walks
+#     up to MAX_L4_LEN/2 = 750 u16 words of L4 data with per-access
+#     volatile packet-pointer re-derivation (`pkt_read_u16`). The
+#     verifier unrolls the bounded loop in its state walk, producing
+#     ~750 * ~200 verified instruction states.
+#
+#     The actual JIT'd machine code is compact — one loop body — so
+#     pps impact is minimal compared to the incremental-csum path it
+#     replaces. The verifier cost is the price of CHECKSUM_PARTIAL
+#     correctness on veth without `ethtool -K` TX-offload disabling
+#     (which masks the production failure mode).
+#
+#     Delta vs Slice 05-04 baseline: 1211 → 151379 (+150168 insns).
+#     This is a one-time architectural bump from full L4 csum
+#     recomputation (Katran pattern). 151379 remains within every
+#     absolute ceiling:
+#       151379 / 500,000 = 30.3% of the L1-cache-fits target
+#       151379 / 600,000 = 25.2% of the ASR-2.2-03 ceiling
+#       151379 / 1,000,000 = 15.1% of the CAP_BPF kernel ceiling
+#
 # Budget gates (ADR-0040 / architecture.md §7 D3 / ASR-2.2-03):
-#   verified_insns ≤ 1453       ← +20% delta vs Slice 05-04 baseline (1211)
+#   verified_insns ≤ 181655     ← +20% delta vs step 09-04 baseline (151379)
 #                                 — pinned by the integration test
 #                                 `verifier_budget_xdp_service_map_lookup_within_20pct_of_baseline`
 #                                 in `crates/overdrive-dataplane/tests/integration/atomic_swap.rs`.
@@ -97,9 +120,9 @@
 #   verified_insns ≤ 600,000    ← 60% absolute ceiling per ASR-2.2-03
 #   verified_insns ≤ 1,000,000  ← absolute CAP_BPF ceiling (kernel 5.10+)
 #
-# Recorded value (Slice 05-04):
-#   verified_insns = 1211
-#   1211 / 500,000 = 0.24% of the L1-cache-fits target. Comfortably within budget.
+# Recorded value (step 09-04):
+#   verified_insns = 151379
+#   151379 / 500,000 = 30.3% of the L1-cache-fits target.
 #
 # DST companion:
 #   `MaglevDeterministic` invariant
@@ -116,7 +139,7 @@
 # Format (one line per program, space-separated key=value pairs;
 # Slice 07's parser keys off `prog=` and `verified_insns=`):
 
-file=target/xtask/bpf-objects/overdrive_bpf.o prog=xdp_service_map_lookup verdict=success verified_insns=1211
+file=target/xtask/bpf-objects/overdrive_bpf.o prog=xdp_service_map_lookup verdict=success verified_insns=151379
 
 # (`xdp_pass` baseline at 21 verified_insns is recorded under
 # perf-baseline/main/verifier-budget/veristat-xdp-pass.txt when

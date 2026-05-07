@@ -12,4 +12,5 @@
 //! **RED scaffold** — module declarations exist; helper bodies
 //! panic via `todo!()` until DELIVER fills them per Slice 05 / 06.
 
+pub mod csum;
 pub mod sanity;

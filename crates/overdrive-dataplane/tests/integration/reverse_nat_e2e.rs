@@ -191,7 +191,6 @@ fn require_root_or_skip(test_name: &str) -> bool {
 /// 8. Assert `nc` exits 0 and the client's stdout contains the
 ///    backend's payload — proves the full forward + reverse path.
 #[test]
-#[ignore = "blocked on #159 — kernel IP-forward + paged-skb interaction (pskb_expand_head + skb_checksum_help leaving stale CHECKSUM_PARTIAL on non-linear skbs); resolves with bpf_redirect_neigh datapath. Empirical chain: docs/analysis/e1-bpftrace-results.md probes 1–7. Decision: ADR-0045 (and ADR-0040 § Revision 2026-05-07 (later) — Q2 reopened). Lifts when the new XDP-ingress reverse-NAT program lands."]
 fn real_tcp_connection_completes_through_vip_with_payload_echo() {
     if !require_root_or_skip("S-2.2-17") {
         return;
@@ -224,22 +223,37 @@ fn real_tcp_connection_completes_through_vip_with_payload_echo() {
     let _ = std::fs::remove_dir_all(&pcap_dir);
     std::fs::create_dir_all(&pcap_dir).expect("create pcap dir");
 
-    // Read backend's MAC for ARP pre-population. The `ThreeIfaceTopology`
-    // exposes the iface name; we read /sys/class/net/<iface>/address
-    // inside backend-ns via `ip netns exec`.
+    // Read backend's and client's MACs for ARP pre-population.
+    // `bpf_fib_lookup` returns RET_NO_NEIGH when the ARP table is
+    // empty, causing XDP_PASS fallback and kernel-stack forwarding
+    // delays. Pre-populating eliminates flake risk on both the
+    // forward path (backend MAC on lb_veth_b) and the reverse path
+    // (client MAC on lb_veth_a).
     let backend_mac =
         read_iface_mac(&topo.backend_ns.name, &topo.backend_veth).expect("read backend_veth MAC");
+    let client_mac =
+        read_iface_mac(&topo.client_ns.name, &topo.client_veth).expect("read client_veth MAC");
     eprintln!("[diag] backend_veth MAC = {backend_mac}");
+    eprintln!("[diag] client_veth MAC = {client_mac}");
 
-    // Step 1 — Attach the no-op `xdp_pass` stub to `backend_veth` in
-    // backend-ns. Per research § Finding 4.2 / kernel patch v7 09/10,
+    // Step 1 — Attach no-op `xdp_pass` stubs on both peer veths.
+    // Per research § Finding 4.2 / kernel patch v7 09/10,
     // XDP_TX/REDIRECT into a veth peer requires the receiving veth to
-    // have an XDP program attached.
-    let stub_holder = {
+    // have an XDP program attached. The forward path redirects into
+    // `backend_veth` (needs stub in backend-ns). The reverse path
+    // redirects into `client_veth` via lb_veth_a (needs stub in
+    // client-ns).
+    let backend_stub = {
         let _g = enter_netns(&topo.backend_ns.name).expect("setns backend-ns for stub");
         let stub_pin = pin_dir.join("backend-stub");
         let _ = std::fs::create_dir_all(&stub_pin);
-        load_xdp_pass_stub(&topo.backend_veth, &stub_pin).expect("attach xdp_pass stub")
+        load_xdp_pass_stub(&topo.backend_veth, &stub_pin).expect("attach xdp_pass stub on backend")
+    };
+    let client_stub = {
+        let _g = enter_netns(&topo.client_ns.name).expect("setns client-ns for stub");
+        let stub_pin = pin_dir.join("client-stub");
+        let _ = std::fs::create_dir_all(&stub_pin);
+        load_xdp_pass_stub(&topo.client_veth, &stub_pin).expect("attach xdp_pass stub on client")
     };
 
     // Step 2 — Spawn `nc -l 9000` in backend-ns. The listener pipes a
@@ -322,8 +336,38 @@ fn real_tcp_connection_completes_through_vip_with_payload_echo() {
         .expect("ip neigh add for backend");
     assert!(
         neigh_add.status.success(),
-        "ip neigh replace failed: stderr={:?}",
+        "ip neigh replace (backend) failed: stderr={:?}",
         String::from_utf8_lossy(&neigh_add.stderr)
+    );
+
+    // ARP pre-population for the client on `lb_veth_a` in lb-ns.
+    // Without this, the reverse-NAT program's `bpf_fib_lookup` for
+    // `dst=10.0.0.10` returns `RET_NO_NEIGH` and falls to XDP_PASS,
+    // relying on kernel-stack forwarding + ARP resolution — a
+    // multi-second delay that exceeds nc's timeout.
+    use super::helpers::netns::threeiface_ips::CLIENT_IP;
+    let neigh_add_client = Command::new("ip")
+        .args([
+            "netns",
+            "exec",
+            &topo.lb_ns.name,
+            "ip",
+            "neigh",
+            "replace",
+            &CLIENT_IP.to_string(),
+            "lladdr",
+            &client_mac,
+            "dev",
+            &topo.lb_veth_a,
+            "nud",
+            "permanent",
+        ])
+        .output()
+        .expect("ip neigh add for client");
+    assert!(
+        neigh_add_client.status.success(),
+        "ip neigh replace (client) failed: stderr={:?}",
+        String::from_utf8_lossy(&neigh_add_client.stderr)
     );
 
     // Step 5 — Construct EbpfDataplane in lb-ns and attach to
@@ -386,7 +430,8 @@ fn real_tcp_connection_completes_through_vip_with_payload_echo() {
     // Hold the BPF objects until end-of-test so attachments stay
     // alive across `nc` lifecycle.
     drop(dataplane);
-    drop(stub_holder);
+    drop(backend_stub);
+    drop(client_stub);
 
     // Assertions.
     let status = client_status.expect("client nc exit within 8s");

@@ -52,6 +52,7 @@ use aya_ebpf::{
 use crate::maps::backend_map::{BACKEND_MAP, BackendEntry};
 use crate::maps::service_map::{INNER_TABLE_SIZE, SERVICE_MAP, ServiceKey};
 use crate::programs::sanity::{Verdict as SanityVerdict, sanity_check};
+use crate::shared::csum::recompute_l4_csum;
 
 // Header offsets / constants.
 const ETH_HDR_LEN: usize = 14;
@@ -187,26 +188,6 @@ fn csum_incremental_2_2(old_csum: u16, old_lo: u16, old_hi: u16, new_lo: u16, ne
         + u32::from(!old_hi)
         + u32::from(new_lo)
         + u32::from(new_hi);
-    !fold32(s)
-}
-
-#[inline(always)]
-fn csum_incremental_3_3(
-    old_csum: u16,
-    old_a: u16,
-    old_b: u16,
-    old_c: u16,
-    new_a: u16,
-    new_b: u16,
-    new_c: u16,
-) -> u16 {
-    let s: u32 = u32::from(!old_csum)
-        + u32::from(!old_a)
-        + u32::from(!old_b)
-        + u32::from(!old_c)
-        + u32::from(new_a)
-        + u32::from(new_b)
-        + u32::from(new_c);
     !fold32(s)
 }
 
@@ -422,7 +403,7 @@ fn rewrite_and_tx(
     old_ip_csum: u16,
     l4_off: usize,
     l4_csum_off: usize,
-    old_dst_port: u16,
+    _old_dst_port: u16,
     old_l4_csum: u16,
     proto: u8,
     backend: &BackendEntry,
@@ -432,44 +413,54 @@ fn rewrite_and_tx(
     let new_dst_port: u16 = backend.port_host;
 
     // Split 32-bit IPs into two 16-bit big-endian words for the
-    // RFC 1624 fold.
+    // IPv4 header checksum incremental update.
     let old_ip_hi = (old_dst_ip >> 16) as u16;
     let old_ip_lo = (old_dst_ip & 0xffff) as u16;
     let new_ip_hi = (new_dst_ip >> 16) as u16;
     let new_ip_lo = (new_dst_ip & 0xffff) as u16;
 
     // IPv4 header checksum: only the dst-IP changed (2 words).
+    // IP header checksums are always FULL on the wire — incremental
+    // update is safe here.
     let new_ip_csum = csum_incremental_2_2(old_ip_csum, old_ip_lo, old_ip_hi, new_ip_lo, new_ip_hi);
 
-    // L4 checksum covers the pseudo-header (which uses dst IP)
-    // AND the L4 dst port — 3 words changed.
-    let new_l4_csum = csum_incremental_3_3(
-        old_l4_csum,
-        old_ip_hi,
-        old_ip_lo,
-        old_dst_port,
-        new_ip_hi,
-        new_ip_lo,
-        new_dst_port,
-    );
-
-    // RFC 768 (UDP): csum=0x0000 means "no checksum computed" —
-    // leave untouched if it started as 0; if our fold produced 0,
-    // transmit as 0xffff so the receiver doesn't interpret it as
-    // "skip validation".
-    let final_l4_csum = if is_udp && old_l4_csum == 0 {
-        0
-    } else if new_l4_csum == 0 && is_udp {
-        0xffff
-    } else {
-        new_l4_csum
-    };
-
+    // Write IP header csum, new dst IP, and new dst port FIRST.
+    // Then zero the L4 csum field and recompute from scratch.
+    //
+    // Full L4 checksum recomputation replaces RFC 1624 incremental
+    // update because veth with TX-checksum-offload emits
+    // CHECKSUM_PARTIAL — incremental update on partial input
+    // produces garbage. Full recomputation via bpf_csum_diff is
+    // correct for both PARTIAL and FULL input. See
+    // docs/research/dataplane/xdp-checksum-partial-veth-research.md.
     unsafe {
         write_u16_be(ctx, ETH_HDR_LEN + IPV4_CSUM_OFFSET, new_ip_csum)?;
         write_u32_be(ctx, ETH_HDR_LEN + IPV4_DST_IP_OFFSET, new_dst_ip)?;
-        write_u16_be(ctx, l4_off + l4_csum_off, final_l4_csum)?;
         write_u16_be(ctx, l4_off + L4_DST_PORT_OFFSET, new_dst_port)?;
+        write_u16_be(ctx, l4_off + l4_csum_off, 0)?;
+    }
+
+    // RFC 768 (UDP): csum=0x0000 means "no checksum computed" —
+    // if the original L4 csum was 0 (UDP with no checksum),
+    // leave untouched.
+    if is_udp && old_l4_csum == 0 {
+        unsafe {
+            write_u16_be(ctx, l4_off + l4_csum_off, 0)?;
+        }
+    } else {
+        // Pass host-order IPs — `recompute_l4_csum` extracts
+        // pseudo-header u16 words via `>> 16` / `& 0xffff`, which
+        // produces the correct host-order-of-network-order encoding
+        // matching `pkt_read_u16`. src_ip_host is already host-order;
+        // new_dst_ip is host-order from BackendEntry.
+        let new_l4_csum = recompute_l4_csum(ctx, src_ip_host, new_dst_ip, proto, l4_off)?;
+
+        // RFC 768: UDP csum of 0 means "no checksum"; if our
+        // computation yields 0, write 0xffff instead.
+        let final_l4_csum = if is_udp && new_l4_csum == 0 { 0xffff } else { new_l4_csum };
+        unsafe {
+            write_u16_be(ctx, l4_off + l4_csum_off, final_l4_csum)?;
+        }
     }
 
     // L2 MAC rewrite via `bpf_fib_lookup` — see

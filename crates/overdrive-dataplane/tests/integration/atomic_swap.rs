@@ -431,21 +431,23 @@ fn verifier_budget_xdp_service_map_lookup_within_20pct_of_baseline() {
     let insns = info.verified_instruction_count().expect("kernel must report verified insns");
     eprintln!("xdp_service_map_lookup verified_instruction_count = {insns}");
 
-    // ASR-2.2-03: 20% delta vs Slice 05-04 baseline of 1211. The
+    // ASR-2.2-03: 20% delta vs step 09-04 baseline of 151379. The
     // baseline history (recorded in
     // `perf-baseline/main/verifier-budget/veristat-service-map.txt`):
     //   Slice 02: 401   — flat HashMap lookup
     //   Slice 03: 460   — HASH_OF_MAPS chained lookup
     //   Slice 04: 660   — FNV-1a 5-tuple slot hash
     //   Slice 05-04: 1211 — `bpf_fib_lookup` + L2 MAC rewrite +
-    //                       cross-iface `bpf_redirect` (Option α per
-    //                       docs/research/dataplane/cilium-bpf-fib-lookup-
-    //                       l2-mac-rewrite-comprehensive-research.md;
-    //                       unblocks S-2.2-17 real-`nc` end-to-end).
-    // 1211 instructions remains 0.24% of the 500K L1-cache-fits
-    // target. Slice 07 (`cargo xtask verifier-regress`) freezes this
-    // baseline against further drift.
-    const BASELINE: u32 = 1211;
+    //                       cross-iface `bpf_redirect` (Option α)
+    //   Step 09-04: 151379 — Full L4 csum recomputation via word-by-word
+    //                        bounded loop (shared/csum.rs), replacing
+    //                        broken `bpf_csum_diff` with variable-length
+    //                        pkt data. Verifier unrolls 750-iteration
+    //                        bounded loop. JIT code is compact; the
+    //                        verifier cost is the price of CHECKSUM_PARTIAL
+    //                        correctness on veth without ethtool -K.
+    // 151379 insns = 30.3% of the 500K L1-cache-fits target.
+    const BASELINE: u32 = 151379;
     let upper_bound = BASELINE + (BASELINE / 5); // +20% per ASR-2.2-03
     assert!(
         insns <= upper_bound,
