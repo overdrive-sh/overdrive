@@ -962,11 +962,151 @@ fn verifier_regress() -> Result<()> {
     }
 }
 
+/// Tier 4 — `cargo xtask xdp-perf`. Runs `xdp-bench` against the
+/// loaded BPF program in DROP, TX, and LB-forward modes; parses
+/// per-mode pps + p99 latency; compares against
+/// `perf-baseline/main/xdp-perf-<mode>.txt`; fails the build if any
+/// mode regresses pps by >5% or p99 by >10%.
+///
+/// # Architecture
+///
+/// Splits I/O from decision per the [`xtask::perf_gate::xdp_perf`]
+/// module docs:
+/// 1. Discover baseline files under `perf-baseline/main/` matching
+///    the `xdp-perf-<mode>.txt` shape; parse with
+///    [`xtask::perf_gate::xdp_perf::parse_baseline_file`].
+/// 2. For each mode, run `xdp-bench <mode> <iface>` and capture
+///    stdout. The interface is read from `$OVERDRIVE_XDP_PERF_IFACE`
+///    (default `lo` for sanity-runs; CI / Lima sets the real veth
+///    pair).
+/// 3. Parse combined output via
+///    [`xtask::perf_gate::xdp_perf::parse_xdp_bench_output`].
+/// 4. Call [`xtask::perf_gate::xdp_perf::evaluate`]; on `Fail`,
+///    render via
+///    [`xtask::perf_gate::xdp_perf::render_failure`] to stderr and
+///    exit non-zero.
+///
+/// # Failure modes (all surface as `eyre::Report` with non-zero
+/// exit)
+///
+/// 1. `xdp-bench` not on PATH — friendly hint pointing at
+///    `xdp-tools` install (already in `infra/lima/overdrive-dev.yaml`
+///    / CI).
+/// 2. `perf-baseline/main/xdp-perf-*.txt` files missing or
+///    unreadable.
+/// 3. Subprocess invocation fails.
+/// 4. Parser rejects the recorded baseline / xdp-bench output.
+/// 5. Gate evaluation returns one or more breaches.
+///
+/// Self-tested at `xtask/tests/perf_gate_self_test.rs` against the
+/// pure decision fn directly so the tests run on macOS without
+/// xdp-bench installed.
 fn xdp_perf() -> Result<()> {
-    // TODO(#29): wire when first real program lands. xdp-bench
-    // throughput / p99 numbers against a no-op program are not a
-    // meaningful regression signal. See architecture.md §6.3.
-    tracing_placeholder("xdp-perf: xdp-bench harness deferred to #29 (first real program)")
+    use std::fs;
+
+    use xtask::perf_gate::xdp_perf::{
+        BaselineRecord, GateOutcome, GatePolicy, evaluate, parse_baseline_file,
+        parse_xdp_bench_output, render_failure,
+    };
+
+    which_or_hint(
+        "xdp-bench",
+        "install via your distro's `xdp-tools` package (already wired into `infra/lima/overdrive-dev.yaml` and CI Job E). On macOS, run `cargo xtask lima run -- cargo xtask xdp-perf`.",
+    )?;
+
+    let workspace_root = workspace_root_dir()?;
+    let baseline_dir = workspace_root.join("perf-baseline/main");
+
+    // Discover baseline files: every `xdp-perf-<mode>.txt` under
+    // `perf-baseline/main/` becomes a contract entry. Each file is
+    // single-mode (one data line); the gate keys on the data line's
+    // `mode=` value, NOT the file name, so a file misnamed against
+    // its content surfaces as a parser error — not a silent
+    // mismatch.
+    let mut baselines: Vec<BaselineRecord> = Vec::new();
+    let entries = fs::read_dir(&baseline_dir)
+        .map_err(|e| color_eyre::eyre::eyre!("read_dir({}): {e}", baseline_dir.display()))?;
+    let mut baseline_paths: Vec<std::path::PathBuf> = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|e| color_eyre::eyre::eyre!("read_dir entry: {e}"))?;
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        if name.starts_with("xdp-perf-")
+            && std::path::Path::new(name).extension().and_then(|s| s.to_str()) == Some("txt")
+        {
+            baseline_paths.push(path);
+        }
+    }
+    baseline_paths.sort();
+    for path in &baseline_paths {
+        let text = fs::read_to_string(path)
+            .map_err(|e| color_eyre::eyre::eyre!("read {}: {e}", path.display()))?;
+        let mut records = parse_baseline_file(&text)
+            .map_err(|e| color_eyre::eyre::eyre!("parse {}: {e:?}", path.display()))?;
+        baselines.append(&mut records);
+    }
+    if baselines.is_empty() {
+        bail!(
+            "no baselines found matching `xdp-perf-*.txt` under {} — at least one file with a `mode=… pps=… p99_ns=…` line is required",
+            baseline_dir.display()
+        );
+    }
+
+    // Run `xdp-bench` once per baseline-named mode. The interface
+    // is read from $OVERDRIVE_XDP_PERF_IFACE (defaults to `lo` so a
+    // local sanity-run does not spuriously fail; CI / Lima sets a
+    // real veth pair).
+    //
+    // xdp-bench's stdout shape varies across versions; we parse for
+    // the project canonical line `mode=<m> pps=<f64> p99_ns=<u64>`.
+    // If a future xdp-bench upgrade emits JSON or `perf stat`-style
+    // output, this loop captures stdout verbatim and the
+    // [`parse_xdp_bench_output`] entry point absorbs the format
+    // pivot — the pure gate logic does not change.
+    let iface = std::env::var("OVERDRIVE_XDP_PERF_IFACE").unwrap_or_else(|_| "lo".to_string());
+    let mut combined_xdp_bench = String::new();
+    for baseline in &baselines {
+        let mode_arg = baseline.mode.as_str();
+        let output = std::process::Command::new("xdp-bench")
+            .arg(mode_arg)
+            .arg(&iface)
+            .output()
+            .map_err(|e| color_eyre::eyre::eyre!("xdp-bench invocation failed: {e}"))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            bail!(
+                "xdp-bench exited non-zero for mode={} iface={} ({}): {}",
+                mode_arg,
+                iface,
+                output.status,
+                stderr
+            );
+        }
+        combined_xdp_bench.push_str(&String::from_utf8_lossy(&output.stdout));
+        if !combined_xdp_bench.ends_with('\n') {
+            combined_xdp_bench.push('\n');
+        }
+    }
+
+    let candidates = parse_xdp_bench_output(&combined_xdp_bench).map_err(|e| {
+        color_eyre::eyre::eyre!(
+            "parse xdp-bench output: {e:?}\n--- xdp-bench stdout ---\n{combined_xdp_bench}"
+        )
+    })?;
+
+    let policy = GatePolicy::default();
+    match evaluate(&baselines, &candidates, &policy) {
+        GateOutcome::Pass => {
+            eprintln!("xdp-perf: pass — {} mode(s) within budget", baselines.len());
+            Ok(())
+        }
+        GateOutcome::Fail { breaches } => {
+            eprint!("{}", render_failure(&breaches));
+            bail!("xdp-perf gate failed: {} breach(es)", breaches.len());
+        }
+    }
 }
 
 fn mutants(args: MutantsArgs) -> Result<()> {

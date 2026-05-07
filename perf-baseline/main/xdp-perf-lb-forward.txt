@@ -1,0 +1,49 @@
+# XDP perf baseline — LB-forward (full SERVICE_MAP path) mode
+#
+# Slice 07 / step 07-02 — placeholder baseline seeded for the
+# `cargo xtask xdp-perf` regression gate. The first follow-on PR
+# that runs `xdp-bench lb-forward` against the loaded program inside
+# Lima (or CI) overwrites this file with real measurements.
+#
+# See `xdp-perf-drop.txt` for the rationale on placeholder vs real
+# measurement; the same delta-only gate applies.
+#
+# LB-forward is the end-to-end production hot path:
+#
+#   Ethernet/IP parse
+#   → SERVICE_MAP outer-map lookup (HASH_OF_MAPS)
+#   → MAGLEV_MAP inner-ARRAY lookup (slot derived from FNV-1a 5-tuple
+#     hash % MaglevTableSize::DEFAULT)
+#   → BACKEND_MAP backend resolution
+#   → IP/L4 header rewrite (DNAT to chosen backend)
+#   → L4 csum recomputation (word-by-word; ADR-0045 § 6 / step 09-04)
+#   → bpf_fib_lookup (egress route resolution)
+#   → L2 MAC rewrite (next-hop resolution; ADR-0040 § 7 D3 / Slice 05)
+#   → bpf_redirect_neigh (cross-iface redirect via FIB neighbor)
+#
+# Throughput is meaningfully lower than TX because of the chained
+# lookup + FIB call + redirect overhead. On commodity Lima/virtio-net,
+# expect 4–6 Mpps; on bare metal mlx5/i40e, 10–18 Mpps.
+#
+# The slice-07 self-test
+# (`xdp_perf_returns_nonzero_on_synthetic_six_percent_pps_regression`
+# in `xtask/tests/perf_gate_self_test.rs`) uses a SYNTHETIC baseline
+# of 5.0 Mpps and a SYNTHETIC candidate of 4.7 Mpps to verify the
+# gate logic itself — those values are NOT what gets persisted to
+# disk. The synthetic numbers are a representative ballpark; the
+# 5_000_000 below is the gate's first contract value, to be replaced
+# in the first follow-on PR.
+#
+# Recorded against:
+#   kernel:  6.8.0-111-generic   (Lima default; matrix row "6.6 LTS")
+#   commit:  step 07-02 — initial placeholder
+#   date:    2026-05-07
+#   tool:    xdp-bench lb-forward <iface>
+#   target:  target/xtask/bpf-objects/overdrive_bpf.o
+#   runner:  Lima virtio-net single queue
+#
+# Gate thresholds (see xtask/src/perf_gate/xdp_perf.rs::GatePolicy):
+#   pps    — fail if measured < baseline * (1 - 0.05) (i.e. >5% drop)
+#   p99_ns — fail if measured > baseline * (1 + 0.10) (i.e. >10% rise)
+
+mode=lb-forward pps=5000000 p99_ns=2400

@@ -22,3 +22,4 @@
 //! without Lima.
 
 pub mod verifier_regress;
+pub mod xdp_perf;

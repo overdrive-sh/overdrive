@@ -958,3 +958,74 @@ jobs:
       - name: cargo xtask verifier-regress
         run: cargo xtask verifier-regress
 
+  # -------------------------------------------------------------------
+  # Job E (Tier 4) — XDP throughput / p99 latency regression gate
+  # -------------------------------------------------------------------
+  # `cargo xtask xdp-perf` runs `xdp-bench` against the loaded BPF
+  # program in DROP, TX, and LB-forward modes; fails the PR if any
+  # mode regresses pps by >5% or p99 by >10% versus the recorded
+  # baselines under `perf-baseline/main/xdp-perf-*.txt`. Pure-Rust
+  # gate logic self-tested at `xtask/tests/perf_gate_self_test.rs`;
+  # this job runs the gate against real `xdp-bench` output. See
+  # `.claude/rules/testing.md` § "Tier 4 — Verifier and Performance
+  # Gates" and slice-07.
+  xdp-perf:
+    name: cargo xtask xdp-perf
+    runs-on: ubuntu-latest
+    needs: bpf-build
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # mold is the linker per .cargo/config.toml; ubuntu-latest does
+      # not ship it.
+      - name: Install mold linker
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends mold
+
+      # `xdp-bench` ships in the `xdp-tools` package; same install
+      # surface as `infra/lima/overdrive-dev.yaml:108` (where it is
+      # already wired into the dev VM image).
+      - name: Install xdp-tools
+        run: |
+          sudo apt-get install -y --no-install-recommends xdp-tools libxdp-dev libbpf-dev
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "phase-2-xdp-perf"
+
+      - id: sccache-setup
+        name: Setup sccache (soft-fail on cache backend outage)
+        continue-on-error: true
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Enable sccache when setup succeeded
+        if: steps.sccache-setup.outcome == 'success'
+        run: |
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+
+      - name: Warn when sccache unavailable
+        if: steps.sccache-setup.outcome != 'success'
+        run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
+
+      # MUST run AFTER Swatinem/rust-cache@v2 — see fmt-clippy job
+      # for rationale (cache tarball restore clobbers the BPF
+      # artifact).
+      - name: Download BPF object artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bpf-object
+          path: target/xtask/bpf-objects/
+          if-no-files-found: error
+
+      # The interface used by `xdp-bench`; `lo` is the safe default
+      # for a CI run with no veth pair set up. The first follow-on
+      # PR that lands a real veth-pair harness (per #152's
+      # nested-VM Tier 3 work) overrides this via the env var.
+      - name: cargo xtask xdp-perf
+        env:
+          OVERDRIVE_XDP_PERF_IFACE: lo
+        run: sudo -E env "PATH=$PATH" cargo xtask xdp-perf
+
