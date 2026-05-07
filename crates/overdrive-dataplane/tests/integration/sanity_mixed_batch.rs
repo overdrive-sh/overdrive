@@ -267,14 +267,12 @@ fn mixed_batch_increments_per_class_counters_correctly() {
     )
     .expect("SERVICE_MAP pre-create+pin");
 
-    // Locate workspace BPF artifact.
-    let artifact = {
-        let mut p = std::env::current_dir().expect("cwd");
-        while !p.join("Cargo.lock").exists() {
-            assert!(p.pop(), "could not locate workspace root");
-        }
-        p.join("target/xtask/bpf-objects/overdrive_bpf.o")
-    };
+    // `OVERDRIVE_BPF_OBJECT_PATH` is emitted as a `cargo:rustc-env=`
+    // by `crates/overdrive-dataplane/build.rs`, resolved against the
+    // `OVERDRIVE_BPF_OBJECT` override (when set by `cargo xtask
+    // mutants`) or the workspace-relative fallback. Single source of
+    // truth — no cwd-walking.
+    let artifact = std::path::PathBuf::from(env!("OVERDRIVE_BPF_OBJECT_PATH"));
     assert!(
         artifact.exists(),
         "BPF artifact missing at {} — run `cargo xtask bpf-build`",

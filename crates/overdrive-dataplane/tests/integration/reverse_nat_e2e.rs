@@ -470,10 +470,15 @@ fn load_xdp_pass_stub(iface: &str, pin_dir: &std::path::Path) -> Result<StubXdpH
     // We need to materialise it to a temp file because aya's
     // `EbpfLoader::load_file` is the more tolerant path (matches
     // the production `EbpfDataplane::new_with_pin_dir` shape).
-    const STUB_OBJ: &[u8] = include_bytes!(concat!(
-        env!("CARGO_WORKSPACE_DIR"),
-        "/target/xtask/bpf-objects/overdrive_bpf.o",
-    ));
+    //
+    // `OVERDRIVE_BPF_OBJECT_PATH` is emitted by the dataplane crate's
+    // build script as a `cargo:rustc-env=` directive — single source
+    // of truth for the artifact path, including the
+    // `OVERDRIVE_BPF_OBJECT` override that `cargo xtask mutants`
+    // sets so per-mutant copies under `/tmp/cargo-mutants-*/` resolve
+    // the artifact from the original tree. See
+    // `crates/overdrive-dataplane/build.rs` module docstring.
+    const STUB_OBJ: &[u8] = include_bytes!(env!("OVERDRIVE_BPF_OBJECT_PATH"));
     let bpf_temp_path =
         std::env::temp_dir().join(format!("overdrive_bpf_stub-{}.o", std::process::id()));
     std::fs::write(&bpf_temp_path, STUB_OBJ).map_err(|e| format!("write stub temp: {e}"))?;

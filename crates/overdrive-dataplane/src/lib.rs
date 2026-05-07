@@ -65,11 +65,16 @@ use overdrive_core::traits::dataplane::{
 /// not need the artifact present at compile time — the
 /// `cfg(not(target_os = "linux"))` `new()` returns an error before
 /// any aya code runs.
+// `OVERDRIVE_BPF_OBJECT_PATH` is emitted by `build.rs` as a
+// `cargo:rustc-env=` directive, resolved at build-script time against
+// either the `OVERDRIVE_BPF_OBJECT` override (set by `cargo xtask
+// mutants`) or the workspace-relative fallback. Single env-var entry
+// point keeps the `include_bytes!` macro independent of how the path
+// was computed — see `build.rs` module docstring for the override
+// rationale and `xtask::mutants::bpf_object_env_override` for the
+// wrapper-side mechanics.
 #[cfg(target_os = "linux")]
-const OVERDRIVE_BPF_OBJ: &[u8] = include_bytes!(concat!(
-    env!("CARGO_WORKSPACE_DIR"),
-    "/target/xtask/bpf-objects/overdrive_bpf.o",
-));
+const OVERDRIVE_BPF_OBJ: &[u8] = include_bytes!(env!("OVERDRIVE_BPF_OBJECT_PATH"));
 
 /// Production bpffs pin directory for SERVICE_MAP and any future
 /// HoM-shaped maps. The kernel-side declaration carries

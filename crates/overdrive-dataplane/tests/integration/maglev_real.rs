@@ -140,13 +140,13 @@ fn maglev_real_distribution_under_xdp_trafficgen() {
     // Load BPF ELF. The kernel-side ELF declares the inner-ARRAY
     // size via `INNER_TABLE_SIZE`; aya picks up our pre-pinned outer
     // FD via `BPF_OBJ_GET`.
-    let artifact = {
-        let mut p = std::env::current_dir().expect("cwd");
-        while !p.join("Cargo.lock").exists() {
-            assert!(p.pop(), "could not locate workspace root from {:?}", std::env::current_dir());
-        }
-        p.join("target/xtask/bpf-objects/overdrive_bpf.o")
-    };
+    //
+    // `OVERDRIVE_BPF_OBJECT_PATH` is emitted as a `cargo:rustc-env=`
+    // by `crates/overdrive-dataplane/build.rs`, resolved against the
+    // `OVERDRIVE_BPF_OBJECT` override (when set by `cargo xtask
+    // mutants`) or the workspace-relative fallback. Single source of
+    // truth — no cwd-walking.
+    let artifact = std::path::PathBuf::from(env!("OVERDRIVE_BPF_OBJECT_PATH"));
     let load_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     let mut bpf = loop {
         match EbpfLoader::new().map_pin_path(&pin_dir).allow_unsupported_maps().load_file(&artifact)

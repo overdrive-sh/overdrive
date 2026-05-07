@@ -107,16 +107,15 @@ struct BackendEntry {
 // SAFETY: repr(C); `aya::Pod` permits raw map insert.
 unsafe impl aya::Pod for BackendEntry {}
 
-fn workspace_root() -> PathBuf {
-    let manifest = env!("CARGO_MANIFEST_DIR");
-    let mut p = PathBuf::from(manifest);
-    p.pop(); // remove `overdrive-dataplane`
-    p.pop(); // remove `crates`
-    p
-}
-
 fn bpf_artifact_path() -> PathBuf {
-    workspace_root().join("target/xtask/bpf-objects/overdrive_bpf.o")
+    // `OVERDRIVE_BPF_OBJECT_PATH` is emitted as a `cargo:rustc-env=`
+    // by `crates/overdrive-dataplane/build.rs`, resolved against the
+    // `OVERDRIVE_BPF_OBJECT` override (when set by `cargo xtask
+    // mutants`) or the workspace-relative fallback. Single source of
+    // truth — no `CARGO_MANIFEST_DIR` walking, which would resolve
+    // against the per-mutant `/tmp/cargo-mutants-*/` copy under
+    // mutation testing.
+    PathBuf::from(env!("OVERDRIVE_BPF_OBJECT_PATH"))
 }
 
 /// Load `Ebpf::load_file(artifact)` with bounded retry. The sibling

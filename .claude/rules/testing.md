@@ -1081,6 +1081,21 @@ reviewed per-PR, not aggregated across releases.
   per crate is stored under `mutants-baseline/main/`. A drop > 2
   percentage points fails the PR even if absolute kill rate is still
   ≥ 80% — trend matters.
+- **BPF-object-dependent crates work via env override.** cargo-mutants
+  copies the source tree into a per-mutant scratch directory but does
+  NOT copy `target/`. Crates whose `build.rs` depends on a path
+  produced by `cargo xtask bpf-build`
+  (`target/xtask/bpf-objects/overdrive_bpf.o`) would otherwise mark
+  every mutant unviable. The wrapper sets `OVERDRIVE_BPF_OBJECT` to
+  the absolute path of the original tree's BPF object on every
+  cargo-mutants invocation; `crates/overdrive-dataplane/build.rs`
+  reads the env var first and falls back to the workspace-relative
+  path when unset. This affects mutation runs only — regular
+  `cargo {check,test,build}` is unchanged. The env-var approach was
+  chosen over `--copy-target` (multi-GB copy per mutant) and
+  `--in-place` (SIGKILL-mid-run leaves mutated source on disk).
+  Future BPF-object-dependent crates (e.g. when Tier 2 / Tier 3 add
+  more userspace loaders) should consult the same env var.
 
 ### What it's NOT for
 

@@ -27,6 +27,28 @@
 //! `#[cfg(target_os = "linux")]` — the `include_bytes!` constant in
 //! `src/lib.rs` lives behind the same cfg gate and is never evaluated
 //! off-Linux, so the artifact need not exist on developer macOS.
+//!
+//! ## `OVERDRIVE_BPF_OBJECT` override
+//!
+//! When set, the env var `OVERDRIVE_BPF_OBJECT` overrides the
+//! workspace-relative artifact path. The script uses the env var's
+//! value verbatim (must be an absolute path; not validated here —
+//! cargo's existence-check below catches typos).
+//!
+//! This is the override `cargo xtask mutants` sets on every
+//! cargo-mutants invocation. cargo-mutants creates a per-mutant copy
+//! of the source tree under `/tmp/cargo-mutants-*/` and runs cargo
+//! from there — but it does NOT copy `target/`. Without an absolute
+//! path pointing at the *original* tree's BPF object, every mutant of
+//! `overdrive-dataplane` panics here with "BPF object not found",
+//! marks itself unviable, and the kill-rate signal collapses to zero.
+//! See `xtask::mutants::bpf_object_env_override` for the wrapper-side
+//! documentation and the rationale for choosing this mechanism over
+//! `--copy-target` / `--in-place`.
+//!
+//! Regular `cargo {check,test,build}` invocations leave the env var
+//! unset; the workspace-relative fallback applies and the build script
+//! behaves exactly as before this override was introduced.
 
 use std::path::PathBuf;
 
@@ -46,6 +68,14 @@ fn main() {
     // block below is cfg'd out and emits nothing, so anchor the
     // dependency set to `build.rs` itself unconditionally.
     println!("cargo:rerun-if-changed=build.rs");
+
+    // Re-run if the override env var changes. Without this directive
+    // cargo caches the build script's output and a fresh
+    // `OVERDRIVE_BPF_OBJECT` value would not invalidate the cached
+    // build, so the script would silently keep using the old artifact
+    // path (or the workspace fallback). Emit unconditionally — cheap
+    // and matches the contract for the override.
+    println!("cargo:rerun-if-env-changed=OVERDRIVE_BPF_OBJECT");
 
     // `crates/overdrive-dataplane` → workspace root: pop twice (once
     // for the crate name, once for `crates/`). `None` here means the
@@ -74,7 +104,18 @@ fn main() {
     // present.
     #[cfg(target_os = "linux")]
     {
-        let artifact = workspace_root.join("target/xtask/bpf-objects/overdrive_bpf.o");
+        // `OVERDRIVE_BPF_OBJECT` override (see module docstring).
+        // Empty values are treated as "unset" so a stray
+        // `OVERDRIVE_BPF_OBJECT=` does not silently cripple the
+        // fallback — the canonical "unset" shape from cargo's env
+        // plumbing is `None`, but a user-supplied empty value goes
+        // through as `Some("")`, which would then resolve `path.exists()`
+        // against `""` and fail every time. Treat both as "not set".
+        let artifact =
+            std::env::var_os("OVERDRIVE_BPF_OBJECT").filter(|v| !v.is_empty()).map_or_else(
+                || workspace_root.join("target/xtask/bpf-objects/overdrive_bpf.o"),
+                PathBuf::from,
+            );
         if !artifact.exists() {
             // Build scripts surface diagnostics via stderr; cargo
             // captures and renders the `--- stderr` block on failure.
@@ -89,5 +130,18 @@ fn main() {
             std::process::exit(1);
         }
         println!("cargo:rerun-if-changed={}", artifact.display());
+
+        // Emit the resolved artifact path as a rustc-env so the
+        // `include_bytes!` macro in `src/lib.rs` (and the matching
+        // copy in `tests/integration/reverse_nat_e2e.rs`) consumes the
+        // override transparently. Without this, those macros would
+        // resolve `concat!(env!("CARGO_WORKSPACE_DIR"), "/target/...")`,
+        // which under `cargo-mutants` points at the per-mutant copy
+        // `/tmp/cargo-mutants-*.tmp/target/...` — a path that does not
+        // exist because cargo-mutants does not copy `target/`. With
+        // `OVERDRIVE_BPF_OBJECT_PATH` emitted here, lib.rs reads the
+        // absolute path the wrapper supplied and `include_bytes!`
+        // resolves to the original tree's artifact.
+        println!("cargo:rustc-env=OVERDRIVE_BPF_OBJECT_PATH={}", artifact.display());
     }
 }

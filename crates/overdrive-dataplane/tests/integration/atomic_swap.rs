@@ -167,16 +167,14 @@ fn swap_inner_map_distributes_traffic_across_new_backend_set() {
 
     // Load BPF ELF via the loader-with-pin-path so aya picks up the
     // pinned FD.
-    let artifact = {
-        let mut p = std::env::current_dir().expect("cwd");
-        // Walk up to workspace root (tests live in
-        // crates/<crate>/tests/...; xtask BPF target is at
-        // workspace/target/xtask/bpf-objects/).
-        while !p.join("Cargo.lock").exists() {
-            assert!(p.pop(), "could not locate workspace root from {:?}", std::env::current_dir());
-        }
-        p.join("target/xtask/bpf-objects/overdrive_bpf.o")
-    };
+    // `OVERDRIVE_BPF_OBJECT_PATH` is emitted as a `cargo:rustc-env=`
+    // by `crates/overdrive-dataplane/build.rs`, resolved against the
+    // `OVERDRIVE_BPF_OBJECT` override (when set by `cargo xtask
+    // mutants`) or the workspace-relative fallback. Single source of
+    // truth — no cwd-walking. Per-mutant cargo subprocesses cd into a
+    // /tmp copy where the walk-up succeeds at the wrong root; the env
+    // var lookup avoids that pitfall.
+    let artifact = std::path::PathBuf::from(env!("OVERDRIVE_BPF_OBJECT_PATH"));
     // Bounded retry — the sibling `build_rs_artifact_check` test
     // removes the artifact briefly to exercise the build-script
     // diagnostic, and nextest spawns each test in its own process
@@ -405,13 +403,9 @@ fn verifier_budget_xdp_service_map_lookup_within_20pct_of_baseline() {
     )
     .expect("pre-pin SERVICE_MAP");
 
-    let artifact = {
-        let mut p = std::env::current_dir().expect("cwd");
-        while !p.join("Cargo.lock").exists() {
-            assert!(p.pop(), "workspace root not found");
-        }
-        p.join("target/xtask/bpf-objects/overdrive_bpf.o")
-    };
+    // Single source of truth — see the matching block earlier in this
+    // file for the `OVERDRIVE_BPF_OBJECT_PATH` rationale.
+    let artifact = std::path::PathBuf::from(env!("OVERDRIVE_BPF_OBJECT_PATH"));
     let load_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     let mut bpf = loop {
         match EbpfLoader::new().map_pin_path(&pin_dir).allow_unsupported_maps().load_file(&artifact)
@@ -795,13 +789,9 @@ fn removing_backend_purges_orphaned_backend_map_entries() {
     )
     .expect("SERVICE_MAP pre-pin must succeed");
 
-    let artifact = {
-        let mut p = std::env::current_dir().expect("cwd");
-        while !p.join("Cargo.lock").exists() {
-            assert!(p.pop(), "could not locate workspace root");
-        }
-        p.join("target/xtask/bpf-objects/overdrive_bpf.o")
-    };
+    // Single source of truth — see the matching block earlier in this
+    // file for the `OVERDRIVE_BPF_OBJECT_PATH` rationale.
+    let artifact = std::path::PathBuf::from(env!("OVERDRIVE_BPF_OBJECT_PATH"));
     let load_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     let mut bpf = loop {
         match EbpfLoader::new().map_pin_path(&pin_dir).allow_unsupported_maps().load_file(&artifact)
@@ -988,13 +978,9 @@ fn atomic_swap_under_50kpps_traffic_drops_zero_packets() {
     .expect("SERVICE_MAP pre-create+pin must succeed");
 
     // Load BPF ELF with map-pin-path.
-    let artifact = {
-        let mut p = std::env::current_dir().expect("cwd");
-        while !p.join("Cargo.lock").exists() {
-            assert!(p.pop(), "could not locate workspace root");
-        }
-        p.join("target/xtask/bpf-objects/overdrive_bpf.o")
-    };
+    // Single source of truth — see the matching block earlier in this
+    // file for the `OVERDRIVE_BPF_OBJECT_PATH` rationale.
+    let artifact = std::path::PathBuf::from(env!("OVERDRIVE_BPF_OBJECT_PATH"));
     let load_deadline = std::time::Instant::now() + Duration::from_secs(10);
     let mut bpf = loop {
         match EbpfLoader::new().map_pin_path(&pin_dir).allow_unsupported_maps().load_file(&artifact)
