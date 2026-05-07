@@ -1037,6 +1037,13 @@
       "s": "SKIPPED",
       "d": "BLOCKED_BY_DEPENDENCY: kernel verifier rejects bpf_redirect_neigh#152 on XDP (Lima 6.8 + bpftool feature probe full confirms allowed for sched_cls/sched_act/lwt_xmit ONLY, NOT XDP). ADR-0045 \u00a7 Decision \u00a7 1 step 6 conflates bpf_redirect (xdp_fwd_kern.c) with bpf_redirect_neigh; cited research doc cilium-bpf-fib-lookup-l2-mac-rewrite-comprehensive-research.md describes Option \u03b1 via xdp_fwd_kern.c which uses bpf_redirect, not _neigh. Pre-pivot bpf_redirect after FIB+L2 rewrite already achieves the structural intent (IP-forwarder bypass; XDP fast path tx queue never enters ip_forward). Requires architect agent revision of ADR-0045 before GREEN can land. Pre-existing test failure tc_truncated_ipv4_header_drops_with_malformed_header_counter on HEAD 7a07983 noted but unrelated.",
       "t": "2026-05-07T06:25:30Z"
+    },
+    {
+      "sid": "09-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: commit bfa9a39 lands Tier 2 regression-protection tests (xdp_service_map_redirect_neigh.rs, ~588 lines + integration.rs mod declaration). Production GREEN remains blocked on ADR-0045 verifier-incompatibility per the prior GREEN log entry; tests pass against current code as contract-surface protection.",
+      "t": "2026-05-07T06:26:44Z"
     }
   ]
 }
