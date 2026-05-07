@@ -27,8 +27,10 @@ use async_trait::async_trait;
 use futures::Stream;
 use thiserror::Error;
 
-use crate::id::{AllocationId, JobId, NodeId, Region};
+use crate::dataplane::fingerprint::BackendSetFingerprint;
+use crate::id::{AllocationId, JobId, NodeId, Region, ServiceId};
 use crate::transition_reason::{TerminalCondition, TransitionReason};
+use crate::wall_clock::UnixInstant;
 
 #[derive(Debug, Error)]
 pub enum ObservationStoreError {
@@ -317,6 +319,91 @@ pub struct NodeHealthRow {
     pub last_heartbeat: LogicalTimestamp,
 }
 
+/// Status of a service-hydration dispatch attempt — one source of
+/// truth per `service_hydration_results` row per
+/// `docs/feature/phase-2-xdp-service-map/design/architecture.md`
+/// §§ 7, 12.
+///
+/// `Pending` is the row shape the hydrator (Slice 08-02) writes
+/// before invoking dispatch; `Completed` and `Failed` are the
+/// post-dispatch terminal-of-attempt rows the action shim writes
+/// from `Action::DataplaneUpdateService`. Per architecture.md § 7,
+/// the failure surface is observation, NOT a `TerminalCondition`
+/// claim — service hydration cannot terminate an allocation; this
+/// enum carries every dispatch outcome.
+///
+/// Variant ordering and discriminants are STABLE — additions are
+/// minor-version (per ADR-0037 K8s-Condition convention); reordering
+/// or removal is a major-version break that requires a new ADR.
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum ServiceHydrationStatus {
+    /// Hydrator emitted the action; dispatch has not yet returned.
+    Pending,
+    /// Dispatch returned `Ok(())` from `Dataplane::update_service`.
+    Completed {
+        /// Fingerprint of the `(vip, backends)` pair the dispatch
+        /// successfully applied.
+        fingerprint: BackendSetFingerprint,
+        /// Wall-clock snapshot at evaluation start (`tick.now_unix`)
+        /// — observation, not derived state, so the hydrator can
+        /// compare against `actual.fingerprint` at the next tick
+        /// without recomputing.
+        applied_at: UnixInstant,
+    },
+    /// Dispatch returned `Err(DataplaneError::*)`. The hydrator
+    /// reads this row at the next tick to decide whether to retry
+    /// (per its retry-budget policy in the typed View — Slice
+    /// 08-02).
+    Failed {
+        /// Fingerprint of the `(vip, backends)` pair the dispatch
+        /// attempted to apply.
+        fingerprint: BackendSetFingerprint,
+        /// Wall-clock snapshot at evaluation start (`tick.now_unix`).
+        failed_at: UnixInstant,
+        /// `Display::to_string(&err)` of the underlying
+        /// `DataplaneError`. Diagnostic-only; the hydrator does
+        /// not branch on this string (typed retry-budget policy
+        /// lives in the View per `.claude/rules/development.md`
+        /// § "Persist inputs, not derived state").
+        reason: String,
+    },
+}
+
+/// `service_hydration_results` row — observation surface for the
+/// `Action::DataplaneUpdateService` action shim per
+/// architecture.md § 7 *Failure surface* and § 12 *Schema*.
+///
+/// Written by the action shim on dispatch completion (`Completed`
+/// or `Failed`). The hydrator reconciler (Slice 08-02) reads this
+/// row via [`ObservationStore::service_hydration_results_rows`]
+/// projected into `actual` and either advances on
+/// `Completed { fingerprint == desired.fingerprint }` or, on
+/// `Failed`, applies its retry-budget policy from the typed View.
+///
+/// LWW key is `(service_id, fingerprint)` — content-hashed, so two
+/// writes for the same `(service_id, fingerprint)` are strictly
+/// idempotent under `LogicalTimestamp::dominates`.
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct ServiceHydrationResultRow {
+    /// Identity of the service whose backend set was being
+    /// rewritten. Maps 1:1 to a `MAGLEV_MAP` outer-map key.
+    pub service_id: ServiceId,
+    /// Fingerprint of the `(vip, backends)` pair the dispatch
+    /// applied (or attempted to apply on `Failed`). Forms the
+    /// secondary key under LWW so distinct backend sets land in
+    /// distinct rows.
+    pub fingerprint: BackendSetFingerprint,
+    /// Outcome of the dispatch attempt — see
+    /// [`ServiceHydrationStatus`].
+    pub status: ServiceHydrationStatus,
+    /// Lamport timestamp of this row. Same shape as
+    /// [`AllocStatusRow::updated_at`] — the action shim writes
+    /// `(counter = tick.tick + 1, writer = node_id)` so two writes
+    /// for the same `(service_id, fingerprint)` on different ticks
+    /// are correctly ordered under LWW.
+    pub updated_at: LogicalTimestamp,
+}
+
 /// The closed set of row shapes [`ObservationStore`] accepts.
 ///
 /// This enum *is* the compile-time boundary between intent and
@@ -328,6 +415,12 @@ pub struct NodeHealthRow {
 pub enum ObservationRow {
     AllocStatus(AllocStatusRow),
     NodeHealth(NodeHealthRow),
+    /// `service_hydration_results` row — written by the action shim
+    /// on `Action::DataplaneUpdateService` dispatch per
+    /// `docs/feature/phase-2-xdp-service-map/design/architecture.md`
+    /// §§ 7, 12. Read by the `ServiceMapHydrator` reconciler
+    /// (Slice 08-02).
+    ServiceHydration(ServiceHydrationResultRow),
 }
 
 // ---------------------------------------------------------------------------
@@ -438,4 +531,26 @@ pub trait ObservationStore: Send + Sync + 'static {
     /// the full ordered history; Phase 2 will add LWW parallel
     /// tracking and this method will return winners only.
     async fn node_health_rows(&self) -> Result<Vec<NodeHealthRow>, ObservationStoreError>;
+
+    /// Read every LWW-winner `service_hydration_results` row for the
+    /// given [`ServiceId`]. Used by the `ServiceMapHydrator` reconciler
+    /// (Slice 08-02) to project the observation surface into `actual`
+    /// and detect convergence on `Completed { fingerprint ==
+    /// desired.fingerprint }`.
+    ///
+    /// Iteration order is deterministic — keyed by `(service_id,
+    /// fingerprint)` under the adapter's storage shape (e.g.
+    /// [`std::collections::BTreeMap`]). One row may exist per
+    /// `(service_id, fingerprint)`; the same `service_id` with a
+    /// different `fingerprint` lives in a distinct row (the secondary
+    /// key is the content-hashed fingerprint per architecture.md § 12).
+    ///
+    /// Per architecture.md § 12 the table is single-writer (the
+    /// action shim) and additive-only — a Phase 2 Corrosion-backed
+    /// implementation gossips rows under the same LWW semantics as
+    /// `alloc_status` and `node_health`.
+    async fn service_hydration_results_rows(
+        &self,
+        service_id: &ServiceId,
+    ) -> Result<Vec<ServiceHydrationResultRow>, ObservationStoreError>;
 }

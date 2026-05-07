@@ -104,7 +104,15 @@ fn build_app_state(tmp: &TempDir, clock: Arc<dyn Clock>) -> AppState {
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(sample_node(), 0));
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
-    AppState::new(store, obs, Arc::new(runtime), driver, clock)
+    AppState::new(
+        store,
+        obs,
+        Arc::new(runtime),
+        driver,
+        clock,
+        Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+        overdrive_core::id::NodeId::new("writer-1").unwrap(),
+    )
 }
 
 fn build_router(state: AppState) -> Router {

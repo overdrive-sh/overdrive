@@ -67,8 +67,15 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
         Arc::new(overdrive_sim::adapters::clock::SimClock::new()),
     ));
 
-    let state =
-        AppState::new(store, obs, Arc::new(runtime), driver, Arc::new(overdrive_host::SystemClock));
+    let state = AppState::new(
+        store,
+        obs,
+        Arc::new(runtime),
+        driver,
+        Arc::new(overdrive_host::SystemClock),
+        Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+        overdrive_core::id::NodeId::new("writer-1").unwrap(),
+    );
 
     // Spawn the exit-observer subsystem. In production this is wired
     // by `run_server_with_obs_and_driver`; tests construct it directly

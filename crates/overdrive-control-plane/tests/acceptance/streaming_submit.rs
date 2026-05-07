@@ -78,7 +78,15 @@ fn build_app_state(tmp: &TempDir, clock: Arc<dyn Clock>) -> AppState {
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(sample_node(), 0));
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
-    AppState::new(store, obs, Arc::new(runtime), driver, clock)
+    AppState::new(
+        store,
+        obs,
+        Arc::new(runtime),
+        driver,
+        clock,
+        Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+        overdrive_core::id::NodeId::new("writer-1").unwrap(),
+    )
 }
 
 fn build_router(state: AppState) -> Router {
@@ -858,8 +866,10 @@ async fn s_lt_01_lifecycle_transition_from_reflects_prior_alloc_state() {
         vec![Action::StopAllocation { alloc_id: alloc_id.clone(), terminal: None }],
         state.driver.as_ref(),
         state.obs.as_ref(),
+        state.dataplane.as_ref(),
         &state.lifecycle_events,
         &tick,
+        &state.node_id,
     )
     .await
     .expect("dispatch succeeds");

@@ -52,7 +52,15 @@ async fn job_stop_drives_running_to_terminated() {
     let driver: Arc<dyn Driver> =
         Arc::new(ExecDriver::new(std::path::PathBuf::from("/sys/fs/cgroup"), sim_clock.clone()));
 
-    let state = AppState::new(store, obs, Arc::new(runtime), driver, sim_clock.clone());
+    let state = AppState::new(
+        store,
+        obs,
+        Arc::new(runtime),
+        driver,
+        sim_clock.clone(),
+        Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+        overdrive_core::id::NodeId::new("writer-1").unwrap(),
+    );
 
     // Background ticker: advances logical time continuously so any
     // `clock.sleep(...)` parked inside the driver (notably the

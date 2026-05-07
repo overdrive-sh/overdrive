@@ -38,6 +38,15 @@ hex.workspace  = true
 time.workspace = true
 uuid.workspace = true
 
+# Content hashing for `BackendSetFingerprint`
+# (`crate::dataplane::fingerprint::fingerprint`). blake3 is the
+# canonical project choice for content-addressed hashes computed
+# over deterministic byte serializations per
+# `.claude/rules/development.md` § Hashing requires deterministic
+# serialization. Already declared in the workspace
+# (`Cargo.toml` line 74).
+blake3.workspace = true
+
 # Trait boundaries — async, I/O types, streams.
 async-trait.workspace = true
 futures.workspace     = true

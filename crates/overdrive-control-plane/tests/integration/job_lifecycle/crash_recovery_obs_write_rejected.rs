@@ -88,7 +88,15 @@ async fn build_harness(tmp: &TempDir) -> Harness {
     let sim_driver = Arc::new(SimDriver::with_clock(DriverType::Exec, sim_clock.clone()));
     let driver: Arc<dyn Driver> = sim_driver.clone();
 
-    let state = AppState::new(store, obs, Arc::new(runtime), driver, sim_clock.clone());
+    let state = AppState::new(
+        store,
+        obs,
+        Arc::new(runtime),
+        driver,
+        sim_clock.clone(),
+        Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+        overdrive_core::id::NodeId::new("writer-1").unwrap(),
+    );
 
     exit_observer::spawn(
         state.obs.clone(),

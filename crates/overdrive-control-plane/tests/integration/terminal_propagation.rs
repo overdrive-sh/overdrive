@@ -76,7 +76,15 @@ async fn bootstrap_async(
     // never reaches CEILING. SimClock advances when the background
     // ticker calls `clock.tick(...)` so the backoff window crosses
     // and the reconciler emits FinalizeFailed within the test budget.
-    let state = AppState::new(store, obs, Arc::new(runtime), driver, sim_clock.clone());
+    let state = AppState::new(
+        store,
+        obs,
+        Arc::new(runtime),
+        driver,
+        sim_clock.clone(),
+        Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+        overdrive_core::id::NodeId::new("writer-1").unwrap(),
+    );
     let receiver = state.lifecycle_events.subscribe();
     (state, receiver, sim_clock)
 }

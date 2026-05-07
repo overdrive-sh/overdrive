@@ -58,7 +58,15 @@ async fn build_converged_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState 
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("NodeId"), 0));
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
-    AppState::new(store, obs, Arc::new(runtime), driver, clock)
+    AppState::new(
+        store,
+        obs,
+        Arc::new(runtime),
+        driver,
+        clock,
+        Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+        overdrive_core::id::NodeId::new("writer-1").unwrap(),
+    )
 }
 
 /// RED — drive the runtime convergence loop end-to-end against a fully
@@ -224,7 +232,15 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("NodeId"), 0));
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
-    let state = AppState::new(store, obs, Arc::new(runtime), driver, clock.clone());
+    let state = AppState::new(
+        store,
+        obs,
+        Arc::new(runtime),
+        driver,
+        clock.clone(),
+        Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+        overdrive_core::id::NodeId::new("writer-1").unwrap(),
+    );
 
     // --- Preload IntentStore with one converged Job (replicas=1).
     let job = Job::from_spec(JobSpecInput {
@@ -404,7 +420,15 @@ async fn stop_after_failed_alloc_drains_broker() {
     let driver: Arc<dyn Driver> = Arc::new(
         SimDriver::new(DriverType::Exec).fail_on_start_with("binary not found".to_string()),
     );
-    let state = AppState::new(store, obs, Arc::new(runtime), driver, clock.clone());
+    let state = AppState::new(
+        store,
+        obs,
+        Arc::new(runtime),
+        driver,
+        clock.clone(),
+        Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+        overdrive_core::id::NodeId::new("writer-1").unwrap(),
+    );
 
     // --- Preload IntentStore: one Job. The driver will reject its
     //     start, the action shim writes `AllocState::Failed`, the
@@ -642,7 +666,15 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
     let driver: Arc<dyn Driver> = Arc::new(
         SimDriver::new(DriverType::Exec).fail_on_start_with("binary not found".to_string()),
     );
-    let state = AppState::new(store, obs, Arc::new(runtime), driver, sim_clock.clone());
+    let state = AppState::new(
+        store,
+        obs,
+        Arc::new(runtime),
+        driver,
+        sim_clock.clone(),
+        Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+        overdrive_core::id::NodeId::new("writer-1").unwrap(),
+    );
 
     // --- Preload a Job that the SimDriver will reject — this drives
     //     the alloc into Failed and exercises the restart-with-backoff
@@ -901,7 +933,15 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
     // dispatched in this test (we seed Failed directly + restart_counts
     // via the cached view to keep the reconcile output empty).
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
-    let state = AppState::new(store, obs, Arc::new(runtime), driver, sim_clock.clone());
+    let state = AppState::new(
+        store,
+        obs,
+        Arc::new(runtime),
+        driver,
+        sim_clock.clone(),
+        Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+        overdrive_core::id::NodeId::new("writer-1").unwrap(),
+    );
 
     // Seed Job (intent) so hydrate_desired returns Some(job).
     let job = Job::from_spec(JobSpecInput {

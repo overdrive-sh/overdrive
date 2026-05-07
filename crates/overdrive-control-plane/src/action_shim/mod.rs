@@ -21,6 +21,7 @@
 use overdrive_core::TransitionReason;
 use overdrive_core::id::{AllocationId, JobId, NodeId};
 use overdrive_core::reconciler::{Action, TickContext};
+use overdrive_core::traits::dataplane::Dataplane;
 use overdrive_core::traits::driver::{AllocationHandle, Driver, DriverError, DriverType};
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
@@ -30,6 +31,11 @@ use overdrive_core::transition_reason::TerminalCondition;
 use tokio::sync::broadcast;
 
 use crate::api::{AllocStateWire, TransitionSource};
+
+/// Per-arm dispatch for `Action::DataplaneUpdateService`. See
+/// module docstring of [`dataplane_update_service`] for the
+/// failure-surface contract per architecture.md § 7.
+pub mod dataplane_update_service;
 
 /// SCAFFOLD marker.
 pub const SCAFFOLD: bool = false;
@@ -304,13 +310,15 @@ pub async fn dispatch(
     actions: Vec<Action>,
     driver: &dyn Driver,
     obs: &dyn ObservationStore,
+    dataplane: &dyn Dataplane,
     bus: &broadcast::Sender<LifecycleEvent>,
     tick: &TickContext,
+    writer_node: &NodeId,
 ) -> Result<(), ShimError> {
     let mut first_error: Option<ShimError> = None;
 
     for action in actions {
-        let result = dispatch_single(action, driver, obs, bus, tick).await;
+        let result = dispatch_single(action, driver, obs, dataplane, bus, tick, writer_node).await;
         if let Err(err) = result {
             // Per-variant error isolation: record only the first error
             // and continue draining the rest of the actions.
@@ -330,8 +338,10 @@ async fn dispatch_single(
     action: Action,
     driver: &dyn Driver,
     obs: &dyn ObservationStore,
+    dataplane: &dyn Dataplane,
     bus: &broadcast::Sender<LifecycleEvent>,
     tick: &TickContext,
+    writer_node: &NodeId,
 ) -> Result<(), ShimError> {
     match action {
         // No-op (Action::Noop), Phase 3 workflow start, and the Phase 3
@@ -572,23 +582,25 @@ async fn dispatch_single(
             Ok(())
         }
         // phase-2-xdp-service-map Slice 08 (US-08; ASR-2.2-04) —
-        // RED scaffold per `docs/feature/phase-2-xdp-service-map/
-        // distill/wave-decisions.md` DWD-5. DELIVER's Slice 08
-        // first GREEN commit replaces this `todo!()` with a call
-        // into the canonical
-        // `action_shim::service_hydration::dispatch(...)` (the
-        // `action_shim_service_hydration` sibling module is the
-        // pre-rename home; see DWD-3). The shim invokes
-        // `Dataplane::update_service(service_id, vip, backends)`
-        // and writes the outcome row to `service_hydration_results`
-        // per architecture.md § 7 *Failure surface*.
-        Action::DataplaneUpdateService { service_id: _, vip: _, backends: _, correlation: _ } => {
-            todo!(
-                "RED scaffold S-2.2-28 — dispatch \
-                 Action::DataplaneUpdateService via \
-                 Dataplane::update_service and write \
-                 service_hydration_results row (Slice 08)"
-            )
+        // The shim invokes `Dataplane::update_service(...)` via the
+        // canonical per-arm dispatch fn at
+        // `dataplane_update_service::dispatch`, which writes the
+        // outcome row to `service_hydration_results` per
+        // architecture.md § 7 *Failure surface*. A
+        // `Dataplane::update_service` failure does NOT surface as
+        // `ShimError` — it lands as a `Failed` observation row and
+        // dispatch returns `Ok(DispatchOutcome::Failed)`. Only an
+        // ObservationStore write failure surfaces as
+        // `ShimError::Observation`.
+        action @ Action::DataplaneUpdateService { .. } => {
+            dataplane_update_service::dispatch(&action, dataplane, obs, tick, writer_node)
+                .await
+                .map_err(|e| match e {
+                    dataplane_update_service::ServiceHydrationDispatchError::ObservationWrite {
+                        source,
+                    } => ShimError::Observation(source),
+                })?;
+            Ok(())
         }
     }
 }

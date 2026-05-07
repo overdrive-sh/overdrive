@@ -54,10 +54,11 @@ use parking_lot::Mutex;
 use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 
-use overdrive_core::id::{AllocationId, NodeId};
+use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
+use overdrive_core::id::{AllocationId, NodeId, ServiceId};
 use overdrive_core::traits::observation_store::{
     AllocStatusRow, NodeHealthRow, ObservationRow, ObservationStore, ObservationStoreError,
-    ObservationSubscription,
+    ObservationSubscription, ServiceHydrationResultRow,
 };
 
 /// Default capacity for the fan-out broadcast channel. Writes beyond
@@ -96,6 +97,12 @@ struct PeerState {
     rows: Mutex<Vec<ObservationRow>>,
     by_alloc: Mutex<HashMap<AllocationId, AllocStatusRow>>,
     by_node: Mutex<HashMap<NodeId, NodeHealthRow>>,
+    /// `service_hydration_results` LWW index — keyed on
+    /// `(service_id, fingerprint)` per architecture.md § 12. Phase 2.2
+    /// is single-writer (the action shim) so LWW collisions on the
+    /// same key are strictly idempotent.
+    by_service_hydration:
+        Mutex<BTreeMap<(ServiceId, BackendSetFingerprint), ServiceHydrationResultRow>>,
     fan_out: broadcast::Sender<ObservationRow>,
     /// Test-only FIFO of write failures to inject. Each call to
     /// [`SimObservationStore::write`] pops the front entry; when the
@@ -112,6 +119,7 @@ impl PeerState {
             rows: Mutex::new(Vec::new()),
             by_alloc: Mutex::new(HashMap::new()),
             by_node: Mutex::new(HashMap::new()),
+            by_service_hydration: Mutex::new(BTreeMap::new()),
             fan_out,
             pending_write_failures: Mutex::new(VecDeque::new()),
         })
@@ -123,6 +131,7 @@ impl PeerState {
         let accepted = match &row {
             ObservationRow::AllocStatus(incoming) => self.apply_alloc_status(incoming),
             ObservationRow::NodeHealth(incoming) => self.apply_node_health(incoming),
+            ObservationRow::ServiceHydration(incoming) => self.apply_service_hydration(incoming),
         };
 
         if accepted {
@@ -133,6 +142,26 @@ impl PeerState {
             let _ = self.fan_out.send(row);
         }
         accepted
+    }
+
+    /// LWW merge for `service_hydration_results`. Keyed on
+    /// `(service_id, fingerprint)` — distinct backend sets land in
+    /// distinct rows; same `(service_id, fingerprint)` pair on a
+    /// later tick wins under [`LogicalTimestamp::dominates`].
+    fn apply_service_hydration(&self, incoming: &ServiceHydrationResultRow) -> bool {
+        let key = (incoming.service_id, incoming.fingerprint);
+        let mut by_sh = self.by_service_hydration.lock();
+        match by_sh.get(&key) {
+            None => {
+                by_sh.insert(key, incoming.clone());
+                true
+            }
+            Some(existing) if incoming.updated_at.dominates(&existing.updated_at) => {
+                by_sh.insert(key, incoming.clone());
+                true
+            }
+            Some(_) => false,
+        }
     }
 
     /// LWW merge for `alloc_status`. Returns `true` when the incoming
@@ -322,6 +351,21 @@ impl ObservationStore for SimObservationStore {
         // the broadcast channel or the read snapshot; the index is
         // already maintained that way by `apply_node_health`.
         Ok(self.inner.node_health_snapshot().into_values().collect())
+    }
+
+    async fn service_hydration_results_rows(
+        &self,
+        service_id: &ServiceId,
+    ) -> Result<Vec<ServiceHydrationResultRow>, ObservationStoreError> {
+        // LWW winners only, filtered by `service_id`. Iteration is
+        // deterministic via the `(ServiceId, BackendSetFingerprint)`
+        // key on the underlying `BTreeMap`.
+        let by_sh = self.inner.by_service_hydration.lock();
+        Ok(by_sh
+            .iter()
+            .filter(|((sid, _), _)| sid == service_id)
+            .map(|(_, row)| row.clone())
+            .collect())
     }
 }
 

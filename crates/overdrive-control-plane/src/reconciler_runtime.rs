@@ -686,8 +686,10 @@ pub async fn run_convergence_tick(
         actions,
         state.driver.as_ref(),
         state.obs.as_ref(),
+        state.dataplane.as_ref(),
         state.lifecycle_events.as_ref(),
         &tick,
+        &state.node_id,
     )
     .await
     .map_err(ConvergenceError::Shim)?;
