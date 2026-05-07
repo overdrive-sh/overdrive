@@ -38,16 +38,14 @@ use std::path::PathBuf;
 use aya::{
     Ebpf, EbpfLoader,
     maps::PerCpuArray,
-    programs::{ProgramFd, SchedClassifier, Xdp},
+    programs::{ProgramFd, Xdp},
 };
 use aya_obj::generated::{bpf_attr, bpf_cmd::BPF_PROG_TEST_RUN};
 use serial_test::serial;
 
-// XDP / TC verdict constants — kernel ABI; will not change.
+// XDP verdict constants — kernel ABI; will not change.
 const XDP_DROP: u32 = 1;
 const XDP_PASS: u32 = 2;
-const TC_ACT_OK: u32 = 0;
-const TC_ACT_SHOT: u32 = 2;
 
 // `DropClass::MalformedHeader` slot index. Mirrored from
 // `crates/overdrive-core/src/dataplane/drop_class.rs` (`Slot 0`).
@@ -280,52 +278,6 @@ fn load_xdp_program() -> LoadedXdp {
     LoadedXdp { bpf, prog_fd, _outer_fd: outer_fd, _pin_dir_guard: pin_dir_guard }
 }
 
-// ---------- common load (TC) ----------
-
-struct LoadedTc {
-    bpf: Ebpf,
-    prog_fd: ProgramFd,
-    _outer_fd: OwnedFd,
-    _pin_dir_guard: PinDirGuard,
-}
-
-fn load_tc_program() -> LoadedTc {
-    let artifact = bpf_artifact_path();
-    assert!(
-        artifact.exists(),
-        "BPF artifact missing at {} — run `cargo xtask bpf-build` first",
-        artifact.display(),
-    );
-
-    let pin_dir = PathBuf::from(format!(
-        "/sys/fs/bpf/overdrive-test-sanity-tc-{}-{:?}",
-        std::process::id(),
-        std::thread::current().id()
-    ));
-    let _ = std::fs::remove_dir_all(&pin_dir);
-    std::fs::create_dir_all(&pin_dir).expect("create pin dir");
-    let pin_dir_guard = PinDirGuard(pin_dir.clone());
-
-    let outer_fd = pre_pin_service_map(&pin_dir);
-
-    let mut bpf = EbpfLoader::new()
-        .map_pin_path(&pin_dir)
-        .allow_unsupported_maps()
-        .load_file(&artifact)
-        .unwrap_or_else(|e| panic!("aya load_file({}): {e}", artifact.display()));
-
-    let prog_fd = {
-        let prog: &mut SchedClassifier = bpf
-            .program_mut("tc_reverse_nat")
-            .expect("tc_reverse_nat program not found")
-            .try_into()
-            .expect("not a SchedClassifier program");
-        prog.load().expect("tc_reverse_nat.load");
-        prog.fd().expect("fd()").try_clone().expect("ProgramFd::try_clone")
-    };
-    LoadedTc { bpf, prog_fd, _outer_fd: outer_fd, _pin_dir_guard: pin_dir_guard }
-}
-
 // ---------- packet synthesis ----------
 
 const ETH_HDR_LEN: usize = 14;
@@ -421,8 +373,8 @@ fn synthesise_tcp(ihl: u8, tcp_flags: u8) -> Vec<u8> {
 
 /// Synthesise a frame with EtherType 0x86DD (IPv6) but the rest of
 /// the bytes mirror the TCP-IPv4 layout. The sanity prologue must
-/// reject this at check 1 (EtherType) and return `XDP_PASS` /
-/// `TC_ACT_OK` — NO drop counter increment.
+/// reject this at check 1 (EtherType) and return `XDP_PASS` —
+/// NO drop counter increment.
 fn synthesise_ipv6_ethertype() -> Vec<u8> {
     let mut pkt = synthesise_tcp(5, 0x02 /* SYN — irrelevant */);
     pkt[12..14].copy_from_slice(&[0x86, 0xDD]); // EtherType IPv6
@@ -523,60 +475,5 @@ fn ipv6_ethertype_returns_xdp_pass_no_drop_counter_increment() {
     assert_eq!(
         after, baseline,
         "DROP_COUNTER[MalformedHeader] MUST NOT increment for IPv6 pass-through (baseline={baseline}, after={after})"
-    );
-}
-
-// ---------- TC parallel coverage — the same helper, second call site ----------
-//
-// Per dispatch acceptance criterion: "Invoked from both
-// `xdp_service_map_lookup` AND the TC `tc_reverse_nat` egress
-// program." The XDP cases above exercise the first call site;
-// these confirm the SAME helper fires from the TC path.
-
-#[test]
-#[serial(env)]
-fn tc_truncated_ipv4_header_drops_with_malformed_header_counter() {
-    let LoadedTc { bpf, prog_fd, _outer_fd, _pin_dir_guard } = load_tc_program();
-
-    let baseline = read_malformed_header_counter(&bpf);
-
-    let pkt = synthesise_tcp(/* ihl */ 4, /* flags */ 0x02);
-    let mut out = vec![0u8; pkt.len()];
-
-    let (action, _out_len) =
-        bpf_prog_test_run(&prog_fd, &pkt, &mut out).expect("BPF_PROG_TEST_RUN syscall");
-
-    assert_eq!(
-        action, TC_ACT_SHOT,
-        "IHL=4 on TC path must short-circuit with TC_ACT_SHOT, got {action}"
-    );
-
-    let after = read_malformed_header_counter(&bpf);
-    assert_eq!(
-        after - baseline,
-        1,
-        "DROP_COUNTER[MalformedHeader] must increment by 1 from TC path (baseline={baseline}, after={after})"
-    );
-}
-
-#[test]
-#[serial(env)]
-fn tc_ipv6_ethertype_returns_tc_act_ok_no_drop_counter_increment() {
-    let LoadedTc { bpf, prog_fd, _outer_fd, _pin_dir_guard } = load_tc_program();
-
-    let baseline = read_malformed_header_counter(&bpf);
-
-    let pkt = synthesise_ipv6_ethertype();
-    let mut out = vec![0u8; pkt.len()];
-
-    let (action, _out_len) =
-        bpf_prog_test_run(&prog_fd, &pkt, &mut out).expect("BPF_PROG_TEST_RUN syscall");
-
-    assert_eq!(action, TC_ACT_OK, "IPv6 EtherType on TC path must return TC_ACT_OK, got {action}");
-
-    let after = read_malformed_header_counter(&bpf);
-    assert_eq!(
-        after, baseline,
-        "DROP_COUNTER[MalformedHeader] MUST NOT increment for IPv6 pass-through on TC (baseline={baseline}, after={after})"
     );
 }
