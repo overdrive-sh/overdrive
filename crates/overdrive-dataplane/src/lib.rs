@@ -282,7 +282,7 @@ impl EbpfDataplane {
         backend_iface: &str,
         pin_dir: &std::path::Path,
     ) -> Result<Self, DataplaneError> {
-        use aya::programs::{ProgramError, Xdp, XdpFlags};
+        use aya::programs::{Xdp, XdpFlags};
         use nix::errno::Errno;
         use nix::net::if_::if_nametoindex;
 
@@ -428,14 +428,20 @@ impl EbpfDataplane {
         // Native-first attach with documented EOPNOTSUPP/ENOTSUP →
         // SKB fallback. Same shape as the prior xdp_pass attach
         // (S-2.2-02). Forward path attaches on the client-facing
-        // iface ingress.
-        let xdp_forward_link = match prog.attach(client_iface, XdpFlags::DRV_MODE) {
-            Ok(link) => link,
-            Err(ProgramError::SyscallError(ref se)) if should_fallback_to_generic(&se.io_error) => {
+        // iface ingress. Classification policy lives in
+        // `classify_attach_result` — see its docstring for the
+        // mutation-testing rationale (Lima virtio-net never
+        // exercises the Fallback arm; unit tests against synthetic
+        // `SyscallError` values do).
+        let xdp_forward_link = match classify_attach_result(
+            prog.attach(client_iface, XdpFlags::DRV_MODE),
+        ) {
+            AttachOutcome::Native(link) => link,
+            AttachOutcome::Fallback { syscall } => {
                 tracing::warn!(
                     name: "xdp.attach.fallback_generic",
                     iface = %client_iface,
-                    syscall = %se.call,
+                    syscall = %syscall,
                     "native XDP attach not supported by driver; falling back to generic (SKB) mode"
                 );
                 prog.attach(client_iface, XdpFlags::SKB_MODE).map_err(|e| {
@@ -444,7 +450,7 @@ impl EbpfDataplane {
                     ))
                 })?
             }
-            Err(e) => {
+            AttachOutcome::Propagate(e) => {
                 return Err(DataplaneError::LoadFailed(format!(
                     "xdp_service_map_lookup.attach({client_iface}, DRV_MODE): {e}"
                 )));
@@ -472,13 +478,15 @@ impl EbpfDataplane {
         reverse_prog
             .load()
             .map_err(|e| DataplaneError::LoadFailed(format!("xdp_reverse_nat_lookup.load: {e}")))?;
-        let xdp_reverse_link = match reverse_prog.attach(backend_iface, XdpFlags::DRV_MODE) {
-            Ok(link) => link,
-            Err(ProgramError::SyscallError(ref se)) if should_fallback_to_generic(&se.io_error) => {
+        let xdp_reverse_link = match classify_attach_result(
+            reverse_prog.attach(backend_iface, XdpFlags::DRV_MODE),
+        ) {
+            AttachOutcome::Native(link) => link,
+            AttachOutcome::Fallback { syscall } => {
                 tracing::warn!(
                     name: "xdp.attach.fallback_generic",
                     iface = %backend_iface,
-                    syscall = %se.call,
+                    syscall = %syscall,
                     "native XDP attach not supported by driver; falling back to generic (SKB) mode"
                 );
                 reverse_prog.attach(backend_iface, XdpFlags::SKB_MODE).map_err(|e| {
@@ -487,7 +495,7 @@ impl EbpfDataplane {
                     ))
                 })?
             }
-            Err(e) => {
+            AttachOutcome::Propagate(e) => {
                 return Err(DataplaneError::LoadFailed(format!(
                     "xdp_reverse_nat_lookup.attach({backend_iface}, DRV_MODE): {e}"
                 )));
@@ -615,14 +623,27 @@ impl EbpfDataplane {
 /// surfaces as `ProgramError::SyscallError { call: "bpf_link_create"
 /// | "netlink_set_xdp_fd", io_error }`) into either "fall back to
 /// generic" or "propagate as-is". The classification is deliberately
-/// narrow: only the documented driver-not-supported errno codes
-/// (`EOPNOTSUPP`, `ENOTSUP`) trigger fallback. Everything else —
-/// `EINVAL` (often genuinely-invalid attempts), `EPERM` (capability
-/// failure), `EBUSY` (already-attached), errors without an OS errno
-/// — propagates as `DataplaneError::LoadFailed`. Falling back on an
-/// ambiguous error would mask real loader bugs (per
-/// `.claude/rules/development.md` § Errors — distinct failure modes
-/// get distinct variants).
+/// narrow: only the documented driver-not-supported errno code
+/// (`EOPNOTSUPP`, which on Linux is the SAME numeric value as
+/// `ENOTSUP` — both `= 95`; POSIX names them distinctly but the libc
+/// crate exposes them as aliases on the linux target) triggers
+/// fallback. Everything else — `EINVAL` (often genuinely-invalid
+/// attempts), `EPERM` (capability failure), `EBUSY`
+/// (already-attached), errors without an OS errno — propagates as
+/// `DataplaneError::LoadFailed`. Falling back on an ambiguous error
+/// would mask real loader bugs (per `.claude/rules/development.md`
+/// § Errors — distinct failure modes get distinct variants).
+///
+/// **Single equality check**: a previous shape compared against both
+/// `libc::EOPNOTSUPP` AND `libc::ENOTSUP` joined by `||`. On Linux
+/// that comparison is structurally redundant — the two constants are
+/// numerically identical — so the boolean operator (`||` or `&&`)
+/// was never observable, which is precisely the situation `cargo
+/// mutants` flagged with an unkillable `||→&&` mutation. Collapsing
+/// to a single comparison removes the operator entirely; a future
+/// kernel header change that drifts the two apart would surface as a
+/// libc release that breaks the equivalence (see the paired unit
+/// test below pinning `EOPNOTSUPP == ENOTSUP`).
 ///
 /// Lives at module scope rather than as an inherent method so the
 /// unit tests in `mod tests` below can exercise it without
@@ -631,7 +652,68 @@ impl EbpfDataplane {
 /// on for replay equivalence.
 #[cfg(target_os = "linux")]
 fn should_fallback_to_generic(io_error: &std::io::Error) -> bool {
-    io_error.raw_os_error().is_some_and(|code| code == libc::EOPNOTSUPP || code == libc::ENOTSUP)
+    io_error.raw_os_error().is_some_and(|code| code == libc::EOPNOTSUPP)
+}
+
+/// Verdict from classifying an `aya::programs::Xdp::attach` result
+/// against the native→generic fallback policy. Wraps the three
+/// outcomes the loader's two attach call sites (forward-path on
+/// `client_iface`, reverse-path on `backend_iface`) need to
+/// distinguish:
+///
+/// - [`AttachOutcome::Native`] — `DRV_MODE` succeeded; the link is
+///   live on the NIC's native XDP hook.
+/// - [`AttachOutcome::Fallback`] — `DRV_MODE` returned a `SyscallError`
+///   whose `io_error` is `EOPNOTSUPP`/`ENOTSUP`; the caller emits the
+///   structured `xdp.attach.fallback_generic` warn and retries with
+///   `SKB_MODE`. The `syscall` field carries the failing syscall name
+///   (`"bpf_link_create"` or `"netlink_set_xdp_fd"`) for the warn
+///   payload.
+/// - [`AttachOutcome::Propagate`] — every other `ProgramError`
+///   variant (genuine `EINVAL`, `EPERM`, `EBUSY`, non-syscall errors,
+///   syscall errors without an `EOPNOTSUPP` errno). Falling back on
+///   these would mask real loader bugs per
+///   `.claude/rules/development.md` § Errors.
+///
+/// Lifting the match guard out of the call site into this typed
+/// classifier is what makes the policy mutation-killable: Lima
+/// virtio-net supports native XDP, so the in-VM Tier 3 attach path
+/// never exercises the fallback arm — but the unit tests below DO,
+/// against synthetic `ProgramError::SyscallError` values constructed
+/// from arbitrary `io::Error` shapes. Mutating the fallback predicate
+/// (e.g. `code == EOPNOTSUPP` → `false`) flips the EOPNOTSUPP test to
+/// `Propagate`; mutating to `true` flips the EINVAL test to
+/// `Fallback`. Each mutation is killable.
+#[cfg(target_os = "linux")]
+#[derive(Debug)]
+enum AttachOutcome<L> {
+    Native(L),
+    Fallback { syscall: &'static str },
+    Propagate(aya::programs::ProgramError),
+}
+
+/// Classify the result of `aya::programs::Xdp::attach(iface, DRV_MODE)`
+/// against the project's native→generic fallback policy. See
+/// [`AttachOutcome`] for the three verdict variants.
+///
+/// This helper is the single source of truth for the fallback
+/// predicate; both forward-path and reverse-path call sites in
+/// [`EbpfDataplane::new_with_pin_dir`] consume its output. Keeping
+/// the classifier pure-function-shaped (no I/O, no logging, no
+/// `prog: &mut Xdp` dependency) means the unit tests can drive every
+/// arm without standing up a real BPF program — the ~15 ms warm
+/// inner loop the §21 DST harness relies on.
+#[cfg(target_os = "linux")]
+fn classify_attach_result<L>(result: Result<L, aya::programs::ProgramError>) -> AttachOutcome<L> {
+    use aya::programs::ProgramError;
+
+    match result {
+        Ok(link) => AttachOutcome::Native(link),
+        Err(ProgramError::SyscallError(ref se)) if should_fallback_to_generic(&se.io_error) => {
+            AttachOutcome::Fallback { syscall: se.call }
+        }
+        Err(e) => AttachOutcome::Propagate(e),
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -1007,14 +1089,28 @@ mod tests {
     }
 
     /// `ENOTSUP` — on Linux this is the same numeric value as
-    /// `EOPNOTSUPP` (95) but POSIX names them distinctly; some
-    /// drivers / kernels surface one or the other, both must
-    /// trigger fallback. Pinned explicitly so a future kernel
-    /// header change cannot silently drift them apart.
+    /// `EOPNOTSUPP` (both = 95). POSIX names them distinctly but
+    /// the libc crate exposes them as identical constants on the
+    /// linux target. The pinned `assert_eq!` below makes that
+    /// equivalence explicit at test time: a future kernel header
+    /// change (or libc bump) that drifts them apart would fire this
+    /// assertion before the second one ever ran, surfacing as a
+    /// libc / glibc semantic break rather than a silent fallback
+    /// regression. The simpler single-comparison shape of
+    /// `should_fallback_to_generic` (one `code == EOPNOTSUPP`) relies
+    /// on this equivalence to keep `ENOTSUP` falling back.
     #[cfg(target_os = "linux")]
     #[test]
     fn fallback_classification_enotsup_yields_true() {
         use std::io;
+        // Pin the platform invariant the simplified
+        // `should_fallback_to_generic` relies on.
+        assert_eq!(
+            libc::EOPNOTSUPP,
+            libc::ENOTSUP,
+            "Linux libc must expose EOPNOTSUPP == ENOTSUP for the simplified \
+             single-comparison fallback predicate to cover both spellings"
+        );
         let err = io::Error::from_raw_os_error(libc::ENOTSUP);
         assert!(super::should_fallback_to_generic(&err));
     }
@@ -1055,5 +1151,93 @@ mod tests {
         use std::io;
         let err = io::Error::other("synthetic, no errno");
         assert!(!super::should_fallback_to_generic(&err));
+    }
+
+    // ----- classify_attach_result coverage -----
+    //
+    // The two attach call sites in `EbpfDataplane::new_with_pin_dir`
+    // route through `classify_attach_result`. Lima virtio-net
+    // supports native XDP (`DRV_MODE` always succeeds), so the
+    // Tier 3 inner loop never exercises the Fallback or Propagate
+    // arms. These unit tests close the gap by driving every arm
+    // against synthetic `aya::programs::ProgramError::SyscallError`
+    // values — same shape `aya::programs::Xdp::attach` would
+    // surface on a non-virtio NIC, without standing up a real BPF
+    // program.
+    //
+    // Mutation-killing pattern: each arm of `classify_attach_result`
+    // is asserted on by a dedicated test. Mutating the match guard
+    // (e.g. `should_fallback_to_generic` → `true`) flips the EINVAL
+    // test from Propagate to Fallback; mutating to `false` flips the
+    // EOPNOTSUPP test from Fallback to Propagate. The `Native(_)`
+    // arm is independently asserted by the `Ok(())` test.
+
+    /// `Ok(link)` from the underlying attach surfaces as
+    /// [`AttachOutcome::Native`] with the link payload preserved
+    /// verbatim. Drives the happy path without standing up a real
+    /// XDP program; the link type is generic over `L`.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn classify_attach_result_ok_yields_native_with_link() {
+        let outcome: super::AttachOutcome<u32> = super::classify_attach_result(Ok(42u32));
+        match outcome {
+            super::AttachOutcome::Native(link) => assert_eq!(link, 42),
+            other => panic!("expected AttachOutcome::Native(42), got {other:?}"),
+        }
+    }
+
+    /// `Err(SyscallError { io_error: EOPNOTSUPP, call:
+    /// "bpf_link_create" })` surfaces as [`AttachOutcome::Fallback`]
+    /// carrying the originating syscall name. This is the only error
+    /// shape that should drive the SKB retry — the docstring on
+    /// [`AttachOutcome::Fallback`] makes the policy explicit.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn classify_attach_result_eopnotsupp_yields_fallback_with_syscall_name() {
+        use aya::programs::ProgramError;
+        use aya::sys::SyscallError;
+        use std::io;
+
+        let err = ProgramError::SyscallError(SyscallError {
+            call: "bpf_link_create",
+            io_error: io::Error::from_raw_os_error(libc::EOPNOTSUPP),
+        });
+        let outcome: super::AttachOutcome<()> = super::classify_attach_result(Err(err));
+        match outcome {
+            super::AttachOutcome::Fallback { syscall } => {
+                assert_eq!(syscall, "bpf_link_create");
+            }
+            other => panic!("expected AttachOutcome::Fallback, got {other:?}"),
+        }
+    }
+
+    /// `Err(SyscallError { io_error: EINVAL, ... })` is ambiguous —
+    /// the kernel surfaces it for genuinely-invalid attach attempts
+    /// (bad flags, bad ifindex, verifier-rejected program) and
+    /// falling back would mask real loader bugs. Must surface as
+    /// [`AttachOutcome::Propagate`] so the caller wraps it as
+    /// `DataplaneError::LoadFailed`.
+    ///
+    /// This pairs with the EOPNOTSUPP test above to kill the match
+    /// guard mutants: flipping the predicate to `true` turns this
+    /// case into Fallback (assertion fires); flipping to `false`
+    /// turns the EOPNOTSUPP case into Propagate (the other test's
+    /// assertion fires).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn classify_attach_result_einval_yields_propagate() {
+        use aya::programs::ProgramError;
+        use aya::sys::SyscallError;
+        use std::io;
+
+        let err = ProgramError::SyscallError(SyscallError {
+            call: "netlink_set_xdp_fd",
+            io_error: io::Error::from_raw_os_error(libc::EINVAL),
+        });
+        let outcome: super::AttachOutcome<()> = super::classify_attach_result(Err(err));
+        match outcome {
+            super::AttachOutcome::Propagate(_) => {}
+            other => panic!("expected AttachOutcome::Propagate(_), got {other:?}"),
+        }
     }
 }

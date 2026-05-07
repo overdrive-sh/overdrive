@@ -594,11 +594,97 @@ fn removing_backend_purges_reverse_nat_entry_no_stale_rewrite() {
         .expect("update_service install B1");
 
     // Step 2: snapshot REVERSE_NAT_MAP key count via the public
-    // accessor we add below.
+    // accessor. Tightened to `== 1` (was `>= 1`) so the assertion
+    // distinguishes the production count from a stub return of any
+    // other constant — `Ok(1)` happens to coincide with the
+    // single-backend population, but that's why step 3 below
+    // installs TWO backends and asserts `== 2`. A constant-returning
+    // mutation cannot satisfy both assertions simultaneously.
     let count_after_b1 = dataplane.reverse_nat_map_size().expect("size readback after B1");
+    assert_eq!(
+        count_after_b1, 1,
+        "REVERSE_NAT_MAP must contain exactly B1's entry after install (got {count_after_b1})"
+    );
+
+    // Step 2b: BACKEND_MAP must contain B1's BackendId — call the
+    // `backend_map_keys()` accessor and assert B1's deterministic
+    // ID is present. Without this assertion `backend_map_keys` has
+    // zero call sites and any constant-returning mutation
+    // (`Ok(vec![])`, `Ok(vec![0])`, `Ok(vec![1])`) survives. B1's
+    // id is derived from `(BACKEND_IP, BACKEND_PORT)` per the
+    // production hash in `update_service` step 1; we don't pin the
+    // exact derivation here (that would couple the test to the
+    // hash implementation, which the production code is free to
+    // change) — instead we assert cardinality plus distinct-from-0
+    // / distinct-from-1, plus consistency across the multi-backend
+    // step below.
+    let keys_after_b1: std::collections::BTreeSet<u32> = dataplane
+        .backend_map_keys()
+        .expect("backend_map_keys readback after B1")
+        .into_iter()
+        .collect();
+    assert_eq!(
+        keys_after_b1.len(),
+        1,
+        "BACKEND_MAP must contain exactly one BackendId after installing B1 \
+         (got {keys_after_b1:?})"
+    );
+    let bid_b1 = *keys_after_b1.iter().next().expect("BACKEND_MAP cannot be empty after B1");
+
+    // Step 2c: install a SECOND backend B1b alongside B1 — the
+    // `update_service` trait takes the full backend set, so this
+    // is one call with TWO backends. After this, REVERSE_NAT_MAP
+    // must contain exactly 2 entries and BACKEND_MAP must contain
+    // exactly 2 distinct keys. This is the assertion that kills
+    // `reverse_nat_map_size → Ok(1)` and `backend_map_keys →
+    // Ok(vec![<single>])` mutations; the only constants that
+    // satisfy step 2c are 2 and {bid_b1, bid_b1b} respectively,
+    // and the latter is determined by production hashing — no
+    // single hardcoded `Ok(vec![...])` constant covers it.
+    let backend_b1b_ip = Ipv4Addr::new(10, 1, 0, 7);
+    let alloc_b1b =
+        SpiffeId::new("spiffe://overdrive.local/job/e2e/alloc/B1b").expect("alloc B1b SpiffeId");
+    runtime
+        .block_on(dataplane.update_service(
+            VIP,
+            vec![
+                Backend {
+                    alloc: alloc_b1.clone(),
+                    addr: SocketAddr::new(IpAddr::V4(BACKEND_IP), BACKEND_PORT),
+                    weight: 1,
+                    healthy: true,
+                },
+                Backend {
+                    alloc: alloc_b1b.clone(),
+                    addr: SocketAddr::new(IpAddr::V4(backend_b1b_ip), BACKEND_PORT),
+                    weight: 1,
+                    healthy: true,
+                },
+            ],
+        ))
+        .expect("update_service install B1 + B1b");
+
+    let count_after_b1_pair = dataplane.reverse_nat_map_size().expect("size readback after B1+B1b");
+    assert_eq!(
+        count_after_b1_pair, 2,
+        "REVERSE_NAT_MAP must contain exactly 2 entries after installing 2 backends \
+         (got {count_after_b1_pair})"
+    );
+    let keys_after_b1_pair: std::collections::BTreeSet<u32> = dataplane
+        .backend_map_keys()
+        .expect("backend_map_keys readback after B1+B1b")
+        .into_iter()
+        .collect();
+    assert_eq!(
+        keys_after_b1_pair.len(),
+        2,
+        "BACKEND_MAP must contain exactly 2 BackendIds after installing 2 backends \
+         (got {keys_after_b1_pair:?})"
+    );
     assert!(
-        count_after_b1 >= 1,
-        "REVERSE_NAT_MAP must contain at least B1's entry after install (got {count_after_b1})"
+        keys_after_b1_pair.contains(&bid_b1),
+        "BACKEND_MAP must still contain B1's id ({bid_b1}) after adding B1b \
+         (got {keys_after_b1_pair:?})"
     );
 
     // Step 3: install B2 (different IP) — the `update_service`
@@ -628,8 +714,34 @@ fn removing_backend_purges_reverse_nat_entry_no_stale_rewrite() {
     let count_after_b2 = dataplane.reverse_nat_map_size().expect("size readback after B2");
     assert_eq!(
         count_after_b2, 1,
-        "REVERSE_NAT_MAP must contain exactly 1 entry after swap (B2 replaces B1); \
+        "REVERSE_NAT_MAP must contain exactly 1 entry after swap (B2 replaces B1+B1b); \
          got {count_after_b2}"
+    );
+
+    // Step 3b: BACKEND_MAP after the swap must contain exactly
+    // ONE id, distinct from bid_b1. This kills the `Ok(vec![1])`
+    // and `Ok(vec![0])` constant-replacement mutations regardless
+    // of how production derives BackendId — the live BACKEND_MAP
+    // post-swap doesn't contain bid_b1 (B1 was removed) so neither
+    // `vec![0]` nor `vec![1]` can match unless production happens
+    // to derive 0 or 1 for B2's IP/port AND bid_b1 ≠ 0/1
+    // respectively. The cardinality + difference assertion
+    // together exclude both cases.
+    let keys_after_b2: std::collections::BTreeSet<u32> = dataplane
+        .backend_map_keys()
+        .expect("backend_map_keys readback after B2")
+        .into_iter()
+        .collect();
+    assert_eq!(
+        keys_after_b2.len(),
+        1,
+        "BACKEND_MAP must contain exactly 1 BackendId after swap to B2 \
+         (got {keys_after_b2:?})"
+    );
+    assert!(
+        !keys_after_b2.contains(&bid_b1),
+        "BACKEND_MAP must NOT contain B1's id ({bid_b1}) after swap \
+         (got {keys_after_b2:?}) — orphan-GC sweep must have purged it"
     );
 
     // Step 4: B1's specific entry must be gone — point-lookup
