@@ -845,6 +845,38 @@ impl ReconcileBodyInspector {
 ///
 /// Propagates any `syn::parse_file` failure as `Err`.
 pub fn inspect_job_lifecycle_reconcile_body(source: &str) -> Result<Vec<ReconcileBodyViolation>> {
+    inspect_reconciler_body(source, "JobLifecycle")
+}
+
+/// Inspect a Rust source file for any `ServiceMapHydrator::reconcile`
+/// body that contains a banned construct.
+///
+/// Returns a list of every forbidden construct found inside the
+/// `fn reconcile` body of the `impl Reconciler for ServiceMapHydrator`
+/// block. An empty Vec means the body is clean.
+///
+/// The `ServiceMapHydrator` reconciler (Slice 08 / S-2.2-30) carries
+/// the same ADR-0035 §2 purity contract as `JobLifecycle` — sync, no
+/// `.await`, no wall-clock reads, no DB handle. This function is the
+/// mechanical enforcement gate for that invariant.
+///
+/// # Errors
+///
+/// Propagates any `syn::parse_file` failure as `Err`.
+pub fn inspect_service_map_hydrator_reconcile_body(
+    source: &str,
+) -> Result<Vec<ReconcileBodyViolation>> {
+    inspect_reconciler_body(source, "ServiceMapHydrator")
+}
+
+/// Shared inspector: locates `impl Reconciler for {self_name}` in
+/// `source`, finds the `fn reconcile` body, and walks it for forbidden
+/// constructs.
+///
+/// Factored out of the per-reconciler public entry points to avoid
+/// duplication. Both `JobLifecycle` and `ServiceMapHydrator` share the
+/// same purity rules; the only variable is the concrete type name.
+fn inspect_reconciler_body(source: &str, self_name: &str) -> Result<Vec<ReconcileBodyViolation>> {
     let parsed = syn::parse_file(source).context("parse source")?;
     let mut found_impl = false;
     let mut violations = Vec::new();
@@ -852,7 +884,7 @@ pub fn inspect_job_lifecycle_reconcile_body(source: &str) -> Result<Vec<Reconcil
     for item in &parsed.items {
         let syn::Item::Impl(item_impl) = item else { continue };
 
-        // Match `impl Reconciler for JobLifecycle`.
+        // Match `impl Reconciler for {self_name}`.
         let Some((_, trait_path, _)) = &item_impl.trait_ else { continue };
         let trait_name =
             trait_path.segments.last().map(|s| s.ident.to_string()).unwrap_or_default();
@@ -861,9 +893,9 @@ pub fn inspect_job_lifecycle_reconcile_body(source: &str) -> Result<Vec<Reconcil
         }
 
         let syn::Type::Path(type_path) = &*item_impl.self_ty else { continue };
-        let self_name =
+        let impl_self_name =
             type_path.path.segments.last().map(|s| s.ident.to_string()).unwrap_or_default();
-        if self_name != "JobLifecycle" {
+        if impl_self_name != self_name {
             continue;
         }
 
@@ -882,7 +914,7 @@ pub fn inspect_job_lifecycle_reconcile_body(source: &str) -> Result<Vec<Reconcil
     }
 
     if !found_impl {
-        bail!("could not locate `impl Reconciler for JobLifecycle` in source");
+        bail!("could not locate `impl Reconciler for {self_name}` in source");
     }
 
     Ok(violations)
@@ -1035,6 +1067,31 @@ mod tests {
         assert!(
             violations.is_empty(),
             "JobLifecycle::reconcile body must contain no banned construct \
+             (.await, Instant::now, SystemTime::now, rand::*, tokio::time::sleep, \
+             std::thread::sleep); found {} violation(s): {:#?}",
+            violations.len(),
+            violations
+        );
+    }
+
+    /// S-2.2-30 — the real `ServiceMapHydrator::reconcile` body inside
+    /// `crates/overdrive-core/src/reconciler.rs` must contain no
+    /// banned construct per ADR-0035 §2 / ADR-0013 §2.
+    ///
+    /// This is the static-analysis counterpart to the runtime
+    /// `ReconcilerIsPure` DST invariant: it gates at PR time that the
+    /// `ServiceMapHydrator` reconciler carries no `.await`, no
+    /// `Instant::now`, no `SystemTime::now`, no direct DB handle.
+    #[test]
+    fn service_map_hydrator_reconcile_body_passes_dst_lint() {
+        let path = real_core_reconciler_source_path();
+        let source = std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        let violations = inspect_service_map_hydrator_reconcile_body(&source)
+            .expect("overdrive-core reconciler.rs must parse");
+        assert!(
+            violations.is_empty(),
+            "ServiceMapHydrator::reconcile body must contain no banned construct \
              (.await, Instant::now, SystemTime::now, rand::*, tokio::time::sleep, \
              std::thread::sleep); found {} violation(s): {:#?}",
             violations.len(),

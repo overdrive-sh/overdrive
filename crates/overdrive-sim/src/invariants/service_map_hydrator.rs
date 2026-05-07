@@ -319,6 +319,9 @@ fn cluster_host() -> String {
 // `evaluate_*` shape returns `InvariantResult` directly per the
 // `MaglevDeterministic` precedent; the `assert_*` shape was
 // RED-scaffold-only.
+//
+// Placed BEFORE the `#[cfg(test)]` retry-budget module to satisfy
+// `clippy::items-after-test-module`.
 // ---------------------------------------------------------------------------
 
 /// Compatibility: invoke the eventual-convergence evaluator and
@@ -339,5 +342,232 @@ pub fn assert_hydrator_idempotent_steady_state() {
     let result = evaluate_hydrator_idempotent_steady_state();
     if matches!(result.status, InvariantStatus::Fail) {
         panic!("HydratorIdempotentSteadyState failed: {:?}", result.cause);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// S-2.2-30 — retry-budget proptest + dst-lint purity gate
+//
+// Scenario: `reconciler_purity_preserved_dst_lint_and_reconciler_is_pure`
+//
+// Two properties co-located here:
+//
+// 1. **Retry-budget proptest** (Tier 1 property-based): for any
+//    `(attempts, last_failure_seen_at, now)` where
+//    `now < last_failure_seen_at + backoff_for_attempt(attempts)`,
+//    `reconcile` emits NO `Action::DataplaneUpdateService`.  At the
+//    boundary (`now >= ...`) the action IS emitted.  The `View`
+//    carries *inputs* unchanged within the window.
+//
+// 2. **dst-lint purity gate** (static analysis via
+//    `xtask::dst_lint::inspect_service_map_hydrator_reconcile_body`):
+//    the `ServiceMapHydrator::reconcile` body must contain no `.await`,
+//    no `Instant::now`, no `SystemTime::now`, no direct DB handle — per
+//    ADR-0035 §2 / ADR-0013 §2.
+//
+// These tests live in a `#[cfg(test)]` module so they run via nextest
+// and proptest on every PR without touching the invariant catalogue or
+// harness dispatch table.
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    clippy::too_many_lines,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_truncation
+)]
+mod retry_budget_proptest {
+    use std::collections::BTreeMap;
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+    use std::time::{Duration, Instant};
+
+    use overdrive_core::dataplane::fingerprint::fingerprint;
+    use overdrive_core::id::{ServiceId, ServiceVip, SpiffeId};
+    use overdrive_core::reconciler::{
+        Action, Reconciler, RetryMemory, ServiceDesired, ServiceMapHydrator,
+        ServiceMapHydratorState, ServiceMapHydratorView, TickContext, backoff_for_attempt,
+    };
+    use overdrive_core::traits::dataplane::Backend;
+    use overdrive_core::traits::observation_store::ServiceHydrationStatus;
+    use overdrive_core::wall_clock::UnixInstant;
+    use proptest::prelude::*;
+
+    /// Build a minimal `ServiceDesired` for proptest fixtures.
+    fn make_desired() -> ServiceDesired {
+        let vip =
+            ServiceVip::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))).expect("valid ServiceVip");
+        let backends = vec![Backend {
+            alloc: SpiffeId::new("spiffe://overdrive.local/job/web/alloc/web-0")
+                .expect("valid SpiffeId"),
+            addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 1, 1)), 8080),
+            weight: 1,
+            healthy: true,
+        }];
+        let fp = fingerprint(&vip, &backends);
+        ServiceDesired { vip, backends, fingerprint: fp }
+    }
+
+    fn make_tick(now_secs: u64) -> TickContext {
+        TickContext {
+            now: Instant::now(),
+            now_unix: UnixInstant::from_unix_duration(Duration::from_secs(now_secs)),
+            tick: now_secs,
+            deadline: Instant::now() + Duration::from_secs(60),
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 256,
+            ..ProptestConfig::default()
+        })]
+
+        /// Property 1: within the backoff window — no action emitted.
+        ///
+        /// For any `(attempts, failure_secs, now_secs)` where
+        /// `now_secs < failure_secs + backoff_for_attempt(attempts).as_secs()`,
+        /// `reconcile` must emit zero `DataplaneUpdateService` actions
+        /// when actual is `Failed { same fingerprint }`.
+        ///
+        /// The `View.retries` entry is UNCHANGED by a no-dispatch tick:
+        /// attempts and `last_failure_seen_at` carry the same values
+        /// into `next_view` (the view update only fires on dispatch).
+        #[test]
+        fn no_action_within_backoff_window(
+            attempts in 0u32..=10u32,
+            failure_secs in 10u64..=10_000u64,
+            // `now_secs` is strictly BEFORE the backoff deadline.
+            now_delta in 0u64..backoff_for_attempt(0).as_secs(),
+        ) {
+            let r = ServiceMapHydrator::canonical();
+            let s_id = ServiceId::new(1).expect("valid ServiceId");
+            let desired_svc = make_desired();
+            let fp = desired_svc.fingerprint;
+
+            let mut desired = BTreeMap::new();
+            desired.insert(s_id, desired_svc);
+
+            let mut actual = BTreeMap::new();
+            actual.insert(
+                s_id,
+                ServiceHydrationStatus::Failed {
+                    fingerprint: fp,
+                    failed_at: UnixInstant::from_unix_duration(Duration::from_secs(failure_secs)),
+                    reason: "proptest-synthetic".into(),
+                },
+            );
+            let state = ServiceMapHydratorState { desired, actual };
+
+            let backoff = backoff_for_attempt(attempts);
+            // now_secs strictly less than deadline.
+            let now_secs = failure_secs.saturating_add(now_delta)
+                .min(failure_secs.saturating_add(backoff.as_secs()).saturating_sub(1));
+
+            let mut view = ServiceMapHydratorView::default();
+            view.retries.insert(
+                s_id,
+                RetryMemory {
+                    attempts,
+                    last_failure_seen_at: UnixInstant::from_unix_duration(
+                        Duration::from_secs(failure_secs),
+                    ),
+                    last_attempted_fingerprint: Some(fp),
+                },
+            );
+
+            let (actions, next_view) =
+                r.reconcile(&state, &state, &view, &make_tick(now_secs));
+
+            let deadline = failure_secs + backoff.as_secs();
+            let msg = format!(
+                "within backoff window no action must be emitted; \
+                 now={now_secs} deadline={deadline} attempts={attempts}"
+            );
+            prop_assert!(actions.is_empty(), "{}", msg);
+
+            // View inputs unchanged within the window.
+            let entry = next_view.retries.get(&s_id)
+                .expect("retry entry must survive no-dispatch tick");
+            let got_attempts = entry.attempts;
+            prop_assert!(
+                got_attempts == attempts,
+                "attempts must not change within backoff window",
+            );
+            let expected_seen_at =
+                UnixInstant::from_unix_duration(Duration::from_secs(failure_secs));
+            let got_seen_at = entry.last_failure_seen_at;
+            prop_assert!(
+                got_seen_at == expected_seen_at,
+                "last_failure_seen_at must not change within backoff window",
+            );
+        }
+
+        /// Property 2: at and beyond the backoff deadline — action IS emitted.
+        ///
+        /// For any `(attempts, failure_secs)`,
+        /// `now_secs == failure_secs + backoff_for_attempt(attempts).as_secs()`
+        /// must produce exactly one `DataplaneUpdateService` action.
+        /// The deadline is recomputed from inputs every tick — never persisted.
+        #[test]
+        fn action_emitted_at_backoff_boundary(
+            attempts in 0u32..=10u32,
+            failure_secs in 0u64..=10_000u64,
+            // Additional seconds beyond the deadline (0 = exactly at boundary).
+            extra_secs in 0u64..=60u64,
+        ) {
+            let r = ServiceMapHydrator::canonical();
+            let s_id = ServiceId::new(1).expect("valid ServiceId");
+            let desired_svc = make_desired();
+            let fp = desired_svc.fingerprint;
+
+            let mut desired = BTreeMap::new();
+            desired.insert(s_id, desired_svc);
+
+            let mut actual = BTreeMap::new();
+            actual.insert(
+                s_id,
+                ServiceHydrationStatus::Failed {
+                    fingerprint: fp,
+                    failed_at: UnixInstant::from_unix_duration(Duration::from_secs(failure_secs)),
+                    reason: "proptest-synthetic".into(),
+                },
+            );
+            let state = ServiceMapHydratorState { desired, actual };
+
+            let backoff = backoff_for_attempt(attempts);
+            // now_secs exactly at or beyond the deadline.
+            let now_secs = failure_secs + backoff.as_secs() + extra_secs;
+
+            let mut view = ServiceMapHydratorView::default();
+            view.retries.insert(
+                s_id,
+                RetryMemory {
+                    attempts,
+                    last_failure_seen_at: UnixInstant::from_unix_duration(
+                        Duration::from_secs(failure_secs),
+                    ),
+                    last_attempted_fingerprint: Some(fp),
+                },
+            );
+
+            let (actions, _) =
+                r.reconcile(&state, &state, &view, &make_tick(now_secs));
+
+            let deadline = failure_secs + backoff.as_secs();
+            let got_len = actions.len();
+            let boundary_msg = format!(
+                "at/beyond backoff boundary exactly one DataplaneUpdateService \
+                 must be emitted; now={now_secs} deadline={deadline} attempts={attempts}"
+            );
+            prop_assert!(got_len == 1, "{}", boundary_msg);
+            prop_assert!(
+                matches!(&actions[0], Action::DataplaneUpdateService { service_id, .. }
+                    if *service_id == s_id),
+                "action must be DataplaneUpdateService for the expected service",
+            );
+        }
     }
 }
