@@ -52,7 +52,7 @@ pub enum Verdict {
 }
 
 /// A single service backend — IP/port and load-balancing weight.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct Backend {
     pub alloc: SpiffeId,
     pub addr: std::net::SocketAddr,

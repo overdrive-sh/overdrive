@@ -16,14 +16,11 @@
 //! The hashing-determinism rule
 //! (`.claude/rules/development.md` § Hashing requires
 //! deterministic serialization) governs how the value is
-//! computed — a field-by-field byte feed into blake3 in a fixed
-//! canonical order, truncated to u64 LE. The architecture (§ 6)
-//! cites rkyv as the example mechanism; an equivalent hand-rolled
-//! deterministic serialization preserves the bit-identical-across-
-//! nodes property without forcing rkyv derives onto every
-//! transitive type in [`Backend`] (notably `SpiffeId`, which is
-//! not yet rkyv-derived). The property the rule pins is canonical
-//! determinism, not the mechanism.
+//! computed: internal data is canonicalised via rkyv archival —
+//! rkyv's archived bytes are canonical by construction — and the
+//! archived slice is fed directly into blake3. blake3 and the
+//! truncate-to-`u64` little-endian shape are independent of the
+//! canonicalisation step (architecture.md § 7).
 
 use crate::id::ServiceVip;
 use crate::traits::dataplane::Backend;
@@ -31,6 +28,17 @@ use crate::traits::dataplane::Backend;
 /// Content-hash of a `(ServiceVip, &[Backend])` pair, truncated to
 /// `u64`.
 pub type BackendSetFingerprint = u64;
+
+/// rkyv envelope for the `(ServiceVip, &[Backend])` pair the
+/// fingerprint covers. Owns clones of the inputs so a single
+/// `rkyv::to_bytes` call sees one rooted aggregate. Cloning is
+/// acceptable here: fingerprinting runs once per backend-set
+/// change in the hydrator, not in the dataplane hot path.
+#[derive(rkyv::Archive, rkyv::Serialize)]
+struct FingerprintInput {
+    vip: ServiceVip,
+    backends: Vec<Backend>,
+}
 
 /// Compute the canonical content-hash of a backend set keyed by
 /// VIP. Bit-identical across nodes given identical inputs.
@@ -41,78 +49,36 @@ pub type BackendSetFingerprint = u64;
 ///
 /// # Determinism
 ///
-/// The byte feed is field-by-field, in fixed order, with each
-/// variable-length field length-prefixed (`u32` LE). No
-/// `serde_json::to_string` (which has non-deterministic field
-/// ordering on `serde_json::Value`); no `format!` for any addr or
-/// `SpiffeId` — both have stable canonical forms emitted via
-/// `Display` / explicit byte accessors.
+/// The value is the blake3 digest of the rkyv-archived
+/// `FingerprintInput { vip, backends }` envelope. rkyv 0.8 archives
+/// are canonical by construction (`.claude/rules/development.md`
+/// § *Internal data → rkyv*), so the byte feed into blake3 is
+/// deterministic across processes, runs, and seeds without any
+/// hand-rolled field ordering.
 ///
 /// `Backend` order is observed by the caller — the hydrator passes
 /// backends in the deterministic `BTreeMap<BackendId, Backend>`
-/// iteration order per architecture.md § 7. A reordered slice
-/// produces a different fingerprint by construction.
+/// iteration order per architecture.md § 7. rkyv archives slices
+/// in element order, so a reordered slice produces a different
+/// fingerprint by construction.
 #[must_use]
 pub fn fingerprint(vip: &ServiceVip, backends: &[Backend]) -> BackendSetFingerprint {
-    let mut hasher = blake3::Hasher::new();
-
-    // VIP — IpAddr canonical form.
-    feed_ip_addr(&mut hasher, vip.get());
-
-    // Backend set — length-prefixed, then each backend in order.
-    feed_u32(&mut hasher, u32::try_from(backends.len()).unwrap_or(u32::MAX));
-    for backend in backends {
-        // SpiffeId — canonical lowercased string (the SpiffeId
-        // newtype guarantees this on construction). Length-prefix
-        // the bytes so two Spiffe IDs whose byte concatenation
-        // would alias cannot collide.
-        let spiffe = backend.alloc.to_string();
-        feed_bytes(&mut hasher, spiffe.as_bytes());
-
-        // SocketAddr — IP + port. IP is fed via the same canonical
-        // accessor as VIP; port is a fixed-width u16 LE.
-        feed_ip_addr(&mut hasher, backend.addr.ip());
-        hasher.update(&backend.addr.port().to_le_bytes());
-
-        // Weight — fixed-width u16 LE.
-        hasher.update(&backend.weight.to_le_bytes());
-
-        // Health flag — single byte.
-        hasher.update(&[u8::from(backend.healthy)]);
-    }
-
-    let digest = hasher.finalize();
+    let input = FingerprintInput { vip: *vip, backends: backends.to_vec() };
+    // rkyv archival of `FingerprintInput` is structurally infallible:
+    // every field is an owned, sized value (ServiceVip is Copy; Vec<Backend>
+    // owns its backends). The only path to `Err(rkyv::rancor::Error)` is
+    // allocator failure during the archive scratch buffer, which on a
+    // control-plane host means the process is already in OOM territory and
+    // panicking is the correct response. `.expect` here documents that
+    // contract; it is not a TODO.
+    #[allow(clippy::expect_used)]
+    let archived = rkyv::to_bytes::<rkyv::rancor::Error>(&input)
+        .expect("rkyv archival of FingerprintInput is infallible — fields are owned values");
+    let digest = blake3::hash(&archived);
     let bytes = digest.as_bytes();
     let prefix: [u8; 8] =
         [bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7]];
     u64::from_le_bytes(prefix)
-}
-
-/// Feed an IP address as a discriminator byte (4 = v4, 6 = v6) plus
-/// the canonical octets. Distinguishes `0.0.0.0` from `::` even
-/// though both serialize to four/sixteen zero bytes.
-fn feed_ip_addr(hasher: &mut blake3::Hasher, addr: std::net::IpAddr) {
-    match addr {
-        std::net::IpAddr::V4(v4) => {
-            hasher.update(&[4_u8]);
-            hasher.update(&v4.octets());
-        }
-        std::net::IpAddr::V6(v6) => {
-            hasher.update(&[6_u8]);
-            hasher.update(&v6.octets());
-        }
-    }
-}
-
-/// Length-prefixed byte feed (u32 LE).
-fn feed_bytes(hasher: &mut blake3::Hasher, bytes: &[u8]) {
-    feed_u32(hasher, u32::try_from(bytes.len()).unwrap_or(u32::MAX));
-    hasher.update(bytes);
-}
-
-/// Feed a u32 in little-endian.
-fn feed_u32(hasher: &mut blake3::Hasher, v: u32) {
-    hasher.update(&v.to_le_bytes());
 }
 
 #[cfg(test)]
@@ -177,5 +143,19 @@ mod tests {
         backends.reverse();
         let b = fingerprint(&vip, &backends);
         assert_ne!(a, b, "reordered backends must produce a different fingerprint");
+    }
+
+    #[test]
+    fn fingerprint_is_sensitive_to_health_flag() {
+        // Sanity check that rkyv archives the `bool` field — two
+        // backend slices identical except for `healthy` must produce
+        // different fingerprints.
+        let vip = vip_v4(10, 0, 0, 1);
+        let healthy_backends = sample_backends();
+        let mut unhealthy_backends = sample_backends();
+        unhealthy_backends[0].healthy = false;
+        let a = fingerprint(&vip, &healthy_backends);
+        let b = fingerprint(&vip, &unhealthy_backends);
+        assert_ne!(a, b, "differing healthy flag must produce a different fingerprint");
     }
 }

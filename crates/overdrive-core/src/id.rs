@@ -205,7 +205,20 @@ define_label_newtype!(
 ///
 /// Construction validates the `spiffe://<trust-domain>/<path>` shape and
 /// lowercases the canonical form. The stored value is always lowercased.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 #[serde(try_from = "String", into = "String")]
 pub struct SpiffeId {
     canonical: String,
