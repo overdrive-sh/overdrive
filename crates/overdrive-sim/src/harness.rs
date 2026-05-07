@@ -555,19 +555,19 @@ impl Harness {
             // wires real evaluators via
             // `crate::invariants::service_map_hydrator::*` and
             // returns `InvariantResult` from real fixtures.
+            // phase-2-xdp-service-map Slice 08 (US-08; ASR-2.2-04).
+            // GREEN of step 08-02 lands the real evaluator bodies in
+            // `crate::invariants::service_map_hydrator`. Both ESR
+            // invariants drive the typed `ServiceMapHydrator::reconcile`
+            // function directly via `AnyReconciler::ServiceMapHydrator`
+            // dispatch; no I/O, no async — matches `MaglevDeterministic`
+            // shape.
             Invariant::HydratorEventuallyConverges => {
-                crate::invariants::service_map_hydrator::assert_hydrator_eventually_converges();
-                #[allow(unreachable_code)]
-                {
-                    unreachable!("RED scaffold panicked above")
-                }
+                crate::invariants::service_map_hydrator::evaluate_hydrator_eventually_converges()
             }
             Invariant::HydratorIdempotentSteadyState => {
-                crate::invariants::service_map_hydrator::assert_hydrator_idempotent_steady_state();
-                #[allow(unreachable_code)]
-                {
-                    unreachable!("RED scaffold panicked above")
-                }
+                crate::invariants::service_map_hydrator::evaluate_hydrator_idempotent_steady_state(
+                )
             }
         }
     }
@@ -864,13 +864,16 @@ mod tests {
         assert_eq!(cat, vec![Invariant::SingleLeader]);
     }
 
-    // Downstream fallout: `Harness::new().run(...)` walks the full invariant
-    // catalogue including the `HydratorEventuallyConverges` RED scaffold added
-    // by DISTILL wave (5e9ca73). `#[should_panic]` per `.claude/rules/testing.md`
-    // § "Downstream fallout on pre-existing tests" until step 08-NN lands the
-    // impl — at which point this attribute trips and flags the test for review.
+    // Step 08-02 GREEN: the `HydratorEventuallyConverges` and
+    // `HydratorIdempotentSteadyState` evaluators landed; the prior
+    // `#[should_panic(expected = "RED scaffold")]` attribute was the
+    // downstream-fallout guard documented in
+    // `.claude/rules/testing.md` § "Downstream fallout on pre-existing
+    // tests" — removed here per the same section's "removing the
+    // underlying todo!() / panic!() will fire a different panic
+    // message, trip #[should_panic], and flag the test for review at
+    // the moment the scaffold goes GREEN" handoff.
     #[test]
-    #[should_panic(expected = "RED scaffold")]
     fn run_boots_the_default_number_of_hosts_and_reports_every_invariant() {
         let report = Harness::new().run(42).expect("harness must compose");
         // One result per invariant in the default catalogue.

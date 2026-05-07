@@ -91,6 +91,19 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     "view-store-roundtrip-is-lossless",
     "bulk-load-is-deterministic",
     "write-through-ordering",
+    // Phase-2 XDP service map invariants — Slices 03-06 (BPF dataplane
+    // primitives) and Slice 08 (hydrator ESR pair). Each variant lands
+    // alongside its corresponding feature commit; this list mirrors the
+    // canonical order in `Invariant::ALL` so the length assertion catches
+    // silent drift on either side.
+    "backend-set-swap-atomic",
+    "maglev-distribution-even",
+    "maglev-deterministic",
+    "reverse-nat-lockstep",
+    "sanity-checks-fire-before-service-map",
+    // Slice 08 (US-08; ASR-2.2-04) — hydrator ESR pair landed in step 08-02.
+    "hydrator-eventually-converges",
+    "hydrator-idempotent-steady-state",
 ];
 
 // -----------------------------------------------------------------------------
@@ -100,17 +113,12 @@ const EXPECTED_INVARIANTS: &[&str] = &[
 /// The whole default catalogue runs, every invariant passes, and the
 /// wall-clock budget (<60 s per KPI K1) is met.
 ///
-/// Currently `#[should_panic(expected = "RED scaffold")]` because the
-/// `Invariant::ALL` catalogue includes `HydratorEventuallyConverges`
-/// and `HydratorIdempotentSteadyState` RED scaffolds (DISTILL wave
-/// commit `5e9ca73`). The subprocess panics on those scaffolds, the
-/// `assert!(out.status.success(), ...)` fires with the subprocess
-/// stderr embedded — which contains "RED scaffold". Strip the
-/// attribute when Slice 08 closes the scaffolds. See
-/// `.claude/rules/testing.md` § "Downstream fallout on pre-existing
-/// tests".
+/// Step 08-02 GREEN handed off: the
+/// `HydratorEventuallyConverges` and `HydratorIdempotentSteadyState`
+/// scaffolds are GREEN, so the downstream-fallout `#[should_panic]`
+/// attribute is removed per `.claude/rules/testing.md` § "Downstream
+/// fallout on pre-existing tests" handoff procedure.
 #[test]
-#[should_panic(expected = "RED scaffold")]
 fn default_catalogue_is_green_within_wall_clock_budget() {
     let target = tempfile::tempdir().expect("tempdir for CARGO_TARGET_DIR");
     let out = run_dst(target.path(), &["--seed", "42"]);
@@ -171,12 +179,12 @@ fn default_catalogue_is_green_within_wall_clock_budget() {
 
 /// Every named invariant in §7.1 scenario 2 appears in the summary.
 ///
-/// Currently `#[should_panic(expected = "RED scaffold")]` per
-/// downstream-fallout policy — the harness panics on the
-/// `HydratorEventuallyConverges` RED scaffold added in DISTILL
-/// (commit `5e9ca73`). Strip when Slice 08 closes the scaffolds.
+/// Step 08-02 GREEN handed off: the
+/// `HydratorEventuallyConverges` scaffold is GREEN, so the
+/// downstream-fallout `#[should_panic]` attribute is removed per
+/// `.claude/rules/testing.md` § "Downstream fallout on pre-existing
+/// tests" handoff procedure.
 #[test]
-#[should_panic(expected = "RED scaffold")]
 fn summary_names_every_expected_invariant() {
     let target = tempfile::tempdir().expect("tempdir");
     let out = run_dst(target.path(), &["--seed", "42"]);

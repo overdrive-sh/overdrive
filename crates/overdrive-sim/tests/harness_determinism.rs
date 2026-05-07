@@ -15,13 +15,11 @@ use overdrive_sim::{Harness, Invariant};
 /// so a regression shows up under a plain `cargo test` without
 /// requiring proptest to happen to pick the broken case.
 ///
-/// Downstream fallout: `Harness::new().run(...)` walks the full
-/// invariant catalogue including the `HydratorEventuallyConverges`
-/// RED scaffold (DISTILL wave 5e9ca73). `#[should_panic]` per
-/// `.claude/rules/testing.md` § "Downstream fallout on pre-existing
-/// tests" until step 08-NN lands the impl.
+/// Step 08-02 GREEN handed off: the hydrator's RED scaffold is gone
+/// and the downstream-fallout `#[should_panic]` attribute is removed
+/// per `.claude/rules/testing.md` § "Downstream fallout on
+/// pre-existing tests" handoff procedure.
 #[test]
-#[should_panic(expected = "RED scaffold")]
 fn harness_run_is_deterministic_under_fixed_seed() {
     let a = Harness::new().run(42).expect("harness must compose");
     let b = Harness::new().run(42).expect("harness must compose");

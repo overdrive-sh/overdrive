@@ -33,36 +33,29 @@
 //!   unchanged inputs).
 //!
 //! See test-scenarios.md S-2.2-26..30.
+//!
+//! ## Module layout
+//!
+//! The canonical reconciler types and trait impl live in
+//! `overdrive-core::reconciler` alongside the `Reconciler` trait
+//! and its `JobLifecycle` peer — [`AnyReconciler`] holds the
+//! concrete type in its `ServiceMapHydrator` variant, and
+//! `overdrive-core` cannot depend on `overdrive-control-plane`.
+//!
+//! This module exists as the architecture-mandated entry point
+//! (`crates/overdrive-control-plane/src/reconcilers/
+//! service_map_hydrator/`) per architecture.md § 9. It re-exports
+//! the public surface for callers that previously imported from
+//! this path; the reconciler's actual implementation is in
+//! `overdrive_core::reconciler`.
 
-pub mod hydrate;
 pub mod state;
 pub mod view;
 
+pub use overdrive_core::reconciler::ServiceMapHydrator;
 pub use state::{ServiceDesired, ServiceHydrationStatus, ServiceMapHydratorState};
 pub use view::{RetryMemory, ServiceMapHydratorView};
 
 /// `ReconcilerName` constant for this reconciler. Wired into the
 /// runtime registry per ADR-0035 / ADR-0036 by DELIVER.
 pub const NAME: &str = "service-map-hydrator";
-
-/// The Phase 2.2 hydrator reconciler.
-///
-/// **RED scaffold** — `Reconciler` impl + `reconcile` body panic
-/// via `todo!()`. DELIVER fills the body per Slice 08 (S-2.2-26..30).
-pub struct ServiceMapHydrator {
-    _private: (),
-}
-
-impl ServiceMapHydrator {
-    /// Construct a fresh hydrator. The runtime calls this once at
-    /// register-time per ADR-0035.
-    pub fn new() -> Self {
-        Self { _private: () }
-    }
-}
-
-impl Default for ServiceMapHydrator {
-    fn default() -> Self {
-        Self::new()
-    }
-}
