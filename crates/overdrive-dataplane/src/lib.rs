@@ -608,6 +608,43 @@ impl EbpfDataplane {
             .map_err(|e| DataplaneError::LoadFailed(format!("BACKEND_MAP keys(): {e}")))
     }
 
+    /// Returns `true` if SERVICE_MAP contains an outer slot for the
+    /// given `(vip, port)` key.
+    ///
+    /// Observability surface — used by Tier 3 integration tests to
+    /// verify the empty-backend cleanup path removes the outer HoM
+    /// slot.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DataplaneError::LoadFailed`] if the kernel rejects
+    /// the lookup with an error other than `ENOENT`.
+    #[cfg(target_os = "linux")]
+    pub fn service_map_contains(
+        &self,
+        vip: std::net::Ipv4Addr,
+        port: u16,
+    ) -> Result<bool, DataplaneError> {
+        use crate::maps::wire::ServiceKey;
+
+        let key = ServiceKey { vip_host: u32::from(vip), port_host: port, _pad: 0 };
+        let key_bytes = unsafe {
+            core::slice::from_raw_parts(
+                &key as *const _ as *const u8,
+                core::mem::size_of::<ServiceKey>(),
+            )
+        };
+        match crate::sys::bpf::bpf_map_lookup_elem(
+            self.service_map.as_fd(),
+            key_bytes,
+            core::mem::size_of::<u32>(),
+        ) {
+            Ok(Some(_)) => Ok(true),
+            Ok(None) => Ok(false),
+            Err(e) => Err(DataplaneError::LoadFailed(format!("SERVICE_MAP lookup: {e}"))),
+        }
+    }
+
     /// Non-Linux fallthrough — returns
     /// [`DataplaneError::LoadFailed`] with a `"non-Linux build
     /// target"` diagnostic. Lets the rest of the workspace compile on
@@ -769,12 +806,65 @@ impl Dataplane for EbpfDataplane {
 
         use crate::maps::wire::{BackendEntryPod, ServiceKey};
 
-        // Empty backend set — clear the outer slot. (Trait does not
-        // distinguish "no backends" from "remove service"; equivalent
-        // semantics here: drop the slot so XDP returns XDP_PASS for
-        // this VIP.)
+        // Empty backend set — remove this VIP from all maps so XDP
+        // returns XDP_PASS. Recover the last-known ServiceKey from
+        // the service_backends tracker (which carries the port the
+        // prior update used).
         if backends.is_empty() {
-            // No VIP port available; nothing to clear.
+            let vip_host = u32::from(vip);
+
+            let service_key = {
+                let tracker = self.service_backends.lock();
+                tracker.keys().find(|k| k.vip_host == vip_host).copied()
+            };
+
+            let Some(service_key) = service_key else {
+                return Ok(());
+            };
+
+            self.service_map.delete(&service_key).map_err(|e| match e {
+                crate::maps::hash_of_maps::HashOfMapsError::MapAllocFailed { source } => {
+                    DataplaneError::MapAllocFailed { source }
+                }
+                crate::maps::hash_of_maps::HashOfMapsError::Syscall(source) => {
+                    DataplaneError::LoadFailed(format!("SERVICE_MAP outer delete: {source}"))
+                }
+            })?;
+
+            let live_ids: std::collections::BTreeSet<u32> = {
+                let mut tracker = self.service_backends.lock();
+                tracker.remove(&service_key);
+                tracker
+                    .values()
+                    .flat_map(|s| s.iter().copied())
+                    .collect::<std::collections::BTreeSet<u32>>()
+            };
+            {
+                let mut backend_map = self.backend_map.lock();
+                crate::gc::sweep_orphan_backends(&mut backend_map, &live_ids).map_err(|e| {
+                    DataplaneError::LoadFailed(format!("BACKEND_MAP orphan-GC sweep: {e}"))
+                })?;
+            }
+
+            let stale_keys: std::collections::BTreeSet<crate::maps::BackendKeyPod> = {
+                let mut tracker = self.service_reverse_nat_keys.lock();
+                tracker.remove(&service_key).unwrap_or_default()
+            };
+            {
+                let mut reverse_nat_map = self.reverse_nat_map.lock();
+                for stale in &stale_keys {
+                    match reverse_nat_map.remove(stale) {
+                        Ok(()) => {}
+                        Err(aya::maps::MapError::KeyNotFound) => {}
+                        Err(e) => {
+                            return Err(DataplaneError::LoadFailed(format!(
+                                "REVERSE_NAT_MAP purge: {e}"
+                            )));
+                        }
+                    }
+                }
+            }
+
             return Ok(());
         }
 

@@ -807,6 +807,115 @@ fn removing_backend_purges_reverse_nat_entry_no_stale_rewrite() {
     let _ = topo;
 }
 
+/// Regression test: empty-backend `update_service` must remove the
+/// SERVICE_MAP outer slot, purge all REVERSE_NAT_MAP entries, and
+/// sweep orphaned BACKEND_MAP entries for the affected VIP.
+///
+/// Prior to the fix, `backends.is_empty()` returned `Ok(())`
+/// immediately because `ServiceKey` could not be constructed without
+/// a backend to supply `vip_port`. The fix recovers the last-known
+/// `ServiceKey` from the `service_backends` tracker.
+#[test]
+fn empty_backend_update_removes_service_map_and_reverse_nat_entries() {
+    if !require_root_or_skip("empty-backend-cleanup") {
+        return;
+    }
+
+    let topo = match ThreeIfaceTopology::create("c") {
+        Ok(t) => t,
+        Err(NetNsError::CapNetAdminRequired) => {
+            eprintln!("[skip] empty-backend-cleanup needs CAP_NET_ADMIN");
+            return;
+        }
+        Err(e) => panic!("3-iface topology setup failed: {e}"),
+    };
+
+    let pin_dir =
+        PathBuf::from(format!("/sys/fs/bpf/overdrive-test-emptybk-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&pin_dir);
+    std::fs::create_dir_all(&pin_dir).expect("create pin dir");
+    struct PinDirGuard(PathBuf);
+    impl Drop for PinDirGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    let _pin_guard = PinDirGuard(pin_dir.clone());
+
+    let _ns_guard = enter_netns(&topo.lb_ns.name).expect("setns into lb-ns");
+
+    let dataplane = EbpfDataplane::new_with_pin_dir(&topo.lb_veth_a, &topo.lb_veth_b, &pin_dir)
+        .expect("EbpfDataplane::new_with_pin_dir");
+
+    let runtime =
+        tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio rt");
+
+    let alloc_b1 =
+        SpiffeId::new("spiffe://overdrive.local/job/e2e/alloc/empty-B1").expect("SpiffeId");
+
+    // Step 1: install a backend.
+    runtime
+        .block_on(dataplane.update_service(
+            VIP,
+            vec![Backend {
+                alloc: alloc_b1.clone(),
+                addr: SocketAddr::new(IpAddr::V4(BACKEND_IP), BACKEND_PORT),
+                weight: 1,
+                healthy: true,
+            }],
+        ))
+        .expect("update_service install B1");
+
+    // Verify: SERVICE_MAP has the entry.
+    assert!(
+        dataplane.service_map_contains(VIP, VIP_PORT).expect("service_map_contains after install"),
+        "SERVICE_MAP must contain VIP entry after install"
+    );
+    assert_eq!(
+        dataplane.reverse_nat_map_size().expect("rnat size after install"),
+        1,
+        "REVERSE_NAT_MAP must contain 1 entry after install"
+    );
+    assert_eq!(
+        dataplane.backend_map_keys().expect("backend_map_keys after install").len(),
+        1,
+        "BACKEND_MAP must contain 1 entry after install"
+    );
+
+    // Step 2: remove the service by passing empty backends.
+    runtime.block_on(dataplane.update_service(VIP, vec![])).expect("update_service empty backends");
+
+    // Verify: all maps are cleaned up.
+    assert!(
+        !dataplane.service_map_contains(VIP, VIP_PORT).expect("service_map_contains after removal"),
+        "SERVICE_MAP outer slot must be deleted after empty-backend update"
+    );
+    assert_eq!(
+        dataplane.reverse_nat_map_size().expect("rnat size after removal"),
+        0,
+        "REVERSE_NAT_MAP must be empty after empty-backend update"
+    );
+    assert!(
+        dataplane.backend_map_keys().expect("backend_map_keys after removal").is_empty(),
+        "BACKEND_MAP must be empty after orphan-GC sweep"
+    );
+    assert!(
+        !dataplane
+            .reverse_nat_map_has_backend(BACKEND_IP, BACKEND_PORT)
+            .expect("has_backend after removal"),
+        "B1's REVERSE_NAT entry must be purged after empty-backend update"
+    );
+
+    // Step 3: idempotent — removing again is a no-op.
+    runtime
+        .block_on(dataplane.update_service(VIP, vec![]))
+        .expect("update_service empty backends (idempotent)");
+
+    drop(_ns_guard);
+    drop(dataplane);
+    let _ = topo;
+}
+
 /// Wait for `child` to exit, polling at 50 ms intervals up to
 /// `budget`. Returns the exit status, or panics on timeout (which
 /// the caller may want to handle differently — the convention here
