@@ -836,14 +836,130 @@ fn integration_vm(cache_dir: &std::path::Path, kernels: &[String]) -> Result<()>
     tracing_placeholder(&summary)
 }
 
+/// Tier 4 — `cargo xtask verifier-regress` body. Walks every
+/// recorded program baseline under
+/// `perf-baseline/main/verifier-budget/`, runs `veristat` against
+/// the compiled BPF object, parses the output, and calls the pure
+/// decision fn at
+/// [`xtask::perf_gate::verifier_regress::evaluate`]. Fails with
+/// structured breach output (program / metric / baseline /
+/// measured / threshold per breach) on any breach per AC 4 of step
+/// 07-01:
+///
+/// - `>5% growth` vs baseline (ceiling: `policy.max_growth_fraction`)
+/// - `>10% of ceiling` proximity (within 10% of the 1M `CAP_BPF`
+///   ceiling)
+/// - Baseline names a program veristat output does not produce
+///
+/// Failure modes that surface as a structured `eyre::Report`:
+///
+/// 1. `veristat` not on PATH (operator surface — same `which_or_hint`
+///    shape as `bpf-build` / `bpf-unit`).
+/// 2. `target/xtask/bpf-objects/overdrive_bpf.o` missing — caller
+///    must run `cargo xtask bpf-build` first; the error names that
+///    fix.
+/// 3. Subprocess invocation fails (per `sh` contract).
+/// 4. Parser rejects the recorded baseline / veristat output.
+/// 5. Gate evaluation returns one or more breaches.
+///
+/// Self-tested at `xtask/tests/perf_gate_self_test.rs` against the
+/// pure decision fn directly so the tests run on macOS without
+/// veristat installed.
 fn verifier_regress() -> Result<()> {
-    // TODO(#29): wire when first real program lands. Per ADR-0038 §6 /
-    // architecture.md §6.3 there is no point baselining verifier
-    // complexity against a no-op `xdp_pass` — the gate would catch
-    // nothing and the baseline would be meaningless. The harness lands
-    // alongside the first real BPF program (POLICY_MAP / SERVICE_MAP /
-    // sockops+kTLS) in Phase 2 issues #24..#27.
-    tracing_placeholder("verifier-regress: veristat harness deferred to #29 (first real program)")
+    use std::fs;
+
+    use xtask::perf_gate::verifier_regress::{
+        BaselineRecord, GateOutcome, GatePolicy, evaluate, parse_baseline_file,
+        parse_veristat_output, render_failure,
+    };
+
+    which_or_hint(
+        "veristat",
+        "build from kernel-tools (`tools/testing/selftests/bpf/veristat`) or install via your distro's `linux-tools` package",
+    )?;
+
+    let workspace_root = workspace_root_dir()?;
+    let baseline_dir = workspace_root.join("perf-baseline/main/verifier-budget");
+    let bpf_object = workspace_root.join("target/xtask/bpf-objects/overdrive_bpf.o");
+
+    if !bpf_object.exists() {
+        bail!("BPF object {} not found. Run `cargo xtask bpf-build` first.", bpf_object.display());
+    }
+
+    // Discover baseline files — every `<name>.txt` under the
+    // verifier-budget directory becomes a contract entry.
+    let mut baselines: Vec<BaselineRecord> = Vec::new();
+    let entries = fs::read_dir(&baseline_dir)
+        .map_err(|e| color_eyre::eyre::eyre!("read_dir({}): {e}", baseline_dir.display()))?;
+    let mut baseline_paths: Vec<std::path::PathBuf> = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|e| color_eyre::eyre::eyre!("read_dir entry: {e}"))?;
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) == Some("txt") {
+            baseline_paths.push(path);
+        }
+    }
+    baseline_paths.sort();
+    for path in &baseline_paths {
+        let text = fs::read_to_string(path)
+            .map_err(|e| color_eyre::eyre::eyre!("read {}: {e}", path.display()))?;
+        let mut records = parse_baseline_file(&text)
+            .map_err(|e| color_eyre::eyre::eyre!("parse {}: {e:?}", path.display()))?;
+        baselines.append(&mut records);
+    }
+    if baselines.is_empty() {
+        bail!(
+            "no baselines found under {} — at least one `<name>.txt` file with a `prog=… verified_insns=…` line is required",
+            baseline_dir.display()
+        );
+    }
+
+    // Run veristat once per baseline-named program. veristat's
+    // standard output shape is one line per program with the same
+    // `prog=… verified_insns=…` tokens our parser keys on (see the
+    // recorded baselines for the canonical shape). We pass each
+    // program name explicitly via `-f <prog>` so a single
+    // multi-program ELF produces one line per request.
+    let mut combined_veristat = String::new();
+    for baseline in &baselines {
+        let output = std::process::Command::new("veristat")
+            .arg("-f")
+            .arg(&baseline.program)
+            .arg(&bpf_object)
+            .output()
+            .map_err(|e| color_eyre::eyre::eyre!("veristat invocation failed: {e}"))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            bail!(
+                "veristat exited non-zero for prog={} ({}): {}",
+                baseline.program,
+                output.status,
+                stderr
+            );
+        }
+        combined_veristat.push_str(&String::from_utf8_lossy(&output.stdout));
+        if !combined_veristat.ends_with('\n') {
+            combined_veristat.push('\n');
+        }
+    }
+
+    let candidates = parse_veristat_output(&combined_veristat).map_err(|e| {
+        color_eyre::eyre::eyre!(
+            "parse veristat output: {e:?}\n--- veristat stdout ---\n{combined_veristat}"
+        )
+    })?;
+
+    let policy = GatePolicy::default();
+    match evaluate(&baselines, &candidates, &policy) {
+        GateOutcome::Pass => {
+            eprintln!("verifier-regress: pass — {} program(s) within budget", baselines.len());
+            Ok(())
+        }
+        GateOutcome::Fail { breaches } => {
+            eprint!("{}", render_failure(&breaches));
+            bail!("verifier-regress gate failed: {} breach(es)", breaches.len());
+        }
+    }
 }
 
 fn xdp_perf() -> Result<()> {

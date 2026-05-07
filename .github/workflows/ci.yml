@@ -890,3 +890,71 @@ jobs:
           path: target/nextest/ci/junit.xml
           retention-days: 14
           if-no-files-found: warn
+
+  # -------------------------------------------------------------------
+  # Job E (Tier 4) — verifier-budget regression gate
+  # -------------------------------------------------------------------
+  # `cargo xtask verifier-regress` runs `veristat` against the compiled
+  # BPF object and fails the PR if any program's verified instruction
+  # count exceeds its baseline at `perf-baseline/main/verifier-budget/`
+  # by >5%, or approaches the per-program 1M CAP_BPF complexity ceiling
+  # by >10%. Pure-Rust gate logic self-tested at
+  # `xtask/tests/perf_gate_self_test.rs`; this job runs the gate
+  # against real veristat output. See `.claude/rules/testing.md` §
+  # "Tier 4 — Verifier and Performance Gates" and slice-07.
+  verifier-regress:
+    name: cargo xtask verifier-regress
+    runs-on: ubuntu-latest
+    needs: bpf-build
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # mold is the linker per .cargo/config.toml; ubuntu-latest does
+      # not ship it.
+      - name: Install mold linker
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends mold
+
+      # veristat ships with the kernel selftests bpf bundle; on Ubuntu
+      # 24.04 it is packaged via `linux-tools-common` /
+      # `linux-tools-$(uname -r)`. The runner uses the image's stock
+      # kernel; we install the matching tools.
+      - name: Install veristat
+        run: |
+          sudo apt-get install -y --no-install-recommends \
+            linux-tools-common "linux-tools-$(uname -r)" || \
+            sudo apt-get install -y --no-install-recommends linux-tools-generic
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "phase-2-verifier-regress"
+
+      - id: sccache-setup
+        name: Setup sccache (soft-fail on cache backend outage)
+        continue-on-error: true
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Enable sccache when setup succeeded
+        if: steps.sccache-setup.outcome == 'success'
+        run: |
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+
+      - name: Warn when sccache unavailable
+        if: steps.sccache-setup.outcome != 'success'
+        run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
+
+      # MUST run AFTER Swatinem/rust-cache@v2 — see fmt-clippy job above
+      # for rationale (cache tarball restore clobbers the BPF artifact).
+      - name: Download BPF object artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bpf-object
+          path: target/xtask/bpf-objects/
+          if-no-files-found: error
+
+      - name: cargo xtask verifier-regress
+        run: cargo xtask verifier-regress
+
