@@ -101,4 +101,8 @@ mod acceptance {
     // populates `TickContext.now_unix` from the injected `Clock`
     // (`state.clock`), exactly once per tick.
     mod tick_context_now_unix_runtime;
+
+    // GH #160 — `service_backends` ObservationStore table wires
+    // through to `hydrate_desired` for `ServiceMapHydrator`.
+    mod service_backends_hydrate_desired;
 }

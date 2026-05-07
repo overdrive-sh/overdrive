@@ -27,8 +27,11 @@ use async_trait::async_trait;
 use futures::Stream;
 use thiserror::Error;
 
+use std::net::Ipv4Addr;
+
 use crate::dataplane::fingerprint::BackendSetFingerprint;
 use crate::id::{AllocationId, JobId, NodeId, Region, ServiceId};
+use crate::traits::dataplane::Backend;
 use crate::transition_reason::{TerminalCondition, TransitionReason};
 use crate::wall_clock::UnixInstant;
 
@@ -404,13 +407,37 @@ pub struct ServiceHydrationResultRow {
     pub updated_at: LogicalTimestamp,
 }
 
+/// `service_backends` row — the desired backend set for a service,
+/// written by the control plane when allocation status changes and
+/// read by the `ServiceMapHydrator` reconciler to hydrate `desired`
+/// state per architecture.md § 8 *Hydration shape*.
+///
+/// Keyed by [`ServiceId`] alone — one row per service carrying the
+/// full current backend set. LWW resolution uses
+/// [`LogicalTimestamp::dominates`] on `updated_at`.
+///
+/// Per §4 guardrail: full-row writes only, no field-diff merges.
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct ServiceBackendRow {
+    /// Identity of the service. Primary key for LWW.
+    pub service_id: ServiceId,
+    /// Virtual IP for the service — wire-shape `Ipv4Addr`, not
+    /// `ServiceVip`. The hydrator wraps into `ServiceVip` at the
+    /// read boundary (architecture.md § 8 lines 616-629).
+    pub vip: Ipv4Addr,
+    /// Current backend set for the service.
+    pub backends: Vec<Backend>,
+    /// Lamport timestamp for LWW ordering.
+    pub updated_at: LogicalTimestamp,
+}
+
 /// The closed set of row shapes [`ObservationStore`] accepts.
 ///
 /// This enum *is* the compile-time boundary between intent and
 /// observation: any type that is not a variant of [`ObservationRow`]
 /// cannot be written into an [`ObservationStore`]. Phase 2+ extensions
-/// add variants here as new row shapes are introduced (service
-/// backends, compiled policy verdicts, revoked operator certs, ...).
+/// add variants here as new row shapes are introduced (compiled policy
+/// verdicts, revoked operator certs, ...).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ObservationRow {
     AllocStatus(AllocStatusRow),
@@ -421,6 +448,10 @@ pub enum ObservationRow {
     /// §§ 7, 12. Read by the `ServiceMapHydrator` reconciler
     /// (Slice 08-02).
     ServiceHydration(ServiceHydrationResultRow),
+    /// `service_backends` row — the desired backend set for a
+    /// service. Read by the `ServiceMapHydrator` reconciler to
+    /// hydrate `desired` state (GH #160).
+    ServiceBackend(ServiceBackendRow),
 }
 
 // ---------------------------------------------------------------------------
@@ -553,4 +584,16 @@ pub trait ObservationStore: Send + Sync + 'static {
         &self,
         service_id: &ServiceId,
     ) -> Result<Vec<ServiceHydrationResultRow>, ObservationStoreError>;
+
+    /// Read the LWW-winner `service_backends` rows for the given
+    /// [`ServiceId`]. Used by the `ServiceMapHydrator` reconciler
+    /// (GH #160) to hydrate `desired` state from observation.
+    ///
+    /// Returns at most one row per `ServiceId` — the table is keyed
+    /// by `ServiceId` alone (not a composite key). LWW resolution
+    /// uses [`LogicalTimestamp::dominates`] on `updated_at`.
+    async fn service_backends_rows(
+        &self,
+        service_id: &ServiceId,
+    ) -> Result<Vec<ServiceBackendRow>, ObservationStoreError>;
 }

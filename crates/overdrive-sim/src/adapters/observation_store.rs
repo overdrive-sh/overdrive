@@ -58,7 +58,7 @@ use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
 use overdrive_core::id::{AllocationId, NodeId, ServiceId};
 use overdrive_core::traits::observation_store::{
     AllocStatusRow, NodeHealthRow, ObservationRow, ObservationStore, ObservationStoreError,
-    ObservationSubscription, ServiceHydrationResultRow,
+    ObservationSubscription, ServiceBackendRow, ServiceHydrationResultRow,
 };
 
 /// Default capacity for the fan-out broadcast channel. Writes beyond
@@ -103,6 +103,10 @@ struct PeerState {
     /// same key are strictly idempotent.
     by_service_hydration:
         Mutex<BTreeMap<(ServiceId, BackendSetFingerprint), ServiceHydrationResultRow>>,
+    /// `service_backends` LWW index — keyed on `ServiceId` alone.
+    /// One row per service carrying the full current backend set.
+    /// GH #160.
+    by_service_backends: Mutex<BTreeMap<ServiceId, ServiceBackendRow>>,
     fan_out: broadcast::Sender<ObservationRow>,
     /// Test-only FIFO of write failures to inject. Each call to
     /// [`SimObservationStore::write`] pops the front entry; when the
@@ -120,6 +124,7 @@ impl PeerState {
             by_alloc: Mutex::new(HashMap::new()),
             by_node: Mutex::new(HashMap::new()),
             by_service_hydration: Mutex::new(BTreeMap::new()),
+            by_service_backends: Mutex::new(BTreeMap::new()),
             fan_out,
             pending_write_failures: Mutex::new(VecDeque::new()),
         })
@@ -132,6 +137,7 @@ impl PeerState {
             ObservationRow::AllocStatus(incoming) => self.apply_alloc_status(incoming),
             ObservationRow::NodeHealth(incoming) => self.apply_node_health(incoming),
             ObservationRow::ServiceHydration(incoming) => self.apply_service_hydration(incoming),
+            ObservationRow::ServiceBackend(incoming) => self.apply_service_backends(incoming),
         };
 
         if accepted {
@@ -158,6 +164,25 @@ impl PeerState {
             }
             Some(existing) if incoming.updated_at.dominates(&existing.updated_at) => {
                 by_sh.insert(key, incoming.clone());
+                true
+            }
+            Some(_) => false,
+        }
+    }
+
+    /// LWW merge for `service_backends`. Keyed on `ServiceId` alone —
+    /// one row per service. Same `ServiceId` on a later tick wins
+    /// under [`LogicalTimestamp::dominates`]. GH #160.
+    fn apply_service_backends(&self, incoming: &ServiceBackendRow) -> bool {
+        let key = incoming.service_id;
+        let mut by_sb = self.by_service_backends.lock();
+        match by_sb.get(&key) {
+            None => {
+                by_sb.insert(key, incoming.clone());
+                true
+            }
+            Some(existing) if incoming.updated_at.dominates(&existing.updated_at) => {
+                by_sb.insert(key, incoming.clone());
                 true
             }
             Some(_) => false,
@@ -366,6 +391,16 @@ impl ObservationStore for SimObservationStore {
             .filter(|((sid, _), _)| sid == service_id)
             .map(|(_, row)| row.clone())
             .collect())
+    }
+
+    async fn service_backends_rows(
+        &self,
+        service_id: &ServiceId,
+    ) -> Result<Vec<ServiceBackendRow>, ObservationStoreError> {
+        // LWW winner for the given `service_id`, if any. At most one
+        // row per service — keyed by `ServiceId` alone.
+        let by_sb = self.inner.by_service_backends.lock();
+        Ok(by_sb.get(service_id).cloned().into_iter().collect())
     }
 }
 

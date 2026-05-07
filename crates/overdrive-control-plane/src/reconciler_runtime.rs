@@ -856,20 +856,46 @@ async fn hydrate_desired(
             Ok(AnyState::JobLifecycle(s))
         }
         AnyReconciler::ServiceMapHydrator(_) => {
-            // GH #160 — the production `service_backends` ObservationStore
-            // table that this arm projects from is a deferred deliverable.
-            // 08-02 ships the reconciler + State + View + ESR DST
-            // invariants; the DST invariants construct
-            // `ServiceMapHydratorState` directly from test fixtures and do
-            // NOT exercise this hydrate path. When GH #160 lands, this arm
-            // reads `state.obs.service_backends_rows(&service_id)` and
-            // projects rows into `state.desired` per architecture.md § 8
-            // *Hydration shape*. Until then the runtime's tick loop
-            // produces an empty `desired` for any service-map-hydrator
-            // evaluation — semantically a no-op convergence.
-            Ok(AnyState::ServiceMapHydrator(ServiceMapHydratorState::default()))
+            let service_id = service_id_from_target(target)?;
+            let rows = state
+                .obs
+                .service_backends_rows(&service_id)
+                .await
+                .map_err(|e| ConvergenceError::ObservationRead(e.to_string()))?;
+            let mut desired = BTreeMap::new();
+            for row in rows {
+                // Wrap the row's wire-shape `Ipv4Addr` into `ServiceVip`
+                // at the read boundary per architecture.md § 8.
+                let vip = overdrive_core::id::ServiceVip::new(std::net::IpAddr::V4(row.vip))
+                    .map_err(|e| ConvergenceError::ObservationRead(e.to_string()))?;
+                let fp = overdrive_core::dataplane::fingerprint::fingerprint(&vip, &row.backends);
+                desired.insert(
+                    row.service_id,
+                    overdrive_core::reconciler::ServiceDesired {
+                        vip,
+                        backends: row.backends,
+                        fingerprint: fp,
+                    },
+                );
+            }
+            Ok(AnyState::ServiceMapHydrator(ServiceMapHydratorState {
+                desired,
+                actual: BTreeMap::new(),
+            }))
         }
     }
+}
+
+/// Test-only public wrapper for [`hydrate_desired`]. Used by
+/// acceptance tests (GH #160) to exercise the production hydrate
+/// path without going through the full `run_convergence_tick` loop.
+#[doc(hidden)]
+pub async fn hydrate_desired_for_test(
+    reconciler: &AnyReconciler,
+    target: &TargetResource,
+    state: &AppState,
+) -> Result<AnyState, ConvergenceError> {
+    hydrate_desired(reconciler, target, state).await
 }
 
 /// Read a `Job` from the `IntentStore` at the canonical `jobs/<id>` key,
