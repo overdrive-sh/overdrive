@@ -465,6 +465,108 @@ fn verifier_budget_xdp_service_map_lookup_within_20pct_of_baseline() {
     );
 }
 
+/// Records the kernel-side `xdp_reverse_nat_lookup` program's
+/// verified instruction count. Companion to
+/// `verifier_budget_xdp_service_map_lookup_within_20pct_of_baseline`
+/// — exercises the same `ProgramInfo::verified_instruction_count()`
+/// signal against the new program from slice 09-02, written into
+/// `perf-baseline/main/verifier-budget/veristat-reverse-nat.txt` by
+/// step 06-05.
+///
+/// First-baseline behaviour: ADR-0045 § 6 acknowledges this is the
+/// FIRST baseline for `xdp_reverse_nat_lookup` (no historical baseline
+/// to delta against — `tc_reverse_nat` was retired in slice 09-03 per
+/// the single-cut greenfield rule, not migrated). The 20%-delta gate
+/// becomes load-bearing on the SECOND baseline run; this run gates
+/// only on the absolute ceilings (≤ 600,000 per ASR-2.2-03; ≤ 500,000
+/// for the L1-cache-fits target).
+#[test]
+#[serial_test::serial(env)]
+fn verifier_budget_xdp_reverse_nat_lookup_within_absolute_ceiling() {
+    use std::path::PathBuf;
+
+    use aya::EbpfLoader;
+    use aya::programs::Xdp;
+
+    // SAFETY: geteuid is unsafe per libc binding family but reads a
+    // kernel-managed numeric, no preconditions.
+    let euid = unsafe { libc::geteuid() };
+    if euid != 0 {
+        eprintln!("[skip] verifier-budget test needs root for BPF program load; euid={euid}");
+        return;
+    }
+
+    let pin_dir =
+        PathBuf::from(format!("/sys/fs/bpf/overdrive-test-veristat-revnat-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&pin_dir);
+    std::fs::create_dir_all(&pin_dir).expect("create pin dir");
+    struct G(PathBuf);
+    impl Drop for G {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    let _g = G(pin_dir.clone());
+
+    // SERVICE_MAP is a HoM and aya's stock loader cannot create one
+    // from the ELF; pre-pin so EbpfLoader picks it up by name. The
+    // reverse-nat program does not touch SERVICE_MAP, but the same
+    // ELF object holds both programs and aya processes every map in
+    // the maps section at load time.
+    use overdrive_dataplane::maps::ServiceKey;
+    use overdrive_dataplane::maps::hash_of_maps::HashOfMapsHandle;
+    let _service_map = HashOfMapsHandle::<ServiceKey, u32>::new_pinned_with_array_inner(
+        "SERVICE_MAP",
+        4096,
+        overdrive_core::dataplane::MaglevTableSize::DEFAULT.get(),
+        &pin_dir,
+    )
+    .expect("pre-pin SERVICE_MAP");
+
+    let artifact = std::path::PathBuf::from(env!("OVERDRIVE_BPF_OBJECT_PATH"));
+    let load_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let mut bpf = loop {
+        match EbpfLoader::new().map_pin_path(&pin_dir).allow_unsupported_maps().load_file(&artifact)
+        {
+            Ok(b) => break b,
+            Err(e) => {
+                if std::time::Instant::now() < load_deadline {
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    continue;
+                }
+                panic!("EbpfLoader.load_file: {e}");
+            }
+        }
+    };
+    let prog: &mut Xdp = bpf
+        .program_mut("xdp_reverse_nat_lookup")
+        .expect("program present")
+        .try_into()
+        .expect("xdp");
+    prog.load().expect("xdp load");
+
+    let info = prog.info().expect("ProgramInfo");
+    let insns = info.verified_instruction_count().expect("kernel must report verified insns");
+    eprintln!("xdp_reverse_nat_lookup verified_instruction_count = {insns}");
+
+    // First-baseline run: no historical baseline to delta against
+    // (per ADR-0045 § 6 + step 06-05). Subsequent runs will tighten
+    // this to a ±20% gate around the recorded baseline once
+    // `perf-baseline/main/verifier-budget/veristat-reverse-nat.txt`
+    // is committed alongside this test.
+    //
+    // Absolute ceilings (architecture.md § 7 D3 / ASR-2.2-03):
+    //   ≤ 500,000 — 50% CAP_BPF, "L1-cache fits"
+    //   ≤ 600,000 — 60% absolute ASR-2.2-03 ceiling
+    //   ≤ 1,000,000 — kernel CAP_BPF maximum
+    assert!(
+        insns <= 600_000,
+        "verified_instruction_count {insns} exceeds ASR-2.2-03 ceiling (600k); \
+         update perf-baseline/main/verifier-budget/veristat-reverse-nat.txt \
+         with documented justification per architecture.md § 7 D3"
+    );
+}
+
 // ---- helpers ----
 
 fn if_nametoindex(iface: &str) -> Result<u32, std::io::Error> {

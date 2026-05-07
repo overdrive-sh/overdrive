@@ -1226,6 +1226,34 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-05-07T12:37:42Z"
+    },
+    {
+      "sid": "06-05",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-07T12:53:33Z"
+    },
+    {
+      "sid": "06-05",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: post-pivot service-map baseline (151379) already pinned in test from step 09-04 GREEN; reverse-nat has no historical baseline (first-baseline run per criterion #4). This step records baseline files as the gate's filesystem SSOT, not the test pin.",
+      "t": "2026-05-07T12:54:14Z"
+    },
+    {
+      "sid": "06-05",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: data files only; no unit-test surface",
+      "t": "2026-05-07T12:54:14Z"
+    },
+    {
+      "sid": "06-05",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-07T12:57:37Z"
     }
   ]
 }

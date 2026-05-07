@@ -111,6 +111,36 @@
 #       151379 / 600,000 = 25.2% of the ASR-2.2-03 ceiling
 #       151379 / 1,000,000 = 15.1% of the CAP_BPF kernel ceiling
 #
+#   Step 06-05 (this commit): verified_insns = 151379 — REAFFIRMED as
+#     the load-bearing baseline of record per ADR-0045 § 6 / § 8.
+#     Re-measurement under the post-pivot program shape (existing
+#     SERVICE_MAP / MAGLEV_MAP / BACKEND_MAP chained lookup + L3+L4
+#     rewrite + word-by-word L4 csum recomputation + bpf_fib_lookup +
+#     L2 MAC rewrite + bpf_redirect_neigh) returns the SAME 151379
+#     count as step 09-04 because no source under
+#     `crates/overdrive-bpf/src/programs/xdp_service_map.rs` has
+#     changed since 09-04's GREEN commit (`d8d848a`).
+#     `git log --oneline -- crates/overdrive-bpf/src/programs/xdp_service_map.rs`
+#     terminates at 09-04 as the most recent commit.
+#
+#     Step 06-05 is the post-pivot baseline-recording step per
+#     ADR-0045 § 8 (Phasing — "Replanned: Baselines are recorded
+#     against the post-pivot program shape, not the pre-pivot
+#     shape"). The Tier 4 gate threshold (≤ 20% delta per PR; ≤ 60%
+#     of 1M ceiling absolute) is preserved.
+#
+#     Delta vs step 09-04 baseline: 151379 → 151379 (+0 insns, 0%) —
+#     well within the 20% gate (≤ 181655). The 20%-delta gate
+#     remains anchored on 151379 for any future change.
+#
+#     Companion baseline: `xdp_reverse_nat_lookup` (NEW program from
+#     slice 09-02) is recorded at first-baseline 148166 in
+#     `perf-baseline/main/verifier-budget/veristat-reverse-nat.txt`.
+#     The retired `tc_reverse_nat` baseline file (pre-pivot
+#     TC-egress shape) was never recorded against the pre-pivot
+#     shape on disk, so no delete is required (criterion #2 of step
+#     06-05 satisfied vacuously).
+#
 # Budget gates (ADR-0040 / architecture.md §7 D3 / ASR-2.2-03):
 #   verified_insns ≤ 181655     ← +20% delta vs step 09-04 baseline (151379)
 #                                 — pinned by the integration test
