@@ -290,6 +290,7 @@ impl EbpfDataplane {
     /// [`Self::new_with_pin_dir`]). The directory's parent must
     /// already exist; the directory itself is created if missing.
     #[cfg(target_os = "linux")]
+    #[allow(clippy::too_many_lines)]
     pub fn new_with_pin_dir(
         client_iface: &str,
         backend_iface: &str,
@@ -654,7 +655,7 @@ impl EbpfDataplane {
         let key = ServiceKey { vip_host: u32::from(vip), port_host: port, _pad: 0 };
         let key_bytes = unsafe {
             core::slice::from_raw_parts(
-                &key as *const _ as *const u8,
+                (&raw const key).cast::<u8>(),
                 core::mem::size_of::<ServiceKey>(),
             )
         };
@@ -778,6 +779,7 @@ fn classify_attach_result<L>(result: Result<L, aya::programs::ProgramError>) -> 
 
 #[cfg(target_os = "linux")]
 #[async_trait]
+#[allow(clippy::too_many_lines)]
 impl Dataplane for EbpfDataplane {
     /// see #24 (`POLICY_MAP`)
     async fn update_policy(
@@ -829,6 +831,8 @@ impl Dataplane for EbpfDataplane {
         use std::os::fd::AsFd;
 
         use crate::maps::wire::{BackendEntryPod, ServiceKey};
+        use crate::maps::{BackendKeyPod, VipPod};
+        use overdrive_core::dataplane::backend_key::Proto;
 
         // Empty backend set — remove this VIP from all maps so XDP
         // returns XDP_PASS. Recover the last-known ServiceKey from
@@ -878,8 +882,7 @@ impl Dataplane for EbpfDataplane {
                 let mut reverse_nat_map = self.reverse_nat_map.lock();
                 for stale in &stale_keys {
                     match reverse_nat_map.remove(stale) {
-                        Ok(()) => {}
-                        Err(aya::maps::MapError::KeyNotFound) => {}
+                        Ok(()) | Err(aya::maps::MapError::KeyNotFound) => {}
                         Err(e) => {
                             return Err(DataplaneError::LoadFailed(format!(
                                 "REVERSE_NAT_MAP purge: {e}"
@@ -891,9 +894,6 @@ impl Dataplane for EbpfDataplane {
 
             return Ok(());
         }
-
-        use crate::maps::{BackendKeyPod, VipPod};
-        use overdrive_core::dataplane::backend_key::Proto;
 
         let vip_port = backends[0].addr.port();
         let service_key = ServiceKey { vip_host: u32::from(vip), port_host: vip_port, _pad: 0 };
@@ -966,12 +966,12 @@ impl Dataplane for EbpfDataplane {
         let weighted: std::collections::BTreeMap<overdrive_core::id::BackendId, u16> = backends
             .iter()
             .filter_map(|backend| {
-                BackendEntryPod::from_backend(backend).ok().and_then(|pod| {
+                BackendEntryPod::from_backend(backend).ok().map(|pod| {
                     // Memo hit — every endpoint was already allocated in
                     // Step 1's BACKEND_MAP populate loop above.
                     let bid =
                         self.backend_id_alloc.lock().allocate(pod.ipv4_host, pod.port_host, proto);
-                    Some((bid, backend.weight.max(1)))
+                    (bid, backend.weight.max(1))
                 })
             })
             .collect();
@@ -1124,8 +1124,7 @@ impl Dataplane for EbpfDataplane {
             // entries already gone — fold into Ok().
             for stale in prior_keys.difference(&new_keys) {
                 match reverse_nat_map.remove(stale) {
-                    Ok(()) => {}
-                    Err(aya::maps::MapError::KeyNotFound) => {}
+                    Ok(()) | Err(aya::maps::MapError::KeyNotFound) => {}
                     Err(e) => {
                         return Err(DataplaneError::LoadFailed(format!(
                             "REVERSE_NAT_MAP purge: {e}"

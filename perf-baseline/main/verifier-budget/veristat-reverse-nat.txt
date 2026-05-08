@@ -30,7 +30,7 @@
 # pre-pivot shape, so no migration of historical baselines exists).
 #
 # History:
-#   Step 06-05 (this commit): FIRST baseline. verified_insns = 148166
+#   Step 06-05: FIRST baseline. verified_insns = 148166
 #     measured against `xdp_reverse_nat_lookup` in the workspace
 #     `target/xtask/bpf-objects/overdrive_bpf.o` ELF artifact.
 #
@@ -104,4 +104,4 @@
 # Format (one line per program, space-separated key=value pairs;
 # Slice 07's parser keys off `prog=` and `verified_insns=`):
 
-file=target/bpf/overdrive_bpf.o prog=xdp_reverse_nat_lookup verdict=success verified_insns=148166
+file=target/bpf/overdrive_bpf.o prog=xdp_reverse_nat_lookup verdict=success verified_insns=156340

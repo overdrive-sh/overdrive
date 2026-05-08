@@ -123,7 +123,9 @@ pub mod wire {
         }
     }
 
-    /// `REVERSE_NAT_MAP` outer-key POD. 8-byte host-order tuple
+    /// `REVERSE_NAT_MAP` outer-key POD.
+    ///
+    /// 8-byte host-order tuple
     /// `(backend_ip, backend_port, proto, _pad)`. Matches
     /// `crates/overdrive-bpf/src/maps/reverse_nat_map.rs`'s kernel
     /// `BackendKey` byte-for-byte. Used by the egress reverse-NAT
