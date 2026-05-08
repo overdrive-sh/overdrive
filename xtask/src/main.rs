@@ -807,6 +807,28 @@ fn bpf_unit() -> Result<()> {
         "cargo install cargo-nextest --locked  # or: brew install cargo-nextest",
     )?;
     let workspace_root = workspace_root_dir()?;
+
+    // Tier 2 BPF unit tests under
+    // `crates/overdrive-bpf/tests/integration/xdp_service_map_redirect_neigh.rs`
+    // call `bpf_fib_lookup` from the XDP program with input-mode
+    // semantics (flags=0). For `RET_SUCCESS` the kernel needs both a
+    // route AND a populated neighbour entry for the destination —
+    // and rp_filter must be relaxed because `BPF_PROG_TEST_RUN`
+    // synthesises an XDP context with `ingress_ifindex = lo`. Lima
+    // happens to satisfy these via routine boot traffic on the
+    // default route, so the suite passes there; CI runners
+    // (`ubuntu-latest`, LVH) make no such guarantee.
+    //
+    // Install a deterministic FIB-hit topology before `nextest` runs
+    // and tear it down on Drop so a panicking test still cleans up.
+    // The topology lives once per `bpf-unit` invocation, not per
+    // test (mirrors the env-wide nature of host network state, and
+    // avoids per-test sudo dances). Linux-only — on macOS the actual
+    // tests run inside Lima via `cargo xtask lima run --`, which
+    // re-enters this function on Linux.
+    #[cfg(target_os = "linux")]
+    let _topology = bpf_fib_topology::install()?;
+
     sh(
         "cargo nextest run -p overdrive-bpf --features integration-tests --test integration",
         Command::new(cargo())
@@ -822,6 +844,142 @@ fn bpf_unit() -> Result<()> {
             ])
             .current_dir(&workspace_root),
     )
+}
+
+/// Tier 2 BPF unit-test FIB topology: a dummy interface with a
+/// directly-connected `/32` route to the well-known backend IP +
+/// permanent neighbour entry, so `bpf_fib_lookup` returns
+/// `RET_SUCCESS` from the XDP program independent of host network
+/// state. See `bpf_unit()` for the rationale.
+///
+/// Magic constants are duplicated by name in the consuming test
+/// file (`crates/overdrive-bpf/tests/integration/
+/// xdp_service_map_redirect_neigh.rs` — `ROUTABLE_BACKEND_OCTETS`
+/// and the synthesised packet's source IP). xtask hard-codes the
+/// dotted-quad strings rather than importing the test crate, per
+/// the `overdrive-*`-out-of-xtask-deps rule (CLAUDE.md §
+/// "xtask is build / test / dev orchestration"). If the test
+/// constants ever change, this module changes alongside them.
+#[cfg(target_os = "linux")]
+mod bpf_fib_topology {
+    use super::{Result, sh};
+    use eyre::bail;
+    use std::process::Command;
+
+    // 15-char IFNAMSIZ ceiling; this is well under.
+    const IFACE: &str = "odt-bpf-fib";
+    // /24 covers the test's source IP (`10.0.0.100` in
+    // `synthesise_tcp_syn`) so the input-mode FIB lookup has a
+    // valid reverse-path candidate via this iface.
+    const IFACE_ADDR_CIDR: &str = "10.0.0.254/24";
+    // Matches `ROUTABLE_BACKEND_OCTETS = [10, 1, 0, 5]` in the
+    // forward-path consuming test (`xdp_service_map_redirect_neigh`).
+    // Outside the IFACE_ADDR_CIDR subnet, so it needs an explicit
+    // `/32` route plus permanent neigh entry.
+    const BACKEND_IP: &str = "10.1.0.5";
+    // Matches `ROUTABLE_CLIENT_OCTETS = [10, 0, 0, 100]` in the
+    // reverse-path consuming test (`xdp_reverse_nat_redirect_neigh`).
+    // Inside the IFACE_ADDR_CIDR `/24` so the route is auto-added
+    // (directly connected); only the permanent neigh entry is needed
+    // (without it the FIB lookup gates on ARP and returns
+    // RET_NO_NEIGH, falling through to XDP_PASS).
+    const CLIENT_IP: &str = "10.0.0.100";
+    // Synthetic next-hop MAC; the tests assert only that the
+    // post-FIB-lookup `h_dest` differs from the PKTGEN sentinel,
+    // so any well-formed unicast MAC works. Same for both neigh
+    // entries — neither test inspects the value.
+    const NEIGH_LLADDR: &str = "02:00:00:00:00:01";
+    const RP_FILTER_ALL: &str = "/proc/sys/net/ipv4/conf/all/rp_filter";
+
+    pub(super) struct Topology {
+        rp_filter_prior: Option<String>,
+    }
+
+    pub(super) fn install() -> Result<Topology> {
+        // Best-effort module load — already present on most modern
+        // kernels including Lima's 6.8 image.
+        let _ = Command::new("modprobe").arg("dummy").status();
+
+        // Defensive cleanup: if a prior `bpf-unit` was killed
+        // mid-run, the iface may still exist. Removing here is
+        // idempotent.
+        let _ = Command::new("ip").args(["link", "del", IFACE]).status();
+
+        // `BPF_PROG_TEST_RUN` synthesises an XDP context with
+        // `ingress_ifindex = lo`. Input-mode `bpf_fib_lookup` then
+        // does a route lookup with `flowi4_iif = lo`; on kernels
+        // with `all.rp_filter >= 1` (Ubuntu's default) the kernel
+        // rejects the lookup because the source IP is not routable
+        // back through `lo`. Drop the global to 0 for the duration
+        // of the suite and restore on Drop. Lima's image already
+        // ships with `all.rp_filter = 0`; this branch is the
+        // CI-runner backstop.
+        let rp_filter_prior = std::fs::read_to_string(RP_FILTER_ALL).ok();
+        if let Err(err) = std::fs::write(RP_FILTER_ALL, "0\n") {
+            bail!(
+                "failed to relax {RP_FILTER_ALL} for FIB-hit topology: {err}; \
+                 `cargo xtask bpf-unit` requires NET_ADMIN — invoke via \
+                 `cargo xtask lima run -- cargo xtask bpf-unit` or `sudo` in CI"
+            );
+        }
+
+        sh(
+            &format!("ip link add {IFACE} type dummy"),
+            Command::new("ip").args(["link", "add", IFACE, "type", "dummy"]),
+        )?;
+        sh(
+            &format!("ip link set {IFACE} up"),
+            Command::new("ip").args(["link", "set", IFACE, "up"]),
+        )?;
+        sh(
+            &format!("ip addr add {IFACE_ADDR_CIDR} dev {IFACE}"),
+            Command::new("ip").args(["addr", "add", IFACE_ADDR_CIDR, "dev", IFACE]),
+        )?;
+        sh(
+            &format!("ip route add {BACKEND_IP}/32 dev {IFACE}"),
+            Command::new("ip").args(["route", "add", &format!("{BACKEND_IP}/32"), "dev", IFACE]),
+        )?;
+        sh(
+            &format!("ip neigh add {BACKEND_IP} lladdr {NEIGH_LLADDR} dev {IFACE} nud permanent"),
+            Command::new("ip").args([
+                "neigh",
+                "add",
+                BACKEND_IP,
+                "lladdr",
+                NEIGH_LLADDR,
+                "dev",
+                IFACE,
+                "nud",
+                "permanent",
+            ]),
+        )?;
+        sh(
+            &format!("ip neigh add {CLIENT_IP} lladdr {NEIGH_LLADDR} dev {IFACE} nud permanent"),
+            Command::new("ip").args([
+                "neigh",
+                "add",
+                CLIENT_IP,
+                "lladdr",
+                NEIGH_LLADDR,
+                "dev",
+                IFACE,
+                "nud",
+                "permanent",
+            ]),
+        )?;
+
+        Ok(Topology { rp_filter_prior })
+    }
+
+    impl Drop for Topology {
+        fn drop(&mut self) {
+            // `ip link del` cascades the route and neigh entry.
+            let _ = Command::new("ip").args(["link", "del", IFACE]).status();
+            if let Some(prior) = &self.rp_filter_prior {
+                let _ = std::fs::write(RP_FILTER_ALL, prior);
+            }
+        }
+    }
 }
 
 fn integration_vm(cache_dir: &std::path::Path, kernels: &[String]) -> Result<()> {
