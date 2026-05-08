@@ -42,10 +42,12 @@ use std::time::{Duration, Instant};
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{IntentKey, Job, Node};
 use overdrive_core::id::{JobId, NodeId};
+#[cfg(any(test, feature = "integration-tests"))]
+use overdrive_core::reconciler::ServiceMapHydrator;
 use overdrive_core::reconciler::{
     Action, AnyReconciler, AnyReconcilerView, AnyState, JobLifecycle, JobLifecycleState,
-    JobLifecycleView, Reconciler, ReconcilerName, ServiceMapHydrator, ServiceMapHydratorState,
-    ServiceMapHydratorView, TargetResource, TickContext,
+    JobLifecycleView, Reconciler, ReconcilerName, ServiceMapHydratorState, ServiceMapHydratorView,
+    TargetResource, TickContext,
 };
 use overdrive_core::traits::intent_store::IntentStore;
 use parking_lot::Mutex;
