@@ -13,10 +13,12 @@
 //!    VLAN-tagged, …) returns `Verdict::PassToKernel` because the LB
 //!    is not a firewall: edge protocols belong to the host's other
 //!    workloads.
-//! 2. **IP version + IHL** — version field must be 4, IHL must be ≥ 5
-//!    (i.e. ≥ 20 bytes of IP header). Anything else means the frame
-//!    is malformed; return `Verdict::Drop` and increment the
-//!    `MalformedHeader` slot of `DROP_COUNTER`.
+//! 2. **IP version + IHL** — version field must be 4, IHL must be
+//!    exactly 5 (20 bytes, no IP options). IHL < 5 is malformed:
+//!    `Verdict::Drop` + `MalformedHeader` counter. IHL > 5 (IP
+//!    options present) returns `Verdict::PassToKernel` — the LB fast
+//!    path assumes a fixed 20-byte IPv4 header; packets with options
+//!    are handed to the kernel stack. Matches Cilium's XDP fast path.
 //! 3. **IP `total_length`** — the IPv4 header's `total_length` field
 //!    must satisfy `IHL·4 ≤ total_length ≤ packet_length`. Anything
 //!    outside that window is a malformed frame; drop + counter.
@@ -237,6 +239,9 @@ where
     if version != 4 || ihl < 5 {
         record_malformed_header_drop();
         return Verdict::Drop;
+    }
+    if ihl != 5 {
+        return Verdict::PassToKernel;
     }
 
     // (3) IP total_length sanity. The header advertises a

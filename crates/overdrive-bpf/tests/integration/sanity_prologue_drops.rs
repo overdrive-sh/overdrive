@@ -452,6 +452,44 @@ fn tcp_syn_plus_rst_flags_drops_with_malformed_header_counter() {
     );
 }
 
+// ---------- Regression: IHL > 5 (IP options) passes to kernel ----------
+//
+// IP-options packets (IHL = 6..15) must return XDP_PASS (PassToKernel)
+// without incrementing DROP_COUNTER. Before the fix, these packets
+// passed the `ihl >= 5` sanity check and reached the L4-offset code
+// which hard-codes ETH_HDR_LEN + IPV4_HDR_LEN (34 bytes) — only
+// correct for IHL = 5. The guard at check 2 now rejects IHL != 5 as
+// PassToKernel before any L4-offset computation runs.
+
+#[test]
+#[serial(env)]
+fn ipv4_with_options_ihl6_returns_xdp_pass_no_drop_counter_increment() {
+    let LoadedXdp { bpf, prog_fd, _outer_fd, _pin_dir_guard } = load_xdp_program();
+
+    let baseline = read_malformed_header_counter(&bpf);
+
+    // PKTGEN: IPv4 with IHL=6 (24-byte header with 4 bytes of options).
+    // The packet buffer is still 54 bytes; the sanity prologue returns
+    // PassToKernel at check 2 before reaching total_length validation.
+    let pkt = synthesise_tcp(/* ihl */ 6, /* flags */ 0x02);
+    let mut out = vec![0u8; pkt.len()];
+
+    let (action, _out_len) =
+        bpf_prog_test_run(&prog_fd, &pkt, &mut out).expect("BPF_PROG_TEST_RUN syscall");
+
+    assert_eq!(
+        action, XDP_PASS,
+        "IHL=6 (IP options) must return XDP_PASS (PassToKernel), got {action}"
+    );
+
+    let after = read_malformed_header_counter(&bpf);
+    assert_eq!(
+        after, baseline,
+        "DROP_COUNTER[MalformedHeader] MUST NOT increment for IHL>5 pass-to-kernel \
+         (baseline={baseline}, after={after})"
+    );
+}
+
 // ---------- S-2.2-21 — XDP: IPv6 ethertype passes through ----------
 
 #[test]
