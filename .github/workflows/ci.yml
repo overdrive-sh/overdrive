@@ -182,19 +182,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Lima
+        uses: lima-vm/lima-actions/install@v1
 
-      # mold is the linker per .cargo/config.toml; ubuntu-latest does
-      # not ship it.
-      - name: Install mold linker
-        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends mold
-
-      - uses: Swatinem/rust-cache@v2
+      - name: Cache Lima VM
+        id: lima-cache
+        uses: actions/cache@v4
         with:
-          shared-key: "phase-1-test"
+          path: ~/.lima/overdrive
+          key: lima-${{ hashFiles('infra/lima/overdrive-dev.yaml') }}-${{ runner.arch }}
 
-      # MUST run AFTER Swatinem/rust-cache@v2 — see fmt-clippy job above
-      # for rationale (cache tarball restore clobbers the BPF artifact).
+      - name: Provision Lima VM (cache miss)
+        if: steps.lima-cache.outputs.cache-hit != 'true'
+        run: limactl start --name=overdrive --tty=false infra/lima/overdrive-dev.yaml
+
+      - name: Start cached Lima VM
+        if: steps.lima-cache.outputs.cache-hit == 'true'
+        run: limactl start overdrive
+
+      # BPF artifact is downloaded to the host and visible inside the
+      # VM via the home-directory mount.
       - name: Download BPF object artifact
         uses: actions/download-artifact@v4
         with:
@@ -202,38 +209,25 @@ jobs:
           path: target/bpf/
           if-no-files-found: error
 
-      # See fmt-clippy job above for rationale.
-      - id: sccache-setup
-        name: Setup sccache (soft-fail on cache backend outage)
-        continue-on-error: true
-        uses: mozilla-actions/sccache-action@v0.0.10
-
-      - name: Enable sccache when setup succeeded
-        if: steps.sccache-setup.outcome == 'success'
-        run: |
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
-
-      - name: Warn when sccache unavailable
-        if: steps.sccache-setup.outcome != 'success'
-        run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
-
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-nextest
-
       - name: cargo nextest run --workspace (profile=ci)
         # PROPTEST_CASES is inherited from the workflow-level env:
         # declared at the top of this file (1024 per testing.md).
         # Profile config lives in `.config/nextest.toml`.
-        run: cargo nextest run --workspace --locked --profile ci
+        # The Lima VM has cargo-nextest, mold, and the full Rust
+        # toolchain pre-provisioned.
+        run: |
+          limactl shell overdrive bash -lc \
+            'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
+             cargo nextest run --workspace --locked --profile ci'
 
       - name: cargo test --doc --workspace
         # Nextest does not execute doctests. Run them in a separate step
         # so rustdoc examples are still verified — per
         # `.claude/rules/development.md` §Documentation.
-        run: cargo test --doc --workspace --locked
+        run: |
+          limactl shell overdrive bash -lc \
+            'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
+             cargo test --doc --workspace --locked'
 
       - name: Upload nextest JUnit report
         if: always()
@@ -261,26 +255,28 @@ jobs:
   integration:
     name: nextest (integration-tests)
     runs-on: ubuntu-latest
-    # Workspace nextest with --features integration-tests compiles
-    # overdrive-dataplane, whose build.rs requires the BPF artifact on
-    # Linux per ADR-0038 §3.2.
     needs: bpf-build
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Lima
+        uses: lima-vm/lima-actions/install@v1
 
-      # mold is the linker per .cargo/config.toml; ubuntu-latest does
-      # not ship it.
-      - name: Install mold linker
-        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends mold
-
-      - uses: Swatinem/rust-cache@v2
+      - name: Cache Lima VM
+        id: lima-cache
+        uses: actions/cache@v4
         with:
-          shared-key: "phase-1-integration"
+          path: ~/.lima/overdrive
+          key: lima-${{ hashFiles('infra/lima/overdrive-dev.yaml') }}-${{ runner.arch }}
 
-      # MUST run AFTER Swatinem/rust-cache@v2 — see fmt-clippy job above
-      # for rationale (cache tarball restore clobbers the BPF artifact).
+      - name: Provision Lima VM (cache miss)
+        if: steps.lima-cache.outputs.cache-hit != 'true'
+        run: limactl start --name=overdrive --tty=false infra/lima/overdrive-dev.yaml
+
+      - name: Start cached Lima VM
+        if: steps.lima-cache.outputs.cache-hit == 'true'
+        run: limactl start overdrive
+
       - name: Download BPF object artifact
         uses: actions/download-artifact@v4
         with:
@@ -288,62 +284,17 @@ jobs:
           path: target/bpf/
           if-no-files-found: error
 
-      - id: sccache-setup
-        name: Setup sccache (soft-fail on cache backend outage)
-        continue-on-error: true
-        uses: mozilla-actions/sccache-action@v0.0.10
-
-      - name: Enable sccache when setup succeeded
-        if: steps.sccache-setup.outcome == 'success'
-        run: |
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
-
-      - name: Warn when sccache unavailable
-        if: steps.sccache-setup.outcome != 'success'
-        run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
-
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-nextest
-
       - name: cargo nextest run --workspace --features integration-tests (profile=ci)
-        # Bare `--features integration-tests` enables the feature on
-        # every workspace member that defines it (Cargo silently
-        # ignores members without). New crates that add an
-        # integration-tests gate are picked up automatically — no edit
-        # to this step required.
-        #
         # Filter `binary(integration)` selects only the integration
-        # entrypoint binaries (`tests/integration.rs` per
-        # `.claude/rules/testing.md` §"Integration vs unit gating") so
-        # the unit/proptest suite that already ran in the `test` job
-        # above is not re-executed here.
-        #
-        # `sudo -E` preserves the runner user's environment (PATH,
-        # CARGO_HOME, RUSTUP_HOME, RUSTC_WRAPPER) so cargo/nextest/
-        # sccache resolve correctly while running as root. Root access
-        # is required for ProcessDriver: creating cgroup scope directories
-        # and writing child PIDs to cgroup.procs both fail with EACCES
-        # for the unprivileged runner user.
-        #
-        # `--exclude overdrive-bpf` avoids a cross-process artifact race:
-        # `overdrive-dataplane::integration::build_rs_artifact_check`
-        # transiently removes `target/bpf/overdrive_bpf.o`
-        # for the duration of a `cargo check` subprocess, and nextest
-        # runs each integration binary as a separate OS process — so
-        # `#[serial(env)]` (per-process) cannot gate
-        # `overdrive-bpf::integration::xdp_pass_test_run`'s
-        # `Ebpf::load_file` against that window. The `bpf-unit` job
-        # already owns `overdrive-bpf`'s integration tests via
-        # `cargo xtask bpf-unit` under the same CAP_BPF `sudo` guard,
-        # so excluding it here is loss-free.
+        # entrypoint binaries. `--exclude overdrive-bpf` avoids a
+        # cross-process artifact race (see bpf-unit job).
         run: |
-          sudo -E env "PATH=$PATH" cargo nextest run --workspace --locked --profile ci \
-            --features integration-tests \
-            --exclude overdrive-bpf \
-            -E 'binary(integration)'
+          limactl shell overdrive bash -lc \
+            'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
+             cargo nextest run --workspace --locked --profile ci \
+               --features integration-tests \
+               --exclude overdrive-bpf \
+               -E "binary(integration)"'
 
       - name: Upload nextest JUnit report
         if: always()
@@ -571,10 +522,7 @@ jobs:
     # Only run on PRs — diff-scoping has nothing meaningful to do on a
     # push to main (the diff is the merge commit itself).
     if: github.event_name == 'pull_request'
-    timeout-minutes: 30
-    # cargo-mutants reruns the workspace nextest baseline per mutation,
-    # which compiles overdrive-dataplane and thus requires the BPF
-    # artifact on Linux per ADR-0038 §3.2.
+    timeout-minutes: 45
     needs: bpf-build
     steps:
       - uses: actions/checkout@v4
@@ -584,19 +532,24 @@ jobs:
           # canonical mutants-diff misconfiguration.
           fetch-depth: 0
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Lima
+        uses: lima-vm/lima-actions/install@v1
 
-      # mold is the linker per .cargo/config.toml; ubuntu-latest does
-      # not ship it.
-      - name: Install mold linker
-        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends mold
-
-      - uses: Swatinem/rust-cache@v2
+      - name: Cache Lima VM
+        id: lima-cache
+        uses: actions/cache@v4
         with:
-          shared-key: "phase-1-mutants"
+          path: ~/.lima/overdrive
+          key: lima-${{ hashFiles('infra/lima/overdrive-dev.yaml') }}-${{ runner.arch }}
 
-      # MUST run AFTER Swatinem/rust-cache@v2 — see fmt-clippy job above
-      # for rationale (cache tarball restore clobbers the BPF artifact).
+      - name: Provision Lima VM (cache miss)
+        if: steps.lima-cache.outputs.cache-hit != 'true'
+        run: limactl start --name=overdrive --tty=false infra/lima/overdrive-dev.yaml
+
+      - name: Start cached Lima VM
+        if: steps.lima-cache.outputs.cache-hit == 'true'
+        run: limactl start overdrive
+
       - name: Download BPF object artifact
         uses: actions/download-artifact@v4
         with:
@@ -604,48 +557,15 @@ jobs:
           path: target/bpf/
           if-no-files-found: error
 
-      # See fmt-clippy job above for rationale.
-      - id: sccache-setup
-        name: Setup sccache (soft-fail on cache backend outage)
-        continue-on-error: true
-        uses: mozilla-actions/sccache-action@v0.0.10
-
-      - name: Enable sccache when setup succeeded
-        if: steps.sccache-setup.outcome == 'success'
-        run: |
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
-
-      - name: Warn when sccache unavailable
-        if: steps.sccache-setup.outcome != 'success'
-        run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
-
-      - name: Install cargo-mutants + cargo-nextest
-        # xtask mutants invokes cargo-mutants with `--test-tool=nextest`,
-        # so both binaries must be on PATH.
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-mutants,cargo-nextest
-
       - name: Ensure base ref available
         run: git fetch origin main --depth=1 || true
 
       - name: cargo xtask mutants --diff origin/main
-        # `--features integration-tests` is passed explicitly so
-        # acceptance tests gated behind that cfg participate in the
-        # mutation lane (see .claude/rules/testing.md §"Integration vs
-        # unit gating"). The workspace convention requires every
-        # member to declare the feature, so the bare flag resolves
-        # uniformly under cargo-mutants v27's per-package scoping —
-        # the wrapper does not auto-add anything.
-        #
-        # `sudo -E env "PATH=$PATH"` matches the `integration` job
-        # (lines 251-254): cargo-mutants reruns the unmutated baseline
-        # under nextest, which spins up the in-process control-plane
-        # server, which writes /sys/fs/cgroup/overdrive.slice/...
-        # That requires root on the unprivileged GHA runner per
-        # ADR-0034 (no in-binary cgroup escape hatch).
-        run: sudo -E env "PATH=$PATH" cargo xtask mutants --diff origin/main --features integration-tests
+        # The Lima VM has cargo-mutants and cargo-nextest pre-installed.
+        run: |
+          limactl shell overdrive bash -lc \
+            'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
+             cargo xtask mutants --diff origin/main --features integration-tests'
 
       - name: Upload mutants report
         if: always()
@@ -822,65 +742,44 @@ jobs:
     name: bpf-unit
     runs-on: ubuntu-latest
     needs: bpf-build
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Lima
+        uses: lima-vm/lima-actions/install@v1
 
-      # mold is the linker per .cargo/config.toml; ubuntu-latest does
-      # not ship it.
-      - name: Install mold linker
-        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends mold
-
-      - uses: Swatinem/rust-cache@v2
+      - name: Cache Lima VM
+        id: lima-cache
+        uses: actions/cache@v4
         with:
-          shared-key: "phase-2-bpf-unit"
+          path: ~/.lima/overdrive
+          key: lima-${{ hashFiles('infra/lima/overdrive-dev.yaml') }}-${{ runner.arch }}
 
-      # See fmt-clippy job above for rationale.
-      - id: sccache-setup
-        name: Setup sccache (soft-fail on cache backend outage)
-        continue-on-error: true
-        uses: mozilla-actions/sccache-action@v0.0.10
+      - name: Provision Lima VM (cache miss)
+        if: steps.lima-cache.outputs.cache-hit != 'true'
+        run: limactl start --name=overdrive --tty=false infra/lima/overdrive-dev.yaml
 
-      - name: Enable sccache when setup succeeded
-        if: steps.sccache-setup.outcome == 'success'
-        run: |
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+      - name: Start cached Lima VM
+        if: steps.lima-cache.outputs.cache-hit == 'true'
+        run: limactl start overdrive
 
-      - name: Warn when sccache unavailable
-        if: steps.sccache-setup.outcome != 'success'
-        run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
-
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-nextest
-
-      # MUST run AFTER Swatinem/rust-cache@v2 — see fmt-clippy job above
-      # for rationale (cache tarball restore clobbers the BPF artifact).
       - name: Download BPF object artifact
         uses: actions/download-artifact@v4
         with:
           name: bpf-object
-          # Materialises overdrive_bpf.o at the path the loader's
-          # `include_bytes!` and the build.rs shim both reference (the
-          # stable path mandated by ADR-0038 §3).
           path: target/bpf/
-          # Fail fast at the boundary — without this a missing-artifact
-          # case (e.g. bpf-build panicked but emitted nothing) silently
-          # no-ops and the downstream failure surfaces as a confusing
-          # build.rs shim error.
           if-no-files-found: error
 
       - name: cargo xtask bpf-unit
-        # `sudo -E env "PATH=$PATH"` matches the `integration` and
-        # `mutants-diff` jobs above. CAP_BPF is required because Ubuntu
-        # 22.04+ ships `kernel.unprivileged_bpf_disabled = 2` — see
-        # upstream-issues.md §A2 for the empirical correction to
-        # ci-cd-pipeline.md §2.2's earlier "no CAP_BPF needed" claim.
-        run: sudo -E env "PATH=$PATH" cargo xtask bpf-unit
+        # CAP_BPF is required; the Lima VM's `xtask lima run` wrapper
+        # provides root via `sudo -E`. The xtask `bpf_unit()` function
+        # calls `ensure_in_lima()` which detects the VM and proceeds
+        # directly.
+        run: |
+          limactl shell overdrive bash -lc \
+            'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
+             cargo xtask bpf-unit'
 
       - name: Upload nextest JUnit report
         if: always()
@@ -922,38 +821,28 @@ jobs:
     name: cargo verifier-regress
     runs-on: ubuntu-latest
     needs: bpf-build
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Lima
+        uses: lima-vm/lima-actions/install@v1
 
-      # mold is the linker per .cargo/config.toml; ubuntu-latest does
-      # not ship it.
-      - name: Install mold linker
-        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends mold
-
-      - uses: Swatinem/rust-cache@v2
+      - name: Cache Lima VM
+        id: lima-cache
+        uses: actions/cache@v4
         with:
-          shared-key: "phase-2-verifier-regress"
+          path: ~/.lima/overdrive
+          key: lima-${{ hashFiles('infra/lima/overdrive-dev.yaml') }}-${{ runner.arch }}
 
-      - id: sccache-setup
-        name: Setup sccache (soft-fail on cache backend outage)
-        continue-on-error: true
-        uses: mozilla-actions/sccache-action@v0.0.10
+      - name: Provision Lima VM (cache miss)
+        if: steps.lima-cache.outputs.cache-hit != 'true'
+        run: limactl start --name=overdrive --tty=false infra/lima/overdrive-dev.yaml
 
-      - name: Enable sccache when setup succeeded
-        if: steps.sccache-setup.outcome == 'success'
-        run: |
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+      - name: Start cached Lima VM
+        if: steps.lima-cache.outputs.cache-hit == 'true'
+        run: limactl start overdrive
 
-      - name: Warn when sccache unavailable
-        if: steps.sccache-setup.outcome != 'success'
-        run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
-
-      # MUST run AFTER Swatinem/rust-cache@v2 — see fmt-clippy job above
-      # for rationale (cache tarball restore clobbers the BPF artifact).
       - name: Download BPF object artifact
         uses: actions/download-artifact@v4
         with:
@@ -962,13 +851,10 @@ jobs:
           if-no-files-found: error
 
       - name: cargo verifier-regress
-        # `sudo -E env "PATH=$PATH"` matches the bpf-unit job — Ubuntu
-        # 22.04+ ships `kernel.unprivileged_bpf_disabled = 2`, so
-        # `BPF_PROG_LOAD` (called by aya `prog.load()`) requires
-        # CAP_BPF. The binary also pre-pins SERVICE_MAP under
-        # `/sys/fs/bpf/overdrive-verifier-regress-<pid>` which needs
-        # the same capability. See upstream-issues.md §A2.
-        run: sudo -E env "PATH=$PATH" cargo verifier-regress
+        run: |
+          limactl shell overdrive bash -lc \
+            'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
+             cargo run -p overdrive-dataplane --bin verifier_regress'
 
   # -------------------------------------------------------------------
   # Job E (Tier 4) — XDP throughput / mean-latency regression gate
@@ -989,39 +875,28 @@ jobs:
     name: cargo xdp-perf
     runs-on: ubuntu-latest
     needs: bpf-build
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Lima
+        uses: lima-vm/lima-actions/install@v1
 
-      # mold is the linker per .cargo/config.toml; ubuntu-latest does
-      # not ship it.
-      - name: Install mold linker
-        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends mold
-
-      - uses: Swatinem/rust-cache@v2
+      - name: Cache Lima VM
+        id: lima-cache
+        uses: actions/cache@v4
         with:
-          shared-key: "phase-2-xdp-perf"
+          path: ~/.lima/overdrive
+          key: lima-${{ hashFiles('infra/lima/overdrive-dev.yaml') }}-${{ runner.arch }}
 
-      - id: sccache-setup
-        name: Setup sccache (soft-fail on cache backend outage)
-        continue-on-error: true
-        uses: mozilla-actions/sccache-action@v0.0.10
+      - name: Provision Lima VM (cache miss)
+        if: steps.lima-cache.outputs.cache-hit != 'true'
+        run: limactl start --name=overdrive --tty=false infra/lima/overdrive-dev.yaml
 
-      - name: Enable sccache when setup succeeded
-        if: steps.sccache-setup.outcome == 'success'
-        run: |
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+      - name: Start cached Lima VM
+        if: steps.lima-cache.outputs.cache-hit == 'true'
+        run: limactl start overdrive
 
-      - name: Warn when sccache unavailable
-        if: steps.sccache-setup.outcome != 'success'
-        run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
-
-      # MUST run AFTER Swatinem/rust-cache@v2 — see fmt-clippy job
-      # for rationale (cache tarball restore clobbers the BPF
-      # artifact).
       - name: Download BPF object artifact
         uses: actions/download-artifact@v4
         with:
@@ -1029,11 +904,12 @@ jobs:
           path: target/bpf/
           if-no-files-found: error
 
-      # `cargo xdp-perf` uses `BPF_PROG_TEST_RUN` — no veth pair,
-      # no xdp-trafficgen, no interface attachment. The program is
-      # loaded into the kernel and run in a tight loop against a
-      # synthetic UDP packet. Needs `CAP_SYS_ADMIN` for
-      # `enable_stats(RunTime)` — `sudo -E env` provides it.
+      # The Lima VM has the full toolchain. Needs `CAP_SYS_ADMIN` for
+      # `enable_stats(RunTime)` — the default `sudo -E` wrapper inside
+      # the VM provides it.
       - name: cargo xdp-perf
-        run: sudo -E env "PATH=$PATH" cargo xdp-perf
+        run: |
+          limactl shell overdrive bash -lc \
+            'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
+             cargo xdp-perf'
 

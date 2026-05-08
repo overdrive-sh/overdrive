@@ -93,7 +93,9 @@ enum Task {
     Ci,
 
     /// Manage the `overdrive` Lima VM used for Linux-specific builds and
-    /// BPF/integration tests from a macOS host. No-op on Linux.
+    /// BPF/integration tests. Required on all host platforms — macOS and
+    /// Linux developers both use Lima for reproducibility and to avoid
+    /// polluting the host with kernel toolchains.
     Lima {
         #[command(subcommand)]
         action: LimaAction,
@@ -484,12 +486,64 @@ fn hooks(action: HooksAction) -> Result<()> {
 const LIMA_INSTANCE: &str = "overdrive";
 const LIMA_TEMPLATE: &str = "infra/lima/overdrive-dev.yaml";
 
-fn lima(action: LimaAction) -> Result<()> {
-    if !cfg!(target_os = "macos") {
-        eprintln!("xtask: lima target is macOS-only; skipping on {}", std::env::consts::OS);
+/// Returns `true` when the current process is running inside the Lima
+/// guest VM. Lima sets `LIMA_CIDATA_NAME` in every guest shell session.
+fn inside_lima() -> bool {
+    std::env::var_os("LIMA_CIDATA_NAME").is_some()
+}
+
+/// Ensures the current xtask subcommand is running inside the Lima VM.
+/// If already inside (detected via `LIMA_CIDATA_NAME` env var), returns
+/// `Ok(())` and the caller proceeds with the real work. If outside, re-
+/// dispatches the given `args` through `cargo xtask lima run --` and
+/// exits with the child's exit status.
+fn ensure_in_lima(args: &[&str]) -> Result<()> {
+    if inside_lima() {
         return Ok(());
     }
-    which_or_hint("limactl", "brew install lima")?;
+    let mut cmd_args: Vec<String> =
+        vec!["cargo".into(), "xtask".into(), "lima".into(), "run".into(), "--".into()];
+    cmd_args.extend(args.iter().map(|s| (*s).to_string()));
+    lima(LimaAction::Run { no_sudo: false, args: cmd_args })
+}
+
+fn lima(action: LimaAction) -> Result<()> {
+    // When already inside the Lima guest and the action is `Run`,
+    // execute the command directly — `limactl` is not installed inside
+    // the VM so the `which_or_hint` below would fail. This passthrough
+    // lets cargo aliases (e.g. `cargo verifier-regress`) that route
+    // through `xtask lima run --` work transparently from both the host
+    // and from inside the VM.
+    if let LimaAction::Run { no_sudo, ref args } = action {
+        if inside_lima() {
+            if args.is_empty() {
+                bail!("no command given; use `cargo xtask lima run -- cargo dst` etc.");
+            }
+            if no_sudo {
+                return sh("(lima passthrough)", Command::new(&args[0]).args(&args[1..]));
+            }
+            return sh(
+                "(lima passthrough, sudo)",
+                Command::new("sudo")
+                    .args(["-E", "env"])
+                    .arg(format!("PATH={}", std::env::var("PATH").unwrap_or_default()))
+                    .arg(format!(
+                        "CARGO_TARGET_DIR={}",
+                        std::env::var("CARGO_TARGET_DIR").unwrap_or_default()
+                    ))
+                    .args(args),
+            );
+        }
+    }
+
+    which_or_hint(
+        "limactl",
+        if cfg!(target_os = "macos") {
+            "brew install lima"
+        } else {
+            "brew install lima  # or: curl -fsSL https://lima-vm.io/install.sh | bash"
+        },
+    )?;
 
     match action {
         LimaAction::Up => sh(
@@ -674,13 +728,12 @@ fn bpf_build() -> Result<()> {
 /// failure mode as `bpf_build` if missing.
 fn bpf_clippy() -> Result<()> {
     // The kernel-side toolchain (nightly + `rust-src` + `bpf-linker` +
-    // `bpfel-unknown-none` target) is only provisioned in the Lima VM
-    // on macOS dev surfaces. Re-dispatch through `lima run --no-sudo`
-    // so callers (lefthook, devs) can invoke `cargo xtask bpf-clippy`
-    // unconditionally — the inner xtask sees Linux and falls through
-    // to the direct path below. `--no-sudo` because clippy is a build,
-    // not a privileged op.
-    if cfg!(target_os = "macos") {
+    // `bpfel-unknown-none` target) is provisioned in the Lima VM. Re-
+    // dispatch through Lima so callers (lefthook, devs, CI) can invoke
+    // `cargo xtask bpf-clippy` unconditionally — inside the VM the
+    // guard returns Ok(()) and falls through to the direct path below.
+    // `--no-sudo` because clippy is a build, not a privileged op.
+    if !inside_lima() {
         return lima(LimaAction::Run {
             no_sudo: true,
             args: vec!["cargo".into(), "xtask".into(), "bpf-clippy".into()],
@@ -772,6 +825,8 @@ fn cargo_target_dir(workspace_root: &std::path::Path) -> std::path::PathBuf {
 /// command still exits 0 with "no tests run" output, which is the
 /// correct shape for macOS dev (the real gate is Lima / CI).
 fn bpf_unit() -> Result<()> {
+    ensure_in_lima(&["cargo", "xtask", "bpf-unit"])?;
+
     which_or_hint(
         "cargo-nextest",
         "cargo install cargo-nextest --locked  # or: brew install cargo-nextest",
@@ -861,11 +916,11 @@ mod bpf_fib_topology {
     const NEIGH_LLADDR: &str = "02:00:00:00:00:01";
     const RP_FILTER_ALL: &str = "/proc/sys/net/ipv4/conf/all/rp_filter";
 
-    pub(super) struct Topology {
+    pub struct Topology {
         rp_filter_prior: Option<String>,
     }
 
-    pub(super) fn install() -> Result<Topology> {
+    pub fn install() -> Result<Topology> {
         // Best-effort module load — already present on most modern
         // kernels including Lima's 6.8 image.
         let _ = Command::new("modprobe").arg("dummy").status();
@@ -953,6 +1008,8 @@ mod bpf_fib_topology {
 }
 
 fn integration_vm(cache_dir: &std::path::Path, kernels: &[String]) -> Result<()> {
+    ensure_in_lima(&["cargo", "xtask", "integration-test", "vm"])?;
+
     if kernels.is_empty() {
         bail!("specify at least one kernel (e.g. 5.15, 6.1, 6.6, latest, bpf-next)");
     }

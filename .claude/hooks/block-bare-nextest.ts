@@ -1,22 +1,17 @@
 #!/usr/bin/env bun
-// PreToolUse/Bash hook — on macOS, blocks `cargo nextest run` not routed
-// through `cargo xtask lima run --`.
+// PreToolUse/Bash hook — blocks `cargo nextest run` not routed through
+// `cargo xtask lima run --`.
 //
-// Block policy (macOS only):
+// Block policy (all platforms):
 //   cargo nextest run ...           use `cargo xtask lima run -- cargo nextest run ...`
 //   cargo nextest run ... --no-run  allowed (compile-check; no Linux surface needed)
 //   cargo xtask lima run -- ...     allowed (already routed through Lima)
 //
-// No-op on Linux (and any non-darwin platform).
-//
-// Why: the Linux test surface (#[cfg(target_os = "linux")], cgroup writes,
-// real driver processes, eBPF attachment) is unreachable on macOS. Running
-// nextest directly on macOS gives a green signal from a degraded envelope
-// — #[cfg(target_os = "linux")] items compile away and `cargo nextest run`
-// skips them silently. The Lima VM is the canonical inner-loop path.
-// See `.claude/rules/testing.md` § "Running tests on macOS — Lima VM".
-
-const IS_MACOS = process.platform === "darwin";
+// Why: all test execution goes through the Lima VM for reproducibility.
+// Running nextest directly on the host gives a degraded signal —
+// #[cfg(target_os = "linux")] items may compile away, cgroup writes fail,
+// and the toolchain may differ from the canonical VM environment.
+// See `.claude/rules/testing.md` § "Running tests — Lima VM".
 
 // Matches `cargo nextest run` as a command or pipeline stage.
 const NEXTEST_RUN = /(?:^|[\s;&|])cargo\s+nextest\s+run\b/;
@@ -42,12 +37,10 @@ function segments(cmd: string): string[] {
 
 /**
  * True iff the command contains a `cargo nextest run` that must be blocked:
- *   - We are on macOS.
  *   - The full command is NOT already wrapped in `cargo xtask lima run`.
  *   - At least one pipeline segment is `cargo nextest run ...` without `--no-run`.
  */
 function isBlockedNextestRun(cmd: string): boolean {
-  if (!IS_MACOS) return false;
   // Already routed through Lima — allow it through.
   if (/cargo\s+xtask\s+lima\s+run\b/.test(cmd)) return false;
   return segments(cmd).some((seg) => {
@@ -70,18 +63,18 @@ try {
 
 if (cmd && isBlockedNextestRun(cmd)) {
   deny(
-    "`cargo nextest run` is blocked on macOS by pre-tool hook " +
-      "(.claude/hooks/block-nextest-on-macos.ts).\n\n" +
-      "The Linux test surface (#[cfg(target_os = \"linux\")], cgroup writes, " +
-      "real driver processes, eBPF attachment) is unreachable on macOS. " +
-      "Running nextest directly gives a green signal from a degraded envelope — " +
-      "Linux-gated tests are silently skipped.\n\n" +
+    "`cargo nextest run` is blocked by pre-tool hook " +
+      "(.claude/hooks/block-bare-nextest.ts).\n\n" +
+      "All test execution goes through the Lima VM for reproducibility. " +
+      "Running nextest directly on the host gives a degraded signal — " +
+      "Linux-gated tests may be silently skipped and the toolchain may " +
+      "differ from the canonical VM environment.\n\n" +
       "Route through Lima instead:\n" +
       "  cargo nextest run [ARGS]\n" +
       "  →  cargo xtask lima run -- cargo nextest run [ARGS]\n\n" +
       "Allowed exceptions (no Lima required):\n" +
       "  --no-run                compile-check only; no Linux surface involved\n" +
       "  cargo xtask lima run -- already routed through Lima\n\n" +
-      "See .claude/rules/testing.md § \"Running tests on macOS — Lima VM\"."
+      "See .claude/rules/testing.md § \"Running tests — Lima VM\"."
   );
 }

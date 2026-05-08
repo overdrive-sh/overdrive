@@ -19,11 +19,11 @@ overdrive        = "run -p overdrive-cli --bin overdrive --"
 # xtask) because both must load the BPF object via aya, which xtask's
 # deps cannot include per `.claude/rules/development.md` § "xtask is
 # build / test / dev orchestration, NOT a runtime entry point".
-# `xdp-perf` uses `BPF_PROG_TEST_RUN` with `repeat=N` and reads
-# `bpf_prog_info.run_time_ns` / `run_cnt` via aya's `ProgramInfo`
-# (kernel ≥5.8 with `BPF_ENABLE_STATS BPF_STATS_RUN_TIME`).
-verifier-regress = "run -p overdrive-dataplane --bin verifier_regress --"
-xdp-perf         = "run -p overdrive-dataplane --bin xdp_perf --"
+# Both route through `xtask lima run --` so they auto-enter the Lima
+# VM when invoked on the host. The passthrough logic in `lima(Run)`
+# detects `LIMA_CIDATA_NAME` inside the VM and runs directly.
+verifier-regress = "run --package xtask -- lima run -- cargo run -p overdrive-dataplane --bin verifier_regress --"
+xdp-perf         = "run --package xtask -- lima run -- cargo run -p overdrive-dataplane --bin xdp_perf --"
 
 # Build / test orchestration shortcuts — wrappers over xtask subcommands.
 bpf-unit      = "run --package xtask -- bpf-unit"

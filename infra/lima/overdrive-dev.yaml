@@ -1,4 +1,4 @@
-# Overdrive Linux dev VM for macOS hosts.
+# Overdrive Linux dev VM.
 #
 # Installs everything the Phase 1–4 roadmap needs for inner-loop development:
 #
@@ -31,12 +31,13 @@ base:
   - template:_images/ubuntu-24.04
 
 # ────────────────────────────────────────────────────────────────────────────
-# VM backend — Apple Virtualization.framework. Auto-selects virtiofs for
-# mounts. Nested virtualization is required for running QEMU (LVH kernel
-# matrix) and Cloud Hypervisor *inside* the Lima guest; it works on Apple
-# Silicon M3+ with macOS 15+, and on all Intel Macs.
+# VM backend — auto-detected by Lima. Apple Virtualization.framework (vz)
+# on macOS; QEMU with KVM acceleration on Linux. virtiofs mounts are auto-
+# selected on vz; 9p or reverse-sshfs on qemu.
+#
+# Nested virtualization is required for running QEMU (LVH kernel matrix)
+# and Cloud Hypervisor *inside* the Lima guest.
 # ────────────────────────────────────────────────────────────────────────────
-vmType: "vz"
 nestedVirtualization: true
 
 vmOpts:
@@ -111,9 +112,17 @@ provision:
           golang-go \
           e2fsprogs
 
-      # bpftool from linux-tools-generic on a stable PATH.
+      # Kernel-matched tools — linux-tools-generic covers the stock
+      # kernel but the VM image may ship a newer one. Try the exact
+      # match first; fall back silently if the package doesn't exist
+      # (the symlink below catches the generic fallback).
+      apt-get install -y --no-install-recommends \
+        "linux-tools-$(uname -r)" 2>/dev/null || true
+
+      # bpftool on a stable PATH. Prefer the kernel-matched binary;
+      # fall back to whichever linux-tools-* ships one.
       if [ ! -x /usr/local/bin/bpftool ]; then
-        BPFTOOL="$(find /usr/lib/linux-tools-*/bpftool 2>/dev/null | head -n1 || true)"
+        BPFTOOL="$(find /usr/lib/linux-tools-*/bpftool 2>/dev/null | sort -rV | head -n1 || true)"
         if [ -n "${BPFTOOL}" ]; then ln -sf "${BPFTOOL}" /usr/local/bin/bpftool; fi
       fi
 

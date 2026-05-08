@@ -117,10 +117,9 @@ impl VethPair {
     /// Assigns `host_cidr` once, then adds a permanent ARP entry for
     /// each `backend_ip` mapped to the peer's MAC. All `backend_ip`s
     /// must lie within the on-link prefix of `host_cidr`. The XDP
-    /// program calls `bpf_fib_lookup` with `BPF_FIB_LOOKUP_OUTPUT`,
-    /// which uses the OUTPUT routing table direction and does not
-    /// require `net.ipv4.ip_forward` to be enabled — see body comment
-    /// for why we deliberately leave forwarding disabled.
+    /// program calls `bpf_fib_lookup` with `flags = 0`, which
+    /// requires `net.ipv4.ip_forward=1` on the ingress iface to
+    /// return success for non-local destinations.
     pub fn configure_for_xdp_tx_to_backends(
         &self,
         host_cidr: &str,
@@ -135,16 +134,19 @@ impl VethPair {
         // The XDP fast path on host is the only forward step we
         // want; once the rewritten frame arrives on peer's RX path,
         // it must reach the PF_PACKET capture and stop.
-        let _ = Command::new("sysctl").args(["-w", "net.ipv4.ip_forward=1"]).output();
-        let _ = Command::new("sysctl")
-            .args(["-w", &format!("net.ipv4.conf.{}.forwarding=1", self.host)])
-            .output();
-        let _ = Command::new("sysctl")
-            .args(["-w", &format!("net.ipv4.conf.{}.forwarding=0", self.peer)])
-            .output();
+        run_sysctl("net.ipv4.ip_forward=1")?;
+        run_sysctl(&format!("net.ipv4.conf.{}.forwarding=1", self.host))?;
+        run_sysctl(&format!("net.ipv4.conf.{}.forwarding=0", self.peer))?;
         // rp_filter strict-mode would drop the rewritten frame.
-        let _ = Command::new("sysctl").args(["-w", "net.ipv4.conf.all.rp_filter=0"]).output();
-        let _ = Command::new("sysctl").args(["-w", "net.ipv4.conf.default.rp_filter=0"]).output();
+        // Effective rp_filter = MAX(conf.all, conf.<iface>), so both
+        // the global and per-interface values must be zeroed. The
+        // veths already exist at this point — their per-iface values
+        // inherited from `default` at creation time (typically 2 on
+        // Ubuntu). Setting `all` and `default` alone is insufficient.
+        run_sysctl("net.ipv4.conf.all.rp_filter=0")?;
+        run_sysctl("net.ipv4.conf.default.rp_filter=0")?;
+        run_sysctl(&format!("net.ipv4.conf.{}.rp_filter=0", self.host))?;
+        run_sysctl(&format!("net.ipv4.conf.{}.rp_filter=0", self.peer))?;
 
         run_ip(["addr", "add", host_cidr, "dev", &self.host])?;
         let peer_mac = read_iface_mac(&self.peer)?;
@@ -216,4 +218,16 @@ where
         return Err(VethError::CapNetAdminRequired);
     }
     Err(VethError::IpCommand { args: arg_str, stderr, status: out.status.code() })
+}
+
+fn run_sysctl(kv: &str) -> Result<(), VethError> {
+    let out = Command::new("sysctl").args(["-w", kv]).output().map_err(VethError::Spawn)?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&out.stderr).to_string();
+    if stderr.contains("Operation not permitted") || stderr.contains("Permission denied") {
+        return Err(VethError::CapNetAdminRequired);
+    }
+    Err(VethError::IpCommand { args: format!("sysctl -w {kv}"), stderr, status: out.status.code() })
 }

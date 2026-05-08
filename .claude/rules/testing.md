@@ -203,13 +203,13 @@ Do not let a slow test sit in the default lane "until it gets fixed."
 > examples. Nothing else. If you think you need `cargo test` elsewhere,
 > you are wrong — reach for `cargo nextest run` instead.
 
-> **On macOS, every `cargo nextest run` must go through Lima.**
+> **Every `cargo nextest run` must go through Lima.**
 >
-> `cargo nextest run` is **blocked on macOS** by a pre-tool hook
-> (`.claude/hooks/block-nextest-on-macos.ts`) unless it is already
+> `cargo nextest run` is **blocked** by a pre-tool hook
+> (`.claude/hooks/block-bare-nextest.ts`) unless it is already
 > wrapped in `cargo xtask lima run --` or uses `--no-run`.
 >
-> **Rewrite your command before submitting it on macOS:**
+> **Rewrite your command before submitting it:**
 >
 > | ❌ don't | ✅ do |
 > |---|---|
@@ -218,11 +218,11 @@ Do not let a slow test sit in the default lane "until it gets fixed."
 > | `cargo nextest run -E 'test(X)'` | `cargo xtask lima run -- cargo nextest run -E 'test(X)'` |
 > | `cargo nextest run --workspace` | `cargo xtask lima run -- cargo nextest run --workspace` |
 >
-> **Allowed on macOS without Lima:**
+> **Allowed without Lima:**
 > - `cargo nextest run ... --no-run` — compile-check only; no Linux surface involved.
 > - `cargo xtask lima run -- cargo nextest run ...` — already routed.
 >
-> See § "Running tests on macOS — Lima VM" below for the rationale.
+> See § "Running tests — Lima VM" below for the rationale.
 
 **Run test commands directly. Do not background them.**
 `cargo nextest run`, `cargo test --doc`, `cargo dst`,
@@ -864,7 +864,7 @@ kill-rate gate. Invoking `cargo mutants` directly skips all of that.
 **On macOS: every mutation invocation that includes `--features
 integration-tests` MUST be prefixed with `cargo xtask lima run --`** —
 same Lima requirement that governs `cargo nextest run --features
-integration-tests` (see § "Running tests on macOS — Lima VM" below).
+integration-tests` (see § "Running tests — Lima VM" below).
 The integration-tests-gated test surface is
 `#[cfg(target_os = "linux")]`; on macOS those tests compile (with
 `--no-run`) but the runtime surface is unreachable, so a mutation run
@@ -1174,19 +1174,20 @@ kernel requires an ADR.
 - GitHub Actions runners work with `--qemu-disable-kvm`; self-hosted
   KVM-capable runners optional for latency budget.
 
-### Running tests on macOS — Lima VM
+### Running tests — Lima VM
 
-`cargo nextest run` does not work on macOS. ProcessDriver, control-plane
-cgroup management, eBPF programs, and every `#[cfg(target_os = "linux")]`
-test surface require a real Linux kernel plus cgroup v2. macOS-side
-`--no-run` catches type and wiring errors but not runtime or permission
-issues — every shipped test must be exercised on Linux at least once before
-merge, and the Lima VM is the canonical inner-loop path.
+All test execution goes through the Lima VM for reproducibility.
+ProcessDriver, control-plane cgroup management, eBPF programs, and every
+`#[cfg(target_os = "linux")]` test surface require a real Linux kernel
+plus cgroup v2. Running tests directly on the host — even on Linux —
+gives a degraded signal: the toolchain may differ, kernel version may
+vary, and system state can leak between runs. The Lima VM is the
+canonical inner-loop path for all platforms (macOS and Linux).
 
-A pre-tool hook (`.claude/hooks/block-nextest-on-macos.ts`) enforces this
-mechanically: bare `cargo nextest run` on macOS is blocked at the
-tool-call boundary. The hook allows only `cargo xtask lima run -- cargo
-nextest run ...` and the `--no-run` compile-check form.
+A pre-tool hook (`.claude/hooks/block-bare-nextest.ts`) enforces this
+mechanically: bare `cargo nextest run` is blocked at the tool-call
+boundary on all platforms. The hook allows only `cargo xtask lima run
+-- cargo nextest run ...` and the `--no-run` compile-check form.
 
 **Where the VM is defined.** `infra/lima/overdrive-dev.yaml` describes
 the project's standard dev VM (Ubuntu 24.04, kernel 6.8, cgroup v2,

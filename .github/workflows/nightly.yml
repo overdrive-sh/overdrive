@@ -48,41 +48,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Lima
+        uses: lima-vm/lima-actions/install@v1
 
-      # mold is the linker per .cargo/config.toml; ubuntu-latest does
-      # not ship it.
-      - name: Install mold linker
-        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends mold
-
-      - uses: Swatinem/rust-cache@v2
+      - name: Cache Lima VM
+        id: lima-cache
+        uses: actions/cache@v4
         with:
-          shared-key: "nightly-mutants"
+          path: ~/.lima/overdrive
+          key: lima-${{ hashFiles('infra/lima/overdrive-dev.yaml') }}-${{ runner.arch }}
 
-      - uses: mozilla-actions/sccache-action@v0.0.6
-        with:
-          version: "v0.8.2"
+      - name: Provision Lima VM (cache miss)
+        if: steps.lima-cache.outputs.cache-hit != 'true'
+        run: limactl start --name=overdrive --tty=false infra/lima/overdrive-dev.yaml
 
-      - name: Install cargo-mutants + cargo-nextest
-        # xtask mutants invokes cargo-mutants with `--test-tool=nextest`,
-        # so both binaries must be on PATH.
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-mutants,cargo-nextest
+      - name: Start cached Lima VM
+        if: steps.lima-cache.outputs.cache-hit == 'true'
+        run: limactl start overdrive
 
-      # Delegate to the canonical entry point per .claude/rules/testing.md
-      # §CI topology. The xtask wrapper owns cargo-mutants invocation,
-      # outcomes.json parsing, the ≥60% absolute floor, the -2pp drift
-      # warn, baseline seeding when absent, and the structured summary.
       - name: cargo xtask mutants --workspace
-        # `--features integration-tests` is passed explicitly so the
-        # full-corpus run sees the same acceptance-gated tests the
-        # diff-scoped per-PR job sees (see .claude/rules/testing.md
-        # §"Integration vs unit gating"). The workspace convention
-        # requires every member to declare the feature, so the bare
-        # flag resolves uniformly under cargo-mutants v27's per-package
-        # scoping — the wrapper does not auto-add anything.
-        run: cargo xtask mutants --workspace --features integration-tests
+        run: |
+          limactl shell overdrive bash -lc \
+            'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
+             cargo xtask mutants --workspace --features integration-tests'
 
       # Render the nightly trend table into the job summary from the
       # structured JSON produced by xtask — the same pattern the dst job
