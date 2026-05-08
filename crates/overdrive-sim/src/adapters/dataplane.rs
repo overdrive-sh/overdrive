@@ -249,30 +249,25 @@ impl Dataplane for SimDataplane {
         // critical section.
         let mut state = self.state.lock();
 
-        // Purge any reverse-NAT entries for the prior backend set
-        // that are NOT carried over by the new set. Without this,
-        // a backend removed by `update_service` would leak its
-        // reverse-NAT entry — exactly the failure mode US-05's
-        // "Removed backend's `REVERSE_NAT` entry is purged on
-        // service update" scenario pins.
-        let prior_keys: Vec<BackendKey> = state
+        // Snapshot prior reverse-NAT keys for this VIP before any
+        // mutation — the diff drives the purge below.
+        let prior_keys: std::collections::BTreeSet<BackendKey> = state
             .services
             .get(&vip)
             .map(|prior| prior.iter().flat_map(reverse_nat_keys_for).collect())
             .unwrap_or_default();
-        for key in prior_keys {
-            state.reverse_nat.remove(&key);
-        }
+
+        // Compute new reverse-NAT keys for the incoming backend set.
+        let new_keys: std::collections::BTreeSet<BackendKey> =
+            backends.iter().flat_map(reverse_nat_keys_for).collect();
 
         // Install the new reverse-NAT entries for the incoming
         // backend set. Each `(backend_ip, backend_port, proto)` →
         // `vip` mapping lets the egress reverse-NAT path rewrite
         // the source 5-tuple of a response packet back to the VIP
         // the client connected to.
-        for backend in &backends {
-            for key in reverse_nat_keys_for(backend) {
-                state.reverse_nat.insert(key, vip);
-            }
+        for &key in &new_keys {
+            state.reverse_nat.insert(key, vip);
         }
 
         // Atomic forward-path replacement. Empty backend set removes
@@ -283,6 +278,25 @@ impl Dataplane for SimDataplane {
         } else {
             state.services.insert(vip, backends);
         }
+
+        // Compute the union of ALL active services' reverse-NAT keys
+        // (after the forward-path update above). Only purge entries
+        // that left THIS service AND are absent from the global set.
+        // Without this cross-service check, removing a backend from
+        // one service would delete the reverse-NAT entry even when
+        // another service still routes through the same backend.
+        let live_keys: std::collections::BTreeSet<BackendKey> = state
+            .services
+            .values()
+            .flat_map(|bs| bs.iter().flat_map(reverse_nat_keys_for))
+            .collect();
+
+        for key in prior_keys.difference(&new_keys) {
+            if !live_keys.contains(key) {
+                state.reverse_nat.remove(key);
+            }
+        }
+
         // Drop the guard before returning so the mutex is released
         // before any caller `.await` resumes — minimises contention
         // for concurrent observers and silences

@@ -191,9 +191,11 @@ pub struct EbpfDataplane {
     ///
     /// Without this tracker, removed backends would leave stale
     /// REVERSE_NAT_MAP entries (architecture.md § 11 + S-2.2-18
-    /// purge invariant). Tracking per-service prevents accidental
-    /// cross-service deletion when two services briefly share a
-    /// backend address.
+    /// purge invariant). Tracking per-service enables the
+    /// cross-service union check: on purge, only entries absent
+    /// from the union of ALL active services' key sets are
+    /// deleted — preventing accidental cross-service deletion
+    /// when two services share a backend address.
     service_reverse_nat_keys: parking_lot::Mutex<
         std::collections::BTreeMap<
             crate::maps::ServiceKey,
@@ -846,7 +848,14 @@ impl Dataplane for EbpfDataplane {
 
             let stale_keys: std::collections::BTreeSet<crate::maps::BackendKeyPod> = {
                 let mut tracker = self.service_reverse_nat_keys.lock();
-                matching_keys.iter().flat_map(|sk| tracker.remove(sk).unwrap_or_default()).collect()
+                let prior_keys: std::collections::BTreeSet<crate::maps::BackendKeyPod> =
+                    matching_keys
+                        .iter()
+                        .flat_map(|sk| tracker.remove(sk).unwrap_or_default())
+                        .collect();
+                let live: std::collections::BTreeSet<crate::maps::BackendKeyPod> =
+                    tracker.values().flat_map(|s| s.iter().copied()).collect();
+                prior_keys.difference(&live).copied().collect()
             };
             {
                 let mut reverse_nat_map = self.reverse_nat_map.lock();
@@ -1071,13 +1080,15 @@ impl Dataplane for EbpfDataplane {
             })
             .collect();
         let vip_value = VipPod { ip_host: u32::from(vip), port_host: vip_port, _pad: 0 };
-        let prior_keys: std::collections::BTreeSet<BackendKeyPod> = {
+        let (prior_keys, live_nat_keys): (
+            std::collections::BTreeSet<BackendKeyPod>,
+            std::collections::BTreeSet<BackendKeyPod>,
+        ) = {
             let mut tracker = self.service_reverse_nat_keys.lock();
-            // Snapshot the prior set BEFORE overwriting; the diff
-            // (`prior - new`) drives the purge below.
             let prior = tracker.get(&service_key).cloned().unwrap_or_default();
             tracker.insert(service_key, new_keys.clone());
-            prior
+            let live = tracker.values().flat_map(|s| s.iter().copied()).collect();
+            (prior, live)
         };
         {
             let mut reverse_nat_map = self.reverse_nat_map.lock();
@@ -1089,10 +1100,15 @@ impl Dataplane for EbpfDataplane {
                     DataplaneError::LoadFailed(format!("REVERSE_NAT_MAP insert: {e}"))
                 })?;
             }
-            // Purge keys that were in the prior set but are not in
-            // the new set. `remove` returns `Err(KeyNotFound)` for
-            // entries already gone — fold into Ok().
+            // Purge keys that left THIS service AND are absent from
+            // the global union of all active services' key sets.
+            // Without the cross-service check, removing a backend
+            // from one service would delete the reverse-NAT entry
+            // even when another service still routes through it.
             for stale in prior_keys.difference(&new_keys) {
+                if live_nat_keys.contains(stale) {
+                    continue;
+                }
                 match reverse_nat_map.remove(stale) {
                     Ok(()) | Err(aya::maps::MapError::KeyNotFound) => {}
                     Err(e) => {
