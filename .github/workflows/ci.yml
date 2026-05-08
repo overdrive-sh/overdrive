@@ -78,11 +78,17 @@ env:
   # and mozilla/sccache#1751 (SCCACHE_IGNORE_SERVER_IO_ERROR does NOT
   # cover backend startup probe failures).
   #
-  # Lima-using jobs also need ACTIONS_CACHE_URL and ACTIONS_RUNTIME_TOKEN
-  # forwarded into the guest — those are exported to $GITHUB_ENV by the
-  # mozilla-actions/sccache-action step, then plumbed through `limactl
-  # shell env ... bash -lc 'sudo -E env "X=$X" ...'` so sccache running
-  # inside the VM can reach the GHA cache HTTP service.
+  # Lima-using jobs also need ACTIONS_CACHE_URL, ACTIONS_RESULTS_URL,
+  # and ACTIONS_RUNTIME_TOKEN forwarded into the guest — those are
+  # exported to $GITHUB_ENV by the mozilla-actions/sccache-action step,
+  # then plumbed through `limactl shell env ... bash -lc 'sudo -E env
+  # "X=$X" ...'` so sccache running inside the VM can reach the GHA
+  # cache HTTP service. Both ACTIONS_CACHE_URL (v1 cache backend) and
+  # ACTIONS_RESULTS_URL (v2, post-Feb-2025) must be forwarded — runners
+  # may export either or both depending on backend rollout, and sccache
+  # picks whichever is populated. Forwarding only ACTIONS_CACHE_URL
+  # silently regresses to "no GHA backend" on v2-only runners and the
+  # sccache server fails its startup probe.
 
 jobs:
   # -------------------------------------------------------------------
@@ -140,9 +146,22 @@ jobs:
 
       - name: Enable sccache when setup succeeded
         if: steps.sccache-setup.outcome == 'success'
+        # The action reports `success` even when the underlying GHA cache
+        # backend is unreachable (no ACTIONS_*_URL exported to GITHUB_ENV).
+        # If we forwarded RUSTC_WRAPPER=sccache into the build with an
+        # empty URL, sccache would refuse to start ("cache url for ghac
+        # not found") and every rustc invocation — including rustup's
+        # toolchain verification probe — would exit 2. Guard explicitly:
+        # require at least one of ACTIONS_CACHE_URL (v1 backend) or
+        # ACTIONS_RESULTS_URL (v2 backend, post-Feb-2025) to be set
+        # before flipping the wrapper on.
         run: |
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          if [ -n "${ACTIONS_CACHE_URL:-}" ] || [ -n "${ACTIONS_RESULTS_URL:-}" ]; then
+            echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+            echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          else
+            echo "::warning::sccache-action reported success but neither ACTIONS_CACHE_URL nor ACTIONS_RESULTS_URL is set; building without compiler cache."
+          fi
 
       - name: Warn when sccache unavailable
         if: steps.sccache-setup.outcome != 'success'
@@ -231,9 +250,22 @@ jobs:
 
       - name: Enable sccache when setup succeeded
         if: steps.sccache-setup.outcome == 'success'
+        # The action reports `success` even when the underlying GHA cache
+        # backend is unreachable (no ACTIONS_*_URL exported to GITHUB_ENV).
+        # If we forwarded RUSTC_WRAPPER=sccache into the build with an
+        # empty URL, sccache would refuse to start ("cache url for ghac
+        # not found") and every rustc invocation — including rustup's
+        # toolchain verification probe — would exit 2. Guard explicitly:
+        # require at least one of ACTIONS_CACHE_URL (v1 backend) or
+        # ACTIONS_RESULTS_URL (v2 backend, post-Feb-2025) to be set
+        # before flipping the wrapper on.
         run: |
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          if [ -n "${ACTIONS_CACHE_URL:-}" ] || [ -n "${ACTIONS_RESULTS_URL:-}" ]; then
+            echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+            echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          else
+            echo "::warning::sccache-action reported success but neither ACTIONS_CACHE_URL nor ACTIONS_RESULTS_URL is set; building without compiler cache."
+          fi
 
       - name: Warn when sccache unavailable
         if: steps.sccache-setup.outcome != 'success'
@@ -250,11 +282,13 @@ jobs:
             "RUSTC_WRAPPER=${RUSTC_WRAPPER:-}" \
             "SCCACHE_GHA_ENABLED=${SCCACHE_GHA_ENABLED:-}" \
             "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL:-}" \
+            "ACTIONS_RESULTS_URL=${ACTIONS_RESULTS_URL:-}" \
             "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
             bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
                       "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
                       "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
                       "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
+                      "ACTIONS_RESULTS_URL=$ACTIONS_RESULTS_URL" \
                       "ACTIONS_RUNTIME_TOKEN=$ACTIONS_RUNTIME_TOKEN" \
                       cargo nextest run --workspace --locked --profile ci'
 
@@ -267,11 +301,13 @@ jobs:
             "RUSTC_WRAPPER=${RUSTC_WRAPPER:-}" \
             "SCCACHE_GHA_ENABLED=${SCCACHE_GHA_ENABLED:-}" \
             "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL:-}" \
+            "ACTIONS_RESULTS_URL=${ACTIONS_RESULTS_URL:-}" \
             "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
             bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
                       "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
                       "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
                       "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
+                      "ACTIONS_RESULTS_URL=$ACTIONS_RESULTS_URL" \
                       "ACTIONS_RUNTIME_TOKEN=$ACTIONS_RUNTIME_TOKEN" \
                       cargo test --doc --workspace --locked'
 
@@ -349,9 +385,22 @@ jobs:
 
       - name: Enable sccache when setup succeeded
         if: steps.sccache-setup.outcome == 'success'
+        # The action reports `success` even when the underlying GHA cache
+        # backend is unreachable (no ACTIONS_*_URL exported to GITHUB_ENV).
+        # If we forwarded RUSTC_WRAPPER=sccache into the build with an
+        # empty URL, sccache would refuse to start ("cache url for ghac
+        # not found") and every rustc invocation — including rustup's
+        # toolchain verification probe — would exit 2. Guard explicitly:
+        # require at least one of ACTIONS_CACHE_URL (v1 backend) or
+        # ACTIONS_RESULTS_URL (v2 backend, post-Feb-2025) to be set
+        # before flipping the wrapper on.
         run: |
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          if [ -n "${ACTIONS_CACHE_URL:-}" ] || [ -n "${ACTIONS_RESULTS_URL:-}" ]; then
+            echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+            echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          else
+            echo "::warning::sccache-action reported success but neither ACTIONS_CACHE_URL nor ACTIONS_RESULTS_URL is set; building without compiler cache."
+          fi
 
       - name: Warn when sccache unavailable
         if: steps.sccache-setup.outcome != 'success'
@@ -366,11 +415,13 @@ jobs:
             "RUSTC_WRAPPER=${RUSTC_WRAPPER:-}" \
             "SCCACHE_GHA_ENABLED=${SCCACHE_GHA_ENABLED:-}" \
             "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL:-}" \
+            "ACTIONS_RESULTS_URL=${ACTIONS_RESULTS_URL:-}" \
             "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
             bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
                       "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
                       "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
                       "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
+                      "ACTIONS_RESULTS_URL=$ACTIONS_RESULTS_URL" \
                       "ACTIONS_RUNTIME_TOKEN=$ACTIONS_RUNTIME_TOKEN" \
                       cargo nextest run --workspace --locked --profile ci \
                         --features integration-tests \
@@ -432,9 +483,22 @@ jobs:
 
       - name: Enable sccache when setup succeeded
         if: steps.sccache-setup.outcome == 'success'
+        # The action reports `success` even when the underlying GHA cache
+        # backend is unreachable (no ACTIONS_*_URL exported to GITHUB_ENV).
+        # If we forwarded RUSTC_WRAPPER=sccache into the build with an
+        # empty URL, sccache would refuse to start ("cache url for ghac
+        # not found") and every rustc invocation — including rustup's
+        # toolchain verification probe — would exit 2. Guard explicitly:
+        # require at least one of ACTIONS_CACHE_URL (v1 backend) or
+        # ACTIONS_RESULTS_URL (v2 backend, post-Feb-2025) to be set
+        # before flipping the wrapper on.
         run: |
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          if [ -n "${ACTIONS_CACHE_URL:-}" ] || [ -n "${ACTIONS_RESULTS_URL:-}" ]; then
+            echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+            echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          else
+            echo "::warning::sccache-action reported success but neither ACTIONS_CACHE_URL nor ACTIONS_RESULTS_URL is set; building without compiler cache."
+          fi
 
       - name: Warn when sccache unavailable
         if: steps.sccache-setup.outcome != 'success'
@@ -531,9 +595,22 @@ jobs:
 
       - name: Enable sccache when setup succeeded
         if: steps.sccache-setup.outcome == 'success'
+        # The action reports `success` even when the underlying GHA cache
+        # backend is unreachable (no ACTIONS_*_URL exported to GITHUB_ENV).
+        # If we forwarded RUSTC_WRAPPER=sccache into the build with an
+        # empty URL, sccache would refuse to start ("cache url for ghac
+        # not found") and every rustc invocation — including rustup's
+        # toolchain verification probe — would exit 2. Guard explicitly:
+        # require at least one of ACTIONS_CACHE_URL (v1 backend) or
+        # ACTIONS_RESULTS_URL (v2 backend, post-Feb-2025) to be set
+        # before flipping the wrapper on.
         run: |
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          if [ -n "${ACTIONS_CACHE_URL:-}" ] || [ -n "${ACTIONS_RESULTS_URL:-}" ]; then
+            echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+            echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          else
+            echo "::warning::sccache-action reported success but neither ACTIONS_CACHE_URL nor ACTIONS_RESULTS_URL is set; building without compiler cache."
+          fi
 
       - name: Warn when sccache unavailable
         if: steps.sccache-setup.outcome != 'success'
@@ -577,9 +654,22 @@ jobs:
 
       - name: Enable sccache when setup succeeded
         if: steps.sccache-setup.outcome == 'success'
+        # The action reports `success` even when the underlying GHA cache
+        # backend is unreachable (no ACTIONS_*_URL exported to GITHUB_ENV).
+        # If we forwarded RUSTC_WRAPPER=sccache into the build with an
+        # empty URL, sccache would refuse to start ("cache url for ghac
+        # not found") and every rustc invocation — including rustup's
+        # toolchain verification probe — would exit 2. Guard explicitly:
+        # require at least one of ACTIONS_CACHE_URL (v1 backend) or
+        # ACTIONS_RESULTS_URL (v2 backend, post-Feb-2025) to be set
+        # before flipping the wrapper on.
         run: |
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          if [ -n "${ACTIONS_CACHE_URL:-}" ] || [ -n "${ACTIONS_RESULTS_URL:-}" ]; then
+            echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+            echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          else
+            echo "::warning::sccache-action reported success but neither ACTIONS_CACHE_URL nor ACTIONS_RESULTS_URL is set; building without compiler cache."
+          fi
 
       - name: Warn when sccache unavailable
         if: steps.sccache-setup.outcome != 'success'
@@ -657,9 +747,22 @@ jobs:
 
       - name: Enable sccache when setup succeeded
         if: steps.sccache-setup.outcome == 'success'
+        # The action reports `success` even when the underlying GHA cache
+        # backend is unreachable (no ACTIONS_*_URL exported to GITHUB_ENV).
+        # If we forwarded RUSTC_WRAPPER=sccache into the build with an
+        # empty URL, sccache would refuse to start ("cache url for ghac
+        # not found") and every rustc invocation — including rustup's
+        # toolchain verification probe — would exit 2. Guard explicitly:
+        # require at least one of ACTIONS_CACHE_URL (v1 backend) or
+        # ACTIONS_RESULTS_URL (v2 backend, post-Feb-2025) to be set
+        # before flipping the wrapper on.
         run: |
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          if [ -n "${ACTIONS_CACHE_URL:-}" ] || [ -n "${ACTIONS_RESULTS_URL:-}" ]; then
+            echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+            echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          else
+            echo "::warning::sccache-action reported success but neither ACTIONS_CACHE_URL nor ACTIONS_RESULTS_URL is set; building without compiler cache."
+          fi
 
       - name: Warn when sccache unavailable
         if: steps.sccache-setup.outcome != 'success'
@@ -675,11 +778,13 @@ jobs:
             "RUSTC_WRAPPER=${RUSTC_WRAPPER:-}" \
             "SCCACHE_GHA_ENABLED=${SCCACHE_GHA_ENABLED:-}" \
             "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL:-}" \
+            "ACTIONS_RESULTS_URL=${ACTIONS_RESULTS_URL:-}" \
             "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
             bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
                       "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
                       "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
                       "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
+                      "ACTIONS_RESULTS_URL=$ACTIONS_RESULTS_URL" \
                       "ACTIONS_RUNTIME_TOKEN=$ACTIONS_RUNTIME_TOKEN" \
                       cargo xtask mutants --diff origin/main --features integration-tests'
 
@@ -791,9 +896,22 @@ jobs:
 
       - name: Enable sccache when setup succeeded
         if: steps.sccache-setup.outcome == 'success'
+        # The action reports `success` even when the underlying GHA cache
+        # backend is unreachable (no ACTIONS_*_URL exported to GITHUB_ENV).
+        # If we forwarded RUSTC_WRAPPER=sccache into the build with an
+        # empty URL, sccache would refuse to start ("cache url for ghac
+        # not found") and every rustc invocation — including rustup's
+        # toolchain verification probe — would exit 2. Guard explicitly:
+        # require at least one of ACTIONS_CACHE_URL (v1 backend) or
+        # ACTIONS_RESULTS_URL (v2 backend, post-Feb-2025) to be set
+        # before flipping the wrapper on.
         run: |
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          if [ -n "${ACTIONS_CACHE_URL:-}" ] || [ -n "${ACTIONS_RESULTS_URL:-}" ]; then
+            echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+            echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          else
+            echo "::warning::sccache-action reported success but neither ACTIONS_CACHE_URL nor ACTIONS_RESULTS_URL is set; building without compiler cache."
+          fi
 
       - name: Warn when sccache unavailable
         if: steps.sccache-setup.outcome != 'success'
@@ -815,11 +933,13 @@ jobs:
             "RUSTC_WRAPPER=${RUSTC_WRAPPER:-}" \
             "SCCACHE_GHA_ENABLED=${SCCACHE_GHA_ENABLED:-}" \
             "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL:-}" \
+            "ACTIONS_RESULTS_URL=${ACTIONS_RESULTS_URL:-}" \
             "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
             bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
                       "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
                       "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
                       "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
+                      "ACTIONS_RESULTS_URL=$ACTIONS_RESULTS_URL" \
                       "ACTIONS_RUNTIME_TOKEN=$ACTIONS_RUNTIME_TOKEN" \
                       cargo xtask bpf-clippy'
 
@@ -836,11 +956,13 @@ jobs:
             "RUSTC_WRAPPER=${RUSTC_WRAPPER:-}" \
             "SCCACHE_GHA_ENABLED=${SCCACHE_GHA_ENABLED:-}" \
             "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL:-}" \
+            "ACTIONS_RESULTS_URL=${ACTIONS_RESULTS_URL:-}" \
             "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
             bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
                       "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
                       "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
                       "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
+                      "ACTIONS_RESULTS_URL=$ACTIONS_RESULTS_URL" \
                       "ACTIONS_RUNTIME_TOKEN=$ACTIONS_RUNTIME_TOKEN" \
                       cargo xtask bpf-build'
 
@@ -923,9 +1045,22 @@ jobs:
 
       - name: Enable sccache when setup succeeded
         if: steps.sccache-setup.outcome == 'success'
+        # The action reports `success` even when the underlying GHA cache
+        # backend is unreachable (no ACTIONS_*_URL exported to GITHUB_ENV).
+        # If we forwarded RUSTC_WRAPPER=sccache into the build with an
+        # empty URL, sccache would refuse to start ("cache url for ghac
+        # not found") and every rustc invocation — including rustup's
+        # toolchain verification probe — would exit 2. Guard explicitly:
+        # require at least one of ACTIONS_CACHE_URL (v1 backend) or
+        # ACTIONS_RESULTS_URL (v2 backend, post-Feb-2025) to be set
+        # before flipping the wrapper on.
         run: |
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          if [ -n "${ACTIONS_CACHE_URL:-}" ] || [ -n "${ACTIONS_RESULTS_URL:-}" ]; then
+            echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+            echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          else
+            echo "::warning::sccache-action reported success but neither ACTIONS_CACHE_URL nor ACTIONS_RESULTS_URL is set; building without compiler cache."
+          fi
 
       - name: Warn when sccache unavailable
         if: steps.sccache-setup.outcome != 'success'
@@ -941,11 +1076,13 @@ jobs:
             "RUSTC_WRAPPER=${RUSTC_WRAPPER:-}" \
             "SCCACHE_GHA_ENABLED=${SCCACHE_GHA_ENABLED:-}" \
             "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL:-}" \
+            "ACTIONS_RESULTS_URL=${ACTIONS_RESULTS_URL:-}" \
             "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
             bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
                       "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
                       "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
                       "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
+                      "ACTIONS_RESULTS_URL=$ACTIONS_RESULTS_URL" \
                       "ACTIONS_RUNTIME_TOKEN=$ACTIONS_RUNTIME_TOKEN" \
                       cargo xtask bpf-unit'
 
@@ -1034,9 +1171,22 @@ jobs:
 
       - name: Enable sccache when setup succeeded
         if: steps.sccache-setup.outcome == 'success'
+        # The action reports `success` even when the underlying GHA cache
+        # backend is unreachable (no ACTIONS_*_URL exported to GITHUB_ENV).
+        # If we forwarded RUSTC_WRAPPER=sccache into the build with an
+        # empty URL, sccache would refuse to start ("cache url for ghac
+        # not found") and every rustc invocation — including rustup's
+        # toolchain verification probe — would exit 2. Guard explicitly:
+        # require at least one of ACTIONS_CACHE_URL (v1 backend) or
+        # ACTIONS_RESULTS_URL (v2 backend, post-Feb-2025) to be set
+        # before flipping the wrapper on.
         run: |
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          if [ -n "${ACTIONS_CACHE_URL:-}" ] || [ -n "${ACTIONS_RESULTS_URL:-}" ]; then
+            echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+            echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          else
+            echo "::warning::sccache-action reported success but neither ACTIONS_CACHE_URL nor ACTIONS_RESULTS_URL is set; building without compiler cache."
+          fi
 
       - name: Warn when sccache unavailable
         if: steps.sccache-setup.outcome != 'success'
@@ -1048,11 +1198,13 @@ jobs:
             "RUSTC_WRAPPER=${RUSTC_WRAPPER:-}" \
             "SCCACHE_GHA_ENABLED=${SCCACHE_GHA_ENABLED:-}" \
             "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL:-}" \
+            "ACTIONS_RESULTS_URL=${ACTIONS_RESULTS_URL:-}" \
             "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
             bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
                       "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
                       "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
                       "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
+                      "ACTIONS_RESULTS_URL=$ACTIONS_RESULTS_URL" \
                       "ACTIONS_RUNTIME_TOKEN=$ACTIONS_RUNTIME_TOKEN" \
                       cargo run -p overdrive-dataplane --bin verifier_regress'
 
@@ -1120,9 +1272,22 @@ jobs:
 
       - name: Enable sccache when setup succeeded
         if: steps.sccache-setup.outcome == 'success'
+        # The action reports `success` even when the underlying GHA cache
+        # backend is unreachable (no ACTIONS_*_URL exported to GITHUB_ENV).
+        # If we forwarded RUSTC_WRAPPER=sccache into the build with an
+        # empty URL, sccache would refuse to start ("cache url for ghac
+        # not found") and every rustc invocation — including rustup's
+        # toolchain verification probe — would exit 2. Guard explicitly:
+        # require at least one of ACTIONS_CACHE_URL (v1 backend) or
+        # ACTIONS_RESULTS_URL (v2 backend, post-Feb-2025) to be set
+        # before flipping the wrapper on.
         run: |
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          if [ -n "${ACTIONS_CACHE_URL:-}" ] || [ -n "${ACTIONS_RESULTS_URL:-}" ]; then
+            echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+            echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          else
+            echo "::warning::sccache-action reported success but neither ACTIONS_CACHE_URL nor ACTIONS_RESULTS_URL is set; building without compiler cache."
+          fi
 
       - name: Warn when sccache unavailable
         if: steps.sccache-setup.outcome != 'success'
@@ -1137,11 +1302,13 @@ jobs:
             "RUSTC_WRAPPER=${RUSTC_WRAPPER:-}" \
             "SCCACHE_GHA_ENABLED=${SCCACHE_GHA_ENABLED:-}" \
             "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL:-}" \
+            "ACTIONS_RESULTS_URL=${ACTIONS_RESULTS_URL:-}" \
             "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
             bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
                       "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
                       "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
                       "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
+                      "ACTIONS_RESULTS_URL=$ACTIONS_RESULTS_URL" \
                       "ACTIONS_RUNTIME_TOKEN=$ACTIONS_RUNTIME_TOKEN" \
                       cargo xdp-perf'
 
