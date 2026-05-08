@@ -835,33 +835,37 @@ impl Dataplane for EbpfDataplane {
         use overdrive_core::dataplane::backend_key::Proto;
 
         // Empty backend set — remove this VIP from all maps so XDP
-        // returns XDP_PASS. Recover the last-known ServiceKey from
-        // the service_backends tracker (which carries the port the
-        // prior update used).
+        // returns XDP_PASS. Collect ALL ServiceKeys matching the VIP
+        // IP (the same VIP may be registered on multiple ports via
+        // separate update_service calls).
         if backends.is_empty() {
             let vip_host = u32::from(vip);
 
-            let service_key = {
+            let matching_keys: Vec<crate::maps::wire::ServiceKey> = {
                 let tracker = self.service_backends.lock();
-                tracker.keys().find(|k| k.vip_host == vip_host).copied()
+                tracker.keys().filter(|k| k.vip_host == vip_host).copied().collect()
             };
 
-            let Some(service_key) = service_key else {
+            if matching_keys.is_empty() {
                 return Ok(());
-            };
+            }
 
-            self.service_map.delete(&service_key).map_err(|e| match e {
-                crate::maps::hash_of_maps::HashOfMapsError::MapAllocFailed { source } => {
-                    DataplaneError::MapAllocFailed { source }
-                }
-                crate::maps::hash_of_maps::HashOfMapsError::Syscall(source) => {
-                    DataplaneError::LoadFailed(format!("SERVICE_MAP outer delete: {source}"))
-                }
-            })?;
+            for service_key in &matching_keys {
+                self.service_map.delete(service_key).map_err(|e| match e {
+                    crate::maps::hash_of_maps::HashOfMapsError::MapAllocFailed { source } => {
+                        DataplaneError::MapAllocFailed { source }
+                    }
+                    crate::maps::hash_of_maps::HashOfMapsError::Syscall(source) => {
+                        DataplaneError::LoadFailed(format!("SERVICE_MAP outer delete: {source}"))
+                    }
+                })?;
+            }
 
             let live_ids: std::collections::BTreeSet<u32> = {
                 let mut tracker = self.service_backends.lock();
-                tracker.remove(&service_key);
+                for service_key in &matching_keys {
+                    tracker.remove(service_key);
+                }
                 tracker
                     .values()
                     .flat_map(|s| s.iter().copied())
@@ -876,7 +880,7 @@ impl Dataplane for EbpfDataplane {
 
             let stale_keys: std::collections::BTreeSet<crate::maps::BackendKeyPod> = {
                 let mut tracker = self.service_reverse_nat_keys.lock();
-                tracker.remove(&service_key).unwrap_or_default()
+                matching_keys.iter().flat_map(|sk| tracker.remove(sk).unwrap_or_default()).collect()
             };
             {
                 let mut reverse_nat_map = self.reverse_nat_map.lock();

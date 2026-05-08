@@ -42,7 +42,9 @@
     clippy::ref_as_ptr,
     clippy::items_after_statements,
     clippy::too_many_lines,
-    clippy::similar_names
+    clippy::similar_names,
+    clippy::redundant_clone,
+    clippy::used_underscore_binding
 )]
 
 use std::io::{Read, Write};
@@ -910,6 +912,122 @@ fn empty_backend_update_removes_service_map_and_reverse_nat_entries() {
     runtime
         .block_on(dataplane.update_service(VIP, vec![]))
         .expect("update_service empty backends (idempotent)");
+
+    drop(_ns_guard);
+    drop(dataplane);
+    let _ = topo;
+}
+
+/// Regression: `update_service(vip, vec![])` must purge ALL ports
+/// registered on the same VIP IP, not just the first. The prior code
+/// used `Iterator::find` (first match by `vip_host`) which left the
+/// second port's SERVICE_MAP slot, BACKEND_MAP entries, and
+/// REVERSE_NAT_MAP entries alive — XDP continued forwarding on the
+/// un-purged port.
+#[test]
+fn empty_backend_purge_removes_all_ports_for_same_vip() {
+    if !require_root_or_skip("multi-port-purge") {
+        return;
+    }
+
+    let topo = match ThreeIfaceTopology::create("mp") {
+        Ok(t) => t,
+        Err(NetNsError::CapNetAdminRequired) => {
+            eprintln!("[skip] multi-port-purge needs CAP_NET_ADMIN");
+            return;
+        }
+        Err(e) => panic!("3-iface topology setup failed: {e}"),
+    };
+
+    let pin_dir = PathBuf::from(format!("/sys/fs/bpf/overdrive-test-mp-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&pin_dir);
+    std::fs::create_dir_all(&pin_dir).expect("create pin dir");
+    struct PinDirGuard(PathBuf);
+    impl Drop for PinDirGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    let _pin_guard = PinDirGuard(pin_dir.clone());
+
+    let _ns_guard = enter_netns(&topo.lb_ns.name).expect("setns into lb-ns");
+
+    let dataplane = EbpfDataplane::new_with_pin_dir(&topo.lb_veth_a, &topo.lb_veth_b, &pin_dir)
+        .expect("EbpfDataplane::new_with_pin_dir");
+
+    let runtime =
+        tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio rt");
+
+    let alloc_port80 =
+        SpiffeId::new("spiffe://overdrive.local/job/e2e/alloc/mp-port80").expect("SpiffeId");
+    let alloc_port443 =
+        SpiffeId::new("spiffe://overdrive.local/job/e2e/alloc/mp-port443").expect("SpiffeId");
+
+    let port_80: u16 = 80;
+    let port_443: u16 = 443;
+
+    // Step 1: register VIP on port 80.
+    runtime
+        .block_on(dataplane.update_service(
+            VIP,
+            vec![Backend {
+                alloc: alloc_port80,
+                addr: SocketAddr::new(IpAddr::V4(BACKEND_IP), port_80),
+                weight: 1,
+                healthy: true,
+            }],
+        ))
+        .expect("update_service port 80");
+
+    // Step 2: register same VIP on port 443.
+    runtime
+        .block_on(dataplane.update_service(
+            VIP,
+            vec![Backend {
+                alloc: alloc_port443,
+                addr: SocketAddr::new(IpAddr::V4(BACKEND_IP), port_443),
+                weight: 1,
+                healthy: true,
+            }],
+        ))
+        .expect("update_service port 443");
+
+    // Verify: SERVICE_MAP has entries for both ports.
+    assert!(
+        dataplane.service_map_contains(VIP, port_80).expect("contains port 80"),
+        "SERVICE_MAP must contain VIP:80 after install"
+    );
+    assert!(
+        dataplane.service_map_contains(VIP, port_443).expect("contains port 443"),
+        "SERVICE_MAP must contain VIP:443 after install"
+    );
+    assert_eq!(
+        dataplane.backend_map_keys().expect("backend_map_keys").len(),
+        2,
+        "BACKEND_MAP must contain 2 entries (one per port)"
+    );
+
+    // Step 3: purge the VIP with empty backends — must remove BOTH ports.
+    runtime.block_on(dataplane.update_service(VIP, vec![])).expect("update_service empty");
+
+    // Verify: SERVICE_MAP has no entries for either port.
+    assert!(
+        !dataplane.service_map_contains(VIP, port_80).expect("contains port 80 after purge"),
+        "SERVICE_MAP must NOT contain VIP:80 after empty-backend purge"
+    );
+    assert!(
+        !dataplane.service_map_contains(VIP, port_443).expect("contains port 443 after purge"),
+        "SERVICE_MAP must NOT contain VIP:443 after empty-backend purge"
+    );
+    assert!(
+        dataplane.backend_map_keys().expect("backend_map_keys after purge").is_empty(),
+        "BACKEND_MAP must be empty after orphan-GC sweep"
+    );
+    assert_eq!(
+        dataplane.reverse_nat_map_size().expect("rnat size after purge"),
+        0,
+        "REVERSE_NAT_MAP must be empty after purge"
+    );
 
     drop(_ns_guard);
     drop(dataplane);

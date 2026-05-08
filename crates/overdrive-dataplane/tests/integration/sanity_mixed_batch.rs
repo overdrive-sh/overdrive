@@ -1,3 +1,4 @@
+#![allow(clippy::used_underscore_binding)]
 //! S-2.2-22 — Mixed legitimate + pathological batch hits per-class
 //! `DROP_COUNTER` slots.
 //!

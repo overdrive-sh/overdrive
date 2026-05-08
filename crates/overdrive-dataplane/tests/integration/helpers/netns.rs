@@ -1,3 +1,4 @@
+#![allow(clippy::doc_markdown)]
 //! RAII Linux network-namespace fixture for Tier 3 integration tests.
 //!
 //! Creates a named netns via `ip netns add`, brings up `lo` inside it

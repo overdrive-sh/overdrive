@@ -447,7 +447,7 @@ fn verifier_budget_xdp_service_map_lookup_within_20pct_of_baseline() {
     //                        verifier cost is the price of CHECKSUM_PARTIAL
     //                        correctness on veth without ethtool -K.
     // 151379 insns = 30.3% of the 500K L1-cache-fits target.
-    const BASELINE: u32 = 151379;
+    const BASELINE: u32 = 151_379;
     let upper_bound = BASELINE + (BASELINE / 5); // +20% per ASR-2.2-03
     assert!(
         insns <= upper_bound,

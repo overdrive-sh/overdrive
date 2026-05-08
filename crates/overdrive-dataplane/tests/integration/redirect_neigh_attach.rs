@@ -34,7 +34,14 @@
 // `expect_used` is workspace-wide `warn` per `.claude/rules/development.md`
 // § Errors. Tier 3 tests use `.expect(...)` to surface fail-fast at the
 // assertion site, matching the convention in sibling integration tests.
-#![allow(clippy::expect_used, clippy::print_stderr, clippy::significant_drop_tightening)]
+#![allow(
+    clippy::expect_used,
+    clippy::print_stderr,
+    clippy::significant_drop_tightening,
+    clippy::doc_lazy_continuation,
+    clippy::unwrap_used,
+    clippy::doc_markdown
+)]
 
 use std::path::PathBuf;
 use std::process::Command;

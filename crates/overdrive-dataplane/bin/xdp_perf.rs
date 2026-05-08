@@ -193,7 +193,7 @@ fn measure(
     let pin_path = Path::new(&pin_dir).join("SERVICE_MAP");
     let _ = std::fs::remove_file(&pin_path);
 
-    let _service_map = HashOfMapsHandle::<ServiceKey, u32>::new_pinned_with_array_inner(
+    let service_map = HashOfMapsHandle::<ServiceKey, u32>::new_pinned_with_array_inner(
         "SERVICE_MAP",
         4096,
         overdrive_core::dataplane::MaglevTableSize::DEFAULT.get(),
@@ -257,6 +257,7 @@ fn measure(
             );
         }
 
+        #[allow(clippy::cast_precision_loss)]
         let pps = cnt_delta as f64 / wall_duration.as_secs_f64();
         let mean_ns =
             u64::try_from(time_delta.as_nanos() / u128::from(cnt_delta)).unwrap_or(u64::MAX);
@@ -265,7 +266,7 @@ fn measure(
     }
 
     drop(bpf);
-    drop(_service_map);
+    drop(service_map);
     let _ = std::fs::remove_file(&pin_path);
     let _ = std::fs::remove_dir(&pin_dir);
 
@@ -277,7 +278,7 @@ fn measure(
 /// The kernel requires `data_size_in >= ETH_HLEN` (14 bytes) per
 /// commit `6b3d638ca897`. This frame is 42 bytes — well above the
 /// minimum — and exercises the XDP program's header-parsing path
-/// (EtherType check → IPv4 parse → UDP protocol match → map lookup).
+/// (`EtherType` check → IPv4 parse → UDP protocol match → map lookup).
 #[cfg(target_os = "linux")]
 fn build_synthetic_udp_frame() -> Vec<u8> {
     let mut pkt = Vec::with_capacity(42);

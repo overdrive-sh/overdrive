@@ -21,6 +21,7 @@
 //! test mutates the on-disk artifact (process-global file).
 
 #![cfg(target_os = "linux")]
+#![allow(clippy::print_stderr)]
 
 use std::path::PathBuf;
 use std::process::Command;

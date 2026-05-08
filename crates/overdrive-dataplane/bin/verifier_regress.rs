@@ -182,7 +182,7 @@ fn measure(
     // `tests/integration/atomic_swap.rs`. Capacities match the
     // kernel-side `MAX_OUTER_ENTRIES` / `INNER_TABLE_SIZE` per
     // architecture.md § 5 / § 10.
-    let _service_map = HashOfMapsHandle::<ServiceKey, u32>::new_pinned_with_array_inner(
+    let service_map = HashOfMapsHandle::<ServiceKey, u32>::new_pinned_with_array_inner(
         "SERVICE_MAP",
         4096,
         overdrive_core::dataplane::MaglevTableSize::DEFAULT.get(),
@@ -233,7 +233,7 @@ fn measure(
     // (locals in reverse-declaration order); the pin is freed once
     // the final fd closes.
     drop(bpf);
-    drop(_service_map);
+    drop(service_map);
     let _ = std::fs::remove_file(&pin_path);
     let _ = std::fs::remove_dir(&pin_dir);
 
