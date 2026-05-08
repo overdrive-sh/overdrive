@@ -27,6 +27,16 @@ authors.workspace      = true
 repository.workspace   = true
 publish                = false
 
+# Tooling binaries live under `bin/` (not `src/bin/`) per
+# `.claude/rules/development.md` § "src/ is production code".
+[[bin]]
+name = "verifier_regress"
+path = "bin/verifier_regress.rs"
+
+[[bin]]
+name = "xdp_perf"
+path = "bin/xdp_perf.rs"
+
 [package.metadata.overdrive]
 crate_class = "adapter-host"
 
@@ -48,12 +58,14 @@ thiserror.workspace      = true
 tokio                    = { workspace = true, features = ["macros", "rt"] }
 tracing.workspace        = true
 
-# Binary-only at the `verifier_regress` boundary per
-# `.claude/rules/development.md` § Errors ("eyre only at CLI / binary
-# boundaries"). The library modules use `thiserror`-typed errors;
-# `verifier_budget` does not depend on these.
+# Binary-only at the `verifier_regress` and `xdp_perf` boundaries
+# per `.claude/rules/development.md` § Errors ("eyre only at CLI /
+# binary boundaries"). The library modules use `thiserror`-typed
+# errors; `verifier_budget` and `xdp_perf_gate` do not depend on
+# these. `clap` powers the `xdp_perf` binary's CLI args.
 eyre.workspace       = true
 color-eyre.workspace = true
+clap.workspace       = true
 
 # `parking_lot::Mutex` for interior mutability of aya's
 # `HashMap`-backed `BACKEND_MAP` handle — `Dataplane::update_service`

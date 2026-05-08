@@ -971,18 +971,22 @@ jobs:
         run: sudo -E env "PATH=$PATH" cargo verifier-regress
 
   # -------------------------------------------------------------------
-  # Job E (Tier 4) — XDP throughput / p99 latency regression gate
+  # Job E (Tier 4) — XDP throughput / mean-latency regression gate
   # -------------------------------------------------------------------
-  # `cargo xtask xdp-perf` runs `xdp-bench` against the loaded BPF
-  # program in DROP, TX, and LB-forward modes; fails the PR if any
-  # mode regresses pps by >5% or p99 by >10% versus the recorded
-  # baselines under `perf-baseline/main/xdp-perf-*.txt`. Pure-Rust
-  # gate logic self-tested at `xtask/tests/perf_gate_self_test.rs`;
-  # this job runs the gate against real `xdp-bench` output. See
+  # `cargo xdp-perf` (binary at
+  # `crates/overdrive-dataplane/bin/xdp_perf.rs`) loads each
+  # XDP program named in `perf-baseline/main/xdp-perf/*.txt` via
+  # aya, runs each in-kernel via `BPF_PROG_TEST_RUN` with
+  # `repeat=N`, then reads `bpf_prog_info.run_time_ns` / `run_cnt`
+  # (gated on `aya::sys::enable_stats(Stats::RunTime)`, kernel ≥5.8)
+  # to compute pps + mean_ns. Fails the PR if pps regresses by >5%
+  # or mean_ns rises by >10% vs the recorded baseline. Pure gate
+  # logic self-tested via `cargo nextest run -p overdrive-dataplane
+  # --lib -E 'test(xdp_perf_gate)'`. See
   # `.claude/rules/testing.md` § "Tier 4 — Verifier and Performance
-  # Gates" and slice-07.
+  # Gates".
   xdp-perf:
-    name: cargo xtask xdp-perf
+    name: cargo xdp-perf
     runs-on: ubuntu-latest
     needs: bpf-build
     timeout-minutes: 10
@@ -995,13 +999,6 @@ jobs:
       # not ship it.
       - name: Install mold linker
         run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends mold
-
-      # `xdp-bench` ships in the `xdp-tools` package; same install
-      # surface as `infra/lima/overdrive-dev.yaml:108` (where it is
-      # already wired into the dev VM image).
-      - name: Install xdp-tools
-        run: |
-          sudo apt-get install -y --no-install-recommends xdp-tools libxdp-dev libbpf-dev
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -1032,15 +1029,11 @@ jobs:
           path: target/bpf/
           if-no-files-found: error
 
-      # `cargo xtask xdp-perf` auto-provisions an `xdp0/xdp1` veth
-      # pair when `OVERDRIVE_XDP_PERF_IFACE` is unset and runs
-      # `xdp-bench` against `xdp0`. veth supports native XDP attach
-      # (`ndo_bpf` → `veth_xdp`), unlike `lo` which the loopback
-      # driver rejects with "Underlying driver does not support XDP
-      # in native mode". The auto-provisioning needs `CAP_NET_ADMIN`
-      # — `sudo -E env` provides it. To stage the interface
-      # externally instead, set `OVERDRIVE_XDP_PERF_IFACE` (or pass
-      # `--no-auto-setup`).
-      - name: cargo xtask xdp-perf
-        run: sudo -E env "PATH=$PATH" cargo xtask xdp-perf
+      # `cargo xdp-perf` uses `BPF_PROG_TEST_RUN` — no veth pair,
+      # no xdp-trafficgen, no interface attachment. The program is
+      # loaded into the kernel and run in a tight loop against a
+      # synthetic UDP packet. Needs `CAP_SYS_ADMIN` for
+      # `enable_stats(RunTime)` — `sudo -E env` provides it.
+      - name: cargo xdp-perf
+        run: sudo -E env "PATH=$PATH" cargo xdp-perf
 

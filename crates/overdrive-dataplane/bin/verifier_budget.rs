@@ -5,7 +5,7 @@
 //! # Architecture
 //!
 //! Three concerns, three pure functions, plus a shell-side wrapper in
-//! `crates/overdrive-dataplane/src/bin/verifier_regress.rs`:
+//! `crates/overdrive-dataplane/bin/verifier_regress.rs`:
 //!
 //! 1. [`parse_baseline_file`] — line-by-line key=value parser that
 //!    skips `#`-comment and blank lines; returns one

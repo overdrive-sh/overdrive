@@ -75,9 +75,6 @@ enum Task {
         scope: IntegrationScope,
     },
 
-    /// Tier 4 — XDP throughput / p99 regression (`xdp-bench`).
-    XdpPerf(XdpPerfArgs),
-
     /// Mutation testing (`cargo-mutants`) — diff-scoped per PR or
     /// full-workspace (nightly).
     ///
@@ -207,28 +204,6 @@ struct MutantsArgs {
     test_whole_workspace: bool,
 }
 
-/// CLI arguments for `cargo xtask xdp-perf`. Only operational
-/// concern today: whether the wrapper is allowed to auto-provision
-/// the `xdp0/xdp1` veth pair before invoking `xdp-bench`.
-///
-/// Default behaviour (no flag) is to auto-provision when
-/// `OVERDRIVE_XDP_PERF_IFACE` is unset. An explicit env var or
-/// `--no-auto-setup` opts out — see
-/// `xtask::perf_gate::xdp_perf_setup::resolve_iface_config` for the
-/// full decision matrix.
-#[derive(Debug, Clone, Copy, clap::Args)]
-struct XdpPerfArgs {
-    /// Skip the auto-provisioning of the `xdp0/xdp1` veth pair.
-    /// The wrapper will run `xdp-bench` against whatever interface
-    /// `OVERDRIVE_XDP_PERF_IFACE` names (or the default `xdp0`),
-    /// trusting that the caller has staged the interface
-    /// externally. Use when an ops harness or higher-level test
-    /// rig owns the network plumbing and xtask must stay out of
-    /// `/sys/class/net`.
-    #[arg(long)]
-    no_auto_setup: bool,
-}
-
 #[derive(Debug, Clone, Copy, Subcommand)]
 enum McpAction {
     /// Render `.mcp.json` from the built-in template, injecting tokens
@@ -318,7 +293,6 @@ fn run() -> Result<()> {
         Task::IntegrationTest { scope } => match scope {
             IntegrationScope::Vm { cache_dir, kernels } => integration_vm(&cache_dir, &kernels),
         },
-        Task::XdpPerf(args) => xdp_perf(args),
         Task::Mutants(args) => mutants(args),
         Task::Ci => ci(),
         Task::Lima { action } => lima(action),
@@ -998,226 +972,6 @@ fn integration_vm(cache_dir: &std::path::Path, kernels: &[String]) -> Result<()>
         kernels.join(",")
     );
     tracing_placeholder(&summary)
-}
-
-/// Tier 4 — `cargo xtask xdp-perf`. Runs `xdp-bench` against the
-/// loaded BPF program in DROP, TX, and LB-forward modes; parses
-/// per-mode pps + p99 latency; compares against
-/// `perf-baseline/main/xdp-perf-<mode>.txt`; fails the build if any
-/// mode regresses pps by >5% or p99 by >10%.
-///
-/// # Architecture
-///
-/// Splits I/O from decision per the [`xtask::perf_gate::xdp_perf`]
-/// module docs:
-/// 1. Discover baseline files under `perf-baseline/main/` matching
-///    the `xdp-perf-<mode>.txt` shape; parse with
-///    [`xtask::perf_gate::xdp_perf::parse_baseline_file`].
-/// 2. Resolve the test interface via
-///    [`xtask::perf_gate::xdp_perf_setup::resolve_iface_config`]
-///    (env `OVERDRIVE_XDP_PERF_IFACE`; CLI flag `--no-auto-setup`).
-///    Default behaviour is to auto-provision an `xdp0/xdp1` veth
-///    pair so native XDP attach succeeds — `lo` was the prior
-///    default and is structurally broken (the loopback driver does
-///    not implement `ndo_bpf` for native XDP).
-/// 3. For each mode, run `xdp-bench <mode> <iface>` and capture
-///    stdout.
-/// 4. Parse combined output via
-///    [`xtask::perf_gate::xdp_perf::parse_xdp_bench_output`].
-/// 5. Call [`xtask::perf_gate::xdp_perf::evaluate`]; on `Fail`,
-///    render via
-///    [`xtask::perf_gate::xdp_perf::render_failure`] to stderr and
-///    exit non-zero.
-///
-/// # Failure modes (all surface as `eyre::Report` with non-zero
-/// exit)
-///
-/// 1. `xdp-bench` not on PATH — friendly hint pointing at
-///    `xdp-tools` install (already in `infra/lima/overdrive-dev.yaml`
-///    / CI).
-/// 2. `ip` (iproute2) not on PATH when auto-provisioning is
-///    requested — same shape hint.
-/// 3. `perf-baseline/main/xdp-perf-*.txt` files missing or
-///    unreadable.
-/// 4. Subprocess invocation fails (`ip link …` or `xdp-bench`).
-/// 5. Parser rejects the recorded baseline / xdp-bench output.
-/// 6. Gate evaluation returns one or more breaches.
-///
-/// Self-tested at `xtask/tests/perf_gate_self_test.rs` against the
-/// pure decision fns directly so the tests run on macOS without
-/// xdp-bench / iproute2 installed.
-fn xdp_perf(args: XdpPerfArgs) -> Result<()> {
-    use std::fs;
-
-    use xtask::perf_gate::xdp_perf::{
-        BaselineRecord, GateOutcome, GatePolicy, evaluate, parse_baseline_file,
-        parse_xdp_bench_output, render_failure,
-    };
-    use xtask::perf_gate::xdp_perf_setup::{ProvisioningPlan, resolve_iface_config};
-
-    which_or_hint(
-        "xdp-bench",
-        "install via your distro's `xdp-tools` package (already wired into `infra/lima/overdrive-dev.yaml` and CI Job E). On macOS, run `cargo xtask lima run -- cargo xtask xdp-perf`.",
-    )?;
-
-    let workspace_root = workspace_root_dir()?;
-    let baseline_dir = workspace_root.join("perf-baseline/main");
-
-    // Discover baseline files: every `xdp-perf-<mode>.txt` under
-    // `perf-baseline/main/` becomes a contract entry. Each file is
-    // single-mode (one data line); the gate keys on the data line's
-    // `mode=` value, NOT the file name, so a file misnamed against
-    // its content surfaces as a parser error — not a silent
-    // mismatch.
-    let mut baselines: Vec<BaselineRecord> = Vec::new();
-    let entries = fs::read_dir(&baseline_dir)
-        .map_err(|e| color_eyre::eyre::eyre!("read_dir({}): {e}", baseline_dir.display()))?;
-    let mut baseline_paths: Vec<std::path::PathBuf> = Vec::new();
-    for entry in entries {
-        let entry = entry.map_err(|e| color_eyre::eyre::eyre!("read_dir entry: {e}"))?;
-        let path = entry.path();
-        let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
-            continue;
-        };
-        if name.starts_with("xdp-perf-")
-            && std::path::Path::new(name).extension().and_then(|s| s.to_str()) == Some("txt")
-        {
-            baseline_paths.push(path);
-        }
-    }
-    baseline_paths.sort();
-    for path in &baseline_paths {
-        let text = fs::read_to_string(path)
-            .map_err(|e| color_eyre::eyre::eyre!("read {}: {e}", path.display()))?;
-        let mut records = parse_baseline_file(&text)
-            .map_err(|e| color_eyre::eyre::eyre!("parse {}: {e:?}", path.display()))?;
-        baselines.append(&mut records);
-    }
-    if baselines.is_empty() {
-        bail!(
-            "no baselines found matching `xdp-perf-*.txt` under {} — at least one file with a `mode=… pps=… p99_ns=…` line is required",
-            baseline_dir.display()
-        );
-    }
-
-    // Resolve the iface + provisioning plan. The resolver is a
-    // pure fn; provisioning (running `ip link …`) lives below in
-    // [`provision_veth_pair`].
-    let env_iface = std::env::var("OVERDRIVE_XDP_PERF_IFACE").ok();
-    let resolution = resolve_iface_config(env_iface, args.no_auto_setup);
-
-    if let ProvisioningPlan::AutoProvisionVeth { primary, peer } = &resolution.provisioning {
-        which_or_hint(
-            "ip",
-            "install iproute2 (already wired into `infra/lima/overdrive-dev.yaml` and CI Job E). Or pass `--no-auto-setup` and stage the interface yourself.",
-        )?;
-        provision_veth_pair(primary, peer)?;
-    }
-
-    let iface = &resolution.iface;
-    let mut combined_xdp_bench = String::new();
-    for baseline in &baselines {
-        let mode_arg = baseline.mode.as_str();
-        let output = std::process::Command::new("xdp-bench")
-            .arg(mode_arg)
-            .arg(iface)
-            .output()
-            .map_err(|e| color_eyre::eyre::eyre!("xdp-bench invocation failed: {e}"))?;
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!(
-                "xdp-bench exited non-zero for mode={} iface={} ({}): {}",
-                mode_arg,
-                iface,
-                output.status,
-                stderr
-            );
-        }
-        combined_xdp_bench.push_str(&String::from_utf8_lossy(&output.stdout));
-        if !combined_xdp_bench.ends_with('\n') {
-            combined_xdp_bench.push('\n');
-        }
-    }
-
-    let candidates = parse_xdp_bench_output(&combined_xdp_bench).map_err(|e| {
-        color_eyre::eyre::eyre!(
-            "parse xdp-bench output: {e:?}\n--- xdp-bench stdout ---\n{combined_xdp_bench}"
-        )
-    })?;
-
-    let policy = GatePolicy::default();
-    match evaluate(&baselines, &candidates, &policy) {
-        GateOutcome::Pass => {
-            eprintln!("xdp-perf: pass — {} mode(s) within budget", baselines.len());
-            Ok(())
-        }
-        GateOutcome::Fail { breaches } => {
-            eprint!("{}", render_failure(&breaches));
-            bail!("xdp-perf gate failed: {} breach(es)", breaches.len());
-        }
-    }
-}
-
-/// Idempotently provision a veth pair `(primary, peer)` and bring
-/// both sides UP. Skips `ip link add` when `ip link show <primary>`
-/// already returns zero — a prior xdp-perf run on the same host
-/// (Lima session, CI runner, dev VM) leaves the pair in place;
-/// recreating it would tear down whatever the previous run left
-/// and is needless work.
-///
-/// Both sides are brought UP every call (cheap; idempotent).
-/// Native XDP attach against `<primary>` requires `<peer>` UP as
-/// well — otherwise the link state stays `LOWER_DOWN` and packet
-/// flow does not establish.
-///
-/// Requires `CAP_NET_ADMIN`. The Lima wrapper runs as root by
-/// default (`cargo xtask lima run --` invokes `sudo -E env`); the
-/// CI job runs `sudo -E env "PATH=$PATH" cargo xtask xdp-perf`.
-fn provision_veth_pair(primary: &str, peer: &str) -> Result<()> {
-    use xtask::perf_gate::xdp_perf_setup::{veth_create_argv, veth_link_up_argv, veth_show_argv};
-
-    let show_argv = veth_show_argv(primary);
-    let show = std::process::Command::new(&show_argv[0])
-        .args(&show_argv[1..])
-        .output()
-        .map_err(|e| color_eyre::eyre::eyre!("`ip link show {primary}` invocation failed: {e}"))?;
-
-    if show.status.success() {
-        eprintln!("xdp-perf: reusing existing veth pair (found {primary})");
-    } else {
-        let create_argv = veth_create_argv(primary, peer);
-        let create = std::process::Command::new(&create_argv[0])
-            .args(&create_argv[1..])
-            .output()
-            .map_err(|e| {
-            color_eyre::eyre::eyre!(
-                "`ip link add {primary} type veth peer name {peer}` invocation failed: {e}"
-            )
-        })?;
-        if !create.status.success() {
-            let stderr = String::from_utf8_lossy(&create.stderr);
-            bail!(
-                "`ip link add {primary} type veth peer name {peer}` exited non-zero ({}): {}",
-                create.status,
-                stderr.trim()
-            );
-        }
-        eprintln!("xdp-perf: created veth pair {primary} ↔ {peer}");
-    }
-
-    for side in [primary, peer] {
-        let up_argv = veth_link_up_argv(side);
-        let up =
-            std::process::Command::new(&up_argv[0]).args(&up_argv[1..]).output().map_err(|e| {
-                color_eyre::eyre::eyre!("`ip link set {side} up` invocation failed: {e}")
-            })?;
-        if !up.status.success() {
-            let stderr = String::from_utf8_lossy(&up.stderr);
-            bail!("`ip link set {side} up` exited non-zero ({}): {}", up.status, stderr.trim());
-        }
-    }
-
-    Ok(())
 }
 
 fn mutants(args: MutantsArgs) -> Result<()> {

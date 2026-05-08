@@ -1,6 +1,6 @@
 [alias]
 # Developer conveniences. xtask hosts build / test / dev orchestration
-# subcommands (`bpf-build`, `xdp-perf`, `integration-test vm`,
+# subcommands (`bpf-build`, `integration-test vm`,
 # `mutants`, `dst-lint`, `lima`, `hooks`, …); runtime tools (`dst`,
 # `openapi`, `overdrive`, `verifier-regress`) ship as binaries in
 # their owning crate and are invoked through `cargo run -p <crate>
@@ -15,15 +15,18 @@ dst              = "run -p overdrive-sim --bin dst --"
 openapi-gen      = "run -p overdrive-control-plane --bin openapi -- gen"
 openapi-check    = "run -p overdrive-control-plane --bin openapi -- check"
 overdrive        = "run -p overdrive-cli --bin overdrive --"
-# `verifier-regress` lives in overdrive-dataplane (not xtask) because
-# it must load the BPF object via aya, which xtask's deps cannot
-# include per `.claude/rules/development.md` § "xtask is build / test
-# / dev orchestration, NOT a runtime entry point".
+# `verifier-regress` and `xdp-perf` live in overdrive-dataplane (not
+# xtask) because both must load the BPF object via aya, which xtask's
+# deps cannot include per `.claude/rules/development.md` § "xtask is
+# build / test / dev orchestration, NOT a runtime entry point".
+# `xdp-perf` uses `BPF_PROG_TEST_RUN` with `repeat=N` and reads
+# `bpf_prog_info.run_time_ns` / `run_cnt` via aya's `ProgramInfo`
+# (kernel ≥5.8 with `BPF_ENABLE_STATS BPF_STATS_RUN_TIME`).
 verifier-regress = "run -p overdrive-dataplane --bin verifier_regress --"
+xdp-perf         = "run -p overdrive-dataplane --bin xdp_perf --"
 
 # Build / test orchestration shortcuts — wrappers over xtask subcommands.
 bpf-unit      = "run --package xtask -- bpf-unit"
-xdp-perf      = "run --package xtask -- xdp-perf"
 it-vm         = "run --package xtask -- integration-test vm"
 lint          = "clippy --workspace --all-targets --all-features -- -D warnings"
 fmt-check     = "fmt --all -- --check"

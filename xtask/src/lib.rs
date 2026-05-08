@@ -9,5 +9,4 @@
 pub mod dev_setup;
 pub mod dst_lint;
 pub mod mutants;
-pub mod perf_gate;
 pub mod yaml_free_cli;

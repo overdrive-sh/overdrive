@@ -27,12 +27,6 @@ pub mod loader;
 pub mod maps;
 pub mod swap;
 
-// Tier 4 verifier-complexity regression gate. Pure decision fn +
-// parsers; the shell-side wrapper is the
-// `crates/overdrive-dataplane/src/bin/verifier_regress.rs` binary
-// fronted by the `cargo verifier-regress` alias.
-pub mod verifier_budget;
-
 // Collision-free BackendId allocator per ADR-0046. Replaces the
 // multiplicative-hash derivation with a monotonic-counter allocator +
 // memo table, matching Cilium's IDAllocator pattern. Userspace-only.

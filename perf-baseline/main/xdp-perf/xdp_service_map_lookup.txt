@@ -1,0 +1,34 @@
+# XDP perf baseline — xdp_service_map_lookup
+#
+# Tier 4 throughput / mean-latency gate per
+# `.claude/rules/testing.md` § "XDP performance" — fail when
+# pps regresses by >5% OR mean_ns rises by >10% versus this
+# recorded baseline.
+#
+# # Why mean_ns, not p99_ns
+#
+# This gate reads `bpf_prog_info.run_time_ns` and `run_cnt` via
+# aya's `ProgramInfo` (kernel ≥5.8 with `BPF_ENABLE_STATS
+# BPF_STATS_RUN_TIME`). The kernel exposes only cumulative
+# run_time_ns / run_cnt, not per-invocation latency, so the gate
+# measures *mean* per-invocation cost (`run_time_ns / run_cnt`).
+# True p99 requires a custom BPF probe (out of scope today).
+#
+# # Why BPF_PROG_TEST_RUN, not xdp-trafficgen
+#
+# `BPF_PROG_TEST_RUN` with `repeat=N` runs the XDP program N
+# times in a tight kernel loop against a synthetic UDP packet.
+# No external tool, no veth pair, no interface attachment. More
+# deterministic than live-traffic measurement (no kernel
+# networking stack jitter). See
+# `docs/research/dataplane/xdp-trafficgen-einval-research.md`.
+#
+# # Recorded against
+#
+#   kernel:    6.8.0-111-generic   (Lima default; matrix row "6.6 LTS")
+#   tool:      cargo xdp-perf  (overdrive-dataplane/bin/xdp_perf.rs)
+#   driver:    BPF_PROG_TEST_RUN repeat=1000000
+#   commit:    initial measurement from Lima VM
+#   date:      2026-05-08
+
+prog=xdp_service_map_lookup pps=235000 mean_ns=2100

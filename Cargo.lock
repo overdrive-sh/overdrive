@@ -1870,6 +1870,7 @@ version = "0.0.0"
 dependencies = [
  "async-trait",
  "aya",
+ "clap",
  "color-eyre",
  "eyre",
  "libc",

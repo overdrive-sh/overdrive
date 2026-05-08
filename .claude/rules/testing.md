@@ -1359,7 +1359,7 @@ gate may pivot to `veristat` + its `peak_states` /
 expose — those are the only signal lost under the current path.
 
 **Where the gate lives.**
-`crates/overdrive-dataplane/src/bin/verifier_regress.rs` (the binary) +
+`crates/overdrive-dataplane/bin/verifier_regress.rs` (the binary) +
 `crates/overdrive-dataplane/src/verifier_budget.rs` (the pure decision
 fn). Invoked via the `cargo verifier-regress` alias. NOT in xtask,
 because xtask cannot depend on `overdrive-*` crates per

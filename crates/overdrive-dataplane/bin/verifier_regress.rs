@@ -38,7 +38,12 @@ use std::process::ExitCode;
 
 use color_eyre::eyre::{Result, WrapErr, bail};
 
-use overdrive_dataplane::verifier_budget::{
+#[allow(
+    dead_code,
+    reason = "gate module is binary-internal; some pub fns exist only for round-trip test coverage"
+)]
+mod verifier_budget;
+use verifier_budget::{
     BaselineRecord, GateOutcome, GatePolicy, MeasuredRecord, evaluate, parse_baseline_file,
     render_failure, render_measured,
 };

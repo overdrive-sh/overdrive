@@ -1,0 +1,20 @@
+# XDP perf baseline — xdp_reverse_nat_lookup
+#
+# Tier 4 throughput / mean-latency gate per
+# `.claude/rules/testing.md` § "XDP performance" — fail when
+# pps regresses by >5% OR mean_ns rises by >10% versus this
+# recorded baseline.
+#
+# See sibling `xdp_service_map_lookup.txt` for the rationale of
+# the `mean_ns` (vs `p99_ns`) signal source and the
+# BPF_PROG_TEST_RUN measurement path.
+#
+# # Recorded against
+#
+#   kernel:    6.8.0-111-generic   (Lima default; matrix row "6.6 LTS")
+#   tool:      cargo xdp-perf  (overdrive-dataplane/bin/xdp_perf.rs)
+#   driver:    BPF_PROG_TEST_RUN repeat=1000000
+#   commit:    initial measurement from Lima VM
+#   date:      2026-05-08
+
+prog=xdp_reverse_nat_lookup pps=241000 mean_ns=2050

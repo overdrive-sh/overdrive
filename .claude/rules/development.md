@@ -366,6 +366,49 @@ upstream prevention.
 
 ---
 
+## `src/` is production code — tooling binaries live in `bin/`
+
+`src/` contains the crate's library and production code surface.
+Tooling binaries — gates, generators, debug helpers — that import
+the crate to *exercise* it live under `bin/` at the crate root, not
+`src/bin/`. This keeps `src/` greppable as "what ships" and avoids
+polluting the library's module tree with gate/tool-only code.
+
+**Modules consumed only by `bin/` binaries belong in `bin/`, not in
+`src/`.** If a module (parsers, pure decision fns, helpers) has no
+library consumer — only tooling binaries use it — it is not
+production code and does not belong in the library surface. Each
+`[[bin]]` is a crate root; `mod foo;` resolves to sibling files in
+the same directory, so `bin/my_gate.rs` is found naturally by
+`bin/my_tool.rs` declaring `mod my_gate;`. No `#[path]` and no
+`mod.rs` needed.
+
+Layout:
+
+```
+crates/<crate>/
+├── src/           # production library code
+├── bin/           # tooling binaries + their private modules
+│   ├── <tool>.rs          # [[bin]] crate root
+│   └── <gate_logic>.rs    # mod declared by the binary
+├── tests/         # test entrypoints
+└── Cargo.toml     # [[bin]] entries with `path = "bin/<tool>.rs"`
+```
+
+Cargo auto-discovers `src/bin/` but NOT `bin/`. Every binary under
+`bin/` needs an explicit `[[bin]]` entry in `Cargo.toml`:
+
+```toml
+[[bin]]
+name = "my_tool"
+path = "bin/my_tool.rs"
+```
+
+Existing crates with `src/bin/` (`overdrive-sim`, `overdrive-control-plane`)
+migrate on touch — when you edit the binary, move it in the same commit.
+
+---
+
 ## xtask is build / test / dev orchestration, NOT a runtime entry point
 
 **Build/test/dev orchestration → xtask; runtime tools → their owning
@@ -1846,7 +1889,7 @@ Each kernel-side program lands across all four tiers:
 - **Tier 4 verifier-budget**: `perf-baseline/main/verifier-budget/veristat-<name>.txt`
   — instruction count baseline, ≤ 50 % of 1M-privileged ceiling.
   Enforced by `cargo verifier-regress` (binary lives in
-  `crates/overdrive-dataplane/src/bin/verifier_regress.rs`; reads
+  `crates/overdrive-dataplane/bin/verifier_regress.rs`; reads
   `bpf_prog_info.verified_insns` via aya, NOT veristat — see
   `.claude/rules/testing.md` § "Verifier complexity").
 - **Tier 1 (DST)**: not directly applicable to kernel-side code (DST
