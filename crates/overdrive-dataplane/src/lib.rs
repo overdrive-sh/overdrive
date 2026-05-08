@@ -33,6 +33,14 @@ pub mod swap;
 // fronted by the `cargo verifier-regress` alias.
 pub mod verifier_budget;
 
+// Collision-free BackendId allocator per ADR-0046. Replaces the
+// multiplicative-hash derivation with a monotonic-counter allocator +
+// memo table, matching Cilium's IDAllocator pattern. Userspace-only.
+// On non-Linux targets the sole consumer (`EbpfDataplane`) is behind
+// `#[cfg(target_os = "linux")]`, so the allocator appears unused.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+mod allocator;
+
 // Orphan-GC sweep over `BACKEND_MAP` (step 4 of ADR-0040 § 2's
 // 5-step swap orchestration). Linux-only — the module's
 // `#![cfg(target_os = "linux")]` elides the body on macOS without
@@ -185,6 +193,12 @@ pub struct EbpfDataplane {
     reverse_nat_map: parking_lot::Mutex<
         aya::maps::HashMap<aya::maps::MapData, crate::maps::BackendKeyPod, crate::maps::VipPod>,
     >,
+
+    /// Collision-free `BackendId` allocator per ADR-0046. Replaces
+    /// the multiplicative-hash derivation with a monotonic counter +
+    /// memo table. Lock held briefly during `update_service` —
+    /// dropped before any `.await`.
+    backend_id_alloc: parking_lot::Mutex<crate::allocator::BackendIdAllocator>,
 
     /// Per-service `BackendId` set tracker. Used by step 4 of the
     /// 5-step atomic swap (orphan GC) to compute the union of every
@@ -512,6 +526,7 @@ impl EbpfDataplane {
             service_map,
             backend_map: parking_lot::Mutex::new(backend_map),
             reverse_nat_map: parking_lot::Mutex::new(reverse_nat_map),
+            backend_id_alloc: parking_lot::Mutex::new(crate::allocator::BackendIdAllocator::new()),
             service_backends: parking_lot::Mutex::new(std::collections::BTreeMap::new()),
             service_reverse_nat_keys: parking_lot::Mutex::new(std::collections::BTreeMap::new()),
             pin_dir: pin_dir.to_path_buf(),
@@ -890,30 +905,23 @@ impl Dataplane for EbpfDataplane {
         let service_key = ServiceKey { vip_host: u32::from(vip), port_host: vip_port, _pad: 0 };
 
         // Step 1 — Upsert each backend into BACKEND_MAP. BackendId
-        // is derived from (IPv4, port) — host-order u32 of the IP
-        // shifted up by 16 bits, OR'd with the port, giving a stable
-        // 48-bit-shaped identifier in a 32-bit space (the high 16
-        // bits of the IP collide with the port, which is acceptable
-        // for the slot-set contract — slot lookups go through the
-        // inner ARRAY, not BackendId reverse-mapping). A future
-        // BackendId allocator can replace this; the swap shape
-        // doesn't depend on the specific derivation.
+        // is assigned by the monotonic-counter allocator per ADR-0046.
+        // Same (ip, port, proto) yields the same BackendId across
+        // updates (memo-table hit); orphan GC removes IDs not in the
+        // new set.
+        //
+        // Phase 2.2 hardcodes proto = TCP because the trait surface
+        // does not yet carry per-service protocol (GH #163).
+        let proto = Proto::Tcp.as_u8();
         let mut backend_ids: Vec<u32> = Vec::with_capacity(backends.len());
         {
-            // Lock is held only for the BACKEND_MAP populate loop;
-            // dropped at end of this block (the `{ ... }` braces) before
-            // any further work. The fn-level `#[allow(
-            // clippy::significant_drop_tightening)]` covers this.
+            // Locks held only for the BACKEND_MAP populate loop;
+            // dropped at end of this block before any further work.
             let mut backend_map = self.backend_map.lock();
+            let mut alloc = self.backend_id_alloc.lock();
             for backend in &backends {
                 let pod = BackendEntryPod::from_backend(backend)?;
-                // Use a deterministic ID derived from IP+port. Same
-                // (ip, port) yields the same BackendId across
-                // updates; orphan GC removes IDs not in the new set.
-                let backend_id: u32 = pod
-                    .ipv4_host
-                    .wrapping_mul(2_654_435_761)
-                    .wrapping_add(u32::from(pod.port_host));
+                let backend_id: u32 = alloc.allocate(pod.ipv4_host, pod.port_host, proto).get();
                 backend_map
                     .insert(backend_id, pod, 0)
                     .map_err(|e| DataplaneError::LoadFailed(format!("BACKEND_MAP insert: {e}")))?;
@@ -965,13 +973,11 @@ impl Dataplane for EbpfDataplane {
             .iter()
             .filter_map(|backend| {
                 BackendEntryPod::from_backend(backend).ok().and_then(|pod| {
-                    let bid_raw: u32 = pod
-                        .ipv4_host
-                        .wrapping_mul(2_654_435_761)
-                        .wrapping_add(u32::from(pod.port_host));
-                    overdrive_core::id::BackendId::new(bid_raw)
-                        .ok()
-                        .map(|bid| (bid, backend.weight.max(1)))
+                    // Memo hit — every endpoint was already allocated in
+                    // Step 1's BACKEND_MAP populate loop above.
+                    let bid =
+                        self.backend_id_alloc.lock().allocate(pod.ipv4_host, pod.port_host, proto);
+                    Some((bid, backend.weight.max(1)))
                 })
             })
             .collect();
@@ -1043,9 +1049,21 @@ impl Dataplane for EbpfDataplane {
         };
         {
             let mut backend_map = self.backend_map.lock();
-            crate::gc::sweep_orphan_backends(&mut backend_map, &live_ids).map_err(|e| {
-                DataplaneError::LoadFailed(format!("BACKEND_MAP orphan-GC sweep: {e}"))
-            })?;
+            let removed =
+                crate::gc::sweep_orphan_backends(&mut backend_map, &live_ids).map_err(|e| {
+                    DataplaneError::LoadFailed(format!("BACKEND_MAP orphan-GC sweep: {e}"))
+                })?;
+            // Release removed ids from the allocator memo table
+            // (ADR-0046). Lock acquired after backend_map is done —
+            // same brief-hold discipline.
+            if !removed.is_empty() {
+                let mut alloc = self.backend_id_alloc.lock();
+                for removed_id in &removed {
+                    if let Ok(bid) = overdrive_core::id::BackendId::new(*removed_id) {
+                        alloc.release(bid);
+                    }
+                }
+            }
         }
 
         // Step 4b — REVERSE_NAT_MAP lockstep populate + purge
