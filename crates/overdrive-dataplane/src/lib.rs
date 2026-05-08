@@ -987,6 +987,42 @@ impl Dataplane for EbpfDataplane {
             })?;
         }
 
+        // Step 2b — Pre-populate REVERSE_NAT_MAP for new backends.
+        //
+        // MUST land BEFORE the SERVICE_MAP swap (step 3) so the
+        // reverse path is ready before any packet can be forwarded
+        // to a new backend. Without this ordering, a response from
+        // a newly-added backend arrives at xdp_reverse_nat_lookup,
+        // misses the REVERSE_NAT_MAP, and escapes with the backend
+        // IP as source — breaking the VIP abstraction.
+        //
+        // Inserting with BPF_ANY is idempotent: re-adding an
+        // existing backend is a no-op update. Stale entries for
+        // removed backends are purged in step 5 (after the swap),
+        // which is safe because removed backends no longer receive
+        // forward-path traffic.
+        let new_keys: std::collections::BTreeSet<BackendKeyPod> = backends
+            .iter()
+            .filter_map(|backend| match backend.addr.ip() {
+                std::net::IpAddr::V4(v4) => Some(BackendKeyPod {
+                    ip_host: u32::from(v4),
+                    port_host: backend.addr.port(),
+                    proto: Proto::Tcp.as_u8(),
+                    _pad: 0,
+                }),
+                std::net::IpAddr::V6(_) => None,
+            })
+            .collect();
+        let vip_value = VipPod { ip_host: u32::from(vip), port_host: vip_port, _pad: 0 };
+        {
+            let mut reverse_nat_map = self.reverse_nat_map.lock();
+            for key in &new_keys {
+                reverse_nat_map.insert(key, vip_value, 0).map_err(|e| {
+                    DataplaneError::LoadFailed(format!("REVERSE_NAT_MAP insert: {e}"))
+                })?;
+            }
+        }
+
         // Step 3 — Atomic outer-pointer update. Single
         // bpf_map_update_elem syscall; kernel ref-counts the new
         // inner map and the old; concurrent XDP readers see one or
@@ -1039,47 +1075,18 @@ impl Dataplane for EbpfDataplane {
             }
         }
 
-        // Step 4b — REVERSE_NAT_MAP lockstep populate + purge
-        // (Slice 05-04, S-2.2-18).
+        // Step 5 — REVERSE_NAT_MAP stale-entry purge (S-2.2-18).
         //
-        // For every backend in the new set, install
-        // `(backend_ip, backend_port, proto=TCP)` → `(vip_ip, vip_port)`
-        // so the `xdp_reverse_nat_lookup` program (attached on the
-        // backend-facing veth ingress per ADR-0045) can rewrite
-        // the source 5-tuple of response packets back to the VIP.
-        //
-        // For backends that were in the PRIOR set but are not in
-        // the new set, delete the corresponding REVERSE_NAT_MAP
-        // entry — without this, a late response from a removed
-        // backend would still be rewritten to the VIP, leaking
-        // service identity across removals (the architectural
-        // invariant S-2.2-18 pins).
+        // New entries already landed in step 2b (before the
+        // SERVICE_MAP swap). This step purges entries for backends
+        // that left this service and are not referenced by any
+        // other active service. Runs after the swap because stale
+        // reverse-NAT entries are harmless (removed backends no
+        // longer receive forward-path traffic) while the pre-swap
+        // insert ordering is safety-critical.
         //
         // Phase 2.2 hardcodes `proto = TCP` because the trait
-        // surface does not yet carry per-service protocol. UDP
-        // services route forward-path correctly today (SERVICE_MAP
-        // keys carry `proto`) but their responses miss this map
-        // and leak the backend IP back to the client. The fix is
-        // a `Dataplane::update_service` trait-surface change to
-        // thread the per-service `Proto` through; tracked in
-        // GH #163.
-        // Per `.claude/rules/development.md` § "Persist inputs, not
-        // derived state" — the per-service tracker carries the
-        // BackendKeyPods themselves (the authoritative inputs), not
-        // a derived "should-be-deleted" flag.
-        let new_keys: std::collections::BTreeSet<BackendKeyPod> = backends
-            .iter()
-            .filter_map(|backend| match backend.addr.ip() {
-                std::net::IpAddr::V4(v4) => Some(BackendKeyPod {
-                    ip_host: u32::from(v4),
-                    port_host: backend.addr.port(),
-                    proto: Proto::Tcp.as_u8(),
-                    _pad: 0,
-                }),
-                std::net::IpAddr::V6(_) => None,
-            })
-            .collect();
-        let vip_value = VipPod { ip_host: u32::from(vip), port_host: vip_port, _pad: 0 };
+        // surface does not yet carry per-service protocol (GH #163).
         let (prior_keys, live_nat_keys): (
             std::collections::BTreeSet<BackendKeyPod>,
             std::collections::BTreeSet<BackendKeyPod>,
@@ -1092,19 +1099,6 @@ impl Dataplane for EbpfDataplane {
         };
         {
             let mut reverse_nat_map = self.reverse_nat_map.lock();
-            // Insert / update every key in the new set. `insert`
-            // with flags=0 (BPF_ANY) accepts both "new" and
-            // "existing" — idempotent.
-            for key in &new_keys {
-                reverse_nat_map.insert(key, vip_value, 0).map_err(|e| {
-                    DataplaneError::LoadFailed(format!("REVERSE_NAT_MAP insert: {e}"))
-                })?;
-            }
-            // Purge keys that left THIS service AND are absent from
-            // the global union of all active services' key sets.
-            // Without the cross-service check, removing a backend
-            // from one service would delete the reverse-NAT entry
-            // even when another service still routes through it.
             for stale in prior_keys.difference(&new_keys) {
                 if live_nat_keys.contains(stale) {
                     continue;
@@ -1120,7 +1114,7 @@ impl Dataplane for EbpfDataplane {
             }
         }
 
-        // Step 5 — Old inner map released by aya's ref-counting once
+        // Step 6 — Old inner map released by aya's ref-counting once
         // it goes out of scope in the kernel-side program tail. The
         // userspace `OwnedFd` we used to populate the new inner map
         // (`new_inner`) drops here, decrementing the userspace-side

@@ -10,12 +10,13 @@
 //!
 //! This is the DST mirror of the production `EbpfDataplane`'s
 //! `REVERSE_NAT_MAP` lockstep contract: the userspace-side
-//! `EbpfDataplane::update_service` writes / removes `REVERSE_NAT_MAP`
-//! entries in the same critical section that swaps the `SERVICE_MAP`
-//! outer-map slot. Per `.claude/rules/development.md`
+//! `EbpfDataplane::update_service` writes `REVERSE_NAT_MAP` entries
+//! for new backends BEFORE the `SERVICE_MAP` swap, and purges stale
+//! entries AFTER. Per `.claude/rules/development.md`
 //! § *Production code is not shaped by simulation*, the `SimDataplane`
 //! mirrors this with a single mutex acquisition guarding both maps —
-//! observers cannot witness a partial update.
+//! observers cannot witness a forward-path entry without a matching
+//! reverse-NAT entry.
 //!
 //! Wired into the existing `Invariant` enum's exhaustive match at
 //! `crates/overdrive-sim/src/invariants/mod.rs` as additive variant
