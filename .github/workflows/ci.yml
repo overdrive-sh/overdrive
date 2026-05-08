@@ -330,6 +330,7 @@ jobs:
       # VM (early step failure) doesn't fail the post-cleanup.
       - name: Stop Lima VM (release disk before cache save)
         if: always()
+        timeout-minutes: 1
         run: limactl stop overdrive || true
 
   # -------------------------------------------------------------------
@@ -444,6 +445,7 @@ jobs:
 
       - name: Stop Lima VM (release disk before cache save)
         if: always()
+        timeout-minutes: 1
         run: limactl stop overdrive || true
 
   # -------------------------------------------------------------------
@@ -843,6 +845,7 @@ jobs:
 
       - name: Stop Lima VM (release disk before cache save)
         if: always()
+        timeout-minutes: 1
         run: limactl stop overdrive || true
 
   # -------------------------------------------------------------------
@@ -984,6 +987,7 @@ jobs:
 
       - name: Stop Lima VM (release disk before cache save)
         if: always()
+        timeout-minutes: 1
         run: limactl stop overdrive || true
 
   # -------------------------------------------------------------------
@@ -1102,6 +1106,7 @@ jobs:
 
       - name: Stop Lima VM (release disk before cache save)
         if: always()
+        timeout-minutes: 1
         run: limactl stop overdrive || true
 
   # -------------------------------------------------------------------
@@ -1215,6 +1220,7 @@ jobs:
 
       - name: Stop Lima VM (release disk before cache save)
         if: always()
+        timeout-minutes: 1
         run: limactl stop overdrive || true
 
   # -------------------------------------------------------------------
@@ -1319,5 +1325,6 @@ jobs:
 
       - name: Stop Lima VM (release disk before cache save)
         if: always()
+        timeout-minutes: 1
         run: limactl stop overdrive || true
 
