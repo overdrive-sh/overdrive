@@ -238,7 +238,7 @@ provision:
       fi
       . "${HOME}/.cargo/env"
       rustup component add rustfmt clippy rust-src || true
-      rustup toolchain install nightly --component rust-src --profile minimal || true
+      rustup toolchain install nightly --component rust-src --component clippy --profile minimal || true
 
       # cargo-binstall pulls prebuilt binaries when crates publish them
       # (cargo-nextest, cargo-deny, cargo-mutants, bpf-linker all do as
