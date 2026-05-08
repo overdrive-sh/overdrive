@@ -15,6 +15,18 @@
 //! `tokio::net::*`, `Instant::now`, or `rand::thread_rng`.
 
 #![allow(clippy::missing_errors_doc, clippy::missing_panics_doc, dead_code)]
+// Phase 2.2 RED scaffolds in `invariants/mod.rs` carry multi-line
+// rustdoc paragraphs whose continuation form lacks blank-line
+// separation; the canonical fixed shape lands when DELIVER ships
+// the invariant evaluator bodies. Per `.claude/rules/testing.md` §
+// "Production-side scaffolds", crates with concurrent scaffolds
+// gate the lint via `expect` so the gate self-removes the moment
+// every scaffold goes GREEN. Strip when Slice 08 closes the last
+// scaffold.
+#![expect(
+    clippy::doc_lazy_continuation,
+    reason = "Phase 2.2 RED scaffolds; lints will self-trip when scaffolds go GREEN"
+)]
 
 pub mod adapters;
 pub mod harness;

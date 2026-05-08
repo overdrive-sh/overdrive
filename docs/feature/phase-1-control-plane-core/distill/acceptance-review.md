@@ -278,7 +278,7 @@ parametrizing only the thin adapter layer:
 | `ContentHash::of(archived_bytes)` | Used by handler describe + CLI |
 | `ReconcilerName::from_str` validation | `ReconcilerRuntime::register` |
 | libSQL path derivation (canonicalise + concat + check) | `libsql_provisioner::provision_db_path` |
-| OpenAPI schema byte-comparison | `cargo xtask openapi-check` |
+| OpenAPI schema byte-comparison | `cargo openapi-check` |
 | `to_response` error mapping | Axum handler error boundary |
 | CLI error rendering (what/why/how-to-fix) | `reqwest` error → CLI output |
 

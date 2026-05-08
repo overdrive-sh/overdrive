@@ -265,11 +265,9 @@ pub enum CgroupPreflightError {
 /// `geteuid()`. Tests pass a tempdir + arbitrary UID so they can
 /// reproduce each failure shape without touching `/sys/fs/cgroup`.
 ///
-/// On Linux this performs real filesystem reads of `/proc/filesystems`
+/// This performs real filesystem reads of `/proc/filesystems`
 /// (always — it is the source of truth for cgroup v2 availability) and
 /// of `<cgroup_root>/cgroup.controllers` etc. (under the test root).
-/// On non-Linux this is unreachable in production because the boot
-/// path only invokes the pre-flight under `#[cfg(target_os = "linux")]`.
 ///
 /// `proc_self_cgroup` names the file from which the *enclosing* slice
 /// path is discovered for step 4 per ADR-0028 §4 step 4 (production:
@@ -477,7 +475,6 @@ fn parse_cgroup_v2_path(contents: &str) -> Option<&str> {
 /// # Errors
 ///
 /// See [`CgroupPreflightError`] variants.
-#[cfg(target_os = "linux")]
 pub fn run_preflight() -> Result<(), CgroupPreflightError> {
     // SAFETY: `geteuid` is a POSIX-defined thin syscall wrapper with
     // no preconditions and no failure modes; it cannot panic, return
@@ -493,15 +490,6 @@ pub fn run_preflight() -> Result<(), CgroupPreflightError> {
         Path::new("/proc/filesystems"),
         Path::new("/proc/self/cgroup"),
     )
-}
-
-/// Non-Linux stub — pre-flight is only invoked under
-/// `#[cfg(target_os = "linux")]` in the boot path; this signature
-/// exists so tests in the `cgroup_preflight` module compile on macOS.
-#[cfg(not(target_os = "linux"))]
-#[allow(clippy::unnecessary_wraps, clippy::missing_const_for_fn)]
-pub fn run_preflight() -> Result<(), CgroupPreflightError> {
-    Ok(())
 }
 
 /// Read `uname -r` analogue. Returns "unknown" if the kernel-version

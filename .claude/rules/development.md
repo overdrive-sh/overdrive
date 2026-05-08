@@ -366,6 +366,194 @@ upstream prevention.
 
 ---
 
+## `src/` is production code — tooling binaries live in `bin/`
+
+`src/` contains the crate's library and production code surface.
+Tooling binaries — gates, generators, debug helpers — that import
+the crate to *exercise* it live under `bin/` at the crate root, not
+`src/bin/`. This keeps `src/` greppable as "what ships" and avoids
+polluting the library's module tree with gate/tool-only code.
+
+**Modules consumed only by `bin/` binaries belong in `bin/`, not in
+`src/`.** If a module (parsers, pure decision fns, helpers) has no
+library consumer — only tooling binaries use it — it is not
+production code and does not belong in the library surface. Each
+`[[bin]]` is a crate root; `mod foo;` resolves to sibling files in
+the same directory, so `bin/my_gate.rs` is found naturally by
+`bin/my_tool.rs` declaring `mod my_gate;`. No `#[path]` and no
+`mod.rs` needed.
+
+Layout:
+
+```
+crates/<crate>/
+├── src/           # production library code
+├── bin/           # tooling binaries + their private modules
+│   ├── <tool>.rs          # [[bin]] crate root
+│   └── <gate_logic>.rs    # mod declared by the binary
+├── tests/         # test entrypoints
+└── Cargo.toml     # [[bin]] entries with `path = "bin/<tool>.rs"`
+```
+
+Cargo auto-discovers `src/bin/` but NOT `bin/`. Every binary under
+`bin/` needs an explicit `[[bin]]` entry in `Cargo.toml`:
+
+```toml
+[[bin]]
+name = "my_tool"
+path = "bin/my_tool.rs"
+```
+
+Existing crates with `src/bin/` (`overdrive-sim`, `overdrive-control-plane`)
+migrate on touch — when you edit the binary, move it in the same commit.
+
+---
+
+## xtask is build / test / dev orchestration, NOT a runtime entry point
+
+**Build/test/dev orchestration → xtask; runtime tools → their owning
+crate.** xtask exists to drive cargo / rustc / kernel build artifacts
+on behalf of the workspace; it does not exist to host binaries that
+import the platform's crates to exercise them.
+
+### Why this matters
+
+xtask's `[dependencies]` graph is a build-time compile chain. Every
+crate listed there is compiled (and its `build.rs` executed) before
+any xtask subcommand can run. When a runtime crate is added to that
+list, its `build.rs` is dragged into xtask's compile chain — and if
+that `build.rs` fails fast on a missing artifact whose *only*
+producer is itself an xtask subcommand, the build pipeline deadlocks
+on a clean tree:
+
+> `xtask` depends on `overdrive-sim` (for an in-process `Harness`).
+> `overdrive-sim` depends on `overdrive-dataplane` (for one pure
+> function). `overdrive-dataplane`'s `build.rs` is
+> `#[cfg(target_os = "linux")]` and hard-fails when
+> `target/bpf/overdrive_bpf.o` is missing. Compiling `xtask` inside
+> Lima therefore requires the BPF object — and `cargo xtask
+> bpf-build` is what produces it. Chicken, egg, exit 1.
+
+This section exists because the failure mode is silent until somebody
+nukes their `target/` dir on a clean tree. The next contributor wires
+the same shape and the chicken-and-egg returns. The rule prevents the
+recurrence. See the commit history of `xtask/Cargo.toml` for the
+landed fix (relocations of `dst` and `openapi` binaries out of
+xtask, plus the move of pure `maglev` modules from
+`overdrive-dataplane` to `overdrive-core` to break the
+`overdrive-sim → overdrive-dataplane` edge).
+
+### What stays in xtask
+
+Build / test / dev orchestration subcommands — tasks *about* the
+codebase, consuming source / producing build artifacts. The canonical
+list as of this PR:
+
+`bpf-build`, `bpf-clippy`, `bpf-unit`, `integration-test vm`,
+`verifier-regress`, `xdp-perf`, `mutants`, `dst-lint`,
+`yaml-free-cli`, `ci`, `lima`, `hooks`, `mcp`, `dev-setup`.
+
+These are allowed to depend on cargo / rustc / kernel toolchain
+machinery. They MUST NOT depend on `overdrive-*` crates.
+
+### What moves out of xtask
+
+Runtime tools that import the platform's crates to *exercise* them.
+Today:
+
+- `dst` — the DST harness binary. Lives at
+  `crates/overdrive-sim/src/bin/dst.rs`; subprocess tests live at
+  `crates/overdrive-sim/tests/integration/`.
+- `openapi` — the OpenAPI generator/gate. Library at
+  `crates/overdrive-control-plane/src/openapi.rs` (typed
+  `OpenApiError`); binary at
+  `crates/overdrive-control-plane/src/bin/openapi.rs`; acceptance
+  test at
+  `crates/overdrive-control-plane/tests/integration/openapi_gate.rs`.
+
+Future runtime tools (scenario runners, simulation snapshots,
+debug-shell variants) ship as binaries in their owning crate — never
+as xtask subcommands.
+
+### User-facing surface
+
+Cargo aliases in `.cargo/config.toml`, never xtask wrappers. Pattern:
+
+```
+<tool> = "run -p <crate> --bin <bin> --"
+```
+
+Worked example, post-move:
+
+```
+dst         = "run -p overdrive-sim --bin dst --"
+openapi-gen = "run -p overdrive-control-plane --bin openapi -- generate"
+openapi-check = "run -p overdrive-control-plane --bin openapi -- check"
+```
+
+Direct invocation always works too —
+`cargo run -p overdrive-sim --bin dst -- --seed 1234`. The alias is
+for ergonomics; the binary is the SSOT.
+
+### Decision test for new tools
+
+Two questions, in order:
+
+1. Does it consume cargo / rustc / kernel build artifacts to
+   produce a build / test / lint result? → **xtask subcommand.**
+2. Does it import `overdrive-{core,sim,control-plane,dataplane,host,
+   worker,…}` to *exercise* the platform? → **a binary in that
+   crate's `src/bin/`, fronted by a cargo alias.**
+
+If both answers are yes, the tool has two concerns and should be
+split into two binaries.
+
+### What xtask's `[dependencies]` MUST NOT contain
+
+Any `overdrive-*` crate. Adding such a dep is exactly the failure
+mode this rule prevents. The xtask `Cargo.toml` carries an inline
+comment naming this rule above its `[dependencies]` block; the
+comment is the active enforcement surface, and the lint of last
+resort is:
+
+```bash
+cargo tree -p xtask | rg overdrive-
+```
+
+This must return empty. If it doesn't, the dep graph has regressed
+and the bootstrap chain is at risk.
+
+The artifact-path rename that landed alongside this rule
+(`target/xtask/dst-*` → `target/dst/*`,
+`target/xtask/bpf-objects/overdrive_bpf.o` → `target/bpf/overdrive_bpf.o`)
+reflects the same separation: artifacts produced by runtime tools
+live under their own top-level path, not under `target/xtask/`.
+Mutants outputs (`target/xtask/mutants*`) stay — `mutants` is a
+genuine xtask subcommand and owns that path.
+
+### Symptom signals during review
+
+- A new `Task::*` variant in `xtask/src/main.rs` whose dispatch arm
+  destructures runtime-crate types (`SimHarness`, `OpenApiSpec`,
+  reconciler `View` shapes, etc.).
+- A `pub mod foo` in `xtask/src/lib.rs` whose body imports an
+  `overdrive-*` crate.
+- An `overdrive-*` line in `xtask/Cargo.toml [dependencies]`. The
+  comment block above the deps says "MUST NOT contain"; honor it.
+- A `.cargo/config.toml` alias of the form
+  `foo = "run --package xtask -- foo"` for a runtime-shaped tool.
+  Compare against the post-move shape:
+  `dst = "run -p overdrive-sim --bin dst --"`. The first form drags
+  the entire xtask compile chain into the runtime tool's startup
+  path; the second resolves directly to the owning crate.
+
+This rule is a complement to ADR-0003 (crate-class taxonomy), not a
+replacement. ADR-0003 governs what kind of crate something is; this
+rule governs which crate a given binary lives in once that taxonomy
+is fixed.
+
+---
+
 ## Production code is not shaped by simulation
 
 **Production code MUST NOT carry extra logic, extra arms, extra yields,
@@ -439,6 +627,121 @@ call site, answer:
 
 The boundary between production and simulation is load-bearing. Erode
 it once and every future call site inherits the erosion.
+
+---
+
+## Trait definitions specify behavior, not just signature
+
+**A trait is a contract, and the contract is the SSOT.** Every method
+on a port trait (`Clock`, `Transport`, `Dataplane`, `IntentStore`,
+`ObservationStore`, `Driver`, `Llm`, `Reconciler`, …) MUST carry a
+rustdoc block that pins the *observable behavior* every adapter is
+required to implement — not just the type signature, not just an
+English description of what the method "does."
+
+Type signatures specify shape; they do not specify semantics.
+`fn update_service(&self, vip: Ipv4Addr, backends: Vec<Backend>) ->
+Result<(), DataplaneError>` says "takes a VIP and a list of backends,
+returns an error or unit." It does NOT say what `update_service(vip,
+vec![])` means, what the post-state of `service_backends(vip)` should
+be, or whether reverse-NAT entries are purged. When the contract is
+implicit, every adapter ships a private interpretation — and they
+drift the moment one of them is patched without the others.
+
+This rule is the *upstream* of § "Production code is not shaped by
+simulation": that rule governs implementation shape; this one governs
+the contract both implementations must honor. Without a written
+contract, "production and sim must observe the same behavior" is a
+slogan, not an enforceable property.
+
+### What every trait-method docstring must specify
+
+The four load-bearing properties:
+
+1. **Preconditions** — what the caller must guarantee about the
+   inputs. "VIP must be IPv4," "backends must be non-empty," "key
+   must have been previously registered." If a precondition can be
+   violated, the violation MUST map to a typed error variant; do not
+   defer to "implementation may panic."
+2. **Postconditions** — what the caller can rely on after the call
+   returns `Ok(_)`. State the *observable* effect, not the
+   implementation: "after return, `service_backends(vip)` returns the
+   passed `backends` slice in insertion order," not "we write to the
+   `services` map."
+3. **Edge cases** — every degenerate input the signature permits.
+   Empty collections, zero values, `None`, idempotent re-application,
+   re-registration, removal of an absent key. Each gets a sentence
+   pinning the contract: "passing `backends.is_empty()` removes the
+   VIP from the dataplane entirely; `service_backends(vip)` returns
+   `None` after return." If the trait author cannot say what an edge
+   case means, the edge case should be made unrepresentable (a
+   `NonEmpty<Backend>` newtype, a `RegisterService` / `RemoveService`
+   sum type, …) rather than left under-specified.
+4. **Observable invariants** — the cross-method properties adapters
+   must preserve. "After `update_service(vip, [b1, b2])`, every
+   reverse-NAT key derived from b1 / b2 maps to `vip`. After
+   `update_service(vip, [])`, no reverse-NAT key derived from any
+   prior backend of `vip` is reachable." These are the properties
+   the DST equivalence harness asserts on; if they are not written,
+   they cannot be tested.
+
+### Why the contract goes in the trait, not in one adapter's docstring
+
+The trait is the only place every adapter author reads. A contract
+documented on `EbpfDataplane::update_service` is invisible to whoever
+writes the next sim adapter, the next mock, the next test double; a
+contract documented on the `Dataplane` trait method itself is the one
+artifact every implementation MUST consult. When two adapters diverge
+on an edge case, the question is always "what does the trait say?"
+— if the trait says nothing, the divergence is a contract gap, not
+an adapter bug.
+
+### Symptom signals during review
+
+- A trait method whose docstring is one sentence describing what it
+  "does" (`/// Update the service backends.`) with no edge-case
+  language. Reject — every degenerate input the signature permits
+  must be pinned.
+- Two adapter implementations of the same trait method whose
+  observable behavior diverges on the same call (`update_service(vip,
+  vec![])` returns `Some(vec![])` from one and `None` from the other,
+  per the SimDataplane vs EbpfDataplane drift in PR review of step
+  03-XX). The bug is in the trait contract, not in either adapter —
+  fix the trait docstring first, then bring the adapters into line.
+- A precondition expressed as a runtime panic (`assert!(!backends.
+  is_empty())`) instead of a typed error variant or a non-empty
+  newtype. Reject — preconditions are part of the contract; the
+  type system enforces them when possible, the typed error surface
+  enforces them otherwise. Panics are not a contract.
+- A docstring that describes the *implementation* ("writes to the
+  `services` BTreeMap") rather than the *observable effect* ("after
+  return, `service_backends(vip)` reflects the passed backends").
+  The implementation is per-adapter; the contract is universal.
+
+### The DST equivalence test is the structural guard
+
+Once the contract is written, the structural defense against future
+drift is a DST harness that drives every adapter implementing the
+trait through the same sequence of calls and asserts observable
+equivalence at every step. The contract is the *spec*; the
+equivalence test is the *enforcement*. A contract without a test
+that exercises every clause is documentation, not a guarantee.
+
+In practice, every port trait whose contract differs across adapters
+in any non-trivial way (`Dataplane`, `IntentStore`, `Driver`,
+`ObservationStore`) ships a `tests/integration/<trait>_equivalence.rs`
+that drives both the host adapter and the sim adapter through the
+same sequence and asserts on observable state through the trait's
+own accessors (or, where necessary, through accessors documented as
+"part of the contract for testing purposes"). When the equivalence
+test fails, exactly one of the contract / host adapter / sim adapter
+is wrong; the test isolates which.
+
+This is the load-bearing pattern: the trait's docstring is the
+contract; the equivalence test is the enforcement; the per-adapter
+implementation is the consequence. The pattern degrades the moment
+the docstring is allowed to be vague, because then the equivalence
+test cannot be written.
 
 ---
 
@@ -970,6 +1273,32 @@ a reconciler.
 > errors," you want `cargo check`. If you need the binary, reach for
 > the xtask wrapper that already knows how to produce it.
 
+> **On macOS, every `cargo check` must go through Lima.**
+>
+> `cargo check` is **blocked** on macOS by a pre-tool hook
+> (`.claude/hooks/block-bare-cargo-check.ts`) unless it is already
+> wrapped in `cargo xtask lima run --`. On Linux the hook is a no-op
+> — the host IS the canonical compile environment.
+>
+> **Rewrite your command before submitting it (macOS):**
+>
+> | ❌ don't | ✅ do |
+> |---|---|
+> | `cargo check` | `cargo xtask lima run -- cargo check` |
+> | `cargo check -p CRATE` | `cargo xtask lima run -- cargo check -p CRATE` |
+> | `cargo check --workspace` | `cargo xtask lima run -- cargo check --workspace` |
+> | `cargo check --all-targets` | `cargo xtask lima run -- cargo check --all-targets` |
+> | `cargo check --features X` | `cargo xtask lima run -- cargo check --features X` |
+>
+> **Why:** typecheck signal must match the canonical compile
+> environment. macOS host rustc resolves `#[cfg(target_os = "linux")]`
+> items differently, may miss conditional dependencies, and skips
+> `build.rs` steps gated on Linux. A green `cargo check` on macOS
+> without Lima is not the same signal as a green check inside Lima —
+> and the next Lima-side compile diverges silently. The same
+> rationale governs `cargo nextest run` and `cargo clippy` on macOS;
+> see § "Running tests — Lima VM" in `.claude/rules/testing.md`.
+
 ## Committing a focused subset
 
 The lefthook pre-commit pipeline auto-stages modified files into the
@@ -1265,6 +1594,12 @@ let digest = sha256(&archived);
   "Workspace convention" for the full story; an xtask `#[test]`
   enforces the rule mechanically (`xtask::mutants::tests::every_
   workspace_member_declares_integration_tests_feature`).
+- **`xtask/Cargo.toml [dependencies]` MUST NOT contain any
+  `overdrive-*` crate.** xtask is build / test / dev orchestration;
+  runtime tools live in their owning crate's `src/bin/` and are
+  fronted by cargo aliases. See § "xtask is build / test / dev
+  orchestration, NOT a runtime entry point" above for the bootstrap
+  RCA and the decision test for new tools.
 
 ### Newtypes — STRICT by default
 
@@ -1348,6 +1683,359 @@ Exception: full paths only to disambiguate two types with the same name:
 use overdrive_core::JobId;
 use legacy::JobId as LegacyJobId;
 ```
+
+---
+
+## aya-rs XDP / TC kernel-side patterns
+
+These idioms govern every kernel-side eBPF program in `overdrive-bpf`. They
+are sourced from the upstream aya book (https://aya-rs.dev/book/programs/xdp.html)
+and adapted to project conventions. The verifier rejects programs that
+deviate from these shapes; treat them as load-bearing.
+
+### `ptr_at` — bounds-checked pointer access (canonical helper)
+
+Every kernel-side program MUST go through this helper to dereference packet
+data. Direct casting is rejected by the verifier and unsafe regardless.
+
+```rust
+#[inline(always)]
+unsafe fn ptr_at<T>(ctx: &XdpContext, offset: usize) -> Result<*const T, ()> {
+    let start = ctx.data();
+    let end = ctx.data_end();
+    let len = mem::size_of::<T>();
+
+    if start + offset + len > end {
+        return Err(());
+    }
+
+    let ptr = (start + offset) as *const T;
+    Ok(&*ptr)
+}
+```
+
+**When to use:** Every typed read out of an `XdpContext` / `TcContext` packet
+buffer — Ethernet header, IPv4 header, TCP/UDP header, payload byte
+ranges. Anywhere you'd otherwise write `*(ctx.data() as *const T)` or
+similar.
+
+**What it protects against:**
+
+- Verifier rejection on unbounded pointer arithmetic — the `start + offset
+  + len > end` check is the structural shape the verifier requires.
+- Buffer-overflow reads on truncated packets (the most common
+  malformed-input class).
+- Silent UB from dereferencing past `data_end`.
+
+**House-style adaptations:**
+
+- The helper lives once per program crate at
+  `crates/overdrive-bpf/src/shared/access.rs` (or similar) — do not
+  copy-paste it per program. Each `programs/<name>.rs` file imports it.
+- `#[inline(always)]` is required, not stylistic — the verifier needs the
+  bounds check at the call site, not behind a function call.
+- Use `mut_ptr_at<T>` (mirror, returning `*mut T`) for write paths
+  (header-rewrite hot path during NAT). Same shape, same bounds check.
+- Errors propagate via `?` to a top-level `match` that converts `Err(_)
+  → XDP_PASS` (or `TC_ACT_OK`) — see "Error Handling Pattern" below.
+
+### Packet header parsing — sequential offsets
+
+```rust
+let ethhdr: *const EthHdr = unsafe { ptr_at(&ctx, 0)? };
+match unsafe { (*ethhdr).ether_type() } {
+    Ok(EtherType::Ipv4) => {}
+    _ => return Ok(xdp_action::XDP_PASS),
+}
+
+let ipv4hdr: *const Ipv4Hdr = unsafe { ptr_at(&ctx, EthHdr::LEN)? };
+let source = u32::from_be_bytes(unsafe { (*ipv4hdr).src_addr });
+```
+
+Rules:
+
+- **Sequential offsets via `<HdrType>::LEN` constants**, never
+  hand-coded byte counts. The header crate (`network-types` or our own
+  `crates/overdrive-bpf/src/shared/headers.rs`) owns the canonical
+  layout.
+- **Early-return on non-matching protocols.** IPv6 / ARP / non-IPv4
+  EtherTypes return `XDP_PASS` so the host's other workloads keep
+  working — per § 7 of the whitepaper, the LB program is not a firewall.
+- **Wire-byte-order on read; convert at the boundary.** `u32::from_be_bytes`
+  on the read path; `to_be_bytes` on the write path. This is the
+  endianness lockstep boundary documented in
+  `docs/feature/phase-2-xdp-service-map/design/architecture.md` § 11.
+  Userspace map storage is host-order; kernel-side conversion happens at
+  this boundary, not in the userspace handle.
+
+### XDP return codes
+
+| Return | Meaning | When |
+|---|---|---|
+| `XDP_PASS` | Hand to kernel networking stack | Non-LB traffic, miss, edge protocols (IPv6, ICMP, ARP) |
+| `XDP_DROP` | Silent drop | Malformed input, sanity-prologue violations, blocked traffic |
+| `XDP_ABORTED` | Drop + tracepoint | Fallback for unhandled `Err(_)` in the top-level match |
+| `XDP_TX` | Bounce back same NIC | LB hit with rewritten dest; reverse-NAT egress |
+| `XDP_REDIRECT` | Forward to another NIC / `AF_XDP` | Cross-NIC LB (not used Phase 2.2) |
+
+**Project rule:** `XDP_DROP` requires a `DROP_COUNTER` increment with an
+explicit `DropClass` reason (per `crates/overdrive-core/src/dataplane/
+drop_class.rs`). Silent drops are forbidden — every drop is an
+observable event.
+
+### Error-handling pattern (top-level wrapper)
+
+```rust
+#[xdp]
+pub fn xdp_service_map_lookup(ctx: XdpContext) -> u32 {
+    match try_xdp_service_map_lookup(ctx) {
+        Ok(ret) => ret,
+        Err(_) => xdp_action::XDP_ABORTED,
+    }
+}
+
+fn try_xdp_service_map_lookup(ctx: XdpContext) -> Result<u32, ()> {
+    // bounds checks via `?`, header parsing, map lookup, header rewrite
+}
+```
+
+**Why two functions:** The `#[xdp]` entry point returns `u32` (kernel ABI).
+The inner `try_*` returns `Result<u32, ()>` so `?` works for bounds-check
+propagation. The wrapper converts unhandled `Err(_)` to `XDP_ABORTED` —
+verifier-clean and observable via the kernel's xdp tracepoint.
+
+**Project deviation:** `XDP_ABORTED` is acceptable as the catch-all but
+prefer `XDP_PASS` when the failure mode is "we can't classify; let the
+kernel handle it" (truncated frames per S-2.2-08; non-IPv4 per
+S-2.2-21). Reserve `XDP_ABORTED` for genuine "this should never happen"
+paths — e.g., a verifier-impossible bounds violation.
+
+### Map access from XDP context
+
+```rust
+#[map]
+static SERVICE_MAP: HashMap<ServiceKey, u32> = HashMap::with_max_entries(4096, 0);
+
+fn lookup_backend(key: &ServiceKey) -> Option<u32> {
+    unsafe { SERVICE_MAP.get(key).copied() }
+}
+```
+
+Rules:
+
+- `#[map]` declarations live in `crates/overdrive-bpf/src/maps/<name>.rs`,
+  one file per map, paired with a userspace handle in
+  `crates/overdrive-dataplane/src/maps/<name>_handle.rs` (per ADR-0040
+  three-map split).
+- `unsafe { MAP.get(...) }` is required — the verifier sees the unsafe
+  block and validates the bounded operation. Do NOT wrap further in
+  custom helpers; the call site IS the verifier-readable shape.
+- Return `Option<T>` — null-checking via `is_some()` / `match` is
+  verifier-friendly. Bare null derefs are rejected.
+- The `with_max_entries` argument is the BPF map size; it must match
+  the userspace handle's expected capacity.
+- **HASH_OF_MAPS chained lookup.** Outer-map `bpf_map_lookup_elem`
+  returns a `NonNull<c_void>` tagged `inner_map` by the verifier; chain
+  to a second `bpf_map_lookup_elem` against the inner FD only after a
+  NULL check. Single-level nesting only — the kernel rejects HoM-of-HoM
+  at outer-map create time. See
+  `docs/research/dataplane/aya-rs-usage-comprehensive-research.md`
+  § D.6 for the canonical chained-lookup shape.
+
+### `no_std` / `no_main` constraints
+
+```rust
+#![no_std]
+#![no_main]
+
+#[cfg(not(test))]
+#[panic_handler]
+fn panic(_info: &core::panic::PanicInfo) -> ! {
+    loop {}
+}
+```
+
+- Every kernel-side crate is `#![no_std]`. No `std::*`, no `alloc::*`
+  (no `Vec`, no `String`, no `Box`).
+- `no_main` because the `#[xdp]` / `#[classifier]` / `#[lsm]` macros
+  emit the entry point.
+- Panic handler is `loop {}` — the verifier rejects unwinding. The
+  `cfg(not(test))` gate keeps host-side mod-tests compilable.
+- The `panic_handler` lives once per crate, in the crate's `lib.rs` (not
+  per program file).
+
+### Attach mode — native vs generic (`SKB_MODE`)
+
+- **Default = native (`XdpFlags::DRV_MODE`).** Requires NIC driver
+  support; near-line-rate throughput. Lima virtio-net, ubuntu-latest
+  virtio-net, mlx5, ena, i40e all support native.
+- **`XdpFlags::SKB_MODE` (generic) is the documented fallback.** Slower
+  (full kernel networking stack traversal) but driver-agnostic; useful
+  for `dummy` interfaces and non-virtio kernels.
+- **Project rule (architecture.md § 2 constraint 9):** the loader tries
+  native first; on `EOPNOTSUPP` / `ENOTSUP` it emits a single structured
+  `tracing::warn!(name: "xdp.attach.fallback_generic", iface = %iface,
+  ...)` event and retries with `SKB_MODE`. Do NOT fall back on
+  `EINVAL` — that masks real loader bugs (the userspace classifier
+  `should_fallback_to_generic` in `crates/overdrive-dataplane/src/lib.rs`
+  enforces this).
+
+### Userspace map insertion (companion to kernel-side reads)
+
+```rust
+let mut blocklist: HashMap<_, u32, u32> =
+    HashMap::try_from(bpf.map_mut("BLOCKLIST").unwrap())?;
+
+let block_addr: u32 = Ipv4Addr::new(1, 1, 1, 1).into();
+blocklist.insert(block_addr, 0, 0)?;
+```
+
+**Endianness lockstep** (architecture.md § 11):
+
+- **Userspace stores host-order bytes** in the map. The host writes
+  `u32::from(Ipv4Addr)` — that produces host-order on every supported
+  arch.
+- **Kernel-side converts to network-order** at the read boundary via
+  `u32::from_be_bytes(packet_addr_bytes)` against the map key. No
+  endian flip in userspace.
+- Userspace proptests round-trip host-order writes against host-order
+  reads (per `.claude/rules/testing.md` § "Property-based testing
+  (proptest)" — newtype roundtrip is mandatory).
+
+This is the load-bearing rule the typed userspace handles
+(`ServiceMapHandle`, `BackendMapHandle`, etc.) enforce — they accept
+host-order inputs, write host-order to the BPF map, and the kernel-side
+program does the conversion. Any drift in either direction is caught by
+S-2.2-17 (Tier 2 lockstep test).
+
+### `HASH_OF_MAPS` — hand-rolled until aya 0.14+
+
+aya 0.13.x ships no typed userspace `HashOfMaps<K, V>` wrapper and
+aya-ebpf 0.1.x ships no `#[map]` macro support for
+`BPF_MAP_TYPE_HASH_OF_MAPS`. The project provides a typed handle
+(`HashOfMapsHandle<K, V>`) on the userspace side and a
+`#[repr(transparent)]` `HashOfMaps<K, V, M>` struct on the kernel side
+— both built directly over the raw `bpf()` syscall + `bpf_helper_*`
+binding surface.
+
+Outer map and inner-map prototype both created via direct `bpf()`
+syscalls in `crates/overdrive-dataplane/src/sys/bpf.rs`; the typed
+`HashOfMapsHandle<K, V>` is the only entry point. **Atomic backend
+swap is `HashOfMapsHandle::set(&service_id, new_inner_fd)`** — kernel
+ref-counting handles in-flight readers, so the swap is observers-see-
+either-old-or-new with no torn states.
+
+Migration path when aya 1.0 / PR #1446 lands: `HashOfMapsHandle` has a
+deliberately PR-1446-compatible signature; replace
+`HashOfMapsHandle::new_with_hash_inner(...)` with
+`aya::maps::HashOfMaps::try_from(...)`, replace
+`HashOfMapsHandle::set(&key, inner_fd)` with the upstream typed
+equivalent, and remove the `sys/bpf.rs` HoM helpers. The
+`BackendId`/`ServiceKey`/lookup-chain logic stays as-is.
+
+See `docs/research/dataplane/aya-rs-usage-comprehensive-research.md`
+§ D.1–D.3 for the full hand-rolled shape (userspace construction +
+typed handle + kernel-side struct) and § F.1 for the migration
+plan.
+
+### Sharing the outer HoM between userspace and the kernel-side ELF — `pinning = ByName`
+
+aya 0.13.x's stock ELF loader cannot create a HASH_OF_MAPS map from
+the ELF alone — `MapData::create` doesn't know the inner-map
+prototype, so `BPF_MAP_CREATE` rejects (the `inner_map_fd` field is
+unset). The crafter for step 03-02's first attempts mistook this for
+a structural blocker; **it isn't**. aya 0.13.x at `bpf.rs:495–503`
+already supports the pin-by-name workaround — the same pattern
+libbpf uses, and the same pattern Cilium / Katran use to share HoMs
+between userspace and kernel-side BPF programs.
+
+The wiring:
+
+1. **Kernel-side declaration** — the project's hand-rolled
+   `HashOfMaps<K, V, M>` struct (over `bpf_map_def`) bakes
+   `pinning: PinningType::ByName as u32` into its const initializer.
+   Required field; not optional.
+2. **Userspace `EbpfDataplane::new`** runs in this order:
+   1. **Create the inner-map prototype** — `bpf(BPF_MAP_CREATE)` for
+      a single `Array<BackendId, 256>` (or whatever the inner shape
+      is). This is the template the kernel uses to type-check
+      subsequent inner FDs handed in via
+      `HashOfMapsHandle::set`.
+   2. **Create the outer HoM** —
+      `sys::bpf::bpf_create_map(BPF_MAP_TYPE_HASH_OF_MAPS, …,
+      inner_map_fd: prototype_fd)`. Returns `outer_fd`.
+   3. **Pin the outer map to bpffs** —
+      `sys::bpf::bpf_obj_pin(outer_fd,
+      "/sys/fs/bpf/overdrive/<MAP_NAME>")`.
+   4. **Load the ELF with the pin path set** —
+      `EbpfLoader::new().map_pin_path("/sys/fs/bpf/overdrive").load_file(…)`.
+      aya's loader sees the kernel-side `bpf_map_def.pinning ==
+      ByName`, finds the existing pinned FD by name, and **reuses
+      it** — no second `BPF_MAP_CREATE` is attempted. The kernel-side
+      program and the userspace `HashOfMapsHandle` now reference the
+      same FD.
+3. **Cleanup** — bpffs pins survive across process exits; remove on
+   shutdown via `unlink("/sys/fs/bpf/overdrive/<MAP_NAME>")` or
+   accept the persistence (it's how Cilium operates in production).
+
+**Pin-path discipline**: every Overdrive HoM pins under
+`/sys/fs/bpf/overdrive/`. Tests use a per-test tempdir to avoid
+cross-test collisions; production uses the literal path. Set this
+once in the loader's `EbpfDataplane::new` and never override per-map.
+
+**Why this is not "scope creep"**: the existing Slice 02 S-2.2-06
+GREEN test's userspace surface (`ServiceMapHandle::insert`) does
+NOT change shape — only the underlying handle implementation does.
+The kernel-side ELF declaration and the loader call site change;
+the test body stays the same.
+
+See `docs/research/dataplane/aya-rs-usage-comprehensive-research.md`
+§ D.3 (b) for the bare-create rejection mechanism, and the aya
+0.13.1 source at `aya/src/bpf.rs:495–503` for the pin-by-name reuse
+path. Resolves K-1 in the research doc.
+
+### Verifier-friendly idioms — what to avoid
+
+- **No loops with non-bounded counters.** The verifier needs to know the
+  loop terminates. Use `for i in 0..N` with `N` a const, never a runtime
+  variable.
+- **No recursion.** Period.
+- **No floating-point math.** The kernel BPF JIT does not emit FP
+  instructions on most arches.
+- **No `panic!` / `todo!` / `unimplemented!` in production code paths.**
+  These are RED scaffolds; gate via `#[expect(clippy::todo)]` per
+  `.claude/rules/testing.md` § "Production-side scaffolds". The verifier
+  rejects programs that reach `panic_handler`.
+- **No `Vec`, no `Box`, no `Rc` / `Arc`.** `no_std` constraint; even if
+  it compiled, the verifier wouldn't accept dynamic allocation.
+- **No deep call chains.** Each `#[inline(always)]` helper expands at the
+  call site; deep call graphs explode the verifier's instruction budget.
+
+### Testing tier mapping (per `.claude/rules/testing.md`)
+
+Each kernel-side program lands across all four tiers:
+
+- **Tier 2 (`BPF_PROG_TEST_RUN`)**: `crates/overdrive-bpf/tests/integration/<name>.rs`
+  — PKTGEN/SETUP/CHECK triptych against curated input. Map state
+  cleared between sub-tests by default. aya 0.13.x does NOT expose
+  `BPF_PROG_TEST_RUN` as a typed method; PKTGEN/SETUP/CHECK uses the
+  project's `prog_test_run()` helper at
+  `crates/overdrive-dataplane/src/sys/prog_test_run.rs` (or inline raw
+  `libc::syscall(SYS_bpf, BPF_PROG_TEST_RUN, ...)` until the helper
+  lands). See `docs/research/dataplane/aya-rs-usage-comprehensive-research.md`
+  § C.1 / F.2 — no upstream typed-wrapper effort visible, helper
+  expected to remain load-bearing across multiple aya releases.
+- **Tier 3 (real veth)**: `crates/overdrive-dataplane/tests/integration/<name>.rs`
+  — real packet plumbing through veth pairs in Lima / ubuntu-latest.
+- **Tier 4 verifier-budget**: `perf-baseline/main/verifier-budget/veristat-<name>.txt`
+  — instruction count baseline, ≤ 50 % of 1M-privileged ceiling.
+  Enforced by `cargo verifier-regress` (binary lives in
+  `crates/overdrive-dataplane/bin/verifier_regress.rs`; reads
+  `bpf_prog_info.verified_insns` via aya, NOT veristat — see
+  `.claude/rules/testing.md` § "Verifier complexity").
+- **Tier 1 (DST)**: not directly applicable to kernel-side code (DST
+  uses `SimDataplane`); the userspace handle that wraps the map IS
+  Tier 1-tested.
 
 ---
 

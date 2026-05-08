@@ -705,7 +705,7 @@ slips one layer faces two more.
 - `crates/overdrive-core/**` — no trait surface changes (Option A2
   rejected).
 - `xtask/**` — no CLI changes; the new invariant is automatically
-  picked up by `cargo xtask dst` via `Invariant::ALL`.
+  picked up by `cargo dst` via `Invariant::ALL`.
 
 ---
 

@@ -26,7 +26,7 @@ do not rewrite prior sections without a corresponding ADR marked
 |---|---|---|
 | System Architecture | Titan (future) | placeholder |
 | Domain Model | Hera (future) | placeholder |
-| Application Architecture | Morgan (this doc) | **extended — Phase 1 first-workload (2026-04-27)** |
+| Application Architecture | Morgan (this doc) | **extended — Phase 2.2 XDP service map (2026-05-05); pivot to `bpf_redirect_neigh` datapath (2026-05-07, GH #159, ADR-0045)** |
 
 ---
 
@@ -157,7 +157,7 @@ extends `xtask` with `dst`/`dst-lint`. `overdrive-cli` already exists;
   (ADR-0009).
 - **`api/openapi.yaml`** — NEW at workspace root. Checked-in OpenAPI 3.1
   document, derived from the Rust request/response types; drift caught
-  by `cargo xtask openapi-check` in CI.
+  by `cargo openapi-check` in CI.
 
 **Phase 1 first-workload extension** (ADR-0021 — ADR-0029):
 
@@ -482,8 +482,8 @@ via `tarpc` or `postcard-rpc` — pure Rust, no `protoc` in toolchain.
 Per ADR-0009. The OpenAPI 3.1 schema is derived from the Rust
 request/response types in `overdrive-control-plane::api` via `utoipa`
 + `utoipa-axum`. The generated document lives at `api/openapi.yaml`
-(workspace root) as a checked-in artifact. `cargo xtask openapi-gen`
-regenerates it; `cargo xtask openapi-check` regenerates to a temp file
+(workspace root) as a checked-in artifact. `cargo openapi-gen`
+regenerates it; `cargo openapi-check` regenerates to a temp file
 and diffs against the checked-in version — non-empty diff fails CI.
 
 The Rust types are the contract; the OpenAPI document is their report.
@@ -664,7 +664,7 @@ can be added additively in a future v1.1.
 
 | Attribute | Phase 1 control-plane-core target | How it is addressed |
 |---|---|---|
-| Performance efficiency — time behaviour (REST round-trip) | CLI → server → LocalStore → response < 100 ms on localhost | Axum + rustls over localhost; no proxy, no schedule jitter. `cargo xtask openapi-check` stays under 10 s. |
+| Performance efficiency — time behaviour (REST round-trip) | CLI → server → LocalStore → response < 100 ms on localhost | Axum + rustls over localhost; no proxy, no schedule jitter. `cargo openapi-check` stays under 10 s. |
 | Reliability — fault tolerance (submit) | Validation failures reject before any IntentStore write | Handler gate per Slice 3 AC; unit test asserts no-write on malformed input |
 | Reliability — storm-proofing | Evaluation broker collapses N concurrent duplicate evaluations | DST `DuplicateEvaluationsCollapse` invariant |
 | Maintainability — testability (reconciler purity) | Twin invocation produces bit-identical outputs | DST `ReconcilerIsPure` + `dst-lint` banned-API gate |
@@ -1079,14 +1079,14 @@ unaffected by Amendment 1.
 C4Context
   title System Context — Overdrive (Phase 1 scope)
 
-  Person(engineer, "Platform Engineer (Ana)", "Writes core-plane logic; runs cargo xtask dst")
+  Person(engineer, "Platform Engineer (Ana)", "Writes core-plane logic; runs cargo dst")
   System(overdrive, "Overdrive", "One-binary orchestration platform — Phase 1: walking skeleton (ports + LocalStore + DST harness)")
   System_Ext(ci, "CI", "GitHub Actions or similar — runs xtask gates on every PR")
   System_Ext(fs, "Local filesystem (redb)", "Backs LocalStore — ACID embedded KV on disk")
 
-  Rel(engineer, overdrive, "Runs `cargo xtask dst` against")
+  Rel(engineer, overdrive, "Runs `cargo dst` against")
   Rel(engineer, ci, "Pushes PRs to")
-  Rel(ci, overdrive, "Runs `cargo xtask dst` + `dst-lint` + `cargo test`")
+  Rel(ci, overdrive, "Runs `cargo dst` + `dst-lint` + `cargo test`")
   Rel(overdrive, fs, "Persists intent to")
 ```
 
@@ -1117,7 +1117,7 @@ C4Container
     Container(worker, "overdrive-worker", "Rust crate (class: adapter-host, NEW per ADR-0029; amended 2026-04-28)", "ExecDriver (Linux-only; renamed from ProcessDriver) + workload-cgroup management (overdrive.slice/workloads.slice/<alloc>.scope per ADR-0026) + boot-time node_health row writer (per ADR-0025 amendment)")
     Container(sim, "overdrive-sim", "Rust crate (class: adapter-sim)", "Sim* adapters + turmoil harness + invariant catalogue; SimDriver / SimObservationStore are used by DST only — not runtime deps of the control plane or worker")
     Container(ctrl, "overdrive-control-plane", "Rust crate (class: adapter-host)", "Axum router + rustls TLS + ReconcilerRuntime + EvaluationBroker + ActionShim + JobLifecycle reconciler + control-plane cgroup management + pre-flight (ADR-0028)")
-    Container(xtask, "xtask", "Rust binary (class: binary)", "cargo xtask dst / dst-lint / openapi-gen / openapi-check")
+    Container(xtask, "xtask", "Rust binary (class: binary)", "cargo dst / dst-lint / openapi-gen / openapi-check")
     Container(cli, "overdrive-cli", "Rust binary (class: binary)", "overdrive CLI — reqwest HTTP client against /v1 REST API; gains `job stop` subcommand (ADR-0027). `serve` subcommand is the binary-composition root: hard-depends on both overdrive-control-plane and overdrive-worker; runtime [node] role config selects which subsystems boot (ADR-0029)")
   }
 
@@ -1372,7 +1372,7 @@ Rules to enforce:
 | 0003 | Core-crate labelling via `package.metadata.overdrive.crate_class` | Accepted |
 | 0004 | Single `overdrive-sim` crate, not split | Accepted |
 | 0005 | Test distribution: per-crate `tests/`, top-level `tests/acceptance/` for acceptance only | Accepted |
-| 0006 | `cargo xtask dst` + `dst-lint` are the required CI checks; seeds surfaced on failure | Accepted |
+| 0006 | `cargo dst` + `dst-lint` are the required CI checks; seeds surfaced on failure | Accepted |
 | 0007 | cr-sqlite deletion discipline (tombstones + bounded sweep) | Accepted |
 | 0008 | Control-plane external API is REST + OpenAPI over axum/rustls | Accepted |
 | 0009 | OpenAPI schema is derived from Rust types via `utoipa`, checked-in, CI-gated | Accepted |
@@ -1397,6 +1397,12 @@ Rules to enforce:
 | 0035 | Reconciler memory: collapse trait to one method, typed-View blob auto-persisted, redb backend, in-memory hot copy as steady-state read SSOT (supersedes 0013) | Accepted |
 | 0036 | Amendment to ADR-0021: remove the per-reconciler `hydrate(target, db)` surface; runtime owns all hydration | Accepted |
 | 0037 | Reconciler emits typed `TerminalCondition`; streaming forwards it; `LifecycleEvent` no longer projects reconciler-private View state (replaces step-02-04's `restart_count_max: u32` with `terminal: Option<TerminalCondition>`; durable home on `AllocStatusRow.terminal`; K8s-Condition-shaped SemVer convention) | Accepted |
+| 0038 | eBPF crate layout (`overdrive-bpf` + `overdrive-dataplane`) + `xtask bpf-build` + `build.rs` shim build pipeline (Phase 2.1) | Accepted |
+| 0040 | SERVICE_MAP three-map split (SERVICE_MAP / BACKEND_MAP / MAGLEV_MAP) + HASH_OF_MAPS atomic-swap primitive; checksum helper = `bpf_l3_csum_replace`/`bpf_l4_csum_replace`; sanity prologue = shared `#[inline(always)]` Rust helper; HASH_OF_MAPS inner-map size = 256; `DropClass` slots = 6 (Phase 2.2) | Accepted |
+| 0041 | Weighted Maglev consistent hashing (M=16_381 default, prime, M ≥ 100·N) + REVERSE_NAT_MAP shape + endianness lockstep contract (wire = network-order; map storage = host-order; conversion site `crates/overdrive-bpf/src/shared/sanity.rs`) + TC-egress for `tc_reverse_nat` (Phase 2.2) | Accepted |
+| 0042 | `ServiceMapHydrator` reconciler + new `Action::DataplaneUpdateService` variant + new `service_hydration_results` ObservationStore table; failure surface is observation, NOT `TerminalCondition` (preserves ADR-0037); ESR pair `HydratorEventuallyConverges` + `HydratorIdempotentSteadyState` (Phase 2.2; closes J-PLAT-004) | Accepted |
+| 0043 | XDP L4LB three-iface transit test topology (`client-ns ↔ lb-ns ↔ backend-ns`) — `lb-ns` carries the routing host that `XDP_TX` returned frames need to reach the backend network; restores production XDP L4LB shape in netns form (Phase 2.2) | Accepted |
+| 0044 | XDP per-CPU LRU conntrack table — Phase 2.16 design lockpoint. **SUPERSEDED 2026-05-07** — empirically falsified; the conntrack-shaped fix this ADR proposed is unnecessary. The actual S-2.2-17 root cause was the sanity prologue's `claimed_pkt_len > packet_len` check firing spuriously on forwarded skbs at TC egress. Fix lives in ADR-0040 § Revision 2026-05-07 (Q3 amendment — sanity prologue is ingress-only). See ADR-0044 § Falsification for the diagnostic trail. GH #154 remains open with its original flow-affinity-across-rotations scope, no longer urgency-attached to Phase 2.2. | Superseded |
 
 ---
 
@@ -1620,7 +1626,7 @@ ship together to honour the BPF-target compile contract:
   kernel-side eBPF programs. Phase 2.1 ships one no-op XDP
   `xdp_pass` plus an `LruHashMap<u32, u64>` packet counter, attached
   to `lo` for the Tier 3 smoke test. Compiles to a single ELF object
-  copied to `target/xtask/bpf-objects/overdrive_bpf.o`. Excluded from
+  copied to `target/bpf/overdrive_bpf.o`. Excluded from
   workspace `default-members` so `cargo check --workspace` on macOS
   skips it; built explicitly via `cargo xtask bpf-build`.
 - **`crates/overdrive-dataplane/`** — class `adapter-host` (ADR-0003,
@@ -1689,7 +1695,7 @@ macOS.
 To DEVOPS — required CI checks gain:
 
 - `cargo xtask bpf-build` (compiles `overdrive-bpf` to
-  `target/xtask/bpf-objects/overdrive_bpf.o`; runs on every PR
+  `target/bpf/overdrive_bpf.o`; runs on every PR
   before any job that compiles `overdrive-dataplane`).
 - `cargo xtask bpf-unit` (Tier 2; runs `cargo nextest run -p
   overdrive-bpf --features integration-tests --test '*'` against
@@ -1707,6 +1713,282 @@ on first boot.
 External integrations in Phase 2.1: **none**. The eBPF subsystem
 is kernel-bound, not external. Contract testing posture unchanged
 from the Phase 1 first-workload extension.
+
+---
+
+## Phase 2.2 — XDP service map extension
+
+**Source:** `docs/feature/phase-2-xdp-service-map/design/architecture.md`
+**ADRs:** ADR-0040 (three-map split + HASH_OF_MAPS), ADR-0041
+(weighted Maglev + REVERSE_NAT + endianness lockstep), ADR-0042
+(`ServiceMapHydrator` reconciler + `Action::DataplaneUpdateService`
++ `service_hydration_results` table).
+**Date:** 2026-05-05.
+
+This section extends §1–§43 with the application-architecture
+decisions landed by feature `phase-2-xdp-service-map` (GH #24).
+Nothing in §1–§43 is rewritten. The feature fills the empty body of
+`Dataplane::update_service` left as a stub by ADR-0038 and lands
+the first non-trivial reconciler against a real (non-Sim)
+Dataplane port body — closing `J-PLAT-004` (reconciler
+convergence).
+
+### 44. New newtypes — module placement under `overdrive-core`
+
+Five STRICT newtypes ship in `overdrive-core` with full FromStr /
+Display / serde / rkyv / proptest discipline per
+`development.md` § Newtype completeness:
+
+| Newtype | Module | Purpose |
+|---|---|---|
+| `ServiceVip` | `overdrive-core/src/id.rs` (extend) | Virtual IP. Stored host-order; converted at kernel boundary (§47 endianness). |
+| `ServiceId` | `overdrive-core/src/id.rs` (extend) | Service identity (u64, content-hashed from `(VIP, port, scope)`). MAGLEV_MAP outer key. |
+| `BackendId` | `overdrive-core/src/id.rs` (extend) | BACKEND_MAP key (u32, monotonic). Backends are shared across services; one global map. |
+| `MaglevTableSize` | `overdrive-core/src/dataplane/maglev_table_size.rs` (NEW module) | u32; validating constructor enforces prime + ≥ 1 + ≤ 131_071. Default M=16_381. Q6=A. |
+| `DropClass` | `overdrive-core/src/dataplane/drop_class.rs` (NEW module) | `#[repr(u32)]` enum, 6 variants. PERCPU_ARRAY index for DROP_COUNTER. Q7=B. |
+
+`MaglevTableSize` and `DropClass` get their own module under a new
+`dataplane/` sibling because they are *dataplane-internal* concerns
+rather than first-class workload identifiers — the natural-decomposition
+shape that mirrors `overdrive-core::traits::dataplane`.
+
+### 45. `overdrive-bpf` program structure (Phase 2.2 extension)
+
+```
+crates/overdrive-bpf/src/
+├── lib.rs                       # `#![no_std]` crate root
+├── programs/
+│   ├── xdp_service_map.rs       # XDP attach @ NIC; Slices 02-04 + 06
+│   └── tc_reverse_nat.rs        # TC egress hook; Slice 05
+├── maps/
+│   ├── service_map.rs           # SERVICE_MAP (HASH_OF_MAPS outer)
+│   ├── backend_map.rs           # BACKEND_MAP
+│   ├── maglev_map.rs            # MAGLEV_MAP (HASH_OF_MAPS outer)
+│   ├── reverse_nat_map.rs       # REVERSE_NAT_MAP
+│   └── drop_counter.rs          # DROP_COUNTER (PERCPU_ARRAY)
+└── shared/
+    └── sanity.rs                # `#[inline(always)]` prologue helpers
+                                 # + endianness conversion site
+```
+
+Phase 2.1's no-op `xdp_pass` stays in place; Phase 2.2 adds the
+two real programs (`xdp_service_map`, `tc_reverse_nat`) alongside.
+
+### 46. `overdrive-dataplane` extension
+
+```
+crates/overdrive-dataplane/src/
+├── ebpf_dataplane.rs            # impl `Dataplane` for `EbpfDataplane`
+│                                # (Phase 2.1 stub bodies → real impl)
+├── loader.rs                    # aya-rs program load + attach;
+│                                # gains TcLink for `tc_reverse_nat`
+├── maps/
+│   ├── service_map_handle.rs    # typed handles per research rec #5
+│   ├── backend_map_handle.rs
+│   ├── maglev_map_handle.rs
+│   ├── reverse_nat_map_handle.rs
+│   └── drop_counter_handle.rs
+├── swap.rs                      # atomic HASH_OF_MAPS inner-map swap
+│                                # (Slice 03 — zero-drop primitive)
+└── maglev/
+    ├── permutation.rs           # Eisenbud permutation generation
+    └── table.rs                 # weighted multiplicity expansion
+```
+
+`Dataplane::update_service` signature locked at:
+
+```rust
+async fn update_service(
+    &self,
+    service_id: ServiceId,
+    vip: ServiceVip,
+    backends: Vec<Backend>,
+) -> Result<(), DataplaneError>;
+```
+
+Q-Sig=A — three explicit args. `SimDataplane` mirrors the same
+shape with in-memory `BTreeMap` book-keeping.
+
+### 47. BPF map shapes (Phase 2.2)
+
+| Map | Type | Key | Value | Notes |
+|---|---|---|---|---|
+| `SERVICE_MAP` | `BPF_MAP_TYPE_HASH_OF_MAPS` (outer) | `(ServiceVip, u16 port)` | inner-map fd | **Drift 3 locked outer key.** Inner = `BPF_MAP_TYPE_HASH` keyed by `BackendId` → `BackendEntry`, `max_entries = 256` (Q5=A). Atomic swap via outer-map fd replace. |
+| `BACKEND_MAP` | `BPF_MAP_TYPE_HASH` | `BackendId` (u32) | `BackendEntry { ipv4, port, weight, healthy, _pad }` | Single global. `max_entries = 65_536`. |
+| `MAGLEV_MAP` | `BPF_MAP_TYPE_HASH_OF_MAPS` (outer) | `ServiceId` (u64) | inner-map fd | Inner = `BPF_MAP_TYPE_ARRAY` of `BackendId` slots, size = `MaglevTableSize` (default 16_381). |
+| `REVERSE_NAT_MAP` | `BPF_MAP_TYPE_HASH` | `ReverseKey {client_ip, client_port, backend_ip, backend_port, proto, _pad}` | `OriginalDest {vip, vip_port, _pad}` | Host-order storage; conversion at kernel boundary. `max_entries = 1_048_576`. |
+| `DROP_COUNTER` | `BPF_MAP_TYPE_PERCPU_ARRAY` | `u32` (= `DropClass as u32`) | `u64` count | 6 slots locked (Q7=B). |
+
+**Endianness lockstep contract (§47.1):** wire = network-order
+(IPs and L4 ports as `__be32` / `__be16`); map storage = host-order;
+conversion site is the single `#[inline(always)]` helper at
+`crates/overdrive-bpf/src/shared/sanity.rs::reverse_key_from_packet` /
+`original_dest_to_wire`. Tier 2 BPF unit roundtrip + userspace
+proptest gate the contract. Closes the Eclipse-review remediation
+note.
+
+### 48. New ObservationStore table — `service_hydration_results`
+
+Schema:
+
+| Column | Type | Notes |
+|---|---|---|
+| `service_id` | `ServiceId` (u64) | PK |
+| `fingerprint` | `BackendSetFingerprint` (u64) | Content-hash of `(vip, backends)` per `development.md` § Hashing requires deterministic serialization (rkyv-archived). |
+| `status` | tagged enum: `Pending` / `Completed` / `Failed` | See `ServiceHydrationStatus` shape. |
+| `applied_at` / `failed_at` | `UnixInstant` | Tagged-enum payload. |
+| `reason` | `String` | `Failed`-variant only. |
+| `lamport_counter` / `writer_node_id` | per ObservationStore convention | Forward-compat with Phase 2 Corrosion gossip. |
+
+**Migration:** additive-only (no `ALTER TABLE ADD COLUMN NULL`
+against existing tables). **Single-writer in Phase 2.2** — only
+the action shim's `service_hydration` module writes; the hydrator
+reconciler is the sole reader. Trait surface adds typed row helpers
+`service_hydration_results_rows(service_id)` /
+`write_service_hydration_result(row)` matching the existing
+`alloc_status_rows` / `node_health_rows` precedent.
+
+Drift 2 rationale: `actual` reads what the action shim **confirmed**
+by writing an observation row after the dataplane call returned;
+deriving `actual` from the last-emitted action would be a
+write-only loop incapable of detecting silent dataplane failures —
+exactly the failure shape J-PLAT-004 closes (per ADR-0042).
+
+### 49. `ServiceMapHydrator` reconciler — placement
+
+The hydrator lands in the existing `overdrive-control-plane`
+reconciler set, at:
+
+```
+crates/overdrive-control-plane/src/reconcilers/service_map_hydrator/
+├── mod.rs                       # `pub struct ServiceMapHydrator`,
+│                                # impl Reconciler for ...
+├── state.rs                     # ServiceMapHydratorState,
+│                                # ServiceDesired, ServiceHydrationStatus,
+│                                # BackendSetFingerprint
+├── view.rs                      # ServiceMapHydratorView, RetryMemory
+└── hydrate.rs                   # async hydrate_desired / hydrate_actual
+                                 # (called by runtime per ADR-0036)
+```
+
+The action-shim wrapper for `Action::DataplaneUpdateService` lands
+at
+`crates/overdrive-control-plane/src/action_shim/service_hydration.rs`
+(NEW file alongside the existing per-action shim files). Hosts
+`ServiceHydrationDispatchError` enum + `dispatch` function.
+
+Per-target keying = `ServiceId`. View persists `RetryMemory` inputs
+(`attempts`, `last_failure_seen_at`, `last_attempted_fingerprint`)
+NOT a `next_attempt_at` deadline (per `development.md` § Persist
+inputs, not derived state). The deadline is recomputed every tick.
+
+ESR pair (locked names): `HydratorEventuallyConverges`,
+`HydratorIdempotentSteadyState` — both live in
+`crates/overdrive-sim/src/invariants/` and run on every PR per
+`.claude/rules/testing.md` § Tier 1.
+
+### 50. Updated quality-attribute scenarios — Phase 2.2 (extending §32 / §38)
+
+| ASR | Quality attribute | Scenario | Pass criterion |
+|---|---|---|---|
+| ASR-2.2-01 | Reliability — zero-drop atomic swap | Synthetic XDP traffic at 50 kpps (CI) / 100 kpps (Lima) traversing a service VIP; SERVICE_MAP outer-map inner-fd swap to a new backend set during sustained traffic; native XDP on virtio-net. | 0 swap-boundary drops over a 30-second swap-storm window (research § 3) |
+| ASR-2.2-02 | Reliability — flow-affinity bound under churn | Synthetic 5-tuple connection set; backend churn — remove 1/N backends, rebuild Maglev table, atomically swap; M=16_381, N=100, M ≥ 100·N. | ≤ 1 % of 5-tuples remap per single-backend removal (research § 5.2) |
+| ASR-2.2-03 | Maintainability — verifier-budget headroom | `cargo xtask verifier-regress` on each PR; instruction-count delta vs Slice 04 baseline + absolute fraction of 1M verifier ceiling. | Delta ≤ 20 % per PR; absolute ≤ 60 % of 1M ceiling |
+| ASR-2.2-04 | Correctness — hydrator ESR closure | DST harness with `SimDataplane` + `SimObservationStore`; arbitrary sequence of `service_backends` row mutations + injected `DataplaneError` failures + clock advances; `HydratorIdempotentSteadyState` + `HydratorEventuallyConverges`. | Both invariants hold across the seeded fault catalogue (J-PLAT-004) |
+
+### 51. C4 — see `c4-diagrams.md` § Phase 2.2
+
+The Phase 2.2 C4 Level 3 (Component) diagram for the dataplane
+subsystem lives in `docs/product/architecture/c4-diagrams.md` § Phase
+2.2. C4 Container (L2) is unchanged from Phase 2.1 — `overdrive-bpf`
+and `overdrive-dataplane` are already on the L2 from #23
+(ADR-0038). L1 (System Context) is unchanged.
+
+### 52. Updated handoff annotations — Phase 2.2 (extending §43)
+
+To DEVOPS — required CI checks gain:
+
+- `cargo xtask verifier-regress` (Tier 4; veristat baseline ≤ 20 %
+  delta per PR, absolute ≤ 60 % of 1M ceiling — Slice 07 fills the
+  Phase 2.1 stub).
+- `cargo xtask xdp-perf` (Tier 4; xdp-bench relative-delta gates —
+  Slice 07 fills the Phase 2.1 stub).
+- `cargo nextest run -p overdrive-sim --features integration-tests`
+  with the two new ESR invariants
+  (`HydratorEventuallyConverges`, `HydratorIdempotentSteadyState`).
+
+External integrations in Phase 2.2: **none**. The eBPF subsystem is
+kernel-bound, not external. The new `service_hydration_results`
+ObservationStore table is internal. Contract testing posture
+unchanged.
+
+### 53. Phase 2.2 dataplane shape — pivot to `bpf_redirect_neigh` (2026-05-07)
+
+**Supersession source**: ADR-0045 (`adr-0045-bpf-redirect-neigh-
+datapath.md`); ADR-0040 § Revision 2026-05-07 (later) — Q2 reopened.
+**Tracking**: GH #159 — *[2.x] Replace IP-forward + TCX-egress with
+bpf_redirect_neigh datapath*. **Empirical evidence**:
+`docs/analysis/e1-bpftrace-results.md` probes 1–7.
+
+The Phase 2.2 dataplane shape recorded in §§ 45–52 above (TC-egress
+reverse-NAT via `tc_reverse_nat`, kernel IP-forwarder in the request
+data path) is **partially superseded** by ADR-0045. The change is
+additive at the architecture-brief layer:
+
+- **§ 45 — `overdrive-bpf` program structure.** `programs/tc_reverse_nat.rs`
+  is retired. A new `programs/xdp_reverse_nat.rs` lands in its place,
+  attached at XDP ingress on the backend-facing veth. The
+  `programs/xdp_service_map.rs` body is extended with `bpf_fib_lookup`
+  + L2 MAC rewrite + `bpf_redirect_neigh`; its file path is unchanged.
+  The crate-internal `maps/` and `shared/` modules are unaffected.
+- **§ 46 — `overdrive-dataplane` extension.** `loader.rs` retires
+  the `SchedClassifier` + TcLink attach for `tc_reverse_nat` and
+  gains a second `Xdp::attach` for `xdp_reverse_nat_lookup` on the
+  backend-facing veth. The `Dataplane::update_service` trait surface
+  is unchanged; the typed map handles in `maps/` are unchanged. The
+  `swap.rs` HASH_OF_MAPS atomic-swap primitive is unchanged
+  (direction-agnostic).
+- **§ 47 — BPF map shapes.** Unchanged. SERVICE_MAP, BACKEND_MAP,
+  MAGLEV_MAP, REVERSE_NAT_MAP, DROP_COUNTER all preserve their key
+  shapes, value shapes, and atomic-swap semantics across the pivot.
+  REVERSE_NAT_MAP is now read by an XDP-ingress program rather than
+  a TCX-egress program; the row contents and lookup key are
+  identical.
+- **§ 47.1 — endianness lockstep contract.** Preserved verbatim.
+  Wire = network-order; map storage = host-order; conversion site
+  is the single `#[inline(always)]` helper in
+  `crates/overdrive-bpf/src/shared/sanity.rs`. Both XDP programs go
+  through the same helper.
+- **§§ 48–49 — `service_hydration_results` table + `ServiceMapHydrator`
+  reconciler.** Unchanged. The reconciler writes into the same
+  three SERVICE-class maps via the same typed handles; the dataplane
+  shape pivot is below the `Dataplane::update_service` trait
+  surface.
+- **§ 50 — quality-attribute scenarios (ASR-2.2-01..04).** Preserved
+  in shape; ASR-2.2-03's verifier-budget envelope (≤ 20% delta per
+  PR; ≤ 60% of 1M ceiling) is reset to the post-pivot baseline. The
+  Slice 06-05 baseline-update step records the new baseline against
+  both `xdp_service_map_lookup` (extended body) and
+  `xdp_reverse_nat_lookup` (new program). The retired
+  `tc_reverse_nat` baseline file is deleted in the same commit.
+- **§ 51 — C4.** The C4 Component diagram in `c4-diagrams.md` § Phase
+  2.2 references `tc_reverse_nat` as a TC egress program. That
+  diagram is updated as part of the GH #159 production work to
+  reflect the new shape (two XDP programs, no TC programs in the
+  Phase 2.2 dataplane). The C4 Container (L2) diagram is unchanged
+  — `overdrive-bpf` and `overdrive-dataplane` remain the
+  dataplane crates.
+- **§ 52 — handoff annotations.** Unchanged in shape. The CI checks
+  (`cargo xtask verifier-regress`, `cargo xtask xdp-perf`, the two
+  ESR invariants) all apply to the post-pivot programs identically.
+  External-integrations posture: still **none**.
+
+**ADR-0045 deletes nothing in this brief**; it adds § 53 as a
+supersession pointer and amends the file paths in § 45 / § 46 via
+this section. Future readers should treat ADR-0045 as the SSOT for
+the dataplane *shape* and §§ 45–52 above as the SSOT for the
+dataplane *crate / map / handoff structure*, with the references in
+§ 45 / § 46 read through the lens of this section.
 
 ---
 
@@ -1733,11 +2015,11 @@ from the Phase 1 first-workload extension.
   first internal contract worth testing; Phase 3+ ACME and Phase 5+
   OIDC land the first truly external surfaces.
 - CI integration — the required checks are now:
-  - `cargo xtask dst` (DST harness, phase-1-foundation ADR-0006)
+  - `cargo dst` (DST harness, phase-1-foundation ADR-0006)
   - `cargo xtask dst-lint` (banned-API scan; first-workload extension:
     `overdrive-scheduler` is now in scope per ADR-0024 — set size
     grows from one core-class crate to two)
-  - `cargo xtask openapi-check` (ADR-0009; first-workload extension
+  - `cargo openapi-check` (ADR-0009; first-workload extension
     adds the `POST /v1/jobs/{id}:stop` endpoint per ADR-0027)
   - `cargo nextest run --workspace` with `cargo test --doc --workspace`
     paired per `.claude/rules/testing.md`
@@ -1794,4 +2076,6 @@ from the Phase 1 first-workload extension.
 | 2026-05-03 | Added ADR-0037 (reconciler emits typed `TerminalCondition`; streaming forwards it; `LifecycleEvent` no longer projects reconciler-private View state). Codifies the recommendation in `docs/research/control-plane/issue-139-followup-streaming-restart-budget-research.md` candidate (c). Replaces step-02-04's `restart_count_max: u32` projection on `LifecycleEvent` with `terminal: Option<TerminalCondition>`; the deciding action carries `terminal` so the action shim writes both `AllocStatusRow.terminal` (durable home) and the broadcast event with the same value. `streaming.rs::check_terminal` collapses from ~30 LOC to ~5 LOC; `lagged_recover`'s `restart_count_max_hint` parameter is deleted; `exit_observer.rs`'s structurally-meaningless `restart_count_max: 0` literal becomes the structurally-meaningful `terminal: None`. ADR-0033's `RestartBudget.exhausted` source changes from a `restart_counts` recomputation to a `row.terminal` row-field read (the `RestartBudget` wire shape itself is unchanged). New variants: `TerminalCondition::{ BackoffExhausted { attempts }, Stopped { by: StoppedBy }, Custom { type_name, detail } }` — `Custom` is the WASM-third-party extension surface per whitepaper §18. K8s-`Condition.Reason`-shaped SemVer convention documented (well-known variants stable; renames are major; new variants additive minor). Lands alongside the ADR-0035 reset of the in-flight `marcus-sa/libsql-view-cache` branch; the new DELIVER roadmap must wire `terminal` from day one rather than ship ADR-0035 first and `terminal` second. — Morgan. |
 | 2026-04-27 | Post-ratification amendment: ADR-0029 (dedicated `overdrive-worker` crate, class `adapter-host`). User-proposed and ratified 2026-04-27 same day as the original first-workload DESIGN pass. The new crate hosts `ProcessDriver` (formerly slated for `overdrive-host`), workload-cgroup management (`overdrive.slice/workloads.slice/<alloc>.scope`; the workload half of ADR-0026), and the boot-time `node_health` row writer (relocated from control-plane bootstrap per ADR-0025 amendment). `overdrive-host` shrinks back to ADR-0016's original host-OS-primitives intent (`SystemClock`, `OsEntropy`, `TcpTransport`). Composition pattern: binary-composition — `overdrive-cli`'s `serve` subcommand hard-depends on both `overdrive-control-plane` and `overdrive-worker`; runtime `[node] role` config selects which subsystems boot. `overdrive-control-plane` does NOT depend on `overdrive-worker` — the action shim calls `Driver::*` against an injected `&dyn Driver`, impl plugged in by the binary at AppState construction. ADRs 0022, 0023, 0025, 0026 amended in-place (Amendment subsections at the end); structural shape unchanged in each. C4 Container diagram updated (new `overdrive-worker` container + binary-composition arrows from `overdrive-cli`); C4 Component (convergence-loop) diagram updated (ProcessDriver moves from `overdrive-host` boundary to `overdrive-worker` boundary; node_health writer added). Crate inventory grows from seven Rust crates to eight (excluding xtask). — Morgan. |
 | 2026-05-02 | ADR-0028 superseded in part by ADR-0034: the `--allow-no-cgroups` escape hatch is removed. Reasons: (a) structural leak in the `StopAllocation` action path (handle had `pid: None`, cgroup-kill branch gated off, `stop` returned `Ok(())` while the process kept running, producing `state: Terminated`-while-process-alive on the next reconciler tick); (b) redundancy — the canonical dev path is now `cargo xtask lima run --` (documented in `.claude/rules/testing.md`), which absorbs the dev-ergonomics objection ADR-0028 § Alternative A documented. Hard-refusal pre-flight from ADR-0028 stays. §31 rewritten; ADR index entry for 0028 marked Superseded; ADR-0034 added to index; Linux-only requirements bullet replaces flag reference with the Lima wrapper. Single-cut migration per greenfield convention — code/test deletions land in the crafter PR, not in this changelog entry. — Morgan. |
+| 2026-05-05 | Phase 2.2 XDP service map extension (§44–§52). Added ADR-0040 (SERVICE_MAP three-map split — SERVICE_MAP / BACKEND_MAP / MAGLEV_MAP — with HASH_OF_MAPS atomic-swap primitive; Q1=A `bpf_l3_csum_replace`/`bpf_l4_csum_replace` kernel helpers; Q3=C shared `#[inline(always)]` Rust helper for sanity prologue; Q5=A inner-map size 256; Q7=B `DropClass` slots = 6 — `MalformedHeader=0, UnknownVip=1, NoHealthyBackend=2, SanityPrologue=3, ReverseNatMiss=4, OversizePacket=5`). Added ADR-0041 (weighted Maglev consistent hashing M=16_381 default + Eisenbud permutation + multiplicity expansion in deterministic `BTreeMap` order; REVERSE_NAT_MAP shape and host-order storage; Q2=A TC-egress for `tc_reverse_nat`; endianness lockstep contract with conversion site at `crates/overdrive-bpf/src/shared/sanity.rs`). Added ADR-0042 (`ServiceMapHydrator` reconciler closes J-PLAT-004; new `Action::DataplaneUpdateService` typed variant; new `service_hydration_results` ObservationStore table for `actual` projection — Drift 2 fix; failure surface is observation, NOT `TerminalCondition` — preserves ADR-0037 invariant; ESR pair `HydratorEventuallyConverges` + `HydratorIdempotentSteadyState`). Drift 3: SERVICE_MAP outer key locked at `(ServiceVip, u16 port)` (the kernel sees wire packets and must look up by `(VIP, port)`); MAGLEV_MAP outer key on `ServiceId`; BACKEND_MAP key on `BackendId`. Five new STRICT newtypes in `overdrive-core` — `ServiceVip`, `ServiceId`, `BackendId` (extending `id.rs`); `MaglevTableSize` (u32) + `DropClass` (#[repr(u32)] enum) in NEW `dataplane/` sibling module. `Dataplane::update_service(service_id, vip, backends)` signature locked (Q-Sig=A — three explicit args). One additive ObservationStore table; no edits to existing observation rows. C4 Level 3 component diagram for the Phase 2.2 dataplane subsystem added to `c4-diagrams.md`. ADR index grows from 32 to 35 entries; no entry changes status. — Morgan. |
+| 2026-05-05 | Atlas review remediation pass (review ID `arch-rev-2026-05-05-phase2.2-xdp-service-map`; verdict `NEEDS_REVISION` → `APPROVED after remediation`): B1–B3 + S4–S5 + Q1–Q2 addressed in a single pass — concrete `hydrate_desired` / `hydrate_actual` arm signatures inlined in ADR-0042 § 2 + architecture.md § 8 (B1); full `service_hydration_results` schema replicated inline in ADR-0042 § 4 with LWW resolution semantics (B2); `BackendSetFingerprint` declared as a `pub type … = u64;` alias in `crates/overdrive-core/src/dataplane/mod.rs` with computation site at `dataplane/fingerprint.rs` and rationale in architecture.md § 6 *Type aliases* (B3); `DropClass` and `MaglevTableSize` carry full Rust code blocks in their respective ADRs and architecture.md § 6 (S4); `CorrelationKey::derive` derivation pinned with explicit `(target, spec_hash, purpose)` snippet in architecture.md § 7 + ADR-0042 § 1 (S5); test-file inventory added as architecture.md § 13 advisory subsection (Q1); `service_backends.vip` typing clarified as Case A — row carries `vip: Ipv4Addr` as its existing wire-shape field, `ServiceVip` is a userspace-only newtype wrapped at the hydrate boundary, no schema migration (Q2). `## Review` section appended to architecture.md. No design decisions changed; artifact lockdowns only. Atlas not re-invoked. — Morgan. |
 | 2026-05-04 | Phase 2.1 eBPF dataplane scaffolding extension (§40–§43). Added ADR-0038 (eBPF crate layout `overdrive-bpf` + `overdrive-dataplane`; `xtask bpf-build` + `build.rs` artifact-check shim build pipeline; `bpf-linker` provisioning via Lima image + xtask dev-setup + which-or-hint; `default-members` exclusion for the kernel-side crate; `EbpfDataplane` mirroring `SimDataplane`'s constructor seam). Two new crates: `overdrive-bpf` (class `binary`, target `bpfel-unknown-none`, `#![no_std]`, `aya-ebpf`-only) and `overdrive-dataplane` (class `adapter-host`, hosts `EbpfDataplane` impl of `Dataplane` port). `cargo xtask bpf-build` is NEW; `cargo xtask bpf-unit` and `cargo xtask integration-test vm` filled in (against the no-op XDP `xdp_pass` + `LruHashMap<u32,u64>` packet counter); `verifier-regress` and `xdp-perf` remain stubbed for #29. Workspace `members` grows from 9 to 11 entries; new `default-members` declaration excludes `overdrive-bpf` so `cargo check --workspace` builds on macOS. Lima image `cargo install --locked` line extended with `bpf-linker`. C4 L1 (System Context) + L2 (Container) added at `c4-diagrams.md` § Phase 2.1; L3 deliberately skipped (loader is a single struct with two no-op methods). dst-lint scope unchanged — both new crates are non-`core`. ADR-0029 mirrored as the closest-precedent extraction ADR. — Morgan. |

@@ -117,7 +117,7 @@ All gates from the execution log:
 - `cargo clippy -p overdrive-core --all-targets -- -D warnings` — clean.
 - `cargo xtask dst-lint` — clean (no `Instant::now()` / `SystemTime::now()`
   in `reconcile`).
-- `cargo xtask dst` — 14 invariants passed.
+- `cargo dst` — 14 invariants passed.
 - `cargo nextest run --workspace --features integration-tests --no-run`
   — typechecks on macOS.
 - Mutation gate — `cargo xtask mutants --diff origin/main --package

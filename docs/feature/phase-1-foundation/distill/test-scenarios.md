@@ -35,11 +35,11 @@ to a Rust `#[test]` / `#[tokio::test]` function in
 ```gherkin
 @walking_skeleton @real-io @adapter-integration @driving_port
 @us-06 @journey:trust-the-sim @kpi K1
-Scenario: Clean-clone cargo xtask dst is green within the wall-clock budget
+Scenario: Clean-clone cargo dst is green within the wall-clock budget
   Given Ana has a freshly cloned overdrive workspace
     And no environment variables override DST defaults
     And redb is backing LocalStore on a temporary filesystem path
-  When Ana runs cargo xtask dst as a subprocess
+  When Ana runs cargo dst as a subprocess
   Then the subprocess exits with status zero
     And the first line of output names the seed used for this run
     And the summary line reports zero invariant failures
@@ -53,10 +53,10 @@ Scenario: Clean-clone cargo xtask dst is green within the wall-clock budget
 ```gherkin
 @walking_skeleton @driving_port @us-06 @journey:trust-the-sim @kpi K3
 Scenario: The same seed produces the same trajectory across two runs
-  Given Ana has captured seed S from a previous cargo xtask dst run
+  Given Ana has captured seed S from a previous cargo dst run
     And the git commit and Rust toolchain are unchanged
-  When Ana runs cargo xtask dst --seed S as a subprocess
-    And Ana runs cargo xtask dst --seed S again
+  When Ana runs cargo dst --seed S as a subprocess
+    And Ana runs cargo dst --seed S again
   Then both runs produce the same ordered invariant results
     And every per-invariant tick number matches between the two runs
     And the seed printed on both runs is S
@@ -68,7 +68,7 @@ Scenario: The same seed produces the same trajectory across two runs
 @walking_skeleton @driving_port @error-path @canary @us-06 @kpi K6
 Scenario: A red invariant prints the seed, tick, host, and reproduction command
   Given a canary bug in a Sim adapter that violates the single-leader invariant
-  When Ana runs cargo xtask dst as a subprocess
+  When Ana runs cargo dst as a subprocess
   Then the subprocess exits with non-zero status
     And the failure block names the failing invariant
     And the failure block includes the seed for this run
@@ -611,7 +611,7 @@ Scenario: Lint gate fails fast when a workspace crate has no crate-class declara
 @us-06 @driving_port @real-io @adapter-integration @kpi K1
 Scenario: The DST harness composes real LocalStore with every Sim adapter
   Given a freshly cloned overdrive workspace
-  When Ana runs cargo xtask dst as a subprocess
+  When Ana runs cargo dst as a subprocess
   Then the harness reports that LocalStore is backing intent
     And the harness reports that SimObservationStore is backing observation
     And the harness reports SimClock, SimTransport, SimEntropy, SimDataplane, SimDriver, and SimLlm in use
@@ -621,7 +621,7 @@ Scenario: The DST harness composes real LocalStore with every Sim adapter
 @us-06 @driving_port @real-io @kpi K1
 Scenario: The default invariant catalogue runs to completion
   Given a freshly cloned overdrive workspace
-  When Ana runs cargo xtask dst as a subprocess
+  When Ana runs cargo dst as a subprocess
   Then the harness reports that single_leader ran
     And intent_never_crosses_into_observation ran
     And snapshot_roundtrip_bit_identical ran
@@ -643,7 +643,7 @@ Scenario: Every invariant name printed by the harness round-trips through the in
 @us-06 @driving_port @real-io
 Scenario: Passing --only narrows a run to a single named invariant
   Given Ana has captured the name I of an invariant from a prior run
-  When Ana runs cargo xtask dst --only I as a subprocess
+  When Ana runs cargo dst --only I as a subprocess
   Then the harness runs exactly the invariant named I
     And no other invariant is reported in the summary
 ```
@@ -662,7 +662,7 @@ Scenario: The printed reproduction command reproduces the failure at the same ti
 ```gherkin
 @us-06 @driving_port @real-io
 Scenario: The seed is printed on the first line of every run
-  Given any cargo xtask dst invocation
+  Given any cargo dst invocation
   When the subprocess completes or is interrupted
   Then the first line of captured stdout names the seed used for the run
 ```
@@ -673,7 +673,7 @@ Scenario: The seed is printed on the first line of every run
 @us-06 @driving_port @real-io @error-path
 Scenario: CI fails when any DST invariant is red
   Given the DST harness will fail at least one invariant on seed S
-  When cargo xtask dst runs as a subprocess with seed S
+  When cargo dst runs as a subprocess with seed S
   Then the subprocess exits with non-zero status
     And a dst-output.log artifact is written
     And a dst-summary.json artifact is written
@@ -684,7 +684,7 @@ Scenario: CI fails when any DST invariant is red
 @us-06 @driving_port @real-io @error-path @canary
 Scenario: A planted bug in a Sim adapter causes the invariant suite to fail
   Given a deliberately planted bug in SimObservationStore that breaks LWW convergence on a specific seed
-  When cargo xtask dst runs as a subprocess on that seed
+  When cargo dst runs as a subprocess on that seed
   Then the subprocess exits with non-zero status
     And the failing invariant is sim_observation_lww_converges
     And the failure output names the seed, tick, host, and reproduction command
@@ -715,7 +715,7 @@ Scenario: When a Clock method is missing the engineer extends the trait rather t
     And implements it in both SystemClock and SimClock
     And consumes it from her core-crate code
   Then running cargo xtask dst-lint as a subprocess exits with status zero
-    And running cargo xtask dst as a subprocess exits with status zero
+    And running cargo dst as a subprocess exits with status zero
 ```
 
 ### 8.2 Engineer uses the state-layer type boundary as a refactor guard
@@ -743,7 +743,7 @@ Scenario: Accidentally routing a job spec into the observation store is rejected
 | SimDataplane (HashMap) | `Dataplane` | NO — production sim impl | §1.1, §7.1 |
 | SimDriver (in-memory) | `Driver` | NO — production sim impl | §1.1, §7.1 |
 | SimLlm (transcript) | `Llm` | NO — production sim impl | §1.1, §7.1 |
-| `cargo xtask dst` CLI | driving port | YES — subprocess | §1.1, §1.2, §1.3, §7.1, §7.2 |
+| `cargo dst` CLI | driving port | YES — subprocess | §1.1, §1.2, §1.3, §7.1, §7.2 |
 | `cargo xtask dst-lint` CLI | driving port | YES — subprocess | §6.1, §6.2 |
 
 No adapter missing real-I/O / subprocess coverage. Every `Sim*` row is

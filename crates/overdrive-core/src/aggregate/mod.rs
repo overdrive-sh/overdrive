@@ -223,7 +223,7 @@ impl Job {
 /// reuse this type verbatim as the body / field shape for
 /// `POST /v1/jobs` and `GET /v1/jobs/{id}` (ADR-0014 §Shared types).
 /// Carries `utoipa::ToSchema` so the generated `OpenAPI` document
-/// (ADR-0009, `cargo xtask openapi-gen`) renders the spec shape
+/// (ADR-0009, `cargo openapi-gen`) renders the spec shape
 /// consistently across the server and CLI lanes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]

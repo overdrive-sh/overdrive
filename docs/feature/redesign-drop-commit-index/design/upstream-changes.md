@@ -433,10 +433,10 @@ exists).
 
 *Rationale tag*: `regenerate`.
 
-*Notes*: regenerate via `cargo xtask openapi`, then verify
-`cargo xtask openapi-check` passes. The regenerated YAML is
+*Notes*: regenerate via `cargo openapi-gen`, then verify
+`cargo openapi-check` passes. The regenerated YAML is
 checked in; the DELIVER crafter does NOT hand-edit
-`api/openapi.yaml`. The `cargo xtask openapi-check` gate will
+`api/openapi.yaml`. The `cargo openapi-check` gate will
 fail on the first DELIVER step that lands the trait change
 without the matching schema regeneration; this is the desired
 behaviour (structural drift is caught at the gate). The DELIVER
@@ -945,9 +945,9 @@ flow:
   deleted and every test in §7 revised before this gate passes.
 - `cargo test --doc --workspace` — any rustdoc example referencing
   `commit_index` must be updated.
-- `cargo xtask openapi-check` — the regenerated YAML must match
+- `cargo openapi-check` — the regenerated YAML must match
   what the new Rust types produce; any drift fails this gate.
-- `cargo xtask dst` — the harness invariant
+- `cargo dst` — the harness invariant
   `intent_store_returns_caller_bytes` (per ADR-0020 *Enforcement*)
   catches a regression of the inline row encoding. If this
   invariant is not yet present, it lands as part of the DELIVER PR.
@@ -1075,7 +1075,7 @@ to v1; proptests drop the index column from the property generator).
 **Medium — OpenAPI schema regeneration command.**
 The §4 entry for `openapi.yaml` did not name the regeneration
 command. **Fix recommendation**: add: "Regenerate via
-`cargo xtask openapi`, then verify `cargo xtask openapi-check`
+`cargo openapi-gen`, then verify `cargo openapi-check`
 passes. The regenerated YAML is checked in; do not hand-edit."
 
 **Low — CLI help-text cleanup.**
@@ -1095,7 +1095,7 @@ to `commit_index` that becomes vacuous post-drop. Now folded into U3
 | **U6** (`debug_assert_eq!` count) | Resolved | §2 entry now cites the exact count from grep audit: "There are exactly 3 `debug_assert_eq!` calls in `redb_backend.rs` at lines 312, 392, and 525." The reviewer's prompt suggested 4 plus "one verified by re-grep"; live grep audit shows 3. The entry instructs the DELIVER crafter to re-grep at edit time and delete every match, with the rule "delete every match" surviving any future drift. |
 | **Medium** (`ClusterStatus` self-justifying) | Resolved | §3 handlers entry for `cluster_status` now carries the structural rationale inline: the in-memory counter, bump call site, and cross-writer race window all survive verbatim under any rename; pure-drop removes the surface that generates the class; activity-rate signals belong in Phase 5's metrics endpoint. Cross-references ADR-0020 §Considered alternatives §D for the full structural argument. |
 | **Medium** (snapshot proptest detail) | Resolved | Folded into U1. The §7 `snapshot_proptest.rs` entry already specifies the generator change (drop the index column); U1's revert-to-v1 framing makes the proptest revision shape explicit. |
-| **Medium** (OpenAPI regeneration command) | Resolved | §4 `openapi.yaml` entry now states explicitly: "Regenerate via `cargo xtask openapi`, then verify `cargo xtask openapi-check` passes. The regenerated YAML is checked in; the DELIVER crafter does NOT hand-edit `api/openapi.yaml`." |
+| **Medium** (OpenAPI regeneration command) | Resolved | §4 `openapi.yaml` entry now states explicitly: "Regenerate via `cargo openapi-gen`, then verify `cargo openapi-check` passes. The regenerated YAML is checked in; the DELIVER crafter does NOT hand-edit `api/openapi.yaml`." |
 | **Low** (CLI help-text cleanup) | Resolved | Folded into U3. New §5 entry for `crates/overdrive-cli/src/cli.rs` cites line 91 explicitly with the rustdoc revision. |
 
 No deferred issues. All review findings addressed in this revision pass.

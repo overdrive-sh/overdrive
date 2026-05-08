@@ -6,7 +6,7 @@
 //! `JobSpecInput` with the nested `resources` object and the
 //! tagged-driver `oneOf` carrying an `exec` variant. This is Layer 1
 //! of the two-layer `OpenAPI` defence — Layer 2 is the existing
-//! `cargo xtask openapi-check` CI gate that diffs the live render
+//! `cargo openapi-check` CI gate that diffs the live render
 //! against the checked-in `api/openapi.yaml`.
 //!
 //! This test calls `OverdriveApi::openapi()` directly, renders to YAML,

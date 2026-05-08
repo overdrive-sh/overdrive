@@ -30,9 +30,15 @@
           },
           {
             "type": "command",
-            "command": "bun run .claude/hooks/block-nextest-on-macos.ts",
+            "command": "bun run .claude/hooks/block-bare-nextest.ts",
             "timeout": 10,
-            "statusMessage": "Checking for bare `cargo nextest run` on macOS (use Lima)..."
+            "statusMessage": "Checking for bare `cargo nextest run` (use Lima)..."
+          },
+          {
+            "type": "command",
+            "command": "bun run .claude/hooks/block-bare-clippy.ts",
+            "timeout": 10,
+            "statusMessage": "Checking for bare `cargo clippy` (use Lima)..."
           },
           {
             "type": "command",
@@ -45,6 +51,12 @@
             "command": "bun run .claude/hooks/block-cargo-build.ts",
             "timeout": 10,
             "statusMessage": "Checking for `cargo build` (use `cargo check`)..."
+          },
+          {
+            "type": "command",
+            "command": "bun run .claude/hooks/block-bare-cargo-check.ts",
+            "timeout": 10,
+            "statusMessage": "Checking for bare `cargo check` (macOS → use Lima)..."
           }
         ]
       },

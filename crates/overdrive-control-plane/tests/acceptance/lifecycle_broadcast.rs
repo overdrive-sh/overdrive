@@ -240,7 +240,9 @@ proptest! {
             let tick = make_tick(0);
 
             // Dispatch — the shim writes N rows AND broadcasts N events.
-            dispatch(actions, driver.as_ref(), obs.as_ref(), &tx, &tick)
+            let dataplane: std::sync::Arc<dyn overdrive_core::traits::dataplane::Dataplane> = std::sync::Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new());
+            let writer_node = overdrive_core::id::NodeId::new("writer-1").expect("NodeId");
+            dispatch(actions, driver.as_ref(), obs.as_ref(), dataplane.as_ref(), &tx, &tick, &writer_node)
                 .await
                 .expect("dispatch must succeed");
 
@@ -293,9 +295,22 @@ async fn run_classifier_scenario(reason_text: &str, expected_reason: TransitionR
 
     let tick = make_tick(0);
 
-    dispatch(vec![action], driver.as_ref(), obs.as_ref(), &tx, &tick)
-        .await
-        .expect("dispatch must succeed even on driver failure (failure is recorded)");
+    let dataplane: std::sync::Arc<dyn overdrive_core::traits::dataplane::Dataplane> =
+        std::sync::Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new());
+
+    let writer_node = overdrive_core::id::NodeId::new("writer-1").expect("NodeId");
+
+    dispatch(
+        vec![action],
+        driver.as_ref(),
+        obs.as_ref(),
+        dataplane.as_ref(),
+        &tx,
+        &tick,
+        &writer_node,
+    )
+    .await
+    .expect("dispatch must succeed even on driver failure (failure is recorded)");
 
     // Assert the row.
     let rows = obs.alloc_status_rows().await.expect("read rows");
@@ -417,9 +432,20 @@ async fn stop_action_also_broadcasts_lifecycle_event() {
     // reconciler is the single source of every terminal claim.
     let action = Action::StopAllocation { alloc_id: alloc_id.clone(), terminal: None };
     let tick = make_tick(1);
-    dispatch(vec![action], driver.as_ref(), obs.as_ref(), &tx, &tick)
-        .await
-        .expect("dispatch must succeed");
+    let dataplane: std::sync::Arc<dyn overdrive_core::traits::dataplane::Dataplane> =
+        std::sync::Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new());
+    let writer_node = overdrive_core::id::NodeId::new("writer-1").expect("NodeId");
+    dispatch(
+        vec![action],
+        driver.as_ref(),
+        obs.as_ref(),
+        dataplane.as_ref(),
+        &tx,
+        &tick,
+        &writer_node,
+    )
+    .await
+    .expect("dispatch must succeed");
 
     let event = rx.try_recv().expect("broadcast event must arrive");
     assert_eq!(event.alloc_id, alloc_id);

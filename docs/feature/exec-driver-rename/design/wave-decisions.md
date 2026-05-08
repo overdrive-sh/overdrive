@@ -224,7 +224,7 @@ the cgroup boundary is still enforced.
   `build_command`).
 - Quality gates per step are the standard workspace gates:
   `cargo nextest run --workspace` (default lane);
-  `cargo test --doc --workspace`; `cargo xtask dst`;
+  `cargo test --doc --workspace`; `cargo dst`;
   `cargo xtask dst-lint`; `cargo clippy --workspace --all-targets
   --no-deps -- -D warnings`. The Lima sudo integration suite must
   stay green for step `01-02` because the cgroup-isolation burst

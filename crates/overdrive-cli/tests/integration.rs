@@ -29,9 +29,6 @@ mod integration {
     //   * S-WS-01 (happy path: real `/bin/sleep` → ConvergedRunning → exit 0)
     //   * S-WS-02 (REGRESSION TARGET KPI-02: real ENOENT → ConvergedFailed
     //     with byte-equal cause-class payload across streaming + snapshot)
-    // Both #[cfg(target_os = "linux")] — production `ExecDriver`
-    // requires real `tokio::process::Command::spawn`. macOS dev runs
-    // via `cargo xtask lima run --` per `crates/overdrive-cli/CLAUDE.md`.
     mod streaming_submit_broken_binary;
     // fix-converged-stopped-cli-arm — regression: ConvergedStopped
     // must terminate the streaming consumer with exit code 0; current

@@ -95,4 +95,15 @@ mod acceptance {
     // desired.desired_to_stop)` against the fixed JobLifecycle-internal
     // ceiling.
     mod job_lifecycle_terminal_decision;
+
+    // phase-2-xdp-service-map step 08-02 (Slice 08; ASR-2.2-04) —
+    // `ServiceMapHydrator::reconcile` decision tree. Pins the
+    // four-arm dispatch logic (Pending / Completed / Failed-same /
+    // Failed-different fingerprints) plus the per-service retry
+    // memory invariants: increment-on-dispatch, reset-on-convergence,
+    // GC-of-stale-services. Lives in `tests/` rather than `src/`
+    // because dst-lint scans `src/**/*.rs` for banned APIs even
+    // under `#[cfg(test)]`; `Instant::now()` for `TickContext.now`
+    // is the legitimate test-fixture exception.
+    mod service_map_hydrator_reconcile;
 }

@@ -16,12 +16,12 @@
 #![allow(clippy::expect_fun_call)]
 
 mod acceptance {
-    //! Acceptance scenarios for xtask — spans phase-1-foundation
-    //! (`dst_*`) and phase-1-control-plane-core (`openapi_gate`).
-    mod dst_clean_clone_green;
-    mod dst_harness_smoke;
+    //! Acceptance scenarios for xtask — phase-1-foundation `dst_lint_*`
+    //! gates. The `dst_*` subprocess scenarios moved to
+    //! `crates/overdrive-sim/tests/integration/` when the DST harness
+    //! binary relocated; the openapi gate moved to
+    //! `crates/overdrive-control-plane/tests/` alongside the openapi
+    //! library module.
     mod dst_lint_banned_apis;
     mod dst_lint_catches_reconciler_violation;
-    mod dst_seeded_reproduction;
-    mod openapi_gate;
 }

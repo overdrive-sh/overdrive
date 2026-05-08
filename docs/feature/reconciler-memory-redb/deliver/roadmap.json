@@ -242,16 +242,16 @@
         {
           "id": "01-07",
           "name": "DST invariants: ViewStoreRoundtripIsLossless, BulkLoadIsDeterministic, WriteThroughOrdering",
-          "description": "Adds three new invariants to crates/overdrive-sim/src/invariants/. ViewStoreRoundtripIsLossless: proptest-driven; for arbitrary View values, write_through then bulk_load returns byte-equal (covers serde-derive regressions, ciborium-version skew, schema-evolution oversights — per ADR-0035 §6). BulkLoadIsDeterministic: two bulk_load calls against the same store produce PartialEq-equal BTreeMap (catches iteration-order regressions). WriteThroughOrdering: under SimViewStore with injected fsync failure, the in-memory BTreeMap visible through ReconcilerRuntime is NOT updated (catches the inverse durability ordering). Wires into cargo xtask dst gate.",
-          "criteria": "Three new invariant variants in overdrive-sim::invariants::Invariant; each is exercised by cargo xtask dst on every PR; existing ReconcilerIsPure, AtLeastOneReconcilerRegistered, DuplicateEvaluationsCollapse continue to fire.",
+          "description": "Adds three new invariants to crates/overdrive-sim/src/invariants/. ViewStoreRoundtripIsLossless: proptest-driven; for arbitrary View values, write_through then bulk_load returns byte-equal (covers serde-derive regressions, ciborium-version skew, schema-evolution oversights — per ADR-0035 §6). BulkLoadIsDeterministic: two bulk_load calls against the same store produce PartialEq-equal BTreeMap (catches iteration-order regressions). WriteThroughOrdering: under SimViewStore with injected fsync failure, the in-memory BTreeMap visible through ReconcilerRuntime is NOT updated (catches the inverse durability ordering). Wires into cargo dst gate.",
+          "criteria": "Three new invariant variants in overdrive-sim::invariants::Invariant; each is exercised by cargo dst on every PR; existing ReconcilerIsPure, AtLeastOneReconcilerRegistered, DuplicateEvaluationsCollapse continue to fire.",
           "test_file": "crates/overdrive-sim/src/invariants/evaluators.rs",
           "scenario_name": "view_store_roundtrip_bulk_load_determinism_and_write_through_ordering_invariants",
           "acceptance_criteria": [
             "ViewStoreRoundtripIsLossless variant exists in overdrive-sim::invariants::Invariant; the evaluator is proptest-backed; covers JobLifecycleView and the unit-View case (NoopHeartbeat) at minimum",
             "BulkLoadIsDeterministic variant exists; the evaluator runs bulk_load twice against the same backing store and asserts BTreeMap equality (not just len equality)",
             "WriteThroughOrdering variant exists; the evaluator drives a write_through with SimViewStore::inject_fsync_failure → asserts the runtime's in-memory BTreeMap state did NOT advance for that target",
-            "cargo xtask dst executes all three new invariants in addition to the existing catalogue; failure of any one fails the gate",
-            "Each invariant prints its DST seed on failure; reproduction with cargo xtask dst --seed <N> is bit-identical",
+            "cargo dst executes all three new invariants in addition to the existing catalogue; failure of any one fails the gate",
+            "Each invariant prints its DST seed on failure; reproduction with cargo dst --seed <N> is bit-identical",
             "cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-sim --file crates/overdrive-sim/src/invariants/evaluators.rs kill rate ≥ 80%"
           ],
           "implementation_scope": [

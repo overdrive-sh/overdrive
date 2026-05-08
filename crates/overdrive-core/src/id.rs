@@ -205,7 +205,20 @@ define_label_newtype!(
 ///
 /// Construction validates the `spiffe://<trust-domain>/<path>` shape and
 /// lowercases the canonical form. The stored value is always lowercased.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 #[serde(try_from = "String", into = "String")]
 pub struct SpiffeId {
     canonical: String,
@@ -592,6 +605,259 @@ impl From<CorrelationKey> for String {
 }
 
 use std::fmt::Write as _;
+
+// -----------------------------------------------------------------------------
+// Phase 2.2 newtypes — `ServiceVip`, `ServiceId`, `BackendId`.
+// RED scaffolds per `docs/feature/phase-2-xdp-service-map/distill/
+// wave-decisions.md` DWD-4. Bodies panic until DELIVER fills them
+// per the carpaccio slice plan (Slice 02 / Slice 04).
+// -----------------------------------------------------------------------------
+
+/// Virtual IP a kernel-side XDP program matches incoming packets
+/// against. Stored host-order; converted at the kernel boundary
+/// per architecture.md § 11.
+///
+/// Userspace control-plane newtype only — `service_backends`
+/// observation rows continue to carry `vip: Ipv4Addr` as their
+/// wire-shape field; the hydrator wraps at the read boundary
+/// (architecture.md § 5).
+///
+/// # Wire form
+///
+/// `Display` emits the canonical `IpAddr` string form (e.g.
+/// `10.0.0.1`, `::1`). `FromStr` parses any [`std::net::IpAddr`]-
+/// compatible string. Empty input and non-IP strings surface as
+/// structured [`IdParseError`] variants.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[serde(try_from = "String", into = "String")]
+pub struct ServiceVip(std::net::IpAddr);
+
+impl ServiceVip {
+    /// Validating constructor over a [`std::net::IpAddr`].
+    ///
+    /// IPv4 is always accepted today; IPv6 is also accepted at
+    /// the type level (per architecture.md § 6 the IPv6 *kernel-
+    /// side* path is GH #155 deferral, not a userspace newtype
+    /// concern).
+    ///
+    /// The `Result` return is the project's newtype-completeness
+    /// shape (`development.md` § Newtype completeness — *No
+    /// infallible `new()` that silently accepts garbage*); even
+    /// where every input is currently valid, the return shape is
+    /// stable so future range-checks (e.g. rejecting multicast
+    /// or unspecified addresses) land additively.
+    #[allow(clippy::unnecessary_wraps, clippy::missing_const_for_fn)]
+    pub fn new(addr: std::net::IpAddr) -> Result<Self, IdParseError> {
+        Ok(Self(addr))
+    }
+
+    /// Inner [`std::net::IpAddr`].
+    #[must_use]
+    pub const fn get(&self) -> std::net::IpAddr {
+        self.0
+    }
+}
+
+impl Display for ServiceVip {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        Display::fmt(&self.0, f)
+    }
+}
+
+impl FromStr for ServiceVip {
+    type Err = IdParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.is_empty() {
+            return Err(IdParseError::Empty { kind: "ServiceVip" });
+        }
+        // Accept upper- / lower-case hex digits in IPv6 inputs and
+        // delegate to `IpAddr::from_str`. The canonical Display form
+        // emitted by `IpAddr` is already lowercase.
+        let canonical = s.to_ascii_lowercase();
+        let addr =
+            std::net::IpAddr::from_str(&canonical).map_err(|_| IdParseError::InvalidFormat {
+                kind: "ServiceVip",
+                expected: "an IPv4 or IPv6 address (e.g. 10.0.0.1)",
+            })?;
+        Ok(Self(addr))
+    }
+}
+
+impl TryFrom<String> for ServiceVip {
+    type Error = IdParseError;
+
+    fn try_from(raw: String) -> Result<Self, Self::Error> {
+        Self::from_str(&raw)
+    }
+}
+
+impl TryFrom<&str> for ServiceVip {
+    type Error = IdParseError;
+
+    fn try_from(raw: &str) -> Result<Self, Self::Error> {
+        Self::from_str(raw)
+    }
+}
+
+impl From<ServiceVip> for String {
+    fn from(v: ServiceVip) -> Self {
+        v.to_string()
+    }
+}
+
+/// Identity of a service for control-plane addressing. Maps 1:1
+/// to a `MAGLEV_MAP` outer-map key; backed by `u64` content-hash
+/// per architecture.md § 6 (the `(VIP, port, scope)` content-hash
+/// is computed upstream — the newtype itself is opaque).
+///
+/// # Wire form
+///
+/// `Display` emits the decimal `u64` representation. `FromStr`
+/// parses decimal `u64`. There is no case axis; the
+/// case-insensitivity rule from `development.md` § Newtype
+/// completeness applies only to human-typed string identifiers
+/// (matches the `BackendId` / `MaglevTableSize` precedent).
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[serde(transparent)]
+pub struct ServiceId(u64);
+
+impl ServiceId {
+    /// Validating constructor over the raw `u64`. Every `u64` is a
+    /// valid `ServiceId` — the newtype's role is type-system
+    /// distinctness, not runtime range-check. The `Result` return
+    /// is the project's newtype-completeness shape — see
+    /// [`ServiceVip::new`] for the same rationale.
+    #[allow(clippy::unnecessary_wraps, clippy::missing_const_for_fn)]
+    pub fn new(value: u64) -> Result<Self, IdParseError> {
+        Ok(Self(value))
+    }
+
+    /// Inner `u64`.
+    #[must_use]
+    pub const fn get(self) -> u64 {
+        self.0
+    }
+}
+
+impl Display for ServiceId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        Display::fmt(&self.0, f)
+    }
+}
+
+impl FromStr for ServiceId {
+    type Err = IdParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.is_empty() {
+            return Err(IdParseError::Empty { kind: "ServiceId" });
+        }
+        s.parse::<u64>().map(Self).map_err(|_| IdParseError::InvalidFormat {
+            kind: "ServiceId",
+            expected: "decimal u64 (0..=18446744073709551615)",
+        })
+    }
+}
+
+/// `BACKEND_MAP` key — a stable monotonic backend identifier
+/// shared across services per architecture.md § 6.
+///
+/// `u32` per architecture.md § 6 / § 10. Display emits the decimal
+/// `u32`; `FromStr` parses decimal `u32`. There is no case axis
+/// for a numeric identifier — the case-insensitivity rule from
+/// `development.md` § Newtype completeness applies only to
+/// human-typed string identifiers (matches the `ServiceId` /
+/// `MaglevTableSize` precedent).
+///
+/// # Wire form
+///
+/// `Serialize` / `Deserialize` use the transparent `u32`
+/// representation: JSON form is the bare integer, matching the
+/// `ServiceId` precedent for content-derived numeric IDs.
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    Hash,
+    PartialOrd,
+    Ord,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+#[serde(transparent)]
+pub struct BackendId(u32);
+
+impl BackendId {
+    /// Validating constructor over the raw `u32`. Every `u32` is a
+    /// valid `BackendId` — the newtype's role is type-system
+    /// distinctness, not runtime range-check. The `Result` return
+    /// is the project's newtype-completeness shape — see
+    /// [`ServiceVip::new`] for the same rationale.
+    #[allow(clippy::unnecessary_wraps, clippy::missing_const_for_fn)]
+    pub fn new(value: u32) -> Result<Self, IdParseError> {
+        Ok(Self(value))
+    }
+
+    /// Inner `u32`.
+    #[must_use]
+    pub const fn get(self) -> u32 {
+        self.0
+    }
+}
+
+impl Display for BackendId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        Display::fmt(&self.0, f)
+    }
+}
+
+impl FromStr for BackendId {
+    type Err = IdParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.is_empty() {
+            return Err(IdParseError::Empty { kind: "BackendId" });
+        }
+        s.parse::<u32>().map(Self).map_err(|_| IdParseError::InvalidFormat {
+            kind: "BackendId",
+            expected: "decimal u32 (0..=4294967295)",
+        })
+    }
+}
 
 // -----------------------------------------------------------------------------
 // Tests

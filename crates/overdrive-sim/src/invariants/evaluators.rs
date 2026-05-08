@@ -678,22 +678,8 @@ pub fn evaluate_at_least_one_reconciler_registered(registered_count: usize) -> I
 // ---------------------------------------------------------------------------
 
 /// Observable broker counters the `DuplicateEvaluationsCollapse`
-/// evaluator inspects.
-///
-/// Mirrors the shape of
-/// `overdrive_control_plane::eval_broker::BrokerCounters` but is
-/// redefined locally so the sim crate does not take a cyclic dependency
-/// on `overdrive-control-plane` (which already depends on
-/// `overdrive-sim` via `observation_wiring`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct BrokerCountersSnapshot {
-    /// Number of evaluations currently pending dispatch.
-    pub queued: u64,
-    /// Cumulative count of superseded evaluations.
-    pub cancelled: u64,
-    /// Cumulative count of dispatched evaluations.
-    pub dispatched: u64,
-}
+/// evaluator inspects. Re-exported from `overdrive_core::eval_broker`.
+pub type BrokerCountersSnapshot = overdrive_core::eval_broker::BrokerCounters;
 
 /// Evaluate `DuplicateEvaluationsCollapse`.
 ///
@@ -820,29 +806,14 @@ pub fn evaluate_broker_drain_order_is_deterministic(
 // DispatchRoutingIsNameRestricted (fix-dst-dispatch-routing-invariant 01-01)
 // ---------------------------------------------------------------------------
 
-/// Evaluation-shape mirror for the
-/// `DispatchRoutingIsNameRestricted` evaluator.
-///
-/// Mirrors `overdrive_control_plane::eval_broker::Evaluation` rather
-/// than importing it; sim crate stays a leaf adapter (per CLAUDE.md
-/// crate classes / ADR-0004 sim-host split). The harness submits these
-/// to its mirrored dispatcher and feeds the result into this evaluator.
-/// Sibling to [`BrokerCountersSnapshot`]: that mirror covers broker
-/// counters; this one covers the eval shape the dispatcher consumes.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Evaluation {
-    /// Reconciler this evaluation is keyed against. The dispatcher MUST
-    /// invoke this — and only this — reconciler against `target`.
-    pub reconciler: overdrive_core::reconciler::ReconcilerName,
-    /// Target resource the reconciler converges.
-    pub target: overdrive_core::reconciler::TargetResource,
-}
+/// Evaluation type used by the `DispatchRoutingIsNameRestricted`
+/// evaluator. Re-exported from `overdrive_core::eval_broker`.
+pub use overdrive_core::eval_broker::Evaluation;
 
 /// Snapshot of dispatcher invocations during one tick.
 ///
 /// Each entry is one `(reconciler, target)` tuple from a single
-/// `run_convergence_tick` invocation — captured by the harness mirror,
-/// not by importing `overdrive-control-plane`. Sibling to
+/// `run_convergence_tick` invocation. Sibling to
 /// [`BrokerCountersSnapshot`] (broker-side entry collapse) and
 /// [`BrokerDrainOrderSnapshot`] (broker-side drain order); all three
 /// coexist and none subsumes another.

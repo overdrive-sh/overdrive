@@ -466,7 +466,7 @@ Maps to: `crates/overdrive-control-plane/tests/acceptance/action_shim_restart_us
 ### Scenario @openapi_propagation — Generated OpenAPI schema includes `JobSpecInput` with nested `resources` object and tagged-driver `oneOf`
 
 ```gherkin
-When `cargo xtask openapi-gen` is invoked (programmatically via
+When `cargo openapi-gen` is invoked (programmatically via
         `xtask::openapi::generate_yaml()`)
 Then the rendered YAML contains a `JobSpecInput` schema
   And the schema's `required` list contains "id", "replicas", and "resources"

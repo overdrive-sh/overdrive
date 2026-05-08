@@ -344,7 +344,7 @@ The paper's figure 6 labels components as "verified executable" vs "trusted" vs 
 **Confidence**: High (primary project docs)
 
 **Analysis — CI integration shape for Overdrive**:
-- Verus is invoked as `verus` (a separate binary), not `cargo verify`. Natural Overdrive integration: `cargo xtask verify` subcommand, alongside existing `cargo xtask dst`, `cargo xtask bpf-unit`, `cargo xtask integration-test vm`.
+- Verus is invoked as `verus` (a separate binary), not `cargo verify`. Natural Overdrive integration: `cargo xtask verify` subcommand, alongside existing `cargo dst`, `cargo xtask bpf-unit`, `cargo xtask integration-test vm`.
 - Rust toolchain pin: the verified crates must build against the Verus-fork-compatible toolchain. Practical pattern: isolate verified crates (e.g., `crates/overdrive-reconcilers-verified/`) into a sub-workspace with its own `rust-toolchain.toml` pinning Verus's supported toolchain. Main workspace keeps tracking stable Rust.
 - Verify-time budget: Anvil controllers verify in 154–520 seconds (parallel). 15 controllers × ~500 s ≈ ~7500 seconds ≈ 2+ hours. **Not credible per-PR; fits testing.md's nightly job envelope.** Incremental verification (only rebuild proofs for changed code) is a known Verus feature but was not separately quantified in sources.
 

@@ -14,6 +14,11 @@ use overdrive_sim::{Harness, Invariant};
 /// exercises across 16 seeds; this test pins it for one specific seed
 /// so a regression shows up under a plain `cargo test` without
 /// requiring proptest to happen to pick the broken case.
+///
+/// Step 08-02 GREEN handed off: the hydrator's RED scaffold is gone
+/// and the downstream-fallout `#[should_panic]` attribute is removed
+/// per `.claude/rules/testing.md` § "Downstream fallout on
+/// pre-existing tests" handoff procedure.
 #[test]
 fn harness_run_is_deterministic_under_fixed_seed() {
     let a = Harness::new().run(42).expect("harness must compose");

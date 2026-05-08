@@ -7,7 +7,7 @@ cannot. None of them substitutes for any other.
 Tier 1  DST in-process            turmoil + Sim* traits        (§21)
 Tier 2  BPF unit tests            BPF_PROG_TEST_RUN            (§22)
 Tier 3  Real-kernel integration   QEMU + kernel matrix         (§22)
-Tier 4  Verifier + perf gates     veristat, xdp-bench, PREVAIL (§22)
+Tier 4  Verifier + perf gates     verifier-regress, xdp-bench, PREVAIL (§22)
 ```
 
 ---
@@ -203,13 +203,13 @@ Do not let a slow test sit in the default lane "until it gets fixed."
 > examples. Nothing else. If you think you need `cargo test` elsewhere,
 > you are wrong — reach for `cargo nextest run` instead.
 
-> **On macOS, every `cargo nextest run` must go through Lima.**
+> **Every `cargo nextest run` must go through Lima.**
 >
-> `cargo nextest run` is **blocked on macOS** by a pre-tool hook
-> (`.claude/hooks/block-nextest-on-macos.ts`) unless it is already
+> `cargo nextest run` is **blocked** by a pre-tool hook
+> (`.claude/hooks/block-bare-nextest.ts`) unless it is already
 > wrapped in `cargo xtask lima run --` or uses `--no-run`.
 >
-> **Rewrite your command before submitting it on macOS:**
+> **Rewrite your command before submitting it:**
 >
 > | ❌ don't | ✅ do |
 > |---|---|
@@ -218,14 +218,14 @@ Do not let a slow test sit in the default lane "until it gets fixed."
 > | `cargo nextest run -E 'test(X)'` | `cargo xtask lima run -- cargo nextest run -E 'test(X)'` |
 > | `cargo nextest run --workspace` | `cargo xtask lima run -- cargo nextest run --workspace` |
 >
-> **Allowed on macOS without Lima:**
+> **Allowed without Lima:**
 > - `cargo nextest run ... --no-run` — compile-check only; no Linux surface involved.
 > - `cargo xtask lima run -- cargo nextest run ...` — already routed.
 >
-> See § "Running tests on macOS — Lima VM" below for the rationale.
+> See § "Running tests — Lima VM" below for the rationale.
 
 **Run test commands directly. Do not background them.**
-`cargo nextest run`, `cargo test --doc`, `cargo xtask dst`,
+`cargo nextest run`, `cargo test --doc`, `cargo dst`,
 `cargo xtask bpf-unit`, `cargo xtask integration-test`, and every other
 test invocation goes through the `Bash` tool with
 `run_in_background: false` (the default). Wait for the command to finish;
@@ -320,7 +320,7 @@ Rules for mutation specifically:
 
 This exception is narrow. Nextest, `cargo test --doc`, `cargo xtask
 dst`, `cargo xtask bpf-unit`, `cargo xtask integration-test vm`,
-`cargo xtask verifier-regress`, and `cargo xtask xdp-perf` all stay
+`cargo verifier-regress`, and `cargo xtask xdp-perf` all stay
 foreground.
 
 ---
@@ -329,35 +329,135 @@ foreground.
 
 Outside-In TDD produces intentionally-failing test scaffolds: new
 `SimInvariant` variants, new arms in an exhaustive match, new trait
-methods the harness calls before the implementation exists. Mark the
-unimplemented branch with `panic!("Not yet implemented -- RED
-scaffold")` (or `todo!("RED scaffold: ...")`). The panic IS the
-specification of work not yet done.
+methods the harness calls before the implementation exists. The
+scaffold IS the specification of work not yet done — and it must be
+**discoverable, machine-checkable, and hook-compatible**.
 
-**Downstream fallout on pre-existing tests is expected and correct.**
+### Test-side scaffolds — `#[should_panic(expected = "RED scaffold")]`
+
+For Rust `#[test]` / `#[tokio::test]` bodies, mark every RED scaffold
+with the `#[should_panic(expected = "RED scaffold")]` attribute and a
+panic body that names the scenario:
+
+```rust
+#[test]
+#[should_panic(expected = "RED scaffold")]
+fn service_map_hit_returns_xdp_tx_with_rewritten_headers() {
+    panic!("Not yet implemented -- RED scaffold (S-2.2-04 / SERVICE_MAP hit returns XDP_TX)");
+}
+```
+
+This is the **only** sanctioned RED test shape. Three reasons:
+
+1. **The expected-message check IS the signature.** Removing the
+   `panic!()` line without implementing the assertions causes the
+   `#[should_panic]` attribute to fail loud at test time — the test
+   becomes red the moment the scaffold drifts from spec.
+2. **Hook-compatible.** `cargo nextest run` reports the test as PASS;
+   `clippy -D warnings` is happy on the test side; lefthook
+   pre-commit / pre-push do not need `--no-verify` to land
+   sibling work. The "GREEN-on-RED commit blocked" failure mode is
+   structurally absent.
+3. **GREEN transition is explicit.** Replacing `#[should_panic(...)]`
+   with the real assertions and dropping the `panic!()` line is a
+   one-commit change a reviewer can spot at a glance.
+
+Do NOT use bare `panic!("RED scaffold ...")` without the
+`#[should_panic]` attribute — that leaves the test red at the bar
+and forces every adjacent commit to skip pre-commit hooks. That
+shape is **deprecated**; existing instances are migrated on touch.
+
+Discovery: list every pending scenario via
+`grep -rn 'should_panic.*RED scaffold' crates/` (or wire an xtask
+report).
+
+### Production-side scaffolds — `todo!("RED scaffold: ...")`
+
+For production code that the test will exercise (a new `match` arm,
+a new trait-method body, a new pure-function body) keep
+`todo!("RED scaffold: <one-line spec>")`. The corresponding test
+panics with `not yet implemented` (the std `todo!` panic message)
+which is a substring of `"RED scaffold"` only via the descriptive
+text, so the test's `#[should_panic(expected = "RED scaffold")]`
+matches because the test body's panic message DOES contain the
+phrase. (If the test body simply calls a `todo!()`-bearing
+production fn directly without a panic of its own, use
+`#[should_panic(expected = "not yet implemented")]` — match the
+panic that will actually fire.)
+
+If clippy `-D warnings` flags `clippy::todo` on a production-side
+scaffold, gate the file or module with
+`#[expect(clippy::todo, reason = "RED scaffold; lands GREEN in step <id>")]`
+(NOT `allow` — `expect` self-removes when the lint stops firing,
+which is the natural moment the scaffold goes GREEN). Crates with
+many concurrent scaffolds may carry a crate-level
+`#![cfg_attr(not(test), expect(clippy::todo, reason = "..."))]`
+during the active feature; strip it once Slice 08 (or whichever
+slice closes the last scaffold) lands.
+
+### Downstream fallout on pre-existing tests
+
 When a generic harness iterates every variant — DST walking every
 `SimInvariant`, a property test enumerating every action, a match
-covering every driver class — the new RED branch makes pre-existing
-tests panic the moment they touch it. Do NOT "fix" this by replacing
-the `panic!` with a neutral stub (`Ok(())`, `Verdict::Allow`, `return
-vec![]`). A neutral stub turns the bar green and masks the
-unfinished state — the whole point of the RED phase is that the bar
-is red until the implementation lands.
+covering every driver class — the new RED branch causes adjacent
+tests to panic the moment they touch it. Do NOT "fix" this by
+replacing the `panic!` with a neutral stub (`Ok(())`,
+`Verdict::Allow`, `return vec![]`). A neutral stub turns the bar
+green and masks the unfinished state.
 
-When a pre-commit or pre-push hook fires on a RED scaffold:
+When the panicking adjacent test is ALSO a `#[test]` body, give it
+the same `#[should_panic(expected = "RED scaffold")]` attribute
+until its dependency lands. That keeps the bar green AND preserves
+the structural signature: removing the underlying `todo!()` /
+`panic!()` will (a) fire a different panic message, (b) trip
+`#[should_panic]`, and (c) flag the test for review at the moment
+the scaffold goes GREEN.
 
-- **Do not** swap the `panic!` for a neutral stub to satisfy the gate.
-- **Do not** add `#[ignore]` to the pre-existing tests the new
-  scaffold now panics. That hides a regression surface the moment the
-  scaffold goes GREEN — the paired tests are precisely what will
-  validate the implementation.
-- **Commit with `git commit --no-verify`** and call it out explicitly
-  in the commit message or user-facing summary. Intentionally-RED
-  commits are one of the explicit exceptions to "never skip hooks":
-  forcing green with stubs is worse than acknowledging red. Full
-  pre-push lefthook and CI still catch anything that shouldn't ship;
-  the pre-commit gate is here to catch accidents, not to block the
-  GREEN-next-commit loop.
+When the panicking surface is NOT a test (e.g., a `dst-lint` walk
+that loads every `Invariant`), the scaffold author IS expected to
+extend the harness — add the new variant, route to the new
+`Invariant`'s `evaluate()` body which itself `todo!()`s with the
+RED scaffold message, and keep the harness's exhaustive `match`
+intact. Do NOT short-circuit the harness with an early return.
+
+### What about `#[ignore]`?
+
+`#[ignore]` is only correct for tests waiting on **external**
+resources the implementation cannot synthesize (real BPF ELF that
+the upstream `xtask bpf-build` pipeline doesn't yet emit; a kernel
+matrix only available in CI; an integration target whose dependency
+is genuinely missing). When the blocker is "the production code
+doesn't exist yet," `#[should_panic(expected = "RED scaffold")]` is
+the right tool — it keeps the test compiled, exercised by the
+runner on every PR, and structurally tied to the panic message
+that matches the scaffold spec. Reach for `#[ignore]` only when the
+test cannot run at all on the current target.
+
+Every `#[ignore]` carries a `reason` string naming the unblocking
+step or external resource:
+`#[ignore = "blocked on step 02-03 — real BPF ELF with .BTF section"]`.
+
+### Pre-commit and pre-push hooks
+
+With the `#[should_panic]` convention in place, pre-commit /
+pre-push lefthook should run cleanly on RED scaffolds: tests pass,
+clippy is appeased by `#[expect(clippy::todo, ...)]` on production
+todos. `git commit --no-verify` is therefore **not** the standard
+escape hatch and is explicitly blocked by
+`.claude/hooks/block-git-commit-no-verify.ts`. If a hook still
+fires:
+
+- **Diagnose first.** A clippy / nextest failure that surfaces is
+  a real bug in the change, not a RED-scaffold side effect.
+- **Fix the root cause.** Add the missing `#[should_panic]`
+  attribute, swap a deprecated bare `panic!()` test for the new
+  shape, or scope an `#[expect(clippy::todo, ...)]` to the
+  scaffolded module.
+- **Last resort: explicit user approval.** If a genuinely
+  unfixable hook collision blocks landing (e.g., a third-party
+  pre-commit hook bug), surface it to the user and request
+  `--no-verify` only with their explicit approval recorded in the
+  commit message.
 
 ---
 
@@ -627,7 +727,7 @@ Rules:
 ### Seeding and reproducibility
 
 - Every DST test takes a seed. On failure, the harness prints the seed.
-- `cargo xtask dst --seed <N>` reproduces bit-for-bit.
+- `cargo dst --seed <N>` reproduces bit-for-bit.
 - Flaky DST is a bug in the sim layer, never a "just rerun it." Fix or
   file.
 
@@ -764,7 +864,7 @@ kill-rate gate. Invoking `cargo mutants` directly skips all of that.
 **On macOS: every mutation invocation that includes `--features
 integration-tests` MUST be prefixed with `cargo xtask lima run --`** —
 same Lima requirement that governs `cargo nextest run --features
-integration-tests` (see § "Running tests on macOS — Lima VM" below).
+integration-tests` (see § "Running tests — Lima VM" below).
 The integration-tests-gated test surface is
 `#[cfg(target_os = "linux")]`; on macOS those tests compile (with
 `--no-run`) but the runtime surface is unreachable, so a mutation run
@@ -981,6 +1081,21 @@ reviewed per-PR, not aggregated across releases.
   per crate is stored under `mutants-baseline/main/`. A drop > 2
   percentage points fails the PR even if absolute kill rate is still
   ≥ 80% — trend matters.
+- **BPF-object-dependent crates work via env override.** cargo-mutants
+  copies the source tree into a per-mutant scratch directory but does
+  NOT copy `target/`. Crates whose `build.rs` depends on a path
+  produced by `cargo xtask bpf-build`
+  (`target/xtask/bpf-objects/overdrive_bpf.o`) would otherwise mark
+  every mutant unviable. The wrapper sets `OVERDRIVE_BPF_OBJECT` to
+  the absolute path of the original tree's BPF object on every
+  cargo-mutants invocation; `crates/overdrive-dataplane/build.rs`
+  reads the env var first and falls back to the workspace-relative
+  path when unset. This affects mutation runs only — regular
+  `cargo {check,test,build}` is unchanged. The env-var approach was
+  chosen over `--copy-target` (multi-GB copy per mutant) and
+  `--in-place` (SIGKILL-mid-run leaves mutated source on disk).
+  Future BPF-object-dependent crates (e.g. when Tier 2 / Tier 3 add
+  more userspace loaders) should consult the same env var.
 
 ### What it's NOT for
 
@@ -994,7 +1109,7 @@ reviewed per-PR, not aggregated across releases.
 - **Performance assertions.** A mutation that removes an optimisation
   may still pass correctness tests. Performance regressions are Tier 4's
   job.
-- **`cargo xtask dst` / Tier 3 integration.** `cargo-mutants` reruns
+- **`cargo dst` / Tier 3 integration.** `cargo-mutants` reruns
   the unit suite per mutation under `--test-tool=nextest` (matches the
   project runner); DST and real-kernel tests are too slow for the
   per-mutation budget and are excluded from the mutants run. Doctests
@@ -1059,19 +1174,32 @@ kernel requires an ADR.
 - GitHub Actions runners work with `--qemu-disable-kvm`; self-hosted
   KVM-capable runners optional for latency budget.
 
-### Running tests on macOS — Lima VM
+### Running tests — Lima VM
 
-`cargo nextest run` does not work on macOS. ProcessDriver, control-plane
-cgroup management, eBPF programs, and every `#[cfg(target_os = "linux")]`
-test surface require a real Linux kernel plus cgroup v2. macOS-side
-`--no-run` catches type and wiring errors but not runtime or permission
-issues — every shipped test must be exercised on Linux at least once before
-merge, and the Lima VM is the canonical inner-loop path.
+All test execution goes through the Lima VM for reproducibility.
+ProcessDriver, control-plane cgroup management, eBPF programs, and every
+`#[cfg(target_os = "linux")]` test surface require a real Linux kernel
+plus cgroup v2. Running tests directly on the host — even on Linux —
+gives a degraded signal: the toolchain may differ, kernel version may
+vary, and system state can leak between runs. The Lima VM is the
+canonical inner-loop path for all platforms (macOS and Linux).
 
-A pre-tool hook (`.claude/hooks/block-nextest-on-macos.ts`) enforces this
-mechanically: bare `cargo nextest run` on macOS is blocked at the
-tool-call boundary. The hook allows only `cargo xtask lima run -- cargo
-nextest run ...` and the `--no-run` compile-check form.
+A pre-tool hook (`.claude/hooks/block-bare-nextest.ts`) enforces this
+mechanically: bare `cargo nextest run` is blocked at the tool-call
+boundary on all platforms. The hook allows only `cargo xtask lima run
+-- cargo nextest run ...` and the `--no-run` compile-check form.
+
+The same Lima discipline extends to compile-only commands on macOS:
+`cargo check` is blocked by `.claude/hooks/block-bare-cargo-check.ts`
+and `cargo clippy` by `.claude/hooks/block-bare-clippy.ts` unless
+routed through `cargo xtask lima run --`. The cargo-check hook is a
+no-op on Linux — the host already matches the canonical compile
+environment — but macOS host rustc resolves
+`#[cfg(target_os = "linux")]` items differently and skips Linux-gated
+`build.rs` steps, so a green check on the macOS host is not the same
+signal as a green check inside Lima. See
+`.claude/rules/development.md` § "Compile-checking" for the rationale
+applied to `cargo check` specifically.
 
 **Where the VM is defined.** `infra/lima/overdrive-dev.yaml` describes
 the project's standard dev VM (Ubuntu 24.04, kernel 6.8, cgroup v2,
@@ -1212,7 +1340,7 @@ Every new eBPF program lands with the coverage below or it does not merge:
 
 ## Tier 4 — Verifier and Performance Gates
 
-### Verifier complexity (`veristat`)
+### Verifier complexity (`cargo verifier-regress`)
 
 - Full BPF corpus compiled with worst-case feature flags, loaded into every
   matrix kernel.
@@ -1222,6 +1350,36 @@ Every new eBPF program lands with the coverage below or it does not merge:
 - Verifier behaviour changes across kernel releases. The only guard is
   loading the corpus into every kernel in the matrix. Do not rely on a
   single-kernel verifier-pass signal.
+
+**Signal source.** The gate reads aya's
+`ProgramInfo::verified_instruction_count` after loading each program —
+kernel ≥5.16 surfaces `bpf_prog_info.verified_insns` via
+`BPF_OBJ_GET_INFO_BY_FD`. This is the same field veristat surfaces as
+its `TOTAL_INSNS` column; both come from the kernel verifier's own
+accounting. The gate bypasses libbpf-based tools (`veristat`,
+`bpftool prog loadall`) because libbpf 1.0+ removed the legacy
+`SEC("maps")` parser and aya 0.13.x still emits that section shape —
+every libbpf-linked tool rejects aya ELFs with
+`libbpf: elf: legacy map definitions in 'maps' section are not
+supported by libbpf v1.0+`. Tracking
+[aya issue #913](https://github.com/aya-rs/aya/issues/913) for the
+upstream resolution; HashMap PR
+[#1367](https://github.com/aya-rs/aya/pull/1367) and HashOfMaps PR
+[#1446](https://github.com/aya-rs/aya/pull/1446) collectively close it
+once they merge and ship in a tagged aya release. When that lands the
+gate may pivot to `veristat` + its `peak_states` /
+`max_states_per_insn` columns, which `bpf_prog_info` UAPI does not
+expose — those are the only signal lost under the current path.
+
+**Where the gate lives.**
+`crates/overdrive-dataplane/bin/verifier_regress.rs` (the binary) +
+`crates/overdrive-dataplane/src/verifier_budget.rs` (the pure decision
+fn). Invoked via the `cargo verifier-regress` alias. NOT in xtask,
+because xtask cannot depend on `overdrive-*` crates per
+`.claude/rules/development.md` § "xtask is build / test / dev
+orchestration, NOT a runtime entry point" — and the gate must load the
+BPF object via aya, which needs `overdrive-dataplane`'s
+`HashOfMapsHandle` for the `pinning = ByName` workaround.
 
 ### XDP performance (`xdp-bench`)
 
@@ -1240,6 +1398,16 @@ Every new eBPF program lands with the coverage below or it does not merge:
 - Fails the build when PREVAIL disagrees with the kernel verifier's
   accept/reject decision.
 - This defends against verifier bugs, not just program bugs.
+
+---
+
+## Debugging real-kernel failures
+
+Inner-loop kernel debugging (pwru, per-skb tracing, drop-reason
+capture) and the reasoning discipline around it live in
+`.claude/rules/debugging.md`. The four-tier test stack here is the
+gate; debugging is what happens when a test fails and the gate
+did not predict where to look.
 
 ---
 
@@ -1272,10 +1440,10 @@ Tests and chaos share the fault definitions; a fault is specified once.
 Per-PR (critical path ≈ 15 minutes):
   A1 cargo nextest run --workspace       unit + proptest, no BPF       (s)
   A2 cargo test --doc --workspace        rustdoc examples              (s)
-  B  cargo xtask dst                     Tier 1                        (min)
+  B  cargo dst                     Tier 1                        (min)
   C  cargo xtask bpf-unit                Tier 2                        (min)
   D  cargo xtask integration-test vm     Tier 3, kernel matrix         (10 min)
-  E  cargo xtask verifier-regress        Tier 4 — veristat             (min)
+  E  cargo verifier-regress              Tier 4 — aya ProgramInfo      (min)
      cargo xtask xdp-perf                Tier 4 — xdp-bench            (min)
   F  cargo xtask mutants --diff origin/main
                                          diff-scoped (nextest per      (min)

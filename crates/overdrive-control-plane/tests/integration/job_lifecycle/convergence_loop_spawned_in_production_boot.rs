@@ -126,10 +126,6 @@ async fn submitted_job_reaches_running_via_real_server_boot() {
         bind: "127.0.0.1:0".parse().expect("parse bind addr"),
         data_dir,
         operator_config_dir: operator_config_dir.clone(),
-        // Per ADR-0034 the in-binary cgroup escape hatch is gone; on
-        // macOS the pre-flight is a `#[cfg(target_os = "linux")]` no-op,
-        // and on Linux this test runs via `cargo xtask lima run --`
-        // against the bundled VM (root + delegated cgroups).
         tick_cadence: Duration::from_millis(100),
         clock: clock.clone(),
     };

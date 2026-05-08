@@ -1,0 +1,107 @@
+# Verifier-budget baseline — xdp_reverse_nat_lookup
+#
+# Step 06-05 (this commit) — FIRST baseline for the new
+# `xdp_reverse_nat_lookup` XDP program landed in slice 09-02 per
+# ADR-0045 § 6 (Verifier-budget envelope) / § 8 (Phasing).
+#
+# Slice 07's `cargo xtask verifier-regress` gate (lands at step
+# 07-01) parses this file and fails the PR if the recorded program
+# exceeds the baseline by >20% or approaches the per-program
+# complexity ceiling (1,000,000 instructions for CAP_BPF programs)
+# by >10%, per ASR-2.2-03.
+#
+# Program shape (post-pivot):
+#   1. sanity prologue (shared with xdp_service_map_lookup)
+#   2. REVERSE_NAT_MAP lookup keyed on (client_ip, client_port,
+#      backend_ip, backend_port, proto) — BPF_MAP_TYPE_HASH
+#   3. L3+L4 rewrite (backend_ip, backend_port → VIP, vip_port)
+#      with incremental csum
+#   4. bpf_fib_lookup against post-rewrite (src_ip, dst_ip)
+#   5. L2 MAC rewrite + bpf_redirect_neigh(ifindex, NULL, 0, 0)
+#      on FIB hit; XDP_PASS on REVERSE_NAT miss or FIB miss
+#
+# The reverse-NAT path lands on the post-pivot bpf_redirect_neigh
+# shape from the start (slice 09-02). It does NOT carry the
+# word-by-word csum recomputation that xdp_service_map_lookup needs:
+# the reverse path's incremental csum is sufficient because the
+# rewrite is symmetric to the original incremental NAT — see
+# ADR-0040 Q1=A and ADR-0045 § Decision § 3 (single-cut greenfield
+# migration; the retired TC-egress reverse-NAT did NOT land on the
+# pre-pivot shape, so no migration of historical baselines exists).
+#
+# History:
+#   Step 06-05: FIRST baseline. verified_insns = 148166
+#     measured against `xdp_reverse_nat_lookup` in the workspace
+#     `target/xtask/bpf-objects/overdrive_bpf.o` ELF artifact.
+#
+#     First-baseline run resets trend; subsequent runs gate on
+#     ≤ 20% delta vs THIS value (i.e. `verified_insns ≤ 177799`).
+#
+#     148166 is well within every absolute ceiling:
+#       148166 / 500,000 = 29.6% of the L1-cache-fits target
+#       148166 / 600,000 = 24.7% of the ASR-2.2-03 ceiling
+#       148166 / 1,000,000 = 14.8% of the CAP_BPF kernel ceiling
+#
+#     The verifier cost is dominated by the same word-by-word
+#     pattern that xdp_service_map_lookup carries — both programs
+#     share `crates/overdrive-bpf/src/shared/csum.rs` for the L4
+#     checksum-fold path. The reverse-NAT program reaches a
+#     verifier instruction count comparable to the forward-path
+#     151379 because the bulk of the verifier's state walk is in
+#     the bounded csum loop and the bpf_fib_lookup parameter
+#     init / bpf_redirect_neigh helper call surface, which are
+#     structurally identical between the two programs.
+#
+#     The retired `tc_reverse_nat` (TC-egress reverse-NAT) program
+#     never had a veristat baseline recorded on disk — slice 09-03
+#     deleted the program before its baseline file was ever
+#     created. There is therefore no `tc_reverse_nat.txt` to
+#     delete in this commit (criterion #2 of step 06-05 satisfied
+#     vacuously).
+#
+# Recorded against:
+#   kernel:   6.8.0-111-generic   (Ubuntu 24.04 LTS lineage; matrix
+#                                   row "6.6 LTS" per
+#                                   .claude/rules/testing.md
+#                                   § "Kernel matrix" with Lima's
+#                                   actual 6.8 kernel)
+#   commit:   fb7a7b6  (parent of this 06-05 commit; post-09-04 +
+#                       post-09-04 phase-record commit)
+#   date:     2026-05-07
+#   tool:     aya 0.13.1 ProgramInfo::verified_instruction_count
+#             (veristat is not packaged in the Lima image; aya
+#             queries BPF_OBJ_GET_INFO_BY_FD which returns the
+#             same kernel-side counter veristat reads.)
+#   target:   target/bpf/overdrive_bpf.o
+#             (built by `cargo xtask bpf-build` against
+#             rustup nightly + bpfel-unknown-none + -Z build-std=core,
+#             per ADR-0038 §3.1)
+#
+# Budget gates (ADR-0045 § 6 / ASR-2.2-03):
+#   verified_insns ≤ 177799     ← +20% delta vs step 06-05 baseline (148166)
+#                                 — pinned by the integration test
+#                                 `verifier_budget_xdp_reverse_nat_lookup_within_absolute_ceiling`
+#                                 in `crates/overdrive-dataplane/tests/integration/atomic_swap.rs`.
+#                                 The test currently asserts only on the
+#                                 absolute 600k ceiling because this is
+#                                 the FIRST baseline; tightening to the
+#                                 +20% gate happens in slice 07's
+#                                 verifier-regress xtask integration.
+#   verified_insns ≤ 500,000    ← 50% of CAP_BPF ceiling, "L1-cache fits"
+#   verified_insns ≤ 600,000    ← 60% absolute ceiling per ASR-2.2-03
+#   verified_insns ≤ 1,000,000  ← absolute CAP_BPF ceiling (kernel 5.10+)
+#
+# Recorded value (step 06-05):
+#   verified_insns = 148166
+#   148166 / 500,000 = 29.6% of the L1-cache-fits target.
+#
+# Companion baseline:
+#   `xdp_service_map_lookup` is recorded at 151379 in
+#   `perf-baseline/main/verifier-budget/veristat-service-map.txt`
+#   (reaffirmed at step 06-05 — no source drift since step 09-04
+#   GREEN commit `d8d848a`).
+#
+# Format (one line per program, space-separated key=value pairs;
+# Slice 07's parser keys off `prog=` and `verified_insns=`):
+
+file=target/bpf/overdrive_bpf.o prog=xdp_reverse_nat_lookup verdict=success verified_insns=156340

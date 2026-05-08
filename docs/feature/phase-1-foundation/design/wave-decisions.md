@@ -270,7 +270,7 @@ artifacts go, and how is the seed surfaced?
 **Chosen**: **D. xtask wrapper; seed on first line; text log + JSON
 summary both uploaded as CI artifacts.** See ADR-0006.
 
-**One-liner**: One canonical invocation (`cargo xtask dst`); seed
+**One-liner**: One canonical invocation (`cargo dst`); seed
 preserved even on killed runs; dashboard-parseable.
 
 ---

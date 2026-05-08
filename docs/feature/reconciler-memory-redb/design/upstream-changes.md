@@ -211,9 +211,9 @@ The new invariants from wave-decisions.md §D6 add to the Tier 1
 catalogue:
 
 - `ViewStoreRoundtripIsLossless` — proptest-backed, runs under
-  `cargo xtask dst`.
-- `BulkLoadIsDeterministic` — runs under `cargo xtask dst`.
-- `WriteThroughOrdering` — runs under `cargo xtask dst` with
+  `cargo dst`.
+- `BulkLoadIsDeterministic` — runs under `cargo dst`.
+- `WriteThroughOrdering` — runs under `cargo dst` with
   `SimViewStore`'s injected fsync-failure shape.
 
 The existing `ReconcilerIsPure` invariant continues to fire; the

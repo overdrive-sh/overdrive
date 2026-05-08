@@ -47,11 +47,11 @@ A secondary contributing factor: the harness's `harness_registered_reconcilers` 
 
 ## Verification
 
-- **Regression test (DST tier)** — `dispatch-routing-is-name-restricted` runs on every `cargo xtask dst` pass. Pre-fix: the invariant did not exist; the §8 dispatch-routing contract had no DST-tier witness. Post-fix: 15 invariants pass including the new one; the four-branch evaluator catches every fan-out / wrong-routing / cardinality regression shape.
+- **Regression test (DST tier)** — `dispatch-routing-is-name-restricted` runs on every `cargo dst` pass. Pre-fix: the invariant did not exist; the §8 dispatch-routing contract had no DST-tier witness. Post-fix: 15 invariants pass including the new one; the four-branch evaluator catches every fan-out / wrong-routing / cardinality regression shape.
 - **Prior regression preserved** — the unit/acceptance pin `eval_dispatch_runs_only_the_named_reconciler` (commit `e6f5e5e`) continues to pass. Together with the new DST invariant, the §8 storm-proofing dispatch-routing contract is now witnessed at three independent boundaries: real production through fixed-timeline acceptance pin, harness mirror through DST pin, and broker through counter pin. Any single regression that slips one layer faces two more.
 - **Mutation gate** — 100% kill rate (2/2 caught). The low mutation count is explained by diff-scope resolution; the 8 inline witnesses + the end-to-end happy/negative tests exercise all four evaluator branches per the reviewer's dimension-5 analysis.
 - **Reviewer (nw-software-crafter-reviewer) verdict** — APPROVED with zero required changes; zero testing-theater patterns detected across all 9 review dimensions.
-- **Quality gates green** — `cargo nextest run --workspace` (544/544), `cargo xtask dst` (15 invariants pass), `cargo xtask dst-lint`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --doc -p overdrive-sim`, `cargo nextest run --workspace --features integration-tests --no-run` (macOS typecheck).
+- **Quality gates green** — `cargo nextest run --workspace` (544/544), `cargo dst` (15 invariants pass), `cargo xtask dst-lint`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --doc -p overdrive-sim`, `cargo nextest run --workspace --features integration-tests --no-run` (macOS typecheck).
 - **DES integrity** — `verify_deliver_integrity` exit 0; the single step has a complete DES trace.
 
 ## Lessons learned

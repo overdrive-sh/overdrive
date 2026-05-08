@@ -7,8 +7,6 @@
 #![allow(clippy::expect_used, clippy::print_stderr, clippy::unnecessary_wraps)]
 
 pub mod dev_setup;
-pub mod dst;
 pub mod dst_lint;
 pub mod mutants;
-pub mod openapi;
 pub mod yaml_free_cli;

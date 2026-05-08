@@ -11,7 +11,7 @@ schema_version: 1
 journey:
   name: "Trust the Sim — proving Overdrive's DST foundation works"
   goal: >
-    A Overdrive platform engineer can run `cargo xtask dst` on a clean
+    A Overdrive platform engineer can run `cargo dst` on a clean
     clone, have the harness exercise a multi-node simulated cluster
     against real LocalStore + SimObservationStore + all Sim* traits,
     watch core invariants pass, and trust that a red run is reproducible
@@ -26,10 +26,10 @@ journey:
 steps:
   - id: 1
     name: "Fresh clone, first DST run"
-    command: "cargo xtask dst"
+    command: "cargo dst"
 
     tui_mockup: |
-      $ cargo xtask dst
+      $ cargo dst
           Compiling overdrive-core v0.0.0
           Compiling overdrive-sim  v0.0.0
           Finished `dev` profile [optimized + debuginfo]
@@ -83,7 +83,7 @@ steps:
       Scenario: Clean-clone DST run is fast and green
         Given Ana has cloned the overdrive repository to a clean workspace
         And no environment variables override DST defaults
-        When Ana runs "cargo xtask dst"
+        When Ana runs "cargo dst"
         Then the harness boots a 3-node simulated cluster using LocalStore
           (real redb) and SimObservationStore plus SimClock, SimTransport,
           SimEntropy, SimDataplane, SimDriver, and SimLlm
@@ -94,7 +94,7 @@ steps:
 
       Scenario: The same seed produces the same trajectory
         Given Ana has just seen a green run with seed ${dst_seed}
-        When Ana runs "cargo xtask dst --seed ${dst_seed}" again
+        When Ana runs "cargo dst --seed ${dst_seed}" again
         Then the harness produces the same ordered invariant results
         And the same summary line
         And no tick number changes between the two runs
@@ -248,10 +248,10 @@ steps:
 
   - id: 4
     name: "Real invariant failure reproduces bit-for-bit from the seed"
-    command: "cargo xtask dst --seed ${dst_seed} --only leader_election_under_partition"
+    command: "cargo dst --seed ${dst_seed} --only leader_election_under_partition"
 
     tui_mockup: |
-      $ cargo xtask dst
+      $ cargo dst
           ...
           [ 37/100] leader_election_under_partition  FAILED
 
@@ -262,9 +262,9 @@ steps:
         cause:  2 leaders elected after partition heal
 
       reproduce:
-        cargo xtask dst --seed ${dst_seed} --only leader_election_under_partition
+        cargo dst --seed ${dst_seed} --only leader_election_under_partition
 
-      $ cargo xtask dst --seed ${dst_seed} --only leader_election_under_partition
+      $ cargo dst --seed ${dst_seed} --only leader_election_under_partition
           Same seed. Same trajectory.
           [ 1/1] leader_election_under_partition     FAILED (tick 8743)
 
@@ -297,7 +297,7 @@ steps:
       Scenario: A failing invariant prints the seed and an exact reproduction command
         Given a bug has been introduced that allows two leaders to be elected
           after a partition heal
-        When Ana runs "cargo xtask dst"
+        When Ana runs "cargo dst"
         Then the harness reports the failing invariant by name
         And the failure output contains the seed used for that run
         And the failure output contains a reproduction command that embeds
@@ -313,7 +313,7 @@ steps:
 
       Scenario: A DST failure fails the CI job
         Given the DST harness has failed at least one invariant
-        When the `cargo xtask dst` step completes in CI
+        When the `cargo dst` step completes in CI
         Then the step exits with a non-zero status
         And the CI pipeline is marked failed
 

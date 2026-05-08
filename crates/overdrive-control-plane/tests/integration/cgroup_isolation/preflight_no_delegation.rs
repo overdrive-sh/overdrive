@@ -8,8 +8,6 @@
 //! path (per ADR-0034), and the docs URL — operators without cgroup
 //! delegation see actionable next steps, not a silent panic.
 
-#![cfg(target_os = "linux")]
-
 use overdrive_control_plane::cgroup_preflight::{CgroupPreflightError, run_preflight_at};
 use tempfile::TempDir;
 

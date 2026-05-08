@@ -176,7 +176,7 @@ ADR-0014).
 
 ## OpenAPI schema regeneration
 
-`cargo xtask openapi-gen` regenerates `api/openapi.yaml`. The schema
+`cargo openapi-gen` regenerates `api/openapi.yaml`. The schema
 carries:
 
 - `JobSpecInput` — `required: [id, replicas, resources]` plus the
@@ -188,7 +188,7 @@ carries:
 - `DriverInput` — `oneOf` with one entry today, externally tagged via
   serde-rename (`exec`).
 
-`cargo xtask openapi-check` (CI gate per ADR-0009) catches drift.
+`cargo openapi-check` (CI gate per ADR-0009) catches drift.
 
 ## Out of scope (do NOT add tests for these)
 

@@ -70,10 +70,11 @@ pre-commit:
           done
         done | sort -u)
         for p in $pkgs; do
-          cargo clippy -p "$p" --all-targets --all-features --tests -- -D warnings
+          cargo xtask lima run -- cargo clippy -p "$p" --all-targets --all-features --tests -- -D warnings
         done
       fail_text: |
         Clippy warnings. Fix or `#[allow]` with justification.
+        If Lima is not running: `cargo xtask lima up`
     doctest:
       tags: [rust]
       glob: "*.rs"
@@ -111,10 +112,11 @@ pre-commit:
           done
         done | sort -u)
         for p in $pkgs; do
-          cargo test --doc -p "$p"
+          cargo xtask lima run -- cargo test --doc -p "$p"
         done
       fail_text: |
         Doctest failed. Rustdoc examples are executable per development.md.
+        If Lima is not running: `cargo xtask lima up`
     nextest-affected:
       tags: [rust]
       glob: "*.rs"
@@ -162,10 +164,26 @@ pre-commit:
         # Join crate names into `rdeps(c1) | rdeps(c2) | ...`.
         filter=$(echo "$pkgs" | awk 'BEGIN{sep=""} {printf "%srdeps(%s)", sep, $0; sep=" | "}')
         echo "nextest-affected: filter = $filter"
-        cargo nextest run -E "$filter"
+        cargo xtask lima run -- cargo nextest run -E "$filter"
       fail_text: |
         Affected tests failed. Pre-push runs the full suite — this
         smoke check caught it earlier.
+        If Lima is not running: `cargo xtask lima up`
+    bpf-clippy:
+      tags: [rust, bpf]
+      glob: "crates/overdrive-bpf/**/*"
+      # The kernel-side eBPF crate is skipped by the host `clippy` step
+      # above (rustc rejects `#![no_std] #![no_main]` on the host triple
+      # with "unwinding panics are not supported without std"). Cover
+      # that gap here: when any file under `crates/overdrive-bpf/` is
+      # staged, run `cargo xtask bpf-clippy`, which invokes clippy under
+      # the dedicated nightly + `bpfel-unknown-none` toolchain.
+      #
+      # `bpf-clippy` self-routes through Lima (the toolchain lives in
+      # the VM); runs directly when already inside the VM.
+      run: cargo xtask bpf-clippy
+      fail_text: |
+        bpf-clippy failed. Fix or `#[allow]` with justification.
     toml-check:
       tags: [toml, fast]
       glob:
@@ -215,11 +233,10 @@ pre-push:
     # pre-commit hook above, which catches broken rustdoc examples at
     # commit time.
     nextest:
-      run: cargo nextest run --workspace
+      run: cargo xtask lima run -- cargo nextest run --workspace --features integration-tests
       fail_text: |
         Tests failed. Fix or push with --no-verify for a WIP branch.
-        If `cargo-nextest` is not installed, run:
-          cargo xtask dev-setup
+        If Lima is not running: `cargo xtask lima up`
 
 # ────────────────────────────────────────────────────────────────────────────
 # commit-msg — placeholder. Enable when we pick a convention

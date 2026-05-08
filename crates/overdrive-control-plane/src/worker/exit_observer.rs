@@ -60,8 +60,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::action_shim::LifecycleEvent;
 use crate::api::{AllocStateWire, TransitionSource};
-use crate::eval_broker::Evaluation;
 use crate::reconciler_runtime::ReconcilerRuntime;
+use overdrive_core::eval_broker::Evaluation;
 
 /// Bounded retry budget for transient `ObservationStore::write` failures
 /// in `handle_exit_event`. The first attempt is unbudgeted; on a

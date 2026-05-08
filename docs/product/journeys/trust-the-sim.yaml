@@ -3,7 +3,7 @@ schema_version: 1
 journey:
   name: "Trust the Sim — proving Overdrive's DST foundation works"
   goal: >
-    A Overdrive platform engineer can run `cargo xtask dst` on a clean
+    A Overdrive platform engineer can run `cargo dst` on a clean
     clone, have the harness exercise a multi-node simulated cluster
     against real store implementations (LocalStore + SimObservationStore)
     using injectable Sim* traits for every other source of
@@ -19,9 +19,9 @@ journey:
 steps:
   - id: 1
     name: "Fresh clone, first DST run"
-    command: "cargo xtask dst"
+    command: "cargo dst"
     tui_mockup: |
-      $ cargo xtask dst
+      $ cargo dst
           Compiling overdrive-core v0.0.0
           Compiling overdrive-sim  v0.0.0
           Finished `dev` profile [optimized + debuginfo]
@@ -156,9 +156,9 @@ steps:
 
   - id: 4
     name: "Hit a real DST failure and reproduce it from the seed"
-    command: "cargo xtask dst --seed 14923048572033948571"
+    command: "cargo dst --seed 14923048572033948571"
     tui_mockup: |
-      $ cargo xtask dst
+      $ cargo dst
           ...
           [ 37/100] leader_election_under_partition  FAILED
 
@@ -169,9 +169,9 @@ steps:
         cause:  2 leaders elected after partition heal
 
       reproduce:
-        cargo xtask dst --seed 14923048572033948571 --only leader_election_under_partition
+        cargo dst --seed 14923048572033948571 --only leader_election_under_partition
 
-      $ cargo xtask dst --seed 14923048572033948571 --only leader_election_under_partition
+      $ cargo dst --seed 14923048572033948571 --only leader_election_under_partition
           Same seed. Same trajectory.
           [ 1/1] leader_election_under_partition     FAILED (tick 8743)
     shared_artifacts:

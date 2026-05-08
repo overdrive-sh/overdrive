@@ -29,12 +29,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use overdrive_control_plane::eval_broker::Evaluation;
 use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
 use overdrive_control_plane::{AppState, job_lifecycle, noop_heartbeat};
 use overdrive_core::aggregate::{
     DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
 };
+use overdrive_core::eval_broker::Evaluation;
 use overdrive_core::id::NodeId;
 use overdrive_core::reconciler::{ReconcilerName, TargetResource};
 use overdrive_core::traits::clock::Clock;
@@ -99,7 +99,15 @@ async fn build_state_with_clock(tmp: &TempDir, clock: Arc<dyn Clock>) -> AppStat
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("NodeId"), 0));
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
-    AppState::new(store, obs, Arc::new(runtime), driver, clock)
+    AppState::new(
+        store,
+        obs,
+        Arc::new(runtime),
+        driver,
+        clock,
+        Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+        overdrive_core::id::NodeId::new("writer-1").unwrap(),
+    )
 }
 
 /// The runtime construction site populates `TickContext.now_unix` from

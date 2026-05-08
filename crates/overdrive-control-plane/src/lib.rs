@@ -16,29 +16,51 @@
 //! | `error` | `ControlPlaneError` enum + `to_response` mapping (ADR-0015) |
 //! | `tls_bootstrap` | Ephemeral CA + trust triple + rustls config (ADR-0010) |
 //! | `reconciler_runtime` | `ReconcilerRuntime` + registry (ADR-0013/ADR-0035) |
-//! | `eval_broker` | `EvaluationBroker` + cancelable-eval-set (ADR-0013) |
 //! | `view_store` | Runtime-owned `ViewStore` port + `RedbViewStore` (ADR-0035) |
 //! | `observation_wiring` | `LocalObservationStore` single-node wiring (ADR-0012, revised 2026-04-24) |
 
-// Per ADR-0028, this crate's `cgroup_preflight` and `cgroup_manager`
-// modules call `libc::geteuid` / `libc::getpid` directly under
-// `#[cfg(target_os = "linux")]`. Both are thin syscall wrappers with
-// no preconditions, but they are `extern "C"` and therefore require
-// an `unsafe` block. We `deny(unsafe_code)` workspace-wide and
-// `#[allow(unsafe_code)]` scope-locally on the two call sites that
-// need it; switching from `forbid` to `deny` is what enables the
-// scoped allow. Every other module in this crate stays unsafe-free.
+// Per ADR-0028, this crate's `cgroup_preflight` module calls
+// `libc::geteuid` directly. It is a thin syscall wrapper with no
+// preconditions, but it is `extern "C"` and therefore requires an
+// `unsafe` block. We `deny(unsafe_code)` workspace-wide and
+// `#[allow(unsafe_code)]` scope-locally on the call site that needs
+// it; switching from `forbid` to `deny` is what enables the scoped
+// allow. Every other module in this crate stays unsafe-free.
 #![deny(unsafe_code)]
+// Phase 2.2 RED scaffolds in `reconcilers/service_map_hydrator/*` carry
+// short docstrings on draft type definitions. Per
+// `.claude/rules/testing.md` § "Production-side scaffolds", crates with many
+// concurrent scaffolds gate the relevant lints crate-level via `expect` (NOT
+// `allow`) so the gate self-removes the moment every scaffold goes GREEN.
+// Slice 08-01 closed the `action_shim::DataplaneUpdateService` `todo!()` —
+// `clippy::todo` is therefore dropped from this expect block. Strip the rest
+// once the remaining scaffolds go GREEN.
+#![expect(
+    clippy::doc_markdown,
+    clippy::missing_const_for_fn,
+    clippy::too_long_first_doc_paragraph,
+    clippy::doc_lazy_continuation,
+    reason = "Phase 2.2 RED scaffolds; lints will self-trip when scaffolds go GREEN"
+)]
 
 pub mod action_shim;
 pub mod api;
 pub mod cgroup_manager;
 pub mod cgroup_preflight;
 pub mod error;
-pub mod eval_broker;
 pub mod handlers;
 pub mod observation_wiring;
+// `cargo openapi-{gen,check}` library — pure deterministic YAML render
+// + drift detection. Paired with the `openapi` binary in `src/bin/`.
+// Lives here (not in xtask) per § "xtask is build / test / dev
+// orchestration, NOT a runtime entry point" in
+// `.claude/rules/development.md`.
+pub mod openapi;
 pub mod reconciler_runtime;
+// Phase 2.2 reconcilers per DWD-3. Currently hosts only the
+// `service_map_hydrator`; future Phase 2+ reconcilers will land
+// alongside.
+pub mod reconcilers;
 pub mod streaming;
 pub mod tls_bootstrap;
 // reconciler-memory-redb step 01-03 — `ViewStore` port + error types
@@ -55,7 +77,9 @@ use axum::Router;
 use axum::routing::{get, post};
 use axum_server::Handle as AxumHandle;
 use axum_server::tls_rustls::RustlsConfig;
+use overdrive_core::id::NodeId;
 use overdrive_core::traits::clock::Clock;
+use overdrive_core::traits::dataplane::Dataplane;
 use overdrive_core::traits::driver::Driver;
 use overdrive_core::traits::observation_store::ObservationStore;
 use overdrive_store_local::LocalIntentStore;
@@ -117,6 +141,20 @@ pub struct AppState {
     /// crate (the only crate permitted to instantiate `SystemClock`);
     /// tests inject `Arc<SimClock>`.
     pub clock: Arc<dyn Clock>,
+    /// Production [`Dataplane`] impl per architecture.md § 7. The
+    /// action shim's `Action::DataplaneUpdateService` arm dispatches
+    /// through this trait object; production wires
+    /// `Arc<EbpfDataplane>` from `overdrive-dataplane`, tests wire
+    /// `Arc<SimDataplane>`. Per `.claude/rules/development.md`
+    /// § "Port-trait dependencies", the dependency is mandatory at
+    /// construction so tests cannot silently inherit production
+    /// kernel I/O behaviour by forgetting to override.
+    pub dataplane: Arc<dyn overdrive_core::traits::dataplane::Dataplane>,
+    /// Identity of the node writing observation rows. The action
+    /// shim populates `LogicalTimestamp.writer` from this value so
+    /// LWW resolution across peers is deterministic per
+    /// `docs/whitepaper.md` §4.
+    pub node_id: NodeId,
 }
 
 /// Default capacity for the lifecycle-event broadcast channel.
@@ -154,6 +192,8 @@ impl AppState {
         runtime: Arc<reconciler_runtime::ReconcilerRuntime>,
         driver: Arc<dyn Driver>,
         clock: Arc<dyn Clock>,
+        dataplane: Arc<dyn Dataplane>,
+        node_id: NodeId,
     ) -> Self {
         let (tx, _rx) = tokio::sync::broadcast::channel(DEFAULT_LIFECYCLE_BROADCAST_CAPACITY);
         Self {
@@ -164,6 +204,8 @@ impl AppState {
             lifecycle_events: Arc::new(tx),
             streaming_cap: DEFAULT_STREAMING_CAP,
             clock,
+            dataplane,
+            node_id,
         }
     }
 }
@@ -193,7 +235,7 @@ pub struct ServerConfig {
     /// identity-artefact root, and conflating the two left the CLI
     /// pinning a stale CA on the production-default path.
     pub operator_config_dir: PathBuf,
-    /// Cadence between drains of the [`crate::eval_broker::EvaluationBroker`]
+    /// Cadence between drains of the [`overdrive_core::eval_broker::EvaluationBroker`]
     /// in the convergence-loop spawn (see
     /// [`run_server_with_obs_and_driver`]). Default
     /// [`reconciler_runtime::DEFAULT_TICK_CADENCE`] (100ms) per
@@ -427,18 +469,9 @@ pub async fn run_server_with_obs_and_driver(
     // any on-disk side effects (no CA mint, no IntentStore open, no
     // listener bind). On failure, the server refuses to start and
     // produces no on-disk artefacts.
-    //
-    // The host is not Linux on macOS / Windows dev hosts; cgroup v2 is
-    // Linux-only by design, so the pre-flight is a no-op there. There
-    // is no in-binary escape hatch (ADR-0034 deleted it); operators
-    // running on macOS / Windows / non-delegated Linux dev boxes use
-    // `cargo xtask lima run --` per `.claude/rules/testing.md`.
-    #[cfg(target_os = "linux")]
-    {
-        cgroup_preflight::run_preflight().map_err(error::ControlPlaneError::from)?;
-        cgroup_manager::create_and_enrol_control_plane_slice()
-            .map_err(|e| error::ControlPlaneError::internal("create control-plane slice", e))?;
-    }
+    cgroup_preflight::run_preflight().map_err(error::ControlPlaneError::from)?;
+    cgroup_manager::create_and_enrol_control_plane_slice()
+        .map_err(|e| error::ControlPlaneError::internal("create control-plane slice", e))?;
 
     // Install the rustls process-wide CryptoProvider (ring) exactly
     // once. The workspace enables only the `ring` feature, but rustls
@@ -499,7 +532,22 @@ pub async fn run_server_with_obs_and_driver(
     // as the convergence-loop spawn. The clock is required at
     // construction per `.claude/rules/development.md` § "Port-trait
     // dependencies"; there is no post-construction injection path.
-    let state: AppState = AppState::new(store, obs, runtime, driver, config.clock.clone());
+    // Phase 2.2: production single-mode boot threads `NoopDataplane`
+    // until the Slice 08-02 hydrator reconciler ships. Until then no
+    // `Action::DataplaneUpdateService` is emitted, so the dataplane
+    // parameter is unreachable at runtime. Slice 08-04 / Phase 2.3
+    // swaps in `EbpfDataplane` here.
+    let dataplane: Arc<dyn overdrive_core::traits::dataplane::Dataplane> =
+        Arc::new(overdrive_host::NoopDataplane);
+    // Phase 2.2: production single-mode uses a placeholder node id;
+    // Phase 2 introduces real node-bootstrap identity that will replace
+    // this. The shim writes this into `LogicalTimestamp.writer` on
+    // `service_hydration_results` rows.
+    let node_id = overdrive_core::id::NodeId::new("local").map_err(|e| {
+        error::ControlPlaneError::Internal(format!("placeholder NodeId rejected: {e}"))
+    })?;
+    let state: AppState =
+        AppState::new(store, obs, runtime, driver, config.clock.clone(), dataplane, node_id);
 
     // Spawn the exit-observer subsystem BEFORE the convergence loop so
     // the observer is already draining the driver's `ExitEvent`

@@ -9,12 +9,9 @@
 # `overdrive-store-local`, `overdrive-worker`. dst-lint scans only
 # `core`-class crates and skips this one.
 #
-# Phase 2.1 step 01-02 ships the loader skeleton: real `new()` body
-# wired on Linux (gated by `#[cfg(target_os = "linux")]`); non-Linux
-# fallthrough returns `DataplaneError::LoadFailed("non-Linux build
-# target")`. The three `Dataplane` trait methods are stubbed
-# (`Ok(())` / `Ok(vec![])`) with `/// see #N` doc anchors per
-# architecture.md §7.
+# Phase 2.1 step 01-02 ships the loader skeleton. The three
+# `Dataplane` trait methods are stubbed (`Ok(())` / `Ok(vec![])`)
+# with `/// see #N` doc anchors per architecture.md §7.
 
 [package]
 name         = "overdrive-dataplane"
@@ -26,6 +23,16 @@ license.workspace      = true
 authors.workspace      = true
 repository.workspace   = true
 publish                = false
+
+# Tooling binaries live under `bin/` (not `src/bin/`) per
+# `.claude/rules/development.md` § "src/ is production code".
+[[bin]]
+name = "verifier_regress"
+path = "bin/verifier_regress.rs"
+
+[[bin]]
+name = "xdp_perf"
+path = "bin/xdp_perf.rs"
 
 [package.metadata.overdrive]
 crate_class = "adapter-host"
@@ -48,19 +55,45 @@ thiserror.workspace      = true
 tokio                    = { workspace = true, features = ["macros", "rt"] }
 tracing.workspace        = true
 
-# `aya` is the userspace BPF loader and pulls in libbpf-sys etc. —
-# Linux-only. macOS builds compile this crate via the
-# `#[cfg(not(target_os = "linux"))]` stub branches in `src/lib.rs`
-# without aya in the dep graph (architecture.md §5.2).
-[target.'cfg(target_os = "linux")'.dependencies]
-aya.workspace = true
+# Binary-only at the `verifier_regress` and `xdp_perf` boundaries
+# per `.claude/rules/development.md` § Errors ("eyre only at CLI /
+# binary boundaries"). The library modules use `thiserror`-typed
+# errors; `verifier_budget` and `xdp_perf_gate` do not depend on
+# these. `clap` powers the `xdp_perf` binary's CLI args.
+eyre.workspace       = true
+color-eyre.workspace = true
+clap.workspace       = true
+
+# `parking_lot::Mutex` for interior mutability of aya's
+# `HashMap`-backed `BACKEND_MAP` handle — `Dataplane::update_service`
+# is `&self` per the trait surface, but aya's `HashMap::insert /
+# remove` take `&mut self`. The lock is held only for the duration
+# of the BPF syscalls — never across `.await` (per
+# `.claude/rules/development.md` § Concurrency).
+parking_lot.workspace = true
+
+aya.workspace  = true
+libc.workspace = true
+nix.workspace  = true
 
 # Integration-test dev-deps. `serial_test` serialises tests that
 # mutate process-global state — here, the on-disk BPF artifact path
-# under `target/xtask/bpf-objects/`. See `.claude/rules/testing.md`
+# under `target/bpf/`. See `.claude/rules/testing.md`
 # § "Tests that mutate process-global state".
+#
+# `tracing-subscriber` is dev-only — used by S-2.2-02 to capture the
+# `xdp.attach.fallback_generic` structured warn event via a custom
+# `tracing::Layer` (production code does NOT install a subscriber).
+# `proptest` powers the userspace endianness round-trip in
+# `crates/overdrive-dataplane/src/maps/service_map_handle.rs` per
+# Phase 2.2 step 02-02 (S-2.2-04 handle endianness). Pure-function
+# unit-level test, runs in the default lane.
 [dev-dependencies]
-serial_test.workspace = true
+proptest.workspace           = true
+serial_test.workspace        = true
+tracing-subscriber.workspace = true
+
+serde_json.workspace = true
 
 [lints]
 workspace = true

@@ -7,8 +7,6 @@
 //! `cgroup.procs` — neither operation must fail when the slice
 //! already exists.
 
-#![cfg(target_os = "linux")]
-
 use overdrive_control_plane::cgroup_manager::{
     CONTROL_PLANE_SLICE, create_and_enrol_control_plane_slice_at,
 };

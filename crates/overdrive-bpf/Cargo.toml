@@ -52,16 +52,10 @@ aya-ebpf.workspace = true
 # Host-side dev-deps for the Tier 2 BPF unit triptych under
 # `tests/integration/`. The triptych is compiled against the HOST
 # target (not `bpfel-unknown-none`) — it loads the pre-built BPF ELF
-# at `target/xtask/bpf-objects/overdrive_bpf.o` via aya's userspace
-# loader and drives `BPF_PROG_TEST_RUN`. Linux-only because:
-#   1. `BPF_PROG_TEST_RUN` is a Linux syscall;
-#   2. `aya` (userspace) pulls in libbpf-sys etc. that don't build on
-#      macOS — same gating as `overdrive-dataplane`'s aya dependency
-#      (architecture.md §5.2).
-# The kernel-side `[dependencies]` block above (with `aya-ebpf`) is
-# unchanged; the bin target stays gated behind `build-bpf-target`
-# (see `[[bin]] required-features` below) so host workflows skip it.
-[target.'cfg(target_os = "linux")'.dev-dependencies]
+# at `target/bpf/overdrive_bpf.o` via aya's userspace
+# loader and drives `BPF_PROG_TEST_RUN`. All test execution happens
+# inside the Lima VM (always Linux).
+[dev-dependencies]
 aya.workspace         = true
 # `aya_obj` is the shared crate that owns the `bpf_attr` union and
 # `BPF_PROG_TEST_RUN` constant. aya 0.13.1 uses it internally
@@ -71,6 +65,10 @@ aya.workspace         = true
 # reproducible — bumping aya is the migration trigger.
 aya-obj               = "=0.2.1"
 libc.workspace        = true
+# Host-side dev dep — used by Tier 2 BPF unit tests for
+# `MaglevTableSize::DEFAULT.get()` to keep the inner-ARRAY size
+# in lockstep with kernel-side `INNER_TABLE_SIZE`.
+overdrive-core.workspace = true
 serial_test.workspace = true
 
 [[bin]]

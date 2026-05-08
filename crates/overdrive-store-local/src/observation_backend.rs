@@ -58,10 +58,11 @@ use std::task::{Context, Poll};
 
 use async_trait::async_trait;
 use futures::Stream;
-use overdrive_core::id::AllocationId;
+use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
+use overdrive_core::id::{AllocationId, ServiceId};
 use overdrive_core::traits::observation_store::{
     AllocStatusRow, NodeHealthRow, ObservationRow, ObservationStore, ObservationStoreError,
-    ObservationSubscription,
+    ObservationSubscription, ServiceBackendRow, ServiceHydrationResultRow,
 };
 use redb::{Database, ReadableTable, Table, TableDefinition};
 use tokio::sync::broadcast;
@@ -77,6 +78,42 @@ const ALLOC_STATUS_TABLE: TableDefinition<&[u8], &[u8]> =
 /// canonical `NodeId` bytes.
 const NODE_HEALTH_TABLE: TableDefinition<&[u8], &[u8]> =
     TableDefinition::new("observation_node_health");
+
+/// Holds the rkyv-archived bytes of every `ServiceHydrationResultRow`,
+/// keyed on the canonical 16-byte encoding of `(service_id,
+/// fingerprint)` (each component little-endian u64). Phase 2.2 is
+/// single-writer (the action shim) and additive-only per
+/// `docs/feature/phase-2-xdp-service-map/design/architecture.md` § 12.
+const SERVICE_HYDRATION_TABLE: TableDefinition<&[u8], &[u8]> =
+    TableDefinition::new("observation_service_hydration_results");
+
+/// Holds the rkyv-archived bytes of every `ServiceBackendRow`, keyed
+/// on the canonical 8-byte LE encoding of `ServiceId`. One row per
+/// service — the full current backend set. GH #160.
+const SERVICE_BACKENDS_TABLE: TableDefinition<&[u8], &[u8]> =
+    TableDefinition::new("observation_service_backends");
+
+/// Encode the composite `(service_id, fingerprint)` key as 16 bytes
+/// (`service_id` LE u64 || `fingerprint` LE u64). Sort order on the
+/// `BTreeMap`-backed redb tree mirrors the lexicographic-on-bytes
+/// order of this layout — predictable, deterministic, no JSON.
+const fn encode_service_hydration_key(
+    service_id: ServiceId,
+    fingerprint: BackendSetFingerprint,
+) -> [u8; 16] {
+    let sid = service_id.get().to_le_bytes();
+    let fp = fingerprint.to_le_bytes();
+    [
+        sid[0], sid[1], sid[2], sid[3], sid[4], sid[5], sid[6], sid[7], fp[0], fp[1], fp[2], fp[3],
+        fp[4], fp[5], fp[6], fp[7],
+    ]
+}
+
+/// Encode the prefix of `(service_id, *)` for range scans — first 8
+/// bytes of [`encode_service_hydration_key`].
+const fn encode_service_hydration_prefix(service_id: ServiceId) -> [u8; 8] {
+    service_id.get().to_le_bytes()
+}
 
 /// Capacity of the in-process broadcast channel used for
 /// `subscribe_all`. Sized to absorb a short-lived reader stall on a
@@ -115,12 +152,19 @@ impl LocalObservationStore {
         }
         let db = Database::create(path).map_err(map_to_io)?;
 
-        // Materialize both tables up-front.
+        // Materialize all observation tables up-front.
         {
             let write = db.begin_write().map_err(map_to_io)?;
             {
                 let _ = write.open_table(ALLOC_STATUS_TABLE).map_err(map_to_io)?;
                 let _ = write.open_table(NODE_HEALTH_TABLE).map_err(map_to_io)?;
+                // Service-hydration table — additive-only migration
+                // per `docs/feature/phase-2-xdp-service-map/design/
+                // architecture.md` § 12. New table; never alters
+                // existing tables.
+                let _ = write.open_table(SERVICE_HYDRATION_TABLE).map_err(map_to_io)?;
+                // Service-backends table — GH #160.
+                let _ = write.open_table(SERVICE_BACKENDS_TABLE).map_err(map_to_io)?;
             }
             write.commit().map_err(map_to_io)?;
         }
@@ -162,6 +206,14 @@ impl ObservationStore for LocalObservationStore {
                 ObservationRow::NodeHealth(incoming) => {
                     let mut table = write.open_table(NODE_HEALTH_TABLE).map_err(map_to_io)?;
                     apply_node_health_lww(&mut table, incoming)?
+                }
+                ObservationRow::ServiceHydration(incoming) => {
+                    let mut table = write.open_table(SERVICE_HYDRATION_TABLE).map_err(map_to_io)?;
+                    apply_service_hydration_lww(&mut table, incoming)?
+                }
+                ObservationRow::ServiceBackend(incoming) => {
+                    let mut table = write.open_table(SERVICE_BACKENDS_TABLE).map_err(map_to_io)?;
+                    apply_service_backends_lww(&mut table, incoming)?
                 }
             };
             // Commit unconditionally — a rejected write performed only
@@ -262,6 +314,59 @@ impl ObservationStore for LocalObservationStore {
         .await
         .map_err(map_to_io)?
     }
+
+    async fn service_hydration_results_rows(
+        &self,
+        service_id: &ServiceId,
+    ) -> Result<Vec<ServiceHydrationResultRow>, ObservationStoreError> {
+        let inner = Arc::clone(&self.inner);
+        let prefix = encode_service_hydration_prefix(*service_id);
+        tokio::task::spawn_blocking(move || {
+            let read = inner.db.begin_read().map_err(map_to_io)?;
+            let table = read.open_table(SERVICE_HYDRATION_TABLE).map_err(map_to_io)?;
+            let mut out: Vec<ServiceHydrationResultRow> = Vec::new();
+            // Range scan over the 8-byte service_id prefix — keys are
+            // composite `(service_id || fingerprint)` with service_id
+            // first, so a contiguous range covers exactly the rows
+            // for `service_id`.
+            let iter = table.iter().map_err(map_to_io)?;
+            for item in iter {
+                let (k, v) = item.map_err(map_to_io)?;
+                let key_bytes = k.value();
+                if key_bytes.len() != 16 || &key_bytes[..8] != prefix.as_slice() {
+                    continue;
+                }
+                let mut aligned = rkyv::util::AlignedVec::<8>::new();
+                aligned.extend_from_slice(v.value());
+                let row: ServiceHydrationResultRow =
+                    rkyv::from_bytes::<ServiceHydrationResultRow, rkyv::rancor::Error>(&aligned)
+                        .map_err(map_to_io)?;
+                out.push(row);
+            }
+            Ok::<_, ObservationStoreError>(out)
+        })
+        .await
+        .map_err(map_to_io)?
+    }
+
+    async fn service_backends_rows(
+        &self,
+        service_id: &ServiceId,
+    ) -> Result<Vec<ServiceBackendRow>, ObservationStoreError> {
+        let inner = Arc::clone(&self.inner);
+        let key = encode_service_backends_key(*service_id);
+        tokio::task::spawn_blocking(move || {
+            let read = inner.db.begin_read().map_err(map_to_io)?;
+            let table = read.open_table(SERVICE_BACKENDS_TABLE).map_err(map_to_io)?;
+            let Some(value) = table.get(key.as_slice()).map_err(map_to_io)? else {
+                return Ok::<_, ObservationStoreError>(Vec::new());
+            };
+            let row = decode_service_backends(value.value())?;
+            Ok(vec![row])
+        })
+        .await
+        .map_err(map_to_io)?
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -337,6 +442,74 @@ fn apply_node_health_lww(
     if dominates {
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(incoming).map_err(map_to_io)?;
         table.insert(key, bytes.as_ref()).map_err(map_to_io)?;
+    }
+    Ok(dominates)
+}
+
+/// Decode a prior rkyv-archived `ServiceHydrationResultRow`. Mirrors
+/// [`decode_alloc_status`].
+fn decode_service_hydration(
+    bytes: &[u8],
+) -> Result<ServiceHydrationResultRow, ObservationStoreError> {
+    let mut aligned = rkyv::util::AlignedVec::<8>::new();
+    aligned.extend_from_slice(bytes);
+    rkyv::from_bytes::<ServiceHydrationResultRow, rkyv::rancor::Error>(&aligned).map_err(map_to_io)
+}
+
+/// Encode the `ServiceId` key as 8 LE bytes for the
+/// `SERVICE_BACKENDS_TABLE`. Single-keyed (no composite). GH #160.
+const fn encode_service_backends_key(service_id: ServiceId) -> [u8; 8] {
+    service_id.get().to_le_bytes()
+}
+
+/// Decode a prior rkyv-archived `ServiceBackendRow`. Mirrors
+/// [`decode_alloc_status`].
+fn decode_service_backends(bytes: &[u8]) -> Result<ServiceBackendRow, ObservationStoreError> {
+    let mut aligned = rkyv::util::AlignedVec::<8>::new();
+    aligned.extend_from_slice(bytes);
+    rkyv::from_bytes::<ServiceBackendRow, rkyv::rancor::Error>(&aligned).map_err(map_to_io)
+}
+
+/// LWW-guarded insert for `ServiceBackendRow`. Keyed on `ServiceId`
+/// alone — one row per service. Mirrors [`apply_alloc_status_lww`].
+/// GH #160.
+fn apply_service_backends_lww(
+    table: &mut Table<'_, &[u8], &[u8]>,
+    incoming: &ServiceBackendRow,
+) -> Result<bool, ObservationStoreError> {
+    let key = encode_service_backends_key(incoming.service_id);
+    let dominates = match table.get(key.as_slice()).map_err(map_to_io)? {
+        None => true,
+        Some(prior) => {
+            let prior_row = decode_service_backends(prior.value())?;
+            incoming.updated_at.dominates(&prior_row.updated_at)
+        }
+    };
+    if dominates {
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(incoming).map_err(map_to_io)?;
+        table.insert(key.as_slice(), bytes.as_ref()).map_err(map_to_io)?;
+    }
+    Ok(dominates)
+}
+
+/// LWW-guarded insert for `ServiceHydrationResultRow`. Keyed on
+/// `(service_id, fingerprint)` per architecture.md § 12. Mirrors the
+/// [`apply_alloc_status_lww`] shape.
+fn apply_service_hydration_lww(
+    table: &mut Table<'_, &[u8], &[u8]>,
+    incoming: &ServiceHydrationResultRow,
+) -> Result<bool, ObservationStoreError> {
+    let key = encode_service_hydration_key(incoming.service_id, incoming.fingerprint);
+    let dominates = match table.get(key.as_slice()).map_err(map_to_io)? {
+        None => true,
+        Some(prior) => {
+            let prior_row = decode_service_hydration(prior.value())?;
+            incoming.updated_at.dominates(&prior_row.updated_at)
+        }
+    };
+    if dominates {
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(incoming).map_err(map_to_io)?;
+        table.insert(key.as_slice(), bytes.as_ref()).map_err(map_to_io)?;
     }
     Ok(dominates)
 }

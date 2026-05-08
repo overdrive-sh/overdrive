@@ -55,6 +55,30 @@
 #    subcommand's acceptance tests; per-line mutation coverage adds
 #    no safety signal against platform regressions and spends minutes
 #    of CI time on code that will never run in production.
+#
+# 7. `overdrive-sim` — DST harness + invariant catalogue. Per
+#    `.claude/rules/testing.md` § Mutation testing → "What it's NOT
+#    for": "`cargo dst` / Tier 3 integration. `cargo-mutants` reruns
+#    the unit suite per mutation under `--test-tool=nextest`; DST
+#    and real-kernel tests are too slow for the per-mutation budget
+#    and are excluded from the mutants run." The
+#    `overdrive-sim/src/{adapters,invariants}` directories carry
+#    every Tier 1 (DST) sim adapter and invariant evaluator —
+#    exercised exclusively by `cargo dst` (the `dst` subprocess
+#    harness), never by `cargo nextest run`. cargo-mutants would
+#    flag every mutation in these files as missed because no nextest
+#    test covers them; that miss is a structural artefact of the
+#    test-runner geometry, not a real assertion gap. The
+#    QUALITY_GATE wave's mutation report (2026-05-08) flagged 40 such
+#    misses out of 104 total — collapsing the raw kill rate signal
+#    to 59.8% even though every Tier 1 mutation is structurally
+#    protected by `cargo xtask dst`. Excluding the sim adapter +
+#    invariant directories cleans this up.
+#
+#    Note: this excludes the DST-only paths, NOT the entire
+#    `overdrive-sim` crate — the `overdrive-sim/src/bin/dst.rs`
+#    binary entry point and any future non-Tier-1 surface remain in
+#    scope. Slim glob targets `adapters/` and `invariants/` only.
 
 # ---------------------------------------------------------------------------
 # Excluded paths
@@ -79,6 +103,13 @@ exclude_globs = [
     # Rule 6 — xtask developer tooling. Not platform code; correctness
     # surfaced by the CI workflow and subcommand acceptance tests.
     "xtask/**",
+
+    # Rule 7 — DST sim adapters + invariants. Tier 1 protection lives in
+    # `cargo xtask dst`, not nextest; cargo-mutants' nextest scope cannot
+    # reach these paths. See header comment for full rationale + the
+    # QUALITY_GATE wave's mutation-report citation.
+    "crates/overdrive-sim/src/adapters/**",
+    "crates/overdrive-sim/src/invariants/**",
 ]
 
 # ---------------------------------------------------------------------------

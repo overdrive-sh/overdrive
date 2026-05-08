@@ -498,7 +498,6 @@ mod tests {
     /// unmutated guard returns `Err(NotADirectory)`; the `-> true`
     /// mutant routes through `remove_dir_all` and returns `Ok(())`.
     #[tokio::test]
-    #[cfg(target_os = "linux")]
     async fn remove_workload_scope_propagates_non_enotempty_non_notfound_errors() {
         use std::os::unix::fs::symlink;
 

@@ -163,9 +163,11 @@ use std::collections::BTreeMap;
 
 use crate::SpiffeId;
 use crate::aggregate::{Exec, Job, Node, WorkloadDriver};
-use crate::id::{AllocationId, CorrelationKey, JobId, NodeId};
+use crate::dataplane::fingerprint::BackendSetFingerprint;
+use crate::id::{AllocationId, ContentHash, CorrelationKey, JobId, NodeId, ServiceId, ServiceVip};
+use crate::traits::dataplane::Backend;
 use crate::traits::driver::{AllocationSpec, Resources};
-use crate::traits::observation_store::{AllocState, AllocStatusRow};
+use crate::traits::observation_store::{AllocState, AllocStatusRow, ServiceHydrationStatus};
 use crate::transition_reason::{StoppedBy, TerminalCondition};
 use crate::wall_clock::UnixInstant;
 
@@ -365,6 +367,9 @@ pub enum AnyState {
     /// `JobLifecycle` reconciler's typed projection — see
     /// [`JobLifecycleState`].
     JobLifecycle(JobLifecycleState),
+    /// `ServiceMapHydrator` reconciler's typed projection — see
+    /// [`ServiceMapHydratorState`]. Phase 2 (Slice 08; ASR-2.2-04).
+    ServiceMapHydrator(ServiceMapHydratorState),
 }
 
 /// Desired/actual projection consumed by `JobLifecycle::reconcile`.
@@ -546,6 +551,52 @@ pub enum Action {
         /// [`Action::StopAllocation::terminal`].
         terminal: Option<TerminalCondition>,
     },
+
+    // -----------------------------------------------------------------
+    // phase-2-xdp-service-map (Slice 08, US-08, ASR-2.2-04) — emitted
+    // by the `service-map-hydrator` reconciler when the
+    // `service_backends` ObservationStore rows for a `ServiceId`
+    // produce a fingerprint distinct from the one persisted in the
+    // reconciler's `View`.
+    // -----------------------------------------------------------------
+    /// Replace the backend set for a service VIP in the kernel-side
+    /// `SERVICE_MAP` / `BACKEND_MAP` / `MAGLEV_MAP` tuple per
+    /// `docs/feature/phase-2-xdp-service-map/design/architecture.md`
+    /// § 7.
+    ///
+    /// The action shim consumes this variant, invokes
+    /// `Dataplane::update_service(service_id, vip, backends)`,
+    /// and writes the outcome into the `service_hydration_results`
+    /// observation row. The next reconcile tick reads that row via
+    /// `actual` and either advances (Completed) or retries on the
+    /// next backend-set change (Failed).
+    ///
+    /// `Vec<Backend>` carries weighted backends in deterministic
+    /// `BTreeMap<BackendId, Backend>::iter()` order — Maglev table
+    /// generation is byte-deterministic across nodes given identical
+    /// inputs (DISCUSS Decision 8 + architecture.md Constraint 6).
+    DataplaneUpdateService {
+        /// Identity of the service whose backend set is being
+        /// rewritten. Maps 1:1 to a `MAGLEV_MAP` outer-map key.
+        service_id: crate::id::ServiceId,
+        /// Virtual IP the kernel-side XDP program matches incoming
+        /// packets against. Carried explicitly (rather than re-derived
+        /// from `service_id`) so the shim never needs to look back at
+        /// `service_backends` to dispatch.
+        vip: crate::id::ServiceVip,
+        /// Backend set, in deterministic iteration order. The shim
+        /// passes this slice straight into
+        /// `Dataplane::update_service`; userspace Maglev permutation
+        /// generation reads it in this exact order.
+        backends: Vec<crate::traits::dataplane::Backend>,
+        /// Cause-to-response linkage per the existing `HttpCall`
+        /// pattern. Derived deterministically from
+        /// `(target = "service-map-hydrator/<service_id>",
+        ///   spec_hash = ContentHash::of(rkyv-archive of fingerprint),
+        ///   purpose = "update-service")` so the next tick can locate
+        /// the `service_hydration_results` row deterministically.
+        correlation: CorrelationKey,
+    },
 }
 
 /// Placeholder for the workflow spec. Phase 3 replaces with real shape.
@@ -659,7 +710,7 @@ pub enum ReconcilerNameError {
 /// Canonical shapes accepted by `TargetResource::new`. Each variant
 /// corresponds to one of the core aggregate identifier classes; any
 /// other prefix is rejected with `UnknownShape`.
-const CANONICAL_TARGET_PREFIXES: &[&str] = &["job/", "node/", "alloc/"];
+const CANONICAL_TARGET_PREFIXES: &[&str] = &["job/", "node/", "alloc/", "service/"];
 
 /// Target-resource component of the evaluation broker's key.
 ///
@@ -814,6 +865,9 @@ pub enum AnyReconciler {
     /// First real (non-proof-of-life) reconciler. Converges declared
     /// replica count for a `Job` — see [`JobLifecycle`].
     JobLifecycle(JobLifecycle),
+    /// Phase 2 (Slice 08; ASR-2.2-04) — `service-map-hydrator`.
+    /// Activates J-PLAT-004 per ADR-0042. See [`ServiceMapHydrator`].
+    ServiceMapHydrator(ServiceMapHydrator),
 }
 
 impl AnyReconciler {
@@ -823,6 +877,7 @@ impl AnyReconciler {
         match self {
             Self::NoopHeartbeat(r) => r.name(),
             Self::JobLifecycle(r) => r.name(),
+            Self::ServiceMapHydrator(r) => r.name(),
         }
     }
 
@@ -845,6 +900,7 @@ impl AnyReconciler {
         match self {
             Self::NoopHeartbeat(_) => <NoopHeartbeat as Reconciler>::NAME,
             Self::JobLifecycle(_) => <JobLifecycle as Reconciler>::NAME,
+            Self::ServiceMapHydrator(_) => <ServiceMapHydrator as Reconciler>::NAME,
         }
     }
 
@@ -905,6 +961,16 @@ impl AnyReconciler {
                 let (actions, next_view) = r.reconcile(desired, actual, view, tick);
                 (actions, AnyReconcilerView::JobLifecycle(next_view))
             }
+            // Phase 2 — `service-map-hydrator` dispatch.
+            (
+                Self::ServiceMapHydrator(r),
+                AnyState::ServiceMapHydrator(desired),
+                AnyState::ServiceMapHydrator(actual),
+                AnyReconcilerView::ServiceMapHydrator(view),
+            ) => {
+                let (actions, next_view) = r.reconcile(desired, actual, view, tick);
+                (actions, AnyReconcilerView::ServiceMapHydrator(next_view))
+            }
             // Cross-variant branches — statically impossible once the
             // runtime correctly hydrates matching state and view kinds.
             // The runtime tick loop ships in 02-03; until then these
@@ -936,6 +1002,9 @@ pub enum AnyReconcilerView {
     Unit,
     /// `JobLifecycle` reconciler's view — see [`JobLifecycleView`].
     JobLifecycle(JobLifecycleView),
+    /// `ServiceMapHydrator` reconciler's view — see
+    /// [`ServiceMapHydratorView`]. Phase 2 (Slice 08; ASR-2.2-04).
+    ServiceMapHydrator(ServiceMapHydratorView),
 }
 
 // ---------------------------------------------------------------------------
@@ -1440,4 +1509,278 @@ pub struct JobLifecycleView {
     /// derived deadline.
     #[serde(default)]
     pub last_failure_seen_at: BTreeMap<AllocationId, UnixInstant>,
+}
+
+// ---------------------------------------------------------------------------
+// ServiceMapHydrator reconciler — Phase 2 (Slice 08; ASR-2.2-04)
+//
+// Watches the `service_backends` ObservationStore rows for backend-set
+// drift (the desired side) and the `service_hydration_results` rows
+// for the dataplane's confirmed-state observation (the actual side).
+// Emits one `Action::DataplaneUpdateService` per service whose
+// fingerprint diverges, and reads the hydration-result row on the
+// next tick to advance the state machine.
+//
+// Per ADR-0035/0036:
+//
+// - Sync `reconcile`. No `.await`, no `Instant::now()`, no DB handle.
+//   Wall-clock only via `tick.now_unix`.
+// - Typed `State` (desired+actual per `ServiceId`) and typed `View`
+//   (per-service retry inputs only — `attempts`,
+//   `last_failure_seen_at`, `last_attempted_fingerprint`). NEVER a
+//   `next_attempt_at` field per `.claude/rules/development.md`
+//   § "Persist inputs, not derived state".
+//
+// The struct lives here (rather than in `overdrive-control-plane`)
+// because [`AnyReconciler`] holds the concrete type in its
+// `ServiceMapHydrator` variant — same layering as `JobLifecycle`.
+// `overdrive-control-plane::reconcilers::service_map_hydrator`
+// re-exports the public surface.
+// ---------------------------------------------------------------------------
+
+/// Desired-side projection for a single service. Sourced by the runtime's
+/// `hydrate_desired` arm from the `service_backends` ObservationStore
+/// table (see GH #160 for the upstream table addition pending) and
+/// projected into [`ServiceMapHydratorState::desired`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServiceDesired {
+    /// Virtual IP the kernel-side XDP program matches incoming packets
+    /// against. Wrapped from the `service_backends` row's `Ipv4Addr`
+    /// at the runtime hydrate boundary (architecture.md § 8 lines
+    /// 616-629).
+    pub vip: ServiceVip,
+    /// Backend set, in deterministic `BTreeMap<BackendId, Backend>`
+    /// iteration order (architecture.md § 7). Maglev table generation
+    /// is byte-deterministic across nodes given identical inputs.
+    pub backends: Vec<Backend>,
+    /// Content-hash of the `(vip, backends)` pair per
+    /// [`crate::dataplane::fingerprint::fingerprint`]. Identifies a
+    /// unique backend-set state for convergence detection.
+    pub fingerprint: BackendSetFingerprint,
+}
+
+/// Hydrator state — split into `desired` and `actual` projections
+/// merged by the runtime before `reconcile` per ADR-0036.
+///
+/// `BTreeMap` per `.claude/rules/development.md` § Ordered-collection
+/// choice — deterministic iteration order is load-bearing for the
+/// Maglev permutation generator that consumes the emitted action.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ServiceMapHydratorState {
+    /// Per-service desired backend set. Hydrated from
+    /// `service_backends` ObservationStore rows for the target
+    /// `ServiceId`.
+    pub desired: BTreeMap<ServiceId, ServiceDesired>,
+    /// Per-service last-known hydration outcome from the
+    /// `service_hydration_results` table. The hydrator observes the
+    /// dataplane's confirmed state, not a next-action prediction.
+    pub actual: BTreeMap<ServiceId, ServiceHydrationStatus>,
+}
+
+/// Per-service retry inputs — `attempts`,
+/// `last_failure_seen_at`, `last_attempted_fingerprint` per
+/// architecture.md § 8 *type View*. Per
+/// `.claude/rules/development.md` § "Persist inputs, not derived
+/// state" the View carries the inputs the next-attempt deadline is
+/// computed from, NEVER the deadline itself — every tick recomputes
+/// `last_failure_seen_at + backoff_for_attempt(attempts)` from these
+/// inputs against `tick.now_unix`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct RetryMemory {
+    /// Number of `Action::DataplaneUpdateService` dispatches emitted
+    /// for this service. Increments only on dispatch (NOT every tick);
+    /// reset to 0 on confirmed Completed observation. **Input.**
+    #[serde(default)]
+    pub attempts: u32,
+    /// Wall-clock observation timestamp of the last failure
+    /// (`tick.now_unix` at the moment a Failed status was recorded
+    /// on dispatch). The backoff *deadline* is recomputed on every
+    /// read as `seen_at + backoff_for_attempt(attempts)`; never
+    /// persisted. **Input.**
+    #[serde(default = "retry_memory_default_seen_at")]
+    pub last_failure_seen_at: UnixInstant,
+    /// Fingerprint of the most recently attempted backend set. Used
+    /// to distinguish "same fingerprint failed; retry only when the
+    /// backoff window elapses" from "fingerprint changed; dispatch
+    /// immediately regardless of backoff." **Input.**
+    #[serde(default)]
+    pub last_attempted_fingerprint: Option<BackendSetFingerprint>,
+}
+
+/// Default `last_failure_seen_at` for serde — `UnixInstant` does not
+/// implement `Default`, so we provide a sensible epoch-zero value
+/// for new rows where no failure has been observed yet.
+const fn retry_memory_default_seen_at() -> UnixInstant {
+    UnixInstant::from_unix_duration(Duration::ZERO)
+}
+
+impl Default for RetryMemory {
+    fn default() -> Self {
+        Self {
+            attempts: 0,
+            last_failure_seen_at: retry_memory_default_seen_at(),
+            last_attempted_fingerprint: None,
+        }
+    }
+}
+
+/// `ServiceMapHydrator` reconciler memory — `BTreeMap<ServiceId,
+/// RetryMemory>` persisted by the runtime via `RedbViewStore` per
+/// ADR-0035.
+///
+/// `BTreeMap` per `.claude/rules/development.md` § Ordered-collection
+/// choice. The retries map is iterated in the GC sweep at the end of
+/// `reconcile`; deterministic iteration order keeps DST replay
+/// bit-identical.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ServiceMapHydratorView {
+    /// Per-service retry inputs. Empty when no service has been
+    /// dispatched for yet, or after every dispatched service has
+    /// reached the converged-Completed branch (each Completed entry
+    /// is removed by the convergence reset).
+    #[serde(default)]
+    pub retries: BTreeMap<ServiceId, RetryMemory>,
+}
+
+/// The Phase 2 hydrator reconciler. Activates J-PLAT-004 (per
+/// ADR-0042). Watches `service_backends` and `service_hydration_results`
+/// observation rows; emits one `Action::DataplaneUpdateService` per
+/// service whose backend-set fingerprint has drifted from the
+/// confirmed-applied fingerprint.
+pub struct ServiceMapHydrator {
+    name: ReconcilerName,
+}
+
+impl ServiceMapHydrator {
+    /// Construct the canonical `service-map-hydrator` instance.
+    ///
+    /// # Panics
+    ///
+    /// Never — `Self::NAME` is a compile-time string literal
+    /// satisfying every `ReconcilerName` validation rule.
+    #[must_use]
+    pub fn canonical() -> Self {
+        #[allow(clippy::expect_used)]
+        let name = ReconcilerName::new(<Self as Reconciler>::NAME)
+            .expect("'service-map-hydrator' is a valid ReconcilerName by construction");
+        Self { name }
+    }
+}
+
+impl Default for ServiceMapHydrator {
+    fn default() -> Self {
+        Self::canonical()
+    }
+}
+
+impl Reconciler for ServiceMapHydrator {
+    const NAME: &'static str = "service-map-hydrator";
+
+    type State = ServiceMapHydratorState;
+    type View = ServiceMapHydratorView;
+
+    fn name(&self) -> &ReconcilerName {
+        &self.name
+    }
+
+    fn reconcile(
+        &self,
+        desired: &Self::State,
+        actual: &Self::State,
+        view: &Self::View,
+        tick: &TickContext,
+    ) -> (Vec<Action>, Self::View) {
+        let mut actions = Vec::new();
+        let mut next_view = view.clone();
+
+        // For each service in `desired`, decide whether to dispatch
+        // based on (1) actual.fingerprint vs desired.fingerprint, and
+        // (2) the retry-budget deadline recomputed from persisted
+        // inputs (NEVER persisted as a derived value).
+        for (service_id, desired_svc) in &desired.desired {
+            let actual_status = actual.actual.get(service_id);
+            let need_dispatch = should_dispatch(
+                actual_status,
+                desired_svc.fingerprint,
+                view.retries.get(service_id),
+                tick.now_unix,
+            );
+
+            if need_dispatch {
+                let target_str = format!("service-map-hydrator/{service_id}");
+                let spec_hash = ContentHash::of(desired_svc.fingerprint.to_le_bytes().as_slice());
+                let correlation = CorrelationKey::derive(&target_str, &spec_hash, "update-service");
+
+                actions.push(Action::DataplaneUpdateService {
+                    service_id: *service_id,
+                    vip: desired_svc.vip,
+                    backends: desired_svc.backends.clone(),
+                    correlation,
+                });
+
+                // Bump retry memory — record *inputs* per
+                // `.claude/rules/development.md` § "Persist inputs,
+                // not derived state". `attempts` and
+                // `last_failure_seen_at` together drive the next
+                // tick's deadline recomputation.
+                let entry = next_view.retries.entry(*service_id).or_default();
+                entry.attempts = entry.attempts.saturating_add(1);
+                entry.last_failure_seen_at = tick.now_unix;
+                entry.last_attempted_fingerprint = Some(desired_svc.fingerprint);
+            } else if let Some(ServiceHydrationStatus::Completed { fingerprint, .. }) =
+                actual_status
+            {
+                // Convergence: reset retry memory for this service.
+                if *fingerprint == desired_svc.fingerprint {
+                    next_view.retries.remove(service_id);
+                }
+            }
+        }
+
+        // GC: drop retry memory for services no longer in `desired`.
+        next_view.retries.retain(|service_id, _| desired.desired.contains_key(service_id));
+
+        (actions, next_view)
+    }
+}
+
+/// Pure decision: dispatch a `DataplaneUpdateService` action this tick?
+///
+/// Encapsulates the four-arm decision tree per architecture.md § 8:
+///
+/// 1. No actual row yet (`None`) or `Pending` → dispatch.
+/// 2. `Completed { fingerprint }` matches desired.fingerprint → no
+///    dispatch (converged).
+/// 3. `Completed { fingerprint }` differs → dispatch (fingerprint
+///    drift, no backoff gate).
+/// 4. `Failed { fingerprint }`:
+///    - Different fingerprint than current desired → dispatch
+///      immediately (drift overrides backoff).
+///    - Same fingerprint → dispatch only when backoff window has
+///      elapsed (`tick.now_unix >= seen_at + backoff_for_attempt`).
+fn should_dispatch(
+    actual_status: Option<&ServiceHydrationStatus>,
+    desired_fingerprint: BackendSetFingerprint,
+    retry: Option<&RetryMemory>,
+    now: UnixInstant,
+) -> bool {
+    match actual_status {
+        None | Some(ServiceHydrationStatus::Pending) => true,
+        Some(ServiceHydrationStatus::Completed { fingerprint, .. }) => {
+            *fingerprint != desired_fingerprint
+        }
+        Some(ServiceHydrationStatus::Failed { fingerprint, .. }) => {
+            if *fingerprint != desired_fingerprint {
+                // Backend set drifted while in Failed state — dispatch
+                // the new fingerprint immediately.
+                return true;
+            }
+            // Same fingerprint failed; gate on retry-budget deadline.
+            // Per `.claude/rules/development.md` § "Persist inputs,
+            // not derived state" the deadline is recomputed every
+            // tick from inputs (`attempts`, `last_failure_seen_at`)
+            // against the current backoff policy. Never persisted.
+            retry.is_none_or(|r| now >= r.last_failure_seen_at + backoff_for_attempt(r.attempts))
+        }
+    }
 }

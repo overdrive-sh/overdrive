@@ -66,13 +66,13 @@ on every CI run.**
   `#[utoipa::path(...)]`.
 - **Generated artifact**: `api/openapi.yaml` at the workspace root.
   Checked into git as the canonical wire contract.
-- **Derivation command**: `cargo xtask openapi-gen` regenerates
+- **Derivation command**: `cargo openapi-gen` regenerates
   `api/openapi.yaml` by calling `OverdriveApi::openapi()` on the
   `utoipa::OpenApi`-derived root struct and serialising as YAML.
-- **CI gate**: `cargo xtask openapi-check` regenerates to a temp file
+- **CI gate**: `cargo openapi-check` regenerates to a temp file
   and `diff`s against the checked-in `api/openapi.yaml`. Non-empty
   diff fails the build. Message names the out-of-sync type and
-  suggests `cargo xtask openapi-gen` to regenerate.
+  suggests `cargo openapi-gen` to regenerate.
 - **Shared types**: both the axum handlers and the CLI HTTP client
   (ADR-0014) import the same Rust types. The OpenAPI document is
   a *report* of the types; the types are the contract.
@@ -97,7 +97,7 @@ to the single-source-of-truth invariant.
 
 - Request/response type changes are atomic: rename a field in Rust,
   regenerate the schema, CLI and server stay in lockstep.
-- `cargo xtask openapi-check` in CI makes drift a merge-blocker.
+- `cargo openapi-check` in CI makes drift a merge-blocker.
 - `api/openapi.yaml` is a publishable artifact — operators, future
   SDK consumers, and documentation builders reference one path.
 - Works cleanly with `utoipa-swagger-ui` as a future gateway add-on

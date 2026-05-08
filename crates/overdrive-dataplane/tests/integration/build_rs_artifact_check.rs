@@ -12,15 +12,12 @@
 //! 1. exit code is non-zero, AND
 //! 2. stderr names the artifact path AND `cargo xtask bpf-build`.
 //!
-//! Linux-only by `#[cfg(target_os = "linux")]` — the build.rs check
-//! itself is Linux-only (the `include_bytes!` constant lives behind
-//! `#[cfg(target_os = "linux")]` in `src/lib.rs` and is never
-//! evaluated on non-Linux). Gated behind the `integration-tests`
+//! Gated behind the `integration-tests`
 //! feature on the crate via the `tests/integration.rs` entrypoint per
 //! `.claude/rules/testing.md` § Layout. `#[serial(env)]` because the
 //! test mutates the on-disk artifact (process-global file).
 
-#![cfg(target_os = "linux")]
+#![allow(clippy::print_stderr)]
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -30,8 +27,26 @@ use serial_test::serial;
 #[test]
 #[serial(env)]
 fn build_rs_emits_diagnostic_when_artifact_missing() -> Result<(), Box<dyn std::error::Error>> {
+    // Skip under mutation testing. `cargo xtask mutants` sets
+    // `OVERDRIVE_BPF_OBJECT` to an absolute path in the original tree
+    // (so per-mutant copies under `/tmp/cargo-mutants-*/` resolve the
+    // artifact correctly — see `crates/overdrive-dataplane/build.rs`
+    // module docstring and `xtask::mutants::bpf_object_env_override`).
+    // This test deliberately removes the artifact and asserts
+    // build.rs's "BPF object not found" diagnostic — but under the
+    // override, the build script consults the env var first and finds
+    // the file at the original tree's location regardless of any
+    // local removal in the mutant copy. The test is a build-script
+    // shape assertion, not a logic property; CI (normal runs) and
+    // local dev exercise it. Skipping here keeps the mutation gate
+    // honest without weakening the build-script contract.
+    if std::env::var_os("OVERDRIVE_BPF_OBJECT").is_some() {
+        eprintln!("[skip] build_rs_artifact_check: OVERDRIVE_BPF_OBJECT set (under mutation test)");
+        return Ok(());
+    }
+
     let workspace_root = workspace_root();
-    let artifact = workspace_root.join("target/xtask/bpf-objects/overdrive_bpf.o");
+    let artifact = workspace_root.join("target/bpf/overdrive_bpf.o");
 
     // Snapshot any existing artifact so the test is reversible: the
     // placeholder produced by the GREEN setup, or a real

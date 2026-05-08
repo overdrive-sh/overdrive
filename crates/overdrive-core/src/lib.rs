@@ -23,10 +23,44 @@
 #![forbid(unsafe_code)]
 #![cfg_attr(not(test), warn(clippy::expect_used, clippy::unwrap_used))]
 #![cfg_attr(test, allow(clippy::expect_used, clippy::unwrap_used))]
+// Phase 2.2 RED scaffolds in `dataplane/*` (DropClass, MaglevTableSize)
+// and `id::BackendId` carry short docstrings on draft type definitions.
+// Per `.claude/rules/testing.md` § "Production-side scaffolds", crates
+// with many concurrent scaffolds gate the relevant lints crate-level
+// via `expect` (NOT `allow`) so the gate self-removes the moment
+// every scaffold goes GREEN. Slice 08-01 closed the
+// `BackendSetFingerprint` `todo!()` — `clippy::todo` is therefore
+// dropped from this expect block. Remove the rest once the remaining
+// scaffolds go GREEN.
+#![expect(
+    clippy::doc_markdown,
+    clippy::too_long_first_doc_paragraph,
+    reason = "Phase 2.2 RED scaffolds; lints will self-trip when scaffolds go GREEN"
+)]
 
 pub mod aggregate;
+pub mod eval_broker;
+// Phase 2.2 dataplane-internal types — `MaglevTableSize`, `DropClass`,
+// `BackendSetFingerprint` + computation helpers. Workload-identifier
+// newtypes (`ServiceVip`, `ServiceId`, `BackendId`) live in
+// [`id`] alongside the existing identifier catalogue.
+// RED scaffolds per `docs/feature/phase-2-xdp-service-map/distill/
+// wave-decisions.md` DWD-4. Bodies panic until DELIVER fills them.
+pub mod dataplane;
 pub mod error;
 pub mod id;
+// `maglev::{permutation, table}` — pure userspace consistent-hashing
+// primitives over `BackendId` + `MaglevTableSize`. Lives here (rather
+// than in `overdrive-dataplane` where it originated) because it has
+// two consumers — the production BPF map handle in `overdrive-dataplane`
+// AND the `MaglevDistributionEven` / `MaglevDeterministic` DST
+// invariants in `overdrive-sim` — and both already depend on
+// `overdrive-core`. Hosting it here breaks the `overdrive-sim →
+// overdrive-dataplane` edge that previously dragged dataplane's
+// `build.rs` (and its missing-BPF-object hard-fail) into xtask's
+// compile chain. See § "xtask is build / test / dev orchestration"
+// in `.claude/rules/development.md` for the layering rule.
+pub mod maglev;
 pub mod reconciler;
 pub mod traits;
 // `UnixInstant` — portable wall-clock instant for persistable

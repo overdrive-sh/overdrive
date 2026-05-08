@@ -1,8 +1,8 @@
 //! DST invariant catalogue.
 //!
 //! The [`Invariant`] enum is the canonical name source for `--only <NAME>`
-//! on `cargo xtask dst` and for every invariant entry in
-//! `target/xtask/dst-summary.json`. `Display` emits kebab-case, lowercase;
+//! on `cargo dst` and for every invariant entry in
+//! `target/dst/summary.json`. `Display` emits kebab-case, lowercase;
 //! [`FromStr`] accepts any ASCII-case spelling of a canonical name. A name
 //! printed by the harness MUST round-trip losslessly through
 //! `FromStr → Display` — the proptest in
@@ -11,7 +11,7 @@
 //! Phase 1 ships the catalogue definition and canonical-name machinery.
 //! The invariant *evaluators* — the code that decides whether an
 //! invariant holds in a given run — land in step 06-02. Every name in
-//! this enum is already known to `cargo xtask dst`, so CI wiring and
+//! this enum is already known to `cargo dst`, so CI wiring and
 //! artifact shape are stable even before the evaluators exist.
 
 #![allow(clippy::missing_errors_doc)]
@@ -20,6 +20,49 @@ use std::fmt::{self, Display};
 use std::str::FromStr;
 
 pub mod evaluators;
+// phase-2-xdp-service-map Slice 03 (US-03; S-2.2-09). The
+// `BackendSetSwapAtomic` invariant pins the SimDataplane's
+// `update_service` to a single mutex-guarded reassignment so
+// observers see either the pre- or post-swap backend set,
+// never a torn state. Mirrors the production `EbpfDataplane`'s
+// atomic HASH_OF_MAPS outer-map swap.
+pub mod backend_set_swap_atomic;
+// phase-2-xdp-service-map Slice 04 (US-04; S-2.2-13 sibling).
+// The `MaglevDistributionEven` invariant pins the steady-state
+// distribution property of `maglev::generate` — under equal
+// weights, every backend occupies its expected share ±5 %. The
+// disruption-bound proptest at `tests/integration/maglev_churn.rs`
+// pins the churn property; this invariant pins the distribution
+// property, both ride on the same pure function.
+pub mod maglev_distribution;
+// phase-2-xdp-service-map Slice 04 (US-04; S-2.2-14 sibling).
+// The `MaglevDeterministic` invariant pins the K3 twin-run identity
+// property of `maglev::generate` — two calls with identical inputs
+// return bit-identical `Vec<BackendId>` outputs. Sibling to
+// `MaglevDistributionEven`: that invariant pins the steady-state
+// distribution property, this one pins the determinism property.
+pub mod maglev_deterministic;
+// phase-2-xdp-service-map Slice 05 (US-05; S-2.2-20). The
+// `ReverseNatLockstep` invariant pins the lockstep contract between
+// `SimDataplane.services` and `SimDataplane.reverse_nat`: every
+// forward-path service backend has a matching `REVERSE_NAT` entry
+// pointing back to the original VIP, written/removed under one
+// mutex acquisition. Mirrors the production `EbpfDataplane`'s
+// `REVERSE_NAT_MAP` lockstep contract.
+pub mod reverse_nat_lockstep;
+// phase-2-xdp-service-map Slice 06 (US-06; S-2.2-22 sibling). The
+// `SanityChecksFireBeforeServiceMap` invariant pins the kernel-side
+// contract that every sanity-rule-violating packet produces
+// `XDP_DROP` (slot `MalformedHeader` increments) AND short-circuits
+// before SERVICE_MAP lookup. Sibling to the Tier 3 mixed-batch test
+// at `crates/overdrive-dataplane/tests/integration/sanity_mixed_batch.rs`.
+pub mod sanity_checks_fire;
+// phase-2-xdp-service-map DISTILL — RED scaffolds per
+// `docs/feature/phase-2-xdp-service-map/distill/wave-decisions.md`
+// DWD-4. Hosts `assert_hydrator_eventually_converges` +
+// `assert_hydrator_idempotent_steady_state` (both panic until DELIVER
+// fills them per Slice 08).
+pub mod service_map_hydrator;
 
 /// Catalogue of invariants the DST harness evaluates.
 ///
@@ -133,6 +176,82 @@ pub enum Invariant {
     /// state to readers across crashes; this invariant catches the
     /// inverse ordering at PR time.
     WriteThroughOrdering,
+
+    /// phase-2-xdp-service-map Slice 03 (US-03; S-2.2-09) — always
+    /// invariant. Every observation of
+    /// `SimDataplane.services[service]` made concurrent with an
+    /// `update_service` call sees either the pre-swap backend set or
+    /// the post-swap backend set — never a torn / mixed state. DST
+    /// mirror of the production `EbpfDataplane`'s atomic outer-map
+    /// swap (`HASH_OF_MAPS`). The evaluator body lives in
+    /// `crate::invariants::backend_set_swap_atomic`.
+    BackendSetSwapAtomic,
+
+    /// phase-2-xdp-service-map Slice 04 (US-04; S-2.2-13 sibling) —
+    /// always invariant. Under equal weights, the Maglev permutation
+    /// distributes slots within ±5 % of the per-backend expectation
+    /// (`M / N`). Sibling to the `single_backend_removal_shifts_at_
+    /// most_two_percent_of_flows` proptest in
+    /// `crates/overdrive-sim/tests/integration/maglev_churn.rs`: the
+    /// proptest pins the churn property, this invariant pins the
+    /// steady-state distribution property. Both ride on the same
+    /// `maglev::generate` pure function. The evaluator body lives in
+    /// `crate::invariants::maglev_distribution`.
+    MaglevDistributionEven,
+
+    /// phase-2-xdp-service-map Slice 04 (US-04; S-2.2-14 sibling) —
+    /// always invariant. Two successive `maglev::generate` calls with
+    /// identical inputs return bit-identical `Vec<BackendId>` outputs.
+    /// The K3 reproducibility property (whitepaper §21) projected onto
+    /// the Maglev permutation: any seeded fixture's BPF inner-map
+    /// contents must be byte-equal across twin runs. Sibling to
+    /// `MaglevDistributionEven`: that invariant pins the steady-state
+    /// distribution property, this one pins the determinism property.
+    /// The evaluator body lives in
+    /// `crate::invariants::maglev_deterministic`.
+    MaglevDeterministic,
+
+    /// phase-2-xdp-service-map Slice 05 (US-05; S-2.2-20) — always
+    /// invariant. Every forward-path `SimDataplane.services[vip]`
+    /// entry has a matching `reverse_nat[BackendKey::from(backend)]`
+    /// entry mapping back to the original VIP; removing a backend
+    /// purges both in lockstep. DST mirror of the production
+    /// `EbpfDataplane`'s `REVERSE_NAT_MAP` lockstep contract — one
+    /// mutex acquisition guards both maps. The evaluator body lives
+    /// in `crate::invariants::reverse_nat_lockstep`.
+    ReverseNatLockstep,
+
+    /// phase-2-xdp-service-map Slice 06 (US-06; S-2.2-22 sibling) —
+    /// always invariant. Every packet whose classification violates
+    /// a sanity-prologue rule (truncated IPv4 header, pathological
+    /// TCP flags, IPv6 `EtherType` when the LB is IPv4-only, ...)
+    /// MUST cause the kernel-side dataplane to drop the frame and
+    /// MUST short-circuit BEFORE `SERVICE_MAP` lookup. Mirror of the
+    /// production XDP / TC sanity prologue: `MalformedHeader` slot
+    /// increments and the program returns `XDP_DROP` / `TC_ACT_SHOT`
+    /// before any `HoM` lookup. The evaluator body lives in
+    /// `crate::invariants::sanity_checks_fire`. Sibling to the Tier 3
+    /// mixed-batch test at
+    /// `crates/overdrive-dataplane/tests/integration/sanity_mixed_batch.rs`.
+    SanityChecksFireBeforeServiceMap,
+
+    /// SCAFFOLD: true — phase-2-xdp-service-map DISTILL per ADR-0042
+    /// + architecture.md § 8 *ESR pair*. Eventual: from any
+    /// combination of `service_backends` rows + starting BPF map
+    /// state, repeated reconcile ticks drive
+    /// `actual.fingerprint == desired.fingerprint` for every service.
+    /// The evaluator body panics with a `RED scaffold` message until
+    /// DELIVER ships the body per Slice 08 / S-2.2-26.
+    HydratorEventuallyConverges,
+
+    /// SCAFFOLD: true — phase-2-xdp-service-map DISTILL per ADR-0042
+    /// + architecture.md § 8 *ESR pair*. Always: once
+    /// `actual.fingerprint == desired.fingerprint` for all services,
+    /// the hydrator emits zero `Action::DataplaneUpdateService`
+    /// actions per tick. The evaluator body panics with a
+    /// `RED scaffold` message until DELIVER ships the body per
+    /// Slice 08 / S-2.2-27.
+    HydratorIdempotentSteadyState,
 }
 
 impl Invariant {
@@ -163,6 +282,38 @@ impl Invariant {
         Self::ViewStoreRoundtripIsLossless,
         Self::BulkLoadIsDeterministic,
         Self::WriteThroughOrdering,
+        // phase-2-xdp-service-map Slice 03 (US-03; S-2.2-09). The
+        // `BackendSetSwapAtomic` invariant body lands in GREEN of
+        // step 03-01; the variant is registered up front so the
+        // canonical name is stable.
+        Self::BackendSetSwapAtomic,
+        // phase-2-xdp-service-map Slice 04 (US-04; S-2.2-13 sibling).
+        // The `MaglevDistributionEven` invariant body lives in
+        // `crate::invariants::maglev_distribution`. Sibling to the
+        // disruption-bound proptest at
+        // `tests/integration/maglev_churn.rs`.
+        Self::MaglevDistributionEven,
+        // phase-2-xdp-service-map Slice 04 (US-04; S-2.2-14 sibling).
+        // The `MaglevDeterministic` invariant body lives in
+        // `crate::invariants::maglev_deterministic`. Sibling to
+        // `MaglevDistributionEven` — both ride on the same pure
+        // `maglev::generate` function.
+        Self::MaglevDeterministic,
+        // phase-2-xdp-service-map Slice 05 (US-05; S-2.2-20). The
+        // `ReverseNatLockstep` invariant body lives in
+        // `crate::invariants::reverse_nat_lockstep`.
+        Self::ReverseNatLockstep,
+        // phase-2-xdp-service-map Slice 06 (US-06; S-2.2-22 sibling).
+        // The `SanityChecksFireBeforeServiceMap` invariant body lives
+        // in `crate::invariants::sanity_checks_fire`. Sibling to the
+        // Tier 3 mixed-batch test at
+        // `crates/overdrive-dataplane/tests/integration/sanity_mixed_batch.rs`.
+        Self::SanityChecksFireBeforeServiceMap,
+        // phase-2-xdp-service-map DISTILL — RED scaffolds per
+        // `docs/feature/phase-2-xdp-service-map/distill/wave-decisions.md`
+        // DWD-4. Evaluator bodies panic until DELIVER fills them.
+        Self::HydratorEventuallyConverges,
+        Self::HydratorIdempotentSteadyState,
     ];
 
     /// The canonical kebab-case spelling of this invariant, as a static
@@ -192,6 +343,13 @@ impl Invariant {
             Self::ViewStoreRoundtripIsLossless => "view-store-roundtrip-is-lossless",
             Self::BulkLoadIsDeterministic => "bulk-load-is-deterministic",
             Self::WriteThroughOrdering => "write-through-ordering",
+            Self::BackendSetSwapAtomic => "backend-set-swap-atomic",
+            Self::MaglevDistributionEven => "maglev-distribution-even",
+            Self::MaglevDeterministic => "maglev-deterministic",
+            Self::ReverseNatLockstep => "reverse-nat-lockstep",
+            Self::SanityChecksFireBeforeServiceMap => "sanity-checks-fire-before-service-map",
+            Self::HydratorEventuallyConverges => "hydrator-eventually-converges",
+            Self::HydratorIdempotentSteadyState => "hydrator-idempotent-steady-state",
         }
     }
 }

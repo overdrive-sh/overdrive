@@ -132,10 +132,10 @@ span field suffices; no separate "monotonic violation" event.
 **Observable**: three new DST invariants
 (`at_least_one_reconciler_registered`,
 `duplicate_evaluations_collapse`, `reconciler_is_pure`) pass on every
-run of `cargo xtask dst`.
+run of `cargo dst`.
 
 **Tracing design**: the DST harness produces
-`target/xtask/dst-summary.json` per invariant (phase-1-foundation
+`target/dst/summary.json` per invariant (phase-1-foundation
 ADR-0006). K4 does NOT need additional `tracing` spans — the existing
 DST summary file IS the structured signal.
 

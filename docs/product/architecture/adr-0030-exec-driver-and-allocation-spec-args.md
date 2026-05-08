@@ -395,7 +395,7 @@ interim shape is exactly what would be carved out of
   amendments to ADR-0026 and ADR-0029 are superseded by this ADR.
 - **OpenAPI schema regeneration required.** The `api/openapi.yaml`
   delta is mechanical (`image` → `command`; new `args` array of
-  strings) and the existing CI check (`cargo xtask openapi-check`)
+  strings) and the existing CI check (`cargo openapi-check`)
   catches drift. One-time cost.
 - **Test fixtures grow by one line each.** Every fixture that
   previously relied on magic dispatch via three-character image

@@ -1,0 +1,176 @@
+# Verifier-budget baseline — xdp_service_map_lookup
+#
+# Slice 04 / S-2.2-14 — post-Maglev MAGLEV_MAP-indexed slot lookup
+# baseline. Slice 07's `cargo xtask verifier-regress` gate (lands at
+# step 07-01) parses this file and fails the PR if the recorded
+# program exceeds the baseline by >20% or approaches the per-program
+# complexity ceiling (1,000,000 instructions for CAP_BPF programs)
+# by >10%, per ASR-2.2-03.
+#
+# History:
+#   Slice 02 baseline (commit 8edf471): verified_insns = 401 with
+#     flat HashMap<ServiceKey, BackendEntry> single-lookup shape.
+#   Slice 03 baseline (commit c38a110): verified_insns = 460 with
+#     HASH_OF_MAPS chained lookup (outer SERVICE_MAP → inner ARRAY)
+#     plus a placeholder slot hash (`(src_port ^ dst_port) & 0xff`).
+#     Growth: +59 instructions (+14.7%) — within ASR-2.2-03's 20%
+#     delta gate vs Slice 02.
+#   Slice 04 (this commit): verified_insns = 660 with FNV-1a-32 over
+#     the 5-tuple unrolled across 13 input bytes plus
+#     `% MaglevTableSize::DEFAULT` (= 16_381) for slot derivation,
+#     and the inner ARRAY populated by `maglev::permutation::generate`
+#     instead of round-robin. The HoM swap orchestration (5-step,
+#     ADR-0040 § 2) is unchanged — only the inner-ARRAY contents and
+#     the kernel-side slot-hash differ.
+#
+#     Delta vs Slice 03: 460 → 660 (+200 instructions, +43.5%).
+#
+#     Delta vs Slice 02 baseline: 401 → 660 (+259 instructions, +64.6%).
+#     This is a one-time architectural bump from FNV-1a 5-tuple hashing.
+#     Slice 04 is the SECOND baseline recorded after Slice 02; the
+#     +64.6% delta is informational vs the original baseline, NOT
+#     gating against it. The next gate (Slice 07's verifier-regress)
+#     enforces against THIS new baseline (660), with ASR-2.2-03's 20%
+#     delta becoming `insns ≤ 792` for any future change.
+#
+#     660 is comfortably within the 50% CAP_BPF target (500_000 insns)
+#     — the program uses 0.13% of the L1-cache-fits budget. There is
+#     no further FNV/Maglev-shaped growth queued; subsequent slices
+#     (DROP_COUNTER PerCpuArray, TC egress, sockops mTLS) live in
+#     separate programs with their own baselines.
+#
+#   Slice 05-04 (this commit): verified_insns = 1211 with
+#     `bpf_fib_lookup` + L2 MAC rewrite + cross-iface `bpf_redirect`
+#     appended after the existing L3+L4 rewrite + checksum fold
+#     (Option α per
+#     docs/research/dataplane/cilium-bpf-fib-lookup-l2-mac-rewrite-comprehensive-research.md).
+#     The added instructions: ~80 bytes of `bpf_fib_lookup` parameter
+#     init from packet fields (tot_len, tos, sport, dport, src_ip,
+#     dst_ip, ifindex, family, proto), one helper call (`bpf_fib_lookup`,
+#     helper id 69), the success-path conditional branching on
+#     `BPF_FIB_LKUP_RET_SUCCESS`, two 6-byte MAC writes via `mut_ptr_at`
+#     bounds checks, an `ingress_ifindex == fib.ifindex` comparison,
+#     and the `bpf_redirect` helper call in the cross-iface path.
+#
+#     Delta vs Slice 04 baseline: 660 → 1211 (+551 instructions,
+#     +83%). This exceeds the 20% relative-delta gate against Slice
+#     04's baseline, so the gate is being re-baselined here per
+#     ADR-0040 / architecture.md § 7 D3 — Option α is the load-bearing
+#     L2 MAC rewrite + redirect mechanic that unblocks S-2.2-17 (real
+#     `nc` end-to-end through 3-iface topology). Without it, every
+#     `XDP_TX` into a non-local backend's veth peer is dropped at
+#     `ip_rcv` due to `PACKET_OTHERHOST` classification — see Findings
+#     2.4 / 3.3 of the cited research.
+#
+#     1211 instructions remains comfortably within every absolute
+#     ceiling: 0.24% of the 500K L1-cache-fits target, 0.20% of the
+#     600K ASR-2.2-03 ceiling, 0.12% of the 1M CAP_BPF kernel ceiling.
+#     The +20% gate now enforces against THIS new baseline (1211),
+#     i.e. `verified_insns ≤ 1453` for future changes.
+#
+#     The pps cost of the added helper call is predicted by the
+#     research at ≤ 2% (Finding 4.2); empirical measurement lands in
+#     Slice 07's xdp-perf baseline. If the regression exceeds 5%, an
+#     ADR amendment names the budget renegotiation.
+#
+# Recorded against:
+#   kernel:   6.8.0-111-generic   (Ubuntu 24.04 LTS lineage; matrix row "6.6 LTS"
+#                                   per .claude/rules/testing.md § "Kernel matrix"
+#                                   with Lima's actual 6.8 kernel)
+#   commit:   post-Option-α (Slice 05-04)
+#   date:     2026-05-06
+#   tool:     aya 0.13.1 ProgramInfo::verified_instruction_count
+#             (veristat is not packaged in the Lima image; aya queries
+#             BPF_OBJ_GET_INFO_BY_FD which returns the same kernel-side
+#             counter veristat reads.)
+#   target:   target/bpf/overdrive_bpf.o
+#             (built by `cargo xtask bpf-build` against
+#             rustup nightly + bpfel-unknown-none + -Z build-std=core,
+#             per ADR-0038 §3.1)
+#
+#   Step 09-04 (this commit): verified_insns = 151379 with full L4
+#     checksum recomputation via word-by-word bounded loop replacing
+#     the broken `bpf_csum_diff`-with-variable-length-pkt-data approach
+#     (which the verifier rejected — aya-rs/aya#1562). The loop walks
+#     up to MAX_L4_LEN/2 = 750 u16 words of L4 data with per-access
+#     volatile packet-pointer re-derivation (`pkt_read_u16`). The
+#     verifier unrolls the bounded loop in its state walk, producing
+#     ~750 * ~200 verified instruction states.
+#
+#     The actual JIT'd machine code is compact — one loop body — so
+#     pps impact is minimal compared to the incremental-csum path it
+#     replaces. The verifier cost is the price of CHECKSUM_PARTIAL
+#     correctness on veth without `ethtool -K` TX-offload disabling
+#     (which masks the production failure mode).
+#
+#     Delta vs Slice 05-04 baseline: 1211 → 151379 (+150168 insns).
+#     This is a one-time architectural bump from full L4 csum
+#     recomputation (Katran pattern). 151379 remains within every
+#     absolute ceiling:
+#       151379 / 500,000 = 30.3% of the L1-cache-fits target
+#       151379 / 600,000 = 25.2% of the ASR-2.2-03 ceiling
+#       151379 / 1,000,000 = 15.1% of the CAP_BPF kernel ceiling
+#
+#   Step 06-05 (this commit): verified_insns = 151379 — REAFFIRMED as
+#     the load-bearing baseline of record per ADR-0045 § 6 / § 8.
+#     Re-measurement under the post-pivot program shape (existing
+#     SERVICE_MAP / MAGLEV_MAP / BACKEND_MAP chained lookup + L3+L4
+#     rewrite + word-by-word L4 csum recomputation + bpf_fib_lookup +
+#     L2 MAC rewrite + bpf_redirect_neigh) returns the SAME 151379
+#     count as step 09-04 because no source under
+#     `crates/overdrive-bpf/src/programs/xdp_service_map.rs` has
+#     changed since 09-04's GREEN commit (`d8d848a`).
+#     `git log --oneline -- crates/overdrive-bpf/src/programs/xdp_service_map.rs`
+#     terminates at 09-04 as the most recent commit.
+#
+#     Step 06-05 is the post-pivot baseline-recording step per
+#     ADR-0045 § 8 (Phasing — "Replanned: Baselines are recorded
+#     against the post-pivot program shape, not the pre-pivot
+#     shape"). The Tier 4 gate threshold (≤ 20% delta per PR; ≤ 60%
+#     of 1M ceiling absolute) is preserved.
+#
+#     Delta vs step 09-04 baseline: 151379 → 151379 (+0 insns, 0%) —
+#     well within the 20% gate (≤ 181655). The 20%-delta gate
+#     remains anchored on 151379 for any future change.
+#
+#     Companion baseline: `xdp_reverse_nat_lookup` (NEW program from
+#     slice 09-02) is recorded at first-baseline 148166 in
+#     `perf-baseline/main/verifier-budget/veristat-reverse-nat.txt`.
+#     The retired `tc_reverse_nat` baseline file (pre-pivot
+#     TC-egress shape) was never recorded against the pre-pivot
+#     shape on disk, so no delete is required (criterion #2 of step
+#     06-05 satisfied vacuously).
+#
+# Budget gates (ADR-0040 / architecture.md §7 D3 / ASR-2.2-03):
+#   verified_insns ≤ 181655     ← +20% delta vs step 09-04 baseline (151379)
+#                                 — pinned by the integration test
+#                                 `verifier_budget_xdp_service_map_lookup_within_20pct_of_baseline`
+#                                 in `crates/overdrive-dataplane/tests/integration/atomic_swap.rs`.
+#   verified_insns ≤ 500,000    ← 50% of CAP_BPF ceiling, "L1-cache fits"
+#   verified_insns ≤ 600,000    ← 60% absolute ceiling per ASR-2.2-03
+#   verified_insns ≤ 1,000,000  ← absolute CAP_BPF ceiling (kernel 5.10+)
+#
+# Recorded value (step 09-04):
+#   verified_insns = 151379
+#   151379 / 500,000 = 30.3% of the L1-cache-fits target.
+#
+# DST companion:
+#   `MaglevDeterministic` invariant
+#   (`crates/overdrive-sim/src/invariants/maglev_deterministic.rs`) pins
+#   the K3 twin-run identity property of `maglev::generate` — two
+#   calls with identical inputs return bit-identical `Vec<BackendId>`
+#   outputs. Recorded here because the Maglev permutation determines
+#   the inner-ARRAY contents whose verifier complexity this baseline
+#   measures; non-determinism in `generate` would produce a different
+#   ARRAY shape on the same seed and silently invalidate the perf
+#   baseline. Sibling to `MaglevDistributionEven`
+#   (`maglev_distribution.rs`).
+#
+# Format (one line per program, space-separated key=value pairs;
+# Slice 07's parser keys off `prog=` and `verified_insns=`):
+
+file=target/bpf/overdrive_bpf.o prog=xdp_service_map_lookup verdict=success verified_insns=151379
+
+# (`xdp_pass` baseline at 21 verified_insns is recorded under
+# perf-baseline/main/verifier-budget/veristat-xdp-pass.txt when
+# Slice 01 retroactively lands its baseline; out of scope for 04-05.)

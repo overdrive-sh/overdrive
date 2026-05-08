@@ -349,6 +349,15 @@ impl Harness {
     /// [`crate::invariants::evaluators`]. Every invariant in the
     /// catalogue maps to exactly one evaluator; unknown variants cannot
     /// compile because the enum is exhaustive.
+    ///
+    /// `#[allow(clippy::too_many_lines)]`: the body is a pure
+    /// `match` over `Invariant::ALL` — one arm per variant, with each
+    /// arm's body being a single delegating call. Extracting the arms
+    /// to a per-invariant helper would split the exhaustive match
+    /// across two files without removing any logic. Documentation
+    /// comments per arm push the line count over the 100-line lint
+    /// threshold; the dispatch shape is the right one.
+    #[allow(clippy::too_many_lines)]
     async fn evaluate(
         invariant: Invariant,
         seed: u64,
@@ -502,6 +511,64 @@ impl Harness {
                 evaluators::evaluate_bulk_load_is_deterministic().await
             }
             Invariant::WriteThroughOrdering => evaluators::evaluate_write_through_ordering().await,
+            // phase-2-xdp-service-map Slice 03 (US-03; S-2.2-09).
+            // GREEN of step 03-01 lands the real evaluator body
+            // in `crate::invariants::backend_set_swap_atomic`. The
+            // RED-scaffold body panics when invoked.
+            Invariant::BackendSetSwapAtomic => {
+                crate::invariants::backend_set_swap_atomic::evaluate_backend_set_swap_atomic().await
+            }
+            // phase-2-xdp-service-map Slice 04 (US-04; S-2.2-13 sibling).
+            // GREEN of step 04-03 lands the real evaluator body in
+            // `crate::invariants::maglev_distribution`. Sibling to the
+            // disruption-bound proptest at
+            // `crates/overdrive-sim/tests/integration/maglev_churn.rs`.
+            Invariant::MaglevDistributionEven => {
+                crate::invariants::maglev_distribution::evaluate_maglev_distribution_even()
+            }
+            // phase-2-xdp-service-map Slice 04 (US-04; S-2.2-14 sibling).
+            // GREEN of step 04-05 lands the real evaluator body in
+            // `crate::invariants::maglev_deterministic`. Sibling to
+            // `MaglevDistributionEven` — both ride on the same pure
+            // `maglev::generate` function.
+            Invariant::MaglevDeterministic => {
+                crate::invariants::maglev_deterministic::evaluate_maglev_deterministic()
+            }
+            // phase-2-xdp-service-map Slice 05 (US-05; S-2.2-20).
+            // GREEN of step 05-01 lands the real evaluator body in
+            // `crate::invariants::reverse_nat_lockstep`. The
+            // RED-scaffold body panics when invoked.
+            Invariant::ReverseNatLockstep => {
+                crate::invariants::reverse_nat_lockstep::evaluate_reverse_nat_lockstep().await
+            }
+            // phase-2-xdp-service-map Slice 06 (US-06; S-2.2-22
+            // sibling). GREEN of step 06-04 lands the real evaluator
+            // body in `crate::invariants::sanity_checks_fire`. Sibling
+            // to the Tier 3 mixed-batch test at
+            // `crates/overdrive-dataplane/tests/integration/sanity_mixed_batch.rs`.
+            Invariant::SanityChecksFireBeforeServiceMap => {
+                crate::invariants::sanity_checks_fire::evaluate_sanity_checks_fire_before_service_map().await
+            }
+            // phase-2-xdp-service-map DISTILL — RED scaffolds per
+            // `docs/feature/phase-2-xdp-service-map/distill/wave-decisions.md`
+            // DWD-4. Bodies panic when invoked. DELIVER's Slice 08
+            // wires real evaluators via
+            // `crate::invariants::service_map_hydrator::*` and
+            // returns `InvariantResult` from real fixtures.
+            // phase-2-xdp-service-map Slice 08 (US-08; ASR-2.2-04).
+            // GREEN of step 08-02 lands the real evaluator bodies in
+            // `crate::invariants::service_map_hydrator`. Both ESR
+            // invariants drive the typed `ServiceMapHydrator::reconcile`
+            // function directly via `AnyReconciler::ServiceMapHydrator`
+            // dispatch; no I/O, no async — matches `MaglevDeterministic`
+            // shape.
+            Invariant::HydratorEventuallyConverges => {
+                crate::invariants::service_map_hydrator::evaluate_hydrator_eventually_converges()
+            }
+            Invariant::HydratorIdempotentSteadyState => {
+                crate::invariants::service_map_hydrator::evaluate_hydrator_idempotent_steady_state(
+                )
+            }
         }
     }
 }
@@ -528,58 +595,41 @@ const fn harness_registered_reconcilers(_hosts: &[Host]) -> usize {
 /// isolation: submit `N ≥ 3` evaluations at the same `(ReconcilerName,
 /// TargetResource)` key, drain once, and return the observed counters.
 ///
-/// The broker's LWW key-collapse is reimplemented here in a few lines
-/// rather than pulled in from `overdrive-control-plane` — the sim crate
-/// is a leaf adapter and the broker's behaviour is small enough to
-/// mirror. The contract the evaluator checks — `dispatched == 1`,
-/// `cancelled == n - 1`, `queued == 0` — is the invariant, and
-/// mirroring the broker proves the contract is satisfiable on a clean
-/// run. Production wiring is exercised in step 05-05.
+/// Uses the real `EvaluationBroker` from `overdrive-core` — the broker
+/// is pure logic over core types with no I/O, so the sim crate imports
+/// it directly. The contract the evaluator checks — `dispatched == 1`,
+/// `cancelled == n - 1`, `queued == 0` — is asserted against the real
+/// broker's `counters()` snapshot.
 #[allow(clippy::expect_used)] // `ReconcilerName::new` / `TargetResource::new` are total on literals.
 fn drive_broker_collapse() -> (u64, evaluators::BrokerCountersSnapshot) {
-    use std::collections::HashSet;
-
+    use overdrive_core::eval_broker::{Evaluation, EvaluationBroker};
     use overdrive_core::reconciler::{ReconcilerName, TargetResource};
 
-    /// Number of same-key evaluations the harness submits. 3 is the
-    /// minimum the ADR-0013 invariant requires; larger values don't
-    /// change the shape of the assertion.
     const N: u64 = 3;
 
     let reconciler =
         ReconcilerName::new("noop-heartbeat").expect("noop-heartbeat is a valid ReconcilerName");
     let target =
         TargetResource::new("job/payments").expect("job/payments is a valid TargetResource");
-    let key = (reconciler, target);
 
-    // Mirror of `EvaluationBroker::submit` + `drain_pending` LWW
-    // semantics. Inserting at an occupied key evicts the prior value
-    // into the cancelable count; draining empties pending and bumps
-    // dispatched by the drained length.
-    let mut pending: HashSet<(ReconcilerName, TargetResource)> = HashSet::new();
-    let mut cancelled: u64 = 0;
+    let mut broker = EvaluationBroker::new();
     for _ in 0..N {
-        // `insert` returns false if the key was already present — which
-        // is exactly the LWW-supersession signal the broker uses.
-        if !pending.insert(key.clone()) {
-            cancelled = cancelled.saturating_add(1);
-        }
+        broker.submit(Evaluation { reconciler: reconciler.clone(), target: target.clone() });
     }
-    let dispatched = pending.len() as u64;
-    pending.clear();
+    let _ = broker.drain_pending();
 
-    (N, evaluators::BrokerCountersSnapshot { queued: 0, cancelled, dispatched })
+    (N, broker.counters())
 }
 
 /// Drive the broker-collapse sequence across **two distinct keys** with
-/// interleaved submits, drain once, and return the observed counters.
+/// interleaved submits, drain once, and return the observed counters
+/// plus the drain-order snapshot.
 ///
-/// This is the multi-key sibling of [`drive_broker_collapse`]. The
-/// single-key driver remains untouched and continues to pin the
-/// `DuplicateEvaluationsCollapse` invariant; this driver exists so the
-/// future `BrokerDrainOrderIsDeterministic` invariant (step 01-05) has a
-/// scenario where multiple keys coexist in `pending` at drain time.
-/// Open-closed: both drivers coexist; neither replaces the other.
+/// Multi-key sibling of [`drive_broker_collapse`]. Uses the real
+/// `EvaluationBroker` from `overdrive-core` — the broker's
+/// `BTreeMap`-backed `drain_pending` yields deterministic ascending
+/// key order, which is exactly what the
+/// `BrokerDrainOrderIsDeterministic` evaluator asserts.
 ///
 /// ## Submit pattern
 ///
@@ -597,29 +647,12 @@ fn drive_broker_collapse() -> (u64, evaluators::BrokerCountersSnapshot) {
 ///   evicts the prior version into the cancelable count. With N=3 and
 ///   2 keys: `2 * (N - 1) = 4`.
 /// - `queued = 0` — drain emptied `pending`.
-///
-/// ## Mirroring discipline
-///
-/// As with [`drive_broker_collapse`], the broker's `submit` +
-/// `drain_pending` LWW semantics are mirrored here in a few lines
-/// rather than imported from `overdrive-control-plane`. `overdrive-sim`
-/// is `adapter-sim` (per CLAUDE.md crate classes) and must not depend
-/// on `overdrive-control-plane` (which already depends on
-/// `overdrive-sim` via `observation_wiring` — the reverse edge would
-/// invert the dep graph). The contract the future evaluator checks is
-/// the invariant; mirroring proves the contract is satisfiable on a
-/// clean run.
-///
-/// See `docs/feature/fix-eval-broker-drain-determinism/discuss/rca-context.md`
-/// for the failure mode this driver is the prerequisite for catching.
 #[allow(clippy::expect_used)] // `ReconcilerName::new` / `TargetResource::new` are total on literals.
 fn drive_broker_collapse_multi_key()
 -> (u64, evaluators::BrokerCountersSnapshot, evaluators::BrokerDrainOrderSnapshot) {
+    use overdrive_core::eval_broker::{Evaluation, EvaluationBroker};
     use overdrive_core::reconciler::{ReconcilerName, TargetResource};
 
-    /// Number of submits per key. 3 matches the single-key driver and
-    /// the ADR-0013 invariant minimum; with two keys this yields the
-    /// `cancelled = 4` snapshot the multi-key invariant pins.
     const N: u64 = 3;
 
     let reconciler =
@@ -628,43 +661,17 @@ fn drive_broker_collapse_multi_key()
         TargetResource::new("job/payments").expect("job/payments is a valid TargetResource");
     let target_b =
         TargetResource::new("job/frontend").expect("job/frontend is a valid TargetResource");
-    let key_a = (reconciler.clone(), target_a);
-    let key_b = (reconciler, target_b);
 
-    // Mirror of `EvaluationBroker::submit` + `drain_pending` LWW
-    // semantics, with a `Vec`-based pending buffer instead of
-    // `HashSet`. The single-key driver above gets away with `HashSet`
-    // because there is only one key — drain order is trivially
-    // deterministic. The multi-key sibling cannot: `HashSet` iteration
-    // order is randomised per process, so two drain passes against
-    // identical submits would diverge non-deterministically. The
-    // 01-05 RCA names this exact failure shape — the broker's drain
-    // order must be stable, not implicit on `HashSet` state. Using
-    // `Vec` + linear dedup mirrors the *fix* shape (insertion-ordered
-    // pending) so the invariant has a clean pass to assert against.
-    let mut pending: Vec<(ReconcilerName, TargetResource)> = Vec::new();
-    let mut cancelled: u64 = 0;
+    let mut broker = EvaluationBroker::new();
     for _ in 0..N {
-        // Strict interleave: K1, then K2, repeated. Each submit either
-        // appends (key absent) or evicts-and-appends (key present),
-        // both yielding LWW semantics with deterministic ordering.
-        for key in [&key_a, &key_b] {
-            if let Some(idx) = pending.iter().position(|p| p == key) {
-                pending.remove(idx);
-                cancelled = cancelled.saturating_add(1);
-            }
-            pending.push(key.clone());
-        }
+        broker.submit(Evaluation { reconciler: reconciler.clone(), target: target_a.clone() });
+        broker.submit(Evaluation { reconciler: reconciler.clone(), target: target_b.clone() });
     }
-    let dispatched_order = pending.clone();
-    let dispatched = dispatched_order.len() as u64;
-    pending.clear();
+    let drained = broker.drain_pending();
+    let dispatched_order: Vec<(ReconcilerName, TargetResource)> =
+        drained.into_iter().map(|e| (e.reconciler, e.target)).collect();
 
-    (
-        N,
-        evaluators::BrokerCountersSnapshot { queued: 0, cancelled, dispatched },
-        evaluators::BrokerDrainOrderSnapshot { dispatched_order },
-    )
+    (N, broker.counters(), evaluators::BrokerDrainOrderSnapshot { dispatched_order })
 }
 
 /// Drive the dispatch path for the `DispatchRoutingIsNameRestricted`
@@ -688,6 +695,7 @@ fn drive_broker_collapse_multi_key()
 /// contract at unit and DST tiers.
 #[allow(clippy::expect_used)] // `ReconcilerName::new` / `TargetResource::new` are total on literals.
 fn drive_dispatch_routing() -> (Vec<evaluators::Evaluation>, evaluators::DispatchRecord) {
+    use overdrive_core::eval_broker::Evaluation;
     use overdrive_core::reconciler::{ReconcilerName, TargetResource};
 
     let r_jl =
@@ -696,8 +704,8 @@ fn drive_dispatch_routing() -> (Vec<evaluators::Evaluation>, evaluators::Dispatc
     let t_b = TargetResource::new("job/frontend").expect("job/frontend is a valid TargetResource");
 
     let submitted = vec![
-        evaluators::Evaluation { reconciler: r_jl.clone(), target: t_a },
-        evaluators::Evaluation { reconciler: r_jl, target: t_b },
+        Evaluation { reconciler: r_jl.clone(), target: t_a },
+        Evaluation { reconciler: r_jl, target: t_b },
     ];
 
     // Mirrored dispatcher: for each drained eval, dispatch the named
@@ -797,6 +805,15 @@ mod tests {
         assert_eq!(cat, vec![Invariant::SingleLeader]);
     }
 
+    // Step 08-02 GREEN: the `HydratorEventuallyConverges` and
+    // `HydratorIdempotentSteadyState` evaluators landed; the prior
+    // `#[should_panic(expected = "RED scaffold")]` attribute was the
+    // downstream-fallout guard documented in
+    // `.claude/rules/testing.md` § "Downstream fallout on pre-existing
+    // tests" — removed here per the same section's "removing the
+    // underlying todo!() / panic!() will fire a different panic
+    // message, trip #[should_panic], and flag the test for review at
+    // the moment the scaffold goes GREEN" handoff.
     #[test]
     fn run_boots_the_default_number_of_hosts_and_reports_every_invariant() {
         let report = Harness::new().run(42).expect("harness must compose");

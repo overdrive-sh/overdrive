@@ -53,6 +53,11 @@ mod integration {
     /// `write_through_bytes` accepts `&'static str` directly.
     mod redb_view_store_no_leak;
     mod server_lifecycle;
+    /// phase-2-xdp-service-map Slice 08 (US-08) — service-map
+    /// hydrator dispatch RED scaffold per
+    /// `docs/feature/phase-2-xdp-service-map/distill/test-scenarios.md`
+    /// S-2.2-28. Body panics until DELIVER fills it.
+    mod service_map_hydrator_dispatch;
     mod submit_round_trip;
     /// `TerminalCondition` propagation — step 02-02 of
     /// `reconciler-memory-redb`. Action shim threads `Action.terminal`
@@ -61,11 +66,7 @@ mod integration {
     /// surfaces is structurally impossible.
     mod terminal_propagation;
     mod tls_bootstrap;
-    /// phase-1-first-workload — slice 3 (US-03) — Linux-only walking
-    /// skeletons. Each scenario file gates itself with
-    /// `#[cfg(target_os = "linux")]` so the module declarations
-    /// compile cleanly on macOS/Windows even when no test bodies
-    /// exist there.
+    /// phase-1-first-workload — slice 3 (US-03) — walking skeletons.
     pub mod job_lifecycle {
         // Shared cleanup helper — reaps real `/bin/sleep` workloads
         // spawned by the action shim so nextest does not flag the
@@ -74,7 +75,6 @@ mod integration {
         // production stop path under test. `pub` so the slice-4
         // `cgroup_isolation::cluster_status_under_burst` test can
         // reuse the same `AllocCleanup` guard via `super::super::`.
-        #[cfg(target_os = "linux")]
         pub mod cleanup;
         mod convergence_loop_spawned_in_production_boot;
         mod crash_recovery;
@@ -86,12 +86,10 @@ mod integration {
         /// spawned convergence loop via `SimClock`. See module docs.
         pub mod wait;
     }
-    /// phase-1-first-workload — slice 4 (US-03 final) — Linux-only
+    /// phase-1-first-workload — slice 4 (US-03 final) —
     /// cgroup-isolation harness. Per ADR-0028 the control-plane
     /// boots through a 4-step pre-flight check + creates its own
-    /// slice. The scenario files gate themselves with
-    /// `#[cfg(target_os = "linux")]` so the module declarations
-    /// compile cleanly on macOS/Windows.
+    /// slice.
     mod cgroup_isolation {
         mod cluster_status_under_burst;
         mod idempotent_slice_creation;
@@ -107,4 +105,11 @@ mod integration {
         mod preflight_v1_host;
         mod server_enrols_in_slice;
     }
+
+    /// `cargo openapi-{gen,check}` library + binary scenarios — relocated
+    /// from xtask when the OpenAPI gate moved into overdrive-control-plane.
+    /// Covers test-scenarios.md §3.3. See § "xtask is build / test / dev
+    /// orchestration, NOT a runtime entry point" in
+    /// `.claude/rules/development.md` for the layering rationale.
+    mod openapi_gate;
 }

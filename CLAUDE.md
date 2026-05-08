@@ -1,5 +1,3 @@
-Read the entire @docs/whitepaper.md file
-
 ## Development Paradigm
 
 This project follows the **object-oriented** paradigm. Use @nw-software-crafter for implementation.
@@ -77,6 +75,33 @@ site.
 
 This project uses **per-feature** mutation testing. Per-PR runs are diff-scoped via `cargo mutants --in-diff origin/main` with a kill-rate gate of ≥80%. A nightly job runs the full workspace against the baseline in `mutants-baseline/main/` to catch drift. Mutations to `unsafe` blocks, `aya-rs` eBPF programs, generated code, and async scheduling logic are excluded per `.claude/rules/testing.md`.
 
+## nWave design dispatches — priority scope
+
+When dispatching `@nw-solution-architect` (or any DESIGN-wave agent) for a feature whose DISCUSS/DISTILL outputs enumerate prioritised open questions (P1, P2, …), include **all priorities** by default. Do not narrow scope to P1 only unless the user explicitly says so. State "all priorities (P1 + P2 …)" in the dispatch confirmation so the scope is visible.
+
 ## Roadmap validator warnings
 
 `des.cli.roadmap validate` flags length-limit warnings (`STEP_NAME_TOO_LONG`, `CRITERIA_TOO_LONG`, `DESCRIPTION_TOO_LONG`) that are cosmetic and non-blocking — the validator exits 0 anyway. Overdrive roadmap ACs deliberately carry scenario-level specificity (test names, invariant names, proptest targets, kill-rate thresholds), and tightening them to the defaults would lose traceability. Ignore these warnings; do not ask the crafter to trim them.
+
+## No effort/time budget cuts
+
+Roadmap `effort_hours` estimates are **advisory, not enforcement**. Do NOT defer scope mid-step on the basis "exceeds this slice's hour budget." Land the full work the step's acceptance criteria describe, however long it takes. If the work genuinely warrants a follow-up (e.g., a separate concern surfaces during implementation that's clearly out of the step's named scope), surface that to the user and ask — do not unilaterally ship a partial and log COMMIT EXECUTED PASS against an incomplete deliverable. The DES log is a contract; partial completions corrupt it.
+
+## Deferrals require GitHub issues — AND user approval BEFORE creation
+
+Every deferral surfaced during a wave dispatch — operator-tunable knobs, future-phase scope, follow-up cleanup, "we'll wire this later" — MUST be (1) surfaced to the user explicitly at the point it's introduced **and the user must approve before any issue is created or deferral language is written**, (2) if approved, captured as a GitHub issue (`gh issue create`) before the artifact lands, and (3) cited by issue number at every reference site. Hand-wavy forward pointers ("future ticket," "Phase 3+ slice," "future operator config surface") without a real issue number are forbidden — they compound across dispatches as the next reader treats the deferral as planned work and propagates the false reference.
+
+**Agents MUST NOT unilaterally create GitHub issues.** The `gh issue create` command is a user-visible, shared-state action (§ "Executing actions with care" in the system prompt). Creating an issue without explicit user approval — even with good intent — is a violation. The correct flow is: surface the deferral to the user in a message, wait for approval, then create the issue. If the agent is a subagent that cannot message the user directly, it MUST surface the deferral as a blocker in its return message so the orchestrator can relay it.
+
+**Clippy warnings, lint errors, and other code-quality findings are NOT deferrals — they are in-scope fixes.** Per `.claude/rules/development.md` and feedback memory: "clippy errors surfaced during a task get fixed in-scope, not classified as 'pre-existing' and left for the next person." An agent that encounters clippy `-D warnings` failures during its quality gate MUST fix them in the current commit, not create a tracking issue. The only exception is when the fix requires touching files explicitly outside the step's implementation scope AND the fix is structurally unrelated to the step's work (e.g., a lint regression in a crate the step never imported) — in that case, surface it to the user as a blocker with the specific errors and files, and let the user decide whether to expand scope or defer. Never create the issue unilaterally.
+
+The valid moves when tempted to write "deferred to a future X":
+
+- **Drop the deferral language.** Unstated knobs are "not in scope" by default; the reader doesn't need a promise of a future slot.
+- **Fix it now.** If it's a code-quality issue (clippy, fmt, dead code, missing test) that surfaced during your step — fix it. It's not a deferral; it's your job.
+- **Surface and ask.** Present the deferral to the user with the specific scope, affected files, and your recommendation. Wait for approval. On approval run `gh issue create`. Two minutes is the price of an honest forward pointer.
+- **Cite an existing issue** verified by `gh issue view <N>` whose scope actually covers the deferred work — never invent, guess, or copy-paste an issue number.
+
+Architects, crafters, and reviewers all enforce this: any of them spotting a deferral without an issue number must flag it in handoff and refuse to land the artifact until either the issue is created or the deferral language is dropped. The same applies to existing artifacts touched during a dispatch — fix the reference rather than propagate it.
+
+This extends `.claude/rules/development.md` § "Documentation" (*No aspirational docs. Never document behaviour that is not implemented.*) to forward pointers as well as backward claims.

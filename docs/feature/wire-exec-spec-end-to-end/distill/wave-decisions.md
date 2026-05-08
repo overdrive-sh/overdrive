@@ -91,7 +91,7 @@ this feature — this is a DESIGN-first wave per `design/wave-decisions.md`
   live-render shape pin via direct call to
   `xtask::openapi::generate_yaml()` (which renders
   `OverdriveApi::openapi()` to YAML). Layer 2 — the existing
-  `cargo xtask openapi-check` CI gate that compares against
+  `cargo openapi-check` CI gate that compares against
   `api/openapi.yaml`. Layer 1 is acceptance test; Layer 2 is the CI
   artifact-drift gate. Both are required: Layer 1 catches "the schema
   shape regressed" within the default test lane; Layer 2 catches
@@ -444,7 +444,7 @@ e. Update the Restart arm of `dispatch_single` to read `spec` off the
    action.
 f. Mass-migrate the ~25 fixture files (DWD-9) — flat `cpu_milli` /
    `memory_bytes` → nested `[resources]` + `[exec]`.
-g. Regenerate `api/openapi.yaml` via `cargo xtask openapi-gen`.
+g. Regenerate `api/openapi.yaml` via `cargo openapi-gen`.
 h. Verify the entire suite goes GREEN: default lane (`cargo nextest
    run`), integration lane (`cargo nextest run --features
    integration-tests` — on Linux or Lima per `.claude/rules/testing.md`).

@@ -23,7 +23,7 @@ commands. This feature does NOT modify any of them:
 | `fmt-clippy` | `cargo fmt --all -- --check` + `cargo clippy --workspace --all-targets -- -D warnings` | ✅ Picks up `overdrive-control-plane` automatically |
 | `test` | `cargo nextest run --workspace --locked --profile ci` + `cargo test --doc --workspace --locked` | ✅ New crate's tests discovered automatically |
 | `integration` | `cargo nextest run --workspace --features integration-tests -E 'binary(integration)'` | ✅ New crate's `tests/integration/*.rs` discovered automatically |
-| `dst` | `cargo xtask dst` (iterates `ALL_VARIANTS`) | ✅ New invariants auto-scheduled once scaffolds are replaced |
+| `dst` | `cargo dst` (iterates `ALL_VARIANTS`) | ✅ New invariants auto-scheduled once scaffolds are replaced |
 | `dst-lint` | `cargo xtask dst-lint` (scans `crate_class = "core"` crates) | ✅ `overdrive-control-plane` is `adapter-host`, not scanned; `overdrive-core::reconciler` additions are scanned |
 | `mutants-diff` | `cargo xtask mutants --diff origin/main` | ✅ Existing `.cargo/mutants.toml` exclusion list unchanged; new crate is in-scope |
 
@@ -54,7 +54,7 @@ existing jobs)
 **What it runs**:
 
 ```
-cargo xtask openapi-check
+cargo openapi-check
 ```
 
 This xtask subcommand (per ADR-0009) regenerates the OpenAPI schema
@@ -72,7 +72,7 @@ instruction unambiguous in the PR UI.
 
 ```yaml
 openapi-check:
-  name: cargo xtask openapi-check
+  name: cargo openapi-check
   runs-on: ubuntu-latest
   timeout-minutes: 10
   steps:
@@ -94,8 +94,8 @@ openapi-check:
     - name: Warn when sccache unavailable
       if: steps.sccache-setup.outcome != 'success'
       run: echo "::warning::sccache setup failed; building without compiler cache."
-    - name: cargo xtask openapi-check
-      run: cargo xtask openapi-check
+    - name: cargo openapi-check
+      run: cargo openapi-check
     - name: Annotate failure with regeneration instruction
       if: failure()
       run: |
@@ -106,13 +106,13 @@ openapi-check:
           echo "\`overdrive-control-plane::api\`. Regenerate locally:"
           echo ""
           echo '```'
-          echo "cargo xtask openapi-gen"
+          echo "cargo openapi-gen"
           echo "git add api/openapi.yaml"
           echo '```'
           echo ""
           echo "Then commit and push. See ADR-0009."
         } >> "$GITHUB_STEP_SUMMARY"
-        echo "::error title=openapi-check failed::schema drift — run 'cargo xtask openapi-gen' to regenerate"
+        echo "::error title=openapi-check failed::schema drift — run 'cargo openapi-gen' to regenerate"
 ```
 
 **Branch-protection delta**: the required-status-checks list grows
@@ -185,7 +185,7 @@ Unit-shaped tests stay in the default lane.
 DISTILL DWD-06 scaffold inventory pre-lands the three new invariant
 enum variants (`AtLeastOneReconcilerRegistered`,
 `DuplicateEvaluationsCollapse`, `ReconcilerIsPure`) into
-`xtask/src/dst.rs`. The existing `cargo xtask dst` subcommand
+`xtask/src/dst.rs`. The existing `cargo dst` subcommand
 iterates `ALL_VARIANTS`; the new variants are scheduled on the next
 DST run automatically once the scaffolds compile.
 

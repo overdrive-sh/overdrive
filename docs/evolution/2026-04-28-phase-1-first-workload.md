@@ -53,7 +53,7 @@ ProcessDriver places the child in a cgroup, `alloc status` renders
 a real `Running` row → `job stop payments` → drains and terminates
 cleanly**, all with cgroup-enforced isolation between control plane
 and workload, all under the existing CI gates (`cargo nextest run`,
-`cargo test --doc`, `cargo xtask dst`, `cargo xtask openapi-check`,
+`cargo test --doc`, `cargo dst`, `cargo openapi-check`,
 `cargo xtask mutants --diff`), and with three new DST invariants
 gating reconciler correctness against injected concurrency.
 

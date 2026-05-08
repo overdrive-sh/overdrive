@@ -258,6 +258,23 @@ fn invoke_cargo_mutants(
     // it via env is the only way that works with cargo-mutants, which
     // does not forward arbitrary nextest flags.
     cmd.env("NEXTEST_PROFILE", "mutants");
+
+    // BPF-object override — see `bpf_object_env_override` rustdoc for
+    // the full rationale. cargo-mutants copies the source tree but not
+    // `target/`; without an absolute-path override, every mutant of
+    // `overdrive-dataplane` (or any future crate whose `build.rs`
+    // depends on `target/bpf/overdrive_bpf.o`) is marked
+    // unviable, collapsing kill rate to zero. The wrapper computes the
+    // absolute path against the original tree's workspace root and
+    // threads it through `OVERDRIVE_BPF_OBJECT`; the build script
+    // consults the env var first and falls back to its
+    // workspace-relative computation when unset (so this affects
+    // mutation runs only — regular `cargo {check,test,build}` is
+    // unchanged).
+    let workspace_root = workspace_root_for_bpf_override();
+    let (bpf_env_name, bpf_env_path) = bpf_object_env_override(&workspace_root);
+    cmd.env(&bpf_env_name, &bpf_env_path);
+
     eprintln!("xtask mutants: running {} (NEXTEST_PROFILE=mutants)", format_cmd(&cmd));
     let status = cmd.status().wrap_err("spawn cargo-mutants")?;
     // Don't bail on non-zero — cargo-mutants returns non-zero for any
@@ -894,6 +911,85 @@ fn xtask_target_dir() -> PathBuf {
     target.join("xtask")
 }
 
+/// Compute the `(env-var-name, absolute-path)` pair the wrapper sets on
+/// every `cargo-mutants` invocation so per-mutant builds of crates whose
+/// `build.rs` depends on `target/bpf/overdrive_bpf.o`
+/// resolve the artifact correctly.
+///
+/// **Background.** cargo-mutants creates a per-mutant copy of the source
+/// tree under `/tmp/cargo-mutants-*/` and runs `cargo {check,test}` from
+/// there. It does NOT copy `target/`. `crates/overdrive-dataplane/build.rs`
+/// fails fast when the workspace-relative artifact path
+/// `<workspace_root>/target/bpf/overdrive_bpf.o` is absent
+/// — and inside the mutant copy that path is always absent. Without an
+/// override, every mutant for `overdrive-dataplane` (or any future crate
+/// with the same shape) is marked unviable, collapsing the kill-rate
+/// signal to zero.
+///
+/// **Mechanism.** The wrapper sets `OVERDRIVE_BPF_OBJECT` to the
+/// absolute path of the BPF object in the *original* tree before
+/// spawning cargo-mutants. cargo-mutants inherits parent env into
+/// per-mutant cargo subprocesses; the absolute path resolves to the
+/// original tree's artifact regardless of the cwd the mutant build
+/// runs from. `crates/overdrive-dataplane/build.rs` reads
+/// `OVERDRIVE_BPF_OBJECT` first and uses its value verbatim, falling
+/// back to the workspace-relative path when the env var is unset.
+///
+/// **Why this shape rather than `--copy-target` or `--in-place`.**
+/// `--copy-target` recursively copies the multi-GB workspace `target/`
+/// per mutant — wall-clock and disk explosions on a sizeable mutant
+/// corpus, no hardlinking in cargo-mutants 27.x. `--in-place` runs in
+/// the source tree directly; SIGKILL mid-run leaves mutated source on
+/// disk (the existing wrapper's foreground-blocking exception already
+/// documents this hazard) and concurrent cargo runs race. Env-var
+/// override is the most surgical option: zero copying, no source-tree
+/// risk, single env var, no recursive cargo invocations from `build.rs`
+/// (ADR-0038 stays clean).
+///
+/// **Workspace root resolution.** The caller threads in `workspace_root`
+/// rather than re-deriving it via `cargo metadata` so this function
+/// stays a pure-function-shaped helper testable without subprocess I/O.
+/// The argument should be the canonical workspace root —
+/// `cargo_metadata::Metadata::workspace_root` (see
+/// `xtask::workspace_root_dir()` in `main.rs`).
+///
+/// The path is workspace-rooted at
+/// `<workspace_root>/target/bpf/overdrive_bpf.o` —
+/// `CARGO_TARGET_DIR` is **not** consulted here. This matches
+/// `cargo xtask bpf-build`'s actual write path (see `xtask::bpf_build`
+/// in `main.rs` — `workspace_root.join("target/bpf")`)
+/// and `crates/overdrive-dataplane/build.rs`'s fallback path. A
+/// `CARGO_TARGET_DIR`-aware path would diverge from both: in Lima dev
+/// (`CARGO_TARGET_DIR=/home/marcus.guest/.cargo-target-lima`), the
+/// override would resolve to a path that doesn't exist while the
+/// actual artifact lives at the workspace-rooted location, and the
+/// build script would still fail. The single source of truth is the
+/// workspace-relative path.
+fn bpf_object_env_override(workspace_root: &Path) -> (std::ffi::OsString, std::ffi::OsString) {
+    let path = workspace_root.join("target/bpf/overdrive_bpf.o");
+    ("OVERDRIVE_BPF_OBJECT".into(), path.into_os_string())
+}
+
+/// Resolve the workspace root for use by the BPF-object env override.
+///
+/// Mirrors `xtask::workspace_root_dir()` in `main.rs` but lives here so
+/// the lib crate is self-contained; `cargo_metadata` is already a
+/// transitive dep via the workspace-convention enforcement test.
+///
+/// Falls back to `current_dir()` on metadata failure — `cargo xtask
+/// mutants` always runs from the workspace root in practice, and the
+/// only way `cargo metadata` would fail here is a broken cargo
+/// installation, in which case the cargo-mutants subprocess will fail
+/// downstream with a clearer error than this layer can produce. The
+/// fallback keeps mutation testing usable in degraded environments
+/// rather than panicking on env detection.
+fn workspace_root_for_bpf_override() -> PathBuf {
+    cargo_metadata::MetadataCommand::new().no_deps().exec().map_or_else(
+        |_| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+        |m| m.workspace_root.into_std_path_buf(),
+    )
+}
+
 fn cargo() -> std::ffi::OsString {
     std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into())
 }
@@ -1468,6 +1564,141 @@ mod tests {
             build_cargo_mutants_args(&mode, &Scope::default(), Path::new("/tmp/xtask"), None);
         let joined = argv_str(&args);
         assert!(joined.contains("--test-tool=nextest"), "got: {joined}");
+    }
+
+    // ---- bpf_object_env_override ------------------------------------------
+    //
+    // Per-mutant env override that lets cargo-mutants build crates whose
+    // `build.rs` depends on `target/bpf/overdrive_bpf.o`.
+    // cargo-mutants copies the source tree but NOT `target/`, so a
+    // mutated `overdrive-dataplane` build script panics with the
+    // "BPF object not found … run cargo xtask bpf-build first" message
+    // unless the path is absolute and points at the original tree.
+    //
+    // The helper computes that absolute path; the caller threads it onto
+    // the `Command` via `cmd.env(...)`. The build script reads the env
+    // var and uses it verbatim. ADR-0038 stays clean — the build script
+    // makes no recursive cargo invocation.
+    //
+    // These tests mutate `CARGO_TARGET_DIR` (the helper consults it to
+    // honour Lima's per-host target dir override), so they take the
+    // `env` serial group per `.claude/rules/testing.md` § "Tests that
+    // mutate process-global state". The RAII guard saves and restores
+    // around each test body so a panic mid-test never leaks state.
+
+    /// RAII guard that saves and restores `CARGO_TARGET_DIR` across a
+    /// test body. Drop-restores even if the test panics, so subsequent
+    /// `#[serial(env)]` tests in the same group see a clean baseline.
+    struct CargoTargetDirGuard {
+        prior: Option<std::ffi::OsString>,
+    }
+
+    impl CargoTargetDirGuard {
+        fn set(value: Option<&str>) -> Self {
+            let prior = std::env::var_os("CARGO_TARGET_DIR");
+            // SAFETY: `#[serial(env)]` guarantees exclusive access for
+            // the duration of the calling test. The matching restore
+            // runs from `Drop` so a panic between here and the end of
+            // the test still releases the env back to its prior state.
+            match value {
+                Some(v) => unsafe { std::env::set_var("CARGO_TARGET_DIR", v) },
+                None => unsafe { std::env::remove_var("CARGO_TARGET_DIR") },
+            }
+            Self { prior }
+        }
+    }
+
+    impl Drop for CargoTargetDirGuard {
+        fn drop(&mut self) {
+            // SAFETY: same exclusive-access invariant as `set` above.
+            match self.prior.take() {
+                Some(v) => unsafe { std::env::set_var("CARGO_TARGET_DIR", v) },
+                None => unsafe { std::env::remove_var("CARGO_TARGET_DIR") },
+            }
+        }
+    }
+
+    #[test]
+    #[serial_test::serial(env)]
+    fn bpf_object_env_override_uses_canonical_var_name() {
+        // Var name does not depend on env state, but we still hold the
+        // guard to keep the env-mutation lifecycle consistent across
+        // the `#[serial(env)]` group. No `set` call needed — defaulting
+        // to "leave alone, restore on drop" is fine.
+        let _guard = CargoTargetDirGuard::set(std::env::var("CARGO_TARGET_DIR").ok().as_deref());
+        let workspace = Path::new("/work/overdrive");
+        let (name, _path) = bpf_object_env_override(workspace);
+        assert_eq!(
+            name.to_str(),
+            Some("OVERDRIVE_BPF_OBJECT"),
+            "env var name must match the one `crates/overdrive-dataplane/build.rs` consults; \
+             changing it requires updating both sides in lockstep (single-cut migration)"
+        );
+    }
+
+    #[test]
+    #[serial_test::serial(env)]
+    fn bpf_object_env_override_returns_absolute_path_under_workspace_target() {
+        // Clear any inherited `CARGO_TARGET_DIR` (e.g. Lima's
+        // `.cargo-target-lima` override) so we're testing the
+        // workspace-rooted default. Per-test isolation via the RAII
+        // guard restores the prior value on drop.
+        let _guard = CargoTargetDirGuard::set(None);
+
+        // The path must be absolute and point at the same place
+        // `cargo xtask bpf-build` writes — `<workspace>/target/xtask/
+        // bpf-objects/overdrive_bpf.o`. Per-mutant cargo subprocesses
+        // cd into a copied tree under /tmp/cargo-mutants-*; a relative
+        // path would resolve against the copy and miss the artifact.
+        let workspace = Path::new("/work/overdrive");
+        let (_name, path) = bpf_object_env_override(workspace);
+        let path = PathBuf::from(path);
+        assert!(path.is_absolute(), "path must be absolute, got: {}", path.display());
+        assert!(
+            path.ends_with("target/bpf/overdrive_bpf.o"),
+            "path must end with target/bpf/overdrive_bpf.o, got: {}",
+            path.display()
+        );
+        assert!(
+            path.starts_with(workspace),
+            "path must be rooted under the workspace, got: {} (workspace: {})",
+            path.display(),
+            workspace.display()
+        );
+    }
+
+    #[test]
+    #[serial_test::serial(env)]
+    fn bpf_object_env_override_ignores_cargo_target_dir() {
+        // The wrapper's BPF override is workspace-rooted, NOT
+        // `CARGO_TARGET_DIR`-rooted. `cargo xtask bpf-build` writes to
+        // `<workspace_root>/target/bpf/overdrive_bpf.o`
+        // unconditionally (see `xtask::bpf_build` — `dst_dir =
+        // workspace_root.join("target/bpf")`); honouring
+        // `CARGO_TARGET_DIR` here would point the override at a
+        // non-existent path under e.g. Lima's `.cargo-target-lima`
+        // while the actual artifact still lives at the workspace path.
+        // The build script's fallback in `crates/overdrive-dataplane/
+        // build.rs` is also workspace-rooted, so the override and the
+        // fallback resolve to the same file.
+        let custom_target = "/home/lima/.cargo-target";
+        let _guard = CargoTargetDirGuard::set(Some(custom_target));
+
+        let workspace = Path::new("/work/overdrive");
+        let (_name, path) = bpf_object_env_override(workspace);
+        let path = PathBuf::from(path);
+        assert_eq!(
+            path,
+            workspace.join("target/bpf/overdrive_bpf.o"),
+            "override must be workspace-rooted regardless of CARGO_TARGET_DIR; \
+             `cargo xtask bpf-build` writes to <workspace>/target/bpf/, \
+             so honouring CARGO_TARGET_DIR would diverge from the actual artifact path"
+        );
+        assert!(
+            !path.starts_with(custom_target),
+            "path must NOT start with CARGO_TARGET_DIR={custom_target}, got: {}",
+            path.display()
+        );
     }
 
     // ---- clear_stale_summary ---------------------------------------------

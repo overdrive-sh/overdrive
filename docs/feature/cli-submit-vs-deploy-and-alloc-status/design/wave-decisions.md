@@ -369,7 +369,7 @@ a documented over-approximation of the wire shape (NDJSON IS
 line-delimited single objects). No tooling consumes the vendor
 extension in Phase 1; it is annotation for human readers.
 
-The `cargo xtask openapi-check` gate (ADR-0009) covers the addition
+The `cargo openapi-check` gate (ADR-0009) covers the addition
 unchanged — the new media-type entry is part of the schema derivation.
 
 ---

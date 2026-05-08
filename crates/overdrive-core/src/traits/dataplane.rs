@@ -22,6 +22,26 @@ pub enum DataplaneError {
     LoadFailed(String),
     #[error("dataplane I/O: {0}")]
     Io(#[from] std::io::Error),
+    /// Resolution of an interface name to a kernel ifindex failed —
+    /// the named interface does not exist on the host. Surfaces
+    /// `ENODEV` / `ENOENT` from `if_nametoindex(2)` per S-2.2-03.
+    /// The loader uses this BEFORE attempting to load any BPF
+    /// program; see `EbpfDataplane::new` in `overdrive-dataplane`.
+    #[error("interface not found: {iface}")]
+    IfaceNotFound { iface: String },
+    /// Kernel rejected an inner-map allocation during the 5-step
+    /// HASH_OF_MAPS atomic-swap primitive (ADR-0040 § 2 step 2 —
+    /// `bpf(BPF_MAP_CREATE)`). On this error the existing outer-map
+    /// pointer is **unchanged**: the swap aborts before step 3 (the
+    /// load-bearing single-syscall pointer update). Surfaced as a
+    /// distinct variant per `.claude/rules/development.md` § Errors
+    /// — collapsing this into `LoadFailed(String)` would lose the
+    /// preservation guarantee S-2.2-11 pins.
+    #[error("inner-map allocation rejected by kernel: {source}")]
+    MapAllocFailed {
+        #[source]
+        source: std::io::Error,
+    },
 }
 
 /// Policy decision compiled into the BPF `POLICY_MAP`.
@@ -32,7 +52,7 @@ pub enum Verdict {
 }
 
 /// A single service backend — IP/port and load-balancing weight.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct Backend {
     pub alloc: SpiffeId,
     pub addr: std::net::SocketAddr,

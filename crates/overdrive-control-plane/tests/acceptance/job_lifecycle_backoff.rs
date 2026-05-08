@@ -102,7 +102,15 @@ async fn build_state_with_driver(tmp: &TempDir, driver: Arc<dyn Driver>) -> AppS
     // Tests do not seed node-registration intent — that would invert
     // the dependency direction.
 
-    AppState::new(store, obs, Arc::new(runtime), driver, Arc::new(SimClock::new()))
+    AppState::new(
+        store,
+        obs,
+        Arc::new(runtime),
+        driver,
+        Arc::new(SimClock::new()),
+        Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+        overdrive_core::id::NodeId::new("writer-1").unwrap(),
+    )
 }
 
 #[tokio::test]

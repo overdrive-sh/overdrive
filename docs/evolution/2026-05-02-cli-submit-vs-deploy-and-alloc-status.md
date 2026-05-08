@@ -208,7 +208,7 @@ This is what makes the broken-binary scenario the user originally hit produce
 | **D5** | CLI-side `IsTerminal::is_terminal(&stdout())` + explicit `--detach`; `--detach` always wins; server stays Accept-driven | Reference class is uniform — `docker run -d`, `nomad job run --detach`. Server-side detection (E3) is wrong on multiple axes (no signal the server can use that the CLI cannot; least-surprise inversion). |
 | **D6** | No new endpoint; `POST /v1/jobs` polymorphic on `Accept` header | Two-endpoints-diverge-over-time is the well-known failure mode; ADR-0008's REST shape commits to content-negotiation as the polymorphism mechanism. |
 | **D7** | `restart_budget.max = 5` hard-coded in Phase 1 (matches existing `RESTART_BUDGET_MAX`); configurable in Phase 2+ when right-sizing reconcilers land | Surfacing a config hook now without a configuration mechanism is over-engineering. |
-| **D8** | OpenAPI declares both `application/json` and `application/x-ndjson` response media types on `submit_job`; vendor extension `x-ndjson-stream: true` is informational | utoipa 5.x supports multiple response media types via the `responses(...)` macro; the existing `cargo xtask openapi-check` gate covers the addition unchanged. |
+| **D8** | OpenAPI declares both `application/json` and `application/x-ndjson` response media types on `submit_job`; vendor extension `x-ndjson-stream: true` is informational | utoipa 5.x supports multiple response media types via the `responses(...)` macro; the existing `cargo openapi-check` gate covers the addition unchanged. |
 
 ### Single-source-of-truth pin (the [C6] story, structurally)
 

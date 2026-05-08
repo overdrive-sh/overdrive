@@ -34,7 +34,8 @@ use overdrive_core::aggregate::Node;
 use overdrive_core::id::{JobId, NodeId, Region};
 use overdrive_core::reconciler::{
     Action, AnyReconciler, AnyReconcilerView, AnyState, JobLifecycle, JobLifecycleState,
-    NoopHeartbeat, TickContext,
+    NoopHeartbeat, ServiceMapHydrator, ServiceMapHydratorState, ServiceMapHydratorView,
+    TickContext,
 };
 use overdrive_core::traits::driver::Resources;
 
@@ -128,4 +129,54 @@ fn dispatch_routes_job_lifecycle_triple_to_job_lifecycle_view() {
         matches!(returned_view, AnyReconcilerView::JobLifecycle(_)),
         "JobLifecycle dispatch must return AnyReconcilerView::JobLifecycle; got {returned_view:?}",
     );
+}
+
+// -------------------------------------------------------------------
+// L965 — ServiceMapHydrator dispatch arm (Phase 2 / ASR-2.2-04)
+// -------------------------------------------------------------------
+
+#[test]
+fn dispatch_routes_service_map_hydrator_triple_to_hydrator_view() {
+    // Construct the canonical `ServiceMapHydrator`, wrap it in
+    // `AnyReconciler::ServiceMapHydrator`, and dispatch with the
+    // ServiceMapHydrator triple. Production: routes to
+    // `ServiceMapHydrator::reconcile` → returns
+    // `AnyReconcilerView::ServiceMapHydrator(_)`. Mutant (delete arm):
+    // wildcard panic. Closes the missed mutation flagged at line
+    // 965 by the QUALITY_GATE wave's mutation run.
+    let any = AnyReconciler::ServiceMapHydrator(ServiceMapHydrator::canonical());
+    let now = Instant::now();
+    let tick = TickContext {
+        now,
+        now_unix: UnixInstant::from_unix_duration(Duration::from_secs(0)),
+        tick: 0,
+        deadline: now + Duration::from_secs(1),
+    };
+
+    // Empty desired/actual hydrator states — no services. The
+    // reconciler returns no actions; only the variant of the
+    // returned view discriminates the dispatch arm. The mutation
+    // (`delete match arm`) makes this fall through to the wildcard
+    // `_ => panic!`, which `catch_unwind` would reveal.
+    let desired = ServiceMapHydratorState::default();
+    let actual = ServiceMapHydratorState::default();
+    let view = AnyReconcilerView::ServiceMapHydrator(ServiceMapHydratorView::default());
+
+    let (_actions, returned_view) = any.reconcile(
+        &AnyState::ServiceMapHydrator(desired),
+        &AnyState::ServiceMapHydrator(actual),
+        &view,
+        &tick,
+    );
+
+    assert!(
+        matches!(returned_view, AnyReconcilerView::ServiceMapHydrator(_)),
+        "ServiceMapHydrator dispatch must return AnyReconcilerView::ServiceMapHydrator; \
+         got {returned_view:?}",
+    );
+    // Suppress unused-import warning for `Action` in this test —
+    // the import remains used by the NoopHeartbeat dispatch test
+    // above, retained here as a no-op assertion to make the
+    // dependency obvious.
+    let _ = Action::Noop;
 }

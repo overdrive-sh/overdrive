@@ -36,7 +36,7 @@ use crate::api::{
 use crate::AppState;
 use crate::api;
 use crate::error::ControlPlaneError;
-use crate::eval_broker::Evaluation;
+use overdrive_core::eval_broker::Evaluation;
 
 /// Enqueue a `(job-lifecycle, job/<id>)` evaluation onto the runtime
 /// broker. Called from `submit_job` and `stop_job` after the

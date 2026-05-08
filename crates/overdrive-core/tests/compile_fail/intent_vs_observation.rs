@@ -11,15 +11,11 @@
 
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::ObservationStore;
-use overdrive_store_local::LocalIntentStore;
 
 fn expects_observation(_store: &dyn ObservationStore) {}
 
-fn main() {
-    let tmp = tempfile::TempDir::new().expect("temp dir");
-    let local = LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open");
-    // `LocalIntentStore` implements `IntentStore`, not `ObservationStore`.
-    // This line must fail to compile.
-    let as_intent: &dyn IntentStore = &local;
-    expects_observation(as_intent);
+fn takes_intent(store: &dyn IntentStore) {
+    expects_observation(store);
 }
+
+fn main() {}

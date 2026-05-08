@@ -20,17 +20,6 @@ struct Args {
 
 #[derive(Debug, Subcommand)]
 enum Task {
-    /// Tier 1 — deterministic simulation tests (`turmoil` + `Sim*` traits).
-    Dst {
-        /// Seed for reproducible runs. Defaults to a fresh random seed.
-        #[arg(long)]
-        seed: Option<u64>,
-        /// Run exactly one invariant by its canonical kebab-case name.
-        /// Unknown names fail fast before the harness is built.
-        #[arg(long)]
-        only: Option<String>,
-    },
-
     /// Tier 1 — banned-API lint gate over `crate_class = "core"` crates.
     /// See `docs/product/architecture/adr-0003-core-crate-labelling.md`
     /// and `.claude/rules/development.md`.
@@ -54,7 +43,7 @@ enum Task {
 
     /// Compile `crates/overdrive-bpf` against `bpfel-unknown-none` and
     /// copy the produced ELF to the load-bearing stable path
-    /// `target/xtask/bpf-objects/overdrive_bpf.o` that the loader's
+    /// `target/bpf/overdrive_bpf.o` that the loader's
     /// `include_bytes!` references.
     ///
     /// Per ADR-0038 §3.1 the build is a child-process invocation of
@@ -86,12 +75,6 @@ enum Task {
         scope: IntegrationScope,
     },
 
-    /// Tier 4 — verifier complexity regression (`veristat`).
-    VerifierRegress,
-
-    /// Tier 4 — XDP throughput / p99 regression (`xdp-bench`).
-    XdpPerf,
-
     /// Mutation testing (`cargo-mutants`) — diff-scoped per PR or
     /// full-workspace (nightly).
     ///
@@ -110,7 +93,9 @@ enum Task {
     Ci,
 
     /// Manage the `overdrive` Lima VM used for Linux-specific builds and
-    /// BPF/integration tests from a macOS host. No-op on Linux.
+    /// BPF/integration tests. Required on all host platforms — macOS and
+    /// Linux developers both use Lima for reproducibility and to avoid
+    /// polluting the host with kernel toolchains.
     Lima {
         #[command(subcommand)]
         action: LimaAction,
@@ -146,18 +131,6 @@ enum Task {
         #[command(subcommand)]
         action: McpAction,
     },
-
-    /// Regenerate `api/openapi.yaml` from the live `OverdriveApi`
-    /// schema. Invoked by developers after adding or changing a DTO or
-    /// handler path. Per ADR-0009, the checked-in YAML is the contract;
-    /// drift is caught by `openapi-check` in CI.
-    OpenapiGen,
-
-    /// Verify `api/openapi.yaml` matches the live `OverdriveApi`
-    /// schema. Exits 0 on match; non-zero with a message naming the
-    /// first drifted schema/path and suggesting `cargo xtask
-    /// openapi-gen` to regenerate. CI gate per ADR-0009.
-    OpenapiCheck,
 }
 
 #[derive(Debug, Parser)]
@@ -314,7 +287,6 @@ fn main() -> ExitCode {
 
 fn run() -> Result<()> {
     match Args::parse().cmd {
-        Task::Dst { seed, only } => xtask::dst::run(seed, only.as_deref()),
         Task::DstLint { manifest_path } => xtask::dst_lint::run(&manifest_path),
         Task::YamlFreeCli { manifest_path } => xtask::yaml_free_cli::run(&manifest_path),
         Task::BpfBuild => bpf_build(),
@@ -323,16 +295,12 @@ fn run() -> Result<()> {
         Task::IntegrationTest { scope } => match scope {
             IntegrationScope::Vm { cache_dir, kernels } => integration_vm(&cache_dir, &kernels),
         },
-        Task::VerifierRegress => verifier_regress(),
-        Task::XdpPerf => xdp_perf(),
         Task::Mutants(args) => mutants(args),
         Task::Ci => ci(),
         Task::Lima { action } => lima(action),
         Task::Hooks { action } => hooks(action),
         Task::Mcp { action } => mcp(action),
         Task::DevSetup => dev_setup(),
-        Task::OpenapiGen => xtask::openapi::openapi_gen(),
-        Task::OpenapiCheck => xtask::openapi::openapi_check(),
     }
 }
 
@@ -518,12 +486,71 @@ fn hooks(action: HooksAction) -> Result<()> {
 const LIMA_INSTANCE: &str = "overdrive";
 const LIMA_TEMPLATE: &str = "infra/lima/overdrive-dev.yaml";
 
-fn lima(action: LimaAction) -> Result<()> {
-    if !cfg!(target_os = "macos") {
-        eprintln!("xtask: lima target is macOS-only; skipping on {}", std::env::consts::OS);
+/// Returns `true` when the current process is running inside the Lima
+/// guest VM. Lima names every guest `lima-<instance>`, so the hostname
+/// prefix is a reliable signal that survives across shell sessions and
+/// sudo escalation. The `OVERDRIVE_LIMA_VM` env var in the Lima
+/// template (`infra/lima/overdrive-dev.yaml`) is the secondary signal
+/// for newly-provisioned VMs.
+fn inside_lima() -> bool {
+    if std::env::var_os("OVERDRIVE_LIMA_VM").is_some() {
+        return true;
+    }
+    std::fs::read_to_string("/etc/hostname").is_ok_and(|h| h.trim().starts_with("lima-"))
+}
+
+/// Ensures the current xtask subcommand is running inside the Lima VM.
+/// If already inside (detected via `OVERDRIVE_LIMA_VM` env var), returns
+/// `Ok(())` and the caller proceeds with the real work. If outside, re-
+/// dispatches the given `args` through `cargo xtask lima run --` and
+/// exits with the child's exit status.
+fn ensure_in_lima(args: &[&str]) -> Result<()> {
+    if inside_lima() {
         return Ok(());
     }
-    which_or_hint("limactl", "brew install lima")?;
+    let mut cmd_args: Vec<String> =
+        vec!["cargo".into(), "xtask".into(), "lima".into(), "run".into(), "--".into()];
+    cmd_args.extend(args.iter().map(|s| (*s).to_string()));
+    lima(LimaAction::Run { no_sudo: false, args: cmd_args })
+}
+
+fn lima(action: LimaAction) -> Result<()> {
+    // When already inside the Lima guest and the action is `Run`,
+    // execute the command directly — `limactl` is not installed inside
+    // the VM so the `which_or_hint` below would fail. This passthrough
+    // lets cargo aliases (e.g. `cargo verifier-regress`) that route
+    // through `xtask lima run --` work transparently from both the host
+    // and from inside the VM.
+    if let LimaAction::Run { no_sudo, ref args } = action {
+        if inside_lima() {
+            if args.is_empty() {
+                bail!("no command given; use `cargo xtask lima run -- cargo dst` etc.");
+            }
+            if no_sudo {
+                return sh("(lima passthrough)", Command::new(&args[0]).args(&args[1..]));
+            }
+            return sh(
+                "(lima passthrough, sudo)",
+                Command::new("sudo")
+                    .args(["-E", "env"])
+                    .arg(format!("PATH={}", std::env::var("PATH").unwrap_or_default()))
+                    .arg(format!(
+                        "CARGO_TARGET_DIR={}",
+                        std::env::var("CARGO_TARGET_DIR").unwrap_or_default()
+                    ))
+                    .args(args),
+            );
+        }
+    }
+
+    which_or_hint(
+        "limactl",
+        if cfg!(target_os = "macos") {
+            "brew install lima"
+        } else {
+            "brew install lima  # or: curl -fsSL https://lima-vm.io/install.sh | bash"
+        },
+    )?;
 
     match action {
         LimaAction::Up => sh(
@@ -541,7 +568,7 @@ fn lima(action: LimaAction) -> Result<()> {
         }
         LimaAction::Run { no_sudo, args } => {
             if args.is_empty() {
-                bail!("no command given; use `cargo xtask lima run -- cargo xtask dst` etc.");
+                bail!("no command given; use `cargo xtask lima run -- cargo dst` etc.");
             }
             let mut cmd = Command::new("limactl");
             if no_sudo {
@@ -616,7 +643,7 @@ fn which_or_hint(binary: &str, install_hint: &str) -> Result<()> {
 
 /// Compile `crates/overdrive-bpf` against `bpfel-unknown-none` and
 /// copy the resulting ELF to the load-bearing stable path
-/// `target/xtask/bpf-objects/overdrive_bpf.o` that the loader's
+/// `target/bpf/overdrive_bpf.o` that the loader's
 /// `include_bytes!` references (see ADR-0038 §3.1, architecture.md
 /// §3.1, wave-decisions.md D3).
 ///
@@ -678,7 +705,7 @@ fn bpf_build() -> Result<()> {
     // redirected (e.g. Lima's `/home/marcus.guest/.cargo-target-lima`).
     let target_dir = cargo_target_dir(&workspace_root);
     let src = target_dir.join("bpfel-unknown-none/release/overdrive-bpf");
-    let dst_dir = workspace_root.join("target/xtask/bpf-objects");
+    let dst_dir = workspace_root.join("target/bpf");
     let dst = dst_dir.join("overdrive_bpf.o");
 
     std::fs::create_dir_all(&dst_dir)
@@ -707,6 +734,19 @@ fn bpf_build() -> Result<()> {
 /// step), but the rest of the toolchain (nightly + rust-src) is — same
 /// failure mode as `bpf_build` if missing.
 fn bpf_clippy() -> Result<()> {
+    // The kernel-side toolchain (nightly + `rust-src` + `bpf-linker` +
+    // `bpfel-unknown-none` target) is provisioned in the Lima VM. Re-
+    // dispatch through Lima so callers (lefthook, devs, CI) can invoke
+    // `cargo xtask bpf-clippy` unconditionally — inside the VM the
+    // guard returns Ok(()) and falls through to the direct path below.
+    // `--no-sudo` because clippy is a build, not a privileged op.
+    if !inside_lima() {
+        return lima(LimaAction::Run {
+            no_sudo: true,
+            args: vec!["cargo".into(), "xtask".into(), "bpf-clippy".into()],
+        });
+    }
+
     let workspace_root = workspace_root_dir()?;
     let manifest = workspace_root.join("crates/overdrive-bpf/Cargo.toml");
 
@@ -787,16 +827,33 @@ fn cargo_target_dir(workspace_root: &std::path::Path) -> std::path::PathBuf {
 /// the concrete invocation lands the binary name as the integration
 /// suite's single entrypoint per the testing.md Layout convention.
 ///
-/// On non-Linux build hosts the triptych test functions are
-/// `#[cfg(target_os = "linux")]`-gated and silently skip — the
-/// command still exits 0 with "no tests run" output, which is the
-/// correct shape for macOS dev (the real gate is Lima / CI).
 fn bpf_unit() -> Result<()> {
+    ensure_in_lima(&["cargo", "xtask", "bpf-unit"])?;
+
     which_or_hint(
         "cargo-nextest",
         "cargo install cargo-nextest --locked  # or: brew install cargo-nextest",
     )?;
     let workspace_root = workspace_root_dir()?;
+
+    // Tier 2 BPF unit tests under
+    // `crates/overdrive-bpf/tests/integration/xdp_service_map_redirect_neigh.rs`
+    // call `bpf_fib_lookup` from the XDP program with input-mode
+    // semantics (flags=0). For `RET_SUCCESS` the kernel needs both a
+    // route AND a populated neighbour entry for the destination —
+    // and rp_filter must be relaxed because `BPF_PROG_TEST_RUN`
+    // synthesises an XDP context with `ingress_ifindex = lo`. Lima
+    // happens to satisfy these via routine boot traffic on the
+    // default route, so the suite passes there; CI runners
+    // (`ubuntu-latest`, LVH) make no such guarantee.
+    //
+    // Install a deterministic FIB-hit topology before `nextest` runs
+    // and tear it down on Drop so a panicking test still cleans up.
+    // The topology lives once per `bpf-unit` invocation, not per
+    // test (mirrors the env-wide nature of host network state, and
+    // avoids per-test sudo dances).
+    let _topology = bpf_fib_topology::install()?;
+
     sh(
         "cargo nextest run -p overdrive-bpf --features integration-tests --test integration",
         Command::new(cargo())
@@ -814,7 +871,144 @@ fn bpf_unit() -> Result<()> {
     )
 }
 
+/// Tier 2 BPF unit-test FIB topology: a dummy interface with a
+/// directly-connected `/32` route to the well-known backend IP +
+/// permanent neighbour entry, so `bpf_fib_lookup` returns
+/// `RET_SUCCESS` from the XDP program independent of host network
+/// state. See `bpf_unit()` for the rationale.
+///
+/// Magic constants are duplicated by name in the consuming test
+/// file (`crates/overdrive-bpf/tests/integration/
+/// xdp_service_map_redirect_neigh.rs` — `ROUTABLE_BACKEND_OCTETS`
+/// and the synthesised packet's source IP). xtask hard-codes the
+/// dotted-quad strings rather than importing the test crate, per
+/// the `overdrive-*`-out-of-xtask-deps rule (CLAUDE.md §
+/// "xtask is build / test / dev orchestration"). If the test
+/// constants ever change, this module changes alongside them.
+mod bpf_fib_topology {
+    use super::{Result, sh};
+    use eyre::bail;
+    use std::process::Command;
+
+    // 15-char IFNAMSIZ ceiling; this is well under.
+    const IFACE: &str = "odt-bpf-fib";
+    // /24 covers the test's source IP (`10.0.0.100` in
+    // `synthesise_tcp_syn`) so the input-mode FIB lookup has a
+    // valid reverse-path candidate via this iface.
+    const IFACE_ADDR_CIDR: &str = "10.0.0.254/24";
+    // Matches `ROUTABLE_BACKEND_OCTETS = [10, 1, 0, 5]` in the
+    // forward-path consuming test (`xdp_service_map_redirect_neigh`).
+    // Outside the IFACE_ADDR_CIDR subnet, so it needs an explicit
+    // `/32` route plus permanent neigh entry.
+    const BACKEND_IP: &str = "10.1.0.5";
+    // Matches `ROUTABLE_CLIENT_OCTETS = [10, 0, 0, 100]` in the
+    // reverse-path consuming test (`xdp_reverse_nat_redirect_neigh`).
+    // Inside the IFACE_ADDR_CIDR `/24` so the route is auto-added
+    // (directly connected); only the permanent neigh entry is needed
+    // (without it the FIB lookup gates on ARP and returns
+    // RET_NO_NEIGH, falling through to XDP_PASS).
+    const CLIENT_IP: &str = "10.0.0.100";
+    // Synthetic next-hop MAC; the tests assert only that the
+    // post-FIB-lookup `h_dest` differs from the PKTGEN sentinel,
+    // so any well-formed unicast MAC works. Same for both neigh
+    // entries — neither test inspects the value.
+    const NEIGH_LLADDR: &str = "02:00:00:00:00:01";
+    const RP_FILTER_ALL: &str = "/proc/sys/net/ipv4/conf/all/rp_filter";
+
+    pub struct Topology {
+        rp_filter_prior: Option<String>,
+    }
+
+    pub fn install() -> Result<Topology> {
+        // Best-effort module load — already present on most modern
+        // kernels including Lima's 6.8 image.
+        let _ = Command::new("modprobe").arg("dummy").status();
+
+        // Defensive cleanup: if a prior `bpf-unit` was killed
+        // mid-run, the iface may still exist. Removing here is
+        // idempotent.
+        let _ = Command::new("ip").args(["link", "del", IFACE]).status();
+
+        // `BPF_PROG_TEST_RUN` synthesises an XDP context with
+        // `ingress_ifindex = lo`. Input-mode `bpf_fib_lookup` then
+        // does a route lookup with `flowi4_iif = lo`; on kernels
+        // with `all.rp_filter >= 1` (Ubuntu's default) the kernel
+        // rejects the lookup because the source IP is not routable
+        // back through `lo`. Drop the global to 0 for the duration
+        // of the suite and restore on Drop. Lima's image already
+        // ships with `all.rp_filter = 0`; this branch is the
+        // CI-runner backstop.
+        let rp_filter_prior = std::fs::read_to_string(RP_FILTER_ALL).ok();
+        if let Err(err) = std::fs::write(RP_FILTER_ALL, "0\n") {
+            bail!(
+                "failed to relax {RP_FILTER_ALL} for FIB-hit topology: {err}; \
+                 `cargo xtask bpf-unit` requires NET_ADMIN — invoke via \
+                 `cargo xtask lima run -- cargo xtask bpf-unit` or `sudo` in CI"
+            );
+        }
+
+        sh(
+            &format!("ip link add {IFACE} type dummy"),
+            Command::new("ip").args(["link", "add", IFACE, "type", "dummy"]),
+        )?;
+        sh(
+            &format!("ip link set {IFACE} up"),
+            Command::new("ip").args(["link", "set", IFACE, "up"]),
+        )?;
+        sh(
+            &format!("ip addr add {IFACE_ADDR_CIDR} dev {IFACE}"),
+            Command::new("ip").args(["addr", "add", IFACE_ADDR_CIDR, "dev", IFACE]),
+        )?;
+        sh(
+            &format!("ip route add {BACKEND_IP}/32 dev {IFACE}"),
+            Command::new("ip").args(["route", "add", &format!("{BACKEND_IP}/32"), "dev", IFACE]),
+        )?;
+        sh(
+            &format!("ip neigh add {BACKEND_IP} lladdr {NEIGH_LLADDR} dev {IFACE} nud permanent"),
+            Command::new("ip").args([
+                "neigh",
+                "add",
+                BACKEND_IP,
+                "lladdr",
+                NEIGH_LLADDR,
+                "dev",
+                IFACE,
+                "nud",
+                "permanent",
+            ]),
+        )?;
+        sh(
+            &format!("ip neigh add {CLIENT_IP} lladdr {NEIGH_LLADDR} dev {IFACE} nud permanent"),
+            Command::new("ip").args([
+                "neigh",
+                "add",
+                CLIENT_IP,
+                "lladdr",
+                NEIGH_LLADDR,
+                "dev",
+                IFACE,
+                "nud",
+                "permanent",
+            ]),
+        )?;
+
+        Ok(Topology { rp_filter_prior })
+    }
+
+    impl Drop for Topology {
+        fn drop(&mut self) {
+            // `ip link del` cascades the route and neigh entry.
+            let _ = Command::new("ip").args(["link", "del", IFACE]).status();
+            if let Some(prior) = &self.rp_filter_prior {
+                let _ = std::fs::write(RP_FILTER_ALL, prior);
+            }
+        }
+    }
+}
+
 fn integration_vm(cache_dir: &std::path::Path, kernels: &[String]) -> Result<()> {
+    ensure_in_lima(&["cargo", "xtask", "integration-test", "vm"])?;
+
     if kernels.is_empty() {
         bail!("specify at least one kernel (e.g. 5.15, 6.1, 6.6, latest, bpf-next)");
     }
@@ -834,23 +1028,6 @@ fn integration_vm(cache_dir: &std::path::Path, kernels: &[String]) -> Result<()>
         kernels.join(",")
     );
     tracing_placeholder(&summary)
-}
-
-fn verifier_regress() -> Result<()> {
-    // TODO(#29): wire when first real program lands. Per ADR-0038 §6 /
-    // architecture.md §6.3 there is no point baselining verifier
-    // complexity against a no-op `xdp_pass` — the gate would catch
-    // nothing and the baseline would be meaningless. The harness lands
-    // alongside the first real BPF program (POLICY_MAP / SERVICE_MAP /
-    // sockops+kTLS) in Phase 2 issues #24..#27.
-    tracing_placeholder("verifier-regress: veristat harness deferred to #29 (first real program)")
-}
-
-fn xdp_perf() -> Result<()> {
-    // TODO(#29): wire when first real program lands. xdp-bench
-    // throughput / p99 numbers against a no-op program are not a
-    // meaningful regression signal. See architecture.md §6.3.
-    tracing_placeholder("xdp-perf: xdp-bench harness deferred to #29 (first real program)")
 }
 
 fn mutants(args: MutantsArgs) -> Result<()> {

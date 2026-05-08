@@ -22,7 +22,7 @@ on Linux/Lima and degrades cleanly on macOS:
   `#![no_std]`) — kernel-side eBPF programs. Phase 2.1 ships one no-op XDP
   program `xdp_pass` plus an `LruHashMap<u32, u64>` packet counter. Compiles
   to a single ELF object at the stable path
-  `target/xtask/bpf-objects/overdrive_bpf.o`. Excluded from `default-members`
+  `target/bpf/overdrive_bpf.o`. Excluded from `default-members`
   so `cargo check --workspace` skips it on macOS automatically.
 - **`overdrive-dataplane`** (class `adapter-host`) — userspace BPF loader.
   Hosts the `EbpfDataplane` impl of the `Dataplane` port trait from
@@ -89,10 +89,10 @@ Scope explicitly held back to downstream Phase-2 issues:
 - **#24 [2.2]** — SERVICE_MAP and the first non-trivial XDP program;
   closes the binary-composition edge by wiring `Arc<dyn Dataplane>` into
   `AppState`.
-- **#25 [2.3]** — POLICY_MAP and the BPF map hydration path from
+- **#158 [3.14]** — POLICY_MAP and the BPF map hydration path from
   `policy_verdicts` Corrosion rows.
 - **#26+** — sockops + kTLS (whitepaper §8).
-- **#27** — telemetry ringbuf consumer (whitepaper §12).
+- **#31** — telemetry ringbuf consumer (whitepaper §12).
 - **#28+** — BPF LSM mandatory access control (whitepaper §19).
 - **#29** — full Tier 3 kernel matrix `[5.10, 5.15, 6.1, 6.6, latest LTS,
   bpf-next]` + Tier 4 (veristat verifier-regress + xdp-bench perf gates +
@@ -194,7 +194,7 @@ ongoing implications beyond #23.
 - **D3: Hybrid build pipeline.** `cargo xtask bpf-build` is primary;
   `build.rs` is a defensive shim that converts a cryptic
   `include_bytes!` failure into a one-line diagnostic. Stable artifact
-  path `target/xtask/bpf-objects/overdrive_bpf.o` is load-bearing —
+  path `target/bpf/overdrive_bpf.o` is load-bearing —
   every later xtask refactor must preserve it or the loader breaks.
 - **D5: macOS dev story.** Workspace gains a NEW `default-members`
   declaration that omits `overdrive-bpf`; the loader compiles via
@@ -342,7 +342,7 @@ Cross-cutting artifacts that already lived outside the feature workspace:
   `Arc<dyn Dataplane>` into `AppState`, closing the binary-composition
   edge that #23 deliberately deferred. First slice where `update_service`
   has a concrete caller.
-- **#25 [2.3]** — POLICY_MAP: the first wire-format struct crossing the
+- **#158 [3.14]** — POLICY_MAP: the first wire-format struct crossing the
   kernel/user boundary. Anchor for the deferred decision on a third
   shared-types crate (`overdrive-bpf-types`) versus a `cfg`-gated module
   inside `overdrive-bpf`.

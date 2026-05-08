@@ -1,4 +1,4 @@
-# ADR-0006 — CI gates: `cargo xtask dst` and `cargo xtask dst-lint` with seed surfacing
+# ADR-0006 — CI gates: `cargo dst` and `cargo xtask dst-lint` with seed surfacing
 
 ## Status
 
@@ -9,7 +9,7 @@ Accepted. 2026-04-21.
 User stories US-05 and US-06 require two CI checks to block merges:
 
 - `cargo xtask dst-lint` — scans core crates for banned APIs (US-05).
-- `cargo xtask dst` — runs the turmoil DST harness (US-06).
+- `cargo dst` — runs the turmoil DST harness (US-06).
 
 Both already have stub subcommands in `xtask/src/main.rs`; Phase 1 fills
 in their bodies. Beyond wiring the commands, the CI integration must
@@ -42,11 +42,11 @@ exits with the harness's status.
 **xtask command surface** (filling in the stubs):
 
 ```
-cargo xtask dst [--seed <u64>] [--only <INVARIANT_NAME>] [--nodes <N>]
+cargo dst [--seed <u64>] [--only <INVARIANT_NAME>] [--nodes <N>]
 cargo xtask dst-lint
 ```
 
-### `cargo xtask dst`
+### `cargo dst`
 
 Responsibilities:
 
@@ -70,7 +70,7 @@ Responsibilities:
      tick       = 8743
      host       = node-0
      cause      = two leaders observed
-     reproduce  = cargo xtask dst --seed 17283645 --only single-leader
+     reproduce  = cargo dst --seed 17283645 --only single-leader
    ```
 
 6. Exit with the harness's exit code.
@@ -115,7 +115,7 @@ clippy` checks:
   run: cargo xtask dst-lint
 
 - name: dst
-  run: cargo xtask dst
+  run: cargo dst
   # Upload both artifacts regardless of success, to avoid the "what seed
   # reproduced this?" trap.
 - name: upload dst logs
@@ -124,8 +124,8 @@ clippy` checks:
   with:
     name: dst-output
     path: |
-      target/xtask/dst-output.log
-      target/xtask/dst-summary.json
+      target/dst/output.log
+      target/dst/summary.json
     retention-days: 30
 ```
 
@@ -142,7 +142,7 @@ The `dst-output.log` and `dst-summary.json` files are written by
   "tick": 8743,
   "host": "node-0",
   "cause": "two leaders observed",
-  "reproduce": "cargo xtask dst --seed 17283645 --only single-leader",
+  "reproduce": "cargo dst --seed 17283645 --only single-leader",
   "git_sha": "abc123",
   "toolchain": "stable-1.85"
 }
@@ -181,7 +181,7 @@ See Decision above.
 
 ### Positive
 
-- Single canonical invocation path: `cargo xtask dst` for developers and
+- Single canonical invocation path: `cargo dst` for developers and
   CI alike. No "well in CI we do it differently."
 - Seed is discoverable on the first output line — even a truncated,
   killed, or OOM-killed run preserves it.

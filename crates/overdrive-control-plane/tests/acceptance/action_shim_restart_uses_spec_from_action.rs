@@ -141,9 +141,20 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
     let (lifecycle_tx, _lifecycle_rx) = tokio::sync::broadcast::channel(16);
 
     // Dispatch the action through the shim.
-    dispatch(vec![action], driver_dyn.as_ref(), obs.as_ref(), &lifecycle_tx, &tick)
-        .await
-        .expect("dispatch must succeed");
+    let dataplane: std::sync::Arc<dyn overdrive_core::traits::dataplane::Dataplane> =
+        std::sync::Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new());
+    let writer_node = overdrive_core::id::NodeId::new("writer-1").expect("NodeId");
+    dispatch(
+        vec![action],
+        driver_dyn.as_ref(),
+        obs.as_ref(),
+        dataplane.as_ref(),
+        &lifecycle_tx,
+        &tick,
+        &writer_node,
+    )
+    .await
+    .expect("dispatch must succeed");
 
     // The shim must have called `Driver::start` exactly once with the
     // spec carried on the action — NOT with the deleted /bin/sleep

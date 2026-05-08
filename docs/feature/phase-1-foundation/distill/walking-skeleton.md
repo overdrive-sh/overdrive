@@ -15,15 +15,15 @@ session.
 
 ## Demo script for a non-technical stakeholder
 
-1. "Ana has cloned the project. She runs `cargo xtask dst`."
+1. "Ana has cloned the project. She runs `cargo dst`."
 2. "The harness boots three simulated nodes on real redb plus all
    deterministic simulator adapters."
 3. "Ninety-plus-some invariants run in under three seconds."
 4. "The summary line says zero failures. The seed for this run is
    printed right there."
-5. "Ana copies the seed and runs `cargo xtask dst --seed <N>`. The exact
+5. "Ana copies the seed and runs `cargo dst --seed <N>`. The exact
    same trajectory replays."
-6. "We deliberately break one adapter. Ana runs `cargo xtask dst` again.
+6. "We deliberately break one adapter. Ana runs `cargo dst` again.
    The harness prints the invariant name, the seed, the exact simulated
    tick, and a one-line command she can paste to reproduce it."
 7. "Ana runs the printed command. Same failure at the same tick on the
@@ -37,12 +37,12 @@ confirm "yes, that is what engineers need" without reading any Rust.
 
 **WS-1 — Clean-clone green run** (`test-scenarios.md` §1.1, tags
 `@walking_skeleton @real-io @adapter-integration @driving_port @us-06
-@kpi K1`). Enters through the `cargo xtask dst` subprocess. Exercises
+@kpi K1`). Enters through the `cargo dst` subprocess. Exercises
 real redb-backed LocalStore in a `tempfile::TempDir`. Every Sim adapter
 composes. Returns green. Prints the seed on the first line.
 
 **WS-2 — Seed reproduces trajectory** (§1.2, `@walking_skeleton
-@driving_port @us-06 @kpi K3`). Enters through the `cargo xtask dst
+@driving_port @us-06 @kpi K3`). Enters through the `cargo dst
 --seed <N>` subprocess twice in sequence. Proves that the seed captured
 in WS-1 is the *whole* determinism input — the harness produces the
 same ordered invariant results and the same per-invariant tick numbers
@@ -87,7 +87,7 @@ snapshot canonical) and fail WS-1's snapshot-related invariant. The
 walking skeleton tests the wiring of the production adapter, not a
 convenient stand-in. ✅
 
-> "Could the WS pass without the `cargo xtask dst` subprocess
+> "Could the WS pass without the `cargo dst` subprocess
 > wrapper?"
 
 **Answer**: No. WS-1, WS-2, and WS-3 all enter through the

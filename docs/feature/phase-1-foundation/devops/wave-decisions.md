@@ -20,7 +20,7 @@ All other typical DEVOPS artifacts (platform architecture, observability
 design, monitoring/alerting, infrastructure integration, continuous
 learning, KPI dashboards) are skipped — they have nothing to design
 against at Phase 1 scope. The six KPIs from DISCUSS are enforced by
-`cargo xtask dst`, `cargo xtask dst-lint`, and `cargo test` running in
+`cargo dst`, `cargo xtask dst-lint`, and `cargo test` running in
 CI, not by external instrumentation.
 
 ---
@@ -35,7 +35,7 @@ CI, not by external instrumentation.
 runtime deploy.
 
 **Rationale**: The workspace has no server, no service, no long-running
-process. Phase 1's user is a platform engineer running `cargo xtask dst`
+process. Phase 1's user is a platform engineer running `cargo dst`
 locally on their laptop, and CI running the same command on every PR.
 There is nothing to deploy.
 
@@ -84,7 +84,7 @@ without disturbing lefthook is the minimum-risk shape.
 
 **Answer**: **Deferred to later phases**. Phase 1's only telemetry is:
 
-- `cargo xtask dst` prints the seed on the first line of stdout and a
+- `cargo dst` prints the seed on the first line of stdout and a
   structured summary at the end (green or red).
 - On failure, a JSON summary artifact (`dst-summary.json`) and full text
   log (`dst-output.log`) are uploaded by CI per ADR-0006.
@@ -200,7 +200,7 @@ script; DWD-01).
 **Confirmations**:
 
 - **Real redb on `tempfile::TempDir`, not mocks.** The `test` and `dst`
-  jobs in `ci.yml` run `cargo test --workspace` and `cargo xtask dst`,
+  jobs in `ci.yml` run `cargo test --workspace` and `cargo dst`,
   which exercise the real `overdrive-store-local::LocalStore` against
   redb in a tempdir per WS-1. No test mocks redb.
 - **No `@requires_external` markers.** The workflow has no AWS creds,
@@ -208,7 +208,7 @@ script; DWD-01).
   needs is a GitHub-native runtime token (GITHUB_TOKEN for artifact
   upload; the default automatic permission).
 - **DST runs as a subprocess entry point.** The `dst` job invokes
-  `cargo xtask dst` directly — not `cargo test --features dst`. This
+  `cargo dst` directly — not `cargo test --features dst`. This
   matches WS-1 / WS-2 / WS-3 which all enter through the subprocess
   driver-port wrapper per Mandate-1.
 - **K1 wall-clock ceiling enforced.** Job timeout is 10 minutes; the
@@ -233,8 +233,8 @@ The software-crafter needs the following before DELIVER begins:
    `cargo xtask ci`, which is expected to run fmt-check + clippy + test
    — the xtask `ci` subcommand must actually do that (the crafter
    verifies / implements).
-3. **`cargo xtask dst` must write to the paths CI expects.** CI reads
-   `target/xtask/dst-output.log` and `target/xtask/dst-summary.json`.
+3. **`cargo dst` must write to the paths CI expects.** CI reads
+   `target/dst/output.log` and `target/dst/summary.json`.
    The crafter's implementation of `xtask dst` must write to exactly
    those paths. If `$CARGO_TARGET_DIR` is set, both paths resolve to
    `$CARGO_TARGET_DIR/xtask/...` — CI does not set the variable, so the

@@ -6,12 +6,6 @@
 //! alloc reaches `Running`, then asserts cgroup membership of the
 //! workload PID.
 //!
-//! Linux-only — gated by `#[cfg(target_os = "linux")]` AND
-//! `#[cfg(feature = "integration-tests")]`. Compile-clean on macOS via
-//! `cargo nextest run --features integration-tests --no-run`.
-
-#![cfg(target_os = "linux")]
-
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -48,7 +42,15 @@ async fn submitted_job_reaches_running_via_real_exec_driver() {
     let driver: Arc<dyn Driver> =
         Arc::new(ExecDriver::new(std::path::PathBuf::from("/sys/fs/cgroup"), sim_clock.clone()));
 
-    let state = AppState::new(store, obs, Arc::new(runtime), driver, sim_clock);
+    let state = AppState::new(
+        store,
+        obs,
+        Arc::new(runtime),
+        driver,
+        sim_clock,
+        Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+        overdrive_core::id::NodeId::new("writer-1").unwrap(),
+    );
 
     // Cleanup guard — fires on test exit (panic or success) and
     // mass-kills every workload cgroup the test created via

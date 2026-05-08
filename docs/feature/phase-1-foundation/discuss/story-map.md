@@ -1,7 +1,7 @@
 # Story Map — phase-1-foundation
 
 ## User: Overdrive platform engineer (Ana), distributed-systems SRE background
-## Goal: Run `cargo xtask dst` on a clean clone and trust that a red run is reproducible from the printed seed.
+## Goal: Run `cargo dst` on a clean clone and trust that a red run is reproducible from the printed seed.
 
 ## Backbone
 
@@ -42,14 +42,14 @@ The user activities, left-to-right in chronological order over the lifetime of t
 
 ### 5. Simulate distributed behaviour
 
-- 5.1 `cargo xtask dst` harness boots a 3-node simulated cluster *(Walking Skeleton)*
+- 5.1 `cargo dst` harness boots a 3-node simulated cluster *(Walking Skeleton)*
 - 5.2 Invariant catalogue: `single_leader`, `intent_never_crosses_into_observation`, `snapshot_roundtrip_bit_identical`, `lww_converges`, `replay_equivalent_empty_workflow` *(Walking Skeleton)*
 - 5.3 Seeded reproduction: `--seed N` produces bit-identical trajectory *(Walking Skeleton)*
 - 5.4 Failure output includes invariant name, seed, tick, reproduction command *(Walking Skeleton)*
 
 ## Walking Skeleton
 
-The thinnest end-to-end slice that connects ALL five activities. If any activity has nothing above the skeleton line, the engineer cannot reach `cargo xtask dst` green:
+The thinnest end-to-end slice that connects ALL five activities. If any activity has nothing above the skeleton line, the engineer cannot reach `cargo dst` green:
 
 | 1. Model | 2. Intent | 3. Observation | 4. Nondet | 5. Sim |
 |---|---|---|---|---|
@@ -113,7 +113,7 @@ Each slice ≤1 day of focused work, ships demonstrable end-to-end value, carrie
 
 ### Slice 6 — turmoil DST harness green (WS — row 5)
 
-**Outcome**: `cargo xtask dst` on a clean clone boots a 3-node simulated cluster using `LocalStore` + `SimObservationStore` + all Sim* traits, runs a catalogue of invariants (`single_leader`, `intent_never_crosses_into_observation`, `snapshot_roundtrip_bit_identical`, `lww_converges`, `replay_equivalent_empty_workflow`), prints the seed on every run, reproduces bit-for-bit on `--seed N` and prints an exact reproduction command on failure.
+**Outcome**: `cargo dst` on a clean clone boots a 3-node simulated cluster using `LocalStore` + `SimObservationStore` + all Sim* traits, runs a catalogue of invariants (`single_leader`, `intent_never_crosses_into_observation`, `snapshot_roundtrip_bit_identical`, `lww_converges`, `replay_equivalent_empty_workflow`), prints the seed on every run, reproduces bit-for-bit on `--seed N` and prints an exact reproduction command on failure.
 
 **Target KPI**: DST wall-clock < 60s on an M-class developer laptop for the default invariant set. Same-seed reproduction is bit-identical across two sequential runs on the same toolchain.
 
@@ -123,7 +123,7 @@ Each slice ≤1 day of focused work, ships demonstrable end-to-end value, carrie
 
 ## Priority Rationale
 
-Ordering by outcome impact and dependencies. Every slice in Release 1 is on the walking skeleton — they are all required to reach `cargo xtask dst` green. The order within Release 1 is the dependency graph:
+Ordering by outcome impact and dependencies. Every slice in Release 1 is on the walking skeleton — they are all required to reach `cargo dst` green. The order within Release 1 is the dependency graph:
 
 | Priority | Slice | Depends on | Why this order |
 |---|---|---|---|

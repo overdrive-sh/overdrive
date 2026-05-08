@@ -19,7 +19,7 @@
     {
       "id": "01",
       "name": "Drop commit_index across trait, impl, handlers, API, CLI, tests, and docs",
-      "description": "Single-cut migration per project memory `feedback_single_cut_greenfield_migrations`. Phase 1 is unshipped; no external consumer; no deprecation path. The five steps below partition the surgery surface enumerated in `upstream-changes.md` along verification-gate boundaries: each step has a distinct CI signal that proves it landed correctly. Step 01-01 lands the wire-contract change coherently (trait + handlers + api.rs cannot ship piecemeal without compile breakage). Step 01-02 lands the storage-layer simplification under the new contract. Step 01-03 regenerates the OpenAPI schema and updates CLI rendering \u2014 both are downstream of the wire change and gate on `cargo xtask openapi-check` + CLI render acceptance tests. Step 01-04 deletes and revises the test surface that asserted on the dropped field. Step 01-05 amends the architectural records and runs the \u00a712 catch-all grep audit. Each step is a single commit; the PR lands as one breaking-internal change.",
+      "description": "Single-cut migration per project memory `feedback_single_cut_greenfield_migrations`. Phase 1 is unshipped; no external consumer; no deprecation path. The five steps below partition the surgery surface enumerated in `upstream-changes.md` along verification-gate boundaries: each step has a distinct CI signal that proves it landed correctly. Step 01-01 lands the wire-contract change coherently (trait + handlers + api.rs cannot ship piecemeal without compile breakage). Step 01-02 lands the storage-layer simplification under the new contract. Step 01-03 regenerates the OpenAPI schema and updates CLI rendering \u2014 both are downstream of the wire change and gate on `cargo openapi-check` + CLI render acceptance tests. Step 01-04 deletes and revises the test surface that asserted on the dropped field. Step 01-05 amends the architectural records and runs the \u00a712 catch-all grep audit. Each step is a single commit; the PR lands as one breaking-internal change.",
       "steps": [
         {
           "id": "01-01",
@@ -65,7 +65,7 @@
             "`crates/overdrive-store-local/src/snapshot_frame.rs` \u2014 `pub const VERSION: u16 = 1;` (single constant); encoder emits `Vec<(Vec<u8>, Vec<u8>)>`; v2 encoder/decoder branch deleted; v1 decoder branch preserved verbatim; module docstring revised to drop the 'v1 inputs project the missing index column to 0' framing (the v1 frame is canonical).",
             "`crates/overdrive-sim/` \u2014 grep-clean for `commit_index`, `(Bytes, u64)`, `Option<(Bytes, u64)>`, `PutOutcome::Inserted { commit_index`, `PutOutcome::KeyExists { commit_index`. Each prior match has been edited to the trait's new shape (drop tuple unpack, drop field bind, drop index assertion).",
             "`cargo nextest run -p overdrive-store-local -p overdrive-sim --lib` is GREEN.",
-            "`cargo xtask dst` is GREEN \u2014 the harness invariant `intent_store_returns_caller_bytes` (per ADR-0020 \u00a7Enforcement) is added if not yet present, asserting that `IntentStore::get` returns the bytes as supplied to `put` with no framing overhead. This is the structural-regression guard against a future contributor re-introducing inline encoding.",
+            "`cargo dst` is GREEN \u2014 the harness invariant `intent_store_returns_caller_bytes` (per ADR-0020 \u00a7Enforcement) is added if not yet present, asserting that `IntentStore::get` returns the bytes as supplied to `put` with no framing overhead. This is the structural-regression guard against a future contributor re-introducing inline encoding.",
             "Commit-message shape: `refactor(store-local): drop commit_counter and revert snapshot frame to v1 (ADR-0020)`. Body cites ADR-0020 \u00a7Decision \u00a73 + \u00a7Enforcement and `Step-ID: 01-02`."
           ],
           "test_file": "crates/overdrive-sim/tests/integration/dst_invariants.rs",
@@ -79,7 +79,7 @@
           "implementation_notes": "On-disk format change: redb files written by the current code are not readable by the post-step code (rows are no longer prefixed with the `[u64-LE-prefix || value]` frame). This is deliberately accepted \u2014 Phase 1 development databases are scratch, no production data exists to migrate. The cross-writer race documented in `f5b361c`'s RCA is unreachable post-step because the bump call site is gone. The `bootstrap_from` simplification: the previous code read a `commit_index` from the snapshot frame and seeded `commit_counter` via `fetch_max`; the new code clears the `entries` table and replays snapshot rows verbatim. The sim crate audit: the file paths to grep are under `crates/overdrive-sim/src/` \u2014 `harness.rs` is the most likely site (per `upstream-changes.md` \u00a72 it reuses `LocalIntentStore`), but the audit covers the whole crate. Snapshot proptests live in `tests/integration/snapshot_proptest.rs` and are revised in 01-04 \u2014 the impl-level edits here may make them fail until 01-04 lands; that is intentionally-RED per `.claude/rules/testing.md`. The `intent_store_returns_caller_bytes` invariant is the structural-regression guard required by ADR-0020 \u00a7Enforcement; if it does not yet exist, the `files_to_modify` above includes its creation site (`crates/overdrive-sim/src/invariants/intent_store_caller_bytes.rs` \u2014 verify the actual `invariants/` module path at edit time).",
           "quality_gates": [
             "cargo nextest run -p overdrive-store-local -p overdrive-sim --lib passes",
-            "cargo xtask dst passes (with intent_store_returns_caller_bytes invariant)",
+            "cargo dst passes (with intent_store_returns_caller_bytes invariant)",
             "grep clean for commit_index across overdrive-sim",
             "single commit",
             "ADR-0020 cited in body"
@@ -95,9 +95,9 @@
         {
           "id": "01-03",
           "name": "Regenerate OpenAPI schema + update CLI rendering",
-          "description": "Regenerate `api/openapi.yaml` from the new Rust types via `cargo xtask openapi`, then verify `cargo xtask openapi-check` passes. The expected diff: `SubmitJobResponse` drops `commit_index`, adds `spec_digest` (string) and `outcome` (enum); `JobDescription` drops `commit_index`; `ClusterStatus` drops `commit_index`; new `IdempotencyOutcome` component schema (string enum `inserted` | `unchanged`). Update CLI rendering across `render.rs` (three `Commit index:` lines at 32, 81, 100 \u2014 re-grep at edit time), `cli.rs` (line 91 rustdoc), `commands/cluster.rs` (`ClusterStatusOutput` field set), `commands/job.rs` (submit + describe rendering), `commands/alloc.rs` (drop any 'Commit index' line). The `job submit` output prints the outcome in human form (`created` for `inserted`, `unchanged` for `unchanged`) \u2014 the JSON wire form is `inserted` | `unchanged`, the CLI surfaces the human form per `upstream-changes.md` \u00a75. The walking-skeleton test-scenarios amendment (test-scenarios.md \u00a71.1, \u00a71.2, \u00a71.3) maps directly to this step's CLI rendering output. Implements \u00a74 (OpenAPI regen) + \u00a75 (CLI rendering) of `upstream-changes.md`.",
+          "description": "Regenerate `api/openapi.yaml` from the new Rust types via `cargo openapi-gen`, then verify `cargo openapi-check` passes. The expected diff: `SubmitJobResponse` drops `commit_index`, adds `spec_digest` (string) and `outcome` (enum); `JobDescription` drops `commit_index`; `ClusterStatus` drops `commit_index`; new `IdempotencyOutcome` component schema (string enum `inserted` | `unchanged`). Update CLI rendering across `render.rs` (three `Commit index:` lines at 32, 81, 100 \u2014 re-grep at edit time), `cli.rs` (line 91 rustdoc), `commands/cluster.rs` (`ClusterStatusOutput` field set), `commands/job.rs` (submit + describe rendering), `commands/alloc.rs` (drop any 'Commit index' line). The `job submit` output prints the outcome in human form (`created` for `inserted`, `unchanged` for `unchanged`) \u2014 the JSON wire form is `inserted` | `unchanged`, the CLI surfaces the human form per `upstream-changes.md` \u00a75. The walking-skeleton test-scenarios amendment (test-scenarios.md \u00a71.1, \u00a71.2, \u00a71.3) maps directly to this step's CLI rendering output. Implements \u00a74 (OpenAPI regen) + \u00a75 (CLI rendering) of `upstream-changes.md`.",
           "criteria": [
-            "`api/openapi.yaml` regenerated via `cargo xtask openapi`; `cargo xtask openapi-check` is GREEN. Three component schemas changed (`SubmitJobResponse`, `JobDescription`, `ClusterStatus`); one new component schema (`IdempotencyOutcome`).",
+            "`api/openapi.yaml` regenerated via `cargo openapi-gen`; `cargo openapi-check` is GREEN. Three component schemas changed (`SubmitJobResponse`, `JobDescription`, `ClusterStatus`); one new component schema (`IdempotencyOutcome`).",
             "`crates/overdrive-cli/src/render.rs` \u2014 three `Commit index:` writeln sites deleted (was lines 32, 81, 100); `render::job_submit` prints `Spec digest:` + `Outcome:` (human form `created` | `unchanged`); `render::alloc_status` no longer prints a Commit-index line; `render::cluster_status` output narrows from five lines to four (`Mode`, `Region`, `Reconcilers`, `Broker`).",
             "`crates/overdrive-cli/src/cli.rs` \u2014 line 91 rustdoc updated to drop the `commit_index` mention.",
             "`crates/overdrive-cli/src/commands/cluster.rs` \u2014 `ClusterStatusOutput` (or equivalent) drops `commit_index: u64`; print logic mirrors the four-field shape.",
@@ -116,9 +116,9 @@
             "crates/overdrive-cli/src/commands/job.rs",
             "crates/overdrive-cli/src/commands/alloc.rs"
           ],
-          "implementation_notes": "Do NOT hand-edit `api/openapi.yaml` \u2014 it is generated. Run `cargo xtask openapi` and check in the generated bytes; `cargo xtask openapi-check` then asserts no drift between generator output and checked-in YAML. Per memory `feedback_no_user_install_instructions`, do not surface install hints if `cargo xtask openapi` is missing \u2014 just run it. The label set printed by `render::job_submit` (per `upstream-changes.md` \u00a77 `render_job_submit.rs` enumeration line 12) is: `Accepted.`, `Job ID:`, `Intent key:`, `Spec digest:`, `Outcome:`, `Endpoint:`, `Next:`. The walking-skeleton scenarios in `distill/test-scenarios.md` \u00a71.1, \u00a71.2, \u00a71.3 (Amendment 2026-04-26 ADR-0020) describe the operator-visible behaviour that the CLI rendering must produce \u2014 those scenarios are translated into Rust acceptance tests in `crates/overdrive-cli/tests/integration/walking_skeleton.rs` and revised in 01-04. CLI render fixture revisions (`render_job_submit.rs`, `render_alloc_status.rs`, `render_cluster_and_node.rs`) are also revised in 01-04 \u2014 this step lands the source-side rendering changes; 01-04 lands the matching test-side fixture revisions.",
+          "implementation_notes": "Do NOT hand-edit `api/openapi.yaml` \u2014 it is generated. Run `cargo openapi-gen` and check in the generated bytes; `cargo openapi-check` then asserts no drift between generator output and checked-in YAML. Per memory `feedback_no_user_install_instructions`, do not surface install hints if `cargo openapi-gen` is missing \u2014 just run it. The label set printed by `render::job_submit` (per `upstream-changes.md` \u00a77 `render_job_submit.rs` enumeration line 12) is: `Accepted.`, `Job ID:`, `Intent key:`, `Spec digest:`, `Outcome:`, `Endpoint:`, `Next:`. The walking-skeleton scenarios in `distill/test-scenarios.md` \u00a71.1, \u00a71.2, \u00a71.3 (Amendment 2026-04-26 ADR-0020) describe the operator-visible behaviour that the CLI rendering must produce \u2014 those scenarios are translated into Rust acceptance tests in `crates/overdrive-cli/tests/integration/walking_skeleton.rs` and revised in 01-04. CLI render fixture revisions (`render_job_submit.rs`, `render_alloc_status.rs`, `render_cluster_and_node.rs`) are also revised in 01-04 \u2014 this step lands the source-side rendering changes; 01-04 lands the matching test-side fixture revisions.",
           "quality_gates": [
-            "cargo xtask openapi-check passes",
+            "cargo openapi-check passes",
             "cargo nextest run -p overdrive-cli --lib passes",
             "no hand-edits to api/openapi.yaml",
             "single commit",
@@ -210,8 +210,8 @@
             "Catch-all grep audit: `grep -rln 'commit_index\\|Commit index' crates/ tests/ api/ | grep -v target/` returns zero matches. Any docs/ surface that retains `commit_index` is correctly preserved as historical record (the `docs/evolution/` files capturing the bug cascade, the `docs/feature/.../deliver/roadmap.json` files for prior features) \u2014 verify each remaining match is justified.",
             "`cargo nextest run --workspace` is GREEN (every step's gate must still hold at the end).",
             "`cargo test --doc --workspace` is GREEN.",
-            "`cargo xtask openapi-check` is GREEN.",
-            "`cargo xtask dst` is GREEN.",
+            "`cargo openapi-check` is GREEN.",
+            "`cargo dst` is GREEN.",
             "`cargo xtask mutants --diff origin/main` returns kill-rate \u2265 80% per the per-feature mutation strategy. Run with `run_in_background: true` per `.claude/rules/testing.md` \u00a7 'Mutation testing is the exception'.",
             "Commit-message shape: `docs(architecture): amend ADRs 0008/0015 + brief + flip ADR-0020 to Accepted`. Body cites ADR-0020 and `Step-ID: 01-05`."
           ],
@@ -232,8 +232,8 @@
             "grep audit zero matches outside docs/",
             "cargo nextest run --workspace passes",
             "cargo test --doc --workspace passes",
-            "cargo xtask openapi-check passes",
-            "cargo xtask dst passes",
+            "cargo openapi-check passes",
+            "cargo dst passes",
             "cargo xtask mutants --diff origin/main kill-rate >= 80%",
             "single commit",
             "ADR-0020 cited in body"

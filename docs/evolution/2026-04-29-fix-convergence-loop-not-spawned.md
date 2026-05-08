@@ -212,7 +212,7 @@ All gates from the execution log:
   characteristics, not regressions).
 - `cargo nextest run --workspace --features integration-tests --no-run`
   — typechecks on macOS.
-- `cargo xtask dst` — 14 invariants passed.
+- `cargo dst` — 14 invariants passed.
 - `cargo xtask dst-lint` — clean (no `Instant::now()` /
   `SystemTime::now()` in `reconcile`; broker-mutability adapter
   satisfies the no-`.await`-across-lock rule via guard-drop before the

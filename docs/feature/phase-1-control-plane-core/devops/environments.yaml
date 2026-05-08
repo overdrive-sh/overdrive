@@ -158,7 +158,7 @@ deployment_assumptions:
   - "No runtime deployment target external to the contributor's machine.
      The server binary is the walking skeleton; there is no production
      host, no container registry, no deployment pipeline."
-  - "`cargo xtask openapi-check` is hermetic — it reads Rust types,
+  - "`cargo openapi-check` is hermetic — it reads Rust types,
      renders YAML, diffs against api/openapi.yaml. No network, no
      external services."
   - "Acceptance tests that spawn `overdrive serve` bind to an OS-chosen

@@ -11,7 +11,7 @@ If invariants can't be expressed as `assert_always!` / `assert_eventually!` agai
 ## What ships
 
 - `overdrive-sim` crate completed with the turmoil harness
-- `cargo xtask dst` entry point
+- `cargo dst` entry point
 - Invariant catalogue: `single_leader` (stubbed topology), `intent_never_crosses_into_observation`, `snapshot_roundtrip_bit_identical`, `sim_observation_lww_converges`, `replay_equivalent_empty_workflow`, `entropy_determinism_under_reseed`
 - Each invariant name is an enum variant in `overdrive-sim::invariants`
 - Seeded reproduction: `--seed N` produces bit-identical trajectory
@@ -22,7 +22,7 @@ If invariants can't be expressed as `assert_always!` / `assert_eventually!` agai
 
 ## Demonstrable end-to-end value
 
-This is the **acceptance gate** for Phase 1. On a clean clone, `cargo xtask dst` compiles, boots a 3-node sim cluster composing real `LocalStore` with every Sim* trait, runs the invariant catalogue, prints a seed, and returns green in under 60s. A deliberate red run prints a reproduction command that reproduces the failure bit-for-bit.
+This is the **acceptance gate** for Phase 1. On a clean clone, `cargo dst` compiles, boots a 3-node sim cluster composing real `LocalStore` with every Sim* trait, runs the invariant catalogue, prints a seed, and returns green in under 60s. A deliberate red run prints a reproduction command that reproduces the failure bit-for-bit.
 
 ## Carpaccio taste tests
 
@@ -32,7 +32,7 @@ This is the **acceptance gate** for Phase 1. On a clean clone, `cargo xtask dst`
 
 ## Definition of Done (slice level)
 
-- [ ] `cargo xtask dst` runs green on a clean clone, < 60s wall-clock.
+- [ ] `cargo dst` runs green on a clean clone, < 60s wall-clock.
 - [ ] Seed printed on every run.
 - [ ] `--seed N` reproduces bit-for-bit on the same SHA and toolchain.
 - [ ] `--only <INVARIANT>` narrows and matches an enum variant.

@@ -8,8 +8,6 @@
 //! gap. Companion test to `preflight_no_delegation.rs`, which covers
 //! the both-missing case.
 
-#![cfg(target_os = "linux")]
-
 use overdrive_control_plane::cgroup_preflight::{CgroupPreflightError, run_preflight_at};
 use tempfile::TempDir;
 

@@ -1,0 +1,573 @@
+# ADR-0040 — SERVICE_MAP three-map split (SERVICE_MAP / BACKEND_MAP / MAGLEV_MAP) + HASH_OF_MAPS atomic-swap primitive
+
+## Status
+
+Accepted. 2026-05-05. Decision-makers: Morgan (proposing); user
+ratified `lgtm` against
+`docs/feature/phase-2-xdp-service-map/design/proposal-draft.md`
+(2026-05-05). Tags: phase-2, dataplane, kernel-maps, service-map,
+load-balancing.
+
+**Companion ADRs**: ADR-0041 (weighted Maglev + REVERSE_NAT shape +
+endianness lockstep), ADR-0042 (`ServiceMapHydrator` reconciler +
+`Action::DataplaneUpdateService` + `service_hydration_results`
+observation table).
+
+## Context
+
+Phase 2.2 (GH #24) fills the empty body of `Dataplane::update_service`
+that Phase 2.1's ADR-0038 substrate left as a stub. The body
+implements XDP service load balancing per `whitepaper.md` § 7
+*eBPF Dataplane / XDP — Fast Path Packet Processing* and § 15
+*Zero Downtime Deployments* (atomic backend swap).
+
+Two architectural questions need to be settled together because the
+answer to one constrains the other:
+
+1. **How does the kernel-side decompose the
+   `(VIP, port) → backend` lookup?** Three credible shapes exist
+   in the published reference set:
+   - **Cilium / Katran three-map split** — `SERVICE_MAP{(VIP, port) → service_id}` + `BACKEND_MAP{backend_id → backend_entry}` + `MAGLEV_MAP{service_id → slot_array}`. Three single-purpose maps, each with a clear read pattern (research § 2.1, § 2.2, § 6.2).
+   - **Single-map shape** — one `BPF_MAP_TYPE_SOCK_HASH` keyed by `(VIP, port)`, value is the full backend list. Small footprint at single-service scale, no atomic-swap primitive at multi-service scale.
+   - **Array-based SERVICE_MAP** — `BPF_MAP_TYPE_ARRAY` of fixed size, indexed by hash of `(VIP, port)`. Lock-free; fixed size constraint binds operator and forces collision handling.
+
+2. **How is the backend set rotated atomically when a service's
+   backends change?** Three credible mechanisms:
+   - **`BPF_MAP_TYPE_HASH_OF_MAPS`** — outer map's value is an inner-map fd; rotating the inner-map fd is one atomic syscall (research § 3). The kernel swaps the entire inner map under the lookup hot path.
+   - **In-place mutation of a fixed-size map** — write new entries; no atomic primitive; requires reader-side reconciliation.
+   - **Two-map double-buffer** — userspace toggles a generation counter; kernel reads the indicated generation. Requires per-packet generation read.
+
+These questions extend the Phase 2.1 substrate (ADR-0038):
+
+- The kernel side compiles against `bpfel-unknown-none` with
+  `#![no_std]` and `aya-ebpf` only.
+- The userspace loader compiles against the host triple with `aya`.
+- `Dataplane` port trait surface is the only consumer-facing
+  contract; no `aya` import outside `overdrive-dataplane`.
+
+A third question — how the kernel-side reads its key tuple from
+the wire — falls naturally to ADR-0041's endianness section.
+
+## Decision
+
+### 1. Adopt the Cilium / Katran three-map split
+
+The kernel-side hot path uses three maps, each with a single
+typed key shape:
+
+| Map | Type | Key | Value | Purpose |
+|---|---|---|---|---|
+| `SERVICE_MAP` | `BPF_MAP_TYPE_HASH_OF_MAPS` (outer) | `(ServiceVip, u16 port)` | inner-map fd | `(VIP, port)`-to-inner-map indirection. Outer map atomically rotates its value (the inner-map fd) on backend-set change. Inner = `BPF_MAP_TYPE_HASH` keyed by `BackendId` → `BackendEntry`, `max_entries = 256`. |
+| `BACKEND_MAP` | `BPF_MAP_TYPE_HASH` | `BackendId` (u32) | `BackendEntry { ipv4, port, weight, healthy, _pad }` | Single global; backends shared across services. `max_entries = 65_536`. |
+| `MAGLEV_MAP` | `BPF_MAP_TYPE_HASH_OF_MAPS` (outer) | `ServiceId` (u64) | inner-map fd | Inner = `BPF_MAP_TYPE_ARRAY` of `BackendId` slots, size = `MaglevTableSize` (default 16_381). One inner per service. |
+
+The trait surface that drives this layout is locked at:
+
+```rust
+async fn update_service(
+    &self,
+    service_id: ServiceId,
+    vip: ServiceVip,
+    backends: Vec<Backend>,
+) -> Result<(), DataplaneError>;
+```
+
+(Q-Sig=A — three explicit args at the trait surface; no aggregate
+unpack.)
+
+**Drift correction.** The proposal-draft initially framed
+"`ServiceId` keys all three maps." That conflated trait surface with
+kernel-map shape; the kernel sees wire packets and must look up by
+`(VIP, port)`. Corrected:
+
+- `SERVICE_MAP` outer key = `(ServiceVip, u16 port)` — wire-shape
+  driven.
+- `MAGLEV_MAP` outer key = `ServiceId` — control-plane-shape
+  driven.
+- `BACKEND_MAP` key = `BackendId` — flat-namespace driven.
+
+Three keys, typed-distinct, traced end-to-end through trait → shim
+→ loader → BPF maps.
+
+### 2. Atomic swap via HASH_OF_MAPS outer-map fd replacement
+
+Both `SERVICE_MAP` and `MAGLEV_MAP` are `BPF_MAP_TYPE_HASH_OF_MAPS`
+outers. On a backend-set change:
+
+1. Userspace builds the new inner map (HASH or ARRAY, depending).
+2. Userspace populates it with the new backend set (HASH) or
+   recomputes the Maglev permutation table (ARRAY).
+3. Userspace replaces the outer-map's value (an fd) with the new
+   inner-map fd. This is **one atomic kernel syscall**.
+4. The kernel's reference count on the old inner fd drops; in-flight
+   readers complete against the old inner; new readers see the new
+   inner.
+
+The userspace mechanism lives in
+`crates/overdrive-dataplane/src/swap.rs`. The atomic-swap primitive
+is the architectural foundation for ASR-2.2-01 (zero-drop atomic
+swap, ≤ 0 packets dropped attributable to the swap boundary over a
+30-second swap-storm window).
+
+### 3. Checksum helper choice — kernel helpers (Q1=A)
+
+The forward-path packet rewrite uses `bpf_l3_csum_replace` and
+`bpf_l4_csum_replace` from the kernel-helper set, not the
+`csum_diff` family from aya. Rationale: kernel helpers are
+verifier-clean across the entire kernel matrix without exposing
+additional verifier constraints; the `csum_diff` family adds wrapper
+indirection that costs verifier-budget without functional gain
+(research § 4.1, § 4.2). The choice keeps DROP_COUNTER off the
+checksum hot path, preserving Tier 4 verifier-budget headroom.
+
+### 4. Sanity-prologue strategy — shared `#[inline(always)]` Rust helper (Q3=C)
+
+Pre-SERVICE_MAP packet-shape sanity checks (Slice 06) live in
+`crates/overdrive-bpf/src/shared/sanity.rs` as
+`#[inline(always)]` functions. The functions get inlined at every
+call site in `xdp_service_map.rs` and (future) other XDP / TC
+programs. This is the canonical aya-rs pattern (research § 8.2)
+and matches Cilium's structural shape after their initial
+duplication-then-tail-call iteration converged on inlining.
+
+Rejected:
+- **Inline duplication** — source drifts asymmetrically across
+  programs (research § 8.2 documents the failure shape in
+  Cilium's history).
+- **`bpf_tail_call` shared helper** — verifier-budget-equivalent
+  reasoning *plus* indirection on every packet; no upside.
+
+### 5. HASH_OF_MAPS inner-map size — fixed 256 (Q5=A)
+
+Inner-map `max_entries = 256`, compiled in. Well above any
+realistic per-service backend count for Phase 2 (research § 3.3);
+keeps the BPF map declaration syntax simple and verifier-friendly
+(`#[map(name = "...", max_entries = 256)]`). Operator-tunability
+for the algorithmic shape composes via `MaglevTableSize` (ADR-0041);
+the inner HASH_OF_MAPS size is a structural constant.
+
+### 6. `DropClass` slot count locked at 6 (Q7=B)
+
+The `DROP_COUNTER` `BPF_MAP_TYPE_PERCPU_ARRAY` is indexed by
+`DropClass as u32` with six locked variants. The newtype lives at
+`crates/overdrive-core/src/dataplane/drop_class.rs`:
+
+```rust
+/// Drop classification for the `DROP_COUNTER` PERCPU_ARRAY.
+/// `#[repr(u32)]` makes `as u32` a stable kernel-side index
+/// across Rust toolchains (the verified pattern Cilium and
+/// Katran use).
+///
+/// Variant ordering and discriminants are STABLE — additions are
+/// minor-version (per ADR-0037 K8s-Condition convention);
+/// reordering or removal is a major-version break that requires
+/// a new ADR.
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DropClass {
+    MalformedHeader   = 0,
+    UnknownVip        = 1,
+    NoHealthyBackend  = 2,
+    SanityPrologue    = 3,
+    ReverseNatMiss    = 4,
+    OversizePacket    = 5,
+}
+```
+
+`FromStr` parses kebab-case (`malformed-header` →
+`MalformedHeader`); `Display` emits kebab-case; the proptest
+harness in `crates/overdrive-core/tests/drop_class.rs` exhausts
+all six variants and asserts `Display`/`FromStr` round-trip
+bit-equivalent — the project STRICT-newtype discipline per
+`development.md` § Newtype completeness.
+
+Six slots cover every drop the XDP + TC programs in Phase 2.2
+actually emit. Adding later is structurally compatible (PERCPU_ARRAY
+index space is `u32`; new slots stay zero on every CPU until next
+BPF re-load); reducing later is structurally compatible (unused
+slots stay zero). The `#[repr(u32)]` annotation on the enum is
+what makes `as u32` a stable index across Rust toolchains.
+
+### 7. `cargo xtask perf-baseline-update` helper deferred (Q4=B)
+
+Slice 07 ships its veristat / xdp-bench baselines via manual
+`git mv`. The helper's surface area (4–5 args, file path
+canonicalisation, baseline-rotation atomicity) is bigger than the
+first three baseline-update commits will exercise; re-evaluate
+after #29 / #152 lands.
+
+## Alternatives Considered
+
+### A — Single-map SOCK_HASH
+
+A single `BPF_MAP_TYPE_SOCK_HASH` keyed by `(VIP, port)`, value =
+the full backend list. **Rejected**: no atomic-swap primitive at
+multi-service scale; updating a single key writes new bytes
+in-place, exposing torn-read windows during long backend lists. The
+zero-drop ASR (ASR-2.2-01) is structurally unachievable with this
+shape; would require user-space reader-side reconciliation that the
+XDP fast path cannot afford.
+
+### B — Array-based SERVICE_MAP
+
+A `BPF_MAP_TYPE_ARRAY` of fixed size, indexed by hash of
+`(VIP, port)`. **Rejected**: fixed size at compile time forces
+operators to declare a maximum service count up-front. Hash
+collisions force a probing strategy that adds verifier-budget cost
+on every packet. The HASH_OF_MAPS shape grows naturally; the array
+shape cannot.
+
+### C — `bpf_tail_call` for sanity prologue
+
+Tail-call to a shared "prologue" program before SERVICE_MAP lookup.
+**Rejected** for Q3: verifier-budget-equivalent reasoning *plus*
+indirection on every packet; no upside relative to `#[inline(always)]`
+on a Rust helper. Cilium's history (research § 8.2) converged on
+inlining for the same reason.
+
+### D — Two-map double-buffer
+
+Two SERVICE_MAPs with a userspace-toggled generation counter. The
+kernel reads a third map for the current generation, then looks up
+in the indicated SERVICE_MAP. **Rejected**: per-packet additional
+map lookup (the generation read) costs verifier budget and an
+extra cache line; HASH_OF_MAPS achieves the same property in one
+syscall with no per-packet cost.
+
+## Consequences
+
+**Positive:**
+
+- ASR-2.2-01 (zero-drop atomic swap) becomes structurally achievable
+  via HASH_OF_MAPS outer-fd replacement.
+- Three single-purpose maps map cleanly to typed Rust handles in
+  `overdrive-dataplane::maps/*` — no `BPF_MAP_TYPE_*` choice
+  visible at call sites (research recommendation #5; matches
+  "make invalid states unrepresentable" from
+  `development.md` § Type-driven design).
+- Verifier-budget delta is budgeted ≤ 20 % per PR (ASR-2.2-03);
+  kernel-helper checksum choice + `#[inline(always)]` sanity-helper
+  shape stay inside this envelope.
+- Six drop-class slots cover Phase 2.2's drop surface without
+  reserving unused index space.
+
+**Negative:**
+
+- Locks the kernel-floor at 5.10 LTS (HASH_OF_MAPS is stable from
+  4.18+; Phase 2.2's Tier 3 floor of 5.10 is well above). Future
+  Phase 2 features that want kernel features ≥ 5.18 (XDP-egress in
+  particular) need their own kernel-floor uplift.
+- Userspace permutation generation is one-time-per-change cost
+  (DISCUSS Risk #5 acknowledged); production rate is
+  ops-per-minute scale.
+- Three maps in the kernel-side BPF object grow the per-program
+  verifier baseline; mitigated by the `veristat` baseline gate.
+
+**Operational implications:**
+
+- `cargo xtask integration-test vm` continues to be available but
+  not exercised by Phase 2.2 (single-kernel in-host per
+  Constraint 1).
+- Lima image already carries `bpf-linker` from Phase 2.1 (#23
+  ADR-0038); no additional infra change.
+- `cargo xtask bpf-build` regenerates the ELF; `cargo xtask
+  verifier-regress` (Slice 07) baselines it; CI gates kick in
+  per-PR for any change to `crates/overdrive-bpf/**`.
+
+## References
+
+- `docs/feature/phase-2-xdp-service-map/design/architecture.md` § 5,
+  § 10, § 14.
+- `docs/feature/phase-2-xdp-service-map/design/wave-decisions.md`
+  D1, D3, D5.
+- `docs/research/networking/xdp-service-load-balancing-research.md`
+  § 2.1, § 2.2, § 3, § 3.3, § 4.1, § 4.2, § 6.2, § 8.2.
+- `docs/whitepaper.md` § 7 *eBPF Dataplane*, § 15 *Zero Downtime
+  Deployments*, § 19 *Security Model*.
+- ADR-0038 (eBPF crate layout + build pipeline) — substrate.
+- ADR-0041 (weighted Maglev + REVERSE_NAT) — companion.
+- ADR-0042 (`ServiceMapHydrator`) — companion.
+
+---
+
+## Revision 2026-05-07 — Q3 amendment (sanity prologue is ingress-only)
+
+### Status
+
+Amendment. 2026-05-07. Decision-maker: Morgan. Tags: phase-2,
+dataplane, sanity-prologue, tc-egress, xdp-ingress, skb-linearisation,
+falsification-followup.
+
+### Why this amendment
+
+Decision 4 (Q3=C) above scoped the sanity prologue as a shared
+`#[inline(always)]` Rust helper invoked from BOTH `xdp_service_map_lookup`
+(ingress) AND `tc_reverse_nat` (egress). That decision was correct
+for ingress and wrong for egress. The empirical evidence trail is
+captured in ADR-0044 § Falsification (2026-05-07); the short summary:
+
+S-2.2-17 (`real_tcp_connection_completes_through_vip_with_payload_echo`)
+shows length-0 TCP segments passing through the dataplane and
+length-N segments dropping. A Lima-side bpftrace + netstat + pcap
+diagnostic on 2026-05-07 isolated the drop to
+`SKB_DROP_REASON_TC_EGRESS = 51` from `dev_queue_xmit` on `lb_a`.
+The only path in `tc_reverse_nat` that returns `TC_ACT_SHOT` is
+`Verdict::Drop` from the sanity prologue — specifically the
+`claimed_pkt_len > packet_len` check at
+`crates/overdrive-bpf/src/programs/sanity.rs:259`.
+
+The kernel-side rationale: when the kernel forwards an skb to TC
+egress, the IPv4 `total_length` field includes the full L4 payload,
+but the skb's linear-buffer length (`data_end - data` in BPF
+context) may not. skb linearisation, GSO segmentation, and
+forwarded-packet metadata can leave the linear region shorter than
+what `total_length` advertises. Length-0 segments pass because
+`total_length == header_bytes`. Length-N segments fail check (3)
+because `claimed_pkt_len = ipv4_offset + total_len` exceeds
+`packet_len` for forwarded skbs.
+
+### Amendment
+
+Q3 is amended to scope the sanity prologue helper to **XDP ingress
+only** (`xdp_service_map_lookup`). The TC egress program
+(`tc_reverse_nat`) MUST NOT call the prologue.
+
+The egress program does not need its own packet-shape validation:
+the ingress program is the enforcement point, and any packet
+reaching TC egress on `lb_a` has already passed XDP ingress sanity
+checks on `lb_veth_a`. Re-running the prologue at egress is not
+defence-in-depth — it is a check whose preconditions (linear-buffer
+length matches IPv4 `total_length`) the kernel does not preserve
+through forwarding, so the check fires spuriously on every length-N
+forwarded segment.
+
+### Concretely
+
+The decision the original Q3=C locked has TWO components:
+
+1. **Helper shape — shared `#[inline(always)]` Rust function.** This
+   component stands. Ingress callers continue to import the helper
+   from `crates/overdrive-bpf/src/shared/sanity.rs`.
+2. **Call sites — ingress AND egress.** This component is amended.
+   The egress call site is removed.
+
+The actual code change (removing the call from `tc_reverse_nat`) is
+the crafter's responsibility in a follow-up dispatch; this ADR
+captures the DECISION, not the implementation.
+
+### Consequences of the amendment
+
+**Positive:**
+
+- S-2.2-17 closes structurally without a conntrack table, without
+  NOTRACK, without changing the Phase 2.2 architecture envelope.
+  The prologue remains a load-bearing ingress check; the egress
+  path stays as it was before Slice 06-02 landed.
+- Phase 2.16 (the proposed dataplane-owned conntrack feature) is
+  retracted. ADR-0044 is marked SUPERSEDED.
+- The Tier 4 verifier-budget envelope improves: removing one helper
+  invocation from `tc_reverse_nat` is a small but measurable
+  reduction.
+
+**Negative:**
+
+- The egress program no longer carries a structural sanity check.
+  Acceptable: XDP ingress is the enforcement point, and forwarded
+  skbs at TC egress are kernel-vouched for in a way the prologue's
+  `claimed_pkt_len > packet_len` check is not equipped to validate.
+
+**Operational:**
+
+- Slice 06-02's existing scope (the prologue helper itself) stays
+  intact. Only the Slice 06-04 attempt to reuse the prologue at TC
+  egress is undone.
+- The in-flight 06-04 working-tree files (NOTRACK bridge variant,
+  IptablesInstall action, etc.) become moot in their conntrack-
+  framed shape. The crafter handling 06-04 in the follow-up
+  dispatch decides whether to land the prologue-removal-from-egress
+  fix as 06-04 or as a renumbered slice.
+
+### Cross-references
+
+- ADR-0044 (`adr-0044-xdp-conntrack-percpu-lru.md`) — SUPERSEDED;
+  carries the falsification record at top of file.
+- `docs/research/dataplane/length-n-tcp-drop-veth-xdp-tc-reverse-nat-research.md`
+  § Update 2026-05-07 — RECOMMENDATION FALSIFIED.
+- `docs/research/dataplane/cilium-bpf-fib-lookup-l2-mac-rewrite-comprehensive-research.md`
+  § Update 2026-05-07 — primary findings stand; downstream
+  conntrack inference falsified.
+- `crates/overdrive-bpf/src/programs/sanity.rs:259` — the
+  `claimed_pkt_len > packet_len` check that fires spuriously on
+  forwarded skbs.
+- CLAUDE.md § "Documentation" / `.claude/rules/development.md`
+  § "No aspirational docs" — this amendment captures the decision;
+  the code change is the crafter's responsibility, not this
+  ADR's.
+
+### Changelog (Revision 2026-05-07)
+
+| Date | Change |
+|---|---|
+| 2026-05-07 | Q3 amendment: sanity prologue scope narrowed from {ingress, egress} to {ingress only}. Empirical falsification trail in ADR-0044. — Morgan. |
+
+---
+
+## Revision 2026-05-07 (later) — Q2 reopened (kernel IP-forward + TCX-egress retired)
+
+### Status
+
+Amendment. 2026-05-07. Decision-maker: Morgan. Tags: phase-2,
+dataplane, q2-reopen, bpf-redirect-neigh, supersession-pointer,
+falsification-followup-2.
+
+**GitHub tracking issue**: #159 — *[2.x] Replace IP-forward +
+TCX-egress with bpf_redirect_neigh datapath*. Production work for
+this amendment lives under that issue.
+
+### Why this amendment
+
+The Q3 amendment earlier today scoped the sanity prologue to XDP
+ingress only after probes 1–4 falsified the egress-side prologue
+invocation. Continued investigation through probes 5–7 (recorded in
+`docs/analysis/e1-bpftrace-results.md`) extended the falsification
+to the *entire TCX-egress reverse-NAT shape* locked by Q2=A above.
+
+The short summary (full causal chain in ADR-0045 § "The empirical
+chain that falsified the locked datapath"):
+
+S-2.2-17 still drops length-N TCP segments at
+`__dev_queue_xmit → qdisc_pkt_len_init →
+kfree_skb_reason(SKB_DROP_REASON_TC_EGRESS = 51)` on the
+client-facing veth egress, *before* the TCX dispatcher invokes
+`tc_reverse_nat`. Probe 5's `kernel.bpf_stats_enabled` polling
+shows the loaded program has `run_cnt = 16` during the test window;
+probe 6's `pwru` per-skb trace shows the *dropped* skb hits zero
+TC-classifier dispatchers — the program's invocations are firing on
+ARP frames and other unrelated traffic, not on the data segments.
+Probe 7's drop-site skb metadata identifies the unique signature:
+`data_len=20, nr_frags=1` paged skbs with stale CHECKSUM_PARTIAL
+metadata (`csum_start=288, csum_offset=16, ip_summed=0`) left over
+from the kernel's `pskb_expand_head + skb_checksum_help` sequence
+during IP-forwarding. The kernel's egress pre-classifier rejects
+these skbs before TCX runs.
+
+This is a structural defect of the *locked architecture* (kernel
+IP-forwarder in the request data path, TCX-egress reverse-NAT on
+the response path), not of `tc_reverse_nat`'s body. Test-fixture
+mitigations (`ethtool -K $iface tso off gso off gro off`) were
+falsified during the probe chain — the helper already disabled
+offloads; the paged-skb shape comes from veth-peer delivery
+semantics, not iface offload settings.
+
+There is no in-program fix. The kernel mechanism that produces the
+bug must be removed from the path entirely.
+
+### Amendment
+
+**Q2 is reopened.** The TC-egress reverse-NAT shape locked by Q2=A
+is empirically falsified for the data-bearing skb path under
+Linux 6.8 (and structurally on any kernel where `pskb_expand_head`
++ `skb_checksum_help` interact with paged skbs the same way — the
+mechanism is not specific to one LTS).
+
+**The resolution moves to a new ADR**: ADR-0045 (`adr-0045-bpf-
+redirect-neigh-datapath.md`) locks the post-pivot architecture
+— XDP-ingress L3+L2 rewrite + `bpf_fib_lookup` +
+`bpf_redirect_neigh`, on both the client-facing veth (request path)
+and the backend-facing veth (response path). The kernel IP-forwarder
+is removed from both directions; `tc_reverse_nat` is retired as a
+TC program; its reverse-NAT logic moves to a new XDP program
+(`xdp_reverse_nat_lookup`) attached on the backend-facing veth
+ingress. See ADR-0045 for the full decision and alternatives.
+
+### What this amendment supersedes vs preserves in Q1–Q7 above
+
+| Original decision | Status |
+|---|---|
+| Q1=A (kernel-helper checksum choice — `bpf_l3_csum_replace`, `bpf_l4_csum_replace`) | **Preserved.** The L3/L4 incremental checksum update runs on both post-pivot XDP programs identically. |
+| Q2=A (TC-egress reverse-NAT, kernel IP-forward in the data path) | **Superseded by ADR-0045.** |
+| Q3=C (sanity prologue helper, ingress-only after the earlier 2026-05-07 amendment) | **Preserved.** Both post-pivot programs are XDP-ingress, so the ingress-only scope is structurally satisfied. |
+| Decision 1 (three-map split: SERVICE_MAP / BACKEND_MAP / MAGLEV_MAP) | **Preserved in full.** Map shapes, key types, and inner-map structure are direction-agnostic. |
+| Decision 2 (atomic swap via HASH_OF_MAPS outer-map fd replacement) | **Preserved in full.** The atomic-swap primitive is independent of how packets traverse the dataplane. |
+| Q5=A (HASH_OF_MAPS inner-map size 256) | **Preserved.** |
+| Q7=B (DROP_COUNTER 6 slots) | **Preserved.** No new `DropClass` variant required by the pivot. |
+
+The original Q2=A reasoning above is **not deleted** — it remains
+historically accurate as the decision made on the evidence
+available at the time. The supersession is recorded by this
+amendment, not by rewriting the original decision body.
+
+### Concretely
+
+The architectural decisions that were made under Q2=A's evidence
+chain — TC-egress attach for `tc_reverse_nat`, kernel IP-forwarder
+in the request data path, `tc_reverse_nat` body reading and
+rewriting REVERSE_NAT_MAP entries on response — see ADR-0045 § 1–3
+for the post-pivot shape. The reverse-NAT *logic* is preserved
+verbatim; only the *attach layer* moves from TCX-egress on the
+client-facing veth to XDP-ingress on the backend-facing veth.
+
+The actual code changes (deleting `tc_reverse_nat.rs`, adding
+`xdp_reverse_nat.rs`, extending `xdp_service_map.rs` with FIB +
+`bpf_redirect_neigh`, retiring the loader's TC-link plumbing) are
+the crafter's responsibility under GH #159 — this amendment
+captures the DECISION that the change is needed; the new ADR
+captures the SHAPE; the crafter implements.
+
+### Consequences of the Q2 reopen
+
+**Positive:**
+
+- S-2.2-17 closes structurally without further test-fixture
+  experimentation. The kernel mechanism that produces the bug is
+  removed from the path entirely.
+- The dataplane aligns with the published reference (Cilium L4LB
+  shape) on stable kernels, removing the project's exposure to
+  "we are the only ones doing it this way."
+- Future kernel-version sensitivity is reduced — `bpf_fib_lookup` +
+  `bpf_redirect_neigh` semantics are stable from 5.10 onwards (the
+  project's floor); the pre-pivot path's failure mode was sensitive
+  to kernel-version-specific paged-skb handling.
+
+**Negative:**
+
+- Slice 05's TC-egress reverse-NAT work is partially obsoleted (the
+  REVERSE_NAT_MAP shape and endianness lockstep contract from
+  ADR-0041 are preserved; the TC-egress attach + `tc_reverse_nat`
+  body are retired).
+- Slice 06-05's veristat baseline is reset to the new program
+  shape; trend tracking restarts. A single-PR cost.
+- One-time engineering cost for the new XDP program, the extension
+  of `xdp_service_map_lookup`, and loader changes. Bounded; tracked
+  under #159.
+
+**Operational:**
+
+- ADR-0040 stays the SSOT for the SERVICE_MAP / BACKEND_MAP /
+  MAGLEV_MAP / HASH_OF_MAPS shape decisions (Decisions 1, 2, Q5, Q7).
+- ADR-0045 is the SSOT for the post-pivot dataplane shape
+  (request-path forwarding, response-path reverse-NAT, FIB lookup,
+  `bpf_redirect_neigh` semantics).
+- ADR-0041 (REVERSE_NAT_MAP shape, endianness lockstep) is
+  unaffected.
+- ADR-0042 (`ServiceMapHydrator`) is unaffected.
+- ADR-0043 (3-iface test topology) is unaffected.
+
+### Cross-references
+
+- ADR-0045 (`adr-0045-bpf-redirect-neigh-datapath.md`) — the
+  resolution ADR for the reopened Q2.
+- `docs/analysis/e1-bpftrace-results.md` probes 1–7 — empirical
+  evidence trail.
+- GH #159 — production work under this amendment.
+- ADR-0044 (`adr-0044-xdp-conntrack-percpu-lru.md`) — already
+  marked SUPERSEDED by the earlier 2026-05-07 amendment; this
+  Q2 reopen is independent and consistent.
+
+### Changelog (Revision 2026-05-07, later)
+
+| Date | Change |
+|---|---|
+| 2026-05-07 (later) | Q2 reopened: TC-egress reverse-NAT + kernel IP-forward in the data path superseded by ADR-0045's `bpf_redirect_neigh` datapath. Empirical falsification chain in `docs/analysis/e1-bpftrace-results.md` probes 1–7. Tracked under GH #159. — Morgan. |

@@ -35,15 +35,19 @@
 
 use std::collections::BTreeMap;
 use std::path::Path;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{IntentKey, Job, Node};
 use overdrive_core::id::{JobId, NodeId};
+#[cfg(any(test, feature = "integration-tests"))]
+use overdrive_core::reconciler::ServiceMapHydrator;
 use overdrive_core::reconciler::{
     Action, AnyReconciler, AnyReconcilerView, AnyState, JobLifecycle, JobLifecycleState,
-    JobLifecycleView, Reconciler, ReconcilerName, TargetResource, TickContext,
+    JobLifecycleView, Reconciler, ReconcilerName, ServiceMapHydratorState, ServiceMapHydratorView,
+    TargetResource, TickContext,
 };
 use overdrive_core::traits::intent_store::IntentStore;
 use parking_lot::Mutex;
@@ -51,8 +55,8 @@ use parking_lot::Mutex;
 use crate::AppState;
 use crate::action_shim;
 use crate::error::ControlPlaneError;
-use crate::eval_broker::{Evaluation, EvaluationBroker};
 use crate::view_store::{ViewStore, ViewStoreExt};
+use overdrive_core::eval_broker::{Evaluation, EvaluationBroker};
 
 /// Per-reconciler-kind in-memory view map. Mirrors the `AnyReconciler`
 /// enum's variant set so the runtime can dispatch typed `View` reads
@@ -72,6 +76,10 @@ enum AnyViewMap {
     /// `JobLifecycle` carries `View = JobLifecycleView`; the map
     /// holds per-target persisted views.
     JobLifecycle(BTreeMap<TargetResource, JobLifecycleView>),
+    /// `ServiceMapHydrator` carries `View = ServiceMapHydratorView`;
+    /// the map holds per-target persisted views per ADR-0035 §5.
+    /// Phase 2 (Slice 08; ASR-2.2-04).
+    ServiceMapHydrator(BTreeMap<TargetResource, ServiceMapHydratorView>),
 }
 
 /// Registry entry — pairs an `AnyReconciler` with its typed in-memory
@@ -231,6 +239,16 @@ impl ReconcilerRuntime {
                     })?;
                 AnyViewMap::JobLifecycle(loaded)
             }
+            AnyReconciler::ServiceMapHydrator(_) => {
+                let loaded: BTreeMap<TargetResource, ServiceMapHydratorView> =
+                    self.view_store.bulk_load(static_name).await.map_err(|e| {
+                        ControlPlaneError::from(crate::error::ViewStoreBootError::BulkLoad {
+                            reconciler: name.clone(),
+                            source: e,
+                        })
+                    })?;
+                AnyViewMap::ServiceMapHydrator(loaded)
+            }
         };
 
         // Step 3 — install the registry entry.
@@ -293,7 +311,7 @@ impl ReconcilerRuntime {
         };
         match &*entry.views.lock() {
             AnyViewMap::JobLifecycle(map) => map.get(target).cloned().unwrap_or_default(),
-            AnyViewMap::Unit => JobLifecycleView::default(),
+            AnyViewMap::Unit | AnyViewMap::ServiceMapHydrator(_) => JobLifecycleView::default(),
         }
     }
 
@@ -314,6 +332,9 @@ impl ReconcilerRuntime {
             AnyViewMap::Unit => AnyReconcilerView::Unit,
             AnyViewMap::JobLifecycle(map) => {
                 AnyReconcilerView::JobLifecycle(map.get(target).cloned().unwrap_or_default())
+            }
+            AnyViewMap::ServiceMapHydrator(map) => {
+                AnyReconcilerView::ServiceMapHydrator(map.get(target).cloned().unwrap_or_default())
             }
         })
     }
@@ -387,7 +408,9 @@ impl ReconcilerRuntime {
                         AnyViewMap::JobLifecycle(map) => {
                             map.get(target).cloned().unwrap_or_default()
                         }
-                        AnyViewMap::Unit => JobLifecycleView::default(),
+                        AnyViewMap::Unit | AnyViewMap::ServiceMapHydrator(_) => {
+                            JobLifecycleView::default()
+                        }
                     }
                 };
                 if current == view {
@@ -416,6 +439,44 @@ impl ReconcilerRuntime {
                 {
                     let mut guard = entry.views.lock();
                     if let AnyViewMap::JobLifecycle(map) = &mut *guard {
+                        map.insert(target.clone(), view);
+                    }
+                }
+                Ok(())
+            }
+            AnyReconcilerView::ServiceMapHydrator(view) => {
+                // Eq-diff skip — same shape as JobLifecycle arm above.
+                let current = {
+                    let guard = entry.views.lock();
+                    match &*guard {
+                        AnyViewMap::ServiceMapHydrator(map) => {
+                            map.get(target).cloned().unwrap_or_default()
+                        }
+                        AnyViewMap::Unit | AnyViewMap::JobLifecycle(_) => {
+                            ServiceMapHydratorView::default()
+                        }
+                    }
+                };
+                if current == view {
+                    return Ok(());
+                }
+
+                // STEP 7 — durable write-through with fsync.
+                self.view_store
+                    .write_through(static_name, target, &view)
+                    .await
+                    .map_err(|e| {
+                        ControlPlaneError::internal(
+                            format!(
+                                "ReconcilerRuntime::persist_view({name}, {target}): write_through failed"
+                            ),
+                            e,
+                        )
+                    })?;
+                // STEP 8 — in-memory update AFTER fsync OK.
+                {
+                    let mut guard = entry.views.lock();
+                    if let AnyViewMap::ServiceMapHydrator(map) = &mut *guard {
                         map.insert(target.clone(), view);
                     }
                 }
@@ -469,7 +530,7 @@ impl ReconcilerRuntime {
         let entry = self.reconcilers.get(name)?;
         match &*entry.views.lock() {
             AnyViewMap::JobLifecycle(map) => Some(map.clone()),
-            AnyViewMap::Unit => None,
+            AnyViewMap::Unit | AnyViewMap::ServiceMapHydrator(_) => None,
         }
     }
 
@@ -524,6 +585,57 @@ impl ReconcilerRuntime {
             map.remove(target);
         }
     }
+
+    /// Snapshot of the in-memory `ServiceMapHydratorView` map for `name`.
+    /// Returns `None` when the reconciler is not registered or is not
+    /// the `ServiceMapHydrator` variant. **Test-only.**
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "integration-tests"))]
+    pub fn loaded_service_map_hydrator_views_for_test(
+        &self,
+        name: &ReconcilerName,
+    ) -> Option<BTreeMap<TargetResource, ServiceMapHydratorView>> {
+        let entry = self.reconcilers.get(name)?;
+        match &*entry.views.lock() {
+            AnyViewMap::ServiceMapHydrator(map) => Some(map.clone()),
+            AnyViewMap::Unit | AnyViewMap::JobLifecycle(_) => None,
+        }
+    }
+
+    /// Drive the runtime's persist-view path directly with a typed
+    /// `ServiceMapHydratorView`. Mirrors
+    /// [`Self::apply_next_view_for_test`] for the ServiceMapHydrator
+    /// variant. **Test-only.**
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "integration-tests"))]
+    pub async fn apply_next_service_map_hydrator_view_for_test(
+        &self,
+        name: &ReconcilerName,
+        target: &TargetResource,
+        next: ServiceMapHydratorView,
+    ) -> Result<(), ControlPlaneError> {
+        self.persist_view(name, target, AnyReconcilerView::ServiceMapHydrator(next)).await
+    }
+
+    /// Seed the in-memory view for `(service-map-hydrator, target)`
+    /// directly, bypassing the `ViewStore`. Mirrors
+    /// [`Self::seed_job_lifecycle_view_for_test`] for the
+    /// ServiceMapHydrator variant. **Test-only.**
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "integration-tests"))]
+    pub fn seed_service_map_hydrator_view_for_test(
+        &self,
+        target: &TargetResource,
+        view: ServiceMapHydratorView,
+    ) {
+        let Some(entry) = self.reconcilers.get(&service_map_hydrator_canonical_name()) else {
+            return;
+        };
+        let mut guard = entry.views.lock();
+        if let AnyViewMap::ServiceMapHydrator(map) = &mut *guard {
+            map.insert(target.clone(), view);
+        }
+    }
 }
 
 /// Build the canonical [`ReconcilerName`] for the [`JobLifecycle`]
@@ -541,6 +653,13 @@ impl ReconcilerRuntime {
 fn job_lifecycle_canonical_name() -> ReconcilerName {
     ReconcilerName::new(<JobLifecycle as Reconciler>::NAME)
         .expect("JobLifecycle::NAME is a valid ReconcilerName by construction")
+}
+
+#[cfg(any(test, feature = "integration-tests"))]
+#[allow(clippy::expect_used)]
+fn service_map_hydrator_canonical_name() -> ReconcilerName {
+    ReconcilerName::new(<ServiceMapHydrator as Reconciler>::NAME)
+        .expect("ServiceMapHydrator::NAME is a valid ReconcilerName by construction")
 }
 
 // ---------------------------------------------------------------------------
@@ -571,9 +690,9 @@ pub const DEFAULT_TICK_CADENCE: Duration = Duration::from_millis(100);
 /// view-persist path is load-bearing per ADR-0035 §5 step 7→8.
 ///
 /// Spawned by [`crate::run_server_with_obs_and_driver`] as a tokio
-/// task that drains the [`crate::eval_broker::EvaluationBroker`] each
+/// task that drains the [`overdrive_core::eval_broker::EvaluationBroker`] each
 /// tick (`config.tick_cadence`, default [`DEFAULT_TICK_CADENCE`]) and
-/// dispatches one call per pending [`crate::eval_broker::Evaluation`].
+/// dispatches one call per pending [`overdrive_core::eval_broker::Evaluation`].
 /// Each drained Evaluation runs exactly one reconciler — the one it
 /// names. Tests call this directly per-tick to drive the tick loop
 /// deterministically without booting the full server.
@@ -686,8 +805,10 @@ pub async fn run_convergence_tick(
         actions,
         state.driver.as_ref(),
         state.obs.as_ref(),
+        state.dataplane.as_ref(),
         state.lifecycle_events.as_ref(),
         &tick,
+        &state.node_id,
     )
     .await
     .map_err(ConvergenceError::Shim)?;
@@ -750,7 +871,13 @@ pub async fn run_convergence_tick(
 /// backoff would silently drop the eval and leave the runtime stuck.
 fn view_has_backoff_pending(next_view: &AnyReconcilerView) -> bool {
     match next_view {
-        AnyReconcilerView::Unit => false,
+        // Both `Unit` (NoopHeartbeat) and `ServiceMapHydrator` carry no
+        // backoff-pending signal at this layer. The hydrator's per-
+        // service typed `RetryMemory` is not wired into the
+        // convergence-tick loop today; when the production hydrate path
+        // lands (GH #160), the corresponding "any service has retry
+        // memory recorded" predicate ships alongside.
+        AnyReconcilerView::Unit | AnyReconcilerView::ServiceMapHydrator(_) => false,
         AnyReconcilerView::JobLifecycle(view) => {
             view.last_failure_seen_at.iter().any(|(alloc, _)| {
                 view.restart_counts.get(alloc).copied().unwrap_or(0)
@@ -788,7 +915,47 @@ async fn hydrate_desired(
             let s = JobLifecycleState { job, desired_to_stop, nodes, allocations: BTreeMap::new() };
             Ok(AnyState::JobLifecycle(s))
         }
+        AnyReconciler::ServiceMapHydrator(_) => {
+            let service_id = service_id_from_target(target)?;
+            let rows = state
+                .obs
+                .service_backends_rows(&service_id)
+                .await
+                .map_err(|e| ConvergenceError::ObservationRead(e.to_string()))?;
+            let mut desired = BTreeMap::new();
+            for row in rows {
+                // Wrap the row's wire-shape `Ipv4Addr` into `ServiceVip`
+                // at the read boundary per architecture.md § 8.
+                let vip = overdrive_core::id::ServiceVip::new(std::net::IpAddr::V4(row.vip))
+                    .map_err(|e| ConvergenceError::ObservationRead(e.to_string()))?;
+                let fp = overdrive_core::dataplane::fingerprint::fingerprint(&vip, &row.backends);
+                desired.insert(
+                    row.service_id,
+                    overdrive_core::reconciler::ServiceDesired {
+                        vip,
+                        backends: row.backends,
+                        fingerprint: fp,
+                    },
+                );
+            }
+            Ok(AnyState::ServiceMapHydrator(ServiceMapHydratorState {
+                desired,
+                actual: BTreeMap::new(),
+            }))
+        }
     }
+}
+
+/// Test-only public wrapper for [`hydrate_desired`]. Used by
+/// acceptance tests (GH #160) to exercise the production hydrate
+/// path without going through the full `run_convergence_tick` loop.
+#[doc(hidden)]
+pub async fn hydrate_desired_for_test(
+    reconciler: &AnyReconciler,
+    target: &TargetResource,
+    state: &AppState,
+) -> Result<AnyState, ConvergenceError> {
+    hydrate_desired(reconciler, target, state).await
 }
 
 /// Read a `Job` from the `IntentStore` at the canonical `jobs/<id>` key,
@@ -847,6 +1014,51 @@ async fn hydrate_actual(
             let s = JobLifecycleState { job: None, desired_to_stop: false, nodes, allocations };
             Ok(AnyState::JobLifecycle(s))
         }
+        AnyReconciler::ServiceMapHydrator(_) => {
+            // 08-02 hydrate-actual reads from
+            // `service_hydration_results` (the table 08-01 added).
+            // GH #160 covers the upstream `service_backends` table for
+            // `desired`; `actual` is wire-shape-complete today. Project
+            // rows into `BTreeMap<ServiceId, ServiceHydrationStatus>` —
+            // the latest LWW winner per `(service_id, fingerprint)` is
+            // already filtered by the trait's
+            // `service_hydration_results_rows` LWW contract.
+            let service_id = service_id_from_target(target)?;
+            let rows = state
+                .obs
+                .service_hydration_results_rows(&service_id)
+                .await
+                .map_err(|e| ConvergenceError::ObservationRead(e.to_string()))?;
+            let mut actual = BTreeMap::new();
+            // Multiple rows for the same `service_id` are keyed by
+            // distinct `fingerprint`s under LWW — the most-recently-
+            // written status for THIS service is the row whose
+            // `updated_at` dominates. The trait already filters to LWW
+            // winners, so all returned rows are tip-of-history; the
+            // hydrator wants the most-recent one for the convergence
+            // check. `LogicalTimestamp::dominates` is the single
+            // comparator the §4 LWW invariant exposes; iterate the rows
+            // and retain the dominator.
+            let mut latest: Option<
+                overdrive_core::traits::observation_store::ServiceHydrationResultRow,
+            > = None;
+            for row in rows {
+                let take = match latest.as_ref() {
+                    None => true,
+                    Some(current) => row.updated_at.dominates(&current.updated_at),
+                };
+                if take {
+                    latest = Some(row);
+                }
+            }
+            if let Some(row) = latest {
+                actual.insert(row.service_id, row.status);
+            }
+            Ok(AnyState::ServiceMapHydrator(ServiceMapHydratorState {
+                desired: BTreeMap::new(),
+                actual,
+            }))
+        }
     }
 }
 
@@ -874,6 +1086,19 @@ fn job_id_from_target(target: &TargetResource) -> Result<JobId, ConvergenceError
     let id_part =
         raw.strip_prefix("job/").ok_or_else(|| ConvergenceError::TargetShape(raw.to_string()))?;
     JobId::new(id_part).map_err(|e| ConvergenceError::TargetShape(e.to_string()))
+}
+
+/// Extract a `ServiceId` from a `TargetResource` of shape `service/<id>`.
+/// Mirrors `job_id_from_target` for the hydrator. Phase 2 (Slice 08).
+fn service_id_from_target(
+    target: &TargetResource,
+) -> Result<overdrive_core::id::ServiceId, ConvergenceError> {
+    let raw = target.as_str();
+    let id_part = raw
+        .strip_prefix("service/")
+        .ok_or_else(|| ConvergenceError::TargetShape(raw.to_string()))?;
+    overdrive_core::id::ServiceId::from_str(id_part)
+        .map_err(|e| ConvergenceError::TargetShape(e.to_string()))
 }
 
 /// Errors from [`run_convergence_tick`].

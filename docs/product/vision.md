@@ -71,7 +71,7 @@ If Phase 1 passes, the §21 DST claim is real, not performative. If it doesn't, 
 
 Three orthogonal tests:
 
-1. **Technical**: `cargo xtask dst` runs green on a clean clone, with a seeded harness that exercises every `Sim*` trait pair against the real `LocalStore`. Invariants pass. Seed reproduces bit-for-bit on failure.
+1. **Technical**: `cargo dst` runs green on a clean clone, with a seeded harness that exercises every `Sim*` trait pair against the real `LocalStore`. Invariants pass. Seed reproduces bit-for-bit on failure.
 2. **Commercial**: `LocalStore` is shown to run a full control plane within the whitepaper-claimed ~30MB RAM envelope with cold start under 50ms, and the snapshot round-trip is bit-identical.
 3. **Process**: the CI lint gate catches a deliberate `Instant::now()` smuggled into `overdrive-core`, with a clear message pointing at `development.md`.
 

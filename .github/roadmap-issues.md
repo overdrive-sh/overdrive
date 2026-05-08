@@ -36,7 +36,7 @@ Goal: single-node orchestrator whose trait boundaries are already HA-shaped and 
 | 1.3 | `IntentStore` trait + `LocalStore` (redb direct) | `storage` | `primitive` | §4, §17 | Single-node implementation; `export_snapshot` / `bootstrap_from` from day one |
 | 1.4 | `ObservationStore` trait + in-memory LWW implementation | `storage` | `primitive` | §4 | Final read/write shape for service-backends/verdicts (operator revocation table lands in Phase 5) |
 | 1.5 | Nondeterminism traits: `Clock`, `Transport`, `Entropy`, `Dataplane`, `Driver`, `Llm` | `control-plane` `testing` | `primitive` | §21 | DST precondition; lint gate enforcing no bypass |
-| 1.6 | turmoil DST harness + `SimDriver` / `SimDataplane` / `SimClock` / `SimTransport` / `SimEntropy` / `SimObservationStore` / `SimLlm` | `testing` | `primitive` | §21 | Tier 1 infrastructure; `cargo xtask dst` entry point |
+| 1.6 | turmoil DST harness + `SimDriver` / `SimDataplane` / `SimClock` / `SimTransport` / `SimEntropy` / `SimObservationStore` / `SimLlm` | `testing` | `primitive` | §21 | Tier 1 infrastructure; `cargo dst` entry point |
 | 1.7 | Process driver (tokio::process + cgroups v2) | `drivers` | `primitive` | §6 | First concrete `Driver` impl |
 | 1.8 | Basic scheduler (first-fit) | `control-plane` | `primitive` | §4 | Bin-packing heuristics come later; taint/toleration support in 1.11 |
 | 1.9 | Reconciler primitive — trait + runtime + evaluation broker (cancelable-eval-set) | `control-plane` | `primitive` | §18 | Storm mitigation shipped native, not retrofitted; runtime provisions and manages per-primitive private libSQL DBs for reconciler memory (backoff counters, placement history, resource samples) |

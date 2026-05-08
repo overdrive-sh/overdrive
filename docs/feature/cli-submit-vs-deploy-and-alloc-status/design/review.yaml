@@ -109,7 +109,7 @@ priority_validation:
   q4_data_justified: JUSTIFIED
 
 enforcement_checks_present:
-  - cargo xtask openapi-check (drift detection on api/openapi.yaml)
+  - cargo openapi-check (drift detection on api/openapi.yaml)
   - trybuild compile-fail (LifecycleEvent must NOT derive Serialize)
   - unit test (every SubmitEvent variant has `kind` discriminator)
   - integration test Tier 3 (broken-binary; streaming vs snapshot reason byte-equality)

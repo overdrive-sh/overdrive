@@ -38,6 +38,15 @@ hex.workspace  = true
 time.workspace = true
 uuid.workspace = true
 
+# Content hashing for `BackendSetFingerprint`
+# (`crate::dataplane::fingerprint::fingerprint`). blake3 is the
+# canonical project choice for content-addressed hashes computed
+# over deterministic byte serializations per
+# `.claude/rules/development.md` § Hashing requires deterministic
+# serialization. Already declared in the workspace
+# (`Cargo.toml` line 74).
+blake3.workspace = true
+
 # Trait boundaries — async, I/O types, streams.
 async-trait.workspace = true
 futures.workspace     = true
@@ -77,17 +86,12 @@ syn.workspace      = true
 # `tests/compile_fail/*.rs` fixtures and asserts each produces the
 # expected compiler diagnostic. ADR-0001 row 24 approves this dev-dep.
 trybuild.workspace = true
-# The trybuild fixture under `tests/compile_fail/intent_vs_observation.rs`
-# constructs a real `LocalStore` via `LocalStore::open`, so the harness
-# needs the store crate on its compile graph.
-overdrive-store-local.path = "../overdrive-store-local"
 # `tests/acceptance/unix_instant_arithmetic.rs` exercises
 # `UnixInstant::from_clock` against the project's standard `Clock`
 # fixture (`SimClock`). Dev-dep only — `overdrive-sim` itself depends
 # on `overdrive-core`, which Cargo permits in dev-deps because dev-deps
 # do not propagate to downstream consumers.
 overdrive-sim.path = "../overdrive-sim"
-tempfile.workspace = true
 tokio              = { workspace = true }
 # Used by `tests/acceptance/exec_validation.rs` to exercise the
 # tagged-enum + deny_unknown_fields TOML parse path for the new

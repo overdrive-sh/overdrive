@@ -440,7 +440,7 @@ is the honest compromise.
   `crates/overdrive-invariants/tests/*.rs` (plumbing layout per
   ADR-0005); DST scenario tests stay in `crates/overdrive-sim/tests/dst/`
   and import the invariants from the new crate.
-- **Relates to ADR-0006** — `cargo xtask dst` and `--only <NAME>`
+- **Relates to ADR-0006** — `cargo dst` and `--only <NAME>`
   continue to resolve names against the invariant catalogue, now
   imported from `overdrive-invariants` rather than `overdrive-sim`.
   No xtask surface changes.

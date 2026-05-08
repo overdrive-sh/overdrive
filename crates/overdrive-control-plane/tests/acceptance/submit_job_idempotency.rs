@@ -68,7 +68,15 @@ fn build_app_state(tmp: &TempDir) -> AppState {
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::from_str("local").expect("NodeId"), 0));
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
-    AppState::new(store, obs, Arc::new(runtime), driver, Arc::new(SimClock::new()))
+    AppState::new(
+        store,
+        obs,
+        Arc::new(runtime),
+        driver,
+        Arc::new(SimClock::new()),
+        Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+        overdrive_core::id::NodeId::new("writer-1").unwrap(),
+    )
 }
 
 fn payments_spec() -> JobSpecInput {

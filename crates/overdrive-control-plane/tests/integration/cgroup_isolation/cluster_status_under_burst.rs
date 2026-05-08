@@ -21,13 +21,6 @@
 //! it keeps the test scoped to the cgroup-scheduling property under
 //! verification rather than the shim's image-resolution behaviour.
 //!
-//! Linux-only — gated by `#[cfg(target_os = "linux")]`. Compile-clean
-//! on macOS via `cargo nextest run --features integration-tests
-//! --no-run`. Runs on Lima via `cargo xtask lima run -- cargo
-//! nextest run --workspace --features integration-tests`.
-
-#![cfg(target_os = "linux")]
-
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 

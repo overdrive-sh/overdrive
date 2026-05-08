@@ -35,7 +35,7 @@ target_environments:
     description: >-
       Contributor laptop — the K1 wall-clock measurement surface. Lefthook
       pre-commit + pre-push hooks mirror the CI commit stage (fmt + clippy
-      + test). `cargo xtask dst` produces the same artifacts locally as in
+      + test). `cargo dst` produces the same artifacts locally as in
       CI.
     platform: [macos, linux]
     runner_class: "Apple Silicon M-class MacBook Pro reference; Linux x86_64 secondary"
@@ -44,7 +44,7 @@ target_environments:
       - "lefthook installed (brew install lefthook) and wired via `cargo xtask hooks install`"
       - "Optional: Lima VM for Linux-specific builds (via `cargo xtask lima`)"
     owned_by: "contributors (self-service)"
-    sla: "K1: `cargo xtask dst` completes green in <60s on reference M-class laptop"
+    sla: "K1: `cargo dst` completes green in <60s on reference M-class laptop"
 
 coexistence_matrix:
   - tool: lefthook
@@ -59,7 +59,7 @@ coexistence_matrix:
   - tool: xtask
     must_not_break: true
     notes: >-
-      `cargo xtask dst` and `cargo xtask dst-lint` are the ONLY canonical
+      `cargo dst` and `cargo xtask dst-lint` are the ONLY canonical
       invocations for the DST pipeline per ADR-0006. CI never calls
       `cargo test --features dst` directly — only through the xtask
       wrapper, because the wrapper owns seed generation, first-line seed
@@ -83,13 +83,13 @@ platform_coverage:
        Windows must use WSL2 or the Lima VM path."
 
 deployment_assumptions:
-  - "`cargo xtask dst` is hermetic — no network, no external services, no
+  - "`cargo dst` is hermetic — no network, no external services, no
     credentials. Reproducible from a u64 seed."
   - "Workflow runs are idempotent and safe to re-trigger. The xtask
-    wrapper regenerates target/xtask/dst-output.log and dst-summary.json
+    wrapper regenerates target/dst/output.log and dst-summary.json
     on every run; no persistent state is written outside the target
     directory."
-  - "Artifact paths (target/xtask/dst-output.log, target/xtask/dst-summary.json)
+  - "Artifact paths (target/dst/output.log, target/dst/summary.json)
     are relative to the repo root and land inside $CARGO_TARGET_DIR when
     set. CI relies on the default (`./target/`) — if CARGO_TARGET_DIR
     is ever overridden in CI, the artifact-upload path in ci.yml must be

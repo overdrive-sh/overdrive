@@ -297,7 +297,7 @@ the current code is not readable by the post-ADR code. This is
 deliberately accepted — Phase 1 development databases are scratch,
 no production data exists to migrate.
 
-The OpenAPI schema bytes change. The `cargo xtask openapi-check` gate
+The OpenAPI schema bytes change. The `cargo openapi-check` gate
 will fail on the first DELIVER step that lands the trait change without
 the matching schema regeneration; this is the desired behaviour
 (structural drift is caught at the gate). The DELIVER lane regenerates

@@ -65,7 +65,7 @@ tagged enum on `Job`.
   (see: ADR-0031 §7)
 - [D8] **OpenAPI propagation via `utoipa::ToSchema` derives on
   `JobSpecInput`, `ResourcesInput`, `ExecInput`, `DriverInput`.** Schema
-  regenerated via `cargo xtask openapi-gen`; CI gate `cargo xtask
+  regenerated via `cargo openapi-gen`; CI gate `cargo xtask
   openapi-check` catches drift. (see: ADR-0031 §8)
 - [D9] **Single-cut migration: no `#[serde(alias)]`, no compatibility
   shim, no two-shape acceptance period.** Per
@@ -169,7 +169,7 @@ prematurely foreclosed that shape.
 | `default_restart_resources_pins_exact_values` test | `action_shim.rs:284-317` | pins the deleted function | DELETE | Per `feedback_delete_dont_gate.md`: production code becomes unused → delete code AND its test in the same PR. |
 | CLI parse path | `crates/overdrive-cli/src/commands/job.rs:104-113` | `toml::from_str::<JobSpecInput>` → `Job::from_spec` | EXTEND (no logic change) | serde drives the new tagged-enum + nested-table shape transparently. |
 | Server submit path | `crates/overdrive-control-plane/src/handlers.rs::submit_job` | JSON deserialise → `Job::from_spec` | EXTEND (no logic change) | Server-side defence-in-depth runs the same constructor (ADR-0015). New rules fire on both lanes by construction. |
-| OpenAPI schema | `api/openapi.yaml` (auto-regenerated) | utoipa-derived | REGENERATE | `cargo xtask openapi-gen` regenerates; `cargo xtask openapi-check` (CI gate per ADR-0009) catches drift. |
+| OpenAPI schema | `api/openapi.yaml` (auto-regenerated) | utoipa-derived | REGENERATE | `cargo openapi-gen` regenerates; `cargo openapi-check` (CI gate per ADR-0009) catches drift. |
 | Test fixtures (TOML / `JobSpecInput { ... }` literals) | ~25 source files (enumerated in upstream-changes.md §test surfaces) | flat-shape literals | MIGRATE single-cut | Per `feedback_single_cut_greenfield_migrations`: every fixture migrates in the same PR. Each diff is mechanical literal-by-literal substitution. |
 
 Net new types: **3** (`ResourcesInput`, `ExecInput`, `DriverInput`). All

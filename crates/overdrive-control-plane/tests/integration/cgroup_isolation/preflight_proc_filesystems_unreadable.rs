@@ -40,8 +40,6 @@
 //! `.claude/rules/testing.md` § "RED scaffolds and intentionally-
 //! failing commits".
 
-#![cfg(target_os = "linux")]
-
 use overdrive_control_plane::cgroup_preflight::{CgroupPreflightError, run_preflight_at};
 use tempfile::TempDir;
 

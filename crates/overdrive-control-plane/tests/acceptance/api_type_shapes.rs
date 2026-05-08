@@ -16,7 +16,7 @@
 //!
 //! Every request/response type:
 //!   1. Round-trips through `serde_json::to_string` -> `from_str`.
-//!   2. Carries `utoipa::ToSchema` so the `cargo xtask openapi-gen`
+//!   2. Carries `utoipa::ToSchema` so the `cargo openapi-gen`
 //!      checked-in artifact (ADR-0009) stays derivable.
 //!   3. Matches the field set pinned by the step AC verbatim —
 //!      renaming breaks the contract surface.
@@ -261,7 +261,7 @@ fn error_body_round_trips_with_field_none_and_field_some() {
     assert_eq!(round_tripped.field.as_deref(), Some("replicas"));
 }
 
-/// The `ToSchema` derive is what keeps `cargo xtask openapi-gen`
+/// The `ToSchema` derive is what keeps `cargo openapi-gen`
 /// derivable (ADR-0009). Rather than inspecting the generated schema
 /// shape (which is utoipa-version-sensitive), we pin that every type
 /// in the API module implements `ToSchema` at all — a missing derive

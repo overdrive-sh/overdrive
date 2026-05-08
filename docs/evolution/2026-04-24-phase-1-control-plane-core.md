@@ -27,7 +27,7 @@ monotonic `commit_index`, the reconciler primitive registers a heartbeat,
 and `alloc status` renders an honest empty observation** — all over real
 TLS against an ephemeral in-process CA, all exercised in real-redb /
 real-axum / real-reqwest integration tests, and all gated by the
-existing `cargo xtask dst` + `dst-lint` + `openapi-check` +
+existing `cargo dst` + `dst-lint` + `openapi-check` +
 mutants-diff CI pipeline.
 
 ## Business context
@@ -112,7 +112,7 @@ registry. No scheduling logic, no real workloads.
 | Slice | Steps | What shipped |
 |---|---|---|
 | **Slice 1** — Aggregates + canonical intent-keys | 01-01..01-04 | `Job`, `Node`, `Allocation` with validating constructors in `overdrive-core::aggregate`; `Resources` reused from `traits/driver` (no duplicate); `IntentKey::{for_job,for_node,for_allocation}` canonical derivation; `rkyv::Archive + Serialize + Deserialize` + `serde::Serialize + Deserialize` on every aggregate (two serialisation lanes — serde-JSON at REST edge, rkyv at IntentStore boundary). |
-| **Slice 2** — REST service surface | 02-01..02-05 | Ephemeral in-process CA via `rcgen`; trust triple written to `~/.overdrive/config` (base64); multi-SAN server cert; axum + rustls server bound on HTTPS over HTTP/2 (HTTP/1.1 fallback) at `127.0.0.1:7001`; `utoipa`-derived OpenAPI 3.1 schema at `api/openapi.yaml`; `cargo xtask openapi-gen` + `openapi-check` subcommands + CI gate; `--insecure` rejected structurally. |
+| **Slice 2** — REST service surface | 02-01..02-05 | Ephemeral in-process CA via `rcgen`; trust triple written to `~/.overdrive/config` (base64); multi-SAN server cert; axum + rustls server bound on HTTPS over HTTP/2 (HTTP/1.1 fallback) at `127.0.0.1:7001`; `utoipa`-derived OpenAPI 3.1 schema at `api/openapi.yaml`; `cargo openapi-gen` + `openapi-check` subcommands + CI gate; `--insecure` rejected structurally. |
 | **Slice 3** — Handlers | 03-01..03-06 | `POST /v1/jobs` commits through `LocalIntentStore` (rkyv-archived body → `ContentHash`-keyed IntentStore write); `GET /v1/jobs/{id}` rkyv-round-trips to `spec_digest` + 404 on unknown; `GET /v1/allocs` + `GET /v1/nodes` honest empty reads via ObservationStore wiring; idempotent re-submit returns 200 OK with original `commit_index`; 409 on conflicting spec at occupied intent-key; exhaustive `ControlPlaneError` → HTTP mapping per ADR-0015 (RFC 7807-compatible body shape). ADR-0012 revised mid-slice: `SimObservationStore` wiring replaced with `LocalObservationStore` (redb adapter-host) in production, leaving `overdrive-sim` as a dev-dep only. |
 | **Slice 4** — Reconciler primitive | 04-01..04-10 | `Reconciler` trait + `Action` enum + `ReconcilerName` + `TargetResource` newtypes in `overdrive-core::reconciler`; `EvaluationBroker` with cancelable-eval-set + reaper; `ReconcilerRuntime` wires broker + registry + libSQL; per-primitive libSQL provisioner (`<data_dir>/reconcilers/<name>/memory.db`, canonicalised-path isolation); `noop-heartbeat` registered at server boot; three new DST invariants (`AtLeastOneReconcilerRegistered`, `DuplicateEvaluationsCollapse`, `ReconcilerIsPure`) with canary-bug feature fixture proving `ReconcilerIsPure` fires; dst-lint gate extended to catch reconciler-body purity violations; steps 04-07..04-10 migrate the trait surface single-cut to the ADR-0013 pre-hydration + time-injection amendment (see below). |
 | **Slice 5** — CLI | 05-01..05-05 | Hand-rolled `reqwest`-based thin HTTP client with typed `CliError`; CLI handlers for `cluster init` (mints CA + writes trust triple), `serve` (boots control-plane server), `job submit` (reads TOML, validates locally, POSTs, prints `commit_index`), `job describe`, `cluster status` (renders registered reconcilers + broker counters), `node list`, `alloc status`; rendering via a dedicated `render` module; walking-skeleton gate via direct handler calls proving the end-to-end byte-identical spec-digest round-trip. |
@@ -130,7 +130,7 @@ its one-line thesis.
 | ADR | Thesis |
 |---|---|
 | **0008** — REST + OpenAPI transport | External API is REST + JSON over HTTP/2 with rustls; `axum` + `axum-server` (rustls feature); `/v1` prefix non-negotiable. Internal tarpc / postcard-rpc deferred. |
-| **0009** — OpenAPI schema derivation | `utoipa` + `utoipa-axum`; schema checked in at `api/openapi.yaml`; `cargo xtask openapi-check` CI gate fails on drift. |
+| **0009** — OpenAPI schema derivation | `utoipa` + `utoipa-axum`; schema checked in at `api/openapi.yaml`; `cargo openapi-check` CI gate fails on drift. |
 | **0010** — Phase 1 TLS bootstrap | Ephemeral in-process CA at `cluster init`; base64 trust triple in `~/.overdrive/config`; multi-SAN server cert; **no `--insecure`**. Role NOT in cert O-field (whitepaper §8 SPIFFE URI SANs). |
 | **0011** — Aggregates + `JobSpec` collision | Intent-side `Job` in `overdrive-core::aggregate`; observation-side `AllocStatusRow` stays in `traits::observation_store`. Any vestigial `JobSpec`-named struct deleted. |
 | **0012** — ObservationStore server impl | Initially: reuse `SimObservationStore` behind a wiring adapter. Revised mid-Slice-3 (step 03-06, commit `7c86424`): replaced with a real `LocalObservationStore` (redb-backed adapter-host) in production. `overdrive-sim` becomes dev-dep only. |
@@ -323,7 +323,7 @@ records.
    (trybuild fixture, DST invariant, openapi-check) did exactly one
    thing and stopped — no auto-wiring into CI beyond the single
    `openapi-check` job identified in DEVOPS N1. The existing
-   `cargo nextest run`, `cargo test --doc`, `cargo xtask dst`, and
+   `cargo nextest run`, `cargo test --doc`, `cargo dst`, and
    `cargo xtask mutants --in-diff` paths pick up new fixtures
    automatically by virtue of file-system conventions.
 

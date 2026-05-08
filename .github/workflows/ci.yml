@@ -27,7 +27,7 @@
 #   - bpf-unit        (added in #23 — Phase 2.1)
 #
 # Rationale references:
-#   - ADR-0006  (`cargo xtask dst` + `dst-lint` are the required CI checks;
+#   - ADR-0006  (`cargo dst` + `dst-lint` are the required CI checks;
 #                seed surfaced on failure; text + JSON artifacts uploaded)
 #   - ADR-0005  (test distribution — drives `cargo test` targets)
 #   - ADR-0003  (`package.metadata.overdrive.crate_class` labels; `dst-lint`
@@ -65,6 +65,11 @@ env:
   # per PR; nightly soaks higher elsewhere. Do not lower to dodge slow
   # generators — fix the generator.
   PROPTEST_CASES: "1024"
+  # sccache + cargo incremental do not compose: incremental wins, sccache
+  # silently misses every rustc invocation. Disable incremental at workflow
+  # level so every sccache-using job (host + Lima) actually hits the cache.
+  # See https://github.com/mozilla/sccache#known-caveats §"Rust caveats".
+  CARGO_INCREMENTAL: "0"
   # NOTE: RUSTC_WRAPPER and SCCACHE_GHA_ENABLED are intentionally NOT set
   # here. They are exported by each job's sccache setup step only when
   # that step succeeds — so a GHA cache backend outage degrades the build
@@ -72,6 +77,27 @@ env:
   # before cargo runs. See docs/research/ci/sccache-gha-outage-hardening.md
   # and mozilla/sccache#1751 (SCCACHE_IGNORE_SERVER_IO_ERROR does NOT
   # cover backend startup probe failures).
+  #
+  # Lima-using jobs also need the GHA cache credentials forwarded into
+  # the guest so sccache running inside the VM can reach the GHA cache
+  # HTTP service. The four variables sccache's OpenDAL GHAC backend
+  # needs are:
+  #
+  #   ACTIONS_CACHE_SERVICE_V2  — version selector ("on" = v2 mode);
+  #                               without this, sccache defaults to v1
+  #                               and looks for ACTIONS_CACHE_URL, which
+  #                               the action no longer exports (v1 was
+  #                               shut down April 2025)
+  #   ACTIONS_RESULTS_URL       — v2 cache endpoint
+  #   ACTIONS_RUNTIME_TOKEN     — auth JWT
+  #   ACTIONS_CACHE_URL         — v1 endpoint (legacy; kept for compat)
+  #
+  # All four are exported to $GITHUB_ENV by mozilla-actions/sccache-action
+  # on the host runner, then plumbed through `limactl shell env ...
+  # bash -lc 'sudo -E env "X=$X" ...'` into the guest. Omitting any one
+  # of them causes sccache's server startup probe to fail with
+  # "cache url for ghac not found", which kills rustup's `sccache rustc
+  # -vV` toolchain verification before cargo even starts.
 
 jobs:
   # -------------------------------------------------------------------
@@ -82,7 +108,7 @@ jobs:
     name: fmt + clippy
     runs-on: ubuntu-latest
     # Workspace clippy compiles overdrive-dataplane, whose build.rs
-    # requires target/xtask/bpf-objects/overdrive_bpf.o on Linux per
+    # requires target/bpf/overdrive_bpf.o on Linux per
     # ADR-0038 §3.2. Pull the artifact from bpf-build rather than
     # rebuilding it here.
     needs: bpf-build
@@ -107,7 +133,7 @@ jobs:
 
       # MUST run AFTER Swatinem/rust-cache@v2: the cached tarball is the
       # entire workspace `target/` directory and its restore step
-      # extracts over `target/xtask/bpf-objects/`, clobbering anything
+      # extracts over `target/bpf/`, clobbering anything
       # written there by an earlier `download-artifact` invocation.
       # Downloading after the cache restore guarantees the BPF object is
       # the file present when build.rs runs.
@@ -115,7 +141,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: bpf-object
-          path: target/xtask/bpf-objects/
+          path: target/bpf/
           if-no-files-found: error
 
       # sccache setup is soft-fail: if the GHA cache backend is unreachable
@@ -129,9 +155,22 @@ jobs:
 
       - name: Enable sccache when setup succeeded
         if: steps.sccache-setup.outcome == 'success'
+        # The action reports `success` even when the underlying GHA cache
+        # backend is unreachable (no ACTIONS_*_URL exported to GITHUB_ENV).
+        # If we forwarded RUSTC_WRAPPER=sccache into the build with an
+        # empty URL, sccache would refuse to start ("cache url for ghac
+        # not found") and every rustc invocation — including rustup's
+        # toolchain verification probe — would exit 2. Guard explicitly:
+        # require at least one of ACTIONS_CACHE_URL (v1 backend) or
+        # ACTIONS_RESULTS_URL (v2 backend, post-Feb-2025) to be set
+        # before flipping the wrapper on.
         run: |
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          if [ -n "${ACTIONS_CACHE_URL:-}" ] || [ -n "${ACTIONS_RESULTS_URL:-}" ]; then
+            echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+            echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          else
+            echo "::warning::sccache-action reported success but neither ACTIONS_CACHE_URL nor ACTIONS_RESULTS_URL is set; building without compiler cache."
+          fi
 
       - name: Warn when sccache unavailable
         if: steps.sccache-setup.outcome != 'success'
@@ -182,27 +221,37 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Lima
+        uses: lima-vm/lima-actions/setup@v1
 
-      # mold is the linker per .cargo/config.toml; ubuntu-latest does
-      # not ship it.
-      - name: Install mold linker
-        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends mold
-
-      - uses: Swatinem/rust-cache@v2
+      - name: Cache Lima VM
+        id: lima-cache
+        uses: actions/cache@v4
         with:
-          shared-key: "phase-1-test"
+          path: ~/.lima/overdrive
+          key: lima-${{ hashFiles('infra/lima/overdrive-dev.yaml') }}-${{ runner.arch }}
 
-      # MUST run AFTER Swatinem/rust-cache@v2 — see fmt-clippy job above
-      # for rationale (cache tarball restore clobbers the BPF artifact).
+      - name: Provision Lima VM (cache miss)
+        if: steps.lima-cache.outputs.cache-hit != 'true'
+        run: limactl start --timeout=30m --name=overdrive --tty=false infra/lima/overdrive-dev.yaml
+
+      - name: Start cached Lima VM
+        if: steps.lima-cache.outputs.cache-hit == 'true'
+        run: limactl start --timeout=30m overdrive
+
+      # BPF artifact is downloaded to the host and visible inside the
+      # VM via the home-directory mount.
       - name: Download BPF object artifact
         uses: actions/download-artifact@v4
         with:
           name: bpf-object
-          path: target/xtask/bpf-objects/
+          path: target/bpf/
           if-no-files-found: error
 
-      # See fmt-clippy job above for rationale.
+      # sccache setup is soft-fail (see fmt-clippy job for rationale). The
+      # action exports ACTIONS_CACHE_URL + ACTIONS_RUNTIME_TOKEN to
+      # $GITHUB_ENV; the limactl invocation below forwards them into the
+      # guest so sccache (running inside the VM) can reach the GHA cache.
       - id: sccache-setup
         name: Setup sccache (soft-fail on cache backend outage)
         continue-on-error: true
@@ -210,30 +259,75 @@ jobs:
 
       - name: Enable sccache when setup succeeded
         if: steps.sccache-setup.outcome == 'success'
+        # The action reports `success` even when the underlying GHA cache
+        # backend is unreachable (no ACTIONS_*_URL exported to GITHUB_ENV).
+        # If we forwarded RUSTC_WRAPPER=sccache into the build with an
+        # empty URL, sccache would refuse to start ("cache url for ghac
+        # not found") and every rustc invocation — including rustup's
+        # toolchain verification probe — would exit 2. Guard explicitly:
+        # require at least one of ACTIONS_CACHE_URL (v1 backend) or
+        # ACTIONS_RESULTS_URL (v2 backend, post-Feb-2025) to be set
+        # before flipping the wrapper on.
         run: |
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          if [ -n "${ACTIONS_CACHE_URL:-}" ] || [ -n "${ACTIONS_RESULTS_URL:-}" ]; then
+            echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+            echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          else
+            echo "::warning::sccache-action reported success but neither ACTIONS_CACHE_URL nor ACTIONS_RESULTS_URL is set; building without compiler cache."
+          fi
 
       - name: Warn when sccache unavailable
         if: steps.sccache-setup.outcome != 'success'
         run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
 
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-nextest
-
       - name: cargo nextest run --workspace (profile=ci)
         # PROPTEST_CASES is inherited from the workflow-level env:
         # declared at the top of this file (1024 per testing.md).
         # Profile config lives in `.config/nextest.toml`.
-        run: cargo nextest run --workspace --locked --profile ci
+        # The Lima VM has cargo-nextest, mold, sccache, and the full
+        # Rust toolchain pre-provisioned.
+        run: |
+          limactl shell overdrive env \
+            "RUSTC_WRAPPER=${RUSTC_WRAPPER:-}" \
+            "SCCACHE_GHA_ENABLED=${SCCACHE_GHA_ENABLED:-}" \
+            "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL:-}" \
+            "ACTIONS_RESULTS_URL=${ACTIONS_RESULTS_URL:-}" \
+            "ACTIONS_CACHE_SERVICE_V2=${ACTIONS_CACHE_SERVICE_V2:-}" \
+            "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
+            bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
+                      "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
+                      "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
+                      "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
+                      "ACTIONS_RESULTS_URL=$ACTIONS_RESULTS_URL" \
+                      "ACTIONS_CACHE_SERVICE_V2=$ACTIONS_CACHE_SERVICE_V2" \
+                      "ACTIONS_RUNTIME_TOKEN=$ACTIONS_RUNTIME_TOKEN" \
+                      cargo nextest run --workspace --locked --profile ci'
 
       - name: cargo test --doc --workspace
         # Nextest does not execute doctests. Run them in a separate step
         # so rustdoc examples are still verified — per
         # `.claude/rules/development.md` §Documentation.
-        run: cargo test --doc --workspace --locked
+        run: |
+          limactl shell overdrive env \
+            "RUSTC_WRAPPER=${RUSTC_WRAPPER:-}" \
+            "SCCACHE_GHA_ENABLED=${SCCACHE_GHA_ENABLED:-}" \
+            "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL:-}" \
+            "ACTIONS_RESULTS_URL=${ACTIONS_RESULTS_URL:-}" \
+            "ACTIONS_CACHE_SERVICE_V2=${ACTIONS_CACHE_SERVICE_V2:-}" \
+            "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
+            bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
+                      "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
+                      "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
+                      "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
+                      "ACTIONS_RESULTS_URL=$ACTIONS_RESULTS_URL" \
+                      "ACTIONS_CACHE_SERVICE_V2=$ACTIONS_CACHE_SERVICE_V2" \
+                      "ACTIONS_RUNTIME_TOKEN=$ACTIONS_RUNTIME_TOKEN" \
+                      cargo test --doc --workspace --locked'
+
+      - name: Show sccache stats
+        if: always() && steps.sccache-setup.outcome == 'success'
+        run: |
+          limactl shell overdrive bash -lc 'sccache --show-stats' || true
 
       - name: Upload nextest JUnit report
         if: always()
@@ -243,6 +337,14 @@ jobs:
           path: target/nextest/ci/junit.xml
           retention-days: 14
           if-no-files-found: warn
+
+      # Stop the VM so the cache-save post-step can read ~/.lima/overdrive/disk
+      # without tripping `file changed as we read it`. `|| true` so a never-started
+      # VM (early step failure) doesn't fail the post-cleanup.
+      - name: Stop Lima VM (release disk before cache save)
+        if: always()
+        timeout-minutes: 1
+        run: limactl stop overdrive || true
 
   # -------------------------------------------------------------------
   # Integration tests — slow / real-infra suites gated behind each
@@ -261,31 +363,33 @@ jobs:
   integration:
     name: nextest (integration-tests)
     runs-on: ubuntu-latest
-    # Workspace nextest with --features integration-tests compiles
-    # overdrive-dataplane, whose build.rs requires the BPF artifact on
-    # Linux per ADR-0038 §3.2.
     needs: bpf-build
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Lima
+        uses: lima-vm/lima-actions/setup@v1
 
-      # mold is the linker per .cargo/config.toml; ubuntu-latest does
-      # not ship it.
-      - name: Install mold linker
-        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends mold
-
-      - uses: Swatinem/rust-cache@v2
+      - name: Cache Lima VM
+        id: lima-cache
+        uses: actions/cache@v4
         with:
-          shared-key: "phase-1-integration"
+          path: ~/.lima/overdrive
+          key: lima-${{ hashFiles('infra/lima/overdrive-dev.yaml') }}-${{ runner.arch }}
 
-      # MUST run AFTER Swatinem/rust-cache@v2 — see fmt-clippy job above
-      # for rationale (cache tarball restore clobbers the BPF artifact).
+      - name: Provision Lima VM (cache miss)
+        if: steps.lima-cache.outputs.cache-hit != 'true'
+        run: limactl start --timeout=30m --name=overdrive --tty=false infra/lima/overdrive-dev.yaml
+
+      - name: Start cached Lima VM
+        if: steps.lima-cache.outputs.cache-hit == 'true'
+        run: limactl start --timeout=30m overdrive
+
       - name: Download BPF object artifact
         uses: actions/download-artifact@v4
         with:
           name: bpf-object
-          path: target/xtask/bpf-objects/
+          path: target/bpf/
           if-no-files-found: error
 
       - id: sccache-setup
@@ -295,55 +399,55 @@ jobs:
 
       - name: Enable sccache when setup succeeded
         if: steps.sccache-setup.outcome == 'success'
+        # The action reports `success` even when the underlying GHA cache
+        # backend is unreachable (no ACTIONS_*_URL exported to GITHUB_ENV).
+        # If we forwarded RUSTC_WRAPPER=sccache into the build with an
+        # empty URL, sccache would refuse to start ("cache url for ghac
+        # not found") and every rustc invocation — including rustup's
+        # toolchain verification probe — would exit 2. Guard explicitly:
+        # require at least one of ACTIONS_CACHE_URL (v1 backend) or
+        # ACTIONS_RESULTS_URL (v2 backend, post-Feb-2025) to be set
+        # before flipping the wrapper on.
         run: |
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          if [ -n "${ACTIONS_CACHE_URL:-}" ] || [ -n "${ACTIONS_RESULTS_URL:-}" ]; then
+            echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+            echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          else
+            echo "::warning::sccache-action reported success but neither ACTIONS_CACHE_URL nor ACTIONS_RESULTS_URL is set; building without compiler cache."
+          fi
 
       - name: Warn when sccache unavailable
         if: steps.sccache-setup.outcome != 'success'
         run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
 
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-nextest
-
       - name: cargo nextest run --workspace --features integration-tests (profile=ci)
-        # Bare `--features integration-tests` enables the feature on
-        # every workspace member that defines it (Cargo silently
-        # ignores members without). New crates that add an
-        # integration-tests gate are picked up automatically — no edit
-        # to this step required.
-        #
         # Filter `binary(integration)` selects only the integration
-        # entrypoint binaries (`tests/integration.rs` per
-        # `.claude/rules/testing.md` §"Integration vs unit gating") so
-        # the unit/proptest suite that already ran in the `test` job
-        # above is not re-executed here.
-        #
-        # `sudo -E` preserves the runner user's environment (PATH,
-        # CARGO_HOME, RUSTUP_HOME, RUSTC_WRAPPER) so cargo/nextest/
-        # sccache resolve correctly while running as root. Root access
-        # is required for ProcessDriver: creating cgroup scope directories
-        # and writing child PIDs to cgroup.procs both fail with EACCES
-        # for the unprivileged runner user.
-        #
-        # `--exclude overdrive-bpf` avoids a cross-process artifact race:
-        # `overdrive-dataplane::integration::build_rs_artifact_check`
-        # transiently removes `target/xtask/bpf-objects/overdrive_bpf.o`
-        # for the duration of a `cargo check` subprocess, and nextest
-        # runs each integration binary as a separate OS process — so
-        # `#[serial(env)]` (per-process) cannot gate
-        # `overdrive-bpf::integration::xdp_pass_test_run`'s
-        # `Ebpf::load_file` against that window. The `bpf-unit` job
-        # already owns `overdrive-bpf`'s integration tests via
-        # `cargo xtask bpf-unit` under the same CAP_BPF `sudo` guard,
-        # so excluding it here is loss-free.
+        # entrypoint binaries. `--exclude overdrive-bpf` avoids a
+        # cross-process artifact race (see bpf-unit job).
         run: |
-          sudo -E env "PATH=$PATH" cargo nextest run --workspace --locked --profile ci \
-            --features integration-tests \
-            --exclude overdrive-bpf \
-            -E 'binary(integration)'
+          limactl shell overdrive env \
+            "RUSTC_WRAPPER=${RUSTC_WRAPPER:-}" \
+            "SCCACHE_GHA_ENABLED=${SCCACHE_GHA_ENABLED:-}" \
+            "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL:-}" \
+            "ACTIONS_RESULTS_URL=${ACTIONS_RESULTS_URL:-}" \
+            "ACTIONS_CACHE_SERVICE_V2=${ACTIONS_CACHE_SERVICE_V2:-}" \
+            "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
+            bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
+                      "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
+                      "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
+                      "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
+                      "ACTIONS_RESULTS_URL=$ACTIONS_RESULTS_URL" \
+                      "ACTIONS_CACHE_SERVICE_V2=$ACTIONS_CACHE_SERVICE_V2" \
+                      "ACTIONS_RUNTIME_TOKEN=$ACTIONS_RUNTIME_TOKEN" \
+                      cargo nextest run --workspace --locked --profile ci \
+                        --features integration-tests \
+                        --exclude overdrive-bpf \
+                        -E "binary(integration)"'
+
+      - name: Show sccache stats
+        if: always() && steps.sccache-setup.outcome == 'success'
+        run: |
+          limactl shell overdrive bash -lc 'sccache --show-stats' || true
 
       - name: Upload nextest JUnit report
         if: always()
@@ -353,6 +457,11 @@ jobs:
           path: target/nextest/ci/junit.xml
           retention-days: 14
           if-no-files-found: warn
+
+      - name: Stop Lima VM (release disk before cache save)
+        if: always()
+        timeout-minutes: 1
+        run: limactl stop overdrive || true
 
   # -------------------------------------------------------------------
   # DST — Tier 1 per testing.md. Invoked via the xtask wrapper per
@@ -364,7 +473,7 @@ jobs:
   # runs that exceed the guardrail.
   # -------------------------------------------------------------------
   dst:
-    name: cargo xtask dst
+    name: cargo dst
     runs-on: ubuntu-latest
     # 10 min ceiling — K1 targets <60s; anything close to the ceiling
     # means the guardrail is broken and the build should fail loudly.
@@ -391,20 +500,33 @@ jobs:
 
       - name: Enable sccache when setup succeeded
         if: steps.sccache-setup.outcome == 'success'
+        # The action reports `success` even when the underlying GHA cache
+        # backend is unreachable (no ACTIONS_*_URL exported to GITHUB_ENV).
+        # If we forwarded RUSTC_WRAPPER=sccache into the build with an
+        # empty URL, sccache would refuse to start ("cache url for ghac
+        # not found") and every rustc invocation — including rustup's
+        # toolchain verification probe — would exit 2. Guard explicitly:
+        # require at least one of ACTIONS_CACHE_URL (v1 backend) or
+        # ACTIONS_RESULTS_URL (v2 backend, post-Feb-2025) to be set
+        # before flipping the wrapper on.
         run: |
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          if [ -n "${ACTIONS_CACHE_URL:-}" ] || [ -n "${ACTIONS_RESULTS_URL:-}" ]; then
+            echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+            echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          else
+            echo "::warning::sccache-action reported success but neither ACTIONS_CACHE_URL nor ACTIONS_RESULTS_URL is set; building without compiler cache."
+          fi
 
       - name: Warn when sccache unavailable
         if: steps.sccache-setup.outcome != 'success'
         run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
 
-      - name: cargo xtask dst
+      - name: cargo dst
         # The xtask wrapper writes:
-        #   target/xtask/dst-output.log   — full stdout/stderr
-        #   target/xtask/dst-summary.json — structured summary
+        #   target/dst/output.log   — full stdout/stderr
+        #   target/dst/summary.json — structured summary
         # per ADR-0006 Decision § "Failure-artifact schema".
-        run: cargo xtask dst
+        run: cargo dst
 
       - name: Upload DST artifacts
         # Always upload — a killed or OOM-killed run still contains the
@@ -415,8 +537,8 @@ jobs:
         with:
           name: dst-output
           path: |
-            target/xtask/dst-output.log
-            target/xtask/dst-summary.json
+            target/dst/output.log
+            target/dst/summary.json
           retention-days: 30
           if-no-files-found: warn
 
@@ -427,12 +549,12 @@ jobs:
         # needed to get the first-line seed.
         if: failure()
         run: |
-          if [ -f target/xtask/dst-summary.json ]; then
-            SEED=$(jq -r '.seed // "unknown"' target/xtask/dst-summary.json)
-            INV=$(jq -r '.invariant // "unknown"' target/xtask/dst-summary.json)
-            TICK=$(jq -r '.tick // "unknown"' target/xtask/dst-summary.json)
-            HOST=$(jq -r '.host // "unknown"' target/xtask/dst-summary.json)
-            REPRO=$(jq -r '.reproduce // "cargo xtask dst --seed <N>"' target/xtask/dst-summary.json)
+          if [ -f target/dst/summary.json ]; then
+            SEED=$(jq -r '.seed // "unknown"' target/dst/summary.json)
+            INV=$(jq -r '.invariant // "unknown"' target/dst/summary.json)
+            TICK=$(jq -r '.tick // "unknown"' target/dst/summary.json)
+            HOST=$(jq -r '.host // "unknown"' target/dst/summary.json)
+            REPRO=$(jq -r '.reproduce // "cargo dst --seed <N>"' target/dst/summary.json)
             {
               echo "## DST failure"
               echo ""
@@ -490,9 +612,22 @@ jobs:
 
       - name: Enable sccache when setup succeeded
         if: steps.sccache-setup.outcome == 'success'
+        # The action reports `success` even when the underlying GHA cache
+        # backend is unreachable (no ACTIONS_*_URL exported to GITHUB_ENV).
+        # If we forwarded RUSTC_WRAPPER=sccache into the build with an
+        # empty URL, sccache would refuse to start ("cache url for ghac
+        # not found") and every rustc invocation — including rustup's
+        # toolchain verification probe — would exit 2. Guard explicitly:
+        # require at least one of ACTIONS_CACHE_URL (v1 backend) or
+        # ACTIONS_RESULTS_URL (v2 backend, post-Feb-2025) to be set
+        # before flipping the wrapper on.
         run: |
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          if [ -n "${ACTIONS_CACHE_URL:-}" ] || [ -n "${ACTIONS_RESULTS_URL:-}" ]; then
+            echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+            echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          else
+            echo "::warning::sccache-action reported success but neither ACTIONS_CACHE_URL nor ACTIONS_RESULTS_URL is set; building without compiler cache."
+          fi
 
       - name: Warn when sccache unavailable
         if: steps.sccache-setup.outcome != 'success'
@@ -536,9 +671,22 @@ jobs:
 
       - name: Enable sccache when setup succeeded
         if: steps.sccache-setup.outcome == 'success'
+        # The action reports `success` even when the underlying GHA cache
+        # backend is unreachable (no ACTIONS_*_URL exported to GITHUB_ENV).
+        # If we forwarded RUSTC_WRAPPER=sccache into the build with an
+        # empty URL, sccache would refuse to start ("cache url for ghac
+        # not found") and every rustc invocation — including rustup's
+        # toolchain verification probe — would exit 2. Guard explicitly:
+        # require at least one of ACTIONS_CACHE_URL (v1 backend) or
+        # ACTIONS_RESULTS_URL (v2 backend, post-Feb-2025) to be set
+        # before flipping the wrapper on.
         run: |
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          if [ -n "${ACTIONS_CACHE_URL:-}" ] || [ -n "${ACTIONS_RESULTS_URL:-}" ]; then
+            echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+            echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          else
+            echo "::warning::sccache-action reported success but neither ACTIONS_CACHE_URL nor ACTIONS_RESULTS_URL is set; building without compiler cache."
+          fi
 
       - name: Warn when sccache unavailable
         if: steps.sccache-setup.outcome != 'success'
@@ -571,10 +719,7 @@ jobs:
     # Only run on PRs — diff-scoping has nothing meaningful to do on a
     # push to main (the diff is the merge commit itself).
     if: github.event_name == 'pull_request'
-    timeout-minutes: 30
-    # cargo-mutants reruns the workspace nextest baseline per mutation,
-    # which compiles overdrive-dataplane and thus requires the BPF
-    # artifact on Linux per ADR-0038 §3.2.
+    timeout-minutes: 45
     needs: bpf-build
     steps:
       - uses: actions/checkout@v4
@@ -584,27 +729,34 @@ jobs:
           # canonical mutants-diff misconfiguration.
           fetch-depth: 0
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Lima
+        uses: lima-vm/lima-actions/setup@v1
 
-      # mold is the linker per .cargo/config.toml; ubuntu-latest does
-      # not ship it.
-      - name: Install mold linker
-        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends mold
-
-      - uses: Swatinem/rust-cache@v2
+      - name: Cache Lima VM
+        id: lima-cache
+        uses: actions/cache@v4
         with:
-          shared-key: "phase-1-mutants"
+          path: ~/.lima/overdrive
+          key: lima-${{ hashFiles('infra/lima/overdrive-dev.yaml') }}-${{ runner.arch }}
 
-      # MUST run AFTER Swatinem/rust-cache@v2 — see fmt-clippy job above
-      # for rationale (cache tarball restore clobbers the BPF artifact).
+      - name: Provision Lima VM (cache miss)
+        if: steps.lima-cache.outputs.cache-hit != 'true'
+        run: limactl start --timeout=30m --name=overdrive --tty=false infra/lima/overdrive-dev.yaml
+
+      - name: Start cached Lima VM
+        if: steps.lima-cache.outputs.cache-hit == 'true'
+        run: limactl start --timeout=30m overdrive
+
       - name: Download BPF object artifact
         uses: actions/download-artifact@v4
         with:
           name: bpf-object
-          path: target/xtask/bpf-objects/
+          path: target/bpf/
           if-no-files-found: error
 
-      # See fmt-clippy job above for rationale.
+      - name: Ensure base ref available
+        run: git fetch origin main --depth=1 || true
+
       - id: sccache-setup
         name: Setup sccache (soft-fail on cache backend outage)
         continue-on-error: true
@@ -612,40 +764,53 @@ jobs:
 
       - name: Enable sccache when setup succeeded
         if: steps.sccache-setup.outcome == 'success'
+        # The action reports `success` even when the underlying GHA cache
+        # backend is unreachable (no ACTIONS_*_URL exported to GITHUB_ENV).
+        # If we forwarded RUSTC_WRAPPER=sccache into the build with an
+        # empty URL, sccache would refuse to start ("cache url for ghac
+        # not found") and every rustc invocation — including rustup's
+        # toolchain verification probe — would exit 2. Guard explicitly:
+        # require at least one of ACTIONS_CACHE_URL (v1 backend) or
+        # ACTIONS_RESULTS_URL (v2 backend, post-Feb-2025) to be set
+        # before flipping the wrapper on.
         run: |
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          if [ -n "${ACTIONS_CACHE_URL:-}" ] || [ -n "${ACTIONS_RESULTS_URL:-}" ]; then
+            echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+            echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          else
+            echo "::warning::sccache-action reported success but neither ACTIONS_CACHE_URL nor ACTIONS_RESULTS_URL is set; building without compiler cache."
+          fi
 
       - name: Warn when sccache unavailable
         if: steps.sccache-setup.outcome != 'success'
         run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
 
-      - name: Install cargo-mutants + cargo-nextest
-        # xtask mutants invokes cargo-mutants with `--test-tool=nextest`,
-        # so both binaries must be on PATH.
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-mutants,cargo-nextest
-
-      - name: Ensure base ref available
-        run: git fetch origin main --depth=1 || true
-
       - name: cargo xtask mutants --diff origin/main
-        # `--features integration-tests` is passed explicitly so
-        # acceptance tests gated behind that cfg participate in the
-        # mutation lane (see .claude/rules/testing.md §"Integration vs
-        # unit gating"). The workspace convention requires every
-        # member to declare the feature, so the bare flag resolves
-        # uniformly under cargo-mutants v27's per-package scoping —
-        # the wrapper does not auto-add anything.
-        #
-        # `sudo -E env "PATH=$PATH"` matches the `integration` job
-        # (lines 251-254): cargo-mutants reruns the unmutated baseline
-        # under nextest, which spins up the in-process control-plane
-        # server, which writes /sys/fs/cgroup/overdrive.slice/...
-        # That requires root on the unprivileged GHA runner per
-        # ADR-0034 (no in-binary cgroup escape hatch).
-        run: sudo -E env "PATH=$PATH" cargo xtask mutants --diff origin/main --features integration-tests
+        # The Lima VM has cargo-mutants, cargo-nextest, and sccache
+        # pre-installed. sccache pays for itself many times over here:
+        # cargo-mutants does N full rebuilds per mutation, all of which
+        # hit the GHA cache after the first.
+        run: |
+          limactl shell overdrive env \
+            "RUSTC_WRAPPER=${RUSTC_WRAPPER:-}" \
+            "SCCACHE_GHA_ENABLED=${SCCACHE_GHA_ENABLED:-}" \
+            "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL:-}" \
+            "ACTIONS_RESULTS_URL=${ACTIONS_RESULTS_URL:-}" \
+            "ACTIONS_CACHE_SERVICE_V2=${ACTIONS_CACHE_SERVICE_V2:-}" \
+            "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
+            bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
+                      "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
+                      "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
+                      "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
+                      "ACTIONS_RESULTS_URL=$ACTIONS_RESULTS_URL" \
+                      "ACTIONS_CACHE_SERVICE_V2=$ACTIONS_CACHE_SERVICE_V2" \
+                      "ACTIONS_RUNTIME_TOKEN=$ACTIONS_RUNTIME_TOKEN" \
+                      cargo xtask mutants --diff origin/main --features integration-tests'
+
+      - name: Show sccache stats
+        if: always() && steps.sccache-setup.outcome == 'success'
+        run: |
+          limactl shell overdrive bash -lc 'sccache --show-stats' || true
 
       - name: Upload mutants report
         if: always()
@@ -695,12 +860,17 @@ jobs:
             echo "::error title=mutants failed::no mutants-summary.json produced; check artifact"
           fi
 
+      - name: Stop Lima VM (release disk before cache save)
+        if: always()
+        timeout-minutes: 1
+        run: limactl stop overdrive || true
+
   # -------------------------------------------------------------------
   # bpf-build — Phase 2.1 kernel-side ELF compilation.
   #
   # Per devops/ci-cd-pipeline.md §2.1 + ADR-0038 §3, §4. Runs
   # `cargo xtask bpf-build` to produce
-  # `target/xtask/bpf-objects/overdrive_bpf.o`, the artifact every
+  # `target/bpf/overdrive_bpf.o`, the artifact every
   # downstream BPF test job consumes.
   #
   # Provisions bpf-linker via `cargo install --locked bpf-linker`
@@ -714,36 +884,31 @@ jobs:
   bpf-build:
     name: bpf-build
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    # Lima provisioning + nightly `-Z build-std=core` rebuild is meaningfully
+    # slower than the previous host-toolchain shape. Sized for a cold cache
+    # miss; warm cache runs finish well under this budget.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust toolchain (stable, pinned via rust-toolchain.toml)
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install Lima
+        uses: lima-vm/lima-actions/setup@v1
 
-      # `cargo xtask bpf-build` invokes `rustup run nightly cargo build
-      # ... -Z build-std=core` (see xtask/src/main.rs). The
-      # `bpfel-unknown-none` target ships no prebuilt core, so nightly +
-      # rust-src on nightly is required — stable + rust-src does not
-      # satisfy `-Z build-std=core`.
-      - name: Install nightly toolchain (required for -Z build-std=core)
-        uses: dtolnay/rust-toolchain@nightly
+      - name: Cache Lima VM
+        id: lima-cache
+        uses: actions/cache@v4
         with:
-          components: rust-src
+          path: ~/.lima/overdrive
+          key: lima-${{ hashFiles('infra/lima/overdrive-dev.yaml') }}-${{ runner.arch }}
 
-      # mold is the linker per .cargo/config.toml; ubuntu-latest does
-      # not ship it.
-      - name: Install mold linker
-        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends mold
+      - name: Provision Lima VM (cache miss)
+        if: steps.lima-cache.outputs.cache-hit != 'true'
+        run: limactl start --timeout=30m --name=overdrive --tty=false infra/lima/overdrive-dev.yaml
 
-      - uses: Swatinem/rust-cache@v2
-        with:
-          # Independent cache from the existing `phase-1-*` keys so
-          # phase-1 cache invalidation does not cascade. Also caches
-          # `~/.cargo/bin/bpf-linker` after the first install.
-          shared-key: "phase-2-bpf-build"
+      - name: Start cached Lima VM
+        if: steps.lima-cache.outputs.cache-hit == 'true'
+        run: limactl start --timeout=30m overdrive
 
-      # See fmt-clippy job above for rationale.
       - id: sccache-setup
         name: Setup sccache (soft-fail on cache backend outage)
         continue-on-error: true
@@ -751,53 +916,100 @@ jobs:
 
       - name: Enable sccache when setup succeeded
         if: steps.sccache-setup.outcome == 'success'
+        # The action reports `success` even when the underlying GHA cache
+        # backend is unreachable (no ACTIONS_*_URL exported to GITHUB_ENV).
+        # If we forwarded RUSTC_WRAPPER=sccache into the build with an
+        # empty URL, sccache would refuse to start ("cache url for ghac
+        # not found") and every rustc invocation — including rustup's
+        # toolchain verification probe — would exit 2. Guard explicitly:
+        # require at least one of ACTIONS_CACHE_URL (v1 backend) or
+        # ACTIONS_RESULTS_URL (v2 backend, post-Feb-2025) to be set
+        # before flipping the wrapper on.
         run: |
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          if [ -n "${ACTIONS_CACHE_URL:-}" ] || [ -n "${ACTIONS_RESULTS_URL:-}" ]; then
+            echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+            echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          else
+            echo "::warning::sccache-action reported success but neither ACTIONS_CACHE_URL nor ACTIONS_RESULTS_URL is set; building without compiler cache."
+          fi
 
       - name: Warn when sccache unavailable
         if: steps.sccache-setup.outcome != 'success'
         run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
-
-      - name: Install bpf-linker
-        # --locked is mandatory per ADR-0038 §4 for reproducibility.
-        # Cached by Swatinem/rust-cache via `~/.cargo/bin` after the
-        # first run.
-        run: cargo install --locked bpf-linker
-
-      - name: Install clippy on nightly
-        # `cargo xtask bpf-clippy` runs `rustup run nightly cargo
-        # clippy …`; the dtolnay nightly toolchain step above does
-        # not include clippy by default.
-        run: rustup component add --toolchain nightly clippy
 
       - name: cargo xtask bpf-clippy
         # Lint the kernel-side bin under `+nightly --target
         # bpfel-unknown-none -Z build-std=core --features
         # build-bpf-target`. The host workspace clippy job cannot
         # cover this bin: it is `#![no_std] #![no_main]` and rustc
-        # rejects it on the host triple. Running here keeps the
-        # nightly toolchain + cache shared with bpf-build.
-        run: cargo xtask bpf-clippy
+        # rejects it on the host triple.
+        #
+        # The Lima VM has nightly + rust-src + bpf-linker + clippy +
+        # sccache pre-provisioned (see infra/lima/overdrive-dev.yaml).
+        # Note: -Z build-std=core rebuilds `core` per nightly hash;
+        # cache hits are scoped to a stable nightly toolchain.
+        run: |
+          limactl shell overdrive env \
+            "RUSTC_WRAPPER=${RUSTC_WRAPPER:-}" \
+            "SCCACHE_GHA_ENABLED=${SCCACHE_GHA_ENABLED:-}" \
+            "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL:-}" \
+            "ACTIONS_RESULTS_URL=${ACTIONS_RESULTS_URL:-}" \
+            "ACTIONS_CACHE_SERVICE_V2=${ACTIONS_CACHE_SERVICE_V2:-}" \
+            "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
+            bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
+                      "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
+                      "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
+                      "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
+                      "ACTIONS_RESULTS_URL=$ACTIONS_RESULTS_URL" \
+                      "ACTIONS_CACHE_SERVICE_V2=$ACTIONS_CACHE_SERVICE_V2" \
+                      "ACTIONS_RUNTIME_TOKEN=$ACTIONS_RUNTIME_TOKEN" \
+                      cargo xtask bpf-clippy'
 
       - name: cargo xtask bpf-build
         # The xtask wrapper invokes `cargo build --release --target
         # bpfel-unknown-none -Z build-std=core` against
         # crates/overdrive-bpf and copies the resulting ELF to
-        # target/xtask/bpf-objects/overdrive_bpf.o (the stable path
-        # mandated by ADR-0038 §3).
-        run: cargo xtask bpf-build
+        # target/bpf/overdrive_bpf.o (the stable path
+        # mandated by ADR-0038 §3). The destination is on the
+        # virtiofs-mounted workspace, so the artifact is visible on
+        # the host for the upload step below.
+        run: |
+          limactl shell overdrive env \
+            "RUSTC_WRAPPER=${RUSTC_WRAPPER:-}" \
+            "SCCACHE_GHA_ENABLED=${SCCACHE_GHA_ENABLED:-}" \
+            "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL:-}" \
+            "ACTIONS_RESULTS_URL=${ACTIONS_RESULTS_URL:-}" \
+            "ACTIONS_CACHE_SERVICE_V2=${ACTIONS_CACHE_SERVICE_V2:-}" \
+            "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
+            bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
+                      "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
+                      "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
+                      "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
+                      "ACTIONS_RESULTS_URL=$ACTIONS_RESULTS_URL" \
+                      "ACTIONS_CACHE_SERVICE_V2=$ACTIONS_CACHE_SERVICE_V2" \
+                      "ACTIONS_RUNTIME_TOKEN=$ACTIONS_RUNTIME_TOKEN" \
+                      cargo xtask bpf-build'
+
+      - name: Show sccache stats
+        if: always() && steps.sccache-setup.outcome == 'success'
+        run: |
+          limactl shell overdrive bash -lc 'sccache --show-stats' || true
 
       - name: Upload BPF object artifact
         uses: actions/upload-artifact@v4
         with:
           name: bpf-object
-          path: target/xtask/bpf-objects/overdrive_bpf.o
+          path: target/bpf/overdrive_bpf.o
           retention-days: 14
           # if-no-files-found: error is load-bearing — without it a
           # missing artifact silently no-ops and the downstream job
           # fails with a confusing surface.
           if-no-files-found: error
+
+      - name: Stop Lima VM (release disk before cache save)
+        if: always()
+        timeout-minutes: 1
+        run: limactl stop overdrive || true
 
   # -------------------------------------------------------------------
   # bpf-unit — Phase 2.1 Tier 2 BPF unit tests.
@@ -822,22 +1034,35 @@ jobs:
     name: bpf-unit
     runs-on: ubuntu-latest
     needs: bpf-build
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Lima
+        uses: lima-vm/lima-actions/setup@v1
 
-      # mold is the linker per .cargo/config.toml; ubuntu-latest does
-      # not ship it.
-      - name: Install mold linker
-        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends mold
-
-      - uses: Swatinem/rust-cache@v2
+      - name: Cache Lima VM
+        id: lima-cache
+        uses: actions/cache@v4
         with:
-          shared-key: "phase-2-bpf-unit"
+          path: ~/.lima/overdrive
+          key: lima-${{ hashFiles('infra/lima/overdrive-dev.yaml') }}-${{ runner.arch }}
 
-      # See fmt-clippy job above for rationale.
+      - name: Provision Lima VM (cache miss)
+        if: steps.lima-cache.outputs.cache-hit != 'true'
+        run: limactl start --timeout=30m --name=overdrive --tty=false infra/lima/overdrive-dev.yaml
+
+      - name: Start cached Lima VM
+        if: steps.lima-cache.outputs.cache-hit == 'true'
+        run: limactl start --timeout=30m overdrive
+
+      - name: Download BPF object artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bpf-object
+          path: target/bpf/
+          if-no-files-found: error
+
       - id: sccache-setup
         name: Setup sccache (soft-fail on cache backend outage)
         continue-on-error: true
@@ -845,42 +1070,53 @@ jobs:
 
       - name: Enable sccache when setup succeeded
         if: steps.sccache-setup.outcome == 'success'
+        # The action reports `success` even when the underlying GHA cache
+        # backend is unreachable (no ACTIONS_*_URL exported to GITHUB_ENV).
+        # If we forwarded RUSTC_WRAPPER=sccache into the build with an
+        # empty URL, sccache would refuse to start ("cache url for ghac
+        # not found") and every rustc invocation — including rustup's
+        # toolchain verification probe — would exit 2. Guard explicitly:
+        # require at least one of ACTIONS_CACHE_URL (v1 backend) or
+        # ACTIONS_RESULTS_URL (v2 backend, post-Feb-2025) to be set
+        # before flipping the wrapper on.
         run: |
-          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
-          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          if [ -n "${ACTIONS_CACHE_URL:-}" ] || [ -n "${ACTIONS_RESULTS_URL:-}" ]; then
+            echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+            echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          else
+            echo "::warning::sccache-action reported success but neither ACTIONS_CACHE_URL nor ACTIONS_RESULTS_URL is set; building without compiler cache."
+          fi
 
       - name: Warn when sccache unavailable
         if: steps.sccache-setup.outcome != 'success'
         run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
 
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-nextest
-
-      # MUST run AFTER Swatinem/rust-cache@v2 — see fmt-clippy job above
-      # for rationale (cache tarball restore clobbers the BPF artifact).
-      - name: Download BPF object artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: bpf-object
-          # Materialises overdrive_bpf.o at the path the loader's
-          # `include_bytes!` and the build.rs shim both reference (the
-          # stable path mandated by ADR-0038 §3).
-          path: target/xtask/bpf-objects/
-          # Fail fast at the boundary — without this a missing-artifact
-          # case (e.g. bpf-build panicked but emitted nothing) silently
-          # no-ops and the downstream failure surfaces as a confusing
-          # build.rs shim error.
-          if-no-files-found: error
-
       - name: cargo xtask bpf-unit
-        # `sudo -E env "PATH=$PATH"` matches the `integration` and
-        # `mutants-diff` jobs above. CAP_BPF is required because Ubuntu
-        # 22.04+ ships `kernel.unprivileged_bpf_disabled = 2` — see
-        # upstream-issues.md §A2 for the empirical correction to
-        # ci-cd-pipeline.md §2.2's earlier "no CAP_BPF needed" claim.
-        run: sudo -E env "PATH=$PATH" cargo xtask bpf-unit
+        # CAP_BPF is required; the Lima VM's `xtask lima run` wrapper
+        # provides root via `sudo -E`. The xtask `bpf_unit()` function
+        # calls `ensure_in_lima()` which detects the VM and proceeds
+        # directly.
+        run: |
+          limactl shell overdrive env \
+            "RUSTC_WRAPPER=${RUSTC_WRAPPER:-}" \
+            "SCCACHE_GHA_ENABLED=${SCCACHE_GHA_ENABLED:-}" \
+            "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL:-}" \
+            "ACTIONS_RESULTS_URL=${ACTIONS_RESULTS_URL:-}" \
+            "ACTIONS_CACHE_SERVICE_V2=${ACTIONS_CACHE_SERVICE_V2:-}" \
+            "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
+            bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
+                      "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
+                      "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
+                      "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
+                      "ACTIONS_RESULTS_URL=$ACTIONS_RESULTS_URL" \
+                      "ACTIONS_CACHE_SERVICE_V2=$ACTIONS_CACHE_SERVICE_V2" \
+                      "ACTIONS_RUNTIME_TOKEN=$ACTIONS_RUNTIME_TOKEN" \
+                      cargo xtask bpf-unit'
+
+      - name: Show sccache stats
+        if: always() && steps.sccache-setup.outcome == 'success'
+        run: |
+          limactl shell overdrive bash -lc 'sccache --show-stats' || true
 
       - name: Upload nextest JUnit report
         if: always()
@@ -890,3 +1126,232 @@ jobs:
           path: target/nextest/ci/junit.xml
           retention-days: 14
           if-no-files-found: warn
+
+      - name: Stop Lima VM (release disk before cache save)
+        if: always()
+        timeout-minutes: 1
+        run: limactl stop overdrive || true
+
+  # -------------------------------------------------------------------
+  # Job E (Tier 4) — verifier-budget regression gate
+  # -------------------------------------------------------------------
+  # `cargo verifier-regress` (alias resolves to
+  # `cargo run -p overdrive-dataplane --bin verifier_regress`) loads
+  # the compiled BPF object via aya, reads each program's
+  # `ProgramInfo::verified_instruction_count` (kernel ≥5.16
+  # `bpf_prog_info.verified_insns`), and fails the PR if any program
+  # exceeds its baseline at `perf-baseline/main/verifier-budget/` by
+  # >5%, or approaches the per-program 1M CAP_BPF complexity ceiling
+  # by >10%.
+  #
+  # # Why aya, not veristat
+  #
+  # libbpf 1.0+ removed the legacy `SEC("maps")` parser; aya 0.13.x
+  # still emits maps in that legacy section, so libbpf-linked tools
+  # (veristat, bpftool) refuse to load aya ELFs. The signal we want
+  # — `bpf_prog_info.verified_insns` — is the same field veristat
+  # surfaces as `TOTAL_INSNS`; reading it via aya bypasses libbpf
+  # entirely. Tracking aya issue #913.
+  #
+  # Pure-Rust gate logic self-tested by `cargo nextest run -p
+  # overdrive-dataplane` (unit tests in
+  # `crates/overdrive-dataplane/src/verifier_budget.rs`); this job
+  # runs the gate against the real BPF object. See
+  # `.claude/rules/testing.md` § "Tier 4 — Verifier and Performance
+  # Gates".
+  verifier-regress:
+    name: cargo verifier-regress
+    runs-on: ubuntu-latest
+    needs: bpf-build
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Lima
+        uses: lima-vm/lima-actions/setup@v1
+
+      - name: Cache Lima VM
+        id: lima-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.lima/overdrive
+          key: lima-${{ hashFiles('infra/lima/overdrive-dev.yaml') }}-${{ runner.arch }}
+
+      - name: Provision Lima VM (cache miss)
+        if: steps.lima-cache.outputs.cache-hit != 'true'
+        run: limactl start --timeout=30m --name=overdrive --tty=false infra/lima/overdrive-dev.yaml
+
+      - name: Start cached Lima VM
+        if: steps.lima-cache.outputs.cache-hit == 'true'
+        run: limactl start --timeout=30m overdrive
+
+      - name: Download BPF object artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bpf-object
+          path: target/bpf/
+          if-no-files-found: error
+
+      - id: sccache-setup
+        name: Setup sccache (soft-fail on cache backend outage)
+        continue-on-error: true
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Enable sccache when setup succeeded
+        if: steps.sccache-setup.outcome == 'success'
+        # The action reports `success` even when the underlying GHA cache
+        # backend is unreachable (no ACTIONS_*_URL exported to GITHUB_ENV).
+        # If we forwarded RUSTC_WRAPPER=sccache into the build with an
+        # empty URL, sccache would refuse to start ("cache url for ghac
+        # not found") and every rustc invocation — including rustup's
+        # toolchain verification probe — would exit 2. Guard explicitly:
+        # require at least one of ACTIONS_CACHE_URL (v1 backend) or
+        # ACTIONS_RESULTS_URL (v2 backend, post-Feb-2025) to be set
+        # before flipping the wrapper on.
+        run: |
+          if [ -n "${ACTIONS_CACHE_URL:-}" ] || [ -n "${ACTIONS_RESULTS_URL:-}" ]; then
+            echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+            echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          else
+            echo "::warning::sccache-action reported success but neither ACTIONS_CACHE_URL nor ACTIONS_RESULTS_URL is set; building without compiler cache."
+          fi
+
+      - name: Warn when sccache unavailable
+        if: steps.sccache-setup.outcome != 'success'
+        run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
+
+      - name: cargo verifier-regress
+        run: |
+          limactl shell overdrive env \
+            "RUSTC_WRAPPER=${RUSTC_WRAPPER:-}" \
+            "SCCACHE_GHA_ENABLED=${SCCACHE_GHA_ENABLED:-}" \
+            "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL:-}" \
+            "ACTIONS_RESULTS_URL=${ACTIONS_RESULTS_URL:-}" \
+            "ACTIONS_CACHE_SERVICE_V2=${ACTIONS_CACHE_SERVICE_V2:-}" \
+            "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
+            bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
+                      "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
+                      "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
+                      "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
+                      "ACTIONS_RESULTS_URL=$ACTIONS_RESULTS_URL" \
+                      "ACTIONS_CACHE_SERVICE_V2=$ACTIONS_CACHE_SERVICE_V2" \
+                      "ACTIONS_RUNTIME_TOKEN=$ACTIONS_RUNTIME_TOKEN" \
+                      cargo run -p overdrive-dataplane --bin verifier_regress'
+
+      - name: Show sccache stats
+        if: always() && steps.sccache-setup.outcome == 'success'
+        run: |
+          limactl shell overdrive bash -lc 'sccache --show-stats' || true
+
+      - name: Stop Lima VM (release disk before cache save)
+        if: always()
+        timeout-minutes: 1
+        run: limactl stop overdrive || true
+
+  # -------------------------------------------------------------------
+  # Job E (Tier 4) — XDP throughput / mean-latency regression gate
+  # -------------------------------------------------------------------
+  # `cargo xdp-perf` (binary at
+  # `crates/overdrive-dataplane/bin/xdp_perf.rs`) loads each
+  # XDP program named in `perf-baseline/main/xdp-perf/*.txt` via
+  # aya, runs each in-kernel via `BPF_PROG_TEST_RUN` with
+  # `repeat=N`, then reads `bpf_prog_info.run_time_ns` / `run_cnt`
+  # (gated on `aya::sys::enable_stats(Stats::RunTime)`, kernel ≥5.8)
+  # to compute pps + mean_ns. Fails the PR if pps regresses by >5%
+  # or mean_ns rises by >10% vs the recorded baseline. Pure gate
+  # logic self-tested via `cargo nextest run -p overdrive-dataplane
+  # --lib -E 'test(xdp_perf_gate)'`. See
+  # `.claude/rules/testing.md` § "Tier 4 — Verifier and Performance
+  # Gates".
+  xdp-perf:
+    name: cargo xdp-perf
+    runs-on: ubuntu-latest
+    needs: bpf-build
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Lima
+        uses: lima-vm/lima-actions/setup@v1
+
+      - name: Cache Lima VM
+        id: lima-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.lima/overdrive
+          key: lima-${{ hashFiles('infra/lima/overdrive-dev.yaml') }}-${{ runner.arch }}
+
+      - name: Provision Lima VM (cache miss)
+        if: steps.lima-cache.outputs.cache-hit != 'true'
+        run: limactl start --timeout=30m --name=overdrive --tty=false infra/lima/overdrive-dev.yaml
+
+      - name: Start cached Lima VM
+        if: steps.lima-cache.outputs.cache-hit == 'true'
+        run: limactl start --timeout=30m overdrive
+
+      - name: Download BPF object artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: bpf-object
+          path: target/bpf/
+          if-no-files-found: error
+
+      - id: sccache-setup
+        name: Setup sccache (soft-fail on cache backend outage)
+        continue-on-error: true
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Enable sccache when setup succeeded
+        if: steps.sccache-setup.outcome == 'success'
+        # The action reports `success` even when the underlying GHA cache
+        # backend is unreachable (no ACTIONS_*_URL exported to GITHUB_ENV).
+        # If we forwarded RUSTC_WRAPPER=sccache into the build with an
+        # empty URL, sccache would refuse to start ("cache url for ghac
+        # not found") and every rustc invocation — including rustup's
+        # toolchain verification probe — would exit 2. Guard explicitly:
+        # require at least one of ACTIONS_CACHE_URL (v1 backend) or
+        # ACTIONS_RESULTS_URL (v2 backend, post-Feb-2025) to be set
+        # before flipping the wrapper on.
+        run: |
+          if [ -n "${ACTIONS_CACHE_URL:-}" ] || [ -n "${ACTIONS_RESULTS_URL:-}" ]; then
+            echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+            echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+          else
+            echo "::warning::sccache-action reported success but neither ACTIONS_CACHE_URL nor ACTIONS_RESULTS_URL is set; building without compiler cache."
+          fi
+
+      - name: Warn when sccache unavailable
+        if: steps.sccache-setup.outcome != 'success'
+        run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
+
+      # The Lima VM has the full toolchain. Needs `CAP_SYS_ADMIN` for
+      # `enable_stats(RunTime)` — the default `sudo -E` wrapper inside
+      # the VM provides it.
+      - name: cargo xdp-perf
+        run: |
+          limactl shell overdrive env \
+            "RUSTC_WRAPPER=${RUSTC_WRAPPER:-}" \
+            "SCCACHE_GHA_ENABLED=${SCCACHE_GHA_ENABLED:-}" \
+            "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL:-}" \
+            "ACTIONS_RESULTS_URL=${ACTIONS_RESULTS_URL:-}" \
+            "ACTIONS_CACHE_SERVICE_V2=${ACTIONS_CACHE_SERVICE_V2:-}" \
+            "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
+            bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
+                      "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
+                      "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
+                      "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
+                      "ACTIONS_RESULTS_URL=$ACTIONS_RESULTS_URL" \
+                      "ACTIONS_CACHE_SERVICE_V2=$ACTIONS_CACHE_SERVICE_V2" \
+                      "ACTIONS_RUNTIME_TOKEN=$ACTIONS_RUNTIME_TOKEN" \
+                      cargo xdp-perf'
+
+      - name: Show sccache stats
+        if: always() && steps.sccache-setup.outcome == 'success'
+        run: |
+          limactl shell overdrive bash -lc 'sccache --show-stats' || true
+
+      - name: Stop Lima VM (release disk before cache save)
+        if: always()
+        timeout-minutes: 1
+        run: limactl stop overdrive || true
+
