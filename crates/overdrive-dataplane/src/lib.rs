@@ -548,11 +548,20 @@ impl EbpfDataplane {
     }
 
     /// Returns `true` if REVERSE_NAT_MAP contains an entry for the
-    /// given `(backend_ip, backend_port)` keyed under TCP.
+    /// given `(backend_ip, backend_port)` keyed under TCP only.
     ///
     /// Observability surface — companion to [`Self::reverse_nat_map_size`].
     /// Phase 2.2 hardcodes proto = TCP; UDP support follows in a
-    /// future slice when the trait surface gains the field.
+    /// future slice when the trait surface gains the field (GH #163).
+    ///
+    /// **Sim-vs-production divergence**: `SimDataplane::update_service`
+    /// writes reverse-NAT entries for both `Proto::Tcp` and `Proto::Udp`
+    /// (via `reverse_nat_keys_for`), and the `ReverseNatLockstep` DST
+    /// invariant asserts on both protos. This production helper — and
+    /// `EbpfDataplane::update_service` — only populate / query TCP keys.
+    /// Tier 3 tests using this helper to verify lockstep correctness will
+    /// miss UDP-only gaps; use `reverse_nat_map_size` for a proto-agnostic
+    /// count or iterate the map directly when both protos matter.
     ///
     /// # Errors
     ///
