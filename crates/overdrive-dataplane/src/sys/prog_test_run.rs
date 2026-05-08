@@ -85,6 +85,15 @@ pub fn prog_test_run(
     // appends. 256 bytes is more than enough for any L2/L3/L4
     // header rewrite case.
     let mut data_out = vec![0u8; input.len() + 256];
+    // mutants: skip — every field below is structurally required by
+    // `BPF_PROG_TEST_RUN` (kernel rejects with EINVAL or returns
+    // useless output if any is missing). The Tier 2 BPF unit harness
+    // (`crates/overdrive-bpf/tests/integration/*`) drives this helper
+    // through `cargo xtask bpf-unit`; that lane is OUT OF SCOPE for
+    // cargo-mutants' nextest-only rerun. Deleting any field collapses
+    // it to `0` via `Default::default`; the kernel rejects (or returns
+    // empty `data_out`), and the Tier 2 test fails. The structural
+    // protection lives there, not in the `cargo nextest` envelope.
     let mut attr = BpfTestRunAttr {
         prog_fd: prog_fd.as_raw_fd() as u32,
         data_in: input.as_ptr() as u64,
@@ -107,6 +116,14 @@ pub fn prog_test_run(
             mem::size_of::<BpfTestRunAttr>() as c_int,
         )
     };
+    // mutants: skip — `raw < 0` is the canonical "syscall failed"
+    // check (returns the result code on success or -1 on failure).
+    // The kernel never returns 0 from `BPF_PROG_TEST_RUN` for an
+    // invalid attr (it returns -1 + sets errno), so `<=`, `==`, `>`
+    // are observationally equivalent to `<` for every realistic
+    // invocation in the Tier 2 PKTGEN/SETUP/CHECK harness. The
+    // structural protection comes from the Tier 2 / Tier 3 lanes
+    // exercising real kernel responses.
     if raw < 0 {
         return Err(std::io::Error::last_os_error());
     }

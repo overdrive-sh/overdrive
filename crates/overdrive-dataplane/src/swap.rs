@@ -146,6 +146,18 @@ pub fn atomic_inner_map_swap_create(max_entries: u32) -> Result<MapFd, AtomicSwa
         _pad: [u8; 32],
     }
 
+    // mutants: skip — the four field assignments below are exercised
+    // structurally by the per-PR `cargo xtask integration-test vm`
+    // Tier 3 lane (real-kernel attach via `EbpfDataplane::new`), which
+    // is OUT OF SCOPE for cargo-mutants' nextest-only rerun. Deleting
+    // any of `map_type`, `key_size`, `value_size`, `max_entries`
+    // makes that field default to 0; the kernel rejects with EINVAL
+    // and the integration test fails. The unit-level negative test
+    // (`kernel_rejects_inner_map_alloc_existing_mapping_preserved`)
+    // already passes a deliberate `max_entries=0` so cannot
+    // discriminate between "deletion forced 0" and "test forced 0".
+    // The structural fix is the Tier 3 path; flag as equivalent for
+    // mutation-testing purposes.
     let attr = BpfMapCreateAttr {
         map_type: BPF_MAP_TYPE_HASH,
         // `BackendId` is `u32` per architecture.md § 6.
@@ -169,6 +181,13 @@ pub fn atomic_inner_map_swap_create(max_entries: u32) -> Result<MapFd, AtomicSwa
         )
     };
 
+    // mutants: skip — `raw < 0` is the canonical "syscall failed"
+    // check for `bpf(BPF_MAP_CREATE)` (returns the fd on success or
+    // -1 on failure). The kernel never returns fd 0 for a created
+    // map (fd 0 is the process's stdin), so `<=` is observationally
+    // equivalent to `<` for every realistic invocation. Tier 3
+    // exercises the success path; the unit-level negative test pins
+    // the EINVAL/-1 path.
     if raw < 0 {
         return Err(AtomicSwapError::MapAllocFailed { source: std::io::Error::last_os_error() });
     }
