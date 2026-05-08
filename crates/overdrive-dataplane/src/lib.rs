@@ -944,16 +944,13 @@ impl Dataplane for EbpfDataplane {
         // `crates/overdrive-bpf/src/programs/xdp_service_map.rs`.
         let weighted: std::collections::BTreeMap<overdrive_core::id::BackendId, u16> = backends
             .iter()
-            .filter_map(|backend| {
-                BackendEntryPod::from_backend(backend).ok().map(|pod| {
-                    // Memo hit — every endpoint was already allocated in
-                    // Step 1's BACKEND_MAP populate loop above.
-                    let bid =
-                        self.backend_id_alloc.lock().allocate(pod.ipv4_host, pod.port_host, proto);
-                    (bid, backend.weight.max(1))
-                })
+            .map(|backend| {
+                let pod = BackendEntryPod::from_backend(backend)?;
+                let bid =
+                    self.backend_id_alloc.lock().allocate(pod.ipv4_host, pod.port_host, proto);
+                Ok((bid, backend.weight.max(1)))
             })
-            .collect();
+            .collect::<Result<_, DataplaneError>>()?;
         let permutation = overdrive_core::maglev::permutation::generate(
             &weighted,
             overdrive_core::dataplane::MaglevTableSize::DEFAULT,
