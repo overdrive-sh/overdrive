@@ -1189,6 +1189,18 @@ mechanically: bare `cargo nextest run` is blocked at the tool-call
 boundary on all platforms. The hook allows only `cargo xtask lima run
 -- cargo nextest run ...` and the `--no-run` compile-check form.
 
+The same Lima discipline extends to compile-only commands on macOS:
+`cargo check` is blocked by `.claude/hooks/block-bare-cargo-check.ts`
+and `cargo clippy` by `.claude/hooks/block-bare-clippy.ts` unless
+routed through `cargo xtask lima run --`. The cargo-check hook is a
+no-op on Linux — the host already matches the canonical compile
+environment — but macOS host rustc resolves
+`#[cfg(target_os = "linux")]` items differently and skips Linux-gated
+`build.rs` steps, so a green check on the macOS host is not the same
+signal as a green check inside Lima. See
+`.claude/rules/development.md` § "Compile-checking" for the rationale
+applied to `cargo check` specifically.
+
 **Where the VM is defined.** `infra/lima/overdrive-dev.yaml` describes
 the project's standard dev VM (Ubuntu 24.04, kernel 6.8, cgroup v2,
 KVM, full eBPF + BPF LSM toolchain, `cargo-nextest`, `cargo-mutants`).

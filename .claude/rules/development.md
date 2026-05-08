@@ -1273,6 +1273,32 @@ a reconciler.
 > errors," you want `cargo check`. If you need the binary, reach for
 > the xtask wrapper that already knows how to produce it.
 
+> **On macOS, every `cargo check` must go through Lima.**
+>
+> `cargo check` is **blocked** on macOS by a pre-tool hook
+> (`.claude/hooks/block-bare-cargo-check.ts`) unless it is already
+> wrapped in `cargo xtask lima run --`. On Linux the hook is a no-op
+> — the host IS the canonical compile environment.
+>
+> **Rewrite your command before submitting it (macOS):**
+>
+> | ❌ don't | ✅ do |
+> |---|---|
+> | `cargo check` | `cargo xtask lima run -- cargo check` |
+> | `cargo check -p CRATE` | `cargo xtask lima run -- cargo check -p CRATE` |
+> | `cargo check --workspace` | `cargo xtask lima run -- cargo check --workspace` |
+> | `cargo check --all-targets` | `cargo xtask lima run -- cargo check --all-targets` |
+> | `cargo check --features X` | `cargo xtask lima run -- cargo check --features X` |
+>
+> **Why:** typecheck signal must match the canonical compile
+> environment. macOS host rustc resolves `#[cfg(target_os = "linux")]`
+> items differently, may miss conditional dependencies, and skips
+> `build.rs` steps gated on Linux. A green `cargo check` on macOS
+> without Lima is not the same signal as a green check inside Lima —
+> and the next Lima-side compile diverges silently. The same
+> rationale governs `cargo nextest run` and `cargo clippy` on macOS;
+> see § "Running tests — Lima VM" in `.claude/rules/testing.md`.
+
 ## Committing a focused subset
 
 The lefthook pre-commit pipeline auto-stages modified files into the

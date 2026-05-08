@@ -51,7 +51,7 @@ if (cmd && isBlockedClippyRun(cmd)) {
       "All cargo commands go through the Lima VM for reproducibility.\n\n" +
       "Route through Lima instead:\n" +
       "  cargo clippy [ARGS]\n" +
-      "  →  cargo xtask lima run --no-sudo -- cargo clippy [ARGS]\n\n" +
+      "  →  cargo xtask lima run -- cargo clippy [ARGS]\n\n" +
       "Allowed exceptions:\n" +
       "  cargo xtask lima run --      already routed through Lima\n" +
       "  cargo xtask bpf-clippy       self-routes through Lima"

@@ -51,6 +51,12 @@
             "command": "bun run .claude/hooks/block-cargo-build.ts",
             "timeout": 10,
             "statusMessage": "Checking for `cargo build` (use `cargo check`)..."
+          },
+          {
+            "type": "command",
+            "command": "bun run .claude/hooks/block-bare-cargo-check.ts",
+            "timeout": 10,
+            "statusMessage": "Checking for bare `cargo check` (macOS → use Lima)..."
           }
         ]
       },
