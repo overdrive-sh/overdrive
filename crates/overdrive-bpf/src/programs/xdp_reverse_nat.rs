@@ -340,12 +340,8 @@ fn rewrite_and_redirect(
 
     // RFC 768 (UDP): csum=0x0000 means "no checksum computed" —
     // if the original L4 csum was 0 (UDP with no checksum),
-    // leave untouched.
-    if is_udp && old_l4_csum == 0 {
-        unsafe {
-            write_u16_be(ctx, l4_off + l4_csum_off, 0)?;
-        }
-    } else {
+    // the zero written above is already correct; skip recomputation.
+    if !is_udp || old_l4_csum != 0 {
         // Pass host-order IPs — `recompute_l4_csum` extracts
         // pseudo-header u16 words via `>> 16` / `& 0xffff`.
         // new_src_ip is host-order from Vip; dst_ip is host-order
