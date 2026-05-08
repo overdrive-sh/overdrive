@@ -52,18 +52,6 @@ const DROP_CLASS_MALFORMED_HEADER: u32 = 0;
 
 // ---------- workspace plumbing ----------
 
-fn workspace_root() -> PathBuf {
-    let manifest = env!("CARGO_MANIFEST_DIR");
-    let mut p = PathBuf::from(manifest);
-    p.pop(); // remove `overdrive-bpf`
-    p.pop(); // remove `crates`
-    p
-}
-
-fn bpf_artifact_path() -> PathBuf {
-    workspace_root().join("target/bpf/overdrive_bpf.o")
-}
-
 // ---------- bpf(2) syscall helper ----------
 
 fn bpf_prog_test_run(
@@ -241,12 +229,13 @@ struct LoadedXdp {
 }
 
 fn load_xdp_program() -> LoadedXdp {
-    let artifact = bpf_artifact_path();
-    assert!(
-        artifact.exists(),
-        "BPF artifact missing at {} — run `cargo xtask bpf-build` first",
-        artifact.display(),
-    );
+    // Existence + freshness gate; the shared helper compares the
+    // artifact's mtime against the newest `*.rs` under
+    // `crates/overdrive-bpf/src/` and panics with a clear
+    // remediation when stale — plugs the workflow trap where
+    // `cargo nextest` does NOT transitively rebuild the BPF ELF
+    // when its source changes.
+    let artifact = super::bpf_artifact::path();
 
     let pin_dir = PathBuf::from(format!(
         "/sys/fs/bpf/overdrive-test-sanity-xdp-{}-{:?}",

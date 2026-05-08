@@ -84,18 +84,6 @@ const XDP_REDIRECT: u32 = 4;
 
 // ----- workspace plumbing (same shape as sibling tests) -----
 
-fn workspace_root() -> PathBuf {
-    let manifest = env!("CARGO_MANIFEST_DIR");
-    let mut p = PathBuf::from(manifest);
-    p.pop(); // remove `overdrive-bpf`
-    p.pop(); // remove `crates`
-    p
-}
-
-fn bpf_artifact_path() -> PathBuf {
-    workspace_root().join("target/bpf/overdrive_bpf.o")
-}
-
 // ----- syscall helper -----
 
 /// Drive `BPF_PROG_TEST_RUN`. Returns `(retval, data_out_len)`.
@@ -349,12 +337,7 @@ impl Drop for BlackholeRouteGuard {
 }
 
 fn load_service_map_program() -> LoadedTestBpf {
-    let artifact = bpf_artifact_path();
-    assert!(
-        artifact.exists(),
-        "BPF artifact missing at {} — run `cargo xtask bpf-build` first",
-        artifact.display(),
-    );
+    let artifact = super::bpf_artifact::path();
 
     let pin_dir = PathBuf::from(format!(
         "/sys/fs/bpf/overdrive-test-rdrnh-tier2-{}-{:?}",

@@ -23,6 +23,9 @@
 #![allow(clippy::expect_used)]
 
 mod integration {
+    // Shared helpers; consumed by sibling scenario modules below.
+    mod bpf_artifact;
+
     mod xdp_pass_test_run;
     // phase-2-xdp-service-map DISTILL — RED scaffolds per
     // `docs/feature/phase-2-xdp-service-map/distill/test-scenarios.md`

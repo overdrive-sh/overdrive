@@ -39,8 +39,6 @@
     clippy::doc_markdown
 )]
 
-use std::path::PathBuf;
-
 use aya::{
     EbpfLoader,
     maps::HashMap,
@@ -58,23 +56,6 @@ use serial_test::serial;
 /// `aya-ebpf-bindings-0.1.2/src/<arch>/bindings.rs` (`pub const
 /// XDP_PASS: Type = 2`).
 const XDP_PASS: u32 = 2;
-
-/// Walk up from `crates/overdrive-bpf`'s manifest dir to the
-/// workspace root. The BPF artifact at
-/// `target/bpf/overdrive_bpf.o` is workspace-relative.
-///
-/// `crates/overdrive-bpf/` -> pop twice (crate name + `crates/`).
-fn workspace_root() -> PathBuf {
-    let manifest = env!("CARGO_MANIFEST_DIR");
-    let mut p = PathBuf::from(manifest);
-    p.pop(); // remove `overdrive-bpf`
-    p.pop(); // remove `crates`
-    p
-}
-
-fn bpf_artifact_path() -> PathBuf {
-    workspace_root().join("target/bpf/overdrive_bpf.o")
-}
 
 /// PKTGEN — synthesise a minimal Ethernet (14B) + IPv4 (20B) +
 /// TCP (20B) frame. The `xdp_pass` program does not parse the
@@ -188,12 +169,7 @@ impl AsRawFdU32 for std::os::fd::BorrowedFd<'_> {
 #[test]
 #[serial(env)]
 fn bpf_unit_runs_xdp_pass_triptych_via_bpf_prog_test_run() {
-    let artifact = bpf_artifact_path();
-    assert!(
-        artifact.exists(),
-        "BPF artifact missing at {} — run `cargo xtask bpf-build` first",
-        artifact.display(),
-    );
+    let artifact = super::bpf_artifact::path();
 
     // SETUP: load the BPF object and resolve the `xdp_pass` program
     // and `PKTS` map. The ELF declares `SERVICE_MAP` as a HASH_OF_MAPS
