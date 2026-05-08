@@ -28,7 +28,6 @@
 //! host-order. This module is endianness-agnostic — it copies raw
 //! bytes — so the rule is enforced by the caller.
 
-#![cfg(target_os = "linux")]
 // `bpf(2)` syscall surface — FD <-> u32 casts (kernel ABI), raw
 // pointer borrows for `bpf_attr` arg buffers, `repr(C)` POD struct
 // construction. Pedantic lints flag these; the patterns are

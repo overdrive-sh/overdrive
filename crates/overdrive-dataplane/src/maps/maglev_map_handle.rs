@@ -24,8 +24,6 @@
 
 #![allow(dead_code)]
 
-#[cfg(target_os = "linux")]
 pub use crate::maps::hash_of_maps::HashOfMapsHandle as MaglevMapHandle;
 
-#[cfg(target_os = "linux")]
 pub use overdrive_core::dataplane::MaglevTableSize;

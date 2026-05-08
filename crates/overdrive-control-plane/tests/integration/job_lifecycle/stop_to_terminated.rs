@@ -6,12 +6,6 @@
 //! and drives convergence again — alloc must transition Running →
 //! Terminated.
 //!
-//! Linux-only — gated by `#[cfg(target_os = "linux")]` AND
-//! `#[cfg(feature = "integration-tests")]`. Compile-clean on macOS via
-//! `cargo nextest run --features integration-tests --no-run`.
-
-#![cfg(target_os = "linux")]
-
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 

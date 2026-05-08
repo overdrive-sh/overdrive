@@ -39,8 +39,6 @@
 //! `slice == <tmp>/user.slice/user-1000.slice` and `missing` contains
 //! both `cpu` and `memory`.
 
-#![cfg(target_os = "linux")]
-
 use overdrive_control_plane::cgroup_preflight::{CgroupPreflightError, run_preflight_at};
 use tempfile::TempDir;
 

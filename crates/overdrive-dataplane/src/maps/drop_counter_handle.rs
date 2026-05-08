@@ -21,8 +21,6 @@
 //! through this handle. Tier 3 (real veth) exercises the full
 //! load-and-attach path.
 
-#![cfg_attr(not(target_os = "linux"), allow(dead_code))]
-
 use overdrive_core::dataplane::{DropClass, aggregate_per_cpu};
 
 /// Number of slots in the kernel-side `DROP_COUNTER`. Lockstep with
@@ -44,7 +42,6 @@ pub fn aggregate_for_class(_class: DropClass, per_cpu_values: &[u64]) -> u64 {
     aggregate_per_cpu(per_cpu_values)
 }
 
-#[cfg(target_os = "linux")]
 mod linux {
     use aya::Ebpf;
     use aya::maps::{MapData, PerCpuArray};
@@ -111,5 +108,4 @@ mod linux {
     }
 }
 
-#[cfg(target_os = "linux")]
 pub use linux::DropCounterHandle;

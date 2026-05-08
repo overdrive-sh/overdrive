@@ -29,7 +29,6 @@
 //! See `docs/product/architecture/adr-0045-bpf-redirect-neigh-datapath.md`
 //! § Operational for the topology rationale.
 
-#![cfg(target_os = "linux")]
 #![allow(clippy::missing_panics_doc)]
 // `expect_used` is workspace-wide `warn` per `.claude/rules/development.md`
 // § Errors. Tier 3 tests use `.expect(...)` to surface fail-fast at the

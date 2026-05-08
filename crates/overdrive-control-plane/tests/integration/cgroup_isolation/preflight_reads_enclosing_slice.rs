@@ -21,8 +21,6 @@
 //! This is the missing oracle from Root Cause B in
 //! `docs/feature/fix-cgroup-preflight-wrong-slice/bugfix-rca.md`.
 
-#![cfg(target_os = "linux")]
-
 use overdrive_control_plane::cgroup_preflight::{CgroupPreflightError, run_preflight_at};
 use tempfile::TempDir;
 

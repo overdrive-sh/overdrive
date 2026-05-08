@@ -20,11 +20,6 @@
 //! 3. `non_terminal_transitions_emit_none` — Pending → Running with
 //!    budget remaining: every event/row carries `terminal: None`.
 //!
-//! Linux-only — gated by `#[cfg(target_os = "linux")]`. Compile-clean
-//! on macOS via `cargo nextest run --features integration-tests --no-run`.
-
-#![cfg(target_os = "linux")]
-
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 

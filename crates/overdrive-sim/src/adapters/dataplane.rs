@@ -275,8 +275,14 @@ impl Dataplane for SimDataplane {
             }
         }
 
-        // Atomic forward-path replacement.
-        state.services.insert(vip, backends);
+        // Atomic forward-path replacement. Empty backend set removes
+        // the VIP entirely — matches `EbpfDataplane` which deletes
+        // the SERVICE_MAP outer key on empty-backend updates.
+        if backends.is_empty() {
+            state.services.remove(&vip);
+        } else {
+            state.services.insert(vip, backends);
+        }
         // Drop the guard before returning so the mutex is released
         // before any caller `.await` resumes — minimises contention
         // for concurrent observers and silences

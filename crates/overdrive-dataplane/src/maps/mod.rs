@@ -18,10 +18,8 @@ pub mod reverse_nat_map_handle;
 pub mod service_map_handle;
 
 // Typed userspace handle around `BPF_MAP_TYPE_HASH_OF_MAPS` —
-// hand-rolled until aya 0.14+ / PR #1446. Linux-only because the
-// `bpf()` syscall surface is Linux-specific. See research § D.3 +
+// hand-rolled until aya 0.14+ / PR #1446. See research § D.3 +
 // Appendix A.3.
-#[cfg(target_os = "linux")]
 pub mod hash_of_maps;
 
 // Shared wire-shape POD types used across the typed handles AND the
@@ -34,7 +32,6 @@ pub mod hash_of_maps;
 // `pub _pad` is a load-bearing wire-shape padding field — its byte
 // position determines the struct's kernel-readable layout. Renaming
 // it loses the "this is padding" signal at every call site.
-#[cfg(target_os = "linux")]
 #[allow(clippy::pub_underscore_fields)]
 pub mod wire {
     use overdrive_core::dataplane::backend_key::BackendKey;
@@ -193,5 +190,4 @@ pub mod wire {
 
 // Re-export at the crate-public level for `EbpfDataplane` field
 // naming and the integration tests.
-#[cfg(target_os = "linux")]
 pub use wire::{BackendEntryPod, BackendKeyPod, ServiceKey, VipPod};

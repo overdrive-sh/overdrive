@@ -3,11 +3,8 @@
 //! Owns [`EbpfDataplane`], the production binding of the
 //! [`Dataplane`] port trait from `overdrive-core`. The kernel-side
 //! object produced by `overdrive-bpf` is embedded at compile time via
-//! `include_bytes!`; on Linux the loader attaches the `xdp_pass`
-//! program to the configured interface. On non-Linux build targets
-//! (developer macOS, primarily) the constructor returns
-//! [`DataplaneError::LoadFailed`] with a `"non-Linux build target"`
-//! diagnostic — the rest of the workspace still compiles.
+//! `include_bytes!`; the loader attaches the configured XDP programs
+//! to the requested interfaces.
 //!
 //! Phase 2.1 step 01-02 ships the loader skeleton. The three trait
 //! methods (`update_policy`, `update_service`, `drain_flow_events`)
@@ -30,34 +27,19 @@ pub mod swap;
 // Collision-free BackendId allocator per ADR-0046. Replaces the
 // multiplicative-hash derivation with a monotonic-counter allocator +
 // memo table, matching Cilium's IDAllocator pattern. Userspace-only.
-// On non-Linux targets the sole consumer (`EbpfDataplane`) is behind
-// `#[cfg(target_os = "linux")]`, so the allocator appears unused.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 mod allocator;
 
 // Orphan-GC sweep over `BACKEND_MAP` (step 4 of ADR-0040 § 2's
-// 5-step swap orchestration). Linux-only — the module's
-// `#![cfg(target_os = "linux")]` elides the body on macOS without
-// dragging the cfg gate up here.
+// 5-step swap orchestration).
 pub mod gc;
 
 // Direct `bpf(2)` syscall surface used where aya 0.13.x ships no
 // typed wrappers (HASH_OF_MAPS construction + `BPF_PROG_TEST_RUN`).
-// Linux-only — gated within the module.
-#[cfg(target_os = "linux")]
 pub mod sys;
 
-// `Dataplane` trait + supporting types — only used by the Linux-side
-// trait impl below. Non-Linux builds get a stub `impl Dataplane`
-// (further down) that uses no extra symbols.
-#[cfg(target_os = "linux")]
 use std::net::Ipv4Addr;
 
-#[cfg(target_os = "linux")]
 use async_trait::async_trait;
-#[cfg(not(target_os = "linux"))]
-use overdrive_core::traits::dataplane::DataplaneError;
-#[cfg(target_os = "linux")]
 use overdrive_core::traits::dataplane::{
     Backend, Dataplane, DataplaneError, FlowEvent, PolicyKey, Verdict,
 };
@@ -67,11 +49,6 @@ use overdrive_core::traits::dataplane::{
 /// `target/bpf/overdrive_bpf.o`. The `build.rs` shim
 /// (step 01-03) converts a missing artifact into a single-line
 /// actionable error.
-///
-/// Lives behind `#[cfg(target_os = "linux")]` so non-Linux builds do
-/// not need the artifact present at compile time — the
-/// `cfg(not(target_os = "linux"))` `new()` returns an error before
-/// any aya code runs.
 // `OVERDRIVE_BPF_OBJECT_PATH` is emitted by `build.rs` as a
 // `cargo:rustc-env=` directive, resolved at build-script time against
 // either the `OVERDRIVE_BPF_OBJECT` override (set by `cargo xtask
@@ -80,7 +57,6 @@ use overdrive_core::traits::dataplane::{
 // was computed — see `build.rs` module docstring for the override
 // rationale and `xtask::mutants::bpf_object_env_override` for the
 // wrapper-side mechanics.
-#[cfg(target_os = "linux")]
 const OVERDRIVE_BPF_OBJ: &[u8] = include_bytes!(env!("OVERDRIVE_BPF_OBJECT_PATH"));
 
 /// Production bpffs pin directory for SERVICE_MAP and any future
@@ -89,18 +65,15 @@ const OVERDRIVE_BPF_OBJ: &[u8] = include_bytes!(env!("OVERDRIVE_BPF_OBJECT_PATH"
 /// name when resolving the pre-pinned FD via `BPF_OBJ_GET`. See
 /// `.claude/rules/development.md` § "Sharing the outer HoM between
 /// userspace and the kernel-side ELF — `pinning = ByName`".
-#[cfg(target_os = "linux")]
 const DEFAULT_PIN_DIR: &str = "/sys/fs/bpf/overdrive";
 
 /// SERVICE_MAP outer-map name. MUST match the `#[map]` `export_name`
 /// emitted from `crates/overdrive-bpf/src/maps/service_map.rs` —
 /// that name is what aya's loader uses to join `<pin_dir>/<name>`.
-#[cfg(target_os = "linux")]
 const SERVICE_MAP_NAME: &str = "SERVICE_MAP";
 
 /// BACKEND_MAP name — regular HASH map; aya supports it natively
 /// (no pin-by-name workaround needed).
-#[cfg(target_os = "linux")]
 const BACKEND_MAP_NAME: &str = "BACKEND_MAP";
 
 /// REVERSE_NAT_MAP name — regular HASH map keyed on
@@ -108,7 +81,6 @@ const BACKEND_MAP_NAME: &str = "BACKEND_MAP";
 /// `VipPod { ip_host, port_host, _pad }`. aya supports HASH natively
 /// (Slice 05-04: promoted from in-memory placeholder per
 /// `crates/overdrive-bpf/src/maps/reverse_nat_map.rs`).
-#[cfg(target_os = "linux")]
 const REVERSE_NAT_MAP_NAME: &str = "REVERSE_NAT_MAP";
 
 /// SERVICE_MAP outer-map capacity in services. 4096 per
@@ -116,7 +88,6 @@ const REVERSE_NAT_MAP_NAME: &str = "REVERSE_NAT_MAP";
 /// `MAX_OUTER_ENTRIES` const in `service_map.rs` — kernel and
 /// userspace see the same map (pin-by-name shares the FD), so the
 /// capacities are consistent by definition.
-#[cfg(target_os = "linux")]
 const SERVICE_MAP_OUTER_CAPACITY: u32 = 4096;
 
 /// SERVICE_MAP inner-ARRAY size in slots. Equals
@@ -127,7 +98,6 @@ const SERVICE_MAP_OUTER_CAPACITY: u32 = 4096;
 /// drift between the two would silently misroute packets via slot
 /// out-of-bounds reads (the kernel ARRAY map clamps to its declared
 /// size; userspace populating slots beyond it is a no-op).
-#[cfg(target_os = "linux")]
 const SERVICE_MAP_INNER_CAPACITY: u32 = overdrive_core::dataplane::MaglevTableSize::DEFAULT.get();
 
 /// Production dataplane.
@@ -138,7 +108,6 @@ const SERVICE_MAP_INNER_CAPACITY: u32 = overdrive_core::dataplane::MaglevTableSi
 /// § "Sharing the outer HoM between userspace and the kernel-side
 /// ELF — `pinning = ByName`"), and attaches the configured XDP
 /// program to the requested interface.
-#[cfg(target_os = "linux")]
 pub struct EbpfDataplane {
     /// Owns the loaded BPF maps and programs. Dropping this releases
     /// kernel-side resources. Field is kept live so the BPF object's
@@ -258,9 +227,6 @@ pub struct EbpfDataplane {
     _xdp_reverse_link: aya::programs::xdp::XdpLinkId,
 }
 
-#[cfg(not(target_os = "linux"))]
-pub struct EbpfDataplane;
-
 impl EbpfDataplane {
     /// Construct an `EbpfDataplane` by:
     ///
@@ -289,7 +255,6 @@ impl EbpfDataplane {
     /// test tempdir under `/sys/fs/bpf/overdrive-test-<rand>` via
     /// [`Self::new_with_pin_dir`]). The directory's parent must
     /// already exist; the directory itself is created if missing.
-    #[cfg(target_os = "linux")]
     #[allow(clippy::too_many_lines)]
     pub fn new_with_pin_dir(
         client_iface: &str,
@@ -538,7 +503,6 @@ impl EbpfDataplane {
     /// `client_iface` (forward-path; `xdp_service_map_lookup`
     /// ingress) and `backend_iface` (reverse-path;
     /// `xdp_reverse_nat_lookup` ingress).
-    #[cfg(target_os = "linux")]
     pub fn new(client_iface: &str, backend_iface: &str) -> Result<Self, DataplaneError> {
         Self::new_with_pin_dir(client_iface, backend_iface, std::path::Path::new(DEFAULT_PIN_DIR))
     }
@@ -554,7 +518,6 @@ impl EbpfDataplane {
     ///
     /// Returns [`DataplaneError::LoadFailed`] if the kernel rejects
     /// a `keys()` iteration step.
-    #[cfg(target_os = "linux")]
     pub fn reverse_nat_map_size(&self) -> Result<usize, DataplaneError> {
         let map = self.reverse_nat_map.lock();
         map.keys()
@@ -584,7 +547,6 @@ impl EbpfDataplane {
     /// Returns [`DataplaneError::LoadFailed`] if the kernel rejects
     /// the lookup with anything other than `KeyNotFound` (which is
     /// the `Ok(false)` path).
-    #[cfg(target_os = "linux")]
     pub fn reverse_nat_map_has_backend(
         &self,
         ip: Ipv4Addr,
@@ -624,7 +586,6 @@ impl EbpfDataplane {
     /// Returns [`DataplaneError::LoadFailed`] if the kernel rejects
     /// a `keys()` iteration step (mid-iteration map mutation, kernel
     /// out-of-memory, etc).
-    #[cfg(target_os = "linux")]
     pub fn backend_map_keys(&self) -> Result<Vec<u32>, DataplaneError> {
         let backend_map = self.backend_map.lock();
         backend_map
@@ -638,7 +599,6 @@ impl EbpfDataplane {
     /// Diagnostic surface — used by integration tests to verify that
     /// `release()` is called after orphan-GC sweeps on both the
     /// non-empty and empty-backend paths.
-    #[cfg(target_os = "linux")]
     #[must_use]
     pub fn allocator_memo_len(&self) -> usize {
         self.backend_id_alloc.lock().memo_len()
@@ -655,7 +615,6 @@ impl EbpfDataplane {
     ///
     /// Returns [`DataplaneError::LoadFailed`] if the kernel rejects
     /// the lookup with an error other than `ENOENT`.
-    #[cfg(target_os = "linux")]
     pub fn service_map_contains(
         &self,
         vip: std::net::Ipv4Addr,
@@ -679,15 +638,6 @@ impl EbpfDataplane {
             Ok(None) => Ok(false),
             Err(e) => Err(DataplaneError::LoadFailed(format!("SERVICE_MAP lookup: {e}"))),
         }
-    }
-
-    /// Non-Linux fallthrough — returns
-    /// [`DataplaneError::LoadFailed`] with a `"non-Linux build
-    /// target"` diagnostic. Lets the rest of the workspace compile on
-    /// macOS without aya in the dep graph (architecture.md §5.2).
-    #[cfg(not(target_os = "linux"))]
-    pub fn new(_client_iface: &str, _backend_iface: &str) -> Result<Self, DataplaneError> {
-        Err(DataplaneError::LoadFailed("overdrive-dataplane: non-Linux build target".into()))
     }
 }
 
@@ -722,7 +672,6 @@ impl EbpfDataplane {
 /// constructing a full `EbpfDataplane`. Keeps the fallback decision
 /// pure-function-shaped — same property the wider DST harness relies
 /// on for replay equivalence.
-#[cfg(target_os = "linux")]
 fn should_fallback_to_generic(io_error: &std::io::Error) -> bool {
     io_error.raw_os_error().is_some_and(|code| code == libc::EOPNOTSUPP)
 }
@@ -756,7 +705,6 @@ fn should_fallback_to_generic(io_error: &std::io::Error) -> bool {
 /// (e.g. `code == EOPNOTSUPP` → `false`) flips the EOPNOTSUPP test to
 /// `Propagate`; mutating to `true` flips the EINVAL test to
 /// `Fallback`. Each mutation is killable.
-#[cfg(target_os = "linux")]
 #[derive(Debug)]
 enum AttachOutcome<L> {
     Native(L),
@@ -775,7 +723,6 @@ enum AttachOutcome<L> {
 /// `prog: &mut Xdp` dependency) means the unit tests can drive every
 /// arm without standing up a real BPF program — the ~15 ms warm
 /// inner loop the §21 DST harness relies on.
-#[cfg(target_os = "linux")]
 fn classify_attach_result<L>(result: Result<L, aya::programs::ProgramError>) -> AttachOutcome<L> {
     use aya::programs::ProgramError;
 
@@ -788,7 +735,6 @@ fn classify_attach_result<L>(result: Result<L, aya::programs::ProgramError>) -> 
     }
 }
 
-#[cfg(target_os = "linux")]
 #[async_trait]
 #[allow(clippy::too_many_lines)]
 impl Dataplane for EbpfDataplane {
@@ -1176,55 +1122,13 @@ impl Dataplane for EbpfDataplane {
 
 #[cfg(test)]
 mod tests {
-    //! macOS-side regression guards for the `#[cfg(not(target_os =
-    //! "linux"))]` stub branch, plus Linux-side unit tests for the
-    //! native→generic fallback classification helper (S-2.2-02).
-    //!
-    //! The macOS branch is one line of code, but the test exists to
-    //! prevent silent erosion of the boundary — a future refactor
-    //! that drops the cfg gate, weakens the diagnostic, or returns
-    //! a different error variant trips this assertion on macOS CI
-    //! before the change reaches Linux.
-    //!
-    //! On Linux the macOS test is `#[cfg(not(target_os = "linux"))]`-
-    //! gated and silently absent — the Tier 3 LVH smoke (`cargo xtask
-    //! integration-test vm latest`, step 03-02) is the corresponding
-    //! Linux-side gate. The fallback-classification unit tests below
-    //! run on Linux only (the helper itself is `#[cfg(target_os =
-    //! "linux")]`).
-
-    // Imports are only consumed by the `#[cfg(not(target_os =
-    // "linux"))]` test below, so they're dead on Linux. The cfg gate
-    // can't sit on `use` directly without complicating the macOS
-    // path; allowing here keeps both paths clean.
-    #[cfg(not(target_os = "linux"))]
-    use super::{DataplaneError, EbpfDataplane};
-
-    /// On non-Linux build targets the constructor returns
-    /// [`DataplaneError::LoadFailed`] carrying the `"non-Linux build
-    /// target"` diagnostic — never any other variant, never a
-    /// surprise `Ok(_)`.
-    #[cfg(not(target_os = "linux"))]
-    #[test]
-    fn new_returns_load_failed_with_non_linux_diagnostic() {
-        // `EbpfDataplane` does not implement `Debug` (its inner aya
-        // types do not, and adding a manual impl is noise for a stub
-        // that lives only on Linux). Unwrap the `Result` via match
-        // rather than `expect_err`, which would require `T: Debug`.
-        match EbpfDataplane::new("lo", "lo") {
-            Err(DataplaneError::LoadFailed(msg)) => {
-                assert!(msg.contains("non-Linux build target"), "unexpected diagnostic: {msg}");
-            }
-            Err(other) => panic!("expected DataplaneError::LoadFailed, got {other:?}"),
-            Ok(_) => panic!("expected Err on non-Linux build target"),
-        }
-    }
+    //! Unit tests for the native→generic fallback classification
+    //! helper (S-2.2-02) and the `classify_attach_result` dispatcher.
 
     /// Classification — `EOPNOTSUPP` from `bpf_link_create` /
     /// `netlink_set_xdp_fd` is the canonical "driver does not
     /// support native XDP" signal. Trigger fallback to generic
     /// (`SKB_MODE`).
-    #[cfg(target_os = "linux")]
     #[test]
     fn fallback_classification_eopnotsupp_yields_true() {
         use std::io;
@@ -1243,7 +1147,6 @@ mod tests {
     /// regression. The simpler single-comparison shape of
     /// `should_fallback_to_generic` (one `code == EOPNOTSUPP`) relies
     /// on this equivalence to keep `ENOTSUP` falling back.
-    #[cfg(target_os = "linux")]
     #[test]
     fn fallback_classification_enotsup_yields_true() {
         use std::io;
@@ -1265,7 +1168,6 @@ mod tests {
     /// real loader bugs, per `.claude/rules/development.md` § Errors
     /// (distinct failure modes get distinct variants). Must NOT
     /// trigger fallback.
-    #[cfg(target_os = "linux")]
     #[test]
     fn fallback_classification_einval_yields_false() {
         use std::io;
@@ -1277,7 +1179,6 @@ mod tests {
     /// LSM denial, sysctl lock). Falling back to generic does not
     /// fix the underlying problem and would emit a misleading warn.
     /// Must NOT trigger fallback.
-    #[cfg(target_os = "linux")]
     #[test]
     fn fallback_classification_eperm_yields_false() {
         use std::io;
@@ -1289,7 +1190,6 @@ mod tests {
     /// `io::Error::other(...)` constructions, future error shapes)
     /// must NOT trigger fallback — same conservative rule as
     /// `EINVAL` / `EPERM`.
-    #[cfg(target_os = "linux")]
     #[test]
     fn fallback_classification_no_os_errno_yields_false() {
         use std::io;
@@ -1320,7 +1220,6 @@ mod tests {
     /// [`AttachOutcome::Native`] with the link payload preserved
     /// verbatim. Drives the happy path without standing up a real
     /// XDP program; the link type is generic over `L`.
-    #[cfg(target_os = "linux")]
     #[test]
     fn classify_attach_result_ok_yields_native_with_link() {
         let outcome: super::AttachOutcome<u32> = super::classify_attach_result(Ok(42u32));
@@ -1335,7 +1234,6 @@ mod tests {
     /// carrying the originating syscall name. This is the only error
     /// shape that should drive the SKB retry — the docstring on
     /// [`AttachOutcome::Fallback`] makes the policy explicit.
-    #[cfg(target_os = "linux")]
     #[test]
     fn classify_attach_result_eopnotsupp_yields_fallback_with_syscall_name() {
         use aya::programs::ProgramError;
@@ -1367,7 +1265,6 @@ mod tests {
     /// case into Fallback (assertion fires); flipping to `false`
     /// turns the EOPNOTSUPP case into Propagate (the other test's
     /// assertion fires).
-    #[cfg(target_os = "linux")]
     #[test]
     fn classify_attach_result_einval_yields_propagate() {
         use aya::programs::ProgramError;

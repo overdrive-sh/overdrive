@@ -66,11 +66,7 @@ mod integration {
     /// surfaces is structurally impossible.
     mod terminal_propagation;
     mod tls_bootstrap;
-    /// phase-1-first-workload — slice 3 (US-03) — Linux-only walking
-    /// skeletons. Each scenario file gates itself with
-    /// `#[cfg(target_os = "linux")]` so the module declarations
-    /// compile cleanly on macOS/Windows even when no test bodies
-    /// exist there.
+    /// phase-1-first-workload — slice 3 (US-03) — walking skeletons.
     pub mod job_lifecycle {
         // Shared cleanup helper — reaps real `/bin/sleep` workloads
         // spawned by the action shim so nextest does not flag the
@@ -79,7 +75,6 @@ mod integration {
         // production stop path under test. `pub` so the slice-4
         // `cgroup_isolation::cluster_status_under_burst` test can
         // reuse the same `AllocCleanup` guard via `super::super::`.
-        #[cfg(target_os = "linux")]
         pub mod cleanup;
         mod convergence_loop_spawned_in_production_boot;
         mod crash_recovery;
@@ -91,12 +86,10 @@ mod integration {
         /// spawned convergence loop via `SimClock`. See module docs.
         pub mod wait;
     }
-    /// phase-1-first-workload — slice 4 (US-03 final) — Linux-only
+    /// phase-1-first-workload — slice 4 (US-03 final) —
     /// cgroup-isolation harness. Per ADR-0028 the control-plane
     /// boots through a 4-step pre-flight check + creates its own
-    /// slice. The scenario files gate themselves with
-    /// `#[cfg(target_os = "linux")]` so the module declarations
-    /// compile cleanly on macOS/Windows.
+    /// slice.
     mod cgroup_isolation {
         mod cluster_status_under_burst;
         mod idempotent_slice_creation;

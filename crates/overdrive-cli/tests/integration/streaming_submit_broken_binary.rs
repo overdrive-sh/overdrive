@@ -25,8 +25,6 @@
 //! `tokio::process::Command::spawn`. macOS dev runs via `cargo xtask
 //! lima run --` per `crates/overdrive-cli/CLAUDE.md`.
 
-#![cfg(target_os = "linux")]
-
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 

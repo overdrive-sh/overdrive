@@ -42,13 +42,11 @@ pub fn create_and_enrol_control_plane_slice_at(
 }
 
 /// Production wrapper — resolves the running PID from `getpid()` and
-/// targets `/sys/fs/cgroup`. Linux-only; non-Linux is unreachable in
-/// the production boot path.
+/// targets `/sys/fs/cgroup`.
 ///
 /// # Errors
 ///
 /// See [`create_and_enrol_control_plane_slice_at`].
-#[cfg(target_os = "linux")]
 pub fn create_and_enrol_control_plane_slice() -> Result<(), std::io::Error> {
     // `std::process::id()` returns the OS-assigned process id as a
     // safe u32 — no FFI, no unsafe block required. (Older drafts of
@@ -59,13 +57,4 @@ pub fn create_and_enrol_control_plane_slice() -> Result<(), std::io::Error> {
         Path::new(crate::cgroup_preflight::DEFAULT_CGROUP_ROOT),
         pid,
     )
-}
-
-/// Non-Linux stub — control-plane slice creation is only invoked
-/// under `#[cfg(target_os = "linux")]` in the boot path; this
-/// signature exists so the call site in `lib.rs` compiles uniformly.
-#[cfg(not(target_os = "linux"))]
-#[allow(clippy::unnecessary_wraps, clippy::missing_const_for_fn)]
-pub fn create_and_enrol_control_plane_slice() -> Result<(), std::io::Error> {
-    Ok(())
 }

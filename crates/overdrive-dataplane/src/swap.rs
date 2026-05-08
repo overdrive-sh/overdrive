@@ -105,7 +105,6 @@ impl From<AtomicSwapError> for DataplaneError {
 /// Returns [`AtomicSwapError::MapAllocFailed`] if the kernel
 /// rejects the map-create syscall. Failure preserves the outer-
 /// map pointer (the swap orchestration aborts before step 3).
-#[cfg(target_os = "linux")]
 pub fn atomic_inner_map_swap_create(max_entries: u32) -> Result<MapFd, AtomicSwapError> {
     use std::mem;
     use std::os::fd::FromRawFd;
@@ -203,13 +202,11 @@ pub fn atomic_inner_map_swap_create(max_entries: u32) -> Result<MapFd, AtomicSwa
 /// Owned file descriptor handle for a freshly-allocated inner map.
 /// Drops on `Drop` via `OwnedFd`'s `close(2)` — kernel reaps the
 /// map once refcount hits 0.
-#[cfg(target_os = "linux")]
 #[derive(Debug)]
 pub struct MapFd {
     inner: std::os::fd::OwnedFd,
 }
 
-#[cfg(target_os = "linux")]
 impl MapFd {
     /// Borrow the raw fd. Kept narrow — the swap orchestration is
     /// the only legitimate caller; future steps 3–5 will pass it
@@ -219,28 +216,6 @@ impl MapFd {
         use std::os::fd::AsRawFd;
         self.inner.as_raw_fd()
     }
-}
-
-// ---------------------------------------------------------------
-// Non-Linux: stub branch so the workspace compiles on macOS dev.
-// ---------------------------------------------------------------
-
-/// Non-Linux fallthrough — returns `MapAllocFailed`.
-///
-/// Carries a synthetic `io::Error`. Lives behind
-/// `#[cfg(not(target_os = "linux"))]` so the macOS-side workspace
-/// continues to compile without aya in the dep graph.
-#[cfg(not(target_os = "linux"))]
-pub fn atomic_inner_map_swap_create(_max_entries: u32) -> Result<MapFd, AtomicSwapError> {
-    Err(AtomicSwapError::MapAllocFailed {
-        source: std::io::Error::other("atomic_inner_map_swap_create: non-Linux build target"),
-    })
-}
-
-#[cfg(not(target_os = "linux"))]
-#[derive(Debug)]
-pub struct MapFd {
-    _private: (),
 }
 
 #[cfg(test)]

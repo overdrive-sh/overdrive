@@ -17,7 +17,6 @@
 //! delta after PROG_TEST_RUN, which makes the test resilient to any
 //! per-CPU values left behind by sibling tests in the same process.
 
-#![cfg(target_os = "linux")]
 #![allow(
     clippy::missing_panics_doc,
     clippy::cast_possible_truncation,

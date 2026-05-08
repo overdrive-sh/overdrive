@@ -630,6 +630,121 @@ it once and every future call site inherits the erosion.
 
 ---
 
+## Trait definitions specify behavior, not just signature
+
+**A trait is a contract, and the contract is the SSOT.** Every method
+on a port trait (`Clock`, `Transport`, `Dataplane`, `IntentStore`,
+`ObservationStore`, `Driver`, `Llm`, `Reconciler`, …) MUST carry a
+rustdoc block that pins the *observable behavior* every adapter is
+required to implement — not just the type signature, not just an
+English description of what the method "does."
+
+Type signatures specify shape; they do not specify semantics.
+`fn update_service(&self, vip: Ipv4Addr, backends: Vec<Backend>) ->
+Result<(), DataplaneError>` says "takes a VIP and a list of backends,
+returns an error or unit." It does NOT say what `update_service(vip,
+vec![])` means, what the post-state of `service_backends(vip)` should
+be, or whether reverse-NAT entries are purged. When the contract is
+implicit, every adapter ships a private interpretation — and they
+drift the moment one of them is patched without the others.
+
+This rule is the *upstream* of § "Production code is not shaped by
+simulation": that rule governs implementation shape; this one governs
+the contract both implementations must honor. Without a written
+contract, "production and sim must observe the same behavior" is a
+slogan, not an enforceable property.
+
+### What every trait-method docstring must specify
+
+The four load-bearing properties:
+
+1. **Preconditions** — what the caller must guarantee about the
+   inputs. "VIP must be IPv4," "backends must be non-empty," "key
+   must have been previously registered." If a precondition can be
+   violated, the violation MUST map to a typed error variant; do not
+   defer to "implementation may panic."
+2. **Postconditions** — what the caller can rely on after the call
+   returns `Ok(_)`. State the *observable* effect, not the
+   implementation: "after return, `service_backends(vip)` returns the
+   passed `backends` slice in insertion order," not "we write to the
+   `services` map."
+3. **Edge cases** — every degenerate input the signature permits.
+   Empty collections, zero values, `None`, idempotent re-application,
+   re-registration, removal of an absent key. Each gets a sentence
+   pinning the contract: "passing `backends.is_empty()` removes the
+   VIP from the dataplane entirely; `service_backends(vip)` returns
+   `None` after return." If the trait author cannot say what an edge
+   case means, the edge case should be made unrepresentable (a
+   `NonEmpty<Backend>` newtype, a `RegisterService` / `RemoveService`
+   sum type, …) rather than left under-specified.
+4. **Observable invariants** — the cross-method properties adapters
+   must preserve. "After `update_service(vip, [b1, b2])`, every
+   reverse-NAT key derived from b1 / b2 maps to `vip`. After
+   `update_service(vip, [])`, no reverse-NAT key derived from any
+   prior backend of `vip` is reachable." These are the properties
+   the DST equivalence harness asserts on; if they are not written,
+   they cannot be tested.
+
+### Why the contract goes in the trait, not in one adapter's docstring
+
+The trait is the only place every adapter author reads. A contract
+documented on `EbpfDataplane::update_service` is invisible to whoever
+writes the next sim adapter, the next mock, the next test double; a
+contract documented on the `Dataplane` trait method itself is the one
+artifact every implementation MUST consult. When two adapters diverge
+on an edge case, the question is always "what does the trait say?"
+— if the trait says nothing, the divergence is a contract gap, not
+an adapter bug.
+
+### Symptom signals during review
+
+- A trait method whose docstring is one sentence describing what it
+  "does" (`/// Update the service backends.`) with no edge-case
+  language. Reject — every degenerate input the signature permits
+  must be pinned.
+- Two adapter implementations of the same trait method whose
+  observable behavior diverges on the same call (`update_service(vip,
+  vec![])` returns `Some(vec![])` from one and `None` from the other,
+  per the SimDataplane vs EbpfDataplane drift in PR review of step
+  03-XX). The bug is in the trait contract, not in either adapter —
+  fix the trait docstring first, then bring the adapters into line.
+- A precondition expressed as a runtime panic (`assert!(!backends.
+  is_empty())`) instead of a typed error variant or a non-empty
+  newtype. Reject — preconditions are part of the contract; the
+  type system enforces them when possible, the typed error surface
+  enforces them otherwise. Panics are not a contract.
+- A docstring that describes the *implementation* ("writes to the
+  `services` BTreeMap") rather than the *observable effect* ("after
+  return, `service_backends(vip)` reflects the passed backends").
+  The implementation is per-adapter; the contract is universal.
+
+### The DST equivalence test is the structural guard
+
+Once the contract is written, the structural defense against future
+drift is a DST harness that drives every adapter implementing the
+trait through the same sequence of calls and asserts observable
+equivalence at every step. The contract is the *spec*; the
+equivalence test is the *enforcement*. A contract without a test
+that exercises every clause is documentation, not a guarantee.
+
+In practice, every port trait whose contract differs across adapters
+in any non-trivial way (`Dataplane`, `IntentStore`, `Driver`,
+`ObservationStore`) ships a `tests/integration/<trait>_equivalence.rs`
+that drives both the host adapter and the sim adapter through the
+same sequence and asserts on observable state through the trait's
+own accessors (or, where necessary, through accessors documented as
+"part of the contract for testing purposes"). When the equivalence
+test fails, exactly one of the contract / host adapter / sim adapter
+is wrong; the test isolates which.
+
+This is the load-bearing pattern: the trait's docstring is the
+contract; the equivalence test is the enforcement; the per-adapter
+implementation is the consequence. The pattern degrades the moment
+the docstring is allowed to be vague, because then the equivalence
+test cannot be written.
+
+---
+
 ## Ordered-collection choice
 
 `core` and control-plane hot paths default to `BTreeMap` for keyed maps

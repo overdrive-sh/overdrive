@@ -19,14 +19,13 @@
 //! | `view_store` | Runtime-owned `ViewStore` port + `RedbViewStore` (ADR-0035) |
 //! | `observation_wiring` | `LocalObservationStore` single-node wiring (ADR-0012, revised 2026-04-24) |
 
-// Per ADR-0028, this crate's `cgroup_preflight` and `cgroup_manager`
-// modules call `libc::geteuid` / `libc::getpid` directly under
-// `#[cfg(target_os = "linux")]`. Both are thin syscall wrappers with
-// no preconditions, but they are `extern "C"` and therefore require
-// an `unsafe` block. We `deny(unsafe_code)` workspace-wide and
-// `#[allow(unsafe_code)]` scope-locally on the two call sites that
-// need it; switching from `forbid` to `deny` is what enables the
-// scoped allow. Every other module in this crate stays unsafe-free.
+// Per ADR-0028, this crate's `cgroup_preflight` module calls
+// `libc::geteuid` directly. It is a thin syscall wrapper with no
+// preconditions, but it is `extern "C"` and therefore requires an
+// `unsafe` block. We `deny(unsafe_code)` workspace-wide and
+// `#[allow(unsafe_code)]` scope-locally on the call site that needs
+// it; switching from `forbid` to `deny` is what enables the scoped
+// allow. Every other module in this crate stays unsafe-free.
 #![deny(unsafe_code)]
 // Phase 2.2 RED scaffolds in `reconcilers/service_map_hydrator/*` carry
 // short docstrings on draft type definitions. Per
@@ -470,18 +469,9 @@ pub async fn run_server_with_obs_and_driver(
     // any on-disk side effects (no CA mint, no IntentStore open, no
     // listener bind). On failure, the server refuses to start and
     // produces no on-disk artefacts.
-    //
-    // The host is not Linux on macOS / Windows dev hosts; cgroup v2 is
-    // Linux-only by design, so the pre-flight is a no-op there. There
-    // is no in-binary escape hatch (ADR-0034 deleted it); operators
-    // running on macOS / Windows / non-delegated Linux dev boxes use
-    // `cargo xtask lima run --` per `.claude/rules/testing.md`.
-    #[cfg(target_os = "linux")]
-    {
-        cgroup_preflight::run_preflight().map_err(error::ControlPlaneError::from)?;
-        cgroup_manager::create_and_enrol_control_plane_slice()
-            .map_err(|e| error::ControlPlaneError::internal("create control-plane slice", e))?;
-    }
+    cgroup_preflight::run_preflight().map_err(error::ControlPlaneError::from)?;
+    cgroup_manager::create_and_enrol_control_plane_slice()
+        .map_err(|e| error::ControlPlaneError::internal("create control-plane slice", e))?;
 
     // Install the rustls process-wide CryptoProvider (ring) exactly
     // once. The workspace enables only the `ring` feature, but rustls

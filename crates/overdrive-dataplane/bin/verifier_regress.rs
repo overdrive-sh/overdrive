@@ -152,7 +152,6 @@ fn workspace_root_dir() -> Result<PathBuf> {
 // "Linux-only" error.
 // -------------------------------------------------------------------
 
-#[cfg(target_os = "linux")]
 fn measure(
     bpf_object: &std::path::Path,
     baselines: &[BaselineRecord],
@@ -238,16 +237,4 @@ fn measure(
     let _ = std::fs::remove_dir(&pin_dir);
 
     Ok(records)
-}
-
-#[cfg(not(target_os = "linux"))]
-fn measure(
-    _bpf_object: &std::path::Path,
-    _baselines: &[BaselineRecord],
-) -> Result<Vec<MeasuredRecord>> {
-    bail!(
-        "verifier-regress requires Linux (kernel ≥5.16) to read \
-         `bpf_prog_info.verified_insns`. On macOS run via \
-         `cargo xtask lima run -- cargo verifier-regress`."
-    )
 }

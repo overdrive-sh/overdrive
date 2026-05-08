@@ -16,7 +16,6 @@
 //! aya releases. This helper is expected to remain load-bearing
 //! across multiple aya versions; signature is kept stable.
 
-#![cfg(target_os = "linux")]
 // `BPF_PROG_TEST_RUN` userspace helper — same FD <-> u32 /
 // raw-pointer-borrow surface as the rest of `crate::sys::bpf`.
 #![allow(

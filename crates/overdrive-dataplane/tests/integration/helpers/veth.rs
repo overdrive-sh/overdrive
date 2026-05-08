@@ -12,7 +12,6 @@
 //! capability-gating convention in
 //! `crates/overdrive-worker/tests/integration/exec_driver/`.
 
-#![cfg(target_os = "linux")]
 #![allow(clippy::expect_used, clippy::doc_markdown)]
 
 use std::process::{Command, Output};

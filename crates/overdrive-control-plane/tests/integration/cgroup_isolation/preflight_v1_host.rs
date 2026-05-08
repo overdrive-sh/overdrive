@@ -8,8 +8,6 @@
 //! (per ADR-0034) and the docs URL — Phase 1 of Overdrive does not
 //! support cgroup v1.
 
-#![cfg(target_os = "linux")]
-
 use overdrive_control_plane::cgroup_preflight::{CgroupPreflightError, run_preflight_at};
 use tempfile::TempDir;
 

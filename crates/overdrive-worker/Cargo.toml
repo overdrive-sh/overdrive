@@ -39,11 +39,6 @@ thiserror.workspace      = true
 tokio.workspace          = true
 tracing.workspace        = true
 
-[target.'cfg(target_os = "linux")'.dependencies]
-# Used only for `libc::kill(pid, SIGTERM)` in `Driver::stop` — the
-# tokio API exposes `Child::kill()` for SIGKILL but not SIGTERM. The
-# call lives behind `cfg(target_os = "linux")` because Phase 1 only
-# runs ExecDriver on Linux.
 libc = { workspace = true }
 
 [dev-dependencies]

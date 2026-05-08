@@ -4,7 +4,6 @@
 //! `@real-io @adapter-integration` `@pending`.
 //! Tier: Tier 3.
 
-#![cfg(target_os = "linux")]
 // Tier 3 swap test calls into the kernel's `bpf(2)` / `socket(2)` /
 // `bind(2)` / `sendto(2)` syscall surface for veth-pair packet
 // injection + capture. The pedantic lint group flags the FD <-> u32

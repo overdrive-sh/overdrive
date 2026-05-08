@@ -18,7 +18,6 @@
 //! Linux-only — `BPF_PROG_TEST_RUN` is a Linux syscall and aya's
 //! userspace API requires libbpf-sys.
 
-#![cfg(target_os = "linux")]
 // See `xdp_pass_test_run.rs` for the full rationale — Tier 2 BPF unit
 // tests work directly with the `bpf(2)` syscall surface (raw FD <-> u32
 // casts, raw pointer borrows for syscall arg buffers, kernel POD

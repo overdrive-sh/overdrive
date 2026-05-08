@@ -67,7 +67,6 @@ fn start_rejected(reason: impl Into<String>) -> DriverError {
 /// This is the highest-mutation-density surface in the diff per
 /// `.claude/rules/testing.md` § "What it's NOT for" — keep it small
 /// and exhaustively covered by the inline tests below.
-#[cfg(target_os = "linux")]
 fn classify_exit(status: std::process::ExitStatus, intentional_stop: bool) -> ExitKind {
     use std::os::unix::process::ExitStatusExt;
 
@@ -91,18 +90,6 @@ fn classify_exit(status: std::process::ExitStatus, intentional_stop: bool) -> Ex
             }
         },
     )
-}
-
-#[cfg(not(target_os = "linux"))]
-fn classify_exit(status: std::process::ExitStatus, intentional_stop: bool) -> ExitKind {
-    if intentional_stop {
-        return ExitKind::CleanExit;
-    }
-    match status.code() {
-        Some(0) => ExitKind::CleanExit,
-        Some(code) => ExitKind::Crashed { exit_code: Some(code), signal: None },
-        None => ExitKind::Crashed { exit_code: None, signal: None },
-    }
 }
 
 /// Tracking state for a running allocation owned by the driver. The
@@ -266,21 +253,18 @@ impl ExecDriver {
         cmd.args(&spec.args);
         cmd.kill_on_drop(false);
 
-        #[cfg(target_os = "linux")]
-        {
-            // SAFETY: `setsid` is async-signal-safe; the closure is
-            // executed in the forked child between fork and exec, no
-            // shared state is touched. `setsid()` places the spawned
-            // child in its own process group so SIGKILL at stop time
-            // reaches the entire workload tree (matches the pre-rename
-            // behaviour for `/bin/sh`-class workloads, made unconditional
-            // because every exec workload deserves the same guarantee).
-            unsafe {
-                cmd.pre_exec(|| {
-                    libc::setsid();
-                    Ok(())
-                });
-            }
+        // SAFETY: `setsid` is async-signal-safe; the closure is
+        // executed in the forked child between fork and exec, no
+        // shared state is touched. `setsid()` places the spawned
+        // child in its own process group so SIGKILL at stop time
+        // reaches the entire workload tree (matches the pre-rename
+        // behaviour for `/bin/sh`-class workloads, made unconditional
+        // because every exec workload deserves the same guarantee).
+        unsafe {
+            cmd.pre_exec(|| {
+                libc::setsid();
+                Ok(())
+            });
         }
 
         cmd
@@ -348,7 +332,6 @@ impl Driver for ExecDriver {
             // the tokio Child's drop handler does not reap, but the
             // OS will reap orphans. For defence-in-depth we send
             // SIGKILL via libc.
-            #[cfg(target_os = "linux")]
             // SAFETY: `pid` came from `Child::id()` so it is a live
             // child PID owned by this process. `libc::kill` with a
             // valid pid + signal is sound; we ignore the return code
@@ -558,9 +541,7 @@ fn spawn_exit_watcher(
 // SIGTERM / SIGKILL signalling
 // ---------------------------------------------------------------------------
 
-/// Send SIGTERM to a process. Linux uses `libc::kill`; non-Linux
-/// builds are no-ops (the tokio API does not expose SIGTERM specifically).
-#[cfg(target_os = "linux")]
+/// Send SIGTERM to a process via `libc::kill`.
 fn send_sigterm(pid: u32) {
     // SAFETY: `libc::kill` is a thin syscall wrapper. Passing a pid
     // we obtained from `Child::id()` and a documented signal constant
@@ -573,18 +554,12 @@ fn send_sigterm(pid: u32) {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
-const fn send_sigterm(_pid: u32) {
-    // Non-Linux builds compile but do not run real-process tests.
-}
-
 /// Send SIGKILL to the entire process group led by `pid`. Used as a
 /// fallback to reach reparented grandchildren whose lineage left the
 /// driver's tokio `Child` handle. The child is placed in its own
 /// session via `setsid` at spawn time (see [`ExecDriver::build_command`])
 /// so its PGID equals its PID; passing `-pid` to `kill(2)` delivers
 /// SIGKILL to every member of that process group.
-#[cfg(target_os = "linux")]
 fn send_sigkill_pgrp(pid: u32) {
     // SAFETY: `libc::kill` with a negative pid targets a process group
     // and is sound for any signed pid_t. We ignore the return — best-effort.
@@ -596,11 +571,6 @@ fn send_sigkill_pgrp(pid: u32) {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
-const fn send_sigkill_pgrp(_pid: u32) {
-    // Non-Linux builds compile but do not run real-process tests.
-}
-
 // ---------------------------------------------------------------------------
 // Exit-classification unit tests (mutation-gate target)
 // ---------------------------------------------------------------------------
@@ -610,7 +580,7 @@ const fn send_sigkill_pgrp(_pid: u32) {
 // table below pins the (ExitStatus, intentional_stop) → ExitKind
 // mapping exhaustively. Linux-only — `ExitStatus` does not expose
 // `from_raw` cross-platform, and signal handling is Linux-specific.
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(test)]
 mod classify_exit_tests {
     use super::*;
     use std::os::unix::process::ExitStatusExt;

@@ -13,7 +13,6 @@
 //! both need the same primitives, and a single source of truth means a
 //! checksum bug fix lands once.
 
-#![cfg(target_os = "linux")]
 // Helpers manipulate raw byte arrays for IPv4/TCP frames; pedantic
 // lints flag the cast-possible-truncation in shrinking int casts (the
 // values are statically bounded — TCP_HDR_LEN = 20 fits in u16) and

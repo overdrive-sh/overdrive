@@ -25,7 +25,6 @@
 //! and overruns surface as `sendto` errors that we propagate up
 //! rather than silently absorbing.
 
-#![cfg(target_os = "linux")]
 #![allow(
     clippy::missing_panics_doc,
     clippy::cast_possible_truncation,

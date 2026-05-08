@@ -14,7 +14,6 @@
 //! `@real-io @adapter-integration`.
 //! Tier: Tier 3.
 
-#![cfg(target_os = "linux")]
 #![allow(
     clippy::missing_panics_doc,
     clippy::expect_used,

@@ -9,12 +9,9 @@
 # `overdrive-store-local`, `overdrive-worker`. dst-lint scans only
 # `core`-class crates and skips this one.
 #
-# Phase 2.1 step 01-02 ships the loader skeleton: real `new()` body
-# wired on Linux (gated by `#[cfg(target_os = "linux")]`); non-Linux
-# fallthrough returns `DataplaneError::LoadFailed("non-Linux build
-# target")`. The three `Dataplane` trait methods are stubbed
-# (`Ok(())` / `Ok(vec![])`) with `/// see #N` doc anchors per
-# architecture.md §7.
+# Phase 2.1 step 01-02 ships the loader skeleton. The three
+# `Dataplane` trait methods are stubbed (`Ok(())` / `Ok(vec![])`)
+# with `/// see #N` doc anchors per architecture.md §7.
 
 [package]
 name         = "overdrive-dataplane"
@@ -75,15 +72,6 @@ clap.workspace       = true
 # `.claude/rules/development.md` § Concurrency).
 parking_lot.workspace = true
 
-# `aya` is the userspace BPF loader and pulls in libbpf-sys etc. —
-# Linux-only. macOS builds compile this crate via the
-# `#[cfg(not(target_os = "linux"))]` stub branches in `src/lib.rs`
-# without aya in the dep graph (architecture.md §5.2).
-#
-# `nix` provides `if_nametoindex` (interface name → ifindex resolution)
-# per S-2.2-03; Linux-only because the call surface lives behind
-# `#[cfg(target_os = "linux")]` in the loader.
-[target.'cfg(target_os = "linux")'.dependencies]
 aya.workspace  = true
 libc.workspace = true
 nix.workspace  = true
@@ -105,13 +93,6 @@ proptest.workspace           = true
 serial_test.workspace        = true
 tracing-subscriber.workspace = true
 
-# Linux-only dev-deps for S-2.2-01. `serde_json` parses
-# `bpftool map dump -j` output to read the `PKTS` LruHashMap counter
-# value (8 bytes, little-endian u64). The test uses `libc` directly
-# (already a Linux runtime dep above) to open an `AF_PACKET` raw
-# socket and `sendto` 100 minimal Ethernet+IPv4+UDP frames into the
-# peer end of the veth pair.
-[target.'cfg(target_os = "linux")'.dev-dependencies]
 serde_json.workspace = true
 
 [lints]

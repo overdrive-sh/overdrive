@@ -71,8 +71,9 @@ containerd:
 # user-mode provisioning step below).
 # ────────────────────────────────────────────────────────────────────────────
 env:
-  CARGO_TERM_COLOR: "always"
-  RUST_LOG:         "overdrive=info"
+  CARGO_TERM_COLOR:  "always"
+  RUST_LOG:          "overdrive=info"
+  OVERDRIVE_LIMA_VM: "1"
 
 # ────────────────────────────────────────────────────────────────────────────
 # Pinned versions for single-file binary downloads. Bump as releases land.

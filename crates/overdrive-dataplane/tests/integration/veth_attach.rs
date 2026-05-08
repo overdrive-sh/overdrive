@@ -6,7 +6,6 @@
 //! See `docs/feature/phase-2-xdp-service-map/distill/test-scenarios.md`
 //! for the Gherkin specification of each scenario.
 
-#![cfg(target_os = "linux")]
 #![allow(clippy::missing_panics_doc)]
 // `expect_used` is workspace-wide `warn` per `.claude/rules/development.md`
 // § Errors. Tests that interact with kernel network state via `ip(8)` and
@@ -103,7 +102,6 @@ fn xdp_attaches_to_real_veth_and_packet_counter_increments() {
 /// shortest the kernel will accept on a veth (minimum 64 bytes on
 /// Ethernet — pad with zeros). Destination MAC is broadcast so no ARP
 /// is needed.
-#[cfg(target_os = "linux")]
 #[allow(
     clippy::items_after_statements,
     clippy::cast_lossless,
@@ -195,7 +193,6 @@ fn inject_frames(iface: &str, n: u32) -> Result<(), std::io::Error> {
 /// parse the JSON, and return the u64 count. Returns the kernel's
 /// representation faithfully — for an `LruHashMap` with no eviction
 /// pressure, the single entry at key=0 is the running counter.
-#[cfg(target_os = "linux")]
 fn read_pkts_counter() -> Result<u64, String> {
     use std::process::Command;
 
@@ -220,7 +217,6 @@ fn read_pkts_counter() -> Result<u64, String> {
 /// `[{"key":[0,0,0,0],"value":[c0,c1,c2,c3,c4,c5,c6,c7]}]` — bytes in
 /// little-endian on x86-64/aarch64. We sum across all rows defensively
 /// (LRU may have been touched concurrently with no bound on key).
-#[cfg(target_os = "linux")]
 fn parse_pkts_dump(json: &str) -> Result<u64, String> {
     let value: serde_json::Value = serde_json::from_str(json)
         .map_err(|e| format!("bpftool json parse: {e} — output: {json}"))?;

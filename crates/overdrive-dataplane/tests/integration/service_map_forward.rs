@@ -40,7 +40,6 @@
 //! `EPERM` rather than failing — `cargo xtask lima run --` runs as root
 //! by default; CI runs the integration job as root.
 
-#![cfg(target_os = "linux")]
 #![allow(clippy::missing_panics_doc)]
 // `expect_used` is workspace-wide `warn` per `.claude/rules/development.md`
 // § Errors. This Tier 3 test surfaces RAII-fail-fast at the assertion

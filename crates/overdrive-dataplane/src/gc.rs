@@ -1,7 +1,3 @@
-// Linux-only: the BPF surface this module mediates does not exist
-// on macOS / other targets. `lib.rs` declares `pub mod gc;`
-// unconditionally; the file's contents elide cleanly on non-Linux.
-#![cfg(target_os = "linux")]
 #![allow(clippy::missing_errors_doc)]
 
 //! Orphan-GC sweep over `BACKEND_MAP` (step 4 of ADR-0040 § 2's

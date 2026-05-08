@@ -41,9 +41,8 @@
 //! # Architecture
 //!
 //! Mirrors the verifier-regress sibling: a tiny `main` shim, a
-//! `run()` body, and a `#[cfg(target_os = "linux")]`-gated
-//! `measure()` that owns aya + syscall invocations. Pure gate
-//! logic lives in
+//! `run()` body, and a `measure()` fn that owns aya + syscall
+//! invocations. Pure gate logic lives in
 //! `crates/overdrive-dataplane/src/xdp_perf_gate.rs`.
 
 use std::path::PathBuf;
@@ -167,7 +166,6 @@ fn workspace_root_dir() -> Result<PathBuf> {
     }
 }
 
-#[cfg(target_os = "linux")]
 fn measure(
     args: Args,
     bpf_object: &std::path::Path,
@@ -279,7 +277,6 @@ fn measure(
 /// commit `6b3d638ca897`. This frame is 42 bytes — well above the
 /// minimum — and exercises the XDP program's header-parsing path
 /// (`EtherType` check → IPv4 parse → UDP protocol match → map lookup).
-#[cfg(target_os = "linux")]
 fn build_synthetic_udp_frame() -> Vec<u8> {
     let mut pkt = Vec::with_capacity(42);
 
@@ -307,16 +304,4 @@ fn build_synthetic_udp_frame() -> Vec<u8> {
     pkt.extend_from_slice(&[0x00; 2]); // checksum
 
     pkt
-}
-
-#[cfg(not(target_os = "linux"))]
-fn measure(
-    _args: Args,
-    _bpf_object: &std::path::Path,
-    _baselines: &[BaselineRecord],
-) -> Result<Vec<MeasuredRecord>> {
-    bail!(
-        "xdp-perf requires Linux (kernel ≥5.8 for BPF_ENABLE_STATS). On macOS run via \
-         `cargo xtask lima run -- cargo xdp-perf`."
-    )
 }

@@ -29,8 +29,6 @@
 //! GREEN ships in step 01-02. This commit lands the RED scaffold per
 //! `.claude/rules/testing.md` §RED scaffolds.
 
-#![cfg(target_os = "linux")]
-
 use overdrive_control_plane::cgroup_preflight::run_preflight_at;
 use tempfile::TempDir;
 

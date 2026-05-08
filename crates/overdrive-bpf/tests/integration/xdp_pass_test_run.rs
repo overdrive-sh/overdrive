@@ -12,11 +12,6 @@
 //!   `XDP_PASS` (verdict assertion) AND (b) the counter map's
 //!   value at key 0 transitioned 0 -> 1 (state assertion).
 //!
-//! Linux-only — `BPF_PROG_TEST_RUN` is a Linux syscall and aya's
-//! userspace API requires libbpf-sys. macOS skips this test entirely
-//! (the parent `tests/integration.rs` compiles fine; the test
-//! function is `#[cfg(target_os = "linux")]`-gated).
-//!
 //! Implementation note on `test_run`: aya 0.13.1 does NOT expose a
 //! safe `Xdp::test_run` wrapper. We drive the syscall directly via
 //! `libc::syscall(SYS_bpf, BPF_PROG_TEST_RUN, &mut bpf_attr, ...)`
@@ -25,7 +20,6 @@
 //! `BPF_MAP_LOOKUP_ELEM`, etc. The program FD comes from
 //! `aya::programs::Program::fd().as_fd()`.
 
-#![cfg(target_os = "linux")]
 // Tier 2 BPF unit tests work directly with the `bpf(2)` syscall surface
 // — `bpf_attr` POD struct construction, FD <-> u32 casts (kernel ABI),
 // raw pointer borrows for syscall arg buffers. The `pedantic` /

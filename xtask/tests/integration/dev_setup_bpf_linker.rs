@@ -23,11 +23,7 @@
 //!
 //! These are pure argv-construction assertions against the planning
 //! function — no process spawning, no environment mutation, no
-//! filesystem touches. Linux-only by `#[cfg(target_os = "linux")]`
-//! because the dev-setup install path is Linux-only per AC7 (macOS
-//! short-circuits with a `tracing::warn`).
-
-#![cfg(target_os = "linux")]
+//! filesystem touches.
 
 use xtask::dev_setup::{Plan, ProbeContext, plan};
 

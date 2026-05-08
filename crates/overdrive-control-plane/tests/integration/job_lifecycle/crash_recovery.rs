@@ -13,12 +13,6 @@
 //! is the state transition Terminated → Running with a distinct PID
 //! at the driver layer.
 //!
-//! Linux-only — gated by `#[cfg(target_os = "linux")]` AND
-//! `#[cfg(feature = "integration-tests")]`. Compile-clean on macOS via
-//! `cargo nextest run --features integration-tests --no-run`.
-
-#![cfg(target_os = "linux")]
-
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 

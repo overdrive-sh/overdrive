@@ -27,7 +27,6 @@
 //! `cargo xtask lima run --` (default-root) on macOS and as the CI
 //! integration job's `sudo`-wrapped invocation elsewhere.
 
-#![cfg(target_os = "linux")]
 #![allow(
     clippy::missing_panics_doc,
     clippy::expect_used,

@@ -30,7 +30,6 @@
 //! `host_ns`. Both ends are brought up inside their respective
 //! namespaces (`ip netns exec <ns> ip link set ...`).
 
-#![cfg(target_os = "linux")]
 #![allow(clippy::missing_panics_doc, clippy::expect_used)]
 
 use std::process::Command;

@@ -20,10 +20,8 @@ mod integration {
     /// RED scaffold.
     mod atomic_swap;
     mod build_rs_artifact_check;
-    /// Shared fixtures (RAII veth-pair, capability gating). Linux-only
-    /// — declared at module scope so siblings reach it via
-    /// `super::helpers::…`.
-    #[cfg(target_os = "linux")]
+    /// Shared fixtures (RAII veth-pair, capability gating). Declared at
+    /// module scope so siblings reach it via `super::helpers::…`.
     mod helpers;
     /// phase-2-xdp-service-map Slice 04 (US-04; S-2.2-15) —
     /// Maglev real-distribution under XDP traffic on real veth.

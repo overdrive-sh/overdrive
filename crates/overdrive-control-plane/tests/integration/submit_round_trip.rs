@@ -94,10 +94,6 @@ async fn spawn_server() -> (ServerHandle, SocketAddr, TempDir, String) {
         operator_config_dir: operator_config_dir.clone(),
         // `tick_cadence` and `clock` default to
         // `DEFAULT_TICK_CADENCE` (100ms) and `Arc::new(SystemClock)`.
-        // Per ADR-0034 the in-binary cgroup escape hatch is gone; on
-        // macOS the pre-flight is a `#[cfg(target_os = "linux")]` no-op,
-        // and on Linux this test runs via `cargo xtask lima run --`
-        // against the bundled VM (root + delegated cgroups).
         // Per `fix-convergence-loop-not-spawned` Step 01-02: the
         // production server now spawns a convergence-tick loop. This
         // test does not assert on convergence outcomes — its

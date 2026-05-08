@@ -12,15 +12,11 @@
 //! 1. exit code is non-zero, AND
 //! 2. stderr names the artifact path AND `cargo xtask bpf-build`.
 //!
-//! Linux-only by `#[cfg(target_os = "linux")]` — the build.rs check
-//! itself is Linux-only (the `include_bytes!` constant lives behind
-//! `#[cfg(target_os = "linux")]` in `src/lib.rs` and is never
-//! evaluated on non-Linux). Gated behind the `integration-tests`
+//! Gated behind the `integration-tests`
 //! feature on the crate via the `tests/integration.rs` entrypoint per
 //! `.claude/rules/testing.md` § Layout. `#[serial(env)]` because the
 //! test mutates the on-disk artifact (process-global file).
 
-#![cfg(target_os = "linux")]
 #![allow(clippy::print_stderr)]
 
 use std::path::PathBuf;

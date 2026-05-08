@@ -14,8 +14,6 @@
 //! UID. Production wires the same function with `/sys/fs/cgroup`
 //! and `getpid()`.
 
-#![cfg(target_os = "linux")]
-
 use overdrive_control_plane::cgroup_manager::{
     CONTROL_PLANE_SLICE, create_and_enrol_control_plane_slice_at,
 };

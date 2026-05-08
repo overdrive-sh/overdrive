@@ -11,10 +11,6 @@
 //! See `docs/research/dataplane/aya-rs-usage-comprehensive-research.md`
 //! § F.1 for the migration recipe.
 //!
-//! Linux-only. The macOS workspace compiles without aya in the dep
-//! graph and never reaches this module — gated at `lib.rs`.
-
-#![cfg(target_os = "linux")]
 
 pub mod bpf;
 pub mod prog_test_run;

@@ -6,12 +6,6 @@
 //! alloc reaches `Running`, then asserts cgroup membership of the
 //! workload PID.
 //!
-//! Linux-only — gated by `#[cfg(target_os = "linux")]` AND
-//! `#[cfg(feature = "integration-tests")]`. Compile-clean on macOS via
-//! `cargo nextest run --features integration-tests --no-run`.
-
-#![cfg(target_os = "linux")]
-
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 

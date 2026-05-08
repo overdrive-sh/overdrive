@@ -44,7 +44,6 @@
 //!   `SanityPrologue` is reserved for future operator-tunable
 //!   sanity rules per architecture.md § 6.
 
-#![cfg(target_os = "linux")]
 #![allow(
     clippy::missing_panics_doc,
     clippy::expect_used,

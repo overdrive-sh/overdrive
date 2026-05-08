@@ -26,7 +26,6 @@
 //! `set`, `delete`, `pin`, `as_fd`, `create_inner`. The migration
 //! recipe is in research § F.1.
 
-#![cfg(target_os = "linux")]
 // HoM userspace handle wraps the `bpf(2)` syscall surface in
 // `crate::sys::bpf`. Same FD <-> u32 / raw-pointer-borrow patterns
 // apply here. Allow scoped to this module — production code

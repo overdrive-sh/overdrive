@@ -23,10 +23,6 @@
 //! (aya-template's default; breaks workspace caching, opaque errors,
 //! hostile to incremental rebuilds).
 //!
-//! On non-Linux build targets the artifact-check is skipped via
-//! `#[cfg(target_os = "linux")]` — the `include_bytes!` constant in
-//! `src/lib.rs` lives behind the same cfg gate and is never evaluated
-//! off-Linux, so the artifact need not exist on developer macOS.
 //!
 //! ## `OVERDRIVE_BPF_OBJECT` override
 //!
@@ -92,54 +88,44 @@ fn main() {
         std::path::Path::to_path_buf,
     );
 
-    // Emit `CARGO_WORKSPACE_DIR` for `env!()` in `src/lib.rs`. Both
-    // Linux and non-Linux targets need this — on macOS the env var is
-    // still consulted by `cargo check` even though the
-    // `include_bytes!` constant is cfg-gated out.
+    // Emit `CARGO_WORKSPACE_DIR` for `env!()` in `src/lib.rs`.
     println!("cargo:rustc-env=CARGO_WORKSPACE_DIR={}", workspace_root.display());
 
-    // Linux artifact-check shim. macOS short-circuits — the
-    // `include_bytes!` in `src/lib.rs` is `#[cfg(target_os = "linux")]`
-    // and never evaluated on non-Linux, so the artifact need not be
-    // present.
-    #[cfg(target_os = "linux")]
-    {
-        // `OVERDRIVE_BPF_OBJECT` override (see module docstring).
-        // Empty values are treated as "unset" so a stray
-        // `OVERDRIVE_BPF_OBJECT=` does not silently cripple the
-        // fallback — the canonical "unset" shape from cargo's env
-        // plumbing is `None`, but a user-supplied empty value goes
-        // through as `Some("")`, which would then resolve `path.exists()`
-        // against `""` and fail every time. Treat both as "not set".
-        let artifact = std::env::var_os("OVERDRIVE_BPF_OBJECT")
-            .filter(|v| !v.is_empty())
-            .map_or_else(|| workspace_root.join("target/bpf/overdrive_bpf.o"), PathBuf::from);
-        if !artifact.exists() {
-            // Build scripts surface diagnostics via stderr; cargo
-            // captures and renders the `--- stderr` block on failure.
-            // `clippy::print_stderr` is not the right gate for build.rs.
-            #[allow(clippy::print_stderr)]
-            {
-                eprintln!(
-                    "error: BPF object not found at {}; run `cargo xtask bpf-build` first",
-                    artifact.display()
-                );
-            }
-            std::process::exit(1);
+    // `OVERDRIVE_BPF_OBJECT` override (see module docstring).
+    // Empty values are treated as "unset" so a stray
+    // `OVERDRIVE_BPF_OBJECT=` does not silently cripple the
+    // fallback — the canonical "unset" shape from cargo's env
+    // plumbing is `None`, but a user-supplied empty value goes
+    // through as `Some("")`, which would then resolve `path.exists()`
+    // against `""` and fail every time. Treat both as "not set".
+    let artifact = std::env::var_os("OVERDRIVE_BPF_OBJECT")
+        .filter(|v| !v.is_empty())
+        .map_or_else(|| workspace_root.join("target/bpf/overdrive_bpf.o"), PathBuf::from);
+    if !artifact.exists() {
+        // Build scripts surface diagnostics via stderr; cargo
+        // captures and renders the `--- stderr` block on failure.
+        // `clippy::print_stderr` is not the right gate for build.rs.
+        #[allow(clippy::print_stderr)]
+        {
+            eprintln!(
+                "error: BPF object not found at {}; run `cargo xtask bpf-build` first",
+                artifact.display()
+            );
         }
-        println!("cargo:rerun-if-changed={}", artifact.display());
-
-        // Emit the resolved artifact path as a rustc-env so the
-        // `include_bytes!` macro in `src/lib.rs` (and the matching
-        // copy in `tests/integration/reverse_nat_e2e.rs`) consumes the
-        // override transparently. Without this, those macros would
-        // resolve `concat!(env!("CARGO_WORKSPACE_DIR"), "/target/...")`,
-        // which under `cargo-mutants` points at the per-mutant copy
-        // `/tmp/cargo-mutants-*.tmp/target/...` — a path that does not
-        // exist because cargo-mutants does not copy `target/`. With
-        // `OVERDRIVE_BPF_OBJECT_PATH` emitted here, lib.rs reads the
-        // absolute path the wrapper supplied and `include_bytes!`
-        // resolves to the original tree's artifact.
-        println!("cargo:rustc-env=OVERDRIVE_BPF_OBJECT_PATH={}", artifact.display());
+        std::process::exit(1);
     }
+    println!("cargo:rerun-if-changed={}", artifact.display());
+
+    // Emit the resolved artifact path as a rustc-env so the
+    // `include_bytes!` macro in `src/lib.rs` (and the matching
+    // copy in `tests/integration/reverse_nat_e2e.rs`) consumes the
+    // override transparently. Without this, those macros would
+    // resolve `concat!(env!("CARGO_WORKSPACE_DIR"), "/target/...")`,
+    // which under `cargo-mutants` points at the per-mutant copy
+    // `/tmp/cargo-mutants-*.tmp/target/...` — a path that does not
+    // exist because cargo-mutants does not copy `target/`. With
+    // `OVERDRIVE_BPF_OBJECT_PATH` emitted here, lib.rs reads the
+    // absolute path the wrapper supplied and `include_bytes!`
+    // resolves to the original tree's artifact.
+    println!("cargo:rustc-env=OVERDRIVE_BPF_OBJECT_PATH={}", artifact.display());
 }

@@ -487,13 +487,20 @@ const LIMA_INSTANCE: &str = "overdrive";
 const LIMA_TEMPLATE: &str = "infra/lima/overdrive-dev.yaml";
 
 /// Returns `true` when the current process is running inside the Lima
-/// guest VM. Lima sets `LIMA_CIDATA_NAME` in every guest shell session.
+/// guest VM. Lima names every guest `lima-<instance>`, so the hostname
+/// prefix is a reliable signal that survives across shell sessions and
+/// sudo escalation. The `OVERDRIVE_LIMA_VM` env var in the Lima
+/// template (`infra/lima/overdrive-dev.yaml`) is the secondary signal
+/// for newly-provisioned VMs.
 fn inside_lima() -> bool {
-    std::env::var_os("LIMA_CIDATA_NAME").is_some()
+    if std::env::var_os("OVERDRIVE_LIMA_VM").is_some() {
+        return true;
+    }
+    std::fs::read_to_string("/etc/hostname").is_ok_and(|h| h.trim().starts_with("lima-"))
 }
 
 /// Ensures the current xtask subcommand is running inside the Lima VM.
-/// If already inside (detected via `LIMA_CIDATA_NAME` env var), returns
+/// If already inside (detected via `OVERDRIVE_LIMA_VM` env var), returns
 /// `Ok(())` and the caller proceeds with the real work. If outside, re-
 /// dispatches the given `args` through `cargo xtask lima run --` and
 /// exits with the child's exit status.
@@ -820,10 +827,6 @@ fn cargo_target_dir(workspace_root: &std::path::Path) -> std::path::PathBuf {
 /// the concrete invocation lands the binary name as the integration
 /// suite's single entrypoint per the testing.md Layout convention.
 ///
-/// On non-Linux build hosts the triptych test functions are
-/// `#[cfg(target_os = "linux")]`-gated and silently skip — the
-/// command still exits 0 with "no tests run" output, which is the
-/// correct shape for macOS dev (the real gate is Lima / CI).
 fn bpf_unit() -> Result<()> {
     ensure_in_lima(&["cargo", "xtask", "bpf-unit"])?;
 
@@ -848,10 +851,7 @@ fn bpf_unit() -> Result<()> {
     // and tear it down on Drop so a panicking test still cleans up.
     // The topology lives once per `bpf-unit` invocation, not per
     // test (mirrors the env-wide nature of host network state, and
-    // avoids per-test sudo dances). Linux-only — on macOS the actual
-    // tests run inside Lima via `cargo xtask lima run --`, which
-    // re-enters this function on Linux.
-    #[cfg(target_os = "linux")]
+    // avoids per-test sudo dances).
     let _topology = bpf_fib_topology::install()?;
 
     sh(
@@ -885,7 +885,6 @@ fn bpf_unit() -> Result<()> {
 /// the `overdrive-*`-out-of-xtask-deps rule (CLAUDE.md §
 /// "xtask is build / test / dev orchestration"). If the test
 /// constants ever change, this module changes alongside them.
-#[cfg(target_os = "linux")]
 mod bpf_fib_topology {
     use super::{Result, sh};
     use eyre::bail;

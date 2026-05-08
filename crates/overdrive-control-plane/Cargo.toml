@@ -133,9 +133,6 @@ libsql = { workspace = true }
 tracing.workspace            = true
 tracing-subscriber.workspace = true
 
-# Linux-only — `geteuid` for the cgroup pre-flight (ADR-0028) and
-# `getpid` for control-plane slice enrolment.
-[target.'cfg(target_os = "linux")'.dependencies]
 libc.workspace = true
 
 [dev-dependencies]
