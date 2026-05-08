@@ -60,11 +60,11 @@ jobs:
 
       - name: Provision Lima VM (cache miss)
         if: steps.lima-cache.outputs.cache-hit != 'true'
-        run: limactl start --name=overdrive --tty=false infra/lima/overdrive-dev.yaml
+        run: limactl start --timeout=30m --name=overdrive --tty=false infra/lima/overdrive-dev.yaml
 
       - name: Start cached Lima VM
         if: steps.lima-cache.outputs.cache-hit == 'true'
-        run: limactl start overdrive
+        run: limactl start --timeout=30m overdrive
 
       - name: cargo xtask mutants --workspace
         run: |

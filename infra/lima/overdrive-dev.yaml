@@ -239,7 +239,20 @@ provision:
       . "${HOME}/.cargo/env"
       rustup component add rustfmt clippy rust-src || true
       rustup toolchain install nightly --component rust-src --profile minimal || true
-      cargo install --locked cargo-deny cargo-nextest cargo-mutants bpf-linker || true
+
+      # cargo-binstall pulls prebuilt binaries when crates publish them
+      # (cargo-nextest, cargo-deny, cargo-mutants, bpf-linker all do as
+      # of 2026). Cold provisioning of these four via `cargo install
+      # --locked` was busting Lima's 10-minute startup timeout in CI;
+      # binstall reduces the user-mode block from many minutes of source
+      # builds to <30s of curl + extract. Falls back to a source build
+      # automatically if a target lacks prebuilts.
+      if ! command -v cargo-binstall >/dev/null 2>&1; then
+        curl -fsSL https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh \
+          | bash
+      fi
+      cargo binstall --no-confirm --force \
+        cargo-deny cargo-nextest cargo-mutants bpf-linker || true
 
       # virtme-ng (fast kernel boot from source tree) — via pipx so it gets
       # its own venv and doesn't collide with system python packages.

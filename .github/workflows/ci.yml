@@ -194,11 +194,11 @@ jobs:
 
       - name: Provision Lima VM (cache miss)
         if: steps.lima-cache.outputs.cache-hit != 'true'
-        run: limactl start --name=overdrive --tty=false infra/lima/overdrive-dev.yaml
+        run: limactl start --timeout=30m --name=overdrive --tty=false infra/lima/overdrive-dev.yaml
 
       - name: Start cached Lima VM
         if: steps.lima-cache.outputs.cache-hit == 'true'
-        run: limactl start overdrive
+        run: limactl start --timeout=30m overdrive
 
       # BPF artifact is downloaded to the host and visible inside the
       # VM via the home-directory mount.
@@ -271,11 +271,11 @@ jobs:
 
       - name: Provision Lima VM (cache miss)
         if: steps.lima-cache.outputs.cache-hit != 'true'
-        run: limactl start --name=overdrive --tty=false infra/lima/overdrive-dev.yaml
+        run: limactl start --timeout=30m --name=overdrive --tty=false infra/lima/overdrive-dev.yaml
 
       - name: Start cached Lima VM
         if: steps.lima-cache.outputs.cache-hit == 'true'
-        run: limactl start overdrive
+        run: limactl start --timeout=30m overdrive
 
       - name: Download BPF object artifact
         uses: actions/download-artifact@v4
@@ -544,11 +544,11 @@ jobs:
 
       - name: Provision Lima VM (cache miss)
         if: steps.lima-cache.outputs.cache-hit != 'true'
-        run: limactl start --name=overdrive --tty=false infra/lima/overdrive-dev.yaml
+        run: limactl start --timeout=30m --name=overdrive --tty=false infra/lima/overdrive-dev.yaml
 
       - name: Start cached Lima VM
         if: steps.lima-cache.outputs.cache-hit == 'true'
-        run: limactl start overdrive
+        run: limactl start --timeout=30m overdrive
 
       - name: Download BPF object artifact
         uses: actions/download-artifact@v4
@@ -653,11 +653,11 @@ jobs:
 
       - name: Provision Lima VM (cache miss)
         if: steps.lima-cache.outputs.cache-hit != 'true'
-        run: limactl start --name=overdrive --tty=false infra/lima/overdrive-dev.yaml
+        run: limactl start --timeout=30m --name=overdrive --tty=false infra/lima/overdrive-dev.yaml
 
       - name: Start cached Lima VM
         if: steps.lima-cache.outputs.cache-hit == 'true'
-        run: limactl start overdrive
+        run: limactl start --timeout=30m overdrive
 
       - name: cargo xtask bpf-clippy
         # Lint the kernel-side bin under `+nightly --target
@@ -736,11 +736,11 @@ jobs:
 
       - name: Provision Lima VM (cache miss)
         if: steps.lima-cache.outputs.cache-hit != 'true'
-        run: limactl start --name=overdrive --tty=false infra/lima/overdrive-dev.yaml
+        run: limactl start --timeout=30m --name=overdrive --tty=false infra/lima/overdrive-dev.yaml
 
       - name: Start cached Lima VM
         if: steps.lima-cache.outputs.cache-hit == 'true'
-        run: limactl start overdrive
+        run: limactl start --timeout=30m overdrive
 
       - name: Download BPF object artifact
         uses: actions/download-artifact@v4
@@ -815,11 +815,11 @@ jobs:
 
       - name: Provision Lima VM (cache miss)
         if: steps.lima-cache.outputs.cache-hit != 'true'
-        run: limactl start --name=overdrive --tty=false infra/lima/overdrive-dev.yaml
+        run: limactl start --timeout=30m --name=overdrive --tty=false infra/lima/overdrive-dev.yaml
 
       - name: Start cached Lima VM
         if: steps.lima-cache.outputs.cache-hit == 'true'
-        run: limactl start overdrive
+        run: limactl start --timeout=30m overdrive
 
       - name: Download BPF object artifact
         uses: actions/download-artifact@v4
@@ -869,11 +869,11 @@ jobs:
 
       - name: Provision Lima VM (cache miss)
         if: steps.lima-cache.outputs.cache-hit != 'true'
-        run: limactl start --name=overdrive --tty=false infra/lima/overdrive-dev.yaml
+        run: limactl start --timeout=30m --name=overdrive --tty=false infra/lima/overdrive-dev.yaml
 
       - name: Start cached Lima VM
         if: steps.lima-cache.outputs.cache-hit == 'true'
-        run: limactl start overdrive
+        run: limactl start --timeout=30m overdrive
 
       - name: Download BPF object artifact
         uses: actions/download-artifact@v4
