@@ -117,3 +117,7 @@ jobs:
             target/xtask/mutants.out/
           retention-days: 30
           if-no-files-found: warn
+
+      - name: Stop Lima VM (release disk before cache save)
+        if: always()
+        run: limactl stop overdrive || true

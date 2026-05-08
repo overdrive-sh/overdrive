@@ -238,6 +238,13 @@ jobs:
           retention-days: 14
           if-no-files-found: warn
 
+      # Stop the VM so the cache-save post-step can read ~/.lima/overdrive/disk
+      # without tripping `file changed as we read it`. `|| true` so a never-started
+      # VM (early step failure) doesn't fail the post-cleanup.
+      - name: Stop Lima VM (release disk before cache save)
+        if: always()
+        run: limactl stop overdrive || true
+
   # -------------------------------------------------------------------
   # Integration tests — slow / real-infra suites gated behind each
   # crate's `integration-tests` feature. Per `.claude/rules/testing.md`
@@ -304,6 +311,10 @@ jobs:
           path: target/nextest/ci/junit.xml
           retention-days: 14
           if-no-files-found: warn
+
+      - name: Stop Lima VM (release disk before cache save)
+        if: always()
+        run: limactl stop overdrive || true
 
   # -------------------------------------------------------------------
   # DST — Tier 1 per testing.md. Invoked via the xtask wrapper per
@@ -615,6 +626,10 @@ jobs:
             echo "::error title=mutants failed::no mutants-summary.json produced; check artifact"
           fi
 
+      - name: Stop Lima VM (release disk before cache save)
+        if: always()
+        run: limactl stop overdrive || true
+
   # -------------------------------------------------------------------
   # bpf-build — Phase 2.1 kernel-side ELF compilation.
   #
@@ -697,6 +712,10 @@ jobs:
           # fails with a confusing surface.
           if-no-files-found: error
 
+      - name: Stop Lima VM (release disk before cache save)
+        if: always()
+        run: limactl stop overdrive || true
+
   # -------------------------------------------------------------------
   # bpf-unit — Phase 2.1 Tier 2 BPF unit tests.
   #
@@ -768,6 +787,10 @@ jobs:
           retention-days: 14
           if-no-files-found: warn
 
+      - name: Stop Lima VM (release disk before cache save)
+        if: always()
+        run: limactl stop overdrive || true
+
   # -------------------------------------------------------------------
   # Job E (Tier 4) — verifier-budget regression gate
   # -------------------------------------------------------------------
@@ -834,6 +857,10 @@ jobs:
             'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
              cargo run -p overdrive-dataplane --bin verifier_regress'
 
+      - name: Stop Lima VM (release disk before cache save)
+        if: always()
+        run: limactl stop overdrive || true
+
   # -------------------------------------------------------------------
   # Job E (Tier 4) — XDP throughput / mean-latency regression gate
   # -------------------------------------------------------------------
@@ -890,4 +917,8 @@ jobs:
           limactl shell overdrive bash -lc \
             'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
              cargo xdp-perf'
+
+      - name: Stop Lima VM (release disk before cache save)
+        if: always()
+        run: limactl stop overdrive || true
 
