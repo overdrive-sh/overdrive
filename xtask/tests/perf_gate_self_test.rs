@@ -40,6 +40,19 @@ use xtask::perf_gate::xdp_perf::{
     evaluate as xdp_evaluate, parse_baseline_file as parse_xdp_baseline_file,
     parse_xdp_bench_output,
 };
+// Iface-resolution helper for xdp-perf — pure logic that decides
+// which interface the shell-side wrapper hands to `xdp-bench` and
+// whether to auto-provision a veth pair before invocation. Exists
+// because the prior shape silently defaulted to `lo` (which does not
+// support native XDP, so the gate exited 4 from libbpf with
+// "Underlying driver does not support XDP in native mode" on every
+// uncustomised invocation in Lima or CI). The pure resolution lives
+// in a sibling module so the wrapper's I/O stays thin and this file
+// stays runnable on macOS without `ip` / `xdp-bench` installed.
+use xtask::perf_gate::xdp_perf_setup::{
+    DEFAULT_VETH_PEER, DEFAULT_VETH_PRIMARY, IfaceResolution, ProvisioningPlan,
+    resolve_iface_config, veth_create_argv, veth_link_up_argv, veth_show_argv,
+};
 
 /// Slice-07 KPI pinned: a synthetic 12% growth (5000 → 5600) MUST
 /// trip the gate (`evaluate` returns `GateOutcome::Fail`). The
@@ -361,4 +374,202 @@ fn parse_xdp_baseline_file_rejects_unknown_mode() {
     let err = parse_xdp_baseline_file(text).expect_err("unknown mode must error");
     let msg = format!("{err:?}");
     assert!(msg.contains("mode") || msg.contains("bogus"), "error must name mode; got {msg}");
+}
+
+// ---------------------------------------------------------------------
+// Iface-resolution self-tests — captures the bugfix that defaulted to
+// `lo` (which rejects native XDP). The pure resolver decides between
+// auto-provisioning a `xdp0/xdp1` veth pair and using a caller-staged
+// interface; the shell wrapper in `main.rs::xdp_perf` runs `ip link`
+// per the resolution. These tests pin the contract; subprocess
+// invocation stays untested per existing self-test discipline.
+// ---------------------------------------------------------------------
+
+/// Regression: with no `OVERDRIVE_XDP_PERF_IFACE` set and auto-setup
+/// enabled (the default), the resolver MUST hand back the
+/// project's reserved veth-primary name and ask the wrapper to
+/// auto-provision the `xdp0/xdp1` pair. Prior to the fix the
+/// effective default was `lo`, which the loopback driver rejects for
+/// native XDP — every uncustomised `cargo xtask xdp-perf` run on
+/// Lima or `ubuntu-latest` exited 4 from libbpf.
+#[test]
+fn resolve_iface_config_auto_provisions_xdp_veth_when_env_unset() {
+    let resolution = resolve_iface_config(None, false);
+
+    assert_eq!(
+        resolution.iface, DEFAULT_VETH_PRIMARY,
+        "default iface must be the project's reserved veth primary, never `lo`"
+    );
+    match resolution.provisioning {
+        ProvisioningPlan::AutoProvisionVeth { ref primary, ref peer } => {
+            assert_eq!(primary, DEFAULT_VETH_PRIMARY);
+            assert_eq!(peer, DEFAULT_VETH_PEER);
+        }
+        ProvisioningPlan::UseAsIs => {
+            panic!("auto-provision path expected when env unset and no_auto_setup=false")
+        }
+    }
+}
+
+/// When the operator explicitly names an interface via
+/// `OVERDRIVE_XDP_PERF_IFACE`, the resolver MUST honour it verbatim
+/// and stay out of the provisioning path — that interface's lifecycle
+/// is the operator's, not the gate's. This is the existing CI escape
+/// hatch and the dev-loop knob for "I already wired up a different
+/// veth pair (or a real NIC)."
+#[test]
+fn resolve_iface_config_honours_explicit_env_var_without_provisioning() {
+    let resolution = resolve_iface_config(Some("eth0".to_string()), false);
+
+    assert_eq!(resolution.iface, "eth0");
+    assert!(
+        matches!(resolution.provisioning, ProvisioningPlan::UseAsIs),
+        "explicit env var must skip auto-provisioning"
+    );
+}
+
+/// `--no-auto-setup` MUST disable the auto-provisioning path even
+/// when the env var is unset. Used by harnesses that pre-stage the
+/// interface (e.g. an ops runbook, a test rig, a future Tier 3 nested
+/// VM) and don't want xtask mutating `/sys/class/net`.
+#[test]
+fn resolve_iface_config_no_auto_setup_disables_provisioning_with_unset_env() {
+    let resolution = resolve_iface_config(None, true);
+
+    assert_eq!(resolution.iface, DEFAULT_VETH_PRIMARY);
+    assert!(
+        matches!(resolution.provisioning, ProvisioningPlan::UseAsIs),
+        "no_auto_setup=true must skip auto-provisioning"
+    );
+}
+
+/// `--no-auto-setup` paired with an explicit env var is the
+/// unambiguous "stay out of my plumbing" combination — both signals
+/// agree and the resolver stays out of provisioning.
+#[test]
+fn resolve_iface_config_no_auto_setup_with_explicit_env_uses_as_is() {
+    let resolution = resolve_iface_config(Some("custom-veth".to_string()), true);
+
+    assert_eq!(resolution.iface, "custom-veth");
+    assert!(matches!(resolution.provisioning, ProvisioningPlan::UseAsIs));
+}
+
+/// Veth-pair creation argv MUST match the canonical iproute2 shape
+/// for `ip link add <primary> type veth peer name <peer>`. Pinned
+/// here so a future refactor that drops the `peer name` token (or
+/// transposes argv positions) breaks the test rather than the
+/// runtime — the runtime error surface from a bad argv is generic
+/// "Error: argument ...; try 'ip link help'".
+#[test]
+fn veth_create_argv_matches_iproute2_canonical_shape() {
+    let argv = veth_create_argv("xdp0", "xdp1");
+
+    assert_eq!(
+        argv,
+        vec![
+            "ip".to_string(),
+            "link".to_string(),
+            "add".to_string(),
+            "xdp0".to_string(),
+            "type".to_string(),
+            "veth".to_string(),
+            "peer".to_string(),
+            "name".to_string(),
+            "xdp1".to_string(),
+        ]
+    );
+}
+
+/// Bring-up argv: `ip link set <iface> up`. The wrapper calls this
+/// once per side of the veth pair (both must be UP for native XDP
+/// attach to succeed; `LOWER_UP` follows automatically once both
+/// peers are UP).
+#[test]
+fn veth_link_up_argv_matches_iproute2_canonical_shape() {
+    let argv = veth_link_up_argv("xdp0");
+
+    assert_eq!(
+        argv,
+        vec![
+            "ip".to_string(),
+            "link".to_string(),
+            "set".to_string(),
+            "xdp0".to_string(),
+            "up".to_string(),
+        ]
+    );
+}
+
+/// Existence-check argv: `ip link show <iface>`. The wrapper uses
+/// the exit status (0 = exists, non-zero = absent) to decide whether
+/// to skip creation, so the argv stays minimal — no `--json` or
+/// other format flags that vary across iproute2 releases.
+#[test]
+fn veth_show_argv_matches_iproute2_canonical_shape() {
+    let argv = veth_show_argv("xdp0");
+
+    assert_eq!(
+        argv,
+        vec!["ip".to_string(), "link".to_string(), "show".to_string(), "xdp0".to_string(),]
+    );
+}
+
+/// Default veth names MUST be stable across runs — the gate writes
+/// no record of which iface it used, so a name churn between runs
+/// would silently produce orphaned veth pairs in the host netns.
+/// Pinned here as the contract: changing these is a breaking
+/// operational change that needs a deliberate migration.
+#[test]
+fn default_veth_names_are_stable() {
+    assert_eq!(DEFAULT_VETH_PRIMARY, "xdp0");
+    assert_eq!(DEFAULT_VETH_PEER, "xdp1");
+}
+
+/// The resolved `iface` MUST always equal the auto-provision
+/// primary when the auto-provision path is taken. Pins the cross-
+/// field invariant so a future refactor that changes one without
+/// the other (e.g. resolves to a peer-side iface but provisions
+/// the primary side) breaks the test rather than the runtime
+/// attach.
+#[test]
+fn auto_provision_primary_matches_resolved_iface() {
+    let resolution = resolve_iface_config(None, false);
+
+    let ProvisioningPlan::AutoProvisionVeth { primary, peer: _ } = resolution.provisioning else {
+        panic!("auto-provision path expected");
+    };
+    assert_eq!(primary, resolution.iface);
+}
+
+/// Sanity: `IfaceResolution` MUST be constructible without a
+/// peer — i.e. `UseAsIs` is a valid provisioning plan even when the
+/// iface name happens to match the default. This guards against
+/// the resolver accidentally promoting an explicit-env case into
+/// auto-provisioning just because the operator named the iface
+/// `xdp0`.
+#[test]
+fn explicit_env_named_xdp0_still_uses_as_is() {
+    let resolution = resolve_iface_config(Some(DEFAULT_VETH_PRIMARY.to_string()), false);
+
+    assert_eq!(resolution.iface, DEFAULT_VETH_PRIMARY);
+    assert!(
+        matches!(resolution.provisioning, ProvisioningPlan::UseAsIs),
+        "explicit env var (even when matching the default name) must not trigger auto-provisioning — operator owns lifecycle"
+    );
+}
+
+/// Direct construction of `IfaceResolution` (used by the wrapper
+/// to plumb the resolution through to the runner) MUST work
+/// regardless of the variant. Compile-shape assertion only.
+#[test]
+fn iface_resolution_struct_is_constructible_directly() {
+    let _: IfaceResolution =
+        IfaceResolution { iface: "anything".to_string(), provisioning: ProvisioningPlan::UseAsIs };
+    let _: IfaceResolution = IfaceResolution {
+        iface: DEFAULT_VETH_PRIMARY.to_string(),
+        provisioning: ProvisioningPlan::AutoProvisionVeth {
+            primary: DEFAULT_VETH_PRIMARY.to_string(),
+            peer: DEFAULT_VETH_PEER.to_string(),
+        },
+    };
 }

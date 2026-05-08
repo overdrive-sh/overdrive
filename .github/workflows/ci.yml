@@ -917,15 +917,30 @@ jobs:
       - name: Install mold linker
         run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends mold
 
-      # veristat ships with the kernel selftests bpf bundle; on Ubuntu
-      # 24.04 it is packaged via `linux-tools-common` /
-      # `linux-tools-$(uname -r)`. The runner uses the image's stock
-      # kernel; we install the matching tools.
+      # veristat is the Tier 4 verifier-budget statistics tool. Ubuntu's
+      # `linux-tools-*` packages do NOT ship it (they include only
+      # bpftool/perf/cpupower/rtla/usbip), so install from the upstream
+      # libbpf/veristat release — the canonical standalone mirror of
+      # `tools/testing/selftests/bpf/veristat` from bpf-next, maintained
+      # by the libbpf org. Single static binary; mirrored in
+      # `infra/lima/overdrive-dev.yaml` so local + CI stay in lockstep.
       - name: Install veristat
+        env:
+          VERISTAT_VERSION: v0.5.1
         run: |
-          sudo apt-get install -y --no-install-recommends \
-            linux-tools-common "linux-tools-$(uname -r)" || \
-            sudo apt-get install -y --no-install-recommends linux-tools-generic
+          ARCH="$(uname -m)"
+          case "${ARCH}" in
+            x86_64)  ASSET_ARCH="amd64" ;;
+            aarch64) ASSET_ARCH="arm64" ;;
+            *) echo "unsupported arch: ${ARCH}"; exit 1 ;;
+          esac
+          TARBALL="veristat-${VERISTAT_VERSION}-${ASSET_ARCH}.tar.gz"
+          curl -fsSL -o "/tmp/${TARBALL}" \
+            "https://github.com/libbpf/veristat/releases/download/${VERISTAT_VERSION}/${TARBALL}"
+          tar -C /tmp -xf "/tmp/${TARBALL}" veristat
+          sudo install -m 0755 /tmp/veristat /usr/local/bin/veristat
+          rm -f "/tmp/${TARBALL}" /tmp/veristat
+          veristat --version
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -1020,12 +1035,15 @@ jobs:
           path: target/bpf/
           if-no-files-found: error
 
-      # The interface used by `xdp-bench`; `lo` is the safe default
-      # for a CI run with no veth pair set up. The first follow-on
-      # PR that lands a real veth-pair harness (per #152's
-      # nested-VM Tier 3 work) overrides this via the env var.
+      # `cargo xtask xdp-perf` auto-provisions an `xdp0/xdp1` veth
+      # pair when `OVERDRIVE_XDP_PERF_IFACE` is unset and runs
+      # `xdp-bench` against `xdp0`. veth supports native XDP attach
+      # (`ndo_bpf` → `veth_xdp`), unlike `lo` which the loopback
+      # driver rejects with "Underlying driver does not support XDP
+      # in native mode". The auto-provisioning needs `CAP_NET_ADMIN`
+      # — `sudo -E env` provides it. To stage the interface
+      # externally instead, set `OVERDRIVE_XDP_PERF_IFACE` (or pass
+      # `--no-auto-setup`).
       - name: cargo xtask xdp-perf
-        env:
-          OVERDRIVE_XDP_PERF_IFACE: lo
         run: sudo -E env "PATH=$PATH" cargo xtask xdp-perf
 

@@ -23,3 +23,4 @@
 
 pub mod verifier_regress;
 pub mod xdp_perf;
+pub mod xdp_perf_setup;
