@@ -31,10 +31,10 @@ use std::time::{Duration, Instant};
 use overdrive_control_plane::error::ControlPlaneError;
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_control_plane::view_store::{ViewStore, ViewStoreExt};
-use overdrive_core::id::AllocationId;
+use overdrive_core::id::{AllocationId, ServiceId};
 use overdrive_core::reconciler::{
     AnyReconciler, JobLifecycle, JobLifecycleView, NoopHeartbeat, Reconciler, ReconcilerName,
-    TargetResource,
+    RetryMemory, ServiceMapHydrator, ServiceMapHydratorView, TargetResource,
 };
 use overdrive_core::wall_clock::UnixInstant;
 use overdrive_sim::adapters::view_store::SimViewStore;
@@ -283,5 +283,83 @@ async fn runtime_skips_write_through_when_next_view_equals_in_memory() {
         sim.write_through_count(),
     );
     let after2 = runtime.loaded_job_lifecycle_views_for_test(&n).expect("map present");
+    assert_eq!(after2.get(&t), Some(&changed), "in-memory map must reflect the changed view");
+}
+
+fn service_id(v: u64) -> ServiceId {
+    ServiceId::new(v).expect("valid service id")
+}
+
+/// Same Eq-diff contract as the `JobLifecycle` variant above, but for
+/// `ServiceMapHydratorView`. The `persist_view` implementation has a
+/// per-variant `if current == view { return Ok(()); }` gate — a
+/// mutation that swaps `==` for `!=` on the `ServiceMapHydrator` arm
+/// must be caught here.
+#[tokio::test]
+async fn runtime_skips_write_through_when_service_map_hydrator_view_equals_in_memory() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let sim = Arc::new(SimViewStore::new());
+    let n = name("service-map-hydrator");
+    let t = target("service/global");
+
+    let mut runtime =
+        ReconcilerRuntime::new(tmp.path(), sim.clone() as Arc<dyn ViewStore>).expect("runtime");
+    runtime
+        .register(AnyReconciler::ServiceMapHydrator(ServiceMapHydrator::canonical()))
+        .await
+        .expect("register service-map-hydrator");
+
+    let mut seeded = ServiceMapHydratorView::default();
+    seeded.retries.insert(
+        service_id(1),
+        RetryMemory {
+            attempts: 2,
+            last_failure_seen_at: UnixInstant::from_unix_duration(Duration::from_secs(100)),
+            last_attempted_fingerprint: None,
+        },
+    );
+    runtime.seed_service_map_hydrator_view_for_test(&t, seeded.clone());
+
+    sim.reset_write_through_count();
+    assert_eq!(sim.write_through_count(), 0, "counter must be zero after reset");
+
+    let result =
+        runtime.apply_next_service_map_hydrator_view_for_test(&n, &t, seeded.clone()).await;
+    assert!(result.is_ok(), "Eq-diff skip must return Ok, got {result:?}");
+
+    assert_eq!(
+        sim.write_through_count(),
+        0,
+        "runtime MUST skip write_through when ServiceMapHydratorView next_view == in-memory view; \
+         observed {} fsync(s)",
+        sim.write_through_count(),
+    );
+
+    let after = runtime
+        .loaded_service_map_hydrator_views_for_test(&n)
+        .expect("service-map-hydrator map must exist");
+    assert_eq!(after.get(&t), Some(&seeded), "in-memory map must be unchanged");
+
+    let mut changed = seeded.clone();
+    changed.retries.insert(
+        service_id(1),
+        RetryMemory {
+            attempts: 3,
+            last_failure_seen_at: UnixInstant::from_unix_duration(Duration::from_secs(200)),
+            last_attempted_fingerprint: None,
+        },
+    );
+    runtime
+        .apply_next_service_map_hydrator_view_for_test(&n, &t, changed.clone())
+        .await
+        .expect("changed view must persist");
+    assert_eq!(
+        sim.write_through_count(),
+        1,
+        "a non-equal next_view MUST write through exactly once; \
+         observed {} fsync(s)",
+        sim.write_through_count(),
+    );
+    let after2 = runtime.loaded_service_map_hydrator_views_for_test(&n).expect("map present");
     assert_eq!(after2.get(&t), Some(&changed), "in-memory map must reflect the changed view");
 }

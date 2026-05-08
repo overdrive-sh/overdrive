@@ -45,15 +45,8 @@ fn main() -> ExitCode {
     }
 }
 
-// mutants: skip — `run` is the binary entry point; the per-PR
-// integration test `crates/overdrive-control-plane/tests/integration/
-// openapi_gate.rs` exercises both subcommands (`generate` writes the
-// YAML; `check` re-renders and compares) by spawning the binary as a
-// subprocess. cargo-mutants' nextest scope cannot rerun the wrapped
-// `cargo run -p overdrive-control-plane --bin openapi -- ...` shape,
-// so the protection lives at the integration tier rather than at the
-// per-mutant nextest invocation.
 fn run(cmd: &Cmd) -> Result<()> {
+    // mutants: skip — binary entry point tested via subprocess in openapi_gate.rs
     let workspace_root = workspace_root()?;
     let path = workspace_root.join(OPENAPI_YAML_PATH);
     match cmd {

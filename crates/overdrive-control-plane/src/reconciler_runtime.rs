@@ -44,8 +44,8 @@ use overdrive_core::aggregate::{IntentKey, Job, Node};
 use overdrive_core::id::{JobId, NodeId};
 use overdrive_core::reconciler::{
     Action, AnyReconciler, AnyReconcilerView, AnyState, JobLifecycle, JobLifecycleState,
-    JobLifecycleView, Reconciler, ReconcilerName, ServiceMapHydratorState, ServiceMapHydratorView,
-    TargetResource, TickContext,
+    JobLifecycleView, Reconciler, ReconcilerName, ServiceMapHydrator, ServiceMapHydratorState,
+    ServiceMapHydratorView, TargetResource, TickContext,
 };
 use overdrive_core::traits::intent_store::IntentStore;
 use parking_lot::Mutex;
@@ -583,6 +583,57 @@ impl ReconcilerRuntime {
             map.remove(target);
         }
     }
+
+    /// Snapshot of the in-memory `ServiceMapHydratorView` map for `name`.
+    /// Returns `None` when the reconciler is not registered or is not
+    /// the `ServiceMapHydrator` variant. **Test-only.**
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "integration-tests"))]
+    pub fn loaded_service_map_hydrator_views_for_test(
+        &self,
+        name: &ReconcilerName,
+    ) -> Option<BTreeMap<TargetResource, ServiceMapHydratorView>> {
+        let entry = self.reconcilers.get(name)?;
+        match &*entry.views.lock() {
+            AnyViewMap::ServiceMapHydrator(map) => Some(map.clone()),
+            AnyViewMap::Unit | AnyViewMap::JobLifecycle(_) => None,
+        }
+    }
+
+    /// Drive the runtime's persist-view path directly with a typed
+    /// `ServiceMapHydratorView`. Mirrors
+    /// [`Self::apply_next_view_for_test`] for the ServiceMapHydrator
+    /// variant. **Test-only.**
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "integration-tests"))]
+    pub async fn apply_next_service_map_hydrator_view_for_test(
+        &self,
+        name: &ReconcilerName,
+        target: &TargetResource,
+        next: ServiceMapHydratorView,
+    ) -> Result<(), ControlPlaneError> {
+        self.persist_view(name, target, AnyReconcilerView::ServiceMapHydrator(next)).await
+    }
+
+    /// Seed the in-memory view for `(service-map-hydrator, target)`
+    /// directly, bypassing the `ViewStore`. Mirrors
+    /// [`Self::seed_job_lifecycle_view_for_test`] for the
+    /// ServiceMapHydrator variant. **Test-only.**
+    #[doc(hidden)]
+    #[cfg(any(test, feature = "integration-tests"))]
+    pub fn seed_service_map_hydrator_view_for_test(
+        &self,
+        target: &TargetResource,
+        view: ServiceMapHydratorView,
+    ) {
+        let Some(entry) = self.reconcilers.get(&service_map_hydrator_canonical_name()) else {
+            return;
+        };
+        let mut guard = entry.views.lock();
+        if let AnyViewMap::ServiceMapHydrator(map) = &mut *guard {
+            map.insert(target.clone(), view);
+        }
+    }
 }
 
 /// Build the canonical [`ReconcilerName`] for the [`JobLifecycle`]
@@ -600,6 +651,13 @@ impl ReconcilerRuntime {
 fn job_lifecycle_canonical_name() -> ReconcilerName {
     ReconcilerName::new(<JobLifecycle as Reconciler>::NAME)
         .expect("JobLifecycle::NAME is a valid ReconcilerName by construction")
+}
+
+#[cfg(any(test, feature = "integration-tests"))]
+#[allow(clippy::expect_used)]
+fn service_map_hydrator_canonical_name() -> ReconcilerName {
+    ReconcilerName::new(<ServiceMapHydrator as Reconciler>::NAME)
+        .expect("ServiceMapHydrator::NAME is a valid ReconcilerName by construction")
 }
 
 // ---------------------------------------------------------------------------
