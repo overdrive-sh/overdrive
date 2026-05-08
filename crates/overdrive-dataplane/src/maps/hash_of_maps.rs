@@ -238,6 +238,19 @@ impl<K: Pod, V: Pod> HashOfMapsHandle<K, V> {
     /// kernel-side BPF program declaring an external map) can
     /// recover it via `BPF_OBJ_GET`. The path's parent must already
     /// be a bpffs mount.
+    // mutants: skip — `pin` wraps `bpf_obj_pin` which requires a real
+    // bpffs mount + `CAP_SYS_ADMIN`; the protecting tests are the
+    // Linux integration suite under
+    // `crates/overdrive-dataplane/tests/integration/` which exercise
+    // `new_pinned_with_array_inner` (whose body calls `pin`) end-to-end
+    // through `EbpfDataplane::new`. That tier runs under
+    // `cargo xtask integration-test vm` and is OUT OF SCOPE for
+    // cargo-mutants' nextest-only rerun. Mutating `pin` to `Ok(())`
+    // would make every `new_pinned_with_array_inner` call return a
+    // handle whose pin path does NOT exist; the kernel-side BPF
+    // ELF then fails to find the pinned outer map at load time,
+    // surfaced as `EbpfDataplane::new` failure in the integration
+    // suite.
     pub fn pin<P: AsRef<Path>>(&self, path: P) -> Result<()> {
         bpf_obj_pin(self.outer_fd.as_fd(), path.as_ref())?;
         Ok(())
