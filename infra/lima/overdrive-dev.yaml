@@ -252,7 +252,7 @@ provision:
           | bash
       fi
       cargo binstall --no-confirm --force \
-        cargo-deny cargo-nextest cargo-mutants bpf-linker || true
+        cargo-deny cargo-nextest cargo-mutants bpf-linker sccache || true
 
       # virtme-ng (fast kernel boot from source tree) — via pipx so it gets
       # its own venv and doesn't collide with system python packages.
@@ -322,6 +322,14 @@ probes:
       set -eu
       timeout 300 bash -c 'until command -v kraft >/dev/null 2>&1; do sleep 2; done'
     hint: "kraftkit .deb install failed — check /var/log/cloud-init-output.log"
+
+  - description: "sccache installed"
+    script: |
+      #!/usr/bin/env bash
+      set -eu
+      timeout 300 bash -c 'until command -v sccache >/dev/null 2>&1 \
+        || [ -x "$HOME/.cargo/bin/sccache" ]; do sleep 2; done'
+    hint: "sccache binary missing — `cargo binstall sccache` failed in user-mode provisioning."
 
   - description: "KVM accessible"
     script: |

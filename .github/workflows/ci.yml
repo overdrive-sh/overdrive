@@ -65,6 +65,11 @@ env:
   # per PR; nightly soaks higher elsewhere. Do not lower to dodge slow
   # generators — fix the generator.
   PROPTEST_CASES: "1024"
+  # sccache + cargo incremental do not compose: incremental wins, sccache
+  # silently misses every rustc invocation. Disable incremental at workflow
+  # level so every sccache-using job (host + Lima) actually hits the cache.
+  # See https://github.com/mozilla/sccache#known-caveats §"Rust caveats".
+  CARGO_INCREMENTAL: "0"
   # NOTE: RUSTC_WRAPPER and SCCACHE_GHA_ENABLED are intentionally NOT set
   # here. They are exported by each job's sccache setup step only when
   # that step succeeds — so a GHA cache backend outage degrades the build
@@ -72,6 +77,12 @@ env:
   # before cargo runs. See docs/research/ci/sccache-gha-outage-hardening.md
   # and mozilla/sccache#1751 (SCCACHE_IGNORE_SERVER_IO_ERROR does NOT
   # cover backend startup probe failures).
+  #
+  # Lima-using jobs also need ACTIONS_CACHE_URL and ACTIONS_RUNTIME_TOKEN
+  # forwarded into the guest — those are exported to $GITHUB_ENV by the
+  # mozilla-actions/sccache-action step, then plumbed through `limactl
+  # shell env ... bash -lc 'sudo -E env "X=$X" ...'` so sccache running
+  # inside the VM can reach the GHA cache HTTP service.
 
 jobs:
   # -------------------------------------------------------------------
@@ -209,25 +220,65 @@ jobs:
           path: target/bpf/
           if-no-files-found: error
 
+      # sccache setup is soft-fail (see fmt-clippy job for rationale). The
+      # action exports ACTIONS_CACHE_URL + ACTIONS_RUNTIME_TOKEN to
+      # $GITHUB_ENV; the limactl invocation below forwards them into the
+      # guest so sccache (running inside the VM) can reach the GHA cache.
+      - id: sccache-setup
+        name: Setup sccache (soft-fail on cache backend outage)
+        continue-on-error: true
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Enable sccache when setup succeeded
+        if: steps.sccache-setup.outcome == 'success'
+        run: |
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+
+      - name: Warn when sccache unavailable
+        if: steps.sccache-setup.outcome != 'success'
+        run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
+
       - name: cargo nextest run --workspace (profile=ci)
         # PROPTEST_CASES is inherited from the workflow-level env:
         # declared at the top of this file (1024 per testing.md).
         # Profile config lives in `.config/nextest.toml`.
-        # The Lima VM has cargo-nextest, mold, and the full Rust
-        # toolchain pre-provisioned.
+        # The Lima VM has cargo-nextest, mold, sccache, and the full
+        # Rust toolchain pre-provisioned.
         run: |
-          limactl shell overdrive bash -lc \
-            'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
-             cargo nextest run --workspace --locked --profile ci'
+          limactl shell overdrive env \
+            "RUSTC_WRAPPER=${RUSTC_WRAPPER:-}" \
+            "SCCACHE_GHA_ENABLED=${SCCACHE_GHA_ENABLED:-}" \
+            "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL:-}" \
+            "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
+            bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
+                      "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
+                      "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
+                      "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
+                      "ACTIONS_RUNTIME_TOKEN=$ACTIONS_RUNTIME_TOKEN" \
+                      cargo nextest run --workspace --locked --profile ci'
 
       - name: cargo test --doc --workspace
         # Nextest does not execute doctests. Run them in a separate step
         # so rustdoc examples are still verified — per
         # `.claude/rules/development.md` §Documentation.
         run: |
-          limactl shell overdrive bash -lc \
-            'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
-             cargo test --doc --workspace --locked'
+          limactl shell overdrive env \
+            "RUSTC_WRAPPER=${RUSTC_WRAPPER:-}" \
+            "SCCACHE_GHA_ENABLED=${SCCACHE_GHA_ENABLED:-}" \
+            "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL:-}" \
+            "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
+            bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
+                      "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
+                      "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
+                      "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
+                      "ACTIONS_RUNTIME_TOKEN=$ACTIONS_RUNTIME_TOKEN" \
+                      cargo test --doc --workspace --locked'
+
+      - name: Show sccache stats
+        if: always() && steps.sccache-setup.outcome == 'success'
+        run: |
+          limactl shell overdrive bash -lc 'sccache --show-stats' || true
 
       - name: Upload nextest JUnit report
         if: always()
@@ -291,17 +342,45 @@ jobs:
           path: target/bpf/
           if-no-files-found: error
 
+      - id: sccache-setup
+        name: Setup sccache (soft-fail on cache backend outage)
+        continue-on-error: true
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Enable sccache when setup succeeded
+        if: steps.sccache-setup.outcome == 'success'
+        run: |
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+
+      - name: Warn when sccache unavailable
+        if: steps.sccache-setup.outcome != 'success'
+        run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
+
       - name: cargo nextest run --workspace --features integration-tests (profile=ci)
         # Filter `binary(integration)` selects only the integration
         # entrypoint binaries. `--exclude overdrive-bpf` avoids a
         # cross-process artifact race (see bpf-unit job).
         run: |
-          limactl shell overdrive bash -lc \
-            'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
-             cargo nextest run --workspace --locked --profile ci \
-               --features integration-tests \
-               --exclude overdrive-bpf \
-               -E "binary(integration)"'
+          limactl shell overdrive env \
+            "RUSTC_WRAPPER=${RUSTC_WRAPPER:-}" \
+            "SCCACHE_GHA_ENABLED=${SCCACHE_GHA_ENABLED:-}" \
+            "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL:-}" \
+            "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
+            bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
+                      "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
+                      "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
+                      "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
+                      "ACTIONS_RUNTIME_TOKEN=$ACTIONS_RUNTIME_TOKEN" \
+                      cargo nextest run --workspace --locked --profile ci \
+                        --features integration-tests \
+                        --exclude overdrive-bpf \
+                        -E "binary(integration)"'
+
+      - name: Show sccache stats
+        if: always() && steps.sccache-setup.outcome == 'success'
+        run: |
+          limactl shell overdrive bash -lc 'sccache --show-stats' || true
 
       - name: Upload nextest JUnit report
         if: always()
@@ -571,12 +650,43 @@ jobs:
       - name: Ensure base ref available
         run: git fetch origin main --depth=1 || true
 
-      - name: cargo xtask mutants --diff origin/main
-        # The Lima VM has cargo-mutants and cargo-nextest pre-installed.
+      - id: sccache-setup
+        name: Setup sccache (soft-fail on cache backend outage)
+        continue-on-error: true
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Enable sccache when setup succeeded
+        if: steps.sccache-setup.outcome == 'success'
         run: |
-          limactl shell overdrive bash -lc \
-            'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
-             cargo xtask mutants --diff origin/main --features integration-tests'
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+
+      - name: Warn when sccache unavailable
+        if: steps.sccache-setup.outcome != 'success'
+        run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
+
+      - name: cargo xtask mutants --diff origin/main
+        # The Lima VM has cargo-mutants, cargo-nextest, and sccache
+        # pre-installed. sccache pays for itself many times over here:
+        # cargo-mutants does N full rebuilds per mutation, all of which
+        # hit the GHA cache after the first.
+        run: |
+          limactl shell overdrive env \
+            "RUSTC_WRAPPER=${RUSTC_WRAPPER:-}" \
+            "SCCACHE_GHA_ENABLED=${SCCACHE_GHA_ENABLED:-}" \
+            "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL:-}" \
+            "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
+            bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
+                      "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
+                      "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
+                      "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
+                      "ACTIONS_RUNTIME_TOKEN=$ACTIONS_RUNTIME_TOKEN" \
+                      cargo xtask mutants --diff origin/main --features integration-tests'
+
+      - name: Show sccache stats
+        if: always() && steps.sccache-setup.outcome == 'success'
+        run: |
+          limactl shell overdrive bash -lc 'sccache --show-stats' || true
 
       - name: Upload mutants report
         if: always()
@@ -674,6 +784,21 @@ jobs:
         if: steps.lima-cache.outputs.cache-hit == 'true'
         run: limactl start --timeout=30m overdrive
 
+      - id: sccache-setup
+        name: Setup sccache (soft-fail on cache backend outage)
+        continue-on-error: true
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Enable sccache when setup succeeded
+        if: steps.sccache-setup.outcome == 'success'
+        run: |
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+
+      - name: Warn when sccache unavailable
+        if: steps.sccache-setup.outcome != 'success'
+        run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
+
       - name: cargo xtask bpf-clippy
         # Lint the kernel-side bin under `+nightly --target
         # bpfel-unknown-none -Z build-std=core --features
@@ -681,12 +806,22 @@ jobs:
         # cover this bin: it is `#![no_std] #![no_main]` and rustc
         # rejects it on the host triple.
         #
-        # The Lima VM has nightly + rust-src + bpf-linker + clippy
-        # pre-provisioned (see infra/lima/overdrive-dev.yaml).
+        # The Lima VM has nightly + rust-src + bpf-linker + clippy +
+        # sccache pre-provisioned (see infra/lima/overdrive-dev.yaml).
+        # Note: -Z build-std=core rebuilds `core` per nightly hash;
+        # cache hits are scoped to a stable nightly toolchain.
         run: |
-          limactl shell overdrive bash -lc \
-            'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
-             cargo xtask bpf-clippy'
+          limactl shell overdrive env \
+            "RUSTC_WRAPPER=${RUSTC_WRAPPER:-}" \
+            "SCCACHE_GHA_ENABLED=${SCCACHE_GHA_ENABLED:-}" \
+            "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL:-}" \
+            "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
+            bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
+                      "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
+                      "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
+                      "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
+                      "ACTIONS_RUNTIME_TOKEN=$ACTIONS_RUNTIME_TOKEN" \
+                      cargo xtask bpf-clippy'
 
       - name: cargo xtask bpf-build
         # The xtask wrapper invokes `cargo build --release --target
@@ -697,9 +832,22 @@ jobs:
         # virtiofs-mounted workspace, so the artifact is visible on
         # the host for the upload step below.
         run: |
-          limactl shell overdrive bash -lc \
-            'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
-             cargo xtask bpf-build'
+          limactl shell overdrive env \
+            "RUSTC_WRAPPER=${RUSTC_WRAPPER:-}" \
+            "SCCACHE_GHA_ENABLED=${SCCACHE_GHA_ENABLED:-}" \
+            "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL:-}" \
+            "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
+            bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
+                      "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
+                      "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
+                      "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
+                      "ACTIONS_RUNTIME_TOKEN=$ACTIONS_RUNTIME_TOKEN" \
+                      cargo xtask bpf-build'
+
+      - name: Show sccache stats
+        if: always() && steps.sccache-setup.outcome == 'success'
+        run: |
+          limactl shell overdrive bash -lc 'sccache --show-stats' || true
 
       - name: Upload BPF object artifact
         uses: actions/upload-artifact@v4
@@ -768,15 +916,43 @@ jobs:
           path: target/bpf/
           if-no-files-found: error
 
+      - id: sccache-setup
+        name: Setup sccache (soft-fail on cache backend outage)
+        continue-on-error: true
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Enable sccache when setup succeeded
+        if: steps.sccache-setup.outcome == 'success'
+        run: |
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+
+      - name: Warn when sccache unavailable
+        if: steps.sccache-setup.outcome != 'success'
+        run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
+
       - name: cargo xtask bpf-unit
         # CAP_BPF is required; the Lima VM's `xtask lima run` wrapper
         # provides root via `sudo -E`. The xtask `bpf_unit()` function
         # calls `ensure_in_lima()` which detects the VM and proceeds
         # directly.
         run: |
-          limactl shell overdrive bash -lc \
-            'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
-             cargo xtask bpf-unit'
+          limactl shell overdrive env \
+            "RUSTC_WRAPPER=${RUSTC_WRAPPER:-}" \
+            "SCCACHE_GHA_ENABLED=${SCCACHE_GHA_ENABLED:-}" \
+            "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL:-}" \
+            "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
+            bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
+                      "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
+                      "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
+                      "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
+                      "ACTIONS_RUNTIME_TOKEN=$ACTIONS_RUNTIME_TOKEN" \
+                      cargo xtask bpf-unit'
+
+      - name: Show sccache stats
+        if: always() && steps.sccache-setup.outcome == 'success'
+        run: |
+          limactl shell overdrive bash -lc 'sccache --show-stats' || true
 
       - name: Upload nextest JUnit report
         if: always()
@@ -851,11 +1027,39 @@ jobs:
           path: target/bpf/
           if-no-files-found: error
 
+      - id: sccache-setup
+        name: Setup sccache (soft-fail on cache backend outage)
+        continue-on-error: true
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Enable sccache when setup succeeded
+        if: steps.sccache-setup.outcome == 'success'
+        run: |
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+
+      - name: Warn when sccache unavailable
+        if: steps.sccache-setup.outcome != 'success'
+        run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
+
       - name: cargo verifier-regress
         run: |
-          limactl shell overdrive bash -lc \
-            'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
-             cargo run -p overdrive-dataplane --bin verifier_regress'
+          limactl shell overdrive env \
+            "RUSTC_WRAPPER=${RUSTC_WRAPPER:-}" \
+            "SCCACHE_GHA_ENABLED=${SCCACHE_GHA_ENABLED:-}" \
+            "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL:-}" \
+            "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
+            bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
+                      "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
+                      "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
+                      "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
+                      "ACTIONS_RUNTIME_TOKEN=$ACTIONS_RUNTIME_TOKEN" \
+                      cargo run -p overdrive-dataplane --bin verifier_regress'
+
+      - name: Show sccache stats
+        if: always() && steps.sccache-setup.outcome == 'success'
+        run: |
+          limactl shell overdrive bash -lc 'sccache --show-stats' || true
 
       - name: Stop Lima VM (release disk before cache save)
         if: always()
@@ -909,14 +1113,42 @@ jobs:
           path: target/bpf/
           if-no-files-found: error
 
+      - id: sccache-setup
+        name: Setup sccache (soft-fail on cache backend outage)
+        continue-on-error: true
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      - name: Enable sccache when setup succeeded
+        if: steps.sccache-setup.outcome == 'success'
+        run: |
+          echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+          echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
+
+      - name: Warn when sccache unavailable
+        if: steps.sccache-setup.outcome != 'success'
+        run: echo "::warning::sccache setup failed; building without compiler cache. Expected during GHA cache backend outages."
+
       # The Lima VM has the full toolchain. Needs `CAP_SYS_ADMIN` for
       # `enable_stats(RunTime)` — the default `sudo -E` wrapper inside
       # the VM provides it.
       - name: cargo xdp-perf
         run: |
-          limactl shell overdrive bash -lc \
-            'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
-             cargo xdp-perf'
+          limactl shell overdrive env \
+            "RUSTC_WRAPPER=${RUSTC_WRAPPER:-}" \
+            "SCCACHE_GHA_ENABLED=${SCCACHE_GHA_ENABLED:-}" \
+            "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL:-}" \
+            "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
+            bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
+                      "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
+                      "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
+                      "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
+                      "ACTIONS_RUNTIME_TOKEN=$ACTIONS_RUNTIME_TOKEN" \
+                      cargo xdp-perf'
+
+      - name: Show sccache stats
+        if: always() && steps.sccache-setup.outcome == 'success'
+        run: |
+          limactl shell overdrive bash -lc 'sccache --show-stats' || true
 
       - name: Stop Lima VM (release disk before cache save)
         if: always()
