@@ -380,3 +380,173 @@ fn generate_single_backend_fills_every_slot() {
     assert_eq!(table.len(), 509);
     assert!(table.iter().all(|&id| id == only));
 }
+
+// -----------------------------------------------------------------------------
+// Reference implementation — closes the cargo-mutants gap on offset/skip
+// arithmetic mutations that preserve determinism, bijection, and full
+// population but produce a *different valid* table.
+// -----------------------------------------------------------------------------
+//
+// The proptests above assert structural properties (determinism, every slot
+// is a known backend, length == M, distinct inputs → distinct outputs).
+// Three arithmetic mutations on the offset/skip computation slip past every
+// one of those because they preserve all four properties — they just shift
+// the permutation to a different (still-valid) layout:
+//
+//   * line 134 `m_u32 - 1` → `m_u32 + 1`  — skip range expands from
+//     [1, M-1] to [1, M+1]; both still produce traversable permutations
+//     mod M for nearly every random input.
+//   * line 152 `h_offset % m_u64` → `h_offset / m_u64` — offset becomes
+//     `(h_offset / M) as u32` (truncated); slot is still `% M` so output
+//     is a different but valid permutation.
+//   * line 152 `h_offset % m_u64` → `h_offset + m_u64` — offset becomes
+//     `(h_offset + M) as u32` (truncated); same shape.
+//
+// The robust catcher: a faithful reference implementation in this test
+// file (which cargo-mutants does not mutate, only `permutation.rs` is)
+// asserted against the source via a proptest. Any arithmetic divergence
+// in the source produces a slot mismatch on at least one input.
+//
+// Reference faithfulness is the load-bearing property — the comments
+// below cite the source line each block mirrors. If `permutation.rs`
+// changes algorithmically (not a refactor), update both sides in lockstep.
+
+const REF_FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+const REF_FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+
+fn ref_fnv1a_64(parts: &[&[u8]]) -> u64 {
+    let mut h = REF_FNV_OFFSET;
+    for part in parts {
+        for &b in *part {
+            h ^= u64::from(b);
+            h = h.wrapping_mul(REF_FNV_PRIME);
+        }
+    }
+    h
+}
+
+fn ref_generate(backends: &BTreeMap<BackendId, Weight>, m: MaglevTableSize) -> Vec<BackendId> {
+    let m_u32 = m.get();
+    let m_usize = m_u32 as usize;
+
+    if backends.is_empty() || m_u32 == 0 {
+        return Vec::new();
+    }
+
+    let total_replicas: usize =
+        backends.values().copied().map(usize::from).fold(0usize, usize::saturating_add);
+
+    let mut entries: Vec<(BackendId, u16)> = Vec::with_capacity(total_replicas);
+    for (id, weight) in backends {
+        for replica in 0..*weight {
+            entries.push((*id, replica));
+        }
+    }
+
+    // Mirrors src line 134-135.
+    let table_minus_one = u64::from(m_u32 - 1);
+    let m_u64 = u64::from(m_u32);
+
+    let mut perms: Vec<(u32, u32)> = Vec::with_capacity(entries.len());
+    for (id, replica) in &entries {
+        let id_bytes = id.get().to_le_bytes();
+        let rep_bytes = replica.to_le_bytes();
+        let h_offset = ref_fnv1a_64(&[b"overdrive-maglev-offset", &id_bytes, &rep_bytes]);
+        let h_skip = ref_fnv1a_64(&[b"overdrive-maglev-skip", &id_bytes, &rep_bytes]);
+        // Mirrors src line 152 / 154. Same cast-truncation reasoning:
+        // value is bounded above by m_u64 (≤ 131_071) which fits in u32.
+        #[allow(clippy::cast_possible_truncation)]
+        let offset = (h_offset % m_u64) as u32;
+        #[allow(clippy::cast_possible_truncation)]
+        let skip = ((h_skip % table_minus_one) + 1) as u32;
+        perms.push((offset, skip));
+    }
+
+    let n = entries.len();
+    let mut next_idx = vec![0u32; n];
+    let mut result: Vec<Option<BackendId>> = vec![None; m_usize];
+    let mut filled = 0usize;
+
+    'outer: while filled < m_usize {
+        for entry_idx in 0..n {
+            let (offset, skip) = perms[entry_idx];
+            loop {
+                let probe = next_idx[entry_idx];
+                let slot = (offset.wrapping_add(probe.wrapping_mul(skip)) % m_u32) as usize;
+                next_idx[entry_idx] = probe.wrapping_add(1);
+                if result[slot].is_none() {
+                    result[slot] = Some(entries[entry_idx].0);
+                    filled += 1;
+                    break;
+                }
+                if u64::from(next_idx[entry_idx]) >= m_u64 {
+                    break;
+                }
+            }
+            if filled == m_usize {
+                break 'outer;
+            }
+        }
+    }
+
+    let fallback = entries[0].0;
+    result.into_iter().map(|s| s.unwrap_or(fallback)).collect()
+}
+
+#[test]
+fn matches_reference_single_backend() {
+    // Single-backend cases exercise the offset/skip arithmetic for one
+    // entry; mutations that change the FIRST slot's offset are visible
+    // because that slot determines where population begins.
+    let m = MaglevTableSize::new(251).expect("prime");
+    for &raw in &[1u32, 7, 42, 100, 200, 1_000, 65_535] {
+        let id = BackendId::new(raw).expect("u32");
+        let backends: BTreeMap<BackendId, Weight> = [(id, 1u16)].into_iter().collect();
+        let actual = generate(&backends, m);
+        let expected = ref_generate(&backends, m);
+        assert_eq!(actual, expected, "single backend id={raw} M=251 must match reference");
+    }
+}
+
+#[test]
+fn matches_reference_multi_backend_known_input() {
+    // Two-backend case — the population trajectory of each entry depends
+    // on its own (offset, skip), so any arithmetic mutation produces a
+    // different slot pattern even when both backends are still present.
+    let m = MaglevTableSize::new(251).expect("prime");
+    let b1 = BackendId::new(100).expect("u32");
+    let b2 = BackendId::new(200).expect("u32");
+    let backends: BTreeMap<BackendId, Weight> = [(b1, 1u16), (b2, 1u16)].into_iter().collect();
+    let actual = generate(&backends, m);
+    let expected = ref_generate(&backends, m);
+    assert_eq!(actual, expected, "(100, 200) M=251 must match reference");
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig {
+        cases: 64,
+        .. ProptestConfig::default()
+    })]
+
+    /// Source matches the in-test reference implementation slot-for-slot
+    /// for every generated input. The reference computes
+    /// `offset = h_offset % M` and `skip = (h_skip % (M-1)) + 1`
+    /// faithfully; arithmetic mutations on lines 134 / 152 produce
+    /// values outside the original range, yielding a different trajectory
+    /// for at least one input within proptest's case budget.
+    ///
+    /// This proptest is the structural backstop for the three mutations
+    /// the existing property tests miss:
+    ///   - line 134 `m_u32 - 1` → `m_u32 + 1`
+    ///   - line 152 `h_offset % m_u64` → `h_offset / m_u64`
+    ///   - line 152 `h_offset % m_u64` → `h_offset + m_u64`
+    #[test]
+    fn matches_reference_implementation(
+        backends in arb_weighted_backends(8, 4),
+        m in arb_table_size(),
+    ) {
+        let actual = generate(&backends, m);
+        let expected = ref_generate(&backends, m);
+        prop_assert_eq!(actual, expected);
+    }
+}
