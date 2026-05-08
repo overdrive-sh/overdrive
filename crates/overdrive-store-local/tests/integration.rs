@@ -28,5 +28,6 @@ mod integration {
     //! `redesign-drop-commit-index` — the counter it asserted no
     //! longer exists.
     mod lww_conformance;
+    mod observation_backend_proptest;
     mod snapshot_proptest;
 }
