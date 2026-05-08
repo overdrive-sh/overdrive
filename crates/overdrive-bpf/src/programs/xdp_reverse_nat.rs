@@ -75,7 +75,7 @@ use aya_ebpf::{
 
 use crate::maps::reverse_nat_map::{BackendKey, REVERSE_NAT_MAP, Vip};
 use crate::programs::sanity::{Verdict as SanityVerdict, sanity_check};
-use crate::shared::csum::recompute_l4_csum;
+use crate::shared::csum::{csum_incremental_2_2, recompute_l4_csum};
 
 // Header offsets / constants — same shape as `xdp_service_map.rs`.
 const ETH_HDR_LEN: usize = 14;
@@ -168,33 +168,6 @@ unsafe fn write_u32_be(ctx: &XdpContext, offset: usize, val: u32) -> Result<(), 
     let p: *mut [u8; 4] = unsafe { mut_ptr_at(ctx, offset) }?;
     unsafe { *p = val.to_be_bytes() };
     Ok(())
-}
-
-// ---------- one's-complement incremental checksum fold ----------
-//
-// Mirrors `xdp_service_map.rs` — same verifier discipline (three
-// unrolled folds is the verifier-accepted minimum).
-
-#[inline(always)]
-#[allow(clippy::cast_possible_truncation)] // Intentional: three folds guarantee s fits in u16.
-fn fold32(s: u32) -> u16 {
-    let s = (s & 0xffff) + (s >> 16);
-    let s = (s & 0xffff) + (s >> 16);
-    let s = (s & 0xffff) + (s >> 16);
-    s as u16
-}
-
-/// RFC 1624 incremental update — two (old, new) word pairs. Used
-/// for the IPv4 header checksum where only the source IP (2 words)
-/// changes.
-#[inline(always)]
-fn csum_incremental_2_2(old_csum: u16, old_lo: u16, old_hi: u16, new_lo: u16, new_hi: u16) -> u16 {
-    let s: u32 = u32::from(!old_csum)
-        + u32::from(!old_lo)
-        + u32::from(!old_hi)
-        + u32::from(new_lo)
-        + u32::from(new_hi);
-    !fold32(s)
 }
 
 // ---------- main program ----------

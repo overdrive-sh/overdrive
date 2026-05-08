@@ -52,7 +52,7 @@ use aya_ebpf::{
 use crate::maps::backend_map::{BACKEND_MAP, BackendEntry};
 use crate::maps::service_map::{INNER_TABLE_SIZE, SERVICE_MAP, ServiceKey};
 use crate::programs::sanity::{Verdict as SanityVerdict, sanity_check};
-use crate::shared::csum::recompute_l4_csum;
+use crate::shared::csum::{csum_incremental_2_2, recompute_l4_csum};
 
 // Header offsets / constants.
 const ETH_HDR_LEN: usize = 14;
@@ -151,46 +151,6 @@ unsafe fn write_u32_be(ctx: &XdpContext, offset: usize, val: u32) -> Result<(), 
     let p: *mut [u8; 4] = unsafe { mut_ptr_at(ctx, offset) }?;
     unsafe { *p = val.to_be_bytes() };
     Ok(())
-}
-
-// ---------- one's-complement incremental checksum fold ----------
-//
-// The verifier rejects unbounded loops. Our sum has at most ~16
-// terms (each `u32::from(u16)` ≤ 0xffff), so the running u32 is
-// bounded by 16 * 0xffff < 0x100000 — i.e. the high half is at
-// most 16. Two carry-folds is therefore *always* sufficient: the
-// first fold reduces (carry ≤ 16) + (low ≤ 0xffff) ≤ 0x10010,
-// which fits in 17 bits; the second fold reduces ≤ 1 + 0xffff =
-// 0x10000, which fits in 17 bits; one final fold trims it to 16.
-// Three unrolled folds is the minimum bounded loop the verifier
-// accepts and is what Cilium's XDP fast path uses for the same
-// shape of sum.
-
-#[inline(always)]
-fn fold32(s: u32) -> u16 {
-    let s = (s & 0xffff) + (s >> 16);
-    let s = (s & 0xffff) + (s >> 16);
-    let s = (s & 0xffff) + (s >> 16);
-    #[allow(clippy::cast_possible_truncation)]
-    let result = s as u16;
-    result
-}
-
-/// RFC 1624 incremental update:
-///   `new_csum = ~( ~old_csum + sum(~old_words) + sum(new_words) )`
-/// All u16 inputs/outputs are big-endian (network order).
-///
-/// Inputs use fixed-size arrays rather than slices so the verifier
-/// sees a fully-unrolled loop body — slice iteration with a
-/// runtime length explodes the verifier's path-walk budget.
-#[inline(always)]
-fn csum_incremental_2_2(old_csum: u16, old_lo: u16, old_hi: u16, new_lo: u16, new_hi: u16) -> u16 {
-    let s: u32 = u32::from(!old_csum)
-        + u32::from(!old_lo)
-        + u32::from(!old_hi)
-        + u32::from(new_lo)
-        + u32::from(new_hi);
-    !fold32(s)
 }
 
 // ---------- FNV-1a 32-bit over the 5-tuple ----------

@@ -146,3 +146,26 @@ pub fn recompute_l4_csum(
     let folded = csum_fold(sum);
     Ok(!folded)
 }
+
+/// RFC 1624 incremental update — two (old, new) word pairs.
+///   `new_csum = ~( ~old_csum + sum(~old_words) + sum(new_words) )`
+/// All u16 inputs/outputs are big-endian (network order).
+///
+/// Inputs are individual words rather than slices so the verifier sees
+/// a fully-unrolled body — slice iteration with a runtime length
+/// explodes the verifier's path-walk budget.
+#[inline(always)]
+pub fn csum_incremental_2_2(
+    old_csum: u16,
+    old_lo: u16,
+    old_hi: u16,
+    new_lo: u16,
+    new_hi: u16,
+) -> u16 {
+    let s: u32 = u32::from(!old_csum)
+        + u32::from(!old_lo)
+        + u32::from(!old_hi)
+        + u32::from(new_lo)
+        + u32::from(new_hi);
+    !csum_fold(s)
+}
