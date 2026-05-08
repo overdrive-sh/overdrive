@@ -25,6 +25,12 @@
 //! 4. **Protocol** — must be TCP (`6`) or UDP (`17`). Anything else
 //!    (ICMP, GRE, ESP, …) returns `Verdict::PassToKernel` for the
 //!    same "LB is not a firewall" reason as check 1.
+//!
+//! 4b. **L4 minimum length** — `ip_total_length` must be at least
+//!     `IHL·4 + min_l4_hdr` (28 for UDP, 40 for TCP). A packet
+//!     claiming zero L4 payload passes check 3 but would let
+//!     downstream code read `dst_port` from frame-padding bytes past
+//!     the claimed IP payload boundary; drop + counter.
 //! 5. **TCP flags** — for TCP frames only, reject the canonical
 //!    Cloudflare-flagged pathological flag combinations:
 //!    `SYN+RST`, `SYN+FIN`, all-zero, and a few other classic
@@ -271,6 +277,18 @@ where
     };
     if proto != IPV4_PROTO_TCP && proto != IPV4_PROTO_UDP {
         return Verdict::PassToKernel;
+    }
+
+    // (4b) L4 minimum length — `ip_total_length` must cover the IPv4
+    //      header PLUS the minimum L4 header for the identified
+    //      protocol (TCP = 20, UDP = 8). Without this, a crafted
+    //      packet with `proto = TCP` but `ip_total_len = 20` passes
+    //      the prologue and lets downstream code read `dst_port` from
+    //      frame-padding bytes past the claimed IP payload boundary.
+    let min_l4_hdr: u16 = if proto == IPV4_PROTO_TCP { 20 } else { 8 };
+    if total_len < header_bytes + min_l4_hdr {
+        record_malformed_header_drop();
+        return Verdict::Drop;
     }
 
     // (5) TCP flags — only relevant for TCP. UDP gates this trivially.

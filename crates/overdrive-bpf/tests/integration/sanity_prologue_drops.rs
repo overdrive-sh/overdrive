@@ -370,6 +370,57 @@ fn synthesise_tcp(ihl: u8, tcp_flags: u8) -> Vec<u8> {
     pkt
 }
 
+const UDP_HDR_LEN: usize = 8;
+
+/// Synthesise a frame with a valid IPv4+TCP structure but with a
+/// caller-controlled `ip_total_len` field. The actual frame buffer is
+/// always full-size (ETH + IPv4 + TCP); only the IPv4 `total_length`
+/// header field is overridden. This lets the test exercise the
+/// check-4b L4 minimum length gate independently of frame truncation.
+fn synthesise_tcp_with_total_len(ip_total_len: u16, tcp_flags: u8) -> Vec<u8> {
+    let mut pkt = synthesise_tcp(5, tcp_flags);
+    let ip = ETH_HDR_LEN;
+    pkt[ip + 2..ip + 4].copy_from_slice(&ip_total_len.to_be_bytes());
+    // Recompute IPv4 header checksum after total_len change.
+    pkt[ip + 10..ip + 12].copy_from_slice(&0u16.to_be_bytes());
+    let csum = ipv4_header_checksum(&pkt[ip..ip + IPV4_HDR_LEN]);
+    pkt[ip + 10..ip + 12].copy_from_slice(&csum.to_be_bytes());
+    pkt
+}
+
+/// Synthesise a frame with proto=UDP and a caller-controlled
+/// `ip_total_len` field. The frame buffer contains a full-size UDP
+/// header (8 bytes) regardless of the claimed total_len.
+fn synthesise_udp_with_total_len(ip_total_len: u16) -> Vec<u8> {
+    let pkt_len = ETH_HDR_LEN + IPV4_HDR_LEN + UDP_HDR_LEN;
+    let mut pkt = vec![0u8; pkt_len];
+
+    // Ethernet.
+    pkt[0..6].copy_from_slice(&[0x52, 0x54, 0x00, 0x12, 0x34, 0x56]);
+    pkt[6..12].copy_from_slice(&[0x52, 0x54, 0x00, 0xab, 0xcd, 0xef]);
+    pkt[12..14].copy_from_slice(&[0x08, 0x00]);
+
+    // IPv4.
+    let ip = ETH_HDR_LEN;
+    pkt[ip] = (4 << 4) | 5;
+    pkt[ip + 2..ip + 4].copy_from_slice(&ip_total_len.to_be_bytes());
+    pkt[ip + 8] = 0x40; // TTL
+    pkt[ip + 9] = 0x11; // proto = UDP
+    pkt[ip + 12..ip + 16].copy_from_slice(&SRC_OCTETS);
+    pkt[ip + 16..ip + 20].copy_from_slice(&DST_OCTETS);
+    let csum = ipv4_header_checksum(&pkt[ip..ip + IPV4_HDR_LEN]);
+    pkt[ip + 10..ip + 12].copy_from_slice(&csum.to_be_bytes());
+
+    // UDP (8B).
+    let udp = ip + IPV4_HDR_LEN;
+    pkt[udp..udp + 2].copy_from_slice(&SRC_PORT.to_be_bytes());
+    pkt[udp + 2..udp + 4].copy_from_slice(&DST_PORT.to_be_bytes());
+    pkt[udp + 4..udp + 6].copy_from_slice(&(UDP_HDR_LEN as u16).to_be_bytes());
+    // checksum = 0 (no checksum)
+
+    pkt
+}
+
 /// Synthesise a frame with EtherType 0x86DD (IPv6) but the rest of
 /// the bytes mirror the TCP-IPv4 layout. The sanity prologue must
 /// reject this at check 1 (EtherType) and return `XDP_PASS` —
@@ -512,5 +563,98 @@ fn ipv6_ethertype_returns_xdp_pass_no_drop_counter_increment() {
     assert_eq!(
         after, baseline,
         "DROP_COUNTER[MalformedHeader] MUST NOT increment for IPv6 pass-through (baseline={baseline}, after={after})"
+    );
+}
+
+// ---------- Regression: ip_total_len too short for L4 header ----------
+//
+// Check 4b: after protocol identification, ip_total_len must cover
+// the IPv4 header PLUS the minimum L4 header (TCP=20, UDP=8).
+// Packets that pass check 3 (total_len >= 20) but claim zero or
+// truncated L4 payload must be dropped before downstream code reads
+// dst_port from frame-padding bytes past the claimed IP payload.
+
+#[test]
+#[serial(env)]
+fn tcp_total_len_20_zero_l4_payload_drops_with_malformed_header_counter() {
+    let LoadedXdp { bpf, prog_fd, _outer_fd, _pin_dir_guard } = load_xdp_program();
+
+    let baseline = read_malformed_header_counter(&bpf);
+
+    // PKTGEN: valid IPv4 (IHL=5) + TCP (SYN), but ip_total_len = 20
+    // — claims the IP payload is zero bytes. The frame buffer has a
+    // full 20-byte TCP header, but the IPv4 header says it isn't there.
+    let pkt = synthesise_tcp_with_total_len(20, 0x02);
+    let mut out = vec![0u8; pkt.len()];
+
+    let (action, _out_len) =
+        bpf_prog_test_run(&prog_fd, &pkt, &mut out).expect("BPF_PROG_TEST_RUN syscall");
+
+    assert_eq!(
+        action, XDP_DROP,
+        "ip_total_len=20 with proto=TCP must drop at check 4b, got {action}"
+    );
+
+    let after = read_malformed_header_counter(&bpf);
+    assert_eq!(
+        after - baseline,
+        1,
+        "DROP_COUNTER[MalformedHeader] must increment by 1 (baseline={baseline}, after={after})"
+    );
+}
+
+#[test]
+#[serial(env)]
+fn tcp_total_len_39_one_byte_short_drops_with_malformed_header_counter() {
+    let LoadedXdp { bpf, prog_fd, _outer_fd, _pin_dir_guard } = load_xdp_program();
+
+    let baseline = read_malformed_header_counter(&bpf);
+
+    // PKTGEN: ip_total_len = 39 — one byte short of the minimum for
+    // TCP (20 IPv4 + 20 TCP = 40).
+    let pkt = synthesise_tcp_with_total_len(39, 0x02);
+    let mut out = vec![0u8; pkt.len()];
+
+    let (action, _out_len) =
+        bpf_prog_test_run(&prog_fd, &pkt, &mut out).expect("BPF_PROG_TEST_RUN syscall");
+
+    assert_eq!(
+        action, XDP_DROP,
+        "ip_total_len=39 with proto=TCP must drop at check 4b, got {action}"
+    );
+
+    let after = read_malformed_header_counter(&bpf);
+    assert_eq!(
+        after - baseline,
+        1,
+        "DROP_COUNTER[MalformedHeader] must increment by 1 (baseline={baseline}, after={after})"
+    );
+}
+
+#[test]
+#[serial(env)]
+fn udp_total_len_27_one_byte_short_drops_with_malformed_header_counter() {
+    let LoadedXdp { bpf, prog_fd, _outer_fd, _pin_dir_guard } = load_xdp_program();
+
+    let baseline = read_malformed_header_counter(&bpf);
+
+    // PKTGEN: proto=UDP, ip_total_len = 27 — one byte short of the
+    // minimum for UDP (20 IPv4 + 8 UDP = 28).
+    let pkt = synthesise_udp_with_total_len(27);
+    let mut out = vec![0u8; pkt.len()];
+
+    let (action, _out_len) =
+        bpf_prog_test_run(&prog_fd, &pkt, &mut out).expect("BPF_PROG_TEST_RUN syscall");
+
+    assert_eq!(
+        action, XDP_DROP,
+        "ip_total_len=27 with proto=UDP must drop at check 4b, got {action}"
+    );
+
+    let after = read_malformed_header_counter(&bpf);
+    assert_eq!(
+        after - baseline,
+        1,
+        "DROP_COUNTER[MalformedHeader] must increment by 1 (baseline={baseline}, after={after})"
     );
 }
