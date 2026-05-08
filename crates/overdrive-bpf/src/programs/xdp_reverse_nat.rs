@@ -240,6 +240,7 @@ fn try_xdp_reverse_nat_lookup(ctx: &XdpContext) -> Result<u32, ()> {
     let proto = unsafe { read_u8(ctx, ETH_HDR_LEN + IPV4_PROTO_OFFSET)? };
     let src_ip = unsafe { read_u32_be(ctx, ETH_HDR_LEN + IPV4_SRC_IP_OFFSET)? };
     let ip_csum = unsafe { read_u16_be(ctx, ETH_HDR_LEN + IPV4_CSUM_OFFSET)? };
+    let ip_total_len = unsafe { read_u16_be(ctx, ETH_HDR_LEN + IPV4_TOT_LEN_OFFSET)? };
 
     let is_tcp = proto == IPV4_PROTO_TCP;
     let is_udp = proto == IPV4_PROTO_UDP;
@@ -284,6 +285,7 @@ fn try_xdp_reverse_nat_lookup(ctx: &XdpContext) -> Result<u32, ()> {
         proto,
         &vip,
         is_udp,
+        ip_total_len,
     )
 }
 
@@ -311,6 +313,7 @@ fn rewrite_and_redirect(
     proto: u8,
     vip: &Vip,
     is_udp: bool,
+    ip_total_len: u16,
 ) -> Result<u32, ()> {
     let new_src_ip: u32 = vip.ip_host;
     let new_src_port: u16 = vip.port_host;
@@ -350,7 +353,9 @@ fn rewrite_and_redirect(
         // pseudo-header u16 words via `>> 16` / `& 0xffff`.
         // new_src_ip is host-order from Vip; dst_ip is host-order
         // from `read_u32_be`.
-        let new_l4_csum = recompute_l4_csum(ctx, new_src_ip, dst_ip, proto, l4_off)?;
+        let l4_payload_len = ip_total_len as usize - IPV4_HDR_LEN;
+        let new_l4_csum =
+            recompute_l4_csum(ctx, new_src_ip, dst_ip, proto, l4_off, l4_payload_len)?;
 
         // RFC 768: UDP csum of 0 means "no checksum"; write 0xffff
         // instead.

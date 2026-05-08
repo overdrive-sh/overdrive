@@ -61,6 +61,12 @@ unsafe fn pkt_read_u16(ctx: &XdpContext, off: usize) -> Result<u16, ()> {
 ///    / `& 0xffff` extraction produces pseudo-header u16 words in
 ///    the same host-order-of-network-order encoding as
 ///    `pkt_read_u16`.
+/// 4. Pass `l4_payload_len` as the L4 segment length derived from
+///    the IP header (`ip_total_length - ip_header_length`), NOT
+///    from `ctx.data_end()`. On hardware NICs, `data_end` can
+///    include Ethernet minimum-frame padding beyond the IP payload;
+///    using it overcounts `l4_len` and produces a checksum over
+///    padding bytes the remote stack does not expect.
 #[inline(always)]
 pub fn recompute_l4_csum(
     ctx: &XdpContext,
@@ -68,6 +74,7 @@ pub fn recompute_l4_csum(
     dst_ip: u32,
     proto: u8,
     l4_off: usize,
+    l4_payload_len: usize,
 ) -> Result<u16, ()> {
     let start = ctx.data();
     let end = ctx.data_end();
@@ -75,7 +82,11 @@ pub fn recompute_l4_csum(
     if start + l4_off >= end {
         return Err(());
     }
-    let l4_len = end - start - l4_off;
+    // Cap at the buffer's actual extent so we never read past
+    // `data_end`, but prefer the IP-header-derived length to
+    // exclude Ethernet minimum-frame padding.
+    let buf_len = end - start - l4_off;
+    let l4_len = buf_len.min(l4_payload_len);
     if l4_len > MAX_L4_LEN || l4_len == 0 {
         return Err(());
     }

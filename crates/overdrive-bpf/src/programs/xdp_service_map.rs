@@ -287,6 +287,7 @@ fn try_xdp_service_map_lookup(ctx: &XdpContext) -> Result<u32, ()> {
     let proto = unsafe { read_u8(ctx, ETH_HDR_LEN + IPV4_PROTO_OFFSET)? };
     let dst_ip = unsafe { read_u32_be(ctx, ETH_HDR_LEN + IPV4_DST_IP_OFFSET)? };
     let ip_csum = unsafe { read_u16_be(ctx, ETH_HDR_LEN + IPV4_CSUM_OFFSET)? };
+    let ip_total_len = unsafe { read_u16_be(ctx, ETH_HDR_LEN + IPV4_TOT_LEN_OFFSET)? };
 
     let is_tcp = proto == IPV4_PROTO_TCP;
     let is_udp = proto == IPV4_PROTO_UDP;
@@ -380,6 +381,7 @@ fn try_xdp_service_map_lookup(ctx: &XdpContext) -> Result<u32, ()> {
         proto,
         &backend,
         is_udp,
+        ip_total_len,
     )
 }
 
@@ -408,6 +410,7 @@ fn rewrite_and_tx(
     proto: u8,
     backend: &BackendEntry,
     is_udp: bool,
+    ip_total_len: u16,
 ) -> Result<u32, ()> {
     let new_dst_ip: u32 = backend.ipv4_host;
     let new_dst_port: u16 = backend.port_host;
@@ -449,7 +452,9 @@ fn rewrite_and_tx(
         // produces the correct host-order-of-network-order encoding
         // matching `pkt_read_u16`. src_ip_host is already host-order;
         // new_dst_ip is host-order from BackendEntry.
-        let new_l4_csum = recompute_l4_csum(ctx, src_ip_host, new_dst_ip, proto, l4_off)?;
+        let l4_payload_len = ip_total_len as usize - IPV4_HDR_LEN;
+        let new_l4_csum =
+            recompute_l4_csum(ctx, src_ip_host, new_dst_ip, proto, l4_off, l4_payload_len)?;
 
         // RFC 768: UDP csum of 0 means "no checksum"; if our
         // computation yields 0, write 0xffff instead.
