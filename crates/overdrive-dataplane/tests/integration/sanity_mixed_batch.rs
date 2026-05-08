@@ -273,28 +273,11 @@ fn mixed_batch_increments_per_class_counters_correctly() {
     // mutants`) or the workspace-relative fallback. Single source of
     // truth — no cwd-walking.
     let artifact = std::path::PathBuf::from(env!("OVERDRIVE_BPF_OBJECT_PATH"));
-    assert!(
-        artifact.exists(),
-        "BPF artifact missing at {} — run `cargo xtask bpf-build`",
-        artifact.display(),
-    );
-
-    // Bounded retry to handle build_rs_artifact_check sibling test
-    // (re-creating the artifact). 10s covers the restore window.
-    let load_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    let mut bpf = loop {
-        match EbpfLoader::new().map_pin_path(&pin_dir).allow_unsupported_maps().load_file(&artifact)
-        {
-            Ok(b) => break b,
-            Err(e) => {
-                if std::time::Instant::now() < load_deadline {
-                    std::thread::sleep(std::time::Duration::from_millis(100));
-                    continue;
-                }
-                panic!("EbpfLoader.load_file({}): {e}", artifact.display());
-            }
-        }
-    };
+    let mut bpf = EbpfLoader::new()
+        .map_pin_path(&pin_dir)
+        .allow_unsupported_maps()
+        .load_file(&artifact)
+        .unwrap_or_else(|e| panic!("EbpfLoader.load_file({}): {e}", artifact.display()));
 
     // Enter lb-ns to attach XDP — `attach()` resolves the iface
     // index against the calling thread's netns.

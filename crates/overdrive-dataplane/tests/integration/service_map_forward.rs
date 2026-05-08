@@ -70,7 +70,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use aya::{
-    Ebpf, EbpfLoader,
+    EbpfLoader,
     maps::HashMap,
     programs::{Xdp, XdpFlags},
 };
@@ -115,38 +115,6 @@ fn bpf_artifact_path() -> PathBuf {
     // against the per-mutant `/tmp/cargo-mutants-*/` copy under
     // mutation testing.
     PathBuf::from(env!("OVERDRIVE_BPF_OBJECT_PATH"))
-}
-
-/// Load `Ebpf::load_file(artifact)` with bounded retry. The sibling
-/// `build_rs_artifact_check` test removes-and-restores the same
-/// artifact within a single test body; nextest may schedule that
-/// test in parallel with this one (different processes, so
-/// `serial_test` group keys do not synchronise across them).
-/// Retrying for ~10 s absorbs that transient gap without weakening
-/// the assertion that the artifact must exist by the time this test
-/// completes its setup.
-fn load_with_retry(artifact: &PathBuf, pin_dir: &std::path::Path, budget: Duration) -> Ebpf {
-    let deadline = Instant::now() + budget;
-    let mut last_err: Option<String> = None;
-    while Instant::now() < deadline {
-        if artifact.exists() {
-            match EbpfLoader::new()
-                .map_pin_path(pin_dir)
-                .allow_unsupported_maps()
-                .load_file(artifact)
-            {
-                Ok(bpf) => return bpf,
-                Err(e) => last_err = Some(format!("aya load_file({}): {e}", artifact.display())),
-            }
-        } else {
-            last_err = Some(format!(
-                "BPF artifact missing at {} — run `cargo xtask bpf-build` first",
-                artifact.display()
-            ));
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    panic!("{}", last_err.unwrap_or_else(|| "load_with_retry: budget exhausted".into()));
 }
 
 /// S-2.2-06 — Ten TCP SYNs to a registered VIP all rewrite and
@@ -196,11 +164,7 @@ fn ten_tcp_syns_to_vip_are_rewritten_and_forwarded_via_veth() {
     // Load the BPF object. `Ebpf::load_file` is preferred over
     // `Ebpf::load(slice)` here — the slice path of aya 0.13 rejects
     // BTF-less ELFs in some configurations; the file path is more
-    // tolerant. The artifact may transiently disappear when the
-    // sibling `build_rs_artifact_check` test runs in another process
-    // (nextest spawns each test in its own process; `serial_test`
-    // only synchronises within one process). Retry briefly before
-    // declaring the artifact missing.
+    // tolerant.
     let artifact = bpf_artifact_path();
 
     // Pin path discipline (per `.claude/rules/development.md` §
@@ -233,7 +197,11 @@ fn ten_tcp_syns_to_vip_are_rewritten_and_forwarded_via_veth() {
     )
     .expect("pre-create + pre-pin SERVICE_MAP outer HoM");
 
-    let mut bpf = load_with_retry(&artifact, &pin_dir, Duration::from_secs(10));
+    let mut bpf = EbpfLoader::new()
+        .map_pin_path(&pin_dir)
+        .allow_unsupported_maps()
+        .load_file(&artifact)
+        .unwrap_or_else(|e| panic!("aya load_file({}): {e}", artifact.display()));
 
     // Attach `xdp_service_map_lookup` to the host end (veth0). Native-
     // first attach mirrors `EbpfDataplane::new`'s production wiring;

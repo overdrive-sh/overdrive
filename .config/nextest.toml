@@ -83,47 +83,68 @@ slow-timeout = { period = "60s", terminate-after = 4 }
 filter = 'binary(compile_fail) & test(compile_fail_cases)'
 slow-timeout = { period = "60s", terminate-after = 4 }
 
-# Test group for veth-based Tier 3 BPF integration tests. These tests
-# create real veth pairs in the host netns, attach XDP/TC programs,
-# and inject traffic via raw sockets. Slice 05-04+ added
-# `bpf_fib_lookup` to the production XDP program, which made these
-# tests dependent on FIB+ARP context (route, neighbour entry, IP
-# forwarding sysctl). The supporting state lives at the netns layer
-# (global routing table, global ARP cache) and parallel test
-# processes corrupt each other's state — packets emitted by Test A
-# can be redirected via Test B's iface when Test A's destination IP
-# overlaps Test B's on-link prefix.
+# Test group for any test that touches the on-disk BPF artifact at
+# `target/bpf/overdrive_bpf.o` — load it via `EbpfLoader::load_file`,
+# create veth + attach an XDP program built from it, or (in the case
+# of `build_rs_emits_diagnostic_when_artifact_missing`) deliberately
+# remove-and-restore it to exercise the build.rs diagnostic. Two
+# distinct concerns are served by the single group:
 #
-# Solution: serialize the group at the nextest layer. Each test
-# serially gets clean ARP / sysctl / iface state. The fully-isolated
-# S-2.2-17 / S-2.2-20 tests use a per-test netns (ThreeIfaceTopology
-# / E2eTopology) and are therefore safe in parallel — but they're
-# included in the group anyway because they share the `xdp_pass` BPF
-# artifact load + the bpffs pin namespace, and serialising them
-# prevents a sibling test's pin-by-name dance from colliding with
-# theirs.
+# 1. **Artifact mutation**. The `build_rs_artifact_check` test deletes
+#    `target/bpf/overdrive_bpf.o`, runs `cargo check` as a subprocess,
+#    and restores the file. The subprocess is unbounded — cold-cache
+#    cargo on a CI runner regularly takes >10s. Any test that opens
+#    the artifact concurrently sees the missing file and panics. The
+#    sole correct fix is mutual exclusion between the deleter and
+#    every loader.
 #
-# Why `max-threads = 1` and not the more general `serial_test`
+# 2. **veth/FIB/ARP/bpffs state.** Slice 05-04+ added `bpf_fib_lookup`
+#    to the production XDP program, which made the veth-based Tier 3
+#    tests dependent on FIB+ARP context (route, neighbour entry, IP
+#    forwarding sysctl). The supporting state lives at the netns layer
+#    (global routing table, global ARP cache) and parallel test
+#    processes corrupt each other's state — packets emitted by Test A
+#    can be redirected via Test B's iface when Test A's destination IP
+#    overlaps Test B's on-link prefix. The fully-isolated S-2.2-17 /
+#    S-2.2-20 tests use a per-test netns (ThreeIfaceTopology /
+#    E2eTopology) but still share the bpffs pin namespace
+#    (`/sys/fs/bpf/overdrive/...`); a sibling's pin-by-name dance can
+#    still collide.
+#
+# Solution: serialize at the nextest layer with `max-threads = 1`.
+# Each test gets clean artifact / ARP / sysctl / iface / bpffs state.
+#
+# Why `max-threads = 1` and not the in-source `serial_test::serial`
 # attribute: nextest spawns each test in its own process, and
 # `serial_test` only synchronises within a single process. The
 # nextest test-group mechanism is the only correct level to enforce
-# the cross-process single-writer constraint.
-[test-groups.bpf-veth-tier3]
+# the cross-process single-writer constraint. Existing `#[serial(env)]`
+# annotations on these tests are kept for any same-process collision
+# they may still defend against, but the test-group is what makes the
+# guarantee load-bearing.
+[test-groups.bpf-artifact-shared]
 max-threads = 1
 
 [[profile.default.overrides]]
 filter = '''
     binary(integration)
     & (
-        test(swap_inner_map_distributes_traffic_across_new_backend_set)
-        | test(ten_tcp_syns_to_vip_are_rewritten_and_forwarded_via_veth)
+        test(build_rs_emits_diagnostic_when_artifact_missing)
+        | test(mixed_batch_increments_per_class_counters_correctly)
+        | test(swap_inner_map_distributes_traffic_across_new_backend_set)
+        | test(verifier_budget_xdp_service_map_lookup_within_20pct_of_baseline)
+        | test(verifier_budget_xdp_reverse_nat_lookup_within_absolute_ceiling)
+        | test(hash_of_maps_handle_create_swap_delete_round_trip)
+        | test(removing_backend_purges_orphaned_backend_map_entries)
         | test(atomic_swap_under_50kpps_traffic_drops_zero_packets)
+        | test(kernel_rejects_inner_map_alloc_existing_mapping_preserved)
+        | test(ten_tcp_syns_to_vip_are_rewritten_and_forwarded_via_veth)
         | test(maglev_real_distribution_under_xdp_trafficgen)
         | test(real_tcp_connection_completes_through_vip_with_payload_echo)
         | test(removing_backend_purges_reverse_nat_entry_no_stale_rewrite)
     )
 '''
-test-group = 'bpf-veth-tier3'
+test-group = 'bpf-artifact-shared'
 
 [profile.ci]
 # CI runs the same suite with structured output. Retries stay at zero:

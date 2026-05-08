@@ -174,25 +174,11 @@ fn swap_inner_map_distributes_traffic_across_new_backend_set() {
     // /tmp copy where the walk-up succeeds at the wrong root; the env
     // var lookup avoids that pitfall.
     let artifact = std::path::PathBuf::from(env!("OVERDRIVE_BPF_OBJECT_PATH"));
-    // Bounded retry — the sibling `build_rs_artifact_check` test
-    // removes the artifact briefly to exercise the build-script
-    // diagnostic, and nextest spawns each test in its own process
-    // (so `serial_test` does not synchronise across binaries). 10 s
-    // covers the artifact-restore window comfortably.
-    let load_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    let mut bpf = loop {
-        match EbpfLoader::new().map_pin_path(&pin_dir).allow_unsupported_maps().load_file(&artifact)
-        {
-            Ok(bpf) => break bpf,
-            Err(e) => {
-                if std::time::Instant::now() < load_deadline {
-                    std::thread::sleep(std::time::Duration::from_millis(100));
-                    continue;
-                }
-                panic!("EbpfLoader.load_file({}): {e}", artifact.display());
-            }
-        }
-    };
+    let mut bpf = EbpfLoader::new()
+        .map_pin_path(&pin_dir)
+        .allow_unsupported_maps()
+        .load_file(&artifact)
+        .unwrap_or_else(|e| panic!("EbpfLoader.load_file({}): {e}", artifact.display()));
 
     // Attach xdp_service_map_lookup to host end with native→SKB
     // fallback.
@@ -405,20 +391,11 @@ fn verifier_budget_xdp_service_map_lookup_within_20pct_of_baseline() {
     // Single source of truth — see the matching block earlier in this
     // file for the `OVERDRIVE_BPF_OBJECT_PATH` rationale.
     let artifact = std::path::PathBuf::from(env!("OVERDRIVE_BPF_OBJECT_PATH"));
-    let load_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    let mut bpf = loop {
-        match EbpfLoader::new().map_pin_path(&pin_dir).allow_unsupported_maps().load_file(&artifact)
-        {
-            Ok(b) => break b,
-            Err(e) => {
-                if std::time::Instant::now() < load_deadline {
-                    std::thread::sleep(std::time::Duration::from_millis(100));
-                    continue;
-                }
-                panic!("EbpfLoader.load_file: {e}");
-            }
-        }
-    };
+    let mut bpf = EbpfLoader::new()
+        .map_pin_path(&pin_dir)
+        .allow_unsupported_maps()
+        .load_file(&artifact)
+        .unwrap_or_else(|e| panic!("EbpfLoader.load_file: {e}"));
     let prog: &mut Xdp = bpf
         .program_mut("xdp_service_map_lookup")
         .expect("program present")
@@ -523,20 +500,11 @@ fn verifier_budget_xdp_reverse_nat_lookup_within_absolute_ceiling() {
     .expect("pre-pin SERVICE_MAP");
 
     let artifact = std::path::PathBuf::from(env!("OVERDRIVE_BPF_OBJECT_PATH"));
-    let load_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    let mut bpf = loop {
-        match EbpfLoader::new().map_pin_path(&pin_dir).allow_unsupported_maps().load_file(&artifact)
-        {
-            Ok(b) => break b,
-            Err(e) => {
-                if std::time::Instant::now() < load_deadline {
-                    std::thread::sleep(std::time::Duration::from_millis(100));
-                    continue;
-                }
-                panic!("EbpfLoader.load_file: {e}");
-            }
-        }
-    };
+    let mut bpf = EbpfLoader::new()
+        .map_pin_path(&pin_dir)
+        .allow_unsupported_maps()
+        .load_file(&artifact)
+        .unwrap_or_else(|e| panic!("EbpfLoader.load_file: {e}"));
     let prog: &mut Xdp = bpf
         .program_mut("xdp_reverse_nat_lookup")
         .expect("program present")
@@ -895,20 +863,11 @@ fn removing_backend_purges_orphaned_backend_map_entries() {
     // Single source of truth — see the matching block earlier in this
     // file for the `OVERDRIVE_BPF_OBJECT_PATH` rationale.
     let artifact = std::path::PathBuf::from(env!("OVERDRIVE_BPF_OBJECT_PATH"));
-    let load_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-    let mut bpf = loop {
-        match EbpfLoader::new().map_pin_path(&pin_dir).allow_unsupported_maps().load_file(&artifact)
-        {
-            Ok(b) => break b,
-            Err(e) => {
-                if std::time::Instant::now() < load_deadline {
-                    std::thread::sleep(std::time::Duration::from_millis(100));
-                    continue;
-                }
-                panic!("EbpfLoader.load_file({}): {e}", artifact.display());
-            }
-        }
-    };
+    let mut bpf = EbpfLoader::new()
+        .map_pin_path(&pin_dir)
+        .allow_unsupported_maps()
+        .load_file(&artifact)
+        .unwrap_or_else(|e| panic!("EbpfLoader.load_file({}): {e}", artifact.display()));
 
     // Recover BACKEND_MAP — typed `HashMap<MapData, u32, BackendEntryPod>`.
     let mut backend_map: aya::maps::HashMap<aya::maps::MapData, u32, BackendEntryPod> =
@@ -1084,20 +1043,11 @@ fn atomic_swap_under_50kpps_traffic_drops_zero_packets() {
     // Single source of truth — see the matching block earlier in this
     // file for the `OVERDRIVE_BPF_OBJECT_PATH` rationale.
     let artifact = std::path::PathBuf::from(env!("OVERDRIVE_BPF_OBJECT_PATH"));
-    let load_deadline = std::time::Instant::now() + Duration::from_secs(10);
-    let mut bpf = loop {
-        match EbpfLoader::new().map_pin_path(&pin_dir).allow_unsupported_maps().load_file(&artifact)
-        {
-            Ok(b) => break b,
-            Err(e) => {
-                if std::time::Instant::now() < load_deadline {
-                    std::thread::sleep(Duration::from_millis(100));
-                    continue;
-                }
-                panic!("EbpfLoader.load_file({}): {e}", artifact.display());
-            }
-        }
-    };
+    let mut bpf = EbpfLoader::new()
+        .map_pin_path(&pin_dir)
+        .allow_unsupported_maps()
+        .load_file(&artifact)
+        .unwrap_or_else(|e| panic!("EbpfLoader.load_file({}): {e}", artifact.display()));
 
     // Attach service-map lookup to host end (DRV→SKB fallback).
     let _service_link = {
