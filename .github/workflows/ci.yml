@@ -894,16 +894,32 @@ jobs:
   # -------------------------------------------------------------------
   # Job E (Tier 4) — verifier-budget regression gate
   # -------------------------------------------------------------------
-  # `cargo xtask verifier-regress` runs `veristat` against the compiled
-  # BPF object and fails the PR if any program's verified instruction
-  # count exceeds its baseline at `perf-baseline/main/verifier-budget/`
-  # by >5%, or approaches the per-program 1M CAP_BPF complexity ceiling
-  # by >10%. Pure-Rust gate logic self-tested at
-  # `xtask/tests/perf_gate_self_test.rs`; this job runs the gate
-  # against real veristat output. See `.claude/rules/testing.md` §
-  # "Tier 4 — Verifier and Performance Gates" and slice-07.
+  # `cargo verifier-regress` (alias resolves to
+  # `cargo run -p overdrive-dataplane --bin verifier_regress`) loads
+  # the compiled BPF object via aya, reads each program's
+  # `ProgramInfo::verified_instruction_count` (kernel ≥5.16
+  # `bpf_prog_info.verified_insns`), and fails the PR if any program
+  # exceeds its baseline at `perf-baseline/main/verifier-budget/` by
+  # >5%, or approaches the per-program 1M CAP_BPF complexity ceiling
+  # by >10%.
+  #
+  # # Why aya, not veristat
+  #
+  # libbpf 1.0+ removed the legacy `SEC("maps")` parser; aya 0.13.x
+  # still emits maps in that legacy section, so libbpf-linked tools
+  # (veristat, bpftool) refuse to load aya ELFs. The signal we want
+  # — `bpf_prog_info.verified_insns` — is the same field veristat
+  # surfaces as `TOTAL_INSNS`; reading it via aya bypasses libbpf
+  # entirely. Tracking aya issue #913.
+  #
+  # Pure-Rust gate logic self-tested by `cargo nextest run -p
+  # overdrive-dataplane` (unit tests in
+  # `crates/overdrive-dataplane/src/verifier_budget.rs`); this job
+  # runs the gate against the real BPF object. See
+  # `.claude/rules/testing.md` § "Tier 4 — Verifier and Performance
+  # Gates".
   verifier-regress:
-    name: cargo xtask verifier-regress
+    name: cargo verifier-regress
     runs-on: ubuntu-latest
     needs: bpf-build
     timeout-minutes: 5
@@ -916,31 +932,6 @@ jobs:
       # not ship it.
       - name: Install mold linker
         run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends mold
-
-      # veristat is the Tier 4 verifier-budget statistics tool. Ubuntu's
-      # `linux-tools-*` packages do NOT ship it (they include only
-      # bpftool/perf/cpupower/rtla/usbip), so install from the upstream
-      # libbpf/veristat release — the canonical standalone mirror of
-      # `tools/testing/selftests/bpf/veristat` from bpf-next, maintained
-      # by the libbpf org. Single static binary; mirrored in
-      # `infra/lima/overdrive-dev.yaml` so local + CI stay in lockstep.
-      - name: Install veristat
-        env:
-          VERISTAT_VERSION: v0.5.1
-        run: |
-          ARCH="$(uname -m)"
-          case "${ARCH}" in
-            x86_64)  ASSET_ARCH="amd64" ;;
-            aarch64) ASSET_ARCH="arm64" ;;
-            *) echo "unsupported arch: ${ARCH}"; exit 1 ;;
-          esac
-          TARBALL="veristat-${VERISTAT_VERSION}-${ASSET_ARCH}.tar.gz"
-          curl -fsSL -o "/tmp/${TARBALL}" \
-            "https://github.com/libbpf/veristat/releases/download/${VERISTAT_VERSION}/${TARBALL}"
-          tar -C /tmp -xf "/tmp/${TARBALL}" veristat
-          sudo install -m 0755 /tmp/veristat /usr/local/bin/veristat
-          rm -f "/tmp/${TARBALL}" /tmp/veristat
-          veristat --version
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -970,8 +961,14 @@ jobs:
           path: target/bpf/
           if-no-files-found: error
 
-      - name: cargo xtask verifier-regress
-        run: cargo xtask verifier-regress
+      - name: cargo verifier-regress
+        # `sudo -E env "PATH=$PATH"` matches the bpf-unit job — Ubuntu
+        # 22.04+ ships `kernel.unprivileged_bpf_disabled = 2`, so
+        # `BPF_PROG_LOAD` (called by aya `prog.load()`) requires
+        # CAP_BPF. The binary also pre-pins SERVICE_MAP under
+        # `/sys/fs/bpf/overdrive-verifier-regress-<pid>` which needs
+        # the same capability. See upstream-issues.md §A2.
+        run: sudo -E env "PATH=$PATH" cargo verifier-regress
 
   # -------------------------------------------------------------------
   # Job E (Tier 4) — XDP throughput / p99 latency regression gate

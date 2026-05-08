@@ -1843,9 +1843,12 @@ Each kernel-side program lands across all four tiers:
   expected to remain load-bearing across multiple aya releases.
 - **Tier 3 (real veth)**: `crates/overdrive-dataplane/tests/integration/<name>.rs`
   — real packet plumbing through veth pairs in Lima / ubuntu-latest.
-- **Tier 4 (`veristat`)**: `perf-baseline/main/verifier-budget/veristat-<name>.txt`
+- **Tier 4 verifier-budget**: `perf-baseline/main/verifier-budget/veristat-<name>.txt`
   — instruction count baseline, ≤ 50 % of 1M-privileged ceiling.
-  Enforced by `cargo xtask verifier-regress`.
+  Enforced by `cargo verifier-regress` (binary lives in
+  `crates/overdrive-dataplane/src/bin/verifier_regress.rs`; reads
+  `bpf_prog_info.verified_insns` via aya, NOT veristat — see
+  `.claude/rules/testing.md` § "Verifier complexity").
 - **Tier 1 (DST)**: not directly applicable to kernel-side code (DST
   uses `SimDataplane`); the userspace handle that wraps the map IS
   Tier 1-tested.

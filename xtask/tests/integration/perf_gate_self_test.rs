@@ -1,4 +1,4 @@
-//! S-2.2-24, S-2.2-25 — `cargo xtask verifier-regress` /
+//! S-2.2-24, S-2.2-25 — `cargo verifier-regress` /
 //! `cargo xtask xdp-perf` self-tests.
 //!
 //! Tags: `@US-07` `@K7` `@slice-07` `@kpi` `@pending`.
@@ -19,7 +19,7 @@ fn verifier_regress_returns_nonzero_on_synthetic_twelve_percent_growth() {
     panic!(
         "Not yet implemented -- RED scaffold: S-2.2-24 — \
          synthetic baseline 5000; candidate 5600 (12% growth); \
-         cargo xtask verifier-regress returns non-zero exit code; \
+         cargo verifier-regress returns non-zero exit code; \
          output names program, both counts, threshold"
     );
 }

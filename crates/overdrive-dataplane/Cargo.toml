@@ -48,6 +48,13 @@ thiserror.workspace      = true
 tokio                    = { workspace = true, features = ["macros", "rt"] }
 tracing.workspace        = true
 
+# Binary-only at the `verifier_regress` boundary per
+# `.claude/rules/development.md` § Errors ("eyre only at CLI / binary
+# boundaries"). The library modules use `thiserror`-typed errors;
+# `verifier_budget` does not depend on these.
+eyre.workspace       = true
+color-eyre.workspace = true
+
 # `parking_lot::Mutex` for interior mutability of aya's
 # `HashMap`-backed `BACKEND_MAP` handle — `Dataplane::update_service`
 # is `&self` per the trait surface, but aya's `HashMap::insert /

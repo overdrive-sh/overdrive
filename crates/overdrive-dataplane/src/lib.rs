@@ -27,6 +27,12 @@ pub mod loader;
 pub mod maps;
 pub mod swap;
 
+// Tier 4 verifier-complexity regression gate. Pure decision fn +
+// parsers; the shell-side wrapper is the
+// `crates/overdrive-dataplane/src/bin/verifier_regress.rs` binary
+// fronted by the `cargo verifier-regress` alias.
+pub mod verifier_budget;
+
 // Orphan-GC sweep over `BACKEND_MAP` (step 4 of ADR-0040 § 2's
 // 5-step swap orchestration). Linux-only — the module's
 // `#![cfg(target_os = "linux")]` elides the body on macOS without

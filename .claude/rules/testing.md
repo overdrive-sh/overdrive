@@ -7,7 +7,7 @@ cannot. None of them substitutes for any other.
 Tier 1  DST in-process            turmoil + Sim* traits        (§21)
 Tier 2  BPF unit tests            BPF_PROG_TEST_RUN            (§22)
 Tier 3  Real-kernel integration   QEMU + kernel matrix         (§22)
-Tier 4  Verifier + perf gates     veristat, xdp-bench, PREVAIL (§22)
+Tier 4  Verifier + perf gates     verifier-regress, xdp-bench, PREVAIL (§22)
 ```
 
 ---
@@ -320,7 +320,7 @@ Rules for mutation specifically:
 
 This exception is narrow. Nextest, `cargo test --doc`, `cargo xtask
 dst`, `cargo xtask bpf-unit`, `cargo xtask integration-test vm`,
-`cargo xtask verifier-regress`, and `cargo xtask xdp-perf` all stay
+`cargo verifier-regress`, and `cargo xtask xdp-perf` all stay
 foreground.
 
 ---
@@ -1327,7 +1327,7 @@ Every new eBPF program lands with the coverage below or it does not merge:
 
 ## Tier 4 — Verifier and Performance Gates
 
-### Verifier complexity (`veristat`)
+### Verifier complexity (`cargo verifier-regress`)
 
 - Full BPF corpus compiled with worst-case feature flags, loaded into every
   matrix kernel.
@@ -1337,6 +1337,36 @@ Every new eBPF program lands with the coverage below or it does not merge:
 - Verifier behaviour changes across kernel releases. The only guard is
   loading the corpus into every kernel in the matrix. Do not rely on a
   single-kernel verifier-pass signal.
+
+**Signal source.** The gate reads aya's
+`ProgramInfo::verified_instruction_count` after loading each program —
+kernel ≥5.16 surfaces `bpf_prog_info.verified_insns` via
+`BPF_OBJ_GET_INFO_BY_FD`. This is the same field veristat surfaces as
+its `TOTAL_INSNS` column; both come from the kernel verifier's own
+accounting. The gate bypasses libbpf-based tools (`veristat`,
+`bpftool prog loadall`) because libbpf 1.0+ removed the legacy
+`SEC("maps")` parser and aya 0.13.x still emits that section shape —
+every libbpf-linked tool rejects aya ELFs with
+`libbpf: elf: legacy map definitions in 'maps' section are not
+supported by libbpf v1.0+`. Tracking
+[aya issue #913](https://github.com/aya-rs/aya/issues/913) for the
+upstream resolution; HashMap PR
+[#1367](https://github.com/aya-rs/aya/pull/1367) and HashOfMaps PR
+[#1446](https://github.com/aya-rs/aya/pull/1446) collectively close it
+once they merge and ship in a tagged aya release. When that lands the
+gate may pivot to `veristat` + its `peak_states` /
+`max_states_per_insn` columns, which `bpf_prog_info` UAPI does not
+expose — those are the only signal lost under the current path.
+
+**Where the gate lives.**
+`crates/overdrive-dataplane/src/bin/verifier_regress.rs` (the binary) +
+`crates/overdrive-dataplane/src/verifier_budget.rs` (the pure decision
+fn). Invoked via the `cargo verifier-regress` alias. NOT in xtask,
+because xtask cannot depend on `overdrive-*` crates per
+`.claude/rules/development.md` § "xtask is build / test / dev
+orchestration, NOT a runtime entry point" — and the gate must load the
+BPF object via aya, which needs `overdrive-dataplane`'s
+`HashOfMapsHandle` for the `pinning = ByName` workaround.
 
 ### XDP performance (`xdp-bench`)
 
@@ -1400,7 +1430,7 @@ Per-PR (critical path ≈ 15 minutes):
   B  cargo dst                     Tier 1                        (min)
   C  cargo xtask bpf-unit                Tier 2                        (min)
   D  cargo xtask integration-test vm     Tier 3, kernel matrix         (10 min)
-  E  cargo xtask verifier-regress        Tier 4 — veristat             (min)
+  E  cargo verifier-regress              Tier 4 — aya ProgramInfo      (min)
      cargo xtask xdp-perf                Tier 4 — xdp-bench            (min)
   F  cargo xtask mutants --diff origin/main
                                          diff-scoped (nextest per      (min)

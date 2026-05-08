@@ -83,7 +83,7 @@
 #             (veristat is not packaged in the Lima image; aya queries
 #             BPF_OBJ_GET_INFO_BY_FD which returns the same kernel-side
 #             counter veristat reads.)
-#   target:   target/xtask/bpf-objects/overdrive_bpf.o
+#   target:   target/bpf/overdrive_bpf.o
 #             (built by `cargo xtask bpf-build` against
 #             rustup nightly + bpfel-unknown-none + -Z build-std=core,
 #             per ADR-0038 §3.1)
@@ -169,7 +169,7 @@
 # Format (one line per program, space-separated key=value pairs;
 # Slice 07's parser keys off `prog=` and `verified_insns=`):
 
-file=target/xtask/bpf-objects/overdrive_bpf.o prog=xdp_service_map_lookup verdict=success verified_insns=151379
+file=target/bpf/overdrive_bpf.o prog=xdp_service_map_lookup verdict=success verified_insns=151379
 
 # (`xdp_pass` baseline at 21 verified_insns is recorded under
 # perf-baseline/main/verifier-budget/veristat-xdp-pass.txt when

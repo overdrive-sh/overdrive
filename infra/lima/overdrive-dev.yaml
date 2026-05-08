@@ -6,7 +6,6 @@
 #   eBPF toolchain (§7)    clang, llvm, libbpf, bpftool, xdp-tools
 #   Tier 2 BPF unit (§22)  via `BPF_PROG_TEST_RUN` — already in-kernel
 #   Tier 3 integration     little-vm-helper (Go), virtme-ng (Python), QEMU
-#   Tier 4 verifier (§22)  veristat (libbpf/veristat — verifier stats)
 #   Rust                   rustup (toolchain governed by rust-toolchain.toml),
 #                          cargo-nextest, cargo-deny
 #   Networking             tcpdump, iproute2, bridge-utils
@@ -82,7 +81,6 @@ param:
   CLOUD_HYPERVISOR_VERSION: "v46.0"
   WASMTIME_VERSION:         "v28.0.0"
   PWRU_VERSION:             "v1.0.11"
-  VERISTAT_VERSION:         "v0.5.1"
 
 # ────────────────────────────────────────────────────────────────────────────
 # Provisioning.
@@ -195,36 +193,6 @@ provision:
       pwru --version
 
   # -------------------------------------------------------------------------
-  # veristat — Tier 4 verifier-budget statistics tool. Sourced from
-  # libbpf/veristat (the canonical standalone mirror of
-  # `tools/testing/selftests/bpf/veristat` from bpf-next, maintained by
-  # the libbpf org). Ubuntu's `linux-tools-*` packages do NOT ship
-  # veristat — they include bpftool/perf/cpupower/rtla only — so we
-  # consume the upstream release directly. Single static binary; same
-  # provisioning shape as pwru / cloud-hypervisor / wasmtime above.
-  # See `cargo xtask verifier-regress` (xtask/src/main.rs) which calls
-  # `veristat -f <prog> <bpf-object>` per program.
-  # -------------------------------------------------------------------------
-  - mode: system
-    script: |
-      #!/usr/bin/env bash
-      set -euxo pipefail
-      VER="{{ .Param.VERISTAT_VERSION }}"
-      ARCH="$(uname -m)"
-      case "${ARCH}" in
-        x86_64)  ASSET_ARCH="amd64" ;;
-        aarch64) ASSET_ARCH="arm64" ;;
-        *) echo "unsupported arch: ${ARCH}"; exit 1 ;;
-      esac
-      TARBALL="veristat-${VER}-${ASSET_ARCH}.tar.gz"
-      curl -fsSL -o "/tmp/${TARBALL}" \
-        "https://github.com/libbpf/veristat/releases/download/${VER}/${TARBALL}"
-      tar -C /tmp -xf "/tmp/${TARBALL}" veristat
-      install -m 0755 /tmp/veristat /usr/local/bin/veristat
-      rm -f "/tmp/${TARBALL}" /tmp/veristat
-      veristat --version
-
-  # -------------------------------------------------------------------------
   # kraft (Unikraft build CLI) — direct .deb from the kraftkit GitHub
   # release. The official `get.kraftkit.sh` installer prompts for the sudo
   # password on a TTY (which cloud-init doesn't have); `deb.pkg.kraftkit.sh`
@@ -331,14 +299,6 @@ probes:
       pwru --version
     hint: "pwru binary missing — check provisioning log."
 
-  - description: "veristat installed"
-    script: |
-      #!/usr/bin/env bash
-      set -eu
-      timeout 300 bash -c 'until command -v veristat >/dev/null 2>&1; do sleep 2; done'
-      veristat --version
-    hint: "veristat binary missing — check provisioning log."
-
   - description: "kraft (Unikraft) installed"
     script: |
       #!/usr/bin/env bash
@@ -373,7 +333,6 @@ message: |
     cloud-hypervisor   $(cloud-hypervisor --version 2>/dev/null || echo missing)
     wasmtime           $(wasmtime --version 2>/dev/null || echo missing)
     pwru               $(pwru --version 2>/dev/null || echo missing)
-    veristat           $(veristat --version 2>/dev/null || echo missing)
     kraft              $(kraft version 2>/dev/null | head -n1 || echo missing)
     lvh                $(lvh --version 2>/dev/null || echo 'in $HOME/go/bin')
     rustup             $(rustup --version 2>/dev/null | head -n1)

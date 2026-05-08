@@ -1,8 +1,8 @@
 [alias]
 # Developer conveniences. xtask hosts build / test / dev orchestration
-# subcommands (`bpf-build`, `verifier-regress`, `xdp-perf`,
-# `integration-test vm`, `mutants`, `dst-lint`, `lima`, `hooks`, …);
-# runtime tools (`dst`, `openapi`, `overdrive`) ship as binaries in
+# subcommands (`bpf-build`, `xdp-perf`, `integration-test vm`,
+# `mutants`, `dst-lint`, `lima`, `hooks`, …); runtime tools (`dst`,
+# `openapi`, `overdrive`, `verifier-regress`) ship as binaries in
 # their owning crate and are invoked through `cargo run -p <crate>
 # --bin <bin> --` directly. See § "xtask is build / test / dev
 # orchestration, NOT a runtime entry point" in
@@ -11,14 +11,18 @@ xtask         = "run --package xtask --"
 xt            = "run --package xtask --"
 
 # Runtime tools — direct cargo invocations, no xtask wrapper.
-dst           = "run -p overdrive-sim --bin dst --"
-openapi-gen   = "run -p overdrive-control-plane --bin openapi -- gen"
-openapi-check = "run -p overdrive-control-plane --bin openapi -- check"
-overdrive     = "run -p overdrive-cli --bin overdrive --"
+dst              = "run -p overdrive-sim --bin dst --"
+openapi-gen      = "run -p overdrive-control-plane --bin openapi -- gen"
+openapi-check    = "run -p overdrive-control-plane --bin openapi -- check"
+overdrive        = "run -p overdrive-cli --bin overdrive --"
+# `verifier-regress` lives in overdrive-dataplane (not xtask) because
+# it must load the BPF object via aya, which xtask's deps cannot
+# include per `.claude/rules/development.md` § "xtask is build / test
+# / dev orchestration, NOT a runtime entry point".
+verifier-regress = "run -p overdrive-dataplane --bin verifier_regress --"
 
 # Build / test orchestration shortcuts — wrappers over xtask subcommands.
 bpf-unit      = "run --package xtask -- bpf-unit"
-verifier      = "run --package xtask -- verifier-regress"
 xdp-perf      = "run --package xtask -- xdp-perf"
 it-vm         = "run --package xtask -- integration-test vm"
 lint          = "clippy --workspace --all-targets --all-features -- -D warnings"
