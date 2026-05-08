@@ -350,3 +350,153 @@ What it is NOT:
 - **Not a substitute for source-line resolution.** pwru tells you the
   function name; the source line still needs § 9's symbol resolution
   for the actual mechanism.
+
+---
+
+## Leftover XDP attachments across runs (Lima / Linux integration tests)
+
+Integration tests that load XDP onto a real interface — `crates/
+overdrive-dataplane/tests/integration/{atomic_swap,maglev_real,
+redirect_neigh_attach,reverse_nat_e2e,sanity_mixed_batch,
+service_map_forward,veth_attach}.rs` running through `cargo xtask
+lima run --` — and the `xdp-perf` gate (which loads xdp-trafficgen /
+xdp-bench, both libxdp-based and using the `xdp_dispatcher`
+program-array shape) attach an XDP program to an iface for the
+duration of the test.
+
+When a test crashes mid-run, gets cancelled by nextest's
+slow-test killer, gets SIGKILL'd by the Bash tool's wall-clock cap,
+or is interrupted by the user, the RAII guard that detaches the
+program does NOT run — the program stays attached to the iface
+until something explicitly removes it.
+
+### Why this matters
+
+Once a stale XDP program is attached to `lo` (or any iface a later
+test plumbs traffic through), every TCP / UDP / ICMP packet on that
+iface traverses the program before the kernel networking stack sees
+it. The program was loaded against a *previous* test's map state and
+expectations; against a fresh test's traffic it can drop packets
+silently, mangle headers, or simply pass everything through with
+side effects (counters bumped, ring buffers drained). The exact
+shape depends on what the leftover program was, but the steady-state
+symptom on `lo` is the same: **TCP connections to `127.0.0.1:<port>`
+that should `ECONNREFUSED` immediately just hang until timeout**.
+
+This bites adjacent tests that have nothing to do with the
+dataplane. The 6 `overdrive-cli` integration tests that exercise the
+in-process control-plane HTTPS server (`http_client::*`,
+`cluster_and_node_commands::*`, `endpoint_from_config::*`,
+`exec_spec_walking_skeleton::*`) all failed with the same Transport
+timeout signature after a prior xdp-perf run left
+`xdp_dispatcher` attached to `lo`. The control-plane code was not
+broken; the loopback path was.
+
+The failure looks like a regression in whichever test is under
+audit; it isn't. It's leftover state from whatever ran (or crashed)
+before.
+
+### Detection — the canonical one-liner
+
+```bash
+cargo xtask lima run -- bash -lc '
+  for i in $(ip -br link show | awk "{print \$1}"); do
+    info=$(ip link show "$i")
+    case "$info" in
+      *xdpgeneric*|*xdpdrv*|*xdp\ *)
+        echo "=== $i ==="
+        echo "$info" | grep -E "xdp(generic|drv)?"
+        ;;
+    esac
+  done
+  echo "--- bpftool prog show (xdp/sched_cls only) ---"
+  bpftool prog show 2>/dev/null | grep -E "(xdp|sched_cls)"
+'
+```
+
+Output naming `xdp_dispatcher`, `xdp_service_map_lookup`,
+`xdp_reverse_nat`, or any other Overdrive-side XDP program attached
+to `lo` / `veth0` / `overdrive-veth-*` is the smoking gun.
+
+A faster sanity probe when you suspect the loopback is the problem:
+
+```bash
+cargo xtask lima run -- bash -lc \
+  'timeout 3 bash -c "echo > /dev/tcp/127.0.0.1/1" 2>&1 \
+   || echo "loopback path is healthy (refused, did not hang)"'
+```
+
+`Connection refused` is the expected output (nothing listens on
+:1). A 3 s timeout is the failure shape — proceed to the detection
+one-liner above.
+
+### Cleanup — before re-running the affected suite
+
+```bash
+cargo xtask lima run -- bash -lc '
+  for i in $(ip -br link show | awk "{print \$1}"); do
+    ip link set dev "$i" xdpgeneric off 2>/dev/null
+    ip link set dev "$i" xdpdrv off 2>/dev/null
+    ip link set dev "$i" xdp off 2>/dev/null
+  done
+'
+```
+
+`xdpgeneric off` / `xdpdrv off` / `xdp off` are the three detach
+shapes; only one will fire per iface, the others are harmless
+no-ops. Running all three covers attach-mode uncertainty (the
+fallback in § "Attach mode" of `development.md` means we don't
+always know which mode the leftover program is in).
+
+Veth pairs created by the integration tests usually clean themselves
+on `Drop` (one `ip link del <peer>` removes both sides), but when
+the test was SIGKILLed mid-setup the pair survives. Sweeping them is
+parallel to the XDP detach:
+
+```bash
+cargo xtask lima run -- bash -lc '
+  for i in $(ip -br link show type veth | awk "{print \$1}"); do
+    case "$i" in
+      overdrive-veth-*) ip link del "$i" 2>/dev/null ;;
+    esac
+  done
+'
+```
+
+### Prevention — what RAII already does, when it runs
+
+`aya::programs::Xdp::attach()` returns an `XdpLinkId` whose `Drop`
+detaches the program. As long as the test process exits via the
+normal unwind path (panic OR clean return), the link is detached on
+scope exit. That handles the common case.
+
+`xdp-trafficgen` and `xdp-bench` (libxdp-based) detach on
+`SIGINT` / `SIGTERM`. The `xdp-perf` gate driver in
+`crates/overdrive-dataplane/bin/xdp_perf.rs` wraps these subprocesses
+and signals them on shutdown.
+
+Neither path fires when the parent process itself dies abnormally —
+SIGKILL from nextest's `slow-timeout` (default 60 s test, 120 s
+leak), SIGKILL from the Bash tool's wall-clock cap, SIGINT from the
+user mid-run. After any such event, expect leftover XDP.
+
+### Don't paper over it
+
+If a previously-passing CLI / control-plane / non-dataplane test
+suddenly starts timing out against a loopback HTTPS server, **run
+the loopback sanity probe before assuming the recent changes broke
+the test**. The failure shape — `request timed out` after the
+client's full timeout — is identical to "the server crashed mid-bind"
+and "we wired the wrong port"; the only way to distinguish is to
+check the loopback path itself.
+
+The fix is to detach the leftover program, not to add defensive
+retries or longer client timeouts to the test under audit (the
+production code path IS the loopback, and lengthening the timeout
+just shifts the failure threshold without removing the cause).
+
+The same discipline as the cgroup-leak section in `testing.md`
+applies: tests that attach XDP must NOT silently reuse a
+pre-existing attachment. Production code does not assume the iface
+has a stale program ready to be replaced; tests should not paper
+over a leak by replacing one stale program with another.
