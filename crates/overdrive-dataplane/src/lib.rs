@@ -633,6 +633,17 @@ impl EbpfDataplane {
             .map_err(|e| DataplaneError::LoadFailed(format!("BACKEND_MAP keys(): {e}")))
     }
 
+    /// Number of entries in the `BackendIdAllocator`'s memo table.
+    ///
+    /// Diagnostic surface — used by integration tests to verify that
+    /// `release()` is called after orphan-GC sweeps on both the
+    /// non-empty and empty-backend paths.
+    #[cfg(target_os = "linux")]
+    #[must_use]
+    pub fn allocator_memo_len(&self) -> usize {
+        self.backend_id_alloc.lock().memo_len()
+    }
+
     /// Returns `true` if SERVICE_MAP contains an outer slot for the
     /// given `(vip, port)` key.
     ///
@@ -873,9 +884,18 @@ impl Dataplane for EbpfDataplane {
             };
             {
                 let mut backend_map = self.backend_map.lock();
-                crate::gc::sweep_orphan_backends(&mut backend_map, &live_ids).map_err(|e| {
-                    DataplaneError::LoadFailed(format!("BACKEND_MAP orphan-GC sweep: {e}"))
-                })?;
+                let removed = crate::gc::sweep_orphan_backends(&mut backend_map, &live_ids)
+                    .map_err(|e| {
+                        DataplaneError::LoadFailed(format!("BACKEND_MAP orphan-GC sweep: {e}"))
+                    })?;
+                if !removed.is_empty() {
+                    let mut alloc = self.backend_id_alloc.lock();
+                    for removed_id in &removed {
+                        if let Ok(bid) = overdrive_core::id::BackendId::new(*removed_id) {
+                            alloc.release(bid);
+                        }
+                    }
+                }
             }
 
             let stale_keys: std::collections::BTreeSet<crate::maps::BackendKeyPod> = {

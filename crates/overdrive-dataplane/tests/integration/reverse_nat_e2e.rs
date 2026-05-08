@@ -1034,6 +1034,100 @@ fn empty_backend_purge_removes_all_ports_for_same_vip() {
     let _ = topo;
 }
 
+/// Regression: the empty-backend GC sweep path must release swept
+/// `BackendId`s from the allocator's memo table, matching the
+/// non-empty shrink path. Without the fix, the memo table retains
+/// stale entries after a full deregistration — the same endpoint
+/// always gets back its old id (memo hit) instead of a fresh one,
+/// and the memo grows unboundedly under endpoint churn.
+#[test]
+fn empty_backend_deregistration_releases_allocator_memo_entries() {
+    if !require_root_or_skip("alloc-memo-release") {
+        return;
+    }
+
+    let topo = match ThreeIfaceTopology::create("ar") {
+        Ok(t) => t,
+        Err(NetNsError::CapNetAdminRequired) => {
+            eprintln!("[skip] alloc-memo-release needs CAP_NET_ADMIN");
+            return;
+        }
+        Err(e) => panic!("3-iface topology setup failed: {e}"),
+    };
+
+    let pin_dir = PathBuf::from(format!("/sys/fs/bpf/overdrive-test-ar-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&pin_dir);
+    std::fs::create_dir_all(&pin_dir).expect("create pin dir");
+    struct PinDirGuard(PathBuf);
+    impl Drop for PinDirGuard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    let _pin_guard = PinDirGuard(pin_dir.clone());
+
+    let _ns_guard = enter_netns(&topo.lb_ns.name).expect("setns into lb-ns");
+
+    let dataplane = EbpfDataplane::new_with_pin_dir(&topo.lb_veth_a, &topo.lb_veth_b, &pin_dir)
+        .expect("EbpfDataplane::new_with_pin_dir");
+
+    let runtime =
+        tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio rt");
+
+    let alloc_b1 = SpiffeId::new("spiffe://overdrive.local/job/e2e/alloc/ar-B1").expect("SpiffeId");
+
+    assert_eq!(dataplane.allocator_memo_len(), 0, "memo must start empty");
+
+    // Step 1: register a backend.
+    runtime
+        .block_on(dataplane.update_service(
+            VIP,
+            vec![Backend {
+                alloc: alloc_b1.clone(),
+                addr: SocketAddr::new(IpAddr::V4(BACKEND_IP), BACKEND_PORT),
+                weight: 1,
+                healthy: true,
+            }],
+        ))
+        .expect("update_service install B1");
+
+    assert_eq!(dataplane.allocator_memo_len(), 1, "memo must contain 1 entry after installing B1");
+
+    // Step 2: deregister via empty-backend update.
+    runtime.block_on(dataplane.update_service(VIP, vec![])).expect("update_service empty backends");
+
+    assert_eq!(
+        dataplane.allocator_memo_len(),
+        0,
+        "memo must be empty after empty-backend deregistration — \
+         release() must be called for swept BackendIds"
+    );
+
+    // Step 3: re-register the same endpoint — must get a fresh id
+    // (counter increment), not the old id (memo hit on a stale entry).
+    runtime
+        .block_on(dataplane.update_service(
+            VIP,
+            vec![Backend {
+                alloc: alloc_b1.clone(),
+                addr: SocketAddr::new(IpAddr::V4(BACKEND_IP), BACKEND_PORT),
+                weight: 1,
+                healthy: true,
+            }],
+        ))
+        .expect("update_service re-register B1");
+
+    assert_eq!(
+        dataplane.allocator_memo_len(),
+        1,
+        "memo must contain exactly 1 entry after re-registration"
+    );
+
+    drop(_ns_guard);
+    drop(dataplane);
+    let _ = topo;
+}
+
 /// Wait for `child` to exit, polling at 50 ms intervals up to
 /// `budget`. Returns the exit status, or panics on timeout (which
 /// the caller may want to handle differently — the convention here

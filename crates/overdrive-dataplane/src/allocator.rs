@@ -71,6 +71,14 @@ impl BackendIdAllocator {
     pub fn release(&mut self, id: BackendId) {
         self.by_endpoint.retain(|_, v| *v != id);
     }
+
+    /// Number of entries in the memo table. Diagnostic-only — used by
+    /// integration tests to verify that release() was called after
+    /// orphan-GC sweeps.
+    #[must_use]
+    pub fn memo_len(&self) -> usize {
+        self.by_endpoint.len()
+    }
 }
 
 #[cfg(test)]
