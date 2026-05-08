@@ -25,17 +25,17 @@
 //! 4. **Protocol** — must be TCP (`6`) or UDP (`17`). Anything else
 //!    (ICMP, GRE, ESP, …) returns `Verdict::PassToKernel` for the
 //!    same "LB is not a firewall" reason as check 1.
-//!
-//! 4b. **L4 minimum length** — `ip_total_length` must be at least
-//!     `IHL·4 + min_l4_hdr` (28 for UDP, 40 for TCP). A packet
-//!     claiming zero L4 payload passes check 3 but would let
-//!     downstream code read `dst_port` from frame-padding bytes past
-//!     the claimed IP payload boundary; drop + counter.
 //! 5. **TCP flags** — for TCP frames only, reject the canonical
 //!    Cloudflare-flagged pathological flag combinations:
 //!    `SYN+RST`, `SYN+FIN`, all-zero, and a few other classic
 //!    nmap-shape sets. Any match drops + increments the counter.
 //!    UDP frames pass this check trivially.
+//! 6. **L4 minimum length** — `ip_total_length` must be at least
+//!    `IHL·4 + min_l4_hdr` (28 for UDP, 40 for TCP). A packet
+//!    claiming zero L4 payload passes check 3 but would let
+//!    downstream code read `dst_port` from frame-padding bytes past
+//!    the claimed IP payload boundary; drop + counter. Runs AFTER
+//!    check 5 deliberately — see the ordering note in `sanity_check`.
 //!
 //! # Cooperation contract with the call sites
 //!
@@ -279,18 +279,6 @@ where
         return Verdict::PassToKernel;
     }
 
-    // (4b) L4 minimum length — `ip_total_length` must cover the IPv4
-    //      header PLUS the minimum L4 header for the identified
-    //      protocol (TCP = 20, UDP = 8). Without this, a crafted
-    //      packet with `proto = TCP` but `ip_total_len = 20` passes
-    //      the prologue and lets downstream code read `dst_port` from
-    //      frame-padding bytes past the claimed IP payload boundary.
-    let min_l4_hdr: u16 = if proto == IPV4_PROTO_TCP { 20 } else { 8 };
-    if total_len < header_bytes + min_l4_hdr {
-        record_malformed_header_drop();
-        return Verdict::Drop;
-    }
-
     // (5) TCP flags — only relevant for TCP. UDP gates this trivially.
     if proto == IPV4_PROTO_TCP {
         let Ok(flags) = read_u8(l4_offset + TCP_FLAGS_OFFSET) else {
@@ -300,6 +288,31 @@ where
             record_malformed_header_drop();
             return Verdict::Drop;
         }
+    }
+
+    // (6) L4 minimum length — `ip_total_length` must cover the IPv4
+    //     header PLUS the minimum L4 header for the identified
+    //     protocol (TCP = 20, UDP = 8). Without this, a crafted
+    //     packet with `proto = TCP` but `ip_total_len = 20` passes
+    //     the prologue and lets downstream code read `dst_port` from
+    //     frame-padding bytes past the claimed IP payload boundary.
+    //
+    //     ORDERING NOTE: this check MUST run AFTER check 5 (TCP
+    //     flags). With check 6 placed BEFORE check 5, LLVM combines
+    //     `total_len >= header_bytes + 20` (the TCP path of this
+    //     check) with check 3's `claimed_pkt_len <= packet_len` to
+    //     infer `packet_len >= 54`, then eliminates the bounds
+    //     check at the TCP-flags read site (`l4_offset + 13 = 47`).
+    //     The kernel verifier does not follow that multi-step
+    //     inference and rejects the offset-47 read as out-of-bounds
+    //     against the `_l4_bounds_pre` (UDP_HDR_LEN = 8) bound the
+    //     call site established. Keeping check 6 after check 5
+    //     preserves the bounds check at the read site and the
+    //     verifier accepts the program.
+    let min_l4_hdr: u16 = if proto == IPV4_PROTO_TCP { 20 } else { 8 };
+    if total_len < header_bytes + min_l4_hdr {
+        record_malformed_header_drop();
+        return Verdict::Drop;
     }
 
     Verdict::Continue
