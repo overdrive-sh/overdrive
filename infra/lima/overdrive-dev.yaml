@@ -140,6 +140,25 @@ provision:
       udevadm trigger --name-match=kvm || true
 
   # -------------------------------------------------------------------------
+  # IPv4 forwarding — required for `bpf_fib_lookup(flags=0)` to return
+  # RET_SUCCESS against forwarded destinations. Without it the helper
+  # returns BPF_FIB_LKUP_RET_FWD_DISABLED and Tier 2 FIB-hit tests
+  # (`xdp_{service_map,reverse_nat}_redirect_neigh`) fall through to
+  # XDP_PASS. Ubuntu 24.04 defaults this to 0; this drop-in flips it
+  # to 1 for the dev VM. Future Tier 3 real-veth tests need it too.
+  # -------------------------------------------------------------------------
+  - mode: system
+    script: |
+      #!/usr/bin/env bash
+      set -euxo pipefail
+      cat > /etc/sysctl.d/99-overdrive.conf <<'EOF'
+      # Overdrive dev VM — required by Tier 2 BPF unit tests that call
+      # bpf_fib_lookup, and by Tier 3 real-veth integration tests.
+      net.ipv4.ip_forward = 1
+      EOF
+      sysctl --system >/dev/null
+
+  # -------------------------------------------------------------------------
   # Cloud Hypervisor — single static binary. Replaces Firecracker + QEMU as
   # the unified VMM (§6). Provides CPU/memory hotplug + virtiofs.
   # -------------------------------------------------------------------------
