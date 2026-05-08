@@ -510,7 +510,7 @@ fn pre_pin_service_map(pin_dir: &std::path::Path) -> OwnedFd {
 
 /// Idempotent map clear — removes the `(BACKEND_OCTETS, BACKEND_PORT,
 /// TCP)` entry from REVERSE_NAT_MAP regardless of prior state.
-fn clear_reverse_nat_entry(bpf: &mut Ebpf, key: &BackendKey) {
+fn clear_reverse_nat_entry(bpf: &mut Ebpf, key: BackendKey) {
     let mut rnm: HashMap<_, BackendKey, Vip> =
         HashMap::try_from(bpf.map_mut("REVERSE_NAT_MAP").expect("REVERSE_NAT_MAP not found"))
             .expect("REVERSE_NAT_MAP HashMap::try_from");
@@ -676,7 +676,7 @@ fn reverse_path_passes_to_kernel_on_reverse_nat_miss() {
         proto: IPV4_PROTO_TCP,
         _pad: 0,
     };
-    clear_reverse_nat_entry(&mut bpf, &key);
+    clear_reverse_nat_entry(&mut bpf, key);
 
     let pkt = synthesise_backend_response(ROUTABLE_CLIENT_OCTETS);
     let mut out = vec![0u8; pkt.len()];

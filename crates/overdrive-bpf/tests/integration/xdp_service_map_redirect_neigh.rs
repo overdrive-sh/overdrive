@@ -675,7 +675,7 @@ fn forward_path_redirects_via_neigh_on_fib_hit() {
         bpf_prog_test_run(&prog_fd, &pkt, &mut out).expect("BPF_PROG_TEST_RUN syscall");
     assert_eq!(out_len, pkt.len(), "output frame length mismatch");
 
-    assert_eq!(action, XDP_REDIRECT, "expected XDP_REDIRECT (=4) on FIB hit, got {action}",);
+    assert_eq!(action, XDP_REDIRECT, "expected XDP_REDIRECT (=4) on FIB hit, got {action}");
 
     // L2 rewrite assertion: h_dest and h_source MUST differ from
     // the PKTGEN sentinels. The actual MAC values depend on the
