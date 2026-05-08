@@ -78,17 +78,26 @@ env:
   # and mozilla/sccache#1751 (SCCACHE_IGNORE_SERVER_IO_ERROR does NOT
   # cover backend startup probe failures).
   #
-  # Lima-using jobs also need ACTIONS_CACHE_URL, ACTIONS_RESULTS_URL,
-  # and ACTIONS_RUNTIME_TOKEN forwarded into the guest — those are
-  # exported to $GITHUB_ENV by the mozilla-actions/sccache-action step,
-  # then plumbed through `limactl shell env ... bash -lc 'sudo -E env
-  # "X=$X" ...'` so sccache running inside the VM can reach the GHA
-  # cache HTTP service. Both ACTIONS_CACHE_URL (v1 cache backend) and
-  # ACTIONS_RESULTS_URL (v2, post-Feb-2025) must be forwarded — runners
-  # may export either or both depending on backend rollout, and sccache
-  # picks whichever is populated. Forwarding only ACTIONS_CACHE_URL
-  # silently regresses to "no GHA backend" on v2-only runners and the
-  # sccache server fails its startup probe.
+  # Lima-using jobs also need the GHA cache credentials forwarded into
+  # the guest so sccache running inside the VM can reach the GHA cache
+  # HTTP service. The four variables sccache's OpenDAL GHAC backend
+  # needs are:
+  #
+  #   ACTIONS_CACHE_SERVICE_V2  — version selector ("on" = v2 mode);
+  #                               without this, sccache defaults to v1
+  #                               and looks for ACTIONS_CACHE_URL, which
+  #                               the action no longer exports (v1 was
+  #                               shut down April 2025)
+  #   ACTIONS_RESULTS_URL       — v2 cache endpoint
+  #   ACTIONS_RUNTIME_TOKEN     — auth JWT
+  #   ACTIONS_CACHE_URL         — v1 endpoint (legacy; kept for compat)
+  #
+  # All four are exported to $GITHUB_ENV by mozilla-actions/sccache-action
+  # on the host runner, then plumbed through `limactl shell env ...
+  # bash -lc 'sudo -E env "X=$X" ...'` into the guest. Omitting any one
+  # of them causes sccache's server startup probe to fail with
+  # "cache url for ghac not found", which kills rustup's `sccache rustc
+  # -vV` toolchain verification before cargo even starts.
 
 jobs:
   # -------------------------------------------------------------------
@@ -283,12 +292,14 @@ jobs:
             "SCCACHE_GHA_ENABLED=${SCCACHE_GHA_ENABLED:-}" \
             "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL:-}" \
             "ACTIONS_RESULTS_URL=${ACTIONS_RESULTS_URL:-}" \
+            "ACTIONS_CACHE_SERVICE_V2=${ACTIONS_CACHE_SERVICE_V2:-}" \
             "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
             bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
                       "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
                       "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
                       "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
                       "ACTIONS_RESULTS_URL=$ACTIONS_RESULTS_URL" \
+                      "ACTIONS_CACHE_SERVICE_V2=$ACTIONS_CACHE_SERVICE_V2" \
                       "ACTIONS_RUNTIME_TOKEN=$ACTIONS_RUNTIME_TOKEN" \
                       cargo nextest run --workspace --locked --profile ci'
 
@@ -302,12 +313,14 @@ jobs:
             "SCCACHE_GHA_ENABLED=${SCCACHE_GHA_ENABLED:-}" \
             "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL:-}" \
             "ACTIONS_RESULTS_URL=${ACTIONS_RESULTS_URL:-}" \
+            "ACTIONS_CACHE_SERVICE_V2=${ACTIONS_CACHE_SERVICE_V2:-}" \
             "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
             bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
                       "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
                       "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
                       "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
                       "ACTIONS_RESULTS_URL=$ACTIONS_RESULTS_URL" \
+                      "ACTIONS_CACHE_SERVICE_V2=$ACTIONS_CACHE_SERVICE_V2" \
                       "ACTIONS_RUNTIME_TOKEN=$ACTIONS_RUNTIME_TOKEN" \
                       cargo test --doc --workspace --locked'
 
@@ -417,12 +430,14 @@ jobs:
             "SCCACHE_GHA_ENABLED=${SCCACHE_GHA_ENABLED:-}" \
             "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL:-}" \
             "ACTIONS_RESULTS_URL=${ACTIONS_RESULTS_URL:-}" \
+            "ACTIONS_CACHE_SERVICE_V2=${ACTIONS_CACHE_SERVICE_V2:-}" \
             "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
             bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
                       "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
                       "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
                       "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
                       "ACTIONS_RESULTS_URL=$ACTIONS_RESULTS_URL" \
+                      "ACTIONS_CACHE_SERVICE_V2=$ACTIONS_CACHE_SERVICE_V2" \
                       "ACTIONS_RUNTIME_TOKEN=$ACTIONS_RUNTIME_TOKEN" \
                       cargo nextest run --workspace --locked --profile ci \
                         --features integration-tests \
@@ -781,12 +796,14 @@ jobs:
             "SCCACHE_GHA_ENABLED=${SCCACHE_GHA_ENABLED:-}" \
             "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL:-}" \
             "ACTIONS_RESULTS_URL=${ACTIONS_RESULTS_URL:-}" \
+            "ACTIONS_CACHE_SERVICE_V2=${ACTIONS_CACHE_SERVICE_V2:-}" \
             "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
             bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
                       "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
                       "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
                       "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
                       "ACTIONS_RESULTS_URL=$ACTIONS_RESULTS_URL" \
+                      "ACTIONS_CACHE_SERVICE_V2=$ACTIONS_CACHE_SERVICE_V2" \
                       "ACTIONS_RUNTIME_TOKEN=$ACTIONS_RUNTIME_TOKEN" \
                       cargo xtask mutants --diff origin/main --features integration-tests'
 
@@ -937,12 +954,14 @@ jobs:
             "SCCACHE_GHA_ENABLED=${SCCACHE_GHA_ENABLED:-}" \
             "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL:-}" \
             "ACTIONS_RESULTS_URL=${ACTIONS_RESULTS_URL:-}" \
+            "ACTIONS_CACHE_SERVICE_V2=${ACTIONS_CACHE_SERVICE_V2:-}" \
             "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
             bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
                       "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
                       "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
                       "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
                       "ACTIONS_RESULTS_URL=$ACTIONS_RESULTS_URL" \
+                      "ACTIONS_CACHE_SERVICE_V2=$ACTIONS_CACHE_SERVICE_V2" \
                       "ACTIONS_RUNTIME_TOKEN=$ACTIONS_RUNTIME_TOKEN" \
                       cargo xtask bpf-clippy'
 
@@ -960,12 +979,14 @@ jobs:
             "SCCACHE_GHA_ENABLED=${SCCACHE_GHA_ENABLED:-}" \
             "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL:-}" \
             "ACTIONS_RESULTS_URL=${ACTIONS_RESULTS_URL:-}" \
+            "ACTIONS_CACHE_SERVICE_V2=${ACTIONS_CACHE_SERVICE_V2:-}" \
             "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
             bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
                       "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
                       "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
                       "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
                       "ACTIONS_RESULTS_URL=$ACTIONS_RESULTS_URL" \
+                      "ACTIONS_CACHE_SERVICE_V2=$ACTIONS_CACHE_SERVICE_V2" \
                       "ACTIONS_RUNTIME_TOKEN=$ACTIONS_RUNTIME_TOKEN" \
                       cargo xtask bpf-build'
 
@@ -1081,12 +1102,14 @@ jobs:
             "SCCACHE_GHA_ENABLED=${SCCACHE_GHA_ENABLED:-}" \
             "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL:-}" \
             "ACTIONS_RESULTS_URL=${ACTIONS_RESULTS_URL:-}" \
+            "ACTIONS_CACHE_SERVICE_V2=${ACTIONS_CACHE_SERVICE_V2:-}" \
             "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
             bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
                       "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
                       "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
                       "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
                       "ACTIONS_RESULTS_URL=$ACTIONS_RESULTS_URL" \
+                      "ACTIONS_CACHE_SERVICE_V2=$ACTIONS_CACHE_SERVICE_V2" \
                       "ACTIONS_RUNTIME_TOKEN=$ACTIONS_RUNTIME_TOKEN" \
                       cargo xtask bpf-unit'
 
@@ -1204,12 +1227,14 @@ jobs:
             "SCCACHE_GHA_ENABLED=${SCCACHE_GHA_ENABLED:-}" \
             "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL:-}" \
             "ACTIONS_RESULTS_URL=${ACTIONS_RESULTS_URL:-}" \
+            "ACTIONS_CACHE_SERVICE_V2=${ACTIONS_CACHE_SERVICE_V2:-}" \
             "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
             bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
                       "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
                       "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
                       "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
                       "ACTIONS_RESULTS_URL=$ACTIONS_RESULTS_URL" \
+                      "ACTIONS_CACHE_SERVICE_V2=$ACTIONS_CACHE_SERVICE_V2" \
                       "ACTIONS_RUNTIME_TOKEN=$ACTIONS_RUNTIME_TOKEN" \
                       cargo run -p overdrive-dataplane --bin verifier_regress'
 
@@ -1309,12 +1334,14 @@ jobs:
             "SCCACHE_GHA_ENABLED=${SCCACHE_GHA_ENABLED:-}" \
             "ACTIONS_CACHE_URL=${ACTIONS_CACHE_URL:-}" \
             "ACTIONS_RESULTS_URL=${ACTIONS_RESULTS_URL:-}" \
+            "ACTIONS_CACHE_SERVICE_V2=${ACTIONS_CACHE_SERVICE_V2:-}" \
             "ACTIONS_RUNTIME_TOKEN=${ACTIONS_RUNTIME_TOKEN:-}" \
             bash -lc 'sudo -E env "PATH=$PATH" "CARGO_TARGET_DIR=$CARGO_TARGET_DIR" \
                       "RUSTC_WRAPPER=$RUSTC_WRAPPER" \
                       "SCCACHE_GHA_ENABLED=$SCCACHE_GHA_ENABLED" \
                       "ACTIONS_CACHE_URL=$ACTIONS_CACHE_URL" \
                       "ACTIONS_RESULTS_URL=$ACTIONS_RESULTS_URL" \
+                      "ACTIONS_CACHE_SERVICE_V2=$ACTIONS_CACHE_SERVICE_V2" \
                       "ACTIONS_RUNTIME_TOKEN=$ACTIONS_RUNTIME_TOKEN" \
                       cargo xdp-perf'
 
