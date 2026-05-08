@@ -210,12 +210,16 @@ pub fn xdp_reverse_nat_lookup(ctx: XdpContext) -> u32 {
 #[inline(always)]
 fn try_xdp_reverse_nat_lookup(ctx: &XdpContext) -> Result<u32, ()> {
     // (0) Sanity prologue — XDP-ingress scope per ADR-0040 Q3
-    // amendment + ADR-0045 § 4. Pre-bounds-check the IPv4 + L4
-    // regions before invoking the helper, identical shape to
-    // `xdp_service_map.rs`.
+    // amendment + ADR-0045 § 4. Pre-bounds-check the IPv4 header
+    // and the minimum L4 header (UDP_HDR_LEN = 8, the smaller of
+    // TCP/UDP) before invoking the helper. `sanity_check`'s TCP
+    // flags read at l4_offset+13 is self-guarded via its own
+    // `read_u8` → `ptr_at` bounds check; the per-protocol L4
+    // bounds check after `sanity_check` returns validates the full
+    // TCP header when needed.
     let _ipv4_bounds_pre: *const u8 = unsafe { ptr_at(ctx, ETH_HDR_LEN + IPV4_HDR_LEN - 1)? };
     let _l4_bounds_pre: *const u8 =
-        unsafe { ptr_at(ctx, ETH_HDR_LEN + IPV4_HDR_LEN + TCP_HDR_LEN - 1)? };
+        unsafe { ptr_at(ctx, ETH_HDR_LEN + IPV4_HDR_LEN + UDP_HDR_LEN - 1)? };
     let packet_len: usize = ctx.data_end().saturating_sub(ctx.data());
     let sanity = sanity_check(
         ETH_HDR_LEN,

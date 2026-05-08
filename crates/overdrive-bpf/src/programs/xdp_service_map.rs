@@ -257,18 +257,16 @@ fn try_xdp_service_map_lookup(ctx: &XdpContext) -> Result<u32, ()> {
     //     `DROP_COUNTER[MalformedHeader]`; we just translate the
     //     three-way decision into the XDP verdict.
     //
-    //     Sanity bounds-check for the full IPv4 header (offsets
-    //     0..IPV4_HDR_LEN-1 from `ETH_HDR_LEN`) is the IP version
-    //     check's prerequisite; for the L4 flag-byte read we need
-    //     at least the L4 flags byte (offset 13 from L4 start) to
-    //     be in-range. We bounds-check the FULL fixed-min L4 header
-    //     here (TCP_HDR_LEN; UDP is shorter so it'd be a tighter
-    //     bound but the read of TCP_FLAGS_OFFSET=13 only fires for
-    //     TCP frames — a UDP frame's flag-byte read is gated by the
-    //     proto check inside `sanity_check`).
+    //     Sanity bounds-check for the full IPv4 header and the
+    //     minimum L4 header (UDP_HDR_LEN = 8, the smaller of
+    //     TCP/UDP). `sanity_check`'s TCP flags read at
+    //     l4_offset+13 is self-guarded via its own `read_u8` →
+    //     `ptr_at` bounds check; the per-protocol L4 bounds check
+    //     after `sanity_check` returns validates the full TCP
+    //     header when needed.
     let _ipv4_bounds_pre: *const u8 = unsafe { ptr_at(ctx, ETH_HDR_LEN + IPV4_HDR_LEN - 1)? };
     let _l4_bounds_pre: *const u8 =
-        unsafe { ptr_at(ctx, ETH_HDR_LEN + IPV4_HDR_LEN + TCP_HDR_LEN - 1)? };
+        unsafe { ptr_at(ctx, ETH_HDR_LEN + IPV4_HDR_LEN + UDP_HDR_LEN - 1)? };
     let packet_len: usize = ctx.data_end().saturating_sub(ctx.data());
     let sanity = sanity_check(
         ETH_HDR_LEN,
