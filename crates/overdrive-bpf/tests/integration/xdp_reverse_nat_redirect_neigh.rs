@@ -514,7 +514,7 @@ fn clear_reverse_nat_entry(bpf: &mut Ebpf, key: BackendKey) {
     let mut rnm: HashMap<_, BackendKey, Vip> =
         HashMap::try_from(bpf.map_mut("REVERSE_NAT_MAP").expect("REVERSE_NAT_MAP not found"))
             .expect("REVERSE_NAT_MAP HashMap::try_from");
-    let _ = rnm.remove(key);
+    let _ = rnm.remove(&key);
 }
 
 /// Common SETUP — populate REVERSE_NAT_MAP with the `(backend, TCP)`
