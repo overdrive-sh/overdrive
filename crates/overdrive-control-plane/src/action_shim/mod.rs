@@ -599,6 +599,14 @@ async fn dispatch_single(
                     dataplane_update_service::ServiceHydrationDispatchError::ObservationWrite {
                         source,
                     } => ShimError::Observation(source),
+                    dataplane_update_service::ServiceHydrationDispatchError::Ipv6Unsupported {
+                        ..
+                    } => {
+                        unreachable!(
+                            "Ipv6Unsupported is handled inside dispatch — it writes \
+                             a Failed row and returns Ok(DispatchOutcome::Failed)"
+                        )
+                    }
                 })?;
             Ok(())
         }

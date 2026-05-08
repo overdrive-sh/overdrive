@@ -60,6 +60,14 @@ pub enum ServiceHydrationDispatchError {
         #[from]
         source: ObservationStoreError,
     },
+
+    /// The `ServiceVip` carries an IPv6 address but the Phase 2.2
+    /// dataplane is IPv4-only (architecture.md § 6, GH #155).
+    #[error("IPv6 VIP {vip} not supported in Phase 2.2 dataplane (GH #155)")]
+    Ipv6Unsupported {
+        /// The offending VIP, for structured error reporting.
+        vip: ServiceVip,
+    },
 }
 
 /// Dispatch one `Action::DataplaneUpdateService`. Calls
@@ -73,7 +81,9 @@ pub enum ServiceHydrationDispatchError {
 /// when the ObservationStore itself rejects the write. A
 /// `Dataplane::update_service` failure does NOT surface as `Err` —
 /// it lands as a `Failed` observation row and the fn returns
-/// `Ok(DispatchOutcome::Failed)`.
+/// `Ok(DispatchOutcome::Failed)`. An IPv6 VIP likewise lands as a
+/// `Failed` row (Phase 2.2 is IPv4-only per architecture.md § 6,
+/// GH #155).
 ///
 /// # Panics
 ///
@@ -97,7 +107,26 @@ pub async fn dispatch(
     };
 
     let fp = fingerprint(vip, backends);
-    let v4 = ipv4_from_vip(vip);
+    let v4 = match ipv4_from_vip(vip) {
+        Ok(addr) => addr,
+        Err(e) => {
+            let row = ServiceHydrationResultRow {
+                service_id: *service_id,
+                fingerprint: fp,
+                status: ServiceHydrationStatus::Failed {
+                    fingerprint: fp,
+                    failed_at: tick.now_unix,
+                    reason: e.to_string(),
+                },
+                updated_at: LogicalTimestamp {
+                    counter: tick.tick.saturating_add(1),
+                    writer: writer.clone(),
+                },
+            };
+            observation.write(ObservationRow::ServiceHydration(row)).await?;
+            return Ok(DispatchOutcome::Failed);
+        }
+    };
     let dataplane_result = dataplane.update_service(v4, backends.clone()).await;
 
     let (status, outcome) = match &dataplane_result {
@@ -128,16 +157,11 @@ pub async fn dispatch(
     Ok(outcome)
 }
 
-/// Phase 2.2 dataplane is IPv4-only per architecture.md § 6 / GH #155.
-/// `ServiceVip` carries an [`std::net::IpAddr`] for forward-compat;
-/// today the dispatch path expects IPv4 and the loader-time validation
-/// upstream of the hydrator is responsible for rejecting IPv6 VIPs.
-/// On a misuse, fall back to `0.0.0.0` — observation rows still record
-/// the `(service_id, fingerprint)` pair, and the hydrator's Tier 1
-/// invariants will catch the discrepancy.
-fn ipv4_from_vip(vip: &ServiceVip) -> std::net::Ipv4Addr {
+fn ipv4_from_vip(vip: &ServiceVip) -> Result<std::net::Ipv4Addr, ServiceHydrationDispatchError> {
     match vip.get() {
-        std::net::IpAddr::V4(v4) => v4,
-        std::net::IpAddr::V6(_) => std::net::Ipv4Addr::UNSPECIFIED,
+        std::net::IpAddr::V4(v4) => Ok(v4),
+        std::net::IpAddr::V6(_) => {
+            Err(ServiceHydrationDispatchError::Ipv6Unsupported { vip: *vip })
+        }
     }
 }

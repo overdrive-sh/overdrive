@@ -18,7 +18,7 @@
 //! `TerminalCondition` claim — service hydration cannot terminate an
 //! allocation; the row's `status` enum carries every dispatch outcome.
 
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -167,6 +167,74 @@ async fn dispatch_writes_failed_row_on_dataplane_err() {
             // `#[error("dataplane busy, retry later")]` attribute on
             // the variant.
             assert_eq!(reason, &DataplaneError::Busy.to_string());
+        }
+        other => panic!("expected Failed, got {other:?}"),
+    }
+}
+
+/// Regression: an IPv6 VIP must NOT silently fall through to
+/// `Dataplane::update_service(0.0.0.0, ...)`. The dispatch must
+/// short-circuit with a `Failed` observation row whose `reason`
+/// names the unsupported address family, and never call the
+/// dataplane at all.
+#[tokio::test]
+async fn dispatch_rejects_ipv6_vip_with_failed_row() {
+    let service_id = ServiceId::new(99).expect("ServiceId");
+    let ipv6_vip =
+        ServiceVip::new(IpAddr::V6(Ipv6Addr::new(0xfd, 0xc2, 0, 0, 0, 0, 0, 1))).expect("v6 VIP");
+    let backends = vec![Backend {
+        alloc: SpiffeId::new("spiffe://overdrive.local/job/payments/alloc/a1b2c3")
+            .expect("SpiffeId"),
+        addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 10)), 8080),
+        weight: 100,
+        healthy: true,
+    }];
+    let fp = fingerprint(&ipv6_vip, &backends);
+    let target = format!("service-map-hydrator/{service_id}");
+    let spec_hash = ContentHash::of(fp.to_le_bytes());
+    let correlation = CorrelationKey::derive(&target, &spec_hash, "update-service");
+
+    let action = Action::DataplaneUpdateService {
+        service_id,
+        vip: ipv6_vip,
+        backends: backends.clone(),
+        correlation,
+    };
+
+    let dataplane: Arc<dyn Dataplane> = Arc::new(SimDataplane::new());
+    let writer_node = NodeId::new("writer-1").expect("NodeId");
+    let obs: Arc<dyn ObservationStore> =
+        Arc::new(SimObservationStore::single_peer(writer_node.clone(), 3));
+    let tick = fixed_tick();
+
+    let outcome = dataplane_update_service::dispatch(
+        &action,
+        dataplane.as_ref(),
+        obs.as_ref(),
+        &tick,
+        &writer_node,
+    )
+    .await
+    .expect("dispatch returns Ok (IPv6 rejection is Failed, not Err)");
+
+    assert!(
+        matches!(outcome, DispatchOutcome::Failed),
+        "IPv6 VIP must produce DispatchOutcome::Failed, got {outcome:?}"
+    );
+
+    let rows = obs.service_hydration_results_rows(&service_id).await.expect("read rows");
+    assert_eq!(rows.len(), 1, "exactly one Failed row written");
+    let row = &rows[0];
+    assert_eq!(row.service_id, service_id);
+    assert_eq!(row.fingerprint, fp);
+    match &row.status {
+        ServiceHydrationStatus::Failed { fingerprint: row_fp, failed_at, reason } => {
+            assert_eq!(*row_fp, fp);
+            assert_eq!(*failed_at, tick.now_unix);
+            assert!(
+                reason.contains("IPv6") || reason.contains("not supported"),
+                "reason should mention IPv6 rejection, got: {reason}"
+            );
         }
         other => panic!("expected Failed, got {other:?}"),
     }
