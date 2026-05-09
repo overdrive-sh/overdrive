@@ -151,6 +151,13 @@ base64.workspace         = true
 # `waitpid()` test-spawned `/bin/sleep` workloads after `cgroup.kill`
 # delivers SIGKILL — without reaping, nextest flags the test as LEAK.
 libc.workspace           = true
+# `serial_test` — process-global cgroupfs mutation serialisation per
+# `.claude/rules/testing.md` § "Tests that mutate process-global
+# state". The new `alloc_scope_has_writable_cpu_weight_and_memory_max`
+# regression (step 01-01 of `fix-cgroup-subtree-control-delegation`)
+# writes to real `/sys/fs/cgroup` and must serialise against any other
+# `#[serial(cgroup)]` test in this binary.
+serial_test.workspace    = true
 # Trybuild for compile-fail fixtures (e.g. architecture.md §8: a
 # `LifecycleEvent` field MUST NOT be `AllocStatusRow`). Pinned exact
 # version per `.claude/rules/testing.md` § "Compile-fail testing".
