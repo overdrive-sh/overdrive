@@ -344,7 +344,7 @@ jobs:
       - name: Stop Lima VM (release disk before cache save)
         if: always()
         timeout-minutes: 1
-        run: limactl stop overdrive || true
+        run: limactl stop --force overdrive || true
 
   # -------------------------------------------------------------------
   # Integration tests — slow / real-infra suites gated behind each
@@ -461,7 +461,7 @@ jobs:
       - name: Stop Lima VM (release disk before cache save)
         if: always()
         timeout-minutes: 1
-        run: limactl stop overdrive || true
+        run: limactl stop --force overdrive || true
 
   # -------------------------------------------------------------------
   # DST — Tier 1 per testing.md. Invoked via the xtask wrapper per
@@ -863,7 +863,7 @@ jobs:
       - name: Stop Lima VM (release disk before cache save)
         if: always()
         timeout-minutes: 1
-        run: limactl stop overdrive || true
+        run: limactl stop --force overdrive || true
 
   # -------------------------------------------------------------------
   # bpf-build — Phase 2.1 kernel-side ELF compilation.
@@ -1009,7 +1009,7 @@ jobs:
       - name: Stop Lima VM (release disk before cache save)
         if: always()
         timeout-minutes: 1
-        run: limactl stop overdrive || true
+        run: limactl stop --force overdrive || true
 
   # -------------------------------------------------------------------
   # bpf-unit — Phase 2.1 Tier 2 BPF unit tests.
@@ -1130,7 +1130,7 @@ jobs:
       - name: Stop Lima VM (release disk before cache save)
         if: always()
         timeout-minutes: 1
-        run: limactl stop overdrive || true
+        run: limactl stop --force overdrive || true
 
   # -------------------------------------------------------------------
   # Job E (Tier 4) — verifier-budget regression gate
@@ -1246,7 +1246,7 @@ jobs:
       - name: Stop Lima VM (release disk before cache save)
         if: always()
         timeout-minutes: 1
-        run: limactl stop overdrive || true
+        run: limactl stop --force overdrive || true
 
   # -------------------------------------------------------------------
   # Job E (Tier 4) — XDP throughput / mean-latency regression gate
@@ -1353,5 +1353,5 @@ jobs:
       - name: Stop Lima VM (release disk before cache save)
         if: always()
         timeout-minutes: 1
-        run: limactl stop overdrive || true
+        run: limactl stop --force overdrive || true
 
