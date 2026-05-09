@@ -7,25 +7,33 @@
 //! `cpu.weight` and `memory.max` retain their original values.
 //! Asserting on the post-resize file contents catches the missing
 //! write.
+//!
+//! Phase 02 migration: real `/sys/fs/cgroup` per the bugfix RCA § D.
 
+use std::path::Path;
 use std::sync::Arc;
 
 use overdrive_core::id::{AllocationId, SpiffeId};
 use overdrive_core::traits::driver::{AllocationSpec, Driver, Resources};
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_worker::ExecDriver;
-use tempfile::TempDir;
+use overdrive_worker::cgroup_manager::create_workloads_slice_with_controllers;
+use serial_test::serial;
+
+use super::cleanup::AllocCleanup;
 
 #[tokio::test]
+#[serial(cgroup)]
 async fn resize_updates_cpu_weight_and_memory_max_in_cgroup() {
-    let cgroup_root = TempDir::new().expect("tempdir created");
-    std::fs::create_dir_all(cgroup_root.path().join("overdrive.slice/workloads.slice"))
-        .expect("workloads.slice created");
+    let cgroup_root = Path::new("/sys/fs/cgroup");
+    create_workloads_slice_with_controllers(cgroup_root)
+        .expect("workloads.slice bootstrap succeeds");
 
     let driver: Arc<dyn Driver> =
-        Arc::new(ExecDriver::new(cgroup_root.path().to_path_buf(), Arc::new(SimClock::new())));
+        Arc::new(ExecDriver::new(cgroup_root.to_path_buf(), Arc::new(SimClock::new())));
 
     let alloc = AllocationId::new("alloc-resize-test").expect("valid alloc id");
+    let _cleanup = AllocCleanup::register(cgroup_root.to_path_buf(), alloc.clone());
     let initial_spec = AllocationSpec {
         alloc: alloc.clone(),
         identity: SpiffeId::new("spiffe://overdrive.local/job/x/alloc/rz")
@@ -37,8 +45,7 @@ async fn resize_updates_cpu_weight_and_memory_max_in_cgroup() {
 
     let handle = driver.start(&initial_spec).await.expect("start succeeds");
 
-    let scope_dir =
-        cgroup_root.path().join(format!("overdrive.slice/workloads.slice/{alloc}.scope"));
+    let scope_dir = cgroup_root.join(format!("overdrive.slice/workloads.slice/{alloc}.scope"));
 
     // Pre-resize values.
     let pre_weight = std::fs::read_to_string(scope_dir.join("cpu.weight"))

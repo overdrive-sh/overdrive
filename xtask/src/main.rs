@@ -661,6 +661,21 @@ fn which_or_hint(binary: &str, install_hint: &str) -> Result<()> {
 /// The copy is `fs::copy`, not move — keep the cargo-target ELF in
 /// place so subsequent rebuilds short-circuit on no-change.
 fn bpf_build() -> Result<()> {
+    // The kernel-side toolchain (nightly + `rust-src` + `bpf-linker` +
+    // `bpfel-unknown-none` target) is provisioned in the Lima VM. Re-
+    // dispatch through Lima so callers (lefthook, devs, CI) can invoke
+    // `cargo xtask bpf-build` unconditionally — inside the VM the
+    // guard returns Ok(()) and falls through to the direct path below.
+    // `--no-sudo` because the build is unprivileged; the ELF copy lands
+    // in the workspace's virtiofs-mounted `target/bpf/` owned by the
+    // `lima` user.
+    if !inside_lima() {
+        return lima(LimaAction::Run {
+            no_sudo: true,
+            args: vec!["cargo".into(), "xtask".into(), "bpf-build".into()],
+        });
+    }
+
     which_or_hint("bpf-linker", &bpf_linker_install_hint())?;
 
     let workspace_root = workspace_root_dir()?;

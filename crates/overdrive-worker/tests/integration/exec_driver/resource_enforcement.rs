@@ -2,27 +2,41 @@
 //!
 //! @real-io — Linux + cgroup v2 required. Asserts the cgroup limit
 //! files exist and carry the values derived from `Resources`:
-//! `cpu.weight = clamp(cpu_milli/10, 1, 10000)`, `memory.max = memory_bytes`.
+//! `cpu.weight = clamp(cpu_milli/10, 1, 10000)`,
+//! `memory.max = memory_bytes`.
+//!
+//! Phase 02 migration: real `/sys/fs/cgroup`. Per the bugfix RCA § D,
+//! the previous TempDir-backed shape masked the `subtree_control` bug
+//! because tmpfs honoured `O_CREAT` for the synthetic `cpu.weight` /
+//! `memory.max` files; under real cgroupfs the kernel itself
+//! synthesises those files when the controllers are delegated, and
+//! the test now exercises the real delegation path.
 
+use std::path::Path;
 use std::sync::Arc;
 
 use overdrive_core::id::{AllocationId, SpiffeId};
 use overdrive_core::traits::driver::{AllocationSpec, Driver, Resources};
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_worker::ExecDriver;
-use tempfile::TempDir;
+use overdrive_worker::cgroup_manager::create_workloads_slice_with_controllers;
+use serial_test::serial;
+
+use super::cleanup::AllocCleanup;
 
 #[tokio::test]
+#[serial(cgroup)]
 async fn cpu_weight_and_memory_max_are_written_from_spec() {
-    let cgroup_root = TempDir::new().expect("tempdir created");
-    std::fs::create_dir_all(cgroup_root.path().join("overdrive.slice/workloads.slice"))
-        .expect("workloads.slice created");
+    let cgroup_root = Path::new("/sys/fs/cgroup");
+    create_workloads_slice_with_controllers(cgroup_root)
+        .expect("workloads.slice bootstrap succeeds");
 
     let driver: Arc<dyn Driver> =
-        Arc::new(ExecDriver::new(cgroup_root.path().to_path_buf(), Arc::new(SimClock::new())));
+        Arc::new(ExecDriver::new(cgroup_root.to_path_buf(), Arc::new(SimClock::new())));
 
     // cpu_milli=2000 -> cpu.weight=200; memory_bytes=128MiB.
     let alloc = AllocationId::new("alloc-resource-enforcement").expect("valid alloc id");
+    let _cleanup = AllocCleanup::register(cgroup_root.to_path_buf(), alloc.clone());
     let spec = AllocationSpec {
         alloc: alloc.clone(),
         identity: SpiffeId::new("spiffe://overdrive.local/job/x/alloc/re")
@@ -34,8 +48,7 @@ async fn cpu_weight_and_memory_max_are_written_from_spec() {
 
     let handle = driver.start(&spec).await.expect("start succeeds");
 
-    let scope_dir =
-        cgroup_root.path().join(format!("overdrive.slice/workloads.slice/{alloc}.scope"));
+    let scope_dir = cgroup_root.join(format!("overdrive.slice/workloads.slice/{alloc}.scope"));
 
     let cpu_weight = std::fs::read_to_string(scope_dir.join("cpu.weight"))
         .expect("cpu.weight readable")

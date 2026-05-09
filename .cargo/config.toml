@@ -14,7 +14,7 @@ xt            = "run --package xtask --"
 dst              = "run -p overdrive-sim --bin dst --"
 openapi-gen      = "run -p overdrive-control-plane --bin openapi -- gen"
 openapi-check    = "run -p overdrive-control-plane --bin openapi -- check"
-overdrive        = "run -p overdrive-cli --bin overdrive --"
+overdrive        = "run -p xtask -- lima run -- cargo run -p overdrive-cli --bin overdrive --"
 # `verifier-regress` and `xdp-perf` live in overdrive-dataplane (not
 # xtask) because both must load the BPF object via aya, which xtask's
 # deps cannot include per `.claude/rules/development.md` § "xtask is

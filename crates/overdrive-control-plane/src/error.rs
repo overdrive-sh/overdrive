@@ -71,6 +71,153 @@ pub enum ViewStoreBootError {
     },
 }
 
+/// Boot-time failures from the cgroup-bootstrap surface
+/// (`cgroup_manager::create_and_enrol_control_plane_slice_at` plus
+/// the future `overdrive-worker::cgroup_manager::
+/// create_workloads_slice_with_controllers`).
+///
+/// Per `docs/feature/fix-cgroup-subtree-control-delegation/bugfix-rca.md`
+/// § "Production fix #1 — Typed errors", the
+/// `overdrive.slice/cgroup.subtree_control` write surfaces as a
+/// discrete error variant per `.claude/rules/development.md`
+/// § "Distinct failure modes get distinct error variants" — never
+/// absorbed into a generic `io::Error`. EBUSY (a process is already
+/// in the cgroup; the slice was previously initialised in the wrong
+/// order) and "any other I/O error" carry distinct operator
+/// remediation hints.
+///
+/// Pass-through embedding via `#[source]` per
+/// `.claude/rules/development.md` § Errors — preserves the structured
+/// `io::Error` chain (`ErrorKind::ResourceBusy`, `kind`, `os_error`)
+/// through audit logs and operator-facing diagnostics instead of
+/// stringifying it.
+///
+/// **Step 01-01 NOTE**: this enum is declared but no production call
+/// site constructs its variants yet. Step 01-02 wires
+/// `create_and_enrol_control_plane_slice_at` and the new
+/// `create_workloads_slice_with_controllers` to `map_err(...)?` into
+/// these variants. Until then the variants are unreachable from
+/// production; they exist as the typed contract the RED regression
+/// test (`tests/integration/cgroup_isolation/
+/// alloc_scope_has_writable_cpu_weight_and_memory_max.rs`) pins.
+#[derive(Debug, Error)]
+pub enum CgroupBootstrapError {
+    /// The kernel returned EBUSY on the
+    /// `overdrive.slice/cgroup.subtree_control` write — a process is
+    /// already enrolled in `overdrive.slice` (the slice was
+    /// previously initialised in the wrong order, with a process
+    /// added to `cgroup.procs` BEFORE the controllers were enabled).
+    /// Per cgroup v2 contract a cgroup with a process in
+    /// `cgroup.procs` cannot have its parent's `subtree_control`
+    /// modified; the kernel response is `EBUSY`.
+    ///
+    /// Operator hint: restart the server cleanly so no stale process
+    /// is left in `overdrive.slice`. If the leak persists across
+    /// restarts, run the leftover-cgroup cleanup discipline from
+    /// `.claude/rules/testing.md` § "Leaked workload cgroups across
+    /// runs".
+    #[error(
+        "cgroup `subtree_control` write rejected with EBUSY — a process \
+         is already enrolled in overdrive.slice (controllers must be \
+         enabled BEFORE any process is enrolled).\n\
+         \n\
+         Try: restart the server cleanly so no stale process is left \
+         in overdrive.slice. If a stale process persists across \
+         restarts, sweep leftover cgroups per the leftover-cgroup \
+         cleanup discipline.\n\
+         \n\
+         Underlying: {source}"
+    )]
+    SubtreeControlBusy {
+        /// Underlying `io::Error` carrying `ErrorKind::ResourceBusy`
+        /// (or the equivalent `raw_os_error() == EBUSY`).
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// Catch-all I/O failure on the
+    /// `overdrive.slice/cgroup.subtree_control` (or analogous child)
+    /// write that is NOT EBUSY. Any other `ErrorKind` — typically
+    /// `PermissionDenied` (`EACCES` from cgroupfs delegation refusal),
+    /// `NotFound` (the enclosing slice does not exist), or
+    /// `InvalidInput` (the kernel rejected the controller list) —
+    /// flows here.
+    ///
+    /// Operator hint: inspect cgroupfs delegation for the enclosing
+    /// slice. The pre-flight at `cgroup_preflight.rs` should have
+    /// caught the most common shapes (no delegation, missing `cpu`
+    /// controller); a failure here typically means the pre-flight
+    /// passed but the runtime delegation surface differs (e.g. a
+    /// systemd unit replaced the slice between pre-flight and
+    /// bootstrap).
+    #[error(
+        "cgroup `subtree_control` write failed: {source}\n\
+         \n\
+         Try: inspect cgroupfs delegation for the enclosing slice — \
+         the pre-flight passed, so this is typically a runtime \
+         divergence (a systemd unit replaced the slice between \
+         pre-flight and bootstrap, or a concurrent operator action \
+         removed delegation)."
+    )]
+    SubtreeControlWriteFailed {
+        /// Underlying `io::Error` for any non-EBUSY I/O failure.
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// I/O failure on a non-`subtree_control` bootstrap operation —
+    /// `mkdir` of the slice directory or `cgroup.procs` write for PID
+    /// enrolment. Distinct from [`SubtreeControlWriteFailed`] so the
+    /// operator message names the actual operation that failed, not a
+    /// file that may not even exist yet.
+    ///
+    /// Mirrors [`WorkloadsBootstrapError::WriteFailed`] in the worker
+    /// crate, which uses the same generic "bootstrap failed" message
+    /// for non-subtree_control operations.
+    #[error(
+        "cgroup bootstrap failed: {source}\n\
+         \n\
+         Try: verify cgroupfs is mounted at /sys/fs/cgroup and the \
+         running process has permission to create directories and \
+         write cgroup.procs under overdrive.slice."
+    )]
+    BootstrapIoFailed {
+        /// Underlying `io::Error` from `mkdir` or `cgroup.procs` write.
+        #[source]
+        source: std::io::Error,
+    },
+}
+
+impl CgroupBootstrapError {
+    /// Construct a [`CgroupBootstrapError`] from an `io::Error` returned
+    /// by a `subtree_control` write, dispatching on `ErrorKind` so
+    /// EBUSY surfaces as the discrete
+    /// [`CgroupBootstrapError::SubtreeControlBusy`] variant and
+    /// everything else collapses into
+    /// [`CgroupBootstrapError::SubtreeControlWriteFailed`].
+    ///
+    /// Production call sites (landing in step 01-02) use this
+    /// constructor via `.map_err(CgroupBootstrapError::from_subtree_control_io)?`
+    /// rather than spelling out the match at every site. Keeping the
+    /// dispatch in one place makes the EBUSY-vs-other discrimination a
+    /// single line in production and trivially mockable from tests.
+    #[must_use]
+    pub fn from_subtree_control_io(source: std::io::Error) -> Self {
+        // `ErrorKind::ResourceBusy` is the stable shape (Rust 1.83+);
+        // `raw_os_error() == Some(libc::EBUSY)` is the structural
+        // fallback for older toolchains and for io::Errors constructed
+        // without the kind hint (e.g. from `tokio::fs` paths that lose
+        // the kind on conversion).
+        let is_ebusy = matches!(source.kind(), std::io::ErrorKind::ResourceBusy)
+            || source.raw_os_error() == Some(libc::EBUSY);
+        if is_ebusy {
+            Self::SubtreeControlBusy { source }
+        } else {
+            Self::SubtreeControlWriteFailed { source }
+        }
+    }
+}
+
 /// Top-level control-plane error.
 #[derive(Debug, Error)]
 pub enum ControlPlaneError {
@@ -110,6 +257,25 @@ pub enum ControlPlaneError {
     /// HTTP response — the listener doesn't bind on this error.
     #[error(transparent)]
     Cgroup(#[from] crate::cgroup_preflight::CgroupPreflightError),
+
+    /// Control-plane slice bootstrap failure (`cgroup_manager::
+    /// create_and_enrol_control_plane_slice`). Pass-through embedding
+    /// so callers can `matches!(e, ControlPlaneError::CgroupBootstrap(_))`
+    /// for structured startup diagnostics without `Display`-grepping.
+    /// Same boot-path shape as `Cgroup` and `ViewStoreBoot`: happens
+    /// BEFORE the listener binds, so the `to_response` arm is
+    /// exhaustiveness-only.
+    #[error(transparent)]
+    CgroupBootstrap(#[from] CgroupBootstrapError),
+
+    /// Workloads-slice bootstrap failure (`overdrive_worker::
+    /// cgroup_manager::create_workloads_slice_with_controllers`).
+    /// Pass-through embedding so callers can
+    /// `matches!(e, ControlPlaneError::WorkloadsBootstrap(_))` for
+    /// structured startup diagnostics. Same boot-path shape as
+    /// `CgroupBootstrap` above.
+    #[error(transparent)]
+    WorkloadsBootstrap(#[from] overdrive_worker::cgroup_manager::WorkloadsBootstrapError),
 
     /// `ViewStore` boot-time failure per ADR-0035 §5 (Earned Trust).
     /// Pass-through embedding so `overdrive-cli::commands::serve` can
@@ -201,6 +367,18 @@ pub fn to_response(err: ControlPlaneError) -> (StatusCode, ErrorBody) {
             // arm exists for completeness so the enum match stays
             // exhaustive. In practice a Cgroup error never reaches an
             // HTTP response — the operator sees it on stderr at boot.
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
+        ),
+        ControlPlaneError::CgroupBootstrap(e) => (
+            // Same shape as `Cgroup` above: control-plane slice
+            // bootstrap failures happen BEFORE the listener binds.
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
+        ),
+        ControlPlaneError::WorkloadsBootstrap(e) => (
+            // Same shape as `CgroupBootstrap` above: workloads-slice
+            // bootstrap failures happen BEFORE the listener binds.
             StatusCode::INTERNAL_SERVER_ERROR,
             ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
         ),

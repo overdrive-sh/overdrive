@@ -170,13 +170,14 @@ impl std::fmt::Debug for ExecDriver {
 
 impl ExecDriver {
     /// Construct a fresh `ExecDriver` rooted at `cgroup_root` with an
-    /// explicit `Clock` dependency. Production wires `/sys/fs/cgroup`
-    /// and `Arc::new(overdrive_host::SystemClock)`; simulation / DST
-    /// tests wire a tempdir and `Arc::new(SimClock::new())` so the
-    /// SIGTERM/SIGKILL grace window in `Driver::stop` advances on
-    /// logical time. The clock is a required parameter, never
-    /// defaulted, so tests cannot accidentally inherit wall-clock
-    /// behaviour by omission.
+    /// explicit `Clock` dependency. Production and integration tests
+    /// alike wire `/sys/fs/cgroup` and either
+    /// `Arc::new(overdrive_host::SystemClock)` or
+    /// `Arc::new(SimClock::new())` so the SIGTERM/SIGKILL grace window
+    /// in `Driver::stop` advances on logical time under simulation /
+    /// DST. The clock is a required parameter, never defaulted, so
+    /// tests cannot accidentally inherit wall-clock behaviour by
+    /// omission.
     #[must_use]
     pub fn new(cgroup_root: PathBuf, clock: Arc<dyn Clock>) -> Self {
         let (exit_tx, exit_rx) = mpsc::channel(EXIT_CHANNEL_CAPACITY);
@@ -241,13 +242,15 @@ impl ExecDriver {
     /// The `setsid(2)` pre-exec hook is unconditional: every spawned
     /// child becomes its own process group leader so the driver can
     /// reach reparented grandchildren via `kill(-pgid, SIGKILL)` at
-    /// stop time. `cgroup.kill` covers the production path (real
-    /// cgroupfs); the process-group fallback covers the integration
-    /// tests, which mount a `tempfile::TempDir` as a fake cgroupfs root
-    /// where `cgroup.kill` is a no-op file write. Linux-only —
-    /// `pre_exec` is `unsafe` because the closure runs between fork
-    /// and exec where the contract is to call only async-signal-safe
-    /// functions; `setsid(2)` is on the POSIX async-signal-safe list.
+    /// stop time. `cgroup.kill` is the primary mechanism on real
+    /// cgroupfs (production and integration tests both run against
+    /// `/sys/fs/cgroup` per `.claude/rules/testing.md` § "Running
+    /// tests — Lima VM"); the process-group SIGKILL is a belt-and-
+    /// braces backstop for grandchildren that have already escaped
+    /// the cgroup at the moment of stop. Linux-only — `pre_exec` is
+    /// `unsafe` because the closure runs between fork and exec where
+    /// the contract is to call only async-signal-safe functions;
+    /// `setsid(2)` is on the POSIX async-signal-safe list.
     fn build_command(spec: &AllocationSpec) -> Command {
         let mut cmd = Command::new(&spec.command);
         cmd.args(&spec.args);
@@ -432,13 +435,15 @@ impl Driver for ExecDriver {
         //    tracks the parent. Two complementary mechanisms:
         //
         //    a) `cgroup.kill` (real cgroupfs) — atomic SIGKILL of every
-        //       task in the workload's scope.
-        //    b) Process-group SIGKILL (TempDir test path, where
-        //       `cgroup.kill` is a regular file write that doesn't
-        //       reach the kernel). The child was `setsid`-ed at spawn
+        //       task in the workload's scope. Primary mechanism on
+        //       both production and integration tests (both run
+        //       against `/sys/fs/cgroup`).
+        //    b) Process-group SIGKILL — belt-and-braces backstop for
+        //       grandchildren that have already escaped the cgroup at
+        //       the moment of stop. The child was `setsid`-ed at spawn
         //       so its PGID = its PID; `kill(-pid, SIGKILL)` reaches
-        //       every member of that group regardless of what the
-        //       fake-cgroupfs root happens to be.
+        //       every member of that group regardless of cgroup
+        //       residency.
         send_sigkill_pgrp(pid_for_pgrp_kill);
         let _ = cgroup_kill(&self.cgroup_root, &scope).await;
         // 5. Tear down the cgroup scope. NotFound is benign.

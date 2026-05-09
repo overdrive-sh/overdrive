@@ -1,33 +1,44 @@
 //! US-02 Scenario 2.8 — limit-write failure warns and continues.
 //!
 //! @real-io — Linux. Per ADR-0026 D9, when `cpu.weight` or
-//! `memory.max` write fails (e.g. tmpfs without cgroup-controller
-//! semantics), the driver emits a `tracing::warn!` log and proceeds
-//! to PID enrolment — `Driver::start` succeeds, the alloc reaches
-//! `Running`. We force the failure with a test-injected toggle on
-//! `ExecDriver` that makes the limit-write helper return error
-//! synthetically.
+//! `memory.max` write fails, the driver emits a `tracing::warn!` log
+//! and proceeds to PID enrolment — `Driver::start` succeeds, the
+//! alloc reaches `Running`. We force the failure with a test-injected
+//! toggle on `ExecDriver` that makes the limit-write helper return
+//! error synthetically.
+//!
+//! The `force_limit_write_failure` injection seam is filesystem-
+//! agnostic — it short-circuits the limit-write call with a synthetic
+//! EACCES regardless of whether the underlying path is on tmpfs or
+//! cgroupfs. This test continues to assert the warn-and-continue path
+//! after the Phase 02 migration onto real `/sys/fs/cgroup`.
 
+use std::path::Path;
 use std::sync::Arc;
 
 use overdrive_core::id::{AllocationId, SpiffeId};
 use overdrive_core::traits::driver::{AllocationSpec, AllocationState, Driver, Resources};
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_worker::ExecDriver;
-use tempfile::TempDir;
+use overdrive_worker::cgroup_manager::create_workloads_slice_with_controllers;
+use serial_test::serial;
+
+use super::cleanup::AllocCleanup;
 
 #[tokio::test]
+#[serial(cgroup)]
 async fn limit_write_failure_warns_and_continues() {
-    let cgroup_root = TempDir::new().expect("tempdir created");
-    std::fs::create_dir_all(cgroup_root.path().join("overdrive.slice/workloads.slice"))
-        .expect("workloads.slice created");
+    let cgroup_root = Path::new("/sys/fs/cgroup");
+    create_workloads_slice_with_controllers(cgroup_root)
+        .expect("workloads.slice bootstrap succeeds");
 
     let driver: Arc<dyn Driver> = Arc::new(
-        ExecDriver::new(cgroup_root.path().to_path_buf(), Arc::new(SimClock::new()))
+        ExecDriver::new(cgroup_root.to_path_buf(), Arc::new(SimClock::new()))
             .with_force_limit_write_failure(true),
     );
 
     let alloc = AllocationId::new("alloc-limit-write-fail").expect("valid alloc id");
+    let _cleanup = AllocCleanup::register(cgroup_root.to_path_buf(), alloc.clone());
     let spec = AllocationSpec {
         alloc: alloc.clone(),
         identity: SpiffeId::new("spiffe://overdrive.local/job/x/alloc/lw")

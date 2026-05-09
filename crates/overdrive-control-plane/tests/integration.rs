@@ -91,6 +91,12 @@ mod integration {
     /// boots through a 4-step pre-flight check + creates its own
     /// slice.
     mod cgroup_isolation {
+        /// Step 01-01 of `fix-cgroup-subtree-control-delegation` —
+        /// RED regression for the missing `subtree_control` write.
+        /// See module-level docs for the GREEN transition (step
+        /// 01-02). Holds AC2 + AC3 (sibling
+        /// `alloc_start_does_not_emit_resource_limit_warning`).
+        mod alloc_scope_has_writable_cpu_weight_and_memory_max;
         mod cluster_status_under_burst;
         mod idempotent_slice_creation;
         mod preflight_falls_back_to_parent_slice_on_empty_scope;
@@ -104,6 +110,12 @@ mod integration {
         mod preflight_subtree_control_unreadable;
         mod preflight_v1_host;
         mod server_enrols_in_slice;
+        /// Step 01-02 of `fix-cgroup-subtree-control-delegation` —
+        /// idempotency regression for both the control-plane and the
+        /// new `create_workloads_slice_with_controllers` inits. A
+        /// second boot of the supervisor must re-enable controllers
+        /// as a kernel no-op rather than EBUSY.
+        mod subtree_control_delegation_is_idempotent;
     }
 
     /// `cargo openapi-{gen,check}` library + binary scenarios — relocated
