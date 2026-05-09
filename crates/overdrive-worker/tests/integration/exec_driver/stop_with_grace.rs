@@ -3,8 +3,11 @@
 //!
 //! @real-io — Linux. SIGTERM-respecting `/bin/sleep` exits cleanly
 //! within the grace window; afterward the scope dir must be gone
-//! and `Driver::status` returns `Terminated`.
+//! and `Driver::status` returns `NotFound`.
+//!
+//! Phase 02 migration: real `/sys/fs/cgroup` per the bugfix RCA § D.
 
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -12,14 +15,18 @@ use overdrive_core::id::{AllocationId, SpiffeId};
 use overdrive_core::traits::driver::{AllocationSpec, Driver, DriverError, Resources};
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_worker::ExecDriver;
-use tempfile::TempDir;
+use overdrive_worker::cgroup_manager::create_workloads_slice_with_controllers;
+use serial_test::serial;
 use tokio::time::Instant;
 
+use super::cleanup::AllocCleanup;
+
 #[tokio::test]
+#[serial(cgroup)]
 async fn stop_with_grace_drives_to_terminated_and_removes_scope() {
-    let cgroup_root = TempDir::new().expect("tempdir created");
-    std::fs::create_dir_all(cgroup_root.path().join("overdrive.slice/workloads.slice"))
-        .expect("workloads.slice created");
+    let cgroup_root = Path::new("/sys/fs/cgroup");
+    create_workloads_slice_with_controllers(cgroup_root)
+        .expect("workloads.slice bootstrap succeeds");
 
     // Use an explicit, generous grace window. With SIGTERM working,
     // `/bin/sleep` exits within milliseconds. With SIGTERM swallowed
@@ -30,11 +37,12 @@ async fn stop_with_grace_drives_to_terminated_and_removes_scope() {
     // the SIGKILL fallback eventually reaps the workload.
     let stop_grace = Duration::from_secs(5);
     let driver: Arc<dyn Driver> = Arc::new(
-        ExecDriver::new(cgroup_root.path().to_path_buf(), Arc::new(SimClock::new()))
+        ExecDriver::new(cgroup_root.to_path_buf(), Arc::new(SimClock::new()))
             .with_stop_grace(stop_grace),
     );
 
     let alloc = AllocationId::new("alloc-stop-grace").expect("valid alloc id");
+    let _cleanup = AllocCleanup::register(cgroup_root.to_path_buf(), alloc.clone());
     let spec = AllocationSpec {
         alloc: alloc.clone(),
         identity: SpiffeId::new("spiffe://overdrive.local/job/x/alloc/sg")
@@ -75,8 +83,7 @@ async fn stop_with_grace_drives_to_terminated_and_removes_scope() {
         "status after stop must be Err(NotFound {{ alloc }}); got {err:?}",
     );
 
-    let scope_dir =
-        cgroup_root.path().join(format!("overdrive.slice/workloads.slice/{alloc}.scope"));
+    let scope_dir = cgroup_root.join(format!("overdrive.slice/workloads.slice/{alloc}.scope"));
     assert!(
         !scope_dir.exists(),
         "scope directory must be removed after stop, still present at {}",

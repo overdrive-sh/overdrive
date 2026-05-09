@@ -4,13 +4,18 @@
 //! @real-io — Linux. The workload is a `/bin/sh -c 'trap "" TERM; ...'`
 //! that ignores SIGTERM. After the grace window elapses, the driver
 //! sends SIGKILL; the test asserts the process is reaped, the state
-//! advances to `Terminated`, AND the reparented `sleep` grandchild
-//! is also reaped — the latter is what pins the `kill(-pid, SIGKILL)`
-//! process-group escalation in `send_sigkill_pgrp` (the only
-//! mechanism that reaches the grandchild on the TempDir-as-cgroupfs
-//! path, since `cgroup.kill` is a regular file write that never
-//! reaches the kernel here).
+//! advances to `NotFound`, AND the reparented `sleep` grandchild is
+//! also reaped — the latter is what pins the post-grace SIGKILL path
+//! (process-group `kill(-pid, SIGKILL)` in `send_sigkill_pgrp` AND
+//! the parallel `cgroup.kill` write in production cgroupfs).
+//!
+//! Phase 02 migration: real `/sys/fs/cgroup` per the bugfix RCA § D.
+//! On real cgroupfs both mechanisms (`cgroup.kill` AND
+//! `send_sigkill_pgrp`) reach the grandchild; the test asserts the
+//! observable outcome (grandchild reaped) without distinguishing
+//! which mechanism delivered the kill.
 
+use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant as StdInstant};
 
@@ -19,8 +24,11 @@ use overdrive_core::id::{AllocationId, SpiffeId};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{AllocationSpec, Driver, DriverError, Resources};
 use overdrive_worker::ExecDriver;
-use tempfile::TempDir;
+use overdrive_worker::cgroup_manager::create_workloads_slice_with_controllers;
+use serial_test::serial;
 use tokio::time::Instant;
+
+use super::cleanup::AllocCleanup;
 
 /// Test-local [`Clock`] impl that delegates `sleep` to the tokio
 /// timer and reads `now` / `unix_now` from real wall-clock. Used in
@@ -55,9 +63,6 @@ const SIGTERM_BIT: u64 = 1u64 << (15 - 1);
 /// SIGTERM ignore-trap, OR a deadline elapses. Eliminates the
 /// race where SIGTERM is delivered to the freshly-spawned shell
 /// before it has executed `trap '' TERM`.
-///
-/// Returns `Ok(())` once the bit is observed; `Err(...)` on timeout
-/// or when `/proc/<pid>/status` cannot be read at all.
 async fn await_sigterm_trap_installed(pid: u32, deadline: Duration) -> Result<(), String> {
     let started = std::time::Instant::now();
     loop {
@@ -65,7 +70,6 @@ async fn await_sigterm_trap_installed(pid: u32, deadline: Duration) -> Result<()
         match std::fs::read_to_string(&path) {
             Ok(status) => {
                 if let Some(line) = status.lines().find(|l| l.starts_with("SigIgn:")) {
-                    // Format: `SigIgn:\t0000000000004000`
                     let hex = line.trim_start_matches("SigIgn:").trim();
                     if let Ok(mask) = u64::from_str_radix(hex, 16) {
                         if mask & SIGTERM_BIT != 0 {
@@ -75,7 +79,6 @@ async fn await_sigterm_trap_installed(pid: u32, deadline: Duration) -> Result<()
                 }
             }
             Err(_) => {
-                // Process may have already exited — bail.
                 return Err(format!("could not read {path}"));
             }
         }
@@ -87,9 +90,7 @@ async fn await_sigterm_trap_installed(pid: u32, deadline: Duration) -> Result<()
 }
 
 /// Read direct children of `pid` from
-/// `/proc/<pid>/task/<pid>/children`. The kernel exposes children
-/// PIDs as a single space-separated line. Empty file or missing pid
-/// yields an empty vec.
+/// `/proc/<pid>/task/<pid>/children`.
 fn read_direct_children(pid: u32) -> Vec<u32> {
     let path = format!("/proc/{pid}/task/{pid}/children");
     let Ok(raw) = std::fs::read_to_string(&path) else {
@@ -98,27 +99,19 @@ fn read_direct_children(pid: u32) -> Vec<u32> {
     raw.split_whitespace().filter_map(|s| s.parse::<u32>().ok()).collect()
 }
 
-/// Determine whether the process at `pid` is a "live sleep". A pid
-/// that maps to a `/proc/<pid>/comm` of `sleep` AND whose state line
-/// is NOT `Z` (zombie) AND NOT `X` (dead) is treated as live.
-///
-/// Returns `false` when:
-///   * `/proc/<pid>/comm` no longer exists (kernel reaped),
-///   * the comm has changed (pid recycled to a different program),
-///   * the process is in zombie / dead state.
+/// Determine whether the process at `pid` is a "live sleep".
 fn sleep_grandchild_is_live(pid: u32) -> bool {
     let comm_path = format!("/proc/{pid}/comm");
     let Ok(comm) = std::fs::read_to_string(&comm_path) else {
-        return false; // process gone
+        return false;
     };
     if comm.trim() != "sleep" {
-        return false; // pid recycled to a different program
+        return false;
     }
     let status_path = format!("/proc/{pid}/status");
     let Ok(status) = std::fs::read_to_string(&status_path) else {
         return false;
     };
-    // Find the `State:` line; format `State:\tR (running)` etc.
     let state_char = status
         .lines()
         .find(|l| l.starts_with("State:"))
@@ -127,9 +120,7 @@ fn sleep_grandchild_is_live(pid: u32) -> bool {
 }
 
 /// Wait up to `deadline` for the sleep grandchild at `pid` to no
-/// longer be live (per `sleep_grandchild_is_live`). Returns `true`
-/// if the grandchild was reaped within the deadline, `false` if it
-/// was still live when the deadline expired.
+/// longer be live (per `sleep_grandchild_is_live`).
 async fn await_sleep_grandchild_reaped(pid: u32, deadline: Duration) -> bool {
     let started = std::time::Instant::now();
     loop {
@@ -144,21 +135,23 @@ async fn await_sleep_grandchild_reaped(pid: u32, deadline: Duration) -> bool {
 }
 
 #[tokio::test]
+#[serial(cgroup)]
 async fn stop_escalates_to_sigkill_when_sigterm_ignored() {
-    let cgroup_root = TempDir::new().expect("tempdir created");
-    std::fs::create_dir_all(cgroup_root.path().join("overdrive.slice/workloads.slice"))
-        .expect("workloads.slice created");
+    let cgroup_root = Path::new("/sys/fs/cgroup");
+    create_workloads_slice_with_controllers(cgroup_root)
+        .expect("workloads.slice bootstrap succeeds");
 
     // Real-IO test: the SUT runs a real `/bin/sh` and the grace window
     // in `Driver::stop` must elapse against actual wall-clock for the
     // SIGKILL escalation path to fire. `SimClock` would park
     // indefinitely waiting for `tick()`. See `TokioWallClock` above.
     let driver: Arc<dyn Driver> = Arc::new(
-        ExecDriver::new(cgroup_root.path().to_path_buf(), Arc::new(TokioWallClock))
+        ExecDriver::new(cgroup_root.to_path_buf(), Arc::new(TokioWallClock))
             .with_stop_grace(Duration::from_millis(250)),
     );
 
     let alloc = AllocationId::new("alloc-stop-sigkill").expect("valid alloc id");
+    let _cleanup = AllocCleanup::register(cgroup_root.to_path_buf(), alloc.clone());
     // /bin/sh that traps and ignores SIGTERM; sleeps 60s.
     let spec = AllocationSpec {
         alloc: alloc.clone(),
@@ -190,8 +183,6 @@ async fn stop_escalates_to_sigkill_when_sigterm_ignored() {
     let children_deadline = std::time::Instant::now() + Duration::from_secs(2);
     while std::time::Instant::now() < children_deadline {
         let children = read_direct_children(pid);
-        // Filter to live `sleep` processes only — the shell may have
-        // transient ancillary children depending on the libc.
         sleep_pids = children.into_iter().filter(|p| sleep_grandchild_is_live(*p)).collect();
         if !sleep_pids.is_empty() {
             break;
@@ -209,56 +200,34 @@ async fn stop_escalates_to_sigkill_when_sigterm_ignored() {
     let elapsed = started.elapsed();
 
     // Wall-clock upper bound — escalation must complete within budget.
-    // The lower bound that previously asserted `elapsed >= grace` was
-    // removed when `dd6437` migrated the grace window from
-    // `tokio::time::timeout` to `Clock::sleep` (DST-controllable). Under
-    // `SimClock::sleep`, logical time advances cooperatively without
-    // consuming wall-clock; the lower bound was no longer observable
-    // through `Instant::now()`. The SIGKILL-escalation behaviour itself
-    // is pinned by `await_sleep_grandchild_reaped` below — the grandchild
-    // reaper proves the post-grace SIGKILL path actually fired, which is
-    // the test's purpose. See
-    // `docs/feature/fix-terminated-slot-accumulation/deliver/upstream-issues.md`
-    // §1 for the full RCA.
     assert!(elapsed < Duration::from_secs(10), "stop did not escalate within budget ({elapsed:?})");
 
     // Per `fix-terminated-slot-accumulation` Step 01-02: the driver
     // does not retain a terminal-state slot after stop. Durable
     // terminal-state truth lives in `ObservationStore::AllocStatusRow`;
-    // `Driver::status` returns `Err(NotFound)` post-stop. See the
-    // `Driver::status` rustdoc in `overdrive-core`.
+    // `Driver::status` returns `Err(NotFound)` post-stop.
     let err = driver.status(&handle).await.expect_err("status returns NotFound after stop");
     assert!(
         matches!(err, DriverError::NotFound { ref alloc } if *alloc == handle.alloc),
         "status after stop must be Err(NotFound {{ alloc }}); got {err:?}",
     );
 
-    // Crucially: the reparented `sleep` grandchild MUST also be reaped.
-    //
-    // The shell's tokio `Child` handle only addresses the shell PID;
-    // when `child.start_kill()` SIGKILL-s the shell, the `sleep`
-    // grandchild reparents to init and survives. The driver follows
-    // up with `send_sigkill_pgrp(pid)` — `kill(-pid, SIGKILL)` —
-    // which addresses the entire process group (the child was
-    // `setsid`-ed at spawn so PGID == shell PID). On real cgroupfs
-    // (Lima/LVH/production) the parallel `cgroup.kill` write reaches
-    // the same grandchildren via the kernel; on this test's TempDir
-    // root, `cgroup.kill` is a regular file and the write never
-    // reaches the kernel — so `send_sigkill_pgrp` is the ONLY
-    // mechanism that reaps the grandchild here.
-    //
-    // This assertion pins both:
-    //   * `send_sigkill_pgrp -> ()` (no-op body) — grandchild survives.
-    //   * `kill(-raw, SIGKILL)` → `kill(raw, SIGKILL)` (drop the
-    //     negation) — only the leader is signalled, grandchild
-    //     survives. The leader is already dead via `start_kill` so
-    //     the positive-PID kill is a no-op against a corpse.
+    // Crucially: the reparented `sleep` grandchild MUST also be
+    // reaped. On real cgroupfs (this test) BOTH mechanisms fire:
+    //   * `cgroup.kill` write — atomic SIGKILL of every task in the
+    //     scope, reaches the grandchild via the kernel.
+    //   * `send_sigkill_pgrp(pid)` — `kill(-pid, SIGKILL)` reaches
+    //     every member of the process group (the child was setsid-ed
+    //     at spawn so PGID == shell PID).
+    // Either is sufficient on real cgroupfs; the assertion pins the
+    // observable outcome regardless of which mechanism delivered the
+    // signal.
     for sleep_pid in &sleep_pids {
         let reaped = await_sleep_grandchild_reaped(*sleep_pid, Duration::from_secs(5)).await;
         assert!(
             reaped,
             "sleep grandchild at pid={sleep_pid} must be reaped after stop(); \
-             still live in /proc — process-group SIGKILL escalation did not reach it",
+             still live in /proc — neither cgroup.kill nor process-group SIGKILL reached it",
         );
     }
 }
