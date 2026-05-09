@@ -63,8 +63,8 @@ impl CgroupPath {
         &self.0
     }
 
-    /// Resolve under a cgroupfs root (`/sys/fs/cgroup`, or a tempdir
-    /// for tests).
+    /// Resolve under a cgroupfs root (`/sys/fs/cgroup` in production
+    /// and integration tests).
     #[must_use]
     pub fn resolve(&self, root: &Path) -> PathBuf {
         root.join(&self.0)
@@ -286,21 +286,6 @@ impl WorkloadsBootstrapError {
 /// `cgroup.subtree_control` as a no-op. A process supervisor calling
 /// the init on every restart sees Ok every time.
 ///
-/// # Compatibility with `TempDir`-based `exec_driver` tests
-///
-/// The existing `crates/overdrive-worker/tests/integration/exec_driver/
-/// *.rs` integration tests use `tempfile::TempDir` as a fake cgroupfs
-/// root. They exercise [`create_workload_scope`] directly (per-alloc
-/// scope creation), NOT this function (parent-slice + delegation).
-/// On tmpfs the `mkdir` succeeds and the `subtree_control` write also
-/// succeeds (tmpfs honours `O_CREAT`), so calling this function
-/// against a tempdir `cgroup_root` would no-op rather than fail — but
-/// the production wiring is the only caller, and it always targets
-/// `/sys/fs/cgroup`. Phase 02 of the bugfix migrates the `TempDir`
-/// tests to real cgroupfs and removes the
-/// [`crate::cgroup_manager::remove_workload_scope`] ENOTEMPTY fallback
-/// branch that exists only for the tempdir path.
-///
 /// # Errors
 ///
 /// * [`WorkloadsBootstrapError::SubtreeControlBusy`] — the kernel
@@ -447,51 +432,27 @@ pub async fn cgroup_kill(root: &Path, scope: &CgroupPath) -> Result<(), std::io:
 /// Remove the workload scope directory after process reap.
 /// Idempotent — succeeds when the directory is already gone.
 ///
-/// On real cgroupfs the directory looks empty to userspace because
-/// the kernel-managed virtual files (`cgroup.procs`, `cpu.weight`,
-/// `memory.max`, ...) cannot be `unlink`ed individually — they are
-/// reaped automatically by `rmdir`. On a non-cgroupfs (the integration
-/// tests use a `tempfile::TempDir`) those files are real on-disk
-/// entries and `rmdir` returns `ENOTEMPTY`. To make production code
-/// portable across both, fall back to `remove_dir_all` on
-/// `ENOTEMPTY` so the test-fixture path also succeeds.
+/// Honours the cgroup v2 contract: the kernel-managed virtual files
+/// inside a workload scope (`cgroup.procs`, `cpu.weight`, `memory.max`,
+/// ...) cannot be `unlink`ed individually and are reaped automatically
+/// by `rmdir(2)`. The single `tokio::fs::remove_dir` call is therefore
+/// the complete teardown — no `remove_dir_all` fallback is needed
+/// because real cgroupfs never returns `ENOTEMPTY` for a workload
+/// scope. The integration tests run against real `/sys/fs/cgroup` per
+/// `.claude/rules/testing.md` § "Running tests — Lima VM" and observe
+/// the same kernel semantics as production.
 ///
 /// # Errors
 ///
-/// Returns the underlying io error if neither `rmdir` nor the
-/// `remove_dir_all` fallback succeeds.
+/// Returns the underlying io error if `rmdir` fails for a reason
+/// other than the directory being absent.
 pub async fn remove_workload_scope(root: &Path, scope: &CgroupPath) -> Result<(), std::io::Error> {
     let dir = scope.resolve(root);
     match tokio::fs::remove_dir(&dir).await {
         Ok(()) => Ok(()),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(err) if is_dir_not_empty(&err) => {
-            // Tempdir-as-cgroupfs path (tests). Real cgroupfs never
-            // returns ENOTEMPTY for a workload scope because the
-            // virtual files are reaped on `rmdir`. Single-writer
-            // ownership through `ExecDriver`'s `live` mutex serialises
-            // start/stop for a given allocation, so the inner
-            // `remove_dir_all` cannot race with another caller of
-            // `remove_workload_scope` for the same scope; a NotFound
-            // here would imply an out-of-band remover that the
-            // architecture forbids. Surface the error rather than
-            // swallow it.
-            tokio::fs::remove_dir_all(&dir).await
-        }
         Err(err) => Err(err),
     }
-}
-
-/// Detect the `ENOTEMPTY` `io::Error` from `remove_dir`. Rust's
-/// `io::ErrorKind::DirectoryNotEmpty` is stable in 1.83+; fall back
-/// to the raw OS error code for portability against older toolchains.
-fn is_dir_not_empty(err: &std::io::Error) -> bool {
-    // The stable kind name (Rust 1.83+).
-    if format!("{:?}", err.kind()) == "DirectoryNotEmpty" {
-        return true;
-    }
-    // Linux: ENOTEMPTY = 39. The OS error survives any libc surface.
-    err.raw_os_error() == Some(39)
 }
 
 // ---------------------------------------------------------------------------
@@ -537,31 +498,6 @@ mod tests {
         assert_eq!(cpu_weight_for(100_000), 10_000, "100k mCPU at upper clamp");
         assert_eq!(cpu_weight_for(200_000), 10_000, "200k mCPU clamps down to 10_000");
         assert_eq!(cpu_weight_for(1000), 100, "1000 mCPU → weight 100");
-    }
-
-    /// `is_dir_not_empty` returns true for `ENOTEMPTY` (raw os
-    /// error 39 on Linux, or the named `DirectoryNotEmpty` kind in
-    /// Rust 1.83+) and false for other error kinds. Pin both
-    /// branches and the negative case — kills the four mutations
-    /// on this function (body→true / body→false / two `==` flips).
-    #[test]
-    fn is_dir_not_empty_recognises_directory_not_empty_kind() {
-        let err = std::io::Error::from(std::io::ErrorKind::DirectoryNotEmpty);
-        assert!(is_dir_not_empty(&err), "DirectoryNotEmpty kind must be recognised");
-    }
-
-    #[test]
-    fn is_dir_not_empty_recognises_raw_enotempty_os_error() {
-        let err = std::io::Error::from_raw_os_error(39);
-        assert!(is_dir_not_empty(&err), "raw ENOTEMPTY (39) must be recognised");
-    }
-
-    #[test]
-    fn is_dir_not_empty_rejects_unrelated_errors() {
-        let err = std::io::Error::from(std::io::ErrorKind::NotFound);
-        assert!(!is_dir_not_empty(&err), "NotFound must not be recognised as ENOTEMPTY");
-        let err = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
-        assert!(!is_dir_not_empty(&err), "PermissionDenied must not be recognised as ENOTEMPTY");
     }
 
     /// `cgroup_kill` is idempotent on `NotFound` (the scope is gone
@@ -647,75 +583,32 @@ mod tests {
         );
     }
 
-    /// `remove_workload_scope` falls back to `remove_dir_all` on
-    /// `ENOTEMPTY` (the tempdir-as-cgroupfs path). Pins the
-    /// `is_dir_not_empty(&err)` match-guard mutation.
+    /// `remove_workload_scope` propagates non-`NotFound` errors from
+    /// the underlying `remove_dir` rather than swallowing them. Pins
+    /// the outer match-guard mutation that flips
+    /// `err.kind() == NotFound` to `true` (which would route every
+    /// error through the idempotent arm).
+    ///
+    /// Setup creates a regular file at the *scope* path; `remove_dir`
+    /// against a non-directory inode returns `NotADirectory`
+    /// (`ENOTDIR`). The unmutated guard propagates the error; the
+    /// `-> true` mutant returns `Ok(())`.
     #[tokio::test]
-    async fn remove_workload_scope_falls_back_to_remove_dir_all_on_enotempty() {
+    async fn remove_workload_scope_propagates_non_notfound_errors() {
         let tmp = tempfile::TempDir::new().expect("tempdir");
-        let scope_path = "overdrive.slice/workloads.slice/alloc-non-empty-0.scope";
+        let scope_path = "overdrive.slice/workloads.slice/alloc-blocker-1.scope";
         let scope = CgroupPath::from_str(scope_path).expect("valid CgroupPath");
-        let scope_dir = scope.resolve(tmp.path());
-        std::fs::create_dir_all(&scope_dir).expect("create scope dir");
-        std::fs::write(scope_dir.join("cgroup.procs"), "").expect("write fake cgroup.procs");
-        assert!(scope_dir.exists(), "scope dir must exist before removal");
-
-        let result = remove_workload_scope(tmp.path(), &scope).await;
-        assert!(
-            result.is_ok(),
-            "remove_workload_scope must succeed via the ENOTEMPTY fallback; got {result:?}",
-        );
-        assert!(
-            !scope_dir.exists(),
-            "scope dir must be gone after remove_workload_scope's fallback path",
-        );
-    }
-
-    /// `remove_workload_scope` propagates non-`ENOTEMPTY`
-    /// non-`NotFound` errors from the outer `remove_dir` rather than
-    /// routing them through the `remove_dir_all` fallback. Pins the
-    /// `is_dir_not_empty(&err)` match-guard mutation that would flip
-    /// to `true` and incorrectly mask a hard error as a transient
-    /// ENOTEMPTY.
-    ///
-    /// Setup creates a SYMLINK at the scope path pointing to a real
-    /// directory elsewhere in the tempdir. On Linux:
-    ///
-    ///   * `remove_dir(symlink_to_dir)` returns `NotADirectory` —
-    ///     `lstat(2)` resolves the symlink and `rmdir(2)` rejects
-    ///     a non-directory inode.
-    ///   * `remove_dir_all(symlink_to_dir)` returns `Ok(())` —
-    ///     standard library follows the symlink, finds an empty
-    ///     directory, and removes the link itself.
-    ///
-    /// The two functions producing different observable outcomes on
-    /// the same path is exactly what makes mutant 3 killable: the
-    /// unmutated guard returns `Err(NotADirectory)`; the `-> true`
-    /// mutant routes through `remove_dir_all` and returns `Ok(())`.
-    #[tokio::test]
-    async fn remove_workload_scope_propagates_non_enotempty_non_notfound_errors() {
-        use std::os::unix::fs::symlink;
-
-        let tmp = tempfile::TempDir::new().expect("tempdir");
-        let scope_path = "overdrive.slice/workloads.slice/alloc-symlink-1.scope";
-        let scope = CgroupPath::from_str(scope_path).expect("valid CgroupPath");
-        let scope_link = scope.resolve(tmp.path());
-        if let Some(parent) = scope_link.parent() {
+        let scope_as_path = scope.resolve(tmp.path());
+        if let Some(parent) = scope_as_path.parent() {
             std::fs::create_dir_all(parent).expect("create parent slice dirs");
         }
-        // The symlink target — a real, empty directory elsewhere in
-        // the tempdir.
-        let target_dir = tmp.path().join("symlink-target");
-        std::fs::create_dir_all(&target_dir).expect("create symlink target dir");
-        symlink(&target_dir, &scope_link).expect("create symlink at scope path");
+        // Place a regular file where the scope DIR would be —
+        // `remove_dir` against a non-directory inode produces a
+        // non-NotFound error (NotADirectory / ENOTDIR).
+        std::fs::write(&scope_as_path, b"blocker").expect("write blocker file");
 
         let result = remove_workload_scope(tmp.path(), &scope).await;
-        let err = result.expect_err(
-            "remove_workload_scope on a symlink-to-dir must propagate the \
-             outer remove_dir error (NotADirectory) without falling back to \
-             remove_dir_all; the `is_dir_not_empty -> true` mutation diverges \
-             by calling remove_dir_all on the symlink, which succeeds",
-        );
+        let err = result.expect_err("non-NotFound errors must propagate");
         assert_ne!(
             err.kind(),
             std::io::ErrorKind::NotFound,
