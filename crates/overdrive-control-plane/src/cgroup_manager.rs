@@ -83,9 +83,9 @@ const SUBTREE_CONTROL_CONTROLLERS: &str = "+cpu +memory +io +pids\n";
 ///   `NotFound` if the enclosing slice does not exist).
 /// * `std::io::Error` (lifted via the `From` impls) — any other
 ///   non-`subtree_control` failure (`mkdir_p`, `cgroup.procs` write).
-///   These flow through `CgroupBootstrapError` is NOT — the existing
-///   `ControlPlaneError::internal` mapping at the call site continues
-///   to absorb them.
+///   These do NOT flow through the typed `CgroupBootstrapError`
+///   variants above; instead, the `ControlPlaneError::internal`
+///   mapping at the call site absorbs them.
 pub fn create_and_enrol_control_plane_slice_at(
     cgroup_root: &Path,
     pid: u32,
