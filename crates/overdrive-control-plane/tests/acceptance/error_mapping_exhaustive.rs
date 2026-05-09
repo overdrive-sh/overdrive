@@ -197,6 +197,46 @@ fn tls_bootstrap_error_renders_as_500_with_internal_kind_and_preserves_chain() {
 }
 
 #[test]
+fn cgroup_bootstrap_error_renders_as_500_with_internal_kind_and_preserves_chain() {
+    let err = ControlPlaneError::CgroupBootstrap(
+        overdrive_control_plane::error::CgroupBootstrapError::SubtreeControlWriteFailed {
+            source: io::Error::new(io::ErrorKind::PermissionDenied, "EACCES on subtree_control"),
+        },
+    );
+
+    let (status, body) = to_response(err);
+
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(body.error, "internal");
+    assert!(
+        body.message.contains("EACCES on subtree_control"),
+        "CgroupBootstrap(_) mapping must preserve the structured chain in the message; got {:?}",
+        body.message,
+    );
+    assert!(body.field.is_none());
+}
+
+#[test]
+fn workloads_bootstrap_error_renders_as_500_with_internal_kind_and_preserves_chain() {
+    let err = ControlPlaneError::WorkloadsBootstrap(
+        overdrive_worker::cgroup_manager::WorkloadsBootstrapError::SubtreeControlBusy {
+            source: io::Error::other("EBUSY on workloads.slice"),
+        },
+    );
+
+    let (status, body) = to_response(err);
+
+    assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(body.error, "internal");
+    assert!(
+        body.message.contains("EBUSY on workloads.slice"),
+        "WorkloadsBootstrap(_) mapping must preserve the structured chain in the message; got {:?}",
+        body.message,
+    );
+    assert!(body.field.is_none());
+}
+
+#[test]
 fn internal_error_renders_as_500_with_internal_kind() {
     let err = ControlPlaneError::Internal("store dropped mid-write".into());
 

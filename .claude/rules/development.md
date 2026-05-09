@@ -1496,6 +1496,22 @@ you actually deleted what you set out to delete.
   the originating error via `.map_err(...)?`, and let `Display` carry
   the cause-specific guidance.
 
+- **Never flatten a typed error to `Internal(String)` at a composition
+  boundary.** When a function returns a typed error enum (e.g.
+  `CgroupBootstrapError`, `WorkloadsBootstrapError`), the call site
+  that converts it to the top-level error (`ControlPlaneError`) MUST
+  use a dedicated `#[from]` variant — never
+  `.map_err(|e| ControlPlaneError::internal("...", e))`. The
+  `internal(context, source)` constructor calls `format!("{context}:
+  {source}")`, collapsing the typed variant into a plain `String` and
+  destroying the caller's ability to `matches!` on the variant for
+  structured diagnostics. The pattern to follow is `ViewStoreBoot`,
+  `Tls`, `Cgroup` — each has a dedicated `#[from]` variant on
+  `ControlPlaneError` so the CLI can branch on the type without
+  `Display`-grepping. The anti-pattern is any `.map_err(|e|
+  ControlPlaneError::internal(...))` on a typed bootstrap/infra
+  error — that is always a bug, not a convenience.
+
 ### Concurrency & async
 
 - **Tokio is the standard runtime.** Do not reach for `async-std`,

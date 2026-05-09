@@ -471,7 +471,7 @@ pub async fn run_server_with_obs_and_driver(
     // produces no on-disk artefacts.
     cgroup_preflight::run_preflight().map_err(error::ControlPlaneError::from)?;
     cgroup_manager::create_and_enrol_control_plane_slice()
-        .map_err(|e| error::ControlPlaneError::internal("create control-plane slice", e))?;
+        .map_err(error::ControlPlaneError::from)?;
     // Per `docs/feature/fix-cgroup-subtree-control-delegation/bugfix-rca.md`
     // § "Production fix #2": delegate `+cpu +memory +io +pids` to
     // `overdrive.slice/workloads.slice/cgroup.subtree_control` BEFORE
@@ -485,7 +485,7 @@ pub async fn run_server_with_obs_and_driver(
     overdrive_worker::cgroup_manager::create_workloads_slice_with_controllers(
         std::path::Path::new(cgroup_preflight::DEFAULT_CGROUP_ROOT),
     )
-    .map_err(|e| error::ControlPlaneError::internal("create workloads slice", e))?;
+    .map_err(error::ControlPlaneError::from)?;
 
     // Install the rustls process-wide CryptoProvider (ring) exactly
     // once. The workspace enables only the `ring` feature, but rustls

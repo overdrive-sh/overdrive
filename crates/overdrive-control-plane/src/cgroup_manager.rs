@@ -81,11 +81,8 @@ const SUBTREE_CONTROL_CONTROLLERS: &str = "+cpu +memory +io +pids\n";
 ///   I/O failure on the `subtree_control` write (typically
 ///   `PermissionDenied` from cgroupfs delegation refusal, or
 ///   `NotFound` if the enclosing slice does not exist).
-/// * `std::io::Error` (lifted via the `From` impls) — any other
-///   non-`subtree_control` failure (`mkdir_p`, `cgroup.procs` write).
-///   These do NOT flow through the typed `CgroupBootstrapError`
-///   variants above; instead, the `ControlPlaneError::internal`
-///   mapping at the call site absorbs them.
+/// * [`CgroupBootstrapError::BootstrapIoFailed`] — any other
+///   non-`subtree_control` failure (`mkdir`, `cgroup.procs` write).
 pub fn create_and_enrol_control_plane_slice_at(
     cgroup_root: &Path,
     pid: u32,
@@ -93,7 +90,7 @@ pub fn create_and_enrol_control_plane_slice_at(
     // Step 1 — mkdir overdrive.slice (idempotent).
     let parent_slice = cgroup_root.join("overdrive.slice");
     std::fs::create_dir_all(&parent_slice)
-        .map_err(|source| CgroupBootstrapError::SubtreeControlWriteFailed { source })?;
+        .map_err(|source| CgroupBootstrapError::BootstrapIoFailed { source })?;
 
     // Step 2 — delegate controllers to overdrive.slice's children.
     // MUST happen BEFORE step 4 (PID enrolment) per the cgroup v2
@@ -107,12 +104,12 @@ pub fn create_and_enrol_control_plane_slice_at(
     // Step 3 — mkdir control-plane.slice underneath (idempotent).
     let dir = cgroup_root.join(CONTROL_PLANE_SLICE);
     std::fs::create_dir_all(&dir)
-        .map_err(|source| CgroupBootstrapError::SubtreeControlWriteFailed { source })?;
+        .map_err(|source| CgroupBootstrapError::BootstrapIoFailed { source })?;
 
     // Step 4 — enrol the server PID into the control-plane slice.
     let procs = dir.join("cgroup.procs");
     std::fs::write(&procs, format!("{pid}\n"))
-        .map_err(|source| CgroupBootstrapError::SubtreeControlWriteFailed { source })?;
+        .map_err(|source| CgroupBootstrapError::BootstrapIoFailed { source })?;
 
     Ok(())
 }

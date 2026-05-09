@@ -166,6 +166,30 @@ pub enum CgroupBootstrapError {
         #[source]
         source: std::io::Error,
     },
+
+    /// I/O failure on a non-`subtree_control` bootstrap operation —
+    /// `mkdir` of the slice directory or `cgroup.procs` write for PID
+    /// enrolment. Distinct from [`SubtreeControlWriteFailed`] so the
+    /// operator message names the actual operation that failed, not a
+    /// file that may not even exist yet.
+    ///
+    /// Mirrors [`WorkloadsBootstrapError::WriteFailed`] in the worker
+    /// crate, which uses the same generic "bootstrap failed" message
+    /// for non-subtree_control operations.
+    #[error(
+        "cgroup bootstrap failed: {source}\n\
+         \n\
+         Try: verify cgroupfs is mounted at /sys/fs/cgroup and the \
+         running process has permission to create directories and \
+         write cgroup.procs under overdrive.slice.\n\
+         \n\
+         Underlying: {source}"
+    )]
+    BootstrapIoFailed {
+        /// Underlying `io::Error` from `mkdir` or `cgroup.procs` write.
+        #[source]
+        source: std::io::Error,
+    },
 }
 
 impl CgroupBootstrapError {
@@ -237,6 +261,25 @@ pub enum ControlPlaneError {
     /// HTTP response — the listener doesn't bind on this error.
     #[error(transparent)]
     Cgroup(#[from] crate::cgroup_preflight::CgroupPreflightError),
+
+    /// Control-plane slice bootstrap failure (`cgroup_manager::
+    /// create_and_enrol_control_plane_slice`). Pass-through embedding
+    /// so callers can `matches!(e, ControlPlaneError::CgroupBootstrap(_))`
+    /// for structured startup diagnostics without `Display`-grepping.
+    /// Same boot-path shape as `Cgroup` and `ViewStoreBoot`: happens
+    /// BEFORE the listener binds, so the `to_response` arm is
+    /// exhaustiveness-only.
+    #[error(transparent)]
+    CgroupBootstrap(#[from] CgroupBootstrapError),
+
+    /// Workloads-slice bootstrap failure (`overdrive_worker::
+    /// cgroup_manager::create_workloads_slice_with_controllers`).
+    /// Pass-through embedding so callers can
+    /// `matches!(e, ControlPlaneError::WorkloadsBootstrap(_))` for
+    /// structured startup diagnostics. Same boot-path shape as
+    /// `CgroupBootstrap` above.
+    #[error(transparent)]
+    WorkloadsBootstrap(#[from] overdrive_worker::cgroup_manager::WorkloadsBootstrapError),
 
     /// `ViewStore` boot-time failure per ADR-0035 §5 (Earned Trust).
     /// Pass-through embedding so `overdrive-cli::commands::serve` can
@@ -328,6 +371,18 @@ pub fn to_response(err: ControlPlaneError) -> (StatusCode, ErrorBody) {
             // arm exists for completeness so the enum match stays
             // exhaustive. In practice a Cgroup error never reaches an
             // HTTP response — the operator sees it on stderr at boot.
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
+        ),
+        ControlPlaneError::CgroupBootstrap(e) => (
+            // Same shape as `Cgroup` above: control-plane slice
+            // bootstrap failures happen BEFORE the listener binds.
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
+        ),
+        ControlPlaneError::WorkloadsBootstrap(e) => (
+            // Same shape as `CgroupBootstrap` above: workloads-slice
+            // bootstrap failures happen BEFORE the listener binds.
             StatusCode::INTERNAL_SERVER_ERROR,
             ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
         ),
