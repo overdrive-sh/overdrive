@@ -222,9 +222,7 @@ pub enum WorkloadsBootstrapError {
          pre-flight passed, so this is typically a runtime divergence \
          (a systemd unit replaced the slice between control-plane and \
          worker bootstrap, or a concurrent operator action removed \
-         delegation).\n\
-         \n\
-         Underlying: {source}"
+         delegation)."
     )]
     WriteFailed {
         /// Underlying `io::Error` for any non-EBUSY I/O failure.

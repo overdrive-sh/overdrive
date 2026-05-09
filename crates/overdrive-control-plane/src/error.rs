@@ -157,9 +157,7 @@ pub enum CgroupBootstrapError {
          the pre-flight passed, so this is typically a runtime \
          divergence (a systemd unit replaced the slice between \
          pre-flight and bootstrap, or a concurrent operator action \
-         removed delegation).\n\
-         \n\
-         Underlying: {source}"
+         removed delegation)."
     )]
     SubtreeControlWriteFailed {
         /// Underlying `io::Error` for any non-EBUSY I/O failure.
@@ -181,9 +179,7 @@ pub enum CgroupBootstrapError {
          \n\
          Try: verify cgroupfs is mounted at /sys/fs/cgroup and the \
          running process has permission to create directories and \
-         write cgroup.procs under overdrive.slice.\n\
-         \n\
-         Underlying: {source}"
+         write cgroup.procs under overdrive.slice."
     )]
     BootstrapIoFailed {
         /// Underlying `io::Error` from `mkdir` or `cgroup.procs` write.
