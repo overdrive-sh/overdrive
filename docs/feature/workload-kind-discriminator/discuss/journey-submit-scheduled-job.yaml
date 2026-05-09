@@ -1,0 +1,152 @@
+schema_version: 1
+
+# Journey C — Submit a Scheduled Job (parse + validate; execution deferred).
+# Slice 05 ships parser and composition validation only. Execution is a deferred
+# follow-up — see wave-decisions.md.
+
+journey:
+  name: "Submit a Scheduled Job and trust the platform's honesty about deferred execution"
+  goal: >
+    Ana submits a `[job] + [schedule]` spec, sees the parser accept it, sees the
+    submit echo say "Schedule registered" with an explicit note that execution is
+    not yet implemented, and sees `alloc status` reflect the same deferral with a
+    tracking URL.
+  persona: "Ana, Overdrive platform engineer"
+
+  emotional_arc:
+    start: "Curious — 'how do I declare a recurring job?'"
+    middle: "Confident-in-syntax — 'the parser says my spec is valid.'"
+    end: "Patient — 'execution is deferred; the platform pointed me to the tracking issue.'"
+
+steps:
+  - id: 1
+    name: "Author the Schedule spec"
+    command: "(editor)"
+    tui_mockup: |
+      [job]
+      id = "nightly-backup"
+      [schedule]
+      cron = "0 2 * * *"
+      [exec]
+      command = "/usr/bin/pg_dump"
+      args = ["--format=custom", "-d", "payments", "-f", "/backups"]
+      [resources]
+      cpu_milli = 200
+      memory_bytes = 134217728
+    shared_artifacts:
+      - name: "spec_path"
+        source: "operator filesystem"
+        displayed_as: "${spec_path}"
+        consumers: ["parser", "submit RPC"]
+      - name: "kind"
+        source: "section presence: `[job]` + `[schedule]` co-presence"
+        displayed_as: "${kind} = Schedule"
+        consumers: ["WorkloadSpec::Schedule variant"]
+      - name: "cron_expr"
+        source: "[schedule].cron"
+        displayed_as: "${cron_expr}"
+        consumers: ["alloc status render"]
+    emotional_state:
+      entry: "Curious"
+      exit: "Confident-in-syntax"
+    integration_checkpoint: |
+      `[job]` and `[schedule]` are sibling top-level tables; `[exec]` and
+      `[resources]` are also at top level. No nested `[schedule.job]`.
+    failure_modes:
+      - "`[schedule]` without `[job]` — must reject"
+      - "`[schedule]` with `[service]` — must reject (services don't terminate)"
+      - "`cron` field missing — must reject"
+      - "`cron` field malformed — must reject naming the malformed substring"
+    gherkin: |
+      Scenario: A Scheduled Job spec is recognised by [job] + [schedule] co-presence
+        Given a TOML file with [job], [schedule], [exec], [resources] and a valid cron string
+        When the parser reads the file
+        Then a Schedule-kind workload spec is constructed
+        And it carries the cron expression as a string field
+
+  - id: 2
+    name: "Submit and acknowledge with explicit deferral"
+    command: "overdrive job submit ./nightly-backup.toml"
+    tui_mockup: |
+      Submitting schedule 'nightly-backup' (kind=Schedule)
+      Spec digest: sha256:c9e1...77
+      Endpoint:    https://127.0.0.1:7001/
+      Schedule registered.
+
+      NOTE: schedule execution is not yet implemented in this Phase 1 slice.
+            The spec has been validated and persisted as intent; no Job runs
+            will be spawned automatically.
+            Tracking: https://github.com/overdrive-sh/overdrive/issues/166
+    shared_artifacts:
+      - name: "kind"
+        source: "parser output"
+        displayed_as: "${kind} = Schedule"
+        consumers: ["echo line"]
+      - name: "deferral_issue_url"
+        source: "CLI config constant naming the GH issue tracking Schedule execution"
+        displayed_as: "${deferral_issue_url}"
+        consumers: ["submit echo NOTE block", "alloc status reason line"]
+    emotional_state:
+      entry: "Anxious — 'will the CLI silently accept-and-discard?'"
+      exit: "Patient — 'the platform was honest about the deferral.'"
+    integration_checkpoint: |
+      The submit echo's NOTE references the SAME `deferral_issue_url` that
+      alloc status uses. The shared-artifacts registry pins this.
+      The CLI exits 0 — the parse + persist happy path succeeded; execution
+      is a separate concern.
+    failure_modes:
+      - "Server rejects spec for invalid cron — typed error from parser-side check"
+    gherkin: |
+      Scenario: Submitting a Schedule echoes "registered" plus a deferral note
+        Given a Scheduled Job spec at "./nightly-backup.toml"
+        When the operator submits the spec
+        Then the CLI prints "Submitting schedule 'nightly-backup' (kind=Schedule)"
+        And the CLI prints "Schedule registered."
+        And the CLI prints a NOTE saying execution is not yet implemented
+        And the NOTE includes the tracking issue URL
+
+  - id: 3
+    name: "Inspect via alloc status — empty allocations with reason"
+    command: "overdrive alloc status --job nightly-backup"
+    tui_mockup: |
+      Job:    nightly-backup    (kind: Schedule)
+      Spec:   sha256:c9e1...77
+      Cron:   0 2 * * *
+
+      No allocations have been spawned yet.
+
+      Reason: Schedule execution is not yet implemented (issue #166).
+    shared_artifacts:
+      - name: "deferral_issue_url"
+        source: "same CLI config constant as step 2"
+        displayed_as: "${deferral_issue_url}"
+        consumers: ["alloc status reason line"]
+    emotional_state:
+      entry: "Curious — 'has anything happened yet?'"
+      exit: "Trusting — 'the platform is consistent across surfaces about what is and isn't done.'"
+    integration_checkpoint: |
+      The Reason line in alloc status references the same issue URL as
+      the submit echo's NOTE — verifiable by string match across the two
+      outputs in the integration test.
+    failure_modes:
+      - "alloc status renders an empty list with no reason — regression of J-OPS-002 'no silent blank outputs' clause; must NOT happen"
+    gherkin: |
+      Scenario: alloc status for a Schedule reflects the deferral consistently
+        Given a Scheduled Job has been submitted but execution is deferred
+        When the operator runs `overdrive alloc status --job <id>`
+        Then the output shows "kind: Schedule" and the cron expression
+        And the output explicitly names the deferral with the tracking issue URL
+        And the URL is byte-identical to the URL in the submit echo's NOTE
+
+integration_validation:
+  shared_artifact_consistency:
+    - artifact: "kind"
+      must_match_across: [1, 2, 3]
+    - artifact: "deferral_issue_url"
+      must_match_across: [2, 3]
+      failure_message: "The submit echo's deferral URL must equal alloc status's deferral URL — single source of truth in CLI config."
+
+changelog:
+  - date: 2026-05-09
+    feature: workload-kind-discriminator
+    change: Initial Schedule journey — parse + validate only; execution deferred to a follow-up feature.

@@ -1,0 +1,205 @@
+schema_version: 1
+
+# Journey B — Submit a Job (run-to-completion).
+# This is the journey the coinflip bug exposed. The current Phase 1 shape returns
+# "is running with 1/1 replicas (took live)" for a Job that exits with status 1; this
+# journey closes the bug structurally by making `ConvergedRunning` unreachable for Jobs.
+
+journey:
+  name: "Submit a Job (run-to-completion) and trust the CLI's verdict"
+  goal: >
+    Ana submits a `[job]` spec and receives a definitive Succeeded (exit 0) or
+    Failed (exit non-zero, backoff exhausted) terminal event from the streaming
+    protocol — never a "running" line. The CLI's exit code mirrors the workload's.
+  persona: "Ana, Overdrive platform engineer"
+
+  emotional_arc:
+    start: "Anxious — 'will I be misled like the coinflip bug?'"
+    middle: "Watchful — 'the CLI is honest about uncertainty during the run.'"
+    end: "Satisfied (on Succeeded) OR Informed (on Failed) — never Misled."
+
+steps:
+  - id: 1
+    name: "Author the Job spec"
+    command: "(editor)"
+    tui_mockup: |
+      [job]
+      id = "coinflip"
+      [exec]
+      command = "/bin/bash"
+      args = ["-c", "if (( RANDOM % 2 )); then echo SUCCESS; exit 0; else echo ERROR >&2; exit 1; fi"]
+      [resources]
+      cpu_milli = 100
+      memory_bytes = 67108864
+    shared_artifacts:
+      - name: "spec_path"
+        source: "operator filesystem"
+        displayed_as: "${spec_path}"
+        consumers: ["parser", "submit RPC", "error messages"]
+      - name: "kind"
+        source: "section presence: `[job]`"
+        displayed_as: "${kind} = Job"
+        consumers: ["parser → WorkloadSpec::Job variant"]
+    emotional_state:
+      entry: "Curious — 'how do I declare a one-shot vs a service?'"
+      exit: "Confident — '[job] is unambiguous.'"
+    integration_checkpoint: |
+      The TOML carries `[job]` exclusively. `[exec]` and `[resources]` are
+      at top level. No `[schedule]` block (that's journey C).
+    failure_modes:
+      - "Spec contains both [job] and [service] — parser rejects"
+      - "Spec contains [job] but missing [exec] — parser rejects"
+    gherkin: |
+      Scenario: A Job spec is recognised by [job] section presence
+        Given a TOML file with [job], [exec], [resources] and no [service] / [schedule]
+        When the parser reads the file
+        Then a Job-kind workload spec is constructed
+
+  - id: 2
+    name: "Submit and stream"
+    command: "overdrive job submit ./coinflip.toml"
+    tui_mockup: |
+      Submitting job 'coinflip' (kind=Job, run-to-completion)
+      Spec digest: sha256:b7f2...3a
+      Endpoint:    https://127.0.0.1:7001/
+      Waiting for terminal exit (Succeeded or Failed)...
+    shared_artifacts:
+      - name: "kind"
+        source: "parser output"
+        displayed_as: "${kind} = Job"
+        consumers: ["echo line", "RPC variant `JobSubmit`", "stream event type `JobSubmitEvent`"]
+      - name: "spec_digest"
+        source: "ContentHash::of(rkyv archive)"
+        displayed_as: "${spec_digest}"
+        consumers: ["echo line", "AllocStatusRow", "DescribeJob"]
+    emotional_state:
+      entry: "Anxious — 'is this going to mislead me again?'"
+      exit: "Watchful — 'the CLI explicitly says it is waiting for the verdict.'"
+    integration_checkpoint: |
+      The submit echo names "kind=Job, run-to-completion" — the second clause
+      is operator-facing language for "this will exit, and I will tell you when."
+    failure_modes:
+      - "Server-side spec validation fails with structured error"
+    gherkin: |
+      Scenario: Submit echoes "Job, run-to-completion"
+        Given a Job spec at "./coinflip.toml"
+        When the operator runs `overdrive job submit ./coinflip.toml`
+        Then the CLI prints "Submitting job 'coinflip' (kind=Job, run-to-completion)" before any streaming events
+
+  - id: 3
+    name: "Stream to terminal verdict (Succeeded path)"
+    command: "(streaming)"
+    tui_mockup: |
+      Job 'coinflip' succeeded.
+        exit code: 0
+        duration:  1.2s
+        attempts:  1
+    shared_artifacts:
+      - name: "exit_code"
+        source: "ExitObserver (existing); flows into JobSubmitEvent::Succeeded"
+        displayed_as: "${exit_code}"
+        consumers: ["render line", "AllocStatusRow.terminal_exit_code"]
+      - name: "duration"
+        source: "Clock-derived elapsed since start"
+        displayed_as: "${duration}"
+        consumers: ["render line"]
+    emotional_state:
+      entry: "Watchful"
+      exit: "Satisfied — 'the CLI told me success, and exit code 0 confirms it.'"
+    integration_checkpoint: |
+      `JobSubmitEvent::Succeeded { exit_code: 0, duration }` is the ONLY way
+      the stream terminates with operator-facing success language. The CLI
+      process exits with status 0.
+    failure_modes:
+      - "Workload's exit_code is non-zero on this attempt — go to step 3' or 3''"
+    gherkin: |
+      Scenario: A Job that exits 0 emits Succeeded with exit_code and duration
+        Given a Job whose workload exits 0 on first attempt
+        When the streaming submit observes the exit
+        Then the CLI prints "Job 'coinflip' succeeded."
+        And the line names exit code 0 and a measured duration
+        And the CLI process exits with status 0
+
+  - id: 3p
+    name: "Stream to terminal verdict (Failed-Final path)"
+    command: "(streaming)"
+    tui_mockup: |
+      Job 'coinflip' failed.
+        exit code: 1
+        duration:  0.3s (per-attempt)
+        attempts:  3 of 3 (backoff exhausted)
+        stderr (last 5 lines):
+          ERROR
+    shared_artifacts:
+      - name: "exit_code"
+        source: "ExitObserver"
+        displayed_as: "${exit_code}"
+        consumers: ["render line"]
+      - name: "attempt_count"
+        source: "JobLifecycle reconciler (existing RESTART_BACKOFF_CEILING)"
+        displayed_as: "${attempt_count} of ${max_attempts}"
+        consumers: ["render line"]
+    emotional_state:
+      entry: "Watchful — 'the previous attempt failed; will it eventually succeed?'"
+      exit: "Informed — 'definitive failure with exit code; I know what to do.'"
+    integration_checkpoint: |
+      `JobSubmitEvent::Failed { exit_code, attempts, max_attempts }` is the
+      only way the stream terminates with operator-facing failure language for
+      a Job. The CLI process exits with the workload's exit code (or 1 if the
+      reconciler indicates BackoffExhausted without a recorded exit code).
+    failure_modes:
+      - "stderr capture is too long — truncate to last N lines"
+    gherkin: |
+      Scenario: A Job that exhausts retries emits Failed with exit_code and attempts
+        Given a Job whose workload exits non-zero on every attempt up to backoff_limit
+        When the streaming submit observes BackoffExhausted
+        Then the CLI prints "Job 'coinflip' failed."
+        And the line names exit code 1, attempts "3 of 3", and includes stderr tail
+        And the CLI process exits with a non-zero status code
+
+  - id: 3pp
+    name: "Stream intermediate Failed-but-will-retry events"
+    command: "(streaming)"
+    tui_mockup: |
+      Job 'coinflip' attempt 1 failed (exit 1, 0.2s). Retrying in 0.5s... (attempt 2/3)
+    shared_artifacts:
+      - name: "attempt_count"
+        source: "JobLifecycle reconciler"
+        displayed_as: "(attempt N/M)"
+        consumers: ["intermediate render line"]
+    emotional_state:
+      entry: "Watchful"
+      exit: "Watchful — 'the platform is honest about retrying.'"
+    integration_checkpoint: |
+      Intermediate events are NON-terminal — the stream stays open until
+      Succeeded or Failed-Final. This is the level-triggered protocol shape
+      the RCA's root cause C calls for, narrowed to Jobs.
+    failure_modes:
+      - "Stream cap elapses before terminal — emit kind-aware Timeout event"
+    gherkin: |
+      Scenario: An attempt failure emits an intermediate event that does not close the stream
+        Given a Job whose first attempt exits 1 and whose backoff_limit is 3
+        When the streaming submit observes the first failure
+        Then the CLI prints an "attempt 1 failed... Retrying" line
+        And the streaming session remains open
+        And the CLI does NOT yet exit
+
+integration_validation:
+  shared_artifact_consistency:
+    - artifact: "kind"
+      must_match_across: [1, 2, 3, 3p, 3pp]
+      failure_message: "A Job-kind spec must produce only Job-kind streaming events; any cross-kind leak is a protocol violation."
+    - artifact: "exit_code"
+      must_match_across: [3, 3p]
+      failure_message: "exit_code in the terminal event must equal the kernel-observed exit_code in the ExitObserver."
+  no_running_terminal:
+    description: |
+      Per the structural fix: there is NO event variant on JobSubmitEvent that
+      lets the CLI render "Job 'X' is running with N/M replicas". The render
+      function `format_running_summary` is unreachable from the Job code path.
+    failure_message: "If the test harness reaches `format_running_summary` from a Job submit, the kind discriminator has been bypassed."
+
+changelog:
+  - date: 2026-05-09
+    feature: workload-kind-discriminator
+    change: Initial Job journey — closes the coinflip bug structurally.

@@ -1,0 +1,241 @@
+schema_version: 1
+
+# Journey A — Submit a Service.
+# Cross-references journey-submit-job.yaml (B), journey-submit-scheduled-job.yaml (C),
+# journey-alloc-status.yaml (D), and shared-artifacts-registry.md.
+
+journey:
+  name: "Submit a Service (long-running) and trust the CLI's running summary"
+  goal: >
+    Ana submits a `[service]` spec, sees the streaming protocol return
+    `Service '<id>' is running with N/M replicas (took <duration>)` ONLY
+    after the desired replica count is met and the workload has not
+    crashed within the stability window. Vocabulary is kind-aware ("Service"
+    not "Job").
+  persona: "Ana, Overdrive platform engineer (per submit-a-job.yaml)"
+
+  emotional_arc:
+    start: "Skeptical — 'will the parser accept my [service] block correctly?'"
+    middle: "Focused — 'the kind echo confirms my intent; the streaming events are landing.'"
+    end: "Trusting — 'the CLI says running because it IS running; that vocabulary fits a Service.'"
+
+steps:
+  - id: 1
+    name: "Author the Service spec (with listeners)"
+    command: "(editor)"
+    tui_mockup: |
+      [service]
+      id = "payments"
+      replicas = 1
+
+      [[listener]]
+      port     = 8080
+      protocol = "tcp"
+      vip      = "10.0.0.1"
+
+      [[listener]]
+      port     = 8081
+      protocol = "udp"
+
+      [exec]
+      command = "/usr/local/bin/payments-server"
+      args = ["--port", "8080"]
+      [resources]
+      cpu_milli = 500
+      memory_bytes = 268435456
+    shared_artifacts:
+      - name: "spec_path"
+        source: "operator filesystem"
+        displayed_as: "${spec_path}"
+        consumers: ["parser", "submit RPC", "error messages"]
+      - name: "listener_triple"
+        source: "parser output (`Vec<Listener>` field on `WorkloadSpec::Service`)"
+        displayed_as: "${listener_triple}"
+        consumers: ["submit echo Listeners section", "alloc status Listeners section", "uniqueness validation"]
+      - name: "vip_assignment_state"
+        source: "parser output (`Option<ServiceVip>` per listener)"
+        displayed_as: "${vip_assignment_state}"
+        consumers: ["submit echo render", "alloc status render"]
+    emotional_state:
+      entry: "Curious — 'what's the new shape?'"
+      exit: "Confident-in-syntax — '[service] + [[listener]] is unambiguous.'"
+    integration_checkpoint: |
+      The TOML carries `[service]` but neither `[job]` nor `[schedule]`.
+      `[exec]`, `[resources]`, and `[[listener]]` are at top level, not
+      nested. The Service has at least one `[[listener]]` block; every
+      listener triple `(vip, port, protocol)` is distinct. (Per fold-in of
+      GH #164.)
+    failure_modes:
+      - "Operator writes `[service]` AND `[job]` — both present, must reject"
+      - "Operator writes `[service]` AND `[schedule]` — invalid composition (services don't terminate)"
+      - "Operator writes neither — must reject with named guidance"
+      - "Operator writes `[service]` with zero `[[listener]]` blocks — must reject"
+      - "Operator writes two `[[listener]]` blocks with the same `(vip, port, protocol)` triple — must reject"
+      - "Operator writes a `[[listener]]` with `port = 0` — must reject"
+      - "Operator writes a `[[listener]]` with an unsupported protocol (e.g. `sctp`) — must reject"
+    gherkin: |
+      Scenario: A Service spec with listeners is recognised by section presence
+        Given a TOML file containing `[service]`, two `[[listener]]` blocks (8080/tcp/10.0.0.1 then 8081/udp/none), `[exec]`, `[resources]`
+        When the parser reads the file
+        Then `WorkloadSpec::Service { listeners, … }` is constructed
+        And the listeners are preserved in declaration order with both triples intact
+        And neither Job nor Schedule kinds are constructed
+
+  - id: 2
+    name: "Submit the spec"
+    command: "overdrive job submit ./payments.toml"
+    tui_mockup: |
+      Submitting service 'payments' (kind=Service, replicas=1)
+      Spec digest: sha256:a4c1...e9
+      Endpoint:    https://127.0.0.1:7001/
+      Listeners:
+        10.0.0.1:8080/tcp
+        (vip: pending allocation — see #167):8081/udp
+    shared_artifacts:
+      - name: "kind"
+        source: "parser output (`WorkloadSpec` enum)"
+        displayed_as: "${kind} = Service"
+        consumers: ["submit RPC variant", "AllocStatusRow.kind", "render branch selection"]
+      - name: "spec_digest"
+        source: "ContentHash::of(rkyv-archived spec)"
+        displayed_as: "${spec_digest}"
+        consumers: ["CLI submit echo", "AllocStatusRow", "DescribeJob response"]
+      - name: "listener_triple"
+        source: "parser output (`Vec<Listener>` on the Service spec)"
+        displayed_as: "<vip-or-pending>:<port>/<protocol>"
+        consumers: ["submit echo Listeners section"]
+      - name: "vip_assignment_state"
+        source: "parser output (`Option<ServiceVip>` per listener)"
+        displayed_as: "Pinned or '(vip: pending allocation — see #167)'"
+        consumers: ["submit echo line per listener"]
+    emotional_state:
+      entry: "Focused — 'did the server take it? Are my listeners visible?'"
+      exit: "Confident — 'commit_index returned, kind echoed, listeners mirrored.'"
+    integration_checkpoint: |
+      The CLI's submit echo names the kind explicitly so the operator
+      sees that the discriminator was honoured. For Service kind, the echo
+      also names every listener triple, with pending VIPs explicitly marked
+      so the operator knows the allocator (#167) has not yet executed.
+    failure_modes:
+      - "Server rejects spec for malformed `[exec]` (missing `command`)"
+      - "Server rejects spec for `replicas` outside 1..=NonZeroU32::MAX"
+      - "Server rejects spec for invalid listener triple (parser-side)"
+    gherkin: |
+      Scenario: Submit echoes the kind discriminator and listener triples
+        Given a Service spec with id "payments", replicas 1, and two listeners (8080/tcp/pinned, 8081/udp/pending)
+        When the operator submits the spec
+        Then the CLI echo names "kind=Service" before any streaming events
+        And the echo's Listeners section names both listener triples in declaration order
+        And the pinned-VIP listener renders the literal IPv4 address
+        And the pending-VIP listener renders "(vip: pending allocation — see #167)"
+        And the spec_digest in the echo matches the operator's local computation
+
+  - id: 3
+    name: "Stream convergence to Running (happy path)"
+    command: "(streaming, no operator action)"
+    tui_mockup: |
+      Service 'payments' is running with 1/1 replicas (took 1.4s)
+    shared_artifacts:
+      - name: "converged_running_event"
+        source: "ServiceSubmitEvent::ConvergedRunning emitted by control-plane streaming"
+        displayed_as: "${converged_running_event}"
+        consumers: ["CLI render branch (Service-kind only)"]
+      - name: "settle_duration"
+        source: "Clock::now() - first Accepted event timestamp"
+        displayed_as: "(took 1.4s)"
+        consumers: ["render line"]
+    emotional_state:
+      entry: "Hopeful — 'will it stabilise?'"
+      exit: "Trusting — 'the line matches reality.'"
+    integration_checkpoint: |
+      `ConvergedRunning` only fires on `ServiceSubmitEvent`, never on
+      `JobSubmitEvent`. The render function `format_running_summary` is
+      reachable only from the Service code path.
+    failure_modes:
+      - "Service exits within stability window — must NOT emit ConvergedRunning"
+      - "Streaming cap (60s default) elapses with no Running observation — emit ConvergedFailed{Timeout}"
+    gherkin: |
+      Scenario: A stable Service emits ConvergedRunning with a real duration
+        Given a Service spec with replicas 1 and a workload that stays alive past the stability window
+        When the streaming submit observes the alloc reach Running and remain stable
+        Then the CLI prints "Service 'payments' is running with 1/1 replicas (took <real-duration>)"
+        And the duration is computed from Clock, not the literal "live"
+
+  - id: 4
+    name: "Inspect via alloc status"
+    command: "overdrive alloc status --job payments"
+    tui_mockup: |
+      Job:    payments    (kind: Service)
+      Spec:   sha256:a4c1...e9
+      Replicas (desired/running): 1/1
+      Listeners:
+        10.0.0.1:8080/tcp
+        (vip: pending allocation — see #167):8081/udp
+      Alloc                  State    Restarts  Since
+      ---------------------- -------- --------- ----------
+      payments-0             Running  0         00:00:02.3
+    shared_artifacts:
+      - name: "alloc_status_kind"
+        source: "AllocStatusRow.kind (denormalised at write time from spec)"
+        displayed_as: "(kind: Service)"
+        consumers: ["alloc status render"]
+      - name: "spec_digest"
+        source: "ContentHash::of(rkyv-archived spec)"
+        displayed_as: "${spec_digest}"
+        consumers: ["alloc status render header"]
+      - name: "listener_triple"
+        source: "AllocStatusRow listener fields denormalised from spec (architect to confirm shape)"
+        displayed_as: "<vip-or-pending>:<port>/<protocol>"
+        consumers: ["alloc status Listeners section"]
+      - name: "vip_assignment_state"
+        source: "AllocStatusRow listener fields"
+        displayed_as: "Pinned or '(vip: pending allocation — see #167)'"
+        consumers: ["alloc status listener line"]
+    emotional_state:
+      entry: "Confident — 'I expect to see Running.'"
+      exit: "Trusting — 'the kind label, replica count, and listener triples all match what I declared.'"
+    integration_checkpoint: |
+      `alloc status` renders the kind header before per-alloc rows.
+      For a Service with replicas==N, the header shows `Replicas (desired/running): N/M`.
+      For a Service with M listeners, the header includes a Listeners section
+      with M lines, each rendering `<vip-or-pending>:<port>/<protocol>` byte-
+      identical to the submit echo for the same spec.
+    failure_modes:
+      - "alloc_status_kind disagrees with the originally-submitted kind — protocol violation, must surface as error"
+      - "alloc status's listener triples disagree with the submit echo — byte-equality round-trip violation"
+    gherkin: |
+      Scenario: alloc status renders Service-kind context including listeners
+        Given a Service "payments" with two listeners (8080/tcp/pinned, 8081/udp/pending) has been running stably for 2 seconds
+        When the operator runs `overdrive alloc status --job payments`
+        Then the output contains "kind: Service"
+        And the output contains "Replicas (desired/running): 1/1"
+        And the output contains a "Listeners:" section
+        And both listener triples appear in declaration order
+        And every listener line in alloc status byte-equals the corresponding submit echo line
+
+integration_validation:
+  shared_artifact_consistency:
+    - artifact: "kind"
+      must_match_across: [1, 2, 3, 4]
+      failure_message: "Operator-declared kind disagrees with platform's persisted kind — protocol violation."
+    - artifact: "spec_digest"
+      must_match_across: [2, 4]
+      failure_message: "spec_digest from submit must equal spec_digest from alloc status (byte-identical round trip)."
+    - artifact: "listener_triple"
+      must_match_across: [1, 2, 4]
+      failure_message: "Listener triples must round-trip byte-identical from operator TOML through submit echo to alloc status."
+    - artifact: "vip_assignment_state"
+      must_match_across: [2, 4]
+      failure_message: "VIP assignment state (pinned vs '(vip: pending allocation — see #167)') must agree across submit echo and alloc status for the same spec."
+
+changelog:
+  - date: 2026-05-09
+    feature: workload-kind-discriminator
+    change: Initial Service journey for the kind discriminator feature.
+  - date: 2026-05-10
+    feature: workload-kind-discriminator
+    change: |
+      Folded in GH #164 (service listener spec shape). Steps 1, 2, and 4 now
+      include `[[listener]]` declarations, submit echo Listeners section, and
+      alloc status Listeners section. Pending VIPs reference #167 explicitly.
+      Two new shared artifacts: `${listener_triple}` and `${vip_assignment_state}`.
