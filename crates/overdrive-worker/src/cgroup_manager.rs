@@ -142,6 +142,201 @@ pub enum CgroupPathError {
 // Workload-cgroup management entrypoints
 // ---------------------------------------------------------------------------
 
+/// Controllers delegated to `overdrive.slice/workloads.slice` children.
+/// Per AC2 of step 01-02: enable all four (`+cpu +memory +io +pids`)
+/// for symmetry with the control-plane half rather than the
+/// bare-minimum `+cpu +memory` the resource-limit surface technically
+/// requires — costs nothing on the kernel side and avoids "why is
+/// workloads.slice narrower than overdrive.slice" reviewer comments
+/// later. Trailing newline matches the cgroup-v2 admin-guide write
+/// shape.
+const WORKLOADS_SUBTREE_CONTROL_CONTROLLERS: &str = "+cpu +memory +io +pids\n";
+
+/// Errors from the workload-side cgroup-bootstrap surface
+/// ([`create_workloads_slice_with_controllers`]).
+///
+/// Per `docs/feature/fix-cgroup-subtree-control-delegation/bugfix-rca.md`
+/// § "Production fix #2 — Typed errors", the `subtree_control` write
+/// surfaces as a discrete error variant per `.claude/rules/development.md`
+/// § "Distinct failure modes get distinct error variants" — never
+/// absorbed into a generic `io::Error`. EBUSY (a process is already
+/// in the cgroup; the slice was previously initialised in the wrong
+/// order) and "any other I/O error" carry distinct operator
+/// remediation hints.
+///
+/// Mirrors `overdrive_control_plane::error::CgroupBootstrapError` —
+/// the worker crate cannot depend on the control-plane crate
+/// (architecture is the other way around per ADR-0029), so the
+/// taxonomy is duplicated here. The two enums are kept in lockstep by
+/// review.
+#[derive(Debug, Error)]
+pub enum WorkloadsBootstrapError {
+    /// The kernel returned EBUSY on the
+    /// `overdrive.slice/workloads.slice/cgroup.subtree_control` write —
+    /// a process is already enrolled somewhere under
+    /// `workloads.slice` (an alloc scope was created BEFORE the
+    /// controllers were enabled). The cgroup v2 contract forbids
+    /// modifying `subtree_control` on a cgroup whose descendants
+    /// contain a live process.
+    ///
+    /// Operator hint: the worker must call this init BEFORE accepting
+    /// any allocations. If the leak persists across restarts, run the
+    /// leftover-cgroup cleanup discipline from
+    /// `.claude/rules/testing.md` § "Leaked workload cgroups across
+    /// runs".
+    #[error(
+        "workloads.slice `subtree_control` write rejected with EBUSY — a \
+         process is already enrolled under workloads.slice (controllers \
+         must be enabled BEFORE any alloc scope is created).\n\
+         \n\
+         Try: ensure create_workloads_slice_with_controllers is called \
+         before the convergence loop accepts any allocations. If a \
+         stale alloc scope persists across restarts, sweep leftover \
+         cgroups per the leftover-cgroup cleanup discipline.\n\
+         \n\
+         Underlying: {source}"
+    )]
+    SubtreeControlBusy {
+        /// Underlying `io::Error` carrying `ErrorKind::ResourceBusy`
+        /// (or the equivalent `raw_os_error() == EBUSY`).
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// Catch-all I/O failure on the workloads-slice setup that is NOT
+    /// EBUSY. Any other `ErrorKind` — typically `PermissionDenied`
+    /// (`EACCES` from cgroupfs delegation refusal), `NotFound` (the
+    /// enclosing slice does not exist), or a `mkdir` failure — flows
+    /// here.
+    ///
+    /// Operator hint: inspect cgroupfs delegation for `overdrive.slice`.
+    /// The control-plane pre-flight must have passed for the worker to
+    /// reach this code path; a failure here typically means the
+    /// runtime delegation surface differs (e.g. a systemd unit
+    /// replaced the slice between control-plane bootstrap and worker
+    /// bootstrap).
+    #[error(
+        "workloads.slice bootstrap failed: {source}\n\
+         \n\
+         Try: inspect cgroupfs delegation for overdrive.slice — the \
+         pre-flight passed, so this is typically a runtime divergence \
+         (a systemd unit replaced the slice between control-plane and \
+         worker bootstrap, or a concurrent operator action removed \
+         delegation).\n\
+         \n\
+         Underlying: {source}"
+    )]
+    WriteFailed {
+        /// Underlying `io::Error` for any non-EBUSY I/O failure.
+        #[source]
+        source: std::io::Error,
+    },
+}
+
+impl WorkloadsBootstrapError {
+    /// Construct from an `io::Error` returned by a `subtree_control`
+    /// write, dispatching on `ErrorKind` so EBUSY surfaces as the
+    /// discrete [`WorkloadsBootstrapError::SubtreeControlBusy`]
+    /// variant and everything else collapses into
+    /// [`WorkloadsBootstrapError::WriteFailed`].
+    ///
+    /// Mirrors `CgroupBootstrapError::from_subtree_control_io` — the
+    /// EBUSY-vs-other discrimination logic is identical because the
+    /// kernel-level contract is identical. See
+    /// `crates/overdrive-control-plane/src/error.rs`'s constructor for
+    /// the rationale on `ErrorKind::ResourceBusy` vs `raw_os_error`.
+    #[must_use]
+    pub fn from_subtree_control_io(source: std::io::Error) -> Self {
+        let is_ebusy = matches!(source.kind(), std::io::ErrorKind::ResourceBusy)
+            || source.raw_os_error() == Some(libc::EBUSY);
+        if is_ebusy { Self::SubtreeControlBusy { source } } else { Self::WriteFailed { source } }
+    }
+}
+
+/// Bootstrap the workload-bearing slice.
+///
+/// Creates `overdrive.slice/workloads.slice` and delegates the
+/// standard set of controllers (`+cpu +memory +io +pids`) to its
+/// `cgroup.subtree_control`. Called once at worker startup BEFORE the
+/// convergence loop accepts any allocations.
+///
+/// # Order is load-bearing
+///
+/// The two steps run in this order, no exceptions:
+///
+/// 1. `mkdir -p overdrive.slice/workloads.slice` (idempotent)
+/// 2. write `+cpu +memory +io +pids\n` to
+///    `overdrive.slice/workloads.slice/cgroup.subtree_control`
+///    (idempotent on already-enabled controllers — kernel accepts the
+///    re-enable as a no-op)
+///
+/// Step 2 MUST complete before any `alloc-*.scope` directory is
+/// created underneath `workloads.slice`. The cgroup v2 kernel contract
+/// forbids modifying a parent's `subtree_control` while any child
+/// cgroup contains a live process — the kernel returns `EBUSY`. The
+/// production wiring at `overdrive-control-plane::run_server_with_*`
+/// calls this init before spawning the convergence loop, satisfying
+/// the constraint.
+///
+/// # Idempotency
+///
+/// Both steps survive repeated boots: `mkdir -p` (`std::fs::create_dir_all`)
+/// is idempotent on existing directories, and the kernel treats a
+/// re-write of `+cpu +memory +io +pids` to an already-enabled
+/// `cgroup.subtree_control` as a no-op. A process supervisor calling
+/// the init on every restart sees Ok every time.
+///
+/// # Compatibility with `TempDir`-based `exec_driver` tests
+///
+/// The existing `crates/overdrive-worker/tests/integration/exec_driver/
+/// *.rs` integration tests use `tempfile::TempDir` as a fake cgroupfs
+/// root. They exercise [`create_workload_scope`] directly (per-alloc
+/// scope creation), NOT this function (parent-slice + delegation).
+/// On tmpfs the `mkdir` succeeds and the `subtree_control` write also
+/// succeeds (tmpfs honours `O_CREAT`), so calling this function
+/// against a tempdir `cgroup_root` would no-op rather than fail — but
+/// the production wiring is the only caller, and it always targets
+/// `/sys/fs/cgroup`. Phase 02 of the bugfix migrates the `TempDir`
+/// tests to real cgroupfs and removes the
+/// [`crate::cgroup_manager::remove_workload_scope`] ENOTEMPTY fallback
+/// branch that exists only for the tempdir path.
+///
+/// # Errors
+///
+/// * [`WorkloadsBootstrapError::SubtreeControlBusy`] — the kernel
+///   returned EBUSY on the `subtree_control` write because a process
+///   was already enrolled under `workloads.slice`. Operator hint in
+///   the `Display` impl: ensure no alloc scope was created before
+///   this init ran.
+/// * [`WorkloadsBootstrapError::WriteFailed`] — any other I/O failure
+///   from either the `mkdir` or the `subtree_control` write
+///   (`PermissionDenied` from cgroupfs delegation refusal,
+///   `NotFound` if the enclosing `overdrive.slice` does not exist,
+///   etc.).
+pub fn create_workloads_slice_with_controllers(
+    cgroup_root: &Path,
+) -> Result<(), WorkloadsBootstrapError> {
+    // Step 1 — mkdir overdrive.slice/workloads.slice (idempotent).
+    // `create_dir_all` covers the case where the parent overdrive.slice
+    // does not yet exist (e.g. unit-test harness ordering); production
+    // wiring runs the control-plane init first which always creates
+    // overdrive.slice, but this fn does not assume that ordering.
+    let workloads_slice = cgroup_root.join("overdrive.slice/workloads.slice");
+    std::fs::create_dir_all(&workloads_slice)
+        .map_err(|source| WorkloadsBootstrapError::WriteFailed { source })?;
+
+    // Step 2 — delegate controllers. MUST happen BEFORE any alloc
+    // scope is created under workloads.slice per the cgroup v2
+    // contract documented in this fn's "Order is load-bearing"
+    // section.
+    let subtree_control = workloads_slice.join("cgroup.subtree_control");
+    if let Err(err) = std::fs::write(&subtree_control, WORKLOADS_SUBTREE_CONTROL_CONTROLLERS) {
+        return Err(WorkloadsBootstrapError::from_subtree_control_io(err));
+    }
+
+    Ok(())
+}
+
 /// Create the workload scope directory under `root`.
 /// `mkdir -p` semantics; idempotent on directory already existing.
 ///
@@ -610,5 +805,89 @@ mod tests {
             scope.resolve(tmp.path()).join("memory.max").exists(),
             "memory.max must be written on the happy path",
         );
+    }
+
+    /// `WorkloadsBootstrapError::from_subtree_control_io` discriminates
+    /// EBUSY (typed `SubtreeControlBusy`) from any other I/O error
+    /// (typed `WriteFailed`). Pins the `||` and `==` mutations on
+    /// the EBUSY check — `||` → `&&` would force both
+    /// `ResourceBusy` AND `raw_os_error == EBUSY` to be true; `==`
+    /// → `!=` would invert the raw-os-error match. Either mutation
+    /// reroutes EBUSY into the catch-all `WriteFailed` arm.
+    #[test]
+    fn from_subtree_control_io_discriminates_ebusy_via_resource_busy_kind() {
+        let err = std::io::Error::from(std::io::ErrorKind::ResourceBusy);
+        let mapped = WorkloadsBootstrapError::from_subtree_control_io(err);
+        assert!(
+            matches!(mapped, WorkloadsBootstrapError::SubtreeControlBusy { .. }),
+            "ResourceBusy ErrorKind must map to SubtreeControlBusy; got {mapped:?}",
+        );
+    }
+
+    #[test]
+    fn from_subtree_control_io_discriminates_ebusy_via_raw_os_error() {
+        let err = std::io::Error::from_raw_os_error(libc::EBUSY);
+        let mapped = WorkloadsBootstrapError::from_subtree_control_io(err);
+        assert!(
+            matches!(mapped, WorkloadsBootstrapError::SubtreeControlBusy { .. }),
+            "raw_os_error == EBUSY must map to SubtreeControlBusy; got {mapped:?}",
+        );
+    }
+
+    #[test]
+    fn from_subtree_control_io_routes_non_ebusy_to_write_failed() {
+        let err = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        let mapped = WorkloadsBootstrapError::from_subtree_control_io(err);
+        assert!(
+            matches!(mapped, WorkloadsBootstrapError::WriteFailed { .. }),
+            "PermissionDenied must map to WriteFailed (NOT EBUSY); got {mapped:?}",
+        );
+
+        let err = std::io::Error::from(std::io::ErrorKind::NotFound);
+        let mapped = WorkloadsBootstrapError::from_subtree_control_io(err);
+        assert!(
+            matches!(mapped, WorkloadsBootstrapError::WriteFailed { .. }),
+            "NotFound must map to WriteFailed (NOT EBUSY); got {mapped:?}",
+        );
+    }
+
+    /// `create_workloads_slice_with_controllers` performs the two
+    /// load-bearing writes on `cgroup_root`: `mkdir -p
+    /// overdrive.slice/workloads.slice` and write `+cpu +memory +io
+    /// +pids\n` to `workloads.slice/cgroup.subtree_control`. Pinning
+    /// both side effects on a tempdir-as-cgroupfs (tmpfs honours
+    /// `O_CREAT`, so the `subtree_control` write succeeds) kills the
+    /// body→`Ok(())` mutation — the mutant skips both writes; the
+    /// directory does NOT appear and the file does NOT appear, and
+    /// the assertions catch both.
+    #[test]
+    fn create_workloads_slice_with_controllers_creates_dir_and_writes_subtree_control() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let cgroup_root = tmp.path();
+        create_workloads_slice_with_controllers(cgroup_root)
+            .expect("init must succeed against tempdir-as-cgroupfs");
+
+        let workloads_slice = cgroup_root.join("overdrive.slice/workloads.slice");
+        assert!(workloads_slice.is_dir(), "workloads.slice dir must exist after init");
+
+        let subtree_control = workloads_slice.join("cgroup.subtree_control");
+        let body =
+            std::fs::read_to_string(&subtree_control).expect("subtree_control must be written");
+        assert_eq!(
+            body, "+cpu +memory +io +pids\n",
+            "subtree_control body must match the canonical four-controller delegation",
+        );
+    }
+
+    /// `create_workloads_slice_with_controllers` is idempotent on
+    /// repeated invocation against the same `cgroup_root`. Pins the
+    /// `mkdir -p` semantics + the kernel-level no-op contract on
+    /// re-writing an already-enabled `subtree_control`.
+    #[test]
+    fn create_workloads_slice_with_controllers_is_idempotent() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let cgroup_root = tmp.path();
+        create_workloads_slice_with_controllers(cgroup_root).expect("first call");
+        create_workloads_slice_with_controllers(cgroup_root).expect("second call must be Ok");
     }
 }

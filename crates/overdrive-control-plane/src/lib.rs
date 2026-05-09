@@ -472,6 +472,20 @@ pub async fn run_server_with_obs_and_driver(
     cgroup_preflight::run_preflight().map_err(error::ControlPlaneError::from)?;
     cgroup_manager::create_and_enrol_control_plane_slice()
         .map_err(|e| error::ControlPlaneError::internal("create control-plane slice", e))?;
+    // Per `docs/feature/fix-cgroup-subtree-control-delegation/bugfix-rca.md`
+    // § "Production fix #2": delegate `+cpu +memory +io +pids` to
+    // `overdrive.slice/workloads.slice/cgroup.subtree_control` BEFORE
+    // the convergence loop accepts any allocations. Without this, the
+    // per-alloc `cpu.weight` / `memory.max` writes return EACCES on
+    // real cgroupfs (the resource interface files do not exist on
+    // children of a slice whose subtree_control is empty), silently
+    // absorbed by the ADR-0026 D9 warn-and-continue disposition.
+    // Order vs the control-plane init above does not matter — the two
+    // touch disjoint slice paths.
+    overdrive_worker::cgroup_manager::create_workloads_slice_with_controllers(
+        std::path::Path::new(cgroup_preflight::DEFAULT_CGROUP_ROOT),
+    )
+    .map_err(|e| error::ControlPlaneError::internal("create workloads slice", e))?;
 
     // Install the rustls process-wide CryptoProvider (ring) exactly
     // once. The workspace enables only the `ring` feature, but rustls

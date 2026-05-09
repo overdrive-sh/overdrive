@@ -110,6 +110,12 @@ mod integration {
         mod preflight_subtree_control_unreadable;
         mod preflight_v1_host;
         mod server_enrols_in_slice;
+        /// Step 01-02 of `fix-cgroup-subtree-control-delegation` —
+        /// idempotency regression for both the control-plane and the
+        /// new `create_workloads_slice_with_controllers` inits. A
+        /// second boot of the supervisor must re-enable controllers
+        /// as a kernel no-op rather than EBUSY.
+        mod subtree_control_delegation_is_idempotent;
     }
 
     /// `cargo openapi-{gen,check}` library + binary scenarios — relocated
