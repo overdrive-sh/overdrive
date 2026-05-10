@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{
-    DriverInput, ExecInput, Job, JobSpecInput, Node, NodeSpecInput, ResourcesInput,
+    DriverInput, ExecInput, Job, JobSpecInput, Node, NodeSpecInput, ResourcesInput, WorkloadKind,
 };
 use overdrive_core::reconciler::{
     AnyReconciler, AnyReconcilerView, AnyState, JobLifecycle, JobLifecycleState, JobLifecycleView,
@@ -65,6 +65,7 @@ fn happy_path_state() -> JobLifecycleState {
         desired_to_stop: false,
         nodes,
         allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::default(),
     }
 }
 
@@ -83,6 +84,7 @@ fn job_lifecycle_satisfies_reconciler_is_pure_invariant() {
         desired_to_stop: false,
         nodes: desired_inner.nodes.clone(),
         allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::default(),
     };
     let desired = AnyState::JobLifecycle(desired_inner);
     let actual = AnyState::JobLifecycle(actual_inner);
@@ -121,6 +123,7 @@ fn job_lifecycle_run_emits_start_allocation_when_no_running_alloc() {
         desired_to_stop: false,
         nodes: desired_inner.nodes.clone(),
         allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::default(),
     };
     let desired = AnyState::JobLifecycle(desired_inner);
     let actual = AnyState::JobLifecycle(actual_inner);

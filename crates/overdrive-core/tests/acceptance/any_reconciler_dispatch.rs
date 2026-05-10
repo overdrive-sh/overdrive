@@ -30,7 +30,7 @@ use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
-use overdrive_core::aggregate::Node;
+use overdrive_core::aggregate::{Node, WorkloadKind};
 use overdrive_core::id::{JobId, NodeId, Region};
 use overdrive_core::reconciler::{
     Action, AnyReconciler, AnyReconcilerView, AnyState, JobLifecycle, JobLifecycleState,
@@ -108,12 +108,14 @@ fn dispatch_routes_job_lifecycle_triple_to_job_lifecycle_view() {
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::default(),
     };
     let actual = JobLifecycleState {
         job: None,
         desired_to_stop: false,
         nodes,
         allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::default(),
     };
     let view =
         AnyReconcilerView::JobLifecycle(overdrive_core::reconciler::JobLifecycleView::default());

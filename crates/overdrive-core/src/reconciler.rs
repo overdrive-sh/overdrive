@@ -162,13 +162,13 @@ use serde::de::DeserializeOwned;
 use std::collections::BTreeMap;
 
 use crate::SpiffeId;
-use crate::aggregate::{Exec, Job, Node, WorkloadDriver};
+use crate::aggregate::{Exec, Job, Node, WorkloadDriver, WorkloadKind};
 use crate::dataplane::fingerprint::BackendSetFingerprint;
 use crate::id::{AllocationId, ContentHash, CorrelationKey, JobId, NodeId, ServiceId, ServiceVip};
 use crate::traits::dataplane::Backend;
 use crate::traits::driver::{AllocationSpec, Resources};
 use crate::traits::observation_store::{AllocState, AllocStatusRow, ServiceHydrationStatus};
-use crate::transition_reason::{StoppedBy, TerminalCondition};
+use crate::transition_reason::{StoppedBy, TerminalCondition, TransitionReason};
 use crate::wall_clock::UnixInstant;
 
 // ---------------------------------------------------------------------------
@@ -401,6 +401,28 @@ pub struct JobLifecycleState {
     /// Read from `ObservationStore::alloc_status_rows` filtered by
     /// `job_id`. Empty when no allocations yet exist.
     pub allocations: BTreeMap<AllocationId, AllocStatusRow>,
+    /// Workload kind discriminator per ADR-0047 §1 / ADR-0037 Amendment
+    /// 2026-05-10. Drives the natural-exit branching in
+    /// [`JobLifecycle::reconcile`]:
+    ///
+    /// - `WorkloadKind::Job` — a terminal alloc (clean exit OR crash)
+    ///   is the *natural* end of the workload. The reconciler emits
+    ///   `Action::FinalizeFailed` carrying
+    ///   `Some(TerminalCondition::Completed { exit_code: 0 })` for a
+    ///   `Stopped { by: Process }` row, and
+    ///   `Some(TerminalCondition::Failed { exit_code: N })` for a
+    ///   crashed row. No restart attempts.
+    /// - `WorkloadKind::Service` (and `WorkloadKind::Schedule` —
+    ///   Phase 1 ships no schedule-firing reconciler logic) — preserves
+    ///   the existing restart-budget semantics; a Failed alloc with
+    ///   budget remaining flows through `RestartAllocation`, exhausting
+    ///   the budget produces `FinalizeFailed { BackoffExhausted }`.
+    ///
+    /// Hydrated by `reconciler_runtime::hydrate_desired` from the
+    /// active `WorkloadSpec` variant. Phase 1 default for legacy
+    /// callers is `WorkloadKind::Service` (the kind-agnostic shape
+    /// today's reconciler emulates).
+    pub workload_kind: WorkloadKind,
 }
 
 // ---------------------------------------------------------------------------
@@ -1105,6 +1127,16 @@ impl Reconciler for JobLifecycle {
         &self.name
     }
 
+    // Per ADR-0023 + ADR-0037 §4 the reconcile body is the single
+    // dispatch surface for every JobLifecycle decision branch (Stop,
+    // Absent, Run → {Running, Operator-stopped, Job-natural-exit,
+    // Restart-with-budget, NoCapacity-fresh-schedule}). Splitting it
+    // into N helper fns would require threading every read of
+    // `desired` / `actual` / `view` / `tick` through arguments;
+    // each branch is short and self-contained, and the line count is
+    // dominated by the inline-comment audit trail per the project's
+    // documentation discipline (`.claude/rules/development.md`).
+    #[allow(clippy::too_many_lines)]
     fn reconcile(
         &self,
         desired: &Self::State,
@@ -1202,6 +1234,44 @@ impl Reconciler for JobLifecycle {
                 // by direct CLI / API operator action.)
                 if allocs_vec.iter().any(|r| is_operator_stopped(r)) {
                     return (Vec::new(), view.clone());
+                }
+
+                // Job-kind natural-exit handler per ADR-0037 Amendment
+                // 2026-05-10 / ADR-0047 §1. A run-to-completion workload
+                // (`WorkloadKind::Job`) terminates on the first observed
+                // exit — clean OR crashed — and the reconciler emits
+                // `Action::FinalizeFailed` carrying the typed terminal
+                // claim. There are no restart attempts (the workload's
+                // contract is "run once, until it exits"). Service-kind
+                // (and Schedule-kind, Phase 1 no-op) flow through the
+                // existing restart-budget branch below — preserves the
+                // pre-feature kind-agnostic semantics that the Service
+                // shape today emulates.
+                //
+                // Idempotency guard: if the row already carries a
+                // Completed/Failed terminal claim the reconciler has
+                // already finalised this alloc on a prior tick — do not
+                // re-emit. Without this guard the action shim's
+                // level-triggered re-enqueue would emit FinalizeFailed
+                // every tick forever once the alloc reached terminal.
+                if desired.workload_kind == WorkloadKind::Job {
+                    if let Some(terminal_alloc) = allocs_vec.iter().find(|r| is_natural_exit(r)) {
+                        if matches!(
+                            terminal_alloc.terminal,
+                            Some(
+                                TerminalCondition::Completed { .. }
+                                    | TerminalCondition::Failed { .. }
+                            )
+                        ) {
+                            return (Vec::new(), view.clone());
+                        }
+                        let typed = classify_natural_exit_terminal(terminal_alloc);
+                        let action = Action::FinalizeFailed {
+                            alloc_id: terminal_alloc.alloc_id.clone(),
+                            terminal: Some(typed),
+                        };
+                        return (vec![action], view.clone());
+                    }
                 }
 
                 // Failed alloc with attempt budget remaining and
@@ -1464,6 +1534,69 @@ fn is_restartable(row: &AllocStatusRow) -> bool {
     let restartable_state =
         matches!(row.state, AllocState::Terminated | AllocState::Draining | AllocState::Failed);
     restartable_state && !is_operator_stopped(row)
+}
+
+/// True iff the alloc row represents a *natural exit* the Job-kind
+/// reconciler should finalize on — a terminal lifecycle state (Failed
+/// OR Terminated) whose `reason` is NOT an operator stop. Per
+/// ADR-0037 Amendment 2026-05-10 / ADR-0047 §1: Job kind terminates on
+/// the first observed exit (clean OR crashed). Operator-stopped rows
+/// are excluded — they are handled by the upstream
+/// `is_operator_stopped` short-circuit and carry their own
+/// `Stopped { by: Operator }` terminal claim downstream.
+fn is_natural_exit(row: &AllocStatusRow) -> bool {
+    let terminal_state = matches!(row.state, AllocState::Terminated | AllocState::Failed);
+    terminal_state && !is_operator_stopped(row)
+}
+
+/// Classify a natural-exit alloc row into the typed
+/// [`TerminalCondition::Completed { exit_code }`] / [`TerminalCondition::Failed { exit_code }`]
+/// variant per ADR-0037 Amendment 2026-05-10.
+///
+/// The `exit_code` source today is encoded in the row's existing shape
+/// (the field that step 02-05 will lift onto a typed
+/// `AllocStatusRow.exit_code` column):
+///
+/// - `state: Terminated`, `reason: Stopped { by: Process }` — clean
+///   exit. Maps to `Completed { exit_code: 0 }`. The `Process` source
+///   on `Stopped` IS the canonical signal that the workload exited
+///   cleanly; `exit_code` is `0` by definition for this row shape
+///   (the `ExitObserver`'s `CleanExit` path emits exactly this).
+/// - `state: Failed`, `reason: DriverInternalError { detail }` —
+///   crash. The `detail` string today carries `"exit_code=N"` /
+///   `"signal=N"` / `"unknown_exit"` per
+///   `worker::exit_observer::format_crash_detail`. Parses an integer
+///   exit code out of the `exit_code=` prefix; falls back to `0` for
+///   signal-only / unknown shapes (signal-encoded statuses become a
+///   typed field surface in step 02-05).
+/// - Anything else — falls back to `Failed { exit_code: 0 }`. This
+///   is structurally rare (`is_natural_exit` already filters
+///   non-terminal states); the catch-all preserves total dispatch.
+fn classify_natural_exit_terminal(row: &AllocStatusRow) -> TerminalCondition {
+    if row.state == AllocState::Terminated
+        && matches!(row.reason, Some(TransitionReason::Stopped { by: StoppedBy::Process }))
+    {
+        return TerminalCondition::Completed { exit_code: 0 };
+    }
+    let exit_code = parse_exit_code_from_reason(row.reason.as_ref());
+    TerminalCondition::Failed { exit_code }
+}
+
+/// Parse `"exit_code=N"` out of the legacy
+/// `TransitionReason::DriverInternalError { detail }` shape today's
+/// `worker::exit_observer::format_crash_detail` writes. Returns `0`
+/// for any other shape (no detail, signal-only, malformed integer).
+/// Step 02-05 lifts this onto a typed `AllocStatusRow.exit_code`
+/// column and removes the parse path; until then this is the
+/// minimal-shim that satisfies the unit-level reconciler tests per the
+/// step-02-04 acceptance criteria.
+fn parse_exit_code_from_reason(reason: Option<&TransitionReason>) -> i32 {
+    match reason {
+        Some(TransitionReason::DriverInternalError { detail }) => {
+            detail.strip_prefix("exit_code=").and_then(|n| n.parse::<i32>().ok()).unwrap_or(0)
+        }
+        _ => 0,
+    }
 }
 
 /// `JobLifecycle` reconciler's typed view — the libSQL-hydrated

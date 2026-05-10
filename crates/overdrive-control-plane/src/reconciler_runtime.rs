@@ -40,7 +40,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
-use overdrive_core::aggregate::{IntentKey, Job, Node};
+use overdrive_core::aggregate::{IntentKey, Job, Node, WorkloadKind};
 use overdrive_core::id::{JobId, NodeId};
 #[cfg(any(test, feature = "integration-tests"))]
 use overdrive_core::reconciler::ServiceMapHydrator;
@@ -912,7 +912,27 @@ async fn hydrate_desired(
             let nodes = baseline_nodes_phase1();
             // `desired.allocations` is unused by the JobLifecycle
             // reconciler — it inspects `actual.allocations`.
-            let s = JobLifecycleState { job, desired_to_stop, nodes, allocations: BTreeMap::new() };
+            // ADR-0037 Amendment 2026-05-10 / ADR-0047 §1: per slice 02-04
+            // the reconciler branches on workload kind for natural-exit
+            // terminals. The Phase 1 `Job` aggregate does not yet carry
+            // a `WorkloadKind` field — that lifting lands in slice 02-06
+            // when the streaming side wires kind through the IntentStore
+            // → reconciler boundary. Until then, the hydrator defaults
+            // the kind to `Service`, which preserves the pre-feature
+            // kind-agnostic semantics that the Service shape today
+            // emulates (long-running, restart-budget-driven). This is a
+            // no-op for Service-shape workloads and a temporary
+            // back-compat shim for Job-shape workloads — Job-kind
+            // natural-exit emission is unit-tested directly via the
+            // reconciler's State input parameter.
+            let workload_kind = WorkloadKind::default();
+            let s = JobLifecycleState {
+                job,
+                desired_to_stop,
+                nodes,
+                allocations: BTreeMap::new(),
+                workload_kind,
+            };
             Ok(AnyState::JobLifecycle(s))
         }
         AnyReconciler::ServiceMapHydrator(_) => {
@@ -1011,7 +1031,20 @@ async fn hydrate_actual(
             // `actual.job` is unused — the reconciler reads desired.job.
             // `actual.desired_to_stop` is also unused (only the desired
             // side carries it); set false unconditionally.
-            let s = JobLifecycleState { job: None, desired_to_stop: false, nodes, allocations };
+            // ADR-0037 Amendment 2026-05-10 / ADR-0047 §1: per slice 02-04
+            // the reconciler branches on workload kind for natural-exit
+            // terminals. The `actual` side mirrors the `desired` side's
+            // back-compat default (Service); only the `desired` side
+            // drives `reconcile`'s kind-branching logic, but constructing
+            // both with the same default keeps the field semantically
+            // uniform across the State pair.
+            let s = JobLifecycleState {
+                job: None,
+                desired_to_stop: false,
+                nodes,
+                allocations,
+                workload_kind: WorkloadKind::default(),
+            };
             Ok(AnyState::JobLifecycle(s))
         }
         AnyReconciler::ServiceMapHydrator(_) => {

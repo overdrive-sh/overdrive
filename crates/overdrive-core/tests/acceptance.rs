@@ -124,4 +124,12 @@ mod acceptance {
     // the new variants for every `i32` exit code (1024 cases including
     // boundary values + common Unix exit codes).
     mod transition_reason_roundtrip;
+
+    // workload-kind-discriminator Slice 02b (step 02-04) — Job-vs-Service
+    // branching in `JobLifecycle::reconcile` for natural-exit terminals.
+    // Job kind emits typed `TerminalCondition::Completed { exit_code }` /
+    // `Failed { exit_code }`; Service kind preserves existing
+    // restart-budget semantics. Per ADR-0037 Amendment 2026-05-10 +
+    // ADR-0047 §1.
+    mod job_lifecycle_natural_exit;
 }

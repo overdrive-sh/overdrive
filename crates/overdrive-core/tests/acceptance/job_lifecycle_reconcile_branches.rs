@@ -46,7 +46,7 @@ use std::num::NonZeroU32;
 use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
-use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver};
+use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver, WorkloadKind};
 use overdrive_core::id::{AllocationId, JobId, NodeId, Region};
 use overdrive_core::reconciler::{
     Action, JobLifecycle, JobLifecycleState, JobLifecycleView, RESTART_BACKOFF_CEILING,
@@ -177,8 +177,15 @@ fn stop_branch_skipped_when_stop_intent_set_but_no_job() {
         desired_to_stop: true,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::default(),
     };
-    let actual = JobLifecycleState { job: None, desired_to_stop: false, nodes, allocations };
+    let actual = JobLifecycleState {
+        job: None,
+        desired_to_stop: false,
+        nodes,
+        allocations,
+        workload_kind: WorkloadKind::default(),
+    };
     let view = JobLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
@@ -208,12 +215,14 @@ fn stop_branch_skipped_when_job_present_but_no_stop_intent() {
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::default(),
     };
     let actual = JobLifecycleState {
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
         allocations,
+        workload_kind: WorkloadKind::default(),
     };
     let view = JobLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
@@ -257,12 +266,14 @@ fn stop_branch_emits_one_stop_per_running_alloc_only() {
         desired_to_stop: true,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::default(),
     };
     let actual = JobLifecycleState {
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
         allocations: allocs,
+        workload_kind: WorkloadKind::default(),
     };
     let view = JobLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
@@ -312,12 +323,14 @@ fn run_branch_emits_nothing_when_an_alloc_is_already_running() {
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::default(),
     };
     let actual = JobLifecycleState {
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
         allocations,
+        workload_kind: WorkloadKind::default(),
     };
     let view = JobLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
@@ -343,12 +356,14 @@ fn run_branch_starts_fresh_alloc_when_no_running_no_failed() {
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::default(),
     };
     let actual = JobLifecycleState {
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
         allocations: empty_alloc_map(),
+        workload_kind: WorkloadKind::default(),
     };
     let view = JobLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
@@ -443,12 +458,14 @@ fn run_with_failed_alloc_and_attempts(attempts: u32) -> Vec<Action> {
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::default(),
     };
     let actual = JobLifecycleState {
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
         allocations,
+        workload_kind: WorkloadKind::default(),
     };
     let mut restart_counts = BTreeMap::new();
     restart_counts.insert(aid("alloc-payments-0"), attempts);
@@ -543,12 +560,14 @@ fn run_with_failed_alloc_and_seen_at(now_unix: UnixInstant, seen_at: UnixInstant
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::default(),
     };
     let actual = JobLifecycleState {
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
         allocations,
+        workload_kind: WorkloadKind::default(),
     };
     let mut last_failure_seen_at = BTreeMap::new();
     last_failure_seen_at.insert(aid("alloc-payments-0"), seen_at);
@@ -599,12 +618,14 @@ fn fresh_failure_writes_seen_at_into_next_view() {
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::default(),
     };
     let actual = JobLifecycleState {
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
         allocations,
+        workload_kind: WorkloadKind::default(),
     };
     // view is empty — fresh failure, no prior restart bookkeeping.
     let view = JobLifecycleView::default();
@@ -661,12 +682,14 @@ fn subsequent_tick_within_backoff_window_emits_nothing() {
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::default(),
     };
     let actual = JobLifecycleState {
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
         allocations,
+        workload_kind: WorkloadKind::default(),
     };
 
     // Tick 1: fresh failure. Capture next_view as the input to tick 2.
@@ -730,12 +753,14 @@ fn tick_after_backoff_elapsed_emits_restart_and_advances_seen_at() {
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::default(),
     };
     let actual = JobLifecycleState {
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
         allocations,
+        workload_kind: WorkloadKind::default(),
     };
 
     // Tick 1: fresh failure.
@@ -832,12 +857,14 @@ fn stop_branch_clears_last_failure_seen_at_when_no_running_allocs() {
         desired_to_stop: true,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::default(),
     };
     let actual = JobLifecycleState {
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
         allocations,
+        workload_kind: WorkloadKind::default(),
     };
 
     // Seed the view: restart_counts < CEILING (so

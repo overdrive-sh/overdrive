@@ -47,7 +47,7 @@ use std::num::NonZeroU32;
 use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
-use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver};
+use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver, WorkloadKind};
 use overdrive_core::id::{AllocationId, JobId, NodeId, Region};
 use overdrive_core::reconciler::{
     Action, JobLifecycle, JobLifecycleState, JobLifecycleView, RESTART_BACKOFF_DURATION,
@@ -142,12 +142,14 @@ fn failed_alloc_state(state: AllocState) -> (JobLifecycleState, JobLifecycleStat
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::default(),
     };
     let actual = JobLifecycleState {
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
         allocations,
+        workload_kind: WorkloadKind::default(),
     };
     (desired, actual)
 }

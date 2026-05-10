@@ -349,28 +349,44 @@ async fn dispatch_single(
         // action is observation-only or deferred.
         Action::Noop | Action::StartWorkflow { .. } | Action::HttpCall { .. } => Ok(()),
         // FinalizeFailed: the reconciler has decided this allocation
-        // has reached a terminal failure (e.g. restart budget
-        // exhausted). Per ADR-0037 §4 the shim threads the
-        // `Action.terminal` value onto BOTH `AllocStatusRow.terminal`
-        // (durable surface, written via `obs.write`) AND
-        // `LifecycleEvent.terminal` (broadcast surface, emitted via
-        // `bus.send`) in the same call frame — both surfaces come
-        // from the same source value, so drift is structurally
-        // impossible.
+        // has reached a terminal lifecycle moment. Per ADR-0037 §4 the
+        // shim threads the `Action.terminal` value onto BOTH
+        // `AllocStatusRow.terminal` (durable surface, written via
+        // `obs.write`) AND `LifecycleEvent.terminal` (broadcast surface,
+        // emitted via `bus.send`) in the same call frame — both
+        // surfaces come from the same source value, so drift is
+        // structurally impossible.
+        //
+        // The reconciler emits `FinalizeFailed` for several distinct
+        // typed terminal claims, all flowing through the same arm
+        // here unchanged:
+        // - `BackoffExhausted { attempts }` — restart budget exceeded
+        //   for a Service-shape workload (per existing ADR-0037 §4).
+        // - `Completed { exit_code: 0 }` — Job-kind workload exited
+        //   cleanly (per ADR-0037 Amendment 2026-05-10 / ADR-0047 §1,
+        //   landed in slice 02-04).
+        // - `Failed { exit_code: N }` — Job-kind workload exited with
+        //   non-zero status (per ADR-0037 Amendment 2026-05-10).
         //
         // The row is written with `state: Failed` (per ADR-0032 §5
         // distinguishes "operator stopped" → Terminated from
-        // "driver could not start / budget exhausted" → Failed). The
-        // `reason` field propagates the prior row's typed leaf cause
-        // unchanged (e.g. `ExecBinaryNotFound { path }`); the typed
-        // terminal claim lives on the orthogonal `terminal` field per
-        // ADR-0037 §4. Synthesising a `RestartBudgetExhausted { attempts,
-        // last_cause_summary }` reason here would duplicate `attempts`
-        // (already on `terminal`) and stringify the typed leaf cause
-        // into `last_cause_summary` — both violations of `.claude/rules/
-        // development.md` § "Persist inputs, not derived state". Wire
-        // consumers wanting the "we gave up after N" framing render it
-        // from `terminal` directly.
+        // "driver could not start / budget exhausted / Job exit" →
+        // Failed). The `reason` field propagates the prior row's typed
+        // leaf cause unchanged (e.g. `ExecBinaryNotFound { path }`);
+        // the typed terminal claim lives on the orthogonal `terminal`
+        // field per ADR-0037 §4. Synthesising a derived `reason` here
+        // (e.g. `RestartBudgetExhausted { attempts, last_cause_summary }`)
+        // would duplicate `attempts` (already on `terminal`) and
+        // stringify the typed leaf cause into `last_cause_summary` —
+        // both violations of `.claude/rules/development.md`
+        // § "Persist inputs, not derived state". Wire consumers wanting
+        // the "we gave up after N" / "exited cleanly" / "exited with N"
+        // framing render it from `terminal` directly. The streaming
+        // dispatcher's `submit_event_from_terminal` projection consumes
+        // the variants — the explicit Job-kind mapping
+        // (`Completed → Succeeded`, `Failed → Failed`) lands in slice
+        // 02-06; until then both variants flow through the wildcard
+        // `_ => ConvergedFailed` arm so the stream still terminates.
         Action::FinalizeFailed { alloc_id, terminal } => {
             let Some(prior_row) = find_prior_alloc_row(obs, &alloc_id).await? else {
                 // No prior row — nothing to finalize against. This is

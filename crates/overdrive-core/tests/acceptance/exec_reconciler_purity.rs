@@ -27,7 +27,7 @@ use std::num::NonZeroU32;
 use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
-use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver};
+use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver, WorkloadKind};
 use overdrive_core::id::{AllocationId, JobId, NodeId, Region};
 use overdrive_core::reconciler::{
     Action, JobLifecycle, JobLifecycleState, JobLifecycleView, Reconciler, TickContext,
@@ -151,12 +151,14 @@ fn start_action_carries_full_alloc_spec_from_live_job_command_and_args() {
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::default(),
     };
     let actual = JobLifecycleState {
         job: Some(job),
         desired_to_stop: false,
         nodes,
         allocations: empty_alloc_map(),
+        workload_kind: WorkloadKind::default(),
     };
     let view = JobLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
@@ -213,8 +215,15 @@ fn restart_action_carries_full_alloc_spec_from_live_job() {
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::default(),
     };
-    let actual = JobLifecycleState { job: Some(job), desired_to_stop: false, nodes, allocations };
+    let actual = JobLifecycleState {
+        job: Some(job),
+        desired_to_stop: false,
+        nodes,
+        allocations,
+        workload_kind: WorkloadKind::default(),
+    };
     // attempts=0, no deadline → restart fires immediately.
     let view = JobLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
@@ -270,12 +279,14 @@ fn reconcile_with_exec_spec_is_deterministic_across_twin_invocations() {
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::default(),
     };
     let actual = JobLifecycleState {
         job: Some(job),
         desired_to_stop: false,
         nodes,
         allocations: empty_alloc_map(),
+        workload_kind: WorkloadKind::default(),
     };
     let view = JobLifecycleView::default();
 

@@ -39,7 +39,7 @@ use std::num::NonZeroU32;
 use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
-use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver};
+use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver, WorkloadKind};
 use overdrive_core::id::{AllocationId, JobId, NodeId, Region};
 use overdrive_core::reconciler::{
     Action, JobLifecycle, JobLifecycleState, JobLifecycleView, Reconciler, TickContext,
@@ -117,12 +117,14 @@ fn placement_actions(
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::default(),
     };
     let actual = JobLifecycleState {
         job: Some(job),
         desired_to_stop: false,
         nodes,
         allocations: current_allocs,
+        workload_kind: WorkloadKind::default(),
     };
     let view = JobLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));

@@ -98,9 +98,16 @@ pub enum ParseError {
 
 /// Three-way kind discriminator. Mirrors the variant tags of
 /// [`WorkloadSpec`] and [`WorkloadSpecInput`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// `Default == Service` per ADR-0037 Amendment 2026-05-10 / ADR-0047 §1:
+/// before slice 02-04 the reconciler was kind-agnostic and emulated the
+/// Service shape (long-running, restart-budget-driven). Defaulting to
+/// `Service` preserves that behavior at every call site that has not
+/// yet been wired through to populate the kind explicitly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WorkloadKind {
     /// Long-running supervised workload — a `[service]` body in TOML.
+    #[default]
     Service,
     /// Run-to-completion workload — a `[job]` body in TOML.
     Job,

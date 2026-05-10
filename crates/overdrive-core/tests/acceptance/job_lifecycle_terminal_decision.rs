@@ -35,7 +35,7 @@ use std::num::NonZeroU32;
 use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
-use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver};
+use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver, WorkloadKind};
 use overdrive_core::id::{AllocationId, JobId, NodeId, Region};
 use overdrive_core::reconciler::{
     Action, JobLifecycle, JobLifecycleState, JobLifecycleView, RESTART_BACKOFF_CEILING, Reconciler,
@@ -145,12 +145,14 @@ fn job_lifecycle_stamps_backoff_exhausted_terminal_when_attempts_reach_ceiling()
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::default(),
     };
     let actual = JobLifecycleState {
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
         allocations,
+        workload_kind: WorkloadKind::default(),
     };
     let mut restart_counts = BTreeMap::new();
     restart_counts.insert(aid("alloc-payments-0"), RESTART_BACKOFF_CEILING);
@@ -192,12 +194,14 @@ fn job_lifecycle_stamps_stopped_terminal_when_operator_stop_converges() {
         desired_to_stop: true,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::default(),
     };
     let actual = JobLifecycleState {
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
         allocations,
+        workload_kind: WorkloadKind::default(),
     };
     let view = JobLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
@@ -229,12 +233,14 @@ fn job_lifecycle_emits_no_terminal_for_pending_to_running() {
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::default(),
     };
     let actual = JobLifecycleState {
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
         allocations: empty_alloc_map(),
+        workload_kind: WorkloadKind::default(),
     };
     let view = JobLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
@@ -272,12 +278,14 @@ fn job_lifecycle_emits_no_terminal_when_failed_with_budget_remaining() {
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::default(),
     };
     let actual = JobLifecycleState {
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
         allocations,
+        workload_kind: WorkloadKind::default(),
     };
     let mut restart_counts = BTreeMap::new();
     // Budget remaining: attempts < ceiling.
@@ -353,12 +361,14 @@ proptest! {
             desired_to_stop,
             nodes: nodes.clone(),
             allocations: BTreeMap::new(),
+                    workload_kind: WorkloadKind::default(),
         };
         let actual = JobLifecycleState {
             job: Some(make_job("payments")),
             desired_to_stop: false,
             nodes,
             allocations,
+            workload_kind: WorkloadKind::default(),
         };
         let mut restart_counts = BTreeMap::new();
         restart_counts.insert(aid("alloc-payments-0"), attempts);

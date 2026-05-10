@@ -27,7 +27,7 @@ use std::time::Duration;
 use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
 use overdrive_control_plane::{AppState, job_lifecycle, noop_heartbeat};
 use overdrive_core::aggregate::{
-    DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
+    DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput, WorkloadKind,
 };
 use overdrive_core::eval_broker::Evaluation;
 use overdrive_core::id::{AllocationId, NodeId};
@@ -802,12 +802,14 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::default(),
     });
     let actual = AnyState::JobLifecycle(JobLifecycleState {
         job: None,
         desired_to_stop: false,
         nodes,
         allocations,
+        workload_kind: WorkloadKind::default(),
     });
 
     // Single TickContext shared across both reconcile calls — same
