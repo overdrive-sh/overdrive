@@ -113,6 +113,12 @@ mod acceptance {
     mod coinflip_migration;
     mod workload_spec_parser;
 
+    // workload-kind-discriminator Slice 06 — Service `[[listener]]`
+    // spec shape per ADR-0047 §1. S-08-01..S-08-06 (per-scenario
+    // parser tests) + S-08-10 (round-trip property test).
+    mod listener_parser;
+    mod listener_roundtrip;
+
     // workload-kind-discriminator Slice 05 — parser-side cron
     // required-field scenario. S-05-04 in distill/test-scenarios.md §5.
     mod schedule_parser;

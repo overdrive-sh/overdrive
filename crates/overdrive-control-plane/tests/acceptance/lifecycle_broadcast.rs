@@ -427,6 +427,7 @@ async fn stop_action_also_broadcasts_lifecycle_event() {
         terminal: None,
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
+        listeners: Vec::new(),
     };
     obs.write(ObservationRow::AllocStatus(prior_row)).await.expect("seed prior row");
 

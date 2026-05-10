@@ -655,6 +655,46 @@ components:
         Carries `utoipa::ToSchema` so the generated `OpenAPI` document
         (ADR-0009, `cargo openapi-gen`) renders the spec shape
         consistently across the server and CLI lanes.
+    Listener:
+      type: object
+      description: |-
+        A single `[[listener]]` block on a `[service]` body.
+
+        Per ADR-0047 §1 (Service listener fields) the triple is
+        `(port, protocol, vip)` — `port` is non-zero (rejected at parse
+        time per S-08-06), `protocol` is `tcp` / `udp` only via the existing
+        [`Proto`] newtype (case-insensitive parse, lowercase canonical
+        render), and `vip` is optional.
+
+        Distinct from the dataplane-layer `Backend` per design Reuse
+        Analysis — the spec-layer `Listener` is the OPERATOR-DECLARED
+        intent, while a `Backend` is the dataplane's per-replica realised
+        endpoint. The two carry the same [`Proto`] newtype but live in
+        different bounded contexts.
+      required:
+      - port
+      - protocol
+      properties:
+        port:
+          type: integer
+          format: int32
+          description: |-
+            Listener port — 1..=65535. `port = 0` is rejected at parse time
+            per S-08-06 (`ParseError::ListenerPortZero`).
+          maximum: 65535
+          minimum: 1
+        protocol:
+          $ref: '#/components/schemas/Proto'
+          description: |-
+            L4 protocol — `tcp` or `udp` only. Case-insensitive at parse
+            time; lowercase on canonical render.
+        vip:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/ServiceVip'
+            description: |-
+              Optional pinned VIP. `None` means the runtime VIP allocator is
+              responsible for assigning one (GH #167).
     NodeList:
       type: object
       description: |-
@@ -681,6 +721,15 @@ components:
           type: string
         region:
           type: string
+    Proto:
+      type: string
+      description: |-
+        L4 protocol discriminator. Only `Tcp` and `Udp` are recognised in
+        Phase 2.2 — these are the two protocols the egress reverse-NAT
+        path supports per architecture.md § 6.
+      enum:
+      - tcp
+      - udp
     ResourceEnvelope:
       type: object
       description: |-
@@ -775,6 +824,19 @@ components:
           type: integer
           format: int32
           minimum: 0
+    ServiceVip:
+      type: string
+      description: |-
+        Pinned service VIP — IPv4 address an operator pinned in their
+        `[[listener]]` block. Wraps [`Ipv4Addr`] with `serde` / `utoipa` /
+        `rkyv` derives so the type-system distinguishes it from a backend or
+        node IP at every call site.
+
+        Per ADR-0047 §1 (Service listener fields) the VIP is OPTIONAL — when
+        absent, the runtime VIP allocator is responsible for assigning one
+        at convergence time. The runtime allocator behaviour is OUT OF SCOPE
+        for slice 06 and tracked at GH #167.
+      example: 10.0.0.1
     StopJobResponse:
       type: object
       description: |-

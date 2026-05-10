@@ -105,6 +105,7 @@ async fn cluster_status_responsive_under_workload_cpu_burst() {
         terminal: None,
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
+        listeners: Vec::new(),
     };
     obs.write(ObservationRow::AllocStatus(row)).await.expect("write alloc row");
 

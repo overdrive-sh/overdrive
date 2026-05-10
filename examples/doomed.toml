@@ -2,6 +2,10 @@
 id = "doomed"
 replicas = 1
 
+[[listener]]
+port = 8080
+protocol = "tcp"
+
 [resources]
 cpu_milli = 100
 memory_bytes = 67108864

@@ -145,6 +145,7 @@ async fn write_row(
         terminal: None,
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
+        listeners: Vec::new(),
     };
     obs.write(ObservationRow::AllocStatus(row)).await.expect("obs write");
 }

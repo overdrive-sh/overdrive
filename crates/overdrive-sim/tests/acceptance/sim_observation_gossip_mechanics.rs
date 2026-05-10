@@ -43,6 +43,7 @@ fn row_at(writer: &NodeId, counter: u64, state: AllocState) -> AllocStatusRow {
         terminal: None,
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
+        listeners: Vec::new(),
     }
 }
 
@@ -168,6 +169,7 @@ async fn lww_equal_timestamps_are_idempotent_no_redelivery_flip() {
         terminal: None,
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
+        listeners: Vec::new(),
     };
     // Identical timestamp, but a different payload — represents the
     // same logical row being re-delivered via gossip. Under LWW, this

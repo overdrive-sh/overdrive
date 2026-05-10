@@ -51,6 +51,7 @@ fn alloc_row(alloc_id: &str, state: AllocState, counter: u64) -> AllocStatusRow 
         terminal: None,
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
+        listeners: Vec::new(),
     }
 }
 

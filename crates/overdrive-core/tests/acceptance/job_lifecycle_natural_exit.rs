@@ -98,6 +98,7 @@ fn alloc_clean_exit(alloc_id: &str, job_id: &str, node_id: &str) -> AllocStatusR
         terminal: None,
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
+        listeners: Vec::new(),
     }
 }
 
@@ -124,6 +125,7 @@ fn alloc_crashed_with_exit(
         terminal: None,
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
+        listeners: Vec::new(),
     }
 }
 

@@ -87,6 +87,7 @@ fn build_row(terminal: Option<TerminalCondition>) -> AllocStatusRow {
         terminal,
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
+        listeners: Vec::new(),
     }
 }
 

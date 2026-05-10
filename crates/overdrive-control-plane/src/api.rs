@@ -362,6 +362,12 @@ pub struct ErrorBody {
         // `StoppedBy` is carried by `SubmitEvent::ConvergedStopped.by`
         // and must be registered so the schema reference resolves.
         StoppedBy,
+        // workload-kind-discriminator slice 06 — Service `[[listener]]`
+        // spec types per ADR-0047 §1. Registered here so the OpenAPI
+        // document carries `Listener` and `ServiceVip` schema references
+        // for any future wire surface that names them.
+        overdrive_core::aggregate::Listener,
+        overdrive_core::aggregate::ServiceVip,
     )),
     tags(
         (name = "jobs", description = "Job lifecycle endpoints"),

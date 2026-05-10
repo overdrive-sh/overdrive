@@ -31,8 +31,8 @@ use crate::traits::driver::Resources;
 // downstream slices (02–06) migrate every reader.
 // ---------------------------------------------------------------------------
 pub use self::workload_spec::{
-    CronExpr, JobSpec, ParseError, ScheduleSpec, ServiceSpec, WorkloadKind, WorkloadSpec,
-    WorkloadSpecInput,
+    CronExpr, JobSpec, Listener, ParseError, ScheduleSpec, ServiceSpec, ServiceVip, WorkloadKind,
+    WorkloadSpec, WorkloadSpecInput,
 };
 
 mod workload_spec;

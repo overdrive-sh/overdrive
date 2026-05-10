@@ -106,6 +106,7 @@ fn alloc_row(scope: &str, idx: usize, state: AllocState, ts: LogicalTimestamp) -
         terminal: None,
         stderr_tail: None,
         kind: crate::aggregate::WorkloadKind::Service,
+        listeners: Vec::new(),
     }
 }
 

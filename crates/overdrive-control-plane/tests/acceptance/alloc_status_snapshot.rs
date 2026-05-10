@@ -127,6 +127,7 @@ async fn write_row(
         terminal: None,
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
+        listeners: Vec::new(),
     };
     state.obs.write(ObservationRow::AllocStatus(row)).await.expect("obs write");
 }
@@ -341,6 +342,7 @@ async fn write_terminal_row(
         terminal,
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
+        listeners: Vec::new(),
     };
     state.obs.write(ObservationRow::AllocStatus(row)).await.expect("obs write");
 }

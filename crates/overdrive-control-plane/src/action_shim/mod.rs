@@ -231,6 +231,7 @@ fn build_alloc_status_row(
         // stderr was observed at those write sites).
         stderr_tail,
         kind,
+        listeners: Vec::new(),
     }
 }
 

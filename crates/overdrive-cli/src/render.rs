@@ -23,6 +23,12 @@ use overdrive_core::TransitionReason;
 // + slice 05 spec.
 pub mod schedule;
 
+// workload-kind-discriminator slice 06 — Service `[[listener]]`
+// render functions and the SERVICE_VIP_ALLOCATOR_TRACKING_URL SSOT
+// constant (KPI K6 byte-equality across surfaces). Per ADR-0047 §1
+// + slice 06 spec.
+pub mod listener;
+
 use crate::commands::alloc::AllocStatusOutput;
 use crate::commands::cluster::ClusterStatusOutput;
 use crate::commands::job::{StopOutput, SubmitOutput};

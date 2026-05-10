@@ -114,6 +114,7 @@ async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
         terminal: None,
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
+        listeners: Vec::new(),
     };
     state.obs.write(ObservationRow::AllocStatus(alloc_row)).await.expect("seed Running alloc row");
 
@@ -272,6 +273,7 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
         terminal: None,
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
+        listeners: Vec::new(),
     };
     state.obs.write(ObservationRow::AllocStatus(alloc_row)).await.expect("seed Running alloc row");
 
@@ -994,6 +996,7 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
         terminal: seeded_terminal,
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
+        listeners: Vec::new(),
     };
     state.obs.write(ObservationRow::AllocStatus(alloc_row)).await.expect("seed Failed alloc row");
 

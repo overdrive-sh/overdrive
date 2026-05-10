@@ -89,6 +89,7 @@ fn free_capacity_excludes_pending_allocs_on_same_node() {
         terminal: None,
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
+        listeners: Vec::new(),
     }];
 
     let result = schedule(&nodes, &job, &allocs);

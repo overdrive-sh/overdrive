@@ -29,7 +29,8 @@ use thiserror::Error;
 
 use std::net::Ipv4Addr;
 
-use crate::aggregate::WorkloadKind;
+use crate::aggregate::{Listener, ServiceVip, WorkloadKind};
+use crate::dataplane::backend_key::Proto;
 use crate::dataplane::fingerprint::BackendSetFingerprint;
 use crate::id::{AllocationId, JobId, NodeId, Region, ServiceId};
 use crate::traits::dataplane::Backend;
@@ -348,6 +349,41 @@ pub struct AllocStatusRow {
     /// kind-agnostic behavior at any consumer that has not yet been
     /// wired to populate the field explicitly. Per ADR-0047 §4.
     pub kind: WorkloadKind,
+    /// Service `[[listener]]` blocks denormalised onto the row per
+    /// ADR-0047 §4a / [D5] of the `workload-kind-discriminator`
+    /// feature (slice 06). Embedded directly on the row, NOT a separate
+    /// `service_listener` table — the listener set per allocation is
+    /// small and bounded, denormalisation keeps the read fan-out at
+    /// one query.
+    ///
+    /// Empty for non-Service kinds (Job, Schedule). Old rows that
+    /// pre-date this field deserialise to the default empty `Vec` per
+    /// rkyv's additive-field tolerance.
+    ///
+    /// `ListenerRow` is the OBSERVATION-side twin of the intent-side
+    /// [`Listener`] type per ADR-0011 intent-vs-observation
+    /// distinctness — same fields, different bounded context.
+    pub listeners: Vec<ListenerRow>,
+}
+
+/// Observation-side twin of the intent-side [`Listener`] per ADR-0011.
+///
+/// Carries `(port, protocol, vip)` — the same triple shape as the
+/// intent-side [`Listener`], but distinct as a type so the bounded
+/// context boundary stays load-bearing. The action shim's
+/// `build_alloc_status_row` copies from intent-side listeners onto this
+/// shape at write time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct ListenerRow {
+    pub port: std::num::NonZeroU16,
+    pub protocol: Proto,
+    pub vip: Option<ServiceVip>,
+}
+
+impl From<&Listener> for ListenerRow {
+    fn from(l: &Listener) -> Self {
+        Self { port: l.port, protocol: l.protocol, vip: l.vip }
+    }
 }
 
 /// `node_health` row — Phase 1 minimal shape per brief §6.

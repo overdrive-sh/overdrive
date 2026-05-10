@@ -108,6 +108,7 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
         terminal: None,
         stderr_tail: None,
         kind: overdrive_core::aggregate::WorkloadKind::Service,
+        listeners: Vec::new(),
     };
     obs.write(ObservationRow::AllocStatus(prior_row)).await.expect("seed prior alloc row");
 
