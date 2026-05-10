@@ -487,6 +487,28 @@ impl IntentKey {
         Self(format!("jobs/{id}/stop").into_bytes())
     }
 
+    /// Derive the intent key for a Job's workload-kind discriminator —
+    /// `jobs/<id>/kind`.
+    ///
+    /// Per ADR-0047 §1 / slice 02 of `workload-kind-discriminator`: the
+    /// workload-kind discriminator (`service` / `job` / `schedule`) is
+    /// persisted as a separate intent record alongside the `Job`
+    /// aggregate. The streaming endpoint reads this key at submit-stream
+    /// open time to dispatch on per-kind streaming-event sibling enums
+    /// (ADR-0047 §3 [D7]); the reconciler runtime reads it at
+    /// `hydrate_desired` time to populate `JobLifecycleState.workload_kind`
+    /// so the natural-exit emission path (ADR-0037 Amendment 2026-05-10)
+    /// fires for Job-kind workloads.
+    ///
+    /// The value at this key is a single ASCII byte: `s` for Service,
+    /// `j` for Job, `c` for sChedule. A single-byte discriminator (vs
+    /// rkyv-archived enum) keeps the read path branch-free at every
+    /// consumer and makes the file shape trivially debuggable with
+    /// `bpftool` / `redb-cli` / hex dumps.
+    pub fn for_job_kind(id: &JobId) -> Self {
+        Self(format!("jobs/{id}/kind").into_bytes())
+    }
+
     /// Derive the intent key for a Schedule. Stable for any valid
     /// `JobId` per the same ASCII-only invariants that govern
     /// [`Self::for_job`]. The string form is `schedules/<JobId::Display>`.

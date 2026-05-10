@@ -111,7 +111,7 @@ async fn byte_identical_resubmit_returns_ok_with_unchanged_outcome_and_same_dige
 
     // First submit — Ok, outcome = Inserted.
     let first: SubmitJobResponse =
-        submit_json(state.clone(), SubmitJobRequest { spec: spec.clone() })
+        submit_json(state.clone(), SubmitJobRequest { spec: spec.clone(), workload_kind: None })
             .await
             .expect("first submit must be Ok");
     assert_eq!(first.job_id, "payments");
@@ -131,7 +131,9 @@ async fn byte_identical_resubmit_returns_ok_with_unchanged_outcome_and_same_dige
     // takes the idempotency branch and returns Ok with the SAME
     // spec_digest and `outcome = Unchanged`. Under mutation `!=` this
     // takes the conflict branch and returns ControlPlaneError::Conflict.
-    let second = submit_json(state.clone(), SubmitJobRequest { spec: spec.clone() }).await;
+    let second =
+        submit_json(state.clone(), SubmitJobRequest { spec: spec.clone(), workload_kind: None })
+            .await;
 
     match second {
         Ok(body) => {
@@ -170,7 +172,7 @@ async fn different_spec_at_occupied_key_returns_conflict_variant() {
 
     // Prime with canonical spec.
     let primed: SubmitJobResponse =
-        submit_json(state.clone(), SubmitJobRequest { spec: payments_spec() })
+        submit_json(state.clone(), SubmitJobRequest { spec: payments_spec(), workload_kind: None })
             .await
             .expect("prime submit");
     assert_eq!(primed.outcome, IdempotencyOutcome::Inserted);
@@ -179,8 +181,11 @@ async fn different_spec_at_occupied_key_returns_conflict_variant() {
     // this takes the conflict branch and returns Conflict. Under
     // mutation `!=` this takes the idempotency branch and returns
     // Ok.
-    let outcome =
-        submit_json(state.clone(), SubmitJobRequest { spec: payments_spec_alt_replicas() }).await;
+    let outcome = submit_json(
+        state.clone(),
+        SubmitJobRequest { spec: payments_spec_alt_replicas(), workload_kind: None },
+    )
+    .await;
 
     match outcome {
         Err(ControlPlaneError::Conflict { message }) => {
@@ -235,7 +240,7 @@ async fn fresh_submit_on_empty_key_returns_inserted_and_persists_spec() {
     let state = build_app_state(&tmp);
 
     let resp: SubmitJobResponse =
-        submit_json(state.clone(), SubmitJobRequest { spec: payments_spec() })
+        submit_json(state.clone(), SubmitJobRequest { spec: payments_spec(), workload_kind: None })
             .await
             .expect("submit");
     assert_eq!(resp.job_id, "payments");

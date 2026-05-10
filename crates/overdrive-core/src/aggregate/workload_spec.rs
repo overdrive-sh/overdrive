@@ -115,6 +115,63 @@ pub enum WorkloadKind {
     Schedule,
 }
 
+impl WorkloadKind {
+    /// Single-byte discriminator written to / read from the
+    /// `jobs/<id>/kind` intent record per
+    /// [`crate::aggregate::IntentKey::for_job_kind`]. The byte is the
+    /// canonical persisted form — readable in hex dumps, parseable
+    /// without rkyv, and stable across future variant additions
+    /// (`Self::default()` is the back-compat fallback for an unknown
+    /// byte, preserving the kind-agnostic Service shape).
+    #[must_use]
+    pub const fn discriminator_byte(self) -> u8 {
+        match self {
+            Self::Service => b's',
+            Self::Job => b'j',
+            Self::Schedule => b'c',
+        }
+    }
+
+    /// Inverse of [`Self::discriminator_byte`]. Unknown bytes default to
+    /// `Self::Service` per ADR-0047 §1 — preserves kind-agnostic
+    /// behavior at any consumer site reading a forward-compatible byte
+    /// it does not yet recognise.
+    #[must_use]
+    pub const fn from_discriminator_byte(byte: u8) -> Self {
+        match byte {
+            b'j' => Self::Job,
+            b'c' => Self::Schedule,
+            _ => Self::Service,
+        }
+    }
+
+    /// Canonical lowercase string form. Used as the wire-side
+    /// `workload_kind` field on `SubmitJobRequest` so legacy JSON-
+    /// inspecting clients see a human-readable value, and as the
+    /// inverse of [`Self::from_wire_str`].
+    #[must_use]
+    pub const fn wire_str(self) -> &'static str {
+        match self {
+            Self::Service => "service",
+            Self::Job => "job",
+            Self::Schedule => "schedule",
+        }
+    }
+
+    /// Parse the wire-side string form. Unknown values fall back to
+    /// `Self::Service` per ADR-0047 §1 forward-compat (a client may
+    /// send a value the server does not yet recognise; preserve
+    /// kind-agnostic behavior rather than fail).
+    #[must_use]
+    pub fn from_wire_str(s: &str) -> Self {
+        match s {
+            "job" => Self::Job,
+            "schedule" => Self::Schedule,
+            _ => Self::Service,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Cron expression newtype (Phase-1 string-shaped; #166 tracks richer validation)
 // ---------------------------------------------------------------------------

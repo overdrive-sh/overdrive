@@ -39,7 +39,7 @@ fn sample_job_spec() -> JobSpecInput {
 
 #[test]
 fn submit_job_request_round_trips_through_serde_json() {
-    let original = SubmitJobRequest { spec: sample_job_spec() };
+    let original = SubmitJobRequest { spec: sample_job_spec(), workload_kind: None };
     let wire = serde_json::to_string(&original).expect("serialise SubmitJobRequest");
     let round_tripped: SubmitJobRequest =
         serde_json::from_str(&wire).expect("deserialise SubmitJobRequest");

@@ -912,20 +912,15 @@ async fn hydrate_desired(
             let nodes = baseline_nodes_phase1();
             // `desired.allocations` is unused by the JobLifecycle
             // reconciler — it inspects `actual.allocations`.
-            // ADR-0037 Amendment 2026-05-10 / ADR-0047 §1: per slice 02-04
-            // the reconciler branches on workload kind for natural-exit
-            // terminals. The Phase 1 `Job` aggregate does not yet carry
-            // a `WorkloadKind` field — that lifting lands in slice 02-06
-            // when the streaming side wires kind through the IntentStore
-            // → reconciler boundary. Until then, the hydrator defaults
-            // the kind to `Service`, which preserves the pre-feature
-            // kind-agnostic semantics that the Service shape today
-            // emulates (long-running, restart-budget-driven). This is a
-            // no-op for Service-shape workloads and a temporary
-            // back-compat shim for Job-shape workloads — Job-kind
-            // natural-exit emission is unit-tested directly via the
-            // reconciler's State input parameter.
-            let workload_kind = WorkloadKind::default();
+            // ADR-0037 Amendment 2026-05-10 / ADR-0047 §1: read the
+            // persisted workload-kind discriminator at
+            // `IntentKey::for_job_kind` (written by `submit_job` in
+            // slice 02-06). Absent / unparseable bytes default to
+            // `WorkloadKind::default()` (Service) per
+            // `from_discriminator_byte` forward-compat — preserves
+            // the kind-agnostic Service shape for legacy submits that
+            // predate the discriminator persistence.
+            let workload_kind = read_workload_kind(state, &job_id).await?;
             let s = JobLifecycleState {
                 job,
                 desired_to_stop,
@@ -996,6 +991,27 @@ async fn read_job(state: &AppState, job_id: &JobId) -> Result<Option<Job>, Conve
     Ok(Some(job))
 }
 
+/// Read the persisted workload-kind discriminator at
+/// `IntentKey::for_job_kind`. Absent or unparseable bytes default to
+/// `WorkloadKind::default()` (Service) per ADR-0047 §1 forward-compat
+/// — legacy submits that predate slice 02-06's discriminator
+/// persistence still hydrate as Service-shape (kind-agnostic).
+async fn read_workload_kind(
+    state: &AppState,
+    job_id: &JobId,
+) -> Result<WorkloadKind, ConvergenceError> {
+    let key = IntentKey::for_job_kind(job_id);
+    let bytes = state
+        .store
+        .get(key.as_bytes())
+        .await
+        .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
+    Ok(bytes
+        .as_ref()
+        .and_then(|b| b.first().copied())
+        .map_or_else(WorkloadKind::default, WorkloadKind::from_discriminator_byte))
+}
+
 /// Probe the canonical `jobs/<id>:stop` key; presence is the signal.
 async fn stop_intent_present(state: &AppState, job_id: &JobId) -> Result<bool, ConvergenceError> {
     let stop_key = IntentKey::for_job_stop(job_id);
@@ -1031,19 +1047,22 @@ async fn hydrate_actual(
             // `actual.job` is unused — the reconciler reads desired.job.
             // `actual.desired_to_stop` is also unused (only the desired
             // side carries it); set false unconditionally.
-            // ADR-0037 Amendment 2026-05-10 / ADR-0047 §1: per slice 02-04
-            // the reconciler branches on workload kind for natural-exit
-            // terminals. The `actual` side mirrors the `desired` side's
-            // back-compat default (Service); only the `desired` side
-            // drives `reconcile`'s kind-branching logic, but constructing
-            // both with the same default keeps the field semantically
-            // uniform across the State pair.
+            // ADR-0037 Amendment 2026-05-10 / ADR-0047 §1: read the
+            // persisted workload-kind discriminator at
+            // `IntentKey::for_job_kind` so the `actual` side carries
+            // the same kind as `desired`. Only the `desired` side
+            // drives `reconcile`'s kind-branching logic today, but
+            // populating both with the same value keeps the field
+            // semantically uniform across the State pair so future
+            // `actual`-side branching has a non-default value to work
+            // with.
+            let workload_kind = read_workload_kind(state, &job_id).await?;
             let s = JobLifecycleState {
                 job: None,
                 desired_to_stop: false,
                 nodes,
                 allocations,
-                workload_kind: WorkloadKind::default(),
+                workload_kind,
             };
             Ok(AnyState::JobLifecycle(s))
         }

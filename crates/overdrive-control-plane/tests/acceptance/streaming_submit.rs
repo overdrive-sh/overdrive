@@ -95,7 +95,8 @@ fn build_router(state: AppState) -> Router {
 
 /// Build a `POST /v1/jobs` request with the given Accept header.
 fn build_submit_request(spec: &JobSpecInput, accept: &str) -> Request<Body> {
-    let body = serde_json::to_vec(&SubmitJobRequest { spec: spec.clone() }).expect("serialize");
+    let body = serde_json::to_vec(&SubmitJobRequest { spec: spec.clone(), workload_kind: None })
+        .expect("serialize");
     Request::builder()
         .method(Method::POST)
         .uri("/v1/jobs")
@@ -225,7 +226,8 @@ async fn s_cp_08b_no_accept_header_defaults_to_json_back_compat() {
 
     // Build request without Accept header — back-compat with reqwest
     // clients that never send Accept.
-    let body = serde_json::to_vec(&SubmitJobRequest { spec: payments_spec() }).expect("serialize");
+    let body = serde_json::to_vec(&SubmitJobRequest { spec: payments_spec(), workload_kind: None })
+        .expect("serialize");
     let request = Request::builder()
         .method(Method::POST)
         .uri("/v1/jobs")

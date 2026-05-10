@@ -126,7 +126,7 @@ async fn get_v1_jobs_id_returns_described_job_after_submit() {
     let submit_url = format!("https://localhost:{}/v1/jobs", bound.port());
     let submit_resp = client
         .post(&submit_url)
-        .json(&SubmitJobRequest { spec: payments_spec() })
+        .json(&SubmitJobRequest { spec: payments_spec(), workload_kind: None })
         .send()
         .await
         .expect("POST /v1/jobs");
@@ -261,7 +261,7 @@ async fn describe_spec_digest_equals_content_hash_of_archived_bytes() {
     let submit_url = format!("https://localhost:{}/v1/jobs", bound.port());
     let submit_resp = client
         .post(&submit_url)
-        .json(&SubmitJobRequest { spec: spec.clone() })
+        .json(&SubmitJobRequest { spec: spec.clone(), workload_kind: None })
         .send()
         .await
         .expect("POST /v1/jobs");
@@ -312,7 +312,7 @@ async fn describe_returns_spec_digest_matching_submit_response() {
     let submit_url = format!("https://localhost:{}/v1/jobs", bound.port());
     let submit_resp = client
         .post(&submit_url)
-        .json(&SubmitJobRequest { spec: payments_spec() })
+        .json(&SubmitJobRequest { spec: payments_spec(), workload_kind: None })
         .send()
         .await
         .expect("POST /v1/jobs");
@@ -390,7 +390,7 @@ proptest! {
             let submit_url = format!("https://localhost:{}/v1/jobs", bound.port());
             let submit_resp = client
                 .post(&submit_url)
-                .json(&SubmitJobRequest { spec: spec.clone() })
+                .json(&SubmitJobRequest { spec: spec.clone(), workload_kind: None })
                 .send()
                 .await
                 .expect("POST /v1/jobs");

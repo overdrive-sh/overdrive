@@ -192,9 +192,10 @@ fn split_once_after_path(s: &str) -> Option<(&str, &str)> {
 /// `build_lifecycle_event` BOTH come from the same Action-derived value
 /// — drift between the two surfaces is structurally impossible.
 //
-// 8 row fields are intentional — the row is the durable wire shape and
+// 9 row fields are intentional — the row is the durable wire shape and
 // adding indirection would add noise without simplifying the call sites;
-// ADR-0032 §3 + ADR-0037 §4 both grew this list deliberately.
+// ADR-0032 §3 + ADR-0037 §4 + slice 02-06 (stderr_tail propagation)
+// each grew this list deliberately.
 #[allow(clippy::too_many_arguments)]
 fn build_alloc_status_row(
     alloc_id: AllocationId,
@@ -205,6 +206,7 @@ fn build_alloc_status_row(
     reason: Option<TransitionReason>,
     detail: Option<String>,
     terminal: Option<TerminalCondition>,
+    stderr_tail: Option<String>,
 ) -> AllocStatusRow {
     let writer = node_id.clone();
     AllocStatusRow {
@@ -216,13 +218,17 @@ fn build_alloc_status_row(
         reason,
         detail,
         terminal,
-        // The action shim does NOT capture stderr — it writes
-        // pre-Running rows (Pending → Running) and reconciler-driven
-        // terminal rows (RestartBudgetExhausted, Cancelled). Stderr
-        // capture is the `ExitObserver` boundary's job per
-        // ADR-0033 Amendment 2026-05-10 / step 02-05; the action
-        // shim's writes always carry `stderr_tail: None`.
-        stderr_tail: None,
+        // Per ADR-0033 Amendment 2026-05-10 / slice 02-05 the
+        // observation row's `stderr_tail` field carries the workload's
+        // stderr verbatim (the `ExitObserver` boundary populates it
+        // for crashed exits). Per slice 02-06 the action shim's
+        // `FinalizeFailed` arm propagates this forward so the typed
+        // terminal row inherits the prior attempt's stderr — without
+        // this, the streaming layer's terminal `Failed` projection
+        // sees `stderr_tail: None` even when the workload wrote to
+        // stderr before exiting. Other arms still pass `None` (no
+        // stderr was observed at those write sites).
+        stderr_tail,
     }
 }
 
@@ -405,6 +411,16 @@ async fn dispatch_single(
                 return Ok(());
             };
             let prior_state: AllocStateWire = prior_row.state.into();
+            // Per slice 02-06: propagate the prior row's `stderr_tail`
+            // forward onto the typed terminal row so the streaming
+            // layer's `JobSubmitEvent::Failed` projection can render
+            // the workload's stderr verbatim. The exit observer (per
+            // slice 02-05 / ADR-0033 Amendment 2026-05-10) populates
+            // `stderr_tail` on the per-attempt failure row; without
+            // this propagation, the FinalizeFailed write would
+            // overwrite that row with `stderr_tail: None`, breaking
+            // S-02-02's stderr-tail rendering assertion.
+            let prior_stderr_tail = prior_row.stderr_tail.clone();
             let row = build_alloc_status_row(
                 alloc_id,
                 prior_row.job_id,
@@ -423,6 +439,7 @@ async fn dispatch_single(
                 // attempt rows carry it.
                 prior_row.detail.clone(),
                 terminal,
+                prior_stderr_tail,
             );
             obs.write(ObservationRow::AllocStatus(row.clone())).await?;
             emit_event(bus, build_lifecycle_event(&row, prior_state, TransitionSource::Reconciler));
@@ -477,7 +494,7 @@ async fn dispatch_single(
             // arm. A successful start or a single mid-budget failed
             // start carries `terminal: None`.
             let row = build_alloc_status_row(
-                alloc_id, job_id, node_id, state, tick, reason, detail, None,
+                alloc_id, job_id, node_id, state, tick, reason, detail, None, None,
             );
             obs.write(ObservationRow::AllocStatus(row.clone())).await?;
             emit_event(bus, build_lifecycle_event(&row, prior_state, source));
@@ -544,6 +561,7 @@ async fn dispatch_single(
                 reason,
                 detail,
                 None,
+                None,
             );
             obs.write(ObservationRow::AllocStatus(row.clone())).await?;
             emit_event(bus, build_lifecycle_event(&row, prior_state, source));
@@ -599,6 +617,7 @@ async fn dispatch_single(
                 }),
                 None,
                 terminal,
+                None,
             );
             obs.write(ObservationRow::AllocStatus(row.clone())).await?;
             emit_event(bus, build_lifecycle_event(&row, prior_state, TransitionSource::Reconciler));

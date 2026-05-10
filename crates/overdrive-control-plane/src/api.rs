@@ -35,9 +35,28 @@ use utoipa::ToSchema;
 /// Body of `POST /v1/jobs`. Carries the operator-submitted job spec
 /// verbatim; the server routes it through `Job::from_spec` to validate
 /// and derive the intent key / digest.
+///
+/// Per ADR-0047 §1 / slice 02 of `workload-kind-discriminator`: the
+/// optional `workload_kind` field is the wire-side carrier for the
+/// kind discriminator (`"service"` / `"job"` / `"schedule"`). Absent
+/// on legacy clients (defaults to `"service"` per
+/// `WorkloadKind::default`); set to `"job"` by the CLI's
+/// `submit_streaming_job` path so the server can dispatch on the
+/// per-kind streaming-event sibling enums (ADR-0047 §3 [D7]) and
+/// persist the discriminator at `IntentKey::for_job_kind` so the
+/// reconciler runtime's `hydrate_desired` populates
+/// `JobLifecycleState.workload_kind` for the natural-exit emission
+/// path (ADR-0037 Amendment 2026-05-10).
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SubmitJobRequest {
     pub spec: JobSpecInput,
+    /// Optional workload-kind discriminator. `"service"` (default),
+    /// `"job"`, or `"schedule"`. Unknown values fall back to `"service"`
+    /// per ADR-0047 §1 forward-compat — preserves kind-agnostic
+    /// behavior for clients sending a value the server does not
+    /// recognise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workload_kind: Option<String>,
 }
 
 /// Response for `POST /v1/jobs`. Carries `job_id`, the canonical

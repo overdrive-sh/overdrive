@@ -81,7 +81,7 @@ async fn submit_job_handler_rejects_empty_exec_command_with_validation_error_nam
     let result = submit_job(
         State(state.clone()),
         HeaderMap::new(),
-        Json(SubmitJobRequest { spec: spec_with_command("") }),
+        Json(SubmitJobRequest { spec: spec_with_command(""), workload_kind: None }),
     )
     .await;
 
@@ -126,7 +126,7 @@ async fn submit_job_handler_rejects_whitespace_only_exec_command_with_validation
     let result = submit_job(
         State(state.clone()),
         HeaderMap::new(),
-        Json(SubmitJobRequest { spec: spec_with_command("   ") }),
+        Json(SubmitJobRequest { spec: spec_with_command("   "), workload_kind: None }),
     )
     .await;
 

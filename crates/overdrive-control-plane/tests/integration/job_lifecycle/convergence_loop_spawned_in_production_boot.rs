@@ -149,7 +149,7 @@ async fn submitted_job_reaches_running_via_real_server_boot() {
     };
     let resp = client
         .post(&submit_url)
-        .json(&SubmitJobRequest { spec })
+        .json(&SubmitJobRequest { spec, workload_kind: None })
         .send()
         .await
         .expect("POST /v1/jobs");

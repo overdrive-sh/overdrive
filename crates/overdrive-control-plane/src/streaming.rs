@@ -490,6 +490,362 @@ pub fn build_accepted(
     SubmitEvent::Accepted { spec_digest, intent_key, outcome }
 }
 
+/// Build the synchronous `JobSubmitEvent::Accepted` event the handler
+/// emits before entering the Job-kind streaming loop.
+///
+/// Per ADR-0047 §3 [D7]: Job-kind submits stream the per-kind sibling
+/// event enum [`JobSubmitEvent`]; the `Accepted` variant mirrors the
+/// existing legacy `SubmitEvent::Accepted` shape so wire-format
+/// migration is a renamed-tag change, not a payload change.
+#[must_use]
+pub fn build_job_accepted(
+    spec_digest: String,
+    intent_key: String,
+    outcome: IdempotencyOutcome,
+) -> JobSubmitEvent {
+    JobSubmitEvent::Accepted { spec_digest, intent_key, outcome }
+}
+
+/// Build the streaming response body for the Job-kind NDJSON lane.
+///
+/// Per ADR-0047 §3 [D7]: Job-kind streams the per-kind sibling-event
+/// enum [`JobSubmitEvent`]; the legacy flat [`SubmitEvent::ConvergedRunning`]
+/// variant is structurally unreachable on this code path because the
+/// type carries no equivalent variant — Jobs are run-to-completion and
+/// `Running` is informational only.
+///
+/// Contract (per `.claude/rules/development.md` § *Trait definitions
+/// specify behavior, not just signature*):
+///
+/// - **Preconditions**: `state.lifecycle_events`, `state.obs`, and
+///   `state.clock` are wired; `accepted` carries the synchronous
+///   `Accepted` line built by [`build_job_accepted`].
+/// - **Postconditions**: the returned stream emits `Accepted` first,
+///   then zero or more intermediate variants
+///   (`Pending` / `Running` / `AttemptFailed`), and exactly one
+///   terminal variant (`Succeeded` / `Failed`) before closing.
+/// - **Edge cases**:
+///   - Operator-stop converged terminal → `Succeeded { exit_code: 0 }`
+///     (clean stop is the Job-kind success path; preserves the existing
+///     `ConvergedStopped → exit code 0` semantics from the legacy lane).
+///   - Cap timer expiry → `Failed { exit_code: -1 }` (no kernel exit
+///     observed within the wall-clock budget — distinguished from a
+///     genuine non-zero exit by the sentinel `-1`).
+///   - Broadcast `Closed` → `Failed { exit_code: -1 }` (server-side
+///     stream interruption — analogous to `TerminalReason::StreamInterrupted`
+///     on the legacy lane).
+///   - Pre-subscribe race / `Lagged(_)` → snapshot-and-classify the
+///     latest LWW-winner row; emit the matching terminal if reached.
+/// - **Observable invariants**: every Job-kind submit produces exactly
+///   ONE terminal variant (`Succeeded` or `Failed`) on the wire; the
+///   stream never closes silently. The CLI process exit code equals
+///   the terminal `exit_code` field per KPI K1 honesty contract.
+pub fn build_job_stream(
+    state: AppState,
+    job_id: JobId,
+    accepted: JobSubmitEvent,
+) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send + 'static {
+    let bus = state.lifecycle_events.clone();
+    let clock = state.clock.clone();
+    let obs = state.obs.clone();
+    let cap = state.streaming_cap;
+
+    async_stream::stream! {
+        // 1. Emit Accepted SYNCHRONOUSLY — first byte on the wire.
+        match emit_job_line(&accepted) {
+            Ok(line) => yield Ok(line),
+            Err(err) => {
+                yield Err(err);
+                return;
+            }
+        }
+
+        // 2. Subscribe BEFORE the pre-subscribe snapshot recovery — same
+        //    ordering as `build_stream` to bridge the pre-subscribe
+        //    event window per architecture.md §10 / ADR-0032 §7.
+        let mut sub = bus.subscribe();
+        drop(bus);
+
+        // 3. Pre-subscribe race recovery — if the latest row already
+        //    carries a terminal claim, emit the matching JobSubmitEvent
+        //    terminal and end.
+        if let Some(terminal) = job_terminal_from_snapshot(&*obs, &job_id).await {
+            match emit_job_line(&terminal) {
+                Ok(line) => {
+                    yield Ok(line);
+                    return;
+                }
+                Err(err) => {
+                    yield Err(err);
+                    return;
+                }
+            }
+        }
+
+        let cap_future = clock.sleep(cap);
+        tokio::pin!(cap_future);
+
+        loop {
+            tokio::select! {
+                biased;
+                recv = sub.recv() => {
+                    match recv {
+                        Ok(event) => {
+                            if event.job_id != job_id {
+                                continue;
+                            }
+                            // Project the LifecycleEvent into the
+                            // JobSubmitEvent shape — informational
+                            // (Pending / Running) or AttemptFailed
+                            // (intermediate failure) or terminal
+                            // (Succeeded / Failed).
+                            if let Some(emit) = job_event_from_lifecycle(
+                                &*obs,
+                                &job_id,
+                                &event,
+                            ).await {
+                                let is_terminal = matches!(
+                                    emit,
+                                    JobSubmitEvent::Succeeded { .. } | JobSubmitEvent::Failed { .. }
+                                );
+                                match emit_job_line(&emit) {
+                                    Ok(line) => {
+                                        yield Ok(line);
+                                        if is_terminal {
+                                            return;
+                                        }
+                                    }
+                                    Err(err) => {
+                                        yield Err(err);
+                                        return;
+                                    }
+                                }
+                            }
+                        }
+                        Err(broadcast::error::RecvError::Lagged(_)) => {
+                            if let Some(terminal) = job_terminal_from_snapshot(
+                                &*obs,
+                                &job_id,
+                            ).await {
+                                match emit_job_line(&terminal) {
+                                    Ok(line) => {
+                                        yield Ok(line);
+                                        return;
+                                    }
+                                    Err(err) => {
+                                        yield Err(err);
+                                        return;
+                                    }
+                                }
+                            }
+                        }
+                        Err(broadcast::error::RecvError::Closed) => {
+                            // Server-side stream interruption — emit
+                            // a Failed terminal so the CLI exits non-zero.
+                            // exit_code = -1 is the sentinel for
+                            // "no kernel exit observed" (no genuine
+                            // workload exit code is available — the
+                            // bus closed before we saw one).
+                            let terminal = JobSubmitEvent::Failed {
+                                exit_code: -1,
+                                duration: String::new(),
+                                attempts: 1,
+                                max_attempts: 1,
+                                stderr_tail: Some(
+                                    "lifecycle channel closed before terminal".to_string(),
+                                ),
+                            };
+                            match emit_job_line(&terminal) {
+                                Ok(line) => yield Ok(line),
+                                Err(err) => yield Err(err),
+                            }
+                            return;
+                        }
+                    }
+                }
+                () = &mut cap_future => {
+                    let after_seconds = u32::try_from(cap.as_secs()).unwrap_or(u32::MAX);
+                    let terminal = JobSubmitEvent::Failed {
+                        exit_code: -1,
+                        duration: format!("{after_seconds}s"),
+                        attempts: 1,
+                        max_attempts: 1,
+                        stderr_tail: Some(format!(
+                            "did not converge in {after_seconds}s"
+                        )),
+                    };
+                    match emit_job_line(&terminal) {
+                        Ok(line) => yield Ok(line),
+                        Err(err) => yield Err(err),
+                    }
+                    return;
+                }
+            }
+        }
+    }
+}
+
+/// One NDJSON line for a [`JobSubmitEvent`] —
+/// `serde_json::to_writer(buf, &event)?` + `b'\n'`. Mirror of
+/// [`emit_line`] for the legacy [`SubmitEvent`] surface.
+fn emit_job_line(event: &JobSubmitEvent) -> std::io::Result<Bytes> {
+    use std::io::Write as _;
+    let mut buf = BytesMut::with_capacity(256);
+    let mut writer = (&mut buf).writer();
+    serde_json::to_writer(&mut writer, event).map_err(std::io::Error::other)?;
+    writer.write_all(b"\n")?;
+    Ok(buf.freeze())
+}
+
+/// Project a [`LifecycleEvent`] into a [`JobSubmitEvent`] for the
+/// Job-kind streaming wire. Returns `None` for events that have no
+/// Job-kind manifestation (e.g. an event for a different job, an
+/// AllocStateWire variant the Job streaming surface ignores).
+///
+/// The terminal projection reads the row's `stderr_tail` field via
+/// `obs.alloc_status_row(...)` so the operator-facing `Failed` event
+/// carries the workload's stderr verbatim per slice 02-05 / ADR-0033
+/// Amendment 2026-05-10.
+async fn job_event_from_lifecycle(
+    obs: &dyn ObservationStore,
+    job_id: &JobId,
+    event: &LifecycleEvent,
+) -> Option<JobSubmitEvent> {
+    if let Some(cond) = &event.terminal {
+        return Some(job_event_from_terminal(obs, job_id, event, cond).await);
+    }
+    match event.to {
+        AllocStateWire::Pending => Some(JobSubmitEvent::Pending),
+        AllocStateWire::Running => Some(JobSubmitEvent::Running { since: event.at.clone() }),
+        AllocStateWire::Failed => {
+            // Intermediate per-attempt failure observation — emitted
+            // by the exit observer between attempts. Per ADR-0037 §4
+            // the reconciler's terminal claim arrives on a subsequent
+            // tick; surface this row as `AttemptFailed` so the operator
+            // sees the workload exited and the verdict is being
+            // finalised, without conflating the two into a single line.
+            let exit_code = parse_exit_code_from_detail(event.detail.as_deref());
+            Some(JobSubmitEvent::AttemptFailed {
+                attempt_index: 1,
+                exit_code,
+                duration: event.at.clone(),
+                will_restart: false,
+                next_attempt_delay: None,
+            })
+        }
+        // Terminated without a terminal claim is a transitional state
+        // (the reconciler will stamp the terminal on the next tick).
+        // Suspended / Draining are likewise non-terminal Job-kind
+        // surfaces. Skip emission until the terminal claim arrives.
+        AllocStateWire::Terminated | AllocStateWire::Draining | AllocStateWire::Suspended => None,
+    }
+}
+
+/// Project a [`TerminalCondition`] into the matching terminal
+/// [`JobSubmitEvent`] variant. Reads the LWW-winner observation row
+/// for `stderr_tail` so the operator-facing `Failed` event carries
+/// the workload's stderr verbatim.
+async fn job_event_from_terminal(
+    obs: &dyn ObservationStore,
+    _job_id: &JobId,
+    event: &LifecycleEvent,
+    cond: &TerminalCondition,
+) -> JobSubmitEvent {
+    let row = obs.alloc_status_row(&event.alloc_id).await.ok().flatten();
+    let stderr_tail = row.as_ref().and_then(|r| r.stderr_tail.clone());
+    match cond {
+        TerminalCondition::Completed { exit_code } => JobSubmitEvent::Succeeded {
+            exit_code: *exit_code,
+            duration: event.at.clone(),
+            attempts: 1,
+        },
+        TerminalCondition::Failed { exit_code } => JobSubmitEvent::Failed {
+            exit_code: *exit_code,
+            duration: event.at.clone(),
+            attempts: 1,
+            max_attempts: 1,
+            stderr_tail,
+        },
+        TerminalCondition::Stopped { .. } => {
+            JobSubmitEvent::Succeeded { exit_code: 0, duration: event.at.clone(), attempts: 1 }
+        }
+        TerminalCondition::BackoffExhausted { attempts } => JobSubmitEvent::Failed {
+            exit_code: 1,
+            duration: event.at.clone(),
+            attempts: *attempts,
+            max_attempts: *attempts,
+            stderr_tail,
+        },
+        // Forward-compat for future `#[non_exhaustive]` additions to
+        // `TerminalCondition`. Render unknown terminals as a generic
+        // `Failed` carrying the prior exit semantics so the stream
+        // still terminates rather than silently dropping the event.
+        _ => JobSubmitEvent::Failed {
+            exit_code: 1,
+            duration: event.at.clone(),
+            attempts: 1,
+            max_attempts: 1,
+            stderr_tail,
+        },
+    }
+}
+
+/// On `Lagged(_)` or pre-subscribe snapshot, inspect the LWW-winner
+/// `AllocStatusRow` for the job. If it already carries a terminal
+/// claim, project to the matching `JobSubmitEvent` terminal.
+async fn job_terminal_from_snapshot(
+    obs: &dyn ObservationStore,
+    job_id: &JobId,
+) -> Option<JobSubmitEvent> {
+    let rows = obs.alloc_status_rows().await.ok()?;
+    let latest =
+        rows.into_iter().filter(|r| r.job_id == *job_id).max_by_key(|r| r.updated_at.counter)?;
+    let cond = latest.terminal.as_ref()?;
+    let duration = format!("{}@{}", latest.updated_at.counter, latest.updated_at.writer.as_str());
+    let stderr_tail = latest.stderr_tail.clone();
+    Some(match cond {
+        TerminalCondition::Completed { exit_code } => {
+            JobSubmitEvent::Succeeded { exit_code: *exit_code, duration, attempts: 1 }
+        }
+        TerminalCondition::Failed { exit_code } => JobSubmitEvent::Failed {
+            exit_code: *exit_code,
+            duration,
+            attempts: 1,
+            max_attempts: 1,
+            stderr_tail,
+        },
+        TerminalCondition::Stopped { .. } => {
+            JobSubmitEvent::Succeeded { exit_code: 0, duration, attempts: 1 }
+        }
+        TerminalCondition::BackoffExhausted { attempts } => JobSubmitEvent::Failed {
+            exit_code: 1,
+            duration,
+            attempts: *attempts,
+            max_attempts: *attempts,
+            stderr_tail,
+        },
+        _ => JobSubmitEvent::Failed {
+            exit_code: 1,
+            duration,
+            attempts: 1,
+            max_attempts: 1,
+            stderr_tail,
+        },
+    })
+}
+
+/// Parse `"exit_code=N"` out of the legacy `TransitionReason::DriverInternalError.detail`
+/// shape that the worker `exit_observer` writes on a crashed exit. Falls
+/// back to `1` when the detail is absent or unparseable — the Job-kind
+/// `AttemptFailed` event surface needs SOME exit code to render the
+/// "attempt N failed (exit X)" line.
+fn parse_exit_code_from_detail(detail: Option<&str>) -> i32 {
+    let Some(s) = detail else {
+        return 1;
+    };
+    s.strip_prefix("exit_code=").and_then(|n| n.parse::<i32>().ok()).unwrap_or(1)
+}
+
 // ---------------------------------------------------------------------------
 // Job streaming sub-path — slice 02 of `workload-kind-discriminator`.
 // ---------------------------------------------------------------------------

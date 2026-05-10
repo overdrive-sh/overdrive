@@ -98,7 +98,7 @@ async fn stop_on_already_stopped_job_returns_already_stopped_outcome() {
     // Submit the job first.
     let submit_resp = client
         .post(&submit_url)
-        .json(&SubmitJobRequest { spec: payments_spec() })
+        .json(&SubmitJobRequest { spec: payments_spec(), workload_kind: None })
         .send()
         .await
         .expect("POST /v1/jobs");

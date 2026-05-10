@@ -135,8 +135,10 @@ async fn submit_job_then_describe_round_trips_via_http_client() {
         driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     };
 
-    let submit_resp =
-        client.submit_job(SubmitJobRequest { spec: spec.clone() }).await.expect("submit_job");
+    let submit_resp = client
+        .submit_job(SubmitJobRequest { spec: spec.clone(), workload_kind: None })
+        .await
+        .expect("submit_job");
     assert!(!submit_resp.job_id.is_empty(), "job_id must not be empty");
     // Per ADR-0020 the per-write witness is `outcome` + `spec_digest`;
     // a fresh insert reports `outcome = Inserted` with a 64-char digest.
@@ -232,7 +234,10 @@ async fn submit_with_invalid_spec_returns_http_status_400_with_error_body() {
         driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     };
 
-    let err = client.submit_job(SubmitJobRequest { spec: bad }).await.expect_err("bad spec");
+    let err = client
+        .submit_job(SubmitJobRequest { spec: bad, workload_kind: None })
+        .await
+        .expect_err("bad spec");
 
     match &err {
         CliError::HttpStatus { status, body } => {

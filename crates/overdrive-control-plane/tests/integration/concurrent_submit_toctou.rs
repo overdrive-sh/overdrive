@@ -171,7 +171,7 @@ async fn concurrent_distinct_specs_same_key_commit_exactly_once() {
         set.spawn(async move {
             let resp = client
                 .post(&url)
-                .json(&SubmitJobRequest { spec: spec.clone() })
+                .json(&SubmitJobRequest { spec: spec.clone(), workload_kind: None })
                 .send()
                 .await
                 .expect("concurrent submit send");
@@ -309,7 +309,7 @@ async fn concurrent_byte_identical_submits_return_single_spec_digest() {
         set.spawn(async move {
             let resp = client
                 .post(&url)
-                .json(&SubmitJobRequest { spec })
+                .json(&SubmitJobRequest { spec, workload_kind: None })
                 .send()
                 .await
                 .expect("concurrent submit send");

@@ -120,7 +120,8 @@ fn build_router(state: AppState) -> Router {
 }
 
 fn build_submit_request(spec: &JobSpecInput, accept: &str) -> Request<Body> {
-    let body = serde_json::to_vec(&SubmitJobRequest { spec: spec.clone() }).expect("serialize");
+    let body = serde_json::to_vec(&SubmitJobRequest { spec: spec.clone(), workload_kind: None })
+        .expect("serialize");
     Request::builder()
         .method(Method::POST)
         .uri("/v1/jobs")

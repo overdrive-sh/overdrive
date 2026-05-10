@@ -176,7 +176,7 @@ async fn post_v1_jobs_with_valid_spec_returns_200_inserted_with_canonical_digest
 
     let resp = client
         .post(&url)
-        .json(&SubmitJobRequest { spec: spec.clone() })
+        .json(&SubmitJobRequest { spec: spec.clone(), workload_kind: None })
         .send()
         .await
         .expect("POST /v1/jobs");
@@ -223,7 +223,7 @@ async fn post_v1_jobs_persists_archived_job_under_jobs_prefix_in_local_store() {
     let spec = payments_spec();
     let resp = client
         .post(&url)
-        .json(&SubmitJobRequest { spec: spec.clone() })
+        .json(&SubmitJobRequest { spec: spec.clone(), workload_kind: None })
         .send()
         .await
         .expect("POST /v1/jobs");
@@ -276,7 +276,7 @@ async fn post_v1_jobs_with_invalid_spec_returns_400_with_error_body_naming_field
 
     let resp = client
         .post(&url)
-        .json(&SubmitJobRequest { spec: bad })
+        .json(&SubmitJobRequest { spec: bad, workload_kind: None })
         .send()
         .await
         .expect("POST /v1/jobs with bad spec");
@@ -308,7 +308,7 @@ async fn post_v1_jobs_idempotent_byte_identical_spec_returns_unchanged_with_same
 
     let first: SubmitJobResponse = client
         .post(&url)
-        .json(&SubmitJobRequest { spec: spec.clone() })
+        .json(&SubmitJobRequest { spec: spec.clone(), workload_kind: None })
         .send()
         .await
         .expect("first submit")
@@ -316,8 +316,12 @@ async fn post_v1_jobs_idempotent_byte_identical_spec_returns_unchanged_with_same
         .await
         .expect("decode first response");
 
-    let second_resp =
-        client.post(&url).json(&SubmitJobRequest { spec }).send().await.expect("second submit");
+    let second_resp = client
+        .post(&url)
+        .json(&SubmitJobRequest { spec, workload_kind: None })
+        .send()
+        .await
+        .expect("second submit");
 
     assert_eq!(
         second_resp.status(),
@@ -362,7 +366,7 @@ async fn post_v1_jobs_with_different_spec_at_existing_key_returns_409_conflict()
     // First submit: canonical spec.
     let first = client
         .post(&url)
-        .json(&SubmitJobRequest { spec: payments_spec() })
+        .json(&SubmitJobRequest { spec: payments_spec(), workload_kind: None })
         .send()
         .await
         .expect("first submit");
@@ -373,7 +377,7 @@ async fn post_v1_jobs_with_different_spec_at_existing_key_returns_409_conflict()
     // spec".
     let conflict = client
         .post(&url)
-        .json(&SubmitJobRequest { spec: payments_spec_alt() })
+        .json(&SubmitJobRequest { spec: payments_spec_alt(), workload_kind: None })
         .send()
         .await
         .expect("second submit");

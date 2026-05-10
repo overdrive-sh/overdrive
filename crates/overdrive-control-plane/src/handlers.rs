@@ -18,7 +18,7 @@ use axum::body::Body;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, header};
 use axum::response::{IntoResponse, Response};
-use overdrive_core::aggregate::{AggregateError, IntentKey, Job, JobSpecInput};
+use overdrive_core::aggregate::{AggregateError, IntentKey, Job, JobSpecInput, WorkloadKind};
 use overdrive_core::id::{ContentHash, JobId};
 use overdrive_core::reconciler::{
     JobLifecycle, RESTART_BACKOFF_CEILING, Reconciler, ReconcilerName, TargetResource,
@@ -243,6 +243,21 @@ pub async fn submit_job(
     //    bytes already stored at this key — see step 5.
     let spec_digest = ContentHash::of(archived.as_ref()).to_string();
 
+    // 5a. Per ADR-0047 §1 / slice 02 of `workload-kind-discriminator`:
+    //     persist the workload-kind discriminator at
+    //     `IntentKey::for_job_kind` so the streaming endpoint can
+    //     dispatch on per-kind sibling-event enums (ADR-0047 §3 [D7])
+    //     and the reconciler runtime's `hydrate_desired` can populate
+    //     `JobLifecycleState.workload_kind` for the natural-exit
+    //     emission path (ADR-0037 Amendment 2026-05-10). The wire
+    //     field is optional — absent or unknown values default to
+    //     Service per `WorkloadKind::from_wire_str` forward-compat.
+    let workload_kind = request
+        .workload_kind
+        .as_deref()
+        .map_or_else(WorkloadKind::default, WorkloadKind::from_wire_str);
+    let kind_key = IntentKey::for_job_kind(&job.id);
+
     // 5. Atomic idempotency / conflict detection via `put_if_absent`.
     //    The existence check and the insert happen in a single store
     //    transaction — this closes the TOCTOU window that would open
@@ -252,6 +267,19 @@ pub async fn submit_job(
     //    silently clobbering the first spec.
     let outcome = match state.store.put_if_absent(key.as_bytes(), archived.as_ref()).await? {
         PutOutcome::Inserted => {
+            // Persist the kind discriminator alongside the job.
+            // Use `put` (overwrite-OK) rather than `put_if_absent` —
+            // a Job at the same key cannot have a different kind by
+            // construction (idempotency check on the spec above
+            // requires byte-identical re-submission), so writing the
+            // discriminator unconditionally is safe and survives a
+            // crashed-mid-submit retry that wrote the spec but not
+            // the kind on the prior attempt.
+            state
+                .store
+                .put(kind_key.as_bytes(), &[workload_kind.discriminator_byte()])
+                .await
+                .map_err(|e| ControlPlaneError::internal("persist workload kind", e))?;
             // Edge-triggered ingress per whitepaper §18: enqueue an
             // evaluation for the job-lifecycle reconciler so the
             // convergence-loop spawn picks it up on the next tick.
@@ -285,13 +313,32 @@ pub async fn submit_job(
 
     // Branch on Accept header per [D6] / [D8]. JSON lane preserves
     // the existing `SubmitJobResponse` shape unchanged (back-compat
-    // S-CP-08). NDJSON lane delegates to `streaming_submit_loop` for
-    // the per-line emit + cap timer + lagged-recovery.
+    // S-CP-08). NDJSON lane delegates to the per-kind streaming loop
+    // per ADR-0047 §3 [D7]: Service → `build_stream` (legacy flat
+    // `SubmitEvent`); Job → `build_job_stream` (typed sibling-event
+    // enum, no `ConvergedRunning` variant — RCA root causes B+C+D
+    // structurally unreachable). Schedule support lands in slice 05.
     if want_streaming {
-        let accepted =
-            crate::streaming::build_accepted(spec_digest, key.as_str().to_owned(), outcome);
-        let stream = crate::streaming::build_stream(state.clone(), job.id, accepted);
-        let body = Body::from_stream(stream);
+        let body = match workload_kind {
+            WorkloadKind::Job => {
+                let accepted = crate::streaming::build_job_accepted(
+                    spec_digest,
+                    key.as_str().to_owned(),
+                    outcome,
+                );
+                let stream = crate::streaming::build_job_stream(state.clone(), job.id, accepted);
+                Body::from_stream(stream)
+            }
+            WorkloadKind::Service | WorkloadKind::Schedule => {
+                // Service / Schedule (Schedule is no-op streaming for
+                // Phase 1 per slice 05) flow through the legacy
+                // flat-`SubmitEvent` path unchanged.
+                let accepted =
+                    crate::streaming::build_accepted(spec_digest, key.as_str().to_owned(), outcome);
+                let stream = crate::streaming::build_stream(state.clone(), job.id, accepted);
+                Body::from_stream(stream)
+            }
+        };
         let response = Response::builder()
             .status(axum::http::StatusCode::OK)
             .header(header::CONTENT_TYPE, "application/x-ndjson")

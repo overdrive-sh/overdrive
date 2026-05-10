@@ -166,6 +166,37 @@ filter = '''
 '''
 test-group = 'bpf-artifact-shared'
 
+# Test group for any test that spawns workloads via the production
+# `ExecDriver` against the per-allocation cgroup hierarchy at
+# `/sys/fs/cgroup/overdrive.slice/workloads.slice/alloc-<job>-<n>.scope`.
+#
+# Per `.claude/rules/testing.md` § "Leaked workload cgroups across
+# runs": the cgroup scope hierarchy is a process-global resource —
+# parallel test PROCESSES creating allocs with overlapping ids can
+# race on `mkdir` / `cgroup.kill` semantics, and a workload's exit
+# under one test can be picked up by another test's exit observer
+# subscriber. `serial_test::serial(...)` annotations within each
+# binary are kept for same-process collision defence, but the
+# nextest layer is the only place that can enforce the cross-process
+# single-writer constraint — same rationale as `bpf-artifact-shared`
+# above.
+[test-groups.cgroup-workload-shared]
+max-threads = 1
+
+[[profile.default.overrides]]
+filter = '''
+    binary(integration)
+    & (
+        test(s_02_01_job_exits_zero_reports_succeeded)
+        | test(s_02_02_job_exits_nonzero_reports_failed_with_attempts)
+        | test(s_02_03_intermediate_attempt_failure_does_not_close_stream)
+        | test(s_02_04_third_attempt_zero_reports_succeeded)
+        | test(s_02_05_anti_scenario_no_is_running_with)
+        | test(s_02_06_submit_echo_names_kind_upfront)
+    )
+'''
+test-group = 'cgroup-workload-shared'
+
 [profile.ci]
 # CI runs the same suite with structured output. Retries stay at zero:
 # `.claude/rules/testing.md` — "Flaky DST is a bug … never a just-rerun-it."
