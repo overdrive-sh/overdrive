@@ -48,6 +48,7 @@ fn sample_alloc_status() -> AllocStatusRow {
         reason: None,
         detail: None,
         terminal: None,
+        stderr_tail: None,
     }
 }
 

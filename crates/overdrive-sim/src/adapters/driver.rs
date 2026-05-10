@@ -192,7 +192,18 @@ impl SimDriver {
             // the production `classify_exit` mapping in
             // `crates/overdrive-worker/src/driver.rs`).
             let final_kind = if intentional { ExitKind::CleanExit } else { kind };
-            let event = ExitEvent { alloc, kind: final_kind, intentional_stop: intentional };
+            // SimDriver has no real stderr to capture — the watcher
+            // contract leaves `stderr_tail = None`. Tests that want
+            // to exercise the tail-render path inject explicit stderr
+            // via the dedicated sim-driver helper (added when the
+            // first such test lands per step 02-05 / ADR-0033
+            // Amendment 2026-05-10).
+            let event = ExitEvent {
+                alloc,
+                kind: final_kind,
+                intentional_stop: intentional,
+                stderr_tail: None,
+            };
             let _ = exit_tx.send(event).await;
         });
     }

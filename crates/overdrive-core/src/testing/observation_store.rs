@@ -104,6 +104,7 @@ fn alloc_row(scope: &str, idx: usize, state: AllocState, ts: LogicalTimestamp) -
         reason: None,
         detail: None,
         terminal: None,
+        stderr_tail: None,
     }
 }
 

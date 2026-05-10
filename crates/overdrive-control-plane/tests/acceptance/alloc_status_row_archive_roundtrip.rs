@@ -134,6 +134,7 @@ fn build_row(
         reason,
         detail,
         terminal: None,
+        stderr_tail: None,
     }
 }
 

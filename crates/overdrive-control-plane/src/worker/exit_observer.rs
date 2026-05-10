@@ -49,7 +49,7 @@ use std::time::Duration;
 use overdrive_core::id::{AllocationId, JobId};
 use overdrive_core::reconciler::{JobLifecycle, Reconciler, ReconcilerName, TargetResource};
 use overdrive_core::traits::clock::Clock;
-use overdrive_core::traits::driver::{Driver, DriverType, ExitEvent, ExitKind};
+use overdrive_core::traits::driver::{Driver, DriverType, ExitEvent, ExitKind, STDERR_TAIL_LINES};
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
     ObservationStoreError,
@@ -62,6 +62,14 @@ use crate::action_shim::LifecycleEvent;
 use crate::api::{AllocStateWire, TransitionSource};
 use crate::reconciler_runtime::ReconcilerRuntime;
 use overdrive_core::eval_broker::Evaluation;
+
+// Re-export the project-wide stderr-tail line-budget constant so the
+// observer module is the single AC-named SSOT readers consult per step
+// 02-05 of `workload-kind-discriminator` ("STDERR_TAIL_LINES is a single
+// ExitObserver constant"). The actual definition lives on the trait
+// surface in `overdrive_core::traits::driver` because the driver crate
+// (which fills the ring) cannot depend on `overdrive-control-plane`.
+pub use overdrive_core::traits::driver::STDERR_TAIL_LINES as STDERR_TAIL_LINES_REEXPORT;
 
 /// Bounded retry budget for transient `ObservationStore::write` failures
 /// in `handle_exit_event`. The first attempt is unbudgeted; on a
@@ -411,6 +419,14 @@ async fn handle_exit_event(
         counter: prior.updated_at.counter.saturating_add(1),
         writer: prior.node_id.clone(),
     };
+    // Bound the stderr_tail to the project-wide line budget at the
+    // observation seam. The driver-side ring buffer in `ExecDriver`
+    // already caps emission at `STDERR_TAIL_LINES`, but the observer
+    // is the canonical defence-in-depth: any future driver impl that
+    // emits a longer tail (test injection, alternate driver) is
+    // truncated here before reaching the obs row.
+    let stderr_tail =
+        event.stderr_tail.as_deref().map(|raw| keep_last_n_lines(raw, STDERR_TAIL_LINES));
     let row = AllocStatusRow {
         alloc_id: event.alloc.clone(),
         job_id: prior.job_id,
@@ -425,6 +441,7 @@ async fn handle_exit_event(
         // Structurally meaningful: "I am not making a terminal claim";
         // the reconciler is the single writer for terminal decisions.
         terminal: None,
+        stderr_tail,
     };
     obs.write(ObservationRow::AllocStatus(row.clone())).await?;
     Ok(Some((row, prior_state)))
@@ -545,6 +562,28 @@ enum HandleError {
     Observation(#[from] overdrive_core::traits::observation_store::ObservationStoreError),
 }
 
+/// Truncate a multi-line string to its last `n` lines, joined by `\n`.
+/// Pure helper used at the observation seam (defence-in-depth against
+/// a driver emitting more than [`STDERR_TAIL_LINES`]) and exercised
+/// directly by `keep_last_n_lines_tests`. The returned string carries
+/// no trailing newline; rendering layers that want one append it.
+///
+/// Invariants:
+/// - `keep_last_n_lines("", _)` returns `""`.
+/// - For inputs with ≤ `n` lines, the original line ordering is
+///   preserved verbatim (without any artificial trailing newline).
+/// - For inputs with > `n` lines, the LAST `n` lines are kept in
+///   their original order — the stderr_tail must read top-to-bottom
+///   like the workload's actual exit-time stderr trailer.
+fn keep_last_n_lines(input: &str, n: usize) -> String {
+    if input.is_empty() || n == 0 {
+        return String::new();
+    }
+    let lines: Vec<&str> = input.lines().collect();
+    let start = lines.len().saturating_sub(n);
+    lines[start..].join("\n")
+}
+
 // ---------------------------------------------------------------------------
 // Classification unit tests — pure-function coverage of the
 // `(ExitKind, intentional_stop) → (AllocState, TransitionReason)`
@@ -612,5 +651,52 @@ mod classify_tests {
             panic!("expected DriverInternalError, got {reason:?}");
         };
         assert_eq!(detail, "unknown_exit");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// `keep_last_n_lines` — pure helper used by the driver-side stderr ring
+// buffer to retain only the last N captured lines for inclusion on the
+// `ExitEvent`. Per slice 02c (step 02-05) of `workload-kind-discriminator`
+// per ADR-0033 Amendment 2026-05-10. `STDERR_TAIL_LINES = 5` is the
+// project-wide SSOT for "how many lines"; it lives on the trait surface
+// (`overdrive_core::traits::driver::STDERR_TAIL_LINES`) so both the
+// driver (which fills the ring) and the observer (which reads the row)
+// reference one constant.
+// ---------------------------------------------------------------------------
+#[cfg(test)]
+mod keep_last_n_lines_tests {
+    use super::keep_last_n_lines;
+
+    #[test]
+    fn input_longer_than_budget_keeps_last_n_in_order() {
+        let input = "ERR 1\nERR 2\nERR 3\nERR 4\nERR 5\nERR 6\nERR 7\n";
+        let kept = keep_last_n_lines(input, 5);
+        let lines: Vec<&str> = kept.lines().collect();
+        assert_eq!(lines, vec!["ERR 3", "ERR 4", "ERR 5", "ERR 6", "ERR 7"]);
+    }
+
+    #[test]
+    fn input_shorter_than_budget_keeps_all_lines_in_order() {
+        let input = "first\nsecond\nthird\n";
+        let kept = keep_last_n_lines(input, 5);
+        let lines: Vec<&str> = kept.lines().collect();
+        assert_eq!(lines, vec!["first", "second", "third"]);
+    }
+
+    #[test]
+    fn empty_input_yields_empty_string() {
+        let kept = keep_last_n_lines("", 5);
+        assert_eq!(kept, "");
+    }
+
+    #[test]
+    fn input_without_trailing_newline_still_kept() {
+        // A workload that exits before flushing a final newline still
+        // produces a usable tail.
+        let input = "ERR 1\nERR 2\nERR 3";
+        let kept = keep_last_n_lines(input, 5);
+        let lines: Vec<&str> = kept.lines().collect();
+        assert_eq!(lines, vec!["ERR 1", "ERR 2", "ERR 3"]);
     }
 }

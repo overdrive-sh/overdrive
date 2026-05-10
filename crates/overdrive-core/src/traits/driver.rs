@@ -197,7 +197,30 @@ pub struct ExitEvent {
     pub alloc: AllocationId,
     pub kind: ExitKind,
     pub intentional_stop: bool,
+    /// Newline-joined tail of the last [`STDERR_TAIL_LINES`] lines the
+    /// workload wrote to stderr before exiting. `None` when the driver
+    /// could not capture stderr (no `Stdio::piped()` wiring, the pipe
+    /// was closed by the workload, or the watcher detected an I/O
+    /// error mid-stream). Per ADR-0033 Amendment 2026-05-10.
+    ///
+    /// Producers:
+    /// - `ExecDriver` (production): consumes `child.stderr` line-by-
+    ///   line into a bounded ring buffer of capacity
+    ///   `STDERR_TAIL_LINES`; on `child.wait()` resolution emits the
+    ///   ring contents joined by `\n` (no trailing newline).
+    /// - `SimDriver` (tests): emits `None` by default; tests that
+    ///   want to exercise the tail-rendering path inject explicit
+    ///   stderr via the sim driver's tail-injection API.
+    pub stderr_tail: Option<String>,
 }
+
+/// Number of trailing stderr lines `ExecDriver` retains for inclusion
+/// on the [`ExitEvent`]. The constant is the project-wide SSOT so the
+/// driver-side ring buffer (which fills it) and the renderer (which
+/// displays it as "stderr (last N lines):") read from one source.
+/// Per ADR-0033 Amendment 2026-05-10 / step 02-05 of
+/// `workload-kind-discriminator`.
+pub const STDERR_TAIL_LINES: usize = 5;
 
 #[async_trait]
 pub trait Driver: Send + Sync + 'static {

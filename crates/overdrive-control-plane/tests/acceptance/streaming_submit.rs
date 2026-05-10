@@ -142,6 +142,7 @@ async fn write_row(
         reason,
         detail: None,
         terminal: None,
+        stderr_tail: None,
     };
     obs.write(ObservationRow::AllocStatus(row)).await.expect("obs write");
 }

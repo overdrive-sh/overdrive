@@ -519,6 +519,7 @@ pub async fn evaluate_sim_observation_lww(cluster: &SimObservationCluster) -> In
                 reason: None,
                 detail: None,
                 terminal: None,
+                stderr_tail: None,
             };
             let peer = cluster.peer(writer);
             if let Err(err) = peer.write(ObservationRow::AllocStatus(row)).await {
@@ -2201,6 +2202,7 @@ mod tests {
             reason: None,
             detail: None,
             terminal: None,
+            stderr_tail: None,
         }
     }
 

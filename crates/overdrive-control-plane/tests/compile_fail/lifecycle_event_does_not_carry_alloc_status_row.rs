@@ -34,6 +34,7 @@ fn main() {
         reason: None,
         detail: None,
         terminal: None,
+        stderr_tail: None,
     };
 
     // This line MUST fail to compile: `LifecycleEvent.from` is typed

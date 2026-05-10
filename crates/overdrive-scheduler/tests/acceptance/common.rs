@@ -85,6 +85,7 @@ pub fn make_alloc_running(alloc_id: &str, job_id: &str, target_node: &str) -> Al
         reason: None,
         detail: None,
         terminal: None,
+        stderr_tail: None,
     }
 }
 
@@ -99,6 +100,7 @@ pub fn make_alloc_terminated(alloc_id: &str, job_id: &str, target_node: &str) ->
         reason: None,
         detail: None,
         terminal: None,
+        stderr_tail: None,
     }
 }
 
@@ -201,6 +203,7 @@ pub fn arb_allocs_for_nodes(node_ids: Vec<NodeId>) -> BoxedStrategy<Vec<AllocSta
                         reason: None,
                         detail: None,
                         terminal: None,
+                        stderr_tail: None,
                         state: if is_running {
                             AllocState::Running
                         } else {

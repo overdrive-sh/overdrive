@@ -545,7 +545,17 @@ pub fn format_job_failed_summary(
         "Job '{job_name}' failed. (exit code {exit_code}, took {took_human}, attempts {attempts_str})"
     );
     if !stderr_tail.is_empty() {
-        let _ = writeln!(s, "stderr tail:");
+        // Per step 02-05 / ADR-0033 Amendment 2026-05-10: the header
+        // names the line budget so the operator knows whether they're
+        // looking at the workload's full stderr or the trailing
+        // window. `STDERR_TAIL_LINES` is the project-wide SSOT —
+        // sourced from the trait surface in `overdrive_core`, NOT
+        // hardcoded here.
+        let _ = writeln!(
+            s,
+            "stderr (last {} lines):",
+            overdrive_core::traits::driver::STDERR_TAIL_LINES
+        );
         // Indent each line for operator-readability.
         for line in stderr_tail.lines() {
             let _ = writeln!(s, "  {line}");

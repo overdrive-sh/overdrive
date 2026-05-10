@@ -85,6 +85,7 @@ fn build_row(terminal: Option<TerminalCondition>) -> AllocStatusRow {
         reason: None,
         detail: None,
         terminal,
+        stderr_tail: None,
     }
 }
 

@@ -38,6 +38,7 @@ fn alloc_row(alloc: &str, state: AllocState, counter: u64) -> AllocStatusRow {
         reason: None,
         detail: None,
         terminal: None,
+        stderr_tail: None,
     }
 }
 

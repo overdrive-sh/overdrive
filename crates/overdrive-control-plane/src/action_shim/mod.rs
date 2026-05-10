@@ -216,6 +216,13 @@ fn build_alloc_status_row(
         reason,
         detail,
         terminal,
+        // The action shim does NOT capture stderr — it writes
+        // pre-Running rows (Pending → Running) and reconciler-driven
+        // terminal rows (RestartBudgetExhausted, Cancelled). Stderr
+        // capture is the `ExitObserver` boundary's job per
+        // ADR-0033 Amendment 2026-05-10 / step 02-05; the action
+        // shim's writes always carry `stderr_tail: None`.
+        stderr_tail: None,
     }
 }
 

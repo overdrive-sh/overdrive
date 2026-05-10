@@ -96,6 +96,7 @@ fn alloc_clean_exit(alloc_id: &str, job_id: &str, node_id: &str) -> AllocStatusR
         reason: Some(TransitionReason::Stopped { by: StoppedBy::Process }),
         detail: None,
         terminal: None,
+        stderr_tail: None,
     }
 }
 
@@ -120,6 +121,7 @@ fn alloc_crashed_with_exit(
         }),
         detail: None,
         terminal: None,
+        stderr_tail: None,
     }
 }
 

@@ -125,6 +125,7 @@ async fn write_row(
         reason,
         detail,
         terminal: None,
+        stderr_tail: None,
     };
     state.obs.write(ObservationRow::AllocStatus(row)).await.expect("obs write");
 }
@@ -337,6 +338,7 @@ async fn write_terminal_row(
         reason: None,
         detail: None,
         terminal,
+        stderr_tail: None,
     };
     state.obs.write(ObservationRow::AllocStatus(row)).await.expect("obs write");
 }

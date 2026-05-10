@@ -103,6 +103,7 @@ async fn cluster_status_responsive_under_workload_cpu_burst() {
         reason: None,
         detail: None,
         terminal: None,
+        stderr_tail: None,
     };
     obs.write(ObservationRow::AllocStatus(row)).await.expect("write alloc row");
 

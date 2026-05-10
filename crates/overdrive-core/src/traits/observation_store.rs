@@ -310,6 +310,22 @@ pub struct AllocStatusRow {
     /// shape so pre-feature redb files continue to deserialise (rkyv
     /// treats `Option<T>` such that omitted data deserialises to `None`).
     pub terminal: Option<TerminalCondition>,
+    /// Newline-joined tail of the last
+    /// [`STDERR_TAIL_LINES`](crate::traits::driver::STDERR_TAIL_LINES)
+    /// stderr lines the workload wrote before exiting. Populated by
+    /// [`crate::traits::driver::ExitEvent::stderr_tail`]; the worker
+    /// `exit_observer` passes it through verbatim to this field so
+    /// the operator-facing render layer (`format_job_failed_summary`)
+    /// can show "stderr (last N lines):" without re-deriving the
+    /// content.
+    ///
+    /// Per `.claude/rules/development.md` § "Persist inputs, not
+    /// derived state": stderr is the workload's actual output — an
+    /// observed input, not a derived classification — so this field
+    /// is the correct shape for it on an observation row. Additive
+    /// on the rkyv archive shape (same rule as `reason`, `detail`,
+    /// `terminal`).
+    pub stderr_tail: Option<String>,
 }
 
 /// `node_health` row — Phase 1 minimal shape per brief §6.

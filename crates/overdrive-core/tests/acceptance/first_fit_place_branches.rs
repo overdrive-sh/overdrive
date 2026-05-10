@@ -91,6 +91,7 @@ fn alloc_with_state_on(
         reason: None,
         detail: None,
         terminal: None,
+        stderr_tail: None,
     }
 }
 

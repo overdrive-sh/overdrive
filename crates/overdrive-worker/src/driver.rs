@@ -13,14 +13,17 @@
 //! `AllocationSpec::resources` at start time.
 
 use std::collections::BTreeMap;
+use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
 use parking_lot::Mutex;
-use tokio::process::{Child, Command};
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::process::{Child, ChildStderr, Command};
 use tokio::sync::mpsc;
 use tracing::warn;
 
@@ -28,7 +31,7 @@ use overdrive_core::id::AllocationId;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverType, ExitEvent,
-    ExitKind, Resources,
+    ExitKind, Resources, STDERR_TAIL_LINES,
 };
 
 use crate::cgroup_manager::{
@@ -38,6 +41,19 @@ use crate::cgroup_manager::{
 
 /// Default grace window between SIGTERM and SIGKILL during stop.
 const DEFAULT_STOP_GRACE: Duration = Duration::from_secs(5);
+
+/// Maximum number of cooperative yields the per-alloc watcher performs
+/// after `child.wait()` resolves to let the stderr-tail reader catch
+/// up on kernel-buffered bytes. NOT a wall-clock or logical-clock
+/// timer — each yield gives the reader a runtime turn but completes
+/// in zero (or near-zero) elapsed time when the reader has nothing
+/// to do, so the bound is safe under both `SystemClock` and `SimClock`
+/// wirings. The common case (child closes stderr cleanly on exit)
+/// resolves well within the first few yields; the daemonised-
+/// grandchildren case (FD held open by reparented descendants) hits
+/// the budget and the watcher snapshots the partial tail.
+/// Per step 02-05 / ADR-0033 Amendment 2026-05-10.
+const STDERR_DRAIN_MAX_YIELDS: usize = 64;
 
 /// Capacity of the per-driver `ExitEvent` channel. Sized for burst
 /// load — every running alloc emits exactly one event in its
@@ -255,6 +271,14 @@ impl ExecDriver {
         let mut cmd = Command::new(&spec.command);
         cmd.args(&spec.args);
         cmd.kill_on_drop(false);
+        // Pipe stderr per ADR-0033 Amendment 2026-05-10 / step 02-05:
+        // the per-alloc watcher consumes lines into a bounded ring
+        // buffer of capacity `STDERR_TAIL_LINES` and emits the tail
+        // on the `ExitEvent`. stdout is left inherited — the workload's
+        // human-readable output should still reach the operator's
+        // terminal in development; a future operator-config knob can
+        // pipe it too if needed.
+        cmd.stderr(Stdio::piped());
 
         // SAFETY: `setsid` is async-signal-safe; the closure is
         // executed in the forked child between fork and exec, no
@@ -312,7 +336,7 @@ impl Driver for ExecDriver {
         //    bogus or the kernel refused exec — clean up the scope dir
         //    so we don't orphan it (scenario 2.5).
         let mut cmd = Self::build_command(spec);
-        let child = match cmd.spawn() {
+        let mut child = match cmd.spawn() {
             Ok(child) => child,
             Err(err) => {
                 let _ = remove_workload_scope(&self.cgroup_root, &scope).await;
@@ -356,10 +380,18 @@ impl Driver for ExecDriver {
         //    subsystem (see `crates/overdrive-worker/src/
         //    exit_observer.rs`) consumes that event and writes the
         //    classified `AllocStatusRow` to the ObservationStore.
+        //
+        // Per step 02-05 / ADR-0033 Amendment 2026-05-10 the watcher
+        // also drives a per-alloc stderr line-reader (over the piped
+        // `child.stderr`) that fills a bounded `VecDeque` of capacity
+        // `STDERR_TAIL_LINES`; on `child.wait()` resolution the tail
+        // travels with the `ExitEvent` to the obs row.
         let intentional_stop = Arc::new(AtomicBool::new(false));
+        let stderr_pipe = child.stderr.take();
         let watcher = spawn_exit_watcher(
             spec.alloc.clone(),
             child,
+            stderr_pipe,
             intentional_stop.clone(),
             self.exit_tx.clone(),
         );
@@ -507,13 +539,35 @@ impl Driver for ExecDriver {
 /// during the grace window. The task is `'static` over its captured
 /// state — the `Child`, the `intentional_stop` flag, the `Sender`,
 /// and the `AllocationId`.
+///
+/// Per step 02-05 / ADR-0033 Amendment 2026-05-10 the watcher also
+/// drives a stderr-tail capture: the piped `ChildStderr` (taken from
+/// the spawned `Child` before this call) is consumed line-by-line
+/// into a bounded `VecDeque` of capacity [`STDERR_TAIL_LINES`] held
+/// behind a parking-lot `Mutex`. On `child.wait()` resolution the
+/// watcher snapshots the ring's CURRENT contents non-blockingly —
+/// the reader task is detached and may keep running until reparented
+/// grandchildren close the stderr FD. This ordering matters: shells
+/// spawning daemonised children (`while :; do :; done` busy loops,
+/// `nohup` patterns) leave the FD open after the parent exits, and a
+/// watcher that *awaited* the reader would block forever waiting for
+/// EOF that only arrives after `cgroup.kill` reaps the workload tree.
 fn spawn_exit_watcher(
     alloc: AllocationId,
     mut child: Child,
+    stderr_pipe: Option<ChildStderr>,
     intentional_stop: Arc<AtomicBool>,
     exit_tx: mpsc::Sender<ExitEvent>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
+        // Spawn the stderr-tail reader in parallel with `child.wait()`.
+        // The reader task drains lines into a shared ring buffer; the
+        // watcher snapshots the ring after `child.wait()` resolves
+        // (NOT after the reader task finishes — see fn doc above).
+        let ring: Arc<Mutex<VecDeque<String>>> =
+            Arc::new(Mutex::new(VecDeque::with_capacity(STDERR_TAIL_LINES)));
+        let reader_handle = stderr_pipe.map(|pipe| spawn_stderr_tail_reader(pipe, ring.clone()));
+
         let status_result = child.wait().await;
         // `Ordering::SeqCst` pairs with the `store` in `Driver::stop`.
         let intentional = intentional_stop.load(Ordering::SeqCst);
@@ -533,12 +587,91 @@ fn spawn_exit_watcher(
                 }
             }
         };
-        let event = ExitEvent { alloc, kind, intentional_stop: intentional };
+        // Snapshot the ring after letting the reader catch up on
+        // any kernel-buffered stderr the child wrote immediately
+        // before exit. Strategy: poll the reader's JoinHandle a
+        // bounded number of times, yielding cooperatively between
+        // polls so the reader can run on the same runtime. The
+        // common case (the child closes stderr cleanly on exit) sees
+        // the reader resolve within the first few yields; the
+        // daemonised-grandchildren case (FD held open by reparented
+        // descendants — `while :; do :; done` busy loops, `nohup`
+        // patterns) snapshots the partial tail and detaches the
+        // reader, which lives until `cgroup.kill` reaps the workload
+        // tree.
+        //
+        // Cooperative yields (NOT `Clock::sleep`, NOT `tokio::time::
+        // sleep`) are the load-bearing choice: the reader is a peer
+        // task on the same runtime — yielding gives it scheduling
+        // turns to drain bytes already in the kernel pipe buffer,
+        // without depending on logical or wall-clock time. That
+        // keeps the watcher correct under both real-time
+        // (`SystemClock`) and DST (`SimClock`) wirings without
+        // bending production code around test-double quirks.
+        // Per `.claude/rules/development.md` § "Production code is
+        // not shaped by simulation".
+        let stderr_tail = if let Some(handle) = reader_handle {
+            for _ in 0..STDERR_DRAIN_MAX_YIELDS {
+                if handle.is_finished() {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+            // Detach the reader if it's still running — see fn doc
+            // for why awaiting it would deadlock the daemonised-
+            // grandchildren case.
+            drop(handle);
+            let guard = ring.lock();
+            if guard.is_empty() {
+                None
+            } else {
+                Some(guard.iter().cloned().collect::<Vec<_>>().join("\n"))
+            }
+        } else {
+            None
+        };
+        let event = ExitEvent { alloc, kind, intentional_stop: intentional, stderr_tail };
         // Send is best-effort: if the observer has shut down, the
         // event is dropped — the obs store already reflects a
         // shutdown-time terminal state, and there is no recovery
         // here.
         let _ = exit_tx.send(event).await;
+    })
+}
+
+/// Spawn a task that reads `pipe` line-by-line and pushes each line
+/// into a shared bounded ring (capacity [`STDERR_TAIL_LINES`]) held
+/// behind a `parking_lot::Mutex`. The task runs until pipe EOF or
+/// the first I/O error.
+///
+/// The function uses `tokio::io::BufReader::lines()` per
+/// `.claude/rules/development.md` § "No blocking `std::fs::`* inside
+/// async fn" — the reader is `async`-friendly and never blocks the
+/// tokio worker.
+///
+/// Sharing the ring (rather than returning the joined tail at task
+/// exit) lets the watcher snapshot the captured tail non-blockingly
+/// at `child.wait()` resolution. See `spawn_exit_watcher` doc for
+/// why awaiting the reader at watcher-exit time would deadlock when
+/// reparented grandchildren keep the FD alive.
+fn spawn_stderr_tail_reader(
+    pipe: ChildStderr,
+    ring: Arc<Mutex<VecDeque<String>>>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut reader = BufReader::new(pipe).lines();
+        // `while let` exits on `Ok(None)` (pipe-EOF — workload's
+        // stderr is fully drained) and on `Err(_)` (I/O error mid-
+        // stream — keep what we have and stop). Either way, the
+        // shared ring carries whatever lines were captured up to
+        // exit.
+        while let Ok(Some(line)) = reader.next_line().await {
+            let mut guard = ring.lock();
+            if guard.len() == STDERR_TAIL_LINES {
+                guard.pop_front();
+            }
+            guard.push_back(line);
+        }
     })
 }
 

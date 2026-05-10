@@ -84,6 +84,7 @@ fn row(
         reason: None,
         detail: None,
         terminal: None,
+        stderr_tail: None,
     }
 }
 

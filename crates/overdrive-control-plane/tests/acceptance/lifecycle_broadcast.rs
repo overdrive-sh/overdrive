@@ -423,6 +423,7 @@ async fn stop_action_also_broadcasts_lifecycle_event() {
         reason: Some(TransitionReason::Started),
         detail: None,
         terminal: None,
+        stderr_tail: None,
     };
     obs.write(ObservationRow::AllocStatus(prior_row)).await.expect("seed prior row");
 

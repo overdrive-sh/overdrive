@@ -65,6 +65,7 @@ fn alloc_status(state: AllocState, writer: &NodeId, counter: u64) -> AllocStatus
         reason: None,
         detail: None,
         terminal: None,
+        stderr_tail: None,
     }
 }
 
@@ -227,6 +228,7 @@ async fn full_row_writes_take_precedence_with_no_partial_merge() {
         reason: None,
         detail: None,
         terminal: None,
+        stderr_tail: None,
     };
     peer_c
         .write(ObservationRow::AllocStatus(t1_row.clone()))

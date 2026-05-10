@@ -36,6 +36,11 @@ mod integration {
     //! has no consumer on the post-ADR-0020 wire shape.
     mod concurrent_submit_toctou;
     mod describe_round_trip;
+    /// Slice 02c (step 02-05) of `workload-kind-discriminator` —
+    /// `ExitObserver` stderr-tail capture per ADR-0033 Amendment
+    /// 2026-05-10. Real `/bin/sh` workload writes 7 stderr lines;
+    /// asserts the observer's terminal row carries the last 5.
+    mod exit_observer_stderr_tail;
     mod idempotent_resubmit;
     mod observation_empty_rows;
     /// `ReconcilerRuntime` ↔ `ViewStore` wiring (step 01-06 of

@@ -41,6 +41,7 @@ fn row_at(writer: &NodeId, counter: u64, state: AllocState) -> AllocStatusRow {
         reason: None,
         detail: None,
         terminal: None,
+        stderr_tail: None,
     }
 }
 
@@ -164,6 +165,7 @@ async fn lww_equal_timestamps_are_idempotent_no_redelivery_flip() {
         reason: None,
         detail: None,
         terminal: None,
+        stderr_tail: None,
     };
     // Identical timestamp, but a different payload — represents the
     // same logical row being re-delivered via gossip. Under LWW, this

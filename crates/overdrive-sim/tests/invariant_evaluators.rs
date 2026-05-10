@@ -173,6 +173,7 @@ async fn sim_observation_lww_converges_passes_after_writes_and_convergence() {
             reason: None,
             detail: None,
             terminal: None,
+            stderr_tail: None,
         }))
         .await
         .expect("write");
