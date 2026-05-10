@@ -138,7 +138,18 @@ async fn exit_observer_captures_last_n_stderr_lines_on_terminal() {
         resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
     };
 
-    let _handle = driver_dyn.start(&spec).await.expect("ExecDriver::start succeeds");
+    let handle = driver_dyn.start(&spec).await.expect("ExecDriver::start succeeds");
+
+    // Per step 01-03 of `fix-exit-observer-running-gate`: the watcher
+    // parks on a Running-confirmed gate before its first `ExitEvent`
+    // send. This test does NOT go through the action shim's
+    // StartAllocation arm (the seeded Running row was written
+    // directly above), so we fire the gate manually here to mirror
+    // what the action shim would do post-`obs.write(Running)` Ok.
+    // Without this fire, the watcher would park indefinitely on the
+    // gate and the test would time out at the 5s `tokio::time::
+    // timeout` budget below.
+    driver_dyn.release_for_exit_emission(&handle);
 
     // Wait for the observer's lifecycle event for the terminal row.
     // 5s is generous — the workload exits in milliseconds and the

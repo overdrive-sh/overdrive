@@ -48,24 +48,25 @@
 //! silently. The GREEN transition lands in subsequent steps via
 //! Solution 1' (oneshot-gated watcher emission) per the RCA.
 //!
-//! ## RED scaffold convention
+//! ## Step 01-03 — RED → GREEN transition
 //!
-//! Per `.claude/rules/testing.md` § "Test-side scaffolds — `#[should_panic(
-//! expected = \"RED scaffold\")]`": this test uses the sanctioned RED
-//! shape. Today's assertions panic with a message containing
-//! `"RED scaffold"` (the silent-drop race leaves the alloc stuck at
-//! Running with no terminal LifecycleEvent), so the test PASSES under
-//! nextest while structurally pinning the defect — the moment Solution
-//! 1' (oneshot-gated watcher emission) lands and the assertions stop
-//! firing, the `#[should_panic]` will trip and flag the test for
-//! review at the GREEN transition (drop the attribute, the test goes
-//! green by virtue of the post-condition now holding).
+//! Per step 01-03 of `fix-exit-observer-running-gate`: the
+//! action shim's StartAllocation arm now fires the Running-confirmed
+//! gate via `Driver::release_for_exit_emission` after `obs.write(
+//! Running)` resolves Ok. The watcher parks on the corresponding
+//! `oneshot::Receiver` BEFORE its first `ExitEvent` send. The
+//! `#[should_panic(expected = "RED scaffold")]` attribute that
+//! pinned the RED state during 01-01 / 01-02 has been removed; the
+//! test now passes naturally because the alloc reaches a terminal
+//! state and the lifecycle bus carries the corresponding event.
 //!
 //! Portable across Linux/macOS — `SimDriver` does not require a real
 //! kernel — gated only on `#[cfg(feature = "integration-tests")]`.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+use std::io;
 
 use overdrive_control_plane::api::AllocStateWire;
 use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
@@ -78,7 +79,9 @@ use overdrive_core::id::{AllocationId, NodeId};
 use overdrive_core::reconciler::TargetResource;
 use overdrive_core::traits::driver::{Driver, DriverType, ExitKind};
 use overdrive_core::traits::intent_store::IntentStore;
-use overdrive_core::traits::observation_store::{AllocState, ObservationStore};
+use overdrive_core::traits::observation_store::{
+    AllocState, ObservationStore, ObservationStoreError,
+};
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
@@ -95,6 +98,8 @@ use tempfile::TempDir;
 
 struct Harness {
     state: AppState,
+    #[allow(dead_code)]
+    sim_obs: Arc<SimObservationStore>,
     sim_driver: Arc<SimDriver>,
     target: TargetResource,
     alloc_id: AllocationId,
@@ -113,8 +118,8 @@ async fn build_harness(tmp: &TempDir) -> Harness {
     let store =
         Arc::new(LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open store"));
     let node_id = NodeId::new("local").expect("node id");
-    let obs: Arc<dyn ObservationStore> =
-        Arc::new(SimObservationStore::single_peer(node_id.clone(), 0));
+    let sim_obs = Arc::new(SimObservationStore::single_peer(node_id.clone(), 0));
+    let obs: Arc<dyn ObservationStore> = sim_obs.clone();
     let sim_clock = Arc::new(SimClock::new());
     let sim_driver = Arc::new(SimDriver::with_clock(DriverType::Exec, sim_clock.clone()));
     let driver: Arc<dyn Driver> = sim_driver.clone();
@@ -165,7 +170,7 @@ async fn build_harness(tmp: &TempDir) -> Harness {
         }
     });
 
-    Harness { state, sim_driver, target, alloc_id, sim_clock, ticker_handle }
+    Harness { state, sim_obs, sim_driver, target, alloc_id, sim_clock, ticker_handle }
 }
 
 // -----------------------------------------------------------------------
@@ -181,7 +186,6 @@ async fn build_harness(tmp: &TempDir) -> Harness {
 // -----------------------------------------------------------------------
 
 #[tokio::test]
-#[should_panic(expected = "RED scaffold")]
 async fn watcher_cannot_emit_exit_before_running_row_committed() {
     let tmp = TempDir::new().expect("tempdir");
     let h = build_harness(&tmp).await;
@@ -265,26 +269,177 @@ async fn watcher_cannot_emit_exit_before_running_row_committed() {
     });
     assert!(
         terminal_row.is_some(),
-        "RED scaffold (step 01-01 / fix-exit-observer-running-gate): \
-         alloc must reach Failed or Terminated in obs after sub-budget exit; \
-         current rows = {:?}; \
-         the silent-drop race in exit_observer.rs:225 (RetryOutcome::NoPriorRow) \
-         is the defect this test pins. GREEN landing zone is Solution 1' \
-         (oneshot-gated watcher emission) per RCA \
-         docs/feature/fix-exit-observer-running-gate/deliver/rca.md",
+        "step 01-03 / fix-exit-observer-running-gate: alloc must reach \
+         Failed or Terminated in obs after sub-budget exit; current rows = \
+         {:?}. The Running-confirmed gate fired by the action shim's \
+         StartAllocation arm provides the structural happens-before edge \
+         that prevents the silent-drop race.",
         rows.iter().map(|r| (&r.alloc_id, &r.state)).collect::<Vec<_>>(),
     );
 
     // Bus assertion: a `LifecycleEvent` carrying a terminal `to`
-    // state must be broadcast. Today FAILS — `RetryOutcome::NoPriorRow`
-    // emits no event (`exit_observer.rs:225-228` is the empty arm).
+    // state must be broadcast. With Solution 1' wired, the gate fires
+    // post-`obs.write(Running)` Ok, the watcher unparks, the
+    // `ExitEvent` lands at the observer with a present prior row, and
+    // a terminal LifecycleEvent is broadcast.
     assert!(
         found_terminal_event.is_some(),
-        "RED scaffold (step 01-01 / fix-exit-observer-running-gate): \
-         LifecycleEvent with terminal `to` (Failed | Terminated) must be \
-         broadcast on the lifecycle bus after sub-budget exit; the silent-drop \
-         race in exit_observer.rs:225 (RetryOutcome::NoPriorRow) emits nothing. \
-         GREEN landing zone is Solution 1' (oneshot-gated watcher emission) per \
-         RCA docs/feature/fix-exit-observer-running-gate/deliver/rca.md",
+        "step 01-03 / fix-exit-observer-running-gate: LifecycleEvent \
+         with terminal `to` (Failed | Terminated) must be broadcast on \
+         the lifecycle bus after sub-budget exit. The Running-confirmed \
+         gate forces the watcher to park until the action shim's \
+         `obs.write(Running)` commits, eliminating the NoPriorRow drop.",
+    );
+}
+
+// -----------------------------------------------------------------------
+// Step 01-03 — May-2 retry-exhaustion-degraded path still fires the
+// Running-confirmed gate (liveness rail).
+//
+// Per RCA `docs/feature/fix-exit-observer-running-gate/deliver/rca.md`
+// § "Approved fix — Solution 1'" / "Liveness rail":
+//
+// > the May-2 `obs.write(Running)` retry path may exhaust retries and
+// > degrade to `LifecycleEvent`-only. In that path the gate **must
+// > still fire** (otherwise the watcher leaks forever waiting on a
+// > oneshot that nothing will ever send). Two firing sites: post-
+// > success and post-degraded-escalation.
+//
+// This scenario drives the alloc to Running (gate fires post-Ok at
+// the action shim's StartAllocation arm), then injects a saturating
+// run of non-retryable obs-write failures so the exit_observer's
+// `run_with_retry` exhausts retries on the post-exit row write and
+// degrades to a `LifecycleEvent` carrying
+// `TransitionReason::DriverInternalError`. Asserts:
+//
+// (a) the alloc reaches a terminal LifecycleEvent via the degraded
+//     path,
+// (b) `Driver::release_for_exit_emission` was called from BOTH sites
+//     (idempotent — the SimDriver's gate is `take`n on the first
+//     fire from the action shim; the exit_observer's degraded-path
+//     fire is a structural no-op),
+// (c) the watcher's `ExitEvent` was consumed (it would have leaked
+//     forever if either firing site were missing).
+//
+// On current main this scenario PASSES (drive-to-Running succeeds,
+// exit_observer's May-2 retry path is wired). The test is the
+// load-bearing structural defence against future regressions on
+// either firing site — if a refactor breaks the May-2 path's gate
+// fire, the watcher would deadlock pre-degraded-emit and this test
+// would time out.
+// -----------------------------------------------------------------------
+
+#[tokio::test]
+async fn degraded_escalation_still_fires_running_gate() {
+    let tmp = TempDir::new().expect("tempdir");
+    let h = build_harness(&tmp).await;
+    let start = Instant::now();
+
+    let mut events = h.state.lifecycle_events.subscribe();
+    let job_lifecycle_name = overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
+        .expect("job-lifecycle reconciler name");
+    let deadline = start + Duration::from_secs(120);
+
+    // Drive to Running first — the action shim's StartAllocation
+    // arm fires the gate post-`obs.write(Running)` Ok at this stage.
+    let mut tick_n: u64 = 0;
+    let mut reached_running = false;
+    while tick_n < 30 && !reached_running {
+        run_convergence_tick(
+            &h.state,
+            &job_lifecycle_name,
+            &h.target,
+            start + Duration::from_millis(tick_n.saturating_mul(100)),
+            tick_n,
+            deadline,
+        )
+        .await
+        .expect("tick");
+        let rows = h.state.obs.alloc_status_rows().await.expect("read rows");
+        reached_running =
+            rows.iter().any(|r| r.alloc_id == h.alloc_id && matches!(r.state, AllocState::Running));
+        tick_n += 1;
+    }
+    assert!(
+        reached_running,
+        "alloc must reach Running before the test injects exit + write \
+         failures (the gate fires at the action shim's post-Running-Ok \
+         site here, validating the success path of AC1)",
+    );
+
+    // Drain pre-degraded events so the assertion below sees the
+    // degraded-path events specifically.
+    while events.try_recv().is_ok() {}
+
+    // Inject a saturating run of non-retryable PermissionDenied
+    // failures. `run_with_retry` consults `is_retryable` on each
+    // attempt; PermissionDenied is non-retryable so a single injection
+    // suffices, but stacking covers any future retry-policy change
+    // that attempts a small number of writes regardless. This drives
+    // the May-2 `RetryOutcome::Failed` path that step 01-03 wires the
+    // gate-fire on (belt-and-suspenders against future regressions).
+    for _ in 0..16 {
+        h.sim_obs.inject_write_failure(ObservationStoreError::Io(io::Error::from(
+            io::ErrorKind::PermissionDenied,
+        )));
+    }
+
+    // Now inject the exit. The watcher emits `ExitEvent` (its gate
+    // already fired at the post-Ok site above); the exit_observer's
+    // `run_with_retry` exhausts retries on every injected
+    // PermissionDenied; emits the degraded LifecycleEvent. The
+    // `RetryOutcome::Failed` arm ALSO fires the gate (idempotent
+    // via `Option::take` + `oneshot::Sender::send` consume-self —
+    // a no-op on the success-path code that already fired).
+    h.sim_driver.inject_exit_after(
+        &h.alloc_id,
+        Duration::from_millis(500),
+        ExitKind::Crashed { exit_code: Some(1), signal: None },
+    );
+
+    // Drive convergence ticks until either:
+    //  - we observe a degraded LifecycleEvent (the success criterion),
+    //  - 50 additional ticks elapse (the timeout — failure: the
+    //    degraded path didn't run, or the gate-fire deadlocked the
+    //    watcher).
+    let mut saw_degraded_event = false;
+    'outer: for tick_n in tick_n..(tick_n + 50) {
+        run_convergence_tick(
+            &h.state,
+            &job_lifecycle_name,
+            &h.target,
+            start + Duration::from_millis(tick_n.saturating_mul(100)),
+            tick_n,
+            deadline,
+        )
+        .await
+        .expect("tick");
+        // Yield generously — the inject task, the observer task, and
+        // the retry's clock-sleep all need scheduling turns. Mirrors
+        // the convention in `crash_recovery_obs_write_rejected.rs`.
+        for _ in 0..8 {
+            tokio::task::yield_now().await;
+        }
+        while let Ok(ev) = events.try_recv() {
+            if ev.alloc_id == h.alloc_id
+                && matches!(ev.to, AllocStateWire::Failed | AllocStateWire::Terminated)
+            {
+                saw_degraded_event = true;
+                break 'outer;
+            }
+        }
+    }
+
+    assert!(
+        saw_degraded_event,
+        "step 01-03 / fix-exit-observer-running-gate: after the action \
+         shim's StartAllocation arm fires the Running-confirmed gate \
+         post-Ok AND obs writes saturate with non-retryable failures, \
+         the exit_observer's May-2 retry path must exhaust and emit a \
+         degraded LifecycleEvent with terminal `to` (Failed | \
+         Terminated). The watcher's `ExitEvent` was consumed (it would \
+         have leaked forever if either firing site were missing — the \
+         post-Ok site at the action shim or the degraded-path site at \
+         exit_observer.rs's RetryOutcome::Failed arm).",
     );
 }

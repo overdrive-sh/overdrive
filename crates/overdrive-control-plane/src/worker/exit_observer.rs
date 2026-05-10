@@ -43,13 +43,15 @@
 //! kind; when `false`, `ExitKind::CleanExit` ⇒ `Terminated` and
 //! `ExitKind::Crashed` ⇒ `Failed`.
 
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use overdrive_core::id::{AllocationId, JobId};
 use overdrive_core::reconciler::{JobLifecycle, Reconciler, ReconcilerName, TargetResource};
 use overdrive_core::traits::clock::Clock;
-use overdrive_core::traits::driver::{Driver, DriverType, ExitEvent, ExitKind, STDERR_TAIL_LINES};
+use overdrive_core::traits::driver::{
+    AllocationHandle, Driver, DriverType, ExitEvent, ExitKind, STDERR_TAIL_LINES,
+};
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
     ObservationStoreError,
@@ -170,13 +172,27 @@ pub fn spawn_with_runtime(
             return;
         };
         let driver_kind = driver.r#type();
-        // Drop our `Arc<dyn Driver>` reference now that we've taken the
-        // receiver and captured the driver kind. Holding it for the
-        // lifetime of the observer task would pin the driver alive
-        // across shutdown — its `exit_tx` would never drop and
-        // `rx.recv().await` would block forever, leaking the task.
-        // The receiver is what carries the exit-event lifetime; the
-        // driver Arc is no longer needed.
+        // Downgrade to `Weak` BEFORE dropping the strong Arc. Holding a
+        // strong reference for the lifetime of the observer task would
+        // pin the driver alive across shutdown — its `exit_tx` would
+        // never drop and `rx.recv().await` would block forever, leaking
+        // the task. A `Weak` reference does NOT pin the driver, so the
+        // shutdown path still drops `exit_tx` cleanly when `AppState`
+        // releases its strong Arc.
+        //
+        // Per step 01-03 of `fix-exit-observer-running-gate`: the
+        // `Weak` is upgraded transiently inside the
+        // `RetryOutcome::Failed` arm to call
+        // `Driver::release_for_exit_emission`. This fires the
+        // Running-confirmed gate on the May-2 retry-exhaustion-degraded
+        // path — required for liveness when a future evolution adds
+        // action-shim-side retry on `obs.write(Running)` whose Err leg
+        // would otherwise leave the watcher parked on the gate.
+        // Today's action shim fires the gate post-Ok directly, so this
+        // is belt-and-suspenders: the call is idempotent (the sender is
+        // already `take`n on the Ok path) and structurally pins the
+        // liveness invariant against future regressions.
+        let driver_weak: Weak<dyn Driver> = Arc::downgrade(&driver);
         drop(driver);
         loop {
             let event = tokio::select! {
@@ -227,6 +243,31 @@ pub fn spawn_with_runtime(
                     // reached Running per the observer's vantage point).
                 }
                 RetryOutcome::Failed { error, attempts, prior_state } => {
+                    // Fires the Running-confirmed gate exposed by
+                    // Driver::start. Required for liveness — the
+                    // watcher parks on this gate before emitting
+                    // ExitEvent. The two firing sites
+                    // (post-Running-Ok and post-degraded-escalation)
+                    // are jointly load-bearing; missing either leaks
+                    // the watcher. Per RCA `docs/feature/fix-exit-
+                    // observer-running-gate/deliver/rca.md` (Solution
+                    // 1', § "Liveness rail").
+                    //
+                    // This site fires on the May-2 retry-exhaustion-
+                    // degraded escalation path. The action shim's
+                    // post-Running-Ok fire is the primary site;
+                    // `release_for_exit_emission` is idempotent so
+                    // double-fire (action shim Ok then degraded
+                    // escalation) is structurally a no-op via
+                    // `Option::take` + `oneshot::Sender::send`
+                    // consume-self. The `Weak::upgrade` is None when
+                    // the driver has already been dropped (shutdown
+                    // path); in that case there is no watcher left to
+                    // unpark, so the no-op is correct.
+                    if let Some(driver) = driver_weak.upgrade() {
+                        let handle = AllocationHandle { alloc: event.alloc.clone(), pid: None };
+                        driver.release_for_exit_emission(&handle);
+                    }
                     tracing::error!(
                         target: "overdrive::exit_observer",
                         alloc = %event.alloc,

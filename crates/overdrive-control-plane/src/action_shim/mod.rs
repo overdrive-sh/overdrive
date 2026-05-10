@@ -464,13 +464,15 @@ async fn dispatch_single(
             // cause-class `TransitionReason` variant. State on
             // failure is `Failed` (not `Terminated`) — distinguishes
             // operator-stop from driver-could-not-start.
-            let (state, reason, detail, source): (
+            let (handle_opt, state, reason, detail, source): (
+                Option<AllocationHandle>,
                 AllocState,
                 Option<TransitionReason>,
                 Option<String>,
                 TransitionSource,
             ) = match driver.start(&spec).await {
-                Ok(_handle) => (
+                Ok(handle) => (
+                    Some(handle),
                     AllocState::Running,
                     Some(TransitionReason::Started),
                     None,
@@ -479,6 +481,7 @@ async fn dispatch_single(
                 Err(DriverError::StartRejected { reason: reason_text, driver: drv }) => {
                     let cause = classify_driver_failure(&reason_text, drv, &spec.command);
                     (
+                        None,
                         AllocState::Failed,
                         Some(cause),
                         Some(reason_text),
@@ -496,7 +499,28 @@ async fn dispatch_single(
             let row = build_alloc_status_row(
                 alloc_id, job_id, node_id, state, tick, reason, detail, None, None,
             );
+            // Fires the Running-confirmed gate exposed by Driver::start.
+            // Required for liveness — the watcher parks on this gate
+            // before emitting ExitEvent. The two firing sites
+            // (post-Running-Ok and post-degraded-escalation) are jointly
+            // load-bearing; missing either leaks the watcher. Per RCA
+            // `docs/feature/fix-exit-observer-running-gate/deliver/rca.md`
+            // (Solution 1'). Standard convention: fire the gate
+            // IMMEDIATELY after `obs.write` resolves Ok, BEFORE the
+            // lifecycle-event emit.
+            //
+            // Failed-row branch (state == Failed, handle_opt == None) does
+            // NOT fire the gate per AC2 — the alloc never reached Running
+            // and no watcher exists for a never-spawned alloc. The
+            // driver's `release_for_exit_emission` is idempotent for
+            // unknown allocs anyway; the explicit None-check here makes
+            // the AC contract structurally readable at the call site.
             obs.write(ObservationRow::AllocStatus(row.clone())).await?;
+            if state == AllocState::Running {
+                if let Some(handle) = &handle_opt {
+                    driver.release_for_exit_emission(handle);
+                }
+            }
             emit_event(bus, build_lifecycle_event(&row, prior_state, source));
             Ok(())
         }
@@ -525,13 +549,15 @@ async fn dispatch_single(
             // Failed restart — same cause-class classification path
             // as StartAllocation. Per ADR-0032 §5: state is `Failed`
             // on driver `StartRejected`.
-            let (state, reason, detail, source): (
+            let (handle_opt, state, reason, detail, source): (
+                Option<AllocationHandle>,
                 AllocState,
                 Option<TransitionReason>,
                 Option<String>,
                 TransitionSource,
             ) = match driver.start(&spec).await {
-                Ok(_handle) => (
+                Ok(handle) => (
+                    Some(handle),
                     AllocState::Running,
                     Some(TransitionReason::Started),
                     None,
@@ -540,6 +566,7 @@ async fn dispatch_single(
                 Err(DriverError::StartRejected { reason: reason_text, driver: drv }) => {
                     let cause = classify_driver_failure(&reason_text, drv, &spec.command);
                     (
+                        None,
                         AllocState::Failed,
                         Some(cause),
                         Some(reason_text),
@@ -563,7 +590,23 @@ async fn dispatch_single(
                 None,
                 None,
             );
+            // Fires the Running-confirmed gate exposed by Driver::start.
+            // Required for liveness — the watcher parks on this gate
+            // before emitting ExitEvent. The two firing sites
+            // (post-Running-Ok and post-degraded-escalation) are jointly
+            // load-bearing; missing either leaks the watcher. Per RCA
+            // `docs/feature/fix-exit-observer-running-gate/deliver/rca.md`
+            // (Solution 1'). Symmetric with the StartAllocation arm
+            // above. Failed-row branch (state == Failed, handle_opt ==
+            // None) does NOT fire — restart-rejected reuses the prior
+            // alloc id, but the new watcher was never spawned, so no
+            // gate is awaited.
             obs.write(ObservationRow::AllocStatus(row.clone())).await?;
+            if state == AllocState::Running {
+                if let Some(handle) = &handle_opt {
+                    driver.release_for_exit_emission(handle);
+                }
+            }
             emit_event(bus, build_lifecycle_event(&row, prior_state, source));
             Ok(())
         }

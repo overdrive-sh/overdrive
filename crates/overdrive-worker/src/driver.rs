@@ -415,19 +415,22 @@ impl Driver for ExecDriver {
         // action shim takes it via `Driver::release_for_exit_emission`
         // after `obs.write(Running)` resolves Ok (or after the May-2
         // degraded-escalation path). Receiver is handed to the
-        // watcher and awaited BEFORE its first `ExitEvent` send.
+        // watcher and awaited BEFORE its first `ExitEvent` send —
+        // this is the structural happens-before edge that prevents
+        // `find_prior_row → NoPriorRow` silent-drops on
+        // sub-millisecond-lifetime workloads.
         //
-        // Step 01-02 transitional: the action-shim firing site is
-        // wired in step 01-03 (NOT this step). To keep the gate from
-        // hanging existing tests that do not yet route through the
-        // action-shim's `release_for_exit_emission` call, we drop
-        // the sender immediately after stashing it — the watcher's
-        // `gate_receiver.await` then resolves to `Err(RecvError)`
-        // (orphan path) and emit proceeds. Step 01-03 will replace
-        // the immediate-drop with proper action-shim wiring.
-        // The 01-01 regression test stays RED under this transition
-        // because the gate provides no ordering edge yet (sender
-        // dropped before the action shim could ever hold it).
+        // Per step 01-03 of `fix-exit-observer-running-gate`: the
+        // action shim fires the gate via
+        // `Driver::release_for_exit_emission` after committing
+        // `obs.write(Running)` (or via the exit_observer's degraded
+        // path on May-2 retry exhaustion). The 01-02 transitional
+        // immediate-drop has been removed; the gate now provides the
+        // production ordering edge. On `Driver::stop` the
+        // `LiveAllocation` is dropped — if the sender was never taken
+        // (action shim crashed before firing), the watcher's
+        // `gate_receiver.await` resolves to `Err(RecvError)` (orphan
+        // path) and emit proceeds.
         let (gate_sender, gate_receiver) = oneshot::channel::<()>();
         let watcher = spawn_exit_watcher(
             spec.alloc.clone(),
@@ -447,11 +450,6 @@ impl Driver for ExecDriver {
                 gate_sender: Some(gate_sender),
             },
         );
-        // Step 01-02 transitional drop: see comment above. Step
-        // 01-03 will remove this drop and wire the action shim's
-        // post-Running firing site instead.
-        let _step_01_02_transitional_drop =
-            self.live.lock().get_mut(&spec.alloc).and_then(|live| live.gate_sender.take());
 
         Ok(AllocationHandle { alloc: spec.alloc.clone(), pid: Some(pid) })
     }

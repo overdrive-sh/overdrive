@@ -175,24 +175,90 @@ impl SimDriver {
         let alloc = alloc.clone();
         let exit_tx = self.exit_tx.clone();
         let clock = self.clock.clone();
+        // Take the Running-confirmed gate receiver. Three cases:
+        //
+        // 1. `start` was already called for this alloc → receiver was
+        //    parked at start-time, take it here. The matching sender
+        //    is held in `gate_senders` and consumed by
+        //    `release_for_exit_emission` (action-shim or
+        //    exit_observer's degraded path).
+        //
+        // 2. `inject_exit_after` was called BEFORE `start` (the 01-01
+        //    regression test does exactly this — inject sub-budget
+        //    exit before the first convergence tick spawns
+        //    `StartAllocation`). The alloc is NOT yet in
+        //    `allocations`; we mint a fresh channel here, stash the
+        //    sender for the future `start` call to find, and use
+        //    the receiver for the spawned exit task's gate-await.
+        //    Without this pre-mint, the spawned task would proceed
+        //    with "no gate configured" semantics, recreating the
+        //    original `find_prior_row → NoPriorRow` race the gate
+        //    exists to prevent.
+        //
+        // 3. The gate fired already (action shim post-Ok firing site
+        //    consumed the sender; receiver was consumed by an earlier
+        //    `inject_exit_after`, OR `Driver::stop` ran and dropped
+        //    both sides). The alloc IS in `allocations` but neither
+        //    `gate_senders[alloc]` nor `gate_receivers[alloc]` is
+        //    present. Proceed without a gate — the orphan path.
+        //
+        // Per `docs/feature/fix-exit-observer-running-gate/deliver/
+        // rca.md` (Solution 1') and step 01-03 of that feature.
+        // The three-case decomposition below is load-bearing — see the
+        // "Three cases" comment block above. The `clippy::option_if_let_else`
+        // lint would collapse the structure into a `map_or_else` that
+        // hides the case analysis behind a closure boundary, defeating
+        // the readability of cases 2 and 3 which are NOT a simple
+        // default-value computation. `expect` (not `allow`) so the lint
+        // gate self-removes if the structure is ever refactored such
+        // that the lint legitimately stops firing.
+        #[expect(
+            clippy::option_if_let_else,
+            reason = "three-case decomposition of receiver/sender state \
+                      is the load-bearing artifact; map_or_else collapses it"
+        )]
+        let gate_receiver = {
+            let existing = self.gate_receivers.lock().remove(&alloc);
+            if let Some(rx) = existing {
+                Some(rx)
+            } else if !self.intentional_stops.lock().contains_key(&alloc) {
+                // Case 2: neither `start` nor `stop` has been called
+                // for this alloc — `intentional_stops` is populated
+                // by both, so its absence means the alloc is unknown
+                // to the driver. Pre-mint a channel for the future
+                // `start` call to reuse so the gate's happens-before
+                // edge stands even when `inject_exit_after` is
+                // sequenced before the first `StartAllocation`
+                // dispatch (the 01-01 regression test does exactly
+                // this).
+                let (tx, rx) = oneshot::channel::<()>();
+                self.gate_senders.lock().insert(alloc.clone(), tx);
+                Some(rx)
+            } else {
+                // Case 3: `start` was already called and either the
+                // gate fired (sender consumed, receiver consumed by
+                // a prior inject_exit_after) or `stop` cleared both
+                // sides. Orphan path — proceed without a gate; any
+                // production-flow ordering edge has already landed
+                // (the action shim's post-Ok fire happened before
+                // the action sequence reached `stop`).
+                None
+            }
+        };
         // Get-or-insert the per-alloc intentional_stop flag — if the
         // alloc was never started via `Driver::start` (rare in tests
         // but defensible), construct a fresh `false` flag so the
-        // emitted event still carries a valid bool.
+        // emitted event still carries a valid bool. Done AFTER the
+        // gate-receiver decision above so the case-2 / case-3
+        // branching can use `intentional_stops.contains_key` as the
+        // "alloc known to driver" signal — populating the entry here
+        // would defeat that detection.
         let intentional_stop = self
             .intentional_stops
             .lock()
             .entry(alloc.clone())
             .or_insert_with(|| Arc::new(AtomicBool::new(false)))
             .clone();
-        // Take the Running-confirmed gate receiver. Allocs whose
-        // `start` was never called (rare-but-defensible test path)
-        // get `None`; the spawned task treats `None` as "no gate
-        // configured, proceed". Symmetric with `ExecDriver`'s
-        // orphan-path treatment of `Err(RecvError)`. Per
-        // `docs/feature/fix-exit-observer-running-gate/deliver/rca.md`
-        // (Solution 1').
-        let gate_receiver = self.gate_receivers.lock().remove(&alloc);
         tokio::spawn(async move {
             // Route the simulated emit-delay through the injected
             // `Clock`. Under DST (`SimClock::sleep` is a deterministic
@@ -295,21 +361,30 @@ impl Driver for SimDriver {
         // parked for `inject_exit_after` to pick up. Mirrors
         // `ExecDriver`'s start-time mint of the channel.
         //
-        // Step 01-02 transitional: the action-shim firing site is
-        // wired in step 01-03 (NOT this step). The sender is
-        // immediately dropped after stashing — the spawned
-        // `inject_exit_after` task's `gate_receiver.await` then
-        // resolves to `Err(RecvError)` (orphan path) and emit
-        // proceeds. Step 01-03 will remove this drop and the
-        // action shim will hold and fire the sender post-
-        // `obs.write(Running)`.  The 01-01 regression test stays
-        // RED under this transition because the gate provides no
-        // ordering edge yet.
-        let (gate_sender, gate_receiver) = oneshot::channel::<()>();
-        self.gate_senders.lock().insert(spec.alloc.clone(), gate_sender);
-        self.gate_receivers.lock().insert(spec.alloc.clone(), gate_receiver);
-        // Step 01-02 transitional drop:
-        let _step_01_02_transitional_drop = self.gate_senders.lock().remove(&spec.alloc);
+        // Per step 01-03 of `fix-exit-observer-running-gate`: the
+        // 01-02 transitional immediate-drop has been removed. The
+        // sender is held in `gate_senders` until the action shim
+        // (post-`obs.write(Running)` Ok) or the exit_observer (May-2
+        // degraded escalation) fires it via
+        // `Driver::release_for_exit_emission`. On `Driver::stop` the
+        // sender is dropped (orphan path); the spawned
+        // `inject_exit_after` task's `gate_receiver.await` resolves
+        // to `Err(RecvError)` and emit proceeds.
+        //
+        // If `inject_exit_after` was called BEFORE this `start` for
+        // the same alloc (the 01-01 regression test does this — sub-
+        // budget exit injected before the first convergence tick),
+        // the sender was pre-minted in `inject_exit_after` and the
+        // receiver was parked into the spawned exit-emit task.
+        // Reuse the existing sender so `release_for_exit_emission`
+        // fires the SAME oneshot the spawned task is awaiting.
+        let mut senders = self.gate_senders.lock();
+        if !senders.contains_key(&spec.alloc) {
+            let (gate_sender, gate_receiver) = oneshot::channel::<()>();
+            senders.insert(spec.alloc.clone(), gate_sender);
+            drop(senders);
+            self.gate_receivers.lock().insert(spec.alloc.clone(), gate_receiver);
+        }
         Ok(AllocationHandle { alloc: spec.alloc.clone(), pid: None })
     }
 
