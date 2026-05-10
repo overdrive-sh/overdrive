@@ -569,7 +569,18 @@ async fn consume_stream(
                     let acc = accepted.ok_or_else(|| CliError::BodyDecode {
                         cause: "ConvergedStopped before Accepted on the streaming bus".to_string(),
                     })?;
-                    let summary = crate::render::format_stopped_summary(&acc.job_id, by);
+                    // Slice 04 (`workload-kind-discriminator`) — the legacy
+                    // long-running streaming submit path is semantically a
+                    // Service workload. Slice 02 will wire the WorkloadSpec
+                    // discriminator into submit_streaming and pass the
+                    // parsed kind here verbatim; until then the legacy
+                    // flat-shape parser produces what is conceptually a
+                    // Service, so we hard-code Service vocabulary.
+                    let summary = crate::render::format_stopped_summary(
+                        &acc.job_id,
+                        overdrive_core::aggregate::WorkloadKind::Service,
+                        by,
+                    );
                     let next_command = format!("overdrive alloc status --job {}", acc.job_id);
                     return Ok(SubmitStreamingOutput {
                         job_id: acc.job_id,

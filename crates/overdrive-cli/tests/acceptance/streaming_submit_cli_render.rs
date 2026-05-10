@@ -214,3 +214,36 @@ fn failed_block_renders_without_reason_falls_back_to_terminal_reason_cause() {
         "reproducer line must always be present; got:\n{rendered}",
     );
 }
+
+// S-04-01 — slice 04 unit: `format_running_summary` emits the canonical
+// Service vocabulary `"Service '<name>' is running with N/M replicas
+// (took <duration>)\n"`. The function's sole caller (post-WorkloadSpec
+// discriminator) is the Service code path; the vocabulary rename is
+// the slice 04 single-cut.
+#[test]
+fn s_04_01_format_running_summary_uses_service_vocabulary() {
+    let rendered = overdrive_cli::render::format_running_summary("payments", 1, 1, "113ms");
+
+    assert_eq!(
+        rendered, "Service 'payments' is running with 1/1 replicas (took 113ms)\n",
+        "S-04-01: format_running_summary must emit canonical Service vocabulary",
+    );
+}
+
+// S-04-03 — anti-scenario: the literal `"live"` never appears in the
+// pure-function render output for any duration value passed in. The
+// dst-lint gate from 01-01 forbids the literal in source; this test
+// confirms the observable consequence at the render boundary.
+#[test]
+fn s_04_03_format_running_summary_never_renders_literal_live() {
+    // Across a representative range of duration renderings (`<1ms`,
+    // `<N>ms`, `<N>.<dec>s`, `<M>m<S>s`), no rendered output may
+    // contain the substring "live".
+    for duration in &["<1ms", "42ms", "1.2s", "5m30s"] {
+        let rendered = overdrive_cli::render::format_running_summary("anything", 1, 1, duration);
+        assert!(
+            !rendered.contains("live"),
+            "S-04-03: rendered summary for duration `{duration}` must NOT contain `live`; got: {rendered}",
+        );
+    }
+}

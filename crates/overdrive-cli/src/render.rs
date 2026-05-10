@@ -475,16 +475,26 @@ const fn hint_for_transition_reason(reason: &TransitionReason) -> &'static str {
 /// Render the streaming `ConvergedRunning` summary line — the
 /// operator-facing exit-0 success render. Pure function.
 ///
-/// Per slice 02 step 02-04 acceptance criteria:
-/// `Job '<name>' is running with <running>/<desired> replicas (took <duration>)`.
+/// Per slice 04 of `workload-kind-discriminator`: the function's sole
+/// caller is the Service code path (post-WorkloadSpec discriminator),
+/// so the rendered vocabulary names "Service". The legacy "Job"
+/// vocabulary was renamed in a single-cut greenfield migration —
+/// `JobSubmitEvent` carries no `ConvergedRunning` variant in the
+/// post-slice-02 tagged-event design. The literal `"live"` (RCA root
+/// cause D) is gone; the `took_human` argument carries a measured
+/// Clock-derived value rendered by `format_human_duration`.
+///
+/// Form: `Service '<name>' is running with <running>/<desired> replicas (took <duration>)`.
 #[must_use]
 pub fn format_running_summary(
-    job_name: &str,
+    workload_name: &str,
     running: u32,
     desired: u32,
     took_human: &str,
 ) -> String {
-    format!("Job '{job_name}' is running with {running}/{desired} replicas (took {took_human})\n")
+    format!(
+        "Service '{workload_name}' is running with {running}/{desired} replicas (took {took_human})\n"
+    )
 }
 
 /// Format a [`std::time::Duration`] for operator-facing display.
@@ -526,20 +536,26 @@ pub fn format_human_duration(took: std::time::Duration) -> String {
 /// reaches a clean terminal stop. Pure function.
 ///
 /// Mirrors `format_running_summary`'s shape (single line, trailing
-/// newline). The `by` argument names the initiator: operator-driven
-/// stop intent, reconciler-driven convergence to terminal, or natural
-/// process exit. `StoppedBy` is `#[non_exhaustive]` per
+/// newline). The `kind` argument is the workload-kind discriminator
+/// per ADR-0047 / slice 04 of `workload-kind-discriminator`: it picks
+/// the operator-facing vocabulary so a Service stop reads `Service
+/// '...' was stopped by ...`, a Job stop reads `Job '...' was stopped
+/// by ...`, and a Schedule stop reads `Schedule '...' was deregistered
+/// by ...` (Schedule is registered/deregistered, not "stopped" — the
+/// vocabulary mirrors slice 05's submit-side phrasing).
+///
+/// The `by` argument names the initiator: operator-driven stop intent,
+/// reconciler-driven convergence to terminal, or natural process exit.
+/// `StoppedBy` is `#[non_exhaustive]` per
 /// `overdrive_core::transition_reason`; the catch-all arm carries
 /// neutral phrasing so a future variant does not silently render an
 /// empty initiator.
 ///
-/// Operator-facing form:
-/// `Job '<name>' was stopped by <operator|reconciler|process>.`
-///
 /// RCA: `docs/feature/fix-converged-stopped-cli-arm/deliver/rca.md`.
 #[must_use]
 pub fn format_stopped_summary(
-    job_name: &str,
+    workload_name: &str,
+    kind: overdrive_core::aggregate::WorkloadKind,
     by: overdrive_core::transition_reason::StoppedBy,
 ) -> String {
     let initiator = match by {
@@ -550,5 +566,15 @@ pub fn format_stopped_summary(
         // any Phase-2+ variant added without updating this mapping.
         _ => "an unrecognised initiator",
     };
-    format!("Job '{job_name}' was stopped by {initiator}.\n")
+    match kind {
+        overdrive_core::aggregate::WorkloadKind::Service => {
+            format!("Service '{workload_name}' was stopped by {initiator}.\n")
+        }
+        overdrive_core::aggregate::WorkloadKind::Job => {
+            format!("Job '{workload_name}' was stopped by {initiator}.\n")
+        }
+        overdrive_core::aggregate::WorkloadKind::Schedule => {
+            format!("Schedule '{workload_name}' was deregistered by {initiator}.\n")
+        }
+    }
 }

@@ -116,11 +116,42 @@ async fn streaming_submit_against_real_bin_sleep_converges_running_and_exits_0()
         output.spec_digest,
     );
 
-    // Stream summary contains the `is running` text for an operator-facing
-    // success line.
+    // S-04-01 — slice 04 acceptance: rendered summary uses Service
+    // vocabulary (NOT Job), names a measured duration (NOT the literal
+    // "live"), and matches the canonical
+    //   "Service '<name>' is running with N/M replicas (took <duration>)"
+    // shape. The fixture above is a long-running `/bin/sleep` workload
+    // — semantically a Service. Slice 02 will wire the [service] TOML
+    // shape into submit_streaming; until then the legacy flat fixture
+    // is the production path the render-side rename guards.
     assert!(
-        output.summary.contains("running"),
-        "S-WS-01: rendered summary must mention `running`; got: {}",
+        output.summary.contains("Service 'sleeper' is running with 1/1 replicas"),
+        "S-04-01: rendered summary must use Service vocabulary; got: {}",
+        output.summary,
+    );
+    assert!(
+        output.summary.contains("(took "),
+        "S-04-01: rendered summary must include a `(took <duration>)` segment; got: {}",
+        output.summary,
+    );
+
+    // S-04-03 — anti-scenario: the literal `"live"` never appears in
+    // the operator-visible render output. The dst-lint gate from
+    // 01-01 forbids the literal in source; this test confirms the
+    // observable consequence at the render boundary.
+    assert!(
+        !output.summary.contains("live"),
+        "S-04-03: rendered summary must NOT contain the literal `live`; got: {}",
+        output.summary,
+    );
+
+    // S-04-XX (vocabulary preservation) — render-side rename consequence:
+    // the summary line MUST NOT contain the legacy "Job '...' is running"
+    // phrasing. Slice 04 single-cut: `format_running_summary`'s sole
+    // caller (the post-WorkloadSpec Service path) emits Service vocab.
+    assert!(
+        !output.summary.contains("Job 'sleeper' is running"),
+        "S-04-01: legacy Job vocabulary must be gone from format_running_summary; got: {}",
         output.summary,
     );
 
