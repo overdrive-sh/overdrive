@@ -37,6 +37,12 @@ mod integration {
     mod streaming_submit_converged_stopped;
     mod streaming_submit_happy_path;
 
+    // workload-kind-discriminator slice 05 — Schedule kind submit /
+    // alloc-status render surface + IntentStore persistence, with
+    // KPI K5 byte-equal deferral URL across surfaces. Per ADR-0047
+    // §1, §3 + slice 05 spec.
+    mod job_submit_schedule;
+
     // Slice 03 step 03-02 — S-CLI-03 Tier 3 jq-pipeline-equivalent:
     // a pipe-redirected stdout (non-TTY) without --detach MUST
     // auto-select the JSON-ack lane and emit a single parseable JSON

@@ -487,6 +487,21 @@ impl IntentKey {
         Self(format!("jobs/{id}/stop").into_bytes())
     }
 
+    /// Derive the intent key for a Schedule. Stable for any valid
+    /// `JobId` per the same ASCII-only invariants that govern
+    /// [`Self::for_job`]. The string form is `schedules/<JobId::Display>`.
+    ///
+    /// Per ADR-0047 §1 / slice 05 of `workload-kind-discriminator`,
+    /// Schedule is a third workload kind alongside Service and Job;
+    /// it persists alongside `[job]` in TOML but lives at its own
+    /// canonical key prefix so a job-named-the-same and a
+    /// schedule-named-the-same remain distinct intents at the
+    /// IntentStore level (no key collision, no "stop the schedule"
+    /// shape stops the standalone job, ...).
+    pub fn for_schedule(id: &JobId) -> Self {
+        Self(format!("schedules/{id}").into_bytes())
+    }
+
     /// Derive the intent key for a Node.
     pub fn for_node(id: &NodeId) -> Self {
         Self(format!("nodes/{id}").into_bytes())

@@ -112,4 +112,8 @@ mod acceptance {
     // (§7). Per ADR-0047 §1, §2.
     mod coinflip_migration;
     mod workload_spec_parser;
+
+    // workload-kind-discriminator Slice 05 — parser-side cron
+    // required-field scenario. S-05-04 in distill/test-scenarios.md §5.
+    mod schedule_parser;
 }

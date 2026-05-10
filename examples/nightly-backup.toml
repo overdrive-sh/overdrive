@@ -1,0 +1,30 @@
+# Slice 05 of `workload-kind-discriminator` — example `[job]+[schedule]`
+# spec exercising the Schedule kind end-to-end.
+#
+# Submit:
+#   overdrive job submit examples/nightly-backup.toml
+#
+# The CLI prints "Schedule registered." plus a NOTE block referencing
+# https://github.com/overdrive-sh/overdrive/issues/166. Cron firing
+# semantics are deferred to that tracking issue — the spec is
+# validated and persisted as intent (per J-OPS-002 — submitted
+# things are committed even if execution is deferred), but no Job
+# runs are spawned automatically.
+#
+# `cron = "0 2 * * *"` is preserved VERBATIM in `alloc status`
+# output. Slice 05 explicitly does NOT canonicalise cron strings;
+# richer cron syntax validation lands in GH #166.
+
+[job]
+id = "nightly-backup"
+
+[exec]
+command = "/bin/echo"
+args = ["nightly", "backup", "snapshot"]
+
+[resources]
+cpu_milli = 100
+memory_bytes = 67108864
+
+[schedule]
+cron = "0 2 * * *"

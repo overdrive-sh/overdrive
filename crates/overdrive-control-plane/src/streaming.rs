@@ -490,6 +490,67 @@ pub fn build_accepted(
     SubmitEvent::Accepted { spec_digest, intent_key, outcome }
 }
 
+// ---------------------------------------------------------------------------
+// Schedule streaming sub-path — slice 05 of `workload-kind-discriminator`.
+// ---------------------------------------------------------------------------
+//
+// Per ADR-0047 §3 / DESIGN [D7] the streaming surface gains three
+// sibling per-kind event enums (`ServiceSubmitEvent`, `JobSubmitEvent`,
+// `ScheduleSubmitEvent`) wrapped in a kind-tagged outer envelope.
+// Slice 02 introduces the outer envelope and the Service/Job sibling
+// enums; slice 05 lands the Schedule sibling because the Schedule
+// surface is independent of the long-running streaming-cap loop —
+// Schedule submit is `Accepted` + `Registered` and the stream closes,
+// no firing semantics this slice (cron firing is GH #166).
+//
+// `ScheduleSubmitEvent` is intentionally minimal: two variants, both
+// emitted synchronously at submit time. There is no terminal /
+// converged-running / cap-timer arm because Schedule has no
+// long-running convergence loop yet — that lands when GH #166 wires
+// firing semantics through the reconciler.
+
+/// Streaming events emitted by the Schedule submit sub-path.
+///
+/// Per ADR-0047 §3 / [D7]: two variants, both emitted synchronously
+/// at submit time. `Accepted` mirrors the existing
+/// [`SubmitEvent::Accepted`] shape; `Registered` carries the cron
+/// expression echoed verbatim and the deferral tracking URL. The
+/// stream closes after `Registered` — Schedule has no firing
+/// semantics this slice (tracked at GH #166).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+#[serde(tag = "kind", content = "data", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ScheduleSubmitEvent {
+    /// Submit was accepted. Mirrors the existing `SubmitEvent::Accepted`
+    /// payload — `spec_digest` is the canonical 64-char lowercase-hex
+    /// SHA-256 of the rkyv-archived `WorkloadSpec::Schedule` bytes;
+    /// `intent_key` is the canonical `schedules/<id>` key; `outcome`
+    /// is the idempotency verdict.
+    Accepted {
+        /// Canonical 64-char lowercase-hex SHA-256 of the
+        /// rkyv-archived `WorkloadSpec::Schedule` bytes (ADR-0002).
+        spec_digest: String,
+        /// Canonical `schedules/<id>` IntentKey string form.
+        intent_key: String,
+        /// Idempotency verdict — `Inserted` for fresh submit,
+        /// `Unchanged` for byte-identical resubmit.
+        outcome: IdempotencyOutcome,
+    },
+    /// Schedule registered — execution is deferred. `cron` is the
+    /// operator-supplied cron expression echoed verbatim;
+    /// `deferral_url` is the tracking-issue URL the CLI render-layer
+    /// reads from `SCHEDULE_EXECUTION_TRACKING_URL`. The stream
+    /// closes after this event.
+    Registered {
+        /// Operator-supplied cron expression, preserved verbatim
+        /// (no canonicalisation, no whitespace collapse).
+        cron: String,
+        /// Deferral-tracking issue URL — byte-equal to the CLI's
+        /// `SCHEDULE_EXECUTION_TRACKING_URL` constant per KPI K5.
+        deferral_url: String,
+    },
+}
+
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {

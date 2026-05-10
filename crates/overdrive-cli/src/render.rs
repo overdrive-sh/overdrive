@@ -17,6 +17,12 @@ use overdrive_control_plane::api::{
 };
 use overdrive_core::TransitionReason;
 
+// workload-kind-discriminator slice 05 — Schedule submit/alloc-status
+// render functions and the SCHEDULE_EXECUTION_TRACKING_URL SSOT
+// constant (KPI K5 byte-equality across surfaces). Per ADR-0047 §1
+// + slice 05 spec.
+pub mod schedule;
+
 use crate::commands::alloc::AllocStatusOutput;
 use crate::commands::cluster::ClusterStatusOutput;
 use crate::commands::job::{StopOutput, SubmitOutput};
