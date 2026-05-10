@@ -35,6 +35,7 @@ fn main() {
         detail: None,
         terminal: None,
         stderr_tail: None,
+        kind: overdrive_core::aggregate::WorkloadKind::Service,
     };
 
     // This line MUST fail to compile: `LifecycleEvent.from` is typed

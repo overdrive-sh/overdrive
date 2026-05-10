@@ -174,6 +174,7 @@ async fn sim_observation_lww_converges_passes_after_writes_and_convergence() {
             detail: None,
             terminal: None,
             stderr_tail: None,
+            kind: overdrive_core::aggregate::WorkloadKind::Service,
         }))
         .await
         .expect("write");

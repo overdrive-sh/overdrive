@@ -105,6 +105,7 @@ fn alloc_with_state(
         detail: None,
         terminal: None,
         stderr_tail: None,
+        kind: overdrive_core::aggregate::WorkloadKind::Service,
     }
 }
 
@@ -216,7 +217,13 @@ fn recomputes_deadline_at_window_boundary() {
          emit RestartAllocation (backoff window elapsed under `<`); got {actions_at:?}",
     );
     assert!(
-        matches!(actions_at[0], Action::RestartAllocation { .. }),
+        matches!(
+            actions_at[0],
+            Action::RestartAllocation {
+                kind: overdrive_core::aggregate::WorkloadKind::Service,
+                ..
+            }
+        ),
         "first action must be RestartAllocation; got {:?}",
         actions_at[0],
     );

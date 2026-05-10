@@ -36,6 +36,7 @@ fn sample_alloc_status_row() -> AllocStatusRow {
         detail: None,
         terminal: None,
         stderr_tail: None,
+        kind: overdrive_core::aggregate::WorkloadKind::Service,
     }
 }
 

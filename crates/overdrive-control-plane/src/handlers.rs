@@ -656,6 +656,19 @@ pub async fn alloc_status(
         u32::try_from(rows.iter().filter(|r| matches!(r.state, AllocStateWire::Running)).count())
             .unwrap_or(u32::MAX);
 
+    // Per ADR-0047 §1 / step 02-02 [D4]: read the workload-kind
+    // discriminator from the dedicated `jobs/<id>/kind` intent record.
+    // Phase-1 greenfield: missing record defaults to `Service` (the
+    // kind-agnostic shape the reconciler emulated before slice 02-04).
+    let kind_byte = state
+        .store
+        .get(IntentKey::for_job_kind(&job_id).as_bytes())
+        .await?
+        .and_then(|bytes| bytes.first().copied());
+    let kind = kind_byte
+        .map(overdrive_core::aggregate::WorkloadKind::from_discriminator_byte)
+        .unwrap_or_default();
+
     Ok(Json(api::AllocStatusResponse {
         job_id: Some(job.id.to_string()),
         spec_digest: Some(spec_digest),
@@ -663,6 +676,7 @@ pub async fn alloc_status(
         replicas_running,
         rows,
         restart_budget: Some(restart_budget),
+        kind: Some(kind),
     }))
 }
 

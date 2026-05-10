@@ -234,6 +234,7 @@ proptest! {
                     job_id: job_id.clone(),
                     node_id: node_id.clone(),
                     spec,
+                    kind: overdrive_core::aggregate::WorkloadKind::Service,
                 });
             }
 
@@ -291,6 +292,7 @@ async fn run_classifier_scenario(reason_text: &str, expected_reason: TransitionR
         job_id: job_id.clone(),
         node_id: node_id.clone(),
         spec,
+        kind: overdrive_core::aggregate::WorkloadKind::Service,
     };
 
     let tick = make_tick(0);
@@ -424,6 +426,7 @@ async fn stop_action_also_broadcasts_lifecycle_event() {
         detail: None,
         terminal: None,
         stderr_tail: None,
+        kind: overdrive_core::aggregate::WorkloadKind::Service,
     };
     obs.write(ObservationRow::AllocStatus(prior_row)).await.expect("seed prior row");
 

@@ -107,6 +107,7 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
         detail: None,
         terminal: None,
         stderr_tail: None,
+        kind: overdrive_core::aggregate::WorkloadKind::Service,
     };
     obs.write(ObservationRow::AllocStatus(prior_row)).await.expect("seed prior alloc row");
 
@@ -125,7 +126,11 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
         args: vec!["--mode=fast".to_string()],
         resources: Resources { cpu_milli: 200, memory_bytes: 128 * 1024 * 1024 },
     };
-    let action = Action::RestartAllocation { alloc_id, spec: restart_spec.clone() };
+    let action = Action::RestartAllocation {
+        alloc_id,
+        spec: restart_spec.clone(),
+        kind: overdrive_core::aggregate::WorkloadKind::Service,
+    };
 
     let now = Instant::now();
     let tick = TickContext {

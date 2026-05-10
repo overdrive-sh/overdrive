@@ -135,6 +135,7 @@ fn build_row(
         detail,
         terminal: None,
         stderr_tail: None,
+        kind: overdrive_core::aggregate::WorkloadKind::Service,
     }
 }
 

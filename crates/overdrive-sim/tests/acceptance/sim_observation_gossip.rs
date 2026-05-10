@@ -66,6 +66,7 @@ fn alloc_status(state: AllocState, writer: &NodeId, counter: u64) -> AllocStatus
         detail: None,
         terminal: None,
         stderr_tail: None,
+        kind: overdrive_core::aggregate::WorkloadKind::Service,
     }
 }
 
@@ -229,6 +230,7 @@ async fn full_row_writes_take_precedence_with_no_partial_merge() {
         detail: None,
         terminal: None,
         stderr_tail: None,
+        kind: overdrive_core::aggregate::WorkloadKind::Service,
     };
     peer_c
         .write(ObservationRow::AllocStatus(t1_row.clone()))

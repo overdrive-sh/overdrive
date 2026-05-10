@@ -104,6 +104,7 @@ fn alloc_with_state(
         detail: None,
         terminal: None,
         stderr_tail: None,
+        kind: overdrive_core::aggregate::WorkloadKind::Service,
     }
 }
 
@@ -374,7 +375,10 @@ fn run_branch_starts_fresh_alloc_when_no_running_no_failed() {
 
     assert_eq!(actions.len(), 1, "must emit one StartAllocation; got {actions:?}");
     assert!(
-        matches!(actions[0], Action::StartAllocation { .. }),
+        matches!(
+            actions[0],
+            Action::StartAllocation { kind: overdrive_core::aggregate::WorkloadKind::Service, .. }
+        ),
         "first action must be StartAllocation; got {:?}",
         actions[0],
     );
@@ -399,7 +403,13 @@ fn restart_emitted_when_attempts_below_ceiling() {
         "attempts={attempts_when_below_ceiling} (< ceiling) must emit RestartAllocation; got {actions:?}",
     );
     assert!(
-        matches!(actions[0], Action::RestartAllocation { .. }),
+        matches!(
+            actions[0],
+            Action::RestartAllocation {
+                kind: overdrive_core::aggregate::WorkloadKind::Service,
+                ..
+            }
+        ),
         "first action must be RestartAllocation; got {:?}",
         actions[0],
     );
@@ -527,7 +537,13 @@ fn restart_emitted_when_now_equals_deadline() {
          (backoff elapsed); got {actions:?}",
     );
     assert!(
-        matches!(actions[0], Action::RestartAllocation { .. }),
+        matches!(
+            actions[0],
+            Action::RestartAllocation {
+                kind: overdrive_core::aggregate::WorkloadKind::Service,
+                ..
+            }
+        ),
         "first action must be RestartAllocation; got {:?}",
         actions[0],
     );
@@ -788,7 +804,13 @@ fn tick_after_backoff_elapsed_emits_restart_and_advances_seen_at() {
         "tick 2 after backoff elapsed must emit one RestartAllocation; got {actions_2:?}",
     );
     assert!(
-        matches!(actions_2[0], Action::RestartAllocation { .. }),
+        matches!(
+            actions_2[0],
+            Action::RestartAllocation {
+                kind: overdrive_core::aggregate::WorkloadKind::Service,
+                ..
+            }
+        ),
         "first action must be RestartAllocation; got {:?}",
         actions_2[0],
     );

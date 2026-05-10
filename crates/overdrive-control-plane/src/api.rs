@@ -210,6 +210,10 @@ pub struct AllocStatusResponse {
     /// `RESTART_BACKOFF_CEILING` (5) in Phase 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub restart_budget: Option<RestartBudget>,
+    /// Workload-kind discriminator per ADR-0047 §1 / step 02-02 [D4].
+    /// The CLI render layer branches on this field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<overdrive_core::aggregate::WorkloadKind>,
 }
 
 /// Allocation-status row body — extended per ADR-0033 §1 / Slice 01

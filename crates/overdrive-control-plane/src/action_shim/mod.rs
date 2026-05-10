@@ -207,6 +207,7 @@ fn build_alloc_status_row(
     detail: Option<String>,
     terminal: Option<TerminalCondition>,
     stderr_tail: Option<String>,
+    kind: overdrive_core::aggregate::WorkloadKind,
 ) -> AllocStatusRow {
     let writer = node_id.clone();
     AllocStatusRow {
@@ -229,6 +230,7 @@ fn build_alloc_status_row(
         // stderr before exiting. Other arms still pass `None` (no
         // stderr was observed at those write sites).
         stderr_tail,
+        kind,
     }
 }
 
@@ -440,6 +442,7 @@ async fn dispatch_single(
                 prior_row.detail.clone(),
                 terminal,
                 prior_stderr_tail,
+                prior_row.kind,
             );
             obs.write(ObservationRow::AllocStatus(row.clone())).await?;
             emit_event(bus, build_lifecycle_event(&row, prior_state, TransitionSource::Reconciler));
@@ -449,7 +452,7 @@ async fn dispatch_single(
         // Running AllocStatusRow on success. On StartRejected, write
         // a `Failed` row recording the typed cause-class
         // (ADR-0032 §5 + §4 Amendment).
-        Action::StartAllocation { alloc_id, job_id, node_id, spec } => {
+        Action::StartAllocation { alloc_id, job_id, node_id, spec, kind } => {
             // Read prior obs row before the driver call so we capture
             // the allocation's state before this transition. For first-
             // seen allocs (no prior row) default to Pending — consistent
@@ -497,7 +500,7 @@ async fn dispatch_single(
             // arm. A successful start or a single mid-budget failed
             // start carries `terminal: None`.
             let row = build_alloc_status_row(
-                alloc_id, job_id, node_id, state, tick, reason, detail, None, None,
+                alloc_id, job_id, node_id, state, tick, reason, detail, None, None, kind,
             );
             // Fires the Running-confirmed gate exposed by Driver::start.
             // Required for liveness — the watcher parks on this gate
@@ -531,7 +534,7 @@ async fn dispatch_single(
         // reconciler from the live `Job`; the shim reads it straight
         // off the action. `find_prior_alloc_row` is still needed to
         // recover `(job_id, node_id)` for the `AllocStatusRow` write.
-        Action::RestartAllocation { alloc_id, spec } => {
+        Action::RestartAllocation { alloc_id, spec, kind } => {
             // Stop half — Phase 1 uses an empty AllocationHandle (no
             // pid tracking yet); the driver's `stop` is best-effort
             // and `NotFound` is silently absorbed (the alloc may have
@@ -579,6 +582,12 @@ async fn dispatch_single(
             // claim. Same rationale as StartAllocation — restart is a
             // mid-budget recovery attempt; only `FinalizeFailed`
             // carries the BackoffExhausted terminal.
+            //
+            // Per ADR-0047 §1 / step 02-02 [D4]: kind comes from the
+            // emitting action (sourced by the reconciler from the
+            // hydrated `JobLifecycleState.workload_kind`), NOT from
+            // the prior row. The action's kind is the authoritative
+            // value at every restart write.
             let row = build_alloc_status_row(
                 alloc_id,
                 prior_row.job_id,
@@ -589,6 +598,7 @@ async fn dispatch_single(
                 detail,
                 None,
                 None,
+                kind,
             );
             // Fires the Running-confirmed gate exposed by Driver::start.
             // Required for liveness — the watcher parks on this gate
@@ -661,6 +671,7 @@ async fn dispatch_single(
                 None,
                 terminal,
                 None,
+                prior_row.kind,
             );
             obs.write(ObservationRow::AllocStatus(row.clone())).await?;
             emit_event(bus, build_lifecycle_event(&row, prior_state, TransitionSource::Reconciler));

@@ -92,6 +92,7 @@ fn alloc_with_state_on(
         detail: None,
         terminal: None,
         stderr_tail: None,
+        kind: overdrive_core::aggregate::WorkloadKind::Service,
     }
 }
 
@@ -188,7 +189,10 @@ fn placement_succeeds_at_exact_cpu_fit_with_memory_excess() {
     let actions = placement_actions(nodes, job, BTreeMap::new());
 
     assert_eq!(actions.len(), 1, "exact-fit on cpu must place; got {actions:?}");
-    assert!(matches!(actions[0], Action::StartAllocation { .. }));
+    assert!(matches!(
+        actions[0],
+        Action::StartAllocation { kind: overdrive_core::aggregate::WorkloadKind::Service, .. }
+    ));
 }
 
 // -------------------------------------------------------------------
@@ -213,7 +217,10 @@ fn placement_succeeds_at_exact_memory_fit_with_cpu_excess() {
     let actions = placement_actions(nodes, job, BTreeMap::new());
 
     assert_eq!(actions.len(), 1, "exact-fit on memory must place; got {actions:?}");
-    assert!(matches!(actions[0], Action::StartAllocation { .. }));
+    assert!(matches!(
+        actions[0],
+        Action::StartAllocation { kind: overdrive_core::aggregate::WorkloadKind::Service, .. }
+    ));
 }
 
 // -------------------------------------------------------------------

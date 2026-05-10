@@ -47,6 +47,7 @@ fn running_fixture() -> AllocStatusResponse {
             error: Some("driver started (pid 12345)".to_string()),
         }],
         restart_budget: Some(RestartBudget { used: 0, max: 5, exhausted: false }),
+        kind: None,
     }
 }
 
@@ -77,6 +78,7 @@ fn failed_fixture() -> AllocStatusResponse {
             error: Some("stat /usr/local/bin/payments: no such file or directory".to_string()),
         }],
         restart_budget: Some(RestartBudget { used: 5, max: 5, exhausted: true }),
+        kind: None,
     }
 }
 
@@ -108,6 +110,7 @@ fn pending_no_capacity_fixture() -> AllocStatusResponse {
             error: Some("requested 10000mCPU/10 GiB / free 4000mCPU/3.2 GiB".to_string()),
         }],
         restart_budget: Some(RestartBudget { used: 0, max: 5, exhausted: false }),
+        kind: None,
     }
 }
 

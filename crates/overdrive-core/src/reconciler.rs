@@ -497,6 +497,12 @@ pub enum Action {
         /// Resources / command / args / identity for the workload. The action
         /// shim passes this directly to `Driver::start`.
         spec: AllocationSpec,
+        /// Workload-kind discriminator per ADR-0047 §1 / step 02-02
+        /// [D4]. The action shim denormalises this onto the emitted
+        /// `AllocStatusRow.kind` field so the render layer can branch
+        /// on kind without re-fetching intent. Sourced from
+        /// [`JobLifecycleState::workload_kind`] at emit time.
+        kind: WorkloadKind,
     },
     /// Stop a Running allocation. Emitted by the `JobLifecycle`
     /// reconciler when desired state is "stopped" (set by
@@ -542,6 +548,9 @@ pub enum Action {
         /// mirrors [`Action::StartAllocation::spec`]. The action shim
         /// passes this directly to `Driver::start`.
         spec: AllocationSpec,
+        /// Workload-kind discriminator per ADR-0047 §1 / step 02-02
+        /// [D4]. Mirrors [`Action::StartAllocation::kind`].
+        kind: WorkloadKind,
     },
 
     /// Finalize a failed allocation as terminal — the synthetic
@@ -1384,6 +1393,7 @@ impl Reconciler for JobLifecycle {
                             args: args.clone(),
                             resources: job.resources,
                         },
+                        kind: desired.workload_kind,
                     };
                     let mut next_view = view.clone();
                     let count =
@@ -1435,6 +1445,7 @@ impl Reconciler for JobLifecycle {
                                 args: args.clone(),
                                 resources: job.resources,
                             },
+                            kind: desired.workload_kind,
                         };
                         (vec![action], view.clone())
                     },

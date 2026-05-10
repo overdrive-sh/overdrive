@@ -29,6 +29,7 @@ use thiserror::Error;
 
 use std::net::Ipv4Addr;
 
+use crate::aggregate::WorkloadKind;
 use crate::dataplane::fingerprint::BackendSetFingerprint;
 use crate::id::{AllocationId, JobId, NodeId, Region, ServiceId};
 use crate::traits::dataplane::Backend;
@@ -326,6 +327,27 @@ pub struct AllocStatusRow {
     /// on the rkyv archive shape (same rule as `reason`, `detail`,
     /// `terminal`).
     pub stderr_tail: Option<String>,
+    /// Workload-kind discriminator denormalised onto every alloc-
+    /// status row at write time per design [D4] of the
+    /// `workload-kind-discriminator` feature (slice 03 / step 02-02).
+    ///
+    /// The render layer branches on this field without re-fetching
+    /// intent — Service rows render with replicas + Restarts (no Exit
+    /// column); Job rows render with Verdict + per-attempt Exit codes
+    /// + stderr tail; Schedule rows render with cron + deferral.
+    ///
+    /// Phase-1 greenfield — NO backfill. New rows carry the
+    /// authoritative kind; old rows do not exist (the feature lands
+    /// before any persistent observation row was written under prior
+    /// schemas in production). The action shim's
+    /// `build_alloc_status_row` populates this from the originating
+    /// `JobLifecycleState.workload_kind` (per ADR-0047 §1).
+    ///
+    /// Default is [`WorkloadKind::Service`] per the same back-compat
+    /// rule documented on the [`WorkloadKind`] type itself — preserves
+    /// kind-agnostic behavior at any consumer that has not yet been
+    /// wired to populate the field explicitly. Per ADR-0047 §4.
+    pub kind: WorkloadKind,
 }
 
 /// `node_health` row — Phase 1 minimal shape per brief §6.

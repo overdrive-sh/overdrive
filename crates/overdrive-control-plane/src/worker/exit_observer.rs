@@ -483,6 +483,13 @@ async fn handle_exit_event(
         // the reconciler is the single writer for terminal decisions.
         terminal: None,
         stderr_tail,
+        // Phase-1 greenfield (ADR-0047 §4 / step 02-02 [D4]): the
+        // exit observer inherits the prior row's kind so the
+        // denormalised field stays accurate across the workload's
+        // lifetime. The exit observer never invents a kind — it
+        // always has a `prior` row in scope (loaded above) whose
+        // `kind` is the authoritative value written at submit time.
+        kind: prior.kind,
     };
     obs.write(ObservationRow::AllocStatus(row.clone())).await?;
     Ok(Some((row, prior_state)))

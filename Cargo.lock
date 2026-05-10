@@ -1771,6 +1771,7 @@ dependencies = [
  "overdrive-control-plane",
  "overdrive-core",
  "overdrive-store-local",
+ "proptest",
  "reqwest",
  "rkyv",
  "rustls",

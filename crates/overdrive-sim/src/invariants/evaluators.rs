@@ -520,6 +520,7 @@ pub async fn evaluate_sim_observation_lww(cluster: &SimObservationCluster) -> In
                 detail: None,
                 terminal: None,
                 stderr_tail: None,
+                kind: overdrive_core::aggregate::WorkloadKind::Service,
             };
             let peer = cluster.peer(writer);
             if let Err(err) = peer.write(ObservationRow::AllocStatus(row)).await {
@@ -2203,6 +2204,7 @@ mod tests {
             detail: None,
             terminal: None,
             stderr_tail: None,
+            kind: overdrive_core::aggregate::WorkloadKind::Service,
         }
     }
 

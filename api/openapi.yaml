@@ -335,6 +335,13 @@ components:
             Canonical job id this snapshot describes. `None` is reserved
             for forward-compat (Phase 2 may add cluster-wide reads); Phase 1
             always populates it.
+        kind:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/WorkloadKind'
+            description: |-
+              Workload-kind discriminator per ADR-0047 §1 / step 02-02 [D4].
+              The CLI render layer branches on this field.
         replicas_desired:
           type: integer
           format: int32
@@ -1771,6 +1778,21 @@ components:
         `{"kind": "driver", "data": "exec"}` for the typed variant
         (`DriverType` itself serialises as a kebab-case string per its own
         `#[serde(rename_all = "kebab-case")]`).
+    WorkloadKind:
+      type: string
+      description: |-
+        Three-way kind discriminator. Mirrors the variant tags of
+        [`WorkloadSpec`] and [`WorkloadSpecInput`].
+
+        `Default == Service` per ADR-0037 Amendment 2026-05-10 / ADR-0047 §1:
+        before slice 02-04 the reconciler was kind-agnostic and emulated the
+        Service shape (long-running, restart-budget-driven). Defaulting to
+        `Service` preserves that behavior at every call site that has not
+        yet been wired through to populate the kind explicitly.
+      enum:
+      - Service
+      - Job
+      - Schedule
 tags:
 - name: jobs
   description: Job lifecycle endpoints

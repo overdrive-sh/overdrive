@@ -104,7 +104,20 @@ pub enum ParseError {
 /// Service shape (long-running, restart-budget-driven). Defaulting to
 /// `Service` preserves that behavior at every call site that has not
 /// yet been wired through to populate the kind explicitly.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Default,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+    utoipa::ToSchema,
+)]
 pub enum WorkloadKind {
     /// Long-running supervised workload — a `[service]` body in TOML.
     #[default]

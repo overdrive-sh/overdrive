@@ -88,6 +88,7 @@ fn free_capacity_excludes_pending_allocs_on_same_node() {
         detail: None,
         terminal: None,
         stderr_tail: None,
+        kind: overdrive_core::aggregate::WorkloadKind::Service,
     }];
 
     let result = schedule(&nodes, &job, &allocs);

@@ -1,7 +1,7 @@
 //! Acceptance scenarios for `wire-exec-spec-end-to-end` — the
 //! `JobLifecycle::reconcile` projection of `job.command` / `job.args`
-//! into `Action::StartAllocation { spec }` and
-//! `Action::RestartAllocation { alloc_id, spec }`.
+//! into `Action::StartAllocation { spec, .. }` and
+//! `Action::RestartAllocation { alloc_id, spec, .. }`.
 //!
 //! Covers `docs/feature/wire-exec-spec-end-to-end/distill/test-scenarios.md`
 //! §5 *Reconciler purity*.
@@ -98,6 +98,7 @@ fn alloc_with_state(
         detail: None,
         terminal: None,
         stderr_tail: None,
+        kind: overdrive_core::aggregate::WorkloadKind::Service,
     }
 }
 
@@ -236,7 +237,7 @@ fn restart_action_carries_full_alloc_spec_from_live_job() {
     // operator's declared command + args + resources.
     assert_eq!(actions.len(), 1, "must emit one RestartAllocation; got {actions:?}");
     match &actions[0] {
-        Action::RestartAllocation { alloc_id, spec } => {
+        Action::RestartAllocation { alloc_id, spec, .. } => {
             assert_eq!(alloc_id.as_str(), "alloc-payments-0");
             assert_eq!(
                 spec.command, "/opt/x/y",

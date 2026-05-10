@@ -86,6 +86,7 @@ pub fn make_alloc_running(alloc_id: &str, job_id: &str, target_node: &str) -> Al
         detail: None,
         terminal: None,
         stderr_tail: None,
+        kind: overdrive_core::aggregate::WorkloadKind::Service,
     }
 }
 
@@ -101,6 +102,7 @@ pub fn make_alloc_terminated(alloc_id: &str, job_id: &str, target_node: &str) ->
         detail: None,
         terminal: None,
         stderr_tail: None,
+        kind: overdrive_core::aggregate::WorkloadKind::Service,
     }
 }
 
@@ -204,6 +206,7 @@ pub fn arb_allocs_for_nodes(node_ids: Vec<NodeId>) -> BoxedStrategy<Vec<AllocSta
                         detail: None,
                         terminal: None,
                         stderr_tail: None,
+                        kind: overdrive_core::aggregate::WorkloadKind::Service,
                         state: if is_running {
                             AllocState::Running
                         } else {
