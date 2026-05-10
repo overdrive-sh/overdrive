@@ -1,3 +1,4 @@
+[service]
 id = "doomed"
 replicas = 1
 
