@@ -374,6 +374,44 @@ pub enum TerminalCondition {
     /// by the reconciler (e.g. `"vendor.io/quota.QuotaExhausted"`);
     /// `detail` is opaque bytes the reconciler may attach.
     Custom { type_name: String, detail: Option<Vec<u8>> },
+    /// `JobLifecycle`: workload exited cleanly (Job-kind natural
+    /// termination, exit code `0` is the canonical success but the
+    /// variant carries the observed `exit_code` verbatim because the
+    /// publication boundary owns the cleanliness classification —
+    /// downstream consumers must not redo the comparison from a row
+    /// they no longer hold the policy for). Per ADR-0037 Amendment
+    /// 2026-05-10: typed natural-exit terminals replace the previous
+    /// reliance on `AllocStatusRow.exit_code` + heuristic mapping at
+    /// every consumer.
+    ///
+    /// Emission lands in slice 02-04 (JobLifecycle reconciler
+    /// natural-exit emission); the row-shape change lands in 02-05.
+    /// This variant exists at the type level from slice 02a (this
+    /// step) so every downstream `match` site is forward-compatible
+    /// with the additive shape ahead of runtime emission.
+    ///
+    /// **Additive position**: appended after `Custom` to keep the
+    /// pre-existing rkyv discriminants (`BackoffExhausted=0`,
+    /// `Stopped=1`, `Custom=2`) stable. This variant takes
+    /// discriminant `3`, `Failed` takes discriminant `4`. Existing
+    /// archived rows decode unchanged.
+    Completed { exit_code: i32 },
+    /// `JobLifecycle`: workload exited with a non-zero status (Job-kind
+    /// natural termination interpreted as failure by the reconciler).
+    /// Per ADR-0037 Amendment 2026-05-10. The `exit_code` field
+    /// carries the observed status verbatim — the reconciler does
+    /// the success/failure classification at the publication
+    /// boundary and the variant identity (`Completed` vs `Failed`)
+    /// IS the classification. Downstream consumers branch on the
+    /// variant, never on `exit_code != 0`.
+    ///
+    /// Common Unix exit codes operators see in this variant:
+    /// `1` (generic failure), `127` (command-not-found),
+    /// `137` (SIGKILL — typically OOM under cgroup-v2),
+    /// `255` (generic shell failure). The full `i32` range is
+    /// supported so the variant can carry signal-encoded statuses
+    /// if a future driver emits them.
+    Failed { exit_code: i32 },
 }
 
 /// Initiator of a `Cancelled` transition.

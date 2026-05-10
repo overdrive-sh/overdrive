@@ -116,4 +116,12 @@ mod acceptance {
     // workload-kind-discriminator Slice 05 — parser-side cron
     // required-field scenario. S-05-04 in distill/test-scenarios.md §5.
     mod schedule_parser;
+
+    // workload-kind-discriminator Slice 02a (step 02-03) — typed
+    // `TerminalCondition::Completed { exit_code: i32 }` /
+    // `Failed { exit_code: i32 }` variants per ADR-0037 Amendment
+    // 2026-05-10. Property: rkyv + serde JSON roundtrip preserves
+    // the new variants for every `i32` exit code (1024 cases including
+    // boundary values + common Unix exit codes).
+    mod transition_reason_roundtrip;
 }
