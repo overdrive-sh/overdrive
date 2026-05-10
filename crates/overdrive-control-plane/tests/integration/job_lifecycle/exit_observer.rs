@@ -1,18 +1,24 @@
-//! Step 01-01 — RED scaffold for the exit-event abstraction.
+//! Exit-observer consumer contract — observer behaviour given a
+//! present prior `Running` row.
 //!
-//! Pins the public Driver/SimDriver/worker exit-observer surface that
-//! Step 01-02 (GREEN) will land. Each test references symbols that do
-//! NOT resolve against current main:
+//! Every scenario in this file drives the alloc to `Running` via
+//! `drive_to_first_running` BEFORE injecting an `ExitEvent` through
+//! `SimDriver::inject_exit_after`, so each test exercises the observer
+//! against a present prior row. With Solution 1' (oneshot-gated watcher
+//! emission) landed in steps 01-02 / 01-03 of
+//! `fix-exit-observer-running-gate`, the watcher cannot emit an
+//! `ExitEvent` before `obs.write(Running)` has committed — so the
+//! `RetryOutcome::NoPriorRow` arm at `exit_observer.rs::handle_exit_event`
+//! is structurally unreachable from production. The producer-ordering
+//! race the predecessor RCA flagged is now defended directly by the
+//! sibling `exit_observer_running_gate.rs` (step 01-01) and degraded-path
+//! sibling `degraded_escalation_still_fires_running_gate` (step 01-03).
 //!
-//! * `overdrive_core::traits::driver::ExitEvent`
-//! * `overdrive_core::traits::driver::ExitKind`
-//! * `overdrive_sim::adapters::driver::SimDriver::inject_exit_after`
-//! * `overdrive_control_plane::worker::exit_observer::spawn`
-//!
-//! The compile failure (`unresolved import`) IS the RED state — see
-//! `.claude/rules/testing.md` §"RED scaffolds and intentionally-failing
-//! commits". The production fix lands in Step 01-02; this step adds
-//! tests only.
+//! Step 01-04 triage: every existing scenario in this file was
+//! classified KEEP — each one is already shaped to test the observer's
+//! receiver contract given a present prior row, so no producer-ordering
+//! `NoPriorRow` scenarios needed to be deleted. See the step-01-04
+//! commit message for the per-scenario classification rationale.
 //!
 //! Portable across Linux/macOS — `SimDriver` does not require a real
 //! kernel — so this file gates only on `#[cfg(feature =
