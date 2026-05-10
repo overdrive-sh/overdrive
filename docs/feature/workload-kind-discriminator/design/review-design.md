@@ -165,3 +165,33 @@ Morgan delivered a complete, coherent, well-defended architecture that closes th
 - Did not create any GitHub issue.
 
 **Handoff cleared. Ready for `/nw-devops` and `/nw-distill` dispatch in parallel.**
+
+---
+
+## Delta review (2026-05-10) — post-correction
+
+**Verdict**: **APPROVED (delta)** — corrections are net-positive; original APPROVED verdict stands.
+
+**Triggered by**: commit `266a879 docs(feature): correct GH #163 framing in DESIGN artifacts` plus a parallel update to GH #163's body (appended "Scope clarification (2026-05-10) — listener-aware traffic flow rides on this issue" section with two new acceptance criteria and cross-references).
+
+**Scope of delta review**: just the diff between `dfc2e79` (original review commit) and `HEAD`, plus the GH #163 body change reported by the orchestrator. Did NOT re-review unchanged artifacts.
+
+### Findings
+
+- **#163 framing in `wave-decisions.md` is technically accurate.** The corrected language correctly identifies UDP reverse-NAT lockstep as the root cause, names the trait-surface change as the *mechanism* (not the goal), and preserves the "OUT OF SCOPE for this feature" clarification. The phrase "the trait-surface mechanism by which listener-aware traffic flow eventually ships" is precise — it names #163 as a prerequisite without overstating its title.
+
+- **No residual mislabel sites.** Cross-checked all DESIGN artifacts (ADR-0047, brief.md, c4-diagrams.md, upstream-changes.md) and DISCUSS user stories — no other artifact referenced #163 with the old "Listener dataplane wiring" paraphrase.
+
+- **No cross-artifact contradictions.** DISCUSS slice 06's "listener dataplane wiring is OUT OF SCOPE — that's #163's territory" still holds; the new framing strengthens rather than contradicts it by acknowledging #163's prerequisite role explicitly.
+
+### praise:
+
+The correction surfaces the *actual* load-bearing dependency (trait-surface change) instead of paraphrasing it as "dataplane wiring." This is honest traceability — the kind of correction-handling that prevents accumulating drift across waves.
+
+### Reviewer attestation (delta)
+
+- Read only the `dfc2e79..HEAD` diff plus the orchestrator's account of the #163 body update.
+- Did not modify any artifact.
+- Did not create any GitHub issue.
+
+**Original APPROVED verdict stands. Delta APPROVED. Handoff to DEVOPS / DISTILL remains cleared.**
