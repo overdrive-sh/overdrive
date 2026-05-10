@@ -95,27 +95,14 @@ fn write_toml(dir: &Path, name: &str, body: &str) -> PathBuf {
 }
 
 /// Per-trial coinflip TOML. Body comes from `examples/coinflip.toml`
-/// (the AC-named SSOT) except:
+/// (the AC-named SSOT) except `id = "coinflip-<NNN>"` per trial —
+/// defeats `IntentStore` idempotency (each trial is structurally a
+/// distinct submit).
 ///
-/// 1. `id = "coinflip-<NNN>"` per trial — defeats `IntentStore`
-///    idempotency (each trial is structurally a distinct submit).
-/// 2. The `[exec]` body wraps the coinflip in a brief `sleep 0.5` —
-///    the same workaround the rest of the Job-kind suite uses (see
-///    `job_kind_streaming.rs::job_exit_zero_spec` rustdoc). The brief
-///    sleep is load-bearing for fixture sequencing: it gives the action
-///    shim's `obs.write(Running)` enough wall-clock budget to land
-///    BEFORE the worker exit observer's `find_prior_row(alloc)` lookup
-///    fires on the kernel exit event. Without the sleep, sub-
-///    millisecond-exit workloads race the obs write and the observer's
-///    lookup returns `NoPriorRow`, dropping the exit event silently —
-///    a known issue in the Phase 1 observer (TODO: separate fix); the
-///    K1 contract is about CLI honesty given an honest pipeline, not
-///    about hammering the pipeline with sub-ms workloads to expose an
-///    unrelated Phase 1 race. Per AC implementation notes: "the K1
-///    contract is 'for whatever exit code the workload's bash script
-///    chooses, the CLI process exit equals it AND the terminal verdict
-///    line names it correctly.'" The `if (( RANDOM % 2 ))` branch IS
-///    the SSOT for trial-to-trial exit-code variance.
+/// Per fix-exit-observer-running-gate (Solution 1'): the action-shim's
+/// `obs.write(Running)` is now structurally happens-before the
+/// watcher's `ExitEvent` emission, so sub-millisecond-exit workloads
+/// no longer race. No fixture-side workaround required.
 fn coinflip_spec_for_trial(trial: usize) -> String {
     format!(
         r#"
@@ -126,7 +113,7 @@ id = "coinflip-{trial:03}"
 command = "/bin/bash"
 args = [
     "-c",
-    "sleep 0.5; if (( RANDOM % 2 )); then echo SUCCESS; exit 0; else echo ERROR >&2; exit 1; fi",
+    "if (( RANDOM % 2 )); then echo SUCCESS; exit 0; else echo ERROR >&2; exit 1; fi",
 ]
 
 [resources]

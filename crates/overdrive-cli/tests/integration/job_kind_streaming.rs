@@ -210,21 +210,15 @@ async fn s_02_06_submit_echo_names_kind_upfront() {
 }
 
 /// `[job]+[exec]+[resources]` TOML — a Job-kind workload that exits 0
-/// after a small sleep. Drives the natural-exit path for Job-kind: the
+/// immediately. Drives the natural-exit path for Job-kind: the
 /// reconciler emits `TerminalCondition::Completed { exit_code: 0 }`
 /// (per ADR-0037 Amendment 2026-05-10) and the streaming layer projects
 /// to `JobSubmitEvent::Succeeded`.
 ///
-/// The brief `sleep 0.5` is load-bearing for fixture sequencing: it
-/// gives the action shim's `obs.write(Running)` enough wall-clock
-/// budget to land before the worker exit observer's
-/// `find_prior_row(alloc)` lookup fires on the kernel exit event.
-/// Without the sleep, sub-millisecond-exit workloads race the obs
-/// write and the observer's lookup returns `NoPriorRow`, dropping
-/// the exit event silently. The race is a known issue in the Phase 1
-/// observer (TODO: separate fix); the test exercises the kind-aware
-/// streaming dispatch surface, not the observer's race window, so
-/// the fixture is shaped to avoid the unrelated race.
+/// Per fix-exit-observer-running-gate (Solution 1'): the action-shim's
+/// `obs.write(Running)` is now structurally happens-before the
+/// watcher's `ExitEvent` emission, so sub-millisecond-exit workloads
+/// no longer race. No fixture-side workaround required.
 const fn job_exit_zero_spec() -> &'static str {
     r#"
 [job]
@@ -232,7 +226,7 @@ id = "happy-job"
 
 [exec]
 command = "/bin/sh"
-args = ["-c", "sleep 0.5; exit 0"]
+args = ["-c", "exit 0"]
 
 [resources]
 cpu_milli = 100
@@ -241,10 +235,14 @@ memory_bytes = 67108864
 }
 
 /// `[job]+[exec]+[resources]` TOML — a Job-kind workload that exits 1
-/// after a small sleep. Drives the natural-exit failure path for
-/// Job-kind: the reconciler emits `TerminalCondition::Failed { exit_code: 1 }`
-/// and the streaming layer projects to `JobSubmitEvent::Failed`. Same
-/// `sleep 0.5` rationale as `job_exit_zero_spec` above.
+/// immediately. Drives the natural-exit failure path for Job-kind: the
+/// reconciler emits `TerminalCondition::Failed { exit_code: 1 }` and
+/// the streaming layer projects to `JobSubmitEvent::Failed`.
+///
+/// Per fix-exit-observer-running-gate (Solution 1'): the action-shim's
+/// `obs.write(Running)` is now structurally happens-before the
+/// watcher's `ExitEvent` emission, so sub-millisecond-exit workloads
+/// no longer race. No fixture-side workaround required.
 const fn job_exit_nonzero_spec() -> &'static str {
     r#"
 [job]
@@ -252,7 +250,7 @@ id = "coinflip"
 
 [exec]
 command = "/bin/sh"
-args = ["-c", "sleep 0.5; echo 'workload stderr line' >&2; exit 1"]
+args = ["-c", "echo 'workload stderr line' >&2; exit 1"]
 
 [resources]
 cpu_milli = 100
