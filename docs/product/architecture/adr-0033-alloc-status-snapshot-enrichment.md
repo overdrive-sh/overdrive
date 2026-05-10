@@ -480,9 +480,56 @@ the structured `TransitionReason::NoCapacity` plus the diagnostic
   `slices/slice-01-alloc-status-enrichment.md`,
   `discuss/user-stories.md` US-05 / US-06.
 
+## Amendment 2026-05-10 — kind-aware render branches; `AllocStatusRow.kind` denormalised; Service `Listeners` section
+
+**Decision-maker.** Morgan (DESIGN wave for
+`workload-kind-discriminator`).
+
+**What changed.** Per ADR-0047:
+
+1. **`AllocStatusRow` (intent-side row shape) gains `kind: WorkloadKind`** —
+   denormalised at write time from the originally-submitted spec.
+   Phase 1 is greenfield; no backfill. The kind is never re-derived
+   from intent at read time.
+
+2. **`AllocStatusRow` gains `listeners: Vec<ListenerRow>`** — present
+   for Service-kind allocs (mirrors the spec's listener slice byte-
+   for-byte at write time), empty for Job / Schedule. Single-row
+   embed shape chosen over a separate `service_listener` table —
+   see ADR-0047 §4a for the trade-off analysis. The `(vip, port,
+   protocol)` triple is the load-bearing artifact for KPI K6 byte-
+   equality between submit echo and `alloc status`.
+
+3. **`AllocStatusRowBody` (wire-side render) gains kind-aware fields**:
+    - `kind: WorkloadKind` (always present — the render dispatcher).
+    - `verdict: Option<JobVerdict>` (Job kind only — `Succeeded`,
+      `Failed`, `BackoffExhausted`, `InProgress`).
+    - `attempts: Vec<JobAttemptRow>` (Job kind only — per-attempt
+      `(attempt_index, state, exit_code, started_at, duration)`).
+    - `stderr_tail: Vec<String>` (Job kind only, on `Failed`).
+    - `listeners: Vec<ListenerRow>` (Service kind only — see §4a).
+    - `cron: Option<String>` and `deferral_url: Option<String>`
+      (Schedule kind only).
+
+4. **§3 render contract amended.** The CLI render layer branches on
+   `kind` at the top of the `alloc status` formatter. Service kind
+   render preserves the existing replicas+restarts shape with NO
+   `Exit` column; Job kind render emits `Verdict` header + per-attempt
+   table with `Exit` column; Schedule kind render shows cron + the
+   deferral notice (URL sourced from a single CLI constant —
+   `SCHEDULE_EXECUTION_TRACKING_URL`).
+
+5. **Anti-scenario contract.** No Job-kind `alloc status` output line
+   contains the substring `is running with`; no production source
+   line contains the literal `"live"` as a render argument (grep
+   gate; see ADR-0047 §7).
+
+See ADR-0047 for the full ADR.
+
 ## Changelog
 
 | Date | Change |
 |---|---|
 | 2026-04-30 | Initial ADR. Decision D2 / D7 from the DESIGN wave; constraints carried from DISCUSS wave-decisions. Slice 01 back-prop completed. Echo peer review pending. |
+| 2026-05-10 | **Amendment** — `AllocStatusRow.kind` denormalised; `listeners: Vec<ListenerRow>` embedded for Service kind; per-kind render branches; Job kind `verdict` + `attempts` + `stderr_tail` fields; Schedule kind `cron` + `deferral_url` fields. See `Amendment 2026-05-10` section above and ADR-0047. |
 | 2026-04-30 | **Amendment** — `TransitionReason` cross-references updated in lockstep with ADR-0032 amendment of the same date. §2 field-source-map row clarifies that `reason` now carries a cause-class typed payload, not just an opaque enum + free-form `detail`. §4 CLI render contract mapping table replaced with the full Phase 1 cause-class variant set; `detail: Option<String>` demoted to "verbatim text not captured by the typed payload." §5 single-source-of-truth text tightened to call out byte-equality across the typed payload, not just the variant tag. Slice 01 back-prop list (in `docs/feature/cli-submit-vs-deploy-and-alloc-status/design/upstream-changes.md`) catalogues consequent updates needed in DISCUSS / DISTILL / roadmap. |

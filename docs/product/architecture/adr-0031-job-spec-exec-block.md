@@ -393,6 +393,58 @@ this design amendment).
 
 ---
 
+## Amendment 2 — 2026-05-10: per-kind `WorkloadSpec` shapes; `[exec]` and `[resources]` retained at top level; `[[listener]]` array-of-tables for Service kind
+
+**Decision-maker.** Morgan (DESIGN wave for
+`workload-kind-discriminator`). User pre-approved the per-kind shape
+in the DISCUSS-wave convergence transcript (2026-05-09).
+
+**What changed.** `JobSpecInput` is replaced by tagged enum
+`WorkloadSpecInput { Service, Job, Schedule }` per ADR-0047. The
+`[exec]` and `[resources]` blocks remain **top-level tables** — they
+are NOT nested under `[service]` / `[job]` / `[schedule]`. Section
+presence at the top level is the kind discriminator. The custom
+`Deserialize` impl walks the parsed TOML `Value::Table` and branches
+on which top-level table is present; mixed-kind specs are rejected
+with a typed `ParseError::MixedKinds { service_line, job_line }`
+naming both lines.
+
+**`[[listener]]` placement.** Service-kind specs gain a top-level
+array-of-tables `[[listener]]` (sibling to `[service]` / `[exec]` /
+`[resources]`, NOT nested). Each listener carries `port: NonZeroU16`,
+`protocol: Proto` (case-insensitive `tcp`/`udp` reusing the existing
+`overdrive-core::Proto` newtype), and `vip: Option<ServiceVip>`
+(IPv4). The parser enforces:
+- At least one `[[listener]]` block per Service.
+- No two listeners within a Service may share `(vip, port, protocol)`.
+- Unsupported protocols rejected with named guidance.
+- `port = 0` rejected.
+
+The `[[listener]]` block is **invalid for `[job]` and `[schedule]`
+kinds** in this slice — listener attachment to non-Service kinds is
+out of scope and the parser rejects with named guidance.
+
+**Schedule kind.** `[schedule]` is a top-level table accepted only
+alongside `[job]`; carries a `cron: String` field (string-only
+validation; semantic cron parsing deferred to GH #166).
+
+**§4 amendment.** The validation rules in §4 are extended with the
+parser-side rules above; the rest of §4 is unchanged.
+
+**§10 C4 component diagram.** The C4 diagram in §10 is updated as
+part of `docs/feature/workload-kind-discriminator/design/c4-diagrams.md`
+to show `WorkloadSpec` as the parser-output type with three variants;
+the `Job → AllocationSpec` projection is replaced by
+`WorkloadSpec::Job(JobSpec) → AllocationSpec` (others kinds project
+analogously). The original §10 diagram remains as supersession
+record.
+
+See ADR-0047 for the full decomposition rationale, alternatives
+analysis, and downstream consequences. This amendment records the
+ADR-0031 surface that ADR-0047 affects.
+
+---
+
 ## Context
 
 ADR-0030 ratified the *internal* shape of `AllocationSpec` — the type

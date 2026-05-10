@@ -143,6 +143,41 @@ from, a runtime-typed bug).
   for test scaffolding, it is renamed to carry the observation-side
   role in its name.
 
+## Amendment 2026-05-10 — partially superseded by ADR-0047; intent-side aggregate becomes `WorkloadSpec` enum
+
+**Decision-maker.** Morgan (DESIGN wave for
+`workload-kind-discriminator`).
+
+**What changed.** ADR-0047 splits the intent-side `Job` aggregate
+into a tagged enum `WorkloadSpec { Service(ServiceSpec) |
+Job(JobSpec) | Schedule(ScheduleSpec) }`. The Phase 1 `Job` struct
+is renamed to `JobSpec` and re-shaped to drop `replicas` (Job kind
+is run-to-completion); the new `ServiceSpec` carries `replicas` plus
+the listener slice (Slice 06 / GH #164).
+
+**What is preserved verbatim.** ADR-0011's load-bearing claim — that
+intent-side aggregates and observation-side row shapes stay in
+different modules and never merge — is unchanged. ADR-0047 keeps
+`WorkloadSpec` in `overdrive-core::aggregate::*` and the
+observation-side `AllocStatusRow` in
+`overdrive-core::traits::observation_store::*`. The two never share
+a struct definition. The new `WorkloadKind` enum is a projection
+function (`WorkloadSpec::kind()`); it is denormalised onto
+`AllocStatusRow.kind` at write time but the row shape and the
+aggregate shape are still distinct types.
+
+**What is superseded.** The Alternative A rejection ("rename
+intent-side aggregate to `WorkloadSpec`") is partially overturned —
+the rename happens, but the rationale that motivated rejection
+(whitepaper §4 names the aggregate `Job`) is addressed by demoting
+"Job" to "Job is one of three workload kinds" in the whitepaper
+amendment that lands in the same wave (out of scope for this ADR
+amendment). The vestigial `JobSpec` deletion in
+`observation_store.rs` from the original §Decision is preserved —
+the observation row remains `AllocStatusRow`.
+
+See ADR-0047 for the full decomposition.
+
 ## References
 
 - `docs/whitepaper.md` §4 (Core Data Model)
@@ -151,3 +186,4 @@ from, a runtime-typed bug).
 - `docs/feature/phase-1-control-plane-core/discuss/user-stories.md`
   US-01 Technical Notes
 - `docs/feature/phase-1-control-plane-core/slices/slice-1-aggregates-and-canonical-keys.md`
+- ADR-0047 (workload kind discriminator — partial supersession)
