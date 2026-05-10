@@ -85,6 +85,14 @@ mod integration {
         mod crash_recovery;
         mod crash_recovery_obs_write_rejected;
         mod exit_observer;
+        /// Step 01-01 of `fix-exit-observer-running-gate` — RED
+        /// regression for the producer-ordering race between the
+        /// action shim's `obs.write(Running)` and the worker exit
+        /// observer's `ExitEvent` consumption. Today's
+        /// `RetryOutcome::NoPriorRow` arm drops the event silently
+        /// for sub-millisecond-exit workloads. See
+        /// `docs/feature/fix-exit-observer-running-gate/deliver/rca.md`.
+        mod exit_observer_running_gate;
         mod stop_to_terminated;
         mod submit_to_running;
         /// Wait helpers for Tier-3 integration tests that drive the
