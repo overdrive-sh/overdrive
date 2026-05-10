@@ -23,6 +23,21 @@ use crate::id::{AllocationId, InvestigationId, JobId, NodeId, PolicyId, Region};
 use crate::traits::driver::Resources;
 
 // ---------------------------------------------------------------------------
+// Re-exports for the workload-kind-discriminator parser surface.
+//
+// `WorkloadSpec` and friends ship as part of Slice 01 of
+// `workload-kind-discriminator` per ADR-0047. The legacy `Job` aggregate
+// and `JobSpecInput` remain in this module as the production path until
+// downstream slices (02–06) migrate every reader.
+// ---------------------------------------------------------------------------
+pub use self::workload_spec::{
+    CronExpr, JobSpec, ParseError, ScheduleSpec, ServiceSpec, WorkloadKind, WorkloadSpec,
+    WorkloadSpecInput,
+};
+
+mod workload_spec;
+
+// ---------------------------------------------------------------------------
 // Aggregate error
 // ---------------------------------------------------------------------------
 

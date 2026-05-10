@@ -128,6 +128,14 @@ pub enum BannedKind {
     /// `adapter-host`-class crates per
     /// `.claude/rules/development.md` § Concurrency & async.
     BlockingIoInAsync,
+    /// `"live"` literal in CLI render or command source — banned per
+    /// the `workload-kind-discriminator` Slice 01 regression guard
+    /// (US-06). The literal `"live"` was used as a hard-coded
+    /// duration in render output for in-progress workloads; it must
+    /// be replaced with a measured duration. This rule fires only on
+    /// source files under `crates/overdrive-cli/src/render.rs` or
+    /// `crates/overdrive-cli/src/commands/`.
+    LiveLiteralBanned,
 }
 
 /// A single banned-API usage found in a core-class crate source file.
@@ -547,6 +555,164 @@ pub fn scan_source_async_fs(source: &str, file: impl AsRef<Path>) -> Result<Vec<
 }
 
 // -----------------------------------------------------------------------------
+// `"live"` literal grep gate (CLI render / command source)
+// -----------------------------------------------------------------------------
+//
+// Slice 01 of `workload-kind-discriminator` (US-06). The literal `"live"`
+// was used as a hard-coded duration in CLI render output ("(took live)")
+// for in-progress workloads; this gate fires when any file under
+// `crates/overdrive-cli/src/render.rs` or
+// `crates/overdrive-cli/src/commands/` contains the bare `"live"`
+// string-literal token in code (NOT in `//`, `///`, or `/* */`
+// comments). Comments and docstrings are fine — they may explain the
+// historical bug.
+
+/// Rule label rendered in the violation help text. The rule name doubles
+/// as a grep target so reviewers can find every reference.
+const LIVE_LITERAL_RULE_LABEL: &str = "live-literal-banned: replace with a measured duration";
+
+/// Tokenizer state for [`scan_source_live_literal`]. Module-scoped so
+/// the function body stays free of item-after-statement clippy
+/// complaints; the enum is implementation-private to the live-literal
+/// gate.
+enum LiveLiteralScanState {
+    Code,
+    LineComment,
+    BlockComment,
+    StringLit,
+}
+
+/// Scan a single source file for the `"live"` literal in code, ignoring
+/// occurrences inside `//`-line, `///`-doc, and `/* */`-block comments.
+///
+/// Used in two places:
+///
+/// 1. [`scan_workspace`] applies this to render / command source under
+///    the CLI crate.
+/// 2. The xtask self-test (`xtask/tests/dst_lint_live_literal.rs`)
+///    drives synthetic source through this entry point directly.
+///
+/// # Errors
+///
+/// Currently infallible — kept as `Result` for parity with the other
+/// `scan_source_*` entry points in this module.
+pub fn scan_source_live_literal(source: &str, file: impl AsRef<Path>) -> Result<Vec<Violation>> {
+    use LiveLiteralScanState as State;
+
+    let file = file.as_ref().to_path_buf();
+    let mut violations = Vec::new();
+
+    let bytes = source.as_bytes();
+    let mut state = State::Code;
+    let mut line = 1usize;
+    let mut col = 1usize;
+    let mut current_string_start: Option<(usize, usize, usize)> = None; // (line, col, byte_idx_of_open_quote)
+    let mut i = 0usize;
+
+    while i < bytes.len() {
+        let c = bytes[i];
+        match state {
+            State::Code => {
+                if c == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+                    state = State::LineComment;
+                    i += 2;
+                    col += 2;
+                    continue;
+                } else if c == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'*' {
+                    state = State::BlockComment;
+                    i += 2;
+                    col += 2;
+                    continue;
+                } else if c == b'"' {
+                    state = State::StringLit;
+                    current_string_start = Some((line, col, i));
+                }
+            }
+            State::LineComment => {
+                if c == b'\n' {
+                    state = State::Code;
+                }
+            }
+            State::BlockComment => {
+                if c == b'*' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
+                    state = State::Code;
+                    i += 2;
+                    col += 2;
+                    continue;
+                }
+            }
+            State::StringLit => {
+                if c == b'\\' && i + 1 < bytes.len() {
+                    // Skip escape sequence: advance over the next byte.
+                    i += 2;
+                    col += 2;
+                    continue;
+                }
+                if c == b'"' {
+                    // String closes — inspect the literal between the
+                    // opening quote and this position.
+                    if let Some((open_line, open_col, open_idx)) = current_string_start.take() {
+                        let inner = &source[open_idx + 1..i];
+                        if inner == "live" {
+                            violations.push(Violation {
+                                file: file.clone(),
+                                line: open_line,
+                                column: open_col,
+                                banned_path: "\"live\"".to_string(),
+                                replacement_trait: LIVE_LITERAL_RULE_LABEL.to_string(),
+                                kind: BannedKind::LiveLiteralBanned,
+                            });
+                        }
+                    }
+                    state = State::Code;
+                }
+            }
+        }
+        if c == b'\n' {
+            line += 1;
+            col = 1;
+        } else {
+            col += 1;
+        }
+        i += 1;
+    }
+
+    Ok(violations)
+}
+
+/// Decide whether a path under a `crate_class = "binary"` (or otherwise)
+/// crate is in scope for the `live-literal-banned` rule. The rule
+/// targets only:
+///
+/// - `crates/overdrive-cli/src/render.rs` (or any file directly named
+///   `render.rs` under the CLI crate's `src/`)
+/// - any `.rs` file under `crates/overdrive-cli/src/commands/`
+///
+/// The check is path-string-based (substring match) for simplicity;
+/// path normalisation is handled by the caller passing relative paths
+/// rooted at the workspace.
+fn live_literal_path_in_scope(rel_path: &Path) -> bool {
+    let s = rel_path.to_string_lossy().replace('\\', "/");
+    if s.contains("crates/overdrive-cli/src/render.rs") || s.contains("overdrive-cli/src/render.rs")
+    {
+        return true;
+    }
+    let is_rs = rel_path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("rs"));
+    if !is_rs {
+        return false;
+    }
+    if s.contains("crates/overdrive-cli/src/commands/") {
+        return true;
+    }
+    // Also accept the relative form (without the `crates/` prefix) for
+    // when scan_workspace strips the crate root before invoking us.
+    if s.contains("overdrive-cli/src/commands/") {
+        return true;
+    }
+    false
+}
+
+// -----------------------------------------------------------------------------
 // Workspace scan
 // -----------------------------------------------------------------------------
 
@@ -646,6 +812,36 @@ pub fn scan_workspace(manifest_path: &Path) -> Result<Vec<Violation>> {
         }
     }
 
+    // Scan the CLI crate's render / command source for the `"live"`
+    // literal regression-guard rule (Slice 01 of
+    // `workload-kind-discriminator`, US-06). Path-based scoping picks
+    // out only `crates/overdrive-cli/src/render.rs` and any file
+    // under `crates/overdrive-cli/src/commands/**/*.rs`.
+    for (_name, root, _class) in &classes {
+        let src = root.join("src");
+        if !src.exists() {
+            continue;
+        }
+        for rs in collect_rs_files(&src)? {
+            let rel_to_workspace = rs
+                .strip_prefix(
+                    Path::new(&metadata.workspace_root.as_str())
+                        .canonicalize()
+                        .unwrap_or_else(|_| metadata.workspace_root.clone().into_std_path_buf()),
+                )
+                .unwrap_or(&rs)
+                .to_path_buf();
+            if !live_literal_path_in_scope(&rel_to_workspace) {
+                continue;
+            }
+            let source =
+                std::fs::read_to_string(&rs).with_context(|| format!("read {}", rs.display()))?;
+            if let Ok(found) = scan_source_live_literal(&source, &rel_to_workspace) {
+                violations.extend(found);
+            }
+        }
+    }
+
     Ok(violations)
 }
 
@@ -691,6 +887,15 @@ pub fn render_violation(v: &Violation) -> String {
                 v.replacement_trait,
             ),
             "see .claude/rules/development.md (\"Concurrency & async\")",
+        ),
+        BannedKind::LiveLiteralBanned => (
+            "error: `\"live\"` literal in CLI render or command source",
+            format!(
+                "{} — replace the literal with a measured duration (e.g. \
+                 the actual elapsed time of the workload)",
+                v.replacement_trait,
+            ),
+            "see docs/feature/workload-kind-discriminator/slices/slice-01-parser-kind-discriminator.md",
         ),
     };
     format!(

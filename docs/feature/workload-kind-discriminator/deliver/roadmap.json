@@ -160,9 +160,9 @@
     ]
   },
   "validation": {
-    "status": "pending",
-    "reviewer": "TODO",
-    "approved_at": "TODO"
+    "status": "approved",
+    "reviewer": "nw-acceptance-designer-reviewer + nw-solution-architect-reviewer (Atlas)",
+    "approved_at": "2026-05-10T07:18:00Z"
   },
   "reviews": [
     {

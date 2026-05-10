@@ -432,6 +432,13 @@ async fn consume_stream(
     let mut stream = response.bytes_stream();
     let mut buf = BytesMut::new();
 
+    // Stream-start wall-clock — used to compute the converged-running
+    // summary duration in place of the historical `"live"` literal
+    // (US-06 of `workload-kind-discriminator`). The CLI is a `binary`
+    // crate so `Instant::now()` is allowed by dst-lint; the value is
+    // used only for operator-facing display.
+    let stream_started = std::time::Instant::now();
+
     // State accumulated as the stream proceeds. Populated by the
     // `Accepted` event (first) and by intermediate `LifecycleTransition`
     // events; consulted at terminal time to build the typed output.
@@ -491,6 +498,7 @@ async fn consume_stream(
                     let acc = accepted.ok_or_else(|| CliError::BodyDecode {
                         cause: "ConvergedRunning before Accepted on the streaming bus".to_string(),
                     })?;
+                    let took_human = crate::render::format_human_duration(stream_started.elapsed());
                     let summary = crate::render::format_running_summary(
                         &acc.job_id,
                         // Phase-1 single-replica streaming witness — the
@@ -501,7 +509,7 @@ async fn consume_stream(
                         // running" via the terminal event.
                         1,
                         1,
-                        "live",
+                        &took_human,
                     );
                     let next_command = format!("overdrive alloc status --job {}", acc.job_id);
                     return Ok(SubmitStreamingOutput {

@@ -487,6 +487,40 @@ pub fn format_running_summary(
     format!("Job '{job_name}' is running with {running}/{desired} replicas (took {took_human})\n")
 }
 
+/// Format a [`std::time::Duration`] for operator-facing display.
+///
+/// Replaces the historical `"live"` literal (US-06 of
+/// `workload-kind-discriminator`) used as a duration placeholder in
+/// the streaming `ConvergedRunning` summary. The output format is
+/// chosen for human readability at typical convergence latencies
+/// (single-digit ms to a few seconds):
+///
+/// - `<1ms` → `"<1ms"`
+/// - `<1s`  → `"<N>ms"`
+/// - `<60s` → `"<N>.<dec>s"` (one decimal place)
+/// - `>=60s` → `"<M>m<S>s"`
+///
+/// Pure function; no allocations beyond the returned `String`.
+#[must_use]
+pub fn format_human_duration(took: std::time::Duration) -> String {
+    let total_millis = took.as_millis();
+    if total_millis == 0 {
+        return "<1ms".to_string();
+    }
+    if total_millis < 1_000 {
+        return format!("{total_millis}ms");
+    }
+    let total_secs = took.as_secs();
+    if total_secs < 60 {
+        // Render with one decimal place for sub-minute durations.
+        let tenths = (took.as_millis() % 1_000) / 100;
+        return format!("{total_secs}.{tenths}s");
+    }
+    let minutes = total_secs / 60;
+    let seconds = total_secs % 60;
+    format!("{minutes}m{seconds}s")
+}
+
 /// Render the streaming `ConvergedStopped` summary line — the
 /// operator-facing exit-0 success render fired when a workload
 /// reaches a clean terminal stop. Pure function.

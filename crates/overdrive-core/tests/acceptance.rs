@@ -106,4 +106,10 @@ mod acceptance {
     // under `#[cfg(test)]`; `Instant::now()` for `TickContext.now`
     // is the legitimate test-fixture exception.
     mod service_map_hydrator_reconcile;
+
+    // workload-kind-discriminator Slice 01 — `WorkloadSpec` tagged
+    // enum at the parser boundary (§1) + migrated `examples/coinflip.toml`
+    // (§7). Per ADR-0047 §1, §2.
+    mod coinflip_migration;
+    mod workload_spec_parser;
 }

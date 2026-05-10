@@ -53,6 +53,13 @@ futures.workspace     = true
 bytes.workspace       = true
 tokio.workspace       = true
 
+# TOML deserialisation for the `WorkloadSpecInput::from_toml_str`
+# parser surface (Slice 01 of `workload-kind-discriminator`, ADR-0047
+# §2). The parser is the single driving port for kind discrimination —
+# every consumer routes through here. `toml` is a pure-Rust string
+# parser and is NOT on the dst-lint banned-API list.
+toml.workspace = true
+
 [features]
 # `test-utils` — TEST-ONLY feature. Exposes
 # `overdrive_core::testing::observation_store::run_lww_conformance`, the
@@ -93,9 +100,6 @@ trybuild.workspace = true
 # do not propagate to downstream consumers.
 overdrive-sim.path = "../overdrive-sim"
 tokio              = { workspace = true }
-# Used by `tests/acceptance/exec_validation.rs` to exercise the
-# tagged-enum + deny_unknown_fields TOML parse path for the new
-# `wire-exec-spec-end-to-end` shape (per ADR-0031 §3 acceptance
-# coverage). The runtime production code does not parse TOML in
-# overdrive-core — that lives in overdrive-cli.
-toml.workspace     = true
+# `toml` is now a regular dep — see [dependencies] above for the
+# Slice 01 / ADR-0047 §2 rationale. Tests inherit the regular dep,
+# so a separate dev-dep entry would be a duplicate.
