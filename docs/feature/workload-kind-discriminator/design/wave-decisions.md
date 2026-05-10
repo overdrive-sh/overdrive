@@ -263,11 +263,17 @@ the surrounding ADRs.
   field; the runtime allocator decision (allocate-at-runtime vs
   reject-at-admission) is deferred. Issue verified real per DISCUSS
   hard gate.
-- **GH #163** (Listener dataplane wiring) — the question "where does
-  this listener actually become a kernel BPF entry?" is OUT OF
-  SCOPE. Slice 06 ships spec-shape + CLI render only; do NOT extend
-  to `Dataplane::update_service` / BPF map updates. The dispatch
-  prompt explicitly named #163's territory as forbidden.
+- **GH #163** (REVERSE_NAT_MAP lockstep populates only TCP entries;
+  UDP responses silently bypass source rewrite) — fixing #163
+  requires extending the `Dataplane::update_service` trait with a
+  per-service `Proto`, which is the trait-surface mechanism by
+  which listener-aware traffic flow eventually ships in production
+  (the trait change unblocks the reconciler that reads
+  `[[listener]]` from intent and feeds protocol into `update_service`).
+  The "where does this listener actually become a kernel BPF
+  entry?" question rides on #163's trait change. OUT OF SCOPE for
+  this feature: Slice 06 ships spec-shape + CLI render only; do
+  NOT extend to `Dataplane::update_service` / BPF map updates.
 - **RCA root cause A** (Service can report Running before workload
   stabilises) — tracked at
   [overdrive-sh/overdrive#170](https://github.com/overdrive-sh/overdrive/issues/170)

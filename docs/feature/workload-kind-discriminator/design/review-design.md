@@ -90,7 +90,7 @@ Cross-ADR consistency verified: `JobSubmitEvent` has no `ConvergedRunning` (ADR-
 All deferrals cite verified GitHub issues:
 - **#166** (Schedule execution semantics) — referenced in ADR-0047 §6, wave-decisions.md, brief.md §57-§59
 - **#167** (VIP allocator primitive) — referenced in ADR-0047 §4a, wave-decisions.md, brief.md §56, §62
-- **#163** (Listener dataplane wiring) — wave-decisions.md (pre-existing, out of scope)
+- **#163** (REVERSE_NAT_MAP UDP lockstep bug; trait-surface change to thread per-service `Proto` through `Dataplane::update_service` is the mechanism by which listener-aware traffic flow eventually ships in production) — wave-decisions.md (pre-existing, out of scope)
 - **#170** (Service health-check primitive) — wave-decisions.md (replaces closed #169)
 
 #169 (settle-window) correctly closed 2026-05-10 and superseded by #170. No invented numbers, no `<N>` placeholders.
