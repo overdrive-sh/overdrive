@@ -29,6 +29,167 @@
       "s": "SKIPPED",
       "d": "NOT_APPLICABLE: RED scaffold step; GREEN happens in subsequent steps via Solution 1' oneshot-gate",
       "t": "2026-05-10T14:18:47Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T14:20:00Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T14:23:25Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: 01-01 acceptance test stays RED until step 01-03 wires the firing sites; this step lands the gate-await side only",
+      "t": "2026-05-10T14:23:31Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T14:29:27Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T14:35:21Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T14:36:54Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T14:40:31Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T14:45:00Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: action-shim wiring has no isolated unit-level surface; integration tests at port-to-port level are the load-bearing assertion",
+      "t": "2026-05-10T14:45:02Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T15:13:01Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T15:13:05Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: action-shim wiring has no isolated unit-level surface; integration tests at port-to-port level are the load-bearing assertion",
+      "t": "2026-05-10T15:13:10Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T15:13:14Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T15:13:19Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T15:15:51Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: test triage step; structural change already landed in 01-02/01-03 with its own integration test",
+      "t": "2026-05-10T15:15:59Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: pure test triage; no production unit under test",
+      "t": "2026-05-10T15:16:00Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T15:18:38Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T15:20:05Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T15:24:04Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T15:24:16Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: invariant is structurally an integration-level assertion; no isolated unit-level decision function",
+      "t": "2026-05-10T15:24:18Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T15:36:23Z"
     }
   ]
 }

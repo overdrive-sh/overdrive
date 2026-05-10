@@ -108,6 +108,17 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     // Slice 08 (US-08; ASR-2.2-04) — hydrator ESR pair landed in step 08-02.
     "hydrator-eventually-converges",
     "hydrator-idempotent-steady-state",
+    // fix-exit-observer-running-gate step 01-05 (Solution 4) — DST
+    // invariant defending the post-condition that every `ExitEvent`
+    // consumed by the worker exit_observer produces at least one of
+    // (a) obs row write with state ∈ {Failed, Terminated}, (b)
+    // degraded `LifecycleEvent` carrying
+    // `TransitionReason::DriverInternalError`, or (c) structured
+    // `tracing::error!` naming the alloc_id. Closes the gap
+    // predecessor RCA `fix-exit-observer-write-retry/deliver/
+    // rca.md:107-109` named and `docs/evolution/2026-05-02-fix-exit-
+    // observer-write-retry.md:64` left open.
+    "exit-event-observable-outcome",
 ];
 
 // -----------------------------------------------------------------------------

@@ -1922,6 +1922,7 @@ dependencies = [
  "parking_lot",
  "proptest",
  "rand 0.8.6",
+ "rkyv",
  "serde",
  "serde_json",
  "tempfile",

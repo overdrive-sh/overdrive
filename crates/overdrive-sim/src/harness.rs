@@ -569,6 +569,20 @@ impl Harness {
                 crate::invariants::service_map_hydrator::evaluate_hydrator_idempotent_steady_state(
                 )
             }
+            // fix-exit-observer-running-gate step 01-05 (Solution 4).
+            // Drives the live action_shim + exit_observer + SimDriver
+            // + SimObservationStore wiring end-to-end across two
+            // scenarios (happy path + May-2 degraded escalation) and
+            // asserts the three-outcome disjunction for every
+            // consumed `ExitEvent`. With Solution 1' (oneshot-gated
+            // watcher emission) landed in steps 01-02 / 01-03, this
+            // evaluator does NOT fire under the canonical flow — it
+            // is the load-bearing structural defence against future
+            // regressions.
+            Invariant::ExitEventObservableOutcome => {
+                crate::invariants::exit_event_observable_outcome::evaluate_exit_event_observable_outcome()
+                    .await
+            }
         }
     }
 }

@@ -47,6 +47,14 @@ overdrive-control-plane.path = "../overdrive-control-plane"
 ciborium.workspace       = true
 serde.workspace          = true
 serde_json.workspace     = true
+# Used by the `ExitEventObservableOutcome` invariant evaluator
+# (fix-exit-observer-running-gate step 01-05 — Solution 4) to
+# archive a `Job` aggregate into the in-process `LocalIntentStore`
+# fixture so the production `JobLifecycle` reconciler resolves it
+# through `IntentStore::get`. Mirrors the integration test fixture at
+# `crates/overdrive-control-plane/tests/integration/job_lifecycle/
+# exit_observer_running_gate.rs`.
+rkyv.workspace               = true
 # `cargo dst` binary deps — the `[[bin]] name = "dst"` entry below
 # ships the DST harness as a runtime tool. See § "xtask is build /
 # test / dev orchestration, NOT a runtime entry point" in
