@@ -24,8 +24,8 @@ use async_trait::async_trait;
 use parking_lot::Mutex;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, ChildStderr, Command};
-use tokio::sync::mpsc;
-use tracing::warn;
+use tokio::sync::{mpsc, oneshot};
+use tracing::{debug, warn};
 
 use overdrive_core::id::AllocationId;
 use overdrive_core::traits::clock::Clock;
@@ -138,6 +138,27 @@ struct LiveAllocation {
     /// task, but the path is best-effort — the `JoinHandle` may
     /// already have completed naturally before stop runs.
     watcher: tokio::task::JoinHandle<()>,
+    /// "Running-confirmed" gate sender per
+    /// `docs/feature/fix-exit-observer-running-gate/deliver/rca.md`
+    /// (Solution 1'). The action shim consumes this via
+    /// [`Driver::release_for_exit_emission`] after committing the
+    /// `obs.write(AllocStatus::Running)` row (or after the May-2
+    /// degraded-escalation `LifecycleEvent` path). The matching
+    /// `oneshot::Receiver` was handed to the per-alloc watcher at
+    /// spawn time and is awaited BEFORE the watcher emits its
+    /// `ExitEvent` — that is the structural happens-before edge
+    /// preventing the observer's `find_prior_row → NoPriorRow`
+    /// silent-drop on sub-millisecond-lifetime workloads.
+    ///
+    /// `Some` from start until [`Driver::release_for_exit_emission`]
+    /// `take()`s it; `None` thereafter (idempotent fire). On
+    /// `Driver::stop` the `LiveAllocation` is dropped — if the
+    /// sender was never taken (action shim crashed before
+    /// release), the sender's `Drop` causes the watcher's
+    /// `oneshot::Receiver::await` to resolve to `Err(RecvError)`,
+    /// which the watcher treats as "proceed and emit". See the
+    /// `Driver::start` rustdoc § "Sender drop (orphan path)".
+    gate_sender: Option<oneshot::Sender<()>>,
 }
 
 /// Production `Driver` impl for native processes under cgroup v2
@@ -388,16 +409,49 @@ impl Driver for ExecDriver {
         // travels with the `ExitEvent` to the obs row.
         let intentional_stop = Arc::new(AtomicBool::new(false));
         let stderr_pipe = child.stderr.take();
+        // Mint the Running-confirmed gate per
+        // `docs/feature/fix-exit-observer-running-gate/deliver/rca.md`
+        // (Solution 1'). Sender is stashed on `LiveAllocation`; the
+        // action shim takes it via `Driver::release_for_exit_emission`
+        // after `obs.write(Running)` resolves Ok (or after the May-2
+        // degraded-escalation path). Receiver is handed to the
+        // watcher and awaited BEFORE its first `ExitEvent` send.
+        //
+        // Step 01-02 transitional: the action-shim firing site is
+        // wired in step 01-03 (NOT this step). To keep the gate from
+        // hanging existing tests that do not yet route through the
+        // action-shim's `release_for_exit_emission` call, we drop
+        // the sender immediately after stashing it — the watcher's
+        // `gate_receiver.await` then resolves to `Err(RecvError)`
+        // (orphan path) and emit proceeds. Step 01-03 will replace
+        // the immediate-drop with proper action-shim wiring.
+        // The 01-01 regression test stays RED under this transition
+        // because the gate provides no ordering edge yet (sender
+        // dropped before the action shim could ever hold it).
+        let (gate_sender, gate_receiver) = oneshot::channel::<()>();
         let watcher = spawn_exit_watcher(
             spec.alloc.clone(),
             child,
             stderr_pipe,
             intentional_stop.clone(),
             self.exit_tx.clone(),
+            gate_receiver,
         );
-        self.live
-            .lock()
-            .insert(spec.alloc.clone(), LiveAllocation { scope, pid, intentional_stop, watcher });
+        self.live.lock().insert(
+            spec.alloc.clone(),
+            LiveAllocation {
+                scope,
+                pid,
+                intentional_stop,
+                watcher,
+                gate_sender: Some(gate_sender),
+            },
+        );
+        // Step 01-02 transitional drop: see comment above. Step
+        // 01-03 will remove this drop and wire the action shim's
+        // post-Running firing site instead.
+        let _step_01_02_transitional_drop =
+            self.live.lock().get_mut(&spec.alloc).and_then(|live| live.gate_sender.take());
 
         Ok(AllocationHandle { alloc: spec.alloc.clone(), pid: Some(pid) })
     }
@@ -409,9 +463,17 @@ impl Driver for ExecDriver {
             let mut live = self.live.lock();
             live.remove(&handle.alloc)
         };
-        let Some(LiveAllocation { scope, pid, intentional_stop, watcher }) = entry else {
+        let Some(LiveAllocation { scope, pid, intentional_stop, watcher, gate_sender }) = entry
+        else {
             return Err(DriverError::NotFound { alloc: handle.alloc.clone() });
         };
+        // Drop the gate sender explicitly. If the action shim never
+        // released the gate before stop (e.g. operator stop landed
+        // mid-flight, or the watcher already emitted via the orphan
+        // path), the receiver wakes with `Err(RecvError)` and the
+        // watcher proceeds. Per the `Driver::start` rustdoc § "Sender
+        // drop (orphan path)".
+        drop(gate_sender);
 
         // 0. Set `intentional_stop = true` BEFORE delivering any
         //    signal. The watcher reads this flag at exit-classification
@@ -529,6 +591,30 @@ impl Driver for ExecDriver {
     fn take_exit_receiver(&self) -> Option<mpsc::Receiver<ExitEvent>> {
         self.exit_rx.lock().take()
     }
+
+    /// Fire the Running-confirmed gate for `handle.alloc`. Idempotent:
+    /// a call against an alloc whose gate has already fired (or whose
+    /// alloc is unknown to the driver) is a no-op, NOT a panic. See
+    /// `Driver::start` rustdoc on the `overdrive-core` trait for the
+    /// full contract; the structural exactly-once guarantee comes
+    /// from `Option::take` + `oneshot::Sender::send` consume-self.
+    fn release_for_exit_emission(&self, handle: &AllocationHandle) {
+        // Hold the lock only long enough to take the sender; never
+        // hold a parking_lot mutex across an `.await` (we don't
+        // await here, but the discipline is uniform).
+        let sender =
+            self.live.lock().get_mut(&handle.alloc).and_then(|live| live.gate_sender.take());
+        if let Some(sender) = sender {
+            // `oneshot::Sender::send` consumes self — double-fire is
+            // structurally impossible. `Err(())` from a closed
+            // receiver (watcher already dropped, e.g. mid-flight
+            // stop / shutdown) is benign; nothing to log on a
+            // post-stop release race.
+            let _ = sender.send(());
+        }
+        // Unknown alloc OR gate already fired: no-op per the
+        // idempotent-fire contract.
+    }
 }
 
 /// Spawn a per-allocation watcher task that owns the `Child`, awaits
@@ -558,6 +644,7 @@ fn spawn_exit_watcher(
     stderr_pipe: Option<ChildStderr>,
     intentional_stop: Arc<AtomicBool>,
     exit_tx: mpsc::Sender<ExitEvent>,
+    gate_receiver: oneshot::Receiver<()>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         // Spawn the stderr-tail reader in parallel with `child.wait()`.
@@ -631,6 +718,47 @@ fn spawn_exit_watcher(
             None
         };
         let event = ExitEvent { alloc, kind, intentional_stop: intentional, stderr_tail };
+        // Running-confirmed gate: await the action-shim signal that
+        // the corresponding `obs.write(Running)` row has committed
+        // (or that the May-2 retry path has degraded to
+        // `LifecycleEvent`-only). Without this happens-before edge,
+        // a sub-millisecond-lifetime workload can have its
+        // `ExitEvent` race the action shim's `Running` write and
+        // be silently dropped by the observer's `find_prior_row →
+        // NoPriorRow` arm. Per
+        // `docs/feature/fix-exit-observer-running-gate/deliver/rca.md`
+        // (Solution 1').
+        //
+        // ORDERING is load-bearing: gate await is AFTER `child.wait()`
+        // resolves AND AFTER the stderr-tail drain budget completes,
+        // BEFORE `exit_tx.send`. The stderr-tail drain is its own
+        // pre-condition for emit (rendering correctness); the gate
+        // is the additional pre-condition (ordering correctness).
+        // Both must complete before the event is delivered to the
+        // observer.
+        //
+        // `tokio::sync::oneshot` is NOT `Clock`-dependent — works
+        // under `SimClock`, turmoil, real tokio identically. The
+        // gate is a logical happens-before edge, not a wall-clock
+        // budget. This is the structural production race fix; not a
+        // sim concession (per
+        // `.claude/rules/development.md` § "Production code is not
+        // shaped by simulation").
+        //
+        // `Err(RecvError)` resolves when the sender is dropped
+        // without sending — the action-shim-crashed orphan path. We
+        // log at debug and proceed: the observer's own
+        // `find_prior_row` handles present-or-absent prior rows the
+        // same way it does today, and reconciler convergence cleans
+        // up the orphan on the next tick. Per the `Driver::start`
+        // rustdoc § "Sender drop (orphan path)".
+        if let Err(_recv_err) = gate_receiver.await {
+            debug!(
+                alloc = %event.alloc,
+                "exit_watcher: gate sender dropped before fire; \
+                 proceeding with ExitEvent emission (orphan path)"
+            );
+        }
         // Send is best-effort: if the observer has shut down, the
         // event is dropped — the obs store already reflects a
         // shutdown-time terminal state, and there is no recovery
