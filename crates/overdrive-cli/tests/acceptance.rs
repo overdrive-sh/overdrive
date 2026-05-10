@@ -46,4 +46,11 @@ mod acceptance {
     // streaming lane). The wire-level Accept-header pinning is covered
     // by the existing JSON-ack and streaming integration suites.
     mod submit_pipe_autodetect;
+
+    // workload-kind-discriminator slice 02 — Job-kind render fns
+    // (`format_job_succeeded_summary`, `format_job_failed_summary`,
+    // `format_job_attempt_failed`, `format_job_submit_echo`) per
+    // ADR-0047 §3 [D2] / [D7]. The structural fix that closes the
+    // bug under audit lands here.
+    mod job_kind_render;
 }

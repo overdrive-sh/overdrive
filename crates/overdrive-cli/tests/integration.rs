@@ -50,4 +50,11 @@ mod integration {
     // forbids `Command::spawn`, so this is the in-process equivalent
     // of the shell pipeline; see file rustdoc for the full mapping.
     mod submit_jq_pipeline;
+
+    // workload-kind-discriminator slice 02 — Job-kind streaming
+    // submit acceptance tests + S-02-09 K1 honesty (Lima-gated).
+    // The load-bearing assertion is S-02-05 anti-scenario: no
+    // Job-kind submit produces "is running with" or "(took live)".
+    mod coinflip_honesty_100_trials;
+    mod job_kind_streaming;
 }

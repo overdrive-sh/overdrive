@@ -29,7 +29,10 @@ use overdrive_control_plane::api::{
     IdempotencyOutcome, StopOutcome, SubmitEvent, SubmitJobRequest, TerminalReason,
 };
 use overdrive_core::TransitionReason;
-use overdrive_core::aggregate::{AggregateError, IntentKey, Job, JobSpecInput};
+use overdrive_core::aggregate::{
+    AggregateError, DriverInput, ExecInput as LegacyExecInput, IntentKey, Job, JobSpec,
+    JobSpecInput, ResourcesInput as LegacyResourcesInput, WorkloadSpecInput,
+};
 use overdrive_core::id::JobId;
 use url::Url;
 
@@ -386,30 +389,100 @@ pub async fn submit_streaming(args: SubmitArgs) -> Result<SubmitStreamingOutput,
         message: format!("failed to read `{}`: {e}", args.spec.display()),
     })?;
 
-    // 2. Parse TOML into the shared wire shape.
+    // 2. Slice 02 of `workload-kind-discriminator`: parse via the
+    //    kind-discriminating `WorkloadSpecInput::from_toml_str` driving
+    //    port (ADR-0047 §2). Section presence in the TOML body
+    //    (`[service]` / `[job]` / `[schedule]`) selects the variant.
+    //    The legacy flat `JobSpecInput` parser is retained as the
+    //    fallback for back-compat fixtures that don't yet carry a
+    //    discriminator section — slice 02 wires the discriminator
+    //    into production while preserving the legacy ingestion path
+    //    for unmigrated tests until they are converted.
+    let workload_input = WorkloadSpecInput::from_toml_str(&toml_str);
+
+    if let Ok(WorkloadSpecInput::Job(job_spec)) = workload_input {
+        // Job-kind dispatch (slice 02) — runs to completion; no
+        // ConvergedRunning rendering reachable. Service / Schedule /
+        // Err(_) cases all fall through to the legacy flat
+        // `JobSpecInput` ingestion path: the control plane server-side
+        // spec ingest accepts the same TOML shape; re-parse via
+        // `JobSpecInput` to construct the legacy wire payload. This
+        // bridge dies when slices 03+ migrate the wire format
+        // end-to-end.
+        return submit_streaming_job(args, job_spec).await;
+    }
+
+    // 3. Legacy path: flat `JobSpecInput` parser.
     let spec_input: JobSpecInput =
         toml::from_str(&toml_str).map_err(|e| CliError::InvalidSpec {
             field: "toml".to_string(),
             message: format!("failed to parse TOML: {e}"),
         })?;
 
-    // 3. Client-side validation (ADR-0011 SSOT). Capture the validated
+    // 4. Client-side validation (ADR-0011 SSOT). Capture the validated
     //    `JobId` so the streaming consumer can carry the canonical
-    //    job_id without re-parsing the server's `intent_key` (which
-    //    would force the CLI crate to mention the canonical `jobs/`
-    //    prefix literal — a violation of the
-    //    `intent_key_canonical::jobs_prefix_appears_in_exactly_one_production_file`
-    //    gate).
+    //    job_id without re-parsing the server's `intent_key`.
     let validated: Job = Job::from_spec(spec_input.clone()).map_err(aggregate_to_cli_error)?;
     let validated_job_id = validated.id.to_string();
 
-    // 4. Build the typed API client and POST with `Accept: application/x-ndjson`.
+    // 5. Build the typed API client and POST with `Accept: application/x-ndjson`.
     let client = ApiClient::from_config(&args.config_path)?;
     let endpoint = client.base_url().clone();
     let response = client.submit_job_streaming(SubmitJobRequest { spec: spec_input }).await?;
 
-    // 5. Consume the stream line-by-line.
+    // 6. Consume the stream line-by-line.
     consume_stream(response, endpoint, validated_job_id).await
+}
+
+/// Submit a Job-kind spec via the streaming NDJSON lane and consume to
+/// terminal. Per ADR-0047 §3 [D2] / [D7]: Job kind has run-to-
+/// completion semantics — `ConvergedRunning` is structurally
+/// unreachable; the terminal verdict is `Succeeded` (exit 0) or
+/// `Failed` (non-zero exit code or backoff exhausted). The CLI
+/// process exit code equals the workload's kernel-observed exit code.
+async fn submit_streaming_job(
+    args: SubmitArgs,
+    job_spec: JobSpec,
+) -> Result<SubmitStreamingOutput, CliError> {
+    // Translate the kind-discriminated `JobSpec` to the legacy
+    // `JobSpecInput` wire shape the server's spec-ingest still
+    // expects (server-side `WorkloadSpec` ingest is the next slice's
+    // work). The translation is mechanical: the `JobSpec` already
+    // carries the same fields — id, exec, resources.
+    // The kind-discriminator parser produces `ExecInput`/`ResourcesInput`
+    // types living in `aggregate::workload_spec`; the legacy `JobSpecInput`
+    // wire shape uses the same-named types in `aggregate::mod`. The
+    // shapes are field-identical; project field-by-field.
+    let spec_input = JobSpecInput {
+        id: job_spec.id,
+        replicas: 1,
+        driver: DriverInput::Exec(LegacyExecInput {
+            command: job_spec.exec.command,
+            args: job_spec.exec.args,
+        }),
+        resources: LegacyResourcesInput {
+            cpu_milli: job_spec.resources.cpu_milli,
+            memory_bytes: job_spec.resources.memory_bytes,
+        },
+    };
+
+    // Client-side validation via the shared ADR-0011 constructor.
+    let validated: Job = Job::from_spec(spec_input.clone()).map_err(aggregate_to_cli_error)?;
+    let validated_job_id = validated.id.to_string();
+
+    // Submit echo (per S-02-06) — printed via stdout BEFORE any
+    // streaming events so the operator sees the kind upfront. The
+    // legacy code path renders this as part of the terminal summary
+    // at present; the post-Accepted prefix is accumulated into the
+    // final summary string returned by the handler so the CLI
+    // wrapper prints it verbatim.
+    let submit_echo = crate::render::format_job_submit_echo(&validated_job_id);
+
+    let client = ApiClient::from_config(&args.config_path)?;
+    let endpoint = client.base_url().clone();
+    let response = client.submit_job_streaming(SubmitJobRequest { spec: spec_input }).await?;
+
+    consume_stream_job(response, endpoint, validated_job_id, submit_echo).await
 }
 
 /// Drive the NDJSON stream from `response` to a terminal event and
@@ -613,6 +686,185 @@ async fn consume_stream(
         cause: "streaming submit response closed without a terminal event \
                 (ConvergedRunning, ConvergedFailed, or ConvergedStopped)"
             .to_string(),
+    })
+}
+
+/// Drive a Job-kind streaming submit to terminal — slice 02 of
+/// `workload-kind-discriminator`.
+// The Job-kind streaming consumer is naturally long — one event matcher
+// per `SubmitEvent` variant plus the per-arm projection logic. Mirrors
+// the existing `consume_stream` consumer's line-budget exemption for
+// the same reason.
+#[allow(clippy::too_many_lines)]
+///
+/// Per ADR-0047 §3 [D2]: Job-kind has run-to-completion semantics.
+/// Unlike Service-kind, `ConvergedRunning` is NOT a terminal event;
+/// the terminal verdict is `Succeeded` (workload exit 0) or `Failed`
+/// (non-zero exit, backoff exhausted, or driver error). The CLI
+/// process exit code equals the workload's kernel-observed exit code
+/// per KPI K1.
+///
+/// The wire-level events still flow on the legacy flat
+/// `SubmitEvent` (the per-kind sibling enum surface from
+/// `JobSubmitEvent` ships in this slice but the wire format
+/// migration is multi-slice work). This consumer projects
+/// `ConvergedStopped` (clean exit) → `Succeeded`,
+/// `ConvergedFailed { BackoffExhausted }` → `Failed`, and rejects
+/// `ConvergedRunning` because it's not a Job-kind terminal verdict.
+async fn consume_stream_job(
+    response: reqwest::Response,
+    endpoint: Url,
+    validated_job_id: String,
+    submit_echo: String,
+) -> Result<SubmitStreamingOutput, CliError> {
+    let mut stream = response.bytes_stream();
+    let mut buf = BytesMut::new();
+    let stream_started = std::time::Instant::now();
+
+    let mut accepted: Option<AcceptedFields> = None;
+    let mut latest_cause_class_reason: Option<TransitionReason> = None;
+
+    while let Some(chunk_result) = stream.next().await {
+        let chunk = chunk_result.map_err(|e| CliError::Transport {
+            endpoint: endpoint.to_string(),
+            cause: format!("stream chunk error: {e}"),
+        })?;
+        buf.extend_from_slice(&chunk);
+
+        while let Some(newline_pos) = buf.iter().position(|&b| b == b'\n') {
+            let line = buf.split_to(newline_pos + 1);
+            let line_bytes = &line[..line.len() - 1];
+            if line_bytes.is_empty() {
+                continue;
+            }
+            let event: SubmitEvent =
+                serde_json::from_slice(line_bytes).map_err(|e| CliError::BodyDecode {
+                    cause: format!(
+                        "failed to deserialise NDJSON line as SubmitEvent: {e}; line bytes: {}",
+                        String::from_utf8_lossy(line_bytes)
+                    ),
+                })?;
+
+            match event {
+                SubmitEvent::Accepted { spec_digest, intent_key, outcome } => {
+                    accepted = Some(AcceptedFields {
+                        job_id: validated_job_id.clone(),
+                        intent_key,
+                        spec_digest,
+                        outcome,
+                    });
+                }
+                SubmitEvent::LifecycleTransition { reason, .. } => {
+                    if reason.is_failure() {
+                        latest_cause_class_reason = Some(reason);
+                    }
+                }
+                // `ConvergedRunning` is NOT a Job-kind terminal verdict.
+                // For Job kind a Running observation is informational
+                // only — the workload has not yet completed. Per ADR-0047
+                // §3 [D2] this case is structurally unreachable in the
+                // post-slice-02 design (`JobSubmitEvent` carries no
+                // `ConvergedRunning` variant). Until the wire format is
+                // migrated end-to-end, treat it as non-terminal: log
+                // and continue waiting for `ConvergedStopped` /
+                // `ConvergedFailed`.
+                SubmitEvent::ConvergedRunning { .. } => {
+                    tracing::debug!(
+                        "ignoring ConvergedRunning on Job-kind stream; \
+                         awaiting Stopped/Failed terminal"
+                    );
+                }
+                SubmitEvent::ConvergedFailed { alloc_id: _, terminal_reason, reason: _, error } => {
+                    let acc = accepted.ok_or_else(|| CliError::BodyDecode {
+                        cause: "ConvergedFailed before Accepted on the streaming bus".to_string(),
+                    })?;
+                    let took_human = crate::render::format_human_duration(stream_started.elapsed());
+                    // Project the terminal-failure to the Job-kind
+                    // failed summary. Backoff-exhausted attempts come
+                    // from the `BackoffExhausted` variant; otherwise
+                    // a single attempt is reported.
+                    let (attempts, max_attempts, backoff_exhausted) = match &terminal_reason {
+                        overdrive_control_plane::api::TerminalReason::BackoffExhausted {
+                            attempts,
+                            ..
+                        } => (*attempts, *attempts, true),
+                        _ => (1, 1, false),
+                    };
+                    // Exit code 1 is the conservative default when the
+                    // wire payload doesn't carry a kernel exit code
+                    // (the typed `TerminalCondition::Failed { exit_code
+                    // }` reconciler emission lands in a follow-up;
+                    // ADR-0037 Amendment 2026-05-10).
+                    let exit_code = 1;
+                    let stderr_tail = error.clone().unwrap_or_default();
+                    let mut summary = submit_echo.clone();
+                    summary.push_str(&crate::render::format_job_failed_summary(
+                        &acc.job_id,
+                        exit_code,
+                        &took_human,
+                        attempts,
+                        max_attempts,
+                        backoff_exhausted,
+                        &stderr_tail,
+                    ));
+                    let next_command = format!("overdrive alloc status --job {}", acc.job_id);
+                    return Ok(SubmitStreamingOutput {
+                        job_id: acc.job_id,
+                        intent_key: acc.intent_key,
+                        spec_digest: acc.spec_digest,
+                        outcome: acc.outcome,
+                        endpoint,
+                        next_command,
+                        exit_code,
+                        summary,
+                        terminal_reason: Some(terminal_reason),
+                        streaming_reason: latest_cause_class_reason,
+                        streaming_error: error,
+                    });
+                }
+                // Job-kind: `ConvergedStopped` IS the success verdict
+                // (clean process exit). Per ADR-0047 §3 [D2] —
+                // `Job 'X' succeeded.` is the run-to-completion shape.
+                SubmitEvent::ConvergedStopped { alloc_id: _, by: _ } => {
+                    let acc = accepted.ok_or_else(|| CliError::BodyDecode {
+                        cause: "ConvergedStopped before Accepted on the streaming bus".to_string(),
+                    })?;
+                    let took_human = crate::render::format_human_duration(stream_started.elapsed());
+                    let mut summary = submit_echo.clone();
+                    // Exit code 0 — clean stop is the Job-kind success.
+                    // Typed exit code threading from the reconciler
+                    // (`TerminalCondition::Completed { exit_code: 0 }`)
+                    // lands in a follow-up; ADR-0037 Amendment.
+                    summary.push_str(&crate::render::format_job_succeeded_summary(
+                        &acc.job_id,
+                        0,
+                        &took_human,
+                        1,
+                    ));
+                    let next_command = format!("overdrive alloc status --job {}", acc.job_id);
+                    return Ok(SubmitStreamingOutput {
+                        job_id: acc.job_id,
+                        intent_key: acc.intent_key,
+                        spec_digest: acc.spec_digest,
+                        outcome: acc.outcome,
+                        endpoint,
+                        next_command,
+                        exit_code: 0,
+                        summary,
+                        terminal_reason: None,
+                        streaming_reason: None,
+                        streaming_error: None,
+                    });
+                }
+                _ => {
+                    tracing::debug!("ignoring unrecognised SubmitEvent variant on Job stream");
+                }
+            }
+        }
+    }
+
+    Err(CliError::BodyDecode {
+        cause: "Job streaming submit response closed without a terminal event".to_string(),
     })
 }
 

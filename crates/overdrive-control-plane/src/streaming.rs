@@ -491,6 +491,113 @@ pub fn build_accepted(
 }
 
 // ---------------------------------------------------------------------------
+// Job streaming sub-path — slice 02 of `workload-kind-discriminator`.
+// ---------------------------------------------------------------------------
+//
+// Per ADR-0047 §3 [D2] + [D7]: Job-kind submits stream a per-kind
+// sibling enum `JobSubmitEvent` whose variants make the historical
+// false-positive "is running with N/M replicas (took live)" rendering
+// structurally unreachable. The enum has NO `ConvergedRunning`
+// variant — the conjunction of RCA root causes B+C+D is rendered
+// impossible at the type level.
+//
+// Job semantics (run-to-completion):
+//   * `Accepted` — synchronous first-line ack (mirrors the existing
+//     `SubmitEvent::Accepted` shape).
+//   * `Pending` — informational, allocation pending placement.
+//   * `Running { since }` — informational, NOT terminal. A Job is not
+//     "done" because it is currently running; it is done only when it
+//     terminates with an exit code. Renderers MUST NOT render this
+//     variant as a terminal success.
+//   * `AttemptFailed` — intermediate; stream stays open while the
+//     reconciler decides whether to restart.
+//   * `Succeeded { exit_code: 0, ... }` — terminal; CLI exits 0.
+//   * `Failed { exit_code, ... }` — terminal; CLI exits with the
+//     workload's kernel-observed exit code.
+
+/// Streaming events emitted by the Job submit sub-path.
+///
+/// Per ADR-0047 §3 [D2] / [D7]: Job kind has NO `ConvergedRunning`
+/// variant — the conjunction of RCA root causes B+C+D is rendered
+/// structurally unreachable for Job by the type system itself.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+#[serde(tag = "kind", content = "data", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum JobSubmitEvent {
+    /// Submit was accepted. Mirrors `SubmitEvent::Accepted` — first
+    /// NDJSON line on the wire. Synchronous; no broadcast wait.
+    Accepted {
+        /// Canonical 64-char lowercase-hex SHA-256 of the rkyv-archived
+        /// `WorkloadSpec::Job` bytes (ADR-0002).
+        spec_digest: String,
+        /// Canonical `jobs/<id>` IntentKey string form.
+        intent_key: String,
+        /// Idempotency verdict.
+        outcome: crate::api::IdempotencyOutcome,
+    },
+    /// Allocation pending placement.
+    Pending,
+    /// Allocation is currently running. **NOT a terminal event.** The
+    /// stream MUST NOT close on this variant — Jobs are
+    /// run-to-completion and `Running` is informational only.
+    Running { since: String },
+    /// Intermediate — an attempt exited non-zero and the reconciler
+    /// will restart up to `backoff_limit`. The stream remains open.
+    AttemptFailed {
+        attempt_index: u32,
+        exit_code: i32,
+        duration: String,
+        will_restart: bool,
+        next_attempt_delay: Option<String>,
+    },
+    /// Terminal — workload exited 0 within `backoff_limit`. CLI exit 0.
+    Succeeded { exit_code: i32, duration: String, attempts: u32 },
+    /// Terminal — workload exhausted `backoff_limit` with a non-zero
+    /// exit on every attempt. CLI exit code = workload kernel exit
+    /// code (per slice 02 KPI K1 honesty contract).
+    Failed {
+        exit_code: i32,
+        duration: String,
+        attempts: u32,
+        max_attempts: u32,
+        /// Last 5 lines (default) of the workload's stderr from the
+        /// final attempt. Present when ExitObserver captured stderr.
+        stderr_tail: Option<String>,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// Service streaming sub-path — slice 02 of `workload-kind-discriminator`.
+// ---------------------------------------------------------------------------
+//
+// Per ADR-0047 §3 [D2] / [D7]: Service-kind retains the existing
+// `ConvergedRunning` shape — long-running workloads converge on
+// "running" and stream remains observable. The legacy flat
+// `SubmitEvent` continues to serve Service-kind for backward
+// compatibility with existing consumers (this slice introduces the
+// per-kind enum surface; later slices may collapse the flat shape).
+
+/// Streaming events emitted by the Service submit sub-path.
+///
+/// Per ADR-0047 §3 [D7]: Service-kind retains `ConvergedRunning`
+/// (long-running workloads converge on the live state).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+#[serde(tag = "kind", content = "data", rename_all = "snake_case")]
+#[non_exhaustive]
+pub enum ServiceSubmitEvent {
+    /// Submit was accepted. Mirrors `SubmitEvent::Accepted`.
+    Accepted { spec_digest: String, intent_key: String, outcome: crate::api::IdempotencyOutcome },
+    /// Terminal — convergence reached `Running` with replicas met.
+    ConvergedRunning { alloc_id: String, started_at: String },
+    /// Terminal — convergence failed.
+    ConvergedFailed {
+        alloc_id: Option<String>,
+        terminal_reason: crate::api::TerminalReason,
+        error: Option<String>,
+    },
+}
+
+// ---------------------------------------------------------------------------
 // Schedule streaming sub-path — slice 05 of `workload-kind-discriminator`.
 // ---------------------------------------------------------------------------
 //

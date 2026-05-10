@@ -478,6 +478,99 @@ const fn hint_for_transition_reason(reason: &TransitionReason) -> &'static str {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Job-kind render fns — slice 02 of `workload-kind-discriminator`.
+// ---------------------------------------------------------------------------
+//
+// Per ADR-0047 §3 [D2] / [D7]: Job kind workloads are run-to-completion;
+// they have no `ConvergedRunning` shape. The structural fix closing the
+// bug under audit (RCA: B+C+D conjunction) renders Job-kind submits via
+// these dedicated functions whose output cannot contain the historical
+// `"is running with"` / `"(took live)"` substrings.
+
+/// Render the operator-facing submit echo for a Job-kind workload.
+///
+/// Per slice 02 spec / S-02-06: emitted BEFORE any streaming events
+/// so the operator sees the kind upfront and understands a Job is
+/// run-to-completion (not a long-running Service).
+///
+/// Form: `Submitting job '<name>' (kind=Job, run-to-completion)\n`.
+#[must_use]
+pub fn format_job_submit_echo(job_name: &str) -> String {
+    format!("Submitting job '{job_name}' (kind=Job, run-to-completion)\n")
+}
+
+/// Render the operator-facing terminal-success line for a Job-kind
+/// workload. Pure function. Per slice 02 spec / S-02-01.
+///
+/// A Job that exits 0 reports `Succeeded` with exit code, duration,
+/// and attempts. The CLI maps `Succeeded` → process exit 0.
+///
+/// Form: `Job '<name>' succeeded. (exit code 0, took <duration>, attempts <N>)\n`
+#[must_use]
+pub fn format_job_succeeded_summary(
+    job_name: &str,
+    exit_code: i32,
+    took_human: &str,
+    attempts: u32,
+) -> String {
+    format!(
+        "Job '{job_name}' succeeded. (exit code {exit_code}, took {took_human}, attempts {attempts})\n"
+    )
+}
+
+/// Render the operator-facing terminal-failure line for a Job-kind
+/// workload. Pure function. Per slice 02 spec / S-02-02.
+///
+/// Form: `Job '<name>' failed. (exit code <N>, took <duration>, attempts <X> of <Y> [(backoff exhausted)])\nstderr tail:\n<tail>`
+#[must_use]
+pub fn format_job_failed_summary(
+    job_name: &str,
+    exit_code: i32,
+    took_human: &str,
+    attempts: u32,
+    max_attempts: u32,
+    backoff_exhausted: bool,
+    stderr_tail: &str,
+) -> String {
+    use std::fmt::Write as _;
+    let mut s = String::new();
+    let attempts_str = if backoff_exhausted {
+        format!("{attempts} of {max_attempts} (backoff exhausted)")
+    } else {
+        format!("{attempts} of {max_attempts}")
+    };
+    let _ = writeln!(
+        s,
+        "Job '{job_name}' failed. (exit code {exit_code}, took {took_human}, attempts {attempts_str})"
+    );
+    if !stderr_tail.is_empty() {
+        let _ = writeln!(s, "stderr tail:");
+        // Indent each line for operator-readability.
+        for line in stderr_tail.lines() {
+            let _ = writeln!(s, "  {line}");
+        }
+    }
+    s
+}
+
+/// Render an intermediate Job attempt-failed line. Pure function.
+/// Per slice 02 spec / S-02-03 — intermediate (non-terminal) line;
+/// the streaming session stays open after this is emitted.
+///
+/// Form: `Job '<name>' attempt <N> failed (exit <X>). Retrying in <duration>.\n`
+#[must_use]
+pub fn format_job_attempt_failed(
+    job_name: &str,
+    attempt_index: u32,
+    exit_code: i32,
+    next_attempt_delay: &str,
+) -> String {
+    format!(
+        "Job '{job_name}' attempt {attempt_index} failed (exit {exit_code}). Retrying in {next_attempt_delay}.\n"
+    )
+}
+
 /// Render the streaming `ConvergedRunning` summary line — the
 /// operator-facing exit-0 success render. Pure function.
 ///
