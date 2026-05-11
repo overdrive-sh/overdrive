@@ -155,6 +155,28 @@ exclude_re = [
     # reconciler PR will re-examine this exclusion at that point.
     "replace && with \\|\\| in evaluate_reconciler_is_pure",
 
+    # HTTP-stream consumers (`consume_stream`, `consume_stream_job`)
+    # and the thin CLI dispatcher (`run`) — exercised by integration
+    # tests behind `integration-tests` feature gate (real in-process
+    # TLS server + reqwest). Not reachable from the default nextest
+    # lane, so every mutation in these functions shows as MISSED
+    # during `--diff` runs. The per-function `// mutants::skip`
+    # comments in the source remain as documentation of which arms
+    # have dedicated integration coverage; these regexes are the
+    # actual suppression mechanism (cargo-mutants' comment-based
+    # skip applies at function granularity, which matches here).
+    "in consume_stream$",
+    "in consume_stream_job$",
+    "replace run -> Result<\\(\\)> with Ok",
+
+    # Running-gate release in `dispatch_single` — the `if state ==
+    # AllocState::Running` conditional is exercised by the
+    # `exit_observer_running_gate` integration test (behind
+    # `integration-tests` feature gate). `dispatch_single` is too
+    # large to skip wholesale; this regex targets the specific
+    # operator-flip mutation.
+    "replace == with != in dispatch_single",
+
     # Rule 7 — function-body replacement with `Default::default()`.
     # cargo-mutants' default operator synthesises three replacement
     # bodies for any function returning `Result<T, E>`: `Ok(T::default())`,

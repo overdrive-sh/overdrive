@@ -1243,4 +1243,39 @@ mod tests {
             "memory must be exactly 8 GiB = 8589934592 bytes",
         );
     }
+
+    /// Boundary test for `restart_status_for_alloc` at the
+    /// `RESTART_BACKOFF_CEILING`. Catches the `< vs <=` mutation:
+    /// at exactly ceiling attempts, `will_restart` must be false.
+    #[tokio::test]
+    async fn restart_status_flips_at_ceiling_boundary() {
+        use overdrive_core::id::AllocationId;
+        use overdrive_core::reconciler::{
+            RESTART_BACKOFF_CEILING, TargetResource, WorkloadLifecycleView,
+        };
+
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let mut runtime =
+            ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime");
+        runtime.register(crate::workload_lifecycle()).await.expect("register");
+
+        let target = TargetResource::new("job/payments").expect("target");
+        let alloc = AllocationId::new("payments-0").expect("alloc id");
+
+        // attempts = CEILING - 2 → attempt_index = CEILING - 1 → below ceiling → will_restart
+        let mut below = WorkloadLifecycleView::default();
+        below.restart_counts.insert(alloc.clone(), RESTART_BACKOFF_CEILING - 2);
+        runtime.seed_workload_lifecycle_view_for_test(&target, below);
+        let (idx, restart) = runtime.restart_status_for_alloc(&target, &alloc);
+        assert_eq!(idx, RESTART_BACKOFF_CEILING - 1);
+        assert!(restart, "one below ceiling must still restart");
+
+        // attempts = CEILING - 1 → attempt_index = CEILING → AT ceiling → must NOT restart
+        let mut at = WorkloadLifecycleView::default();
+        at.restart_counts.insert(alloc.clone(), RESTART_BACKOFF_CEILING - 1);
+        runtime.seed_workload_lifecycle_view_for_test(&target, at);
+        let (idx, restart) = runtime.restart_status_for_alloc(&target, &alloc);
+        assert_eq!(idx, RESTART_BACKOFF_CEILING);
+        assert!(!restart, "at ceiling must NOT restart — catches < vs <= mutation");
+    }
 }
