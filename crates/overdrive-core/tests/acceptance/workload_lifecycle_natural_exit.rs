@@ -9,7 +9,7 @@
 //!   the reconciler emits `Action::FinalizeFailed` carrying
 //!   `Some(TerminalCondition::Completed { exit_code: 0 })`.
 //! - On a Job-kind alloc whose terminal observation row arrives with a
-//!   crash (`state: Failed`, `reason: DriverInternalError { detail: "exit_code=N" }`),
+//!   crash (`state: Failed`, `reason: WorkloadCrashedImmediately { exit_code: Some(N), .. }`),
 //!   the reconciler emits `Action::FinalizeFailed` carrying
 //!   `Some(TerminalCondition::Failed { exit_code: N })`.
 //! - Service-kind preserves its existing semantics: a Failed alloc with
@@ -104,8 +104,8 @@ fn alloc_clean_exit(alloc_id: &str, workload_id: &str, node_id: &str) -> AllocSt
 }
 
 /// Construct a terminal alloc row representing the shape the
-/// `ExitObserver` writes today (`AllocState::Failed` +
-/// `TransitionReason::DriverInternalError { detail: "exit_code=N" }`) for
+/// `ExitObserver` writes (`AllocState::Failed` +
+/// `TransitionReason::WorkloadCrashedImmediately { exit_code: Some(N), .. }`) for
 /// a crash with non-zero exit code.
 fn alloc_crashed_with_exit(
     alloc_id: &str,
@@ -119,8 +119,10 @@ fn alloc_crashed_with_exit(
         node_id: nid(node_id),
         state: AllocState::Failed,
         updated_at: LogicalTimestamp { counter: 2, writer: nid(node_id) },
-        reason: Some(TransitionReason::DriverInternalError {
-            detail: format!("exit_code={exit_code}"),
+        reason: Some(TransitionReason::WorkloadCrashedImmediately {
+            exit_code: Some(exit_code),
+            signal: None,
+            stderr_tail: None,
         }),
         detail: None,
         terminal: None,

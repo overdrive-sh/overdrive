@@ -1569,22 +1569,16 @@ fn is_natural_exit(row: &AllocStatusRow) -> bool {
 /// [`TerminalCondition::Completed { exit_code }`] / [`TerminalCondition::Failed { exit_code }`]
 /// variant per ADR-0037 Amendment 2026-05-10.
 ///
-/// The `exit_code` source today is encoded in the row's existing shape
-/// (the field that step 02-05 will lift onto a typed
-/// `AllocStatusRow.exit_code` column):
+/// Exit-code source per row shape:
 ///
 /// - `state: Terminated`, `reason: Stopped { by: Process }` — clean
 ///   exit. Maps to `Completed { exit_code: 0 }`. The `Process` source
 ///   on `Stopped` IS the canonical signal that the workload exited
 ///   cleanly; `exit_code` is `0` by definition for this row shape
 ///   (the `ExitObserver`'s `CleanExit` path emits exactly this).
-/// - `state: Failed`, `reason: DriverInternalError { detail }` —
-///   crash. The `detail` string today carries `"exit_code=N"` /
-///   `"signal=N"` / `"unknown_exit"` per
-///   `worker::exit_observer::format_crash_detail`. Parses an integer
-///   exit code out of the `exit_code=` prefix; falls back to `0` for
-///   signal-only / unknown shapes (signal-encoded statuses become a
-///   typed field surface in step 02-05).
+/// - `state: Failed`, `reason: WorkloadCrashedImmediately { exit_code, .. }` —
+///   crash. The typed `exit_code` field is used directly; falls back
+///   to `0` when `exit_code` is `None` (signal-only exits).
 /// - Anything else — falls back to `Failed { exit_code: 0 }`. This
 ///   is structurally rare (`is_natural_exit` already filters
 ///   non-terminal states); the catch-all preserves total dispatch.
@@ -1594,25 +1588,10 @@ fn classify_natural_exit_terminal(row: &AllocStatusRow) -> TerminalCondition {
     {
         return TerminalCondition::Completed { exit_code: 0 };
     }
-    let exit_code = parse_exit_code_from_reason(row.reason.as_ref());
-    TerminalCondition::Failed { exit_code }
-}
-
-/// Parse `"exit_code=N"` out of the legacy
-/// `TransitionReason::DriverInternalError { detail }` shape today's
-/// `worker::exit_observer::format_crash_detail` writes. Returns `0`
-/// for any other shape (no detail, signal-only, malformed integer).
-/// Step 02-05 lifts this onto a typed `AllocStatusRow.exit_code`
-/// column and removes the parse path; until then this is the
-/// minimal-shim that satisfies the unit-level reconciler tests per the
-/// step-02-04 acceptance criteria.
-fn parse_exit_code_from_reason(reason: Option<&TransitionReason>) -> i32 {
-    match reason {
-        Some(TransitionReason::DriverInternalError { detail }) => {
-            detail.strip_prefix("exit_code=").and_then(|n| n.parse::<i32>().ok()).unwrap_or(0)
-        }
-        _ => 0,
+    if let Some(TransitionReason::WorkloadCrashedImmediately { exit_code, .. }) = row.reason {
+        return TerminalCondition::Failed { exit_code: exit_code.unwrap_or(0) };
     }
+    TerminalCondition::Failed { exit_code: 0 }
 }
 
 /// `WorkloadLifecycle` reconciler's typed view — the libSQL-hydrated

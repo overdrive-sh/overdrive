@@ -456,7 +456,7 @@ async fn handle_exit_event(
     };
     let prior_state: AllocStateWire = prior.state.into();
 
-    let (state, reason) = classify(&event.kind, event.intentional_stop);
+    let (state, mut reason) = classify(&event.kind, event.intentional_stop);
     let updated_at = LogicalTimestamp {
         counter: prior.updated_at.counter.saturating_add(1),
         writer: prior.node_id.clone(),
@@ -469,6 +469,12 @@ async fn handle_exit_event(
     // truncated here before reaching the obs row.
     let stderr_tail =
         event.stderr_tail.as_deref().map(|raw| keep_last_n_lines(raw, STDERR_TAIL_LINES));
+    // Patch stderr_tail into WorkloadCrashedImmediately so the typed
+    // reason carries the same tail the row carries — both are
+    // observation data and denormalisation is intentional here.
+    if let TransitionReason::WorkloadCrashedImmediately { stderr_tail: ref mut tail, .. } = reason {
+        tail.clone_from(&stderr_tail);
+    }
     let row = AllocStatusRow {
         alloc_id: event.alloc.clone(),
         workload_id: prior.workload_id,
@@ -517,18 +523,15 @@ fn classify(kind: &ExitKind, intentional_stop: bool) -> (AllocState, TransitionR
         ),
         ExitKind::Crashed { exit_code, signal } => (
             AllocState::Failed,
-            TransitionReason::DriverInternalError {
-                detail: format_crash_detail(*exit_code, *signal),
+            TransitionReason::WorkloadCrashedImmediately {
+                exit_code: *exit_code,
+                // Signal numbers on Linux/POSIX are 1–64, always within u8 range.
+                // `u8::try_from` encodes that assumption and saturates to u8::MAX
+                // for any out-of-range value the kernel cannot actually produce.
+                signal: signal.map(|s| u8::try_from(s).unwrap_or(u8::MAX)),
+                stderr_tail: None,
             },
         ),
-    }
-}
-
-fn format_crash_detail(exit_code: Option<i32>, signal: Option<i32>) -> String {
-    match (exit_code, signal) {
-        (Some(c), _) => format!("exit_code={c}"),
-        (None, Some(s)) => format!("signal={s}"),
-        (None, None) => "unknown_exit".to_owned(),
     }
 }
 
@@ -661,25 +664,35 @@ mod classify_tests {
     }
 
     #[test]
-    fn crashed_with_exit_code_intentional_false_fails_with_code_detail() {
+    fn crashed_with_exit_code_intentional_false_fails_with_typed_reason() {
         let kind = ExitKind::Crashed { exit_code: Some(137), signal: None };
         let (state, reason) = classify(&kind, false);
         assert_eq!(state, AllocState::Failed);
-        let TransitionReason::DriverInternalError { detail } = reason else {
-            panic!("expected DriverInternalError, got {reason:?}");
-        };
-        assert_eq!(detail, "exit_code=137");
+        assert_eq!(
+            reason,
+            TransitionReason::WorkloadCrashedImmediately {
+                exit_code: Some(137),
+                signal: None,
+                stderr_tail: None,
+            },
+            "crashed with exit_code=137 must emit WorkloadCrashedImmediately with typed fields",
+        );
     }
 
     #[test]
-    fn crashed_with_signal_intentional_false_fails_with_signal_detail() {
+    fn crashed_with_signal_intentional_false_fails_with_typed_reason() {
         let kind = ExitKind::Crashed { exit_code: None, signal: Some(9) };
         let (state, reason) = classify(&kind, false);
         assert_eq!(state, AllocState::Failed);
-        let TransitionReason::DriverInternalError { detail } = reason else {
-            panic!("expected DriverInternalError, got {reason:?}");
-        };
-        assert_eq!(detail, "signal=9");
+        assert_eq!(
+            reason,
+            TransitionReason::WorkloadCrashedImmediately {
+                exit_code: None,
+                signal: Some(9u8),
+                stderr_tail: None,
+            },
+            "crashed with signal=9 must emit WorkloadCrashedImmediately with typed signal field",
+        );
     }
 
     #[test]
@@ -693,14 +706,19 @@ mod classify_tests {
     }
 
     #[test]
-    fn crashed_with_no_code_or_signal_fails_with_unknown_detail() {
+    fn crashed_with_no_code_or_signal_fails_with_typed_reason() {
         let kind = ExitKind::Crashed { exit_code: None, signal: None };
         let (state, reason) = classify(&kind, false);
         assert_eq!(state, AllocState::Failed);
-        let TransitionReason::DriverInternalError { detail } = reason else {
-            panic!("expected DriverInternalError, got {reason:?}");
-        };
-        assert_eq!(detail, "unknown_exit");
+        assert_eq!(
+            reason,
+            TransitionReason::WorkloadCrashedImmediately {
+                exit_code: None,
+                signal: None,
+                stderr_tail: None,
+            },
+            "crashed with no exit code or signal must emit WorkloadCrashedImmediately with all None fields",
+        );
     }
 }
 
