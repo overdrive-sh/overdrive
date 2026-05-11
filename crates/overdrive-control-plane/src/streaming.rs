@@ -658,11 +658,14 @@ pub fn build_workload_stream(
                             // "no kernel exit observed" (no genuine
                             // workload exit code is available — the
                             // bus closed before we saw one).
+                            let attempts = best_effort_attempt_count(
+                                &*obs, &runtime, &workload_id,
+                            ).await;
                             let terminal = JobSubmitEvent::Failed {
                                 exit_code: -1,
                                 duration: String::new(),
-                                attempts: 1,
-                                max_attempts: 1,
+                                attempts,
+                                max_attempts: attempts,
                                 stderr_tail: Some(
                                     "lifecycle channel closed before terminal".to_string(),
                                 ),
@@ -677,11 +680,14 @@ pub fn build_workload_stream(
                 }
                 () = &mut cap_future => {
                     let after_seconds = u32::try_from(cap.as_secs()).unwrap_or(u32::MAX);
+                    let attempts = best_effort_attempt_count(
+                        &*obs, &runtime, &workload_id,
+                    ).await;
                     let terminal = JobSubmitEvent::Failed {
                         exit_code: -1,
                         duration: format!("{after_seconds}s"),
-                        attempts: 1,
-                        max_attempts: 1,
+                        attempts,
+                        max_attempts: attempts,
                         stderr_tail: Some(format!(
                             "did not converge in {after_seconds}s"
                         )),
@@ -875,6 +881,30 @@ async fn workload_terminal_from_snapshot(
             max_attempts: attempt_index,
             stderr_tail,
         },
+    })
+}
+
+/// Best-effort attempt count for a workload from the obs store + runtime
+/// view. Used by degenerate terminal arms (Closed, cap-timer) that have
+/// no [`LifecycleEvent`] to extract an `alloc_id` from.
+///
+/// Follows the same obs-store → runtime query as
+/// [`workload_terminal_from_snapshot`]; returns 1 when no observation
+/// row or view entry exists (preserving the original hardcoded default
+/// for fresh jobs that never completed an attempt).
+async fn best_effort_attempt_count(
+    obs: &dyn ObservationStore,
+    runtime: &ReconcilerRuntime,
+    workload_id: &WorkloadId,
+) -> u32 {
+    let Ok(rows) = obs.alloc_status_rows().await else { return 1 };
+    let latest = rows
+        .into_iter()
+        .filter(|r| r.workload_id == *workload_id)
+        .max_by_key(|r| r.updated_at.counter);
+    latest.map_or(1, |row| {
+        let target = TargetResource::new(&format!("job/{workload_id}")).ok();
+        target.as_ref().map_or(1, |t| runtime.restart_status_for_alloc(t, &row.alloc_id).0)
     })
 }
 
@@ -1079,7 +1109,7 @@ mod tests {
     use crate::reconciler_runtime::ReconcilerRuntime;
 
     use super::{
-        JobSubmitEvent, check_terminal, workload_event_from_terminal,
+        JobSubmitEvent, best_effort_attempt_count, check_terminal, workload_event_from_terminal,
         workload_terminal_from_snapshot,
     };
 
@@ -1517,5 +1547,52 @@ mod tests {
             }
             other => panic!("expected Some(Succeeded), got {other:?}"),
         }
+    }
+
+    // ── best_effort_attempt_count ────────────────────────────────────
+
+    #[tokio::test]
+    async fn best_effort_attempt_count_returns_view_restart_count() {
+        let alloc_id = AllocationId::from_str("alloc-0").expect("alloc id");
+        let wl_id = WorkloadId::from_str("job-0").expect("wl id");
+        let tmp = tempfile::TempDir::new().expect("tmpdir");
+        let runtime = make_runtime_with_restart_count(&tmp, &wl_id, &alloc_id, 3).await;
+        let node = NodeId::from_str("node-a").expect("node id");
+        let obs = Arc::new(SimObservationStore::single_peer(node.clone(), 0));
+
+        let row = make_alloc_status_row(&alloc_id, &wl_id, &node, None);
+        obs.write(ObservationRow::AllocStatus(row)).await.expect("write");
+
+        let count = best_effort_attempt_count(&*obs, &runtime, &wl_id).await;
+        assert_eq!(count, 4, "3 restarts → attempt_index 4");
+    }
+
+    #[tokio::test]
+    async fn best_effort_attempt_count_defaults_to_one_without_obs_rows() {
+        let wl_id = WorkloadId::from_str("job-0").expect("wl id");
+        let tmp = tempfile::TempDir::new().expect("tmpdir");
+        let runtime = make_runtime(&tmp);
+        let node = NodeId::from_str("node-a").expect("node id");
+        let obs = Arc::new(SimObservationStore::single_peer(node, 0));
+
+        let count = best_effort_attempt_count(&*obs, &runtime, &wl_id).await;
+        assert_eq!(count, 1, "no obs rows → default 1");
+    }
+
+    #[tokio::test]
+    async fn best_effort_attempt_count_defaults_to_one_for_unrelated_workload() {
+        let alloc_id = AllocationId::from_str("alloc-0").expect("alloc id");
+        let wl_id = WorkloadId::from_str("job-0").expect("wl id");
+        let other_wl = WorkloadId::from_str("job-other").expect("other wl id");
+        let tmp = tempfile::TempDir::new().expect("tmpdir");
+        let runtime = make_runtime_with_restart_count(&tmp, &wl_id, &alloc_id, 5).await;
+        let node = NodeId::from_str("node-a").expect("node id");
+        let obs = Arc::new(SimObservationStore::single_peer(node.clone(), 0));
+
+        let row = make_alloc_status_row(&alloc_id, &wl_id, &node, None);
+        obs.write(ObservationRow::AllocStatus(row)).await.expect("write");
+
+        let count = best_effort_attempt_count(&*obs, &runtime, &other_wl).await;
+        assert_eq!(count, 1, "no obs rows for queried workload → default 1");
     }
 }
