@@ -531,11 +531,12 @@ pub fn build_workload_accepted(
 /// - **Postconditions**: the returned stream emits `Accepted` first,
 ///   then zero or more intermediate variants
 ///   (`Pending` / `Running` / `AttemptFailed`), and exactly one
-///   terminal variant (`Succeeded` / `Failed`) before closing.
+///   terminal variant (`Succeeded` / `Failed` / `Stopped`) before closing.
 /// - **Edge cases**:
-///   - Operator-stop converged terminal → `Succeeded { exit_code: 0 }`
-///     (clean stop is the Job-kind success path; preserves the existing
-///     `ConvergedStopped → exit code 0` semantics from the legacy lane).
+///   - Operator-stop converged terminal → `Stopped { stopped_by, exit_code }`
+///     (operator-initiated stop is its own terminal variant, distinct from
+///     `Succeeded`; `stopped_by` names the operator, `exit_code` reflects
+///     the actual workload exit code at the time of stop).
 ///   - Cap timer expiry → `Failed { exit_code: -1 }` (no kernel exit
 ///     observed within the wall-clock budget — distinguished from a
 ///     genuine non-zero exit by the sentinel `-1`).
@@ -545,9 +546,9 @@ pub fn build_workload_accepted(
 ///   - Pre-subscribe race / `Lagged(_)` → snapshot-and-classify the
 ///     latest LWW-winner row; emit the matching terminal if reached.
 /// - **Observable invariants**: every Job-kind submit produces exactly
-///   ONE terminal variant (`Succeeded` or `Failed`) on the wire; the
-///   stream never closes silently. The CLI process exit code equals
-///   the terminal `exit_code` field per KPI K1 honesty contract.
+///   ONE terminal variant (`Succeeded`, `Failed`, or `Stopped`) on the
+///   wire; the stream never closes silently. The CLI process exit code
+///   equals the terminal `exit_code` field per KPI K1 honesty contract.
 pub fn build_workload_stream(
     state: AppState,
     workload_id: WorkloadId,
@@ -723,7 +724,7 @@ pub async fn workload_event_from_lifecycle(
     event: &LifecycleEvent,
 ) -> Option<JobSubmitEvent> {
     if let Some(cond) = &event.terminal {
-        return Some(workload_event_from_terminal(obs, workload_id, event, cond).await);
+        return Some(workload_event_from_terminal(obs, event, cond).await);
     }
     match event.to {
         AllocStateWire::Pending => Some(JobSubmitEvent::Pending),
@@ -781,7 +782,6 @@ pub async fn workload_event_from_lifecycle(
 /// the workload's stderr verbatim.
 async fn workload_event_from_terminal(
     obs: &dyn ObservationStore,
-    _job_id: &WorkloadId,
     event: &LifecycleEvent,
     cond: &TerminalCondition,
 ) -> JobSubmitEvent {
@@ -1000,7 +1000,13 @@ pub enum ServiceSubmitEvent {
 // long-running convergence loop yet — that lands when GH #166 wires
 // firing semantics through the reconciler.
 
-/// Streaming events emitted by the Schedule submit sub-path.
+/// Wire-shape declaration for the Schedule submit streaming sub-path.
+///
+/// **Not currently emitted on any server code path.** `handlers.rs`
+/// routes `WorkloadKind::Schedule` through the legacy `build_stream`
+/// path, which emits [`SubmitEvent`]-shaped NDJSON. This enum is the
+/// forward-declared wire shape for when that dispatch is wired up;
+/// tracked at GH #166.
 ///
 /// Per ADR-0047 §3 / [D7]: two variants, both emitted synchronously
 /// at submit time. `Accepted` mirrors the existing
@@ -1145,7 +1151,7 @@ mod tests {
         let event = make_lifecycle_event(&alloc_id, &wl_id);
         let cond = TerminalCondition::Completed { exit_code: 0 };
 
-        let result = workload_event_from_terminal(&*obs, &wl_id, &event, &cond).await;
+        let result = workload_event_from_terminal(&*obs, &event, &cond).await;
 
         match result {
             JobSubmitEvent::Succeeded { exit_code, attempts, .. } => {
@@ -1165,7 +1171,7 @@ mod tests {
         let event = make_lifecycle_event(&alloc_id, &wl_id);
         let cond = TerminalCondition::Failed { exit_code: 42 };
 
-        let result = workload_event_from_terminal(&*obs, &wl_id, &event, &cond).await;
+        let result = workload_event_from_terminal(&*obs, &event, &cond).await;
 
         match result {
             JobSubmitEvent::Failed { exit_code, attempts, max_attempts, .. } => {
@@ -1186,7 +1192,7 @@ mod tests {
         let event = make_lifecycle_event(&alloc_id, &wl_id);
         let cond = TerminalCondition::Stopped { by: StoppedBy::Operator };
 
-        let result = workload_event_from_terminal(&*obs, &wl_id, &event, &cond).await;
+        let result = workload_event_from_terminal(&*obs, &event, &cond).await;
 
         match result {
             JobSubmitEvent::Stopped { stopped_by, attempts, .. } => {
@@ -1206,7 +1212,7 @@ mod tests {
         let event = make_lifecycle_event(&alloc_id, &wl_id);
         let cond = TerminalCondition::BackoffExhausted { attempts: 5 };
 
-        let result = workload_event_from_terminal(&*obs, &wl_id, &event, &cond).await;
+        let result = workload_event_from_terminal(&*obs, &event, &cond).await;
 
         match result {
             JobSubmitEvent::Failed { exit_code, attempts, max_attempts, .. } => {
