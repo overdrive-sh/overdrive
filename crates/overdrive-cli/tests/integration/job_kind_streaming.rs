@@ -151,18 +151,20 @@ async fn s_02_05_anti_scenario_no_is_running_with() {
         summary = output.summary,
     );
 
-    // Honesty assertion (subset of S-02-01): a Job that exits 0
-    // renders 'Job 'happy-job' succeeded.' so the operator sees
-    // run-to-completion vocabulary, not 'is running'.
+    // Honesty assertion: an operator-stopped Job renders as "stopped
+    // by operator", not "succeeded" (which would be a false-positive —
+    // fixed in 064a8cc3). The explicit stop is the terminal trigger in
+    // this test; natural exit-0 succeeded rendering is covered by
+    // separate exit-code-honesty tests.
     assert!(
-        output.summary.contains("succeeded.") || output.summary.contains("Succeeded"),
-        "S-02-01: a Job exiting 0 must render a succeeded verdict; got: {summary:?}",
+        output.summary.contains("stopped by operator"),
+        "An operator-stopped Job must render 'stopped by operator'; got: {summary:?}",
         summary = output.summary,
     );
 
-    // CLI process exit code (mapping to std::process::exit) must
-    // equal 0 for Succeeded.
-    assert_eq!(output.exit_code, 0, "S-02-01: Job exit 0 maps to CLI exit 0");
+    // CLI process exit code for an operator-stopped Job is 130
+    // (SIGINT-equivalent), not 0 (which would falsely signal success).
+    assert_eq!(output.exit_code, 130, "operator-stopped Job maps to CLI exit 130");
 
     drop(handle);
 }
