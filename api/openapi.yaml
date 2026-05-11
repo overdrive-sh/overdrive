@@ -1641,11 +1641,15 @@ components:
             - out_of_memory
       - type: object
         description: |-
-          Workload exited within the post-spawn settle window. Requires
-          Phase 2 `ExecDriver` post-spawn `wait()` + classification;
-          defined now for wire-shape forward-compatibility. The
-          `exit_code` field on `AllocStatusRowBody` is the snapshot
-          counterpart (also Phase-2-populated).
+          Workload exited with a non-zero status or signal within the
+          post-spawn settle window. Emitted by the `ExitObserver` when
+          `ExitKind::Crashed` is received from the driver — `ExecDriver`
+          already performs `child.wait()` in Phase 1 and that is exactly
+          how `ExitKind::Crashed` is produced. The `exit_code` field
+          carries the process exit status (`None` for signal-only exits);
+          `signal` carries the signal number cast to `u8` (`None` when
+          absent); `stderr_tail` carries the last few lines of stderr
+          captured by the driver's ring buffer.
         required:
         - data
         - kind
@@ -1653,11 +1657,15 @@ components:
           data:
             type: object
             description: |-
-              Workload exited within the post-spawn settle window. Requires
-              Phase 2 `ExecDriver` post-spawn `wait()` + classification;
-              defined now for wire-shape forward-compatibility. The
-              `exit_code` field on `AllocStatusRowBody` is the snapshot
-              counterpart (also Phase-2-populated).
+              Workload exited with a non-zero status or signal within the
+              post-spawn settle window. Emitted by the `ExitObserver` when
+              `ExitKind::Crashed` is received from the driver — `ExecDriver`
+              already performs `child.wait()` in Phase 1 and that is exactly
+              how `ExitKind::Crashed` is produced. The `exit_code` field
+              carries the process exit status (`None` for signal-only exits);
+              `signal` carries the signal number cast to `u8` (`None` when
+              absent); `stderr_tail` carries the last few lines of stderr
+              captured by the driver's ring buffer.
             properties:
               exit_code:
                 type:
@@ -1704,15 +1712,14 @@ components:
         | `Cancelled { by }` | cause | reconciler — operator stop intent observed | yes |
         | `NoCapacity { requested, free }` | cause | reconciler — scheduler returned `NoCapacity` | yes |
         | `OutOfMemory { peak_bytes, limit_bytes }` | cause | `ExecDriver` — cgroup OOM-killed | NO — Phase 2 |
-        | `WorkloadCrashedImmediately { exit_code, signal, stderr_tail }` | cause | `ExecDriver` — post-spawn exit-code observation | NO — Phase 2 |
+        | `WorkloadCrashedImmediately { exit_code, signal, stderr_tail }` | cause | `ExecDriver` — post-spawn exit-code observation | yes |
 
-        **Phase 2 emit-deferred variants**: `OutOfMemory` and
-        `WorkloadCrashedImmediately` require driver observability the Phase 1
-        `ExecDriver` does not have (cgroup OOM-killed event subscription;
-        post-spawn exit-code wait-and-classify). The variants are defined now
-        so the wire shape is forward-stable; the driver emits them in Phase 2.
-        This mirrors the `exit_code: Option<i32>` field on `AllocStatusRowBody`
-        (always `None` in Phase 1; populated in Phase 2 — see ADR-0033 §2).
+        **Phase 2 emit-deferred variants**: `OutOfMemory` requires cgroup-events
+        subscription not yet present in the Phase 1 `ExecDriver`; it is defined
+        now for wire-shape forward-compatibility and will be emitted in Phase 2.
+        `WorkloadCrashedImmediately` is emitted in Phase 1 — `ExecDriver` already
+        performs `child.wait()` and produces `ExitKind::Crashed`; the
+        `ExitObserver` maps that to this variant directly.
 
         **Cause-class payloads carry typed cause-specific data**, NOT a
         free-form `detail: String`. The previous state-class shape relied on
