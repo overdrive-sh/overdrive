@@ -36,10 +36,10 @@ mod acceptance {
     mod logical_timestamp_dominates;
 
     // phase-1-first-workload — branch-coverage tests pinning the
-    // `JobLifecycle::reconcile` decision points (Stop/Run/Restart).
+    // `WorkloadLifecycle::reconcile` decision points (Stop/Run/Restart).
     mod any_reconciler_dispatch;
     mod first_fit_place_branches;
-    mod job_lifecycle_reconcile_branches;
+    mod workload_lifecycle_reconcile_branches;
 
     // wire-exec-spec-end-to-end — operator-facing job spec carries
     // explicit `[exec]` block (command + args) and the projection
@@ -55,7 +55,7 @@ mod acceptance {
     // constructor surface; step 01-02 covers Display/FromStr/Serde
     // completeness + proptest roundtrips; step 02-01 wires it through
     // `TickContext.now_unix` + introduces the `backoff_for_attempt`
-    // const fn; subsequent steps wire it through `JobLifecycleView`.
+    // const fn; subsequent steps wire it through `WorkloadLifecycleView`.
     mod unix_instant_arithmetic;
     mod unix_instant_completeness;
 
@@ -65,14 +65,14 @@ mod acceptance {
     // core crate cannot build an `AppState` without circular deps).
     mod tick_context_now_unix;
 
-    // Step 02-02 — `JobLifecycleView` persists inputs
+    // Step 02-02 — `WorkloadLifecycleView` persists inputs
     // (`last_failure_seen_at: UnixInstant` is the canonical input;
     // a precomputed `Instant` deadline would have been a derived
     // value); deadline recomputed each tick from
     // `seen_at + backoff_for_attempt(restart_count)`. Restart-survival
     // idempotence is structural rather than coincidental — see
     // `.claude/rules/development.md` § "Persist inputs, not derived state".
-    mod job_lifecycle_recompute_deadline;
+    mod workload_lifecycle_recompute_deadline;
 
     // reconciler-memory-redb step 01-02 — `TerminalCondition` enum +
     // `AllocStatusRow.terminal` field (ADR-0037 prerequisite for the
@@ -87,14 +87,14 @@ mod acceptance {
     // and ADR-0036.
     mod collapsed_reconciler_trait;
 
-    // reconciler-memory-redb step 02-01 — `JobLifecycle::reconcile`
+    // reconciler-memory-redb step 02-01 — `WorkloadLifecycle::reconcile`
     // stamps `TerminalCondition` on the lifecycle-concluding `Action`
     // variants (`StopAllocation`, `FinalizeFailed`). Per ADR-0037 §4.
     // Property test asserts the terminal-decision logic is a pure
     // function of `(view.restart_counts, view.last_failure_seen_at,
-    // desired.desired_to_stop)` against the fixed JobLifecycle-internal
+    // desired.desired_to_stop)` against the fixed WorkloadLifecycle-internal
     // ceiling.
-    mod job_lifecycle_terminal_decision;
+    mod workload_lifecycle_terminal_decision;
 
     // phase-2-xdp-service-map step 08-02 (Slice 08; ASR-2.2-04) —
     // `ServiceMapHydrator::reconcile` decision tree. Pins the
@@ -132,10 +132,10 @@ mod acceptance {
     mod transition_reason_roundtrip;
 
     // workload-kind-discriminator Slice 02b (step 02-04) — Job-vs-Service
-    // branching in `JobLifecycle::reconcile` for natural-exit terminals.
+    // branching in `WorkloadLifecycle::reconcile` for natural-exit terminals.
     // Job kind emits typed `TerminalCondition::Completed { exit_code }` /
     // `Failed { exit_code }`; Service kind preserves existing
     // restart-budget semantics. Per ADR-0037 Amendment 2026-05-10 +
     // ADR-0047 §1.
-    mod job_lifecycle_natural_exit;
+    mod workload_lifecycle_natural_exit;
 }

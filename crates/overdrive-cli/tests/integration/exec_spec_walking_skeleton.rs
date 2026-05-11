@@ -18,7 +18,7 @@
 //! Job aggregate                      (carries command + args)
 //!     │ POST /v1/jobs (real reqwest + rustls)
 //!     ▼
-//! handlers::submit_job               (server-side defence-in-depth)
+//! handlers::submit_workload               (server-side defence-in-depth)
 //!     │ rkyv::to_bytes
 //!     ▼
 //! LocalIntentStore (real redb)
@@ -33,7 +33,7 @@
 //! convergence-loop assertions) is per
 //! `docs/feature/wire-exec-spec-end-to-end/distill/walking-skeleton.md`
 //! § *What the WS does NOT assert*. The driver-side flow is exercised
-//! by the existing `tests/integration/job_lifecycle/submit_to_running.rs`
+//! by the existing `tests/integration/workload_lifecycle/submit_to_running.rs`
 //! suite under `--features integration-tests`.
 
 use std::net::SocketAddr;
@@ -44,7 +44,7 @@ use overdrive_cli::commands::job::SubmitArgs;
 use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
 use overdrive_control_plane::api::IdempotencyOutcome;
 use overdrive_core::aggregate::{IntentKey, Job, JobSpecInput, WorkloadDriver};
-use overdrive_core::id::{ContentHash, JobId};
+use overdrive_core::id::{ContentHash, WorkloadId};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
@@ -97,7 +97,7 @@ fn write_toml(dir: &Path, name: &str, body: &str) -> PathBuf {
 }
 
 /// Locally compute the canonical `spec_digest` for the new wire shape.
-/// Mirrors the server-side computation in `handlers::submit_job` —
+/// Mirrors the server-side computation in `handlers::submit_workload` —
 /// any drift indicates the rkyv canonicalisation lane diverged.
 fn local_spec_digest_new_shape(spec_toml: &str) -> String {
     let parsed: JobSpecInput = toml::from_str(spec_toml).expect("parse new-shape TOML");
@@ -121,7 +121,7 @@ async fn walking_skeleton_submit_with_exec_block_returns_inserted_and_persists_c
     .expect("job::submit must accept the new-shape spec end-to-end");
 
     // Phase 2 — assert the client-visible outcome.
-    assert_eq!(submit_output.job_id, "payments", "echoed job_id must equal the spec id");
+    assert_eq!(submit_output.workload_id, "payments", "echoed workload_id must equal the spec id");
     assert_eq!(
         submit_output.intent_key, "jobs/payments",
         "intent_key must derive via IntentKey::for_job; SSOT is overdrive_core",
@@ -171,8 +171,8 @@ async fn walking_skeleton_submit_with_exec_block_returns_inserted_and_persists_c
     // destructure goes through `WorkloadDriver::Exec(_)` first.
     let store = LocalIntentStore::open(intent_redb_path(server_tmp.path()))
         .expect("re-open intent.redb for back-door read");
-    let job_id = JobId::from_str("payments").expect("JobId::from_str(\"payments\")");
-    let key = IntentKey::for_job(&job_id);
+    let workload_id = WorkloadId::from_str("payments").expect("WorkloadId::from_str(\"payments\")");
+    let key = IntentKey::for_job(&workload_id);
     let stored = store.get(key.as_bytes()).await.expect("back-door IntentStore::get must succeed");
     let bytes = stored.expect(
         "after a successful submit the intent key `jobs/payments` MUST be \
@@ -181,7 +181,7 @@ async fn walking_skeleton_submit_with_exec_block_returns_inserted_and_persists_c
     );
 
     // rkyv access + deserialise — same lane the server uses on read
-    // (see `handlers::describe_job` for the canonical pattern).
+    // (see `handlers::describe_workload` for the canonical pattern).
     let archived = rkyv::access::<rkyv::Archived<Job>, rkyv::rancor::Error>(&bytes)
         .expect("rkyv access of ArchivedJob from back-door read bytes");
     let job: Job = rkyv::deserialize::<Job, rkyv::rancor::Error>(archived)

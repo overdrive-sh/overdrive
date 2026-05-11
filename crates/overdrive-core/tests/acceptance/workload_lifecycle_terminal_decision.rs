@@ -1,4 +1,4 @@
-//! ADR-0037 §4 — `JobLifecycle::reconcile` stamps a typed
+//! ADR-0037 §4 — `WorkloadLifecycle::reconcile` stamps a typed
 //! `TerminalCondition` on the lifecycle-concluding `Action` variants.
 //!
 //! Per `docs/feature/reconciler-memory-redb/deliver/roadmap.json` step 02-01:
@@ -18,7 +18,7 @@
 //! - Every other transition (Pending → Running, Running → Failed with
 //!   budget remaining) emits `terminal: None`.
 //!
-//! `RESTART_BACKOFF_CEILING` is hardcoded JobLifecycle-internal policy
+//! `RESTART_BACKOFF_CEILING` is hardcoded WorkloadLifecycle-internal policy
 //! per AC#5 — NOT exported as a property-test input. The proptest
 //! sweeps `(restart_counts, last_failure_seen_at, desired_to_stop)`
 //! against the *fixed* internal ceiling and asserts terminal is
@@ -36,10 +36,10 @@ use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver, WorkloadKind};
-use overdrive_core::id::{AllocationId, JobId, NodeId, Region};
+use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
 use overdrive_core::reconciler::{
-    Action, JobLifecycle, JobLifecycleState, JobLifecycleView, RESTART_BACKOFF_CEILING, Reconciler,
-    TickContext,
+    Action, RESTART_BACKOFF_CEILING, Reconciler, TickContext, WorkloadLifecycle,
+    WorkloadLifecycleState, WorkloadLifecycleView,
 };
 use overdrive_core::traits::driver::Resources;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
@@ -48,15 +48,15 @@ use proptest::prelude::*;
 
 // -------------------------------------------------------------------
 // Fixtures (mirror the shape used in
-// `tests/acceptance/job_lifecycle_reconcile_branches.rs`)
+// `tests/acceptance/workload_lifecycle_reconcile_branches.rs`)
 // -------------------------------------------------------------------
 
 fn nid(s: &str) -> NodeId {
     NodeId::new(s).expect("valid NodeId")
 }
 
-fn jid(s: &str) -> JobId {
-    JobId::new(s).expect("valid JobId")
+fn jid(s: &str) -> WorkloadId {
+    WorkloadId::new(s).expect("valid WorkloadId")
 }
 
 fn aid(s: &str) -> AllocationId {
@@ -86,13 +86,13 @@ fn make_job(id: &str) -> Job {
 
 fn alloc_with_state(
     alloc_id: &str,
-    job_id: &str,
+    workload_id: &str,
     node_id: &str,
     state: AllocState,
 ) -> AllocStatusRow {
     AllocStatusRow {
         alloc_id: aid(alloc_id),
-        job_id: jid(job_id),
+        workload_id: jid(workload_id),
         node_id: nid(node_id),
         state,
         updated_at: LogicalTimestamp { counter: 1, writer: nid(node_id) },
@@ -135,7 +135,7 @@ fn fresh_tick(now: Instant, now_unix: UnixInstant) -> TickContext {
 /// emitted `Action::FinalizeFailed`. Pre-CEILING the same restart
 /// branch emits `Action::RestartAllocation` with `terminal: None`.
 #[test]
-fn job_lifecycle_stamps_backoff_exhausted_terminal_when_attempts_reach_ceiling() {
+fn workload_lifecycle_stamps_backoff_exhausted_terminal_when_attempts_reach_ceiling() {
     // attempts == ceiling: the reconciler must emit the synthetic
     // FinalizeFailed action carrying terminal Some(BackoffExhausted).
     let allocations = one_alloc_map(
@@ -143,14 +143,14 @@ fn job_lifecycle_stamps_backoff_exhausted_terminal_when_attempts_reach_ceiling()
         alloc_with_state("alloc-payments-0", "payments", "local", AllocState::Failed),
     );
     let nodes = one_node_map("local");
-    let desired = JobLifecycleState {
+    let desired = WorkloadLifecycleState {
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
     };
-    let actual = JobLifecycleState {
+    let actual = WorkloadLifecycleState {
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
@@ -159,10 +159,10 @@ fn job_lifecycle_stamps_backoff_exhausted_terminal_when_attempts_reach_ceiling()
     };
     let mut restart_counts = BTreeMap::new();
     restart_counts.insert(aid("alloc-payments-0"), RESTART_BACKOFF_CEILING);
-    let view = JobLifecycleView { restart_counts, last_failure_seen_at: BTreeMap::new() };
+    let view = WorkloadLifecycleView { restart_counts, last_failure_seen_at: BTreeMap::new() };
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
-    let r = JobLifecycle::canonical();
+    let r = WorkloadLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
 
     assert_eq!(actions.len(), 1, "at-ceiling must emit one FinalizeFailed action; got {actions:?}");
@@ -186,30 +186,30 @@ fn job_lifecycle_stamps_backoff_exhausted_terminal_when_attempts_reach_ceiling()
 /// on the action — the action shim writes that value onto the row in
 /// step 02-02.
 #[test]
-fn job_lifecycle_stamps_stopped_terminal_when_operator_stop_converges() {
+fn workload_lifecycle_stamps_stopped_terminal_when_operator_stop_converges() {
     let nodes = one_node_map("local");
     let allocations = one_alloc_map(
         "alloc-payments-0",
         alloc_with_state("alloc-payments-0", "payments", "local", AllocState::Running),
     );
-    let desired = JobLifecycleState {
+    let desired = WorkloadLifecycleState {
         job: Some(make_job("payments")),
         desired_to_stop: true,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
     };
-    let actual = JobLifecycleState {
+    let actual = WorkloadLifecycleState {
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
         allocations,
         workload_kind: WorkloadKind::default(),
     };
-    let view = JobLifecycleView::default();
+    let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
-    let r = JobLifecycle::canonical();
+    let r = WorkloadLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
 
     assert_eq!(actions.len(), 1, "stop branch with one Running alloc emits one StopAllocation");
@@ -229,26 +229,26 @@ fn job_lifecycle_stamps_stopped_terminal_when_operator_stop_converges() {
 /// AC#4a — Pending → Running (fresh-schedule) emits `StartAllocation`
 /// with no terminal claim.
 #[test]
-fn job_lifecycle_emits_no_terminal_for_pending_to_running() {
+fn workload_lifecycle_emits_no_terminal_for_pending_to_running() {
     let nodes = one_node_map("local");
-    let desired = JobLifecycleState {
+    let desired = WorkloadLifecycleState {
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
     };
-    let actual = JobLifecycleState {
+    let actual = WorkloadLifecycleState {
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
         allocations: empty_alloc_map(),
         workload_kind: WorkloadKind::default(),
     };
-    let view = JobLifecycleView::default();
+    let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
-    let r = JobLifecycle::canonical();
+    let r = WorkloadLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
 
     assert_eq!(actions.len(), 1, "fresh schedule must emit one StartAllocation");
@@ -270,20 +270,20 @@ fn job_lifecycle_emits_no_terminal_for_pending_to_running() {
 /// emits `RestartAllocation`. By construction `RestartAllocation` is
 /// never a terminal moment (the reconciler is going to try again).
 #[test]
-fn job_lifecycle_emits_no_terminal_when_failed_with_budget_remaining() {
+fn workload_lifecycle_emits_no_terminal_when_failed_with_budget_remaining() {
     let allocations = one_alloc_map(
         "alloc-payments-0",
         alloc_with_state("alloc-payments-0", "payments", "local", AllocState::Failed),
     );
     let nodes = one_node_map("local");
-    let desired = JobLifecycleState {
+    let desired = WorkloadLifecycleState {
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
     };
-    let actual = JobLifecycleState {
+    let actual = WorkloadLifecycleState {
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
@@ -293,10 +293,10 @@ fn job_lifecycle_emits_no_terminal_when_failed_with_budget_remaining() {
     let mut restart_counts = BTreeMap::new();
     // Budget remaining: attempts < ceiling.
     restart_counts.insert(aid("alloc-payments-0"), 0);
-    let view = JobLifecycleView { restart_counts, last_failure_seen_at: BTreeMap::new() };
+    let view = WorkloadLifecycleView { restart_counts, last_failure_seen_at: BTreeMap::new() };
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
-    let r = JobLifecycle::canonical();
+    let r = WorkloadLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
 
     assert_eq!(actions.len(), 1, "Failed-with-budget must emit one RestartAllocation");
@@ -316,14 +316,14 @@ fn job_lifecycle_emits_no_terminal_when_failed_with_budget_remaining() {
 // Property test (AC #5)
 // -------------------------------------------------------------------
 
-// AC#5 — `JobLifecycleTerminalIsPureFunctionOfViewInputs`.
+// AC#5 — `WorkloadLifecycleTerminalIsPureFunctionOfViewInputs`.
 //
 // The reconcile's terminal-decision logic depends ONLY on:
 // - `view.restart_counts` (max value consumed)
 // - `view.last_failure_seen_at`
 // - `desired_state.desired_to_stop` (operator signal)
 //
-// `RESTART_BACKOFF_CEILING` is hardcoded JobLifecycle-internal policy
+// `RESTART_BACKOFF_CEILING` is hardcoded WorkloadLifecycle-internal policy
 // (NOT a property-test input); the test sweeps multiple `(attempts,
 // last_failure_seen_at, desired_to_stop)` triples against the fixed
 // ceiling and asserts terminal is deterministic for fixed inputs.
@@ -332,7 +332,7 @@ fn job_lifecycle_emits_no_terminal_when_failed_with_budget_remaining() {
 // in-process and allocation-free under `Bump`-style scratch.
 proptest! {
     #[test]
-    fn job_lifecycle_terminal_is_pure_function_of_view_inputs(
+    fn workload_lifecycle_terminal_is_pure_function_of_view_inputs(
         // Sweep across the ceiling boundary plus headroom either side
         // so both the BackoffExhausted (>=) and the budget-remaining
         // (<) branches are exercised.
@@ -359,14 +359,14 @@ proptest! {
             "alloc-payments-0",
             alloc_with_state("alloc-payments-0", "payments", "local", alloc_state),
         );
-        let desired = JobLifecycleState {
+        let desired = WorkloadLifecycleState {
             job: Some(make_job("payments")),
             desired_to_stop,
             nodes: nodes.clone(),
             allocations: BTreeMap::new(),
                     workload_kind: WorkloadKind::default(),
         };
-        let actual = JobLifecycleState {
+        let actual = WorkloadLifecycleState {
             job: Some(make_job("payments")),
             desired_to_stop: false,
             nodes,
@@ -380,7 +380,7 @@ proptest! {
             aid("alloc-payments-0"),
             UnixInstant::from_unix_duration(Duration::from_secs(seen_at_secs)),
         );
-        let view = JobLifecycleView { restart_counts, last_failure_seen_at };
+        let view = WorkloadLifecycleView { restart_counts, last_failure_seen_at };
 
         // Use a tick well past any seen_at + backoff so the deadline
         // gate never blocks the restart branch — ensures the
@@ -390,7 +390,7 @@ proptest! {
         let tick_a = fresh_tick(now, now_unix);
         let tick_b = fresh_tick(now, now_unix);
 
-        let r = JobLifecycle::canonical();
+        let r = WorkloadLifecycle::canonical();
         let (actions_a, _va) = r.reconcile(&desired, &actual, &view, &tick_a);
         let (actions_b, _vb) = r.reconcile(&desired, &actual, &view, &tick_b);
 

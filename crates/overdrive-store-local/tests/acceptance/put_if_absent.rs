@@ -1,6 +1,6 @@
 //! Acceptance scenarios for `IntentStore::put_if_absent` against
 //! `LocalIntentStore` — the atomic compare-and-set primitive that the
-//! control-plane `submit_job` handler relies on to close the TOCTOU
+//! control-plane `submit_workload` handler relies on to close the TOCTOU
 //! race between idempotent re-submit and conflicting-spec detection.
 //!
 //! Per ADR-0020 (drop `commit_index` from Phase 1) the `PutOutcome`

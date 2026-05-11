@@ -13,7 +13,9 @@
 use std::net::SocketAddr;
 use std::time::Duration;
 
-use overdrive_control_plane::api::{IdempotencyOutcome, SubmitJobRequest, SubmitJobResponse};
+use overdrive_control_plane::api::{
+    IdempotencyOutcome, SubmitWorkloadRequest, SubmitWorkloadResponse,
+};
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
 use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
 use serde::Deserialize;
@@ -81,10 +83,10 @@ fn payments_spec() -> JobSpecInput {
 
 /// Local mirror of the wire shape `POST /v1/jobs/<id>/stop` returns.
 /// Defined here in the test to pin the contract — the production type
-/// lives in `overdrive_control_plane::api` (`StopJobResponse`).
+/// lives in `overdrive_control_plane::api` (`StopWorkloadResponse`).
 #[derive(Debug, Deserialize)]
-struct StopJobResponseBody {
-    job_id: String,
+struct StopWorkloadResponseBody {
+    workload_id: String,
     outcome: String,
 }
 
@@ -98,27 +100,28 @@ async fn stop_on_already_stopped_job_returns_already_stopped_outcome() {
     // Submit the job first.
     let submit_resp = client
         .post(&submit_url)
-        .json(&SubmitJobRequest { spec: payments_spec(), workload_kind: None })
+        .json(&SubmitWorkloadRequest { spec: payments_spec(), workload_kind: None })
         .send()
         .await
         .expect("POST /v1/jobs");
     assert_eq!(submit_resp.status(), reqwest::StatusCode::OK);
-    let submit_body: SubmitJobResponse = submit_resp.json().await.expect("decode submit");
+    let submit_body: SubmitWorkloadResponse = submit_resp.json().await.expect("decode submit");
     assert_eq!(submit_body.outcome, IdempotencyOutcome::Inserted);
 
     // First stop — must succeed with outcome=stopped.
     let resp_first = client.post(&stop_url).send().await.expect("first stop");
     assert_eq!(resp_first.status(), reqwest::StatusCode::OK);
-    let body_first: StopJobResponseBody = resp_first.json().await.expect("decode first stop body");
-    assert_eq!(body_first.job_id, "payments");
+    let body_first: StopWorkloadResponseBody =
+        resp_first.json().await.expect("decode first stop body");
+    assert_eq!(body_first.workload_id, "payments");
     assert_eq!(body_first.outcome, "stopped", "first stop must report outcome=stopped");
 
     // Second stop — must succeed with outcome=already_stopped.
     let resp_second = client.post(&stop_url).send().await.expect("second stop");
     assert_eq!(resp_second.status(), reqwest::StatusCode::OK);
-    let body_second: StopJobResponseBody =
+    let body_second: StopWorkloadResponseBody =
         resp_second.json().await.expect("decode second stop body");
-    assert_eq!(body_second.job_id, "payments");
+    assert_eq!(body_second.workload_id, "payments");
     assert_eq!(
         body_second.outcome, "already_stopped",
         "second stop must report outcome=already_stopped"

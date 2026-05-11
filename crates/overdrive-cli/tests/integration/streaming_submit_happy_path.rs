@@ -99,7 +99,7 @@ async fn streaming_submit_against_real_bin_sleep_converges_running_and_exits_0()
     // the load-bearing wiring witness. `outcome` is `Inserted` for a
     // fresh submit per ADR-0020.
     assert_eq!(output.outcome, IdempotencyOutcome::Inserted);
-    assert_eq!(output.job_id, "sleeper");
+    assert_eq!(output.workload_id, "sleeper");
     assert_eq!(output.intent_key, "jobs/sleeper");
 
     // Spec digest is the canonical 64-char SHA-256 lowercase-hex form.

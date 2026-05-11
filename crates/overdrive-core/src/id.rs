@@ -172,8 +172,8 @@ macro_rules! define_label_newtype {
 }
 
 define_label_newtype!(
-    /// Identifier for a submitted [`Job`](super) spec.
-    JobId, "JobId"
+    /// Identifier for a submitted workload (Job, Service, or Schedule).
+    WorkloadId, "WorkloadId"
 );
 define_label_newtype!(
     /// Identifier for a scheduled [`Allocation`](super).
@@ -869,12 +869,12 @@ mod tests {
 
     #[test]
     fn label_rejects_empty() {
-        assert!(matches!(JobId::new(""), Err(IdParseError::Empty { .. })));
+        assert!(matches!(WorkloadId::new(""), Err(IdParseError::Empty { .. })));
     }
 
     #[test]
     fn label_is_case_insensitive_on_parse_and_lowercases_canonical() {
-        let parsed = JobId::new("Payments").unwrap();
+        let parsed = WorkloadId::new("Payments").unwrap();
         assert_eq!(parsed.as_str(), "payments");
     }
 
@@ -926,10 +926,10 @@ mod tests {
 
     #[test]
     fn serde_round_trips_job_id() {
-        let id = JobId::new("payments").unwrap();
+        let id = WorkloadId::new("payments").unwrap();
         let json = serde_json::to_string(&id).unwrap();
         assert_eq!(json, "\"payments\"");
-        let back: JobId = serde_json::from_str(&json).unwrap();
+        let back: WorkloadId = serde_json::from_str(&json).unwrap();
         assert_eq!(id, back);
     }
 }

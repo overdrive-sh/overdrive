@@ -19,7 +19,7 @@ use std::num::NonZeroU32;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::id::{AllocationId, InvestigationId, JobId, NodeId, PolicyId, Region};
+use crate::id::{AllocationId, InvestigationId, NodeId, PolicyId, Region, WorkloadId};
 use crate::traits::driver::Resources;
 
 // ---------------------------------------------------------------------------
@@ -105,7 +105,7 @@ pub enum AggregateError {
     rkyv::Deserialize,
 )]
 pub struct Job {
-    pub id: JobId,
+    pub id: WorkloadId,
     pub replicas: NonZeroU32,
     pub resources: Resources,
     /// Driver-class declaration carrying the operator's invocation
@@ -178,11 +178,11 @@ impl Job {
     ///
     /// Rejects zero replicas, zero-byte memory capacity, and (per
     /// ADR-0031 §4) empty / whitespace-only `exec.command`. Wraps
-    /// [`JobId`]'s `FromStr` error through `AggregateError::Id(..)` via
+    /// [`WorkloadId`]'s `FromStr` error through `AggregateError::Id(..)` via
     /// `#[from]`.
     pub fn from_spec(spec: JobSpecInput) -> Result<Self, AggregateError> {
         let JobSpecInput { id, replicas, resources, driver } = spec;
-        let id = JobId::new(&id)?;
+        let id = WorkloadId::new(&id)?;
         let replicas = NonZeroU32::new(replicas).ok_or_else(|| AggregateError::Validation {
             field: "replicas",
             message: format!("replica count must be non-zero; got {replicas}"),
@@ -297,13 +297,13 @@ pub struct ExecInput {
 }
 
 /// Reverse conversion — reconstruct the wire-shape `JobSpecInput` from a
-/// validated `Job` aggregate. Used by `describe_job` (ADR-0008 §GET
+/// validated `Job` aggregate. Used by `describe_workload` (ADR-0008 §GET
 /// /v1/jobs/{id}) to render the stored spec back onto the wire after
 /// rkyv access + deserialize.
 ///
 /// Non-fallible by construction: every field in `JobSpecInput` is a
 /// projection of a field already validated by `Job::from_spec`. Cloning
-/// the `id` is cheap — `JobId::to_string()` is an owned ASCII string.
+/// the `id` is cheap — `WorkloadId::to_string()` is an owned ASCII string.
 impl From<&Job> for JobSpecInput {
     fn from(job: &Job) -> Self {
         // Per ADR-0031 Amendment 1, project the intent-shape
@@ -404,7 +404,7 @@ pub struct NodeSpecInput {
 )]
 pub struct Allocation {
     pub id: AllocationId,
-    pub job_id: JobId,
+    pub workload_id: WorkloadId,
     pub node_id: NodeId,
 }
 
@@ -414,11 +414,11 @@ impl Allocation {
     /// parse via their `FromStr` impls, wrapping failures through
     /// `AggregateError::Id(..)`.
     pub fn new(spec: AllocationSpecInput) -> Result<Self, AggregateError> {
-        let AllocationSpecInput { id, job_id, node_id } = spec;
+        let AllocationSpecInput { id, workload_id, node_id } = spec;
         let id = AllocationId::new(&id)?;
-        let job_id = JobId::new(&job_id)?;
+        let workload_id = WorkloadId::new(&workload_id)?;
         let node_id = NodeId::new(&node_id)?;
-        Ok(Self { id, job_id, node_id })
+        Ok(Self { id, workload_id, node_id })
     }
 }
 
@@ -426,7 +426,7 @@ impl Allocation {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AllocationSpecInput {
     pub id: String,
-    pub job_id: String,
+    pub workload_id: String,
     pub node_id: String,
 }
 
@@ -461,7 +461,7 @@ pub struct Investigation {
 /// Every caller (CLI, handler, describe) routes through these functions —
 /// any drift-prone second copy in production code violates US-01's
 /// shared-artifacts-registry entry for `intent_key`. The string form is
-/// `jobs/<JobId::display>`, `nodes/<NodeId::display>`, or
+/// `jobs/<WorkloadId::display>`, `nodes/<NodeId::display>`, or
 /// `allocations/<AllocationId::display>` per ADR-0011.
 ///
 /// The wrapped bytes are always valid UTF-8 by construction — the `<id>`
@@ -471,9 +471,9 @@ pub struct Investigation {
 pub struct IntentKey(Vec<u8>);
 
 impl IntentKey {
-    /// Derive the intent key for a Job. Stable for any valid `JobId` per
+    /// Derive the intent key for a Job. Stable for any valid `WorkloadId` per
     /// US-01 AC (property test).
-    pub fn for_job(id: &JobId) -> Self {
+    pub fn for_job(id: &WorkloadId) -> Self {
         Self(format!("jobs/{id}").into_bytes())
     }
 
@@ -481,14 +481,14 @@ impl IntentKey {
     /// Per ADR-0027, the stop signal is a separate intent record so the
     /// original job spec stays readable for audit / rollback / debug.
     /// `IntentKey::for_job_stop(&id)` is byte-stable for any valid
-    /// `JobId`; the `/stop` suffix is fixed ASCII and the prefix `jobs/`
+    /// `WorkloadId`; the `/stop` suffix is fixed ASCII and the prefix `jobs/`
     /// reuses the canonical ASCII derivation from `for_job`.
-    pub fn for_job_stop(id: &JobId) -> Self {
+    pub fn for_job_stop(id: &WorkloadId) -> Self {
         Self(format!("jobs/{id}/stop").into_bytes())
     }
 
-    /// Derive the intent key for a Job's workload-kind discriminator —
-    /// `jobs/<id>/kind`.
+    /// Derive the intent key for a workload's kind discriminator —
+    /// `workloads/<id>/kind`.
     ///
     /// Per ADR-0047 §1 / slice 02 of `workload-kind-discriminator`: the
     /// workload-kind discriminator (`service` / `job` / `schedule`) is
@@ -496,7 +496,7 @@ impl IntentKey {
     /// aggregate. The streaming endpoint reads this key at submit-stream
     /// open time to dispatch on per-kind streaming-event sibling enums
     /// (ADR-0047 §3 [D7]); the reconciler runtime reads it at
-    /// `hydrate_desired` time to populate `JobLifecycleState.workload_kind`
+    /// `hydrate_desired` time to populate `WorkloadLifecycleState.workload_kind`
     /// so the natural-exit emission path (ADR-0037 Amendment 2026-05-10)
     /// fires for Job-kind workloads.
     ///
@@ -505,13 +505,13 @@ impl IntentKey {
     /// rkyv-archived enum) keeps the read path branch-free at every
     /// consumer and makes the file shape trivially debuggable with
     /// `bpftool` / `redb-cli` / hex dumps.
-    pub fn for_job_kind(id: &JobId) -> Self {
-        Self(format!("jobs/{id}/kind").into_bytes())
+    pub fn for_workload_kind(id: &WorkloadId) -> Self {
+        Self(format!("workloads/{id}/kind").into_bytes())
     }
 
     /// Derive the intent key for a Schedule. Stable for any valid
-    /// `JobId` per the same ASCII-only invariants that govern
-    /// [`Self::for_job`]. The string form is `schedules/<JobId::Display>`.
+    /// `WorkloadId` per the same ASCII-only invariants that govern
+    /// [`Self::for_job`]. The string form is `schedules/<WorkloadId::Display>`.
     ///
     /// Per ADR-0047 §1 / slice 05 of `workload-kind-discriminator`,
     /// Schedule is a third workload kind alongside Service and Job;
@@ -520,7 +520,7 @@ impl IntentKey {
     /// schedule-named-the-same remain distinct intents at the
     /// IntentStore level (no key collision, no "stop the schedule"
     /// shape stops the standalone job, ...).
-    pub fn for_schedule(id: &JobId) -> Self {
+    pub fn for_schedule(id: &WorkloadId) -> Self {
         Self(format!("schedules/{id}").into_bytes())
     }
 
@@ -540,7 +540,7 @@ impl IntentKey {
         &self.0
     }
 
-    /// Canonical string form — `jobs/<JobId>`, `nodes/<NodeId>`, or
+    /// Canonical string form — `jobs/<WorkloadId>`, `nodes/<NodeId>`, or
     /// `allocations/<AllocationId>`. Always succeeds: the byte buffer is
     /// UTF-8 by construction (see the struct-level docs).
     ///

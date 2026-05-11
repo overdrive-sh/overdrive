@@ -145,7 +145,7 @@ fn correlation_key_varies_when_any_component_of_the_triple_changes() {
 /// The canonical Phase 1 identifier set. Order matches the brief's
 /// enumeration; the scan sorts for stable diagnostics.
 const PHASE_1_NEWTYPES: &[&str] = &[
-    "JobId",
+    "WorkloadId",
     "NodeId",
     "AllocationId",
     "SpiffeId",
@@ -299,7 +299,7 @@ impl<'ast> Visit<'ast> for ContractScan {
 
     fn visit_item_macro(&mut self, node: &'ast ItemMacro) {
         // `id.rs` defines six label newtypes via the `define_label_newtype!`
-        // macro (JobId, NodeId, AllocationId, PolicyId, InvestigationId,
+        // macro (WorkloadId, NodeId, AllocationId, PolicyId, InvestigationId,
         // Region). The macro expands to a `pub struct <Name>(String);`
         // followed by the full completeness-contract impls. `syn::parse_file`
         // does NOT expand macros — it only tokenises them — so we parse

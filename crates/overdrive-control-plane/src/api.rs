@@ -43,12 +43,12 @@ use utoipa::ToSchema;
 /// `WorkloadKind::default`); set to `"job"` by the CLI's
 /// `submit_streaming_job` path so the server can dispatch on the
 /// per-kind streaming-event sibling enums (ADR-0047 §3 [D7]) and
-/// persist the discriminator at `IntentKey::for_job_kind` so the
+/// persist the discriminator at `IntentKey::for_workload_kind` so the
 /// reconciler runtime's `hydrate_desired` populates
-/// `JobLifecycleState.workload_kind` for the natural-exit emission
+/// `WorkloadLifecycleState.workload_kind` for the natural-exit emission
 /// path (ADR-0037 Amendment 2026-05-10).
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct SubmitJobRequest {
+pub struct SubmitWorkloadRequest {
     pub spec: JobSpecInput,
     /// Optional workload-kind discriminator. `"service"` (default),
     /// `"job"`, or `"schedule"`. Unknown values fall back to `"service"`
@@ -59,7 +59,7 @@ pub struct SubmitJobRequest {
     pub workload_kind: Option<String>,
 }
 
-/// Response for `POST /v1/jobs`. Carries `job_id`, the canonical
+/// Response for `POST /v1/jobs`. Carries `workload_id`, the canonical
 /// `spec_digest`, and the idempotency `outcome` per ADR-0008 and
 /// ADR-0020.
 ///
@@ -73,28 +73,28 @@ pub struct SubmitJobRequest {
 ///   field on the wire (conflict is an HTTP-status concern, never an
 ///   enum value — see ADR-0015 §4 amendment via ADR-0020).
 ///
-/// `job_id` is rendered as a `String` at the wire boundary; the server
-/// converts back to `overdrive_core::id::JobId` in handlers.
+/// `workload_id` is rendered as a `String` at the wire boundary; the server
+/// converts back to `overdrive_core::id::WorkloadId` in handlers.
 /// `spec_digest` is the lowercase-hex SHA-256 of the canonical
 /// rkyv-archived `Job` bytes (ADR-0002, development.md §Hashing); 64
 /// characters.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct SubmitJobResponse {
-    pub job_id: String,
+pub struct SubmitWorkloadResponse {
+    pub workload_id: String,
     pub spec_digest: String,
     pub outcome: IdempotencyOutcome,
 }
 
 /// Response for `POST /v1/jobs/{id}/stop`. Per ADR-0027 the body shape
-/// is `{ job_id, outcome }` where `outcome ∈ { "stopped",
+/// is `{ workload_id, outcome }` where `outcome ∈ { "stopped",
 /// "already_stopped" }`. 404 on unknown job (separate path).
 ///
 /// `outcome` is wire-stringly-typed (lowercase JSON via
 /// `#[serde(rename_all = "snake_case")]`) so future verbs (start,
 /// restart, cancel) can extend the enum additively.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct StopJobResponse {
-    pub job_id: String,
+pub struct StopWorkloadResponse {
+    pub workload_id: String,
     pub outcome: StopOutcome,
 }
 
@@ -138,9 +138,9 @@ pub enum IdempotencyOutcome {
 /// CLI parses this response into a concrete type rather than a value
 /// bag. `spec_digest` equals the lowercase-hex SHA-256 of the
 /// rkyv-archived bytes pulled out of the `IntentStore` — i.e. the
-/// same value the original `POST /v1/jobs` returned for this `job_id`.
+/// same value the original `POST /v1/jobs` returned for this `workload_id`.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct JobDescription {
+pub struct WorkloadDescription {
     pub spec: JobSpecInput,
     pub spec_digest: String,
 }
@@ -178,10 +178,10 @@ pub struct BrokerCountersBody {
 /// Response for `GET /v1/allocs`.
 ///
 /// Per ADR-0033 §1 amended 2026-04-30 / Slice 01 step 01-03 — the
-/// envelope carries top-level identity (`job_id`, `spec_digest`),
+/// envelope carries top-level identity (`workload_id`, `spec_digest`),
 /// replica counts (`replicas_desired` / `replicas_running`) projected
 /// from the `IntentStore` + observation rows, and a `restart_budget`
-/// block hydrated from the `JobLifecycle` reconciler view cache.
+/// block hydrated from the `WorkloadLifecycle` reconciler view cache.
 ///
 /// On the empty / 200 path with no rows the envelope still carries
 /// `replicas_desired` (from the spec) so the CLI can render an
@@ -193,9 +193,9 @@ pub struct AllocStatusResponse {
     /// for forward-compat (Phase 2 may add cluster-wide reads); Phase 1
     /// always populates it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub job_id: Option<String>,
+    pub workload_id: Option<String>,
     /// SHA-256 (hex, 64 chars) of the canonical rkyv-archived `Job`
-    /// bytes — see `JobDescription::spec_digest`. Pinned per ADR-0002.
+    /// bytes — see `WorkloadDescription::spec_digest`. Pinned per ADR-0002.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub spec_digest: Option<String>,
     /// Desired replica count from `Job.spec.replicas`.
@@ -206,7 +206,7 @@ pub struct AllocStatusResponse {
     pub replicas_running: u32,
     pub rows: Vec<AllocStatusRowBody>,
     /// Aggregate restart-budget block for the job — derived from the
-    /// `JobLifecycle` reconciler view cache. `max` is hard-coded to
+    /// `WorkloadLifecycle` reconciler view cache. `max` is hard-coded to
     /// `RESTART_BACKOFF_CEILING` (5) in Phase 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub restart_budget: Option<RestartBudget>,
@@ -233,7 +233,7 @@ pub struct AllocStatusResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 pub struct AllocStatusRowBody {
     pub alloc_id: String,
-    pub job_id: String,
+    pub workload_id: String,
     pub node_id: String,
     pub state: AllocStateWire,
     /// Structured cause for this row's most recent transition.
@@ -312,20 +312,20 @@ pub struct ErrorBody {
         version = "0.0.0",
     ),
     paths(
-        crate::handlers::submit_job,
-        crate::handlers::describe_job,
-        crate::handlers::stop_job,
+        crate::handlers::submit_workload,
+        crate::handlers::describe_workload,
+        crate::handlers::stop_workload,
         crate::handlers::cluster_status,
         crate::handlers::alloc_status,
         crate::handlers::node_list,
     ),
     components(schemas(
-        SubmitJobRequest,
-        SubmitJobResponse,
+        SubmitWorkloadRequest,
+        SubmitWorkloadResponse,
         IdempotencyOutcome,
-        StopJobResponse,
+        StopWorkloadResponse,
         StopOutcome,
-        JobDescription,
+        WorkloadDescription,
         ClusterStatus,
         BrokerCountersBody,
         AllocStatusResponse,
@@ -507,7 +507,7 @@ impl From<AllocState> for AllocStateWire {
 /// does not have to compare two integers each time.
 ///
 /// Phase 1: `max` is hard-coded to 5 (matching the existing
-/// `RESTART_BUDGET_MAX` constant in `JobLifecycle::reconcile`); Phase 2+
+/// `RESTART_BUDGET_MAX` constant in `WorkloadLifecycle::reconcile`); Phase 2+
 /// makes it per-job-config (DESIGN [D7]).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 pub struct RestartBudget {
@@ -538,7 +538,7 @@ impl From<&overdrive_core::traits::driver::Resources> for ResourcesBody {
 ///
 /// | Variant | When emitted |
 /// |---|---|
-/// | `Reconciler` | the `JobLifecycle` reconciler converged a state and emitted an `Action::*` that the action shim materialised into an `AllocStatusRow` write |
+/// | `Reconciler` | the `WorkloadLifecycle` reconciler converged a state and emitted an `Action::*` that the action shim materialised into an `AllocStatusRow` write |
 /// | `Driver(DriverType)` | the action shim observed a driver `start`/`stop`/`status` result and wrote the row directly (post-spawn settle, immediate failure, etc.) |
 ///
 /// The `Driver(DriverType)` carries the driver kind so a CLI rendering

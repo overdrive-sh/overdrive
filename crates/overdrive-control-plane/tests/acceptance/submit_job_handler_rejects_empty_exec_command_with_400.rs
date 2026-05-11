@@ -25,9 +25,9 @@ use axum::Json;
 use axum::extract::State;
 use axum::http::HeaderMap;
 use overdrive_control_plane::AppState;
-use overdrive_control_plane::api::SubmitJobRequest;
+use overdrive_control_plane::api::SubmitWorkloadRequest;
 use overdrive_control_plane::error::ControlPlaneError;
-use overdrive_control_plane::handlers::submit_job;
+use overdrive_control_plane::handlers::submit_workload;
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
 use overdrive_core::id::NodeId;
@@ -78,10 +78,10 @@ async fn submit_job_handler_rejects_empty_exec_command_with_validation_error_nam
     let state = build_app_state(&tmp);
 
     // When the handler is invoked with a spec carrying empty exec.command.
-    let result = submit_job(
+    let result = submit_workload(
         State(state.clone()),
         HeaderMap::new(),
-        Json(SubmitJobRequest { spec: spec_with_command(""), workload_kind: None }),
+        Json(SubmitWorkloadRequest { spec: spec_with_command(""), workload_kind: None }),
     )
     .await;
 
@@ -123,10 +123,10 @@ async fn submit_job_handler_rejects_whitespace_only_exec_command_with_validation
     let tmp = TempDir::new().expect("tmpdir");
     let state = build_app_state(&tmp);
 
-    let result = submit_job(
+    let result = submit_workload(
         State(state.clone()),
         HeaderMap::new(),
-        Json(SubmitJobRequest { spec: spec_with_command("   "), workload_kind: None }),
+        Json(SubmitWorkloadRequest { spec: spec_with_command("   "), workload_kind: None }),
     )
     .await;
 

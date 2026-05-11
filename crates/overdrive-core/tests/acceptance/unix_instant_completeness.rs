@@ -285,7 +285,7 @@ proptest! {
 //   > for every durable type crossing the IntentStore boundary.
 //
 // `UnixInstant` crosses the IntentStore boundary as a field of
-// `JobLifecycleView` in step 02-02 (#139); that wiring depends on
+// `WorkloadLifecycleView` in step 02-02 (#139); that wiring depends on
 // this property holding for every valid value.
 // -----------------------------------------------------------------------------
 

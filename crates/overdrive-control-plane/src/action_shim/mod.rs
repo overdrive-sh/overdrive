@@ -19,7 +19,7 @@
 //! the canonical path via `pub mod` in lib.rs.
 
 use overdrive_core::TransitionReason;
-use overdrive_core::id::{AllocationId, JobId, NodeId};
+use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::reconciler::{Action, TickContext};
 use overdrive_core::traits::dataplane::Dataplane;
 use overdrive_core::traits::driver::{AllocationHandle, Driver, DriverError, DriverType};
@@ -66,7 +66,7 @@ pub struct LifecycleEvent {
     /// Allocation this transition concerns.
     pub alloc_id: AllocationId,
     /// Job the allocation belongs to.
-    pub job_id: JobId,
+    pub workload_id: WorkloadId,
     /// Wire-shape state the alloc was in before this transition. The
     /// shim does not currently track this on every write (it's the
     /// downstream consumer's job to compute `from` from prior state);
@@ -199,7 +199,7 @@ fn split_once_after_path(s: &str) -> Option<(&str, &str)> {
 #[allow(clippy::too_many_arguments)]
 fn build_alloc_status_row(
     alloc_id: AllocationId,
-    job_id: JobId,
+    workload_id: WorkloadId,
     node_id: NodeId,
     state: AllocState,
     tick: &TickContext,
@@ -212,7 +212,7 @@ fn build_alloc_status_row(
     let writer = node_id.clone();
     AllocStatusRow {
         alloc_id,
-        job_id,
+        workload_id,
         node_id,
         state,
         updated_at: timestamp_for(tick, writer),
@@ -255,7 +255,7 @@ fn build_lifecycle_event(
     let to_wire: AllocStateWire = row.state.into();
     LifecycleEvent {
         alloc_id: row.alloc_id.clone(),
-        job_id: row.job_id.clone(),
+        workload_id: row.workload_id.clone(),
         from: prior_state,
         to: to_wire,
         reason: row
@@ -406,7 +406,7 @@ async fn dispatch_single(
         Action::FinalizeFailed { alloc_id, terminal } => {
             let Some(prior_row) = find_prior_alloc_row(obs, &alloc_id).await? else {
                 // No prior row — nothing to finalize against. This is
-                // structurally rare (the JobLifecycle only emits
+                // structurally rare (the WorkloadLifecycle only emits
                 // FinalizeFailed against a known-failed alloc) but
                 // we tolerate it as a no-op so a level-triggered
                 // re-enqueue against a torn-down alloc does not
@@ -426,7 +426,7 @@ async fn dispatch_single(
             let prior_stderr_tail = prior_row.stderr_tail.clone();
             let row = build_alloc_status_row(
                 alloc_id,
-                prior_row.job_id,
+                prior_row.workload_id,
                 prior_row.node_id,
                 AllocState::Failed,
                 tick,
@@ -453,7 +453,7 @@ async fn dispatch_single(
         // Running AllocStatusRow on success. On StartRejected, write
         // a `Failed` row recording the typed cause-class
         // (ADR-0032 §5 + §4 Amendment).
-        Action::StartAllocation { alloc_id, job_id, node_id, spec, kind } => {
+        Action::StartAllocation { alloc_id, workload_id, node_id, spec, kind } => {
             // Read prior obs row before the driver call so we capture
             // the allocation's state before this transition. For first-
             // seen allocs (no prior row) default to Pending — consistent
@@ -495,13 +495,22 @@ async fn dispatch_single(
                 Err(other) => return Err(ShimError::Driver(other)),
             };
             // Per ADR-0037 §4: StartAllocation is never a terminal
-            // claim — JobLifecycle emits FinalizeFailed on a separate
+            // claim — WorkloadLifecycle emits FinalizeFailed on a separate
             // tick when restart budget is exhausted, and the row that
             // gets the BackoffExhausted terminal is written by that
             // arm. A successful start or a single mid-budget failed
             // start carries `terminal: None`.
             let row = build_alloc_status_row(
-                alloc_id, job_id, node_id, state, tick, reason, detail, None, None, kind,
+                alloc_id,
+                workload_id,
+                node_id,
+                state,
+                tick,
+                reason,
+                detail,
+                None,
+                None,
+                kind,
             );
             // Fires the Running-confirmed gate exposed by Driver::start.
             // Required for liveness — the watcher parks on this gate
@@ -534,7 +543,7 @@ async fn dispatch_single(
         // fully-populated `AllocationSpec` constructed in the
         // reconciler from the live `Job`; the shim reads it straight
         // off the action. `find_prior_alloc_row` is still needed to
-        // recover `(job_id, node_id)` for the `AllocStatusRow` write.
+        // recover `(workload_id, node_id)` for the `AllocStatusRow` write.
         Action::RestartAllocation { alloc_id, spec, kind } => {
             // Stop half — Phase 1 uses an empty AllocationHandle (no
             // pid tracking yet); the driver's `stop` is best-effort
@@ -586,12 +595,12 @@ async fn dispatch_single(
             //
             // Per ADR-0047 §1 / step 02-02 [D4]: kind comes from the
             // emitting action (sourced by the reconciler from the
-            // hydrated `JobLifecycleState.workload_kind`), NOT from
+            // hydrated `WorkloadLifecycleState.workload_kind`), NOT from
             // the prior row. The action's kind is the authoritative
             // value at every restart write.
             let row = build_alloc_status_row(
                 alloc_id,
-                prior_row.job_id,
+                prior_row.workload_id,
                 prior_row.node_id,
                 state,
                 tick,
@@ -635,7 +644,7 @@ async fn dispatch_single(
         // impossible because both are populated from the same
         // `terminal` value at the same source site.
         Action::StopAllocation { alloc_id, terminal } => {
-            // Look up prior obs row to recover (job_id, node_id) for
+            // Look up prior obs row to recover (workload_id, node_id) for
             // the Terminated row we will write. If the alloc has no
             // obs row at all (e.g. the reconciler emitted Stop
             // without ever having seen the alloc Running) there is
@@ -662,7 +671,7 @@ async fn dispatch_single(
             // exclusively on `terminal`.
             let row = build_alloc_status_row(
                 alloc_id,
-                prior_row.job_id,
+                prior_row.workload_id,
                 prior_row.node_id,
                 AllocState::Terminated,
                 tick,
@@ -719,7 +728,7 @@ const fn timestamp_for(tick: &TickContext, writer: NodeId) -> LogicalTimestamp {
 }
 
 /// Look up the LWW-winner observation row for `alloc_id`, used by the
-/// Restart and Stop variants to recover `(job_id, node_id)` for the
+/// Restart and Stop variants to recover `(workload_id, node_id)` for the
 /// Terminated row they write. Returns `Ok(None)` when no row exists —
 /// callers decide whether that is an error (Restart) or a no-op (Stop).
 async fn find_prior_alloc_row(

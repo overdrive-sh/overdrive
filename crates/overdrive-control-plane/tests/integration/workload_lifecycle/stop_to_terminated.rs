@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
-use overdrive_control_plane::{AppState, job_lifecycle, noop_heartbeat};
+use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
 use overdrive_core::aggregate::{
     DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
 };
@@ -30,7 +30,7 @@ async fn job_stop_drives_running_to_terminated() {
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime");
     runtime.register(noop_heartbeat()).await.expect("register noop");
-    runtime.register(job_lifecycle()).await.expect("register job-lifecycle");
+    runtime.register(workload_lifecycle()).await.expect("register job-lifecycle");
 
     let store =
         Arc::new(LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open store"));
@@ -68,7 +68,7 @@ async fn job_stop_drives_running_to_terminated() {
         }
     });
 
-    // Use a distinct job_id so the derived cgroup scope
+    // Use a distinct workload_id so the derived cgroup scope
     // (`alloc-stopper-0.scope`) does not collide with submit_to_running
     // (`alloc-payments-0.scope`) when both tests run in parallel under nextest.
     let job = Job::from_spec(JobSpecInput {
@@ -86,7 +86,7 @@ async fn job_stop_drives_running_to_terminated() {
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
     let target = TargetResource::new("job/stopper").expect("valid target");
-    let job_lifecycle_name = overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
+    let workload_lifecycle_name = overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
         .expect("job-lifecycle reconciler name");
     let now = Instant::now();
     let deadline = now + Duration::from_secs(60);
@@ -96,7 +96,7 @@ async fn job_stop_drives_running_to_terminated() {
     for tick_n in 0..30_u64 {
         run_convergence_tick(
             &state,
-            &job_lifecycle_name,
+            &workload_lifecycle_name,
             &target,
             now + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
@@ -120,7 +120,7 @@ async fn job_stop_drives_running_to_terminated() {
     for tick_n in 30..60_u64 {
         run_convergence_tick(
             &state,
-            &job_lifecycle_name,
+            &workload_lifecycle_name,
             &target,
             now + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,

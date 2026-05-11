@@ -21,8 +21,8 @@ use std::path::Path;
 use std::time::Duration;
 
 use overdrive_control_plane::api::{
-    AllocStatusResponse, ClusterStatus, ErrorBody, JobDescription, NodeList, StopJobResponse,
-    SubmitJobRequest, SubmitJobResponse,
+    AllocStatusResponse, ClusterStatus, ErrorBody, NodeList, StopWorkloadResponse,
+    SubmitWorkloadRequest, SubmitWorkloadResponse, WorkloadDescription,
 };
 use overdrive_control_plane::tls_bootstrap::{TrustTriple, load_trust_triple};
 use reqwest::StatusCode;
@@ -148,7 +148,10 @@ impl ApiClient {
     /// # Errors
     ///
     /// See [`CliError`] variants.
-    pub async fn submit_job(&self, req: SubmitJobRequest) -> Result<SubmitJobResponse, CliError> {
+    pub async fn submit_workload(
+        &self,
+        req: SubmitWorkloadRequest,
+    ) -> Result<SubmitWorkloadResponse, CliError> {
         let url = self.build_url("v1/jobs")?;
         let resp = self
             .inner
@@ -176,9 +179,9 @@ impl ApiClient {
     ///
     /// * [`CliError::Transport`] — control plane unreachable.
     /// * [`CliError::HttpStatus`] — server returned non-2xx.
-    pub async fn submit_job_streaming(
+    pub async fn submit_workload_streaming(
         &self,
-        req: SubmitJobRequest,
+        req: SubmitWorkloadRequest,
     ) -> Result<reqwest::Response, CliError> {
         let url = self.build_url("v1/jobs")?;
         // Override the client-wide 30s `.timeout(...)` for the streaming
@@ -216,14 +219,14 @@ impl ApiClient {
     /// `POST /v1/jobs/{id}/stop` — record a stop intent for a
     /// previously-submitted job. Per ADR-0027.
     ///
-    /// Empty request body. Returns `StopJobResponse` on 200 OK with
+    /// Empty request body. Returns `StopWorkloadResponse` on 200 OK with
     /// `outcome ∈ { Stopped, AlreadyStopped }`. A 404 maps to
     /// [`CliError::HttpStatus`] with `body.error == "not_found"`.
     ///
     /// # Errors
     ///
     /// See [`CliError`] variants.
-    pub async fn stop_job(&self, id: &str) -> Result<StopJobResponse, CliError> {
+    pub async fn stop_workload(&self, id: &str) -> Result<StopWorkloadResponse, CliError> {
         self.post_typed(&format!("v1/jobs/{id}/stop"), &serde_json::json!({})).await
     }
 
@@ -232,7 +235,7 @@ impl ApiClient {
     /// # Errors
     ///
     /// See [`CliError`] variants.
-    pub async fn describe_job(&self, id: &str) -> Result<JobDescription, CliError> {
+    pub async fn describe_workload(&self, id: &str) -> Result<WorkloadDescription, CliError> {
         self.get_typed(&format!("v1/jobs/{id}")).await
     }
 
@@ -253,14 +256,14 @@ impl ApiClient {
     /// # Errors
     ///
     /// See [`CliError`] variants.
-    pub async fn alloc_status_for_job(
+    pub async fn alloc_status_for_workload(
         &self,
-        job_id: &str,
+        workload_id: &str,
     ) -> Result<AllocStatusResponse, CliError> {
-        // URL-encode the job_id query parameter via the std url crate
+        // URL-encode the workload_id query parameter via the std url crate
         // (`Url::query_pairs_mut`), avoiding manual escaping.
         let mut url = self.build_url("v1/allocs")?;
-        url.query_pairs_mut().append_pair("job", job_id);
+        url.query_pairs_mut().append_pair("job", workload_id);
         let resp = self.inner.get(url).send().await.map_err(|e| self.transport_err(&e))?;
         self.decode_typed(resp).await
     }

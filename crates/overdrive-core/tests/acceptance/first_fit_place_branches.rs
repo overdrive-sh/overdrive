@@ -2,7 +2,7 @@
 //! `node_free_capacity` helpers in `overdrive-core::reconciler`.
 //!
 //! These helpers are private; we drive them through their only
-//! public caller: `JobLifecycle::reconcile`'s Run branch (placement
+//! public caller: `WorkloadLifecycle::reconcile`'s Run branch (placement
 //! emits `Action::StartAllocation` with the chosen `node_id`, or
 //! emits nothing when no node fits). The decisions covered:
 //!
@@ -40,9 +40,10 @@ use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver, WorkloadKind};
-use overdrive_core::id::{AllocationId, JobId, NodeId, Region};
+use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
 use overdrive_core::reconciler::{
-    Action, JobLifecycle, JobLifecycleState, JobLifecycleView, Reconciler, TickContext,
+    Action, Reconciler, TickContext, WorkloadLifecycle, WorkloadLifecycleState,
+    WorkloadLifecycleView,
 };
 use overdrive_core::traits::driver::Resources;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
@@ -55,8 +56,8 @@ fn nid(s: &str) -> NodeId {
     NodeId::new(s).expect("valid NodeId")
 }
 
-fn jid(s: &str) -> JobId {
-    JobId::new(s).expect("valid JobId")
+fn jid(s: &str) -> WorkloadId {
+    WorkloadId::new(s).expect("valid WorkloadId")
 }
 
 fn aid(s: &str) -> AllocationId {
@@ -78,13 +79,13 @@ fn make_job_with_resources(id: &str, resources: Resources) -> Job {
 
 fn alloc_with_state_on(
     alloc_id: &str,
-    job_id: &str,
+    workload_id: &str,
     node_id: &str,
     state: AllocState,
 ) -> AllocStatusRow {
     AllocStatusRow {
         alloc_id: aid(alloc_id),
-        job_id: jid(job_id),
+        workload_id: jid(workload_id),
         node_id: nid(node_id),
         state,
         updated_at: LogicalTimestamp { counter: 1, writer: nid(node_id) },
@@ -115,24 +116,24 @@ fn placement_actions(
     job: Job,
     current_allocs: BTreeMap<AllocationId, AllocStatusRow>,
 ) -> Vec<Action> {
-    let desired = JobLifecycleState {
+    let desired = WorkloadLifecycleState {
         job: Some(job.clone()),
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
     };
-    let actual = JobLifecycleState {
+    let actual = WorkloadLifecycleState {
         job: Some(job),
         desired_to_stop: false,
         nodes,
         allocations: current_allocs,
         workload_kind: WorkloadKind::default(),
     };
-    let view = JobLifecycleView::default();
+    let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
-    let r = JobLifecycle::canonical();
+    let r = WorkloadLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
     actions
 }

@@ -13,7 +13,7 @@
 //! Three scenarios:
 //!
 //! 1. `terminal_backoff_exhausted_appears_on_alloc_status_and_streaming` —
-//!    drive a JobLifecycle through the restart budget; both surfaces
+//!    drive a WorkloadLifecycle through the restart budget; both surfaces
 //!    carry `Some(BackoffExhausted { attempts: ceiling })`.
 //! 2. `terminal_stopped_appears_on_both_surfaces` — issue an explicit
 //!    operator stop; both surfaces carry `Some(Stopped { by: Operator })`.
@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 
 use overdrive_control_plane::action_shim::LifecycleEvent;
 use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
-use overdrive_control_plane::{AppState, job_lifecycle, noop_heartbeat};
+use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
 use overdrive_core::aggregate::{
     DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
 };
@@ -52,7 +52,7 @@ async fn bootstrap_async(
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime");
     runtime.register(noop_heartbeat()).await.expect("register noop");
-    runtime.register(job_lifecycle()).await.expect("register job-lifecycle");
+    runtime.register(workload_lifecycle()).await.expect("register job-lifecycle");
 
     let store =
         Arc::new(LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open store"));
@@ -64,7 +64,7 @@ async fn bootstrap_async(
 
     // SimClock is passed at construction so the convergence-tick's
     // `tick.now_unix` snapshot advances with simulation time. The
-    // JobLifecycle backoff predicate compares `tick.now_unix <
+    // WorkloadLifecycle backoff predicate compares `tick.now_unix <
     // last_failure_seen_at + backoff_for_attempt(attempts)`; under
     // SystemClock, a tight 200-tick loop completes in real ~ms so the
     // backoff window (1 s × CEILING) never elapses and restart_counts
@@ -122,7 +122,7 @@ async fn terminal_backoff_exhausted_appears_on_alloc_status_and_streaming() {
     // A job spec whose binary does not exist — every start attempt
     // fails with `StartRejected`, the reconciler increments
     // `restart_counts`, and after `RESTART_BACKOFF_CEILING (5)` the
-    // JobLifecycle emits `Action::FinalizeFailed { terminal:
+    // WorkloadLifecycle emits `Action::FinalizeFailed { terminal:
     // BackoffExhausted { attempts: 5 } }`.
     let job = Job::from_spec(JobSpecInput {
         id: "backoff-exhaust".to_string(),
@@ -139,19 +139,19 @@ async fn terminal_backoff_exhausted_appears_on_alloc_status_and_streaming() {
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
     let target = TargetResource::new("job/backoff-exhaust").expect("valid target");
-    let job_lifecycle_name =
+    let workload_lifecycle_name =
         overdrive_core::reconciler::ReconcilerName::new("job-lifecycle").expect("valid name");
     let now = Instant::now();
     let deadline = now + Duration::from_secs(120);
 
     // Drive convergence until an alloc row carries a terminal claim.
-    // The JobLifecycle needs ceiling+1 ticks (5 failed starts + 1 to
+    // The WorkloadLifecycle needs ceiling+1 ticks (5 failed starts + 1 to
     // emit FinalizeFailed) plus headroom for backoff timer ticks.
     let mut terminal_row = None;
     for tick_n in 0..200_u64 {
         run_convergence_tick(
             &state,
-            &job_lifecycle_name,
+            &workload_lifecycle_name,
             &target,
             now + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
@@ -161,7 +161,7 @@ async fn terminal_backoff_exhausted_appears_on_alloc_status_and_streaming() {
         .expect("tick");
         let rows = state.obs.alloc_status_rows().await.expect("read rows");
         if let Some(row) = rows.iter().find(|r| {
-            r.job_id == job.id
+            r.workload_id == job.id
                 && matches!(r.terminal, Some(TerminalCondition::BackoffExhausted { .. }))
         }) {
             terminal_row = Some(row.clone());
@@ -170,7 +170,7 @@ async fn terminal_backoff_exhausted_appears_on_alloc_status_and_streaming() {
     }
 
     let row = terminal_row.expect(
-        "JobLifecycle must produce an AllocStatusRow with terminal = BackoffExhausted within 200 ticks",
+        "WorkloadLifecycle must produce an AllocStatusRow with terminal = BackoffExhausted within 200 ticks",
     );
 
     // AC #1 / AC #7 — durable surface carries the terminal claim.
@@ -215,7 +215,7 @@ async fn terminal_stopped_appears_on_both_surfaces() {
         }
     });
 
-    // Distinct job_id so cgroup scope name does not collide with
+    // Distinct workload_id so cgroup scope name does not collide with
     // sibling tests under nextest.
     let job = Job::from_spec(JobSpecInput {
         id: "term-stop".to_string(),
@@ -232,7 +232,7 @@ async fn terminal_stopped_appears_on_both_surfaces() {
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
     let target = TargetResource::new("job/term-stop").expect("valid target");
-    let job_lifecycle_name =
+    let workload_lifecycle_name =
         overdrive_core::reconciler::ReconcilerName::new("job-lifecycle").expect("valid name");
     let now = Instant::now();
     let deadline = now + Duration::from_secs(120);
@@ -242,7 +242,7 @@ async fn terminal_stopped_appears_on_both_surfaces() {
     for tick_n in 0..30_u64 {
         run_convergence_tick(
             &state,
-            &job_lifecycle_name,
+            &workload_lifecycle_name,
             &target,
             now + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
@@ -272,7 +272,7 @@ async fn terminal_stopped_appears_on_both_surfaces() {
     for tick_n in 30..120_u64 {
         run_convergence_tick(
             &state,
-            &job_lifecycle_name,
+            &workload_lifecycle_name,
             &target,
             now + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
@@ -282,7 +282,7 @@ async fn terminal_stopped_appears_on_both_surfaces() {
         .expect("tick");
         let rows = state.obs.alloc_status_rows().await.expect("read rows");
         if let Some(row) = rows.iter().find(|r| {
-            r.job_id == job.id
+            r.workload_id == job.id
                 && r.state == AllocState::Terminated
                 && matches!(
                     r.terminal,
@@ -328,7 +328,7 @@ async fn non_terminal_transitions_emit_none() {
         }
     });
 
-    // Distinct job_id; long-running /bin/sleep so we observe the
+    // Distinct workload_id; long-running /bin/sleep so we observe the
     // Pending → Running transition and stop early before any restart
     // budget would be consumed.
     let job = Job::from_spec(JobSpecInput {
@@ -346,7 +346,7 @@ async fn non_terminal_transitions_emit_none() {
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
     let target = TargetResource::new("job/non-term").expect("valid target");
-    let job_lifecycle_name =
+    let workload_lifecycle_name =
         overdrive_core::reconciler::ReconcilerName::new("job-lifecycle").expect("valid name");
     let now = Instant::now();
     let deadline = now + Duration::from_secs(60);
@@ -356,7 +356,7 @@ async fn non_terminal_transitions_emit_none() {
     for tick_n in 0..30_u64 {
         run_convergence_tick(
             &state,
-            &job_lifecycle_name,
+            &workload_lifecycle_name,
             &target,
             now + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,

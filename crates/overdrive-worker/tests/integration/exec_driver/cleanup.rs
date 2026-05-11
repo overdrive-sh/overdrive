@@ -13,7 +13,7 @@
 //! `crates/overdrive-control-plane/tests/integration/cgroup_isolation/
 //! alloc_scope_has_writable_cpu_weight_and_memory_max.rs` (the worker
 //! crate cannot reuse it cross-crate). Differs from
-//! `crates/overdrive-control-plane/tests/integration/job_lifecycle/
+//! `crates/overdrive-control-plane/tests/integration/workload_lifecycle/
 //! cleanup.rs::AllocCleanup` in that we do NOT have an
 //! `ObservationStore` to enumerate live allocs from — the test passes
 //! the `AllocationId` directly because each test owns exactly one

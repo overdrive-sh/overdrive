@@ -72,7 +72,7 @@ mod integration {
     mod terminal_propagation;
     mod tls_bootstrap;
     /// phase-1-first-workload — slice 3 (US-03) — walking skeletons.
-    pub mod job_lifecycle {
+    pub mod workload_lifecycle {
         // Shared cleanup helper — reaps real `/bin/sleep` workloads
         // spawned by the action shim so nextest does not flag the
         // tests as `LEAK`. Used by `crash_recovery` and

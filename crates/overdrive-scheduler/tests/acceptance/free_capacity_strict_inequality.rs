@@ -77,7 +77,7 @@ fn free_capacity_excludes_pending_allocs_on_same_node() {
     // Pending alloc — same node, different job, NOT Running.
     let allocs = vec![overdrive_core::traits::observation_store::AllocStatusRow {
         alloc_id: overdrive_core::id::AllocationId::new("alloc-pending-0").expect("valid"),
-        job_id: overdrive_core::id::JobId::new("other").expect("valid"),
+        workload_id: overdrive_core::id::WorkloadId::new("other").expect("valid"),
         node_id: nid("local"),
         state: AllocState::Pending,
         updated_at: overdrive_core::traits::observation_store::LogicalTimestamp {

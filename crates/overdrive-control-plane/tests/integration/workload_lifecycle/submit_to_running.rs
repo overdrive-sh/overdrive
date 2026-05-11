@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
-use overdrive_control_plane::{AppState, job_lifecycle, noop_heartbeat};
+use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
 use overdrive_core::aggregate::{
     DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
 };
@@ -32,7 +32,7 @@ async fn submitted_job_reaches_running_via_real_exec_driver() {
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime");
     runtime.register(noop_heartbeat()).await.expect("register noop");
-    runtime.register(job_lifecycle()).await.expect("register job-lifecycle");
+    runtime.register(workload_lifecycle()).await.expect("register job-lifecycle");
 
     let store =
         Arc::new(LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open store"));
@@ -78,7 +78,7 @@ async fn submitted_job_reaches_running_via_real_exec_driver() {
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
     let target = TargetResource::new("job/payments").expect("valid target");
-    let job_lifecycle_name = overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
+    let workload_lifecycle_name = overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
         .expect("job-lifecycle reconciler name");
     let now = Instant::now();
     let deadline = now + Duration::from_secs(60);
@@ -89,7 +89,7 @@ async fn submitted_job_reaches_running_via_real_exec_driver() {
     for tick_n in 0..30_u64 {
         run_convergence_tick(
             &state,
-            &job_lifecycle_name,
+            &workload_lifecycle_name,
             &target,
             now + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,

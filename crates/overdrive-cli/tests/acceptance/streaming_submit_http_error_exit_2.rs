@@ -8,8 +8,8 @@
 //! >   400/404/409/500/transport_err)
 //!
 //! The streaming submit handler runs through the same
-//! `ApiClient::submit_job_streaming` plumbing as the original
-//! one-shot `submit_job`. Pre-Accepted errors are HTTP responses with
+//! `ApiClient::submit_workload_streaming` plumbing as the original
+//! one-shot `submit_workload`. Pre-Accepted errors are HTTP responses with
 //! non-2xx status that arrive BEFORE any `SubmitEvent::Accepted` line
 //! has been observed. The renderer's exit-code helper must map every
 //! such variant — and `CliError::Transport` — to exit code 2.

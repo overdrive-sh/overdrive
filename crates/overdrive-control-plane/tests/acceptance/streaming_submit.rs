@@ -1,7 +1,7 @@
 //! Acceptance — Slice 02 step 02-03.
 //!
 //! `S-CP-01` / `S-CP-02` / `S-CP-03` / `S-CP-06` / `S-CP-07` / `S-CP-08` /
-//! `S-CP-10` / `S-CP-11` — content-negotiated `submit_job` +
+//! `S-CP-10` / `S-CP-11` — content-negotiated `submit_workload` +
 //! `streaming_submit_loop` with `select!` cap timer + lagged-recovery
 //! fallback + stop-while-streaming closure.
 //!
@@ -26,14 +26,15 @@ use axum::routing::post;
 use overdrive_control_plane::AppState;
 use overdrive_control_plane::action_shim::{LifecycleEvent, dispatch};
 use overdrive_control_plane::api::{
-    AllocStateWire, IdempotencyOutcome, SubmitJobRequest, SubmitJobResponse, TransitionSource,
+    AllocStateWire, IdempotencyOutcome, SubmitWorkloadRequest, SubmitWorkloadResponse,
+    TransitionSource,
 };
-use overdrive_control_plane::handlers::submit_job;
+use overdrive_control_plane::handlers::submit_workload;
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_core::TransitionReason;
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
-use overdrive_core::id::{AllocationId, JobId, NodeId};
+use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::reconciler::{Action, TickContext};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{Driver, DriverType};
@@ -90,13 +91,14 @@ fn build_app_state(tmp: &TempDir, clock: Arc<dyn Clock>) -> AppState {
 }
 
 fn build_router(state: AppState) -> Router {
-    Router::new().route("/v1/jobs", post(submit_job)).with_state(state)
+    Router::new().route("/v1/jobs", post(submit_workload)).with_state(state)
 }
 
 /// Build a `POST /v1/jobs` request with the given Accept header.
 fn build_submit_request(spec: &JobSpecInput, accept: &str) -> Request<Body> {
-    let body = serde_json::to_vec(&SubmitJobRequest { spec: spec.clone(), workload_kind: None })
-        .expect("serialize");
+    let body =
+        serde_json::to_vec(&SubmitWorkloadRequest { spec: spec.clone(), workload_kind: None })
+            .expect("serialize");
     Request::builder()
         .method(Method::POST)
         .uri("/v1/jobs")
@@ -129,14 +131,14 @@ async fn body_json(body: Body) -> Value {
 async fn write_row(
     obs: &dyn ObservationStore,
     alloc: &AllocationId,
-    job_id: &JobId,
+    workload_id: &WorkloadId,
     state: AllocState,
     counter: u64,
     reason: Option<TransitionReason>,
 ) {
     let row = AllocStatusRow {
         alloc_id: alloc.clone(),
-        job_id: job_id.clone(),
+        workload_id: workload_id.clone(),
         node_id: sample_node(),
         state,
         updated_at: LogicalTimestamp { counter, writer: sample_node() },
@@ -157,14 +159,14 @@ fn emit_lifecycle(state: &AppState, event: LifecycleEvent) {
 
 fn make_lifecycle_event(
     alloc_id: AllocationId,
-    job_id: JobId,
+    workload_id: WorkloadId,
     from: AllocStateWire,
     to: AllocStateWire,
     reason: TransitionReason,
 ) -> LifecycleEvent {
     LifecycleEvent {
         alloc_id,
-        job_id,
+        workload_id,
         from,
         to,
         reason,
@@ -181,7 +183,7 @@ fn make_lifecycle_event(
 
 // ===========================================================================
 // S-CP-08 — Back-compat: Accept: application/json returns one-shot
-// SubmitJobResponse byte-equivalent to the existing handler shape.
+// SubmitWorkloadResponse byte-equivalent to the existing handler shape.
 // ===========================================================================
 
 #[tokio::test]
@@ -208,9 +210,9 @@ async fn s_cp_08_application_json_returns_one_shot_response_with_back_compat_sha
     );
 
     let json = body_json(response.into_body()).await;
-    let parsed: SubmitJobResponse =
-        serde_json::from_value(json.clone()).expect("body parses to SubmitJobResponse");
-    assert_eq!(parsed.job_id, "payments-v0");
+    let parsed: SubmitWorkloadResponse =
+        serde_json::from_value(json.clone()).expect("body parses to SubmitWorkloadResponse");
+    assert_eq!(parsed.workload_id, "payments-v0");
     assert_eq!(parsed.outcome, IdempotencyOutcome::Inserted);
     assert_eq!(parsed.spec_digest.len(), 64);
     // No streaming-only fields leak into the JSON shape.
@@ -228,8 +230,9 @@ async fn s_cp_08b_no_accept_header_defaults_to_json_back_compat() {
 
     // Build request without Accept header — back-compat with reqwest
     // clients that never send Accept.
-    let body = serde_json::to_vec(&SubmitJobRequest { spec: payments_spec(), workload_kind: None })
-        .expect("serialize");
+    let body =
+        serde_json::to_vec(&SubmitWorkloadRequest { spec: payments_spec(), workload_kind: None })
+            .expect("serialize");
     let request = Request::builder()
         .method(Method::POST)
         .uri("/v1/jobs")
@@ -267,9 +270,9 @@ async fn s_cp_01_streaming_lane_emits_accepted_then_running_then_converged_runni
 
     // Pre-resolve the alloc id we will inject. The handler does not
     // need to know it in advance — it just observes whatever transitions
-    // come through the bus that match the job_id.
+    // come through the bus that match the workload_id.
     let alloc_id = AllocationId::from_str("alloc-payments-0").expect("alloc id");
-    let job_id = JobId::from_str("payments-v0").expect("job id");
+    let workload_id = WorkloadId::from_str("payments-v0").expect("job id");
 
     // Drive: send the request and read the body in a task.
     let request_task = tokio::spawn(async move {
@@ -307,7 +310,7 @@ async fn s_cp_01_streaming_lane_emits_accepted_then_running_then_converged_runni
         &state,
         make_lifecycle_event(
             alloc_id.clone(),
-            job_id.clone(),
+            workload_id.clone(),
             AllocStateWire::Pending,
             AllocStateWire::Running,
             TransitionReason::Started,
@@ -319,7 +322,7 @@ async fn s_cp_01_streaming_lane_emits_accepted_then_running_then_converged_runni
     write_row(
         state.obs.as_ref(),
         &alloc_id,
-        &job_id,
+        &workload_id,
         AllocState::Running,
         1,
         Some(TransitionReason::Started),
@@ -371,11 +374,11 @@ async fn s_cp_03_resubmit_unchanged_emits_accepted_with_unchanged_outcome() {
     // path so the second call terminates without waiting for any
     // additional transitions.
     let alloc_id = AllocationId::from_str("alloc-payments-0").expect("alloc id");
-    let job_id = JobId::from_str("payments-v0").expect("job id");
+    let workload_id = WorkloadId::from_str("payments-v0").expect("job id");
     write_row(
         state.obs.as_ref(),
         &alloc_id,
-        &job_id,
+        &workload_id,
         AllocState::Running,
         1,
         Some(TransitionReason::Started),
@@ -402,7 +405,7 @@ async fn s_cp_03_resubmit_unchanged_emits_accepted_with_unchanged_outcome() {
         &state,
         make_lifecycle_event(
             alloc_id.clone(),
-            job_id.clone(),
+            workload_id.clone(),
             AllocStateWire::Pending,
             AllocStateWire::Running,
             TransitionReason::Started,
@@ -507,7 +510,7 @@ async fn s_cp_06b_cap_is_absolute_deadline_not_inactivity_timeout() {
     let router = build_router(state.clone());
 
     let alloc_id = AllocationId::from_str("alloc-payments-0").expect("alloc id");
-    let job_id = JobId::from_str("payments-v0").expect("job id");
+    let workload_id = WorkloadId::from_str("payments-v0").expect("job id");
 
     let request_task = tokio::spawn(async move {
         let response = router
@@ -539,7 +542,7 @@ async fn s_cp_06b_cap_is_absolute_deadline_not_inactivity_timeout() {
         &state,
         make_lifecycle_event(
             alloc_id.clone(),
-            job_id.clone(),
+            workload_id.clone(),
             AllocStateWire::Pending,
             AllocStateWire::Running,
             TransitionReason::Started,
@@ -607,7 +610,7 @@ async fn s_cp_07_streaming_reason_byte_equals_snapshot_reason() {
     // and a broadcast event, then assert the JSON shapes byte-equal
     // each other on the wire.
     let alloc_id = AllocationId::from_str("alloc-payments-0").expect("alloc id");
-    let job_id = JobId::from_str("payments-v0").expect("job id");
+    let workload_id = WorkloadId::from_str("payments-v0").expect("job id");
 
     let reason =
         TransitionReason::ExecBinaryNotFound { path: "/usr/local/bin/payments".to_string() };
@@ -615,7 +618,7 @@ async fn s_cp_07_streaming_reason_byte_equals_snapshot_reason() {
     let req_state = state.clone();
     let req_reason = reason.clone();
     let req_alloc_id = alloc_id.clone();
-    let req_job_id = job_id.clone();
+    let req_job_id = workload_id.clone();
     let request_task = tokio::spawn(async move {
         let response = router
             .oneshot(build_submit_request(&payments_spec(), "application/x-ndjson"))
@@ -655,7 +658,7 @@ async fn s_cp_07_streaming_reason_byte_equals_snapshot_reason() {
     write_row(
         state.obs.as_ref(),
         &alloc_id,
-        &job_id,
+        &workload_id,
         AllocState::Running,
         1,
         Some(TransitionReason::Started),
@@ -730,7 +733,7 @@ async fn s_cp_11_stop_while_streaming_closes_stream_with_stopped_result() {
     let router = build_router(state.clone());
 
     let alloc_id = AllocationId::from_str("alloc-payments-0").expect("alloc id");
-    let job_id = JobId::from_str("payments-v0").expect("job id");
+    let workload_id = WorkloadId::from_str("payments-v0").expect("job id");
 
     let request_task = tokio::spawn(async move {
         let response = router
@@ -755,7 +758,7 @@ async fn s_cp_11_stop_while_streaming_closes_stream_with_stopped_result() {
         &state,
         make_lifecycle_event(
             alloc_id.clone(),
-            job_id.clone(),
+            workload_id.clone(),
             AllocStateWire::Pending,
             AllocStateWire::Running,
             TransitionReason::Started,
@@ -785,7 +788,7 @@ async fn s_cp_11_stop_while_streaming_closes_stream_with_stopped_result() {
     // typed terminal claim, not just the legacy `reason` field.
     let mut terminated_event = make_lifecycle_event(
         alloc_id.clone(),
-        job_id.clone(),
+        workload_id.clone(),
         AllocStateWire::Running,
         AllocStateWire::Terminated,
         TransitionReason::Stopped { by: StoppedBy::Reconciler },
@@ -837,14 +840,14 @@ async fn s_lt_01_lifecycle_transition_from_reflects_prior_alloc_state() {
     let state = build_app_state(&tmp, Arc::new(SimClock::new()));
 
     let alloc_id = AllocationId::from_str("alloc-payments-0").expect("alloc id");
-    let job_id = JobId::from_str("payments-v0").expect("job id");
+    let workload_id = WorkloadId::from_str("payments-v0").expect("job id");
 
     // AC-3: Pre-seed a Running AllocStatusRow so dispatch() can find the
     // prior state when it calls find_prior_alloc_row().
     write_row(
         state.obs.as_ref(),
         &alloc_id,
-        &job_id,
+        &workload_id,
         AllocState::Running,
         1,
         Some(TransitionReason::Started),
@@ -939,7 +942,7 @@ async fn s_cp_12_pre_subscribe_terminal_does_not_hang_until_cap() {
     state.streaming_cap = Duration::from_secs(60);
 
     let alloc_id = AllocationId::from_str("alloc-payments-0").expect("alloc id");
-    let job_id = JobId::from_str("payments-v0").expect("job id");
+    let workload_id = WorkloadId::from_str("payments-v0").expect("job id");
 
     // Pre-seed a Running AllocStatusRow BEFORE issuing the streaming
     // request — simulates the production race outcome where the
@@ -948,7 +951,7 @@ async fn s_cp_12_pre_subscribe_terminal_does_not_hang_until_cap() {
     write_row(
         state.obs.as_ref(),
         &alloc_id,
-        &job_id,
+        &workload_id,
         AllocState::Running,
         1,
         Some(TransitionReason::Started),

@@ -8,7 +8,7 @@
 //! * Scenario — Node construction rejects zero-byte memory capacity.
 //! * Scenario — Job construction rejects a zero-replica count (field +
 //!   value echoed in the message).
-//! * Scenario — Job construction rejects a malformed `JobId` before any
+//! * Scenario — Job construction rejects a malformed `WorkloadId` before any
 //!   archive attempt (pass-through via `AggregateError::Id(..)`).
 //!
 //! Also pins:
@@ -100,7 +100,10 @@ fn job_from_spec_rejects_forbidden_space_in_id_via_id_parse_error_passthrough_wi
     // And the variant is the pass-through from IdParseError via `#[from]`.
     match err {
         AggregateError::Id(IdParseError::InvalidChar { kind, ch, index }) => {
-            assert_eq!(kind, "JobId", "InvalidChar must name the JobId kind; got {kind:?}");
+            assert_eq!(
+                kind, "WorkloadId",
+                "InvalidChar must name the WorkloadId kind; got {kind:?}"
+            );
             assert_eq!(ch, ' ', "InvalidChar must carry the offending char; got {ch:?}");
             // The space sits at index 3 in "pay mentS" after lowercasing
             // ("PAY MENTS" -> "pay ments"), per validate_label's
@@ -230,7 +233,7 @@ fn node_new_rejects_empty_region_via_id_parse_error_passthrough() {
 fn allocation_new_rejects_forbidden_char_in_allocation_id() {
     let spec = AllocationSpecInput {
         id: "BAD ID".to_string(),
-        job_id: "payments".to_string(),
+        workload_id: "payments".to_string(),
         node_id: "worker-01".to_string(),
     };
     let err = Allocation::new(spec).expect_err("forbidden AllocationId char must be rejected");
@@ -244,27 +247,27 @@ fn allocation_new_rejects_forbidden_char_in_allocation_id() {
 
 #[test]
 fn allocation_new_rejects_forbidden_char_in_job_id() {
-    // Given a valid AllocationId and NodeId but a forbidden char in job_id.
+    // Given a valid AllocationId and NodeId but a forbidden char in workload_id.
     let spec = AllocationSpecInput {
         id: "a1b2c3d4".to_string(),
-        job_id: "BAD JOB".to_string(),
+        workload_id: "BAD JOB".to_string(),
         node_id: "worker-01".to_string(),
     };
-    let err = Allocation::new(spec).expect_err("forbidden JobId char must be rejected");
+    let err = Allocation::new(spec).expect_err("forbidden WorkloadId char must be rejected");
     match err {
         AggregateError::Id(IdParseError::InvalidChar { kind, .. }) => {
-            assert_eq!(kind, "JobId", "must name JobId kind; got {kind:?}");
+            assert_eq!(kind, "WorkloadId", "must name WorkloadId kind; got {kind:?}");
         }
-        other => panic!("expected AggregateError::Id(InvalidChar for JobId), got {other:?}"),
+        other => panic!("expected AggregateError::Id(InvalidChar for WorkloadId), got {other:?}"),
     }
 }
 
 #[test]
 fn allocation_new_rejects_forbidden_char_in_node_id() {
-    // Given a valid AllocationId and JobId but a forbidden char in node_id.
+    // Given a valid AllocationId and WorkloadId but a forbidden char in node_id.
     let spec = AllocationSpecInput {
         id: "a1b2c3d4".to_string(),
-        job_id: "payments".to_string(),
+        workload_id: "payments".to_string(),
         node_id: "BAD NODE".to_string(),
     };
     let err = Allocation::new(spec).expect_err("forbidden NodeId char must be rejected");

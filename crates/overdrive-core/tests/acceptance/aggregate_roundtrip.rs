@@ -58,7 +58,7 @@ fn sample_node() -> Node {
 fn sample_allocation() -> Allocation {
     Allocation::new(AllocationSpecInput {
         id: "alloc-xyz".to_owned(),
-        job_id: "payments".to_owned(),
+        workload_id: "payments".to_owned(),
         node_id: "worker-01".to_owned(),
     })
     .expect("canonical AllocationSpecInput constructs an Allocation")
@@ -284,8 +284,8 @@ fn arb_node() -> impl Strategy<Value = Node> {
 
 /// An arbitrary valid `Allocation`.
 fn arb_allocation() -> impl Strategy<Value = Allocation> {
-    (valid_label(), valid_label(), valid_label()).prop_map(|(id, job_id, node_id)| {
-        Allocation::new(AllocationSpecInput { id, job_id, node_id })
+    (valid_label(), valid_label(), valid_label()).prop_map(|(id, workload_id, node_id)| {
+        Allocation::new(AllocationSpecInput { id, workload_id, node_id })
             .expect("generator yields valid Allocation")
     })
 }

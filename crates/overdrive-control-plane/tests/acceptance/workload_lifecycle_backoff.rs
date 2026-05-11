@@ -2,7 +2,7 @@
 //!
 //! Drives the runtime convergence tick loop against a `SimDriver` that
 //! force-fails every `Driver::start` call. After M+1 ticks, the
-//! `JobLifecycle` reconciler must STOP emitting `RestartAllocation`
+//! `WorkloadLifecycle` reconciler must STOP emitting `RestartAllocation`
 //! actions for the persistently-failing alloc — the alloc state stays
 //! Terminated (Phase 1's `Failed`-equivalent) and `Driver::start` is
 //! NOT invoked again past the configured ceiling.
@@ -20,11 +20,11 @@ use std::time::{Duration, Instant};
 use async_trait::async_trait;
 
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
-use overdrive_control_plane::{AppState, job_lifecycle, noop_heartbeat};
+use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
 use overdrive_core::aggregate::{
     DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
 };
-use overdrive_core::id::{JobId, NodeId};
+use overdrive_core::id::{NodeId, WorkloadId};
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverType, Resources,
 };
@@ -91,7 +91,7 @@ async fn build_state_with_driver(tmp: &TempDir, driver: Arc<dyn Driver>) -> AppS
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
     runtime.register(noop_heartbeat()).await.expect("register noop-heartbeat");
-    runtime.register(job_lifecycle()).await.expect("register job-lifecycle");
+    runtime.register(workload_lifecycle()).await.expect("register job-lifecycle");
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("open store"));
     let obs: Arc<dyn ObservationStore> =
@@ -137,23 +137,23 @@ async fn repeatedly_crashing_workload_exhausts_backoff_and_stops_retrying() {
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
     // Drive the convergence tick loop M+1 times. The current ceiling
-    // is 5 attempts (per `JobLifecycle::reconcile`'s
+    // is 5 attempts (per `WorkloadLifecycle::reconcile`'s
     // `RESTART_BACKOFF_CEILING`). At tick 6 the reconciler must
     // recognise the ceiling and emit no further StartAllocation.
     //
     // We use a target tick budget large enough to comfortably exceed
     // the ceiling; the assertion later pins the exact upper bound.
-    let target = JobId::new("payments").expect("valid job id");
+    let target = WorkloadId::new("payments").expect("valid job id");
     let target_resource = overdrive_core::reconciler::TargetResource::new(&format!("job/{target}"))
         .expect("valid target");
-    let job_lifecycle_name = overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
+    let workload_lifecycle_name = overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
         .expect("job-lifecycle reconciler name");
     let now = Instant::now();
     let deadline = now + Duration::from_secs(60);
     for tick_n in 0..20_u64 {
         run_convergence_tick(
             &state,
-            &job_lifecycle_name,
+            &workload_lifecycle_name,
             &target_resource,
             now + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
@@ -168,7 +168,7 @@ async fn repeatedly_crashing_workload_exhausts_backoff_and_stops_retrying() {
     // `RESTART_BACKOFF_CEILING + 1` times — once for the initial
     // start, and at most ceiling-many restarts before exhaustion.
     let rows = state.obs.alloc_status_rows().await.expect("read alloc rows");
-    let payments_rows: Vec<_> = rows.iter().filter(|r| r.job_id == target).collect();
+    let payments_rows: Vec<_> = rows.iter().filter(|r| r.workload_id == target).collect();
     assert!(!payments_rows.is_empty(), "alloc rows must exist for the submitted job");
 
     let final_count = *count_handle.lock().expect("mutex");

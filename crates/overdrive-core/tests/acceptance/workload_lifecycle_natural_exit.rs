@@ -1,4 +1,4 @@
-//! ADR-0037 Amendment 2026-05-10 / ADR-0047 §1 — `JobLifecycle::reconcile`
+//! ADR-0037 Amendment 2026-05-10 / ADR-0047 §1 — `WorkloadLifecycle::reconcile`
 //! branches on workload kind for natural-exit terminals.
 //!
 //! Per `docs/feature/workload-kind-discriminator/deliver/roadmap.json`
@@ -27,24 +27,25 @@ use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver, WorkloadKind};
-use overdrive_core::id::{AllocationId, JobId, NodeId, Region};
+use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
 use overdrive_core::reconciler::{
-    Action, JobLifecycle, JobLifecycleState, JobLifecycleView, Reconciler, TickContext,
+    Action, Reconciler, TickContext, WorkloadLifecycle, WorkloadLifecycleState,
+    WorkloadLifecycleView,
 };
 use overdrive_core::traits::driver::Resources;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
 use overdrive_core::transition_reason::{StoppedBy, TerminalCondition, TransitionReason};
 
 // -------------------------------------------------------------------
-// Fixtures (mirror `job_lifecycle_terminal_decision.rs`)
+// Fixtures (mirror `workload_lifecycle_terminal_decision.rs`)
 // -------------------------------------------------------------------
 
 fn nid(s: &str) -> NodeId {
     NodeId::new(s).expect("valid NodeId")
 }
 
-fn jid(s: &str) -> JobId {
-    JobId::new(s).expect("valid JobId")
+fn jid(s: &str) -> WorkloadId {
+    WorkloadId::new(s).expect("valid WorkloadId")
 }
 
 fn aid(s: &str) -> AllocationId {
@@ -86,10 +87,10 @@ fn fresh_tick(now: Instant, now_unix: UnixInstant) -> TickContext {
 /// Construct a terminal alloc row representing the shape the
 /// `ExitObserver` writes today (`AllocState::Terminated` +
 /// `TransitionReason::Stopped { by: Process }`) for a clean exit.
-fn alloc_clean_exit(alloc_id: &str, job_id: &str, node_id: &str) -> AllocStatusRow {
+fn alloc_clean_exit(alloc_id: &str, workload_id: &str, node_id: &str) -> AllocStatusRow {
     AllocStatusRow {
         alloc_id: aid(alloc_id),
-        job_id: jid(job_id),
+        workload_id: jid(workload_id),
         node_id: nid(node_id),
         state: AllocState::Terminated,
         updated_at: LogicalTimestamp { counter: 2, writer: nid(node_id) },
@@ -108,13 +109,13 @@ fn alloc_clean_exit(alloc_id: &str, job_id: &str, node_id: &str) -> AllocStatusR
 /// a crash with non-zero exit code.
 fn alloc_crashed_with_exit(
     alloc_id: &str,
-    job_id: &str,
+    workload_id: &str,
     node_id: &str,
     exit_code: i32,
 ) -> AllocStatusRow {
     AllocStatusRow {
         alloc_id: aid(alloc_id),
-        job_id: jid(job_id),
+        workload_id: jid(workload_id),
         node_id: nid(node_id),
         state: AllocState::Failed,
         updated_at: LogicalTimestamp { counter: 2, writer: nid(node_id) },
@@ -138,30 +139,30 @@ fn alloc_crashed_with_exit(
 /// `Some(TerminalCondition::Completed { exit_code: 0 })`. This is the
 /// canonical AC for step 02-04.
 #[test]
-fn job_lifecycle_natural_exit_emits_typed_terminal_unit_completed() {
+fn workload_lifecycle_natural_exit_emits_typed_terminal_unit_completed() {
     let nodes = one_node_map("local");
     let mut allocations = BTreeMap::new();
     allocations
         .insert(aid("alloc-payments-0"), alloc_clean_exit("alloc-payments-0", "payments", "local"));
 
-    let desired = JobLifecycleState {
+    let desired = WorkloadLifecycleState {
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::Job,
     };
-    let actual = JobLifecycleState {
+    let actual = WorkloadLifecycleState {
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
         allocations,
         workload_kind: WorkloadKind::Job,
     };
-    let view = JobLifecycleView::default();
+    let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
-    let r = JobLifecycle::canonical();
+    let r = WorkloadLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
 
     assert_eq!(
@@ -186,7 +187,7 @@ fn job_lifecycle_natural_exit_emits_typed_terminal_unit_completed() {
 /// reconciler emits `Action::FinalizeFailed` carrying
 /// `Some(TerminalCondition::Failed { exit_code: N })`.
 #[test]
-fn job_lifecycle_natural_exit_emits_typed_terminal_unit_failed() {
+fn workload_lifecycle_natural_exit_emits_typed_terminal_unit_failed() {
     let nodes = one_node_map("local");
     let mut allocations = BTreeMap::new();
     allocations.insert(
@@ -194,24 +195,24 @@ fn job_lifecycle_natural_exit_emits_typed_terminal_unit_failed() {
         alloc_crashed_with_exit("alloc-payments-0", "payments", "local", 1),
     );
 
-    let desired = JobLifecycleState {
+    let desired = WorkloadLifecycleState {
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::Job,
     };
-    let actual = JobLifecycleState {
+    let actual = WorkloadLifecycleState {
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
         allocations,
         workload_kind: WorkloadKind::Job,
     };
-    let view = JobLifecycleView::default();
+    let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
-    let r = JobLifecycle::canonical();
+    let r = WorkloadLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
 
     assert_eq!(
@@ -247,14 +248,14 @@ fn service_kind_failed_alloc_preserves_restart_branch() {
     allocations
         .insert(aid("alloc-svc-0"), alloc_crashed_with_exit("alloc-svc-0", "svc", "local", 1));
 
-    let desired = JobLifecycleState {
+    let desired = WorkloadLifecycleState {
         job: Some(make_job("svc")),
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::Service,
     };
-    let actual = JobLifecycleState {
+    let actual = WorkloadLifecycleState {
         job: Some(make_job("svc")),
         desired_to_stop: false,
         nodes,
@@ -264,10 +265,10 @@ fn service_kind_failed_alloc_preserves_restart_branch() {
     // Budget remaining: attempts == 0 < ceiling.
     let mut restart_counts = BTreeMap::new();
     restart_counts.insert(aid("alloc-svc-0"), 0);
-    let view = JobLifecycleView { restart_counts, last_failure_seen_at: BTreeMap::new() };
+    let view = WorkloadLifecycleView { restart_counts, last_failure_seen_at: BTreeMap::new() };
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
-    let r = JobLifecycle::canonical();
+    let r = WorkloadLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
 
     assert_eq!(

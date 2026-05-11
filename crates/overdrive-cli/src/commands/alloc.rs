@@ -1,16 +1,16 @@
 //! `overdrive alloc status --job <id>`.
 //!
 //! Reads the canonical `spec_digest` from the control plane's
-//! `JobDescription`, counts the allocations reported by
+//! `WorkloadDescription`, counts the allocations reported by
 //! `GET /v1/allocs`, and returns a typed [`AllocStatusOutput`] with an
 //! explicit empty-state message pointing at the
 //! `phase-1-first-workload` onboarding step.
 //!
 //! Per ADR-0020 (drop `commit_index` from Phase 1) the wire shape of
-//! `JobDescription` is `{spec, spec_digest}` — the Raft commit-index
+//! `WorkloadDescription` is `{spec, spec_digest}` — the Raft commit-index
 //! field was dropped.
 //!
-//! Per ADR-0002 + handler contract (`describe_job`): `spec_digest` is
+//! Per ADR-0002 + handler contract (`describe_workload`): `spec_digest` is
 //! SHA-256 of the exact rkyv bytes the server wrote to the
 //! `IntentStore`. The CLI treats it as an opaque hex string and echoes
 //! it verbatim; any CLI-side recomputation would drift from the
@@ -37,7 +37,7 @@ use crate::http_client::{ApiClient, CliError};
 /// endpoint per whitepaper §8.
 #[derive(Debug, Clone)]
 pub struct StatusArgs {
-    /// Canonical `JobId` to describe.
+    /// Canonical `WorkloadId` to describe.
     pub job: String,
     /// Path to the Talos-shape trust triple on disk. The endpoint
     /// recorded in the triple is where the GETs are issued.
@@ -49,7 +49,7 @@ pub struct StatusArgs {
 /// Slice 01 step 01-03 — the handler now returns the full
 /// [`AllocStatusResponse`] envelope so the renderer can produce the
 /// journey TUI mockup (per ADR-0033 §4 amended 2026-04-30). Legacy
-/// fields (`job_id`, `spec_digest`, `allocations_total`,
+/// fields (`workload_id`, `spec_digest`, `allocations_total`,
 /// `empty_state_message`) are derived from the envelope at construction
 /// time so existing renderers (`render::alloc_status`) keep working.
 ///
@@ -57,13 +57,13 @@ pub struct StatusArgs {
 #[derive(Debug, Clone)]
 pub struct AllocStatusOutput {
     /// Canonical job id as echoed by the control plane.
-    pub job_id: String,
+    pub workload_id: String,
     /// SHA-256 (hex) of the archived rkyv bytes of the validated `Job`,
     /// per ADR-0002. Opaque to the CLI — the CLI never recomputes this
     /// client-side, because a second canonicalisation would drift.
     pub spec_digest: String,
     /// Number of allocation rows in the observation store whose
-    /// `job_id` matches [`Self::job_id`].
+    /// `workload_id` matches [`Self::workload_id`].
     pub allocations_total: usize,
     /// Operator-facing empty-state message rendered when
     /// `allocations_total == 0`. Carries a `phase-1-first-workload`
@@ -76,7 +76,7 @@ pub struct AllocStatusOutput {
     pub snapshot: AllocStatusResponse,
 }
 
-/// Read the canonical `JobDescription` for `args.job` + the allocation
+/// Read the canonical `WorkloadDescription` for `args.job` + the allocation
 /// count from the observation store.
 ///
 /// Returns `Err(CliError::HttpStatus { status: 404, .. })` for unknown
@@ -97,9 +97,9 @@ pub async fn status(args: StatusArgs) -> Result<AllocStatusOutput, CliError> {
 
     // Slice 01 step 01-03 — single round-trip through the snapshot
     // surface. The handler reads IntentStore + Observation rows +
-    // JobLifecycle view-cache and returns the full envelope; 404 on
+    // WorkloadLifecycle view-cache and returns the full envelope; 404 on
     // missing job carries `body.error == "not_found"`.
-    let snapshot = client.alloc_status_for_job(&args.job).await?;
+    let snapshot = client.alloc_status_for_workload(&args.job).await?;
 
     let allocations_total = snapshot.rows.len();
     let empty_state_message = if allocations_total == 0 {
@@ -115,7 +115,7 @@ pub async fn status(args: StatusArgs) -> Result<AllocStatusOutput, CliError> {
     let spec_digest = snapshot.spec_digest.clone().unwrap_or_default();
 
     Ok(AllocStatusOutput {
-        job_id: args.job,
+        workload_id: args.job,
         spec_digest,
         allocations_total,
         empty_state_message,
@@ -136,5 +136,5 @@ pub async fn status(args: StatusArgs) -> Result<AllocStatusOutput, CliError> {
 /// Same shapes as [`status`].
 pub async fn status_snapshot(args: StatusArgs) -> Result<AllocStatusResponse, CliError> {
     let client = ApiClient::from_config(&args.config_path)?;
-    client.alloc_status_for_job(&args.job).await
+    client.alloc_status_for_workload(&args.job).await
 }

@@ -5,14 +5,14 @@
 //! (NO subprocess). A real in-process control-plane server stands up via
 //! `commands::serve::run(...)` (step 05-02), then the handler reads a
 //! TOML file from disk, validates locally through `Job::from_spec`
-//! (ADR-0011 constructor), POSTs `SubmitJobRequest` via the `ApiClient`
-//! from step 05-01, and returns a typed `SubmitOutput` with `job_id`,
+//! (ADR-0011 constructor), POSTs `SubmitWorkloadRequest` via the `ApiClient`
+//! from step 05-01, and returns a typed `SubmitOutput` with `workload_id`,
 //! `intent_key`, `spec_digest`, `outcome`, `endpoint`, and
 //! `next_command` (per ADR-0020 the `commit_index` field is dropped).
 //!
 //! Acceptance coverage:
 //!   (a) valid TOML against in-process server returns `SubmitOutput`
-//!       with `job_id = "payments"`, `intent_key = "jobs/payments"`,
+//!       with `workload_id = "payments"`, `intent_key = "jobs/payments"`,
 //!       `outcome = IdempotencyOutcome::Inserted`, a 64-char
 //!       `spec_digest`, and `next_command` naming
 //!       `overdrive alloc status --job payments`.
@@ -129,7 +129,7 @@ async fn submit_with_valid_toml_against_in_process_server_returns_submit_output_
     let output: SubmitOutput =
         overdrive_cli::commands::job::submit(args).await.expect("job::submit");
 
-    assert_eq!(output.job_id, "payments", "SubmitOutput.job_id must be 'payments'");
+    assert_eq!(output.workload_id, "payments", "SubmitOutput.workload_id must be 'payments'");
     assert_eq!(
         output.intent_key, "jobs/payments",
         "SubmitOutput.intent_key must be 'jobs/payments'",

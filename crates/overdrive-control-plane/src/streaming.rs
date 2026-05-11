@@ -5,7 +5,7 @@
 //!
 //! # Wiring
 //!
-//! The handler in [`crate::handlers::submit_job`] branches on the
+//! The handler in [`crate::handlers::submit_workload`] branches on the
 //! `Accept` header. The `application/x-ndjson` lane delegates here:
 //! `streaming_submit_loop` builds a stream of `Result<Bytes, _>`
 //! NDJSON lines that axum wraps via `Body::from_stream(...)`.
@@ -97,7 +97,7 @@
 use axum::body::Bytes;
 use bytes::BytesMut;
 use futures::Stream;
-use overdrive_core::id::JobId;
+use overdrive_core::id::WorkloadId;
 use overdrive_core::traits::observation_store::{AllocState, ObservationStore};
 use tokio::sync::broadcast;
 
@@ -154,7 +154,7 @@ impl std::io::Write for BytesMutW<'_> {
 /// that axum's `Body::from_stream(...)` wraps into the response body.
 pub fn build_stream(
     state: AppState,
-    job_id: JobId,
+    workload_id: WorkloadId,
     accepted: SubmitEvent,
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send + 'static {
     let bus = state.lifecycle_events.clone();
@@ -202,7 +202,7 @@ pub fn build_stream(
         //    the terminal event and end the stream — analogous to
         //    ADR-0032 §7 lagged-recovery, applied to the subscribe-race
         //    rather than the buffer-overflow class.
-        if let Some(terminal) = lagged_recover(&*obs, &job_id).await {
+        if let Some(terminal) = lagged_recover(&*obs, &workload_id).await {
             match emit_line(&terminal) {
                 Ok(line) => {
                     yield Ok(line);
@@ -224,7 +224,7 @@ pub fn build_stream(
                 recv = sub.recv() => {
                     match recv {
                         Ok(event) => {
-                            if event.job_id != job_id {
+                            if event.workload_id != workload_id {
                                 // Event for a different job — ignore.
                                 continue;
                             }
@@ -255,7 +255,7 @@ pub fn build_stream(
                             // recomputation.
                             if let Some(terminal) = check_terminal(
                                 &*obs,
-                                &job_id,
+                                &workload_id,
                                 &event,
                             ).await {
                                 match emit_line(&terminal) {
@@ -277,7 +277,7 @@ pub fn build_stream(
                             // channel; no explicit resubscribe needed.
                             if let Some(terminal) = lagged_recover(
                                 &*obs,
-                                &job_id,
+                                &workload_id,
                             ).await {
                                 match emit_line(&terminal) {
                                     Ok(line) => {
@@ -358,7 +358,7 @@ pub fn build_stream(
 /// IntentStore per broadcast event.
 async fn check_terminal(
     obs: &dyn ObservationStore,
-    job_id: &JobId,
+    workload_id: &WorkloadId,
     event: &LifecycleEvent,
 ) -> Option<SubmitEvent> {
     // Terminal path — project the reconciler-emitted terminal claim
@@ -381,7 +381,7 @@ async fn check_terminal(
     if matches!(event.to, AllocStateWire::Running) {
         if let Ok(rows) = obs.alloc_status_rows().await {
             let has_running = rows.iter().any(|r| {
-                r.job_id == *job_id
+                r.workload_id == *workload_id
                     && r.state == overdrive_core::traits::observation_store::AllocState::Running
             });
             if has_running {
@@ -438,10 +438,15 @@ fn submit_event_from_terminal(cond: &TerminalCondition, event: &LifecycleEvent) 
 /// LWW-winner `AllocStatusRow`. Per ADR-0037 §4 the row's `terminal`
 /// field is the authoritative durable surface for terminal claims —
 /// no view consultation needed.
-async fn lagged_recover(obs: &dyn ObservationStore, job_id: &JobId) -> Option<SubmitEvent> {
+async fn lagged_recover(
+    obs: &dyn ObservationStore,
+    workload_id: &WorkloadId,
+) -> Option<SubmitEvent> {
     let rows = obs.alloc_status_rows().await.ok()?;
-    let latest =
-        rows.into_iter().filter(|r| r.job_id == *job_id).max_by_key(|r| r.updated_at.counter)?;
+    let latest = rows
+        .into_iter()
+        .filter(|r| r.workload_id == *workload_id)
+        .max_by_key(|r| r.updated_at.counter)?;
 
     if let Some(cond) = &latest.terminal {
         // Promote the row to a synthetic LifecycleEvent shape so the
@@ -450,7 +455,7 @@ async fn lagged_recover(obs: &dyn ObservationStore, job_id: &JobId) -> Option<Su
         let to_wire: AllocStateWire = latest.state.into();
         let event = LifecycleEvent {
             alloc_id: latest.alloc_id.clone(),
-            job_id: latest.job_id.clone(),
+            workload_id: latest.workload_id.clone(),
             from: to_wire,
             to: to_wire,
             reason: latest.reason.clone().unwrap_or(
@@ -498,7 +503,7 @@ pub fn build_accepted(
 /// existing legacy `SubmitEvent::Accepted` shape so wire-format
 /// migration is a renamed-tag change, not a payload change.
 #[must_use]
-pub fn build_job_accepted(
+pub fn build_workload_accepted(
     spec_digest: String,
     intent_key: String,
     outcome: IdempotencyOutcome,
@@ -519,7 +524,7 @@ pub fn build_job_accepted(
 ///
 /// - **Preconditions**: `state.lifecycle_events`, `state.obs`, and
 ///   `state.clock` are wired; `accepted` carries the synchronous
-///   `Accepted` line built by [`build_job_accepted`].
+///   `Accepted` line built by [`build_workload_accepted`].
 /// - **Postconditions**: the returned stream emits `Accepted` first,
 ///   then zero or more intermediate variants
 ///   (`Pending` / `Running` / `AttemptFailed`), and exactly one
@@ -540,9 +545,9 @@ pub fn build_job_accepted(
 ///   ONE terminal variant (`Succeeded` or `Failed`) on the wire; the
 ///   stream never closes silently. The CLI process exit code equals
 ///   the terminal `exit_code` field per KPI K1 honesty contract.
-pub fn build_job_stream(
+pub fn build_workload_stream(
     state: AppState,
-    job_id: JobId,
+    workload_id: WorkloadId,
     accepted: JobSubmitEvent,
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send + 'static {
     let bus = state.lifecycle_events.clone();
@@ -552,7 +557,7 @@ pub fn build_job_stream(
 
     async_stream::stream! {
         // 1. Emit Accepted SYNCHRONOUSLY — first byte on the wire.
-        match emit_job_line(&accepted) {
+        match emit_workload_line(&accepted) {
             Ok(line) => yield Ok(line),
             Err(err) => {
                 yield Err(err);
@@ -569,8 +574,8 @@ pub fn build_job_stream(
         // 3. Pre-subscribe race recovery — if the latest row already
         //    carries a terminal claim, emit the matching JobSubmitEvent
         //    terminal and end.
-        if let Some(terminal) = job_terminal_from_snapshot(&*obs, &job_id).await {
-            match emit_job_line(&terminal) {
+        if let Some(terminal) = workload_terminal_from_snapshot(&*obs, &workload_id).await {
+            match emit_workload_line(&terminal) {
                 Ok(line) => {
                     yield Ok(line);
                     return;
@@ -591,7 +596,7 @@ pub fn build_job_stream(
                 recv = sub.recv() => {
                     match recv {
                         Ok(event) => {
-                            if event.job_id != job_id {
+                            if event.workload_id != workload_id {
                                 continue;
                             }
                             // Project the LifecycleEvent into the
@@ -599,16 +604,16 @@ pub fn build_job_stream(
                             // (Pending / Running) or AttemptFailed
                             // (intermediate failure) or terminal
                             // (Succeeded / Failed).
-                            if let Some(emit) = job_event_from_lifecycle(
+                            if let Some(emit) = workload_event_from_lifecycle(
                                 &*obs,
-                                &job_id,
+                                &workload_id,
                                 &event,
                             ).await {
                                 let is_terminal = matches!(
                                     emit,
                                     JobSubmitEvent::Succeeded { .. } | JobSubmitEvent::Failed { .. }
                                 );
-                                match emit_job_line(&emit) {
+                                match emit_workload_line(&emit) {
                                     Ok(line) => {
                                         yield Ok(line);
                                         if is_terminal {
@@ -623,11 +628,11 @@ pub fn build_job_stream(
                             }
                         }
                         Err(broadcast::error::RecvError::Lagged(_)) => {
-                            if let Some(terminal) = job_terminal_from_snapshot(
+                            if let Some(terminal) = workload_terminal_from_snapshot(
                                 &*obs,
-                                &job_id,
+                                &workload_id,
                             ).await {
-                                match emit_job_line(&terminal) {
+                                match emit_workload_line(&terminal) {
                                     Ok(line) => {
                                         yield Ok(line);
                                         return;
@@ -655,7 +660,7 @@ pub fn build_job_stream(
                                     "lifecycle channel closed before terminal".to_string(),
                                 ),
                             };
-                            match emit_job_line(&terminal) {
+                            match emit_workload_line(&terminal) {
                                 Ok(line) => yield Ok(line),
                                 Err(err) => yield Err(err),
                             }
@@ -674,7 +679,7 @@ pub fn build_job_stream(
                             "did not converge in {after_seconds}s"
                         )),
                     };
-                    match emit_job_line(&terminal) {
+                    match emit_workload_line(&terminal) {
                         Ok(line) => yield Ok(line),
                         Err(err) => yield Err(err),
                     }
@@ -688,7 +693,7 @@ pub fn build_job_stream(
 /// One NDJSON line for a [`JobSubmitEvent`] —
 /// `serde_json::to_writer(buf, &event)?` + `b'\n'`. Mirror of
 /// [`emit_line`] for the legacy [`SubmitEvent`] surface.
-fn emit_job_line(event: &JobSubmitEvent) -> std::io::Result<Bytes> {
+fn emit_workload_line(event: &JobSubmitEvent) -> std::io::Result<Bytes> {
     use std::io::Write as _;
     let mut buf = BytesMut::with_capacity(256);
     let mut writer = (&mut buf).writer();
@@ -706,13 +711,13 @@ fn emit_job_line(event: &JobSubmitEvent) -> std::io::Result<Bytes> {
 /// `obs.alloc_status_row(...)` so the operator-facing `Failed` event
 /// carries the workload's stderr verbatim per slice 02-05 / ADR-0033
 /// Amendment 2026-05-10.
-async fn job_event_from_lifecycle(
+async fn workload_event_from_lifecycle(
     obs: &dyn ObservationStore,
-    job_id: &JobId,
+    workload_id: &WorkloadId,
     event: &LifecycleEvent,
 ) -> Option<JobSubmitEvent> {
     if let Some(cond) = &event.terminal {
-        return Some(job_event_from_terminal(obs, job_id, event, cond).await);
+        return Some(workload_event_from_terminal(obs, workload_id, event, cond).await);
     }
     match event.to {
         AllocStateWire::Pending => Some(JobSubmitEvent::Pending),
@@ -745,9 +750,9 @@ async fn job_event_from_lifecycle(
 /// [`JobSubmitEvent`] variant. Reads the LWW-winner observation row
 /// for `stderr_tail` so the operator-facing `Failed` event carries
 /// the workload's stderr verbatim.
-async fn job_event_from_terminal(
+async fn workload_event_from_terminal(
     obs: &dyn ObservationStore,
-    _job_id: &JobId,
+    _job_id: &WorkloadId,
     event: &LifecycleEvent,
     cond: &TerminalCondition,
 ) -> JobSubmitEvent {
@@ -793,13 +798,15 @@ async fn job_event_from_terminal(
 /// On `Lagged(_)` or pre-subscribe snapshot, inspect the LWW-winner
 /// `AllocStatusRow` for the job. If it already carries a terminal
 /// claim, project to the matching `JobSubmitEvent` terminal.
-async fn job_terminal_from_snapshot(
+async fn workload_terminal_from_snapshot(
     obs: &dyn ObservationStore,
-    job_id: &JobId,
+    workload_id: &WorkloadId,
 ) -> Option<JobSubmitEvent> {
     let rows = obs.alloc_status_rows().await.ok()?;
-    let latest =
-        rows.into_iter().filter(|r| r.job_id == *job_id).max_by_key(|r| r.updated_at.counter)?;
+    let latest = rows
+        .into_iter()
+        .filter(|r| r.workload_id == *workload_id)
+        .max_by_key(|r| r.updated_at.counter)?;
     let cond = latest.terminal.as_ref()?;
     let duration = format!("{}@{}", latest.updated_at.counter, latest.updated_at.writer.as_str());
     let stderr_tail = latest.stderr_tail.clone();
@@ -1021,7 +1028,7 @@ mod tests {
     use std::sync::Arc;
 
     use overdrive_core::TransitionReason;
-    use overdrive_core::id::{AllocationId, JobId, NodeId};
+    use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
     use overdrive_core::traits::driver::DriverType;
     use overdrive_core::transition_reason::{StoppedBy, TerminalCondition};
     use overdrive_sim::adapters::observation_store::SimObservationStore;
@@ -1044,11 +1051,11 @@ mod tests {
         let node = NodeId::from_str("node-a").expect("node id");
         let obs = Arc::new(SimObservationStore::single_peer(node, 0));
         let alloc_id = AllocationId::from_str("alloc-0").expect("alloc id");
-        let job_id = JobId::from_str("job-0").expect("job id");
+        let workload_id = WorkloadId::from_str("job-0").expect("job id");
 
         let event = LifecycleEvent {
             alloc_id: alloc_id.clone(),
-            job_id: job_id.clone(),
+            workload_id: workload_id.clone(),
             from: AllocStateWire::Running,
             to: AllocStateWire::Terminated,
             reason: TransitionReason::Stopped { by: StoppedBy::Reconciler },
@@ -1058,7 +1065,7 @@ mod tests {
             terminal: Some(TerminalCondition::Stopped { by: StoppedBy::Reconciler }),
         };
 
-        let result = check_terminal(&*obs, &job_id, &event).await;
+        let result = check_terminal(&*obs, &workload_id, &event).await;
 
         assert!(
             matches!(result, Some(SubmitEvent::ConvergedStopped { .. })),

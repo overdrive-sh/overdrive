@@ -3,7 +3,7 @@
 //! variants. ADR-0037 Amendment 2026-05-10.
 //!
 //! This step is type-level only — runtime emission of these variants
-//! lands in 02-04 (`JobLifecycle` reconciler natural-exit emission), and
+//! lands in 02-04 (`WorkloadLifecycle` reconciler natural-exit emission), and
 //! the row-shape change lands in 02-05. Here we pin two structural
 //! correctness properties:
 //!

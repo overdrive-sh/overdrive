@@ -2,9 +2,9 @@
 //! `ToSchema` derives and finalised field sets.
 //!
 //! Step 01-01 (`redesign-drop-commit-index`, ADR-0020): the
-//! `commit_index` field is dropped from `SubmitJobResponse`,
-//! `JobDescription`, and `ClusterStatus`; `SubmitJobResponse` now
-//! carries `{job_id, spec_digest, outcome}` and `JobDescription`
+//! `commit_index` field is dropped from `SubmitWorkloadResponse`,
+//! `WorkloadDescription`, and `ClusterStatus`; `SubmitWorkloadResponse` now
+//! carries `{workload_id, spec_digest, outcome}` and `WorkloadDescription`
 //! carries `{spec, spec_digest}`. A new `IdempotencyOutcome` enum at
 //! the api layer distinguishes `inserted` from `unchanged`. The 409
 //! Conflict path remains an HTTP-status concern — never an enum value.
@@ -23,7 +23,8 @@
 
 use overdrive_control_plane::api::{
     AllocStatusResponse, AllocStatusRowBody, BrokerCountersBody, ClusterStatus, ErrorBody,
-    IdempotencyOutcome, JobDescription, NodeList, NodeRowBody, SubmitJobRequest, SubmitJobResponse,
+    IdempotencyOutcome, NodeList, NodeRowBody, SubmitWorkloadRequest, SubmitWorkloadResponse,
+    WorkloadDescription,
 };
 use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
 use utoipa::ToSchema;
@@ -39,15 +40,15 @@ fn sample_job_spec() -> JobSpecInput {
 
 #[test]
 fn submit_job_request_round_trips_through_serde_json() {
-    let original = SubmitJobRequest { spec: sample_job_spec(), workload_kind: None };
-    let wire = serde_json::to_string(&original).expect("serialise SubmitJobRequest");
-    let round_tripped: SubmitJobRequest =
-        serde_json::from_str(&wire).expect("deserialise SubmitJobRequest");
+    let original = SubmitWorkloadRequest { spec: sample_job_spec(), workload_kind: None };
+    let wire = serde_json::to_string(&original).expect("serialise SubmitWorkloadRequest");
+    let round_tripped: SubmitWorkloadRequest =
+        serde_json::from_str(&wire).expect("deserialise SubmitWorkloadRequest");
     assert_eq!(round_tripped.spec, original.spec);
 }
 
-/// RED-phase pin (Step 01-01): `SubmitJobResponse` MUST carry
-/// `{job_id, spec_digest, outcome}` per ADR-0020. The `outcome`
+/// RED-phase pin (Step 01-01): `SubmitWorkloadResponse` MUST carry
+/// `{workload_id, spec_digest, outcome}` per ADR-0020. The `outcome`
 /// field MUST round-trip as `IdempotencyOutcome::Inserted` on the
 /// fresh-insert path. This test compiles only against the new
 /// post-ADR-0020 wire shape — by name, the
@@ -56,15 +57,15 @@ fn submit_job_request_round_trips_through_serde_json() {
 #[test]
 fn submit_response_carries_spec_digest_and_outcome_inserted() {
     let digest = "deadbeef".repeat(8);
-    let original = SubmitJobResponse {
-        job_id: "payments".to_string(),
+    let original = SubmitWorkloadResponse {
+        workload_id: "payments".to_string(),
         spec_digest: digest.clone(),
         outcome: IdempotencyOutcome::Inserted,
     };
-    let wire = serde_json::to_string(&original).expect("serialise SubmitJobResponse");
-    let round_tripped: SubmitJobResponse =
-        serde_json::from_str(&wire).expect("deserialise SubmitJobResponse");
-    assert_eq!(round_tripped.job_id, "payments");
+    let wire = serde_json::to_string(&original).expect("serialise SubmitWorkloadResponse");
+    let round_tripped: SubmitWorkloadResponse =
+        serde_json::from_str(&wire).expect("deserialise SubmitWorkloadResponse");
+    assert_eq!(round_tripped.workload_id, "payments");
     assert_eq!(round_tripped.spec_digest, digest);
     assert_eq!(round_tripped.outcome, IdempotencyOutcome::Inserted);
 }
@@ -77,20 +78,20 @@ fn submit_response_carries_spec_digest_and_outcome_inserted() {
 #[test]
 fn submit_response_carries_outcome_unchanged_on_idempotent_resubmit() {
     let digest = "abcdef01".repeat(8);
-    let original = SubmitJobResponse {
-        job_id: "payments".to_string(),
+    let original = SubmitWorkloadResponse {
+        workload_id: "payments".to_string(),
         spec_digest: digest.clone(),
         outcome: IdempotencyOutcome::Unchanged,
     };
-    let wire = serde_json::to_string(&original).expect("serialise SubmitJobResponse");
+    let wire = serde_json::to_string(&original).expect("serialise SubmitWorkloadResponse");
     // The lowercase JSON form is the wire contract — pinned via
     // `#[serde(rename_all = "lowercase")]` on `IdempotencyOutcome`.
     assert!(
         wire.contains(r#""outcome":"unchanged""#),
         "outcome must serialise lowercase; got: {wire}"
     );
-    let round_tripped: SubmitJobResponse =
-        serde_json::from_str(&wire).expect("deserialise SubmitJobResponse");
+    let round_tripped: SubmitWorkloadResponse =
+        serde_json::from_str(&wire).expect("deserialise SubmitWorkloadResponse");
     assert_eq!(round_tripped.outcome, IdempotencyOutcome::Unchanged);
     assert_eq!(round_tripped.spec_digest, digest);
 }
@@ -113,10 +114,11 @@ fn idempotency_outcome_serialises_lowercase_unchanged() {
 
 #[test]
 fn job_description_round_trips_with_typed_spec() {
-    let original = JobDescription { spec: sample_job_spec(), spec_digest: "deadbeef".repeat(8) };
-    let wire = serde_json::to_string(&original).expect("serialise JobDescription");
-    let round_tripped: JobDescription =
-        serde_json::from_str(&wire).expect("deserialise JobDescription");
+    let original =
+        WorkloadDescription { spec: sample_job_spec(), spec_digest: "deadbeef".repeat(8) };
+    let wire = serde_json::to_string(&original).expect("serialise WorkloadDescription");
+    let round_tripped: WorkloadDescription =
+        serde_json::from_str(&wire).expect("deserialise WorkloadDescription");
     assert_eq!(round_tripped.spec, original.spec);
     assert_eq!(round_tripped.spec_digest.len(), 64);
     assert_eq!(round_tripped.spec_digest, original.spec_digest);
@@ -127,7 +129,7 @@ fn cluster_status_round_trips_through_serde_json() {
     let original = ClusterStatus {
         mode: "single".to_string(),
         region: "eu-west-1".to_string(),
-        reconcilers: vec!["job_lifecycle".to_string(), "node_lifecycle".to_string()],
+        reconcilers: vec!["workload_lifecycle".to_string(), "node_lifecycle".to_string()],
         broker: BrokerCountersBody { queued: 1, cancelled: 2, dispatched: 3 },
     };
     let wire = serde_json::to_string(&original).expect("serialise ClusterStatus");
@@ -187,13 +189,13 @@ fn alloc_status_response_round_trips_with_empty_and_populated_rows() {
     // `last_transition` and `error` fields, plus the envelope's
     // identity + replica counts + restart_budget block.
     let populated = AllocStatusResponse {
-        job_id: Some("payments".to_owned()),
+        workload_id: Some("payments".to_owned()),
         spec_digest: Some("0".repeat(64)),
         replicas_desired: 1,
         replicas_running: 1,
         rows: vec![AllocStatusRowBody {
             alloc_id: "alloc-1".to_owned(),
-            job_id: "payments".to_owned(),
+            workload_id: "payments".to_owned(),
             node_id: "node-a".to_owned(),
             state: overdrive_control_plane::api::AllocStateWire::Running,
             reason: None,
@@ -271,9 +273,9 @@ fn error_body_round_trips_with_field_none_and_field_some() {
 fn every_api_type_implements_utoipa_to_schema() {
     fn assert_to_schema<T: ToSchema>() {}
 
-    assert_to_schema::<SubmitJobRequest>();
-    assert_to_schema::<SubmitJobResponse>();
-    assert_to_schema::<JobDescription>();
+    assert_to_schema::<SubmitWorkloadRequest>();
+    assert_to_schema::<SubmitWorkloadResponse>();
+    assert_to_schema::<WorkloadDescription>();
     assert_to_schema::<ClusterStatus>();
     assert_to_schema::<BrokerCountersBody>();
     assert_to_schema::<AllocStatusResponse>();

@@ -25,8 +25,8 @@ mod acceptance {
     mod insecure_rejected;
     mod render_alloc_status;
     mod render_cluster_and_node;
-    mod render_job_stop;
-    mod render_job_submit;
+    mod render_workload_stop;
+    mod render_workload_submit;
 
     // Slice 02 step 02-04 — S-CLI-04 (Failed-block render) and
     // S-CLI-05 (exit-code 2 across HTTP error variants).

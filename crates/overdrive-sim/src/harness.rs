@@ -478,7 +478,7 @@ impl Harness {
             // -------------------------------------------------------------
             // phase-1-first-workload — slice 3 (US-03) — convergence
             // invariants. The harness does not yet drive a full runtime
-            // tick loop with a real `JobLifecycle` reconciler against
+            // tick loop with a real `WorkloadLifecycle` reconciler against
             // host-owned IntentStore + ObservationStore (that wiring lives
             // in `overdrive-control-plane` as of step 02-03 and would
             // invert the dep graph). At the harness level we therefore
@@ -486,10 +486,10 @@ impl Harness {
             // the invariants are vacuous-pass here, which is the
             // correct K3 behaviour: "no submissions, no rows" is
             // self-consistent. End-to-end exercise lives in
-            // `crates/overdrive-control-plane/tests/integration/job_lifecycle/*`.
+            // `crates/overdrive-control-plane/tests/integration/workload_lifecycle/*`.
             // -------------------------------------------------------------
             Invariant::JobScheduledAfterSubmission => {
-                evaluators::evaluate_job_scheduled_after_submission(&[], &[])
+                evaluators::evaluate_workload_scheduled_after_submission(&[], &[])
             }
             Invariant::DesiredReplicaCountConverges => {
                 evaluators::evaluate_desired_replica_count_converges(&[], &[])

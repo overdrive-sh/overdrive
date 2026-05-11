@@ -38,13 +38,14 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use overdrive_control_plane::api::{
-    ErrorBody, IdempotencyOutcome, JobDescription, SubmitJobRequest, SubmitJobResponse,
+    ErrorBody, IdempotencyOutcome, SubmitWorkloadRequest, SubmitWorkloadResponse,
+    WorkloadDescription,
 };
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
 use overdrive_core::aggregate::{
     DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
 };
-use overdrive_core::id::JobId;
+use overdrive_core::id::WorkloadId;
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
@@ -148,7 +149,7 @@ fn payments_spec() -> JobSpecInput {
 }
 
 fn payments_spec_alt_replicas() -> JobSpecInput {
-    // Same JobId, different replicas — semantically different spec at
+    // Same WorkloadId, different replicas — semantically different spec at
     // the same intent key; rkyv bytes differ; must 409.
     JobSpecInput {
         id: "payments".to_owned(),
@@ -174,9 +175,9 @@ async fn byte_identical_resubmit_returns_outcome_unchanged_and_same_digest() {
     let spec = payments_spec();
 
     // First submit — outcome = Inserted, captures the spec_digest.
-    let first: SubmitJobResponse = client
+    let first: SubmitWorkloadResponse = client
         .post(&url)
-        .json(&SubmitJobRequest { spec: spec.clone(), workload_kind: None })
+        .json(&SubmitWorkloadRequest { spec: spec.clone(), workload_kind: None })
         .send()
         .await
         .expect("first submit")
@@ -193,9 +194,9 @@ async fn byte_identical_resubmit_returns_outcome_unchanged_and_same_digest() {
 
     // Second submit — byte-identical spec; must return outcome =
     // Unchanged and the SAME spec_digest.
-    let second: SubmitJobResponse = client
+    let second: SubmitWorkloadResponse = client
         .post(&url)
-        .json(&SubmitJobRequest { spec: spec.clone(), workload_kind: None })
+        .json(&SubmitWorkloadRequest { spec: spec.clone(), workload_kind: None })
         .send()
         .await
         .expect("second submit")
@@ -216,7 +217,10 @@ async fn byte_identical_resubmit_returns_outcome_unchanged_and_same_digest() {
          got first = {}, second = {}",
         first.spec_digest, second.spec_digest,
     );
-    assert_eq!(second.job_id, first.job_id, "job_id must echo canonical JobId on both submits");
+    assert_eq!(
+        second.workload_id, first.workload_id,
+        "workload_id must echo canonical WorkloadId on both submits"
+    );
 
     // Shut the server down before the back-door read so the redb write
     // handle is released.
@@ -225,8 +229,8 @@ async fn byte_identical_resubmit_returns_outcome_unchanged_and_same_digest() {
     // §4.9 tail: the IntentStore contains only one entry at the intent
     // key — i.e. the stored bytes are byte-equal to the rkyv archive of
     // the canonical spec, unchanged by the second submission.
-    let job_id = JobId::new("payments").expect("parse payments JobId");
-    let key = IntentKey::for_job(&job_id);
+    let workload_id = WorkloadId::new("payments").expect("parse payments WorkloadId");
+    let key = IntentKey::for_job(&workload_id);
     let persisted = read_intent_key_from_store(&data_dir_under(tmp.path()), key.as_bytes())
         .await
         .expect("jobs/payments must be populated after successful submit");
@@ -243,7 +247,7 @@ async fn byte_identical_resubmit_returns_outcome_unchanged_and_same_digest() {
 }
 
 // -----------------------------------------------------------------------
-// AC (b) — a different spec at the same JobId returns 409 Conflict with
+// AC (b) — a different spec at the same WorkloadId returns 409 Conflict with
 // `ErrorBody.error = "conflict"` (test-scenarios §4.10).
 // -----------------------------------------------------------------------
 
@@ -256,7 +260,7 @@ async fn different_spec_at_existing_key_returns_409_conflict_with_error_body() {
     // Prime the store with the canonical payments spec.
     let primed = client
         .post(&url)
-        .json(&SubmitJobRequest { spec: payments_spec(), workload_kind: None })
+        .json(&SubmitWorkloadRequest { spec: payments_spec(), workload_kind: None })
         .send()
         .await
         .expect("prime submit");
@@ -265,7 +269,7 @@ async fn different_spec_at_existing_key_returns_409_conflict_with_error_body() {
     // Second submit: same id, different replicas. Must be 409.
     let conflict = client
         .post(&url)
-        .json(&SubmitJobRequest { spec: payments_spec_alt_replicas(), workload_kind: None })
+        .json(&SubmitWorkloadRequest { spec: payments_spec_alt_replicas(), workload_kind: None })
         .send()
         .await
         .expect("conflicting submit");
@@ -303,7 +307,7 @@ async fn intent_store_unchanged_after_conflict_attempt() {
     // Prime with replicas = 3 (canonical).
     let primed = client
         .post(&submit_url)
-        .json(&SubmitJobRequest { spec: payments_spec(), workload_kind: None })
+        .json(&SubmitWorkloadRequest { spec: payments_spec(), workload_kind: None })
         .send()
         .await
         .expect("prime submit");
@@ -313,12 +317,13 @@ async fn intent_store_unchanged_after_conflict_attempt() {
     // we can assert that describe() returns the SAME digest after the
     // 409 (the conflict branch must NOT call `put`, so the stored
     // bytes must be unchanged).
-    let prime_response: SubmitJobResponse = primed.json().await.expect("decode prime response");
+    let prime_response: SubmitWorkloadResponse =
+        primed.json().await.expect("decode prime response");
 
     // Reject with replicas = 7 — must be 409.
     let conflict = client
         .post(&submit_url)
-        .json(&SubmitJobRequest { spec: payments_spec_alt_replicas(), workload_kind: None })
+        .json(&SubmitWorkloadRequest { spec: payments_spec_alt_replicas(), workload_kind: None })
         .send()
         .await
         .expect("conflicting submit");
@@ -332,7 +337,8 @@ async fn intent_store_unchanged_after_conflict_attempt() {
         reqwest::StatusCode::OK,
         "describe must succeed after a conflict — the original entry is still there",
     );
-    let desc_body: JobDescription = described.json().await.expect("decode JobDescription");
+    let desc_body: WorkloadDescription =
+        described.json().await.expect("decode WorkloadDescription");
     assert_eq!(
         desc_body.spec.replicas, 3,
         "after a 409, the stored spec must remain the ORIGINAL (replicas = 3), \
@@ -365,9 +371,9 @@ async fn triple_resubmit_byte_identical_all_return_same_digest_with_unchanged_ou
 
     let mut responses = Vec::with_capacity(3);
     for attempt in 0..3 {
-        let resp: SubmitJobResponse = client
+        let resp: SubmitWorkloadResponse = client
             .post(&url)
-            .json(&SubmitJobRequest { spec: spec.clone(), workload_kind: None })
+            .json(&SubmitWorkloadRequest { spec: spec.clone(), workload_kind: None })
             .send()
             .await
             .expect(&format!("submit attempt {attempt}"))
@@ -430,7 +436,7 @@ async fn conflict_message_names_intent_key_path() {
     // Prime, then conflict.
     let primed = client
         .post(&url)
-        .json(&SubmitJobRequest { spec: payments_spec(), workload_kind: None })
+        .json(&SubmitWorkloadRequest { spec: payments_spec(), workload_kind: None })
         .send()
         .await
         .expect("prime submit");
@@ -438,7 +444,7 @@ async fn conflict_message_names_intent_key_path() {
 
     let conflict = client
         .post(&url)
-        .json(&SubmitJobRequest { spec: payments_spec_alt_replicas(), workload_kind: None })
+        .json(&SubmitWorkloadRequest { spec: payments_spec_alt_replicas(), workload_kind: None })
         .send()
         .await
         .expect("conflicting submit");

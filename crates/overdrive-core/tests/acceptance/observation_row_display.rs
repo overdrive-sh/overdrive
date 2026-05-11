@@ -2,7 +2,7 @@
 //! types exposed from `overdrive_core::traits::observation_store`.
 //!
 //! The `Display` impl on `AllocState` is load-bearing: handlers at
-//! `overdrive-control-plane::handlers::submit_job` +
+//! `overdrive-control-plane::handlers::submit_workload` +
 //! `alloc_status` render `AllocStatusRow.state` onto the REST wire via
 //! `AllocState::to_string()` (see `AllocStatusRowBody::from(row)`).
 //! An `Ok(Default::default())` mutation of the `fmt` body would emit an

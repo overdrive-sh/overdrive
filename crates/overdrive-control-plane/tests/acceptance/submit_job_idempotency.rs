@@ -1,17 +1,17 @@
-//! Acceptance tests for `handlers::submit_job` — the byte-equality
+//! Acceptance tests for `handlers::submit_workload` — the byte-equality
 //! idempotency check at `existing.as_ref() == archived.as_ref()`.
 //!
 //! A mutation flipping `==` to `!=` in the idempotency branch swaps
 //! the two outcomes: byte-identical re-submits would 409, and
-//! semantically-different specs at the same `JobId` would return 200.
+//! semantically-different specs at the same `WorkloadId` would return 200.
 //! The integration suite catches this over real HTTP (the
 //! `idempotent_resubmit.rs` case asserts `outcome == Unchanged` and
 //! `spec_digest` equality), but the default mutation run does not
 //! compile the integration lane.
 //!
-//! These acceptance tests call `submit_job` directly against a live
+//! These acceptance tests call `submit_workload` directly against a live
 //! `AppState` (`LocalIntentStore` over `TempDir` + Sim observation)
-//! and assert on the typed `Result<Json<SubmitJobResponse>,
+//! and assert on the typed `Result<Json<SubmitWorkloadResponse>,
 //! ControlPlaneError>` return — no network, no TLS, no reqwest. The
 //! byte-equality contract is pinned in the default lane, and the
 //! `ControlPlaneError::Conflict` variant is asserted directly (no HTTP
@@ -30,22 +30,24 @@ use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::response::Response;
 use overdrive_control_plane::AppState;
-use overdrive_control_plane::api::{IdempotencyOutcome, SubmitJobRequest, SubmitJobResponse};
+use overdrive_control_plane::api::{
+    IdempotencyOutcome, SubmitWorkloadRequest, SubmitWorkloadResponse,
+};
 use overdrive_control_plane::error::ControlPlaneError;
-use overdrive_control_plane::handlers::submit_job;
+use overdrive_control_plane::handlers::submit_workload;
 
-/// Helper: invoke the content-negotiated `submit_job` handler with no
+/// Helper: invoke the content-negotiated `submit_workload` handler with no
 /// `Accept` header (back-compat JSON lane) and parse the response body
-/// into the typed `SubmitJobResponse`. Slice 02 step 02-03 made
-/// `submit_job` content-negotiate; the existing acceptance tests
+/// into the typed `SubmitWorkloadResponse`. Slice 02 step 02-03 made
+/// `submit_workload` content-negotiate; the existing acceptance tests
 /// continue to assert on the JSON shape via this shim.
 async fn submit_json(
     state: AppState,
-    request: SubmitJobRequest,
-) -> Result<SubmitJobResponse, ControlPlaneError> {
-    let response: Response = submit_job(State(state), HeaderMap::new(), Json(request)).await?;
+    request: SubmitWorkloadRequest,
+) -> Result<SubmitWorkloadResponse, ControlPlaneError> {
+    let response: Response = submit_workload(State(state), HeaderMap::new(), Json(request)).await?;
     let bytes = to_bytes(response.into_body(), usize::MAX).await.expect("body to bytes");
-    Ok(serde_json::from_slice(&bytes).expect("JSON SubmitJobResponse"))
+    Ok(serde_json::from_slice(&bytes).expect("JSON SubmitWorkloadResponse"))
 }
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
@@ -110,11 +112,13 @@ async fn byte_identical_resubmit_returns_ok_with_unchanged_outcome_and_same_dige
     let spec = payments_spec();
 
     // First submit — Ok, outcome = Inserted.
-    let first: SubmitJobResponse =
-        submit_json(state.clone(), SubmitJobRequest { spec: spec.clone(), workload_kind: None })
-            .await
-            .expect("first submit must be Ok");
-    assert_eq!(first.job_id, "payments");
+    let first: SubmitWorkloadResponse = submit_json(
+        state.clone(),
+        SubmitWorkloadRequest { spec: spec.clone(), workload_kind: None },
+    )
+    .await
+    .expect("first submit must be Ok");
+    assert_eq!(first.workload_id, "payments");
     assert_eq!(
         first.outcome,
         IdempotencyOutcome::Inserted,
@@ -131,9 +135,11 @@ async fn byte_identical_resubmit_returns_ok_with_unchanged_outcome_and_same_dige
     // takes the idempotency branch and returns Ok with the SAME
     // spec_digest and `outcome = Unchanged`. Under mutation `!=` this
     // takes the conflict branch and returns ControlPlaneError::Conflict.
-    let second =
-        submit_json(state.clone(), SubmitJobRequest { spec: spec.clone(), workload_kind: None })
-            .await;
+    let second = submit_json(
+        state.clone(),
+        SubmitWorkloadRequest { spec: spec.clone(), workload_kind: None },
+    )
+    .await;
 
     match second {
         Ok(body) => {
@@ -150,7 +156,7 @@ async fn byte_identical_resubmit_returns_ok_with_unchanged_outcome_and_same_dige
                  (idempotency branch); a mutation of `==` to `!=` would either \
                  return a Conflict or compute a different digest",
             );
-            assert_eq!(body.job_id, first.job_id);
+            assert_eq!(body.workload_id, first.workload_id);
         }
         Err(ControlPlaneError::Conflict { message }) => panic!(
             "byte-identical re-submit MUST NOT return Conflict — mutation of the \
@@ -171,19 +177,21 @@ async fn different_spec_at_occupied_key_returns_conflict_variant() {
     let state = build_app_state(&tmp);
 
     // Prime with canonical spec.
-    let primed: SubmitJobResponse =
-        submit_json(state.clone(), SubmitJobRequest { spec: payments_spec(), workload_kind: None })
-            .await
-            .expect("prime submit");
+    let primed: SubmitWorkloadResponse = submit_json(
+        state.clone(),
+        SubmitWorkloadRequest { spec: payments_spec(), workload_kind: None },
+    )
+    .await
+    .expect("prime submit");
     assert_eq!(primed.outcome, IdempotencyOutcome::Inserted);
 
-    // Submit a DIFFERENT spec at the same `JobId`. Under original `==`
+    // Submit a DIFFERENT spec at the same `WorkloadId`. Under original `==`
     // this takes the conflict branch and returns Conflict. Under
     // mutation `!=` this takes the idempotency branch and returns
     // Ok.
     let outcome = submit_json(
         state.clone(),
-        SubmitJobRequest { spec: payments_spec_alt_replicas(), workload_kind: None },
+        SubmitWorkloadRequest { spec: payments_spec_alt_replicas(), workload_kind: None },
     )
     .await;
 
@@ -239,11 +247,13 @@ async fn fresh_submit_on_empty_key_returns_inserted_and_persists_spec() {
     let tmp = TempDir::new().expect("tmpdir");
     let state = build_app_state(&tmp);
 
-    let resp: SubmitJobResponse =
-        submit_json(state.clone(), SubmitJobRequest { spec: payments_spec(), workload_kind: None })
-            .await
-            .expect("submit");
-    assert_eq!(resp.job_id, "payments");
+    let resp: SubmitWorkloadResponse = submit_json(
+        state.clone(),
+        SubmitWorkloadRequest { spec: payments_spec(), workload_kind: None },
+    )
+    .await
+    .expect("submit");
+    assert_eq!(resp.workload_id, "payments");
     assert_eq!(
         resp.outcome,
         IdempotencyOutcome::Inserted,

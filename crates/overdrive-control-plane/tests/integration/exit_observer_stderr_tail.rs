@@ -18,7 +18,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use overdrive_core::id::{AllocationId, JobId, NodeId, SpiffeId};
+use overdrive_core::id::{AllocationId, NodeId, SpiffeId, WorkloadId};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{AllocationSpec, Driver, Resources};
 use overdrive_core::traits::observation_store::{
@@ -81,12 +81,12 @@ impl Drop for AllocCleanup {
 async fn seed_running_row(
     obs: &dyn ObservationStore,
     alloc: &AllocationId,
-    job_id: &JobId,
+    workload_id: &WorkloadId,
     node_id: &NodeId,
 ) {
     let row = AllocStatusRow {
         alloc_id: alloc.clone(),
-        job_id: job_id.clone(),
+        workload_id: workload_id.clone(),
         node_id: node_id.clone(),
         state: AllocState::Running,
         updated_at: LogicalTimestamp { counter: 1, writer: node_id.clone() },
@@ -118,10 +118,10 @@ async fn exit_observer_captures_last_n_stderr_lines_on_terminal() {
     let events = Arc::new(events_tx);
 
     let alloc = AllocationId::new("alloc-stderr-tail-test-0").expect("valid alloc id");
-    let job_id = JobId::new("stderr-tail-test").expect("valid job id");
+    let workload_id = WorkloadId::new("stderr-tail-test").expect("valid job id");
     let _cleanup = AllocCleanup { cgroup_root: cgroup_root.to_path_buf(), alloc: alloc.clone() };
 
-    seed_running_row(obs.as_ref(), &alloc, &job_id, &node_id).await;
+    seed_running_row(obs.as_ref(), &alloc, &workload_id, &node_id).await;
 
     let observer_handle =
         exit_observer::spawn(obs.clone(), driver_dyn.clone(), events.clone(), clock.clone());

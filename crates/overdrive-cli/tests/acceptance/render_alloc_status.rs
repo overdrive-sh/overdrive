@@ -18,7 +18,7 @@ use overdrive_control_plane::api::AllocStatusResponse;
 
 fn fixture_empty_state() -> AllocStatusOutput {
     AllocStatusOutput {
-        job_id: "payments".to_string(),
+        workload_id: "payments".to_string(),
         spec_digest: "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789".to_string(),
         allocations_total: 0,
         empty_state_message: "0 allocations for job payments — the scheduler + driver land in \
@@ -30,7 +30,7 @@ fn fixture_empty_state() -> AllocStatusOutput {
 
 fn fixture_with_allocations() -> AllocStatusOutput {
     AllocStatusOutput {
-        job_id: "payments".to_string(),
+        workload_id: "payments".to_string(),
         spec_digest: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".to_string(),
         allocations_total: 3,
         empty_state_message: String::new(),
@@ -108,7 +108,7 @@ fn render_alloc_status_suppresses_hint_when_allocations_exist_even_with_message_
     // hint because `allocations_total == 0` is false; a mutation to
     // `||` would print it because the message is non-empty.
     let out = AllocStatusOutput {
-        job_id: "payments".to_string(),
+        workload_id: "payments".to_string(),
         spec_digest: "deadbeef".repeat(8),
         allocations_total: 5,
         empty_state_message: "0 allocations for job payments — the scheduler + driver land in \
@@ -141,7 +141,7 @@ fn render_alloc_status_suppresses_hint_when_message_is_empty_even_with_zero_allo
     // We pin the absence of a spurious trailing blank line that the
     // mutation would leave behind.
     let out = AllocStatusOutput {
-        job_id: "payments".to_string(),
+        workload_id: "payments".to_string(),
         spec_digest: "cafebabe".repeat(8),
         allocations_total: 0,
         empty_state_message: String::new(),

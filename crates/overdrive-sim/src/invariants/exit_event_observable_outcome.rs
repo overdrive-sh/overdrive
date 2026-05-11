@@ -35,7 +35,7 @@
 //! Both scenarios drive the live `action_shim + exit_observer +
 //! SimDriver + SimObservationStore` wiring end-to-end (the same
 //! production code paths the integration tests at
-//! `crates/overdrive-control-plane/tests/integration/job_lifecycle/
+//! `crates/overdrive-control-plane/tests/integration/workload_lifecycle/
 //! exit_observer_running_gate.rs` exercise) and assert the three-
 //! outcome disjunction at the end.
 //!
@@ -95,7 +95,7 @@ use std::time::{Duration, Instant};
 use overdrive_control_plane::api::AllocStateWire;
 use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
 use overdrive_control_plane::worker::exit_observer;
-use overdrive_control_plane::{AppState, job_lifecycle, noop_heartbeat};
+use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
 use overdrive_core::TransitionReason;
 use overdrive_core::aggregate::{
     DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
@@ -185,7 +185,7 @@ async fn drive(scenario: Scenario, label: &str) -> Result<(), String> {
     let tmp = TempDir::new().map_err(|e| format!("scenario `{label}`: tempdir: {e}"))?;
     let h = build_harness(&tmp).await.map_err(|e| format!("scenario `{label}`: {e}"))?;
 
-    let job_lifecycle_name = ReconcilerName::new("job-lifecycle")
+    let workload_lifecycle_name = ReconcilerName::new("job-lifecycle")
         .map_err(|e| format!("scenario `{label}`: reconciler name: {e}"))?;
     let mut events = h.state.lifecycle_events.subscribe();
     let start = Instant::now();
@@ -195,14 +195,21 @@ async fn drive(scenario: Scenario, label: &str) -> Result<(), String> {
 
     match scenario {
         Scenario::HappyPath => {
-            drive_happy_path(&h, &job_lifecycle_name, start, deadline, &mut events, &mut report)
-                .await
-                .map_err(|e| format!("scenario `{label}`: {e}"))?;
+            drive_happy_path(
+                &h,
+                &workload_lifecycle_name,
+                start,
+                deadline,
+                &mut events,
+                &mut report,
+            )
+            .await
+            .map_err(|e| format!("scenario `{label}`: {e}"))?;
         }
         Scenario::DegradedEscalation => {
             drive_degraded_escalation(
                 &h,
-                &job_lifecycle_name,
+                &workload_lifecycle_name,
                 start,
                 deadline,
                 &mut events,
@@ -241,7 +248,7 @@ async fn drive(scenario: Scenario, label: &str) -> Result<(), String> {
 /// broadcast. Outcomes (a) AND (b) are produced.
 async fn drive_happy_path(
     h: &Harness,
-    job_lifecycle_name: &ReconcilerName,
+    workload_lifecycle_name: &ReconcilerName,
     start: Instant,
     deadline: Instant,
     events: &mut tokio::sync::broadcast::Receiver<
@@ -258,7 +265,7 @@ async fn drive_happy_path(
     for tick_n in 0_u64..60 {
         run_convergence_tick(
             &h.state,
-            job_lifecycle_name,
+            workload_lifecycle_name,
             &h.target,
             start + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
@@ -286,7 +293,7 @@ async fn drive_happy_path(
 /// assertion.
 async fn drive_degraded_escalation(
     h: &Harness,
-    job_lifecycle_name: &ReconcilerName,
+    workload_lifecycle_name: &ReconcilerName,
     start: Instant,
     deadline: Instant,
     events: &mut tokio::sync::broadcast::Receiver<
@@ -294,7 +301,7 @@ async fn drive_degraded_escalation(
     >,
     report: &mut OutcomeReport,
 ) -> Result<(), String> {
-    let tick_n = drive_to_running(h, job_lifecycle_name, start, deadline).await?;
+    let tick_n = drive_to_running(h, workload_lifecycle_name, start, deadline).await?;
 
     // Drain pre-degraded events so the assertion sees the
     // degraded-path event specifically.
@@ -317,7 +324,7 @@ async fn drive_degraded_escalation(
     for tick in tick_n..(tick_n + 60) {
         run_convergence_tick(
             &h.state,
-            job_lifecycle_name,
+            workload_lifecycle_name,
             &h.target,
             start + Duration::from_millis(tick.saturating_mul(100)),
             tick,
@@ -344,7 +351,7 @@ async fn drive_degraded_escalation(
 /// `Running` is not reached within the budget.
 async fn drive_to_running(
     h: &Harness,
-    job_lifecycle_name: &ReconcilerName,
+    workload_lifecycle_name: &ReconcilerName,
     start: Instant,
     deadline: Instant,
 ) -> Result<u64, String> {
@@ -353,7 +360,7 @@ async fn drive_to_running(
     while tick_n < 30 && !reached_running {
         run_convergence_tick(
             &h.state,
-            job_lifecycle_name,
+            workload_lifecycle_name,
             &h.target,
             start + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
@@ -445,7 +452,7 @@ async fn build_harness(tmp: &TempDir) -> Result<Harness, String> {
         .map_err(|e| format!("runtime: {e:?}"))?;
     runtime.register(noop_heartbeat()).await.map_err(|e| format!("register noop: {e:?}"))?;
     runtime
-        .register(job_lifecycle())
+        .register(workload_lifecycle())
         .await
         .map_err(|e| format!("register job-lifecycle: {e:?}"))?;
 

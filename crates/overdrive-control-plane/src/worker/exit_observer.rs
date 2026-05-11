@@ -46,8 +46,8 @@
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
-use overdrive_core::id::{AllocationId, JobId};
-use overdrive_core::reconciler::{JobLifecycle, Reconciler, ReconcilerName, TargetResource};
+use overdrive_core::id::{AllocationId, WorkloadId};
+use overdrive_core::reconciler::{Reconciler, ReconcilerName, TargetResource, WorkloadLifecycle};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{
     AllocationHandle, Driver, DriverType, ExitEvent, ExitKind, STDERR_TAIL_LINES,
@@ -232,9 +232,10 @@ pub fn spawn_with_runtime(
                     // deliver/rca.md` pre-archive).
                     if let Some(runtime) = runtime.as_ref() {
                         if let Some(target) = target_for_event(obs.as_ref(), &event.alloc).await {
-                            runtime
-                                .broker()
-                                .submit(Evaluation { reconciler: job_lifecycle_name(), target });
+                            runtime.broker().submit(Evaluation {
+                                reconciler: workload_lifecycle_name(),
+                                target,
+                            });
                         }
                     }
                 }
@@ -392,15 +393,15 @@ fn build_escalation_event(
     let detail = format!("obs write failed after {attempts} attempts: {error}");
     LifecycleEvent {
         alloc_id: event.alloc.clone(),
-        // Best-effort job_id: the observer did not successfully read a
+        // Best-effort workload_id: the observer did not successfully read a
         // prior row (or the read pre-empted the write failure path), so
-        // the wire-format `JobId` is the same defensive fallback the
+        // the wire-format `WorkloadId` is the same defensive fallback the
         // alloc_id naming convention encodes (`alloc-<jobid>-N`). Phase
-        // 1 wires job_id from the AllocationId by stripping the
+        // 1 wires workload_id from the AllocationId by stripping the
         // `alloc-` prefix and trailing `-N`; if that parse fails (alloc
         // id was not built by the action shim's standard pattern), use
         // an "unknown" sentinel so the event still broadcasts.
-        job_id: extract_job_id_or_unknown(&event.alloc),
+        workload_id: extract_job_id_or_unknown(&event.alloc),
         from: prior_state,
         to: AllocStateWire::Failed,
         reason: TransitionReason::DriverInternalError { detail },
@@ -422,18 +423,18 @@ fn build_escalation_event(
     }
 }
 
-/// Best-effort `JobId` extraction from an [`AllocationId`] when the
+/// Best-effort `WorkloadId` extraction from an [`AllocationId`] when the
 /// observer's prior-row read failed. The action shim's allocation IDs
 /// follow `alloc-<jobid>-<index>` (e.g. `alloc-payments-0`); strip the
 /// known prefix and the trailing `-N` to recover `<jobid>`. Falls back
 /// to `unknown-job` if the parse fails.
-fn extract_job_id_or_unknown(alloc: &AllocationId) -> JobId {
+fn extract_job_id_or_unknown(alloc: &AllocationId) -> WorkloadId {
     let raw = alloc.as_str();
     let stripped = raw.strip_prefix("alloc-").unwrap_or(raw);
     let trimmed = stripped.rsplit_once('-').map_or(stripped, |(prefix, _suffix)| prefix);
-    JobId::new(trimmed).unwrap_or_else(|_| {
+    WorkloadId::new(trimmed).unwrap_or_else(|_| {
         #[allow(clippy::expect_used)]
-        JobId::new("unknown-job").expect("constant valid job id")
+        WorkloadId::new("unknown-job").expect("constant valid job id")
     })
 }
 
@@ -470,7 +471,7 @@ async fn handle_exit_event(
         event.stderr_tail.as_deref().map(|raw| keep_last_n_lines(raw, STDERR_TAIL_LINES));
     let row = AllocStatusRow {
         alloc_id: event.alloc.clone(),
-        job_id: prior.job_id,
+        workload_id: prior.workload_id,
         node_id: prior.node_id,
         state,
         updated_at,
@@ -532,7 +533,7 @@ fn format_crash_detail(exit_code: Option<i32>, signal: Option<i32>) -> String {
 }
 
 /// Find the LWW-winner row for this alloc — used to recover the
-/// (`job_id`, `node_id`) tuple and the prior `LogicalTimestamp` counter.
+/// (`workload_id`, `node_id`) tuple and the prior `LogicalTimestamp` counter.
 async fn find_prior_row(
     obs: &dyn ObservationStore,
     alloc: &AllocationId,
@@ -541,28 +542,28 @@ async fn find_prior_row(
 }
 
 /// Best-effort target derivation from the alloc's prior obs row's
-/// `job_id`. Used by the production `spawn_with_runtime` path to
+/// `workload_id`. Used by the production `spawn_with_runtime` path to
 /// re-enqueue the job-lifecycle reconciler after writing a new state.
 async fn target_for_event(
     obs: &dyn ObservationStore,
     alloc: &AllocationId,
 ) -> Option<TargetResource> {
     let row = obs.alloc_status_row(alloc).await.ok()??;
-    TargetResource::new(&format!("job/{}", row.job_id)).ok()
+    TargetResource::new(&format!("job/{}", row.workload_id)).ok()
 }
 
-fn job_lifecycle_name() -> ReconcilerName {
+fn workload_lifecycle_name() -> ReconcilerName {
     // Sourced from the trait const per the
-    // `refactor-reconciler-static-name` RCA: `JobLifecycle::NAME` is
+    // `refactor-reconciler-static-name` RCA: `WorkloadLifecycle::NAME` is
     // the single compile-time anchor for the kebab-case literal, so
     // there is exactly one place to change if the canonical name ever
     // moves. The `expect` is by-construction-safe — the validator's
     // `^[a-z][a-z0-9-]{0,62}$` grammar accepts `"job-lifecycle"` and
     // the per-call `ReconcilerName::new` invocation is the same shape
-    // `JobLifecycle::canonical()` itself uses.
+    // `WorkloadLifecycle::canonical()` itself uses.
     #[allow(clippy::expect_used)]
-    ReconcilerName::new(<JobLifecycle as Reconciler>::NAME)
-        .expect("JobLifecycle::NAME is a valid ReconcilerName by construction")
+    ReconcilerName::new(<WorkloadLifecycle as Reconciler>::NAME)
+        .expect("WorkloadLifecycle::NAME is a valid ReconcilerName by construction")
 }
 
 /// Build a `LifecycleEvent` from an observer-written `AllocStatusRow`.
@@ -585,7 +586,7 @@ fn build_lifecycle_event(
     let to_wire: AllocStateWire = row.state.into();
     LifecycleEvent {
         alloc_id: row.alloc_id.clone(),
-        job_id: row.job_id.clone(),
+        workload_id: row.workload_id.clone(),
         from: prior_state,
         to: to_wire,
         reason: row
@@ -637,7 +638,7 @@ fn keep_last_n_lines(input: &str, n: usize) -> String {
 // Classification unit tests — pure-function coverage of the
 // `(ExitKind, intentional_stop) → (AllocState, TransitionReason)`
 // mapping. The integration tests in
-// `crates/overdrive-control-plane/tests/integration/job_lifecycle/
+// `crates/overdrive-control-plane/tests/integration/workload_lifecycle/
 // exit_observer.rs` cover the end-to-end obs-write path.
 // ---------------------------------------------------------------------------
 #[cfg(test)]

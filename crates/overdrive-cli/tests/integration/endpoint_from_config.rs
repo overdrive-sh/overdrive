@@ -94,10 +94,10 @@ async fn job_submit_reads_endpoint_from_config_when_no_override_is_provided() {
     let output: SubmitOutput =
         overdrive_cli::commands::job::submit(args).await.expect("job::submit");
 
-    // The POST reached the server: the server assigned `job_id`
+    // The POST reached the server: the server assigned `workload_id`
     // `payments` and a fresh-insert outcome (per ADR-0020 the
     // per-write witness is `outcome` + `spec_digest`).
-    assert_eq!(output.job_id, "payments", "SubmitOutput.job_id must be 'payments'");
+    assert_eq!(output.workload_id, "payments", "SubmitOutput.workload_id must be 'payments'");
     assert_eq!(
         output.outcome,
         IdempotencyOutcome::Inserted,

@@ -1,4 +1,4 @@
-//! Test cleanup helper shared across `job_lifecycle` walking-skeleton
+//! Test cleanup helper shared across `workload_lifecycle` walking-skeleton
 //! tests that spawn real `/bin/sleep` workloads via `ExecDriver`.
 //!
 //! Without this guard, the workloads survive past the `#[tokio::test]`

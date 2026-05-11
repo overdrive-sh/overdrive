@@ -305,7 +305,7 @@ impl SimObservationStore {
     /// Used by `crate worker::exit_observer` integration tests to
     /// exercise the bounded retry path without wiring a real fault
     /// injection layer into the observation store. See
-    /// `crates/overdrive-control-plane/tests/integration/job_lifecycle/
+    /// `crates/overdrive-control-plane/tests/integration/workload_lifecycle/
     /// crash_recovery_obs_write_rejected.rs` for the canonical
     /// consumer.
     pub fn inject_write_failure(&self, error: ObservationStoreError) {

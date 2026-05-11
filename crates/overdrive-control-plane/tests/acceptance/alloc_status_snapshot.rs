@@ -1,5 +1,5 @@
 //! Slice 01 step 01-03 — `AllocStatusResponse` extension + `alloc_status`
-//! handler hydration via observation rows + `JobLifecycleView`.
+//! handler hydration via observation rows + `WorkloadLifecycleView`.
 //!
 //! Covers four scenarios (S-AS-01, S-AS-07, S-AS-08, S-AS-09) at the
 //! control-plane port:
@@ -33,7 +33,7 @@ use overdrive_core::TransitionReason;
 use overdrive_core::aggregate::{
     DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
 };
-use overdrive_core::id::{AllocationId, JobId, NodeId};
+use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
@@ -110,7 +110,7 @@ async fn install_job(state: &AppState, spec: JobSpecInput) -> Job {
 async fn write_row(
     state: &AppState,
     alloc: AllocationId,
-    job_id: JobId,
+    workload_id: WorkloadId,
     state_value: AllocState,
     counter: u64,
     reason: Option<TransitionReason>,
@@ -118,7 +118,7 @@ async fn write_row(
 ) {
     let row = AllocStatusRow {
         alloc_id: alloc,
-        job_id,
+        workload_id,
         node_id: sample_node(),
         state: state_value,
         updated_at: LogicalTimestamp { counter, writer: sample_node() },
@@ -162,9 +162,9 @@ async fn s_as_01_running_snapshot_carries_six_actionable_fields() {
 
     let body: AllocStatusResponse = resp.0;
 
-    // KPI-03 — at least 6 populated fields beyond legacy alloc_id/job_id/node_id/state.
+    // KPI-03 — at least 6 populated fields beyond legacy alloc_id/workload_id/node_id/state.
     let envelope_populated_count = [
-        body.job_id.is_some(),
+        body.workload_id.is_some(),
         body.spec_digest.is_some(),
         body.replicas_desired > 0,
         body.replicas_running > 0,
@@ -326,14 +326,14 @@ proptest! {
 async fn write_terminal_row(
     state: &AppState,
     alloc: AllocationId,
-    job_id: JobId,
+    workload_id: WorkloadId,
     state_value: AllocState,
     counter: u64,
     terminal: Option<TerminalCondition>,
 ) {
     let row = AllocStatusRow {
         alloc_id: alloc,
-        job_id,
+        workload_id,
         node_id: sample_node(),
         state: state_value,
         updated_at: LogicalTimestamp { counter, writer: sample_node() },

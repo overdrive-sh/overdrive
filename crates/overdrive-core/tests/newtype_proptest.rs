@@ -7,7 +7,7 @@
 //! > invalid input must be rejected by `FromStr` with a structured
 //! > `ParseError`.
 //!
-//! This file covers `JobId`, `NodeId`, and `AllocationId` — the three
+//! This file covers `WorkloadId`, `NodeId`, and `AllocationId` — the three
 //! identifiers under step 01-01. The extended identifier set (US-02)
 //! lands in a later step with its own proptest module.
 
@@ -19,8 +19,8 @@
 use std::str::FromStr;
 
 use overdrive_core::id::{
-    AllocationId, CertSerial, ContentHash, IdParseError, InvestigationId, JobId, NodeId, PolicyId,
-    Region, SchematicId, SpiffeId,
+    AllocationId, CertSerial, ContentHash, IdParseError, InvestigationId, NodeId, PolicyId, Region,
+    SchematicId, SpiffeId, WorkloadId,
 };
 use proptest::prelude::*;
 
@@ -95,14 +95,14 @@ fn valid_label() -> impl Strategy<Value = String> {
 // -----------------------------------------------------------------------------
 
 proptest! {
-    /// JobId round-trips through Display -> FromStr.
+    /// WorkloadId round-trips through Display -> FromStr.
     ///
     /// Covers §2.1 scenario 1 under the property budget.
     #[test]
     fn job_id_display_from_str_round_trip(raw in valid_label()) {
-        let original = JobId::new(&raw).expect("generator yields valid input");
+        let original = WorkloadId::new(&raw).expect("generator yields valid input");
         let rendered = original.to_string();
-        let reparsed = JobId::from_str(&rendered).expect("canonical form re-parses");
+        let reparsed = WorkloadId::from_str(&rendered).expect("canonical form re-parses");
         prop_assert_eq!(reparsed, original);
     }
 
@@ -129,16 +129,16 @@ proptest! {
     }
 
     /// serde JSON output equals the Display form surrounded by quotes
-    /// for every valid JobId.
+    /// for every valid WorkloadId.
     ///
     /// Covers §2.1 scenario 4 (the JSON-byte-equivalence leg).
     #[test]
     fn job_id_serde_matches_display_quoted(raw in valid_label()) {
-        let id = JobId::new(&raw).expect("generator yields valid input");
+        let id = WorkloadId::new(&raw).expect("generator yields valid input");
         let json = serde_json::to_string(&id).expect("serialises");
         let expected = format!("\"{id}\"");
         prop_assert_eq!(&json, &expected);
-        let back: JobId = serde_json::from_str(&json).expect("deserialises");
+        let back: WorkloadId = serde_json::from_str(&json).expect("deserialises");
         prop_assert_eq!(back, id);
     }
 
@@ -205,7 +205,7 @@ proptest! {
         let mut raw = prefix;
         raw.push(bad);
         raw.push('x'); // keep last char valid so only the forbidden one trips
-        let err = JobId::from_str(&raw).expect_err("forbidden char must reject");
+        let err = WorkloadId::from_str(&raw).expect_err("forbidden char must reject");
         let is_invalid_char = matches!(err, IdParseError::InvalidChar { .. });
         prop_assert!(is_invalid_char, "expected InvalidChar variant");
     }
@@ -214,7 +214,7 @@ proptest! {
 #[test]
 fn job_id_rejects_empty_input_with_structured_error() {
     // Empty is a single case, not a property.
-    let err = JobId::from_str("").expect_err("empty must reject");
+    let err = WorkloadId::from_str("").expect_err("empty must reject");
     assert!(matches!(err, IdParseError::Empty { .. }));
 }
 
@@ -427,7 +427,7 @@ proptest! {
 //                         picks 32 arbitrary bytes and wraps.
 //
 // `SpiffeId` and `ContentHash` are already covered above; `Region` has a
-// dedicated case-insensitivity property; `JobId` / `NodeId` /
+// dedicated case-insensitivity property; `WorkloadId` / `NodeId` /
 // `AllocationId` have the core label round-trips. Taken together the
 // file now pins Display↔FromStr and serde round-trip for every member of
 // the Phase 1 identifier set (§3.3 completeness contract).

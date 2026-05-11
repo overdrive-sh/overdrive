@@ -1,10 +1,10 @@
-//! S-CLI-01 — `overdrive job submit --detach` argv surface.
+//! S-CLI-01 — `overdrive deploy --detach` argv surface.
 //!
 //! Per `docs/feature/cli-submit-vs-deploy-and-alloc-status/deliver/03-01`
 //! step 03-01 acceptance criteria:
 //!
-//! > Add `--detach` boolean to the `Submit` clap struct in
-//! > `crates/overdrive-cli/src/commands/job.rs`. When set, CLI sends
+//! > Add `--detach` boolean to the `Deploy` clap struct in
+//! > `crates/overdrive-cli/src/cli.rs`. When set, CLI sends
 //! > `Accept: application/json` and consumes the JSON ack only (today's
 //! > pre-feature shape) — does NOT engage the NDJSON consumer regardless
 //! > of stdout being a TTY. Exit code 0 on Inserted/Unchanged outcome;
@@ -28,19 +28,19 @@
 //! witness.
 
 use clap::Parser as _;
-use overdrive_cli::cli::{Cli, Command, JobCommand};
+use overdrive_cli::cli::{Cli, Command};
 
 // ---------------------------------------------------------------------
 // (A) `--detach` is recognised by clap and lands as `true`
 // ---------------------------------------------------------------------
 
 #[test]
-fn submit_with_detach_flag_parses_to_detach_true() {
-    let cli = Cli::try_parse_from(["overdrive", "job", "submit", "--detach", "payments.toml"])
-        .expect("`--detach` must be a recognised flag on `job submit`");
+fn deploy_with_detach_flag_parses_to_detach_true() {
+    let cli = Cli::try_parse_from(["overdrive", "deploy", "--detach", "payments.toml"])
+        .expect("`--detach` must be a recognised flag on `deploy`");
 
     match cli.command {
-        Command::Job(JobCommand::Submit { spec, detach }) => {
+        Command::Deploy { spec, detach } => {
             assert_eq!(
                 spec.to_string_lossy(),
                 "payments.toml",
@@ -48,10 +48,10 @@ fn submit_with_detach_flag_parses_to_detach_true() {
             );
             assert!(
                 detach,
-                "S-CLI-01: `--detach` on the argv must produce `detach = true` on the parsed Submit struct",
+                "S-CLI-01: `--detach` on the argv must produce `detach = true` on the parsed Deploy struct",
             );
         }
-        other => panic!("expected JobCommand::Submit, got {other:?}"),
+        other => panic!("expected Command::Deploy, got {other:?}"),
     }
 }
 
@@ -60,19 +60,19 @@ fn submit_with_detach_flag_parses_to_detach_true() {
 // ---------------------------------------------------------------------
 
 #[test]
-fn submit_without_detach_flag_parses_to_detach_false() {
-    let cli = Cli::try_parse_from(["overdrive", "job", "submit", "payments.toml"])
-        .expect("`job submit <spec>` without --detach is the streaming default and must parse");
+fn deploy_without_detach_flag_parses_to_detach_false() {
+    let cli = Cli::try_parse_from(["overdrive", "deploy", "payments.toml"])
+        .expect("`deploy <spec>` without --detach is the streaming default and must parse");
 
     match cli.command {
-        Command::Job(JobCommand::Submit { spec, detach }) => {
+        Command::Deploy { spec, detach } => {
             assert_eq!(spec.to_string_lossy(), "payments.toml");
             assert!(
                 !detach,
                 "S-CLI-01: absent `--detach` must produce `detach = false` (streaming-default lane)",
             );
         }
-        other => panic!("expected JobCommand::Submit, got {other:?}"),
+        other => panic!("expected Command::Deploy, got {other:?}"),
     }
 }
 
@@ -82,13 +82,8 @@ fn submit_without_detach_flag_parses_to_detach_false() {
 
 #[test]
 fn detach_flag_does_not_accept_a_value() {
-    // `--detach=true` would be malformed for a bool clap flag (clap
-    // treats `=value` on a `bool` arg as TakesValue=false → unknown).
-    // The criteria requires a plain boolean flag, no value-attached
-    // form. A future maintainer that accidentally introduces
-    // `#[arg(long, value_parser = ..)]` would break this contract.
     let result =
-        Cli::try_parse_from(["overdrive", "job", "submit", "--detach=somevalue", "payments.toml"]);
+        Cli::try_parse_from(["overdrive", "deploy", "--detach=somevalue", "payments.toml"]);
     assert!(
         result.is_err(),
         "S-CLI-01: `--detach` must be a boolean flag with no attached value; \
@@ -97,27 +92,18 @@ fn detach_flag_does_not_accept_a_value() {
 }
 
 // ---------------------------------------------------------------------
-// (D) `--detach` is documented in the help output for `job submit`
+// (D) `--detach` is documented in the help output for `deploy`
 // ---------------------------------------------------------------------
-//
-// The criteria explicitly says: 'The `--detach` flag is documented in
-// the help output (e.g. `/// Wait only for the IntentStore commit; do
-// not stream lifecycle events.`)'. This test pins that the help text
-// for `job submit` mentions `--detach` so an operator running
-// `overdrive job submit --help` discovers the flag.
 
 #[test]
-fn job_submit_help_output_documents_detach_flag() {
-    // Render the help text for `overdrive job submit` by asking clap
-    // to parse `--help` — clap returns an `Err` whose Display form is
-    // the help text.
-    let err = Cli::try_parse_from(["overdrive", "job", "submit", "--help"])
+fn deploy_help_output_documents_detach_flag() {
+    let err = Cli::try_parse_from(["overdrive", "deploy", "--help"])
         .expect_err("`--help` exits with a non-zero clap kind carrying the help text");
 
     let rendered = err.render().to_string();
 
     assert!(
         rendered.contains("--detach"),
-        "S-CLI-01: `overdrive job submit --help` must document the `--detach` flag; got:\n{rendered}",
+        "S-CLI-01: `overdrive deploy --help` must document the `--detach` flag; got:\n{rendered}",
     );
 }

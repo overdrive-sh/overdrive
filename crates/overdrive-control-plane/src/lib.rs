@@ -12,7 +12,7 @@
 //! | Module | Role |
 //! |---|---|
 //! | `api` | Shared request/response types (serde + utoipa) |
-//! | `handlers` | axum route handlers — submit_job, describe_job, cluster_status, alloc_status, node_list |
+//! | `handlers` | axum route handlers — submit_workload, describe_workload, cluster_status, alloc_status, node_list |
 //! | `error` | `ControlPlaneError` enum + `to_response` mapping (ADR-0015) |
 //! | `tls_bootstrap` | Ephemeral CA + trust triple + rustls config (ADR-0010) |
 //! | `reconciler_runtime` | `ReconcilerRuntime` + registry (ADR-0013/ADR-0035) |
@@ -103,7 +103,7 @@ pub struct AppState {
     /// Authoritative intent store — every write lands here.
     pub store: Arc<LocalIntentStore>,
     /// Eventually-consistent observation store. Unused by 03-01's
-    /// `submit_job` handler, but wired in so observation-reading
+    /// `submit_workload` handler, but wired in so observation-reading
     /// handlers in later steps (03-03) can pick it up without
     /// restructuring the state shape.
     pub obs: Arc<dyn ObservationStore>,
@@ -538,7 +538,7 @@ pub async fn run_server_with_obs_and_driver(
         })?);
     let mut runtime = reconciler_runtime::ReconcilerRuntime::new(&config.data_dir, view_store)?;
     runtime.register(noop_heartbeat()).await?;
-    runtime.register(job_lifecycle()).await?;
+    runtime.register(workload_lifecycle()).await?;
     let runtime = Arc::new(runtime);
 
     // Production boot threads the `ServerConfig.clock` into AppState
@@ -591,7 +591,7 @@ pub async fn run_server_with_obs_and_driver(
     // `convergence_shutdown` is observed in `tokio::select!` between
     // ticks so an in-flight dispatch always completes before exit.
     //
-    // Without this spawn, `submit_job` and `stop_job` would only
+    // Without this spawn, `submit_workload` and `stop_workload` would only
     // write to the IntentStore — the broker would never be drained,
     // no allocations would ever be scheduled, and
     // `cluster_status.broker.dispatched` would permanently read 0.
@@ -610,9 +610,9 @@ pub async fn run_server_with_obs_and_driver(
     // `cluster_status` handler signature; step 05-03 wires it onto the
     // real route (previously a `stub` placeholder).
     let router = Router::new()
-        .route("/v1/jobs", post(handlers::submit_job))
-        .route("/v1/jobs/:id", get(handlers::describe_job))
-        .route("/v1/jobs/:id/stop", post(handlers::stop_job))
+        .route("/v1/jobs", post(handlers::submit_workload))
+        .route("/v1/jobs/:id", get(handlers::describe_workload))
+        .route("/v1/jobs/:id/stop", post(handlers::stop_workload))
         .route("/v1/allocs", get(handlers::alloc_status))
         .route("/v1/nodes", get(handlers::node_list))
         .route("/v1/cluster/info", get(handlers::cluster_status))
@@ -678,7 +678,7 @@ pub async fn run_server_with_obs_and_driver(
 /// observed in `tokio::select!` between ticks so an in-flight dispatch
 /// always completes before exit.
 ///
-/// Without this spawn, `submit_job` and `stop_job` would only write to
+/// Without this spawn, `submit_workload` and `stop_workload` would only write to
 /// the `IntentStore` — the broker would never be drained, no allocations
 /// would ever be scheduled, and `cluster_status.broker.dispatched` would
 /// permanently read 0. See
@@ -764,8 +764,8 @@ pub fn noop_heartbeat() -> overdrive_core::reconciler::AnyReconciler {
 /// Per US-03 (Slice 3 of phase-1-first-workload), this is registered
 /// at boot alongside `noop-heartbeat`.
 #[must_use]
-pub fn job_lifecycle() -> overdrive_core::reconciler::AnyReconciler {
-    use overdrive_core::reconciler::{AnyReconciler, JobLifecycle};
+pub fn workload_lifecycle() -> overdrive_core::reconciler::AnyReconciler {
+    use overdrive_core::reconciler::{AnyReconciler, WorkloadLifecycle};
 
-    AnyReconciler::JobLifecycle(JobLifecycle::canonical())
+    AnyReconciler::WorkloadLifecycle(WorkloadLifecycle::canonical())
 }

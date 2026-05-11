@@ -1,8 +1,8 @@
-//! Acceptance tests for `overdrive_cli::render::job_stop_accepted`.
+//! Acceptance tests for `overdrive_cli::render::workload_stop_accepted`.
 //!
 //! Pins the rendered output for both `StopOutcome::Stopped` and
 //! `StopOutcome::AlreadyStopped`. Kills the two body-replacement
-//! mutations on `render::job_stop_accepted`:
+//! mutations on `render::workload_stop_accepted`:
 //!
 //!   - body → `String::new()` — empty string
 //!   - body → `"xyzzy".into()` — wrong literal
@@ -20,7 +20,7 @@ use url::Url;
 
 fn fixture_stop_output(outcome: StopOutcome) -> StopOutput {
     StopOutput {
-        job_id: "payments".to_string(),
+        workload_id: "payments".to_string(),
         outcome,
         endpoint: Url::parse("https://127.0.0.1:7001").expect("parse endpoint"),
     }
@@ -29,11 +29,11 @@ fn fixture_stop_output(outcome: StopOutcome) -> StopOutput {
 #[test]
 fn render_job_stop_accepted_for_stopped_outcome() {
     let out = fixture_stop_output(StopOutcome::Stopped);
-    let rendered = overdrive_cli::render::job_stop_accepted(&out);
+    let rendered = overdrive_cli::render::workload_stop_accepted(&out);
 
     assert!(
-        rendered.contains("Stopped job 'payments'"),
-        "rendered output must contain `Stopped job 'payments'`; got:\n{rendered}",
+        rendered.contains("Stopped workload 'payments'"),
+        "rendered output must contain `Stopped workload 'payments'`; got:\n{rendered}",
     );
     assert!(
         rendered.contains("Endpoint:"),
@@ -51,10 +51,10 @@ fn render_job_stop_accepted_for_stopped_outcome() {
 #[test]
 fn render_job_stop_accepted_for_already_stopped_outcome() {
     let out = fixture_stop_output(StopOutcome::AlreadyStopped);
-    let rendered = overdrive_cli::render::job_stop_accepted(&out);
+    let rendered = overdrive_cli::render::workload_stop_accepted(&out);
 
     assert!(
-        rendered.contains("Job 'payments' was already stopped"),
+        rendered.contains("Workload 'payments' was already stopped"),
         "rendered output must mention idempotent path; got:\n{rendered}",
     );
     assert!(

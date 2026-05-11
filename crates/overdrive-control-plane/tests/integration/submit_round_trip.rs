@@ -1,11 +1,11 @@
 //! Integration tests for `POST /v1/jobs` — step 03-01.
 //!
-//! Proves the Phase 1 `submit_job` handler round-trip:
+//! Proves the Phase 1 `submit_workload` handler round-trip:
 //!
 //! 1. Validates the spec via `Job::from_spec` (errors map to HTTP 400).
 //! 2. Archives via `rkyv::to_bytes::<rancor::Error>`.
-//! 3. Commits through `IntentStore::put_if_absent` at `jobs/<JobId>`.
-//! 4. Returns `{job_id, spec_digest, outcome}` with
+//! 3. Commits through `IntentStore::put_if_absent` at `jobs/<WorkloadId>`.
+//! 4. Returns `{workload_id, spec_digest, outcome}` with
 //!    `outcome == Inserted` on a fresh insert (per ADR-0020 the
 //!    `commit_index` field is dropped).
 //! 5. Idempotency: byte-identical re-submission returns the same
@@ -23,13 +23,13 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use overdrive_control_plane::api::{
-    ErrorBody, IdempotencyOutcome, SubmitJobRequest, SubmitJobResponse,
+    ErrorBody, IdempotencyOutcome, SubmitWorkloadRequest, SubmitWorkloadResponse,
 };
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
 use overdrive_core::aggregate::{
     DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
 };
-use overdrive_core::id::JobId;
+use overdrive_core::id::WorkloadId;
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
@@ -98,7 +98,7 @@ async fn spawn_server() -> (ServerHandle, SocketAddr, TempDir, String) {
         // production server now spawns a convergence-tick loop. This
         // test does not assert on convergence outcomes — its
         // assertions ride on the IntentStore round-trip through the
-        // submit_job handler — and shutdown ordering in
+        // submit_workload handler — and shutdown ordering in
         // `ServerHandle::shutdown` cancels the convergence task
         // before axum graceful so any in-flight ticks land cleanly.
         ..Default::default()
@@ -176,15 +176,15 @@ async fn post_v1_jobs_with_valid_spec_returns_200_inserted_with_canonical_digest
 
     let resp = client
         .post(&url)
-        .json(&SubmitJobRequest { spec: spec.clone(), workload_kind: None })
+        .json(&SubmitWorkloadRequest { spec: spec.clone(), workload_kind: None })
         .send()
         .await
         .expect("POST /v1/jobs");
 
     assert_eq!(resp.status(), reqwest::StatusCode::OK, "expected 200 OK");
-    let body: SubmitJobResponse = resp.json().await.expect("decode SubmitJobResponse");
+    let body: SubmitWorkloadResponse = resp.json().await.expect("decode SubmitWorkloadResponse");
 
-    assert_eq!(body.job_id, "payments", "job_id must echo the canonicalised JobId");
+    assert_eq!(body.workload_id, "payments", "workload_id must echo the canonicalised WorkloadId");
     assert_eq!(
         body.outcome,
         IdempotencyOutcome::Inserted,
@@ -223,7 +223,7 @@ async fn post_v1_jobs_persists_archived_job_under_jobs_prefix_in_local_store() {
     let spec = payments_spec();
     let resp = client
         .post(&url)
-        .json(&SubmitJobRequest { spec: spec.clone(), workload_kind: None })
+        .json(&SubmitWorkloadRequest { spec: spec.clone(), workload_kind: None })
         .send()
         .await
         .expect("POST /v1/jobs");
@@ -234,8 +234,8 @@ async fn post_v1_jobs_persists_archived_job_under_jobs_prefix_in_local_store() {
     // environments where redb's file lock is exclusive.
     handle.shutdown(Duration::from_secs(2)).await;
 
-    let job_id = JobId::new("payments").expect("parse payments JobId");
-    let key = IntentKey::for_job(&job_id);
+    let workload_id = WorkloadId::new("payments").expect("parse payments WorkloadId");
+    let key = IntentKey::for_job(&workload_id);
     let persisted = read_intent_key_from_store(&data_dir_under(tmp.path()), key.as_bytes())
         .await
         .expect("jobs/payments must be populated after successful submit");
@@ -276,7 +276,7 @@ async fn post_v1_jobs_with_invalid_spec_returns_400_with_error_body_naming_field
 
     let resp = client
         .post(&url)
-        .json(&SubmitJobRequest { spec: bad, workload_kind: None })
+        .json(&SubmitWorkloadRequest { spec: bad, workload_kind: None })
         .send()
         .await
         .expect("POST /v1/jobs with bad spec");
@@ -306,9 +306,9 @@ async fn post_v1_jobs_idempotent_byte_identical_spec_returns_unchanged_with_same
 
     let spec = payments_spec();
 
-    let first: SubmitJobResponse = client
+    let first: SubmitWorkloadResponse = client
         .post(&url)
-        .json(&SubmitJobRequest { spec: spec.clone(), workload_kind: None })
+        .json(&SubmitWorkloadRequest { spec: spec.clone(), workload_kind: None })
         .send()
         .await
         .expect("first submit")
@@ -318,7 +318,7 @@ async fn post_v1_jobs_idempotent_byte_identical_spec_returns_unchanged_with_same
 
     let second_resp = client
         .post(&url)
-        .json(&SubmitJobRequest { spec, workload_kind: None })
+        .json(&SubmitWorkloadRequest { spec, workload_kind: None })
         .send()
         .await
         .expect("second submit");
@@ -328,9 +328,9 @@ async fn post_v1_jobs_idempotent_byte_identical_spec_returns_unchanged_with_same
         reqwest::StatusCode::OK,
         "byte-identical re-submission must be 200 OK (idempotent)",
     );
-    let second: SubmitJobResponse = second_resp.json().await.expect("decode second response");
+    let second: SubmitWorkloadResponse = second_resp.json().await.expect("decode second response");
 
-    assert_eq!(first.job_id, second.job_id);
+    assert_eq!(first.workload_id, second.workload_id);
     assert_eq!(
         first.outcome,
         IdempotencyOutcome::Inserted,
@@ -354,7 +354,7 @@ async fn post_v1_jobs_idempotent_byte_identical_spec_returns_unchanged_with_same
 }
 
 // -----------------------------------------------------------------------
-// AC — different spec at same JobId -> HTTP 409 Conflict
+// AC — different spec at same WorkloadId -> HTTP 409 Conflict
 // -----------------------------------------------------------------------
 
 #[tokio::test]
@@ -366,18 +366,18 @@ async fn post_v1_jobs_with_different_spec_at_existing_key_returns_409_conflict()
     // First submit: canonical spec.
     let first = client
         .post(&url)
-        .json(&SubmitJobRequest { spec: payments_spec(), workload_kind: None })
+        .json(&SubmitWorkloadRequest { spec: payments_spec(), workload_kind: None })
         .send()
         .await
         .expect("first submit");
     assert_eq!(first.status(), reqwest::StatusCode::OK);
 
-    // Second submit: same JobId, different replicas. Must be rejected
+    // Second submit: same WorkloadId, different replicas. Must be rejected
     // with 409 per ADR-0015 §4 "Duplicate intent-key with *different*
     // spec".
     let conflict = client
         .post(&url)
-        .json(&SubmitJobRequest { spec: payments_spec_alt(), workload_kind: None })
+        .json(&SubmitWorkloadRequest { spec: payments_spec_alt(), workload_kind: None })
         .send()
         .await
         .expect("second submit");
@@ -385,7 +385,7 @@ async fn post_v1_jobs_with_different_spec_at_existing_key_returns_409_conflict()
     assert_eq!(
         conflict.status(),
         reqwest::StatusCode::CONFLICT,
-        "different spec at same JobId must be HTTP 409 Conflict",
+        "different spec at same WorkloadId must be HTTP 409 Conflict",
     );
     let body: ErrorBody = conflict.json().await.expect("decode ErrorBody");
     assert_eq!(body.error, "conflict", "error kind must be 'conflict'");

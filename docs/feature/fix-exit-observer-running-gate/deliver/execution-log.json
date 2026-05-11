@@ -260,6 +260,27 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-05-10T15:53:21Z"
+    },
+    {
+      "sid": "01-07",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T15:54:20Z"
+    },
+    {
+      "sid": "03-refactor",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "APPROVED_SKIP: refactor-pass evaluated all 18 modified files against L1-L4 (naming, duplication, structural, cohesion); no improvements warranted on this focused 6-commit fix. Closest candidate (L2 \u2014 gate-fire duplication across StartAllocation/RestartAllocation arms in action_shim) rejected: 4 lines x 2 sites with load-bearing AC2 comment block that would defeat consolidation; would shuffle code, not net-positive. Naming intention-revealing throughout; sim/host split per development.md preserved; user-signed-off paired-method gate shape kept intact.",
+      "t": "2026-05-10T15:58:09Z"
+    },
+    {
+      "sid": "07-finalize",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: evolution doc + analysis archived at commit 5cbf64f; no push (deferred to user authorization)",
+      "t": "2026-05-10T16:07:53Z"
     }
   ]
 }

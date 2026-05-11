@@ -32,7 +32,7 @@ use std::net::Ipv4Addr;
 use crate::aggregate::{Listener, ServiceVip, WorkloadKind};
 use crate::dataplane::backend_key::Proto;
 use crate::dataplane::fingerprint::BackendSetFingerprint;
-use crate::id::{AllocationId, JobId, NodeId, Region, ServiceId};
+use crate::id::{AllocationId, NodeId, Region, ServiceId, WorkloadId};
 use crate::traits::dataplane::Backend;
 use crate::transition_reason::{TerminalCondition, TransitionReason};
 use crate::wall_clock::UnixInstant;
@@ -283,7 +283,7 @@ impl LogicalTimestamp {
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct AllocStatusRow {
     pub alloc_id: AllocationId,
-    pub job_id: JobId,
+    pub workload_id: WorkloadId,
     pub node_id: NodeId,
     pub state: AllocState,
     pub updated_at: LogicalTimestamp,
@@ -342,7 +342,7 @@ pub struct AllocStatusRow {
     /// before any persistent observation row was written under prior
     /// schemas in production). The action shim's
     /// `build_alloc_status_row` populates this from the originating
-    /// `JobLifecycleState.workload_kind` (per ADR-0047 §1).
+    /// `WorkloadLifecycleState.workload_kind` (per ADR-0047 §1).
     ///
     /// Default is [`WorkloadKind::Service`] per the same back-compat
     /// rule documented on the [`WorkloadKind`] type itself — preserves
@@ -620,7 +620,7 @@ pub trait ObservationStore: Send + Sync + 'static {
     /// makes that invariant load-bearing at the type level.
     ///
     /// Used by the worker subsystems (`exit_observer`, `action_shim`)
-    /// to recover the prior `(job_id, node_id, updated_at)` tuple
+    /// to recover the prior `(workload_id, node_id, updated_at)` tuple
     /// when writing a successor row. The previous shape — calling
     /// `alloc_status_rows()` and then `find`/`max_by_key` over the
     /// result — encoded a false suggestion that the contract permits

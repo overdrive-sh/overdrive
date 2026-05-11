@@ -12,10 +12,10 @@
 //!     dispatch that does NOT panic and returns the expected tuple
 //!     can only have come from the production arm.
 //!
-//!   - `delete match arm (Self::JobLifecycle(r), … JobLifecycle …)`
+//!   - `delete match arm (Self::WorkloadLifecycle(r), … WorkloadLifecycle …)`
 //!     — same shape: production dispatches to
-//!     `JobLifecycle::reconcile` and returns
-//!     `AnyReconcilerView::JobLifecycle(_)`. Under deletion the
+//!     `WorkloadLifecycle::reconcile` and returns
+//!     `AnyReconcilerView::WorkloadLifecycle(_)`. Under deletion the
 //!     wildcard panics. The test asserts the variant of the
 //!     returned `AnyReconcilerView`, which can only come from the
 //!     production arm.
@@ -31,11 +31,11 @@ use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{Node, WorkloadKind};
-use overdrive_core::id::{JobId, NodeId, Region};
+use overdrive_core::id::{NodeId, Region, WorkloadId};
 use overdrive_core::reconciler::{
-    Action, AnyReconciler, AnyReconcilerView, AnyState, JobLifecycle, JobLifecycleState,
-    NoopHeartbeat, ServiceMapHydrator, ServiceMapHydratorState, ServiceMapHydratorView,
-    TickContext,
+    Action, AnyReconciler, AnyReconcilerView, AnyState, NoopHeartbeat, ServiceMapHydrator,
+    ServiceMapHydratorState, ServiceMapHydratorView, TickContext, WorkloadLifecycle,
+    WorkloadLifecycleState,
 };
 use overdrive_core::traits::driver::Resources;
 
@@ -70,17 +70,17 @@ fn dispatch_routes_noop_heartbeat_unit_triple_to_noop_action() {
 }
 
 // -------------------------------------------------------------------
-// L975 — JobLifecycle dispatch arm
+// L975 — WorkloadLifecycle dispatch arm
 // -------------------------------------------------------------------
 
 #[test]
 fn dispatch_routes_job_lifecycle_triple_to_job_lifecycle_view() {
-    // Construct the canonical `JobLifecycle`, wrap it in
-    // `AnyReconciler::JobLifecycle`, and dispatch with the
-    // JobLifecycle triple. Production: routes to
-    // `JobLifecycle::reconcile` → returns `AnyReconcilerView::
-    // JobLifecycle(_)`. Mutant (delete arm): wildcard panic.
-    let any = AnyReconciler::JobLifecycle(JobLifecycle::canonical());
+    // Construct the canonical `WorkloadLifecycle`, wrap it in
+    // `AnyReconciler::WorkloadLifecycle`, and dispatch with the
+    // WorkloadLifecycle triple. Production: routes to
+    // `WorkloadLifecycle::reconcile` → returns `AnyReconcilerView::
+    // WorkloadLifecycle(_)`. Mutant (delete arm): wildcard panic.
+    let any = AnyReconciler::WorkloadLifecycle(WorkloadLifecycle::canonical());
     let now = Instant::now();
     let tick = TickContext {
         now,
@@ -89,11 +89,11 @@ fn dispatch_routes_job_lifecycle_triple_to_job_lifecycle_view() {
         deadline: now + Duration::from_secs(1),
     };
 
-    // Empty desired/actual JobLifecycle states — no allocs, no nodes,
+    // Empty desired/actual WorkloadLifecycle states — no allocs, no nodes,
     // no job. The reconciler emits no actions, returns its default
     // view. We don't care about the action shape for this test —
     // only the *variant* of the returned view, which is uniquely
-    // produced by the JobLifecycle dispatch arm.
+    // produced by the WorkloadLifecycle dispatch arm.
     let mut nodes = BTreeMap::new();
     let local = Node {
         id: NodeId::new("local").expect("valid NodeId"),
@@ -101,35 +101,36 @@ fn dispatch_routes_job_lifecycle_triple_to_job_lifecycle_view() {
         capacity: Resources { cpu_milli: 1_000, memory_bytes: 1024 * 1024 * 1024 },
     };
     nodes.insert(local.id.clone(), local);
-    let _ = JobId::new("payments").expect("valid JobId");
+    let _ = WorkloadId::new("payments").expect("valid WorkloadId");
 
-    let desired = JobLifecycleState {
+    let desired = WorkloadLifecycleState {
         job: None,
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
     };
-    let actual = JobLifecycleState {
+    let actual = WorkloadLifecycleState {
         job: None,
         desired_to_stop: false,
         nodes,
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
     };
-    let view =
-        AnyReconcilerView::JobLifecycle(overdrive_core::reconciler::JobLifecycleView::default());
+    let view = AnyReconcilerView::WorkloadLifecycle(
+        overdrive_core::reconciler::WorkloadLifecycleView::default(),
+    );
 
     let (_actions, returned_view) = any.reconcile(
-        &AnyState::JobLifecycle(desired),
-        &AnyState::JobLifecycle(actual),
+        &AnyState::WorkloadLifecycle(desired),
+        &AnyState::WorkloadLifecycle(actual),
         &view,
         &tick,
     );
 
     assert!(
-        matches!(returned_view, AnyReconcilerView::JobLifecycle(_)),
-        "JobLifecycle dispatch must return AnyReconcilerView::JobLifecycle; got {returned_view:?}",
+        matches!(returned_view, AnyReconcilerView::WorkloadLifecycle(_)),
+        "WorkloadLifecycle dispatch must return AnyReconcilerView::WorkloadLifecycle; got {returned_view:?}",
     );
 }
 

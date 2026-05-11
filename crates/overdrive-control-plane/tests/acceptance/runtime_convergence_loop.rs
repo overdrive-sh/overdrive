@@ -25,7 +25,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
-use overdrive_control_plane::{AppState, job_lifecycle, noop_heartbeat};
+use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
 use overdrive_core::aggregate::{
     DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput, WorkloadKind,
 };
@@ -52,7 +52,7 @@ async fn build_converged_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState 
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
     runtime.register(noop_heartbeat()).await.expect("register noop-heartbeat");
-    runtime.register(job_lifecycle()).await.expect("register job-lifecycle");
+    runtime.register(workload_lifecycle()).await.expect("register job-lifecycle");
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
@@ -87,7 +87,7 @@ async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
     let state = build_converged_state(&tmp, clock.clone()).await;
 
     // --- Preload IntentStore: one Job, replicas=1 (the converged
-    //     desired state for `JobLifecycle` against `job/payments`).
+    //     desired state for `WorkloadLifecycle` against `job/payments`).
     let job = Job::from_spec(JobSpecInput {
         id: "payments".to_string(),
         replicas: 1,
@@ -100,12 +100,12 @@ async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
     // --- Preload ObservationStore: one Running alloc against the same
-    //     job (so `JobLifecycle::reconcile` sees `desired ≈ actual` and
+    //     job (so `WorkloadLifecycle::reconcile` sees `desired ≈ actual` and
     //     emits no actions, isolating the assertion to NoopHeartbeat).
     let writer = NodeId::new("local").expect("writer node id");
     let alloc_row = AllocStatusRow {
         alloc_id: AllocationId::new("alloc-payments-0").expect("valid alloc id"),
-        job_id: job.id.clone(),
+        workload_id: job.id.clone(),
         node_id: writer.clone(),
         state: AllocState::Running,
         updated_at: LogicalTimestamp { counter: 1, writer: writer.clone() },
@@ -177,7 +177,7 @@ async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
 // reconciler against the target — not fan out across every registered
 // reconciler. The current production loop (`for name in &registered`)
 // ignores `eval.reconciler` entirely, so a single eval submitted at
-// `(job-lifecycle, job/payments)` causes BOTH `JobLifecycle::hydrate_desired`
+// `(job-lifecycle, job/payments)` causes BOTH `WorkloadLifecycle::hydrate_desired`
 // AND `NoopHeartbeat::hydrate_desired` to read from the IntentStore — see
 // `docs/feature/fix-eval-reconciler-discarded/deliver/bugfix-rca.md` §Defect.
 //
@@ -197,7 +197,7 @@ async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
 
 /// RED — drives the runtime convergence loop with a single
 /// `Evaluation { reconciler: job-lifecycle, target: job/payments }` and
-/// asserts that ONLY `JobLifecycle` is dispatched against the target.
+/// asserts that ONLY `WorkloadLifecycle` is dispatched against the target.
 ///
 /// Counting strategy: the broker's `dispatched` counter is bumped
 /// once per `run_convergence_tick` invocation. Submitting one
@@ -208,7 +208,7 @@ async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
 ///
 /// Note (May 2026, runtime Eq-diff additive extension per ADR-0035
 /// §1): an earlier version of this test additionally asserted on
-/// `loaded_job_lifecycle_views_for_test(...).contains_key(target)`
+/// `loaded_workload_lifecycle_views_for_test(...).contains_key(target)`
 /// as a secondary witness. Under Eq-diff that side-effect is no
 /// longer reliable: a converged-Running target produces a `next_view`
 /// equal to the in-memory `default()`, so the runtime correctly
@@ -228,7 +228,7 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
     runtime.register(noop_heartbeat()).await.expect("register noop-heartbeat");
-    runtime.register(job_lifecycle()).await.expect("register job-lifecycle");
+    runtime.register(workload_lifecycle()).await.expect("register job-lifecycle");
 
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
@@ -258,13 +258,13 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
     state.store.put(payments_intent_key.as_bytes(), archived.as_ref()).await.expect("put job");
 
     // --- Preload ObservationStore: one Running alloc against the same
-    //     job so `JobLifecycle::reconcile` sees `desired ≈ actual` and
+    //     job so `WorkloadLifecycle::reconcile` sees `desired ≈ actual` and
     //     emits no actions — keeps the assertion focused on the
     //     dispatch-routing defect rather than convergence work.
     let writer = NodeId::new("local").expect("writer node id");
     let alloc_row = AllocStatusRow {
         alloc_id: AllocationId::new("alloc-payments-0").expect("valid alloc id"),
-        job_id: job.id.clone(),
+        workload_id: job.id.clone(),
         node_id: writer.clone(),
         state: AllocState::Running,
         updated_at: LogicalTimestamp { counter: 1, writer: writer.clone() },
@@ -307,22 +307,22 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
     //     counter is bumped once per `run_convergence_tick`: pre-fix
     //     the dispatch loop runs every registered reconciler against
     //     the target, so for one submitted eval the counter would be
-    //     ≥ 2 (`JobLifecycle` AND `NoopHeartbeat`); post-fix only the
+    //     ≥ 2 (`WorkloadLifecycle` AND `NoopHeartbeat`); post-fix only the
     //     named reconciler runs and the counter is exactly one.
     //
-    //     The runtime's `loaded_job_lifecycle_views_for_test` is no
+    //     The runtime's `loaded_workload_lifecycle_views_for_test` is no
     //     longer a reliable side-effect witness here — see the
     //     test's docstring "Note (May 2026, runtime Eq-diff additive
     //     extension per ADR-0035 §1)" for the rationale. We still
-    //     check the JobLifecycle map exists (sanity: the reconciler
+    //     check the WorkloadLifecycle map exists (sanity: the reconciler
     //     was registered), but do NOT check `contains_key(&target)`
     //     because a converged-Running target yields
     //     `next_view == default()` and the runtime elides the
     //     in-memory insert.
-    let job_lifecycle_name = ReconcilerName::new("job-lifecycle").expect("name");
+    let workload_lifecycle_name = ReconcilerName::new("job-lifecycle").expect("name");
     let _jl_views = state
         .runtime
-        .loaded_job_lifecycle_views_for_test(&job_lifecycle_name)
+        .loaded_workload_lifecycle_views_for_test(&workload_lifecycle_name)
         .expect("job-lifecycle map present after register");
     // Broker dispatched counter: pre-fix would be ≥ 2 (both reconcilers
     // ran); post-fix is exactly 1 (the named reconciler only).
@@ -338,7 +338,7 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
 // fix-stop-branch-backoff-pending — RED regression scaffold (Step 01-01).
 //
 // Pins the §18 *Level-triggered inside the reconciler* contract for the
-// Stop branch of `JobLifecycle::reconcile`: when a stop intent arrives
+// Stop branch of `WorkloadLifecycle::reconcile`: when a stop intent arrives
 // while the only alloc is `Failed` mid-restart-backoff
 // (`view.last_failure_seen_at` populated, `view.restart_counts < CEILING`),
 // the reconciler must clear the transitional view state — otherwise
@@ -418,7 +418,7 @@ async fn stop_after_failed_alloc_drains_broker() {
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
     runtime.register(noop_heartbeat()).await.expect("register noop-heartbeat");
-    runtime.register(job_lifecycle()).await.expect("register job-lifecycle");
+    runtime.register(workload_lifecycle()).await.expect("register job-lifecycle");
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
@@ -473,7 +473,7 @@ async fn stop_after_failed_alloc_drains_broker() {
     //     `RESTART_BACKOFF_DURATION = 1 s`, so the alloc stays
     //     mid-backoff for the rest of the test.
     let setup_target = target.clone();
-    let job_id = job.id.clone();
+    let workload_id = job.id.clone();
     let mut warm_up_ticks = 0_u64;
     while warm_up_ticks < 30 {
         let now = clock.now();
@@ -499,9 +499,9 @@ async fn stop_after_failed_alloc_drains_broker() {
 
         // Check whether the cached view shows the desired
         // Failed-mid-backoff state.
-        let view = state.runtime.view_for_job_lifecycle(&setup_target);
-        let alloc_id =
-            AllocationId::new(&format!("alloc-{}-0", job_id.as_str())).expect("derived alloc id");
+        let view = state.runtime.view_for_workload_lifecycle(&setup_target);
+        let alloc_id = AllocationId::new(&format!("alloc-{}-0", workload_id.as_str()))
+            .expect("derived alloc id");
         let count = view.restart_counts.get(&alloc_id).copied().unwrap_or(0);
         let has_deadline = view.last_failure_seen_at.contains_key(&alloc_id);
         if count >= 1 && has_deadline {
@@ -525,7 +525,7 @@ async fn stop_after_failed_alloc_drains_broker() {
     //     is the signal — value is opaque (the runtime probes
     //     `state.store.get(stop_key.as_bytes())` and treats `Some(_)`
     //     as "stop intended"). A single zero byte is sufficient.
-    let stop_key = IntentKey::for_job_stop(&job_id);
+    let stop_key = IntentKey::for_job_stop(&workload_id);
     state.store.put(stop_key.as_bytes(), &[0u8]).await.expect("put stop intent");
 
     // --- Re-submit the evaluation so the next tick re-evaluates the
@@ -598,13 +598,13 @@ async fn stop_after_failed_alloc_drains_broker() {
 // across simulated control-plane restart.
 //
 // Pins the load-bearing property of "persist inputs, not derived state" at
-// the runtime boundary: a freshly-rehydrated `JobLifecycleView` constructed
+// the runtime boundary: a freshly-rehydrated `WorkloadLifecycleView` constructed
 // from only the persisted *inputs* `(restart_counts, last_failure_seen_at)`
 // produces a reconcile output bit-equivalent to the live in-memory view at
 // the same `TickContext`, when `backoff_for_attempt` is unchanged.
 //
-// Step 02-02 pinned the same property at the `JobLifecycle::reconcile`
-// boundary (`crates/overdrive-core/tests/acceptance/job_lifecycle_recompute_deadline.rs`
+// Step 02-02 pinned the same property at the `WorkloadLifecycle::reconcile`
+// boundary (`crates/overdrive-core/tests/acceptance/workload_lifecycle_recompute_deadline.rs`
 // `restart_survival_idempotence`). 03-02 is the runtime-boundary
 // counterpart: drive the runtime convergence loop until the cached view
 // has accumulated non-trivial backoff state, then prove that wiping the
@@ -613,7 +613,7 @@ async fn stop_after_failed_alloc_drains_broker() {
 // yields an identical reconcile trajectory at the same TickContext.
 //
 // Why this matters: under the rejected alternative where
-// `JobLifecycleView` persisted a precomputed `next_attempt_at` deadline,
+// `WorkloadLifecycleView` persisted a precomputed `next_attempt_at` deadline,
 // this property would still pass *today* but would silently no-op when
 // `backoff_for_attempt` evolves (a future per-tenant backoff override,
 // a tier-based schedule swap, a deferred attempt-count adjustment).
@@ -622,11 +622,11 @@ async fn stop_after_failed_alloc_drains_broker() {
 // the policy evolves between persistence and rehydration.
 // ---------------------------------------------------------------------------
 
-/// GIVEN the runtime has driven `JobLifecycle` into a Failed-mid-backoff
-/// state where the cached `JobLifecycleView` carries
+/// GIVEN the runtime has driven `WorkloadLifecycle` into a Failed-mid-backoff
+/// state where the cached `WorkloadLifecycleView` carries
 /// `restart_counts > 0` and `last_failure_seen_at` populated —
 /// WHEN the cached view is replaced with a freshly-constructed
-/// `JobLifecycleView` containing ONLY the persisted inputs from the
+/// `WorkloadLifecycleView` containing ONLY the persisted inputs from the
 /// snapshot (simulating a control-plane restart that rehydrates view
 /// state from libSQL columns) AND reconcile is invoked at an identical
 /// `TickContext` —
@@ -646,8 +646,8 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
 
     use overdrive_core::UnixInstant;
     use overdrive_core::reconciler::{
-        AnyReconciler, AnyReconcilerView, AnyState, JobLifecycle, JobLifecycleState,
-        JobLifecycleView, TickContext,
+        AnyReconciler, AnyReconcilerView, AnyState, TickContext, WorkloadLifecycle,
+        WorkloadLifecycleState, WorkloadLifecycleView,
     };
     use overdrive_core::traits::driver::Resources;
 
@@ -664,7 +664,7 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
     runtime.register(noop_heartbeat()).await.expect("register noop-heartbeat");
-    runtime.register(job_lifecycle()).await.expect("register job-lifecycle");
+    runtime.register(workload_lifecycle()).await.expect("register job-lifecycle");
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
@@ -684,7 +684,7 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
 
     // --- Preload a Job that the SimDriver will reject — this drives
     //     the alloc into Failed and exercises the restart-with-backoff
-    //     branch where `JobLifecycleView` accumulates state.
+    //     branch where `WorkloadLifecycleView` accumulates state.
     let job = Job::from_spec(JobSpecInput {
         id: "payments".to_string(),
         replicas: 1,
@@ -712,9 +712,9 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
     //     above. Logical time advances by 100 ms per tick — well below
     //     `RESTART_BACKOFF_DURATION = 1 s`, so the alloc stays mid-backoff
     //     across the warm-up.
-    let job_id = job.id.clone();
+    let workload_id = job.id.clone();
     let alloc_id =
-        AllocationId::new(&format!("alloc-{}-0", job_id.as_str())).expect("derived alloc id");
+        AllocationId::new(&format!("alloc-{}-0", workload_id.as_str())).expect("derived alloc id");
     let mut warm_up_ticks = 0_u64;
     while warm_up_ticks < 30 {
         let now = sim_clock.now();
@@ -738,7 +738,7 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
         sim_clock.tick(Duration::from_millis(100));
         warm_up_ticks += 1;
 
-        let view = state.runtime.view_for_job_lifecycle(&target);
+        let view = state.runtime.view_for_workload_lifecycle(&target);
         let count = view.restart_counts.get(&alloc_id).copied().unwrap_or(0);
         let has_seen_at = view.last_failure_seen_at.contains_key(&alloc_id);
         if count >= 1 && has_seen_at {
@@ -747,7 +747,7 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
     }
     assert!(
         warm_up_ticks < 30,
-        "warm-up failed to populate JobLifecycleView with backoff inputs in 30 ticks; \
+        "warm-up failed to populate WorkloadLifecycleView with backoff inputs in 30 ticks; \
          test fixture is misconfigured (SimDriver should reject starts and the \
          action_shim should write Failed allocs that the reconciler then restarts)",
     );
@@ -756,10 +756,10 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
     //     ONLY two fields a libSQL hydrate would produce: `restart_counts`
     //     and `last_failure_seen_at`. The view holds nothing else — by
     //     construction (issue #141 §"Persist inputs, not derived state").
-    let view_pre: JobLifecycleView = state.runtime.view_for_job_lifecycle(&target);
+    let view_pre: WorkloadLifecycleView = state.runtime.view_for_workload_lifecycle(&target);
     assert!(
         !view_pre.restart_counts.is_empty() || !view_pre.last_failure_seen_at.is_empty(),
-        "expected non-default JobLifecycle view after warm-up; got default"
+        "expected non-default WorkloadLifecycle view after warm-up; got default"
     );
     let restart_counts_persisted: BTreeMap<AllocationId, u32> = view_pre.restart_counts.clone();
     let last_failure_seen_at_persisted: BTreeMap<AllocationId, UnixInstant> =
@@ -788,7 +788,7 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
     //     ObservationStore and invalidate the post-restart comparison).
     let alloc_rows = state.obs.alloc_status_rows().await.expect("read alloc rows");
     let mut allocations = BTreeMap::new();
-    for row in alloc_rows.into_iter().filter(|r| r.job_id == job_id) {
+    for row in alloc_rows.into_iter().filter(|r| r.workload_id == workload_id) {
         allocations.insert(row.alloc_id.clone(), row);
     }
     let mut nodes = BTreeMap::new();
@@ -803,14 +803,14 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
     let _ = Resources { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 }; // type used by job spec
     nodes.insert(local_node.id.clone(), local_node);
 
-    let desired = AnyState::JobLifecycle(JobLifecycleState {
+    let desired = AnyState::WorkloadLifecycle(WorkloadLifecycleState {
         job: Some(job.clone()),
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
     });
-    let actual = AnyState::JobLifecycle(JobLifecycleState {
+    let actual = AnyState::WorkloadLifecycle(WorkloadLifecycleState {
         job: None,
         desired_to_stop: false,
         nodes,
@@ -826,28 +826,28 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
     let now_unix = UnixInstant::from_clock(&*sim_clock);
     let tick = TickContext { now, now_unix, tick: 99, deadline: now + Duration::from_millis(100) };
 
-    let reconciler = AnyReconciler::JobLifecycle(JobLifecycle::canonical());
-    let view_live = AnyReconcilerView::JobLifecycle(view_pre.clone());
+    let reconciler = AnyReconciler::WorkloadLifecycle(WorkloadLifecycle::canonical());
+    let view_live = AnyReconcilerView::WorkloadLifecycle(view_pre.clone());
     let (actions_pre, next_view_pre) = reconciler.reconcile(&desired, &actual, &view_live, &tick);
 
     // --- Simulate control-plane restart: drop the cached view (the
     //     in-memory derived state) and rehydrate a fresh
-    //     `JobLifecycleView` from ONLY the persisted inputs. This is
+    //     `WorkloadLifecycleView` from ONLY the persisted inputs. This is
     //     the exact rehydration shape libSQL would produce —
     //     `restart_counts` and `last_failure_seen_at` are the row
     //     columns; the view struct holds nothing else.
-    state.runtime.drop_job_lifecycle_view_for_test(&target);
-    let view_post = JobLifecycleView {
+    state.runtime.drop_workload_lifecycle_view_for_test(&target);
+    let view_post = WorkloadLifecycleView {
         restart_counts: restart_counts_persisted.clone(),
         last_failure_seen_at: last_failure_seen_at_persisted.clone(),
     };
-    state.runtime.seed_job_lifecycle_view_for_test(&target, view_post.clone());
+    state.runtime.seed_workload_lifecycle_view_for_test(&target, view_post.clone());
 
     // --- Run reconcile against the rehydrated view at the SAME
     //     TickContext. Same desired, same actual, same tick — the only
     //     difference is the view came from a "freshly bootstrapped
     //     process" rather than a continuous in-memory accumulation.
-    let view_rehydrated = AnyReconcilerView::JobLifecycle(view_post);
+    let view_rehydrated = AnyReconcilerView::WorkloadLifecycle(view_post);
     let (actions_post, next_view_post) =
         reconciler.reconcile(&desired, &actual, &view_rehydrated, &tick);
 
@@ -915,7 +915,7 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
 // ---------------------------------------------------------------------------
 
 /// Prepare a converged-shaped runtime + Failed alloc + cached
-/// `JobLifecycleView` with the supplied `restart_counts` for the
+/// `WorkloadLifecycleView` with the supplied `restart_counts` for the
 /// alloc, and `last_failure_seen_at` very close to "now" (so the
 /// backoff window has NOT elapsed regardless of attempt count). Drives
 /// the broker to empty, then runs ONE convergence tick. Returns
@@ -924,7 +924,7 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
     use std::collections::BTreeMap;
 
     use overdrive_core::UnixInstant;
-    use overdrive_core::reconciler::JobLifecycleView;
+    use overdrive_core::reconciler::WorkloadLifecycleView;
 
     let tmp = TempDir::new().expect("tempdir");
     let sim_clock = Arc::new(SimClock::new());
@@ -932,7 +932,7 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
     runtime.register(noop_heartbeat()).await.expect("register noop-heartbeat");
-    runtime.register(job_lifecycle()).await.expect("register job-lifecycle");
+    runtime.register(workload_lifecycle()).await.expect("register job-lifecycle");
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
@@ -987,7 +987,7 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
         };
     let alloc_row = AllocStatusRow {
         alloc_id: alloc_id.clone(),
-        job_id: job.id.clone(),
+        workload_id: job.id.clone(),
         node_id: writer.clone(),
         state: AllocState::Failed,
         updated_at: LogicalTimestamp { counter: 1, writer: writer.clone() },
@@ -1008,8 +1008,8 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
     restart_counts.insert(alloc_id.clone(), restart_counts_value);
     let mut last_failure_seen_at = BTreeMap::new();
     last_failure_seen_at.insert(alloc_id, UnixInstant::from_clock(&*sim_clock));
-    let view = JobLifecycleView { restart_counts, last_failure_seen_at };
-    state.runtime.seed_job_lifecycle_view_for_test(&target, view);
+    let view = WorkloadLifecycleView { restart_counts, last_failure_seen_at };
+    state.runtime.seed_workload_lifecycle_view_for_test(&target, view);
 
     // Submit and drain the seed eval — without re-submitting, the
     // broker is empty going into the tick. After the tick, queued
@@ -1033,7 +1033,7 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
     state.runtime.broker().counters().queued
 }
 
-/// GIVEN a `JobLifecycleView` with `restart_counts={alloc→1}` (strictly
+/// GIVEN a `WorkloadLifecycleView` with `restart_counts={alloc→1}` (strictly
 /// below the CEILING of 5) and `last_failure_seen_at` populated within
 /// the unelapsed backoff window —
 /// WHEN one convergence tick runs against a Failed alloc whose
@@ -1056,7 +1056,7 @@ async fn view_below_ceiling_with_seen_at_re_enqueues() {
     );
 }
 
-/// GIVEN a `JobLifecycleView` with `restart_counts={alloc→CEILING}`
+/// GIVEN a `WorkloadLifecycleView` with `restart_counts={alloc→CEILING}`
 /// (exactly the ceiling — backoff budget exhausted) and
 /// `last_failure_seen_at` populated —
 /// WHEN one convergence tick runs against a Failed alloc whose
@@ -1084,22 +1084,22 @@ async fn view_at_ceiling_with_seen_at_does_not_re_enqueue() {
 }
 
 // ---------------------------------------------------------------------------
-// drop_job_lifecycle_view_for_test — mutation-gate kill target
+// drop_workload_lifecycle_view_for_test — mutation-gate kill target
 //
-// Kills the `replace drop_job_lifecycle_view_for_test with ()` mutation
+// Kills the `replace drop_workload_lifecycle_view_for_test with ()` mutation
 // (reconciler_runtime.rs:499). Without this test, the mutation is invisible
 // because the only existing call site immediately re-seeds the view, so the
 // drop effect is fully masked.
 // ---------------------------------------------------------------------------
 
-/// Seeding a `JobLifecycleView` then dropping it via
-/// `drop_job_lifecycle_view_for_test` must leave `view_for_job_lifecycle`
+/// Seeding a `WorkloadLifecycleView` then dropping it via
+/// `drop_workload_lifecycle_view_for_test` must leave `view_for_workload_lifecycle`
 /// returning the default (empty) view. If `drop` is replaced with a no-op,
-/// `view_for_job_lifecycle` would still return the previously-seeded
+/// `view_for_workload_lifecycle` would still return the previously-seeded
 /// non-default view and the assertion below would fail.
 #[tokio::test]
 async fn drop_job_lifecycle_view_removes_seeded_view() {
-    use overdrive_core::reconciler::{JobLifecycleView, TargetResource};
+    use overdrive_core::reconciler::{TargetResource, WorkloadLifecycleView};
     use std::collections::BTreeMap;
 
     let tmp = TempDir::new().expect("tmpdir");
@@ -1113,25 +1113,26 @@ async fn drop_job_lifecycle_view_removes_seeded_view() {
     // Seed a non-default view (restart_counts non-empty).
     let mut counts = BTreeMap::new();
     counts.insert(alloc_id.clone(), 2u32);
-    let seeded = JobLifecycleView { restart_counts: counts, last_failure_seen_at: BTreeMap::new() };
-    state.runtime.seed_job_lifecycle_view_for_test(&target, seeded);
+    let seeded =
+        WorkloadLifecycleView { restart_counts: counts, last_failure_seen_at: BTreeMap::new() };
+    state.runtime.seed_workload_lifecycle_view_for_test(&target, seeded);
 
     // Verify the seed is visible before drop.
-    let before = state.runtime.view_for_job_lifecycle(&target);
+    let before = state.runtime.view_for_workload_lifecycle(&target);
     assert_eq!(
         before.restart_counts.get(&alloc_id).copied(),
         Some(2),
         "seeded view must be visible before drop"
     );
 
-    // Drop the view — after this, view_for_job_lifecycle must return default().
-    state.runtime.drop_job_lifecycle_view_for_test(&target);
+    // Drop the view — after this, view_for_workload_lifecycle must return default().
+    state.runtime.drop_workload_lifecycle_view_for_test(&target);
 
-    let after = state.runtime.view_for_job_lifecycle(&target);
+    let after = state.runtime.view_for_workload_lifecycle(&target);
     assert_eq!(
         after,
-        JobLifecycleView::default(),
-        "view_for_job_lifecycle must return default() after drop_job_lifecycle_view_for_test; \
+        WorkloadLifecycleView::default(),
+        "view_for_workload_lifecycle must return default() after drop_workload_lifecycle_view_for_test; \
          got {after:?}"
     );
 }

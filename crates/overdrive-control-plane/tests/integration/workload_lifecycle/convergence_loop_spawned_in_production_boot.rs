@@ -31,7 +31,7 @@
 //!      Root Cause C (no automated gate on `broker.dispatched`).
 //!   2. Submitted job reaches `Running` — kills Roots A + B
 //!      together (production omission of the spawn AND
-//!      `submit_job` not enqueueing an evaluation).
+//!      `submit_workload` not enqueueing an evaluation).
 //!
 //! Tier 3 — real axum server, real rustls handshake, real reqwest
 //! client. Gated by the `integration-tests` feature at the
@@ -41,7 +41,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use overdrive_control_plane::api::{
-    AllocStatusResponse, ClusterStatus, IdempotencyOutcome, SubmitJobRequest, SubmitJobResponse,
+    AllocStatusResponse, ClusterStatus, IdempotencyOutcome, SubmitWorkloadRequest,
+    SubmitWorkloadResponse,
 };
 use overdrive_control_plane::{ServerConfig, run_server_with_obs_and_driver};
 use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
@@ -149,12 +150,12 @@ async fn submitted_job_reaches_running_via_real_server_boot() {
     };
     let resp = client
         .post(&submit_url)
-        .json(&SubmitJobRequest { spec, workload_kind: None })
+        .json(&SubmitWorkloadRequest { spec, workload_kind: None })
         .send()
         .await
         .expect("POST /v1/jobs");
     assert_eq!(resp.status(), reqwest::StatusCode::OK, "submit must return 200");
-    let body: SubmitJobResponse = resp.json().await.expect("decode SubmitJobResponse");
+    let body: SubmitWorkloadResponse = resp.json().await.expect("decode SubmitWorkloadResponse");
     assert_eq!(
         body.outcome,
         IdempotencyOutcome::Inserted,
@@ -206,7 +207,7 @@ async fn submitted_job_reaches_running_via_real_server_boot() {
                 .await
                 .expect("decode AllocStatusResponse");
             if allocs.rows.iter().any(|a| {
-                a.job_id == "payments"
+                a.workload_id == "payments"
                     && matches!(a.state, overdrive_control_plane::api::AllocStateWire::Running)
             }) {
                 running_seen = true;

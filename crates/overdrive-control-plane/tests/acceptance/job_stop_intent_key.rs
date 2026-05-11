@@ -16,10 +16,12 @@
 use std::net::SocketAddr;
 use std::time::Duration;
 
-use overdrive_control_plane::api::{IdempotencyOutcome, SubmitJobRequest, SubmitJobResponse};
+use overdrive_control_plane::api::{
+    IdempotencyOutcome, SubmitWorkloadRequest, SubmitWorkloadResponse,
+};
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
 use overdrive_core::aggregate::{DriverInput, ExecInput, IntentKey, JobSpecInput, ResourcesInput};
-use overdrive_core::id::JobId;
+use overdrive_core::id::WorkloadId;
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
@@ -94,19 +96,19 @@ async fn stop_writes_separate_intent_key_preserving_spec() {
     // Submit a job first.
     let resp = client
         .post(&submit_url)
-        .json(&SubmitJobRequest { spec: payments_spec(), workload_kind: None })
+        .json(&SubmitWorkloadRequest { spec: payments_spec(), workload_kind: None })
         .send()
         .await
         .expect("POST /v1/jobs");
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
-    let submit_body: SubmitJobResponse = resp.json().await.expect("decode submit body");
+    let submit_body: SubmitWorkloadResponse = resp.json().await.expect("decode submit body");
     assert_eq!(submit_body.outcome, IdempotencyOutcome::Inserted);
 
     // Capture the expected spec bytes by re-archiving from the same
     // input — the original handler stores rkyv archive of `Job::from_spec`,
     // which is byte-deterministic.
-    let job_id = JobId::new("payments").expect("parse job id");
-    let job_key = IntentKey::for_job(&job_id);
+    let workload_id = WorkloadId::new("payments").expect("parse job id");
+    let job_key = IntentKey::for_job(&workload_id);
     let job = overdrive_core::aggregate::Job::from_spec(payments_spec()).expect("Job::from_spec");
     let expected_spec_bytes =
         rkyv::to_bytes::<rkyv::rancor::Error>(&job).expect("rkyv archive expected Job");
@@ -142,7 +144,7 @@ async fn stop_writes_separate_intent_key_preserving_spec() {
     );
 
     // Stop intent key must now be present.
-    let stop_key = IntentKey::for_job_stop(&job_id);
+    let stop_key = IntentKey::for_job_stop(&workload_id);
     let stop_bytes = store
         .get(stop_key.as_bytes())
         .await

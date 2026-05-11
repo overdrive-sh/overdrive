@@ -481,7 +481,7 @@ mod release_for_exit_emission_tests {
     //! test. The integration-level happens-before edge (gate-await
     //! before `ExitEvent` emission) is exercised by the
     //! 01-01 regression test in
-    //! `crates/overdrive-control-plane/tests/integration/job_lifecycle/`
+    //! `crates/overdrive-control-plane/tests/integration/workload_lifecycle/`
     //! once step 01-03 wires the firing site.
     use super::*;
     use overdrive_core::SpiffeId;

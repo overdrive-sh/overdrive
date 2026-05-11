@@ -25,8 +25,8 @@ use proptest::prelude::*;
 use overdrive_core::UnixInstant;
 use overdrive_core::id::{ContentHash, CorrelationKey};
 use overdrive_core::reconciler::{
-    Action, AnyReconciler, JobLifecycle, NoopHeartbeat, Reconciler, ReconcilerName,
-    ReconcilerNameError, TargetResource, TargetResourceError, TickContext,
+    Action, AnyReconciler, NoopHeartbeat, Reconciler, ReconcilerName, ReconcilerNameError,
+    TargetResource, TargetResourceError, TickContext, WorkloadLifecycle,
 };
 
 // ---------------------------------------------------------------------------
@@ -576,10 +576,10 @@ fn reconciler_name_const_for_noop_heartbeat_is_canonical_kebab_case() {
 
 #[test]
 fn reconciler_name_const_for_job_lifecycle_is_canonical_kebab_case() {
-    assert_eq!(<JobLifecycle as Reconciler>::NAME, "job-lifecycle");
+    assert_eq!(<WorkloadLifecycle as Reconciler>::NAME, "job-lifecycle");
 
-    let parsed = ReconcilerName::new(<JobLifecycle as Reconciler>::NAME)
-        .expect("JobLifecycle::NAME must satisfy ReconcilerName::new");
+    let parsed = ReconcilerName::new(<WorkloadLifecycle as Reconciler>::NAME)
+        .expect("WorkloadLifecycle::NAME must satisfy ReconcilerName::new");
     assert_eq!(parsed.as_str(), "job-lifecycle");
 }
 
@@ -596,8 +596,8 @@ fn reconciler_name_const_matches_runtime_name_for_noop_heartbeat() {
 
 #[test]
 fn reconciler_name_const_matches_runtime_name_for_job_lifecycle() {
-    let r = JobLifecycle::canonical();
-    assert_eq!(r.name().as_str(), <JobLifecycle as Reconciler>::NAME);
+    let r = WorkloadLifecycle::canonical();
+    assert_eq!(r.name().as_str(), <WorkloadLifecycle as Reconciler>::NAME);
 }
 
 #[test]
@@ -615,7 +615,7 @@ fn any_reconciler_static_name_dispatches_to_inner_const_for_noop_heartbeat() {
 
 #[test]
 fn any_reconciler_static_name_dispatches_to_inner_const_for_job_lifecycle() {
-    let any = AnyReconciler::JobLifecycle(JobLifecycle::canonical());
-    assert_eq!(any.static_name(), <JobLifecycle as Reconciler>::NAME);
+    let any = AnyReconciler::WorkloadLifecycle(WorkloadLifecycle::canonical());
+    assert_eq!(any.static_name(), <WorkloadLifecycle as Reconciler>::NAME);
     assert_eq!(any.static_name(), "job-lifecycle");
 }

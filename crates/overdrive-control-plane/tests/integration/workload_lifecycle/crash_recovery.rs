@@ -5,11 +5,11 @@
 //! the workload externally; drives the convergence loop forward; and
 //! asserts the alloc state transitions through Terminated → Running
 //! again under the (deterministic, same) `alloc_id` (Phase 1 reuses
-//! `mint_alloc_id(job_id)` per ADR-0023).
+//! `mint_alloc_id(workload_id)` per ADR-0023).
 //!
 //! The "fresh `alloc_id`" framing in the scenario name reflects the
 //! Phase-2+ direction; in Phase 1 single-mode the alloc id is a pure
-//! function of the job id (`alloc-{job_id}-0`), so observable rebirth
+//! function of the job id (`alloc-{workload_id}-0`), so observable rebirth
 //! is the state transition Terminated → Running with a distinct PID
 //! at the driver layer.
 //!
@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 
 use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
 use overdrive_control_plane::worker::exit_observer;
-use overdrive_control_plane::{AppState, job_lifecycle, noop_heartbeat};
+use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
 use overdrive_core::aggregate::{
     DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
 };
@@ -41,7 +41,7 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime");
     runtime.register(noop_heartbeat()).await.expect("register noop");
-    runtime.register(job_lifecycle()).await.expect("register job-lifecycle");
+    runtime.register(workload_lifecycle()).await.expect("register job-lifecycle");
 
     let store =
         Arc::new(LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open store"));
@@ -49,7 +49,7 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
     // Driver-internal clock (SIGTERM grace timing) is SimClock; the
     // convergence-tick's `tick.now_unix` snapshot needs real wall-clock
-    // advancement so the JobLifecycle backoff predicate
+    // advancement so the WorkloadLifecycle backoff predicate
     // `tick.now_unix < last_failure_seen_at + backoff(attempts)`
     // crosses against the test's real-wall-clock pacing
     // (`tokio::time::sleep(20ms)` between manual ticks). Explicit
@@ -95,7 +95,7 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
         cgroup_root: std::path::PathBuf::from("/sys/fs/cgroup"),
     };
 
-    // Use a distinct job_id so the derived cgroup scope
+    // Use a distinct workload_id so the derived cgroup scope
     // (`alloc-recovery-0.scope`) does not collide with the scope used by
     // submit_to_running (`alloc-payments-0.scope`) when both tests run in
     // parallel under nextest.
@@ -114,7 +114,7 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
     let target = TargetResource::new("job/recovery").expect("valid target");
-    let job_lifecycle_name = overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
+    let workload_lifecycle_name = overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
         .expect("job-lifecycle reconciler name");
     let start = Instant::now();
     let deadline = start + Duration::from_secs(120);
@@ -125,7 +125,7 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
     while tick_n < 30 && !first_running {
         run_convergence_tick(
             &state,
-            &job_lifecycle_name,
+            &workload_lifecycle_name,
             &target,
             start + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
@@ -194,7 +194,7 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
     while tick_n < 90 && !saw_failed {
         run_convergence_tick(
             &state,
-            &job_lifecycle_name,
+            &workload_lifecycle_name,
             &target,
             start + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
@@ -216,7 +216,7 @@ async fn killed_workload_is_restarted_with_fresh_alloc_id() {
     while tick_n < 150 && !recovered {
         run_convergence_tick(
             &state,
-            &job_lifecycle_name,
+            &workload_lifecycle_name,
             &target,
             start + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,

@@ -24,7 +24,7 @@
 use std::time::Duration;
 
 use futures::StreamExt;
-use overdrive_core::id::{AllocationId, JobId, NodeId, Region};
+use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, NodeHealthRow, ObservationRow, ObservationStore,
 };
@@ -39,7 +39,7 @@ use tokio::time::timeout;
 fn alloc_row(alloc_id: &str, state: AllocState, counter: u64) -> AllocStatusRow {
     AllocStatusRow {
         alloc_id: AllocationId::new(alloc_id).expect("valid alloc id"),
-        job_id: JobId::new("payments").expect("valid job id"),
+        workload_id: WorkloadId::new("payments").expect("valid job id"),
         node_id: NodeId::new("control-plane-0").expect("valid node id"),
         state,
         updated_at: LogicalTimestamp {

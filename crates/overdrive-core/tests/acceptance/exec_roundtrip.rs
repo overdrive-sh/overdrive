@@ -80,7 +80,7 @@ const ALPHA: &str = "abcdefghijklmnopqrstuvwxyz";
 const ALNUM_DASH: &str = "abcdefghijklmnopqrstuvwxyz0123456789-";
 const ALNUM: &str = "abcdefghijklmnopqrstuvwxyz0123456789";
 
-/// Valid label matching the `JobId` newtype's `^[a-z][a-z0-9-]{0,62}$`.
+/// Valid label matching the `WorkloadId` newtype's `^[a-z][a-z0-9-]{0,62}$`.
 fn valid_label() -> impl Strategy<Value = String> {
     prop_oneof![
         proptest::sample::select(ALPHA.chars().collect::<Vec<_>>()).prop_map(|c| c.to_string()),

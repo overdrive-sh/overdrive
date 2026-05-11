@@ -1,7 +1,7 @@
-//! Acceptance scenarios for issue #141 step 02-02 — `JobLifecycleView`
+//! Acceptance scenarios for issue #141 step 02-02 — `WorkloadLifecycleView`
 //! persists *inputs*, deadline recomputed each tick.
 //!
-//! Two port-to-port scenarios at domain scope (the `JobLifecycle::reconcile`
+//! Two port-to-port scenarios at domain scope (the `WorkloadLifecycle::reconcile`
 //! public signature IS the driving port per
 //! `~/.claude/skills/nw-tdd-methodology/SKILL.md` § "Port-to-Port at
 //! Domain Layer"):
@@ -19,7 +19,7 @@
 //!    "persist inputs, not derived state". Run reconcile against a
 //!    seeded view, capture (Actions_A, NextView_A). Clone the resulting
 //!    `(restart_counts, last_failure_seen_at)` into a brand-new
-//!    `JobLifecycleView` (simulating libSQL persistence + rehydration)
+//!    `WorkloadLifecycleView` (simulating libSQL persistence + rehydration)
 //!    and run reconcile again with an *identical* `TickContext`.
 //!    Assert the second call produces the same Actions and NextView.
 //!    Under Option B (persist a precomputed deadline) this would still
@@ -48,24 +48,24 @@ use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver, WorkloadKind};
-use overdrive_core::id::{AllocationId, JobId, NodeId, Region};
+use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
 use overdrive_core::reconciler::{
-    Action, JobLifecycle, JobLifecycleState, JobLifecycleView, RESTART_BACKOFF_DURATION,
-    Reconciler, TickContext,
+    Action, RESTART_BACKOFF_DURATION, Reconciler, TickContext, WorkloadLifecycle,
+    WorkloadLifecycleState, WorkloadLifecycleView,
 };
 use overdrive_core::traits::driver::Resources;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
 
 // -------------------------------------------------------------------
-// fixtures (mirror job_lifecycle_reconcile_branches.rs shape)
+// fixtures (mirror workload_lifecycle_reconcile_branches.rs shape)
 // -------------------------------------------------------------------
 
 fn nid(s: &str) -> NodeId {
     NodeId::new(s).expect("valid NodeId")
 }
 
-fn jid(s: &str) -> JobId {
-    JobId::new(s).expect("valid JobId")
+fn jid(s: &str) -> WorkloadId {
+    WorkloadId::new(s).expect("valid WorkloadId")
 }
 
 fn aid(s: &str) -> AllocationId {
@@ -91,13 +91,13 @@ fn make_job(id: &str) -> Job {
 
 fn alloc_with_state(
     alloc_id: &str,
-    job_id: &str,
+    workload_id: &str,
     node_id: &str,
     state: AllocState,
 ) -> AllocStatusRow {
     AllocStatusRow {
         alloc_id: aid(alloc_id),
-        job_id: jid(job_id),
+        workload_id: jid(workload_id),
         node_id: nid(node_id),
         state,
         updated_at: LogicalTimestamp { counter: 1, writer: nid(node_id) },
@@ -132,22 +132,22 @@ fn tick_at(now_unix: UnixInstant, tick: u64) -> TickContext {
     TickContext { now, now_unix, tick, deadline: now + Duration::from_secs(1) }
 }
 
-/// Build a `JobLifecycleState` (desired,actual) pair where the alloc
+/// Build a `WorkloadLifecycleState` (desired,actual) pair where the alloc
 /// for `payments` is in the requested terminal state on `local`.
-fn failed_alloc_state(state: AllocState) -> (JobLifecycleState, JobLifecycleState) {
+fn failed_alloc_state(state: AllocState) -> (WorkloadLifecycleState, WorkloadLifecycleState) {
     let nodes = one_node_map("local");
     let allocations = one_alloc_map(
         "alloc-payments-0",
         alloc_with_state("alloc-payments-0", "payments", "local", state),
     );
-    let desired = JobLifecycleState {
+    let desired = WorkloadLifecycleState {
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
     };
-    let actual = JobLifecycleState {
+    let actual = WorkloadLifecycleState {
         job: Some(make_job("payments")),
         desired_to_stop: false,
         nodes,
@@ -184,10 +184,10 @@ fn recomputes_deadline_at_window_boundary() {
     restart_counts.insert(aid("alloc-payments-0"), 2_u32);
     let mut last_failure_seen_at = BTreeMap::new();
     last_failure_seen_at.insert(aid("alloc-payments-0"), t0);
-    let view = JobLifecycleView { restart_counts, last_failure_seen_at };
+    let view = WorkloadLifecycleView { restart_counts, last_failure_seen_at };
 
     let (desired, actual) = failed_alloc_state(AllocState::Terminated);
-    let r = JobLifecycle::canonical();
+    let r = WorkloadLifecycle::canonical();
 
     // --- Sub-case A: window NOT yet elapsed ---
     // tick.now_unix = t0 + (window - 1ns) → strictly less than the
@@ -238,7 +238,7 @@ fn recomputes_deadline_at_window_boundary() {
 /// produced (Actions_A, NextView_A) — representing the in-memory state
 /// at the end of tick A —
 /// WHEN the persisted *inputs* `(restart_counts, last_failure_seen_at)`
-/// are cloned into a fresh `JobLifecycleView` (simulating libSQL
+/// are cloned into a fresh `WorkloadLifecycleView` (simulating libSQL
 /// persistence + rehydration on a subsequent process incarnation)
 /// AND reconcile runs against an identical `TickContext` (same
 /// `tick.now_unix`, same `tick.tick`, same `tick.now`, same
@@ -269,10 +269,10 @@ fn restart_survival_idempotence() {
     restart_counts.insert(aid("alloc-payments-0"), 1_u32);
     let mut last_failure_seen_at = BTreeMap::new();
     last_failure_seen_at.insert(aid("alloc-payments-0"), t0);
-    let view_a = JobLifecycleView { restart_counts, last_failure_seen_at };
+    let view_a = WorkloadLifecycleView { restart_counts, last_failure_seen_at };
 
     let (desired, actual) = failed_alloc_state(AllocState::Terminated);
-    let r = JobLifecycle::canonical();
+    let r = WorkloadLifecycle::canonical();
 
     // Pin a single TickContext to use for both calls — same monotonic
     // `now`, same `now_unix`, same `tick`, same `deadline`.
@@ -300,7 +300,7 @@ fn restart_survival_idempotence() {
     // serialised to libSQL; view_b is what *would* be reconstructed
     // on the next process incarnation. The test does not need both
     // alive at the same time.)
-    let view_b: JobLifecycleView = view_a;
+    let view_b: WorkloadLifecycleView = view_a;
 
     let (actions_b, next_view_b) = r.reconcile(&desired, &actual, &view_b, &tick);
 

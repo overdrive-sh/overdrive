@@ -37,8 +37,8 @@ mod acceptance {
     // Step 04-05 — Reconciler-primitive DST invariants.
     mod reconciler_invariants_pass;
 
-    // Step 02-02 — `ReconcilerIsPure` holds for `JobLifecycle` (scenario 3.2).
-    mod reconciler_is_pure_with_job_lifecycle;
+    // Step 02-02 — `ReconcilerIsPure` holds for `WorkloadLifecycle` (scenario 3.2).
+    mod reconciler_is_pure_with_workload_lifecycle;
 
     // reconciler-memory-redb Step 01-03 — `SimViewStore` is a lossless
     // CBOR-byte cache for arbitrary `View` values (ADR-0035 §2 /

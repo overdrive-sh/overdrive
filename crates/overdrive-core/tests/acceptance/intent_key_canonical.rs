@@ -24,7 +24,7 @@
 use std::str::FromStr;
 
 use overdrive_core::aggregate::IntentKey;
-use overdrive_core::id::{AllocationId, JobId, NodeId};
+use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use proptest::prelude::*;
 
 // ---------------------------------------------------------------------------
@@ -33,19 +33,19 @@ use proptest::prelude::*;
 
 #[test]
 fn for_job_returns_jobs_slash_id_as_byte_sequence() {
-    let id = JobId::from_str("payments").expect("canonical JobId parses");
+    let id = WorkloadId::from_str("payments").expect("canonical WorkloadId parses");
     let key = IntentKey::for_job(&id);
 
     assert_eq!(
         key.as_bytes(),
         b"jobs/payments",
-        "canonical JobId intent key must be `jobs/<id>` byte-for-byte"
+        "canonical WorkloadId intent key must be `jobs/<id>` byte-for-byte"
     );
 }
 
 #[test]
 fn for_job_returns_jobs_slash_id_as_str() {
-    let id = JobId::from_str("payments").expect("canonical JobId parses");
+    let id = WorkloadId::from_str("payments").expect("canonical WorkloadId parses");
     let key = IntentKey::for_job(&id);
 
     assert_eq!(key.as_str(), "jobs/payments");
@@ -76,7 +76,7 @@ fn for_allocation_returns_allocations_slash_id() {
 
 #[test]
 fn two_calls_produce_byte_identical_output_for_job() {
-    let id = JobId::from_str("payments").expect("canonical JobId parses");
+    let id = WorkloadId::from_str("payments").expect("canonical WorkloadId parses");
     let first = IntentKey::for_job(&id);
     let second = IntentKey::for_job(&id);
 
@@ -159,12 +159,12 @@ fn valid_label() -> impl Strategy<Value = String> {
 // ---------------------------------------------------------------------------
 
 proptest! {
-    /// For any valid JobId, `IntentKey::for_job(&id).as_bytes()` equals
+    /// For any valid WorkloadId, `IntentKey::for_job(&id).as_bytes()` equals
     /// `format!("jobs/{}", id).as_bytes()` AND is stable across two
     /// invocations.
     #[test]
     fn for_job_is_stable_and_matches_format(raw in valid_label()) {
-        let id = JobId::new(&raw).expect("generator yields valid JobId");
+        let id = WorkloadId::new(&raw).expect("generator yields valid WorkloadId");
         let expected = format!("jobs/{id}");
 
         let first = IntentKey::for_job(&id);

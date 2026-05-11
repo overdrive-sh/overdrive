@@ -929,10 +929,10 @@ pub fn run(manifest_path: &Path) -> Result<()> {
 }
 
 // -----------------------------------------------------------------------------
-// Structural inspector — JobLifecycle::reconcile body
+// Structural inspector — WorkloadLifecycle::reconcile body
 // -----------------------------------------------------------------------------
 //
-// Scenario 3.3 of phase-1-first-workload Slice 3A.2: the `JobLifecycle`
+// Scenario 3.3 of phase-1-first-workload Slice 3A.2: the `WorkloadLifecycle`
 // reconciler's `reconcile` body must contain no banned API call,
 // including `.await` (which dst-lint's project-wide scanner does NOT
 // catch — the rule is "no `.await` inside `reconcile`" per ADR-0013 §2,
@@ -1039,18 +1039,20 @@ impl ReconcileBodyInspector {
     }
 }
 
-/// Inspect a Rust source file for any `JobLifecycle::reconcile` body
+/// Inspect a Rust source file for any `WorkloadLifecycle::reconcile` body
 /// that contains a banned construct.
 ///
 /// Returns a list of every forbidden construct found inside the
-/// `fn reconcile` body of the `impl Reconciler for JobLifecycle`
+/// `fn reconcile` body of the `impl Reconciler for WorkloadLifecycle`
 /// block. An empty Vec means the body is clean.
 ///
 /// # Errors
 ///
 /// Propagates any `syn::parse_file` failure as `Err`.
-pub fn inspect_job_lifecycle_reconcile_body(source: &str) -> Result<Vec<ReconcileBodyViolation>> {
-    inspect_reconciler_body(source, "JobLifecycle")
+pub fn inspect_workload_lifecycle_reconcile_body(
+    source: &str,
+) -> Result<Vec<ReconcileBodyViolation>> {
+    inspect_reconciler_body(source, "WorkloadLifecycle")
 }
 
 /// Inspect a Rust source file for any `ServiceMapHydrator::reconcile`
@@ -1061,7 +1063,7 @@ pub fn inspect_job_lifecycle_reconcile_body(source: &str) -> Result<Vec<Reconcil
 /// block. An empty Vec means the body is clean.
 ///
 /// The `ServiceMapHydrator` reconciler (Slice 08 / S-2.2-30) carries
-/// the same ADR-0035 §2 purity contract as `JobLifecycle` — sync, no
+/// the same ADR-0035 §2 purity contract as `WorkloadLifecycle` — sync, no
 /// `.await`, no wall-clock reads, no DB handle. This function is the
 /// mechanical enforcement gate for that invariant.
 ///
@@ -1079,7 +1081,7 @@ pub fn inspect_service_map_hydrator_reconcile_body(
 /// constructs.
 ///
 /// Factored out of the per-reconciler public entry points to avoid
-/// duplication. Both `JobLifecycle` and `ServiceMapHydrator` share the
+/// duplication. Both `WorkloadLifecycle` and `ServiceMapHydrator` share the
 /// same purity rules; the only variable is the concrete type name.
 fn inspect_reconciler_body(source: &str, self_name: &str) -> Result<Vec<ReconcileBodyViolation>> {
     let parsed = syn::parse_file(source).context("parse source")?;
@@ -1187,14 +1189,15 @@ mod tests {
     fn inspector_flags_await_inside_reconcile_body() {
         let source = r"
             pub trait Reconciler {}
-            pub struct JobLifecycle;
-            impl Reconciler for JobLifecycle {
+            pub struct WorkloadLifecycle;
+            impl Reconciler for WorkloadLifecycle {
                 fn reconcile(&self) {
                     let _x = some_future().await;
                 }
             }
         ";
-        let violations = inspect_job_lifecycle_reconcile_body(source).expect("source must parse");
+        let violations =
+            inspect_workload_lifecycle_reconcile_body(source).expect("source must parse");
         assert!(
             violations.iter().any(|v| matches!(v.kind, ReconcileBodyViolationKind::Await)),
             ".await must be flagged; got {violations:?}"
@@ -1205,14 +1208,15 @@ mod tests {
     fn inspector_flags_instant_now_inside_reconcile_body() {
         let source = r"
             pub trait Reconciler {}
-            pub struct JobLifecycle;
-            impl Reconciler for JobLifecycle {
+            pub struct WorkloadLifecycle;
+            impl Reconciler for WorkloadLifecycle {
                 fn reconcile(&self) {
                     let _ = std::time::Instant::now();
                 }
             }
         ";
-        let violations = inspect_job_lifecycle_reconcile_body(source).expect("source must parse");
+        let violations =
+            inspect_workload_lifecycle_reconcile_body(source).expect("source must parse");
         assert!(
             violations.iter().any(|v| matches!(
                 &v.kind,
@@ -1226,14 +1230,15 @@ mod tests {
     fn inspector_flags_rand_inside_reconcile_body() {
         let source = r"
             pub trait Reconciler {}
-            pub struct JobLifecycle;
-            impl Reconciler for JobLifecycle {
+            pub struct WorkloadLifecycle;
+            impl Reconciler for WorkloadLifecycle {
                 fn reconcile(&self) {
                     let _x = rand::random::<u64>();
                 }
             }
         ";
-        let violations = inspect_job_lifecycle_reconcile_body(source).expect("source must parse");
+        let violations =
+            inspect_workload_lifecycle_reconcile_body(source).expect("source must parse");
         assert!(
             violations.iter().any(|v| matches!(v.kind, ReconcileBodyViolationKind::Rand)),
             "rand::* must be flagged; got {violations:?}"
@@ -1244,34 +1249,35 @@ mod tests {
     fn inspector_passes_clean_body() {
         let source = r"
             pub trait Reconciler {}
-            pub struct JobLifecycle;
-            impl Reconciler for JobLifecycle {
+            pub struct WorkloadLifecycle;
+            impl Reconciler for WorkloadLifecycle {
                 fn reconcile(&self, tick: &TickContext) -> Vec<u8> {
                     let _now = tick.now;
                     vec![]
                 }
             }
         ";
-        let violations = inspect_job_lifecycle_reconcile_body(source).expect("source must parse");
+        let violations =
+            inspect_workload_lifecycle_reconcile_body(source).expect("source must parse");
         assert!(
             violations.is_empty(),
             "clean body must produce zero violations; got {violations:?}"
         );
     }
 
-    /// Scenario 3.3 — the real `JobLifecycle::reconcile` body inside
+    /// Scenario 3.3 — the real `WorkloadLifecycle::reconcile` body inside
     /// `crates/overdrive-core/src/reconciler.rs` must contain no
     /// banned construct.
     #[test]
-    fn job_lifecycle_reconcile_body_passes_dst_lint() {
+    fn workload_lifecycle_reconcile_body_passes_dst_lint() {
         let path = real_core_reconciler_source_path();
         let source = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
-        let violations = inspect_job_lifecycle_reconcile_body(&source)
+        let violations = inspect_workload_lifecycle_reconcile_body(&source)
             .expect("overdrive-core reconciler.rs must parse");
         assert!(
             violations.is_empty(),
-            "JobLifecycle::reconcile body must contain no banned construct \
+            "WorkloadLifecycle::reconcile body must contain no banned construct \
              (.await, Instant::now, SystemTime::now, rand::*, tokio::time::sleep, \
              std::thread::sleep); found {} violation(s): {:#?}",
             violations.len(),

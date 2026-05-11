@@ -29,7 +29,7 @@ use std::time::{Duration, Instant};
 
 use overdrive_control_plane::api::AllocStateWire;
 use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
-use overdrive_control_plane::{AppState, job_lifecycle, noop_heartbeat};
+use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
 use overdrive_core::aggregate::{
     DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
 };
@@ -86,7 +86,7 @@ async fn build_harness(tmp: &TempDir) -> Harness {
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime");
     runtime.register(noop_heartbeat()).await.expect("register noop");
-    runtime.register(job_lifecycle()).await.expect("register job-lifecycle");
+    runtime.register(workload_lifecycle()).await.expect("register job-lifecycle");
 
     let store =
         Arc::new(LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open store"));
@@ -141,7 +141,7 @@ async fn build_harness(tmp: &TempDir) -> Harness {
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
     let target = TargetResource::new("job/exitobs").expect("valid target");
-    // Phase 1 alloc id derivation per ADR-0023 — `alloc-{job_id}-0`.
+    // Phase 1 alloc id derivation per ADR-0023 — `alloc-{workload_id}-0`.
     let alloc_id = AllocationId::new("alloc-exitobs-0").expect("alloc id");
 
     // Background ticker: advances logical time so any
@@ -160,7 +160,7 @@ async fn build_harness(tmp: &TempDir) -> Harness {
 }
 
 async fn drive_to_first_running(h: &Harness, start: Instant) -> AllocStatusRow {
-    let job_lifecycle_name = overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
+    let workload_lifecycle_name = overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
         .expect("job-lifecycle reconciler name");
     let deadline = start + Duration::from_secs(120);
     let mut tick_n = 0_u64;
@@ -168,7 +168,7 @@ async fn drive_to_first_running(h: &Harness, start: Instant) -> AllocStatusRow {
     while tick_n < 30 && running.is_none() {
         run_convergence_tick(
             &h.state,
-            &job_lifecycle_name,
+            &workload_lifecycle_name,
             &h.target,
             start + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
@@ -184,13 +184,13 @@ async fn drive_to_first_running(h: &Harness, start: Instant) -> AllocStatusRow {
 }
 
 async fn drive_ticks(h: &Harness, start: Instant, range: std::ops::Range<u64>) {
-    let job_lifecycle_name = overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
+    let workload_lifecycle_name = overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
         .expect("job-lifecycle reconciler name");
     let deadline = start + Duration::from_secs(120);
     for tick_n in range {
         run_convergence_tick(
             &h.state,
-            &job_lifecycle_name,
+            &workload_lifecycle_name,
             &h.target,
             start + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
@@ -245,14 +245,14 @@ async fn simulated_crash_writes_failed_to_obs_within_budget() {
     // `LifecycleEvent { to: Failed }` after the obs write. The test
     // breaks as soon as that event arrives, BEFORE the next tick's
     // reconciler emits `RestartAllocation`.
-    let job_lifecycle_name = overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
+    let workload_lifecycle_name = overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
         .expect("job-lifecycle reconciler name");
     let deadline = start + Duration::from_secs(120);
     let mut found_failed_at: Option<String> = None;
     'outer: for tick_n in 30_u64..50 {
         run_convergence_tick(
             &h.state,
-            &job_lifecycle_name,
+            &workload_lifecycle_name,
             &h.target,
             start + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
@@ -351,14 +351,14 @@ async fn crashed_alloc_eventually_reaches_non_running() {
     // greater than prior_counter that resolves to Failed or fresh
     // Running is acceptable — what is forbidden is staying stuck at
     // the original Running row's counter.
-    let job_lifecycle_name = overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
+    let workload_lifecycle_name = overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
         .expect("job-lifecycle reconciler name");
     let deadline = start + Duration::from_secs(120);
     let mut left_running = false;
     for tick_n in 30_u64..90 {
         run_convergence_tick(
             &h.state,
-            &job_lifecycle_name,
+            &workload_lifecycle_name,
             &h.target,
             start + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,
@@ -442,14 +442,15 @@ async fn intentional_stop_flag_serialises_with_natural_exit_race() {
             ExitKind::Crashed { exit_code: Some(1), signal: None },
         );
 
-        let job_lifecycle_name = overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
-            .expect("job-lifecycle reconciler name");
+        let workload_lifecycle_name =
+            overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
+                .expect("job-lifecycle reconciler name");
         let deadline = start + Duration::from_secs(120);
         let mut saw_failed = false;
         'outer: for tick_n in 30_u64..50 {
             run_convergence_tick(
                 &h.state,
-                &job_lifecycle_name,
+                &workload_lifecycle_name,
                 &h.target,
                 start + Duration::from_millis(tick_n.saturating_mul(100)),
                 tick_n,
@@ -514,14 +515,14 @@ async fn exit_observer_lifecycle_from_reflects_prior_running_state() {
         ExitKind::Crashed { exit_code: Some(1), signal: None },
     );
 
-    let job_lifecycle_name = overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
+    let workload_lifecycle_name = overdrive_core::reconciler::ReconcilerName::new("job-lifecycle")
         .expect("job-lifecycle reconciler name");
     let deadline = start + Duration::from_secs(120);
     let mut found_ev = None;
     'outer: for tick_n in 30_u64..50 {
         run_convergence_tick(
             &h.state,
-            &job_lifecycle_name,
+            &workload_lifecycle_name,
             &h.target,
             start + Duration::from_millis(tick_n.saturating_mul(100)),
             tick_n,

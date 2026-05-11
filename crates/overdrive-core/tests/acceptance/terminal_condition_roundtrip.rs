@@ -16,7 +16,7 @@
 
 use std::str::FromStr;
 
-use overdrive_core::id::{AllocationId, JobId, NodeId};
+use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
 use overdrive_core::transition_reason::{StoppedBy, TerminalCondition};
 use proptest::prelude::*;
@@ -63,8 +63,8 @@ fn fixed_alloc_id() -> AllocationId {
     AllocationId::from_str("alloc-tc-roundtrip-0").expect("valid alloc id")
 }
 
-fn fixed_job_id() -> JobId {
-    JobId::from_str("payments").expect("valid job id")
+fn fixed_job_id() -> WorkloadId {
+    WorkloadId::from_str("payments").expect("valid job id")
 }
 
 fn fixed_node_id() -> NodeId {
@@ -78,7 +78,7 @@ fn fixed_timestamp() -> LogicalTimestamp {
 fn build_row(terminal: Option<TerminalCondition>) -> AllocStatusRow {
     AllocStatusRow {
         alloc_id: fixed_alloc_id(),
-        job_id: fixed_job_id(),
+        workload_id: fixed_job_id(),
         node_id: fixed_node_id(),
         state: AllocState::Failed,
         updated_at: fixed_timestamp(),

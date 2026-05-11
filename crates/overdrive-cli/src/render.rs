@@ -87,11 +87,11 @@ pub fn node_list(out: &NodeListOutput) -> String {
     s
 }
 
-/// Render a successful `job submit` as a multi-line operator-facing
+/// Render a successful `deploy` as a multi-line operator-facing
 /// summary.
 ///
 /// Per ADR-0020 §Decision §2 the labelled set is `Accepted.`,
-/// `Job ID:`, `Intent key:`, `Spec digest:`, `Outcome:`, `Endpoint:`,
+/// `Workload ID:`, `Intent key:`, `Spec digest:`, `Outcome:`, `Endpoint:`,
 /// `Next:`. The `Commit index:` line was dropped — `commit_index` was
 /// an in-memory `u64`, never a substitute for the spec digest as a
 /// stable identity (see ADR-0020 §Considered alternatives §D).
@@ -107,11 +107,11 @@ pub fn node_list(out: &NodeListOutput) -> String {
 /// follow-up command so the operator can continue without consulting
 /// the docs.
 #[must_use]
-pub fn job_submit_accepted(out: &SubmitOutput) -> String {
+pub fn workload_submit_accepted(out: &SubmitOutput) -> String {
     use std::fmt::Write as _;
     let mut s = String::new();
     let _ = writeln!(s, "Accepted.");
-    let _ = writeln!(s, "Job ID:        {}", out.job_id);
+    let _ = writeln!(s, "Workload ID:   {}", out.workload_id);
     let _ = writeln!(s, "Intent key:    {}", out.intent_key);
     let _ = writeln!(s, "Spec digest:   {}", out.spec_digest);
     let _ = writeln!(s, "Outcome:       {}", outcome_human(out.outcome));
@@ -135,19 +135,19 @@ const fn outcome_human(outcome: IdempotencyOutcome) -> &'static str {
 
 /// Render the result of `overdrive job stop` per AC.
 ///
-/// On `Stopped`, the line is `Stopped job '<id>'.`; on `AlreadyStopped`
-/// the line names the idempotent path so the operator knows the call
-/// was a no-op. Per ADR-0027 + Step 02-04 AC.
+/// On `Stopped`, the line is `Stopped workload '<id>'.`; on
+/// `AlreadyStopped` the line names the idempotent path so the operator
+/// knows the call was a no-op. Per ADR-0027 + Step 02-04 AC.
 #[must_use]
-pub fn job_stop_accepted(out: &StopOutput) -> String {
+pub fn workload_stop_accepted(out: &StopOutput) -> String {
     use std::fmt::Write as _;
     let mut s = String::new();
     match out.outcome {
         StopOutcome::Stopped => {
-            let _ = writeln!(s, "Stopped job '{}'.", out.job_id);
+            let _ = writeln!(s, "Stopped workload '{}'.", out.workload_id);
         }
         StopOutcome::AlreadyStopped => {
-            let _ = writeln!(s, "Job '{}' was already stopped (no-op).", out.job_id);
+            let _ = writeln!(s, "Workload '{}' was already stopped (no-op).", out.workload_id);
         }
     }
     let _ = writeln!(s, "Endpoint: {}", out.endpoint);
@@ -165,7 +165,7 @@ pub fn job_stop_accepted(out: &StopOutput) -> String {
 pub fn alloc_status(out: &AllocStatusOutput) -> String {
     use std::fmt::Write as _;
     let mut s = String::new();
-    let _ = writeln!(s, "Job ID:        {}", out.job_id);
+    let _ = writeln!(s, "Workload ID:   {}", out.workload_id);
     let _ = writeln!(s, "Spec digest:   {}", out.spec_digest);
     let _ = writeln!(s, "Allocations:   {}", out.allocations_total);
     if out.allocations_total == 0 && !out.empty_state_message.is_empty() {
@@ -197,8 +197,8 @@ pub fn alloc_status(out: &AllocStatusOutput) -> String {
 pub fn alloc_snapshot(out: &AllocStatusResponse) -> String {
     use std::fmt::Write as _;
     let mut s = String::new();
-    if let Some(job_id) = &out.job_id {
-        let _ = writeln!(s, "Job ID:        {job_id}");
+    if let Some(workload_id) = &out.workload_id {
+        let _ = writeln!(s, "Job ID:        {workload_id}");
     }
     if let Some(digest) = &out.spec_digest {
         let _ = writeln!(s, "Spec digest:   {digest}");
@@ -335,7 +335,7 @@ pub const fn cli_error_to_exit_code(_err: &CliError) -> i32 {
 /// in `docs/.../journey/walking-skeleton.md`. Five labelled sections:
 ///
 /// ```text
-/// Error: job '<name>' did not converge to running.
+/// Error: workload '<name>' did not converge to running.
 ///   reason: <human_readable rendering>
 ///   last-event: <verbatim driver text>
 ///   reproducer: overdrive alloc status --job <name>
@@ -357,14 +357,14 @@ pub const fn cli_error_to_exit_code(_err: &CliError) -> i32 {
 /// cause-class table.
 #[must_use]
 pub fn format_failed_block(
-    job_name: &str,
+    workload_name: &str,
     reason: Option<&TransitionReason>,
     last_event_detail: Option<&str>,
     terminal_reason: &TerminalReason,
 ) -> String {
     use std::fmt::Write as _;
     let mut s = String::new();
-    let _ = writeln!(s, "Error: job '{job_name}' did not converge to running.");
+    let _ = writeln!(s, "Error: workload '{workload_name}' did not converge to running.");
 
     // `reason:` line — standalone reason wins; otherwise derive from
     // terminal_reason. The streaming `ConvergedFailed.reason` carries
@@ -384,7 +384,7 @@ pub fn format_failed_block(
 
     // Reproducer line — points the operator at `alloc status --job <name>`
     // for the structured snapshot. Per US-02 walking-skeleton transcript.
-    let _ = writeln!(s, "  reproducer: overdrive alloc status --job {job_name}");
+    let _ = writeln!(s, "  reproducer: overdrive alloc status --job {workload_name}");
 
     // Blank line separates the structured block from the variant-specific
     // Hint line.
@@ -502,8 +502,8 @@ const fn hint_for_transition_reason(reason: &TransitionReason) -> &'static str {
 ///
 /// Form: `Submitting job '<name>' (kind=Job, run-to-completion)\n`.
 #[must_use]
-pub fn format_job_submit_echo(job_name: &str) -> String {
-    format!("Submitting job '{job_name}' (kind=Job, run-to-completion)\n")
+pub fn format_job_submit_echo(workload_name: &str) -> String {
+    format!("Submitting job '{workload_name}' (kind=Job, run-to-completion)\n")
 }
 
 /// Render the operator-facing terminal-success line for a Job-kind
@@ -515,13 +515,13 @@ pub fn format_job_submit_echo(job_name: &str) -> String {
 /// Form: `Job '<name>' succeeded. (exit code 0, took <duration>, attempts <N>)\n`
 #[must_use]
 pub fn format_job_succeeded_summary(
-    job_name: &str,
+    workload_name: &str,
     exit_code: i32,
     took_human: &str,
     attempts: u32,
 ) -> String {
     format!(
-        "Job '{job_name}' succeeded. (exit code {exit_code}, took {took_human}, attempts {attempts})\n"
+        "Job '{workload_name}' succeeded. (exit code {exit_code}, took {took_human}, attempts {attempts})\n"
     )
 }
 
@@ -531,7 +531,7 @@ pub fn format_job_succeeded_summary(
 /// Form: `Job '<name>' failed. (exit code <N>, took <duration>, attempts <X> of <Y> [(backoff exhausted)])\nstderr tail:\n<tail>`
 #[must_use]
 pub fn format_job_failed_summary(
-    job_name: &str,
+    workload_name: &str,
     exit_code: i32,
     took_human: &str,
     attempts: u32,
@@ -548,7 +548,7 @@ pub fn format_job_failed_summary(
     };
     let _ = writeln!(
         s,
-        "Job '{job_name}' failed. (exit code {exit_code}, took {took_human}, attempts {attempts_str})"
+        "Job '{workload_name}' failed. (exit code {exit_code}, took {took_human}, attempts {attempts_str})"
     );
     if !stderr_tail.is_empty() {
         // Per step 02-05 / ADR-0033 Amendment 2026-05-10: the header
@@ -577,13 +577,13 @@ pub fn format_job_failed_summary(
 /// Form: `Job '<name>' attempt <N> failed (exit <X>). Retrying in <duration>.\n`
 #[must_use]
 pub fn format_job_attempt_failed(
-    job_name: &str,
+    workload_name: &str,
     attempt_index: u32,
     exit_code: i32,
     next_attempt_delay: &str,
 ) -> String {
     format!(
-        "Job '{job_name}' attempt {attempt_index} failed (exit {exit_code}). Retrying in {next_attempt_delay}.\n"
+        "Job '{workload_name}' attempt {attempt_index} failed (exit {exit_code}). Retrying in {next_attempt_delay}.\n"
     )
 }
 
@@ -721,14 +721,14 @@ pub fn derive_job_verdict(rows: &[overdrive_control_plane::api::AllocStatusRowBo
 /// Verdict: <verdict body>
 /// ```
 #[must_use]
-pub fn format_job_alloc_status_header(
-    job_name: &str,
+pub fn format_workload_alloc_status_header(
+    workload_name: &str,
     spec_digest: &str,
     verdict: JobVerdict,
 ) -> String {
     use std::fmt::Write as _;
     let mut s = String::new();
-    let _ = writeln!(s, "Job '{job_name}' (kind: Job)");
+    let _ = writeln!(s, "Job '{workload_name}' (kind: Job)");
     let _ = writeln!(s, "Spec digest: {spec_digest}");
     s.push_str(&format_job_verdict(verdict));
     s
@@ -742,7 +742,7 @@ pub fn format_job_alloc_status_header(
 /// KPI K3 byte-equality: every persisted `exit_code`'s canonical
 /// decimal form appears in the rendered Exit cell verbatim.
 #[must_use]
-pub fn format_job_alloc_status_attempts_table(
+pub fn format_workload_alloc_status_attempts_table(
     rows: &[overdrive_control_plane::api::AllocStatusRowBody],
 ) -> String {
     use std::fmt::Write as _;
@@ -787,13 +787,13 @@ pub fn alloc_status_kind_aware(out: &AllocStatusResponse) -> String {
     use overdrive_core::aggregate::WorkloadKind;
     use std::fmt::Write as _;
     let kind = out.kind.unwrap_or(WorkloadKind::Service);
-    let job_name = out.job_id.as_deref().unwrap_or("(unknown)");
+    let workload_name = out.workload_id.as_deref().unwrap_or("(unknown)");
     let spec_digest = out.spec_digest.as_deref().unwrap_or("");
 
     match kind {
         WorkloadKind::Service => {
             let mut s = String::new();
-            let _ = writeln!(s, "Service '{job_name}' (kind: Service)");
+            let _ = writeln!(s, "Service '{workload_name}' (kind: Service)");
             if !spec_digest.is_empty() {
                 let _ = writeln!(s, "Spec digest: {spec_digest}");
             }
@@ -824,9 +824,9 @@ pub fn alloc_status_kind_aware(out: &AllocStatusResponse) -> String {
         WorkloadKind::Job => {
             let mut s = String::new();
             let verdict = derive_job_verdict(&out.rows);
-            s.push_str(&format_job_alloc_status_header(job_name, spec_digest, verdict));
+            s.push_str(&format_workload_alloc_status_header(workload_name, spec_digest, verdict));
             s.push('\n');
-            s.push_str(&format_job_alloc_status_attempts_table(&out.rows));
+            s.push_str(&format_workload_alloc_status_attempts_table(&out.rows));
             // stderr tail on Failed: pull from the last attempt's
             // `error` field if present (the action shim threads
             // `prior_row.detail` / `prior_row.stderr_tail` onto the
@@ -851,7 +851,7 @@ pub fn alloc_status_kind_aware(out: &AllocStatusResponse) -> String {
             // (job_submit_schedule) provides the deferral surface;
             // here we name the kind so the dispatcher is exhaustive.
             let mut s = String::new();
-            let _ = writeln!(s, "Schedule '{job_name}' (kind: Schedule)");
+            let _ = writeln!(s, "Schedule '{workload_name}' (kind: Schedule)");
             if !spec_digest.is_empty() {
                 let _ = writeln!(s, "Spec digest: {spec_digest}");
             }

@@ -37,7 +37,7 @@
 use std::str::FromStr;
 use std::time::Duration;
 
-use overdrive_core::id::{AllocationId, JobId, NodeId};
+use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
 };
@@ -77,7 +77,7 @@ fn row(
 ) -> AllocStatusRow {
     AllocStatusRow {
         alloc_id: alloc_id.clone(),
-        job_id: JobId::from_str("payments").expect("valid job id"),
+        workload_id: WorkloadId::from_str("payments").expect("valid job id"),
         node_id: writer.clone(),
         state,
         updated_at: LogicalTimestamp { counter, writer: writer.clone() },

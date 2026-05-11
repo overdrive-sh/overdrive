@@ -98,7 +98,7 @@ pub enum TransitionReason {
     Started,
     /// Reconciler holding off restart per backoff window.
     /// `attempt` is the 1-indexed retry number that will fire when the
-    /// backoff elapses (matches `JobLifecycleView::restart_counts + 1`).
+    /// backoff elapses (matches `WorkloadLifecycleView::restart_counts + 1`).
     BackoffPending { attempt: u32 },
     /// Reconciler observed terminal stop. `by` carries who initiated:
     /// `"operator"` for explicit stop intent, `"reconciler"` for
@@ -305,7 +305,7 @@ mod tests {
 ///
 /// # Variants
 ///
-/// - [`Self::BackoffExhausted`] — `JobLifecycle` reached its restart
+/// - [`Self::BackoffExhausted`] — `WorkloadLifecycle` reached its restart
 ///   budget at the deciding tick. `attempts` is the count *consumed*
 ///   at that moment (in Phase 1, the budget is hard-coded; in
 ///   future phases the same variant carries the post-policy attempts).
@@ -361,11 +361,11 @@ mod tests {
 #[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum TerminalCondition {
-    /// `JobLifecycle`: restart budget reached; no further attempts
+    /// `WorkloadLifecycle`: restart budget reached; no further attempts
     /// will be scheduled. `attempts` is the count consumed at the
     /// moment of the deciding tick.
     BackoffExhausted { attempts: u32 },
-    /// `JobLifecycle`: explicit operator stop converged. The
+    /// `WorkloadLifecycle`: explicit operator stop converged. The
     /// allocation reached `Stopped` because the operator (or the
     /// reconciler itself) requested it, not because of a failure.
     Stopped { by: StoppedBy },
@@ -374,7 +374,7 @@ pub enum TerminalCondition {
     /// by the reconciler (e.g. `"vendor.io/quota.QuotaExhausted"`);
     /// `detail` is opaque bytes the reconciler may attach.
     Custom { type_name: String, detail: Option<Vec<u8>> },
-    /// `JobLifecycle`: workload exited cleanly (Job-kind natural
+    /// `WorkloadLifecycle`: workload exited cleanly (Job-kind natural
     /// termination, exit code `0` is the canonical success but the
     /// variant carries the observed `exit_code` verbatim because the
     /// publication boundary owns the cleanliness classification —
@@ -384,7 +384,7 @@ pub enum TerminalCondition {
     /// reliance on `AllocStatusRow.exit_code` + heuristic mapping at
     /// every consumer.
     ///
-    /// Emission lands in slice 02-04 (JobLifecycle reconciler
+    /// Emission lands in slice 02-04 (WorkloadLifecycle reconciler
     /// natural-exit emission); the row-shape change lands in 02-05.
     /// This variant exists at the type level from slice 02a (this
     /// step) so every downstream `match` site is forward-compatible
@@ -396,7 +396,7 @@ pub enum TerminalCondition {
     /// discriminant `3`, `Failed` takes discriminant `4`. Existing
     /// archived rows decode unchanged.
     Completed { exit_code: i32 },
-    /// `JobLifecycle`: workload exited with a non-zero status (Job-kind
+    /// `WorkloadLifecycle`: workload exited with a non-zero status (Job-kind
     /// natural termination interpreted as failure by the reconciler).
     /// Per ADR-0037 Amendment 2026-05-10. The `exit_code` field
     /// carries the observed status verbatim — the reconciler does

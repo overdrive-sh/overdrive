@@ -246,8 +246,9 @@ async fn schedule_05_05_schedule_submit_persists_to_intent_store() {
 
     // Build the canonical IntentKey for a Schedule. Lives at the
     // overdrive-core SSOT (`IntentKey::for_schedule`).
-    let job_id = overdrive_core::id::JobId::new(&id).expect("schedule id parses as JobId");
-    let key = IntentKey::for_schedule(&job_id);
+    let workload_id =
+        overdrive_core::id::WorkloadId::new(&id).expect("schedule id parses as WorkloadId");
+    let key = IntentKey::for_schedule(&workload_id);
     assert_eq!(
         key.as_str(),
         format!("schedules/{id}"),

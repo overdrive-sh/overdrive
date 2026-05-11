@@ -1,9 +1,9 @@
 //! Integration test for `POST /v1/jobs` under concurrent submission —
 //! the TOCTOU race pinned shut by `IntentStore::put_if_absent`.
 //!
-//! Prior to step 03-01's hardening, `submit_job` used a naive `get`
+//! Prior to step 03-01's hardening, `submit_workload` used a naive `get`
 //! (read txn) + `put` (write txn) pair. Two concurrent submitters for
-//! the same `JobId` but *different* specs could both observe `None`
+//! the same `WorkloadId` but *different* specs could both observe `None`
 //! on the read, both fall through to the blind `put`, and the second
 //! writer would silently clobber the first — no 409 returned to
 //! either caller, one spec lost.
@@ -33,13 +33,14 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use overdrive_control_plane::api::{
-    ErrorBody, IdempotencyOutcome, JobDescription, SubmitJobRequest, SubmitJobResponse,
+    ErrorBody, IdempotencyOutcome, SubmitWorkloadRequest, SubmitWorkloadResponse,
+    WorkloadDescription,
 };
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
 use overdrive_core::aggregate::{
     DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
 };
-use overdrive_core::id::JobId;
+use overdrive_core::id::WorkloadId;
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
@@ -135,7 +136,7 @@ fn spec_with_replicas(replicas: u32) -> JobSpecInput {
 // -----------------------------------------------------------------------
 // The TOCTOU defence test.
 //
-// Fires N concurrent submits against the same JobId, each carrying a
+// Fires N concurrent submits against the same WorkloadId, each carrying a
 // DISTINCT spec (distinct `replicas` — produces distinct rkyv archive
 // bytes). Exactly one must win with HTTP 200 + `outcome == Inserted`;
 // every other submit must return HTTP 409.
@@ -150,7 +151,7 @@ fn spec_with_replicas(replicas: u32) -> JobSpecInput {
 
 #[tokio::test]
 async fn concurrent_distinct_specs_same_key_commit_exactly_once() {
-    // N distinct specs, same JobId = "payments". Each spec produces
+    // N distinct specs, same WorkloadId = "payments". Each spec produces
     // distinct rkyv archive bytes because `replicas` differs, so any
     // pair of winners would be an observable byte-drift failure.
     const CONCURRENCY: u32 = 8;
@@ -171,14 +172,14 @@ async fn concurrent_distinct_specs_same_key_commit_exactly_once() {
         set.spawn(async move {
             let resp = client
                 .post(&url)
-                .json(&SubmitJobRequest { spec: spec.clone(), workload_kind: None })
+                .json(&SubmitWorkloadRequest { spec: spec.clone(), workload_kind: None })
                 .send()
                 .await
                 .expect("concurrent submit send");
             let status = resp.status();
             if status.is_success() {
-                let body: SubmitJobResponse =
-                    resp.json().await.expect("decode SubmitJobResponse on 200");
+                let body: SubmitWorkloadResponse =
+                    resp.json().await.expect("decode SubmitWorkloadResponse on 200");
                 (spec, status.as_u16(), Some(body), None::<ErrorBody>)
             } else {
                 let body: ErrorBody = resp.json().await.expect("decode ErrorBody on non-2xx");
@@ -187,7 +188,7 @@ async fn concurrent_distinct_specs_same_key_commit_exactly_once() {
         });
     }
 
-    let mut ok_outcomes: Vec<(JobSpecInput, SubmitJobResponse)> = Vec::new();
+    let mut ok_outcomes: Vec<(JobSpecInput, SubmitWorkloadResponse)> = Vec::new();
     let mut conflict_outcomes: Vec<(JobSpecInput, ErrorBody)> = Vec::new();
     while let Some(res) = set.join_next().await {
         let (spec, status, ok, err) = res.expect("join concurrent submit task");
@@ -242,8 +243,8 @@ async fn concurrent_distinct_specs_same_key_commit_exactly_once() {
 
     handle.shutdown(Duration::from_secs(2)).await;
 
-    let job_id = JobId::new("payments").expect("parse JobId");
-    let key = IntentKey::for_job(&job_id);
+    let workload_id = WorkloadId::new("payments").expect("parse WorkloadId");
+    let key = IntentKey::for_job(&workload_id);
     let persisted = read_intent_key_from_store(&data_dir_under(tmp.path()), key.as_bytes())
         .await
         .expect("jobs/payments must be populated after a successful concurrent submit");
@@ -309,7 +310,7 @@ async fn concurrent_byte_identical_submits_return_single_spec_digest() {
         set.spawn(async move {
             let resp = client
                 .post(&url)
-                .json(&SubmitJobRequest { spec, workload_kind: None })
+                .json(&SubmitWorkloadRequest { spec, workload_kind: None })
                 .send()
                 .await
                 .expect("concurrent submit send");
@@ -321,11 +322,11 @@ async fn concurrent_byte_identical_submits_return_single_spec_digest() {
                  here would be the TOCTOU race misclassifying an identical \
                  write as a conflict",
             );
-            resp.json::<SubmitJobResponse>().await.expect("decode SubmitJobResponse")
+            resp.json::<SubmitWorkloadResponse>().await.expect("decode SubmitWorkloadResponse")
         });
     }
 
-    let mut responses: Vec<SubmitJobResponse> = Vec::with_capacity(CONCURRENCY);
+    let mut responses: Vec<SubmitWorkloadResponse> = Vec::with_capacity(CONCURRENCY);
     while let Some(res) = set.join_next().await {
         responses.push(res.expect("join concurrent identical submit task"));
     }
@@ -374,11 +375,11 @@ async fn concurrent_byte_identical_submits_return_single_spec_digest() {
         CONCURRENCY - 1,
     );
 
-    // Describe(job_id) must return the same `spec_digest` every
+    // Describe(workload_id) must return the same `spec_digest` every
     // concurrent submitter saw. Per ADR-0020 the digest is the
     // round-trip witness that submit and describe agree on the same
     // canonical bytes.
-    let job_id_str = responses.first().expect("at least one response").job_id.clone();
+    let job_id_str = responses.first().expect("at least one response").workload_id.clone();
     let describe_url = format!("https://localhost:{}/v1/jobs/{}", bound.port(), job_id_str);
     let describe_resp =
         client.get(&describe_url).send().await.expect("GET /v1/jobs/{id} after concurrent burst");
@@ -387,11 +388,11 @@ async fn concurrent_byte_identical_submits_return_single_spec_digest() {
         reqwest::StatusCode::OK,
         "describe of the just-burst-submitted job must be HTTP 200",
     );
-    let description: JobDescription =
-        describe_resp.json().await.expect("decode JobDescription after burst");
+    let description: WorkloadDescription =
+        describe_resp.json().await.expect("decode WorkloadDescription after burst");
     assert_eq!(
         description.spec_digest, the_digest,
-        "describe(job_id).spec_digest must equal the digest every \
+        "describe(workload_id).spec_digest must equal the digest every \
          concurrent submitter saw ({the_digest}); got {} from describe \
          — this is the round-trip property the per-write digest \
          witness (ADR-0020) defends.",
@@ -403,8 +404,8 @@ async fn concurrent_byte_identical_submits_return_single_spec_digest() {
     // archived.
     handle.shutdown(Duration::from_secs(2)).await;
 
-    let job_id = JobId::new("payments").expect("parse JobId");
-    let key = IntentKey::for_job(&job_id);
+    let workload_id = WorkloadId::new("payments").expect("parse WorkloadId");
+    let key = IntentKey::for_job(&workload_id);
     let persisted = read_intent_key_from_store(&data_dir_under(tmp.path()), key.as_bytes())
         .await
         .expect("jobs/payments must be populated after concurrent identical submits");

@@ -41,13 +41,13 @@ use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{IntentKey, Job, Node, WorkloadKind};
-use overdrive_core::id::{JobId, NodeId};
+use overdrive_core::id::{NodeId, WorkloadId};
 #[cfg(any(test, feature = "integration-tests"))]
 use overdrive_core::reconciler::ServiceMapHydrator;
 use overdrive_core::reconciler::{
-    Action, AnyReconciler, AnyReconcilerView, AnyState, JobLifecycle, JobLifecycleState,
-    JobLifecycleView, Reconciler, ReconcilerName, ServiceMapHydratorState, ServiceMapHydratorView,
-    TargetResource, TickContext,
+    Action, AnyReconciler, AnyReconcilerView, AnyState, Reconciler, ReconcilerName,
+    ServiceMapHydratorState, ServiceMapHydratorView, TargetResource, TickContext,
+    WorkloadLifecycle, WorkloadLifecycleState, WorkloadLifecycleView,
 };
 use overdrive_core::traits::intent_store::IntentStore;
 use parking_lot::Mutex;
@@ -73,9 +73,9 @@ enum AnyViewMap {
     /// `default()` when a target is read.
     #[default]
     Unit,
-    /// `JobLifecycle` carries `View = JobLifecycleView`; the map
+    /// `WorkloadLifecycle` carries `View = WorkloadLifecycleView`; the map
     /// holds per-target persisted views.
-    JobLifecycle(BTreeMap<TargetResource, JobLifecycleView>),
+    WorkloadLifecycle(BTreeMap<TargetResource, WorkloadLifecycleView>),
     /// `ServiceMapHydrator` carries `View = ServiceMapHydratorView`;
     /// the map holds per-target persisted views per ADR-0035 §5.
     /// Phase 2 (Slice 08; ASR-2.2-04).
@@ -111,7 +111,7 @@ pub struct ReconcilerRuntime {
     ///
     /// Wrapped in [`parking_lot::Mutex`] per
     /// `fix-convergence-loop-not-spawned` Step 01-02 (RCA Option B2):
-    /// `submit_job` / `stop_job` (handler path) and the spawn loop in
+    /// `submit_workload` / `stop_workload` (handler path) and the spawn loop in
     /// [`crate::run_server_with_obs_and_driver`] both call broker
     /// methods that need `&mut self` (`submit`, `drain_pending`).
     /// Since `state.runtime` is `Arc<ReconcilerRuntime>`, neither
@@ -229,15 +229,15 @@ impl ReconcilerRuntime {
         let static_name = reconciler.static_name();
         let views = match &reconciler {
             AnyReconciler::NoopHeartbeat(_) => AnyViewMap::Unit,
-            AnyReconciler::JobLifecycle(_) => {
-                let loaded: BTreeMap<TargetResource, JobLifecycleView> =
+            AnyReconciler::WorkloadLifecycle(_) => {
+                let loaded: BTreeMap<TargetResource, WorkloadLifecycleView> =
                     self.view_store.bulk_load(static_name).await.map_err(|e| {
                         ControlPlaneError::from(crate::error::ViewStoreBootError::BulkLoad {
                             reconciler: name.clone(),
                             source: e,
                         })
                     })?;
-                AnyViewMap::JobLifecycle(loaded)
+                AnyViewMap::WorkloadLifecycle(loaded)
             }
             AnyReconciler::ServiceMapHydrator(_) => {
                 let loaded: BTreeMap<TargetResource, ServiceMapHydratorView> =
@@ -296,22 +296,24 @@ impl ReconcilerRuntime {
         self.reconcilers.get(name).map(|e| &e.reconciler)
     }
 
-    /// Read the current in-memory `JobLifecycleView` for `target`. Returns
-    /// `JobLifecycleView::default()` when the reconciler is not
+    /// Read the current in-memory `WorkloadLifecycleView` for `target`. Returns
+    /// `WorkloadLifecycleView::default()` when the reconciler is not
     /// registered, when the target has no persisted row, or when the
-    /// registered reconciler is not `JobLifecycle`. The default fall-back
+    /// registered reconciler is not `WorkloadLifecycle`. The default fall-back
     /// matches the legacy `view_cache` accessor's contract — fresh-job
-    /// callers (`handlers::describe_job`, the streaming submit's
+    /// callers (`handlers::describe_workload`, the streaming submit's
     /// terminal-event detection) see an empty view rather than a missing
     /// one.
     #[must_use]
-    pub fn view_for_job_lifecycle(&self, target: &TargetResource) -> JobLifecycleView {
-        let Some(entry) = self.reconcilers.get(&job_lifecycle_canonical_name()) else {
-            return JobLifecycleView::default();
+    pub fn view_for_workload_lifecycle(&self, target: &TargetResource) -> WorkloadLifecycleView {
+        let Some(entry) = self.reconcilers.get(&workload_lifecycle_canonical_name()) else {
+            return WorkloadLifecycleView::default();
         };
         match &*entry.views.lock() {
-            AnyViewMap::JobLifecycle(map) => map.get(target).cloned().unwrap_or_default(),
-            AnyViewMap::Unit | AnyViewMap::ServiceMapHydrator(_) => JobLifecycleView::default(),
+            AnyViewMap::WorkloadLifecycle(map) => map.get(target).cloned().unwrap_or_default(),
+            AnyViewMap::Unit | AnyViewMap::ServiceMapHydrator(_) => {
+                WorkloadLifecycleView::default()
+            }
         }
     }
 
@@ -330,8 +332,8 @@ impl ReconcilerRuntime {
         let guard = entry.views.lock();
         Some(match &*guard {
             AnyViewMap::Unit => AnyReconcilerView::Unit,
-            AnyViewMap::JobLifecycle(map) => {
-                AnyReconcilerView::JobLifecycle(map.get(target).cloned().unwrap_or_default())
+            AnyViewMap::WorkloadLifecycle(map) => {
+                AnyReconcilerView::WorkloadLifecycle(map.get(target).cloned().unwrap_or_default())
             }
             AnyViewMap::ServiceMapHydrator(map) => {
                 AnyReconcilerView::ServiceMapHydrator(map.get(target).cloned().unwrap_or_default())
@@ -392,7 +394,7 @@ impl ReconcilerRuntime {
                 // arm acts as the skip already.
                 Ok(())
             }
-            AnyReconcilerView::JobLifecycle(view) => {
+            AnyReconcilerView::WorkloadLifecycle(view) => {
                 // Eq-diff skip — compare `next_view` against the
                 // current in-memory value (or `default()` when no
                 // row exists for this target, matching the runtime's
@@ -405,11 +407,11 @@ impl ReconcilerRuntime {
                 let current = {
                     let guard = entry.views.lock();
                     match &*guard {
-                        AnyViewMap::JobLifecycle(map) => {
+                        AnyViewMap::WorkloadLifecycle(map) => {
                             map.get(target).cloned().unwrap_or_default()
                         }
                         AnyViewMap::Unit | AnyViewMap::ServiceMapHydrator(_) => {
-                            JobLifecycleView::default()
+                            WorkloadLifecycleView::default()
                         }
                     }
                 };
@@ -438,21 +440,21 @@ impl ReconcilerRuntime {
                 // `.claude/rules/development.md` § Concurrency & async.
                 {
                     let mut guard = entry.views.lock();
-                    if let AnyViewMap::JobLifecycle(map) = &mut *guard {
+                    if let AnyViewMap::WorkloadLifecycle(map) = &mut *guard {
                         map.insert(target.clone(), view);
                     }
                 }
                 Ok(())
             }
             AnyReconcilerView::ServiceMapHydrator(view) => {
-                // Eq-diff skip — same shape as JobLifecycle arm above.
+                // Eq-diff skip — same shape as WorkloadLifecycle arm above.
                 let current = {
                     let guard = entry.views.lock();
                     match &*guard {
                         AnyViewMap::ServiceMapHydrator(map) => {
                             map.get(target).cloned().unwrap_or_default()
                         }
-                        AnyViewMap::Unit | AnyViewMap::JobLifecycle(_) => {
+                        AnyViewMap::Unit | AnyViewMap::WorkloadLifecycle(_) => {
                             ServiceMapHydratorView::default()
                         }
                     }
@@ -518,24 +520,24 @@ impl ReconcilerRuntime {
         Self::new(data_dir, store)
     }
 
-    /// Snapshot of the in-memory `JobLifecycleView` map for `name`.
+    /// Snapshot of the in-memory `WorkloadLifecycleView` map for `name`.
     /// Returns `None` when the reconciler is not registered or is not
-    /// the `JobLifecycle` variant. **Test-only.**
+    /// the `WorkloadLifecycle` variant. **Test-only.**
     #[doc(hidden)]
     #[cfg(any(test, feature = "integration-tests"))]
-    pub fn loaded_job_lifecycle_views_for_test(
+    pub fn loaded_workload_lifecycle_views_for_test(
         &self,
         name: &ReconcilerName,
-    ) -> Option<BTreeMap<TargetResource, JobLifecycleView>> {
+    ) -> Option<BTreeMap<TargetResource, WorkloadLifecycleView>> {
         let entry = self.reconcilers.get(name)?;
         match &*entry.views.lock() {
-            AnyViewMap::JobLifecycle(map) => Some(map.clone()),
+            AnyViewMap::WorkloadLifecycle(map) => Some(map.clone()),
             AnyViewMap::Unit | AnyViewMap::ServiceMapHydrator(_) => None,
         }
     }
 
     /// Drive the runtime's persist-view path directly with a typed
-    /// `JobLifecycleView`. Used by the `WriteThroughOrdering`
+    /// `WorkloadLifecycleView`. Used by the `WriteThroughOrdering`
     /// integration test to assert the runtime obeys the fsync-first
     /// ordering without spinning up a full tick. **Test-only.**
     #[doc(hidden)]
@@ -544,44 +546,48 @@ impl ReconcilerRuntime {
         &self,
         name: &ReconcilerName,
         target: &TargetResource,
-        next: JobLifecycleView,
+        next: WorkloadLifecycleView,
     ) -> Result<(), ControlPlaneError> {
-        self.persist_view(name, target, AnyReconcilerView::JobLifecycle(next)).await
+        self.persist_view(name, target, AnyReconcilerView::WorkloadLifecycle(next)).await
     }
 
     /// Seed the in-memory view for `(job-lifecycle, target)` directly,
     /// bypassing the `ViewStore`. Used by acceptance tests that need
-    /// to bootstrap a specific `JobLifecycleView` shape (e.g.
+    /// to bootstrap a specific `WorkloadLifecycleView` shape (e.g.
     /// Failed-mid-backoff) without driving the full reconcile cycle to
     /// produce it. **Test-only.**
     ///
     /// Returns silently when the reconciler is not registered or is
-    /// not the `JobLifecycle` variant — same fall-back contract as
-    /// [`Self::view_for_job_lifecycle`].
+    /// not the `WorkloadLifecycle` variant — same fall-back contract as
+    /// [`Self::view_for_workload_lifecycle`].
     #[doc(hidden)]
     #[cfg(any(test, feature = "integration-tests"))]
-    pub fn seed_job_lifecycle_view_for_test(
+    pub fn seed_workload_lifecycle_view_for_test(
         &self,
         target: &TargetResource,
-        view: JobLifecycleView,
+        view: WorkloadLifecycleView,
     ) {
-        let Some(entry) = self.reconcilers.get(&job_lifecycle_canonical_name()) else { return };
+        let Some(entry) = self.reconcilers.get(&workload_lifecycle_canonical_name()) else {
+            return;
+        };
         let mut guard = entry.views.lock();
-        if let AnyViewMap::JobLifecycle(map) = &mut *guard {
+        if let AnyViewMap::WorkloadLifecycle(map) = &mut *guard {
             map.insert(target.clone(), view);
         }
     }
 
     /// Drop the in-memory view for `(job-lifecycle, target)` directly.
-    /// Pairs with [`Self::seed_job_lifecycle_view_for_test`] for the
+    /// Pairs with [`Self::seed_workload_lifecycle_view_for_test`] for the
     /// "simulate process restart" test pattern in
     /// `runtime_convergence_loop.rs`. **Test-only.**
     #[doc(hidden)]
     #[cfg(any(test, feature = "integration-tests"))]
-    pub fn drop_job_lifecycle_view_for_test(&self, target: &TargetResource) {
-        let Some(entry) = self.reconcilers.get(&job_lifecycle_canonical_name()) else { return };
+    pub fn drop_workload_lifecycle_view_for_test(&self, target: &TargetResource) {
+        let Some(entry) = self.reconcilers.get(&workload_lifecycle_canonical_name()) else {
+            return;
+        };
         let mut guard = entry.views.lock();
-        if let AnyViewMap::JobLifecycle(map) = &mut *guard {
+        if let AnyViewMap::WorkloadLifecycle(map) = &mut *guard {
             map.remove(target);
         }
     }
@@ -598,7 +604,7 @@ impl ReconcilerRuntime {
         let entry = self.reconcilers.get(name)?;
         match &*entry.views.lock() {
             AnyViewMap::ServiceMapHydrator(map) => Some(map.clone()),
-            AnyViewMap::Unit | AnyViewMap::JobLifecycle(_) => None,
+            AnyViewMap::Unit | AnyViewMap::WorkloadLifecycle(_) => None,
         }
     }
 
@@ -619,7 +625,7 @@ impl ReconcilerRuntime {
 
     /// Seed the in-memory view for `(service-map-hydrator, target)`
     /// directly, bypassing the `ViewStore`. Mirrors
-    /// [`Self::seed_job_lifecycle_view_for_test`] for the
+    /// [`Self::seed_workload_lifecycle_view_for_test`] for the
     /// ServiceMapHydrator variant. **Test-only.**
     #[doc(hidden)]
     #[cfg(any(test, feature = "integration-tests"))]
@@ -638,21 +644,21 @@ impl ReconcilerRuntime {
     }
 }
 
-/// Build the canonical [`ReconcilerName`] for the [`JobLifecycle`]
-/// reconciler from its trait const [`JobLifecycle::NAME`].
+/// Build the canonical [`ReconcilerName`] for the [`WorkloadLifecycle`]
+/// reconciler from its trait const [`WorkloadLifecycle::NAME`].
 ///
 /// The const is the single compile-time anchor for the name string —
 /// see the `refactor-reconciler-static-name` RCA. `ReconcilerName::new`
 /// validates against `^[a-z][a-z0-9-]{0,62}$`; the literal
-/// `"job-lifecycle"` declared on `<JobLifecycle as Reconciler>::NAME`
-/// is verified-valid at construction time by every `JobLifecycle::canonical()`
+/// `"job-lifecycle"` declared on `<WorkloadLifecycle as Reconciler>::NAME`
+/// is verified-valid at construction time by every `WorkloadLifecycle::canonical()`
 /// call site (`unwrap` or `expect` would be equivalent at runtime —
 /// the literal cannot fail validation as long as the trait const and
 /// the validator's grammar agree).
 #[allow(clippy::expect_used)]
-fn job_lifecycle_canonical_name() -> ReconcilerName {
-    ReconcilerName::new(<JobLifecycle as Reconciler>::NAME)
-        .expect("JobLifecycle::NAME is a valid ReconcilerName by construction")
+fn workload_lifecycle_canonical_name() -> ReconcilerName {
+    ReconcilerName::new(<WorkloadLifecycle as Reconciler>::NAME)
+        .expect("WorkloadLifecycle::NAME is a valid ReconcilerName by construction")
 }
 
 #[cfg(any(test, feature = "integration-tests"))]
@@ -736,7 +742,7 @@ pub async fn run_convergence_tick(
     // snapshot is taken from the SAME injected `Clock` the spawn loop
     // sourced `now` from (`state.clock`), once per tick — never
     // `SystemTime::now()` (dst-lint enforces). Reconcilers that need a
-    // persistable deadline (e.g. JobLifecycleView's
+    // persistable deadline (e.g. WorkloadLifecycleView's
     // `last_failure_seen_at` per issue #141) read `tick.now_unix`;
     // in-process deadline arithmetic continues to use `tick.now`.
     let now_unix = UnixInstant::from_clock(&*state.clock);
@@ -845,7 +851,7 @@ pub async fn run_convergence_tick(
     Ok(())
 }
 
-/// Pure predicate over `next_view`: does the `JobLifecycle` reconciler
+/// Pure predicate over `next_view`: does the `WorkloadLifecycle` reconciler
 /// have transitional state still to converge?
 ///
 /// "Transitional" = the view records a `last_failure_seen_at`
@@ -858,7 +864,7 @@ pub async fn run_convergence_tick(
 /// or the broker drains empty and the convergence loop sleeps without
 /// ever re-evaluating the deadline.
 ///
-/// Returns `false` for `Unit` views and for `JobLifecycle` views whose
+/// Returns `false` for `Unit` views and for `WorkloadLifecycle` views whose
 /// allocs have all reached the backoff ceiling (terminal-failed) or
 /// whose `last_failure_seen_at` is empty (no pending restart). The
 /// latter covers the converged-Running case (no Failed alloc → no
@@ -878,7 +884,7 @@ fn view_has_backoff_pending(next_view: &AnyReconcilerView) -> bool {
         // lands (GH #160), the corresponding "any service has retry
         // memory recorded" predicate ships alongside.
         AnyReconcilerView::Unit | AnyReconcilerView::ServiceMapHydrator(_) => false,
-        AnyReconcilerView::JobLifecycle(view) => {
+        AnyReconcilerView::WorkloadLifecycle(view) => {
             view.last_failure_seen_at.iter().any(|(alloc, _)| {
                 view.restart_counts.get(alloc).copied().unwrap_or(0)
                     < overdrive_core::reconciler::RESTART_BACKOFF_CEILING
@@ -891,8 +897,8 @@ fn view_has_backoff_pending(next_view: &AnyReconcilerView) -> bool {
 /// against the `AppState`'s `IntentStore`.
 ///
 /// Per ADR-0021 the runtime owns hydrate-desired; for `NoopHeartbeat`
-/// this is `AnyState::Unit`, for `JobLifecycle` it constructs a
-/// `JobLifecycleState` from the `IntentStore`.
+/// this is `AnyState::Unit`, for `WorkloadLifecycle` it constructs a
+/// `WorkloadLifecycleState` from the `IntentStore`.
 async fn hydrate_desired(
     reconciler: &AnyReconciler,
     target: &TargetResource,
@@ -900,35 +906,35 @@ async fn hydrate_desired(
 ) -> Result<AnyState, ConvergenceError> {
     match reconciler {
         AnyReconciler::NoopHeartbeat(_) => Ok(AnyState::Unit),
-        AnyReconciler::JobLifecycle(_) => {
-            let job_id = job_id_from_target(target)?;
-            let job = read_job(state, &job_id).await?;
+        AnyReconciler::WorkloadLifecycle(_) => {
+            let workload_id = workload_id_from_target(target)?;
+            let job = read_job(state, &workload_id).await?;
             // ADR-0027: also read the stop intent. If present →
             // desired_to_stop = true. The reconciler's Stop branch
             // fires only when the spec is also Some (a stop intent
             // for an absent job is a no-op).
-            let desired_to_stop = stop_intent_present(state, &job_id).await?;
+            let desired_to_stop = stop_intent_present(state, &workload_id).await?;
 
             let nodes = baseline_nodes_phase1();
-            // `desired.allocations` is unused by the JobLifecycle
+            // `desired.allocations` is unused by the WorkloadLifecycle
             // reconciler — it inspects `actual.allocations`.
             // ADR-0037 Amendment 2026-05-10 / ADR-0047 §1: read the
             // persisted workload-kind discriminator at
-            // `IntentKey::for_job_kind` (written by `submit_job` in
+            // `IntentKey::for_workload_kind` (written by `submit_workload` in
             // slice 02-06). Absent / unparseable bytes default to
             // `WorkloadKind::default()` (Service) per
             // `from_discriminator_byte` forward-compat — preserves
             // the kind-agnostic Service shape for legacy submits that
             // predate the discriminator persistence.
-            let workload_kind = read_workload_kind(state, &job_id).await?;
-            let s = JobLifecycleState {
+            let workload_kind = read_workload_kind(state, &workload_id).await?;
+            let s = WorkloadLifecycleState {
                 job,
                 desired_to_stop,
                 nodes,
                 allocations: BTreeMap::new(),
                 workload_kind,
             };
-            Ok(AnyState::JobLifecycle(s))
+            Ok(AnyState::WorkloadLifecycle(s))
         }
         AnyReconciler::ServiceMapHydrator(_) => {
             let service_id = service_id_from_target(target)?;
@@ -976,8 +982,11 @@ pub async fn hydrate_desired_for_test(
 /// Read a `Job` from the `IntentStore` at the canonical `jobs/<id>` key,
 /// rkyv-decoding the archived bytes. Returns `Ok(None)` when the key is
 /// absent. Errors map to `ConvergenceError::IntentRead`.
-async fn read_job(state: &AppState, job_id: &JobId) -> Result<Option<Job>, ConvergenceError> {
-    let key = IntentKey::for_job(job_id);
+async fn read_job(
+    state: &AppState,
+    workload_id: &WorkloadId,
+) -> Result<Option<Job>, ConvergenceError> {
+    let key = IntentKey::for_job(workload_id);
     let bytes = state
         .store
         .get(key.as_bytes())
@@ -992,15 +1001,15 @@ async fn read_job(state: &AppState, job_id: &JobId) -> Result<Option<Job>, Conve
 }
 
 /// Read the persisted workload-kind discriminator at
-/// `IntentKey::for_job_kind`. Absent or unparseable bytes default to
+/// `IntentKey::for_workload_kind`. Absent or unparseable bytes default to
 /// `WorkloadKind::default()` (Service) per ADR-0047 §1 forward-compat
 /// — legacy submits that predate slice 02-06's discriminator
 /// persistence still hydrate as Service-shape (kind-agnostic).
 async fn read_workload_kind(
     state: &AppState,
-    job_id: &JobId,
+    workload_id: &WorkloadId,
 ) -> Result<WorkloadKind, ConvergenceError> {
-    let key = IntentKey::for_job_kind(job_id);
+    let key = IntentKey::for_workload_kind(workload_id);
     let bytes = state
         .store
         .get(key.as_bytes())
@@ -1013,8 +1022,11 @@ async fn read_workload_kind(
 }
 
 /// Probe the canonical `jobs/<id>:stop` key; presence is the signal.
-async fn stop_intent_present(state: &AppState, job_id: &JobId) -> Result<bool, ConvergenceError> {
-    let stop_key = IntentKey::for_job_stop(job_id);
+async fn stop_intent_present(
+    state: &AppState,
+    workload_id: &WorkloadId,
+) -> Result<bool, ConvergenceError> {
+    let stop_key = IntentKey::for_job_stop(workload_id);
     let stop_bytes = state
         .store
         .get(stop_key.as_bytes())
@@ -1032,15 +1044,15 @@ async fn hydrate_actual(
 ) -> Result<AnyState, ConvergenceError> {
     match reconciler {
         AnyReconciler::NoopHeartbeat(_) => Ok(AnyState::Unit),
-        AnyReconciler::JobLifecycle(_) => {
-            let job_id = job_id_from_target(target)?;
+        AnyReconciler::WorkloadLifecycle(_) => {
+            let workload_id = workload_id_from_target(target)?;
             let rows = state
                 .obs
                 .alloc_status_rows()
                 .await
                 .map_err(|e| ConvergenceError::ObservationRead(e.to_string()))?;
             let mut allocations = BTreeMap::new();
-            for row in rows.into_iter().filter(|r| r.job_id == job_id) {
+            for row in rows.into_iter().filter(|r| r.workload_id == workload_id) {
                 allocations.insert(row.alloc_id.clone(), row);
             }
             let nodes = baseline_nodes_phase1();
@@ -1049,22 +1061,22 @@ async fn hydrate_actual(
             // side carries it); set false unconditionally.
             // ADR-0037 Amendment 2026-05-10 / ADR-0047 §1: read the
             // persisted workload-kind discriminator at
-            // `IntentKey::for_job_kind` so the `actual` side carries
+            // `IntentKey::for_workload_kind` so the `actual` side carries
             // the same kind as `desired`. Only the `desired` side
             // drives `reconcile`'s kind-branching logic today, but
             // populating both with the same value keeps the field
             // semantically uniform across the State pair so future
             // `actual`-side branching has a non-default value to work
             // with.
-            let workload_kind = read_workload_kind(state, &job_id).await?;
-            let s = JobLifecycleState {
+            let workload_kind = read_workload_kind(state, &workload_id).await?;
+            let s = WorkloadLifecycleState {
                 job: None,
                 desired_to_stop: false,
                 nodes,
                 allocations,
                 workload_kind,
             };
-            Ok(AnyState::JobLifecycle(s))
+            Ok(AnyState::WorkloadLifecycle(s))
         }
         AnyReconciler::ServiceMapHydrator(_) => {
             // 08-02 hydrate-actual reads from
@@ -1132,16 +1144,16 @@ fn baseline_nodes_phase1() -> BTreeMap<NodeId, Node> {
     nodes
 }
 
-/// Extract a `JobId` from a `TargetResource` of shape `job/<id>`.
-fn job_id_from_target(target: &TargetResource) -> Result<JobId, ConvergenceError> {
+/// Extract a `WorkloadId` from a `TargetResource` of shape `job/<id>`.
+fn workload_id_from_target(target: &TargetResource) -> Result<WorkloadId, ConvergenceError> {
     let raw = target.as_str();
     let id_part =
         raw.strip_prefix("job/").ok_or_else(|| ConvergenceError::TargetShape(raw.to_string()))?;
-    JobId::new(id_part).map_err(|e| ConvergenceError::TargetShape(e.to_string()))
+    WorkloadId::new(id_part).map_err(|e| ConvergenceError::TargetShape(e.to_string()))
 }
 
 /// Extract a `ServiceId` from a `TargetResource` of shape `service/<id>`.
-/// Mirrors `job_id_from_target` for the hydrator. Phase 2 (Slice 08).
+/// Mirrors `workload_id_from_target` for the hydrator. Phase 2 (Slice 08).
 fn service_id_from_target(
     target: &TargetResource,
 ) -> Result<overdrive_core::id::ServiceId, ConvergenceError> {

@@ -1,4 +1,4 @@
-//! Acceptance tests for `overdrive_cli::render::{job_submit_accepted,
+//! Acceptance tests for `overdrive_cli::render::{workload_submit_accepted,
 //! cli_error}` — step 05-04.
 //!
 //! Rendering functions are pure string-builders — no I/O, no server
@@ -8,7 +8,7 @@
 //! handler tests.
 //!
 //! Acceptance coverage:
-//!   (f) `render::job_submit_accepted` emits a multi-line string with
+//!   (f) `render::workload_submit_accepted` emits a multi-line string with
 //!       `Accepted.`, `Job ID:`, `Intent key:`, `Spec digest:`,
 //!       `Outcome:`, `Endpoint:`, `Next:` labels and the corresponding
 //!       values (per ADR-0020 the `Commit index:` line was dropped).
@@ -27,7 +27,7 @@ const FIXTURE_DIGEST: &str = "deadbeefcafebabe0123456789abcdefdeadbeefcafebabe01
 
 fn fixture_submit_output() -> SubmitOutput {
     SubmitOutput {
-        job_id: "payments".to_string(),
+        workload_id: "payments".to_string(),
         intent_key: "jobs/payments".to_string(),
         spec_digest: FIXTURE_DIGEST.to_string(),
         outcome: IdempotencyOutcome::Inserted,
@@ -37,25 +37,31 @@ fn fixture_submit_output() -> SubmitOutput {
 }
 
 // -------------------------------------------------------------------
-// (f) render::job_submit_accepted contains required labels + values
+// (f) render::workload_submit_accepted contains required labels + values
 // -------------------------------------------------------------------
 
 #[test]
 fn render_job_submit_accepted_contains_required_labels() {
     let out = fixture_submit_output();
-    let rendered = overdrive_cli::render::job_submit_accepted(&out);
+    let rendered = overdrive_cli::render::workload_submit_accepted(&out);
 
-    for label in
-        ["Accepted.", "Job ID:", "Intent key:", "Spec digest:", "Outcome:", "Endpoint:", "Next:"]
-    {
+    for label in [
+        "Accepted.",
+        "Workload ID:",
+        "Intent key:",
+        "Spec digest:",
+        "Outcome:",
+        "Endpoint:",
+        "Next:",
+    ] {
         assert!(
             rendered.contains(label),
-            "rendered job_submit_accepted must contain `{label}`; got:\n{rendered}",
+            "rendered workload_submit_accepted must contain `{label}`; got:\n{rendered}",
         );
     }
     assert!(
         rendered.contains("payments"),
-        "rendered block must contain job_id value `payments`; got:\n{rendered}",
+        "rendered block must contain workload_id value `payments`; got:\n{rendered}",
     );
     assert!(
         rendered.contains("jobs/payments"),

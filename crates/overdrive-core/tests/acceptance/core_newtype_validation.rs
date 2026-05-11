@@ -21,7 +21,7 @@
 
 use std::str::FromStr;
 
-use overdrive_core::id::{IdParseError, JobId, NodeId};
+use overdrive_core::id::{IdParseError, NodeId, WorkloadId};
 
 // -----------------------------------------------------------------------------
 // §2.2 — scenario 1: Empty identifier input is rejected at the constructor.
@@ -32,19 +32,22 @@ fn empty_input_is_rejected_with_empty_variant_naming_the_kind() {
     // Given the empty string.
     let input = "";
 
-    // When Ana calls JobId::from_str on that input.
-    let outcome = JobId::from_str(input);
+    // When Ana calls WorkloadId::from_str on that input.
+    let outcome = WorkloadId::from_str(input);
 
     // Then Ana receives a parse error naming the empty input — specifically
     // the `Empty` variant, with the `kind` field carrying the newtype name.
-    // And no JobId value is constructed (enforced by pattern-matching the Err
+    // And no WorkloadId value is constructed (enforced by pattern-matching the Err
     // arm; the Ok arm is a test failure).
     match outcome {
         Err(IdParseError::Empty { kind }) => {
-            assert_eq!(kind, "JobId", "Empty.kind must name the rejecting newtype; got {kind:?}");
+            assert_eq!(
+                kind, "WorkloadId",
+                "Empty.kind must name the rejecting newtype; got {kind:?}"
+            );
         }
         Err(other) => panic!("expected IdParseError::Empty, got {other:?}"),
-        Ok(value) => panic!("empty input must not construct a JobId; got {value}"),
+        Ok(value) => panic!("empty input must not construct a WorkloadId; got {value}"),
     }
 }
 
@@ -60,14 +63,14 @@ fn space_in_identifier_is_rejected_with_invalid_char_naming_position() {
     let expected_position = 8_usize;
     let expected_char = ' ';
 
-    // When Ana calls JobId::from_str on that input.
-    let outcome = JobId::from_str(input);
+    // When Ana calls WorkloadId::from_str on that input.
+    let outcome = WorkloadId::from_str(input);
 
     // Then Ana receives a parse error naming the invalid character and its
-    // position. And no JobId value is constructed.
+    // position. And no WorkloadId value is constructed.
     match outcome {
         Err(IdParseError::InvalidChar { kind, ch, index }) => {
-            assert_eq!(kind, "JobId", "InvalidChar.kind must name the newtype");
+            assert_eq!(kind, "WorkloadId", "InvalidChar.kind must name the newtype");
             assert_eq!(ch, expected_char, "InvalidChar.ch must carry the offending character");
             assert_eq!(
                 index, expected_position,
@@ -75,7 +78,7 @@ fn space_in_identifier_is_rejected_with_invalid_char_naming_position() {
             );
         }
         Err(other) => panic!("expected IdParseError::InvalidChar, got {other:?}"),
-        Ok(value) => panic!("space in input must not construct a JobId; got {value}"),
+        Ok(value) => panic!("space in input must not construct a WorkloadId; got {value}"),
     }
 }
 
@@ -92,19 +95,19 @@ fn input_of_254_chars_is_rejected_with_too_long_naming_the_max() {
     let input: String = std::iter::repeat_n('a', 254).collect();
     assert_eq!(input.len(), 254, "fixture must match the scenario length");
 
-    // When Ana calls JobId::from_str on that input.
-    let outcome = JobId::from_str(&input);
+    // When Ana calls WorkloadId::from_str on that input.
+    let outcome = WorkloadId::from_str(&input);
 
     // Then Ana receives a parse error naming the length violation. The
     // structured variant carries `kind` and `max` (the ceiling — one less
-    // than the offending length). And no JobId value is constructed.
+    // than the offending length). And no WorkloadId value is constructed.
     match outcome {
         Err(IdParseError::TooLong { kind, max }) => {
-            assert_eq!(kind, "JobId", "TooLong.kind must name the newtype");
+            assert_eq!(kind, "WorkloadId", "TooLong.kind must name the newtype");
             assert_eq!(max, 253, "TooLong.max must carry the DNS-label ceiling (253)");
         }
         Err(other) => panic!("expected IdParseError::TooLong, got {other:?}"),
-        Ok(value) => panic!("254-char input must not construct a JobId; got {value}"),
+        Ok(value) => panic!("254-char input must not construct a WorkloadId; got {value}"),
     }
 }
 
@@ -123,10 +126,10 @@ fn input_of_253_chars_at_the_boundary_is_accepted() {
     let input: String = std::iter::repeat_n('a', 253).collect();
     assert_eq!(input.len(), 253, "fixture must match the boundary length");
 
-    // When Ana calls JobId::from_str on that input.
-    let outcome = JobId::from_str(&input);
+    // When Ana calls WorkloadId::from_str on that input.
+    let outcome = WorkloadId::from_str(&input);
 
-    // Then Ana receives a valid JobId. The positive side of the boundary
+    // Then Ana receives a valid WorkloadId. The positive side of the boundary
     // is load-bearing — without it, `> 253` and `>= 253` are
     // observationally identical under the 254-char rejection test alone.
     let id = outcome.expect("253-char all-alnum input must parse");

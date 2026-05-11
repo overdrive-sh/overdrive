@@ -164,7 +164,7 @@ pub enum Invariant {
     /// reconciler-memory-redb step 01-07 — always invariant.
     /// For arbitrary `View` values, `ViewStore::write_through` followed
     /// by `ViewStore::bulk_load` returns byte-equal values. proptest-
-    /// backed; covers `JobLifecycleView` (the only meaningful production
+    /// backed; covers `WorkloadLifecycleView` (the only meaningful production
     /// View today) and `()` (the unit-View case used by `NoopHeartbeat`).
     /// Catches CBOR encode/decode regressions, ciborium-version skew,
     /// and serde-derive oversights per ADR-0035 §6.
@@ -179,7 +179,7 @@ pub enum Invariant {
     /// reconciler-memory-redb step 01-07 — always invariant.
     /// Under `SimViewStore::inject_fsync_failure`, the runtime's
     /// in-memory `BTreeMap` visible through
-    /// `ReconcilerRuntime::loaded_job_lifecycle_views_for_test` MUST
+    /// `ReconcilerRuntime::loaded_workload_lifecycle_views_for_test` MUST
     /// NOT be updated for the target whose `write_through` failed. The
     /// load-bearing crash-durability invariant from ADR-0035 §5: the
     /// fsync-then-memory ordering rule. A reconciler runtime that

@@ -60,7 +60,7 @@ use std::time::Duration;
 use futures::StreamExt;
 use tokio::time::timeout;
 
-use crate::id::{AllocationId, JobId, NodeId, Region};
+use crate::id::{AllocationId, NodeId, Region, WorkloadId};
 use crate::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, NodeHealthRow, ObservationRow, ObservationStore,
 };
@@ -97,7 +97,7 @@ fn region() -> Region {
 fn alloc_row(scope: &str, idx: usize, state: AllocState, ts: LogicalTimestamp) -> AllocStatusRow {
     AllocStatusRow {
         alloc_id: alloc_id(scope, idx),
-        job_id: JobId::from_str("payments").expect("job id is valid"),
+        workload_id: WorkloadId::from_str("payments").expect("job id is valid"),
         node_id: node_id("control-plane-0"),
         state,
         updated_at: ts,

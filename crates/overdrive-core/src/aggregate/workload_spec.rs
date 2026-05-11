@@ -169,8 +169,8 @@ pub enum WorkloadKind {
 
 impl WorkloadKind {
     /// Single-byte discriminator written to / read from the
-    /// `jobs/<id>/kind` intent record per
-    /// [`crate::aggregate::IntentKey::for_job_kind`]. The byte is the
+    /// `workloads/<id>/kind` intent record per
+    /// [`crate::aggregate::IntentKey::for_workload_kind`]. The byte is the
     /// canonical persisted form — readable in hex dumps, parseable
     /// without rkyv, and stable across future variant additions
     /// (`Self::default()` is the back-compat fallback for an unknown
@@ -198,7 +198,7 @@ impl WorkloadKind {
     }
 
     /// Canonical lowercase string form. Used as the wire-side
-    /// `workload_kind` field on `SubmitJobRequest` so legacy JSON-
+    /// `workload_kind` field on `SubmitWorkloadRequest` so legacy JSON-
     /// inspecting clients see a human-readable value, and as the
     /// inverse of [`Self::from_wire_str`].
     #[must_use]

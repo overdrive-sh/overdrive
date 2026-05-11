@@ -31,10 +31,10 @@
 use std::time::Duration;
 
 use overdrive_core::UnixInstant;
-use overdrive_core::id::{JobId, NodeId};
+use overdrive_core::id::{NodeId, WorkloadId};
 use overdrive_core::reconciler::{
-    AnyReconciler, AnyReconcilerView, AnyState, JobLifecycle, NoopHeartbeat, Reconciler,
-    TickContext,
+    AnyReconciler, AnyReconcilerView, AnyState, NoopHeartbeat, Reconciler, TickContext,
+    WorkloadLifecycle,
 };
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::entropy::Entropy;
@@ -304,7 +304,7 @@ struct IntentStoreProbeKeys {
 /// `jobs/` prefix is sourced from `aggregate/mod.rs` (the SSOT).
 fn derive_intent_store_probe_keys() -> Result<IntentStoreProbeKeys, String> {
     let mk = |raw: &str| -> Result<overdrive_core::aggregate::IntentKey, String> {
-        overdrive_core::id::JobId::new(raw)
+        overdrive_core::id::WorkloadId::new(raw)
             .map(|id| overdrive_core::aggregate::IntentKey::for_job(&id))
             .map_err(|e| format!("derive IntentKey for {raw}: {e}"))
     };
@@ -463,7 +463,7 @@ pub async fn evaluate_intent_store_returns_caller_bytes() -> InvariantResult {
 pub async fn evaluate_sim_observation_lww(cluster: &SimObservationCluster) -> InvariantResult {
     use std::str::FromStr;
 
-    use overdrive_core::id::{AllocationId, JobId};
+    use overdrive_core::id::{AllocationId, WorkloadId};
     use overdrive_core::traits::observation_store::{
         AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
     };
@@ -493,7 +493,7 @@ pub async fn evaluate_sim_observation_lww(cluster: &SimObservationCluster) -> In
                 );
             }
         };
-        let job_id = match JobId::from_str("payments") {
+        let workload_id = match WorkloadId::from_str("payments") {
             Ok(j) => j,
             Err(err) => {
                 return result(
@@ -512,7 +512,7 @@ pub async fn evaluate_sim_observation_lww(cluster: &SimObservationCluster) -> In
             let state = if i == 0 { AllocState::Pending } else { AllocState::Running };
             let row = AllocStatusRow {
                 alloc_id: alloc_id.clone(),
-                job_id: job_id.clone(),
+                workload_id: workload_id.clone(),
                 node_id: writer.clone(),
                 state,
                 updated_at: LogicalTimestamp { counter, writer: writer.clone() },
@@ -973,8 +973,8 @@ pub fn evaluate_reconciler_is_pure(
     // Per ADR-0021 (step 02-01), `desired`/`actual` are now typed
     // `&AnyState` rather than the prior `&State, &State` placeholder
     // pair. Phase 1 reconcilers (`NoopHeartbeat`) use `AnyState::Unit`
-    // because their `Reconciler::State = ()`; the `JobLifecycle`
-    // reconciler's `AnyState::JobLifecycle(...)` arm becomes reachable
+    // because their `Reconciler::State = ()`; the `WorkloadLifecycle`
+    // reconciler's `AnyState::WorkloadLifecycle(...)` arm becomes reachable
     // in step 02-03 when the runtime tick loop ships.
     let desired = AnyState::Unit;
     let actual = AnyState::Unit;
@@ -1055,8 +1055,8 @@ fn build_tick_context(clock: &SimClock) -> TickContext {
 /// iff every submitted job has at least one Running alloc in the
 /// snapshot. Pure, no I/O — the harness owns the tick loop.
 #[must_use]
-pub fn evaluate_job_scheduled_after_submission(
-    submitted_jobs: &[JobId],
+pub fn evaluate_workload_scheduled_after_submission(
+    submitted_jobs: &[WorkloadId],
     alloc_status: &[AllocStatusRow],
 ) -> InvariantResult {
     let name = "job-scheduled-after-submission";
@@ -1068,16 +1068,16 @@ pub fn evaluate_job_scheduled_after_submission(
     if submitted_jobs.is_empty() {
         return result(name, InvariantStatus::Pass, CLUSTER_HOST, None);
     }
-    for job_id in submitted_jobs {
+    for workload_id in submitted_jobs {
         let has_running = alloc_status
             .iter()
-            .any(|row| &row.job_id == job_id && row.state == AllocState::Running);
+            .any(|row| &row.workload_id == workload_id && row.state == AllocState::Running);
         if !has_running {
             return result(
                 name,
                 InvariantStatus::Fail,
                 CLUSTER_HOST,
-                Some(format!("submitted job {job_id} has no Running alloc within budget")),
+                Some(format!("submitted job {workload_id} has no Running alloc within budget")),
             );
         }
     }
@@ -1096,15 +1096,15 @@ pub fn evaluate_job_scheduled_after_submission(
 /// is the observation snapshot.
 #[must_use]
 pub fn evaluate_desired_replica_count_converges(
-    desired_replicas: &[(JobId, u32)],
+    desired_replicas: &[(WorkloadId, u32)],
     alloc_status: &[AllocStatusRow],
 ) -> InvariantResult {
     let name = "desired-replica-count-converges";
-    for (job_id, want) in desired_replicas {
+    for (workload_id, want) in desired_replicas {
         let running_count = u32::try_from(
             alloc_status
                 .iter()
-                .filter(|row| &row.job_id == job_id && row.state == AllocState::Running)
+                .filter(|row| &row.workload_id == workload_id && row.state == AllocState::Running)
                 .count(),
         )
         .unwrap_or(u32::MAX);
@@ -1113,7 +1113,7 @@ pub fn evaluate_desired_replica_count_converges(
                 name,
                 InvariantStatus::Fail,
                 CLUSTER_HOST,
-                Some(format!("job {job_id}: want {want} Running, observed {running_count}")),
+                Some(format!("job {workload_id}: want {want} Running, observed {running_count}")),
             );
         }
     }
@@ -1235,7 +1235,7 @@ pub fn ordering_verdict<V: PartialEq>(
 /// Evaluate `ViewStoreRoundtripIsLossless`.
 ///
 /// proptest-backed: for arbitrary `View` values, `write_through` then
-/// `bulk_load` returns byte-equal results. Covers `JobLifecycleView`
+/// `bulk_load` returns byte-equal results. Covers `WorkloadLifecycleView`
 /// (the only meaningful production View today) and `()` (the unit-View
 /// case used by `NoopHeartbeat`). Catches CBOR encode/decode regressions,
 /// ciborium-version skew, and serde-derive oversights per ADR-0035 §6.
@@ -1253,7 +1253,7 @@ pub fn ordering_verdict<V: PartialEq>(
 pub async fn evaluate_view_store_roundtrip_is_lossless(seed: u64) -> InvariantResult {
     use overdrive_control_plane::view_store::ViewStoreExt;
     use overdrive_core::id::AllocationId;
-    use overdrive_core::reconciler::{JobLifecycleView, TargetResource};
+    use overdrive_core::reconciler::{TargetResource, WorkloadLifecycleView};
     use overdrive_core::wall_clock::UnixInstant;
     use rand::{Rng, SeedableRng};
 
@@ -1277,11 +1277,11 @@ pub async fn evaluate_view_store_roundtrip_is_lossless(seed: u64) -> InvariantRe
     // per the `refactor-reconciler-static-name` RCA — so no
     // `ReconcilerName::new(...)` wrapping is needed at the call site.
     for case_idx in 0..CASES {
-        // Generate a JobLifecycleView with random restart_counts and
+        // Generate a WorkloadLifecycleView with random restart_counts and
         // last_failure_seen_at maps. Cardinality 0..4 covers empty,
         // single-entry, and multi-entry shapes.
         let entries: usize = rng.gen_range(0..4);
-        let mut view = JobLifecycleView::default();
+        let mut view = WorkloadLifecycleView::default();
         for i in 0..entries {
             let raw = format!("alloc-case-{case_idx}-{i}");
             let alloc_id = match AllocationId::new(&raw) {
@@ -1306,7 +1306,7 @@ pub async fn evaluate_view_store_roundtrip_is_lossless(seed: u64) -> InvariantRe
             }
         }
 
-        // Roundtrip JobLifecycleView through a fresh SimViewStore.
+        // Roundtrip WorkloadLifecycleView through a fresh SimViewStore.
         let store = SimViewStore::new();
         let target_raw = format!("job/case-{case_idx}");
         let target = match TargetResource::new(&target_raw) {
@@ -1321,7 +1321,7 @@ pub async fn evaluate_view_store_roundtrip_is_lossless(seed: u64) -> InvariantRe
             }
         };
         if let Err(err) =
-            store.write_through(<JobLifecycle as Reconciler>::NAME, &target, &view).await
+            store.write_through(<WorkloadLifecycle as Reconciler>::NAME, &target, &view).await
         {
             return result(
                 name,
@@ -1330,8 +1330,8 @@ pub async fn evaluate_view_store_roundtrip_is_lossless(seed: u64) -> InvariantRe
                 Some(format!("case {case_idx}: write_through failed: {err}")),
             );
         }
-        let loaded: std::collections::BTreeMap<TargetResource, JobLifecycleView> =
-            match store.bulk_load(<JobLifecycle as Reconciler>::NAME).await {
+        let loaded: std::collections::BTreeMap<TargetResource, WorkloadLifecycleView> =
+            match store.bulk_load(<WorkloadLifecycle as Reconciler>::NAME).await {
                 Ok(m) => m,
                 Err(err) => {
                     return result(
@@ -1351,7 +1351,7 @@ pub async fn evaluate_view_store_roundtrip_is_lossless(seed: u64) -> InvariantRe
                     InvariantStatus::Fail,
                     "host-0",
                     Some(format!(
-                        "case {case_idx}: JobLifecycleView roundtrip diverged — \
+                        "case {case_idx}: WorkloadLifecycleView roundtrip diverged — \
                          original={view:?} decoded={decoded:?}",
                     )),
                 );
@@ -1361,7 +1361,9 @@ pub async fn evaluate_view_store_roundtrip_is_lossless(seed: u64) -> InvariantRe
                     name,
                     InvariantStatus::Fail,
                     "host-0",
-                    Some(format!("case {case_idx}: JobLifecycleView absent from bulk_load result")),
+                    Some(format!(
+                        "case {case_idx}: WorkloadLifecycleView absent from bulk_load result"
+                    )),
                 );
             }
         }
@@ -1435,14 +1437,14 @@ pub async fn evaluate_view_store_roundtrip_is_lossless(seed: u64) -> InvariantRe
 pub async fn evaluate_bulk_load_is_deterministic() -> InvariantResult {
     use overdrive_control_plane::view_store::ViewStoreExt;
     use overdrive_core::id::AllocationId;
-    use overdrive_core::reconciler::{JobLifecycleView, TargetResource};
+    use overdrive_core::reconciler::{TargetResource, WorkloadLifecycleView};
 
     use crate::adapters::view_store::SimViewStore;
 
     let name = "bulk-load-is-deterministic";
 
     // Reconciler name flows through the ViewStore byte surface as
-    // `<JobLifecycle as Reconciler>::NAME` directly per the
+    // `<WorkloadLifecycle as Reconciler>::NAME` directly per the
     // `refactor-reconciler-static-name` RCA — no `ReconcilerName::new`
     // wrapping needed.
 
@@ -1459,9 +1461,9 @@ pub async fn evaluate_bulk_load_is_deterministic() -> InvariantResult {
     // store, which catches NON-DETERMINISM (different order across
     // reads) rather than ORDERING (a specific order). Both calls must
     // produce identical output.
-    let targets_with_views: Vec<(&str, JobLifecycleView)> = vec![
+    let targets_with_views: Vec<(&str, WorkloadLifecycleView)> = vec![
         ("job/payments", {
-            let mut v = JobLifecycleView::default();
+            let mut v = WorkloadLifecycleView::default();
             let id = match AllocationId::new("alloc-payments-0") {
                 Ok(a) => a,
                 Err(err) => {
@@ -1477,7 +1479,7 @@ pub async fn evaluate_bulk_load_is_deterministic() -> InvariantResult {
             v
         }),
         ("job/frontend", {
-            let mut v = JobLifecycleView::default();
+            let mut v = WorkloadLifecycleView::default();
             let id = match AllocationId::new("alloc-frontend-0") {
                 Ok(a) => a,
                 Err(err) => {
@@ -1493,7 +1495,7 @@ pub async fn evaluate_bulk_load_is_deterministic() -> InvariantResult {
             v
         }),
         ("job/scheduler", {
-            let mut v = JobLifecycleView::default();
+            let mut v = WorkloadLifecycleView::default();
             let id = match AllocationId::new("alloc-scheduler-0") {
                 Ok(a) => a,
                 Err(err) => {
@@ -1523,7 +1525,7 @@ pub async fn evaluate_bulk_load_is_deterministic() -> InvariantResult {
             }
         };
         if let Err(err) =
-            store.write_through(<JobLifecycle as Reconciler>::NAME, &target, view).await
+            store.write_through(<WorkloadLifecycle as Reconciler>::NAME, &target, view).await
         {
             return result(
                 name,
@@ -1537,8 +1539,8 @@ pub async fn evaluate_bulk_load_is_deterministic() -> InvariantResult {
     // Two bulk_load calls against the same store. Both must produce
     // PartialEq-equal BTreeMaps — same keys, same values, same order
     // (BTreeMap PartialEq compares element-wise in iteration order).
-    let first: std::collections::BTreeMap<TargetResource, JobLifecycleView> =
-        match store.bulk_load(<JobLifecycle as Reconciler>::NAME).await {
+    let first: std::collections::BTreeMap<TargetResource, WorkloadLifecycleView> =
+        match store.bulk_load(<WorkloadLifecycle as Reconciler>::NAME).await {
             Ok(m) => m,
             Err(err) => {
                 return result(
@@ -1549,8 +1551,8 @@ pub async fn evaluate_bulk_load_is_deterministic() -> InvariantResult {
                 );
             }
         };
-    let second: std::collections::BTreeMap<TargetResource, JobLifecycleView> =
-        match store.bulk_load(<JobLifecycle as Reconciler>::NAME).await {
+    let second: std::collections::BTreeMap<TargetResource, WorkloadLifecycleView> =
+        match store.bulk_load(<WorkloadLifecycle as Reconciler>::NAME).await {
             Ok(m) => m,
             Err(err) => {
                 return result(
@@ -1605,7 +1607,7 @@ pub async fn evaluate_bulk_load_is_deterministic() -> InvariantResult {
 ///
 /// The evaluator:
 ///
-/// 1. Seeds an `original` `JobLifecycleView` via `write_through`.
+/// 1. Seeds an `original` `WorkloadLifecycleView` via `write_through`.
 /// 2. Calls `inject_fsync_failure` on the `SimViewStore`.
 /// 3. Attempts a second `write_through` with a divergent `next_view`.
 ///    The call MUST error.
@@ -1628,7 +1630,7 @@ pub async fn evaluate_bulk_load_is_deterministic() -> InvariantResult {
 pub async fn evaluate_write_through_ordering() -> InvariantResult {
     use overdrive_control_plane::view_store::ViewStoreExt;
     use overdrive_core::id::AllocationId;
-    use overdrive_core::reconciler::{JobLifecycleView, TargetResource};
+    use overdrive_core::reconciler::{TargetResource, WorkloadLifecycleView};
 
     use crate::adapters::view_store::SimViewStore;
 
@@ -1636,7 +1638,7 @@ pub async fn evaluate_write_through_ordering() -> InvariantResult {
 
     let sim = SimViewStore::new();
     // Reconciler name flows through the ViewStore byte surface as
-    // `<JobLifecycle as Reconciler>::NAME` directly per the
+    // `<WorkloadLifecycle as Reconciler>::NAME` directly per the
     // `refactor-reconciler-static-name` RCA — no `ReconcilerName::new`
     // wrapping needed.
     let target = match TargetResource::new("job/payments") {
@@ -1653,7 +1655,7 @@ pub async fn evaluate_write_through_ordering() -> InvariantResult {
 
     // STEP 1 — seed the `original` view via a clean `write_through`.
     let original = {
-        let mut v = JobLifecycleView::default();
+        let mut v = WorkloadLifecycleView::default();
         let id = match AllocationId::new("alloc-payments-0") {
             Ok(a) => a,
             Err(err) => {
@@ -1669,7 +1671,7 @@ pub async fn evaluate_write_through_ordering() -> InvariantResult {
         v
     };
     if let Err(err) =
-        sim.write_through(<JobLifecycle as Reconciler>::NAME, &target, &original).await
+        sim.write_through(<WorkloadLifecycle as Reconciler>::NAME, &target, &original).await
     {
         return result(
             name,
@@ -1700,7 +1702,7 @@ pub async fn evaluate_write_through_ordering() -> InvariantResult {
 
     sim.inject_fsync_failure();
     let write_result =
-        sim.write_through(<JobLifecycle as Reconciler>::NAME, &target, &next_view).await;
+        sim.write_through(<WorkloadLifecycle as Reconciler>::NAME, &target, &next_view).await;
     sim.clear_fsync_failure();
 
     if write_result.is_ok() {
@@ -1721,8 +1723,8 @@ pub async fn evaluate_write_through_ordering() -> InvariantResult {
     // contract: the runtime's in-memory `BTreeMap` is updated only
     // after `write_through` returns Ok, so the underlying storage
     // MUST roll back any partial write when fsync fails.
-    let loaded: std::collections::BTreeMap<TargetResource, JobLifecycleView> =
-        match sim.bulk_load(<JobLifecycle as Reconciler>::NAME).await {
+    let loaded: std::collections::BTreeMap<TargetResource, WorkloadLifecycleView> =
+        match sim.bulk_load(<WorkloadLifecycle as Reconciler>::NAME).await {
             Ok(m) => m,
             Err(err) => {
                 return result(
@@ -2194,7 +2196,7 @@ mod tests {
         use overdrive_core::traits::observation_store::LogicalTimestamp;
         AllocStatusRow {
             alloc_id: AllocationId::new(alloc).expect("valid alloc id"),
-            job_id: JobId::new(job).expect("valid job id"),
+            workload_id: WorkloadId::new(job).expect("valid job id"),
             node_id: NodeId::new(node).expect("valid node id"),
             state,
             updated_at: LogicalTimestamp {
@@ -2212,40 +2214,40 @@ mod tests {
 
     #[test]
     fn job_scheduled_after_submission_passes_when_every_job_has_running_alloc() {
-        let jobs = vec![JobId::new("payments").expect("valid job id")];
+        let jobs = vec![WorkloadId::new("payments").expect("valid job id")];
         let rows = vec![alloc_row("alloc-payments-0", "payments", "node-1", AllocState::Running)];
-        let r = evaluate_job_scheduled_after_submission(&jobs, &rows);
+        let r = evaluate_workload_scheduled_after_submission(&jobs, &rows);
         assert_eq!(r.status, InvariantStatus::Pass);
     }
 
     #[test]
     fn job_scheduled_after_submission_fails_when_no_running_alloc_for_submitted_job() {
-        let jobs = vec![JobId::new("payments").expect("valid job id")];
+        let jobs = vec![WorkloadId::new("payments").expect("valid job id")];
         let rows = vec![alloc_row("alloc-payments-0", "payments", "node-1", AllocState::Pending)];
-        let r = evaluate_job_scheduled_after_submission(&jobs, &rows);
+        let r = evaluate_workload_scheduled_after_submission(&jobs, &rows);
         assert_eq!(r.status, InvariantStatus::Fail);
         assert!(r.cause.as_ref().is_some_and(|c| c.contains("no Running alloc")));
     }
 
     #[test]
     fn job_scheduled_after_submission_passes_vacuously_with_no_submissions() {
-        let jobs: Vec<JobId> = Vec::new();
+        let jobs: Vec<WorkloadId> = Vec::new();
         let rows: Vec<AllocStatusRow> = Vec::new();
-        let r = evaluate_job_scheduled_after_submission(&jobs, &rows);
+        let r = evaluate_workload_scheduled_after_submission(&jobs, &rows);
         assert_eq!(r.status, InvariantStatus::Pass);
     }
 
     #[test]
     fn job_scheduled_after_submission_fails_when_running_alloc_belongs_to_different_job() {
-        let jobs = vec![JobId::new("payments").expect("valid job id")];
+        let jobs = vec![WorkloadId::new("payments").expect("valid job id")];
         let rows = vec![alloc_row("alloc-frontend-0", "frontend", "node-1", AllocState::Running)];
-        let r = evaluate_job_scheduled_after_submission(&jobs, &rows);
+        let r = evaluate_workload_scheduled_after_submission(&jobs, &rows);
         assert_eq!(r.status, InvariantStatus::Fail);
     }
 
     #[test]
     fn desired_replica_count_converges_passes_at_n_equals_one() {
-        let want = vec![(JobId::new("payments").expect("valid job id"), 1)];
+        let want = vec![(WorkloadId::new("payments").expect("valid job id"), 1)];
         let rows = vec![alloc_row("alloc-payments-0", "payments", "node-1", AllocState::Running)];
         let r = evaluate_desired_replica_count_converges(&want, &rows);
         assert_eq!(r.status, InvariantStatus::Pass);
@@ -2253,7 +2255,7 @@ mod tests {
 
     #[test]
     fn desired_replica_count_converges_fails_when_observed_count_undershoots() {
-        let want = vec![(JobId::new("payments").expect("valid job id"), 2)];
+        let want = vec![(WorkloadId::new("payments").expect("valid job id"), 2)];
         let rows = vec![alloc_row("alloc-payments-0", "payments", "node-1", AllocState::Running)];
         let r = evaluate_desired_replica_count_converges(&want, &rows);
         assert_eq!(r.status, InvariantStatus::Fail);
@@ -2262,7 +2264,7 @@ mod tests {
 
     #[test]
     fn desired_replica_count_converges_fails_when_observed_count_overshoots() {
-        let want = vec![(JobId::new("payments").expect("valid job id"), 1)];
+        let want = vec![(WorkloadId::new("payments").expect("valid job id"), 1)];
         let rows = vec![
             alloc_row("alloc-payments-0", "payments", "node-1", AllocState::Running),
             alloc_row("alloc-payments-1", "payments", "node-1", AllocState::Running),
@@ -2280,12 +2282,12 @@ mod tests {
     /// to the `&&` shape.
     #[test]
     fn desired_replica_count_converges_distinguishes_and_from_or_in_row_filter() {
-        let want = vec![(JobId::new("payments").expect("valid job id"), 1)];
+        let want = vec![(WorkloadId::new("payments").expect("valid job id"), 1)];
         // Two rows for the SAME job: one Running, one Terminated.
         // Under production `&&`: only Running matches → count=1 ⇒
         // matches desired (1) ⇒ Pass.
         // Under mutant `||`: both match (first via state==Running,
-        // second via job_id==payments) → count=2 ⇒ mismatches
+        // second via workload_id==payments) → count=2 ⇒ mismatches
         // desired (1) ⇒ Fail.
         let rows = vec![
             alloc_row("alloc-payments-0", "payments", "node-1", AllocState::Running),
@@ -2351,10 +2353,10 @@ mod tests {
 
     #[tokio::test]
     async fn view_store_roundtrip_is_lossless_covers_unit_and_jobview() {
-        // The evaluator covers BOTH `JobLifecycleView` and `()`. A
+        // The evaluator covers BOTH `WorkloadLifecycleView` and `()`. A
         // pass result proves both code paths fired without error —
         // the body returns Fail on the FIRST roundtrip divergence
-        // (across JobLifecycleView cases or the unit-View case), so
+        // (across WorkloadLifecycleView cases or the unit-View case), so
         // a green verdict implies every covered shape roundtripped.
         let r = evaluate_view_store_roundtrip_is_lossless(7).await;
         assert_eq!(r.status, InvariantStatus::Pass, "covers both View shapes; got {r:?}");
@@ -2451,15 +2453,15 @@ mod tests {
     #[test]
     fn roundtrip_verdict_distinguishes_equal_from_not_equal_for_jobview() {
         // Pin against a `==` flip. Two structurally-different
-        // JobLifecycleView values must produce Mismatch; identical
+        // WorkloadLifecycleView values must produce Mismatch; identical
         // ones must produce Match. A mutation that flips the inner
         // PartialEq comparison surfaces here.
         use overdrive_core::id::AllocationId;
-        use overdrive_core::reconciler::JobLifecycleView;
+        use overdrive_core::reconciler::WorkloadLifecycleView;
 
-        let mut a = JobLifecycleView::default();
+        let mut a = WorkloadLifecycleView::default();
         a.restart_counts.insert(AllocationId::new("alloc-a").expect("valid"), 1);
-        let mut b = JobLifecycleView::default();
+        let mut b = WorkloadLifecycleView::default();
         b.restart_counts.insert(AllocationId::new("alloc-a").expect("valid"), 2);
 
         assert_eq!(roundtrip_verdict(Some(&a), &a), RoundtripVerdict::Match);
@@ -2507,17 +2509,17 @@ mod tests {
 
     #[test]
     fn ordering_verdict_distinguishes_held_from_advanced_under_jobview() {
-        // Under realistic JobLifecycleView shapes, OrderingHeld and
+        // Under realistic WorkloadLifecycleView shapes, OrderingHeld and
         // Advanced must remain distinguishable. A mutation flipping
         // the `==` on either guard would collapse one of these two
         // assertions.
         use overdrive_core::id::AllocationId;
-        use overdrive_core::reconciler::JobLifecycleView;
+        use overdrive_core::reconciler::WorkloadLifecycleView;
 
         let id = AllocationId::new("alloc-payments-0").expect("valid");
-        let mut original = JobLifecycleView::default();
+        let mut original = WorkloadLifecycleView::default();
         original.restart_counts.insert(id.clone(), 7);
-        let mut next = JobLifecycleView::default();
+        let mut next = WorkloadLifecycleView::default();
         next.restart_counts.insert(id, 99);
 
         assert_eq!(

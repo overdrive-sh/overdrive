@@ -26,7 +26,7 @@ use std::num::NonZeroU32;
 use proptest::prelude::*;
 
 use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver};
-use overdrive_core::id::{AllocationId, JobId, NodeId, Region};
+use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
 use overdrive_core::traits::driver::Resources;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
 
@@ -40,8 +40,8 @@ pub fn nid(s: &str) -> NodeId {
 }
 
 #[must_use]
-pub fn jid(s: &str) -> JobId {
-    JobId::new(s).expect("valid JobId")
+pub fn jid(s: &str) -> WorkloadId {
+    WorkloadId::new(s).expect("valid WorkloadId")
 }
 
 #[must_use]
@@ -75,10 +75,10 @@ pub fn make_job(id: &str, resources: Resources) -> Job {
 }
 
 #[must_use]
-pub fn make_alloc_running(alloc_id: &str, job_id: &str, target_node: &str) -> AllocStatusRow {
+pub fn make_alloc_running(alloc_id: &str, workload_id: &str, target_node: &str) -> AllocStatusRow {
     AllocStatusRow {
         alloc_id: aid(alloc_id),
-        job_id: jid(job_id),
+        workload_id: jid(workload_id),
         node_id: nid(target_node),
         state: AllocState::Running,
         updated_at: LogicalTimestamp { counter: 1, writer: nid(target_node) },
@@ -92,10 +92,14 @@ pub fn make_alloc_running(alloc_id: &str, job_id: &str, target_node: &str) -> Al
 }
 
 #[must_use]
-pub fn make_alloc_terminated(alloc_id: &str, job_id: &str, target_node: &str) -> AllocStatusRow {
+pub fn make_alloc_terminated(
+    alloc_id: &str,
+    workload_id: &str,
+    target_node: &str,
+) -> AllocStatusRow {
     AllocStatusRow {
         alloc_id: aid(alloc_id),
-        job_id: jid(job_id),
+        workload_id: jid(workload_id),
         node_id: nid(target_node),
         state: AllocState::Terminated,
         updated_at: LogicalTimestamp { counter: 1, writer: nid(target_node) },
@@ -116,7 +120,7 @@ const ALPHA: &str = "abcdefghijklmnopqrstuvwxyz";
 const ALNUM_DASH: &str = "abcdefghijklmnopqrstuvwxyz0123456789-";
 const ALNUM: &str = "abcdefghijklmnopqrstuvwxyz0123456789";
 
-/// Valid DNS-1123 label matching `JobId` / `NodeId` / `Region` shape.
+/// Valid DNS-1123 label matching `WorkloadId` / `NodeId` / `Region` shape.
 /// Same generator overdrive-core uses in `aggregate_roundtrip.rs`.
 pub fn valid_label() -> impl Strategy<Value = String> {
     prop_oneof![
@@ -179,7 +183,7 @@ pub fn arb_node_map() -> BoxedStrategy<BTreeMap<NodeId, Node>> {
 /// An arbitrary valid `Job`.
 pub fn arb_job() -> impl Strategy<Value = Job> {
     (valid_label(), 1u32..=64u32, arb_resources()).prop_map(|(id, replicas, resources)| Job {
-        id: JobId::new(&id).expect("valid JobId"),
+        id: WorkloadId::new(&id).expect("valid WorkloadId"),
         replicas: NonZeroU32::new(replicas).expect("replicas > 0"),
         resources,
         driver: WorkloadDriver::Exec(Exec { command: "/bin/true".to_string(), args: vec![] }),
@@ -202,7 +206,7 @@ pub fn arb_allocs_for_nodes(node_ids: Vec<NodeId>) -> BoxedStrategy<Vec<AllocSta
                     let target = node_ids[idx].clone();
                     AllocStatusRow {
                         alloc_id: AllocationId::new(&alloc_label).expect("valid AllocationId"),
-                        job_id: JobId::new(&job_label).expect("valid JobId"),
+                        workload_id: WorkloadId::new(&job_label).expect("valid WorkloadId"),
                         node_id: target.clone(),
                         reason: None,
                         detail: None,

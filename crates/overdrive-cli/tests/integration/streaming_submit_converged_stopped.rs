@@ -142,9 +142,9 @@ async fn streaming_submit_observes_converged_stopped_exit_0_on_concurrent_stop()
         output.summary,
     );
 
-    // job_id / next_command keep the same shape as the other terminal
+    // workload_id / next_command keep the same shape as the other terminal
     // arms — same operator hint surface.
-    assert_eq!(output.job_id, "stoppable");
+    assert_eq!(output.workload_id, "stoppable");
     assert_eq!(output.next_command, "overdrive alloc status --job stoppable");
 
     handle.shutdown().await.expect("clean shutdown");

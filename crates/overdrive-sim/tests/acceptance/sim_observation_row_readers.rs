@@ -16,7 +16,7 @@
 
 use std::str::FromStr;
 
-use overdrive_core::id::{AllocationId, JobId, NodeId, Region};
+use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, NodeHealthRow, ObservationRow, ObservationStore,
 };
@@ -31,7 +31,7 @@ fn peer() -> NodeId {
 fn alloc_row(alloc: &str, state: AllocState, counter: u64) -> AllocStatusRow {
     AllocStatusRow {
         alloc_id: AllocationId::from_str(alloc).expect("valid alloc id"),
-        job_id: JobId::from_str("payments").expect("valid job id"),
+        workload_id: WorkloadId::from_str("payments").expect("valid job id"),
         node_id: peer(),
         state,
         updated_at: LogicalTimestamp { counter, writer: peer() },

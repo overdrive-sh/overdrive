@@ -21,8 +21,8 @@
 #![allow(clippy::unwrap_used)]
 
 use overdrive_cli::render::{
-    JobVerdict, format_job_alloc_status_attempts_table, format_job_alloc_status_header,
-    format_job_verdict,
+    JobVerdict, format_job_verdict, format_workload_alloc_status_attempts_table,
+    format_workload_alloc_status_header,
 };
 use overdrive_control_plane::api::{AllocStateWire, AllocStatusResponse, AllocStatusRowBody};
 use overdrive_core::aggregate::WorkloadKind;
@@ -41,7 +41,7 @@ fn fixture_row(
 ) -> AllocStatusRowBody {
     AllocStatusRowBody {
         alloc_id: alloc_id.to_string(),
-        job_id: "coinflip".to_string(),
+        workload_id: "coinflip".to_string(),
         node_id: "node-1".to_string(),
         state,
         reason: None,
@@ -58,14 +58,14 @@ fn fixture_row(
 
 /// Build an `AllocStatusResponse` carrying the supplied rows and kind.
 fn fixture_response(
-    job_id: &str,
+    workload_id: &str,
     kind: WorkloadKind,
     rows: Vec<AllocStatusRowBody>,
     replicas_desired: u32,
     replicas_running: u32,
 ) -> AllocStatusResponse {
     AllocStatusResponse {
-        job_id: Some(job_id.to_string()),
+        workload_id: Some(workload_id.to_string()),
         spec_digest: Some("a".repeat(64)),
         replicas_desired,
         replicas_running,
@@ -383,7 +383,7 @@ proptest! {
             /*desired=*/ 1,
             /*running=*/ 0,
         );
-        let table = format_job_alloc_status_attempts_table(&rows);
+        let table = format_workload_alloc_status_attempts_table(&rows);
 
         // For every persisted exit code, the canonical decimal text
         // must appear in the rendered table. KPI K3 byte-equality:
@@ -433,8 +433,9 @@ fn job_verdict_in_progress_renders_no_terminal_yet() {
 }
 
 #[test]
-fn format_job_alloc_status_header_includes_name_kind_digest() {
-    let rendered = format_job_alloc_status_header("coinflip", "abc123def456", JobVerdict::Failed);
+fn format_workload_alloc_status_header_includes_name_kind_digest() {
+    let rendered =
+        format_workload_alloc_status_header("coinflip", "abc123def456", JobVerdict::Failed);
     assert!(rendered.contains("Job 'coinflip'"));
     assert!(rendered.contains("kind: Job"));
     assert!(rendered.contains("abc123def456"));

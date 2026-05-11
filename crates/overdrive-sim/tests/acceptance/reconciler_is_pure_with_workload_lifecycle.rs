@@ -1,5 +1,5 @@
 //! Step 02-02 / Slice 3A.2 scenario 3.2 — `ReconcilerIsPure` invariant
-//! holds for the `JobLifecycle` reconciler.
+//! holds for the `WorkloadLifecycle` reconciler.
 //!
 //! The §18 purity contract requires `reconcile(desired, actual, view,
 //! tick)` to produce bit-identical `(Vec<Action>, NextView)` tuples on
@@ -7,10 +7,10 @@
 //! `ReconcilerIsPure` invariant is the runtime witness.
 //!
 //! This scenario exercises the contract specifically against
-//! `JobLifecycle` — the first reconciler with a non-trivial `State`
+//! `WorkloadLifecycle` — the first reconciler with a non-trivial `State`
 //! and `View`. Twin invocation is performed directly (the harness's
 //! `evaluate_reconciler_is_pure` evaluator currently constructs an
-//! `AnyState::Unit` for every reconciler; we test `JobLifecycle`
+//! `AnyState::Unit` for every reconciler; we test `WorkloadLifecycle`
 //! against its own typed state directly here).
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
@@ -23,8 +23,8 @@ use overdrive_core::aggregate::{
     DriverInput, ExecInput, Job, JobSpecInput, Node, NodeSpecInput, ResourcesInput, WorkloadKind,
 };
 use overdrive_core::reconciler::{
-    AnyReconciler, AnyReconcilerView, AnyState, JobLifecycle, JobLifecycleState, JobLifecycleView,
-    TickContext,
+    AnyReconciler, AnyReconcilerView, AnyState, TickContext, WorkloadLifecycle,
+    WorkloadLifecycleState, WorkloadLifecycleView,
 };
 
 /// Canonical `fresh_tick` signature (uniform across every acceptance
@@ -56,11 +56,11 @@ fn node_alpha() -> Node {
     .expect("valid Node spec")
 }
 
-fn happy_path_state() -> JobLifecycleState {
+fn happy_path_state() -> WorkloadLifecycleState {
     let mut nodes = BTreeMap::new();
     let n = node_alpha();
     nodes.insert(n.id.clone(), n);
-    JobLifecycleState {
+    WorkloadLifecycleState {
         job: Some(payments_job()),
         desired_to_stop: false,
         nodes,
@@ -69,26 +69,26 @@ fn happy_path_state() -> JobLifecycleState {
     }
 }
 
-const fn empty_view() -> JobLifecycleView {
-    JobLifecycleView { restart_counts: BTreeMap::new(), last_failure_seen_at: BTreeMap::new() }
+const fn empty_view() -> WorkloadLifecycleView {
+    WorkloadLifecycleView { restart_counts: BTreeMap::new(), last_failure_seen_at: BTreeMap::new() }
 }
 
 #[test]
-fn job_lifecycle_satisfies_reconciler_is_pure_invariant() {
-    // Construct AnyReconciler::JobLifecycle and twin-invoke through
+fn workload_lifecycle_satisfies_reconciler_is_pure_invariant() {
+    // Construct AnyReconciler::WorkloadLifecycle and twin-invoke through
     // the AnyReconciler dispatch layer.
-    let reconciler = AnyReconciler::JobLifecycle(JobLifecycle::canonical());
+    let reconciler = AnyReconciler::WorkloadLifecycle(WorkloadLifecycle::canonical());
     let desired_inner = happy_path_state();
-    let actual_inner = JobLifecycleState {
+    let actual_inner = WorkloadLifecycleState {
         job: desired_inner.job.clone(),
         desired_to_stop: false,
         nodes: desired_inner.nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
     };
-    let desired = AnyState::JobLifecycle(desired_inner);
-    let actual = AnyState::JobLifecycle(actual_inner);
-    let view = AnyReconcilerView::JobLifecycle(empty_view());
+    let desired = AnyState::WorkloadLifecycle(desired_inner);
+    let actual = AnyState::WorkloadLifecycle(actual_inner);
+    let view = AnyReconcilerView::WorkloadLifecycle(empty_view());
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
     // Twin invocation per ADR-0013 §2 / §2c — single TickContext shared
@@ -98,36 +98,36 @@ fn job_lifecycle_satisfies_reconciler_is_pure_invariant() {
 
     assert_eq!(
         actions_a, actions_b,
-        "ReconcilerIsPure: JobLifecycle twin invocations must produce bit-identical actions; \
+        "ReconcilerIsPure: WorkloadLifecycle twin invocations must produce bit-identical actions; \
          got first={actions_a:?}, second={actions_b:?}"
     );
     assert_eq!(
         view_a, view_b,
-        "ReconcilerIsPure: JobLifecycle twin invocations must produce bit-identical NextView; \
+        "ReconcilerIsPure: WorkloadLifecycle twin invocations must produce bit-identical NextView; \
          got first={view_a:?}, second={view_b:?}"
     );
 }
 
 #[test]
-fn job_lifecycle_run_emits_start_allocation_when_no_running_alloc() {
+fn workload_lifecycle_run_emits_start_allocation_when_no_running_alloc() {
     // Sanity check: when desired says "Run" (job present) and actual
-    // shows no Running alloc, JobLifecycle must emit a StartAllocation.
+    // shows no Running alloc, WorkloadLifecycle must emit a StartAllocation.
     // This is the happy-path Slice 3 acceptance: the first reconciler
     // exercises the scheduler and emits a Start.
     use overdrive_core::reconciler::Action;
 
-    let reconciler = AnyReconciler::JobLifecycle(JobLifecycle::canonical());
+    let reconciler = AnyReconciler::WorkloadLifecycle(WorkloadLifecycle::canonical());
     let desired_inner = happy_path_state();
-    let actual_inner = JobLifecycleState {
+    let actual_inner = WorkloadLifecycleState {
         job: desired_inner.job.clone(),
         desired_to_stop: false,
         nodes: desired_inner.nodes.clone(),
         allocations: BTreeMap::new(),
         workload_kind: WorkloadKind::default(),
     };
-    let desired = AnyState::JobLifecycle(desired_inner);
-    let actual = AnyState::JobLifecycle(actual_inner);
-    let view = AnyReconcilerView::JobLifecycle(empty_view());
+    let desired = AnyState::WorkloadLifecycle(desired_inner);
+    let actual = AnyState::WorkloadLifecycle(actual_inner);
+    let view = AnyReconcilerView::WorkloadLifecycle(empty_view());
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
     let (actions, _next_view) = reconciler.reconcile(&desired, &actual, &view, &tick);
@@ -135,8 +135,8 @@ fn job_lifecycle_run_emits_start_allocation_when_no_running_alloc() {
     assert_eq!(actions.len(), 1, "exactly one StartAllocation expected; got {actions:?}");
     let action = actions.first().expect("one action present");
     match action {
-        Action::StartAllocation { job_id, node_id, .. } => {
-            assert_eq!(job_id.to_string(), "payments");
+        Action::StartAllocation { workload_id, node_id, .. } => {
+            assert_eq!(workload_id.to_string(), "payments");
             assert_eq!(node_id.to_string(), "node-alpha");
         }
         other => panic!("expected StartAllocation, got {other:?}"),

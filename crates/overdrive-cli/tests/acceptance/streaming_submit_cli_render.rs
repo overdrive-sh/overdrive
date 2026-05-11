@@ -39,7 +39,7 @@ fn failed_block_for_exec_binary_not_found_contains_required_lines() {
 
     // Header line — names the job and the failure mode.
     assert!(
-        rendered.contains("Error: job 'payments' did not converge to running."),
+        rendered.contains("Error: workload 'payments' did not converge to running."),
         "rendered must contain the Error header line; got:\n{rendered}",
     );
 
