@@ -316,3 +316,19 @@ fn service_vip_displays_as_ipv4() {
     let v = ServiceVip(Ipv4Addr::new(192, 168, 1, 100));
     assert_eq!(v.to_string(), "192.168.1.100");
 }
+
+// ---------------------------------------------------------------------------
+// Regression: serde must not bypass the ≥1 listener invariant
+// ---------------------------------------------------------------------------
+
+#[test]
+fn serde_json_without_listeners_field_is_rejected() {
+    let json = r#"{
+        "id": "web",
+        "replicas": 1,
+        "exec": { "image": "nginx:latest", "command": ["/bin/sh"] },
+        "resources": { "cpu_cores": 1, "memory_mib": 512 }
+    }"#;
+    let result = serde_json::from_str::<ServiceSpec>(json);
+    assert!(result.is_err(), "ServiceSpec with no listeners must not deserialize");
+}

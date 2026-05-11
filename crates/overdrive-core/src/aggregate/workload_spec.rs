@@ -456,7 +456,6 @@ pub struct ServiceSpec {
     /// * `protocol` is restricted to `tcp` / `udp` (case-insensitive
     ///   parse, lowercase canonical render).
     /// * `port` is non-zero ([`ParseError::ListenerPortZero`]).
-    #[serde(default)]
     pub listeners: Vec<Listener>,
 }
 
