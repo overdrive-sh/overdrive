@@ -579,7 +579,7 @@ pub fn build_workload_stream(
         // 3. Pre-subscribe race recovery — if the latest row already
         //    carries a terminal claim, emit the matching JobSubmitEvent
         //    terminal and end.
-        if let Some(terminal) = workload_terminal_from_snapshot(&*obs, &workload_id).await {
+        if let Some(terminal) = workload_terminal_from_snapshot(&*obs, &runtime, &workload_id).await {
             match emit_workload_line(&terminal) {
                 Ok(line) => {
                     yield Ok(line);
@@ -636,6 +636,7 @@ pub fn build_workload_stream(
                         Err(broadcast::error::RecvError::Lagged(_)) => {
                             if let Some(terminal) = workload_terminal_from_snapshot(
                                 &*obs,
+                                &runtime,
                                 &workload_id,
                             ).await {
                                 match emit_workload_line(&terminal) {
@@ -724,7 +725,7 @@ pub async fn workload_event_from_lifecycle(
     event: &LifecycleEvent,
 ) -> Option<JobSubmitEvent> {
     if let Some(cond) = &event.terminal {
-        return Some(workload_event_from_terminal(obs, event, cond).await);
+        return Some(workload_event_from_terminal(obs, runtime, workload_id, event, cond).await);
     }
     match event.to {
         AllocStateWire::Pending => Some(JobSubmitEvent::Pending),
@@ -782,27 +783,34 @@ pub async fn workload_event_from_lifecycle(
 /// the workload's stderr verbatim.
 async fn workload_event_from_terminal(
     obs: &dyn ObservationStore,
+    runtime: &ReconcilerRuntime,
+    workload_id: &WorkloadId,
     event: &LifecycleEvent,
     cond: &TerminalCondition,
 ) -> JobSubmitEvent {
     let row = obs.alloc_status_row(&event.alloc_id).await.ok().flatten();
     let stderr_tail = row.as_ref().and_then(|r| r.stderr_tail.clone());
+    let target = TargetResource::new(&format!("job/{workload_id}")).ok();
+    let attempt_index =
+        target.as_ref().map_or(1, |t| runtime.restart_status_for_alloc(t, &event.alloc_id).0);
     match cond {
         TerminalCondition::Completed { exit_code } => JobSubmitEvent::Succeeded {
             exit_code: *exit_code,
             duration: event.at.clone(),
-            attempts: 1,
+            attempts: attempt_index,
         },
         TerminalCondition::Failed { exit_code } => JobSubmitEvent::Failed {
             exit_code: *exit_code,
             duration: event.at.clone(),
-            attempts: 1,
-            max_attempts: 1,
+            attempts: attempt_index,
+            max_attempts: attempt_index,
             stderr_tail,
         },
-        TerminalCondition::Stopped { by } => {
-            JobSubmitEvent::Stopped { stopped_by: *by, duration: event.at.clone(), attempts: 1 }
-        }
+        TerminalCondition::Stopped { by } => JobSubmitEvent::Stopped {
+            stopped_by: *by,
+            duration: event.at.clone(),
+            attempts: attempt_index,
+        },
         TerminalCondition::BackoffExhausted { attempts } => JobSubmitEvent::Failed {
             exit_code: 1,
             duration: event.at.clone(),
@@ -810,15 +818,11 @@ async fn workload_event_from_terminal(
             max_attempts: *attempts,
             stderr_tail,
         },
-        // Forward-compat for future `#[non_exhaustive]` additions to
-        // `TerminalCondition`. Render unknown terminals as a generic
-        // `Failed` carrying the prior exit semantics so the stream
-        // still terminates rather than silently dropping the event.
         _ => JobSubmitEvent::Failed {
             exit_code: 1,
             duration: event.at.clone(),
-            attempts: 1,
-            max_attempts: 1,
+            attempts: attempt_index,
+            max_attempts: attempt_index,
             stderr_tail,
         },
     }
@@ -829,6 +833,7 @@ async fn workload_event_from_terminal(
 /// claim, project to the matching `JobSubmitEvent` terminal.
 async fn workload_terminal_from_snapshot(
     obs: &dyn ObservationStore,
+    runtime: &ReconcilerRuntime,
     workload_id: &WorkloadId,
 ) -> Option<JobSubmitEvent> {
     let rows = obs.alloc_status_rows().await.ok()?;
@@ -839,19 +844,22 @@ async fn workload_terminal_from_snapshot(
     let cond = latest.terminal.as_ref()?;
     let duration = format!("{}@{}", latest.updated_at.counter, latest.updated_at.writer.as_str());
     let stderr_tail = latest.stderr_tail.clone();
+    let target = TargetResource::new(&format!("job/{workload_id}")).ok();
+    let attempt_index =
+        target.as_ref().map_or(1, |t| runtime.restart_status_for_alloc(t, &latest.alloc_id).0);
     Some(match cond {
         TerminalCondition::Completed { exit_code } => {
-            JobSubmitEvent::Succeeded { exit_code: *exit_code, duration, attempts: 1 }
+            JobSubmitEvent::Succeeded { exit_code: *exit_code, duration, attempts: attempt_index }
         }
         TerminalCondition::Failed { exit_code } => JobSubmitEvent::Failed {
             exit_code: *exit_code,
             duration,
-            attempts: 1,
-            max_attempts: 1,
+            attempts: attempt_index,
+            max_attempts: attempt_index,
             stderr_tail,
         },
         TerminalCondition::Stopped { by } => {
-            JobSubmitEvent::Stopped { stopped_by: *by, duration, attempts: 1 }
+            JobSubmitEvent::Stopped { stopped_by: *by, duration, attempts: attempt_index }
         }
         TerminalCondition::BackoffExhausted { attempts } => JobSubmitEvent::Failed {
             exit_code: 1,
@@ -863,8 +871,8 @@ async fn workload_terminal_from_snapshot(
         _ => JobSubmitEvent::Failed {
             exit_code: 1,
             duration,
-            attempts: 1,
-            max_attempts: 1,
+            attempts: attempt_index,
+            max_attempts: attempt_index,
             stderr_tail,
         },
     })
@@ -1051,12 +1059,14 @@ pub enum ScheduleSubmitEvent {
 #[cfg(test)]
 #[allow(clippy::expect_used)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::str::FromStr;
     use std::sync::Arc;
 
     use overdrive_core::TransitionReason;
     use overdrive_core::aggregate::WorkloadKind;
     use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
+    use overdrive_core::reconciler::WorkloadLifecycleView;
     use overdrive_core::traits::driver::DriverType;
     use overdrive_core::traits::observation_store::{
         AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
@@ -1066,6 +1076,7 @@ mod tests {
 
     use crate::action_shim::LifecycleEvent;
     use crate::api::{AllocStateWire, SubmitEvent, TransitionSource};
+    use crate::reconciler_runtime::ReconcilerRuntime;
 
     use super::{
         JobSubmitEvent, check_terminal, workload_event_from_terminal,
@@ -1107,6 +1118,28 @@ mod tests {
         }
     }
 
+    fn make_runtime(tmp: &tempfile::TempDir) -> ReconcilerRuntime {
+        ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime")
+    }
+
+    async fn make_runtime_with_restart_count(
+        tmp: &tempfile::TempDir,
+        workload_id: &WorkloadId,
+        alloc_id: &AllocationId,
+        restart_count: u32,
+    ) -> ReconcilerRuntime {
+        let mut runtime = make_runtime(tmp);
+        runtime.register(crate::workload_lifecycle()).await.expect("register");
+        let target = overdrive_core::reconciler::TargetResource::new(&format!("job/{workload_id}"))
+            .expect("target");
+        let view = WorkloadLifecycleView {
+            restart_counts: BTreeMap::from([(alloc_id.clone(), restart_count)]),
+            ..Default::default()
+        };
+        runtime.seed_workload_lifecycle_view_for_test(&target, view);
+        runtime
+    }
+
     // -----------------------------------------------------------------------
     // check_terminal
     // -----------------------------------------------------------------------
@@ -1144,6 +1177,8 @@ mod tests {
 
     #[tokio::test]
     async fn event_from_terminal_completed_yields_succeeded() {
+        let tmp = tempfile::TempDir::new().expect("tmpdir");
+        let runtime = make_runtime(&tmp);
         let node = NodeId::from_str("node-a").expect("node id");
         let obs = Arc::new(SimObservationStore::single_peer(node, 0));
         let alloc_id = AllocationId::from_str("alloc-0").expect("alloc id");
@@ -1151,7 +1186,7 @@ mod tests {
         let event = make_lifecycle_event(&alloc_id, &wl_id);
         let cond = TerminalCondition::Completed { exit_code: 0 };
 
-        let result = workload_event_from_terminal(&*obs, &event, &cond).await;
+        let result = workload_event_from_terminal(&*obs, &runtime, &wl_id, &event, &cond).await;
 
         match result {
             JobSubmitEvent::Succeeded { exit_code, attempts, .. } => {
@@ -1164,6 +1199,8 @@ mod tests {
 
     #[tokio::test]
     async fn event_from_terminal_failed_yields_failed() {
+        let tmp = tempfile::TempDir::new().expect("tmpdir");
+        let runtime = make_runtime(&tmp);
         let node = NodeId::from_str("node-a").expect("node id");
         let obs = Arc::new(SimObservationStore::single_peer(node, 0));
         let alloc_id = AllocationId::from_str("alloc-0").expect("alloc id");
@@ -1171,7 +1208,7 @@ mod tests {
         let event = make_lifecycle_event(&alloc_id, &wl_id);
         let cond = TerminalCondition::Failed { exit_code: 42 };
 
-        let result = workload_event_from_terminal(&*obs, &event, &cond).await;
+        let result = workload_event_from_terminal(&*obs, &runtime, &wl_id, &event, &cond).await;
 
         match result {
             JobSubmitEvent::Failed { exit_code, attempts, max_attempts, .. } => {
@@ -1185,6 +1222,8 @@ mod tests {
 
     #[tokio::test]
     async fn event_from_terminal_stopped_yields_stopped() {
+        let tmp = tempfile::TempDir::new().expect("tmpdir");
+        let runtime = make_runtime(&tmp);
         let node = NodeId::from_str("node-a").expect("node id");
         let obs = Arc::new(SimObservationStore::single_peer(node, 0));
         let alloc_id = AllocationId::from_str("alloc-0").expect("alloc id");
@@ -1192,7 +1231,7 @@ mod tests {
         let event = make_lifecycle_event(&alloc_id, &wl_id);
         let cond = TerminalCondition::Stopped { by: StoppedBy::Operator };
 
-        let result = workload_event_from_terminal(&*obs, &event, &cond).await;
+        let result = workload_event_from_terminal(&*obs, &runtime, &wl_id, &event, &cond).await;
 
         match result {
             JobSubmitEvent::Stopped { stopped_by, attempts, .. } => {
@@ -1205,6 +1244,8 @@ mod tests {
 
     #[tokio::test]
     async fn event_from_terminal_backoff_exhausted_yields_failed() {
+        let tmp = tempfile::TempDir::new().expect("tmpdir");
+        let runtime = make_runtime(&tmp);
         let node = NodeId::from_str("node-a").expect("node id");
         let obs = Arc::new(SimObservationStore::single_peer(node, 0));
         let alloc_id = AllocationId::from_str("alloc-0").expect("alloc id");
@@ -1212,7 +1253,7 @@ mod tests {
         let event = make_lifecycle_event(&alloc_id, &wl_id);
         let cond = TerminalCondition::BackoffExhausted { attempts: 5 };
 
-        let result = workload_event_from_terminal(&*obs, &event, &cond).await;
+        let result = workload_event_from_terminal(&*obs, &runtime, &wl_id, &event, &cond).await;
 
         match result {
             JobSubmitEvent::Failed { exit_code, attempts, max_attempts, .. } => {
@@ -1225,11 +1266,84 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
+    // workload_event_from_terminal — multi-attempt regression tests
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn event_from_terminal_completed_reports_attempt_count_from_view() {
+        let alloc_id = AllocationId::from_str("alloc-0").expect("alloc id");
+        let wl_id = WorkloadId::from_str("job-0").expect("wl id");
+        let tmp = tempfile::TempDir::new().expect("tmpdir");
+        let runtime = make_runtime_with_restart_count(&tmp, &wl_id, &alloc_id, 3).await;
+        let node = NodeId::from_str("node-a").expect("node id");
+        let obs = Arc::new(SimObservationStore::single_peer(node, 0));
+        let event = make_lifecycle_event(&alloc_id, &wl_id);
+        let cond = TerminalCondition::Completed { exit_code: 0 };
+
+        let result = workload_event_from_terminal(&*obs, &runtime, &wl_id, &event, &cond).await;
+
+        match result {
+            JobSubmitEvent::Succeeded { exit_code, attempts, .. } => {
+                assert_eq!(exit_code, 0);
+                assert_eq!(attempts, 4, "3 restarts → attempt_index 4");
+            }
+            other => panic!("expected Succeeded, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn event_from_terminal_failed_reports_attempt_count_from_view() {
+        let alloc_id = AllocationId::from_str("alloc-0").expect("alloc id");
+        let wl_id = WorkloadId::from_str("job-0").expect("wl id");
+        let tmp = tempfile::TempDir::new().expect("tmpdir");
+        let runtime = make_runtime_with_restart_count(&tmp, &wl_id, &alloc_id, 2).await;
+        let node = NodeId::from_str("node-a").expect("node id");
+        let obs = Arc::new(SimObservationStore::single_peer(node, 0));
+        let event = make_lifecycle_event(&alloc_id, &wl_id);
+        let cond = TerminalCondition::Failed { exit_code: 137 };
+
+        let result = workload_event_from_terminal(&*obs, &runtime, &wl_id, &event, &cond).await;
+
+        match result {
+            JobSubmitEvent::Failed { exit_code, attempts, max_attempts, .. } => {
+                assert_eq!(exit_code, 137);
+                assert_eq!(attempts, 3, "2 restarts → attempt_index 3");
+                assert_eq!(max_attempts, 3);
+            }
+            other => panic!("expected Failed, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn event_from_terminal_stopped_reports_attempt_count_from_view() {
+        let alloc_id = AllocationId::from_str("alloc-0").expect("alloc id");
+        let wl_id = WorkloadId::from_str("job-0").expect("wl id");
+        let tmp = tempfile::TempDir::new().expect("tmpdir");
+        let runtime = make_runtime_with_restart_count(&tmp, &wl_id, &alloc_id, 1).await;
+        let node = NodeId::from_str("node-a").expect("node id");
+        let obs = Arc::new(SimObservationStore::single_peer(node, 0));
+        let event = make_lifecycle_event(&alloc_id, &wl_id);
+        let cond = TerminalCondition::Stopped { by: StoppedBy::Operator };
+
+        let result = workload_event_from_terminal(&*obs, &runtime, &wl_id, &event, &cond).await;
+
+        match result {
+            JobSubmitEvent::Stopped { stopped_by, attempts, .. } => {
+                assert_eq!(stopped_by, StoppedBy::Operator);
+                assert_eq!(attempts, 2, "1 restart → attempt_index 2");
+            }
+            other => panic!("expected Stopped, got {other:?}"),
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // workload_terminal_from_snapshot
     // -----------------------------------------------------------------------
 
     #[tokio::test]
     async fn snapshot_returns_none_when_no_terminal() {
+        let tmp = tempfile::TempDir::new().expect("tmpdir");
+        let runtime = make_runtime(&tmp);
         let node = NodeId::from_str("node-a").expect("node id");
         let obs = Arc::new(SimObservationStore::single_peer(node.clone(), 0));
         let wl_id = WorkloadId::from_str("job-0").expect("wl id");
@@ -1238,12 +1352,14 @@ mod tests {
         let row = make_alloc_status_row(&alloc_id, &wl_id, &node, None);
         obs.write(ObservationRow::AllocStatus(row)).await.expect("write");
 
-        let result = workload_terminal_from_snapshot(&*obs, &wl_id).await;
+        let result = workload_terminal_from_snapshot(&*obs, &runtime, &wl_id).await;
         assert!(result.is_none(), "expected None when row has no terminal, got {result:?}");
     }
 
     #[tokio::test]
     async fn snapshot_returns_none_for_unrelated_workload() {
+        let tmp = tempfile::TempDir::new().expect("tmpdir");
+        let runtime = make_runtime(&tmp);
         let node = NodeId::from_str("node-a").expect("node id");
         let obs = Arc::new(SimObservationStore::single_peer(node.clone(), 0));
         let wl_id = WorkloadId::from_str("job-0").expect("wl id");
@@ -1258,12 +1374,14 @@ mod tests {
         );
         obs.write(ObservationRow::AllocStatus(row)).await.expect("write");
 
-        let result = workload_terminal_from_snapshot(&*obs, &wl_id).await;
+        let result = workload_terminal_from_snapshot(&*obs, &runtime, &wl_id).await;
         assert!(result.is_none(), "expected None for non-matching workload_id, got {result:?}");
     }
 
     #[tokio::test]
     async fn snapshot_completed_yields_succeeded() {
+        let tmp = tempfile::TempDir::new().expect("tmpdir");
+        let runtime = make_runtime(&tmp);
         let node = NodeId::from_str("node-a").expect("node id");
         let obs = Arc::new(SimObservationStore::single_peer(node.clone(), 0));
         let wl_id = WorkloadId::from_str("job-0").expect("wl id");
@@ -1277,7 +1395,7 @@ mod tests {
         );
         obs.write(ObservationRow::AllocStatus(row)).await.expect("write");
 
-        let result = workload_terminal_from_snapshot(&*obs, &wl_id).await;
+        let result = workload_terminal_from_snapshot(&*obs, &runtime, &wl_id).await;
         match result {
             Some(JobSubmitEvent::Succeeded { exit_code, attempts, .. }) => {
                 assert_eq!(exit_code, 0);
@@ -1289,6 +1407,8 @@ mod tests {
 
     #[tokio::test]
     async fn snapshot_failed_yields_failed() {
+        let tmp = tempfile::TempDir::new().expect("tmpdir");
+        let runtime = make_runtime(&tmp);
         let node = NodeId::from_str("node-a").expect("node id");
         let obs = Arc::new(SimObservationStore::single_peer(node.clone(), 0));
         let wl_id = WorkloadId::from_str("job-0").expect("wl id");
@@ -1302,7 +1422,7 @@ mod tests {
         );
         obs.write(ObservationRow::AllocStatus(row)).await.expect("write");
 
-        let result = workload_terminal_from_snapshot(&*obs, &wl_id).await;
+        let result = workload_terminal_from_snapshot(&*obs, &runtime, &wl_id).await;
         match result {
             Some(JobSubmitEvent::Failed { exit_code, attempts, max_attempts, .. }) => {
                 assert_eq!(exit_code, 137);
@@ -1315,6 +1435,8 @@ mod tests {
 
     #[tokio::test]
     async fn snapshot_stopped_yields_stopped() {
+        let tmp = tempfile::TempDir::new().expect("tmpdir");
+        let runtime = make_runtime(&tmp);
         let node = NodeId::from_str("node-a").expect("node id");
         let obs = Arc::new(SimObservationStore::single_peer(node.clone(), 0));
         let wl_id = WorkloadId::from_str("job-0").expect("wl id");
@@ -1328,7 +1450,7 @@ mod tests {
         );
         obs.write(ObservationRow::AllocStatus(row)).await.expect("write");
 
-        let result = workload_terminal_from_snapshot(&*obs, &wl_id).await;
+        let result = workload_terminal_from_snapshot(&*obs, &runtime, &wl_id).await;
         match result {
             Some(JobSubmitEvent::Stopped { stopped_by, attempts, .. }) => {
                 assert_eq!(stopped_by, StoppedBy::Operator);
@@ -1340,6 +1462,8 @@ mod tests {
 
     #[tokio::test]
     async fn snapshot_backoff_exhausted_yields_failed() {
+        let tmp = tempfile::TempDir::new().expect("tmpdir");
+        let runtime = make_runtime(&tmp);
         let node = NodeId::from_str("node-a").expect("node id");
         let obs = Arc::new(SimObservationStore::single_peer(node.clone(), 0));
         let wl_id = WorkloadId::from_str("job-0").expect("wl id");
@@ -1353,7 +1477,7 @@ mod tests {
         );
         obs.write(ObservationRow::AllocStatus(row)).await.expect("write");
 
-        let result = workload_terminal_from_snapshot(&*obs, &wl_id).await;
+        let result = workload_terminal_from_snapshot(&*obs, &runtime, &wl_id).await;
         match result {
             Some(JobSubmitEvent::Failed { exit_code, attempts, max_attempts, .. }) => {
                 assert_eq!(exit_code, 1);
@@ -1361,6 +1485,37 @@ mod tests {
                 assert_eq!(max_attempts, 3);
             }
             other => panic!("expected Some(Failed) for backoff exhausted, got {other:?}"),
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // workload_terminal_from_snapshot — multi-attempt regression test
+    // -----------------------------------------------------------------------
+
+    #[tokio::test]
+    async fn snapshot_completed_reports_attempt_count_from_view() {
+        let alloc_id = AllocationId::from_str("alloc-0").expect("alloc id");
+        let wl_id = WorkloadId::from_str("job-0").expect("wl id");
+        let tmp = tempfile::TempDir::new().expect("tmpdir");
+        let runtime = make_runtime_with_restart_count(&tmp, &wl_id, &alloc_id, 4).await;
+        let node = NodeId::from_str("node-a").expect("node id");
+        let obs = Arc::new(SimObservationStore::single_peer(node.clone(), 0));
+
+        let row = make_alloc_status_row(
+            &alloc_id,
+            &wl_id,
+            &node,
+            Some(TerminalCondition::Completed { exit_code: 0 }),
+        );
+        obs.write(ObservationRow::AllocStatus(row)).await.expect("write");
+
+        let result = workload_terminal_from_snapshot(&*obs, &runtime, &wl_id).await;
+        match result {
+            Some(JobSubmitEvent::Succeeded { exit_code, attempts, .. }) => {
+                assert_eq!(exit_code, 0);
+                assert_eq!(attempts, 5, "4 restarts → attempt_index 5");
+            }
+            other => panic!("expected Some(Succeeded), got {other:?}"),
         }
     }
 }
