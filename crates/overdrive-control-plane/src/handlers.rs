@@ -259,7 +259,7 @@ pub async fn submit_workload(
     //     emission path (ADR-0037 Amendment 2026-05-10). The wire
     //     field is optional — absent or unknown values default to
     //     Service per `WorkloadKind::from_wire_str` forward-compat.
-    let workload_kind = request
+    let mut workload_kind = request
         .workload_kind
         .as_deref()
         .map_or_else(WorkloadKind::default, WorkloadKind::from_wire_str);
@@ -304,6 +304,19 @@ pub async fn submit_workload(
                 // any drift, and the broker collapses duplicates per
                 // §18 evaluation-broker semantics so a flapping
                 // resubmit produces one pending eval, not N.
+                //
+                // Read the stored kind discriminator so streaming
+                // dispatch matches the reconciler's view. The first
+                // submit wrote the authoritative kind; a re-submit
+                // with a different (or absent) workload_kind must not
+                // override the streaming dispatch to a different path.
+                if let Some(stored_kind_bytes) =
+                    state.store.get(kind_key.as_bytes()).await.map_err(|e| {
+                        ControlPlaneError::internal("read workload kind (unchanged path)", e)
+                    })?
+                {
+                    workload_kind = WorkloadKind::from_discriminator_byte(stored_kind_bytes[0]);
+                }
                 enqueue_workload_lifecycle_eval(&state, &job.id)?;
                 api::IdempotencyOutcome::Unchanged
             } else {

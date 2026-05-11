@@ -38,6 +38,7 @@ use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::reconciler::{Action, TickContext};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{Driver, DriverType};
+use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
 };
@@ -1119,5 +1120,127 @@ async fn attempt_failed_exit_code_comes_from_workload_crashed_immediately_reason
         attempt_failed_line["data"]["exit_code"], 137,
         "AttemptFailed exit_code must be 137 (from WorkloadCrashedImmediately reason), \
          not 1 (from stale parse_exit_code_from_detail(None)); got {attempt_failed_line}"
+    );
+}
+
+/// Regression: on the `Unchanged` idempotency path the handler used to
+/// take `workload_kind` from the *current request* rather than the stored
+/// discriminator. A first submit with `workload_kind: "job"` followed by a
+/// re-submit with `workload_kind: None` (defaults to `Service`) would
+/// dispatch through the Service streaming path (`build_stream`), whose
+/// `submit_event_from_terminal` has no `Completed` arm — it falls through
+/// to `ConvergedFailed`, reporting a successful Job exit as a failure.
+///
+/// The fix re-writes the kind discriminator on the `Unchanged` path so
+/// streaming dispatch always matches what the reconciler uses.
+#[tokio::test]
+async fn unchanged_resubmit_with_different_kind_uses_stored_discriminator_for_streaming() {
+    let tmp = TempDir::new().expect("tmpdir");
+    let sim_clock = Arc::new(SimClock::new());
+    let state = build_app_state(&tmp, sim_clock.clone());
+    let router = build_router(state.clone());
+
+    let alloc_id = AllocationId::from_str("alloc-payments-0").expect("alloc id");
+    let workload_id = WorkloadId::from_str("payments-v0").expect("job id");
+
+    // ── First submit: JSON lane with explicit `workload_kind: "job"` ──
+    let first_response = router
+        .clone()
+        .oneshot(build_submit_request_with_kind(&payments_spec(), "application/json", Some("job")))
+        .await
+        .expect("first submit");
+    assert_eq!(first_response.status(), StatusCode::OK);
+
+    // Verify the stored discriminator is Job.
+    let kind_key = overdrive_core::aggregate::IntentKey::for_workload_kind(&workload_id);
+    let stored =
+        state.store.get(kind_key.as_bytes()).await.expect("store get").expect("kind key present");
+    assert_eq!(stored.as_ref(), b"j", "first submit must persist Job discriminator");
+
+    // ── Second submit: streaming lane, same spec, but `workload_kind: None`
+    //    (defaults to Service). On the buggy code path this would dispatch
+    //    through `build_stream` (Service format) instead of
+    //    `build_workload_stream` (Job format). ──
+
+    // Seed a Running row so the stream can progress.
+    write_row(
+        state.obs.as_ref(),
+        &alloc_id,
+        &workload_id,
+        AllocState::Running,
+        1,
+        Some(TransitionReason::Started),
+    )
+    .await;
+
+    let request_task = {
+        let router = router.clone();
+        let spec = payments_spec();
+        tokio::spawn(async move {
+            let response = router
+                .oneshot(build_submit_request_with_kind(
+                    &spec,
+                    "application/x-ndjson",
+                    None, // defaults to Service — the bug trigger
+                ))
+                .await
+                .expect("resubmit oneshot");
+            assert_eq!(response.status(), StatusCode::OK);
+            body_ndjson_lines(response.into_body()).await
+        })
+    };
+
+    // Wait for handler subscription.
+    for _ in 0..100 {
+        if state.lifecycle_events.receiver_count() >= 1 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    // Emit Running transition then a Completed terminal — the Job
+    // succeeded with exit code 0.
+    emit_lifecycle(
+        &state,
+        make_lifecycle_event(
+            alloc_id.clone(),
+            workload_id.clone(),
+            AllocStateWire::Pending,
+            AllocStateWire::Running,
+            TransitionReason::Started,
+        ),
+    );
+
+    // Yield so handler processes the Running event.
+    for _ in 0..20 {
+        tokio::task::yield_now().await;
+    }
+
+    // Terminal: Completed with exit_code 0.
+    let mut terminal_event = make_lifecycle_event(
+        alloc_id.clone(),
+        workload_id.clone(),
+        AllocStateWire::Running,
+        AllocStateWire::Terminated,
+        TransitionReason::Started,
+    );
+    terminal_event.terminal =
+        Some(overdrive_core::transition_reason::TerminalCondition::Completed { exit_code: 0 });
+    emit_lifecycle(&state, terminal_event);
+
+    let lines = tokio::time::timeout(Duration::from_secs(5), request_task)
+        .await
+        .expect("request finishes within 5s")
+        .expect("task ok");
+
+    // The stream MUST use the Job path — a Completed terminal maps to
+    // `succeeded` on the Job path but falls through to `converged_failed`
+    // on the Service path (the bug).
+    let terminal_line = lines.last().expect("at least one streaming line");
+    assert_eq!(
+        terminal_line["kind"], "succeeded",
+        "Job completed successfully but stream reported {:?} — streaming dispatch \
+         used the request's workload_kind (Service) instead of the stored kind (Job)",
+        terminal_line["kind"]
     );
 }
