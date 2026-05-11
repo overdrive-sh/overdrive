@@ -65,13 +65,9 @@ use crate::api::{AllocStateWire, TransitionSource};
 use crate::reconciler_runtime::ReconcilerRuntime;
 use overdrive_core::eval_broker::Evaluation;
 
-// Re-export the project-wide stderr-tail line-budget constant so the
-// observer module is the single AC-named SSOT readers consult per step
-// 02-05 of `workload-kind-discriminator` ("STDERR_TAIL_LINES is a single
-// ExitObserver constant"). The actual definition lives on the trait
-// surface in `overdrive_core::traits::driver` because the driver crate
-// (which fills the ring) cannot depend on `overdrive-control-plane`.
-pub use overdrive_core::traits::driver::STDERR_TAIL_LINES as STDERR_TAIL_LINES_REEXPORT;
+// STDERR_TAIL_LINES lives at `overdrive_core::traits::driver::STDERR_TAIL_LINES`
+// (the single SSOT per ADR-0033 Amendment 2026-05-10 / step 02-05).
+// Callers import it directly from that path; no re-export is needed here.
 
 /// Bounded retry budget for transient `ObservationStore::write` failures
 /// in `handle_exit_event`. The first attempt is unbudgeted; on a

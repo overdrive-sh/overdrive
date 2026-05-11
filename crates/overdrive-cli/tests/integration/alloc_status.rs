@@ -21,8 +21,8 @@
 #![allow(clippy::unwrap_used)]
 
 use overdrive_cli::render::{
-    JobVerdict, format_job_verdict, format_workload_alloc_status_attempts_table,
-    format_workload_alloc_status_header,
+    JobVerdict, format_job_alloc_status_header, format_job_verdict,
+    format_workload_alloc_status_attempts_table,
 };
 use overdrive_control_plane::api::{AllocStateWire, AllocStatusResponse, AllocStatusRowBody};
 use overdrive_core::aggregate::WorkloadKind;
@@ -433,9 +433,8 @@ fn job_verdict_in_progress_renders_no_terminal_yet() {
 }
 
 #[test]
-fn format_workload_alloc_status_header_includes_name_kind_digest() {
-    let rendered =
-        format_workload_alloc_status_header("coinflip", "abc123def456", JobVerdict::Failed);
+fn format_job_alloc_status_header_includes_name_kind_digest() {
+    let rendered = format_job_alloc_status_header("coinflip", "abc123def456", JobVerdict::Failed);
     assert!(rendered.contains("Job 'coinflip'"));
     assert!(rendered.contains("kind: Job"));
     assert!(rendered.contains("abc123def456"));

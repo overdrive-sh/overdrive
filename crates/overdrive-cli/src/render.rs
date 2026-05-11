@@ -198,7 +198,7 @@ pub fn alloc_snapshot(out: &AllocStatusResponse) -> String {
     use std::fmt::Write as _;
     let mut s = String::new();
     if let Some(workload_id) = &out.workload_id {
-        let _ = writeln!(s, "Job ID:        {workload_id}");
+        let _ = writeln!(s, "Workload ID:   {workload_id}");
     }
     if let Some(digest) = &out.spec_digest {
         let _ = writeln!(s, "Spec digest:   {digest}");
@@ -721,7 +721,7 @@ pub fn derive_job_verdict(rows: &[overdrive_control_plane::api::AllocStatusRowBo
 /// Verdict: <verdict body>
 /// ```
 #[must_use]
-pub fn format_workload_alloc_status_header(
+pub fn format_job_alloc_status_header(
     workload_name: &str,
     spec_digest: &str,
     verdict: JobVerdict,
@@ -824,7 +824,7 @@ pub fn alloc_status_kind_aware(out: &AllocStatusResponse) -> String {
         WorkloadKind::Job => {
             let mut s = String::new();
             let verdict = derive_job_verdict(&out.rows);
-            s.push_str(&format_workload_alloc_status_header(workload_name, spec_digest, verdict));
+            s.push_str(&format_job_alloc_status_header(workload_name, spec_digest, verdict));
             s.push('\n');
             s.push_str(&format_workload_alloc_status_attempts_table(&out.rows));
             // stderr tail on Failed: pull from the last attempt's
