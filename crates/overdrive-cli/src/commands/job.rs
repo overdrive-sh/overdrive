@@ -736,7 +736,8 @@ async fn consume_stream(
 /// structurally absent on this code path because the type carries
 /// no equivalent variant. This consumer projects
 /// `JobSubmitEvent::Succeeded` → `format_job_succeeded_summary`,
-/// `JobSubmitEvent::Failed` → `format_job_failed_summary`, and
+/// `JobSubmitEvent::Failed` → `format_job_failed_summary`,
+/// `JobSubmitEvent::Stopped` → `format_job_stopped_summary`, and
 /// `JobSubmitEvent::AttemptFailed` → intermediate per-attempt line
 /// (stream stays open).
 //
@@ -761,7 +762,7 @@ async fn consume_stream_job(
     // accumulate the operator-facing intermediate lines into the
     // running summary so the operator sees the per-attempt narrative
     // and the terminal verdict in one buffer; the stream stays open
-    // across `AttemptFailed` and closes only on `Succeeded` / `Failed`.
+    // across `AttemptFailed` and closes only on `Succeeded` / `Failed` / `Stopped`.
     let mut summary = submit_echo;
 
     while let Some(chunk_result) = stream.next().await {
@@ -851,6 +852,37 @@ async fn consume_stream_job(
                         // for forward-compat with non-zero "successes"
                         // a future reconciler may stamp).
                         exit_code,
+                        summary,
+                        terminal_reason: None,
+                        streaming_reason: None,
+                        streaming_error: None,
+                    });
+                }
+                JobSubmitEvent::Stopped { stopped_by, attempts, .. } => {
+                    let acc = accepted.ok_or_else(|| CliError::BodyDecode {
+                        cause: "Stopped before Accepted on the streaming bus".to_string(),
+                    })?;
+                    let took_human = crate::render::format_human_duration(stream_started.elapsed());
+                    let initiator = match stopped_by {
+                        overdrive_core::transition_reason::StoppedBy::Operator => "operator",
+                        overdrive_core::transition_reason::StoppedBy::Reconciler => "reconciler",
+                        _ => "system",
+                    };
+                    summary.push_str(&crate::render::format_job_stopped_summary(
+                        &acc.workload_id,
+                        initiator,
+                        &took_human,
+                        attempts,
+                    ));
+                    let next_command = format!("overdrive alloc status --job {}", acc.workload_id);
+                    return Ok(SubmitStreamingOutput {
+                        workload_id: acc.workload_id,
+                        intent_key: acc.intent_key,
+                        spec_digest: acc.spec_digest,
+                        outcome: acc.outcome,
+                        endpoint,
+                        next_command,
+                        exit_code: 130,
                         summary,
                         terminal_reason: None,
                         streaming_reason: None,

@@ -525,6 +525,25 @@ pub fn format_job_succeeded_summary(
     )
 }
 
+/// Render the operator-facing terminal-stopped line for a Job-kind
+/// workload. Pure function.
+///
+/// An operator stop is neither success nor failure — the workload was
+/// interrupted before natural completion.
+///
+/// Form: `Job '<name>' stopped by <initiator>. (took <duration>, attempts <N>)\n`
+#[must_use]
+pub fn format_job_stopped_summary(
+    workload_name: &str,
+    stopped_by: &str,
+    took_human: &str,
+    attempts: u32,
+) -> String {
+    format!(
+        "Job '{workload_name}' stopped by {stopped_by}. (took {took_human}, attempts {attempts})\n"
+    )
+}
+
 /// Decide whether a Job's retry budget is exhausted. Pure function.
 /// Extracted from `consume_stream_job` for testability.
 #[must_use]

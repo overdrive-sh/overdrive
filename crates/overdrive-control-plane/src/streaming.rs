@@ -107,7 +107,7 @@ use crate::action_shim::LifecycleEvent;
 use crate::api::{AllocStateWire, IdempotencyOutcome, SubmitEvent, TerminalReason};
 use crate::reconciler_runtime::ReconcilerRuntime;
 use overdrive_core::reconciler::TargetResource;
-use overdrive_core::transition_reason::TerminalCondition;
+use overdrive_core::transition_reason::{StoppedBy, TerminalCondition};
 
 /// One NDJSON line — `serde_json::to_writer(buf, &event)?` + `b'\n'`.
 fn emit_line(event: &SubmitEvent) -> std::io::Result<Bytes> {
@@ -616,7 +616,7 @@ pub fn build_workload_stream(
                             ).await {
                                 let is_terminal = matches!(
                                     emit,
-                                    JobSubmitEvent::Succeeded { .. } | JobSubmitEvent::Failed { .. }
+                                    JobSubmitEvent::Succeeded { .. } | JobSubmitEvent::Failed { .. } | JobSubmitEvent::Stopped { .. }
                                 );
                                 match emit_workload_line(&emit) {
                                     Ok(line) => {
@@ -792,8 +792,8 @@ async fn workload_event_from_terminal(
             max_attempts: 1,
             stderr_tail,
         },
-        TerminalCondition::Stopped { .. } => {
-            JobSubmitEvent::Succeeded { exit_code: 0, duration: event.at.clone(), attempts: 1 }
+        TerminalCondition::Stopped { by } => {
+            JobSubmitEvent::Stopped { stopped_by: *by, duration: event.at.clone(), attempts: 1 }
         }
         TerminalCondition::BackoffExhausted { attempts } => JobSubmitEvent::Failed {
             exit_code: 1,
@@ -842,8 +842,8 @@ async fn workload_terminal_from_snapshot(
             max_attempts: 1,
             stderr_tail,
         },
-        TerminalCondition::Stopped { .. } => {
-            JobSubmitEvent::Succeeded { exit_code: 0, duration, attempts: 1 }
+        TerminalCondition::Stopped { by } => {
+            JobSubmitEvent::Stopped { stopped_by: *by, duration, attempts: 1 }
         }
         TerminalCondition::BackoffExhausted { attempts } => JobSubmitEvent::Failed {
             exit_code: 1,
@@ -936,6 +936,10 @@ pub enum JobSubmitEvent {
         /// final attempt. Present when ExitObserver captured stderr.
         stderr_tail: Option<String>,
     },
+    /// Terminal — allocation stopped by operator or reconciler before
+    /// natural completion. Neither success nor failure — the workload
+    /// was interrupted. CLI exit code = 130 (SIGINT-stop convention).
+    Stopped { stopped_by: StoppedBy, duration: String, attempts: u32 },
 }
 
 // ---------------------------------------------------------------------------
@@ -1166,7 +1170,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn event_from_terminal_stopped_yields_succeeded_zero() {
+    async fn event_from_terminal_stopped_yields_stopped() {
         let node = NodeId::from_str("node-a").expect("node id");
         let obs = Arc::new(SimObservationStore::single_peer(node, 0));
         let alloc_id = AllocationId::from_str("alloc-0").expect("alloc id");
@@ -1177,11 +1181,11 @@ mod tests {
         let result = workload_event_from_terminal(&*obs, &wl_id, &event, &cond).await;
 
         match result {
-            JobSubmitEvent::Succeeded { exit_code, attempts, .. } => {
-                assert_eq!(exit_code, 0);
+            JobSubmitEvent::Stopped { stopped_by, attempts, .. } => {
+                assert_eq!(stopped_by, StoppedBy::Operator);
                 assert_eq!(attempts, 1);
             }
-            other => panic!("expected Succeeded (clean stop), got {other:?}"),
+            other => panic!("expected Stopped, got {other:?}"),
         }
     }
 
@@ -1296,7 +1300,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn snapshot_stopped_yields_succeeded_zero() {
+    async fn snapshot_stopped_yields_stopped() {
         let node = NodeId::from_str("node-a").expect("node id");
         let obs = Arc::new(SimObservationStore::single_peer(node.clone(), 0));
         let wl_id = WorkloadId::from_str("job-0").expect("wl id");
@@ -1312,11 +1316,11 @@ mod tests {
 
         let result = workload_terminal_from_snapshot(&*obs, &wl_id).await;
         match result {
-            Some(JobSubmitEvent::Succeeded { exit_code, attempts, .. }) => {
-                assert_eq!(exit_code, 0);
+            Some(JobSubmitEvent::Stopped { stopped_by, attempts, .. }) => {
+                assert_eq!(stopped_by, StoppedBy::Operator);
                 assert_eq!(attempts, 1);
             }
-            other => panic!("expected Some(Succeeded) for clean stop, got {other:?}"),
+            other => panic!("expected Some(Stopped) for operator stop, got {other:?}"),
         }
     }
 
