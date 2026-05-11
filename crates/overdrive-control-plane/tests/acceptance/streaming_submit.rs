@@ -96,9 +96,21 @@ fn build_router(state: AppState) -> Router {
 
 /// Build a `POST /v1/jobs` request with the given Accept header.
 fn build_submit_request(spec: &JobSpecInput, accept: &str) -> Request<Body> {
-    let body =
-        serde_json::to_vec(&SubmitWorkloadRequest { spec: spec.clone(), workload_kind: None })
-            .expect("serialize");
+    build_submit_request_with_kind(spec, accept, None)
+}
+
+/// Build a `POST /v1/jobs` request with the given Accept header and
+/// explicit workload kind discriminator.
+fn build_submit_request_with_kind(
+    spec: &JobSpecInput,
+    accept: &str,
+    workload_kind: Option<&str>,
+) -> Request<Body> {
+    let body = serde_json::to_vec(&SubmitWorkloadRequest {
+        spec: spec.clone(),
+        workload_kind: workload_kind.map(str::to_owned),
+    })
+    .expect("serialize");
     Request::builder()
         .method(Method::POST)
         .uri("/v1/jobs")
@@ -1000,5 +1012,112 @@ async fn s_cp_12_pre_subscribe_terminal_does_not_hang_until_cap() {
     assert_eq!(
         lines[1]["data"]["alloc_id"], "alloc-payments-0",
         "converged_running must reference the pre-seeded alloc"
+    );
+}
+
+// ===========================================================================
+// Regression — AttemptFailed exit code comes from WorkloadCrashedImmediately
+//
+// Root cause: workload_event_from_lifecycle's AllocStateWire::Failed arm
+// called parse_exit_code_from_detail(event.detail.as_deref()), which was
+// written for the old "exit_code=137" string format in
+// DriverInternalError.detail. After the exit observer was refactored to
+// emit TransitionReason::WorkloadCrashedImmediately { exit_code, .. }, the
+// detail field is None — so parse_exit_code_from_detail(None) always falls
+// through to `return 1` and every AttemptFailed event carries exit code 1
+// regardless of what the workload actually returned.
+//
+// RED: fails against current code (detail: None → exit_code always 1).
+// GREEN: passes after workload_event_from_lifecycle reads exit_code from
+//        event.reason instead.
+// ===========================================================================
+
+#[tokio::test]
+async fn attempt_failed_exit_code_comes_from_workload_crashed_immediately_reason() {
+    let tmp = TempDir::new().expect("tmpdir");
+    let sim_clock = Arc::new(SimClock::new());
+    let mut state = build_app_state(&tmp, sim_clock.clone());
+    // Use a 60s cap so the test can close the stream via SimClock.tick
+    // after the AttemptFailed line is emitted, without racing a terminal.
+    state.streaming_cap = Duration::from_secs(60);
+    let router = build_router(state.clone());
+
+    let alloc_id = AllocationId::from_str("alloc-payments-0").expect("alloc id");
+    let workload_id = WorkloadId::from_str("payments-v0").expect("job id");
+
+    let request_task = tokio::spawn(async move {
+        let response = router
+            .oneshot(build_submit_request_with_kind(
+                &payments_spec(),
+                "application/x-ndjson",
+                Some("job"),
+            ))
+            .await
+            .expect("router oneshot");
+        assert_eq!(response.status(), StatusCode::OK);
+        body_ndjson_lines(response.into_body()).await
+    });
+
+    // Wait until the handler has subscribed.
+    for _ in 0..100 {
+        if state.lifecycle_events.receiver_count() >= 1 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    // Emit a Failed event with WorkloadCrashedImmediately { exit_code: Some(137) }
+    // and detail: None — the exact shape the exit observer now produces after the
+    // refactor that removed the "exit_code=N" string encoding in detail.
+    let mut failed_event = make_lifecycle_event(
+        alloc_id.clone(),
+        workload_id.clone(),
+        AllocStateWire::Pending,
+        AllocStateWire::Failed,
+        TransitionReason::WorkloadCrashedImmediately {
+            exit_code: Some(137),
+            signal: None,
+            stderr_tail: None,
+        },
+    );
+    // Explicitly confirm detail is None (make_lifecycle_event already sets
+    // it to None; this documents the intent and protects against future
+    // helper changes).
+    failed_event.detail = None;
+    // Not a terminal event — intermediate per-attempt failure.
+    failed_event.terminal = None;
+    emit_lifecycle(&state, failed_event);
+
+    // Yield so the handler processes the Failed event and emits the
+    // AttemptFailed line before we advance the clock to close the stream.
+    for _ in 0..50 {
+        tokio::task::yield_now().await;
+    }
+
+    // Advance the SimClock past the 60s cap — this closes the stream with
+    // a ConvergedFailed{Timeout} terminal, which is after the AttemptFailed
+    // line we care about.
+    sim_clock.tick(Duration::from_secs(61));
+    for _ in 0..50 {
+        tokio::task::yield_now().await;
+    }
+
+    let lines = tokio::time::timeout(Duration::from_secs(5), request_task)
+        .await
+        .expect("request finishes within 5s")
+        .expect("task ok");
+
+    // Find the AttemptFailed line.
+    let attempt_failed_line = lines
+        .iter()
+        .find(|l| l["kind"] == "attempt_failed")
+        .expect("expected an attempt_failed line in the stream");
+
+    // The exit code must come from WorkloadCrashedImmediately.exit_code (137),
+    // NOT from parse_exit_code_from_detail(None) which always returns 1.
+    assert_eq!(
+        attempt_failed_line["data"]["exit_code"], 137,
+        "AttemptFailed exit_code must be 137 (from WorkloadCrashedImmediately reason), \
+         not 1 (from stale parse_exit_code_from_detail(None)); got {attempt_failed_line}"
     );
 }

@@ -97,6 +97,7 @@
 use axum::body::Bytes;
 use bytes::BytesMut;
 use futures::Stream;
+use overdrive_core::TransitionReason;
 use overdrive_core::id::WorkloadId;
 use overdrive_core::traits::observation_store::{AllocState, ObservationStore};
 use tokio::sync::broadcast;
@@ -729,7 +730,18 @@ async fn workload_event_from_lifecycle(
             // tick; surface this row as `AttemptFailed` so the operator
             // sees the workload exited and the verdict is being
             // finalised, without conflating the two into a single line.
-            let exit_code = parse_exit_code_from_detail(event.detail.as_deref());
+            //
+            // Read exit_code from the typed TransitionReason — the exit
+            // observer now emits WorkloadCrashedImmediately { exit_code,
+            // .. } with detail: None. The old parse_exit_code_from_detail
+            // only handled the legacy "exit_code=N" string in detail and
+            // always returned 1 when detail is absent.
+            let exit_code = match &event.reason {
+                TransitionReason::WorkloadCrashedImmediately { exit_code, .. } => {
+                    exit_code.unwrap_or(1)
+                }
+                _ => 1,
+            };
             Some(JobSubmitEvent::AttemptFailed {
                 attempt_index: 1,
                 exit_code,
@@ -839,18 +851,6 @@ async fn workload_terminal_from_snapshot(
             stderr_tail,
         },
     })
-}
-
-/// Parse `"exit_code=N"` out of the legacy `TransitionReason::DriverInternalError.detail`
-/// shape that the worker `exit_observer` writes on a crashed exit. Falls
-/// back to `1` when the detail is absent or unparseable — the Job-kind
-/// `AttemptFailed` event surface needs SOME exit code to render the
-/// "attempt N failed (exit X)" line.
-fn parse_exit_code_from_detail(detail: Option<&str>) -> i32 {
-    let Some(s) = detail else {
-        return 1;
-    };
-    s.strip_prefix("exit_code=").and_then(|n| n.parse::<i32>().ok()).unwrap_or(1)
 }
 
 // ---------------------------------------------------------------------------
