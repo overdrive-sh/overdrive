@@ -227,7 +227,8 @@ pub fn spawn_with_runtime(
                     // write-retry.md` (or `docs/feature/fix-exit-observer-write-retry/
                     // deliver/rca.md` pre-archive).
                     if let Some(runtime) = runtime.as_ref() {
-                        if let Some(target) = target_for_event(obs.as_ref(), &event.alloc).await {
+                        if let Ok(target) = TargetResource::new(&format!("job/{}", row.workload_id))
+                        {
                             runtime.broker().submit(Evaluation {
                                 reconciler: workload_lifecycle_name(),
                                 target,
@@ -538,17 +539,6 @@ async fn find_prior_row(
     alloc: &AllocationId,
 ) -> Result<Option<AllocStatusRow>, HandleError> {
     Ok(obs.alloc_status_row(alloc).await?)
-}
-
-/// Best-effort target derivation from the alloc's prior obs row's
-/// `workload_id`. Used by the production `spawn_with_runtime` path to
-/// re-enqueue the job-lifecycle reconciler after writing a new state.
-async fn target_for_event(
-    obs: &dyn ObservationStore,
-    alloc: &AllocationId,
-) -> Option<TargetResource> {
-    let row = obs.alloc_status_row(alloc).await.ok()??;
-    TargetResource::new(&format!("job/{}", row.workload_id)).ok()
 }
 
 fn workload_lifecycle_name() -> ReconcilerName {
