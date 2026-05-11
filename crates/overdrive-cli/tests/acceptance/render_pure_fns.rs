@@ -103,6 +103,12 @@ fn verdict_running_is_in_progress() {
 }
 
 #[test]
+fn verdict_empty_rows_is_in_progress_not_failed() {
+    let rows: Vec<AllocStatusRowBody> = vec![];
+    assert_eq!(derive_job_verdict(&rows), JobVerdict::InProgress);
+}
+
+#[test]
 fn verdict_terminated_nonzero_and_running_sibling_is_succeeded_not_in_progress() {
     // Terminated(0) takes priority over Running.
     let rows = vec![

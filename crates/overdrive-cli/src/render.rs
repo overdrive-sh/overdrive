@@ -701,6 +701,7 @@ pub fn format_job_verdict(verdict: JobVerdict) -> String {
 ///
 /// - any `Terminated` row with `exit_code: Some(0)` → `Succeeded`
 /// - any `Running` row with no terminal sibling → `InProgress`
+/// - empty `rows` (no allocations yet) → `InProgress`
 /// - else (every row is `Failed` or terminated-non-zero) → `Failed`
 #[must_use]
 pub fn derive_job_verdict(rows: &[overdrive_control_plane::api::AllocStatusRowBody]) -> JobVerdict {
@@ -713,6 +714,9 @@ pub fn derive_job_verdict(rows: &[overdrive_control_plane::api::AllocStatusRowBo
     }
     let any_running = rows.iter().any(|r| matches!(r.state, AllocStateWire::Running));
     if any_running {
+        return JobVerdict::InProgress;
+    }
+    if rows.is_empty() {
         return JobVerdict::InProgress;
     }
     JobVerdict::Failed
