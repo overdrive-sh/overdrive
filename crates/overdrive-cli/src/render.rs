@@ -772,7 +772,7 @@ pub fn format_job_alloc_status_header(
 /// KPI K3 byte-equality: every persisted `exit_code`'s canonical
 /// decimal form appears in the rendered Exit cell verbatim.
 #[must_use]
-pub fn format_workload_alloc_status_attempts_table(
+pub fn format_job_alloc_status_attempts_table(
     rows: &[overdrive_control_plane::api::AllocStatusRowBody],
 ) -> String {
     use std::fmt::Write as _;
@@ -856,7 +856,7 @@ pub fn alloc_status_kind_aware(out: &AllocStatusResponse) -> String {
             let verdict = derive_job_verdict(&out.rows);
             s.push_str(&format_job_alloc_status_header(workload_name, spec_digest, verdict));
             s.push('\n');
-            s.push_str(&format_workload_alloc_status_attempts_table(&out.rows));
+            s.push_str(&format_job_alloc_status_attempts_table(&out.rows));
             // stderr tail on Failed: pull from the last attempt's
             // `error` field if present (the action shim threads
             // `prior_row.detail` / `prior_row.stderr_tail` onto the

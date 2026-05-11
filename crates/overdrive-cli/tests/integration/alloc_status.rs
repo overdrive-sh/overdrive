@@ -21,8 +21,8 @@
 #![allow(clippy::unwrap_used)]
 
 use overdrive_cli::render::{
-    JobVerdict, format_job_alloc_status_header, format_job_verdict,
-    format_workload_alloc_status_attempts_table,
+    JobVerdict, format_job_alloc_status_attempts_table, format_job_alloc_status_header,
+    format_job_verdict,
 };
 use overdrive_control_plane::api::{AllocStateWire, AllocStatusResponse, AllocStatusRowBody};
 use overdrive_core::aggregate::WorkloadKind;
@@ -383,7 +383,7 @@ proptest! {
             /*desired=*/ 1,
             /*running=*/ 0,
         );
-        let table = format_workload_alloc_status_attempts_table(&rows);
+        let table = format_job_alloc_status_attempts_table(&rows);
 
         // For every persisted exit code, the canonical decimal text
         // must appear in the rendered table. KPI K3 byte-equality:
