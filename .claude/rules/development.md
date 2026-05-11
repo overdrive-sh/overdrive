@@ -1157,6 +1157,191 @@ DST-replayable. See ADR-0035 / ADR-0036 for the full design.
 
 ---
 
+## rkyv schema evolution
+
+rkyv archives are **fixed positional layouts**. `#[derive(rkyv::Archive)]`
+on a plain struct/enum encodes every field at a compile-time-fixed
+offset; adding a field (even `Option<T>`) shifts every subsequent
+offset and renders pre-existing bytes unreadable. The validator
+surfaces the failure as a `subtree pointer overran range` rejection
+at read time. There is no `#[serde(default)]`-equivalent escape
+hatch.
+
+**This rule is the rkyv counterpart to § "Reconciler I/O" → "Schema
+evolution".** That section governs CBOR-encoded `View` blobs in the
+runtime-owned `ViewStore` (additive serde with
+`#[serde(default)]` / versioned envelope per ADR-0035/0036). This
+section governs every *other* rkyv-archived value crossing a
+persistence boundary — observation rows, intent aggregates, and any
+future rkyv-persisted type.
+
+**This section governs rkyv-persisted types at the redb boundary
+(observation rows + intent aggregates). For CBOR-serialized
+reconciler `View` state see § "Reconciler I/O" → "Schema evolution"
+(ADR-0035 / ADR-0036). The two paths use different evolution
+mechanics — CBOR carries additive-serde tolerance via
+`#[serde(default)]`; rkyv requires a per-type versioned envelope
+enum. Do not conflate them.** If a value lives in the `ViewStore`
+(CBOR), the rkyv evolution rules do not apply. If a value lives in
+an `observation_*` or `entries` redb table (rkyv), the CBOR
+additive-field tolerance does not apply.
+
+**Every rkyv-persisted type goes through a versioned envelope.** The
+canonical shape is a per-type rkyv enum where each variant is one
+historical payload type. Per ADR-0048:
+
+```rust
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, ...)]
+pub enum AllocStatusRowEnvelope {
+    V1(AllocStatusRowV1),
+    V2(AllocStatusRowV2),
+}
+pub type AllocStatusRow       = AllocStatusRowEnvelope;
+pub type AllocStatusRowLatest = AllocStatusRowV2;
+
+impl VersionedEnvelope for AllocStatusRowEnvelope {
+    type Latest = AllocStatusRowV2;
+    fn latest(payload: Self::Latest) -> Self { Self::V2(payload) }
+    fn into_latest(self) -> Result<Self::Latest, EnvelopeError> {
+        match self {
+            Self::V1(v1) => Ok(v1.into()),  // From<V1> for V2 — additive
+            Self::V2(v2) => Ok(v2),
+        }
+    }
+}
+```
+
+The `VersionedEnvelope` trait, `EnvelopeError`, and the schema-
+evolution test harness primitive live in
+`overdrive-core::codec::envelope`. The per-type envelope enum lives
+co-located with its domain type (intent on `aggregate`, observation
+on `traits::observation_store`).
+
+### Rules
+
+- **Writers MUST go through `<Envelope>::latest(payload)`.** Direct
+  variant construction (e.g. `AllocStatusRowEnvelope::V1(...)`) is
+  blocked by two complementary layers, each with a distinct honest
+  mechanism:
+  - **Layer 1 — cross-crate payload-type visibility.** Inner payload
+    types (`AllocStatusRowV1`, `AllocStatusRowV2`, …) are
+    `pub(crate)` inside their defining module of `overdrive-core`
+    and are NOT re-exported. A cross-crate writer (the dominant
+    case — every IntentStore / ObservationStore writer lives in
+    `overdrive-store-local`) cannot name the inner payload type to
+    construct a value of it, so cannot supply an expression to
+    `Envelope::V1(<expr>)`. The only construction path from outside
+    `overdrive-core` is `Envelope::latest(<Foo>Latest { ... })`.
+    NOTE: this does NOT block the variant constructor itself — the
+    envelope enum is `pub` and `Envelope::V1(<expr>)` is
+    syntactically reachable from any crate; Layer 1 renders it
+    uncallable in practice by the payload type being unnameable.
+  - **Layer 2 — in-crate variant-construction lint
+    (`xtask::dst_lint` clause).** Within `overdrive-core` itself,
+    code can name a `pub(crate)` payload and call
+    `Envelope::V1(payload)` directly. The residual hole is closed
+    by an addition to the existing `xtask::dst_lint` AST scanner:
+    it walks `overdrive-core` source for `<Envelope>::V<N>(`
+    literal expression patterns outside the defining module's own
+    `From` / `into_latest` impls and fails the PR at CI time. The
+    scanner is purely syntactic and does NOT import any
+    `overdrive-*` crate, so the xtask boundary per § "xtask is
+    build / test / dev orchestration, NOT a runtime entry point"
+    stays intact.
+- **Reads up-convert to `Latest` via `into_latest()`.** Older
+  variants chain through `From<V1> for V2`, `From<V2> for V3`, …;
+  each conversion is additive-only.
+- **Unknown / malformed handling is asymmetric by layer.**
+  - **Intent** (load-bearing — SSOT): refuse to start with
+    `IntentStoreError::Envelope { source: EnvelopeError }`; surface
+    as a structured `health.startup.refused` event.
+  - **Observation** (gossiped, converges): log + skip the row
+    (`ObservationStoreError::Envelope { source: EnvelopeError }`
+    recorded; convergence proceeds for surviving rows).
+- **Bumping a version is a single commit.** See § "Version-bump
+  procedure" below for the numbered checklist. The structural
+  defense against drift is that **existing fixtures (V1 … VN) are
+  NEVER touched** — they continue to assert prior versions' bytes
+  decode through the new envelope.
+- **Aggregate envelopes wrap the outer type only.** For a `Job`
+  aggregate with embedded `WorkloadDriver` and `Exec` types, the
+  envelope lives at the outer `Job` level. Embedded type changes
+  bump the outer envelope version. Sub-envelopes on embedded types
+  are explicitly rejected — they create a combinatorial version
+  space without operator-visible benefit.
+- **Migration policy is greenfield single-cut for Phase 1.** Per
+  `feedback_single_cut_greenfield_migrations.md`. "Delete the
+  on-disk redb file" is the official upgrade path. The envelope
+  exists so that **future** versions can read today's `V<latest>`
+  files without rebuild — not so today's binaries can read
+  pre-envelope files.
+
+### Version-bump procedure
+
+Adding `V<N+1>` to an existing envelope is a **single commit** that
+performs all six steps below in order. Skipping any one of them is a
+review rejection. The order matters: steps 1-4 establish the new
+shape; step 5 pins the prior shape's bytes; step 6 is the atomic
+landing boundary.
+
+1. **Add the new `V<N+1>` variant to the envelope enum**, with its
+   `V<N+1>Payload` inner struct. Append at the end — do NOT reorder
+   existing variants. Appending preserves the rkyv `#[repr(u8)]`
+   discriminant tags for `V1..V<N>` (see ADR-0048 § "Why a per-type
+   rkyv enum is forward-compatible across variant additions").
+2. **Update the `Latest` type alias** to point to the new payload:
+   `pub type FooRowLatest = FooRowV<N+1>Payload`.
+3. **Update the `Envelope::latest()` constructor** to wrap into the
+   new variant: `fn latest(p: Self::Latest) -> Self { Self::V<N+1>(p) }`.
+4. **Add a `From<V<N>Payload> for V<N+1>Payload` impl** (or
+   document why semantic translation is required — e.g., a field
+   whose meaning shifted requires explicit derivation rather than
+   structural mapping). Extend `into_latest()` so older variants
+   chain through the new `From` impl: e.g.
+   `Self::V<N>(p) => Ok(p.into())` becomes the bridge from V<N> to
+   V<N+1>'s `Latest` shape.
+5. **Add a golden-bytes test fixture** pinning `V<N>` archived bytes
+   per `.claude/rules/testing.md` § "Property-based testing
+   (proptest)" → "Mandatory call sites" → "Archive schema-evolution
+   roundtrip". The new fixture file lives under
+   `crates/<crate>/tests/schema_evolution/<envelope>.rs` and adds a
+   `const FIXTURE_V<N>: &str = "..."` constant + a test that
+   hex-decodes, rkyv-deserialises into the envelope, calls
+   `into_latest()`, and asserts equality against a canonical
+   `Latest` projection. **Existing fixtures (`FIXTURE_V1` …
+   `FIXTURE_V<N-1>`) are NEVER touched.** Touching them collapses
+   the schema-evolution signal: the test would pass if the prior
+   layout had silently drifted.
+6. **All five changes land in a single commit.** Splitting across
+   commits leaves intermediate states where the envelope can be
+   constructed without a fixture (step 1 alone) or where the
+   fixture asserts against a no-longer-canonical projection (step 5
+   alone). The single-commit discipline is the atomic landing
+   boundary for the structural defense.
+
+### When to apply
+
+Every rkyv-persisted type at a redb (or other durable storage)
+boundary. Today: `AllocStatusRow`, `NodeHealthRow`,
+`ServiceHydrationResultRow`, `ServiceBackendRow`, `Job`. Future
+rkyv-persisted types (compiled policy verdicts, revoked-cert lists,
+…) follow the same pattern.
+
+### When NOT to apply
+
+- **rkyv used purely for hashing** (e.g. `FingerprintInput` —
+  archived bytes feed a `sha256` and are never stored). Hash inputs
+  are content-addressed by definition; schema evolution is moot.
+- **CBOR-encoded `View` blobs** in the runtime-owned `ViewStore` —
+  those follow § "Reconciler I/O" → "Schema evolution" (additive
+  serde with `#[serde(default)]` or `#[serde(tag = "v")]`-versioned
+  enum envelope). Two different codecs, two different evolution
+  paradigms; do not conflate.
+
+See ADR-0048 for the full decision record and rejected alternatives.
+
+---
+
 ## Workflow contract
 
 Workflows are the §18 peer primitive to reconcilers. The rules are

@@ -764,6 +764,40 @@ of. Neither substitutes for the other.
 - **Hash determinism.** Any content hash under `development.md`'s
   "Hashing requires deterministic serialization" rule — N permutations of
   the same logical value must produce one hash.
+- **Archive schema-evolution roundtrip.** Every rkyv versioned envelope
+  (per `development.md` § "rkyv schema evolution"; ADR-0048) ships a
+  per-version golden-bytes fixture in
+  `crates/<crate>/tests/schema_evolution/<envelope>.rs`. For each
+  historical variant `V_N`, the test:
+  1. Constructs the canonical `V_N` payload from hand-pinned fields
+     (the inputs that defined that historical shape — never derived
+     state).
+  2. rkyv-serialises it; the resulting bytes are hex-encoded and
+     stored inline in the test source as
+     `const FIXTURE_V_N: &str = "..."`.
+  3. On every run, hex-decodes `FIXTURE_V_N`, rkyv-deserialises into
+     the envelope, calls `into_latest()`, and asserts equality
+     against a canonical `Latest` projection.
+
+  The test FAILS when an envelope variant's archived layout changes
+  without minting a new version — the structural defense against
+  "additive `Option<T>` will be fine" mistakes. Adding `V_N+1` adds
+  a new fixture and a new assertion in the same commit; prior
+  `FIXTURE_V_N` literals are **never touched** (touching them
+  collapses the schema-evolution signal). Layout per crate:
+
+  ```
+  crates/<crate>/tests/schema_evolution.rs       # entrypoint
+  crates/<crate>/tests/schema_evolution/
+      alloc_status_row.rs
+      node_health_row.rs
+      ...
+  ```
+
+  Default lane (no `integration-tests` feature) — pure-Rust in-memory,
+  no I/O. Every rkyv envelope MUST have at least one historical-version
+  golden fixture; adding a new variant without a corresponding fixture
+  pinning the previous version's bytes is a review rejection.
 
 Reach for it elsewhere whenever a pure function's argument space exceeds
 a dozen hand-picked cases. If you find yourself enumerating `#[test]`
