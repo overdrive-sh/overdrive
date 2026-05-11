@@ -453,3 +453,41 @@ async fn cli_submit_surfaces_missing_exec_table_as_toml_field_error() {
 
     handle.shutdown().await.expect("clean shutdown");
 }
+
+// -------------------------------------------------------------------
+// (h) [job]-section TOML via non-streaming submit() sends correct
+//     workload_kind discriminator — regression for
+//     fix-detach-submit-workload-kind
+// -------------------------------------------------------------------
+
+#[tokio::test]
+async fn submit_accepts_job_section_toml_and_persists_job_discriminator() {
+    let (handle, tmp) = spawn_server().await;
+    let cfg = config_path(tmp.path());
+
+    let spec = r#"
+[job]
+id = "regression-kind"
+
+[exec]
+command = "/bin/true"
+args = []
+
+[resources]
+cpu_milli = 100
+memory_bytes = 67108864
+"#;
+    let path = tmp.path().join("job-section.toml");
+    std::fs::write(&path, spec).expect("write job-section.toml");
+
+    let args = SubmitArgs { spec: path, config_path: cfg };
+    let output: SubmitOutput = overdrive_cli::commands::job::submit(args)
+        .await
+        .expect("submit must accept [job]-section TOML");
+
+    assert_eq!(output.workload_id, "regression-kind");
+    assert_eq!(output.intent_key, "jobs/regression-kind");
+    assert_eq!(output.outcome, IdempotencyOutcome::Inserted);
+
+    handle.shutdown().await.expect("clean shutdown");
+}

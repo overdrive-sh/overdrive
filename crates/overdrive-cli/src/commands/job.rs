@@ -185,14 +185,35 @@ pub async fn submit(args: SubmitArgs) -> Result<SubmitOutput, CliError> {
         message: format!("failed to read `{}`: {e}", args.spec.display()),
     })?;
 
-    // 2. Parse TOML into the shared wire shape. Parse failures map to
-    //    InvalidSpec with field="toml" so the operator sees the parser
-    //    diagnostic without a cryptic stack trace.
-    let spec_input: JobSpecInput =
-        toml::from_str(&toml_str).map_err(|e| CliError::InvalidSpec {
+    // 2. Try the kind-discriminated parser first (same detection as
+    //    `submit_streaming`). If the TOML carries a `[job]` section,
+    //    translate to the legacy wire shape and tag with
+    //    `workload_kind = "job"` so the server persists the correct
+    //    discriminator byte. Flat TOMLs fall through to the legacy
+    //    `JobSpecInput` parser with `workload_kind: None`.
+    let (spec_input, workload_kind) = if let Ok(WorkloadSpecInput::Job(job_spec)) =
+        WorkloadSpecInput::from_toml_str(&toml_str)
+    {
+        let spec = JobSpecInput {
+            id: job_spec.id,
+            replicas: 1,
+            driver: DriverInput::Exec(LegacyExecInput {
+                command: job_spec.exec.command,
+                args: job_spec.exec.args,
+            }),
+            resources: LegacyResourcesInput {
+                cpu_milli: job_spec.resources.cpu_milli,
+                memory_bytes: job_spec.resources.memory_bytes,
+            },
+        };
+        (spec, Some("job".to_string()))
+    } else {
+        let spec: JobSpecInput = toml::from_str(&toml_str).map_err(|e| CliError::InvalidSpec {
             field: "toml".to_string(),
             message: format!("failed to parse TOML: {e}"),
         })?;
+        (spec, None)
+    };
 
     // 3. Client-side validation via the shared ADR-0011 constructor.
     //    Fast-fail BEFORE any HTTP call — operators see the offending
@@ -204,9 +225,8 @@ pub async fn submit(args: SubmitArgs) -> Result<SubmitOutput, CliError> {
     //    sole source.
     let client = ApiClient::from_config(&args.config_path)?;
     let endpoint = client.base_url().clone();
-    let resp = client
-        .submit_workload(SubmitWorkloadRequest { spec: spec_input, workload_kind: None })
-        .await?;
+    let resp =
+        client.submit_workload(SubmitWorkloadRequest { spec: spec_input, workload_kind }).await?;
 
     // 5. Compose the typed output. Intent key is derived via the
     //    shared `IntentKey::for_job` helper (ADR-0011 SSOT) — no
