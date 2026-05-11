@@ -315,7 +315,9 @@ pub async fn submit_workload(
                         ControlPlaneError::internal("read workload kind (unchanged path)", e)
                     })?
                 {
-                    workload_kind = WorkloadKind::from_discriminator_byte(stored_kind_bytes[0]);
+                    if let Some(b) = stored_kind_bytes.first().copied() {
+                        workload_kind = WorkloadKind::from_discriminator_byte(b);
+                    }
                 }
                 enqueue_workload_lifecycle_eval(&state, &job.id)?;
                 api::IdempotencyOutcome::Unchanged

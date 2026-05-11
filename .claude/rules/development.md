@@ -1512,6 +1512,30 @@ you actually deleted what you set out to delete.
   ControlPlaneError::internal(...))` on a typed bootstrap/infra
   error — that is always a bug, not a convenience.
 
+### Safe byte-slice access
+
+**Never index a byte slice directly (`bytes[0]`) when the source is
+external or fallible (store reads, network payloads, user input).**
+Use `.first().copied()` (or `.get(n).copied()` for arbitrary offsets)
+and handle the `None` case explicitly. Direct indexing panics on
+empty or short slices; the safe accessors return `Option<u8>`.
+
+```rust
+// Bad — panics on empty Bytes
+let kind = WorkloadKind::from_discriminator_byte(stored[0]);
+
+// Good — gracefully handles empty/short slices
+if let Some(b) = stored.first().copied() {
+    kind = WorkloadKind::from_discriminator_byte(b);
+}
+```
+
+This applies to any `Bytes`, `Vec<u8>`, or `&[u8]` whose length is
+not statically guaranteed by the type system. When the write path
+always produces a fixed-length value, the read path must still
+defend against corruption, truncation, or future schema evolution
+that changes the length.
+
 ### Concurrency & async
 
 - **Tokio is the standard runtime.** Do not reach for `async-std`,

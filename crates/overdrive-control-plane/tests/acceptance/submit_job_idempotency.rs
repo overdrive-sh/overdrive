@@ -277,3 +277,47 @@ async fn fresh_submit_on_empty_key_returns_inserted_and_persists_spec() {
     );
     assert!(!bytes.is_empty(), "stored bytes must be non-empty");
 }
+
+// ---------------------------------------------------------------------------
+// Regression: empty kind-key bytes must not panic on the Unchanged path.
+// Before the fix, `stored_kind_bytes[0]` panicked on `Bytes::new()`.
+// After the fix, `.first().copied()` gracefully skips the assignment.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn unchanged_path_with_empty_kind_bytes_does_not_panic() {
+    let tmp = TempDir::new().expect("tmpdir");
+    let state = build_app_state(&tmp);
+    let spec = payments_spec();
+
+    // First submit — plants the spec at the canonical key.
+    let first = submit_json(
+        state.clone(),
+        SubmitWorkloadRequest { spec: spec.clone(), workload_kind: None },
+    )
+    .await
+    .expect("first submit");
+    assert_eq!(first.outcome, IdempotencyOutcome::Inserted);
+
+    // Overwrite the kind key with an empty value — simulates a
+    // corrupted or truncated store entry.
+    let workload_id = overdrive_core::WorkloadId::from_str("payments").expect("WorkloadId");
+    let kind_key = overdrive_core::aggregate::IntentKey::for_workload_kind(&workload_id);
+    state.store.put(kind_key.as_bytes(), b"").await.expect("overwrite kind key with empty bytes");
+
+    // Re-submit the identical spec. Before the fix this panicked with
+    // "index out of bounds: the len is 0 but the index is 0".
+    let second = submit_json(
+        state.clone(),
+        SubmitWorkloadRequest { spec: spec.clone(), workload_kind: None },
+    )
+    .await
+    .expect("re-submit with empty kind bytes must not panic");
+
+    assert_eq!(
+        second.outcome,
+        IdempotencyOutcome::Unchanged,
+        "byte-identical re-submit must still return Unchanged even when \
+         the kind key holds empty bytes",
+    );
+}
