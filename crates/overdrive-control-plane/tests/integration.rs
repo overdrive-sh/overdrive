@@ -137,4 +137,5 @@ mod integration {
     /// orchestration, NOT a runtime entry point" in
     /// `.claude/rules/development.md` for the layering rationale.
     mod openapi_gate;
+    mod streaming_attempt_failed;
 }

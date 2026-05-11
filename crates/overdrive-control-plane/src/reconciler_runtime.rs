@@ -41,7 +41,7 @@ use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{IntentKey, Job, Node, WorkloadKind};
-use overdrive_core::id::{NodeId, WorkloadId};
+use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 #[cfg(any(test, feature = "integration-tests"))]
 use overdrive_core::reconciler::ServiceMapHydrator;
 use overdrive_core::reconciler::{
@@ -315,6 +315,28 @@ impl ReconcilerRuntime {
                 WorkloadLifecycleView::default()
             }
         }
+    }
+
+    /// Restart-budget snapshot for a single allocation within the
+    /// `WorkloadLifecycle` view. Returns `(attempt_index, will_restart)`
+    /// where `attempt_index` is 1-indexed (first attempt = 1) and
+    /// `will_restart` is true when the reconciler's budget has not been
+    /// exhausted.
+    ///
+    /// Falls back to `(1, true)` when the view is empty (fresh job,
+    /// reconciler not yet registered) — conservative: first attempt,
+    /// budget assumed available.
+    #[must_use]
+    pub fn restart_status_for_alloc(
+        &self,
+        target: &TargetResource,
+        alloc_id: &AllocationId,
+    ) -> (u32, bool) {
+        let view = self.view_for_workload_lifecycle(target);
+        let attempts = view.restart_counts.get(alloc_id).copied().unwrap_or(0);
+        let attempt_index = attempts.saturating_add(1);
+        let will_restart = attempt_index < overdrive_core::reconciler::RESTART_BACKOFF_CEILING;
+        (attempt_index, will_restart)
     }
 
     /// Look up the in-memory view for `(reconciler, target)` against

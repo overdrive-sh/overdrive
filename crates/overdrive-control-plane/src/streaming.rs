@@ -105,6 +105,8 @@ use tokio::sync::broadcast;
 use crate::AppState;
 use crate::action_shim::LifecycleEvent;
 use crate::api::{AllocStateWire, IdempotencyOutcome, SubmitEvent, TerminalReason};
+use crate::reconciler_runtime::ReconcilerRuntime;
+use overdrive_core::reconciler::TargetResource;
 use overdrive_core::transition_reason::TerminalCondition;
 
 /// One NDJSON line — `serde_json::to_writer(buf, &event)?` + `b'\n'`.
@@ -554,6 +556,7 @@ pub fn build_workload_stream(
     let bus = state.lifecycle_events.clone();
     let clock = state.clock.clone();
     let obs = state.obs.clone();
+    let runtime = state.runtime.clone();
     let cap = state.streaming_cap;
 
     async_stream::stream! {
@@ -607,6 +610,7 @@ pub fn build_workload_stream(
                             // (Succeeded / Failed).
                             if let Some(emit) = workload_event_from_lifecycle(
                                 &*obs,
+                                &runtime,
                                 &workload_id,
                                 &event,
                             ).await {
@@ -712,8 +716,9 @@ fn emit_workload_line(event: &JobSubmitEvent) -> std::io::Result<Bytes> {
 /// `obs.alloc_status_row(...)` so the operator-facing `Failed` event
 /// carries the workload's stderr verbatim per slice 02-05 / ADR-0033
 /// Amendment 2026-05-10.
-async fn workload_event_from_lifecycle(
+pub async fn workload_event_from_lifecycle(
     obs: &dyn ObservationStore,
+    runtime: &ReconcilerRuntime,
     workload_id: &WorkloadId,
     event: &LifecycleEvent,
 ) -> Option<JobSubmitEvent> {
@@ -742,11 +747,15 @@ async fn workload_event_from_lifecycle(
                 }
                 _ => 1,
             };
+            let target = TargetResource::new(&format!("job/{workload_id}")).ok();
+            let (attempt_index, will_restart) = target
+                .as_ref()
+                .map_or((1, true), |t| runtime.restart_status_for_alloc(t, &event.alloc_id));
             Some(JobSubmitEvent::AttemptFailed {
-                attempt_index: 1,
+                attempt_index,
                 exit_code,
                 duration: event.at.clone(),
-                will_restart: false,
+                will_restart,
                 next_attempt_delay: None,
             })
         }
