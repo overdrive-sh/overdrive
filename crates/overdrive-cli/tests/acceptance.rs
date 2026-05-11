@@ -53,4 +53,8 @@ mod acceptance {
     // ADR-0047 §3 [D2] / [D7]. The structural fix that closes the
     // bug under audit lands here.
     mod job_kind_render;
+
+    // Pure render helpers — format_human_duration, derive_job_verdict,
+    // alloc_status_kind_aware spec-digest branches.
+    mod render_pure_fns;
 }
