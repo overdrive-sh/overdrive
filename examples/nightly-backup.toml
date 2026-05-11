@@ -2,7 +2,7 @@
 # spec exercising the Schedule kind end-to-end.
 #
 # Submit:
-#   overdrive job submit examples/nightly-backup.toml
+#   overdrive deploy examples/nightly-backup.toml
 #
 # The CLI prints "Schedule registered." plus a NOTE block referencing
 # https://github.com/overdrive-sh/overdrive/issues/166. Cron firing
