@@ -100,7 +100,7 @@ Memory safety, performance, and a maturing ecosystem that now covers every requi
 The control plane and node agent are compiled into a single binary. Role is declared at bootstrap, not at build time. A single-node development cluster and a hundred-node production cluster run the same binary with different configuration. There is no separate installation, no separate upgrade path, no separate operational model.
 
 **9. Strong consistency where it matters, gossip where it scales.**
-Cluster state divides cleanly along a consistency boundary. *Intent* — job specs, policies, certificates, scheduler allocation decisions — requires linearizability and flows through per-region Raft. *Observation* — live allocation status, service endpoints, node health, resource profiles — tolerates seconds of staleness and flows through Corrosion: CR-SQLite tables gossiped over SWIM. Raft scales to a quorum; Corrosion scales to continents. Each tool is used where its guarantees fit, and never where they don't.
+Cluster state divides cleanly along a consistency boundary. *Intent* — workload specs, policies, certificates, scheduler allocation decisions — requires linearizability and flows through per-region Raft. *Observation* — live allocation status, service endpoints, node health, resource profiles — tolerates seconds of staleness and flows through Corrosion: CR-SQLite tables gossiped over SWIM. Raft scales to a quorum; Corrosion scales to continents. Each tool is used where its guarantees fit, and never where they don't.
 
 ---
 
@@ -169,7 +169,7 @@ Overdrive splits cluster state along a fundamental consistency boundary, reflect
 
 |                | **Intent**                                        | **Observation**                                         |
 |----------------|---------------------------------------------------|---------------------------------------------------------|
-| Examples       | Job specs, policies, certificates, scheduler allocation decisions, compiled policy verdicts | Live allocation status, service backend IPs, node health, resource profiles |
+| Examples       | Workload specs, policies, certificates, scheduler allocation decisions, compiled policy verdicts | Live allocation status, service backend IPs, node health, resource profiles |
 | Consistency    | Linearizable                                      | Eventually consistent (seconds)                         |
 | Backend        | Raft (openraft + redb), per region                | Corrosion (CR-SQLite + SWIM/QUIC), global               |
 | Writer         | Control plane leader within region                | Every node writes its own rows                          |
@@ -177,7 +177,7 @@ Overdrive splits cluster state along a fundamental consistency boundary, reflect
 | Scale ceiling  | 3–5 node quorum, one region                       | Thousands of nodes, many regions                        |
 | Partition behavior | Minority region unavailable for writes        | Reads always succeed locally; writes catch up on heal   |
 
-The split isolates two classes of bug. A Raft partition does not stall service routing — the dataplane reads observation, which stays live. A Corrosion backfill does not corrupt job specs — intent sits in a separate store with separate writers. Nothing in the codebase can cross the boundary accidentally: `IntentStore` and `ObservationStore` are distinct traits on distinct types.
+The split isolates two classes of bug. A Raft partition does not stall service routing — the dataplane reads observation, which stays live. A Corrosion backfill does not corrupt workload specs — intent sits in a separate store with separate writers. Nothing in the codebase can cross the boundary accidentally: `IntentStore` and `ObservationStore` are distinct traits on distinct types.
 
 This is the split Fly.io arrived at after years of trying to use Consul-style consensus for everything. Overdrive adopts it from day one, not after the incident.
 
@@ -225,7 +225,7 @@ Read path:   linearizable read → Raft read index → redb → done
 Footprint:   ~80MB RAM, redb + Raft log, background replication tasks
 ```
 
-**Per-region quorum.** In multi-region deployments each region runs its own Raft cluster. A region's intent store is authoritative for jobs and policies declared in that region. Cross-region visibility is provided by the observation store, not by stretching Raft across the WAN — see *Multi-Region Federation* below.
+**Per-region quorum.** In multi-region deployments each region runs its own Raft cluster. A region's intent store is authoritative for workloads and policies declared in that region. Cross-region visibility is provided by the observation store, not by stretching Raft across the WAN — see *Multi-Region Federation* below.
 
 **Migration: single → HA**
 
@@ -257,7 +257,7 @@ trait IntentStore: Send + Sync {
 
 `export_snapshot` serialises the full key-value state of `LocalStore` into a portable `StateSnapshot`. `RaftStore::bootstrap_from` replays that snapshot as the initial Raft log entry on each peer before the cluster starts — no peer sees an empty state, no reconciliation loop runs against a blank slate. The snapshot format is also used for regular Raft snapshots in HA mode and for disaster recovery backups written to Garage, so the same code path is exercised continuously in production rather than only at migration time.
 
-All authoritative intent — job definitions, node registrations (static identity, not runtime health), allocation decisions (the intent, not the live status), network policies, certificates — passes through whichever IntentStore implementation is active. The rest of the control plane is unaware of which is running.
+All authoritative intent — workload definitions (Service, Job, Schedule kinds), node registrations (static identity, not runtime health), allocation decisions (the intent, not the live status), network policies, certificates — passes through whichever IntentStore implementation is active. The rest of the control plane is unaware of which is running.
 
 ```
 Control plane footprint by mode:
@@ -340,7 +340,7 @@ The earlier bare "Gossip / Health (SWIM)" component is gone. Corrosion is SWIM m
 
 CR-SQLite sacrifices strong ordering for availability. Overdrive enforces the boundary between intent and observation with compile-time discipline and runtime safeguards drawn directly from Fly.io's published post-mortems:
 
-- **Type-level separation.** `IntentStore` and `ObservationStore` are distinct traits on distinct types. Nothing in the codebase can persist a job spec into Corrosion or an allocation heartbeat into Raft — the compiler rejects it. There is no shared `put(key, value)` surface that lets the wrong call go to the wrong place.
+- **Type-level separation.** `IntentStore` and `ObservationStore` are distinct traits on distinct types. Nothing in the codebase can persist a workload spec into Corrosion or an allocation heartbeat into Raft — the compiler rejects it. There is no shared `put(key, value)` surface that lets the wrong call go to the wrong place.
 - **Identity-scoped writes.** A Corrosion peer only accepts writes whose CRDT site ID matches a live node SVID signed by the platform CA. A compromised node cannot forge rows on behalf of another node, and a decommissioned node's site ID is purged from the trust bundle.
 - **Additive-only schema migrations.** Nullable column additions in CR-SQLite trigger cluster-wide backfill storms — Fly's most painful Corrosion incident. Overdrive schema migrations are strictly additive, versioned in the intent store, and gated through a two-phase rollout: new table first, readers cut over, old table drained, old table dropped. No `ALTER TABLE ADD COLUMN NULL` across the live fleet.
 - **Full rows over field diffs.** Learning from Fly's post-mortem on partial updates, node agents republish the complete row for an allocation on every state transition rather than diffing fields. Late or reordered gossip converges deterministically under LWW; diff-merge logic does not.
@@ -356,7 +356,7 @@ The intent/observation split makes geographic federation a straightforward exten
 ┌─ region: us-east-1 ────────────┐   ┌─ region: eu-west-1 ─────────────┐
 │                                │   │                                 │
 │  IntentStore (Raft, 3 nodes)   │   │  IntentStore (Raft, 3 nodes)    │
-│    jobs, policies, certs       │   │    jobs, policies, certs        │
+│    workloads, policies, certs  │   │    workloads, policies, certs   │
 │    scoped to this region       │   │    scoped to this region        │
 │                                │   │                                 │
 │  ObservationStore (Corrosion) ◄┼───┼► ObservationStore (Corrosion)   │
@@ -367,7 +367,7 @@ The intent/observation split makes geographic federation a straightforward exten
 └────────────────────────────────┘   └─────────────────────────────────┘
                   ▲                                      ▲
                   └──── global Corrosion membership ─────┘
-                        (region metadata only; no jobs)
+                        (region metadata only; no workloads)
 ```
 
 Each region is operationally autonomous. Control plane decisions are made by the regional Raft cluster; they do not wait on consensus across an ocean. Routing, service discovery, and health converge globally through Corrosion at gossip latency (seconds), which is well below the rate at which routing decisions need to react.
@@ -446,15 +446,21 @@ Operators running three-node all-in-one clusters typically tolerate this taint c
 ### Core Data Model
 
 ```
-Job         — desired workload specification (driver, resources, constraints)
+Workload    — desired workload specification (driver, resources, constraints).
+              One of three kinds: Service (long-running, restart-on-exit),
+              Job (run-to-completion, success = exit 0), Schedule (cron-
+              triggered Job). The kind discriminator is structural — see
+              ADR-0047.
 Node        — registered worker node with capabilities and labels
-Allocation  — binding of a job to a node, lifecycle state machine
+Allocation  — binding of a workload to a node, lifecycle state machine
 Policy      — Rego-based network and security rules
 Certificate — issued SVID, TTL, rotation schedule
 Investigation — live SRE-agent investigation: correlation key, affected
               SPIFFE identities, token/wall-clock budget, tool-call trace.
               Concludes into an incident row in the incident-memory libSQL.
 ```
+
+The platform's central workload aggregate is `WorkloadSpec`, a tagged enum with three variants (`Service`, `Job`, `Schedule`). Earlier drafts of this document treated "Job" as the single workload primitive; that framing is demoted — Job is now one kind of three. The CLI verb `overdrive job submit` is preserved for operator continuity, and the SPIFFE path component `job/<name>` remains the canonical identity scheme for workloads of every kind. Wire-shape and identifier reuse decisions live in ADR-0047 §1a.
 
 ### Built-in Certificate Authority
 
@@ -472,7 +478,7 @@ Short TTLs eliminate the need for CRL or OCSP. Expiry is the revocation mechanis
 
 ### Scheduler
 
-The scheduler is a bin-packing allocator that assigns jobs to nodes based on declared resource requirements, node labels, affinity rules, and constraints. Scheduling decisions are state machine transitions written through the active store — linearizable in HA mode, ACID-transactional in single mode. No global lock, no single-threaded bottleneck.
+The scheduler is a bin-packing allocator that assigns workloads to nodes based on declared resource requirements, node labels, affinity rules, and constraints. Scheduling decisions are state machine transitions written through the active store — linearizable in HA mode, ACID-transactional in single mode. No global lock, no single-threaded bottleneck.
 
 Resource profiles maintained by the right-sizing subsystem feed real utilization data back to the scheduler over time, progressively improving placement density.
 
@@ -605,7 +611,7 @@ Overdrive handles this by extending the `microvm` driver with a `persistent` fla
 name = "agent-claude-code"
 driver = "microvm"
 
-[job.microvm]
+[microvm]
 persistent = true
 persistent_rootfs_size   = "100GB"
 snapshot_on_idle_seconds = 30
@@ -660,7 +666,7 @@ Without the agent the sequence degrades cleanly: `fs_quiesce` is skipped, the sn
 name = "agent-claude-code"
 driver = "microvm"
 
-[job.microvm]
+[microvm]
 persistent = true
 guest_agent = true               # opt-in; requires Image Factory extension
 persistent_rootfs_size = "100GB"
@@ -678,7 +684,7 @@ A persistent microVM that also wants a stable public URL, credential sandboxing,
 - **Credential proxy sidecar (§8, §9)** — automatically attached for persistent workloads that declare external credentials, ensuring the workload never holds real secrets regardless of what it runs.
 - **Content-inspector sidecar (§9)** — optional; relevant for workloads processing untrusted content (AI agents reading the web, CI runners fetching third-party packages).
 
-The principle: persistent microVMs are not a separate concept. They are the `microvm` driver with `persistent = true`, and the other capabilities stateful workloads typically need are already first-class in Overdrive and compose via the job spec. The platform does not ship pre-baked workload images (Python, Node, Claude Code) — that is a product decision, not a platform primitive.
+The principle: persistent microVMs are not a separate concept. They are the `microvm` driver with `persistent = true`, and the other capabilities stateful workloads typically need are already first-class in Overdrive and compose via the workload spec. The platform does not ship pre-baked workload images (Python, Node, Claude Code) — that is a product decision, not a platform primitive.
 
 ### Use Cases
 
@@ -931,7 +937,7 @@ An agent that can call external APIs and has access to real credentials is dange
 name = "ai-research-agent"
 driver = "wasm"
 
-[[job.sidecars]]
+[[sidecars]]
 name = "credential-proxy"
 module = "builtin:credential-proxy"
 hooks = ["egress"]
@@ -1003,7 +1009,7 @@ name = "ai-research-agent"
 driver = "wasm"
 
 # Platform built-in — credential management
-[[job.sidecars]]
+[[sidecars]]
 name = "credential-proxy"
 module = "builtin:credential-proxy"
 hooks = ["egress"]
@@ -1011,20 +1017,20 @@ config.allowed_domains = ["api.anthropic.com", "gmail.com"]
 config.credentials = { ANTHROPIC_KEY = { secret = "anthropic-prod" } }
 
 # User WASM module — AWS SigV4 request signing
-[[job.sidecars]]
+[[sidecars]]
 name = "aws-sigv4"
 module = "sha256:abc123"
 hooks = ["egress"]
 
 # User WASM module — prompt injection detection on incoming content
-[[job.sidecars]]
+[[sidecars]]
 name = "content-inspector"
 module = "sha256:def456"
 hooks = ["ingress"]
 config.mode = "block"
 
 # User WASM module — structured audit log
-[[job.sidecars]]
+[[sidecars]]
 name = "audit-logger"
 module = "sha256:ghi789"
 hooks = ["egress", "ingress"]
@@ -1146,13 +1152,13 @@ They compose naturally. A policy deny at the kernel level never reaches the side
 Overdrive embeds **Regorus** — Microsoft's Rust-native Rego evaluation engine — directly in the control plane for policy evaluation. Rego is the language used by Open Policy Agent and is widely understood by platform and security engineers.
 
 Regorus handles:
-- Admission control (can this job be submitted?)
+- Admission control (can this workload be submitted?)
 - RBAC (who can perform what operations?)
-- Network policy (which jobs can communicate?)
-- Scheduling constraints (where can this job run?)
-- Audit rules (does this job spec comply with security policy?)
+- Network policy (which workloads can communicate?)
+- Scheduling constraints (where can this workload run?)
+- Audit rules (does this workload spec comply with security policy?)
 
-Regorus is **not** in the hot path. Policy is evaluated during control plane reconciliation — when jobs start, stop, or policies change — and compiled into BPF maps. Per-connection enforcement is a BPF map lookup.
+Regorus is **not** in the hot path. Policy is evaluated during control plane reconciliation — when workloads start, stop, or policies change — and compiled into BPF maps. Per-connection enforcement is a BPF map lookup.
 
 ### Policy Layers
 
@@ -1186,7 +1192,7 @@ require_label {
 
 Overdrive includes a native HTTP/gRPC gateway built in Rust using `hyper` and `rustls`. There is no Envoy dependency.
 
-The gateway is a built-in subsystem of the node agent, not a platform job. This distinction matters: a job depends on the scheduler, can be evicted, and requires the cluster to be healthy before it can run. The gateway needs to be available before any of that — it is infrastructure, not a workload. Making it a job would create a bootstrap deadlock and contradict the single-binary design principle.
+The gateway is a built-in subsystem of the node agent, not a platform workload. This distinction matters: a scheduled workload depends on the scheduler, can be evicted, and requires the cluster to be healthy before it can run. The gateway needs to be available before any of that — it is infrastructure, not a workload. Making it a scheduled workload would create a bootstrap deadlock and contradict the single-binary design principle.
 
 Gateway nodes are designated by configuration, not by scheduling:
 
@@ -1327,7 +1333,7 @@ The public TLS boundary terminates at the gateway. Inside the gateway, traffic i
 
 ### Declarative Request Replay
 
-Applications frequently need to redirect an individual request to a different region, instance, or job — a write against a read-only regional replica belongs at the primary; a sticky session belongs on the canary allocation; a tenant-sharded request belongs on the shard that owns the tenant. Static route tables cannot express this; the choice depends on request content that only the application can inspect.
+Applications frequently need to redirect an individual request to a different region, instance, or workload — a write against a read-only regional replica belongs at the primary; a sticky session belongs on the canary allocation; a tenant-sharded request belongs on the shard that owns the tenant. Static route tables cannot express this; the choice depends on request content that only the application can inspect.
 
 Overdrive exposes an application-driven replay primitive via a response header:
 
@@ -1343,7 +1349,7 @@ Loop prevention is enforced in-kernel. A `overdrive-replay-count` header is incr
 
 Typical patterns:
 
-- **Primary-region writes.** A read replica receiving a write request responds with `overdrive-replay: region=<primary>`; the gateway replays to the primary region's job. This composes with §3.5 Multi-Region Federation — each region reads its local ObservationStore for the primary's backend set.
+- **Primary-region writes.** A read replica receiving a write request responds with `overdrive-replay: region=<primary>`; the gateway replays to the primary region's workload. This composes with §3.5 Multi-Region Federation — each region reads its local ObservationStore for the primary's backend set.
 - **Canary pinning.** A sticky session is pinned across canary promotion with `overdrive-replay: instance=<canary-alloc>` until promotion completes. Rollback remains a single SERVICE_MAP atomic update (§15) — once the canary allocation stops emitting the header, traffic follows the weighted backend set normally.
 - **Tenant sharding.** A request whose tenant hash maps to a shard the local instance does not own is redirected with `overdrive-replay: instance=<shard-owner-alloc>`. The shard map itself is application state; the platform only carries the redirect primitive.
 
@@ -1451,7 +1457,7 @@ Overdrive's Tier 3 reasoning surface is a native SRE investigation agent built o
 
 **Runbooks — LLM-interpreted investigation guides.** Runbooks are markdown documents with YAML frontmatter describing trigger conditions and required toolsets. They are stored content-addressed in Garage and indexed in the incident-memory libSQL alongside past incidents via the same embedding-similarity system. When an investigation is triggered, the agent's first step retrieves top-k runbooks matching the trigger description and includes them in context. Runbooks guide *reasoning* — the steps are interpretive, not deterministic. The deterministic counterpart is the workflow primitive (§18): runbooks produce diagnoses and proposals; workflows execute ratified proposals. Format matches HolmesGPT's runbook format so community-maintained runbook catalogs are leverageable directly.
 
-**Investigation — a first-class resource.** Investigations join `Job`, `Node`, `Allocation`, `Policy`, `Certificate` in the core data model (§4). An investigation carries a lifecycle (triggered → gathering → reasoning → concluding → concluded), a trigger (alert, reconciler escalation, operator query, scheduled), a correlation key, a list of affected SPIFFE identities, a token and wall-clock budget, and a trace of tool calls and LLM turns. Live investigation state lives in the ObservationStore (Corrosion `investigation_state` table); on conclusion, the investigation is compressed into an incident row in the incident-memory libSQL with embedding-indexed diagnosis for future retrieval. An `InvestigationReconciler` drives the lifecycle; proposals from the agent are queued through the graduated approval gate.
+**Investigation — a first-class resource.** Investigations join `Workload`, `Node`, `Allocation`, `Policy`, `Certificate` in the core data model (§4). An investigation carries a lifecycle (triggered → gathering → reasoning → concluding → concluded), a trigger (alert, reconciler escalation, operator query, scheduled), a correlation key, a list of affected SPIFFE identities, a token and wall-clock budget, and a trace of tool calls and LLM turns. Live investigation state lives in the ObservationStore (Corrosion `investigation_state` table); on conclusion, the investigation is compressed into an incident row in the incident-memory libSQL with embedding-indexed diagnosis for future retrieval. An `InvestigationReconciler` drives the lifecycle; proposals from the agent are queued through the graduated approval gate.
 
 **Correlation — identity-based, not label-based.** Every eBPF event in Overdrive carries cryptographic SPIFFE identity on both ends. Correlation across alerts is a DuckLake SQL query over events joined on `src_identity` / `dst_identity` / `alloc_id`, windowed by causal-time proximity. Investigations carry a `correlation_key` derived from the primary identity, signal class, and time bucket; an incoming event whose key matches a live investigation appends to that investigation rather than spawning a duplicate. This collapses alert-storm scenarios to one investigation per underlying phenomenon without label-based heuristics.
 
@@ -1461,7 +1467,7 @@ Overdrive's Tier 3 reasoning surface is a native SRE investigation agent built o
 
 **Credential and prompt-injection posture.** Where the LLM is an external API, `builtin:credential-proxy` (§8) holds the provider keys; the agent never sees them. Where the agent ingests third-party content (runbook bodies from the catalog, log chunks returned by tools, documentation excerpts), `builtin:content-inspector` (§9) scans on ingress and flags prompt-injection payloads before the LLM sees them. BPF LSM blocks raw socket creation and unauthorised binary execution regardless of what the agent decides to do (§19). The agent is itself a workload under the same structural security posture as any other workload — security is enforced by infrastructure, not by the model's judgment.
 
-**Cost metering.** Every LLM call is attributed to an `investigation_id`. Token spend is accumulated per investigation, per job (via the investigation's related allocations), and cluster-wide. External-provider calls route through `builtin:credential-proxy`, which parses the response `usage` object and writes costs into the ObservationStore; local-workload-hosted LLMs report token counts via rig-rs directly. A dedicated `llm_spend` reconciler enforces per-job and cluster-wide monthly caps — Tier-3 escalations route to queue-and-notify when the cap is approached, preserving observability without incurring further spend.
+**Cost metering.** Every LLM call is attributed to an `investigation_id`. Token spend is accumulated per investigation, per workload (via the investigation's related allocations), and cluster-wide. External-provider calls route through `builtin:credential-proxy`, which parses the response `usage` object and writes costs into the ObservationStore; local-workload-hosted LLMs report token counts via rig-rs directly. A dedicated `llm_spend` reconciler enforces per-workload and cluster-wide monthly caps — Tier-3 escalations route to queue-and-notify when the cap is approached, preserving observability without incurring further spend.
 
 **Simulation.** The `SimLlm` DST trait (§21) returns deterministic completions from seeded transcripts. The full investigation trace — prompt, tool calls, tool outputs, LLM turns — is captured per investigation; re-running deterministically in CI reproduces the final diagnosis or flags a regression. Investigation-agent correctness joins control-plane correctness as a DST-gated property.
 
@@ -1500,12 +1506,12 @@ trait Policy: Send + Sync {
 The control plane evaluates a policy chain. Each policy can allow, deny, or defer to the next. The engine backing each policy is an implementation detail:
 
 ```toml
-[[job.policies]]
+[[policies]]
 name = "network-egress"
 engine = "rego"
 source = "policies/egress.rego"
 
-[[job.policies]]
+[[policies]]
 name = "placement-history"
 engine = "wasm"
 module = "sha256:abc123"
@@ -1520,7 +1526,7 @@ Regorus is the right engine for policies that compliance and security teams need
 | Network allow/deny | Declarative, auditable, line-by-line reviewable |
 | RBAC | Standard pattern, tooling exists (conftest, opa check) |
 | Admission control | Compliance teams must be able to verify |
-| Job spec validation | Static analysis catches errors before deployment |
+| Workload spec validation | Static analysis catches errors before deployment |
 
 Rego policies can be statically analyzed — tools can prove properties about them without executing them. For regulated industries (finance, government, healthcare), this is not optional. "Here is our Rego policy" is auditable. "Here is our WASM binary" is not.
 
@@ -1632,11 +1638,11 @@ This enables four subsystems:
 
 **Live resizing, mechanism per workload class.** Process, container, and WASM workloads are right-sized by writing the cgroup limit directly (`/sys/fs/cgroup/.../memory.max`). This is a cgroups v2 kernel feature and has no dependency on the VMM. VM and unikernel workloads are right-sized via Cloud Hypervisor's hotplug APIs — memory via virtio-mem, CPU via ACPI — which *does* require Cloud Hypervisor and a guest kernel that recognises the new capacity (Linux ≥5.8 for virtio-mem). The control-plane contract is uniform: the right-sizing reconciler issues a single typed `resize` action. The mechanical path differs sharply; the §14 novelty is that one reconciler and one pressure signal drive both.
 
-**Resource profiles** — the reconciler accumulates p95 CPU and memory utilization per job, per hour-of-week, over a rolling 30-day window stored in libSQL. Right-sizing recommendations carry a confidence score based on sample count.
+**Resource profiles** — the reconciler accumulates p95 CPU and memory utilization per workload, per hour-of-week, over a rolling 30-day window stored in libSQL. Right-sizing recommendations carry a confidence score based on sample count.
 
 **Predictive scaling** — the LLM agent identifies time-based patterns (daily batch spikes, weekly traffic patterns) and proposes cron-based resource schedules. Resources are pre-expanded before spikes hit, not after.
 
-**Bin-packing feedback** — right-sized resource profiles feed back to the scheduler. As jobs are right-sized, the scheduler can place more workloads per node, compounding the efficiency gain.
+**Bin-packing feedback** — right-sized resource profiles feed back to the scheduler. As workloads are right-sized, the scheduler can place more workloads per node, compounding the efficiency gain.
 
 ### Expected Outcome
 
@@ -1710,7 +1716,7 @@ scale_target {
 }
 ```
 
-Rules evaluate against ObservationStore metrics on a fixed cadence (default 15 s). Output writes the desired replica count into the IntentStore; the job-lifecycle reconciler picks it up through the normal convergence path. Rule-based and LLM-based scalers are complementary — rules cover deterministic, short-horizon signals; the LLM covers pattern-based, long-horizon predictions. A job can use either or both.
+Rules evaluate against ObservationStore metrics on a fixed cadence (default 15 s). Output writes the desired replica count into the IntentStore; the workload-lifecycle reconciler picks it up through the normal convergence path. Rule-based and LLM-based scalers are complementary — rules cover deterministic, short-horizon signals; the LLM covers pattern-based, long-horizon predictions. Replica-count scaling applies to Service-kind workloads; Job and Schedule kinds run to completion and are not autoscale targets. A Service can use either or both scalers.
 
 ---
 
@@ -1804,7 +1810,7 @@ Different data shapes require different storage primitives. Overdrive uses purpo
 
 ### Control Plane Intent — IntentStore (mode-dependent)
 
-Hot authoritative metadata: job specs, policies, certificates, scheduler allocation decisions. Requires linearizability. The active implementation depends on deployment mode:
+Hot authoritative metadata: workload specs, policies, certificates, scheduler allocation decisions. Requires linearizability. The active implementation depends on deployment mode:
 
 - **Single mode** — redb direct. ACID transactions, no Raft overhead, ~30MB RAM. Right-sized for a single server without paying for distributed consensus that provides no benefit.
 - **HA mode** — openraft + redb. Linearizable via the Raft log, replicated across 3 or 5 control plane nodes, ~80MB RAM. Per-region: a multi-region deployment runs one IntentStore per region.
@@ -2016,7 +2022,7 @@ Reconcilers have infinite lifecycle. They re-evaluate whenever their inputs chan
 
 Every mature production orchestrator — Kubernetes, Nomad, KCP, Crossplane — converges on level-triggered reconciliation because it is the only pattern that survives missed events, crashes, and stale caches. Pure event-sourced orchestrators do not exist in production; the straw-man is always a hybrid in practice. Overdrive follows the same consensus with Nomad's concrete shape:
 
-- **Edge-triggered at ingress.** External state changes (job submission, node heartbeat failure, policy update, cert approaching expiry) produce a typed `Evaluation` enqueued through Raft.
+- **Edge-triggered at ingress.** External state changes (workload submission, node heartbeat failure, policy update, cert approaching expiry) produce a typed `Evaluation` enqueued through Raft.
 - **Level-triggered inside the reconciler.** Each `Evaluation` causes the responsible reconciler to recompute `desired vs actual → Vec<Action>` against the authoritative IntentStore. Missed or duplicated events do not lose state — the next evaluation sees the full current delta.
 
 ### Evaluation Broker — Storm-Proof Ingress
@@ -2087,7 +2093,7 @@ This replaces the Kubernetes operator model, where extensions ship as Go binarie
 
 **Reconcilers** (converge, pure):
 
-- Job lifecycle (start, stop, migrate, restart)
+- Workload lifecycle (start, stop, migrate, restart) — kind-aware: Service converges replica counts with restart-on-exit; Job runs to completion with backoff-bounded retry; Schedule fires Jobs on a cron trigger. See ADR-0047 for the kind taxonomy.
 - Node drain and replacement
 - Resource right-sizing
 - Rolling deployment (BPF map weighted backends)
@@ -2160,10 +2166,10 @@ Security properties are enforced by infrastructure, not by application behavior.
 
 ### Multi-Level Security
 
-Job specs declare their security profile explicitly:
+Workload specs declare their security profile explicitly:
 
 ```toml
-[job.security]
+[security]
 fs_paths = ["/data/payments", "/tmp"]
 allowed_ports = [8080, 8443]
 allowed_binaries = ["payments-server"]
@@ -2421,7 +2427,7 @@ Observation: Corrosion gossip stalled, LWW clock skew across peers,
 Workloads:   driver fails to start, workload OOM, restart loop,
              workload consumes all node CPU
 
-Control plane: leader crash during job submission, leader crash
+Control plane: leader crash during workload submission, leader crash
                during cert rotation, reconciler panic,
                policy evaluation timeout
 ```
@@ -2499,8 +2505,8 @@ Nested virtualisation is not required. Tetragon's `--qemu-disable-kvm` flag exis
 
 **Inside-VM test shape:**
 
-1. A `overdrive-tester` binary runs as a systemd unit inside the VM, reads a job manifest, executes each test case, writes results to a host-mounted directory, then powers off the VM.
-2. Each test case stands up a small network of namespaces connected by veth pairs, runs the Overdrive node binary in each, submits jobs through the IntentStore API, and drives real traffic via Rust packet primitives (`pnet` + `tokio-tun`).
+1. A `overdrive-tester` binary runs as a systemd unit inside the VM, reads a test manifest, executes each test case, writes results to a host-mounted directory, then powers off the VM.
+2. Each test case stands up a small network of namespaces connected by veth pairs, runs the Overdrive node binary in each, submits workloads through the IntentStore API, and drives real traffic via Rust packet primitives (`pnet` + `tokio-tun`).
 3. Assertions fire against three observable layers:
    - **Kernel-side state** — BPF maps via `bpftool map dump`, TLS ULP via `ss -K`, LSM decisions via the BPF ringbuf event stream.
    - **Userspace state** — structured flow events from the Overdrive telemetry ringbuf.
@@ -2742,6 +2748,46 @@ Upgrades are handled by the OCI registry frontend. A node running Overdrive can 
 Overdrive is not a Kubernetes improvement. It is a clean-slate design that leverages a set of primitives — stable eBPF APIs, Rust systems libraries, WASM runtimes, kernel TLS — that simply did not exist at production quality when Kubernetes was designed.
 
 The result is a platform that is structurally more efficient, more secure, and more observable than any existing orchestrator, while supporting a broader range of workload types under a unified operational model.
+
+---
+
+## Changed Assumptions
+
+This section records material drift in the whitepaper's framing as the platform's design has evolved. Each entry names the date, the driving decision, and the sections updated in the same wave.
+
+### 2026-05-10 — Job demoted from primary primitive to one of three workload kinds
+
+**Driver.** ADR-0047 (workload-kind-discriminator), accepted 2026-05-10. Partial supersession of ADR-0011's "single Job aggregate" claim.
+
+**Summary.** Earlier drafts of this whitepaper treated "Job" as the platform's central workload primitive — operators "submit a Job", the IntentStore stores "job specs", the lifecycle reconciler is the "Job lifecycle reconciler". Industry research and the RCA of a coinflip-style false-positive submit converged on a three-kind taxonomy: `Service` (long-running, restart-on-exit, replicas), `Job` (run-to-completion, success = exit 0, backoff-bounded retry), and `Schedule` (cron-triggered Job). The intent-side workload aggregate is now `WorkloadSpec`, a tagged enum with three variants. Job is preserved as one variant — not as the primitive.
+
+**Sections updated in this wave.**
+
+- §2 Design Principles (#9) — "intent" examples generalised from "job specs" to "workload specs".
+- §3.5 Multi-Region Federation — "jobs and policies" → "workloads and policies"; diagram nodes generalised.
+- §4 Control Plane — Intent/Observation table examples; IntentStore/ObservationStore narrative; multi-region diagram column headings; Core Data Model entry for `Job` replaced with `Workload` and the kind taxonomy made explicit; Scheduler, certificate authority, and consistency-guardrail prose generalised.
+- §6 Workload Drivers — persistent-microvm composition prose generalised ("compose via the workload spec").
+- §10 Policy Engine — Regorus admission/network/scheduling/audit bullets generalised; "when jobs start, stop" → "when workloads start, stop".
+- §11 Gateway — "platform job" → "platform workload"; bootstrap-deadlock framing reworded for the kind taxonomy.
+- §11 Declarative Request Replay — "different region, instance, or job" → "different region, instance, or workload"; "primary region's job" → "primary region's workload".
+- §12 Observability — Investigation as first-class resource: core-data-model echo updated to `Workload`; cost-metering attribution shifted from "per job" to "per workload".
+- §13 Dual Policy Engine — "Job spec validation" table row → "Workload spec validation".
+- §14 Right-Sizing — resource profiles per workload; bin-packing-feedback prose; deterministic scale rules clarified to apply to Service-kind workloads (Job and Schedule kinds run to completion and are not autoscale targets).
+- §17 Storage Architecture — IntentStore "hot authoritative metadata" example list generalised.
+- §18 Reconciler and Workflow Primitives — built-in reconciler list: "Job lifecycle" → "Workload lifecycle" with kind-aware semantics annotated; edge-triggered ingress example generalised.
+- §19 Security Model — "Job specs declare their security profile" → "Workload specs declare their security profile".
+- §21 Deterministic Simulation Testing — fault-injection catalogue control-plane example: "leader crash during job submission" → "during workload submission".
+- §22 Real-Kernel Integration Testing — inside-VM test harness prose: "job manifest" → "test manifest"; "submits jobs through the IntentStore" → "submits workloads through the IntentStore".
+
+**What was deliberately not edited.**
+
+- TOML kind discriminators (`[service]`, `[job]`, `[schedule]`) — these tag the workload kind per ADR-0047 §1 and stay as section names in the wire shape. Workload-level concerns are siblings at the top level (`[exec]`, `[resources]`, `[[listener]]`, `[microvm]`, `[[sidecars]]`, `[[policies]]`, `[security]`) — flattened from the prior `[job.*]` nesting per ADR-0031 Amendment 2's section-as-discriminator convention. The operator-facing CLI verb `overdrive job submit` stays for continuity (ADR-0047 §1a).
+- SPIFFE ID literals (`spiffe://overdrive.local/job/payments/...`) and the per-service VIP DNS pattern (`<job>.svc.overdrive.local`) — the `job/<name>` path component is the canonical workload-identity scheme and applies to all three kinds.
+- Code identifiers (`job_id`, `job_name`, `JobLifecycleState`), Rego policy input fields (`input.src.job`, `input.dst.job`), and SQL column names — these are governed by ADR-0011 / ADR-0031 / ADR-0033 amendments, not whitepaper concerns.
+- Generic English uses of "job" (CI job nomenclature in §22; "the kernel's job"; "Spark-style jobs"; "no separate archival job") — these mean "task" in colloquial English, not the workload primitive.
+- DST illustrative test code (`submitted_jobs.iter()...` in §21) — Rust-level identifier in an inline code example.
+
+**Cross-references.** ADR-0047 §1 (aggregate variants), §3 (per-kind streaming protocols), §4 (`AllocStatusRow.kind` denormalisation), §6 (CLI render branches). ADR-0011 Amendment 2, ADR-0031 Amendment 2, ADR-0032 Amendment, ADR-0033 Amendment, ADR-0037 Amendment — all dated 2026-05-10.
 
 The core insight is that eBPF is not a feature to add to an orchestrator. It is the right foundation for one. When the dataplane, the security model, the telemetry pipeline, and the service mesh all emerge from the same kernel primitive with the same workload identity attached, the platform is coherent in a way that bolted-on approaches cannot match.
 

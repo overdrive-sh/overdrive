@@ -1,0 +1,286 @@
+{
+  "schema_version": "3.0",
+  "feature_id": "fix-exit-observer-running-gate",
+  "events": [
+    {
+      "sid": "01-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T14:18:40Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T14:18:47Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: RED scaffold step; production code untouched per AC8",
+      "t": "2026-05-10T14:18:47Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: RED scaffold step; GREEN happens in subsequent steps via Solution 1' oneshot-gate",
+      "t": "2026-05-10T14:18:47Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T14:20:00Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T14:23:25Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: 01-01 acceptance test stays RED until step 01-03 wires the firing sites; this step lands the gate-await side only",
+      "t": "2026-05-10T14:23:31Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T14:29:27Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T14:35:21Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T14:36:54Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T14:40:31Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T14:45:00Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: action-shim wiring has no isolated unit-level surface; integration tests at port-to-port level are the load-bearing assertion",
+      "t": "2026-05-10T14:45:02Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T15:13:01Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T15:13:05Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: action-shim wiring has no isolated unit-level surface; integration tests at port-to-port level are the load-bearing assertion",
+      "t": "2026-05-10T15:13:10Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T15:13:14Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T15:13:19Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T15:15:51Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: test triage step; structural change already landed in 01-02/01-03 with its own integration test",
+      "t": "2026-05-10T15:15:59Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: pure test triage; no production unit under test",
+      "t": "2026-05-10T15:16:00Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T15:18:38Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T15:20:05Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T15:24:04Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T15:24:16Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: invariant is structurally an integration-level assertion; no isolated unit-level decision function",
+      "t": "2026-05-10T15:24:18Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T15:36:23Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T15:38:32Z"
+    },
+    {
+      "sid": "01-06",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T15:41:08Z"
+    },
+    {
+      "sid": "01-06",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: K1 acceptance test pre-exists; this step removes fixture-side concealment and verifies K1 still passes \u2014 passing post-removal IS the acceptance gate",
+      "t": "2026-05-10T15:41:11Z"
+    },
+    {
+      "sid": "01-06",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: pure fixture cleanup; no production unit under test",
+      "t": "2026-05-10T15:41:12Z"
+    },
+    {
+      "sid": "01-06",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T15:44:25Z"
+    },
+    {
+      "sid": "01-06",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T15:44:57Z"
+    },
+    {
+      "sid": "01-07",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T15:46:48Z"
+    },
+    {
+      "sid": "01-07",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: final-sweep verification step; no new behavior asserted",
+      "t": "2026-05-10T15:46:50Z"
+    },
+    {
+      "sid": "01-07",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: final-sweep verification step; no production unit under test",
+      "t": "2026-05-10T15:46:51Z"
+    },
+    {
+      "sid": "01-07",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T15:53:21Z"
+    },
+    {
+      "sid": "01-07",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-10T15:54:20Z"
+    },
+    {
+      "sid": "03-refactor",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "APPROVED_SKIP: refactor-pass evaluated all 18 modified files against L1-L4 (naming, duplication, structural, cohesion); no improvements warranted on this focused 6-commit fix. Closest candidate (L2 \u2014 gate-fire duplication across StartAllocation/RestartAllocation arms in action_shim) rejected: 4 lines x 2 sites with load-bearing AC2 comment block that would defeat consolidation; would shuffle code, not net-positive. Naming intention-revealing throughout; sim/host split per development.md preserved; user-signed-off paired-method gate shape kept intact.",
+      "t": "2026-05-10T15:58:09Z"
+    },
+    {
+      "sid": "07-finalize",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: evolution doc + analysis archived at commit 5cbf64f; no push (deferred to user authorization)",
+      "t": "2026-05-10T16:07:53Z"
+    }
+  ]
+}

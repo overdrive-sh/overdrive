@@ -1,0 +1,220 @@
+schema_version: 1
+
+# Journey D — Cross-kind alloc status with kind-aware semantics.
+# This is the journey the user explicitly framed: "when we check the status using
+# overdrive alloc status --job <id> then it should show that it failed during execution".
+
+journey:
+  name: "Inspect a workload via alloc status with kind-aware semantics"
+  goal: >
+    Ana runs `overdrive alloc status --job <id>` and gets a render whose semantics
+    match the workload's kind: Service shows replicas + restarts + uptime; Job shows
+    a terminal verdict and per-attempt exit codes; Schedule shows cron + deferral
+    notice (this slice).
+  persona: "Ana, Overdrive platform engineer"
+
+  emotional_arc:
+    start: "Curious — 'what's the actual state?'"
+    middle: "Reading carefully — 'the kind label tells me which semantics apply.'"
+    end: "Confident — 'the platform's view matches my mental model for THIS kind.'"
+
+steps:
+  - id: 1
+    name: "Run alloc status"
+    command: "overdrive alloc status --job <id>"
+    tui_mockup: |
+      (varies by kind — see step 2)
+    shared_artifacts:
+      - name: "job_id"
+        source: "operator-supplied --job flag"
+        displayed_as: "${job_id}"
+        consumers: ["DescribeJob RPC", "AllocStatus RPC"]
+    emotional_state:
+      entry: "Curious"
+      exit: "Curious — about to read the render"
+    integration_checkpoint: |
+      The CLI calls DescribeJob + AllocStatus with the operator-supplied job_id,
+      reading the canonical `IntentKey::for_job(job_id)` (or for_service, for_schedule).
+    failure_modes:
+      - "job_id not found — typed NotFound error from the API"
+    gherkin: |
+      Scenario: alloc status accepts a --job flag and resolves to the canonical IntentKey
+        Given a job "payments" exists in the IntentStore
+        When the operator runs `overdrive alloc status --job payments`
+        Then the CLI calls DescribeJob and AllocStatus with the job's IntentKey
+
+  - id: 2
+    name: "Render kind-aware (Service sub-path, with listeners)"
+    command: "(render)"
+    tui_mockup: |
+      Job:    payments    (kind: Service)
+      Spec:   sha256:a4c1...e9
+      Replicas (desired/running): 1/1
+      Listeners:
+        10.0.0.1:8080/tcp
+        (vip: pending allocation — see #167):8081/udp
+      Alloc                  State    Restarts  Since
+      ---------------------- -------- --------- ----------
+      payments-0             Running  0         00:00:42.1
+    shared_artifacts:
+      - name: "alloc_status_kind"
+        source: "AllocStatusRow.kind (denormalised at write time)"
+        displayed_as: "(kind: Service)"
+        consumers: ["render branch selection"]
+      - name: "spec_digest"
+        source: "ContentHash::of(rkyv archive)"
+        displayed_as: "${spec_digest}"
+        consumers: ["render header"]
+      - name: "listener_triple"
+        source: "AllocStatusRow listener fields denormalised from spec (architect to confirm shape)"
+        displayed_as: "<vip-or-pending>:<port>/<protocol>"
+        consumers: ["alloc status Listeners section"]
+      - name: "vip_assignment_state"
+        source: "AllocStatusRow listener fields"
+        displayed_as: "Pinned IPv4 or '(vip: pending allocation — see #167)'"
+        consumers: ["alloc status listener line"]
+    emotional_state:
+      entry: "Reading carefully"
+      exit: "Confident — 'Service shows uptime AND the listeners I declared; that matches my expectation.'"
+    integration_checkpoint: |
+      The Service render branch never includes an Exit column. Restart count and
+      uptime are the operator-relevant signals. The Listeners section is byte-
+      equal to the section printed in the submit echo for the same spec — KPI
+      K6 asserts this round-trip across 100 trials with pinned VIPs.
+    gherkin: |
+      Scenario: Service alloc status shows replicas, listeners, state, restarts, uptime
+        Given a Service "payments" running stably with two listeners (8080/tcp/pinned, 8081/udp/pending)
+        When the operator runs `overdrive alloc status --job payments`
+        Then the output contains "Replicas (desired/running): 1/1"
+        And the output contains a "Listeners:" section
+        And both listener triples appear in declaration order
+        And every listener line byte-equals the corresponding submit echo line
+        And the output's per-alloc table has columns Alloc, State, Restarts, Since
+        And the output's per-alloc table has NO Exit column
+
+  - id: 2j
+    name: "Render kind-aware (Job sub-path — Failed)"
+    command: "(render)"
+    tui_mockup: |
+      Job:      coinflip    (kind: Job)
+      Spec:     sha256:b7f2...3a
+      Verdict:  Failed (backoff exhausted)
+      Attempt  State       Exit  Started               Duration
+      -------  ----------  ----  --------------------  --------
+      1        Failed      1     2026-05-09T14:27:02Z  0.2s
+      2        Failed      1     2026-05-09T14:27:03Z  0.2s
+      3        Failed      1     2026-05-09T14:27:05Z  0.3s
+      Last stderr (alloc coinflip-3, last 3 lines):
+        ERROR
+    shared_artifacts:
+      - name: "alloc_status_kind"
+        source: "AllocStatusRow.kind"
+        displayed_as: "(kind: Job)"
+        consumers: ["render branch selection"]
+      - name: "exit_code"
+        source: "ExitObserver per-attempt"
+        displayed_as: "${exit_code}"
+        consumers: ["per-attempt Exit column", "Verdict line"]
+      - name: "verdict"
+        source: "derived from terminal AllocStatusRow + reconciler BackoffExhausted claim"
+        displayed_as: "Verdict: ${verdict}"
+        consumers: ["header line"]
+    emotional_state:
+      entry: "Reading carefully — 'what was the actual outcome?'"
+      exit: "Confident-and-informed — 'I see exit 1 on every attempt; I know what to do.'"
+    integration_checkpoint: |
+      The Verdict line is one of `{Succeeded, Failed, Failed (backoff exhausted), In progress}` —
+      never "Running with N/M replicas" (that phrasing is reserved for Service kind).
+      The Exit column is non-empty for every Succeeded or Failed attempt.
+    failure_modes:
+      - "Verdict cannot be computed (control plane in inconsistent state) — show 'Verdict: Unknown' rather than crash"
+    gherkin: |
+      Scenario: Job alloc status shows verdict and per-attempt exit codes
+        Given a Job "coinflip" whose three attempts all exited 1 and the reconciler emitted BackoffExhausted
+        When the operator runs `overdrive alloc status --job coinflip`
+        Then the output contains "Verdict: Failed (backoff exhausted)"
+        And the output's per-attempt table has columns Attempt, State, Exit, Started, Duration
+        And every Failed row has Exit "1"
+        And the output includes the stderr tail of the last attempt
+
+  - id: 2js
+    name: "Render kind-aware (Job sub-path — Succeeded)"
+    command: "(render)"
+    tui_mockup: |
+      Job:      coinflip    (kind: Job)
+      Spec:     sha256:b7f2...3a
+      Verdict:  Succeeded
+      Attempt  State       Exit  Started               Duration
+      -------  ----------  ----  --------------------  --------
+      1        Succeeded   0     2026-05-09T14:27:02Z  1.2s
+    shared_artifacts:
+      - name: "verdict"
+        displayed_as: "Verdict: Succeeded"
+        consumers: ["header line"]
+    emotional_state:
+      entry: "Reading carefully"
+      exit: "Satisfied"
+    gherkin: |
+      Scenario: A Job that exited 0 reports Verdict Succeeded with exit 0 in the attempts table
+        Given a Job "coinflip" whose first attempt exited 0
+        When the operator runs `overdrive alloc status --job coinflip`
+        Then the output contains "Verdict: Succeeded"
+        And the attempts table contains exactly one row with State Succeeded and Exit 0
+
+  - id: 2sched
+    name: "Render kind-aware (Schedule sub-path — deferred this slice)"
+    command: "(render)"
+    tui_mockup: |
+      Job:    nightly-backup    (kind: Schedule)
+      Spec:   sha256:c9e1...77
+      Cron:   0 2 * * *
+      No allocations have been spawned yet.
+      Reason: Schedule execution is not yet implemented (issue #166).
+    shared_artifacts:
+      - name: "deferral_issue_url"
+        source: "CLI config constant"
+        displayed_as: "${deferral_issue_url}"
+        consumers: ["Reason line"]
+    emotional_state:
+      entry: "Curious"
+      exit: "Patient"
+    gherkin: |
+      Scenario: Schedule alloc status names the deferral with a tracking URL
+        Given a registered Scheduled Job whose execution is deferred
+        When the operator runs `overdrive alloc status --job <id>`
+        Then the output contains "kind: Schedule"
+        And the output contains the cron expression
+        And the output names the deferral with the tracking issue URL
+
+integration_validation:
+  shared_artifact_consistency:
+    - artifact: "alloc_status_kind"
+      must_match_across: [2, 2j, 2js, 2sched]
+      failure_message: "alloc status's kind label must equal the kind declared in the originally-submitted spec."
+    - artifact: "spec_digest"
+      must_match_across: [2, 2j, 2js, 2sched]
+      failure_message: "spec_digest in alloc status must equal the digest the submit echo printed."
+    - artifact: "listener_triple"
+      must_match_across: [2]
+      failure_message: |
+        Service listener triples in alloc status must byte-equal the listener
+        lines printed in the submit echo for the same spec. Round-trip
+        violation breaks KPI K6.
+  no_running_for_job:
+    description: |
+      For a Job-kind workload, the alloc status output must NEVER contain the
+      substring "is running with" — that phrasing is reserved for Service.
+    failure_message: "Cross-kind vocabulary leak — Job render path must not borrow Service phrasing."
+
+changelog:
+  - date: 2026-05-09
+    feature: workload-kind-discriminator
+    change: Initial alloc status journey — kind-aware render branches.
+  - date: 2026-05-10
+    feature: workload-kind-discriminator
+    change: |
+      Folded in GH #164 (service listener spec shape). Service render
+      sub-path (id=2) now includes a Listeners section with one line per
+      declared listener; pending VIPs reference #167 explicitly. Two new
+      shared artifacts: `${listener_triple}` and `${vip_assignment_state}`.
+      Job and Schedule sub-paths unchanged.

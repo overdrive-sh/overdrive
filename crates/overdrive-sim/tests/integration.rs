@@ -35,4 +35,17 @@ mod integration {
     mod dst_clean_clone_green;
     mod dst_harness_smoke;
     mod dst_seeded_reproduction;
+
+    /// fix-exit-observer-running-gate step 01-05 (Solution 4) — DST
+    /// invariant defending the post-condition that every `ExitEvent`
+    /// consumed by the worker exit_observer produces at least one of
+    /// (a) obs row write with state ∈ {Failed, Terminated}, (b)
+    /// degraded `LifecycleEvent` carrying
+    /// `TransitionReason::DriverInternalError`, or (c) structured
+    /// `tracing::error!` naming the alloc_id. See
+    /// `docs/feature/fix-exit-observer-running-gate/deliver/rca.md`
+    /// (Solution 4) and the evaluator at
+    /// `crates/overdrive-sim/src/invariants/
+    /// exit_event_observable_outcome.rs`.
+    mod exit_event_observable_outcome;
 }

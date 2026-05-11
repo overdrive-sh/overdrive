@@ -106,8 +106,8 @@
 //!
 //!     // Per ADR-0021, every reconciler picks its own `State`
 //!     // projection. A reconciler with no meaningful desired/actual
-//!     // shape picks `()`; the first real reconciler (`JobLifecycle`)
-//!     // picks `JobLifecycleState`.
+//!     // shape picks `()`; the first real reconciler (`WorkloadLifecycle`)
+//!     // picks `WorkloadLifecycleState`.
 //!     type State = ();
 //!     // Per ADR-0035 §1, `View` carries the four serde + Default +
 //!     // Clone bounds; `()` satisfies them trivially. Phase 2+
@@ -162,13 +162,15 @@ use serde::de::DeserializeOwned;
 use std::collections::BTreeMap;
 
 use crate::SpiffeId;
-use crate::aggregate::{Exec, Job, Node, WorkloadDriver};
+use crate::aggregate::{Exec, Job, Node, WorkloadDriver, WorkloadKind};
 use crate::dataplane::fingerprint::BackendSetFingerprint;
-use crate::id::{AllocationId, ContentHash, CorrelationKey, JobId, NodeId, ServiceId, ServiceVip};
+use crate::id::{
+    AllocationId, ContentHash, CorrelationKey, NodeId, ServiceId, ServiceVip, WorkloadId,
+};
 use crate::traits::dataplane::Backend;
 use crate::traits::driver::{AllocationSpec, Resources};
 use crate::traits::observation_store::{AllocState, AllocStatusRow, ServiceHydrationStatus};
-use crate::transition_reason::{StoppedBy, TerminalCondition};
+use crate::transition_reason::{StoppedBy, TerminalCondition, TransitionReason};
 use crate::wall_clock::UnixInstant;
 
 // ---------------------------------------------------------------------------
@@ -277,8 +279,8 @@ pub trait Reconciler: Send + Sync {
     /// and constructs the matching [`AnyState`] variant on each tick.
     ///
     /// Reconcilers with no meaningful projection pick `type State =
-    /// ()`; the first real reconciler (`JobLifecycle`) picks
-    /// `type State = JobLifecycleState`.
+    /// ()`; the first real reconciler (`WorkloadLifecycle`) picks
+    /// `type State = WorkloadLifecycleState`.
     type State: Send + Sync;
 
     /// Author-declared projection of the reconciler's private memory.
@@ -351,9 +353,9 @@ pub trait Reconciler: Send + Sync {
 ///
 /// - `Unit` — carried by reconcilers whose `desired`/`actual`
 ///   projections are degenerate. `NoopHeartbeat` uses this.
-/// - `JobLifecycle` — the first real reconciler's projection
+/// - `WorkloadLifecycle` — the first real reconciler's projection
 ///   (job + nodes + allocations). Lands in this DISTILL wave but
-///   the `JobLifecycleState` body is RED scaffold.
+///   the `WorkloadLifecycleState` body is RED scaffold.
 ///
 /// Compile-time exhaustiveness: a new reconciler variant whose
 /// `State` does not have a matching `AnyState` arm produces a
@@ -364,15 +366,15 @@ pub enum AnyState {
     /// `State = ()` variant for Phase 1 reconcilers that do not
     /// dereference their projection (`NoopHeartbeat`).
     Unit,
-    /// `JobLifecycle` reconciler's typed projection — see
-    /// [`JobLifecycleState`].
-    JobLifecycle(JobLifecycleState),
+    /// `WorkloadLifecycle` reconciler's typed projection — see
+    /// [`WorkloadLifecycleState`].
+    WorkloadLifecycle(WorkloadLifecycleState),
     /// `ServiceMapHydrator` reconciler's typed projection — see
     /// [`ServiceMapHydratorState`]. Phase 2 (Slice 08; ASR-2.2-04).
     ServiceMapHydrator(ServiceMapHydratorState),
 }
 
-/// Desired/actual projection consumed by `JobLifecycle::reconcile`.
+/// Desired/actual projection consumed by `WorkloadLifecycle::reconcile`.
 /// Hydrated by the runtime from `IntentStore` (job + nodes) and
 /// `ObservationStore` (allocations) per ADR-0021.
 ///
@@ -381,7 +383,7 @@ pub enum AnyState {
 /// `actual.allocations` as "what is currently running." Field shapes
 /// are pinned by ADR-0021 §1.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct JobLifecycleState {
+pub struct WorkloadLifecycleState {
     /// The target job. `None` when the desired-state read returned
     /// no row (job was deleted) or the actual-state read found no
     /// surviving row to project against.
@@ -399,8 +401,30 @@ pub struct JobLifecycleState {
     pub nodes: BTreeMap<NodeId, Node>,
     /// Current allocations belonging to this job, keyed by alloc id.
     /// Read from `ObservationStore::alloc_status_rows` filtered by
-    /// `job_id`. Empty when no allocations yet exist.
+    /// `workload_id`. Empty when no allocations yet exist.
     pub allocations: BTreeMap<AllocationId, AllocStatusRow>,
+    /// Workload kind discriminator per ADR-0047 §1 / ADR-0037 Amendment
+    /// 2026-05-10. Drives the natural-exit branching in
+    /// [`WorkloadLifecycle::reconcile`]:
+    ///
+    /// - `WorkloadKind::Job` — a terminal alloc (clean exit OR crash)
+    ///   is the *natural* end of the workload. The reconciler emits
+    ///   `Action::FinalizeFailed` carrying
+    ///   `Some(TerminalCondition::Completed { exit_code: 0 })` for a
+    ///   `Stopped { by: Process }` row, and
+    ///   `Some(TerminalCondition::Failed { exit_code: N })` for a
+    ///   crashed row. No restart attempts.
+    /// - `WorkloadKind::Service` (and `WorkloadKind::Schedule` —
+    ///   Phase 1 ships no schedule-firing reconciler logic) — preserves
+    ///   the existing restart-budget semantics; a Failed alloc with
+    ///   budget remaining flows through `RestartAllocation`, exhausting
+    ///   the budget produces `FinalizeFailed { BackoffExhausted }`.
+    ///
+    /// Hydrated by `reconciler_runtime::hydrate_desired` from the
+    /// active `WorkloadSpec` variant. Phase 1 default for legacy
+    /// callers is `WorkloadKind::Service` (the kind-agnostic shape
+    /// today's reconciler emulates).
+    pub workload_kind: WorkloadKind,
 }
 
 // ---------------------------------------------------------------------------
@@ -461,7 +485,7 @@ pub enum Action {
     // `Driver::start` / `Driver::stop` per ADR-0023.
     // -----------------------------------------------------------------
     /// Start a fresh allocation for a job. Emitted by the
-    /// `JobLifecycle` reconciler when `desired.replicas >
+    /// `WorkloadLifecycle` reconciler when `desired.replicas >
     /// actual.replicas_running`.
     StartAllocation {
         /// Newly-minted allocation identifier (the reconciler reads
@@ -469,14 +493,20 @@ pub enum Action {
         /// seeded `Entropy` port to mint it).
         alloc_id: AllocationId,
         /// Owning job.
-        job_id: JobId,
+        workload_id: WorkloadId,
         /// Placement decision from `overdrive-scheduler::schedule`.
         node_id: NodeId,
         /// Resources / command / args / identity for the workload. The action
         /// shim passes this directly to `Driver::start`.
         spec: AllocationSpec,
+        /// Workload-kind discriminator per ADR-0047 §1 / step 02-02
+        /// [D4]. The action shim denormalises this onto the emitted
+        /// `AllocStatusRow.kind` field so the render layer can branch
+        /// on kind without re-fetching intent. Sourced from
+        /// [`WorkloadLifecycleState::workload_kind`] at emit time.
+        kind: WorkloadKind,
     },
-    /// Stop a Running allocation. Emitted by the `JobLifecycle`
+    /// Stop a Running allocation. Emitted by the `WorkloadLifecycle`
     /// reconciler when desired state is "stopped" (set by
     /// `IntentKey::for_job_stop`).
     ///
@@ -503,7 +533,7 @@ pub enum Action {
     },
     /// Restart an allocation — semantically a `StopAllocation`
     /// followed by a fresh `StartAllocation` with the same `alloc_id`.
-    /// Emitted by the `JobLifecycle` reconciler in crash-recovery
+    /// Emitted by the `WorkloadLifecycle` reconciler in crash-recovery
     /// scenarios (per US-03 Domain Example 2).
     ///
     /// Per ADR-0031 §5 the variant carries a fully-populated
@@ -520,12 +550,15 @@ pub enum Action {
         /// mirrors [`Action::StartAllocation::spec`]. The action shim
         /// passes this directly to `Driver::start`.
         spec: AllocationSpec,
+        /// Workload-kind discriminator per ADR-0047 §1 / step 02-02
+        /// [D4]. Mirrors [`Action::StartAllocation::kind`].
+        kind: WorkloadKind,
     },
 
     /// Finalize a failed allocation as terminal — the synthetic
     /// Failed-row action per ADR-0023 / ADR-0037 §4.
     ///
-    /// Emitted by the `JobLifecycle` reconciler at the deciding tick
+    /// Emitted by the `WorkloadLifecycle` reconciler at the deciding tick
     /// when `attempts >= RESTART_BACKOFF_CEILING`: the reconciler has
     /// concluded the allocation will not be restarted and the row
     /// should be flipped to terminal-Failed. The action shim consumes
@@ -858,13 +891,13 @@ impl Reconciler for NoopHeartbeat {
 /// each of `name` and `reconcile`.
 ///
 /// Phase 1 ships two variants: `NoopHeartbeat` (proof-of-life) and
-/// `JobLifecycle` (the first real reconciler).
+/// `WorkloadLifecycle` (the first real reconciler).
 pub enum AnyReconciler {
     /// The Phase 1 proof-of-life reconciler. See [`NoopHeartbeat`].
     NoopHeartbeat(NoopHeartbeat),
     /// First real (non-proof-of-life) reconciler. Converges declared
-    /// replica count for a `Job` — see [`JobLifecycle`].
-    JobLifecycle(JobLifecycle),
+    /// replica count for a `Job` — see [`WorkloadLifecycle`].
+    WorkloadLifecycle(WorkloadLifecycle),
     /// Phase 2 (Slice 08; ASR-2.2-04) — `service-map-hydrator`.
     /// Activates J-PLAT-004 per ADR-0042. See [`ServiceMapHydrator`].
     ServiceMapHydrator(ServiceMapHydrator),
@@ -876,7 +909,7 @@ impl AnyReconciler {
     pub fn name(&self) -> &ReconcilerName {
         match self {
             Self::NoopHeartbeat(r) => r.name(),
-            Self::JobLifecycle(r) => r.name(),
+            Self::WorkloadLifecycle(r) => r.name(),
             Self::ServiceMapHydrator(r) => r.name(),
         }
     }
@@ -899,7 +932,7 @@ impl AnyReconciler {
     pub const fn static_name(&self) -> &'static str {
         match self {
             Self::NoopHeartbeat(_) => <NoopHeartbeat as Reconciler>::NAME,
-            Self::JobLifecycle(_) => <JobLifecycle as Reconciler>::NAME,
+            Self::WorkloadLifecycle(_) => <WorkloadLifecycle as Reconciler>::NAME,
             Self::ServiceMapHydrator(_) => <ServiceMapHydrator as Reconciler>::NAME,
         }
     }
@@ -930,9 +963,9 @@ impl AnyReconciler {
     /// **Phase 02-01 caller contract**: the runtime tick loop has not
     /// shipped yet, so callers (the sim invariant evaluator and the
     /// runtime acceptance test) construct `AnyState::Unit` directly.
-    /// Phase 02-02 lands the action shim and `JobLifecycle::reconcile`
+    /// Phase 02-02 lands the action shim and `WorkloadLifecycle::reconcile`
     /// body; Phase 02-03 lands the runtime tick loop that builds
-    /// `AnyState::JobLifecycle(...)` from the `IntentStore` /
+    /// `AnyState::WorkloadLifecycle(...)` from the `IntentStore` /
     /// `ObservationStore` reads.
     #[must_use]
     pub fn reconcile(
@@ -947,19 +980,19 @@ impl AnyReconciler {
                 let (actions, ()) = r.reconcile(&(), &(), &(), tick);
                 (actions, AnyReconcilerView::Unit)
             }
-            // JobLifecycle dispatch — types align by construction
+            // WorkloadLifecycle dispatch — types align by construction
             // when the runtime hydrates matching desired/actual/view
             // variants. Step 02-03 lands the runtime tick loop that
             // produces these triples; the body of `reconcile` itself
             // is fully implemented as of step 02-02.
             (
-                Self::JobLifecycle(r),
-                AnyState::JobLifecycle(desired),
-                AnyState::JobLifecycle(actual),
-                AnyReconcilerView::JobLifecycle(view),
+                Self::WorkloadLifecycle(r),
+                AnyState::WorkloadLifecycle(desired),
+                AnyState::WorkloadLifecycle(actual),
+                AnyReconcilerView::WorkloadLifecycle(view),
             ) => {
                 let (actions, next_view) = r.reconcile(desired, actual, view, tick);
-                (actions, AnyReconcilerView::JobLifecycle(next_view))
+                (actions, AnyReconcilerView::WorkloadLifecycle(next_view))
             }
             // Phase 2 — `service-map-hydrator` dispatch.
             (
@@ -990,7 +1023,7 @@ impl AnyReconciler {
 /// Sum of every per-reconciler `View` shape held by the runtime.
 ///
 /// Phase 1 originally only had `View = ()` (the `Unit` variant); the
-/// phase-1-first-workload DISTILL added the `JobLifecycle` arm. Per
+/// phase-1-first-workload DISTILL added the `WorkloadLifecycle` arm. Per
 /// ADR-0035 §1 the runtime owns the cache (bulk-loaded at boot via
 /// `ViewStore::bulk_load`, written through after each `reconcile`);
 /// reconcilers see a typed `&Self::View`, never the erased
@@ -1000,18 +1033,18 @@ pub enum AnyReconcilerView {
     /// The `View = ()` variant used by Phase 1 reconcilers
     /// (`NoopHeartbeat`).
     Unit,
-    /// `JobLifecycle` reconciler's view — see [`JobLifecycleView`].
-    JobLifecycle(JobLifecycleView),
+    /// `WorkloadLifecycle` reconciler's view — see [`WorkloadLifecycleView`].
+    WorkloadLifecycle(WorkloadLifecycleView),
     /// `ServiceMapHydrator` reconciler's view — see
     /// [`ServiceMapHydratorView`]. Phase 2 (Slice 08; ASR-2.2-04).
     ServiceMapHydrator(ServiceMapHydratorView),
 }
 
 // ---------------------------------------------------------------------------
-// JobLifecycle reconciler — first real reconciler (US-03)
+// WorkloadLifecycle reconciler — first real reconciler (US-03)
 // ---------------------------------------------------------------------------
 
-/// Maximum restart attempts before `JobLifecycle` gives up on an alloc.
+/// Maximum restart attempts before `WorkloadLifecycle` gives up on an alloc.
 ///
 /// Past this count the reconciler stops emitting `RestartAllocation`
 /// for a persistently failing alloc. Per US-03 step 02-03 — the
@@ -1074,11 +1107,11 @@ pub const fn backoff_for_attempt(_attempt: u32) -> Duration {
 /// against `tick.now_unix` (NEVER `Instant::now()` /
 /// `SystemTime::now()`). Per `.claude/rules/development.md` §
 /// "Persist inputs, not derived state".
-pub struct JobLifecycle {
+pub struct WorkloadLifecycle {
     name: ReconcilerName,
 }
 
-impl JobLifecycle {
+impl WorkloadLifecycle {
     /// Construct the canonical `job-lifecycle` instance.
     ///
     /// # Panics
@@ -1094,17 +1127,27 @@ impl JobLifecycle {
     }
 }
 
-impl Reconciler for JobLifecycle {
+impl Reconciler for WorkloadLifecycle {
     /// Canonical kebab-case name; single compile-time anchor.
     const NAME: &'static str = "job-lifecycle";
 
-    type State = JobLifecycleState;
-    type View = JobLifecycleView;
+    type State = WorkloadLifecycleState;
+    type View = WorkloadLifecycleView;
 
     fn name(&self) -> &ReconcilerName {
         &self.name
     }
 
+    // Per ADR-0023 + ADR-0037 §4 the reconcile body is the single
+    // dispatch surface for every WorkloadLifecycle decision branch (Stop,
+    // Absent, Run → {Running, Operator-stopped, Job-natural-exit,
+    // Restart-with-budget, NoCapacity-fresh-schedule}). Splitting it
+    // into N helper fns would require threading every read of
+    // `desired` / `actual` / `view` / `tick` through arguments;
+    // each branch is short and self-contained, and the line count is
+    // dominated by the inline-comment audit trail per the project's
+    // documentation discipline (`.claude/rules/development.md`).
+    #[allow(clippy::too_many_lines)]
     fn reconcile(
         &self,
         desired: &Self::State,
@@ -1202,6 +1245,44 @@ impl Reconciler for JobLifecycle {
                 // by direct CLI / API operator action.)
                 if allocs_vec.iter().any(|r| is_operator_stopped(r)) {
                     return (Vec::new(), view.clone());
+                }
+
+                // Job-kind natural-exit handler per ADR-0037 Amendment
+                // 2026-05-10 / ADR-0047 §1. A run-to-completion workload
+                // (`WorkloadKind::Job`) terminates on the first observed
+                // exit — clean OR crashed — and the reconciler emits
+                // `Action::FinalizeFailed` carrying the typed terminal
+                // claim. There are no restart attempts (the workload's
+                // contract is "run once, until it exits"). Service-kind
+                // (and Schedule-kind, Phase 1 no-op) flow through the
+                // existing restart-budget branch below — preserves the
+                // pre-feature kind-agnostic semantics that the Service
+                // shape today emulates.
+                //
+                // Idempotency guard: if the row already carries a
+                // Completed/Failed terminal claim the reconciler has
+                // already finalised this alloc on a prior tick — do not
+                // re-emit. Without this guard the action shim's
+                // level-triggered re-enqueue would emit FinalizeFailed
+                // every tick forever once the alloc reached terminal.
+                if desired.workload_kind == WorkloadKind::Job {
+                    if let Some(terminal_alloc) = allocs_vec.iter().find(|r| is_natural_exit(r)) {
+                        if matches!(
+                            terminal_alloc.terminal,
+                            Some(
+                                TerminalCondition::Completed { .. }
+                                    | TerminalCondition::Failed { .. }
+                            )
+                        ) {
+                            return (Vec::new(), view.clone());
+                        }
+                        let typed = classify_natural_exit_terminal(terminal_alloc);
+                        let action = Action::FinalizeFailed {
+                            alloc_id: terminal_alloc.alloc_id.clone(),
+                            terminal: Some(typed),
+                        };
+                        return (vec![action], view.clone());
+                    }
                 }
 
                 // Failed alloc with attempt budget remaining and
@@ -1314,6 +1395,7 @@ impl Reconciler for JobLifecycle {
                             args: args.clone(),
                             resources: job.resources,
                         },
+                        kind: desired.workload_kind,
                     };
                     let mut next_view = view.clone();
                     let count =
@@ -1356,7 +1438,7 @@ impl Reconciler for JobLifecycle {
                         let WorkloadDriver::Exec(Exec { command, args }) = &job.driver;
                         let action = Action::StartAllocation {
                             alloc_id: alloc_id.clone(),
-                            job_id: job.id.clone(),
+                            workload_id: job.id.clone(),
                             node_id,
                             spec: AllocationSpec {
                                 alloc: alloc_id,
@@ -1365,6 +1447,7 @@ impl Reconciler for JobLifecycle {
                                 args: args.clone(),
                                 resources: job.resources,
                             },
+                            kind: desired.workload_kind,
                         };
                         (vec![action], view.clone())
                     },
@@ -1424,16 +1507,19 @@ fn node_free_capacity(
 /// Mint a deterministic [`AllocationId`] for a job. Pure function over
 /// the job id so two reconcile calls with the same desired/actual
 /// produce the same alloc id (purity contract).
-fn mint_alloc_id(job_id: &JobId) -> AllocationId {
-    let raw = format!("alloc-{}-0", job_id.as_str());
+fn mint_alloc_id(workload_id: &WorkloadId) -> AllocationId {
+    let raw = format!("alloc-{}-0", workload_id.as_str());
     #[allow(clippy::expect_used)]
     AllocationId::new(&raw).expect("derived alloc id format is valid")
 }
 
 /// Mint a deterministic [`SpiffeId`] for an allocation.
-fn mint_identity(job_id: &JobId, alloc_id: &AllocationId) -> SpiffeId {
-    let raw =
-        format!("spiffe://overdrive.local/job/{}/alloc/{}", job_id.as_str(), alloc_id.as_str());
+fn mint_identity(workload_id: &WorkloadId, alloc_id: &AllocationId) -> SpiffeId {
+    let raw = format!(
+        "spiffe://overdrive.local/job/{}/alloc/{}",
+        workload_id.as_str(),
+        alloc_id.as_str()
+    );
     #[allow(clippy::expect_used)]
     SpiffeId::new(&raw).expect("derived SpiffeId is valid")
 }
@@ -1466,7 +1552,49 @@ fn is_restartable(row: &AllocStatusRow) -> bool {
     restartable_state && !is_operator_stopped(row)
 }
 
-/// `JobLifecycle` reconciler's typed view — the libSQL-hydrated
+/// True iff the alloc row represents a *natural exit* the Job-kind
+/// reconciler should finalize on — a terminal lifecycle state (Failed
+/// OR Terminated) whose `reason` is NOT an operator stop. Per
+/// ADR-0037 Amendment 2026-05-10 / ADR-0047 §1: Job kind terminates on
+/// the first observed exit (clean OR crashed). Operator-stopped rows
+/// are excluded — they are handled by the upstream
+/// `is_operator_stopped` short-circuit and carry their own
+/// `Stopped { by: Operator }` terminal claim downstream.
+fn is_natural_exit(row: &AllocStatusRow) -> bool {
+    let terminal_state = matches!(row.state, AllocState::Terminated | AllocState::Failed);
+    terminal_state && !is_operator_stopped(row)
+}
+
+/// Classify a natural-exit alloc row into the typed
+/// [`TerminalCondition::Completed { exit_code }`] / [`TerminalCondition::Failed { exit_code }`]
+/// variant per ADR-0037 Amendment 2026-05-10.
+///
+/// Exit-code source per row shape:
+///
+/// - `state: Terminated`, `reason: Stopped { by: Process }` — clean
+///   exit. Maps to `Completed { exit_code: 0 }`. The `Process` source
+///   on `Stopped` IS the canonical signal that the workload exited
+///   cleanly; `exit_code` is `0` by definition for this row shape
+///   (the `ExitObserver`'s `CleanExit` path emits exactly this).
+/// - `state: Failed`, `reason: WorkloadCrashedImmediately { exit_code, .. }` —
+///   crash. The typed `exit_code` field is used directly; falls back
+///   to `0` when `exit_code` is `None` (signal-only exits).
+/// - Anything else — falls back to `Failed { exit_code: 0 }`. This
+///   is structurally rare (`is_natural_exit` already filters
+///   non-terminal states); the catch-all preserves total dispatch.
+fn classify_natural_exit_terminal(row: &AllocStatusRow) -> TerminalCondition {
+    if row.state == AllocState::Terminated
+        && matches!(row.reason, Some(TransitionReason::Stopped { by: StoppedBy::Process }))
+    {
+        return TerminalCondition::Completed { exit_code: 0 };
+    }
+    if let Some(TransitionReason::WorkloadCrashedImmediately { exit_code, .. }) = row.reason {
+        return TerminalCondition::Failed { exit_code: exit_code.unwrap_or(0) };
+    }
+    TerminalCondition::Failed { exit_code: 0 }
+}
+
+/// `WorkloadLifecycle` reconciler's typed view — the libSQL-hydrated
 /// private memory.
 ///
 /// Per US-03 AC and issue #141 (persist inputs, not derived state):
@@ -1496,7 +1624,7 @@ fn is_restartable(row: &AllocStatusRow) -> bool {
 /// and rehydrate the value across process restarts (cf.
 /// `docs/research/control-plane/issue-139-followup-portable-deadline-representation-research.md`).
 #[derive(Debug, Clone, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
-pub struct JobLifecycleView {
+pub struct WorkloadLifecycleView {
     /// How many times each alloc has been started under this
     /// reconciler's lifecycle. Reset by `alloc_id` when a new
     /// `alloc_id` is minted (per US-03 Domain Example 2).
@@ -1533,7 +1661,7 @@ pub struct JobLifecycleView {
 //
 // The struct lives here (rather than in `overdrive-control-plane`)
 // because [`AnyReconciler`] holds the concrete type in its
-// `ServiceMapHydrator` variant — same layering as `JobLifecycle`.
+// `ServiceMapHydrator` variant — same layering as `WorkloadLifecycle`.
 // `overdrive-control-plane::reconcilers::service_map_hydrator`
 // re-exports the public surface.
 // ---------------------------------------------------------------------------

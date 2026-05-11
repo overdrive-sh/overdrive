@@ -22,7 +22,7 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use futures::StreamExt;
-use overdrive_core::id::{AllocationId, JobId, NodeId};
+use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
     ObservationSubscription,
@@ -41,13 +41,16 @@ fn peer_node() -> NodeId {
 fn sample_alloc_status() -> AllocStatusRow {
     AllocStatusRow {
         alloc_id: AllocationId::from_str("alloc-a1b2c3").expect("valid alloc id"),
-        job_id: JobId::from_str("payments").expect("valid job id"),
+        workload_id: WorkloadId::from_str("payments").expect("valid job id"),
         node_id: peer_node(),
         state: AllocState::Running,
         updated_at: LogicalTimestamp { counter: 1, writer: peer_node() },
         reason: None,
         detail: None,
         terminal: None,
+        stderr_tail: None,
+        kind: overdrive_core::aggregate::WorkloadKind::Service,
+        listeners: Vec::new(),
     }
 }
 

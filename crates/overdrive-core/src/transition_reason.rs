@@ -54,15 +54,14 @@ use utoipa::ToSchema;
 /// | `Cancelled { by }` | cause | reconciler — operator stop intent observed | yes |
 /// | `NoCapacity { requested, free }` | cause | reconciler — scheduler returned `NoCapacity` | yes |
 /// | `OutOfMemory { peak_bytes, limit_bytes }` | cause | `ExecDriver` — cgroup OOM-killed | NO — Phase 2 |
-/// | `WorkloadCrashedImmediately { exit_code, signal, stderr_tail }` | cause | `ExecDriver` — post-spawn exit-code observation | NO — Phase 2 |
+/// | `WorkloadCrashedImmediately { exit_code, signal, stderr_tail }` | cause | `ExecDriver` — post-spawn exit-code observation | yes |
 ///
-/// **Phase 2 emit-deferred variants**: `OutOfMemory` and
-/// `WorkloadCrashedImmediately` require driver observability the Phase 1
-/// `ExecDriver` does not have (cgroup OOM-killed event subscription;
-/// post-spawn exit-code wait-and-classify). The variants are defined now
-/// so the wire shape is forward-stable; the driver emits them in Phase 2.
-/// This mirrors the `exit_code: Option<i32>` field on `AllocStatusRowBody`
-/// (always `None` in Phase 1; populated in Phase 2 — see ADR-0033 §2).
+/// **Phase 2 emit-deferred variants**: `OutOfMemory` requires cgroup-events
+/// subscription not yet present in the Phase 1 `ExecDriver`; it is defined
+/// now for wire-shape forward-compatibility and will be emitted in Phase 2.
+/// `WorkloadCrashedImmediately` is emitted in Phase 1 — `ExecDriver` already
+/// performs `child.wait()` and produces `ExitKind::Crashed`; the
+/// `ExitObserver` maps that to this variant directly.
 ///
 /// **Cause-class payloads carry typed cause-specific data**, NOT a
 /// free-form `detail: String`. The previous state-class shape relied on
@@ -98,7 +97,7 @@ pub enum TransitionReason {
     Started,
     /// Reconciler holding off restart per backoff window.
     /// `attempt` is the 1-indexed retry number that will fire when the
-    /// backoff elapses (matches `JobLifecycleView::restart_counts + 1`).
+    /// backoff elapses (matches `WorkloadLifecycleView::restart_counts + 1`).
     BackoffPending { attempt: u32 },
     /// Reconciler observed terminal stop. `by` carries who initiated:
     /// `"operator"` for explicit stop intent, `"reconciler"` for
@@ -168,11 +167,15 @@ pub enum TransitionReason {
     /// cgroup-events subscription; defined now for wire-shape forward-
     /// compatibility.
     OutOfMemory { peak_bytes: u64, limit_bytes: u64 },
-    /// Workload exited within the post-spawn settle window. Requires
-    /// Phase 2 `ExecDriver` post-spawn `wait()` + classification;
-    /// defined now for wire-shape forward-compatibility. The
-    /// `exit_code` field on `AllocStatusRowBody` is the snapshot
-    /// counterpart (also Phase-2-populated).
+    /// Workload exited with a non-zero status or signal within the
+    /// post-spawn settle window. Emitted by the `ExitObserver` when
+    /// `ExitKind::Crashed` is received from the driver — `ExecDriver`
+    /// already performs `child.wait()` in Phase 1 and that is exactly
+    /// how `ExitKind::Crashed` is produced. The `exit_code` field
+    /// carries the process exit status (`None` for signal-only exits);
+    /// `signal` carries the signal number cast to `u8` (`None` when
+    /// absent); `stderr_tail` carries the last few lines of stderr
+    /// captured by the driver's ring buffer.
     WorkloadCrashedImmediately {
         exit_code: Option<i32>,
         signal: Option<u8>,
@@ -305,7 +308,7 @@ mod tests {
 ///
 /// # Variants
 ///
-/// - [`Self::BackoffExhausted`] — `JobLifecycle` reached its restart
+/// - [`Self::BackoffExhausted`] — `WorkloadLifecycle` reached its restart
 ///   budget at the deciding tick. `attempts` is the count *consumed*
 ///   at that moment (in Phase 1, the budget is hard-coded; in
 ///   future phases the same variant carries the post-policy attempts).
@@ -361,11 +364,11 @@ mod tests {
 #[serde(tag = "kind", content = "data", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum TerminalCondition {
-    /// `JobLifecycle`: restart budget reached; no further attempts
+    /// `WorkloadLifecycle`: restart budget reached; no further attempts
     /// will be scheduled. `attempts` is the count consumed at the
     /// moment of the deciding tick.
     BackoffExhausted { attempts: u32 },
-    /// `JobLifecycle`: explicit operator stop converged. The
+    /// `WorkloadLifecycle`: explicit operator stop converged. The
     /// allocation reached `Stopped` because the operator (or the
     /// reconciler itself) requested it, not because of a failure.
     Stopped { by: StoppedBy },
@@ -374,6 +377,44 @@ pub enum TerminalCondition {
     /// by the reconciler (e.g. `"vendor.io/quota.QuotaExhausted"`);
     /// `detail` is opaque bytes the reconciler may attach.
     Custom { type_name: String, detail: Option<Vec<u8>> },
+    /// `WorkloadLifecycle`: workload exited cleanly (Job-kind natural
+    /// termination, exit code `0` is the canonical success but the
+    /// variant carries the observed `exit_code` verbatim because the
+    /// publication boundary owns the cleanliness classification —
+    /// downstream consumers must not redo the comparison from a row
+    /// they no longer hold the policy for). Per ADR-0037 Amendment
+    /// 2026-05-10: typed natural-exit terminals replace the previous
+    /// reliance on `AllocStatusRow.exit_code` + heuristic mapping at
+    /// every consumer.
+    ///
+    /// Emission lands in slice 02-04 (WorkloadLifecycle reconciler
+    /// natural-exit emission); the row-shape change lands in 02-05.
+    /// This variant exists at the type level from slice 02a (this
+    /// step) so every downstream `match` site is forward-compatible
+    /// with the additive shape ahead of runtime emission.
+    ///
+    /// **Additive position**: appended after `Custom` to keep the
+    /// pre-existing rkyv discriminants (`BackoffExhausted=0`,
+    /// `Stopped=1`, `Custom=2`) stable. This variant takes
+    /// discriminant `3`, `Failed` takes discriminant `4`. Existing
+    /// archived rows decode unchanged.
+    Completed { exit_code: i32 },
+    /// `WorkloadLifecycle`: workload exited with a non-zero status (Job-kind
+    /// natural termination interpreted as failure by the reconciler).
+    /// Per ADR-0037 Amendment 2026-05-10. The `exit_code` field
+    /// carries the observed status verbatim — the reconciler does
+    /// the success/failure classification at the publication
+    /// boundary and the variant identity (`Completed` vs `Failed`)
+    /// IS the classification. Downstream consumers branch on the
+    /// variant, never on `exit_code != 0`.
+    ///
+    /// Common Unix exit codes operators see in this variant:
+    /// `1` (generic failure), `127` (command-not-found),
+    /// `137` (SIGKILL — typically OOM under cgroup-v2),
+    /// `255` (generic shell failure). The full `i32` range is
+    /// supported so the variant can carry signal-encoded statuses
+    /// if a future driver emits them.
+    Failed { exit_code: i32 },
 }
 
 /// Initiator of a `Cancelled` transition.

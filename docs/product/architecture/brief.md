@@ -1992,6 +1992,193 @@ dataplane *crate / map / handoff structure*, with the references in
 
 ---
 
+## Phase 1 workload-kind-discriminator extension
+
+**Source:** `docs/feature/workload-kind-discriminator/design/`
+**ADR:** ADR-0047 (workload kind discriminator), with amendments to
+ADR-0011, ADR-0031, ADR-0032, ADR-0033, ADR-0037.
+**Date:** 2026-05-10.
+
+This section extends §§ 1–53 with the application-architecture
+decisions landed by feature `workload-kind-discriminator`. Nothing
+in §§ 1–53 is rewritten. The feature closes the
+`coinflip-submit-reports-running-on-exit-1` bug (RCA root causes
+B + C + D, structurally) and lands the three-aggregate workload
+taxonomy validated against 13/15 vendor primaries
+(`docs/research/platform/workload-type-taxonomy-research.md`).
+
+### 54. `WorkloadSpec` aggregate — tagged enum at parser boundary
+
+The Phase 1 `Job` aggregate (introduced in §17, locked by ADR-0011,
+re-shaped by ADR-0031 Amendment 1) is **renamed in place** and
+restructured per ADR-0047. The new shape:
+
+```rust
+// crates/overdrive-core/src/aggregate/mod.rs
+pub enum WorkloadSpec {
+    Service(ServiceSpec),
+    Job(JobSpec),         // existing `Job` struct renamed; `replicas`
+                          // field removed (Job kind is run-to-completion)
+    Schedule(ScheduleSpec),
+}
+
+pub enum WorkloadKind {   // projection function output; not stored
+    Service, Job, Schedule,
+}
+```
+
+Repository-wide single-cut migration per
+`feedback_single_cut_greenfield_migrations.md`: every `Job` consumer
+in `overdrive-control-plane`, `overdrive-cli`,
+`overdrive-store-local`, and `overdrive-worker` updates to the new
+type names in the same PR train. No compat shim, no deprecation
+path. Phase 1 has no surviving rows pre-feature; greenfield.
+
+### 55. Per-kind streaming protocol — three sibling `*SubmitEvent` enums
+
+ADR-0032 §2's flat `SubmitEvent` becomes a kind-discriminating outer
+envelope per ADR-0047 §3:
+
+```rust
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SubmitEvent {
+    Service(ServiceSubmitEvent),
+    Job(JobSubmitEvent),         // NO ConvergedRunning variant
+    Schedule(ScheduleSubmitEvent),
+}
+```
+
+The `JobSubmitEvent` enum has no `ConvergedRunning` variant — the
+structural fix for RCA root causes B + C. The Job streaming
+subscriber waits for the ExitObserver's terminal observation row
+before emitting `Succeeded { exit_code: 0, .. }` /
+`Failed { exit_code: N, .. }`. The literal `"live"` is removed from
+every render path (RCA root cause D); a grep gate in
+`xtask::dst_lint` rejects re-introduction.
+
+### 56. `AllocStatusRow.kind` denormalisation + `listeners: Vec<ListenerRow>`
+
+Per ADR-0047 §4, the observation-side `AllocStatusRow` (intent-side
+row shape per ADR-0011 §Decision) gains:
+
+- `kind: WorkloadKind` — denormalised at write time from the
+  originally-submitted spec. Never re-derived. Consumers (`alloc
+  status` render) branch on this field.
+- `listeners: Vec<ListenerRow>` — embedded vec on the row (NOT a
+  separate `service_listener` table). Present for Service kind
+  only; empty for Job / Schedule. Single read returns everything
+  the render layer needs; cross-alloc listener queries belong to
+  the runtime VIP allocator primitive (#167) when it lands.
+
+The intent-vs-observation type-distinctness from ADR-0011 is
+preserved verbatim — `WorkloadSpec` lives in
+`overdrive-core::aggregate::*`; `AllocStatusRow` lives in
+`overdrive-core::traits::observation_store::*`. The two never share
+a struct definition.
+
+### 57. CLI render branches + deferral URL constants
+
+Per ADR-0047 §5/§6, the CLI render layer branches on
+`AllocStatusRow.kind`:
+
+- **Service**: `format_running_summary` is reached only on this
+  path (vocabulary updated to "Service"; `"live"` removed).
+  Listeners section emitted from `row.listeners`. No Exit column.
+- **Job**: new `format_job_*` family — `Succeeded` / `Failed` /
+  `attempt_failed` for streaming; `alloc_status_header` +
+  `attempts_table` for status. Per-attempt Exit column. Stderr
+  tail on Failed.
+- **Schedule**: `format_schedule_registered` (submit echo) +
+  `format_schedule_alloc_status`. Both read the deferral URL from
+  a single CLI constant `SCHEDULE_EXECUTION_TRACKING_URL`
+  (`https://github.com/overdrive-sh/overdrive/issues/166`); KPI K5
+  asserts byte-equality across submit echo and `alloc status`.
+
+A second constant `SERVICE_VIP_ALLOCATOR_TRACKING_URL`
+(`https://github.com/overdrive-sh/overdrive/issues/167`) is the SSOT
+for the pending-VIP marker `(vip: pending allocation — see #167)`
+emitted on Service listener lines whose `vip` is `None`. KPI K6
+asserts byte-equality across the two surfaces.
+
+### 58. Listener spec shape (Slice 06 / GH #164)
+
+Per ADR-0047 §1 + ADR-0031 Amendment 2, Service-kind specs gain a
+top-level `[[listener]]` array-of-tables (sibling to `[service]` /
+`[exec]` / `[resources]`). Each listener carries `port: NonZeroU16`,
+`protocol: Proto` (case-insensitive `tcp`/`udp` reusing the existing
+`overdrive-core::Proto` newtype from §44; no second copy), and
+`vip: Option<ServiceVip>` (existing newtype from §44 — no second
+copy). Parser uniqueness validation on `(vip, port, protocol)`
+within a Service. Section name `[[listener]]` not `[[backend]]` —
+avoids collision with the dataplane's destination-address `Backend`
+type at `crates/overdrive-core/src/traits/dataplane.rs:54`.
+
+The listener slice is **invalid for `[job]` and `[schedule]` kinds**
+in this feature; the parser rejects with named guidance. Listener
+attachment to non-Service kinds is out of scope.
+
+### 59. Reconciler-side typed terminal conditions (Job kind)
+
+Per ADR-0037 Amendment 2026-05-10, the Phase 1 reconciler emits
+per-kind typed `TerminalCondition` variants:
+
+- **Service**: existing `ConvergedRunning` /  `ConvergedFailed` /
+  `ConvergedStopped` shape preserved.
+- **Job**: new `Completed { exit_code: 0, duration_ms, attempts }` /
+  `Failed { exit_code, duration_ms, attempts, max_attempts,
+  stderr_tail }`. Streaming dispatcher routes onto
+  `JobSubmitEvent::Succeeded` / `JobSubmitEvent::Failed`.
+- **Schedule**: only `Registered { deferral_url }`, emitted at
+  submit-handler ingress (no firing reconciler this slice; deferred
+  to GH #166).
+
+The §19 reconciler primitive shape is preserved — reconciler
+decides terminal-or-not from inputs in scope; streaming forwards
+without re-deriving.
+
+### 60. Updated quality-attribute scenarios (extending §22 / §32 / §38 / §50)
+
+| ASR | Quality attribute | Scenario | Pass criterion |
+|---|---|---|---|
+| ASR-WKD-01 | Reliability — Job-kind verdict honesty | `examples/coinflip.toml` submitted 100× via `overdrive job submit`; bash workload exits 0 or 1 randomly. CLI process exit code observed. | ≥ 99 / 100 trials produce CLI exit code matching workload exit code (KPI K1; baseline 0/100 today) |
+| ASR-WKD-02 | Maintainability — kind-mix rejection latency | Parser ingest of mixed-kind / missing-section / malformed specs. | p95 < 50 ms per parse-and-reject (KPI K2) |
+| ASR-WKD-03 | Functional correctness — Listener round-trip | 100 Service spec submits with pinned VIPs; submit echo Listeners section vs `alloc status` Listeners section. | 100 / 100 byte-identical (KPI K6) |
+| ASR-WKD-04 | Maintainability — anti-pattern grep gate | `xtask dst-lint` scan after every PR. | 0 occurrences of `"live"` literal in render-path source |
+| ASR-WKD-05 | Operator usability — Failed-Job exit-code comprehension | Usability check against rendered fixture; 5–10 operators read a `Failed (backoff exhausted)` `alloc status` and state the exit code. | ≥ 95 % correct (KPI K3; pre-release manual gate; see § "K3 measurement cadence" in feature wave-decisions) |
+
+### 61. C4 — see `docs/feature/workload-kind-discriminator/design/c4-diagrams.md`
+
+The feature ships:
+
+- **L1 (System Context)** — unchanged from §C4 L1 in `c4-diagrams.md`
+  (operator + CLI + control plane + driver + workload boundaries are
+  not affected by the kind split).
+- **L2 (Container)** — annotated to mark `overdrive-cli` and
+  `overdrive-control-plane` as "extended for `WorkloadKind` parsing
+  / streaming dispatch / kind-aware render".
+- **L3 (Component)** — new diagram for the spec-parser pipeline
+  (TOML `Value::Table` → custom `Deserialize` → `WorkloadSpec`
+  variant → `JobLifecycle*` reconciler + streaming dispatcher).
+
+### 62. Updated handoff annotations — workload-kind-discriminator
+
+To DEVOPS — required CI checks gain:
+
+- `xtask dst-lint` extended with the `"live"` grep gate (ASR-WKD-04).
+- KPI K1 integration test: `cargo xtask lima run -- cargo nextest
+  run -p overdrive-cli -E 'test(coinflip_honesty)'` runs the 100-trial
+  honesty check.
+- KPI K6 integration test: `cargo xtask lima run -- cargo nextest
+  run -p overdrive-cli -E 'test(service_listener_roundtrip)'`.
+- `cargo openapi-check` rerun on the new `*SubmitEvent` schemas
+  and the new `Listener` / `ServiceVip` ToSchema derives.
+
+External integrations in this feature: **none**. No contract tests
+recommended. The kind discriminator is purely internal type-shape
+work.
+
+---
+
 ## Handoff annotations
 
 **To acceptance-designer (DISTILL)**:

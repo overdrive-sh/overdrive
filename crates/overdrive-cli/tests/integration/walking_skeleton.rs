@@ -116,7 +116,7 @@ fn write_toml(dir: &Path, name: &str, body: &str) -> PathBuf {
 }
 
 /// Locally compute the canonical `spec_digest` using the same primitives
-/// the server uses in `handlers::describe_job`:
+/// the server uses in `handlers::describe_workload`:
 ///   SHA-256 of `rkyv::to_bytes::<rancor::Error>(&Job::from_spec(spec))`.
 /// Any drift between this and the server-side computation is a bug.
 fn local_spec_digest(spec_toml: &str) -> String {
@@ -145,7 +145,7 @@ async fn walking_skeleton_ws1_ws2_ws3_post_adr_0020_wire_shape() {
 
     // Phase 2 — WS-1: write the job spec, then submit via handler.
     // Post-ADR-0020 the submit response carries
-    // `{job_id, spec_digest, outcome}` — no `commit_index`.
+    // `{workload_id, spec_digest, outcome}` — no `commit_index`.
     let spec_path = write_toml(server_tmp.path(), "payments.toml", payments_toml_spec_str());
     let submit_output = overdrive_cli::commands::job::submit(SubmitArgs {
         spec: spec_path.clone(),
@@ -153,7 +153,7 @@ async fn walking_skeleton_ws1_ws2_ws3_post_adr_0020_wire_shape() {
     })
     .await
     .expect("job::submit");
-    assert_eq!(submit_output.job_id, "payments");
+    assert_eq!(submit_output.workload_id, "payments");
     assert_eq!(submit_output.intent_key, "jobs/payments");
 
     // WS-1 (test-scenarios.md §1.1, ADR-0020 amendment): the submit
@@ -186,7 +186,7 @@ async fn walking_skeleton_ws1_ws2_ws3_post_adr_0020_wire_shape() {
     .await
     .expect("alloc::status");
 
-    assert_eq!(status_output.job_id, "payments", "status output must echo job id");
+    assert_eq!(status_output.workload_id, "payments", "status output must echo job id");
     assert_eq!(
         status_output.allocations_total, 0,
         "phase-1 allocations_total must be 0 (scheduler ships in phase-1-first-workload)",

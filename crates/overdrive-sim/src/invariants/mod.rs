@@ -63,6 +63,17 @@ pub mod sanity_checks_fire;
 // `assert_hydrator_idempotent_steady_state` (both panic until DELIVER
 // fills them per Slice 08).
 pub mod service_map_hydrator;
+// fix-exit-observer-running-gate step 01-05 (Solution 4). The
+// `ExitEventObservableOutcome` invariant pins the post-condition
+// that every `ExitEvent` consumed by the worker `exit_observer`
+// produces at least one of (a) an obs row write with state ∈
+// {Failed, Terminated}, (b) a degraded `LifecycleEvent` carrying
+// `TransitionReason::DriverInternalError`, or (c) a structured
+// `tracing::error!` naming the alloc. Closes the gap predecessor
+// RCA `fix-exit-observer-write-retry/deliver/rca.md:107-109`
+// named and `docs/evolution/2026-05-02-fix-exit-observer-write-
+// retry.md:64` left open.
+pub mod exit_event_observable_outcome;
 
 /// Catalogue of invariants the DST harness evaluates.
 ///
@@ -153,7 +164,7 @@ pub enum Invariant {
     /// reconciler-memory-redb step 01-07 — always invariant.
     /// For arbitrary `View` values, `ViewStore::write_through` followed
     /// by `ViewStore::bulk_load` returns byte-equal values. proptest-
-    /// backed; covers `JobLifecycleView` (the only meaningful production
+    /// backed; covers `WorkloadLifecycleView` (the only meaningful production
     /// View today) and `()` (the unit-View case used by `NoopHeartbeat`).
     /// Catches CBOR encode/decode regressions, ciborium-version skew,
     /// and serde-derive oversights per ADR-0035 §6.
@@ -168,7 +179,7 @@ pub enum Invariant {
     /// reconciler-memory-redb step 01-07 — always invariant.
     /// Under `SimViewStore::inject_fsync_failure`, the runtime's
     /// in-memory `BTreeMap` visible through
-    /// `ReconcilerRuntime::loaded_job_lifecycle_views_for_test` MUST
+    /// `ReconcilerRuntime::loaded_workload_lifecycle_views_for_test` MUST
     /// NOT be updated for the target whose `write_through` failed. The
     /// load-bearing crash-durability invariant from ADR-0035 §5: the
     /// fsync-then-memory ordering rule. A reconciler runtime that
@@ -252,6 +263,28 @@ pub enum Invariant {
     /// `RED scaffold` message until DELIVER ships the body per
     /// Slice 08 / S-2.2-27.
     HydratorIdempotentSteadyState,
+
+    /// fix-exit-observer-running-gate step 01-05 (Solution 4) —
+    /// eventually invariant. For every `ExitEvent` consumed by the
+    /// worker `exit_observer::run_with_retry → handle_exit_event`,
+    /// at least one of:
+    ///   (a) an obs row write of `AllocStatusRow{state ∈ {Failed,
+    ///       Terminated}}` for the same `alloc_id`,
+    ///   (b) a degraded `LifecycleEvent` broadcast carrying
+    ///       `TransitionReason::DriverInternalError` (May-2
+    ///       escalation path),
+    ///   (c) a structured `tracing::error!` log naming the
+    ///       `alloc_id` and the underlying error
+    /// is produced. Closes the gap predecessor RCA
+    /// `fix-exit-observer-write-retry/deliver/rca.md:107-109`
+    /// named and `docs/evolution/2026-05-02-fix-exit-observer-
+    /// write-retry.md:64` left open. With Solution 1' landed in
+    /// steps 01-02 / 01-03, the invariant does NOT fire under the
+    /// canonical flow — its load-bearing role is preventing
+    /// future regressions through any emission path that bypasses
+    /// the gate. The evaluator body lives in
+    /// `crate::invariants::exit_event_observable_outcome`.
+    ExitEventObservableOutcome,
 }
 
 impl Invariant {
@@ -314,6 +347,10 @@ impl Invariant {
         // DWD-4. Evaluator bodies panic until DELIVER fills them.
         Self::HydratorEventuallyConverges,
         Self::HydratorIdempotentSteadyState,
+        // fix-exit-observer-running-gate step 01-05 (Solution 4).
+        // The evaluator body lives in
+        // `crate::invariants::exit_event_observable_outcome`.
+        Self::ExitEventObservableOutcome,
     ];
 
     /// The canonical kebab-case spelling of this invariant, as a static
@@ -350,6 +387,7 @@ impl Invariant {
             Self::SanityChecksFireBeforeServiceMap => "sanity-checks-fire-before-service-map",
             Self::HydratorEventuallyConverges => "hydrator-eventually-converges",
             Self::HydratorIdempotentSteadyState => "hydrator-idempotent-steady-state",
+            Self::ExitEventObservableOutcome => "exit-event-observable-outcome",
         }
     }
 }

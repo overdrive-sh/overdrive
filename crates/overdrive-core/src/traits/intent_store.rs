@@ -64,7 +64,7 @@ pub enum TxnOutcome {
 /// Handlers use the returned bytes to distinguish idempotent
 /// re-submission (byte-identical to the losing caller's payload) from
 /// genuine conflict (different payload at the same key) — see
-/// `overdrive_control_plane::handlers::submit_job`.
+/// `overdrive_control_plane::handlers::submit_workload`.
 ///
 /// [`Inserted`]: PutOutcome::Inserted
 /// [`KeyExists`]: PutOutcome::KeyExists

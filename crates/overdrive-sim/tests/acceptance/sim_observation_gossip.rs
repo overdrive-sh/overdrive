@@ -29,7 +29,7 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use futures::StreamExt;
-use overdrive_core::id::{AllocationId, JobId, NodeId};
+use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
     ObservationSubscription,
@@ -55,7 +55,7 @@ fn node(name: &str) -> NodeId {
 fn alloc_status(state: AllocState, writer: &NodeId, counter: u64) -> AllocStatusRow {
     AllocStatusRow {
         alloc_id: AllocationId::from_str("alloc-a1b2c3").expect("valid alloc id"),
-        job_id: JobId::from_str("payments").expect("valid job id"),
+        workload_id: WorkloadId::from_str("payments").expect("valid job id"),
         // `node_id` records which node owns the alloc; it is the same
         // across all rows for this alloc. The *writer* field on the
         // logical timestamp is what identifies who emitted the update.
@@ -65,6 +65,9 @@ fn alloc_status(state: AllocState, writer: &NodeId, counter: u64) -> AllocStatus
         reason: None,
         detail: None,
         terminal: None,
+        stderr_tail: None,
+        kind: overdrive_core::aggregate::WorkloadKind::Service,
+        listeners: Vec::new(),
     }
 }
 
@@ -213,20 +216,23 @@ async fn full_row_writes_take_precedence_with_no_partial_merge() {
     cluster.advance(PAST_CONVERGENCE).await;
 
     // When a third peer writes a full updated row at T1 > T0. The new
-    // row differs from the prior in state (Draining), job_id (scheduler
+    // row differs from the prior in state (Draining), workload_id (scheduler
     // moved the alloc), and timestamp — a combination a partial-field
     // merge would never reconstruct correctly.
     let t1_row = AllocStatusRow {
         alloc_id: t0_row.alloc_id.clone(),
-        // Different job_id — if any peer applied a partial merge keeping
-        // the old job_id, the assertion below would catch it.
-        job_id: JobId::from_str("billing").expect("valid job id"),
+        // Different workload_id — if any peer applied a partial merge keeping
+        // the old workload_id, the assertion below would catch it.
+        workload_id: WorkloadId::from_str("billing").expect("valid job id"),
         node_id: node("node-a"),
         state: AllocState::Draining,
         updated_at: LogicalTimestamp { counter: 2, writer: node("node-c") },
         reason: None,
         detail: None,
         terminal: None,
+        stderr_tail: None,
+        kind: overdrive_core::aggregate::WorkloadKind::Service,
+        listeners: Vec::new(),
     };
     peer_c
         .write(ObservationRow::AllocStatus(t1_row.clone()))
@@ -235,7 +241,7 @@ async fn full_row_writes_take_precedence_with_no_partial_merge() {
     cluster.advance(PAST_CONVERGENCE).await;
 
     // Then every peer converges to the row peer C wrote. No partial
-    // merge: the winning row's job_id is "billing" (not "payments" from
+    // merge: the winning row's workload_id is "billing" (not "payments" from
     // T0), its state is Draining (not Running from T0), and the
     // timestamp is T1 wholesale.
     for (name, peer) in [("node-a", &peer_a), ("node-b", &peer_b), ("node-c", &peer_c)] {

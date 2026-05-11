@@ -17,7 +17,7 @@
 use std::str::FromStr;
 use std::time::Duration;
 
-use overdrive_core::id::{AllocationId, JobId, NodeId};
+use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
 };
@@ -166,13 +166,16 @@ async fn sim_observation_lww_converges_passes_after_writes_and_convergence() {
     peer_a
         .write(ObservationRow::AllocStatus(AllocStatusRow {
             alloc_id: AllocationId::from_str("alloc-1").expect("alloc id"),
-            job_id: JobId::from_str("payments").expect("job id"),
+            workload_id: WorkloadId::from_str("payments").expect("job id"),
             node_id: node("node-a"),
             state: AllocState::Running,
             updated_at: LogicalTimestamp { counter: 1, writer: node("node-a") },
             reason: None,
             detail: None,
             terminal: None,
+            stderr_tail: None,
+            kind: overdrive_core::aggregate::WorkloadKind::Service,
+            listeners: Vec::new(),
         }))
         .await
         .expect("write");

@@ -1,0 +1,370 @@
+{
+  "roadmap": {
+    "project_id": "fix-exit-observer-running-gate",
+    "feature_id": "fix-exit-observer-running-gate",
+    "created_at": "2026-05-10T21:05:00Z",
+    "filled_at": "2026-05-10T21:05:00Z",
+    "total_steps": 7,
+    "phases": 1,
+    "walking_skeleton_gate": "01-06",
+    "validation": {
+      "status": "approved",
+      "approved_at": "2026-05-10T21:05:00Z",
+      "approver": "user",
+      "rationale": "User reviewed and approved the RCA + Solution 1' (oneshot-gated watcher emission) + Solution 4 (DST invariant) fix shape on 2026-05-10. The K1 honesty test (`coinflip_honesty_100_trials.rs:294-302`) passing at threshold ≥99/100 with `sleep 0.5` removed from both CLI fixtures is the load-bearing acceptance gate; until that passes without the workaround, the fix is not delivered."
+    },
+    "notes": [
+      "Bug fix via /nw-bugfix → /nw-deliver. Authoritative spec is the RCA at `docs/feature/fix-exit-observer-running-gate/deliver/rca.md`; the full multi-causal analysis lives at `docs/analysis/root-cause-analysis-exit-observer-prior-row-race.md` (read §5 Solution 1' validation table and §7 delivery shape). This is the *read-miss* leg of the silent-drop tree; the predecessor PR `fix-exit-observer-write-retry` fixed the symmetric *write-failure* leg on 2026-05-02.",
+      "Approved fix is Solution 1' (oneshot-gated watcher emission) + Solution 4 (DST invariant). Solution 1' establishes a structural happens-before edge between `obs.write(Running)` Ok and the watcher's first `ExitEvent` emission via `tokio::sync::oneshot`. Solution 4 adds a DST `assert_eventually!` invariant guarding latent B/C/D from re-emerging through any future emission path that bypasses the gate.",
+      "DST cleanliness — `tokio::sync::oneshot` is NOT `Clock`-dependent; works under `SimClock`, turmoil, real tokio identically. Honors `.claude/rules/development.md` § 'Production code is not shaped by simulation' — the gate is a structural ordering edge for a real production race, not a sim concession. No `Instant::now`, no real-clock dependency in production or tests.",
+      "Liveness rail (interaction with May-2 retry path) — the May-2 `obs.write(Running)` retry path may exhaust retries and degrade to `LifecycleEvent`-only. The gate MUST still fire on the degraded path (otherwise the watcher leaks forever waiting on a oneshot that nothing will ever send). Two firing sites: post-success (after `obs.write(Running)` resolves Ok) and post-degraded-escalation (after the May-2 retry-exhaustion path emits the synthesized `LifecycleEvent`). This is called out explicitly in step 01-03's AC.",
+      "Single-cut migration per `feedback_single_cut_greenfield_migrations`: no deprecated dual-path retained; no feature-flag fallback. The Driver trait surface gains the new return shape symmetrically across `ExecDriver` and `SimDriver` (and any future impls); both update in the same commit (step 01-02).",
+      "Test-triage discipline — some existing observer integration tests in `tests/integration/job_lifecycle/exit_observer.rs` injected `ExitEvent` ahead of any `Running` row (defending the now-impossible `NoPriorRow` producer-ordering path). Step 01-04 splits these: tests defending the observer-receiver contract given a present prior row stay (possibly simplified); tests defending now-impossible producer-ordering are deleted with a rationale comment naming this RCA. Per `feedback_delete_dont_gate`: delete production code AND its tests in the same commit; do not gate or salvage.",
+      "Solution 4 DST invariant location — likely the simulation harness invariant catalogue under `crates/overdrive-sim/`. With Solution 1' landed, the invariant should never fire under the canonical flow; its load-bearing role is preventing future regressions of B/C/D. Closes the gap predecessor RCA `fix-exit-observer-write-retry/deliver/rca.md:107-109` named.",
+      "K1 acceptance gate — `coinflip_honesty_100_trials.rs:294-302` is the load-bearing observability KPI. Step 01-06 removes `sleep 0.5` from both CLI fixtures (`coinflip_honesty_100_trials.rs:128`, `job_kind_streaming.rs:235/255`) and the rustdoc paragraphs disclaiming the workaround (`coinflip_honesty_100_trials.rs:103-117`, `job_kind_streaming.rs:218-227`). After removal, K1 MUST pass at threshold ≥99/100 trials. Until that passes without the workaround, the fix is NOT delivered.",
+      "No GitHub issues created by agents — per CLAUDE.md and `feedback_no_unilateral_gh_issues`. Solution 2 (defence-in-depth bounded retry inside `find_prior_row`) is a deferral candidate awaiting user decision; it is NOT to be created as a follow-up issue without explicit user approval, and NO step in this roadmap cites a phantom issue number for it.",
+      "No effort/time budget cuts per CLAUDE.md — `estimated_hours` is advisory only; do NOT defer scope mid-step on hour-budget grounds. Land the full work each step's acceptance criteria describe.",
+      "No new files for structural changes — extend existing components (`ExecDriver` in `crates/overdrive-worker/src/driver.rs`, `SimDriver` in `crates/overdrive-sim/src/adapters/driver.rs`, action shim in `crates/overdrive-control-plane/src/action_shim/mod.rs`); do NOT introduce parallel implementations. The only new files this roadmap adds are: (a) the regression-test scenario in step 01-01, and (b) the DST invariant module/scenario in step 01-05 (location TBD by crafter; existing invariant catalogue is preferred).",
+      "Per `.claude/rules/testing.md`: `cargo nextest run` (NOT `cargo test`); every Linux runtime test invocation goes through `cargo xtask lima run --`; `--features integration-tests` is mandatory for the integration lane. Mutation testing is the explicit exception to the foreground-only rule (run with `run_in_background: true`)."
+    ]
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Bug fix — exit observer races action-shim obs.write(Running) for sub-millisecond-exit workloads",
+      "slice": "single-vertical",
+      "user_stories": [
+        "As an operator running `overdrive submit --watch` against a workload whose process lifetime is shorter than the wall-clock budget between `Driver::start` returning and the action shim committing the `Running` row, I see the correct terminal verdict (Succeeded with exit code 0, or Failed with exit code N and stderr tail) — not a hang. As a platform engineer, the K1 CLI exit-code honesty KPI passes at threshold ≥99/100 trials WITHOUT the `sleep 0.5` workaround in the workload bash. As a future maintainer, the producer-ordering edge between `obs.write(Running) Ok` and `ExitEvent` emission is verifiable in source by reading three adjacent call sites, not derived from wall-clock coincidence."
+      ],
+      "description": "Establish a structural happens-before edge between `obs.write(Running)` Ok (or May-2 degraded escalation) and the watcher's first `ExitEvent` emission via a `tokio::sync::oneshot` channel (Solution 1'). Add a DST invariant guarding that every consumed `ExitEvent` produces a visible outcome (Solution 4). Triage existing `NoPriorRow`-defending tests. Remove the `sleep 0.5` fixture-side concealment from both CLI integration tests; K1 honesty test is the load-bearing acceptance gate.",
+      "estimated_hours": 8.0,
+      "depends_on": [],
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "RED — failing regression test exercising the producer-ordering race without the sleep workaround",
+          "description": "Land a new regression test in `crates/overdrive-control-plane/tests/integration/job_lifecycle/` that exercises the producer-ordering race directly under a DST schedule that today produces `RetryOutcome::NoPriorRow`. The scenario: drive `SimDriver` with `inject_exit_after(Duration::from_micros(1))` (or the smallest deterministic budget that beats `obs.write(Running)`), assert under the current main code that the watcher's `ExitEvent` is dropped silently and the alloc never reaches a terminal state. New file: `crates/overdrive-control-plane/tests/integration/job_lifecycle/exit_observer_running_gate.rs` with one `#[tokio::test]` scenario `watcher_cannot_emit_exit_before_running_row_committed`. The test asserts the post-condition: after a sub-budget exit, the alloc reaches `Failed` or `Terminated` in obs AND a `LifecycleEvent` is broadcast on the lifecycle bus carrying the correct terminal `to` state. Both assertions FAIL on current main (the race drops the event silently). Wire the new file through `crates/overdrive-control-plane/tests/integration.rs` under `mod job_lifecycle { … }` adjacent to the existing `crash_recovery`, `exit_observer`, and `crash_recovery_obs_write_rejected` modules. Use `#[should_panic(expected = \"RED scaffold\")]` per `.claude/rules/testing.md` § 'Test-side scaffolds' if the assertions cannot be expressed without a panic-shaped failure on current main; otherwise let the test fail naturally and commit with `--no-verify` per the RED-scaffold convention. Default lane unaffected (the new file is `#[cfg(feature = \"integration-tests\")]`).",
+          "criteria": [],
+          "acceptance_criteria": [
+            "AC1: New file `crates/overdrive-control-plane/tests/integration/job_lifecycle/exit_observer_running_gate.rs` exists with one `#[tokio::test]` scenario named `watcher_cannot_emit_exit_before_running_row_committed`.",
+            "AC2: The scenario uses `SimClock` + `SimDriver::inject_exit_after(...)` with a sub-`obs.write(Running)`-budget exit deadline (the smallest deterministic budget that today produces `RetryOutcome::NoPriorRow`). No `tokio::time::sleep`, no real-clock dependency.",
+            "AC3: The scenario asserts the post-condition: after the sub-budget exit, the alloc reaches `Failed` or `Terminated` in the obs store AND a `LifecycleEvent` is broadcast on the lifecycle bus carrying a terminal `to` state. Both assertions FAIL on current main (the race drops the event silently).",
+            "AC4: The new file is wired through `crates/overdrive-control-plane/tests/integration.rs` under `mod job_lifecycle { … }` adjacent to the existing `crash_recovery`, `exit_observer`, and `crash_recovery_obs_write_rejected` modules.",
+            "AC5: The scenario follows the RED-scaffold convention from `.claude/rules/testing.md` § 'RED scaffolds and intentionally-failing commits' — either `#[should_panic(expected = \"RED scaffold\")]` with a descriptive panic body, OR a natural assertion failure committed with `--no-verify` whose message names this RCA (`docs/feature/fix-exit-observer-running-gate/deliver/rca.md`).",
+            "AC6: `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests --no-run` succeeds (compile gate; the new file compiles). The `--no-run` macOS gate also passes.",
+            "AC7: Linux runtime via `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests -E 'test(watcher_cannot_emit_exit_before_running_row_committed)'` — the new scenario FAILS (or panics with the documented RED-scaffold message); existing tests unchanged.",
+            "AC8: Default lane: `cargo nextest run -p overdrive-control-plane` (no integration-tests feature) continues to pass. No production source modified in this step.",
+            "AC9: `cargo clippy --workspace --all-targets --features integration-tests -- -D warnings` passes via `cargo xtask lima run --` (lint clean on the new test code).",
+            "AC10: Commit message clearly marks the RED scaffold state (e.g., `test(control-plane): RED — exit_observer running-gate regression`)."
+          ],
+          "files_to_modify": [
+            "crates/overdrive-control-plane/tests/integration.rs",
+            "crates/overdrive-control-plane/tests/integration/job_lifecycle/exit_observer_running_gate.rs"
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/job_lifecycle/exit_observer_running_gate.rs",
+          "scenario_name": "watcher_cannot_emit_exit_before_running_row_committed",
+          "tier": "structural",
+          "time_estimate_hours": 1.0,
+          "estimated_hours": 1.0,
+          "dependencies": [],
+          "quality_gates": [
+            "Compile-only on macOS via `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests --no-run`.",
+            "Default lane: `cargo nextest run -p overdrive-control-plane` continues to pass.",
+            "Linux runtime via `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests` — the new scenario FAILS as expected with documented assertion / RED-scaffold panic.",
+            "Clippy clean: `cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings`.",
+            "Commit shape: `--no-verify` with explicit RED-scaffold marker in the message (per testing.md §RED scaffolds, if the test cannot be expressed via `#[should_panic]`)."
+          ],
+          "deliverables": [
+            "One commit landing the new RED regression test in `exit_observer_running_gate.rs`."
+          ],
+          "implementation_scope": {
+            "production": [],
+            "tests": [
+              "crates/overdrive-control-plane/tests/integration.rs (mod declaration)",
+              "crates/overdrive-control-plane/tests/integration/job_lifecycle/exit_observer_running_gate.rs (new oracle, 1 scenario)"
+            ]
+          }
+        },
+        {
+          "id": "01-02",
+          "name": "Driver trait return-shape extension — oneshot-gated emission across ExecDriver and SimDriver",
+          "description": "Extend the `Driver::start` trait surface to expose a `oneshot::Sender<()>` (the 'Running-confirmed' gate) symmetrically across all impls. Two equivalent shapes; the crafter picks whichever respects the existing `LiveAllocation`/handle invariants better: (a) `Driver::start` returns `(AllocationHandle, oneshot::Sender<()>)`; or (b) the sender is stashed inside `LiveAllocation` and the trait gains a `release_for_exit_emission(&AllocationHandle)` method that consumes/sends on it. The watcher (today at `crates/overdrive-worker/src/driver.rs:638` for `ExecDriver`, and the corresponding emission site in `SimDriver`) awaits the corresponding `oneshot::Receiver<()>` BEFORE `exit_tx.send(event).await`. The trait docstring at `crates/overdrive-core/src/traits/driver.rs:226-231` gains the post-condition: 'the returned `oneshot::Sender<()>` (or the gate-release method) is fired exactly once after the corresponding `Running` row is committed (or after the May-2 retry path degrades to `LifecycleEvent`-only) — this establishes the producer-ordering happens-before edge that prevents `ExitEvent` from being emitted before consumers can observe a prior row.' Update both `ExecDriver` (`crates/overdrive-worker/src/driver.rs`) and `SimDriver` (`crates/overdrive-sim/src/adapters/driver.rs`) symmetrically. Per `.claude/rules/development.md` § 'Trait definitions specify behavior, not just signature': the trait docstring states the precondition (gate fired exactly once, by the action shim post `obs.write(Running)` Ok or post degraded-escalation), the postcondition (no `ExitEvent` reaches the consumer before the gate fires), and the observable invariant (gate firing is idempotent — a second send becomes a no-op or a warn-and-drop, NOT a panic). Production code is NOT shaped by simulation: the gate is a real production ordering edge, not a sim concession. The 01-01 regression test stays RED at the end of this step (no firing site yet); steps 01-03 wires the firing sites and the test transitions RED → GREEN.",
+          "criteria": [],
+          "acceptance_criteria": [
+            "AC1: `Driver::start` (or a paired `release_for_exit_emission` method on `Driver`) exposes a `tokio::sync::oneshot::Sender<()>` to the action shim by either return-shape extension or stash-in-LiveAllocation. Both `ExecDriver` and `SimDriver` implement the new shape symmetrically. `crates/overdrive-core/src/traits/driver.rs` is the trait SSOT.",
+            "AC2: The trait docstring on `Driver::start` (at `crates/overdrive-core/src/traits/driver.rs:226-231`) gains explicit post-condition language naming: (a) the gate is fired exactly once by the action shim, after `obs.write(Running)` Ok OR after the May-2 retry-exhaustion-degraded path; (b) no `ExitEvent` reaches the consumer before the gate fires; (c) double-fire is idempotent (no-op or warn-and-drop, NOT a panic).",
+            "AC3: `ExecDriver`'s watcher at `crates/overdrive-worker/src/driver.rs:638` (`exit_tx.send(event).await`) is preceded by `gate_rx.await` (or equivalent), where `gate_rx` is the `oneshot::Receiver<()>` corresponding to the sender exposed in AC1. The gate is awaited AFTER `child.wait()` resolves and AFTER any stderr-tail drain budget, BEFORE `exit_tx.send`.",
+            "AC4: `SimDriver`'s emission site (in `crates/overdrive-sim/src/adapters/driver.rs`) gains the symmetric `gate_rx.await` before its `ExitEvent` send. The DST harness's logical-time advance still drives `inject_exit_after` deterministically.",
+            "AC5: Per `.claude/rules/development.md` § 'Production code is not shaped by simulation': `gate_rx.await` is the production ordering edge, not a sim concession. No `tokio::select!` arm exists whose only resolving form is `clock.sleep(...)` to advance time under SimClock; the gate is a logical happens-before, not a wall-clock budget.",
+            "AC6: Workspace builds clean: `cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests` succeeds.",
+            "AC7: All existing tests in `crates/overdrive-control-plane/tests/integration/job_lifecycle/{crash_recovery,exit_observer,submit_to_running,stop_to_terminated,convergence_loop_spawned_in_production_boot,cleanup,crash_recovery_obs_write_rejected}.rs` continue to pass on Linux via `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests` — minus any tests deleted in step 01-04 (the test-triage step is sequenced AFTER this so 01-02 only adds compatibility-preserving structure).",
+            "AC8: The 01-01 regression test (`watcher_cannot_emit_exit_before_running_row_committed`) STAYS RED at the end of this step — the gate exists at the watcher side but no production caller fires it yet. Step 01-03 wires the firing sites and transitions the test GREEN.",
+            "AC9: Clippy clean: `cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings`.",
+            "AC10: `cargo fmt --check` passes."
+          ],
+          "files_to_modify": [
+            "crates/overdrive-core/src/traits/driver.rs",
+            "crates/overdrive-worker/src/driver.rs",
+            "crates/overdrive-sim/src/adapters/driver.rs"
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/job_lifecycle/exit_observer_running_gate.rs",
+          "scenario_name": "watcher_cannot_emit_exit_before_running_row_committed",
+          "tier": "structural",
+          "time_estimate_hours": 2.0,
+          "estimated_hours": 2.0,
+          "dependencies": ["01-01"],
+          "quality_gates": [
+            "`cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests` succeeds.",
+            "`cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests --no-run` succeeds on macOS.",
+            "Linux runtime: existing tests pass via `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests`. The 01-01 regression test continues to FAIL (gate exists but no firing site yet — expected RED).",
+            "`cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings` clean.",
+            "`cargo fmt --check` clean."
+          ],
+          "deliverables": [
+            "One commit landing the trait surface change + symmetric ExecDriver/SimDriver gate-await wiring + trait docstring post-condition."
+          ],
+          "implementation_scope": {
+            "production": [
+              "crates/overdrive-core/src/traits/driver.rs (Driver::start return-shape extension or paired release method; trait docstring post-condition naming the happens-before edge and the May-2 liveness rail)",
+              "crates/overdrive-worker/src/driver.rs (ExecDriver::start exposes oneshot::Sender; watcher at line 638 awaits gate_rx before exit_tx.send)",
+              "crates/overdrive-sim/src/adapters/driver.rs (SimDriver::start exposes oneshot::Sender; emission site awaits gate_rx symmetrically)"
+            ],
+            "tests": []
+          }
+        },
+        {
+          "id": "01-03",
+          "name": "Action-shim wiring — fire the gate on obs.write(Running) Ok AND on May-2 degraded-escalation (liveness rail)",
+          "description": "Wire the action shim to fire the `oneshot::Sender<()>` exposed by step 01-02 at TWO load-bearing sites in `crates/overdrive-control-plane/src/action_shim/mod.rs`: (1) the success path: after `obs.write(ObservationRow::AllocStatus(row))` resolves Ok at line 499 (StartAllocation arm) AND line 535/566 (RestartAllocation arm where the row carries `state = AllocState::Running`), fire the corresponding sender. The `LifecycleEvent` broadcast at line 500 may happen in either order with respect to the gate fire; standard convention is fire the gate IMMEDIATELY after the obs.write resolves Ok and BEFORE the lifecycle-event emit, so the watcher's emission window is opened at the earliest legitimate moment. (2) The May-2 retry-exhaustion-degraded path: when the May-2 retry path (in the action shim and/or in `crate::worker::exit_observer`) exhausts its bounded retries on the `Running` write and degrades to a `LifecycleEvent`-only escalation carrying `TransitionReason::DriverInternalError`, the gate MUST also fire — otherwise the watcher leaks forever waiting on a oneshot that nothing will ever send. Locate the May-2 degraded-escalation site (introduced in `fix-exit-observer-write-retry` step 01-02, in `crates/overdrive-control-plane/src/worker/exit_observer.rs` and/or the action shim's StartAllocation arm) and fire the gate there too. **Liveness invariant**: every code path through which the action shim signals 'this alloc has reached an outcome (Running or degraded)' MUST fire the gate exactly once. Add a `// SAFETY:`-style or rustdoc comment immediately above each firing site naming the liveness invariant: 'Fires the Running-confirmed gate exposed by Driver::start. Required for liveness — the watcher parks on this gate before emitting ExitEvent. The two firing sites (post-Running-Ok and post-degraded-escalation) are jointly load-bearing; missing either leaks the watcher.' The 01-01 regression test transitions RED → GREEN. Add at least one new scenario to `exit_observer_running_gate.rs` that injects a May-2-style degraded escalation (via `SimObservationStore::inject_write_failure` from the predecessor PR) and asserts the gate fires anyway and the alloc reaches a terminal state through the degraded `LifecycleEvent` path. Run mutation testing on the diff per `.claude/rules/testing.md` § 'Mutation testing' with `run_in_background: true`. Standard commit (no `--no-verify`).",
+          "criteria": [],
+          "acceptance_criteria": [
+            "AC1: In `crates/overdrive-control-plane/src/action_shim/mod.rs`, the StartAllocation arm fires the oneshot gate immediately after `obs.write(ObservationRow::AllocStatus(row))` resolves Ok at line 499 (where `row.state == AllocState::Running`). The fire site is BEFORE the `emit_event(bus, build_lifecycle_event(...))` call.",
+            "AC2: The RestartAllocation arm at line 535/566 fires the gate symmetrically when the row carries `state = AllocState::Running`. RestartAllocation arms whose row is `Failed` (start-rejected branch) do NOT fire the gate — the alloc never reached Running, no watcher exists.",
+            "AC3: The May-2 retry-exhaustion-degraded escalation path (in either `crates/overdrive-control-plane/src/action_shim/mod.rs` or `crates/overdrive-control-plane/src/worker/exit_observer.rs`, wherever the May-2 PR landed the synthesized degraded `LifecycleEvent`) ALSO fires the gate. Documented inline with a comment naming the liveness invariant.",
+            "AC4: A rustdoc / inline comment immediately above each gate-fire site names the liveness invariant: the watcher parks on the gate before emitting `ExitEvent`; the two firing sites (post-Running-Ok and post-degraded-escalation) are jointly load-bearing; missing either leaks the watcher.",
+            "AC5: The 01-01 regression test `watcher_cannot_emit_exit_before_running_row_committed` transitions RED → GREEN. The strict RED-scaffold marker (whether `#[should_panic]` or `--no-verify`) is removed in the same commit.",
+            "AC6: A new scenario `degraded_escalation_still_fires_running_gate` is added to `exit_observer_running_gate.rs`. It uses `SimObservationStore::inject_write_failure(...)` (from the predecessor PR `fix-exit-observer-write-retry`) to drive the May-2 retry-exhaustion path on the `Running` write. The scenario asserts: (a) the gate fires; (b) the watcher's `ExitEvent` is consumed (does not park indefinitely); (c) the alloc reaches a terminal state via the degraded `LifecycleEvent` carrying `TransitionReason::DriverInternalError`.",
+            "AC7: All existing tests in `crates/overdrive-control-plane/tests/integration/job_lifecycle/` continue to pass on Linux via `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests`.",
+            "AC8: Mutation testing kill rate ≥80% on the diff via `cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-control-plane --file crates/overdrive-control-plane/src/action_shim/mod.rs --file crates/overdrive-control-plane/src/worker/exit_observer.rs --package overdrive-worker --file crates/overdrive-worker/src/driver.rs --package overdrive-sim --file crates/overdrive-sim/src/adapters/driver.rs --package overdrive-core --file crates/overdrive-core/src/traits/driver.rs`. Run with `run_in_background: true`.",
+            "AC9: `cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings` clean.",
+            "AC10: `cargo fmt --check` clean. Standard commit shape (no `--no-verify`) — pre-commit hook must pass."
+          ],
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/action_shim/mod.rs",
+            "crates/overdrive-control-plane/src/worker/exit_observer.rs",
+            "crates/overdrive-control-plane/tests/integration/job_lifecycle/exit_observer_running_gate.rs"
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/job_lifecycle/exit_observer_running_gate.rs",
+          "scenario_name": "watcher_cannot_emit_exit_before_running_row_committed",
+          "tier": "behavioural",
+          "time_estimate_hours": 1.5,
+          "estimated_hours": 1.5,
+          "dependencies": ["01-02"],
+          "quality_gates": [
+            "`cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests` succeeds.",
+            "`cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests --no-run` succeeds on macOS.",
+            "Linux runtime: `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests` — all tests PASS, including the 01-01 regression test now GREEN and the new `degraded_escalation_still_fires_running_gate` scenario.",
+            "Mutation testing kill rate ≥80% on the diff (file-scoped to the four production files in AC8). Run with `run_in_background: true`.",
+            "`cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings` clean.",
+            "`cargo fmt --check` clean. Standard commit shape (no `--no-verify`)."
+          ],
+          "deliverables": [
+            "One commit landing the gate-fire wiring at both sites (Running-Ok + degraded-escalation), the inline liveness-invariant comments, and the new degraded-path scenario.",
+            "One mutation-testing run with documented kill rate."
+          ],
+          "implementation_scope": {
+            "production": [
+              "crates/overdrive-control-plane/src/action_shim/mod.rs (fire gate after obs.write(Running) Ok in StartAllocation arm at line 499 and RestartAllocation arm at line 535/566; rustdoc comments naming the liveness invariant)",
+              "crates/overdrive-control-plane/src/worker/exit_observer.rs (fire gate on May-2 retry-exhaustion-degraded escalation; inline liveness comment)"
+            ],
+            "tests": [
+              "crates/overdrive-control-plane/tests/integration/job_lifecycle/exit_observer_running_gate.rs (transitions RED → GREEN; adds degraded_escalation_still_fires_running_gate scenario)"
+            ]
+          }
+        },
+        {
+          "id": "01-04",
+          "name": "Test triage — split existing exit_observer NoPriorRow tests; delete now-impossible producer-ordering scenarios",
+          "description": "Triage existing scenarios in `crates/overdrive-control-plane/tests/integration/job_lifecycle/exit_observer.rs`. Per `feedback_delete_dont_gate`: delete production code AND its tests in the same commit; do NOT gate, do NOT salvage by rewriting. For each existing scenario in that file, classify it: (a) tests that defend the observer-receiver contract given a present prior row (e.g., 'observer correctly handles a delivered ExitEvent and writes Failed/Terminated row'): KEEP, possibly simplify if the test setup previously had to defensively wait for the `Running` row to land — that defensive wait is now unnecessary because the gate guarantees ordering; (b) tests that defend the now-impossible `NoPriorRow`/producer-ordering path (those that injected `ExitEvent` ahead of any `Running` row to assert the observer's behavior on a missing prior row): DELETE with a rationale comment in the commit message naming this RCA (`docs/feature/fix-exit-observer-running-gate/deliver/rca.md`). Per `.claude/rules/development.md` § 'Deletion discipline': do NOT add `#[ignore]`, do NOT `#[allow(dead_code)]` on helpers that lose their callers; if a helper is now unused, delete it in the same commit. Run the post-deletion `cargo nextest run -p overdrive-control-plane --features integration-tests` via Lima; expect the test count to DECREASE (a deletion PR's correct shape is shrinking the test count). Document the triage decisions in the commit message: list each deleted scenario by name with one-line rationale tying it to the structural impossibility introduced by Solution 1'.",
+          "criteria": [],
+          "acceptance_criteria": [
+            "AC1: Every scenario in `crates/overdrive-control-plane/tests/integration/job_lifecycle/exit_observer.rs` is classified into KEEP (defends observer-receiver contract given a present prior row) or DELETE (defends now-impossible producer-ordering / NoPriorRow path).",
+            "AC2: DELETE-classified scenarios are removed in this step's commit. The commit message lists each deleted scenario by name with a one-line rationale tying it to the structural impossibility introduced by Solution 1' (gate guarantees `Running` row commits before `ExitEvent` reaches the consumer).",
+            "AC3: KEEP-classified scenarios continue to pass. If their setup previously had a defensive wait for the `Running` row, that wait is simplified or removed — the gate now guarantees ordering structurally.",
+            "AC4: No `#[ignore]`, no `#[allow(dead_code)]`, no salvaged-and-renamed scenarios per `feedback_delete_dont_gate`. If a helper function loses its callers, delete it in the same commit.",
+            "AC5: The post-deletion test count is less than or equal to the pre-deletion count — a deletion PR's correct shape is shrinking the test count, not growing it.",
+            "AC6: All remaining tests in `crates/overdrive-control-plane/tests/integration/job_lifecycle/` (including `exit_observer_running_gate.rs` from 01-01/01-03 and `crash_recovery_obs_write_rejected.rs` from the May-2 PR) continue to pass on Linux via `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests`.",
+            "AC7: `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests --no-run` succeeds on macOS.",
+            "AC8: `cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings` clean — no `dead_code` warnings introduced by orphaned helpers.",
+            "AC9: `cargo fmt --check` clean. Standard commit shape (no `--no-verify`)."
+          ],
+          "files_to_modify": [
+            "crates/overdrive-control-plane/tests/integration/job_lifecycle/exit_observer.rs"
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/job_lifecycle/exit_observer.rs",
+          "scenario_name": "test_triage_post_running_gate",
+          "tier": "structural",
+          "time_estimate_hours": 1.0,
+          "estimated_hours": 1.0,
+          "dependencies": ["01-03"],
+          "quality_gates": [
+            "Linux runtime: `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests` — all remaining tests PASS.",
+            "macOS compile: `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane --features integration-tests --no-run` succeeds.",
+            "`cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings` clean (no `dead_code` warnings from orphaned helpers).",
+            "`cargo fmt --check` clean. Standard commit shape (no `--no-verify`).",
+            "Test count is less-than-or-equal post-deletion (deletion PRs SHRINK test counts)."
+          ],
+          "deliverables": [
+            "One commit deleting now-impossible NoPriorRow scenarios with documented per-scenario rationale in the commit message; KEEP scenarios continue to pass."
+          ],
+          "implementation_scope": {
+            "production": [],
+            "tests": [
+              "crates/overdrive-control-plane/tests/integration/job_lifecycle/exit_observer.rs (split into KEEP/DELETE; delete DELETE-classified scenarios with rationale in commit message; simplify KEEP scenarios that had defensive Running-wait setup)"
+            ]
+          }
+        },
+        {
+          "id": "01-05",
+          "name": "Solution 4 — DST invariant: every consumed ExitEvent produces a visible outcome",
+          "description": "Add a DST `assert_eventually!` invariant to the simulation harness ensuring that for every `ExitEvent` consumed by the `exit_observer`, at least one of the following observable outcomes is produced: (a) an `obs.write(...)` of an `AllocStatusRow` with `state ∈ {Failed, Terminated}` for the same `alloc_id`; (b) a degraded `LifecycleEvent` broadcast carrying `TransitionReason::DriverInternalError` for the same `alloc_id` (May-2 escalation path); OR (c) a structured `tracing::error!` log naming the `alloc_id` and the underlying error. Location: TBD by crafter — likely the existing simulation invariant catalogue under `crates/overdrive-sim/` (e.g., `crates/overdrive-sim/src/invariants/...` or a new test under `crates/overdrive-sim/tests/integration/...` per `.claude/rules/testing.md` § 'Integration vs unit gating'). Per RCA §Approved fix: with Solution 1' landed, this invariant SHOULD never fire under the canonical flow; its load-bearing role is preventing future regressions of B/C/D (consumer one-shot read silent verdict, missing DST invariant). Closes the gap predecessor RCA `fix-exit-observer-write-retry/deliver/rca.md:107-109` named and `docs/evolution/2026-05-02-fix-exit-observer-write-retry.md:64` left open. The invariant runs in the standard DST seed sweep (per `.claude/rules/testing.md` § 'Tier 1 — Deterministic Simulation Testing'). Add at least one positive scenario (a happy-path `submit → Running → exit → Terminated` flow) and one negative scenario (the May-2 degraded escalation, which produces outcome (b) — the invariant must accept that outcome).",
+          "criteria": [],
+          "acceptance_criteria": [
+            "AC1: A new DST invariant is added to the simulation harness expressing: 'For every `ExitEvent` consumed by `exit_observer::run_with_retry → handle_exit_event`, at least one of (a) obs row write with state ∈ {Failed, Terminated} for the same alloc_id, (b) degraded LifecycleEvent carrying DriverInternalError for the same alloc_id, or (c) structured tracing::error! log naming the alloc_id is produced.' Implemented via `assert_eventually!` (or the equivalent Tier 1 macro) per `.claude/rules/testing.md` § 'Properties, not scenarios'.",
+            "AC2: The invariant location is one of: (a) `crates/overdrive-sim/src/invariants/...` (preferred — adds to the existing invariant catalogue); or (b) `crates/overdrive-sim/tests/integration/...` (acceptable if structured as a Tier 1 DST test). The crafter chooses based on the existing pattern; the choice is documented inline.",
+            "AC3: At least one positive scenario exercises the happy-path flow (`submit → Running → exit → Terminated`) and the invariant holds.",
+            "AC4: At least one negative scenario exercises the May-2 degraded-escalation path (via `SimObservationStore::inject_write_failure`) and the invariant ACCEPTS outcome (b) — degraded `LifecycleEvent` counts as a visible outcome.",
+            "AC5: The invariant runs in the standard DST seed sweep (per `.claude/rules/testing.md` § 'Tier 1' / 'Seeding and reproducibility'). At least one canonical seed reproduces both scenarios deterministically.",
+            "AC6: Per the RCA: with Solution 1' landed (steps 01-02/01-03), this invariant does NOT fire under the canonical flow. Its load-bearing role is preventing future regressions of B/C/D; the invariant is verifiable against current main as 'green-when-correct'.",
+            "AC7: All four DST tiers per `.claude/rules/testing.md` continue to pass — no existing seeds are disturbed by the new invariant.",
+            "AC8: `cargo xtask lima run -- cargo nextest run -p overdrive-sim --features integration-tests` (or the equivalent DST harness invocation per the existing pattern) passes.",
+            "AC9: `cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings` clean.",
+            "AC10: The commit message references the predecessor RCA gap closure: `fix-exit-observer-write-retry/deliver/rca.md:107-109` and `docs/evolution/2026-05-02-fix-exit-observer-write-retry.md:64`.",
+            "AC11: `cargo fmt --check` clean. Standard commit shape (no `--no-verify`)."
+          ],
+          "files_to_modify": [
+            "crates/overdrive-sim/src/invariants/exit_event_observable_outcome.rs",
+            "crates/overdrive-sim/src/invariants/mod.rs",
+            "crates/overdrive-sim/tests/integration/exit_event_observable_outcome.rs"
+          ],
+          "test_file": "crates/overdrive-sim/tests/integration/exit_event_observable_outcome.rs",
+          "scenario_name": "every_exit_event_produces_visible_outcome",
+          "tier": "structural",
+          "time_estimate_hours": 1.5,
+          "estimated_hours": 1.5,
+          "dependencies": ["01-03"],
+          "quality_gates": [
+            "`cargo xtask lima run -- cargo check --workspace --all-targets --features integration-tests` succeeds.",
+            "`cargo xtask lima run -- cargo nextest run -p overdrive-sim --features integration-tests` (or the equivalent DST harness invocation) passes — the new invariant holds across the standard seed sweep.",
+            "Linux runtime: `cargo xtask lima run -- cargo nextest run --workspace --features integration-tests` — all tests PASS (no existing seeds disturbed).",
+            "`cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings` clean.",
+            "`cargo fmt --check` clean. Standard commit shape (no `--no-verify`)."
+          ],
+          "deliverables": [
+            "One commit landing the Solution 4 DST invariant + at least one positive and one negative scenario covering the canonical and May-2 degraded paths, closing the gap predecessor RCA flagged."
+          ],
+          "implementation_scope": {
+            "production": [
+              "crates/overdrive-sim/src/invariants/exit_event_observable_outcome.rs (new invariant; or equivalent location per existing pattern)",
+              "crates/overdrive-sim/src/invariants/mod.rs (re-export)"
+            ],
+            "tests": [
+              "crates/overdrive-sim/tests/integration/exit_event_observable_outcome.rs (positive happy-path scenario + negative May-2 degraded-escalation scenario; or equivalent location per the existing DST harness pattern)"
+            ]
+          }
+        },
+        {
+          "id": "01-06",
+          "name": "Acceptance gate — remove sleep 0.5 from CLI fixtures; K1 honesty test passes ≥99/100 trials without the workaround",
+          "description": "This is the load-bearing acceptance gate per RCA §Risk assessment: 'Until K1 passes without the workaround, the fix is not delivered.' Remove the fixture-side concealment from BOTH CLI integration test fixtures: (1) `crates/overdrive-cli/tests/integration/coinflip_honesty_100_trials.rs` line 128 — strip `sleep 0.5;` from the bash `args`. Also remove the rustdoc paragraphs at lines 102-118 disclaiming the workaround (the entire 'The `[exec]` body wraps the coinflip in a brief `sleep 0.5`...' explanation block). Replace with a one-liner crediting this RCA fix: `Per fix-exit-observer-running-gate (Solution 1'): the action-shim's obs.write(Running) is now structurally happens-before the watcher's ExitEvent emission, so sub-millisecond-exit workloads no longer race. No fixture-side workaround required.`. (2) `crates/overdrive-cli/tests/integration/job_kind_streaming.rs` lines 235 and 255 — strip `sleep 0.5; ` from both `args` strings. Remove the rustdoc paragraphs at lines 218-227 (`/// The brief sleep 0.5 is load-bearing for fixture sequencing...` block) and the parallel block above `job_exit_nonzero_spec` at line 247 ('Same sleep 0.5 rationale...'). Replace with the same one-liner. After removal, the K1 honesty test (`coinflip_honesty_100_trials.rs:294-302`) MUST pass at threshold ≥99/100 trials per the existing test assertion — that is the load-bearing acceptance signal for this RCA. Run K1 explicitly: `cargo xtask lima run -- cargo nextest run -p overdrive-cli --features integration-tests -E 'test(coinflip_honesty_100_trials)'`. Run `job_kind_streaming` explicitly: `cargo xtask lima run -- cargo nextest run -p overdrive-cli --features integration-tests -E 'binary(job_kind_streaming)'`. Both must pass. If K1 fails (drops below 99/100), STOP and report the trial-by-trial breakdown — Solution 1' is not actually closing the race in some scenario the prior steps' tests did not catch, and the diagnostic loop loops back to steps 01-02/01-03. Standard commit (no `--no-verify`).",
+          "criteria": [],
+          "acceptance_criteria": [
+            "AC1: `crates/overdrive-cli/tests/integration/coinflip_honesty_100_trials.rs` line 128 has `sleep 0.5;` removed from the bash `args` array. The bash now reads: `\"if (( RANDOM % 2 )); then echo SUCCESS; exit 0; else echo ERROR >&2; exit 1; fi\"`.",
+            "AC2: `crates/overdrive-cli/tests/integration/coinflip_honesty_100_trials.rs` lines 102-118 (the rustdoc paragraphs disclaiming the `sleep 0.5` workaround, beginning with 'The `[exec]` body wraps the coinflip in a brief `sleep 0.5`...') are removed and replaced with the one-liner: `Per fix-exit-observer-running-gate (Solution 1'): the action-shim's obs.write(Running) is now structurally happens-before the watcher's ExitEvent emission, so sub-millisecond-exit workloads no longer race. No fixture-side workaround required.`",
+            "AC3: `crates/overdrive-cli/tests/integration/job_kind_streaming.rs` line 235 has `sleep 0.5; ` removed from `job_exit_zero_spec`'s `args`. The args now read: `[\"-c\", \"exit 0\"]`.",
+            "AC4: `crates/overdrive-cli/tests/integration/job_kind_streaming.rs` line 255 has `sleep 0.5; ` removed from `job_exit_nonzero_spec`'s `args`. The args now read: `[\"-c\", \"echo 'workload stderr line' >&2; exit 1\"]`.",
+            "AC5: `crates/overdrive-cli/tests/integration/job_kind_streaming.rs` lines 218-227 (the rustdoc 'The brief sleep 0.5 is load-bearing...' paragraph above `job_exit_zero_spec`) and the parallel paragraph above `job_exit_nonzero_spec` ('Same sleep 0.5 rationale as job_exit_zero_spec above.') are removed and replaced with the AC2 one-liner.",
+            "AC6: K1 honesty test (`coinflip_honesty_100_trials.rs:294-302` — the assertion `assert!(honesty_count >= 99, ...)`) PASSES under Linux runtime via `cargo xtask lima run -- cargo nextest run -p overdrive-cli --features integration-tests -E 'test(coinflip_honesty_100_trials)'`. The trial honesty count is ≥99/100.",
+            "AC7: All scenarios in `crates/overdrive-cli/tests/integration/job_kind_streaming.rs` PASS under Linux runtime via `cargo xtask lima run -- cargo nextest run -p overdrive-cli --features integration-tests -E 'binary(job_kind_streaming)'`.",
+            "AC8: If K1 fails (drops below 99/100 honesty trials), the step is BLOCKED and the failure is reported with trial-by-trial breakdown — Solution 1' is not actually closing the race in some scenario, and the diagnostic loop loops back to steps 01-02/01-03 to fix the structural gap. No `sleep 0.5` re-introduction is acceptable.",
+            "AC9: `cargo xtask lima run -- cargo nextest run --workspace --features integration-tests --no-run` succeeds on macOS (compile gate covers all crates).",
+            "AC10: `cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings` clean.",
+            "AC11: `cargo fmt --check` clean. Standard commit shape (no `--no-verify`)."
+          ],
+          "files_to_modify": [
+            "crates/overdrive-cli/tests/integration/coinflip_honesty_100_trials.rs",
+            "crates/overdrive-cli/tests/integration/job_kind_streaming.rs"
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/coinflip_honesty_100_trials.rs",
+          "scenario_name": "k1_cli_exit_code_honesty_100_trials",
+          "tier": "behavioural",
+          "time_estimate_hours": 1.0,
+          "estimated_hours": 1.0,
+          "dependencies": ["01-03", "01-05"],
+          "quality_gates": [
+            "Linux runtime K1: `cargo xtask lima run -- cargo nextest run -p overdrive-cli --features integration-tests -E 'test(coinflip_honesty_100_trials)'` — honesty count ≥99/100.",
+            "Linux runtime job_kind_streaming: `cargo xtask lima run -- cargo nextest run -p overdrive-cli --features integration-tests -E 'binary(job_kind_streaming)'` — all scenarios PASS.",
+            "macOS compile: `cargo xtask lima run -- cargo nextest run --workspace --features integration-tests --no-run` succeeds.",
+            "`cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings` clean.",
+            "`cargo fmt --check` clean. Standard commit shape (no `--no-verify`).",
+            "BLOCKER: if K1 fails, do NOT re-introduce `sleep 0.5`; loop back to steps 01-02/01-03."
+          ],
+          "deliverables": [
+            "One commit removing `sleep 0.5` from both CLI fixtures + replacing the disclaiming rustdoc with a one-liner crediting this RCA fix; K1 ≥99/100 trial pass under Linux runtime."
+          ],
+          "implementation_scope": {
+            "production": [],
+            "tests": [
+              "crates/overdrive-cli/tests/integration/coinflip_honesty_100_trials.rs (remove sleep 0.5 at line 128; replace rustdoc 102-118 with one-liner crediting this RCA)",
+              "crates/overdrive-cli/tests/integration/job_kind_streaming.rs (remove sleep 0.5 at lines 235 and 255; replace rustdoc 218-227 and the parallel block above job_exit_nonzero_spec with the same one-liner)"
+            ]
+          }
+        },
+        {
+          "id": "01-07",
+          "name": "Final integration sweep — workspace-wide tests + doctests + clippy + mutation diff under Lima",
+          "description": "Final cross-cutting verification gate. Run the full workspace test suite under Lima with the integration-tests feature enabled; run doctests separately (nextest does not execute doctests per `.claude/rules/testing.md` § 'Running tests'); run clippy with `-D warnings` workspace-wide; run a final per-PR mutation test scoped to the diff against `origin/main` per the canonical CI shape. Confirm all four tiers per `.claude/rules/testing.md` continue to pass: Tier 1 (DST), Tier 2 (BPF unit — N/A for this fix but workspace-wide invocation must not regress them), Tier 3 (real-kernel integration), Tier 4 (verifier + perf gates — same N/A but no regression). Per CLAUDE.md: clippy warnings, lint errors, and other code-quality findings are NOT deferrals — fix them in-scope. Also confirm the predecessor PR's tests (`crash_recovery_obs_write_rejected.rs` from `fix-exit-observer-write-retry`) continue to pass alongside the new tests landed by this RCA. If any test regresses, FIX IT IN THIS STEP — do not defer to a follow-up. Standard commit shape (no `--no-verify`); commit only if any tightening was needed (formatting drift, comment polish, etc.). If the prior steps left the workspace clean, this step's commit may be empty (allowed) — the gate is the verification, not the commit.",
+          "criteria": [],
+          "acceptance_criteria": [
+            "AC1: Workspace test suite passes under Linux runtime: `cargo xtask lima run -- cargo nextest run --workspace --features integration-tests` — every test in every crate PASSES.",
+            "AC2: Doctests pass: `cargo xtask lima run -- cargo test --doc --workspace` — every rustdoc example PASSES (this is the only allowed `cargo test` shape per `.claude/rules/testing.md`).",
+            "AC3: macOS compile gate: `cargo xtask lima run -- cargo nextest run --workspace --features integration-tests --no-run` succeeds.",
+            "AC4: Clippy clean workspace-wide: `cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings`.",
+            "AC5: `cargo fmt --check` clean.",
+            "AC6: Mutation testing kill rate ≥80% on the full diff vs origin/main: `cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests` (workspace-scoped). Run with `run_in_background: true`.",
+            "AC7: K1 honesty test from step 01-06 continues to pass at ≥99/100 trials.",
+            "AC8: Predecessor PR's tests (`crash_recovery_obs_write_rejected.rs` from `fix-exit-observer-write-retry`) continue to pass alongside the new tests this RCA landed.",
+            "AC9: No `dead_code`, `unused_imports`, `unused_variables` warnings introduced by the prior steps.",
+            "AC10: dst-lint passes: `cargo xtask lima run -- cargo xtask dst-lint` — no `core`-class crate gained a banned real-infra dependency (e.g., `Instant::now`, `tokio::net::*`, `rand::thread_rng`, `std::fs` in async fn). The new `tokio::sync::oneshot` usage in production is fine — it is not a clock or a real-infra primitive.",
+            "AC11: If any test regresses or any clippy/fmt finding surfaces, FIX IT IN THIS STEP per CLAUDE.md (clippy is not a deferral). If a fix lands, the commit message names the finding and the fix; if no fix was needed, this step's commit may be empty (allowed). Standard commit shape (no `--no-verify`)."
+          ],
+          "files_to_modify": [],
+          "test_file": "",
+          "scenario_name": "final_integration_sweep",
+          "tier": "structural",
+          "time_estimate_hours": 1.0,
+          "estimated_hours": 1.0,
+          "dependencies": ["01-06"],
+          "quality_gates": [
+            "Linux runtime workspace: `cargo xtask lima run -- cargo nextest run --workspace --features integration-tests` PASSES.",
+            "Doctests: `cargo xtask lima run -- cargo test --doc --workspace` PASSES.",
+            "macOS compile: `cargo xtask lima run -- cargo nextest run --workspace --features integration-tests --no-run` succeeds.",
+            "Workspace clippy: `cargo xtask lima run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings` clean.",
+            "`cargo fmt --check` clean.",
+            "dst-lint: `cargo xtask lima run -- cargo xtask dst-lint` PASSES.",
+            "Mutation diff: `cargo xtask lima run -- cargo xtask mutants --diff origin/main --features integration-tests` kill rate ≥80%. Run with `run_in_background: true`.",
+            "K1 still passes ≥99/100; predecessor PR tests still pass.",
+            "Standard commit shape (no `--no-verify`); empty commit acceptable if no tightening was needed."
+          ],
+          "deliverables": [
+            "One commit (possibly empty) confirming the final integration sweep PASSES across all four tiers; any code-quality tightening is landed in-scope per CLAUDE.md (clippy is not a deferral)."
+          ],
+          "implementation_scope": {
+            "production": [],
+            "tests": []
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -166,6 +166,53 @@ filter = '''
 '''
 test-group = 'bpf-artifact-shared'
 
+# Test group for any test that spawns workloads via the production
+# `ExecDriver` against the per-allocation cgroup hierarchy at
+# `/sys/fs/cgroup/overdrive.slice/workloads.slice/alloc-<job>-<n>.scope`.
+#
+# Per `.claude/rules/testing.md` § "Leaked workload cgroups across
+# runs": the cgroup scope hierarchy is a process-global resource —
+# parallel test PROCESSES creating allocs with overlapping ids can
+# race on `mkdir` / `cgroup.kill` semantics, and a workload's exit
+# under one test can be picked up by another test's exit observer
+# subscriber. `serial_test::serial(...)` annotations within each
+# binary are kept for same-process collision defence, but the
+# nextest layer is the only place that can enforce the cross-process
+# single-writer constraint — same rationale as `bpf-artifact-shared`
+# above.
+[test-groups.cgroup-workload-shared]
+max-threads = 1
+
+[[profile.default.overrides]]
+filter = '''
+    binary(integration)
+    & (
+        test(s_02_01_job_exits_zero_reports_succeeded)
+        | test(s_02_02_job_exits_nonzero_reports_failed_with_attempts)
+        | test(s_02_03_intermediate_attempt_failure_does_not_close_stream)
+        | test(s_02_04_third_attempt_zero_reports_succeeded)
+        | test(s_02_05_anti_scenario_no_is_running_with)
+        | test(s_02_06_submit_echo_names_kind_upfront)
+        | test(s_02_09_k1_honesty_100_trials)
+    )
+'''
+test-group = 'cgroup-workload-shared'
+
+# S-02-09 K1 honesty 100-trial test (workload-kind-discriminator slice
+# 02-07). Each trial spawns a real `/bin/bash` workload via the
+# production `ExecDriver` against the per-allocation cgroup hierarchy,
+# waits for the natural-exit observation row, projects to a streaming
+# `JobSubmitEvent` terminal, and consumes via the CLI handler. Solo
+# wall-clock per trial is ~1–2s; 100 trials × 2s = 200s upper bound.
+# A 600s budget (60s × 10) absorbs the worst-case cold-cache + Lima
+# virtio-net contention without weakening the K1 deadline. Per
+# `.claude/rules/testing.md` § "Flaky DST is a bug, never a 'just
+# rerun it'": K1 below threshold means the code is wrong, NOT the
+# test — do not lower the trial count or threshold.
+[[profile.default.overrides]]
+filter = 'binary(integration) & test(s_02_09_k1_honesty_100_trials)'
+slow-timeout = { period = "60s", terminate-after = 10 }
+
 [profile.ci]
 # CI runs the same suite with structured output. Retries stay at zero:
 # `.claude/rules/testing.md` — "Flaky DST is a bug … never a just-rerun-it."

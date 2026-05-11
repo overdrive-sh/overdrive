@@ -17,6 +17,18 @@ use overdrive_control_plane::api::{
 };
 use overdrive_core::TransitionReason;
 
+// workload-kind-discriminator slice 05 — Schedule submit/alloc-status
+// render functions and the SCHEDULE_EXECUTION_TRACKING_URL SSOT
+// constant (KPI K5 byte-equality across surfaces). Per ADR-0047 §1
+// + slice 05 spec.
+pub mod schedule;
+
+// workload-kind-discriminator slice 06 — Service `[[listener]]`
+// render functions and the SERVICE_VIP_ALLOCATOR_TRACKING_URL SSOT
+// constant (KPI K6 byte-equality across surfaces). Per ADR-0047 §1
+// + slice 06 spec.
+pub mod listener;
+
 use crate::commands::alloc::AllocStatusOutput;
 use crate::commands::cluster::ClusterStatusOutput;
 use crate::commands::job::{StopOutput, SubmitOutput};
@@ -75,11 +87,11 @@ pub fn node_list(out: &NodeListOutput) -> String {
     s
 }
 
-/// Render a successful `job submit` as a multi-line operator-facing
+/// Render a successful `deploy` as a multi-line operator-facing
 /// summary.
 ///
 /// Per ADR-0020 §Decision §2 the labelled set is `Accepted.`,
-/// `Job ID:`, `Intent key:`, `Spec digest:`, `Outcome:`, `Endpoint:`,
+/// `Workload ID:`, `Intent key:`, `Spec digest:`, `Outcome:`, `Endpoint:`,
 /// `Next:`. The `Commit index:` line was dropped — `commit_index` was
 /// an in-memory `u64`, never a substitute for the spec digest as a
 /// stable identity (see ADR-0020 §Considered alternatives §D).
@@ -95,11 +107,11 @@ pub fn node_list(out: &NodeListOutput) -> String {
 /// follow-up command so the operator can continue without consulting
 /// the docs.
 #[must_use]
-pub fn job_submit_accepted(out: &SubmitOutput) -> String {
+pub fn workload_submit_accepted(out: &SubmitOutput) -> String {
     use std::fmt::Write as _;
     let mut s = String::new();
     let _ = writeln!(s, "Accepted.");
-    let _ = writeln!(s, "Job ID:        {}", out.job_id);
+    let _ = writeln!(s, "Workload ID:   {}", out.workload_id);
     let _ = writeln!(s, "Intent key:    {}", out.intent_key);
     let _ = writeln!(s, "Spec digest:   {}", out.spec_digest);
     let _ = writeln!(s, "Outcome:       {}", outcome_human(out.outcome));
@@ -123,19 +135,19 @@ const fn outcome_human(outcome: IdempotencyOutcome) -> &'static str {
 
 /// Render the result of `overdrive job stop` per AC.
 ///
-/// On `Stopped`, the line is `Stopped job '<id>'.`; on `AlreadyStopped`
-/// the line names the idempotent path so the operator knows the call
-/// was a no-op. Per ADR-0027 + Step 02-04 AC.
+/// On `Stopped`, the line is `Stopped workload '<id>'.`; on
+/// `AlreadyStopped` the line names the idempotent path so the operator
+/// knows the call was a no-op. Per ADR-0027 + Step 02-04 AC.
 #[must_use]
-pub fn job_stop_accepted(out: &StopOutput) -> String {
+pub fn workload_stop_accepted(out: &StopOutput) -> String {
     use std::fmt::Write as _;
     let mut s = String::new();
     match out.outcome {
         StopOutcome::Stopped => {
-            let _ = writeln!(s, "Stopped job '{}'.", out.job_id);
+            let _ = writeln!(s, "Stopped workload '{}'.", out.workload_id);
         }
         StopOutcome::AlreadyStopped => {
-            let _ = writeln!(s, "Job '{}' was already stopped (no-op).", out.job_id);
+            let _ = writeln!(s, "Workload '{}' was already stopped (no-op).", out.workload_id);
         }
     }
     let _ = writeln!(s, "Endpoint: {}", out.endpoint);
@@ -153,7 +165,7 @@ pub fn job_stop_accepted(out: &StopOutput) -> String {
 pub fn alloc_status(out: &AllocStatusOutput) -> String {
     use std::fmt::Write as _;
     let mut s = String::new();
-    let _ = writeln!(s, "Job ID:        {}", out.job_id);
+    let _ = writeln!(s, "Workload ID:   {}", out.workload_id);
     let _ = writeln!(s, "Spec digest:   {}", out.spec_digest);
     let _ = writeln!(s, "Allocations:   {}", out.allocations_total);
     if out.allocations_total == 0 && !out.empty_state_message.is_empty() {
@@ -185,8 +197,8 @@ pub fn alloc_status(out: &AllocStatusOutput) -> String {
 pub fn alloc_snapshot(out: &AllocStatusResponse) -> String {
     use std::fmt::Write as _;
     let mut s = String::new();
-    if let Some(job_id) = &out.job_id {
-        let _ = writeln!(s, "Job ID:        {job_id}");
+    if let Some(workload_id) = &out.workload_id {
+        let _ = writeln!(s, "Workload ID:   {workload_id}");
     }
     if let Some(digest) = &out.spec_digest {
         let _ = writeln!(s, "Spec digest:   {digest}");
@@ -323,7 +335,7 @@ pub const fn cli_error_to_exit_code(_err: &CliError) -> i32 {
 /// in `docs/.../journey/walking-skeleton.md`. Five labelled sections:
 ///
 /// ```text
-/// Error: job '<name>' did not converge to running.
+/// Error: workload '<name>' did not converge to running.
 ///   reason: <human_readable rendering>
 ///   last-event: <verbatim driver text>
 ///   reproducer: overdrive alloc status --job <name>
@@ -345,14 +357,14 @@ pub const fn cli_error_to_exit_code(_err: &CliError) -> i32 {
 /// cause-class table.
 #[must_use]
 pub fn format_failed_block(
-    job_name: &str,
+    workload_name: &str,
     reason: Option<&TransitionReason>,
     last_event_detail: Option<&str>,
     terminal_reason: &TerminalReason,
 ) -> String {
     use std::fmt::Write as _;
     let mut s = String::new();
-    let _ = writeln!(s, "Error: job '{job_name}' did not converge to running.");
+    let _ = writeln!(s, "Error: workload '{workload_name}' did not converge to running.");
 
     // `reason:` line — standalone reason wins; otherwise derive from
     // terminal_reason. The streaming `ConvergedFailed.reason` carries
@@ -372,7 +384,7 @@ pub fn format_failed_block(
 
     // Reproducer line — points the operator at `alloc status --job <name>`
     // for the structured snapshot. Per US-02 walking-skeleton transcript.
-    let _ = writeln!(s, "  reproducer: overdrive alloc status --job {job_name}");
+    let _ = writeln!(s, "  reproducer: overdrive alloc status --job {workload_name}");
 
     // Blank line separates the structured block from the variant-specific
     // Hint line.
@@ -472,19 +484,415 @@ const fn hint_for_transition_reason(reason: &TransitionReason) -> &'static str {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Job-kind render fns — slice 02 of `workload-kind-discriminator`.
+// ---------------------------------------------------------------------------
+//
+// Per ADR-0047 §3 [D2] / [D7]: Job kind workloads are run-to-completion;
+// they have no `ConvergedRunning` shape. The structural fix closing the
+// bug under audit (RCA: B+C+D conjunction) renders Job-kind submits via
+// these dedicated functions whose output cannot contain the historical
+// `"is running with"` / `"(took live)"` substrings.
+
+/// Render the operator-facing submit echo for a Job-kind workload.
+///
+/// Per slice 02 spec / S-02-06: emitted BEFORE any streaming events
+/// so the operator sees the kind upfront and understands a Job is
+/// run-to-completion (not a long-running Service).
+///
+/// Form: `Submitting job '<name>' (kind=Job, run-to-completion)\n`.
+#[must_use]
+pub fn format_job_submit_echo(workload_name: &str) -> String {
+    format!("Submitting job '{workload_name}' (kind=Job, run-to-completion)\n")
+}
+
+/// Render the operator-facing terminal-success line for a Job-kind
+/// workload. Pure function. Per slice 02 spec / S-02-01.
+///
+/// A Job that exits 0 reports `Succeeded` with exit code, duration,
+/// and attempts. The CLI maps `Succeeded` → process exit 0.
+///
+/// Form: `Job '<name>' succeeded. (exit code 0, took <duration>, attempts <N>)\n`
+#[must_use]
+pub fn format_job_succeeded_summary(
+    workload_name: &str,
+    exit_code: i32,
+    took_human: &str,
+    attempts: u32,
+) -> String {
+    format!(
+        "Job '{workload_name}' succeeded. (exit code {exit_code}, took {took_human}, attempts {attempts})\n"
+    )
+}
+
+/// Render the operator-facing terminal-stopped line for a Job-kind
+/// workload. Pure function.
+///
+/// An operator stop is neither success nor failure — the workload was
+/// interrupted before natural completion.
+///
+/// Form: `Job '<name>' stopped by <initiator>. (took <duration>, attempts <N>)\n`
+#[must_use]
+pub fn format_job_stopped_summary(
+    workload_name: &str,
+    stopped_by: &str,
+    took_human: &str,
+    attempts: u32,
+) -> String {
+    format!(
+        "Job '{workload_name}' stopped by {stopped_by}. (took {took_human}, attempts {attempts})\n"
+    )
+}
+
+/// Decide whether a Job's retry budget is exhausted. Pure function.
+/// Extracted from `consume_stream_job` for testability.
+#[must_use]
+pub const fn is_backoff_exhausted(attempts: u32, max_attempts: u32) -> bool {
+    attempts >= max_attempts && max_attempts > 1
+}
+
+/// Render the operator-facing terminal-failure line for a Job-kind
+/// workload. Pure function. Per slice 02 spec / S-02-02.
+///
+/// Form: `Job '<name>' failed. (exit code <N>, took <duration>, attempts <X> of <Y> [(backoff exhausted)])\nstderr tail:\n<tail>`
+#[must_use]
+pub fn format_job_failed_summary(
+    workload_name: &str,
+    exit_code: i32,
+    took_human: &str,
+    attempts: u32,
+    max_attempts: u32,
+    backoff_exhausted: bool,
+    stderr_tail: &str,
+) -> String {
+    use std::fmt::Write as _;
+    let mut s = String::new();
+    let attempts_str = if backoff_exhausted {
+        format!("{attempts} of {max_attempts} (backoff exhausted)")
+    } else {
+        format!("{attempts} of {max_attempts}")
+    };
+    let _ = writeln!(
+        s,
+        "Job '{workload_name}' failed. (exit code {exit_code}, took {took_human}, attempts {attempts_str})"
+    );
+    if !stderr_tail.is_empty() {
+        // Per step 02-05 / ADR-0033 Amendment 2026-05-10: the header
+        // names the line budget so the operator knows whether they're
+        // looking at the workload's full stderr or the trailing
+        // window. `STDERR_TAIL_LINES` is the project-wide SSOT —
+        // sourced from the trait surface in `overdrive_core`, NOT
+        // hardcoded here.
+        let _ = writeln!(
+            s,
+            "stderr (last {} lines):",
+            overdrive_core::traits::driver::STDERR_TAIL_LINES
+        );
+        // Indent each line for operator-readability.
+        for line in stderr_tail.lines() {
+            let _ = writeln!(s, "  {line}");
+        }
+    }
+    s
+}
+
+/// Render an intermediate Job attempt-failed line. Pure function.
+/// Per slice 02 spec / S-02-03 — intermediate (non-terminal) line;
+/// the streaming session stays open after this is emitted.
+///
+/// Form: `Job '<name>' attempt <N> failed (exit <X>). Retrying in <duration>.\n`
+#[must_use]
+pub fn format_job_attempt_failed(
+    workload_name: &str,
+    attempt_index: u32,
+    exit_code: i32,
+    next_attempt_delay: &str,
+) -> String {
+    format!(
+        "Job '{workload_name}' attempt {attempt_index} failed (exit {exit_code}). Retrying in {next_attempt_delay}.\n"
+    )
+}
+
 /// Render the streaming `ConvergedRunning` summary line — the
 /// operator-facing exit-0 success render. Pure function.
 ///
-/// Per slice 02 step 02-04 acceptance criteria:
-/// `Job '<name>' is running with <running>/<desired> replicas (took <duration>)`.
+/// Per slice 04 of `workload-kind-discriminator`: the function's sole
+/// caller is the Service code path (post-WorkloadSpec discriminator),
+/// so the rendered vocabulary names "Service". The legacy "Job"
+/// vocabulary was renamed in a single-cut greenfield migration —
+/// `JobSubmitEvent` carries no `ConvergedRunning` variant in the
+/// post-slice-02 tagged-event design. The literal `"live"` (RCA root
+/// cause D) is gone; the `took_human` argument carries a measured
+/// Clock-derived value rendered by `format_human_duration`.
+///
+/// Form: `Service '<name>' is running with <running>/<desired> replicas (took <duration>)`.
 #[must_use]
 pub fn format_running_summary(
-    job_name: &str,
+    workload_name: &str,
     running: u32,
     desired: u32,
     took_human: &str,
 ) -> String {
-    format!("Job '{job_name}' is running with {running}/{desired} replicas (took {took_human})\n")
+    format!(
+        "Service '{workload_name}' is running with {running}/{desired} replicas (took {took_human})\n"
+    )
+}
+
+/// Format a [`std::time::Duration`] for operator-facing display.
+///
+/// Replaces the historical `"live"` literal (US-06 of
+/// `workload-kind-discriminator`) used as a duration placeholder in
+/// the streaming `ConvergedRunning` summary. The output format is
+/// chosen for human readability at typical convergence latencies
+/// (single-digit ms to a few seconds):
+///
+/// - `<1ms` → `"<1ms"`
+/// - `<1s`  → `"<N>ms"`
+/// - `<60s` → `"<N>.<dec>s"` (one decimal place)
+/// - `>=60s` → `"<M>m<S>s"`
+///
+/// Pure function; no allocations beyond the returned `String`.
+#[must_use]
+pub fn format_human_duration(took: std::time::Duration) -> String {
+    let total_millis = took.as_millis();
+    if total_millis == 0 {
+        return "<1ms".to_string();
+    }
+    if total_millis < 1_000 {
+        return format!("{total_millis}ms");
+    }
+    let total_secs = took.as_secs();
+    if total_secs < 60 {
+        // Render with one decimal place for sub-minute durations.
+        let tenths = (took.as_millis() % 1_000) / 100;
+        return format!("{total_secs}.{tenths}s");
+    }
+    let minutes = total_secs / 60;
+    let seconds = total_secs % 60;
+    format!("{minutes}m{seconds}s")
+}
+
+// ---------------------------------------------------------------------------
+// Job-kind alloc-status render fns — slice 03 step 02-02
+// ---------------------------------------------------------------------------
+//
+// Per ADR-0047 §4 / [D4] of the workload-kind-discriminator feature:
+// the alloc-status render layer branches on `AllocStatusResponse.kind`
+// without re-fetching intent. Service shows replicas + Restarts (no
+// Exit column); Job shows Verdict + per-attempt Exit codes + stderr
+// tail; Schedule shows cron + deferral. The match on `WorkloadKind`
+// is exhaustive — adding a future kind requires adding one match arm.
+
+/// Operator-facing terminal verdict for a Job-kind workload.
+///
+/// Computed from the rows' terminal field at render time per
+/// `.claude/rules/development.md` § "Persist inputs, not derived
+/// state" — Verdict is DERIVED from the row's terminal, NOT
+/// persisted as a column on the wire. Sourced fresh on every render.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JobVerdict {
+    /// Job exited with a clean terminal (any attempt rolled
+    /// `Terminated` / `Stopped { by: Process }` with `exit_code` 0).
+    Succeeded,
+    /// Job exhausted its backoff budget — every attempt failed.
+    Failed,
+    /// Job has at least one Running attempt and no terminal yet.
+    InProgress,
+}
+
+/// Render the operator-facing `Verdict:` line for a Job-kind alloc
+/// status. Pure function. Per slice 03 / S-03-02, S-03-03, S-03-04.
+#[must_use]
+pub fn format_job_verdict(verdict: JobVerdict) -> String {
+    let body = match verdict {
+        JobVerdict::Succeeded => "Succeeded",
+        JobVerdict::Failed => "Failed (backoff exhausted)",
+        JobVerdict::InProgress => "In progress (no terminal yet)",
+    };
+    format!("Verdict: {body}\n")
+}
+
+/// Derive a [`JobVerdict`] from a Job-kind alloc status's per-attempt
+/// rows. Pure function — operates on the wire-shape rows.
+///
+/// The classification rule (per design [D4] / `.claude/rules/development.md`
+/// § "Persist inputs, not derived state"):
+///
+/// - any `Terminated` row with `exit_code: Some(0)` → `Succeeded`
+/// - any `Running` row with no terminal sibling → `InProgress`
+/// - empty `rows` (no allocations yet) → `InProgress`
+/// - else (every row is `Failed` or terminated-non-zero) → `Failed`
+#[must_use]
+pub fn derive_job_verdict(rows: &[overdrive_control_plane::api::AllocStatusRowBody]) -> JobVerdict {
+    use overdrive_control_plane::api::AllocStateWire;
+    let any_succeeded = rows
+        .iter()
+        .any(|r| matches!(r.state, AllocStateWire::Terminated) && r.exit_code == Some(0));
+    if any_succeeded {
+        return JobVerdict::Succeeded;
+    }
+    let any_running = rows.iter().any(|r| matches!(r.state, AllocStateWire::Running));
+    if any_running {
+        return JobVerdict::InProgress;
+    }
+    if rows.is_empty() {
+        return JobVerdict::InProgress;
+    }
+    JobVerdict::Failed
+}
+
+/// Render the operator-facing header for a Job-kind alloc status.
+/// Pure function. Per slice 03 / step 02-02 acceptance criteria.
+///
+/// Form:
+/// ```text
+/// Job '<name>' (kind: Job)
+/// Spec digest: <digest>
+/// Verdict: <verdict body>
+/// ```
+#[must_use]
+pub fn format_job_alloc_status_header(
+    workload_name: &str,
+    spec_digest: &str,
+    verdict: JobVerdict,
+) -> String {
+    use std::fmt::Write as _;
+    let mut s = String::new();
+    let _ = writeln!(s, "Job '{workload_name}' (kind: Job)");
+    let _ = writeln!(s, "Spec digest: {spec_digest}");
+    s.push_str(&format_job_verdict(verdict));
+    s
+}
+
+/// Render the per-attempt table for a Job-kind alloc status.
+/// Pure function. Per slice 03 / step 02-02 acceptance criteria.
+///
+/// Columns: `Attempt / State / Exit / Started / Duration`. Running
+/// attempts (no terminal yet) render Exit as em-dash (—, U+2014).
+/// KPI K3 byte-equality: every persisted `exit_code`'s canonical
+/// decimal form appears in the rendered Exit cell verbatim.
+#[must_use]
+pub fn format_job_alloc_status_attempts_table(
+    rows: &[overdrive_control_plane::api::AllocStatusRowBody],
+) -> String {
+    use std::fmt::Write as _;
+    let mut s = String::new();
+    let _ = writeln!(
+        s,
+        "{:<8} {:<12} {:<6} {:<20} {:<10}",
+        "Attempt", "State", "Exit", "Started", "Duration",
+    );
+    for (i, row) in rows.iter().enumerate() {
+        let exit_cell = row.exit_code.map_or_else(|| "\u{2014}".to_string(), |c| c.to_string());
+        let started = row.started_at.as_deref().unwrap_or("\u{2014}");
+        // Phase 1: duration is not yet observed end-to-end; render em-dash.
+        let duration = "\u{2014}";
+        let _ = writeln!(
+            s,
+            "{:<8} {:<12} {:<6} {:<20} {:<10}",
+            i + 1,
+            state_label(row.state),
+            exit_cell,
+            started,
+            duration,
+        );
+    }
+    s
+}
+
+/// Render the operator-facing alloc-status output, branching on
+/// [`overdrive_core::aggregate::WorkloadKind`] per design [D4].
+///
+/// - Service: header + `Replicas (desired/running): N/M` + per-alloc
+///   table with columns `Alloc / State / Restarts / Since` (NO Exit).
+/// - Job: header (`Job '...' (kind: Job)`) + Verdict + per-attempt
+///   table with columns `Attempt / State / Exit / Started / Duration`
+///   + stderr tail on Failed.
+/// - Schedule: header + cron + deferral note.
+///
+/// The match on `WorkloadKind` is EXHAUSTIVE per ADR-0047 §1 — no
+/// catch-all wildcard. Future kinds require explicit arms.
+#[must_use]
+pub fn alloc_status_kind_aware(out: &AllocStatusResponse) -> String {
+    use overdrive_core::aggregate::WorkloadKind;
+    use std::fmt::Write as _;
+    let kind = out.kind.unwrap_or(WorkloadKind::Service);
+    let workload_name = out.workload_id.as_deref().unwrap_or("(unknown)");
+    let spec_digest = out.spec_digest.as_deref().unwrap_or("");
+
+    match kind {
+        WorkloadKind::Service => {
+            let mut s = String::new();
+            let _ = writeln!(s, "Service '{workload_name}' (kind: Service)");
+            if !spec_digest.is_empty() {
+                let _ = writeln!(s, "Spec digest: {spec_digest}");
+            }
+            let _ = writeln!(
+                s,
+                "Replicas (desired/running): {}/{}",
+                out.replicas_desired, out.replicas_running,
+            );
+            // Per-alloc table — Service columns: Alloc / State / Restarts / Since.
+            let _ =
+                writeln!(s, "{:<24} {:<12} {:<10} {:<20}", "Alloc", "State", "Restarts", "Since");
+            // Restarts default to 0 in Phase 1 (per-alloc restart counter
+            // not surfaced on the wire row body yet — this is a
+            // forward-compat placeholder).
+            for row in &out.rows {
+                let since = row.started_at.as_deref().unwrap_or("\u{2014}");
+                let _ = writeln!(
+                    s,
+                    "{:<24} {:<12} {:<10} {:<20}",
+                    row.alloc_id,
+                    state_label(row.state),
+                    "0",
+                    since,
+                );
+            }
+            s
+        }
+        WorkloadKind::Job => {
+            let mut s = String::new();
+            let verdict = derive_job_verdict(&out.rows);
+            s.push_str(&format_job_alloc_status_header(workload_name, spec_digest, verdict));
+            s.push('\n');
+            s.push_str(&format_job_alloc_status_attempts_table(&out.rows));
+            // stderr tail on Failed: pull from the last attempt's
+            // `error` field if present (the action shim threads
+            // `prior_row.detail` / `prior_row.stderr_tail` onto the
+            // wire row body's `error` field).
+            if matches!(verdict, JobVerdict::Failed) {
+                if let Some(last) = out.rows.last() {
+                    if let Some(err) = &last.error {
+                        if !err.is_empty() {
+                            s.push('\n');
+                            let _ = writeln!(
+                                s,
+                                "stderr (last {} lines):",
+                                overdrive_core::traits::driver::STDERR_TAIL_LINES
+                            );
+                            for line in err.lines() {
+                                let _ = writeln!(s, "  {line}");
+                            }
+                        }
+                    }
+                }
+            }
+            s
+        }
+        WorkloadKind::Schedule => {
+            // Schedule branch — minimal Phase-1 rendering. Slice 05
+            // (job_submit_schedule) provides the deferral surface;
+            // here we name the kind so the dispatcher is exhaustive.
+            let mut s = String::new();
+            let _ = writeln!(s, "Schedule '{workload_name}' (kind: Schedule)");
+            if !spec_digest.is_empty() {
+                let _ = writeln!(s, "Spec digest: {spec_digest}");
+            }
+            let _ = writeln!(s, "{}", crate::render::schedule::SCHEDULE_EXECUTION_TRACKING_URL);
+            s
+        }
+    }
 }
 
 /// Render the streaming `ConvergedStopped` summary line — the
@@ -492,20 +900,26 @@ pub fn format_running_summary(
 /// reaches a clean terminal stop. Pure function.
 ///
 /// Mirrors `format_running_summary`'s shape (single line, trailing
-/// newline). The `by` argument names the initiator: operator-driven
-/// stop intent, reconciler-driven convergence to terminal, or natural
-/// process exit. `StoppedBy` is `#[non_exhaustive]` per
+/// newline). The `kind` argument is the workload-kind discriminator
+/// per ADR-0047 / slice 04 of `workload-kind-discriminator`: it picks
+/// the operator-facing vocabulary so a Service stop reads `Service
+/// '...' was stopped by ...`, a Job stop reads `Job '...' was stopped
+/// by ...`, and a Schedule stop reads `Schedule '...' was deregistered
+/// by ...` (Schedule is registered/deregistered, not "stopped" — the
+/// vocabulary mirrors slice 05's submit-side phrasing).
+///
+/// The `by` argument names the initiator: operator-driven stop intent,
+/// reconciler-driven convergence to terminal, or natural process exit.
+/// `StoppedBy` is `#[non_exhaustive]` per
 /// `overdrive_core::transition_reason`; the catch-all arm carries
 /// neutral phrasing so a future variant does not silently render an
 /// empty initiator.
 ///
-/// Operator-facing form:
-/// `Job '<name>' was stopped by <operator|reconciler|process>.`
-///
 /// RCA: `docs/feature/fix-converged-stopped-cli-arm/deliver/rca.md`.
 #[must_use]
 pub fn format_stopped_summary(
-    job_name: &str,
+    workload_name: &str,
+    kind: overdrive_core::aggregate::WorkloadKind,
     by: overdrive_core::transition_reason::StoppedBy,
 ) -> String {
     let initiator = match by {
@@ -516,5 +930,15 @@ pub fn format_stopped_summary(
         // any Phase-2+ variant added without updating this mapping.
         _ => "an unrecognised initiator",
     };
-    format!("Job '{job_name}' was stopped by {initiator}.\n")
+    match kind {
+        overdrive_core::aggregate::WorkloadKind::Service => {
+            format!("Service '{workload_name}' was stopped by {initiator}.\n")
+        }
+        overdrive_core::aggregate::WorkloadKind::Job => {
+            format!("Job '{workload_name}' was stopped by {initiator}.\n")
+        }
+        overdrive_core::aggregate::WorkloadKind::Schedule => {
+            format!("Schedule '{workload_name}' was deregistered by {initiator}.\n")
+        }
+    }
 }

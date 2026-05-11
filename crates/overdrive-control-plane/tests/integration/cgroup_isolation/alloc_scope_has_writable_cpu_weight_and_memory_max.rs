@@ -99,7 +99,7 @@ where
 }
 
 /// Best-effort cleanup of the alloc scope this test creates. Mirrors
-/// the `AllocCleanup` pattern from `tests/integration/job_lifecycle/cleanup.rs`,
+/// the `AllocCleanup` pattern from `tests/integration/workload_lifecycle/cleanup.rs`,
 /// but inlined because we don't have an obs store handle to enumerate
 /// (we know the single `AllocationId` we care about).
 struct ScopeCleanup {

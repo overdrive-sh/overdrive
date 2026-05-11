@@ -119,7 +119,7 @@ fn reconciler_is_pure_passes_on_default_harness() {
 
 /// `ViewStoreRoundtripIsLossless` runs in the default catalogue and
 /// passes on a clean harness build. proptest-backed; covers
-/// `JobLifecycleView` and the unit-View case (`NoopHeartbeat`).
+/// `WorkloadLifecycleView` and the unit-View case (`NoopHeartbeat`).
 #[test]
 fn view_store_roundtrip_is_lossless_passes_on_default_harness() {
     let report = Harness::new()

@@ -9,7 +9,7 @@
 //! Ord order (`BTreeMap` iteration).
 //!
 //! This is the walking-skeleton driver for 02-02: until the runtime
-//! boot path actually registers `JobLifecycle`, the test fails because
+//! boot path actually registers `WorkloadLifecycle`, the test fails because
 //! the rendered list contains only `noop-heartbeat`.
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
@@ -21,7 +21,7 @@ use axum::extract::State;
 use overdrive_control_plane::api::ClusterStatus;
 use overdrive_control_plane::handlers::cluster_status;
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
-use overdrive_control_plane::{AppState, job_lifecycle, noop_heartbeat};
+use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
 use overdrive_core::id::NodeId;
 use overdrive_core::traits::driver::DriverType;
 use overdrive_core::traits::observation_store::ObservationStore;
@@ -35,7 +35,7 @@ async fn build_app_state(tmp: &TempDir) -> AppState {
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
     runtime.register(noop_heartbeat()).await.expect("register noop-heartbeat");
-    runtime.register(job_lifecycle()).await.expect("register job-lifecycle");
+    runtime.register(workload_lifecycle()).await.expect("register job-lifecycle");
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =

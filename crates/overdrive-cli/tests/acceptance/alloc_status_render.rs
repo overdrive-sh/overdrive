@@ -24,13 +24,13 @@ const SAMPLE_DIGEST: &str = "0123456789abcdef0123456789abcdef0123456789abcdef012
 
 fn running_fixture() -> AllocStatusResponse {
     AllocStatusResponse {
-        job_id: Some("payments-v2".to_string()),
+        workload_id: Some("payments-v2".to_string()),
         spec_digest: Some(SAMPLE_DIGEST.to_string()),
         replicas_desired: 1,
         replicas_running: 1,
         rows: vec![AllocStatusRowBody {
             alloc_id: "alloc-payments-v2-0".to_string(),
-            job_id: "payments-v2".to_string(),
+            workload_id: "payments-v2".to_string(),
             node_id: "node-a".to_string(),
             state: AllocStateWire::Running,
             reason: None,
@@ -47,18 +47,19 @@ fn running_fixture() -> AllocStatusResponse {
             error: Some("driver started (pid 12345)".to_string()),
         }],
         restart_budget: Some(RestartBudget { used: 0, max: 5, exhausted: false }),
+        kind: None,
     }
 }
 
 fn failed_fixture() -> AllocStatusResponse {
     AllocStatusResponse {
-        job_id: Some("payments-v2".to_string()),
+        workload_id: Some("payments-v2".to_string()),
         spec_digest: Some(SAMPLE_DIGEST.to_string()),
         replicas_desired: 1,
         replicas_running: 0,
         rows: vec![AllocStatusRowBody {
             alloc_id: "alloc-payments-v2-0".to_string(),
-            job_id: "payments-v2".to_string(),
+            workload_id: "payments-v2".to_string(),
             node_id: "node-a".to_string(),
             state: AllocStateWire::Failed,
             reason: None,
@@ -77,18 +78,19 @@ fn failed_fixture() -> AllocStatusResponse {
             error: Some("stat /usr/local/bin/payments: no such file or directory".to_string()),
         }],
         restart_budget: Some(RestartBudget { used: 5, max: 5, exhausted: true }),
+        kind: None,
     }
 }
 
 fn pending_no_capacity_fixture() -> AllocStatusResponse {
     AllocStatusResponse {
-        job_id: Some("payments-v2".to_string()),
+        workload_id: Some("payments-v2".to_string()),
         spec_digest: Some(SAMPLE_DIGEST.to_string()),
         replicas_desired: 1,
         replicas_running: 0,
         rows: vec![AllocStatusRowBody {
             alloc_id: "alloc-payments-v2-0".to_string(),
-            job_id: "payments-v2".to_string(),
+            workload_id: "payments-v2".to_string(),
             node_id: "node-a".to_string(),
             state: AllocStateWire::Pending,
             reason: Some(TransitionReason::NoCapacity {
@@ -108,6 +110,7 @@ fn pending_no_capacity_fixture() -> AllocStatusResponse {
             error: Some("requested 10000mCPU/10 GiB / free 4000mCPU/3.2 GiB".to_string()),
         }],
         restart_budget: Some(RestartBudget { used: 0, max: 5, exhausted: false }),
+        kind: None,
     }
 }
 
@@ -120,7 +123,10 @@ fn s_as_04_running_snapshot_renders_journey_tui_mockup() {
     let out = running_fixture();
     let rendered = alloc_snapshot(&out);
 
-    assert!(rendered.contains("payments-v2"), "Running render must echo job_id; got:\n{rendered}");
+    assert!(
+        rendered.contains("payments-v2"),
+        "Running render must echo workload_id; got:\n{rendered}"
+    );
     assert!(
         rendered.contains(SAMPLE_DIGEST),
         "Running render must echo spec_digest; got:\n{rendered}",

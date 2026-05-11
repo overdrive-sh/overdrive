@@ -37,6 +37,12 @@ mod integration {
     mod streaming_submit_converged_stopped;
     mod streaming_submit_happy_path;
 
+    // workload-kind-discriminator slice 05 — Schedule kind submit /
+    // alloc-status render surface + IntentStore persistence, with
+    // KPI K5 byte-equal deferral URL across surfaces. Per ADR-0047
+    // §1, §3 + slice 05 spec.
+    mod job_submit_schedule;
+
     // Slice 03 step 03-02 — S-CLI-03 Tier 3 jq-pipeline-equivalent:
     // a pipe-redirected stdout (non-TTY) without --detach MUST
     // auto-select the JSON-ack lane and emit a single parseable JSON
@@ -44,4 +50,17 @@ mod integration {
     // forbids `Command::spawn`, so this is the in-process equivalent
     // of the shell pipeline; see file rustdoc for the full mapping.
     mod submit_jq_pipeline;
+
+    // workload-kind-discriminator slice 02 — Job-kind streaming
+    // submit acceptance tests + S-02-09 K1 honesty (Lima-gated).
+    // The load-bearing assertion is S-02-05 anti-scenario: no
+    // Job-kind submit produces "is running with" or "(took live)".
+    mod coinflip_honesty_100_trials;
+    mod job_kind_streaming;
+
+    // workload-kind-discriminator slice 03 — kind-aware alloc-status
+    // Job render. KPI K3 byte-equality between rendered Exit column
+    // and persisted exit_code (S-03-08 proptest 1024 cases). Per
+    // step 02-02 acceptance criteria + ADR-0047 §1 / §4.
+    mod alloc_status;
 }

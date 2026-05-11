@@ -23,7 +23,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use parking_lot::Mutex;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 use overdrive_core::id::AllocationId;
 use overdrive_core::traits::clock::Clock;
@@ -50,6 +50,23 @@ pub struct SimDriver {
     /// Set by [`Driver::stop`] BEFORE returning, read by the
     /// scheduled exit-event task before sending.
     intentional_stops: Mutex<HashMap<AllocationId, Arc<AtomicBool>>>,
+    /// Per-alloc Running-confirmed gate senders. Stashed at
+    /// [`Driver::start`]; consumed by
+    /// [`Driver::release_for_exit_emission`]. Mirrors
+    /// `ExecDriver`'s `LiveAllocation::gate_sender` field; the
+    /// matching `oneshot::Receiver` is parked in `gate_receivers`
+    /// until [`SimDriver::inject_exit_after`] picks it up for the
+    /// scheduled emit task. Per
+    /// `docs/feature/fix-exit-observer-running-gate/deliver/rca.md`
+    /// (Solution 1').
+    gate_senders: Mutex<HashMap<AllocationId, oneshot::Sender<()>>>,
+    /// Per-alloc Running-confirmed gate receivers, parked between
+    /// [`Driver::start`] and the first call to
+    /// [`SimDriver::inject_exit_after`] for that alloc. Tests that
+    /// never call `inject_exit_after` (i.e. the workload never
+    /// "exits" in simulation) drop their receiver when the driver
+    /// is dropped — no leak.
+    gate_receivers: Mutex<HashMap<AllocationId, oneshot::Receiver<()>>>,
     exit_tx: mpsc::Sender<ExitEvent>,
     exit_rx: Mutex<Option<mpsc::Receiver<ExitEvent>>>,
     /// Injected `Clock` used by [`SimDriver::inject_exit_after`] for
@@ -104,6 +121,8 @@ impl SimDriver {
             allocations: Mutex::new(HashMap::new()),
             failure_mode: Mutex::new(None),
             intentional_stops: Mutex::new(HashMap::new()),
+            gate_senders: Mutex::new(HashMap::new()),
+            gate_receivers: Mutex::new(HashMap::new()),
             exit_tx,
             exit_rx: Mutex::new(Some(exit_rx)),
             clock,
@@ -156,10 +175,84 @@ impl SimDriver {
         let alloc = alloc.clone();
         let exit_tx = self.exit_tx.clone();
         let clock = self.clock.clone();
+        // Take the Running-confirmed gate receiver. Three cases:
+        //
+        // 1. `start` was already called for this alloc → receiver was
+        //    parked at start-time, take it here. The matching sender
+        //    is held in `gate_senders` and consumed by
+        //    `release_for_exit_emission` (action-shim or
+        //    exit_observer's degraded path).
+        //
+        // 2. `inject_exit_after` was called BEFORE `start` (the 01-01
+        //    regression test does exactly this — inject sub-budget
+        //    exit before the first convergence tick spawns
+        //    `StartAllocation`). The alloc is NOT yet in
+        //    `allocations`; we mint a fresh channel here, stash the
+        //    sender for the future `start` call to find, and use
+        //    the receiver for the spawned exit task's gate-await.
+        //    Without this pre-mint, the spawned task would proceed
+        //    with "no gate configured" semantics, recreating the
+        //    original `find_prior_row → NoPriorRow` race the gate
+        //    exists to prevent.
+        //
+        // 3. The gate fired already (action shim post-Ok firing site
+        //    consumed the sender; receiver was consumed by an earlier
+        //    `inject_exit_after`, OR `Driver::stop` ran and dropped
+        //    both sides). The alloc IS in `allocations` but neither
+        //    `gate_senders[alloc]` nor `gate_receivers[alloc]` is
+        //    present. Proceed without a gate — the orphan path.
+        //
+        // Per `docs/feature/fix-exit-observer-running-gate/deliver/
+        // rca.md` (Solution 1') and step 01-03 of that feature.
+        // The three-case decomposition below is load-bearing — see the
+        // "Three cases" comment block above. The `clippy::option_if_let_else`
+        // lint would collapse the structure into a `map_or_else` that
+        // hides the case analysis behind a closure boundary, defeating
+        // the readability of cases 2 and 3 which are NOT a simple
+        // default-value computation. `expect` (not `allow`) so the lint
+        // gate self-removes if the structure is ever refactored such
+        // that the lint legitimately stops firing.
+        #[expect(
+            clippy::option_if_let_else,
+            reason = "three-case decomposition of receiver/sender state \
+                      is the load-bearing artifact; map_or_else collapses it"
+        )]
+        let gate_receiver = {
+            let existing = self.gate_receivers.lock().remove(&alloc);
+            if let Some(rx) = existing {
+                Some(rx)
+            } else if !self.intentional_stops.lock().contains_key(&alloc) {
+                // Case 2: neither `start` nor `stop` has been called
+                // for this alloc — `intentional_stops` is populated
+                // by both, so its absence means the alloc is unknown
+                // to the driver. Pre-mint a channel for the future
+                // `start` call to reuse so the gate's happens-before
+                // edge stands even when `inject_exit_after` is
+                // sequenced before the first `StartAllocation`
+                // dispatch (the 01-01 regression test does exactly
+                // this).
+                let (tx, rx) = oneshot::channel::<()>();
+                self.gate_senders.lock().insert(alloc.clone(), tx);
+                Some(rx)
+            } else {
+                // Case 3: `start` was already called and either the
+                // gate fired (sender consumed, receiver consumed by
+                // a prior inject_exit_after) or `stop` cleared both
+                // sides. Orphan path — proceed without a gate; any
+                // production-flow ordering edge has already landed
+                // (the action shim's post-Ok fire happened before
+                // the action sequence reached `stop`).
+                None
+            }
+        };
         // Get-or-insert the per-alloc intentional_stop flag — if the
         // alloc was never started via `Driver::start` (rare in tests
         // but defensible), construct a fresh `false` flag so the
-        // emitted event still carries a valid bool.
+        // emitted event still carries a valid bool. Done AFTER the
+        // gate-receiver decision above so the case-2 / case-3
+        // branching can use `intentional_stops.contains_key` as the
+        // "alloc known to driver" signal — populating the entry here
+        // would defeat that detection.
         let intentional_stop = self
             .intentional_stops
             .lock()
@@ -192,7 +285,53 @@ impl SimDriver {
             // the production `classify_exit` mapping in
             // `crates/overdrive-worker/src/driver.rs`).
             let final_kind = if intentional { ExitKind::CleanExit } else { kind };
-            let event = ExitEvent { alloc, kind: final_kind, intentional_stop: intentional };
+            // SimDriver has no real stderr to capture — the watcher
+            // contract leaves `stderr_tail = None`. Tests that want
+            // to exercise the tail-render path inject explicit stderr
+            // via the dedicated sim-driver helper (added when the
+            // first such test lands per step 02-05 / ADR-0033
+            // Amendment 2026-05-10).
+            let event = ExitEvent {
+                alloc,
+                kind: final_kind,
+                intentional_stop: intentional,
+                stderr_tail: None,
+            };
+            // Running-confirmed gate await: symmetric with
+            // `ExecDriver`'s watcher per
+            // `docs/feature/fix-exit-observer-running-gate/deliver/rca.md`
+            // (Solution 1'). The action shim fires the gate via
+            // `Driver::release_for_exit_emission` after committing
+            // `obs.write(Running)` (or the May-2 degraded path).
+            // Without this happens-before edge a sub-millisecond
+            // emit delay would race the action shim's `Running`
+            // write and the observer would silently drop the event
+            // on its `find_prior_row → NoPriorRow` arm.
+            //
+            // ORDERING: gate await happens AFTER the simulated
+            // emit-delay (`clock.sleep(after)`) AND AFTER the
+            // sim-internal cooperative yield, BEFORE
+            // `exit_tx.send`. This mirrors the `ExecDriver` watcher's
+            // "after `child.wait()` AND stderr-tail drain budget,
+            // before `exit_tx.send`" ordering.
+            //
+            // `tokio::sync::oneshot` is NOT `Clock`-dependent —
+            // works under `SimClock` / turmoil / real tokio
+            // identically. The gate is a logical happens-before
+            // edge, not a wall-clock budget, so this is the
+            // structural production ordering edge — NOT a sim
+            // concession (per
+            // `.claude/rules/development.md` § "Production code is
+            // not shaped by simulation").
+            //
+            // `Err(RecvError)` (sender dropped without sending —
+            // action-shim-crashed orphan path) AND `None`
+            // (alloc whose `start` was never called) both
+            // collapse to "proceed and emit"; symmetric with
+            // `ExecDriver`'s orphan-path handling.
+            if let Some(gate_receiver) = gate_receiver {
+                let _ = gate_receiver.await;
+            }
             let _ = exit_tx.send(event).await;
         });
     }
@@ -215,6 +354,37 @@ impl Driver for SimDriver {
         // scheduled exit-event task can observe operator stops via
         // the shared `Arc<AtomicBool>`.
         self.intentional_stops.lock().insert(spec.alloc.clone(), Arc::new(AtomicBool::new(false)));
+        // Mint the Running-confirmed gate per
+        // `docs/feature/fix-exit-observer-running-gate/deliver/rca.md`
+        // (Solution 1'). Sender stashed for
+        // `Driver::release_for_exit_emission` to consume; receiver
+        // parked for `inject_exit_after` to pick up. Mirrors
+        // `ExecDriver`'s start-time mint of the channel.
+        //
+        // Per step 01-03 of `fix-exit-observer-running-gate`: the
+        // 01-02 transitional immediate-drop has been removed. The
+        // sender is held in `gate_senders` until the action shim
+        // (post-`obs.write(Running)` Ok) or the exit_observer (May-2
+        // degraded escalation) fires it via
+        // `Driver::release_for_exit_emission`. On `Driver::stop` the
+        // sender is dropped (orphan path); the spawned
+        // `inject_exit_after` task's `gate_receiver.await` resolves
+        // to `Err(RecvError)` and emit proceeds.
+        //
+        // If `inject_exit_after` was called BEFORE this `start` for
+        // the same alloc (the 01-01 regression test does this — sub-
+        // budget exit injected before the first convergence tick),
+        // the sender was pre-minted in `inject_exit_after` and the
+        // receiver was parked into the spawned exit-emit task.
+        // Reuse the existing sender so `release_for_exit_emission`
+        // fires the SAME oneshot the spawned task is awaiting.
+        let mut senders = self.gate_senders.lock();
+        if !senders.contains_key(&spec.alloc) {
+            let (gate_sender, gate_receiver) = oneshot::channel::<()>();
+            senders.insert(spec.alloc.clone(), gate_sender);
+            drop(senders);
+            self.gate_receivers.lock().insert(spec.alloc.clone(), gate_receiver);
+        }
         Ok(AllocationHandle { alloc: spec.alloc.clone(), pid: None })
     }
 
@@ -246,6 +416,17 @@ impl Driver for SimDriver {
             .or_insert_with(|| Arc::new(AtomicBool::new(false)))
             .clone();
         flag.store(true, Ordering::SeqCst);
+        // Drop any unsent gate sender — if `release_for_exit_emission`
+        // was never called before stop landed, the spawned
+        // `inject_exit_after` task's `gate_receiver.await` resolves
+        // to `Err(RecvError)` and the task proceeds with the emit.
+        // Symmetric with `ExecDriver::stop`'s `drop(gate_sender)`.
+        // Per `Driver::start` rustdoc § "Sender drop (orphan path)".
+        let _dropped_sender = self.gate_senders.lock().remove(&handle.alloc);
+        // Drop any unparked gate receiver — if `inject_exit_after`
+        // was never called for this alloc (test never simulated an
+        // exit), the receiver was sitting idle. No leak.
+        let _dropped_receiver = self.gate_receivers.lock().remove(&handle.alloc);
         Ok(())
     }
 
@@ -269,5 +450,84 @@ impl Driver for SimDriver {
 
     fn take_exit_receiver(&self) -> Option<mpsc::Receiver<ExitEvent>> {
         self.exit_rx.lock().take()
+    }
+
+    /// Fire the Running-confirmed gate for `handle.alloc`. Symmetric
+    /// with `ExecDriver::release_for_exit_emission`. Idempotent: a
+    /// call against an alloc whose gate has already fired (or whose
+    /// alloc is unknown to the driver) is a no-op, NOT a panic. The
+    /// structural exactly-once guarantee comes from
+    /// `HashMap::remove` + `oneshot::Sender::send` consume-self.
+    fn release_for_exit_emission(&self, handle: &AllocationHandle) {
+        let sender = self.gate_senders.lock().remove(&handle.alloc);
+        if let Some(sender) = sender {
+            // `Err(())` from a closed receiver (the spawned
+            // `inject_exit_after` task already dropped its receiver
+            // post-emit, or the alloc was never injected) is benign.
+            let _ = sender.send(());
+        }
+        // Unknown alloc OR gate already fired: no-op per the
+        // idempotent-fire contract.
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
+mod release_for_exit_emission_tests {
+    //! Trait-contract unit tests for the Running-confirmed gate
+    //! introduced by step 01-02 of `fix-exit-observer-running-gate`.
+    //! See `Driver::start` / `Driver::release_for_exit_emission`
+    //! rustdoc on the `overdrive-core` trait for the contract under
+    //! test. The integration-level happens-before edge (gate-await
+    //! before `ExitEvent` emission) is exercised by the
+    //! 01-01 regression test in
+    //! `crates/overdrive-control-plane/tests/integration/workload_lifecycle/`
+    //! once step 01-03 wires the firing site.
+    use super::*;
+    use overdrive_core::SpiffeId;
+    use overdrive_core::traits::driver::{AllocationSpec, Resources};
+    use std::str::FromStr;
+
+    fn sample_spec(name: &str) -> AllocationSpec {
+        AllocationSpec {
+            alloc: AllocationId::from_str(name).expect("valid AllocationId"),
+            identity: SpiffeId::from_str("spiffe://overdrive.local/test/wl")
+                .expect("valid SpiffeId"),
+            command: "/bin/true".to_owned(),
+            args: vec![],
+            resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
+        }
+    }
+
+    /// Behavior 1: idempotent fire — a second
+    /// `release_for_exit_emission` against the same alloc is a no-op,
+    /// NOT a panic. Protects future call sites firing the gate twice
+    /// (e.g. successful retry AND May-2 degraded escalation both
+    /// firing).
+    #[tokio::test]
+    async fn release_for_exit_emission_is_idempotent() {
+        let driver = SimDriver::new(DriverType::Exec);
+        let spec = sample_spec("alloc-idempotent");
+        let handle = driver.start(&spec).await.expect("start succeeds");
+        // First fire — consumes the stashed sender.
+        driver.release_for_exit_emission(&handle);
+        // Second fire — must NOT panic. (Asserted by the test
+        // returning normally.)
+        driver.release_for_exit_emission(&handle);
+    }
+
+    /// Behavior 2: release against an unknown alloc is a no-op, NOT
+    /// a panic. Protects the action shim's call path against races
+    /// (e.g. driver evicted the slot before the shim reached
+    /// release).
+    #[test]
+    fn release_for_exit_emission_on_unknown_alloc_is_noop() {
+        let driver = SimDriver::new(DriverType::Exec);
+        let unknown = AllocationHandle {
+            alloc: AllocationId::from_str("alloc-never-started").expect("valid AllocationId"),
+            pid: None,
+        };
+        // No `start` call; no stashed sender. Must NOT panic.
+        driver.release_for_exit_emission(&unknown);
     }
 }

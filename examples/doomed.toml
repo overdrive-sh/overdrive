@@ -1,5 +1,10 @@
+[service]
 id = "doomed"
 replicas = 1
+
+[[listener]]
+port = 8080
+protocol = "tcp"
 
 [resources]
 cpu_milli = 100

@@ -59,8 +59,8 @@ use axum::body::{Body, to_bytes};
 use axum::http::{Method, Request, header};
 use axum::routing::post;
 use overdrive_control_plane::AppState;
-use overdrive_control_plane::api::{SubmitJobRequest, TerminalReason};
-use overdrive_control_plane::handlers::submit_job;
+use overdrive_control_plane::api::{SubmitWorkloadRequest, TerminalReason};
+use overdrive_control_plane::handlers::submit_workload;
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
 use overdrive_core::id::NodeId;
@@ -116,11 +116,13 @@ fn build_app_state(tmp: &TempDir, clock: Arc<dyn Clock>) -> AppState {
 }
 
 fn build_router(state: AppState) -> Router {
-    Router::new().route("/v1/jobs", post(submit_job)).with_state(state)
+    Router::new().route("/v1/jobs", post(submit_workload)).with_state(state)
 }
 
 fn build_submit_request(spec: &JobSpecInput, accept: &str) -> Request<Body> {
-    let body = serde_json::to_vec(&SubmitJobRequest { spec: spec.clone() }).expect("serialize");
+    let body =
+        serde_json::to_vec(&SubmitWorkloadRequest { spec: spec.clone(), workload_kind: None })
+            .expect("serialize");
     Request::builder()
         .method(Method::POST)
         .uri("/v1/jobs")

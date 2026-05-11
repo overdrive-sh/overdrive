@@ -22,7 +22,7 @@ paths:
 
         The `job` query parameter is REQUIRED. The handler reads the
         `IntentStore` for `<id>`'s `Job`, returns 404 if absent, then
-        projects matching rows + the `JobLifecycle` view-cache restart
+        projects matching rows + the `WorkloadLifecycle` view-cache restart
         counts into the populated envelope shape per ADR-0033 §1. A missing
         `?job=` query parameter returns HTTP 400 with
         `field = Some("job")`.
@@ -88,12 +88,12 @@ paths:
       - jobs
       summary: |-
         `POST /v1/jobs` — validate, archive via rkyv, commit through the
-        intent store, return `{job_id, spec_digest, outcome}`.
+        intent store, return `{workload_id, spec_digest, outcome}`.
       description: |-
         Idempotency contract (ADR-0015 §4 amended by ADR-0020):
 
         * A spec whose rkyv-archived bytes are absent at the canonical
-          `jobs/<JobId>` key returns HTTP 200 with `outcome =
+          `jobs/<WorkloadId>` key returns HTTP 200 with `outcome =
           IdempotencyOutcome::Inserted` and the canonical `spec_digest`
           (`PutOutcome::Inserted` path).
         * A spec whose rkyv-archived bytes are byte-identical to what is
@@ -112,12 +112,12 @@ paths:
         bytes and used both for the byte-equality check (against the
         `existing` bytes returned by `PutOutcome::KeyExists`) and for the
         response body.
-      operationId: submit_job
+      operationId: submit_workload
       requestBody:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/SubmitJobRequest'
+              $ref: '#/components/schemas/SubmitWorkloadRequest'
         required: true
       responses:
         '200':
@@ -125,7 +125,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/SubmitJobResponse'
+                $ref: '#/components/schemas/SubmitWorkloadResponse'
             application/x-ndjson:
               schema:
                 $ref: '#/components/schemas/SubmitEvent'
@@ -171,11 +171,11 @@ paths:
         Post-ADR-0020: the response shape is `{spec, spec_digest}` only.
         The `commit_index` field is dropped wholesale — there is no
         store-wide nor per-entry index on the wire (see ADR-0020).
-      operationId: describe_job
+      operationId: describe_workload
       parameters:
       - name: id
         in: path
-        description: Canonical JobId
+        description: Canonical WorkloadId
         required: true
         schema:
           type: string
@@ -185,7 +185,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/JobDescription'
+                $ref: '#/components/schemas/WorkloadDescription'
         '404':
           description: Job not found
           content:
@@ -225,12 +225,12 @@ paths:
         recorded — stopping a non-existent job is operator error, not an
         idempotent no-op.
 
-        Empty request body. The response body is `{ job_id, outcome }`.
-      operationId: stop_job
+        Empty request body. The response body is `{ workload_id, outcome }`.
+      operationId: stop_workload
       parameters:
       - name: id
         in: path
-        description: Canonical JobId
+        description: Canonical WorkloadId
         required: true
         schema:
           type: string
@@ -240,7 +240,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/StopJobResponse'
+                $ref: '#/components/schemas/StopWorkloadResponse'
         '400':
           description: Validation error
           content:
@@ -315,10 +315,10 @@ components:
         Response for `GET /v1/allocs`.
 
         Per ADR-0033 §1 amended 2026-04-30 / Slice 01 step 01-03 — the
-        envelope carries top-level identity (`job_id`, `spec_digest`),
+        envelope carries top-level identity (`workload_id`, `spec_digest`),
         replica counts (`replicas_desired` / `replicas_running`) projected
         from the `IntentStore` + observation rows, and a `restart_budget`
-        block hydrated from the `JobLifecycle` reconciler view cache.
+        block hydrated from the `WorkloadLifecycle` reconciler view cache.
 
         On the empty / 200 path with no rows the envelope still carries
         `replicas_desired` (from the spec) so the CLI can render an
@@ -327,14 +327,13 @@ components:
       required:
       - rows
       properties:
-        job_id:
-          type:
-          - string
-          - 'null'
-          description: |-
-            Canonical job id this snapshot describes. `None` is reserved
-            for forward-compat (Phase 2 may add cluster-wide reads); Phase 1
-            always populates it.
+        kind:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/WorkloadKind'
+            description: |-
+              Workload-kind discriminator per ADR-0047 §1 / step 02-02 [D4].
+              The CLI render layer branches on this field.
         replicas_desired:
           type: integer
           format: int32
@@ -351,7 +350,7 @@ components:
           - $ref: '#/components/schemas/RestartBudget'
             description: |-
               Aggregate restart-budget block for the job — derived from the
-              `JobLifecycle` reconciler view cache. `max` is hard-coded to
+              `WorkloadLifecycle` reconciler view cache. `max` is hard-coded to
               `RESTART_BACKOFF_CEILING` (5) in Phase 1.
         rows:
           type: array
@@ -363,7 +362,15 @@ components:
           - 'null'
           description: |-
             SHA-256 (hex, 64 chars) of the canonical rkyv-archived `Job`
-            bytes — see `JobDescription::spec_digest`. Pinned per ADR-0002.
+            bytes — see `WorkloadDescription::spec_digest`. Pinned per ADR-0002.
+        workload_id:
+          type:
+          - string
+          - 'null'
+          description: |-
+            Canonical job id this snapshot describes. `None` is reserved
+            for forward-compat (Phase 2 may add cluster-wide reads); Phase 1
+            always populates it.
     AllocStatusRowBody:
       type: object
       description: |-
@@ -383,7 +390,7 @@ components:
         `from → to reason: ... source: ... at: ...` block.
       required:
       - alloc_id
-      - job_id
+      - workload_id
       - node_id
       - state
       - resources
@@ -405,8 +412,6 @@ components:
           - 'null'
           format: int32
           description: Phase 2+ — exit code observation. `None` in Phase 1.
-        job_id:
-          type: string
         last_transition:
           oneOf:
           - type: 'null'
@@ -437,6 +442,8 @@ components:
             to a non-Pending state. `None` for never-started Pending rows.
         state:
           $ref: '#/components/schemas/AllocStateWire'
+        workload_id:
+          type: string
     BrokerCountersBody:
       type: object
       description: |-
@@ -595,26 +602,6 @@ components:
       enum:
       - inserted
       - unchanged
-    JobDescription:
-      type: object
-      description: |-
-        Response for `GET /v1/jobs/{id}`. Carries the re-hydrated spec and
-        the canonical spec digest per ADR-0014 and US-03 AC (amended by
-        ADR-0020).
-
-        `spec` is typed (`JobSpecInput`), never `serde_json::Value` — the
-        CLI parses this response into a concrete type rather than a value
-        bag. `spec_digest` equals the lowercase-hex SHA-256 of the
-        rkyv-archived bytes pulled out of the `IntentStore` — i.e. the
-        same value the original `POST /v1/jobs` returned for this `job_id`.
-      required:
-      - spec
-      - spec_digest
-      properties:
-        spec:
-          $ref: '#/components/schemas/JobSpecInput'
-        spec_digest:
-          type: string
     JobSpecInput:
       allOf:
       - $ref: '#/components/schemas/DriverInput'
@@ -648,6 +635,46 @@ components:
         Carries `utoipa::ToSchema` so the generated `OpenAPI` document
         (ADR-0009, `cargo openapi-gen`) renders the spec shape
         consistently across the server and CLI lanes.
+    Listener:
+      type: object
+      description: |-
+        A single `[[listener]]` block on a `[service]` body.
+
+        Per ADR-0047 §1 (Service listener fields) the triple is
+        `(port, protocol, vip)` — `port` is non-zero (rejected at parse
+        time per S-08-06), `protocol` is `tcp` / `udp` only via the existing
+        [`Proto`] newtype (case-insensitive parse, lowercase canonical
+        render), and `vip` is optional.
+
+        Distinct from the dataplane-layer `Backend` per design Reuse
+        Analysis — the spec-layer `Listener` is the OPERATOR-DECLARED
+        intent, while a `Backend` is the dataplane's per-replica realised
+        endpoint. The two carry the same [`Proto`] newtype but live in
+        different bounded contexts.
+      required:
+      - port
+      - protocol
+      properties:
+        port:
+          type: integer
+          format: int32
+          description: |-
+            Listener port — 1..=65535. `port = 0` is rejected at parse time
+            per S-08-06 (`ParseError::ListenerPortZero`).
+          maximum: 65535
+          minimum: 1
+        protocol:
+          $ref: '#/components/schemas/Proto'
+          description: |-
+            L4 protocol — `tcp` or `udp` only. Case-insensitive at parse
+            time; lowercase on canonical render.
+        vip:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/ServiceVip'
+            description: |-
+              Optional pinned VIP. `None` means the runtime VIP allocator is
+              responsible for assigning one (GH #167).
     NodeList:
       type: object
       description: |-
@@ -674,6 +701,15 @@ components:
           type: string
         region:
           type: string
+    Proto:
+      type: string
+      description: |-
+        L4 protocol discriminator. Only `Tcp` and `Udp` are recognised in
+        Phase 2.2 — these are the two protocols the egress reverse-NAT
+        path supports per architecture.md § 6.
+      enum:
+      - tcp
+      - udp
     ResourceEnvelope:
       type: object
       description: |-
@@ -751,7 +787,7 @@ components:
         does not have to compare two integers each time.
 
         Phase 1: `max` is hard-coded to 5 (matching the existing
-        `RESTART_BUDGET_MAX` constant in `JobLifecycle::reconcile`); Phase 2+
+        `RESTART_BUDGET_MAX` constant in `WorkloadLifecycle::reconcile`); Phase 2+
         makes it per-job-config (DESIGN [D7]).
       required:
       - used
@@ -768,30 +804,43 @@ components:
           type: integer
           format: int32
           minimum: 0
-    StopJobResponse:
-      type: object
+    ServiceVip:
+      type: string
       description: |-
-        Response for `POST /v1/jobs/{id}/stop`. Per ADR-0027 the body shape
-        is `{ job_id, outcome }` where `outcome ∈ { "stopped",
-        "already_stopped" }`. 404 on unknown job (separate path).
+        Pinned service VIP — IPv4 address an operator pinned in their
+        `[[listener]]` block. Wraps [`Ipv4Addr`] with `serde` / `utoipa` /
+        `rkyv` derives so the type-system distinguishes it from a backend or
+        node IP at every call site.
 
-        `outcome` is wire-stringly-typed (lowercase JSON via
-        `#[serde(rename_all = "snake_case")]`) so future verbs (start,
-        restart, cancel) can extend the enum additively.
-      required:
-      - job_id
-      - outcome
-      properties:
-        job_id:
-          type: string
-        outcome:
-          $ref: '#/components/schemas/StopOutcome'
+        Per ADR-0047 §1 (Service listener fields) the VIP is OPTIONAL — when
+        absent, the runtime VIP allocator is responsible for assigning one
+        at convergence time. The runtime allocator behaviour is OUT OF SCOPE
+        for slice 06 and tracked at GH #167.
+      example: 10.0.0.1
     StopOutcome:
       type: string
       description: Outcome of `POST /v1/jobs/{id}/stop` per ADR-0027.
       enum:
       - stopped
       - already_stopped
+    StopWorkloadResponse:
+      type: object
+      description: |-
+        Response for `POST /v1/jobs/{id}/stop`. Per ADR-0027 the body shape
+        is `{ workload_id, outcome }` where `outcome ∈ { "stopped",
+        "already_stopped" }`. 404 on unknown job (separate path).
+
+        `outcome` is wire-stringly-typed (lowercase JSON via
+        `#[serde(rename_all = "snake_case")]`) so future verbs (start,
+        restart, cancel) can extend the enum additively.
+      required:
+      - workload_id
+      - outcome
+      properties:
+        outcome:
+          $ref: '#/components/schemas/StopOutcome'
+        workload_id:
+          type: string
     StoppedBy:
       type: string
       description: Initiator of a `Stopped` transition.
@@ -1032,21 +1081,43 @@ components:
         `TransitionReason` enum as the snapshot's
         `AllocStatusRowBody.reason` and `TransitionRecord.reason` — byte-
         equality across surfaces is structural, not discipline ([C6]).
-    SubmitJobRequest:
+    SubmitWorkloadRequest:
       type: object
       description: |-
         Body of `POST /v1/jobs`. Carries the operator-submitted job spec
         verbatim; the server routes it through `Job::from_spec` to validate
         and derive the intent key / digest.
+
+        Per ADR-0047 §1 / slice 02 of `workload-kind-discriminator`: the
+        optional `workload_kind` field is the wire-side carrier for the
+        kind discriminator (`"service"` / `"job"` / `"schedule"`). Absent
+        on legacy clients (defaults to `"service"` per
+        `WorkloadKind::default`); set to `"job"` by the CLI's
+        `submit_streaming_job` path so the server can dispatch on the
+        per-kind streaming-event sibling enums (ADR-0047 §3 [D7]) and
+        persist the discriminator at `IntentKey::for_workload_kind` so the
+        reconciler runtime's `hydrate_desired` populates
+        `WorkloadLifecycleState.workload_kind` for the natural-exit emission
+        path (ADR-0037 Amendment 2026-05-10).
       required:
       - spec
       properties:
         spec:
           $ref: '#/components/schemas/JobSpecInput'
-    SubmitJobResponse:
+        workload_kind:
+          type:
+          - string
+          - 'null'
+          description: |-
+            Optional workload-kind discriminator. `"service"` (default),
+            `"job"`, or `"schedule"`. Unknown values fall back to `"service"`
+            per ADR-0047 §1 forward-compat — preserves kind-agnostic
+            behavior for clients sending a value the server does not
+            recognise.
+    SubmitWorkloadResponse:
       type: object
       description: |-
-        Response for `POST /v1/jobs`. Carries `job_id`, the canonical
+        Response for `POST /v1/jobs`. Carries `workload_id`, the canonical
         `spec_digest`, and the idempotency `outcome` per ADR-0008 and
         ADR-0020.
 
@@ -1060,21 +1131,21 @@ components:
           field on the wire (conflict is an HTTP-status concern, never an
           enum value — see ADR-0015 §4 amendment via ADR-0020).
 
-        `job_id` is rendered as a `String` at the wire boundary; the server
-        converts back to `overdrive_core::id::JobId` in handlers.
+        `workload_id` is rendered as a `String` at the wire boundary; the server
+        converts back to `overdrive_core::id::WorkloadId` in handlers.
         `spec_digest` is the lowercase-hex SHA-256 of the canonical
         rkyv-archived `Job` bytes (ADR-0002, development.md §Hashing); 64
         characters.
       required:
-      - job_id
+      - workload_id
       - spec_digest
       - outcome
       properties:
-        job_id:
-          type: string
         outcome:
           $ref: '#/components/schemas/IdempotencyOutcome'
         spec_digest:
+          type: string
+        workload_id:
           type: string
     TerminalReason:
       oneOf:
@@ -1245,7 +1316,7 @@ components:
         description: |-
           Reconciler holding off restart per backoff window.
           `attempt` is the 1-indexed retry number that will fire when the
-          backoff elapses (matches `JobLifecycleView::restart_counts + 1`).
+          backoff elapses (matches `WorkloadLifecycleView::restart_counts + 1`).
         required:
         - data
         - kind
@@ -1255,7 +1326,7 @@ components:
             description: |-
               Reconciler holding off restart per backoff window.
               `attempt` is the 1-indexed retry number that will fire when the
-              backoff elapses (matches `JobLifecycleView::restart_counts + 1`).
+              backoff elapses (matches `WorkloadLifecycleView::restart_counts + 1`).
             required:
             - attempt
             properties:
@@ -1570,11 +1641,15 @@ components:
             - out_of_memory
       - type: object
         description: |-
-          Workload exited within the post-spawn settle window. Requires
-          Phase 2 `ExecDriver` post-spawn `wait()` + classification;
-          defined now for wire-shape forward-compatibility. The
-          `exit_code` field on `AllocStatusRowBody` is the snapshot
-          counterpart (also Phase-2-populated).
+          Workload exited with a non-zero status or signal within the
+          post-spawn settle window. Emitted by the `ExitObserver` when
+          `ExitKind::Crashed` is received from the driver — `ExecDriver`
+          already performs `child.wait()` in Phase 1 and that is exactly
+          how `ExitKind::Crashed` is produced. The `exit_code` field
+          carries the process exit status (`None` for signal-only exits);
+          `signal` carries the signal number cast to `u8` (`None` when
+          absent); `stderr_tail` carries the last few lines of stderr
+          captured by the driver's ring buffer.
         required:
         - data
         - kind
@@ -1582,11 +1657,15 @@ components:
           data:
             type: object
             description: |-
-              Workload exited within the post-spawn settle window. Requires
-              Phase 2 `ExecDriver` post-spawn `wait()` + classification;
-              defined now for wire-shape forward-compatibility. The
-              `exit_code` field on `AllocStatusRowBody` is the snapshot
-              counterpart (also Phase-2-populated).
+              Workload exited with a non-zero status or signal within the
+              post-spawn settle window. Emitted by the `ExitObserver` when
+              `ExitKind::Crashed` is received from the driver — `ExecDriver`
+              already performs `child.wait()` in Phase 1 and that is exactly
+              how `ExitKind::Crashed` is produced. The `exit_code` field
+              carries the process exit status (`None` for signal-only exits);
+              `signal` carries the signal number cast to `u8` (`None` when
+              absent); `stderr_tail` carries the last few lines of stderr
+              captured by the driver's ring buffer.
             properties:
               exit_code:
                 type:
@@ -1633,15 +1712,14 @@ components:
         | `Cancelled { by }` | cause | reconciler — operator stop intent observed | yes |
         | `NoCapacity { requested, free }` | cause | reconciler — scheduler returned `NoCapacity` | yes |
         | `OutOfMemory { peak_bytes, limit_bytes }` | cause | `ExecDriver` — cgroup OOM-killed | NO — Phase 2 |
-        | `WorkloadCrashedImmediately { exit_code, signal, stderr_tail }` | cause | `ExecDriver` — post-spawn exit-code observation | NO — Phase 2 |
+        | `WorkloadCrashedImmediately { exit_code, signal, stderr_tail }` | cause | `ExecDriver` — post-spawn exit-code observation | yes |
 
-        **Phase 2 emit-deferred variants**: `OutOfMemory` and
-        `WorkloadCrashedImmediately` require driver observability the Phase 1
-        `ExecDriver` does not have (cgroup OOM-killed event subscription;
-        post-spawn exit-code wait-and-classify). The variants are defined now
-        so the wire shape is forward-stable; the driver emits them in Phase 2.
-        This mirrors the `exit_code: Option<i32>` field on `AllocStatusRowBody`
-        (always `None` in Phase 1; populated in Phase 2 — see ADR-0033 §2).
+        **Phase 2 emit-deferred variants**: `OutOfMemory` requires cgroup-events
+        subscription not yet present in the Phase 1 `ExecDriver`; it is defined
+        now for wire-shape forward-compatibility and will be emitted in Phase 2.
+        `WorkloadCrashedImmediately` is emitted in Phase 1 — `ExecDriver` already
+        performs `child.wait()` and produces `ExitKind::Crashed`; the
+        `ExitObserver` maps that to this variant directly.
 
         **Cause-class payloads carry typed cause-specific data**, NOT a
         free-form `detail: String`. The previous state-class shape relied on
@@ -1735,7 +1813,7 @@ components:
 
         | Variant | When emitted |
         |---|---|
-        | `Reconciler` | the `JobLifecycle` reconciler converged a state and emitted an `Action::*` that the action shim materialised into an `AllocStatusRow` write |
+        | `Reconciler` | the `WorkloadLifecycle` reconciler converged a state and emitted an `Action::*` that the action shim materialised into an `AllocStatusRow` write |
         | `Driver(DriverType)` | the action shim observed a driver `start`/`stop`/`status` result and wrote the row directly (post-spawn settle, immediate failure, etc.) |
 
         The `Driver(DriverType)` carries the driver kind so a CLI rendering
@@ -1749,6 +1827,41 @@ components:
         `{"kind": "driver", "data": "exec"}` for the typed variant
         (`DriverType` itself serialises as a kebab-case string per its own
         `#[serde(rename_all = "kebab-case")]`).
+    WorkloadDescription:
+      type: object
+      description: |-
+        Response for `GET /v1/jobs/{id}`. Carries the re-hydrated spec and
+        the canonical spec digest per ADR-0014 and US-03 AC (amended by
+        ADR-0020).
+
+        `spec` is typed (`JobSpecInput`), never `serde_json::Value` — the
+        CLI parses this response into a concrete type rather than a value
+        bag. `spec_digest` equals the lowercase-hex SHA-256 of the
+        rkyv-archived bytes pulled out of the `IntentStore` — i.e. the
+        same value the original `POST /v1/jobs` returned for this `workload_id`.
+      required:
+      - spec
+      - spec_digest
+      properties:
+        spec:
+          $ref: '#/components/schemas/JobSpecInput'
+        spec_digest:
+          type: string
+    WorkloadKind:
+      type: string
+      description: |-
+        Three-way kind discriminator. Mirrors the variant tags of
+        [`WorkloadSpec`] and [`WorkloadSpecInput`].
+
+        `Default == Service` per ADR-0037 Amendment 2026-05-10 / ADR-0047 §1:
+        before slice 02-04 the reconciler was kind-agnostic and emulated the
+        Service shape (long-running, restart-budget-driven). Defaulting to
+        `Service` preserves that behavior at every call site that has not
+        yet been wired through to populate the kind explicitly.
+      enum:
+      - Service
+      - Job
+      - Schedule
 tags:
 - name: jobs
   description: Job lifecycle endpoints

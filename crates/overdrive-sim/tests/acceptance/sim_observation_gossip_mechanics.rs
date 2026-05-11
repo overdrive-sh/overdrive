@@ -17,7 +17,7 @@
 use std::str::FromStr;
 use std::time::Duration;
 
-use overdrive_core::id::{AllocationId, JobId, NodeId};
+use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
 };
@@ -34,13 +34,16 @@ fn node(name: &str) -> NodeId {
 fn row_at(writer: &NodeId, counter: u64, state: AllocState) -> AllocStatusRow {
     AllocStatusRow {
         alloc_id: AllocationId::from_str("alloc-tiebreak").expect("valid alloc id"),
-        job_id: JobId::from_str("payments").expect("valid job id"),
+        workload_id: WorkloadId::from_str("payments").expect("valid job id"),
         node_id: node("node-a"),
         state,
         updated_at: LogicalTimestamp { counter, writer: writer.clone() },
         reason: None,
         detail: None,
         terminal: None,
+        stderr_tail: None,
+        kind: overdrive_core::aggregate::WorkloadKind::Service,
+        listeners: Vec::new(),
     }
 }
 
@@ -157,13 +160,16 @@ async fn lww_equal_timestamps_are_idempotent_no_redelivery_flip() {
     let store = SimObservationStore::single_peer(node("node-a"), STEP_SEED);
     let row_v1 = AllocStatusRow {
         alloc_id: AllocationId::from_str("alloc-dup").expect("valid alloc id"),
-        job_id: JobId::from_str("payments").expect("valid job id"),
+        workload_id: WorkloadId::from_str("payments").expect("valid job id"),
         node_id: node("node-a"),
         state: AllocState::Running,
         updated_at: LogicalTimestamp { counter: 5, writer: node("node-a") },
         reason: None,
         detail: None,
         terminal: None,
+        stderr_tail: None,
+        kind: overdrive_core::aggregate::WorkloadKind::Service,
+        listeners: Vec::new(),
     };
     // Identical timestamp, but a different payload — represents the
     // same logical row being re-delivered via gossip. Under LWW, this

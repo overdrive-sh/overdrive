@@ -18,22 +18,25 @@
 
 use overdrive_control_plane::action_shim::LifecycleEvent;
 use overdrive_core::TransitionReason;
-use overdrive_core::id::{AllocationId, JobId, NodeId};
+use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
 
 fn main() {
     let alloc_id = AllocationId::new("alloc-x").unwrap();
-    let job_id = JobId::new("payments").unwrap();
+    let workload_id = WorkloadId::new("payments").unwrap();
     let node_id = NodeId::new("local").unwrap();
     let row = AllocStatusRow {
         alloc_id: alloc_id.clone(),
-        job_id: job_id.clone(),
+        workload_id: workload_id.clone(),
         node_id: node_id.clone(),
         state: AllocState::Running,
         updated_at: LogicalTimestamp { counter: 1, writer: node_id.clone() },
         reason: None,
         detail: None,
         terminal: None,
+        stderr_tail: None,
+        kind: overdrive_core::aggregate::WorkloadKind::Service,
+        listeners: Vec::new(),
     };
 
     // This line MUST fail to compile: `LifecycleEvent.from` is typed
@@ -42,7 +45,7 @@ fn main() {
     // conflated.
     let _ = LifecycleEvent {
         alloc_id,
-        job_id,
+        workload_id,
         from: row, // <-- expected type `AllocStateWire`, found `AllocStatusRow`
         to: overdrive_control_plane::api::AllocStateWire::Running,
         reason: TransitionReason::Started,

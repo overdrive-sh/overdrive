@@ -1,7 +1,7 @@
 //! Acceptance scenarios for `wire-exec-spec-end-to-end` — the
-//! `JobLifecycle::reconcile` projection of `job.command` / `job.args`
-//! into `Action::StartAllocation { spec }` and
-//! `Action::RestartAllocation { alloc_id, spec }`.
+//! `WorkloadLifecycle::reconcile` projection of `job.command` / `job.args`
+//! into `Action::StartAllocation { spec, .. }` and
+//! `Action::RestartAllocation { alloc_id, spec, .. }`.
 //!
 //! Covers `docs/feature/wire-exec-spec-end-to-end/distill/test-scenarios.md`
 //! §5 *Reconciler purity*.
@@ -15,7 +15,7 @@
 //!     invocations with the same input (twin-invocation invariant per
 //!     ADR-0013).
 //!
-//! Tests enter through the driving port (`JobLifecycle::reconcile`
+//! Tests enter through the driving port (`WorkloadLifecycle::reconcile`
 //! via the `Reconciler` trait) and assert observable outcomes (returned
 //! `Vec<Action>` shape with exact `spec` field equality). No internal
 //! state is peeked.
@@ -27,10 +27,11 @@ use std::num::NonZeroU32;
 use std::time::{Duration, Instant};
 
 use overdrive_core::UnixInstant;
-use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver};
-use overdrive_core::id::{AllocationId, JobId, NodeId, Region};
+use overdrive_core::aggregate::{Exec, Job, Node, WorkloadDriver, WorkloadKind};
+use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
 use overdrive_core::reconciler::{
-    Action, JobLifecycle, JobLifecycleState, JobLifecycleView, Reconciler, TickContext,
+    Action, Reconciler, TickContext, WorkloadLifecycle, WorkloadLifecycleState,
+    WorkloadLifecycleView,
 };
 use overdrive_core::traits::driver::Resources;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
@@ -43,8 +44,8 @@ fn nid(s: &str) -> NodeId {
     NodeId::new(s).expect("valid NodeId")
 }
 
-fn jid(s: &str) -> JobId {
-    JobId::new(s).expect("valid JobId")
+fn jid(s: &str) -> WorkloadId {
+    WorkloadId::new(s).expect("valid WorkloadId")
 }
 
 fn aid(s: &str) -> AllocationId {
@@ -84,19 +85,22 @@ fn make_job_with_command_args(
 
 fn alloc_with_state(
     alloc_id: &str,
-    job_id: &str,
+    workload_id: &str,
     node_id: &str,
     state: AllocState,
 ) -> AllocStatusRow {
     AllocStatusRow {
         alloc_id: aid(alloc_id),
-        job_id: jid(job_id),
+        workload_id: jid(workload_id),
         node_id: nid(node_id),
         state,
         updated_at: LogicalTimestamp { counter: 1, writer: nid(node_id) },
         reason: None,
         detail: None,
         terminal: None,
+        stderr_tail: None,
+        kind: overdrive_core::aggregate::WorkloadKind::Service,
+        listeners: Vec::new(),
     }
 }
 
@@ -146,22 +150,24 @@ fn start_action_carries_full_alloc_spec_from_live_job_command_and_args() {
     // No allocations present — the reconciler enters the fresh-start
     // branch and emits StartAllocation.
     let nodes = one_node_map("local");
-    let desired = JobLifecycleState {
+    let desired = WorkloadLifecycleState {
         job: Some(job.clone()),
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::default(),
     };
-    let actual = JobLifecycleState {
+    let actual = WorkloadLifecycleState {
         job: Some(job),
         desired_to_stop: false,
         nodes,
         allocations: empty_alloc_map(),
+        workload_kind: WorkloadKind::default(),
     };
-    let view = JobLifecycleView::default();
+    let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
-    let r = JobLifecycle::canonical();
+    let r = WorkloadLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
 
     // Then exactly one StartAllocation, and the spec carries the
@@ -208,25 +214,32 @@ fn restart_action_carries_full_alloc_spec_from_live_job() {
         "alloc-payments-0",
         alloc_with_state("alloc-payments-0", "payments", "local", AllocState::Terminated),
     );
-    let desired = JobLifecycleState {
+    let desired = WorkloadLifecycleState {
         job: Some(job.clone()),
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::default(),
     };
-    let actual = JobLifecycleState { job: Some(job), desired_to_stop: false, nodes, allocations };
+    let actual = WorkloadLifecycleState {
+        job: Some(job),
+        desired_to_stop: false,
+        nodes,
+        allocations,
+        workload_kind: WorkloadKind::default(),
+    };
     // attempts=0, no deadline → restart fires immediately.
-    let view = JobLifecycleView::default();
+    let view = WorkloadLifecycleView::default();
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
-    let r = JobLifecycle::canonical();
+    let r = WorkloadLifecycle::canonical();
     let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
 
     // Then exactly one RestartAllocation, and the spec carries the
     // operator's declared command + args + resources.
     assert_eq!(actions.len(), 1, "must emit one RestartAllocation; got {actions:?}");
     match &actions[0] {
-        Action::RestartAllocation { alloc_id, spec } => {
+        Action::RestartAllocation { alloc_id, spec, .. } => {
             assert_eq!(alloc_id.as_str(), "alloc-payments-0");
             assert_eq!(
                 spec.command, "/opt/x/y",
@@ -265,26 +278,28 @@ fn reconcile_with_exec_spec_is_deterministic_across_twin_invocations() {
     );
 
     let nodes = one_node_map("local");
-    let desired = JobLifecycleState {
+    let desired = WorkloadLifecycleState {
         job: Some(job.clone()),
         desired_to_stop: false,
         nodes: nodes.clone(),
         allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::default(),
     };
-    let actual = JobLifecycleState {
+    let actual = WorkloadLifecycleState {
         job: Some(job),
         desired_to_stop: false,
         nodes,
         allocations: empty_alloc_map(),
+        workload_kind: WorkloadKind::default(),
     };
-    let view = JobLifecycleView::default();
+    let view = WorkloadLifecycleView::default();
 
     // Pin a fixed `tick.now` — purity says reconcile is a pure
     // function over its inputs; with the SAME tick the SAME output
     // must come out.
     let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
 
-    let r = JobLifecycle::canonical();
+    let r = WorkloadLifecycle::canonical();
     let (actions_a, view_a) = r.reconcile(&desired, &actual, &view, &tick);
     let (actions_b, view_b) = r.reconcile(&desired, &actual, &view, &tick);
 

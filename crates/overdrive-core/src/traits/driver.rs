@@ -197,7 +197,30 @@ pub struct ExitEvent {
     pub alloc: AllocationId,
     pub kind: ExitKind,
     pub intentional_stop: bool,
+    /// Newline-joined tail of the last [`STDERR_TAIL_LINES`] lines the
+    /// workload wrote to stderr before exiting. `None` when the driver
+    /// could not capture stderr (no `Stdio::piped()` wiring, the pipe
+    /// was closed by the workload, or the watcher detected an I/O
+    /// error mid-stream). Per ADR-0033 Amendment 2026-05-10.
+    ///
+    /// Producers:
+    /// - `ExecDriver` (production): consumes `child.stderr` line-by-
+    ///   line into a bounded ring buffer of capacity
+    ///   `STDERR_TAIL_LINES`; on `child.wait()` resolution emits the
+    ///   ring contents joined by `\n` (no trailing newline).
+    /// - `SimDriver` (tests): emits `None` by default; tests that
+    ///   want to exercise the tail-rendering path inject explicit
+    ///   stderr via the sim driver's tail-injection API.
+    pub stderr_tail: Option<String>,
 }
+
+/// Number of trailing stderr lines `ExecDriver` retains for inclusion
+/// on the [`ExitEvent`]. The constant is the project-wide SSOT so the
+/// driver-side ring buffer (which fills it) and the renderer (which
+/// displays it as "stderr (last N lines):") read from one source.
+/// Per ADR-0033 Amendment 2026-05-10 / step 02-05 of
+/// `workload-kind-discriminator`.
+pub const STDERR_TAIL_LINES: usize = 5;
 
 #[async_trait]
 pub trait Driver: Send + Sync + 'static {
@@ -205,7 +228,88 @@ pub trait Driver: Send + Sync + 'static {
     /// deserialises to the same variant.
     fn r#type(&self) -> DriverType;
 
+    /// Spawn the workload described by `spec` and return an opaque
+    /// `AllocationHandle` the operator uses to address it.
+    ///
+    /// # Running-confirmed gate (post-condition)
+    ///
+    /// Drivers that emit `ExitEvent`s via [`Driver::take_exit_receiver`]
+    /// (i.e. those whose `start` spawns a per-alloc watcher / scheduled
+    /// emitter) MUST stash a `tokio::sync::oneshot::Sender<()>` whose
+    /// receiver is awaited by the watcher BEFORE its first
+    /// `ExitEvent` send on the channel. The action shim fires the
+    /// gate via [`Driver::release_for_exit_emission`] exactly once,
+    /// after one of:
+    ///
+    /// - the corresponding `obs.write(AllocStatus::Running)` has
+    ///   committed Ok, or
+    /// - the May-2 retry path has exhausted retries and degraded to a
+    ///   `LifecycleEvent`-only emission (the gate must STILL fire on
+    ///   that liveness rail — otherwise the watcher leaks forever
+    ///   waiting on a oneshot that nothing will ever send).
+    ///
+    /// This is the structural happens-before edge between the action
+    /// shim's "Running row committed" and the watcher's first
+    /// `ExitEvent` emission. Without it, a sub-millisecond-lifetime
+    /// workload's exit event can race the action shim's `Running`
+    /// write and be silently dropped by the observer's
+    /// `find_prior_row → NoPriorRow` arm. See
+    /// `docs/feature/fix-exit-observer-running-gate/deliver/rca.md`
+    /// (Solution 1') for the full RCA.
+    ///
+    /// # Idempotency
+    ///
+    /// `release_for_exit_emission` is idempotent: a call against an
+    /// alloc whose gate has already fired (or whose alloc is unknown
+    /// to the driver) is a no-op, NOT a panic. This protects against
+    /// future call sites firing the gate twice (e.g. a successful
+    /// retry AND the May-2 degraded-escalation path both firing).
+    /// `tokio::sync::oneshot::Sender::send` consumes the sender, so
+    /// double-fire is structurally impossible at the type level —
+    /// the idempotency guarantee here is about the lookup-and-take
+    /// path in this method, not the channel itself.
+    ///
+    /// # Observable invariant
+    ///
+    /// No `ExitEvent` reaches the consumer of
+    /// [`Driver::take_exit_receiver`] before the corresponding gate
+    /// has fired (or, equivalently, before the gate's
+    /// `oneshot::Sender` has been dropped — see "Sender drop"
+    /// below).
+    ///
+    /// # Sender drop (orphan path)
+    ///
+    /// If the action shim crashes or otherwise panics between
+    /// `driver.start` resolving and the gate firing, the stashed
+    /// `oneshot::Sender` is eventually dropped (when the driver is
+    /// dropped, or when the alloc's slot is evicted). The watcher's
+    /// `oneshot::Receiver::await` then resolves to `Err(RecvError)`,
+    /// which the watcher treats as "proceed and emit the event". The
+    /// observer's `find_prior_row` then handles the present-or-absent
+    /// row case as today (May-2 RCA). This matches the today-reality
+    /// orphan-process condition the predecessor RCA accepts as out of
+    /// scope.
+    ///
+    /// # Default implementation
+    ///
+    /// Drivers that have no watcher (no `ExitEvent` emission path)
+    /// do not need to override [`Driver::release_for_exit_emission`];
+    /// the default no-op is correct for them.
     async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError>;
+
+    /// Fire the Running-confirmed gate for `handle.alloc`. See the
+    /// post-condition section on [`Driver::start`] for the full
+    /// contract: idempotent, exactly-once-per-alloc by construction
+    /// of the `oneshot::Sender::send` consume-self semantics, no-op
+    /// for unknown allocs.
+    ///
+    /// The action shim calls this after `obs.write(Running)`
+    /// resolves Ok, OR after the May-2 retry-exhaustion-degraded
+    /// `LifecycleEvent` path runs. Either firing site is sufficient
+    /// for the watcher's gate-await to release.
+    ///
+    /// Default: no-op (drivers with no watcher).
+    fn release_for_exit_emission(&self, _handle: &AllocationHandle) {}
 
     async fn stop(&self, handle: &AllocationHandle) -> Result<(), DriverError>;
 

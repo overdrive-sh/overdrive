@@ -4,13 +4,13 @@
 //!
 //! | Endpoint | Handler |
 //! |---|---|
-//! | `POST /v1/jobs` | `submit_job` |
-//! | `GET /v1/jobs/{id}` | `describe_job` |
+//! | `POST /v1/jobs` | `submit_workload` |
+//! | `GET /v1/jobs/{id}` | `describe_workload` |
 //! | `GET /v1/cluster/info` | `cluster_status` |
 //! | `GET /v1/allocs` | `alloc_status` |
 //! | `GET /v1/nodes` | `node_list` |
 //!
-//! Step 03-01 lands the `submit_job` body; the other four remain RED
+//! Step 03-01 lands the `submit_workload` body; the other four remain RED
 //! scaffolds owned by subsequent deliver steps.
 
 use axum::Json;
@@ -18,10 +18,10 @@ use axum::body::Body;
 use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, header};
 use axum::response::{IntoResponse, Response};
-use overdrive_core::aggregate::{AggregateError, IntentKey, Job, JobSpecInput};
-use overdrive_core::id::{ContentHash, JobId};
+use overdrive_core::aggregate::{AggregateError, IntentKey, Job, JobSpecInput, WorkloadKind};
+use overdrive_core::id::{ContentHash, WorkloadId};
 use overdrive_core::reconciler::{
-    JobLifecycle, RESTART_BACKOFF_CEILING, Reconciler, ReconcilerName, TargetResource,
+    RESTART_BACKOFF_CEILING, Reconciler, ReconcilerName, TargetResource, WorkloadLifecycle,
 };
 use overdrive_core::traits::intent_store::{IntentStore, PutOutcome};
 use overdrive_core::traits::observation_store::AllocState;
@@ -30,7 +30,8 @@ use overdrive_core::transition_reason::TerminalCondition;
 use serde::Deserialize;
 
 use crate::api::{
-    AllocStateWire, RestartBudget, StopJobResponse, StopOutcome, TransitionRecord, TransitionSource,
+    AllocStateWire, RestartBudget, StopOutcome, StopWorkloadResponse, TransitionRecord,
+    TransitionSource,
 };
 
 use crate::AppState;
@@ -39,7 +40,7 @@ use crate::error::ControlPlaneError;
 use overdrive_core::eval_broker::Evaluation;
 
 /// Enqueue a `(job-lifecycle, job/<id>)` evaluation onto the runtime
-/// broker. Called from `submit_job` and `stop_job` after the
+/// broker. Called from `submit_workload` and `stop_workload` after the
 /// `IntentStore` write commits — the edge-triggered ingress half of
 /// whitepaper §18 *Triggering Model — Hybrid by Design*. The
 /// convergence-loop spawn in [`crate::run_server_with_obs_and_driver`]
@@ -51,22 +52,28 @@ use overdrive_core::eval_broker::Evaluation;
 /// without this enqueue, `IntentStore` writes would commit but no
 /// convergence would ever run — `cluster_status.broker.dispatched`
 /// would permanently read 0.
-fn enqueue_job_lifecycle_eval(state: &AppState, job_id: &JobId) -> Result<(), ControlPlaneError> {
+fn enqueue_workload_lifecycle_eval(
+    state: &AppState,
+    workload_id: &WorkloadId,
+) -> Result<(), ControlPlaneError> {
     // Source from the trait const per the `refactor-reconciler-static-name`
-    // RCA — `JobLifecycle::NAME` is the single compile-time anchor for
+    // RCA — `WorkloadLifecycle::NAME` is the single compile-time anchor for
     // the kebab-case literal, and the `ReconcilerName::new` validator
     // accepts it by construction.
-    let reconciler = ReconcilerName::new(<JobLifecycle as Reconciler>::NAME).map_err(|e| {
-        ControlPlaneError::internal("ReconcilerName::new(<JobLifecycle as Reconciler>::NAME)", e)
+    let reconciler = ReconcilerName::new(<WorkloadLifecycle as Reconciler>::NAME).map_err(|e| {
+        ControlPlaneError::internal(
+            "ReconcilerName::new(<WorkloadLifecycle as Reconciler>::NAME)",
+            e,
+        )
     })?;
-    let target_string = format!("job/{job_id}");
+    let target_string = format!("job/{workload_id}");
     let target = TargetResource::new(&target_string)
         .map_err(|e| ControlPlaneError::internal("TargetResource::new(job/<id>)", e))?;
     state.runtime.broker().submit(Evaluation { reconciler, target });
     Ok(())
 }
 
-/// Parse a `JobId` from a path parameter, attaching `field = Some("id")` to
+/// Parse a `WorkloadId` from a path parameter, attaching `field = Some("id")` to
 /// the validation error so HTTP clients can branch on the error origin.
 ///
 /// The `field` discriminator is the contract that lets a client tell
@@ -75,8 +82,8 @@ fn enqueue_job_lifecycle_eval(state: &AppState, job_id: &JobId) -> Result<(), Co
 /// `field = None` because it has no caller-side context to name. Handlers
 /// that DO have caller-side context (the `OpenAPI` path parameter `id`)
 /// attach it explicitly through this helper.
-fn parse_job_id_path(job_id_str: &str) -> Result<JobId, ControlPlaneError> {
-    JobId::new(job_id_str).map_err(|e| ControlPlaneError::Validation {
+fn parse_workload_id_path(job_id_str: &str) -> Result<WorkloadId, ControlPlaneError> {
+    WorkloadId::new(job_id_str).map_err(|e| ControlPlaneError::Validation {
         message: e.to_string(),
         field: Some("id".to_owned()),
     })
@@ -108,7 +115,7 @@ impl From<overdrive_core::traits::observation_store::AllocStatusRow> for api::Al
 
         Self {
             alloc_id: row.alloc_id.to_string(),
-            job_id: row.job_id.to_string(),
+            workload_id: row.workload_id.to_string(),
             node_id: row.node_id.to_string(),
             state: AllocStateWire::from(row.state),
             reason: row.reason,
@@ -127,15 +134,15 @@ impl From<overdrive_core::traits::observation_store::AllocStatusRow> for api::Al
 
 /// Query parameters for `GET /v1/allocs`.
 ///
-/// `job` selects the snapshot for a specific `JobId`. The query
+/// `job` selects the snapshot for a specific `WorkloadId`. The query
 /// parameter is REQUIRED — a missing `?job=` returns HTTP 400 with
 /// `field = Some("job")`. The handler reads the `IntentStore` for the
 /// named job, returns 404 if absent, then projects matching rows + the
-/// `JobLifecycle` view-cache restart counts into the populated
+/// `WorkloadLifecycle` view-cache restart counts into the populated
 /// envelope shape per ADR-0033 §1.
 #[derive(Debug, Clone, Deserialize)]
 pub struct AllocStatusQuery {
-    /// Canonical `JobId` to filter on. Required. Missing → HTTP 400
+    /// Canonical `WorkloadId` to filter on. Required. Missing → HTTP 400
     /// with `field = Some("job")`.
     pub job: Option<String>,
 }
@@ -147,12 +154,12 @@ impl From<overdrive_core::traits::observation_store::NodeHealthRow> for api::Nod
 }
 
 /// `POST /v1/jobs` — validate, archive via rkyv, commit through the
-/// intent store, return `{job_id, spec_digest, outcome}`.
+/// intent store, return `{workload_id, spec_digest, outcome}`.
 ///
 /// Idempotency contract (ADR-0015 §4 amended by ADR-0020):
 ///
 /// * A spec whose rkyv-archived bytes are absent at the canonical
-///   `jobs/<JobId>` key returns HTTP 200 with `outcome =
+///   `jobs/<WorkloadId>` key returns HTTP 200 with `outcome =
 ///   IdempotencyOutcome::Inserted` and the canonical `spec_digest`
 ///   (`PutOutcome::Inserted` path).
 /// * A spec whose rkyv-archived bytes are byte-identical to what is
@@ -174,7 +181,7 @@ impl From<overdrive_core::traits::observation_store::NodeHealthRow> for api::Nod
 // Slice 02 step 02-02 — `POST /v1/jobs` 200 response is polymorphic
 // on `Accept` per DESIGN [D6] / [D8]. The path declares both content
 // types under a single 200 response — `application/json` returns a
-// one-shot `SubmitJobResponse`; `application/x-ndjson` returns a
+// one-shot `SubmitWorkloadResponse`; `application/x-ndjson` returns a
 // stream of `SubmitEvent` lines. utoipa 5.x's `responses(..., content(
 // (T1 = "mime1"), (T2 = "mime2") ))` group form is the multi-content-
 // type shape (see utoipa-gen 5.4.0 src/path/response.rs §"content"
@@ -182,11 +189,11 @@ impl From<overdrive_core::traits::observation_store::NodeHealthRow> for api::Nod
 #[utoipa::path(
     post,
     path = "/v1/jobs",
-    request_body = api::SubmitJobRequest,
+    request_body = api::SubmitWorkloadRequest,
     responses(
         (status = 200, description = "Job accepted (Accept negotiates one-shot vs streaming)",
             content(
-                (api::SubmitJobResponse = "application/json"),
+                (api::SubmitWorkloadResponse = "application/json"),
                 (api::SubmitEvent       = "application/x-ndjson"),
             )
         ),
@@ -196,10 +203,10 @@ impl From<overdrive_core::traits::observation_store::NodeHealthRow> for api::Nod
     ),
     tag = "jobs",
 )]
-pub async fn submit_job(
+pub async fn submit_workload(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(request): Json<api::SubmitJobRequest>,
+    Json(request): Json<api::SubmitWorkloadRequest>,
 ) -> Result<Response, ControlPlaneError> {
     let want_streaming = wants_ndjson(&headers);
     // 1. Validate via the single aggregate constructor (ADR-0011 —
@@ -234,7 +241,7 @@ pub async fn submit_job(
     let archived = rkyv::to_bytes::<rkyv::rancor::Error>(&job)
         .map_err(|e| ControlPlaneError::internal("rkyv archive of Job", e))?;
 
-    // 3. Derive the canonical intent key (`jobs/<JobId>`).
+    // 3. Derive the canonical intent key (`jobs/<WorkloadId>`).
     let key = IntentKey::for_job(&job.id);
 
     // 4. Compute the canonical `spec_digest` over the rkyv-archived
@@ -242,6 +249,21 @@ pub async fn submit_job(
     //    `KeyExists` branch) as the equality check against the
     //    bytes already stored at this key — see step 5.
     let spec_digest = ContentHash::of(archived.as_ref()).to_string();
+
+    // 5a. Per ADR-0047 §1 / slice 02 of `workload-kind-discriminator`:
+    //     persist the workload-kind discriminator at
+    //     `IntentKey::for_workload_kind` so the streaming endpoint can
+    //     dispatch on per-kind sibling-event enums (ADR-0047 §3 [D7])
+    //     and the reconciler runtime's `hydrate_desired` can populate
+    //     `WorkloadLifecycleState.workload_kind` for the natural-exit
+    //     emission path (ADR-0037 Amendment 2026-05-10). The wire
+    //     field is optional — absent or unknown values default to
+    //     Service per `WorkloadKind::from_wire_str` forward-compat.
+    let mut workload_kind = request
+        .workload_kind
+        .as_deref()
+        .map_or_else(WorkloadKind::default, WorkloadKind::from_wire_str);
+    let kind_key = IntentKey::for_workload_kind(&job.id);
 
     // 5. Atomic idempotency / conflict detection via `put_if_absent`.
     //    The existence check and the insert happen in a single store
@@ -252,11 +274,24 @@ pub async fn submit_job(
     //    silently clobbering the first spec.
     let outcome = match state.store.put_if_absent(key.as_bytes(), archived.as_ref()).await? {
         PutOutcome::Inserted => {
+            // Persist the kind discriminator alongside the job.
+            // Use `put` (overwrite-OK) rather than `put_if_absent` —
+            // a Job at the same key cannot have a different kind by
+            // construction (idempotency check on the spec above
+            // requires byte-identical re-submission), so writing the
+            // discriminator unconditionally is safe and survives a
+            // crashed-mid-submit retry that wrote the spec but not
+            // the kind on the prior attempt.
+            state
+                .store
+                .put(kind_key.as_bytes(), &[workload_kind.discriminator_byte()])
+                .await
+                .map_err(|e| ControlPlaneError::internal("persist workload kind", e))?;
             // Edge-triggered ingress per whitepaper §18: enqueue an
             // evaluation for the job-lifecycle reconciler so the
             // convergence-loop spawn picks it up on the next tick.
             // Per `fix-convergence-loop-not-spawned` Step 01-02.
-            enqueue_job_lifecycle_eval(&state, &job.id)?;
+            enqueue_workload_lifecycle_eval(&state, &job.id)?;
             api::IdempotencyOutcome::Inserted
         }
         PutOutcome::KeyExists { existing } => {
@@ -269,7 +304,22 @@ pub async fn submit_job(
                 // any drift, and the broker collapses duplicates per
                 // §18 evaluation-broker semantics so a flapping
                 // resubmit produces one pending eval, not N.
-                enqueue_job_lifecycle_eval(&state, &job.id)?;
+                //
+                // Read the stored kind discriminator so streaming
+                // dispatch matches the reconciler's view. The first
+                // submit wrote the authoritative kind; a re-submit
+                // with a different (or absent) workload_kind must not
+                // override the streaming dispatch to a different path.
+                if let Some(stored_kind_bytes) =
+                    state.store.get(kind_key.as_bytes()).await.map_err(|e| {
+                        ControlPlaneError::internal("read workload kind (unchanged path)", e)
+                    })?
+                {
+                    if let Some(b) = stored_kind_bytes.first().copied() {
+                        workload_kind = WorkloadKind::from_discriminator_byte(b);
+                    }
+                }
+                enqueue_workload_lifecycle_eval(&state, &job.id)?;
                 api::IdempotencyOutcome::Unchanged
             } else {
                 // Different spec at the same key — 409 Conflict.
@@ -284,14 +334,34 @@ pub async fn submit_job(
     };
 
     // Branch on Accept header per [D6] / [D8]. JSON lane preserves
-    // the existing `SubmitJobResponse` shape unchanged (back-compat
-    // S-CP-08). NDJSON lane delegates to `streaming_submit_loop` for
-    // the per-line emit + cap timer + lagged-recovery.
+    // the existing `SubmitWorkloadResponse` shape unchanged (back-compat
+    // S-CP-08). NDJSON lane delegates to the per-kind streaming loop
+    // per ADR-0047 §3 [D7]: Service → `build_stream` (legacy flat
+    // `SubmitEvent`); Job → `build_workload_stream` (typed sibling-event
+    // enum, no `ConvergedRunning` variant — RCA root causes B+C+D
+    // structurally unreachable). Schedule support lands in slice 05.
     if want_streaming {
-        let accepted =
-            crate::streaming::build_accepted(spec_digest, key.as_str().to_owned(), outcome);
-        let stream = crate::streaming::build_stream(state.clone(), job.id, accepted);
-        let body = Body::from_stream(stream);
+        let body = match workload_kind {
+            WorkloadKind::Job => {
+                let accepted = crate::streaming::build_workload_accepted(
+                    spec_digest,
+                    key.as_str().to_owned(),
+                    outcome,
+                );
+                let stream =
+                    crate::streaming::build_workload_stream(state.clone(), job.id, accepted);
+                Body::from_stream(stream)
+            }
+            WorkloadKind::Service | WorkloadKind::Schedule => {
+                // Service / Schedule (Schedule is no-op streaming for
+                // Phase 1 per slice 05) flow through the legacy
+                // flat-`SubmitEvent` path unchanged.
+                let accepted =
+                    crate::streaming::build_accepted(spec_digest, key.as_str().to_owned(), outcome);
+                let stream = crate::streaming::build_stream(state.clone(), job.id, accepted);
+                Body::from_stream(stream)
+            }
+        };
         let response = Response::builder()
             .status(axum::http::StatusCode::OK)
             .header(header::CONTENT_TYPE, "application/x-ndjson")
@@ -299,7 +369,8 @@ pub async fn submit_job(
             .map_err(|e| ControlPlaneError::internal("build streaming response", e))?;
         Ok(response)
     } else {
-        let body = api::SubmitJobResponse { job_id: job.id.to_string(), spec_digest, outcome };
+        let body =
+            api::SubmitWorkloadResponse { workload_id: job.id.to_string(), spec_digest, outcome };
         Ok(Json(body).into_response())
     }
 }
@@ -342,23 +413,23 @@ fn wants_ndjson(headers: &HeaderMap) -> bool {
     get,
     path = "/v1/jobs/{id}",
     params(
-        ("id" = String, Path, description = "Canonical JobId"),
+        ("id" = String, Path, description = "Canonical WorkloadId"),
     ),
     responses(
-        (status = 200, description = "Job description", body = api::JobDescription),
+        (status = 200, description = "Job description", body = api::WorkloadDescription),
         (status = 404, description = "Job not found", body = api::ErrorBody),
         (status = 500, description = "Internal error", body = api::ErrorBody),
     ),
     tag = "jobs",
 )]
-pub async fn describe_job(
+pub async fn describe_workload(
     State(state): State<AppState>,
     Path(job_id_str): Path<String>,
-) -> Result<Json<api::JobDescription>, ControlPlaneError> {
-    // 1. Parse the path parameter through the JobId newtype. A malformed
+) -> Result<Json<api::WorkloadDescription>, ControlPlaneError> {
+    // 1. Parse the path parameter through the WorkloadId newtype. A malformed
     //    identifier (non-ASCII, wrong length, bad charset) surfaces as
-    //    HTTP 400 with `field: Some("id")` via `parse_job_id_path`.
-    let job_id = parse_job_id_path(&job_id_str)?;
+    //    HTTP 400 with `field: Some("id")` via `parse_workload_id_path`.
+    let workload_id = parse_workload_id_path(&job_id_str)?;
 
     // 2. Derive the canonical intent key and read from the authoritative
     //    store. Missing key → NotFound → HTTP 404.
@@ -369,7 +440,7 @@ pub async fn describe_job(
     //    duplicate the job-prefix literal into a second production
     //    file, which the `intent_key_canonical` grep-gate in
     //    `overdrive-core` explicitly forbids.
-    let key = IntentKey::for_job(&job_id);
+    let key = IntentKey::for_job(&workload_id);
     let bytes = state
         .store
         .get(key.as_bytes())
@@ -388,7 +459,7 @@ pub async fn describe_job(
     //    bytes"; no re-archival, no re-canonicalisation.
     let spec_digest = ContentHash::of(&bytes).to_string();
 
-    Ok(Json(api::JobDescription { spec: JobSpecInput::from(&job), spec_digest }))
+    Ok(Json(api::WorkloadDescription { spec: JobSpecInput::from(&job), spec_digest }))
 }
 
 /// `POST /v1/jobs/{id}/stop` — record a stop intent for a previously-
@@ -413,35 +484,35 @@ pub async fn describe_job(
 /// recorded — stopping a non-existent job is operator error, not an
 /// idempotent no-op.
 ///
-/// Empty request body. The response body is `{ job_id, outcome }`.
+/// Empty request body. The response body is `{ workload_id, outcome }`.
 #[utoipa::path(
     post,
     path = "/v1/jobs/{id}/stop",
     params(
-        ("id" = String, Path, description = "Canonical JobId"),
+        ("id" = String, Path, description = "Canonical WorkloadId"),
     ),
     responses(
-        (status = 200, description = "Job stop recorded", body = StopJobResponse),
+        (status = 200, description = "Job stop recorded", body = StopWorkloadResponse),
         (status = 400, description = "Validation error", body = api::ErrorBody),
         (status = 404, description = "Job not found", body = api::ErrorBody),
         (status = 500, description = "Internal error", body = api::ErrorBody),
     ),
     tag = "jobs",
 )]
-pub async fn stop_job(
+pub async fn stop_workload(
     State(state): State<AppState>,
     Path(job_id_str): Path<String>,
-) -> Result<axum::Json<StopJobResponse>, ControlPlaneError> {
-    // 1. Parse the path parameter through the JobId newtype. Same
-    //    field-naming discipline as `describe_job` — see `parse_job_id_path`.
-    let job_id = parse_job_id_path(&job_id_str)?;
+) -> Result<axum::Json<StopWorkloadResponse>, ControlPlaneError> {
+    // 1. Parse the path parameter through the WorkloadId newtype. Same
+    //    field-naming discipline as `describe_workload` — see `parse_workload_id_path`.
+    let workload_id = parse_workload_id_path(&job_id_str)?;
 
     // 2. The job must exist before a stop can be recorded. Reading
     //    the canonical job key is the cheapest 404 check — if the
     //    row is absent we have no stop target, so 404 surfaces with
-    //    the same `resource = jobs/<id>` shape as describe_job's
+    //    the same `resource = jobs/<id>` shape as describe_workload's
     //    NotFound path.
-    let job_key = IntentKey::for_job(&job_id);
+    let job_key = IntentKey::for_job(&workload_id);
     let job_exists = state.store.get(job_key.as_bytes()).await?.is_some();
     if !job_exists {
         return Err(ControlPlaneError::NotFound { resource: job_key.as_str().to_owned() });
@@ -451,7 +522,7 @@ pub async fn stop_job(
     //    deliberate — the key's existence IS the signal. A second
     //    stop call lands on the KeyExists branch and reports
     //    AlreadyStopped without a second write.
-    let stop_key = IntentKey::for_job_stop(&job_id);
+    let stop_key = IntentKey::for_job_stop(&workload_id);
     let outcome = match state.store.put_if_absent(stop_key.as_bytes(), b"").await? {
         PutOutcome::Inserted => StopOutcome::Stopped,
         PutOutcome::KeyExists { .. } => StopOutcome::AlreadyStopped,
@@ -464,9 +535,9 @@ pub async fn stop_job(
     // stop arriving while the prior stop has not yet converged is
     // collapsed by the broker's `(reconciler, target)` keying.
     // Per `fix-convergence-loop-not-spawned` Step 01-02.
-    enqueue_job_lifecycle_eval(&state, &job_id)?;
+    enqueue_workload_lifecycle_eval(&state, &workload_id)?;
 
-    Ok(axum::Json(StopJobResponse { job_id: job_id.to_string(), outcome }))
+    Ok(axum::Json(StopWorkloadResponse { workload_id: workload_id.to_string(), outcome }))
 }
 
 /// `GET /v1/cluster/info` — mode, region, reconciler registry, broker
@@ -524,7 +595,7 @@ pub async fn cluster_status(
 ///
 /// The `job` query parameter is REQUIRED. The handler reads the
 /// `IntentStore` for `<id>`'s `Job`, returns 404 if absent, then
-/// projects matching rows + the `JobLifecycle` view-cache restart
+/// projects matching rows + the `WorkloadLifecycle` view-cache restart
 /// counts into the populated envelope shape per ADR-0033 §1. A missing
 /// `?job=` query parameter returns HTTP 400 with
 /// `field = Some("job")`.
@@ -553,15 +624,15 @@ pub async fn alloc_status(
         });
     };
 
-    // Validate the JobId (returns 400 with field=Some("job") on bad
+    // Validate the WorkloadId (returns 400 with field=Some("job") on bad
     // input — the path-param helper handles this naming).
-    let job_id = JobId::new(job_str).map_err(|e| ControlPlaneError::Validation {
+    let workload_id = WorkloadId::new(job_str).map_err(|e| ControlPlaneError::Validation {
         message: e.to_string(),
         field: Some("job".to_owned()),
     })?;
 
     // Read the Job aggregate — 404 if absent.
-    let key = IntentKey::for_job(&job_id);
+    let key = IntentKey::for_job(&workload_id);
     let bytes = state
         .store
         .get(key.as_bytes())
@@ -587,7 +658,7 @@ pub async fn alloc_status(
         .await
         .map_err(|e| ControlPlaneError::internal("alloc_status_rows", e))?;
     let job_rows: Vec<AllocStatusRow> =
-        raw_rows.into_iter().filter(|row| row.job_id == job_id).collect();
+        raw_rows.into_iter().filter(|row| row.workload_id == workload_id).collect();
 
     // Per ADR-0037 §4: derive the RestartBudget from the durable
     // `AllocStatusRow.terminal` field rather than from a recomputed
@@ -609,13 +680,27 @@ pub async fn alloc_status(
         u32::try_from(rows.iter().filter(|r| matches!(r.state, AllocStateWire::Running)).count())
             .unwrap_or(u32::MAX);
 
+    // Per ADR-0047 §1 / step 02-02 [D4]: read the workload-kind
+    // discriminator from the dedicated `workloads/<id>/kind` intent record.
+    // Phase-1 greenfield: missing record defaults to `Service` (the
+    // kind-agnostic shape the reconciler emulated before slice 02-04).
+    let kind_byte = state
+        .store
+        .get(IntentKey::for_workload_kind(&workload_id).as_bytes())
+        .await?
+        .and_then(|bytes| bytes.first().copied());
+    let kind = kind_byte
+        .map(overdrive_core::aggregate::WorkloadKind::from_discriminator_byte)
+        .unwrap_or_default();
+
     Ok(Json(api::AllocStatusResponse {
-        job_id: Some(job.id.to_string()),
+        workload_id: Some(job.id.to_string()),
         spec_digest: Some(spec_digest),
         replicas_desired: job.replicas.get(),
         replicas_running,
         rows,
         restart_budget: Some(restart_budget),
+        kind: Some(kind),
     }))
 }
 
@@ -630,7 +715,7 @@ pub async fn alloc_status(
 ///
 /// `used` reflects the attempts count from the `BackoffExhausted`
 /// variant when terminal, else 0; `max` is sourced from
-/// [`RESTART_BACKOFF_CEILING`], the `JobLifecycle` policy ceiling —
+/// [`RESTART_BACKOFF_CEILING`], the `WorkloadLifecycle` policy ceiling —
 /// single source of truth shared with the reconciler so the wire
 /// field cannot drift from the runtime policy.
 fn restart_budget_from_rows(rows: &[AllocStatusRow]) -> RestartBudget {

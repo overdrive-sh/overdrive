@@ -17,7 +17,7 @@
 use std::str::FromStr;
 
 use overdrive_control_plane::api::{AllocStateWire, AllocStatusRowBody, NodeRowBody};
-use overdrive_core::id::{AllocationId, JobId, NodeId, Region};
+use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, NodeHealthRow,
 };
@@ -25,7 +25,7 @@ use overdrive_core::traits::observation_store::{
 fn sample_alloc_status_row() -> AllocStatusRow {
     AllocStatusRow {
         alloc_id: AllocationId::from_str("alloc-a1b2c3").expect("valid alloc id"),
-        job_id: JobId::from_str("payments").expect("valid job id"),
+        workload_id: WorkloadId::from_str("payments").expect("valid job id"),
         node_id: NodeId::from_str("node-a").expect("valid node id"),
         state: AllocState::Running,
         updated_at: LogicalTimestamp {
@@ -35,6 +35,9 @@ fn sample_alloc_status_row() -> AllocStatusRow {
         reason: None,
         detail: None,
         terminal: None,
+        stderr_tail: None,
+        kind: overdrive_core::aggregate::WorkloadKind::Service,
+        listeners: Vec::new(),
     }
 }
 
@@ -67,9 +70,9 @@ fn alloc_status_row_body_carries_all_four_fields_verbatim() {
         "alloc_id must carry the source AllocationId's canonical rendering",
     );
     assert_eq!(
-        body.job_id,
-        row.job_id.to_string(),
-        "job_id must carry the source JobId's canonical rendering",
+        body.workload_id,
+        row.workload_id.to_string(),
+        "workload_id must carry the source WorkloadId's canonical rendering",
     );
     assert_eq!(
         body.node_id,
@@ -85,7 +88,7 @@ fn alloc_status_row_body_carries_all_four_fields_verbatim() {
     // Belt-and-braces — a mutation that substitutes
     // `Default::default()` (empty strings) would fail this too.
     assert!(!body.alloc_id.is_empty(), "alloc_id must not be empty");
-    assert!(!body.job_id.is_empty(), "job_id must not be empty");
+    assert!(!body.workload_id.is_empty(), "workload_id must not be empty");
     assert!(!body.node_id.is_empty(), "node_id must not be empty");
     // body.state is now typed (AllocStateWire), not String — variant
     // distinctness is asserted in the next test

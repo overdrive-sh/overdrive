@@ -30,7 +30,7 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
-use overdrive_control_plane::{AppState, job_lifecycle, noop_heartbeat};
+use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
 use overdrive_core::aggregate::{
     DriverInput, ExecInput, IntentKey, Job, JobSpecInput, ResourcesInput,
 };
@@ -93,7 +93,7 @@ async fn build_state_with_clock(tmp: &TempDir, clock: Arc<dyn Clock>) -> AppStat
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime::new");
     runtime.register(noop_heartbeat()).await.expect("register noop-heartbeat");
-    runtime.register(job_lifecycle()).await.expect("register job-lifecycle");
+    runtime.register(workload_lifecycle()).await.expect("register job-lifecycle");
     let store_path = tmp.path().join("intent.redb");
     let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
@@ -127,7 +127,7 @@ async fn run_convergence_tick_populates_now_unix_from_state_clock() {
     // construction site to obtain a `unix_now()` value.
     let state = build_state_with_clock(&tmp, Arc::clone(&probe) as Arc<dyn Clock>).await;
 
-    // Preload IntentStore with a Job so JobLifecycle's hydrate_desired
+    // Preload IntentStore with a Job so WorkloadLifecycle's hydrate_desired
     // succeeds (otherwise hydrate fails before TickContext construction
     // — this test asserts the happy-path tick construction).
     let job = Job::from_spec(JobSpecInput {

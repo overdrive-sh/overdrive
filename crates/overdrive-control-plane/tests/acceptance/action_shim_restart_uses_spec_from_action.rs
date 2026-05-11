@@ -27,7 +27,7 @@ use async_trait::async_trait;
 use overdrive_control_plane::action_shim::dispatch;
 use overdrive_core::SpiffeId;
 use overdrive_core::UnixInstant;
-use overdrive_core::id::{AllocationId, JobId, NodeId};
+use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::reconciler::{Action, TickContext};
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverType, Resources,
@@ -92,20 +92,23 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
         Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("NodeId"), 0));
 
     // Seed a prior alloc row — the shim's Restart arm needs this to
-    // recover (job_id, node_id) for the Terminated AllocStatusRow it
+    // recover (workload_id, node_id) for the Terminated AllocStatusRow it
     // writes after the start half completes (per ADR-0023).
     let alloc_id = AllocationId::new("alloc-payments-0").expect("alloc id");
-    let job_id = JobId::new("payments").expect("job id");
+    let workload_id = WorkloadId::new("payments").expect("job id");
     let node_id = NodeId::new("local").expect("node id");
     let prior_row = AllocStatusRow {
         alloc_id: alloc_id.clone(),
-        job_id: job_id.clone(),
+        workload_id: workload_id.clone(),
         node_id: node_id.clone(),
         state: AllocState::Terminated,
         updated_at: LogicalTimestamp { counter: 1, writer: node_id.clone() },
         reason: None,
         detail: None,
         terminal: None,
+        stderr_tail: None,
+        kind: overdrive_core::aggregate::WorkloadKind::Service,
+        listeners: Vec::new(),
     };
     obs.write(ObservationRow::AllocStatus(prior_row)).await.expect("seed prior alloc row");
 
@@ -113,7 +116,7 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
     // spec carrying operator-declared command + args.
     let identity = SpiffeId::new(&format!(
         "spiffe://overdrive.local/job/{}/alloc/{}",
-        job_id.as_str(),
+        workload_id.as_str(),
         alloc_id.as_str(),
     ))
     .expect("spiffe id");
@@ -124,7 +127,11 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
         args: vec!["--mode=fast".to_string()],
         resources: Resources { cpu_milli: 200, memory_bytes: 128 * 1024 * 1024 },
     };
-    let action = Action::RestartAllocation { alloc_id, spec: restart_spec.clone() };
+    let action = Action::RestartAllocation {
+        alloc_id,
+        spec: restart_spec.clone(),
+        kind: overdrive_core::aggregate::WorkloadKind::Service,
+    };
 
     let now = Instant::now();
     let tick = TickContext {

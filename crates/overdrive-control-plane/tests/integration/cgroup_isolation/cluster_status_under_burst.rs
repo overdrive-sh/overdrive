@@ -25,9 +25,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
-use overdrive_control_plane::{job_lifecycle, noop_heartbeat};
+use overdrive_control_plane::{noop_heartbeat, workload_lifecycle};
 use overdrive_core::SpiffeId;
-use overdrive_core::id::{AllocationId, JobId, NodeId};
+use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::traits::driver::{AllocationSpec, Driver, Resources};
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
@@ -36,7 +36,7 @@ use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_worker::ExecDriver;
 use tempfile::TempDir;
 
-use super::super::job_lifecycle::cleanup::AllocCleanup;
+use super::super::workload_lifecycle::cleanup::AllocCleanup;
 
 #[tokio::test]
 async fn cluster_status_responsive_under_workload_cpu_burst() {
@@ -52,7 +52,7 @@ async fn cluster_status_responsive_under_workload_cpu_burst() {
     let mut runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime");
     runtime.register(noop_heartbeat()).await.expect("register noop");
-    runtime.register(job_lifecycle()).await.expect("register job-lifecycle");
+    runtime.register(workload_lifecycle()).await.expect("register job-lifecycle");
     let runtime = Arc::new(runtime);
 
     let local_node = NodeId::new("local").expect("node id");
@@ -63,7 +63,7 @@ async fn cluster_status_responsive_under_workload_cpu_burst() {
         Arc::new(overdrive_sim::adapters::clock::SimClock::new()),
     ));
 
-    // Cleanup guard — see job_lifecycle/cleanup.rs.
+    // Cleanup guard — see workload_lifecycle/cleanup.rs.
     let _cleanup =
         AllocCleanup { obs: obs.clone(), cgroup_root: std::path::PathBuf::from("/sys/fs/cgroup") };
 
@@ -75,7 +75,7 @@ async fn cluster_status_responsive_under_workload_cpu_burst() {
     // core and `wait`s — `cgroup.kill` (real cgroupfs) or process-group
     // SIGKILL (test fakes) reaches the entire group at teardown.
     let alloc_id = AllocationId::new("alloc-burner-0").expect("valid alloc id");
-    let job_id = JobId::new("burner").expect("valid job id");
+    let workload_id = WorkloadId::new("burner").expect("valid job id");
     let identity = SpiffeId::new("spiffe://overdrive.local/job/burner/alloc/alloc-burner-0")
         .expect("valid identity");
     let spec = AllocationSpec {
@@ -94,7 +94,7 @@ async fn cluster_status_responsive_under_workload_cpu_burst() {
     // non-empty data (matches what the action shim would have written).
     let row = AllocStatusRow {
         alloc_id: alloc_id.clone(),
-        job_id,
+        workload_id,
         node_id: local_node.clone(),
         state: AllocState::Running,
         updated_at: LogicalTimestamp { counter: 1, writer: local_node.clone() },
@@ -103,6 +103,9 @@ async fn cluster_status_responsive_under_workload_cpu_burst() {
         reason: None,
         detail: None,
         terminal: None,
+        stderr_tail: None,
+        kind: overdrive_core::aggregate::WorkloadKind::Service,
+        listeners: Vec::new(),
     };
     obs.write(ObservationRow::AllocStatus(row)).await.expect("write alloc row");
 

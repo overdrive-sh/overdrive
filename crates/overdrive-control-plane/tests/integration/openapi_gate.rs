@@ -63,9 +63,9 @@ fn openapi_gen_output_contains_every_adr_0008_path() {
 fn openapi_gen_output_contains_every_api_type_schema() {
     let yaml = openapi_lib::generate_yaml().expect("generate_yaml must succeed");
     for expected in [
-        "SubmitJobRequest",
-        "SubmitJobResponse",
-        "JobDescription",
+        "SubmitWorkloadRequest",
+        "SubmitWorkloadResponse",
+        "WorkloadDescription",
         "ClusterStatus",
         "BrokerCountersBody",
         "AllocStatusResponse",

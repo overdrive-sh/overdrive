@@ -28,7 +28,7 @@
 
 use overdrive_control_plane::view_store::ViewStore;
 use overdrive_control_plane::view_store::redb::RedbViewStore;
-use overdrive_core::reconciler::{JobLifecycle, Reconciler, TargetResource};
+use overdrive_core::reconciler::{Reconciler, TargetResource, WorkloadLifecycle};
 
 fn target(s: &str) -> TargetResource {
     TargetResource::new(s).expect("valid target resource")
@@ -42,12 +42,12 @@ fn target(s: &str) -> TargetResource {
 /// under the const shape they all alias the same data segment slice.
 #[test]
 fn reconciler_name_const_is_pointer_identical_across_reads() {
-    let first: &'static str = JobLifecycle::NAME;
-    let second: &'static str = JobLifecycle::NAME;
+    let first: &'static str = WorkloadLifecycle::NAME;
+    let second: &'static str = WorkloadLifecycle::NAME;
 
     assert!(
         std::ptr::eq(first.as_ptr(), second.as_ptr()),
-        "JobLifecycle::NAME must be a single compile-time anchor — \
+        "WorkloadLifecycle::NAME must be a single compile-time anchor — \
          got distinct pointers {:p} vs {:p}, indicating a per-call \
          allocation snuck back in",
         first.as_ptr(),
@@ -83,11 +83,11 @@ async fn write_through_bytes_accepts_reconciler_name_const_directly() {
     // call site continues to compile but the companion compile-fail
     // fixture (view_store_rejects_owned_string.rs) breaks.
     store
-        .write_through_bytes(JobLifecycle::NAME, &t, unit_cbor)
+        .write_through_bytes(WorkloadLifecycle::NAME, &t, unit_cbor)
         .await
         .expect("first write_through accepts NAME directly");
     store
-        .write_through_bytes(JobLifecycle::NAME, &t, unit_cbor)
+        .write_through_bytes(WorkloadLifecycle::NAME, &t, unit_cbor)
         .await
         .expect("second write_through accepts NAME directly");
 }

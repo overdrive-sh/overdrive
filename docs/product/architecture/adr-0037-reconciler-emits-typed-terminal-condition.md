@@ -480,9 +480,58 @@ One coherent step.
   than *cached input* (which would inherit the bug class the rule
   was written to prevent).
 
+## Amendment 2026-05-10 — `JobLifecycleReconciler` (Job kind) emits `Completed { exit_code: 0 }` / `Failed { exit_code: N }` typed terminal conditions
+
+**Decision-maker.** Morgan (DESIGN wave for
+`workload-kind-discriminator`).
+
+**What changed.** Per ADR-0047, the Phase 1 reconciler that today
+serves a single `Job` aggregate splits, semantically, into per-kind
+behaviour:
+
+- **Service kind** (`WorkloadSpec::Service`) — preserves the existing
+  `TerminalCondition::ConvergedRunning { alloc_id, started_at }` /
+  `ConvergedFailed { reason: TransitionReason }` / `ConvergedStopped`
+  shape. No change.
+- **Job kind** (`WorkloadSpec::Job`) — terminal conditions become:
+  - `TerminalCondition::Completed { exit_code: 0, duration_ms,
+    attempts }` — emitted when the ExitObserver writes a terminal
+    `alloc_status` row with `exit_code == 0`.
+  - `TerminalCondition::Failed { exit_code, duration_ms, attempts,
+    max_attempts, stderr_tail }` — emitted when:
+    - The ExitObserver writes a terminal row with `exit_code != 0`
+      AND the reconciler's restart budget is exhausted, OR
+    - The reconciler explicitly emits `BackoffExhausted` per the
+      existing § rule.
+
+  `Completed` and `Failed` are typed `TerminalCondition` variants on
+  the existing enum; the streaming dispatcher routes them onto the
+  outer `JobSubmitEvent::Succeeded` / `JobSubmitEvent::Failed` wire
+  variants per ADR-0032 Amendment 2026-05-10.
+
+- **Schedule kind** (`WorkloadSpec::Schedule`) — Phase 1 ships no
+  reconciler-side execution; the only terminal condition is
+  `TerminalCondition::Registered { deferral_url }` emitted at submit
+  time by the submit handler, not by a reconciler. Real schedule-
+  firing reconciler logic is deferred to GH #166.
+
+The §1 layering claim (reconciler decides terminal-or-not from
+inputs in scope; streaming forwards without re-deriving) is
+preserved verbatim. The new variants are *additional* typed
+conclusions the same reconciler primitive emits; the streaming
+layer remains a forwarder.
+
+See ADR-0047 §3 for the wire-shape consequence and ADR-0047 §1 for
+the aggregate decomposition.
+
 ## Changelog
 
 - 2026-05-03 — Initial accepted version. Codifies the recommendation
   from `issue-139-followup-streaming-restart-budget-research.md`
   candidate (c). Lands alongside the ADR-0035 reset of the in-flight
   `marcus-sa/libsql-view-cache` branch.
+- 2026-05-10 — **Amendment**: Job-kind reconciler emits
+  `Completed { exit_code: 0, .. }` / `Failed { exit_code: N, .. }`
+  typed `TerminalCondition` variants. Service kind unchanged.
+  Schedule kind ships no firing semantics (deferred to GH #166).
+  See `Amendment 2026-05-10` section above and ADR-0047.

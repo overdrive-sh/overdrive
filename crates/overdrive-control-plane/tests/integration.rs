@@ -36,6 +36,11 @@ mod integration {
     //! has no consumer on the post-ADR-0020 wire shape.
     mod concurrent_submit_toctou;
     mod describe_round_trip;
+    /// Slice 02c (step 02-05) of `workload-kind-discriminator` —
+    /// `ExitObserver` stderr-tail capture per ADR-0033 Amendment
+    /// 2026-05-10. Real `/bin/sh` workload writes 7 stderr lines;
+    /// asserts the observer's terminal row carries the last 5.
+    mod exit_observer_stderr_tail;
     mod idempotent_resubmit;
     mod observation_empty_rows;
     /// `ReconcilerRuntime` ↔ `ViewStore` wiring (step 01-06 of
@@ -67,7 +72,7 @@ mod integration {
     mod terminal_propagation;
     mod tls_bootstrap;
     /// phase-1-first-workload — slice 3 (US-03) — walking skeletons.
-    pub mod job_lifecycle {
+    pub mod workload_lifecycle {
         // Shared cleanup helper — reaps real `/bin/sleep` workloads
         // spawned by the action shim so nextest does not flag the
         // tests as `LEAK`. Used by `crash_recovery` and
@@ -80,6 +85,14 @@ mod integration {
         mod crash_recovery;
         mod crash_recovery_obs_write_rejected;
         mod exit_observer;
+        /// Step 01-01 of `fix-exit-observer-running-gate` — RED
+        /// regression for the producer-ordering race between the
+        /// action shim's `obs.write(Running)` and the worker exit
+        /// observer's `ExitEvent` consumption. Today's
+        /// `RetryOutcome::NoPriorRow` arm drops the event silently
+        /// for sub-millisecond-exit workloads. See
+        /// `docs/feature/fix-exit-observer-running-gate/deliver/rca.md`.
+        mod exit_observer_running_gate;
         mod stop_to_terminated;
         mod submit_to_running;
         /// Wait helpers for Tier-3 integration tests that drive the
@@ -124,4 +137,5 @@ mod integration {
     /// orchestration, NOT a runtime entry point" in
     /// `.claude/rules/development.md` for the layering rationale.
     mod openapi_gate;
+    mod streaming_attempt_failed;
 }

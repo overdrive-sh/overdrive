@@ -38,7 +38,7 @@
 //!
 //! The canonical reconciler types and trait impl live in
 //! `overdrive-core::reconciler` alongside the `Reconciler` trait
-//! and its `JobLifecycle` peer — [`AnyReconciler`] holds the
+//! and its `WorkloadLifecycle` peer — [`AnyReconciler`] holds the
 //! concrete type in its `ServiceMapHydrator` variant, and
 //! `overdrive-core` cannot depend on `overdrive-control-plane`.
 //!

@@ -266,8 +266,8 @@ async fn all_adr_0008_paths_return_200_on_stub_router() {
         "GET /v1/cluster/info body must deserialise as ClusterStatus — route must reach the real handler",
     );
 
-    // POST /v1/jobs now routes through the real `submit_job` handler
-    // (step 03-01). A valid body yields 200 + a `SubmitJobResponse`;
+    // POST /v1/jobs now routes through the real `submit_workload` handler
+    // (step 03-01). A valid body yields 200 + a `SubmitWorkloadResponse`;
     // a malformed body would yield 422 from axum's `Json` extractor,
     // which is precisely why this assertion uses a canonical payload
     // rather than `{}`. Full happy-path + idempotency + conflict

@@ -1,6 +1,6 @@
 //! Reconcilers shipped by the control plane.
 //!
-//! Phase 1 reconcilers (`noop-heartbeat`, `JobLifecycle`) live
+//! Phase 1 reconcilers (`noop-heartbeat`, `WorkloadLifecycle`) live
 //! inline in `reconciler_runtime.rs` per ADR-0013 / ADR-0035. Phase
 //! 2.2 introduces the first reconciler whose body is non-trivial
 //! enough to warrant a dedicated module: the

@@ -43,13 +43,15 @@
 //! kind; when `false`, `ExitKind::CleanExit` ⇒ `Terminated` and
 //! `ExitKind::Crashed` ⇒ `Failed`.
 
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 
-use overdrive_core::id::{AllocationId, JobId};
-use overdrive_core::reconciler::{JobLifecycle, Reconciler, ReconcilerName, TargetResource};
+use overdrive_core::id::{AllocationId, WorkloadId};
+use overdrive_core::reconciler::{Reconciler, ReconcilerName, TargetResource, WorkloadLifecycle};
 use overdrive_core::traits::clock::Clock;
-use overdrive_core::traits::driver::{Driver, DriverType, ExitEvent, ExitKind};
+use overdrive_core::traits::driver::{
+    AllocationHandle, Driver, DriverType, ExitEvent, ExitKind, STDERR_TAIL_LINES,
+};
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
     ObservationStoreError,
@@ -62,6 +64,10 @@ use crate::action_shim::LifecycleEvent;
 use crate::api::{AllocStateWire, TransitionSource};
 use crate::reconciler_runtime::ReconcilerRuntime;
 use overdrive_core::eval_broker::Evaluation;
+
+// STDERR_TAIL_LINES lives at `overdrive_core::traits::driver::STDERR_TAIL_LINES`
+// (the single SSOT per ADR-0033 Amendment 2026-05-10 / step 02-05).
+// Callers import it directly from that path; no re-export is needed here.
 
 /// Bounded retry budget for transient `ObservationStore::write` failures
 /// in `handle_exit_event`. The first attempt is unbudgeted; on a
@@ -162,13 +168,27 @@ pub fn spawn_with_runtime(
             return;
         };
         let driver_kind = driver.r#type();
-        // Drop our `Arc<dyn Driver>` reference now that we've taken the
-        // receiver and captured the driver kind. Holding it for the
-        // lifetime of the observer task would pin the driver alive
-        // across shutdown — its `exit_tx` would never drop and
-        // `rx.recv().await` would block forever, leaking the task.
-        // The receiver is what carries the exit-event lifetime; the
-        // driver Arc is no longer needed.
+        // Downgrade to `Weak` BEFORE dropping the strong Arc. Holding a
+        // strong reference for the lifetime of the observer task would
+        // pin the driver alive across shutdown — its `exit_tx` would
+        // never drop and `rx.recv().await` would block forever, leaking
+        // the task. A `Weak` reference does NOT pin the driver, so the
+        // shutdown path still drops `exit_tx` cleanly when `AppState`
+        // releases its strong Arc.
+        //
+        // Per step 01-03 of `fix-exit-observer-running-gate`: the
+        // `Weak` is upgraded transiently inside the
+        // `RetryOutcome::Failed` arm to call
+        // `Driver::release_for_exit_emission`. This fires the
+        // Running-confirmed gate on the May-2 retry-exhaustion-degraded
+        // path — required for liveness when a future evolution adds
+        // action-shim-side retry on `obs.write(Running)` whose Err leg
+        // would otherwise leave the watcher parked on the gate.
+        // Today's action shim fires the gate post-Ok directly, so this
+        // is belt-and-suspenders: the call is idempotent (the sender is
+        // already `take`n on the Ok path) and structurally pins the
+        // liveness invariant against future regressions.
+        let driver_weak: Weak<dyn Driver> = Arc::downgrade(&driver);
         drop(driver);
         loop {
             let event = tokio::select! {
@@ -207,10 +227,12 @@ pub fn spawn_with_runtime(
                     // write-retry.md` (or `docs/feature/fix-exit-observer-write-retry/
                     // deliver/rca.md` pre-archive).
                     if let Some(runtime) = runtime.as_ref() {
-                        if let Some(target) = target_for_event(obs.as_ref(), &event.alloc).await {
-                            runtime
-                                .broker()
-                                .submit(Evaluation { reconciler: job_lifecycle_name(), target });
+                        if let Ok(target) = TargetResource::new(&format!("job/{}", row.workload_id))
+                        {
+                            runtime.broker().submit(Evaluation {
+                                reconciler: workload_lifecycle_name(),
+                                target,
+                            });
                         }
                     }
                 }
@@ -219,6 +241,31 @@ pub fn spawn_with_runtime(
                     // reached Running per the observer's vantage point).
                 }
                 RetryOutcome::Failed { error, attempts, prior_state } => {
+                    // Fires the Running-confirmed gate exposed by
+                    // Driver::start. Required for liveness — the
+                    // watcher parks on this gate before emitting
+                    // ExitEvent. The two firing sites
+                    // (post-Running-Ok and post-degraded-escalation)
+                    // are jointly load-bearing; missing either leaks
+                    // the watcher. Per RCA `docs/feature/fix-exit-
+                    // observer-running-gate/deliver/rca.md` (Solution
+                    // 1', § "Liveness rail").
+                    //
+                    // This site fires on the May-2 retry-exhaustion-
+                    // degraded escalation path. The action shim's
+                    // post-Running-Ok fire is the primary site;
+                    // `release_for_exit_emission` is idempotent so
+                    // double-fire (action shim Ok then degraded
+                    // escalation) is structurally a no-op via
+                    // `Option::take` + `oneshot::Sender::send`
+                    // consume-self. The `Weak::upgrade` is None when
+                    // the driver has already been dropped (shutdown
+                    // path); in that case there is no watcher left to
+                    // unpark, so the no-op is correct.
+                    if let Some(driver) = driver_weak.upgrade() {
+                        let handle = AllocationHandle { alloc: event.alloc.clone(), pid: None };
+                        driver.release_for_exit_emission(&handle);
+                    }
                     tracing::error!(
                         target: "overdrive::exit_observer",
                         alloc = %event.alloc,
@@ -343,15 +390,15 @@ fn build_escalation_event(
     let detail = format!("obs write failed after {attempts} attempts: {error}");
     LifecycleEvent {
         alloc_id: event.alloc.clone(),
-        // Best-effort job_id: the observer did not successfully read a
+        // Best-effort workload_id: the observer did not successfully read a
         // prior row (or the read pre-empted the write failure path), so
-        // the wire-format `JobId` is the same defensive fallback the
+        // the wire-format `WorkloadId` is the same defensive fallback the
         // alloc_id naming convention encodes (`alloc-<jobid>-N`). Phase
-        // 1 wires job_id from the AllocationId by stripping the
+        // 1 wires workload_id from the AllocationId by stripping the
         // `alloc-` prefix and trailing `-N`; if that parse fails (alloc
         // id was not built by the action shim's standard pattern), use
         // an "unknown" sentinel so the event still broadcasts.
-        job_id: extract_job_id_or_unknown(&event.alloc),
+        workload_id: extract_job_id_or_unknown(&event.alloc),
         from: prior_state,
         to: AllocStateWire::Failed,
         reason: TransitionReason::DriverInternalError { detail },
@@ -373,18 +420,18 @@ fn build_escalation_event(
     }
 }
 
-/// Best-effort `JobId` extraction from an [`AllocationId`] when the
+/// Best-effort `WorkloadId` extraction from an [`AllocationId`] when the
 /// observer's prior-row read failed. The action shim's allocation IDs
 /// follow `alloc-<jobid>-<index>` (e.g. `alloc-payments-0`); strip the
 /// known prefix and the trailing `-N` to recover `<jobid>`. Falls back
 /// to `unknown-job` if the parse fails.
-fn extract_job_id_or_unknown(alloc: &AllocationId) -> JobId {
+fn extract_job_id_or_unknown(alloc: &AllocationId) -> WorkloadId {
     let raw = alloc.as_str();
     let stripped = raw.strip_prefix("alloc-").unwrap_or(raw);
     let trimmed = stripped.rsplit_once('-').map_or(stripped, |(prefix, _suffix)| prefix);
-    JobId::new(trimmed).unwrap_or_else(|_| {
+    WorkloadId::new(trimmed).unwrap_or_else(|_| {
         #[allow(clippy::expect_used)]
-        JobId::new("unknown-job").expect("constant valid job id")
+        WorkloadId::new("unknown-job").expect("constant valid job id")
     })
 }
 
@@ -406,14 +453,28 @@ async fn handle_exit_event(
     };
     let prior_state: AllocStateWire = prior.state.into();
 
-    let (state, reason) = classify(&event.kind, event.intentional_stop);
+    let (state, mut reason) = classify(&event.kind, event.intentional_stop);
     let updated_at = LogicalTimestamp {
         counter: prior.updated_at.counter.saturating_add(1),
         writer: prior.node_id.clone(),
     };
+    // Bound the stderr_tail to the project-wide line budget at the
+    // observation seam. The driver-side ring buffer in `ExecDriver`
+    // already caps emission at `STDERR_TAIL_LINES`, but the observer
+    // is the canonical defence-in-depth: any future driver impl that
+    // emits a longer tail (test injection, alternate driver) is
+    // truncated here before reaching the obs row.
+    let stderr_tail =
+        event.stderr_tail.as_deref().map(|raw| keep_last_n_lines(raw, STDERR_TAIL_LINES));
+    // Patch stderr_tail into WorkloadCrashedImmediately so the typed
+    // reason carries the same tail the row carries — both are
+    // observation data and denormalisation is intentional here.
+    if let TransitionReason::WorkloadCrashedImmediately { stderr_tail: ref mut tail, .. } = reason {
+        tail.clone_from(&stderr_tail);
+    }
     let row = AllocStatusRow {
         alloc_id: event.alloc.clone(),
-        job_id: prior.job_id,
+        workload_id: prior.workload_id,
         node_id: prior.node_id,
         state,
         updated_at,
@@ -425,6 +486,15 @@ async fn handle_exit_event(
         // Structurally meaningful: "I am not making a terminal claim";
         // the reconciler is the single writer for terminal decisions.
         terminal: None,
+        stderr_tail,
+        // Phase-1 greenfield (ADR-0047 §4 / step 02-02 [D4]): the
+        // exit observer inherits the prior row's kind so the
+        // denormalised field stays accurate across the workload's
+        // lifetime. The exit observer never invents a kind — it
+        // always has a `prior` row in scope (loaded above) whose
+        // `kind` is the authoritative value written at submit time.
+        kind: prior.kind,
+        listeners: Vec::new(),
     };
     obs.write(ObservationRow::AllocStatus(row.clone())).await?;
     Ok(Some((row, prior_state)))
@@ -450,23 +520,20 @@ fn classify(kind: &ExitKind, intentional_stop: bool) -> (AllocState, TransitionR
         ),
         ExitKind::Crashed { exit_code, signal } => (
             AllocState::Failed,
-            TransitionReason::DriverInternalError {
-                detail: format_crash_detail(*exit_code, *signal),
+            TransitionReason::WorkloadCrashedImmediately {
+                exit_code: *exit_code,
+                // Signal numbers on Linux/POSIX are 1–64, always within u8 range.
+                // `u8::try_from` encodes that assumption and saturates to u8::MAX
+                // for any out-of-range value the kernel cannot actually produce.
+                signal: signal.map(|s| u8::try_from(s).unwrap_or(u8::MAX)),
+                stderr_tail: None,
             },
         ),
     }
 }
 
-fn format_crash_detail(exit_code: Option<i32>, signal: Option<i32>) -> String {
-    match (exit_code, signal) {
-        (Some(c), _) => format!("exit_code={c}"),
-        (None, Some(s)) => format!("signal={s}"),
-        (None, None) => "unknown_exit".to_owned(),
-    }
-}
-
 /// Find the LWW-winner row for this alloc — used to recover the
-/// (`job_id`, `node_id`) tuple and the prior `LogicalTimestamp` counter.
+/// (`workload_id`, `node_id`) tuple and the prior `LogicalTimestamp` counter.
 async fn find_prior_row(
     obs: &dyn ObservationStore,
     alloc: &AllocationId,
@@ -474,29 +541,18 @@ async fn find_prior_row(
     Ok(obs.alloc_status_row(alloc).await?)
 }
 
-/// Best-effort target derivation from the alloc's prior obs row's
-/// `job_id`. Used by the production `spawn_with_runtime` path to
-/// re-enqueue the job-lifecycle reconciler after writing a new state.
-async fn target_for_event(
-    obs: &dyn ObservationStore,
-    alloc: &AllocationId,
-) -> Option<TargetResource> {
-    let row = obs.alloc_status_row(alloc).await.ok()??;
-    TargetResource::new(&format!("job/{}", row.job_id)).ok()
-}
-
-fn job_lifecycle_name() -> ReconcilerName {
+fn workload_lifecycle_name() -> ReconcilerName {
     // Sourced from the trait const per the
-    // `refactor-reconciler-static-name` RCA: `JobLifecycle::NAME` is
+    // `refactor-reconciler-static-name` RCA: `WorkloadLifecycle::NAME` is
     // the single compile-time anchor for the kebab-case literal, so
     // there is exactly one place to change if the canonical name ever
     // moves. The `expect` is by-construction-safe — the validator's
     // `^[a-z][a-z0-9-]{0,62}$` grammar accepts `"job-lifecycle"` and
     // the per-call `ReconcilerName::new` invocation is the same shape
-    // `JobLifecycle::canonical()` itself uses.
+    // `WorkloadLifecycle::canonical()` itself uses.
     #[allow(clippy::expect_used)]
-    ReconcilerName::new(<JobLifecycle as Reconciler>::NAME)
-        .expect("JobLifecycle::NAME is a valid ReconcilerName by construction")
+    ReconcilerName::new(<WorkloadLifecycle as Reconciler>::NAME)
+        .expect("WorkloadLifecycle::NAME is a valid ReconcilerName by construction")
 }
 
 /// Build a `LifecycleEvent` from an observer-written `AllocStatusRow`.
@@ -519,7 +575,7 @@ fn build_lifecycle_event(
     let to_wire: AllocStateWire = row.state.into();
     LifecycleEvent {
         alloc_id: row.alloc_id.clone(),
-        job_id: row.job_id.clone(),
+        workload_id: row.workload_id.clone(),
         from: prior_state,
         to: to_wire,
         reason: row
@@ -545,11 +601,33 @@ enum HandleError {
     Observation(#[from] overdrive_core::traits::observation_store::ObservationStoreError),
 }
 
+/// Truncate a multi-line string to its last `n` lines, joined by `\n`.
+/// Pure helper used at the observation seam (defence-in-depth against
+/// a driver emitting more than [`STDERR_TAIL_LINES`]) and exercised
+/// directly by `keep_last_n_lines_tests`. The returned string carries
+/// no trailing newline; rendering layers that want one append it.
+///
+/// Invariants:
+/// - `keep_last_n_lines("", _)` returns `""`.
+/// - For inputs with ≤ `n` lines, the original line ordering is
+///   preserved verbatim (without any artificial trailing newline).
+/// - For inputs with > `n` lines, the LAST `n` lines are kept in
+///   their original order — the stderr_tail must read top-to-bottom
+///   like the workload's actual exit-time stderr trailer.
+fn keep_last_n_lines(input: &str, n: usize) -> String {
+    if input.is_empty() || n == 0 {
+        return String::new();
+    }
+    let lines: Vec<&str> = input.lines().collect();
+    let start = lines.len().saturating_sub(n);
+    lines[start..].join("\n")
+}
+
 // ---------------------------------------------------------------------------
 // Classification unit tests — pure-function coverage of the
 // `(ExitKind, intentional_stop) → (AllocState, TransitionReason)`
 // mapping. The integration tests in
-// `crates/overdrive-control-plane/tests/integration/job_lifecycle/
+// `crates/overdrive-control-plane/tests/integration/workload_lifecycle/
 // exit_observer.rs` cover the end-to-end obs-write path.
 // ---------------------------------------------------------------------------
 #[cfg(test)]
@@ -572,25 +650,35 @@ mod classify_tests {
     }
 
     #[test]
-    fn crashed_with_exit_code_intentional_false_fails_with_code_detail() {
+    fn crashed_with_exit_code_intentional_false_fails_with_typed_reason() {
         let kind = ExitKind::Crashed { exit_code: Some(137), signal: None };
         let (state, reason) = classify(&kind, false);
         assert_eq!(state, AllocState::Failed);
-        let TransitionReason::DriverInternalError { detail } = reason else {
-            panic!("expected DriverInternalError, got {reason:?}");
-        };
-        assert_eq!(detail, "exit_code=137");
+        assert_eq!(
+            reason,
+            TransitionReason::WorkloadCrashedImmediately {
+                exit_code: Some(137),
+                signal: None,
+                stderr_tail: None,
+            },
+            "crashed with exit_code=137 must emit WorkloadCrashedImmediately with typed fields",
+        );
     }
 
     #[test]
-    fn crashed_with_signal_intentional_false_fails_with_signal_detail() {
+    fn crashed_with_signal_intentional_false_fails_with_typed_reason() {
         let kind = ExitKind::Crashed { exit_code: None, signal: Some(9) };
         let (state, reason) = classify(&kind, false);
         assert_eq!(state, AllocState::Failed);
-        let TransitionReason::DriverInternalError { detail } = reason else {
-            panic!("expected DriverInternalError, got {reason:?}");
-        };
-        assert_eq!(detail, "signal=9");
+        assert_eq!(
+            reason,
+            TransitionReason::WorkloadCrashedImmediately {
+                exit_code: None,
+                signal: Some(9u8),
+                stderr_tail: None,
+            },
+            "crashed with signal=9 must emit WorkloadCrashedImmediately with typed signal field",
+        );
     }
 
     #[test]
@@ -604,13 +692,65 @@ mod classify_tests {
     }
 
     #[test]
-    fn crashed_with_no_code_or_signal_fails_with_unknown_detail() {
+    fn crashed_with_no_code_or_signal_fails_with_typed_reason() {
         let kind = ExitKind::Crashed { exit_code: None, signal: None };
         let (state, reason) = classify(&kind, false);
         assert_eq!(state, AllocState::Failed);
-        let TransitionReason::DriverInternalError { detail } = reason else {
-            panic!("expected DriverInternalError, got {reason:?}");
-        };
-        assert_eq!(detail, "unknown_exit");
+        assert_eq!(
+            reason,
+            TransitionReason::WorkloadCrashedImmediately {
+                exit_code: None,
+                signal: None,
+                stderr_tail: None,
+            },
+            "crashed with no exit code or signal must emit WorkloadCrashedImmediately with all None fields",
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// `keep_last_n_lines` — pure helper used by the driver-side stderr ring
+// buffer to retain only the last N captured lines for inclusion on the
+// `ExitEvent`. Per slice 02c (step 02-05) of `workload-kind-discriminator`
+// per ADR-0033 Amendment 2026-05-10. `STDERR_TAIL_LINES = 5` is the
+// project-wide SSOT for "how many lines"; it lives on the trait surface
+// (`overdrive_core::traits::driver::STDERR_TAIL_LINES`) so both the
+// driver (which fills the ring) and the observer (which reads the row)
+// reference one constant.
+// ---------------------------------------------------------------------------
+#[cfg(test)]
+mod keep_last_n_lines_tests {
+    use super::keep_last_n_lines;
+
+    #[test]
+    fn input_longer_than_budget_keeps_last_n_in_order() {
+        let input = "ERR 1\nERR 2\nERR 3\nERR 4\nERR 5\nERR 6\nERR 7\n";
+        let kept = keep_last_n_lines(input, 5);
+        let lines: Vec<&str> = kept.lines().collect();
+        assert_eq!(lines, vec!["ERR 3", "ERR 4", "ERR 5", "ERR 6", "ERR 7"]);
+    }
+
+    #[test]
+    fn input_shorter_than_budget_keeps_all_lines_in_order() {
+        let input = "first\nsecond\nthird\n";
+        let kept = keep_last_n_lines(input, 5);
+        let lines: Vec<&str> = kept.lines().collect();
+        assert_eq!(lines, vec!["first", "second", "third"]);
+    }
+
+    #[test]
+    fn empty_input_yields_empty_string() {
+        let kept = keep_last_n_lines("", 5);
+        assert_eq!(kept, "");
+    }
+
+    #[test]
+    fn input_without_trailing_newline_still_kept() {
+        // A workload that exits before flushing a final newline still
+        // produces a usable tail.
+        let input = "ERR 1\nERR 2\nERR 3";
+        let kept = keep_last_n_lines(input, 5);
+        let lines: Vec<&str> = kept.lines().collect();
+        assert_eq!(lines, vec!["ERR 1", "ERR 2", "ERR 3"]);
     }
 }

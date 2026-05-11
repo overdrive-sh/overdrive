@@ -5,14 +5,14 @@
 //! (NO subprocess). A real in-process control-plane server stands up via
 //! `commands::serve::run(...)` (step 05-02), then the handler reads a
 //! TOML file from disk, validates locally through `Job::from_spec`
-//! (ADR-0011 constructor), POSTs `SubmitJobRequest` via the `ApiClient`
-//! from step 05-01, and returns a typed `SubmitOutput` with `job_id`,
+//! (ADR-0011 constructor), POSTs `SubmitWorkloadRequest` via the `ApiClient`
+//! from step 05-01, and returns a typed `SubmitOutput` with `workload_id`,
 //! `intent_key`, `spec_digest`, `outcome`, `endpoint`, and
 //! `next_command` (per ADR-0020 the `commit_index` field is dropped).
 //!
 //! Acceptance coverage:
 //!   (a) valid TOML against in-process server returns `SubmitOutput`
-//!       with `job_id = "payments"`, `intent_key = "jobs/payments"`,
+//!       with `workload_id = "payments"`, `intent_key = "jobs/payments"`,
 //!       `outcome = IdempotencyOutcome::Inserted`, a 64-char
 //!       `spec_digest`, and `next_command` naming
 //!       `overdrive alloc status --job payments`.
@@ -129,7 +129,7 @@ async fn submit_with_valid_toml_against_in_process_server_returns_submit_output_
     let output: SubmitOutput =
         overdrive_cli::commands::job::submit(args).await.expect("job::submit");
 
-    assert_eq!(output.job_id, "payments", "SubmitOutput.job_id must be 'payments'");
+    assert_eq!(output.workload_id, "payments", "SubmitOutput.workload_id must be 'payments'");
     assert_eq!(
         output.intent_key, "jobs/payments",
         "SubmitOutput.intent_key must be 'jobs/payments'",
@@ -450,6 +450,44 @@ async fn cli_submit_surfaces_missing_exec_table_as_toml_field_error() {
         }
         other => panic!("expected CliError::InvalidSpec {{ field: \"toml\", .. }}; got {other:?}"),
     }
+
+    handle.shutdown().await.expect("clean shutdown");
+}
+
+// -------------------------------------------------------------------
+// (h) [job]-section TOML via non-streaming submit() sends correct
+//     workload_kind discriminator — regression for
+//     fix-detach-submit-workload-kind
+// -------------------------------------------------------------------
+
+#[tokio::test]
+async fn submit_accepts_job_section_toml_and_persists_job_discriminator() {
+    let (handle, tmp) = spawn_server().await;
+    let cfg = config_path(tmp.path());
+
+    let spec = r#"
+[job]
+id = "regression-kind"
+
+[exec]
+command = "/bin/true"
+args = []
+
+[resources]
+cpu_milli = 100
+memory_bytes = 67108864
+"#;
+    let path = tmp.path().join("job-section.toml");
+    std::fs::write(&path, spec).expect("write job-section.toml");
+
+    let args = SubmitArgs { spec: path, config_path: cfg };
+    let output: SubmitOutput = overdrive_cli::commands::job::submit(args)
+        .await
+        .expect("submit must accept [job]-section TOML");
+
+    assert_eq!(output.workload_id, "regression-kind");
+    assert_eq!(output.intent_key, "jobs/regression-kind");
+    assert_eq!(output.outcome, IdempotencyOutcome::Inserted);
 
     handle.shutdown().await.expect("clean shutdown");
 }

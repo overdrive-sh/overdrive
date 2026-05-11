@@ -1,9 +1,9 @@
 //! Integration tests for `GET /v1/jobs/{id}` — step 03-02.
 //!
-//! Proves the Phase 1 `describe_job` handler round-trip:
+//! Proves the Phase 1 `describe_workload` handler round-trip:
 //!
 //! 1. After `POST /v1/jobs`, `GET /v1/jobs/{id}` returns HTTP 200 with
-//!    the canonical `JobDescription` shape — `spec`, `spec_digest`
+//!    the canonical `WorkloadDescription` shape — `spec`, `spec_digest`
 //!    (per ADR-0020 the `commit_index` field is dropped).
 //! 2. The returned `spec` is byte-identical (via rkyv archive of the
 //!    round-tripped `Job`) to the spec the operator submitted.
@@ -21,7 +21,7 @@ use std::net::SocketAddr;
 use std::time::Duration;
 
 use overdrive_control_plane::api::{
-    ErrorBody, JobDescription, SubmitJobRequest, SubmitJobResponse,
+    ErrorBody, SubmitWorkloadRequest, SubmitWorkloadResponse, WorkloadDescription,
 };
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
 use overdrive_core::aggregate::{DriverInput, ExecInput, Job, JobSpecInput, ResourcesInput};
@@ -126,22 +126,25 @@ async fn get_v1_jobs_id_returns_described_job_after_submit() {
     let submit_url = format!("https://localhost:{}/v1/jobs", bound.port());
     let submit_resp = client
         .post(&submit_url)
-        .json(&SubmitJobRequest { spec: payments_spec() })
+        .json(&SubmitWorkloadRequest { spec: payments_spec(), workload_kind: None })
         .send()
         .await
         .expect("POST /v1/jobs");
     assert_eq!(submit_resp.status(), reqwest::StatusCode::OK);
-    let submit_body: SubmitJobResponse = submit_resp.json().await.expect("decode submit response");
+    let submit_body: SubmitWorkloadResponse =
+        submit_resp.json().await.expect("decode submit response");
 
     // 2. Describe.
-    let describe_url = format!("https://localhost:{}/v1/jobs/{}", bound.port(), submit_body.job_id);
+    let describe_url =
+        format!("https://localhost:{}/v1/jobs/{}", bound.port(), submit_body.workload_id);
     let describe_resp = client.get(&describe_url).send().await.expect("GET /v1/jobs/{id}");
     assert_eq!(
         describe_resp.status(),
         reqwest::StatusCode::OK,
         "describe of a just-submitted job must be HTTP 200 OK",
     );
-    let description: JobDescription = describe_resp.json().await.expect("decode JobDescription");
+    let description: WorkloadDescription =
+        describe_resp.json().await.expect("decode WorkloadDescription");
 
     // 3. spec must round-trip byte-identical (via rkyv) to the submitted
     //    spec — `Job::from_spec(spec)` applied to both sides must produce
@@ -170,7 +173,7 @@ async fn get_v1_jobs_id_returns_described_job_after_submit() {
 // Regression — malformed `{id}` path parameter returns 400 with
 // `field: Some("id")` so client tooling can branch on the discriminator.
 //
-// Pre-fix shape: `JobId::new(...).map_err(AggregateError::Id)?` routed
+// Pre-fix shape: `WorkloadId::new(...).map_err(AggregateError::Id)?` routed
 // through `to_response`'s `Aggregate(Id(_))` arm, which hardcodes
 // `field = None`. The handler holds stronger context than the wrapped
 // aggregate error — the path parameter name is statically known — and
@@ -182,12 +185,12 @@ async fn get_v1_jobs_malformed_id_returns_400_with_field_id() {
     let (handle, bound, _tmp, ca_pem) = spawn_server().await;
     let client = client_trusting(&ca_pem);
 
-    // `JobId::new` rejects labels that don't start with an alphanumeric
+    // `WorkloadId::new` rejects labels that don't start with an alphanumeric
     // character (`validate_label` enforces `InvalidFormat`). A leading
     // hyphen is URL-safe (no percent-encoding required, distinguishable
     // from a captured path segment) and forces the validation lane the
     // bug report targets — distinct from the `no-such-job` 404 path
-    // which uses a *valid* JobId form that simply isn't stored.
+    // which uses a *valid* WorkloadId form that simply isn't stored.
     //
     // (Note: uppercase ASCII canonicalises to lowercase via
     // `to_ascii_lowercase` in the parser, so `INVALID` → `invalid`
@@ -198,7 +201,7 @@ async fn get_v1_jobs_malformed_id_returns_400_with_field_id() {
     assert_eq!(
         resp.status(),
         reqwest::StatusCode::BAD_REQUEST,
-        "describe of a malformed JobId must be HTTP 400",
+        "describe of a malformed WorkloadId must be HTTP 400",
     );
 
     let body: ErrorBody = resp.json().await.expect("decode ErrorBody");
@@ -225,7 +228,7 @@ async fn get_v1_jobs_unknown_id_returns_404_with_error_body() {
     let (handle, bound, _tmp, ca_pem) = spawn_server().await;
     let client = client_trusting(&ca_pem);
 
-    // No prior submit — any valid JobId format we pass in must 404
+    // No prior submit — any valid WorkloadId format we pass in must 404
     // because the underlying `IntentStore::get` returns `None` for the
     // canonical key.
     let describe_url = format!("https://localhost:{}/v1/jobs/no-such-job", bound.port());
@@ -234,7 +237,7 @@ async fn get_v1_jobs_unknown_id_returns_404_with_error_body() {
     assert_eq!(
         resp.status(),
         reqwest::StatusCode::NOT_FOUND,
-        "describe of an unknown JobId must be HTTP 404",
+        "describe of an unknown WorkloadId must be HTTP 404",
     );
 
     let body: ErrorBody = resp.json().await.expect("decode ErrorBody");
@@ -261,17 +264,19 @@ async fn describe_spec_digest_equals_content_hash_of_archived_bytes() {
     let submit_url = format!("https://localhost:{}/v1/jobs", bound.port());
     let submit_resp = client
         .post(&submit_url)
-        .json(&SubmitJobRequest { spec: spec.clone() })
+        .json(&SubmitWorkloadRequest { spec: spec.clone(), workload_kind: None })
         .send()
         .await
         .expect("POST /v1/jobs");
     assert_eq!(submit_resp.status(), reqwest::StatusCode::OK);
-    let submit_body: SubmitJobResponse = submit_resp.json().await.expect("decode submit response");
+    let submit_body: SubmitWorkloadResponse =
+        submit_resp.json().await.expect("decode submit response");
 
-    let describe_url = format!("https://localhost:{}/v1/jobs/{}", bound.port(), submit_body.job_id);
+    let describe_url =
+        format!("https://localhost:{}/v1/jobs/{}", bound.port(), submit_body.workload_id);
     let resp = client.get(&describe_url).send().await.expect("GET /v1/jobs/{id}");
     assert_eq!(resp.status(), reqwest::StatusCode::OK);
-    let description: JobDescription = resp.json().await.expect("decode JobDescription");
+    let description: WorkloadDescription = resp.json().await.expect("decode WorkloadDescription");
 
     let expected = expected_spec_digest(&spec);
     assert_eq!(
@@ -312,15 +317,17 @@ async fn describe_returns_spec_digest_matching_submit_response() {
     let submit_url = format!("https://localhost:{}/v1/jobs", bound.port());
     let submit_resp = client
         .post(&submit_url)
-        .json(&SubmitJobRequest { spec: payments_spec() })
+        .json(&SubmitWorkloadRequest { spec: payments_spec(), workload_kind: None })
         .send()
         .await
         .expect("POST /v1/jobs");
-    let submit_body: SubmitJobResponse = submit_resp.json().await.expect("decode submit response");
+    let submit_body: SubmitWorkloadResponse =
+        submit_resp.json().await.expect("decode submit response");
 
-    let describe_url = format!("https://localhost:{}/v1/jobs/{}", bound.port(), submit_body.job_id);
+    let describe_url =
+        format!("https://localhost:{}/v1/jobs/{}", bound.port(), submit_body.workload_id);
     let resp = client.get(&describe_url).send().await.expect("GET /v1/jobs/{id}");
-    let description: JobDescription = resp.json().await.expect("decode JobDescription");
+    let description: WorkloadDescription = resp.json().await.expect("decode WorkloadDescription");
 
     assert_eq!(
         description.spec_digest, submit_body.spec_digest,
@@ -337,7 +344,7 @@ async fn describe_returns_spec_digest_matching_submit_response() {
 // -----------------------------------------------------------------------
 
 fn arb_valid_job_spec() -> impl Strategy<Value = JobSpecInput> {
-    // `JobId::new` accepts lowercase-ASCII labels (`[a-z0-9][a-z0-9-]*`
+    // `WorkloadId::new` accepts lowercase-ASCII labels (`[a-z0-9][a-z0-9-]*`
     // with trailing-hyphen / length constraints handled internally). We
     // bias toward short valid-by-construction labels so the proptest
     // exercises the handler path, not the newtype's parse failure modes
@@ -361,7 +368,7 @@ proptest! {
     #![proptest_config(ProptestConfig::with_cases(256))]
 
     /// Submit-then-describe round-trip: for any valid `JobSpecInput`,
-    /// describing the returned job_id yields a `JobDescription` whose
+    /// describing the returned workload_id yields a `WorkloadDescription` whose
     /// `spec` equals the submitted spec AND whose `spec_digest` equals
     /// the canonical `ContentHash::of(rkyv::to_bytes(Job::from_spec(spec)))`.
     ///
@@ -390,22 +397,22 @@ proptest! {
             let submit_url = format!("https://localhost:{}/v1/jobs", bound.port());
             let submit_resp = client
                 .post(&submit_url)
-                .json(&SubmitJobRequest { spec: spec.clone() })
+                .json(&SubmitWorkloadRequest { spec: spec.clone(), workload_kind: None })
                 .send()
                 .await
                 .expect("POST /v1/jobs");
             prop_assert_eq!(submit_resp.status(), reqwest::StatusCode::OK);
-            let submit_body: SubmitJobResponse =
+            let submit_body: SubmitWorkloadResponse =
                 submit_resp.json().await.expect("decode submit body");
 
             let describe_url = format!(
                 "https://localhost:{}/v1/jobs/{}",
                 bound.port(),
-                submit_body.job_id,
+                submit_body.workload_id,
             );
             let describe_resp = client.get(&describe_url).send().await.expect("GET describe");
             prop_assert_eq!(describe_resp.status(), reqwest::StatusCode::OK);
-            let description: JobDescription =
+            let description: WorkloadDescription =
                 describe_resp.json().await.expect("decode description");
 
             prop_assert_eq!(

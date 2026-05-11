@@ -15,7 +15,7 @@
 //! walk every exported function signature (free `pub fn`, inherent `impl`
 //! methods on `pub` types, and trait methods on `pub` traits) and flag
 //! any parameter whose *name* identifies it as an identifier (e.g.
-//! `job_id`, `node_id`, `spiffe_id`, `region`, `correlation_key`, …)
+//! `workload_id`, `node_id`, `spiffe_id`, `region`, `correlation_key`, …)
 //! that is typed as a bare `&str` / `&mut str` / `String`.
 //!
 //! # Why not `cargo public-api` or `trybuild`
@@ -62,7 +62,7 @@ use syn::{FnArg, ImplItem, Item, Pat, Signature, TraitItem, Type, TypeReference,
 
 const IDENTIFIER_PARAM_NAMES: &[&str] = &[
     // Label-class newtypes
-    "job_id",
+    "workload_id",
     "alloc_id",
     "allocation_id",
     "node_id",

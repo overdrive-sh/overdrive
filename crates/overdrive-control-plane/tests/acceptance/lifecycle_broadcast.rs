@@ -54,7 +54,7 @@ use overdrive_control_plane::action_shim::{LifecycleEvent, dispatch};
 use overdrive_core::SpiffeId;
 use overdrive_core::TransitionReason;
 use overdrive_core::UnixInstant;
-use overdrive_core::id::{AllocationId, JobId, NodeId};
+use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::reconciler::{Action, TickContext};
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverType, Resources,
@@ -144,10 +144,10 @@ impl Driver for FailingDriver {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn build_spec(alloc_id: &AllocationId, job_id: &JobId) -> AllocationSpec {
+fn build_spec(alloc_id: &AllocationId, workload_id: &WorkloadId) -> AllocationSpec {
     let identity = SpiffeId::new(&format!(
         "spiffe://overdrive.local/job/{}/alloc/{}",
-        job_id.as_str(),
+        workload_id.as_str(),
         alloc_id.as_str(),
     ))
     .expect("spiffe id");
@@ -217,7 +217,7 @@ proptest! {
             let driver: Arc<dyn Driver> = Arc::new(AlwaysOkDriver);
             let obs: Arc<dyn ObservationStore> =
                 Arc::new(SimObservationStore::single_peer(fresh_node(), 0));
-            let job_id = JobId::new("payments").expect("job id");
+            let workload_id = WorkloadId::new("payments").expect("job id");
             let node_id = fresh_node();
 
             // Build N successful StartAllocation actions, each with a
@@ -228,12 +228,13 @@ proptest! {
                 let alloc_id = AllocationId::new(&format!("alloc-{i}"))
                     .expect("alloc id");
                 expected_alloc_ids.push(alloc_id.clone());
-                let spec = build_spec(&alloc_id, &job_id);
+                let spec = build_spec(&alloc_id, &workload_id);
                 actions.push(Action::StartAllocation {
                     alloc_id,
-                    job_id: job_id.clone(),
+                    workload_id: workload_id.clone(),
                     node_id: node_id.clone(),
                     spec,
+                    kind: overdrive_core::aggregate::WorkloadKind::Service,
                 });
             }
 
@@ -255,7 +256,7 @@ proptest! {
             for (i, event) in events.iter().enumerate() {
                 prop_assert_eq!(&event.alloc_id, &expected_alloc_ids[i],
                     "event {} alloc_id mismatch", i);
-                prop_assert_eq!(&event.job_id, &job_id);
+                prop_assert_eq!(&event.workload_id, &workload_id);
                 prop_assert!(matches!(event.reason, TransitionReason::Started));
             }
 
@@ -283,14 +284,15 @@ async fn run_classifier_scenario(reason_text: &str, expected_reason: TransitionR
         Arc::new(SimObservationStore::single_peer(fresh_node(), 0));
 
     let alloc_id = AllocationId::new("alloc-fail").expect("alloc id");
-    let job_id = JobId::new("payments").expect("job id");
+    let workload_id = WorkloadId::new("payments").expect("job id");
     let node_id = fresh_node();
-    let spec = build_spec(&alloc_id, &job_id);
+    let spec = build_spec(&alloc_id, &workload_id);
     let action = Action::StartAllocation {
         alloc_id: alloc_id.clone(),
-        job_id: job_id.clone(),
+        workload_id: workload_id.clone(),
         node_id: node_id.clone(),
         spec,
+        kind: overdrive_core::aggregate::WorkloadKind::Service,
     };
 
     let tick = make_tick(0);
@@ -409,11 +411,11 @@ async fn stop_action_also_broadcasts_lifecycle_event() {
     // Seed a prior alloc row so `find_prior_alloc_row` finds it on the
     // Stop arm.
     let alloc_id = AllocationId::new("alloc-stop").expect("alloc id");
-    let job_id = JobId::new("payments").expect("job id");
+    let workload_id = WorkloadId::new("payments").expect("job id");
     let node_id = fresh_node();
     let prior_row = overdrive_core::traits::observation_store::AllocStatusRow {
         alloc_id: alloc_id.clone(),
-        job_id: job_id.clone(),
+        workload_id: workload_id.clone(),
         node_id: node_id.clone(),
         state: AllocState::Running,
         updated_at: overdrive_core::traits::observation_store::LogicalTimestamp {
@@ -423,6 +425,9 @@ async fn stop_action_also_broadcasts_lifecycle_event() {
         reason: Some(TransitionReason::Started),
         detail: None,
         terminal: None,
+        stderr_tail: None,
+        kind: overdrive_core::aggregate::WorkloadKind::Service,
+        listeners: Vec::new(),
     };
     obs.write(ObservationRow::AllocStatus(prior_row)).await.expect("seed prior row");
 

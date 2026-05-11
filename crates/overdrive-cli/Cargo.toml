@@ -97,3 +97,10 @@ overdrive-store-local.path   = "../overdrive-store-local"
 # parallel nextest threads would still clobber one another. The
 # `#[serial(env)]` attribute gives per-group mutual exclusion.
 serial_test.workspace        = true
+# `proptest` drives the S-03-08 KPI K3 byte-equality property over
+# rendered Exit column vs persisted exit_code (1024 cases). Per
+# `.claude/rules/testing.md` § "Property-based testing (proptest)"
+# the default case count is preserved here — do NOT lower it to dodge
+# wall-clock budget; the render fns are pure-function-shaped and
+# 1024 cases run in well under the slow-test budget.
+proptest.workspace           = true

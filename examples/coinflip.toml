@@ -1,9 +1,5 @@
+[job]
 id = "coinflip"
-replicas = 1
-
-[resources]
-cpu_milli = 100
-memory_bytes = 67108864
 
 [exec]
 command = "/bin/bash"
@@ -11,3 +7,7 @@ args = [
     "-c",
     "if (( RANDOM % 2 )); then echo SUCCESS; exit 0; else echo ERROR >&2; exit 1; fi",
 ]
+
+[resources]
+cpu_milli = 100
+memory_bytes = 67108864

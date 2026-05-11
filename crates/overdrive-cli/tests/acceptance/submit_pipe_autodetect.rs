@@ -66,7 +66,7 @@ fn pipe_redirected_stdout_without_detach_selects_json_lane() {
 
     // Then: the dispatch decision is the JSON-ack lane (Detached).
     // The wire-level Accept-header pinning happens at
-    // `ApiClient::submit_job` (set to `application/json`); the
+    // `ApiClient::submit_workload` (set to `application/json`); the
     // `should_stream == false` branch causes main.rs to call `submit`
     // (one-shot ack), not `submit_streaming`. The JSON-ack handler is
     // already exercised end-to-end by
@@ -96,7 +96,7 @@ fn tty_stdout_without_detach_selects_ndjson_lane() {
 
     // Then: the dispatch decision is the NDJSON streaming lane.
     // The wire-level Accept-header pinning happens at
-    // `ApiClient::submit_job_streaming` (set to `application/x-ndjson`);
+    // `ApiClient::submit_workload_streaming` (set to `application/x-ndjson`);
     // the `should_stream == true` branch causes main.rs to call
     // `submit_streaming` and engage the line-delimited consumer. The
     // NDJSON handler is exercised end-to-end by

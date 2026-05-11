@@ -66,7 +66,7 @@ pub mod traits;
 // `UnixInstant` — portable wall-clock instant for persistable
 // deadlines. See `docs/research/control-plane/issue-139-followup-portable-deadline-representation-research.md`
 // for the design rationale; subsequent steps under issue #141 wire it
-// through `TickContext` and `JobLifecycleView`.
+// through `TickContext` and `WorkloadLifecycleView`.
 pub mod wall_clock;
 // `TransitionReason` is the SSOT enum carried on streaming
 // `SubmitEvent::LifecycleTransition` and snapshot
@@ -93,8 +93,8 @@ pub mod testing;
 
 pub use error::{Error, Result};
 pub use id::{
-    AllocationId, CertSerial, ContentHash, CorrelationKey, IdParseError, InvestigationId, JobId,
-    NodeId, PolicyId, Region, SchematicId, SpiffeId,
+    AllocationId, CertSerial, ContentHash, CorrelationKey, IdParseError, InvestigationId, NodeId,
+    PolicyId, Region, SchematicId, SpiffeId, WorkloadId,
 };
 pub use traits::{
     Clock, Dataplane, Driver, DriverType, Entropy, IntentStore, Llm, ObservationStore, Transport,

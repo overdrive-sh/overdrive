@@ -60,6 +60,7 @@ use serde::{Deserialize, Serialize};
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    utoipa::ToSchema,
 )]
 #[serde(rename_all = "lowercase")]
 pub enum Proto {

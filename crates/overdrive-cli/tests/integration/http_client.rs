@@ -11,10 +11,10 @@
 //! Acceptance coverage:
 //!   (a) `from_config` loads + pins CA + builds client
 //!   (b) `cluster_status` against real server returns Ok
-//!   (c) `submit_job` + `describe_job` round-trip through HTTP
+//!   (c) `submit_workload` + `describe_workload` round-trip through HTTP
 //!   (d) `cluster_status` with no server → typed `CliError::Transport`
 //!       with actionable (non-leaky) Display
-//!   (e) `submit_job` with invalid spec → `CliError::HttpStatus { 400,
+//!   (e) `submit_workload` with invalid spec → `CliError::HttpStatus { 400,
 //!       ErrorBody { error: "validation", field: Some("replicas"), .. } }`
 //!   (f) `from_config` with malformed base64 CA → `CliError::ConfigLoad`
 //!       with non-raw cause
@@ -24,7 +24,9 @@ use std::path::Path;
 use std::time::Duration;
 
 use overdrive_cli::http_client::{ApiClient, CliError};
-use overdrive_control_plane::api::{IdempotencyOutcome, JobDescription, SubmitJobRequest};
+use overdrive_control_plane::api::{
+    IdempotencyOutcome, SubmitWorkloadRequest, WorkloadDescription,
+};
 use overdrive_control_plane::tls_bootstrap::{mint_ephemeral_ca, write_trust_triple};
 use overdrive_control_plane::{ServerConfig, ServerHandle, run_server};
 use overdrive_core::aggregate::{DriverInput, ExecInput, JobSpecInput, ResourcesInput};
@@ -105,7 +107,7 @@ async fn from_config_loads_trust_triple_and_builds_client() {
 //
 // `/v1/allocs` was previously exercised via the bare `alloc_status()`
 // method; the bare-GET shape is gone (S-AS-09 / single-cut greenfield).
-// `?job=<id>` coverage lives in the CLI's `alloc_status_for_job`
+// `?job=<id>` coverage lives in the CLI's `alloc_status_for_workload`
 // integration tests and the control-plane's `acceptance::alloc_status_snapshot`.
 
 #[tokio::test]
@@ -120,7 +122,7 @@ async fn node_list_against_in_process_server_returns_ok() {
 }
 
 // -------------------------------------------------------------------
-// (c) submit_job + describe_job round-trip
+// (c) submit_workload + describe_workload round-trip
 // -------------------------------------------------------------------
 
 #[tokio::test]
@@ -135,9 +137,11 @@ async fn submit_job_then_describe_round_trips_via_http_client() {
         driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     };
 
-    let submit_resp =
-        client.submit_job(SubmitJobRequest { spec: spec.clone() }).await.expect("submit_job");
-    assert!(!submit_resp.job_id.is_empty(), "job_id must not be empty");
+    let submit_resp = client
+        .submit_workload(SubmitWorkloadRequest { spec: spec.clone(), workload_kind: None })
+        .await
+        .expect("submit_workload");
+    assert!(!submit_resp.workload_id.is_empty(), "workload_id must not be empty");
     // Per ADR-0020 the per-write witness is `outcome` + `spec_digest`;
     // a fresh insert reports `outcome = Inserted` with a 64-char digest.
     assert_eq!(
@@ -153,8 +157,8 @@ async fn submit_job_then_describe_round_trips_via_http_client() {
         submit_resp.spec_digest.len(),
     );
 
-    let description: JobDescription =
-        client.describe_job(&submit_resp.job_id).await.expect("describe_job");
+    let description: WorkloadDescription =
+        client.describe_workload(&submit_resp.workload_id).await.expect("describe_workload");
     assert_eq!(description.spec, spec, "round-tripped spec must match submitted spec");
     assert_eq!(
         description.spec_digest, submit_resp.spec_digest,
@@ -232,7 +236,10 @@ async fn submit_with_invalid_spec_returns_http_status_400_with_error_body() {
         driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     };
 
-    let err = client.submit_job(SubmitJobRequest { spec: bad }).await.expect_err("bad spec");
+    let err = client
+        .submit_workload(SubmitWorkloadRequest { spec: bad, workload_kind: None })
+        .await
+        .expect_err("bad spec");
 
     match &err {
         CliError::HttpStatus { status, body } => {

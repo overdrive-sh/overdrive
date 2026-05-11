@@ -29,7 +29,7 @@ use overdrive_core::aggregate::{
     Allocation, AllocationSpecInput, DriverInput, ExecInput, Job, JobSpecInput, Node,
     NodeSpecInput, ResourcesInput,
 };
-use overdrive_core::id::{AllocationId, JobId, NodeId, Region};
+use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
 use overdrive_core::traits::driver::Resources;
 
 // ---------------------------------------------------------------------------
@@ -52,8 +52,8 @@ fn job_from_spec_accepts_canonical_input() {
     // Then the resulting Job carries the expected typed fields.
     assert_eq!(
         job.id,
-        JobId::new("payments").expect("static valid JobId"),
-        "id must be the typed JobId"
+        WorkloadId::new("payments").expect("static valid WorkloadId"),
+        "id must be the typed WorkloadId"
     );
     assert_eq!(
         job.replicas,
@@ -89,7 +89,7 @@ fn allocation_new_accepts_canonical_input() {
     // Given a canonical Allocation spec.
     let spec = AllocationSpecInput {
         id: "a1b2c3d4".to_string(),
-        job_id: "payments".to_string(),
+        workload_id: "payments".to_string(),
         node_id: "worker-01".to_string(),
     };
 
@@ -98,7 +98,7 @@ fn allocation_new_accepts_canonical_input() {
 
     // Then the Allocation links the three newtypes.
     assert_eq!(alloc.id, AllocationId::new("a1b2c3d4").expect("static valid AllocationId"));
-    assert_eq!(alloc.job_id, JobId::new("payments").expect("static valid JobId"));
+    assert_eq!(alloc.workload_id, WorkloadId::new("payments").expect("static valid WorkloadId"));
     assert_eq!(alloc.node_id, NodeId::new("worker-01").expect("static valid NodeId"));
 }
 
@@ -212,14 +212,14 @@ fn allocation_public_fields_are_typed_newtypes_not_raw_primitives() {
     // Given an Allocation constructed through `new`.
     let alloc = Allocation::new(AllocationSpecInput {
         id: "a1b2c3d4".to_string(),
-        job_id: "payments".to_string(),
+        workload_id: "payments".to_string(),
         node_id: "worker-01".to_string(),
     })
     .expect("canonical input");
 
     // When Ana inspects each field's compile-time type name.
     let id_type = type_name_of_val(&alloc.id);
-    let job_id_type = type_name_of_val(&alloc.job_id);
+    let job_id_type = type_name_of_val(&alloc.workload_id);
     let node_id_type = type_name_of_val(&alloc.node_id);
 
     // Then each field is a typed newtype from `overdrive_core::id`,
@@ -229,8 +229,8 @@ fn allocation_public_fields_are_typed_newtypes_not_raw_primitives() {
         "Allocation.id must be AllocationId; got {id_type}"
     );
     assert_eq!(
-        job_id_type, "overdrive_core::id::JobId",
-        "Allocation.job_id must be JobId; got {job_id_type}"
+        job_id_type, "overdrive_core::id::WorkloadId",
+        "Allocation.workload_id must be WorkloadId; got {job_id_type}"
     );
     assert_eq!(
         node_id_type, "overdrive_core::id::NodeId",
@@ -238,7 +238,7 @@ fn allocation_public_fields_are_typed_newtypes_not_raw_primitives() {
     );
 
     // And explicitly not a bare String or u64.
-    for (field, ty) in [("id", id_type), ("job_id", job_id_type), ("node_id", node_id_type)] {
+    for (field, ty) in [("id", id_type), ("workload_id", job_id_type), ("node_id", node_id_type)] {
         assert_ne!(ty, "alloc::string::String", "{field} must not be bare String");
         assert_ne!(ty, "u64", "{field} must not be bare u64");
         assert_ne!(ty, "u32", "{field} must not be bare u32");
@@ -260,7 +260,7 @@ fn job_public_fields_are_typed_newtypes_not_raw_primitives() {
     let replicas_type = type_name_of_val(&job.replicas);
     let resources_type = type_name_of_val(&job.resources);
 
-    assert_eq!(id_type, "overdrive_core::id::JobId");
+    assert_eq!(id_type, "overdrive_core::id::WorkloadId");
     // `type_name` renders `NonZeroU32` as the generic base — accept either
     // the historical spelling or the generic form.
     assert!(

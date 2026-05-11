@@ -13,22 +13,25 @@
 //! `AllocationSpec::resources` at start time.
 
 use std::collections::BTreeMap;
+use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
 use parking_lot::Mutex;
-use tokio::process::{Child, Command};
-use tokio::sync::mpsc;
-use tracing::warn;
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::process::{Child, ChildStderr, Command};
+use tokio::sync::{mpsc, oneshot};
+use tracing::{debug, warn};
 
 use overdrive_core::id::AllocationId;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverType, ExitEvent,
-    ExitKind, Resources,
+    ExitKind, Resources, STDERR_TAIL_LINES,
 };
 
 use crate::cgroup_manager::{
@@ -38,6 +41,19 @@ use crate::cgroup_manager::{
 
 /// Default grace window between SIGTERM and SIGKILL during stop.
 const DEFAULT_STOP_GRACE: Duration = Duration::from_secs(5);
+
+/// Maximum number of cooperative yields the per-alloc watcher performs
+/// after `child.wait()` resolves to let the stderr-tail reader catch
+/// up on kernel-buffered bytes. NOT a wall-clock or logical-clock
+/// timer — each yield gives the reader a runtime turn but completes
+/// in zero (or near-zero) elapsed time when the reader has nothing
+/// to do, so the bound is safe under both `SystemClock` and `SimClock`
+/// wirings. The common case (child closes stderr cleanly on exit)
+/// resolves well within the first few yields; the daemonised-
+/// grandchildren case (FD held open by reparented descendants) hits
+/// the budget and the watcher snapshots the partial tail.
+/// Per step 02-05 / ADR-0033 Amendment 2026-05-10.
+const STDERR_DRAIN_MAX_YIELDS: usize = 64;
 
 /// Capacity of the per-driver `ExitEvent` channel. Sized for burst
 /// load — every running alloc emits exactly one event in its
@@ -122,6 +138,27 @@ struct LiveAllocation {
     /// task, but the path is best-effort — the `JoinHandle` may
     /// already have completed naturally before stop runs.
     watcher: tokio::task::JoinHandle<()>,
+    /// "Running-confirmed" gate sender per
+    /// `docs/feature/fix-exit-observer-running-gate/deliver/rca.md`
+    /// (Solution 1'). The action shim consumes this via
+    /// [`Driver::release_for_exit_emission`] after committing the
+    /// `obs.write(AllocStatus::Running)` row (or after the May-2
+    /// degraded-escalation `LifecycleEvent` path). The matching
+    /// `oneshot::Receiver` was handed to the per-alloc watcher at
+    /// spawn time and is awaited BEFORE the watcher emits its
+    /// `ExitEvent` — that is the structural happens-before edge
+    /// preventing the observer's `find_prior_row → NoPriorRow`
+    /// silent-drop on sub-millisecond-lifetime workloads.
+    ///
+    /// `Some` from start until [`Driver::release_for_exit_emission`]
+    /// `take()`s it; `None` thereafter (idempotent fire). On
+    /// `Driver::stop` the `LiveAllocation` is dropped — if the
+    /// sender was never taken (action shim crashed before
+    /// release), the sender's `Drop` causes the watcher's
+    /// `oneshot::Receiver::await` to resolve to `Err(RecvError)`,
+    /// which the watcher treats as "proceed and emit". See the
+    /// `Driver::start` rustdoc § "Sender drop (orphan path)".
+    gate_sender: Option<oneshot::Sender<()>>,
 }
 
 /// Production `Driver` impl for native processes under cgroup v2
@@ -255,6 +292,14 @@ impl ExecDriver {
         let mut cmd = Command::new(&spec.command);
         cmd.args(&spec.args);
         cmd.kill_on_drop(false);
+        // Pipe stderr per ADR-0033 Amendment 2026-05-10 / step 02-05:
+        // the per-alloc watcher consumes lines into a bounded ring
+        // buffer of capacity `STDERR_TAIL_LINES` and emits the tail
+        // on the `ExitEvent`. stdout is left inherited — the workload's
+        // human-readable output should still reach the operator's
+        // terminal in development; a future operator-config knob can
+        // pipe it too if needed.
+        cmd.stderr(Stdio::piped());
 
         // SAFETY: `setsid` is async-signal-safe; the closure is
         // executed in the forked child between fork and exec, no
@@ -312,7 +357,7 @@ impl Driver for ExecDriver {
         //    bogus or the kernel refused exec — clean up the scope dir
         //    so we don't orphan it (scenario 2.5).
         let mut cmd = Self::build_command(spec);
-        let child = match cmd.spawn() {
+        let mut child = match cmd.spawn() {
             Ok(child) => child,
             Err(err) => {
                 let _ = remove_workload_scope(&self.cgroup_root, &scope).await;
@@ -356,16 +401,55 @@ impl Driver for ExecDriver {
         //    subsystem (see `crates/overdrive-worker/src/
         //    exit_observer.rs`) consumes that event and writes the
         //    classified `AllocStatusRow` to the ObservationStore.
+        //
+        // Per step 02-05 / ADR-0033 Amendment 2026-05-10 the watcher
+        // also drives a per-alloc stderr line-reader (over the piped
+        // `child.stderr`) that fills a bounded `VecDeque` of capacity
+        // `STDERR_TAIL_LINES`; on `child.wait()` resolution the tail
+        // travels with the `ExitEvent` to the obs row.
         let intentional_stop = Arc::new(AtomicBool::new(false));
+        let stderr_pipe = child.stderr.take();
+        // Mint the Running-confirmed gate per
+        // `docs/feature/fix-exit-observer-running-gate/deliver/rca.md`
+        // (Solution 1'). Sender is stashed on `LiveAllocation`; the
+        // action shim takes it via `Driver::release_for_exit_emission`
+        // after `obs.write(Running)` resolves Ok (or after the May-2
+        // degraded-escalation path). Receiver is handed to the
+        // watcher and awaited BEFORE its first `ExitEvent` send —
+        // this is the structural happens-before edge that prevents
+        // `find_prior_row → NoPriorRow` silent-drops on
+        // sub-millisecond-lifetime workloads.
+        //
+        // Per step 01-03 of `fix-exit-observer-running-gate`: the
+        // action shim fires the gate via
+        // `Driver::release_for_exit_emission` after committing
+        // `obs.write(Running)` (or via the exit_observer's degraded
+        // path on May-2 retry exhaustion). The 01-02 transitional
+        // immediate-drop has been removed; the gate now provides the
+        // production ordering edge. On `Driver::stop` the
+        // `LiveAllocation` is dropped — if the sender was never taken
+        // (action shim crashed before firing), the watcher's
+        // `gate_receiver.await` resolves to `Err(RecvError)` (orphan
+        // path) and emit proceeds.
+        let (gate_sender, gate_receiver) = oneshot::channel::<()>();
         let watcher = spawn_exit_watcher(
             spec.alloc.clone(),
             child,
+            stderr_pipe,
             intentional_stop.clone(),
             self.exit_tx.clone(),
+            gate_receiver,
         );
-        self.live
-            .lock()
-            .insert(spec.alloc.clone(), LiveAllocation { scope, pid, intentional_stop, watcher });
+        self.live.lock().insert(
+            spec.alloc.clone(),
+            LiveAllocation {
+                scope,
+                pid,
+                intentional_stop,
+                watcher,
+                gate_sender: Some(gate_sender),
+            },
+        );
 
         Ok(AllocationHandle { alloc: spec.alloc.clone(), pid: Some(pid) })
     }
@@ -377,9 +461,17 @@ impl Driver for ExecDriver {
             let mut live = self.live.lock();
             live.remove(&handle.alloc)
         };
-        let Some(LiveAllocation { scope, pid, intentional_stop, watcher }) = entry else {
+        let Some(LiveAllocation { scope, pid, intentional_stop, watcher, gate_sender }) = entry
+        else {
             return Err(DriverError::NotFound { alloc: handle.alloc.clone() });
         };
+        // Drop the gate sender explicitly. If the action shim never
+        // released the gate before stop (e.g. operator stop landed
+        // mid-flight, or the watcher already emitted via the orphan
+        // path), the receiver wakes with `Err(RecvError)` and the
+        // watcher proceeds. Per the `Driver::start` rustdoc § "Sender
+        // drop (orphan path)".
+        drop(gate_sender);
 
         // 0. Set `intentional_stop = true` BEFORE delivering any
         //    signal. The watcher reads this flag at exit-classification
@@ -497,6 +589,30 @@ impl Driver for ExecDriver {
     fn take_exit_receiver(&self) -> Option<mpsc::Receiver<ExitEvent>> {
         self.exit_rx.lock().take()
     }
+
+    /// Fire the Running-confirmed gate for `handle.alloc`. Idempotent:
+    /// a call against an alloc whose gate has already fired (or whose
+    /// alloc is unknown to the driver) is a no-op, NOT a panic. See
+    /// `Driver::start` rustdoc on the `overdrive-core` trait for the
+    /// full contract; the structural exactly-once guarantee comes
+    /// from `Option::take` + `oneshot::Sender::send` consume-self.
+    fn release_for_exit_emission(&self, handle: &AllocationHandle) {
+        // Hold the lock only long enough to take the sender; never
+        // hold a parking_lot mutex across an `.await` (we don't
+        // await here, but the discipline is uniform).
+        let sender =
+            self.live.lock().get_mut(&handle.alloc).and_then(|live| live.gate_sender.take());
+        if let Some(sender) = sender {
+            // `oneshot::Sender::send` consumes self — double-fire is
+            // structurally impossible. `Err(())` from a closed
+            // receiver (watcher already dropped, e.g. mid-flight
+            // stop / shutdown) is benign; nothing to log on a
+            // post-stop release race.
+            let _ = sender.send(());
+        }
+        // Unknown alloc OR gate already fired: no-op per the
+        // idempotent-fire contract.
+    }
 }
 
 /// Spawn a per-allocation watcher task that owns the `Child`, awaits
@@ -507,13 +623,36 @@ impl Driver for ExecDriver {
 /// during the grace window. The task is `'static` over its captured
 /// state — the `Child`, the `intentional_stop` flag, the `Sender`,
 /// and the `AllocationId`.
+///
+/// Per step 02-05 / ADR-0033 Amendment 2026-05-10 the watcher also
+/// drives a stderr-tail capture: the piped `ChildStderr` (taken from
+/// the spawned `Child` before this call) is consumed line-by-line
+/// into a bounded `VecDeque` of capacity [`STDERR_TAIL_LINES`] held
+/// behind a parking-lot `Mutex`. On `child.wait()` resolution the
+/// watcher snapshots the ring's CURRENT contents non-blockingly —
+/// the reader task is detached and may keep running until reparented
+/// grandchildren close the stderr FD. This ordering matters: shells
+/// spawning daemonised children (`while :; do :; done` busy loops,
+/// `nohup` patterns) leave the FD open after the parent exits, and a
+/// watcher that *awaited* the reader would block forever waiting for
+/// EOF that only arrives after `cgroup.kill` reaps the workload tree.
 fn spawn_exit_watcher(
     alloc: AllocationId,
     mut child: Child,
+    stderr_pipe: Option<ChildStderr>,
     intentional_stop: Arc<AtomicBool>,
     exit_tx: mpsc::Sender<ExitEvent>,
+    gate_receiver: oneshot::Receiver<()>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
+        // Spawn the stderr-tail reader in parallel with `child.wait()`.
+        // The reader task drains lines into a shared ring buffer; the
+        // watcher snapshots the ring after `child.wait()` resolves
+        // (NOT after the reader task finishes — see fn doc above).
+        let ring: Arc<Mutex<VecDeque<String>>> =
+            Arc::new(Mutex::new(VecDeque::with_capacity(STDERR_TAIL_LINES)));
+        let reader_handle = stderr_pipe.map(|pipe| spawn_stderr_tail_reader(pipe, ring.clone()));
+
         let status_result = child.wait().await;
         // `Ordering::SeqCst` pairs with the `store` in `Driver::stop`.
         let intentional = intentional_stop.load(Ordering::SeqCst);
@@ -533,12 +672,132 @@ fn spawn_exit_watcher(
                 }
             }
         };
-        let event = ExitEvent { alloc, kind, intentional_stop: intentional };
+        // Snapshot the ring after letting the reader catch up on
+        // any kernel-buffered stderr the child wrote immediately
+        // before exit. Strategy: poll the reader's JoinHandle a
+        // bounded number of times, yielding cooperatively between
+        // polls so the reader can run on the same runtime. The
+        // common case (the child closes stderr cleanly on exit) sees
+        // the reader resolve within the first few yields; the
+        // daemonised-grandchildren case (FD held open by reparented
+        // descendants — `while :; do :; done` busy loops, `nohup`
+        // patterns) snapshots the partial tail and detaches the
+        // reader, which lives until `cgroup.kill` reaps the workload
+        // tree.
+        //
+        // Cooperative yields (NOT `Clock::sleep`, NOT `tokio::time::
+        // sleep`) are the load-bearing choice: the reader is a peer
+        // task on the same runtime — yielding gives it scheduling
+        // turns to drain bytes already in the kernel pipe buffer,
+        // without depending on logical or wall-clock time. That
+        // keeps the watcher correct under both real-time
+        // (`SystemClock`) and DST (`SimClock`) wirings without
+        // bending production code around test-double quirks.
+        // Per `.claude/rules/development.md` § "Production code is
+        // not shaped by simulation".
+        let stderr_tail = if let Some(handle) = reader_handle {
+            for _ in 0..STDERR_DRAIN_MAX_YIELDS {
+                if handle.is_finished() {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+            // Detach the reader if it's still running — see fn doc
+            // for why awaiting it would deadlock the daemonised-
+            // grandchildren case.
+            drop(handle);
+            let guard = ring.lock();
+            if guard.is_empty() {
+                None
+            } else {
+                Some(guard.iter().cloned().collect::<Vec<_>>().join("\n"))
+            }
+        } else {
+            None
+        };
+        let event = ExitEvent { alloc, kind, intentional_stop: intentional, stderr_tail };
+        // Running-confirmed gate: await the action-shim signal that
+        // the corresponding `obs.write(Running)` row has committed
+        // (or that the May-2 retry path has degraded to
+        // `LifecycleEvent`-only). Without this happens-before edge,
+        // a sub-millisecond-lifetime workload can have its
+        // `ExitEvent` race the action shim's `Running` write and
+        // be silently dropped by the observer's `find_prior_row →
+        // NoPriorRow` arm. Per
+        // `docs/feature/fix-exit-observer-running-gate/deliver/rca.md`
+        // (Solution 1').
+        //
+        // ORDERING is load-bearing: gate await is AFTER `child.wait()`
+        // resolves AND AFTER the stderr-tail drain budget completes,
+        // BEFORE `exit_tx.send`. The stderr-tail drain is its own
+        // pre-condition for emit (rendering correctness); the gate
+        // is the additional pre-condition (ordering correctness).
+        // Both must complete before the event is delivered to the
+        // observer.
+        //
+        // `tokio::sync::oneshot` is NOT `Clock`-dependent — works
+        // under `SimClock`, turmoil, real tokio identically. The
+        // gate is a logical happens-before edge, not a wall-clock
+        // budget. This is the structural production race fix; not a
+        // sim concession (per
+        // `.claude/rules/development.md` § "Production code is not
+        // shaped by simulation").
+        //
+        // `Err(RecvError)` resolves when the sender is dropped
+        // without sending — the action-shim-crashed orphan path. We
+        // log at debug and proceed: the observer's own
+        // `find_prior_row` handles present-or-absent prior rows the
+        // same way it does today, and reconciler convergence cleans
+        // up the orphan on the next tick. Per the `Driver::start`
+        // rustdoc § "Sender drop (orphan path)".
+        if let Err(_recv_err) = gate_receiver.await {
+            debug!(
+                alloc = %event.alloc,
+                "exit_watcher: gate sender dropped before fire; \
+                 proceeding with ExitEvent emission (orphan path)"
+            );
+        }
         // Send is best-effort: if the observer has shut down, the
         // event is dropped — the obs store already reflects a
         // shutdown-time terminal state, and there is no recovery
         // here.
         let _ = exit_tx.send(event).await;
+    })
+}
+
+/// Spawn a task that reads `pipe` line-by-line and pushes each line
+/// into a shared bounded ring (capacity [`STDERR_TAIL_LINES`]) held
+/// behind a `parking_lot::Mutex`. The task runs until pipe EOF or
+/// the first I/O error.
+///
+/// The function uses `tokio::io::BufReader::lines()` per
+/// `.claude/rules/development.md` § "No blocking `std::fs::`* inside
+/// async fn" — the reader is `async`-friendly and never blocks the
+/// tokio worker.
+///
+/// Sharing the ring (rather than returning the joined tail at task
+/// exit) lets the watcher snapshot the captured tail non-blockingly
+/// at `child.wait()` resolution. See `spawn_exit_watcher` doc for
+/// why awaiting the reader at watcher-exit time would deadlock when
+/// reparented grandchildren keep the FD alive.
+fn spawn_stderr_tail_reader(
+    pipe: ChildStderr,
+    ring: Arc<Mutex<VecDeque<String>>>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut reader = BufReader::new(pipe).lines();
+        // `while let` exits on `Ok(None)` (pipe-EOF — workload's
+        // stderr is fully drained) and on `Err(_)` (I/O error mid-
+        // stream — keep what we have and stop). Either way, the
+        // shared ring carries whatever lines were captured up to
+        // exit.
+        while let Ok(Some(line)) = reader.next_line().await {
+            let mut guard = ring.lock();
+            if guard.len() == STDERR_TAIL_LINES {
+                guard.pop_front();
+            }
+            guard.push_back(line);
+        }
     })
 }
 

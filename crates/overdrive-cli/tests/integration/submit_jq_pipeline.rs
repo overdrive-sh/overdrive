@@ -39,9 +39,9 @@
 //!    extract from the real JSON response body.
 //!
 //! The `Accept: application/json` header pinning is structural in
-//! `ApiClient::submit_job` (the only public API the dispatched handler
+//! `ApiClient::submit_workload` (the only public API the dispatched handler
 //! reaches); the JSON-body shape is structural in
-//! `SubmitJobResponse` (the typed response). Calling the dispatched
+//! `SubmitWorkloadResponse` (the typed response). Calling the dispatched
 //! handler IS the wire-level witness — short of `Command::spawn`,
 //! which CLAUDE.md forbids.
 //!

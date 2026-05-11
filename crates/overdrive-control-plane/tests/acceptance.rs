@@ -25,7 +25,7 @@ mod acceptance {
 
     // S-AS-01 / S-AS-07 / S-AS-08 / S-AS-09 (Slice 01 step 01-03) —
     // `AllocStatusResponse` extension, handler hydration via observation
-    // rows + `JobLifecycleView`, 404 on missing job. KPI-03 satisfaction.
+    // rows + `WorkloadLifecycleView`, 404 on missing job. KPI-03 satisfaction.
     mod alloc_status_snapshot;
 
     mod api_type_shapes;
@@ -37,13 +37,13 @@ mod acceptance {
     // SAME type so byte-equality is structural.
     mod error_mapping_exhaustive;
     mod eval_broker_collapse;
-    mod job_lifecycle_backoff;
     #[cfg(feature = "integration-tests")]
     mod job_stop_idempotent;
     #[cfg(feature = "integration-tests")]
     mod job_stop_intent_key;
     #[cfg(feature = "integration-tests")]
     mod job_stop_unknown;
+    mod workload_lifecycle_backoff;
     // `pending_no_capacity_renders_reason` was retired in slice 01 step
     // 01-03: the legacy `AllocStatusRowBody.reason: Option<String>`
     // surface is replaced by the typed `Option<TransitionReason>` per
@@ -82,7 +82,7 @@ mod acceptance {
     mod submit_event_serialization;
 
     // cli-submit-vs-deploy-and-alloc-status — Slice 02 step 02-03.
-    // Content-negotiated submit_job + streaming_submit_loop with
+    // Content-negotiated submit_workload + streaming_submit_loop with
     // select! cap timer + lagged-recovery fallback.
     // Scenarios: S-CP-01, S-CP-02, S-CP-03, S-CP-06, S-CP-07,
     // S-CP-08, S-CP-10 (#[ignore]'d per wave-decisions.md).

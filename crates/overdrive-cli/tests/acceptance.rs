@@ -25,8 +25,8 @@ mod acceptance {
     mod insecure_rejected;
     mod render_alloc_status;
     mod render_cluster_and_node;
-    mod render_job_stop;
-    mod render_job_submit;
+    mod render_workload_stop;
+    mod render_workload_submit;
 
     // Slice 02 step 02-04 — S-CLI-04 (Failed-block render) and
     // S-CLI-05 (exit-code 2 across HTTP error variants).
@@ -46,4 +46,15 @@ mod acceptance {
     // streaming lane). The wire-level Accept-header pinning is covered
     // by the existing JSON-ack and streaming integration suites.
     mod submit_pipe_autodetect;
+
+    // workload-kind-discriminator slice 02 — Job-kind render fns
+    // (`format_job_succeeded_summary`, `format_job_failed_summary`,
+    // `format_job_attempt_failed`, `format_job_submit_echo`) per
+    // ADR-0047 §3 [D2] / [D7]. The structural fix that closes the
+    // bug under audit lands here.
+    mod job_kind_render;
+
+    // Pure render helpers — format_human_duration, derive_job_verdict,
+    // alloc_status_kind_aware spec-digest branches.
+    mod render_pure_fns;
 }

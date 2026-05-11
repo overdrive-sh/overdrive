@@ -980,6 +980,47 @@ of `.claude/rules/development.md` § "Sum types over sentinels".
   regression), `95b34a3` (GREEN — emit-site swap + CLI render arms +
   `drop(bus);` reachability fix).
 
+## Amendment 2026-05-10 — per-kind `SubmitEvent` enums (Service / Job / Schedule)
+
+**Decision-maker.** Morgan (DESIGN wave for
+`workload-kind-discriminator`).
+
+**What changed.** §2's flat `SubmitEvent` enum is wrapped in a
+kind-discriminating outer envelope. Per ADR-0047, the wire shape
+becomes:
+
+```rust
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SubmitEvent {
+    Service(ServiceSubmitEvent),
+    Job(JobSubmitEvent),
+    Schedule(ScheduleSubmitEvent),
+}
+```
+
+Each inner enum is a closed sibling — the prior flat variants are
+redistributed across them. The Job inner enum has **no
+`ConvergedRunning` variant**: this is the structural fix for RCA
+root causes B+C in
+`docs/analysis/root-cause-analysis-coinflip-submit-reports-running-on-exit-1.md`.
+The Job streaming subscriber waits for the ExitObserver's terminal
+observation row before emitting `JobSubmitEvent::Succeeded { exit_code, .. }`
+or `JobSubmitEvent::Failed { exit_code, .. }`.
+
+The `ScheduleSubmitEvent` enum carries an `Accepted` and a
+`Registered { cron, deferral_url }` variant only; Phase 1 ships no
+firing semantics (deferred to GH #166).
+
+The §3 wall-clock cap mechanism, §6 HTTP error semantics, and §8
+stream-interrupted handling are unchanged — they apply per-kind on
+the inner enum.
+
+The `LifecycleEvent` broadcast bus shape carries the kind tag from
+its first emission; subscribers select which inner enum to reify
+based on the persisted `WorkloadSpec.kind()` read from intent.
+
+See ADR-0047 for the full decomposition.
+
 ## Changelog
 
 | Date | Change |
@@ -987,3 +1028,4 @@ of `.claude/rules/development.md` § "Sum types over sentinels".
 | 2026-04-30 | Initial ADR. Decisions D1 / D3 / D4 / D5 / D6 / D8 from the DESIGN wave; constraints carried from DISCUSS wave-decisions. Slice 02 back-prop completed. Echo peer review pending. |
 | 2026-04-30 | **Amendment** — `TransitionReason` refactored from state-class to cause-class. `TerminalReason` extended with structured payloads. Original variant set retired and captured under Alternative D as the rejected predecessor. See `Amendment 2026-04-30` section above. Slice 02 back-prop list (in `docs/feature/cli-submit-vs-deploy-and-alloc-status/design/upstream-changes.md`) catalogues the consequent updates needed in DISCUSS / DISTILL / roadmap. |
 | 2026-05-02 | **Amendment** — §8 channel-closed row now maps to `TerminalReason::StreamInterrupted` (new payload-free variant), not `DriverError`. The original routing was unimplementable: `DriverError` requires a `cause: TransitionReason` the closed-bus call site cannot construct. Implementation had drifted to a `Timeout { after_seconds: 0 }` sentinel; the new variant is the dedicated payload-free wire shape for stream-transport failures with no observable cause. See `Amendment 2026-05-02` section above. |
+| 2026-05-10 | **Amendment** — `SubmitEvent` becomes a kind-discriminating outer envelope; `JobSubmitEvent` has no `ConvergedRunning` variant (structural bug fix). See `Amendment 2026-05-10` section above and ADR-0047. |

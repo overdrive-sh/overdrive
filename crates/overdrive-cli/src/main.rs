@@ -47,6 +47,7 @@ fn main() -> Result<()> {
 // 1-1 correspondence between argv shape and handler call. Slice 03 step
 // 03-01 added the `--detach` branch to `Job::Submit`, taking the body
 // past the 100-line clippy default.
+// mutants::skip — thin binary dispatcher; tested via library-level acceptance tests per CLAUDE.md (no subprocess)
 #[allow(clippy::too_many_lines)]
 async fn run(cli: Cli) -> Result<()> {
     use overdrive_cli::cli::{AllocCommand, ClusterCommand, Command, JobCommand, NodeCommand};
@@ -59,7 +60,7 @@ async fn run(cli: Cli) -> Result<()> {
             print!("{}", overdrive_cli::render::cluster_status(&out));
             Ok(())
         }
-        Command::Job(JobCommand::Submit { spec, detach }) => {
+        Command::Deploy { spec, detach } => {
             // Slice 03 step 03-02 — IsTerminal auto-detach lane
             // selection per architecture.md §6 + DESIGN [D5]:
             //
@@ -119,7 +120,7 @@ async fn run(cli: Cli) -> Result<()> {
                 // stdout is redirected (pipe / file / non-TTY).
                 match overdrive_cli::commands::job::submit(args).await {
                     Ok(out) => {
-                        print!("{}", overdrive_cli::render::job_submit_accepted(&out));
+                        print!("{}", overdrive_cli::render::workload_submit_accepted(&out));
                         // Exit code 0 on `Inserted`/`Unchanged` per the
                         // criteria. The renderer prints the typed
                         // outcome verbatim so operators see which
@@ -139,12 +140,12 @@ async fn run(cli: Cli) -> Result<()> {
             let args = overdrive_cli::commands::job::StopArgs { id, config_path };
             match overdrive_cli::commands::job::stop(args).await {
                 Ok(out) => {
-                    print!("{}", overdrive_cli::render::job_stop_accepted(&out));
+                    print!("{}", overdrive_cli::render::workload_stop_accepted(&out));
                     Ok(())
                 }
                 Err(err) => {
                     eprint!("{}", overdrive_cli::render::cli_error(&err));
-                    Err(color_eyre::eyre::eyre!("job stop failed"))
+                    Err(color_eyre::eyre::eyre!("workload stop failed"))
                 }
             }
         }
@@ -176,7 +177,7 @@ async fn run(cli: Cli) -> Result<()> {
             let data_dir = data_dir.unwrap_or_else(default_data_dir);
             // Operator config dir is the canonical write target for
             // the trust triple — must equal what `default_config_path`
-            // resolves to on the read side, so `serve` and `job submit`
+            // resolves to on the read side, so `serve` and `deploy`
             // share the same file (`fix-cli-cannot-reach-control-plane`).
             let config_dir = overdrive_cli::commands::cluster::default_operator_config_dir();
             let args =
