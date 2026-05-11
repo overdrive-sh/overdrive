@@ -1,15 +1,17 @@
 # Slice 05 of `workload-kind-discriminator` — example `[job]+[schedule]`
 # spec exercising the Schedule kind end-to-end.
 #
-# Submit:
-#   overdrive deploy examples/nightly-backup.toml
+# Submit (end-to-end Schedule wiring is deferred — see GH #166):
+#   The Schedule kind parser and IntentStore persistence helpers ship
+#   in this slice (slice 05), but submit_streaming() / submit() do not
+#   yet route WorkloadSpecInput::Schedule to the server. Attempting
+#   `overdrive deploy examples/nightly-backup.toml` currently returns
+#   an InvalidSpec error (legacy JobSpecInput parser rejects [job]/[schedule]).
+#   End-to-end CLI wiring lands in a future slice-02 follow-up.
 #
-# The CLI prints "Schedule registered." plus a NOTE block referencing
-# https://github.com/overdrive-sh/overdrive/issues/166. Cron firing
-# semantics are deferred to that tracking issue — the spec is
-# validated and persisted as intent (per J-OPS-002 — submitted
-# things are committed even if execution is deferred), but no Job
-# runs are spawned automatically.
+# Cron firing semantics are deferred to GH #166 — the spec is
+# validated and persisted as intent once the CLI wiring lands, but no
+# Job runs are spawned automatically.
 #
 # `cron = "0 2 * * *"` is preserved VERBATIM in `alloc status`
 # output. Slice 05 explicitly does NOT canonicalise cron strings;
