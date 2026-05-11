@@ -1,6 +1,6 @@
 //! Regression tests for `workload_event_from_lifecycle` populating
-//! `attempt_index` and `will_restart` from the reconciler's view cache
-//! rather than hardcoding `(1, false)`.
+//! `attempt_index`, `will_restart`, and `next_attempt_delay` from the
+//! reconciler's view cache rather than hardcoding `(1, false, None)`.
 //!
 //! These tests open a real `RedbViewStore` via `TempDir` and are gated
 //! behind `integration-tests` per `.claude/rules/testing.md`
@@ -13,8 +13,8 @@ use std::sync::Arc;
 use overdrive_core::TransitionReason;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::reconciler::{
-    AnyReconciler, RESTART_BACKOFF_CEILING, TargetResource, WorkloadLifecycle,
-    WorkloadLifecycleView,
+    AnyReconciler, RESTART_BACKOFF_CEILING, RESTART_BACKOFF_DURATION, TargetResource,
+    WorkloadLifecycle, WorkloadLifecycleView,
 };
 use overdrive_core::traits::driver::DriverType;
 use overdrive_core::traits::observation_store::ObservationStore;
@@ -81,10 +81,22 @@ async fn attempt_failed_first_attempt_will_restart() {
     let result = workload_event_from_lifecycle(&*obs, &rt, &wl_id, &event).await;
 
     match result {
-        Some(JobSubmitEvent::AttemptFailed { attempt_index, will_restart, exit_code, .. }) => {
+        Some(JobSubmitEvent::AttemptFailed {
+            attempt_index,
+            will_restart,
+            exit_code,
+            next_attempt_delay,
+            ..
+        }) => {
             assert_eq!(attempt_index, 1, "first attempt should be index 1");
             assert!(will_restart, "budget not exhausted — will_restart must be true");
             assert_eq!(exit_code, 42);
+            let expected_delay = format!("{}ms", RESTART_BACKOFF_DURATION.as_millis());
+            assert_eq!(
+                next_attempt_delay.as_deref(),
+                Some(expected_delay.as_str()),
+                "will_restart=true must populate delay from backoff_for_attempt"
+            );
         }
         other => panic!("expected AttemptFailed, got {other:?}"),
     }
@@ -109,9 +121,18 @@ async fn attempt_failed_mid_budget_reports_correct_index() {
     let result = workload_event_from_lifecycle(&*obs, &rt, &wl_id, &event).await;
 
     match result {
-        Some(JobSubmitEvent::AttemptFailed { attempt_index, will_restart, .. }) => {
+        Some(JobSubmitEvent::AttemptFailed {
+            attempt_index,
+            will_restart,
+            next_attempt_delay,
+            ..
+        }) => {
             assert_eq!(attempt_index, 4, "restart_counts=3 → attempt_index=4");
             assert!(will_restart, "4 < CEILING(5) — will_restart must be true");
+            assert!(
+                next_attempt_delay.is_some(),
+                "will_restart=true must populate next_attempt_delay"
+            );
         }
         other => panic!("expected AttemptFailed, got {other:?}"),
     }
@@ -136,13 +157,22 @@ async fn attempt_failed_at_ceiling_will_not_restart() {
     let result = workload_event_from_lifecycle(&*obs, &rt, &wl_id, &event).await;
 
     match result {
-        Some(JobSubmitEvent::AttemptFailed { attempt_index, will_restart, .. }) => {
+        Some(JobSubmitEvent::AttemptFailed {
+            attempt_index,
+            will_restart,
+            next_attempt_delay,
+            ..
+        }) => {
             assert_eq!(
                 attempt_index,
                 RESTART_BACKOFF_CEILING + 1,
                 "at ceiling → attempt_index = CEILING + 1"
             );
             assert!(!will_restart, "at ceiling — will_restart must be false");
+            assert_eq!(
+                next_attempt_delay, None,
+                "will_restart=false → no next attempt → delay must be None"
+            );
         }
         other => panic!("expected AttemptFailed, got {other:?}"),
     }
@@ -163,9 +193,18 @@ async fn attempt_failed_empty_view_defaults_conservative() {
     let result = workload_event_from_lifecycle(&*obs, &rt, &wl_id, &event).await;
 
     match result {
-        Some(JobSubmitEvent::AttemptFailed { attempt_index, will_restart, .. }) => {
+        Some(JobSubmitEvent::AttemptFailed {
+            attempt_index,
+            will_restart,
+            next_attempt_delay,
+            ..
+        }) => {
             assert_eq!(attempt_index, 1, "empty view → first attempt");
             assert!(will_restart, "empty view → conservative will_restart=true");
+            assert!(
+                next_attempt_delay.is_some(),
+                "empty view defaults to will_restart=true → delay must be populated"
+            );
         }
         other => panic!("expected AttemptFailed, got {other:?}"),
     }

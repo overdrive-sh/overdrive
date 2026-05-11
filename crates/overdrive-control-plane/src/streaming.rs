@@ -106,7 +106,7 @@ use crate::AppState;
 use crate::action_shim::LifecycleEvent;
 use crate::api::{AllocStateWire, IdempotencyOutcome, SubmitEvent, TerminalReason};
 use crate::reconciler_runtime::ReconcilerRuntime;
-use overdrive_core::reconciler::TargetResource;
+use overdrive_core::reconciler::{TargetResource, backoff_for_attempt};
 use overdrive_core::transition_reason::{StoppedBy, TerminalCondition};
 
 /// One NDJSON line — `serde_json::to_writer(buf, &event)?` + `b'\n'`.
@@ -751,12 +751,20 @@ pub async fn workload_event_from_lifecycle(
             let (attempt_index, will_restart) = target
                 .as_ref()
                 .map_or((1, true), |t| runtime.restart_status_for_alloc(t, &event.alloc_id));
+            let next_attempt_delay = if will_restart {
+                Some(format!(
+                    "{}ms",
+                    backoff_for_attempt(attempt_index.saturating_sub(1)).as_millis()
+                ))
+            } else {
+                None
+            };
             Some(JobSubmitEvent::AttemptFailed {
                 attempt_index,
                 exit_code,
                 duration: event.at.clone(),
                 will_restart,
-                next_attempt_delay: None,
+                next_attempt_delay,
             })
         }
         // Terminated without a terminal claim is a transitional state
