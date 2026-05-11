@@ -47,7 +47,7 @@ fn main() -> Result<()> {
 // 1-1 correspondence between argv shape and handler call. Slice 03 step
 // 03-01 added the `--detach` branch to `Job::Submit`, taking the body
 // past the 100-line clippy default.
-// mutants: skip — thin binary dispatcher; tested via library-level acceptance tests per CLAUDE.md (no subprocess)
+// mutants::skip — thin binary dispatcher; tested via library-level acceptance tests per CLAUDE.md (no subprocess)
 #[allow(clippy::too_many_lines)]
 async fn run(cli: Cli) -> Result<()> {
     use overdrive_cli::cli::{AllocCommand, ClusterCommand, Command, JobCommand, NodeCommand};

@@ -622,6 +622,7 @@ async fn dispatch_single(
             // alloc id, but the new watcher was never spawned, so no
             // gate is awaited.
             obs.write(ObservationRow::AllocStatus(row.clone())).await?;
+            // mutants::skip — Running gate exercised by exit_observer_running_gate integration test; dispatch_single requires full Driver+ObservationStore wiring
             if state == AllocState::Running {
                 if let Some(handle) = &handle_opt {
                     driver.release_for_exit_emission(handle);

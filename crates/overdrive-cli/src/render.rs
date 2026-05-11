@@ -525,6 +525,13 @@ pub fn format_job_succeeded_summary(
     )
 }
 
+/// Decide whether a Job's retry budget is exhausted. Pure function.
+/// Extracted from `consume_stream_job` for testability.
+#[must_use]
+pub const fn is_backoff_exhausted(attempts: u32, max_attempts: u32) -> bool {
+    attempts >= max_attempts && max_attempts > 1
+}
+
 /// Render the operator-facing terminal-failure line for a Job-kind
 /// workload. Pure function. Per slice 02 spec / S-02-02.
 ///

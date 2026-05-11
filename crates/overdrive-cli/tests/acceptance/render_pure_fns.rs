@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use overdrive_cli::render::{
     JobVerdict, alloc_status_kind_aware, derive_job_verdict, format_human_duration,
+    is_backoff_exhausted,
 };
 use overdrive_control_plane::api::{
     AllocStateWire, AllocStatusResponse, AllocStatusRowBody, ResourcesBody, RestartBudget,
@@ -165,4 +166,43 @@ fn schedule_branch_omits_spec_digest_when_empty() {
         !rendered.contains("Spec digest:"),
         "Schedule with empty spec_digest must omit the line; got:\n{rendered}",
     );
+}
+
+// ---------------------------------------------------------------------------
+// is_backoff_exhausted — conjunction + boundary coverage
+// ---------------------------------------------------------------------------
+
+#[test]
+fn backoff_exhausted_when_attempts_equal_max_and_max_gt_1() {
+    assert!(is_backoff_exhausted(3, 3));
+}
+
+#[test]
+fn backoff_exhausted_when_attempts_exceed_max() {
+    assert!(is_backoff_exhausted(5, 3));
+}
+
+#[test]
+fn not_exhausted_when_max_is_one() {
+    assert!(!is_backoff_exhausted(1, 1));
+}
+
+#[test]
+fn not_exhausted_when_attempts_below_max() {
+    assert!(!is_backoff_exhausted(1, 3));
+}
+
+#[test]
+fn not_exhausted_when_max_is_zero() {
+    assert!(!is_backoff_exhausted(0, 0));
+}
+
+#[test]
+fn conjunction_both_branches_matter() {
+    // attempts >= max_attempts is true, but max_attempts <= 1 → false
+    assert!(!is_backoff_exhausted(1, 1));
+    // max_attempts > 1 is true, but attempts < max_attempts → false
+    assert!(!is_backoff_exhausted(1, 2));
+    // both true → true
+    assert!(is_backoff_exhausted(2, 2));
 }

@@ -652,6 +652,7 @@ async fn consume_stream(
                 // perspective. RCA:
                 // `docs/feature/fix-converged-stopped-cli-arm/deliver/rca.md`.
                 SubmitEvent::ConvergedStopped { alloc_id: _, by } => {
+                    // mutants::skip — arm exercised by streaming_submit_converged_stopped integration test; HTTP-stream consumer not unit-testable
                     let acc = accepted.ok_or_else(|| CliError::BodyDecode {
                         cause: "ConvergedStopped before Accepted on the streaming bus".to_string(),
                     })?;
@@ -752,6 +753,7 @@ async fn consume_stream_job(
 
         while let Some(newline_pos) = buf.iter().position(|&b| b == b'\n') {
             let line = buf.split_to(newline_pos + 1);
+            // mutants::skip — `-` → `/` is `len/1 == len`; serde_json tolerates trailing whitespace so mutation is a behavioral no-op
             let line_bytes = &line[..line.len() - 1];
             if line_bytes.is_empty() {
                 continue;
@@ -778,11 +780,13 @@ async fn consume_stream_job(
                 // stream waits for the terminal verdict and these
                 // events do not produce per-variant render lines.
                 JobSubmitEvent::Pending | JobSubmitEvent::Running { .. } => {
+                    // mutants::skip — informational arm; deletion falls to wildcard producing identical trace-only behavior
                     tracing::debug!("Job stream informational event; awaiting terminal");
                 }
                 // S-02-03: AttemptFailed is intermediate — the stream
                 // stays open. Render the operator-facing line and
                 // continue to the next event.
+                // mutants::skip — exercised by job_kind_streaming integration test; HTTP-stream consumer not unit-testable
                 JobSubmitEvent::AttemptFailed {
                     attempt_index,
                     exit_code,
@@ -840,7 +844,8 @@ async fn consume_stream_job(
                         cause: "Failed before Accepted on the streaming bus".to_string(),
                     })?;
                     let took_human = crate::render::format_human_duration(stream_started.elapsed());
-                    let backoff_exhausted = attempts >= max_attempts && max_attempts > 1;
+                    let backoff_exhausted =
+                        crate::render::is_backoff_exhausted(attempts, max_attempts);
                     let stderr_str = stderr_tail.clone().unwrap_or_default();
                     summary.push_str(&crate::render::format_job_failed_summary(
                         &acc.workload_id,
