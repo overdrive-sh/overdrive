@@ -866,7 +866,11 @@ pub fn alloc_status_kind_aware(out: &AllocStatusResponse) -> String {
                     if let Some(err) = &last.error {
                         if !err.is_empty() {
                             s.push('\n');
-                            let _ = writeln!(s, "stderr (last lines):");
+                            let _ = writeln!(
+                                s,
+                                "stderr (last {} lines):",
+                                overdrive_core::traits::driver::STDERR_TAIL_LINES
+                            );
                             for line in err.lines() {
                                 let _ = writeln!(s, "  {line}");
                             }
