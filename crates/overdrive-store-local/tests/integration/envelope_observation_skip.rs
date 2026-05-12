@@ -1,4 +1,4 @@
-//! Observation log + skip self-heal — S-EV-04.1 + S-EV-04.2.
+//! Observation log + skip self-heal — S-EV-04.1 + S-EV-04.2 + S-EV-04.3.
 //!
 //! Per ADR-0048 § 3 (observation layer): on envelope decode failure
 //! the reader emits `tracing::warn!(name: "observation.envelope.
@@ -13,9 +13,9 @@
 use std::sync::{Arc, Mutex};
 
 use overdrive_core::aggregate::WorkloadKind;
-use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
+use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
 use overdrive_core::traits::observation_store::{
-    AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
+    AllocState, AllocStatusRow, LogicalTimestamp, NodeHealthRow, ObservationRow, ObservationStore,
 };
 use overdrive_store_local::LocalObservationStore;
 use tempfile::TempDir;
@@ -25,7 +25,9 @@ use tracing_subscriber::layer::{Context, SubscriberExt};
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::{Layer, Registry};
 
-use super::envelope_helpers::write_raw_bytes_to_alloc_status_table;
+use super::envelope_helpers::{
+    write_raw_bytes_to_alloc_status_table, write_raw_bytes_to_node_health_table,
+};
 
 #[derive(Clone, Default)]
 struct CapturedEvents {
@@ -180,5 +182,71 @@ async fn rewriting_malformed_key_with_valid_envelope_recovers_reads() {
     assert_eq!(
         second_pass_decodes, 1,
         "no additional decode event expected on the recovery read; total {second_pass_decodes}"
+    );
+}
+
+// ---------------------------------------------------------------------
+// S-EV-04.3 — NodeHealthRow malformed-row skip + valid-row survives.
+// Mirrors the AllocStatusRow sub-tests above against the node_health
+// table. Per ADR-0048 § 3 observation policy is log+skip — identical
+// shape, distinct table = "observation_node_health" tag in the warn
+// event.
+// ---------------------------------------------------------------------
+
+fn make_node_health_row(node_id_str: &str, counter: u64) -> NodeHealthRow {
+    let node_id = NodeId::new(node_id_str).expect("valid node id");
+    NodeHealthRow {
+        node_id: node_id.clone(),
+        region: Region::new("us-east-1").expect("valid region"),
+        last_heartbeat: LogicalTimestamp { counter, writer: node_id },
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn malformed_node_health_row_is_logged_and_skipped_but_valid_row_surfaces() {
+    let captured = CapturedEvents::default();
+    let subscriber = Registry::default().with(captured.clone());
+
+    let tmp = TempDir::new().expect("tempdir");
+    let redb_path = tmp.path().join("observation.redb");
+
+    // K1: valid row through the typed write path.
+    let k1_row = make_node_health_row("node-alpha", 1);
+    {
+        let store = LocalObservationStore::open(&redb_path).expect("open #1");
+        store.write(ObservationRow::NodeHealth(k1_row.clone())).await.expect("write K1");
+    } // store dropped; redb lock released
+
+    // K2: 16 bytes of 0xFF — does not decode through the envelope.
+    let k2_node = NodeId::new("node-malformed-02").expect("valid node id");
+    write_raw_bytes_to_node_health_table(&redb_path, &k2_node, &[0xFF; 16]);
+
+    let _guard = set_default(subscriber);
+
+    let store = LocalObservationStore::open(&redb_path).expect("open #2");
+    let rows = store.node_health_rows().await.expect("read node_health rows");
+
+    assert_eq!(rows.len(), 1, "exactly one valid row must survive; got {rows:?}");
+    assert_eq!(rows[0].node_id, k1_row.node_id);
+
+    let entries = captured.entries();
+    let decode_events: Vec<&String> =
+        entries.iter().filter(|e| e.contains("observation.envelope.decode_failed")).collect();
+    assert_eq!(
+        decode_events.len(),
+        1,
+        "exactly one decode_failed event expected; got {decode_events:?}"
+    );
+    assert!(
+        decode_events[0].contains("observation_node_health"),
+        "event must name the table 'observation_node_health'; got {:?}",
+        decode_events[0]
+    );
+
+    let refused: Vec<&String> =
+        entries.iter().filter(|e| e.contains("health.startup.refused")).collect();
+    assert!(
+        refused.is_empty(),
+        "observation layer must NOT emit health.startup.refused; got {refused:?}"
     );
 }

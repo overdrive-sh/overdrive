@@ -332,12 +332,24 @@ impl From<&Listener> for ListenerRow {
 /// `node_health` row — Phase 1 minimal shape per brief §6.
 ///
 /// Written by the node itself on each heartbeat tick.
-#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub struct NodeHealthRow {
-    pub node_id: NodeId,
-    pub region: Region,
-    pub last_heartbeat: LogicalTimestamp,
-}
+///
+/// # Schema evolution
+///
+/// Per ADR-0048 (`docs/product/architecture/adr-0048-rkyv-versioned-envelope.md`)
+/// this type is the **inner payload** of [`NodeHealthRowEnvelope`]
+/// under the UI-02 amendment alias-to-payload public API. rkyv
+/// archives are **fixed positional layouts** — appending a field
+/// to this struct shifts every subsequent offset and renders
+/// pre-existing bytes unreadable. Schema evolution at this boundary
+/// goes through a new envelope variant (`V2`, `V3`, …) added per
+/// the version-bump procedure in `.claude/rules/development.md`
+/// § "rkyv schema evolution"; existing `FIXTURE_V<N>` golden bytes
+/// are NEVER touched.
+///
+/// Writers go through [`NodeHealthRow::latest`]
+/// (= [`NodeHealthRowEnvelope::latest`]); readers project through
+/// [`NodeHealthRowEnvelope::into_latest`].
+pub type NodeHealthRow = NodeHealthRowV1;
 
 /// Status of a service-hydration dispatch attempt — one source of
 /// truth per `service_hydration_results` row per
@@ -608,31 +620,51 @@ pub struct NodeHealthRowV1 {
 impl VersionedEnvelope for NodeHealthRowEnvelope {
     type Latest = NodeHealthRowV1;
 
-    #[expect(
-        clippy::todo,
-        reason = "RED scaffold; lands GREEN in DELIVER step 02-01 (NodeHealthRowEnvelope)"
-    )]
-    fn latest(_payload: Self::Latest) -> Self {
-        todo!("RED scaffold: wrap payload into Self::V1(payload)")
+    fn latest(payload: Self::Latest) -> Self {
+        Self::V1(payload)
     }
 
-    #[expect(
-        clippy::todo,
-        reason = "RED scaffold; lands GREEN in DELIVER step 02-01 (NodeHealthRowEnvelope)"
-    )]
     fn into_latest(self) -> Result<Self::Latest, EnvelopeError> {
-        todo!("RED scaffold: match Self::V1(v1) => Ok(v1)")
+        match self {
+            Self::V1(v1) => Ok(v1),
+        }
+    }
+
+    /// Discriminant offset for `NodeHealthRowEnvelope` archives,
+    /// measured from the END of the archive bytes.
+    ///
+    /// Empirically determined against canonical V1 payloads of
+    /// varying NodeId / Region / writer-id lengths (including the
+    /// inline-vs-out-of-line `ArchivedString` boundary at 8 bytes)
+    /// and counter values from 1 to u64::MAX: rkyv 0.8 places the
+    /// outer enum's discriminant byte 40 bytes from the END of the
+    /// archive, stable across all payload sizes.
+    ///
+    /// The trailing 40 bytes encompass the root structure footprint:
+    /// 1 byte discriminant + 7 padding + 8-byte counter + 16-byte
+    /// `ArchivedString` (relptr+len OR inline) for the writer
+    /// NodeId + 8-byte enum padding. (rkyv rounds the root region
+    /// up to align to 8 bytes.)
+    ///
+    /// Re-pin alongside the schema-evolution fixture at every
+    /// version-bump per
+    /// [`VersionedEnvelope::discriminant_offset_from_end`]'s
+    /// docstring.
+    fn discriminant_offset_from_end() -> Option<usize> {
+        Some(40)
+    }
+
+    fn known_discriminants() -> &'static [u8] {
+        // V1 carries rkyv discriminant 0 (declaration order — first
+        // variant). Empirically verified by archiving a canonical
+        // `NodeHealthRowEnvelope::latest(...)` and inspecting the
+        // byte at `bytes.len() - 40`.
+        &[0]
     }
 
     fn type_name() -> &'static str {
         "NodeHealthRowEnvelope"
     }
-
-    // `discriminant_offset` / `known_discriminants` inherit the
-    // trait defaults — they get pinned at step 02-01 GREEN time,
-    // alongside this envelope's schema-evolution fixture, via the
-    // same empirical inspection procedure documented on
-    // `VersionedEnvelope::discriminant_offset`.
 }
 
 // SCAFFOLD: true

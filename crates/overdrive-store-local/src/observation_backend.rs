@@ -62,8 +62,9 @@ use overdrive_core::codec::{VersionedEnvelope, probe_known_variant};
 use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
 use overdrive_core::id::{AllocationId, ServiceId};
 use overdrive_core::traits::observation_store::{
-    AllocStatusRow, AllocStatusRowEnvelope, NodeHealthRow, ObservationRow, ObservationStore,
-    ObservationStoreError, ObservationSubscription, ServiceBackendRow, ServiceHydrationResultRow,
+    AllocStatusRow, AllocStatusRowEnvelope, NodeHealthRow, NodeHealthRowEnvelope, ObservationRow,
+    ObservationStore, ObservationStoreError, ObservationSubscription, ServiceBackendRow,
+    ServiceHydrationResultRow,
 };
 use redb::{Database, ReadableTable, Table, TableDefinition};
 use tokio::sync::broadcast;
@@ -323,27 +324,40 @@ impl ObservationStore for LocalObservationStore {
 
     async fn node_health_rows(&self) -> Result<Vec<NodeHealthRow>, ObservationStoreError> {
         let inner = Arc::clone(&self.inner);
-        tokio::task::spawn_blocking(move || {
+        // Per ADR-0048 § 3 (observation layer): log + skip rows whose
+        // envelope decode failed. Mirror of the alloc_status_rows path
+        // above — failures are collected inside the blocking task and
+        // emitted on the calling async thread so per-test
+        // `tracing::subscriber::set_default` guards (thread-local)
+        // observe them.
+        let (rows, decode_failures) = tokio::task::spawn_blocking(move || {
             let read = inner.db.begin_read().map_err(map_to_io)?;
             let table = read.open_table(NODE_HEALTH_TABLE).map_err(map_to_io)?;
             let mut out: Vec<NodeHealthRow> = Vec::new();
+            let mut failures: Vec<(Vec<u8>, ObservationStoreError)> = Vec::new();
             let iter = table.iter().map_err(map_to_io)?;
             for item in iter {
-                let (_k, v) = item.map_err(map_to_io)?;
-                // redb returns a byte slice with unknown alignment; rkyv
-                // requires 8-byte-aligned access. Copy into an AlignedVec
-                // before deserialising.
-                let mut aligned = rkyv::util::AlignedVec::<8>::new();
-                aligned.extend_from_slice(v.value());
-                let row: NodeHealthRow =
-                    rkyv::from_bytes::<NodeHealthRow, rkyv::rancor::Error>(&aligned)
-                        .map_err(map_to_io)?;
-                out.push(row);
+                let (k, v) = item.map_err(map_to_io)?;
+                match decode_node_health(v.value()) {
+                    Ok(row) => out.push(row),
+                    Err(err) => failures.push((k.value().to_vec(), err)),
+                }
             }
-            Ok::<_, ObservationStoreError>(out)
+            Ok::<_, ObservationStoreError>((out, failures))
         })
         .await
-        .map_err(map_to_io)?
+        .map_err(map_to_io)??;
+
+        for (key_bytes, err) in decode_failures {
+            tracing::warn!(
+                name: "observation.envelope.decode_failed",
+                table = "observation_node_health",
+                key = ?key_bytes,
+                source = ?err,
+                "skipping node-health row that failed envelope decode",
+            );
+        }
+        Ok(rows)
     }
 
     async fn service_hydration_results_rows(
@@ -448,12 +462,33 @@ fn decode_alloc_status(bytes: &[u8]) -> Result<AllocStatusRow, ObservationStoreE
     envelope.into_latest().map_err(ObservationStoreError::from)
 }
 
-/// Decode a prior rkyv-archived `NodeHealthRow` from redb-returned
-/// bytes. See [`decode_alloc_status`] for the alignment rationale.
+/// Decode a prior rkyv-archived `NodeHealthRowEnvelope` from
+/// redb-returned bytes and project to the latest payload shape per
+/// ADR-0048. Mirrors [`decode_alloc_status`].
+///
+/// Returns the envelope's [`overdrive_core::codec::EnvelopeError`]
+/// surfaced as `ObservationStoreError::Envelope` so callers can
+/// branch on the structured cause (malformed bytes vs unknown future
+/// variant). Per ADR-0048 § 3 the observation-layer policy is to
+/// log + skip the row, not refuse to start.
 fn decode_node_health(bytes: &[u8]) -> Result<NodeHealthRow, ObservationStoreError> {
     let mut aligned = rkyv::util::AlignedVec::<8>::new();
     aligned.extend_from_slice(bytes);
-    rkyv::from_bytes::<NodeHealthRow, rkyv::rancor::Error>(&aligned).map_err(map_to_io)
+
+    // Probe the rkyv-archived discriminant byte BEFORE the full
+    // bytecheck — distinguishes "future binary's V<N+1>" from
+    // "bytes don't decode at all". Mirror of `decode_alloc_status`
+    // above; see that function's docstring for rationale.
+    probe_known_variant::<NodeHealthRowEnvelope>(aligned.as_ref())
+        .map_err(|source| ObservationStoreError::Envelope { source })?;
+
+    let envelope: NodeHealthRowEnvelope =
+        rkyv::from_bytes::<NodeHealthRowEnvelope, rkyv::rancor::Error>(&aligned).map_err(
+            |source| ObservationStoreError::Envelope {
+                source: overdrive_core::codec::EnvelopeError::Malformed { source },
+            },
+        )?;
+    envelope.into_latest().map_err(ObservationStoreError::from)
 }
 
 /// LWW-guarded insert for `AllocStatusRow`. Reads the prior row at
@@ -491,21 +526,28 @@ fn apply_alloc_status_lww(
 
 /// LWW-guarded insert for `NodeHealthRow`. Mirrors
 /// [`apply_alloc_status_lww`] — keyed by `incoming.node_id`, compares
-/// `incoming.last_heartbeat` via `LogicalTimestamp::dominates`.
+/// `incoming.last_heartbeat` via `LogicalTimestamp::dominates`. On
+/// envelope decode failure of the prior row, treats the incoming
+/// write as dominating per ADR-0048 § 3 (the operator's typed write
+/// is the self-healing path).
 fn apply_node_health_lww(
     table: &mut Table<'_, &[u8], &[u8]>,
     incoming: &NodeHealthRow,
 ) -> Result<bool, ObservationStoreError> {
     let key = incoming.node_id.as_str().as_bytes();
-    let dominates = match table.get(key).map_err(map_to_io)? {
-        None => true,
-        Some(prior) => {
-            let prior_row = decode_node_health(prior.value())?;
-            incoming.last_heartbeat.dominates(&prior_row.last_heartbeat)
-        }
-    };
+    let dominates =
+        table.get(key).map_err(map_to_io)?.is_none_or(|prior| {
+            match decode_node_health(prior.value()) {
+                Ok(prior_row) => incoming.last_heartbeat.dominates(&prior_row.last_heartbeat),
+                Err(_) => true,
+            }
+        });
     if dominates {
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(incoming).map_err(map_to_io)?;
+        // Wrap into the versioned envelope at the write boundary per
+        // ADR-0048 § 1 — the on-disk shape is the envelope, never the
+        // bare payload.
+        let envelope = NodeHealthRowEnvelope::latest(incoming.clone());
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).map_err(map_to_io)?;
         table.insert(key, bytes.as_ref()).map_err(map_to_io)?;
     }
     Ok(dominates)

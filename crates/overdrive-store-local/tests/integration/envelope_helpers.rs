@@ -10,13 +10,18 @@
 
 use std::path::Path;
 
-use overdrive_core::id::AllocationId;
+use overdrive_core::id::{AllocationId, NodeId};
 use redb::{Database, TableDefinition};
 
 /// Mirror of the production constant in
 /// `crates/overdrive-store-local/src/observation_backend.rs`.
 const ALLOC_STATUS_TABLE: TableDefinition<&[u8], &[u8]> =
     TableDefinition::new("observation_alloc_status");
+
+/// Mirror of the production constant in
+/// `crates/overdrive-store-local/src/observation_backend.rs`.
+const NODE_HEALTH_TABLE: TableDefinition<&[u8], &[u8]> =
+    TableDefinition::new("observation_node_health");
 
 /// Mirror of the production constant in
 /// `crates/overdrive-store-local/src/redb_backend.rs`.
@@ -42,6 +47,23 @@ pub fn write_raw_bytes_to_alloc_status_table(
     {
         let mut table = write.open_table(ALLOC_STATUS_TABLE).expect("open alloc_status table");
         let key = alloc_id.as_str().as_bytes();
+        table.insert(key, raw_bytes).expect("insert raw bytes");
+    }
+    write.commit().expect("commit raw-bytes write");
+}
+
+/// Write `raw_bytes` directly into the `observation_node_health` table
+/// at the canonical key for `node_id`. Mirrors
+/// [`write_raw_bytes_to_alloc_status_table`] but for the node-health
+/// surface — used by the envelope-skip integration test (S-EV-04.3)
+/// to inject bytes that the typed write path would refuse to
+/// construct.
+pub fn write_raw_bytes_to_node_health_table(redb_path: &Path, node_id: &NodeId, raw_bytes: &[u8]) {
+    let db = Database::create(redb_path).expect("open redb back-door");
+    let write = db.begin_write().expect("begin_write back-door");
+    {
+        let mut table = write.open_table(NODE_HEALTH_TABLE).expect("open node_health table");
+        let key = node_id.as_str().as_bytes();
         table.insert(key, raw_bytes).expect("insert raw bytes");
     }
     write.commit().expect("commit raw-bytes write");
