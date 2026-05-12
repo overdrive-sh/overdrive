@@ -325,10 +325,17 @@ impl Drop for PinDirGuard {
     }
 }
 
-/// RAII guard that installs an `ip route add blackhole <ip>` on
+/// RAII guard that installs an `ip route replace blackhole <ip>` on
 /// construction and removes it on drop. Used by the FIB-miss test
 /// to force `bpf_fib_lookup` to return `BPF_FIB_LKUP_RET_BLACKHOLE`
 /// against `<ip>` regardless of the default-route catch-all.
+///
+/// Uses `route replace` rather than `route add` so the guard is
+/// idempotent against leftover state from a prior test run that was
+/// SIGKILL'd before its `Drop` could fire (per
+/// `.claude/rules/debugging.md` § "Leftover XDP attachments across
+/// runs" — same shape, different resource). `add` would EEXIST and
+/// abort the test with a misleading NET_ADMIN-flavoured assertion.
 ///
 /// Requires NET_ADMIN — `cargo xtask lima run --` provides root,
 /// CI's LVH harness provides root. If invoked unprivileged the test
@@ -340,12 +347,12 @@ struct BlackholeRouteGuard {
 impl BlackholeRouteGuard {
     fn new(ip: std::net::Ipv4Addr) -> Self {
         let status = std::process::Command::new("ip")
-            .args(["route", "add", "blackhole", &ip.to_string()])
+            .args(["route", "replace", "blackhole", &ip.to_string()])
             .status()
-            .expect("spawn `ip route add blackhole`");
+            .expect("spawn `ip route replace blackhole`");
         assert!(
             status.success(),
-            "ip route add blackhole {ip} failed (status {status:?}); \
+            "ip route replace blackhole {ip} failed (status {status:?}); \
              test requires NET_ADMIN — invoke via `cargo xtask lima run --` or in CI",
         );
         Self { ip }

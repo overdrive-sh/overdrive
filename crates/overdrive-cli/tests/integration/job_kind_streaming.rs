@@ -29,8 +29,10 @@ use std::path::{Path, PathBuf};
 
 use std::time::Duration;
 
+use overdrive_cli::commands::alloc::StatusArgs as AllocStatusArgs;
 use overdrive_cli::commands::job::{StopArgs, SubmitArgs};
 use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
+use overdrive_control_plane::api::AllocStateWire;
 use serial_test::serial;
 use tempfile::TempDir;
 
@@ -54,6 +56,34 @@ fn write_toml(dir: &Path, name: &str, body: &str) -> PathBuf {
     let path = dir.join(name);
     std::fs::write(&path, body).expect("write toml");
     path
+}
+
+/// Poll the alloc snapshot until at least one allocation for `job_id`
+/// reaches `Running`. Replaces a bare `sleep(150ms)` race that
+/// flaked on Lima under parallel-test contention — the
+/// `Pending → Running` window (submit → reconciler → `ExecDriver`
+/// spawn → first observation write) can stretch past 150 ms when
+/// the bpf-artifact / cgroup-workload test groups are scheduled
+/// alongside this one.
+async fn wait_for_alloc_running(config_path: &Path, job_id: &str) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let snapshot = overdrive_cli::commands::alloc::status_snapshot(AllocStatusArgs {
+            job: job_id.to_owned(),
+            config_path: config_path.to_owned(),
+        })
+        .await;
+        if let Ok(resp) = snapshot
+            && resp.rows.iter().any(|r| matches!(r.state, AllocStateWire::Running))
+        {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "alloc for job {job_id} did not reach Running within 10s",
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
 }
 
 /// `[job]+[exec]+[resources]` TOML — the kind-discriminator triggers
@@ -121,7 +151,7 @@ async fn s_02_05_anti_scenario_no_is_running_with() {
         })
         .await
     });
-    tokio::time::sleep(Duration::from_millis(150)).await;
+    wait_for_alloc_running(&cfg, "happy-job").await;
     let _ = overdrive_cli::commands::job::stop(StopArgs {
         id: "happy-job".to_owned(),
         config_path: stop_cfg,
@@ -189,7 +219,7 @@ async fn s_02_06_submit_echo_names_kind_upfront() {
         })
         .await
     });
-    tokio::time::sleep(Duration::from_millis(150)).await;
+    wait_for_alloc_running(&cfg, "happy-job").await;
     let _ = overdrive_cli::commands::job::stop(StopArgs {
         id: "happy-job".to_owned(),
         config_path: stop_cfg,
