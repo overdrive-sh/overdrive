@@ -379,6 +379,11 @@ impl ObservationStore for LocalObservationStore {
     ) -> Result<Vec<ServiceHydrationResultRow>, ObservationStoreError> {
         let inner = Arc::clone(&self.inner);
         let prefix = encode_service_hydration_prefix(*service_id);
+        let mut range_start = [0u8; 16];
+        let mut range_end = [0u8; 16];
+        range_start[..8].copy_from_slice(&prefix);
+        range_end[..8].copy_from_slice(&prefix);
+        range_end[8..].fill(0xFF);
         // Per ADR-0048 § 3 (observation layer): log + skip rows whose
         // envelope decode failed. Mirror of the alloc_status_rows /
         // node_health_rows paths above — failures are collected inside
@@ -390,20 +395,13 @@ impl ObservationStore for LocalObservationStore {
             let table = read.open_table(SERVICE_HYDRATION_TABLE).map_err(map_to_io)?;
             let mut out: Vec<ServiceHydrationResultRow> = Vec::new();
             let mut failures: Vec<(Vec<u8>, ObservationStoreError)> = Vec::new();
-            // Range scan over the 8-byte service_id prefix — keys are
-            // composite `(service_id || fingerprint)` with service_id
-            // first, so a contiguous range covers exactly the rows
-            // for `service_id`.
-            let iter = table.iter().map_err(map_to_io)?;
+            let iter =
+                table.range(range_start.as_slice()..=range_end.as_slice()).map_err(map_to_io)?;
             for item in iter {
                 let (k, v) = item.map_err(map_to_io)?;
-                let key_bytes = k.value();
-                if key_bytes.len() != 16 || &key_bytes[..8] != prefix.as_slice() {
-                    continue;
-                }
                 match decode_envelope::<ServiceHydrationResultRowEnvelope>(v.value()) {
                     Ok(row) => out.push(row),
-                    Err(err) => failures.push((key_bytes.to_vec(), err)),
+                    Err(err) => failures.push((k.value().to_vec(), err)),
                 }
             }
             Ok::<_, ObservationStoreError>((out, failures))

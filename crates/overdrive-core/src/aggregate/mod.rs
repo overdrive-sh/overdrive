@@ -500,34 +500,26 @@ impl JobV1 {
     ///
     /// # Preconditions
     ///
-    /// `self` is a valid [`JobV1`] payload (same precondition as
-    /// [`Self::archive_for_store`]).
+    /// `self` is a valid [`JobV1`] payload.
     ///
     /// # Postconditions
     ///
-    /// Returns SHA-256 over the bytes [`Self::archive_for_store`]
-    /// produces — i.e., over the rkyv-archived
-    /// `JobEnvelope::V1(self.clone())` bytes. Two calls against the
-    /// same logical [`Job`] return bit-identical hashes (canonical
-    /// rkyv archive is byte-stable).
-    ///
-    /// # Operator-observable change
-    ///
-    /// This digest is computed over **envelope bytes** (envelope tag
-    /// concatenated with payload), not over raw V1 payload bytes.
-    /// The numeric value of `spec_digest` therefore differs from
-    /// pre-envelope Job IDs computed over raw
-    /// `rkyv::to_bytes(&job)`. Per the greenfield single-cut
-    /// migration policy (CLAUDE.md / ADR-0048 § 5), existing
-    /// deployments rebuild their redb files; no in-place digest
-    /// migration is supported.
+    /// Returns SHA-256 over the rkyv-archived **raw payload** bytes
+    /// (`rkyv::to_bytes(self)`), **not** the envelope-wrapped bytes
+    /// that [`Self::archive_for_store`] produces. Two calls against
+    /// the same logical [`Job`] return bit-identical hashes
+    /// (canonical rkyv archive is byte-stable), and the hash is
+    /// stable across envelope version bumps — a future
+    /// `JobEnvelope::V2` does not change the digest for the same
+    /// logical payload.
     ///
     /// # Errors
     ///
-    /// Pass-through from [`Self::archive_for_store`] — see that
-    /// method's `Errors` section.
+    /// Returns [`EnvelopeError::Malformed`] if the rkyv serialiser
+    /// fails (unreachable for valid [`JobV1`] payloads).
     pub fn spec_digest(&self) -> Result<ContentHash, EnvelopeError> {
-        let bytes = self.archive_for_store()?;
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(self)
+            .map_err(|source| EnvelopeError::Malformed { source })?;
         Ok(ContentHash::of(bytes.as_ref()))
     }
 }

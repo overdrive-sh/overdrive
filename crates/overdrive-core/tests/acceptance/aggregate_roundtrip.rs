@@ -84,28 +84,48 @@ fn job_rkyv_roundtrip_equals_original() {
     assert_eq!(deserialized, original, "rkyv envelope round-trip must preserve Job equality");
 }
 
-/// `Job::spec_digest()` MUST equal `ContentHash::of(&job.archive_for_store()?)`
-/// — content-addressing relies on the digest being defined as the
-/// SHA-256 over the canonical envelope bytes. If a future refactor
-/// decouples `spec_digest` from `archive_for_store` (e.g. computes
-/// it over raw `rkyv::to_bytes(&self)` instead of the envelope-wrapped
-/// bytes), every persisted job-id derivation would silently shift and
-/// content-addressing across the codebase would break. This test
-/// pins the invariant structurally.
+/// `Job::spec_digest()` MUST equal SHA-256 over the raw payload bytes
+/// (`rkyv::to_bytes(&job)`), NOT the envelope-wrapped bytes from
+/// `archive_for_store`. Content-addressed identity depends only on
+/// the logical payload — including the envelope discriminant byte
+/// would make the digest shift on every envelope version bump.
 #[test]
-fn job_spec_digest_matches_archive_for_store_hash() {
+fn job_spec_digest_matches_raw_payload_hash() {
     let job = sample_job();
 
-    let bytes = job.archive_for_store().expect("archive_for_store of canonical Job must succeed");
-    let hash_over_envelope_bytes = ContentHash::of(bytes.as_ref());
+    let raw_bytes =
+        rkyv::to_bytes::<rancor::Error>(&job).expect("rkyv serialization of Job must succeed");
+    let hash_over_raw_bytes = ContentHash::of(raw_bytes.as_ref());
 
     let digest = job.spec_digest().expect("spec_digest of canonical Job must succeed");
 
     assert_eq!(
-        digest, hash_over_envelope_bytes,
-        "spec_digest MUST equal SHA-256 over archive_for_store bytes — \
-         these two methods are the joint source of content-addressed \
-         identity; decoupling them silently shifts every persisted Job ID",
+        digest, hash_over_raw_bytes,
+        "spec_digest MUST equal SHA-256 over raw payload bytes — \
+         content-addressed identity must be envelope-version-independent",
+    );
+}
+
+/// Regression: `spec_digest` must differ from `SHA-256(archive_for_store)`
+/// because `archive_for_store` includes the envelope discriminant byte.
+/// The two hashing over the same logical payload must produce different
+/// values — if they match, `spec_digest` has regressed to envelope-coupled
+/// hashing.
+#[test]
+fn job_spec_digest_differs_from_envelope_hash() {
+    let job = sample_job();
+
+    let envelope_bytes =
+        job.archive_for_store().expect("archive_for_store of canonical Job must succeed");
+    let hash_over_envelope = ContentHash::of(envelope_bytes.as_ref());
+
+    let digest = job.spec_digest().expect("spec_digest of canonical Job must succeed");
+
+    assert_ne!(
+        digest, hash_over_envelope,
+        "spec_digest must NOT equal SHA-256 over envelope bytes — \
+         content-addressed identity must be independent of the envelope \
+         discriminant byte so it stays stable across version bumps",
     );
 }
 

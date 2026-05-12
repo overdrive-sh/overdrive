@@ -40,7 +40,7 @@
 //! * Events fire only after successful redb commit, so a subscriber
 //!   never sees a phantom write that failed to persist.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -90,6 +90,9 @@ struct Inner {
     /// and `begin_write` both take `&self`, and the crate is documented
     /// as safe to share across threads. No external mutex is required.
     db: Database,
+    /// Retained for diagnostic events (`health.startup.refused`) that
+    /// need to name the redb file in operator-facing messages.
+    path: PathBuf,
     watch_tx: broadcast::Sender<WatchEvent>,
 }
 
@@ -175,7 +178,7 @@ impl LocalIntentStore {
 
         let (watch_tx, _) = broadcast::channel(WATCH_CHANNEL_CAPACITY);
 
-        Ok(Self { inner: Arc::new(Inner { db, watch_tx }) })
+        Ok(Self { inner: Arc::new(Inner { db, path: path.to_path_buf(), watch_tx }) })
     }
 
     fn emit(&self, key: Bytes, value: Bytes) {
@@ -474,6 +477,33 @@ impl IntentStore for LocalIntentStore {
             // the export of a fresh never-bootstrapped store.
             let entries = snapshot_frame::decode(&frame)
                 .map_err(|e| IntentStoreError::SnapshotCorrupt { offset: e.offset() })?;
+
+            // Intent envelope validation walk — same discipline as
+            // `LocalIntentStore::open`. Every `jobs/<id>` entry
+            // (excluding `jobs/<id>/stop` sentinel keys) is decoded
+            // through the typed `Job::from_store_bytes` codec BEFORE
+            // any write. A snapshot containing an unknown or malformed
+            // envelope surfaces `health.startup.refused` and aborts
+            // here — the target store is never touched.
+            {
+                const JOB_PREFIX: &[u8] = b"jobs/";
+                const STOP_SUFFIX: &[u8] = b"/stop";
+                for (k, v) in &entries {
+                    let key_bytes = k.as_ref();
+                    if !key_bytes.starts_with(JOB_PREFIX) {
+                        continue;
+                    }
+                    if key_bytes.ends_with(STOP_SUFFIX) {
+                        continue;
+                    }
+                    let key_hex = hex::encode(key_bytes);
+                    overdrive_core::aggregate::Job::from_store_bytes(
+                        v.as_ref(),
+                        &inner.path,
+                        Some(&key_hex),
+                    )?;
+                }
+            }
 
             let write = inner.db.begin_write().map_err(map_transaction_error)?;
             {

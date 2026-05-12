@@ -29,6 +29,10 @@
 #![allow(clippy::print_stdout)]
 
 use bytes::Bytes;
+use overdrive_core::aggregate::{
+    DriverInput, ExecInput, Job, JobEnvelope, JobSpecInput, ResourcesInput,
+};
+use overdrive_core::codec::{EnvelopeError, VersionedEnvelope};
 use overdrive_core::traits::intent_store::{IntentStore, IntentStoreError, StateSnapshot};
 use overdrive_store_local::{LocalIntentStore, snapshot_frame};
 use tempfile::TempDir;
@@ -44,9 +48,12 @@ use tempfile::TempDir;
 async fn build_populated_snapshot() -> StateSnapshot {
     let tmp = TempDir::new().expect("temp dir");
     let store = LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open src");
-    store.put(b"jobs/payments", b"spec-payments-v1").await.expect("put payments");
-    store.put(b"jobs/auth", b"spec-auth-v1").await.expect("put auth");
-    store.put(b"jobs/frontend", b"spec-frontend-v1").await.expect("put frontend");
+    // Keys use `data/` prefix (not `jobs/`) so bootstrap_from's envelope
+    // validation walk doesn't reject the raw byte values — this helper
+    // exercises the snapshot frame mechanism, not the Job codec.
+    store.put(b"data/payments", b"spec-payments-v1").await.expect("put payments");
+    store.put(b"data/auth", b"spec-auth-v1").await.expect("put auth");
+    store.put(b"data/frontend", b"spec-frontend-v1").await.expect("put frontend");
     store.export_snapshot().await.expect("export snapshot")
 }
 
@@ -284,4 +291,147 @@ impl Drop for RestorePermissions {
         // fail, which surfaces the problem to the operator.
         let _ = fs::set_permissions(&self.path, fs::Permissions::from_mode(self.mode));
     }
+}
+
+fn sample_job_spec(id: &str) -> JobSpecInput {
+    JobSpecInput {
+        id: id.to_string(),
+        replicas: 1,
+        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
+        driver: DriverInput::Exec(ExecInput {
+            command: "/bin/sleep".to_string(),
+            args: vec!["3600".to_string()],
+        }),
+    }
+}
+
+// -----------------------------------------------------------------------------
+// bootstrap_from — malformed envelope in a jobs/<id> entry
+// -----------------------------------------------------------------------------
+
+#[tokio::test]
+async fn bootstrap_from_rejects_snapshot_with_malformed_job_envelope() {
+    // Build a snapshot frame containing a jobs/<id> entry with garbage
+    // bytes that cannot decode as a JobEnvelope.
+    let garbage: &[u8] = b"\xff\xfe\xfd\xfc not rkyv";
+    let entries = vec![
+        (Bytes::from_static(b"jobs/poisoned-01"), Bytes::from(garbage.to_vec())),
+        (Bytes::from_static(b"other/healthy"), Bytes::from_static(b"value")),
+    ];
+    let frame_bytes = snapshot_frame::encode(&entries).expect("encode poisoned snapshot");
+    let snapshot = StateSnapshot::from_parts(1, entries, frame_bytes);
+
+    let (_target_tmp, target) = fresh_target();
+    let reference_empty = fresh_target_reference_bytes().await;
+
+    let outcome = target.bootstrap_from(snapshot).await;
+
+    let err =
+        outcome.expect_err("bootstrap_from must reject a snapshot with malformed job envelope");
+    match &err {
+        IntentStoreError::Envelope { source, .. } => {
+            assert!(
+                matches!(source, EnvelopeError::Malformed { .. }),
+                "expected EnvelopeError::Malformed for garbage bytes; got {source:?}",
+            );
+        }
+        other => panic!("expected IntentStoreError::Envelope; got {other:?}"),
+    }
+
+    // The target store must be untouched — no partial write leaked.
+    let post_failure = target.export_snapshot().await.expect("export after failed bootstrap");
+    assert_eq!(
+        post_failure.bytes(),
+        reference_empty.as_slice(),
+        "target must be byte-identical to a fresh, never-bootstrapped store",
+    );
+    assert!(post_failure.entries.is_empty(), "no entries must have been written");
+}
+
+// -----------------------------------------------------------------------------
+// bootstrap_from — unknown future variant tag in a jobs/<id> entry
+// -----------------------------------------------------------------------------
+
+#[tokio::test]
+async fn bootstrap_from_rejects_snapshot_with_unknown_job_envelope_variant() {
+    const JOB_ENVELOPE_DISCRIMINANT_OFFSET_FROM_END: usize = 64;
+
+    // Build a valid Job envelope, then corrupt the discriminant byte to
+    // simulate a future V<N+1> variant this binary doesn't know about.
+    let job = Job::from_spec(sample_job_spec("job-future-99")).expect("valid job");
+    let valid_archive: rkyv::util::AlignedVec =
+        rkyv::to_bytes::<rkyv::rancor::Error>(&JobEnvelope::latest(job))
+            .expect("rkyv archive of valid envelope");
+
+    let mut poisoned = valid_archive.to_vec();
+    let target_idx = poisoned.len() - JOB_ENVELOPE_DISCRIMINANT_OFFSET_FROM_END;
+    poisoned[target_idx] = 99;
+
+    let entries = vec![
+        (Bytes::from_static(b"jobs/job-future-99"), Bytes::from(poisoned)),
+        (Bytes::from_static(b"other/healthy"), Bytes::from_static(b"value")),
+    ];
+    let frame_bytes = snapshot_frame::encode(&entries).expect("encode poisoned snapshot");
+    let snapshot = StateSnapshot::from_parts(1, entries, frame_bytes);
+
+    let (_target_tmp, target) = fresh_target();
+    let reference_empty = fresh_target_reference_bytes().await;
+
+    let outcome = target.bootstrap_from(snapshot).await;
+
+    let err = outcome.expect_err("bootstrap_from must reject unknown envelope variant");
+    match &err {
+        IntentStoreError::Envelope { source, .. } => match source {
+            EnvelopeError::UnknownVersion { observed, type_name, supported_max } => {
+                assert_eq!(*observed, 99);
+                assert_eq!(*type_name, "JobEnvelope");
+                assert_eq!(
+                    *supported_max, 0,
+                    "JobEnvelope today supports only V1 (rkyv discriminant 0)"
+                );
+            }
+            other @ EnvelopeError::Malformed { .. } => {
+                panic!("expected EnvelopeError::UnknownVersion; got {other:?}")
+            }
+        },
+        other => panic!("expected IntentStoreError::Envelope; got {other:?}"),
+    }
+
+    let post_failure = target.export_snapshot().await.expect("export after failed bootstrap");
+    assert_eq!(
+        post_failure.bytes(),
+        reference_empty.as_slice(),
+        "target must be byte-identical to a fresh, never-bootstrapped store",
+    );
+    assert!(post_failure.entries.is_empty(), "no entries must have been written");
+}
+
+// -----------------------------------------------------------------------------
+// bootstrap_from — valid snapshot with well-formed job envelope succeeds
+// -----------------------------------------------------------------------------
+
+#[tokio::test]
+async fn bootstrap_from_accepts_snapshot_with_valid_job_envelope() {
+    // Build a snapshot containing a properly-encoded Job envelope
+    // alongside a stop sentinel and a non-job key.
+    let job = Job::from_spec(sample_job_spec("job-valid-01")).expect("valid job");
+    let archived = job.archive_for_store().expect("typed codec archive");
+
+    let entries = vec![
+        (Bytes::from_static(b"jobs/job-valid-01"), Bytes::from(archived.to_vec())),
+        (Bytes::from_static(b"jobs/job-valid-01/stop"), Bytes::from_static(b"")),
+        (Bytes::from_static(b"other/key"), Bytes::from_static(b"value")),
+    ];
+    let frame_bytes = snapshot_frame::encode(&entries).expect("encode valid snapshot");
+    let snapshot = StateSnapshot::from_parts(1, entries, frame_bytes);
+
+    let (_target_tmp, target) = fresh_target();
+    target.bootstrap_from(snapshot).await.expect("bootstrap_from must accept valid envelope");
+
+    let val = target.get(b"jobs/job-valid-01").await.expect("get job");
+    assert!(val.is_some(), "job entry must be present after bootstrap");
+    let stop = target.get(b"jobs/job-valid-01/stop").await.expect("get stop");
+    assert!(stop.is_some(), "stop sentinel must be present after bootstrap");
+    let other = target.get(b"other/key").await.expect("get other");
+    assert_eq!(other, Some(Bytes::from_static(b"value")));
 }
