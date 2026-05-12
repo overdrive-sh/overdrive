@@ -561,6 +561,27 @@
       "s": "EXECUTED",
       "d": "PASS: mutation gate satisfied at kill rate 100.0% (56/56 viable). Quality gates: clippy clean, dst-lint clean, 1299 tests pass. Report at docs/feature/rkyv-envelope-evolution/deliver/mutation/mutation-report.md.",
       "t": "2026-05-12T10:54:14Z"
+    },
+    {
+      "sid": "phase-5-mutation-testing",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T10:55:47Z"
+    },
+    {
+      "sid": "phase-5-mutation-testing",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T10:55:48Z"
+    },
+    {
+      "sid": "phase-5-mutation-testing",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T10:55:49Z"
     }
   ]
 }
