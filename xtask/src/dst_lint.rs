@@ -716,27 +716,185 @@ fn live_literal_path_in_scope(rel_path: &Path) -> bool {
 // Envelope scaffolding scanners — RED scaffolds per ADR-0048
 // -----------------------------------------------------------------------------
 
-// SCAFFOLD: true
+// -----------------------------------------------------------------------------
+// Envelope variant-construction scanner — Layer 2 of ADR-0048 § 2
+// -----------------------------------------------------------------------------
 //
-// Layer-2 enforcement of ADR-0048 § 2 — scans `overdrive-core` source
-// for `<Envelope>::V<N>(...)` literal expression patterns OUTSIDE the
-// defining module's own `fn into_latest` body and `impl From<...>`
-// blocks. Returns one [`Violation`] per offending site naming the
-// file path, line number, and offending pattern. Purely syntactic
+// Walks `overdrive-core` source for `<Envelope>::V<N>(...)` literal
+// expression patterns outside the defining module's own
+// `impl VersionedEnvelope for <Envelope>` block (where `fn latest`
+// and `fn into_latest` legitimately produce variants) and any
+// `impl From<...> for <Envelope-related>` block. Purely syntactic
 // (no `overdrive-*` import) per the xtask boundary in
 // `.claude/rules/development.md` § "xtask is build / test / dev
 // orchestration, NOT a runtime entry point".
-//
-// Lands GREEN in DELIVER step 03-01 (Group 5.1 from
-// `docs/feature/rkyv-envelope-evolution/distill/red-scaffolds.md`).
-#[expect(clippy::todo, reason = "RED scaffold; lands GREEN in DELIVER step 03-01 (Group 5.1)")]
-pub fn scan_for_envelope_variant_construction(_source: &str, _path: &Path) -> Vec<Violation> {
-    todo!(
-        "RED scaffold: AST-walk `source` for <Envelope>::V<N>( call expressions \
-         outside `fn into_latest` or `impl From<...V<N>...> for ...V<N+1>...` blocks. \
-         Return one Violation per offending site with the file path, line number, \
-         and offending pattern."
-    );
+
+/// Match heuristics for `<Envelope>::V<N>(...)`-shaped call expressions.
+///
+/// A call expression's callee path must satisfy:
+///
+/// - Exactly two path segments (e.g. `AllocStatusRowEnvelope::V1`).
+/// - The penultimate segment's identifier ends with `Envelope`.
+/// - The last segment matches `V<N>` for `N >= 1` (e.g. `V1`, `V2`, ...).
+///
+/// `Self::V1(...)` inside an `impl <Envelope>` block does NOT match
+/// here (the penultimate segment is `Self`, not `<Envelope>`). This
+/// keeps the `fn latest` / `fn into_latest` canonical impl shapes
+/// from triggering the lint by accident — they construct via
+/// `Self::V1(...)`, which is the textually-distinct pattern Layer 2
+/// is happy to allow inside the defining module's own `impl` block.
+fn is_envelope_variant_call(call: &syn::ExprCall) -> Option<String> {
+    let syn::Expr::Path(path_expr) = &*call.func else { return None };
+    let segments: Vec<&syn::PathSegment> = path_expr.path.segments.iter().collect();
+    if segments.len() != 2 {
+        return None;
+    }
+    let envelope_ident = segments[0].ident.to_string();
+    let variant_ident = segments[1].ident.to_string();
+    if !envelope_ident.ends_with("Envelope") {
+        return None;
+    }
+    if !is_variant_v_n(&variant_ident) {
+        return None;
+    }
+    Some(format!("{envelope_ident}::{variant_ident}"))
+}
+
+/// Is `ident` of the shape `V<digits>` with at least one digit?
+fn is_variant_v_n(ident: &str) -> bool {
+    let Some(rest) = ident.strip_prefix('V') else { return false };
+    !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// Visitor tracking the enclosing-fn / enclosing-impl context.
+///
+/// A variant-construction call is suppressed (allowed) when *either*:
+///
+/// 1. The enclosing `impl` is an `impl From<...> for <X>` block — any
+///    inter-version `From` conversion may legitimately wrap into a
+///    variant of the destination envelope's payload type.
+/// 2. The enclosing fn is named `latest` or `into_latest` — the trait
+///    impl methods that construct variants by design. (Note: those
+///    methods use `Self::V<N>(...)` per the in-repo convention and
+///    therefore already fall outside the
+///    [`is_envelope_variant_call`] heuristic. The fn-name allow-list
+///    is here as a robustness backstop in case a future impl uses
+///    the explicit `<Envelope>::V<N>(...)` form inside its own
+///    `latest` / `into_latest` body.)
+struct EnvelopeVariantCollector<'a> {
+    file: &'a Path,
+    violations: Vec<Violation>,
+    /// Depth of currently-open `impl From<X> for Y` blocks.
+    in_from_impl_depth: usize,
+    /// Depth of currently-open `latest` / `into_latest` fn bodies.
+    in_allowed_fn_depth: usize,
+}
+
+impl<'a> EnvelopeVariantCollector<'a> {
+    const fn new(file: &'a Path) -> Self {
+        Self { file, violations: Vec::new(), in_from_impl_depth: 0, in_allowed_fn_depth: 0 }
+    }
+
+    const fn is_allowed_context(&self) -> bool {
+        self.in_from_impl_depth > 0 || self.in_allowed_fn_depth > 0
+    }
+}
+
+/// Does `item_impl` represent `impl From<...> for <Y>`?
+fn is_from_impl(item_impl: &syn::ItemImpl) -> bool {
+    let Some((_, trait_path, _)) = &item_impl.trait_ else { return false };
+    trait_path.segments.last().is_some_and(|seg| seg.ident == "From")
+}
+
+/// Is `ident` the name of a context that may construct envelope
+/// variants — i.e. `latest` or `into_latest`?
+fn is_allowed_fn_name(ident: &syn::Ident) -> bool {
+    ident == "latest" || ident == "into_latest"
+}
+
+impl<'ast> Visit<'ast> for EnvelopeVariantCollector<'_> {
+    fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
+        let pushed = is_from_impl(node);
+        if pushed {
+            self.in_from_impl_depth += 1;
+        }
+        visit::visit_item_impl(self, node);
+        if pushed {
+            self.in_from_impl_depth -= 1;
+        }
+    }
+
+    fn visit_item_fn(&mut self, node: &'ast syn::ItemFn) {
+        let pushed = is_allowed_fn_name(&node.sig.ident);
+        if pushed {
+            self.in_allowed_fn_depth += 1;
+        }
+        visit::visit_item_fn(self, node);
+        if pushed {
+            self.in_allowed_fn_depth -= 1;
+        }
+    }
+
+    fn visit_impl_item_fn(&mut self, node: &'ast syn::ImplItemFn) {
+        let pushed = is_allowed_fn_name(&node.sig.ident);
+        if pushed {
+            self.in_allowed_fn_depth += 1;
+        }
+        visit::visit_impl_item_fn(self, node);
+        if pushed {
+            self.in_allowed_fn_depth -= 1;
+        }
+    }
+
+    fn visit_expr_call(&mut self, node: &'ast syn::ExprCall) {
+        if let Some(banned_path) = is_envelope_variant_call(node) {
+            if !self.is_allowed_context() {
+                // Locate the head segment span for accurate reporting.
+                if let syn::Expr::Path(path_expr) = &*node.func {
+                    if let Some(first) = path_expr.path.segments.first() {
+                        let start = first.ident.span().start();
+                        self.violations.push(Violation {
+                            file: self.file.to_path_buf(),
+                            line: start.line,
+                            column: start.column + 1,
+                            banned_path,
+                            replacement_trait:
+                                "<Envelope>::latest(payload) (codec-internal wrapping site)"
+                                    .to_owned(),
+                            kind: BannedKind::Api,
+                        });
+                    }
+                }
+            }
+        }
+        visit::visit_expr_call(self, node);
+    }
+}
+
+/// Scan `source` for `<Envelope>::V<N>(...)` literal call expressions
+/// outside the defining module's own `impl From<...>` blocks and
+/// `fn latest` / `fn into_latest` bodies.
+///
+/// Purely syntactic — no `overdrive-*` import per the xtask boundary
+/// in `.claude/rules/development.md` § "xtask is build / test / dev
+/// orchestration, NOT a runtime entry point".
+///
+/// Returns one [`Violation`] per offending site naming the file path,
+/// line number, column, and offending construction pattern.
+///
+/// # Errors
+///
+/// Returns the empty vector on parse failure — the source is expected
+/// to be `overdrive-core` `.rs` text that already type-checks via
+/// `cargo check` before the lint runs. A parse failure means a
+/// transient bad source (mid-edit, malformed merge); the lint is
+/// best-effort and ignores it. Mirrors the convention used by the
+/// other `scan_source_*` entry points in this module.
+pub fn scan_for_envelope_variant_construction(source: &str, path: &Path) -> Vec<Violation> {
+    let Ok(parsed) = syn::parse_file(source) else { return Vec::new() };
+    let mut collector = EnvelopeVariantCollector::new(path);
+    collector.visit_file(&parsed);
+    collector.violations
 }
 
 // SCAFFOLD: true
@@ -822,7 +980,7 @@ pub fn scan_workspace(manifest_path: &Path) -> Result<Vec<Violation>> {
 
     // Scan every .rs file under each core crate's `src/` directory.
     let mut violations = Vec::new();
-    for (_name, root, _class) in core_crates {
+    for (_name, root, _class) in &core_crates {
         let src = root.join("src");
         if !src.exists() {
             continue;
@@ -836,6 +994,12 @@ pub fn scan_workspace(manifest_path: &Path) -> Result<Vec<Violation>> {
             if let Ok(found) = scan_source(&source, &rel) {
                 violations.extend(found);
             }
+            // Layer 2 of ADR-0048 § 2 — flag `<Envelope>::V<N>(...)`
+            // literal constructions outside `impl From<...>` blocks
+            // and `fn latest` / `fn into_latest` bodies. Purely
+            // syntactic; runs over the same source tree as the
+            // banned-API scanner above.
+            violations.extend(scan_for_envelope_variant_construction(&source, &rel));
         }
     }
 
@@ -1358,5 +1522,138 @@ mod tests {
             violations.len(),
             violations
         );
+    }
+
+    // -------------------------------------------------------------
+    // Envelope variant-construction scanner — Layer 2 of ADR-0048 § 2
+    // -------------------------------------------------------------
+
+    /// S-EV-02b.1 — a plain expression-site construction of
+    /// `<Envelope>::V<N>(...)` outside any `impl From<...>` block and
+    /// outside any `fn latest` / `fn into_latest` body MUST be flagged.
+    #[test]
+    fn s_ev_02b_1_envelope_v1_call_outside_allowed_sites_is_flagged() {
+        let source = r"
+            pub fn build_a_row() {
+                let payload = make_payload();
+                let _ = AllocStatusRowEnvelope::V1(payload);
+            }
+        ";
+        let violations =
+            scan_for_envelope_variant_construction(source, std::path::Path::new("synthetic.rs"));
+        assert!(
+            violations.iter().any(|v| v.banned_path == "AllocStatusRowEnvelope::V1"),
+            "<Envelope>::V<N> construction outside allowed sites must be flagged; got {violations:?}"
+        );
+    }
+
+    /// S-EV-02b.2 — a construction inside a `fn into_latest` body is
+    /// the canonical Layer 2 allowed site. Even though the in-repo
+    /// convention writes `Self::V1(v1)` (which the scanner ignores
+    /// because the head segment is not an `*Envelope`), this test
+    /// uses the explicit `<Envelope>::V1(...)` form to exercise the
+    /// fn-name allow-list.
+    #[test]
+    fn s_ev_02b_2_envelope_v1_inside_into_latest_is_allowed() {
+        let source = r"
+            pub enum FooEnvelope { V1(FooV1) }
+            pub struct FooV1;
+            impl FooEnvelope {
+                pub fn into_latest(self) -> Result<FooV1, ()> {
+                    match self {
+                        FooEnvelope::V1(payload) => Ok(payload),
+                    }
+                }
+            }
+            pub fn rewrap(p: FooV1) -> FooEnvelope {
+                // This is OUTSIDE into_latest; deliberately flagged.
+                FooEnvelope::V1(p)
+            }
+        ";
+        let violations =
+            scan_for_envelope_variant_construction(source, std::path::Path::new("synthetic.rs"));
+        // The into_latest body's `FooEnvelope::V1(payload)` is in a
+        // pattern position (match arm), not a call expression, so it
+        // wouldn't fire anyway — but the body would also be exempt
+        // by enclosing-fn name. The standalone `rewrap` call IS
+        // flagged. We assert the lint hit exactly that line.
+        assert_eq!(
+            violations.len(),
+            1,
+            "exactly one violation expected (the rewrap fn); got {violations:?}"
+        );
+        assert_eq!(violations[0].banned_path, "FooEnvelope::V1");
+    }
+
+    /// S-EV-02b.2b — symmetrical case: a construction *inside* an
+    /// `impl From<...>` block (the legitimate inter-version
+    /// conversion shape) MUST be allowed.
+    #[test]
+    fn s_ev_02b_3_envelope_v_n_inside_from_impl_is_allowed() {
+        let source = r"
+            pub struct FooV1;
+            pub struct FooV2;
+            pub enum FooEnvelope { V1(FooV1), V2(FooV2) }
+            impl From<FooV1> for FooV2 {
+                fn from(_v1: FooV1) -> Self {
+                    // Rare in practice — From normally returns the
+                    // payload, not an envelope — but the lint MUST
+                    // allow it because operator intent is clear.
+                    let _envelope = FooEnvelope::V2(FooV2);
+                    FooV2
+                }
+            }
+        ";
+        let violations =
+            scan_for_envelope_variant_construction(source, std::path::Path::new("synthetic.rs"));
+        assert!(
+            violations.is_empty(),
+            "construction inside `impl From<...>` block must be allowed; got {violations:?}"
+        );
+    }
+
+    /// S-EV-02b.4 — source that goes through `<Envelope>::latest(...)`
+    /// at the persistence boundary and `envelope.into_latest()?` on
+    /// the read side produces zero violations. This is the in-repo
+    /// canonical pattern.
+    #[test]
+    fn s_ev_02b_4_clean_source_produces_no_violations() {
+        let source = r"
+            pub struct AllocStatusRowV1;
+            pub enum AllocStatusRowEnvelope { V1(AllocStatusRowV1) }
+            impl AllocStatusRowEnvelope {
+                pub fn latest(payload: AllocStatusRowV1) -> Self {
+                    Self::V1(payload)
+                }
+                pub fn into_latest(self) -> Result<AllocStatusRowV1, ()> {
+                    match self {
+                        Self::V1(v1) => Ok(v1),
+                    }
+                }
+            }
+            pub fn persist(row: AllocStatusRowV1) {
+                let _envelope = AllocStatusRowEnvelope::latest(row);
+            }
+        ";
+        let violations =
+            scan_for_envelope_variant_construction(source, std::path::Path::new("synthetic.rs"));
+        assert!(
+            violations.is_empty(),
+            "clean source must produce zero violations; got {violations:?}"
+        );
+    }
+
+    /// `is_variant_v_n` reference table — accept `V1`, `V2`, `V42`;
+    /// reject `V`, `VX`, `View`, `Variant`.
+    #[test]
+    fn variant_v_n_matcher_accepts_v_followed_by_digits_only() {
+        assert!(is_variant_v_n("V1"));
+        assert!(is_variant_v_n("V2"));
+        assert!(is_variant_v_n("V42"));
+        assert!(!is_variant_v_n("V"));
+        assert!(!is_variant_v_n("VX"));
+        assert!(!is_variant_v_n("View"));
+        assert!(!is_variant_v_n("Variant"));
+        assert!(!is_variant_v_n("v1")); // lowercase v rejected
     }
 }

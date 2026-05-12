@@ -50,6 +50,14 @@ tracing-subscriber.workspace = true
 # every `ObservationStore` adapter exercises this harness from its
 # own test suite to enforce the LWW contract at trait level.
 overdrive-core = { workspace = true, features = ["test-utils"] }
+# `trybuild` powers the compile-fail fixtures under `tests/compile_fail/`
+# that prove Layer 1 of ADR-0048 § 2 — the codec-internal envelope
+# enums are `pub` but NOT re-exported from `overdrive-core::lib.rs`,
+# so cross-crate code referencing them by short path fails to compile
+# with rustc E0432. Pinned exactly via workspace per
+# `.claude/rules/testing.md` § "Compile-fail testing (trybuild)" —
+# stderr is sensitive to both rustc and trybuild itself.
+trybuild.workspace = true
 
 [lints]
 workspace = true

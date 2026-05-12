@@ -1950,6 +1950,7 @@ dependencies = [
  "tokio-stream",
  "tracing",
  "tracing-subscriber",
+ "trybuild",
 ]
 
 [[package]]
