@@ -897,27 +897,197 @@ pub fn scan_for_envelope_variant_construction(source: &str, path: &Path) -> Vec<
     collector.violations
 }
 
-// SCAFFOLD: true
-//
-// Layer-2 coverage gate per ADR-0048 § 6. Walks `<crate_root>/src/`
-// for `enum *Envelope` definitions with `V<N>(<Payload>)` variants;
-// for each envelope, verifies that a file exists at
-// `<crate_root>/tests/schema_evolution/<envelope_snake>.rs` and
-// contains a `FIXTURE_V<N>: &str` constant for every historical
-// variant. Returns one [`Violation`] per missing fixture file or
-// constant. Purely syntactic (no `overdrive-*` import).
-//
-// Lands GREEN in DELIVER step 03-02 (Group 5.2 from
-// `docs/feature/rkyv-envelope-evolution/distill/red-scaffolds.md`).
-#[expect(clippy::todo, reason = "RED scaffold; lands GREEN in DELIVER step 03-02 (Group 5.2)")]
-pub fn scan_for_envelope_fixture_coverage(_crate_root: &Path) -> Vec<Violation> {
-    todo!(
-        "RED scaffold: walk <crate_root>/src/ for `enum *Envelope` definitions \
-         with `V<N>(<Payload>)` variants. For each found envelope, verify a file \
-         exists at <crate_root>/tests/schema_evolution/<envelope_snake>.rs and \
-         contains `FIXTURE_V<N>: &str` for every variant. Return one Violation \
-         per missing fixture file or constant."
-    );
+/// Layer-2 coverage gate per ADR-0048 § 6.
+///
+/// Walks `<crate_root>/src/` for `enum *Envelope` definitions with
+/// `V<N>(<Payload>)` variants; for each envelope, verifies that a
+/// file exists at `<crate_root>/tests/schema_evolution/<envelope_snake>.rs`
+/// and contains a `FIXTURE_V<N>: &str` constant for every historical
+/// variant. Returns one [`Violation`] per missing fixture file or
+/// constant. Purely syntactic (no `overdrive-*` import).
+///
+/// Closes the loop on the schema-evolution defense: without this
+/// clause the structural defense degrades to "did the author
+/// remember to add a fixture?" — a non-mechanical check that fails
+/// open under reviewer fatigue (S-EV-06 closing-the-loop guarantee).
+pub fn scan_for_envelope_fixture_coverage(crate_root: &Path) -> Vec<Violation> {
+    let mut violations = Vec::new();
+    let src = crate_root.join("src");
+    if !src.exists() {
+        return violations;
+    }
+    let Ok(rs_files) = collect_rs_files(&src) else { return violations };
+
+    for rs in rs_files {
+        let Ok(source) = std::fs::read_to_string(&rs) else { continue };
+        let Ok(parsed) = syn::parse_file(&source) else { continue };
+
+        for envelope in collect_envelope_definitions(&parsed) {
+            let snake = envelope_name_to_snake_case(&envelope.name);
+            let fixture_rel: PathBuf =
+                ["tests", "schema_evolution", &format!("{snake}.rs")].iter().collect();
+            let fixture_abs = crate_root.join(&fixture_rel);
+
+            if !fixture_abs.is_file() {
+                // Missing file — emit one violation per envelope at the
+                // enum-definition site.
+                violations.push(Violation {
+                    file: rs.strip_prefix(crate_root).unwrap_or(&rs).to_path_buf(),
+                    line: envelope.line,
+                    column: envelope.column,
+                    banned_path: format!(
+                        "{} (missing fixture file: {})",
+                        envelope.name,
+                        fixture_rel.display(),
+                    ),
+                    replacement_trait: format!(
+                        "create {} with `const FIXTURE_V<N>: &str = \"...\"` for each variant",
+                        fixture_rel.display(),
+                    ),
+                    kind: BannedKind::Api,
+                });
+                continue;
+            }
+
+            // File exists — parse it and collect the `FIXTURE_V<N>`
+            // constants present, then diff against the envelope's
+            // variant list.
+            let Ok(fixture_source) = std::fs::read_to_string(&fixture_abs) else {
+                continue;
+            };
+            let present_fixtures = collect_fixture_constants(&fixture_source);
+            for variant_n in &envelope.variant_ns {
+                let needle = format!("FIXTURE_V{variant_n}");
+                if !present_fixtures.contains(&needle) {
+                    violations.push(Violation {
+                        file: fixture_rel.clone(),
+                        line: envelope.line,
+                        column: envelope.column,
+                        banned_path: format!(
+                            "{}::V{} (missing {})",
+                            envelope.name, variant_n, needle
+                        ),
+                        replacement_trait: format!(
+                            "add `const {needle}: &str = \"...\"` pinning the archived bytes \
+                             of the V{variant_n} payload",
+                        ),
+                        kind: BannedKind::Api,
+                    });
+                }
+            }
+        }
+    }
+
+    violations
+}
+
+/// Information extracted from one `enum *Envelope { V<N>(...) }` item.
+struct EnvelopeDefinition {
+    /// Envelope type name, e.g. `AllocStatusRowEnvelope`.
+    name: String,
+    /// Variant numbers in declaration order, e.g. `[1, 2, 3]` for
+    /// `enum Foo { V1(_), V2(_), V3(_) }`.
+    variant_ns: Vec<u32>,
+    /// 1-based source line of the enum declaration head.
+    line: usize,
+    /// 1-based column of the enum declaration head.
+    column: usize,
+}
+
+/// Walk every item of `parsed` and return one [`EnvelopeDefinition`]
+/// per `enum *Envelope` whose variants are at least partially of the
+/// `V<N>(<Payload>)` shape. An envelope with zero `V<N>` variants is
+/// not an envelope per the convention; skip it (no coverage to
+/// enforce).
+fn collect_envelope_definitions(parsed: &syn::File) -> Vec<EnvelopeDefinition> {
+    let mut out = Vec::new();
+    for item in &parsed.items {
+        let syn::Item::Enum(item_enum) = item else { continue };
+        let name = item_enum.ident.to_string();
+        if !name.ends_with("Envelope") {
+            continue;
+        }
+        let mut variant_ns = Vec::new();
+        for variant in &item_enum.variants {
+            let v_ident = variant.ident.to_string();
+            let Some(rest) = v_ident.strip_prefix('V') else { continue };
+            if rest.is_empty() || !rest.bytes().all(|b| b.is_ascii_digit()) {
+                continue;
+            }
+            // Only count tuple-style `V<N>(<Payload>)` variants; reject
+            // unit (`V1`) and struct (`V1 { … }`) variants because the
+            // payload-carrying shape is the canonical envelope form per
+            // ADR-0048.
+            if !matches!(variant.fields, syn::Fields::Unnamed(_)) {
+                continue;
+            }
+            let Ok(n) = rest.parse::<u32>() else { continue };
+            variant_ns.push(n);
+        }
+        if variant_ns.is_empty() {
+            continue;
+        }
+        let start = item_enum.ident.span().start();
+        out.push(EnvelopeDefinition {
+            name,
+            variant_ns,
+            line: start.line,
+            column: start.column + 1,
+        });
+    }
+    out
+}
+
+/// Walk `parsed` and return the names of every top-level `const`
+/// item whose ident starts with `FIXTURE_V`. Comparison is on the
+/// raw ident string; we do not parse the `<N>` numeric suffix here
+/// because the caller looks up by full name (`FIXTURE_V<N>`).
+fn collect_fixture_constants(source: &str) -> std::collections::BTreeSet<String> {
+    let mut out = std::collections::BTreeSet::new();
+    let Ok(parsed) = syn::parse_file(source) else { return out };
+    for item in &parsed.items {
+        if let syn::Item::Const(item_const) = item {
+            let name = item_const.ident.to_string();
+            if name.starts_with("FIXTURE_V") {
+                out.insert(name);
+            }
+        }
+    }
+    out
+}
+
+/// Convert a `CamelCase` envelope ident to the expected
+/// `snake_case` fixture-file stem, after stripping the trailing
+/// `Envelope` suffix.
+///
+/// Examples (the load-bearing five today):
+/// - `AllocStatusRowEnvelope`            → `alloc_status_row`
+/// - `NodeHealthRowEnvelope`             → `node_health_row`
+/// - `ServiceHydrationResultRowEnvelope` → `service_hydration_result_row`
+/// - `ServiceBackendRowEnvelope`         → `service_backend_row`
+/// - `JobEnvelope`                       → `job`
+///
+/// Algorithm: strip the `Envelope` suffix if present, then lowercase
+/// each char while inserting a `_` before every uppercase letter that
+/// is preceded by a lowercase letter or digit (the canonical
+/// `CamelCase` → `snake_case` boundary). Pure ASCII; no external crate.
+fn envelope_name_to_snake_case(name: &str) -> String {
+    let stem = name.strip_suffix("Envelope").unwrap_or(name);
+    let mut out = String::with_capacity(stem.len() + 4);
+    let mut prev_was_lower_or_digit = false;
+    for ch in stem.chars() {
+        if ch.is_ascii_uppercase() {
+            if prev_was_lower_or_digit {
+                out.push('_');
+            }
+            out.push(ch.to_ascii_lowercase());
+            prev_was_lower_or_digit = false;
+        } else {
+            out.push(ch);
+            prev_was_lower_or_digit = ch.is_ascii_lowercase() || ch.is_ascii_digit();
+        }
+    }
+    out
 }
 
 // -----------------------------------------------------------------------------
@@ -1001,6 +1171,14 @@ pub fn scan_workspace(manifest_path: &Path) -> Result<Vec<Violation>> {
             // banned-API scanner above.
             violations.extend(scan_for_envelope_variant_construction(&source, &rel));
         }
+
+        // Layer-2 fixture-coverage gate per ADR-0048 § 6 — for every
+        // `enum *Envelope` defined under `src/`, ensure the matching
+        // `tests/schema_evolution/<envelope_snake>.rs` exists and
+        // pins `FIXTURE_V<N>` for every variant. The closing-the-loop
+        // gate that prevents a future PR from adding a new envelope
+        // and forgetting the fixture (S-EV-06).
+        violations.extend(scan_for_envelope_fixture_coverage(root));
     }
 
     // Scan adapter-host crates with the std::fs-in-async-fn rule. The
@@ -1655,5 +1833,173 @@ mod tests {
         assert!(!is_variant_v_n("View"));
         assert!(!is_variant_v_n("Variant"));
         assert!(!is_variant_v_n("v1")); // lowercase v rejected
+    }
+
+    // -------------------------------------------------------------
+    // Envelope fixture-coverage scanner — S-EV-06 (closing-the-loop
+    // gate per ADR-0048 § 6).
+    // -------------------------------------------------------------
+
+    /// Reference table for `envelope_name_to_snake_case` — the five
+    /// real envelopes today. Pins behavior so a future contributor
+    /// adding `FooBarBazEnvelope` knows the expected fixture-file
+    /// stem without re-reading the algorithm.
+    #[test]
+    fn envelope_name_to_snake_case_handles_real_envelopes() {
+        assert_eq!(envelope_name_to_snake_case("AllocStatusRowEnvelope"), "alloc_status_row");
+        assert_eq!(envelope_name_to_snake_case("NodeHealthRowEnvelope"), "node_health_row");
+        assert_eq!(
+            envelope_name_to_snake_case("ServiceHydrationResultRowEnvelope"),
+            "service_hydration_result_row",
+        );
+        assert_eq!(envelope_name_to_snake_case("ServiceBackendRowEnvelope"), "service_backend_row");
+        assert_eq!(envelope_name_to_snake_case("JobEnvelope"), "job");
+    }
+
+    /// Build a synthetic crate-root inside `tmp` with `src/lib.rs`
+    /// containing `lib_rs_body`. `tests/schema_evolution/<file>` is
+    /// created when `fixture_file_body` is `Some((file, body))`.
+    /// Returns the crate root path.
+    fn build_synthetic_crate_root(
+        tmp: &std::path::Path,
+        lib_rs_body: &str,
+        fixture_file: Option<(&str, &str)>,
+    ) -> std::path::PathBuf {
+        let crate_root = tmp.join("fake_crate");
+        std::fs::create_dir_all(crate_root.join("src")).expect("create_dir_all src must succeed");
+        std::fs::write(crate_root.join("src/lib.rs"), lib_rs_body)
+            .expect("write src/lib.rs must succeed");
+        std::fs::create_dir_all(crate_root.join("tests/schema_evolution"))
+            .expect("create_dir_all tests/schema_evolution must succeed");
+        if let Some((file_name, body)) = fixture_file {
+            std::fs::write(crate_root.join("tests/schema_evolution").join(file_name), body)
+                .expect("write fixture file must succeed");
+        }
+        crate_root
+    }
+
+    /// S-EV-06.1 — an envelope defined in `src/` with NO matching
+    /// fixture file under `tests/schema_evolution/` MUST be flagged.
+    /// The violation message names the envelope and the missing
+    /// fixture-file path.
+    #[test]
+    fn s_ev_06_1_envelope_without_fixture_file_is_flagged() {
+        let tmp = tempfile::tempdir().expect("tempdir must succeed");
+        // Note: no fixture file passed -> `tests/schema_evolution/`
+        // is created empty.
+        let crate_root = build_synthetic_crate_root(
+            tmp.path(),
+            "
+                pub enum FooEnvelope { V1(FooV1), V2(FooV2) }
+                pub struct FooV1;
+                pub struct FooV2;
+            ",
+            None,
+        );
+
+        let violations = scan_for_envelope_fixture_coverage(&crate_root);
+        assert!(
+            !violations.is_empty(),
+            "envelope without fixture file must be flagged; got 0 violations"
+        );
+        assert!(
+            violations.iter().any(|v| v.banned_path.contains("FooEnvelope")),
+            "violation must name FooEnvelope; got {violations:?}"
+        );
+        assert!(
+            violations.iter().any(|v| v.banned_path.contains("tests/schema_evolution/foo.rs")
+                || v.replacement_trait.contains("tests/schema_evolution/foo.rs")),
+            "violation must name expected fixture path 'tests/schema_evolution/foo.rs'; \
+             got {violations:?}"
+        );
+    }
+
+    /// S-EV-06.2 — an envelope's fixture file exists but is missing
+    /// a `FIXTURE_V<N>` constant for one of the envelope's variants.
+    /// The violation message names the missing variant and the
+    /// expected `FIXTURE_V<N>` constant name.
+    #[test]
+    fn s_ev_06_2_envelope_with_file_but_missing_variant_fixture_is_flagged() {
+        let tmp = tempfile::tempdir().expect("tempdir must succeed");
+        let crate_root = build_synthetic_crate_root(
+            tmp.path(),
+            "
+                pub enum FooEnvelope { V1(FooV1), V2(FooV2) }
+                pub struct FooV1;
+                pub struct FooV2;
+            ",
+            Some((
+                "foo.rs",
+                r#"
+                    const FIXTURE_V1: &str = "deadbeef";
+                    #[test] fn v1_decodes() {}
+                "#,
+            )),
+        );
+
+        let violations = scan_for_envelope_fixture_coverage(&crate_root);
+        assert!(
+            !violations.is_empty(),
+            "envelope with file but missing FIXTURE_V2 must be flagged; got 0 violations"
+        );
+        assert!(
+            violations.iter().any(|v| v.banned_path.contains("FooEnvelope::V2")
+                || v.banned_path.contains("FIXTURE_V2")
+                || v.replacement_trait.contains("FIXTURE_V2")),
+            "violation must name FooEnvelope::V2 / FIXTURE_V2; got {violations:?}"
+        );
+    }
+
+    /// S-EV-06.3 — both variants pinned: scanner returns zero
+    /// violations.
+    #[test]
+    fn s_ev_06_3_complete_coverage_produces_no_violations() {
+        let tmp = tempfile::tempdir().expect("tempdir must succeed");
+        let crate_root = build_synthetic_crate_root(
+            tmp.path(),
+            "
+                pub enum FooEnvelope { V1(FooV1), V2(FooV2) }
+                pub struct FooV1;
+                pub struct FooV2;
+            ",
+            Some((
+                "foo.rs",
+                r#"
+                    const FIXTURE_V1: &str = "deadbeef";
+                    const FIXTURE_V2: &str = "cafef00d";
+                    #[test] fn v1_decodes() {}
+                    #[test] fn v2_decodes() {}
+                "#,
+            )),
+        );
+
+        let violations = scan_for_envelope_fixture_coverage(&crate_root);
+        assert!(
+            violations.is_empty(),
+            "complete coverage must produce zero violations; got {violations:?}"
+        );
+    }
+
+    /// S-EV-06.4 — the real `overdrive-core` crate-root passes the
+    /// coverage gate. All five expected envelope types
+    /// (`AllocStatusRowEnvelope`, `NodeHealthRowEnvelope`,
+    /// `ServiceHydrationResultRowEnvelope`, `ServiceBackendRowEnvelope`,
+    /// `JobEnvelope`) are pinned by `FIXTURE_V1` constants in the
+    /// matching `tests/schema_evolution/<envelope>.rs` files.
+    #[test]
+    fn s_ev_06_4_real_overdrive_core_passes() {
+        let crate_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let overdrive_core = crate_dir
+            .parent()
+            .expect("xtask crate lives directly under workspace root")
+            .join("crates/overdrive-core");
+        let violations = scan_for_envelope_fixture_coverage(&overdrive_core);
+        assert!(
+            violations.is_empty(),
+            "real overdrive-core crate-root must produce zero violations; \
+             found {} violation(s): {:#?}",
+            violations.len(),
+            violations
+        );
     }
 }
