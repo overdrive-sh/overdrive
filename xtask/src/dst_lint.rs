@@ -746,11 +746,11 @@ fn live_literal_path_in_scope(rel_path: &Path) -> bool {
 fn is_envelope_variant_call(call: &syn::ExprCall) -> Option<String> {
     let syn::Expr::Path(path_expr) = &*call.func else { return None };
     let segments: Vec<&syn::PathSegment> = path_expr.path.segments.iter().collect();
-    if segments.len() != 2 {
+    if segments.len() < 2 {
         return None;
     }
-    let envelope_ident = segments[0].ident.to_string();
-    let variant_ident = segments[1].ident.to_string();
+    let envelope_ident = segments[segments.len() - 2].ident.to_string();
+    let variant_ident = segments[segments.len() - 1].ident.to_string();
     if !envelope_ident.ends_with("Envelope") {
         return None;
     }
