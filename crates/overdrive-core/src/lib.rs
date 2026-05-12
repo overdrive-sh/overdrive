@@ -39,6 +39,13 @@
 )]
 
 pub mod aggregate;
+// `codec::envelope::{VersionedEnvelope, EnvelopeError}` — shared
+// envelope contract for every rkyv-persisted type that crosses a
+// durable-storage boundary. Per-type envelopes (e.g.
+// `AllocStatusRowEnvelope`, `JobEnvelope`) live co-located with
+// their domain types and implement this trait. See ADR-0048 +
+// `.claude/rules/development.md` § "rkyv schema evolution".
+pub mod codec;
 pub mod eval_broker;
 // Phase 2.2 dataplane-internal types — `MaglevTableSize`, `DropClass`,
 // `BackendSetFingerprint` + computation helpers. Workload-identifier

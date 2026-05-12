@@ -8,10 +8,14 @@
 //! Every mutation from a reconciler or workflow arrives here as a typed
 //! action; this trait does not expose a raw `put(key, value)` surface.
 
+use std::path::PathBuf;
+
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::Stream;
 use thiserror::Error;
+
+use crate::codec::EnvelopeError;
 
 #[derive(Debug, Error)]
 pub enum IntentStoreError {
@@ -37,6 +41,22 @@ pub enum IntentStoreError {
     },
     #[error("intent store I/O: {0}")]
     Io(#[from] std::io::Error),
+    // SCAFFOLD: true — RED scaffold per ADR-0048 § 3 (intent fail-fast
+    // policy) + § 6 (operator remediation). The `Display` form names
+    // the redb path twice — once in "decode failed for {redb_path}"
+    // and once in the remediation hint "delete {redb_path}" — so
+    // operators see the path on the failure line and the recovery
+    // command on the same render. Lands GREEN in DELIVER step 01-04
+    // when `LocalStore::open` wires the envelope decode path.
+    #[error(
+        "intent envelope decode failed for {redb_path}: {source}. Remediation: delete {redb_path} and restart the control-plane",
+        redb_path = redb_path.display()
+    )]
+    Envelope {
+        redb_path: PathBuf,
+        #[source]
+        source: EnvelopeError,
+    },
 }
 
 #[derive(Debug, Clone)]

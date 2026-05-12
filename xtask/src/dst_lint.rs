@@ -713,6 +713,56 @@ fn live_literal_path_in_scope(rel_path: &Path) -> bool {
 }
 
 // -----------------------------------------------------------------------------
+// Envelope scaffolding scanners — RED scaffolds per ADR-0048
+// -----------------------------------------------------------------------------
+
+// SCAFFOLD: true
+//
+// Layer-2 enforcement of ADR-0048 § 2 — scans `overdrive-core` source
+// for `<Envelope>::V<N>(...)` literal expression patterns OUTSIDE the
+// defining module's own `fn into_latest` body and `impl From<...>`
+// blocks. Returns one [`Violation`] per offending site naming the
+// file path, line number, and offending pattern. Purely syntactic
+// (no `overdrive-*` import) per the xtask boundary in
+// `.claude/rules/development.md` § "xtask is build / test / dev
+// orchestration, NOT a runtime entry point".
+//
+// Lands GREEN in DELIVER step 03-01 (Group 5.1 from
+// `docs/feature/rkyv-envelope-evolution/distill/red-scaffolds.md`).
+#[expect(clippy::todo, reason = "RED scaffold; lands GREEN in DELIVER step 03-01 (Group 5.1)")]
+pub fn scan_for_envelope_variant_construction(_source: &str, _path: &Path) -> Vec<Violation> {
+    todo!(
+        "RED scaffold: AST-walk `source` for <Envelope>::V<N>( call expressions \
+         outside `fn into_latest` or `impl From<...V<N>...> for ...V<N+1>...` blocks. \
+         Return one Violation per offending site with the file path, line number, \
+         and offending pattern."
+    );
+}
+
+// SCAFFOLD: true
+//
+// Layer-2 coverage gate per ADR-0048 § 6. Walks `<crate_root>/src/`
+// for `enum *Envelope` definitions with `V<N>(<Payload>)` variants;
+// for each envelope, verifies that a file exists at
+// `<crate_root>/tests/schema_evolution/<envelope_snake>.rs` and
+// contains a `FIXTURE_V<N>: &str` constant for every historical
+// variant. Returns one [`Violation`] per missing fixture file or
+// constant. Purely syntactic (no `overdrive-*` import).
+//
+// Lands GREEN in DELIVER step 03-02 (Group 5.2 from
+// `docs/feature/rkyv-envelope-evolution/distill/red-scaffolds.md`).
+#[expect(clippy::todo, reason = "RED scaffold; lands GREEN in DELIVER step 03-02 (Group 5.2)")]
+pub fn scan_for_envelope_fixture_coverage(_crate_root: &Path) -> Vec<Violation> {
+    todo!(
+        "RED scaffold: walk <crate_root>/src/ for `enum *Envelope` definitions \
+         with `V<N>(<Payload>)` variants. For each found envelope, verify a file \
+         exists at <crate_root>/tests/schema_evolution/<envelope_snake>.rs and \
+         contains `FIXTURE_V<N>: &str` for every variant. Return one Violation \
+         per missing fixture file or constant."
+    );
+}
+
+// -----------------------------------------------------------------------------
 // Workspace scan
 // -----------------------------------------------------------------------------
 

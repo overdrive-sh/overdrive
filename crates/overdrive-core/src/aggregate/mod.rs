@@ -19,6 +19,7 @@ use std::num::NonZeroU32;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::codec::{EnvelopeError, VersionedEnvelope};
 use crate::id::{AllocationId, InvestigationId, NodeId, PolicyId, Region, WorkloadId};
 use crate::traits::driver::Resources;
 
@@ -169,6 +170,80 @@ pub struct Exec {
     /// Argv passed verbatim to the binary. No per-element validation —
     /// argv is opaque to the platform per ADR-0031 §4.
     pub args: Vec<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Job versioned envelope — RED scaffold per ADR-0048 § 4
+// ---------------------------------------------------------------------------
+//
+// Per the 01-01 scaffolding-step caveat (CLAUDE.md / step description),
+// the existing `Job` struct above remains in place — the full
+// transition through every call site lands in step 01-04. Per
+// ADR-0048 § 4 (outer-envelope-only on `Job`), embedded
+// `WorkloadDriver` / `Exec` types are NOT wrapped; their schema
+// changes bump the outer `JobEnvelope` version.
+
+// SCAFFOLD: true
+//
+// ADR-0048 § 2 Layer 1 specifies `pub(crate)` on inner payload
+// types. See observation_store.rs for the rustc E0446 trade-off
+// note. Layer 1 is enforced by non-re-export from
+// `overdrive_core::lib.rs` + Layer 2 (xtask::dst_lint scanner).
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub enum JobEnvelope {
+    V1(JobV1),
+}
+
+pub type JobLatest = JobV1;
+
+// SCAFFOLD: true — `pub` due to rustc E0446 in trait impl; Layer 1
+// enforced by non-re-export from `lib.rs` + Layer 2 dst_lint scanner
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct JobV1 {
+    pub id: WorkloadId,
+    pub replicas: NonZeroU32,
+    pub resources: Resources,
+    pub driver: WorkloadDriver,
+}
+
+impl VersionedEnvelope for JobEnvelope {
+    type Latest = JobV1;
+
+    #[expect(
+        clippy::todo,
+        reason = "RED scaffold; lands GREEN in DELIVER step 01-04 (JobEnvelope migration through every call site)"
+    )]
+    fn latest(_payload: Self::Latest) -> Self {
+        todo!("RED scaffold: wrap payload into Self::V1(payload)")
+    }
+
+    #[expect(
+        clippy::todo,
+        reason = "RED scaffold; lands GREEN in DELIVER step 01-04 (JobEnvelope migration through every call site)"
+    )]
+    fn into_latest(self) -> Result<Self::Latest, EnvelopeError> {
+        todo!("RED scaffold: match Self::V1(v1) => Ok(v1)")
+    }
 }
 
 impl Job {

@@ -1,0 +1,249 @@
+{
+  "reviews": [
+    {
+      "review_id": "roadmap_rev_20260512_073500",
+      "reviewer": "nw-solution-architect-reviewer",
+      "artifact": "docs/feature/rkyv-envelope-evolution/deliver/roadmap.json",
+      "timestamp": "2026-05-12T07:35:00Z",
+      "approval_status": "APPROVED",
+      "critical_issues_count": 0,
+      "high_issues_count": 0,
+      "medium_issues_count": 0,
+      "low_issues_count": 0,
+      "strengths": [
+        "Walking-skeleton ordering validated: AllocStatusRow end-to-end exercised in Phase 1 (01-03) before observation fan-out (Phase 2), proving mechanism on two layer types with asymmetric failure semantics (intent refuse, observation skip) per ADR-0048.",
+        "Dependency DAG correct: codec foundation (01-02) gates all type implementations; all observation types (02-*) land before lint coverage scanner (03-02) passes real-tree test; no circular dependencies.",
+        "ADR-0048 mandate coverage 100%: five rkyv-persisted envelopes, golden-bytes fixtures per version, write-time ::latest() constructor, read-time asymmetric policy, Layer 1 pub(crate) payload visibility, Layer 2 xtask::dst_lint variant-construction scanner, fixture-coverage gate.",
+        "Behavioral AC throughout: all criteria scenario-tagged (S-EV-XX naming), named test functions (envelope_walking_skeleton.rs, envelope_intent_refuse.rs), golden-fixture constant names (FIXTURE_V1), observable error events (health.startup.refused).",
+        "Step atomicity and proportionality: 01 linear chain (RED -> codec -> AllocStatus -> Job), 02 parallel observation fan-out (mechanical repetition), 03 parallel lint infrastructure. Effort ratio 1.31 (46h / 35 files) well under 2.5 threshold.",
+        "Phase 1 closes the loop: 01-04 JobEnvelope intent refuse-to-start demonstrates asymmetric policy before observation replication, validating the architecture's intent/observation split per whitepaper §18.",
+        "Trybuild fixture scope proportional: one per-envelope compile-fail (Layer 1 payload-type unreachability) covering cross-crate mechanism uniformly, plus four xtask unit tests for in-crate variant-construction lint (Layer 2)."
+      ],
+      "blocking_issues": [],
+      "non_blocking_findings": [],
+      "reviewer_comments": "Roadmap is gated-ready for DELIVER wave. All nine steps are self-contained, properly ordered, and directly implement ADR-0048 mandate. Phase 1 walking skeleton (01-01 through 01-04) proves the full envelope mechanism on two layer types before fan-out. Phase 2 (02-01 through 02-03) replicates the proven pattern across three remaining observation row types in parallel. Phase 3 (03-01 through 03-02) closes the structural enforcement loop via xtask dst-lint clauses covering both write-time invariant layers. No ambiguity in acceptance criteria; every step is verifiable against named test functions and scenario identifiers. Cosmetic validator warnings on step-name/criteria length are acknowledged and ignored per CLAUDE.md precedent. Effort estimates are advisory and proportional to complexity; no scope deferrals introduced."
+    }
+  ],
+  "roadmap": {
+    "project_id": "rkyv-envelope-evolution",
+    "created_at": "2026-05-12T00:34:39Z",
+    "total_steps": 9,
+    "phases": 3
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Walking skeleton — AllocStatusRow end-to-end + intent refuse-to-start",
+      "description": "Land the foundational codec module and walk the AllocStatusRowEnvelope path end-to-end through real redb. Closes the observation-store subtree-pointer-overrun bug for AllocStatusRow and proves the mechanism on intent via JobEnvelope refuse-to-start. Remaining four envelopes follow the proven pattern in Phase 02.",
+      "default_agent": "nw-software-crafter",
+      "default_deps_strategy": "sequential",
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "RED scaffolds — codec module, envelopes, errors",
+          "criteria": "crates/overdrive-core/src/codec/{mod,envelope}.rs exist with VersionedEnvelope trait + EnvelopeError enum as SCAFFOLD: true with todo! bodies per distill/red-scaffolds.md Group 1; AllocStatusRowEnvelope NodeHealthRowEnvelope ServiceHydrationResultRowEnvelope ServiceBackendRowEnvelope JobEnvelope scaffold enums + pub(crate) V1 payload structs land per Groups 2 and 3 with todo! latest/into_latest bodies; IntentStoreError::Envelope and ObservationStoreError::Envelope variants land with #[from] EnvelopeError per Group 4; xtask scan_for_envelope_variant_construction and scan_for_envelope_fixture_coverage functions land with todo! bodies per Group 5; cargo xtask lima run -- cargo check --workspace --all-targets passes and cargo xtask lima run -- cargo nextest run --workspace --features integration-tests --no-run compiles all test binaries",
+          "agent": "nw-software-crafter",
+          "deps": [],
+          "files_to_modify": [
+            "crates/overdrive-core/src/codec/mod.rs",
+            "crates/overdrive-core/src/codec/envelope.rs",
+            "crates/overdrive-core/src/lib.rs",
+            "crates/overdrive-core/src/traits/observation_store.rs",
+            "crates/overdrive-core/src/traits/intent_store.rs",
+            "crates/overdrive-core/src/aggregate/mod.rs",
+            "xtask/src/dst_lint.rs"
+          ],
+          "test_file": "crates/overdrive-core/tests/schema_evolution.rs",
+          "scenario_name": "RED scaffold entrypoint + per-envelope sub-module declarations",
+          "implementation_notes": "Crafter follows distill/red-scaffolds.md verbatim. Inner payload types (AllocStatusRowV1, NodeHealthRowV1, ServiceHydrationResultRowV1, ServiceBackendRowV1, JobV1) MUST be pub(crate) per ADR-0048 § 2 Layer 1 and MUST NOT be re-exported from crate root. Per .claude/rules/testing.md § RED scaffolds — every #[test] body that exercises an unimplemented envelope path carries #[should_panic(expected = \"RED scaffold\")] with a per-scenario panic message naming the S-EV-XX scenario it stands in for; production-side todo!() carries #[expect(clippy::todo, reason = \"RED scaffold; lands GREEN in step 01-02..03-02\")]. No --no-verify on the scaffold commit. effort_hours=4 advisory.",
+          "effort_hours": 4
+        },
+        {
+          "id": "01-02",
+          "name": "GREEN — codec foundation (trait + EnvelopeError + envelope harness)",
+          "criteria": "VersionedEnvelope trait + EnvelopeError variants (UnknownVersion observed supported_max + Malformed source: rkyv::rancor::Error) implement per ADR-0048 § 1 with no todo! remaining in crates/overdrive-core/src/codec/envelope.rs; EnvelopeError derives Debug thiserror::Error and carries the per-variant Display messages from distill/red-scaffolds.md § 1.2; schema_evolution test harness primitive (hex-decode + rkyv-deserialise + into_latest + equality projection helper) lives in crates/overdrive-core/tests/schema_evolution/harness.rs (or equivalent shared module) and is consumed by every per-envelope fixture in subsequent steps; cargo xtask lima run -- cargo nextest run -p overdrive-core --features integration-tests --no-run compiles clean and rustdoc on codec::envelope passes cargo test --doc -p overdrive-core",
+          "agent": "nw-software-crafter",
+          "deps": ["01-01"],
+          "files_to_modify": [
+            "crates/overdrive-core/src/codec/envelope.rs",
+            "crates/overdrive-core/tests/schema_evolution.rs",
+            "crates/overdrive-core/tests/schema_evolution/harness.rs"
+          ],
+          "test_file": "crates/overdrive-core/tests/schema_evolution/harness.rs",
+          "scenario_name": "Shared schema-evolution roundtrip primitive (consumed by S-EV-01.1 through S-EV-01.5)",
+          "implementation_notes": "Trait surface is the SSOT per .claude/rules/development.md § Trait definitions specify behavior — every method docstring pins preconditions/postconditions/edge-cases/observable invariants. The harness primitive takes a hex string + canonical Latest projection and asserts equality; it does NOT bake per-envelope knowledge. EnvelopeError uses #[from] for IntentStoreError::Envelope and ObservationStoreError::Envelope conversion paths landing in 01-03/01-04. effort_hours=3 advisory.",
+          "effort_hours": 3
+        },
+        {
+          "id": "01-03",
+          "name": "GREEN — AllocStatusRowEnvelope walking skeleton (S-EV-01.1 + S-EV-04.1)",
+          "criteria": "AllocStatusRowEnvelope V1 with pub(crate) AllocStatusRowV1 payload struct carrying the eleven fields enumerated in distill/red-scaffolds.md § 2.1; AllocStatusRow type alias points to AllocStatusRowEnvelope and AllocStatusRowLatest alias points to AllocStatusRowV1; VersionedEnvelope impl with latest() wrapping into Self::V1 and into_latest() matching Self::V1(v1) => Ok(v1); crates/overdrive-core/tests/schema_evolution/alloc_status_row.rs ships const FIXTURE_V1: &str hex-pinned bytes and a #[test] decoding through into_latest per S-EV-01.1; LocalObservationStore::alloc_status_rows in crates/overdrive-store-local/src/observation_backend.rs decodes values through AllocStatusRowEnvelope::into_latest() and on EnvelopeError emits tracing::warn!(name: \"observation.envelope.decode_failed\", table = \"observation_alloc_status\", key = ?, source = ?) and skips the row per ADR-0048 § 3 observation layer; LocalObservationStore::write_alloc_status writes through Envelope::latest(payload); integration test crates/overdrive-store-local/tests/integration/envelope_observation_skip.rs covers S-EV-04.1 + S-EV-04.2 (malformed row skip + recovery on re-write); integration test crates/overdrive-store-local/tests/integration/envelope_walking_skeleton.rs covers the WS Gherkin from distill/walking-skeleton.md with zero \"subtree pointer overran range\" log entries; cargo xtask lima run -- cargo nextest run --features integration-tests passes both new integration tests and the schema_evolution fixture",
+          "agent": "nw-software-crafter",
+          "deps": ["01-02"],
+          "files_to_modify": [
+            "crates/overdrive-core/src/traits/observation_store.rs",
+            "crates/overdrive-core/tests/schema_evolution/alloc_status_row.rs",
+            "crates/overdrive-store-local/src/observation_backend.rs",
+            "crates/overdrive-store-local/tests/integration.rs",
+            "crates/overdrive-store-local/tests/integration/envelope_walking_skeleton.rs",
+            "crates/overdrive-store-local/tests/integration/envelope_observation_skip.rs",
+            "crates/overdrive-store-local/tests/integration/envelope_helpers.rs"
+          ],
+          "test_file": "crates/overdrive-store-local/tests/integration/envelope_walking_skeleton.rs",
+          "scenario_name": "S-EV-01.1 + S-EV-04.1 + S-EV-04.2 + walking-skeleton.md operator scenario",
+          "implementation_notes": "FIXTURE_V1 is generated by constructing the canonical V1 payload, calling rkyv::to_bytes::<_, rkyv::rancor::Error>(&envelope), hex-encoding the result, and pasting as a const. FIXTURE_V1 is NEVER touched by future PRs (per testing.md § Archive schema-evolution roundtrip). The three docstrings at observation_store.rs:278-282 311-313 359-361 falsely claiming rkyv has additive-field tolerance MUST be corrected in this step — replace with a reference to ADR-0048 and the envelope mechanism. Integration tests gated behind integration-tests feature per .claude/rules/testing.md § Integration vs unit gating. Real redb via tempfile::TempDir; no Sim* substitution. effort_hours=8 advisory.",
+          "effort_hours": 8
+        },
+        {
+          "id": "01-04",
+          "name": "GREEN — JobEnvelope intent refuse-to-start (S-EV-03.1 + S-EV-03.2)",
+          "criteria": "JobEnvelope::V1(JobV1) lands per distill/red-scaffolds.md § 3.1 wrapping the existing Job struct fields (id replicas resources driver) as pub(crate) JobV1 per ADR-0048 § 4 outer-envelope-only; pub type Job = JobEnvelope alias preserves call-site name across overdrive-store-local overdrive-control-plane overdrive-cli; embedded WorkloadDriver and Exec types are NOT wrapped per ADR-0048 § 4; FIXTURE_V1 lands at crates/overdrive-core/tests/schema_evolution/job.rs decoding through JobEnvelope::into_latest per S-EV-01.5; LocalStore::open in crates/overdrive-store-local/src/redb_backend.rs decodes entries-table values through JobEnvelope::into_latest() and on EnvelopeError returns Err(IntentStoreError::Envelope { redb_path source }) per ADR-0048 § 3 intent layer; IntentStoreError::Envelope Display includes the redb path AND the literal substring \"delete\" + the path again (operator remediation per ADR-0048 § 6); tracing::error!(name: \"health.startup.refused\", redb_path envelope_error) emits before the open call returns Err; integration test crates/overdrive-store-local/tests/integration/envelope_intent_refuse.rs covers S-EV-03.1 (malformed bytes) and S-EV-03.2 (unknown variant tag 99 synthesised via envelope_helpers.rs); LocalStore writers go through Job::latest(JobLatest { ... }) — direct V1 construction removed across overdrive-store-local; cargo xtask lima run -- cargo nextest run --features integration-tests passes the new integration test and the schema_evolution job.rs fixture",
+          "agent": "nw-software-crafter",
+          "deps": ["01-03"],
+          "files_to_modify": [
+            "crates/overdrive-core/src/aggregate/mod.rs",
+            "crates/overdrive-core/src/traits/intent_store.rs",
+            "crates/overdrive-core/tests/schema_evolution/job.rs",
+            "crates/overdrive-store-local/src/redb_backend.rs",
+            "crates/overdrive-store-local/tests/integration/envelope_intent_refuse.rs",
+            "crates/overdrive-store-local/tests/integration/envelope_helpers.rs"
+          ],
+          "test_file": "crates/overdrive-store-local/tests/integration/envelope_intent_refuse.rs",
+          "scenario_name": "S-EV-03.1 + S-EV-03.2 + S-EV-01.5",
+          "implementation_notes": "The Job → JobEnvelope rename is the highest-blast-radius change in the feature — every IntentStore writer (control-plane handlers, CLI commands, fixtures) calls Job::latest(JobLatest { ... }) instead of Job { ... }. Per feedback_single_cut_greenfield_migrations.md there is NO grace period or deprecated alias; the rename lands in one commit alongside the envelope. The synthetic \"unknown variant tag 99\" bytes for S-EV-03.2 are produced by a test-only helper in envelope_helpers.rs that emits an rkyv archive with a hand-crafted discriminant byte at offset 0 per ADR-0048 § 1. Per ADR-0048 § 6 Phase 1 has no in-place migration tooling — Display carries the \"delete <path> and restart\" remediation verbatim. effort_hours=10 advisory (rename surface dominates).",
+          "effort_hours": 10
+        }
+      ]
+    },
+    {
+      "id": "02",
+      "name": "Fan-out — remaining observation envelopes",
+      "description": "Apply the AllocStatusRow pattern to the three remaining observation row types. Each step is structurally identical to 01-03 minus the cross-cutting Job rename: enum + pub(crate) payload + From impl + golden-bytes fixture + envelope-aware adapter read/write + integration test for skip+recovery.",
+      "default_agent": "nw-software-crafter",
+      "default_deps_strategy": "parallel",
+      "depends_on": ["01"],
+      "steps": [
+        {
+          "id": "02-01",
+          "name": "NodeHealthRowEnvelope end-to-end (S-EV-01.2 + S-EV-04.3)",
+          "criteria": "NodeHealthRowEnvelope::V1(NodeHealthRowV1) lands per distill/red-scaffolds.md § 2.2 with pub(crate) payload mirroring existing NodeHealthRow fields; NodeHealthRowLatest alias points to NodeHealthRowV1; VersionedEnvelope impl with latest() and into_latest(); FIXTURE_V1 lands at crates/overdrive-core/tests/schema_evolution/node_health_row.rs covering S-EV-01.2; LocalObservationStore read path for observation_node_health table decodes through into_latest() and on EnvelopeError emits tracing::warn!(name: \"observation.envelope.decode_failed\", table = \"observation_node_health\", ...) and skips the offending row; write path goes through NodeHealthRow::latest(payload); integration test in envelope_observation_skip.rs adds a parallel sub-test for the node_health table covering S-EV-04.3 (malformed-row skip + valid-row survives); cargo xtask lima run -- cargo nextest run --features integration-tests passes",
+          "agent": "nw-software-crafter",
+          "deps": ["01-04"],
+          "files_to_modify": [
+            "crates/overdrive-core/src/traits/observation_store.rs",
+            "crates/overdrive-core/tests/schema_evolution/node_health_row.rs",
+            "crates/overdrive-store-local/src/observation_backend.rs",
+            "crates/overdrive-store-local/tests/integration/envelope_observation_skip.rs"
+          ],
+          "test_file": "crates/overdrive-store-local/tests/integration/envelope_observation_skip.rs",
+          "scenario_name": "S-EV-01.2 + S-EV-04.3",
+          "implementation_notes": "Pattern is mechanical — identical shape to 01-03 minus the host-adapter walking-skeleton scaffolding (envelope_helpers.rs and tempfile fixture already exist). Touch only the node_health surface; do NOT regress the AllocStatusRow path. Per feedback_phase1_single_node_scope.md NodeHealthRow remains single-node-scope; the envelope mechanism is unchanged. effort_hours=4 advisory.",
+          "effort_hours": 4
+        },
+        {
+          "id": "02-02",
+          "name": "ServiceHydrationResultRowEnvelope end-to-end (S-EV-01.3 + S-EV-04.4)",
+          "criteria": "ServiceHydrationResultRowEnvelope::V1(ServiceHydrationResultRowV1) lands per distill/red-scaffolds.md § 2.3 wrapping the existing ServiceHydrationResultRow fields including its ServiceHydrationStatus rkyv enum; ServiceHydrationResultRowLatest alias points to V1; VersionedEnvelope impl; FIXTURE_V1 lands at crates/overdrive-core/tests/schema_evolution/service_hydration_result_row.rs covering S-EV-01.3; LocalObservationStore read path for observation_service_hydration_results table decodes through into_latest() and on EnvelopeError emits the structured warn event with table = \"observation_service_hydration_results\" and skips the row; write path goes through Envelope::latest; integration test in envelope_observation_skip.rs adds the parallel sub-test for service_hydration_results covering S-EV-04.4; the embedded ServiceHydrationStatus rkyv enum remains unwrapped per ADR-0048 § 4 (in-repo precedent — additive variant additions on inner rkyv enums are the documented exception)",
+          "agent": "nw-software-crafter",
+          "deps": ["01-04"],
+          "files_to_modify": [
+            "crates/overdrive-core/src/traits/observation_store.rs",
+            "crates/overdrive-core/tests/schema_evolution/service_hydration_result_row.rs",
+            "crates/overdrive-store-local/src/observation_backend.rs",
+            "crates/overdrive-store-local/tests/integration/envelope_observation_skip.rs"
+          ],
+          "test_file": "crates/overdrive-store-local/tests/integration/envelope_observation_skip.rs",
+          "scenario_name": "S-EV-01.3 + S-EV-04.4",
+          "implementation_notes": "ServiceHydrationStatus is the in-repo precedent cited by ADR-0048 § 1 — its docstring already commits to STABLE variant ordering. Confirm that commitment remains in source after this step. effort_hours=4 advisory.",
+          "effort_hours": 4
+        },
+        {
+          "id": "02-03",
+          "name": "ServiceBackendRowEnvelope end-to-end (S-EV-01.4 + S-EV-04.5)",
+          "criteria": "ServiceBackendRowEnvelope::V1(ServiceBackendRowV1) lands per distill/red-scaffolds.md § 2.4 wrapping the existing ServiceBackendRow fields; ServiceBackendRowLatest alias points to V1; VersionedEnvelope impl; FIXTURE_V1 lands at crates/overdrive-core/tests/schema_evolution/service_backend_row.rs covering S-EV-01.4; LocalObservationStore read path for observation_service_backends table decodes through into_latest() and on EnvelopeError emits structured warn event with table = \"observation_service_backends\" and skips the row; write path goes through Envelope::latest; integration test in envelope_observation_skip.rs adds the parallel sub-test covering S-EV-04.5; all four observation envelopes are now landed and the false additive-field-tolerance docstrings at observation_store.rs:278-282 311-313 359-361 are fully removed/replaced with ADR-0048 references (S-EV-06 docstring grep assertion now passes)",
+          "agent": "nw-software-crafter",
+          "deps": ["01-04"],
+          "files_to_modify": [
+            "crates/overdrive-core/src/traits/observation_store.rs",
+            "crates/overdrive-core/tests/schema_evolution/service_backend_row.rs",
+            "crates/overdrive-store-local/src/observation_backend.rs",
+            "crates/overdrive-store-local/tests/integration/envelope_observation_skip.rs"
+          ],
+          "test_file": "crates/overdrive-store-local/tests/integration/envelope_observation_skip.rs",
+          "scenario_name": "S-EV-01.4 + S-EV-04.5 + design § 10 S-EV-06 docstring correction",
+          "implementation_notes": "Last of the observation envelopes; this step closes the observation-side loop. After this step lands, every rkyv-persisted value at every redb boundary goes through an envelope. The walking-skeleton walking-skeleton.md exit criterion 6 (pre-existing tests still pass) is the cross-check. effort_hours=4 advisory.",
+          "effort_hours": 4
+        }
+      ]
+    },
+    {
+      "id": "03",
+      "name": "Structural enforcement — xtask dst-lint clauses",
+      "description": "Close the write-invariant claim mechanically. The envelope types exist; without enforcement scanners they erode the moment a future contributor constructs Envelope::V1(payload) directly or forgets a golden-bytes fixture. Layer 2 (in-crate construction lint) and the coverage gate are the structural defenses that make the discipline self-enforcing.",
+      "default_agent": "nw-software-crafter",
+      "default_deps_strategy": "parallel",
+      "depends_on": ["02"],
+      "steps": [
+        {
+          "id": "03-01",
+          "name": "dst-lint clause + trybuild fixture for write enforcement (S-EV-02a + S-EV-02b)",
+          "criteria": "xtask::dst_lint::scan_for_envelope_variant_construction(source: &str, path: &Path) -> Vec<Violation> lands in xtask/src/dst_lint.rs as a purely syntactic syn-based AST walk over source strings with NO overdrive-* crate import per ADR-0048 § 2 Layer 2; scanner flags <Envelope>::V<N>( call expressions in overdrive-core source outside fn into_latest bodies and impl From<...V<N>...> for ...V<N+1>... blocks; cargo xtask dst-lint subcommand invokes the scanner across the overdrive-core src tree and fails the run on any violation; four unit tests in xtask cover S-EV-02b.1 (in-crate violation flagged), S-EV-02b.2 (into_latest call site allowed), S-EV-02b.3 (From<V1> for V2 allowed), S-EV-02b.4 (clean source produces no violations); trybuild compile-fail fixture at crates/overdrive-store-local/tests/compile_fail/alloc_status_row_payload_unreachable.rs covers S-EV-02a with the pinned .stderr asserting rustc E0603 or E0432 names AllocStatusRowV1 as the private type (NOT the variant constructor V1) per ADR-0048 § 2 Layer 1; trybuild entrypoint at crates/overdrive-store-local/tests/compile_fail.rs invokes trybuild::TestCases; cargo xtask lima run -- cargo xtask dst-lint passes on HEAD",
+          "agent": "nw-software-crafter",
+          "deps": ["02-01", "02-02", "02-03"],
+          "files_to_modify": [
+            "xtask/src/dst_lint.rs",
+            "xtask/src/main.rs",
+            "crates/overdrive-store-local/tests/compile_fail.rs",
+            "crates/overdrive-store-local/tests/compile_fail/alloc_status_row_payload_unreachable.rs",
+            "crates/overdrive-store-local/tests/compile_fail/alloc_status_row_payload_unreachable.stderr",
+            "crates/overdrive-store-local/Cargo.toml"
+          ],
+          "test_file": "xtask/src/dst_lint.rs",
+          "scenario_name": "S-EV-02a + S-EV-02b.1 through S-EV-02b.4",
+          "implementation_notes": "Scanner is syntactic per ADR-0048 § 2 Layer 2 \"Why dst_lint, not a separate crate binary\" — xtask MUST NOT add an overdrive-* dependency per .claude/rules/development.md § \"xtask is build / test / dev orchestration, NOT a runtime entry point\". Use the existing syn-based dst_lint AST walker. trybuild is dev-dependency only; pin its version exactly per .claude/rules/testing.md § Compile-fail testing — flaky stderr is a bug in the pin, not in the fixture. One trybuild fixture is sufficient (Layer 1 mechanism is uniform across all five envelopes). effort_hours=5 advisory.",
+          "effort_hours": 5
+        },
+        {
+          "id": "03-02",
+          "name": "dst-lint clause for fixture-coverage gate (S-EV-06)",
+          "criteria": "xtask::dst_lint::scan_for_envelope_fixture_coverage(crate_root: &Path) -> Vec<Violation> lands in xtask/src/dst_lint.rs walking <crate_root>/src/ for enum *Envelope definitions matching the V<N>(<PayloadType>) variant shape and verifying <crate_root>/tests/schema_evolution/<envelope_snake>.rs exists with a FIXTURE_V<N>: &str constant for every variant per ADR-0048 § 6; scanner is purely syntactic with NO overdrive-* import; integration into cargo xtask dst-lint subcommand fails the run on any missing fixture file or missing FIXTURE_V<N> constant; four unit tests in xtask cover S-EV-06.1 (envelope without fixture file flagged), S-EV-06.2 (envelope with file but missing variant fixture flagged), S-EV-06.3 (complete coverage no violations), S-EV-06.4 (real overdrive-core crate root passes) — the last uses the absolute path /Users/marcus/conductor/workspaces/helios/new-york-v1/crates/overdrive-core or the workspace-relative equivalent and confirms all five envelopes pass; cargo xtask lima run -- cargo xtask dst-lint passes on HEAD with both clauses active",
+          "agent": "nw-software-crafter",
+          "deps": ["02-01", "02-02", "02-03"],
+          "files_to_modify": [
+            "xtask/src/dst_lint.rs",
+            "xtask/src/main.rs"
+          ],
+          "test_file": "xtask/src/dst_lint.rs",
+          "scenario_name": "S-EV-06.1 + S-EV-06.2 + S-EV-06.3 + S-EV-06.4",
+          "implementation_notes": "This is the structural closing-the-loop step — without it the structural defense degrades to \"did the author remember a fixture?\" (a non-mechanical check that fails open under reviewer fatigue per distill/test-scenarios.md § S-EV-06 closing-the-loop guarantee). Convert envelope-name to snake_case via heck or hand-rolled snake_case conversion. The real-tree test (S-EV-06.4) is what guarantees the scanner agrees with the human review on what \"complete\" means. effort_hours=4 advisory.",
+          "effort_hours": 4
+        }
+      ]
+    }
+  ],
+  "implementation_scope": {
+    "source_directories": [
+      "crates/overdrive-core/src/codec/",
+      "crates/overdrive-core/src/traits/",
+      "crates/overdrive-core/src/aggregate/",
+      "crates/overdrive-store-local/src/",
+      "xtask/src/"
+    ],
+    "test_directories": [
+      "crates/overdrive-core/tests/schema_evolution/",
+      "crates/overdrive-store-local/tests/integration/",
+      "crates/overdrive-store-local/tests/compile_fail/",
+      "xtask/src/dst_lint.rs"
+    ],
+    "excluded_patterns": [
+      "target/**",
+      "**/*.bk",
+      "mutants-baseline/**"
+    ]
+  },
+  "validation": {
+    "status": "pending",
+    "reviewer": "nw-solution-architect-reviewer",
+    "approved_at": "pending"
+  }
+}

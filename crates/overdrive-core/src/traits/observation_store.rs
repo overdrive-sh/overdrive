@@ -30,6 +30,7 @@ use thiserror::Error;
 use std::net::Ipv4Addr;
 
 use crate::aggregate::{Listener, ServiceVip, WorkloadKind};
+use crate::codec::{EnvelopeError, VersionedEnvelope};
 use crate::dataplane::backend_key::Proto;
 use crate::dataplane::fingerprint::BackendSetFingerprint;
 use crate::id::{AllocationId, NodeId, Region, ServiceId, WorkloadId};
@@ -43,6 +44,17 @@ pub enum ObservationStoreError {
     Unreachable { peer: String },
     #[error("observation store I/O: {0}")]
     Io(#[from] std::io::Error),
+    // SCAFFOLD: true — RED scaffold per ADR-0048 § 3 (asymmetric read
+    // policy; observation log + skip on envelope decode failure).
+    // Lands GREEN in DELIVER step 02-01..02-03 when each
+    // `LocalObservationStore::*_rows` adapter wires the envelope
+    // decode path.
+    #[error("observation envelope decode failed: {source}")]
+    Envelope {
+        #[from]
+        #[source]
+        source: EnvelopeError,
+    },
 }
 
 impl ObservationStoreError {
@@ -82,6 +94,11 @@ impl ObservationStoreError {
                     | std::io::ErrorKind::TimedOut
                     | std::io::ErrorKind::ResourceBusy
             ),
+            // Envelope decode failures are terminal — the bytes do
+            // not get any more decodable on retry. Per ADR-0048 § 3
+            // the observation-layer caller logs + skips the row
+            // rather than retrying.
+            Self::Envelope { .. } => false,
         }
     }
 }
@@ -550,6 +567,187 @@ impl JobSpec {
     #[must_use]
     pub const fn new(owner: NodeId) -> Self {
         Self { owner }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Versioned envelopes — RED scaffolds per ADR-0048
+// ---------------------------------------------------------------------------
+//
+// Each per-type envelope wraps the existing row type as `V1`. Per the
+// 01-01 scaffolding-step caveat (CLAUDE.md / step description), the
+// legacy row types above remain in place — call-site migration lands
+// in subsequent steps (01-03 for AllocStatusRow; 02-01..02-03 for the
+// rest). Inner payload types are `pub(crate)` per ADR-0048 § 2
+// Layer 1 (cross-crate writers cannot name the payload to construct
+// it).
+
+// SCAFFOLD: true
+//
+// ADR-0048 § 2 Layer 1 specifies `pub(crate)` on inner payload
+// types. In practice, rustc E0446 rejects `pub(crate)` types
+// referenced from a `pub` trait's `type Latest` impl — see
+// `feat(rkyv-envelope)/01-01 surfacing note` in the step return
+// message. Layer 1 is therefore enforced by **non-re-export from
+// `overdrive_core::lib.rs`** (cross-crate writers must reach the
+// type via the verbose `overdrive_core::traits::observation_store::*`
+// path, which is discouraged by code review) PLUS Layer 2 (the
+// `xtask::dst_lint` envelope-variant-construction scanner in
+// Group 5). The structural defense is Layer 2.
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum AllocStatusRowEnvelope {
+    V1(AllocStatusRowV1),
+}
+
+pub type AllocStatusRowLatest = AllocStatusRowV1;
+
+// SCAFFOLD: true — `pub` due to rustc E0446 in trait impl; Layer 1
+// enforced by non-re-export from `lib.rs` + Layer 2 dst_lint scanner
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct AllocStatusRowV1 {
+    pub alloc_id: AllocationId,
+    pub workload_id: WorkloadId,
+    pub node_id: NodeId,
+    pub state: AllocState,
+    pub updated_at: LogicalTimestamp,
+    pub reason: Option<TransitionReason>,
+    pub detail: Option<String>,
+    pub terminal: Option<TerminalCondition>,
+    pub stderr_tail: Option<String>,
+    pub kind: WorkloadKind,
+    pub listeners: Vec<ListenerRow>,
+}
+
+impl VersionedEnvelope for AllocStatusRowEnvelope {
+    type Latest = AllocStatusRowV1;
+
+    #[expect(
+        clippy::todo,
+        reason = "RED scaffold; lands GREEN in DELIVER step 01-02 (AllocStatusRowEnvelope walking skeleton)"
+    )]
+    fn latest(_payload: Self::Latest) -> Self {
+        todo!("RED scaffold: wrap payload into Self::V1(payload)")
+    }
+
+    #[expect(
+        clippy::todo,
+        reason = "RED scaffold; lands GREEN in DELIVER step 01-02 (AllocStatusRowEnvelope walking skeleton)"
+    )]
+    fn into_latest(self) -> Result<Self::Latest, EnvelopeError> {
+        todo!("RED scaffold: match Self::V1(v1) => Ok(v1)")
+    }
+}
+
+// SCAFFOLD: true
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum NodeHealthRowEnvelope {
+    V1(NodeHealthRowV1),
+}
+
+pub type NodeHealthRowLatest = NodeHealthRowV1;
+
+// SCAFFOLD: true — `pub` due to rustc E0446 in trait impl; Layer 1
+// enforced by non-re-export from `lib.rs` + Layer 2 dst_lint scanner
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct NodeHealthRowV1 {
+    pub node_id: NodeId,
+    pub region: Region,
+    pub last_heartbeat: LogicalTimestamp,
+}
+
+impl VersionedEnvelope for NodeHealthRowEnvelope {
+    type Latest = NodeHealthRowV1;
+
+    #[expect(
+        clippy::todo,
+        reason = "RED scaffold; lands GREEN in DELIVER step 02-01 (NodeHealthRowEnvelope)"
+    )]
+    fn latest(_payload: Self::Latest) -> Self {
+        todo!("RED scaffold: wrap payload into Self::V1(payload)")
+    }
+
+    #[expect(
+        clippy::todo,
+        reason = "RED scaffold; lands GREEN in DELIVER step 02-01 (NodeHealthRowEnvelope)"
+    )]
+    fn into_latest(self) -> Result<Self::Latest, EnvelopeError> {
+        todo!("RED scaffold: match Self::V1(v1) => Ok(v1)")
+    }
+}
+
+// SCAFFOLD: true
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum ServiceHydrationResultRowEnvelope {
+    V1(ServiceHydrationResultRowV1),
+}
+
+pub type ServiceHydrationResultRowLatest = ServiceHydrationResultRowV1;
+
+// SCAFFOLD: true — `pub` due to rustc E0446 in trait impl; Layer 1
+// enforced by non-re-export from `lib.rs` + Layer 2 dst_lint scanner
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct ServiceHydrationResultRowV1 {
+    pub service_id: ServiceId,
+    pub fingerprint: BackendSetFingerprint,
+    pub status: ServiceHydrationStatus,
+    pub updated_at: LogicalTimestamp,
+}
+
+impl VersionedEnvelope for ServiceHydrationResultRowEnvelope {
+    type Latest = ServiceHydrationResultRowV1;
+
+    #[expect(
+        clippy::todo,
+        reason = "RED scaffold; lands GREEN in DELIVER step 02-02 (ServiceHydrationResultRowEnvelope)"
+    )]
+    fn latest(_payload: Self::Latest) -> Self {
+        todo!("RED scaffold: wrap payload into Self::V1(payload)")
+    }
+
+    #[expect(
+        clippy::todo,
+        reason = "RED scaffold; lands GREEN in DELIVER step 02-02 (ServiceHydrationResultRowEnvelope)"
+    )]
+    fn into_latest(self) -> Result<Self::Latest, EnvelopeError> {
+        todo!("RED scaffold: match Self::V1(v1) => Ok(v1)")
+    }
+}
+
+// SCAFFOLD: true
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum ServiceBackendRowEnvelope {
+    V1(ServiceBackendRowV1),
+}
+
+pub type ServiceBackendRowLatest = ServiceBackendRowV1;
+
+// SCAFFOLD: true — `pub` due to rustc E0446 in trait impl; Layer 1
+// enforced by non-re-export from `lib.rs` + Layer 2 dst_lint scanner
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct ServiceBackendRowV1 {
+    pub service_id: ServiceId,
+    pub vip: Ipv4Addr,
+    pub backends: Vec<Backend>,
+    pub updated_at: LogicalTimestamp,
+}
+
+impl VersionedEnvelope for ServiceBackendRowEnvelope {
+    type Latest = ServiceBackendRowV1;
+
+    #[expect(
+        clippy::todo,
+        reason = "RED scaffold; lands GREEN in DELIVER step 02-03 (ServiceBackendRowEnvelope)"
+    )]
+    fn latest(_payload: Self::Latest) -> Self {
+        todo!("RED scaffold: wrap payload into Self::V1(payload)")
+    }
+
+    #[expect(
+        clippy::todo,
+        reason = "RED scaffold; lands GREEN in DELIVER step 02-03 (ServiceBackendRowEnvelope)"
+    )]
+    fn into_latest(self) -> Result<Self::Latest, EnvelopeError> {
+        todo!("RED scaffold: match Self::V1(v1) => Ok(v1)")
     }
 }
 
