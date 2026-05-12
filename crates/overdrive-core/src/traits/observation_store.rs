@@ -415,26 +415,30 @@ pub enum ServiceHydrationStatus {
 /// LWW key is `(service_id, fingerprint)` — content-hashed, so two
 /// writes for the same `(service_id, fingerprint)` are strictly
 /// idempotent under `LogicalTimestamp::dominates`.
-#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub struct ServiceHydrationResultRow {
-    /// Identity of the service whose backend set was being
-    /// rewritten. Maps 1:1 to a `MAGLEV_MAP` outer-map key.
-    pub service_id: ServiceId,
-    /// Fingerprint of the `(vip, backends)` pair the dispatch
-    /// applied (or attempted to apply on `Failed`). Forms the
-    /// secondary key under LWW so distinct backend sets land in
-    /// distinct rows.
-    pub fingerprint: BackendSetFingerprint,
-    /// Outcome of the dispatch attempt — see
-    /// [`ServiceHydrationStatus`].
-    pub status: ServiceHydrationStatus,
-    /// Lamport timestamp of this row. Same shape as
-    /// [`AllocStatusRow::updated_at`] — the action shim writes
-    /// `(counter = tick.tick + 1, writer = node_id)` so two writes
-    /// for the same `(service_id, fingerprint)` on different ticks
-    /// are correctly ordered under LWW.
-    pub updated_at: LogicalTimestamp,
-}
+///
+/// # Schema evolution
+///
+/// Per ADR-0048 (`docs/product/architecture/adr-0048-rkyv-versioned-envelope.md`)
+/// this type is the **inner payload** of
+/// [`ServiceHydrationResultRowEnvelope`] under the UI-02 amendment
+/// alias-to-payload public API. rkyv archives are **fixed positional
+/// layouts** — appending a field to this struct shifts every
+/// subsequent offset and renders pre-existing bytes unreadable.
+/// Schema evolution at this boundary goes through a new envelope
+/// variant (`V2`, `V3`, …) added per the version-bump procedure in
+/// `.claude/rules/development.md` § "rkyv schema evolution"; existing
+/// `FIXTURE_V<N>` golden bytes are NEVER touched.
+///
+/// The embedded [`ServiceHydrationStatus`] enum stays **unwrapped**
+/// per ADR-0048 § 4 (additive variant additions on inner rkyv enums
+/// are the documented exception — `ServiceHydrationStatus`'s STABLE
+/// variant-ordering docstring is the structural commitment that
+/// keeps the inner-enum exception load-bearing).
+///
+/// Writers go through [`ServiceHydrationResultRow::latest`]
+/// (= [`ServiceHydrationResultRowEnvelope::latest`]); readers project
+/// through [`ServiceHydrationResultRowEnvelope::into_latest`].
+pub type ServiceHydrationResultRow = ServiceHydrationResultRowV1;
 
 /// `service_backends` row — the desired backend set for a service,
 /// written by the control plane when allocation status changes and
@@ -667,7 +671,6 @@ impl VersionedEnvelope for NodeHealthRowEnvelope {
     }
 }
 
-// SCAFFOLD: true
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum ServiceHydrationResultRowEnvelope {
     V1(ServiceHydrationResultRowV1),
@@ -675,33 +678,75 @@ pub enum ServiceHydrationResultRowEnvelope {
 
 pub type ServiceHydrationResultRowLatest = ServiceHydrationResultRowV1;
 
-// SCAFFOLD: true — `pub` due to rustc E0446 in trait impl; Layer 1
-// enforced by non-re-export from `lib.rs` + Layer 2 dst_lint scanner
+// `pub` due to rustc E0446 in trait impl; Layer 1 enforced by
+// non-re-export from `lib.rs` + Layer 2 dst_lint scanner.
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct ServiceHydrationResultRowV1 {
+    /// Identity of the service whose backend set was being
+    /// rewritten. Maps 1:1 to a `MAGLEV_MAP` outer-map key.
     pub service_id: ServiceId,
+    /// Fingerprint of the `(vip, backends)` pair the dispatch
+    /// applied (or attempted to apply on `Failed`). Forms the
+    /// secondary key under LWW so distinct backend sets land in
+    /// distinct rows.
     pub fingerprint: BackendSetFingerprint,
+    /// Outcome of the dispatch attempt — see
+    /// [`ServiceHydrationStatus`]. The embedded enum stays
+    /// unwrapped per ADR-0048 § 4 (inner rkyv enum additive variant
+    /// additions are the documented exception).
     pub status: ServiceHydrationStatus,
+    /// Lamport timestamp of this row. Same shape as
+    /// [`AllocStatusRow::updated_at`] — the action shim writes
+    /// `(counter = tick.tick + 1, writer = node_id)` so two writes
+    /// for the same `(service_id, fingerprint)` on different ticks
+    /// are correctly ordered under LWW.
     pub updated_at: LogicalTimestamp,
 }
 
 impl VersionedEnvelope for ServiceHydrationResultRowEnvelope {
     type Latest = ServiceHydrationResultRowV1;
 
-    #[expect(
-        clippy::todo,
-        reason = "RED scaffold; lands GREEN in DELIVER step 02-02 (ServiceHydrationResultRowEnvelope)"
-    )]
-    fn latest(_payload: Self::Latest) -> Self {
-        todo!("RED scaffold: wrap payload into Self::V1(payload)")
+    fn latest(payload: Self::Latest) -> Self {
+        Self::V1(payload)
     }
 
-    #[expect(
-        clippy::todo,
-        reason = "RED scaffold; lands GREEN in DELIVER step 02-02 (ServiceHydrationResultRowEnvelope)"
-    )]
     fn into_latest(self) -> Result<Self::Latest, EnvelopeError> {
-        todo!("RED scaffold: match Self::V1(v1) => Ok(v1)")
+        match self {
+            Self::V1(v1) => Ok(v1),
+        }
+    }
+
+    /// Discriminant offset for `ServiceHydrationResultRowEnvelope`
+    /// archives, measured from the END of the archive bytes.
+    ///
+    /// Empirically determined against canonical V1 payloads of varying
+    /// `ServiceHydrationStatus` variants (`Pending` / `Completed` /
+    /// `Failed`), failure-reason string lengths (inline-vs-out-of-line
+    /// `ArchivedString` boundary at 8 bytes), and `writer: NodeId`
+    /// lengths: rkyv 0.8 places the outer enum's discriminant byte 80
+    /// bytes from the END of the archive, stable across all payload
+    /// sizes (the trailing "root" structure has a fixed 80-byte
+    /// footprint — 1B discriminant + 7B pad + 8B service_id + 8B
+    /// fingerprint + 24B status enum (1B inner-disc + 7B pad + 16B
+    /// payload max) + 8B counter + 16B writer ArchivedString + 8B
+    /// trailing alignment; only the leading slab — failure reason
+    /// strings and long writer NodeId payloads — grows with
+    /// variable-length data).
+    ///
+    /// Re-pin alongside the schema-evolution fixture at every
+    /// version-bump per
+    /// [`VersionedEnvelope::discriminant_offset_from_end`]'s
+    /// docstring.
+    fn discriminant_offset_from_end() -> Option<usize> {
+        Some(80)
+    }
+
+    fn known_discriminants() -> &'static [u8] {
+        // V1 carries rkyv discriminant 0 (declaration order — first
+        // variant). Empirically verified by archiving a canonical
+        // `ServiceHydrationResultRowEnvelope::latest(...)` and
+        // inspecting the byte at `bytes.len() - 80`.
+        &[0]
     }
 
     fn type_name() -> &'static str {

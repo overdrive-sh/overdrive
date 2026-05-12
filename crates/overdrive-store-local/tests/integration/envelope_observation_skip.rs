@@ -11,12 +11,16 @@
 //! production code MUST NOT have a raw-bytes write path.
 
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use overdrive_core::aggregate::WorkloadKind;
-use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
+use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
+use overdrive_core::id::{AllocationId, NodeId, Region, ServiceId, WorkloadId};
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, NodeHealthRow, ObservationRow, ObservationStore,
+    ServiceHydrationResultRow, ServiceHydrationStatus,
 };
+use overdrive_core::wall_clock::UnixInstant;
 use overdrive_store_local::LocalObservationStore;
 use tempfile::TempDir;
 use tracing::subscriber::set_default;
@@ -27,6 +31,7 @@ use tracing_subscriber::{Layer, Registry};
 
 use super::envelope_helpers::{
     write_raw_bytes_to_alloc_status_table, write_raw_bytes_to_node_health_table,
+    write_raw_bytes_to_service_hydration_results_table,
 };
 
 #[derive(Clone, Default)]
@@ -240,6 +245,88 @@ async fn malformed_node_health_row_is_logged_and_skipped_but_valid_row_surfaces(
     assert!(
         decode_events[0].contains("observation_node_health"),
         "event must name the table 'observation_node_health'; got {:?}",
+        decode_events[0]
+    );
+
+    let refused: Vec<&String> =
+        entries.iter().filter(|e| e.contains("health.startup.refused")).collect();
+    assert!(
+        refused.is_empty(),
+        "observation layer must NOT emit health.startup.refused; got {refused:?}"
+    );
+}
+
+// ---------------------------------------------------------------------
+// S-EV-04.4 — ServiceHydrationResultRow malformed-row skip + valid-row
+// survives. Mirrors the AllocStatusRow / NodeHealthRow sub-tests above
+// against the service_hydration_results table. Per ADR-0048 § 3
+// observation policy is log+skip — identical shape, distinct table =
+// "observation_service_hydration_results" tag in the warn event.
+// ---------------------------------------------------------------------
+
+fn make_service_hydration_row(
+    service_id_value: u64,
+    fingerprint_value: BackendSetFingerprint,
+    counter: u64,
+) -> ServiceHydrationResultRow {
+    let writer = NodeId::new("node-001").expect("valid writer node id");
+    ServiceHydrationResultRow {
+        service_id: ServiceId::new(service_id_value).expect("valid service id"),
+        fingerprint: fingerprint_value,
+        status: ServiceHydrationStatus::Completed {
+            fingerprint: fingerprint_value,
+            applied_at: UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000)),
+        },
+        updated_at: LogicalTimestamp { counter, writer },
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn malformed_service_hydration_row_is_logged_and_skipped_but_valid_row_surfaces() {
+    let captured = CapturedEvents::default();
+    let subscriber = Registry::default().with(captured.clone());
+
+    let tmp = TempDir::new().expect("tempdir");
+    let redb_path = tmp.path().join("observation.redb");
+
+    let service_id = ServiceId::new(42).expect("valid service id");
+
+    // K1: valid row through the typed write path.
+    let k1_row = make_service_hydration_row(42, 100, 1);
+    {
+        let store = LocalObservationStore::open(&redb_path).expect("open #1");
+        store.write(ObservationRow::ServiceHydration(k1_row.clone())).await.expect("write K1");
+    } // store dropped; redb lock released
+
+    // K2: 16 bytes of 0xFF — does not decode through the envelope.
+    // The composite key matches the table's `(service_id, fingerprint)`
+    // 16-byte LE encoding so the range-scan over service_id == 42 picks
+    // it up.
+    write_raw_bytes_to_service_hydration_results_table(&redb_path, service_id, 999, &[0xFF; 16]);
+
+    let _guard = set_default(subscriber);
+
+    let store = LocalObservationStore::open(&redb_path).expect("open #2");
+    let rows = store
+        .service_hydration_results_rows(&service_id)
+        .await
+        .expect("read service_hydration rows");
+
+    assert_eq!(rows.len(), 1, "exactly one valid row must survive; got {rows:?}");
+    assert_eq!(rows[0].service_id, k1_row.service_id);
+    assert_eq!(rows[0].fingerprint, k1_row.fingerprint);
+
+    let entries = captured.entries();
+    let decode_events: Vec<&String> =
+        entries.iter().filter(|e| e.contains("observation.envelope.decode_failed")).collect();
+    assert_eq!(
+        decode_events.len(),
+        1,
+        "exactly one decode_failed event expected; got {decode_events:?}"
+    );
+    assert!(
+        decode_events[0].contains("observation_service_hydration_results"),
+        "event must name the table 'observation_service_hydration_results'; got {:?}",
         decode_events[0]
     );
 

@@ -10,7 +10,8 @@
 
 use std::path::Path;
 
-use overdrive_core::id::{AllocationId, NodeId};
+use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
+use overdrive_core::id::{AllocationId, NodeId, ServiceId};
 use redb::{Database, TableDefinition};
 
 /// Mirror of the production constant in
@@ -22,6 +23,11 @@ const ALLOC_STATUS_TABLE: TableDefinition<&[u8], &[u8]> =
 /// `crates/overdrive-store-local/src/observation_backend.rs`.
 const NODE_HEALTH_TABLE: TableDefinition<&[u8], &[u8]> =
     TableDefinition::new("observation_node_health");
+
+/// Mirror of the production constant in
+/// `crates/overdrive-store-local/src/observation_backend.rs`.
+const SERVICE_HYDRATION_TABLE: TableDefinition<&[u8], &[u8]> =
+    TableDefinition::new("observation_service_hydration_results");
 
 /// Mirror of the production constant in
 /// `crates/overdrive-store-local/src/redb_backend.rs`.
@@ -65,6 +71,43 @@ pub fn write_raw_bytes_to_node_health_table(redb_path: &Path, node_id: &NodeId, 
         let mut table = write.open_table(NODE_HEALTH_TABLE).expect("open node_health table");
         let key = node_id.as_str().as_bytes();
         table.insert(key, raw_bytes).expect("insert raw bytes");
+    }
+    write.commit().expect("commit raw-bytes write");
+}
+
+/// Write `raw_bytes` directly into the
+/// `observation_service_hydration_results` table at the canonical key
+/// for `(service_id, fingerprint)`. Mirrors
+/// [`write_raw_bytes_to_node_health_table`] but for the
+/// service-hydration surface — used by the envelope-skip integration
+/// test (S-EV-04.4) to inject bytes that the typed write path would
+/// refuse to construct.
+///
+/// The 16-byte composite key layout
+/// (`service_id` LE u64 || `fingerprint` LE u64) mirrors the
+/// production `encode_service_hydration_key` in
+/// `crates/overdrive-store-local/src/observation_backend.rs` — keeping
+/// the layout in two places is the price of the bytes-injection
+/// back-door; the structural pin is the production constant.
+pub fn write_raw_bytes_to_service_hydration_results_table(
+    redb_path: &Path,
+    service_id: ServiceId,
+    fingerprint: BackendSetFingerprint,
+    raw_bytes: &[u8],
+) {
+    let db = Database::create(redb_path).expect("open redb back-door");
+    let write = db.begin_write().expect("begin_write back-door");
+    {
+        let mut table = write
+            .open_table(SERVICE_HYDRATION_TABLE)
+            .expect("open service_hydration_results table");
+        let sid = service_id.get().to_le_bytes();
+        let fp = fingerprint.to_le_bytes();
+        let key: [u8; 16] = [
+            sid[0], sid[1], sid[2], sid[3], sid[4], sid[5], sid[6], sid[7], fp[0], fp[1], fp[2],
+            fp[3], fp[4], fp[5], fp[6], fp[7],
+        ];
+        table.insert(key.as_slice(), raw_bytes).expect("insert raw bytes");
     }
     write.commit().expect("commit raw-bytes write");
 }
