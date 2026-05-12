@@ -1940,6 +1940,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "futures",
+ "hex",
  "overdrive-core",
  "proptest",
  "redb",

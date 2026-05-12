@@ -18,7 +18,14 @@ use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRowEnvelope, AllocStatusRowLatest, AllocStatusRowV1, LogicalTimestamp,
 };
 
-use super::harness::{assert_discriminant_byte_at_pinned_offset, assert_envelope_v_roundtrip};
+use super::harness::{assert_discriminant_offset_triangulation, assert_envelope_v_roundtrip};
+
+/// Independent pin of the V1 discriminant offset for triangulation
+/// against `AllocStatusRowEnvelope::discriminant_offset_from_end()`.
+/// See `job.rs::GOLDEN_DISCRIMINANT_OFFSET_V1` for the full rationale
+/// (two-source triangulation guards against unilateral drift of
+/// either pin).
+const GOLDEN_DISCRIMINANT_OFFSET_V1: usize = 168;
 
 /// Canonical V1 payload pinned by `FIXTURE_V1` below. The expected
 /// projection is built from these values verbatim — change any one
@@ -54,15 +61,19 @@ fn alloc_status_row_v1_decodes_through_current_envelope() {
     assert_envelope_v_roundtrip::<AllocStatusRowEnvelope>(FIXTURE_V1, &expected);
 }
 
-/// Structural defense for the empirically-pinned
-/// `AllocStatusRowEnvelope::discriminant_offset_from_end()` value
-/// (168). Archives a canonical V1 payload through `latest()` and
-/// asserts the byte at the pinned offset is V1's tag (0). Catches a
-/// stale offset on the next `V<N+1>` bump where rkyv's archived
-/// layout shifts but the pinned offset constant wasn't updated.
+/// Triangulation defense for the empirically-pinned
+/// `AllocStatusRowEnvelope` V1 discriminant offset. Asserts BOTH
+/// that the trait method's return value agrees with
+/// `GOLDEN_DISCRIMINANT_OFFSET_V1` AND that the canonical archive
+/// places the V1 tag (0) at that offset. Both pins must update
+/// together on a `V<N+1>` bump.
 #[test]
-fn alloc_status_row_discriminant_byte_at_pinned_offset() {
-    assert_discriminant_byte_at_pinned_offset::<AllocStatusRowEnvelope>(canonical_v1_payload(), 0);
+fn alloc_status_row_discriminant_offset_triangulation() {
+    assert_discriminant_offset_triangulation::<AllocStatusRowEnvelope>(
+        canonical_v1_payload(),
+        GOLDEN_DISCRIMINANT_OFFSET_V1,
+        0,
+    );
 }
 
 // ---------------------------------------------------------------------

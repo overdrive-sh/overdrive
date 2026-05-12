@@ -141,6 +141,11 @@ impl LocalIntentStore {
                 let (key, value) = entry.map_err(map_storage_error)?;
                 let key_bytes = key.value();
                 if !key_bytes.starts_with(JOB_PREFIX) {
+                    // Safe to break: redb range scans iterate keys in
+                    // sorted byte order, so once the prefix no longer
+                    // matches, every remaining key in the range also
+                    // won't. Removing the prefix-bounded scan would
+                    // make the boot path scan every row in the table.
                     break;
                 }
                 if key_bytes.ends_with(STOP_SUFFIX) {
@@ -148,18 +153,22 @@ impl LocalIntentStore {
                 }
                 // Pass the iterated key into `from_store_bytes` so the
                 // `health.startup.refused` event names which row failed
-                // when an operator has N jobs in the file. Keys are
-                // canonical IntentKey UTF-8 (`jobs/<workload-id>`); on
-                // the off chance bytes have drifted to non-UTF-8 we use
-                // `from_utf8_lossy` rather than refusing to log — the
-                // primary diagnostic value is "which redb file" plus
-                // "which key approximation," not "byte-perfect key
-                // round-trip".
-                let key_str = String::from_utf8_lossy(key_bytes);
+                // when an operator has N jobs in the file. We
+                // hex-encode the key bytes unconditionally: today's
+                // keys are ASCII `jobs/<workload-id>` (hex form is
+                // verbose but unambiguous), but a future key prefix
+                // may carry binary bytes — `String::from_utf8_lossy`
+                // would silently substitute U+FFFD and corrupt the
+                // operator's ability to locate the failing row.
+                // The hex form is always correct and round-trips
+                // through `xxd | grep <hex>` / `redb-cli`. The event's
+                // `key` field is the load-bearing diagnostic
+                // identifier; clarity beats brevity here.
+                let key_hex = hex::encode(key_bytes);
                 overdrive_core::aggregate::Job::from_store_bytes(
                     value.value(),
                     path,
-                    Some(key_str.as_ref()),
+                    Some(&key_hex),
                 )?;
             }
         }

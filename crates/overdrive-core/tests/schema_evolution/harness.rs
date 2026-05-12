@@ -81,35 +81,49 @@ where
     );
 }
 
-/// Assert that the pinned `discriminant_offset_from_end()` value
-/// actually targets the rkyv enum discriminant byte for a canonical
-/// archived `V<N>` payload — and that the byte matches `expected_tag`
-/// (e.g. `0` for V1, the first variant in declaration order under
-/// rkyv 0.8's discriminant assignment).
+/// Triangulate the `discriminant_offset_from_end()` value against an
+/// independent hard-coded golden constant.
 ///
-/// Validates that:
-/// 1. `E::discriminant_offset_from_end()` returns `Some(offset)` — a
-///    `None` here means the envelope skipped overriding the default
-///    and the `UnknownVersion` probe is silently disabled.
-/// 2. `bytes.len() >= offset` — the buffer is long enough to host
-///    the trailing root region the offset assumes.
-/// 3. `bytes[bytes.len() - offset] == expected_tag` — the byte at
-///    the pinned position is the discriminant the envelope claims it
-///    to be.
+/// The bare [`assert_discriminant_byte_at_pinned_offset`] helper reads
+/// the offset from `E::discriminant_offset_from_end()` itself — the
+/// same trait method whose correctness is the structural defense the
+/// helper is supposed to enforce. That is **tautological**: if a
+/// future commit silently edits the trait method's value (say to a
+/// nearby position that also happens to land on a zero byte —
+/// archived enums have many zero bytes from padding, zero
+/// discriminants, and empty string-length headers), the helper still
+/// passes and the `UnknownVersion` probe silently targets the wrong
+/// position.
 ///
-/// This is the **structural defense** against a stale offset surviving
-/// a `V<N+1>` bump. Today's golden-bytes roundtrip test decodes via
-/// `rkyv::from_bytes` and doesn't exercise the probe path, so a wrong
-/// offset value (mismatched against today's archived layout) would
-/// pass roundtrip silently. This helper makes the offset's correctness
-/// a falsifiable assertion alongside the fixture pinning.
+/// This helper closes the loop by accepting `golden_offset` as a
+/// second, **independent** source of truth — pinned as a `const` in
+/// each envelope's per-fixture test file. The helper asserts:
+///
+/// 1. `E::discriminant_offset_from_end() == Some(golden_offset)` —
+///    the trait method has not drifted from the golden constant
+///    without the fixture being updated.
+/// 2. `bytes.len() >= golden_offset` — the canonical archive is at
+///    least the golden offset long.
+/// 3. `bytes[bytes.len() - golden_offset] == expected_tag` — the
+///    canonical archive places the V<N> discriminant at the golden
+///    position.
+///
+/// A future `V<N+1>` bump that genuinely shifts the offset (because
+/// the payload grew the trailing root region) must update BOTH the
+/// trait method's return value AND the per-envelope golden constant
+/// in the same commit. A unilateral edit to either one trips this
+/// assertion. This is the "two-source triangulation" structural
+/// defense.
 ///
 /// # Panics
 ///
 /// Panics with a fixture-identifying message if any of the three
 /// assertions above fails.
-pub fn assert_discriminant_byte_at_pinned_offset<E>(canonical: E::Latest, expected_tag: u8)
-where
+pub fn assert_discriminant_offset_triangulation<E>(
+    canonical: E::Latest,
+    golden_offset: usize,
+    expected_tag: u8,
+) where
     E: VersionedEnvelope
         + rkyv::Archive
         + for<'a> rkyv::Serialize<
@@ -120,37 +134,46 @@ where
             >,
         >,
 {
+    // Triangulation pin 1: the trait method must agree with the
+    // golden constant. Catches a unilateral edit to the trait method
+    // that did not update the per-envelope fixture (or vice versa).
+    let trait_offset = E::discriminant_offset_from_end();
+    assert_eq!(
+        trait_offset,
+        Some(golden_offset),
+        "envelope's discriminant_offset_from_end() drifted from the per-envelope golden \
+         constant — trait method returned {trait_offset:?}, golden is {golden_offset}. On a \
+         V<N+1> bump both must be updated in the same commit per development.md § \
+         Version-bump procedure.",
+    );
+
     let envelope = E::latest(canonical);
     let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope)
         .expect("rkyv archive of canonical payload must succeed");
 
-    let offset = E::discriminant_offset_from_end().expect(
-        "envelope must pin a non-None discriminant_offset_from_end to make UnknownVersion \
-         classification possible (probe falls through to Malformed otherwise)",
-    );
-
+    // Triangulation pin 2: the canonical archived layout must place
+    // the discriminant byte at the golden offset. Catches a rkyv
+    // layout drift (e.g. an additive change to the V<N> payload that
+    // shifted the trailing root region) that was not reflected in
+    // either pin.
+    let buffer_len = bytes.len();
     assert!(
-        bytes.len() >= offset,
-        "archived bytes ({}) must be at least the pinned offset ({}) long — pinned offset \
-         outside the buffer means the probe is targeting padding or the empty before-buffer \
-         region",
-        bytes.len(),
-        offset,
+        buffer_len >= golden_offset,
+        "archived bytes ({buffer_len}) must be at least the golden offset ({golden_offset}) \
+         long — golden offset outside the buffer means rkyv's archived layout shrank, the \
+         trait method/golden agreement is meaningless, and the probe is targeting padding \
+         or the empty before-buffer region",
     );
 
-    let observed = bytes[bytes.len() - offset];
+    let absolute_index = buffer_len - golden_offset;
+    let observed = bytes[absolute_index];
     assert_eq!(
-        observed,
-        expected_tag,
-        "discriminant byte at pinned offset {} (from end of {}-byte buffer, absolute index {}) \
-         must equal V1 tag {} — got {}. Either the pinned offset is stale (re-pin per \
-         development.md § Version-bump procedure) or the envelope's archived layout drifted \
-         without a version bump.",
-        offset,
-        bytes.len(),
-        bytes.len() - offset,
-        expected_tag,
-        observed,
+        observed, expected_tag,
+        "discriminant byte at golden offset {golden_offset} (from end of {buffer_len}-byte \
+         buffer, absolute index {absolute_index}) must equal V<N> tag {expected_tag} — got \
+         {observed}. Either the golden offset is stale (re-pin per development.md § \
+         Version-bump procedure, update BOTH the trait method and the golden constant in \
+         the same commit) or the envelope's archived layout drifted without a version bump.",
     );
 }
 

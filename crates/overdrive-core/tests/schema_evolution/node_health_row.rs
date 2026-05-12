@@ -17,7 +17,13 @@ use overdrive_core::traits::observation_store::{
     LogicalTimestamp, NodeHealthRowEnvelope, NodeHealthRowLatest, NodeHealthRowV1,
 };
 
-use super::harness::{assert_discriminant_byte_at_pinned_offset, assert_envelope_v_roundtrip};
+use super::harness::{assert_discriminant_offset_triangulation, assert_envelope_v_roundtrip};
+
+/// Independent pin of the V1 discriminant offset for triangulation
+/// against `NodeHealthRowEnvelope::discriminant_offset_from_end()`.
+/// See `job.rs::GOLDEN_DISCRIMINANT_OFFSET_V1` for the full
+/// rationale.
+const GOLDEN_DISCRIMINANT_OFFSET_V1: usize = 40;
 
 /// Canonical V1 payload pinned by `FIXTURE_V1` below. The expected
 /// projection is built from these values verbatim — change any one
@@ -45,13 +51,17 @@ fn node_health_row_v1_decodes_through_current_envelope() {
     assert_envelope_v_roundtrip::<NodeHealthRowEnvelope>(FIXTURE_V1, &expected);
 }
 
-/// Structural defense for the empirically-pinned
-/// `NodeHealthRowEnvelope::discriminant_offset_from_end()` value
-/// (40). Archives a canonical V1 payload through `latest()` and
-/// asserts the byte at the pinned offset is V1's tag (0).
+/// Triangulation defense for the empirically-pinned
+/// `NodeHealthRowEnvelope` V1 discriminant offset. Both the trait
+/// method and `GOLDEN_DISCRIMINANT_OFFSET_V1` must agree, and the
+/// canonical archive must place the V1 tag (0) at that offset.
 #[test]
-fn node_health_row_discriminant_byte_at_pinned_offset() {
-    assert_discriminant_byte_at_pinned_offset::<NodeHealthRowEnvelope>(canonical_v1_payload(), 0);
+fn node_health_row_discriminant_offset_triangulation() {
+    assert_discriminant_offset_triangulation::<NodeHealthRowEnvelope>(
+        canonical_v1_payload(),
+        GOLDEN_DISCRIMINANT_OFFSET_V1,
+        0,
+    );
 }
 
 // ---------------------------------------------------------------------

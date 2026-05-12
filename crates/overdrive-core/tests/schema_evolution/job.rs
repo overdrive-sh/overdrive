@@ -22,7 +22,16 @@ use overdrive_core::codec::VersionedEnvelope;
 use overdrive_core::id::WorkloadId;
 use overdrive_core::traits::driver::Resources;
 
-use super::harness::{assert_discriminant_byte_at_pinned_offset, assert_envelope_v_roundtrip};
+use super::harness::{assert_discriminant_offset_triangulation, assert_envelope_v_roundtrip};
+
+/// Independent pin of the V1 discriminant offset for triangulation
+/// against `JobEnvelope::discriminant_offset_from_end()`. The trait
+/// method and this constant must agree; a V2 bump that shifts the
+/// archived layout updates BOTH in the same commit (per
+/// `development.md` § Version-bump procedure). A unilateral edit to
+/// either source trips the triangulation assertion in
+/// `job_discriminant_offset_triangulation`.
+const GOLDEN_DISCRIMINANT_OFFSET_V1: usize = 64;
 
 /// Canonical V1 payload pinned by `FIXTURE_V1` below. The expected
 /// projection is built from these values verbatim — change any one
@@ -52,15 +61,22 @@ fn job_v1_decodes_through_current_envelope() {
     assert_envelope_v_roundtrip::<JobEnvelope>(FIXTURE_V1, &expected);
 }
 
-/// Structural defense for the empirically-pinned
-/// `JobEnvelope::discriminant_offset_from_end()` value (64).
-/// Archives a canonical V1 payload through `latest()` and asserts
-/// the byte at the pinned offset is V1's tag (0). Catches a stale
-/// offset on the next `V<N+1>` bump where rkyv's archived layout
-/// shifts but the pinned offset constant wasn't updated.
+/// Triangulation defense for the empirically-pinned
+/// `JobEnvelope` V1 discriminant offset. Asserts BOTH that the
+/// trait method `JobEnvelope::discriminant_offset_from_end()` agrees
+/// with the per-fixture `GOLDEN_DISCRIMINANT_OFFSET_V1` constant AND
+/// that the canonical V1 archived layout places the V1 tag (0) at
+/// that offset. On a `V<N+1>` bump where rkyv's archived layout
+/// shifts, the developer must update BOTH the trait method's return
+/// value AND `GOLDEN_DISCRIMINANT_OFFSET_V1` in the same commit; a
+/// unilateral edit to either source trips this assertion.
 #[test]
-fn job_discriminant_byte_at_pinned_offset() {
-    assert_discriminant_byte_at_pinned_offset::<JobEnvelope>(canonical_v1_payload(), 0);
+fn job_discriminant_offset_triangulation() {
+    assert_discriminant_offset_triangulation::<JobEnvelope>(
+        canonical_v1_payload(),
+        GOLDEN_DISCRIMINANT_OFFSET_V1,
+        0,
+    );
 }
 
 #[test]
