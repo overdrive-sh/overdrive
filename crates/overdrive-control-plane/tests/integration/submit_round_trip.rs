@@ -197,8 +197,7 @@ async fn post_v1_jobs_with_valid_spec_returns_200_inserted_with_canonical_digest
     // a server-side re-archival or a serde-driven recomputation
     // somewhere in the pipeline.
     let local_job = Job::from_spec(spec).expect("Job::from_spec for digest reference");
-    let local_archived = local_job.archive_for_store().expect("local rkyv archive");
-    let local_digest = overdrive_core::id::ContentHash::of(local_archived.as_ref()).to_string();
+    let local_digest = local_job.spec_digest().expect("spec_digest").to_string();
     assert_eq!(
         body.spec_digest, local_digest,
         "spec_digest must equal the locally-computable canonical \
