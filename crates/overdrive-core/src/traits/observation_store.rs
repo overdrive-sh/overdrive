@@ -450,19 +450,23 @@ pub type ServiceHydrationResultRow = ServiceHydrationResultRowV1;
 /// [`LogicalTimestamp::dominates`] on `updated_at`.
 ///
 /// Per §4 guardrail: full-row writes only, no field-diff merges.
-#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub struct ServiceBackendRow {
-    /// Identity of the service. Primary key for LWW.
-    pub service_id: ServiceId,
-    /// Virtual IP for the service — wire-shape `Ipv4Addr`, not
-    /// `ServiceVip`. The hydrator wraps into `ServiceVip` at the
-    /// read boundary (architecture.md § 8 lines 616-629).
-    pub vip: Ipv4Addr,
-    /// Current backend set for the service.
-    pub backends: Vec<Backend>,
-    /// Lamport timestamp for LWW ordering.
-    pub updated_at: LogicalTimestamp,
-}
+///
+/// # Schema evolution
+///
+/// Per ADR-0048 (`docs/product/architecture/adr-0048-rkyv-versioned-envelope.md`)
+/// this type is the **inner payload** of [`ServiceBackendRowEnvelope`]
+/// under the UI-02 amendment alias-to-payload public API. rkyv
+/// archives are **fixed positional layouts** — appending a field to
+/// this struct shifts every subsequent offset and renders pre-existing
+/// bytes unreadable. Schema evolution at this boundary goes through a
+/// new envelope variant (`V2`, `V3`, …) added per the version-bump
+/// procedure in `.claude/rules/development.md` § "rkyv schema
+/// evolution"; existing `FIXTURE_V<N>` golden bytes are NEVER touched.
+///
+/// Writers go through [`ServiceBackendRow::latest`]
+/// (= [`ServiceBackendRowEnvelope::latest`]); readers project through
+/// [`ServiceBackendRowEnvelope::into_latest`].
+pub type ServiceBackendRow = ServiceBackendRowV1;
 
 /// The closed set of row shapes [`ObservationStore`] accepts.
 ///
@@ -754,7 +758,6 @@ impl VersionedEnvelope for ServiceHydrationResultRowEnvelope {
     }
 }
 
-// SCAFFOLD: true
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum ServiceBackendRowEnvelope {
     V1(ServiceBackendRowV1),
@@ -762,33 +765,63 @@ pub enum ServiceBackendRowEnvelope {
 
 pub type ServiceBackendRowLatest = ServiceBackendRowV1;
 
-// SCAFFOLD: true — `pub` due to rustc E0446 in trait impl; Layer 1
-// enforced by non-re-export from `lib.rs` + Layer 2 dst_lint scanner
+// `pub` due to rustc E0446 in trait impl; Layer 1 enforced by
+// non-re-export from `lib.rs` + Layer 2 dst_lint scanner.
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct ServiceBackendRowV1 {
+    /// Identity of the service. Primary key for LWW.
     pub service_id: ServiceId,
+    /// Virtual IP for the service — wire-shape `Ipv4Addr`, not
+    /// `ServiceVip`. The hydrator wraps into `ServiceVip` at the
+    /// read boundary (architecture.md § 8 lines 616-629).
     pub vip: Ipv4Addr,
+    /// Current backend set for the service.
     pub backends: Vec<Backend>,
+    /// Lamport timestamp for LWW ordering.
     pub updated_at: LogicalTimestamp,
 }
 
 impl VersionedEnvelope for ServiceBackendRowEnvelope {
     type Latest = ServiceBackendRowV1;
 
-    #[expect(
-        clippy::todo,
-        reason = "RED scaffold; lands GREEN in DELIVER step 02-03 (ServiceBackendRowEnvelope)"
-    )]
-    fn latest(_payload: Self::Latest) -> Self {
-        todo!("RED scaffold: wrap payload into Self::V1(payload)")
+    fn latest(payload: Self::Latest) -> Self {
+        Self::V1(payload)
     }
 
-    #[expect(
-        clippy::todo,
-        reason = "RED scaffold; lands GREEN in DELIVER step 02-03 (ServiceBackendRowEnvelope)"
-    )]
     fn into_latest(self) -> Result<Self::Latest, EnvelopeError> {
-        todo!("RED scaffold: match Self::V1(v1) => Ok(v1)")
+        match self {
+            Self::V1(v1) => Ok(v1),
+        }
+    }
+
+    /// Discriminant offset for `ServiceBackendRowEnvelope` archives,
+    /// measured from the END of the archive bytes.
+    ///
+    /// Empirically determined via the byte-flip locator
+    /// `schema_evolution::service_backend_row::locate_service_backend_discriminant_offset_via_byte_flip`
+    /// (run with `--run-ignored only --no-capture`): flipping the
+    /// byte at `bytes.len() - 48` to a non-zero discriminant fires
+    /// `bytecheck` with `invalid discriminant '153' for enum
+    /// 'ArchivedServiceBackendRowEnvelope'`. The trailing 48 bytes
+    /// encompass the V1 payload root: 8B service_id + 4B vip + 4B
+    /// alignment + 8B backends RelVec + 8B counter + 16B writer
+    /// ArchivedString (the alloc/addr strings of every backend live
+    /// in the leading slab, not the trailing root).
+    ///
+    /// Re-pin alongside the schema-evolution fixture at every
+    /// version-bump per
+    /// [`VersionedEnvelope::discriminant_offset_from_end`]'s
+    /// docstring.
+    fn discriminant_offset_from_end() -> Option<usize> {
+        Some(48)
+    }
+
+    fn known_discriminants() -> &'static [u8] {
+        // V1 carries rkyv discriminant 0 (declaration order — first
+        // variant). Empirically verified by archiving a canonical
+        // `ServiceBackendRowEnvelope::latest(...)` and inspecting the
+        // byte at `bytes.len() - 48`.
+        &[0]
     }
 
     fn type_name() -> &'static str {

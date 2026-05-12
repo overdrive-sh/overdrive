@@ -13,12 +13,15 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use std::net::Ipv4Addr;
+
 use overdrive_core::aggregate::WorkloadKind;
 use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
-use overdrive_core::id::{AllocationId, NodeId, Region, ServiceId, WorkloadId};
+use overdrive_core::id::{AllocationId, NodeId, Region, ServiceId, SpiffeId, WorkloadId};
+use overdrive_core::traits::dataplane::Backend;
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, NodeHealthRow, ObservationRow, ObservationStore,
-    ServiceHydrationResultRow, ServiceHydrationStatus,
+    ServiceBackendRow, ServiceHydrationResultRow, ServiceHydrationStatus,
 };
 use overdrive_core::wall_clock::UnixInstant;
 use overdrive_store_local::LocalObservationStore;
@@ -31,7 +34,7 @@ use tracing_subscriber::{Layer, Registry};
 
 use super::envelope_helpers::{
     write_raw_bytes_to_alloc_status_table, write_raw_bytes_to_node_health_table,
-    write_raw_bytes_to_service_hydration_results_table,
+    write_raw_bytes_to_service_backends_table, write_raw_bytes_to_service_hydration_results_table,
 };
 
 #[derive(Clone, Default)]
@@ -327,6 +330,98 @@ async fn malformed_service_hydration_row_is_logged_and_skipped_but_valid_row_sur
     assert!(
         decode_events[0].contains("observation_service_hydration_results"),
         "event must name the table 'observation_service_hydration_results'; got {:?}",
+        decode_events[0]
+    );
+
+    let refused: Vec<&String> =
+        entries.iter().filter(|e| e.contains("health.startup.refused")).collect();
+    assert!(
+        refused.is_empty(),
+        "observation layer must NOT emit health.startup.refused; got {refused:?}"
+    );
+}
+
+// ---------------------------------------------------------------------
+// S-EV-04.5 — ServiceBackendRow malformed-row skip + valid-row survives.
+// Mirrors the AllocStatusRow / NodeHealthRow / ServiceHydrationResultRow
+// sub-tests above against the service_backends table. Per ADR-0048 § 3
+// observation policy is log+skip — identical shape, distinct table =
+// "observation_service_backends" tag in the warn event.
+// ---------------------------------------------------------------------
+
+fn make_service_backend_row(service_id_value: u64, counter: u64) -> ServiceBackendRow {
+    let writer = NodeId::new("node-001").expect("valid writer node id");
+    let alloc =
+        SpiffeId::new("spiffe://overdrive.sh/svc/payments/alloc-1").expect("valid spiffe id");
+    ServiceBackendRow {
+        service_id: ServiceId::new(service_id_value).expect("valid service id"),
+        vip: Ipv4Addr::new(10, 0, 0, 1),
+        backends: vec![Backend {
+            alloc,
+            addr: "10.0.1.1:8080".parse().expect("valid socket addr"),
+            weight: 1,
+            healthy: true,
+        }],
+        updated_at: LogicalTimestamp { counter, writer },
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn malformed_service_backend_row_is_logged_and_skipped_but_valid_row_surfaces() {
+    let captured = CapturedEvents::default();
+    let subscriber = Registry::default().with(captured.clone());
+
+    let tmp = TempDir::new().expect("tempdir");
+    let redb_path = tmp.path().join("observation.redb");
+
+    let service_id = ServiceId::new(42).expect("valid service id");
+
+    // K1: valid row through the typed write path.
+    let k1_row = make_service_backend_row(42, 1);
+    {
+        let store = LocalObservationStore::open(&redb_path).expect("open #1");
+        store.write(ObservationRow::ServiceBackend(k1_row.clone())).await.expect("write K1");
+    } // store dropped; redb lock released
+
+    // K2: 16 bytes of 0xFF on a DIFFERENT service_id — does not decode
+    // through the envelope. We use a separate service_id so the scan
+    // for service_id=42 surfaces K1, while a scan for service_id=999
+    // exercises the decode_failed path.
+    let malformed_service_id = ServiceId::new(999).expect("valid service id");
+    write_raw_bytes_to_service_backends_table(&redb_path, malformed_service_id, &[0xFF; 16]);
+
+    let _guard = set_default(subscriber);
+
+    let store = LocalObservationStore::open(&redb_path).expect("open #2");
+
+    // Read for the malformed key — exercises the decode_failed path.
+    let rows_malformed = store
+        .service_backends_rows(&malformed_service_id)
+        .await
+        .expect("read service_backends rows (malformed key)");
+    assert!(rows_malformed.is_empty(), "malformed row must be skipped; got {rows_malformed:?}");
+
+    // Read for the valid key — exercises the survivor path.
+    let rows_valid = store
+        .service_backends_rows(&service_id)
+        .await
+        .expect("read service_backends rows (valid key)");
+
+    assert_eq!(rows_valid.len(), 1, "exactly one valid row must survive; got {rows_valid:?}");
+    assert_eq!(rows_valid[0].service_id, k1_row.service_id);
+    assert_eq!(rows_valid[0].vip, k1_row.vip);
+
+    let entries = captured.entries();
+    let decode_events: Vec<&String> =
+        entries.iter().filter(|e| e.contains("observation.envelope.decode_failed")).collect();
+    assert_eq!(
+        decode_events.len(),
+        1,
+        "exactly one decode_failed event expected; got {decode_events:?}"
+    );
+    assert!(
+        decode_events[0].contains("observation_service_backends"),
+        "event must name the table 'observation_service_backends'; got {:?}",
         decode_events[0]
     );
 

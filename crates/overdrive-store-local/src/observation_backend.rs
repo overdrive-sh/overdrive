@@ -64,7 +64,7 @@ use overdrive_core::id::{AllocationId, ServiceId};
 use overdrive_core::traits::observation_store::{
     AllocStatusRow, AllocStatusRowEnvelope, NodeHealthRow, NodeHealthRowEnvelope, ObservationRow,
     ObservationStore, ObservationStoreError, ObservationSubscription, ServiceBackendRow,
-    ServiceHydrationResultRow, ServiceHydrationResultRowEnvelope,
+    ServiceBackendRowEnvelope, ServiceHydrationResultRow, ServiceHydrationResultRowEnvelope,
 };
 use redb::{Database, ReadableTable, Table, TableDefinition};
 use tokio::sync::broadcast;
@@ -416,17 +416,39 @@ impl ObservationStore for LocalObservationStore {
     ) -> Result<Vec<ServiceBackendRow>, ObservationStoreError> {
         let inner = Arc::clone(&self.inner);
         let key = encode_service_backends_key(*service_id);
-        tokio::task::spawn_blocking(move || {
+        // Per ADR-0048 § 3 (observation layer): log + skip rows whose
+        // envelope decode failed. Mirror of the alloc_status_rows /
+        // node_health_rows / service_hydration_results_rows paths above
+        // — failures are collected inside the blocking task and
+        // emitted on the calling async thread so per-test
+        // `tracing::subscriber::set_default` guards (thread-local)
+        // observe them.
+        let (rows, decode_failures) = tokio::task::spawn_blocking(move || {
             let read = inner.db.begin_read().map_err(map_to_io)?;
             let table = read.open_table(SERVICE_BACKENDS_TABLE).map_err(map_to_io)?;
-            let Some(value) = table.get(key.as_slice()).map_err(map_to_io)? else {
-                return Ok::<_, ObservationStoreError>(Vec::new());
-            };
-            let row = decode_service_backends(value.value())?;
-            Ok(vec![row])
+            let mut rows: Vec<ServiceBackendRow> = Vec::new();
+            let mut failures: Vec<(Vec<u8>, ObservationStoreError)> = Vec::new();
+            if let Some(value) = table.get(key.as_slice()).map_err(map_to_io)? {
+                match decode_service_backends(value.value()) {
+                    Ok(row) => rows.push(row),
+                    Err(err) => failures.push((key.to_vec(), err)),
+                }
+            }
+            Ok::<_, ObservationStoreError>((rows, failures))
         })
         .await
-        .map_err(map_to_io)?
+        .map_err(map_to_io)??;
+
+        for (key_bytes, err) in decode_failures {
+            tracing::warn!(
+                name: "observation.envelope.decode_failed",
+                table = "observation_service_backends",
+                key = ?key_bytes,
+                source = ?err,
+                "skipping service-backend row that failed envelope decode",
+            );
+        }
+        Ok(rows)
     }
 }
 
@@ -605,31 +627,58 @@ const fn encode_service_backends_key(service_id: ServiceId) -> [u8; 8] {
     service_id.get().to_le_bytes()
 }
 
-/// Decode a prior rkyv-archived `ServiceBackendRow`. Mirrors
-/// [`decode_alloc_status`].
+/// Decode a prior rkyv-archived `ServiceBackendRowEnvelope` from
+/// redb-returned bytes and project to the latest payload shape per
+/// ADR-0048. Mirrors [`decode_alloc_status`] / [`decode_node_health`]
+/// / [`decode_service_hydration`].
+///
+/// Returns the envelope's [`overdrive_core::codec::EnvelopeError`]
+/// surfaced as `ObservationStoreError::Envelope` so callers can
+/// branch on the structured cause (malformed bytes vs unknown future
+/// variant). Per ADR-0048 § 3 the observation-layer policy is to
+/// log + skip the row, not refuse to start.
 fn decode_service_backends(bytes: &[u8]) -> Result<ServiceBackendRow, ObservationStoreError> {
     let mut aligned = rkyv::util::AlignedVec::<8>::new();
     aligned.extend_from_slice(bytes);
-    rkyv::from_bytes::<ServiceBackendRow, rkyv::rancor::Error>(&aligned).map_err(map_to_io)
+
+    // Probe the rkyv-archived discriminant byte BEFORE the full
+    // bytecheck — distinguishes "future binary's V<N+1>" from
+    // "bytes don't decode at all". Mirror of `decode_alloc_status`;
+    // see that function's docstring for rationale.
+    probe_known_variant::<ServiceBackendRowEnvelope>(aligned.as_ref())
+        .map_err(|source| ObservationStoreError::Envelope { source })?;
+
+    let envelope: ServiceBackendRowEnvelope =
+        rkyv::from_bytes::<ServiceBackendRowEnvelope, rkyv::rancor::Error>(&aligned).map_err(
+            |source| ObservationStoreError::Envelope {
+                source: overdrive_core::codec::EnvelopeError::Malformed { source },
+            },
+        )?;
+    envelope.into_latest().map_err(ObservationStoreError::from)
 }
 
 /// LWW-guarded insert for `ServiceBackendRow`. Keyed on `ServiceId`
 /// alone — one row per service. Mirrors [`apply_alloc_status_lww`].
-/// GH #160.
+/// On envelope decode failure of the prior row, treats the incoming
+/// write as dominating per ADR-0048 § 3 (the operator's typed write
+/// is the self-healing path). GH #160.
 fn apply_service_backends_lww(
     table: &mut Table<'_, &[u8], &[u8]>,
     incoming: &ServiceBackendRow,
 ) -> Result<bool, ObservationStoreError> {
     let key = encode_service_backends_key(incoming.service_id);
-    let dominates = match table.get(key.as_slice()).map_err(map_to_io)? {
-        None => true,
-        Some(prior) => {
-            let prior_row = decode_service_backends(prior.value())?;
-            incoming.updated_at.dominates(&prior_row.updated_at)
+    let dominates = table.get(key.as_slice()).map_err(map_to_io)?.is_none_or(|prior| {
+        match decode_service_backends(prior.value()) {
+            Ok(prior_row) => incoming.updated_at.dominates(&prior_row.updated_at),
+            Err(_) => true,
         }
-    };
+    });
     if dominates {
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(incoming).map_err(map_to_io)?;
+        // Wrap into the versioned envelope at the write boundary per
+        // ADR-0048 § 1 — the on-disk shape is the envelope, never the
+        // bare payload.
+        let envelope = ServiceBackendRowEnvelope::latest(incoming.clone());
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).map_err(map_to_io)?;
         table.insert(key.as_slice(), bytes.as_ref()).map_err(map_to_io)?;
     }
     Ok(dominates)
