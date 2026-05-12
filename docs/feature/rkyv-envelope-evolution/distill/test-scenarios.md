@@ -104,73 +104,76 @@ assertion in the same commit.
 
 ---
 
-## S-EV-02a — Layer-1 write enforcement: cross-crate payload unreachability
+## S-EV-02a — Layer-1 write enforcement: cross-crate envelope unreachability
 
-**Source**: DESIGN § 10 S-EV-02a (split per review-revision M2); ADR-0048 § 2 Layer 1
+**Source**: DESIGN § 10 S-EV-02a (split per review-revision M2; further reconciled per UI-02 — alias-to-payload public API); ADR-0048 § 2 Layer 1
 **Driving port**: rustc itself (compile-time enforcement)
 **Tier**: trybuild compile-fail (default-lane)
 **Tag**: `@enforcement @compile_fail`
 **Test files**:
 - `crates/overdrive-store-local/tests/compile_fail.rs` (entrypoint calling `trybuild::TestCases::new()`)
-- `crates/overdrive-store-local/tests/compile_fail/alloc_status_row_payload_unreachable.rs` (fixture)
-- `crates/overdrive-store-local/tests/compile_fail/alloc_status_row_payload_unreachable.stderr` (pinned diagnostic)
+- `crates/overdrive-store-local/tests/compile_fail/alloc_status_row_envelope_unreachable.rs` (fixture)
+- `crates/overdrive-store-local/tests/compile_fail/alloc_status_row_envelope_unreachable.stderr` (pinned diagnostic)
 
 ### Preconditions
 
-- `AllocStatusRowV1` declared `pub` in `overdrive-core` but **NOT re-exported from `overdrive-core::lib.rs`** (per ADR-0048 § 2 Layer 1 as amended 2026-05-12 UI-01 reconciliation; NEW — RED scaffold)
-- Rationale: the literal `pub(crate)` declaration fails to compile with rustc E0446 because the `pub trait VersionedEnvelope`'s `type Latest = AllocStatusRowV1;` assignment exposes the payload as part of the trait's public surface. Layer 1's enforcement mechanism is therefore non-re-export from `lib.rs` + code-review convention, not compile-time `pub(crate)`.
+- `AllocStatusRowEnvelope` (the codec-internal envelope enum) declared `pub` in `overdrive-core` but **NOT re-exported from `overdrive-core::lib.rs`** (per ADR-0048 § 2 Layer 1 as amended UI-01 reconciliation; further reconciled UI-02 — alias-to-payload). The publicly re-exported name `overdrive_core::AllocStatusRow` is the **payload alias** `AllocStatusRowV1`.
+- Inner payload types (`AllocStatusRowV1`, …) are declared `pub` but likewise un-re-exported from the crate root, as defense in depth.
+- Rationale: the literal `pub(crate)` declaration fails to compile with rustc E0446 because the `pub trait VersionedEnvelope`'s `type Latest = AllocStatusRowV1;` assignment exposes the payload as part of the trait's public surface. Layer 1's enforcement mechanism is therefore non-re-export from `lib.rs` + code-review convention, not compile-time `pub(crate)`. Under the UI-02 alias-to-payload shape the **load-bearing non-re-export target is the envelope enum** — that is the codec-internal name a cross-crate writer would need to reach in order to call `<Envelope>::V<N>(payload)` or `<Envelope>::latest(payload)`.
 
 ### Scenario
 
 ```gherkin
-Scenario: A cross-crate writer cannot name AllocStatusRowV1 via the short re-exported path
+Scenario: A cross-crate writer cannot name AllocStatusRowEnvelope via the short re-exported path
   Given the fixture source file at
-        crates/overdrive-store-local/tests/compile_fail/alloc_status_row_payload_unreachable.rs
+        crates/overdrive-store-local/tests/compile_fail/alloc_status_row_envelope_unreachable.rs
         contains the following body:
             use overdrive_core::AllocStatusRowEnvelope;
-            use overdrive_core::AllocStatusRowV1;
             fn main() {
-                let _: AllocStatusRowEnvelope = AllocStatusRowEnvelope::V1(
-                    AllocStatusRowV1 {
-                        alloc_id: AllocationId::default(),
-                        workload_id: WorkloadId::default(),
-                        node_id: NodeId::default(),
-                        state: AllocState::Pending,
-                        updated_at: LogicalTimestamp::default(),
-                    });
+                let _: AllocStatusRowEnvelope = todo!();
             }
   When trybuild compiles the fixture against the production overdrive-core crate
   Then the compilation fails
-    And the compiler diagnostic identifies the AllocStatusRowV1 import as unresolvable
+    And the compiler diagnostic identifies the AllocStatusRowEnvelope import as unresolvable
         because the type is not re-exported from the crate root
         (rustc error code E0432 "unresolved import")
-    And the diagnostic explicitly names AllocStatusRowV1 as the offending identifier
-    And the diagnostic does NOT mention the envelope variant V1 as the offending construct
-        (Layer 1 leaves the variant constructor reachable — the un-re-exported payload
-         is what makes the short-path import fail — per ADR-0048 § 2 as amended)
+    And the diagnostic explicitly names AllocStatusRowEnvelope as the offending identifier
+    And the diagnostic does NOT mention the variant V1 itself as the offending construct
+        (Layer 1 leaves the variant constructor reachable in principle — the un-re-exported
+         envelope is what makes the short-path import fail — per ADR-0048 § 2 as amended)
   And the pinned .stderr fixture file matches the captured diagnostic verbatim
 ```
 
-### Why this is correct under ADR-0048 § 2 (as amended UI-01)
+### Why this is correct under ADR-0048 § 2 (as amended UI-01 + UI-02)
 
 The fixture explicitly does NOT assert that the variant constructor
-`AllocStatusRowEnvelope::V1(...)` is unreachable. Per ADR-0048 § 2
-"What Layer 1 does NOT block": the envelope enum is `pub`, so the
-variant constructor expression is syntactically reachable from any
-crate. Layer 1's structural surface is the **non-re-export** of
-inner payload types from `overdrive-core::lib.rs` — a disciplined
-writer can still find the verbose
-`overdrive_core::traits::observation_store::AllocStatusRowV1` path,
-but the short `overdrive_core::AllocStatusRowV1` path does not
-resolve. This fixture pins exactly the non-re-export property by
-attempting the short import and asserting E0432 ("unresolved
-import — no `AllocStatusRowV1` in the root"). The in-crate
-variant-construction prohibition is covered by S-EV-02b (the
+`AllocStatusRowEnvelope::V1(...)` is unreachable in principle. Per
+ADR-0048 § 2 "What Layer 1 does NOT block": the envelope enum is
+`pub`, so the variant constructor expression is syntactically
+reachable from any crate that names the envelope. Layer 1's
+structural surface is the **non-re-export of the codec-internal
+envelope enum** from `overdrive-core::lib.rs` — a disciplined writer
+can still find the verbose
+`overdrive_core::traits::observation_store::AllocStatusRowEnvelope`
+path, but the short `overdrive_core::AllocStatusRowEnvelope` path
+does not resolve. This fixture pins exactly the non-re-export
+property of the envelope by attempting the short import and asserting
+E0432 ("unresolved import — no `AllocStatusRowEnvelope` in the root").
+
+The public re-exported name `overdrive_core::AllocStatusRow` (= the
+payload alias `AllocStatusRowV1`) remains the unimpeded callers'
+interface — they continue to construct `AllocStatusRow { ... }`
+freely. The in-crate variant-construction prohibition (the
+load-bearing structural defense) is covered by S-EV-02b (the
 dst-lint scanner unit test). Together S-EV-02a + S-EV-02b cover the
 two distinct Layer 1 + Layer 2 mechanisms.
 
 One fixture is sufficient (the Layer 1 non-re-export property is
-uniform across all five envelopes).
+uniform across all five envelopes). An additional fixture asserting
+`use overdrive_core::AllocStatusRowV1;` also fails with E0432
+(defense-in-depth non-re-export of inner payloads) is structurally
+analogous and may be included if it clarifies intent at code review
+time.
 
 ---
 
@@ -511,7 +514,7 @@ for the remaining observation row types). All driven adapters
 | ADR-0048 § | DESIGN § 10 ID | DISTILL scenario | Mandate |
 |---|---|---|---|
 | § 1 (per-type rkyv enum) | S-EV-01 | S-EV-01.1 .. .5 | Coverage; observable behaviour |
-| § 2 Layer 1 (non-re-export) | S-EV-02a | S-EV-02a | Compile-time enforcement (unresolved-import E0432 on short re-exported path) |
+| § 2 Layer 1 (non-re-export of codec-internal envelope) | S-EV-02a | S-EV-02a | Compile-time enforcement (unresolved-import E0432 on short re-exported path to `AllocStatusRowEnvelope`) |
 | § 2 Layer 2 (dst-lint) | S-EV-02b | S-EV-02b.1 .. .4 | In-crate enforcement |
 | § 3 Intent fail-fast | S-EV-05 | S-EV-03.1 + .2 | Asymmetric read policy |
 | § 3 Observation degrade | S-EV-04 | S-EV-04.1 .. .5 | Asymmetric read policy |

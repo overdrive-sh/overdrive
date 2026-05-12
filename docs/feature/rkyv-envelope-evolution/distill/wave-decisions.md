@@ -77,9 +77,14 @@ gating" / "Layout". The entrypoint at
 `#![cfg(feature = "integration-tests")]` gate.
 
 **S-EV-02a** — trybuild fixture at
-`crates/overdrive-store-local/tests/compile_fail/<envelope>_payload_unreachable.rs`
+`crates/overdrive-store-local/tests/compile_fail/<envelope>_envelope_unreachable.rs`
 driven from a `tests/compile_fail.rs` entrypoint that calls
-`trybuild::TestCases::compile_fail()`.
+`trybuild::TestCases::compile_fail()`. Under the UI-02 amendment the
+fixture asserts E0432 on `use overdrive_core::AllocStatusRowEnvelope;`
+(non-re-export of the codec-internal envelope enum). The public
+re-exported `AllocStatusRow` = `AllocStatusRowV1` payload alias
+remains the unimpeded callers' interface (confirmation of the
+reduced call-site footprint per UI-02).
 
 **S-EV-02b / S-EV-06** — unit tests inside `xtask/src/dst_lint.rs` (or
 a sibling `xtask/src/dst_lint/envelope.rs` module); no
@@ -98,7 +103,7 @@ a sibling `xtask/src/dst_lint/envelope.rs` module); no
 | `tests/integration/envelope_observation_skip.rs` | `overdrive-store-local` | `integration-tests` |
 | `tests/integration/envelope_intent_refuse.rs` | `overdrive-store-local` | `integration-tests` |
 | `tests/compile_fail.rs` (entrypoint) | `overdrive-store-local` | default (trybuild gates internally) |
-| `tests/compile_fail/alloc_status_row_payload_unreachable.rs` | `overdrive-store-local` | trybuild fixture |
+| `tests/compile_fail/alloc_status_row_envelope_unreachable.rs` | `overdrive-store-local` | trybuild fixture |
 | `tests/dst_lint/envelope_variant_construction.rs` (or inline `#[cfg(test)] mod tests`) | `xtask` | default |
 
 ---
@@ -165,7 +170,7 @@ wave:
 |---|---|---|
 | `VersionedEnvelope` trait | `crates/overdrive-core/src/codec/envelope.rs` | trait methods bodied with `todo!("RED scaffold: ...")` |
 | `EnvelopeError` enum | `crates/overdrive-core/src/codec/envelope.rs` | full enum with `UnknownVersion` + `Malformed` variants, `Display` impl bodied with `todo!`; thiserror derive |
-| `AllocStatusRowEnvelope` + `V1`/`V2` payloads | `crates/overdrive-core/src/traits/observation_store.rs` | enum + `pub` payload structs (not re-exported from `overdrive-core::lib.rs` per ADR-0048 § 2 Layer 1 as amended UI-01 — rustc E0446 forbids literal `pub(crate)`) + `From<V1> for V2` bodied with `todo!` |
+| `AllocStatusRowEnvelope` + `V1`/`V2` payloads | `crates/overdrive-core/src/traits/observation_store.rs` | codec-internal envelope enum + `pub` payload structs (envelope enum AND payload structs **not re-exported from `overdrive-core::lib.rs`** per ADR-0048 § 2 Layer 1 as amended UI-01 — rustc E0446 forbids literal `pub(crate)`; further reconciled UI-02 — alias-to-payload, `pub type AllocStatusRow = AllocStatusRowV1`) + `From<V1> for V2` bodied with `todo!` |
 | `NodeHealthRowEnvelope` + `V1` payload | same file | enum + payload struct |
 | `ServiceHydrationResultRowEnvelope` + `V1` payload | same file | enum + payload struct |
 | `ServiceBackendRowEnvelope` + `V1` payload | same file | enum + payload struct |
@@ -241,7 +246,7 @@ end-user-facing semantics; this feature does not.
 
 **Sequencing recommendation** (advisory; crafter owns the slice plan):
 1. WS: `AllocStatusRowEnvelope` V1 roundtrip (S-EV-01 for alloc_status only) — proves the envelope shape compiles and roundtrips
-2. WS: Layer-1 trybuild (S-EV-02a) — proves non-re-export of the inner payload from `overdrive-core::lib.rs` causes E0432 on the short-path import (per ADR-0048 § 2 Layer 1 as amended UI-01; rustc E0446 forbids literal `pub(crate)`)
+2. WS: Layer-1 trybuild (S-EV-02a) — proves non-re-export of the **codec-internal envelope enum** (`AllocStatusRowEnvelope`) from `overdrive-core::lib.rs` causes E0432 on the short-path import (per ADR-0048 § 2 Layer 1 as amended UI-01 — rustc E0446 forbids literal `pub(crate)`; further reconciled UI-02 — alias-to-payload public API, so the non-re-export target is the envelope, not the payload). The public re-exported `AllocStatusRow` = payload alias remains the unimpeded callers' interface.
 3. WS: Layer-2 dst-lint clause + its unit test (S-EV-02b) — proves the scanner catches in-crate violations
 4. WS: Observation log+skip for `AllocStatusRow` only (S-EV-04 first row) — proves the read-side error path
 5. WS: Intent refuse-to-start for `JobEnvelope` (S-EV-03) — proves the asymmetric policy

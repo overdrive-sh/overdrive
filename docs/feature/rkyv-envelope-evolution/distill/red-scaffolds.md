@@ -19,13 +19,30 @@ SSOT discipline: DISTILL says *what must exist*, DELIVER says *what
 each one does*.
 
 > Crafter note: per `.claude/rules/development.md` § "rkyv schema
-> evolution" (as amended 2026-05-12 UI-01 reconciliation), inner
-> payload types are declared `pub` (NOT `pub(crate)`) and **MUST NOT
-> be re-exported from the crate root** (`overdrive-core::lib.rs`).
-> Cross-crate writers reach the envelope only through `<Foo>Latest`
-> + `Envelope::latest(...)`. The non-re-export discipline is the
-> load-bearing convention surface for Layer 1; the dst-lint clause
-> (Layer 2, Group 5) is the structural enforcement gate.
+> evolution" (as amended 2026-05-12 UI-01 reconciliation; further
+> reconciled 2026-05-12 UI-02 — **alias-to-payload public API**):
+>
+> - **Public alias points at the payload struct**, not the envelope:
+>   `pub type AllocStatusRow = AllocStatusRowV1` (NOT
+>   `= AllocStatusRowEnvelope`). Public callers continue to construct
+>   `AllocStatusRow { ... }` (= V1 payload) with struct-literal syntax
+>   exactly as before — no `.latest(...)` wrapping at call sites.
+> - **The envelope enum (`AllocStatusRowEnvelope`) is codec-internal**.
+>   It is declared `pub` but **MUST NOT be re-exported** from the
+>   crate root (`overdrive-core::lib.rs`). Cross-crate code reaching
+>   for the envelope finds only the verbose
+>   `overdrive_core::traits::observation_store::AllocStatusRowEnvelope`
+>   path, signposted as "reaching into the persistence boundary."
+> - **Inner payload types** (`AllocStatusRowV1`, …) are declared
+>   `pub` (NOT `pub(crate)` — rustc E0446 forbids that under a `pub`
+>   trait's `type Latest = <Payload>;`) and likewise **NOT re-exported
+>   from the crate root** as defense in depth.
+> - **The persistence-boundary code** (`LocalObservationStore::write_alloc_status`,
+>   `LocalStore::open` / `write_entry`) is the sole call site that
+>   names the envelope and uses `Envelope::latest(payload)` / `envelope.into_latest()?`.
+> - The non-re-export discipline is the load-bearing convention surface
+>   for Layer 1; the dst-lint clause (Layer 2, Group 5) is the structural
+>   enforcement gate.
 
 ---
 
@@ -79,23 +96,39 @@ pub enum EnvelopeError {
 (replacing/wrapping the existing four row types at lines 283, 392,
 463, 494)
 
-> **Inner-payload visibility (amended 2026-05-12 UI-01 reconciliation).**
+> **Inner-payload visibility (amended 2026-05-12 UI-01 reconciliation;
+> further reconciled 2026-05-12 UI-02 — alias-to-payload).**
 > Inner payload types are declared `pub`, NOT `pub(crate)`. The
 > literal `pub(crate)` declaration fails to compile with **rustc
 > E0446** because the `pub trait VersionedEnvelope`'s
 > `type Latest = <PayloadV1>;` associated-type assignment exposes
 > the payload as part of the trait's public surface, and rustc
-> rejects a `pub(crate)` type referenced from a `pub` trait. The
-> Layer 1 enforcement mechanism is therefore **non-re-export from
-> `overdrive-core::lib.rs`** (a code-review convention) plus the
-> typed visibility-hint of leaving inner payloads un-re-exported.
-> The structural defense against drift is Layer 2 (the dst-lint
-> clause; see Group 5).
+> rejects a `pub(crate)` type referenced from a `pub` trait.
+>
+> Under UI-02 (alias-to-payload) the **publicly re-exported name**
+> from `overdrive-core` is `AllocStatusRow` (= `AllocStatusRowV1`,
+> the payload struct). The codec-internal envelope enum
+> (`AllocStatusRowEnvelope`) is `pub` but NOT re-exported from the
+> crate root; inner payload variant types (`AllocStatusRowV1`,
+> future `AllocStatusRowV2`) are likewise `pub` but un-re-exported
+> as defense in depth. Cross-crate writers see only the payload
+> alias `AllocStatusRow` at the short path; reaching the envelope
+> name requires the verbose
+> `overdrive_core::traits::observation_store::AllocStatusRowEnvelope`
+> path, signposted as "reaching into the persistence boundary."
+>
+> The Layer 1 enforcement mechanism is therefore **non-re-export of
+> the envelope enum from `overdrive-core::lib.rs`** (a code-review
+> convention; the envelope is the codec-internal name a cross-crate
+> writer would need in order to call `<Envelope>::V<N>(payload)` or
+> `<Envelope>::latest(payload)`), with payload non-re-export as
+> defense in depth. The structural defense against drift is Layer 2
+> (the dst-lint clause; see Group 5).
 
-### 2.1 — `AllocStatusRowEnvelope`
+### 2.1 — `AllocStatusRowEnvelope` (codec-internal) + `AllocStatusRow` (public payload alias)
 
 ```rust
-// SCAFFOLD: true
+// SCAFFOLD: true — codec-internal envelope; NOT re-exported from crate root
 #[derive(Debug, Clone, PartialEq, Eq,
          rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum AllocStatusRowEnvelope {
@@ -103,11 +136,15 @@ pub enum AllocStatusRowEnvelope {
     // Future: V2(AllocStatusRowV2)
 }
 
-pub type AllocStatusRow = AllocStatusRowEnvelope;
+// Public payload alias — callers continue to use `AllocStatusRow { ... }`
+// with struct-literal syntax (UI-02 amendment, 2026-05-12).
+pub type AllocStatusRow = AllocStatusRowV1;
 pub type AllocStatusRowLatest = AllocStatusRowV1;
 
 // SCAFFOLD: true — pub per ADR-0048 § 2 Layer 1 (rustc E0446 forbids
-// literal pub(crate); enforcement is non-re-export from lib.rs)
+// literal pub(crate); enforcement is non-re-export from lib.rs as
+// defense in depth — the load-bearing non-re-export target is the
+// envelope enum above).
 #[derive(Debug, Clone, PartialEq, Eq,
          rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct AllocStatusRowV1 {
@@ -137,6 +174,15 @@ impl VersionedEnvelope for AllocStatusRowEnvelope {
 }
 ```
 
+> **Crafter note on the wrapping site (UI-02).** The persistence-
+> boundary code (`LocalObservationStore::write_alloc_status` and the
+> read paths) is the ONLY site that names `AllocStatusRowEnvelope` —
+> writes wrap via `AllocStatusRowEnvelope::latest(row.clone())`,
+> reads project via `envelope.into_latest()?`. Non-boundary code
+> (handlers, CLI commands, internal helpers) takes
+> `&AllocStatusRow` (= `&AllocStatusRowV1`) and never names the
+> envelope.
+
 ### 2.2 — `NodeHealthRowEnvelope` (same shape; wraps existing `NodeHealthRow` as `NodeHealthRowV1`)
 
 ### 2.3 — `ServiceHydrationResultRowEnvelope` (same shape; wraps existing `ServiceHydrationResultRow` as `V1`)
@@ -150,22 +196,26 @@ impl VersionedEnvelope for AllocStatusRowEnvelope {
 **Path**: `crates/overdrive-core/src/aggregate/mod.rs` (wrapping the
 existing `Job` at lines 96-117)
 
-### 3.1 — `JobEnvelope`
+### 3.1 — `JobEnvelope` (codec-internal) + `Job` (public payload alias)
 
 ```rust
-// SCAFFOLD: true
+// SCAFFOLD: true — codec-internal envelope; NOT re-exported from crate root
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize,
          rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum JobEnvelope {
     V1(JobV1),
 }
 
+// Public payload alias — callers continue to use `Job { ... }`
+// with struct-literal syntax (UI-02 amendment, 2026-05-12). No
+// `Job::latest(JobLatest { ... })` rewrite at call sites; the
+// `LocalStore` persistence boundary is the sole wrapping site.
+pub type Job = JobV1;
 pub type JobLatest = JobV1;
-// Note: existing pub type Job = JobEnvelope alias replaces direct Job struct
-// per ADR-0048 § 4 (outer-envelope-only on Job)
 
 // pub per ADR-0048 § 2 Layer 1 (rustc E0446 forbids literal pub(crate);
-// enforcement is non-re-export from overdrive-core::lib.rs)
+// enforcement is non-re-export from overdrive-core::lib.rs as defense
+// in depth — the load-bearing non-re-export target is JobEnvelope).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize,
          rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct JobV1 {
@@ -176,12 +226,16 @@ pub struct JobV1 {
 }
 ```
 
-> **Aggregate rename caveat**: today `Job` is the public struct. After
-> the envelope lands, `Job` becomes the envelope alias and `JobV1`
-> holds the fields. Callers throughout `overdrive-store-local`,
-> `overdrive-control-plane`, and `overdrive-cli` continue to use the
-> name `Job` — only constructions move through
-> `Job::latest(JobLatest { ... })`. Per ADR-0048 § 4 (outer-envelope-only)
+> **No call-site rename under UI-02 amendment.** Today `Job` is the
+> public struct via `pub struct Job { ... }`. After the envelope lands,
+> `Job` becomes a type alias `pub type Job = JobV1` (= the payload
+> struct), so every existing struct-literal `Job { id, replicas,
+> resources, driver }` construction across `overdrive-store-local`,
+> `overdrive-control-plane`, `overdrive-cli`, and fixtures continues
+> to compile unchanged. The persistence boundary — `LocalStore::open`
+> (read via `JobEnvelope::into_latest()`), `LocalStore::write_entry`
+> (write via `JobEnvelope::latest(job.clone())`) — is the SOLE site
+> that names `JobEnvelope`. Per ADR-0048 § 4 (outer-envelope-only)
 > embedded types `WorkloadDriver` and `Exec` are NOT wrapped.
 
 ---

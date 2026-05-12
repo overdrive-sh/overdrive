@@ -235,34 +235,49 @@ envelope discipline) in `core::codec`. Mirrors the
 **Recommendation: combination of (i) `type Latest = ...` alias + (ii) trait-driven `latest()` constructor.**
 
 ```rust
-// overdrive-core::aggregate::alloc_status (or wherever the row lives)
-pub type AllocStatusRow = AllocStatusRowEnvelope;        // exported as "the row"
-pub type AllocStatusRowLatest = AllocStatusRowV2;        // alias for current shape
+// overdrive-core::traits::observation_store (or wherever the row lives)
+// Amended 2026-05-12 UI-02 reconciliation: alias-to-payload public API.
+pub type AllocStatusRow = AllocStatusRowV1;              // payload alias — callers continue to use struct-literal AllocStatusRow { ... }
+pub type AllocStatusRowLatest = AllocStatusRowV1;        // "latest payload" name preserved for documentation
 
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, ...)]
-pub enum AllocStatusRowEnvelope {
+pub enum AllocStatusRowEnvelope {                        // codec-internal — referenced only by persistence-boundary code
     V1(AllocStatusRowV1),
-    V2(AllocStatusRowV2),
+    // V2(AllocStatusRowV2) lands when schema breaks
 }
 
 impl VersionedEnvelope for AllocStatusRowEnvelope {
-    type Latest = AllocStatusRowV2;
-    fn latest(payload: Self::Latest) -> Self { Self::V2(payload) }
+    type Latest = AllocStatusRowV1;
+    fn latest(payload: Self::Latest) -> Self { Self::V1(payload) }
     fn into_latest(self) -> Result<Self::Latest, EnvelopeError> {
         match self {
-            Self::V1(v1) => Ok(v1.into()),       // From<V1> for V2 — additive
-            Self::V2(v2) => Ok(v2),
+            Self::V1(v1) => Ok(v1),
+            // Self::V2(v2) => Ok(v2),  when V2 lands
         }
     }
 }
 ```
 
-Every write site is:
+Public callers continue to use struct-literal syntax as before:
 
 ```rust
-let row = AllocStatusRow::latest(AllocStatusRowLatest { /* fields */ });
-store.write(row)?;
+let row = AllocStatusRow { /* fields */ };               // = AllocStatusRowV1 { ... }
+store.write_alloc_status(&row).await?;                   // persistence boundary wraps via Envelope::latest internally
 ```
+
+Only the persistence-boundary code (`LocalObservationStore::write_alloc_status`,
+`LocalStore::write_entry`) names the envelope type:
+
+```rust
+// inside LocalObservationStore::write_alloc_status — the wire-layer wrap
+let envelope = AllocStatusRowEnvelope::latest(row.clone());
+let bytes = rkyv::to_bytes::<_, rkyv::rancor::Error>(&envelope)?;
+// ... write bytes to redb
+```
+
+Schema evolution V1→V2: re-alias `pub type AllocStatusRow =
+AllocStatusRowV2`. Call sites that touch removed/renamed fields
+break at compile time exactly where the schema change touches them.
 
 **Symptom enforcement — two-layer (honest mechanism, amended
 2026-05-12 UI-01 reconciliation)**:
@@ -466,6 +481,19 @@ Rationale:
    "V2 lands by deleting the V1 on-disk file." Phase 2+ may introduce
    sub-envelopes if the cost ratio inverts.
 
+**Public alias shape** (amended 2026-05-12 UI-02 reconciliation):
+`pub type Job = JobV1` (alias-to-payload). `JobEnvelope` is
+codec-internal — used only by `LocalStore` for the redb wire
+boundary. Public callers (`overdrive-store-local`,
+`overdrive-control-plane`, `overdrive-cli` handlers, CLI commands,
+fixtures) continue to construct `Job { id, replicas, resources,
+driver }` using struct-literal syntax exactly as they did
+pre-envelope. The fail-fast intent path (`LocalStore::open`
+returning `Err(IntentStoreError::Envelope { ... })`) still goes
+through rkyv-deserialising into `JobEnvelope` and calling
+`envelope.into_latest()?` — that surface is internal to the
+persistence boundary.
+
 ---
 
 ## 5. Trade-off summary — recommendation
@@ -474,7 +502,7 @@ Rationale:
 |---|---|---|
 | **A. Envelope shape** | A1 — per-type rkyv enum | **Confirmed by user 2026-05-12** |
 | **B. Where it lives** | Per-type co-located; shared trait + error in `overdrive-core::codec::envelope` | **Confirmed by user 2026-05-12** |
-| **C. Write invariant** | Two complementary layers (amended 2026-05-12 UI-01 reconciliation): (1) **Layer 1 — non-re-export discipline (convention, not compiler enforcement).** Inner payload types are declared `pub` but NOT re-exported from `overdrive-core::lib.rs`; cross-crate writers reach them only via the verbose, internal-looking `overdrive_core::traits::observation_store::AllocStatusRowV1` path, which is discouraged at code review. The canonical construction path is `Envelope::latest(<Foo>Latest { ... })`. **rustc E0446 prevents the literal `pub(crate)` declaration** (the `pub trait VersionedEnvelope`'s `type Latest = <Payload>;` exposes the payload as public surface). Layer 1 reduces the writer surface to a verbose, un-re-exported path that is discouraged in code review. The structural defense is Layer 2. (2) **Layer 2 — `xtask::dst_lint` clause (load-bearing).** A one-clause addition to the existing `xtask::dst_lint` scanner (syntactic; no `overdrive-*` deps so the xtask boundary stays intact) flags `<Envelope>::V<N>(` literals outside the defining module's own `From` / `into_latest` impls. **This is the structural enforcement** for both cross-crate disciplined-writers and in-crate writers. Honest framing: non-re-export is the convention surface; the dst-lint clause is the load-bearing gate. | **Confirmed by user 2026-05-12; revised 2026-05-12 per peer review; amended 2026-05-12 (UI-01 reconciliation — rustc E0446)** |
+| **C. Write invariant** | Two complementary layers (amended 2026-05-12 UI-01 reconciliation; further reconciled 2026-05-12 UI-02 to use **alias-to-payload public API**): (1) **Layer 1 — non-re-export discipline (convention, not compiler enforcement).** The codec-internal envelope type (`AllocStatusRowEnvelope`) is declared `pub` but NOT re-exported from `overdrive-core::lib.rs`. The public alias `pub type AllocStatusRow = AllocStatusRowV1` points at the payload struct; the envelope is invisible outside the persistence boundary. Cross-crate writers naming the envelope reach it only via the verbose `overdrive_core::traits::observation_store::AllocStatusRowEnvelope` path (discouraged at code review). Inner payload types (`AllocStatusRowV1`, …) are similarly `pub` but un-re-exported as defense in depth. **rustc E0446 prevents the literal `pub(crate)` declaration** (the `pub trait VersionedEnvelope`'s `type Latest = <Payload>;` exposes the payload as public surface). Layer 1 reduces the writer surface to a verbose, un-re-exported path that is discouraged in code review. The structural defense is Layer 2. (2) **Layer 2 — `xtask::dst_lint` clause (load-bearing).** A one-clause addition to the existing `xtask::dst_lint` scanner (syntactic; no `overdrive-*` deps so the xtask boundary stays intact) flags `<Envelope>::V<N>(` literals outside the defining module's own `From` / `into_latest` impls. **This is the structural enforcement** for both cross-crate disciplined-writers and in-crate writers. Honest framing: non-re-export is the convention surface; the dst-lint clause is the load-bearing gate. Under the alias-to-payload shape the persistence-boundary code is the sole `Envelope::latest(payload)` call site; public callers never name the envelope. | **Confirmed by user 2026-05-12; revised 2026-05-12 per peer review; amended 2026-05-12 (UI-01 reconciliation — rustc E0446); reversed 2026-05-12 (UI-02 reconciliation — alias-to-payload public API)** |
 | **D. Read policy** | Intent: refuse to start on unknown/malformed. Observation: log + skip row. Errors via `EnvelopeError` `#[from]` | **Confirmed by user 2026-05-12 (asymmetric)** |
 | **E. Docs** | Correct three false docstrings; new § "rkyv schema evolution" in development.md | **Confirmed; landed 2026-05-12** |
 | **F. Tests** | Golden-bytes per-version fixtures; new bullet in testing.md § PBT mandatory call sites | **Confirmed; landed 2026-05-12** |
@@ -586,16 +614,17 @@ pub enum EnvelopeError {
 }
 ```
 
-Per-type shape:
+Per-type shape (alias-to-payload — UI-02 amendment 2026-05-12):
 
 ```rust
+pub type AllocStatusRow = AllocStatusRowV1;          // payload alias — callers use struct-literal AllocStatusRow { ... }
+pub type AllocStatusRowLatest = AllocStatusRowV1;    // "latest payload" name
+
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, ...)]
-pub enum AllocStatusRowEnvelope {
+pub enum AllocStatusRowEnvelope {                    // codec-internal — referenced only by persistence-boundary code
     V1(AllocStatusRowV1),
-    V2(AllocStatusRowV2),
+    // V2(AllocStatusRowV2) lands when schema breaks
 }
-pub type AllocStatusRow = AllocStatusRowEnvelope;   // exported as "the row"
-pub type AllocStatusRowLatest = AllocStatusRowV2;
 ```
 
 Read-time policy:
@@ -695,7 +724,8 @@ All four open questions confirmed by the user. SSOT writes performed:
 Resolved decisions:
 
 - **(A) Envelope shape**: per-type rkyv enum (`enum FooRowEnvelope { V1(...), V2(...) }`). Generic `Envelope<T>` and `Tagged<T>` rejected.
-- **(C) Write invariant**: two complementary layers per honest mechanism statement (revised 2026-05-12 per peer review; **amended 2026-05-12 UI-01 reconciliation — rustc E0446**).
+- **(C) Write invariant**: two complementary layers per honest mechanism statement (revised 2026-05-12 per peer review; **amended 2026-05-12 UI-01 reconciliation — rustc E0446**; **further reconciled 2026-05-12 UI-02 — alias-to-payload public API**).
+  - **UI-02 finding (2026-05-12).** The roadmap criterion for step 01-03 specified `pub type AllocStatusRow = AllocStatusRowEnvelope` (alias-to-envelope public API). The orchestrator pushed back on the first crafter's alias-to-payload landing (commit `a90755a2`) and triggered an attempted re-migration. The user halted and reversed direction: the alias-to-envelope shape introduces three public names per row type, forces ~50-70 call-site rewrites per type, and buys nothing meaningful over the simpler alias-to-payload shape (Layer 2 dst-lint targets `<Envelope>::V<N>(...)` constructions regardless of which name the public alias points at). The amended decision: `pub type AllocStatusRow = AllocStatusRowV1` (alias to the payload struct); `AllocStatusRowEnvelope` is codec-internal, consumed only by `LocalObservationStore` read/write paths. Same rule for `Job` (`pub type Job = JobV1`; `JobEnvelope` codec-internal). Commit `a90755a2` remains the correct GREEN landing for step 01-03 under this shape. See `docs/feature/rkyv-envelope-evolution/deliver/upstream-issues.md` (UI-02) for the full RCA.
   - **rustc E0446 finding (UI-01).** The original ADR-0048 Layer 1 statement called for inner payload types to be declared `pub(crate)` so a `pub trait VersionedEnvelope`'s `type Latest = <PayloadV1>;` assignment could reach them. rustc rejects this with E0446 — a `pub trait`'s associated-type assignment exposes the payload as part of the trait's public surface, and a `pub(crate)` type referenced from a `pub` trait fails to compile. The DELIVER scaffolding pass (commit `0dc53e05`) surfaced this; the design was amended in place to reframe Layer 1 around **non-re-export from `overdrive-core::lib.rs`** instead. See `docs/feature/rkyv-envelope-evolution/deliver/upstream-issues.md` (UI-01) for the full RCA.
   - **Layer 1 — non-re-export discourages cross-crate payload construction (convention, not compiler enforcement).** Inner payload types (`AllocStatusRowV1`, `AllocStatusRowV2`, …) are declared `pub` inside `overdrive-core` but **NOT re-exported** from `overdrive-core::lib.rs`. Cross-crate writers in `overdrive-store-local` reach the payload type only via the verbose, internal-looking `overdrive_core::traits::observation_store::AllocStatusRowV1` module path, which is discouraged at code review. The canonical construction path from outside `overdrive-core` is `Envelope::latest(<Foo>Latest { ... })`. NOTE: Layer 1 does NOT block the variant constructor itself — `Envelope::V1(<expr>)` remains syntactically reachable from any crate because the envelope enum is `pub`. A disciplined cross-crate writer who knows the verbose path can still reach the payload type and supply it to the variant constructor. **Layer 1 is therefore a convention surface enforced at code review, plus the typed visibility-hint of non-re-export**, not a compile-time gate. The structural defense is Layer 2.
   - **Layer 2 — `xtask::dst_lint` clause is the load-bearing structural defense.** A syntactic AST clause added to the existing `xtask::dst_lint` scanner (precedent: `xtask/src/dst_lint.rs`, already syntactically scans `core`-class crate sources for banned shapes — see ADR-0003) walks `overdrive-core` source for `<Envelope>::V<N>(` literal expression patterns outside the defining module's own `From` / `into_latest` impls. Per `.claude/rules/development.md` § "xtask is build / test / dev orchestration, NOT a runtime entry point": the scanner is *syntactic only* and does NOT import any `overdrive-*` crate; the xtask boundary stays intact. **This is the structural enforcement** for both cross-crate disciplined-writers and in-crate writers — it was always the load-bearing artifact per the ADR's own § 5/§ 9 framing, and after the UI-01 amendment it is the sole compile-or-CI-enforced gate.
@@ -737,22 +767,38 @@ canonical `Latest` projection.
 Two complementary assertions matching the two enforcement layers in
 ADR-0048 § 2:
 
-**S-EV-02a — Cross-crate payload-type unreachability via short-path
-import (trybuild).** A `tests/compile_fail/<envelope>_payload_
-unreachable.rs` fixture in `overdrive-store-local` that attempts the
-short-path import `use overdrive_core::AllocStatusRowV1;` (the path
-that would exist if the payload were re-exported from the crate
+**S-EV-02a — Cross-crate envelope-type unreachability via short-path
+import (trybuild).** A `tests/compile_fail/<envelope>_unreachable.rs`
+fixture in `overdrive-store-local` that attempts the short-path
+import `use overdrive_core::AllocStatusRowEnvelope;` (the path that
+would exist if the envelope enum were re-exported from the crate
 root) and asserts the compilation fails with rustc `E0432`
-("unresolved import — no `AllocStatusRowV1` in the root"). This
-pins **Layer 1 non-re-export discipline** (as amended UI-01 — rustc
-E0446 forbids the literal `pub(crate)` declaration, so Layer 1's
-mechanism is the absence of a crate-root re-export). The fixture
-explicitly does NOT assert that `AllocStatusRowEnvelope::V1(...)`
-itself is unreachable — Layer 1 does not block the variant
-constructor; it leaves the inner payload reachable only via the
-verbose `overdrive_core::traits::observation_store::AllocStatusRowV1`
-module path. One fixture is sufficient (Layer 1's non-re-export
-property is uniform across all envelopes).
+("unresolved import — no `AllocStatusRowEnvelope` in the root").
+
+Under the alias-to-payload shape (UI-02 amendment) the load-bearing
+non-re-export target is **the envelope enum itself** — the codec-
+internal type that cross-crate writers would need to name in order
+to call `<Envelope>::V<N>(payload)` or `<Envelope>::latest(payload)`.
+The public payload alias (`pub type AllocStatusRow = AllocStatusRowV1`)
+IS the unimpeded public interface; callers continue to construct
+`AllocStatusRow { ... }` exactly as before. The fixture's job is to
+prove that a cross-crate writer cannot reach for the codec-internal
+envelope name via the short re-exported path, which is what makes
+the persistence-boundary code the canonical wrapping site.
+
+As defense in depth, inner payload types (`AllocStatusRowV1`,
+`AllocStatusRowV2`, …) are also un-re-exported; an additional
+fixture asserting `use overdrive_core::AllocStatusRowV1;` fails
+with E0432 is structurally analogous and may be included if it
+clarifies intent at code review time.
+
+The fixture explicitly does NOT assert that
+`AllocStatusRowEnvelope::V1(...)` itself is unreachable — Layer 1
+does not block the variant constructor; it leaves the envelope and
+the inner payload reachable only via verbose module paths. One
+fixture is sufficient (Layer 1's non-re-export property is uniform
+across all envelopes); the in-crate variant-construction prohibition
+is covered by S-EV-02b (the dst-lint scanner unit test).
 
 **S-EV-02b — In-crate variant-construction lint
 (`cargo xtask envelope-lint` or equivalent dst-lint subcommand).**
@@ -839,6 +885,7 @@ high + 2 medium issues + 1 open question. Resolution:
 | H1 — Operator remediation path | High | New § 6 "Operator Remediation" in ADR-0048: control-plane refuses to start on envelope decode failure with typed `IntentStoreError::Envelope`, structured `health.startup.refused` event, non-zero exit. `Display` form names the redb path and the EnvelopeError variant; documented remediation = *"delete `<data_dir>/intent.redb` and restart"*. Phase 1 single-node greenfield per `feedback_single_cut_greenfield_migrations.md`; Phase 2 migration tooling out of scope. | ADR-0048 § 6 |
 | H2 — Version-bump procedure | High | Numbered 6-step checklist landed in `.claude/rules/development.md` § "rkyv schema evolution" → "Version-bump procedure" subsection (steps: add VN+1 variant, update Latest alias, update latest() constructor, add From impl, add golden-bytes fixture, single commit). | `.claude/rules/development.md` § "rkyv schema evolution" |
 | M1 — Cross-reference between rkyv and CBOR sections | Medium | The `.claude/rules/development.md` § "rkyv schema evolution" opens with a paragraph cross-referencing § "Reconciler I/O" → Schema evolution (CBOR / ADR-0035/0036), noting the two paths use different evolution mechanics and must not be conflated. Already present in the prior draft (lines 1170-1176); reviewed for clarity, no change needed. Reviewer's concern was confirmed addressed in-place; logged here for traceability. | `.claude/rules/development.md` lines 1170-1176 |
-| M2 — Handoff scenario S-EV-02 rewording | Medium | S-EV-02 split into S-EV-02a (trybuild — cross-crate payload-type unreachability) and S-EV-02b (xtask::dst_lint unit test — in-crate variant-construction lint). The unresolved-import claim is scoped to the payload type only — after the UI-01 amendment, the fixture pins the **non-re-export property** by attempting the short-path import `use overdrive_core::AllocStatusRowV1;` and asserting E0432; the in-crate variant constructor is covered by the lint. | wave-decisions.md § 10 S-EV-02 |
+| M2 — Handoff scenario S-EV-02 rewording | Medium | S-EV-02 split into S-EV-02a (trybuild — cross-crate envelope-type unreachability) and S-EV-02b (xtask::dst_lint unit test — in-crate variant-construction lint). Under UI-02 the fixture's non-re-export target is **the codec-internal envelope enum** (`AllocStatusRowEnvelope`) — that is the name a cross-crate writer would need to reach in order to call `<Envelope>::V<N>(payload)` or `<Envelope>::latest(payload)`. The fixture attempts `use overdrive_core::AllocStatusRowEnvelope;` and asserts E0432 ("unresolved import"). Inner payload types remain un-re-exported as defense in depth; an additional payload-import fixture is structurally analogous. The in-crate variant constructor is covered by the lint. | wave-decisions.md § 10 S-EV-02 |
 | Q1 — Phase 1 rkyv-persisted boundary enumeration exhaustive? | Open question | Verified complete 2026-05-12 by exhaustive grep across `crates/` for `redb::TableDefinition` constants and `rkyv::Archive` derives reaching redb write paths. 5 redb boundaries confirmed (4 observation tables in `crates/overdrive-store-local/src/observation_backend.rs:74-94`, 1 intent table `entries` in `crates/overdrive-store-local/src/redb_backend.rs:64`). Out-of-band rkyv use sites enumerated and excluded with rationale: `snapshot_frame.rs` (separate `magic+u16-version` frame, not redb-resident), `cgroup_manager.rs` (transient, not persisted), `FingerprintInput` (hash input only), field-level rkyv derives on newtypes (governed transitively by containing envelope). | ADR-0048 Context table + out-of-band enumeration block |
 | B2-followup (2026-05-12 DELIVER UI-01) — rustc E0446 prevents literal `pub(crate)` on inner payloads | Blocking (DELIVER-surfaced) | The first DELIVER scaffolding pass (commit `0dc53e05`) hit rustc E0446 on `pub(crate) struct AllocStatusRowV1` because the `pub trait VersionedEnvelope`'s `type Latest = AllocStatusRowV1;` assignment exposes the payload as part of the trait's public surface — and a `pub(crate)` type referenced from a `pub` trait fails to compile. Resolution: amend the SSOT (ADR-0048 § 2 Layer 1, § 9 Consequences; this file § 4 C, § 5 row C, § 9 (C)) to acknowledge the rustc constraint and reframe Layer 1 around **non-re-export from `overdrive-core::lib.rs`** (a code-review-enforced convention) plus the typed visibility-hint of un-re-exported `pub` payloads. Layer 2 (the `xtask::dst_lint` clause) was always the load-bearing structural defense per § 5/§ 9 language; the amendment makes the SSOT honest about which mechanism does what work. Inner payloads remain declared `pub` but un-re-exported; cross-crate writers reach them only via the verbose `overdrive_core::traits::observation_store::AllocStatusRowV1` module path, discouraged at code review. Originating record: `docs/feature/rkyv-envelope-evolution/deliver/upstream-issues.md` (UI-01). | ADR-0048 § 2 Layer 1, § 2 Rejected alternatives (new "Restructure to preserve `pub(crate)` literally" entry), § 9 Consequences (Negative); this file § 4 C, § 5 row C, § 9 (C); `.claude/rules/development.md` § "rkyv schema evolution" → Rules; `docs/feature/rkyv-envelope-evolution/distill/red-scaffolds.md` Groups 2/3; `docs/feature/rkyv-envelope-evolution/distill/test-scenarios.md` S-EV-02a |
+| B2-followup-2 (2026-05-12 DELIVER UI-02) — alias-to-payload shape reversal; supersedes B2-followup | Blocking (DELIVER-surfaced) | The roadmap criterion for step 01-03 specified `pub type AllocStatusRow = AllocStatusRowEnvelope` (alias-to-envelope public API). The first crafter landed the alternative alias-to-payload shape at commit `a90755a2`; the orchestrator pushed back and triggered an attempted re-migration. The user halted and confirmed the alias-to-payload shape is correct: it minimises call-site churn (~50-70 sites per row type preserved), keeps the public API surface to a single canonical name (`AllocStatusRow` = the payload), and makes schema evolution V1→V2 a single-line re-alias that breaks call sites at compile time exactly where the schema change touches them. Layer 2 (`xtask::dst_lint` clause) is unaffected — it targets `<Envelope>::V<N>(...)` constructions regardless of which name the public alias points at. The envelope enum is codec-internal under the amended shape; the persistence-boundary code is the sole `Envelope::latest(payload)` call site. Commit `a90755a2` remains the correct GREEN landing for step 01-03 under this shape. Originating record: `docs/feature/rkyv-envelope-evolution/deliver/upstream-issues.md` (UI-02). | ADR-0048 § 1 Decision, § 4 Intent aggregate, § 4a How writers stay on `latest()`, § 6/§ 9 Consequences (Positive/Negative), Alternatives → "Alias-to-envelope public API (rejected — UI-02)"; this file § 4 C, § 5 row C, § 9 (C), § H, § 10 S-EV-02a; `.claude/rules/development.md` § "rkyv schema evolution" (canonical example); `docs/feature/rkyv-envelope-evolution/distill/red-scaffolds.md` Groups 2/3 alias examples + crafter note; `docs/feature/rkyv-envelope-evolution/distill/test-scenarios.md` S-EV-02a fixture body; `docs/feature/rkyv-envelope-evolution/distill/wave-decisions.md` § 2 / § 6 RED scaffold strategy / § 9 sequencing; `docs/feature/rkyv-envelope-evolution/deliver/roadmap.json` step 01-03 + 01-04 criteria |

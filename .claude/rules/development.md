@@ -1188,28 +1188,49 @@ additive-field tolerance does not apply.
 
 **Every rkyv-persisted type goes through a versioned envelope.** The
 canonical shape is a per-type rkyv enum where each variant is one
-historical payload type. Per ADR-0048:
+historical payload type. The public alias points at the **payload
+struct** (alias-to-payload — UI-02 amendment 2026-05-12); the
+envelope enum is codec-internal and consumed only by the persistence-
+boundary code. Per ADR-0048:
 
 ```rust
-#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, ...)]
-pub enum AllocStatusRowEnvelope {
-    V1(AllocStatusRowV1),
-    V2(AllocStatusRowV2),
-}
-pub type AllocStatusRow       = AllocStatusRowEnvelope;
-pub type AllocStatusRowLatest = AllocStatusRowV2;
+// Public payload alias — callers continue to use struct-literal `FooRow { ... }`
+pub type FooRow = FooRowV1;
+pub type FooRowLatest = FooRowV1;   // documentation alias for "latest payload"
 
-impl VersionedEnvelope for AllocStatusRowEnvelope {
-    type Latest = AllocStatusRowV2;
-    fn latest(payload: Self::Latest) -> Self { Self::V2(payload) }
+// Codec-internal envelope enum — NOT re-exported from `overdrive-core::lib.rs`;
+// referenced only by persistence-boundary code in `overdrive-store-local`.
+#[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, ...)]
+pub enum FooRowEnvelope {
+    V1(FooRowV1),
+    // V2(FooRowV2) lands when schema breaks; on V2 land, re-alias
+    //   pub type FooRow = FooRowV2;
+    //   pub type FooRowLatest = FooRowV2;
+}
+
+impl VersionedEnvelope for FooRowEnvelope {
+    type Latest = FooRowV1;
+    fn latest(payload: Self::Latest) -> Self { Self::V1(payload) }
     fn into_latest(self) -> Result<Self::Latest, EnvelopeError> {
         match self {
-            Self::V1(v1) => Ok(v1.into()),  // From<V1> for V2 — additive
-            Self::V2(v2) => Ok(v2),
+            Self::V1(v1) => Ok(v1),
+            // when V2 lands:
+            // Self::V1(v1) => Ok(v1.into()),  // From<V1> for V2 — additive
+            // Self::V2(v2) => Ok(v2),
         }
     }
 }
 ```
+
+**Where the envelope appears.** The persistence-boundary code is the
+sole site that names the envelope: writes wrap via
+`FooRowEnvelope::latest(payload)` before rkyv-serialising; reads
+rkyv-deserialise into `FooRowEnvelope` and project via
+`envelope.into_latest()?`. Public callers (handlers, CLI commands,
+internal helpers, fixtures) construct `FooRow { ... }` (= the V1
+payload) directly with struct-literal syntax — no `.latest(...)`
+wrapping at the call site, no `Envelope` type in non-boundary
+signatures.
 
 The `VersionedEnvelope` trait, `EnvelopeError`, and the schema-
 evolution test harness primitive live in
@@ -1219,23 +1240,29 @@ on `traits::observation_store`).
 
 ### Rules
 
-- **Writers MUST go through `<Envelope>::latest(payload)`.** Direct
-  variant construction (e.g. `AllocStatusRowEnvelope::V1(...)`) is
-  discouraged by two complementary layers, each with a distinct
-  honest mechanism (amended 2026-05-12 UI-01 reconciliation):
+- **The persistence-boundary code MUST go through `<Envelope>::latest(payload)`.**
+  This rule binds the redb-wire layer
+  (`LocalObservationStore::write_alloc_status`, `LocalStore::write_entry`,
+  the read-side `envelope.into_latest()?` projections), NOT every
+  caller. Public callers construct the payload directly using
+  struct-literal syntax on the public alias (`FooRow { ... }` = the
+  V1 payload) — that is the intended call-site shape under the
+  UI-02 amendment (alias-to-payload). Direct variant construction
+  (e.g. `FooRowEnvelope::V1(...)`) outside the defining module's own
+  `From` / `into_latest` impls is discouraged by two complementary
+  layers, each with a distinct honest mechanism (amended 2026-05-12
+  UI-01 reconciliation; further reconciled 2026-05-12 UI-02 —
+  alias-to-payload):
   - **Layer 1 — non-re-export discipline (convention, not compiler
-    enforcement).** Inner payload types (`AllocStatusRowV1`,
-    `AllocStatusRowV2`, …) are declared `pub` inside their defining
-    module of `overdrive-core` but are **NOT re-exported** from
-    `overdrive-core::lib.rs`. A cross-crate writer (the dominant
-    case — every IntentStore / ObservationStore writer lives in
-    `overdrive-store-local`) reaches the payload type only via the
-    verbose, internal-looking
-    `overdrive_core::traits::observation_store::AllocStatusRowV1`
-    module path, which is discouraged at code review. The canonical
-    construction path from outside `overdrive-core` is
-    `Envelope::latest(<Foo>Latest { ... })`. **rustc E0446 prevents
-    the literal `pub(crate)` declaration** on inner payloads —
+    enforcement).** The codec-internal envelope enum
+    (`FooRowEnvelope`) is declared `pub` but **NOT re-exported** from
+    `overdrive-core::lib.rs`. Cross-crate writers naming the envelope
+    reach it only via the verbose
+    `overdrive_core::traits::observation_store::FooRowEnvelope`
+    module path (discouraged at code review). Inner payload types
+    (`FooRowV1`, …) are likewise `pub` but un-re-exported from the
+    crate root as defense in depth. **rustc E0446 prevents the
+    literal `pub(crate)` declaration** on inner payloads —
     `VersionedEnvelope` is a `pub` trait, and its
     `type Latest = <Payload>;` associated-type assignment makes the
     payload part of the trait's public surface; rustc rejects a
@@ -1244,9 +1271,9 @@ on `traits::observation_store`).
     + code-review convention**, not a compile-time gate. NOTE: this
     does NOT block the variant constructor itself — the envelope
     enum is `pub` and `Envelope::V1(<expr>)` is syntactically
-    reachable from any crate. Layer 1 reduces the writer surface to
-    a verbose, un-re-exported path; the structural defense is
-    Layer 2.
+    reachable from any crate that names the envelope. Layer 1
+    reduces the writer surface to a verbose, un-re-exported path;
+    the structural defense is Layer 2.
   - **Layer 2 — variant-construction lint (`xtask::dst_lint`
     clause; load-bearing structural defense).** An addition to the
     existing `xtask::dst_lint` AST scanner walks `overdrive-core`
@@ -1300,8 +1327,15 @@ landing boundary.
    existing variants. Appending preserves the rkyv `#[repr(u8)]`
    discriminant tags for `V1..V<N>` (see ADR-0048 § "Why a per-type
    rkyv enum is forward-compatible across variant additions").
+   **Under the alias-to-payload shape (UI-02), also re-alias the
+   public name:** `pub type FooRow = FooRowV<N+1>Payload`. Call sites
+   that touch fields removed/renamed between `V<N>` and `V<N+1>`
+   break at compile time exactly where the schema change touches
+   them — the correct signal at the correct moment.
 2. **Update the `Latest` type alias** to point to the new payload:
-   `pub type FooRowLatest = FooRowV<N+1>Payload`.
+   `pub type FooRowLatest = FooRowV<N+1>Payload`. Under the
+   alias-to-payload shape `FooRow` and `FooRowLatest` move together
+   (both point at the new payload struct).
 3. **Update the `Envelope::latest()` constructor** to wrap into the
    new variant: `fn latest(p: Self::Latest) -> Self { Self::V<N+1>(p) }`.
 4. **Add a `From<V<N>Payload> for V<N+1>Payload` impl** (or

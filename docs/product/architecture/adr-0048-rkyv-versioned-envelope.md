@@ -16,6 +16,22 @@ payloads un-re-exported; the structural defense against drift was
 always Layer 2 (the `xtask::dst_lint` clause) and remains so. See
 `docs/feature/rkyv-envelope-evolution/deliver/upstream-issues.md`
 (UI-01) for the originating compile failure and decision record.
+**Amended 2026-05-12 (UI-02 reconciliation)** — § 1 Decision example
++ § 4 + § 9 reworded to use the **alias-to-payload** public-API shape:
+`pub type AllocStatusRow = AllocStatusRowV1` (the payload struct, not
+the envelope). The envelope enum (`AllocStatusRowEnvelope`) is
+codec-internal — it appears only at the redb wire boundary inside
+`LocalObservationStore` / `LocalStore`. Same rule for `Job` (`pub
+type Job = JobV1`; `JobEnvelope` codec-internal). The previous
+alias-to-envelope shape introduced three public names per row type
+(`<Type>`, `<Type>Envelope`, `<Type>Latest`) and forced ~50-70
+call-site rewrites per type for no enforcement gain over the simpler
+alias-to-payload shape (Layer 2 dst-lint targets `<Envelope>::V<N>(...)`
+constructions regardless of which name the public alias points at).
+Commit `a90755a2` (step 01-03's GREEN landing) shipped this shape
+and remains the correct GREEN landing for step 01-03. See
+`docs/feature/rkyv-envelope-evolution/deliver/upstream-issues.md`
+(UI-02) for the full decision record.
 
 ## Context
 
@@ -105,19 +121,43 @@ pub enum EnvelopeError {
 }
 ```
 
-Per-type shape (one example; same pattern for each of the five):
+Per-type shape (one example; same pattern for each of the five) —
+**alias-to-payload** (amended 2026-05-12 UI-02 reconciliation):
 
 ```rust
+pub type AllocStatusRow = AllocStatusRowV1;          // payload alias — callers continue to use struct-literal AllocStatusRow { ... }
+pub type AllocStatusRowLatest = AllocStatusRowV1;    // "latest payload" name preserved for documentation; today equal to AllocStatusRow
+
 #[derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize, ...)]
-pub enum AllocStatusRowEnvelope {
+pub enum AllocStatusRowEnvelope {                    // codec-internal — referenced only by persistence-boundary code
     V1(AllocStatusRowV1),
-    V2(AllocStatusRowV2),
+    // V2(AllocStatusRowV2) lands when schema breaks
 }
-pub type AllocStatusRow       = AllocStatusRowEnvelope;   // exported as "the row"
-pub type AllocStatusRowLatest = AllocStatusRowV2;
 ```
 
-Generic `Envelope<T>` was rejected — see Alternatives below.
+**Where the envelope appears.** Under the alias-to-payload shape the
+envelope enum is invisible outside the persistence boundary. Public
+callers continue to construct `AllocStatusRow { ... }` (= V1 payload)
+exactly as they did pre-envelope; the persistence boundary
+(`LocalObservationStore::write_alloc_status`) wraps the payload via
+`AllocStatusRowEnvelope::latest(payload)` before rkyv-serialising,
+and the read path (`LocalObservationStore::alloc_status_rows`)
+rkyv-deserialises into `AllocStatusRowEnvelope` and projects via
+`envelope.into_latest()?` to recover the `AllocStatusRow` payload.
+Internal helpers that pass rows around take `&AllocStatusRow` (=
+`&AllocStatusRowV1`) freely — no `Envelope` type appears in their
+signatures.
+
+**Schema evolution V1 → V2.** Re-alias `pub type AllocStatusRow =
+AllocStatusRowV2`. Call sites that touch removed/renamed fields
+break at compile time exactly where the schema change touches them
+— the correct signal at the correct moment. Field-stable call sites
+require no rewrite.
+
+Generic `Envelope<T>` was rejected — see Alternatives below. The
+alias-to-envelope public-API shape (`pub type AllocStatusRow =
+AllocStatusRowEnvelope`) was the original ADR draft and is also
+rejected — see "Alias-to-envelope public API" in Alternatives below.
 
 **Why a per-type rkyv enum is forward-compatible across variant
 additions.** Two independent sources of confidence:
@@ -300,6 +340,39 @@ space (`Job V1 + WorkloadDriver V2 + Exec V1` is one point;
 Coupling internal-type changes to the outer envelope version is the
 correct shape — the *file format* is what changed.
 
+**Public alias shape** (amended 2026-05-12 UI-02 reconciliation):
+`pub type Job = JobV1` — alias-to-payload. The envelope enum
+`JobEnvelope` is codec-internal and consumed only by `LocalStore`
+read/write paths. Public callers (handlers, CLI commands, fixtures
+across `overdrive-store-local`, `overdrive-control-plane`,
+`overdrive-cli`) continue to use the name `Job` with struct-literal
+syntax `Job { id, replicas, resources, driver }` exactly as before
+— no migration is needed at the call-site level. The fail-fast
+intent path still goes through `LocalStore::open` rkyv-deserialising
+into `JobEnvelope` and projecting via `envelope.into_latest()?`.
+
+### 4a. How writers stay on `latest()`
+
+Under the alias-to-payload shape the `Envelope::latest(payload)`
+writer surface IS the persistence-boundary code only —
+`LocalObservationStore::write_alloc_status`,
+`LocalObservationStore::write_node_health`, …, `LocalStore::open`
+(read side via `into_latest()`), `LocalStore::write_entry` (write
+side via `<RowEnvelope>::latest(payload)`). Public callers
+construct the payload directly (e.g. `AllocStatusRow { ... }` =
+V1 payload) as they would any other domain type; the
+persistence-boundary functions accept the payload by value or
+reference and wrap it.
+
+This is the load-bearing simplification: the "MUST go through
+`latest()`" rule binds **the redb-wire layer**, not every caller.
+Layer 2 (the `xtask::dst_lint` clause) enforces that
+`<Envelope>::V<N>(...)` variant constructions only appear inside
+the defining module's own `From` / `into_latest` impls — the
+persistence-boundary code goes through `Envelope::latest(payload)`
+(which is `Self::V1(payload)` today), never through the bare
+variant constructor.
+
 ### 5. Migration
 
 Greenfield single-cut for Phase 1. Per
@@ -387,6 +460,53 @@ existing observation-layer eventual-consistency contract.
 See § 4 above. Combinatorial version space without operator-visible
 benefit at Phase 1 scope. Phase 2+ may re-evaluate.
 
+### Option 6 — Alias-to-envelope public API (`pub type AllocStatusRow = AllocStatusRowEnvelope`) (rejected — UI-02)
+
+The original ADR draft (pre-UI-02) defined the public alias as a
+pointer to the envelope enum:
+
+```rust
+pub type AllocStatusRow       = AllocStatusRowEnvelope;
+pub type AllocStatusRowLatest = AllocStatusRowV1;
+```
+
+Public callers would consume this as `AllocStatusRow::latest(AllocStatusRowLatest { ... })`,
+replacing every existing struct-literal `AllocStatusRow { ... }`.
+
+**Why rejected** (2026-05-12, UI-02):
+
+1. **Three public names per row type for no enforcement gain.** Layer 2
+   (the `xtask::dst_lint` clause) targets `<Envelope>::V<N>(...)`
+   variant constructions, which only the persistence-boundary code
+   performs. Whether the public alias points at the payload struct or
+   at the envelope enum is irrelevant to the structural defense — the
+   scanner targets the wire layer, not the call site.
+2. **High call-site churn for no migration benefit.** ~50-70 struct-
+   literal `AllocStatusRow { ... }` sites across `overdrive-store-local`,
+   `overdrive-control-plane`, `overdrive-cli`, and fixtures would need
+   rewriting to `AllocStatusRow::latest(AllocStatusRowLatest { ... })`
+   plus every internal helper that field-accesses a row would need its
+   parameter re-typed to `AllocStatusRowLatest`. The cost compounds
+   per row type (5 envelopes × 50-70 sites).
+3. **Schema evolution V1→V2 is less ergonomic.** Under alias-to-envelope,
+   evolution requires the call site to continue referring to
+   `<Type>Latest` (which silently moves from V1 to V2 underneath them);
+   under alias-to-payload, re-aliasing `pub type AllocStatusRow =
+   AllocStatusRowV2` causes call sites that touch removed/renamed
+   fields to break at compile time exactly where the schema change
+   touches them — the correct signal at the correct moment.
+4. **Consistency-across-row-types is achieved either way.** The choice
+   is uniform per-row-type once we pick; alias-to-envelope buys nothing
+   here.
+
+The amended decision (alias-to-payload) keeps the public surface
+minimal (one canonical name per row type — the payload), preserves
+the existing struct-literal idiom, and reduces the migration to
+"wrap the payload at the persistence boundary." See
+`docs/feature/rkyv-envelope-evolution/deliver/upstream-issues.md`
+(UI-02) for the originating decision record. Commit `a90755a2`
+(step 01-03's GREEN landing) ships this shape correctly.
+
 ## Consequences
 
 **Positive**:
@@ -395,14 +515,20 @@ benefit at Phase 1 scope. Phase 2+ may re-evaluate.
   addition) catches silent layout drift at PR time.
 - Intent / observation asymmetric policy preserves SSOT integrity:
   intent fails fast; observation converges through degradation.
-- Cross-crate writers are nudged into the canonical
-  `Envelope::latest(<Foo>Latest { ... })` construction path by the
-  non-re-export of inner payload types; the only path reaching them
-  cross-crate is the verbose, internal-looking
-  `overdrive_core::traits::observation_store::AllocStatusRowV1`,
-  signposted as "reach into a module's internals." The structural
-  defense for every writer surface — cross-crate AND in-crate — is
-  the `xtask::dst_lint` clause (Layer 2).
+- **Call-site footprint is minimal under the alias-to-payload shape**
+  (amended 2026-05-12 UI-02 reconciliation). Public callers continue
+  to use struct-literal `<RowType> { ... }` exactly as they did
+  pre-envelope; the envelope appears only at the redb wire boundary
+  in `LocalObservationStore` / `LocalStore`. Schema evolution
+  V1→V2 re-aliases the public name to the new payload, causing call
+  sites that touch removed/renamed fields to break at compile time
+  exactly where the schema change touches them.
+- The structural defense for every writer surface — cross-crate AND
+  in-crate — is the `xtask::dst_lint` clause (Layer 2). The
+  persistence-boundary code is the sole `Envelope::latest(payload)`
+  call site; Layer 2 enforces that bare `<Envelope>::V<N>(...)`
+  variant constructions appear only inside the defining module's
+  own `From` / `into_latest` impls.
 
 **Negative**:
 - Every persisted type gains a per-variant enum overhead (one `u8`
@@ -437,7 +563,11 @@ benefit at Phase 1 scope. Phase 2+ may re-evaluate.
   gate for both cases. This honest framing replaces the earlier
   "`pub(crate)` closes the cross-crate writer hole" wording, which
   was structurally incorrect (rustc rejects the literal `pub(crate)`
-  with E0446 anyway) AND misleading about mechanism.
+  with E0446 anyway) AND misleading about mechanism. Under the
+  alias-to-payload shape (UI-02 amendment) this concern is further
+  reduced in practice: the envelope name is codec-internal, so
+  cross-crate code reaching for it is already structurally
+  signposted as "you are reaching into the persistence boundary."
 
 ## References
 
