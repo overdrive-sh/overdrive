@@ -294,7 +294,7 @@ pub trait VersionedEnvelope {
 /// The probe MUST run BEFORE the `from_bytes` call — running it
 /// after would still surface the bytecheck rejection as `Malformed`,
 /// losing the `UnknownVersion` distinction.
-pub fn probe_known_variant<E: VersionedEnvelope>(bytes: &[u8]) -> Result<(), EnvelopeError> {
+pub(crate) fn probe_known_variant<E: VersionedEnvelope>(bytes: &[u8]) -> Result<(), EnvelopeError> {
     // No offset pinned → probe is a no-op; rkyv decode classifies.
     let Some(from_end) = E::discriminant_offset_from_end() else {
         return Ok(());

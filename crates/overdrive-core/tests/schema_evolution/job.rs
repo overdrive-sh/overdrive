@@ -22,7 +22,7 @@ use overdrive_core::codec::VersionedEnvelope;
 use overdrive_core::id::WorkloadId;
 use overdrive_core::traits::driver::Resources;
 
-use super::harness::assert_envelope_v_roundtrip;
+use super::harness::{assert_discriminant_byte_at_pinned_offset, assert_envelope_v_roundtrip};
 
 /// Canonical V1 payload pinned by `FIXTURE_V1` below. The expected
 /// projection is built from these values verbatim — change any one
@@ -50,6 +50,17 @@ const FIXTURE_V1: &str = "7376632d7061796d656e74732f62696e2f736c6565700000333630
 fn job_v1_decodes_through_current_envelope() {
     let expected = canonical_v1_payload();
     assert_envelope_v_roundtrip::<JobEnvelope>(FIXTURE_V1, &expected);
+}
+
+/// Structural defense for the empirically-pinned
+/// `JobEnvelope::discriminant_offset_from_end()` value (64).
+/// Archives a canonical V1 payload through `latest()` and asserts
+/// the byte at the pinned offset is V1's tag (0). Catches a stale
+/// offset on the next `V<N+1>` bump where rkyv's archived layout
+/// shifts but the pinned offset constant wasn't updated.
+#[test]
+fn job_discriminant_byte_at_pinned_offset() {
+    assert_discriminant_byte_at_pinned_offset::<JobEnvelope>(canonical_v1_payload(), 0);
 }
 
 #[test]

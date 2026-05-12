@@ -18,7 +18,7 @@ use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRowEnvelope, AllocStatusRowLatest, AllocStatusRowV1, LogicalTimestamp,
 };
 
-use super::harness::assert_envelope_v_roundtrip;
+use super::harness::{assert_discriminant_byte_at_pinned_offset, assert_envelope_v_roundtrip};
 
 /// Canonical V1 payload pinned by `FIXTURE_V1` below. The expected
 /// projection is built from these values verbatim — change any one
@@ -52,6 +52,17 @@ const FIXTURE_V1: &str = "616c6c6f632d746573742d30317376632d7061796d656e74730000
 fn alloc_status_row_v1_decodes_through_current_envelope() {
     let expected = canonical_v1_payload();
     assert_envelope_v_roundtrip::<AllocStatusRowEnvelope>(FIXTURE_V1, &expected);
+}
+
+/// Structural defense for the empirically-pinned
+/// `AllocStatusRowEnvelope::discriminant_offset_from_end()` value
+/// (168). Archives a canonical V1 payload through `latest()` and
+/// asserts the byte at the pinned offset is V1's tag (0). Catches a
+/// stale offset on the next `V<N+1>` bump where rkyv's archived
+/// layout shifts but the pinned offset constant wasn't updated.
+#[test]
+fn alloc_status_row_discriminant_byte_at_pinned_offset() {
+    assert_discriminant_byte_at_pinned_offset::<AllocStatusRowEnvelope>(canonical_v1_payload(), 0);
 }
 
 // ---------------------------------------------------------------------

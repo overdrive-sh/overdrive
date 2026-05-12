@@ -146,7 +146,21 @@ impl LocalIntentStore {
                 if key_bytes.ends_with(STOP_SUFFIX) {
                     continue;
                 }
-                overdrive_core::aggregate::Job::from_store_bytes(value.value(), path)?;
+                // Pass the iterated key into `from_store_bytes` so the
+                // `health.startup.refused` event names which row failed
+                // when an operator has N jobs in the file. Keys are
+                // canonical IntentKey UTF-8 (`jobs/<workload-id>`); on
+                // the off chance bytes have drifted to non-UTF-8 we use
+                // `from_utf8_lossy` rather than refusing to log — the
+                // primary diagnostic value is "which redb file" plus
+                // "which key approximation," not "byte-perfect key
+                // round-trip".
+                let key_str = String::from_utf8_lossy(key_bytes);
+                overdrive_core::aggregate::Job::from_store_bytes(
+                    value.value(),
+                    path,
+                    Some(key_str.as_ref()),
+                )?;
             }
         }
 

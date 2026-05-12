@@ -186,7 +186,7 @@ async fn walking_skeleton_submit_with_exec_block_returns_inserted_and_persists_c
     // the `Job` codec module, not on the `IntentStore` trait surface;
     // `Job::from_store_bytes` is the sole reader site.
     let intent_path = intent_redb_path(server_tmp.path());
-    let job: Job = Job::from_store_bytes(&bytes, &intent_path)
+    let job: Job = Job::from_store_bytes(&bytes, &intent_path, None)
         .expect("typed codec decode of Job from back-door read bytes");
 
     // Destructure WorkloadDriver::Exec — irrefutable for Phase 1 (single

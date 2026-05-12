@@ -17,7 +17,7 @@ use overdrive_core::traits::observation_store::{
     LogicalTimestamp, NodeHealthRowEnvelope, NodeHealthRowLatest, NodeHealthRowV1,
 };
 
-use super::harness::assert_envelope_v_roundtrip;
+use super::harness::{assert_discriminant_byte_at_pinned_offset, assert_envelope_v_roundtrip};
 
 /// Canonical V1 payload pinned by `FIXTURE_V1` below. The expected
 /// projection is built from these values verbatim — change any one
@@ -43,6 +43,15 @@ const FIXTURE_V1: &str = "75732d656173742d310000000000000000000000000000006e6f64
 fn node_health_row_v1_decodes_through_current_envelope() {
     let expected = canonical_v1_payload();
     assert_envelope_v_roundtrip::<NodeHealthRowEnvelope>(FIXTURE_V1, &expected);
+}
+
+/// Structural defense for the empirically-pinned
+/// `NodeHealthRowEnvelope::discriminant_offset_from_end()` value
+/// (40). Archives a canonical V1 payload through `latest()` and
+/// asserts the byte at the pinned offset is V1's tag (0).
+#[test]
+fn node_health_row_discriminant_byte_at_pinned_offset() {
+    assert_discriminant_byte_at_pinned_offset::<NodeHealthRowEnvelope>(canonical_v1_payload(), 0);
 }
 
 // ---------------------------------------------------------------------

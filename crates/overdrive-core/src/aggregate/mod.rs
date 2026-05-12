@@ -419,7 +419,14 @@ impl JobV1 {
     /// unknown-future variant — error path). `redb_path` names the
     /// underlying redb file the bytes were read from, used in the
     /// operator-facing remediation message; it is observed but not
-    /// required to exist.
+    /// required to exist. `key` optionally names the redb key the
+    /// bytes were read from (e.g. `"jobs/svc-payments"`); when
+    /// `Some`, it threads into the `health.startup.refused` tracing
+    /// event so an operator with N jobs in the file can identify
+    /// which specific row failed to decode. Callers without a key
+    /// context (the read handlers, the reconciler runtime read path)
+    /// pass `None`; the recovery walk in `LocalIntentStore::open`
+    /// passes the iterated key.
     ///
     /// # Postconditions
     ///
@@ -429,11 +436,12 @@ impl JobV1 {
     ///
     /// On `Err(...)`, exactly one `tracing::error!` event with
     /// `name: "health.startup.refused"` fires BEFORE the `Err` value
-    /// is returned. The event carries the `redb_path` and the
-    /// underlying `envelope_error` for operator diagnosis. The
-    /// returned [`IntentStoreError::Envelope`]'s [`Display`] form
-    /// names the `redb_path` twice (in the decode-failure line and in
-    /// the remediation hint `delete {redb_path}`) per ADR-0048 § 6.
+    /// is returned. The event carries the `redb_path`, the `key`
+    /// (`"<unknown>"` when `None`), and the underlying
+    /// `envelope_error` for operator diagnosis. The returned
+    /// [`IntentStoreError::Envelope`]'s [`Display`] form names the
+    /// `redb_path` twice (in the decode-failure line and in the
+    /// remediation hint `delete {redb_path}`) per ADR-0048 § 6.
     ///
     /// # Edge cases
     ///
@@ -456,7 +464,11 @@ impl JobV1 {
     /// § 3) is implemented by the caller — `from_store_bytes`
     /// surfaces the error; the caller (`LocalIntentStore::open`)
     /// propagates it to abort startup.
-    pub fn from_store_bytes(bytes: &[u8], redb_path: &Path) -> Result<Self, IntentStoreError> {
+    pub fn from_store_bytes(
+        bytes: &[u8],
+        redb_path: &Path,
+        key: Option<&str>,
+    ) -> Result<Self, IntentStoreError> {
         // `decode_envelope_bytes` composes the canonical
         // "align + probe + rkyv decode + into_latest" pipeline per
         // ADR-0048 § 4b. Probing the rkyv-archived discriminant byte
@@ -472,6 +484,7 @@ impl JobV1 {
                 tracing::error!(
                     name: "health.startup.refused",
                     redb_path = %redb_path.display(),
+                    key = key.unwrap_or("<unknown>"),
                     envelope_error = ?envelope_error,
                     "intent envelope decode failed; control-plane refusing to start",
                 );

@@ -459,8 +459,10 @@ pub async fn describe_workload(
     //    (ADR-0048 § "Intent persistence boundary"). Corruption /
     //    bit-rot in the redb file surfaces here as
     //    `IntentStoreError::Envelope`; it maps to HTTP 500 via the
-    //    `#[from]` blanket on `ControlPlaneError::Intent`.
-    let job = Job::from_store_bytes(&bytes, &state.intent_redb_path)?;
+    //    `#[from]` blanket on `ControlPlaneError::Intent`. The
+    //    `health.startup.refused` event names the IntentKey so an
+    //    operator can identify which job's bytes failed to decode.
+    let job = Job::from_store_bytes(&bytes, &state.intent_redb_path, Some(key.as_str()))?;
 
     // 4. Canonical spec_digest — SHA-256 over the envelope bytes
     //    `archive_for_store` produces. Per ADR-0048 § 5, this digest
@@ -651,7 +653,7 @@ pub async fn alloc_status(
         .get(key.as_bytes())
         .await?
         .ok_or_else(|| ControlPlaneError::NotFound { resource: key.as_str().to_owned() })?;
-    let job = Job::from_store_bytes(&bytes, &state.intent_redb_path)?;
+    let job = Job::from_store_bytes(&bytes, &state.intent_redb_path, Some(key.as_str()))?;
     let spec_digest = job
         .spec_digest()
         .map_err(|e| ControlPlaneError::internal("spec_digest of Job", e))?

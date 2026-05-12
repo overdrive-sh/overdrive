@@ -12,4 +12,4 @@
 
 pub mod envelope;
 
-pub use envelope::{EnvelopeError, VersionedEnvelope, decode_envelope_bytes, probe_known_variant};
+pub use envelope::{EnvelopeError, VersionedEnvelope, decode_envelope_bytes};

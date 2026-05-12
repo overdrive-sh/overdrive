@@ -81,6 +81,79 @@ where
     );
 }
 
+/// Assert that the pinned `discriminant_offset_from_end()` value
+/// actually targets the rkyv enum discriminant byte for a canonical
+/// archived `V<N>` payload — and that the byte matches `expected_tag`
+/// (e.g. `0` for V1, the first variant in declaration order under
+/// rkyv 0.8's discriminant assignment).
+///
+/// Validates that:
+/// 1. `E::discriminant_offset_from_end()` returns `Some(offset)` — a
+///    `None` here means the envelope skipped overriding the default
+///    and the `UnknownVersion` probe is silently disabled.
+/// 2. `bytes.len() >= offset` — the buffer is long enough to host
+///    the trailing root region the offset assumes.
+/// 3. `bytes[bytes.len() - offset] == expected_tag` — the byte at
+///    the pinned position is the discriminant the envelope claims it
+///    to be.
+///
+/// This is the **structural defense** against a stale offset surviving
+/// a `V<N+1>` bump. Today's golden-bytes roundtrip test decodes via
+/// `rkyv::from_bytes` and doesn't exercise the probe path, so a wrong
+/// offset value (mismatched against today's archived layout) would
+/// pass roundtrip silently. This helper makes the offset's correctness
+/// a falsifiable assertion alongside the fixture pinning.
+///
+/// # Panics
+///
+/// Panics with a fixture-identifying message if any of the three
+/// assertions above fails.
+pub fn assert_discriminant_byte_at_pinned_offset<E>(canonical: E::Latest, expected_tag: u8)
+where
+    E: VersionedEnvelope
+        + rkyv::Archive
+        + for<'a> rkyv::Serialize<
+            rkyv::api::high::HighSerializer<
+                rkyv::util::AlignedVec,
+                rkyv::ser::allocator::ArenaHandle<'a>,
+                rkyv::rancor::Error,
+            >,
+        >,
+{
+    let envelope = E::latest(canonical);
+    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope)
+        .expect("rkyv archive of canonical payload must succeed");
+
+    let offset = E::discriminant_offset_from_end().expect(
+        "envelope must pin a non-None discriminant_offset_from_end to make UnknownVersion \
+         classification possible (probe falls through to Malformed otherwise)",
+    );
+
+    assert!(
+        bytes.len() >= offset,
+        "archived bytes ({}) must be at least the pinned offset ({}) long — pinned offset \
+         outside the buffer means the probe is targeting padding or the empty before-buffer \
+         region",
+        bytes.len(),
+        offset,
+    );
+
+    let observed = bytes[bytes.len() - offset];
+    assert_eq!(
+        observed,
+        expected_tag,
+        "discriminant byte at pinned offset {} (from end of {}-byte buffer, absolute index {}) \
+         must equal V1 tag {} — got {}. Either the pinned offset is stale (re-pin per \
+         development.md § Version-bump procedure) or the envelope's archived layout drifted \
+         without a version bump.",
+        offset,
+        bytes.len(),
+        bytes.len() - offset,
+        expected_tag,
+        observed,
+    );
+}
+
 // ---------------------------------------------------------------------
 // Self-test — exercises the primitive against a private mock envelope.
 // Per `.claude/rules/testing.md` § "Property-based testing" → "Archive

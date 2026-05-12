@@ -103,7 +103,7 @@ pub struct AppState {
     /// Authoritative intent store — every write lands here.
     pub store: Arc<LocalIntentStore>,
     /// Filesystem path of the intent redb file. Used by handlers that
-    /// decode persisted bytes via `Job::from_store_bytes(bytes, path)`
+    /// decode persisted bytes via `Job::from_store_bytes(bytes, path, key)`
     /// to produce operator-facing remediation messages naming the file
     /// the bytes were read from. Per ADR-0048 § 6 / UI-03 amendment.
     pub intent_redb_path: PathBuf,

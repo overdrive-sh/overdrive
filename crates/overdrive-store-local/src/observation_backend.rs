@@ -37,6 +37,23 @@
 //! will miss the lost events. Phase 2's Corrosion replacement
 //! recovers via CR-SQLite gossip catch-up.
 //!
+//! # Malformed-row warn cadence
+//!
+//! Malformed observation rows produce a
+//! `tracing::warn!(name = "observation.envelope.decode_failed", ...)`
+//! event on every scan that encounters them — once per row per call
+//! to `<table>_rows()`. A row that persists across many reconciler
+//! ticks will emit many warn events. The intended remediation is to
+//! rewrite the row through the typed write API (`apply_*_lww`),
+//! which replaces the malformed bytes and silences subsequent warns
+//! naturally. There is no in-memory dedup; the scan path is
+//! stateless by design (the `ObservationStore` is gossiped and any
+//! node may converge first — so a stateful "we already warned for
+//! this row" cache on one peer would still re-warn on every other
+//! peer that scans the row and would also re-warn this peer after
+//! restart). Per ADR-0048 § 3, observation log-and-skip is the
+//! correct degrade path; the warn cadence is the price.
+//!
 //! # LWW guard on `write`
 //!
 //! Per the `ObservationStore::write` trait contract codified in

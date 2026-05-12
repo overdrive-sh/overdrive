@@ -23,7 +23,7 @@ use overdrive_core::traits::observation_store::{
 };
 use overdrive_core::wall_clock::UnixInstant;
 
-use super::harness::assert_envelope_v_roundtrip;
+use super::harness::{assert_discriminant_byte_at_pinned_offset, assert_envelope_v_roundtrip};
 
 /// Canonical V1 payload pinned by `FIXTURE_V1` below. The expected
 /// projection is built from these values verbatim — change any one
@@ -54,6 +54,18 @@ const FIXTURE_V1: &str = "00000000000000002a000000000000006400000000000000010000
 fn service_hydration_result_row_v1_decodes_through_current_envelope() {
     let expected = canonical_v1_payload();
     assert_envelope_v_roundtrip::<ServiceHydrationResultRowEnvelope>(FIXTURE_V1, &expected);
+}
+
+/// Structural defense for the empirically-pinned
+/// `ServiceHydrationResultRowEnvelope::discriminant_offset_from_end()`
+/// value (80). Archives a canonical V1 payload through `latest()`
+/// and asserts the byte at the pinned offset is V1's tag (0).
+#[test]
+fn service_hydration_result_row_discriminant_byte_at_pinned_offset() {
+    assert_discriminant_byte_at_pinned_offset::<ServiceHydrationResultRowEnvelope>(
+        canonical_v1_payload(),
+        0,
+    );
 }
 
 // ---------------------------------------------------------------------
