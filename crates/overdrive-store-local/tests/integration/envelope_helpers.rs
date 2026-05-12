@@ -71,50 +71,52 @@ pub fn write_raw_bytes_to_entries_table(redb_path: &Path, key: &[u8], raw_bytes:
 
 /// Synthesise bytes that look like a `JobEnvelope` archive but carry
 /// an unknown discriminant tag (`99`). Used by S-EV-03.2 to drive the
-/// "unknown future variant" branch of `Job::from_store_bytes`.
+/// "unknown future variant" branch of `Job::from_store_bytes` — the
+/// pre-decode probe (`probe_known_variant`) surfaces this as
+/// `EnvelopeError::UnknownVersion { observed: 99, type_name:
+/// "JobEnvelope", supported_max: 0 }`.
 ///
-/// Per ADR-0048 § 1 the rkyv enum tag is at offset 0 of the archived
-/// envelope bytes. This helper takes a valid `JobEnvelope::V1`
-/// payload's archived bytes (passed in via `payload_archive`) and
-/// flips the leading discriminant to 99. The resulting bytes fail
-/// the rkyv bytecheck validator and surface as
-/// `EnvelopeError::Malformed` per the implementation reality
-/// documented in `JobV1::from_store_bytes`. (The variant
-/// `EnvelopeError::UnknownVersion` is reserved for future
-/// dynamic-variant designs per `crates/overdrive-core/src/codec/
-/// envelope.rs::EnvelopeError::UnknownVersion`.)
+/// rkyv 0.8 places variable-length payload data (strings, vecs) in
+/// a leading slab and the fixed-size "root" structure — including
+/// the outer enum's discriminant byte — at the END of the archive
+/// buffer. The distance from the buffer's end to the outer
+/// discriminant is therefore stable across all archives of the same
+/// envelope shape; the absolute offset from the start shifts with
+/// every workload-id / command / args length change.
 ///
-/// The leading bytes of a real rkyv archive of a single-variant
-/// enum are not literally `[0u8]` — rkyv uses a `#[repr(u8)]` tag
-/// followed by per-variant inline body. Synthesis emits a fresh
-/// byte buffer where the *last* byte is set to 99 (rkyv stores the
-/// enum discriminator at the END of the archived envelope buffer,
-/// after relative pointers — see `crates/overdrive-core/tests/
-/// schema_evolution/alloc_status_row.rs::FIXTURE_V1` whose final
-/// non-zero byte is the tag).
+/// For `JobEnvelope` V1-only archives this distance is 64 bytes,
+/// mirroring
+/// `JobEnvelope::discriminant_offset_from_end() == Some(64)` in
+/// `crates/overdrive-core/src/aggregate/mod.rs`.
+///
+/// The helper flips only that one byte (no surrounding padding) so
+/// the resulting bytes:
+/// * pass the pre-decode probe's structural sanity (the slice IS
+///   long enough),
+/// * fail the probe's known-discriminant check (99 is not in
+///   `JobEnvelope::known_discriminants()`),
+/// * therefore surface as `UnknownVersion` BEFORE rkyv decode.
+///
+/// **Version-bump invariant.** When `JobEnvelope::V2` lands, the
+/// constant `JOB_ENVELOPE_DISCRIMINANT_OFFSET_FROM_END` below MUST
+/// be re-pinned alongside the schema-evolution fixture per
+/// `VersionedEnvelope::discriminant_offset_from_end`'s docstring —
+/// if V2's archived footprint differs from V1's, rkyv shifts the
+/// distance and this helper would silently target padding instead
+/// of the tag, breaking the test.
 pub fn synthesise_unknown_job_envelope_variant_tag(payload_archive: &[u8]) -> Vec<u8> {
-    // rkyv with `#[derive(Archive)]` on a `#[repr(u8)]`-implicit enum
-    // serialises the discriminant byte at a position determined by
-    // the archived layout — for `JobEnvelope` with one variant
-    // `V1(JobV1)` the discriminant is the byte immediately preceding
-    // the trailing zero-padding emitted to align the archive to a
-    // multiple of `align_of::<Archived<Self>>()`. Inspecting the
-    // canonical V1 fixture for `JobEnvelope` (see
-    // `crates/overdrive-core/tests/schema_evolution/job.rs::
-    // FIXTURE_V1`) the literal `01` discriminant sits 7 bytes from
-    // the end. Flipping every byte across the trailing 8-byte
-    // padding-and-discriminant region to `99` reliably corrupts the
-    // tag regardless of micro-changes to the archive layout.
+    /// Empirically-pinned discriminant distance-from-end for
+    /// `JobEnvelope` V1-only archives. Mirrors
+    /// `JobEnvelope::discriminant_offset_from_end() == Some(64)`.
+    const JOB_ENVELOPE_DISCRIMINANT_OFFSET_FROM_END: usize = 64;
+
     let mut bytes = payload_archive.to_vec();
     let n = bytes.len();
-    if n >= 8 {
-        for slot in &mut bytes[n - 8..] {
-            *slot = 99;
-        }
-    } else {
-        for slot in &mut bytes[..] {
-            *slot = 99;
-        }
-    }
+    assert!(
+        n >= JOB_ENVELOPE_DISCRIMINANT_OFFSET_FROM_END,
+        "test synthesis precondition: archive must be at least the discriminant offset long ({n} >= {JOB_ENVELOPE_DISCRIMINANT_OFFSET_FROM_END})",
+    );
+    let target = n - JOB_ENVELOPE_DISCRIMINANT_OFFSET_FROM_END;
+    bytes[target] = 99;
     bytes
 }

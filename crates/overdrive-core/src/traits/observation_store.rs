@@ -556,6 +556,36 @@ impl VersionedEnvelope for AllocStatusRowEnvelope {
             Self::V1(v1) => Ok(v1),
         }
     }
+
+    /// Discriminant offset for `AllocStatusRowEnvelope` archives,
+    /// measured from the END of the archive bytes.
+    ///
+    /// Empirically determined against canonical V1 payloads of
+    /// varying `listeners: Vec<ListenerRow>` sizes: rkyv 0.8 places
+    /// the outer enum's discriminant byte 168 bytes from the END of
+    /// the archive, stable across all payload sizes (the trailing
+    /// "root" structure has a fixed footprint; only the leading slab
+    /// grows with variable-length data).
+    ///
+    /// Re-pin alongside the schema-evolution fixture at every
+    /// version-bump per
+    /// [`VersionedEnvelope::discriminant_offset_from_end`]'s
+    /// docstring.
+    fn discriminant_offset_from_end() -> Option<usize> {
+        Some(168)
+    }
+
+    fn known_discriminants() -> &'static [u8] {
+        // V1 carries rkyv discriminant 0 (declaration order — first
+        // variant). Empirically verified by archiving a canonical
+        // `AllocStatusRowEnvelope::latest(...)` and inspecting the
+        // byte at `bytes.len() - 168`.
+        &[0]
+    }
+
+    fn type_name() -> &'static str {
+        "AllocStatusRowEnvelope"
+    }
 }
 
 // SCAFFOLD: true
@@ -593,6 +623,16 @@ impl VersionedEnvelope for NodeHealthRowEnvelope {
     fn into_latest(self) -> Result<Self::Latest, EnvelopeError> {
         todo!("RED scaffold: match Self::V1(v1) => Ok(v1)")
     }
+
+    fn type_name() -> &'static str {
+        "NodeHealthRowEnvelope"
+    }
+
+    // `discriminant_offset` / `known_discriminants` inherit the
+    // trait defaults — they get pinned at step 02-01 GREEN time,
+    // alongside this envelope's schema-evolution fixture, via the
+    // same empirical inspection procedure documented on
+    // `VersionedEnvelope::discriminant_offset`.
 }
 
 // SCAFFOLD: true
@@ -631,6 +671,10 @@ impl VersionedEnvelope for ServiceHydrationResultRowEnvelope {
     fn into_latest(self) -> Result<Self::Latest, EnvelopeError> {
         todo!("RED scaffold: match Self::V1(v1) => Ok(v1)")
     }
+
+    fn type_name() -> &'static str {
+        "ServiceHydrationResultRowEnvelope"
+    }
 }
 
 // SCAFFOLD: true
@@ -668,6 +712,10 @@ impl VersionedEnvelope for ServiceBackendRowEnvelope {
     )]
     fn into_latest(self) -> Result<Self::Latest, EnvelopeError> {
         todo!("RED scaffold: match Self::V1(v1) => Ok(v1)")
+    }
+
+    fn type_name() -> &'static str {
+        "ServiceBackendRowEnvelope"
     }
 }
 

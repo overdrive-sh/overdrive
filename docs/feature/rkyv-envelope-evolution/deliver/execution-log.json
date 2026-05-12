@@ -197,6 +197,34 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-05-12T04:50:00Z"
+    },
+    {
+      "sid": "01-04-refactor-discriminant-probing",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T05:17:28Z"
+    },
+    {
+      "sid": "01-04-refactor-discriminant-probing",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: refactor \u2014 existing S-EV-03.2 assertion flipped in GREEN, no new acceptance scaffold",
+      "t": "2026-05-12T05:17:36Z"
+    },
+    {
+      "sid": "01-04-refactor-discriminant-probing",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: refactor \u2014 assertion correction lands in GREEN alongside production change",
+      "t": "2026-05-12T05:17:36Z"
+    },
+    {
+      "sid": "01-04-refactor-discriminant-probing",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T05:35:56Z"
     }
   ]
 }

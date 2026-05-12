@@ -58,7 +58,7 @@ use std::task::{Context, Poll};
 
 use async_trait::async_trait;
 use futures::Stream;
-use overdrive_core::codec::VersionedEnvelope;
+use overdrive_core::codec::{VersionedEnvelope, probe_known_variant};
 use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
 use overdrive_core::id::{AllocationId, ServiceId};
 use overdrive_core::traits::observation_store::{
@@ -428,6 +428,17 @@ impl ObservationStore for LocalObservationStore {
 fn decode_alloc_status(bytes: &[u8]) -> Result<AllocStatusRow, ObservationStoreError> {
     let mut aligned = rkyv::util::AlignedVec::<8>::new();
     aligned.extend_from_slice(bytes);
+
+    // Probe the rkyv-archived discriminant byte BEFORE the full
+    // bytecheck — distinguishes "future binary's V<N+1>" (surfaces
+    // as `EnvelopeError::UnknownVersion`) from "bytes don't decode
+    // at all" (`Malformed`). Per ADR-0048 § 3 the observation layer
+    // logs and skips either way, but the structured distinction
+    // feeds operator-facing diagnostics. See `probe_known_variant`
+    // in `overdrive-core::codec::envelope`.
+    probe_known_variant::<AllocStatusRowEnvelope>(aligned.as_ref())
+        .map_err(|source| ObservationStoreError::Envelope { source })?;
+
     let envelope: AllocStatusRowEnvelope =
         rkyv::from_bytes::<AllocStatusRowEnvelope, rkyv::rancor::Error>(&aligned).map_err(
             |source| ObservationStoreError::Envelope {

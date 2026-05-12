@@ -92,11 +92,23 @@ fn malformed_intent_bytes_cause_refuse_to_start() {
     }
 
     // Inject malformed bytes at a `jobs/<id>` key — the recovery walk
-    // in `LocalIntentStore::open` will pick this up.
+    // in `LocalIntentStore::open` will pick this up. Bytes are
+    // deliberately shorter than
+    // `JobEnvelope::discriminant_offset_from_end()` (= 64) so the
+    // pre-decode probe in `Job::from_store_bytes` returns Ok (the
+    // trailing root region isn't reachable) and the rkyv bytecheck
+    // layer is the one that classifies the bytes as `Malformed` —
+    // this test exercises the "structurally garbage" branch, not
+    // the "unknown future variant" branch (which lives in
+    // `unknown_future_variant_tag_causes_refuse_to_start`).
     let job_id = "job-malformed-01";
     let job = Job::from_spec(sample_job_spec(job_id)).expect("valid job");
     let key = IntentKey::for_job(&job.id);
-    let garbage: &[u8] = b"\xff\xfe\xfd\xfc this is not a valid rkyv archive";
+    let garbage: &[u8] = b"\xff\xfe\xfd\xfc not rkyv";
+    assert!(
+        garbage.len() < 64,
+        "test precondition: garbage must be shorter than JobEnvelope::discriminant_offset_from_end (= 64) so the probe falls through to rkyv classification",
+    );
     write_raw_bytes_to_entries_table(&redb_path, key.as_bytes(), garbage);
 
     // Install the subscriber AFTER bytes injection so the tracing
@@ -159,13 +171,15 @@ fn unknown_future_variant_tag_causes_refuse_to_start() {
         let _ = LocalIntentStore::open(&redb_path).expect("first open");
     }
 
-    // Take a valid envelope's archived bytes and corrupt the trailing
-    // discriminant region to value 99 — bytes no longer decode as
-    // JobEnvelope. The contract under test is the same (recovery
-    // walk surfaces IntentStoreError::Envelope); per the docstring
-    // on EnvelopeError::UnknownVersion the variant is reserved for
-    // future dynamic designs, so today the unknown-tag synthesis
-    // surfaces as EnvelopeError::Malformed.
+    // Take a valid envelope's archived bytes and corrupt the
+    // discriminant byte at the empirically-pinned offset (32 for
+    // `JobEnvelope` per
+    // `JobEnvelope::discriminant_offset`) to value 99. The
+    // pre-decode probe in `Job::from_store_bytes` surfaces this as
+    // `EnvelopeError::UnknownVersion` with the observed byte and
+    // the envelope's `type_name` — the structured surface ADR-0048
+    // § 3 calls for, distinguishing "future binary's V<N+1>" from
+    // "bytes don't decode at all".
     let job_id = "job-unknown-future-99";
     let job = Job::from_spec(sample_job_spec(job_id)).expect("valid job");
     let key = IntentKey::for_job(&job.id);
@@ -184,15 +198,25 @@ fn unknown_future_variant_tag_causes_refuse_to_start() {
     match &err {
         IntentStoreError::Envelope { redb_path: err_path, source } => {
             assert_eq!(err_path, &redb_path);
-            // Per implementation: rkyv bytecheck rejects an unknown
-            // discriminant as malformed rather than surfacing
-            // UnknownVersion. This matches the documented contract
-            // in `JobV1::from_store_bytes` and on
-            // `EnvelopeError::UnknownVersion`.
-            assert!(
-                matches!(source, EnvelopeError::Malformed { .. }),
-                "expected EnvelopeError::Malformed for synthesised unknown-tag bytes; got {source:?}",
-            );
+            match source {
+                EnvelopeError::UnknownVersion { observed, type_name, supported_max } => {
+                    assert_eq!(
+                        *observed, 99,
+                        "probe must surface the observed discriminant byte verbatim",
+                    );
+                    assert_eq!(
+                        *type_name, "JobEnvelope",
+                        "probe must name the envelope whose decode path surfaced the unknown tag",
+                    );
+                    assert_eq!(
+                        *supported_max, 0,
+                        "JobEnvelope today supports only V1 (rkyv discriminant 0)",
+                    );
+                }
+                other @ EnvelopeError::Malformed { .. } => panic!(
+                    "expected EnvelopeError::UnknownVersion {{ observed: 99, type_name: \"JobEnvelope\", .. }} for synthesised unknown-tag bytes; got {other:?}",
+                ),
+            }
         }
         other => panic!("expected IntentStoreError::Envelope; got {other:?}"),
     }

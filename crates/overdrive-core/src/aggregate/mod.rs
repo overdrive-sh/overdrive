@@ -21,7 +21,7 @@ use rkyv::util::AlignedVec;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::codec::{EnvelopeError, VersionedEnvelope};
+use crate::codec::{EnvelopeError, VersionedEnvelope, probe_known_variant};
 use crate::id::{AllocationId, ContentHash, InvestigationId, NodeId, PolicyId, Region, WorkloadId};
 use crate::traits::driver::Resources;
 use crate::traits::intent_store::IntentStoreError;
@@ -266,6 +266,36 @@ impl VersionedEnvelope for JobEnvelope {
             Self::V1(v1) => Ok(v1),
         }
     }
+
+    /// Discriminant offset for `JobEnvelope` archives, measured from
+    /// the END of the archive bytes.
+    ///
+    /// Empirically determined against canonical V1 payloads of
+    /// varying inner-string sizes (`workload_id`, `command`, `args`):
+    /// rkyv 0.8 places the outer enum's discriminant byte 64 bytes
+    /// from the END of the archive, stable across all payload sizes
+    /// (the trailing "root" structure has a fixed footprint; only
+    /// the leading slab grows with variable-length data).
+    ///
+    /// Re-pin alongside the schema-evolution fixture at every
+    /// version-bump per
+    /// [`VersionedEnvelope::discriminant_offset_from_end`]'s
+    /// docstring.
+    fn discriminant_offset_from_end() -> Option<usize> {
+        Some(64)
+    }
+
+    fn known_discriminants() -> &'static [u8] {
+        // V1 carries rkyv discriminant 0 (declaration order — first
+        // variant). Empirically verified by archiving a canonical
+        // `JobEnvelope::latest(...)` and inspecting the byte at
+        // `bytes.len() - 64`.
+        &[0]
+    }
+
+    fn type_name() -> &'static str {
+        "JobEnvelope"
+    }
 }
 
 impl JobV1 {
@@ -411,10 +441,11 @@ impl JobV1 {
     ///   rejection).
     /// * Bytes from a writer that has bumped the envelope to
     ///   `V<N+1>` while this binary knows only up to `V<N>` →
-    ///   [`EnvelopeError::Malformed`] in practice (rkyv discriminant
-    ///   mismatch surfaces as validator rejection, NOT
-    ///   [`EnvelopeError::UnknownVersion`] — the latter variant is
-    ///   reserved for future dynamic-variant designs).
+    ///   [`EnvelopeError::UnknownVersion`] (surfaced by
+    ///   [`probe_known_variant`] before rkyv decode). The structured
+    ///   surface carries the observed discriminant byte and the
+    ///   envelope's [`VersionedEnvelope::type_name`] for
+    ///   operator-facing diagnostics.
     /// * Truncated / corrupt bytes → [`EnvelopeError::Malformed`].
     ///
     /// # Observable invariants
@@ -429,9 +460,19 @@ impl JobV1 {
         let mut aligned = AlignedVec::<8>::new();
         aligned.extend_from_slice(bytes);
 
-        let envelope_result = rkyv::from_bytes::<JobEnvelope, rkyv::rancor::Error>(&aligned)
-            .map_err(|source| EnvelopeError::Malformed { source })
-            .and_then(VersionedEnvelope::into_latest);
+        // Probe the rkyv-archived discriminant byte BEFORE attempting
+        // full decode — surfaces a known-but-unsupported tag (a
+        // future binary's `V<N+1>`) as `EnvelopeError::UnknownVersion`
+        // with the observed byte. Without this probe, rkyv's
+        // bytecheck would collapse the case into `Malformed` and the
+        // operator would not know whether the bytes are corrupt or
+        // newer-than-supported. See `probe_known_variant` and ADR-0048
+        // § 3.
+        let envelope_result = probe_known_variant::<JobEnvelope>(aligned.as_ref()).and_then(|()| {
+            rkyv::from_bytes::<JobEnvelope, rkyv::rancor::Error>(&aligned)
+                .map_err(|source| EnvelopeError::Malformed { source })
+                .and_then(VersionedEnvelope::into_latest)
+        });
 
         match envelope_result {
             Ok(job) => Ok(job),

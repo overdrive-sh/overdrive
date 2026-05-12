@@ -47,6 +47,10 @@
 //!             Self::V1(v1) => Ok(v1),
 //!         }
 //!     }
+//!
+//!     fn type_name() -> &'static str {
+//!         "ExampleEnvelope"
+//!     }
 //! }
 //!
 //! let payload = ExampleV1 { value: 42 };
@@ -140,18 +144,178 @@ pub trait VersionedEnvelope {
     ///
     /// # Errors
     ///
-    /// Returns [`EnvelopeError::UnknownVersion`] when the envelope
-    /// somehow carries a variant tag this binary does not know — in
-    /// practice this is unreachable for envelopes whose enum
-    /// definition is exhaustive at compile time, but the variant
-    /// remains in the error type so future dynamic-variant designs
-    /// have a typed slot.
+    /// Reserved variant-translation slot. `into_latest` itself does
+    /// not surface [`EnvelopeError::UnknownVersion`] today — every
+    /// envelope's `match self` is exhaustive at compile time, so
+    /// an unknown variant cannot reach this fn. The primary path
+    /// that surfaces `UnknownVersion` is the pre-decode probe
+    /// [`probe_known_variant`] (upstream of the rkyv decode call),
+    /// which inspects the archived discriminant byte against the
+    /// envelope's [`Self::known_discriminants`] and reports the
+    /// observed byte to the caller. The variant remains reachable
+    /// from `into_latest` for future explicit-translation steps
+    /// that may reject during the `From` chain.
     ///
     /// Returns [`EnvelopeError::Malformed`] when an inner-payload
     /// conversion via `From` chain itself fails (none today; the
     /// variant is reserved for future explicit-translation steps that
     /// can reject malformed data — e.g. an enum-rename migration).
     fn into_latest(self) -> Result<Self::Latest, EnvelopeError>;
+
+    /// Distance (in bytes) of the rkyv enum discriminant from the END
+    /// of the archived envelope bytes.
+    ///
+    /// rkyv 0.8 archives place variable-length payload data
+    /// (strings, vecs) in a leading slab and the fixed-size "root"
+    /// structure — including the outer enum's discriminant byte — at
+    /// the END of the buffer. The distance from the buffer's end to
+    /// the discriminant is therefore **stable across all archives of
+    /// the same envelope shape**, regardless of how long any inner
+    /// string or vec is. The absolute offset from the start, in
+    /// contrast, shifts with every payload size change.
+    ///
+    /// Pin this offset by archiving canonical payloads of varying
+    /// inner-string sizes and probing for the byte position whose
+    /// mutation causes rkyv's bytecheck to surface
+    /// `"invalid discriminant 'N' for enum 'Archived<EnvelopeName>'"`
+    /// at the top of the error chain (no preceding `trace:` frame).
+    /// The probe converges to a single `n - offset` value across
+    /// every payload size.
+    ///
+    /// Returning `None` (the default) means the offset has not yet
+    /// been pinned for this envelope; [`probe_known_variant`] becomes
+    /// a no-op and unknown-tag bytes fall back to surfacing as
+    /// [`EnvelopeError::Malformed`] via rkyv's bytecheck validator.
+    /// New `VersionedEnvelope` impls that intend to surface
+    /// [`EnvelopeError::UnknownVersion`] on future-binary bytes MUST
+    /// override this function with the empirically-pinned offset.
+    ///
+    /// **Version-bump invariant.** When appending a `V<N+1>` variant
+    /// to the envelope enum, the developer regenerates the
+    /// schema-evolution fixture AND re-inspects this offset. If the
+    /// `V<N+1>` payload's archived footprint differs from `V<N>`'s,
+    /// rkyv re-pads the inline region to `max(V_1..V<N+1>)` and the
+    /// distance from the end shifts. The pinned offset MUST be
+    /// updated in the same commit as the variant addition; the
+    /// schema-evolution roundtrip test pins the bytes, and this
+    /// helper's offset value pins where this binary expects to find
+    /// the discriminant in newly-archived envelopes.
+    fn discriminant_offset_from_end() -> Option<usize> {
+        None
+    }
+
+    /// Set of variant discriminants this binary recognises.
+    ///
+    /// For a `V1`-only envelope this is `&[0]` (rkyv assigns
+    /// discriminants in declaration order starting at 0). When `V2`
+    /// is appended, the slice becomes `&[0, 1]` — the prior tag
+    /// continues to round-trip through `into_latest` via the
+    /// `From<V1>` chain.
+    ///
+    /// The default returns `&[]`; [`probe_known_variant`] is a no-op
+    /// in that case and falls back to rkyv's bytecheck for
+    /// classification.
+    fn known_discriminants() -> &'static [u8] {
+        &[]
+    }
+
+    /// Stable diagnostic name for the envelope (e.g. `"JobEnvelope"`,
+    /// `"AllocStatusRowEnvelope"`).
+    ///
+    /// Used by [`EnvelopeError::UnknownVersion`] to identify which
+    /// envelope's read path surfaced the unknown tag and by tracing
+    /// events at the decode boundary. The default is `"<unknown>"`;
+    /// every production envelope SHOULD override this with its
+    /// canonical name.
+    fn type_name() -> &'static str {
+        "<unknown>"
+    }
+}
+
+/// Inspect the rkyv-archived discriminant byte BEFORE attempting full
+/// decode and classify out-of-set values as
+/// [`EnvelopeError::UnknownVersion`].
+///
+/// # Why this exists
+///
+/// Per ADR-0048 § 3 the envelope read path needs to distinguish two
+/// failure shapes:
+///
+/// * **Unknown future variant** — the bytes were written by a newer
+///   binary that bumped to `V<N+1>` while this reader knows only up
+///   to `V<N>`. The operator remediation is "upgrade this binary or
+///   delete the redb file." The intent path refuses to start;
+///   observation rows are log+skipped per § 3.
+/// * **Malformed bytes** — the bytes were not produced by this
+///   envelope's writer (truncation, corruption, different envelope
+///   shape). The operator remediation is "delete the redb file."
+///
+/// Without a pre-decode probe both shapes collapse into
+/// [`EnvelopeError::Malformed`] (rkyv's bytecheck rejects every
+/// out-of-set discriminant the same way). This helper inspects the
+/// discriminant byte at the empirically-pinned position
+/// (`bytes.len() - E::discriminant_offset_from_end()`) and returns
+/// [`EnvelopeError::UnknownVersion`] for tags outside the known set
+/// ([`VersionedEnvelope::known_discriminants`]) — the typed
+/// classification feeds operator-facing diagnostics and lets the
+/// caller branch.
+///
+/// # Behavior
+///
+/// * If the envelope's
+///   [`discriminant_offset_from_end`](VersionedEnvelope::discriminant_offset_from_end)
+///   is `None`, the probe is a no-op and returns `Ok(())` — the
+///   caller falls through to rkyv decode, which classifies the
+///   bytes via bytecheck.
+/// * If the byte slice is shorter than the from-end offset, the
+///   probe also returns `Ok(())` and lets rkyv surface the
+///   truncation as [`EnvelopeError::Malformed`].
+/// * If the discriminant byte is in
+///   [`known_discriminants`](VersionedEnvelope::known_discriminants),
+///   returns `Ok(())` and the caller proceeds with rkyv decode.
+/// * Otherwise returns [`EnvelopeError::UnknownVersion`] with the
+///   observed byte, the envelope's
+///   [`type_name`](VersionedEnvelope::type_name), and the highest
+///   known variant tag (max of `known_discriminants`).
+///
+/// # Composition
+///
+/// Callers compose this with `rkyv::from_bytes` at every persistence
+/// boundary:
+///
+/// ```rust,ignore
+/// let bytes: &[u8] = /* read from redb */;
+/// probe_known_variant::<FooEnvelope>(bytes)?;
+/// let envelope: FooEnvelope = rkyv::from_bytes(bytes)
+///     .map_err(|source| EnvelopeError::Malformed { source })?;
+/// let latest = envelope.into_latest()?;
+/// ```
+///
+/// The probe MUST run BEFORE the `from_bytes` call — running it
+/// after would still surface the bytecheck rejection as `Malformed`,
+/// losing the `UnknownVersion` distinction.
+pub fn probe_known_variant<E: VersionedEnvelope>(bytes: &[u8]) -> Result<(), EnvelopeError> {
+    // No offset pinned → probe is a no-op; rkyv decode classifies.
+    let Some(from_end) = E::discriminant_offset_from_end() else {
+        return Ok(());
+    };
+    // Bytes too short to contain the trailing root region → let rkyv
+    // surface the truncation as Malformed.
+    let Some(offset) = bytes.len().checked_sub(from_end) else {
+        return Ok(());
+    };
+    let Some(observed) = bytes.get(offset).copied() else {
+        return Ok(());
+    };
+    let known = E::known_discriminants();
+    if known.contains(&observed) {
+        return Ok(());
+    }
+    Err(EnvelopeError::UnknownVersion {
+        observed,
+        type_name: E::type_name(),
+        supported_max: known.iter().copied().max().unwrap_or(0),
+    })
 }
 
 /// Errors produced when decoding bytes through a [`VersionedEnvelope`].
@@ -170,12 +334,22 @@ pub enum EnvelopeError {
     /// path refuses to start (operator remediates by upgrading or
     /// deleting the redb file); the observation path logs and skips
     /// the offending row.
+    ///
+    /// The structured surface is produced by [`probe_known_variant`]
+    /// against the envelope's empirically-pinned discriminant offset.
+    /// Without that probe, rkyv's bytecheck would collapse this case
+    /// into [`Self::Malformed`] — the probe restores the distinction
+    /// for operator-facing diagnostics.
     #[error(
-        "envelope carries unknown version tag {observed} (this binary supports up to V{supported_max})"
+        "{type_name} carries unknown version tag {observed} (this binary supports up to V{supported_max})"
     )]
     UnknownVersion {
         /// The discriminant byte the bytes carried.
         observed: u8,
+        /// Stable diagnostic name of the envelope whose read path
+        /// surfaced the unknown tag (e.g. `"JobEnvelope"`,
+        /// `"AllocStatusRowEnvelope"`).
+        type_name: &'static str,
         /// The highest variant this binary recognises.
         supported_max: u8,
     },

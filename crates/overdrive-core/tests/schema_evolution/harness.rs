@@ -117,6 +117,10 @@ mod harness_self_test {
                 Self::V1(v1) => Ok(v1),
             }
         }
+
+        fn type_name() -> &'static str {
+            "MockEnvelope"
+        }
     }
 
     #[test]
