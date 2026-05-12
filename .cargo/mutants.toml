@@ -177,6 +177,50 @@ exclude_re = [
     # operator-flip mutation.
     "replace == with != in dispatch_single",
 
+    # `VersionedEnvelope` trait default impls — semantically
+    # unreachable from production code paths. Every production
+    # `VersionedEnvelope` impl (`JobEnvelope`,
+    # `AllocStatusRowEnvelope`, `NodeHealthRowEnvelope`,
+    # `ServiceHydrationResultRowEnvelope`,
+    # `ServiceBackendRowEnvelope`) overrides
+    # `discriminant_offset_from_end()`, `known_discriminants()`, and
+    # `type_name()` with their empirically-pinned values; the
+    # trait-level default returns (`None`, `&[]`, `"<unknown>"`)
+    # are observable only from an envelope that does NOT override
+    # them. No such envelope exists in production code. The
+    # per-envelope overrides ARE mutation-tested by the
+    # `*_unknown_version_probe_surfaces` tests in
+    # `crates/overdrive-core/tests/schema_evolution/`. cargo-mutants
+    # cannot tell the difference between a callable-but-overridden
+    # default and a dead-code default, so we exclude the three
+    # defaults explicitly. The source-level `// mutants: skip`
+    # comments on each default in
+    # `crates/overdrive-core/src/codec/envelope.rs` carry the same
+    # rationale as load-bearing documentation for future readers.
+    # Trait-default impls — cargo-mutants emits descriptions of the
+    # shape `replace VersionedEnvelope::<method> -> <type> with <body>`
+    # (no `<impl ...>` prefix because these are trait-level defaults,
+    # not impl bodies). The per-envelope overrides emit a different
+    # shape: `replace <impl VersionedEnvelope for FooEnvelope>::<method>
+    # -> <type> with <body>`. We exclude the trait-level shape only.
+    "replace VersionedEnvelope::discriminant_offset_from_end",
+    "replace VersionedEnvelope::known_discriminants",
+    "replace VersionedEnvelope::type_name",
+
+    # `<impl VersionedEnvelope for ...>::known_discriminants -> &'static [u8]
+    # with Vec::leak(vec![0])` — equivalent mutant. Every production
+    # envelope returns `&[0]` (V1-only state). cargo-mutants
+    # synthesises `Vec::leak(vec![0])` as a "replacement" body, but
+    # `&[0u8]` and `Vec::leak(vec![0u8])` produce byte-equivalent
+    # slices — the only observable difference is allocator vs static,
+    # which no test can detect because the slice contents are
+    # identical. When a future `V2` lands, the production
+    # `known_discriminants()` becomes `&[0, 1]` and this exclusion
+    # naturally narrows to `vec![0]` vs `&[0, 1]` (which IS
+    # observable — the mutant excludes tag 1). The exclusion only
+    # masks the equivalent-mutant case while V1 is the only variant.
+    "::known_discriminants -> &'static\\[u8\\] with Vec::leak\\(vec!\\[0\\]\\)",
+
     # Rule 7 — function-body replacement with `Default::default()`.
     # cargo-mutants' default operator synthesises three replacement
     # bodies for any function returning `Result<T, E>`: `Ok(T::default())`,

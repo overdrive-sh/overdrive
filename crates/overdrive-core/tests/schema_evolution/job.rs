@@ -22,7 +22,10 @@ use overdrive_core::codec::VersionedEnvelope;
 use overdrive_core::id::WorkloadId;
 use overdrive_core::traits::driver::Resources;
 
-use super::harness::{assert_discriminant_offset_triangulation, assert_envelope_v_roundtrip};
+use super::harness::{
+    assert_discriminant_offset_triangulation, assert_envelope_v_roundtrip,
+    assert_unknown_version_probe_surfaces,
+};
 
 /// Independent pin of the V1 discriminant offset for triangulation
 /// against `JobEnvelope::discriminant_offset_from_end()`. The trait
@@ -77,6 +80,28 @@ fn job_discriminant_offset_triangulation() {
         GOLDEN_DISCRIMINANT_OFFSET_V1,
         0,
     );
+}
+
+/// End-to-end pin of `JobEnvelope`'s introspection surface
+/// (`known_discriminants`, `type_name`, `discriminant_offset_from_end`)
+/// through `decode_envelope_bytes`. See
+/// [`assert_unknown_version_probe_surfaces`] for the full rationale.
+///
+/// A sibling integration test
+/// (`overdrive-store-local/tests/integration/envelope_intent_refuse.rs`)
+/// also asserts on these introspection methods via the full
+/// `LocalIntentStore::open` boundary; that test runs only when the
+/// `overdrive-store-local` package is in scope. This per-package
+/// assertion ensures the surface is pinned at the `overdrive-core`
+/// test scope as well (the scope `cargo-mutants` reruns when mutating
+/// `aggregate/mod.rs`).
+///
+/// `supported_max == 0` because today's envelope is V1-only; bumping
+/// to V2 means re-pinning this assertion in the same commit per
+/// `development.md` § "Version-bump procedure".
+#[test]
+fn job_unknown_version_probe_surfaces() {
+    assert_unknown_version_probe_surfaces::<JobEnvelope>(canonical_v1_payload(), "JobEnvelope", 0);
 }
 
 #[test]

@@ -15,7 +15,7 @@
 //! and a canonical `Latest` projection and asserts equality — it does
 //! NOT bake per-envelope knowledge.
 
-use overdrive_core::codec::VersionedEnvelope;
+use overdrive_core::codec::{EnvelopeError, VersionedEnvelope, decode_envelope_bytes};
 
 /// Decode `fixture_hex` (the pinned archived bytes of a historical
 /// payload variant), deserialise into the envelope `E`, project to
@@ -177,6 +177,178 @@ pub fn assert_discriminant_offset_triangulation<E>(
     );
 }
 
+/// Pin the envelope's introspection surface (`known_discriminants`,
+/// `type_name`, `discriminant_offset_from_end`) end-to-end through
+/// [`decode_envelope_bytes`].
+///
+/// Per ADR-0048 § 3, the read path must distinguish "unknown future
+/// variant" (returns [`EnvelopeError::UnknownVersion`] with structured
+/// fields the operator can act on) from "malformed bytes" (returns
+/// [`EnvelopeError::Malformed`]). The distinction depends on three
+/// per-envelope trait methods working in concert:
+///
+/// 1. `discriminant_offset_from_end()` — where in the archive the
+///    pre-decode probe inspects for the tag byte.
+/// 2. `known_discriminants()` — the set of tags this binary recognises.
+/// 3. `type_name()` — the diagnostic name surfaced in the typed error.
+///
+/// Without an end-to-end test pinning all three for each envelope, a
+/// future edit could silently flip the probe's classification for
+/// individual envelopes — mutation testing would catch the unkilled
+/// blind spot, but only after the regression landed.
+///
+/// This helper closes that gap. It performs two assertions per
+/// envelope:
+///
+/// * **Valid bytes round-trip.** Archives `canonical`, decodes via
+///   [`decode_envelope_bytes`], asserts equality. Kills any mutation
+///   that mis-shapes `known_discriminants()` to exclude the V1 tag
+///   (e.g. `Vec::leak(Vec::new())` or `Vec::leak(vec![1])`) — those
+///   mutations cause the probe to flag VALID bytes as
+///   [`EnvelopeError::UnknownVersion`], so the round-trip fails.
+/// * **Unknown-tag bytes surface `UnknownVersion`.** Synthesises bytes
+///   with tag `UNKNOWN_TAG` at the empirically-pinned offset, asserts
+///   [`decode_envelope_bytes`] returns
+///   [`EnvelopeError::UnknownVersion`] with `observed == UNKNOWN_TAG`,
+///   `type_name == expected_type_name`, and `supported_max ==
+///   expected_supported_max`. Kills any mutation that erases
+///   `type_name()` (e.g. `""` or `"xyzzy"`), nulls
+///   `discriminant_offset_from_end()` (makes the probe a no-op, so the
+///   tag-99 bytes fall through to bytecheck and surface as
+///   `Malformed`), or erases the `probe_known_variant` body to
+///   `Ok(())`.
+///
+/// # Choice of `UNKNOWN_TAG`
+///
+/// `99` matches the value used by the existing intent-side
+/// integration test
+/// (`crates/overdrive-store-local/tests/integration/envelope_intent_refuse.rs`).
+/// Any value outside `known_discriminants()` works mechanically; `99`
+/// keeps cross-test diagnostics consistent.
+///
+/// # Panics
+///
+/// Panics with a fixture-identifying message if any assertion fails.
+///
+/// # Example call site
+///
+/// ```rust,ignore
+/// #[test]
+/// fn alloc_status_row_unknown_version_probe_surfaces() {
+///     assert_unknown_version_probe_surfaces::<AllocStatusRowEnvelope>(
+///         canonical_v1_payload(),
+///         "AllocStatusRowEnvelope",
+///         0, // V1 only — highest known tag is 0
+///     );
+/// }
+/// ```
+pub fn assert_unknown_version_probe_surfaces<E>(
+    canonical: E::Latest,
+    expected_type_name: &'static str,
+    expected_supported_max: u8,
+) where
+    E: VersionedEnvelope
+        + rkyv::Archive
+        + for<'a> rkyv::Serialize<
+            rkyv::api::high::HighSerializer<
+                rkyv::util::AlignedVec,
+                rkyv::ser::allocator::ArenaHandle<'a>,
+                rkyv::rancor::Error,
+            >,
+        >,
+    E::Latest: Clone + PartialEq + std::fmt::Debug,
+    <E as rkyv::Archive>::Archived: for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>
+        + rkyv::Deserialize<E, rkyv::rancor::Strategy<rkyv::de::Pool, rkyv::rancor::Error>>,
+{
+    /// Discriminant byte synthesised into the archive at the
+    /// empirically-pinned offset. Must be outside every envelope's
+    /// `known_discriminants()` slice — `99` is high enough to outlive
+    /// any plausible variant-count growth without growing the test's
+    /// vocabulary.
+    const UNKNOWN_TAG: u8 = 99;
+
+    // -----------------------------------------------------------------
+    // Pin 1 — valid bytes round-trip through decode_envelope_bytes.
+    // -----------------------------------------------------------------
+    // If `known_discriminants()` is mutated to omit the V1 tag (e.g.
+    // returns `&[]` or `&[1]`), `probe_known_variant` rejects VALID
+    // bytes (tag 0) as `UnknownVersion`. This round-trip assertion
+    // catches that class of mutation. The `canonical` argument is
+    // moved here; the equality assertion below uses the freshly
+    // decoded value against `canonical_clone` to keep the pin-2
+    // synthesis path independent of move semantics.
+    let canonical_clone = canonical.clone();
+    let envelope = E::latest(canonical);
+    let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope)
+        .expect("rkyv archive of canonical payload must succeed");
+    let decoded = decode_envelope_bytes::<E>(bytes.as_ref()).unwrap_or_else(|err| {
+        panic!(
+            "decode_envelope_bytes::<{expected_type_name}> must succeed on canonical bytes; got {err:?}",
+        )
+    });
+    assert_eq!(
+        decoded, canonical_clone,
+        "canonical payload must round-trip bit-equivalent through decode_envelope_bytes",
+    );
+
+    // -----------------------------------------------------------------
+    // Pin 2 — synthesised unknown-tag bytes surface UnknownVersion.
+    // -----------------------------------------------------------------
+    // Flip the discriminant byte at the pinned offset from V1 (0) to
+    // UNKNOWN_TAG (99). The structural sanity of the slice is
+    // preserved (length, all other bytes); only the tag is unknown.
+    let offset_from_end = E::discriminant_offset_from_end().unwrap_or_else(|| {
+        panic!(
+            "{expected_type_name} must override discriminant_offset_from_end() with the \
+             empirically-pinned offset — None means the probe is a no-op for this envelope, \
+             and the UnknownVersion classification is unreachable",
+        )
+    });
+    let mut synthesised = bytes.as_ref().to_vec();
+    let n = synthesised.len();
+    assert!(
+        n >= offset_from_end,
+        "archived bytes ({n}) must be at least the discriminant offset ({offset_from_end}) long \
+         — without that, the probe's structural sanity check returns Ok(()) and falls through \
+         to bytecheck, surfacing as Malformed instead of UnknownVersion",
+    );
+    let target = n - offset_from_end;
+    synthesised[target] = UNKNOWN_TAG;
+
+    let err = decode_envelope_bytes::<E>(&synthesised).err().unwrap_or_else(|| {
+        panic!(
+            "decode_envelope_bytes::<{expected_type_name}> must surface an error on \
+             unknown-tag bytes (tag {UNKNOWN_TAG} at offset {offset_from_end} from end); got Ok",
+        )
+    });
+    match err {
+        EnvelopeError::UnknownVersion { observed, type_name, supported_max } => {
+            assert_eq!(
+                observed, UNKNOWN_TAG,
+                "probe must surface the observed discriminant byte verbatim — \
+                 either the probe is reading the wrong offset or the synthesis is off",
+            );
+            assert_eq!(
+                type_name, expected_type_name,
+                "probe must name the envelope whose decode path surfaced the unknown tag \
+                 (asserts {expected_type_name}::type_name() has not drifted)",
+            );
+            assert_eq!(
+                supported_max, expected_supported_max,
+                "probe must surface the highest known tag (asserts \
+                 {expected_type_name}::known_discriminants() has not drifted)",
+            );
+        }
+        other @ EnvelopeError::Malformed { .. } => panic!(
+            "decode_envelope_bytes::<{expected_type_name}> must surface UnknownVersion on \
+             unknown-tag bytes (tag {UNKNOWN_TAG} at offset {offset_from_end} from end); got \
+             Malformed instead — either probe_known_variant short-circuited to Ok(()) or the \
+             discriminant_offset_from_end is wrong, causing the probe to inspect padding \
+             bytes that happen to be in known_discriminants. Got: {other:?}",
+        ),
+    }
+}
+
 // ---------------------------------------------------------------------
 // Self-test — exercises the primitive against a private mock envelope.
 // Per `.claude/rules/testing.md` § "Property-based testing" → "Archive
@@ -188,7 +360,6 @@ pub fn assert_discriminant_offset_triangulation<E>(
 #[cfg(test)]
 mod harness_self_test {
     use super::*;
-    use overdrive_core::codec::EnvelopeError;
 
     #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
     enum MockEnvelope {
@@ -229,4 +400,17 @@ mod harness_self_test {
 
         assert_envelope_v_roundtrip::<MockEnvelope>(&fixture_hex, &expected);
     }
+
+    // The new `assert_unknown_version_probe_surfaces` helper does not
+    // have a `MockEnvelope` self-test by design — the probe behavior
+    // depends on `discriminant_offset_from_end` returning `Some(N)`
+    // with `N` empirically pinned per envelope shape, which the inline
+    // `MockEnvelope` here does not provide. The helper's correctness
+    // is cross-validated by the 5 per-envelope call sites
+    // (`tests/schema_evolution/{alloc_status_row,job,node_health_row,
+    // service_backend_row,service_hydration_result_row}.rs`) — every
+    // edit to the helper that regresses any one envelope fails its
+    // dedicated `*_unknown_version_probe_surfaces` test. Adding a
+    // tag-dedicated mock would either duplicate the per-envelope
+    // pinning rationale or test a non-production code path.
 }

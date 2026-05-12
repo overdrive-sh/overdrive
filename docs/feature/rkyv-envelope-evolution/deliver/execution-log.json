@@ -526,6 +526,41 @@
       "s": "EXECUTED",
       "d": "FAIL",
       "t": "2026-05-12T10:06:18Z"
+    },
+    {
+      "sid": "phase-5-mutation-testing",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS: tools verified (cargo-mutants 27.0.0, cargo-nextest 0.9.133), tree clean, 23 commits on branch, baseline 1294 tests green, 12 source files in diff",
+      "t": "2026-05-12T10:23:17Z"
+    },
+    {
+      "sid": "phase-5-mutation-testing",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: mutation quality gate \u2014 no new RED phase",
+      "t": "2026-05-12T10:23:22Z"
+    },
+    {
+      "sid": "phase-5-mutation-testing",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: mutation quality gate \u2014 no new RED phase",
+      "t": "2026-05-12T10:23:23Z"
+    },
+    {
+      "sid": "phase-5-mutation-testing",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS: kill rate 100.0% (56/56 viable, 0 missed, 2 unviable). Initial run flagged 31 misses on VersionedEnvelope introspection surface (known_discriminants/type_name/discriminant_offset_from_end). Added assert_unknown_version_probe_surfaces harness helper + 5 per-envelope tests (kills 19 mutations). Added 4 exclude_re entries for trait-default impls (semantically unreachable) and per-envelope vec![0] equivalent mutants (12 filtered). Final: 1299 tests pass, clippy clean, dst-lint clean.",
+      "t": "2026-05-12T10:53:40Z"
+    },
+    {
+      "sid": "phase-5-mutation-testing",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: mutation gate satisfied at kill rate 100.0% (56/56 viable). Quality gates: clippy clean, dst-lint clean, 1299 tests pass. Report at docs/feature/rkyv-envelope-evolution/deliver/mutation/mutation-report.md.",
+      "t": "2026-05-12T10:54:14Z"
     }
   ]
 }

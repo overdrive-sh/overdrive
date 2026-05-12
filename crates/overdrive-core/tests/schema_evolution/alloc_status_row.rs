@@ -18,7 +18,10 @@ use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRowEnvelope, AllocStatusRowLatest, AllocStatusRowV1, LogicalTimestamp,
 };
 
-use super::harness::{assert_discriminant_offset_triangulation, assert_envelope_v_roundtrip};
+use super::harness::{
+    assert_discriminant_offset_triangulation, assert_envelope_v_roundtrip,
+    assert_unknown_version_probe_surfaces,
+};
 
 /// Independent pin of the V1 discriminant offset for triangulation
 /// against `AllocStatusRowEnvelope::discriminant_offset_from_end()`.
@@ -72,6 +75,23 @@ fn alloc_status_row_discriminant_offset_triangulation() {
     assert_discriminant_offset_triangulation::<AllocStatusRowEnvelope>(
         canonical_v1_payload(),
         GOLDEN_DISCRIMINANT_OFFSET_V1,
+        0,
+    );
+}
+
+/// End-to-end pin of `AllocStatusRowEnvelope`'s introspection surface
+/// (`known_discriminants`, `type_name`, `discriminant_offset_from_end`)
+/// through `decode_envelope_bytes`. See
+/// [`assert_unknown_version_probe_surfaces`] for the full rationale.
+///
+/// `supported_max == 0` because today's envelope is V1-only; bumping
+/// to V2 means re-pinning this assertion in the same commit per
+/// `development.md` § "Version-bump procedure".
+#[test]
+fn alloc_status_row_unknown_version_probe_surfaces() {
+    assert_unknown_version_probe_surfaces::<AllocStatusRowEnvelope>(
+        canonical_v1_payload(),
+        "AllocStatusRowEnvelope",
         0,
     );
 }

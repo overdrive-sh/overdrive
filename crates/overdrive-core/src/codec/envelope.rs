@@ -200,6 +200,19 @@ pub trait VersionedEnvelope {
     /// schema-evolution roundtrip test pins the bytes, and this
     /// helper's offset value pins where this binary expects to find
     /// the discriminant in newly-archived envelopes.
+    // mutants: skip — default-impl mutations are semantically
+    // unreachable. cargo-mutants synthesises `Some(0)` / `Some(1)`
+    // replacement bodies for this default. Every production
+    // `VersionedEnvelope` impl (`JobEnvelope`,
+    // `AllocStatusRowEnvelope`, `NodeHealthRowEnvelope`,
+    // `ServiceHydrationResultRowEnvelope`,
+    // `ServiceBackendRowEnvelope`) overrides this method with the
+    // empirically-pinned offset; the default's `None` return is
+    // observable only from an envelope that does NOT override it. No
+    // such envelope exists in production code. The per-envelope
+    // overrides ARE mutation-tested by the
+    // `*_unknown_version_probe_surfaces` tests in
+    // `tests/schema_evolution/`.
     fn discriminant_offset_from_end() -> Option<usize> {
         None
     }
@@ -215,6 +228,16 @@ pub trait VersionedEnvelope {
     /// The default returns `&[]`; [`probe_known_variant`] is a no-op
     /// in that case and falls back to rkyv's bytecheck for
     /// classification.
+    // mutants: skip — default-impl mutations are semantically
+    // unreachable. cargo-mutants synthesises
+    // `Vec::leak(Vec::new())`, `Vec::leak(vec![0])`, and
+    // `Vec::leak(vec![1])` replacement bodies for this default.
+    // Every production `VersionedEnvelope` impl overrides this
+    // method with `&[0]`; the default's `&[]` return is observable
+    // only from an envelope that does NOT override it. No such
+    // envelope exists in production code. Per-envelope overrides
+    // ARE mutation-tested by the `*_unknown_version_probe_surfaces`
+    // tests in `tests/schema_evolution/`.
     fn known_discriminants() -> &'static [u8] {
         &[]
     }
@@ -227,6 +250,16 @@ pub trait VersionedEnvelope {
     /// events at the decode boundary. The default is `"<unknown>"`;
     /// every production envelope SHOULD override this with its
     /// canonical name.
+    // mutants: skip — default-impl mutations are semantically
+    // unreachable. cargo-mutants synthesises `""` and `"xyzzy"`
+    // replacement bodies for this default. Every production
+    // `VersionedEnvelope` impl overrides this method with its
+    // canonical name; the default's `"<unknown>"` return is
+    // observable only from an envelope that does NOT override it.
+    // No such envelope exists in production code. Per-envelope
+    // overrides ARE mutation-tested by the
+    // `*_unknown_version_probe_surfaces` tests in
+    // `tests/schema_evolution/`.
     fn type_name() -> &'static str {
         "<unknown>"
     }
