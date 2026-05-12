@@ -13,8 +13,15 @@
 //! `mod schema_evolution { ... }` shifts the lookup base from
 //! `tests/<file>.rs` to `tests/schema_evolution/<file>.rs`.
 
+// `expect` is the standard idiom in test code — a panic with a message
+// is exactly what you want when a fixture precondition fails. Matches
+// the convention used by `tests/acceptance.rs`.
+#![allow(clippy::expect_used)]
+#![allow(clippy::expect_fun_call)]
+
 mod schema_evolution {
     mod alloc_status_row;
+    mod harness;
     mod job;
     mod node_health_row;
     mod service_backend_row;
