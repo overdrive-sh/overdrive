@@ -53,6 +53,14 @@ futures.workspace     = true
 bytes.workspace       = true
 tokio.workspace       = true
 
+# Structured tracing for the typed Job persistence-boundary codec
+# (`aggregate::JobV1::from_store_bytes` emits
+# `health.startup.refused` on envelope decode failure per ADR-0048 §
+# 3 intent-fail-fast policy + § 6 operator remediation). `tracing` is
+# a pure-Rust facade (no runtime I/O) and is NOT on the dst-lint
+# banned-API list.
+tracing.workspace = true
+
 # TOML deserialisation for the `WorkloadSpecInput::from_toml_str`
 # parser surface (Slice 01 of `workload-kind-discriminator`, ADR-0047
 # §2). The parser is the single driving port for kind discrimination —

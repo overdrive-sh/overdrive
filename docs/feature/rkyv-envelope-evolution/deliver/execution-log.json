@@ -106,6 +106,97 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-05-12T01:58:16Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T03:10:42Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-05-12T03:14:16Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: source-write hook rejects Edit/Write from this session \u2014 orchestrator-context detection. Must re-dispatch via Task subagent.",
+      "t": "2026-05-12T03:18:28Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: source-write hook rejects edits \u2014 re-dispatch required.",
+      "t": "2026-05-12T03:18:29Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: cannot commit incomplete step. See returned message \u2014 orchestrator must (1) revert partial edits to crates/overdrive-core/src/aggregate/mod.rs, (2) re-dispatch via Task subagent, (3) resolve AC+files_to_modify scope inconsistency.",
+      "t": "2026-05-12T03:18:31Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T03:57:32Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-05-12T04:03:08Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-05-12T04:03:17Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-05-12T04:03:22Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: source-write hook blocks Edit/Write from this dispatch context. Codec methods (archive_for_store, from_store_bytes, spec_digest) landed on JobV1 plus tracing dep in Cargo.toml; remaining migration of call sites and integration tests not landed. Orchestrator must re-dispatch via Task subagent.",
+      "t": "2026-05-12T04:03:37Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T04:30:00Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T04:45:00Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T04:50:00Z"
     }
   ]
 }

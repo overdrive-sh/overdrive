@@ -102,6 +102,11 @@ use crate::reconciler_runtime::{DEFAULT_TICK_CADENCE, run_convergence_tick};
 pub struct AppState {
     /// Authoritative intent store — every write lands here.
     pub store: Arc<LocalIntentStore>,
+    /// Filesystem path of the intent redb file. Used by handlers that
+    /// decode persisted bytes via `Job::from_store_bytes(bytes, path)`
+    /// to produce operator-facing remediation messages naming the file
+    /// the bytes were read from. Per ADR-0048 § 6 / UI-03 amendment.
+    pub intent_redb_path: PathBuf,
     /// Eventually-consistent observation store. Unused by 03-01's
     /// `submit_workload` handler, but wired in so observation-reading
     /// handlers in later steps (03-03) can pick it up without
@@ -186,8 +191,13 @@ impl AppState {
     /// Production passes `Arc::new(overdrive_host::SystemClock)`; tests
     /// pass `Arc::new(overdrive_sim::adapters::clock::SimClock::new())`.
     #[must_use]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Port-trait dependencies (Clock, Driver, Dataplane, ObservationStore, IntentStore) are required at construction per .claude/rules/development.md § Port-trait dependencies; bundling them into a builder would make individual deps optional and defeat the explicit-injection invariant."
+    )]
     pub fn new(
         store: Arc<LocalIntentStore>,
+        intent_redb_path: PathBuf,
         obs: Arc<dyn ObservationStore>,
         runtime: Arc<reconciler_runtime::ReconcilerRuntime>,
         driver: Arc<dyn Driver>,
@@ -198,6 +208,7 @@ impl AppState {
         let (tx, _rx) = tokio::sync::broadcast::channel(DEFAULT_LIFECYCLE_BROADCAST_CAPACITY);
         Self {
             store,
+            intent_redb_path,
             obs,
             runtime,
             driver,
@@ -560,8 +571,16 @@ pub async fn run_server_with_obs_and_driver(
     let node_id = overdrive_core::id::NodeId::new("local").map_err(|e| {
         error::ControlPlaneError::Internal(format!("placeholder NodeId rejected: {e}"))
     })?;
-    let state: AppState =
-        AppState::new(store, obs, runtime, driver, config.clock.clone(), dataplane, node_id);
+    let state: AppState = AppState::new(
+        store,
+        store_path,
+        obs,
+        runtime,
+        driver,
+        config.clock.clone(),
+        dataplane,
+        node_id,
+    );
 
     // Spawn the exit-observer subsystem BEFORE the convergence loop so
     // the observer is already draining the driver's `ExitEvent`

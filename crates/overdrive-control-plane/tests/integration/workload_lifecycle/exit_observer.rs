@@ -88,8 +88,8 @@ async fn build_harness(tmp: &TempDir) -> Harness {
     runtime.register(noop_heartbeat()).await.expect("register noop");
     runtime.register(workload_lifecycle()).await.expect("register job-lifecycle");
 
-    let store =
-        Arc::new(LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open store"));
+    let store_path = tmp.path().join("intent.redb");
+    let store = Arc::new(LocalIntentStore::open(&store_path).expect("open store"));
     let node_id = NodeId::new("local").expect("node id");
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(node_id.clone(), 0));
@@ -104,6 +104,7 @@ async fn build_harness(tmp: &TempDir) -> Harness {
 
     let state = AppState::new(
         store,
+        store_path,
         obs,
         Arc::new(runtime),
         driver,
@@ -136,7 +137,7 @@ async fn build_harness(tmp: &TempDir) -> Harness {
         }),
     })
     .expect("valid job spec");
-    let archived = rkyv::to_bytes::<rkyv::rancor::Error>(&job).expect("rkyv archive");
+    let archived = job.archive_for_store().expect("rkyv archive");
     let key = IntentKey::for_job(&job.id);
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 

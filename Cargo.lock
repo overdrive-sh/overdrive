@@ -1859,6 +1859,7 @@ dependencies = [
  "time",
  "tokio",
  "toml",
+ "tracing",
  "trybuild",
  "utoipa",
  "uuid",

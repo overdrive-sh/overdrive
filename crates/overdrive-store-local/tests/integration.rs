@@ -28,6 +28,7 @@ mod integration {
     //! `redesign-drop-commit-index` — the counter it asserted no
     //! longer exists.
     mod envelope_helpers;
+    mod envelope_intent_refuse;
     mod envelope_observation_skip;
     mod envelope_walking_skeleton;
     mod lww_conformance;

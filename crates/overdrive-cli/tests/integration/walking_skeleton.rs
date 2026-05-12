@@ -122,7 +122,7 @@ fn write_toml(dir: &Path, name: &str, body: &str) -> PathBuf {
 fn local_spec_digest(spec_toml: &str) -> String {
     let parsed: JobSpecInput = toml::from_str(spec_toml).expect("parse TOML");
     let job = Job::from_spec(parsed).expect("Job::from_spec");
-    let archived = rkyv::to_bytes::<rkyv::rancor::Error>(&job).expect("rkyv archive");
+    let archived = job.archive_for_store().expect("rkyv archive");
     ContentHash::of(archived.as_ref()).to_string()
 }
 

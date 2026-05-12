@@ -72,16 +72,15 @@ fn sample_allocation() -> Allocation {
 fn job_rkyv_roundtrip_equals_original() {
     let original = sample_job();
 
-    let bytes = rkyv::to_bytes::<rancor::Error>(&original)
-        .expect("rkyv serialization of canonical Job must succeed");
+    let bytes = original
+        .archive_for_store()
+        .expect("rkyv envelope serialization of canonical Job must succeed");
 
-    let archived = rkyv::access::<rkyv::Archived<Job>, rancor::Error>(&bytes)
-        .expect("archived bytes must validate as ArchivedJob");
+    let deserialized =
+        Job::from_store_bytes(&bytes, std::path::Path::new("aggregate_roundtrip.redb"))
+            .expect("envelope bytes must decode back to Job");
 
-    let deserialized: Job = rkyv::deserialize::<Job, rancor::Error>(archived)
-        .expect("ArchivedJob must deserialize back to Job");
-
-    assert_eq!(deserialized, original, "rkyv round-trip must preserve Job equality");
+    assert_eq!(deserialized, original, "rkyv envelope round-trip must preserve Job equality");
 }
 
 #[test]

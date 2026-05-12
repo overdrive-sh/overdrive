@@ -60,6 +60,7 @@ async fn build_converged_state(tmp: &TempDir, clock: Arc<SimClock>) -> AppState 
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
     AppState::new(
         store,
+        store_path,
         obs,
         Arc::new(runtime),
         driver,
@@ -95,7 +96,7 @@ async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
         driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     })
     .expect("valid job spec");
-    let archived = rkyv::to_bytes::<rkyv::rancor::Error>(&job).expect("rkyv archive");
+    let archived = job.archive_for_store().expect("rkyv archive");
     let key = IntentKey::for_job(&job.id);
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 
@@ -237,6 +238,7 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
     let state = AppState::new(
         store,
+        store_path,
         obs,
         Arc::new(runtime),
         driver,
@@ -253,7 +255,7 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
         driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     })
     .expect("valid job spec");
-    let archived = rkyv::to_bytes::<rkyv::rancor::Error>(&job).expect("rkyv archive");
+    let archived = job.archive_for_store().expect("rkyv archive");
     let payments_intent_key = IntentKey::for_job(&job.id);
     state.store.put(payments_intent_key.as_bytes(), archived.as_ref()).await.expect("put job");
 
@@ -428,6 +430,7 @@ async fn stop_after_failed_alloc_drains_broker() {
     );
     let state = AppState::new(
         store,
+        store_path,
         obs,
         Arc::new(runtime),
         driver,
@@ -450,7 +453,7 @@ async fn stop_after_failed_alloc_drains_broker() {
         }),
     })
     .expect("valid job spec");
-    let archived = rkyv::to_bytes::<rkyv::rancor::Error>(&job).expect("rkyv archive");
+    let archived = job.archive_for_store().expect("rkyv archive");
     let job_key = IntentKey::for_job(&job.id);
     state.store.put(job_key.as_bytes(), archived.as_ref()).await.expect("put job");
 
@@ -674,6 +677,7 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
     );
     let state = AppState::new(
         store,
+        store_path,
         obs,
         Arc::new(runtime),
         driver,
@@ -695,7 +699,7 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
         }),
     })
     .expect("valid job spec");
-    let archived = rkyv::to_bytes::<rkyv::rancor::Error>(&job).expect("rkyv archive");
+    let archived = job.archive_for_store().expect("rkyv archive");
     let job_key = IntentKey::for_job(&job.id);
     state.store.put(job_key.as_bytes(), archived.as_ref()).await.expect("put job");
 
@@ -943,6 +947,7 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
     let state = AppState::new(
         store,
+        store_path,
         obs,
         Arc::new(runtime),
         driver,
@@ -959,7 +964,7 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
         driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     })
     .expect("valid job spec");
-    let archived = rkyv::to_bytes::<rkyv::rancor::Error>(&job).expect("rkyv archive");
+    let archived = job.archive_for_store().expect("rkyv archive");
     let key = IntentKey::for_job(&job.id);
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 

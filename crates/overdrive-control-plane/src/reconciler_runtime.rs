@@ -1015,9 +1015,7 @@ async fn read_job(
         .await
         .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
     let Some(b) = bytes else { return Ok(None) };
-    let archived = rkyv::access::<rkyv::Archived<Job>, rkyv::rancor::Error>(b.as_ref())
-        .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
-    let job = rkyv::deserialize::<Job, rkyv::rancor::Error>(archived)
+    let job = Job::from_store_bytes(b.as_ref(), &state.intent_redb_path)
         .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
     Ok(Some(job))
 }

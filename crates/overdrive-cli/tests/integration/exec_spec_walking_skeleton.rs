@@ -102,7 +102,7 @@ fn write_toml(dir: &Path, name: &str, body: &str) -> PathBuf {
 fn local_spec_digest_new_shape(spec_toml: &str) -> String {
     let parsed: JobSpecInput = toml::from_str(spec_toml).expect("parse new-shape TOML");
     let job = Job::from_spec(parsed).expect("Job::from_spec on canonical new-shape spec");
-    let archived = rkyv::to_bytes::<rkyv::rancor::Error>(&job).expect("rkyv archive");
+    let archived = job.archive_for_store().expect("rkyv archive");
     ContentHash::of(archived.as_ref()).to_string()
 }
 
@@ -180,12 +180,14 @@ async fn walking_skeleton_submit_with_exec_block_returns_inserted_and_persists_c
          `state.store.put(...)` — end-to-end persistence is broken",
     );
 
-    // rkyv access + deserialise — same lane the server uses on read
-    // (see `handlers::describe_workload` for the canonical pattern).
-    let archived = rkyv::access::<rkyv::Archived<Job>, rkyv::rancor::Error>(&bytes)
-        .expect("rkyv access of ArchivedJob from back-door read bytes");
-    let job: Job = rkyv::deserialize::<Job, rkyv::rancor::Error>(archived)
-        .expect("rkyv deserialise of Job from back-door read bytes");
+    // Typed codec read — same lane the server uses on read (see
+    // `handlers::describe_workload` for the canonical pattern). Per
+    // ADR-0048 § 4b (UI-03) the envelope-wrapping discipline lives on
+    // the `Job` codec module, not on the `IntentStore` trait surface;
+    // `Job::from_store_bytes` is the sole reader site.
+    let intent_path = intent_redb_path(server_tmp.path());
+    let job: Job = Job::from_store_bytes(&bytes, &intent_path)
+        .expect("typed codec decode of Job from back-door read bytes");
 
     // Destructure WorkloadDriver::Exec — irrefutable for Phase 1 (single
     // variant). Future Phase 2+ variants (`MicroVm`, `Wasm`) make this

@@ -104,6 +104,7 @@ async fn build_state_with_driver(tmp: &TempDir, driver: Arc<dyn Driver>) -> AppS
 
     AppState::new(
         store,
+        store_path,
         obs,
         Arc::new(runtime),
         driver,
@@ -132,7 +133,7 @@ async fn repeatedly_crashing_workload_exhausts_backoff_and_stops_retrying() {
         driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     })
     .expect("valid job spec");
-    let archived = rkyv::to_bytes::<rkyv::rancor::Error>(&job).expect("rkyv archive");
+    let archived = job.archive_for_store().expect("rkyv archive");
     let key = IntentKey::for_job(&job.id);
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 

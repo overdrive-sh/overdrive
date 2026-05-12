@@ -64,14 +64,14 @@ use tempfile::TempDir;
 fn build_app_state(tmp: &TempDir) -> AppState {
     let runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime");
-    let store = Arc::new(
-        LocalIntentStore::open(tmp.path().join("intent.redb")).expect("LocalIntentStore::open"),
-    );
+    let store_path = tmp.path().join("intent.redb");
+    let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(NodeId::from_str("local").expect("NodeId"), 0));
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
     AppState::new(
         store,
+        store_path,
         obs,
         Arc::new(runtime),
         driver,
@@ -225,8 +225,7 @@ async fn different_spec_at_occupied_key_returns_conflict_variant() {
     let bytes = stored.expect("intent key must remain populated after a Conflict");
     let canonical_job =
         overdrive_core::aggregate::Job::from_spec(payments_spec()).expect("Job::from_spec");
-    let canonical_bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&canonical_job)
-        .expect("rkyv archive of canonical job");
+    let canonical_bytes = canonical_job.archive_for_store().expect("rkyv archive of canonical job");
     assert_eq!(
         bytes.as_ref(),
         canonical_bytes.as_ref(),

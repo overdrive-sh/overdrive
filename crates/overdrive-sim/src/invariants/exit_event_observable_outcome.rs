@@ -469,6 +469,7 @@ async fn build_harness(tmp: &TempDir) -> Result<Harness, String> {
 
     let state = AppState::new(
         store,
+        tmp.path().join("intent.redb"),
         obs,
         Arc::new(runtime),
         driver,
@@ -494,8 +495,7 @@ async fn build_harness(tmp: &TempDir) -> Result<Harness, String> {
         }),
     })
     .map_err(|e| format!("valid job spec: {e:?}"))?;
-    let archived =
-        rkyv::to_bytes::<rkyv::rancor::Error>(&job).map_err(|e| format!("rkyv archive: {e:?}"))?;
+    let archived = job.archive_for_store().map_err(|e| format!("rkyv archive: {e:?}"))?;
     let key = IntentKey::for_job(&job.id);
     state
         .store

@@ -19,7 +19,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, header};
 use axum::response::{IntoResponse, Response};
 use overdrive_core::aggregate::{AggregateError, IntentKey, Job, JobSpecInput, WorkloadKind};
-use overdrive_core::id::{ContentHash, WorkloadId};
+use overdrive_core::id::WorkloadId;
 use overdrive_core::reconciler::{
     RESTART_BACKOFF_CEILING, Reconciler, ReconcilerName, TargetResource, WorkloadLifecycle,
 };
@@ -235,20 +235,28 @@ pub async fn submit_workload(
         other => ControlPlaneError::Aggregate(other),
     })?;
 
-    // 2. Archive canonically via rkyv. Two archivals of the same
-    //    logical Job produce byte-identical bytes — this is what makes
-    //    the idempotency check byte-equality instead of semantic-equality.
-    let archived = rkyv::to_bytes::<rkyv::rancor::Error>(&job)
+    // 2. Archive canonically via the typed `JobEnvelope` codec
+    //    (ADR-0048 § "Intent persistence boundary"). Two archivals of
+    //    the same logical Job produce byte-identical bytes — this is
+    //    what makes the idempotency check byte-equality instead of
+    //    semantic-equality.
+    let archived = job
+        .archive_for_store()
         .map_err(|e| ControlPlaneError::internal("rkyv archive of Job", e))?;
 
     // 3. Derive the canonical intent key (`jobs/<WorkloadId>`).
     let key = IntentKey::for_job(&job.id);
 
-    // 4. Compute the canonical `spec_digest` over the rkyv-archived
-    //    bytes. Used both as the response field and (on the
-    //    `KeyExists` branch) as the equality check against the
-    //    bytes already stored at this key — see step 5.
-    let spec_digest = ContentHash::of(archived.as_ref()).to_string();
+    // 4. Compute the canonical `spec_digest` over the envelope bytes
+    //    via the typed codec method (ADR-0048 § 5 — operator-observable
+    //    Job ID change absorbed by greenfield single-cut). Used both as
+    //    the response field and (on the `KeyExists` branch) as the
+    //    equality check against the bytes already stored at this key —
+    //    see step 5.
+    let spec_digest = job
+        .spec_digest()
+        .map_err(|e| ControlPlaneError::internal("spec_digest of Job", e))?
+        .to_string();
 
     // 5a. Per ADR-0047 §1 / slice 02 of `workload-kind-discriminator`:
     //     persist the workload-kind discriminator at
@@ -447,17 +455,22 @@ pub async fn describe_workload(
         .await?
         .ok_or_else(|| ControlPlaneError::NotFound { resource: key.as_str().to_owned() })?;
 
-    // 3. rkyv access + deserialise. Corruption / bit-rot in the redb
-    //    file surfaces here; it maps to HTTP 500 via `Internal`.
-    let archived = rkyv::access::<rkyv::Archived<Job>, rkyv::rancor::Error>(&bytes)
-        .map_err(|e| ControlPlaneError::internal("rkyv access of ArchivedJob", e))?;
-    let job: Job = rkyv::deserialize::<Job, rkyv::rancor::Error>(archived)
-        .map_err(|e| ControlPlaneError::internal("rkyv deserialize of Job", e))?;
+    // 3. Decode the persisted bytes via the typed `JobEnvelope` codec
+    //    (ADR-0048 § "Intent persistence boundary"). Corruption /
+    //    bit-rot in the redb file surfaces here as
+    //    `IntentStoreError::Envelope`; it maps to HTTP 500 via the
+    //    `#[from]` blanket on `ControlPlaneError::Intent`.
+    let job = Job::from_store_bytes(&bytes, &state.intent_redb_path)?;
 
-    // 4. Canonical spec_digest — SHA-256 of the exact archived bytes we
-    //    just read. This is what ADR-0002 calls "hash of canonical rkyv
-    //    bytes"; no re-archival, no re-canonicalisation.
-    let spec_digest = ContentHash::of(&bytes).to_string();
+    // 4. Canonical spec_digest — SHA-256 over the envelope bytes
+    //    `archive_for_store` produces. Per ADR-0048 § 5, this digest
+    //    is computed over envelope bytes (envelope tag + payload), not
+    //    over raw V1 payload bytes — the operator-observable Job ID
+    //    change is absorbed by the greenfield single-cut migration.
+    let spec_digest = job
+        .spec_digest()
+        .map_err(|e| ControlPlaneError::internal("spec_digest of Job", e))?
+        .to_string();
 
     Ok(Json(api::WorkloadDescription { spec: JobSpecInput::from(&job), spec_digest }))
 }
@@ -638,11 +651,11 @@ pub async fn alloc_status(
         .get(key.as_bytes())
         .await?
         .ok_or_else(|| ControlPlaneError::NotFound { resource: key.as_str().to_owned() })?;
-    let archived = rkyv::access::<rkyv::Archived<Job>, rkyv::rancor::Error>(&bytes)
-        .map_err(|e| ControlPlaneError::internal("rkyv access of ArchivedJob", e))?;
-    let job: Job = rkyv::deserialize::<Job, rkyv::rancor::Error>(archived)
-        .map_err(|e| ControlPlaneError::internal("rkyv deserialize of Job", e))?;
-    let spec_digest = ContentHash::of(&bytes).to_string();
+    let job = Job::from_store_bytes(&bytes, &state.intent_redb_path)?;
+    let spec_digest = job
+        .spec_digest()
+        .map_err(|e| ControlPlaneError::internal("spec_digest of Job", e))?
+        .to_string();
 
     // Filter rows to this job, project them, and stamp the requested
     // resource envelope from the JobSpec onto each row body (the bare

@@ -98,14 +98,14 @@ fn payments_spec() -> JobSpecInput {
 fn build_app_state(tmp: &TempDir, clock: Arc<dyn Clock>) -> AppState {
     let runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime");
-    let store = Arc::new(
-        LocalIntentStore::open(tmp.path().join("intent.redb")).expect("LocalIntentStore::open"),
-    );
+    let store_path = tmp.path().join("intent.redb");
+    let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(sample_node(), 0));
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
     AppState::new(
         store,
+        store_path,
         obs,
         Arc::new(runtime),
         driver,

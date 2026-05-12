@@ -119,6 +119,37 @@ impl LocalIntentStore {
             write.commit().map_err(map_commit_error)?;
         }
 
+        // Intent envelope recovery walk per ADR-0048 § "Intent
+        // persistence boundary — typed codec on Job" + § 3
+        // (refuse-to-start on malformed/unknown envelopes). Iterate
+        // every key with the `jobs/` prefix and attempt to decode via
+        // the typed `Job::from_store_bytes` codec. The first decode
+        // failure surfaces a structured `health.startup.refused` event
+        // (emitted inside `from_store_bytes`) and aborts boot with
+        // `IntentStoreError::Envelope`. The asymmetric intent-fail-fast
+        // policy (intent is load-bearing SSOT) is implemented here.
+        // The `jobs/<id>/stop` suffix-keys are skipped — their value is
+        // an empty byte slice (the existence is the signal); they don't
+        // carry envelope bytes.
+        {
+            const JOB_PREFIX: &[u8] = b"jobs/";
+            const STOP_SUFFIX: &[u8] = b"/stop";
+            let read = db.begin_read().map_err(map_transaction_error)?;
+            let table = read.open_table(ENTRIES_TABLE).map_err(map_table_error)?;
+            let range = table.range::<&[u8]>(JOB_PREFIX..).map_err(map_storage_error)?;
+            for entry in range {
+                let (key, value) = entry.map_err(map_storage_error)?;
+                let key_bytes = key.value();
+                if !key_bytes.starts_with(JOB_PREFIX) {
+                    break;
+                }
+                if key_bytes.ends_with(STOP_SUFFIX) {
+                    continue;
+                }
+                overdrive_core::aggregate::Job::from_store_bytes(value.value(), path)?;
+            }
+        }
+
         let (watch_tx, _) = broadcast::channel(WATCH_CHANNEL_CAPACITY);
 
         Ok(Self { inner: Arc::new(Inner { db, watch_tx }) })

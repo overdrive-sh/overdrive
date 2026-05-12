@@ -197,8 +197,7 @@ async fn post_v1_jobs_with_valid_spec_returns_200_inserted_with_canonical_digest
     // a server-side re-archival or a serde-driven recomputation
     // somewhere in the pipeline.
     let local_job = Job::from_spec(spec).expect("Job::from_spec for digest reference");
-    let local_archived =
-        rkyv::to_bytes::<rkyv::rancor::Error>(&local_job).expect("local rkyv archive");
+    let local_archived = local_job.archive_for_store().expect("local rkyv archive");
     let local_digest = overdrive_core::id::ContentHash::of(local_archived.as_ref()).to_string();
     assert_eq!(
         body.spec_digest, local_digest,
@@ -244,8 +243,7 @@ async fn post_v1_jobs_persists_archived_job_under_jobs_prefix_in_local_store() {
 
     // Rebuild the expected archive from the same spec and compare bytes.
     let expected_job = Job::from_spec(spec).expect("canonical spec constructs a Job");
-    let expected_bytes =
-        rkyv::to_bytes::<rkyv::rancor::Error>(&expected_job).expect("rkyv archive of expected Job");
+    let expected_bytes = expected_job.archive_for_store().expect("rkyv archive of expected Job");
 
     assert_eq!(
         persisted.as_ref(),
