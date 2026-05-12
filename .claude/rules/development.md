@@ -1238,6 +1238,34 @@ evolution test harness primitive live in
 co-located with its domain type (intent on `aggregate`, observation
 on `traits::observation_store`).
 
+**Typed persistence-boundary codec.** When a typed value is
+persisted into a bytes-passthrough store trait (e.g. `IntentStore`,
+which persists `Job` aggregates alongside `WorkloadKind`
+discriminator bytes per ADR-0047, stop sentinel markers, and frame-
+wrapped snapshot bytes per ADR-0020 — all on a generic byte-level
+key/value surface shared with the future `RaftStore` Phase 2 path),
+the envelope-wrapping discipline lives in a **codec module on the
+typed value** (`<Type>::archive_for_store` / `<Type>::from_store_bytes`),
+NOT in the store trait. The store trait stays generic byte-level;
+the codec module is the single wrapping site. Reads call the typed
+decode method (`Job::from_store_bytes(bytes, &redb_path)?`) which
+emits `health.startup.refused` on `EnvelopeError` before returning
+the typed error; writes call the typed encode method
+(`Job::archive_for_store()?`) before passing bytes to the trait's
+byte-level write surface.
+
+Hashing methods (e.g. `<Type>::spec_digest`) co-locate with
+`archive_for_store` on the same type to keep the wire-format /
+content-address invariant trivially deterministic — the
+content hash is SHA-256 over `archive_for_store`'s output, so the
+hash and the wire form share one source-of-truth byte sequence
+and a single function pair audits both. The structural defense
+against drift is that the codec module is the only named site
+producing the canonical bytes. Per ADR-0048 § 4b ("Intent
+persistence boundary — typed codec on `Job`") this rule applies
+to `Job` today; future typed values persisted into a bytes-
+passthrough store follow the same shape.
+
 ### Rules
 
 - **The persistence-boundary code MUST go through `<Envelope>::latest(payload)`.**

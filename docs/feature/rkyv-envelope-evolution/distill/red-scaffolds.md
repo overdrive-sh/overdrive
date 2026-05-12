@@ -232,11 +232,22 @@ pub struct JobV1 {
 > struct), so every existing struct-literal `Job { id, replicas,
 > resources, driver }` construction across `overdrive-store-local`,
 > `overdrive-control-plane`, `overdrive-cli`, and fixtures continues
-> to compile unchanged. The persistence boundary — `LocalStore::open`
-> (read via `JobEnvelope::into_latest()`), `LocalStore::write_entry`
-> (write via `JobEnvelope::latest(job.clone())`) — is the SOLE site
-> that names `JobEnvelope`. Per ADR-0048 § 4 (outer-envelope-only)
-> embedded types `WorkloadDriver` and `Exec` are NOT wrapped.
+> to compile unchanged. **Under UI-03 amendment** (2026-05-12) the
+> persistence boundary — the wrapping discipline for `Job` — lives
+> on a typed codec module on the `Job` type itself
+> (`Job::archive_for_store` / `Job::from_store_bytes` /
+> `Job::spec_digest`), NOT on the `IntentStore` trait. The trait
+> surface is correctly bytes-passthrough (it persists multiple value
+> classes — `Job` aggregates, `WorkloadKind` discriminator bytes per
+> ADR-0047, stop sentinel markers, snapshot frames per ADR-0020 —
+> and is shared with the future `RaftStore` Phase 2 snapshot
+> contract). `LocalStore::open`'s recovery walk calls
+> `Job::from_store_bytes(bytes, &path)?` per `jobs/`-prefixed entry
+> to surface envelope-decode errors at boot; `LocalStore::write_entry`
+> (or analogous Job-write path) goes through `Job::archive_for_store()?`.
+> The `Job` codec module is the SOLE site that names `JobEnvelope`.
+> Per ADR-0048 § 4 (outer-envelope-only) embedded types
+> `WorkloadDriver` and `Exec` are NOT wrapped.
 
 ---
 

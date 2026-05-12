@@ -27,7 +27,10 @@ scenario is tagged `@driving_port`:
 | `Envelope::into_latest()` | `overdrive-core::codec::envelope::VersionedEnvelope::into_latest` |
 | `LocalObservationStore::alloc_status_rows` | `overdrive-store-local::observation_backend` — read API |
 | `LocalObservationStore::write_alloc_status` | `overdrive-store-local::observation_backend` — write API |
-| `LocalStore::open(path)` | `overdrive-store-local::redb_backend` — bootstrap entrypoint |
+| `LocalStore::open(path)` | `overdrive-store-local::redb_backend` — bootstrap entrypoint; per UI-03 amendment, its recovery walk calls `Job::from_store_bytes` per `jobs/`-prefixed entry — wrapping discipline lives on the `Job` codec module, not on the `IntentStore` trait |
+| `Job::from_store_bytes(bytes, &path)` | `overdrive-core::aggregate` — typed codec on `Job` per UI-03; decodes `JobEnvelope` and emits `health.startup.refused` on `EnvelopeError` |
+| `Job::archive_for_store(&self)` | `overdrive-core::aggregate` — typed codec on `Job` per UI-03; wraps via `JobEnvelope::latest(...)` for writes |
+| `Job::spec_digest(&self)` | `overdrive-core::aggregate` — typed codec on `Job` per UI-03; SHA-256 over envelope bytes (operator-observable Job ID change vs. raw V1 bytes — greenfield single-cut absorbs) |
 | `xtask::dst_lint::scan_for_envelope_variant_construction` | `xtask/src/dst_lint.rs` — AST scanner |
 | `xtask::dst_lint::scan_for_envelope_fixture_coverage` | `xtask/src/dst_lint.rs` — coverage gate |
 
@@ -252,17 +255,18 @@ Scenario: The scanner returns empty for source containing no envelope constructi
 
 ## S-EV-03 — Intent fail-fast on unknown / malformed envelope
 
-**Source**: DESIGN § 10 S-EV-05; ADR-0048 § 3 (intent layer) + § 6 (operator remediation)
-**Driving port**: `LocalStore::open(path: &Path) -> Result<LocalStore, IntentStoreError>`
+**Source**: DESIGN § 10 S-EV-05; ADR-0048 § 3 (intent layer) + § 6 (operator remediation) + § 4b (UI-03 — typed codec on `Job`)
+**Driving port** (UI-03 amendment): `Job::from_store_bytes(bytes: &[u8], redb_path: &Path) -> Result<Job, IntentStoreError>` — the typed codec module on `Job`. `LocalStore::open` calls `Job::from_store_bytes` per `jobs/`-prefixed entry during its recovery walk; the integration test still drives via a `LocalStore::open`-shaped bootstrap path, and the test asserts that `Job::from_store_bytes` is the surface producing the `IntentStoreError::Envelope` (the trait surface is bytes-passthrough; the codec module on `Job` is where wrapping discipline lives per UI-03).
 **Tier**: Tier 1 integration-tests-gated (real `redb` via `tempfile::TempDir`)
 **Tag**: `@error_path @real-io @adapter-integration`
 **Test file**: `crates/overdrive-store-local/tests/integration/envelope_intent_refuse.rs`
 
 ### Preconditions
 
-- `IntentStoreError::Envelope { #[from] source: EnvelopeError }` variant exists on `IntentStoreError` (NEW — RED scaffold)
-- `LocalStore::open` decodes the `entries` redb table values through `JobEnvelope::into_latest()` and propagates `EnvelopeError` as `IntentStoreError::Envelope` (NEW — RED scaffold)
-- `health.startup.refused` event emitted via `tracing::error!(name: "health.startup.refused", ...)` before the function returns
+- `IntentStoreError::Envelope { redb_path, #[from] #[source] source: EnvelopeError }` variant exists on `IntentStoreError` (NEW — RED scaffold from 01-01, un-`todo!`'d in 01-04)
+- `Job::from_store_bytes(bytes: &[u8], redb_path: &Path) -> Result<Job, IntentStoreError>` exists as a typed codec method on the `Job` type itself per UI-03 amendment — rkyv-deserialises into `JobEnvelope`, projects via `into_latest()`, and on `EnvelopeError` returns `Err(IntentStoreError::Envelope { redb_path, source })`. (NEW in step 01-04 under UI-03)
+- `LocalStore::open`'s recovery walk calls `Job::from_store_bytes(bytes, &path)?` per `jobs/`-prefixed entry to surface envelope-decode errors at boot (NEW in step 01-04 under UI-03; the wrapping discipline is on the `Job` codec module, NOT on the `IntentStore` trait — the trait surface is bytes-passthrough by design per ADR-0048 § 4b)
+- `health.startup.refused` event emitted via `tracing::error!(name: "health.startup.refused", redb_path, envelope_error, ...)` inside `Job::from_store_bytes` BEFORE the function returns `Err(IntentStoreError::Envelope { ... })`. The same event MUST NOT fire on `Ok`.
 
 ### Sub-scenario S-EV-03.1 — Malformed bytes cause refuse-to-start
 
@@ -274,13 +278,20 @@ Scenario: Control-plane boot refuses to start when an intent row contains malfor
           key: JobId "job-malformed-01"
           value: raw bytes b"\xff\xfe\xfd\xfc this is not a valid rkyv archive"
   When LocalStore::open("{tmpdir}/intent.redb") is invoked
-  Then the call returns Err(IntentStoreError::Envelope { source })
+    And its recovery walk calls Job::from_store_bytes(value_bytes, &"{tmpdir}/intent.redb") on the malformed entry
+        (per UI-03 amendment, the typed codec on Job is the surface where envelope-wrapping discipline lives;
+         LocalStore::open is the bootstrap orchestrator that drives the walk)
+  Then the call returns Err(IntentStoreError::Envelope { redb_path, source })
     And the source variant matches EnvelopeError::Malformed { source: _ }
     And the IntentStoreError's Display form contains the literal substring "{tmpdir}/intent.redb"
     And the Display form contains the literal substring "delete"
         (operator remediation per ADR-0048 § 6)
-    And a structured log event with name "health.startup.refused" was emitted before the function returned
+    And a structured log event with name "health.startup.refused" was emitted from inside
+        Job::from_store_bytes BEFORE the function returned the Err
     And the event's fields include redb_path = "{tmpdir}/intent.redb"
+        and envelope_error referencing the EnvelopeError::Malformed source
+    And on a separate Ok-decoded entry the same "health.startup.refused" event is NOT emitted
+        (the event fires exactly once per malformed/unknown entry, never on Ok)
 ```
 
 ### Sub-scenario S-EV-03.2 — Unknown future variant tag causes refuse-to-start
@@ -293,10 +304,15 @@ Scenario: Control-plane boot refuses to start when an intent row carries an unkn
         carry a rkyv-archived envelope with discriminant byte 99
         (a tag value that does not correspond to any known JobEnvelope variant)
   When LocalStore::open("{tmpdir}/intent.redb") is invoked
-  Then the call returns Err(IntentStoreError::Envelope { source })
+    And its recovery walk calls Job::from_store_bytes(value_bytes, &"{tmpdir}/intent.redb") on the synthesised entry
+        (per UI-03 amendment, the typed codec on Job is the surface where envelope-wrapping discipline lives;
+         LocalStore::open is the bootstrap orchestrator that drives the walk)
+  Then the call returns Err(IntentStoreError::Envelope { redb_path, source })
     And the source variant matches EnvelopeError::UnknownVersion { observed: 99, supported_max: _ }
     And the Display form names the observed and supported_max version values
-    And a structured "health.startup.refused" event was emitted with redb_path and envelope_error fields
+    And a structured "health.startup.refused" event was emitted from inside Job::from_store_bytes
+        BEFORE the function returned the Err
+    And the event's fields include redb_path and envelope_error referencing the EnvelopeError::UnknownVersion source
 ```
 
 ### Note on synthesising the "unknown future variant" bytes
@@ -516,7 +532,7 @@ for the remaining observation row types). All driven adapters
 | § 1 (per-type rkyv enum) | S-EV-01 | S-EV-01.1 .. .5 | Coverage; observable behaviour |
 | § 2 Layer 1 (non-re-export of codec-internal envelope) | S-EV-02a | S-EV-02a | Compile-time enforcement (unresolved-import E0432 on short re-exported path to `AllocStatusRowEnvelope`) |
 | § 2 Layer 2 (dst-lint) | S-EV-02b | S-EV-02b.1 .. .4 | In-crate enforcement |
-| § 3 Intent fail-fast | S-EV-05 | S-EV-03.1 + .2 | Asymmetric read policy |
+| § 3 Intent fail-fast + § 4b typed codec on Job (UI-03) | S-EV-05 | S-EV-03.1 + .2 | Asymmetric read policy; driving surface is `Job::from_store_bytes` (called by `LocalStore::open`'s recovery walk) |
 | § 3 Observation degrade | S-EV-04 | S-EV-04.1 .. .5 | Asymmetric read policy |
 | § 6 Operator remediation | S-EV-05 | S-EV-03.1 (Display assertion) | Operator-facing observable |
 | testing.md § "Archive schema-evolution roundtrip" | (S-EV-01) | S-EV-05 verification checklist + S-EV-06 | Coverage gate |

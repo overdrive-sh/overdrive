@@ -32,6 +32,21 @@ Commit `a90755a2` (step 01-03's GREEN landing) shipped this shape
 and remains the correct GREEN landing for step 01-03. See
 `docs/feature/rkyv-envelope-evolution/deliver/upstream-issues.md`
 (UI-02) for the full decision record.
+**Amended 2026-05-12 (UI-03 reconciliation — typed codec on Job,
+trait unchanged)** — see new § "Intent persistence boundary —
+typed codec on `Job`" below for the full decision. Summary:
+the `IntentStore` trait is correctly bytes-passthrough (it
+persists multiple value classes — Jobs, kind discriminators, stop
+markers, snapshot frames — and is shared with the future
+`RaftStore` Phase 2 snapshot contract whose byte-identity is
+load-bearing). Wrapping discipline lives in a Job-specific codec
+module on `Job` itself (`Job::archive_for_store` /
+`Job::from_store_bytes` / `Job::spec_digest`), NOT on the trait.
+`spec_digest` is now SHA-256 of envelope bytes (not raw V1 bytes)
+— operator-observable Job ID change absorbed by greenfield
+single-cut per § 5. See
+`docs/feature/rkyv-envelope-evolution/deliver/upstream-issues.md`
+(UI-03) for the originating decision record.
 
 ## Context
 
@@ -351,6 +366,106 @@ syntax `Job { id, replicas, resources, driver }` exactly as before
 intent path still goes through `LocalStore::open` rkyv-deserialising
 into `JobEnvelope` and projecting via `envelope.into_latest()?`.
 
+### 4b. Intent persistence boundary — typed codec on `Job` (UI-03)
+
+The `IntentStore` trait is a **generic byte-level key/value store**
+by design. It persists multiple value classes — `Job` aggregates,
+`WorkloadKind` discriminator bytes (per ADR-0047), stop sentinel
+markers, and frame-wrapped snapshot bytes per ADR-0020. Its surface
+is correctly bytes-passthrough; the trait MUST NOT be refactored
+to take a typed `Job` on its write/read methods. The trait is also
+shared with the future `RaftStore` Phase 2 path, whose snapshot
+contract relies on byte identity between log entries and snapshot
+frames.
+
+Per this constraint, the envelope-wrapping discipline for `Job`
+lives in a **Job-specific codec module on the `Job` type itself**,
+NOT on the `IntentStore` trait. Three methods, co-located with the
+`Job` aggregate (`crates/overdrive-core/src/aggregate/mod.rs` or a
+sibling `store_codec.rs` — crafter's choice):
+
+```rust
+impl Job {
+    /// Encode `self` for storage in the `IntentStore`. Wraps the V1
+    /// payload via `JobEnvelope::latest(self.clone())` and rkyv-
+    /// serialises the envelope. Output bytes are suitable for direct
+    /// `IntentStore::write_entry` storage.
+    pub fn archive_for_store(&self) -> Result<AlignedVec, EnvelopeError>;
+
+    /// Decode bytes previously written via `archive_for_store`. rkyv-
+    /// deserialises into `JobEnvelope` and projects via
+    /// `envelope.into_latest()?`. On `EnvelopeError`, emits a
+    /// structured `health.startup.refused` event (with `redb_path`
+    /// and `envelope_error` fields) BEFORE returning
+    /// `Err(IntentStoreError::Envelope { redb_path, source })`.
+    /// Same event MUST NOT fire on `Ok`.
+    pub fn from_store_bytes(bytes: &[u8], redb_path: &Path)
+        -> Result<Job, IntentStoreError>;
+
+    /// SHA-256 over the output of `archive_for_store`. The operator-
+    /// observable Job ID (spec digest) is now computed over envelope
+    /// bytes (the V1 tag + V1 payload), not raw V1 payload bytes —
+    /// the digest is greenfield-single-cut new vs. pre-envelope. Per
+    /// `.claude/rules/development.md` § "Hashing requires deterministic
+    /// serialization", rkyv archived bytes are canonical by
+    /// construction.
+    pub fn spec_digest(&self) -> Result<ContentHash, EnvelopeError>;
+}
+```
+
+**Migration shape.** Every existing Job-writing call site migrates
+from `rkyv::to_bytes(&job)` (or
+`rkyv::to_bytes::<_, rkyv::rancor::Error>(&job)`) to
+`job.archive_for_store()?`. Every Job-reading call site migrates
+from inline `rkyv::access::<rkyv::Archived<Job>>(bytes)?` to
+`Job::from_store_bytes(bytes, &path)?`. The `LocalStore::open`
+recovery walk calls `Job::from_store_bytes` per `jobs/`-prefixed
+entry to surface envelope-decode errors at boot per § 3 (intent
+fail-fast) and § 6 (operator remediation). The
+`spec_digest` computation in
+`crates/overdrive-control-plane/src/handlers.rs` migrates from
+`ContentHash::of(archived_bytes)` to `job.spec_digest()?`. Non-Job
+byte values (`WorkloadKind` discriminator bytes, stop markers,
+snapshot frames) continue to use the byte-level `IntentStore` trait
+surface directly — they have their own evolution mechanisms (frame
+header for snapshots; the kind discriminator is a fixed byte).
+
+**Why the codec lives on `Job`, not on the trait.** Three reasons:
+
+1. **Trait-surface respect.** Refactoring `IntentStore` to take
+   typed `Job` on write/read would either break the trait's
+   bytes-passthrough contract (forcing a sum type that covers every
+   value class) or break the `RaftStore` Phase 2 snapshot contract
+   (which relies on byte identity). Both are Phase-1-out-of-scope
+   trait redesigns with no buy.
+2. **Single wrapping site.** The codec module on `Job` is the sole
+   place that names `JobEnvelope`. Every writer goes through
+   `archive_for_store`; every reader goes through
+   `from_store_bytes`. The "persistence boundary" (where envelope
+   wrapping happens) is now this typed module, NOT `LocalStore::open`
+   directly. `LocalStore::open` calls `Job::from_store_bytes` per
+   entry; the wrapping discipline is at the codec module.
+3. **Deterministic hashing co-location.** `spec_digest`'s
+   correctness invariant (digest is reproducible across two
+   archivals of the same logical `Job`) is the same invariant
+   `archive_for_store` already guarantees. Co-locating
+   `spec_digest` with `archive_for_store` makes the invariant
+   trivially deterministic (one function reuses the other internally
+   where possible) and removes the "raw `rkyv::to_bytes` vs. envelope
+   bytes" choice from every caller.
+
+**`spec_digest` semantics change is operator-observable.** Pre-UI-03,
+the operator-observable Job ID was `ContentHash::of(rkyv_bytes(&job))`
+— SHA-256 over raw `JobV1` archived bytes. Post-UI-03 it is
+`ContentHash::of(envelope_bytes)` — SHA-256 over the envelope's
+archived bytes (V1 tag + V1 payload). The two values differ by
+exactly the leading discriminant tag byte. Phase 1 greenfield
+single-cut absorbs this change per § 5 (operator deletes
+`<data_dir>/intent.redb` on this PR landing); pre-existing Job IDs
+in fixtures, tests, or external systems become stale and are
+regenerated from inputs. PR description landing UI-03 calls this out
+explicitly.
+
 ### 4a. How writers stay on `latest()`
 
 Under the alias-to-payload shape the `Envelope::latest(payload)`
@@ -506,6 +621,75 @@ the existing struct-literal idiom, and reduces the migration to
 `docs/feature/rkyv-envelope-evolution/deliver/upstream-issues.md`
 (UI-02) for the originating decision record. Commit `a90755a2`
 (step 01-03's GREEN landing) ships this shape correctly.
+
+### Option 7 — Refactor `IntentStore` trait to take typed `Job` on write/read surface (rejected — UI-03)
+
+A natural-looking alternative for housing the envelope discipline is
+to retype the `IntentStore` trait's `put` / `get` / `write_entry`
+surface from `&[u8]` to `&Job`, so the trait itself wraps via
+`JobEnvelope::latest(...)` and unwraps via `into_latest()?`. The
+shape would push wrapping all the way down to the adapter
+boundary.
+
+**Why rejected** (2026-05-12, UI-03):
+
+1. **The trait persists multiple value classes**, not just `Job`. It
+   stores `WorkloadKind` discriminator bytes (per ADR-0047), stop
+   sentinel markers, and frame-wrapped snapshot bytes per ADR-0020.
+   Typing the trait on `Job` would either (a) break those value
+   classes (they would need a separate trait), (b) force a sum type
+   covering every value class (introducing a closed-set "all
+   possible intent values" enum at the trait level — a Phase-1-out-
+   of-scope trait redesign), or (c) leave the trait dual-shaped
+   ("typed for Job, byte-level for everything else" — strictly
+   worse than the current uniform byte-level design).
+2. **The trait is shared with the future `RaftStore` Phase 2 path**,
+   whose snapshot contract relies on byte identity between log
+   entries and snapshot frames (per ADR-0020). Typing the trait
+   would force the Raft path to choose between (a) decoding every
+   entry through `JobEnvelope` (which is the wrong layer of
+   abstraction for log replay — Raft replays bytes, not domain
+   objects) and (b) maintaining a parallel byte-level surface
+   alongside the typed one. Both options regress the trait's
+   coherence.
+3. **The codec-module shape (UI-03 chosen path) achieves the same
+   "single wrapping site" property** without any trait change. The
+   `Job::archive_for_store` / `Job::from_store_bytes` methods are
+   the sole wrapping sites; every Job writer goes through them
+   explicitly. The structural defense is identical to what a typed-
+   trait approach would provide, with zero impact on non-Job value
+   classes or the future `RaftStore` path.
+
+### Option 8 — Add typed `put_job` / `get_job` helper methods on the trait with default impl (rejected — UI-03)
+
+A softer variant of Option 7: keep `IntentStore`'s byte-level
+surface but add typed helper methods `put_job(&self, key: JobId,
+job: Job) -> Result<...>` and `get_job(&self, key: JobId) ->
+Result<Option<Job>, ...>` with default implementations that wrap
+via `JobEnvelope::latest(...)` internally.
+
+**Why rejected** (2026-05-12, UI-03):
+
+1. **Trait surface bloat for the convenience of a single value
+   class.** Four-plus default-implemented methods per value class
+   (put, get, iter, delete) — multiplied by every Phase 2+ typed
+   value class — would balloon the trait surface for a property
+   the codec-module approach already provides at a single named
+   site.
+2. **Default-impl trait methods carry coordination cost.** Every
+   future `IntentStore` implementation (a hypothetical
+   `RedisIntentStore`, the `RaftStore` Phase 2 path, sim
+   adapters) must either accept the default or explicitly
+   override. A typed helper method whose contract drifts from the
+   default impl is invisible at the trait-method boundary; the
+   structural defense becomes per-implementation review rather
+   than a single audited site.
+3. **The codec-module approach achieves identical "wrapping in one
+   place" semantics** without per-trait-implementation
+   coordination. `Job::archive_for_store` is the named function
+   every caller invokes; the structural defense scales to N value
+   classes by adding N codec modules, each a single named site,
+   without trait-surface change.
 
 ## Consequences
 
