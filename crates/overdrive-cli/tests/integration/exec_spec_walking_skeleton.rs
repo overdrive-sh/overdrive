@@ -44,7 +44,7 @@ use overdrive_cli::commands::job::SubmitArgs;
 use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
 use overdrive_control_plane::api::IdempotencyOutcome;
 use overdrive_core::aggregate::{IntentKey, Job, JobSpecInput, WorkloadDriver};
-use overdrive_core::id::{ContentHash, WorkloadId};
+use overdrive_core::id::WorkloadId;
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
@@ -102,8 +102,7 @@ fn write_toml(dir: &Path, name: &str, body: &str) -> PathBuf {
 fn local_spec_digest_new_shape(spec_toml: &str) -> String {
     let parsed: JobSpecInput = toml::from_str(spec_toml).expect("parse new-shape TOML");
     let job = Job::from_spec(parsed).expect("Job::from_spec on canonical new-shape spec");
-    let archived = job.archive_for_store().expect("rkyv archive");
-    ContentHash::of(archived.as_ref()).to_string()
+    job.spec_digest().expect("spec_digest").to_string()
 }
 
 #[tokio::test]

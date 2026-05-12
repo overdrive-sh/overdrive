@@ -109,8 +109,7 @@ fn payments_spec() -> JobSpecInput {
 /// JCS, the assertions in this module will fail, as they should.
 fn expected_spec_digest(spec: &JobSpecInput) -> String {
     let job = Job::from_spec(spec.clone()).expect("canonical spec constructs a Job");
-    let bytes = job.archive_for_store().expect("rkyv archive of Job");
-    overdrive_core::id::ContentHash::of(bytes.as_ref()).to_string()
+    job.spec_digest().expect("spec_digest").to_string()
 }
 
 // -----------------------------------------------------------------------
