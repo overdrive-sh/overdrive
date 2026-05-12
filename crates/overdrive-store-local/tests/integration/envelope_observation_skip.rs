@@ -1,0 +1,184 @@
+//! Observation log + skip self-heal — S-EV-04.1 + S-EV-04.2.
+//!
+//! Per ADR-0048 § 3 (observation layer): on envelope decode failure
+//! the reader emits `tracing::warn!(name: "observation.envelope.
+//! decode_failed", table = ?, key = ?, source = ?)` and skips the
+//! row. Valid rows continue to surface. Re-writing the malformed key
+//! with a valid envelope recovers reads (the bad bytes are
+//! overwritten through the typed write path).
+//!
+//! The bytes-injection back-door lives in `envelope_helpers.rs` —
+//! production code MUST NOT have a raw-bytes write path.
+
+use std::sync::{Arc, Mutex};
+
+use overdrive_core::aggregate::WorkloadKind;
+use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
+use overdrive_core::traits::observation_store::{
+    AllocState, AllocStatusRow, LogicalTimestamp, ObservationRow, ObservationStore,
+};
+use overdrive_store_local::LocalObservationStore;
+use tempfile::TempDir;
+use tracing::subscriber::set_default;
+use tracing::{Event, Subscriber};
+use tracing_subscriber::layer::{Context, SubscriberExt};
+use tracing_subscriber::registry::LookupSpan;
+use tracing_subscriber::{Layer, Registry};
+
+use super::envelope_helpers::write_raw_bytes_to_alloc_status_table;
+
+#[derive(Clone, Default)]
+struct CapturedEvents {
+    inner: Arc<Mutex<Vec<String>>>,
+}
+
+impl CapturedEvents {
+    fn entries(&self) -> Vec<String> {
+        self.inner.lock().expect("captured events mutex").clone()
+    }
+}
+
+struct V<'a>(&'a mut String);
+
+impl tracing::field::Visit for V<'_> {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        use std::fmt::Write;
+        let _ = write!(self.0, " {}={:?}", field.name(), value);
+    }
+}
+
+impl<S> Layer<S> for CapturedEvents
+where
+    S: Subscriber + for<'a> LookupSpan<'a>,
+{
+    fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
+        let mut buf = String::new();
+        buf.push_str(event.metadata().name());
+        buf.push_str(" | target=");
+        buf.push_str(event.metadata().target());
+        event.record(&mut V(&mut buf));
+        self.inner.lock().expect("captured events mutex").push(buf);
+    }
+}
+
+fn make_alloc_row(alloc_id_str: &str) -> AllocStatusRow {
+    AllocStatusRow {
+        alloc_id: AllocationId::new(alloc_id_str).expect("valid alloc id"),
+        workload_id: WorkloadId::new("svc-payments").expect("valid workload id"),
+        node_id: NodeId::new("node-001").expect("valid node id"),
+        state: AllocState::Running,
+        updated_at: LogicalTimestamp {
+            counter: 1,
+            writer: NodeId::new("node-001").expect("valid writer node id"),
+        },
+        reason: None,
+        detail: None,
+        terminal: None,
+        stderr_tail: None,
+        kind: WorkloadKind::Service,
+        listeners: Vec::new(),
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn malformed_alloc_status_row_is_logged_and_skipped_but_valid_row_surfaces() {
+    let captured = CapturedEvents::default();
+    let subscriber = Registry::default().with(captured.clone());
+
+    let tmp = TempDir::new().expect("tempdir");
+    let redb_path = tmp.path().join("observation.redb");
+
+    // K1: valid row through the typed write path.
+    let k1_row = make_alloc_row("alloc-01");
+    {
+        let store = LocalObservationStore::open(&redb_path).expect("open #1");
+        store.write(ObservationRow::AllocStatus(k1_row.clone())).await.expect("write K1");
+    } // store dropped; redb lock released
+
+    // K2: 16 bytes of 0xFF — does not decode through the envelope.
+    let k2_alloc = AllocationId::new("alloc-malformed-02").expect("valid alloc id");
+    write_raw_bytes_to_alloc_status_table(&redb_path, &k2_alloc, &[0xFF; 16]);
+
+    let _guard = set_default(subscriber);
+
+    let store = LocalObservationStore::open(&redb_path).expect("open #2");
+    let rows = store.alloc_status_rows().await.expect("read alloc rows");
+
+    assert_eq!(rows.len(), 1, "exactly one valid row must survive; got {rows:?}");
+    assert_eq!(rows[0].alloc_id, k1_row.alloc_id);
+
+    let entries = captured.entries();
+    let decode_events: Vec<&String> =
+        entries.iter().filter(|e| e.contains("observation.envelope.decode_failed")).collect();
+    assert_eq!(
+        decode_events.len(),
+        1,
+        "exactly one decode_failed event expected; got {decode_events:?}"
+    );
+    assert!(
+        decode_events[0].contains("observation_alloc_status"),
+        "event must name the table 'observation_alloc_status'; got {:?}",
+        decode_events[0]
+    );
+
+    let refused: Vec<&String> =
+        entries.iter().filter(|e| e.contains("health.startup.refused")).collect();
+    assert!(
+        refused.is_empty(),
+        "observation layer must NOT emit health.startup.refused; got {refused:?}"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn rewriting_malformed_key_with_valid_envelope_recovers_reads() {
+    let captured = CapturedEvents::default();
+    let subscriber = Registry::default().with(captured.clone());
+
+    let tmp = TempDir::new().expect("tempdir");
+    let redb_path = tmp.path().join("observation.redb");
+
+    // K1: valid row.
+    let k1_row = make_alloc_row("alloc-01");
+    {
+        let store = LocalObservationStore::open(&redb_path).expect("open #1");
+        store.write(ObservationRow::AllocStatus(k1_row.clone())).await.expect("write K1");
+    }
+
+    // K2: malformed.
+    let k2_alloc = AllocationId::new("alloc-malformed-02").expect("valid alloc id");
+    write_raw_bytes_to_alloc_status_table(&redb_path, &k2_alloc, &[0xFF; 16]);
+
+    let _guard = set_default(subscriber);
+
+    // First read: 1 row + 1 decode event.
+    let store = LocalObservationStore::open(&redb_path).expect("open #2");
+    let rows = store.alloc_status_rows().await.expect("read #1");
+    assert_eq!(rows.len(), 1);
+
+    let first_pass_decodes = captured
+        .entries()
+        .iter()
+        .filter(|e| e.contains("observation.envelope.decode_failed"))
+        .count();
+    assert_eq!(first_pass_decodes, 1, "first read must emit one decode event");
+
+    // Re-write K2 with a valid envelope through the typed write
+    // path — overwrites the garbage bytes.
+    let mut k2_row = k1_row.clone();
+    k2_row.alloc_id = k2_alloc.clone();
+    store.write(ObservationRow::AllocStatus(k2_row.clone())).await.expect("re-write K2 valid");
+
+    // Second read: 2 rows, no additional decode event.
+    let rows2 = store.alloc_status_rows().await.expect("read #2");
+    assert_eq!(rows2.len(), 2, "both rows must surface after recovery; got {rows2:?}");
+
+    let second_pass_decodes = captured
+        .entries()
+        .iter()
+        .filter(|e| e.contains("observation.envelope.decode_failed"))
+        .count();
+    assert_eq!(
+        second_pass_decodes, 1,
+        "no additional decode event expected on the recovery read; total {second_pass_decodes}"
+    );
+}

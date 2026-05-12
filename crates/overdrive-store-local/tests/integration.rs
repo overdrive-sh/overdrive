@@ -27,6 +27,9 @@ mod integration {
     //! `commit_counter_invariant` module was deleted in step 01-04 of
     //! `redesign-drop-commit-index` — the counter it asserted no
     //! longer exists.
+    mod envelope_helpers;
+    mod envelope_observation_skip;
+    mod envelope_walking_skeleton;
     mod lww_conformance;
     mod observation_backend_proptest;
     mod snapshot_proptest;

@@ -290,98 +290,24 @@ impl LogicalTimestamp {
 /// readable fallback for cases the cause-class taxonomy has not yet
 /// grown a variant for.
 ///
-/// # Forward compatibility
+/// # Schema evolution
 ///
-/// Both `reason` and `detail` are `Option<…>` and additive on the rkyv
-/// archive shape — pre-feature redb files (where neither field exists)
-/// continue to deserialise (rkyv treats `Option<T>` such that omitted
-/// data deserialises to `None`). New writers populate both fields per
-/// the action-shim contract (ADR-0023); old readers tolerate them.
-#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub struct AllocStatusRow {
-    pub alloc_id: AllocationId,
-    pub workload_id: WorkloadId,
-    pub node_id: NodeId,
-    pub state: AllocState,
-    pub updated_at: LogicalTimestamp,
-    /// Structured cause for this transition. `None` when the writer
-    /// (Phase 1: action shim) has not yet been wired to populate it,
-    /// or when the row predates the schema extension.
-    pub reason: Option<TransitionReason>,
-    /// Verbatim driver / OS text the `reason` payload does not capture.
-    /// Used for diagnostic fidelity on cause variants whose typed
-    /// payload is incomplete (e.g. `DriverInternalError { detail }`
-    /// duplicates this for self-containment, but other cause variants
-    /// may carry only structured fields and rely on `detail` for the
-    /// raw `errno` text).
-    pub detail: Option<String>,
-    /// Reconciler-emitted classification of *why* this allocation
-    /// reached a terminal lifecycle state. Per ADR-0037 §3 the row is
-    /// the *durable* home for the terminal decision; the streaming
-    /// `LifecycleEvent.terminal` field (Phase 02 of this feature)
-    /// carries the same value.
-    ///
-    /// `None` when the writer (Phase 1: action shim) has not yet been
-    /// wired to populate it, when the row predates the schema
-    /// extension, or when the transition is non-terminal (most rows
-    /// — `Pending → Running`, `Running → Failed` with budget remaining,
-    /// etc. all carry `terminal: None`). Additive on the rkyv archive
-    /// shape so pre-feature redb files continue to deserialise (rkyv
-    /// treats `Option<T>` such that omitted data deserialises to `None`).
-    pub terminal: Option<TerminalCondition>,
-    /// Newline-joined tail of the last
-    /// [`STDERR_TAIL_LINES`](crate::traits::driver::STDERR_TAIL_LINES)
-    /// stderr lines the workload wrote before exiting. Populated by
-    /// [`crate::traits::driver::ExitEvent::stderr_tail`]; the worker
-    /// `exit_observer` passes it through verbatim to this field so
-    /// the operator-facing render layer (`format_job_failed_summary`)
-    /// can show "stderr (last N lines):" without re-deriving the
-    /// content.
-    ///
-    /// Per `.claude/rules/development.md` § "Persist inputs, not
-    /// derived state": stderr is the workload's actual output — an
-    /// observed input, not a derived classification — so this field
-    /// is the correct shape for it on an observation row. Additive
-    /// on the rkyv archive shape (same rule as `reason`, `detail`,
-    /// `terminal`).
-    pub stderr_tail: Option<String>,
-    /// Workload-kind discriminator denormalised onto every alloc-
-    /// status row at write time per design [D4] of the
-    /// `workload-kind-discriminator` feature (slice 03 / step 02-02).
-    ///
-    /// The render layer branches on this field without re-fetching
-    /// intent — Service rows render with replicas + Restarts (no Exit
-    /// column); Job rows render with Verdict + per-attempt Exit codes
-    /// + stderr tail; Schedule rows render with cron + deferral.
-    ///
-    /// Phase-1 greenfield — NO backfill. New rows carry the
-    /// authoritative kind; old rows do not exist (the feature lands
-    /// before any persistent observation row was written under prior
-    /// schemas in production). The action shim's
-    /// `build_alloc_status_row` populates this from the originating
-    /// `WorkloadLifecycleState.workload_kind` (per ADR-0047 §1).
-    ///
-    /// Default is [`WorkloadKind::Service`] per the same back-compat
-    /// rule documented on the [`WorkloadKind`] type itself — preserves
-    /// kind-agnostic behavior at any consumer that has not yet been
-    /// wired to populate the field explicitly. Per ADR-0047 §4.
-    pub kind: WorkloadKind,
-    /// Service `[[listener]]` blocks denormalised onto the row per
-    /// ADR-0047 §4a / [D5] of the `workload-kind-discriminator`
-    /// feature (slice 06). Embedded directly on the row, NOT a separate
-    /// `service_listener` table — the listener set per allocation is
-    /// small and bounded, denormalisation keeps the read fan-out at
-    /// one query.
-    ///
-    /// Empty for non-Service kinds (Job, Schedule). Old rows that
-    /// pre-date this field deserialise to the default empty `Vec` per
-    /// rkyv's additive-field tolerance.
-    ///
-    /// `ListenerRow` is the OBSERVATION-side twin of the intent-side
-    /// [`Listener`] type per ADR-0011 intent-vs-observation
-    /// distinctness — same fields, different bounded context.
-    pub listeners: Vec<ListenerRow>,
-}
+/// Per ADR-0048 (`docs/product/architecture/adr-0048-rkyv-versioned-envelope.md`)
+/// this type is the **inner payload** of [`AllocStatusRowEnvelope`].
+/// rkyv archives are **fixed positional layouts** — appending a field
+/// to this struct shifts every subsequent offset and renders
+/// pre-existing bytes unreadable. The previous docstring claim that
+/// `Option<T>` fields are "additive on the rkyv archive shape" was
+/// incorrect (RCA: `docs/feature/rkyv-envelope-evolution/distill/`)
+/// — schema evolution at this boundary goes through a new envelope
+/// variant (`V2`, `V3`, …) added per the version-bump procedure in
+/// `.claude/rules/development.md` § "rkyv schema evolution"; existing
+/// `FIXTURE_V<N>` golden bytes are NEVER touched.
+///
+/// Writers go through [`AllocStatusRow::latest`]
+/// (= [`AllocStatusRowEnvelope::latest`]); readers project through
+/// [`AllocStatusRowEnvelope::into_latest`].
+pub type AllocStatusRow = AllocStatusRowV1;
 
 /// Observation-side twin of the intent-side [`Listener`] per ADR-0011.
 ///
@@ -621,20 +547,14 @@ pub struct AllocStatusRowV1 {
 impl VersionedEnvelope for AllocStatusRowEnvelope {
     type Latest = AllocStatusRowV1;
 
-    #[expect(
-        clippy::todo,
-        reason = "RED scaffold; lands GREEN in DELIVER step 01-02 (AllocStatusRowEnvelope walking skeleton)"
-    )]
-    fn latest(_payload: Self::Latest) -> Self {
-        todo!("RED scaffold: wrap payload into Self::V1(payload)")
+    fn latest(payload: Self::Latest) -> Self {
+        Self::V1(payload)
     }
 
-    #[expect(
-        clippy::todo,
-        reason = "RED scaffold; lands GREEN in DELIVER step 01-02 (AllocStatusRowEnvelope walking skeleton)"
-    )]
     fn into_latest(self) -> Result<Self::Latest, EnvelopeError> {
-        todo!("RED scaffold: match Self::V1(v1) => Ok(v1)")
+        match self {
+            Self::V1(v1) => Ok(v1),
+        }
     }
 }
 

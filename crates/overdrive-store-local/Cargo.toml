@@ -36,11 +36,14 @@ rkyv.workspace           = true
 thiserror.workspace      = true
 tokio.workspace          = true
 tokio-stream.workspace   = true
+tracing.workspace        = true
 
 [dev-dependencies]
 tempfile.workspace = true
 tokio              = { workspace = true }
 proptest.workspace = true
+tracing.workspace  = true
+tracing-subscriber.workspace = true
 # `test-utils` exposes the trait-conformance harness at
 # `overdrive_core::testing::observation_store::run_lww_conformance`.
 # Per `docs/feature/fix-observation-lww-merge/deliver/rca.md` Cause B,

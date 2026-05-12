@@ -58,11 +58,12 @@ use std::task::{Context, Poll};
 
 use async_trait::async_trait;
 use futures::Stream;
+use overdrive_core::codec::VersionedEnvelope;
 use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
 use overdrive_core::id::{AllocationId, ServiceId};
 use overdrive_core::traits::observation_store::{
-    AllocStatusRow, NodeHealthRow, ObservationRow, ObservationStore, ObservationStoreError,
-    ObservationSubscription, ServiceBackendRow, ServiceHydrationResultRow,
+    AllocStatusRow, AllocStatusRowEnvelope, NodeHealthRow, ObservationRow, ObservationStore,
+    ObservationStoreError, ObservationSubscription, ServiceBackendRow, ServiceHydrationResultRow,
 };
 use redb::{Database, ReadableTable, Table, TableDefinition};
 use tokio::sync::broadcast;
@@ -244,27 +245,41 @@ impl ObservationStore for LocalObservationStore {
 
     async fn alloc_status_rows(&self) -> Result<Vec<AllocStatusRow>, ObservationStoreError> {
         let inner = Arc::clone(&self.inner);
-        tokio::task::spawn_blocking(move || {
+        // Emit decode-failure events on the calling async thread so
+        // per-test `tracing::subscriber::set_default` guards (which
+        // are thread-local) observe them. The blocking task collects
+        // the failures and returns them alongside the surviving rows.
+        let (rows, decode_failures) = tokio::task::spawn_blocking(move || {
             let read = inner.db.begin_read().map_err(map_to_io)?;
             let table = read.open_table(ALLOC_STATUS_TABLE).map_err(map_to_io)?;
             let mut out: Vec<AllocStatusRow> = Vec::new();
+            let mut failures: Vec<(Vec<u8>, ObservationStoreError)> = Vec::new();
             let iter = table.iter().map_err(map_to_io)?;
             for item in iter {
-                let (_k, v) = item.map_err(map_to_io)?;
-                // redb returns a byte slice with unknown alignment; rkyv
-                // requires 8-byte-aligned access. Copy into an AlignedVec
-                // before deserialising.
-                let mut aligned = rkyv::util::AlignedVec::<8>::new();
-                aligned.extend_from_slice(v.value());
-                let row: AllocStatusRow =
-                    rkyv::from_bytes::<AllocStatusRow, rkyv::rancor::Error>(&aligned)
-                        .map_err(map_to_io)?;
-                out.push(row);
+                let (k, v) = item.map_err(map_to_io)?;
+                match decode_alloc_status(v.value()) {
+                    Ok(row) => out.push(row),
+                    Err(err) => failures.push((k.value().to_vec(), err)),
+                }
             }
-            Ok::<_, ObservationStoreError>(out)
+            Ok::<_, ObservationStoreError>((out, failures))
         })
         .await
-        .map_err(map_to_io)?
+        .map_err(map_to_io)??;
+
+        // Per ADR-0048 § 3 (observation layer): log + skip rows
+        // whose envelope decode failed. Convergence proceeds on
+        // surviving rows.
+        for (key_bytes, err) in decode_failures {
+            tracing::warn!(
+                name: "observation.envelope.decode_failed",
+                table = "observation_alloc_status",
+                key = ?key_bytes,
+                source = ?err,
+                "skipping alloc-status row that failed envelope decode",
+            );
+        }
+        Ok(rows)
     }
 
     async fn alloc_status_row(
@@ -273,21 +288,37 @@ impl ObservationStore for LocalObservationStore {
     ) -> Result<Option<AllocStatusRow>, ObservationStoreError> {
         let inner = Arc::clone(&self.inner);
         let key: Vec<u8> = alloc_id.as_str().as_bytes().to_vec();
-        tokio::task::spawn_blocking(move || {
+        let key_for_emit = key.clone();
+        let outcome = tokio::task::spawn_blocking(move || {
             let read = inner.db.begin_read().map_err(map_to_io)?;
             let table = read.open_table(ALLOC_STATUS_TABLE).map_err(map_to_io)?;
             let Some(value) = table.get(key.as_slice()).map_err(map_to_io)? else {
-                return Ok::<_, ObservationStoreError>(None);
+                return Ok::<_, ObservationStoreError>(Ok(None));
             };
-            let mut aligned = rkyv::util::AlignedVec::<8>::new();
-            aligned.extend_from_slice(value.value());
-            let row: AllocStatusRow =
-                rkyv::from_bytes::<AllocStatusRow, rkyv::rancor::Error>(&aligned)
-                    .map_err(map_to_io)?;
-            Ok(Some(row))
+            // Point lookup: per ADR-0048 § 3 observation policy is
+            // log + skip, so a malformed row returns None (with a
+            // structured warn event emitted on the calling thread).
+            match decode_alloc_status(value.value()) {
+                Ok(row) => Ok(Ok(Some(row))),
+                Err(err) => Ok(Err(err)),
+            }
         })
         .await
-        .map_err(map_to_io)?
+        .map_err(map_to_io)??;
+
+        match outcome {
+            Ok(opt) => Ok(opt),
+            Err(err) => {
+                tracing::warn!(
+                    name: "observation.envelope.decode_failed",
+                    table = "observation_alloc_status",
+                    key = ?key_for_emit,
+                    source = ?err,
+                    "skipping alloc-status row that failed envelope decode",
+                );
+                Ok(None)
+            }
+        }
     }
 
     async fn node_health_rows(&self) -> Result<Vec<NodeHealthRow>, ObservationStoreError> {
@@ -383,14 +414,27 @@ impl ObservationStore for LocalObservationStore {
 // on subscriptions.
 // -----------------------------------------------------------------------------
 
-/// Decode a prior rkyv-archived `AllocStatusRow` from redb-returned
-/// bytes. Mirrors the alignment-aware decoding pattern at the top of
-/// [`LocalObservationStore::alloc_status_rows`] — redb returns slices
-/// with unknown alignment; rkyv requires 8-byte alignment.
+/// Decode a prior rkyv-archived `AllocStatusRowEnvelope` from
+/// redb-returned bytes and project to the latest payload shape per
+/// ADR-0048. Mirrors the alignment-aware decoding pattern at the top
+/// of [`LocalObservationStore::alloc_status_rows`] — redb returns
+/// slices with unknown alignment; rkyv requires 8-byte alignment.
+///
+/// Returns the envelope's [`overdrive_core::codec::EnvelopeError`]
+/// surfaced as `ObservationStoreError::Envelope` so callers can
+/// branch on the structured cause (malformed bytes vs unknown future
+/// variant). Per ADR-0048 § 3 the observation-layer policy is to
+/// log + skip the row, not refuse to start.
 fn decode_alloc_status(bytes: &[u8]) -> Result<AllocStatusRow, ObservationStoreError> {
     let mut aligned = rkyv::util::AlignedVec::<8>::new();
     aligned.extend_from_slice(bytes);
-    rkyv::from_bytes::<AllocStatusRow, rkyv::rancor::Error>(&aligned).map_err(map_to_io)
+    let envelope: AllocStatusRowEnvelope =
+        rkyv::from_bytes::<AllocStatusRowEnvelope, rkyv::rancor::Error>(&aligned).map_err(
+            |source| ObservationStoreError::Envelope {
+                source: overdrive_core::codec::EnvelopeError::Malformed { source },
+            },
+        )?;
+    envelope.into_latest().map_err(ObservationStoreError::from)
 }
 
 /// Decode a prior rkyv-archived `NodeHealthRow` from redb-returned
@@ -410,15 +454,25 @@ fn apply_alloc_status_lww(
     incoming: &AllocStatusRow,
 ) -> Result<bool, ObservationStoreError> {
     let key = incoming.alloc_id.as_str().as_bytes();
-    let dominates = match table.get(key).map_err(map_to_io)? {
-        None => true,
-        Some(prior) => {
-            let prior_row = decode_alloc_status(prior.value())?;
-            incoming.updated_at.dominates(&prior_row.updated_at)
-        }
-    };
+    // If the prior row's bytes don't decode (malformed / unknown
+    // variant), treat the incoming write as dominating — the
+    // operator's typed write is the self-healing path per
+    // ADR-0048 § 3. is_none_or short-circuits on absent prior;
+    // the inner branch returns true on either dominate OR decode
+    // failure.
+    let dominates =
+        table.get(key).map_err(map_to_io)?.is_none_or(|prior| {
+            match decode_alloc_status(prior.value()) {
+                Ok(prior_row) => incoming.updated_at.dominates(&prior_row.updated_at),
+                Err(_) => true,
+            }
+        });
     if dominates {
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(incoming).map_err(map_to_io)?;
+        // Wrap into the versioned envelope at the write boundary per
+        // ADR-0048 § 1 — the on-disk shape is the envelope, never the
+        // bare payload.
+        let envelope = AllocStatusRowEnvelope::latest(incoming.clone());
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).map_err(map_to_io)?;
         table.insert(key, bytes.as_ref()).map_err(map_to_io)?;
     }
     Ok(dominates)
