@@ -30,7 +30,7 @@ DELIVER but do not block stakeholder demo-ability of the mechanism.
 | Slice | Component | Real / Sim |
 |---|---|---|
 | `overdrive-core::codec::envelope` (trait + `EnvelopeError`) | new module | pure-Rust; no I/O |
-| `AllocStatusRowEnvelope { V1(AllocStatusRowV1), V2(AllocStatusRowV2) }` | new enum + `pub(crate)` payload structs | rkyv-archived (real codec) |
+| `AllocStatusRowEnvelope { V1(AllocStatusRowV1), V2(AllocStatusRowV2) }` | new enum + `pub` payload structs (not re-exported from `overdrive-core::lib.rs` per ADR-0048 § 2 Layer 1 as amended UI-01; rustc E0446 forbids literal `pub(crate)`) | rkyv-archived (real codec) |
 | `AllocStatusRow::latest()` constructor | new constructor | pure-Rust |
 | `Envelope::into_latest()` reader | new method | pure-Rust |
 | `LocalObservationStore::alloc_status_rows` (with envelope decode) | updated host adapter | **real redb via `tempfile::TempDir`** |
@@ -78,7 +78,7 @@ Scenario: Operator restarts control-plane and observes yesterday's allocation st
   `JobEnvelope`) — same pattern, deferred to post-WS DELIVER slices.
 - V2 payload differs from V1 — for the WS, V1 and V2 can be
   structurally identical with a single field added (e.g. a new
-  `pub(crate) terminal_v2: Option<TerminalCondition>` on `V2` that
+  `pub terminal_v2: Option<TerminalCondition>` on `V2` that
   defaults to `None` from `V1::into_latest()`). The point is to
   exercise the *envelope* mechanism, not a real V2 schema bump.
 - xtask coverage gate (S-EV-06) — the WS lands four envelopes' worth

@@ -117,18 +117,18 @@ assertion in the same commit.
 
 ### Preconditions
 
-- `AllocStatusRowV1` declared `pub(crate)` in `overdrive-core` (per ADR-0048 § 2 Layer 1; NEW — RED scaffold)
-- `AllocStatusRowV1` NOT re-exported from `overdrive-core::lib.rs`
+- `AllocStatusRowV1` declared `pub` in `overdrive-core` but **NOT re-exported from `overdrive-core::lib.rs`** (per ADR-0048 § 2 Layer 1 as amended 2026-05-12 UI-01 reconciliation; NEW — RED scaffold)
+- Rationale: the literal `pub(crate)` declaration fails to compile with rustc E0446 because the `pub trait VersionedEnvelope`'s `type Latest = AllocStatusRowV1;` assignment exposes the payload as part of the trait's public surface. Layer 1's enforcement mechanism is therefore non-re-export from `lib.rs` + code-review convention, not compile-time `pub(crate)`.
 
 ### Scenario
 
 ```gherkin
-Scenario: A cross-crate writer cannot name the pub(crate) inner payload type to construct it
+Scenario: A cross-crate writer cannot name AllocStatusRowV1 via the short re-exported path
   Given the fixture source file at
         crates/overdrive-store-local/tests/compile_fail/alloc_status_row_payload_unreachable.rs
         contains the following body:
-            use overdrive_core::traits::observation_store::AllocStatusRowEnvelope;
-            use overdrive_core::traits::observation_store::AllocStatusRowV1;
+            use overdrive_core::AllocStatusRowEnvelope;
+            use overdrive_core::AllocStatusRowV1;
             fn main() {
                 let _: AllocStatusRowEnvelope = AllocStatusRowEnvelope::V1(
                     AllocStatusRowV1 {
@@ -141,25 +141,36 @@ Scenario: A cross-crate writer cannot name the pub(crate) inner payload type to 
             }
   When trybuild compiles the fixture against the production overdrive-core crate
   Then the compilation fails
-    And the compiler diagnostic identifies the AllocStatusRowV1 type as private
-        (rustc error code E0603 "private struct" OR E0432 "unresolved import")
+    And the compiler diagnostic identifies the AllocStatusRowV1 import as unresolvable
+        because the type is not re-exported from the crate root
+        (rustc error code E0432 "unresolved import")
     And the diagnostic explicitly names AllocStatusRowV1 as the offending identifier
     And the diagnostic does NOT mention the envelope variant V1 as the offending construct
-        (Layer 1 blocks the payload type, not the variant constructor — per ADR-0048 § 2)
+        (Layer 1 leaves the variant constructor reachable — the un-re-exported payload
+         is what makes the short-path import fail — per ADR-0048 § 2 as amended)
   And the pinned .stderr fixture file matches the captured diagnostic verbatim
 ```
 
-### Why this is correct under ADR-0048 § 2
+### Why this is correct under ADR-0048 § 2 (as amended UI-01)
 
 The fixture explicitly does NOT assert that the variant constructor
 `AllocStatusRowEnvelope::V1(...)` is unreachable. Per ADR-0048 § 2
 "What Layer 1 does NOT block": the envelope enum is `pub`, so the
 variant constructor expression is syntactically reachable from any
-crate. Layer 1 only blocks *constructing a payload value*
-cross-crate. The fixture pins exactly that property.
+crate. Layer 1's structural surface is the **non-re-export** of
+inner payload types from `overdrive-core::lib.rs` — a disciplined
+writer can still find the verbose
+`overdrive_core::traits::observation_store::AllocStatusRowV1` path,
+but the short `overdrive_core::AllocStatusRowV1` path does not
+resolve. This fixture pins exactly the non-re-export property by
+attempting the short import and asserting E0432 ("unresolved
+import — no `AllocStatusRowV1` in the root"). The in-crate
+variant-construction prohibition is covered by S-EV-02b (the
+dst-lint scanner unit test). Together S-EV-02a + S-EV-02b cover the
+two distinct Layer 1 + Layer 2 mechanisms.
 
-One fixture is sufficient (the Layer 1 mechanism is uniform across all
-five envelopes).
+One fixture is sufficient (the Layer 1 non-re-export property is
+uniform across all five envelopes).
 
 ---
 
@@ -402,8 +413,8 @@ Scenario: The coverage scanner flags an envelope that has no matching fixture fi
   Given a synthetic crate-root directory at "{tmpdir}/fake_crate/"
     And "{tmpdir}/fake_crate/src/lib.rs" contains:
             pub enum FooEnvelope { V1(FooV1), V2(FooV2) }
-            pub(crate) struct FooV1 { /* fields */ }
-            pub(crate) struct FooV2 { /* fields */ }
+            pub struct FooV1 { /* fields */ }
+            pub struct FooV2 { /* fields */ }
     And "{tmpdir}/fake_crate/tests/schema_evolution/" does NOT contain a "foo.rs" file
   When xtask::dst_lint::scan_for_envelope_fixture_coverage("{tmpdir}/fake_crate") is called
   Then the scanner returns a non-empty Vec<Violation>
@@ -500,7 +511,7 @@ for the remaining observation row types). All driven adapters
 | ADR-0048 § | DESIGN § 10 ID | DISTILL scenario | Mandate |
 |---|---|---|---|
 | § 1 (per-type rkyv enum) | S-EV-01 | S-EV-01.1 .. .5 | Coverage; observable behaviour |
-| § 2 Layer 1 (pub(crate)) | S-EV-02a | S-EV-02a | Compile-time enforcement |
+| § 2 Layer 1 (non-re-export) | S-EV-02a | S-EV-02a | Compile-time enforcement (unresolved-import E0432 on short re-exported path) |
 | § 2 Layer 2 (dst-lint) | S-EV-02b | S-EV-02b.1 .. .4 | In-crate enforcement |
 | § 3 Intent fail-fast | S-EV-05 | S-EV-03.1 + .2 | Asymmetric read policy |
 | § 3 Observation degrade | S-EV-04 | S-EV-04.1 .. .5 | Asymmetric read policy |

@@ -1221,33 +1221,44 @@ on `traits::observation_store`).
 
 - **Writers MUST go through `<Envelope>::latest(payload)`.** Direct
   variant construction (e.g. `AllocStatusRowEnvelope::V1(...)`) is
-  blocked by two complementary layers, each with a distinct honest
-  mechanism:
-  - **Layer 1 — cross-crate payload-type visibility.** Inner payload
-    types (`AllocStatusRowV1`, `AllocStatusRowV2`, …) are
-    `pub(crate)` inside their defining module of `overdrive-core`
-    and are NOT re-exported. A cross-crate writer (the dominant
+  discouraged by two complementary layers, each with a distinct
+  honest mechanism (amended 2026-05-12 UI-01 reconciliation):
+  - **Layer 1 — non-re-export discipline (convention, not compiler
+    enforcement).** Inner payload types (`AllocStatusRowV1`,
+    `AllocStatusRowV2`, …) are declared `pub` inside their defining
+    module of `overdrive-core` but are **NOT re-exported** from
+    `overdrive-core::lib.rs`. A cross-crate writer (the dominant
     case — every IntentStore / ObservationStore writer lives in
-    `overdrive-store-local`) cannot name the inner payload type to
-    construct a value of it, so cannot supply an expression to
-    `Envelope::V1(<expr>)`. The only construction path from outside
-    `overdrive-core` is `Envelope::latest(<Foo>Latest { ... })`.
-    NOTE: this does NOT block the variant constructor itself — the
-    envelope enum is `pub` and `Envelope::V1(<expr>)` is
-    syntactically reachable from any crate; Layer 1 renders it
-    uncallable in practice by the payload type being unnameable.
-  - **Layer 2 — in-crate variant-construction lint
-    (`xtask::dst_lint` clause).** Within `overdrive-core` itself,
-    code can name a `pub(crate)` payload and call
-    `Envelope::V1(payload)` directly. The residual hole is closed
-    by an addition to the existing `xtask::dst_lint` AST scanner:
-    it walks `overdrive-core` source for `<Envelope>::V<N>(`
-    literal expression patterns outside the defining module's own
-    `From` / `into_latest` impls and fails the PR at CI time. The
-    scanner is purely syntactic and does NOT import any
-    `overdrive-*` crate, so the xtask boundary per § "xtask is
-    build / test / dev orchestration, NOT a runtime entry point"
-    stays intact.
+    `overdrive-store-local`) reaches the payload type only via the
+    verbose, internal-looking
+    `overdrive_core::traits::observation_store::AllocStatusRowV1`
+    module path, which is discouraged at code review. The canonical
+    construction path from outside `overdrive-core` is
+    `Envelope::latest(<Foo>Latest { ... })`. **rustc E0446 prevents
+    the literal `pub(crate)` declaration** on inner payloads —
+    `VersionedEnvelope` is a `pub` trait, and its
+    `type Latest = <Payload>;` associated-type assignment makes the
+    payload part of the trait's public surface; rustc rejects a
+    `pub(crate)` type referenced from a `pub` trait. The Layer 1
+    enforcement mechanism is therefore **non-re-export from `lib.rs`
+    + code-review convention**, not a compile-time gate. NOTE: this
+    does NOT block the variant constructor itself — the envelope
+    enum is `pub` and `Envelope::V1(<expr>)` is syntactically
+    reachable from any crate. Layer 1 reduces the writer surface to
+    a verbose, un-re-exported path; the structural defense is
+    Layer 2.
+  - **Layer 2 — variant-construction lint (`xtask::dst_lint`
+    clause; load-bearing structural defense).** An addition to the
+    existing `xtask::dst_lint` AST scanner walks `overdrive-core`
+    source for `<Envelope>::V<N>(` literal expression patterns
+    outside the defining module's own `From` / `into_latest` impls
+    and fails the PR at CI time. The scanner is purely syntactic
+    and does NOT import any `overdrive-*` crate, so the xtask
+    boundary per § "xtask is build / test / dev orchestration, NOT
+    a runtime entry point" stays intact. This is the load-bearing
+    structural defense — it catches both in-crate writers AND
+    cross-crate disciplined-writers who reach the inner payload via
+    the verbose module path that Layer 1 leaves un-re-exported.
 - **Reads up-convert to `Latest` via `into_latest()`.** Older
   variants chain through `From<V1> for V2`, `From<V2> for V3`, …;
   each conversion is additive-only.

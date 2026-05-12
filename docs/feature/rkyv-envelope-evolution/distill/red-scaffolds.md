@@ -19,9 +19,13 @@ SSOT discipline: DISTILL says *what must exist*, DELIVER says *what
 each one does*.
 
 > Crafter note: per `.claude/rules/development.md` § "rkyv schema
-> evolution", inner payload types must be `pub(crate)` to make Layer 1
-> work. Do NOT re-export them from the crate root. Cross-crate writers
-> reach the envelope only through `<Foo>Latest` + `Envelope::latest(...)`.
+> evolution" (as amended 2026-05-12 UI-01 reconciliation), inner
+> payload types are declared `pub` (NOT `pub(crate)`) and **MUST NOT
+> be re-exported from the crate root** (`overdrive-core::lib.rs`).
+> Cross-crate writers reach the envelope only through `<Foo>Latest`
+> + `Envelope::latest(...)`. The non-re-export discipline is the
+> load-bearing convention surface for Layer 1; the dst-lint clause
+> (Layer 2, Group 5) is the structural enforcement gate.
 
 ---
 
@@ -75,6 +79,19 @@ pub enum EnvelopeError {
 (replacing/wrapping the existing four row types at lines 283, 392,
 463, 494)
 
+> **Inner-payload visibility (amended 2026-05-12 UI-01 reconciliation).**
+> Inner payload types are declared `pub`, NOT `pub(crate)`. The
+> literal `pub(crate)` declaration fails to compile with **rustc
+> E0446** because the `pub trait VersionedEnvelope`'s
+> `type Latest = <PayloadV1>;` associated-type assignment exposes
+> the payload as part of the trait's public surface, and rustc
+> rejects a `pub(crate)` type referenced from a `pub` trait. The
+> Layer 1 enforcement mechanism is therefore **non-re-export from
+> `overdrive-core::lib.rs`** (a code-review convention) plus the
+> typed visibility-hint of leaving inner payloads un-re-exported.
+> The structural defense against drift is Layer 2 (the dst-lint
+> clause; see Group 5).
+
 ### 2.1 — `AllocStatusRowEnvelope`
 
 ```rust
@@ -89,10 +106,11 @@ pub enum AllocStatusRowEnvelope {
 pub type AllocStatusRow = AllocStatusRowEnvelope;
 pub type AllocStatusRowLatest = AllocStatusRowV1;
 
-// SCAFFOLD: true — pub(crate) per ADR-0048 § 2 Layer 1
+// SCAFFOLD: true — pub per ADR-0048 § 2 Layer 1 (rustc E0446 forbids
+// literal pub(crate); enforcement is non-re-export from lib.rs)
 #[derive(Debug, Clone, PartialEq, Eq,
          rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub(crate) struct AllocStatusRowV1 {
+pub struct AllocStatusRowV1 {
     pub alloc_id: AllocationId,
     pub workload_id: WorkloadId,
     pub node_id: NodeId,
@@ -146,9 +164,11 @@ pub type JobLatest = JobV1;
 // Note: existing pub type Job = JobEnvelope alias replaces direct Job struct
 // per ADR-0048 § 4 (outer-envelope-only on Job)
 
+// pub per ADR-0048 § 2 Layer 1 (rustc E0446 forbids literal pub(crate);
+// enforcement is non-re-export from overdrive-core::lib.rs)
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize,
          rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub(crate) struct JobV1 {
+pub struct JobV1 {
     pub id: WorkloadId,
     pub replicas: NonZeroU32,
     pub resources: Resources,

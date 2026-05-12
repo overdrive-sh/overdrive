@@ -165,7 +165,7 @@ wave:
 |---|---|---|
 | `VersionedEnvelope` trait | `crates/overdrive-core/src/codec/envelope.rs` | trait methods bodied with `todo!("RED scaffold: ...")` |
 | `EnvelopeError` enum | `crates/overdrive-core/src/codec/envelope.rs` | full enum with `UnknownVersion` + `Malformed` variants, `Display` impl bodied with `todo!`; thiserror derive |
-| `AllocStatusRowEnvelope` + `V1`/`V2` payloads | `crates/overdrive-core/src/traits/observation_store.rs` | enum + payload structs + `pub(crate)` visibility + `From<V1> for V2` bodied with `todo!` |
+| `AllocStatusRowEnvelope` + `V1`/`V2` payloads | `crates/overdrive-core/src/traits/observation_store.rs` | enum + `pub` payload structs (not re-exported from `overdrive-core::lib.rs` per ADR-0048 § 2 Layer 1 as amended UI-01 — rustc E0446 forbids literal `pub(crate)`) + `From<V1> for V2` bodied with `todo!` |
 | `NodeHealthRowEnvelope` + `V1` payload | same file | enum + payload struct |
 | `ServiceHydrationResultRowEnvelope` + `V1` payload | same file | enum + payload struct |
 | `ServiceBackendRowEnvelope` + `V1` payload | same file | enum + payload struct |
@@ -241,7 +241,7 @@ end-user-facing semantics; this feature does not.
 
 **Sequencing recommendation** (advisory; crafter owns the slice plan):
 1. WS: `AllocStatusRowEnvelope` V1 roundtrip (S-EV-01 for alloc_status only) — proves the envelope shape compiles and roundtrips
-2. WS: Layer-1 trybuild (S-EV-02a) — proves `pub(crate)` blocks cross-crate payload
+2. WS: Layer-1 trybuild (S-EV-02a) — proves non-re-export of the inner payload from `overdrive-core::lib.rs` causes E0432 on the short-path import (per ADR-0048 § 2 Layer 1 as amended UI-01; rustc E0446 forbids literal `pub(crate)`)
 3. WS: Layer-2 dst-lint clause + its unit test (S-EV-02b) — proves the scanner catches in-crate violations
 4. WS: Observation log+skip for `AllocStatusRow` only (S-EV-04 first row) — proves the read-side error path
 5. WS: Intent refuse-to-start for `JobEnvelope` (S-EV-03) — proves the asymmetric policy

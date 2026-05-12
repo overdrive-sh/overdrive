@@ -5,6 +5,17 @@
 Accepted (2026-05-12). Revised 2026-05-12 in response to peer review
 (see § "Review-revision log" in
 `docs/feature/rkyv-envelope-evolution/design/wave-decisions.md`).
+**Amended 2026-05-12 (UI-01 reconciliation)** — § 2 Layer 1 mechanism
+language reframed to acknowledge **rustc E0446**: a `pub trait`'s
+`type Latest = <Payload>;` associated-type assignment cannot reference
+a `pub(crate)` type, so the literal `pub(crate)` declaration on inner
+payload payloads fails to compile. Layer 1 is reframed in terms of
+**non-re-export from `overdrive-core::lib.rs`** (a code-review-
+enforced convention) plus the typed visibility-hint of leaving inner
+payloads un-re-exported; the structural defense against drift was
+always Layer 2 (the `xtask::dst_lint` clause) and remains so. See
+`docs/feature/rkyv-envelope-evolution/deliver/upstream-issues.md`
+(UI-01) for the originating compile failure and decision record.
 
 ## Context
 
@@ -150,35 +161,52 @@ mandatory golden-bytes fixtures — is what justifies Option A1.
 The write invariant is enforced by **two complementary layers**, each
 honest about what it actually blocks:
 
-**Layer 1 — Rust visibility blocks cross-crate payload construction.**
-The `V1` / `V2` payload structs (`AllocStatusRowV1`, `AllocStatusRowV2`,
-…) are declared `pub(crate)` inside their defining module of
-`overdrive-core` and are NOT re-exported from the crate root. A
-cross-crate writer (the dominant case — every writer lives in
-`overdrive-store-local`) cannot construct `AllocStatusRowV1 { ... }`
-because the *type* is unreachable from outside `overdrive-core`. The
-only way to construct an envelope from `overdrive-store-local` is
+**Layer 1 — non-re-export discourages cross-crate payload
+construction (convention, not compiler enforcement).** The `V1` /
+`V2` payload structs (`AllocStatusRowV1`, `AllocStatusRowV2`, …) are
+declared `pub` inside their defining module of `overdrive-core` but
+are **NOT re-exported** from `overdrive-core::lib.rs`. A cross-crate
+writer can technically reach them via the verbose, internal-looking
+module path
+`overdrive_core::traits::observation_store::AllocStatusRowV1`, but
+this path is discouraged at code review and is structurally signposted
+as "you are reaching into a module's internals." The intended
+construction path from outside `overdrive-core` is
 `AllocStatusRowEnvelope::latest(latest_payload)`, where
-`latest_payload`'s type is the publicly-exported
-`<Foo>Latest` alias.
+`latest_payload`'s type is the re-exported `<Foo>Latest` alias.
+
+**Why not literal `pub(crate)` on the payloads.** The literal
+`pub(crate)` declaration on `AllocStatusRowV1` (and the analogous
+inner payloads for the four other envelopes) fails to compile with
+**rustc E0446** — the `VersionedEnvelope` trait is `pub`, and its
+`type Latest = AllocStatusRowV1;` associated-type assignment exposes
+the payload as part of the trait's public surface. rustc rejects a
+`pub(crate)` type reached through a `pub` trait. Restructuring the
+trait to `pub(crate)` would force every cross-crate
+`Envelope::latest(...)` consumer through a re-export shim and
+introduce a typing-system constraint that complicates the surface for
+no enforcement gain Layer 2 does not already provide; that option is
+rejected (see Alternatives below). The honest framing of Layer 1 is:
+**it is a convention enforced at code review, not by the compiler.**
 
 **What Layer 1 does NOT block.** This is the important honesty. The
 envelope enum itself is `pub`, so the variant constructor expression
 `AllocStatusRowEnvelope::V1(<expr>)` is syntactically reachable from
 any crate — Rust's variant-visibility model exposes constructors
-through the enum's visibility, not the payload's. Layer 1 only blocks
-*constructing the payload value* cross-crate; it does NOT block
-calling the variant constructor with any payload-typed expression. An
-in-crate caller (within `overdrive-core`) can write
-`AllocStatusRowEnvelope::V1(payload)` against any `pub(crate)`
-payload it can name. A cross-crate caller cannot — but only because
-they cannot produce a value of the payload type, not because the
-variant is unreachable.
+through the enum's visibility, not the payload's. Layer 1 only
+*discourages* writing the verbose `overdrive_core::traits::
+observation_store::AllocStatusRowV1` path cross-crate by leaving it
+un-re-exported; it does NOT block calling the variant constructor
+with any payload-typed expression, and it does NOT block the
+disciplined-cross-crate-writer who knows the verbose path. The
+**structural** enforcement against drift is Layer 2.
 
 For this codebase the cross-crate boundary is the dominant writer
 surface: every IntentStore / ObservationStore write site lives in
 `overdrive-store-local`, not in `overdrive-core`. Layer 1 covers that
-case structurally.
+case as a *convention surface* (the verbose path signals "internal";
+the short re-exported path doesn't exist) — but the load-bearing
+defense remains Layer 2.
 
 **Layer 2 — `xtask::dst_lint` clause closes the in-crate hole.**
 Within `overdrive-core` itself, the residual hole is closed by a
@@ -215,11 +243,26 @@ Rejected alternatives for write enforcement:
   matches; does NOT prevent construction.
 - **`pub(in path)` on variants** — Rust does not support per-variant
   visibility narrower than the enum.
+- **Literal `pub(crate)` on inner payload types with
+  `VersionedEnvelope` kept `pub`** — fails to compile (rustc E0446);
+  see "Why not literal `pub(crate)`" above. This was the original
+  ADR draft's mechanism; UI-01 (the DELIVER-side compile failure)
+  surfaced the constraint and forced the reframing.
+- **Restructure `VersionedEnvelope` to `pub(crate)` to preserve
+  literal `pub(crate)` on inner payloads** — would resolve E0446 by
+  making the trait crate-private, but every cross-crate
+  `Envelope::latest(...)` consumer would then need to go through a
+  re-export shim (a `pub fn latest_alloc_status(...)` free function
+  per envelope, or a parallel `pub` trait), complicating the API
+  surface for an enforcement gain Layer 2 already provides via
+  syntactic AST scanning. The trade-off — additional public-surface
+  complexity for a structural property the existing dst-lint clause
+  already covers — is net negative. Rejected.
 - **`compile_fail` trybuild per envelope** — would require one
   fixture per envelope; the dst-lint clause covers all five (and
   every future envelope) with a single rule. A *single* trybuild
   fixture is still recommended as a complement (see § 6 testing)
-  to pin the cross-crate visibility property.
+  to pin the non-re-export property of Layer 1.
 - **Standalone `overdrive-envelope-lint` binary** — would require
   `overdrive-core` for type resolution. Rejected because the check
   is syntactic; pulling `overdrive-core` into a lint tool reintroduces
@@ -347,16 +390,19 @@ benefit at Phase 1 scope. Phase 2+ may re-evaluate.
 ## Consequences
 
 **Positive**:
-- Schema bumps become a structural, type-system-enforced operation.
+- Schema bumps become a structural, dst-lint-enforced operation.
 - Golden-bytes test discipline (per `.claude/rules/testing.md`
   addition) catches silent layout drift at PR time.
 - Intent / observation asymmetric policy preserves SSOT integrity:
   intent fails fast; observation converges through degradation.
-- Cross-crate payload construction is blocked by Rust visibility on
-  the inner `pub(crate)` types — the dominant writer surface
-  (`overdrive-store-local` → `overdrive-core`) is closed by the
-  type system. The xtask dst-lint clause is required only for
-  in-crate construction (a strict minority of writer sites today).
+- Cross-crate writers are nudged into the canonical
+  `Envelope::latest(<Foo>Latest { ... })` construction path by the
+  non-re-export of inner payload types; the only path reaching them
+  cross-crate is the verbose, internal-looking
+  `overdrive_core::traits::observation_store::AllocStatusRowV1`,
+  signposted as "reach into a module's internals." The structural
+  defense for every writer surface — cross-crate AND in-crate — is
+  the `xtask::dst_lint` clause (Layer 2).
 
 **Negative**:
 - Every persisted type gains a per-variant enum overhead (one `u8`
@@ -366,17 +412,32 @@ benefit at Phase 1 scope. Phase 2+ may re-evaluate.
   `Job` envelope version. Stated coupling, not a bug.
 - Greenfield single-cut means existing dev `~/.overdrive/data` files
   must be deleted on this PR landing.
-- Cross-crate variant construction is NOT blocked by `pub(crate)`
-  alone — only payload *construction* is. The variant constructor
-  `Envelope::V1(<expr>)` remains syntactically reachable from any
-  crate because the envelope enum is `pub`; it is rendered uncallable
-  in practice by the payload type being unnameable. Within
+- **Layer 1 is a convention, not compiler enforcement.** rustc E0446
+  prohibits the literal `pub(crate)` declaration on inner payload
+  types when the `VersionedEnvelope` trait is `pub` (the trait's
+  `type Latest = <Payload>;` associated-type assignment exposes the
+  payload as part of the trait's public surface). The honest
+  mechanism is **non-re-export from `overdrive-core::lib.rs`** plus
+  the visibility-hint of leaving inner payloads `pub` but
+  unreachable from the crate root. A disciplined cross-crate writer
+  who knows the verbose path
+  `overdrive_core::traits::observation_store::AllocStatusRowV1` can
+  still reach the payload type. This is acceptable because **Layer 2
+  (the `xtask::dst_lint` clause) is the load-bearing structural
+  defense for all writer surfaces, cross-crate and in-crate alike.**
+  Layer 1's role is reduced to "convention enforced at code review
+  + the typed visibility-hint of non-re-export." The previous ADR
+  draft claimed compile-time `pub(crate)` enforcement; UI-01 in
+  DELIVER surfaced the rustc constraint and forced the reframing.
+- Cross-crate variant construction is NOT blocked by Layer 1. The
+  variant constructor `Envelope::V1(<expr>)` is syntactically
+  reachable from any crate because the envelope enum is `pub`. Within
   `overdrive-core` (in-crate writers) the variant constructor IS
   reachable and IS callable; the dst-lint clause is the load-bearing
-  gate for that case. This honest framing replaces the earlier
+  gate for both cases. This honest framing replaces the earlier
   "`pub(crate)` closes the cross-crate writer hole" wording, which
-  was correct in effect (because no cross-crate caller can supply a
-  payload value) but misleading about mechanism.
+  was structurally incorrect (rustc rejects the literal `pub(crate)`
+  with E0446 anyway) AND misleading about mechanism.
 
 ## References
 
