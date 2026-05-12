@@ -66,14 +66,14 @@ fn sample_alloc() -> AllocationId {
 fn build_app_state(tmp: &TempDir) -> AppState {
     let runtime =
         ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime");
-    let store = Arc::new(
-        LocalIntentStore::open(tmp.path().join("intent.redb")).expect("LocalIntentStore::open"),
-    );
+    let store_path = tmp.path().join("intent.redb");
+    let store = Arc::new(LocalIntentStore::open(&store_path).expect("LocalIntentStore::open"));
     let obs: Arc<dyn ObservationStore> =
         Arc::new(SimObservationStore::single_peer(sample_node(), 0));
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
     AppState::new(
         store,
+        store_path,
         obs,
         Arc::new(runtime),
         driver,
@@ -100,7 +100,7 @@ fn sample_spec() -> JobSpecInput {
 async fn install_job(state: &AppState, spec: JobSpecInput) -> Job {
     let job = Job::from_spec(spec).expect("Job::from_spec must succeed for fixture");
     let key = IntentKey::for_job(&job.id);
-    let archived = rkyv::to_bytes::<rkyv::rancor::Error>(&job).expect("rkyv archive");
+    let archived = job.archive_for_store().expect("rkyv archive");
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("IntentStore put");
     job
 }

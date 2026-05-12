@@ -30,6 +30,7 @@ use thiserror::Error;
 use std::net::Ipv4Addr;
 
 use crate::aggregate::{Listener, ServiceVip, WorkloadKind};
+use crate::codec::{EnvelopeError, VersionedEnvelope};
 use crate::dataplane::backend_key::Proto;
 use crate::dataplane::fingerprint::BackendSetFingerprint;
 use crate::id::{AllocationId, NodeId, Region, ServiceId, WorkloadId};
@@ -43,6 +44,17 @@ pub enum ObservationStoreError {
     Unreachable { peer: String },
     #[error("observation store I/O: {0}")]
     Io(#[from] std::io::Error),
+    // SCAFFOLD: true — RED scaffold per ADR-0048 § 3 (asymmetric read
+    // policy; observation log + skip on envelope decode failure).
+    // Lands GREEN in DELIVER step 02-01..02-03 when each
+    // `LocalObservationStore::*_rows` adapter wires the envelope
+    // decode path.
+    #[error("observation envelope decode failed: {source}")]
+    Envelope {
+        #[from]
+        #[source]
+        source: EnvelopeError,
+    },
 }
 
 impl ObservationStoreError {
@@ -82,6 +94,11 @@ impl ObservationStoreError {
                     | std::io::ErrorKind::TimedOut
                     | std::io::ErrorKind::ResourceBusy
             ),
+            // Envelope decode failures are terminal — the bytes do
+            // not get any more decodable on retry. Per ADR-0048 § 3
+            // the observation-layer caller logs + skips the row
+            // rather than retrying.
+            Self::Envelope { .. } => false,
         }
     }
 }
@@ -273,98 +290,24 @@ impl LogicalTimestamp {
 /// readable fallback for cases the cause-class taxonomy has not yet
 /// grown a variant for.
 ///
-/// # Forward compatibility
+/// # Schema evolution
 ///
-/// Both `reason` and `detail` are `Option<…>` and additive on the rkyv
-/// archive shape — pre-feature redb files (where neither field exists)
-/// continue to deserialise (rkyv treats `Option<T>` such that omitted
-/// data deserialises to `None`). New writers populate both fields per
-/// the action-shim contract (ADR-0023); old readers tolerate them.
-#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub struct AllocStatusRow {
-    pub alloc_id: AllocationId,
-    pub workload_id: WorkloadId,
-    pub node_id: NodeId,
-    pub state: AllocState,
-    pub updated_at: LogicalTimestamp,
-    /// Structured cause for this transition. `None` when the writer
-    /// (Phase 1: action shim) has not yet been wired to populate it,
-    /// or when the row predates the schema extension.
-    pub reason: Option<TransitionReason>,
-    /// Verbatim driver / OS text the `reason` payload does not capture.
-    /// Used for diagnostic fidelity on cause variants whose typed
-    /// payload is incomplete (e.g. `DriverInternalError { detail }`
-    /// duplicates this for self-containment, but other cause variants
-    /// may carry only structured fields and rely on `detail` for the
-    /// raw `errno` text).
-    pub detail: Option<String>,
-    /// Reconciler-emitted classification of *why* this allocation
-    /// reached a terminal lifecycle state. Per ADR-0037 §3 the row is
-    /// the *durable* home for the terminal decision; the streaming
-    /// `LifecycleEvent.terminal` field (Phase 02 of this feature)
-    /// carries the same value.
-    ///
-    /// `None` when the writer (Phase 1: action shim) has not yet been
-    /// wired to populate it, when the row predates the schema
-    /// extension, or when the transition is non-terminal (most rows
-    /// — `Pending → Running`, `Running → Failed` with budget remaining,
-    /// etc. all carry `terminal: None`). Additive on the rkyv archive
-    /// shape so pre-feature redb files continue to deserialise (rkyv
-    /// treats `Option<T>` such that omitted data deserialises to `None`).
-    pub terminal: Option<TerminalCondition>,
-    /// Newline-joined tail of the last
-    /// [`STDERR_TAIL_LINES`](crate::traits::driver::STDERR_TAIL_LINES)
-    /// stderr lines the workload wrote before exiting. Populated by
-    /// [`crate::traits::driver::ExitEvent::stderr_tail`]; the worker
-    /// `exit_observer` passes it through verbatim to this field so
-    /// the operator-facing render layer (`format_job_failed_summary`)
-    /// can show "stderr (last N lines):" without re-deriving the
-    /// content.
-    ///
-    /// Per `.claude/rules/development.md` § "Persist inputs, not
-    /// derived state": stderr is the workload's actual output — an
-    /// observed input, not a derived classification — so this field
-    /// is the correct shape for it on an observation row. Additive
-    /// on the rkyv archive shape (same rule as `reason`, `detail`,
-    /// `terminal`).
-    pub stderr_tail: Option<String>,
-    /// Workload-kind discriminator denormalised onto every alloc-
-    /// status row at write time per design [D4] of the
-    /// `workload-kind-discriminator` feature (slice 03 / step 02-02).
-    ///
-    /// The render layer branches on this field without re-fetching
-    /// intent — Service rows render with replicas + Restarts (no Exit
-    /// column); Job rows render with Verdict + per-attempt Exit codes
-    /// + stderr tail; Schedule rows render with cron + deferral.
-    ///
-    /// Phase-1 greenfield — NO backfill. New rows carry the
-    /// authoritative kind; old rows do not exist (the feature lands
-    /// before any persistent observation row was written under prior
-    /// schemas in production). The action shim's
-    /// `build_alloc_status_row` populates this from the originating
-    /// `WorkloadLifecycleState.workload_kind` (per ADR-0047 §1).
-    ///
-    /// Default is [`WorkloadKind::Service`] per the same back-compat
-    /// rule documented on the [`WorkloadKind`] type itself — preserves
-    /// kind-agnostic behavior at any consumer that has not yet been
-    /// wired to populate the field explicitly. Per ADR-0047 §4.
-    pub kind: WorkloadKind,
-    /// Service `[[listener]]` blocks denormalised onto the row per
-    /// ADR-0047 §4a / [D5] of the `workload-kind-discriminator`
-    /// feature (slice 06). Embedded directly on the row, NOT a separate
-    /// `service_listener` table — the listener set per allocation is
-    /// small and bounded, denormalisation keeps the read fan-out at
-    /// one query.
-    ///
-    /// Empty for non-Service kinds (Job, Schedule). Old rows that
-    /// pre-date this field deserialise to the default empty `Vec` per
-    /// rkyv's additive-field tolerance.
-    ///
-    /// `ListenerRow` is the OBSERVATION-side twin of the intent-side
-    /// [`Listener`] type per ADR-0011 intent-vs-observation
-    /// distinctness — same fields, different bounded context.
-    pub listeners: Vec<ListenerRow>,
-}
+/// Per ADR-0048 (`docs/product/architecture/adr-0048-rkyv-versioned-envelope.md`)
+/// this type is the **inner payload** of [`AllocStatusRowEnvelope`].
+/// rkyv archives are **fixed positional layouts** — appending a field
+/// to this struct shifts every subsequent offset and renders
+/// pre-existing bytes unreadable. The previous docstring claim that
+/// `Option<T>` fields are "additive on the rkyv archive shape" was
+/// incorrect (RCA: `docs/feature/rkyv-envelope-evolution/distill/`)
+/// — schema evolution at this boundary goes through a new envelope
+/// variant (`V2`, `V3`, …) added per the version-bump procedure in
+/// `.claude/rules/development.md` § "rkyv schema evolution"; existing
+/// `FIXTURE_V<N>` golden bytes are NEVER touched.
+///
+/// Writers go through [`AllocStatusRow::latest`]
+/// (= [`AllocStatusRowEnvelope::latest`]); readers project through
+/// [`AllocStatusRowEnvelope::into_latest`].
+pub type AllocStatusRow = AllocStatusRowV1;
 
 /// Observation-side twin of the intent-side [`Listener`] per ADR-0011.
 ///
@@ -389,12 +332,24 @@ impl From<&Listener> for ListenerRow {
 /// `node_health` row — Phase 1 minimal shape per brief §6.
 ///
 /// Written by the node itself on each heartbeat tick.
-#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub struct NodeHealthRow {
-    pub node_id: NodeId,
-    pub region: Region,
-    pub last_heartbeat: LogicalTimestamp,
-}
+///
+/// # Schema evolution
+///
+/// Per ADR-0048 (`docs/product/architecture/adr-0048-rkyv-versioned-envelope.md`)
+/// this type is the **inner payload** of [`NodeHealthRowEnvelope`]
+/// under the UI-02 amendment alias-to-payload public API. rkyv
+/// archives are **fixed positional layouts** — appending a field
+/// to this struct shifts every subsequent offset and renders
+/// pre-existing bytes unreadable. Schema evolution at this boundary
+/// goes through a new envelope variant (`V2`, `V3`, …) added per
+/// the version-bump procedure in `.claude/rules/development.md`
+/// § "rkyv schema evolution"; existing `FIXTURE_V<N>` golden bytes
+/// are NEVER touched.
+///
+/// Writers go through [`NodeHealthRow::latest`]
+/// (= [`NodeHealthRowEnvelope::latest`]); readers project through
+/// [`NodeHealthRowEnvelope::into_latest`].
+pub type NodeHealthRow = NodeHealthRowV1;
 
 /// Status of a service-hydration dispatch attempt — one source of
 /// truth per `service_hydration_results` row per
@@ -460,26 +415,30 @@ pub enum ServiceHydrationStatus {
 /// LWW key is `(service_id, fingerprint)` — content-hashed, so two
 /// writes for the same `(service_id, fingerprint)` are strictly
 /// idempotent under `LogicalTimestamp::dominates`.
-#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub struct ServiceHydrationResultRow {
-    /// Identity of the service whose backend set was being
-    /// rewritten. Maps 1:1 to a `MAGLEV_MAP` outer-map key.
-    pub service_id: ServiceId,
-    /// Fingerprint of the `(vip, backends)` pair the dispatch
-    /// applied (or attempted to apply on `Failed`). Forms the
-    /// secondary key under LWW so distinct backend sets land in
-    /// distinct rows.
-    pub fingerprint: BackendSetFingerprint,
-    /// Outcome of the dispatch attempt — see
-    /// [`ServiceHydrationStatus`].
-    pub status: ServiceHydrationStatus,
-    /// Lamport timestamp of this row. Same shape as
-    /// [`AllocStatusRow::updated_at`] — the action shim writes
-    /// `(counter = tick.tick + 1, writer = node_id)` so two writes
-    /// for the same `(service_id, fingerprint)` on different ticks
-    /// are correctly ordered under LWW.
-    pub updated_at: LogicalTimestamp,
-}
+///
+/// # Schema evolution
+///
+/// Per ADR-0048 (`docs/product/architecture/adr-0048-rkyv-versioned-envelope.md`)
+/// this type is the **inner payload** of
+/// [`ServiceHydrationResultRowEnvelope`] under the UI-02 amendment
+/// alias-to-payload public API. rkyv archives are **fixed positional
+/// layouts** — appending a field to this struct shifts every
+/// subsequent offset and renders pre-existing bytes unreadable.
+/// Schema evolution at this boundary goes through a new envelope
+/// variant (`V2`, `V3`, …) added per the version-bump procedure in
+/// `.claude/rules/development.md` § "rkyv schema evolution"; existing
+/// `FIXTURE_V<N>` golden bytes are NEVER touched.
+///
+/// The embedded [`ServiceHydrationStatus`] enum stays **unwrapped**
+/// per ADR-0048 § 4 (additive variant additions on inner rkyv enums
+/// are the documented exception — `ServiceHydrationStatus`'s STABLE
+/// variant-ordering docstring is the structural commitment that
+/// keeps the inner-enum exception load-bearing).
+///
+/// Writers go through [`ServiceHydrationResultRow::latest`]
+/// (= [`ServiceHydrationResultRowEnvelope::latest`]); readers project
+/// through [`ServiceHydrationResultRowEnvelope::into_latest`].
+pub type ServiceHydrationResultRow = ServiceHydrationResultRowV1;
 
 /// `service_backends` row — the desired backend set for a service,
 /// written by the control plane when allocation status changes and
@@ -491,19 +450,23 @@ pub struct ServiceHydrationResultRow {
 /// [`LogicalTimestamp::dominates`] on `updated_at`.
 ///
 /// Per §4 guardrail: full-row writes only, no field-diff merges.
-#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
-pub struct ServiceBackendRow {
-    /// Identity of the service. Primary key for LWW.
-    pub service_id: ServiceId,
-    /// Virtual IP for the service — wire-shape `Ipv4Addr`, not
-    /// `ServiceVip`. The hydrator wraps into `ServiceVip` at the
-    /// read boundary (architecture.md § 8 lines 616-629).
-    pub vip: Ipv4Addr,
-    /// Current backend set for the service.
-    pub backends: Vec<Backend>,
-    /// Lamport timestamp for LWW ordering.
-    pub updated_at: LogicalTimestamp,
-}
+///
+/// # Schema evolution
+///
+/// Per ADR-0048 (`docs/product/architecture/adr-0048-rkyv-versioned-envelope.md`)
+/// this type is the **inner payload** of [`ServiceBackendRowEnvelope`]
+/// under the UI-02 amendment alias-to-payload public API. rkyv
+/// archives are **fixed positional layouts** — appending a field to
+/// this struct shifts every subsequent offset and renders pre-existing
+/// bytes unreadable. Schema evolution at this boundary goes through a
+/// new envelope variant (`V2`, `V3`, …) added per the version-bump
+/// procedure in `.claude/rules/development.md` § "rkyv schema
+/// evolution"; existing `FIXTURE_V<N>` golden bytes are NEVER touched.
+///
+/// Writers go through [`ServiceBackendRow::latest`]
+/// (= [`ServiceBackendRowEnvelope::latest`]); readers project through
+/// [`ServiceBackendRowEnvelope::into_latest`].
+pub type ServiceBackendRow = ServiceBackendRowV1;
 
 /// The closed set of row shapes [`ObservationStore`] accepts.
 ///
@@ -550,6 +513,319 @@ impl JobSpec {
     #[must_use]
     pub const fn new(owner: NodeId) -> Self {
         Self { owner }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Versioned envelopes — RED scaffolds per ADR-0048
+// ---------------------------------------------------------------------------
+//
+// Each per-type envelope wraps the existing row type as `V1`. Per the
+// 01-01 scaffolding-step caveat (CLAUDE.md / step description), the
+// legacy row types above remain in place — call-site migration lands
+// in subsequent steps (01-03 for AllocStatusRow; 02-01..02-03 for the
+// rest). Inner payload types are `pub(crate)` per ADR-0048 § 2
+// Layer 1 (cross-crate writers cannot name the payload to construct
+// it).
+
+// SCAFFOLD: true
+//
+// ADR-0048 § 2 Layer 1 specifies `pub(crate)` on inner payload
+// types. In practice, rustc E0446 rejects `pub(crate)` types
+// referenced from a `pub` trait's `type Latest` impl — see
+// `feat(rkyv-envelope)/01-01 surfacing note` in the step return
+// message. Layer 1 is therefore enforced by **non-re-export from
+// `overdrive_core::lib.rs`** (cross-crate writers must reach the
+// type via the verbose `overdrive_core::traits::observation_store::*`
+// path, which is discouraged by code review) PLUS Layer 2 (the
+// `xtask::dst_lint` envelope-variant-construction scanner in
+// Group 5). The structural defense is Layer 2.
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum AllocStatusRowEnvelope {
+    V1(AllocStatusRowV1),
+}
+
+pub type AllocStatusRowLatest = AllocStatusRowV1;
+
+// SCAFFOLD: true — `pub` due to rustc E0446 in trait impl; Layer 1
+// enforced by non-re-export from `lib.rs` + Layer 2 dst_lint scanner
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct AllocStatusRowV1 {
+    pub alloc_id: AllocationId,
+    pub workload_id: WorkloadId,
+    pub node_id: NodeId,
+    pub state: AllocState,
+    pub updated_at: LogicalTimestamp,
+    pub reason: Option<TransitionReason>,
+    pub detail: Option<String>,
+    pub terminal: Option<TerminalCondition>,
+    pub stderr_tail: Option<String>,
+    pub kind: WorkloadKind,
+    pub listeners: Vec<ListenerRow>,
+}
+
+impl VersionedEnvelope for AllocStatusRowEnvelope {
+    type Latest = AllocStatusRowV1;
+
+    fn latest(payload: Self::Latest) -> Self {
+        Self::V1(payload)
+    }
+
+    fn into_latest(self) -> Result<Self::Latest, EnvelopeError> {
+        match self {
+            Self::V1(v1) => Ok(v1),
+        }
+    }
+
+    /// Discriminant offset for `AllocStatusRowEnvelope` archives,
+    /// measured from the END of the archive bytes.
+    ///
+    /// Empirically determined against canonical V1 payloads of
+    /// varying `listeners: Vec<ListenerRow>` sizes: rkyv 0.8 places
+    /// the outer enum's discriminant byte 168 bytes from the END of
+    /// the archive, stable across all payload sizes (the trailing
+    /// "root" structure has a fixed footprint; only the leading slab
+    /// grows with variable-length data).
+    ///
+    /// Re-pin alongside the schema-evolution fixture at every
+    /// version-bump per
+    /// [`VersionedEnvelope::discriminant_offset_from_end`]'s
+    /// docstring.
+    fn discriminant_offset_from_end() -> Option<usize> {
+        Some(168)
+    }
+
+    fn known_discriminants() -> &'static [u8] {
+        // V1 carries rkyv discriminant 0 (declaration order — first
+        // variant). Empirically verified by archiving a canonical
+        // `AllocStatusRowEnvelope::latest(...)` and inspecting the
+        // byte at `bytes.len() - 168`.
+        &[0]
+    }
+
+    fn type_name() -> &'static str {
+        "AllocStatusRowEnvelope"
+    }
+}
+
+// SCAFFOLD: true
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum NodeHealthRowEnvelope {
+    V1(NodeHealthRowV1),
+}
+
+pub type NodeHealthRowLatest = NodeHealthRowV1;
+
+// SCAFFOLD: true — `pub` due to rustc E0446 in trait impl; Layer 1
+// enforced by non-re-export from `lib.rs` + Layer 2 dst_lint scanner
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct NodeHealthRowV1 {
+    pub node_id: NodeId,
+    pub region: Region,
+    pub last_heartbeat: LogicalTimestamp,
+}
+
+impl VersionedEnvelope for NodeHealthRowEnvelope {
+    type Latest = NodeHealthRowV1;
+
+    fn latest(payload: Self::Latest) -> Self {
+        Self::V1(payload)
+    }
+
+    fn into_latest(self) -> Result<Self::Latest, EnvelopeError> {
+        match self {
+            Self::V1(v1) => Ok(v1),
+        }
+    }
+
+    /// Discriminant offset for `NodeHealthRowEnvelope` archives,
+    /// measured from the END of the archive bytes.
+    ///
+    /// Empirically determined against canonical V1 payloads of
+    /// varying NodeId / Region / writer-id lengths (including the
+    /// inline-vs-out-of-line `ArchivedString` boundary at 8 bytes)
+    /// and counter values from 1 to u64::MAX: rkyv 0.8 places the
+    /// outer enum's discriminant byte 40 bytes from the END of the
+    /// archive, stable across all payload sizes.
+    ///
+    /// The trailing 40 bytes encompass the root structure footprint:
+    /// 1 byte discriminant + 7 padding + 8-byte counter + 16-byte
+    /// `ArchivedString` (relptr+len OR inline) for the writer
+    /// NodeId + 8-byte enum padding. (rkyv rounds the root region
+    /// up to align to 8 bytes.)
+    ///
+    /// Re-pin alongside the schema-evolution fixture at every
+    /// version-bump per
+    /// [`VersionedEnvelope::discriminant_offset_from_end`]'s
+    /// docstring.
+    fn discriminant_offset_from_end() -> Option<usize> {
+        Some(40)
+    }
+
+    fn known_discriminants() -> &'static [u8] {
+        // V1 carries rkyv discriminant 0 (declaration order — first
+        // variant). Empirically verified by archiving a canonical
+        // `NodeHealthRowEnvelope::latest(...)` and inspecting the
+        // byte at `bytes.len() - 40`.
+        &[0]
+    }
+
+    fn type_name() -> &'static str {
+        "NodeHealthRowEnvelope"
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum ServiceHydrationResultRowEnvelope {
+    V1(ServiceHydrationResultRowV1),
+}
+
+pub type ServiceHydrationResultRowLatest = ServiceHydrationResultRowV1;
+
+// `pub` due to rustc E0446 in trait impl; Layer 1 enforced by
+// non-re-export from `lib.rs` + Layer 2 dst_lint scanner.
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct ServiceHydrationResultRowV1 {
+    /// Identity of the service whose backend set was being
+    /// rewritten. Maps 1:1 to a `MAGLEV_MAP` outer-map key.
+    pub service_id: ServiceId,
+    /// Fingerprint of the `(vip, backends)` pair the dispatch
+    /// applied (or attempted to apply on `Failed`). Forms the
+    /// secondary key under LWW so distinct backend sets land in
+    /// distinct rows.
+    pub fingerprint: BackendSetFingerprint,
+    /// Outcome of the dispatch attempt — see
+    /// [`ServiceHydrationStatus`]. The embedded enum stays
+    /// unwrapped per ADR-0048 § 4 (inner rkyv enum additive variant
+    /// additions are the documented exception).
+    pub status: ServiceHydrationStatus,
+    /// Lamport timestamp of this row. Same shape as
+    /// [`AllocStatusRow::updated_at`] — the action shim writes
+    /// `(counter = tick.tick + 1, writer = node_id)` so two writes
+    /// for the same `(service_id, fingerprint)` on different ticks
+    /// are correctly ordered under LWW.
+    pub updated_at: LogicalTimestamp,
+}
+
+impl VersionedEnvelope for ServiceHydrationResultRowEnvelope {
+    type Latest = ServiceHydrationResultRowV1;
+
+    fn latest(payload: Self::Latest) -> Self {
+        Self::V1(payload)
+    }
+
+    fn into_latest(self) -> Result<Self::Latest, EnvelopeError> {
+        match self {
+            Self::V1(v1) => Ok(v1),
+        }
+    }
+
+    /// Discriminant offset for `ServiceHydrationResultRowEnvelope`
+    /// archives, measured from the END of the archive bytes.
+    ///
+    /// Empirically determined against canonical V1 payloads of varying
+    /// `ServiceHydrationStatus` variants (`Pending` / `Completed` /
+    /// `Failed`), failure-reason string lengths (inline-vs-out-of-line
+    /// `ArchivedString` boundary at 8 bytes), and `writer: NodeId`
+    /// lengths: rkyv 0.8 places the outer enum's discriminant byte 80
+    /// bytes from the END of the archive, stable across all payload
+    /// sizes (the trailing "root" structure has a fixed 80-byte
+    /// footprint — 1B discriminant + 7B pad + 8B service_id + 8B
+    /// fingerprint + 24B status enum (1B inner-disc + 7B pad + 16B
+    /// payload max) + 8B counter + 16B writer ArchivedString + 8B
+    /// trailing alignment; only the leading slab — failure reason
+    /// strings and long writer NodeId payloads — grows with
+    /// variable-length data).
+    ///
+    /// Re-pin alongside the schema-evolution fixture at every
+    /// version-bump per
+    /// [`VersionedEnvelope::discriminant_offset_from_end`]'s
+    /// docstring.
+    fn discriminant_offset_from_end() -> Option<usize> {
+        Some(80)
+    }
+
+    fn known_discriminants() -> &'static [u8] {
+        // V1 carries rkyv discriminant 0 (declaration order — first
+        // variant). Empirically verified by archiving a canonical
+        // `ServiceHydrationResultRowEnvelope::latest(...)` and
+        // inspecting the byte at `bytes.len() - 80`.
+        &[0]
+    }
+
+    fn type_name() -> &'static str {
+        "ServiceHydrationResultRowEnvelope"
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub enum ServiceBackendRowEnvelope {
+    V1(ServiceBackendRowV1),
+}
+
+pub type ServiceBackendRowLatest = ServiceBackendRowV1;
+
+// `pub` due to rustc E0446 in trait impl; Layer 1 enforced by
+// non-re-export from `lib.rs` + Layer 2 dst_lint scanner.
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct ServiceBackendRowV1 {
+    /// Identity of the service. Primary key for LWW.
+    pub service_id: ServiceId,
+    /// Virtual IP for the service — wire-shape `Ipv4Addr`, not
+    /// `ServiceVip`. The hydrator wraps into `ServiceVip` at the
+    /// read boundary (architecture.md § 8 lines 616-629).
+    pub vip: Ipv4Addr,
+    /// Current backend set for the service.
+    pub backends: Vec<Backend>,
+    /// Lamport timestamp for LWW ordering.
+    pub updated_at: LogicalTimestamp,
+}
+
+impl VersionedEnvelope for ServiceBackendRowEnvelope {
+    type Latest = ServiceBackendRowV1;
+
+    fn latest(payload: Self::Latest) -> Self {
+        Self::V1(payload)
+    }
+
+    fn into_latest(self) -> Result<Self::Latest, EnvelopeError> {
+        match self {
+            Self::V1(v1) => Ok(v1),
+        }
+    }
+
+    /// Discriminant offset for `ServiceBackendRowEnvelope` archives,
+    /// measured from the END of the archive bytes.
+    ///
+    /// Empirically determined via the byte-flip locator
+    /// `schema_evolution::service_backend_row::locate_service_backend_discriminant_offset_via_byte_flip`
+    /// (run with `--run-ignored only --no-capture`): flipping the
+    /// byte at `bytes.len() - 48` to a non-zero discriminant fires
+    /// `bytecheck` with `invalid discriminant '153' for enum
+    /// 'ArchivedServiceBackendRowEnvelope'`. The trailing 48 bytes
+    /// encompass the V1 payload root: 8B service_id + 4B vip + 4B
+    /// alignment + 8B backends RelVec + 8B counter + 16B writer
+    /// ArchivedString (the alloc/addr strings of every backend live
+    /// in the leading slab, not the trailing root).
+    ///
+    /// Re-pin alongside the schema-evolution fixture at every
+    /// version-bump per
+    /// [`VersionedEnvelope::discriminant_offset_from_end`]'s
+    /// docstring.
+    fn discriminant_offset_from_end() -> Option<usize> {
+        Some(48)
+    }
+
+    fn known_discriminants() -> &'static [u8] {
+        // V1 carries rkyv discriminant 0 (declaration order — first
+        // variant). Empirically verified by archiving a canonical
+        // `ServiceBackendRowEnvelope::latest(...)` and inspecting the
+        // byte at `bytes.len() - 48`.
+        &[0]
+    }
+
+    fn type_name() -> &'static str {
+        "ServiceBackendRowEnvelope"
     }
 }
 

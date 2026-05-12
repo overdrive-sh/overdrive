@@ -1,0 +1,587 @@
+{
+  "schema_version": "3.0",
+  "feature_id": "rkyv-envelope-evolution",
+  "events": [
+    {
+      "sid": "01-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T00:54:23Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: scaffolding step \u2014 RED scaffolds land here; acceptance tests become executable in 01-02+",
+      "t": "2026-05-12T00:54:29Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T01:02:39Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T01:03:48Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T01:05:58Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T01:24:35Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: codec primitive landing \u2014 per-envelope acceptance tests activate in 01-03..02-03",
+      "t": "2026-05-12T01:24:41Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T01:24:42Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T01:24:43Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T01:25:47Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T01:29:33Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T01:31:11Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T01:31:11Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T01:52:44Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T01:58:16Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T03:10:42Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-05-12T03:14:16Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: source-write hook rejects Edit/Write from this session \u2014 orchestrator-context detection. Must re-dispatch via Task subagent.",
+      "t": "2026-05-12T03:18:28Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: source-write hook rejects edits \u2014 re-dispatch required.",
+      "t": "2026-05-12T03:18:29Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: cannot commit incomplete step. See returned message \u2014 orchestrator must (1) revert partial edits to crates/overdrive-core/src/aggregate/mod.rs, (2) re-dispatch via Task subagent, (3) resolve AC+files_to_modify scope inconsistency.",
+      "t": "2026-05-12T03:18:31Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T03:57:32Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-05-12T04:03:08Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-05-12T04:03:17Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-05-12T04:03:22Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: source-write hook blocks Edit/Write from this dispatch context. Codec methods (archive_for_store, from_store_bytes, spec_digest) landed on JobV1 plus tracing dep in Cargo.toml; remaining migration of call sites and integration tests not landed. Orchestrator must re-dispatch via Task subagent.",
+      "t": "2026-05-12T04:03:37Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T04:30:00Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T04:45:00Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T04:50:00Z"
+    },
+    {
+      "sid": "01-04-refactor-discriminant-probing",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T05:17:28Z"
+    },
+    {
+      "sid": "01-04-refactor-discriminant-probing",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: refactor \u2014 existing S-EV-03.2 assertion flipped in GREEN, no new acceptance scaffold",
+      "t": "2026-05-12T05:17:36Z"
+    },
+    {
+      "sid": "01-04-refactor-discriminant-probing",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: refactor \u2014 assertion correction lands in GREEN alongside production change",
+      "t": "2026-05-12T05:17:36Z"
+    },
+    {
+      "sid": "01-04-refactor-discriminant-probing",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T05:35:56Z"
+    },
+    {
+      "sid": "01-04-refactor-discriminant-probing",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T05:38:40Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T05:43:24Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-05-12T05:45:06Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-05-12T05:45:06Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T05:51:40Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T05:52:51Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T06:11:01Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-05-12T06:11:09Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-05-12T06:11:14Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T06:11:19Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T06:11:31Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T06:16:09Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-05-12T06:17:58Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-05-12T06:18:39Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T07:52:02Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T07:53:29Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T15:00:00Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-05-12T15:00:30Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: inlined with RED_ACCEPTANCE \u2014 scanner unit tests serve as both acceptance and unit layer; the syn-based AST scanner's driving port IS the unit-test entry point (xtask::dst_lint::scan_for_envelope_variant_construction)",
+      "t": "2026-05-12T15:00:30Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T15:08:00Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "REFACTOR",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: inlined refactoring during GREEN \u2014 scanner is one syntactic clause plus small helper fns; no follow-up refactor pass warranted, all clippy::missing-const-for-fn surfaced during clippy gate already addressed",
+      "t": "2026-05-12T15:08:30Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T15:12:00Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T08:23:50Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-05-12T08:23:58Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: inlined with RED_ACCEPTANCE \u2014 scanner unit tests serve both layers",
+      "t": "2026-05-12T08:24:03Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T08:24:10Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T08:24:23Z"
+    },
+    {
+      "sid": "phase-3-refactor-l1-l4",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T08:42:11Z"
+    },
+    {
+      "sid": "phase-3-refactor-l1-l4",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: refactor pass \u2014 existing test suite is the safety net",
+      "t": "2026-05-12T08:42:19Z"
+    },
+    {
+      "sid": "phase-3-refactor-l1-l4",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: refactor pass \u2014 existing test suite is the safety net",
+      "t": "2026-05-12T08:42:19Z"
+    },
+    {
+      "sid": "phase-3-refactor-l1-l4",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: refactor pass \u2014 existing test suite is the safety net",
+      "t": "2026-05-12T08:42:19Z"
+    },
+    {
+      "sid": "phase-3-refactor-l1-l4",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T08:44:11Z"
+    },
+    {
+      "sid": "phase-4-review-fixes",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T08:55:23Z"
+    },
+    {
+      "sid": "phase-4-review-fixes",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: review fixes \u2014 no new acceptance scenario; defect #4 forces signature-change test cascade tracked under RED_UNIT, other defects pin existing-correct invariants",
+      "t": "2026-05-12T09:02:11Z"
+    },
+    {
+      "sid": "phase-4-review-fixes",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T09:02:11Z"
+    },
+    {
+      "sid": "phase-4-review-fixes",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T09:02:12Z"
+    },
+    {
+      "sid": "phase-4-review-fixes",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T09:04:22Z"
+    },
+    {
+      "sid": "phase-4-review-fixes-round-2",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T09:55:46Z"
+    },
+    {
+      "sid": "phase-4-review-fixes-round-2",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: invariant pinning \u2014 no acceptance-level behavior added",
+      "t": "2026-05-12T09:55:52Z"
+    },
+    {
+      "sid": "phase-4-review-fixes-round-2",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "FAIL (intended): falsifiability proof \u2014 deliberately set JobEnvelope::discriminant_offset_from_end to Some(63); job_discriminant_offset_triangulation failed with 'left: Some(63), right: Some(64)' as designed; reverted to Some(64)",
+      "t": "2026-05-12T10:00:11Z"
+    },
+    {
+      "sid": "phase-4-review-fixes-round-2",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T10:02:56Z"
+    },
+    {
+      "sid": "phase-4-review-fixes-round-2",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T10:05:37Z"
+    },
+    {
+      "sid": "phase-4-review-fixes-round-2",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-05-12T10:06:18Z"
+    },
+    {
+      "sid": "phase-5-mutation-testing",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS: tools verified (cargo-mutants 27.0.0, cargo-nextest 0.9.133), tree clean, 23 commits on branch, baseline 1294 tests green, 12 source files in diff",
+      "t": "2026-05-12T10:23:17Z"
+    },
+    {
+      "sid": "phase-5-mutation-testing",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: mutation quality gate \u2014 no new RED phase",
+      "t": "2026-05-12T10:23:22Z"
+    },
+    {
+      "sid": "phase-5-mutation-testing",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: mutation quality gate \u2014 no new RED phase",
+      "t": "2026-05-12T10:23:23Z"
+    },
+    {
+      "sid": "phase-5-mutation-testing",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS: kill rate 100.0% (56/56 viable, 0 missed, 2 unviable). Initial run flagged 31 misses on VersionedEnvelope introspection surface (known_discriminants/type_name/discriminant_offset_from_end). Added assert_unknown_version_probe_surfaces harness helper + 5 per-envelope tests (kills 19 mutations). Added 4 exclude_re entries for trait-default impls (semantically unreachable) and per-envelope vec![0] equivalent mutants (12 filtered). Final: 1299 tests pass, clippy clean, dst-lint clean.",
+      "t": "2026-05-12T10:53:40Z"
+    },
+    {
+      "sid": "phase-5-mutation-testing",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS: mutation gate satisfied at kill rate 100.0% (56/56 viable). Quality gates: clippy clean, dst-lint clean, 1299 tests pass. Report at docs/feature/rkyv-envelope-evolution/deliver/mutation/mutation-report.md.",
+      "t": "2026-05-12T10:54:14Z"
+    },
+    {
+      "sid": "phase-5-mutation-testing",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T10:55:47Z"
+    },
+    {
+      "sid": "phase-5-mutation-testing",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T10:55:48Z"
+    },
+    {
+      "sid": "phase-5-mutation-testing",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-12T10:55:49Z"
+    }
+  ]
+}

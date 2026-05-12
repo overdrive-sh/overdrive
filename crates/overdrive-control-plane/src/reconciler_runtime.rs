@@ -1015,9 +1015,10 @@ async fn read_job(
         .await
         .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
     let Some(b) = bytes else { return Ok(None) };
-    let archived = rkyv::access::<rkyv::Archived<Job>, rkyv::rancor::Error>(b.as_ref())
-        .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
-    let job = rkyv::deserialize::<Job, rkyv::rancor::Error>(archived)
+    // Pass the canonical IntentKey (`jobs/<workload-id>`) so a decode
+    // failure's `health.startup.refused` event names the specific row
+    // an operator would need to inspect.
+    let job = Job::from_store_bytes(b.as_ref(), &state.intent_redb_path, Some(key.as_str()))
         .map_err(|e| ConvergenceError::IntentRead(e.to_string()))?;
     Ok(Some(job))
 }

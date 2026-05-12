@@ -50,6 +50,7 @@ fn build_app_state(tmp: &TempDir, obs: Arc<dyn ObservationStore>) -> AppState {
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
     AppState::new(
         store,
+        store_path,
         obs,
         Arc::new(runtime),
         driver,

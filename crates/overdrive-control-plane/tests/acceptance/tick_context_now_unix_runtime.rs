@@ -101,6 +101,7 @@ async fn build_state_with_clock(tmp: &TempDir, clock: Arc<dyn Clock>) -> AppStat
     let driver: Arc<dyn Driver> = Arc::new(SimDriver::new(DriverType::Exec));
     AppState::new(
         store,
+        store_path,
         obs,
         Arc::new(runtime),
         driver,
@@ -137,7 +138,7 @@ async fn run_convergence_tick_populates_now_unix_from_state_clock() {
         driver: DriverInput::Exec(ExecInput { command: "/bin/true".to_string(), args: vec![] }),
     })
     .expect("valid job spec");
-    let archived = rkyv::to_bytes::<rkyv::rancor::Error>(&job).expect("rkyv archive");
+    let archived = job.archive_for_store().expect("rkyv archive");
     let key = IntentKey::for_job(&job.id);
     state.store.put(key.as_bytes(), archived.as_ref()).await.expect("put job");
 

@@ -1859,6 +1859,7 @@ dependencies = [
  "time",
  "tokio",
  "toml",
+ "tracing",
  "trybuild",
  "utoipa",
  "uuid",
@@ -1939,6 +1940,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "futures",
+ "hex",
  "overdrive-core",
  "proptest",
  "redb",
@@ -1947,6 +1949,9 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tokio-stream",
+ "tracing",
+ "tracing-subscriber",
+ "trybuild",
 ]
 
 [[package]]

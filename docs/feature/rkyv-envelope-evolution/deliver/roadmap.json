@@ -1,0 +1,283 @@
+{
+  "reviews": [
+    {
+      "review_id": "roadmap_rev_20260512_073500",
+      "reviewer": "nw-solution-architect-reviewer",
+      "artifact": "docs/feature/rkyv-envelope-evolution/deliver/roadmap.json",
+      "timestamp": "2026-05-12T07:35:00Z",
+      "approval_status": "APPROVED",
+      "critical_issues_count": 0,
+      "high_issues_count": 0,
+      "medium_issues_count": 0,
+      "low_issues_count": 0,
+      "strengths": [
+        "Walking-skeleton ordering validated: AllocStatusRow end-to-end exercised in Phase 1 (01-03) before observation fan-out (Phase 2), proving mechanism on two layer types with asymmetric failure semantics (intent refuse, observation skip) per ADR-0048.",
+        "Dependency DAG correct: codec foundation (01-02) gates all type implementations; all observation types (02-*) land before lint coverage scanner (03-02) passes real-tree test; no circular dependencies.",
+        "ADR-0048 mandate coverage 100%: five rkyv-persisted envelopes, golden-bytes fixtures per version, write-time ::latest() constructor at persistence boundary, read-time asymmetric policy, Layer 1 non-re-export of codec-internal envelope enum (UI-01 + UI-02 amendments — rustc E0446 forbids literal pub(crate); UI-02 alias-to-payload public API minimises call-site footprint), Layer 2 xtask::dst_lint variant-construction scanner, fixture-coverage gate.",
+        "Behavioral AC throughout: all criteria scenario-tagged (S-EV-XX naming), named test functions (envelope_walking_skeleton.rs, envelope_intent_refuse.rs), golden-fixture constant names (FIXTURE_V1), observable error events (health.startup.refused).",
+        "Step atomicity and proportionality: 01 linear chain (RED -> codec -> AllocStatus -> Job), 02 parallel observation fan-out (mechanical repetition), 03 parallel lint infrastructure. Effort ratio 1.31 (46h / 35 files) well under 2.5 threshold.",
+        "Phase 1 closes the loop: 01-04 JobEnvelope intent refuse-to-start demonstrates asymmetric policy before observation replication, validating the architecture's intent/observation split per whitepaper §18.",
+        "Trybuild fixture scope proportional: one per-envelope compile-fail (Layer 1 codec-internal envelope-type unreachability per UI-02 amendment) covering cross-crate mechanism uniformly, plus four xtask unit tests for in-crate variant-construction lint (Layer 2)."
+      ],
+      "blocking_issues": [],
+      "non_blocking_findings": [],
+      "reviewer_comments": "Roadmap is gated-ready for DELIVER wave. All nine steps are self-contained, properly ordered, and directly implement ADR-0048 mandate. Phase 1 walking skeleton (01-01 through 01-04) proves the full envelope mechanism on two layer types before fan-out. Phase 2 (02-01 through 02-03) replicates the proven pattern across three remaining observation row types in parallel. Phase 3 (03-01 through 03-02) closes the structural enforcement loop via xtask dst-lint clauses covering both write-time invariant layers. No ambiguity in acceptance criteria; every step is verifiable against named test functions and scenario identifiers. Cosmetic validator warnings on step-name/criteria length are acknowledged and ignored per CLAUDE.md precedent. Effort estimates are advisory and proportional to complexity; no scope deferrals introduced."
+    }
+  ],
+  "roadmap": {
+    "project_id": "rkyv-envelope-evolution",
+    "created_at": "2026-05-12T00:34:39Z",
+    "total_steps": 9,
+    "phases": 3
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Walking skeleton — AllocStatusRow end-to-end + intent refuse-to-start",
+      "description": "Land the foundational codec module and walk the AllocStatusRowEnvelope path end-to-end through real redb. Closes the observation-store subtree-pointer-overrun bug for AllocStatusRow and proves the mechanism on intent via JobEnvelope refuse-to-start. Remaining four envelopes follow the proven pattern in Phase 02.",
+      "default_agent": "nw-software-crafter",
+      "default_deps_strategy": "sequential",
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "RED scaffolds — codec module, envelopes, errors",
+          "criteria": "crates/overdrive-core/src/codec/{mod,envelope}.rs exist with VersionedEnvelope trait + EnvelopeError enum as SCAFFOLD: true with todo! bodies per distill/red-scaffolds.md Group 1; AllocStatusRowEnvelope NodeHealthRowEnvelope ServiceHydrationResultRowEnvelope ServiceBackendRowEnvelope JobEnvelope scaffold enums + pub(crate) V1 payload structs land per Groups 2 and 3 with todo! latest/into_latest bodies; IntentStoreError::Envelope and ObservationStoreError::Envelope variants land with #[from] EnvelopeError per Group 4; xtask scan_for_envelope_variant_construction and scan_for_envelope_fixture_coverage functions land with todo! bodies per Group 5; cargo xtask lima run -- cargo check --workspace --all-targets passes and cargo xtask lima run -- cargo nextest run --workspace --features integration-tests --no-run compiles all test binaries",
+          "agent": "nw-software-crafter",
+          "deps": [],
+          "files_to_modify": [
+            "crates/overdrive-core/src/codec/mod.rs",
+            "crates/overdrive-core/src/codec/envelope.rs",
+            "crates/overdrive-core/src/lib.rs",
+            "crates/overdrive-core/src/traits/observation_store.rs",
+            "crates/overdrive-core/src/traits/intent_store.rs",
+            "crates/overdrive-core/src/aggregate/mod.rs",
+            "xtask/src/dst_lint.rs"
+          ],
+          "test_file": "crates/overdrive-core/tests/schema_evolution.rs",
+          "scenario_name": "RED scaffold entrypoint + per-envelope sub-module declarations",
+          "implementation_notes": "Crafter follows distill/red-scaffolds.md verbatim. Inner payload types (AllocStatusRowV1, NodeHealthRowV1, ServiceHydrationResultRowV1, ServiceBackendRowV1, JobV1) MUST be pub (NOT pub(crate) — rustc E0446 forbids that under a pub trait per UI-01 amendment) and MUST NOT be re-exported from crate root per ADR-0048 § 2 Layer 1. Codec-internal envelope enums (AllocStatusRowEnvelope, NodeHealthRowEnvelope, ServiceHydrationResultRowEnvelope, ServiceBackendRowEnvelope, JobEnvelope) are likewise pub but MUST NOT be re-exported from crate root (UI-02 amendment — the envelope non-re-export is the load-bearing Layer 1 target under the alias-to-payload public API). Public payload aliases (pub type AllocStatusRow = AllocStatusRowV1, pub type Job = JobV1, etc.) ARE re-exported from crate root so public callers continue to use struct-literal syntax unchanged. Per .claude/rules/testing.md § RED scaffolds — every #[test] body that exercises an unimplemented envelope path carries #[should_panic(expected = \"RED scaffold\")] with a per-scenario panic message naming the S-EV-XX scenario it stands in for; production-side todo!() carries #[expect(clippy::todo, reason = \"RED scaffold; lands GREEN in step 01-02..03-02\")]. No --no-verify on the scaffold commit. effort_hours=4 advisory.",
+          "effort_hours": 4
+        },
+        {
+          "id": "01-02",
+          "name": "GREEN — codec foundation (trait + EnvelopeError + envelope harness)",
+          "criteria": "VersionedEnvelope trait + EnvelopeError variants (UnknownVersion observed supported_max + Malformed source: rkyv::rancor::Error) implement per ADR-0048 § 1 with no todo! remaining in crates/overdrive-core/src/codec/envelope.rs; EnvelopeError derives Debug thiserror::Error and carries the per-variant Display messages from distill/red-scaffolds.md § 1.2; schema_evolution test harness primitive (hex-decode + rkyv-deserialise + into_latest + equality projection helper) lives in crates/overdrive-core/tests/schema_evolution/harness.rs (or equivalent shared module) and is consumed by every per-envelope fixture in subsequent steps; cargo xtask lima run -- cargo nextest run -p overdrive-core --features integration-tests --no-run compiles clean and rustdoc on codec::envelope passes cargo test --doc -p overdrive-core",
+          "agent": "nw-software-crafter",
+          "deps": ["01-01"],
+          "files_to_modify": [
+            "crates/overdrive-core/src/codec/envelope.rs",
+            "crates/overdrive-core/tests/schema_evolution.rs",
+            "crates/overdrive-core/tests/schema_evolution/harness.rs"
+          ],
+          "test_file": "crates/overdrive-core/tests/schema_evolution/harness.rs",
+          "scenario_name": "Shared schema-evolution roundtrip primitive (consumed by S-EV-01.1 through S-EV-01.5)",
+          "implementation_notes": "Trait surface is the SSOT per .claude/rules/development.md § Trait definitions specify behavior — every method docstring pins preconditions/postconditions/edge-cases/observable invariants. The harness primitive takes a hex string + canonical Latest projection and asserts equality; it does NOT bake per-envelope knowledge. EnvelopeError uses #[from] for IntentStoreError::Envelope and ObservationStoreError::Envelope conversion paths landing in 01-03/01-04. effort_hours=3 advisory.",
+          "effort_hours": 3
+        },
+        {
+          "id": "01-03",
+          "name": "GREEN — AllocStatusRowEnvelope walking skeleton (S-EV-01.1 + S-EV-04.1)",
+          "criteria": "AllocStatusRowEnvelope V1 with pub AllocStatusRowV1 payload struct (NOT pub(crate) — rustc E0446 forbids that under a pub trait per UI-01 amendment; both the envelope enum and the payload type are pub but NOT re-exported from overdrive-core::lib.rs) carrying the eleven fields enumerated in distill/red-scaffolds.md § 2.1; under the alias-to-payload public API per UI-02 amendment, AllocStatusRow type alias points to AllocStatusRowV1 (the payload struct, NOT the envelope enum) and AllocStatusRowLatest alias also points to AllocStatusRowV1; the codec-internal AllocStatusRowEnvelope enum wraps V1(AllocStatusRowV1) and is consumed only by LocalObservationStore read/write paths; public callers continue to use struct-literal AllocStatusRow { fields } as before — no .latest(...) rewrite at call sites; VersionedEnvelope impl with latest() wrapping into Self::V1 and into_latest() matching Self::V1(v1) => Ok(v1); crates/overdrive-core/tests/schema_evolution/alloc_status_row.rs ships const FIXTURE_V1: &str hex-pinned bytes and a #[test] decoding through into_latest per S-EV-01.1; LocalObservationStore::alloc_status_rows in crates/overdrive-store-local/src/observation_backend.rs decodes values through AllocStatusRowEnvelope::into_latest() and on EnvelopeError emits tracing::warn!(name: \"observation.envelope.decode_failed\", table = \"observation_alloc_status\", key = ?, source = ?) and skips the row per ADR-0048 § 3 observation layer; LocalObservationStore::write_alloc_status writes through AllocStatusRowEnvelope::latest(payload) at the persistence boundary; integration test crates/overdrive-store-local/tests/integration/envelope_observation_skip.rs covers S-EV-04.1 + S-EV-04.2 (malformed row skip + recovery on re-write); integration test crates/overdrive-store-local/tests/integration/envelope_walking_skeleton.rs covers the WS Gherkin from distill/walking-skeleton.md with zero \"subtree pointer overran range\" log entries; cargo xtask lima run -- cargo nextest run --features integration-tests passes both new integration tests and the schema_evolution fixture. NOTE: commit a90755a2 shipped this shape correctly and remains the GREEN landing for this step under the UI-02 amendment.",
+          "agent": "nw-software-crafter",
+          "deps": ["01-02"],
+          "files_to_modify": [
+            "crates/overdrive-core/src/traits/observation_store.rs",
+            "crates/overdrive-core/tests/schema_evolution/alloc_status_row.rs",
+            "crates/overdrive-store-local/src/observation_backend.rs",
+            "crates/overdrive-store-local/tests/integration.rs",
+            "crates/overdrive-store-local/tests/integration/envelope_walking_skeleton.rs",
+            "crates/overdrive-store-local/tests/integration/envelope_observation_skip.rs",
+            "crates/overdrive-store-local/tests/integration/envelope_helpers.rs"
+          ],
+          "test_file": "crates/overdrive-store-local/tests/integration/envelope_walking_skeleton.rs",
+          "scenario_name": "S-EV-01.1 + S-EV-04.1 + S-EV-04.2 + walking-skeleton.md operator scenario",
+          "implementation_notes": "FIXTURE_V1 is generated by constructing the canonical V1 envelope, calling rkyv::to_bytes::<_, rkyv::rancor::Error>(&envelope), hex-encoding the result, and pasting as a const. FIXTURE_V1 is NEVER touched by future PRs (per testing.md § Archive schema-evolution roundtrip). The three docstrings at observation_store.rs:278-282 311-313 359-361 falsely claiming rkyv has additive-field tolerance MUST be corrected in this step — replace with a reference to ADR-0048 and the envelope mechanism. Integration tests gated behind integration-tests feature per .claude/rules/testing.md § Integration vs unit gating. Real redb via tempfile::TempDir; no Sim* substitution. UI-02 amendment (2026-05-12): use alias-to-payload public API — pub type AllocStatusRow = AllocStatusRowV1, NOT pub type AllocStatusRow = AllocStatusRowEnvelope; the envelope is codec-internal and named only inside LocalObservationStore. Commit a90755a2 shipped this shape correctly. effort_hours=8 advisory.",
+          "effort_hours": 8
+        },
+        {
+          "id": "01-04",
+          "name": "GREEN — JobEnvelope intent refuse-to-start + typed codec on Job (S-EV-03.1 + S-EV-03.2 + UI-03)",
+          "criteria": "JobEnvelope::V1(JobV1) is operational in crates/overdrive-core/src/aggregate/mod.rs (working-tree edits partially landed — crafter completes any remaining todo! bodies and confirms pub type Job = JobV1, pub type JobLatest = JobV1, JobEnvelope un-re-exported from overdrive-core::lib.rs); under UI-03 amendment the Job-specific codec module lands on the Job type itself (location: crates/overdrive-core/src/aggregate/mod.rs OR a sibling crates/overdrive-core/src/aggregate/store_codec.rs — crafter's choice) with three methods — Job::archive_for_store(&self) -> Result<AlignedVec, EnvelopeError> wraps via JobEnvelope::latest(self.clone()) and rkyv-serialises; Job::from_store_bytes(bytes: &[u8], redb_path: &Path) -> Result<Job, IntentStoreError> rkyv-deserialises as JobEnvelope, projects via envelope.into_latest()?, and emits tracing::error!(name: \"health.startup.refused\", redb_path, envelope_error) BEFORE returning Err(IntentStoreError::Envelope { redb_path, source }) on EnvelopeError (the same event MUST NOT fire on Ok); Job::spec_digest(&self) -> Result<ContentHash, EnvelopeError> = ContentHash::of(self.archive_for_store()?) — SHA-256 over envelope bytes (operator-observable Job ID change vs. raw V1 bytes — greenfield single-cut absorbs); IntentStoreError::Envelope { redb_path, #[from] #[source] source: EnvelopeError } un-todo!'d (the scaffold variant from step 01-01) and its Display form includes the literal redb path AND the literal substring \"delete\" AND the redb path again (operator remediation per ADR-0048 § 6); every existing Job writer migrates from rkyv::to_bytes(&job) (or rkyv::to_bytes::<_, rkyv::rancor::Error>(&job)) to job.archive_for_store()? — crafter enumerates via `git grep \"rkyv::to_bytes\" --include=\"*.rs\"` and targets non-exhaustively crates/overdrive-control-plane/src/handlers.rs (~line 241 submit_workload, ~452, ~641), crates/overdrive-control-plane/src/reconciler_runtime.rs (~1018), crates/overdrive-sim/src/invariants/exit_event_observable_outcome.rs (~498), plus ~10-15 test fixtures across the workspace; every existing Job reader migrates from inline rkyv::access::<rkyv::Archived<Job>>(bytes) to Job::from_store_bytes(bytes, &path)? — same enumeration via `git grep \"rkyv::access\" --include=\"*.rs\"`; crates/overdrive-control-plane/src/handlers.rs spec_digest computation (~line 251) migrates from ContentHash::of(archived.as_ref()) to job.spec_digest()? (operator-observable Job ID change documented in commit body); crates/overdrive-store-local/src/redb_backend.rs LocalStore::open's recovery walk calls Job::from_store_bytes(bytes, &path)? per jobs/-prefixed entry to surface envelope-decode errors at boot per ADR-0048 § 3 intent layer + § 6 operator remediation; LocalStore::write_entry (or analogous Job-write path) goes through Job::archive_for_store()? at the persistence boundary; crates/overdrive-core/tests/schema_evolution/job.rs lands FIXTURE_V1 golden bytes + harness-driven roundtrip test per S-EV-01.5 (replaces the 01-01 RED scaffold #[should_panic]); crates/overdrive-store-local/tests/integration/envelope_intent_refuse.rs covers S-EV-03.1 (malformed bytes) and S-EV-03.2 (unknown variant tag 99) — both drive through a LocalStore::open-shaped bootstrap path that calls Job::from_store_bytes per entry; crates/overdrive-store-local/tests/integration/envelope_helpers.rs gains write_raw_bytes_to_entries_table helper and synthesise_unknown_job_envelope_variant_tag(99) helper; quality gates pass workspace-wide via `cargo xtask lima run -- cargo check --workspace --all-targets`, `cargo xtask lima run -- cargo nextest run --workspace --features integration-tests`, `cargo xtask lima run -- cargo test --doc --workspace`, `cargo xtask lima run -- cargo clippy --workspace --all-targets -- -D warnings`; single commit per CLAUDE.md \"Single-cut migrations in greenfield\" with body naming the spec_digest semantics change (envelope bytes vs. raw V1 bytes) as the operator-observable break and referencing ADR-0048 § 4b + UI-03",
+          "agent": "nw-software-crafter",
+          "deps": ["01-03"],
+          "files_to_modify": [
+            "crates/overdrive-core/src/aggregate/mod.rs",
+            "crates/overdrive-core/src/traits/intent_store.rs",
+            "crates/overdrive-core/tests/schema_evolution/job.rs",
+            "crates/overdrive-control-plane/src/handlers.rs",
+            "crates/overdrive-control-plane/src/reconciler_runtime.rs",
+            "crates/overdrive-sim/src/invariants/exit_event_observable_outcome.rs",
+            "crates/overdrive-store-local/src/redb_backend.rs",
+            "crates/overdrive-store-local/tests/integration.rs",
+            "crates/overdrive-store-local/tests/integration/envelope_intent_refuse.rs",
+            "crates/overdrive-store-local/tests/integration/envelope_helpers.rs"
+          ],
+          "test_file": "crates/overdrive-store-local/tests/integration/envelope_intent_refuse.rs",
+          "scenario_name": "S-EV-03.1 + S-EV-03.2 + S-EV-01.5 + UI-03 typed codec on Job",
+          "implementation_notes": "Under UI-03 amendment (2026-05-12) the \"intent persistence boundary\" is the Job-specific codec module on the Job type — Job::archive_for_store / Job::from_store_bytes / Job::spec_digest — NOT LocalStore::open directly. The IntentStore trait is correctly bytes-passthrough by design (it persists Job aggregates, WorkloadKind discriminator bytes per ADR-0047, stop sentinel markers, and frame-wrapped snapshot bytes per ADR-0020; it is shared with the future RaftStore Phase 2 snapshot contract whose byte identity is load-bearing). The trait surface MUST NOT change. LocalStore::open's recovery walk calls Job::from_store_bytes per jobs/-prefixed entry to surface envelope-decode errors at boot. Job::spec_digest is now SHA-256 of envelope bytes (= output of Job::archive_for_store), not raw V1 bytes — operator-observable Job ID change absorbed by greenfield single-cut per ADR-0048 § 5. The codec module is shared between writers and readers: archive_for_store produces the wire bytes; from_store_bytes consumes them; spec_digest reuses archive_for_store internally where possible to keep the wire-format / content-address invariant trivially deterministic. The partial alias + impl renames already in the working tree (crates/overdrive-core/src/aggregate/mod.rs — JobEnvelope, pub type Job = JobV1, JobV1 struct + VersionedEnvelope impl + JobV1::from_spec) are correct forward progress under UI-03 — the crafter completes any remaining todo! bodies and lands the three codec methods on JobV1 (which IS the Job alias target). Per .claude/rules/development.md § \"Hashing requires deterministic serialization\": Job::spec_digest uses rkyv::to_bytes on the envelope; rkyv archived bytes are canonical by construction, so the digest is reproducible across two archivals of the same logical Job. Per .claude/rules/development.md § \"Trait definitions specify behavior\": Job::from_store_bytes docstring pins preconditions (bytes from rkyv-archived JobEnvelope OR malformed/unknown-future garbage), postconditions (on Ok: returns the projected V1 payload; on Err: emits health.startup.refused exactly once before returning), edge cases (unknown variant discriminant → EnvelopeError::UnknownVersion; non-rkyv garbage → EnvelopeError::Malformed), observable invariants (health.startup.refused event emitted before Err returned; same event NEVER emitted on Ok). The synthetic \"unknown variant tag 99\" bytes for S-EV-03.2 are produced by a test-only helper in envelope_helpers.rs that emits an rkyv archive with a hand-crafted discriminant byte at offset 0 per ADR-0048 § 1. Per ADR-0048 § 6 Phase 1 has no in-place migration tooling — Display carries the \"delete <redb-path> and restart\" remediation verbatim. effort_hours=28 advisory (codec module on Job + IntentStoreError variant un-todo!'d + ~15-20 Job writer/reader call-site migrations + spec_digest semantics change + integration tests + golden-bytes fixture). The crafter's single commit body must note the spec_digest semantics change as operator-observable and reference ADR-0048 § 4b \"Intent persistence boundary — typed codec on Job\" + UI-03 in deliver/upstream-issues.md.",
+          "effort_hours": 28
+        }
+      ]
+    },
+    {
+      "id": "02",
+      "name": "Fan-out — remaining observation envelopes",
+      "description": "Apply the AllocStatusRow pattern to the three remaining observation row types. Each step is structurally identical to 01-03 (no Job-call-site rename under the UI-02 amendment): codec-internal envelope enum + pub payload struct (un-re-exported per ADR-0048 § 2 Layer 1 as amended UI-01) + pub type FooRow = FooRowV1 (re-exported public payload alias per UI-02 amendment) + From impl + golden-bytes fixture + envelope-aware adapter read/write at persistence boundary + integration test for skip+recovery.",
+      "default_agent": "nw-software-crafter",
+      "default_deps_strategy": "parallel",
+      "depends_on": ["01"],
+      "steps": [
+        {
+          "id": "02-01",
+          "name": "NodeHealthRowEnvelope end-to-end (S-EV-01.2 + S-EV-04.3)",
+          "criteria": "NodeHealthRowEnvelope::V1(NodeHealthRowV1) lands per distill/red-scaffolds.md § 2.2 with pub payload (NOT pub(crate) — rustc E0446; both envelope enum and payload pub but NOT re-exported from overdrive-core::lib.rs) mirroring existing NodeHealthRow fields; under the alias-to-payload public API per UI-02 amendment, pub type NodeHealthRow = NodeHealthRowV1 (the payload struct, re-exported from crate root) and NodeHealthRowLatest alias also points to NodeHealthRowV1; public callers continue to use struct-literal NodeHealthRow { fields }; VersionedEnvelope impl with latest() and into_latest(); FIXTURE_V1 lands at crates/overdrive-core/tests/schema_evolution/node_health_row.rs covering S-EV-01.2; LocalObservationStore read path for observation_node_health table decodes through into_latest() and on EnvelopeError emits tracing::warn!(name: \"observation.envelope.decode_failed\", table = \"observation_node_health\", ...) and skips the offending row; write path goes through NodeHealthRowEnvelope::latest(payload) at the persistence boundary; integration test in envelope_observation_skip.rs adds a parallel sub-test for the node_health table covering S-EV-04.3 (malformed-row skip + valid-row survives); cargo xtask lima run -- cargo nextest run --features integration-tests passes",
+          "agent": "nw-software-crafter",
+          "deps": ["01-04"],
+          "files_to_modify": [
+            "crates/overdrive-core/src/traits/observation_store.rs",
+            "crates/overdrive-core/tests/schema_evolution/node_health_row.rs",
+            "crates/overdrive-store-local/src/observation_backend.rs",
+            "crates/overdrive-store-local/tests/integration/envelope_observation_skip.rs"
+          ],
+          "test_file": "crates/overdrive-store-local/tests/integration/envelope_observation_skip.rs",
+          "scenario_name": "S-EV-01.2 + S-EV-04.3",
+          "implementation_notes": "Pattern is mechanical — identical shape to 01-03 minus the host-adapter walking-skeleton scaffolding (envelope_helpers.rs and tempfile fixture already exist). Touch only the node_health surface; do NOT regress the AllocStatusRow path. Per feedback_phase1_single_node_scope.md NodeHealthRow remains single-node-scope; the envelope mechanism is unchanged. effort_hours=4 advisory.",
+          "effort_hours": 4
+        },
+        {
+          "id": "02-02",
+          "name": "ServiceHydrationResultRowEnvelope end-to-end (S-EV-01.3 + S-EV-04.4)",
+          "criteria": "ServiceHydrationResultRowEnvelope::V1(ServiceHydrationResultRowV1) lands per distill/red-scaffolds.md § 2.3 wrapping the existing ServiceHydrationResultRow fields including its ServiceHydrationStatus rkyv enum (both envelope enum and payload pub but NOT re-exported from overdrive-core::lib.rs per UI-01 / UI-02 amendments); under the alias-to-payload public API per UI-02, pub type ServiceHydrationResultRow = ServiceHydrationResultRowV1 (re-exported) and ServiceHydrationResultRowLatest alias points to V1; public callers continue to use struct-literal ServiceHydrationResultRow { fields }; VersionedEnvelope impl; FIXTURE_V1 lands at crates/overdrive-core/tests/schema_evolution/service_hydration_result_row.rs covering S-EV-01.3; LocalObservationStore read path for observation_service_hydration_results table decodes through into_latest() and on EnvelopeError emits the structured warn event with table = \"observation_service_hydration_results\" and skips the row; write path goes through ServiceHydrationResultRowEnvelope::latest(payload) at the persistence boundary; integration test in envelope_observation_skip.rs adds the parallel sub-test for service_hydration_results covering S-EV-04.4; the embedded ServiceHydrationStatus rkyv enum remains unwrapped per ADR-0048 § 4 (in-repo precedent — additive variant additions on inner rkyv enums are the documented exception)",
+          "agent": "nw-software-crafter",
+          "deps": ["01-04"],
+          "files_to_modify": [
+            "crates/overdrive-core/src/traits/observation_store.rs",
+            "crates/overdrive-core/tests/schema_evolution/service_hydration_result_row.rs",
+            "crates/overdrive-store-local/src/observation_backend.rs",
+            "crates/overdrive-store-local/tests/integration/envelope_observation_skip.rs"
+          ],
+          "test_file": "crates/overdrive-store-local/tests/integration/envelope_observation_skip.rs",
+          "scenario_name": "S-EV-01.3 + S-EV-04.4",
+          "implementation_notes": "ServiceHydrationStatus is the in-repo precedent cited by ADR-0048 § 1 — its docstring already commits to STABLE variant ordering. Confirm that commitment remains in source after this step. effort_hours=4 advisory.",
+          "effort_hours": 4
+        },
+        {
+          "id": "02-03",
+          "name": "ServiceBackendRowEnvelope end-to-end (S-EV-01.4 + S-EV-04.5)",
+          "criteria": "ServiceBackendRowEnvelope::V1(ServiceBackendRowV1) lands per distill/red-scaffolds.md § 2.4 wrapping the existing ServiceBackendRow fields (both envelope enum and payload pub but NOT re-exported from overdrive-core::lib.rs per UI-01 / UI-02 amendments); under the alias-to-payload public API per UI-02, pub type ServiceBackendRow = ServiceBackendRowV1 (re-exported) and ServiceBackendRowLatest alias points to V1; public callers continue to use struct-literal ServiceBackendRow { fields }; VersionedEnvelope impl; FIXTURE_V1 lands at crates/overdrive-core/tests/schema_evolution/service_backend_row.rs covering S-EV-01.4; LocalObservationStore read path for observation_service_backends table decodes through into_latest() and on EnvelopeError emits structured warn event with table = \"observation_service_backends\" and skips the row; write path goes through ServiceBackendRowEnvelope::latest(payload) at the persistence boundary; integration test in envelope_observation_skip.rs adds the parallel sub-test covering S-EV-04.5; all four observation envelopes are now landed and the false additive-field-tolerance docstrings at observation_store.rs:278-282 311-313 359-361 are fully removed/replaced with ADR-0048 references (S-EV-06 docstring grep assertion now passes)",
+          "agent": "nw-software-crafter",
+          "deps": ["01-04"],
+          "files_to_modify": [
+            "crates/overdrive-core/src/traits/observation_store.rs",
+            "crates/overdrive-core/tests/schema_evolution/service_backend_row.rs",
+            "crates/overdrive-store-local/src/observation_backend.rs",
+            "crates/overdrive-store-local/tests/integration/envelope_observation_skip.rs"
+          ],
+          "test_file": "crates/overdrive-store-local/tests/integration/envelope_observation_skip.rs",
+          "scenario_name": "S-EV-01.4 + S-EV-04.5 + design § 10 S-EV-06 docstring correction",
+          "implementation_notes": "Last of the observation envelopes; this step closes the observation-side loop. After this step lands, every rkyv-persisted value at every redb boundary goes through an envelope. The walking-skeleton walking-skeleton.md exit criterion 6 (pre-existing tests still pass) is the cross-check. effort_hours=4 advisory.",
+          "effort_hours": 4
+        }
+      ]
+    },
+    {
+      "id": "03",
+      "name": "Structural enforcement — xtask dst-lint clauses",
+      "description": "Close the write-invariant claim mechanically. The envelope types exist; without enforcement scanners they erode the moment a future contributor constructs Envelope::V1(payload) directly or forgets a golden-bytes fixture. Layer 2 (in-crate construction lint) and the coverage gate are the structural defenses that make the discipline self-enforcing.",
+      "default_agent": "nw-software-crafter",
+      "default_deps_strategy": "parallel",
+      "depends_on": ["02"],
+      "steps": [
+        {
+          "id": "03-01",
+          "name": "dst-lint clause + trybuild fixture for write enforcement (S-EV-02a + S-EV-02b)",
+          "criteria": "xtask::dst_lint::scan_for_envelope_variant_construction(source: &str, path: &Path) -> Vec<Violation> lands in xtask/src/dst_lint.rs as a purely syntactic syn-based AST walk over source strings with NO overdrive-* crate import per ADR-0048 § 2 Layer 2; scanner flags <Envelope>::V<N>( call expressions in overdrive-core source outside fn into_latest bodies and impl From<...V<N>...> for ...V<N+1>... blocks; cargo xtask dst-lint subcommand invokes the scanner across the overdrive-core src tree and fails the run on any violation; four unit tests in xtask cover S-EV-02b.1 (in-crate violation flagged), S-EV-02b.2 (into_latest call site allowed), S-EV-02b.3 (From<V1> for V2 allowed), S-EV-02b.4 (clean source produces no violations); trybuild compile-fail fixture at crates/overdrive-store-local/tests/compile_fail/alloc_status_row_envelope_unreachable.rs covers S-EV-02a with the pinned .stderr asserting rustc E0432 \"unresolved import\" names AllocStatusRowEnvelope as the unresolvable identifier (the codec-internal envelope enum is the load-bearing non-re-export target under the UI-02 alias-to-payload amendment — the public re-exported AllocStatusRow = AllocStatusRowV1 payload alias remains the unimpeded callers' interface) per ADR-0048 § 2 Layer 1; trybuild entrypoint at crates/overdrive-store-local/tests/compile_fail.rs invokes trybuild::TestCases; cargo xtask lima run -- cargo xtask dst-lint passes on HEAD",
+          "agent": "nw-software-crafter",
+          "deps": ["02-01", "02-02", "02-03"],
+          "files_to_modify": [
+            "xtask/src/dst_lint.rs",
+            "xtask/src/main.rs",
+            "crates/overdrive-store-local/tests/compile_fail.rs",
+            "crates/overdrive-store-local/tests/compile_fail/alloc_status_row_envelope_unreachable.rs",
+            "crates/overdrive-store-local/tests/compile_fail/alloc_status_row_envelope_unreachable.stderr",
+            "crates/overdrive-store-local/Cargo.toml"
+          ],
+          "test_file": "xtask/src/dst_lint.rs",
+          "scenario_name": "S-EV-02a + S-EV-02b.1 through S-EV-02b.4",
+          "implementation_notes": "Scanner is syntactic per ADR-0048 § 2 Layer 2 \"Why dst_lint, not a separate crate binary\" — xtask MUST NOT add an overdrive-* dependency per .claude/rules/development.md § \"xtask is build / test / dev orchestration, NOT a runtime entry point\". Use the existing syn-based dst_lint AST walker. trybuild is dev-dependency only; pin its version exactly per .claude/rules/testing.md § Compile-fail testing — flaky stderr is a bug in the pin, not in the fixture. One trybuild fixture is sufficient (Layer 1 mechanism is uniform across all five envelopes). effort_hours=5 advisory.",
+          "effort_hours": 5
+        },
+        {
+          "id": "03-02",
+          "name": "dst-lint clause for fixture-coverage gate (S-EV-06)",
+          "criteria": "xtask::dst_lint::scan_for_envelope_fixture_coverage(crate_root: &Path) -> Vec<Violation> lands in xtask/src/dst_lint.rs walking <crate_root>/src/ for enum *Envelope definitions matching the V<N>(<PayloadType>) variant shape and verifying <crate_root>/tests/schema_evolution/<envelope_snake>.rs exists with a FIXTURE_V<N>: &str constant for every variant per ADR-0048 § 6; scanner is purely syntactic with NO overdrive-* import; integration into cargo xtask dst-lint subcommand fails the run on any missing fixture file or missing FIXTURE_V<N> constant; four unit tests in xtask cover S-EV-06.1 (envelope without fixture file flagged), S-EV-06.2 (envelope with file but missing variant fixture flagged), S-EV-06.3 (complete coverage no violations), S-EV-06.4 (real overdrive-core crate root passes) — the last uses the absolute path /Users/marcus/conductor/workspaces/helios/new-york-v1/crates/overdrive-core or the workspace-relative equivalent and confirms all five envelopes pass; cargo xtask lima run -- cargo xtask dst-lint passes on HEAD with both clauses active",
+          "agent": "nw-software-crafter",
+          "deps": ["02-01", "02-02", "02-03"],
+          "files_to_modify": [
+            "xtask/src/dst_lint.rs",
+            "xtask/src/main.rs"
+          ],
+          "test_file": "xtask/src/dst_lint.rs",
+          "scenario_name": "S-EV-06.1 + S-EV-06.2 + S-EV-06.3 + S-EV-06.4",
+          "implementation_notes": "This is the structural closing-the-loop step — without it the structural defense degrades to \"did the author remember a fixture?\" (a non-mechanical check that fails open under reviewer fatigue per distill/test-scenarios.md § S-EV-06 closing-the-loop guarantee). Convert envelope-name to snake_case via heck or hand-rolled snake_case conversion. The real-tree test (S-EV-06.4) is what guarantees the scanner agrees with the human review on what \"complete\" means. effort_hours=4 advisory.",
+          "effort_hours": 4
+        }
+      ]
+    }
+  ],
+  "implementation_scope": {
+    "source_directories": [
+      "crates/overdrive-core/src/codec/",
+      "crates/overdrive-core/src/traits/",
+      "crates/overdrive-core/src/aggregate/",
+      "crates/overdrive-store-local/src/",
+      "xtask/src/"
+    ],
+    "test_directories": [
+      "crates/overdrive-core/tests/schema_evolution/",
+      "crates/overdrive-store-local/tests/integration/",
+      "crates/overdrive-store-local/tests/compile_fail/",
+      "xtask/src/dst_lint.rs"
+    ],
+    "excluded_patterns": [
+      "target/**",
+      "**/*.bk",
+      "mutants-baseline/**"
+    ]
+  },
+  "validation": {
+    "status": "pending",
+    "reviewer": "nw-solution-architect-reviewer",
+    "approved_at": "pending",
+    "amendments": [
+      {
+        "amendment_id": "UI-02-2026-05-12",
+        "timestamp": "2026-05-12T09:57:00Z",
+        "summary": "Alias-to-payload public API reversal — pub type AllocStatusRow = AllocStatusRowV1 (and same shape for Job, NodeHealthRow, ServiceHydrationResultRow, ServiceBackendRow); codec-internal envelope enums consumed only by persistence-boundary code in LocalObservationStore / LocalStore. Step 01-03 / 01-04 / 02-* criteria reworded to reflect alias-to-payload; trybuild fixture renamed alloc_status_row_payload_unreachable.rs -> alloc_status_row_envelope_unreachable.rs and asserts E0432 on the codec-internal envelope import. Commit a90755a2 shipped this shape correctly and remains the GREEN landing for step 01-03 under the amendment. The prior reviewer approval (roadmap_rev_20260512_073500) was against the pre-UI-02 criteria text; this amendment supersedes the wording without invalidating the structural review (effort estimates, phase ordering, dependency DAG, and ADR-0048 mandate coverage are unchanged). See docs/feature/rkyv-envelope-evolution/deliver/upstream-issues.md (UI-02) for the full decision record.",
+        "affected_artifacts": [
+          "docs/product/architecture/adr-0048-rkyv-versioned-envelope.md",
+          "docs/feature/rkyv-envelope-evolution/design/wave-decisions.md",
+          "docs/feature/rkyv-envelope-evolution/distill/red-scaffolds.md",
+          "docs/feature/rkyv-envelope-evolution/distill/test-scenarios.md",
+          "docs/feature/rkyv-envelope-evolution/distill/wave-decisions.md",
+          ".claude/rules/development.md",
+          "docs/feature/rkyv-envelope-evolution/deliver/roadmap.json"
+        ]
+      },
+      {
+        "amendment_id": "UI-03-2026-05-12",
+        "timestamp": "2026-05-12T10:44:00Z",
+        "summary": "Typed codec module on Job; IntentStore trait surface unchanged. Surfaced during step 01-04 when migrating LocalStore intent read/write paths to the envelope. The IntentStore trait is correctly a generic byte-level k/v store (persists Job aggregates, WorkloadKind discriminator bytes per ADR-0047, stop sentinel markers, and frame-wrapped snapshot bytes per ADR-0020) and is shared with the future RaftStore Phase 2 path whose snapshot contract relies on byte identity. The trait surface MUST NOT be refactored to take a typed Job on write/read methods. Decision (2026-05-12, user-approved): shape B(i) — codec module on Job (Job::archive_for_store / Job::from_store_bytes / Job::spec_digest); trait surface unchanged. spec_digest is option (a) — SHA-256 over envelope bytes, not raw V1 bytes; operator-observable Job ID change absorbed by greenfield single-cut per ADR-0048 § 5. The 'intent persistence boundary' conceptually moves from LocalStore::open to the Job codec module — LocalStore::open's recovery walk calls Job::from_store_bytes per jobs/ entry. Rejected: shape A — refactor IntentStore trait to take typed Job (breaks non-Job value classes + RaftStore snapshot contract; Phase-1-out-of-scope trait redesign). Rejected: shape B(ii) — typed put_job / get_job helper methods with default impl on the trait (trait surface bloat for the convenience of a single value class; per-implementation coordination cost). Step 01-04 criteria + implementation_notes + files_to_modify + effort_hours (10 -> 28) reworded to reflect the typed codec module + ~15-20 Job writer/reader call-site migrations + spec_digest semantics change. The prior reviewer approval (roadmap_rev_20260512_073500) was against the pre-UI-03 criteria text; this amendment supersedes the wording without invalidating the structural review (phase ordering, dependency DAG, and ADR-0048 mandate coverage are unchanged; effort_hours for step 01-04 increased from 10 to 28 advisory). See docs/feature/rkyv-envelope-evolution/deliver/upstream-issues.md (UI-03) for the full decision record.",
+        "affected_artifacts": [
+          "docs/product/architecture/adr-0048-rkyv-versioned-envelope.md",
+          "docs/feature/rkyv-envelope-evolution/design/wave-decisions.md",
+          "docs/feature/rkyv-envelope-evolution/deliver/roadmap.json",
+          "docs/feature/rkyv-envelope-evolution/deliver/upstream-issues.md",
+          "docs/feature/rkyv-envelope-evolution/distill/red-scaffolds.md",
+          "docs/feature/rkyv-envelope-evolution/distill/test-scenarios.md",
+          ".claude/rules/development.md"
+        ]
+      }
+    ]
+  }
+}

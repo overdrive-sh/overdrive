@@ -110,8 +110,7 @@ async fn stop_writes_separate_intent_key_preserving_spec() {
     let workload_id = WorkloadId::new("payments").expect("parse job id");
     let job_key = IntentKey::for_job(&workload_id);
     let job = overdrive_core::aggregate::Job::from_spec(payments_spec()).expect("Job::from_spec");
-    let expected_spec_bytes =
-        rkyv::to_bytes::<rkyv::rancor::Error>(&job).expect("rkyv archive expected Job");
+    let expected_spec_bytes = job.archive_for_store().expect("rkyv archive expected Job");
 
     // Stop the job.
     let stop_resp = client.post(&stop_url).send().await.expect("POST stop");

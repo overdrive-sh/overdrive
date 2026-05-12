@@ -236,8 +236,7 @@ async fn byte_identical_resubmit_returns_outcome_unchanged_and_same_digest() {
         .expect("jobs/payments must be populated after successful submit");
 
     let expected_job = Job::from_spec(spec).expect("canonical spec constructs a Job");
-    let expected_bytes =
-        rkyv::to_bytes::<rkyv::rancor::Error>(&expected_job).expect("rkyv archive of expected Job");
+    let expected_bytes = expected_job.archive_for_store().expect("rkyv archive of expected Job");
     assert_eq!(
         persisted.as_ref(),
         expected_bytes.as_ref(),

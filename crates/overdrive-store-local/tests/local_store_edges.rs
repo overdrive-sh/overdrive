@@ -30,11 +30,11 @@ async fn watch_fires_on_delete_with_empty_value() {
     let store = LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open");
 
     // Seed a value so the delete has something to remove.
-    store.put(b"jobs/payments", b"v1").await.expect("put");
+    store.put(b"kv/payments", b"v1").await.expect("put");
 
-    let mut watch = store.watch(b"jobs/").await.expect("watch");
+    let mut watch = store.watch(b"kv/").await.expect("watch");
 
-    store.delete(b"jobs/payments").await.expect("delete");
+    store.delete(b"kv/payments").await.expect("delete");
 
     let event = timeout(Duration::from_secs(2), watch.next())
         .await
@@ -43,7 +43,7 @@ async fn watch_fires_on_delete_with_empty_value() {
 
     // Key matches; value is empty to signal a delete per the trait
     // docstring.
-    assert_eq!(event.0, Bytes::copy_from_slice(b"jobs/payments"));
+    assert_eq!(event.0, Bytes::copy_from_slice(b"kv/payments"));
     assert!(event.1.is_empty(), "delete event carries an empty value");
 }
 
@@ -52,12 +52,12 @@ async fn overwriting_a_key_returns_the_latest_value() {
     let tmp = TempDir::new().expect("temp dir");
     let store = LocalIntentStore::open(tmp.path().join("intent.redb")).expect("open");
 
-    store.put(b"jobs/payments", b"v1").await.expect("first put");
-    store.put(b"jobs/payments", b"v2").await.expect("second put");
+    store.put(b"kv/payments", b"v1").await.expect("first put");
+    store.put(b"kv/payments", b"v2").await.expect("second put");
 
     // Per ADR-0020 the read returns bytes only — the latest value
     // (v2) is what surfaces.
-    let read = store.get(b"jobs/payments").await.expect("get");
+    let read = store.get(b"kv/payments").await.expect("get");
     assert_eq!(read, Some(Bytes::copy_from_slice(b"v2")));
 }
 
@@ -82,13 +82,13 @@ async fn reopening_the_same_path_preserves_state() {
     // Write through one LocalIntentStore and drop it.
     {
         let store = LocalIntentStore::open(&path).expect("first open");
-        store.put(b"jobs/payments", b"durable").await.expect("put");
+        store.put(b"kv/payments", b"durable").await.expect("put");
     }
 
     // Open a fresh LocalIntentStore on the same path. Per ADR-0020 the
     // read returns bytes only — there is no per-entry index column.
     let store = LocalIntentStore::open(&path).expect("second open");
-    let read = store.get(b"jobs/payments").await.expect("get");
+    let read = store.get(b"kv/payments").await.expect("get");
     assert_eq!(read, Some(Bytes::copy_from_slice(b"durable")));
 }
 
@@ -106,26 +106,26 @@ async fn bootstrap_from_replaces_rather_than_merges_into_existing_state() {
     // bootstrap.
     let producer_path = tmp.path().join("producer.redb");
     let producer = LocalIntentStore::open(&producer_path).expect("producer open");
-    producer.put(b"jobs/payments", b"from-producer").await.expect("producer put");
+    producer.put(b"kv/payments", b"from-producer").await.expect("producer put");
     let snapshot = producer.export_snapshot().await.expect("export");
 
     // Target store: seeded with a DIFFERENT key that must not survive
     // bootstrap. Full-state semantics require this key be gone.
     let target_path = tmp.path().join("target.redb");
     let target = LocalIntentStore::open(&target_path).expect("target open");
-    target.put(b"jobs/leftover", b"should-be-wiped").await.expect("target put");
+    target.put(b"kv/leftover", b"should-be-wiped").await.expect("target put");
 
     target.bootstrap_from(snapshot).await.expect("bootstrap_from");
 
     // The producer's key is visible after bootstrap. Per ADR-0020 the
     // read returns bytes only.
-    let producer_value = target.get(b"jobs/payments").await.expect("get producer key");
+    let producer_value = target.get(b"kv/payments").await.expect("get producer key");
     assert_eq!(producer_value, Some(Bytes::copy_from_slice(b"from-producer")));
 
     // The pre-existing target-only key is GONE. Without the clear
     // step inside `bootstrap_from` this assertion fails — the leftover
     // row would survive the snapshot replay.
-    let leftover = target.get(b"jobs/leftover").await.expect("get leftover");
+    let leftover = target.get(b"kv/leftover").await.expect("get leftover");
     assert_eq!(leftover, None, "bootstrap_from must replace, not merge");
 }
 
@@ -148,7 +148,7 @@ async fn open_creates_missing_parent_directory() {
 
     // The store is usable end-to-end after open — not just a no-op
     // success that papered over a half-initialised database.
-    store.put(b"jobs/payments", b"v1").await.expect("put after open");
-    let read = store.get(b"jobs/payments").await.expect("get after open");
+    store.put(b"kv/payments", b"v1").await.expect("put after open");
+    let read = store.get(b"kv/payments").await.expect("get after open");
     assert_eq!(read, Some(Bytes::copy_from_slice(b"v1")));
 }

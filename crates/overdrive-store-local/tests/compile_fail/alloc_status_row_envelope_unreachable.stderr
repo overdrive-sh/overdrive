@@ -1,0 +1,5 @@
+error[E0432]: unresolved import `overdrive_core::AllocStatusRowEnvelope`
+  --> tests/compile_fail/alloc_status_row_envelope_unreachable.rs:18:5
+   |
+18 | use overdrive_core::AllocStatusRowEnvelope;
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ no `AllocStatusRowEnvelope` in the root

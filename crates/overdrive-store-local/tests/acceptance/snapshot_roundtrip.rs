@@ -35,12 +35,16 @@ use tempfile::TempDir;
 
 #[tokio::test]
 async fn snapshot_roundtrip_is_byte_identical_across_local_store_instances() {
-    // Given a LocalIntentStore populated with a known set of JobSpec entries.
+    // Given a LocalIntentStore populated with a known set of entries.
+    // Keys use the `data/` prefix (not `jobs/`) so bootstrap_from's
+    // envelope validation walk doesn't reject the raw byte values —
+    // this test exercises the snapshot frame mechanism, not the Job
+    // codec.
     let tmp1 = TempDir::new().expect("temp dir 1");
     let store1 = LocalIntentStore::open(tmp1.path().join("intent.redb")).expect("open 1");
-    store1.put(b"jobs/payments", b"spec-v1-bytes").await.expect("put payments");
-    store1.put(b"jobs/auth", b"spec-auth-bytes").await.expect("put auth");
-    store1.put(b"jobs/frontend", b"spec-frontend-bytes").await.expect("put frontend");
+    store1.put(b"data/payments", b"spec-v1-bytes").await.expect("put payments");
+    store1.put(b"data/auth", b"spec-auth-bytes").await.expect("put auth");
+    store1.put(b"data/frontend", b"spec-frontend-bytes").await.expect("put frontend");
 
     // When Ana exports a snapshot.
     let snap1 = store1.export_snapshot().await.expect("export 1");
@@ -63,18 +67,18 @@ async fn snapshot_roundtrip_is_byte_identical_across_local_store_instances() {
         "snapshot bytes must be byte-identical across LocalIntentStore instances"
     );
 
-    // And every JobSpec readable from the first store is also readable
+    // And every entry readable from the first store is also readable
     // from the second store.
     assert_eq!(
-        store2.get(b"jobs/payments").await.expect("get payments"),
+        store2.get(b"data/payments").await.expect("get payments"),
         Some(Bytes::copy_from_slice(b"spec-v1-bytes"))
     );
     assert_eq!(
-        store2.get(b"jobs/auth").await.expect("get auth"),
+        store2.get(b"data/auth").await.expect("get auth"),
         Some(Bytes::copy_from_slice(b"spec-auth-bytes"))
     );
     assert_eq!(
-        store2.get(b"jobs/frontend").await.expect("get frontend"),
+        store2.get(b"data/frontend").await.expect("get frontend"),
         Some(Bytes::copy_from_slice(b"spec-frontend-bytes"))
     );
 }
@@ -118,9 +122,10 @@ async fn snapshot_roundtrip_byte_identical_with_four_kb_value() {
     let tmp1 = TempDir::new().expect("temp dir 1");
     let store1 = LocalIntentStore::open(tmp1.path().join("intent.redb")).expect("open 1");
 
-    // 4 KB value.
+    // 4 KB value under a non-`jobs/` key so bootstrap_from's envelope
+    // validation walk doesn't reject the raw bytes.
     let big_value = vec![0xABu8; 4 * 1024];
-    store1.put(b"jobs/bulk", &big_value).await.expect("put bulk");
+    store1.put(b"data/bulk", &big_value).await.expect("put bulk");
 
     let snap1 = store1.export_snapshot().await.expect("export 1");
 
@@ -133,7 +138,7 @@ async fn snapshot_roundtrip_byte_identical_with_four_kb_value() {
 
     // The value is readable from the bootstrapped store.
     assert_eq!(
-        store2.get(b"jobs/bulk").await.expect("get bulk"),
+        store2.get(b"data/bulk").await.expect("get bulk"),
         Some(Bytes::copy_from_slice(&big_value))
     );
 }
@@ -150,16 +155,16 @@ async fn snapshot_bytes_are_deterministic_regardless_of_insertion_order() {
     let tmp_a = TempDir::new().expect("temp dir a");
     let store_a = LocalIntentStore::open(tmp_a.path().join("intent.redb")).expect("open a");
     // Insert in order A, B, C.
-    store_a.put(b"jobs/a", b"va").await.expect("put a");
-    store_a.put(b"jobs/b", b"vb").await.expect("put b");
-    store_a.put(b"jobs/c", b"vc").await.expect("put c");
+    store_a.put(b"data/a", b"va").await.expect("put a");
+    store_a.put(b"data/b", b"vb").await.expect("put b");
+    store_a.put(b"data/c", b"vc").await.expect("put c");
 
     let tmp_b = TempDir::new().expect("temp dir b");
     let store_b = LocalIntentStore::open(tmp_b.path().join("intent.redb")).expect("open b");
     // Insert in reverse order C, B, A.
-    store_b.put(b"jobs/c", b"vc").await.expect("put c");
-    store_b.put(b"jobs/b", b"vb").await.expect("put b");
-    store_b.put(b"jobs/a", b"va").await.expect("put a");
+    store_b.put(b"data/c", b"vc").await.expect("put c");
+    store_b.put(b"data/b", b"vb").await.expect("put b");
+    store_b.put(b"data/a", b"va").await.expect("put a");
 
     let snap_a = store_a.export_snapshot().await.expect("export a");
     let snap_b = store_b.export_snapshot().await.expect("export b");

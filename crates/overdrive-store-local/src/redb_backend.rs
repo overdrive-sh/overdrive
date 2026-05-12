@@ -40,7 +40,7 @@
 //! * Events fire only after successful redb commit, so a subscriber
 //!   never sees a phantom write that failed to persist.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -90,6 +90,9 @@ struct Inner {
     /// and `begin_write` both take `&self`, and the crate is documented
     /// as safe to share across threads. No external mutex is required.
     db: Database,
+    /// Retained for diagnostic events (`health.startup.refused`) that
+    /// need to name the redb file in operator-facing messages.
+    path: PathBuf,
     watch_tx: broadcast::Sender<WatchEvent>,
 }
 
@@ -119,9 +122,63 @@ impl LocalIntentStore {
             write.commit().map_err(map_commit_error)?;
         }
 
+        // Intent envelope recovery walk per ADR-0048 § "Intent
+        // persistence boundary — typed codec on Job" + § 3
+        // (refuse-to-start on malformed/unknown envelopes). Iterate
+        // every key with the `jobs/` prefix and attempt to decode via
+        // the typed `Job::from_store_bytes` codec. The first decode
+        // failure surfaces a structured `health.startup.refused` event
+        // (emitted inside `from_store_bytes`) and aborts boot with
+        // `IntentStoreError::Envelope`. The asymmetric intent-fail-fast
+        // policy (intent is load-bearing SSOT) is implemented here.
+        // The `jobs/<id>/stop` suffix-keys are skipped — their value is
+        // an empty byte slice (the existence is the signal); they don't
+        // carry envelope bytes.
+        {
+            const JOB_PREFIX: &[u8] = b"jobs/";
+            const STOP_SUFFIX: &[u8] = b"/stop";
+            let read = db.begin_read().map_err(map_transaction_error)?;
+            let table = read.open_table(ENTRIES_TABLE).map_err(map_table_error)?;
+            let range = table.range::<&[u8]>(JOB_PREFIX..).map_err(map_storage_error)?;
+            for entry in range {
+                let (key, value) = entry.map_err(map_storage_error)?;
+                let key_bytes = key.value();
+                if !key_bytes.starts_with(JOB_PREFIX) {
+                    // Safe to break: redb range scans iterate keys in
+                    // sorted byte order, so once the prefix no longer
+                    // matches, every remaining key in the range also
+                    // won't. Removing the prefix-bounded scan would
+                    // make the boot path scan every row in the table.
+                    break;
+                }
+                if key_bytes.ends_with(STOP_SUFFIX) {
+                    continue;
+                }
+                // Pass the iterated key into `from_store_bytes` so the
+                // `health.startup.refused` event names which row failed
+                // when an operator has N jobs in the file. We
+                // hex-encode the key bytes unconditionally: today's
+                // keys are ASCII `jobs/<workload-id>` (hex form is
+                // verbose but unambiguous), but a future key prefix
+                // may carry binary bytes — `String::from_utf8_lossy`
+                // would silently substitute U+FFFD and corrupt the
+                // operator's ability to locate the failing row.
+                // The hex form is always correct and round-trips
+                // through `xxd | grep <hex>` / `redb-cli`. The event's
+                // `key` field is the load-bearing diagnostic
+                // identifier; clarity beats brevity here.
+                let key_hex = hex::encode(key_bytes);
+                overdrive_core::aggregate::Job::from_store_bytes(
+                    value.value(),
+                    path,
+                    Some(&key_hex),
+                )?;
+            }
+        }
+
         let (watch_tx, _) = broadcast::channel(WATCH_CHANNEL_CAPACITY);
 
-        Ok(Self { inner: Arc::new(Inner { db, watch_tx }) })
+        Ok(Self { inner: Arc::new(Inner { db, path: path.to_path_buf(), watch_tx }) })
     }
 
     fn emit(&self, key: Bytes, value: Bytes) {
@@ -420,6 +477,33 @@ impl IntentStore for LocalIntentStore {
             // the export of a fresh never-bootstrapped store.
             let entries = snapshot_frame::decode(&frame)
                 .map_err(|e| IntentStoreError::SnapshotCorrupt { offset: e.offset() })?;
+
+            // Intent envelope validation walk — same discipline as
+            // `LocalIntentStore::open`. Every `jobs/<id>` entry
+            // (excluding `jobs/<id>/stop` sentinel keys) is decoded
+            // through the typed `Job::from_store_bytes` codec BEFORE
+            // any write. A snapshot containing an unknown or malformed
+            // envelope surfaces `health.startup.refused` and aborts
+            // here — the target store is never touched.
+            {
+                const JOB_PREFIX: &[u8] = b"jobs/";
+                const STOP_SUFFIX: &[u8] = b"/stop";
+                for (k, v) in &entries {
+                    let key_bytes = k.as_ref();
+                    if !key_bytes.starts_with(JOB_PREFIX) {
+                        continue;
+                    }
+                    if key_bytes.ends_with(STOP_SUFFIX) {
+                        continue;
+                    }
+                    let key_hex = hex::encode(key_bytes);
+                    overdrive_core::aggregate::Job::from_store_bytes(
+                        v.as_ref(),
+                        &inner.path,
+                        Some(&key_hex),
+                    )?;
+                }
+            }
 
             let write = inner.db.begin_write().map_err(map_transaction_error)?;
             {

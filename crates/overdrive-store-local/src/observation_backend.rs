@@ -37,6 +37,23 @@
 //! will miss the lost events. Phase 2's Corrosion replacement
 //! recovers via CR-SQLite gossip catch-up.
 //!
+//! # Malformed-row warn cadence
+//!
+//! Malformed observation rows produce a
+//! `tracing::warn!(name = "observation.envelope.decode_failed", ...)`
+//! event on every scan that encounters them — once per row per call
+//! to `<table>_rows()`. A row that persists across many reconciler
+//! ticks will emit many warn events. The intended remediation is to
+//! rewrite the row through the typed write API (`apply_*_lww`),
+//! which replaces the malformed bytes and silences subsequent warns
+//! naturally. There is no in-memory dedup; the scan path is
+//! stateless by design (the `ObservationStore` is gossiped and any
+//! node may converge first — so a stateful "we already warned for
+//! this row" cache on one peer would still re-warn on every other
+//! peer that scans the row and would also re-warn this peer after
+//! restart). Per ADR-0048 § 3, observation log-and-skip is the
+//! correct degrade path; the warn cadence is the price.
+//!
 //! # LWW guard on `write`
 //!
 //! Per the `ObservationStore::write` trait contract codified in
@@ -58,11 +75,13 @@ use std::task::{Context, Poll};
 
 use async_trait::async_trait;
 use futures::Stream;
+use overdrive_core::codec::{VersionedEnvelope, decode_envelope_bytes};
 use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
 use overdrive_core::id::{AllocationId, ServiceId};
 use overdrive_core::traits::observation_store::{
-    AllocStatusRow, NodeHealthRow, ObservationRow, ObservationStore, ObservationStoreError,
-    ObservationSubscription, ServiceBackendRow, ServiceHydrationResultRow,
+    AllocStatusRow, AllocStatusRowEnvelope, NodeHealthRow, NodeHealthRowEnvelope, ObservationRow,
+    ObservationStore, ObservationStoreError, ObservationSubscription, ServiceBackendRow,
+    ServiceBackendRowEnvelope, ServiceHydrationResultRow, ServiceHydrationResultRowEnvelope,
 };
 use redb::{Database, ReadableTable, Table, TableDefinition};
 use tokio::sync::broadcast;
@@ -112,6 +131,12 @@ const fn encode_service_hydration_key(
 /// Encode the prefix of `(service_id, *)` for range scans — first 8
 /// bytes of [`encode_service_hydration_key`].
 const fn encode_service_hydration_prefix(service_id: ServiceId) -> [u8; 8] {
+    service_id.get().to_le_bytes()
+}
+
+/// Encode the `ServiceId` key as 8 LE bytes for the
+/// `SERVICE_BACKENDS_TABLE`. Single-keyed (no composite). GH #160.
+const fn encode_service_backends_key(service_id: ServiceId) -> [u8; 8] {
     service_id.get().to_le_bytes()
 }
 
@@ -244,27 +269,37 @@ impl ObservationStore for LocalObservationStore {
 
     async fn alloc_status_rows(&self) -> Result<Vec<AllocStatusRow>, ObservationStoreError> {
         let inner = Arc::clone(&self.inner);
-        tokio::task::spawn_blocking(move || {
+        // Emit decode-failure events on the calling async thread so
+        // per-test `tracing::subscriber::set_default` guards (which
+        // are thread-local) observe them. The blocking task collects
+        // the failures and returns them alongside the surviving rows.
+        let (rows, decode_failures) = tokio::task::spawn_blocking(move || {
             let read = inner.db.begin_read().map_err(map_to_io)?;
             let table = read.open_table(ALLOC_STATUS_TABLE).map_err(map_to_io)?;
             let mut out: Vec<AllocStatusRow> = Vec::new();
+            let mut failures: Vec<(Vec<u8>, ObservationStoreError)> = Vec::new();
             let iter = table.iter().map_err(map_to_io)?;
             for item in iter {
-                let (_k, v) = item.map_err(map_to_io)?;
-                // redb returns a byte slice with unknown alignment; rkyv
-                // requires 8-byte-aligned access. Copy into an AlignedVec
-                // before deserialising.
-                let mut aligned = rkyv::util::AlignedVec::<8>::new();
-                aligned.extend_from_slice(v.value());
-                let row: AllocStatusRow =
-                    rkyv::from_bytes::<AllocStatusRow, rkyv::rancor::Error>(&aligned)
-                        .map_err(map_to_io)?;
-                out.push(row);
+                let (k, v) = item.map_err(map_to_io)?;
+                match decode_envelope::<AllocStatusRowEnvelope>(v.value()) {
+                    Ok(row) => out.push(row),
+                    Err(err) => failures.push((k.value().to_vec(), err)),
+                }
             }
-            Ok::<_, ObservationStoreError>(out)
+            Ok::<_, ObservationStoreError>((out, failures))
         })
         .await
-        .map_err(map_to_io)?
+        .map_err(map_to_io)??;
+
+        // Per ADR-0048 § 3 (observation layer): log + skip rows
+        // whose envelope decode failed. Convergence proceeds on
+        // surviving rows.
+        log_decode_failures(
+            "observation_alloc_status",
+            "skipping alloc-status row that failed envelope decode",
+            decode_failures,
+        );
+        Ok(rows)
     }
 
     async fn alloc_status_row(
@@ -273,46 +308,69 @@ impl ObservationStore for LocalObservationStore {
     ) -> Result<Option<AllocStatusRow>, ObservationStoreError> {
         let inner = Arc::clone(&self.inner);
         let key: Vec<u8> = alloc_id.as_str().as_bytes().to_vec();
-        tokio::task::spawn_blocking(move || {
+        let key_for_emit = key.clone();
+        let outcome = tokio::task::spawn_blocking(move || {
             let read = inner.db.begin_read().map_err(map_to_io)?;
             let table = read.open_table(ALLOC_STATUS_TABLE).map_err(map_to_io)?;
             let Some(value) = table.get(key.as_slice()).map_err(map_to_io)? else {
-                return Ok::<_, ObservationStoreError>(None);
+                return Ok::<_, ObservationStoreError>(Ok(None));
             };
-            let mut aligned = rkyv::util::AlignedVec::<8>::new();
-            aligned.extend_from_slice(value.value());
-            let row: AllocStatusRow =
-                rkyv::from_bytes::<AllocStatusRow, rkyv::rancor::Error>(&aligned)
-                    .map_err(map_to_io)?;
-            Ok(Some(row))
+            // Point lookup: per ADR-0048 § 3 observation policy is
+            // log + skip, so a malformed row returns None (with a
+            // structured warn event emitted on the calling thread).
+            match decode_envelope::<AllocStatusRowEnvelope>(value.value()) {
+                Ok(row) => Ok(Ok(Some(row))),
+                Err(err) => Ok(Err(err)),
+            }
         })
         .await
-        .map_err(map_to_io)?
+        .map_err(map_to_io)??;
+
+        match outcome {
+            Ok(opt) => Ok(opt),
+            Err(err) => {
+                log_decode_failures(
+                    "observation_alloc_status",
+                    "skipping alloc-status row that failed envelope decode",
+                    vec![(key_for_emit, err)],
+                );
+                Ok(None)
+            }
+        }
     }
 
     async fn node_health_rows(&self) -> Result<Vec<NodeHealthRow>, ObservationStoreError> {
         let inner = Arc::clone(&self.inner);
-        tokio::task::spawn_blocking(move || {
+        // Per ADR-0048 § 3 (observation layer): log + skip rows whose
+        // envelope decode failed. Mirror of the alloc_status_rows path
+        // above — failures are collected inside the blocking task and
+        // emitted on the calling async thread so per-test
+        // `tracing::subscriber::set_default` guards (thread-local)
+        // observe them.
+        let (rows, decode_failures) = tokio::task::spawn_blocking(move || {
             let read = inner.db.begin_read().map_err(map_to_io)?;
             let table = read.open_table(NODE_HEALTH_TABLE).map_err(map_to_io)?;
             let mut out: Vec<NodeHealthRow> = Vec::new();
+            let mut failures: Vec<(Vec<u8>, ObservationStoreError)> = Vec::new();
             let iter = table.iter().map_err(map_to_io)?;
             for item in iter {
-                let (_k, v) = item.map_err(map_to_io)?;
-                // redb returns a byte slice with unknown alignment; rkyv
-                // requires 8-byte-aligned access. Copy into an AlignedVec
-                // before deserialising.
-                let mut aligned = rkyv::util::AlignedVec::<8>::new();
-                aligned.extend_from_slice(v.value());
-                let row: NodeHealthRow =
-                    rkyv::from_bytes::<NodeHealthRow, rkyv::rancor::Error>(&aligned)
-                        .map_err(map_to_io)?;
-                out.push(row);
+                let (k, v) = item.map_err(map_to_io)?;
+                match decode_envelope::<NodeHealthRowEnvelope>(v.value()) {
+                    Ok(row) => out.push(row),
+                    Err(err) => failures.push((k.value().to_vec(), err)),
+                }
             }
-            Ok::<_, ObservationStoreError>(out)
+            Ok::<_, ObservationStoreError>((out, failures))
         })
         .await
-        .map_err(map_to_io)?
+        .map_err(map_to_io)??;
+
+        log_decode_failures(
+            "observation_node_health",
+            "skipping node-health row that failed envelope decode",
+            decode_failures,
+        );
+        Ok(rows)
     }
 
     async fn service_hydration_results_rows(
@@ -321,32 +379,42 @@ impl ObservationStore for LocalObservationStore {
     ) -> Result<Vec<ServiceHydrationResultRow>, ObservationStoreError> {
         let inner = Arc::clone(&self.inner);
         let prefix = encode_service_hydration_prefix(*service_id);
-        tokio::task::spawn_blocking(move || {
+        let mut range_start = [0u8; 16];
+        let mut range_end = [0u8; 16];
+        range_start[..8].copy_from_slice(&prefix);
+        range_end[..8].copy_from_slice(&prefix);
+        range_end[8..].fill(0xFF);
+        // Per ADR-0048 § 3 (observation layer): log + skip rows whose
+        // envelope decode failed. Mirror of the alloc_status_rows /
+        // node_health_rows paths above — failures are collected inside
+        // the blocking task and emitted on the calling async thread so
+        // per-test `tracing::subscriber::set_default` guards
+        // (thread-local) observe them.
+        let (rows, decode_failures) = tokio::task::spawn_blocking(move || {
             let read = inner.db.begin_read().map_err(map_to_io)?;
             let table = read.open_table(SERVICE_HYDRATION_TABLE).map_err(map_to_io)?;
             let mut out: Vec<ServiceHydrationResultRow> = Vec::new();
-            // Range scan over the 8-byte service_id prefix — keys are
-            // composite `(service_id || fingerprint)` with service_id
-            // first, so a contiguous range covers exactly the rows
-            // for `service_id`.
-            let iter = table.iter().map_err(map_to_io)?;
+            let mut failures: Vec<(Vec<u8>, ObservationStoreError)> = Vec::new();
+            let iter =
+                table.range(range_start.as_slice()..=range_end.as_slice()).map_err(map_to_io)?;
             for item in iter {
                 let (k, v) = item.map_err(map_to_io)?;
-                let key_bytes = k.value();
-                if key_bytes.len() != 16 || &key_bytes[..8] != prefix.as_slice() {
-                    continue;
+                match decode_envelope::<ServiceHydrationResultRowEnvelope>(v.value()) {
+                    Ok(row) => out.push(row),
+                    Err(err) => failures.push((k.value().to_vec(), err)),
                 }
-                let mut aligned = rkyv::util::AlignedVec::<8>::new();
-                aligned.extend_from_slice(v.value());
-                let row: ServiceHydrationResultRow =
-                    rkyv::from_bytes::<ServiceHydrationResultRow, rkyv::rancor::Error>(&aligned)
-                        .map_err(map_to_io)?;
-                out.push(row);
             }
-            Ok::<_, ObservationStoreError>(out)
+            Ok::<_, ObservationStoreError>((out, failures))
         })
         .await
-        .map_err(map_to_io)?
+        .map_err(map_to_io)??;
+
+        log_decode_failures(
+            "observation_service_hydration_results",
+            "skipping service-hydration row that failed envelope decode",
+            decode_failures,
+        );
+        Ok(rows)
     }
 
     async fn service_backends_rows(
@@ -355,17 +423,86 @@ impl ObservationStore for LocalObservationStore {
     ) -> Result<Vec<ServiceBackendRow>, ObservationStoreError> {
         let inner = Arc::clone(&self.inner);
         let key = encode_service_backends_key(*service_id);
-        tokio::task::spawn_blocking(move || {
+        // Per ADR-0048 § 3 (observation layer): log + skip rows whose
+        // envelope decode failed. Mirror of the alloc_status_rows /
+        // node_health_rows / service_hydration_results_rows paths above
+        // — failures are collected inside the blocking task and
+        // emitted on the calling async thread so per-test
+        // `tracing::subscriber::set_default` guards (thread-local)
+        // observe them.
+        let (rows, decode_failures) = tokio::task::spawn_blocking(move || {
             let read = inner.db.begin_read().map_err(map_to_io)?;
             let table = read.open_table(SERVICE_BACKENDS_TABLE).map_err(map_to_io)?;
-            let Some(value) = table.get(key.as_slice()).map_err(map_to_io)? else {
-                return Ok::<_, ObservationStoreError>(Vec::new());
-            };
-            let row = decode_service_backends(value.value())?;
-            Ok(vec![row])
+            let mut rows: Vec<ServiceBackendRow> = Vec::new();
+            let mut failures: Vec<(Vec<u8>, ObservationStoreError)> = Vec::new();
+            if let Some(value) = table.get(key.as_slice()).map_err(map_to_io)? {
+                match decode_envelope::<ServiceBackendRowEnvelope>(value.value()) {
+                    Ok(row) => rows.push(row),
+                    Err(err) => failures.push((key.to_vec(), err)),
+                }
+            }
+            Ok::<_, ObservationStoreError>((rows, failures))
         })
         .await
-        .map_err(map_to_io)?
+        .map_err(map_to_io)??;
+
+        log_decode_failures(
+            "observation_service_backends",
+            "skipping service-backend row that failed envelope decode",
+            decode_failures,
+        );
+        Ok(rows)
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Envelope decode helpers — shared between the read path
+// (`*_rows` methods on the impl block) and the LWW guards
+// (`apply_*_lww` below). Both surfaces decode the same per-table
+// envelope bytes; centralising the alignment + probe + rkyv + project
+// pipeline through these helpers keeps the four per-table fns
+// readable.
+// -----------------------------------------------------------------------------
+
+/// Decode a prior rkyv-archived envelope from redb-returned bytes and
+/// project to the latest payload shape per ADR-0048.
+///
+/// Thin wrapper over [`overdrive_core::codec::decode_envelope_bytes`]
+/// that re-surfaces the typed envelope error as
+/// [`ObservationStoreError::Envelope`] so callers can branch on the
+/// structured cause (malformed bytes vs unknown future variant). Per
+/// ADR-0048 § 3 the observation-layer policy is to log + skip the row,
+/// not refuse to start — see [`log_decode_failures`] for the
+/// structured warn-event surface every `*_rows` method routes through.
+fn decode_envelope<E>(bytes: &[u8]) -> Result<E::Latest, ObservationStoreError>
+where
+    E: VersionedEnvelope + rkyv::Archive,
+    E::Archived: for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>
+        + rkyv::Deserialize<E, rkyv::rancor::Strategy<rkyv::de::Pool, rkyv::rancor::Error>>,
+{
+    decode_envelope_bytes::<E>(bytes).map_err(ObservationStoreError::from)
+}
+
+/// Emit a structured `observation.envelope.decode_failed` event for
+/// each row that failed envelope decode during a scan. The warning
+/// fires on the calling async thread so per-test
+/// `tracing::subscriber::set_default` guards (which are thread-local)
+/// observe it. Per ADR-0048 § 3 the observation-layer policy is
+/// log + skip — this is the "log" half; the caller's containing
+/// `*_rows` method has already collected the surviving rows.
+fn log_decode_failures(
+    table_name: &'static str,
+    skipped_row_label: &'static str,
+    failures: Vec<(Vec<u8>, ObservationStoreError)>,
+) {
+    for (key_bytes, err) in failures {
+        tracing::warn!(
+            name: "observation.envelope.decode_failed",
+            table = table_name,
+            key = ?key_bytes,
+            source = ?err,
+            "{skipped_row_label}",
+        );
     }
 }
 
@@ -383,24 +520,6 @@ impl ObservationStore for LocalObservationStore {
 // on subscriptions.
 // -----------------------------------------------------------------------------
 
-/// Decode a prior rkyv-archived `AllocStatusRow` from redb-returned
-/// bytes. Mirrors the alignment-aware decoding pattern at the top of
-/// [`LocalObservationStore::alloc_status_rows`] — redb returns slices
-/// with unknown alignment; rkyv requires 8-byte alignment.
-fn decode_alloc_status(bytes: &[u8]) -> Result<AllocStatusRow, ObservationStoreError> {
-    let mut aligned = rkyv::util::AlignedVec::<8>::new();
-    aligned.extend_from_slice(bytes);
-    rkyv::from_bytes::<AllocStatusRow, rkyv::rancor::Error>(&aligned).map_err(map_to_io)
-}
-
-/// Decode a prior rkyv-archived `NodeHealthRow` from redb-returned
-/// bytes. See [`decode_alloc_status`] for the alignment rationale.
-fn decode_node_health(bytes: &[u8]) -> Result<NodeHealthRow, ObservationStoreError> {
-    let mut aligned = rkyv::util::AlignedVec::<8>::new();
-    aligned.extend_from_slice(bytes);
-    rkyv::from_bytes::<NodeHealthRow, rkyv::rancor::Error>(&aligned).map_err(map_to_io)
-}
-
 /// LWW-guarded insert for `AllocStatusRow`. Reads the prior row at
 /// `incoming.alloc_id` (if any), compares via
 /// [`overdrive_core::traits::observation_store::LogicalTimestamp::dominates`],
@@ -410,15 +529,24 @@ fn apply_alloc_status_lww(
     incoming: &AllocStatusRow,
 ) -> Result<bool, ObservationStoreError> {
     let key = incoming.alloc_id.as_str().as_bytes();
-    let dominates = match table.get(key).map_err(map_to_io)? {
-        None => true,
-        Some(prior) => {
-            let prior_row = decode_alloc_status(prior.value())?;
-            incoming.updated_at.dominates(&prior_row.updated_at)
+    // If the prior row's bytes don't decode (malformed / unknown
+    // variant), treat the incoming write as dominating — the
+    // operator's typed write is the self-healing path per
+    // ADR-0048 § 3. is_none_or short-circuits on absent prior;
+    // the inner branch returns true on either dominate OR decode
+    // failure.
+    let dominates = table.get(key).map_err(map_to_io)?.is_none_or(|prior| {
+        match decode_envelope::<AllocStatusRowEnvelope>(prior.value()) {
+            Ok(prior_row) => incoming.updated_at.dominates(&prior_row.updated_at),
+            Err(_) => true,
         }
-    };
+    });
     if dominates {
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(incoming).map_err(map_to_io)?;
+        // Wrap into the versioned envelope at the write boundary per
+        // ADR-0048 § 1 — the on-disk shape is the envelope, never the
+        // bare payload.
+        let envelope = AllocStatusRowEnvelope::latest(incoming.clone());
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).map_err(map_to_io)?;
         table.insert(key, bytes.as_ref()).map_err(map_to_io)?;
     }
     Ok(dominates)
@@ -426,67 +554,54 @@ fn apply_alloc_status_lww(
 
 /// LWW-guarded insert for `NodeHealthRow`. Mirrors
 /// [`apply_alloc_status_lww`] — keyed by `incoming.node_id`, compares
-/// `incoming.last_heartbeat` via `LogicalTimestamp::dominates`.
+/// `incoming.last_heartbeat` via `LogicalTimestamp::dominates`. On
+/// envelope decode failure of the prior row, treats the incoming
+/// write as dominating per ADR-0048 § 3 (the operator's typed write
+/// is the self-healing path).
 fn apply_node_health_lww(
     table: &mut Table<'_, &[u8], &[u8]>,
     incoming: &NodeHealthRow,
 ) -> Result<bool, ObservationStoreError> {
     let key = incoming.node_id.as_str().as_bytes();
-    let dominates = match table.get(key).map_err(map_to_io)? {
-        None => true,
-        Some(prior) => {
-            let prior_row = decode_node_health(prior.value())?;
-            incoming.last_heartbeat.dominates(&prior_row.last_heartbeat)
+    let dominates = table.get(key).map_err(map_to_io)?.is_none_or(|prior| {
+        match decode_envelope::<NodeHealthRowEnvelope>(prior.value()) {
+            Ok(prior_row) => incoming.last_heartbeat.dominates(&prior_row.last_heartbeat),
+            Err(_) => true,
         }
-    };
+    });
     if dominates {
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(incoming).map_err(map_to_io)?;
+        // Wrap into the versioned envelope at the write boundary per
+        // ADR-0048 § 1 — the on-disk shape is the envelope, never the
+        // bare payload.
+        let envelope = NodeHealthRowEnvelope::latest(incoming.clone());
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).map_err(map_to_io)?;
         table.insert(key, bytes.as_ref()).map_err(map_to_io)?;
     }
     Ok(dominates)
 }
 
-/// Decode a prior rkyv-archived `ServiceHydrationResultRow`. Mirrors
-/// [`decode_alloc_status`].
-fn decode_service_hydration(
-    bytes: &[u8],
-) -> Result<ServiceHydrationResultRow, ObservationStoreError> {
-    let mut aligned = rkyv::util::AlignedVec::<8>::new();
-    aligned.extend_from_slice(bytes);
-    rkyv::from_bytes::<ServiceHydrationResultRow, rkyv::rancor::Error>(&aligned).map_err(map_to_io)
-}
-
-/// Encode the `ServiceId` key as 8 LE bytes for the
-/// `SERVICE_BACKENDS_TABLE`. Single-keyed (no composite). GH #160.
-const fn encode_service_backends_key(service_id: ServiceId) -> [u8; 8] {
-    service_id.get().to_le_bytes()
-}
-
-/// Decode a prior rkyv-archived `ServiceBackendRow`. Mirrors
-/// [`decode_alloc_status`].
-fn decode_service_backends(bytes: &[u8]) -> Result<ServiceBackendRow, ObservationStoreError> {
-    let mut aligned = rkyv::util::AlignedVec::<8>::new();
-    aligned.extend_from_slice(bytes);
-    rkyv::from_bytes::<ServiceBackendRow, rkyv::rancor::Error>(&aligned).map_err(map_to_io)
-}
-
 /// LWW-guarded insert for `ServiceBackendRow`. Keyed on `ServiceId`
 /// alone — one row per service. Mirrors [`apply_alloc_status_lww`].
-/// GH #160.
+/// On envelope decode failure of the prior row, treats the incoming
+/// write as dominating per ADR-0048 § 3 (the operator's typed write
+/// is the self-healing path). GH #160.
 fn apply_service_backends_lww(
     table: &mut Table<'_, &[u8], &[u8]>,
     incoming: &ServiceBackendRow,
 ) -> Result<bool, ObservationStoreError> {
     let key = encode_service_backends_key(incoming.service_id);
-    let dominates = match table.get(key.as_slice()).map_err(map_to_io)? {
-        None => true,
-        Some(prior) => {
-            let prior_row = decode_service_backends(prior.value())?;
-            incoming.updated_at.dominates(&prior_row.updated_at)
+    let dominates = table.get(key.as_slice()).map_err(map_to_io)?.is_none_or(|prior| {
+        match decode_envelope::<ServiceBackendRowEnvelope>(prior.value()) {
+            Ok(prior_row) => incoming.updated_at.dominates(&prior_row.updated_at),
+            Err(_) => true,
         }
-    };
+    });
     if dominates {
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(incoming).map_err(map_to_io)?;
+        // Wrap into the versioned envelope at the write boundary per
+        // ADR-0048 § 1 — the on-disk shape is the envelope, never the
+        // bare payload.
+        let envelope = ServiceBackendRowEnvelope::latest(incoming.clone());
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).map_err(map_to_io)?;
         table.insert(key.as_slice(), bytes.as_ref()).map_err(map_to_io)?;
     }
     Ok(dominates)
@@ -494,21 +609,27 @@ fn apply_service_backends_lww(
 
 /// LWW-guarded insert for `ServiceHydrationResultRow`. Keyed on
 /// `(service_id, fingerprint)` per architecture.md § 12. Mirrors the
-/// [`apply_alloc_status_lww`] shape.
+/// [`apply_alloc_status_lww`] / [`apply_node_health_lww`] shape. On
+/// envelope decode failure of the prior row, treats the incoming
+/// write as dominating per ADR-0048 § 3 (the operator's typed write
+/// is the self-healing path).
 fn apply_service_hydration_lww(
     table: &mut Table<'_, &[u8], &[u8]>,
     incoming: &ServiceHydrationResultRow,
 ) -> Result<bool, ObservationStoreError> {
     let key = encode_service_hydration_key(incoming.service_id, incoming.fingerprint);
-    let dominates = match table.get(key.as_slice()).map_err(map_to_io)? {
-        None => true,
-        Some(prior) => {
-            let prior_row = decode_service_hydration(prior.value())?;
-            incoming.updated_at.dominates(&prior_row.updated_at)
+    let dominates = table.get(key.as_slice()).map_err(map_to_io)?.is_none_or(|prior| {
+        match decode_envelope::<ServiceHydrationResultRowEnvelope>(prior.value()) {
+            Ok(prior_row) => incoming.updated_at.dominates(&prior_row.updated_at),
+            Err(_) => true,
         }
-    };
+    });
     if dominates {
-        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(incoming).map_err(map_to_io)?;
+        // Wrap into the versioned envelope at the write boundary per
+        // ADR-0048 § 1 — the on-disk shape is the envelope, never the
+        // bare payload.
+        let envelope = ServiceHydrationResultRowEnvelope::latest(incoming.clone());
+        let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).map_err(map_to_io)?;
         table.insert(key.as_slice(), bytes.as_ref()).map_err(map_to_io)?;
     }
     Ok(dominates)
