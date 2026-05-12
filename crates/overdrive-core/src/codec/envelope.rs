@@ -318,6 +318,64 @@ pub fn probe_known_variant<E: VersionedEnvelope>(bytes: &[u8]) -> Result<(), Env
     })
 }
 
+/// Decode `bytes` through a [`VersionedEnvelope`] and project to the
+/// `Latest` payload shape — the canonical composition every
+/// persistence-boundary read site performs.
+///
+/// # Why this helper exists
+///
+/// Every redb adapter that reads a versioned envelope writes the same
+/// three-step shape:
+///
+/// 1. Copy the redb-returned slice (unknown alignment) into an
+///    `AlignedVec::<8>` (rkyv 0.8 requires 8-byte alignment).
+/// 2. Call [`probe_known_variant::<E>`] to surface known-but-unsupported
+///    tags as [`EnvelopeError::UnknownVersion`] before rkyv decode would
+///    collapse them into [`EnvelopeError::Malformed`].
+/// 3. `rkyv::from_bytes::<E, rkyv::rancor::Error>` and project through
+///    [`VersionedEnvelope::into_latest`].
+///
+/// Four observation tables plus the Job aggregate had hand-copied
+/// versions of this shape. Per ADR-0048 § 4b ("typed codec on the
+/// persisted value") the wrapping discipline belongs in one place; this
+/// helper is that place for the read direction, mirroring how
+/// [`VersionedEnvelope::latest`] is the one place for the write
+/// direction.
+///
+/// # Behavior
+///
+/// * Returns `Ok(latest)` when the bytes decode to a known variant and
+///   project cleanly to `Self::Latest`.
+/// * Returns [`EnvelopeError::UnknownVersion`] when the empirically-
+///   pinned discriminant byte names a tag outside
+///   [`VersionedEnvelope::known_discriminants`] (future-binary surface).
+/// * Returns [`EnvelopeError::Malformed`] when rkyv's bytecheck rejects
+///   the slice (truncation, corruption, foreign envelope shape) or
+///   when an `into_latest` chain itself fails.
+///
+/// # Composition
+///
+/// Callers wrap this in their layer-specific error surface — intent
+/// fail-fast via `IntentStoreError::Envelope`, observation log+skip via
+/// `ObservationStoreError::Envelope`. The asymmetric read policy
+/// (ADR-0048 § 3) lives one layer up; this helper carries only the
+/// decode primitive.
+pub fn decode_envelope_bytes<E>(bytes: &[u8]) -> Result<E::Latest, EnvelopeError>
+where
+    E: VersionedEnvelope + rkyv::Archive,
+    E::Archived: for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>
+        + rkyv::Deserialize<E, rkyv::rancor::Strategy<rkyv::de::Pool, rkyv::rancor::Error>>,
+{
+    let mut aligned = rkyv::util::AlignedVec::<8>::new();
+    aligned.extend_from_slice(bytes);
+
+    probe_known_variant::<E>(aligned.as_ref())?;
+
+    let envelope: E = rkyv::from_bytes::<E, rkyv::rancor::Error>(&aligned)
+        .map_err(|source| EnvelopeError::Malformed { source })?;
+    envelope.into_latest()
+}
+
 /// Errors produced when decoding bytes through a [`VersionedEnvelope`].
 ///
 /// Per ADR-0048 § 3 the read policy is asymmetric — intent refuses to

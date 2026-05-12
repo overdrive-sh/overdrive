@@ -38,29 +38,47 @@ const SERVICE_BACKENDS_TABLE: TableDefinition<&[u8], &[u8]> =
 /// `crates/overdrive-store-local/src/redb_backend.rs`.
 const ENTRIES_TABLE: TableDefinition<&[u8], &[u8]> = TableDefinition::new("entries");
 
-/// Write `raw_bytes` directly into the `observation_alloc_status`
-/// table at the canonical key for `alloc_id`. Used by the
-/// envelope-skip integration test to inject bytes that would never be
-/// reachable through the typed write surface (garbage that the
-/// envelope decoder must reject).
+/// Write `raw_bytes` directly into the given redb `table_def` at the
+/// given `key`. Shared back-door for the envelope-skip integration
+/// tests across every observation + intent surface — each per-surface
+/// helper below derives its own `(table_def, key)` pair and delegates
+/// here for the redb plumbing.
 ///
 /// The redb file is opened in its own short-lived `Database`; the
-/// caller's `LocalObservationStore` MUST be dropped or not yet opened
-/// when this helper runs, since redb's single-writer lock would
-/// otherwise contend.
-pub fn write_raw_bytes_to_alloc_status_table(
+/// caller's `LocalIntentStore` / `LocalObservationStore` MUST be
+/// dropped or not yet opened when this helper runs, since redb's
+/// single-writer lock would otherwise contend.
+fn write_raw_bytes_to_table(
     redb_path: &Path,
-    alloc_id: &AllocationId,
+    table_def: TableDefinition<'_, &[u8], &[u8]>,
+    key: &[u8],
     raw_bytes: &[u8],
 ) {
     let db = Database::create(redb_path).expect("open redb back-door");
     let write = db.begin_write().expect("begin_write back-door");
     {
-        let mut table = write.open_table(ALLOC_STATUS_TABLE).expect("open alloc_status table");
-        let key = alloc_id.as_str().as_bytes();
+        let mut table = write.open_table(table_def).expect("open back-door table");
         table.insert(key, raw_bytes).expect("insert raw bytes");
     }
     write.commit().expect("commit raw-bytes write");
+}
+
+/// Write `raw_bytes` directly into the `observation_alloc_status`
+/// table at the canonical key for `alloc_id`. Used by the
+/// envelope-skip integration test to inject bytes that would never be
+/// reachable through the typed write surface (garbage that the
+/// envelope decoder must reject).
+pub fn write_raw_bytes_to_alloc_status_table(
+    redb_path: &Path,
+    alloc_id: &AllocationId,
+    raw_bytes: &[u8],
+) {
+    write_raw_bytes_to_table(
+        redb_path,
+        ALLOC_STATUS_TABLE,
+        alloc_id.as_str().as_bytes(),
+        raw_bytes,
+    );
 }
 
 /// Write `raw_bytes` directly into the `observation_node_health` table
@@ -70,14 +88,7 @@ pub fn write_raw_bytes_to_alloc_status_table(
 /// to inject bytes that the typed write path would refuse to
 /// construct.
 pub fn write_raw_bytes_to_node_health_table(redb_path: &Path, node_id: &NodeId, raw_bytes: &[u8]) {
-    let db = Database::create(redb_path).expect("open redb back-door");
-    let write = db.begin_write().expect("begin_write back-door");
-    {
-        let mut table = write.open_table(NODE_HEALTH_TABLE).expect("open node_health table");
-        let key = node_id.as_str().as_bytes();
-        table.insert(key, raw_bytes).expect("insert raw bytes");
-    }
-    write.commit().expect("commit raw-bytes write");
+    write_raw_bytes_to_table(redb_path, NODE_HEALTH_TABLE, node_id.as_str().as_bytes(), raw_bytes);
 }
 
 /// Write `raw_bytes` directly into the
@@ -100,21 +111,13 @@ pub fn write_raw_bytes_to_service_hydration_results_table(
     fingerprint: BackendSetFingerprint,
     raw_bytes: &[u8],
 ) {
-    let db = Database::create(redb_path).expect("open redb back-door");
-    let write = db.begin_write().expect("begin_write back-door");
-    {
-        let mut table = write
-            .open_table(SERVICE_HYDRATION_TABLE)
-            .expect("open service_hydration_results table");
-        let sid = service_id.get().to_le_bytes();
-        let fp = fingerprint.to_le_bytes();
-        let key: [u8; 16] = [
-            sid[0], sid[1], sid[2], sid[3], sid[4], sid[5], sid[6], sid[7], fp[0], fp[1], fp[2],
-            fp[3], fp[4], fp[5], fp[6], fp[7],
-        ];
-        table.insert(key.as_slice(), raw_bytes).expect("insert raw bytes");
-    }
-    write.commit().expect("commit raw-bytes write");
+    let sid = service_id.get().to_le_bytes();
+    let fp = fingerprint.to_le_bytes();
+    let key: [u8; 16] = [
+        sid[0], sid[1], sid[2], sid[3], sid[4], sid[5], sid[6], sid[7], fp[0], fp[1], fp[2], fp[3],
+        fp[4], fp[5], fp[6], fp[7],
+    ];
+    write_raw_bytes_to_table(redb_path, SERVICE_HYDRATION_TABLE, key.as_slice(), raw_bytes);
 }
 
 /// Write `raw_bytes` directly into the
@@ -135,15 +138,8 @@ pub fn write_raw_bytes_to_service_backends_table(
     service_id: ServiceId,
     raw_bytes: &[u8],
 ) {
-    let db = Database::create(redb_path).expect("open redb back-door");
-    let write = db.begin_write().expect("begin_write back-door");
-    {
-        let mut table =
-            write.open_table(SERVICE_BACKENDS_TABLE).expect("open service_backends table");
-        let key = service_id.get().to_le_bytes();
-        table.insert(key.as_slice(), raw_bytes).expect("insert raw bytes");
-    }
-    write.commit().expect("commit raw-bytes write");
+    let key = service_id.get().to_le_bytes();
+    write_raw_bytes_to_table(redb_path, SERVICE_BACKENDS_TABLE, key.as_slice(), raw_bytes);
 }
 
 /// Write `raw_bytes` directly into the `entries` table (the intent
@@ -153,19 +149,10 @@ pub fn write_raw_bytes_to_service_backends_table(
 /// `IntentStore::put` surface — garbage that `Job::from_store_bytes`
 /// must reject and surface as `IntentStoreError::Envelope`.
 ///
-/// The redb file is opened in its own short-lived `Database`; the
-/// caller's `LocalIntentStore` MUST be dropped or not yet opened when
-/// this helper runs, since redb's single-writer lock would otherwise
-/// contend. The recovery walk in `LocalIntentStore::open` then sees
-/// the bytes when the test re-opens the store.
+/// The recovery walk in `LocalIntentStore::open` sees the bytes when
+/// the test re-opens the store.
 pub fn write_raw_bytes_to_entries_table(redb_path: &Path, key: &[u8], raw_bytes: &[u8]) {
-    let db = Database::create(redb_path).expect("open redb back-door");
-    let write = db.begin_write().expect("begin_write back-door");
-    {
-        let mut table = write.open_table(ENTRIES_TABLE).expect("open entries table");
-        table.insert(key, raw_bytes).expect("insert raw bytes");
-    }
-    write.commit().expect("commit raw-bytes write");
+    write_raw_bytes_to_table(redb_path, ENTRIES_TABLE, key, raw_bytes);
 }
 
 /// Synthesise bytes that look like a `JobEnvelope` archive but carry

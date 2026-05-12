@@ -21,7 +21,7 @@ use rkyv::util::AlignedVec;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::codec::{EnvelopeError, VersionedEnvelope, probe_known_variant};
+use crate::codec::{EnvelopeError, VersionedEnvelope, decode_envelope_bytes};
 use crate::id::{AllocationId, ContentHash, InvestigationId, NodeId, PolicyId, Region, WorkloadId};
 use crate::traits::driver::Resources;
 use crate::traits::intent_store::IntentStoreError;
@@ -457,24 +457,16 @@ impl JobV1 {
     /// surfaces the error; the caller (`LocalIntentStore::open`)
     /// propagates it to abort startup.
     pub fn from_store_bytes(bytes: &[u8], redb_path: &Path) -> Result<Self, IntentStoreError> {
-        let mut aligned = AlignedVec::<8>::new();
-        aligned.extend_from_slice(bytes);
-
-        // Probe the rkyv-archived discriminant byte BEFORE attempting
-        // full decode — surfaces a known-but-unsupported tag (a
-        // future binary's `V<N+1>`) as `EnvelopeError::UnknownVersion`
-        // with the observed byte. Without this probe, rkyv's
-        // bytecheck would collapse the case into `Malformed` and the
-        // operator would not know whether the bytes are corrupt or
-        // newer-than-supported. See `probe_known_variant` and ADR-0048
-        // § 3.
-        let envelope_result = probe_known_variant::<JobEnvelope>(aligned.as_ref()).and_then(|()| {
-            rkyv::from_bytes::<JobEnvelope, rkyv::rancor::Error>(&aligned)
-                .map_err(|source| EnvelopeError::Malformed { source })
-                .and_then(VersionedEnvelope::into_latest)
-        });
-
-        match envelope_result {
+        // `decode_envelope_bytes` composes the canonical
+        // "align + probe + rkyv decode + into_latest" pipeline per
+        // ADR-0048 § 4b. Probing the rkyv-archived discriminant byte
+        // BEFORE attempting full decode is what distinguishes a future
+        // binary's `V<N+1>` (surfaces as
+        // `EnvelopeError::UnknownVersion`) from corrupt bytes
+        // (`Malformed`) — the operator-facing remediation diverges.
+        // The intent-layer policy below (fail-fast with structured
+        // `health.startup.refused` event) is per ADR-0048 § 3.
+        match decode_envelope_bytes::<JobEnvelope>(bytes) {
             Ok(job) => Ok(job),
             Err(envelope_error) => {
                 tracing::error!(

@@ -58,7 +58,7 @@ use std::task::{Context, Poll};
 
 use async_trait::async_trait;
 use futures::Stream;
-use overdrive_core::codec::{VersionedEnvelope, probe_known_variant};
+use overdrive_core::codec::{VersionedEnvelope, decode_envelope_bytes};
 use overdrive_core::dataplane::fingerprint::BackendSetFingerprint;
 use overdrive_core::id::{AllocationId, ServiceId};
 use overdrive_core::traits::observation_store::{
@@ -114,6 +114,12 @@ const fn encode_service_hydration_key(
 /// Encode the prefix of `(service_id, *)` for range scans — first 8
 /// bytes of [`encode_service_hydration_key`].
 const fn encode_service_hydration_prefix(service_id: ServiceId) -> [u8; 8] {
+    service_id.get().to_le_bytes()
+}
+
+/// Encode the `ServiceId` key as 8 LE bytes for the
+/// `SERVICE_BACKENDS_TABLE`. Single-keyed (no composite). GH #160.
+const fn encode_service_backends_key(service_id: ServiceId) -> [u8; 8] {
     service_id.get().to_le_bytes()
 }
 
@@ -258,7 +264,7 @@ impl ObservationStore for LocalObservationStore {
             let iter = table.iter().map_err(map_to_io)?;
             for item in iter {
                 let (k, v) = item.map_err(map_to_io)?;
-                match decode_alloc_status(v.value()) {
+                match decode_envelope::<AllocStatusRowEnvelope>(v.value()) {
                     Ok(row) => out.push(row),
                     Err(err) => failures.push((k.value().to_vec(), err)),
                 }
@@ -271,15 +277,11 @@ impl ObservationStore for LocalObservationStore {
         // Per ADR-0048 § 3 (observation layer): log + skip rows
         // whose envelope decode failed. Convergence proceeds on
         // surviving rows.
-        for (key_bytes, err) in decode_failures {
-            tracing::warn!(
-                name: "observation.envelope.decode_failed",
-                table = "observation_alloc_status",
-                key = ?key_bytes,
-                source = ?err,
-                "skipping alloc-status row that failed envelope decode",
-            );
-        }
+        log_decode_failures(
+            "observation_alloc_status",
+            "skipping alloc-status row that failed envelope decode",
+            decode_failures,
+        );
         Ok(rows)
     }
 
@@ -299,7 +301,7 @@ impl ObservationStore for LocalObservationStore {
             // Point lookup: per ADR-0048 § 3 observation policy is
             // log + skip, so a malformed row returns None (with a
             // structured warn event emitted on the calling thread).
-            match decode_alloc_status(value.value()) {
+            match decode_envelope::<AllocStatusRowEnvelope>(value.value()) {
                 Ok(row) => Ok(Ok(Some(row))),
                 Err(err) => Ok(Err(err)),
             }
@@ -310,12 +312,10 @@ impl ObservationStore for LocalObservationStore {
         match outcome {
             Ok(opt) => Ok(opt),
             Err(err) => {
-                tracing::warn!(
-                    name: "observation.envelope.decode_failed",
-                    table = "observation_alloc_status",
-                    key = ?key_for_emit,
-                    source = ?err,
+                log_decode_failures(
+                    "observation_alloc_status",
                     "skipping alloc-status row that failed envelope decode",
+                    vec![(key_for_emit, err)],
                 );
                 Ok(None)
             }
@@ -338,7 +338,7 @@ impl ObservationStore for LocalObservationStore {
             let iter = table.iter().map_err(map_to_io)?;
             for item in iter {
                 let (k, v) = item.map_err(map_to_io)?;
-                match decode_node_health(v.value()) {
+                match decode_envelope::<NodeHealthRowEnvelope>(v.value()) {
                     Ok(row) => out.push(row),
                     Err(err) => failures.push((k.value().to_vec(), err)),
                 }
@@ -348,15 +348,11 @@ impl ObservationStore for LocalObservationStore {
         .await
         .map_err(map_to_io)??;
 
-        for (key_bytes, err) in decode_failures {
-            tracing::warn!(
-                name: "observation.envelope.decode_failed",
-                table = "observation_node_health",
-                key = ?key_bytes,
-                source = ?err,
-                "skipping node-health row that failed envelope decode",
-            );
-        }
+        log_decode_failures(
+            "observation_node_health",
+            "skipping node-health row that failed envelope decode",
+            decode_failures,
+        );
         Ok(rows)
     }
 
@@ -388,7 +384,7 @@ impl ObservationStore for LocalObservationStore {
                 if key_bytes.len() != 16 || &key_bytes[..8] != prefix.as_slice() {
                     continue;
                 }
-                match decode_service_hydration(v.value()) {
+                match decode_envelope::<ServiceHydrationResultRowEnvelope>(v.value()) {
                     Ok(row) => out.push(row),
                     Err(err) => failures.push((key_bytes.to_vec(), err)),
                 }
@@ -398,15 +394,11 @@ impl ObservationStore for LocalObservationStore {
         .await
         .map_err(map_to_io)??;
 
-        for (key_bytes, err) in decode_failures {
-            tracing::warn!(
-                name: "observation.envelope.decode_failed",
-                table = "observation_service_hydration_results",
-                key = ?key_bytes,
-                source = ?err,
-                "skipping service-hydration row that failed envelope decode",
-            );
-        }
+        log_decode_failures(
+            "observation_service_hydration_results",
+            "skipping service-hydration row that failed envelope decode",
+            decode_failures,
+        );
         Ok(rows)
     }
 
@@ -429,7 +421,7 @@ impl ObservationStore for LocalObservationStore {
             let mut rows: Vec<ServiceBackendRow> = Vec::new();
             let mut failures: Vec<(Vec<u8>, ObservationStoreError)> = Vec::new();
             if let Some(value) = table.get(key.as_slice()).map_err(map_to_io)? {
-                match decode_service_backends(value.value()) {
+                match decode_envelope::<ServiceBackendRowEnvelope>(value.value()) {
                     Ok(row) => rows.push(row),
                     Err(err) => failures.push((key.to_vec(), err)),
                 }
@@ -439,16 +431,63 @@ impl ObservationStore for LocalObservationStore {
         .await
         .map_err(map_to_io)??;
 
-        for (key_bytes, err) in decode_failures {
-            tracing::warn!(
-                name: "observation.envelope.decode_failed",
-                table = "observation_service_backends",
-                key = ?key_bytes,
-                source = ?err,
-                "skipping service-backend row that failed envelope decode",
-            );
-        }
+        log_decode_failures(
+            "observation_service_backends",
+            "skipping service-backend row that failed envelope decode",
+            decode_failures,
+        );
         Ok(rows)
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Envelope decode helpers — shared between the read path
+// (`*_rows` methods on the impl block) and the LWW guards
+// (`apply_*_lww` below). Both surfaces decode the same per-table
+// envelope bytes; centralising the alignment + probe + rkyv + project
+// pipeline through these helpers keeps the four per-table fns
+// readable.
+// -----------------------------------------------------------------------------
+
+/// Decode a prior rkyv-archived envelope from redb-returned bytes and
+/// project to the latest payload shape per ADR-0048.
+///
+/// Thin wrapper over [`overdrive_core::codec::decode_envelope_bytes`]
+/// that re-surfaces the typed envelope error as
+/// [`ObservationStoreError::Envelope`] so callers can branch on the
+/// structured cause (malformed bytes vs unknown future variant). Per
+/// ADR-0048 § 3 the observation-layer policy is to log + skip the row,
+/// not refuse to start — see [`log_decode_failures`] for the
+/// structured warn-event surface every `*_rows` method routes through.
+fn decode_envelope<E>(bytes: &[u8]) -> Result<E::Latest, ObservationStoreError>
+where
+    E: VersionedEnvelope + rkyv::Archive,
+    E::Archived: for<'a> rkyv::bytecheck::CheckBytes<rkyv::api::high::HighValidator<'a, rkyv::rancor::Error>>
+        + rkyv::Deserialize<E, rkyv::rancor::Strategy<rkyv::de::Pool, rkyv::rancor::Error>>,
+{
+    decode_envelope_bytes::<E>(bytes).map_err(ObservationStoreError::from)
+}
+
+/// Emit a structured `observation.envelope.decode_failed` event for
+/// each row that failed envelope decode during a scan. The warning
+/// fires on the calling async thread so per-test
+/// `tracing::subscriber::set_default` guards (which are thread-local)
+/// observe it. Per ADR-0048 § 3 the observation-layer policy is
+/// log + skip — this is the "log" half; the caller's containing
+/// `*_rows` method has already collected the surviving rows.
+fn log_decode_failures(
+    table_name: &'static str,
+    skipped_row_label: &'static str,
+    failures: Vec<(Vec<u8>, ObservationStoreError)>,
+) {
+    for (key_bytes, err) in failures {
+        tracing::warn!(
+            name: "observation.envelope.decode_failed",
+            table = table_name,
+            key = ?key_bytes,
+            source = ?err,
+            "{skipped_row_label}",
+        );
     }
 }
 
@@ -466,69 +505,6 @@ impl ObservationStore for LocalObservationStore {
 // on subscriptions.
 // -----------------------------------------------------------------------------
 
-/// Decode a prior rkyv-archived `AllocStatusRowEnvelope` from
-/// redb-returned bytes and project to the latest payload shape per
-/// ADR-0048. Mirrors the alignment-aware decoding pattern at the top
-/// of [`LocalObservationStore::alloc_status_rows`] — redb returns
-/// slices with unknown alignment; rkyv requires 8-byte alignment.
-///
-/// Returns the envelope's [`overdrive_core::codec::EnvelopeError`]
-/// surfaced as `ObservationStoreError::Envelope` so callers can
-/// branch on the structured cause (malformed bytes vs unknown future
-/// variant). Per ADR-0048 § 3 the observation-layer policy is to
-/// log + skip the row, not refuse to start.
-fn decode_alloc_status(bytes: &[u8]) -> Result<AllocStatusRow, ObservationStoreError> {
-    let mut aligned = rkyv::util::AlignedVec::<8>::new();
-    aligned.extend_from_slice(bytes);
-
-    // Probe the rkyv-archived discriminant byte BEFORE the full
-    // bytecheck — distinguishes "future binary's V<N+1>" (surfaces
-    // as `EnvelopeError::UnknownVersion`) from "bytes don't decode
-    // at all" (`Malformed`). Per ADR-0048 § 3 the observation layer
-    // logs and skips either way, but the structured distinction
-    // feeds operator-facing diagnostics. See `probe_known_variant`
-    // in `overdrive-core::codec::envelope`.
-    probe_known_variant::<AllocStatusRowEnvelope>(aligned.as_ref())
-        .map_err(|source| ObservationStoreError::Envelope { source })?;
-
-    let envelope: AllocStatusRowEnvelope =
-        rkyv::from_bytes::<AllocStatusRowEnvelope, rkyv::rancor::Error>(&aligned).map_err(
-            |source| ObservationStoreError::Envelope {
-                source: overdrive_core::codec::EnvelopeError::Malformed { source },
-            },
-        )?;
-    envelope.into_latest().map_err(ObservationStoreError::from)
-}
-
-/// Decode a prior rkyv-archived `NodeHealthRowEnvelope` from
-/// redb-returned bytes and project to the latest payload shape per
-/// ADR-0048. Mirrors [`decode_alloc_status`].
-///
-/// Returns the envelope's [`overdrive_core::codec::EnvelopeError`]
-/// surfaced as `ObservationStoreError::Envelope` so callers can
-/// branch on the structured cause (malformed bytes vs unknown future
-/// variant). Per ADR-0048 § 3 the observation-layer policy is to
-/// log + skip the row, not refuse to start.
-fn decode_node_health(bytes: &[u8]) -> Result<NodeHealthRow, ObservationStoreError> {
-    let mut aligned = rkyv::util::AlignedVec::<8>::new();
-    aligned.extend_from_slice(bytes);
-
-    // Probe the rkyv-archived discriminant byte BEFORE the full
-    // bytecheck — distinguishes "future binary's V<N+1>" from
-    // "bytes don't decode at all". Mirror of `decode_alloc_status`
-    // above; see that function's docstring for rationale.
-    probe_known_variant::<NodeHealthRowEnvelope>(aligned.as_ref())
-        .map_err(|source| ObservationStoreError::Envelope { source })?;
-
-    let envelope: NodeHealthRowEnvelope =
-        rkyv::from_bytes::<NodeHealthRowEnvelope, rkyv::rancor::Error>(&aligned).map_err(
-            |source| ObservationStoreError::Envelope {
-                source: overdrive_core::codec::EnvelopeError::Malformed { source },
-            },
-        )?;
-    envelope.into_latest().map_err(ObservationStoreError::from)
-}
-
 /// LWW-guarded insert for `AllocStatusRow`. Reads the prior row at
 /// `incoming.alloc_id` (if any), compares via
 /// [`overdrive_core::traits::observation_store::LogicalTimestamp::dominates`],
@@ -544,13 +520,12 @@ fn apply_alloc_status_lww(
     // ADR-0048 § 3. is_none_or short-circuits on absent prior;
     // the inner branch returns true on either dominate OR decode
     // failure.
-    let dominates =
-        table.get(key).map_err(map_to_io)?.is_none_or(|prior| {
-            match decode_alloc_status(prior.value()) {
-                Ok(prior_row) => incoming.updated_at.dominates(&prior_row.updated_at),
-                Err(_) => true,
-            }
-        });
+    let dominates = table.get(key).map_err(map_to_io)?.is_none_or(|prior| {
+        match decode_envelope::<AllocStatusRowEnvelope>(prior.value()) {
+            Ok(prior_row) => incoming.updated_at.dominates(&prior_row.updated_at),
+            Err(_) => true,
+        }
+    });
     if dominates {
         // Wrap into the versioned envelope at the write boundary per
         // ADR-0048 § 1 — the on-disk shape is the envelope, never the
@@ -573,13 +548,12 @@ fn apply_node_health_lww(
     incoming: &NodeHealthRow,
 ) -> Result<bool, ObservationStoreError> {
     let key = incoming.node_id.as_str().as_bytes();
-    let dominates =
-        table.get(key).map_err(map_to_io)?.is_none_or(|prior| {
-            match decode_node_health(prior.value()) {
-                Ok(prior_row) => incoming.last_heartbeat.dominates(&prior_row.last_heartbeat),
-                Err(_) => true,
-            }
-        });
+    let dominates = table.get(key).map_err(map_to_io)?.is_none_or(|prior| {
+        match decode_envelope::<NodeHealthRowEnvelope>(prior.value()) {
+            Ok(prior_row) => incoming.last_heartbeat.dominates(&prior_row.last_heartbeat),
+            Err(_) => true,
+        }
+    });
     if dominates {
         // Wrap into the versioned envelope at the write boundary per
         // ADR-0048 § 1 — the on-disk shape is the envelope, never the
@@ -589,72 +563,6 @@ fn apply_node_health_lww(
         table.insert(key, bytes.as_ref()).map_err(map_to_io)?;
     }
     Ok(dominates)
-}
-
-/// Decode a prior rkyv-archived `ServiceHydrationResultRowEnvelope`
-/// from redb-returned bytes and project to the latest payload shape
-/// per ADR-0048. Mirrors [`decode_alloc_status`] / [`decode_node_health`].
-///
-/// Returns the envelope's [`overdrive_core::codec::EnvelopeError`]
-/// surfaced as `ObservationStoreError::Envelope` so callers can
-/// branch on the structured cause (malformed bytes vs unknown future
-/// variant). Per ADR-0048 § 3 the observation-layer policy is to
-/// log + skip the row, not refuse to start.
-fn decode_service_hydration(
-    bytes: &[u8],
-) -> Result<ServiceHydrationResultRow, ObservationStoreError> {
-    let mut aligned = rkyv::util::AlignedVec::<8>::new();
-    aligned.extend_from_slice(bytes);
-
-    // Probe the rkyv-archived discriminant byte BEFORE the full
-    // bytecheck — distinguishes "future binary's V<N+1>" from
-    // "bytes don't decode at all". Mirror of `decode_alloc_status`;
-    // see that function's docstring for rationale.
-    probe_known_variant::<ServiceHydrationResultRowEnvelope>(aligned.as_ref())
-        .map_err(|source| ObservationStoreError::Envelope { source })?;
-
-    let envelope: ServiceHydrationResultRowEnvelope =
-        rkyv::from_bytes::<ServiceHydrationResultRowEnvelope, rkyv::rancor::Error>(&aligned)
-            .map_err(|source| ObservationStoreError::Envelope {
-                source: overdrive_core::codec::EnvelopeError::Malformed { source },
-            })?;
-    envelope.into_latest().map_err(ObservationStoreError::from)
-}
-
-/// Encode the `ServiceId` key as 8 LE bytes for the
-/// `SERVICE_BACKENDS_TABLE`. Single-keyed (no composite). GH #160.
-const fn encode_service_backends_key(service_id: ServiceId) -> [u8; 8] {
-    service_id.get().to_le_bytes()
-}
-
-/// Decode a prior rkyv-archived `ServiceBackendRowEnvelope` from
-/// redb-returned bytes and project to the latest payload shape per
-/// ADR-0048. Mirrors [`decode_alloc_status`] / [`decode_node_health`]
-/// / [`decode_service_hydration`].
-///
-/// Returns the envelope's [`overdrive_core::codec::EnvelopeError`]
-/// surfaced as `ObservationStoreError::Envelope` so callers can
-/// branch on the structured cause (malformed bytes vs unknown future
-/// variant). Per ADR-0048 § 3 the observation-layer policy is to
-/// log + skip the row, not refuse to start.
-fn decode_service_backends(bytes: &[u8]) -> Result<ServiceBackendRow, ObservationStoreError> {
-    let mut aligned = rkyv::util::AlignedVec::<8>::new();
-    aligned.extend_from_slice(bytes);
-
-    // Probe the rkyv-archived discriminant byte BEFORE the full
-    // bytecheck — distinguishes "future binary's V<N+1>" from
-    // "bytes don't decode at all". Mirror of `decode_alloc_status`;
-    // see that function's docstring for rationale.
-    probe_known_variant::<ServiceBackendRowEnvelope>(aligned.as_ref())
-        .map_err(|source| ObservationStoreError::Envelope { source })?;
-
-    let envelope: ServiceBackendRowEnvelope =
-        rkyv::from_bytes::<ServiceBackendRowEnvelope, rkyv::rancor::Error>(&aligned).map_err(
-            |source| ObservationStoreError::Envelope {
-                source: overdrive_core::codec::EnvelopeError::Malformed { source },
-            },
-        )?;
-    envelope.into_latest().map_err(ObservationStoreError::from)
 }
 
 /// LWW-guarded insert for `ServiceBackendRow`. Keyed on `ServiceId`
@@ -668,7 +576,7 @@ fn apply_service_backends_lww(
 ) -> Result<bool, ObservationStoreError> {
     let key = encode_service_backends_key(incoming.service_id);
     let dominates = table.get(key.as_slice()).map_err(map_to_io)?.is_none_or(|prior| {
-        match decode_service_backends(prior.value()) {
+        match decode_envelope::<ServiceBackendRowEnvelope>(prior.value()) {
             Ok(prior_row) => incoming.updated_at.dominates(&prior_row.updated_at),
             Err(_) => true,
         }
@@ -696,7 +604,7 @@ fn apply_service_hydration_lww(
 ) -> Result<bool, ObservationStoreError> {
     let key = encode_service_hydration_key(incoming.service_id, incoming.fingerprint);
     let dominates = table.get(key.as_slice()).map_err(map_to_io)?.is_none_or(|prior| {
-        match decode_service_hydration(prior.value()) {
+        match decode_envelope::<ServiceHydrationResultRowEnvelope>(prior.value()) {
             Ok(prior_row) => incoming.updated_at.dominates(&prior_row.updated_at),
             Err(_) => true,
         }
