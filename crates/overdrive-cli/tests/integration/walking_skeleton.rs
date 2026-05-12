@@ -45,7 +45,6 @@ use overdrive_cli::commands::serve::{ServeArgs, ServeHandle};
 use overdrive_cli::http_client::CliError;
 use overdrive_control_plane::api::IdempotencyOutcome;
 use overdrive_core::aggregate::{Job, JobSpecInput};
-use overdrive_core::id::ContentHash;
 use tempfile::TempDir;
 
 /// Spin up a real in-process control-plane server on `127.0.0.1:0`. Returns
@@ -122,8 +121,7 @@ fn write_toml(dir: &Path, name: &str, body: &str) -> PathBuf {
 fn local_spec_digest(spec_toml: &str) -> String {
     let parsed: JobSpecInput = toml::from_str(spec_toml).expect("parse TOML");
     let job = Job::from_spec(parsed).expect("Job::from_spec");
-    let archived = job.archive_for_store().expect("rkyv archive");
-    ContentHash::of(archived.as_ref()).to_string()
+    job.spec_digest().expect("spec_digest").to_string()
 }
 
 // -------------------------------------------------------------------
