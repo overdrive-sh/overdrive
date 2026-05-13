@@ -54,6 +54,7 @@ use overdrive_core::reconciler::{
 };
 use overdrive_core::traits::driver::Resources;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
+use overdrive_core::transition_reason::{StoppedBy, TerminalCondition, TransitionReason};
 
 // -------------------------------------------------------------------
 // fixtures
@@ -923,5 +924,62 @@ fn stop_branch_clears_last_failure_seen_at_when_no_running_allocs() {
          tick until `restart_counts` reaches RESTART_BACKOFF_CEILING. \
          Got last_failure_seen_at = {:?} (expected empty)",
         next_view.last_failure_seen_at,
+    );
+}
+
+// -------------------------------------------------------------------
+// GH #149 — `is_operator_stopped` must check `row.terminal` (ADR-0037 §4)
+// -------------------------------------------------------------------
+//
+// The action shim writes operator attribution to `row.terminal`, NOT
+// `row.reason`. `is_operator_stopped` previously only matched on
+// `row.reason`, so action-shim-produced Stop rows were invisible to
+// the operator-stop guard — the Run branch would emit a fresh
+// `StartAllocation` for an operator-stopped allocation, undoing the
+// operator's stop intent.
+
+/// Regression for GH #149: an alloc whose `terminal` field carries
+/// `Stopped { by: Operator }` (action-shim shape per ADR-0037 §4)
+/// must be recognised by `is_operator_stopped` even when `reason`
+/// carries `Stopped { by: Reconciler }` (the action shim's hard-coded
+/// reason). The Run branch must return empty actions — no
+/// `StartAllocation` for an operator-stopped allocation.
+#[test]
+fn run_branch_blocked_when_alloc_has_terminal_operator_stop() {
+    let nodes = one_node_map("local");
+
+    // Build an AllocStatusRow mimicking the action-shim output:
+    //   reason:   Stopped { by: Reconciler }  — action shim hard-codes this
+    //   terminal: Stopped { by: Operator }    — threaded from the action
+    let mut row = alloc_with_state("alloc-payments-0", "payments", "local", AllocState::Terminated);
+    row.reason = Some(TransitionReason::Stopped { by: StoppedBy::Reconciler });
+    row.terminal = Some(TerminalCondition::Stopped { by: StoppedBy::Operator });
+
+    let allocations = one_alloc_map("alloc-payments-0", row);
+
+    let desired = WorkloadLifecycleState {
+        job: Some(make_job("payments")),
+        desired_to_stop: false,
+        nodes: nodes.clone(),
+        allocations: BTreeMap::new(),
+        workload_kind: WorkloadKind::default(),
+    };
+    let actual = WorkloadLifecycleState {
+        job: Some(make_job("payments")),
+        desired_to_stop: false,
+        nodes,
+        allocations,
+        workload_kind: WorkloadKind::default(),
+    };
+    let view = WorkloadLifecycleView::default();
+    let tick = fresh_tick(Instant::now(), UnixInstant::from_unix_duration(Duration::from_secs(0)));
+
+    let r = WorkloadLifecycle::canonical();
+    let (actions, _next) = r.reconcile(&desired, &actual, &view, &tick);
+
+    assert!(
+        actions.is_empty(),
+        "Run branch must emit nothing for an operator-stopped alloc \
+         (terminal: Stopped {{ by: Operator }}); got {actions:?}",
     );
 }

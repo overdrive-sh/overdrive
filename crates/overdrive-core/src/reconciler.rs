@@ -1526,20 +1526,35 @@ fn mint_identity(workload_id: &WorkloadId, alloc_id: &AllocationId) -> SpiffeId 
 
 /// True iff the alloc row carries a terminal Operator-stop record.
 ///
-/// Per `fix-exec-driver-exit-watcher` Step 01-02 RCA §Bug 3: a row
-/// whose `reason` carries `Stopped { by: Operator }` is the terminal
-/// record of an intentional stop. The reconciler MUST NOT restart it
-/// or schedule a fresh allocation for the job — operator stop intent
-/// is the load-bearing discriminator and a fresh schedule would undo
-/// the operator's stop.
+/// Two writers produce operator-stop rows with different field shapes:
+///
+/// - **Exit observer** (direct observation): writes
+///   `reason: Stopped { by: Operator }`, `terminal: None`.
+/// - **Action shim** (ADR-0037 §4 SSOT): writes
+///   `reason: Stopped { by: Reconciler }`,
+///   `terminal: Stopped { by: Operator }`.
+///
+/// The function checks BOTH `terminal` (the ADR-0037 §4 SSOT) and
+/// `reason` (the exit-observer path) so that operator-stop rows from
+/// either writer are recognised. See GH #149 for the regression that
+/// motivated the dual check.
+///
+/// The reconciler MUST NOT restart or schedule a fresh allocation for
+/// an operator-stopped job — operator stop intent is the load-bearing
+/// discriminator and a fresh schedule would undo the operator's stop.
 fn is_operator_stopped(row: &AllocStatusRow) -> bool {
     row.state == AllocState::Terminated
-        && matches!(
+        && (matches!(
+            row.terminal,
+            Some(crate::transition_reason::TerminalCondition::Stopped {
+                by: crate::transition_reason::StoppedBy::Operator
+            })
+        ) || matches!(
             row.reason,
             Some(crate::transition_reason::TransitionReason::Stopped {
                 by: crate::transition_reason::StoppedBy::Operator
             })
-        )
+        ))
 }
 
 /// True iff the alloc row is a candidate for a `RestartAllocation`
@@ -1554,7 +1569,8 @@ fn is_restartable(row: &AllocStatusRow) -> bool {
 
 /// True iff the alloc row represents a *natural exit* the Job-kind
 /// reconciler should finalize on — a terminal lifecycle state (Failed
-/// OR Terminated) whose `reason` is NOT an operator stop. Per
+/// OR Terminated) whose stop attribution (in either `terminal` or
+/// `reason`) is NOT an operator stop. Per
 /// ADR-0037 Amendment 2026-05-10 / ADR-0047 §1: Job kind terminates on
 /// the first observed exit (clean OR crashed). Operator-stopped rows
 /// are excluded — they are handled by the upstream
