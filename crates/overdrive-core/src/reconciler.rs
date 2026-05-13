@@ -1569,7 +1569,8 @@ fn is_restartable(row: &AllocStatusRow) -> bool {
 
 /// True iff the alloc row represents a *natural exit* the Job-kind
 /// reconciler should finalize on — a terminal lifecycle state (Failed
-/// OR Terminated) whose `reason` is NOT an operator stop. Per
+/// OR Terminated) whose stop attribution (in either `terminal` or
+/// `reason`) is NOT an operator stop. Per
 /// ADR-0037 Amendment 2026-05-10 / ADR-0047 §1: Job kind terminates on
 /// the first observed exit (clean OR crashed). Operator-stopped rows
 /// are excluded — they are handled by the upstream
