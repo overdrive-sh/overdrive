@@ -48,4 +48,12 @@ mod integration {
     /// `crates/overdrive-sim/src/invariants/
     /// exit_event_observable_outcome.rs`.
     mod exit_event_observable_outcome;
+
+    /// workload-gc-absent-stale-allocs step 01-03 — DST integration
+    /// scenarios for the absent-intent workload GC arm + resubmit
+    /// race. See architecture.md § 7 of the feature dir, the
+    /// evaluator at
+    /// `crates/overdrive-sim/src/invariants/workload_gc_absent_intent.rs`,
+    /// and GitHub issue #148 AC §1.3.
+    mod workload_gc_absent_intent;
 }

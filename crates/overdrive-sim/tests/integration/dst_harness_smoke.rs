@@ -115,6 +115,14 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     // rca.md:107-109` named and `docs/evolution/2026-05-02-fix-exit-
     // observer-write-retry.md:64` left open.
     "exit-event-observable-outcome",
+    // workload-gc-absent-stale-allocs step 01-03 — DST scenario
+    // covering the absent-intent workload GC arm. The sibling
+    // `workload-gc-resubmit-creates-fresh` is intentionally NOT in
+    // `Invariant::ALL` while the production gap at
+    // `crates/overdrive-core/src/reconciler.rs:1294` remains open;
+    // see the matching comment in `dst_clean_clone_green.rs` and
+    // the `#[should_panic]` guard on the integration test.
+    "workload-gc-orphan-converges",
 ];
 
 // -----------------------------------------------------------------------------

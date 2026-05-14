@@ -119,6 +119,20 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     // rca.md:107-109` named and `docs/evolution/2026-05-02-fix-exit-
     // observer-write-retry.md:64` left open.
     "exit-event-observable-outcome",
+    // workload-gc-absent-stale-allocs step 01-03 — DST scenario
+    // covering the absent-intent workload GC arm: after
+    // `IntentStore::delete("jobs/X")` removes the desired Job, every
+    // alloc row for X reaches a terminal state with
+    // `Some(Stopped { by: SystemGC })` AND no fresh alloc is placed
+    // while intent stays absent. The sibling resubmit invariant
+    // (`workload-gc-resubmit-creates-fresh`) is intentionally NOT
+    // in `Invariant::ALL` while the production gap at
+    // `crates/overdrive-core/src/reconciler.rs:1294` (resurrection
+    // protection covers StoppedBy::Operator only, not
+    // StoppedBy::SystemGC) remains open — its evaluator returns
+    // Fail under today's reconciler shape and would break this
+    // very test. Closes #148 AC §1.3 (orphan-converges half).
+    "workload-gc-orphan-converges",
 ];
 
 // -----------------------------------------------------------------------------

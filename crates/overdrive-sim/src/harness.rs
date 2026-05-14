@@ -583,6 +583,20 @@ impl Harness {
                 crate::invariants::exit_event_observable_outcome::evaluate_exit_event_observable_outcome()
                     .await
             }
+            // workload-gc-absent-stale-allocs step 01-03. Two scenarios
+            // drive end-to-end through SimIntentStore +
+            // SimObservationStore + WorkloadLifecycle runtime stack;
+            // assertions land at the
+            // `ObservationStore::alloc_status_rows()` driven port
+            // boundary. Closes #148 AC §1.3.
+            Invariant::WorkloadGcOrphanConverges => {
+                crate::invariants::workload_gc_absent_intent::evaluate_orphan_workload_converges_to_terminal_gc()
+                    .await
+            }
+            Invariant::WorkloadGcResubmitCreatesFresh => {
+                crate::invariants::workload_gc_absent_intent::evaluate_resubmit_after_gc_creates_fresh_alloc()
+                    .await
+            }
         }
     }
 }

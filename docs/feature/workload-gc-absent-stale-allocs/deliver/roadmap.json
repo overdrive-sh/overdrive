@@ -47,8 +47,8 @@
     "excluded_patterns": []
   },
   "validation": {
-    "status": "pending",
-    "reviewer": "TODO",
-    "approved_at": "TODO"
+    "status": "approved",
+    "reviewer": "nw-acceptance-designer-reviewer",
+    "approved_at": "2026-05-14T05:58:00Z"
   }
 }

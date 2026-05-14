@@ -74,6 +74,18 @@ pub mod service_map_hydrator;
 // named and `docs/evolution/2026-05-02-fix-exit-observer-write-
 // retry.md:64` left open.
 pub mod exit_event_observable_outcome;
+// workload-gc-absent-stale-allocs step 01-03. Two DST scenarios
+// pinning the GC reconciler arm convergence + resubmit-after-GC
+// race: (1) `WorkloadGcOrphanConverges` — Submit Job(X), drain to
+// Running, IntentStore::delete("jobs/X"), drive ≤3 ticks, assert
+// every alloc reaches a terminal state with `terminal == Some(
+// Stopped { by: SystemGC })` AND no fresh alloc placed; (2)
+// `WorkloadGcResubmitCreatesFresh` — continues from quiescent
+// orphan state, resubmits Job(X), drives ≤5 ticks, asserts ≥1
+// fresh alloc reaches Running with `alloc_id != original` AND
+// the original alloc's `SystemGC` terminal stamp is durable.
+// Closes #148 AC §1.3.
+pub mod workload_gc_absent_intent;
 
 /// Catalogue of invariants the DST harness evaluates.
 ///
@@ -285,6 +297,37 @@ pub enum Invariant {
     /// the gate. The evaluator body lives in
     /// `crate::invariants::exit_event_observable_outcome`.
     ExitEventObservableOutcome,
+
+    /// workload-gc-absent-stale-allocs step 01-03 — eventually
+    /// invariant. After `IntentStore::delete("jobs/X")` removes
+    /// the desired Job, every non-terminal `AllocStatusRow` for
+    /// `workload_id == X` reaches a terminal state within 3 ticks
+    /// AND carries `terminal == Some(TerminalCondition::Stopped {
+    /// by: StoppedBy::SystemGC })` AND no fresh allocation is
+    /// placed for X while intent stays absent. Drives end-to-end
+    /// through `SimIntentStore` + `SimObservationStore` +
+    /// `WorkloadLifecycle` runtime stack — entry through the
+    /// `submit` / `tick` harness driving ports, assertions on
+    /// `ObservationStore::alloc_status_rows()` (driven port
+    /// boundary). The evaluator body lives in
+    /// `crate::invariants::workload_gc_absent_intent`. Closes
+    /// #148 AC §1.3.
+    WorkloadGcOrphanConverges,
+
+    /// workload-gc-absent-stale-allocs step 01-03 — eventually +
+    /// always invariant. Continues from
+    /// `WorkloadGcOrphanConverges`'s quiescent state: resubmits
+    /// `Job(id=X)` to intent, drives ≤5 ticks, asserts (a) ≥1
+    /// alloc reaches Running with a fresh `alloc_id` distinct
+    /// from the original GC'd row's `alloc_id` (durable
+    /// distinctness — the GC'd row is not resurrected) AND (b)
+    /// the original alloc's `terminal` field stays
+    /// `Some(Stopped { by: SystemGC })` for every tick after
+    /// resubmit (the `SystemGC` stamp is durable through the
+    /// resubmit cycle). The evaluator body lives in
+    /// `crate::invariants::workload_gc_absent_intent`. Closes
+    /// #148 AC §1.3.
+    WorkloadGcResubmitCreatesFresh,
 }
 
 impl Invariant {
@@ -351,7 +394,46 @@ impl Invariant {
         // The evaluator body lives in
         // `crate::invariants::exit_event_observable_outcome`.
         Self::ExitEventObservableOutcome,
+        // workload-gc-absent-stale-allocs step 01-03. Evaluator
+        // bodies live in `crate::invariants::workload_gc_absent_intent`.
+        // `WorkloadGcOrphanConverges` is registered in the default
+        // catalogue (its evaluator returns Pass against today's
+        // reconciler). `WorkloadGcResubmitCreatesFresh` is
+        // intentionally NOT in `ALL` while the production gap at
+        // `crates/overdrive-core/src/reconciler.rs:1294` (the
+        // resurrection-protection check matches StoppedBy::Operator
+        // only, not StoppedBy::SystemGC) remains open — the
+        // evaluator returns Fail under today's code, which would
+        // break the downstream "default catalogue is green"
+        // contract observed by `dst_clean_clone_green` /
+        // `default_harness_run_passes_all_three_reconciler_invariants`
+        // / `summary_names_every_expected_invariant`. The variant is
+        // still discoverable via `cargo dst --only
+        // workload-gc-resubmit-creates-fresh`; the integration test
+        // at `tests/integration/workload_gc_absent_intent.rs`
+        // captures the failure under a `#[should_panic(expected =
+        // "RED scaffold")]` guard per testing.md. Promote into ALL
+        // once the production gap closes.
+        Self::WorkloadGcOrphanConverges,
     ];
+
+    /// Variants intentionally excluded from [`Self::ALL`] (the default
+    /// catalogue iterated by `cargo dst` without `--only`) but still
+    /// addressable via `--only <NAME>` because their canonical name
+    /// must round-trip through [`FromStr`]. A variant lives here while
+    /// its evaluator returns `Fail` against today's production code —
+    /// inclusion in `ALL` would break the "default catalogue is green"
+    /// contract observed by `dst_clean_clone_green` and
+    /// `summary_names_every_expected_invariant`. Promote into `ALL`
+    /// once the production gap that gates the variant closes.
+    ///
+    /// Currently gated:
+    /// - `WorkloadGcResubmitCreatesFresh` — gated on the production gap
+    ///   at `crates/overdrive-core/src/reconciler.rs:1294` (resurrection
+    ///   protection covers `StoppedBy::Operator` only, not
+    ///   `StoppedBy::SystemGC`). See workload-gc-absent-stale-allocs
+    ///   step 01-03 and #148 AC §1.3.
+    pub const GATED: &'static [Self] = &[Self::WorkloadGcResubmitCreatesFresh];
 
     /// The canonical kebab-case spelling of this invariant, as a static
     /// string. `Display` renders the same text; having a `&'static str`
@@ -388,6 +470,9 @@ impl Invariant {
             Self::HydratorEventuallyConverges => "hydrator-eventually-converges",
             Self::HydratorIdempotentSteadyState => "hydrator-idempotent-steady-state",
             Self::ExitEventObservableOutcome => "exit-event-observable-outcome",
+            // workload-gc-absent-stale-allocs step 01-03.
+            Self::WorkloadGcOrphanConverges => "workload-gc-orphan-converges",
+            Self::WorkloadGcResubmitCreatesFresh => "workload-gc-resubmit-creates-fresh",
         }
     }
 }
@@ -405,7 +490,7 @@ impl FromStr for Invariant {
         // Case-insensitive match against the canonical forms. Hyphens
         // are preserved, only alphabetic characters are folded.
         let lowered = raw.to_ascii_lowercase();
-        for candidate in Self::ALL {
+        for candidate in Self::ALL.iter().chain(Self::GATED.iter()) {
             if candidate.as_canonical() == lowered {
                 return Ok(*candidate);
             }
