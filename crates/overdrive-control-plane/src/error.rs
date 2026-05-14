@@ -287,6 +287,17 @@ pub enum ControlPlaneError {
     #[error(transparent)]
     ViewStoreBoot(#[from] ViewStoreBootError),
 
+    /// `[dataplane.vip_allocator]` TOML parser refusal per
+    /// ADR-0049 § 5b / service-vip-allocator step 02-02. Pass-through
+    /// embedding so the CLI / composition root can branch on
+    /// `matches!(e, ControlPlaneError::VipAllocatorConfig(_))` for
+    /// structured boot diagnostics. Boot-path-only: like the other
+    /// pre-listener variants, this never reaches an HTTP response in
+    /// practice; the arm in `to_response` exists for enum
+    /// exhaustiveness.
+    #[error(transparent)]
+    VipAllocatorConfig(#[from] crate::vip_allocator_config::VipAllocatorBootError),
+
     #[error("internal: {0}")]
     Internal(String),
 }
@@ -388,6 +399,15 @@ pub fn to_response(err: ControlPlaneError) -> (StatusCode, ErrorBody) {
             // exhaustiveness-only. The composition root branches on
             // the typed variant (`matches!(e, ViewStoreBoot(_))`) to
             // emit `health.startup.refused`.
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
+        ),
+        ControlPlaneError::VipAllocatorConfig(e) => (
+            // Same shape as `ViewStoreBoot` above: VIP-allocator
+            // config refusals happen BEFORE the listener binds. The
+            // parser at `vip_allocator_config::parse_vip_allocator_section`
+            // emits `health.startup.refused` itself; this arm exists
+            // only for enum exhaustiveness.
             StatusCode::INTERNAL_SERVER_ERROR,
             ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
         ),

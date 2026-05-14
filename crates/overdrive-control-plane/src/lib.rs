@@ -65,7 +65,12 @@ pub mod streaming;
 pub mod tls_bootstrap;
 // reconciler-memory-redb step 01-03 — `ViewStore` port + error types
 // per ADR-0035 §2. Wired into `ReconcilerRuntime` in step 01-06.
+// service-vip-allocator step 02-02 — `[dataplane.vip_allocator]` TOML
+// parser surface per ADR-0049 § 5b. Owns boot-time section presence,
+// TOML deserialisation, delegation to `VipRange::new`, and the
+// structured `health.startup.refused` event on refusal.
 pub mod view_store;
+pub mod vip_allocator_config;
 pub mod worker;
 
 use std::net::SocketAddr;

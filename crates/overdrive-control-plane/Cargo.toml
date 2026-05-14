@@ -52,6 +52,17 @@ overdrive-worker.path              = "../overdrive-worker"
 # instantiate `SystemClock`, so the `Default` impl on `ServerConfig`
 # imports it from here.
 overdrive-host.path                = "../overdrive-host"
+# Per ADR-0049 / service-vip-allocator step 02-02: the boot-time
+# `[dataplane.vip_allocator]` parser in `src/vip_allocator_config.rs`
+# delegates type-level validation to `VipRange::new` from
+# `overdrive-dataplane::allocators`. Both crates are
+# `crate_class = "adapter-host"` so the dependency does not cross any
+# DST-lint boundary.
+overdrive-dataplane.path           = "../overdrive-dataplane"
+# `ipnet` — IPv4 CIDR newtype used in the VIP-allocator config
+# deserialisation. Workspace-pinned per `.claude/rules/development.md`
+# § Dependencies.
+ipnet.workspace                    = true
 
 # Errors / async / serde
 thiserror.workspace   = true
