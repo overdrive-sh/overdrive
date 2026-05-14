@@ -1205,10 +1205,58 @@ impl Reconciler for WorkloadLifecycle {
         }
         match desired.job.as_ref() {
             // Absent: no desired job. The Stop branch above handles
-            // explicit stops; an absent job with stale Running allocs
-            // is TODO(#148) (cleanup reconciler) — for now we emit
-            // nothing and pass the view through unchanged.
-            None => (Vec::new(), view.clone()),
+            // explicit stops via `desired_to_stop`; the GC branch
+            // here handles the case where the workload's intent has
+            // been *withdrawn* entirely (hard-delete, multi-node
+            // drain, crash-recovery surgery).
+            //
+            // GC branch (closes #148 per ADR-0037 Amendment
+            // 2026-05-14): withdraw any non-terminal allocations by
+            // stamping a system-GC terminal claim. Structural mirror
+            // of the operator-Stop branch above (filter Running rows,
+            // emit one StopAllocation per row, clear
+            // `last_failure_seen_at` when no work remains).
+            // `StoppedBy::SystemGC` is the load-bearing
+            // discriminator: it lets the action shim, lifecycle
+            // event consumers, and operator-facing surfaces
+            // distinguish "the operator stopped this" from "the
+            // system reaped this because no intent referenced it".
+            //
+            // Filter shape (architecture.md § 8 Open Q3): only
+            // Running rows are stopped. A Pending row has no
+            // driver-side runtime to stop; a Draining row is already
+            // being torn down by the worker. Same shape as the
+            // operator-Stop branch above; mutation tests pin the
+            // filter at `state == Running`.
+            //
+            // Kind-agnostic: branches on `desired.job.is_none()`,
+            // not on `desired.workload_kind`. An orphan-row scenario
+            // can occur for any workload kind (architecture.md § 8
+            // Open Q2).
+            None => {
+                let gc_terminal = Some(TerminalCondition::Stopped { by: StoppedBy::SystemGC });
+                let stop_actions: Vec<Action> = actual
+                    .allocations
+                    .values()
+                    .filter(|r| r.state == AllocState::Running)
+                    .map(|r| Action::StopAllocation {
+                        alloc_id: r.alloc_id.clone(),
+                        terminal: gc_terminal.clone(),
+                    })
+                    .collect();
+                let mut next_view = view.clone();
+                if stop_actions.is_empty() {
+                    // No work left — clear backoff inputs so
+                    // `view_has_backoff_pending` returns false and
+                    // the broker stops re-enqueueing this target.
+                    // Mirrors the Stop branch's view-cleanup shape;
+                    // input clearance, not derived-deadline
+                    // clearance, per `.claude/rules/development.md`
+                    // § "Persist inputs, not derived state".
+                    next_view.last_failure_seen_at.clear();
+                }
+                (stop_actions, next_view)
+            }
             // Run: a job is desired.
             Some(job) => {
                 // Pure first-fit placement (inlined from
