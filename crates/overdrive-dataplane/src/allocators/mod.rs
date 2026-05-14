@@ -19,11 +19,21 @@
 //! which BackendId could not use).
 
 mod backend_id;
+pub mod entry;
 mod error;
+mod persistent_service_vip;
 mod service_vip;
 mod vip_range;
 
 pub use backend_id::BackendIdAllocator;
+// `ServiceVipAllocatorEntry` (= V1 payload alias) is re-exported so
+// callers can construct entries with struct-literal syntax. The
+// codec-internal envelope enum `ServiceVipAllocatorEntryEnvelope` is
+// deliberately NOT re-exported here per ADR-0048 § 2 Layer 1
+// (non-re-export discipline); cross-crate writers reach it via the
+// verbose `overdrive_dataplane::allocators::entry::*` module path.
+pub use entry::{ServiceVipAllocatorEntry, ServiceVipAllocatorEntryLatest};
 pub use error::{Result, ServiceVipAllocatorError, VipAllocatorConfigError};
+pub use persistent_service_vip::{PersistentAllocatorError, PersistentServiceVipAllocator};
 pub use service_vip::{ServiceSpecDigest, ServiceVip, ServiceVipAllocator};
 pub use vip_range::VipRange;

@@ -164,7 +164,8 @@ tower             = { version = "0.5", features = ["util"] }
 http-body-util    = "0.1"
 
 # --- Internal workspace crates -------------------------------------------
-overdrive-core = { path = "crates/overdrive-core" }
+overdrive-core        = { path = "crates/overdrive-core" }
+overdrive-store-local = { path = "crates/overdrive-store-local" }
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn  = "deny"

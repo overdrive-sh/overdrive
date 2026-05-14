@@ -157,4 +157,65 @@ impl ServiceVipAllocator {
     pub fn capacity(&self) -> u64 {
         self.range.capacity()
     }
+
+    /// Peek the `(vip, counter_idx)` that would be issued for `digest`
+    /// on the next [`Self::allocate`] call, WITHOUT mutating any
+    /// in-memory state.
+    ///
+    /// Used by [`super::PersistentServiceVipAllocator::allocate`] to
+    /// compute the candidate allocation BEFORE the fsync — the
+    /// in-memory commit (memo insert + counter advance) happens only
+    /// after the persistence-layer write succeeds, per the
+    /// fsync-then-memory ordering rule.
+    ///
+    /// # Preconditions
+    ///
+    /// `digest` MUST NOT already be in the memo. Callers must check
+    /// [`Self::get`] first and short-circuit on hit; passing a
+    /// memo-hit digest here would advance the counter prediction
+    /// past a slot that has already been issued.
+    ///
+    /// # Errors
+    ///
+    /// [`ServiceVipAllocatorError::Exhausted`] when the range has no
+    /// available address at the current counter position, or
+    /// [`ServiceVipAllocatorError::NewtypeRejected`] if the canonical
+    /// [`ServiceVip`] constructor rejects the materialised address.
+    pub fn peek_next_allocation(
+        &self,
+        digest: &ServiceSpecDigest,
+    ) -> Result<(ServiceVip, u64), ServiceVipAllocatorError> {
+        debug_assert!(
+            !self.memo.contains_key(digest),
+            "peek_next_allocation must not be called on a memo-hit digest"
+        );
+        let _ = digest; // suppress unused warning in non-debug builds
+        let addr = self.range.nth_allocatable(self.next_idx).ok_or_else(|| {
+            ServiceVipAllocatorError::Exhausted {
+                allocated: self.memo.len() as u64,
+                capacity: self.range.capacity(),
+            }
+        })?;
+        let vip = ServiceVip::new(IpAddr::V4(addr))?;
+        Ok((vip, self.next_idx))
+    }
+
+    /// Replay a persisted entry into the allocator. Used by
+    /// [`super::PersistentServiceVipAllocator::bulk_load`] to
+    /// reconstruct the in-memory state on restart, and by
+    /// [`super::PersistentServiceVipAllocator::allocate`] to commit
+    /// the in-memory state AFTER the fsync.
+    ///
+    /// Inserts the `(digest, vip)` pair into the memo and advances
+    /// `next_idx` to `max(next_idx, counter_idx + 1)` so subsequent
+    /// allocations skip every persisted slot.
+    pub fn restore_entry(&mut self, digest: ServiceSpecDigest, vip: ServiceVip, counter_idx: u64) {
+        self.memo.insert(digest, vip);
+        // Advance the counter to one past the highest persisted index
+        // — the next miss issues a fresh slot.
+        let next = counter_idx.saturating_add(1);
+        if next > self.next_idx {
+            self.next_idx = next;
+        }
+    }
 }

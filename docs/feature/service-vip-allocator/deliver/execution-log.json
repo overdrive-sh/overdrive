@@ -29,6 +29,83 @@
       "s": "SKIPPED",
       "d": "BLOCKED_BY_DEPENDENCY: stash pop pulled in 47 unrelated files from stash@{0}. My work compiles and 6/6 tests pass in Lima pre-corruption (S-VIP-P03/P04/21/16/17/18 all green). Cleanup blocked by destructive-ops hook. Need user approval to discard unrelated worktree changes.",
       "t": "2026-05-14T07:34:09Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-14T07:35:44Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: Commit blocked by worktree corruption from misdirected stash pop. 47 unrelated files (with merge markers in overdrive-core/src/reconciler.rs) prevent lefthook pre-commit from passing. Files staged correctly (only my 13 files). User approval needed for either no-verify commit OR worktree cleanup. My code verified in Lima pre-corruption: 6/6 tests pass, clippy clean.",
+      "t": "2026-05-14T07:35:47Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-14T13:15:35Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED_ACCEPTANCE",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: unit-shaped step, no driving-port surface (newtype consolidation + allocator memo-hit test)",
+      "t": "2026-05-14T13:15:43Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED_UNIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-14T13:15:43Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-14T13:15:43Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-14T13:15:43Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "PREPARE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-14T13:21:20Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED_ACCEPTANCE",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-14T13:27:22Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED_UNIT",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: acceptance tests + golden-bytes fixture cover all named scenarios; no additional pure-function unit surface emerges (helpers peek_next_allocation/restore_entry on ServiceVipAllocator are exercised through the acceptance tests)",
+      "t": "2026-05-14T13:27:22Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-05-14T13:30:23Z"
     }
   ]
 }

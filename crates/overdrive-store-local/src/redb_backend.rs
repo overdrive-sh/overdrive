@@ -402,6 +402,42 @@ impl IntentStore for LocalIntentStore {
         Ok(Box::new(Box::pin(PrefixWatchStream { inner: Box::pin(stream) })))
     }
 
+    /// Read every `(key, value)` row whose key starts with `prefix`,
+    /// in ascending lexicographic order, via a single redb read
+    /// transaction.
+    ///
+    /// Uses `redb::ReadableTable::range(prefix..)` to start the
+    /// iteration at the first key `>= prefix`, then breaks once a
+    /// key is observed that no longer starts with `prefix`. This is
+    /// O(matched rows) — redb does not have to walk past the prefix
+    /// range.
+    async fn scan_prefix(&self, prefix: &[u8]) -> Result<Vec<(Bytes, Bytes)>, IntentStoreError> {
+        let prefix_vec = prefix.to_vec();
+        let inner = Arc::clone(&self.inner);
+
+        tokio::task::spawn_blocking(move || {
+            let read = inner.db.begin_read().map_err(map_transaction_error)?;
+            let table = read.open_table(ENTRIES_TABLE).map_err(map_table_error)?;
+
+            let mut rows: Vec<(Bytes, Bytes)> = Vec::new();
+            let iter = table.range(prefix_vec.as_slice()..).map_err(map_storage_error)?;
+            for item in iter {
+                let (k, v) = item.map_err(map_storage_error)?;
+                let key_bytes = k.value();
+                if !key_bytes.starts_with(prefix_vec.as_slice()) {
+                    // redb iterates in key order; once we observe a
+                    // key that no longer starts with prefix, no
+                    // subsequent key can either.
+                    break;
+                }
+                rows.push((Bytes::copy_from_slice(key_bytes), Bytes::copy_from_slice(v.value())));
+            }
+            Ok::<_, IntentStoreError>(rows)
+        })
+        .await
+        .map_err(map_join_error)?
+    }
+
     /// Export a full-state snapshot of this `LocalIntentStore`.
     ///
     /// Reads every `(key, value)` pair in a single redb read

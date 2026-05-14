@@ -210,6 +210,50 @@ pub trait IntentStore: Send + Sync + 'static {
         prefix: &[u8],
     ) -> Result<Box<dyn Stream<Item = (Bytes, Bytes)> + Send + Unpin>, IntentStoreError>;
 
+    /// Scan every `(key, value)` pair whose `key` begins with
+    /// `prefix`, returning them as an owned `Vec` in ascending
+    /// (lexicographic) key order.
+    ///
+    /// # Preconditions
+    ///
+    /// `prefix` may be empty (returns every row in the store) or any
+    /// byte sequence (returns only rows whose key starts with those
+    /// bytes). The prefix does not need to align to a structured key
+    /// boundary — the operation is a byte-level prefix match.
+    ///
+    /// # Postconditions
+    ///
+    /// On `Ok(rows)`:
+    /// * Every returned `(key, value)` satisfies `key.starts_with(prefix)`.
+    /// * `value` is the caller-provided bytes from the original
+    ///   [`put`] / [`put_if_absent`] / [`TxnOp::Put`] — implementations
+    ///   do not transform the row payload.
+    /// * Rows are returned in ascending lexicographic key order
+    ///   (deterministic; what `BTreeMap`-style iteration provides).
+    /// * The empty prefix returns every row in the store; an
+    ///   unmatched prefix returns an empty `Vec`.
+    ///
+    /// # Edge cases
+    ///
+    /// * Empty `prefix` → returns every row.
+    /// * `prefix` matches no rows → returns `Ok(vec![])`.
+    /// * Concurrent writers → the returned snapshot is consistent
+    ///   with a single point-in-time read transaction; subsequent
+    ///   writes do not affect the already-returned `Vec`.
+    ///
+    /// # Use cases
+    ///
+    /// The primary caller today is
+    /// `overdrive_dataplane::allocators::PersistentServiceVipAllocator::bulk_load`,
+    /// which reconstructs the allocator's in-memory state by scanning
+    /// every persisted entry under the allocator's namespace prefix.
+    /// Future callers (additional typed namespaces, reconciler
+    /// bootstrap hydration) follow the same pattern.
+    ///
+    /// [`put`]: Self::put
+    /// [`put_if_absent`]: Self::put_if_absent
+    async fn scan_prefix(&self, prefix: &[u8]) -> Result<Vec<(Bytes, Bytes)>, IntentStoreError>;
+
     /// Export full state. Used for migration, DR, and Raft snapshots.
     async fn export_snapshot(&self) -> Result<StateSnapshot, IntentStoreError>;
 
