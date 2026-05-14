@@ -24,35 +24,20 @@
 //! never wraps in practice"). Same shape; different token domain.
 
 use std::collections::BTreeMap;
-use std::net::Ipv4Addr;
+use std::net::IpAddr;
 
 use super::error::ServiceVipAllocatorError;
 use super::vip_range::VipRange;
 
-/// Service VIP token — wraps an IPv4 address allocated from a
-/// [`VipRange`].
+/// Service VIP token re-exported from the canonical
+/// [`overdrive_core::id::ServiceVip`] (step 01-02 consolidation per
+/// ADR-0049).
 ///
-/// Constructed only by the allocator (after a [`VipRange::nth_allocatable`]
-/// lookup); operator-supplied VIPs are structurally unrepresentable per
-/// ADR-0049 § 5 (the `Listener` struct has no `vip` field).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ServiceVip(Ipv4Addr);
-
-impl ServiceVip {
-    /// Wrap an IPv4 address. Crate-only; production construction goes
-    /// through [`ServiceVipAllocator::allocate`] which guarantees the
-    /// address came from the validated [`VipRange`].
-    #[must_use]
-    pub(crate) const fn new(addr: Ipv4Addr) -> Self {
-        Self(addr)
-    }
-
-    /// Borrow the wrapped IPv4 address.
-    #[must_use]
-    pub const fn as_ipv4(self) -> Ipv4Addr {
-        self.0
-    }
-}
+/// The newtype wraps [`std::net::IpAddr`] in the canonical declaration;
+/// Phase 1 admits IPv4 only per ADR-0049 § 5, and the allocator only
+/// ever constructs values via `ServiceVip::new(IpAddr::V4(addr))` from
+/// the validated [`VipRange`].
+pub use overdrive_core::id::ServiceVip;
 
 /// Service-spec digest — 32-byte content hash that keys the allocator
 /// memo. The spec digest is computed upstream (admission handler in
@@ -129,7 +114,13 @@ impl ServiceVipAllocator {
                 capacity: self.range.capacity(),
             }
         })?;
-        let vip = ServiceVip::new(addr);
+        // `ServiceVip::new` is total over `IpAddr` today; the IPv4 wrap
+        // is always valid. The `?` propagates as
+        // `ServiceVipAllocatorError::NewtypeRejected` so a future range-
+        // rejection on the canonical newtype surfaces as a typed error
+        // rather than a panic — distinct failure modes get distinct
+        // variants per `.claude/rules/development.md` § Errors.
+        let vip = ServiceVip::new(IpAddr::V4(addr))?;
         // Saturating add on the off-chance of u64 overflow — at that
         // point the range is also long-exhausted, so the next call hits
         // the `nth_allocatable` exhaustion branch above.

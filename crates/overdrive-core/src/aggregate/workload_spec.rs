@@ -326,58 +326,14 @@ pub struct ResourcesInput {
 //     (NOT nested inside [service]).
 //   * The Listener carries the existing `overdrive-core::Proto` newtype —
 //     NOT a second `Protocol` enum.
-//   * `ServiceVip` is a thin newtype over `Ipv4Addr`; absent value is
-//     `None`.
+//   * `ServiceVip` is the canonical newtype at
+//     `overdrive_core::id::ServiceVip` (wraps `std::net::IpAddr`).
+//     Phase 1 admits IPv4 only per ADR-0049 § 5; the type's IPv6 capacity
+//     is forward-compat for GH #155. Listeners parse IPv4 strings at
+//     the TOML boundary and wrap into the canonical newtype.
 // ---------------------------------------------------------------------------
 
-/// Pinned service VIP — IPv4 address an operator pinned in their
-/// `[[listener]]` block. Wraps [`Ipv4Addr`] with `serde` / `utoipa` /
-/// `rkyv` derives so the type-system distinguishes it from a backend or
-/// node IP at every call site.
-///
-/// Per ADR-0047 §1 (Service listener fields) the VIP is OPTIONAL — when
-/// absent, the runtime VIP allocator is responsible for assigning one
-/// at convergence time. The runtime allocator behaviour is OUT OF SCOPE
-/// for slice 06 and tracked at GH #167.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    Hash,
-    PartialOrd,
-    Ord,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-    utoipa::ToSchema,
-)]
-#[serde(transparent)]
-#[schema(value_type = String, example = "10.0.0.1")]
-pub struct ServiceVip(pub Ipv4Addr);
-
-impl ServiceVip {
-    /// Borrow the underlying [`Ipv4Addr`].
-    #[must_use]
-    pub const fn as_ipv4(self) -> Ipv4Addr {
-        self.0
-    }
-}
-
-impl std::fmt::Display for ServiceVip {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        std::fmt::Display::fmt(&self.0, f)
-    }
-}
-
-impl From<Ipv4Addr> for ServiceVip {
-    fn from(addr: Ipv4Addr) -> Self {
-        Self(addr)
-    }
-}
+pub use crate::id::ServiceVip;
 
 /// A single `[[listener]]` block on a `[service]` body.
 ///
@@ -866,7 +822,19 @@ fn parse_one_listener(entry: &toml::value::Table) -> Result<Listener, ParseError
                 section: "[[listener]]",
                 message: format!("field `vip` is not a valid IPv4 address: {e}"),
             })?;
-            Some(ServiceVip(addr))
+            // ADR-0049 § 5 — Phase 1 admits IPv4 only; the canonical
+            // `ServiceVip` wraps `IpAddr` for forward-compat with GH #155.
+            // `ServiceVip::new` is total over `IpAddr` today; surface the
+            // result with `map_err` into the structured parse error so a
+            // future range-rejection (multicast / unspecified / etc.)
+            // surfaces as a structured `ParseError::Field` rather than a
+            // panic.
+            let vip =
+                ServiceVip::new(std::net::IpAddr::V4(addr)).map_err(|e| ParseError::Field {
+                    section: "[[listener]]",
+                    message: format!("field `vip` rejected by ServiceVip newtype: {e}"),
+                })?;
+            Some(vip)
         }
     };
 

@@ -15,7 +15,7 @@
 #![allow(clippy::unwrap_used)]
 #![allow(clippy::single_char_pattern)]
 
-use std::net::Ipv4Addr;
+use std::net::{IpAddr, Ipv4Addr};
 
 use overdrive_core::aggregate::{
     Listener, ParseError, ServiceSpec, ServiceVip, WorkloadKind, WorkloadSpecInput,
@@ -86,7 +86,10 @@ protocol = "udp"
     assert_eq!(svc.listeners.len(), 2, "two declared listeners must reach the spec");
     assert_eq!(svc.listeners[0].port.get(), 8080);
     assert_eq!(svc.listeners[0].protocol, Proto::Tcp);
-    assert_eq!(svc.listeners[0].vip, Some(ServiceVip(Ipv4Addr::new(10, 0, 0, 1))));
+    assert_eq!(
+        svc.listeners[0].vip,
+        Some(ServiceVip::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))).expect("IPv4 valid"),),
+    );
     assert_eq!(svc.listeners[1].port.get(), 8081);
     assert_eq!(svc.listeners[1].protocol, Proto::Udp);
     assert_eq!(svc.listeners[1].vip, None);
@@ -304,16 +307,19 @@ fn listener_struct_carries_port_protocol_vip_triple() {
     let l = Listener {
         port: NonZeroU16::new(8080).expect("non-zero"),
         protocol: Proto::Tcp,
-        vip: Some(ServiceVip(Ipv4Addr::new(10, 0, 0, 1))),
+        vip: Some(ServiceVip::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))).expect("IPv4 valid")),
     };
     assert_eq!(l.port.get(), 8080);
     assert_eq!(l.protocol, Proto::Tcp);
-    assert_eq!(l.vip.expect("vip set above").as_ipv4(), Ipv4Addr::new(10, 0, 0, 1));
+    assert_eq!(
+        l.vip.expect("vip set above").try_as_ipv4().expect("IPv4 projection"),
+        Ipv4Addr::new(10, 0, 0, 1),
+    );
 }
 
 #[test]
 fn service_vip_displays_as_ipv4() {
-    let v = ServiceVip(Ipv4Addr::new(192, 168, 1, 100));
+    let v = ServiceVip::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 100))).expect("IPv4 valid");
     assert_eq!(v.to_string(), "192.168.1.100");
 }
 

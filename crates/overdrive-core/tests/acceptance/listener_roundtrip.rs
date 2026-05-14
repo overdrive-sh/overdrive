@@ -12,7 +12,7 @@
 #![allow(clippy::expect_used)]
 #![allow(clippy::expect_fun_call)]
 
-use std::net::Ipv4Addr;
+use std::net::{IpAddr, Ipv4Addr};
 
 use overdrive_core::aggregate::{Listener, ServiceVip, WorkloadSpecInput};
 use overdrive_core::dataplane::backend_key::Proto;
@@ -32,7 +32,10 @@ fn arb_proto() -> impl Strategy<Value = Proto> {
 /// space — the absolute octet values do not matter for round-trip
 /// purposes; only that they survive TOML render → parse.
 fn arb_service_vip() -> impl Strategy<Value = ServiceVip> {
-    (1u8..=254u8).prop_map(|d| ServiceVip(Ipv4Addr::new(10, 0, 0, d)))
+    (1u8..=254u8).prop_map(|d| {
+        ServiceVip::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, d)))
+            .expect("IPv4 is always a valid ServiceVip")
+    })
 }
 
 /// Generate a `Listener`. The (vip, port, protocol) triple is the

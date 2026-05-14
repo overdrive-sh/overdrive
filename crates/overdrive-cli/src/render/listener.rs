@@ -77,7 +77,7 @@ pub fn format_listeners_section(listeners: &[Listener]) -> String {
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::expect_fun_call)]
 mod tests {
-    use std::net::Ipv4Addr;
+    use std::net::{IpAddr, Ipv4Addr};
     use std::num::NonZeroU16;
 
     use overdrive_core::aggregate::ServiceVip;
@@ -89,7 +89,10 @@ mod tests {
         Listener {
             port: NonZeroU16::new(port).expect("non-zero port"),
             protocol: proto,
-            vip: Some(ServiceVip(Ipv4Addr::new(10, 0, 0, vip_octet))),
+            vip: Some(
+                ServiceVip::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, vip_octet)))
+                    .expect("IPv4 is always a valid ServiceVip"),
+            ),
         }
     }
 

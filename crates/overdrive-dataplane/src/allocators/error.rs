@@ -16,6 +16,7 @@
 use std::net::Ipv4Addr;
 
 use ipnet::Ipv4Net;
+use overdrive_core::id::IdParseError;
 use thiserror::Error;
 
 /// Construction-time errors from [`super::VipRange::new`].
@@ -71,5 +72,19 @@ pub enum ServiceVipAllocatorError {
         allocated: u64,
         /// Configured pool capacity (after reserved exclusions).
         capacity: u64,
+    },
+
+    /// The canonical [`overdrive_core::id::ServiceVip`] constructor
+    /// rejected the IPv4 address produced by
+    /// [`super::VipRange::nth_allocatable`]. Currently unreachable —
+    /// `ServiceVip::new` is total over `IpAddr` today — but the
+    /// variant exists so a future range-rejection (multicast /
+    /// unspecified / reserved-by-IANA) on the canonical newtype
+    /// surfaces here as a typed error rather than a panic.
+    #[error("ServiceVip newtype rejected allocated address: {source}")]
+    NewtypeRejected {
+        /// Underlying parse error from the canonical newtype.
+        #[from]
+        source: IdParseError,
     },
 }

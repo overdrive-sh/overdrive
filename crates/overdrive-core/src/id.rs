@@ -642,8 +642,10 @@ use std::fmt::Write as _;
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
+    utoipa::ToSchema,
 )]
 #[serde(try_from = "String", into = "String")]
+#[schema(value_type = String, example = "10.0.0.1")]
 pub struct ServiceVip(std::net::IpAddr);
 
 impl ServiceVip {
@@ -669,6 +671,24 @@ impl ServiceVip {
     #[must_use]
     pub const fn get(&self) -> std::net::IpAddr {
         self.0
+    }
+
+    /// Fallible projection to [`std::net::Ipv4Addr`]. Returns `Some`
+    /// when the underlying address is IPv4, `None` for IPv6.
+    ///
+    /// Phase 1 dataplane code paths (per ADR-0049 § 5) work
+    /// exclusively in IPv4; this accessor is the structural seam
+    /// between the canonical type (which admits IPv6 forward-compat
+    /// per GH #155) and the IPv4-only allocator / `service_backends`
+    /// row surface. Maps the older `ipv4_from_vip` helper at
+    /// `crates/overdrive-control-plane/src/action_shim/dataplane_update_service.rs:160`
+    /// onto the newtype.
+    #[must_use]
+    pub const fn try_as_ipv4(&self) -> Option<std::net::Ipv4Addr> {
+        match self.0 {
+            std::net::IpAddr::V4(v4) => Some(v4),
+            std::net::IpAddr::V6(_) => None,
+        }
     }
 }
 

@@ -15,6 +15,12 @@
 //! - **S-VIP-17** — `VipRange::new` rejects reserved addresses outside
 //!   the configured range.
 //! - **S-VIP-18** — `VipRange::new` rejects zero effective capacity.
+//! - **S-VIP-12** — `ServiceVipAllocator` constructed from a `/24`
+//!   range allocates a `ServiceVip` within range, returns the same
+//!   VIP on memo-hit for the same `spec_digest`, and `get` returns
+//!   `None` after `release`. Pins the post-consolidation behaviour:
+//!   the allocator's returned token IS the canonical
+//!   `overdrive_core::id::ServiceVip` (step 01-02 consolidation).
 //!
 //! Unit-level tests, default lane per DWD-03 — no `integration-tests`
 //! feature gate; pure in-memory; no I/O.
@@ -85,8 +91,11 @@ proptest! {
             // and yield a distinct VIP (counter moved on).
             if alloc.memo_len() < usize::try_from(alloc.capacity()).unwrap_or(usize::MAX) {
                 let realloc = alloc.allocate(d).expect("re-allocate after release");
-                prop_assert!(realloc.as_ipv4() >= Ipv4Addr::new(10, 96, 0, 0));
-                prop_assert!(realloc.as_ipv4() <= Ipv4Addr::new(10, 96, 0, 255));
+                let realloc_v4 = realloc
+                    .try_as_ipv4()
+                    .expect("allocator always produces IPv4 tokens (ADR-0049 § 5)");
+                prop_assert!(realloc_v4 >= Ipv4Addr::new(10, 96, 0, 0));
+                prop_assert!(realloc_v4 <= Ipv4Addr::new(10, 96, 0, 255));
                 prop_assert_ne!(
                     realloc, pre_release,
                     "monotonic counter must NOT reuse the released VIP"
@@ -154,8 +163,10 @@ fn reserved_addresses_skipped_during_allocation() {
 
     let allowed: BTreeSet<Ipv4Addr> =
         [Ipv4Addr::new(10, 96, 0, 1), Ipv4Addr::new(10, 96, 0, 2)].into_iter().collect();
-    assert!(allowed.contains(&t1.as_ipv4()), "t1 = {t1:?} not in allowed set");
-    assert!(allowed.contains(&t2.as_ipv4()), "t2 = {t2:?} not in allowed set");
+    let t1_v4 = t1.try_as_ipv4().expect("allocator emits IPv4");
+    let t2_v4 = t2.try_as_ipv4().expect("allocator emits IPv4");
+    assert!(allowed.contains(&t1_v4), "t1 = {t1:?} not in allowed set");
+    assert!(allowed.contains(&t2_v4), "t2 = {t2:?} not in allowed set");
     assert_ne!(t1, t2, "first and second allocations must be distinct");
 
     // Third allocation must fail with Exhausted { allocated: 2, capacity: 2 }
@@ -221,4 +232,54 @@ fn vip_range_rejects_zero_capacity() {
         matches!(result, Err(VipAllocatorConfigError::ZeroCapacity)),
         "expected ZeroCapacity, got {result:?}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// S-VIP-12 — Allocator serves the canonical `overdrive_core::id::ServiceVip`
+//
+// Pins the step 01-02 consolidation: the local `ServiceVip` declaration
+// in `crates/overdrive-dataplane/src/allocators/service_vip.rs` is
+// replaced by a re-export of the canonical newtype, and the allocator's
+// `allocate(...)` / `get(...)` return that canonical token. The test
+// names the canonical newtype via its `overdrive_core::id` path
+// explicitly and equates against the re-export from
+// `overdrive_dataplane::allocators` — both must resolve to the same
+// type at compile time, which is the structural defense that exactly
+// one declaration exists post-commit.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn service_vip_allocator_serves_canonical_newtype() {
+    // Constructor: /24 range, no reserved addresses.
+    let range = VipRange::new(
+        vec![Ipv4Net::new(Ipv4Addr::new(10, 96, 0, 0), 24).unwrap()],
+        BTreeSet::new(),
+    )
+    .expect("valid /24 range");
+    let mut alloc = ServiceVipAllocator::new(range);
+
+    let digest_a = digest_from_u64(0xAAAA_AAAA_AAAA_AAAA);
+    let digest_b = digest_from_u64(0xBBBB_BBBB_BBBB_BBBB);
+
+    // First allocation lands inside the range.
+    let vip_a = alloc.allocate(digest_a).expect("first allocation within capacity");
+    // The returned token IS the canonical `overdrive_core::id::ServiceVip` —
+    // this assignment fails to compile if the consolidation has not happened
+    // (e.g. if a local newtype distinct from the canonical re-emerges).
+    let _: overdrive_core::id::ServiceVip = vip_a;
+
+    // Distinct digest yields a distinct VIP.
+    let vip_b = alloc.allocate(digest_b).expect("second allocation within capacity");
+    assert_ne!(vip_a, vip_b, "distinct digests must yield distinct VIPs");
+
+    // Memo hit: re-allocating digest_a returns the same VIP.
+    let vip_a_again = alloc.allocate(digest_a).expect("memo hit");
+    assert_eq!(vip_a, vip_a_again, "memo-hit must return the prior token");
+
+    // `get(&digest_a)` reflects the memo before release.
+    assert_eq!(alloc.get(&digest_a), Some(vip_a));
+
+    // After release, `get` returns `None`.
+    alloc.release(&digest_a);
+    assert_eq!(alloc.get(&digest_a), None, "post-release lookup must be None");
 }
