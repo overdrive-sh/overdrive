@@ -104,6 +104,19 @@ with the service-vip-allocator feature. The slice's R6.1 mitigation
 language ("'reject at admission' → `None` is a parser error in a future
 ADR") still holds — this DISCUSS wave is the future ADR's predecessor.
 
+**Amendment 2026-05-14 (post-DESIGN)**: DESIGN resolved Q5 to
+**parser-level removal of the `Listener.vip` field** rather than
+admission-level rejection. The framing above is intentionally
+preserved as the audit trail of DISCUSS's original layer-agnostic
+deferral. The authoritative back-propagation record is
+`docs/feature/service-vip-allocator/design/upstream-changes.md`,
+which documents the real spec-shape change to slice-06 (field
+removal + uniqueness rule simplification + render shape + test
+deletions + R6.1 mitigation moot). Readers consulting DISCUSS in
+isolation should treat this section's mechanism details as
+superseded by `design/upstream-changes.md`; the intent (platform-
+issued only; operators cannot supply VIPs) is unchanged.
+
 ## Outcome-defining decisions captured
 
 | # | Decision | Rationale |

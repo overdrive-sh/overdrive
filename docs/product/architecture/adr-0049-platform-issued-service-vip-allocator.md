@@ -40,6 +40,14 @@ DISCUSS wave's Changed Assumption
 only**. Operators cannot supply `vip = Some(...)` in a Service
 `[[listener]]` block.
 
+*(Amended 2026-05-14 — § 5.)* Per
+`.claude/rules/development.md` § "Type-driven design" → "make
+invalid states unrepresentable", the `vip` field on `Listener` is
+removed at the parser/spec layer. An operator-supplied `vip` is now
+unrepresentable in the parsed spec; the prior admission-level
+rejection is unnecessary and is deleted. Slice 06's spec shape
+back-propagates in the same commit; see `upstream-changes.md`.
+
 The feature must extend the existing `BackendIdAllocator` shape
 into a reusable primitive that supports a second consumer
 (`ServiceVipAllocator`) whose persistence requirement is stronger
@@ -58,8 +66,9 @@ Five DESIGN-wave open questions are resolved together here:
 4. **Shared allocator trait shape** — how to factor
    `BackendIdAllocator` + `ServiceVipAllocator` into a reusable
    primitive.
-5. **Upstream slice-06 admission policy** — parser-level vs
+5. **Upstream slice-06 spec shape** — parser-level removal vs
    admission-level rejection of operator-supplied `vip = Some(...)`.
+   *(Amended 2026-05-14 to parser-level removal; see § 5.)*
 
 ## Decision
 
@@ -293,9 +302,14 @@ and at `crates/overdrive-core/src/id.rs:647`
 are **inconsistent on IPv4 vs IpAddr**. This ADR consolidates to a
 **single `ServiceVip` newtype wrapping `Ipv4Addr`** at
 `overdrive-core::id::ServiceVip`; the duplicate in `workload_spec.rs`
-is deleted in the same commit. Per ADR-0047 § Listener field the
-spec field stays `Option<ServiceVip>` — the type the field references
-just moves to a single canonical location.
+is deleted in the same commit. Per the 2026-05-14 amendment (§ 5),
+`Listener` carries no `vip` field at all; `ServiceVip` continues to
+be used by the allocator (`IntentBackedAllocator<ServiceVip>`), the
+allocator's persisted `AllocatorTokenBytes::ServiceVip` payload, and
+the downstream consumer surface (`ServiceMapHydrator` consults
+`ServiceVipAllocator::get(&spec_digest)` per § 5a — the kernel-side
+`Dataplane::update_service(_, vip, _)` parameter remains
+`ServiceVip`-typed).
 
 **Why IPv4-only**: IPv6 VIPs are GH #61 (out of scope per #167 and
 DISCUSS § Out of scope). Future IPv6 support will not change this
@@ -355,10 +369,13 @@ intent-layer discipline.
 The admission handler (in `overdrive-control-plane`) allocates the
 VIP **synchronously, before the `WorkloadSpec::Service` is
 written to IntentStore**. The spec digest is computed first; the
-allocator's `allocate(spec_digest)` returns the assigned VIP (memo-hit
-on resubmit per AC-02); the VIP is folded into the spec via the
-`ListenerRow.vip = Some(allocated_vip)` projection; the full spec is
-then written to IntentStore.
+allocator's `allocate(spec_digest)` returns the assigned VIP
+(memo-hit on resubmit per AC-02); the spec is written to IntentStore
+*as-is* (no `vip` field on `Listener` to fold into, per the
+2026-05-14 amendment — § 5); the allocator's own persisted
+`allocator_entries` row is the durable record of the assignment
+(§ 1a, § 5a); submit-echo renders the assigned VIP at the Service
+level via `ServiceVipAllocator::get(&spec_digest)`.
 
 | Shape | Pros | Cons | Verdict |
 |---|---|---|---|
@@ -375,52 +392,147 @@ then written to IntentStore.
 - `AllocatorError::Envelope` / `AllocatorError::IntentStore` —
   surface as HTTP 500; structured event;
   `health.startup.refused`-class for boot path.
-- `AdmissionError::VipNotOperatorAssignable { listener_idx }` —
-  see § 5; admission rejects with named guidance before the
-  allocator is consulted.
+- *(Removed by 2026-05-14 amendment — see § 5.)* The prior
+  `AdmissionError::VipNotOperatorAssignable` admission-level
+  rejection is replaced by parser-level removal of the `vip` field
+  on `Listener`. Operator-supplied `vip = "..."` now fails at TOML
+  deserialise with serde's `unknown field` error + named guidance.
 
-**Spec-digest invariance under VIP-as-input vs VIP-as-output**: the
-spec digest is computed over the spec *without* the listener.vip
-field (the field is `None` at digest-compute time per Slice 06
-shape). The allocator memo is keyed on the digest of the VIP-free
-spec; the assignment writes `vip = Some(...)` onto the listener
-post-allocation. This means **resubmitting an unchanged spec
-produces the same digest** (the operator never types the VIP, so
-the digest is stable across submits — AC-02 is structural).
+**Spec-digest invariance**: the spec digest is computed over the
+operator-input `ServiceSpec` directly. Per the 2026-05-14 amendment
+(§ 5), `Listener` carries no `vip` field at all; the assigned VIP is
+not stored on the spec or on the aggregate (§ 5a — the allocator's
+persisted memo IS the source of truth). **Resubmitting an unchanged
+spec produces the same digest** by construction — the operator's
+input is the only input to the digest, and the assigned VIP cannot
+contaminate it because it is not part of the spec. AC-02 is
+structural.
 
-### 5. Operator-supplied `vip = Some(...)` — admission-level rejection
+### 5. Operator-supplied `vip` — parser-level removal (make invalid states unrepresentable)
 
-Per the DISCUSS Changed Assumption: operators cannot pin a VIP. The
-choice is between rejecting at parser-level (the TOML parser fails
-when `vip` is present) or admission-level (the parser produces a
-parsed spec with `vip: Some(...)`; the admission handler rejects).
+**Amended 2026-05-14.** The prior resolution of this question
+(admission-level rejection of operator-supplied `vip = Some(...)`,
+preserving the `Option<ServiceVip>` field on `Listener`) is
+withdrawn. New resolution: **the `vip` field is removed from
+`Listener` entirely at the parser/spec layer.** Per
+`.claude/rules/development.md` § "Type-driven design" → **make
+invalid states unrepresentable**: the prior shape (`vip:
+Option<ServiceVip>` validated to always be `None` on operator input)
+is a runtime check defending against a state the type system can
+exclude structurally. The operator-supplied form of `Listener` has
+no business carrying a `vip` field — operators cannot supply one
+(the DISCUSS Changed Assumption decided this), so the field is
+meaningless on the operator spec and is deleted.
+
+The "forward-compatible if operator-pinned VIPs come back" framing
+that motivated the prior resolution is the deferral-without-issue
+shape CLAUDE.md § "Deferrals require GitHub issues" forbids:
+operator-pinned VIPs are a feature explicitly decided against;
+defending future-compatibility with a non-feature preserves a
+defense for nothing. Greenfield single-cut migration
+(`feedback_single_cut_greenfield_migrations.md`): the field, its
+admission-level validator, the upstream slice-06 tests that defend
+the removed shape, and the `AdmissionError::VipNotOperatorAssignable`
+variant all delete together in one commit.
 
 | Shape | Pros | Cons | Verdict |
 |---|---|---|---|
-| (a) Parser-level rejection | Earliest failure; CLI message names the file + line; no half-parsed state | Schema change: must remove `vip` from the parser's `ListenerInput`; introduces a parser-time policy ("operators don't get to pin VIPs") that is technically not a parse error but a policy error; reverses Slice 06's forward-compatibility framing | Mixed |
-| (b) Admission-level rejection (chosen) | Parser stays a pure structural validator; the `Option<ServiceVip>` field shape from ADR-0047 is preserved verbatim; future tier may allow operator-pinned VIPs without parser surface change; rejection happens before any IntentStore write, so AC-06 ("no allocator state is mutated and no admission occurs") is preserved | One additional admission step (cheap — type-tag check on the listener); error surface is "submit" rather than "load file" | **CHOSEN** |
-| (c) Silent ignore (collapse `Some(_)` to `None`) | — | Violates AC-06 ("rejected with named guidance"); silent input mutation | **REJECTED** (per #167 AC-06) |
+| (a) Parser-level removal of the `vip` field (CHOSEN — amended) | Operator-pinned-VIP state is structurally unrepresentable (type-driven design); failure mode shifts from a runtime check ("vip = Some(...)" returns `AdmissionError`) to a parse error (`unknown field 'vip'` from serde with named guidance); fewer codepaths to maintain — no `AdmissionError::VipNotOperatorAssignable` variant, no admission walk; uniqueness rule simplifies from `(vip, port, protocol)` to `(port, protocol)`; CLI submit-echo and `alloc status` shed the per-listener pending-vs-assigned distinction (the assigned VIP renders once per Service, not per listener) | Real spec-shape back-propagation to slice-06 (its already-shipped parser tests + render shape change in the same commit that lands this feature) | **CHOSEN (amended 2026-05-14)** |
+| (b) Admission-level rejection, field preserved (previously CHOSEN; now REJECTED) | Parser stays "pure structural"; preserves Slice 06's forward-compatibility framing | Operator-pinned-VIP state is representable in the parsed spec and only refused at admission — a runtime defense for a type-system-excludable invariant; violates `.claude/rules/development.md` § "Type-driven design"; preserves forward-compatibility for a non-feature (operator-pinned VIPs) the project has explicitly decided against, which is the deferral-without-issue shape CLAUDE.md § "Deferrals require GitHub issues" forbids; adds an admission validator + error variant + tests + render branches that defend a state the type system could exclude | **REJECTED (2026-05-14)** |
+| (c) Silent ignore (collapse `Some(_)` to `None`) | — | Silent input mutation; violates the named-guidance discipline | **REJECTED** |
 
-**Admission handler check** (in `overdrive-control-plane`, before
-spec-digest compute):
+**Parser-side change** (in the workload-kind-discriminator parser
+that lands slice-06's `Listener`):
 
 ```rust
-fn validate_service_listeners(spec: &ServiceSpec) -> Result<(), AdmissionError> {
-    for (idx, listener) in spec.listeners.iter().enumerate() {
-        if listener.vip.is_some() {
-            return Err(AdmissionError::VipNotOperatorAssignable {
-                listener_idx: idx,
-            });
-        }
-    }
-    Ok(())
+// Spec-side Listener — no vip field. Parser uses
+// #[serde(deny_unknown_fields)] (or the equivalent for the
+// existing TOML deserializer) so an operator-supplied `vip = "..."`
+// fails at parse time with a typed error naming the field and
+// guiding the operator: "the `vip` field is not operator-assignable;
+// the platform allocates Service VIPs automatically. Remove it from
+// the `[[listener]]` block."
+pub struct Listener {
+    pub port:     NonZeroU16,
+    pub protocol: Proto,
+    // vip removed — platform-issued only; see ADR-0049 § 5.
 }
 ```
 
-**Upstream `ListenerRow` field shape stays `Option<ServiceVip>`**: the
-spec-side `Option` carries `None` at submit time and `Some(vip)` at
-post-allocation persistence time. The forward-compatibility framing
-from ADR-0047 § Listener field is preserved verbatim.
+**Cascade points** (all land in the same commit as this ADR's
+implementation, per single-cut migration discipline):
+
+1. **`Listener` struct loses the `vip` field.** Slice-06's
+   `Listener` shape becomes `(port, protocol)`-only.
+2. **Listener uniqueness rule simplifies** (slice-06 brief lines
+   36–38 — was "no two `[[listener]]` blocks within a Service may
+   share `(vip, port, protocol)`. When both `vip` are `None`, the
+   comparison is on `(port, protocol)` only"; now: "no two
+   `[[listener]]` blocks within a Service may share `(port,
+   protocol)`").
+3. **Submit echo + `alloc status` render** (slice-06 brief lines
+   41–45) — listener lines render as `<port>/<protocol>` only. The
+   per-listener `<vip-or-pending>:<port>/<protocol>` shape is
+   deleted. The **allocator-assigned VIP renders at the Service
+   level**, not per-listener — see § 5a below.
+4. **`AdmissionError::VipNotOperatorAssignable` is DELETED.** The
+   field is gone, the variant is unreachable; per
+   `.claude/rules/development.md` § "Deletion discipline" the
+   variant and any test that defends it delete in the same commit.
+5. **Slice-06 already-shipped tests update**: the parser unit test
+   for "mixed-pinned-and-pending VIPs" (slice-06 brief lines
+   60–63) is deleted; the integration test that submits "one
+   pinned, one pending" listener (lines 64–67) is deleted; the
+   property test that round-trips listener triples with `vip`
+   (lines 70–71) updates to round-trip `(port, protocol)` pairs.
+   Per deletion discipline, the removals land in the same commit as
+   the field removal. New tests defending the new shape (`vip` field
+   is rejected as `unknown field` at parse with named guidance;
+   uniqueness on `(port, protocol)`) are written from scratch.
+6. **R6.1 risk mitigation in slice-06 (lines 132–137)** is moot —
+   its "the `Option`-shaped field is forward-compatible" framing
+   no longer applies because the field is removed. The risk
+   resolves by deletion, not by mitigation.
+
+### 5a. Where the assigned VIP lives (placement decision)
+
+With the `vip` field removed from `Listener`, the question of
+*where the allocator-assigned VIP is recorded* becomes a fresh
+design decision. **One VIP per Service**, shared across all of
+the Service's listeners (the standard Cilium/k8s LB shape: one
+address, multiple ports). The allocator key per Q4's resolution is
+`(service_id, spec_digest) → ServiceVip` — 1:1 per Service.
+
+Three placement options were considered:
+
+| Option | Shape | Pros | Cons | Verdict |
+|---|---|---|---|---|
+| (A) `Service::assigned_vip: ServiceVip` aggregate field, set by admission post-allocate, before IntentStore write | Single source on the aggregate; restart-survival via IntentStore | The aggregate carries an operator-shape field that is not operator-set; requires `#[serde(skip_deserializing)]` or equivalent to defend; reintroduces a "policy field on the operator-facing struct" that is exactly the smell the parser-level removal is fixing | **REJECTED** |
+| (B) Observation-only (`alloc_status` or new `service_assignments` ObservationStore table) | Clean intent/observation split | AC-01 (submit echo renders the assigned VIP) requires synchronous observation-write at admission, which the admission path does not do today; creates a second source of truth (allocator memo + observation row); post-restart hydration must seed the observation table from the allocator — chicken-and-egg | **REJECTED** |
+| (C) The allocator's own persisted memo IS the source of truth — no separate aggregate, no observation row (CHOSEN) | `IntentBackedAllocator<ServiceVip>` already persists `(spec_digest → ServiceVip)` mappings via the `allocator_entries` redb table per § 1a. Submit echo and `alloc status --service <id>` consult `ServiceVipAllocator::get(&spec_digest) -> Option<ServiceVip>` at render time. `Job`/`ServiceSpec` stays purely operator-input; the aggregate cannot represent or reference the assigned VIP at all (type-driven-design discipline preserved). Restart hydration is already covered by `IntentBackedAllocator::bulk_load` + probe (§ 8). | One additional read at render time per Service-kind alloc-status row — cheap (O(log N) BTreeMap lookup, no I/O). | **CHOSEN** |
+
+**Downstream consumers of the assigned VIP** (e.g.
+`ServiceMapHydrator` per ADR-0042 — the kernel-side dataplane
+service-map writer) consult the allocator via `ServiceVipAllocator::get(&spec_digest)`
+keyed by the Service's spec_digest at the relevant hydration step.
+This is signature-compatible with the prior path (read the VIP from
+the spec at hydrate time) but the source-of-truth shifts: from
+"the spec's `listener.vip`" to "the allocator's
+`get(&spec_digest)`." ADR-0042's contract unchanged; the
+hydrator's input changes from "spec-with-vip" to "spec + allocator
+handle."
+
+**Why this is type-driven design as intended**: with both
+(a) the `vip` field removed from `Listener` and (b) no separate
+"assigned_vip" field on the aggregate, the operator-spec data shape
+cannot represent the assigned VIP at all. The allocator memo is
+the *only* persisted record; the type system structurally enforces
+"the assigned VIP is an allocator-owned fact, not a spec-owned
+fact." This is the upstream of `.claude/rules/development.md` §
+"Persist inputs, not derived state": the spec carries inputs (the
+operator-supplied listener `(port, protocol)` tuples); the assigned
+VIP is derived from those inputs + the allocator's pool policy and
+is owned by the allocator.
 
 ### 6. Reclamation — `WorkloadLifecycle` reconciler emits `Action::ReleaseVip`
 
@@ -671,13 +783,29 @@ to DELIVER wave"). The crafter dispatched against this ADR receives
 the full ADR + DISCUSS artifacts + `wave-decisions.md` + brief.md
 extension as input.
 
+**Expected `ServiceSpecDigest` implementation choice** — the
+`ServiceSpecDigest` newtype identified in the Reuse Analysis table
+(`docs/feature/service-vip-allocator/design/wave-decisions.md`) is
+either a direct alias (`pub type ServiceSpecDigest = ContentHash;`
+where `ContentHash` is `overdrive-core::id::ContentHash`) or a
+dedicated newtype wrapping `[u8; 32]` with identical wire semantics
+to `ContentHash`. Both shapes are acceptable; the crafter chooses
+whichever reads more idiomatically at the point of implementation
+given the surrounding consumer call sites. The load-bearing property
+is wire-format coherence: the digest used as the allocator memo key
+MUST equal byte-for-byte the digest computed at render time by
+`ServiceVipAllocator::get(&spec_digest)`. Both code paths consult
+the same `Job::spec_digest` codec entry point per ADR-0048 § 4b.
+
 ## Cross-references
 
 - GH #167 — SSOT for the feature
 - ADR-0046 — `BackendIdAllocator` structural precedent (extended,
   not superseded)
 - ADR-0047 — `ListenerRow.vip: Option<ServiceVip>` field shape
-  (preserved; admission-rejection lands at the admission layer per § 5)
+  (**amended 2026-05-14**: the `vip` field is removed at the parser
+  layer per § 5; spec back-propagation tracked in
+  `upstream-changes.md`)
 - ADR-0042 — `ServiceMapHydrator` reconciler (allocator output is
   consumed via `update_service`'s `vip` parameter)
 - ADR-0048 — rkyv versioned envelope (persistence wire format per § 1a)

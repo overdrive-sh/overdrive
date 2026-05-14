@@ -213,7 +213,7 @@ C4Component
   Person(operator, "Platform Engineer (Maya)", "Submits Service specs via `overdrive job submit`")
 
   Container_Boundary(ctrl, "overdrive-control-plane (adapter-host)") {
-    Component(admit, "Admission Handler", "axum handler (EXTENDED — §66)", "Validates listener.vip.is_none() per AC-06; rejects operator-supplied VIPs with AdmissionError::VipNotOperatorAssignable. Computes spec digest over VIP-free spec.")
+    Component(admit, "Admission Handler", "axum handler (EXTENDED — §64, §66)", "Operator-supplied `vip` is rejected at TOML parse via #[serde(deny_unknown_fields)] with named guidance (Listener has no vip field per §66 — 2026-05-14 amendment). Admission handler computes spec_digest over the operator-input ServiceSpec, calls ServiceVipAllocator::allocate(spec_digest), and writes the spec AS-IS (no listener.vip projection — allocator memo is the durable record per §67a).")
     Component(wl_recon, "WorkloadLifecycle reconciler", "Reconciler impl (EXTENDED — §65)", "sync `reconcile` (ADR-0035 contract); View gains `released_for_terminal: BTreeSet<ServiceSpecDigest>` (input — past emissions); emits Action::ReleaseServiceVip on terminal-state observation.")
     Component(vip_shim, "action_shim::release_service_vip::dispatch", "fn (NEW — §70)", "Consumes Action::ReleaseServiceVip; calls ServiceVipAllocator::release(&spec_digest); idempotent.")
     Component(boot_probe, "Composition root", "fn (EXTENDED — §71)", "Wires Arc<ServiceVipAllocator>; calls bulk_load() → probe() → use. Refuses to start on AllocatorBootError → health.startup.refused.")
@@ -228,7 +228,7 @@ C4Component
       Component(vip_alloc, "ServiceVipAllocator", "type alias = IntentBackedAllocator<ServiceVip> (NEW)", "Persists across restart (AC-02). Memo key = ServiceSpecDigest; output = ServiceVip from configured VipRange (CIDR + reserved).")
       Component(vip_range, "VipRange", "struct (NEW — §68)", "Ipv4Net CIDR list + BTreeSet<Ipv4Addr> reserved. Built from `[dataplane.vip_allocator]` TOML at boot. capacity() validated > 0 by probe.")
     }
-    Component(hydrator, "ServiceMapHydrator", "Reconciler impl (REUSE AS-IS — ADR-0042)", "Reads allocated VIP from persisted spec listener.vip; passes to Dataplane::update_service. NOT a writer of allocator state — downstream consumer only.")
+    Component(hydrator, "ServiceMapHydrator", "Reconciler impl (input source updated — §67a)", "Reads allocated VIP via ServiceVipAllocator::get(&spec_digest) (post 2026-05-14 amendment: not from spec.listener.vip — that field is removed; allocator memo IS the source of truth). Passes to Dataplane::update_service. NOT a writer of allocator state — downstream consumer only. ADR-0042's contract unchanged.")
   }
 
   Container_Boundary(corebox, "overdrive-core") {
@@ -243,9 +243,9 @@ C4Component
 
   Rel(operator, admit, "POST /v1/jobs/{id} (Service spec)", "HTTPS")
 
-  Rel(admit, vip_newtype, "Validates listener.vip is None")
   Rel(admit, vip_alloc, "Calls allocate(spec_digest) → ServiceVip", "SYNC at submit-time (§64)")
-  Rel(admit, intent_trait, "Writes admitted spec (with allocated VIP) via IntentStore.put")
+  Rel(admit, vip_alloc, "Calls get(&spec_digest) at submit-echo render time", "READ (§67a)")
+  Rel(admit, intent_trait, "Writes admitted spec AS-IS via IntentStore.put (no vip projection per §66)")
 
   Rel(boot_probe, vip_alloc, "Wires Arc<ServiceVipAllocator> at composition root")
   Rel(boot_probe, config, "Deserialises [dataplane.vip_allocator] block")
@@ -263,7 +263,8 @@ C4Component
   Rel(vip_shim, action, "Consumes Action::ReleaseServiceVip")
   Rel(vip_shim, vip_alloc, "Calls release(&spec_digest)", "IDEMPOTENT (§65)")
 
-  Rel(hydrator, intent_trait, "Reads spec.listener.vip (already-allocated VIP)")
+  Rel(hydrator, vip_alloc, "Reads allocated VIP via get(&spec_digest) at hydrate time (§67a — post 2026-05-14 amendment)")
+  Rel(hydrator, intent_trait, "Reads ServiceSpec (operator-input — no vip field per §66)")
 
   Rel(intent_trait, intent_db, "redb ACID transactions")
   Rel(config, boot_probe, "Parsed at boot")
@@ -280,9 +281,13 @@ The diagram makes five architectural properties visually explicit:
    not a runtime convention.
 2. **Submit-time allocation is the single source of VIP truth** —
    the admission handler is the only writer of the allocator;
-   `ServiceMapHydrator` (downstream consumer) reads the allocated
-   VIP from the persisted spec, not from the allocator's API. The
-   intent-vs-observation split is preserved (allocation IS intent).
+   the allocator's `allocator_entries` redb table IS the durable
+   record of the assignment (post 2026-05-14 amendment — §67a:
+   `Listener` has no `vip` field; the spec does not carry the
+   assigned VIP). `ServiceMapHydrator` (downstream consumer) reads
+   the allocated VIP via `ServiceVipAllocator::get(&spec_digest)`
+   directly. The intent-vs-observation split is preserved
+   (allocation IS intent — allocator memo lives in IntentStore).
 3. **Reclamation rides the existing reconciler primitive** —
    `WorkloadLifecycle` emits `Action::ReleaseServiceVip`; the
    action-shim arm dispatches; no new orchestration surface. The
@@ -298,7 +303,22 @@ The diagram makes five architectural properties visually explicit:
 5. **One canonical `ServiceVip`** — the consolidation to
    `overdrive-core::id::ServiceVip(Ipv4Addr)` makes the `Token`
    impl unambiguous. The previously-duplicate declaration at
-   `aggregate/workload_spec.rs:360` is deleted in the same commit;
-   `Listener.vip` references the surviving canonical type.
+   `aggregate/workload_spec.rs:360` is deleted in the same commit.
+   Post 2026-05-14 amendment, `Listener` no longer references
+   `ServiceVip` at all (the `vip` field is removed entirely per
+   §66 / ADR-0049 § 5); references narrow to the allocator codec,
+   the kernel-side `Dataplane::update_service(_, vip: ServiceVip, _)`
+   parameter, and the hydrator's allocator consult.
+
+6. **Type-driven design — make invalid states unrepresentable**
+   (added 2026-05-14 amendment). The operator-input spec
+   structurally cannot carry an assigned VIP — `Listener` has no
+   `vip` field; the aggregate has no `assigned_vip` field. The
+   allocator's persisted memo is the only place the assignment
+   exists. Operator-supplied `vip = "..."` fails at TOML deserialise
+   with `unknown field`, never reaching admission. The prior
+   admission-layer validator (`AdmissionError::VipNotOperatorAssignable`)
+   is deleted per `.claude/rules/development.md` § "Deletion
+   discipline".
 
 
